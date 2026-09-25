@@ -1,4 +1,5 @@
 import 'package:fynkel/fynkel.dart';
+import 'package:pickups/pickups.dart' show Pickup, PickupKind, PickupSink;
 
 /// Which screen is up: the Menu, the level or the Results. The app's
 /// overlay switches on it (lib/main.dart).
@@ -35,8 +36,9 @@ String formatTenths(int t) =>
 
 /// The game's observable state (docs/hud.md): behaviours write the fields
 /// from their callbacks, the HUD's widgets bind to them and rebuild on
-/// change only. `Game.load` installs one in the world's context.
-class GameState extends GameModel {
+/// change only. `Game.load` installs one in the world's context, also as
+/// the pickups package's [PickupSink]: a gem adds its points to the score.
+class GameState extends GameModel implements PickupSink {
   late final screen = field(ModelValue(Screen.menu));
 
   /// Coins collected in this run.
@@ -83,6 +85,11 @@ class GameState extends GameModel {
     score.value += value;
     if (collected.value >= total.value) won.value = true;
   }
+
+  /// A pickup (the pickups package's gem) taken: its points on the score.
+  /// It is not a coin, so the run is won without it.
+  @override
+  void picked(Pickup pickup, PickupKind? kind) => score.value += kind?.points ?? 0;
 
   /// The run is over: its numbers into [lastRun].
   void finish() {

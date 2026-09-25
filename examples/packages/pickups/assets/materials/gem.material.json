@@ -1,0 +1,26 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "cdc6e6dc-9175-5460-8e3f-af15fac42617",
+  "name": "gem",
+  "shader": "fynkel.pbr@1",
+  "base_color": [
+    0.3,
+    0.9,
+    0.8,
+    1.0
+  ],
+  "metallic": 0.1,
+  "roughness": 0.2,
+  "emissive": [
+    0.3,
+    0.9,
+    0.8
+  ],
+  "emissive_strength": 0.6,
+  "normal_scale": 1.0,
+  "occlusion_strength": 1.0,
+  "alpha_mode": "opaque",
+  "alpha_cutoff": 0.5,
+  "double_sided": false
+}

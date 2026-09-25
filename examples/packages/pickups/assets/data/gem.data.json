@@ -1,0 +1,18 @@
+{
+  "$schema": "https://fynkel.dev/schemas/data.schema.json",
+  "formatVersion": 1,
+  "id": "33ab781f-1057-5547-b2e4-3c17aa0896e6",
+  "name": "Gem",
+  "type": "pickups.PickupKind",
+  "version": 1,
+  "data": {
+    "color": [
+      0.3,
+      0.9,
+      0.8
+    ],
+    "pitch": 1.0,
+    "points": 10,
+    "sound": null
+  }
+}

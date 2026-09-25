@@ -4,9 +4,11 @@
 // ignore_for_file: type=lint
 
 import 'package:fynkel/fynkel.dart' show BehaviourRegistry;
+import 'package:pickups/generated/behaviours.g.dart' as _pickups;
 import 'behaviours.g.dart' as _game;
 
-/// Registers the game's behaviours and data types.
+/// Registers `pickups`'s, then the game's behaviours and data types.
 void registerPackages(BehaviourRegistry registry, {bool replace = false}) {
+  _pickups.registerBehaviours(registry, replace: replace);
   _game.registerBehaviours(registry, replace: replace);
 }

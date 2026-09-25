@@ -14,6 +14,7 @@
 // the places, so the app's overlay switches on it.
 
 import 'package:fynkel/fynkel.dart';
+import 'package:pickups/pickups.dart' show PickupSink;
 
 import '../generated/assets.g.dart';
 import '../generated/packages.g.dart';
@@ -114,7 +115,10 @@ class Game {
   }) {
     final world = World.create(library: library);
     registerPackages(world.registry);
-    world.context.install(GameState());
+    final state = GameState();
+    world.context
+      ..install(state)
+      ..install<PickupSink>(state);
     final report = world.loadProject(projectDir, cacheDir: cacheDir);
     if (settingsPath != null) world.useSettings(SettingsStore.open(settingsPath, world: world));
     final flow = switch (mode) {

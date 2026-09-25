@@ -1942,6 +1942,15 @@ assets; `copyIntoProject` and `importPackageAssets` bring them into the
 project. `fynkel codegen` in a package's own folder writes its
 `assets.g.dart` from its `assets` folder.
 
+From code, a package writes its assets as a game does:
+`ProjectWriter(packageDir)` in a folder with `fynkel.package.json` writes
+into the package's `assets` folder, derives ids in a namespace of the
+package's own (`uuid5(writer namespace, 'package/<namespace>')`, so a
+game's document at the same path gets another id), and knows only the
+`default` layer and no tags. A game's writer finds a package's prefab for
+`ObjectSpec.prefab` through `.dart_tool/package_config.json`.
+`examples/packages/pickups` is the example (`tool/assets.dart`).
+
 A package runs `fynkel codegen --project .` in its own folder and commits
 `lib/generated/` and `schemas/`, as a game does. There it writes no
 `packages.g.dart`, and fails on its own types outside its namespace.

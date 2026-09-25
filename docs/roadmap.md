@@ -106,7 +106,10 @@ Three ADRs, then their implementation:
    `FYN-P0016`/`P0017`) done 2026-09-25; step 3 (package assets mounted
    at `Packages/<name>/`, the Project browser's Packages root, Copy into
    Project, Import Package Assets…, read-only when pub keeps the package;
-   the primitives stay built in) done 2026-09-25.
+   the primitives stay built in) done 2026-09-25; step 4 (the example
+   package `examples/packages/pickups`: `Pickup`, `PickupKind`, the pickup
+   prefab and material, an editor part; code_only's gem is its prefab)
+   done 2026-09-25.
 
 ## Phase 4 — Rendering resumes
 

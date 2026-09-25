@@ -41,8 +41,15 @@ big coin worth five as `assets/data/coin.data.json` and `big_coin.data.json`
 (`ProjectWriter.writeData`) and a prefab per kind whose `Collectible` names
 it; every coin of a kind shares its one instance, so an edit to the asset in
 the editor's Inspector changes them all. Built live, the coins hold the same
-kinds made in code. The last coin, behind the gate, is the big one: the route
-scores 9.
+kinds made in code. The last coin, behind the gate, is the big one.
+
+Between the first two coins spins a gem: the prefab of the `pickups` package
+(`examples/packages/pickups`, ADR-0029), a dependency in `pubspec.yaml`.
+Its `Pickup` script, its `PickupKind` data type and its assets come with it —
+the level places `pickups.Assets.prefabs.pickup` both ways, and the editor
+shows the package's assets under Packages/pickups and its Tools ▸ Pickups
+menu. `GameState` is the package's `PickupSink`: the gem adds its ten
+points to the score, so the route scores 19.
 
 Gameplay is four behaviours in `lib/game/`: `Player` (camera-relative walking
 through a `CharacterController`, the jump, the clock, dying on the sweeper,

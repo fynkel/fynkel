@@ -10,6 +10,7 @@
 import 'dart:math' as math;
 
 import 'package:fynkel/fynkel.dart';
+import 'package:pickups/generated/assets.g.dart' as pickups;
 
 import '../generated/assets.g.dart';
 import 'coin_kind.dart';
@@ -155,7 +156,11 @@ const coinSpots = [
   Vec3(-15, 0, -9),
 ];
 
-/// The level: a walled floor, five coins — the last a big one — a sweeper
+/// Where the gem is: between the first two coins, on the route.
+const gemSpot = Vec3(0, 0, -4.75);
+
+/// The level: a walled floor, five coins — the last a big one — a gem (the
+/// pickups package's prefab, ADR-0029), a sweeper
 /// to dodge, a gate that shuts the last two coins in and the switch that
 /// opens it. [coinAt] makes a coin of a kind named `Coin n` at a spot: the
 /// [coin] spec when building live, an instance of the written coin prefab
@@ -245,6 +250,9 @@ List<ObjectSpec> level(
       ),
       for (final (i, spot) in coinSpots.indexed)
         coinAt('Coin ${i + 1}', spot, i == coinSpots.length - 1 ? kinds.big : kinds.coin),
+      // A package's prefab, placed as the game's own are (both ways of
+      // building: the cook mounts Packages/pickups beside assets/).
+      ObjectSpec.prefab(pickups.Assets.prefabs.pickup, name: 'Gem', transform: Transform(position: gemSpot)),
     ];
 
 /// A podium with a big spinning coin, seen by a camera orbiting it: the

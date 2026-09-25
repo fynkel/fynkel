@@ -1497,6 +1497,31 @@
           }
         ]
       }
+    },
+    "f655c198-30f7-5853-8c95-48454456a62a": {
+      "name": "Gem",
+      "parent": null,
+      "children": [],
+      "components": {},
+      "prefab": {
+        "asset": {
+          "asset": "0dd85a60-b1ab-52b3-999e-09eb00a048f4"
+        },
+        "instance": "bfa0c958-2e93-5035-80de-f8e50cc7781a",
+        "overrides": [
+          {
+            "op": "setField",
+            "entity": "d949d0fc-e370-552a-9e5f-e0662685bf34",
+            "component": "fd2b68bd-17ef-5947-b41b-fc0c9b8f9584",
+            "field": "position",
+            "value": [
+              0.0,
+              0.0,
+              -4.75
+            ]
+          }
+        ]
+      }
     }
   }
 }

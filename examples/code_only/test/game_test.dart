@@ -21,6 +21,8 @@ import 'package:code_only/generated/assets.g.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/testing.dart';
+import 'package:pickups/generated/assets.g.dart' as pickups;
+import 'package:pickups/pickups.dart' show Pickup;
 
 import '../tool/scenes.dart';
 
@@ -156,6 +158,16 @@ void main() {
         } else {
           expect(big.asset, isNull);
         }
+
+        // The gem: the pickups package's prefab (ADR-0029), its Pickup
+        // holding the package's gem kind, coloured at start.
+        final gem = game.world.find('Gem')!;
+        expect(gem.localTransform.position, gemSpot);
+        final pickup = gem.behaviour<Pickup>()!;
+        expect(pickup.kind!.asset, pickups.Assets.data.gem);
+        expect(pickup.kind!.points, 10);
+        final gemColour = game.world.runtimeMaterial(gem.children.single.get<MeshRenderer>()!.material)?.baseColor;
+        expect(gemColour, Vec4(pickup.kind!.color.x, pickup.kind!.color.y, pickup.kind!.color.z, 1));
       });
 
       test('the route collects every coin through the gate, then the Results', () {
@@ -166,7 +178,8 @@ void main() {
 
         collectAll().replay(game.world);
         expect(game.state.collected.value, 5);
-        expect(game.state.score.value, 9, reason: 'four coins and a big one worth five');
+        expect(game.state.score.value, 19, reason: 'four coins, a big one worth five and the gem worth ten');
+        expect(game.world.find('Gem'), isNull, reason: 'the gem was taken on the way');
         expect(game.state.won.value, isTrue);
         expect(game.state.deaths.value, 0);
         expect(hinted, isTrue, reason: 'the switch prompted');
@@ -179,7 +192,7 @@ void main() {
         }
         expect(game.state.screen.value, Screen.results);
         final run = game.state.lastRun.value!;
-        expect((run.collected, run.total, run.score, run.deaths), (5, 5, 9, 0));
+        expect((run.collected, run.total, run.score, run.deaths), (5, 5, 19, 0));
         expect(run.won, isTrue);
         expect(game.world.find('Jingle')!.get<AudioSource>()!.playing, isTrue);
 
