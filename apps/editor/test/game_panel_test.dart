@@ -110,9 +110,10 @@ void main() {
     expect(run.paused, isTrue);
     expect(run.running, isFalse);
     run.start(projectDir: '/p');
-    expect(run.control.paused, isTrue, reason: 'the first frame waits');
+    expect(run.control.paused, isTrue);
+    expect(run.control.pendingSteps, 1, reason: 'the first frame runs, then it pauses');
     run.step();
-    expect(run.control.pendingSteps, 1);
+    expect(run.control.pendingSteps, 2);
     run.stop();
     expect(run.paused, isTrue, reason: 'the toggle is kept');
     run.start(projectDir: '/p');

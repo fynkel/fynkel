@@ -50,7 +50,7 @@ final class GameRun extends ChangeNotifier {
   bool get running => _launch != null;
 
   /// The Pause toggle, as Unity's: it may be on before Play (the game then
-  /// starts paused on its first frame) and stays as it is across Stop.
+  /// runs its first frame and pauses) and stays as it is across Stop.
   bool get paused => _pause;
   bool _pause = false;
 
@@ -65,6 +65,10 @@ final class GameRun extends ChangeNotifier {
     _launch = FynkelLaunch(projectDir: projectDir, startScene: startScene, inEditor: true);
     _runs++;
     control.paused = _pause;
+    // Paused before Play, Unity still loads the scene and runs its first
+    // frame, then pauses: a game that switches scenes on its first frame
+    // (the open scene over its menu) shows the scene, not the menu.
+    if (_pause && control.pendingSteps == 0) control.step();
     FynkelApplication.inEditor = true;
     _quitOutside = FynkelApplication.onQuit;
     // Unity ignores Application.Quit in the editor; here it ends Play.
