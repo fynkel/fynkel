@@ -97,7 +97,10 @@ Three ADRs, then their implementation:
    item 1 (its order is the ADR's § Order).
 3. **Package architecture:** physics, audio and animation as optional
    engine modules; game packages that ship behaviours, data assets,
-   prefabs and editor extensions; published artifacts (E2).
+   prefabs and editor extensions; published artifacts (E2). **ADR-0029
+   accepted 2026-09-25**: every Fynkel package is a Dart package found
+   through the package graph; modules switch off in Project Settings;
+   publishing is rehearsed from a local store and waits for ADR-0005.
 
 ## Phase 4 — Rendering resumes
 
