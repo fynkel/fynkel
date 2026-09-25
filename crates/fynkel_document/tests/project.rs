@@ -126,6 +126,56 @@ fn fixture_lock_matches_this_build() {
     assert!(lock.check(&expected, None).is_empty());
 }
 
+/// ADR-0029 §4, one lock shape: `package:fynkel` ships a lock like a
+/// project's, whose runtime also names the release store and a prebuilt
+/// library per target (unpublished until a release fills the checksums).
+#[test]
+fn package_fynkel_ships_its_lock_in_the_project_shape() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packages/fynkel")
+        .join(LOCK_FILE);
+    let text = std::fs::read_to_string(&path).unwrap();
+    let lock = Lock::parse(Some("packages/fynkel"), &text, &schemas()).unwrap();
+    let expected = expected_lock().keeping_store(&lock);
+    if std::env::var_os("FYNKEL_UPDATE_FIXTURES").is_some() {
+        std::fs::write(&path, expected.to_text()).unwrap();
+    }
+    assert_eq!(
+        text,
+        expected.to_text(),
+        "packages/fynkel/{LOCK_FILE} is stale; run with FYNKEL_UPDATE_FIXTURES=1"
+    );
+    assert!(lock.check(&expected_lock(), None).is_empty());
+    assert!(lock.runtime.store.as_deref().unwrap().contains("{version}"));
+    assert_eq!(
+        lock.runtime
+            .artifacts
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        [
+            "ios-arm64",
+            "ios-simulator-arm64",
+            "ios-simulator-x64",
+            "macos-arm64",
+            "macos-x64"
+        ]
+    );
+
+    // `fynkel project lock` keeps the store; the libraries only for the
+    // same runtime version.
+    let mut older = lock.clone();
+    older.runtime.version = "0.0.0".into();
+    let rewritten = expected_lock().keeping_store(&older);
+    assert_eq!(rewritten.runtime.store, lock.runtime.store);
+    assert!(rewritten.runtime.artifacts.is_empty());
+    // A project's lock without a store stays without one.
+    assert_eq!(
+        expected_lock().keeping_store(&expected_lock()),
+        expected_lock()
+    );
+}
+
 #[test]
 fn the_fixture_project_reads_and_validates_clean() {
     let schemas = schemas();

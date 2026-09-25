@@ -955,6 +955,22 @@ pub struct Lock {
 pub struct LockRuntime {
     pub version: String,
     pub abi_version: u32,
+    /// The release store's base URL (`{version}` replaced): where the
+    /// prebuilt runtime libraries are (ADR-0029 §4). `package:fynkel`'s
+    /// lock carries it; a project's lock rarely does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store: Option<String>,
+    /// Build target → the prebuilt library under `store`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub artifacts: BTreeMap<String, LockArtifact>,
+}
+
+/// One prebuilt runtime library in the release store.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LockArtifact {
+    pub file: String,
+    /// Lower-case hex; `None` while the library is not published.
+    pub sha256: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -980,6 +996,8 @@ impl Lock {
             runtime: LockRuntime {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 abi_version: fynkel_contracts::ABI_VERSION as u32,
+                store: None,
+                artifacts: BTreeMap::new(),
             },
             tools: LockTools {
                 version: env!("CARGO_PKG_VERSION").to_string(),
@@ -995,6 +1013,18 @@ impl Lock {
                 container: container_version,
             },
         }
+    }
+
+    /// This lock with `old`'s release store kept: the store always, the
+    /// prebuilt libraries only while the runtime version is the same (their
+    /// checksums are that version's). `fynkel project lock` rewrites the
+    /// versions and leaves where the runtime comes from alone.
+    pub fn keeping_store(mut self, old: &Lock) -> Lock {
+        self.runtime.store = old.runtime.store.clone();
+        if old.runtime.version == self.runtime.version {
+            self.runtime.artifacts = old.runtime.artifacts.clone();
+        }
+        self
     }
 
     /// Parses lock text: strict JSON, the lock schema, then the typed view.
