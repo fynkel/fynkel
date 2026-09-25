@@ -111,6 +111,14 @@ Map<String, Object?>? dataJson(DataAsset? instance) {
   return ref == null ? null : {'asset': ref.asset, 'sub': ?ref.sub};
 }
 
+/// Binds [instance] to the asset `ProjectWriter.writeData` wrote it to,
+/// so a document written afterwards names that asset. For
+/// `package:fynkel/authoring.dart` only; `package:fynkel/fynkel.dart`
+/// hides it.
+void bindWrittenData(DataAsset instance, AssetRef ref, DataType type) => instance
+  .._asset = ref
+  .._dataType = type;
+
 /// Bad authored data for a data asset (unknown type or field, a value
 /// that does not fit).
 class DataAssetError extends Error {

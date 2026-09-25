@@ -12,6 +12,7 @@ import 'package:crypto/crypto.dart';
 import '../../fynkel.dart';
 import '../../generated/schema.g.dart' as gen;
 import '../wire/support.dart' show docAssetRef;
+import '../world.dart' show bindWrittenData;
 
 /// A scene written from code: its objects, in order.
 final class SceneSpec {
@@ -106,6 +107,42 @@ class ProjectWriter {
       ...material.toJson(),
     };
     return _writeText(file, path, id, out, const []);
+  }
+
+  /// Writes [data] to `assets/<path>` (`.data.json` added when missing)
+  /// as a data asset of its registered type named [name] (the file's name
+  /// by default), every field through the type's `get` (ADR-0027 §8).
+  /// The instance then knows its asset: a scene, prefab or data asset
+  /// written afterwards stores that id for every field that holds it. A
+  /// data-typed field holding an instance never written is an
+  /// `ArgumentError` — write that one first (for two that name each
+  /// other, write one, then the other, then the first again).
+  WrittenDocument writeData(String path, DataAsset data, {String? name}) {
+    path = _withExtension(path, '.data.json');
+    final type = data.dataType ?? registry.dataTypeOf(data);
+    if (type == null) {
+      throw ArgumentError('${data.runtimeType} is not a registered data type: pass the generated registerBehaviours '
+          'to ProjectWriter (and annotate the class with @FynkelDataAsset)');
+    }
+    final fields = <String, Object?>{
+      for (final f in type.fields)
+        f.name: f.holdsData ? _dataValue(f.target!(data), f.get(data), '${type.id}.${f.name}') : f.get(data),
+    };
+    final file = File('$assetsDir/$path');
+    final existing = file.existsSync() ? jsonDecode(file.readAsStringSync()) as Map<String, Object?> : null;
+    final id = existing?['id'] as String? ?? _uuid5(_namespace, 'document/$path');
+    final out = <String, Object?>{
+      r'$schema': 'https://fynkel.dev/schemas/data.schema.json',
+      'formatVersion': 1,
+      'id': id,
+      'name': name ?? path.split('/').last.replaceFirst('.data.json', ''),
+      'type': type.id,
+      'version': type.version,
+      'data': fields,
+    };
+    final written = _writeText(file, path, id, out, const []);
+    bindWrittenData(data, written.ref, type);
+    return written;
   }
 
   static String _withExtension(String path, String ext) => path.endsWith(ext) ? path : '$path$ext';
@@ -439,8 +476,21 @@ final class _Document {
 /// scene is picked in the editor), through its registered `get`.
 Map<String, Object?> _scriptData(BehaviourType type, Behaviour b) => {
       for (final f in type.fields)
-        if (!f.isReference) f.name: f.get(b),
+        if (!f.isReference)
+          f.name: f.holdsData ? _dataValue(f.target!(b), f.get(b), '${type.id}.${f.name}') : f.get(b),
     };
+
+/// A data-typed field's [json] (its `get`), once every instance its
+/// [target] holds is known to be written.
+Object? _dataValue(Object? target, Object? json, String where) {
+  for (final d in target is List ? target : [target]) {
+    if (d is DataAsset && d.asset == null) {
+      throw ArgumentError('$where holds a ${d.runtimeType} that was never written: '
+          'write it with ProjectWriter.writeData first');
+    }
+  }
+  return json;
+}
 
 String _typeOf(WireRecord c) {
   for (final codec in gen.componentCodecs.values) {

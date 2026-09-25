@@ -91,4 +91,4 @@ export 'src/native/bridge.dart'
     show BridgeStats, CommandLane, FramePlan, NativeLibrary, NativeWorld, QueryKind, StepResult, SubmitResult;
 export 'src/wire/buffers.dart' show CommandBatch, RecordBatch, WireBuffer;
 export 'src/wire/support.dart' show WireRecord;
-export 'src/world.dart';
+export 'src/world.dart' hide bindWrittenData;
