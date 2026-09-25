@@ -297,3 +297,10 @@ What exists already (mapped 2026-09-25):
    - **A release build** contains no editor code.
    - **On a copy of the project, the user checks** that an edit to
      `lib/editor/` appears in the running editor on save.
+
+**Amended 2026-09-25 (order, confirmed by the user: "Okay, let's go with
+that order").** Step 1 is done and the user checked it in a running
+project editor. Windows and context menus (step 5) move up to follow
+`EditorContext` (step 2), ahead of Custom Inspectors and Property
+drawers: a window is the first real tool an extension makes, and no step
+depends on the order of 3–5. The order is now 1 → 2 → 5 → 3 → 4 → 6 → 7.
