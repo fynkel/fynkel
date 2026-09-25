@@ -46,7 +46,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Copy a live object | `Instantiate(obj)` | 🔧 `obj.clone({parent, transform, name})`: made now, scripts copied through their registered fields, references inside the copy re-pointed (`6988733`, `97d0c5b`, ADR-0026 §4) |
 | A cube / sphere / plane | `GameObject.CreatePrimitive` | 🔧 `world.createPrimitive(Primitive.cube)` or `ObjectSpec.primitive(...)`, with Unity's colliders; every cook ships the shapes (`b5dba47`, `c76c0bb`) |
 | A material made in code | `new Material(shader)`, `material.color = …` | 🔧 `world.createMaterial(PbrMaterial(baseColor: …))` returns an `AssetRef` for `MeshRenderer`; `setMaterial` / `destroyMaterial` change and drop it (`b5dba47`, `c76c0bb`) |
-| A mesh made in code | `new Mesh { vertices = … }` | ❌ |
+| A mesh made in code | `new Mesh { vertices = … }` | 🔧 `world.createMesh(MeshData(positions: …, triangles: …))` returns an `AssetRef` for `MeshRenderer` and a mesh `Collider`; normals and tangents computed when missing, `MeshData.grid(height: …)` for terrain; `setMesh` re-uploads it and rebuilds its colliders, `destroyMesh` drops it (`05020c3`, `e6a9324`, `485db00`) |
 | Load a scene | `SceneManager.LoadScene("Level1")` | 🔧 `scenes.transition(Assets.scenes.level1)`, or `world.assets.find('scenes/level1')` |
 | Additive scenes | | ✅ `LoadMode.additive` |
 
@@ -80,3 +80,4 @@ code as well as, or better than, Unity's.
 - 2026-09-25 — tweens (f8e090d): step 5 done.
 - 2026-09-25 — `authoring.dart` writing scenes and prefabs (4a9dab8; generated `toJson` d7cdc22; `fynkel validate` resolving the built-in shapes b7d4629): step 6 done.
 - 2026-09-25 — `examples/code_only/`, the acceptance game: Menu → Level → Results with a player, five coins, a switch and gate, a sweeper and a HUD; built live or loaded from the scenes, materials and prefab `tool/scenes.dart` writes, both ways passing one headless test driven by an input route built in Dart. Engine fixes it needed: a project with no startup scene (53f62a8, 6291e61), `writeMaterial` (84c15ea), a body command before a destroy in one batch dropped (197a501). Step 7 done.
+- 2026-09-25 — `createMesh` (05020c3 runtime meshes in the store and renderer, e6a9324 colliders following them, 485db00 Dart): step 8's first half done; code-built clips wait for the Phase 5 Animator.

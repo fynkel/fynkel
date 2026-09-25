@@ -412,8 +412,10 @@ turret.findChild('Barrel');                          // the prefab's entities ar
   prefab asset with overrides on its root.
 - `world.createPrimitive(Primitive.cube)` (or `ObjectSpec.primitive`) makes
   a built-in shape with its collider; `world.createMaterial(PbrMaterial(
-  baseColor: …))` returns an `AssetRef` for a `MeshRenderer`;
-  `obj.clone()` copies a spawned object and its subtree, scripts and all
+  baseColor: …))` returns an `AssetRef` for a `MeshRenderer`, and
+  `world.createMesh(MeshData(positions: …, triangles: …))` (or
+  `MeshData.grid(height: …)` for terrain) one for its `mesh` and a mesh
+  `Collider`, both following `setMesh`; `obj.clone()` copies a spawned object and its subtree, scripts and all
   (Unity's `Instantiate(obj)`).
 - Animate a value with a tween, not a hand-written coroutine:
   `yield transform.moveTo(target, 0.5, ease: Ease.outCubic)` in a
