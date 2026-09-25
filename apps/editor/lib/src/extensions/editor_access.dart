@@ -4,9 +4,11 @@
 // transaction, the prefab overrides the Inspector writes, the Project
 // panel's Create), so an extension's change is undone, overridden and
 // shown exactly as the user's would be.
+import 'dart:async' show scheduleMicrotask;
+
 import 'package:flutter/foundation.dart' show Listenable;
 import 'package:fynkel/authoring.dart' show ProjectWriter;
-import 'package:fynkel/fynkel.dart' show AssetRef, BehaviourRegistry, DataAsset, ObjectSpec;
+import 'package:fynkel/fynkel.dart' show AssetRef, BehaviourRegistry, DataAsset, ObjectSpec, World;
 import 'package:fynkel_authoring/fynkel_authoring.dart' show AuthoringException, Command;
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 
@@ -15,6 +17,7 @@ import '../documents/open_document.dart';
 import '../inspector/component_specs.dart';
 import '../inspector/inspector_model.dart' show ComponentInstance, EntityInfo, readEntities;
 import '../inspector/prefab_actions.dart' as prefab;
+import '../play/game_panel.dart' show GameRun;
 import '../project/editor_project.dart';
 import '../project_browser/project_browser_model.dart';
 
@@ -28,6 +31,8 @@ class EditorAccess {
     required this.ping,
     required this.open,
     this.registerBehaviours,
+    this.gameRun,
+    this.stopPlay,
   });
 
   final DocumentTabs? Function() tabs;
@@ -45,12 +50,25 @@ class EditorAccess {
   /// `createData` need to write its behaviours and data types.
   final void Function(BehaviourRegistry registry)? registerBehaviours;
 
+  /// In-editor Play (ADR-0021): the game's run, null without a game
+  /// compiled in; and the toolbar's Stop.
+  final GameRun? Function()? gameRun;
+  final void Function()? stopPlay;
+
+  /// The running game, or null when none runs (or it shows no world yet).
+  EditorPlay? play() {
+    final run = gameRun?.call();
+    if (run == null || !run.running || run.control.world == null) return null;
+    return _Play(run, stopPlay);
+  }
+
   /// What a context reads, to listen to: the tabs, the document in front,
   /// the project and the Project panel (an extension window rebuilds on
   /// their changes).
   List<Listenable?> watch() {
     final t = tabs();
-    return [t, t?.shown, project(), browser()];
+    final run = gameRun?.call();
+    return [t, t?.shown, project(), browser(), run, run?.control.worldsChanged];
   }
 
   /// The document the Hierarchy shows (the running game's during Play).
@@ -64,6 +82,52 @@ class EditorAccess {
     if (p == null) throw StateError('no project is open');
     return ProjectWriter(p.dir, registerBehaviours: registerBehaviours);
   }
+}
+
+// ── Play ──────────────────────────────────────────────────────────────────
+
+final class _Play implements EditorPlay {
+  _Play(this.run, this._stop);
+
+  final GameRun run;
+  final void Function()? _stop;
+  bool _redrawing = false;
+
+  @override
+  World get world {
+    // Whatever the caller changes, a paused Game view draws it (once,
+    // after the callback).
+    if (run.control.paused && !_redrawing) {
+      _redrawing = true;
+      scheduleMicrotask(() {
+        _redrawing = false;
+        run.control.redraw();
+      });
+    }
+    return run.control.world ?? (throw StateError('Play has ended'));
+  }
+
+  @override
+  List<World> get worlds => run.control.worlds;
+
+  @override
+  bool get isPaused => run.paused;
+
+  @override
+  void pause() {
+    if (!run.paused) run.togglePause();
+  }
+
+  @override
+  void resume() {
+    if (run.paused) run.togglePause();
+  }
+
+  @override
+  void step() => run.step();
+
+  @override
+  void stop() => _stop?.call();
 }
 
 // ── The scene ─────────────────────────────────────────────────────────────

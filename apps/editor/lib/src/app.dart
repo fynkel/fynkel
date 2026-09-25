@@ -475,6 +475,8 @@ class EditorShellState extends State<EditorShell> {
         ping: pingInProject,
         open: _openAsset,
         registerBehaviours: widget.game?.registerBehaviours,
+        gameRun: () => gameRun,
+        stopPlay: () => unawaited(stopPlaying()),
       ),
     )..addListener(_onExtensionLog);
     _registerExtensions();

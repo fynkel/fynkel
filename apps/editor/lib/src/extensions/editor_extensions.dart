@@ -806,6 +806,9 @@ class _Context implements EditorContext {
 
   @override
   EditorAssets get assets => host.access == null ? const _NoAssets() : assetsOf(host.access!, logError: logError);
+
+  @override
+  EditorPlay? get play => host.access?.play();
 }
 
 /// No project: nothing to find, nothing created.
