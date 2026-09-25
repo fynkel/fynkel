@@ -16,6 +16,7 @@
 #![recursion_limit = "256"]
 
 mod asset;
+mod assets_gen;
 mod behaviours;
 mod bundle;
 mod codegen;
@@ -160,6 +161,43 @@ fn usage() -> ExitCode {
     ExitCode::from(1)
 }
 
+/// `fynkel codegen --project <dir> --assets-only [--check] [--json]`:
+/// only `lib/generated/assets.g.dart` (ADR-0026 §3), no build_runner — what
+/// the editor runs after an asset is created, imported, renamed or
+/// deleted. `--json` prints `{ ok, check, assets: { status, error? } }`
+/// with `status` `written`, `upToDate`, `stale`, `skipped` (not a
+/// project's package) or `error`. Exit codes as for `codegen`.
+fn assets_only_run(project: &Path, check: bool, json: bool) -> ExitCode {
+    let mut drift = Vec::new();
+    let (status, code, error) = match behaviours::write_assets(project, check, &mut drift) {
+        Err(e) => ("error", ExitCode::from(1), Some(e)),
+        Ok(_) if !project.join("fynkel.project.json").is_file() => {
+            ("skipped", ExitCode::SUCCESS, None)
+        }
+        Ok(_) if drift.is_empty() => ("upToDate", ExitCode::SUCCESS, None),
+        Ok(_) if check => ("stale", ExitCode::from(2), None),
+        Ok(_) => ("written", ExitCode::SUCCESS, None),
+    };
+    if json {
+        let mut assets = serde_json::json!({ "status": status });
+        if let Some(e) = &error {
+            assets["error"] = serde_json::json!(e);
+        }
+        println!(
+            "{}",
+            serde_json::json!({ "ok": code == ExitCode::SUCCESS, "check": check, "assets": assets })
+        );
+    } else if let Some(e) = error {
+        eprintln!("fynkel codegen --assets-only: {e}");
+    } else {
+        println!(
+            "fynkel codegen --project {} --assets-only: {status}",
+            project.display()
+        );
+    }
+    code
+}
+
 /// The repository root, or exit: for commands that write into the checkout.
 fn require_repo_root(explicit: Option<PathBuf>) -> PathBuf {
     schemas::repo_root(explicit).unwrap_or_else(|| {
@@ -234,6 +272,7 @@ fn main() -> ExitCode {
     let mut root = None;
     let mut project: Option<PathBuf> = None;
     let mut project_only = false;
+    let mut assets_only = false;
     let mut watch = false;
     let mut i = 1;
     while i < args.len() {
@@ -241,6 +280,7 @@ fn main() -> ExitCode {
             "--check" => check = true,
             "--json" => json = true,
             "--project-only" => project_only = true,
+            "--assets-only" => assets_only = true,
             "--watch" => watch = true,
             "--root" => {
                 i += 1;
@@ -269,6 +309,13 @@ fn main() -> ExitCode {
                 ExitCode::from(1)
             }
         };
+    }
+    if assets_only {
+        let Some(project) = project.as_deref().filter(|_| cmd == "codegen") else {
+            eprintln!("fynkel codegen: --assets-only needs --project <dir>");
+            return usage();
+        };
+        return assets_only_run(project, check, json);
     }
     if project_only && project.is_none() {
         eprintln!("fynkel codegen: --project-only needs --project <dir>");

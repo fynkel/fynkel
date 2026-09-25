@@ -410,6 +410,10 @@ fn create(root: &Path, opts: &Opts) -> Result<Created, String> {
         .map_err(|e| format!("{}: {e}", lock_path.display()))?;
     files.push(fynkel_document::project::LOCK_FILE.to_string());
 
+    // `Assets.…` for every file above, with the ids just made (ADR-0026 §3).
+    crate::behaviours::write_assets(dir, false, &mut Vec::new())?;
+    files.push(crate::assets_gen::DART_OUT.to_string());
+
     if used_flutter {
         relax_sandbox(dir)?;
     }

@@ -149,6 +149,7 @@ fn generate(
             written += 1;
         }
     }
+    written += write_assets(project, check, &mut drift)?;
 
     if check {
         // `run` puts the committed generated files back: a check never mutates.
@@ -166,6 +167,32 @@ fn generate(
             types,
         }
     })
+}
+
+/// `lib/generated/assets.g.dart` (ADR-0026 §3) for a package that is a
+/// project's: compared, and written unless `check`. Returns the files
+/// written (0 or 1); a difference goes into `drift`.
+pub fn write_assets(
+    project: &Path,
+    check: bool,
+    drift: &mut Vec<PathBuf>,
+) -> Result<usize, String> {
+    let Some(text) = crate::assets_gen::generate(project)? else {
+        return Ok(0);
+    };
+    let path = project.join(crate::assets_gen::DART_OUT);
+    if read_opt(&path).as_deref() == Some(text.as_str()) {
+        return Ok(0);
+    }
+    drift.push(PathBuf::from(crate::assets_gen::DART_OUT));
+    if check {
+        return Ok(0);
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(1)
 }
 
 /// `fynkel codegen --watch --project <dir>`: `dart run build_runner watch`

@@ -215,6 +215,75 @@ fn a_fresh_project_validates_and_runs_headlessly() {
 }
 
 #[test]
+fn codegen_assets_only_names_every_asset_by_id() {
+    let parent = fresh("assets-only");
+    std::fs::create_dir_all(&parent).unwrap();
+    let dir = parent.join("game");
+    let (ok, stdout, stderr) = fynkel(&parent, &["create", "game", "--no-flutter"]);
+    assert!(ok, "{stdout}{stderr}");
+    let generated = dir.join("lib/generated/assets.g.dart");
+    let text = std::fs::read_to_string(&generated).unwrap();
+    // The ids are the sidecars' and the scene's.
+    let meta = std::fs::read_to_string(dir.join("assets/audio/jump.ogg.meta.json")).unwrap();
+    let meta: serde_json::Value = serde_json::from_str(&meta).unwrap();
+    let jump = meta["id"].as_str().unwrap();
+    assert!(
+        text.contains(&format!("AssetRef get jump => const AssetRef('{jump}');")),
+        "{text}"
+    );
+    assert!(text.contains("static const scenes = "), "{text}");
+    assert!(
+        text.contains("sub: 'mesh/"),
+        "the cube model's meshes: {text}"
+    );
+
+    let run = |args: &[&str]| {
+        let (_, stdout, stderr) = fynkel(&dir, args);
+        let report: serde_json::Value =
+            serde_json::from_str(&stdout).unwrap_or_else(|e| panic!("{e}: {stdout}{stderr}"));
+        report["assets"]["status"].as_str().unwrap().to_string()
+    };
+    let check = [
+        "codegen",
+        "--project",
+        ".",
+        "--assets-only",
+        "--check",
+        "--json",
+    ];
+    let write = ["codegen", "--project", ".", "--assets-only", "--json"];
+    assert_eq!(run(&check), "upToDate");
+
+    // A new asset: the check sees it, a write adds it, and then it is current.
+    let starter =
+        std::fs::read_to_string(dir.join("assets/materials/starter.material.json")).unwrap();
+    let mut red: serde_json::Value = serde_json::from_str(&starter).unwrap();
+    red["id"] = "5d1c62c4-8f0e-4c55-9d64-3f3e8f7c1a01".into();
+    std::fs::write(
+        dir.join("assets/materials/dark_red.material.json"),
+        serde_json::to_string_pretty(&red).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(run(&check), "stale");
+    assert!(
+        !std::fs::read_to_string(&generated)
+            .unwrap()
+            .contains("darkRed"),
+        "a check never writes"
+    );
+    assert_eq!(run(&write), "written");
+    assert!(std::fs::read_to_string(&generated).unwrap().contains(
+        "AssetRef get darkRed => const AssetRef('5d1c62c4-8f0e-4c55-9d64-3f3e8f7c1a01');"
+    ));
+    assert_eq!(run(&check), "upToDate");
+
+    // Not a project's package: nothing to write.
+    std::fs::remove_file(dir.join("fynkel.project.json")).unwrap();
+    assert_eq!(run(&write), "skipped");
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+#[test]
 fn codegen_project_only_needs_a_project() {
     let dir = fresh("project-only");
     std::fs::create_dir_all(&dir).unwrap();

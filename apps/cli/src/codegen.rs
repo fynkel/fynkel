@@ -589,7 +589,11 @@ fn dart_const(ty: &FieldType, v: &Value) -> Option<String> {
             return None;
         }
         let t = format!("{x}");
-        Some(if t.contains(['.', 'e', 'E']) { t } else { format!("{t}.0") })
+        Some(if t.contains(['.', 'e', 'E']) {
+            t
+        } else {
+            format!("{t}.0")
+        })
     }
     fn floats(v: &Value, n: usize) -> Option<String> {
         let a = v.as_array().filter(|a| a.len() == n)?;
@@ -621,7 +625,10 @@ fn dart_const(ty: &FieldType, v: &Value) -> Option<String> {
         FieldType::Str => string(v.as_str()?),
         FieldType::AssetRef => {
             let asset = v.get("asset")?.as_str()?;
-            let sub = v.get("sub").and_then(Value::as_str).filter(|s| !s.is_empty());
+            let sub = v
+                .get("sub")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty());
             match sub {
                 None if asset == "00000000-0000-0000-0000-000000000000" => "AssetRef.none".into(),
                 None => format!("AssetRef({})", string(asset)),
@@ -636,7 +643,11 @@ fn dart_const(ty: &FieldType, v: &Value) -> Option<String> {
         FieldType::Nested(s) => {
             let mut args = Vec::new();
             for f in s.fields {
-                args.push(format!("{}: {}", camel(f.name), dart_const(&f.ty, v.get(f.name)?)?));
+                args.push(format!(
+                    "{}: {}",
+                    camel(f.name),
+                    dart_const(&f.ty, v.get(f.name)?)?
+                ));
             }
             format!("{}({})", rust_ident(s), args.join(", "))
         }
@@ -732,13 +743,17 @@ fn dart(fp: u64) -> String {
             // its Rust `Default` (what Add Component writes); a field whose
             // value has no Dart constant form stays `required`.
             let defaults = match s.kind {
-                SchemaKind::Component => fynkel_authoring::component_default(s.name)
-                    .map(|n| n.to_serde()),
+                SchemaKind::Component => {
+                    fynkel_authoring::component_default(s.name).map(|n| n.to_serde())
+                }
                 _ => None,
             };
             for f in s.fields {
                 let v = camel(f.name);
-                if matches!(f.ty, FieldType::OptionalEntity | FieldType::OptionalAssetRef) {
+                if matches!(
+                    f.ty,
+                    FieldType::OptionalEntity | FieldType::OptionalAssetRef
+                ) {
                     let _ = writeln!(o, "    this.{v},");
                     continue;
                 }
@@ -749,7 +764,11 @@ fn dart(fp: u64) -> String {
                 {
                     Some(d) => {
                         // A constructor call as a default value needs `const`.
-                        let d = if d.contains('(') { format!("const {d}") } else { d };
+                        let d = if d.contains('(') {
+                            format!("const {d}")
+                        } else {
+                            d
+                        };
                         let _ = writeln!(o, "    this.{v} = {d},");
                     }
                     None => {
