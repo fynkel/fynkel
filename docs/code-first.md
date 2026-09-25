@@ -22,7 +22,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 |---|---|---|
 | Make an empty object | `new GameObject("Crate")` | ✅ `world.spawn(name: 'Crate')` |
 | Add a script | `AddComponent<Player>()` | ✅ `obj.addBehaviour(Player())` |
-| Add a built-in component | `AddComponent<Rigidbody>()` with defaults | ❌ every field spelled out: `RigidBody` takes six (ADR-0026 §6) |
+| Add a built-in component | `AddComponent<Rigidbody>()` with defaults | 🔧 `add(const RigidBody())`, `RigidBody(mass: 5)` — the Rust `Default`s, as Add Component writes them (ADR-0026 §6) |
 | Get / set / remove a component | `GetComponent<T>()` | ✅ `get<T>()`, `set`, `remove<T>()` |
 | Script lifecycle | Awake … OnDestroy | ✅ `onCreate` … `onDestroy` |
 | Coroutines, Invoke | `StartCoroutine`, `Invoke` | ✅ `b92178e` |
