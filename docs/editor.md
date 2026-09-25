@@ -2402,7 +2402,8 @@ One card per override the profile holds — **Ambient Occlusion**
 **Color Grading** (R3c: Tonemapper as a menu — ACES, Neutral, None —,
 Post Exposure, Temperature, Tint, Contrast, Saturation, Hue Shift, Color
 Filter, and Lift, Gamma, Gain as R, G, B; the −100…100 sliders move in
-whole steps) —
+whole steps), **Contact Shadows** (R3d: Intensity, Length, Thickness,
+Max Distance) —
 with **All** / **None** and **Remove** in its menu; **Add Override**
 lists the ones it lacks and adds an empty block. A **checkbox in front of
 every field** says whether the profile sets it: ticked, the field is in

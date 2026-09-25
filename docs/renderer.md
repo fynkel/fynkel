@@ -49,8 +49,9 @@ The chain is `shadow → depth prepass → ambient occlusion → AO blur →
 opaque → transparent → bloom → post → presentation → overlay`, every pass with
 fixed inputs and outputs; the opaque and transparent stages share one
 render pass because they share the attachments. The three passes before
-the opaque one are the ambient-occlusion stage (R2) and run only while
-the quality profile asks for it; the bloom stage (R3b) runs only while
+the opaque one are the screen-space stage — ambient occlusion (R2) and
+contact shadows (R3d) — and run only while the quality profile allows
+one of them *and* the frame's volumes give it an intensity; the bloom stage (R3b) runs only while
 the profile allows it *and* the frame's volumes give it an intensity.
 Without them the chain is exactly what it was, down to the bits. Colour
 grading (R3c) is no pass: it is arithmetic in the post pass, skipped
@@ -59,9 +60,9 @@ while the grade is neutral.
 | Pass | Reads | Writes | When |
 | --- | --- | --- | --- |
 | **shadow** | shadow uniforms (sun `view_proj`), casters' base-colour map (mask discard) | `SHADOW_FORMAT` (`Depth32Float`) map, `shadow_resolution`², cleared | shadows on, a casting sun, ≥ 1 caster |
-| **depth prepass** | frame uniforms, the opaque instances, their base-colour map (mask discard) | the scene `Depth32Float` (`msaa` samples), cleared and **stored** | ambient occlusion on, ≥ 1 opaque draw |
-| **ambient occlusion** | the frame uniform alone, the stored depth | `AO_FORMAT` (`R8Unorm`) at the internal size | the same |
-| **AO blur** | the frame uniform, the depth, the AO target | a second `R8Unorm` — what the opaque pass samples | the same |
+| **depth prepass** | frame uniforms, the opaque instances, their base-colour map (mask discard) | the scene `Depth32Float` (`msaa` samples), cleared and **stored** | ambient occlusion or contact shadows on, ≥ 1 opaque draw |
+| **ambient occlusion** | the frame uniform alone, the stored depth | `AO_FORMAT` (`Rg8Unorm`: red the occlusion, green the contact shadows) at the internal size | the same |
+| **AO blur** | the frame uniform, the depth, the AO target | a second `Rg8Unorm` — what the opaque pass samples | the same |
 | **opaque** | frame uniforms, shadow map, the AO target, material maps | HDR colour (`HDR_FORMAT` `Rgba16Float`, `msaa` samples) + `Depth32Float`, the colour cleared to transparent black and the depth **loaded** from the prepass (cleared when the stage did not run); at MSAA 4 the colour resolves into the single-sample HDR texture and the samples are discarded | always |
 | **transparent** | the same, plus the depth just written (read-only) | the same colour attachment, blended | `blend` instances queued |
 | **bloom** | the resolved HDR texture, the frame uniform | `BLOOM_FORMAT` (`Rgba16Float`) chain at half the internal size, up to `BLOOM_LEVELS` (6) mips: a prefilter into level 0, a downsample into each next level, a blended upsample back into each finer one | bloom on in the quality profile, the resolved intensity > 0 |
@@ -77,7 +78,7 @@ while the grade is neutral.
    never cast. `MeshRenderer.cast_shadows` opts a mesh out; placeholders
    and missing-mesh cubes cast.
 2. **Depth prepass, ambient occlusion, AO blur**: § Ambient occlusion
-   below.
+   and § Contact shadows below.
 3. **Opaque**: back-face-culled batches first, then double-sided ones,
    one `draw_indexed` per batch over its scene range (the instances
    inside the camera frustum, `Batch::first..+count`), then the
@@ -195,7 +196,8 @@ shadow and the scene:
    single no-culling prepass did before this was fixed.
 2. **The SSAO pass** reads that depth (`texture_depth_multisampled_2d`
    at MSAA, sample 0 — AO is low-frequency, per-sample occlusion buys
-   nothing) and writes one `R8Unorm` byte a pixel. Per pixel: the world
+   nothing) and writes the red byte of an `Rg8Unorm` pixel (the green is
+   the contact shadows', § Contact shadows). Per pixel: the world
    point from `inv_view_proj`, the normal from the four neighbouring
    depths (the nearer neighbour on each axis, so a silhouette does not
    bend it) flipped to face the camera, then `AO_SAMPLES` (12) points in
@@ -207,9 +209,9 @@ shadow and the scene:
    `AO_BIAS` (2 cm) — both lie on the same ray, so their distances order
    them — weighted by `radius / |s − p|` so an occluder beyond the
    hemisphere fades out instead of darkening across a gap. The result is
-   `(1 − occlusion)^intensity` (`frame.ao.y`; 0 — the pass is skipped —
-   unless a volume gives it one: § Volumes).
-3. **The blur** averages a 4×4 square of that, dropping taps more than
+   `(1 − occlusion)^intensity` (`frame.ao.y`; 0 — the estimate is
+   skipped and the red is 1 — unless a volume gives it one: § Volumes).
+3. **The blur** averages a 4×4 square of that (both channels), dropping taps more than
    2 % of the view distance away along the ray, which is what turns the
    per-pixel rotation back into a smooth term without smearing across a
    silhouette.
@@ -226,15 +228,16 @@ darkening a sunlit face with a screen-space guess is the classic way to
 make a scene look dirty). Blend instances are skipped: they are not in
 the prepass, so the AO under them belongs to whatever is behind them.
 
-The stage is one `R8Unorm` pair at the internal size (2 bytes a pixel on
-top of the attachments) and one query pair in the GPU timer — its begin
+The stage is one `Rg8Unorm` pair at the internal size (4 bytes a pixel on
+top of the attachments; 2 before R3d gave it the green channel) and one query pair in the GPU timer — its begin
 is the prepass's, its end the blur's, so `FrameStats::gpu_ao_us` and
 `ViewportStatsSnapshot.gpuAo` are the whole stage.
-`FrameStats::ambient_occlusion` says whether it ran; the profile's
-`ambientOcclusion` turns it off, and then the chain, the attachments and
-the picture are what they were before R2. A volume whose intensity
-resolves to 0 skips the three passes too (the attachments stay, so
-walking out of it costs nothing to switch back).
+`FrameStats::ambient_occlusion` says whether the occlusion was drawn;
+the profile's `ambientOcclusion` turns it off, and with `contactShadows`
+off too the chain, the attachments and the picture are what they were
+before R2. A volume whose intensity resolves to 0 skips the three passes
+too unless contact shadows need them (the attachments stay, so walking
+out of it costs nothing to switch back).
 
 Measured (`benchmarks/m3/results/2026-09-22-94490ad`): 1.81 ms p95 on the
 stress scene, where the whole GPU frame nevertheless fell from 3.56 to
@@ -263,7 +266,10 @@ document.
   brightness, default 0.9), scatter (`0..=1`, default 0.7), tint ([r,
   g, b], per channel) }` (§ Bloom); R3c adds `colorGrading { tonemapper,
   postExposure, temperature, tint, contrast, saturation, hueShift,
-  colorFilter, lift, gamma, gain }` (§ Colour grading). `fynkel
+  colorFilter, lift, gamma, gain }` (§ Colour grading); R3d adds
+  `contactShadows { intensity (`0..=1`; 0 = off, the default), length
+  (m, default 0.15), thickness (m, default 0.05), distance (m, default
+  50) }` (§ Contact shadows). `fynkel
   document new volume <name>` writes one with the engine defaults spelled
   out.
 - **The component** says where the profile applies: `shape` `global`
@@ -402,6 +408,50 @@ no memory. Deliberately not in R3c: a LUT (baking the grade into a 3D
 texture, and loading one made elsewhere), Unity's shadows/midtones/
 highlights and channel mixer, curves, and grading the clear colour.
 
+### Contact shadows (`shaders/ao.wgsl`, R3d)
+
+The shadow map is a few centimetres a texel at best, and its depth bias
+lifts a shadow off its caster by about as much: where an object meets
+the ground, and in the creases of a model, the sun's shadow is missing or
+detached. Contact shadows (Unity HDRP's) fill that in from the screen:
+a profile's `contactShadows` block (§ Volumes) gives them an
+`intensity` — the shadow's opacity, `0..=1`, 0 (off) by default.
+
+They are the green channel of the screen-space stage (§ Ambient
+occlusion), so they share its depth prepass, its target and its blur;
+the stage runs when either effect is on. Per pixel, from the world point
+the depth gives: `CONTACT_STEPS` (12) steps of a march `length` metres
+(0.15) toward the sun, dithered per pixel and started a pixel's footprint
+off the surface along its normal. A step is in shadow when the surface
+drawn at its screen position — on the step's own view ray — is in front
+of it by more than a footprint (`CONTACT_BIAS`) and less than
+`thickness` (0.05 m) plus that: a surface is taken to be that thick, so
+a march passing behind a thin post is not stopped by it. The first such
+step makes the pixel `1 − intensity`; past `distance` (50 m) from the
+camera there are none, faded over the last tenth. There is no test of
+the normal against the sun: the normal from depth is least sure at a
+foot, where contact shadows matter most, and a face turned from the sun
+gets no sunlight to darken anyway.
+
+`mesh.wgsl` darkens the **sun's** light only, by the nearer of the two
+shadows (`min(shadow map, contact)`), on instances that receive shadows
+and are in the prepass (not blend ones). Point and spot lights are not
+marched. With the green channel off it is 1 and nothing reads it: a
+frame without the block renders to the bit what it did before (the
+test checks intensity 0 and the profile's off against no volume).
+
+The quality profile's `contactShadows` (default on) is the ceiling. It
+also keeps the stage's targets: a profile with `ambientOcclusion` off
+and `contactShadows` on still has the pair. No new pass, pipeline or
+target: the green channel doubles the pair's bytes (2 → 4 a pixel).
+`FrameStats::contact_shadows` says they were marched; `fynkel render`
+prints `contact shadows <intensity> over <length> m`, `--json` has
+`contactShadows` and `post.contact*`; the editor's Volume Profile
+Inspector has a Contact Shadows card. They need a sun: without one the
+stage does not run for them. Deliberately not in R3d: per-light contact
+shadows (Unity's per-light toggle), and a `distanceScaleFactor` that
+lengthens the march with distance.
+
 ### Instancing and culling (`src/culling.rs`)
 
 Every frame `prepare` rebuilds one instance buffer from the extract
@@ -475,16 +525,16 @@ carries them, and `ExtractRenderer` resolves the active one at each
 3. the project's default profile (`unknown_profile` names the requested
    one when it was not found — the request is kept for the next store),
 4. the engine defaults (`profile: "default"`: shadows on, 2048, ambient
-   occlusion on, bloom allowed, MSAA 4, scale 1, anisotropy 8) when the project declares
+   occlusion on, bloom and contact shadows allowed, MSAA 4, scale 1, anisotropy 8) when the project declares
    no quality block.
 
 A profile becomes a `Quality` through `clamped()`: `msaa` 1 or 4,
 `shadow_resolution` a power of two in `256..=8192`, `render_scale` in
 `0.25..=2`, `anisotropy` in `1..=16`; `textureMaxSize` is the cook's
-concern (D3) and the renderer ignores it; `ambientOcclusion` and
-`bloom` are straight on/offs. Switching is cheap where it can
+concern (D3) and the renderer ignores it; `ambientOcclusion`, `bloom`
+and `contactShadows` are straight on/offs. Switching is cheap where it can
 be: pipelines are rebuilt only when the sample count changes,
-attachments when the internal size, the samples or the AO or bloom toggle change,
+attachments when the internal size, the samples or whether the screen-space stage or bloom has targets change,
 the shadow map
 when its resolution changes, the material sampler (and with it the cached
 material bind groups) when the anisotropy changes. `quality()` reports the
@@ -768,7 +818,7 @@ loop, so no mask applies to them.
 
 ## Uniform layout
 
-`Frame` (bind group 0, 4 928 bytes, `shaders/frame.wgsl`): `view_proj`,
+`Frame` (bind group 0, 4 944 bytes, `shaders/frame.wgsl`): `view_proj`,
 `inv_view_proj` (the sky's ray reconstruction), `cascades` (four
 `Cascade { view_proj, rect, params }`: world → that cascade's shadow
 clip, its quadrant in atlas uv, and its normal offset in metres),
@@ -777,13 +827,15 @@ clip, its quadrant in atlas uv, and its normal offset in metres),
 `w` = `L_max`), `sky` (`x` intensity, `y` rotation, `z` image-based
 lighting active, `w` specular mips − 1), `shadow` (`x` active,
 `y` one atlas texel in uv, `z` the blend band, `w` cascades), `ao` (the
-volumes' resolution, § Volumes: `x` radius, `y` exponent), `bloom` (`x`
+volumes' resolution, § Volumes: `x` radius, `y` exponent — 0 when off),
+`contact` (§ Contact shadows: `x` opacity — 0 when off —, `y` length,
+`z` thickness, `w` distance), `bloom` (`x`
 threshold, `y` knee, `z` the upsample blend `0.05 + 0.9 × scatter`, `w`
 intensity — 0 when the stage did not run), `bloom_tint` (rgb), `grade`
 (§ Colour grading: `params` — `x` contrast exponent, `y` 1 when the grade
 runs, `z` tone mapper 0 ACES / 1 neutral / 2 none —, `pre` and `post`
 three column vectors each, `lift`, `inv_gamma`, `gain`), `counts` (`x` lights,
-`y` sky drawn, `z` encode sRGB, `w` ambient occlusion ran), then `lights: array<Light, LIGHT_POOL>`
+`y` sky drawn, `z` encode sRGB, `w` the screen-space stage ran), then `lights: array<Light, LIGHT_POOL>`
 (64) —
 `position` (`w` range), `color` (rgb × cd, `w` 0 point / 1 spot),
 `direction` (`w` cos outer), `params` (`x` cos inner). Bind group 0 also
@@ -970,7 +1022,11 @@ bit-identical to the quality profile's `bloom: false`, the profile's
 off beats a volume's on, the glow lifts the background next to the cube
 and fades with distance, a threshold above the scene's brightness
 changes nothing, a red tint only reddens, and a wider scatter reaches
-farther;
+farther; from R3d: the same cube under a sun that casts no map shadow —
+contact shadows darken the sunlit floor at its foot, leave the open
+floor and the cube's own sunlit top alone, run without ambient
+occlusion, need a sun, and at intensity 0 or with the profile's
+`contactShadows: false` are bit-identical to no volume;
 `cast_shadows` / `receive_shadows` per `MeshRenderer`, blend
 materials compositing back to front whatever the record order, MSAA 4
 blending silhouette edges (and 8 ≡ 4, 2 ≡ 1), render scale 0.5 / 0.75 /

@@ -1155,7 +1155,9 @@ brightness, `scatter` in `[0, 1]`, `tint` three numbers in `[0, 1]`; `colorGradi
 in `[-10, 10]` stops, `temperature`, `tint`, `contrast` and `saturation`
 in `[-100, 100]`, `hueShift` in `[-180, 180]` degrees, `colorFilter`
 three numbers in `[0, 1]`, `lift` three in `[-1, 1]`, `gamma` three in
-`(0, 10]`, `gain` three in `[0, 4]`) and refuses unknown blocks and fields
+`(0, 10]`, `gain` three in `[0, 4]`; `contactShadows` (R3d): `intensity` in
+`[0, 1]` — 0, the default, is off —, `length` and `thickness` in `(0, 5]`
+m, `distance` in `(0, 1000]` m) and refuses unknown blocks and fields
 (`FYN-D0100`); the read view reports what the schema cannot see as
 `FYN-D0700` and leaves the field inherited. `fynkel document new volume
 <name>` writes one with the engine defaults spelled out. The cook
@@ -1165,8 +1167,8 @@ chunk (`documentKind: volume`); a scene depends on the profiles its
 volumes name. The runtime store reads the chunk into a
 `fynkel_core::volume::VolumeProfile` (`Assets::volume_profile`, cached
 per reference, evicted with its asset). The lock's `documents` gains
-`volume: 1`. R3b's `bloom` block was the first addition and R3c's
-`colorGrading` the second: blocks, not kinds, so the format stays at 1
+`volume: 1`. R3b's `bloom` block was the first addition, R3c's
+`colorGrading` the second and R3d's `contactShadows` the third: blocks, not kinds, so the format stays at 1
 (a profile without the new block reads as it did).
 
 ## Physics materials (ADR-0025)

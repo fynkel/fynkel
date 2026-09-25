@@ -1120,7 +1120,8 @@ overrides (present overrides, absent inherits); the renderer blends the
 volumes that reach the camera once a frame on the CPU and uploads the
 result. The quality profile stays the ceiling — it says what the device
 affords, a volume only shapes what it allows. R2's two AO constants were
-the first fields; bloom (R3b) and colour grading (R3c) are blocks in the
+the first fields; bloom (R3b), colour grading (R3c) and contact shadows
+(R3d) are blocks in the
 same profile, not new mechanisms. A general game-defined data asset — a
 Unity `ScriptableObject`, `@DataAsset` on a Dart class — was considered
 and deliberately deferred to the package-architecture work, where the
@@ -1144,6 +1145,16 @@ two matrices on the CPU, skipped while neutral so a scene without it is
 the picture it was to the bit; no quality flag, since it costs no memory.
 A LUT (baked or authored elsewhere) is the next step when a game wants
 one. `docs/renderer.md` § Colour grading.)*
+
+*(R3d, 2026-09-26: **contact shadows** — the profile's fourth block,
+`contactShadows { intensity, length, thickness, distance }`, Unity HDRP's:
+a short march toward the sun through the depth buffer, in the green
+channel of the ambient-occlusion stage's target, so no new pass. They
+darken the sun's light where the shadow map is too coarse — a foot on
+the ground, a crease — off until a volume gives them an intensity,
+capped by the quality profile's `contactShadows`. Per-light contact
+shadows wait for a game that needs them. `docs/renderer.md` § Contact
+shadows.)*
 
 ## 9. Physics, animation, audio, and input
 

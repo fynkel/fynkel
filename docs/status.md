@@ -1341,7 +1341,8 @@ good** — the renderer's own leftovers, one item each: R1 (cascaded
 shadow maps), R2 (ambient occlusion), R3a (volumes: the look as
 scene data, `docs/renderer.md` § Volumes) and R3b (bloom, the profile's
 second block, § Bloom) are done, and so is R3c (colour grading, the
-third block, § Colour grading; 2026-09-25); contact shadows follow, then the package architecture (which also decides the deferred
+third block, § Colour grading; 2026-09-25) and R3d (contact shadows,
+the fourth block, § Contact shadows; 2026-09-26); then the package architecture (which also decides the deferred
 game-defined data asset, a `ScriptableObject`-like `@DataAsset`) and the
 shader assets the user asked for. M4 closed on 2026-09-25 (item 30
 below).

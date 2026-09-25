@@ -16,5 +16,9 @@
     "temperature": 20,
     "contrast": 15,
     "saturation": 5
+  },
+  "contactShadows": {
+    "intensity": 1.0,
+    "length": 0.3
   }
 }

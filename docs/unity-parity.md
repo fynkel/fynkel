@@ -176,6 +176,9 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   the override, ticks the Tonemapper and picks Neutral, types a
   Saturation and Lift's blue channel alone, and reads the grade back from
   the Scene view's preview.
+- 2026-09-26: Contact Shadows on the same page (R3d) — the parity test
+  adds the override, ticks and types Intensity and Length, and reads them
+  back from the Scene view's preview with Thickness still inherited.
 - 2026-09-24: model import settings (`41190a1` the importer's
   `scaleFactor`, `normals` / `smoothingAngle`, `importAnimation`;
   `c3e7d3e`) — `import_settings_parity_test.dart` types a Scale Factor,

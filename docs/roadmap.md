@@ -126,8 +126,10 @@ The pending R capture, R3c colour grading, contact shadows, shader assets
 (a cooked record for custom-shader materials), texture mips and GPU
 compression (ASTC/BC). R3c done 2026-09-25 (the volume profile's
 `colorGrading` block, `docs/renderer.md` § Colour grading; the showcase's
-`renders/r3c.png`); the capture, skipped that day, will cover R3a–R3c
-at once.
+`renders/r3c.png`); contact shadows (R3d) done 2026-09-26 (the
+`contactShadows` block, the green channel of the ambient-occlusion stage,
+`docs/renderer.md` § Contact shadows; `renders/r3d.png`). The capture,
+skipped on 2026-09-25, will cover R3a–R3d at once.
 
 ## Phase 5 — M5: a real game
 
