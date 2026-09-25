@@ -200,8 +200,8 @@ pub fn check_reference_kinds(
                         let (Some(want), true) = (&field.data, resolved.sub.is_none()) else {
                             continue;
                         };
-                        match data_type_of(&resolved.entry.file(db.root())) {
-                            Some(t) if t != *want => {
+                        match resolved.entry.data_type.as_deref() {
+                            Some(t) if t != want => {
                                 (format!("{want} data asset"), format!("a {t} data asset"))
                             }
                             _ => continue,
@@ -241,14 +241,6 @@ pub fn check_reference_kinds(
         }
     }
     out
-}
-
-/// A data document's `type`, read from its file (`None` when it does not
-/// read: the document's own validation reports that).
-fn data_type_of(file: &std::path::Path) -> Option<String> {
-    let text = std::fs::read_to_string(file).ok()?;
-    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
-    v.get("type")?.as_str().map(str::to_string)
 }
 
 /// The nodes at `path` under `node` (`*` fans out over an array).

@@ -385,6 +385,9 @@ pub struct AssetEntry {
     /// ([`AssetDatabase::add_builtin`]); `path` is then where the project
     /// would keep it. `None` for every scanned asset.
     pub origin: Option<PathBuf>,
+    /// A data asset's type id (ADR-0027), what a typed picker filters on;
+    /// `None` for every other asset.
+    pub data_type: Option<String>,
 }
 
 impl AssetEntry {
@@ -575,6 +578,7 @@ impl AssetDatabase {
             },
             sub_assets: meta.sub_assets.iter().cloned().collect(),
             origin: Some(file.to_path_buf()),
+            data_type: None,
         };
         let shown = file.display().to_string();
         self.insert(
@@ -650,6 +654,7 @@ impl AssetDatabase {
                 },
                 sub_assets: meta.sub_assets.iter().cloned().collect(),
                 origin: None,
+                data_type: None,
             };
             self.insert(
                 path,
@@ -682,6 +687,14 @@ impl AssetDatabase {
                 kind: AssetKind::Document(kind),
                 sub_assets: subs.iter().cloned().collect(),
                 origin: None,
+                data_type: (kind == DocumentKind::Data)
+                    .then(|| {
+                        doc.root
+                            .get("type")
+                            .and_then(|t| t.as_str())
+                            .map(str::to_string)
+                    })
+                    .flatten(),
             };
             self.insert(path, entry, &subs, &shown, &doc.root, diags);
         } else if !sidecar_path(path).is_file() {
@@ -979,6 +992,9 @@ pub fn entry_json(e: &AssetEntry) -> serde_json::Value {
     match &e.kind {
         AssetKind::Document(k) => {
             v["document"] = k.name().into();
+            if let Some(t) = &e.data_type {
+                v["dataType"] = t.as_str().into();
+            }
             if !e.sub_assets.is_empty() {
                 v["subAssets"] = e
                     .sub_assets

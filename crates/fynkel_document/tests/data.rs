@@ -255,6 +255,17 @@ fn data_assets_validate_in_a_project() {
         "{}",
         wrong[0].message
     );
+
+    // The asset list names a data asset's type, what a typed picker filters on.
+    let (db, _) = fynkel_document::asset::AssetDatabase::scan(&dir.join("assets"), &schemas);
+    let shield = db
+        .entries()
+        .iter()
+        .find(|e| e.name == "Shield")
+        .map(fynkel_document::asset::entry_json)
+        .unwrap();
+    assert_eq!(shield["document"], "data");
+    assert_eq!(shield["dataType"], "game.Shield");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
