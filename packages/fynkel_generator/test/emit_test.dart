@@ -191,6 +191,24 @@ void main() {
     expect(exposeKindProblem('button', FieldKind.number), contains('unknown kind'));
   });
 
+  test('@Expose(drawer:) (ADR-0028) is x-fynkel.drawer: on the field, or on a list\'s items', () {
+    const range = BehaviourClass(
+      id: 'game.Range',
+      version: 1,
+      className: 'Range',
+      libraryUri: 'package:demo/range.dart',
+      fields: [
+        ExposedField(name: 'span', kind: FieldKind.vec3, drawer: 'minMax', label: 'Span'),
+        ExposedField(name: 'spans', kind: FieldKind.list, item: FieldKind.number, drawer: 'meter', label: 'Spans'),
+      ],
+    );
+    final p = schemaFor(range)['properties'] as Map<String, Object?>;
+    expect((p['span'] as Map)['x-fynkel'], {'type': 'vec3', 'label': 'Span', 'drawer': 'minMax'});
+    final spans = p['spans'] as Map;
+    expect((spans['x-fynkel'] as Map).containsKey('drawer'), isFalse);
+    expect((spans['items'] as Map)['x-fynkel'], containsPair('drawer', 'meter'));
+  });
+
   test('@Gizmo reaches x-fynkel beside the hints; a List<Vec3> is an array of triples', () {
     const radius = ExposedField(name: 'reach', kind: FieldKind.number, gizmo: GizmoSpec(shape: 'radius'));
     const path = ExposedField(

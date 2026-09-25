@@ -113,6 +113,7 @@ class ExposedField {
     this.readOnly = false,
     this.hidden = false,
     this.showIf,
+    this.drawer,
     this.gizmo,
     this.doc,
     this.typeLibrary,
@@ -154,6 +155,10 @@ class ExposedField {
   final bool hidden;
   final String? showIf;
 
+  /// The property drawer it names (`@Expose(drawer:)`, ADR-0028); on a
+  /// list, each item's.
+  final String? drawer;
+
   /// Its `@Gizmo` (ADR-0019 §3), if any.
   final GizmoSpec? gizmo;
 
@@ -191,7 +196,7 @@ class ExposedField {
   /// A list's own hints: the item's go on its `items`.
   Map<String, Object?> get _listHints => {
         for (final e in _hints.entries)
-          if (!const {'min', 'max', 'step', 'unit', 'kind'}.contains(e.key)) e.key: e.value,
+          if (!const {'min', 'max', 'step', 'unit', 'kind', 'drawer'}.contains(e.key)) e.key: e.value,
         'items': item!.typeName,
       };
 
@@ -204,6 +209,7 @@ class ExposedField {
         if (displayKind != null) 'kind': displayKind,
         if (dataId != null) 'data': dataId,
         if (record != null) 'record': record!.className,
+        if (drawer != null) 'drawer': drawer,
       };
 
   Map<String, Object?> get _hints => {
@@ -220,6 +226,7 @@ class ExposedField {
         if (readOnly) 'readOnly': true,
         if (hidden) 'hidden': true,
         if (showIf != null) 'showIf': showIf,
+        if (drawer != null) 'drawer': drawer,
         if (gizmo != null) 'gizmo': gizmo!.json,
         if (behaviourId != null) 'behaviour': behaviourId,
         if (dataId != null) 'data': dataId,

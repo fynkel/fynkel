@@ -371,6 +371,7 @@ Future<ExposedField> _readField(
     readOnly: expose.peek('readOnly')?.boolValue ?? false,
     hidden: expose.peek('hidden')?.boolValue ?? false,
     showIf: expose.peek('showIf')?.stringValue,
+    drawer: expose.peek('drawer')?.stringValue,
     gizmo: gizmo,
     doc: _doc(f.documentationComment),
     typeLibrary: typeLibrary,
@@ -441,9 +442,18 @@ Future<RecordClass> _readRecord(Resolver resolver, ClassElement element, String 
   return RecordClass(className: name, libraryUri: libraryUri, fields: fields, doc: _doc(element.documentationComment));
 }
 
-/// Every `showIf` names a sibling `bool` field.
+/// Every `showIf` names a sibling `bool` field; every `drawer` is one
+/// word.
 void _checkShowIf(List<ExposedField> fields, String libraryUri, String name) {
   for (final f in fields) {
+    final drawer = f.drawer;
+    if (drawer != null && !RegExp(r'^[A-Za-z_][A-Za-z0-9_.]*$').hasMatch(drawer)) {
+      throw BehaviourGenerationError(
+        "drawer '$drawer' must be one word (letters, digits, '_' and '.')",
+        library: libraryUri,
+        member: '$name.${f.name}',
+      );
+    }
     final showIf = f.showIf;
     if (showIf == null) continue;
     final target = showIf.startsWith('!') ? showIf.substring(1) : showIf;

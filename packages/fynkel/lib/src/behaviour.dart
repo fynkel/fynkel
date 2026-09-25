@@ -71,7 +71,10 @@ class FynkelRecord {
 /// `'layerMask'` (an `int` of physics-layer bits). [readOnly] shows the
 /// value without editing, [hidden] leaves it out, [showIf] names a sibling
 /// exposed `bool` field (`'spinning'`, or `'!spinning'`) the field is shown
-/// only when set (unset). Anything else is a generator error naming the
+/// only when set (unset). [drawer] names a property drawer an editor
+/// extension registers (`editor.namedDrawer('minMax', …)`, ADR-0028): the
+/// Inspector draws the field with it (each item, on a list), and without
+/// one the default way. Anything else is a generator error naming the
 /// field.
 class Expose {
   const Expose({
@@ -88,6 +91,7 @@ class Expose {
     this.readOnly = false,
     this.hidden = false,
     this.showIf,
+    this.drawer,
   });
 
   final String? label;
@@ -103,6 +107,7 @@ class Expose {
   final bool readOnly;
   final bool hidden;
   final String? showIf;
+  final String? drawer;
 }
 
 /// When the editor draws a declarative [Gizmo].
