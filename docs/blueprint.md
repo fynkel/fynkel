@@ -1136,6 +1136,15 @@ mips of one texture, added to the exposed radiance before ACES. No lens
 dirt or flares: they are taste, and a game that wants them can add a
 block. `docs/renderer.md` § Bloom.)*
 
+*(R3c, 2026-09-25: **colour grading** — the profile's third block,
+`colorGrading`: Unity's Tonemapping (ACES, Neutral, None), White Balance,
+Color Adjustments (post-exposure, contrast, colour filter, hue shift,
+saturation) and Lift Gamma Gain. Arithmetic in the post pass, folded into
+two matrices on the CPU, skipped while neutral so a scene without it is
+the picture it was to the bit; no quality flag, since it costs no memory.
+A LUT (baked or authored elsewhere) is the next step when a game wants
+one. `docs/renderer.md` § Colour grading.)*
+
 ## 9. Physics, animation, audio, and input
 
 ### Physics

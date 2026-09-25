@@ -124,7 +124,10 @@ Three ADRs, then their implementation:
 
 The pending R capture, R3c colour grading, contact shadows, shader assets
 (a cooked record for custom-shader materials), texture mips and GPU
-compression (ASTC/BC).
+compression (ASTC/BC). R3c done 2026-09-25 (the volume profile's
+`colorGrading` block, `docs/renderer.md` § Colour grading; the showcase's
+`renders/r3c.png`); the capture, skipped that day, will cover R3a–R3c
+at once.
 
 ## Phase 5 — M5: a real game
 

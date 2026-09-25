@@ -172,6 +172,10 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   and redoes one; a second test puts the profile on a global volume and
   checks with `fynkel render` that the bloom set in the Inspector makes a
   tenth of the picture brighter.
+- 2026-09-25: Color Grading on the same page (R3c) — the parity test adds
+  the override, ticks the Tonemapper and picks Neutral, types a
+  Saturation and Lift's blue channel alone, and reads the grade back from
+  the Scene view's preview.
 - 2026-09-24: model import settings (`41190a1` the importer's
   `scaleFactor`, `normals` / `smoothingAngle`, `importAnimation`;
   `c3e7d3e`) — `import_settings_parity_test.dart` types a Scale Factor,

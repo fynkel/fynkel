@@ -6,7 +6,7 @@ at and compare. It is a normal Fynkel game (created by `fynkel create`,
 then authored): a Flutter app plus `fynkel.project.json`, an `assets/`
 tree of strict JSON documents and the Fynkel CLI.
 
-![The showcase after R3b](renders/r3b.png)
+![The showcase after R3c](renders/r3c.png)
 
 What is in the scene (`assets/scenes/main.scene.json`):
 
@@ -86,6 +86,7 @@ renderer item so the history is a before/after:
 | `r2.png` | R2 — ambient occlusion: a depth prepass, 12 hemisphere samples at 0.6 m and a bilateral blur, multiplied into the ambient and IBL term only. The crates, the pillars and the lamp post stop floating — each grows a soft contact shadow where it meets the floor, and the seams inside the arch and along the walls darken; 88 680 pixels changed against `r1.png`, every one of them darker (the sunlit faces are untouched — direct light is the shadow map's job) |
 | `r3a.png` | R3a — volumes: the scene's `Global Volume` entity names `assets/volumes/showcase.volume.json`, whose `ambientOcclusion` widens the radius 0.6 → 0.9 m and deepens the exponent 1.35 → 1.6 (`ambient occlusion 0.90 m ^1.60, 1 volume(s)` in the render line). The contact shading reaches further up the crates, the pillars and the arch; 159 407 pixels changed against `r2.png`, 156 603 of them darker (the other 2 804 lighter, most by one or two levels, at most 16). With the volume disabled the render is `r2.png` to the bit |
 | `r3b.png` | R3b — bloom: the same `showcase.volume.json` gains `bloom { intensity 1.0, threshold 0.7, scatter 0.7 }` (`bloom 1.00 >0.70` in the render line). The lamp heads, the sunlit face of the arch and the brightest sky over the wall glow softly into their surroundings; 849 468 pixels changed against `r3a.png`, every one of them lighter — most by a level or two (the mean 2.2), 133 085 by more than 5, at most 43 next to the lamp heads. With `intensity` 0 the render is `r3a.png` to the bit |
+| `r3c.png` | R3c — colour grading: `showcase.volume.json` gains `colorGrading { temperature 20, contrast 15, saturation 5 }` (`graded` in the render line). A little warmer and punchier: the blue cast the sky gives the floor and the walls eases toward neutral, the sunlit faces warm, the shadows keep their depth; every pixel changed against `r3b.png`, the mean red +10.8, green +4.7, blue −2.7 levels. Without the block (or with every field at its neutral value) the render is `r3b.png` to the bit |
 
 To regenerate: `fynkel render --project examples/showcase --out examples/showcase/renders/<item>.png` (`--steps 10` from M3-19, so the runner is posed).
 

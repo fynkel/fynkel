@@ -1150,7 +1150,12 @@ one is inherited — so `{}` is a valid profile that changes nothing and
 nothing else. The schema holds the ranges (`ambientOcclusion`: `radius`
 in `(0, 10]` m, `intensity` in `[0, 8]`; `bloom` (R3b): `intensity` in
 `[0, 10]` — 0, the default, is off —, `threshold` in `[0, 20]` exposed
-brightness, `scatter` in `[0, 1]`, `tint` three numbers in `[0, 1]`) and refuses unknown blocks and fields
+brightness, `scatter` in `[0, 1]`, `tint` three numbers in `[0, 1]`; `colorGrading`
+(R3c): `tonemapper` one of `aces` | `neutral` | `none`, `postExposure`
+in `[-10, 10]` stops, `temperature`, `tint`, `contrast` and `saturation`
+in `[-100, 100]`, `hueShift` in `[-180, 180]` degrees, `colorFilter`
+three numbers in `[0, 1]`, `lift` three in `[-1, 1]`, `gamma` three in
+`(0, 10]`, `gain` three in `[0, 4]`) and refuses unknown blocks and fields
 (`FYN-D0100`); the read view reports what the schema cannot see as
 `FYN-D0700` and leaves the field inherited. `fynkel document new volume
 <name>` writes one with the engine defaults spelled out. The cook
@@ -1160,8 +1165,9 @@ chunk (`documentKind: volume`); a scene depends on the profiles its
 volumes name. The runtime store reads the chunk into a
 `fynkel_core::volume::VolumeProfile` (`Assets::volume_profile`, cached
 per reference, evicted with its asset). The lock's `documents` gains
-`volume: 1`. R3b's `bloom` block was the first addition, and R3c
-(colour grading) adds another: blocks, not kinds.
+`volume: 1`. R3b's `bloom` block was the first addition and R3c's
+`colorGrading` the second: blocks, not kinds, so the format stays at 1
+(a profile without the new block reads as it did).
 
 ## Physics materials (ADR-0025)
 

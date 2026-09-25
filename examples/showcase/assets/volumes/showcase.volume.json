@@ -11,5 +11,10 @@
     "intensity": 1.0,
     "threshold": 0.7,
     "scatter": 0.7
+  },
+  "colorGrading": {
+    "temperature": 20,
+    "contrast": 15,
+    "saturation": 5
   }
 }

@@ -2398,7 +2398,11 @@ stays read-only.
 `.volume.json`'s page edits it as Unity's Volume Profile Inspector does
 (`inspector/volume_inspector.dart`, keys `volume.<override>.<field>`).
 One card per override the profile holds — **Ambient Occlusion**
-(Intensity, Radius), **Bloom** (Intensity, Threshold, Scatter, Tint) —
+(Intensity, Radius), **Bloom** (Intensity, Threshold, Scatter, Tint),
+**Color Grading** (R3c: Tonemapper as a menu — ACES, Neutral, None —,
+Post Exposure, Temperature, Tint, Contrast, Saturation, Hue Shift, Color
+Filter, and Lift, Gamma, Gain as R, G, B; the −100…100 sliders move in
+whole steps) —
 with **All** / **None** and **Remove** in its menu; **Add Override**
 lists the ones it lacks and adds an empty block. A **checkbox in front of
 every field** says whether the profile sets it: ticked, the field is in

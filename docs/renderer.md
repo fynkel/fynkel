@@ -52,7 +52,9 @@ render pass because they share the attachments. The three passes before
 the opaque one are the ambient-occlusion stage (R2) and run only while
 the quality profile asks for it; the bloom stage (R3b) runs only while
 the profile allows it *and* the frame's volumes give it an intensity.
-Without them the chain is exactly what it was, down to the bits.
+Without them the chain is exactly what it was, down to the bits. Colour
+grading (R3c) is no pass: it is arithmetic in the post pass, skipped
+while the grade is neutral.
 
 | Pass | Reads | Writes | When |
 | --- | --- | --- | --- |
@@ -89,8 +91,9 @@ Without them the chain is exactly what it was, down to the bits.
    one `draw_indexed` each, depth tested and not written, blended
    `SrcAlpha / OneMinusSrcAlpha` (colour) and `One / OneMinusSrcAlpha`
    (alpha, so the coverage accumulates).
-5. **Post**: exposure → ACES (Stephen Hill's fit of the RRT + sRGB ODT) →
-   sRGB encode unless the target format is an sRGB format (then the
+5. **Post**: exposure → the grade (§ Colour grading; skipped while
+   neutral) → the tone mapper (ACES, Stephen Hill's fit of the RRT + sRGB
+   ODT, unless a volume picks another) → lift, gamma, gain → sRGB encode unless the target format is an sRGB format (then the
    hardware encodes). The HDR alpha channel is a tag with coverage:
    `0` background → the exact `CLEAR_COLOR` bytes (`clear_rgba8()`; what
    the pixel tests compare against); `(0, 1]` scene-referred radiance
@@ -101,6 +104,8 @@ Without them the chain is exactly what it was, down to the bits.
    encoded only. At coverage 1 the result is bit-identical to V1 (a).
    With bloom (§ Bloom) its level 0 is added to the exposed radiance
    before ACES, and screen-blended over the uncovered part of a pixel.
+   The grade applies to lit pixels only: the clear colour and
+   display-referred texels are never graded.
 6. **Presentation**: only with a render scale, a bilinear fullscreen copy
    of the LDR intermediate to the target size.
 7. **Overlay**: the grid, then the lines, then the triangles, straight
@@ -243,7 +248,7 @@ estimate is low-frequency and blurred anyway.
 ### Volumes (R3a, `fynkel_core::volume`)
 
 The *look* of a frame — how strong the occlusion is, the bloom (R3b),
-and from R3c the grade — is scene data, not a project setting, and it
+the grade (R3c) — is scene data, not a project setting, and it
 can change with where the camera is. That is a **volume**: a
 `fynkel.Volume` component (id 25) on an entity, pointing at a **profile**
 document.
@@ -256,7 +261,9 @@ document.
   exponent, ≥ 0; 0 = off) }` — R2's two constants, now data; R3b adds
   `bloom { intensity (≥ 0; 0 = off, the default), threshold (exposed
   brightness, default 0.9), scatter (`0..=1`, default 0.7), tint ([r,
-  g, b], per channel) }` (§ Bloom). `fynkel
+  g, b], per channel) }` (§ Bloom); R3c adds `colorGrading { tonemapper,
+  postExposure, temperature, tint, contrast, saturation, hueShift,
+  colorFilter, lift, gamma, gain }` (§ Colour grading). `fynkel
   document new volume <name>` writes one with the engine defaults spelled
   out.
 - **The component** says where the profile applies: `shape` `global`
@@ -292,7 +299,7 @@ materials; a scene depends on the profiles its volumes name, so they are
 retained with it. A profile that cannot be read is one `asset_errors`
 line and contributes nothing. Nothing about volumes is on the GPU but
 the result: `Frame.ao` carries the frame's radius and exponent,
-`Frame.bloom` and `Frame.bloom_tint` the bloom.
+`Frame.bloom` and `Frame.bloom_tint` the bloom, `Frame.grade` the grade.
 
 Deliberately not in R3a: a volume per camera (there is one camera a
 frame), a volume *mask* layer, animated profiles (a behaviour can set
@@ -345,6 +352,55 @@ pair (§ GPU timestamps), so the Apple ABI did not change.
 with it false the chain is not even allocated. Deliberately not in R3b:
 lens dirt, anamorphic streaks, a physically based (convolution) bloom,
 and per-light flares.
+
+### Colour grading (`shaders/post.wgsl`, R3c)
+
+The last block of the profile (§ Volumes) is the grade: Unity's
+Tonemapping, White Balance, Color Adjustments and Lift Gamma Gain in one
+`colorGrading` block. Every field is neutral by default — ACES and
+nothing else, the picture the engine always drew — and while the
+resolved grade is neutral apart from the tone mapper the post pass
+skips it: a scene without the block, or with every field at its neutral
+value, renders to the bit what it did before R3c (the showcase's
+`r3b.png`). In the post pass, on a lit pixel's exposed radiance (with
+the bloom already added):
+
+1. **Before the curve**, one matrix (`Grading::pre_contrast`):
+   `postExposure` (stops, `× 2^ev`), then the white balance — Unity's
+   `ColorBalanceToLMSCoeffs`: `temperature` moves the illuminant along
+   the daylight locus and `tint` across it (both `-100..=100`), and the
+   picture is scaled in LMS (CAT02) to take that illuminant to D65, so
+   positive is warmer and negative cooler.
+2. **Contrast** (`-100..=100`) in log space around middle grey:
+   `0.18 × (c / 0.18)^(1 + contrast/100)`.
+3. **After the curve**, one matrix (`Grading::post_contrast`): the
+   `colorFilter` (linear RGB), the `hueShift` (degrees, a turn about the
+   grey axis, so grey stays grey), the `saturation` (`-100` is the Rec.
+   709 luma, `100` twice as far from it).
+4. **The tone mapper**: `aces` (the default), `neutral` (Unity's: John
+   Hable's curve with its constants, white at 5.3 — little hue or
+   saturation shift, a starting point for grading by hand) or `none`
+   (clamped at white). Choosing one is not a grade; it applies with
+   nothing else set. A choice does not blend: any part of a volume sets
+   it, as Unity treats its enum parameters.
+5. **Lift, gamma, gain** on the tone-mapped `0..=1`, per channel:
+   `gain × (c + lift × (1 − c))`, then `^(1 / gamma)`, clamped — lift
+   (`-1..=1`) raises the darks with white held, gain (`0..=4`) scales,
+   gamma (`> 0`) bends the midtones.
+
+Everything but the curve is folded on the CPU into `Frame.grade`
+(`GpuGrade`: the two matrices, the contrast exponent, the tone mapper,
+lift, 1 / gamma, gain, and whether the grade runs); the numbers blend
+across volumes like every other field, colours per channel.
+`FrameStats::grading` says the frame was graded; `fynkel render` prints
+`graded` (and a tone mapper other than ACES), `--json` has `grading` and
+the resolved `post.grading`. The editor's Volume Profile Inspector has a
+Color Grading card (the tone mapper a menu, lift/gamma/gain as R, G, B).
+
+There is no quality flag: the grade is a few dozen instructions a pixel,
+no memory. Deliberately not in R3c: a LUT (baking the grade into a 3D
+texture, and loading one made elsewhere), Unity's shadows/midtones/
+highlights and channel mixer, curves, and grading the clear colour.
 
 ### Instancing and culling (`src/culling.rs`)
 
@@ -712,7 +768,7 @@ loop, so no mask applies to them.
 
 ## Uniform layout
 
-`Frame` (bind group 0, 4 768 bytes, `shaders/frame.wgsl`): `view_proj`,
+`Frame` (bind group 0, 4 928 bytes, `shaders/frame.wgsl`): `view_proj`,
 `inv_view_proj` (the sky's ray reconstruction), `cascades` (four
 `Cascade { view_proj, rect, params }`: world → that cascade's shadow
 clip, its quadrant in atlas uv, and its normal offset in metres),
@@ -723,7 +779,10 @@ lighting active, `w` specular mips − 1), `shadow` (`x` active,
 `y` one atlas texel in uv, `z` the blend band, `w` cascades), `ao` (the
 volumes' resolution, § Volumes: `x` radius, `y` exponent), `bloom` (`x`
 threshold, `y` knee, `z` the upsample blend `0.05 + 0.9 × scatter`, `w`
-intensity — 0 when the stage did not run), `bloom_tint` (rgb), `counts` (`x` lights,
+intensity — 0 when the stage did not run), `bloom_tint` (rgb), `grade`
+(§ Colour grading: `params` — `x` contrast exponent, `y` 1 when the grade
+runs, `z` tone mapper 0 ACES / 1 neutral / 2 none —, `pre` and `post`
+three column vectors each, `lift`, `inv_gamma`, `gain`), `counts` (`x` lights,
 `y` sky drawn, `z` encode sRGB, `w` ambient occlusion ran), then `lights: array<Light, LIGHT_POOL>`
 (64) —
 `position` (`w` range), `color` (rgb × cd, `w` 0 point / 1 spot),
