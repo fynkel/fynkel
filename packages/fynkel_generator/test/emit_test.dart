@@ -314,6 +314,7 @@ void main() {
     expect(src, contains('(b as _lib2.Turret).fallback = _orNull(v, (v) => _lib0.Mode.values.byName(v as String))'));
     expect(src, contains("type: 'gameObject'"));
     expect(src, contains('get: (b) => referenceJson((b as _lib2.Turret).target)'));
+    expect(src, contains('target: (b) => (b as _lib2.Turret).target,'));
     expect(src, contains('(b as _lib2.Turret).target = v as GameObject?'));
     expect(src, contains('(b as _lib2.Turret).spinner = v as _lib1.Spinner?'));
 

@@ -101,6 +101,7 @@ String emitDart(String package, List<BehaviourClass> classes) {
         if (f.max != null) o.writeln('      max: ${_dartLiteral(f.max)},');
         if (f.step != null) o.writeln('      step: ${_dartLiteral(f.step)},');
         o.writeln('      get: (b) => ${_getter(f, cls)},');
+        if (f.kind.isReference) o.writeln('      target: (b) => (b as $cls).${f.name},');
         final type = f.typeName == null ? null : '${prefix[f.typeLibrary]}.${f.typeName}';
         o.writeln('      set: (b, v) => (b as $cls).${f.name} = ${_setter(f, type)},');
         o.writeln('    ),');
