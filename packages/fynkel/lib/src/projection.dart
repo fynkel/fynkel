@@ -124,9 +124,10 @@ class ProjectionView {
         .._dropped = true
         .._flags = 0;
     }
+    final length = _batch.finalize();
     final (b, camera, projected, _) = _world._native.project(
       _batch.backingStore,
-      _batch.finalize(),
+      length,
       _width.round().clamp(1, 1 << 20),
       _height.round().clamp(1, 1 << 20),
     );

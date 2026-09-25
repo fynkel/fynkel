@@ -254,7 +254,11 @@ class CommandBatch {
   }
 
   /// Finalizes header and tail; returns a view (valid until [clear]).
-  Uint8List encoded() => Uint8List.sublistView(_view, 0, finalize());
+  Uint8List encoded() {
+    // finalize() first: it may grow the buffer, replacing _view.
+    final length = finalize();
+    return Uint8List.sublistView(_view, 0, length);
+  }
 
   /// Finalizes header and tail in place and returns the encoded length; the
   /// bytes are the first [finalize] bytes of [backingStore]. This is the
@@ -278,6 +282,8 @@ class CommandBatch {
     return total;
   }
 
+  /// The buffer the encoded bytes are in. Read it after [finalize]: the
+  /// string tail may grow it, and a view read before is the old one.
   Uint8List get backingStore => _view;
 }
 
@@ -349,7 +355,13 @@ class RecordBatch {
     return total;
   }
 
-  Uint8List encoded() => Uint8List.sublistView(_view, 0, finalize());
+  Uint8List encoded() {
+    // finalize() first: it may grow the buffer, replacing _view.
+    final length = finalize();
+    return Uint8List.sublistView(_view, 0, length);
+  }
 
+  /// The buffer the encoded bytes are in. Read it after [finalize]: the
+  /// string tail may grow it, and a view read before is the old one.
   Uint8List get backingStore => _view;
 }

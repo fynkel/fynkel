@@ -176,4 +176,18 @@ void main() {
     expect(() => w.build(spec), throwsStateError);
     w.build(crate('Again', Vec3.zero));
   });
+
+  // A frame's commands and their string tail cross the batch's capacity
+  // together: the tail grows the buffer as it is finalized, and the world
+  // sent the old, shorter one ("Too few elements"; code_only's Collect All
+  // Coins, 36 sparks in a frame). One more object each frame crosses it.
+  test('a frame whose names grow the command buffer as it is sent', () {
+    final w = fresh();
+    for (var n = 1; n <= 64; n++) {
+      final burst = w.build(ObjectSpec('Burst $n', children: [for (var i = 0; i < n; i++) ObjectSpec('Spark $i of burst $n')]));
+      tick(w);
+      expect(burst.children, hasLength(n));
+      burst.destroy();
+    }
+  });
 }

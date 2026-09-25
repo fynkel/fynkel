@@ -492,7 +492,9 @@ class World {
     for (final e in events) {
       _inputEvents.add(e.toRecord());
     }
-    final s = _native.captureInputBytes(_inputEvents.backingStore, _inputEvents.finalize());
+    // finalize() first: it may grow the buffer (the string tail).
+    final length = _inputEvents.finalize();
+    final s = _native.captureInputBytes(_inputEvents.backingStore, length);
     _inputEvents.clear();
     _checkFatal(s, 'captureInput');
   }
@@ -706,7 +708,10 @@ class World {
 
   void _flush(CommandLane lane, CommandBatch batch, _Targets targets, String context) {
     if (batch.isEmpty) return;
-    final r = _native.submitBytes(lane, batch.backingStore, batch.finalize());
+    // finalize() first: appending the string tail may grow the buffer, and
+    // backingStore read before it would be the old, shorter one.
+    final length = batch.finalize();
+    final r = _native.submitBytes(lane, batch.backingStore, length);
     batch.clear();
     _checkFatal(r.status, context);
     if (lane == CommandLane.presentation) {
@@ -1127,13 +1132,15 @@ class World {
   List<gen.PhysicsHitRecord> physicsQuery(List<gen.PhysicsQueryRecord> queries) {
     _physicsQueries.clear();
     queries.forEach(_physicsQueries.add);
-    final b = _native.physicsQuery(_physicsQueries.backingStore, _physicsQueries.finalize());
+    final length = _physicsQueries.finalize();
+    final b = _native.physicsQuery(_physicsQueries.backingStore, length);
     _physicsQueries.clear();
     return b.fixed(gen.PhysicsHitRecord.wireSize, gen.PhysicsHitRecord.decode).toList(growable: false);
   }
 
   List<PhysicsHit> _runPhysicsQueries() {
-    final b = _native.physicsQuery(_physicsQueries.backingStore, _physicsQueries.finalize());
+    final length = _physicsQueries.finalize();
+    final b = _native.physicsQuery(_physicsQueries.backingStore, length);
     _physicsQueries.clear();
     if (b.recordCount == 0) return const [];
     return [
