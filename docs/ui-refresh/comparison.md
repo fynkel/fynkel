@@ -128,7 +128,10 @@ Before/after pictures of each step are in `steps/` (from
    filtering), Project (+ first, grey toggle, path footer), Console
    (flat toggles, no footer): 7afa365.
 4. Empty panels one quiet line; the Scene pill only for a passing state;
-   the Game caption on hover; grey sliders: see the next commit.
+   the Game caption on hover; grey sliders: 1a320dc.
+5. The title bar's controls centred on the traffic lights; a Game view
+   toolbar (camera, aspect ratio, scale, Stats): see the next commit.
 
-Left: the status bar (Unity shows the last Console line); a Game view
-toolbar; Project icons/breadcrumb header; one merged Console list.
+Left: the status bar (Unity shows the last Console line); Project
+icons/breadcrumb header; one merged Console list; the asset pages
+(next).

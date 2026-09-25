@@ -190,7 +190,7 @@ void main() {
       expect(shell.gameRun!.running, isFalse);
       expect(shell.play!.state, PlayState.exited);
       expect(find.textContaining('game in'), findsNothing);
-      expect(find.text('Press Play (⌘P)'), findsOneWidget);
+      expect(find.text('Open a scene to see what its camera sees.'), findsOneWidget);
       expect(CommandRegistry.focusOwnsBareKeys, isFalse);
 
       // Play again is a fresh run; ⌘. stops it.
@@ -308,15 +308,28 @@ void main() {
       await tester.pumpAndSettle();
       final tab = shell.tabs!.focused!;
       expect(activeCamera(tab)!.name, 'Main Camera', reason: 'highest priority, first on a tie, never a disabled one');
-      expect(find.text('Main Camera · ⌘P plays here'), findsOneWidget);
+      Text camera() => tester.widget<Text>(find.byKey(const Key('game.camera')));
+      expect(camera().data, 'Main Camera');
+
+      // The toolbar: aspect, scale and Stats, kept across Play.
+      await tester.tap(find.byKey(const Key('game.aspect')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('game.aspect.wide')));
+      await tester.pumpAndSettle();
+      expect(find.text('16:9'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('game.stats')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('game.statsBox')), findsOneWidget);
+      expect(find.text('Resolution'), findsOneWidget);
 
       // Play replaces the picture with the game; Stop brings it back.
       shell.registry.execute('play.start');
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('game.caption')), findsNothing);
+      expect(find.text('16:9'), findsOneWidget);
+      expect(find.byKey(const Key('game.statsBox')), findsOneWidget);
       shell.registry.execute('play.stop');
       await tester.pumpAndSettle();
-      expect(find.text('Main Camera · ⌘P plays here'), findsOneWidget);
+      expect(camera().data, 'Main Camera');
 
       // Without a camera the view says so.
       shell.hierarchy!.select('low');
@@ -326,7 +339,7 @@ void main() {
       shell.registry.execute('hierarchy.delete');
       await tester.pumpAndSettle();
       expect(find.textContaining('Main has no camera'), findsOneWidget);
-      expect(find.byKey(const Key('game.caption')), findsNothing);
+      expect(camera().data, 'No camera');
     });
 
     testWidgets('a cook that fails does not play', (tester) async {

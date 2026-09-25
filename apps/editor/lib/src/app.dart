@@ -41,6 +41,7 @@ import 'play/editor_game.dart';
 import 'play/game_console.dart';
 import 'play/game_panel.dart';
 import 'play/game_preview.dart';
+import 'play/game_toolbar.dart';
 import 'play/game_record.dart';
 import 'play/live_play.dart';
 import 'play/play_prompt.dart';
@@ -256,6 +257,9 @@ class EditorShellState extends State<EditorShell> {
   PlaySession? play;
   GameConsoleModel? gameConsole;
   ProfilerModel? profiler;
+
+  /// The Game toolbar's aspect, scale and Stats, kept while the panel moves.
+  final _gameView = GameViewOptions();
   DocumentTabs? tabs;
 
   /// The material Inspector's edits, project-wide (Tier 2).
@@ -599,6 +603,7 @@ class EditorShellState extends State<EditorShell> {
     gameConsole?.dispose();
     profiler?.dispose();
     play?.dispose();
+    _gameView.dispose();
     consoleTab.dispose();
     consoleSearchFocus.dispose();
     gameSearchFocus.dispose();
@@ -663,7 +668,13 @@ class EditorShellState extends State<EditorShell> {
       icon: FIcons.sportsEsports,
       fullTitle: EditorStrings.panelGameFull,
       home: PanelHome.center,
-      builder: (_, _) => GamePanel(run: gameRun, preview: _gamePreview, showViewport: widget.sceneViewport),
+      builder: (_, _) => GamePanel(
+        run: gameRun,
+        preview: _gamePreview,
+        options: _gameView,
+        profiler: profiler,
+        showViewport: widget.sceneViewport,
+      ),
     ),
     PanelSpec(
       id: PanelRegistry.inspector,

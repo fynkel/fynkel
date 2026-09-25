@@ -194,7 +194,9 @@ class MainWindow extends StatelessWidget {
         color: t.window,
         border: Border(bottom: t.hairline),
       ),
+      // The row centred on the bar's height, level with the traffic lights.
       child: Stack(
+        alignment: AlignmentDirectional.centerStart,
         children: [
           // Under everything: the bar's empty space is the window's.
           Positioned.fill(

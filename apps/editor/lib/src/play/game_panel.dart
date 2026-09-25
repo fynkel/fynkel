@@ -15,10 +15,12 @@ import 'package:fynkel/fynkel.dart' show EditorChannel;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import '../commands/commands.dart' show KeyboardOwner;
+import '../profiler/profiler_model.dart';
 import '../theme/panel_focus.dart';
 import '../theme/tokens.dart';
 import 'editor_game.dart';
 import 'game_preview.dart';
+import 'game_toolbar.dart';
 
 /// One project's in-editor Play: whether the game is mounted, paused, and
 /// what it was launched with.
@@ -115,10 +117,17 @@ final class GameRun extends ChangeNotifier {
   }
 }
 
-/// The Game panel: the running game, or — between runs — what the scene's
-/// active camera sees.
-class GamePanel extends StatelessWidget {
-  const GamePanel({super.key, required this.run, this.preview, this.showViewport = true});
+/// The Game panel: the toolbar (camera, aspect, scale, Stats) over the
+/// running game, or — between runs — what the scene's active camera sees.
+class GamePanel extends StatefulWidget {
+  const GamePanel({
+    super.key,
+    required this.run,
+    this.preview,
+    this.options,
+    this.profiler,
+    this.showViewport = true,
+  });
 
   /// Null in the plain editor (no game compiled in).
   final GameRun? run;
@@ -126,12 +135,35 @@ class GamePanel extends StatelessWidget {
   /// The camera's picture between runs; null before a project is open.
   final GamePreview? preview;
 
+  /// The toolbar's settings; the panel keeps its own when null.
+  final GameViewOptions? options;
+
+  /// Where the Stats box reads the game's frame times.
+  final ProfilerModel? profiler;
+
   /// False in widget tests (no Metal texture).
   final bool showViewport;
 
   @override
+  State<GamePanel> createState() => _GamePanelState();
+}
+
+class _GamePanelState extends State<GamePanel> {
+  GameViewOptions? _own;
+  final _size = ValueNotifier(Size.zero);
+
+  GameViewOptions get _options => widget.options ?? (_own ??= GameViewOptions());
+
+  @override
+  void dispose() {
+    _own?.dispose();
+    _size.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final run = this.run;
+    final run = widget.run;
     if (run == null) return _between(context, playsHere: false);
     PanelFocus.primary(context, run.focusNode);
     return ListenableBuilder(
@@ -139,15 +171,18 @@ class GamePanel extends StatelessWidget {
       builder: (context, _) {
         final launch = run.launch;
         if (launch == null) return _between(context, playsHere: true);
-        return ColoredBox(
-          color: Colors.black,
-          child: KeyboardOwner(
-            child: Focus(
-              focusNode: run.focusNode,
-              autofocus: true,
-              child: FynkelPlayScope(
-                control: run.control,
-                child: KeyedSubtree(key: ValueKey(run.runs), child: run.game.build(launch)),
+        return _framed(
+          playing: true,
+          child: ColoredBox(
+            color: Colors.black,
+            child: KeyboardOwner(
+              child: Focus(
+                focusNode: run.focusNode,
+                autofocus: true,
+                child: FynkelPlayScope(
+                  control: run.control,
+                  child: KeyedSubtree(key: ValueKey(run.runs), child: run.game.build(launch)),
+                ),
               ),
             ),
           ),
@@ -156,89 +191,57 @@ class GamePanel extends StatelessWidget {
     );
   }
 
-  Widget _between(BuildContext context, {required bool playsHere}) {
-    final title = playsHere ? 'Press Play (⌘P)' : 'The game runs in its own window';
-    final hint = playsHere
-        ? ''
-        : 'This editor was started without the project\'s game. Open the project with '
-              '`fynkel editor <dir>` to play it here, with Pause, Step and hot reload.';
-    final preview = this.preview;
-    if (preview == null) return _Idle(title: title, detail: hint);
-    return Stack(
-      fit: StackFit.expand,
+  /// The toolbar over [child] at the chosen aspect and scale, with the
+  /// Stats box in the corner.
+  Widget _framed({required bool playing, required Widget child}) {
+    final options = _options;
+    return Column(
       children: [
-        GamePreviewView(
-          preview: preview,
-          showViewport: showViewport,
-          placeholder: (message) => _Idle(title: title, detail: '$message\n\n$hint'),
-        ),
-        // The camera's caption shows under the pointer only (docs/ui-refresh).
-        Positioned.fill(
-          child: _HoverReveal(
-            child: Align(
-              alignment: Alignment.bottomLeft,
-              child: Padding(
-                padding: const EdgeInsets.only(left: 8, bottom: 6),
-                child: _Caption(preview: preview, playsHere: playsHere),
+        GameToolbar(options: options, preview: widget.preview),
+        Expanded(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              GameFrame(options: options, onSize: (s) => _size.value = s, child: child),
+              ListenableBuilder(
+                listenable: options,
+                builder: (context, _) => options.stats
+                    ? Align(
+                        alignment: Alignment.topRight,
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: GameStatsBox(size: _size, profiler: widget.profiler, playing: playing),
+                        ),
+                      )
+                    : const SizedBox.shrink(),
               ),
-            ),
+            ],
           ),
         ),
       ],
     );
   }
-}
 
-/// [child] drawn while the pointer is over this area; hits pass through.
-class _HoverReveal extends StatefulWidget {
-  const _HoverReveal({required this.child});
-
-  final Widget child;
-
-  @override
-  State<_HoverReveal> createState() => _HoverRevealState();
-}
-
-class _HoverRevealState extends State<_HoverReveal> {
-  bool _in = false;
-
-  @override
-  Widget build(BuildContext context) => MouseRegion(
-    opaque: false,
-    hitTestBehavior: HitTestBehavior.translucent,
-    onEnter: (_) => setState(() => _in = true),
-    onExit: (_) => setState(() => _in = false),
-    child: IgnorePointer(child: Opacity(opacity: _in ? 1 : 0, child: widget.child)),
-  );
-}
-
-/// "Main Camera · ⌘P plays here" under the picture.
-class _Caption extends StatelessWidget {
-  const _Caption({required this.preview, required this.playsHere});
-
-  final GamePreview preview;
-  final bool playsHere;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-    return ListenableBuilder(
-      listenable: preview,
-      builder: (context, _) {
-        final cam = preview.camera;
-        if (cam == null || preview.message != null) return const SizedBox.shrink();
-        return DecoratedBox(
-          decoration: BoxDecoration(color: t.window.withValues(alpha: .75), borderRadius: BorderRadius.circular(4)),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            child: Text(
-              '${cam.name.isEmpty ? 'Camera' : cam.name} · ${playsHere ? '⌘P plays here' : 'Play opens its own window'}',
-              key: const Key('game.caption'),
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: t.textSecondary),
-            ),
-          ),
-        );
-      },
+  Widget _between(BuildContext context, {required bool playsHere}) {
+    final hint = playsHere
+        ? ''
+        : 'This editor was started without the project\'s game. Open the project with '
+              '`fynkel editor <dir>` to play it here, with Pause, Step and hot reload.';
+    final preview = widget.preview;
+    if (preview == null) {
+      return _Idle(title: playsHere ? 'Press Play (⌘P)' : 'The game runs in its own window', detail: hint);
+    }
+    // The camera's name is in the toolbar; the placeholder is one quiet
+    // line saying why there is no picture (docs/ui-refresh).
+    return _framed(
+      playing: false,
+      child: GamePreviewView(
+        preview: preview,
+        showViewport: widget.showViewport,
+        placeholder: (message) => playsHere
+            ? _Idle(title: message, detail: '')
+            : _Idle(title: 'The game runs in its own window', detail: '$message\n\n$hint'),
+      ),
     );
   }
 }

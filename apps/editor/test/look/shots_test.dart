@@ -14,6 +14,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel_editor/src/console/console_panel.dart';
 import 'package:fynkel_editor/src/hierarchy/hierarchy_panel.dart';
 import 'package:fynkel_editor/src/inspector/inspector_panel.dart';
+import 'package:fynkel_editor/src/play/game_panel.dart';
+import 'package:fynkel_editor/src/shell/workspace.dart';
 import 'package:fynkel_editor/src/project_browser/project_panel.dart';
 
 import '../parity/harness.dart';
@@ -86,6 +88,13 @@ void main() {
     await tester.tap(find.text('Console').first);
     await tester.pumpAndSettle();
     await save('console', find.byType(ConsolePanel).first);
+    // The Game view with its toolbar and the Stats box.
+    e.shell.workspace!.show(PanelRegistry.game);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('game.stats')));
+    await tester.pumpAndSettle();
+    await save('game', find.byType(GamePanel).first);
+    await save('window-game');
     // With no document open: the empty panels.
     e.shell.registry.execute('document.close');
     await tester.pumpAndSettle();

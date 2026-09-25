@@ -157,6 +157,12 @@ void main() {
     expect(chrome.leadingInset, 76);
     final bar = tester.getRect(find.byKey(const Key('window.titleBar')));
     expect(tester.getTopLeft(find.byKey(const Key('window.project'))).dx, greaterThanOrEqualTo(bar.left + 76));
+    // The controls sit on the bar's middle, level with the traffic lights.
+    for (final key in ['window.project', 'window.play']) {
+      final at = find.byKey(Key(key));
+      if (at.evaluate().isEmpty) continue;
+      expect(tester.getCenter(at).dy, moreOrLessEquals(bar.center.dy, epsilon: 1), reason: key);
+    }
 
     // Empty space between the tabs and Play.
     final empty = Offset(bar.left + 560, bar.center.dy);
