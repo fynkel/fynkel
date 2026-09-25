@@ -1324,6 +1324,11 @@ pub fn validate_project_with(
         let refs = crate::asset::asset_refs(&doc.root);
         report.references += refs.iter().filter(|(_, r)| !r.is_nil()).count();
         report.diagnostics.extend(db.check_references(&doc));
+        report
+            .diagnostics
+            .extend(crate::reference_kinds::check_reference_kinds(
+                &doc, schemas, &db,
+            ));
         let path = doc.path.clone();
         match kind {
             DocumentKind::Scene => {

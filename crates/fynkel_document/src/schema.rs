@@ -41,6 +41,9 @@ pub struct SchemaSet {
     sources: Vec<(PathBuf, serde_json::Value)>,
     /// Declarations replayed by [`extended_with`](SchemaSet::extended_with).
     declared: Vec<(String, u32)>,
+    /// The fields of each component and behaviour type that name assets
+    /// of a kind (`FYN-A0007`, [`crate::reference_kinds`]).
+    asset_fields: HashMap<String, Vec<crate::reference_kinds::AssetField>>,
 }
 
 /// A known behaviour type: a Dart class instantiated by the SDK, never by
@@ -223,6 +226,36 @@ impl SchemaSet {
                 },
             );
         }
+        let mut asset_fields: HashMap<String, Vec<crate::reference_kinds::AssetField>> =
+            HashMap::new();
+        for (_, value) in &by_id {
+            let meta = value.get("x-fynkel");
+            let kind = meta.and_then(|m| m.get("kind")).and_then(|k| k.as_str());
+            if !matches!(kind, Some("component") | Some("behaviour")) {
+                continue;
+            }
+            let Some(type_id) = value
+                .get("title")
+                .and_then(|t| t.as_str())
+                .or_else(|| meta.and_then(|m| m.get("id")).and_then(|t| t.as_str()))
+            else {
+                continue;
+            };
+            let fields = crate::reference_kinds::asset_fields_of(value);
+            if !fields.is_empty() {
+                asset_fields.insert(type_id.to_string(), fields);
+            }
+        }
+        for (type_id, field, kinds) in crate::reference_kinds::NATIVE {
+            if components.contains_key(*type_id) {
+                asset_fields.entry(type_id.to_string()).or_default().push(
+                    crate::reference_kinds::AssetField {
+                        path: vec![field.to_string()],
+                        kinds: kinds.iter().map(|k| k.to_string()).collect(),
+                    },
+                );
+            }
+        }
         let mut validators = HashMap::new();
         let mut missing = Vec::new();
         for kind in DocumentKind::ALL {
@@ -255,7 +288,14 @@ impl SchemaSet {
             others,
             sources,
             declared: Vec::new(),
+            asset_fields,
         })
+    }
+
+    /// The fields of `type_id` that name assets of a kind; empty for an
+    /// unknown type or one without such fields.
+    pub fn asset_fields(&self, type_id: &str) -> &[crate::reference_kinds::AssetField] {
+        self.asset_fields.get(type_id).map_or(&[], Vec::as_slice)
     }
 
     /// Known behaviour type (from a loaded behaviour schema or a

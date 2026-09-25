@@ -755,7 +755,12 @@ fn prepare(
                                 failed = true;
                             }
                             diagnostics.extend(diags);
-                            let unresolved = db.check_references(&doc);
+                            let mut unresolved = db.check_references(&doc);
+                            unresolved.extend(
+                                fynkel_document::reference_kinds::check_reference_kinds(
+                                    &doc, schemas, db,
+                                ),
+                            );
                             if has_errors(&unresolved) {
                                 failed = true;
                             }

@@ -712,14 +712,14 @@ fn containers_read_back_with_bounded_decoding() {
 #[test]
 fn cycles_and_unresolved_references_fail_only_the_assets_involved() {
     let p = Project::new("failures");
-    // Scene B references scene A, scene A references scene B (a scene's
-    // entities may carry any assetRef-shaped data; the cooker does not
-    // care which component).
+    // Scene B references scene A, scene A references scene B, through a
+    // script field no schema types (a built-in field checks the target's
+    // kind, A0007, so a scene in `MeshRenderer.mesh` fails on its own).
     let a = "c0000000-0000-4000-8000-0000000000a0";
     let b = "c0000000-0000-4000-8000-0000000000b0";
     let scene = |own: &str, other: &str| {
         format!(
-            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":5,"id":"{own}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"fynkel.MeshRenderer","version":1,"data":{{"mesh":{{"asset":"{other}"}},"material":{{"asset":"{RUSTED}"}},"cast_shadows":true,"receive_shadows":true,"visible":true}}}}}}}}}}}}"#
+            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":5,"id":"{own}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"game.Link","version":1,"data":{{"to":{{"asset":"{other}"}}}}}}}}}}}}}}"#
         )
     };
     p.write("scenes/a.scene.json", &scene(a, b));
@@ -779,6 +779,28 @@ fn cycles_and_unresolved_references_fail_only_the_assets_involved() {
     for s in [a, b, c, d] {
         assert_eq!(status(&r, s), Status::Cooked);
     }
+
+    // A material where a mesh belongs: refused, the rest untouched.
+    p.write(
+        "scenes/c.scene.json",
+        &format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":5,"id":"{c}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"fynkel.MeshRenderer","version":1,"data":{{"mesh":{{"asset":"{RUSTED}"}},"material":{{"asset":"{RUSTED}"}},"cast_shadows":true,"receive_shadows":true,"visible":true}}}}}}}}}}}}"#
+        ),
+    );
+    let r = p.cook();
+    assert_eq!(status(&r, c), Status::Failed);
+    assert_eq!(status(&r, a), Status::Cached);
+    let wrong: Vec<_> = r
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == Code::ASSET_WRONG_KIND)
+        .collect();
+    assert_eq!(wrong.len(), 1, "{:?}", r.diagnostics);
+    assert!(
+        wrong[0].message.contains("takes a mesh"),
+        "{}",
+        wrong[0].message
+    );
 }
 
 #[test]

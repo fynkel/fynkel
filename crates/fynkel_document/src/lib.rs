@@ -30,6 +30,7 @@ pub mod one_root;
 pub mod physics_material;
 pub mod prefab;
 pub mod project;
+pub mod reference_kinds;
 pub mod rig;
 pub mod runtime;
 pub mod scene;

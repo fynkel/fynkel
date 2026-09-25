@@ -625,6 +625,57 @@ fn material_remaps_validate_against_the_database() {
     assert!(codes.iter().any(|(c, _)| c == "FYN-A0004"), "{codes:?}");
 }
 
+/// A reference to an asset of the wrong kind is `A0007` (ADR-0027 §4):
+/// a built-in field (the mesh and material of a `MeshRenderer`, swapped)
+/// and a script's `asset(mesh)` field given a material document.
+#[test]
+fn references_of_the_wrong_kind_fail_validate() {
+    let t = Temp::new("wrong-kind");
+    let scene = t.read("assets/scenes/main.scene.json");
+    let mesh = r#""asset": "c0000000-0000-4000-8000-000000000001",
+              "sub": "mesh/Cube""#;
+    let material = r#""asset": "c0000000-0000-4000-8000-000000000020""#;
+    assert!(scene.contains(mesh) && scene.contains(material));
+    let swapped = scene
+        .replace(mesh, "@MESH@")
+        .replace(material, mesh)
+        .replace("@MESH@", material);
+    t.write("assets/scenes/main.scene.json", &swapped);
+    let codes = t.codes();
+    let robot = "/entities/c0000000-0000-4000-8000-0000000000e1/components";
+    for field in ["mesh", "material"] {
+        let at = format!("{robot}/c0000000-0000-4000-8000-0000000000c1/data/{field}");
+        assert!(
+            codes
+                .iter()
+                .any(|(c, p)| c == "FYN-A0007" && p.as_deref() == Some(at.as_str())),
+            "{field}: {codes:?}"
+        );
+    }
+
+    let showcase = scene.replacen(
+        "\"speed\": 2.5,",
+        "\"speed\": 2.5, \"showcase\": { \"asset\": \"c0000000-0000-4000-8000-000000000020\" },",
+        1,
+    );
+    assert_ne!(showcase, scene);
+    t.write("assets/scenes/main.scene.json", &showcase);
+    let at = format!("{robot}/c0000000-0000-4000-8000-0000000000c2/data/showcase");
+    assert_eq!(
+        t.codes(),
+        vec![("FYN-A0007".to_string(), Some(at))],
+        "a script's asset(mesh) field holding a material"
+    );
+    t.write(
+        "assets/scenes/main.scene.json",
+        &showcase.replace(
+            r#""showcase": { "asset": "c0000000-0000-4000-8000-000000000020" }"#,
+            r#""showcase": { "asset": "c0000000-0000-4000-8000-000000000001", "sub": "mesh/Cube" }"#,
+        ),
+    );
+    assert_eq!(t.codes(), Vec::<(String, Option<String>)>::new());
+}
+
 /// M3-19a/19b: the Rig scene's `Imported` entity instances the Column
 /// rig's `prefab` — the skeleton file `rig.glb`'s hierarchy under the rig
 /// document's id. Without a provider the instance is `D0401` (the
