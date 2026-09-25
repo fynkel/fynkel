@@ -16,6 +16,11 @@
     "sound": {
       "asset": "46690333-e5ce-46aa-84a2-58216253ccc1"
     },
+    "sparks": {
+      "count": 12,
+      "seconds": 1.6,
+      "size": 0.24
+    },
     "value": 5
   }
 }

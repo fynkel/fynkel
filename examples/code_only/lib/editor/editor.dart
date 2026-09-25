@@ -115,6 +115,24 @@ void registerEditor(EditorExtensions editor) {
     ),
   );
 
+  // Unity's PropertyDrawer, by record class: every Sparks field (a coin
+  // kind's) as the burst it makes, above its standard fields.
+  editor.drawer<Sparks>(
+    (context, field) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        field.row(
+          SparksPreview(
+            count: field.valueOf('count'),
+            size: field.valueOf('size'),
+            seconds: field.valueOf('seconds'),
+          ),
+        ),
+        for (final f in field.fields) field.field(f),
+      ],
+    ),
+  );
+
   // A right click on coins in the Hierarchy: they become big coins (the
   // big coin data asset in their Collectible), one undo step.
   editor.hierarchyMenuItem(
@@ -131,6 +149,67 @@ void registerEditor(EditorExtensions editor) {
 
 /// A coin kind as it looks: a disc of its colour (the document's linear
 /// RGB, shown in sRGB), [size] times a coin's, with what it is worth.
+/// A coin's burst as its [Sparks] make it: [count] cubes around the coin,
+/// drawn at their size, and how long they last.
+class SparksPreview extends StatelessWidget {
+  const SparksPreview({super.key, required this.count, required this.size, required this.seconds});
+
+  /// As the document holds them (null: the record's default).
+  final Object? count;
+  final Object? size;
+  final Object? seconds;
+
+  static num _or(Object? v, num d) => v is num ? v : d;
+
+  int get sparks => _or(count, 6).toInt().clamp(0, 24);
+
+  @override
+  Widget build(BuildContext context) {
+    final edge = _or(size, 0.18).toDouble();
+    final small = Theme.of(context).textTheme.bodySmall;
+    return Row(
+      children: [
+        SizedBox.square(
+          dimension: 64,
+          child: CustomPaint(key: const Key('sparksPreview'), painter: _Burst(sparks, edge)),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            '${sparks == 0 ? 'No' : sparks} spark${sparks == 1 ? '' : 's'}, gone after ${_or(seconds, 1.2)} s',
+            key: const Key('sparksPreview.text'),
+            style: small,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Burst extends CustomPainter {
+  _Burst(this.count, this.edge);
+
+  final int count;
+  final double edge;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final centre = size.center(Offset.zero);
+    canvas.drawCircle(centre, 7, Paint()..color = const Color(0xFFFFC857));
+    // 1 m of spark edge is 60 px, the ring as far out as the burst starts.
+    final side = (edge * 60).clamp(2, 24).toDouble();
+    final gold = Paint()..color = const Color(0xFFFFE29A);
+    for (var i = 0; i < count; i++) {
+      final a = i * 2 * pi / count;
+      final at = centre + Offset(cos(a), sin(a)) * 22;
+      canvas.drawRect(Rect.fromCenter(center: at, width: side, height: side), gold);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_Burst old) => old.count != count || old.edge != edge;
+}
+
 class CoinPreview extends StatelessWidget {
   const CoinPreview({super.key, required this.color, required this.size, required this.value});
 

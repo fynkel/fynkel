@@ -47,6 +47,12 @@ DataType get gameCoinKindType => DataType(
       set: (b, v) => (b as _lib0.CoinKind).sound = _orNull(v, _assetRef),
     ),
     DataField(
+      name: 'sparks',
+      type: 'record',
+      get: (b) => _sparksJson((b as _lib0.CoinKind).sparks),
+      set: (b, v) => (b as _lib0.CoinKind).sparks = _sparks(v),
+    ),
+    DataField(
       name: 'value',
       type: 'integer',
       defaultValue: 1,
@@ -210,3 +216,18 @@ Map<String, Object?>? _assetRefJson(AssetRef? r) =>
     r == null ? null : {'asset': r.asset, if (r.sub != null) 'sub': r.sub};
 
 T? _orNull<T>(Object? v, T Function(Object?) convert) => v == null ? null : convert(v);
+
+_lib0.Sparks _sparks(Object? json) {
+  final m = json as Map;
+  final r = _lib0.Sparks();
+  if (m['count'] case final v?) r.count = _int(v);
+  if (m['seconds'] case final v?) r.seconds = _double(v);
+  if (m['size'] case final v?) r.size = _double(v);
+  return r;
+}
+
+Map<String, Object?> _sparksJson(_lib0.Sparks r) => {
+  'count': r.count,
+  'seconds': r.seconds,
+  'size': r.size,
+};

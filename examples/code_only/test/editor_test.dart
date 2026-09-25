@@ -2,11 +2,13 @@
 // and what its command says.
 import 'package:code_only/editor/editor.dart';
 import 'package:code_only/game/coin_kind.dart';
+import 'package:code_only/game/level.dart' show burst;
 import 'package:code_only/generated/assets.g.dart';
 import 'package:code_only/generated/behaviours.g.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/authoring.dart' show ProjectWriter;
+import 'package:fynkel/fynkel.dart' show Vec3;
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 
 typedef InspectorBuilder = Widget Function(BuildContext context, InspectorContext inspector);
@@ -142,7 +144,7 @@ void main() {
     expect(editor.windows, ['Tools/Code Only/Level Tools|codeOnly.levelTools']);
     expect(editor.entries, ['Hierarchy|Make Big Coin|game.Collectible']);
     expect(editor.inspectors, [CoinKind]);
-    expect(editor.drawers, ['jumpHeight']);
+    expect(editor.drawers, ['jumpHeight', 'Sparks']);
   });
 
   test("the jumpHeight drawer's line: v² / 2g", () {
@@ -165,6 +167,32 @@ void main() {
     expect(preview.diameter, closeTo(CoinPreview.base * 1.6, 1e-9));
     expect(preview.swatch.r, closeTo(1, 1e-6));
     expect(tester.getSize(find.byKey(const Key('coinPreview.coin'))).width, closeTo(CoinPreview.base * 1.6, 1e-6));
+  });
+
+  testWidgets("the Sparks drawer's burst: as many as the record says, and how long they last", (tester) async {
+    Future<String> line(Object? count, Object? seconds) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: SparksPreview(count: count, size: 0.24, seconds: seconds)),
+        ),
+      );
+      return tester.widget<Text>(find.byKey(const Key('sparksPreview.text'))).data!;
+    }
+
+    expect(await line(12, 1.6), '12 sparks, gone after 1.6 s');
+    expect(await line(1, 2), '1 spark, gone after 2 s');
+    expect(await line(0, 1.2), 'No sparks, gone after 1.2 s');
+    expect(await line(null, null), '6 sparks, gone after 1.2 s', reason: "the record's defaults");
+    expect(await line(99, 1), contains('24 sparks'), reason: 'at most 24');
+  });
+
+  test("a coin's burst: its kind's sparks, their size and how long they last", () {
+    final big = CoinKinds().big.sparks;
+    final spec = burst(Assets.materials.gold, Vec3.zero, big);
+    expect(spec.children, hasLength(12));
+    expect(spec.children.first.transform.scale, const Vec3(0.24, 0.24, 0.24));
+    expect(burst(Assets.materials.gold, Vec3.zero).children, hasLength(6), reason: 'a Sparks() by default');
+    expect(burst(Assets.materials.gold, Vec3.zero, Sparks(count: 0)).children, isEmpty);
   });
 
   test('the Level Tools ring: coin prefabs evenly around the centre', () {

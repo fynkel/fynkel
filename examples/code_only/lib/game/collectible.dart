@@ -1,4 +1,4 @@
-import 'dart:math' show cos, sin;
+import 'dart:math' show cos, pi, sin;
 
 import 'package:fynkel/fynkel.dart';
 
@@ -70,9 +70,10 @@ class Collectible extends Behaviour {
     // The sparks start where the coin is and fly apart.
     final here = (gameObject.worldTransform ?? transform.value).position;
     final gold = gameObject.getInChildren<MeshRenderer>()?.material ?? Primitive.defaultMaterial;
-    final sparks = world.build(burst(gold, here));
+    final sparks = world.build(burst(gold, here, kind?.sparks));
+    final count = sparks.children.length;
     for (final (i, spark) in sparks.children.indexed) {
-      final angle = i * 1.047; // six sparks, 60° apart
+      final angle = i * 2 * pi / count; // evenly apart
       spark.applyImpulse(Vec3(0.04 * cos(angle), 0.15, 0.04 * sin(angle)));
     }
     gameObject.destroy();

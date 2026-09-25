@@ -119,27 +119,30 @@ ObjectSpec coin(Look look, CoinKind kind, {String name = 'Coin', Transform trans
 
 /// Six sparks that fly apart and go (`LifetimeDespawn`): what a coin
 /// leaves. [Collectible] builds it where the coin was and kicks the pieces.
-ObjectSpec burst(AssetRef material, Vec3 where) => ObjectSpec(
-      'Burst',
-      transform: Transform(position: where),
-      children: [
-        for (var i = 0; i < 6; i++)
-          ObjectSpec(
-            'Spark $i',
-            layer: 'props',
-            transform: Transform(
-              position: Vec3(0.25 * math.cos(i * math.pi / 3), 0.6, 0.25 * math.sin(i * math.pi / 3)),
-              scale: const Vec3(0.18, 0.18, 0.18),
-            ),
-            components: [
-              MeshRenderer(mesh: Primitive.cube.mesh, material: material, castShadows: false),
-              const RigidBody(mass: 0.05, angularDamping: 0.5),
-              Collider(friction: 0.3, restitution: 0.4, mask: defaultMask),
-              const LifetimeDespawn(seconds: 1.2),
-            ],
+ObjectSpec burst(AssetRef material, Vec3 where, [Sparks? sparks]) {
+  final s = sparks ?? Sparks();
+  return ObjectSpec(
+    'Burst',
+    transform: Transform(position: where),
+    children: [
+      for (var i = 0; i < s.count; i++)
+        ObjectSpec(
+          'Spark $i',
+          layer: 'props',
+          transform: Transform(
+            position: Vec3(0.25 * math.cos(i * 2 * math.pi / s.count), 0.6, 0.25 * math.sin(i * 2 * math.pi / s.count)),
+            scale: Vec3(s.size, s.size, s.size),
           ),
-      ],
-    );
+          components: [
+            MeshRenderer(mesh: Primitive.cube.mesh, material: material, castShadows: false),
+            const RigidBody(mass: 0.05, angularDamping: 0.5),
+            Collider(friction: 0.3, restitution: 0.4, mask: defaultMask),
+            LifetimeDespawn(seconds: s.seconds),
+          ],
+        ),
+    ],
+  );
+}
 
 // ---- the places
 
