@@ -1198,6 +1198,12 @@ impl Physics {
                 // and nothing wrong with asking (Unity drops it too).
                 continue;
             }
+            if !ecs.contains(entity) {
+                // Destroyed after the command in the same batch (a script
+                // moves its object, then ends the level): nothing left to
+                // move, and nothing wrong with the order.
+                continue;
+            }
             if !cmd.is_finite() {
                 self.rejections.push(reject(
                     RejectionKind::NotFinite,

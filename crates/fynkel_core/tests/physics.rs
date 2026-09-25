@@ -859,3 +859,28 @@ fn character_commands_and_components_are_checked() {
     assert!(w.physics().character_state(player).is_none());
     assert!(w.ecs().has::<PhysicsOwned>(player));
 }
+
+/// A script moves its character, then ends the level in the same tick:
+/// the move is queued for the physics slot, the destroy lands first, and
+/// the move finds nothing — dropped, not a rejection (ADR-0026's code-only
+/// game does exactly this).
+#[test]
+fn a_move_before_a_destroy_in_one_batch_is_dropped() {
+    let (mut w, player, _camera) = playground();
+    w.step();
+    let r = w.submit(
+        Lane::Simulation,
+        vec![
+            Command::Body {
+                entity: player,
+                op: BodyCommand::Move(Vec3::X),
+            },
+            Command::Destroy(player),
+        ],
+    );
+    assert_eq!(r.accepted, 2);
+    let r = w.step();
+    assert_eq!(r.rejected, 0, "{:?}", w.diagnostics());
+    assert!(w.diagnostics().is_empty());
+    assert!(w.physics().character_state(player).is_none());
+}
