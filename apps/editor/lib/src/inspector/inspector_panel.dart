@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
+import '../extensions/editor_extensions.dart' show ContextEntry, EditorExtensionScope;
 import '../env/tools.dart';
 import '../picker/picker.dart';
 import '../project_browser/project_browser_model.dart';
@@ -857,6 +858,18 @@ class _ComponentCard extends StatelessWidget {
                               ? const Tooltip(message: transformStays, child: Text('Remove Component'))
                               : const Text('Remove Component'),
                         ),
+                        // The extensions' entries for this type (ADR-0028).
+                        if (_extensionEntries(context) case final entries when entries.isNotEmpty) ...[
+                          const PopupMenuDivider(),
+                          for (final (i, e) in entries.indexed)
+                            PopupMenuItem(
+                              key: e.key,
+                              value: 'ext:$i',
+                              enabled: e.enabled,
+                              height: 28,
+                              child: Text(e.label),
+                            ),
+                        ],
                       ],
                     ),
                   ],
@@ -916,8 +929,24 @@ class _ComponentCard extends StatelessWidget {
     );
   }
 
+  /// The extensions' ⋮ entries for this card's type (the same list when
+  /// the menu opens and when its choice runs: the selection is the same).
+  List<ContextEntry> _extensionEntries(BuildContext context) {
+    final tab = model.tab;
+    final host = EditorExtensionScope.maybeOf(context);
+    return tab == null || host == null
+        ? const []
+        : host.componentEntries(tab, slot.type, [for (final i in slot.instances) i.entityId]);
+  }
+
   Future<void> _menu(BuildContext context, String v) async {
     final notices = Notices.maybeOf(context);
+    if (v.startsWith('ext:')) {
+      final i = int.parse(v.substring(4));
+      final entries = _extensionEntries(context);
+      if (i < entries.length) entries[i].run();
+      return;
+    }
     switch (v) {
       case 'remove':
         model.removeComponent(slot);

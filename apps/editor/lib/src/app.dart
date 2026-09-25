@@ -36,6 +36,7 @@ import 'play/code_reload.dart';
 import 'play/dart_stack.dart';
 import 'extensions/editor_access.dart';
 import 'extensions/editor_extensions.dart';
+import 'extensions/extension_window.dart';
 import 'play/editor_game.dart';
 import 'play/game_console.dart';
 import 'play/game_panel.dart';
@@ -541,6 +542,34 @@ class EditorShellState extends State<EditorShell> {
         ),
     ]);
     _extensionIds.addAll(items.map((i) => i.id));
+    // The windows: a panel each (kept in the registry for the session, so
+    // one a reload dropped keeps its place), and the command that shows it.
+    final windows = extensions.windows.toList();
+    _panels.setExtensionSpecs([
+      for (final w in windows)
+        PanelSpec(
+          id: w.panelId,
+          title: w.title,
+          icon: w.icon ?? FIcons.extensionOutlined,
+          home: PanelHome.right,
+          builder: (context, id) => ExtensionWindowView(host: extensions, id: w.id),
+        ),
+    ]);
+    registry.registerAll([
+      for (final (i, w) in windows.indexed)
+        EditorCommand(
+          id: w.commandId,
+          baseLabel: w.label,
+          description: 'Shows the ${w.title} window (${w.package})',
+          menu: w.menu,
+          submenu: w.submenu,
+          group: 100,
+          order: 500000 + i,
+          enabled: () => workspace != null,
+          run: () => workspace?.show(w.panelId),
+        ),
+    ]);
+    _extensionIds.addAll(windows.map((w) => w.commandId));
   }
 
   void _onExtensionLog() => console?.refresh();
@@ -3134,16 +3163,19 @@ class EditorShellState extends State<EditorShell> {
             child: EditorMenuBar(
               registry: registry,
               native: widget.nativeMenuBar,
-              child: NoticesScope(
-                notices: notices,
-                child: p0 == null || workspace == null
-                    ? Column(
-                        children: [
-                          Expanded(child: body),
-                          NoticeStrip(key: const Key('shell.error'), notices: notices),
-                        ],
-                      )
-                    : body,
+              child: EditorExtensionScope(
+                host: extensions,
+                child: NoticesScope(
+                  notices: notices,
+                  child: p0 == null || workspace == null
+                      ? Column(
+                          children: [
+                            Expanded(child: body),
+                            NoticeStrip(key: const Key('shell.error'), notices: notices),
+                          ],
+                        )
+                      : body,
+                ),
               ),
             ),
           ),

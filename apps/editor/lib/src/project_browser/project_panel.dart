@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:path/path.dart' as p;
 
+import '../extensions/editor_extensions.dart' show ContextEntry, EditorExtensionScope;
 import '../env/tools.dart';
 import '../inspector/field_widgets.dart' show AssetDragPayload, assetKindIcon;
 import '../project/editor_project.dart';
@@ -511,6 +512,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
     final many = ids.length > 1;
     final isDoc = e.document == 'scene' || e.document == 'prefab';
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    // The extensions' entries (ADR-0028), for the selected assets.
+    final extensionEntries = EditorExtensionScope.maybeOf(context)?.projectEntries(ids) ?? const <ContextEntry>[];
     final choice = await showMenu<String>(
       popUpAnimationStyle: AnimationStyle.noAnimation,
       context: context,
@@ -571,9 +574,18 @@ class _ProjectPanelState extends State<ProjectPanel> {
         ),
         ..._dataItems(here: true),
         PopupMenuItem(value: 'new:folder', enabled: model.canEdit, child: const Text('New Folder Here')),
+        if (extensionEntries.isNotEmpty) ...[
+          const PopupMenuDivider(),
+          for (final (i, e) in extensionEntries.indexed)
+            PopupMenuItem(key: e.key, value: 'ext:$i', enabled: e.enabled, child: Text(e.label)),
+        ],
       ],
     );
     if (!mounted) return;
+    if (choice != null && choice.startsWith('ext:')) {
+      extensionEntries[int.parse(choice.substring(4))].run();
+      return;
+    }
     final here = e.path.contains('/') ? e.path.substring(0, e.path.lastIndexOf('/')) : '';
     switch (choice) {
       case 'open':

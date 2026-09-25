@@ -86,6 +86,19 @@ final class PanelRegistry {
 
   final Map<String, PanelSpec> _specs;
 
+  /// The extensions' windows (ADR-0028), `ext:<id>`: added or replaced
+  /// after every registration, never removed during a session — a window
+  /// the last hot reload dropped keeps its place and says so.
+  void setExtensionSpecs(Iterable<PanelSpec> specs) {
+    for (final spec in specs) {
+      assert(isExtension(spec.id));
+      _specs[spec.id] = spec;
+    }
+  }
+
+  /// An extension's window id.
+  static bool isExtension(String id) => id.startsWith('ext:');
+
   List<PanelSpec> get all => _specs.values.toList();
 
   /// The spec of a panel or of one of its copies.
@@ -215,7 +228,9 @@ class _PanelBuilder with AreaBuilderMixin {
   @override
   DockingItem buildDockingItem({required dynamic id, required double? weight, required bool maximized}) {
     final spec = workspace.registry.byId(id as String);
-    if (spec == null && PanelRegistry.retired.contains(id)) {
+    // A retired panel, or a window of an extension this editor does not
+    // have (another project's): a placeholder the restore removes.
+    if (spec == null && (PanelRegistry.retired.contains(id) || PanelRegistry.isExtension(id))) {
       // A placeholder the restore removes before the layout is shown.
       return DockingItem(id: id, name: id, widget: const SizedBox.shrink());
     }
@@ -363,6 +378,11 @@ final class Workspace extends ChangeNotifier {
       final retired = [
         for (final id in PanelRegistry.retired)
           if (l.findDockingItem(id) != null) id,
+        for (final item in l.layoutAreas().whereType<DockingItem>())
+          if (item.id is String &&
+              PanelRegistry.isExtension(item.id as String) &&
+              registry.byId(item.id as String) == null)
+            item.id as String,
       ];
       if (retired.isNotEmpty) l.removeItemByIds(retired);
       if (l.root == null) return false;

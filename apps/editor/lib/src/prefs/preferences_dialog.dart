@@ -296,6 +296,16 @@ class ExtensionsList extends StatelessWidget {
                   Text('Registers nothing.', style: small)
                 else
                   for (final item in p.menuItems) Text('Menu item: ${item.path}  (${item.id})', style: small),
+                for (final w in p.windows) Text('Window: ${w.title}  (${w.id})', style: small),
+                for (final c in p.contextItems)
+                  Text(
+                    '${switch (c.place) {
+                      ContextMenuPlace.hierarchy => 'Hierarchy',
+                      ContextMenuPlace.project => 'Project',
+                      ContextMenuPlace.component => '${c.component} card',
+                    }} menu: ${c.label}  (${c.id})',
+                    style: small,
+                  ),
               ],
             ),
           ),

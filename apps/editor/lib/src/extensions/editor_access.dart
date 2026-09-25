@@ -4,6 +4,7 @@
 // transaction, the prefab overrides the Inspector writes, the Project
 // panel's Create), so an extension's change is undone, overridden and
 // shown exactly as the user's would be.
+import 'package:flutter/foundation.dart' show Listenable;
 import 'package:fynkel/authoring.dart' show ProjectWriter;
 import 'package:fynkel/fynkel.dart' show AssetRef, BehaviourRegistry, DataAsset, ObjectSpec;
 import 'package:fynkel_authoring/fynkel_authoring.dart' show AuthoringException, Command;
@@ -43,6 +44,14 @@ class EditorAccess {
   /// The game's generated `registerBehaviours`: what `add` and
   /// `createData` need to write its behaviours and data types.
   final void Function(BehaviourRegistry registry)? registerBehaviours;
+
+  /// What a context reads, to listen to: the tabs, the document in front,
+  /// the project and the Project panel (an extension window rebuilds on
+  /// their changes).
+  List<Listenable?> watch() {
+    final t = tabs();
+    return [t, t?.shown, project(), browser()];
+  }
 
   /// The document the Hierarchy shows (the running game's during Play).
   OpenDocument? get shown => tabs()?.shown;
@@ -168,7 +177,7 @@ EditResult runEdit(
   void Function(EditorEdit edit) changes, {
   required void Function(String message) logError,
 }) {
-  final edit = _Edit(access, tab, playing: access.playing);
+  final edit = _Edit(access, tab, playing: identical(tab, access.tabs()?.live));
   EditResult refused(String why) {
     logError('"$label" changed nothing: $why');
     return EditResult(ok: false, error: why);

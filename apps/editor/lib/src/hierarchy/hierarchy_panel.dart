@@ -13,6 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import '../commands/commands.dart';
+import '../extensions/editor_extensions.dart' show ContextEntry, EditorExtensionScope;
 import '../documents/open_document.dart';
 import '../l10n/strings.dart';
 import '../inspector/field_widgets.dart' show AssetDragPayload, assetKindIcon;
@@ -906,6 +907,7 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
       ])
         ?widget.commands?.byId(cid),
     ];
+    final extensionEntries = EditorExtensionScope.maybeOf(context)?.hierarchyEntries(tab) ?? const <ContextEntry>[];
     await showCascadingMenu(context, at, [
       MenuAction('Cut  ⌘X', enabled: model.canEdit && !anyDerived, onSelected: model.cut),
       MenuAction('Copy  ⌘C', enabled: !anyDerived, onSelected: model.copy),
@@ -963,6 +965,11 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
           key: const Key('hierarchy.menu.applyToScene'),
           onSelected: model.applyToScene,
         ),
+      ],
+      // The extensions' entries (ADR-0028), for the selection.
+      if (extensionEntries.isNotEmpty) ...[
+        const MenuSeparator(),
+        for (final e in extensionEntries) MenuAction(e.label, key: e.key, enabled: e.enabled, onSelected: e.run),
       ],
       const MenuSeparator(),
       MenuAction(
