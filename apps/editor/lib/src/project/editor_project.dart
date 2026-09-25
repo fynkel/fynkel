@@ -93,6 +93,10 @@ final class DataTypeInfo {
   String get title => menuPath.isEmpty ? id : menuPath.last;
 }
 
+/// Where the Project browser shows the game's package assets (ADR-0029),
+/// Unity's Packages folder: `Packages/<package>/…`.
+const packagesRoot = 'Packages';
+
 /// One entry of the asset database (`fynkel asset list --json`).
 final class AssetEntry {
   const AssetEntry({
@@ -104,11 +108,15 @@ final class AssetEntry {
     this.importer,
     this.subAssets = const {},
     this.dataType,
+    this.package,
+    this.file,
+    this.readOnly,
   });
 
   final String id;
 
-  /// Relative to the project's assets directory.
+  /// Relative to the project's assets directory — or, for a package's
+  /// asset, `Packages/<package>/<its path in the package>` (ADR-0029).
   final String path;
   final String name;
 
@@ -126,6 +134,19 @@ final class AssetEntry {
 
   /// A data asset's type id (`game.Weapon`, ADR-0027); null for the rest.
   final String? dataType;
+
+  /// The package the asset belongs to (ADR-0029); null for the project's own.
+  final String? package;
+
+  /// A package asset's absolute file (it is not under the assets directory).
+  final String? file;
+
+  /// Why a package asset cannot be changed (a package pub keeps: hosted or
+  /// git); null for the project's own and a `path` package's.
+  final String? readOnly;
+
+  /// Whether it is one of a package's assets rather than the project's.
+  bool get inPackage => package != null;
 
   bool get isSource => kind == 'source';
 
@@ -322,6 +343,16 @@ abstract class EditorProject extends ChangeNotifier {
   /// sidecar of its own (Unity's Duplicate).
   OperationResult duplicateAsset(String id, {String? path}) => operate('duplicateAsset', {'asset': id, 'path': ?path});
 
+  /// A package's asset copied into the project with a fresh id (ADR-0029),
+  /// by default to `<package>/<its path in the package>`.
+  OperationResult copyIntoProject(String id, {String? path}) =>
+      operate('copyIntoProject', {'asset': id, 'path': ?path});
+
+  /// Every asset of [package] copied into `<package>/` with its id, so the
+  /// copies take over every reference to the package's (Unity's
+  /// `.unitypackage` import, ADR-0029).
+  OperationResult importPackageAssets(String package) => operate('importPackageAssets', {'package': package});
+
   /// The editor's built-in shapes (ADR-0023): the asset of the fixed id,
   /// or `Fynkel/Primitives.glb` written — `json['installed']` says which.
   OperationResult installPrimitives() => operate('installPrimitives');
@@ -369,8 +400,27 @@ abstract class EditorProject extends ChangeNotifier {
   /// fields as the source declares them now. Writes nothing.
   OperationResult reloadBehaviours() => operate('reloadBehaviours', const {});
 
-  /// The absolute path of an asset-root-relative [path].
-  String assetFile(String path) => p.join(assetsDir, p.joinAll(path.split('/')));
+  /// The absolute path of an asset-root-relative [path]; a package asset's
+  /// (`Packages/<package>/…`, ADR-0029) is its own file outside the root,
+  /// and a package folder the directory its assets are in.
+  String assetFile(String path) {
+    if (path.startsWith('$packagesRoot/')) {
+      for (final a in assets()) {
+        final file = a.file;
+        if (file == null) continue;
+        if (a.path == path) return file;
+        if (a.path.startsWith('$path/')) {
+          // Up from the file as many levels as the asset is below [path].
+          var dir = file;
+          for (var n = a.path.substring(path.length + 1).split('/').length; n > 0; n--) {
+            dir = p.dirname(dir);
+          }
+          return dir;
+        }
+      }
+    }
+    return p.join(assetsDir, p.joinAll(path.split('/')));
+  }
 
   /// Whether [id] (and [sub], when given) resolves in the asset database.
   bool assetExists(String id, {String? sub}) {
@@ -634,6 +684,9 @@ final class SessionProject extends EditorProject {
         document: a['document'] as String?,
         importer: a['importer'] as String?,
         dataType: a['dataType'] as String?,
+        package: a['package'] as String?,
+        file: a['file'] as String?,
+        readOnly: a['readOnly'] as String?,
         subAssets: {
           if (a['subAssets'] is Map)
             for (final e in (a['subAssets'] as Map).entries) e.key as String: e.value.toString(),

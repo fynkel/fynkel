@@ -375,6 +375,34 @@ class _ProjectPanelState extends State<ProjectPanel> {
     }
   }
 
+  /// Unity's Import Package (ADR-0029): asks first, as the copies keep the
+  /// package's ids and take over every reference to its assets.
+  Future<void> _importPackageAssets(String package) async {
+    final yes = await showDialog<bool>(
+      animationStyle: AnimationStyle.noAnimation,
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const Key('project.importPackageConfirm'),
+        title: Text('Import $package assets?'),
+        content: Text(
+          'Every asset of $package is copied into assets/$package with its id: '
+          'scenes and prefabs then use the copies, which you can change. '
+          'Removing the copies gives the package\'s back.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            key: const Key('project.importPackageConfirm.yes'),
+            autofocus: true,
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
+    if (yes == true && mounted) model.importPackageAssets(package);
+  }
+
   /// Unity's "Delete selected asset?" — Enter deletes, Esc keeps.
   Future<void> _askDelete(List<String> ids) async {
     if (!mounted) return;
@@ -511,6 +539,10 @@ class _ProjectPanelState extends State<ProjectPanel> {
     final ids = model.selection.toList();
     final many = ids.length > 1;
     final isDoc = e.document == 'scene' || e.document == 'prefab';
+    // A package's assets stay as the package has them (ADR-0029).
+    final editable = ids.every((id) => model.entry(id) != null && model.canEditEntry(model.entry(id)!));
+    final here = e.path.contains('/') ? e.path.substring(0, e.path.lastIndexOf('/')) : '';
+    final canHere = model.canEditFolder(here);
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     // The extensions' entries (ADR-0028), for the selected assets.
     final extensionEntries = EditorExtensionScope.maybeOf(context)?.projectEntries(ids) ?? const <ContextEntry>[];
@@ -537,24 +569,31 @@ class _ProjectPanelState extends State<ProjectPanel> {
             child: const Text('Find References In Scene'),
           ),
         const PopupMenuDivider(),
-        PopupMenuItem(value: 'rename', enabled: model.canEdit && !many, child: const Text('Rename  ⇧⌥⌘R')),
+        if (model.canCopyIntoProject)
+          PopupMenuItem(
+            key: const Key('project.menu.copyIntoProject'),
+            value: 'copyIntoProject',
+            enabled: model.canEdit,
+            child: Text(many ? 'Copy Selection into Project' : 'Copy into Project'),
+          ),
+        PopupMenuItem(value: 'rename', enabled: editable && !many, child: const Text('Rename  ⇧⌥⌘R')),
         PopupMenuItem(
           value: 'move',
-          enabled: model.canEdit,
+          enabled: editable,
           child: Text(many ? 'Move Selection to…  ⇧⌥⌘V' : 'Move to…  ⇧⌥⌘V'),
         ),
         PopupMenuItem(
           value: 'delete',
-          enabled: model.canEdit,
+          enabled: editable,
           child: Text(many ? 'Delete Selection  ⇧⌥⌘⌫' : 'Delete  ⇧⌥⌘⌫'),
         ),
         if (e.isSource)
-          PopupMenuItem(value: 'reimport', enabled: model.canEdit && !many, child: const Text('Reimport  ⇧⌥⌘I')),
+          PopupMenuItem(value: 'reimport', enabled: editable && !many, child: const Text('Reimport  ⇧⌥⌘I')),
         if (e.document == 'prefab')
           PopupMenuItem(
             key: const Key('project.menu.createVariant'),
             value: 'createVariant',
-            enabled: model.canEdit && !many,
+            enabled: canHere && !many,
             child: const Text('Create Prefab Variant'),
           ),
         if (e.document == 'scene')
@@ -563,17 +602,13 @@ class _ProjectPanelState extends State<ProjectPanel> {
         PopupMenuItem(value: 'copyId', child: Text('Copy id  ${e.id.substring(0, 13)}…')),
         PopupMenuItem(value: 'copyPath', child: Text('Copy path  ${e.path}')),
         const PopupMenuDivider(),
-        PopupMenuItem(value: 'new:scene', enabled: model.canEdit, child: const Text('New Scene Here')),
-        PopupMenuItem(value: 'new:prefab', enabled: model.canEdit, child: const Text('New Prefab Here')),
-        PopupMenuItem(value: 'new:material', enabled: model.canEdit, child: const Text('New Material Here')),
-        PopupMenuItem(value: 'new:volume', enabled: model.canEdit, child: const Text('New Volume Profile Here')),
-        PopupMenuItem(
-          value: 'new:physics_material',
-          enabled: model.canEdit,
-          child: const Text('New Physics Material Here'),
-        ),
-        ..._dataItems(here: true),
-        PopupMenuItem(value: 'new:folder', enabled: model.canEdit, child: const Text('New Folder Here')),
+        PopupMenuItem(value: 'new:scene', enabled: canHere, child: const Text('New Scene Here')),
+        PopupMenuItem(value: 'new:prefab', enabled: canHere, child: const Text('New Prefab Here')),
+        PopupMenuItem(value: 'new:material', enabled: canHere, child: const Text('New Material Here')),
+        PopupMenuItem(value: 'new:volume', enabled: canHere, child: const Text('New Volume Profile Here')),
+        PopupMenuItem(value: 'new:physics_material', enabled: canHere, child: const Text('New Physics Material Here')),
+        ..._dataItems(here: true, enabled: canHere),
+        PopupMenuItem(value: 'new:folder', enabled: canHere, child: const Text('New Folder Here')),
         if (extensionEntries.isNotEmpty) ...[
           const PopupMenuDivider(),
           for (final (i, e) in extensionEntries.indexed)
@@ -586,7 +621,6 @@ class _ProjectPanelState extends State<ProjectPanel> {
       extensionEntries[int.parse(choice.substring(4))].run();
       return;
     }
-    final here = e.path.contains('/') ? e.path.substring(0, e.path.lastIndexOf('/')) : '';
     switch (choice) {
       case 'open':
         _activate(e);
@@ -600,6 +634,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
         await _reveal(e.path);
       case 'findReferences':
         widget.onFindReferences?.call(e.id, e.name);
+      case 'copyIntoProject':
+        model.copyIntoProject();
       case 'rename':
         model.beginRename(e.id);
       case 'move':
@@ -631,7 +667,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
 
   /// Create ▸ one entry per data type (ADR-0027 §7), its `menu` path as
   /// the title (`Game › Weapon`); `data:<type id>`.
-  List<PopupMenuEntry<String>> _dataItems({bool here = false}) {
+  List<PopupMenuEntry<String>> _dataItems({bool here = false, bool? enabled}) {
     final types = model.project.dataTypes();
     if (types.isEmpty) return const [];
     return [
@@ -640,7 +676,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
         PopupMenuItem(
           key: Key('project.new.data.${t.id}'),
           value: 'data:${t.id}',
-          enabled: model.canEdit,
+          enabled: enabled ?? model.canEdit,
           child: here
               ? Text('New ${t.menuPath.join(' › ')} Here')
               : ListTile(
@@ -660,29 +696,37 @@ class _ProjectPanelState extends State<ProjectPanel> {
   Future<void> _folderMenu(BuildContext context, String rel, Offset at) async {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final isRoot = rel.isEmpty;
+    final canHere = model.canEditFolder(rel);
+    // Unity's Import Package on a package's own folder (ADR-0029).
+    final package = rel.split('/').length == 2 ? ProjectBrowserModel.packageOfFolder(rel) : null;
     final choice = await showMenu<String>(
       popUpAnimationStyle: AnimationStyle.noAnimation,
       context: context,
       position: RelativeRect.fromRect(Rect.fromPoints(at, at), Offset.zero & overlay.size),
       items: [
         const PopupMenuItem(value: 'open', child: Text('Show Folder')),
-        const PopupMenuItem(value: 'reveal', child: Text('Reveal in Finder')),
-        const PopupMenuDivider(),
-        PopupMenuItem(value: 'new:scene', enabled: model.canEdit, child: const Text('New Scene Here')),
-        PopupMenuItem(value: 'new:prefab', enabled: model.canEdit, child: const Text('New Prefab Here')),
-        PopupMenuItem(value: 'new:material', enabled: model.canEdit, child: const Text('New Material Here')),
-        PopupMenuItem(value: 'new:volume', enabled: model.canEdit, child: const Text('New Volume Profile Here')),
-        PopupMenuItem(
-          value: 'new:physics_material',
-          enabled: model.canEdit,
-          child: const Text('New Physics Material Here'),
-        ),
-        ..._dataItems(here: true),
-        PopupMenuItem(value: 'new:folder', enabled: model.canEdit, child: const Text('New Folder Here')),
-        if (!isRoot) ...[
+        PopupMenuItem(value: 'reveal', enabled: rel != packagesRoot, child: const Text('Reveal in Finder')),
+        if (package != null) ...[
           const PopupMenuDivider(),
-          PopupMenuItem(value: 'rename', enabled: model.canEdit, child: const Text('Rename Folder')),
-          PopupMenuItem(value: 'delete', enabled: model.canEdit, child: const Text('Delete Empty Folder')),
+          PopupMenuItem(
+            key: const Key('project.menu.importPackageAssets'),
+            value: 'importPackageAssets',
+            enabled: model.canEdit,
+            child: Text('Import $package Assets into Project…'),
+          ),
+        ],
+        const PopupMenuDivider(),
+        PopupMenuItem(value: 'new:scene', enabled: canHere, child: const Text('New Scene Here')),
+        PopupMenuItem(value: 'new:prefab', enabled: canHere, child: const Text('New Prefab Here')),
+        PopupMenuItem(value: 'new:material', enabled: canHere, child: const Text('New Material Here')),
+        PopupMenuItem(value: 'new:volume', enabled: canHere, child: const Text('New Volume Profile Here')),
+        PopupMenuItem(value: 'new:physics_material', enabled: canHere, child: const Text('New Physics Material Here')),
+        ..._dataItems(here: true, enabled: canHere),
+        PopupMenuItem(value: 'new:folder', enabled: canHere, child: const Text('New Folder Here')),
+        if (!isRoot && canHere) ...[
+          const PopupMenuDivider(),
+          PopupMenuItem(value: 'rename', child: const Text('Rename Folder')),
+          PopupMenuItem(value: 'delete', child: const Text('Delete Empty Folder')),
         ],
       ],
     );
@@ -692,6 +736,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
         model.setFolder(rel);
       case 'reveal':
         await _reveal(rel);
+      case 'importPackageAssets':
+        await _importPackageAssets(package!);
       case 'rename':
         model.beginRenameFolder(rel);
       case 'delete':
@@ -1400,7 +1446,11 @@ class _ProjectPanelState extends State<ProjectPanel> {
       itemExtent: projectRowHeight(context),
       children: [
         _folderRow(context, theme, '', inList: false),
-        for (final f in folders) _folderRow(context, theme, f, inList: false),
+        for (final f in folders)
+          if (!ProjectBrowserModel.inPackages(f)) _folderRow(context, theme, f, inList: false),
+        // Unity's Packages: a root of its own (ADR-0029).
+        for (final f in folders)
+          if (ProjectBrowserModel.inPackages(f)) _folderRow(context, theme, f, inList: false),
         if (model.hasScripts)
           for (final f in ['', ...model.scripts.folders])
             _ScriptRow(
@@ -1429,7 +1479,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
     bool columns = false,
     double? tile,
   }) {
-    final depth = inList || rel.isEmpty ? 0 : rel.split('/').length;
+    // Packages is a root beside assets, so its folders are a level up.
+    final depth = inList || rel.isEmpty ? 0 : rel.split('/').length - (ProjectBrowserModel.inPackages(rel) ? 1 : 0);
     final name = rel.isEmpty ? 'assets' : p.basename(rel);
     final current = !inList && !model.inScripts && rel == model.folder;
     final renaming = model.renamingFolder == rel && rel.isNotEmpty;
@@ -1509,6 +1560,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
         ? 'every folder'
         : model.folder.isEmpty
         ? 'assets'
+        : ProjectBrowserModel.inPackages(model.folder)
+        ? model.folder
         : 'assets/${model.folder}';
     final text = [
       shown == total ? '$total asset${total == 1 ? '' : 's'}' : '$shown of $total assets',

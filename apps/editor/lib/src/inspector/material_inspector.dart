@@ -72,7 +72,7 @@ class _MaterialInspectorState extends State<MaterialInspector> {
         children: [InspectorValueRow('Error', edits.lastError ?? 'The material could not be opened.')],
       );
     }
-    final enabled = edits.canEdit;
+    final enabled = edits.canEditAsset(id);
     num number(String k, num fallback) => f[k] is num ? f[k] as num : fallback;
     List<num> colour(String k, List<num> fallback) =>
         f[k] is List ? [for (final v in f[k] as List) (v as num?) ?? 0] : fallback;

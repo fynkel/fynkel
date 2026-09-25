@@ -103,7 +103,10 @@ Three ADRs, then their implementation:
    publishing is rehearsed from a local store and waits for ADR-0005. Step 1 (the package
    graph in `fynkel_document`, `fynkel.package.json`, `FYN-P0019`) done
    2026-09-25; step 2 (`registerPackages`, schemas from every package,
-   `FYN-P0016`/`P0017`) done 2026-09-25.
+   `FYN-P0016`/`P0017`) done 2026-09-25; step 3 (package assets mounted
+   at `Packages/<name>/`, the Project browser's Packages root, Copy into
+   Project, Import Package Assets…, read-only when pub keeps the package;
+   the primitives stay built in) done 2026-09-25.
 
 ## Phase 4 — Rendering resumes
 

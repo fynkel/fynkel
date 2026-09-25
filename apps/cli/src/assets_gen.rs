@@ -34,7 +34,11 @@ pub const DART_OUT: &str = "lib/generated/assets.g.dart";
 /// without an assets directory gives an empty `Assets`.
 pub fn generate(project: &Path) -> Result<Option<String>, String> {
     if !project.join("fynkel.project.json").is_file() {
-        return Ok(None);
+        // A Fynkel package names its own assets the same way (ADR-0029 §2).
+        let Some(manifest) = fynkel_document::packages::own_manifest(project) else {
+            return Ok(None);
+        };
+        return Ok(Some(render(&scan(&project.join(manifest.assets)))));
     }
     let project_file = Project::read(project).map_err(|d| {
         format!(
@@ -46,17 +50,19 @@ pub fn generate(project: &Path) -> Result<Option<String>, String> {
                 .join("; ")
         )
     })?;
-    let assets = project_file.assets_dir(project);
-    let entries = if assets.is_dir() {
-        let schemas = SchemaSet::embedded();
-        // Diagnostics are `fynkel validate`'s to report; a duplicate id
-        // keeps its first path here as it does there.
-        let (db, _) = AssetDatabase::scan(&assets, &schemas);
-        db.entries().to_vec()
-    } else {
-        Vec::new()
-    };
-    Ok(Some(render(&entries)))
+    Ok(Some(render(&scan(&project_file.assets_dir(project)))))
+}
+
+/// Every asset under `assets` (none when it is missing).
+fn scan(assets: &Path) -> Vec<AssetEntry> {
+    if !assets.is_dir() {
+        return Vec::new();
+    }
+    let schemas = SchemaSet::embedded();
+    // Diagnostics are `fynkel validate`'s to report; a duplicate id keeps
+    // its first path here as it does there.
+    let (db, _) = AssetDatabase::scan(assets, &schemas);
+    db.entries().to_vec()
 }
 
 /// One folder of the tree: sub-folders and files, by path segment.

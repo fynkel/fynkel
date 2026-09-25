@@ -44,6 +44,18 @@ final class AssetEdits extends ChangeNotifier {
 
   bool get canEdit => project.readOnly == null;
 
+  /// Whether the asset [id] can be changed: the project can be, and it is
+  /// not a package's that pub keeps (ADR-0029: Copy into Project first).
+  bool canEditAsset(String id) => canEdit && readOnlyReason(id) == null;
+
+  /// Why [id] cannot be changed although the project can; null when it can.
+  String? readOnlyReason(String id) {
+    for (final a in project.assets()) {
+      if (a.id == id) return a.readOnly;
+    }
+    return null;
+  }
+
   /// The asset's document, opened on first use and again after its tab
   /// closed it; null (with [lastError]) when it cannot be opened.
   EditorDocument? document(String id) {
@@ -70,7 +82,7 @@ final class AssetEdits extends ChangeNotifier {
   /// [lastError], when refused.
   bool edit(String id, Map<String, Object?> changes) {
     final doc = document(id);
-    if (doc == null || !canEdit || changes.isEmpty) return false;
+    if (doc == null || !canEditAsset(id) || changes.isEmpty) return false;
     try {
       doc.apply([
         for (final c in changes.entries)

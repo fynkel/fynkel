@@ -779,6 +779,26 @@ dependents by document path with each pointer, and offers Cancel or
 and a ×; the status line counts `shown of total assets in <where>` and the
 selection, with an up arrow inside a folder.
 
+### Packages (ADR-0029 step 3)
+
+Unity's Packages folder: a **Packages** root in the tree below `assets`
+(and below nothing else), one folder per Fynkel package the game depends
+on, and the package's folders under it — derived from the entries'
+`Packages/<package>/…` paths, since the files are not under `assets/`.
+The assets root lists only the project's folders and counts only its
+assets. A package's assets show, open, drag onto fields and ping as the
+project's do, but are not renamed, moved, deleted or duplicated, and
+nothing is made, imported or dropped into a Packages folder
+(`ProjectBrowserModel.canEditEntry`, `canEditFolder`, `canCreateHere`);
+the error bar says why. The asset menu's **Copy into Project** (also for
+a selection) copies them under a fresh id to `<package>/…` and selects the
+copies; a package folder's **Import <package> Assets into Project…** asks
+first, then copies every asset with its id so the copies take over the
+references. The Inspector's material, volume, physics-material and data
+pages are read-only for a package pub keeps (`AssetEdits.canEditAsset`); a
+`path:` package's assets are edited in place. Reveal in Finder shows the
+package's own file.
+
 ### Scripts and Create → Behaviour (roadmap Phase 2 item 1)
 
 Below the asset folders the tree has a **Scripts** root: the game's

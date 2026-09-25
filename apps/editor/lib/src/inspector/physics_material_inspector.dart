@@ -68,7 +68,7 @@ class _PhysicsMaterialInspectorState extends State<PhysicsMaterialInspector> {
         children: [InspectorValueRow('Error', edits.lastError ?? 'The physics material could not be opened.')],
       );
     }
-    final enabled = edits.canEdit;
+    final enabled = edits.canEditAsset(id);
     num number(String k, num fallback) => f[k] is num ? f[k] as num : fallback;
 
     Widget combine(String field, String label, String tooltip) => KeyedSubtree(

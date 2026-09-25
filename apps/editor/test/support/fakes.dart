@@ -218,6 +218,8 @@ final class FakeProject extends EditorProject {
   List<String> folders() {
     final out = <String>{...extraFolders};
     for (final e in assetEntries) {
+      // A package's are not under the assets directory (ADR-0029).
+      if (e.inPackage) continue;
       final parts = e.path.split('/');
       for (var i = 1; i < parts.length; i++) {
         out.add(parts.sublist(0, i).join('/'));
@@ -371,6 +373,7 @@ final class FakeProject extends EditorProject {
       case 'renameAsset':
         final id = args['asset'] as String;
         final e = entryOf(id) ?? _refuse('FYN-A0004', 'no asset $id');
+        if (e.inPackage) _refuse('FYN-E0007', 'renameAsset: ${e.path} belongs to the package \'${e.package}\'');
         var to = args['path'] as String;
         final fileName = e.path.split('/').last;
         if (to.endsWith('/') || folders().contains(to)) {
@@ -408,6 +411,7 @@ final class FakeProject extends EditorProject {
       case 'deleteAsset':
         final id = args['asset'] as String;
         final e = entryOf(id) ?? _refuse('FYN-A0004', 'no asset $id');
+        if (e.inPackage) _refuse('FYN-E0007', 'deleteAsset: ${e.path} belongs to the package \'${e.package}\'');
         final related = fakeDependents[id] ?? const [];
         if (related.isNotEmpty && args['force'] != true) {
           _refuse(
@@ -443,6 +447,67 @@ final class FakeProject extends EditorProject {
         _redo.clear();
         _undo.add((label, () => settings[id] = before));
         return _done(kind, label, e, {'settings': next, 'sidecar': '${e.path}.meta.json'});
+      // ADR-0029: a package asset copied with a fresh id to <package>/…
+      case 'copyIntoProject':
+        final id = args['asset'] as String;
+        final e = entryOf(id) ?? _refuse('FYN-A0004', 'no asset $id');
+        if (!e.inPackage) _refuse('FYN-T0003', 'copyIntoProject: ${e.path} is the project\'s already');
+        final to = args['path'] as String? ?? e.path.substring('$packagesRoot/'.length);
+        if (assetEntries.any((x) => x.path == to)) _refuse('FYN-T0003', 'copyIntoProject: $to exists');
+        final copy = AssetEntry(
+          id: 'new-${++_fresh}'.padRight(36, '0'),
+          path: to,
+          name: e.name,
+          kind: e.kind,
+          document: e.document,
+          importer: e.importer,
+          subAssets: e.subAssets,
+          dataType: e.dataType,
+        );
+        assetEntries.add(copy);
+        final label = 'Copy ${e.path.split('/').last} into Project';
+        _redo.clear();
+        _undo.add((label, () => assetEntries.removeWhere((x) => x.id == copy.id)));
+        return _done(kind, label, copy, {'from': e.path, 'path': assetFile(to)});
+      // ADR-0029: every asset of a package copied with its id, shadowing it.
+      case 'importPackageAssets':
+        final package = args['package'] as String;
+        final of = [
+          for (final e in assetEntries)
+            if (e.package == package) e,
+        ];
+        if (of.isEmpty) _refuse('FYN-T0003', 'importPackageAssets: $package has no assets');
+        if (assetEntries.any((x) => !x.inPackage && x.path.startsWith('$package/'))) {
+          _refuse('FYN-T0003', 'importPackageAssets: assets/$package holds files already');
+        }
+        final copies = [
+          for (final e in of)
+            AssetEntry(
+              id: e.id,
+              path: e.path.substring('$packagesRoot/'.length),
+              name: e.name,
+              kind: e.kind,
+              document: e.document,
+              importer: e.importer,
+              subAssets: e.subAssets,
+              dataType: e.dataType,
+            ),
+        ];
+        // The project's own win: the package's are shadowed.
+        assetEntries
+          ..removeWhere((x) => x.package == package)
+          ..addAll(copies);
+        final label = 'Import $package Assets';
+        _redo.clear();
+        _undo.add((
+          label,
+          () {
+            assetEntries
+              ..removeWhere((x) => copies.any((c) => identical(c, x)))
+              ..addAll(of);
+          },
+        ));
+        return _done(kind, label, null, {'imported': copies.length});
       case 'extractMaterials':
         final id = args['asset'] as String;
         final e = entryOf(id) ?? _refuse('FYN-A0004', 'no asset $id');

@@ -680,6 +680,17 @@ window, never running game code and never reading a cooked cache
   file when it was the file's stem; a source is copied byte for byte with
   a sidecar of its own (same settings, fresh sub-asset ids under the same
   keys); undo removes the copy (refused once it was edited).
+  `copyIntoProject { asset, path? }` (ADR-0029) copies a package's
+  asset into the project under a fresh id, as `duplicateAsset` does: by
+  default to `<package>/<its path in the package>`, numbered when that is
+  taken; the label is `Copy <file> into Project`.
+  `importPackageAssets { package }` (ADR-0029, Unity's Import Package)
+  copies every asset of the package to `<package>/…` **with its id**
+  (sidecars and sub-asset ids too), so the copies take over every
+  reference to the package's assets; refused when `assets/<package>`
+  holds files; one undo step (`Import <package> Assets`) removes them all.
+  Renaming, moving or deleting a package's asset is `FYN-E0007` ("belongs
+  to the package 'x'", suggesting Copy into Project).
   `installPrimitives {}` (ADR-0023, 2026-09-24) makes sure the project
   has the editor's built-in shapes: the asset of the fixed id
   `f7a1e5d0-0000-4000-8000-000000000023`, wherever it was moved, comes
@@ -1915,6 +1926,21 @@ A Fynkel package's types are the game's too:
   has their metadata.
 - **Names.** A package's type ids start with its namespace
   (`pickups.Pickup`). `fynkel` and `game` are reserved.
+
+**Package assets.** A Fynkel package's asset folder is scanned as the
+game's is (sidecars, ids, importers) and mounted at
+`Packages/<package>/<path>` (`AssetDatabase::mount`,
+`fynkel_document::packages::package_assets`). Validation, the cook, the
+authoring session and `assets.g.dart` see them; the project's own assets
+win on an id or a path both have (`merged_with`), which is what
+`importPackageAssets` relies on. A package's asset in the session's list
+carries `package`, `file` (its absolute file) and, when pub keeps the
+package (hosted, git, SDK), `readOnly` with the reason. Documents of a
+`path:` package open and save in place; those of a kept package open
+read-only. Asset operations that move or remove files refuse a package's
+assets; `copyIntoProject` and `importPackageAssets` bring them into the
+project. `fynkel codegen` in a package's own folder writes its
+`assets.g.dart` from its `assets` folder.
 
 A package runs `fynkel codegen --project .` in its own folder and commits
 `lib/generated/` and `schemas/`, as a game does. There it writes no

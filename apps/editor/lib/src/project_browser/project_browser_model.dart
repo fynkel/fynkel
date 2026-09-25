@@ -198,7 +198,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
     _seen = rev;
     _entries = project.assets();
     _byId = {for (final e in _entries) e.id: e};
-    _folders = project.folders();
+    _folders = [...project.folders(), ..._packageFolders(_entries)];
     _details.clear();
     _modified.clear();
     _sizes.clear();
@@ -212,6 +212,33 @@ final class ProjectBrowserModel extends ChangeNotifier {
     if (lead != null && !_byId.containsKey(lead)) lead = selection.lastOrNull;
     if (renamingAsset != null && !_byId.containsKey(renamingAsset)) renamingAsset = null;
     if (folder.isNotEmpty && !_folders.contains(folder)) folder = _parentOf(folder);
+  }
+
+  /// The folders of the package assets (ADR-0029): `Packages`, one per
+  /// package and each folder an asset is in — derived, as they are not
+  /// under the assets directory.
+  static List<String> _packageFolders(List<AssetEntry> entries) {
+    final out = <String>{};
+    for (final e in entries) {
+      if (!e.inPackage) continue;
+      var at = e.path.lastIndexOf('/');
+      while (at > 0) {
+        out.add(e.path.substring(0, at));
+        at = e.path.lastIndexOf('/', at - 1);
+      }
+    }
+    return out.toList()..sort();
+  }
+
+  /// Whether [rel] is the Packages root or a folder under it.
+  static bool inPackages(String rel) => rel == packagesRoot || rel.startsWith('$packagesRoot/');
+
+  /// The package a `Packages/<package>/…` folder belongs to; null elsewhere
+  /// (the Packages root included).
+  static String? packageOfFolder(String rel) {
+    if (!rel.startsWith('$packagesRoot/')) return null;
+    final parts = rel.split('/');
+    return parts[1];
   }
 
   void _onProject() {
@@ -291,7 +318,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
       }
       return out;
     }();
-    return rel.isEmpty ? _entries.length : counts[rel] ?? 0;
+    return rel.isEmpty ? _entries.where((e) => !e.inPackage).length : counts[rel] ?? 0;
   }
 
   // ── What the list shows ─────────────────────────────────────────────
@@ -320,7 +347,8 @@ final class ProjectBrowserModel extends ChangeNotifier {
     if (view == BrowserView.list || filtering) return const [];
     return [
       for (final f in _folders)
-        if (_parentOf(f) == folder) f,
+        // Packages is a root of its own, not a folder of the assets root.
+        if (_parentOf(f) == folder && f != packagesRoot) f,
     ];
   }
 
@@ -720,6 +748,26 @@ final class ProjectBrowserModel extends ChangeNotifier {
 
   bool get canEdit => !project.isReadOnly;
 
+  /// Whether the asset [e] can be renamed, moved, deleted or duplicated: a
+  /// package's cannot (ADR-0029) — Copy into Project makes one that can.
+  bool canEditEntry(AssetEntry e) => canEdit && !e.inPackage;
+
+  /// Whether assets can be made, dropped or folders changed in [rel]: not
+  /// in Packages (ADR-0029).
+  bool canEditFolder(String rel) => canEdit && !inPackages(rel);
+
+  /// Whether New … makes its asset here: the shown folder is not one of
+  /// Packages'.
+  bool get canCreateHere => canEditFolder(view == BrowserView.folders ? folder : '');
+
+  /// Refuses a change in a package's folder, saying so; true when refused.
+  bool _refusedInPackages(String rel) {
+    if (!inPackages(rel)) return false;
+    lastError = '$rel belongs to a package — Copy into Project to change a copy.';
+    notifyListeners();
+    return true;
+  }
+
   /// A unique `New <Kind>[ N]` file in [inFolder] for a document kind.
   String _freshPath(String inFolder, String base, String suffix) {
     _sync();
@@ -735,6 +783,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
   /// [inFolder] (the shown folder by default), selected and ready to rename.
   OperationResult? newDocument(String kind, {String? inFolder}) {
     final target = inFolder ?? (view == BrowserView.folders ? folder : '');
+    if (_refusedInPackages(target)) return null;
     // Unity's names: New Scene, New Material, New Volume Profile, New Physics Material.
     final rel = _freshPath(target, 'New ${documentKindTitle(kind)}', documentSuffix(kind));
     final r = _guard(() => project.newDocument(kind, rel));
@@ -754,6 +803,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
   /// with every field at its default, selected and ready to rename.
   OperationResult? newData(DataTypeInfo type, {String? inFolder}) {
     final target = inFolder ?? (view == BrowserView.folders ? folder : '');
+    if (_refusedInPackages(target)) return null;
     final rel = _freshPath(target, 'New ${type.title}', '.data.json');
     final r = _guard(() => project.newDocument('data', rel, type: type.id));
     if (r == null) return null;
@@ -775,6 +825,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
     if (base == null || base.document != 'prefab') return null;
     final slash = base.path.lastIndexOf('/');
     final inFolder = slash < 0 ? '' : base.path.substring(0, slash);
+    if (_refusedInPackages(inFolder)) return null;
     final file = slash < 0 ? base.path : base.path.substring(slash + 1);
     final stem = file.endsWith('.prefab.json') ? file.substring(0, file.length - '.prefab.json'.length) : file;
     final rel = _freshPath(inFolder, '$stem Variant', '.prefab.json');
@@ -793,6 +844,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
   /// folder by default) and selected, as Unity imports them.
   OperationResult? importFiles(List<String> paths, {String? inFolder}) {
     final target = inFolder ?? (view == BrowserView.folders ? folder : '');
+    if (_refusedInPackages(target)) return null;
     final r = _guard(() => project.importFiles(paths, folder: target));
     if (r == null) return null;
     final ids = [
@@ -812,6 +864,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
   /// An empty folder under [inFolder], shown and ready to rename.
   bool newFolder({String? inFolder}) {
     final target = inFolder ?? folder;
+    if (_refusedInPackages(target)) return false;
     _sync();
     String rel;
     for (var n = 1; ; n++) {
@@ -835,14 +888,15 @@ final class ProjectBrowserModel extends ChangeNotifier {
 
   void beginRename([String? id]) {
     final target = id ?? lead;
-    if (target == null || !canEdit || entry(target) == null) return;
+    final e = target == null ? null : entry(target);
+    if (e == null || !canEditEntry(e)) return;
     renamingAsset = target;
     renamingFolder = null;
     notifyListeners();
   }
 
   void beginRenameFolder(String rel) {
-    if (!canEdit || !folders.contains(rel)) return;
+    if (!canEditFolder(rel) || !folders.contains(rel)) return;
     renamingFolder = rel;
     renamingAsset = null;
     notifyListeners();
@@ -903,7 +957,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
     var moved = 0;
     for (final id in ids.toList()) {
       final e = entry(id);
-      if (e == null || _folderOf(e) == toFolder) continue;
+      if (e == null || e.inPackage || _folderOf(e) == toFolder) continue;
       final file = p.basename(e.path);
       final to = toFolder.isEmpty ? file : '$toFolder/$file';
       if (_guard(() => project.renameAsset(id, to)) == null) break;
@@ -914,13 +968,15 @@ final class ProjectBrowserModel extends ChangeNotifier {
 
   /// Whether [ids] may be dropped into [toFolder]: at least one would move.
   bool canMove(Iterable<String> ids, String toFolder) =>
-      canEdit && ids.any((id) => entry(id) != null && _folderOf(entry(id)!) != toFolder);
+      canEditFolder(toFolder) &&
+      ids.any((id) => entry(id) != null && canEditEntry(entry(id)!) && _folderOf(entry(id)!) != toFolder);
 
   /// Renames the folder [rel] to [typed]: every asset under it moves
   /// through the session (each its own undo step), then the empty
   /// directory goes. An empty folder is only a directory rename.
   bool renameFolder(String rel, String typed) {
     renamingFolder = null;
+    if (_refusedInPackages(rel)) return false;
     final name = typed.trim().replaceAll('/', '');
     if (name.isEmpty || name == p.basename(rel)) {
       notifyListeners();
@@ -962,6 +1018,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
   /// Deletes the folder [rel] when nothing is under it; a folder with
   /// assets is refused — move or delete them first.
   bool deleteFolder(String rel) {
+    if (_refusedInPackages(rel)) return false;
     _sync();
     final under = _entries.where((e) => e.path.startsWith('$rel/')).length;
     if (under > 0) {
@@ -1063,6 +1120,11 @@ final class ProjectBrowserModel extends ChangeNotifier {
   void requestDelete() {
     final targets = selection.toList();
     if (targets.isEmpty || !canEdit) return;
+    if (targets.any((id) => entry(id)?.inPackage ?? false)) {
+      lastError = 'A package\'s assets cannot be deleted — remove the package from pubspec.yaml.';
+      notifyListeners();
+      return;
+    }
     if (targets.any((id) => project.dependents(id).isNotEmpty)) {
       delete(ids: targets);
       return;
@@ -1085,7 +1147,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
   bool duplicate() {
     final targets = [
       for (final id in selection)
-        if (entry(id) != null) id,
+        if (entry(id) case final e? when !e.inPackage) id,
     ];
     if (targets.isEmpty || !canEdit) return false;
     final copies = <String>[];
@@ -1101,6 +1163,48 @@ final class ProjectBrowserModel extends ChangeNotifier {
       ..clear()
       ..addAll(copies);
     lead = copies.last;
+    notifyListeners();
+    return true;
+  }
+
+  /// Whether the selection holds a package's asset to Copy into Project.
+  bool get canCopyIntoProject => canEdit && selection.any((id) => entry(id)?.inPackage ?? false);
+
+  /// Copies the selected package assets into the project (ADR-0029), each
+  /// with a fresh id under `<package>/…`, and selects the copies — one
+  /// asset-history step each.
+  bool copyIntoProject() {
+    final targets = [
+      for (final id in selection)
+        if (entry(id) case final e? when e.inPackage) id,
+    ];
+    if (targets.isEmpty || !canEdit) return false;
+    final copies = <String>[];
+    for (final id in targets) {
+      final copy = _guard(() => project.copyIntoProject(id))?.entry?['id'] as String?;
+      if (copy == null) break;
+      copies.add(copy);
+    }
+    if (copies.isEmpty) return false;
+    _sync();
+    selection
+      ..clear()
+      ..addAll(copies);
+    lead = copies.last;
+    final e = entry(lead!);
+    if (e != null && view == BrowserView.folders && !filtering) folder = _folderOf(e);
+    notifyListeners();
+    return true;
+  }
+
+  /// Unity's Import Package: every asset of [package] copied into
+  /// `<package>/` with its id, so the copies take over the package's
+  /// references (ADR-0029); the folder is shown. One undo step.
+  bool importPackageAssets(String package) {
+    if (!canEdit) return false;
+    if (_guard(() => project.importPackageAssets(package)) == null) return false;
+    _sync();
+    if (view == BrowserView.folders && !filtering && _folders.contains(package)) folder = package;
     notifyListeners();
     return true;
   }

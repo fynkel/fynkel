@@ -162,7 +162,7 @@ class _VolumeInspectorState extends State<VolumeInspector> {
             key: const Key('volume.addOverride'),
             popUpAnimationStyle: AnimationStyle.noAnimation,
             tooltip: '',
-            enabled: edits.canEdit && absent.isNotEmpty,
+            enabled: edits.canEditAsset(id) && absent.isNotEmpty,
             onSelected: (key) => edits.edit(id, {'/$key': <String, Object?>{}}),
             itemBuilder: (_) => [
               for (final o in absent)
@@ -170,7 +170,7 @@ class _VolumeInspectorState extends State<VolumeInspector> {
             ],
             child: IgnorePointer(
               child: OutlinedButton.icon(
-                onPressed: edits.canEdit && absent.isNotEmpty ? () {} : null,
+                onPressed: edits.canEditAsset(id) && absent.isNotEmpty ? () {} : null,
                 icon: const Icon(FIcons.add),
                 label: const Text('Add Override'),
               ),
@@ -197,7 +197,7 @@ class _VolumeInspectorState extends State<VolumeInspector> {
     ({String key, String title, List<_Field> fields}) o,
     Map<String, Object?> block,
   ) {
-    final enabled = edits.canEdit;
+    final enabled = edits.canEditAsset(id);
     Widget small(String label, String key, VoidCallback? onPressed) => TextButton(
       key: Key(key),
       style: TextButton.styleFrom(
@@ -267,7 +267,7 @@ class _VolumeInspectorState extends State<VolumeInspector> {
 
   Widget _field(BuildContext context, String block, _Field x, Map<String, Object?> current) {
     final ticked = current.containsKey(x.key);
-    final enabled = edits.canEdit && ticked;
+    final enabled = edits.canEditAsset(id) && ticked;
     final value = current[x.key] ?? x.fallback;
     final Widget field;
     if (value is List || x.fallback is List) {
@@ -311,7 +311,7 @@ class _VolumeInspectorState extends State<VolumeInspector> {
                 value: ticked,
                 visualDensity: VisualDensity.compact,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                onChanged: edits.canEdit
+                onChanged: edits.canEditAsset(id)
                     ? (v) => v == true ? _set(block, {x.key: value}) : edits.edit(id, {'/$block/${x.key}': unset})
                     : null,
               ),

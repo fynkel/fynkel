@@ -123,9 +123,16 @@ What Fynkel has (mapped 2026-09-25):
        game owns and edits them, and they have no update path.
      - The Project panel shows a **Packages** section under the project's
        assets.
-     - The cook treats them as project assets. `package:fynkel`'s own
-       `assets/` holds `Primitives.glb`, so the built-ins stop being a
-       special case (ADR-0026 §4 keeps its ids and its behaviour).
+     - The cook treats them as project assets. The built-in
+       `Fynkel/Primitives.glb` stays built in (`fynkel_import::builtin`,
+       ADR-0026 §4 unchanged). (Changed from "`package:fynkel`'s own
+       `assets/` holds `Primitives.glb`" while building step 3,
+       2026-09-25: the runtime's `assets.find`, `installPrimitives` and a
+       project without a resolved package graph — before `flutter pub
+       get`, a copy outside the checkout — all need the shapes, and
+       `package:fynkel` is the runtime package, not a Fynkel package with
+       assets. A package's assets are mounted beside them; the built-in
+       mount is the one special case left.)
    - **The editor part** is ADR-0028's, unchanged.
 
 3. **Physics, audio and animation become optional modules**, as Unity's
@@ -216,8 +223,9 @@ What Fynkel has (mapped 2026-09-25):
 - **What a game gets.** A game can depend on a package and get its
   scripts, data types, prefabs and editor tools, with no copying and no
   setup call per package.
-- **The built-ins stop being a special case.** The primitives come from
-  `package:fynkel`'s own assets.
+- **The built-ins stay one special case.** The primitives stay built in
+  (amended while building step 3); every other asset outside `assets/`
+  comes from a package.
 - **Multi-root assets.** The asset database, the authoring session, the
   cook and the Project panel handle several roots. Hosted package roots
   are read-only; path package roots are editable.
@@ -244,7 +252,8 @@ What Fynkel has (mapped 2026-09-25):
      Assets…;
    - the Project panel's Packages section;
    - the cook;
-   - `Primitives.glb` into `package:fynkel`.
+   - ~~`Primitives.glb` into `package:fynkel`~~ — stays built in
+     (Decision 2, amended 2026-09-25).
 4. **An example package:** `examples/packages/pickups`, with a `Pickup`
    script, a `PickupKind` data type, a pickup prefab and material, and
    an editor Inspector. `examples/code_only` uses it for a new pickup,

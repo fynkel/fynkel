@@ -226,7 +226,7 @@ final class _DataTarget extends FieldTarget {
   @override
   String get key => 'data.${state.id}';
   @override
-  bool get canEdit => edits.canEdit;
+  bool get canEdit => edits.canEditAsset(state.id);
   @override
   List<String> get instances => [state.id];
 
