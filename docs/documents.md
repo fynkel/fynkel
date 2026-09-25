@@ -721,12 +721,15 @@ window, never running game code and never reading a cooked cache
   entries) and the same values inside prefab overrides — and is refused,
   with nothing written, while such a document has unsaved edits; the
   result's `reload` lists the handles of the clean open documents it
-  rewrote. `registerBehaviour { id, description? }` (`src/behaviours.rs`,
+  rewrote. `registerBehaviour { id, description?, kind? }` (`src/behaviours.rs`,
   the editor's Create → Behaviour, after `fynkel codegen` wrote the new
   type's metadata and schema) adds `id → { kind: behaviour, version: 1,
-  description? }` to the project's component registry when the project
+  description? }` (`kind: data` for a `@FynkelDataAsset` type, ADR-0027)
+  to the project's component registry when the project
   has one and the entry is missing, as one asset-history step, and re-reads
-  the project either way. Its answer is `{ id, registered, inMetadata }`.
+  the project either way. Its answer is `{ id, registered, inMetadata }`
+  (`inMetadata`: the id is in the metadata's `behaviours`, or its
+  `dataTypes` for a data type).
   `setStartupScene { id }` (the M4 gate; Unity's first scene in Build
   Settings) writes the project file's `startupScene` — the scene
   `fynkel run` and `fynkel test --headless` start with — as one
