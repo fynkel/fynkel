@@ -51,10 +51,10 @@ final spinnerType = BehaviourType(
 void registerBehaviours(BehaviourRegistry r) => r.register(spinnerType);
 
 /// A code prefab.
-ObjectSpec lamp() => ObjectSpec(
+ObjectSpec lamp(AssetRef brass) => ObjectSpec(
       'Lamp',
       transform: const Transform(position: Vec3(0, 2, 0)),
-      components: const [PointLight(range: 5)],
+      components: [const PointLight(range: 5), MeshRenderer(mesh: Primitive.cylinder.mesh, material: brass)],
       children: [
         ObjectSpec('Bulb', components: const [PointLight(range: 1)], behaviours: [Spinner()..speed = 2]),
       ],
@@ -111,7 +111,8 @@ void main() {
   ProjectWriter writer() => ProjectWriter(project, registerBehaviours: registerBehaviours);
 
   (WrittenDocument, WrittenDocument) writeAll(ProjectWriter w) {
-    final prefab = w.writePrefab('prefabs/lamp', lamp());
+    final brass = w.writeMaterial('materials/brass', const PbrMaterial(baseColor: Vec4(0.8, 0.6, 0.2, 1), metallic: 1, roughness: 0.3));
+    final prefab = w.writePrefab('prefabs/lamp', lamp(brass.ref));
     final scene = w.writeScene('scenes/code', SceneSpec('Code', level(prefab.ref, robotRef)));
     return (prefab, scene);
   }
@@ -198,7 +199,7 @@ void main() {
     entities[root] = {'name': 'Notes', 'parent': null, 'children': [], 'components': {}};
     file.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(doc));
 
-    final again = writer().writeScene('scenes/code', SceneSpec('Code', level(writer().writePrefab('prefabs/lamp', lamp()).ref, robotRef)));
+    final (_, again) = writeAll(writer());
     expect(again.kept, unorderedEquals(['Crate', 'Notes']));
     final after = (jsonDecode(file.readAsStringSync()) as Map<String, Object?>)['entities'] as Map<String, Object?>;
     expect(((after[floor] as Map)['children'] as List), [mine]);
@@ -214,7 +215,7 @@ void main() {
 
   test('mistakes throw before anything is written', () {
     final w = writer();
-    expect(() => ProjectWriter(project).writePrefab('prefabs/x', lamp()), throwsArgumentError, reason: 'unregistered script');
+    expect(() => ProjectWriter(project).writePrefab('prefabs/x', lamp(Primitive.defaultMaterial)), throwsArgumentError, reason: 'unregistered script');
     expect(() => w.writeScene('scenes/x', const SceneSpec('X', [ObjectSpec('A', tags: ['nope'])])), throwsArgumentError);
     expect(() => w.writeScene('scenes/x', const SceneSpec('X', [ObjectSpec('A', layer: 'nope')])), throwsArgumentError);
     expect(

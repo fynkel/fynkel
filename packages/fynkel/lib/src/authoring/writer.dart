@@ -88,6 +88,26 @@ class ProjectWriter {
     return _write(path, 'prefab', name, [root], prefab: true);
   }
 
+  /// Writes [material] to `assets/<path>` (`.material.json` added when
+  /// missing) as a `fynkel.pbr@1` material named [name] (the file's name
+  /// by default): what `world.createMaterial` makes at runtime, as an
+  /// asset a written scene's `MeshRenderer` can name.
+  WrittenDocument writeMaterial(String path, gen.PbrMaterial material, {String? name}) {
+    path = _withExtension(path, '.material.json');
+    final file = File('$assetsDir/$path');
+    final existing = file.existsSync() ? jsonDecode(file.readAsStringSync()) as Map<String, Object?> : null;
+    final id = existing?['id'] as String? ?? _uuid5(_namespace, 'document/$path');
+    final out = <String, Object?>{
+      r'$schema': 'https://fynkel.dev/schemas/material.schema.json',
+      'formatVersion': 2,
+      'id': id,
+      'name': name ?? path.split('/').last.replaceFirst('.material.json', ''),
+      'shader': 'fynkel.pbr@1',
+      ...material.toJson(),
+    };
+    return _writeText(file, path, id, out, const []);
+  }
+
   static String _withExtension(String path, String ext) => path.endsWith(ext) ? path : '$path$ext';
 
   WrittenDocument _write(String path, String kind, String name, List<ObjectSpec> roots, {required bool prefab}) {
@@ -107,7 +127,13 @@ class ProjectWriter {
       'entities': doc.entities,
       if (prefab) 'root': doc.roots.single,
     };
-    final text = '${const JsonEncoder.withIndent('  ').convert(out)}\n';
+    return _writeText(file, path, id, out, kept);
+  }
+
+  /// Writes [doc] canonically (2-space indent, a trailing newline) unless
+  /// the file holds those bytes already.
+  static WrittenDocument _writeText(File file, String path, String id, Map<String, Object?> doc, List<String> kept) {
+    final text = '${const JsonEncoder.withIndent('  ').convert(doc)}\n';
     final changed = !file.existsSync() || file.readAsStringSync() != text;
     if (changed) {
       file.parent.createSync(recursive: true);
