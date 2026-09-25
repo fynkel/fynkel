@@ -28,12 +28,14 @@ use std::sync::{Arc, Mutex};
 
 use fynkel_contracts::{AssetRef, Code, Diagnostic, Uuid};
 use fynkel_cooked::payload::{
-    decode_animation, decode_clip, decode_environment, decode_mesh, decode_skin, decode_stream,
-    decode_texture, ANIM_INTERPOLATION_CUBIC_SPLINE, ANIM_INTERPOLATION_LINEAR,
-    ANIM_INTERPOLATION_STEP, ANIM_PROPERTY_ROTATION, ANIM_PROPERTY_SCALE,
-    ANIM_PROPERTY_TRANSLATION,
+    decode_animation, decode_clip, decode_environment, decode_skin, decode_stream, decode_texture,
+    ANIM_INTERPOLATION_CUBIC_SPLINE, ANIM_INTERPOLATION_LINEAR, ANIM_INTERPOLATION_STEP,
+    ANIM_PROPERTY_ROTATION, ANIM_PROPERTY_SCALE, ANIM_PROPERTY_TRANSLATION,
 };
-pub use fynkel_cooked::payload::{EnvironmentPayload, MeshPayload, TexturePayload};
+pub use fynkel_cooked::payload::{
+    decode_mesh, encode_mesh, encode_skinned_mesh, EnvironmentPayload, MeshPayload, TexturePayload,
+    Vertex,
+};
 use fynkel_cooked::{
     ChunkFile, KIND_ANIMATION, KIND_CLIP, KIND_ENVIRONMENT, KIND_JSON, KIND_MATERIAL, KIND_MESH,
     KIND_SKIN, KIND_STREAM, KIND_TEXTURE,
@@ -349,6 +351,14 @@ struct Store {
     /// ADR-0026 §4) under ids the cache does not have: read before the
     /// cooked ones, never evicted or cleared — only the game removes one.
     runtime_materials: HashMap<AssetRef, Arc<PbrMaterial>>,
+    /// Meshes made by the game at runtime (`world.createMesh`, ADR-0026
+    /// §4), read before the cooked ones and kept like the materials.
+    runtime_meshes: HashMap<AssetRef, Arc<MeshPayload>>,
+    /// Bumps on every runtime mesh set or removed; `mesh_changes` holds
+    /// the count each mesh last changed at, so a renderer re-uploads only
+    /// what changed since it last looked.
+    mesh_edits: u64,
+    mesh_changes: HashMap<AssetRef, u64>,
     clips: HashMap<AssetRef, Arc<Clip>>,
     blends: HashMap<AssetRef, Arc<BlendSpace>>,
     volumes: HashMap<AssetRef, VolumeProfile>,
@@ -425,6 +435,9 @@ impl Assets {
                 environments: HashMap::new(),
                 materials: HashMap::new(),
                 runtime_materials: HashMap::new(),
+                runtime_meshes: HashMap::new(),
+                mesh_edits: 0,
+                mesh_changes: HashMap::new(),
                 clips: HashMap::new(),
                 blends: HashMap::new(),
                 volumes: HashMap::new(),
@@ -512,16 +525,72 @@ impl Assets {
         s.live_edits += 1;
     }
 
-    /// The runtime materials of `from` (the store a load to another cache
-    /// replaces), so the game's materials outlive the switch.
-    pub fn adopt_runtime_materials(&self, from: &Assets) {
+    /// The runtime materials and meshes of `from` (the store a load to
+    /// another cache replaces), so what the game made outlives the switch.
+    pub fn adopt_runtime_assets(&self, from: &Assets) {
         if Arc::ptr_eq(&self.inner, &from.inner) {
             return;
         }
-        let theirs = from.lock().runtime_materials.clone();
+        let (materials, meshes) = {
+            let f = from.lock();
+            (f.runtime_materials.clone(), f.runtime_meshes.clone())
+        };
         let mut s = self.lock();
-        s.runtime_materials.extend(theirs);
+        s.runtime_materials.extend(materials);
         s.live_edits += 1;
+        for (r, m) in meshes {
+            s.mesh_edits += 1;
+            let at = s.mesh_edits;
+            s.mesh_changes.insert(r.clone(), at);
+            s.runtime_meshes.insert(r, m);
+        }
+    }
+
+    /// `m` as the runtime mesh `r` (`world.createMesh`, ADR-0026 §4), or
+    /// `None` to remove it: drawn by every renderer on this store like a
+    /// cooked mesh, kept across clears and evictions. `m`'s bounds are
+    /// recomputed from its positions.
+    pub fn set_runtime_mesh(&self, r: &AssetRef, m: Option<MeshPayload>) {
+        let mut s = self.lock();
+        match m {
+            Some(mut m) => {
+                let (min, max) = bounds_of(&m.vertices);
+                m.bounds_min = min;
+                m.bounds_max = max;
+                s.runtime_meshes.insert(r.clone(), Arc::new(m))
+            }
+            None => s.runtime_meshes.remove(r),
+        };
+        s.meshes.remove(r);
+        s.mesh_edits += 1;
+        let at = s.mesh_edits;
+        s.mesh_changes.insert(r.clone(), at);
+    }
+
+    /// Whether `r` is a mesh the game made or replaced at runtime.
+    pub fn is_runtime_mesh(&self, r: &AssetRef) -> bool {
+        self.lock().runtime_meshes.contains_key(r)
+    }
+
+    /// Bumps on every [`set_runtime_mesh`]; with [`meshes_changed_since`]
+    /// a renderer drops the GPU copies of the meshes that changed.
+    ///
+    /// [`set_runtime_mesh`]: Assets::set_runtime_mesh
+    /// [`meshes_changed_since`]: Assets::meshes_changed_since
+    pub fn mesh_edits(&self) -> u64 {
+        self.lock().mesh_edits
+    }
+
+    /// The meshes set or removed after the [`mesh_edits`] count `seen`.
+    ///
+    /// [`mesh_edits`]: Assets::mesh_edits
+    pub fn meshes_changed_since(&self, seen: u64) -> Vec<AssetRef> {
+        let s = self.lock();
+        s.mesh_changes
+            .iter()
+            .filter(|(_, at)| **at > seen)
+            .map(|(r, _)| r.clone())
+            .collect()
     }
 
     /// The cooked material `r` again (read on its next use).
@@ -968,8 +1037,11 @@ impl Assets {
     }
 
     pub fn mesh(&self, r: &AssetRef) -> Result<Arc<MeshPayload>, Diagnostic> {
-        if let Some(m) = self.lock().meshes.get(r) {
-            return Ok(m.clone());
+        {
+            let s = self.lock();
+            if let Some(m) = s.runtime_meshes.get(r).or_else(|| s.meshes.get(r)) {
+                return Ok(m.clone());
+            }
         }
         let bytes = self.chunk(r, KIND_MESH)?;
         let payload = decode_mesh(&bytes).ok_or_else(|| self.malformed(r, "MESH"))?;
@@ -1586,4 +1658,19 @@ impl std::fmt::Debug for Residency {
             .field("ids", &self.ids.len())
             .finish()
     }
+}
+
+/// The axis-aligned bounds of `vertices`' positions (zero for none).
+fn bounds_of(vertices: &[fynkel_cooked::payload::Vertex]) -> ([f32; 3], [f32; 3]) {
+    let Some(first) = vertices.first() else {
+        return ([0.0; 3], [0.0; 3]);
+    };
+    let (mut min, mut max) = (first.position, first.position);
+    for v in vertices {
+        for k in 0..3 {
+            min[k] = min[k].min(v.position[k]);
+            max[k] = max[k].max(v.position[k]);
+        }
+    }
+    (min, max)
 }

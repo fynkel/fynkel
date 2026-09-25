@@ -509,6 +509,60 @@ pub unsafe extern "C" fn fynkel_world_set_material(
     })
 }
 
+/// A mesh made at runtime (ADR-0026 §4): see the header.
+///
+/// # Safety
+/// `world` live or NULL; `id` points at 16 readable bytes; `payload` at
+/// `payload_len` readable bytes (NULL when 0).
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_set_mesh(
+    world: *mut FynkelWorld,
+    id: *const u8,
+    payload: *const u8,
+    payload_len: u32,
+) -> Status {
+    if id.is_null() || (payload.is_null() && payload_len != 0) {
+        return Status::InvalidArgument;
+    }
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(std::slice::from_raw_parts(id, 16));
+    let key = fynkel_contracts::AssetRef::new(fynkel_contracts::Uuid(bytes));
+    let mesh = if payload_len == 0 {
+        None
+    } else {
+        let payload = std::slice::from_raw_parts(payload, payload_len as usize);
+        match fynkel_assets::decode_mesh(payload) {
+            Some(m) if !m.is_skinned() && !m.indices.is_empty() && m.indices.len() % 3 == 0 => {
+                let finite = m.vertices.iter().all(|v| {
+                    v.position
+                        .iter()
+                        .chain(&v.normal)
+                        .chain(&v.tangent)
+                        .chain(&v.uv0)
+                        .chain(&v.uv1)
+                        .chain(&v.color)
+                        .all(|x| x.is_finite())
+                });
+                if !finite {
+                    return Status::InvalidArgument;
+                }
+                Some(m)
+            }
+            _ => return Status::InvalidArgument,
+        }
+    };
+    guarded(world, move |w| {
+        let Some(assets) = w.assets.clone() else {
+            return Status::LoadFailed;
+        };
+        assets.set_runtime_mesh(&key, mesh);
+        // A mesh collider reads it again when one is next set; the ones
+        // built already keep their shape.
+        w.core_mut().physics_mut().forget_mesh(&key);
+        Status::Ok
+    })
+}
+
 /// # Safety
 /// `world` live; `out_result` may be NULL.
 #[no_mangle]

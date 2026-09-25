@@ -212,6 +212,57 @@ fn fixture_project_renders_its_cooked_meshes_from_the_scene_camera() {
     assert!(magenta > 500, "{magenta} magenta pixels");
 }
 
+/// A mesh the game makes at runtime (`world.createMesh`, ADR-0026 §4):
+/// drawn from the store like a cooked one, re-uploaded when it changes,
+/// missing once removed.
+#[test]
+fn runtime_meshes_draw_and_change() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("no GPU adapter; skipping");
+        return;
+    };
+    let project = TempProject::new("runtime-mesh");
+    let assets = Assets::open(&project.cook()).unwrap_or_else(|d| panic!("{d}"));
+    let (_world, mut extract, _residency) = load_startup(&assets);
+    let (w, h) = (128, 128);
+    let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, w, h);
+    renderer.placeholders = false;
+    renderer.set_assets(Some(assets.clone()));
+    let cooked_px = render_offscreen(&device, &queue, &mut renderer, &extract);
+    let drawn = |px: &[[u8; 4]]| px.iter().filter(|p| !is_background(**p)).count();
+
+    // Both cubes drawn through a runtime copy of their cooked mesh: the
+    // same picture.
+    let cooked = (*assets.mesh(&extract.meshes[0].mesh).unwrap()).clone();
+    let made = fynkel_contracts::AssetRef::new(fynkel_contracts::Uuid(*b"runtime-mesh-002"));
+    assets.set_runtime_mesh(&made, Some(cooked.clone()));
+    for m in &mut extract.meshes {
+        m.mesh = made.clone();
+    }
+    let px = render_offscreen(&device, &queue, &mut renderer, &extract);
+    assert_eq!(renderer.asset_errors(), &[] as &[String]);
+    assert_eq!(px, cooked_px);
+
+    // Changed: the cubes shrunk to a tenth — the next frame uploads it.
+    let mut small = cooked;
+    for v in &mut small.vertices {
+        v.position = v.position.map(|x| x * 0.1);
+    }
+    assets.set_runtime_mesh(&made, Some(small));
+    let px = render_offscreen(&device, &queue, &mut renderer, &extract);
+    assert!(
+        drawn(&px) * 20 < drawn(&cooked_px),
+        "{} of {} pixels",
+        drawn(&px),
+        drawn(&cooked_px)
+    );
+
+    // Removed: both draw as missing.
+    assets.set_runtime_mesh(&made, None);
+    render_offscreen(&device, &queue, &mut renderer, &extract);
+    assert_eq!(renderer.stats().missing, 2);
+}
+
 #[test]
 fn placeholders_off_hides_entities_without_meshes() {
     let Some((device, queue)) = headless_device() else {

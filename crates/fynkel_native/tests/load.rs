@@ -1059,6 +1059,116 @@ fn runtime_materials_through_the_abi() {
     assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
 }
 
+/// `fynkel_world_set_mesh` (ADR-0026 §4): a mesh made at runtime is what
+/// the store gives every renderer, with bounds from its positions, across
+/// scene loads and clears; a payload that could not be drawn is refused
+/// and the mesh kept.
+#[test]
+fn runtime_meshes_through_the_abi() {
+    use fynkel_assets::{encode_mesh, Vertex};
+    use fynkel_contracts::{AssetRef, Uuid};
+
+    let cooked = Cooked::new("meshes");
+    let cache = cooked.text();
+    let host = Host::new();
+    let made = AssetRef::new(Uuid(*b"runtime-mesh-001"));
+    let at = |p: [f32; 3]| Vertex {
+        position: p,
+        ..Default::default()
+    };
+    let quad = [
+        at([0.0, 0.0, 0.0]),
+        at([2.0, 0.0, 0.0]),
+        at([2.0, 1.0, 0.0]),
+        at([0.0, 1.0, -3.0]),
+    ];
+    let indices = [0, 1, 2, 0, 2, 3];
+    // Bounds that are wrong on purpose: the store recomputes them.
+    let payload = encode_mesh(&quad, &indices, [0.0; 3], [0.0; 3]);
+    let set = |r: &AssetRef, payload: &[u8]| unsafe {
+        fynkel_world_set_mesh(
+            host.w,
+            r.asset.0.as_ptr(),
+            payload.as_ptr(),
+            payload.len() as u32,
+        )
+    };
+    let store = || unsafe { &*host.w }.assets().unwrap().clone();
+
+    assert_eq!(
+        set(&made, &payload),
+        Status::LoadFailed,
+        "no store before a load"
+    );
+    assert_eq!(host.load_project(&cache), Status::Ok);
+    let edits = store().mesh_edits();
+    assert_eq!(set(&made, &payload), Status::Ok);
+    let m = store().mesh(&made).unwrap();
+    assert_eq!(
+        (
+            m.vertices.len(),
+            m.indices.clone(),
+            m.bounds_min,
+            m.bounds_max
+        ),
+        (4, indices.to_vec(), [0.0, 0.0, -3.0], [2.0, 1.0, 0.0])
+    );
+    assert!(store().is_runtime_mesh(&made));
+    assert_eq!(
+        store().meshes_changed_since(edits),
+        vec![made.clone()],
+        "a renderer re-uploads it"
+    );
+
+    // Across a scene load (same cache, same store) and a clear.
+    assert_eq!(host.load_scene(&cache, PLAYGROUND), Status::Ok);
+    store().clear();
+    assert_eq!(store().mesh(&made).unwrap().vertices.len(), 4);
+
+    // What could not be drawn is refused; the mesh stays.
+    let refused = [
+        payload[..payload.len() - 1].to_vec(),
+        encode_mesh(&quad, &[0, 1], [0.0; 3], [0.0; 3]),
+        encode_mesh(&quad, &[0, 1, 4], [0.0; 3], [0.0; 3]),
+        encode_mesh(&quad, &[], [0.0; 3], [0.0; 3]),
+        encode_mesh(
+            &[at([f32::NAN, 0.0, 0.0]), at([1.0; 3]), at([0.0; 3])],
+            &[0, 1, 2],
+            [0.0; 3],
+            [0.0; 3],
+        ),
+        fynkel_assets::encode_skinned_mesh(
+            &quad[..3],
+            &[0, 1, 2],
+            [0.0; 3],
+            [0.0; 3],
+            &[Default::default(); 3],
+        ),
+    ];
+    for (i, p) in refused.iter().enumerate() {
+        assert_eq!(set(&made, p), Status::InvalidArgument, "payload {i}");
+    }
+    assert_eq!(
+        unsafe { fynkel_world_set_mesh(host.w, ptr::null(), ptr::null(), 0) },
+        Status::InvalidArgument
+    );
+    assert_eq!(store().mesh(&made).unwrap().vertices.len(), 4);
+
+    // Changed, then removed.
+    assert_eq!(
+        set(
+            &made,
+            &encode_mesh(&quad[..3], &[0, 1, 2], [0.0; 3], [0.0; 3])
+        ),
+        Status::Ok
+    );
+    assert_eq!(store().mesh(&made).unwrap().vertices.len(), 3);
+    assert_eq!(set(&made, &[]), Status::Ok);
+    assert!(store().mesh(&made).is_err());
+    assert!(!store().is_runtime_mesh(&made));
+    assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
+}
+
 /// `fynkel_world_clone` (ADR-0026 §4): a live subtree copied, placed and
 /// reported as source → copy pairs, without any project; a stale source
 /// fails with a report and spawns nothing.
@@ -1130,7 +1240,8 @@ fn clone_through_the_abi() {
 /// input bound, the cache's scenes loadable by id.
 #[test]
 fn a_project_without_a_startup_scene_opens_empty() {
-    let project = std::env::temp_dir().join(format!("fynkel-native-nostartup-{}", std::process::id()));
+    let project =
+        std::env::temp_dir().join(format!("fynkel-native-nostartup-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&project);
     copy_dir(&fixture(), &project);
     let _ = std::fs::remove_dir_all(project.join(".fynkel"));

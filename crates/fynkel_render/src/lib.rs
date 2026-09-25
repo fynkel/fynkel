@@ -932,6 +932,7 @@ pub struct ExtractRenderer {
     /// `Assets::evictions` when the GPU caches were last reconciled.
     evictions_seen: u64,
     live_edits_seen: u64,
+    mesh_edits_seen: u64,
     meshes: HashMap<AssetRef, Option<GpuMesh>>,
     textures: HashMap<AssetRef, Option<GpuTexture>>,
     /// The cooked environments read for an HDR sky (E1; `None`: the
@@ -1337,6 +1338,7 @@ impl ExtractRenderer {
             assets: None,
             evictions_seen: 0,
             live_edits_seen: 0,
+            mesh_edits_seen: 0,
             meshes: HashMap::new(),
             textures: HashMap::new(),
             environments: HashMap::new(),
@@ -1610,6 +1612,7 @@ impl ExtractRenderer {
         }
         self.evictions_seen = assets.as_ref().map(Assets::evictions).unwrap_or(0);
         self.live_edits_seen = assets.as_ref().map(Assets::live_edits).unwrap_or(0);
+        self.mesh_edits_seen = assets.as_ref().map(Assets::mesh_edits).unwrap_or(0);
         self.assets = assets;
         self.clear_assets();
     }
@@ -1631,13 +1634,23 @@ impl ExtractRenderer {
             self.materials.clear();
             self.volume_profiles.clear();
         }
+        // A mesh the game made, changed or removed (`world.createMesh`):
+        // those GPU copies go, and the next use uploads what the store has.
+        let mesh_edits = assets.mesh_edits();
+        if mesh_edits != self.mesh_edits_seen {
+            for r in assets.meshes_changed_since(self.mesh_edits_seen) {
+                self.meshes.remove(&r);
+            }
+            self.mesh_edits_seen = mesh_edits;
+        }
         let now = assets.evictions();
         if now == self.evictions_seen {
             return;
         }
         self.evictions_seen = now;
         let a = assets.clone();
-        self.meshes.retain(|r, _| a.is_resident(r.asset));
+        self.meshes
+            .retain(|r, _| a.is_resident(r.asset) || a.is_runtime_mesh(r));
         self.textures.retain(|r, _| a.is_resident(r.asset));
         self.environments.retain(|r, _| a.is_resident(r.asset));
         self.volume_profiles.retain(|r, _| a.is_resident(r.asset));

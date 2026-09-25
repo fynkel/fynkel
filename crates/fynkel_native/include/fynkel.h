@@ -590,6 +590,22 @@ FynkelStatus fynkel_world_set_material(FynkelWorld* world,
                                        const uint8_t* id,
                                        const uint8_t* payload,
                                        uint32_t payload_len);
+/* A mesh made at runtime (ADR-0026 §4, `world.createMesh`): `payload` is a
+ * static MESH chunk payload — u32 vertex count, u32 index count, 6 × f32
+ * bounds (recomputed here), the 72-byte vertices (position, normal,
+ * tangent, uv0, uv1, colour), the u32 triangle-list indices — drawn as the
+ * mesh `id` (16 bytes, big-endian UUID, no sub-asset path: one the cache
+ * does not have) by every renderer on the world's asset store until
+ * `payload_len` 0 removes it, and read by a `shape: mesh`
+ * collider set after it (colliders built before keep their shape). Kept
+ * across scene loads. FYNKEL_STATUS_LOAD_FAILED before any project is
+ * loaded; FYNKEL_STATUS_INVALID_ARGUMENT for a payload that does not
+ * decode, has skin weights, no triangles, an index out of range or a
+ * value that is not finite. */
+FynkelStatus fynkel_world_set_mesh(FynkelWorld* world,
+                                   const uint8_t* id,
+                                   const uint8_t* payload,
+                                   uint32_t payload_len);
 
 /* UTF-8 JSON describing the last load, unload, instantiate or bind call
  * on this world (empty before any): {"ok": bool, "mode": "replace" |

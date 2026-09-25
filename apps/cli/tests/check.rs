@@ -1733,7 +1733,13 @@ fn validate_resolves_the_built_in_shapes() {
     assert!(text.contains("f7a1e5d0"));
     std::fs::write(&scene, text).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
-        .args(["validate", "--project", dir.to_str().unwrap(), "--json", "--root"])
+        .args([
+            "validate",
+            "--project",
+            dir.to_str().unwrap(),
+            "--json",
+            "--root",
+        ])
         .arg(&root)
         .output()
         .unwrap();

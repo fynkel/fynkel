@@ -200,7 +200,7 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
             let input = bind_project_input(w, &assets);
             let residency = residency_json(&assets);
             if let Some(old) = &w.assets {
-                assets.adopt_runtime_materials(old);
+                assets.adopt_runtime_assets(old);
             }
             w.assets = Some(assets);
             Outcome {
@@ -253,7 +253,7 @@ fn open_project(w: &mut FynkelWorld, assets: Assets, cache: Value) -> Outcome {
     let input = bind_project_input(w, &assets);
     let residency = residency_json(&assets);
     if let Some(old) = &w.assets {
-        assets.adopt_runtime_materials(old);
+        assets.adopt_runtime_assets(old);
     }
     w.assets = Some(assets);
     Outcome {

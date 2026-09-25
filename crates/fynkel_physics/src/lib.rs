@@ -477,6 +477,12 @@ impl Physics {
         self.meshes.contains_key(key)
     }
 
+    /// Forgets the collision mesh `key` (a runtime mesh removed): colliders
+    /// built from it keep their shape; a new one reports it unavailable.
+    pub fn forget_mesh(&mut self, key: &AssetRef) {
+        self.meshes.remove(key);
+    }
+
     pub fn mesh_count(&self) -> usize {
         self.meshes.len()
     }
