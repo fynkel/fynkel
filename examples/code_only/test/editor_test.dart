@@ -36,15 +36,23 @@ class _Log implements EditorContext {
 
   @override
   void logError(String message) => lines.add('error: $message');
+
+  // The scene, the selection, edits and assets: not used here.
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 void main() {
   test('the editor part lists the coin kinds from the Tools menu', () {
     final editor = _Items();
     registerEditor(editor);
-    expect(editor.items.keys, ['Tools/Code Only/List Coin Kinds|codeOnly.listCoinKinds']);
+    expect(editor.items.keys, [
+      'Tools/Code Only/List Coin Kinds|codeOnly.listCoinKinds',
+      'Tools/Code Only/Select Coins|codeOnly.selectCoins',
+      'Tools/Code Only/Add Coin|codeOnly.addCoin',
+    ]);
     final log = _Log();
-    editor.items.values.single(log);
+    editor.items.values.first(log);
     expect(log.lines, ['A coin is worth 1, the big coin 5 (1.6× the size).']);
   });
 }

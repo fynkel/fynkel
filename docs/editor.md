@@ -1932,7 +1932,44 @@ void registerEditor(EditorExtensions editor) {
 - **`EditorContext`** is what every callback gets. It speaks for its
   package: `log`, `logWarning` and `logError` put a row in the Console's
   Project tab (code `extension`, the message prefixed by the package).
-  Step 2 adds the selection, edits, assets and Play.
+  The rest goes through the editor's own paths
+  (`lib/src/extensions/editor_access.dart`), so an extension's change is
+  undone, overridden and shown exactly like the user's:
+  - **`scene`** is the document the Hierarchy shows (the running game's
+    during Play), read when asked: `objects` in the Hierarchy's order,
+    `roots`, `byId`, and `find('Coin')` or `find('Level/Coins/Coin 1')`.
+    An `EditorObject` has its id, name, own active flag, parent and
+    children, its components' data as the document holds it (with a
+    prefab's overrides applied), the prefab it is an instance of, and
+    `fromPrefab` for the objects a prefab instance brings.
+  - **`selection`** and **`select(objects)`** are the tab's (Unity's
+    `Selection.objects`).
+  - **`edit(label, (edit) { … })`** collects `setField`, `rename`,
+    `setActive`, `addComponent`, `removeComponent`, `reparent`, `remove`
+    and `add(ObjectSpec, parent:)`, then writes them as **one
+    transaction, one undo step**. Values are the game's own (`Vec3`,
+    `Quat`, `AssetRef`, a written `DataAsset`, an enum) or JSON. A field
+    of an object from a prefab becomes an override on its instance, as
+    in the Inspector. Structural changes to such an object (rename,
+    move, delete, a component removed) are refused: open the prefab.
+    `add` builds the spec as `world.build` would and a written scene
+    would hold it (ADR-0026's `ProjectWriter.entitiesOf`), pasted under
+    fresh ids; during Play each object is created in the running game.
+    One refused change, or a throw inside the callback, writes nothing.
+    `EditResult` has `ok`, the `error` (also in the Console) and the top
+    object of each `add`.
+  - **`assets`** is the project's asset list (Unity's `AssetDatabase`):
+    `all`, `ofKind('prefab')`, `ofDataType('game.CoinKind')`,
+    `find('data/coin')` (a path, with or without its extension, or a
+    name), the Project panel's `selected`, `ping`, `open` (a scene or
+    prefab in its tab, anything else in the Inspector) and
+    `createData(path, value)`. `createData` writes a data asset through
+    the Project panel's Create and binds the value to it, so a field set
+    to it afterwards names the new asset.
+  - `add` and `createData` need the game's behaviours and data types.
+    The host passes the game's generated `registerBehaviours`
+    (`EditorGame.registerBehaviours`) when `lib/generated/behaviours.g.dart`
+    exists.
 - **A failing extension fails alone.** Every call into a package is
   wrapped. A throwing `registerEditor` skips that package's extensions,
   and a throwing command or `enabled` check is a Console error (with the
