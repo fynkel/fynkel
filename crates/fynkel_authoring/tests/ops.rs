@@ -985,6 +985,41 @@ fn the_startup_scene_is_set_from_the_editor_and_undone() {
     assert_eq!(startup.asset.to_string(), MAIN);
 }
 
+/// `setModules` (Project Settings › Modules, ADR-0029 §3): the project
+/// file's `modules` with only what differs from the defaults, one undo
+/// step; the components of a module turned off stay and validate reports
+/// them; nothing changing and a non-boolean are refused.
+#[test]
+fn the_modules_are_set_from_the_editor_and_undone() {
+    let copy = Copy::new("modules");
+    let mut s = open(&copy);
+    let before = copy.read("fynkel.project.json");
+
+    refused(s.operate("setModules", &json!({ "physics": true })), "FYN-T0003");
+    refused(s.operate("setModules", &json!({ "audio": "off" })), "FYN-T0003");
+    assert_eq!(copy.read("fynkel.project.json"), before);
+
+    let v = ok(s.operate("setModules", &json!({ "animation": false, "strip": true })));
+    assert_eq!(v["label"], "Set Modules (Animation Off, Strip On)");
+    assert_eq!(v["modules"]["animation"], false);
+    assert_eq!(v["modules"]["physics"], true);
+    let after: serde_json::Value = serde_json::from_str(&copy.read("fynkel.project.json")).unwrap();
+    assert_eq!(after["modules"], json!({ "animation": false, "strip": true }));
+    let modules = s.project().unwrap().project.modules;
+    assert!(!modules.modules.animation && modules.strip);
+    assert!(!s.project().unwrap().project.allows_component("fynkel.Animator"));
+
+    // Back on: the block goes.
+    ok(s.operate("setModules", &json!({ "animation": true, "strip": false })));
+    let after: serde_json::Value = serde_json::from_str(&copy.read("fynkel.project.json")).unwrap();
+    assert!(after.get("modules").is_none(), "{after}");
+
+    ok(s.operate("undoAsset", &json!({})));
+    ok(s.operate("undoAsset", &json!({})));
+    assert_eq!(copy.read("fynkel.project.json"), before);
+    assert!(s.project().unwrap().project.modules.modules.animation);
+}
+
 #[test]
 fn a_duplicate_is_a_fresh_asset_beside_its_original_and_undo_removes_it() {
     let copy = Copy::new("duplicate");

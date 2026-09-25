@@ -45,6 +45,7 @@ pub const OPERATIONS: &[&str] = &[
     "registerBehaviour",
     "reloadBehaviours",
     "setStartupScene",
+    "setModules",
 ];
 
 /// The fixed id of the editor's built-in shapes (ADR-0023), and the
@@ -323,6 +324,7 @@ impl AuthoringSession {
             "extractMaterials" => self.extract_materials(args),
             "reimport" => self.reimport(args).map_err(one),
             "setStartupScene" => self.set_startup_scene(args).map_err(one),
+            "setModules" => self.set_modules(args).map_err(one),
             "undoAsset" => self.undo_asset().map_err(one),
             "redoAsset" => self.redo_asset().map_err(one),
             crate::layers::OP => self.set_layers_and_tags(args).map_err(one),
@@ -1607,6 +1609,87 @@ impl AuthoringSession {
             label: label.clone(),
         });
         Ok(self.finish(OP, &label, Some(id), json!({})))
+    }
+
+    /// `setModules { physics?, audio?, animation?, strip? }`: the project
+    /// file's `modules` (ADR-0029 §3; Project Settings › Modules), the
+    /// keys given replacing the project's, the rest kept. Written with
+    /// only the entries that differ from the defaults (every module on,
+    /// no strip); the block goes when none does. One asset-history step;
+    /// refused when nothing changes or a value is not a boolean. The
+    /// components of a module turned off stay in the documents — validate
+    /// reports them (FYN-P0018).
+    fn set_modules(&mut self, args: &Value) -> Result<Value, Diagnostic> {
+        const OP: &str = "setModules";
+        let project = self.project().expect("operate checked the project");
+        let old = project.project.modules;
+        let mut new = old;
+        let flag = |key: &str| -> Result<Option<bool>, Diagnostic> {
+            match args.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::Bool(b)) => Ok(Some(*b)),
+                Some(_) => Err(invalid(format!("{OP}: `{key}` must be true or false"))),
+            }
+        };
+        for m in fynkel_core::Module::ALL {
+            if let Some(on) = flag(m.key())? {
+                new.modules.set(m, on);
+            }
+        }
+        if let Some(strip) = flag("strip")? {
+            new.strip = strip;
+        }
+        if new == old {
+            return Err(invalid(format!(
+                "{OP}: the modules are what the project already has"
+            )));
+        }
+        let changed: Vec<String> = fynkel_core::Module::ALL
+            .into_iter()
+            .filter(|m| new.modules.has(*m) != old.modules.has(*m))
+            .map(|m| format!("{} {}", m.title(), if new.modules.has(m) { "On" } else { "Off" }))
+            .chain((new.strip != old.strip).then(|| {
+                format!("Strip {}", if new.strip { "On" } else { "Off" })
+            }))
+            .collect();
+        let label = format!("Set Modules ({})", changed.join(", "));
+        let project_file = project.dir.join(fynkel_document::project::PROJECT_FILE);
+        let before = std::fs::read_to_string(&project_file)
+            .map_err(|e| io(&project_file, format!("{OP}: cannot read: {e}")))?;
+        let mut doc = project.project.document.clone();
+        let mut block = serde_json::Map::new();
+        for m in fynkel_core::Module::ALL {
+            if !new.modules.has(m) {
+                block.insert(m.key().into(), false.into());
+            }
+        }
+        if new.strip {
+            block.insert("strip".into(), true.into());
+        }
+        if block.is_empty() {
+            if let Some(members) = doc.root.as_object_mut() {
+                members.retain(|m| m.key != "modules");
+            }
+        } else {
+            doc.root.set("modules", Node::from_serde(&Value::Object(block)));
+        }
+        let files = vec![FileRewrite {
+            path: project_file,
+            before,
+            after: doc.write()?,
+        }];
+        // Re-reads the project (the project file is among the files).
+        self.reload_after = self.write_rewrites(&files, false, OP)?;
+        self.assets_history.push(Done {
+            op: AssetOp::Rewrote { files },
+            label: label.clone(),
+        });
+        Ok(self.finish(
+            OP,
+            &label,
+            None,
+            json!({ "modules": new.to_json() }),
+        ))
     }
 
     fn reimport(&mut self, args: &Value) -> Result<Value, Diagnostic> {
