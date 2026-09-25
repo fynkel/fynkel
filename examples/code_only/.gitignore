@@ -1,0 +1,25 @@
+# Fynkel
+.fynkel/
+fynkel_cache/*
+!fynkel_cache/README.md
+*.bak
+
+# Dart / Flutter
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Platform runners (flutter create): keep what Flutter's own .gitignore keeps
+**/Flutter/ephemeral/
+**/Pods/
+**/xcuserdata/
+**/DerivedData/

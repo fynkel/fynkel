@@ -1,0 +1,26 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "1a765874-6dba-512c-84ec-74c6ac87d1b6",
+  "name": "gold",
+  "shader": "fynkel.pbr@1",
+  "base_color": [
+    1.0,
+    0.78,
+    0.3,
+    1.0
+  ],
+  "metallic": 0.4,
+  "roughness": 0.35,
+  "emissive": [
+    1.0,
+    0.7,
+    0.2
+  ],
+  "emissive_strength": 0.35,
+  "normal_scale": 1.0,
+  "occlusion_strength": 1.0,
+  "alpha_mode": "opaque",
+  "alpha_cutoff": 0.5,
+  "double_sided": false
+}

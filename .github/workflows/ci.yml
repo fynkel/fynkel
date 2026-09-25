@@ -178,6 +178,21 @@ jobs:
         env:
           FYNKEL_CLI: ${{ github.workspace }}/target/debug/fynkel
         run: flutter pub get && flutter analyze --fatal-infos && flutter test
+      # The code-only game (examples/code_only, ADR-0026 §8): no startup
+      # scene; its documents are written from Dart specs by tool/scenes.dart
+      # (game_test.dart checks they are current), and the Dart test plays it
+      # both ways — built live and from the written scenes.
+      - name: code-only game validate + headless + codegen
+        working-directory: examples/code_only
+        run: |
+          "$GITHUB_WORKSPACE/target/debug/fynkel" validate
+          "$GITHUB_WORKSPACE/target/debug/fynkel" test --headless --scene assets/scenes/level.scene.json
+          "$GITHUB_WORKSPACE/target/debug/fynkel" codegen --check --project .
+      - name: code-only game flutter analyze + test
+        working-directory: examples/code_only
+        env:
+          FYNKEL_CLI: ${{ github.workspace }}/target/debug/fynkel
+        run: flutter pub get && flutter analyze --fatal-infos && flutter test
       # The editor (M4): its widget tests, and the ones that drive the real
       # authoring session, the Metal viewport and a Play process. Some
       # copy examples/reference_game, so they run after its checks.
