@@ -653,7 +653,9 @@ window, never running game code and never reading a cooked cache
 - **`operate(kind, args)`** (M4-05, `crates/fynkel_authoring/src/ops.rs`)
   is `query`'s mutating twin: the session's own changes to the **asset
   tree**, next to the per-document transactions. `newDocument { kind:
-  scene|prefab|material|volume|physics_material, path, name?, shader? }` writes `Document::new`
+  scene|prefab|material|volume|physics_material|data, path, name?, shader?,
+  type?, data? }` writes `Document::new` (a `data` asset needs `type`, a
+  type id, and takes `data`, an object; its `version` is the type's)
   under the asset root (the kind's suffix added when missing; the PBR
   shader by default; refused when the file or another kind's file of that
   name exists); with `variantOf` (a prefab's id, or `{ asset, sub? }` for
@@ -1188,6 +1190,41 @@ Registering new values under the same key (a reload after an edit)
 updates the live colliders in place. The lock's `documents` gains
 `physics_material: 1`.
 
+## Data assets (ADR-0027)
+
+`<name>.data.json` (`schemas/data.schema.json`, hand-written; kind
+`data`, `fynkel_document::DataDocument`) is Unity's ScriptableObject: one
+instance of a type the game declares. The engine owns the kind; the type
+is a Dart class whose schema `fynkel codegen` writes to
+`schemas/data/<type>.schema.json` (`x-fynkel.kind: "data"`), and
+`SchemaSet` loads it by type id. The body has the shape a component
+instance has:
+
+```json
+{ "$schema": "https://fynkel.dev/schemas/data.schema.json", "formatVersion": 1,
+  "id": "…", "name": "Sword",
+  "type": "game.Weapon", "version": 1,
+  "data": { "damage": 3, "sounds": [{ "asset": "…" }] } }
+```
+
+A field absent from `data` takes the class's default. The checks:
+
+| Code | Severity | When |
+| --- | --- | --- |
+| `FYN-D1000` | error | `type` is not a namespaced type id, `version` not an integer `>= 1`, or `data` not an object (reported once, with the schema's own finding) |
+| `FYN-D1001` | warning | no schema in `schemas/data/` and no registry entry of kind `data` declares the type; the data is kept as-is |
+| `FYN-D1002` | error | the data does not fit the type's schema (at `/data/…`), or was written for another version of the type (at `/version`) |
+
+A registry entry `{ kind: data, version? }` in `fynkel.project.json`
+declares a type without a schema; its data assets take any object. A
+field whose `asset(<kind>)` hint names one kind of asset and holds
+another is `FYN-A0007`, as on a component (§ Asset sidecars). `fynkel
+document new data <name> --type <type id>` (or the authoring session's
+`newDocument` with kind `data`, `type` and an optional `data`) writes one
+with an empty `data`. The cook validates it (errors fail the asset) and
+writes it through the generic document path as a JSON chunk
+(`documentKind: data`). The lock's `documents` gains `data: 1`.
+
 ## Migrations
 
 Each kind has a current `formatVersion` (`DocumentKind::supported_format_version`:
@@ -1328,7 +1365,7 @@ the first path wins) `A0003`, unknown asset `A0004`, unknown sub-asset
 `A0005`, malformed sidecar entry `A0006`, a reference to an asset of the
 wrong kind `A0007`: a model's material remap naming something that is
 not a material document (§ Material remaps), and, since ADR-0027, any
-component field that names a kind of asset holding a reference to another
+component or data-asset field that names a kind of asset holding a reference to another
 kind — a script's `asset(<kind>)` hint (on a field or a list's items) or a
 built-in field (`MeshRenderer.mesh`/`material`, `Collider.mesh`/`material`
 (a physics material), `AudioSource.clip` (a sound), `Environment.sky` (a
@@ -1758,7 +1795,7 @@ makes a directory a project. It is a document (envelope, strict JSON,
 | `tags` | The project's tags (ADR-0020): up to 32 unique, non-empty names; bit `i` of a `fynkel.Tags` is `tags[i]` (default `[]`) — `FYN-P0014` like `layers`, `FYN-H0012` for a bit past the list |
 | `physics` | `{ gravity: [x, y, z] }` ([physics.md](physics.md), M3-08): the world's gravity (default `[0, -9.81, 0]`) — `FYN-P0013` when not finite. The cook copies the block into the cache index; the world applies it when the project loads. (`physics.layers` of `formatVersion` 1 is the top-level `layers` now.) |
 | `quality` | `{ default, profiles: { name → { shadows, shadowResolution, ambientOcclusion, bloom, msaa, renderScale, anisotropy, textureMaxSize } } }`; `default` must name a profile; unset fields take the schema defaults (shadows on, 2048, ambient occlusion on, bloom allowed, MSAA 4, scale 1, anisotropy 8, 4096). The cook copies the block into the cache index and the renderer reads it there (`docs/renderer.md` — MSAA runs at 1 or 4, the other values are clamped; `ambientOcclusion` is R2's screen-space occlusion, `bloom` whether R3b's bloom may run — a volume gives it its strength); `textureMaxSize` is for the cook |
-| `components` | The component registry: `typeId → { kind: native \| behaviour, version?, description? }`. Absent means every built-in is allowed. A `native` entry this build does not have is an error; a scene or prefab using a type the registry leaves out is a warning (once per document and type) |
+| `components` | The component registry: `typeId → { kind: native \| behaviour \| data, version?, description? }`. Absent means every built-in is allowed. A `native` entry this build does not have is an error; a `data` entry declares a data type (ADR-0027) that has no schema in `schemas/data/`, and its data assets take any object; a scene or prefab using a type the registry leaves out is a warning (once per document and type) |
 | `targets` | `macos \| ios \| android \| windows \| linux \| web → { enabled (default true), profile (default dev) }`; all disabled is a warning |
 | `x-*` | Tool extensions, kept verbatim |
 
