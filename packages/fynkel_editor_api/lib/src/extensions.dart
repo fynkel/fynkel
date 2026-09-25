@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 
 import 'assets.dart';
 import 'context.dart';
+import 'inspector.dart';
 import 'scene.dart';
 
 /// What `registerEditor` is given: one package's way into the editor. The
@@ -38,6 +39,21 @@ abstract interface class EditorExtensions {
     SingleActivator? shortcut,
     String? description,
   });
+
+  /// A custom Inspector (Unity's `CustomEditor`): [build] draws the card of
+  /// the script [T] (`inspector<Collectible>`) on the objects the
+  /// Inspector shows, or the page of the data type [T]
+  /// (`inspector<CoinKind>`), in place of the default one.
+  ///
+  /// [T] is a `@FynkelBehaviour` or `@FynkelDataAsset` class of the game;
+  /// one the editor's game does not register is a Console error, and the
+  /// default Inspector stays. [build] runs again whenever the values
+  /// change. A throw in it shows the default Inspector with a line saying
+  /// why, and a Console error.
+  ///
+  /// Hints come first (ADR-0018: `@Expose(min:, kind:, header:, …)`):
+  /// write a custom Inspector when they cannot say what you need.
+  void inspector<T>(Widget Function(BuildContext context, InspectorContext inspector) build);
 
   /// A window (Unity's `EditorWindow`): a panel the user docks anywhere,
   /// whose place the layout keeps across restarts and hot reloads.

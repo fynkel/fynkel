@@ -47,6 +47,22 @@ change. `hierarchyMenuItem`, `projectMenuItem` and `componentMenuItem`
 add entries to the Hierarchy's, the Project panel's and a component
 card's context menus.
 
+`editor.inspector<T>(build)` replaces the Inspector's card of the script
+`T`, or the page of the data type `T` (Unity's `CustomEditor`). Its
+`InspectorContext` reads and writes the document's values (`value`,
+`set`) and draws the standard editors (`field`, `defaultInspector`);
+every write is one undo step, a prefab override where it should be, and
+reaches the running game during Play:
+
+```dart
+editor.inspector<CoinKind>((context, inspector) => Column(
+  children: [
+    CoinPreview(color: inspector.value('color'), size: inspector.value('size')),
+    inspector.defaultInspector(),
+  ],
+));
+```
+
 The rules:
 
 - Only files under `lib/editor/` import this package or `lib/editor/`
