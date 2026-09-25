@@ -163,6 +163,11 @@ class SparksPreview extends StatelessWidget {
 
   int get sparks => _or(count, 6).toInt().clamp(0, 24);
 
+  /// At most two decimals, no trailing zeros: a dragged field holds
+  /// 1.67109375, the line says 1.67.
+  static String _seconds(num s) =>
+      s.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+
   @override
   Widget build(BuildContext context) {
     final edge = _or(size, 0.18).toDouble();
@@ -176,7 +181,7 @@ class SparksPreview extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            '${sparks == 0 ? 'No' : sparks} spark${sparks == 1 ? '' : 's'}, gone after ${_or(seconds, 1.2)} s',
+            '${sparks == 0 ? 'No' : sparks} spark${sparks == 1 ? '' : 's'}, gone after ${_seconds(_or(seconds, 1.2))} s',
             key: const Key('sparksPreview.text'),
             style: small,
           ),

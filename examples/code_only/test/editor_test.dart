@@ -184,6 +184,8 @@ void main() {
     expect(await line(0, 1.2), 'No sparks, gone after 1.2 s');
     expect(await line(null, null), '6 sparks, gone after 1.2 s', reason: "the record's defaults");
     expect(await line(99, 1), contains('24 sparks'), reason: 'at most 24');
+    expect(await line(8, 1.67109375), '8 sparks, gone after 1.67 s', reason: 'a dragged value, rounded');
+    expect(await line(8, 1.5), '8 sparks, gone after 1.5 s');
   });
 
   test("a coin's burst: its kind's sparks, their size and how long they last", () {
