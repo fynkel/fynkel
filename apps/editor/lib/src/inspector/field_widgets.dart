@@ -1661,26 +1661,49 @@ List<PickerItem<String>> assetPickerItems(
   return [for (final g in groups) ...g.$2];
 }
 
+/// The asset picker an [AssetField] opens: `null` when dismissed, else the
+/// choice, whose `ref` is null for None (offered when [nullable]).
+Future<({Map<String, Object?>? ref})?> pickAssetRef(
+  BuildContext context, {
+  required String? kind,
+  required String? subject,
+  required List<AssetEntry> Function() candidates,
+  Widget Function(AssetEntry entry, double size)? thumbnail,
+  bool nullable = false,
+  Map<String, Object?>? current,
+}) async {
+  // `physics_material` reads "physics material".
+  final noun = kind?.replaceAll('_', ' ');
+  final choice = await showPicker<String>(
+    context,
+    title: noun == null ? 'Choose an asset' : 'Choose a $noun',
+    subject: subject,
+    anchor: globalRectOf(context),
+    items: assetPickerItems(candidates(), kind: kind, thumbnail: thumbnail),
+    allowNone: nullable,
+    current: _refKey(current).isEmpty ? null : _refKey(current),
+    hint: 'Search by name or path',
+    keyPrefix: 'assetPicker',
+    countNoun: noun == null ? 'assets' : '${noun}s',
+    empty: 'No ${noun ?? 'asset'} matches.',
+  );
+  if (choice == null) return null;
+  return (ref: choice.isNone ? null : _refOf(choice.value!));
+}
+
 class _AssetFieldState extends State<AssetField> {
   Future<void> _pick() async {
-    final kind = widget.kind;
-    // `physics_material` reads "physics material".
-    final noun = kind?.replaceAll('_', ' ');
-    final choice = await showPicker<String>(
+    final choice = await pickAssetRef(
       context,
-      title: noun == null ? 'Choose an asset' : 'Choose a $noun',
+      kind: widget.kind,
       subject: widget.subject,
-      anchor: globalRectOf(context),
-      items: assetPickerItems(widget.candidates(), kind: kind, thumbnail: widget.thumbnail),
-      allowNone: widget.nullable,
-      current: _refKey(widget.value).isEmpty ? null : _refKey(widget.value),
-      hint: 'Search by name or path',
-      keyPrefix: 'assetPicker',
-      countNoun: noun == null ? 'assets' : '${noun}s',
-      empty: 'No ${noun ?? 'asset'} matches.',
+      candidates: widget.candidates,
+      thumbnail: widget.thumbnail,
+      nullable: widget.nullable,
+      current: widget.value,
     );
     if (!mounted || choice == null) return;
-    widget.onCommit(choice.isNone ? null : _refOf(choice.value!));
+    widget.onCommit(choice.ref);
   }
 
   AssetEntry? _entry() {

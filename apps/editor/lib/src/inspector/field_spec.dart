@@ -546,7 +546,8 @@ FieldSpec _parseField(
     final asset = RegExp(r'^asset\(([a-zA-Z_]+)\)$').firstMatch(k);
     if (asset != null) {
       kind = FieldKind.assetRef;
-      assetKind = asset.group(1);
+      // A script's `asset(audio)` is the editor's `sound` (a whole audio source).
+      assetKind = asset.group(1) == 'audio' ? 'sound' : asset.group(1);
     } else {
       switch (k) {
         case 'color':

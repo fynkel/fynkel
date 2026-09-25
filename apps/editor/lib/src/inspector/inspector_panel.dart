@@ -1444,11 +1444,7 @@ class _FieldEditor extends StatelessWidget {
                   icon: const Icon(FIcons.add, size: 14),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
-                  onPressed: () => model.setField(
-                    slot,
-                    '$_pointer/${list.length}',
-                    item.hasDefault ? item.defaultValue : _blank(item),
-                  ),
+                  onPressed: () => _addItem(context, item, list),
                 ),
             ],
           ),
@@ -1486,8 +1482,25 @@ class _FieldEditor extends StatelessWidget {
                     indent: indent + 10,
                   ),
                 ),
-                if (_enabled)
+                if (_enabled) ...[
+                  for (final (d, icon, tip) in const [
+                    (-1, FIcons.arrowUpward, 'Move up'),
+                    (1, FIcons.arrowDownward, 'Move down'),
+                  ])
+                    IconButton(
+                      key: ValueKey('array.move$d.$path.$i'),
+                      tooltip: tip,
+                      icon: Icon(icon, size: 12),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 18, minHeight: 26),
+                      onPressed: i + d < 0 || i + d >= list.length
+                          ? null
+                          : () => _commit([...list]
+                              ..[i] = list[i + d]
+                              ..[i + d] = list[i]),
+                    ),
                   IconButton(
+                    key: ValueKey('array.remove.$path.$i'),
                     tooltip: 'Remove item',
                     icon: const Icon(FIcons.remove, size: 14),
                     padding: EdgeInsets.zero,
@@ -1500,11 +1513,42 @@ class _FieldEditor extends StatelessWidget {
                       _commit(next);
                     },
                   ),
+                ],
               ],
             ),
       ],
     );
   }
+
+  /// Unity's `+`: a copy of the last item; into an empty list the item's
+  /// default, or a fresh value — an asset item, which cannot be None, is
+  /// picked first.
+  Future<void> _addItem(BuildContext context, FieldSpec item, List<Object?> list) async {
+    Object? value;
+    if (list.isNotEmpty) {
+      value = _copy(list.last);
+    } else if (item.hasDefault) {
+      value = item.defaultValue;
+    } else if (item.kind == FieldKind.assetRef && !item.nullable) {
+      final choice = await pickAssetRef(
+        context,
+        kind: item.assetKind,
+        subject: '${spec.label} 0',
+        candidates: () => model.assetsFor(item.assetKind),
+      );
+      if (choice?.ref == null) return;
+      value = choice!.ref;
+    } else {
+      value = _blank(item);
+    }
+    model.setField(slot, '$_pointer/${list.length}', value);
+  }
+
+  static Object? _copy(Object? v) => switch (v) {
+    final List<Object?> l => [for (final x in l) _copy(x)],
+    final Map<Object?, Object?> m => {for (final e in m.entries) e.key as String: _copy(e.value)},
+    _ => v,
+  };
 
   Widget _object(BuildContext context, String label, Object? value) {
     final theme = Theme.of(context);

@@ -1119,6 +1119,84 @@ void main() {
       expect(r.model.slots.singleWhere((s) => s.type == 'fynkel.MeshRenderer').value('cast_shadows'), true);
     });
 
+    testWidgets('List<T> fields (ADR-0027 §5): add copies the last, move up and down, remove; an asset item is picked', (
+      tester,
+    ) async {
+      final r = rig();
+      // The generator's own output for a script with three lists.
+      final chime = jsonDecode(
+        File('../../packages/fynkel_generator/example/spinner_game/schemas/behaviours/game.Chime.schema.json')
+            .readAsStringSync(),
+      ) as Map<String, Object?>;
+      r.project.schemas = [
+        ...r.project.schemas,
+        TypeSchema(type: 'game.Chime', isBehaviour: true, authored: true, allowed: true, schema: chime, version: 1),
+      ];
+      final spec = parseComponentSpec('game.Chime', chime);
+      expect(spec.field('delays')!.kind, FieldKind.array);
+      expect(spec.field('delays')!.item!.kind, FieldKind.number);
+      expect(spec.field('delays')!.item!.unit, 's');
+      expect(spec.field('moods')!.item!.enumValues, ['soft', 'bright']);
+      expect(spec.field('sounds')!.item!.kind, FieldKind.assetRef, reason: "the item's kind hint, not the list's");
+      expect(spec.field('sounds')!.item!.assetKind, 'sound', reason: 'asset(audio) is the editor\'s sound');
+
+      final tab = r.tabs.openDocument('main')!;
+      tab.select('a');
+      expect(r.model.addComponent('game.Chime'), isTrue);
+      await pumpPanel(tester, r.model);
+      List<Object?> value(String field) =>
+          r.model.slots.singleWhere((s) => s.type == 'game.Chime').value(field) as List<Object?>;
+      expect(value('delays'), [0.5, 1.0]);
+
+      // + copies the last item (Unity's rule).
+      await tester.tap(find.byKey(const ValueKey('array.add.delays')));
+      await tester.pumpAndSettle();
+      expect(value('delays'), [0.5, 1.0, 1.0]);
+      final delay1 = inField('game.Chime#0', 'delays.1', find.byType(TextField));
+      await tester.enterText(delay1, '2');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(value('delays'), [0.5, 2, 1.0]);
+      // Up and down swap neighbours; the ends cannot go further.
+      await tester.tap(find.byKey(const ValueKey('array.move-1.delays.1')));
+      await tester.pumpAndSettle();
+      expect(value('delays'), [2, 0.5, 1.0]);
+      await tester.tap(find.byKey(const ValueKey('array.move1.delays.1')));
+      await tester.pumpAndSettle();
+      expect(value('delays'), [2, 1.0, 0.5]);
+      expect(
+        tester.widget<IconButton>(find.byKey(const ValueKey('array.move-1.delays.0'))).onPressed,
+        isNull,
+      );
+      expect(tester.widget<IconButton>(find.byKey(const ValueKey('array.move1.delays.2'))).onPressed, isNull);
+      await tester.tap(find.byKey(const ValueKey('array.remove.delays.0')));
+      await tester.pumpAndSettle();
+      expect(value('delays'), [1.0, 0.5]);
+
+      // An asset list starts empty: + picks the first item (it cannot be None) …
+      final history = tab.document.history;
+      await tester.tap(find.byKey(const ValueKey('array.add.sounds')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Choose a sound'), findsOneWidget);
+      expect(find.byKey(const ValueKey('assetPicker.none')), findsNothing);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(value('sounds'), isEmpty, reason: 'dismissed: nothing added');
+      expect(tab.document.history, history);
+      await tester.tap(find.byKey(const ValueKey('array.add.sounds')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('assetPicker.row.0')));
+      await tester.pumpAndSettle();
+      expect(value('sounds'), [
+        {'asset': toneId},
+      ]);
+      // … and the next + copies it.
+      await tester.tap(find.byKey(const ValueKey('array.add.sounds')));
+      await tester.pumpAndSettle();
+      expect(value('sounds'), hasLength(2));
+      expect(find.textContaining('Choose a sound'), findsNothing);
+    });
+
     testWidgets('the asset picker lists the kind only, an unknown drop is refused, Clear on a nullable field', (
       tester,
     ) async {
