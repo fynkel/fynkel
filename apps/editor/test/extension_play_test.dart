@@ -112,8 +112,13 @@ void main() {
     expect(find.text('stopped'), findsOneWidget);
     expect(shell.registry.byId('game.collectCoins')!.enabled!(), isFalse, reason: 'no game runs');
 
+    var refreshed = 0;
+    void count() => refreshed++;
+    shell.registry.addListener(count);
+    addTearDown(() => shell.registry.removeListener(count));
     shell.registry.execute('play.start');
     await tester.pumpAndSettle();
+    expect(refreshed, greaterThan(0), reason: 'the menus look again once the world shows');
     expect(find.text('coins 2'), findsOneWidget, reason: 'the window follows Play starting');
     expect(shell.registry.byId('game.collectCoins')!.enabled!(), isTrue);
 

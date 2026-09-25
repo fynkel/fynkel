@@ -345,6 +345,9 @@ class EditorShellState extends State<EditorShell> {
     final run = gameRun;
     final running = run != null && run.running;
     _livePlay?.follow(running ? run.control.world : null);
+    // A command enabled only during Play (an extension's, on context.play)
+    // reads the world: the menus look again once it shows.
+    registry.refresh();
     // The play-mode tint wraps the window: build again when Play starts or ends.
     if (running != _playing && mounted) setState(() => _playing = running);
   }
