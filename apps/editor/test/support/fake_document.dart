@@ -500,6 +500,35 @@ final class FakeDocument extends EditorDocument {
         final index = c['index'] as int? ?? siblings.indexOf(id) + 1;
         _insert(parent, copy, index);
         return _Result([...ids, ?parent]);
+      case 'pasteObjects':
+        // Fresh ids for the entities and their components; the ones whose
+        // parent is not pasted are the roots, under `parent`, first in
+        // the affected ids.
+        final parent = c['parent'] as String?;
+        if (parent != null && !_entities.containsKey(parent)) return _Result.error('no entity $parent');
+        final given = (c['entities'] as Map).cast<String, Object?>();
+        if (given.isEmpty) return _Result.error('pasteObjects: nothing to paste');
+        final fresh = {for (final k in given.keys) k: 'paste${++_fresh}'};
+        final roots = <String>[];
+        final rest = <String>[];
+        for (final MapEntry(:key, :value) in given.entries) {
+          final e = _deepCopy((value! as Map).cast<String, Object?>());
+          final up = e['parent'] as String?;
+          final isRoot = up == null || !given.containsKey(up);
+          e['parent'] = isRoot ? parent : fresh[up];
+          e['children'] = [
+            for (final ch in e['children'] as List? ?? const [])
+              if (fresh[ch] != null) fresh[ch],
+          ];
+          final comps = (e['components'] as Map?) ?? {};
+          e['components'] = {for (final ce in comps.entries) 'pc${++_fresh}': ce.value};
+          _entities[fresh[key]!] = e;
+          (isRoot ? roots : rest).add(fresh[key]!);
+        }
+        for (final r in roots) {
+          _insert(parent, r, null);
+        }
+        return _Result([...roots, ...rest, ?parent]);
       case 'setField' || 'assignAsset':
         final id = c['entity'] as String;
         final e = _entities[id];

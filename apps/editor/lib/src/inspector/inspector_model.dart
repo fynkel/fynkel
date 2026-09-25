@@ -501,120 +501,19 @@ final class InspectorModel extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    // Derived entities are read from their anchor's expansion; the rest
-    // from the document in one `entities` query.
-    final documentIds = [
-      for (final id in _ids)
-        if (!(t.tree[id]?.isDerived ?? false)) id,
-    ];
-    EntityPatch? patch;
-    if (documentIds.isNotEmpty) {
-      try {
-        patch = t.document.entities(documentIds);
-      } catch (e) {
-        lastError = '$e';
-        _entities = const [];
-        _slots = const [];
-        notifyListeners();
-        return;
-      }
+    final List<EntityInfo> infos;
+    final List<List<ComponentInstance>> perEntity;
+    try {
+      (infos, perEntity) = readEntities(t, _ids);
+    } catch (e) {
+      lastError = '$e';
+      _entities = const [];
+      _slots = const [];
+      notifyListeners();
+      return;
     }
-    final infos = <EntityInfo>[];
-    final perEntity = <List<ComponentInstance>>[];
-    for (final id in _ids) {
-      final node = t.tree[id];
-      if (node != null && node.isDerived) {
-        final x = t.expansionOf(node.anchor!);
-        final de = x?.entity(id);
-        if (x == null || de == null) continue; // the expansion changed under us; the tab prunes next
-        infos.add(
-          EntityInfo(
-            id: id,
-            name: de.name,
-            anchor: node.anchor,
-            local: de.local,
-            added: de.added,
-            active: de.active,
-            activeOverridden: de.activeOverridden,
-          ),
-        );
-        final types = _typesOn[id] = <String>{};
-        perEntity.add([
-          for (final c in de.components.entries)
-            ComponentInstance(
-              entityId: id,
-              componentId: c.key,
-              type: c.value.type,
-              version: c.value.version,
-              data: Map<String, Object?>.from(c.value.data),
-              anchor: node.anchor,
-              entityLocal: de.local,
-              local: c.value.local,
-              added: c.value.added,
-              overridden: c.value.overridden.toSet(),
-            ),
-        ]);
-        types.addAll(de.components.values.map((c) => c.type));
-        continue;
-      }
-      final e = patch?.entities[id];
-      if (e == null) continue; // deleted under us; the tab prunes the selection next
-      final p = _prefabOf(e);
-      final x = p == null ? null : t.expansionOf(id);
-      infos.add(
-        EntityInfo(
-          id: id,
-          name: e['name'] as String? ?? '',
-          active: e['active'] != false,
-          prefab: p,
-          expansion: x,
-        ),
-      );
-      final comps = <ComponentInstance>[];
-      final types = _typesOn[id] = <String>{};
-      // A prefab instance is its prefab's root (ADR-0022): the root's
-      // components as the instance applies them, every edit an override
-      // on the instance itself.
-      final root = x != null && x.expanded ? x.entity(id) : null;
-      if (root != null) {
-        for (final c in root.components.entries) {
-          comps.add(
-            ComponentInstance(
-              entityId: id,
-              componentId: c.key,
-              type: c.value.type,
-              version: c.value.version,
-              data: Map<String, Object?>.from(c.value.data),
-              anchor: id,
-              entityLocal: root.local,
-              local: c.value.local,
-              added: c.value.added,
-              overridden: c.value.overridden.toSet(),
-            ),
-          );
-          types.add(c.value.type);
-        }
-        perEntity.add(comps);
-        continue;
-      }
-      final map = e['components'];
-      if (map is Map) {
-        for (final entry in map.entries) {
-          final c = entry.value;
-          if (c is! Map) continue;
-          comps.add(
-            ComponentInstance(
-              entityId: id,
-              componentId: entry.key as String,
-              type: c['type'] as String? ?? '',
-              version: (c['version'] as num?)?.toInt() ?? 1,
-              data: c['data'] is Map ? Map<String, Object?>.from(c['data'] as Map) : <String, Object?>{},
-            ),
-          );
-          types.add(c['type'] as String? ?? '');
-        }
-      }
-      perEntity.add(comps);
+    for (final (i, info) in infos.indexed) {
+      _typesOn[info.id] = {for (final c in perEntity[i]) c.type};
     }
     for (final c in perEntity.expand((l) => l)) {
       if (c.type == 'fynkel.Layer') _layerOn.putIfAbsent(c.entityId, () => c);
@@ -645,21 +544,6 @@ final class InspectorModel extends ChangeNotifier {
     ];
   }
 
-  PrefabInstanceInfo? _prefabOf(Map<String, Object?> e) {
-    final prefab = e['prefab'];
-    if (prefab is! Map) return null;
-    final asset = prefab['asset'];
-    final assetId = asset is Map ? asset['asset'] as String? ?? '' : asset?.toString() ?? '';
-    return PrefabInstanceInfo(
-      assetId: assetId,
-      sub: asset is Map ? asset['sub'] as String? : null,
-      instance: prefab['instance'] as String? ?? '',
-      overrides: [
-        for (final o in prefab['overrides'] as List? ?? const [])
-          if (o is Map) Map<String, Object?>.from(o),
-      ],
-    );
-  }
 
   /// Components of the first entity, in its order; each kept only when every
   /// other entity has a component of that type at the same position.
@@ -1826,4 +1710,129 @@ String describeAssetRef(List<AssetEntry> assets, Map<String, Object?>? ref) {
     }
   }
   return sub == null || sub.isEmpty ? id : '$id#$sub';
+}
+
+/// [ids]' entities of [t] and each one's components, as the Inspector
+/// shows them: a derived entity from its anchor's expansion, a prefab
+/// instance as its prefab's root with the overrides applied (ADR-0022),
+/// the rest from the document in one `entities` query (which throws when
+/// it fails). An id that is gone is left out of both lists.
+(List<EntityInfo>, List<List<ComponentInstance>>) readEntities(OpenDocument t, List<String> ids) {
+  // Derived entities are read from their anchor's expansion; the rest
+  // from the document in one `entities` query.
+  final documentIds = [
+    for (final id in ids)
+      if (!(t.tree[id]?.isDerived ?? false)) id,
+  ];
+  final patch = documentIds.isEmpty ? null : t.document.entities(documentIds);
+  final infos = <EntityInfo>[];
+  final perEntity = <List<ComponentInstance>>[];
+  for (final id in ids) {
+    final node = t.tree[id];
+    if (node != null && node.isDerived) {
+      final x = t.expansionOf(node.anchor!);
+      final de = x?.entity(id);
+      if (x == null || de == null) continue; // the expansion changed under us; the tab prunes next
+      infos.add(
+        EntityInfo(
+          id: id,
+          name: de.name,
+          anchor: node.anchor,
+          local: de.local,
+          added: de.added,
+          active: de.active,
+          activeOverridden: de.activeOverridden,
+        ),
+      );
+      perEntity.add([
+        for (final c in de.components.entries)
+          ComponentInstance(
+            entityId: id,
+            componentId: c.key,
+            type: c.value.type,
+            version: c.value.version,
+            data: Map<String, Object?>.from(c.value.data),
+            anchor: node.anchor,
+            entityLocal: de.local,
+            local: c.value.local,
+            added: c.value.added,
+            overridden: c.value.overridden.toSet(),
+          ),
+      ]);
+      continue;
+    }
+    final e = patch?.entities[id];
+    if (e == null) continue; // deleted under us; the tab prunes the selection next
+    final p = prefabInstanceOf(e);
+    final x = p == null ? null : t.expansionOf(id);
+    infos.add(
+      EntityInfo(
+        id: id,
+        name: e['name'] as String? ?? '',
+        active: e['active'] != false,
+        prefab: p,
+        expansion: x,
+      ),
+    );
+    final comps = <ComponentInstance>[];
+    // A prefab instance is its prefab's root (ADR-0022): the root's
+    // components as the instance applies them, every edit an override
+    // on the instance itself.
+    final root = x != null && x.expanded ? x.entity(id) : null;
+    if (root != null) {
+      for (final c in root.components.entries) {
+        comps.add(
+          ComponentInstance(
+            entityId: id,
+            componentId: c.key,
+            type: c.value.type,
+            version: c.value.version,
+            data: Map<String, Object?>.from(c.value.data),
+            anchor: id,
+            entityLocal: root.local,
+            local: c.value.local,
+            added: c.value.added,
+            overridden: c.value.overridden.toSet(),
+          ),
+        );
+      }
+      perEntity.add(comps);
+      continue;
+    }
+    final map = e['components'];
+    if (map is Map) {
+      for (final entry in map.entries) {
+        final c = entry.value;
+        if (c is! Map) continue;
+        comps.add(
+          ComponentInstance(
+            entityId: id,
+            componentId: entry.key as String,
+            type: c['type'] as String? ?? '',
+            version: (c['version'] as num?)?.toInt() ?? 1,
+            data: c['data'] is Map ? Map<String, Object?>.from(c['data'] as Map) : <String, Object?>{},
+          ),
+        );
+      }
+    }
+    perEntity.add(comps);
+  }
+  return (infos, perEntity);
+}
+
+/// The prefab instance an entity's document JSON [e] holds, if any.
+PrefabInstanceInfo? prefabInstanceOf(Map<String, Object?> e) {
+  final prefab = e['prefab'];
+  if (prefab is! Map) return null;
+  final asset = prefab['asset'];
+  final assetId = asset is Map ? asset['asset'] as String? ?? '' : asset?.toString() ?? '';
+  return PrefabInstanceInfo(
+    assetId: assetId,
+    sub: asset is Map ? asset['sub'] as String? : null,
+    instance: prefab['instance'] as String? ?? '',
+    overrides: [
+      for (final o in prefab['overrides'] as List? ?? const [])
+        if (o is Map) Map<String, Object?>.from(o),
+    ],
+  );
 }

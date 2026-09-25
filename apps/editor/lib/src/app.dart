@@ -34,6 +34,7 @@ import 'launcher/opening_screen.dart';
 import 'picker/picker.dart';
 import 'play/code_reload.dart';
 import 'play/dart_stack.dart';
+import 'extensions/editor_access.dart';
 import 'extensions/editor_extensions.dart';
 import 'play/editor_game.dart';
 import 'play/game_console.dart';
@@ -464,7 +465,17 @@ class EditorShellState extends State<EditorShell> {
     }
     _panels = PanelRegistry(_panelSpecs());
     _registerCommands();
-    extensions = EditorExtensionHost(widget.extensions)..addListener(_onExtensionLog);
+    extensions = EditorExtensionHost(
+      widget.extensions,
+      access: EditorAccess(
+        tabs: () => tabs,
+        project: () => project,
+        browser: () => browser,
+        ping: pingInProject,
+        open: _openAsset,
+        registerBehaviours: widget.game?.registerBehaviours,
+      ),
+    )..addListener(_onExtensionLog);
     _registerExtensions();
     widget.prefs.addListener(_onPrefsChanged);
     final detected = _detect();
@@ -1240,14 +1251,7 @@ class EditorShellState extends State<EditorShell> {
         enabled: () => _leadAsset != null,
         run: () {
           final a = _leadAsset;
-          if (a == null) return;
-          if (a.document == 'scene') {
-            openScene(a.id);
-          } else if (a.document == 'prefab') {
-            openDocument(a.id);
-          } else {
-            showAssetInInspector();
-          }
+          if (a != null) _openAsset(a);
         },
       ),
       EditorCommand(
@@ -2530,14 +2534,26 @@ class EditorShellState extends State<EditorShell> {
   /// non-document, Show in Inspector, Reimport), the Inspector brought
   /// forward: the copy used last that is not locked — a new one when every
   /// copy is (item 9e: a lock is never broken from outside the panel).
-  void showAssetInInspector() {
+  void showAssetInInspector([String? assetId]) {
     final ws = workspace;
     if (ws == null) return;
-    final lead = browser?.lead;
+    final lead = assetId ?? browser?.lead;
     final id = _unlockedCopy(PanelRegistry.inspector);
     if (lead != null) _selections[id]?.inspect(InspectAsset(lead));
     ws.show(id);
     registry.refresh();
+  }
+
+  /// Open Asset: a scene or prefab in its tab, anything else in the
+  /// Inspector.
+  void _openAsset(AssetEntry a) {
+    if (a.document == 'scene') {
+      openScene(a.id);
+    } else if (a.document == 'prefab') {
+      openDocument(a.id);
+    } else {
+      showAssetInInspector(a.id);
+    }
   }
 
   /// "Show in Project" — a Game row, a "Used by" row, an asset slot's arrow:

@@ -5,9 +5,13 @@
 // hot reload, so a save in `lib/editor/` shows at once.
 import 'package:flutter/widgets.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart' show Diagnostic, Severity;
+import 'package:fynkel/fynkel.dart' show DataAsset;
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 
 import '../commands/commands.dart';
+import '../documents/open_document.dart';
+import '../inspector/inspector_model.dart' show readEntities;
+import 'editor_access.dart';
 
 /// One package's editor part, as the generated host passes it:
 /// `EditorPart('code_only', editor0.registerEditor)`.
@@ -66,11 +70,16 @@ class PackageExtensions {
 /// `registerEditor` ([rebuild]), keeps what they registered and their
 /// Console lines ([log]).
 class EditorExtensionHost extends ChangeNotifier {
-  EditorExtensionHost(this.parts);
+  EditorExtensionHost(this.parts, {this.access});
 
   /// In the order their `registerEditor` runs (the host's order:
   /// dependencies first, the game last).
   final List<EditorPart> parts;
+
+  /// What a context reads and changes: the shell's documents, project and
+  /// Project panel. Null without a shell (a context then sees no scene
+  /// and no assets).
+  EditorAccess? access;
 
   /// What each package registered, in [parts] order, after the last
   /// [rebuild].
@@ -258,4 +267,74 @@ class _Context implements EditorContext {
 
   @override
   void logError(String message) => host._add(package, Severity.error, message);
+
+  OpenDocument? get _shown => host.access?.shown;
+
+  @override
+  EditorScene? get scene {
+    final tab = _shown;
+    return tab == null ? null : sceneOf(tab, playing: host.access!.playing);
+  }
+
+  @override
+  List<EditorObject> get selection {
+    final tab = _shown;
+    if (tab == null || tab.selection.isEmpty) return const [];
+    final (infos, perEntity) = readEntities(tab, tab.selection.toList());
+    return List.unmodifiable([for (final (i, info) in infos.indexed) objectOf(tab, info, perEntity[i])]);
+  }
+
+  @override
+  void select(Iterable<EditorObject> objects) {
+    final tab = _shown;
+    if (tab == null) return;
+    tab.setSelection([
+      for (final o in objects)
+        if (tab.tree.contains(o.id)) o.id,
+    ]);
+  }
+
+  @override
+  EditResult edit(String label, void Function(EditorEdit edit) changes) {
+    final access = host.access;
+    final tab = _shown;
+    if (access == null || tab == null) {
+      const why = 'no scene or prefab is open';
+      logError('"$label" changed nothing: $why');
+      return const EditResult(ok: false, error: why);
+    }
+    return runEdit(access, tab, label, changes, logError: logError);
+  }
+
+  @override
+  EditorAssets get assets => host.access == null ? const _NoAssets() : assetsOf(host.access!, logError: logError);
+}
+
+/// No project: nothing to find, nothing created.
+final class _NoAssets implements EditorAssets {
+  const _NoAssets();
+
+  @override
+  List<EditorAsset> get all => const [];
+
+  @override
+  List<EditorAsset> ofKind(String kind) => const [];
+
+  @override
+  List<EditorAsset> ofDataType(String typeId) => const [];
+
+  @override
+  EditorAsset? find(String path) => null;
+
+  @override
+  List<EditorAsset> get selected => const [];
+
+  @override
+  EditorAsset? createData(String path, DataAsset value) => null;
+
+  @override
+  void ping(EditorAsset asset) {}
+
+  @override
+  void open(EditorAsset asset) {}
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import 'package:fynkel/fynkel.dart' show BehaviourRegistry;
 import 'package:fynkel_flutter/fynkel_flutter.dart' show FynkelLaunch;
 
 /// A game compiled into this editor build (ADR-0021): its package, its
@@ -7,7 +8,7 @@ import 'package:fynkel_flutter/fynkel_flutter.dart' show FynkelLaunch;
 /// `runFynkelEditor`; the plain editor has none.
 @immutable
 class EditorGame {
-  const EditorGame({required this.name, required this.projectDir, required this.build});
+  const EditorGame({required this.name, required this.projectDir, required this.build, this.registerBehaviours});
 
   /// The game package's name.
   final String name;
@@ -15,4 +16,9 @@ class EditorGame {
   /// The project it belongs to: Play runs it only there.
   final String projectDir;
   final Widget Function(FynkelLaunch launch) build;
+
+  /// The game's generated `registerBehaviours` (`behaviours.g.dart`): the
+  /// editor extensions' `add` and `createData` write its behaviours and
+  /// data types with it.
+  final void Function(BehaviourRegistry registry)? registerBehaviours;
 }

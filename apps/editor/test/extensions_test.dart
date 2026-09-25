@@ -37,6 +37,29 @@ void _game(EditorExtensions editor) {
   }
 }
 
+/// Selects every coin and renames them, one undo step (ADR-0028 step 2).
+void _coins(EditorExtensions editor) {
+  editor.menuItem(
+    'Tools/Select Coins',
+    id: 'coins.select',
+    enabled: (context) => context.scene != null,
+    run: (context) {
+      final scene = context.scene!;
+      final coins = [
+        for (final o in scene.objects)
+          if (o.name.startsWith('Coin')) o,
+      ];
+      context.select(coins);
+      context.edit('Number coins', (edit) {
+        for (final (i, c) in context.selection.indexed) {
+          edit.rename(c, 'Coin ${i + 1}');
+        }
+      });
+      context.log('${coins.length} coins in ${scene.name}');
+    },
+  );
+}
+
 void _throws(EditorExtensions editor) => throw UnsupportedError('not today');
 
 void _bad(EditorExtensions editor) {
@@ -108,6 +131,43 @@ void main() {
     expect(consoleLines(shell).last, startsWith('error: tools: "Tools/Broken" failed: Bad state: no level'));
     expect(shell.registry.execute('game.SayHello'), isTrue);
     expect(consoleLines(shell).last, 'info: my_game: Hello from my_game');
+  });
+
+  testWidgets('a context sees the scene in front, selects in it and edits it as one undo step', (tester) async {
+    project.addDocument(
+      FakeDocument(
+        path: '/fake/game/assets/scenes/main.scene.json',
+        relativePath: 'scenes/main.scene.json',
+        id: 'main',
+        name: 'Main',
+        entities: {
+          'cam': FakeDocument.entity('Camera'),
+          'a': FakeDocument.entity('Coin'),
+          'b': FakeDocument.entity('Coin'),
+        },
+      ),
+    );
+    final shell = await openShell(tester, const [EditorPart('coins', _coins)]);
+    expect(shell.registry.execute('coins.select'), isFalse, reason: 'no scene open yet');
+    final tab = shell.openDocument('main')!;
+    await tester.pumpAndSettle();
+    expect(shell.registry.execute('coins.select'), isTrue);
+    await tester.pumpAndSettle();
+    expect(tab.selection.toList(), ['a', 'b']);
+    expect(
+      [
+        for (final id in ['a', 'b']) tab.tree[id]!.name,
+      ],
+      ['Coin 1', 'Coin 2'],
+    );
+    expect(consoleLines(shell), ['info: coins: 2 coins in Main']);
+    expect(tab.undo(), isTrue);
+    expect(
+      [
+        for (final id in ['a', 'b']) tab.tree[id]!.name,
+      ],
+      ['Coin', 'Coin'],
+    );
   });
 
   testWidgets('a hot reload registers every package again', (tester) async {

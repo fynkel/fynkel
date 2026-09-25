@@ -170,6 +170,9 @@ final class FakeProject extends EditorProject {
   int reloads = 0;
   List<AssetEntry> assetEntries = [];
 
+  /// The data a `newDocument` of a data asset started with, by its id.
+  final newData = <String, Map<String, Object?>>{};
+
   @override
   List<TypeSchema> typeSchemas() => schemas;
 
@@ -357,8 +360,10 @@ final class FakeProject extends EditorProject {
           name: name,
           kind: 'document',
           document: docKind,
+          dataType: args['type'] as String?,
         );
         assetEntries.add(e);
+        if (args['data'] != null) newData[e.id] = (args['data']! as Map).cast<String, Object?>();
         final label = 'New $docKind $stem';
         _redo.clear();
         _undo.add((label, () => assetEntries.removeWhere((x) => x.id == e.id)));
