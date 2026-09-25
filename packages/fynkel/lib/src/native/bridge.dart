@@ -530,6 +530,28 @@ class NativeWorld {
     }
   }
 
+  /// `fynkel_world_asset_json` (ADR-0027 §6): the cooked JSON of the
+  /// document asset [id] (16 UUID bytes) — `(OK, the document)`, or
+  /// `(LOAD_FAILED, the diagnostic)` when no project is loaded or the
+  /// cache has no such document.
+  (FynkelStatus, Map<String, Object?>) assetJson(Uint8List id) {
+    ffiCalls++;
+    final idp = calloc<Uint8>(16);
+    final out = calloc<FynkelBufferView>();
+    try {
+      idp.asTypedList(16).setAll(0, id);
+      final s = fynkel_world_asset_json(_w, idp, out);
+      final v = out.ref;
+      if (v.length == 0) return (s, const {});
+      dartCopies++;
+      dartBytesCopied += v.length;
+      return (s, jsonDecode(utf8.decode(v.data.asTypedList(v.length))) as Map<String, Object?>);
+    } finally {
+      calloc.free(idp);
+      calloc.free(out);
+    }
+  }
+
   /// A `MATL` chunk payload (`fynkel_wire::material`): u32 version 1,
   /// record size, tail length, reserved; the record; its string tail.
   static Uint8List materialPayload(gen.PbrMaterial m) {

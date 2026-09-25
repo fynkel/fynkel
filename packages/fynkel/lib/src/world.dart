@@ -400,6 +400,31 @@ class World {
     }
   }
 
+  /// The shared instance of the data asset [ref] (ADR-0027 §3):
+  /// `world.data<Weapon>(Assets.data.sword)`. Made from the cooked
+  /// document the first time and kept for the world's life, across scene
+  /// loads — every reference to the asset shares it, and changes to it
+  /// last for the run and are never saved. Its data-typed fields resolve
+  /// the same way (a missing asset: null, with `FYN-B0004`). An [ArgumentError] for an
+  /// asset the cache does not have or that is not a data asset or not a
+  /// [T]; a [StateError] when no project is loaded or its type is not
+  /// registered.
+  T data<T extends DataAsset>(AssetRef ref) {
+    final warnings = <LoadDiagnostic>[];
+    final DataAsset d;
+    try {
+      d = _data.load(ref, warnings);
+    } finally {
+      if (warnings.isNotEmpty) onLoadDiagnostics(warnings);
+    }
+    if (d is! T) throw ArgumentError.value(ref, 'ref', 'a ${d.dataType?.id ?? d.runtimeType}, not a $T');
+    return d;
+  }
+
+  /// The data assets made so far (their shared instances), by asset id.
+  Map<String, DataAsset> get loadedData => Map.unmodifiable(_data.byId);
+  late final _DataAssets _data = _DataAssets(this);
+
   /// Looks a resolved object up by handle.
   GameObject? byEntity(int entity) => _byEntity[entity];
 
@@ -1271,6 +1296,7 @@ class World {
     var attached = 0;
     final byComponent = <String, Behaviour>{};
     final withReferences = <(AuthoredBehaviour, Behaviour)>[];
+    final withData = <(AuthoredBehaviour, Behaviour)>[];
     for (final b in behaviours) {
       final type = registry.lookup(b.type);
       if (type == null) {
@@ -1291,6 +1317,7 @@ class World {
           .._authoredComponent = b.component.isEmpty ? null : b.component;
         if (b.component.isNotEmpty) byComponent[b.component] = behaviour;
         if (type.fields.any((f) => f.isReference && b.data[f.name] != null)) withReferences.add((b, behaviour));
+        if (type.fields.any((f) => f.holdsData && b.data[f.name] != null)) withData.add((b, behaviour));
         attached++;
       } on BehaviourDataError catch (e) {
         extra.add(LoadDiagnostic(
@@ -1330,6 +1357,15 @@ class World {
             suggestion: 'pick the object again in the Inspector',
           ));
         }
+      }
+    }
+    // Data assets (ADR-0027 §4): the shared instances.
+    for (final (b, behaviour) in withData) {
+      for (final f in behaviour.behaviourType!.fields) {
+        if (!f.holdsData) continue;
+        final value = _data.resolve(b.data[f.name], f.dataType!, extra,
+            where: '${b.type}.${f.name}', document: document, pointer: b.pointer == null ? null : '${b.pointer}/data/${f.name}');
+        if (value != null) f.set(behaviour, value);
       }
     }
     return (attached, extra);
