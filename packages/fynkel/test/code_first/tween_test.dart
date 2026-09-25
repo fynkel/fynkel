@@ -6,7 +6,6 @@
 import 'dart:math' as math;
 
 import 'package:fynkel/fynkel.dart';
-import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
 class Sequence extends Behaviour {

@@ -1,0 +1,441 @@
+// Scenes and prefabs written from code (ADR-0026 §2): the `ObjectSpec`
+// `World.build` spawns, written as the `.scene.json` / `.prefab.json`
+// documents the editor opens and the cook reads. Pure Dart — no native
+// library — for a tool (`dart run tool/scenes.dart`), never for the game.
+
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
+
+import '../../fynkel.dart';
+import '../../generated/schema.g.dart' as gen;
+import '../wire/support.dart' show docAssetRef;
+
+/// A scene written from code: its objects, in order.
+final class SceneSpec {
+  const SceneSpec(this.name, this.objects);
+
+  final String name;
+  final List<ObjectSpec> objects;
+}
+
+/// What [ProjectWriter.writeScene] / [ProjectWriter.writePrefab] did.
+final class WrittenDocument {
+  const WrittenDocument(this.ref, this.path, {required this.changed, required this.kept});
+
+  /// The document's asset (its id is kept across writes).
+  final AssetRef ref;
+
+  /// The file, under the project's `assets/`.
+  final String path;
+
+  /// False when the file already held these bytes (it was not touched).
+  final bool changed;
+
+  /// Objects the document had that code did not make (added in the
+  /// editor), kept as they were, by name.
+  final List<String> kept;
+}
+
+/// Writes scene and prefab documents into the project at [projectDir]
+/// (the folder with `fynkel.project.json`) from [ObjectSpec]s.
+///
+/// Every id is derived — the document's from its path (or kept from the
+/// file already there), an object's from the path of names down to it, a
+/// component's from its object and type — so writing the same specs again
+/// gives the same bytes. The objects code makes belong to code: writing
+/// again replaces them, edits in the editor included. Objects added in the
+/// editor (their ids are not derived) are kept, after the code's, under
+/// the same parent.
+///
+/// Scripts are written through their registered fields: pass the
+/// generated `registerBehaviours` as [registerBehaviours]. A prefab
+/// instance of an imported model (`AssetRef(glb, sub: 'prefab')`) needs
+/// the project cooked (`fynkel cook`), since its ids come from the model.
+class ProjectWriter {
+  ProjectWriter(String projectDir, {void Function(BehaviourRegistry registry)? registerBehaviours, String? cacheDir})
+      : projectDir = Directory(projectDir).absolute.path,
+        registry = BehaviourRegistry() {
+    registerBehaviours?.call(registry);
+    _cacheDir = cacheDir ?? '${this.projectDir}/.fynkel/cache';
+    final project = File('${this.projectDir}/fynkel.project.json');
+    if (!project.existsSync()) throw ArgumentError.value(projectDir, 'projectDir', 'no fynkel.project.json');
+    final json = jsonDecode(project.readAsStringSync()) as Map<String, Object?>;
+    layersAndTags = LayersAndTags.fromJson(json);
+    assetsDir = '${this.projectDir}/${json['assets'] as String? ?? 'assets'}';
+  }
+
+  final String projectDir;
+  late final String assetsDir;
+  late final String _cacheDir;
+  late final LayersAndTags layersAndTags;
+  final BehaviourRegistry registry;
+
+  /// Writes [scene] to `assets/<path>` (`.scene.json` added when missing).
+  WrittenDocument writeScene(String path, SceneSpec scene) {
+    path = _withExtension(path, '.scene.json');
+    return _write(path, 'scene', scene.name, scene.objects, prefab: false);
+  }
+
+  /// Writes [root] as a prefab to `assets/<path>` (`.prefab.json` added
+  /// when missing); the prefab is named after the root.
+  WrittenDocument writePrefab(String path, ObjectSpec root) {
+    path = _withExtension(path, '.prefab.json');
+    final name = root.name;
+    if (name == null) throw ArgumentError.value(root, 'root', 'a prefab needs a name for its root');
+    return _write(path, 'prefab', name, [root], prefab: true);
+  }
+
+  static String _withExtension(String path, String ext) => path.endsWith(ext) ? path : '$path$ext';
+
+  WrittenDocument _write(String path, String kind, String name, List<ObjectSpec> roots, {required bool prefab}) {
+    final file = File('$assetsDir/$path');
+    final existing = file.existsSync() ? jsonDecode(file.readAsStringSync()) as Map<String, Object?> : null;
+    final id = existing?['id'] as String? ?? _uuid5(_namespace, 'document/$path');
+    final doc = _Document(this, id);
+    for (final r in roots) {
+      doc.add(r, null);
+    }
+    final kept = existing == null ? const <String>[] : doc.keep(existing, prefab: prefab);
+    final out = <String, Object?>{
+      r'$schema': 'https://fynkel.dev/schemas/$kind.schema.json',
+      'formatVersion': 5,
+      'id': id,
+      'name': name,
+      'entities': doc.entities,
+      if (prefab) 'root': doc.roots.single,
+    };
+    final text = '${const JsonEncoder.withIndent('  ').convert(out)}\n';
+    final changed = !file.existsSync() || file.readAsStringSync() != text;
+    if (changed) {
+      file.parent.createSync(recursive: true);
+      file.writeAsStringSync(text);
+    }
+    return WrittenDocument(AssetRef(id), path, changed: changed, kept: kept);
+  }
+
+  // ---- prefab roots
+
+  final Map<String, _PrefabRoot> _roots = {};
+  Map<String, String>? _prefabPaths;
+
+  /// The root of the prefab [ref] as an instance sees it: its id and its
+  /// components by type.
+  _PrefabRoot _prefabRoot(AssetRef ref) {
+    final key = '${ref.asset}#${ref.sub ?? ''}';
+    return _roots[key] ??= (ref.sub ?? '').isEmpty ? _documentRoot(ref) : _cookedRoot(ref);
+  }
+
+  _PrefabRoot _documentRoot(AssetRef ref) {
+    final paths = _prefabPaths ??= {
+      for (final f in Directory(assetsDir).listSync(recursive: true))
+        if (f is File && f.path.endsWith('.prefab.json'))
+          if ((jsonDecode(f.readAsStringSync()) as Map<String, Object?>)['id'] case final String id) id: f.path,
+    };
+    final path = paths[ref.asset];
+    if (path == null) throw ArgumentError.value(ref, 'prefab', 'no prefab document in $assetsDir has this id');
+    return _PrefabRoot.of(jsonDecode(File(path).readAsStringSync()) as Map<String, Object?>, path);
+  }
+
+  _PrefabRoot _cookedRoot(AssetRef ref) {
+    final index = File('$_cacheDir/index.json');
+    if (!index.existsSync()) {
+      throw StateError('$ref: an imported model\'s prefab is read from the cooked cache; run `fynkel cook` first');
+    }
+    final assets = (jsonDecode(index.readAsStringSync()) as Map<String, Object?>)['assets'] as List;
+    final entry = assets.cast<Map<String, Object?>>().where((a) => a['id'] == ref.asset).firstOrNull;
+    final object = entry?['file'] as String?;
+    if (object == null) throw ArgumentError.value(ref, 'prefab', 'not in the cooked cache; run `fynkel cook`');
+    final json = _cookedJsonChunk(File('$_cacheDir/$object').readAsBytesSync(), ref.sub!);
+    if (json == null) throw ArgumentError.value(ref, 'prefab', 'the cooked asset has no "${ref.sub}"');
+    return _PrefabRoot.of(json, '${entry!['path']}#${ref.sub}');
+  }
+}
+
+/// The `JSON` chunk named [sub] of a cooked container (`fynkel_cooked`,
+/// version 1: a 48-byte header, the chunk table at `table_offset`, chunk
+/// 0 the `META` object naming every chunk).
+Map<String, Object?>? _cookedJsonChunk(Uint8List bytes, String sub) {
+  final d = ByteData.sublistView(bytes);
+  if (bytes.length < 48 || utf8.decode(bytes.sublist(0, 4)) != 'FYNC' || d.getUint32(4, Endian.little) != 1) {
+    throw const FormatException('not a version 1 cooked container');
+  }
+  final count = d.getUint32(12, Endian.little);
+  final table = d.getUint64(16, Endian.little);
+  Uint8List chunk(int i) {
+    final at = table + i * 32;
+    final offset = d.getUint64(at + 8, Endian.little), length = d.getUint64(at + 16, Endian.little);
+    return Uint8List.sublistView(bytes, offset, offset + length);
+  }
+
+  final meta = jsonDecode(utf8.decode(chunk(0))) as Map<String, Object?>;
+  for (final c in (meta['chunks'] as List? ?? const []).cast<Map<String, Object?>>()) {
+    final i = c['index'] as int?;
+    if (c['kind'] == 'JSON' && c['sub'] == sub && i != null && i < count) {
+      return jsonDecode(utf8.decode(chunk(i))) as Map<String, Object?>;
+    }
+  }
+  return null;
+}
+
+/// A prefab's root: its prefab-local id and its components.
+final class _PrefabRoot {
+  _PrefabRoot(this.name, this.id, this.components);
+
+  factory _PrefabRoot.of(Map<String, Object?> doc, String shown) {
+    final id = doc['root'] as String?;
+    final entities = doc['entities'] as Map<String, Object?>?;
+    final root = id == null ? null : entities?[id] as Map<String, Object?>?;
+    if (root == null) throw FormatException('$shown: no root entity');
+    if (root['prefab'] != null) {
+      throw UnsupportedError('$shown: its root is itself a prefab instance; place that prefab instead');
+    }
+    final components = <String, (String, Map<String, Object?>)>{};
+    for (final MapEntry(key: cid, value: c) in (root['components'] as Map<String, Object?>).entries) {
+      final m = c as Map<String, Object?>;
+      components[m['type'] as String] = (cid, (m['data'] as Map<String, Object?>?) ?? const {});
+    }
+    return _PrefabRoot(doc['name'] as String? ?? '', id!, components);
+  }
+
+  /// The prefab's name, an instance's when the spec gives none.
+  final String name;
+  final String id;
+
+  /// By type id: the component's id and data.
+  final Map<String, (String, Map<String, Object?>)> components;
+}
+
+/// One document being written.
+final class _Document {
+  _Document(this.writer, this.id);
+
+  final ProjectWriter writer;
+  final String id;
+  final Map<String, Object?> entities = {};
+  final List<String> roots = [];
+
+  /// The derived id of each object written, by its path of names.
+  final Map<String, String> _byPath = {};
+
+  /// Adds [spec] and everything under it below [parent] (an entity id).
+  void add(ObjectSpec spec, String? parent, [String parentPath = '']) {
+    final root = spec.prefab == null ? null : writer._prefabRoot(spec.prefab!);
+    final name = spec.name ?? root?.name ?? '';
+    final base = '$parentPath/$name';
+    var path = base;
+    for (var n = 1; _byPath.containsKey(path); n++) {
+      path = '$base#$n';
+    }
+    final eid = _uuid5(id, 'entity$path');
+    _byPath[path] = eid;
+    final components = <String, Object?>{};
+    final overrides = <Map<String, Object?>>[];
+
+    // Everything the spec sets on the object, by type id: the transform,
+    // native components, layer, tags, then scripts.
+    final values = <String, (int, Map<String, Object?>)>{};
+    values['fynkel.Transform'] = (1, spec.transform.toJson());
+    for (final c in spec.components) {
+      final type = _typeOf(c);
+      if (type == 'fynkel.Name') {
+        throw ArgumentError.value(c, spec.toString(), 'the name is the spec\'s own');
+      }
+      // The generated `toJson` of every component record.
+      values[type] = (1, (c as dynamic).toJson() as Map<String, Object?>);
+    }
+    if (spec.layer case final layer?) {
+      final i = writer.layersAndTags.layer(layer);
+      if (i == null) throw ArgumentError('$spec: unknown layer "$layer"; the project declares ${writer.layersAndTags.layers}');
+      values['fynkel.Layer'] = (1, gen.Layer(layer: i).toJson());
+    }
+    var tagBits = 0;
+    if (spec.tags.isNotEmpty) {
+      final bits = writer.layersAndTags.tagBits(spec.tags);
+      if (bits == null) throw ArgumentError('$spec: unknown tag in ${spec.tags}; the project declares ${writer.layersAndTags.tags}');
+      tagBits = bits;
+      values['fynkel.Tags'] = (1, gen.Tags(bits: bits).toJson());
+    }
+    // A document holds one component of a type per object (FYN-D0404):
+    // a second script of one class is for `world.build` only.
+    final behaviours = <(String, int, Map<String, Object?>)>[];
+    for (final b in spec.behaviours) {
+      final type = b.behaviourType ?? _registered(b);
+      if (behaviours.any((s) => s.$1 == type.id) || (root?.components.containsKey(type.id) ?? false)) {
+        throw ArgumentError('$spec: a second ${type.id} — a scene or prefab holds one script of a type per object');
+      }
+      behaviours.add((type.id, type.version, _scriptData(type, b)));
+    }
+
+    Map<String, Object?>? instance;
+    if (root != null) {
+      void component(String type, int version, Map<String, Object?> data) {
+        final have = root.components[type];
+        if (have == null) {
+          overrides.add({
+            'op': 'addComponent',
+            'entity': root.id,
+            'component': _uuid5(eid, 'component/$type'),
+            'type': type,
+            'version': version,
+            'data': data,
+          });
+          return;
+        }
+        for (final MapEntry(key: field, value: v) in data.entries) {
+          if (_same(have.$2[field], v)) continue;
+          overrides.add({'op': 'setField', 'entity': root.id, 'component': have.$1, 'field': field, 'value': v});
+        }
+      }
+
+      for (final MapEntry(key: type, value: (version, data)) in values.entries) {
+        if (type == 'fynkel.Tags') {
+          // Added to the prefab's own, as addTag does.
+          final own = (root.components[type]?.$2['bits'] as int?) ?? 0;
+          component(type, version, gen.Tags(bits: own | tagBits).toJson());
+        } else {
+          component(type, version, data);
+        }
+      }
+      for (final (type, version, data) in behaviours) {
+        component(type, version, data);
+      }
+      instance = {
+        'asset': docAssetRef(spec.prefab!),
+        'instance': _uuid5(eid, 'instance'),
+        'overrides': overrides,
+      };
+    } else {
+      for (final MapEntry(key: type, value: (version, data)) in values.entries) {
+        components[_uuid5(eid, 'component/$type')] = {'type': type, 'version': version, 'data': data};
+      }
+      for (final (type, version, data) in behaviours) {
+        components[_uuid5(eid, 'component/$type')] = {'type': type, 'version': version, 'data': data};
+      }
+    }
+    // In the editor's order; an instance has no components of its own
+    // (ADR-0022) — the prefab root's, with the overrides.
+    entities[eid] = <String, Object?>{
+      'name': name,
+      if (!spec.active) 'active': false,
+      'parent': parent,
+      'children': <String>[],
+      'components': components,
+      'prefab': ?instance,
+    };
+    if (parent == null) {
+      roots.add(eid);
+    } else {
+      ((entities[parent] as Map<String, Object?>)['children'] as List<String>).add(eid);
+    }
+    for (final c in spec.children) {
+      add(c, eid, path);
+    }
+  }
+
+  /// Keeps the objects of [existing] that code did not make: every entity
+  /// whose id is not the one its place would derive, with its subtree.
+  /// Returns their names.
+  List<String> keep(Map<String, Object?> existing, {required bool prefab}) {
+    final old = (existing['entities'] as Map<String, Object?>?) ?? const {};
+    // The ids code made last time: derived from the path of names, as now.
+    final made = <String>{};
+    final seen = <String>{};
+    final named = <String, int>{};
+    for (final e in old.values) {
+      named.update((e as Map<String, Object?>)['name'] as String? ?? '', (n) => n + 1, ifAbsent: () => 1);
+    }
+    void walk(String eid, String parentPath) {
+      final e = old[eid] as Map<String, Object?>?;
+      if (e == null) return;
+      final name = e['name'] as String? ?? '';
+      final base = '$parentPath/$name';
+      // The first free path of this name whose id it is: same-named
+      // siblings the editor added do not take a number.
+      String? path;
+      for (var n = 0; n < named[name]! && path == null; n++) {
+        final p = n == 0 ? base : '$base#$n';
+        if (!seen.contains(p) && _uuid5(id, 'entity$p') == eid) path = p;
+      }
+      if (path == null) return; // the editor's
+      seen.add(path);
+      made.add(eid);
+      for (final c in (e['children'] as List? ?? const []).cast<String>()) {
+        walk(c, path);
+      }
+    }
+
+    for (final MapEntry(key: eid, value: e) in old.entries) {
+      if ((e as Map<String, Object?>)['parent'] == null) walk(eid, '');
+    }
+    final kept = <String>[];
+    void keepTree(String eid, String? parent) {
+      final e = Map<String, Object?>.of(old[eid] as Map<String, Object?>);
+      e['parent'] = parent;
+      entities[eid] = e;
+      kept.add(e['name'] as String? ?? '');
+      final children = (e['children'] as List? ?? const []).cast<String>().where((c) => old.containsKey(c)).toList();
+      e['children'] = children;
+      for (final c in children) {
+        keepTree(c, eid);
+      }
+    }
+
+    for (final MapEntry(key: eid, value: e) in old.entries) {
+      if (made.contains(eid) || entities.containsKey(eid)) continue;
+      final parent = (e as Map<String, Object?>)['parent'] as String?;
+      if (parent != null && !made.contains(parent)) continue; // under another kept object
+      // Under an object code still makes: after its children; else a root
+      // (a prefab's under its root).
+      final at = parent != null && entities.containsKey(parent) ? parent : (prefab ? roots.single : null);
+      keepTree(eid, at);
+      if (at == null) {
+        roots.add(eid);
+      } else {
+        ((entities[at] as Map<String, Object?>)['children'] as List<String>).add(eid);
+      }
+    }
+    return kept;
+  }
+
+  BehaviourType _registered(Behaviour b) {
+    for (final t in writer.registry.types) {
+      if (t.create().runtimeType == b.runtimeType) return t;
+    }
+    throw ArgumentError('${b.runtimeType} is not a registered behaviour: pass the generated registerBehaviours '
+        'to ProjectWriter (and annotate the class with @FynkelBehaviour)');
+  }
+}
+
+/// A script's `data`: every field but references (an object of the
+/// scene is picked in the editor), through its registered `get`.
+Map<String, Object?> _scriptData(BehaviourType type, Behaviour b) => {
+      for (final f in type.fields)
+        if (!f.isReference) f.name: f.get(b),
+    };
+
+String _typeOf(WireRecord c) {
+  for (final codec in gen.componentCodecs.values) {
+    if (codec.type == c.runtimeType) return codec.name;
+  }
+  throw ArgumentError.value(c, 'component', 'not a native component');
+}
+
+bool _same(Object? a, Object? b) => jsonEncode(a) == jsonEncode(b);
+
+/// The namespace of every id this writer derives.
+const _namespace = 'a3f0c0de-5c7e-4b1d-9e2f-6a0d0c0de026';
+
+/// UUID version 5 (SHA-1) of [name] in [namespace], as `uuid.uuid5` and
+/// Rust's `Uuid::new_v5` make it.
+String _uuid5(String namespace, String name) {
+  final hexNs = namespace.replaceAll('-', '');
+  final ns = [for (var i = 0; i < 32; i += 2) int.parse(hexNs.substring(i, i + 2), radix: 16)];
+  final h = sha1.convert([...ns, ...utf8.encode(name)]).bytes.sublist(0, 16);
+  h[6] = (h[6] & 0x0f) | 0x50;
+  h[8] = (h[8] & 0x3f) | 0x80;
+  final hex = h.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+}
