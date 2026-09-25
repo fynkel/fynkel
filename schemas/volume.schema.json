@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://fynkel.dev/schemas/volume.schema.json",
   "title": "Fynkel volume profile",
-  "description": "`<name>.volume.json` (R3a, `docs/renderer.md` § Volumes): a post-processing profile: the look overrides (ambient occlusion R3a, bloom R3b, colour grading R3c) a `fynkel.Volume` component applies to the frame. Every block and every field is optional: a field that is present overrides what is below it (the engine default, or a lower-priority volume), a field that is absent is inherited. The renderer blends the volumes that reach the camera once per frame, each by its weight × how far inside its shape the camera is. The project's quality profile is the ceiling: a profile can shape an effect the quality profile has on, never turn on one it has off.",
+  "description": "`<name>.volume.json` (R3a, `docs/renderer.md` § Volumes): a post-processing profile: the look overrides (ambient occlusion R3a, bloom R3b, colour grading R3c, contact shadows R3d) a `fynkel.Volume` component applies to the frame. Every block and every field is optional: a field that is present overrides what is below it (the engine default, or a lower-priority volume), a field that is absent is inherited. The renderer blends the volumes that reach the camera once per frame, each by its weight × how far inside its shape the camera is. The project's quality profile is the ceiling: a profile can shape an effect the quality profile has on, never turn on one it has off.",
   "type": "object",
   "allOf": [
     {
@@ -138,6 +138,37 @@
           "minItems": 3,
           "maxItems": 3,
           "description": "Per channel: scales the brights (engine default [1, 1, 1])."
+        }
+      },
+      "additionalProperties": false
+    },
+    "contactShadows": {
+      "type": "object",
+      "description": "Contact shadows (R3d, Unity HDRP's Contact Shadows): a short march toward the sun through the depth buffer, for the thin gaps the shadow map is too coarse to see — where an object meets the ground, the creases of a model. They darken the sun's light only, on objects that receive shadows. Off until a profile gives them an intensity.",
+      "properties": {
+        "intensity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "The shadow's opacity: 0 is off, 1 blocks the sun fully (engine default 0)."
+        },
+        "length": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 5,
+          "description": "How far toward the sun a pixel looks for something in the way, in metres (engine default 0.15)."
+        },
+        "thickness": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 5,
+          "description": "How thick a surface is taken to be behind what the camera sees, in metres: larger fills gaps behind thin objects, smaller lets light through them (engine default 0.05)."
+        },
+        "distance": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1000,
+          "description": "The camera distance past which there are none, in metres; they fade out over the last tenth (engine default 50)."
         }
       },
       "additionalProperties": false

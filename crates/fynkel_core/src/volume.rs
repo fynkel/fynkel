@@ -1,6 +1,6 @@
 //! Post-processing volumes (R3a, `docs/renderer.md` § Volumes): the look
 //! a frame is drawn with — ambient occlusion (R3a), bloom (R3b), colour
-//! grading (R3c) — resolved once per frame on the CPU from the scene's [`Volume`]
+//! grading (R3c), contact shadows (R3d) — resolved once per frame on the CPU from the scene's [`Volume`]
 //! components and their profiles.
 //!
 //! A [`VolumeProfile`] (a `.volume.json`) holds *overrides*: a field that
@@ -41,6 +41,23 @@ pub struct BloomOverrides {
     pub scatter: Option<f32>,
     /// Linear RGB multiplied into the glow.
     pub tint: Option<Vec3>,
+}
+
+/// The contact shadows block of a profile (R3d, Unity HDRP's Contact
+/// Shadows): a short march toward the sun through the depth buffer finds
+/// the small gaps the shadow map is too coarse for.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ContactOverrides {
+    /// `0..=1`, the shadow's opacity; 0 is off.
+    pub intensity: Option<f32>,
+    /// How far toward the sun the march goes, in metres, `> 0`.
+    pub length: Option<f32>,
+    /// How thick a surface in the depth buffer is taken to be, in metres,
+    /// `> 0`: a march step further behind it than this passes.
+    pub thickness: Option<f32>,
+    /// The camera distance past which there are none, in metres, `> 0`;
+    /// they fade out over the last tenth.
+    pub distance: Option<f32>,
 }
 
 /// The curve that brings the graded scene's radiance into the display's
@@ -108,6 +125,7 @@ pub struct VolumeProfile {
     pub ambient_occlusion: AoOverrides,
     pub bloom: BloomOverrides,
     pub color_grading: GradingOverrides,
+    pub contact_shadows: ContactOverrides,
 }
 
 /// The resolved colour grading of one frame (R3c). The default is neutral:
@@ -250,6 +268,10 @@ pub struct PostSettings {
     pub bloom_scatter: f32,
     pub bloom_tint: Vec3,
     pub grading: Grading,
+    pub contact_intensity: f32,
+    pub contact_length: f32,
+    pub contact_thickness: f32,
+    pub contact_distance: f32,
 }
 
 /// Ambient occlusion is off until a volume gives it an intensity (as in
@@ -263,6 +285,13 @@ pub const DEFAULT_AO_INTENSITY: f32 = 0.0;
 pub const DEFAULT_BLOOM_INTENSITY: f32 = 0.0;
 pub const DEFAULT_BLOOM_THRESHOLD: f32 = 0.9;
 pub const DEFAULT_BLOOM_SCATTER: f32 = 0.7;
+/// Contact shadows are off until a volume gives them an intensity (R3d);
+/// the rest is what an intensity alone gets (HDRP's defaults, the
+/// thickness a little over its 0.02 m for the engine's coarser depth).
+pub const DEFAULT_CONTACT_INTENSITY: f32 = 0.0;
+pub const DEFAULT_CONTACT_LENGTH: f32 = 0.15;
+pub const DEFAULT_CONTACT_THICKNESS: f32 = 0.05;
+pub const DEFAULT_CONTACT_DISTANCE: f32 = 50.0;
 
 impl Default for PostSettings {
     fn default() -> Self {
@@ -274,6 +303,10 @@ impl Default for PostSettings {
             bloom_scatter: DEFAULT_BLOOM_SCATTER,
             bloom_tint: Vec3::ONE,
             grading: Grading::default(),
+            contact_intensity: DEFAULT_CONTACT_INTENSITY,
+            contact_length: DEFAULT_CONTACT_LENGTH,
+            contact_thickness: DEFAULT_CONTACT_THICKNESS,
+            contact_distance: DEFAULT_CONTACT_DISTANCE,
         }
     }
 }
@@ -351,6 +384,11 @@ pub fn resolve(base: PostSettings, contributions: &mut [Contribution<'_>]) -> (P
         blend(&mut s.bloom_threshold, bloom.threshold, t);
         blend(&mut s.bloom_scatter, bloom.scatter, t);
         blend3(&mut s.bloom_tint, bloom.tint, t);
+        let contact = &c.profile.contact_shadows;
+        blend(&mut s.contact_intensity, contact.intensity, t);
+        blend(&mut s.contact_length, contact.length, t);
+        blend(&mut s.contact_thickness, contact.thickness, t);
+        blend(&mut s.contact_distance, contact.distance, t);
         let c = &c.profile.color_grading;
         let g = &mut s.grading;
         // A choice does not blend: any part of a volume sets it (Unity's
@@ -621,6 +659,34 @@ mod tests {
                 DEFAULT_BLOOM_SCATTER,
                 DEFAULT_AO_RADIUS
             )
+        );
+    }
+
+    #[test]
+    fn contact_shadows_are_off_by_default_and_blend_like_the_rest() {
+        let base = PostSettings::default();
+        assert_eq!(base.contact_intensity, 0.0, "no volume, no contact shadows");
+        let near = VolumeProfile {
+            contact_shadows: ContactOverrides {
+                intensity: Some(1.0),
+                length: Some(0.35),
+                ..ContactOverrides::default()
+            },
+            ..VolumeProfile::default()
+        };
+        let (s, _) = resolve(
+            base,
+            &mut [Contribution {
+                profile: &near,
+                amount: 0.5,
+                priority: 0,
+            }],
+        );
+        assert!((s.contact_intensity - 0.5).abs() < 1e-6);
+        assert!((s.contact_length - 0.25).abs() < 1e-6);
+        assert_eq!(
+            (s.contact_thickness, s.contact_distance),
+            (DEFAULT_CONTACT_THICKNESS, DEFAULT_CONTACT_DISTANCE)
         );
     }
 }

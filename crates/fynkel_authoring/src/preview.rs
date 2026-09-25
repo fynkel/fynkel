@@ -991,6 +991,16 @@ impl Preview {
                 ("gain", rgb(c.gain)),
             ],
         );
+        let cs = p.contact_shadows;
+        block(
+            "contactShadows",
+            vec![
+                ("intensity", n(cs.intensity)),
+                ("length", n(cs.length)),
+                ("thickness", n(cs.thickness)),
+                ("distance", n(cs.distance)),
+            ],
+        );
         Ok(Value::Object(out))
     }
 

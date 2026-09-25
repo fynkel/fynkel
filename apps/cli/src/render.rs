@@ -235,6 +235,7 @@ pub fn run(args: &[String]) -> ExitCode {
                 "shadowCascades": stats.shadow_cascades,
                 "ambientOcclusion": stats.ambient_occlusion,
                 "bloom": stats.bloom,
+                "contactShadows": stats.contact_shadows,
                 "grading": stats.grading,
                 "volumes": stats.volumes,
                 "post": {
@@ -244,6 +245,10 @@ pub fn run(args: &[String]) -> ExitCode {
                     "bloomThreshold": renderer.post_settings().bloom_threshold,
                     "bloomScatter": renderer.post_settings().bloom_scatter,
                     "bloomTint": renderer.post_settings().bloom_tint.to_array(),
+                    "contactIntensity": renderer.post_settings().contact_intensity,
+                    "contactLength": renderer.post_settings().contact_length,
+                    "contactThickness": renderer.post_settings().contact_thickness,
+                    "contactDistance": renderer.post_settings().contact_distance,
                     "grading": grading_json(&renderer.post_settings().grading),
                 },
                 "quality": {
@@ -252,6 +257,7 @@ pub fn run(args: &[String]) -> ExitCode {
                     "shadowResolution": quality.settings.shadow_resolution,
                     "ambientOcclusion": quality.settings.ambient_occlusion,
                     "bloom": quality.settings.bloom,
+                    "contactShadows": quality.settings.contact_shadows,
                     "msaa": quality.settings.msaa,
                     "renderScale": quality.settings.render_scale,
                     "anisotropy": quality.settings.anisotropy,
@@ -316,6 +322,9 @@ pub fn run(args: &[String]) -> ExitCode {
                 };
                 if stats.bloom {
                     look += &format!(", bloom {:.2} >{:.2}", post.bloom_intensity, post.bloom_threshold);
+                }
+                if stats.contact_shadows {
+                    look += &format!(", contact shadows {:.2} over {:.2} m", post.contact_intensity, post.contact_length);
                 }
                 if post.grading.tonemapper != fynkel_core::volume::Tonemapper::Aces {
                     look += &format!(", {} tone mapping", post.grading.tonemapper.name());

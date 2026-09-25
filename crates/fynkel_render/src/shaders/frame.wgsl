@@ -72,8 +72,13 @@ struct Frame {
     shadow: vec4<f32>,
     // The frame's ambient occlusion as the volumes resolved it (R3a):
     // x: hemisphere radius (m); y: the exponent the visible fraction is
-    // raised to; zw unused.
+    // raised to (0: off, the red channel of `ssao_tex` is 1); zw unused.
     ao: vec4<f32>,
+    // The frame's contact shadows as the volumes resolved them (R3d):
+    // x: opacity (0: off, the green channel of `ssao_tex` is 1); y: the
+    // march length toward the sun (m); z: the thickness a depth-buffer
+    // surface is taken to have (m); w: the camera distance they end at (m).
+    contact: vec4<f32>,
     // The frame's bloom as the volumes resolved it (R3b): x: threshold;
     // y: the soft knee (half the threshold); z: how much of each coarser
     // level is blended over the finer one (scatter, 0.05..0.95); w: the
@@ -85,7 +90,7 @@ struct Frame {
     grade: Grade,
     // x: lights in the pool; y: 1 when the sky is drawn; z: 1 when the
     // post pass must sRGB-encode (the target is a Unorm format); w: 1
-    // when `ssao_tex` holds this frame's ambient occlusion (R2).
+    // when `ssao_tex` holds this frame's screen-space stage.
     counts: vec4<u32>,
     // The frame's lights. A mesh reads only the ones its instance lists
     // (E1 light culling); the index is a byte of `Instance.lights`.
@@ -100,8 +105,9 @@ struct Frame {
 @group(0) @binding(4) var irradiance_cube: texture_cube<f32>;
 @group(0) @binding(5) var specular_cube: texture_cube<f32>;
 @group(0) @binding(6) var brdf_lut: texture_2d<f32>;
-// Ambient occlusion at the internal size (R2): a 1×1 white texture when
-// the profile has it off. The AO passes do not bind this group.
+// The screen-space stage at the internal size: red the ambient occlusion
+// (R2), green the contact shadows (R3d); a 1×1 white texture when the
+// profile has both off. The stage's own passes do not bind this group.
 @group(0) @binding(7) var ssao_tex: texture_2d<f32>;
 
 // A world direction in the environment's frame: the sky's rotation about

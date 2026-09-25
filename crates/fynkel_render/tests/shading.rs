@@ -3028,3 +3028,91 @@ fn extra_worlds_cast_and_receive_the_suns_shadow() {
     );
     assert!(spread(px[lit_at]) < 1.0, "the slab is grey");
 }
+
+#[test]
+fn contact_shadows_darken_the_sunlit_floor_at_a_base_and_off_is_none() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    // R2's corner under a sun from the -X side that casts no map shadow,
+    // the ambient dimmed so the sun is most of the light: what darkens the floor at the cube's +X foot is the contact shadow.
+    let lab = Lab::new("contact");
+    let on = lab.volume(
+        1,
+        json!({ "contactShadows": { "intensity": 1.0, "length": 0.8, "thickness": 0.3 } }),
+    );
+    let off = lab.volume(2, json!({ "contactShadows": { "intensity": 0.0 } }));
+    let (assets, _) = lab.extract(Vec3::new(0.0, 0.3, 3.0), &[], false);
+    let mut r = renderer(&device);
+    r.set_assets(Some(assets));
+    r.camera.eye = Vec3::new(4.0, 2.5, 6.0);
+    r.camera.target = Vec3::new(0.5, 0.3, 0.0);
+    let mut bare = ao_corner_scene();
+    bare.environment = Some(environment(Vec3::ONE, 1_000.0));
+    bare.directional_lights
+        .push(sun(Vec3::new(0.6, -1.0, 0.0), 10_000.0));
+    let with = |profile: &AssetRef| {
+        let mut e = bare.clone();
+        e.volumes = vec![global_volume(profile, 0)];
+        e
+    };
+    let at = |world: Vec3| {
+        let (x, y) = pixel_of(&r, world);
+        (y.min(H - 1) * W + x.min(W - 1)) as usize
+    };
+    let foot_px = at(Vec3::new(1.12, 0.0, 0.3));
+    let open_px = at(Vec3::new(5.0, 0.0, 0.0));
+    let top_px = at(Vec3::new(0.0, 2.0, 0.3));
+    let lum = |px: &[[u8; 4]], i: usize| luminance(px[i]);
+
+    let plain = render_offscreen(&device, &queue, &mut r, &bare);
+    dump(&plain, "contact-plain");
+    assert!(!r.stats().contact_shadows, "no volume, no contact shadows");
+
+    let px = render_offscreen(&device, &queue, &mut r, &with(&on));
+    dump(&px, "contact");
+    assert!(r.stats().contact_shadows);
+    assert!(
+        !r.stats().ambient_occlusion,
+        "the stage ran for contact shadows alone"
+    );
+    assert!(
+        lum(&px, foot_px) < lum(&plain, foot_px) * 0.7,
+        "the foot darkens: {:?} vs {:?}",
+        px[foot_px],
+        plain[foot_px]
+    );
+    assert!(
+        (lum(&px, open_px) - lum(&plain, open_px)).abs() < 2.0,
+        "open floor is untouched: {:?} vs {:?}",
+        px[open_px],
+        plain[open_px]
+    );
+    assert!(
+        (lum(&px, top_px) - lum(&plain, top_px)).abs() < 2.0,
+        "a sunlit face does not shadow itself: {:?} vs {:?}",
+        px[top_px],
+        plain[top_px]
+    );
+
+    // Intensity 0 is none, to the bit.
+    let zero = render_offscreen(&device, &queue, &mut r, &with(&off));
+    assert!(!r.stats().contact_shadows);
+    assert_eq!(zero, plain);
+
+    // No sun, nothing to shadow: the stage does not run for them.
+    let mut dark = with(&on);
+    dark.directional_lights.clear();
+    render_offscreen(&device, &queue, &mut r, &dark);
+    assert!(!r.stats().contact_shadows);
+
+    // The quality profile is the ceiling, and its off is none.
+    r.set_quality(Quality {
+        contact_shadows: false,
+        ..Quality::default()
+    });
+    let capped = render_offscreen(&device, &queue, &mut r, &with(&on));
+    assert!(!r.stats().contact_shadows);
+    assert_eq!(capped, plain);
+    r.set_quality(Quality::default());
+}

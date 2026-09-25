@@ -12,8 +12,8 @@
 //! front over the default ambient — every tile lit alike, whatever the
 //! asset authored. The project's default quality profile applies with
 //! MSAA forced on (a tile is small; its edges are most of it) and bloom
-//! off (no volume gives it an intensity anyway, and a glow would bleed
-//! into the transparent background). Pixels left at exactly the clear
+//! and contact shadows off (no volume gives them an intensity anyway, and
+//! a glow would bleed into the transparent background). Pixels left at exactly the clear
 //! colour become transparent, so the tile's own background shows.
 //!
 //! A material is drawn on the project's built-in Sphere (ADR-0023) when
@@ -489,6 +489,7 @@ pub fn run(args: &[String]) -> ExitCode {
     renderer.set_quality(Quality {
         msaa: 4,
         bloom: false,
+        contact_shadows: false,
         ..base
     });
     renderer.set_assets(Some(assets.clone()));

@@ -46,6 +46,8 @@ pub struct QualityProfile {
     pub ambient_occlusion: bool,
     /// Bloom (R3b): allowed; a volume gives it an intensity.
     pub bloom: bool,
+    /// Contact shadows (R3d): allowed; a volume gives them an intensity.
+    pub contact_shadows: bool,
     pub msaa: u32,
     pub render_scale: f64,
     pub anisotropy: u32,
@@ -63,6 +65,7 @@ impl QualityProfile {
             shadow_resolution: 2048,
             ambient_occlusion: true,
             bloom: true,
+            contact_shadows: true,
             msaa: 4,
             render_scale: 1.0,
             anisotropy: 8,
@@ -75,7 +78,7 @@ impl QualityProfile {
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "name": self.name, "shadows": self.shadows, "shadowResolution": self.shadow_resolution,
-            "ambientOcclusion": self.ambient_occlusion, "bloom": self.bloom, "msaa": self.msaa, "renderScale": self.render_scale, "anisotropy": self.anisotropy,
+            "ambientOcclusion": self.ambient_occlusion, "bloom": self.bloom, "contactShadows": self.contact_shadows, "msaa": self.msaa, "renderScale": self.render_scale, "anisotropy": self.anisotropy,
             "textureMaxSize": self.texture_max_size,
         })
     }
@@ -93,6 +96,7 @@ impl QualityProfile {
                 .as_bool()
                 .unwrap_or(d.ambient_occlusion),
             bloom: v["bloom"].as_bool().unwrap_or(d.bloom),
+            contact_shadows: v["contactShadows"].as_bool().unwrap_or(d.contact_shadows),
             msaa: int("msaa", d.msaa),
             render_scale: v["renderScale"].as_f64().unwrap_or(d.render_scale),
             anisotropy: int("anisotropy", d.anisotropy),
@@ -527,6 +531,11 @@ impl Project {
                             .get("bloom")
                             .and_then(Node::as_bool)
                             .unwrap_or(d.bloom),
+                        contact_shadows: m
+                            .value
+                            .get("contactShadows")
+                            .and_then(Node::as_bool)
+                            .unwrap_or(d.contact_shadows),
                         msaa: int("msaa", d.msaa),
                         render_scale: m
                             .value

@@ -343,6 +343,11 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         if frame.shadow.x > 0.5 && (bits & 1u) != 0u {
             visibility = sun_visibility(in.world_pos, geometric_n);
         }
+        // Contact shadows (R3d) for the instances that receive shadows and
+        // are in the prepass's depth: the nearer of the two shadows wins.
+        if frame.contact.x > 0.0 && (bits & 1u) != 0u && cutoff > -1.5 {
+            visibility = min(visibility, textureLoad(ssao_tex, vec2<i32>(in.clip.xy), 0).g);
+        }
         radiance += visibility * shade(n, v, frame.sun_dir.xyz, frame.sun_color.rgb, diffuse, f0, a2);
     }
     // Only the lights this object was given (E1 light culling): its list

@@ -74,8 +74,9 @@ pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// The sun's shadow map format.
 pub const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-/// The ambient-occlusion targets (R2): one byte a pixel, 1 unoccluded.
-pub const AO_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
+/// The screen-space stage's targets: red the ambient occlusion (R2),
+/// green the contact shadows (R3d); a byte each, 1 unoccluded.
+pub const AO_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg8Unorm;
 /// Bloom's mip chain (R3b): exposed radiance, half the internal size and
 /// down.
 pub const BLOOM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -188,6 +189,7 @@ struct FrameUniforms {
     sky: [f32; 4],
     shadow: [f32; 4],
     ao: [f32; 4],
+    contact: [f32; 4],
     bloom: [f32; 4],
     bloom_tint: [f32; 4],
     grade: GpuGrade,
@@ -458,10 +460,14 @@ pub struct FrameStats {
     pub outlined: u32,
     /// [`ExtraWorld`]s drawn beside the main extract this frame.
     pub extra_worlds: u32,
-    /// Whether the frame ran the ambient-occlusion stage (R2).
+    /// Whether the frame drew ambient occlusion (R2) in the screen-space
+    /// stage.
     pub ambient_occlusion: bool,
     /// Whether the frame ran the bloom stage (R3b).
     pub bloom: bool,
+    /// Whether the frame marched contact shadows (R3d) in the
+    /// screen-space stage.
+    pub contact_shadows: bool,
     /// Whether the post pass graded the frame (R3c): a volume set more
     /// than the tone mapper.
     pub grading: bool,
@@ -815,8 +821,9 @@ struct Attachments {
     /// Depth for the scene passes (multisampled with the colour). The
     /// depth prepass fills and stores it; the AO passes read it.
     depth_view: wgpu::TextureView,
-    /// Ambient occlusion at this size (R2); `None` while the profile has
-    /// it off, and then the pass chain has no AO stage at all.
+    /// The screen-space stage's targets at this size, ambient occlusion
+    /// (R2) and contact shadows (R3d); `None` while the profile has both
+    /// off, and then the pass chain has no such stage at all.
     ao: Option<AoTargets>,
     /// Bloom's chain (R3b); `None` while the profile has it off, and then
     /// the post pass reads a black placeholder.
@@ -964,8 +971,9 @@ pub struct ExtractRenderer {
     /// The shadow map holds this frame's sun: the shadow pass runs and the
     /// mesh pass samples it.
     shadow_active: bool,
-    /// Whether this frame's pass chain has the ambient-occlusion stage
-    /// (R2): the profile asks for it and the targets exist.
+    /// Whether this frame's pass chain has the screen-space stage — the
+    /// depth prepass, the ambient occlusion (R2) and contact shadows
+    /// (R3d) — : the targets exist and either effect is on.
     ao_active: bool,
     /// Whether this frame's pass chain has the bloom stage (R3b): the
     /// profile allows it, the chain exists and the volumes give it an
@@ -1617,7 +1625,7 @@ impl ExtractRenderer {
         if internal != (self.attachments.width, self.attachments.height)
             || wanted.msaa != self.attachments.sample_count
             || (wanted.render_scale != 1.0) != self.attachments.ldr_view.is_some()
-            || wanted.ambient_occlusion != self.attachments.ao.is_some()
+            || (wanted.ambient_occlusion || wanted.contact_shadows) != self.attachments.ao.is_some()
             || wanted.bloom != self.attachments.bloom.is_some()
         {
             self.rebuild_attachments(device);
@@ -2482,13 +2490,22 @@ impl ExtractRenderer {
         self.post = post;
         stats.volumes = volumes;
 
-        // Ambient occlusion (R2): the stage runs when the quality profile
-        // asks for it (a volume cannot turn it on), the volumes leave it
-        // an intensity and there is opaque geometry for the prepass.
-        self.ao_active = self.attachments.ao.is_some()
-            && post.ao_intensity > 0.0
-            && stats.draws > stats.transparent;
-        stats.ambient_occlusion = self.ao_active;
+        // Ambient occlusion (R2) and contact shadows (R3d): each is on when
+        // the quality profile allows it (a volume cannot turn it on) and
+        // the volumes give it an intensity — contact shadows also need a
+        // sun. The screen-space stage runs for either when there is
+        // opaque geometry for the prepass; the other one's channel stays 1.
+        let opaque = self.attachments.ao.is_some() && stats.draws > stats.transparent;
+        let ao_on = opaque && self.quality.ambient_occlusion && post.ao_intensity > 0.0;
+        let contact_on = opaque
+            && self.quality.contact_shadows
+            && sun_present
+            && post.contact_intensity > 0.0
+            && post.contact_length > 0.0
+            && post.contact_distance > 0.0;
+        self.ao_active = ao_on || contact_on;
+        stats.ambient_occlusion = ao_on;
+        stats.contact_shadows = contact_on;
         // Bloom (R3b): the profile allows it and a volume gives it an
         // intensity; otherwise the post pass adds nothing, bit for bit.
         self.bloom_active = self.attachments.bloom.is_some() && post.bloom_intensity > 0.0;
@@ -2514,7 +2531,22 @@ impl ExtractRenderer {
                 (ibl_mips - 1) as f32,
             ],
             shadow,
-            ao: [post.ao_radius, post.ao_intensity, 0.0, 0.0],
+            ao: [
+                post.ao_radius,
+                if ao_on { post.ao_intensity } else { 0.0 },
+                0.0,
+                0.0,
+            ],
+            contact: if contact_on {
+                [
+                    post.contact_intensity.clamp(0.0, 1.0),
+                    post.contact_length,
+                    post.contact_thickness.max(1e-4),
+                    post.contact_distance,
+                ]
+            } else {
+                [0.0; 4]
+            },
             bloom: [
                 post.bloom_threshold.max(0.0),
                 post.bloom_threshold.max(0.0) * 0.5,
@@ -4190,7 +4222,7 @@ fn create_attachments(
         DEPTH_FORMAT,
         wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
     );
-    let ao = quality.ambient_occlusion.then(|| {
+    let ao = (quality.ambient_occlusion || quality.contact_shadows).then(|| {
         let ao_usage =
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
         let view = create_attachment(device, "fynkel ao", w, h, 1, AO_FORMAT, ao_usage);
@@ -4371,7 +4403,7 @@ fn create_attachments(
         }
         + texels * 8
         + if ldr_view.is_some() { texels * 4 } else { 0 }
-        + if ao.is_some() { texels * 2 } else { 0 }
+        + if ao.is_some() { texels * 4 } else { 0 }
         + bloom_texels * 8;
     Attachments {
         width: w,

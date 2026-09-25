@@ -27,6 +27,9 @@ pub struct Quality {
     /// Bloom (R3b): the bright-pass and its mip chain exist; a volume
     /// gives it an intensity.
     pub bloom: bool,
+    /// Contact shadows (R3d): the screen-space stage marches toward the
+    /// sun; a volume gives them an intensity.
+    pub contact_shadows: bool,
     /// Samples per pixel of the scene passes: 1 or 4.
     pub msaa: u32,
     /// Internal resolution relative to the target (1.0 = native).
@@ -48,6 +51,7 @@ impl From<&QualityProfile> for Quality {
             shadow_resolution: p.shadow_resolution,
             ambient_occlusion: p.ambient_occlusion,
             bloom: p.bloom,
+            contact_shadows: p.contact_shadows,
             msaa: p.msaa,
             render_scale: p.render_scale as f32,
             anisotropy: p.anisotropy,
@@ -71,6 +75,7 @@ impl Quality {
             shadows: self.shadows,
             ambient_occlusion: self.ambient_occlusion,
             bloom: self.bloom,
+            contact_shadows: self.contact_shadows,
             shadow_resolution: self
                 .shadow_resolution
                 .clamp(MIN_SHADOW_RESOLUTION, MAX_SHADOW_RESOLUTION)
@@ -117,6 +122,7 @@ mod tests {
                 shadow_resolution: 2048,
                 ambient_occlusion: true,
                 bloom: true,
+                contact_shadows: true,
                 msaa: 4,
                 render_scale: 1.0,
                 anisotropy: 8,
@@ -133,6 +139,7 @@ mod tests {
             shadow_resolution: 3000,
             ambient_occlusion: true,
             bloom: true,
+            contact_shadows: true,
             msaa: 8,
             render_scale: 9.0,
             anisotropy: 64,

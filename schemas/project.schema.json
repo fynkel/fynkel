@@ -149,6 +149,7 @@
         "shadowResolution": { "enum": [512, 1024, 2048, 4096], "default": 2048 },
         "ambientOcclusion": { "type": "boolean", "default": true },
         "bloom": { "type": "boolean", "default": true },
+        "contactShadows": { "type": "boolean", "default": true },
         "msaa": { "enum": [1, 2, 4, 8], "default": 4 },
         "renderScale": { "type": "number", "minimum": 0.25, "maximum": 2, "default": 1 },
         "anisotropy": { "enum": [1, 2, 4, 8, 16], "default": 8 },

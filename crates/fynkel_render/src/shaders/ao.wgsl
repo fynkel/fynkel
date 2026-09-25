@@ -1,10 +1,14 @@
 
-// Ambient occlusion (R2, docs/renderer.md §"Ambient occlusion"): the
-// depth prepass has written the frame's opaque depth, and this pass turns
-// it into how much of the sky each pixel can see. `fs_main` is the SSAO
-// estimate, `fs_blur` removes its per-pixel rotation; the mesh pass
-// multiplies the result into its ambient and IBL term only (direct light
-// is not occluded by it).
+// The screen-space stage: the depth prepass has written the frame's
+// opaque depth, and this pass turns it into two answers a pixel.
+// Red, ambient occlusion (R2, docs/renderer.md §"Ambient occlusion"): how
+// much of the sky the pixel can see; the mesh pass multiplies it into its
+// ambient and IBL term only (direct light is not occluded by it).
+// Green, contact shadows (R3d, §"Contact shadows"): whether a short march
+// toward the sun meets something the shadow map is too coarse to see; the
+// mesh pass darkens the sun's light by it. `fs_main` is the estimate,
+// `fs_blur` removes its per-pixel dither. An effect that is off (its
+// intensity 0 in `frame`) leaves its channel at 1.
 //
 // Group 0 is the frame uniform alone — not the mesh pass's group 0, whose
 // last binding is the texture this pass writes.
@@ -27,6 +31,13 @@ const AO_BIAS: f32 = 0.02;
 // different surfaces.
 const AO_BLUR: i32 = 2;
 const AO_BLUR_DEPTH: f32 = 0.02;
+// Steps of the contact-shadow march, and the smallest gap (in pixel
+// footprints at the point) a step must be behind the drawn surface
+// before it counts: the depth is a pixel's centre, the step anywhere in
+// it. The march starts a footprint off the surface, so the surface
+// itself stays behind every step.
+const CONTACT_STEPS: u32 = 12u;
+const CONTACT_BIAS: f32 = 1.0;
 
 struct AoOut {
     @builtin(position) clip: vec4<f32>,
@@ -111,6 +122,26 @@ fn fs_main(in: AoOut) -> @location(0) vec4<f32> {
     let b = cross(n, t);
     let rotation = dither(in.clip.xy) * 6.28318531;
 
+    var ao = 1.0;
+    if frame.ao.y > 0.0 {
+        ao = ambient_occlusion(p, n, t, b, rotation, size, texel);
+    }
+    var contact = 1.0;
+    if frame.contact.x > 0.0 {
+        contact = contact_shadow(p, n, uv, depth, dither(in.clip.xy), size, texel);
+    }
+    return vec4<f32>(ao, contact, 0.0, 1.0);
+}
+
+fn ambient_occlusion(
+    p: vec3<f32>,
+    n: vec3<f32>,
+    t: vec3<f32>,
+    b: vec3<f32>,
+    rotation: f32,
+    size: vec2<i32>,
+    texel: vec2<f32>,
+) -> f32 {
     let eye = frame.camera_pos.xyz;
     var occlusion = 0.0;
     for (var i = 0u; i < AO_SAMPLES; i++) {
@@ -141,8 +172,62 @@ fn fs_main(in: AoOut) -> @location(0) vec4<f32> {
         let away = length(s - p);
         occlusion += clamp(frame.ao.x / max(away, 1e-4), 0.0, 1.0);
     }
-    let ao = pow(clamp(1.0 - occlusion / f32(AO_SAMPLES), 0.0, 1.0), frame.ao.y);
-    return vec4<f32>(ao, 0.0, 0.0, 1.0);
+    return pow(clamp(1.0 - occlusion / f32(AO_SAMPLES), 0.0, 1.0), frame.ao.y);
+}
+
+/// 1 lit, `1 − opacity` where a march of `frame.contact.y` metres toward
+/// the sun passes behind a drawn surface no thicker than
+/// `frame.contact.z`; faded out over the last tenth of
+/// `frame.contact.w`.
+fn contact_shadow(
+    p: vec3<f32>,
+    n: vec3<f32>,
+    uv: vec2<f32>,
+    depth: f32,
+    jitter: f32,
+    size: vec2<i32>,
+    texel: vec2<f32>,
+) -> f32 {
+    // No test of n·L: the normal from depth is least sure where contact
+    // matters most, at a foot, and the mesh pass gives a face turned
+    // from the sun no sunlight to darken anyway.
+    let l = frame.sun_dir.xyz;
+    let eye = frame.camera_pos.xyz;
+    let range = distance(p, eye);
+    let far = frame.contact.w;
+    let fade = clamp((far - range) / (0.1 * far), 0.0, 1.0);
+    if fade <= 0.0 {
+        return 1.0;
+    }
+    // A pixel's size at this depth: the march starts that far off the
+    // surface, and a hit must be further in than the bias.
+    let footprint = distance(world_at(uv + vec2<f32>(texel.x, 0.0), depth), p);
+    let bias = CONTACT_BIAS * footprint;
+    let start = p + n * footprint;
+    for (var i = 0u; i < CONTACT_STEPS; i++) {
+        let q = start + l * (frame.contact.y * (f32(i) + jitter) / f32(CONTACT_STEPS));
+        let clip = frame.view_proj * vec4<f32>(q, 1.0);
+        if clip.w <= 0.0 {
+            break;
+        }
+        let ndc = clip.xyz / clip.w;
+        let suv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+        if any(suv < vec2<f32>(0.0)) || any(suv > vec2<f32>(1.0)) {
+            break;
+        }
+        let sc = clamp(vec2<i32>(suv * vec2<f32>(size)), vec2<i32>(0), size - 1);
+        let sd = depth_at(sc);
+        if sd >= 1.0 {
+            continue;
+        }
+        // The drawn surface on the step's own ray: how far in front of
+        // the step it is.
+        let gap = distance(q, eye) - distance(world_at(suv, sd), eye);
+        if gap > bias && gap < frame.contact.z + bias {
+            return 1.0 - frame.contact.x * fade;
+        }
+    }
+    return 1.0;
 }
 
 @fragment
@@ -153,7 +238,7 @@ fn fs_blur(in: AoOut) -> @location(0) vec4<f32> {
     let eye = frame.camera_pos.xyz;
     let d0 = depth_at(c);
     let r0 = distance(world_at((vec2<f32>(c) + 0.5) * texel, d0), eye);
-    var sum = 0.0;
+    var sum = vec2<f32>(0.0);
     var weight = 0.0;
     for (var y = -AO_BLUR; y < AO_BLUR; y++) {
         for (var x = -AO_BLUR; x < AO_BLUR; x++) {
@@ -166,12 +251,12 @@ fn fs_blur(in: AoOut) -> @location(0) vec4<f32> {
             if abs(r - r0) > AO_BLUR_DEPTH * max(r0, 1.0) {
                 continue;
             }
-            sum += textureLoad(ao_source, s, 0).r;
+            sum += textureLoad(ao_source, s, 0).rg;
             weight += 1.0;
         }
     }
     if weight <= 0.0 {
-        return vec4<f32>(textureLoad(ao_source, c, 0).r, 0.0, 0.0, 1.0);
+        return vec4<f32>(textureLoad(ao_source, c, 0).rg, 0.0, 1.0);
     }
-    return vec4<f32>(sum / weight, 0.0, 0.0, 1.0);
+    return vec4<f32>(sum / weight, 0.0, 1.0);
 }

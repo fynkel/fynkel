@@ -13,7 +13,7 @@
 
 use fynkel_contracts::{Code, Diagnostic};
 use fynkel_core::volume::{
-    AoOverrides, BloomOverrides, GradingOverrides, Tonemapper, VolumeProfile,
+    AoOverrides, BloomOverrides, ContactOverrides, GradingOverrides, Tonemapper, VolumeProfile,
 };
 use glam::Vec3;
 use uuid::Uuid;
@@ -71,6 +71,14 @@ impl VolumeDocument {
                 lift: block.color("lift"),
                 gamma: block.color("gamma"),
                 gain: block.color("gain"),
+            };
+        }
+        if let Some(mut block) = Block::open(root, "contactShadows", &mut diags) {
+            profile.contact_shadows = ContactOverrides {
+                intensity: block.number("intensity"),
+                length: block.number("length"),
+                thickness: block.number("thickness"),
+                distance: block.number("distance"),
             };
         }
         VolumeDocument {

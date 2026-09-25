@@ -1,11 +1,11 @@
-//! Volume profiles (R3a, bloom R3b, colour grading R3c): `.volume.json` read into the core's
+//! Volume profiles (R3a, bloom R3b, colour grading R3c, contact shadows R3d): `.volume.json` read into the core's
 //! `VolumeProfile` — present fields override, absent ones inherit —
 //! and checked by the schema's ranges.
 
 use std::path::Path;
 
 use fynkel_core::volume::{
-    AoOverrides, BloomOverrides, GradingOverrides, Tonemapper, VolumeProfile,
+    AoOverrides, BloomOverrides, ContactOverrides, GradingOverrides, Tonemapper, VolumeProfile,
 };
 use fynkel_document::{Code, Document, DocumentKind, SchemaSet, VolumeDocument};
 use glam::Vec3;
@@ -175,4 +175,41 @@ fn the_colour_grading_block_reads_every_field_and_the_schema_holds_its_ranges() 
         .iter()
         .any(|x| x.code == Code::VOLUME_MALFORMED_ENTRY));
     assert_eq!(codes(&filmic), [d("/colorGrading/tonemapper")]);
+}
+
+#[test]
+fn the_contact_shadows_block_reads_every_field_and_the_schema_holds_its_ranges() {
+    let near =
+        doc(r#","contactShadows":{"intensity":0.8,"length":0.3,"thickness":0.1,"distance":40}"#);
+    assert_eq!(
+        near.profile.contact_shadows,
+        ContactOverrides {
+            intensity: Some(0.8),
+            length: Some(0.3),
+            thickness: Some(0.1),
+            distance: Some(40.0),
+        }
+    );
+    assert_eq!(codes(&near), []);
+    let one = doc(r#","contactShadows":{"intensity":1}"#);
+    assert_eq!(
+        one.profile.contact_shadows,
+        ContactOverrides {
+            intensity: Some(1.0),
+            ..ContactOverrides::default()
+        }
+    );
+    let d = |p: &str| ("FYN-D0100".to_string(), p.to_string());
+    assert_eq!(
+        codes(&doc(r#","contactShadows":{"intensity":2}"#)),
+        [d("/contactShadows/intensity")]
+    );
+    assert_eq!(
+        codes(&doc(r#","contactShadows":{"length":0}"#)),
+        [d("/contactShadows/length")]
+    );
+    assert_eq!(
+        codes(&doc(r#","contactShadows":{"shadows":true}"#)),
+        [d("/contactShadows/shadows")]
+    );
 }
