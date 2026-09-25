@@ -121,7 +121,7 @@ fn a_clean_corpus_cooks_then_hits() {
     let p = Project::new("clean");
     let first = p.cook();
     assert!(!first.has_errors(), "{:?}", first.diagnostics);
-    assert_eq!(first.assets.len(), 6);
+    assert_eq!(first.assets.len(), 7, "and the built-in primitives");
     assert!(all(&first, Status::Cooked), "{:?}", statuses(&first));
     for a in &first.assets {
         let key = a.key.expect("cooked assets have a key");
@@ -137,7 +137,7 @@ fn a_clean_corpus_cooks_then_hits() {
     let index: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(p.cache().index_path()).unwrap()).unwrap();
     assert_eq!(index["profile"], "dev");
-    assert_eq!(index["assets"].as_array().unwrap().len(), 6);
+    assert_eq!(index["assets"].as_array().unwrap().len(), 7);
 
     let second = p.cook();
     assert!(!second.has_errors());
@@ -858,8 +858,8 @@ fn cook_project_expands_scenes_and_records_the_project() {
     assert!(!r.has_errors(), "{}", r.text());
     assert_eq!(
         r.assets.len(),
-        17,
-        "five scenes, three prefabs, the column rig and its blend space, robot, rig, material, swatch, normal, metallic-roughness, the tone"
+        18,
+        "five scenes, three prefabs, the column rig and its blend space, robot, rig, material, swatch, normal, metallic-roughness, the tone, the built-in primitives"
     );
     let cache = project_cache_dir(&dir);
     assert_eq!(cache, dir.join(".fynkel/cache"));
@@ -995,7 +995,7 @@ fn an_fbx_source_cooks_like_a_gltf_one() {
     );
     let r = p.cook();
     assert!(!r.has_errors(), "{:?}", r.diagnostics);
-    assert_eq!(r.assets.len(), 7);
+    assert_eq!(r.assets.len(), 8, "and the built-in primitives");
     let rig = r.get(id(RIG)).unwrap();
     assert_eq!(rig.status, Status::Cooked);
     let mut f = ChunkFile::open_path(rig.file.as_ref().unwrap()).unwrap();
@@ -1091,7 +1091,7 @@ fn a_rig_document_cooks_its_skeleton_and_clips() {
     );
     let r = p.cook();
     assert!(!r.has_errors(), "{:?}", r.diagnostics);
-    assert_eq!(r.assets.len(), 9);
+    assert_eq!(r.assets.len(), 10, "and the built-in primitives");
     let hero = r.get(id(HERO)).unwrap();
     assert_eq!(hero.status, Status::Cooked);
     assert_eq!(hero.kind, "document/rig");

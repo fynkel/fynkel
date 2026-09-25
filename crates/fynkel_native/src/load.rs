@@ -197,6 +197,9 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
             w.residency.push((Some(loaded.id), residency));
             let input = bind_project_input(w, &assets);
             let residency = residency_json(&assets);
+            if let Some(old) = &w.assets {
+                assets.adopt_runtime_materials(old);
+            }
             w.assets = Some(assets);
             Outcome {
                 status: Status::Ok,

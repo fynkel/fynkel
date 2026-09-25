@@ -380,12 +380,20 @@ pub struct AssetEntry {
     /// derived from its clips (`prefab`, `anim/<name>`); empty for the
     /// other documents.
     pub sub_assets: BTreeMap<String, Uuid>,
+    /// Where the file really is when it is not under the root: a built-in
+    /// asset the cook adds to a project that has none of its own
+    /// ([`AssetDatabase::add_builtin`]); `path` is then where the project
+    /// would keep it. `None` for every scanned asset.
+    pub origin: Option<PathBuf>,
 }
 
 impl AssetEntry {
     /// Absolute path of the source file / document.
     pub fn file(&self, root: &Path) -> PathBuf {
-        root.join(&self.path)
+        match &self.origin {
+            Some(origin) => origin.clone(),
+            None => root.join(&self.path),
+        }
     }
 
     /// Absolute path of the sidecar (sources only).
@@ -538,6 +546,50 @@ impl AssetDatabase {
         diags
     }
 
+    /// Adds the source `file` (with its sidecar beside it, outside the
+    /// root) as if it were at `path` under the root: a built-in asset —
+    /// `Fynkel/Primitives.glb` — the cook ships with a project that has not
+    /// installed its own copy (ADR-0026 §4). Nothing when the id is taken
+    /// already (the project's own copy wins); the sidecar's diagnostics
+    /// otherwise.
+    pub fn add_builtin(&mut self, file: &Path, path: &str, schemas: &SchemaSet) -> Vec<Diagnostic> {
+        let mut diags = Vec::new();
+        let meta = match Document::read(&sidecar_path(file), Some(DocumentKind::Meta)) {
+            Ok(doc) => Meta::from_document(doc),
+            Err(d) => return d,
+        };
+        diags.extend(meta.validate(schemas));
+        if fynkel_contracts::has_errors(&diags)
+            || self.owner_path(meta.id()).is_some()
+            || self.by_path.contains_key(path)
+        {
+            return diags;
+        }
+        let entry = AssetEntry {
+            id: meta.id(),
+            path: path.to_string(),
+            name: meta.document.envelope.name.clone(),
+            kind: AssetKind::Source {
+                importer: meta.importer.clone(),
+                importer_version: meta.importer_version,
+            },
+            sub_assets: meta.sub_assets.iter().cloned().collect(),
+            origin: Some(file.to_path_buf()),
+        };
+        let shown = file.display().to_string();
+        self.insert(
+            file,
+            entry,
+            &meta.sub_assets,
+            &shown,
+            &meta.document.root,
+            &mut diags,
+        );
+        self.entries.sort_by(|a, b| a.path.cmp(&b.path));
+        self.reindex();
+        diags
+    }
+
     fn reindex(&mut self) {
         self.by_id.clear();
         self.by_path.clear();
@@ -597,6 +649,7 @@ impl AssetDatabase {
                     importer_version: meta.importer_version,
                 },
                 sub_assets: meta.sub_assets.iter().cloned().collect(),
+                origin: None,
             };
             self.insert(
                 path,
@@ -628,6 +681,7 @@ impl AssetDatabase {
                 name: doc.envelope.name.clone(),
                 kind: AssetKind::Document(kind),
                 sub_assets: subs.iter().cloned().collect(),
+                origin: None,
             };
             self.insert(path, entry, &subs, &shown, &doc.root, diags);
         } else if !sidecar_path(path).is_file() {

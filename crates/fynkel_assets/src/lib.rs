@@ -345,6 +345,10 @@ struct Store {
     /// `Some` for an HDR image, `None` recorded for one without an `ENVM`.
     environments: HashMap<AssetRef, Option<Arc<EnvironmentPayload>>>,
     materials: HashMap<AssetRef, Arc<PbrMaterial>>,
+    /// Materials made by the game at runtime (`world.createMaterial`,
+    /// ADR-0026 §4) under ids the cache does not have: read before the
+    /// cooked ones, never evicted or cleared — only the game removes one.
+    runtime_materials: HashMap<AssetRef, Arc<PbrMaterial>>,
     clips: HashMap<AssetRef, Arc<Clip>>,
     blends: HashMap<AssetRef, Arc<BlendSpace>>,
     volumes: HashMap<AssetRef, VolumeProfile>,
@@ -420,6 +424,7 @@ impl Assets {
                 textures: HashMap::new(),
                 environments: HashMap::new(),
                 materials: HashMap::new(),
+                runtime_materials: HashMap::new(),
                 clips: HashMap::new(),
                 blends: HashMap::new(),
                 volumes: HashMap::new(),
@@ -492,6 +497,30 @@ impl Assets {
     pub fn override_material(&self, r: &AssetRef, m: PbrMaterial) {
         let mut s = self.lock();
         s.materials.insert(r.clone(), Arc::new(m));
+        s.live_edits += 1;
+    }
+
+    /// `m` as the runtime material `r` (`world.createMaterial`, ADR-0026
+    /// §4), or `None` to remove it: drawn by every renderer on this store
+    /// like a cooked one, kept across clears and evictions.
+    pub fn set_runtime_material(&self, r: &AssetRef, m: Option<PbrMaterial>) {
+        let mut s = self.lock();
+        match m {
+            Some(m) => s.runtime_materials.insert(r.clone(), Arc::new(m)),
+            None => s.runtime_materials.remove(r),
+        };
+        s.live_edits += 1;
+    }
+
+    /// The runtime materials of `from` (the store a load to another cache
+    /// replaces), so the game's materials outlive the switch.
+    pub fn adopt_runtime_materials(&self, from: &Assets) {
+        if Arc::ptr_eq(&self.inner, &from.inner) {
+            return;
+        }
+        let theirs = from.lock().runtime_materials.clone();
+        let mut s = self.lock();
+        s.runtime_materials.extend(theirs);
         s.live_edits += 1;
     }
 
@@ -622,6 +651,64 @@ impl Assets {
             }
         }
         (registered, diags)
+    }
+
+    /// A collider set by a command rather than a load (code adding one,
+    /// ADR-0026 §4): its physics material and, for `shape: mesh`, its mesh
+    /// registered as [`register_mesh_colliders`] does for a scene — once;
+    /// what is registered already is left alone. The store's diagnostics
+    /// for what cannot be read (the collider then reports at the step).
+    ///
+    /// [`register_mesh_colliders`]: Assets::register_mesh_colliders
+    pub fn register_collider(
+        &self,
+        c: &fynkel_core::Collider,
+        physics: &mut fynkel_core::Physics,
+    ) -> Vec<Diagnostic> {
+        let mut diags = Vec::new();
+        if let Some(key) = c.material.as_ref().filter(|k| !k.asset.is_nil()) {
+            if !physics.has_material(key) {
+                match self.physics_material(key) {
+                    Ok(m) => {
+                        if let Err(msg) = physics.register_material(key.clone(), m) {
+                            diags.push(
+                                Diagnostic::error(
+                                    Code::RUNTIME_PAYLOAD_MALFORMED,
+                                    format!("physics material {key}: {msg}"),
+                                )
+                                .with_id(key.to_string()),
+                            );
+                        }
+                    }
+                    Err(d) => diags.push(d),
+                }
+            }
+        }
+        if c.shape != fynkel_core::ColliderShape::Mesh {
+            return diags;
+        }
+        let Some(key) = c.mesh.as_ref().filter(|k| !k.asset.is_nil()) else {
+            return diags;
+        };
+        if physics.has_mesh(key) {
+            return diags;
+        }
+        match self.mesh(key) {
+            Ok(m) => {
+                let positions: Vec<[f32; 3]> = m.vertices.iter().map(|v| v.position).collect();
+                if let Err(msg) = physics.register_mesh(key.clone(), &positions, &m.indices) {
+                    diags.push(
+                        Diagnostic::error(
+                            Code::RUNTIME_PAYLOAD_MALFORMED,
+                            format!("mesh collider {key}: {msg}"),
+                        )
+                        .with_id(key.to_string()),
+                    );
+                }
+            }
+            Err(d) => diags.push(d),
+        }
+        diags
     }
 
     /// Registers with `world` every prefab the `Emitter`s in `scene` name
@@ -924,8 +1011,11 @@ impl Assets {
     /// The cooked `PbrMaterial`. A custom-shader material has no `MATL`
     /// chunk (`FYN-R0006`).
     pub fn material(&self, r: &AssetRef) -> Result<PbrMaterial, Diagnostic> {
-        if let Some(m) = self.lock().materials.get(r) {
-            return Ok((**m).clone());
+        {
+            let s = self.lock();
+            if let Some(m) = s.runtime_materials.get(r).or_else(|| s.materials.get(r)) {
+                return Ok((**m).clone());
+            }
         }
         let bytes = self.chunk(r, KIND_MATERIAL)?;
         let m = decode_material(&bytes).ok_or_else(|| self.malformed(r, "MATL"))?;

@@ -22,6 +22,7 @@
 #![allow(clippy::result_large_err)]
 
 pub mod audio;
+pub mod builtin;
 pub mod cache;
 pub mod cook;
 pub mod environment;

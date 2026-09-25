@@ -280,6 +280,14 @@ impl FynkelWorld {
                 } => {
                     let _ = assets.register_skin(&k.skin, &mut self.inner);
                 }
+                // A mesh collider or physics material from code (ADR-0026
+                // §4): what a load would have registered for it.
+                Command::SetComponent {
+                    value: ComponentValue::Collider(c),
+                    ..
+                } => {
+                    let _ = assets.register_collider(c, self.inner.physics_mut());
+                }
                 _ => {}
             }
         }
@@ -451,6 +459,42 @@ pub unsafe extern "C" fn fynkel_world_submit_commands(
             };
         }
         report.status
+    })
+}
+
+/// A material made at runtime (ADR-0026 §4): see the header.
+///
+/// # Safety
+/// `world` live or NULL; `id` points at 16 readable bytes; `payload` at
+/// `payload_len` readable bytes (NULL when 0).
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_set_material(
+    world: *mut FynkelWorld,
+    id: *const u8,
+    payload: *const u8,
+    payload_len: u32,
+) -> Status {
+    if id.is_null() || (payload.is_null() && payload_len != 0) {
+        return Status::InvalidArgument;
+    }
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(std::slice::from_raw_parts(id, 16));
+    let key = fynkel_contracts::AssetRef::new(fynkel_contracts::Uuid(bytes));
+    let material = if payload_len == 0 {
+        None
+    } else {
+        let payload = std::slice::from_raw_parts(payload, payload_len as usize);
+        match fynkel_wire::material::decode_material(payload) {
+            Some(m) => Some(m),
+            None => return Status::InvalidArgument,
+        }
+    };
+    guarded(world, move |w| {
+        let Some(assets) = &w.assets else {
+            return Status::LoadFailed;
+        };
+        assets.set_runtime_material(&key, material);
+        Status::Ok
     })
 }
 

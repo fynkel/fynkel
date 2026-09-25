@@ -255,6 +255,9 @@ pub fn cook(
     opts: &CookOptions,
 ) -> CookReport {
     let mut diagnostics = Vec::new();
+    // The built-in shapes, unless the project has its own (ADR-0026 §4).
+    let with_builtins = crate::builtin::with_builtins(db, cache.root(), schemas, &mut diagnostics);
+    let db = with_builtins.as_ref().unwrap_or(db);
     let entries = db.entries();
     let by_id: HashMap<Uuid, usize> = entries.iter().enumerate().map(|(i, e)| (e.id, i)).collect();
 
@@ -619,6 +622,12 @@ pub fn cook_project(
     let assets = project.assets_dir(project_dir);
     let (db, scan) = AssetDatabase::scan(&assets, &schemas);
     diagnostics.extend(scan);
+    let cache_dir = cache
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| project_cache_dir(project_dir));
+    // References to the built-in shapes resolve without an installed copy.
+    let db =
+        crate::builtin::with_builtins(&db, &cache_dir, &schemas, &mut diagnostics).unwrap_or(db);
     diagnostics.extend(project.validate_against(&db, &schemas));
     if has_errors(&diagnostics) {
         return Err(diagnostics);
@@ -639,9 +648,6 @@ pub fn cook_project(
         }),
         ..opts.clone()
     };
-    let cache_dir = cache
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| project_cache_dir(project_dir));
     let mut report = cook(&db, &schemas, &Cache::at(&cache_dir), &opts);
     // Scan warnings (a sidecar behind its import, say) belong to the cook.
     let mut all = diagnostics;

@@ -984,3 +984,77 @@ fn variants_and_nested_instances_cook_and_instantiate() {
     drop(host);
     let _ = std::fs::remove_dir_all(&project);
 }
+
+/// `fynkel_world_set_material` (ADR-0026 §4): a material made at runtime
+/// is what the store gives every renderer, across scene loads and clears;
+/// a cooked one can be replaced and put back.
+#[test]
+fn runtime_materials_through_the_abi() {
+    use fynkel_contracts::{AssetRef, Uuid};
+    use fynkel_core::material::PbrMaterial;
+    use fynkel_wire::material::encode_material;
+
+    let cooked = Cooked::new("materials");
+    let cache = cooked.text();
+    let host = Host::new();
+    let made = AssetRef::new(Uuid(*b"runtime-material"));
+    let red = PbrMaterial {
+        base_color: [1.0, 0.0, 0.0, 1.0].into(),
+        roughness: 0.25,
+        ..Default::default()
+    };
+    let payload = encode_material(&red);
+    let set = |r: &AssetRef, payload: &[u8]| unsafe {
+        fynkel_world_set_material(
+            host.w,
+            r.asset.0.as_ptr(),
+            payload.as_ptr(),
+            payload.len() as u32,
+        )
+    };
+    let store = || unsafe { &*host.w }.assets().unwrap().clone();
+
+    assert_eq!(
+        set(&made, &payload),
+        Status::LoadFailed,
+        "no store before a load"
+    );
+    assert_eq!(host.load_project(&cache), Status::Ok);
+    assert_eq!(set(&made, &payload), Status::Ok);
+    assert_eq!(store().material(&made).unwrap(), red);
+
+    // Across a scene load (same cache, same store) and a clear.
+    assert_eq!(host.load_scene(&cache, PLAYGROUND), Status::Ok);
+    store().clear();
+    assert_eq!(store().material(&made).unwrap(), red);
+
+    // Malformed or another build's layout: refused, the material kept.
+    assert_eq!(
+        set(&made, &payload[..payload.len() - 1]),
+        Status::InvalidArgument
+    );
+    assert_eq!(
+        unsafe { fynkel_world_set_material(host.w, ptr::null(), ptr::null(), 0) },
+        Status::InvalidArgument
+    );
+    assert_eq!(store().material(&made).unwrap(), red);
+
+    // A cooked material replaced, then back to its cooked values.
+    let rusted = AssetRef::new(Uuid(
+        *"c0000000-0000-4000-8000-000000000020"
+            .parse::<uuid::Uuid>()
+            .unwrap()
+            .as_bytes(),
+    ));
+    let cooked_rusted = store().material(&rusted).unwrap();
+    assert_ne!(cooked_rusted, red);
+    assert_eq!(set(&rusted, &payload), Status::Ok);
+    assert_eq!(store().material(&rusted).unwrap(), red);
+    assert_eq!(set(&rusted, &[]), Status::Ok);
+    assert_eq!(store().material(&rusted).unwrap(), cooked_rusted);
+
+    // Removed: the made one is gone.
+    assert_eq!(set(&made, &[]), Status::Ok);
+    assert!(store().material(&made).is_err());
+    assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
+}

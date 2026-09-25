@@ -552,6 +552,19 @@ typedef struct FynkelInstantiateDesc {
 } FynkelInstantiateDesc;
 FynkelStatus fynkel_world_instantiate(FynkelWorld* world,
                                       const FynkelInstantiateDesc* desc);
+/* A material made at runtime (ADR-0026 §4, `world.createMaterial`):
+ * `payload` is a MATL chunk payload — u32 version (1), u32 record size,
+ * u32 tail length, u32 reserved, the `fynkel.PbrMaterial` wire record, its
+ * string tail — drawn as the material `id` (16 bytes, big-endian UUID; one
+ * the cache does not have, or a cooked material's to replace it) by every
+ * renderer on the world's asset store until `payload_len` 0 removes it.
+ * Kept across scene loads. FYNKEL_STATUS_LOAD_FAILED before any project is
+ * loaded; FYNKEL_STATUS_INVALID_ARGUMENT for a payload that does not
+ * decode (another build's record layout). */
+FynkelStatus fynkel_world_set_material(FynkelWorld* world,
+                                       const uint8_t* id,
+                                       const uint8_t* payload,
+                                       uint32_t payload_len);
 
 /* UTF-8 JSON describing the last load, unload, instantiate or bind call
  * on this world (empty before any): {"ok": bool, "mode": "replace" |
