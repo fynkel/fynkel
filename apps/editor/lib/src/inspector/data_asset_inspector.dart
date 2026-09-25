@@ -7,10 +7,12 @@
 import 'package:flutter/material.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart' show AssetDetail;
 
+import '../extensions/editor_extensions.dart' show EditorExtensionScope;
 import '../project/editor_project.dart';
 import '../project_browser/project_browser_model.dart';
 import '../theme/tokens.dart';
 import 'asset_edits.dart';
+import 'custom_inspector.dart';
 import 'field_editor.dart';
 import 'field_spec.dart';
 import 'inspector_chrome.dart';
@@ -127,22 +129,37 @@ class _DataAssetInspectorState extends State<DataAssetInspector> {
     ].firstOrNull;
     final spec = parseComponentSpec(typeId, type!.schema, metadata: metadata);
     final target = _DataTarget(this, edits, scope!.browser, data);
-    final rows = <Widget>[];
-    String? group;
-    for (final f in spec.fields) {
-      if (!f.visibleWith(data, siblings: spec.fields)) continue;
-      if (f.group != group) {
-        group = f.group;
-        if (group != null) {
-          rows.add(Padding(padding: const EdgeInsets.only(top: 10, bottom: 3), child: InspectorCaption(group)));
-        }
-      }
-      if (f.header != null) {
-        rows.add(Padding(padding: const EdgeInsets.only(top: 10, bottom: 3), child: InspectorCaption(f.header!)));
-      }
-      rows.add(FieldEditor(key: ValueKey('field.${target.key}.${f.name}'), target: target, spec: f, path: f.name));
-    }
+    Widget field(FieldSpec f) =>
+        FieldEditor(key: ValueKey('field.${target.key}.${f.name}'), target: target, spec: f, path: f.name);
     final t = context.tokens;
+    Widget defaults(Set<String> except) {
+      final rows = _rows(spec, data, field, except);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (rows.isEmpty)
+            Text('No fields.', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: t.textDisabled)),
+          ...rows,
+        ],
+      );
+    }
+
+    // The package's custom Inspector for the type (ADR-0028), or the
+    // default fields.
+    final host = EditorExtensionScope.maybeOf(context);
+    final custom = host?.inspectorFor(typeId);
+    final body = host == null || custom == null
+        ? defaults(const {})
+        : buildCustomInspector(
+            context,
+            host: host,
+            inspector: custom,
+            target: target,
+            spec: spec,
+            editor: host.contextFor(custom.package),
+            field: field,
+            defaults: defaults,
+          );
     return InspectorSection(
       title: title,
       children: [
@@ -151,9 +168,7 @@ class _DataAssetInspectorState extends State<DataAssetInspector> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (rows.isEmpty)
-                Text('No fields.', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: t.textDisabled)),
-              ...rows,
+              body,
               if (edits.lastError != null && _errors.isEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
@@ -168,6 +183,31 @@ class _DataAssetInspectorState extends State<DataAssetInspector> {
         ),
       ],
     );
+  }
+
+  /// The default fields: groups and headers as the schema says.
+  static List<Widget> _rows(
+    ComponentSpec spec,
+    Map<String, Object?> data,
+    Widget Function(FieldSpec f) field,
+    Set<String> except,
+  ) {
+    final rows = <Widget>[];
+    String? group;
+    for (final f in spec.fields) {
+      if (except.contains(f.name) || !f.visibleWith(data, siblings: spec.fields)) continue;
+      if (f.group != group) {
+        group = f.group;
+        if (group != null) {
+          rows.add(Padding(padding: const EdgeInsets.only(top: 10, bottom: 3), child: InspectorCaption(group)));
+        }
+      }
+      if (f.header != null) {
+        rows.add(Padding(padding: const EdgeInsets.only(top: 10, bottom: 3), child: InspectorCaption(f.header!)));
+      }
+      rows.add(field(f));
+    }
+    return rows;
   }
 }
 

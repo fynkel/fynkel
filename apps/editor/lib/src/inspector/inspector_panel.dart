@@ -18,6 +18,7 @@ import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import '../extensions/editor_extensions.dart' show ContextEntry, EditorExtensionScope;
+import 'custom_inspector.dart';
 import '../env/tools.dart';
 import '../picker/picker.dart';
 import '../project_browser/project_browser_model.dart';
@@ -1001,7 +1002,25 @@ class _ComponentCard extends StatelessWidget {
     return f != null && f.kind == FieldKind.boolean ? f : null;
   }
 
+  /// The card's body: the package's custom Inspector for its type
+  /// (ADR-0028), or the default fields.
   Widget _fields(BuildContext context) {
+    final host = EditorExtensionScope.maybeOf(context);
+    final custom = host?.inspectorFor(slot.type);
+    if (host == null || custom == null || slot.spec.missingSchema) return _defaultFields(context);
+    return buildCustomInspector(
+      context,
+      host: host,
+      inspector: custom,
+      target: _SlotTarget(model, slot),
+      spec: slot.spec,
+      editor: host.contextFor(custom.package, tab: model.tab),
+      field: _field,
+      defaults: (except) => _defaultFields(context, except: except),
+    );
+  }
+
+  Widget _defaultFields(BuildContext context, {Set<String> except = const {}}) {
     final theme = Theme.of(context);
     final spec = slot.spec;
     final data = slot.first.data;
@@ -1010,7 +1029,7 @@ class _ComponentCard extends StatelessWidget {
     var any = false;
     final enabled = _enabledField;
     for (final f in spec.fields) {
-      if (identical(f, enabled)) continue;
+      if (identical(f, enabled) || except.contains(f.name)) continue;
       if (!f.visibleWith(data, siblings: spec.fields)) continue;
       any = true;
       if (f.group != group) {

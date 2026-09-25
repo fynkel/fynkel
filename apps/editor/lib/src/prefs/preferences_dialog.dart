@@ -306,6 +306,7 @@ class ExtensionsList extends StatelessWidget {
                     }} menu: ${c.label}  (${c.id})',
                     style: small,
                   ),
+                for (final i in p.inspectors) Text('Inspector: ${i.dartType}  (${i.typeId})', style: small),
               ],
             ),
           ),

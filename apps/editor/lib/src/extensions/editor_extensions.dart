@@ -5,7 +5,7 @@
 // hot reload, so a save in `lib/editor/` shows at once.
 import 'package:flutter/widgets.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart' show Diagnostic, Severity;
-import 'package:fynkel/fynkel.dart' show DataAsset;
+import 'package:fynkel/fynkel.dart' show BehaviourRegistry, DataAsset;
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 
 import '../commands/commands.dart';
@@ -88,6 +88,21 @@ class ExtensionWindow {
   static String panelIdOf(String id) => '$panelPrefix$id';
 }
 
+/// A custom Inspector a package registered (Unity's `CustomEditor`): the
+/// card of a script or the page of a data type.
+class ExtensionInspector {
+  ExtensionInspector({required this.package, required this.dartType, required this.build});
+
+  final String package;
+
+  /// The class as registered (`inspector<Collectible>`).
+  final Type dartType;
+  final Widget Function(BuildContext context, InspectorContext inspector) build;
+
+  /// The script's or data type's id, once the game's registry named it.
+  String? typeId;
+}
+
 /// Where a context entry is offered.
 enum ContextMenuPlace { hierarchy, project, component }
 
@@ -158,16 +173,18 @@ class PackageExtensions {
   final menuItems = <ExtensionMenuItem>[];
   final windows = <ExtensionWindow>[];
   final contextItems = <ExtensionContextItem>[];
+  final inspectors = <ExtensionInspector>[];
 
   /// `registerEditor` threw: nothing of the package's is used.
   String? error;
 
-  bool get isEmpty => menuItems.isEmpty && windows.isEmpty && contextItems.isEmpty;
+  bool get isEmpty => menuItems.isEmpty && windows.isEmpty && contextItems.isEmpty && inspectors.isEmpty;
 
   void clear() {
     menuItems.clear();
     windows.clear();
     contextItems.clear();
+    inspectors.clear();
   }
 }
 
@@ -201,6 +218,11 @@ class EditorExtensionHost extends ChangeNotifier {
   /// failed, or the last reload removed it).
   ExtensionWindow? window(String id) => windows.where((w) => w.id == id).firstOrNull;
 
+  /// The custom Inspector of the script or data type [typeId]; null when
+  /// none is registered (the default one draws it).
+  ExtensionInspector? inspectorFor(String typeId) => _inspectors[typeId];
+  var _inspectors = <String, ExtensionInspector>{};
+
   Iterable<ExtensionContextItem> _contextItems(ContextMenuPlace place) =>
       _packages.expand((p) => p.contextItems).where((i) => i.place == place);
 
@@ -221,6 +243,8 @@ class EditorExtensionHost extends ChangeNotifier {
     final keys = <String>{};
     final windowIds = <String>{};
     final contextIds = <String>{};
+    final inspectors = <String, ExtensionInspector>{};
+    Map<Type, String>? typeIds;
     for (final part in parts) {
       final registered = PackageExtensions(part.package);
       final editor = _Registrar(this, registered);
@@ -268,9 +292,25 @@ class EditorExtensionHost extends ChangeNotifier {
         );
         return true;
       });
+      registered.inspectors.removeWhere((i) {
+        final id = (typeIds ??= _typeIds())[i.dartType];
+        final why = id == null
+            ? '${i.dartType} is not a script or data type the game registers'
+            : inspectors.containsKey(id)
+            ? 'another extension already registered an Inspector for $id'
+            : null;
+        if (why != null) {
+          _error(part.package, 'inspector<${i.dartType}> left out: $why.');
+          return true;
+        }
+        inspectors[id!] = i..typeId = id;
+        return false;
+      });
       out.add(registered);
     }
     _packages = out;
+    _inspectors = inspectors;
+    _inspectorErrors.clear();
     notifyListeners();
   }
 
@@ -348,6 +388,42 @@ class EditorExtensionHost extends ChangeNotifier {
       },
     );
   }
+
+  /// The game's scripts and data types by class: made once each (never
+  /// run) to learn it, as `BehaviourRegistry.dataTypeOf` does.
+  Map<Type, String> _typeIds() {
+    final register = access?.registerBehaviours;
+    if (register == null) return const {};
+    final registry = BehaviourRegistry();
+    try {
+      register(registry);
+    } catch (_) {
+      return const {};
+    }
+    final out = <Type, String>{};
+    for (final (id, create) in [
+      for (final t in registry.types) (t.id, t.create),
+      for (final t in registry.dataTypes) (t.id, t.create),
+    ]) {
+      try {
+        out[create().runtimeType] = id;
+      } catch (_) {
+        // A constructor that throws: no custom Inspector can name it.
+      }
+    }
+    return out;
+  }
+
+  /// A custom Inspector's build failed: the Console says so once per
+  /// distinct error.
+  void inspectorFailed(ExtensionInspector i, Object error, StackTrace stack) {
+    final line = 'the ${i.typeId} Inspector failed, so the default one is shown: $error';
+    if (_inspectorErrors[i.typeId!] == line) return;
+    _inspectorErrors[i.typeId!] = line;
+    _error(i.package, line, stack);
+  }
+
+  final _inspectorErrors = <String, String>{};
 
   /// A window's build failed: the Console says so once per distinct error.
   void windowFailed(ExtensionWindow w, Object error, StackTrace stack) {
@@ -487,6 +563,15 @@ class _Registrar implements EditorExtensions {
         build: build,
       ),
     );
+  }
+
+  @override
+  void inspector<T>(Widget Function(BuildContext context, InspectorContext inspector) build) {
+    if (T == dynamic || T == Object) {
+      host._error(package, 'an inspector left out: name its class, inspector<Collectible>(…).');
+      return;
+    }
+    registered.inspectors.add(ExtensionInspector(package: package, dartType: T, build: build));
   }
 
   bool _contextOk(String label, String id) {

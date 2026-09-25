@@ -10,6 +10,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel_editor/src/app.dart';
+import 'package:fynkel_editor/src/extensions/editor_extensions.dart' show EditorPart;
+import 'package:fynkel_editor/src/play/editor_game.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
 import 'package:fynkel_editor/src/project/editor_project.dart';
 
@@ -29,6 +31,8 @@ final class Editor {
     String scene = mainScene,
     void Function(Directory dir)? prepare,
     String? codeReloadStatus,
+    EditorGame? game,
+    List<EditorPart> extensions = const [],
   }) async {
     final dir = copyFixture(tag);
     prepare?.call(dir);
@@ -44,6 +48,8 @@ final class Editor {
         projects: {dir.path: project},
         initialProject: dir.path,
         codeReloadStatus: codeReloadStatus,
+        game: game,
+        extensions: extensions,
       ),
     );
     final shell = tester.state<EditorShellState>(find.byType(EditorShell));
