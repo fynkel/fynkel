@@ -134,6 +134,7 @@ void main() {
       'Tools/Code Only/List Coin Kinds|codeOnly.listCoinKinds',
       'Tools/Code Only/Select Coins|codeOnly.selectCoins',
       'Tools/Code Only/Add Coin|codeOnly.addCoin',
+      'Tools/Code Only/Collect All Coins|codeOnly.collectAll',
     ]);
     final log = _Log();
     editor.items.values.first(log);

@@ -64,6 +64,16 @@ void registerEditor(EditorExtensions editor) {
     },
   );
 
+  // During Play only: the running game's coins, taken as the player
+  // touching them would take them (Live Play mode: gone on Stop).
+  editor.menuItem(
+    'Tools/Code Only/Collect All Coins',
+    id: 'codeOnly.collectAll',
+    description: 'During Play, collects every coin still in the running game.',
+    enabled: (context) => context.play != null,
+    run: (context) => context.log('${PlayTools.collectAll(context.play!.world)} coins collected.'),
+  );
+
   // Unity's EditorWindow: a docked panel that places a ring of coins.
   editor.window(
     'codeOnly.levelTools',
