@@ -1985,7 +1985,11 @@ impl AuthoringSession {
     pub fn asset_detail(&self, id: Uuid) -> Result<Value, Vec<Diagnostic>> {
         let one = |d: Diagnostic| vec![d];
         let project = self.require_project().map_err(one)?;
-        let entry = project.entry(id).map_err(one)?;
+        // A package's asset shows too, read from its package (ADR-0029).
+        let entry = match project.package_assets.get(id) {
+            Some(e) if project.assets.get(id).is_none() => e,
+            _ => project.entry(id).map_err(one)?,
+        };
         let root = project.assets.root();
         let file = entry.file(root);
         let mut v = entry_json(entry);

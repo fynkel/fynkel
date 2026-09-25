@@ -477,6 +477,12 @@ fn a_packages_assets_are_mounted_copied_and_imported() {
     );
     let h = s.open_document(PICKUP_MATERIAL).unwrap();
     assert!(s.state_json(h).unwrap()["readOnly"].is_null());
+    // Its Inspector page reads the package's own file.
+    let detail = s
+        .query("assetDetail", &json!({ "asset": PICKUP_MATERIAL }))
+        .unwrap_or_else(|d| panic!("{d:#?}"));
+    assert_eq!(detail["material"]["shader"], "fynkel.pbr@1", "{detail:#}");
+    assert_eq!(detail["package"], "pickups");
 
     // Not the project's to rename.
     let refused = s
