@@ -1269,3 +1269,53 @@ fn a_project_without_a_startup_scene_opens_empty() {
     assert_eq!(host.live(), 6);
     let _ = std::fs::remove_dir_all(&project);
 }
+
+/// `fynkel_world_asset_json` (ADR-0027 §6): a document's cooked JSON from
+/// the world's cache — any kind, whether or not a scene retains it — and a
+/// diagnostic for no project, an unknown id or a source.
+#[test]
+fn a_documents_cooked_json_through_the_abi() {
+    let uuid = |s: &str| s.parse::<fynkel_contracts::Uuid>().unwrap().0;
+    let read = |host: &Host, id: &[u8; 16]| {
+        let mut out = FynkelBufferView {
+            data: ptr::null(),
+            length: 0,
+        };
+        let status = unsafe { fynkel_world_asset_json(host.w, id.as_ptr(), &mut out) };
+        let bytes = unsafe { std::slice::from_raw_parts(out.data, out.length as usize) };
+        (
+            status,
+            serde_json::from_slice::<serde_json::Value>(bytes).unwrap(),
+        )
+    };
+    let material = uuid("c0000000-0000-4000-8000-000000000020");
+    let host = Host::new();
+    let (status, why) = read(&host, &material);
+    assert_eq!(status, Status::LoadFailed);
+    assert_eq!(why["code"], "FYN-R0003", "{why}");
+
+    let cooked = Cooked::new("asset-json");
+    assert_eq!(host.load_project(&cooked.text()), Status::Ok);
+    let (status, doc) = read(&host, &material);
+    assert_eq!(status, Status::Ok, "{doc}");
+    assert_eq!(doc["name"], "Rusted");
+    assert!(doc["$schema"]
+        .as_str()
+        .unwrap()
+        .ends_with("material.schema.json"));
+
+    // Not in the cache; a source, not a document.
+    let (status, why) = read(&host, &uuid("c0000000-0000-4000-8000-0000000000ff"));
+    assert_eq!(status, Status::LoadFailed);
+    assert!(why["message"].is_string(), "{why}");
+    let (status, why) = read(&host, &uuid("c0000000-0000-4000-8000-000000000006"));
+    assert_eq!(status, Status::LoadFailed);
+    assert!(
+        why["message"].as_str().unwrap().contains("not a document"),
+        "{why}"
+    );
+    assert_eq!(
+        unsafe { fynkel_world_asset_json(host.w, ptr::null(), ptr::null_mut()) },
+        Status::InvalidArgument
+    );
+}

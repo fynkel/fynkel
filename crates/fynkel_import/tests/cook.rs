@@ -1597,3 +1597,46 @@ fn a_data_asset_cooks_as_its_document_checked_against_its_type() {
         .iter()
         .any(|d| d.code == Code::DATA_UNKNOWN_TYPE));
 }
+
+/// Data assets may reference each other in a cycle (ADR-0027): a data
+/// chunk holds its references as ids, so they neither key nor order its
+/// cook; the index still lists them as what a load needs.
+#[test]
+fn data_assets_that_reference_each_other_cook() {
+    const SWORD: &str = "c0000000-0000-4000-8000-000000000a01";
+    const GREAT: &str = "c0000000-0000-4000-8000-000000000a02";
+    let p = Project::new("data-cycle");
+    let weapon = |id: &str, name: &str, upgrade: &str| {
+        format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/data.schema.json","formatVersion":1,"id":"{id}","name":"{name}","type":"game.Weapon","version":1,"data":{{"upgrade":{{"asset":"{upgrade}"}}}}}}"#
+        )
+    };
+    let types = p.dir.join("schemas");
+    std::fs::create_dir_all(types.join("data")).unwrap();
+    std::fs::write(
+        types.join("data/game.Weapon.schema.json"),
+        serde_json::json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": "https://fynkel.dev/schemas/data/game.Weapon.schema.json",
+            "title": "game.Weapon",
+            "type": "object",
+            "properties": { "upgrade": {
+                "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef",
+                "x-fynkel": { "type": "data", "data": "game.Weapon" }
+            } },
+            "additionalProperties": false,
+            "x-fynkel": { "kind": "data", "id": "game.Weapon", "version": 1 }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let schemas = schemas().extended_with(&types).unwrap();
+    p.write("sword.data.json", &weapon(SWORD, "Sword", GREAT));
+    p.write("great.data.json", &weapon(GREAT, "Great Sword", SWORD));
+    let (db, _) = AssetDatabase::scan(&p.assets(), &schemas);
+    let r = cook(&db, &schemas, &p.cache(), &CookOptions::default());
+    assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    assert_eq!(status(&r, SWORD), Status::Cooked);
+    assert_eq!(status(&r, GREAT), Status::Cooked);
+    assert_eq!(r.get(id(SWORD)).unwrap().dependencies, [id(GREAT)]);
+}

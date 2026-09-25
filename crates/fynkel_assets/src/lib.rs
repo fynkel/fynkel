@@ -1327,6 +1327,35 @@ impl Assets {
         Ok(material)
     }
 
+    /// The cooked JSON of a document asset (ADR-0027 §6: a data asset's,
+    /// or any document kind's) with its kind name (`data`, `volume`…): the
+    /// document's JSON chunk as the cook wrote it. Not cached: the SDK
+    /// keeps what it makes of it.
+    pub fn document_json(
+        &self,
+        id: fynkel_contracts::Uuid,
+    ) -> Result<(String, String), Diagnostic> {
+        let (entry, meta) = {
+            let mut s = self.lock();
+            let entry = s.index.object(id)?.clone();
+            let meta = s.meta(&entry)?;
+            (entry, meta)
+        };
+        let Some(kind) = entry.kind.strip_prefix("document/") else {
+            return Err(Diagnostic::error(
+                Code::RUNTIME_CHUNK_MISSING,
+                format!(
+                    "{}: {id} is a {} asset, not a document",
+                    entry.path, entry.kind
+                ),
+            )
+            .with_id(id.to_string()));
+        };
+        let bytes = self.read_chunk(&entry, &meta, KIND_JSON, "")?;
+        let text = String::from_utf8(bytes).map_err(|_| self.malformed_entry(&entry, "JSON"))?;
+        Ok((kind.to_string(), text))
+    }
+
     /// The cooked skin (a `SKIN` chunk, `skin/<s>`) as the core's `Skin`,
     /// validated (M3-19).
     pub fn skin(&self, r: &AssetRef) -> Result<Arc<Skin>, Diagnostic> {

@@ -607,6 +607,20 @@ FynkelStatus fynkel_world_set_mesh(FynkelWorld* world,
                                    const uint8_t* payload,
                                    uint32_t payload_len);
 
+/* The cooked JSON of a document asset (ADR-0027 §6): the text of asset
+ * `id` (16 bytes, big-endian UUID; no sub-asset) as the cook wrote it — a
+ * data asset's `{ "$schema", "formatVersion", "id", "name", "type",
+ * "version", "data" }`, or any other document kind's — read from the
+ * world's cache (the one the last load opened) whether or not a loaded
+ * scene retains it. `*out` is the UTF-8 text, valid until the next call
+ * on this world. FYNKEL_STATUS_LOAD_FAILED before any project is loaded,
+ * or for an id the cache does not have or that is not a document; `*out`
+ * then holds the diagnostic as JSON ({"code", "severity", "message",
+ * ...}). */
+FynkelStatus fynkel_world_asset_json(FynkelWorld* world,
+                                     const uint8_t* id,
+                                     FynkelBufferView* out);
+
 /* UTF-8 JSON describing the last load, unload, instantiate or bind call
  * on this world (empty before any): {"ok": bool, "mode": "replace" |
  * "additive"?, "scene": {"id", "name", "path", "key", "entities",

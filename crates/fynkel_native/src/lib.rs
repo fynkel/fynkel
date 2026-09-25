@@ -45,6 +45,8 @@ pub struct FynkelWorld {
     input_buf: Vec<u8>,
     /// JSON of the last `fynkel_world_load_*` call; empty before any.
     load_report: Vec<u8>,
+    /// What the last `fynkel_world_asset_json` answered (ADR-0027 §6).
+    asset_json: Vec<u8>,
     /// The cache the last load opened (a renderer drawing this world adopts
     /// it, so both see one residency store).
     assets: Option<fynkel_assets::Assets>,
@@ -228,6 +230,7 @@ impl FynkelWorld {
             query_buf: buffer::empty(BufferKind::Query),
             input_buf: buffer::empty(BufferKind::InputActions),
             load_report: Vec::new(),
+            asset_json: Vec::new(),
             assets: None,
             residency: Vec::new(),
             rebinds: std::collections::BTreeMap::new(),
@@ -567,6 +570,48 @@ pub unsafe extern "C" fn fynkel_world_set_mesh(
         }
         assets.set_runtime_mesh(&key, mesh);
         Status::Ok
+    })
+}
+
+/// The cooked JSON of a document asset (ADR-0027 §6): see the header.
+///
+/// # Safety
+/// `world` live or NULL; `id` points at 16 readable bytes; `out` at a
+/// writable `FynkelBufferView`.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_asset_json(
+    world: *mut FynkelWorld,
+    id: *const u8,
+    out: *mut FynkelBufferView,
+) -> Status {
+    if id.is_null() || out.is_null() {
+        return Status::InvalidArgument;
+    }
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(std::slice::from_raw_parts(id, 16));
+    let id = fynkel_contracts::Uuid(bytes);
+    *out = FynkelBufferView::empty();
+    guarded(world, move |w| {
+        let (status, text) = match &w.assets {
+            None => (
+                Status::LoadFailed,
+                fynkel_document::diagnostic_json(&fynkel_contracts::Diagnostic::error(
+                    fynkel_contracts::Code::RUNTIME_ASSET_MISSING,
+                    "no project is loaded: load one before reading its assets",
+                ))
+                .to_string(),
+            ),
+            Some(assets) => match assets.document_json(id) {
+                Ok((_, text)) => (Status::Ok, text),
+                Err(d) => (
+                    Status::LoadFailed,
+                    fynkel_document::diagnostic_json(&d).to_string(),
+                ),
+            },
+        };
+        w.asset_json = text.into_bytes();
+        *out = FynkelBufferView::of(&w.asset_json);
+        status
     })
 }
 

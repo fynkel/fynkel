@@ -790,7 +790,7 @@ fn prepare(
                 Input::Document(d) => d.envelope.format_version,
                 _ => 0,
             };
-            let dependencies: Vec<Uuid> = dependencies.into_iter().collect();
+            let mut dependencies: Vec<Uuid> = dependencies.into_iter().collect();
             let runtime_dependencies = match &input {
                 Input::Document(doc) if *kind == DocumentKind::Rig => {
                     fynkel_document::Rig::from_document(doc.clone())
@@ -801,6 +801,13 @@ fn prepare(
                 }
                 _ => dependencies.clone(),
             };
+            // A data asset's chunk holds its references as ids and embeds
+            // nothing of them, so they neither key nor order its cook: data
+            // assets may reference each other in a cycle (ADR-0027). A load
+            // still needs them (the runtime dependencies).
+            if *kind == DocumentKind::Data {
+                dependencies.clear();
+            }
             Prepared {
                 kind: format!("document/{}", kind.name()),
                 version,
