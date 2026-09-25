@@ -269,6 +269,80 @@ final class CodegenCheck extends ChangeNotifier {
     if (problem == null) reload();
   }
 
+  StreamSubscription<List<String>>? _assetChanges;
+  Timer? _assetsTimer;
+
+  /// Whether an `--assets-only` run is going.
+  bool _assetsRunning = false;
+
+  /// Assets changed while one ran: run once more after it.
+  bool _assetsAgain = false;
+
+  /// The command line [regenerateAssets] runs.
+  List<String> assetsArguments() => ['codegen', '--project', projectDir, '--assets-only', '--json'];
+
+  /// Keeps `lib/generated/assets.g.dart` (ADR-0026 §3) matching the
+  /// project's assets: [delay] after anything under [assetsDir] is
+  /// created, imported, renamed or deleted, runs `fynkel codegen
+  /// --assets-only`, which scans the assets and rewrites the file only when
+  /// it changed — no build_runner, so it is quick. Game code then names the
+  /// new asset as `Assets.…` without anyone running codegen.
+  void regenerateAssetsOn(
+    Stream<List<String>> changes, {
+    required String assetsDir,
+    Duration delay = const Duration(milliseconds: 500),
+  }) {
+    _assetChanges?.cancel();
+    _assetChanges = changes.listen((paths) {
+      if (!paths.any((c) => p.isWithin(assetsDir, c))) return;
+      _assetsTimer?.cancel();
+      _assetsTimer = Timer(delay, () => unawaited(regenerateAssets()));
+    });
+  }
+
+  /// One `fynkel codegen --project <dir> --assets-only --json`. Returns the
+  /// problem, or null when the file was written or already up to date. A
+  /// stale banner is checked again after a write, as the file may have
+  /// been all it was about.
+  Future<String?> regenerateAssets() async {
+    if (!isDartPackage) return 'the project is not a Dart package (no pubspec.yaml)';
+    final exe = cli();
+    if (exe == null) return 'no `fynkel` CLI is configured (Preferences → Fynkel CLI)';
+    if (_assetsRunning) {
+      _assetsAgain = true;
+      return null;
+    }
+    _assetsRunning = true;
+    String? problem;
+    String? outcome;
+    try {
+      final r = await run(exe, assetsArguments(), workingDirectory: projectDir);
+      Map<String, Object?>? report;
+      try {
+        final decoded = jsonDecode(r.stdout.toString());
+        if (decoded is Map<String, Object?>) report = decoded;
+      } catch (_) {}
+      final assets = report?['assets'];
+      outcome = assets is Map ? assets['status']?.toString() : null;
+      if (outcome == 'error') {
+        problem = (assets as Map)['error']?.toString() ?? 'fynkel codegen --assets-only failed';
+      } else if (outcome == null) {
+        final err = r.stderr.toString().trim();
+        problem = err.isNotEmpty ? err.split('\n').first : 'fynkel codegen --assets-only exited with ${r.exitCode}';
+      }
+    } catch (e) {
+      problem = 'could not run `fynkel codegen --assets-only`: $e';
+    }
+    _assetsRunning = false;
+    if (_disposed) return 'the project closed';
+    if (_assetsAgain) {
+      _assetsAgain = false;
+      return regenerateAssets();
+    }
+    if (outcome == 'written' && status == CodegenStatus.stale) unawaited(check());
+    return problem;
+  }
+
   Process? _watcher;
   Completer<String?>? _waiting;
 
@@ -377,6 +451,8 @@ final class CodegenCheck extends ChangeNotifier {
     _answer('the project closed');
     _saves?.cancel();
     _recompile?.cancel();
+    _assetChanges?.cancel();
+    _assetsTimer?.cancel();
     super.dispose();
   }
 

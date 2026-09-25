@@ -1954,6 +1954,8 @@ class EditorShellState extends State<EditorShell> {
       // (Unity's recompile): `fynkel codegen --watch` from open, whose first
       // build is the check; a CLI without it checks once and runs per save.
       if (cg.isDartPackage) {
+        // A new, renamed or deleted asset gets its `Assets.…` constant.
+        cg.regenerateAssetsOn(opened.fileChanges, assetsDir: opened.assetsDir);
         unawaited(
           cg
               .watch(

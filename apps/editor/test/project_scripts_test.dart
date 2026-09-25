@@ -184,6 +184,44 @@ void main() {
     expect(check.status, CodegenStatus.failed);
   });
 
+  test('a changed asset regenerates assets.g.dart (--assets-only); a script or lib file does not', () async {
+    final dir = scriptsProject();
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final runner = RecordingRunner(
+      stdout: jsonEncode({
+        'ok': true,
+        'check': false,
+        'assets': {'status': 'written'},
+      }),
+    );
+    final check = CodegenCheck(projectDir: dir.path, run: runner.call, cli: () => '/fake/fynkel', repoRoot: () => null);
+    addTearDown(check.dispose);
+    final changes = StreamController<List<String>>();
+    addTearDown(changes.close);
+    check.regenerateAssetsOn(changes.stream, assetsDir: '${dir.path}/assets', delay: const Duration(milliseconds: 20));
+
+    changes.add(['${dir.path}/lib/game/player.dart', '${dir.path}/lib/generated/assets.g.dart']);
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    expect(runner.calls, isEmpty, reason: 'its own output does not loop');
+
+    // An import and its sidecar: one run.
+    changes.add(['${dir.path}/assets/models/crate.glb']);
+    changes.add(['${dir.path}/assets/models/crate.glb.meta.json']);
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    expect(runner.calls.single.$2, ['codegen', '--project', dir.path, '--assets-only', '--json']);
+
+    runner
+      ..exitCode = 1
+      ..stdout = jsonEncode({
+        'ok': false,
+        'assets': {'status': 'error', 'error': 'fynkel.project.json: bad'},
+      });
+    expect(await check.regenerateAssets(), 'fynkel.project.json: bad');
+    runner.stdout = '';
+    runner.stderr = 'error: unknown argument --assets-only';
+    expect(await check.regenerateAssets(), contains('unknown argument'));
+  });
+
   test(
     'the watch: every build reports, a written one reloads, Create waits for it, an ended watch falls back',
     () async {
