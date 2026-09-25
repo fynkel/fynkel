@@ -140,8 +140,8 @@ void main() {
     final loose = w.spawn(name: 'loose');
     w.frame(1 / 60);
     w.frame(1 / 60);
-    expect(root.children, [child.entity]);
-    expect(child.parent, root.entity);
+    expect(root.children, [child]);
+    expect(child.parent, root);
     expect(child.worldTransform!.position, const Vec3(11, 0, 0));
 
     loose.setParent(root, keepWorld: true);
@@ -149,7 +149,7 @@ void main() {
     w.frame(1 / 60, update: () {});
     events.addAll(w.drainEvents());
     w.frame(1 / 60);
-    expect(loose.parent, root.entity);
+    expect(loose.parent, root);
     expect(loose.transform.localPosition.x, closeTo(-10, 1e-5), reason: 'local adjusted to keep world');
     expect(loose.transform.position.x, closeTo(0, 1e-5), reason: 'position is the world one');
     expect(loose.worldTransform!.position.x, closeTo(0, 1e-5));

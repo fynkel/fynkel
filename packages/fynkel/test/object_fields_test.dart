@@ -232,7 +232,7 @@ void main() {
     for (final (i, root) in [a, b].indexed) {
       final t = turrets[i];
       expect(t.target, isNotNull);
-      expect(t.target!.parent, root.entity, reason: 'its own Barrel');
+      expect(t.target!.parent, root, reason: 'its own Barrel');
       expect(identical(t.spinner, t.target!.behaviour<Spinner>()), isTrue);
     }
     expect(identical(turrets[0].target, turrets[1].target), isFalse);

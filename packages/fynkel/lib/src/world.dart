@@ -159,6 +159,10 @@ class World {
 
   final Map<int, GameObject> _byEntity = {};
   final Map<int, GameObject> _pendingByTempId = {};
+
+  /// Objects [GameObject.setParent] moved this tick, for
+  /// [GameObject.children]'s read-your-writes; cleared by the step.
+  final List<GameObject> _reparented = [];
   int _nextTempId = 1;
 
   /// Last snapshot: entity → record (read in place, decoded on access).
@@ -317,6 +321,7 @@ class World {
     for (final go in _byEntity.values) {
       go._clearOverlay();
     }
+    _reparented.clear();
     _entityTableStale = true;
     _collectDiagnostics('step');
     return r;
@@ -674,6 +679,74 @@ class World {
     final t = _entities;
     return [for (final e in t.allTagged(_tagBit(tag))) attach(e, name: t.nameOf(e) ?? '')];
   }
+
+  /// The first [T] in the world (Unity's `FindObjectOfType`): a behaviour
+  /// type in callback order, or a native component type (`Camera`) in
+  /// entity order — its value; [findObjectWith] gives its object. Objects
+  /// inactive in the hierarchy are skipped unless [includeInactive].
+  /// Walks every behaviour or entity: not for every frame.
+  T? findObjectOfType<T extends Object>({bool includeInactive = false}) =>
+      _findOfType<T>(includeInactive, first: true).firstOrNull;
+
+  /// Every [T] in the world (Unity's `FindObjectsOfType`); see
+  /// [findObjectOfType].
+  List<T> findObjectsOfType<T extends Object>({bool includeInactive = false}) =>
+      _findOfType<T>(includeInactive, first: false);
+
+  /// The first object carrying the native component [T], entity order
+  /// (objects inactive in the hierarchy skipped unless [includeInactive]).
+  GameObject? findObjectWith<T extends WireRecord>({bool includeInactive = false}) =>
+      _objectsWith(GameObject._codecOf(T).id, includeInactive, first: true).firstOrNull;
+
+  /// Every object carrying the native component [T]; see [findObjectWith].
+  List<GameObject> findObjectsWith<T extends WireRecord>({bool includeInactive = false}) =>
+      _objectsWith(GameObject._codecOf(T).id, includeInactive, first: false);
+
+  List<T> _findOfType<T extends Object>(bool includeInactive, {required bool first}) {
+    if (_isBehaviourType<T>()) {
+      final out = <T>[];
+      for (final b in _behaviours._all) {
+        final go = b._gameObject;
+        if (b is! T || b._destroyed || b._destroyRequested || go == null || !go._alive) continue;
+        if (!includeInactive && !go._activeForFind) continue;
+        out.add(b as T);
+        if (first) break;
+      }
+      return out;
+    }
+    final id = GameObject._codecOf(T).id;
+    return [for (final go in _objectsWith(id, includeInactive, first: first)) go._lookup(id) as T];
+  }
+
+  /// Objects with native component [id]: the world's entities in order
+  /// (an entity no handle names yet is asked directly, without attaching
+  /// it unless it matches), then this tick's pending spawns.
+  List<GameObject> _objectsWith(int id, bool includeInactive, {required bool first}) {
+    final out = <GameObject>[];
+    final t = _entities;
+    for (final e in t.all) {
+      final known = _byEntity[e];
+      if (known != null) {
+        if (!known._alive || (!includeInactive && !known._activeForFind) || known._lookup(id) == null) continue;
+        out.add(known);
+      } else {
+        if (!includeInactive && !t.activeInHierarchy(e)) continue;
+        if (_decodeComponent(_native.query(QueryKind.components, entity: e), id) == null) continue;
+        out.add(attach(e));
+      }
+      if (first) return out;
+    }
+    for (final go in _pendingByTempId.values) {
+      if (!go._alive || (!includeInactive && !go._activeForFind) || go._lookup(id) == null) continue;
+      out.add(go);
+      if (first) return out;
+    }
+    return out;
+  }
+
+  /// Whether [T] is a [Behaviour] type (else it must be a native
+  /// component type).
+  static bool _isBehaviourType<T>() => <T>[] is List<Behaviour>;
 
   /// The bit of the project tag [tag]; throws naming the project's list.
   int _tagBit(String tag) {
@@ -1569,6 +1642,7 @@ class GameObject {
     );
     world._simulationTargets.add(this);
     _stagedParent = (parent,);
+    world._reparented.add(this);
   }
 
   /// The parent as a [setParent] this tick left it.
@@ -1587,8 +1661,44 @@ class GameObject {
     return p == null ? null : world.attach(p);
   }
 
-  List<int> get children => world.childrenOf(this);
-  int? get parent => world.parentOf(this);
+  /// The parent object (Unity's `transform.parent`), or null at the root.
+  /// Read-your-writes like [name]: a [setParent] this tick, else the
+  /// parent a pending spawn was given, else the world's.
+  GameObject? get parent => _parentObject;
+
+  /// The children in sibling order (Unity's `transform` children), with
+  /// this tick's writes applied: a child moved away by [setParent] is
+  /// gone, one spawned under this object or moved to it is last. A
+  /// pending object's children are the ones spawned or moved under it.
+  List<GameObject> get children {
+    final out = <GameObject>[];
+    final seen = <GameObject>{};
+    void take(GameObject go) {
+      if (go._alive && identical(go._parentObject, this) && seen.add(go)) out.add(go);
+    }
+
+    final e = _entity;
+    if (e != null && _alive) {
+      for (final c in world.childrenOf(this)) {
+        take(world.attach(c));
+      }
+    }
+    for (final go in world._pendingByTempId.values) {
+      take(go);
+    }
+    for (final go in world._reparented) {
+      take(go);
+    }
+    return out;
+  }
+
+  /// The parent's runtime handle as the world holds it now (no staged
+  /// writes); throws while pending. See [parent].
+  int? get parentEntity => world.parentOf(this);
+
+  /// The children's runtime handles as the world holds them now (no
+  /// staged writes); throws while pending. See [children].
+  List<int> get childEntities => world.childrenOf(this);
 
   /// This object's own active flag (Unity's `activeSelf`): what the scene
   /// authored, or what [setActive] asked for — read-your-writes, like
@@ -1659,6 +1769,77 @@ class GameObject {
       stack.addAll(world._childrenFromTable(e).reversed);
     }
     return null;
+  }
+
+  /// The first [T] on this object or below it, depth first in sibling
+  /// order (Unity's `GetComponentInChildren`, which also looks at the
+  /// object itself): a behaviour type, or a native component type (its
+  /// value). Inactive objects and their subtrees are skipped unless
+  /// [includeInactive]. This tick's writes count (see [children]).
+  T? getInChildren<T extends Object>({bool includeInactive = false}) =>
+      _inChildren<T>(includeInactive, first: true).firstOrNull;
+
+  /// Every [T] on this object and below it; see [getInChildren].
+  List<T> getAllInChildren<T extends Object>({bool includeInactive = false}) =>
+      _inChildren<T>(includeInactive, first: false);
+
+  /// The first [T] on this object or an ancestor, nearest first (Unity's
+  /// `GetComponentInParent`); see [getInChildren].
+  T? getInParent<T extends Object>({bool includeInactive = false}) {
+    for (GameObject? go = this; go != null; go = go._parentObject) {
+      if (!includeInactive && !go._activeForFind) continue;
+      final v = go._own<T>();
+      if (v != null) return v;
+    }
+    return null;
+  }
+
+  List<T> _inChildren<T extends Object>(bool includeInactive, {required bool first}) {
+    final out = <T>[];
+    final stack = <GameObject>[this];
+    while (stack.isNotEmpty) {
+      final go = stack.removeLast();
+      if (!includeInactive && !go._activeForFind) continue;
+      for (final v in go._allOwn<T>()) {
+        out.add(v);
+        if (first) return out;
+      }
+      stack.addAll(go.children.reversed);
+    }
+    return out;
+  }
+
+  /// The first [T] on this object alone: a live behaviour, or the native
+  /// component's value.
+  T? _own<T extends Object>() {
+    if (World._isBehaviourType<T>()) {
+      for (final b in _behaviours) {
+        if (b is T && !b._destroyed && !b._destroyRequested) return b as T;
+      }
+      return null;
+    }
+    if (T == Transform) return localTransform as T;
+    return _lookup(_codecOf(T).id) as T?;
+  }
+
+  Iterable<T> _allOwn<T extends Object>() sync* {
+    if (World._isBehaviourType<T>()) {
+      for (final b in _behaviours) {
+        if (b is T && !b._destroyed && !b._destroyRequested) yield b as T;
+      }
+      return;
+    }
+    final v = _own<T>();
+    if (v != null) yield v;
+  }
+
+  /// Active for the find helpers: its own flag as staged this tick, and
+  /// its ancestors' as the last tick left them (a pending spawn counts as
+  /// active until the tick says otherwise).
+  bool get _activeForFind {
+    if (!_alive || !activeSelf) return false;
+    final e = _entity;
+    return e == null || world._entities.activeInHierarchy(e);
   }
 
   // ------------------------------------------------ layer and tags (ADR-0020)
@@ -2237,7 +2418,8 @@ class _WorldTime implements TimeService {
 /// ADR-0020); built lazily per tick by [World.find] and friends.
 class _EntityTable {
   _EntityTable._(
-      this._parents, this._names, this._byName, this._children, this._tagged, this._tagBits, this._inactive, this._raw);
+      this._parents, this._names, this._byName, this._children, this._tagged, this._tagBits, this._inactive, this._raw,
+      this.all);
 
   factory _EntityTable.decode(WireBuffer b) {
     final parents = <int, int>{};
@@ -2247,9 +2429,11 @@ class _EntityTable {
     final tagged = <int>[];
     final tagBits = <int>[];
     final inactive = <int>{};
+    final all = <int>[];
     final size = gen.EntityInfoRecord.wireSize;
     for (var i = 0; i < b.recordCount; i++) {
       final r = gen.EntityInfoRecord.decode(b.records, i * size, b.tail);
+      all.add(r.entity);
       if (r.parent != 0) {
         parents[r.entity] = r.parent;
         (children[r.parent] ??= []).add(r.entity);
@@ -2264,11 +2448,14 @@ class _EntityTable {
       }
       if (!r.active) inactive.add(r.entity);
     }
-    return _EntityTable._(parents, names, byName, children, tagged, tagBits, inactive, Uint8List.fromList(b.bytes));
+    return _EntityTable._(parents, names, byName, children, tagged, tagBits, inactive, Uint8List.fromList(b.bytes), all);
   }
 
   final Map<int, int> _parents;
   final Map<int, String> _names;
+
+  /// Every entity, in the order the world lists them.
+  final List<int> all;
   final Map<String, List<int>> _byName;
   final Map<int, List<int>> _children;
 

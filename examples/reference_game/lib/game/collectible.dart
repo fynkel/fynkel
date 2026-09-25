@@ -50,8 +50,7 @@ class Collectible extends Behaviour {
       name: 'Burst',
     );
     var i = 0;
-    for (final child in burst.children) {
-      final spark = world.attach(child);
+    for (final spark in burst.children) {
       final angle = i * 1.047; // six sparks, 60° apart
       spark.applyImpulse(Vec3(0.6 * cos(angle), 1.2, 0.6 * sin(angle)));
       i++;

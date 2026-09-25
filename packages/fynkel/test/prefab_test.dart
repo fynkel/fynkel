@@ -69,7 +69,7 @@ void main() {
     final robot = w.find('Robot')!;
     final go = w.instantiate(const AssetRef(cratePrefab), name: 'Cargo', parent: robot);
     expect(go.name, 'Cargo');
-    expect(go.parent, robot.entity);
+    expect(go.parent, robot);
     expect(robot.findChild('Cargo'), isNotNull);
     w.frame(1 / 60);
     expect(w.componentsOf(go.entity).whereType<MeshRenderer>(), hasLength(1));

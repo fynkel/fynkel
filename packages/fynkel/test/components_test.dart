@@ -174,7 +174,7 @@ void main() {
     expect(lamp.get<PointLight>()!.intensity, 50);
     expect(w.componentsOf(lamp.entity).whereType<PointLight>().single.range, 4);
     expect(w.nameOf(lamp), 'Lamp 2');
-    expect(shade.parent, lamp.entity);
+    expect(shade.parent, lamp);
     expect(w.componentsOf(shade.entity).whereType<MeshRenderer>(), hasLength(1));
 
     lamp.setPresentation(lamp.get<PointLight>()!.copyWith(intensity: 5));

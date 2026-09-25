@@ -189,8 +189,7 @@ void main() {
       // body sits somewhere below the Player and the clips pose the joints
       // — every entity under the Player is watched, not a named thigh.
       Iterable<GameObject> descendants(GameObject o) sync* {
-        for (final c in o.children) {
-          final child = game.world.attach(c);
+        for (final child in o.children) {
           yield child;
           yield* descendants(child);
         }
