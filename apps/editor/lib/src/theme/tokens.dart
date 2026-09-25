@@ -50,6 +50,7 @@ final class FynkelTokens extends ThemeExtension<FynkelTokens> {
     required this.popup,
     required this.line,
     required this.lineStrong,
+    required this.fieldEdge,
     required this.text,
     required this.textSecondary,
     required this.textDisabled,
@@ -91,6 +92,10 @@ final class FynkelTokens extends ThemeExtension<FynkelTokens> {
   /// The 1px line between things, and its stronger form on a control's edge.
   final Color line;
   final Color lineStrong;
+
+  /// A field's edge at rest: in the dark set barely darker than its fill,
+  /// the way Unity's fields are flat and only the focus ring outlines one.
+  final Color fieldEdge;
 
   final Color text;
   final Color textSecondary;
@@ -181,31 +186,37 @@ final class FynkelTokens extends ThemeExtension<FynkelTokens> {
       ? warning
       : info;
 
+  // Unity's mid grey (docs/ui-refresh): few tones, far enough apart that
+  // the groups show without borders — the gutters and the tab strip dark,
+  // the panel mid, toolbars and component bands a step lighter, fields a
+  // recessed step darker; dark hairlines, the way a lit grey surface has
+  // a shadow and not an outline.
   static const _darkPalette = _Palette(
-    window: Color(0xFF17181A),
-    panel: Color(0xFF1E1F22),
-    header: Color(0xFF212328),
-    field: Color(0xFF131416),
-    popup: Color(0xFF26282D),
-    line: Color(0xFF2A2C31),
-    lineStrong: Color(0xFF33363B),
-    text: Color(0xFFD8DADD),
-    textSecondary: Color(0xFF9BA0A6),
-    textDisabled: Color(0xFF6B7076),
-    accent: Color(0xFF3E7BFA),
+    window: Color(0xFF1F1F1F),
+    panel: Color(0xFF383838),
+    header: Color(0xFF3F3F3F),
+    field: Color(0xFF2A2A2A),
+    popup: Color(0xFF303030),
+    line: Color(0xFF262626),
+    lineStrong: Color(0xFF212121),
+    fieldEdge: Color(0xFF242424),
+    text: Color(0xFFD2D2D2),
+    textSecondary: Color(0xFFA2A2A2),
+    textDisabled: Color(0xFF787878),
+    accent: Color(0xFF4C8BF5),
     onAccent: Color(0xFFFFFFFF),
-    selection: Color(0xFF2F5AA8),
+    selection: Color(0xFF2C5D87),
     onSelection: Color(0xFFFFFFFF),
-    selectionQuiet: Color(0xFF2A3140),
-    accentSoft: Color(0x333E7BFA),
-    hover: Color(0x0FFFFFFF),
+    selectionQuiet: Color(0xFF4D4D4D),
+    accentSoft: Color(0x384C8BF5),
+    hover: Color(0x12FFFFFF),
     error: Color(0xFFE5484D),
     warning: Color(0xFFF5A524),
     ok: Color(0xFF30A46C),
-    info: Color(0xFF7A8189),
+    info: Color(0xFF8E8E8E),
     shadow: Color(0x80000000),
-    overlay: Color(0xB81E1F22),
-    overlayEdge: Color(0x12FFFFFF),
+    overlay: Color(0xD9383838),
+    overlayEdge: Color(0x14FFFFFF),
     axisX: Color(0xFFE5645F),
     axisY: Color(0xFF5BBF7D),
     axisZ: Color(0xFF5B8EFA),
@@ -222,6 +233,7 @@ final class FynkelTokens extends ThemeExtension<FynkelTokens> {
     popup: Color(0xFFFAFBFC),
     line: Color(0xFFD2D5DA),
     lineStrong: Color(0xFFC2C6CC),
+    fieldEdge: Color(0xFFC2C6CC),
     text: Color(0xFF1B1D21),
     textSecondary: Color(0xFF5A6067),
     textDisabled: Color(0xFF878D95),
@@ -268,6 +280,7 @@ final class FynkelTokens extends ThemeExtension<FynkelTokens> {
       popup: s(p.popup),
       line: p.line,
       lineStrong: p.lineStrong,
+      fieldEdge: p.fieldEdge,
       text: p.text,
       textSecondary: p.textSecondary,
       textDisabled: p.textDisabled,
@@ -316,6 +329,7 @@ final class _Palette {
     required this.popup,
     required this.line,
     required this.lineStrong,
+    required this.fieldEdge,
     required this.text,
     required this.textSecondary,
     required this.textDisabled,
@@ -338,7 +352,7 @@ final class _Palette {
     required this.axisZ,
   });
 
-  final Color window, panel, header, field, popup, line, lineStrong;
+  final Color window, panel, header, field, popup, line, lineStrong, fieldEdge;
   final Color text, textSecondary, textDisabled;
   final Color accent, onAccent, selection, onSelection, selectionQuiet, accentSoft, hover;
   final Color error, warning, ok, info, shadow, overlay, overlayEdge, axisX, axisY, axisZ;

@@ -191,7 +191,7 @@ class MainWindow extends StatelessWidget {
       key: const Key('window.titleBar'),
       height: titleBarHeight,
       decoration: BoxDecoration(
-        color: t.header,
+        color: t.window,
         border: Border(bottom: t.hairline),
       ),
       child: Stack(
@@ -643,7 +643,7 @@ class MainWindow extends StatelessWidget {
           child: Container(
             height: t.row + 2,
             padding: EdgeInsets.symmetric(horizontal: t.pad),
-            color: t.header,
+            color: t.window,
             child: Row(
               children: [
                 Icon(FIcons.error, size: 13, color: errors > 0 ? t.error : t.textDisabled),

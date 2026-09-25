@@ -71,8 +71,15 @@ ThemeData fynkelTheme({required Brightness brightness, EditorDensity density = E
     inversePrimary: t.accent,
   );
 
-  TextStyle ui(double size, {FontWeight weight = FontWeight.w400, Color? color}) =>
-      TextStyle(fontFamily: uiFontFamily, fontSize: size, fontWeight: weight, color: color ?? t.text, height: 1.3);
+  // Slightly tight: SF at 11–12 px reads wide next to Unity's Inter at 12.
+  TextStyle ui(double size, {FontWeight weight = FontWeight.w400, Color? color}) => TextStyle(
+    fontFamily: uiFontFamily,
+    fontSize: size,
+    fontWeight: weight,
+    color: color ?? t.text,
+    height: 1.3,
+    letterSpacing: -0.15,
+  );
 
   final text = TextTheme(
     // The editor's own scale: one reading size, one quiet size, one title.
@@ -91,7 +98,7 @@ ThemeData fynkelTheme({required Brightness brightness, EditorDensity density = E
 
   final border = OutlineInputBorder(
     borderRadius: t.cornerControl,
-    borderSide: BorderSide(color: t.lineStrong, width: 1),
+    borderSide: BorderSide(color: t.fieldEdge, width: 1),
   );
 
   return ThemeData(

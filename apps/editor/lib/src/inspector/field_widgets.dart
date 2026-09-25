@@ -422,7 +422,7 @@ class _CommitTextState extends State<_CommitText> {
         ? t.accent
         : _hover
         ? t.textDisabled
-        : t.lineStrong;
+        : t.fieldEdge;
     return CallbackShortcuts(
       bindings: {const SingleActivator(LogicalKeyboardKey.escape): _cancel},
       child: MouseRegion(
@@ -913,7 +913,7 @@ class FieldBox extends StatelessWidget {
       padding: padding,
       decoration: BoxDecoration(
         color: t.field,
-        border: Border.all(color: edge ?? t.lineStrong),
+        border: Border.all(color: edge ?? t.fieldEdge),
         borderRadius: t.cornerControl,
       ),
       child: child,
