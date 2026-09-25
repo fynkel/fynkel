@@ -132,7 +132,8 @@ What Fynkel has (mapped 2026-09-25):
        get`, a copy outside the checkout — all need the shapes, and
        `package:fynkel` is the runtime package, not a Fynkel package with
        assets. A package's assets are mounted beside them; the built-in
-       mount is the one special case left.)
+       mount is the one special case left. Confirmed by the user
+       2026-09-25.)
    - **The editor part** is ADR-0028's, unchanged.
 
 3. **Physics, audio and animation become optional modules**, as Unity's
