@@ -63,6 +63,21 @@ editor.inspector<CoinKind>((context, inspector) => Column(
 ));
 ```
 
+`editor.drawer<Wave>(build)` draws every field holding the record class
+`Wave`, and `editor.namedDrawer('jumpHeight', build)` every field
+`@Expose(drawer: 'jumpHeight')` names (Unity's `PropertyDrawer`). The
+`FieldContext` has the value, `set`, the label, a record's sub-fields
+(`valueOf`, `setField`, `field`), `row(child)` and `defaultEditor()`:
+
+```dart
+editor.namedDrawer('jumpHeight', (context, field) => Column(
+  children: [
+    field.defaultEditor(),
+    Text('Reaches ${(field.value as num) * (field.value as num) / 19.62} m'),
+  ],
+));
+```
+
 The rules:
 
 - Only files under `lib/editor/` import this package or `lib/editor/`

@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 
 import 'assets.dart';
 import 'context.dart';
+import 'field.dart';
 import 'inspector.dart';
 import 'scene.dart';
 
@@ -54,6 +55,21 @@ abstract interface class EditorExtensions {
   /// Hints come first (ADR-0018: `@Expose(min:, kind:, header:, …)`):
   /// write a custom Inspector when they cannot say what you need.
   void inspector<T>(Widget Function(BuildContext context, InspectorContext inspector) build);
+
+  /// A property drawer for the record class [T] (`drawer<Wave>`, a
+  /// `@FynkelRecord`): [build] draws every field holding one — alone, in a
+  /// list, inside another record — in place of its foldout (Unity's
+  /// `CustomPropertyDrawer(typeof(Wave))`). A record is known by its class
+  /// name, as the schema's `x-fynkel.record` names it.
+  ///
+  /// A throw in [build] draws the field the default way with a line
+  /// saying why, and a Console error. Hints come first (ADR-0018).
+  void drawer<T>(Widget Function(BuildContext context, FieldContext field) build);
+
+  /// A property drawer by name: [build] draws every field annotated
+  /// `@Expose(drawer: name)` (each item, on a list), whatever its type. A
+  /// field's named drawer comes before its record's.
+  void namedDrawer(String name, Widget Function(BuildContext context, FieldContext field) build);
 
   /// A window (Unity's `EditorWindow`): a panel the user docks anywhere,
   /// whose place the layout keeps across restarts and hot reloads.
