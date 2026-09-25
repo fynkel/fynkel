@@ -68,7 +68,7 @@ class _ScenePanelState extends State<ScenePanel> {
     final theme = Theme.of(context);
     final tab = model.current;
     if (tab == null) {
-      return _sign(theme, FIcons.viewInArOutlined, 'No document open', 'Open a scene or prefab (⇧⌘O) to see it here.');
+      return _sign(theme, FIcons.viewInArOutlined, 'No document open', '');
     }
     if (!tab.hasPreview) {
       return Stack(
@@ -169,16 +169,17 @@ class _ScenePanelState extends State<ScenePanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 32, color: theme.tokens.textDisabled),
-          const SizedBox(height: 12),
-          Text(title, style: theme.textTheme.titleMedium),
-          const SizedBox(height: 4),
-          Text(
-            body,
-            key: const Key('scene.sign'),
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(color: theme.disabledColor),
-          ),
+          // One quiet line, the reason under it when there is one (docs/ui-refresh).
+          Text(title, style: theme.textTheme.bodySmall?.copyWith(color: theme.tokens.textSecondary)),
+          if (body.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              body,
+              key: const Key('scene.sign'),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.disabledColor),
+            ),
+          ],
           if (action != null) ...[const SizedBox(height: 8), action],
         ],
       ),
@@ -833,22 +834,17 @@ class _ScenePanelState extends State<ScenePanel> {
     ),
   );
 
+  /// A state the picture does not show: following, editing a component's
+  /// handles, why no gizmo is drawn. Nothing otherwise — the camera, the
+  /// selection and the tool are on screen already (docs/ui-refresh: Unity
+  /// draws nothing over the picture it was not asked for).
   Widget _status(ThemeData theme, SceneTab tab) {
-    final cam = tab.camera;
-    final sel = tab.tab.selection.length;
     final text = [
-      cam.orthographic ? 'ortho ${_fmt2(cam.orthoHeight)} m' : 'persp ${(cam.fovY * 180 / 3.141592653589793).round()}°',
-      'pivot (${cam.pivot.map(_fmt2).join(', ')})  d ${_fmt2(cam.distance)}',
       if (tab.following != null) 'following the selection · pan to let go',
-      if (sel > 0) '$sel selected',
-      if (model.editingLabel case final editing?)
-        'editing $editing · Esc to stop'
-      else
-        model.tool.name +
-            (!model.tool.hasGizmo ? '' : ' · ${model.space.name}') +
-            (model.snap.enabled ? ' · snap' : ''),
+      if (model.editingLabel case final editing?) 'editing $editing · Esc to stop',
       ?model.noGizmoReason,
     ].join('   ');
+    if (text.isEmpty) return const SizedBox.shrink();
     return Tooltip(
       message:
           'Navigate: ⌥-drag orbit · ⌥⇧-drag or middle-drag pan · ⌥-right-drag dolly · '
@@ -875,7 +871,6 @@ class _ScenePanelState extends State<ScenePanel> {
     );
   }
 
-  static String _fmt2(double v) => v.abs() >= 100 ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
 }
 
 /// The marquee and the focus ring, in logical pixels.

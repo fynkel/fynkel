@@ -365,6 +365,7 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     );
   }
 
+  // No document: one quiet line and a quiet way to open one (docs/ui-refresh).
   Widget _empty(BuildContext context, ThemeData theme) {
     return Center(
       child: Padding(
@@ -372,21 +373,12 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(FIcons.accountTreeOutlined, size: 32, color: context.tokens.textDisabled),
-            const SizedBox(height: 12),
-            Text('No document open', style: theme.textTheme.titleMedium),
+            Text('No document open', style: theme.textTheme.bodySmall?.copyWith(color: context.tokens.textDisabled)),
             const SizedBox(height: 4),
-            Text(
-              'The Hierarchy shows the entities of the focused tab.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.disabledColor),
-            ),
-            const SizedBox(height: 12),
-            FilledButton.tonalIcon(
+            TextButton(
               key: const Key('hierarchy.openDocument'),
               onPressed: widget.onOpenDocument,
-              icon: const Icon(FIcons.folderOpen),
-              label: const Text('Open Document…'),
+              child: const Text('Open Document…'),
             ),
           ],
         ),

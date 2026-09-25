@@ -165,7 +165,6 @@ class _InspectorPanelState extends State<InspectorPanel> {
         key: ValueKey('inspector.empty'),
         icon: FIcons.touchAppOutlined,
         title: 'Nothing selected',
-        message: 'Select an entity in the Hierarchy, or an asset or a folder in the Project panel.',
       );
     }
     return _entityPage(context);
@@ -189,7 +188,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
 
   Widget _entityPage(BuildContext context) {
     final theme = Theme.of(context);
-    if (!model.hasDocument) return _empty(context, FIcons.tune, 'Open a document and select an entity.');
+    if (!model.hasDocument) return const InspectorEmpty(icon: FIcons.tune, title: 'Nothing selected');
     final banner = _banner(context);
     if (model.tooMany) {
       return Column(
@@ -350,20 +349,17 @@ class _InspectorPanelState extends State<InspectorPanel> {
     return card;
   }
 
+  /// One quiet line, no picture (docs/ui-refresh); [icon] kept for callers.
   Widget _empty(BuildContext context, IconData icon, String text) {
     final theme = Theme.of(context);
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 32, color: context.tokens.textDisabled),
-          const SizedBox(height: 8),
-          Text(
-            text,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
-          ),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodySmall?.copyWith(color: context.tokens.textDisabled),
+        ),
       ),
     );
   }

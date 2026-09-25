@@ -353,7 +353,9 @@ class ApplyBar extends StatelessWidget {
   }
 }
 
-/// A centred message for a page with nothing to show.
+/// A centred message for a page with nothing to show: one quiet line
+/// (Unity leaves such a panel empty; docs/ui-refresh). [icon] is kept for
+/// callers and no longer drawn.
 class InspectorEmpty extends StatelessWidget {
   const InspectorEmpty({super.key, required this.icon, required this.title, this.message});
 
@@ -371,9 +373,7 @@ class InspectorEmpty extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 28, color: t.textDisabled),
-            const SizedBox(height: 10),
-            Text(title, style: theme.textTheme.bodyMedium?.copyWith(color: t.textSecondary)),
+            Text(title, style: theme.textTheme.bodySmall?.copyWith(color: t.textDisabled)),
             if (message != null) ...[
               const SizedBox(height: 4),
               Text(

@@ -86,5 +86,9 @@ void main() {
     await tester.tap(find.text('Console').first);
     await tester.pumpAndSettle();
     await save('console', find.byType(ConsolePanel).first);
+    // With no document open: the empty panels.
+    e.shell.registry.execute('document.close');
+    await tester.pumpAndSettle();
+    await save('empty');
   }, skip: _out == null);
 }

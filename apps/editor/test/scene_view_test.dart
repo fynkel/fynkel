@@ -987,8 +987,7 @@ void main() {
       await tester.pump();
       expect(st.tab.selection.toList(), ['crate']);
       expect(r.model.hasFocus, isTrue);
-      expect(find.byKey(const Key('scene.status')), findsOneWidget);
-      expect(find.textContaining('1 selected'), findsOneWidget);
+      expect(find.byKey(const Key('scene.status')), findsNothing, reason: 'nothing over the picture at rest');
 
       // The tools, F, H, L, X and 5 are the registry's (from any panel —
       // the shell test below); the view alone does not take them.

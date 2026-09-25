@@ -15,7 +15,6 @@ import 'package:fynkel/fynkel.dart' show EditorChannel;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import '../commands/commands.dart' show KeyboardOwner;
-import '../theme/icons.dart';
 import '../theme/panel_focus.dart';
 import '../theme/tokens.dart';
 import 'editor_game.dart';
@@ -160,7 +159,7 @@ class GamePanel extends StatelessWidget {
   Widget _between(BuildContext context, {required bool playsHere}) {
     final title = playsHere ? 'Press Play (⌘P)' : 'The game runs in its own window';
     final hint = playsHere
-        ? 'The game runs here, starting in the scene open in the editor.'
+        ? ''
         : 'This editor was started without the project\'s game. Open the project with '
               '`fynkel editor <dir>` to play it here, with Pause, Step and hot reload.';
     final preview = this.preview;
@@ -173,10 +172,44 @@ class GamePanel extends StatelessWidget {
           showViewport: showViewport,
           placeholder: (message) => _Idle(title: title, detail: '$message\n\n$hint'),
         ),
-        Positioned(left: 8, bottom: 6, child: _Caption(preview: preview, playsHere: playsHere)),
+        // The camera's caption shows under the pointer only (docs/ui-refresh).
+        Positioned.fill(
+          child: _HoverReveal(
+            child: Align(
+              alignment: Alignment.bottomLeft,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 8, bottom: 6),
+                child: _Caption(preview: preview, playsHere: playsHere),
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
+}
+
+/// [child] drawn while the pointer is over this area; hits pass through.
+class _HoverReveal extends StatefulWidget {
+  const _HoverReveal({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_HoverReveal> createState() => _HoverRevealState();
+}
+
+class _HoverRevealState extends State<_HoverReveal> {
+  bool _in = false;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    opaque: false,
+    hitTestBehavior: HitTestBehavior.translucent,
+    onEnter: (_) => setState(() => _in = true),
+    onExit: (_) => setState(() => _in = false),
+    child: IgnorePointer(child: Opacity(opacity: _in ? 1 : 0, child: widget.child)),
+  );
 }
 
 /// "Main Camera · ⌘P plays here" under the picture.
@@ -228,15 +261,16 @@ class _Idle extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(FIcons.playArrow, size: 28, color: t.textSecondary),
-              const SizedBox(height: 10),
-              Text(title, style: theme.textTheme.titleSmall?.copyWith(color: t.text)),
-              const SizedBox(height: 6),
-              Text(
-                detail,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(color: t.textSecondary),
-              ),
+              // One quiet line; the detail only when it explains something (docs/ui-refresh).
+              Text(title, style: theme.textTheme.bodySmall?.copyWith(color: t.textSecondary)),
+              if (detail.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  detail,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(color: t.textDisabled),
+                ),
+              ],
             ],
           ),
         ),

@@ -264,12 +264,15 @@ ThemeData fynkelTheme({required Brightness brightness, EditorDensity density = E
       visualDensity: VisualDensity.compact,
       fillColor: WidgetStatePropertyAll(t.accent),
     ),
+    // Unity's slider: a grey track and a small light thumb — no blue.
     sliderTheme: SliderThemeData(
-      activeTrackColor: t.accent,
-      inactiveTrackColor: t.line,
-      thumbColor: t.accent,
+      activeTrackColor: t.textDisabled,
+      inactiveTrackColor: t.field,
+      thumbColor: t.text,
+      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5, disabledThumbRadius: 4, elevation: 0),
       overlayShape: SliderComponentShape.noOverlay,
       trackHeight: 2,
+      tickMarkShape: SliderTickMarkShape.noTickMark,
     ),
     listTileTheme: ListTileThemeData(
       dense: true,

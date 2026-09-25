@@ -114,3 +114,21 @@ Closest to Unity already — floating grouped toolbars, the axis gizmo, Persp.
    pills in Scene/Game; a thin Game toolbar.
 
 Each step with before/after screenshots for the user to judge.
+
+## Done (2026-09-26)
+
+Before/after pictures of each step are in `steps/` (from
+`FYNKEL_SHOTS=<dir> flutter test test/look/shots_test.dart`).
+
+1. Tokens — mid grey, flat fields, tighter text: 127510b.
+2. Inspector — id in the icon's tooltip, Tags + Layer on one row,
+   [Header] captions, units as tooltips (° kept), centred Add
+   Component: dc8d021.
+3. Hierarchy (prefab blue, › on hover, + first, footer only when
+   filtering), Project (+ first, grey toggle, path footer), Console
+   (flat toggles, no footer): 7afa365.
+4. Empty panels one quiet line; the Scene pill only for a passing state;
+   the Game caption on hover; grey sliders: see the next commit.
+
+Left: the status bar (Unity shows the last Console line); a Game view
+toolbar; Project icons/breadcrumb header; one merged Console list.
