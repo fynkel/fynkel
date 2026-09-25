@@ -216,7 +216,13 @@ class _LevelToolsState extends State<LevelTools> {
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
-        Text('Coins: $_count'),
+        // During Play the running game's tools come first: the window is
+        // often a short dock tab.
+        if (widget.editor.play case final play?) ...[
+          PlayTools(play: play),
+          const Divider(height: 32),
+        ],
+        Text('Ring of $_count coins'),
         Slider(
           value: _count.toDouble(),
           min: 3,
@@ -233,10 +239,6 @@ class _LevelToolsState extends State<LevelTools> {
           child: Text(under == null ? 'Place Ring' : 'Place Ring under ${under.name}'),
         ),
         if (scene == null) const Padding(padding: EdgeInsets.only(top: 8), child: Text('Open a scene first.')),
-        if (widget.editor.play case final play?) ...[
-          const Divider(height: 32),
-          PlayTools(play: play),
-        ],
       ],
     );
   }
