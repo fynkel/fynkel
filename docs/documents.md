@@ -1860,7 +1860,10 @@ project or is missing, `P0008` malformed entry, `P0009` an input binding
 the runtime grammar rejects (at `/inputActions/<name>/bindings/<i>`,
 [input.md](input.md)), `P0010` no lock, `P0011` lock mismatch, `P0012`
 malformed lock, `P0013` a `physics` block the runtime cannot apply (a
-non-finite gravity), `P0014` the project's `layers` or `tags` (ADR-0020).
+non-finite gravity), `P0014` the project's `layers` or `tags` (ADR-0020),
+`P0015` a file of the game package outside `lib/editor/` that imports
+`package:fynkel_editor_api` or `lib/editor/` (ADR-0028: editor code never
+ships in a game; also reported by `fynkel codegen --check`).
 
 ## New projects: `fynkel create`
 

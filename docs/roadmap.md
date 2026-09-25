@@ -77,7 +77,8 @@ Three ADRs, then their implementation:
    game build. **ADR-0028 accepted 2026-09-25**: a package's
    editor part (`lib/editor/editor.dart`'s `registerEditor`, through
    `package:fynkel_editor_api`), so the package work (item 3) builds on
-   it.
+   it. Step 1 (the loop: menu items, discovery, reload, `FYN-P0015`,
+   Preferences › Extensions) done 2026-09-25.
 2. **`@DataAsset`** (Unity's ScriptableObject): a Dart class becomes an
    asset type with a schema, an Inspector page, references by id, a
    cooked form. **ADR-0027 accepted 2026-09-25; built first**, ahead of

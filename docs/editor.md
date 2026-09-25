@@ -1878,6 +1878,77 @@ one in front and each tab's selection in `.fynkel/editor.json` (the
 closing the project or quitting. A document that no longer opens is left
 out.
 
+## Editor extensions (ADR-0028)
+
+Any package can add to the editor, the game first among them, as a Unity
+package carries an `Editor` folder. Its **editor part** lives under
+`lib/editor/`, and `lib/editor/editor.dart` defines
+
+```dart
+import 'package:fynkel_editor_api/fynkel_editor_api.dart';
+
+void registerEditor(EditorExtensions editor) {
+  editor.menuItem(
+    'Tools/Code Only/List Coin Kinds',
+    id: 'codeOnly.listCoinKinds',
+    run: (context) => context.log('…'),
+  );
+}
+```
+
+`examples/code_only/lib/editor/editor.dart` is the working example.
+
+- **Finding the parts.** `fynkel editor` (`editor_parts` in
+  `apps/cli/src/editor.rs`) walks the game's `dependencies` (not
+  `dev_dependencies`: the host reaches only what the game depends on),
+  finds each package through the project's
+  `.dart_tool/package_config.json`, and follows each package's own
+  `pubspec.yaml` dependencies. The host's `main.dart` imports every
+  package with `lib/editor/editor.dart` and hands the list to
+  `runFynkelEditor(extensions: [EditorPart('<package>', registerEditor), …])`.
+  The order is dependencies first, then by name, and the game last.
+  Without a resolved `package_config.json` only the game's own part
+  counts.
+- **Registering again on every hot reload.** The shell's `reassemble`
+  calls every `registerEditor` again, from nothing
+  (`EditorExtensionHost.rebuild`, `lib/src/extensions/`). A menu item
+  added in a save appears, and one removed disappears, without a
+  restart. Adding or removing a whole editor part changes the host's
+  `main.dart`, which only a restart runs again. `fynkel editor` reports
+  that save's reload as `reloadRejected`, so the editor restarts at once
+  when nothing is unsaved and asks otherwise (*Restart to Apply*).
+- **Menu items** (Unity's `[MenuItem]`) become ordinary commands, with
+  the extension's stable id. They are in the menu bar, the command
+  palette, shortcuts and automation.
+  - The path is `Menu/Item` or `Menu/Submenu/Item`. The menu is one of
+    the editor's; **Tools** (between Play and Window) is there for
+    extensions and hidden while empty.
+  - An extension's items come after the editor's own in the same menu,
+    in registration order, with a submenu's items kept together.
+  - `enabled` greys an item out (Unity's validate function);
+    `description` is its palette line.
+  - A bad path, an id the editor or another extension already has, or a
+    taken shortcut leaves the item out, with a Console error saying why.
+- **`EditorContext`** is what every callback gets. It speaks for its
+  package: `log`, `logWarning` and `logError` put a row in the Console's
+  Project tab (code `extension`, the message prefixed by the package).
+  Step 2 adds the selection, edits, assets and Play.
+- **A failing extension fails alone.** Every call into a package is
+  wrapped. A throwing `registerEditor` skips that package's extensions,
+  and a throwing command or `enabled` check is a Console error (with the
+  first frame of its stack) while the editor carries on.
+- **Preferences › Extensions** lists each package with an editor part
+  and what it registered, or why it registered nothing.
+- **Editor code never ships in a game.** Only files under `lib/editor/`
+  may import `package:fynkel_editor_api` or `lib/editor/`. `fynkel
+  validate`, the editor's Console and `fynkel codegen --check` report
+  any other file that does as `FYN-P0015`, with its line
+  (`fynkel_document::editor_part`). The game's entry point therefore never
+  reaches editor code, and tree shaking drops it. The API package holds
+  only interfaces and has no plugins.
+- The plain editor (no game compiled in) has no extensions. Everything
+  an extension shows stays editable without it.
+
 ## The Game view: Play in the editor (ADR-0021 P4)
 
 In a project editor (`fynkel editor <dir>`), **Play runs the game inside
