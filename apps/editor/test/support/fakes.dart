@@ -603,6 +603,29 @@ final class FakeProject extends EditorProject {
         _redo.clear();
         _undo.add((label, () => file.writeAsStringSync(before)));
         return _done(kind, label, null, {'layers': args['layers'], 'tags': args['tags'], 'reload': const []});
+      case 'setModules':
+        // The project file's `modules` with what differs from the defaults,
+        // as the session writes it; its undo writes the file back.
+        final file = File('$dir/fynkel.project.json');
+        final before = file.existsSync() ? file.readAsStringSync() : '{}';
+        final json = Map<String, Object?>.from(jsonDecode(before) as Map);
+        final old = Map<String, Object?>.from(json['modules'] as Map? ?? const {});
+        final now = <String, Object?>{
+          for (final k in ['physics', 'audio', 'animation'])
+            if ((args[k] ?? old[k] ?? true) == false) k: false,
+          if ((args['strip'] ?? old['strip'] ?? false) == true) 'strip': true,
+        };
+        if (jsonEncode(now) == jsonEncode(old)) _refuse('FYN-T0003', 'setModules: the modules are what the project already has');
+        if (now.isEmpty) {
+          json.remove('modules');
+        } else {
+          json['modules'] = now;
+        }
+        file.writeAsStringSync(jsonEncode(json));
+        const label = 'Set Modules';
+        _redo.clear();
+        _undo.add((label, () => file.writeAsStringSync(before)));
+        return _done(kind, label, null, {'modules': now});
       case 'registerBehaviour':
         // The registry lives in the project file the fake does not keep: the
         // answer says whether the metadata (what `codegen` wrote) has the id.

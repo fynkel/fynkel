@@ -52,6 +52,8 @@ import 'profiler/profiler_panel.dart';
 import 'project/editor_handover.dart';
 import 'project/editor_project.dart';
 import 'project/migration_dialog.dart';
+import 'project/modules_dialog.dart';
+import 'project/tags_and_layers_dialog.dart';
 import 'project_browser/project_browser_model.dart';
 import 'project_browser/project_panel.dart';
 import 'project_browser/thumbnails.dart';
@@ -1441,6 +1443,23 @@ class EditorShellState extends State<EditorShell> {
         order: 3,
         enabled: () => _hasProject,
         run: () => showMigrationPreview(context, project!),
+      ),
+      // Unity's Project Settings pages, each its own dialog.
+      EditorCommand(
+        id: 'project.tagsAndLayers',
+        menu: EditorMenu.project,
+        group: 2,
+        order: 4,
+        enabled: () => _canEditAssets,
+        run: () => showTagsAndLayersDialog(context, project!),
+      ),
+      EditorCommand(
+        id: 'project.modules',
+        menu: EditorMenu.project,
+        group: 2,
+        order: 5,
+        enabled: () => _canEditAssets,
+        run: () => showModulesDialog(context, project!),
       ),
       EditorCommand(
         id: 'project.reveal',

@@ -176,10 +176,18 @@ abstract final class EditorStrings {
     ),
     'project.close': (label: 'Close Project', description: null),
     'project.migrations': (label: 'Migration Preview…', description: null),
+    'project.modules': (
+      label: 'Modules…',
+      description: 'The engine modules the game uses: physics, audio, animation (Project Settings)',
+    ),
     'project.new': (label: 'New Project…', description: null),
     'project.open': (label: 'Open Project…', description: null),
     'project.revalidate': (label: 'Validate Project', description: null),
     'project.reveal': (label: 'Reveal in Finder', description: null),
+    'project.tagsAndLayers': (
+      label: 'Tags and Layers…',
+      description: 'The project\'s layers and tags (Project Settings)',
+    ),
     'scene.alignCameraToView': (
       label: 'Align Selected Camera to View',
       description: 'The selected camera entity moves to where the view is, one transaction',

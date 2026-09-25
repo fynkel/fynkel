@@ -371,6 +371,13 @@ abstract class EditorProject extends ChangeNotifier {
   /// (`startupScene`; Unity's first scene in Build Settings).
   OperationResult setStartupScene(String id) => operate('setStartupScene', {'id': id});
 
+  /// The project's optional modules (ADR-0029 §3; Project › Modules…):
+  /// the keys given replace the project's, one step on the asset history.
+  /// A module turned off keeps its components in the documents; validate
+  /// reports them (FYN-P0018).
+  OperationResult setModules({bool? physics, bool? audio, bool? animation, bool? strip}) =>
+      operate('setModules', {'physics': ?physics, 'audio': ?audio, 'animation': ?animation, 'strip': ?strip});
+
   /// A model's embedded materials written as `.material.json` documents
   /// (`Materials/` next to it, or [folder]) and remapped to them — one
   /// step on the asset history (`docs/design/material-remapping.md`).
@@ -441,6 +448,19 @@ abstract class EditorProject extends ChangeNotifier {
   /// The project file's `tags` (bit `i` of an object's tag set, ADR-0020),
   /// or none.
   List<String> tagNames() => _projectList('tags') ?? const [];
+
+  /// The project file's `modules` (ADR-0029 §3): every module on and no
+  /// strip for a project that does not say.
+  ProjectModules modules() {
+    try {
+      final decoded = jsonDecode(File(p.join(dir, 'fynkel.project.json')).readAsStringSync());
+      final m = decoded is Map ? decoded['modules'] : null;
+      if (m is Map) return ProjectModules.fromJson(m.cast<String, Object?>());
+    } catch (_) {
+      // A missing or malformed project file: the validation reports it.
+    }
+    return const ProjectModules();
+  }
 
   List<String>? _projectList(String key) {
     try {
@@ -821,3 +841,48 @@ final class SessionProject extends EditorProject {
 
 /// True when [dir] holds a project file (the launcher's Open check).
 bool isFynkelProject(String dir) => File(p.join(dir, 'fynkel.project.json')).existsSync();
+
+/// The project's `modules` block (ADR-0029 §3): which optional engine
+/// modules the game uses, and whether a source build leaves the ones that
+/// are off out (`strip`).
+final class ProjectModules {
+  const ProjectModules({this.physics = true, this.audio = true, this.animation = true, this.strip = false});
+
+  factory ProjectModules.fromJson(Map<String, Object?> j) => ProjectModules(
+    physics: j['physics'] != false,
+    audio: j['audio'] != false,
+    animation: j['animation'] != false,
+    strip: j['strip'] == true,
+  );
+
+  final bool physics;
+  final bool audio;
+  final bool animation;
+  final bool strip;
+
+  /// The components each module owns, as validate and Add Component know
+  /// them (`fynkel_core::Module::components`).
+  static const components = {
+    'physics': ['fynkel.RigidBody', 'fynkel.Collider', 'fynkel.CharacterController'],
+    'audio': ['fynkel.AudioSource', 'fynkel.AudioListener'],
+    'animation': ['fynkel.Animator', 'fynkel.Skin'],
+  };
+
+  bool has(String module) => switch (module) {
+    'physics' => physics,
+    'audio' => audio,
+    'animation' => animation,
+    _ => true,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is ProjectModules &&
+      other.physics == physics &&
+      other.audio == audio &&
+      other.animation == animation &&
+      other.strip == strip;
+
+  @override
+  int get hashCode => Object.hash(physics, audio, animation, strip);
+}
