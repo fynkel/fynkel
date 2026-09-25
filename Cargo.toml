@@ -61,10 +61,10 @@ fynkel_cooked = { path = "crates/fynkel_cooked" }
 fynkel_schema_derive = { path = "crates/fynkel_schema_derive" }
 fynkel_ecs = { path = "crates/fynkel_ecs" }
 fynkel_scene = { path = "crates/fynkel_scene" }
-fynkel_physics = { path = "crates/fynkel_physics" }
-fynkel_audio = { path = "crates/fynkel_audio" }
+fynkel_physics = { path = "crates/fynkel_physics", default-features = false }
+fynkel_audio = { path = "crates/fynkel_audio", default-features = false }
 fynkel_animation = { path = "crates/fynkel_animation" }
-fynkel_core = { path = "crates/fynkel_core" }
+fynkel_core = { path = "crates/fynkel_core", default-features = false }
 fynkel_wire = { path = "crates/fynkel_wire" }
 fynkel_render = { path = "crates/fynkel_render" }
 fynkel_native = { path = "crates/fynkel_native", default-features = false }   # `authoring` is opted into per dependent (platform/apple passes it through)

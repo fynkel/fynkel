@@ -52,12 +52,18 @@ fn body() -> Vec<ComponentValue> {
 }
 
 #[test]
-fn every_module_is_on_by_default() {
-    let w = World::new(WorldConfig::default());
-    assert_eq!(w.modules(), Modules::ALL);
+fn a_world_runs_at_most_the_modules_its_build_carries() {
+    let mut w = World::new(WorldConfig::default());
+    assert_eq!(w.modules(), Modules::COMPILED);
+    w.set_modules(Modules::ALL);
+    assert_eq!(w.modules(), Modules::COMPILED);
+    #[cfg(all(feature = "physics", feature = "audio", feature = "animation"))]
     for m in Module::ALL {
         assert!(w.modules().has(m));
     }
+    // A stripped module stays off whatever the project says.
+    #[cfg(not(feature = "animation"))]
+    assert!(!w.modules().animation);
 }
 
 #[test]
@@ -89,6 +95,7 @@ fn physics_off_leaves_a_body_in_place_and_rejects_body_commands() {
     assert!(d.message.contains("physics"), "{}", d.message);
 }
 
+#[cfg(feature = "physics")]
 #[test]
 fn the_same_body_falls_with_physics_on() {
     let mut w = world(Modules::ALL);
@@ -137,8 +144,11 @@ fn animation_off_rejects_animate_and_leaves_physics_running() {
     let d = w.diagnostics().last().unwrap();
     assert_eq!(d.code, DiagnosticCode::MODULE_OFF);
     assert!(d.message.contains("animation"), "{}", d.message);
-    for _ in 0..30 {
-        w.step();
+    #[cfg(feature = "physics")]
+    {
+        for _ in 0..30 {
+            w.step();
+        }
+        assert!(y(&w, e) < 3.0, "physics still steps");
     }
-    assert!(y(&w, e) < 3.0, "physics still steps");
 }

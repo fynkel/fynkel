@@ -14,7 +14,7 @@ fynkel_document.workspace = true
 fynkel_import.workspace = true
 # `Default` of every authored component, for the `defaults` query (what an
 # entity created "with a native component" starts with).
-fynkel_core.workspace = true
+fynkel_core = { workspace = true, features = ["default"] }
 fynkel_physics.workspace = true
 fynkel_scene.workspace = true
 fynkel_audio.workspace = true

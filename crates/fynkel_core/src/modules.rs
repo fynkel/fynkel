@@ -80,6 +80,25 @@ impl Modules {
         animation: true,
     };
 
+    /// The modules this build carries (the cargo features `physics`,
+    /// `audio`, `animation`, all on by default; a runtime built with
+    /// `modules.strip` leaves the project's off ones out). A world runs
+    /// at most these, whatever the project asks.
+    pub const COMPILED: Modules = Modules {
+        physics: cfg!(feature = "physics"),
+        audio: cfg!(feature = "audio"),
+        animation: cfg!(feature = "animation"),
+    };
+
+    /// On in both.
+    pub const fn and(self, other: Modules) -> Modules {
+        Modules {
+            physics: self.physics && other.physics,
+            audio: self.audio && other.audio,
+            animation: self.animation && other.animation,
+        }
+    }
+
     pub const fn has(&self, m: Module) -> bool {
         match m {
             Module::Physics => self.physics,

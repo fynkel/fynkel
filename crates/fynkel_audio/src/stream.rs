@@ -31,19 +31,10 @@ use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::units::Timestamp;
 
-/// Seconds of decoded audio the ring holds ahead of the mixer.
-pub const STREAM_RING_SECONDS: f32 = 1.0;
+pub use crate::clip::StreamSource;
+pub use crate::types::STREAM_RING_SECONDS;
 /// How long the decoder sleeps when the ring is full.
 const FULL_SLEEP: Duration = Duration::from_millis(5);
-
-/// The encoded half of a streamed clip (`AudioClip::stream`).
-#[derive(Clone, Debug, PartialEq)]
-pub struct StreamSource {
-    /// `pcm` or `vorbis`, as the importer found it.
-    pub codec: String,
-    /// The source file's bytes (WAV or Ogg).
-    pub bytes: Arc<[u8]>,
-}
 
 /// Flags and counters shared by the engine, the decoder and the mixer's
 /// tap for one streamed voice.

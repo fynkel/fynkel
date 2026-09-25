@@ -1647,10 +1647,17 @@ impl AuthoringSession {
         let changed: Vec<String> = fynkel_core::Module::ALL
             .into_iter()
             .filter(|m| new.modules.has(*m) != old.modules.has(*m))
-            .map(|m| format!("{} {}", m.title(), if new.modules.has(m) { "On" } else { "Off" }))
-            .chain((new.strip != old.strip).then(|| {
-                format!("Strip {}", if new.strip { "On" } else { "Off" })
-            }))
+            .map(|m| {
+                format!(
+                    "{} {}",
+                    m.title(),
+                    if new.modules.has(m) { "On" } else { "Off" }
+                )
+            })
+            .chain(
+                (new.strip != old.strip)
+                    .then(|| format!("Strip {}", if new.strip { "On" } else { "Off" })),
+            )
             .collect();
         let label = format!("Set Modules ({})", changed.join(", "));
         let project_file = project.dir.join(fynkel_document::project::PROJECT_FILE);
@@ -1671,7 +1678,8 @@ impl AuthoringSession {
                 members.retain(|m| m.key != "modules");
             }
         } else {
-            doc.root.set("modules", Node::from_serde(&Value::Object(block)));
+            doc.root
+                .set("modules", Node::from_serde(&Value::Object(block)));
         }
         let files = vec![FileRewrite {
             path: project_file,
@@ -1684,12 +1692,7 @@ impl AuthoringSession {
             op: AssetOp::Rewrote { files },
             label: label.clone(),
         });
-        Ok(self.finish(
-            OP,
-            &label,
-            None,
-            json!({ "modules": new.to_json() }),
-        ))
+        Ok(self.finish(OP, &label, None, json!({ "modules": new.to_json() })))
     }
 
     fn reimport(&mut self, args: &Value) -> Result<Value, Diagnostic> {

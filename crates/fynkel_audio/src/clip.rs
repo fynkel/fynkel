@@ -7,8 +7,6 @@
 
 use std::sync::Arc;
 
-use crate::stream::StreamSource;
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct AudioClip {
     pub sample_rate: u32,
@@ -18,6 +16,15 @@ pub struct AudioClip {
     pub samples: Vec<f32>,
     /// The encoded source of a streamed sound, with its frame count.
     pub stream: Option<(Arc<StreamSource>, u64)>,
+}
+
+/// The encoded half of a streamed clip (`AudioClip::stream`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct StreamSource {
+    /// `pcm` or `vorbis`, as the importer found it.
+    pub codec: String,
+    /// The source file's bytes (WAV or Ogg).
+    pub bytes: Arc<[u8]>,
 }
 
 /// Channels a clip may have (mono, stereo).

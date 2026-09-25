@@ -11,7 +11,7 @@ fynkel_contracts.workspace = true
 fynkel_document.workspace = true
 fynkel_cooked.workspace = true
 fynkel_wire.workspace = true
-fynkel_core.workspace = true
+fynkel_core = { workspace = true, features = ["default"] }
 blake3.workspace = true
 glam.workspace = true
 gltf.workspace = true

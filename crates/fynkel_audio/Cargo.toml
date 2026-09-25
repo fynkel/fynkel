@@ -7,16 +7,20 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
-default = []
+# The engine: the mixer, the stream decoders and the backends. Off only in
+# a runtime built with `modules.strip` and the audio module off (ADR-0029):
+# the types stay, `Audio` is a stand-in that plays nothing.
+default = ["engine"]
+engine = ["dep:rtrb", "dep:symphonia"]
 # The real output device through `cpal` (CoreAudio on macOS and iOS); the
 # hosts that play opt in, the CLI and the headless host never link it.
-device = ["dep:cpal"]
+device = ["engine", "dep:cpal"]
 
 [dependencies]
 fynkel_contracts.workspace = true
 fynkel_schema_derive.workspace = true
-rtrb.workspace = true
-symphonia.workspace = true
+rtrb = { workspace = true, optional = true }
+symphonia = { workspace = true, optional = true }
 cpal = { workspace = true, optional = true }
 
 [dev-dependencies]

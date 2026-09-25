@@ -14,8 +14,12 @@ crate-type = ["cdylib", "rlib"]
 # one a macOS/iOS app loads, so it decides whether the editor's
 # `fynkel_authoring_*` entry points are exported. Same rule as there: on by
 # default for the workspace, off in a game's build.
-default = ["authoring"]
+default = ["authoring", "physics", "audio", "animation"]
 authoring = ["fynkel_native/authoring"]
+# The optional modules (ADR-0029), passed through to `fynkel_native`.
+physics = ["fynkel_native/physics"]
+audio = ["fynkel_native/audio"]
+animation = ["fynkel_native/animation"]
 
 [dependencies]
 fynkel_contracts.workspace = true

@@ -6,6 +6,17 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+# The optional modules (ADR-0029): each one's system and dependencies
+# (Rapier; the audio engine with rtrb and symphonia; the animation
+# sampler). All on by default; a runtime built with `modules.strip` leaves
+# the project's off ones out, and a world never runs a module its build
+# lacks (`Modules::COMPILED`). The types stay in every build.
+default = ["physics", "audio", "animation"]
+physics = ["fynkel_physics/rapier"]
+audio = ["fynkel_audio/engine"]
+animation = []
+
 [dependencies]
 fynkel_contracts.workspace = true
 fynkel_schema_derive.workspace = true

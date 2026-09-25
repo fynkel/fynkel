@@ -7,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-fynkel_core.workspace = true
+fynkel_core = { workspace = true, features = ["default"] }
 # The `device` feature: `--audio` opens the output device (M3-11).
 fynkel_audio = { workspace = true, features = ["device"] }
 fynkel_assets.workspace = true

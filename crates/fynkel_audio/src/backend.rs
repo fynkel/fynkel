@@ -4,14 +4,7 @@
 
 use crate::mixer::Mixer;
 
-/// The output format the mixer renders for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DeviceInfo {
-    pub sample_rate: u32,
-    pub channels: usize,
-    /// A real device (else the null backend).
-    pub device: bool,
-}
+pub use crate::types::DeviceInfo;
 
 pub(crate) enum Backend {
     Null(Box<Mixer>),

@@ -334,10 +334,14 @@ pub struct World {
     entity_scratch: Vec<Entity>,
     emission_scratch: Vec<catalogue::Emission>,
     placement_scratch: Vec<catalogue::Placement>,
+    #[cfg_attr(not(feature = "animation"), allow(dead_code))]
     animator_scratch: Vec<animation::AnimatorTick>,
     /// The animators of a tick, (depth, entity), ancestor-first.
+    #[cfg_attr(not(feature = "animation"), allow(dead_code))]
     animator_order_scratch: Vec<(u32, Entity)>,
+    #[cfg_attr(not(feature = "animation"), allow(dead_code))]
     pose_scratch: Pose,
+    #[cfg_attr(not(feature = "animation"), allow(dead_code))]
     fade_pose_scratch: Pose,
 }
 
@@ -381,7 +385,7 @@ impl World {
             poisoned: false,
             input,
             physics: Physics::new(),
-            modules: crate::Modules::ALL,
+            modules: crate::Modules::COMPILED,
             named_targets: HashMap::new(),
             prefabs: HashMap::new(),
             clips: HashMap::new(),
@@ -434,9 +438,10 @@ impl World {
     }
 
     /// The project's module set: from the next tick a module that is off
-    /// runs no systems and its commands are rejected (`MODULE_OFF`).
+    /// runs no systems and its commands are rejected (`MODULE_OFF`). A
+    /// module this build does not carry stays off (`Modules::COMPILED`).
     pub fn set_modules(&mut self, modules: crate::Modules) {
-        self.modules = modules;
+        self.modules = modules.and(crate::Modules::COMPILED);
     }
 
     /// Rejects `cmd` when the module it needs is off; true when it may go on.

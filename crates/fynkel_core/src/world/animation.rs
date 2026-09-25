@@ -15,6 +15,12 @@
 //! and yaw taken out of the pose and handed to the entity's character
 //! controller, or to its transform).
 
+// Without the `animation` feature (a runtime built with `modules.strip`
+// and the animation module off, ADR-0029) the system does not run, so
+// the sampling it reaches is left out of the library; the tables, the
+// commands' bookkeeping and the queries stay.
+#![cfg_attr(not(feature = "animation"), allow(dead_code, unused_imports))]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -707,6 +713,12 @@ impl World {
     /// Animators apply ancestor-first (depth, then entity order), so one
     /// under another is a layer over it: it sees the base pose in the
     /// transforms it blends over at its `weight` (or adds its delta to).
+    #[cfg(not(feature = "animation"))]
+    pub(super) fn run_animation(&mut self, _tick: Tick) -> u32 {
+        0
+    }
+
+    #[cfg(feature = "animation")]
     pub(super) fn run_animation(&mut self, tick: Tick) -> u32 {
         self.attach_state::<Animator, AnimatorRun>();
         self.attach_state::<SkinComponent, SkinRun>();

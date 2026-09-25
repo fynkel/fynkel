@@ -56,6 +56,7 @@ impl CombineRule {
         }
     }
 
+    #[cfg(feature = "rapier")]
     pub(crate) fn rapier(self) -> rapier3d::prelude::CoefficientCombineRule {
         use rapier3d::prelude::CoefficientCombineRule as R;
         match self {
@@ -117,6 +118,7 @@ impl PhysicsMaterial {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "rapier")]
     #[test]
     fn the_higher_rule_wins_in_unitys_and_rapiers_order() {
         use rapier3d::prelude::CoefficientCombineRule as R;

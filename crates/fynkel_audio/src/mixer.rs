@@ -18,16 +18,11 @@ use crate::clip::AudioClip;
 use crate::components::AudioBus;
 use crate::stream::{StreamTap, TapRead};
 
-/// Voices the mixer renders at once; the engine steals or refuses beyond.
-pub const MAX_VOICES: usize = 32;
-/// Clips loaded into the mixer at once.
-pub const MAX_CLIPS: usize = 256;
+pub use crate::types::{GAIN_SMOOTHING_SECONDS, MAX_CLIPS, MAX_VOICES};
 /// Command ring capacity (commands the world may queue between callbacks).
 pub const COMMAND_CAPACITY: usize = 1024;
 /// Return ring capacity.
 pub const RETURN_CAPACITY: usize = 512;
-/// Seconds a gain change takes to settle (declick).
-pub const GAIN_SMOOTHING_SECONDS: f32 = 0.005;
 /// Below this a fading voice counts as silent.
 const SILENCE: f32 = 1e-4;
 

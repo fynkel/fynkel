@@ -995,8 +995,14 @@ fn the_modules_are_set_from_the_editor_and_undone() {
     let mut s = open(&copy);
     let before = copy.read("fynkel.project.json");
 
-    refused(s.operate("setModules", &json!({ "physics": true })), "FYN-T0003");
-    refused(s.operate("setModules", &json!({ "audio": "off" })), "FYN-T0003");
+    refused(
+        s.operate("setModules", &json!({ "physics": true })),
+        "FYN-T0003",
+    );
+    refused(
+        s.operate("setModules", &json!({ "audio": "off" })),
+        "FYN-T0003",
+    );
     assert_eq!(copy.read("fynkel.project.json"), before);
 
     let v = ok(s.operate("setModules", &json!({ "animation": false, "strip": true })));
@@ -1004,10 +1010,17 @@ fn the_modules_are_set_from_the_editor_and_undone() {
     assert_eq!(v["modules"]["animation"], false);
     assert_eq!(v["modules"]["physics"], true);
     let after: serde_json::Value = serde_json::from_str(&copy.read("fynkel.project.json")).unwrap();
-    assert_eq!(after["modules"], json!({ "animation": false, "strip": true }));
+    assert_eq!(
+        after["modules"],
+        json!({ "animation": false, "strip": true })
+    );
     let modules = s.project().unwrap().project.modules;
     assert!(!modules.modules.animation && modules.strip);
-    assert!(!s.project().unwrap().project.allows_component("fynkel.Animator"));
+    assert!(!s
+        .project()
+        .unwrap()
+        .project
+        .allows_component("fynkel.Animator"));
 
     // Back on: the block goes.
     ok(s.operate("setModules", &json!({ "animation": true, "strip": false })));

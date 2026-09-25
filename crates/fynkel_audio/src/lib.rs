@@ -14,19 +14,36 @@
 //! `Audio::render`); the `device` feature adds the real output device
 //! through `cpal` (`Audio::open_device`).
 
-pub mod backend;
 pub mod clip;
 pub mod components;
-pub mod engine;
-pub mod mixer;
-pub mod stream;
+pub mod types;
 
-pub use backend::DeviceInfo;
-pub use clip::{AudioClip, MAX_CLIP_CHANNELS};
+// The engine (mixer, stream decoders, backends) is the `engine` feature,
+// on by default; without it (a runtime built with `modules.strip` and the
+// audio module off, ADR-0029) a stand-in of the same API plays nothing
+// and links no rtrb, symphonia or cpal. The types stay: they are the
+// contract.
+#[cfg(feature = "engine")]
+pub mod backend;
+#[cfg(feature = "engine")]
+pub mod engine;
+#[cfg(feature = "engine")]
+pub mod mixer;
+#[cfg(feature = "engine")]
+pub mod stream;
+#[cfg(not(feature = "engine"))]
+mod stub;
+
+pub use clip::{AudioClip, StreamSource, MAX_CLIP_CHANNELS};
 pub use components::{AudioBus, AudioListener, AudioSource, MAX_PITCH, MIN_PITCH};
-pub use engine::{
-    Audio, AudioStats, Ended, PlayError, PlayParams, VoiceId, VoiceState, NULL_CHANNELS,
-    NULL_SAMPLE_RATE,
+#[cfg(feature = "engine")]
+pub use engine::Audio;
+#[cfg(feature = "engine")]
+pub use mixer::{Mixer, MixerStats};
+#[cfg(not(feature = "engine"))]
+pub use stub::Audio;
+pub use types::{
+    AudioStats, DeviceInfo, Ended, PlayError, PlayParams, VoiceId, VoiceState,
+    GAIN_SMOOTHING_SECONDS, MAX_CLIPS, MAX_VOICES, NULL_CHANNELS, NULL_SAMPLE_RATE,
+    STREAM_RING_SECONDS,
 };
-pub use mixer::{Mixer, MixerStats, GAIN_SMOOTHING_SECONDS, MAX_CLIPS, MAX_VOICES};
-pub use stream::{StreamSource, STREAM_RING_SECONDS};
