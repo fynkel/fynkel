@@ -235,6 +235,7 @@ pub fn run(args: &[String]) -> ExitCode {
                 "shadowCascades": stats.shadow_cascades,
                 "ambientOcclusion": stats.ambient_occlusion,
                 "bloom": stats.bloom,
+                "grading": stats.grading,
                 "volumes": stats.volumes,
                 "post": {
                     "aoRadius": renderer.post_settings().ao_radius,
@@ -243,6 +244,7 @@ pub fn run(args: &[String]) -> ExitCode {
                     "bloomThreshold": renderer.post_settings().bloom_threshold,
                     "bloomScatter": renderer.post_settings().bloom_scatter,
                     "bloomTint": renderer.post_settings().bloom_tint.to_array(),
+                    "grading": grading_json(&renderer.post_settings().grading),
                 },
                 "quality": {
                     "profile": quality.profile,
@@ -315,6 +317,12 @@ pub fn run(args: &[String]) -> ExitCode {
                 if stats.bloom {
                     look += &format!(", bloom {:.2} >{:.2}", post.bloom_intensity, post.bloom_threshold);
                 }
+                if post.grading.tonemapper != fynkel_core::volume::Tonemapper::Aces {
+                    look += &format!(", {} tone mapping", post.grading.tonemapper.name());
+                }
+                if stats.grading {
+                    look += ", graded";
+                }
                 if stats.volumes > 0 {
                     look += &format!(", {} volume(s)", stats.volumes);
                 }
@@ -332,4 +340,21 @@ pub fn run(args: &[String]) -> ExitCode {
     } else {
         ExitCode::from(1)
     }
+}
+
+/// The frame's colour grading (R3c) as `--json` prints it.
+fn grading_json(g: &fynkel_core::volume::Grading) -> serde_json::Value {
+    serde_json::json!({
+        "tonemapper": g.tonemapper.name(),
+        "postExposure": g.post_exposure,
+        "temperature": g.temperature,
+        "tint": g.tint,
+        "contrast": g.contrast,
+        "saturation": g.saturation,
+        "hueShift": g.hue_shift,
+        "colorFilter": g.color_filter.to_array(),
+        "lift": g.lift.to_array(),
+        "gamma": g.gamma.to_array(),
+        "gain": g.gain.to_array(),
+    })
 }

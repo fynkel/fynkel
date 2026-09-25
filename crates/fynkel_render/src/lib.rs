@@ -190,8 +190,66 @@ struct FrameUniforms {
     ao: [f32; 4],
     bloom: [f32; 4],
     bloom_tint: [f32; 4],
+    grade: GpuGrade,
     counts: [u32; 4],
     lights: [GpuLight; LIGHT_POOL],
+}
+
+/// The frame's colour grading as the post pass reads it (R3c,
+/// `Frame.grade` in `shaders/frame.wgsl`).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct GpuGrade {
+    /// x: the contrast exponent; y: 1 when the grade runs; z: the tone
+    /// mapper (0 ACES, 1 neutral, 2 none); w unused.
+    params: [f32; 4],
+    /// Before the contrast curve: post-exposure × white balance, columns.
+    pre: [[f32; 4]; 3],
+    /// After it: saturation × hue × colour filter, columns.
+    post: [[f32; 4]; 3],
+    lift: [f32; 4],
+    /// 1 / gamma per channel.
+    inv_gamma: [f32; 4],
+    gain: [f32; 4],
+}
+
+impl GpuGrade {
+    fn new(g: &volume::Grading) -> GpuGrade {
+        let cols = |m: glam::Mat3| {
+            [
+                m.x_axis.extend(0.0).to_array(),
+                m.y_axis.extend(0.0).to_array(),
+                m.z_axis.extend(0.0).to_array(),
+            ]
+        };
+        let tonemapper = match g.tonemapper {
+            volume::Tonemapper::Aces => 0.0,
+            volume::Tonemapper::Neutral => 1.0,
+            volume::Tonemapper::None => 2.0,
+        };
+        GpuGrade {
+            params: [
+                g.contrast_exponent(),
+                g.is_active() as u32 as f32,
+                tonemapper,
+                0.0,
+            ],
+            pre: cols(g.pre_contrast()),
+            post: cols(g.post_contrast()),
+            lift: g
+                .lift
+                .clamp(Vec3::splat(-1.0), Vec3::ONE)
+                .extend(0.0)
+                .to_array(),
+            inv_gamma: g
+                .gamma
+                .max(Vec3::splat(0.01))
+                .recip()
+                .extend(0.0)
+                .to_array(),
+            gain: g.gain.max(Vec3::ZERO).extend(0.0).to_array(),
+        }
+    }
 }
 
 /// One cascade as the mesh shader reads it (R1): where it looks from,
@@ -404,6 +462,9 @@ pub struct FrameStats {
     pub ambient_occlusion: bool,
     /// Whether the frame ran the bloom stage (R3b).
     pub bloom: bool,
+    /// Whether the post pass graded the frame (R3c): a volume set more
+    /// than the tone mapper.
+    pub grading: bool,
     /// Volumes (R3a) whose profile reached the camera this frame.
     pub volumes: u32,
     /// Samples per pixel of the scene passes (1 or 4).
@@ -2432,6 +2493,9 @@ impl ExtractRenderer {
         // intensity; otherwise the post pass adds nothing, bit for bit.
         self.bloom_active = self.attachments.bloom.is_some() && post.bloom_intensity > 0.0;
         stats.bloom = self.bloom_active;
+        // Colour grading (R3c): arithmetic in the post pass, no stage of
+        // its own; neutral skips it.
+        stats.grading = post.grading.is_active();
 
         let u = FrameUniforms {
             view_proj: view_proj.to_cols_array_2d(),
@@ -2463,6 +2527,7 @@ impl ExtractRenderer {
                 },
             ],
             bloom_tint: post.bloom_tint.max(Vec3::ZERO).extend(0.0).to_array(),
+            grade: GpuGrade::new(&post.grading),
             counts: [
                 n_lights as u32,
                 stats.sky as u32,

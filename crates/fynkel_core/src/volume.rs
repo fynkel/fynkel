@@ -1,6 +1,6 @@
 //! Post-processing volumes (R3a, `docs/renderer.md` § Volumes): the look
-//! a frame is drawn with — ambient occlusion (R3a), bloom (R3b) —
-//! resolved once per frame on the CPU from the scene's [`Volume`]
+//! a frame is drawn with — ambient occlusion (R3a), bloom (R3b), colour
+//! grading (R3c) — resolved once per frame on the CPU from the scene's [`Volume`]
 //! components and their profiles.
 //!
 //! A [`VolumeProfile`] (a `.volume.json`) holds *overrides*: a field that
@@ -13,7 +13,7 @@
 //! the frame's settings; what the quality profile turns off stays off
 //! (the renderer's job, not this module's).
 
-use glam::{Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec3};
 
 use crate::components::{Volume, VolumeShape};
 
@@ -43,11 +43,201 @@ pub struct BloomOverrides {
     pub tint: Option<Vec3>,
 }
 
+/// The curve that brings the graded scene's radiance into the display's
+/// `0..=1` (R3c). ACES is what the engine always drew with.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tonemapper {
+    /// ACES filmic (Stephen Hill's fit): contrasty, highlights roll off
+    /// toward white.
+    #[default]
+    Aces,
+    /// Unity's Neutral curve: little hue or saturation shift, a gentler
+    /// shoulder — a starting point for grading by hand.
+    Neutral,
+    /// No curve: clamped at white.
+    None,
+}
+
+impl Tonemapper {
+    pub const ALL: [Tonemapper; 3] = [Tonemapper::Aces, Tonemapper::Neutral, Tonemapper::None];
+
+    /// The document's name for it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Tonemapper::Aces => "aces",
+            Tonemapper::Neutral => "neutral",
+            Tonemapper::None => "none",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Tonemapper> {
+        Tonemapper::ALL.into_iter().find(|t| t.name() == name)
+    }
+}
+
+/// The colour grading block of a profile (R3c), Unity's Tonemapping,
+/// White Balance, Color Adjustments and Lift Gamma Gain in one.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GradingOverrides {
+    pub tonemapper: Option<Tonemapper>,
+    /// Stops added to the camera's exposure.
+    pub post_exposure: Option<f32>,
+    /// `-100..=100`: cooler (blue) to warmer (yellow).
+    pub temperature: Option<f32>,
+    /// `-100..=100`: green to magenta.
+    pub tint: Option<f32>,
+    /// `-100..=100`: flatter to punchier, around middle grey.
+    pub contrast: Option<f32>,
+    /// `-100..=100`: grey to vivid.
+    pub saturation: Option<f32>,
+    /// Degrees, `-180..=180`: every hue turned round the colour wheel.
+    pub hue_shift: Option<f32>,
+    /// Linear RGB multiplied into the scene.
+    pub color_filter: Option<Vec3>,
+    /// Per channel, `-1..=1`: raises (or lowers) the darks.
+    pub lift: Option<Vec3>,
+    /// Per channel, `> 0`: above 1 brightens the midtones.
+    pub gamma: Option<Vec3>,
+    /// Per channel, `>= 0`: scales the brights.
+    pub gain: Option<Vec3>,
+}
+
 /// A `.volume.json`: the override blocks, each field optional.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct VolumeProfile {
     pub ambient_occlusion: AoOverrides,
     pub bloom: BloomOverrides,
+    pub color_grading: GradingOverrides,
+}
+
+/// The resolved colour grading of one frame (R3c). The default is neutral:
+/// ACES and nothing else, the picture the engine drew before grading.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Grading {
+    pub tonemapper: Tonemapper,
+    pub post_exposure: f32,
+    pub temperature: f32,
+    pub tint: f32,
+    pub contrast: f32,
+    pub saturation: f32,
+    pub hue_shift: f32,
+    pub color_filter: Vec3,
+    pub lift: Vec3,
+    pub gamma: Vec3,
+    pub gain: Vec3,
+}
+
+impl Default for Grading {
+    fn default() -> Self {
+        Self {
+            tonemapper: Tonemapper::Aces,
+            post_exposure: 0.0,
+            temperature: 0.0,
+            tint: 0.0,
+            contrast: 0.0,
+            saturation: 0.0,
+            hue_shift: 0.0,
+            color_filter: Vec3::ONE,
+            lift: Vec3::ZERO,
+            gamma: Vec3::ONE,
+            gain: Vec3::ONE,
+        }
+    }
+}
+
+/// Rec. 709 luma weights (linear sRGB primaries).
+const LUMA: Vec3 = Vec3::new(0.2126, 0.7152, 0.0722);
+
+impl Grading {
+    /// Whether anything but the tone mapper differs from neutral: when
+    /// not, the renderer skips the grade and the picture is the ungraded
+    /// one to the bit.
+    pub fn is_active(&self) -> bool {
+        let neutral = Grading {
+            tonemapper: self.tonemapper,
+            ..Grading::default()
+        };
+        *self != neutral
+    }
+
+    /// What the grade does before the contrast curve, as one matrix on
+    /// linear RGB: the post-exposure, then the white balance (Unity's:
+    /// a von Kries scale in LMS toward the illuminant the temperature
+    /// and tint name).
+    pub fn pre_contrast(&self) -> Mat3 {
+        let lms = white_balance_lms(self.temperature, self.tint);
+        let wb = LMS_TO_LINEAR * Mat3::from_diagonal(lms) * LINEAR_TO_LMS;
+        wb * 2f32.powf(self.post_exposure.clamp(-20.0, 20.0))
+    }
+
+    /// The contrast curve's exponent in log space around middle grey:
+    /// `1 + contrast / 100`, at least 0.01.
+    pub fn contrast_exponent(&self) -> f32 {
+        (1.0 + self.contrast.clamp(-100.0, 100.0) / 100.0).max(0.01)
+    }
+
+    /// What the grade does after the contrast curve, as one matrix: the
+    /// colour filter, the hue shift (a turn about the grey axis), then
+    /// the saturation (toward or away from the pixel's luma).
+    pub fn post_contrast(&self) -> Mat3 {
+        let s = 1.0 + self.saturation.clamp(-100.0, 100.0) / 100.0;
+        let luma = Mat3::from_cols(LUMA, LUMA, LUMA).transpose();
+        let saturation = Mat3::IDENTITY * s + luma * (1.0 - s);
+        saturation
+            * hue_rotation(self.hue_shift.to_radians())
+            * Mat3::from_diagonal(self.color_filter.max(Vec3::ZERO))
+    }
+}
+
+/// Rodrigues' rotation by `angle` about the unit grey axis `(1,1,1)/√3`:
+/// grey stays grey, every hue turns by the same angle.
+fn hue_rotation(angle: f32) -> Mat3 {
+    if angle == 0.0 {
+        return Mat3::IDENTITY;
+    }
+    let (sin, cos) = angle.sin_cos();
+    let k = 1.0 / 3.0;
+    let r = 3f32.sqrt().recip();
+    let a = cos + (1.0 - cos) * k;
+    let b = (1.0 - cos) * k - r * sin;
+    let c = (1.0 - cos) * k + r * sin;
+    // Columns of [[a, b, c], [c, a, b], [b, c, a]].
+    Mat3::from_cols(Vec3::new(a, c, b), Vec3::new(b, a, c), Vec3::new(c, b, a))
+}
+
+/// Linear sRGB → LMS (CAT02 via XYZ), and back: Unity's matrices.
+const LINEAR_TO_LMS: Mat3 = Mat3::from_cols(
+    Vec3::new(3.904_05e-1, 7.084_16e-2, 2.310_82e-2),
+    Vec3::new(5.499_41e-1, 9.631_72e-1, 1.280_21e-1),
+    Vec3::new(8.926_32e-3, 1.357_75e-3, 9.362_45e-1),
+);
+const LMS_TO_LINEAR: Mat3 = Mat3::from_cols(
+    Vec3::new(2.858_47, -2.101_82e-1, -4.181_20e-2),
+    Vec3::new(-1.628_79, 1.158_20, -1.181_69e-1),
+    Vec3::new(-2.489_10e-2, 3.242_81e-4, 1.068_67),
+);
+
+/// Unity's `ColorBalanceToLMSCoeffs`: the LMS scale that takes the
+/// illuminant a temperature and tint name (a CIE daylight chromaticity
+/// shifted along the Planckian locus and across it) to D65. Both 0 is
+/// (to within rounding) no change.
+pub fn white_balance_lms(temperature: f32, tint: f32) -> Vec3 {
+    let t1 = temperature.clamp(-100.0, 100.0) / 65.0;
+    let t2 = tint.clamp(-100.0, 100.0) / 65.0;
+    let x = 0.31271 - t1 * if t1 < 0.0 { 0.1 } else { 0.05 };
+    let y = 2.87 * x - 3.0 * x * x - 0.275_095_07 + t2 * 0.05;
+    let d65 = Vec3::new(0.949_237, 1.035_42, 1.087_28);
+    d65 / xy_to_lms(x, y)
+}
+
+fn xy_to_lms(x: f32, y: f32) -> Vec3 {
+    let big_x = x / y;
+    let big_z = (1.0 - x - y) / y;
+    Vec3::new(
+        0.7328 * big_x + 0.4296 - 0.1624 * big_z,
+        -0.7036 * big_x + 1.6975 + 0.0061 * big_z,
+        0.0030 * big_x + 0.0136 + 0.9834 * big_z,
+    )
 }
 
 /// The resolved look of one frame.
@@ -59,6 +249,7 @@ pub struct PostSettings {
     pub bloom_threshold: f32,
     pub bloom_scatter: f32,
     pub bloom_tint: Vec3,
+    pub grading: Grading,
 }
 
 /// Ambient occlusion is off until a volume gives it an intensity (as in
@@ -82,6 +273,7 @@ impl Default for PostSettings {
             bloom_threshold: DEFAULT_BLOOM_THRESHOLD,
             bloom_scatter: DEFAULT_BLOOM_SCATTER,
             bloom_tint: Vec3::ONE,
+            grading: Grading::default(),
         }
     }
 }
@@ -158,14 +350,36 @@ pub fn resolve(base: PostSettings, contributions: &mut [Contribution<'_>]) -> (P
         blend(&mut s.bloom_intensity, bloom.intensity, t);
         blend(&mut s.bloom_threshold, bloom.threshold, t);
         blend(&mut s.bloom_scatter, bloom.scatter, t);
-        if let Some(tint) = bloom.tint {
-            s.bloom_tint += (tint - s.bloom_tint) * t;
+        blend3(&mut s.bloom_tint, bloom.tint, t);
+        let c = &c.profile.color_grading;
+        let g = &mut s.grading;
+        // A choice does not blend: any part of a volume sets it (Unity's
+        // rule for its enum parameters).
+        if let Some(tonemapper) = c.tonemapper {
+            g.tonemapper = tonemapper;
         }
+        blend(&mut g.post_exposure, c.post_exposure, t);
+        blend(&mut g.temperature, c.temperature, t);
+        blend(&mut g.tint, c.tint, t);
+        blend(&mut g.contrast, c.contrast, t);
+        blend(&mut g.saturation, c.saturation, t);
+        blend(&mut g.hue_shift, c.hue_shift, t);
+        blend3(&mut g.color_filter, c.color_filter, t);
+        blend3(&mut g.lift, c.lift, t);
+        blend3(&mut g.gamma, c.gamma, t);
+        blend3(&mut g.gain, c.gain, t);
     }
     (s, used)
 }
 
 fn blend(value: &mut f32, over: Option<f32>, t: f32) {
+    if let Some(v) = over {
+        *value += (v - *value) * t;
+    }
+}
+
+/// Per channel.
+fn blend3(value: &mut Vec3, over: Option<Vec3>, t: f32) {
     if let Some(v) = over {
         *value += (v - *value) * t;
     }
@@ -291,6 +505,88 @@ mod tests {
             (s.ao_radius, s.ao_intensity, n),
             (DEFAULT_AO_RADIUS, 0.0, 2)
         );
+    }
+
+    #[test]
+    fn grading_is_neutral_by_default_and_blends_like_the_rest() {
+        let base = PostSettings::default();
+        assert!(!base.grading.is_active());
+        assert_eq!(base.grading.tonemapper, Tonemapper::Aces);
+        // Neutral is (to within rounding) the identity.
+        let g = Grading::default();
+        assert!(
+            g.pre_contrast().abs_diff_eq(Mat3::IDENTITY, 1e-3),
+            "{:?}",
+            g.pre_contrast()
+        );
+        assert!(g.post_contrast().abs_diff_eq(Mat3::IDENTITY, 1e-6));
+        assert_eq!(g.contrast_exponent(), 1.0);
+        // A tone mapper alone is no grade.
+        let neutral = VolumeProfile {
+            color_grading: GradingOverrides {
+                tonemapper: Some(Tonemapper::Neutral),
+                ..GradingOverrides::default()
+            },
+            ..VolumeProfile::default()
+        };
+        let warm = VolumeProfile {
+            color_grading: GradingOverrides {
+                temperature: Some(40.0),
+                gain: Some(Vec3::new(2.0, 1.0, 1.0)),
+                ..GradingOverrides::default()
+            },
+            ..VolumeProfile::default()
+        };
+        let (s, _) = resolve(
+            base,
+            &mut [
+                Contribution {
+                    profile: &neutral,
+                    amount: 0.25,
+                    priority: 0,
+                },
+                Contribution {
+                    profile: &warm,
+                    amount: 0.5,
+                    priority: 1,
+                },
+            ],
+        );
+        // The choice is taken by any part of a volume; numbers blend.
+        assert_eq!(s.grading.tonemapper, Tonemapper::Neutral);
+        assert!((s.grading.temperature - 20.0).abs() < 1e-5);
+        assert!((s.grading.gain - Vec3::new(1.5, 1.0, 1.0)).length() < 1e-6);
+        assert!(s.grading.is_active());
+        // Warmer takes blue down against red.
+        let m = s.grading.pre_contrast();
+        let white = m * Vec3::ONE;
+        assert!(white.x > white.z, "{white:?}");
+    }
+
+    #[test]
+    fn saturation_and_hue_keep_grey_and_move_colour() {
+        let grey = Vec3::splat(0.4);
+        let red = Vec3::new(0.8, 0.1, 0.1);
+        let flat = Grading {
+            saturation: -100.0,
+            ..Grading::default()
+        };
+        let out = flat.post_contrast() * red;
+        assert!(
+            (out.x - out.y).abs() < 1e-6 && (out.y - out.z).abs() < 1e-6,
+            "{out:?}"
+        );
+        assert!((out.x - red.dot(LUMA)).abs() < 1e-6);
+        let turned = Grading {
+            hue_shift: 120.0,
+            ..Grading::default()
+        };
+        assert!((turned.post_contrast() * grey - grey).length() < 1e-5);
+        // A third of the way round, red becomes green.
+        let out = turned.post_contrast() * red;
+        assert!((out - Vec3::new(0.1, 0.8, 0.1)).length() < 1e-4, "{out:?}");
+        assert_eq!(Tonemapper::from_name("neutral"), Some(Tonemapper::Neutral));
+        assert_eq!(Tonemapper::from_name("filmic"), None);
     }
 
     #[test]

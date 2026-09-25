@@ -1,6 +1,7 @@
 
-// Post pass: HDR (Rgba16Float, nits) → exposure → ACES (Hill fit) →
-// sRGB encode (unless the target format encodes itself) into the host's
+// Post pass: HDR (Rgba16Float, nits) → exposure → the grade (R3c) → the
+// tone mapper (ACES, Hill fit, unless a volume picks another) → lift,
+// gamma, gain → sRGB encode (unless the target format encodes itself) into the host's
 // target (or the render-scale intermediate). The HDR alpha is a tag with
 // coverage: 0 background (the exact clear colour), (0, 1] scene-referred
 // radiance premultiplied by coverage — a multisample resolve or a blended
@@ -9,7 +10,9 @@
 // Bloom (R3b), when the stage ran: its level 0 is added to the exposed
 // scene-referred radiance before ACES, and over the uncovered part of a
 // pixel it lights the clear colour (a screen blend, in the target's
-// encoding); display-referred texels are left alone.
+// encoding); display-referred texels are left alone. The grade (R3c)
+// applies to what the scene drew, the sky included; the clear colour and
+// display-referred texels are not graded.
 
 @group(1) @binding(0) var hdr_sampler: sampler;
 @group(1) @binding(1) var hdr_tex: texture_2d<f32>;
@@ -56,6 +59,61 @@ fn aces(c: vec3<f32>) -> vec3<f32> {
     return clamp(out, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
+// Unity's Neutral tone mapper (John Hable's curve with its constants,
+// white at 5.3, clipped at 1).
+fn neutral_curve(x: vec3<f32>) -> vec3<f32> {
+    let a = 0.2;
+    let b = 0.29;
+    let c = 0.24;
+    let d = 0.272;
+    let e = 0.02;
+    let f = 0.3;
+    return ((x * (a * x + c * b) + d * e) / (x * (a * x + b) + d * f)) - e / f;
+}
+
+fn neutral(c: vec3<f32>) -> vec3<f32> {
+    let white_scale = vec3<f32>(1.0) / neutral_curve(vec3<f32>(5.3));
+    return clamp(neutral_curve(c * white_scale) * white_scale, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+// Exposed scene radiance → the display's 0..1 by the frame's tone mapper.
+fn tonemap(c: vec3<f32>) -> vec3<f32> {
+    let which = u32(frame.grade.params.z);
+    if which == 1u {
+        return neutral(max(c, vec3<f32>(0.0)));
+    }
+    if which == 2u {
+        return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+    return aces(c);
+}
+
+// The grade on exposed scene radiance, before the tone mapper (R3c):
+// post-exposure and white balance, contrast in log space around middle
+// grey, then colour filter, hue shift and saturation.
+fn grade_scene(c: vec3<f32>) -> vec3<f32> {
+    if frame.grade.params.y == 0.0 {
+        return c;
+    }
+    let g = frame.grade;
+    let pre = mat3x3<f32>(g.pre[0].xyz, g.pre[1].xyz, g.pre[2].xyz);
+    let post = mat3x3<f32>(g.post[0].xyz, g.post[1].xyz, g.post[2].xyz);
+    var x = max(pre * c, vec3<f32>(0.0));
+    x = 0.18 * pow(x / 0.18, vec3<f32>(g.params.x));
+    return max(post * x, vec3<f32>(0.0));
+}
+
+// Lift, gamma and gain on the tone-mapped 0..1 (R3c): lift raises the
+// darks with white held, gain scales, gamma bends the midtones.
+fn grade_display(c: vec3<f32>) -> vec3<f32> {
+    if frame.grade.params.y == 0.0 {
+        return c;
+    }
+    let g = frame.grade;
+    let lifted = g.gain.rgb * (c + g.lift.rgb * (vec3<f32>(1.0) - c));
+    return clamp(pow(max(lifted, vec3<f32>(0.0)), g.inv_gamma.rgb), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
 // The exposed glow at this pixel, tinted and scaled; 0 without bloom.
 fn glow(p: vec2<f32>) -> vec3<f32> {
     if frame.bloom.w <= 0.0 {
@@ -73,7 +131,7 @@ fn fs_main(in: PostOut) -> @location(0) vec4<f32> {
     // The clear colour is already in the target's encoding.
     var background = post.clear_color.rgb;
     if frame.bloom.w > 0.0 {
-        var lit = aces(bloom);
+        var lit = tonemap(bloom);
         if frame.counts.z == 1u {
             lit = srgb_encode(lit);
         }
@@ -90,7 +148,7 @@ fn fs_main(in: PostOut) -> @location(0) vec4<f32> {
         color = clamp(hdr.rgb / coverage, vec3<f32>(0.0), vec3<f32>(1.0));
     } else {
         coverage = min(hdr.a, 1.0);
-        color = aces(hdr.rgb / coverage * frame.camera_pos.w + bloom);
+        color = grade_display(tonemap(grade_scene(hdr.rgb / coverage * frame.camera_pos.w + bloom)));
     }
     if frame.counts.z == 1u {
         color = srgb_encode(color);

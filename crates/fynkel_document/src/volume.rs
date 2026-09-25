@@ -12,7 +12,9 @@
 //! schema's to report).
 
 use fynkel_contracts::{Code, Diagnostic};
-use fynkel_core::volume::{AoOverrides, BloomOverrides, VolumeProfile};
+use fynkel_core::volume::{
+    AoOverrides, BloomOverrides, GradingOverrides, Tonemapper, VolumeProfile,
+};
 use glam::Vec3;
 use uuid::Uuid;
 
@@ -54,6 +56,21 @@ impl VolumeDocument {
                 threshold: block.number("threshold"),
                 scatter: block.number("scatter"),
                 tint: block.color("tint"),
+            };
+        }
+        if let Some(mut block) = Block::open(root, "colorGrading", &mut diags) {
+            profile.color_grading = GradingOverrides {
+                tonemapper: block.tonemapper("tonemapper"),
+                post_exposure: block.number("postExposure"),
+                temperature: block.number("temperature"),
+                tint: block.number("tint"),
+                contrast: block.number("contrast"),
+                saturation: block.number("saturation"),
+                hue_shift: block.number("hueShift"),
+                color_filter: block.color("colorFilter"),
+                lift: block.color("lift"),
+                gamma: block.color("gamma"),
+                gain: block.color("gain"),
             };
         }
         VolumeDocument {
@@ -154,6 +171,18 @@ impl<'a> Block<'a> {
             Some(v) if v.is_finite() => Some(v as f32),
             _ => {
                 self.malformed(field, "a finite number");
+                None
+            }
+        }
+    }
+
+    /// One of [`Tonemapper::ALL`] by name.
+    fn tonemapper(&mut self, field: &str) -> Option<Tonemapper> {
+        let node = self.node.get(field)?;
+        match node.as_str().and_then(Tonemapper::from_name) {
+            Some(t) => Some(t),
+            None => {
+                self.malformed(field, "one of \"aces\", \"neutral\", \"none\"");
                 None
             }
         }

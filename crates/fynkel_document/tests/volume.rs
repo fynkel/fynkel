@@ -1,10 +1,12 @@
-//! Volume profiles (R3a, bloom R3b): `.volume.json` read into the core's
+//! Volume profiles (R3a, bloom R3b, colour grading R3c): `.volume.json` read into the core's
 //! `VolumeProfile` — present fields override, absent ones inherit —
 //! and checked by the schema's ranges.
 
 use std::path::Path;
 
-use fynkel_core::volume::{AoOverrides, BloomOverrides, VolumeProfile};
+use fynkel_core::volume::{
+    AoOverrides, BloomOverrides, GradingOverrides, Tonemapper, VolumeProfile,
+};
 use fynkel_document::{Code, Document, DocumentKind, SchemaSet, VolumeDocument};
 use glam::Vec3;
 
@@ -116,4 +118,61 @@ fn the_schema_holds_the_ranges_and_the_view_reads_what_it_can() {
         }
     );
     assert_eq!(codes(&fresh), []);
+}
+
+#[test]
+fn the_colour_grading_block_reads_every_field_and_the_schema_holds_its_ranges() {
+    let graded = doc(
+        r#","colorGrading":{"tonemapper":"neutral","postExposure":0.5,"temperature":20,"tint":-5,"contrast":15,"saturation":-10,"hueShift":30,"colorFilter":[1,0.9,0.8],"lift":[0,0,-0.1],"gamma":[1,1.1,1],"gain":[1.2,1,1]}"#,
+    );
+    assert_eq!(
+        graded.profile.color_grading,
+        GradingOverrides {
+            tonemapper: Some(Tonemapper::Neutral),
+            post_exposure: Some(0.5),
+            temperature: Some(20.0),
+            tint: Some(-5.0),
+            contrast: Some(15.0),
+            saturation: Some(-10.0),
+            hue_shift: Some(30.0),
+            color_filter: Some(Vec3::new(1.0, 0.9, 0.8)),
+            lift: Some(Vec3::new(0.0, 0.0, -0.1)),
+            gamma: Some(Vec3::new(1.0, 1.1, 1.0)),
+            gain: Some(Vec3::new(1.2, 1.0, 1.0)),
+        }
+    );
+    assert_eq!(codes(&graded), []);
+    // Absent fields inherit.
+    let one = doc(r#","colorGrading":{"contrast":-20}"#);
+    assert_eq!(
+        one.profile.color_grading,
+        GradingOverrides {
+            contrast: Some(-20.0),
+            ..GradingOverrides::default()
+        }
+    );
+
+    let d = |p: &str| ("FYN-D0100".to_string(), p.to_string());
+    assert_eq!(
+        codes(&doc(r#","colorGrading":{"contrast":150}"#)),
+        [d("/colorGrading/contrast")]
+    );
+    assert_eq!(
+        codes(&doc(r#","colorGrading":{"lift":[0,0,-2]}"#)),
+        [d("/colorGrading/lift/2")]
+    );
+    assert_eq!(
+        codes(&doc(r#","colorGrading":{"gamma":[1,0,1]}"#)),
+        [d("/colorGrading/gamma/1")]
+    );
+    // A tone mapper the engine does not have: the schema says so, and the
+    // view leaves it inherited.
+    let filmic = doc(r#","colorGrading":{"tonemapper":"filmic","saturation":5}"#);
+    assert_eq!(filmic.profile.color_grading.tonemapper, None);
+    assert_eq!(filmic.profile.color_grading.saturation, Some(5.0));
+    assert!(filmic
+        .read_diagnostics()
+        .iter()
+        .any(|x| x.code == Code::VOLUME_MALFORMED_ENTRY));
+    assert_eq!(codes(&filmic), [d("/colorGrading/tonemapper")]);
 }

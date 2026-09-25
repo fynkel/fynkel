@@ -2322,6 +2322,132 @@ fn bloom_spreads_bright_light_past_its_edges_and_the_threshold_keeps_the_rest() 
     );
 }
 
+/// R3c: colour grading, shaped by the volumes. An orange cube in the sun
+/// on the clear colour: a neutral grade is no grade at all (to the bit),
+/// each control moves the colour the way its name says, and the clear
+/// colour is never graded.
+#[test]
+fn colour_grading_moves_what_the_scene_drew_and_a_neutral_grade_is_none() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut lab = Lab::new("grading");
+    let orange = lab.material(json!({ "base_color": [0.8, 0.35, 0.1, 1.0], "roughness": 0.8 }));
+    let grade = |n: u32, fields: Value| lab.volume(n, json!({ "colorGrading": fields }));
+    let aces = grade(1, json!({ "tonemapper": "aces" }));
+    let neutral_fields = grade(
+        2,
+        json!({ "postExposure": 0, "temperature": 0, "tint": 0, "contrast": 0, "saturation": 0,
+                "hueShift": 0, "colorFilter": [1, 1, 1], "lift": [0, 0, 0], "gamma": [1, 1, 1], "gain": [1, 1, 1] }),
+    );
+    let grey = grade(3, json!({ "saturation": -100 }));
+    let warm = grade(4, json!({ "temperature": 60 }));
+    let cool = grade(5, json!({ "temperature": -60 }));
+    let brighter = grade(6, json!({ "postExposure": 1 }));
+    let lifted = grade(7, json!({ "lift": [0.3, 0.3, 0.3] }));
+    let none = grade(8, json!({ "tonemapper": "none" }));
+    let neutral_curve = grade(9, json!({ "tonemapper": "neutral" }));
+    let punchy = grade(10, json!({ "contrast": 60 }));
+    let turned = grade(11, json!({ "hueShift": 180 }));
+    let (assets, base) = lab.extract(Vec3::new(0.0, 0.3, 3.0), &[(Vec3::ZERO, orange)], true);
+    let mut r = renderer(&device);
+    r.placeholders = false;
+    r.set_assets(Some(assets));
+    let with = |profile: &AssetRef| {
+        let mut e = base.clone();
+        e.volumes = vec![global_volume(profile, 0)];
+        e
+    };
+    let mut render = |profile: Option<&AssetRef>| {
+        let e = profile.map(with).unwrap_or_else(|| base.clone());
+        let px = render_offscreen(&device, &queue, &mut r, &e);
+        (px, r.stats().grading, r.post_settings().grading)
+    };
+    let mean = |px: &[[u8; 4]]| {
+        [
+            channel_mean(px, 0),
+            channel_mean(px, 1),
+            channel_mean(px, 2),
+        ]
+    };
+
+    let (plain, graded, _) = render(None);
+    dump(&plain, "grading-plain");
+    assert!(!graded, "no volume, no grade");
+    let background = plain
+        .iter()
+        .position(|p| is_background(*p))
+        .expect("background in view");
+    let [pr, pg, pb] = mean(&plain);
+    assert!(pr > pg + 20.0 && pg > pb, "orange: {pr} {pg} {pb}");
+
+    // Neutral is none, to the bit: ACES named, or every field at its
+    // neutral value.
+    for (profile, what) in [(&aces, "aces"), (&neutral_fields, "every field neutral")] {
+        let (px, graded, _) = render(Some(profile));
+        assert!(!graded, "{what}");
+        assert_eq!(px, plain, "{what}");
+    }
+
+    // Saturation −100: grey.
+    let (px, graded, g) = render(Some(&grey));
+    dump(&px, "grading-grey");
+    assert!(graded);
+    assert_eq!(g.saturation, -100.0);
+    let [r_, g_, b_] = mean(&px);
+    assert!(
+        (r_ - g_).abs() < 2.0 && (g_ - b_).abs() < 2.0,
+        "grey: {r_} {g_} {b_}"
+    );
+
+    // Warmer: redder against blue; cooler the other way.
+    let (warm_px, ..) = render(Some(&warm));
+    let (cool_px, ..) = render(Some(&cool));
+    dump(&warm_px, "grading-warm");
+    let [wr, _, wb] = mean(&warm_px);
+    let [cr, _, cb] = mean(&cool_px);
+    assert!(wr - wb > cr - cb + 10.0, "warm {wr}/{wb} vs cool {cr}/{cb}");
+
+    // A stop of post-exposure brightens.
+    let (px, ..) = render(Some(&brighter));
+    assert!(drawn_mean(&px).0 > drawn_mean(&plain).0 + 10.0);
+
+    // Contrast spreads the tones: the brightest channel brighter, the
+    // darkest darker.
+    let (px, ..) = render(Some(&punchy));
+    let [kr, _, kb] = mean(&px);
+    assert!(kr > pr && kb < pb, "contrast: {kr}/{kb} vs {pr}/{pb}");
+
+    // Half-way round the wheel: orange turns blue-ish.
+    let (px, ..) = render(Some(&turned));
+    let [tr, _, tb] = mean(&px);
+    assert!(tb > tr, "turned: {tr} {tb}");
+
+    // Lift raises the darks of what the scene drew — and never the clear
+    // colour.
+    let (px, ..) = render(Some(&lifted));
+    dump(&px, "grading-lift");
+    assert!(
+        mean(&px)[2] > pb + 20.0,
+        "lifted blue: {} vs {pb}",
+        mean(&px)[2]
+    );
+    assert_eq!(
+        px[background], plain[background],
+        "the clear colour is not graded"
+    );
+
+    // The tone mappers differ, and choosing one is not a grade.
+    let (none_px, graded, g) = render(Some(&none));
+    assert!(!graded);
+    assert_eq!(g.tonemapper, fynkel_core::volume::Tonemapper::None);
+    let (neutral_px, ..) = render(Some(&neutral_curve));
+    dump(&neutral_px, "grading-neutral");
+    assert_ne!(none_px, plain);
+    assert_ne!(neutral_px, plain);
+    assert_ne!(neutral_px, none_px);
+}
+
 // ------------------------------------------ the selection outline (ADR-0019)
 
 /// A linear colour as the Unorm target stores it (the overlay encodes

@@ -970,6 +970,27 @@ impl Preview {
                 ("tint", b.tint.map(|t| serde_json::json!([t.x, t.y, t.z]))),
             ],
         );
+        let c = p.color_grading;
+        let rgb = |v: Option<glam::Vec3>| v.map(|t| serde_json::json!([t.x, t.y, t.z]));
+        block(
+            "colorGrading",
+            vec![
+                (
+                    "tonemapper",
+                    c.tonemapper.map(|t| serde_json::json!(t.name())),
+                ),
+                ("postExposure", n(c.post_exposure)),
+                ("temperature", n(c.temperature)),
+                ("tint", n(c.tint)),
+                ("contrast", n(c.contrast)),
+                ("saturation", n(c.saturation)),
+                ("hueShift", n(c.hue_shift)),
+                ("colorFilter", rgb(c.color_filter)),
+                ("lift", rgb(c.lift)),
+                ("gamma", rgb(c.gamma)),
+                ("gain", rgb(c.gain)),
+            ],
+        );
         Ok(Value::Object(out))
     }
 

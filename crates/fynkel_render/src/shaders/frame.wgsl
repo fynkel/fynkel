@@ -33,6 +33,22 @@ struct Light {
     params: vec4<f32>,
 };
 
+struct Grade {
+    // x: the contrast exponent (log space around middle grey); y: 1 when
+    // the grade runs (0: neutral, skipped); z: the tone mapper (0 ACES,
+    // 1 neutral, 2 none); w unused.
+    params: vec4<f32>,
+    // Columns (xyz) of the matrix before the contrast curve: the
+    // post-exposure and the white balance.
+    pre: array<vec4<f32>, 3>,
+    // After it: the colour filter, the hue shift, the saturation.
+    post: array<vec4<f32>, 3>,
+    // rgb: lift, 1 / gamma, gain (display space, after the tone mapper).
+    lift: vec4<f32>,
+    inv_gamma: vec4<f32>,
+    gain: vec4<f32>,
+};
+
 struct Frame {
     view_proj: mat4x4<f32>,
     inv_view_proj: mat4x4<f32>,
@@ -65,6 +81,8 @@ struct Frame {
     bloom: vec4<f32>,
     // rgb: the glow's tint (linear); w unused.
     bloom_tint: vec4<f32>,
+    // The frame's colour grading as the volumes resolved it (R3c).
+    grade: Grade,
     // x: lights in the pool; y: 1 when the sky is drawn; z: 1 when the
     // post pass must sRGB-encode (the target is a Unorm format); w: 1
     // when `ssao_tex` holds this frame's ambient occlusion (R2).

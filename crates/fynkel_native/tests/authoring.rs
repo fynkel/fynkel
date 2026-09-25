@@ -966,7 +966,9 @@ fn the_edit_preview_world_crosses_the_edge() {
         host.preview_call(
             scene,
             "setVolume",
-            &json!({ "volume": look, "data": { "bloom": { "intensity": 2, "tint": [1, 0.5, 0] } } })
+            &json!({ "volume": look, "data": {
+                "bloom": { "intensity": 2, "tint": [1, 0.5, 0] },
+                "colorGrading": { "tonemapper": "neutral", "saturation": -20, "lift": [0, 0, 0.25] } } })
         ),
         Status::Ok
     );
@@ -981,7 +983,10 @@ fn the_edit_preview_world_crosses_the_edge() {
     );
     assert_eq!(
         host.result()["volume"],
-        json!({ "bloom": { "intensity": 2.0, "tint": [1.0, 0.5, 0.0] } })
+        json!({
+            "bloom": { "intensity": 2.0, "tint": [1.0, 0.5, 0.0] },
+            "colorGrading": { "tonemapper": "neutral", "saturation": -20.0, "lift": [0.0, 0.0, 0.25] }
+        })
     );
     assert_eq!(
         host.preview_call(scene, "restoreVolume", &json!({ "volume": look })),
