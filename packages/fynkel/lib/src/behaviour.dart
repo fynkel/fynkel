@@ -481,6 +481,7 @@ class BehaviourField {
     required this.type,
     required this.get,
     required this.set,
+    this.target,
     this.defaultValue,
     this.label,
     this.tooltip,
@@ -500,6 +501,12 @@ class BehaviourField {
   /// Sets the field from its JSON value; throws [BehaviourDataError] (or a
   /// `TypeError`) when the value does not fit.
   final void Function(Behaviour behaviour, Object? value) set;
+
+  /// A reference field's object as it is (the [GameObject], the
+  /// [Behaviour], or null), which [get] answers as JSON; what
+  /// [GameObject.clone] copies. Null for any other field, and in code
+  /// generated before it existed.
+  final Object? Function(Behaviour behaviour)? target;
   final Object? defaultValue;
   final String? label;
   final String? tooltip;

@@ -459,6 +459,36 @@ class NativeWorld {
             }
           }));
 
+  /// `fynkel_world_clone` (ADR-0026 §4): a copy of the live subtree
+  /// under [source]; the report's `clone` has the pairs.
+  (FynkelStatus, Map<String, Object?>) clone(
+    int source,
+    String name,
+    int parent,
+    List<double> position,
+    List<double> rotation,
+    List<double> scale,
+  ) =>
+      _withUtf8(name, (n, nl) {
+        final d = calloc<FynkelCloneDesc>();
+        try {
+          d.ref.source = source;
+          d.ref.name_utf8 = n;
+          d.ref.name_len = nl;
+          d.ref.parent = parent;
+          for (var i = 0; i < 3; i++) {
+            d.ref.position[i] = position[i];
+            d.ref.scale[i] = scale[i];
+          }
+          for (var i = 0; i < 4; i++) {
+            d.ref.rotation[i] = rotation[i];
+          }
+          return _load(() => fynkel_world_clone(_w, d));
+        } finally {
+          calloc.free(d);
+        }
+      });
+
   /// `fynkel_world_set_material` (ADR-0026 §4): [material] drawn as the
   /// runtime material [id] (16 UUID bytes); null removes it.
   FynkelStatus setMaterial(Uint8List id, gen.PbrMaterial? material) {

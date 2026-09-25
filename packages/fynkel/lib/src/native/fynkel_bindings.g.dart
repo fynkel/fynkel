@@ -563,6 +563,22 @@ FynkelStatus fynkel_world_instantiate(
   ffi.Pointer<FynkelInstantiateDesc> desc,
 ) => FynkelStatus.fromValue(_fynkel_world_instantiate(world, desc));
 
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<FynkelCloneDesc>,
+  )
+>(symbol: 'fynkel_world_clone')
+external int _fynkel_world_clone(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<FynkelCloneDesc> desc,
+);
+
+FynkelStatus fynkel_world_clone(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<FynkelCloneDesc> desc,
+) => FynkelStatus.fromValue(_fynkel_world_clone(world, desc));
+
 /// A material made at runtime (ADR-0026 §4, `world.createMaterial`):
 /// `payload` is a MATL chunk payload — u32 version (1), u32 record size,
 /// u32 tail length, u32 reserved, the `fynkel.PbrMaterial` wire record, its
@@ -1212,6 +1228,44 @@ final class FynkelInstantiateDesc extends ffi.Struct {
 
   @ffi.Uint32()
   external int prefab_id_len;
+
+  /// NULL with name_len 0 for none
+  external ffi.Pointer<ffi.Uint8> name_utf8;
+
+  @ffi.Uint32()
+  external int name_len;
+
+  /// 0: a root
+  @FynkelEntity()
+  external int parent;
+
+  @ffi.Array.multi([3])
+  external ffi.Array<ffi.Float> position;
+
+  /// x, y, z, w
+  @ffi.Array.multi([4])
+  external ffi.Array<ffi.Float> rotation;
+
+  @ffi.Array.multi([3])
+  external ffi.Array<ffi.Float> scale;
+}
+
+/// A copy of a live object (ADR-0026 §4, Unity's `Instantiate(gameObject)`,
+/// `GameObject.clone` in Dart). Spawns, now, a copy of the subtree under
+/// `source`: every entity's name, own active flag, child order and
+/// built-in components, as the world holds them (commands not yet stepped
+/// are not in it). The copy's root is named `name_utf8` (empty: the
+/// source's name) with the given local transform under `parent` (0 = a
+/// root); the others keep their local transforms. Components go through
+/// the command path, as an instantiated prefab's. No project needed. The
+/// report: {"ok", "clone": {"source": u64, "root": u64, "entities":
+/// [[source, copy], ...] (breadth first, the root first),
+/// "rejectedComponents"}, "diagnostics": [...]}. FYNKEL_STATUS_LOAD_FAILED
+/// when `source` or `parent` is not live or the transform is not finite
+/// (the world is unchanged).
+final class FynkelCloneDesc extends ffi.Struct {
+  @FynkelEntity()
+  external int source;
 
   /// NULL with name_len 0 for none
   external ffi.Pointer<ffi.Uint8> name_utf8;

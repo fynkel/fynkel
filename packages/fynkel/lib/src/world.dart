@@ -1295,6 +1295,83 @@ class World {
     return go;
   }
 
+  /// [GameObject.clone]'s scripts: each copied through its registered
+  /// fields onto the object's copy, then the references re-pointed into
+  /// the copied tree.
+  void _copyBehaviours(Map<GameObject, GameObject> copies) {
+    final warnings = <LoadDiagnostic>[];
+    final made = Map<Behaviour, Behaviour>.identity();
+    for (final MapEntry(key: original, value: copy) in copies.entries) {
+      for (final b in original._behaviours) {
+        if (b._destroyRequested || b._destroyed) continue;
+        final type = b._type ?? _registeredTypeOf(b);
+        if (type == null) {
+          warnings.add(LoadDiagnostic(
+            code: 'FYN-B0001',
+            severity: 'warning',
+            message: '${b.runtimeType} on "${original.name}" is not a registered behaviour; the copy has no ${b.runtimeType}',
+            suggestion: 'annotate it with @FynkelBehaviour and call registerBehaviours(world.registry) from the generated behaviours.g.dart',
+          ));
+          continue;
+        }
+        final c = type.create().._type = type;
+        for (final f in type.fields) {
+          if (f.isReference) continue;
+          try {
+            f.set(c, f.get(b));
+          } on Object catch (e) {
+            warnings.add(LoadDiagnostic(
+              code: 'FYN-B0002',
+              severity: 'warning',
+              message: '${type.id}.${f.name} on "${original.name}" was not copied: $e',
+            ));
+          }
+        }
+        c._enabled = b._enabled;
+        made[b] = copy.addBehaviour(c);
+      }
+    }
+    for (final MapEntry(key: b, value: c) in made.entries) {
+      for (final f in c._type!.fields) {
+        if (!f.isReference) continue;
+        final read = f.target;
+        if (read == null) {
+          if (f.get(b) != null) {
+            warnings.add(LoadDiagnostic(
+              code: 'FYN-B0003',
+              severity: 'warning',
+              message: '${c._type!.id}.${f.name} was not copied: its behaviours.g.dart predates GameObject.clone; it is None',
+              suggestion: 'regenerate behaviours.g.dart (`fynkel codegen --project`)',
+            ));
+          }
+          continue;
+        }
+        final target = switch (read(b)) {
+          final GameObject g => copies[g] ?? g,
+          final Behaviour t => made[t] ?? t,
+          final other => other,
+        };
+        f.set(c, target);
+      }
+    }
+    if (warnings.isNotEmpty) onLoadDiagnostics(warnings);
+  }
+
+  /// The registered type of a script the game constructed itself (its
+  /// [Behaviour.behaviourType] is null): the registry's type whose factory
+  /// makes the same class.
+  BehaviourType? _registeredTypeOf(Behaviour b) {
+    var byClass = _typesByClass;
+    if (byClass == null || _typesByClassCount != registry.types.length) {
+      byClass = _typesByClass = {for (final t in registry.types) t.create().runtimeType: t};
+      _typesByClassCount = registry.types.length;
+    }
+    return byClass[b.runtimeType];
+  }
+
+  Map<Type, BehaviourType>? _typesByClass;
+  int _typesByClassCount = 0;
+
   // ---------------------------------------------------------------- prefabs (M3-08b)
 
   /// The sub-asset an imported model's node hierarchy is stored under
@@ -1718,6 +1795,60 @@ class GameObject {
     final e = _simulationEntity('destroy');
     world._simulation.destroy(gen.DestroyCommand(entity: e));
     world._simulationTargets.add(this);
+  }
+
+  /// A copy of this object and everything under it, made **now** (Unity's
+  /// `Instantiate(gameObject)`, ADR-0026 §4): names, own active flags,
+  /// child order, tags, layer and native components as the world holds
+  /// them, and every script copied through its registered fields
+  /// (`@FynkelBehaviour`). A script's GameObject or script reference to
+  /// something inside the copied tree points at the copy; one outside it
+  /// is kept. Without [parent] the copy is a root placed where this object
+  /// is in the world; under [parent] it keeps this object's local
+  /// transform (Unity's `Instantiate(obj, parent)`). [transform] (local
+  /// to [parent]) and [name] replace those; the name stays this object's
+  /// by default. Returns the copy's root, already spawned.
+  ///
+  /// This object must be spawned (not pending). Component writes queued
+  /// this frame reach the world at the tick, so the copy has the values
+  /// before them — except this object's own [localTransform], which the
+  /// default placement reads. A script whose type is not registered is
+  /// left out, with an `FYN-B0001` warning through
+  /// [World.onLoadDiagnostics].
+  GameObject clone({GameObject? parent, Transform? transform, String? name}) {
+    final source = _requireResolved('clone');
+    final parentEntity = parent?._requireResolved('clone parent') ?? 0;
+    final at = transform ?? (parent != null || this.parent == null ? localTransform : worldTransform ?? localTransform);
+    final (status, json) = world._native.clone(
+      source,
+      name ?? '',
+      parentEntity,
+      [at.position.x, at.position.y, at.position.z],
+      [at.rotation.x, at.rotation.y, at.rotation.z, at.rotation.w],
+      [at.scale.x, at.scale.y, at.scale.z],
+    );
+    switch (status) {
+      case FynkelStatus.FYNKEL_STATUS_OK:
+        break;
+      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
+        final diagnostics = [for (final d in (json['diagnostics'] as List? ?? const [])) LoadDiagnostic.fromJson(d as Map<String, Object?>)];
+        throw ArgumentError('clone of $this: ${diagnostics.map((d) => d.message).join('; ')}');
+      default:
+        throw FynkelBridgeError('clone: $status');
+    }
+    world._entityTable = null;
+    final report = json['clone'] as Map<String, Object?>;
+    final copies = <GameObject, GameObject>{};
+    final rootEntity = report['root'] as int;
+    final root = world.attach(rootEntity, name: name ?? this.name, initial: at);
+    for (final pair in report['entities'] as List) {
+      final [s as int, c as int] = pair as List;
+      final original = world.byEntity(s);
+      if (original == null) continue; // no script on it and nothing names it
+      copies[original] = c == rootEntity ? root : world.attach(c, name: original.name);
+    }
+    world._copyBehaviours(copies);
+    return root;
   }
 
   void setParent(GameObject? parent, {bool keepWorld = false}) {
