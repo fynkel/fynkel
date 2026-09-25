@@ -224,6 +224,25 @@ class Quat {
     return l == 0 ? identity : Quat(x / l, y / l, z / l, w / l);
   }
 
+  /// The rotation [t] of the way from this one to [o] along the shorter
+  /// arc, at a constant angular speed (spherical interpolation).
+  Quat slerp(Quat o, double t) {
+    var d = x * o.x + y * o.y + z * o.z + w * o.w;
+    var b = o;
+    if (d < 0) {
+      d = -d;
+      b = Quat(-o.x, -o.y, -o.z, -o.w);
+    }
+    if (d > 0.9995) {
+      // Nearly the same: a normalized lerp.
+      return Quat(x + (b.x - x) * t, y + (b.y - y) * t, z + (b.z - z) * t, w + (b.w - w) * t).normalized;
+    }
+    final theta = math.acos(d);
+    final sin = math.sin(theta);
+    final wa = math.sin((1 - t) * theta) / sin, wb = math.sin(t * theta) / sin;
+    return Quat(x * wa + b.x * wb, y * wa + b.y * wb, z * wa + b.z * wb, w * wa + b.w * wb);
+  }
+
   Vec3 rotate(Vec3 v) {
     // v' = q * v * q^-1 for unit q, expanded.
     final u = Vec3(x, y, z);

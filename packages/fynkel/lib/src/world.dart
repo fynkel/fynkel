@@ -35,6 +35,7 @@ part 'behaviour.dart';
 part 'object_spec.dart';
 part 'projection.dart';
 part 'scenes.dart';
+part 'tween.dart';
 
 /// Immutable local transform value (position, rotation, scale).
 typedef Transform = gen.Transform;
@@ -1437,6 +1438,17 @@ class World {
     return root;
   }
 
+  /// Runs [onValue] every frame with a value going from [from] to [to]
+  /// over [seconds] of game time, eased by [ease] (DOTween's `DOTween.To`):
+  /// numbers, `Vec2`/`Vec3`/`Vec4` (colours too) in a straight line,
+  /// `Quat`s along the shorter arc. The first call is now, with [from]; the
+  /// last, with [to], is the frame the time is up. Returns the running
+  /// tween (yield it, `await` its `done`, or `stop()` it); it belongs to
+  /// the world — [Behaviour.tween] is the one that stops with its script.
+  Coroutine tween<T extends Object>(T from, T to, double seconds, void Function(T value) onValue,
+          {Ease ease = Ease.outQuad}) =>
+      _tweenOn(null, seconds, ease, _between(from, to, onValue));
+
   /// The report of the last [instantiate] (null before any).
   InstantiateReport? lastInstantiate;
 
@@ -2582,6 +2594,39 @@ class TransformRef {
   /// [lookAt] another object's world position.
   void lookAtObject(GameObject target, {Vec3 worldUp = Vec3.up}) =>
       lookAt(target.transform.position, worldUp: worldUp);
+
+  // ---- tweens (ADR-0026 §7, tween.dart)
+
+  /// Moves the object to the world [position] over [seconds] of game time
+  /// (DOTween's `DOMove`), from where it is now, eased by [ease]. Returns
+  /// the running tween: yield it in a coroutine, `await` its `done`, or
+  /// `stop()` it (the object stays where it got to). It ends early when
+  /// the object is destroyed. It writes the transform every frame, so it
+  /// is for objects physics does not move.
+  Coroutine moveTo(Vec3 position, double seconds, {Ease ease = Ease.outQuad}) {
+    final from = this.position;
+    return _go.world._tweenOn(_go, seconds, ease, (t) => this.position = from.lerp(position, t));
+  }
+
+  /// [moveTo] in the parent's space (DOTween's `DOLocalMove`).
+  Coroutine moveLocalTo(Vec3 position, double seconds, {Ease ease = Ease.outQuad}) {
+    final from = localPosition;
+    return _go.world._tweenOn(_go, seconds, ease, (t) => localPosition = from.lerp(position, t));
+  }
+
+  /// Turns the object to the world [rotation] along the shorter arc
+  /// (DOTween's `DORotateQuaternion`); see [moveTo].
+  Coroutine rotateTo(Quat rotation, double seconds, {Ease ease = Ease.outQuad}) {
+    final from = this.rotation;
+    return _go.world._tweenOn(_go, seconds, ease, (t) => this.rotation = from.slerp(rotation, t));
+  }
+
+  /// Scales the object to the local [scale] (DOTween's `DOScale`); see
+  /// [moveTo].
+  Coroutine scaleTo(Vec3 scale, double seconds, {Ease ease = Ease.outQuad}) {
+    final from = localScale;
+    return _go.world._tweenOn(_go, seconds, ease, (t) => localScale = from.lerp(scale, t));
+  }
 
   /// A point in this object's space, in the world.
   Vec3 transformPoint(Vec3 p) {

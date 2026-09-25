@@ -346,6 +346,22 @@ abstract class Behaviour {
   /// ```
   Coroutine startCoroutine(Iterable<Object?> routine) => _schedule(Coroutine._(this, routine.iterator, false));
 
+  /// [World.tween] as one of this script's coroutines: it stops with
+  /// them (when the script is destroyed or its object leaves the active
+  /// hierarchy, or at [stopAllCoroutines]).
+  ///
+  /// ```dart
+  /// tween(0.0, 8.0, 0.5, (v) => set(light.copyWith(intensity: v)), ease: Ease.outCubic);
+  /// ```
+  Coroutine tween<T extends Object>(T from, T to, double seconds, void Function(T value) onValue,
+      {Ease ease = Ease.outQuad}) {
+    _checkSeconds(seconds);
+    final apply = _between(from, to, onValue);
+    final system = _system;
+    if (system == null) throw StateError('$runtimeType: a tween needs an attached behaviour');
+    return _schedule(Coroutine._(this, _tweenRoutine(system, seconds, ease, apply).iterator, false));
+  }
+
   /// Stops [coroutine] (it does nothing more).
   void stopCoroutine(Coroutine coroutine) => coroutine.stop();
 
@@ -632,9 +648,14 @@ class BehaviourRegistry {
 
 /// A running [Behaviour.startCoroutine] or [Behaviour.invoke].
 final class Coroutine {
-  Coroutine._(this._owner, Iterator<Object?> routine, this._invoke) : _stack = [routine];
+  Coroutine._(this._owner, Iterator<Object?> routine, this._invoke, [this._target]) : _stack = [routine];
 
-  final Behaviour _owner;
+  /// The behaviour that started it; null for a tween started on an object
+  /// or on the world.
+  final Behaviour? _owner;
+
+  /// The object a tween moves: it ends when that object is destroyed.
+  final GameObject? _target;
   final List<Iterator<Object?>> _stack;
   final bool _invoke;
   bool _done = false;
@@ -649,6 +670,12 @@ final class Coroutine {
 
   /// Stops it: it does nothing more.
   void stop() => _done = true;
+
+  /// Completes once it ended, was stopped, or threw (at the end of that
+  /// frame's pass) — `await tween.done` in async code; a coroutine yields
+  /// the [Coroutine] itself instead.
+  Future<void> get done => (_completer ??= Completer<void>()).future;
+  Completer<void>? _completer;
 }
 
 /// `yield WaitForSeconds(s)`: go on once [seconds] of game time passed.
@@ -677,9 +704,13 @@ final class WaitForFixedUpdate {
 
 /// A behaviour callback that threw ([World.onBehaviourError]).
 class BehaviourError {
-  BehaviourError(this.behaviour, this.callback, this.error, this.stack, {required this.tick});
+  BehaviourError(this.behaviour, this.callback, this.error, this.stack, {required this.tick, GameObject? gameObject})
+      : _object = gameObject;
 
-  final Behaviour behaviour;
+  final GameObject? _object;
+
+  /// Null for a tween started on an object or on the world.
+  final Behaviour? behaviour;
 
   /// The callback's name: `update`, `onCollisionEnter`, `start`…
   final String callback;
@@ -692,8 +723,8 @@ class BehaviourError {
   /// `Player.update on "Hero" threw: Bad state: no ground` — what the
   /// Console's row says.
   String get message {
-    final name = behaviour._gameObject?.name ?? '';
-    return '${behaviour.runtimeType}.$callback${name.isEmpty ? '' : ' on "$name"'} threw: $error';
+    final name = (behaviour?._gameObject ?? _object)?.name ?? '';
+    return '${behaviour?.runtimeType ?? 'World'}.$callback${name.isEmpty ? '' : ' on "$name"'} threw: $error';
   }
 
   @override
@@ -1024,12 +1055,14 @@ class _BehaviourSystem {
     final n = _routines.length;
     for (var i = 0; i < n; i++) {
       final c = _routines[i];
+      if (c._target case final t? when !t.isAlive) c._done = true;
       if (c._done || (c._wait is WaitForFixedUpdate) != fixed || !_ready(c)) continue;
       _advance(c);
     }
     _routines.removeWhere((c) {
       if (!c._done) return false;
-      c._owner._routines.remove(c);
+      c._owner?._routines.remove(c);
+      c._completer?.complete();
       return true;
     });
   }
@@ -1046,6 +1079,14 @@ class _BehaviourSystem {
       Coroutine() => !w.isRunning,
       _ => true,
     };
+  }
+
+  /// Starts a coroutine no behaviour owns (a tween on an object or on the
+  /// world): up to its first yield now, as [Behaviour.startCoroutine].
+  Coroutine _start(Coroutine c) {
+    _routines.add(c);
+    _advance(c);
+    return c;
   }
 
   /// Runs [c] to its next yield (nested generators in place).
@@ -1071,7 +1112,8 @@ class _BehaviourSystem {
       }
     } catch (e, st) {
       c._done = true;
-      _threw(c._owner, c._invoke ? 'invoke' : 'coroutine', e, st);
+      final callback = c._invoke ? 'invoke' : (c._owner == null ? 'tween' : 'coroutine');
+      world.onBehaviourError(BehaviourError(c._owner, callback, e, st, tick: world.tick, gameObject: c._target));
     }
   }
 
