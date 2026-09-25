@@ -15,5 +15,8 @@
 /// game never ships editor code.
 library;
 
+export 'src/assets.dart';
 export 'src/context.dart';
+export 'src/edit.dart';
 export 'src/extensions.dart';
+export 'src/scene.dart';

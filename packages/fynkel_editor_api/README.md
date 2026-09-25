@@ -22,6 +22,25 @@ dependencies first, then alphabetically, the game last. Every hot reload
 calls them again, so a save in `lib/editor/` shows at once. Preferences ›
 Extensions lists what each package registered.
 
+A callback's `EditorContext` reads the scene in front (`scene`,
+`selection`) and the project's assets (`assets`), and changes them as one
+undo step:
+
+```dart
+editor.menuItem(
+  'Tools/Level/Number Coins',
+  id: 'game.numberCoins',
+  run: (context) {
+    final coins = [for (final o in context.scene!.objects) if (o.has('game.Collectible')) o];
+    context.edit('Number coins', (edit) {
+      for (final (i, coin) in coins.indexed) {
+        edit.rename(coin, 'Coin ${i + 1}');
+      }
+    });
+  },
+);
+```
+
 The rules:
 
 - Only files under `lib/editor/` import this package or `lib/editor/`

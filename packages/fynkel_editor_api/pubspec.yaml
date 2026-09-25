@@ -1,5 +1,5 @@
 name: fynkel_editor_api
-description: "Fynkel Engine - what a package's editor part (lib/editor/editor.dart, ADR-0028) registers with the editor: menu items first. Interfaces and widgets only, no platform plugins; the editor (package:fynkel_editor) implements it."
+description: "Fynkel Engine - what a package's editor part (lib/editor/editor.dart, ADR-0028) registers with the editor: menu items, the selection, undoable edits, assets. Interfaces and widgets only, no platform plugins; the editor (package:fynkel_editor) implements it."
 version: 0.0.1
 publish_to: none
 
@@ -10,6 +10,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # ObjectSpec, DataAsset and AssetRef: an extension adds objects and
+  # creates assets in the game's own vocabulary (ADR-0026, ADR-0027).
+  fynkel:
+    path: ../fynkel
 
 dev_dependencies:
   flutter_test:
