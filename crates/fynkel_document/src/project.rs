@@ -1218,6 +1218,12 @@ pub fn validate_project_with(
     report
         .diagnostics
         .extend(crate::editor_part::check_editor_imports(dir));
+    // The dependencies' fynkel.package.json files (ADR-0029 §1).
+    if let Some(package) = crate::editor_part::package_name(dir) {
+        report
+            .diagnostics
+            .extend(crate::packages::package_graph(dir, &package).diagnostics);
+    }
     // From here on the project's behaviour types are known.
     let schemas = match project.schemas(schemas, dir) {
         Ok(s) => s,

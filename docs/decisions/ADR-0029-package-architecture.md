@@ -68,7 +68,9 @@ What Fynkel has (mapped 2026-09-25):
      root, beside `pubspec.yaml`, the way `fynkel.project.json` marks a
      project: `formatVersion`, `assets` (default `"assets"`), `namespace`
      (default: the package name). A package without it can still carry
-     an editor part (ADR-0028). Nothing else about it is read.
+     an editor part (ADR-0028). Nothing else about it is read. A
+     `fynkel.package.json` that cannot be read is `FYN-P0019`, and the
+     package is then not a Fynkel package.
    - **Versions are pub's.** A package states the engine versions it works
      with in its pubspec (`fynkel: ^1.2.0`), and `pub` resolves them.
      Fynkel adds no resolver of its own.

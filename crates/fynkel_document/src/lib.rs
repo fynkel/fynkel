@@ -29,6 +29,7 @@ pub mod json;
 pub mod material;
 pub mod migrate;
 pub mod one_root;
+pub mod packages;
 pub mod physics_material;
 pub mod prefab;
 pub mod project;

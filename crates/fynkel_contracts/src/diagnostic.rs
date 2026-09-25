@@ -193,6 +193,11 @@ impl Code {
     /// code: `package:fynkel_editor_api` or the package's own
     /// `lib/editor/` (ADR-0028 §2), which would ship it in the game.
     pub const PROJECT_EDITOR_IMPORT: Code = Code("FYN-P0015");
+    /// A dependency's `fynkel.package.json` that could not be read: not
+    /// JSON, an unknown field, a newer `formatVersion`, an asset folder
+    /// outside the package or a namespace that is not an identifier
+    /// (ADR-0029 §1). The package is then not a Fynkel package.
+    pub const PACKAGE_MANIFEST: Code = Code("FYN-P0019");
 
     // Physics (`FYN-H`, blueprint §9, §19.2d item 8): scene rules the
     // component schemas cannot express.

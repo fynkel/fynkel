@@ -1863,7 +1863,41 @@ malformed lock, `P0013` a `physics` block the runtime cannot apply (a
 non-finite gravity), `P0014` the project's `layers` or `tags` (ADR-0020),
 `P0015` a file of the game package outside `lib/editor/` that imports
 `package:fynkel_editor_api` or `lib/editor/` (ADR-0028: editor code never
-ships in a game; also reported by `fynkel codegen --check`).
+ships in a game; also reported by `fynkel codegen --check`), `P0019` a
+dependency's `fynkel.package.json` that cannot be read (below).
+
+### Packages: `fynkel.package.json` (ADR-0029)
+
+A game's packages are its pubspec `dependencies` (not
+`dev_dependencies`), followed through each package's own pubspec and
+located by the resolved `.dart_tool/package_config.json`
+(`fynkel_document::packages::package_graph`). They are ordered dependencies
+first, otherwise by name, with the game last. Editor parts (ADR-0028) run in that
+order. Before `flutter pub get` there is only the game.
+
+A dependency with a `fynkel.package.json` at its root, beside
+`pubspec.yaml`, is a **Fynkel package**:
+
+```json
+{ "formatVersion": 1, "assets": "assets", "namespace": "pickups" }
+```
+
+| Field | Meaning |
+|---|---|
+| `formatVersion` | `1` (required) |
+| `assets` | The package's asset folder, relative and inside the package (default `"assets"`) |
+| `namespace` | The prefix of its type ids, a lower-case identifier (default: the package name) |
+
+Any other field, a newer `formatVersion`, an `assets` outside the
+package or a namespace that is not an identifier is `FYN-P0019` at
+`<package>/fynkel.package.json`, and the package is then not a Fynkel
+package.
+
+Where a package comes from (`pubspec.lock`'s `source`) decides whether its
+files are editable. The game and `path:` packages are the user's. Hosted,
+git and SDK packages live in pub's shared cache and are read-only. Without
+a lock entry, a package inside pub's cache (`PUB_CACHE`, `.pub-cache`)
+counts as hosted.
 
 ## New projects: `fynkel create`
 
