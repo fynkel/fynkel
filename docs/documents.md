@@ -1246,6 +1246,14 @@ throws (`ArgumentError` for a bad or unknown ref or a non-data asset,
 `StateError` for no project or an unregistered type). Game code may
 change an instance's fields for the run; nothing is written back.
 
+From code, `ProjectWriter.writeData('data/sword', weapon)`
+(`package:fynkel/authoring.dart`) writes one: the id derived from the
+path (or kept from the file there), every field through the type's
+`get`, the file untouched when the bytes are the same. The instance is
+then bound to that asset, so a scene, prefab or data asset written
+afterwards stores its id; a data-typed field holding an instance never
+written is an `ArgumentError`.
+
 ## Migrations
 
 Each kind has a current `formatVersion` (`DocumentKind::supported_format_version`:
