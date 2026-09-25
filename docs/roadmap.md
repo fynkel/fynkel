@@ -63,7 +63,9 @@ Added 2026-09-25 at the user's request: building a game from Dart as
 fully as from the editor, ahead of the extensibility work, because the
 user ranks the code path above the editor. The checklist is
 `docs/code-first.md`; the order is ADR-0026 § Order; the acceptance test
-is `examples/code_only/`.
+is `examples/code_only/`. **Done 2026-09-25** through step 8's `createMesh`
+(`examples/code_only/` passing both ways); code-built animation clips
+wait for the Phase 5 Animator, as the ADR orders.
 
 ## Phase 3 — Extensibility and the data model
 
