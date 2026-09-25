@@ -423,6 +423,41 @@ class World {
 
   /// The data assets made so far (their shared instances), by asset id.
   Map<String, DataAsset> get loadedData => Map.unmodifiable(_data.byId);
+
+  /// A data-typed field's JSON (`{"asset": id}`, a list of them, or null)
+  /// as the shared instance(s) of the data type [typeId] — what a load sets
+  /// the field to; one that cannot be made is null (left out of a list)
+  /// with `FYN-B0004` through [onLoadDiagnostics]. For an editor setting a
+  /// script's data-typed field during Play.
+  Object? resolveData(Object? json, String typeId, {String where = 'the field'}) {
+    final warnings = <LoadDiagnostic>[];
+    try {
+      return _data.resolve(json, typeId, warnings, where: where);
+    } finally {
+      if (warnings.isNotEmpty) onLoadDiagnostics(warnings);
+    }
+  }
+
+  /// An Inspector edit of the data asset [id] during Play (ADR-0027 §7):
+  /// the instance this world shares takes the asset's saved [data] — every
+  /// field it names, data-typed ones resolved as a load does, and a field
+  /// it no longer names back to its default. False when the world has not
+  /// made that asset (nothing uses it yet: the next use reads the cache).
+  bool applyDataEdit(String id, Map<String, Object?> data) {
+    final d = _data.byId[id];
+    final type = d?.dataType;
+    if (d == null || type == null) return false;
+    for (final f in type.fields) {
+      final has = data.containsKey(f.name);
+      if (f.holdsData) {
+        final v = resolveData(data[f.name], f.dataType!, where: '${type.id}.${f.name}');
+        f.set(d, v ?? (f.type == 'list' ? const <Object?>[] : null));
+      } else if (has || f.defaultValue != null) {
+        f.set(d, has ? data[f.name] : f.defaultValue);
+      }
+    }
+    return true;
+  }
   late final _DataAssets _data = _DataAssets(this);
 
   /// Looks a resolved object up by handle.

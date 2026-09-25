@@ -139,6 +139,33 @@ void main() {
     expect(wielderType.field('weapon')!.get(knight), {'asset': sword});
   });
 
+  test('an editor edit during Play: the shared instance takes the saved data', () {
+    final w = world();
+    w.loadProject(project);
+    w.loadScene(arena);
+    final knight = w.find('Knight')!.behaviour<Wielder>()!;
+    final s = knight.weapon!;
+    expect(w.applyDataEdit(sword, {'damage': 5}), isTrue);
+    expect(s.damage, 5);
+    expect(s.upgrade, isNull, reason: 'no longer named: back to its default');
+    expect(w.applyDataEdit(sword, {'upgrade': {'asset': axe}}), isTrue);
+    expect(s.damage, 1, reason: 'the class default');
+    expect(s.upgrade, same(w.data<Weapon>(const AssetRef(axe))));
+    expect(w.applyDataEdit(great, const {}), isTrue);
+    expect(w.applyDataEdit('c0000000-0000-4000-8000-0000000000ff', const {}), isFalse);
+
+    // A script's data-typed field set from its JSON, as the Inspector does:
+    // a material is no weapon (left out, FYN-B0004).
+    final warnings = <LoadDiagnostic>[];
+    w.onLoadDiagnostics = warnings.addAll;
+    final spares = w.resolveData([
+      {'asset': great},
+      {'asset': 'c0000000-0000-4000-8000-000000000020'},
+    ], 'test.Weapon');
+    expect((spares as List).single, same(w.loadedData[great]));
+    expect(warnings.map((d) => d.code), ['FYN-B0004']);
+  });
+
   test('world.data from code; what cannot be made', () {
     final w = world();
     expect(() => w.data<Weapon>(const AssetRef(sword)), throwsStateError, reason: 'no project loaded');

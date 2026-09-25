@@ -24,6 +24,7 @@ final weaponType = DataType(
     DataField(
       name: 'damage',
       type: 'integer',
+      defaultValue: 1,
       get: (d) => (d as Weapon).damage,
       set: (d, v) => (d as Weapon).damage = v as int,
     ),
