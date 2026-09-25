@@ -1326,8 +1326,19 @@ it. Codes: source file without a sidecar `FYN-A0001`, sidecar without a
 source `A0002`, duplicate id (across documents, sidecars and sub-assets;
 the first path wins) `A0003`, unknown asset `A0004`, unknown sub-asset
 `A0005`, malformed sidecar entry `A0006`, a reference to an asset of the
-wrong kind (a model's material remap naming something that is not a
-material document, § Material remaps) `A0007`.
+wrong kind `A0007`: a model's material remap naming something that is
+not a material document (§ Material remaps), and, since ADR-0027, any
+component field that names a kind of asset holding a reference to another
+kind — a script's `asset(<kind>)` hint (on a field or a list's items) or a
+built-in field (`MeshRenderer.mesh`/`material`, `Collider.mesh`/`material`
+(a physics material), `AudioSource.clip` (a sound), `Environment.sky` (a
+texture), `Volume.profile`, `Skin.skin`, `Animator.clip` (a clip or a
+blend), `Emitter.prefab`; `fynkel_document::reference_kinds`). What a
+target is follows the editor's pickers: a document is its kind, a
+sub-asset its key's head (`anim` → `clip`, `image` → `texture`), a whole
+audio source a `sound`, a whole image a `texture`. `fynkel validate`, the
+cook (which refuses the document) and the editor's document validation
+report it; prefab overrides are not typed yet.
 
 ## Import
 

@@ -550,7 +550,7 @@ reports an edit **once per gesture**:
 | `assetRef` | the asset's name, `…` opens a **searchable picker** filtered by `asset(<kind>)` (a source offers its matching sub-assets; an audio source is offered whole as a `sound` — `AudioSource.clip` takes no sub), Clear when nullable, and a `DragTarget<AssetDragPayload>` for the Project browser's rows (item 5) |
 | `entity` | a name field with a menu of the document's entity names |
 | `layerMask` | a check-list of the project's `layers` (Everything / Nothing), the number beside it — a collider's `mask` ("Collides with"), a camera's or light's `culling_mask` |
-| array, object | rows per item / per child, add and remove; `any` and keys the schema does not list fall back to JSON text |
+| array, object | rows per item / per child; a list's `+` copies the last item (Unity's rule; into an empty list the item's default, and an asset item — which cannot be None — is picked first), each item moves up or down and is removed; `any` and keys the schema does not list fall back to JSON text |
 
 Numbers round-trip **byte-exactly**: a field that held `1` stays an `int`,
 one that held `1.0` stays a `double` (`jsonNumber`), so setting every
