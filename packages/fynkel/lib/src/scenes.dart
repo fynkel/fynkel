@@ -202,6 +202,12 @@ class SceneManager {
     if (world.loadedScenes.isEmpty && _pendingId == null) _set(SceneState.empty);
   }
 
-  /// Records a `loadProject` as the manager's current scene.
-  void _projectLoaded(LoadReport report) => _loaded(report, LoadMode.replace);
+  /// Records a `loadProject` as the manager's current scene; a project
+  /// without a startup scene loaded none, and the manager stays [SceneState.empty].
+  void _projectLoaded(LoadReport report) {
+    if (report.sceneId != null) return _loaded(report, LoadMode.replace);
+    lastReport = report;
+    error = null;
+    _current = null;
+  }
 }

@@ -1037,7 +1037,11 @@ class World {
   /// (rejections reach [onDiagnostics] on the next step). The scene's
   /// assets stay resident in the world's store — a viewport rendering this
   /// world draws from it — until the world is disposed. Throws
-  /// [FynkelLoadError] when the cache or the scene has errors.
+  /// [FynkelLoadError] when the cache or the scene has errors. A project
+  /// whose `fynkel.project.json` names no `startupScene` opens with no
+  /// scene loaded — its input, layers, tags, gravity and assets ready, the
+  /// world left as it is ([LoadReport.sceneId] null): a game that builds
+  /// its world from code (ADR-0026).
   LoadReport loadProject(String dir, {String? cacheDir}) {
     final cache = cacheDir ?? cacheDirOf(dir);
     final report = _load(_native.loadProject(cache), 'loadProject').withProjectDir(dir);
