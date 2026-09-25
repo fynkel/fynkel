@@ -596,8 +596,8 @@ FynkelStatus fynkel_world_set_material(FynkelWorld* world,
  * tangent, uv0, uv1, colour), the u32 triangle-list indices — drawn as the
  * mesh `id` (16 bytes, big-endian UUID, no sub-asset path: one the cache
  * does not have) by every renderer on the world's asset store until
- * `payload_len` 0 removes it, and read by a `shape: mesh`
- * collider set after it (colliders built before keep their shape). Kept
+ * `payload_len` 0 removes it; the `shape: mesh` colliders naming it are
+ * rebuilt from it at the next step (MESH_UNAVAILABLE once removed). Kept
  * across scene loads. FYNKEL_STATUS_LOAD_FAILED before any project is
  * loaded; FYNKEL_STATUS_INVALID_ARGUMENT for a payload that does not
  * decode, has skin weights, no triangles, an index out of range or a

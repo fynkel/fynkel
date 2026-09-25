@@ -286,6 +286,9 @@ struct Entry {
     last_world: Mat4,
     /// A diagnostic already reported for this entry (once).
     reported: bool,
+    /// Rebuild at the next sync: the collision mesh it was built from
+    /// changed ([`Physics::replace_mesh`]).
+    stale: bool,
 }
 
 /// What the sync found on an entity for a new entry.
@@ -477,10 +480,45 @@ impl Physics {
         self.meshes.contains_key(key)
     }
 
-    /// Forgets the collision mesh `key` (a runtime mesh removed): colliders
-    /// built from it keep their shape; a new one reports it unavailable.
-    pub fn forget_mesh(&mut self, key: &AssetRef) {
+    /// Whether a collider uses the collision mesh `key` or it is
+    /// registered: what [`replace_mesh`] needs the triangles for.
+    ///
+    /// [`replace_mesh`]: Physics::replace_mesh
+    pub fn uses_mesh(&self, key: &AssetRef) -> bool {
+        self.meshes.contains_key(key) || self.entries.values().any(|e| Self::built_from(e, key))
+    }
+
+    fn built_from(e: &Entry, key: &AssetRef) -> bool {
+        e.shape
+            .as_ref()
+            .is_some_and(|c| c.shape == ColliderShape::Mesh && c.mesh.as_ref() == Some(key))
+    }
+
+    /// The collision mesh `key` changed at runtime (a mesh made in code set
+    /// again or removed): `Some((positions, indices))` registers the new
+    /// triangles, `None` forgets them, and every collider using `key` is
+    /// rebuilt at the next step — one that no longer can reports
+    /// `MESH_UNAVAILABLE`. Fails as [`register_mesh`] does (the mesh is
+    /// then forgotten).
+    ///
+    /// [`register_mesh`]: Physics::register_mesh
+    pub fn replace_mesh(
+        &mut self,
+        key: &AssetRef,
+        mesh: Option<(&[[f32; 3]], &[u32])>,
+    ) -> Result<(), String> {
         self.meshes.remove(key);
+        for e in self.entries.values_mut() {
+            if Self::built_from(e, key) {
+                e.stale = true;
+            }
+        }
+        match mesh {
+            Some((positions, indices)) => self
+                .register_mesh(key.clone(), positions, indices)
+                .map(|_| ()),
+            None => Ok(()),
+        }
     }
 
     pub fn mesh_count(&self) -> usize {
@@ -754,6 +792,7 @@ impl Physics {
                         && entry.rigid == rigid.copied()
                         && entry.layer == layer.copied().unwrap_or_default().bit()
                         && entry.last_world == wt.matrix
+                        && !entry.stale
                 });
                 if !same {
                     changed.push(entity);
@@ -793,7 +832,8 @@ impl Physics {
             let structural = match existing {
                 None => true,
                 Some(entry) => {
-                    entry.layer != layer
+                    entry.stale
+                        || entry.layer != layer
                         || entry.rigid.is_some() != rigid.is_some()
                         || entry.shape.is_some() != shape.is_some()
                         || entry.character.is_some() != character.is_some()
@@ -949,6 +989,7 @@ impl Physics {
             layer,
             last_world: world,
             reported: false,
+            stale: false,
         };
         if let Some(c) = &shape {
             match self.build_shape(c, scale, rigid.map(|r| r.body_type)) {
@@ -1123,6 +1164,7 @@ impl Physics {
                 layer,
                 last_world: world,
                 reported,
+                stale: false,
             },
         );
     }
@@ -2422,6 +2464,69 @@ mod tests {
         );
         assert!(p.stats().colliders >= 2);
         let _ = ground;
+    }
+
+    /// A mesh made in code changed under its collider (ADR-0026 §4): the
+    /// collider is rebuilt from the new triangles at the next step, and
+    /// reports the mesh unavailable once it is removed.
+    #[test]
+    fn a_replaced_mesh_rebuilds_its_colliders() {
+        let mut ecs = world();
+        let mut p = Physics::new();
+        let none = BTreeSet::new();
+        let key = AssetRef::new("5c4e3f2a-1b0d-4c9e-8a7b-6f5e4d3c2b1a".parse().unwrap());
+        let quad = |y: f32| {
+            [
+                [-5.0, y, -5.0],
+                [5.0, y, -5.0],
+                [5.0, y, 5.0],
+                [-5.0, y, 5.0],
+            ]
+        };
+        let tris = [0, 2, 1, 0, 3, 2];
+        assert!(!p.uses_mesh(&key));
+        p.register_mesh(key.clone(), &quad(0.0), &tris).unwrap();
+        assert!(p.uses_mesh(&key));
+        spawn(
+            &mut ecs,
+            Vec3::ZERO,
+            None,
+            Some(Collider {
+                shape: ColliderShape::Mesh,
+                mesh: Some(key.clone()),
+                ..Collider::default()
+            }),
+        );
+        let ball = spawn(
+            &mut ecs,
+            Vec3::new(1.0, 1.0, 1.0),
+            Some(RigidBody::default()),
+            Some(Collider {
+                shape: ColliderShape::Sphere,
+                size: Vec3::new(0.25, 0.0, 0.0),
+                ..Collider::default()
+            }),
+        );
+        let settle = |p: &mut Physics, ecs: &mut Ecs| {
+            for _ in 0..120 {
+                tick(p, ecs, &none);
+            }
+            ecs.copy::<Transform>(ball).unwrap().position.y
+        };
+        assert!((settle(&mut p, &mut ecs) - 0.25).abs() < 0.02);
+
+        // Lowered by 3 m: the ball falls onto the new floor.
+        p.replace_mesh(&key, Some((&quad(-3.0), &tris))).unwrap();
+        assert!((settle(&mut p, &mut ecs) + 2.75).abs() < 0.02);
+        assert!(p.take_rejections().is_empty());
+
+        // Removed: the collider says so, the ball falls through.
+        p.replace_mesh(&key, None).unwrap();
+        assert!(settle(&mut p, &mut ecs) < -5.0);
+        assert!(p
+            .take_rejections()
+            .iter()
+            .any(|r| r.kind == RejectionKind::MeshUnavailable));
     }
 
     #[test]

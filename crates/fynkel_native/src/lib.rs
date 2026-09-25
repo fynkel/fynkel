@@ -555,10 +555,17 @@ pub unsafe extern "C" fn fynkel_world_set_mesh(
         let Some(assets) = w.assets.clone() else {
             return Status::LoadFailed;
         };
+        // The mesh colliders built from it follow at the next step (one
+        // over the triangle limit reports it there).
+        let physics = w.core_mut().physics_mut();
+        if physics.uses_mesh(&key) {
+            let positions: Option<Vec<[f32; 3]>> = mesh
+                .as_ref()
+                .map(|m| m.vertices.iter().map(|v| v.position).collect());
+            let triangles = mesh.as_ref().map(|m| m.indices.as_slice());
+            let _ = physics.replace_mesh(&key, positions.as_deref().zip(triangles));
+        }
         assets.set_runtime_mesh(&key, mesh);
-        // A mesh collider reads it again when one is next set; the ones
-        // built already keep their shape.
-        w.core_mut().physics_mut().forget_mesh(&key);
         Status::Ok
     })
 }
