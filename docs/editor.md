@@ -1896,7 +1896,9 @@ void registerEditor(EditorExtensions editor) {
 }
 ```
 
-`examples/code_only/lib/editor/editor.dart` is the working example.
+`examples/code_only/lib/editor/editor.dart` is the working example: menu
+items, a Level Tools window that places a ring of coins as one undo step,
+and a Hierarchy entry, Make Big Coin.
 
 - **Finding the parts.** `fynkel editor` (`editor_parts` in
   `apps/cli/src/editor.rs`) walks the game's `dependencies` (not
@@ -1970,12 +1972,41 @@ void registerEditor(EditorExtensions editor) {
     The host passes the game's generated `registerBehaviours`
     (`EditorGame.registerBehaviours`) when `lib/generated/behaviours.g.dart`
     exists.
+- **Windows** (Unity's `EditorWindow`):
+  `editor.window('game.levelTools', title: 'Level Tools', menu: 'Tools/Level Tools', build: (context, editor) => …)`.
+  - It is a panel like the editor's own (`ext:<id>` in the layout; the
+    `ExtensionWindowView` in `lib/src/extensions/extension_window.dart`).
+    Its command (by default in `Window/<title>`) shows it beside the
+    Inspector, and the user docks it anywhere.
+  - `build` runs again whenever the document in front, its selection,
+    the project or the Project panel changes, and after every hot
+    reload, so what it reads through its `EditorContext` is current. It
+    may return a stateful widget of its own for its inputs.
+  - Its place is saved with the layout. A hot reload that drops the
+    window leaves the panel in place with a line saying so, and one that
+    brings it back shows it again. A saved layout that names a window no
+    extension registers (another project's) loads without it.
+  - A throw in `build` is shown in the window's frame, and logged in the
+    Console once per distinct error.
+- **Context entries** join the editor's context menus, after its own
+  lines. Their callbacks get a context whose scene is the panel's own
+  document:
+  - `hierarchyMenuItem(label, id:, withComponent:, run: (context, objects))`
+    in the Hierarchy's menu, for the selected objects; with
+    `withComponent` only when every one has that component.
+  - `projectMenuItem(label, id:, kind:, dataType:, run: (context, assets))`
+    in the Project panel's menu, for the selected assets; with `kind` or
+    `dataType` only when every one is of it.
+  - `componentMenuItem(type, label, id:, run: (context, objects))` in the
+    ⋮ menu of the Inspector's `type` cards (Unity's `CONTEXT/<Type>/`).
+  - `enabled` greys an entry out; a throw in `run` is a Console error.
 - **A failing extension fails alone.** Every call into a package is
   wrapped. A throwing `registerEditor` skips that package's extensions,
   and a throwing command or `enabled` check is a Console error (with the
   first frame of its stack) while the editor carries on.
 - **Preferences › Extensions** lists each package with an editor part
-  and what it registered, or why it registered nothing.
+  and what it registered (menu items, windows, context entries), or why
+  it registered nothing.
 - **Editor code never ships in a game.** Only files under `lib/editor/`
   may import `package:fynkel_editor_api` or `lib/editor/`. `fynkel
   validate`, the editor's Console and `fynkel codegen --check` report

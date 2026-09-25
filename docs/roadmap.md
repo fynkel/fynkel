@@ -79,7 +79,9 @@ Three ADRs, then their implementation:
    `package:fynkel_editor_api`), so the package work (item 3) builds on
    it. Step 1 (the loop: menu items, discovery, reload, `FYN-P0015`,
    Preferences › Extensions) done 2026-09-25; step 2 (`EditorContext`:
-   scene, selection, edits as one undo step, assets) done 2026-09-25.
+   scene, selection, edits as one undo step, assets) done 2026-09-25;
+   step 5 (windows and Hierarchy/Project/component context entries)
+   done 2026-09-25.
 2. **`@DataAsset`** (Unity's ScriptableObject): a Dart class becomes an
    asset type with a schema, an Inspector page, references by id, a
    cooked form. **ADR-0027 accepted 2026-09-25; built first**, ahead of
