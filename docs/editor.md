@@ -2047,6 +2047,23 @@ and a Hierarchy entry, Make Big Coin.
     the `FieldTarget` as the Inspector's do.
   - A throw draws the default editor under a line saying why, and a
     Console error once per distinct error.
+- **Play** (ADR-0028 §4): `context.play` is the running game during
+  in-editor Play, null while stopped (or without a game compiled in).
+  - `play.world` is the game's `World` (the first of `play.worlds`), as
+    the Game view's `FynkelGameView` registered it with
+    `FynkelPlayControl`: find objects, get their scripts, call their
+    methods, as game code does. Reading it while the game is paused
+    redraws the paused view once after the callback, so a change shows.
+  - `pause()`, `resume()`, `step()` and `stop()` are the toolbar's;
+    `isPaused` its state.
+  - Changes follow Live Play mode: the running game's alone, gone on Stop
+    unless applied (the Inspector's Apply to Scene). The Hierarchy and the
+    Inspector show them from the running world. `edit(…)` during Play
+    already went to the running game (step 2); `play` adds what the
+    document view cannot say, the game's own methods.
+  - A window rebuilds when Play starts and stops and when the game's
+    worlds change; a live readout binds to the game's models itself
+    (`ModelBuilder`), as `code_only`'s Level Tools does.
 - **A failing extension fails alone.** Every call into a package is
   wrapped. A throwing `registerEditor` skips that package's extensions,
   and a throwing command or `enabled` check is a Console error (with the

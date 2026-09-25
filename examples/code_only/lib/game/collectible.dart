@@ -55,7 +55,14 @@ class Collectible extends Behaviour {
 
   @override
   void onZoneEnter(ZoneEvent event) {
-    if (event.event != 'collect' || collected || !isPlayer(world, event.other)) return;
+    if (event.event != 'collect' || !isPlayer(world, event.other)) return;
+    collect();
+  }
+
+  /// Taken: scores the kind's value, plays its sound, bursts into sparks
+  /// and goes (the player touching it; the editor's Level Tools too).
+  void collect() {
+    if (collected) return;
     collected = true;
     state.collect(kind?.value ?? 1);
     world.audio.play(kind?.sound ?? Assets.audio.coin, volume: 0.7, pitch: kind?.pitch ?? 1);

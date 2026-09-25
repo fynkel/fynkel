@@ -9,7 +9,12 @@ import 'package:flutter/material.dart' hide Transform;
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 
+import 'package:fynkel_flutter/fynkel_flutter.dart' show ModelBuilder;
+
 import '../game/coin_kind.dart';
+import '../game/collectible.dart';
+import '../game/game_state.dart';
+import '../game/player.dart';
 import '../generated/assets.g.dart';
 
 void registerEditor(EditorExtensions editor) {
@@ -180,7 +185,8 @@ abstract final class JumpHeight {
 
 /// The Level Tools window: how many coins, how far out, and a button that
 /// puts the ring under the selected object (or at the top) as one undo
-/// step — the coins are the coin prefab, as `ObjectSpec`s.
+/// step — the coins are the coin prefab, as `ObjectSpec`s. During Play it
+/// works on the running game too ([PlayTools]).
 class LevelTools extends StatefulWidget {
   const LevelTools({super.key, required this.editor});
 
@@ -227,6 +233,66 @@ class _LevelToolsState extends State<LevelTools> {
           child: Text(under == null ? 'Place Ring' : 'Place Ring under ${under.name}'),
         ),
         if (scene == null) const Padding(padding: EdgeInsets.only(top: 8), child: Text('Open a scene first.')),
+        if (widget.editor.play case final play?) ...[
+          const Divider(height: 32),
+          PlayTools(play: play),
+        ],
+      ],
+    );
+  }
+}
+
+/// Level Tools during Play: the running game's coins, and buttons that
+/// collect them all or send the player back — the game's own methods on
+/// its world, gone when Play stops (Live Play mode).
+class PlayTools extends StatelessWidget {
+  const PlayTools({super.key, required this.play});
+
+  final EditorPlay play;
+
+  /// Takes every coin still in the level, as the player touching it would.
+  static int collectAll(World world) {
+    final coins = [
+      for (final c in world.findObjectsOfType<Collectible>())
+        if (!c.collected) c,
+    ];
+    for (final c in coins) {
+      c.collect();
+    }
+    return coins.length;
+  }
+
+  /// Back to the spawn point (a death, as the sweeper's).
+  static void respawn(World world) => world.findObjectsOfType<Player>().firstOrNull?.die();
+
+  @override
+  Widget build(BuildContext context) {
+    final world = play.world;
+    final state = world.context.serviceOrNull<GameState>();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Playing', style: Theme.of(context).textTheme.titleSmall),
+        if (state != null)
+          ModelBuilder<int>(
+            value: state.collected,
+            builder: (context, collected, _) => ModelBuilder<int>(
+              value: state.total,
+              builder: (context, total, _) => Text('Coins: $collected of $total', key: const Key('playTools.coins')),
+            ),
+          ),
+        const SizedBox(height: 8),
+        FilledButton(
+          key: const Key('playTools.collectAll'),
+          onPressed: () => collectAll(play.world),
+          child: const Text('Collect All Coins'),
+        ),
+        const SizedBox(height: 4),
+        OutlinedButton(
+          key: const Key('playTools.respawn'),
+          onPressed: () => respawn(play.world),
+          child: const Text('Respawn Player'),
+        ),
       ],
     );
   }

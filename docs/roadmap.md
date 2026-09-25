@@ -84,7 +84,10 @@ Three ADRs, then their implementation:
    done 2026-09-25; step 3 (custom Inspectors: `inspector<T>`,
    `InspectorContext`, `code_only`'s coin kind page) done 2026-09-25; step 4 (property
    drawers: `drawer<T>` for records, `namedDrawer` with
-   `@Expose(drawer:)`, `code_only`'s jump height) done 2026-09-25.
+   `@Expose(drawer:)`, `code_only`'s jump height) done 2026-09-25; step 6 (Play access:
+   `context.play` with the running `World`, Pause, Step and Stop;
+   `code_only`'s Level Tools collect the coins and respawn the player)
+   done 2026-09-25.
 2. **`@DataAsset`** (Unity's ScriptableObject): a Dart class becomes an
    asset type with a schema, an Inspector page, references by id, a
    cooked form. **ADR-0027 accepted 2026-09-25; built first**, ahead of

@@ -78,6 +78,25 @@ editor.namedDrawer('jumpHeight', (context, field) => Column(
 ));
 ```
 
+During Play, `context.play` is the running game: `play.world` is its
+`World` (find objects, call their scripts' methods), and `pause`,
+`resume`, `step` and `stop` are the toolbar's. What a tool changes there
+is the running game's alone, gone on Stop unless applied, as any Play
+edit:
+
+```dart
+editor.menuItem(
+  'Tools/Collect All Coins',
+  id: 'game.collectAll',
+  enabled: (context) => context.play != null,
+  run: (context) {
+    for (final coin in context.play!.world.findObjectsOfType<Collectible>()) {
+      coin.collect();
+    }
+  },
+);
+```
+
 The rules:
 
 - Only files under `lib/editor/` import this package or `lib/editor/`

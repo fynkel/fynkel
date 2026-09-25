@@ -8,6 +8,7 @@
 
 import 'dart:io';
 
+import 'package:code_only/editor/editor.dart' show PlayTools;
 import 'package:code_only/game/coin_kind.dart';
 import 'package:code_only/game/collectible.dart';
 import 'package:code_only/game/game.dart';
@@ -186,6 +187,23 @@ void main() {
         game.frame(dt);
         game.frame(dt);
         expect(game.state.screen.value, Screen.menu);
+      });
+
+      test("the editor's Level Tools during Play: every coin collected, the player sent back", () {
+        final game = playing(mode);
+        expect(PlayTools.collectAll(game.world), 5);
+        expect(PlayTools.collectAll(game.world), 0, reason: 'each coin once');
+        expect((game.state.collected.value, game.state.score.value, game.state.won.value), (5, 9, true));
+        game.frame(dt);
+        expect(game.world.findObjectsOfType<Collectible>(), isEmpty);
+
+        final player = game.world.findWithTag(playerTag)!;
+        player.transform.position = const Vec3(6, 0, 1);
+        game.frame(dt);
+        PlayTools.respawn(game.world);
+        game.frame(dt);
+        expect(game.state.deaths.value, 1);
+        expect(player.localTransform.position.x, closeTo(0, 1e-3));
       });
 
       test('the sweeper kills: back to the start', () {
