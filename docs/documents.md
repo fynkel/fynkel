@@ -1224,7 +1224,9 @@ field whose `asset(<kind>)` hint names one kind of asset and holds
 another is `FYN-A0007`, as on a component (§ Asset sidecars). `fynkel
 document new data <name> --type <type id>` (or the authoring session's
 `newDocument` with kind `data`, `type` and an optional `data`) writes one
-with an empty `data`. The cook validates it (errors fail the asset) and
+with an empty `data`. An asset list entry (`fynkel asset list --json`,
+the authoring session's assets) carries a data asset's `dataType`, what
+a typed picker filters on. The cook validates it (errors fail the asset) and
 writes it through the generic document path as a JSON chunk
 (`documentKind: data`). The lock's `documents` gains `data: 1`. A data
 asset's references neither key nor order its cook (the chunk holds only

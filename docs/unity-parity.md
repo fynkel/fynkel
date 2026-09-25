@@ -103,10 +103,14 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Overrides dropdown, blue margin bar | | 🔧 `7d51553` (the Prefab bar — Open, Select, Overrides ▾ — lists the overrides by object, a row comparing the prefab's value with the instance's, Revert / Apply, Revert All / Apply All; the blue bar and Apply / Revert on a right-click; an added component's '+' and Apply / Revert Added Component; Unpack stays in the Hierarchy menu) |
 | Multi-scene Hierarchy | | 🔧 `f632f96`, `ca34f28` (every open scene a section under its header — the active one bold, Set Active / Save / Unload / Load / Remove / Select Scene Asset; Open Scene Additive or a scene dropped on the Hierarchy adds one, a double-click opens one alone after asking; a click on another scene's row or object in the Scene view activates it; rows dragged onto another scene move there; one Scene view camera); 🟡 the selection is one scene's at a time (Unity's may span scenes); `a95f43b`: the other loaded scenes drawn in the Scene view, lit and shadowed with the active one) |
 | Physics Material asset | shared friction/bounciness, combine modes | 🔧 `eee5782`, `797c4b8` (ADR-0025, accepted: `.physicsmaterial.json` with `friction`, `bounciness`, `friction_combine` / `bounce_combine` in Unity's priority, the Collider's `material`, hot reload of live colliders); `089773d` editor (its Inspector page, the Collider's Material picker, the collider's own Friction and Bounciness hidden while one is set); 🟡 one friction coefficient, as Rapier has no static friction |
+| ScriptableObject | a class as an asset type: Create menu, Inspector, typed fields | 🔧 ADR-0027 (accepted): `@FynkelDataAsset` classes, `.data.json` assets checked against `schemas/data/`, one shared instance per asset at runtime (`d0c9606`), `ProjectWriter.writeData` (`cba9694`); `7dec1d9` editor (Create ▸ its menu path, its Inspector page from the schema, typed pickers, live edits during Play) |
 | Grid thumbnails, zoom slider | | 🔧 `8da4595` (the slider at the status bar's right, remembered; tiles act like rows; models, prefabs, materials and a model's meshes and materials drawn by `fynkel thumbnail` in the background, again when their file changes) |
 
 ## On purpose
 
+- A data asset's runtime changes are never saved, in Play too (ADR-0027
+  §3): Unity keeps a ScriptableObject's Play-mode changes; here only
+  Inspector edits are written, and they reach the running game.
 - `Vec3.forward` is −Z (right-handed, as glTF), not Unity's +Z.
 - Euler angles are degrees (as in Unity) but every other angle is
   radians (`Quat.axisAngle`), per ADR-0013's amendment.
@@ -315,3 +319,9 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   Floor's Collider shows Material None with Friction and Bounciness, ⊙
   offers the one physics material only, picked it hides both, ⌘Z brings
   them back).
+- 2026-09-25: data assets in the editor (`7dec1d9`,
+  `data_asset_parity_test.dart`: + ▸ New Game › Weapon writes `New
+  Weapon.data.json` of `game.Weapon`; Damage typed is saved at once, a
+  value under the schema's minimum refused with nothing written, ⌘Z
+  reads *Undo Data Asset Change*, the scene untouched; the Sword's
+  Upgrade ⊙ offers the two weapons, not the shield or a material).

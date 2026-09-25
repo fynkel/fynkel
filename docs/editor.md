@@ -2184,6 +2184,30 @@ it is set the collider's own Friction and Bounciness are hidden, since
 the material's replace them (`showIf: '!material'` — `showIf` counts a
 set reference as on).
 
+**The Data page** (ADR-0027 §7, Unity's ScriptableObject Inspector,
+2026-09-25, `7dec1d9`): a `.data.json`'s page is the registered
+`AssetDocumentSections` builder for `data`
+(`inspector/data_asset_inspector.dart`), which edits through the page's
+`AssetEdits` (`AssetPageScope`). It draws the type's fields from its
+committed schema (`schemas/data/<id>.schema.json`, with the metadata's
+labels) with the same field editors a script's card uses: the field
+editor (`inspector/field_editor.dart`) works on a `FieldTarget` — a
+component slot on the selected objects, or a data asset's `data` — so
+it needs no entity. Each change is prechecked like a script field's
+(bounds, an existing asset), writes the whole top-level field at
+`/data/<field>`, and is one saved undo step reading "Undo Data Asset
+Change". A type with no schema shows its values read-only. Create ▸
+<menu path> (`Game › Weapon`, from the type's `menu`; its `icon`) is in
+the + menu and the folder and asset menus; it writes `New Weapon.data.json`
+of that type with every field at its default and starts the rename. A
+data-typed field (`x-fynkel { type: data, data: <type id> }`, alone or a
+list's items) is an asset field of kind `data` whose ⊙ picker and drop
+take only data assets of its type (the asset list's `dataType`). During
+Play a saved edit reaches the running game's shared instance at once
+(`LivePlay.dataEdited` → `World.applyDataEdit`), and a script's
+data-typed field set in the Inspector takes the shared instance
+(`World.resolveData`); runtime changes to an instance are never saved.
+
 **Open** is offered for scenes, prefabs and an imported model's `prefab`
 part. Blend spaces have no editor in M4, so opening one
 would give an empty tab; their pages show their content read-only until
