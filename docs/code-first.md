@@ -28,13 +28,13 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Coroutines, Invoke | `StartCoroutine`, `Invoke` | ✅ `b92178e` |
 | World transform, `LookAt`, `forward`, `Translate` | | ✅ `2e0183f` |
 | Keys, `Debug.Log`, one script throwing | | ✅ `6b25b52`, `9bdf3d6`, `faf648d` |
-| Parent and children | `transform.parent`, `GetChild(i)` are objects | ❌ `children` is `List<int>`, `parent` is `int?`; a caller has to `world.attach(e)` (ADR-0026 §5) |
+| Parent and children | `transform.parent`, `GetChild(i)` are objects | 🔧 `parent` is a `GameObject?`, `children` a `List<GameObject>`, both showing this tick's `setParent` and spawns; the handles stay as `parentEntity` / `childEntities` (ADR-0026 §5) |
 | Find by name / tag / path | `Find`, `FindWithTag`, `transform.Find("a/b")` | ✅ `find`, `findWithTag`, `findChild`, `findDescendant` |
-| Find a script anywhere | `FindObjectOfType<T>()` | 🟡 `world.behaviours.whereType<T>()` works; no named helper |
-| Search down / up the tree | `GetComponentInChildren<T>()`, `InParent` | ❌ |
+| Find a script or component anywhere | `FindObjectOfType<T>()` | 🔧 `findObjectOfType<T>()` / `findObjectsOfType<T>()` for scripts and native components; `findObjectWith<T>()` / `findObjectsWith<T>()` for the objects carrying a native component |
+| Search down / up the tree | `GetComponentInChildren<T>()`, `InParent` | 🔧 `getInChildren<T>()`, `getAllInChildren<T>()`, `getInParent<T>()`, self first, inactive skipped unless `includeInactive` |
 | Another script on the same object | `GetComponent<Other>()` | ✅ `sibling<T>()` |
 | Shared game state | a singleton / ScriptableObject | ✅ `context.install(GameState())`, `context.service<T>()` |
-| Use an object the frame it spawned | yes | 🟡 most calls work; `entity`, `children`, `parent` throw until the next tick |
+| Use an object the frame it spawned | yes | 🟡 almost every call works, `children` and `parent` included; `entity` (the runtime handle) and `findChild` / `findDescendant` wait for the next tick |
 | SetActive | | ✅ |
 
 ## Tier 2 — assets and making things at runtime
