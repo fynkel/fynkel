@@ -10,6 +10,7 @@ import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/testing.dart';
 import 'package:spinner_game/generated/behaviours.g.dart';
 import 'package:spinner_game/spinner.dart';
+import 'package:spinner_game/weapon.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -27,7 +28,8 @@ void main() {
   });
 
   test('generated registration covers every @FynkelBehaviour class', () {
-    expect(behaviourTypes.map((t) => t.id), ['game.Blinker', 'game.Chime', 'game.Patrol', 'game.Spinner']);
+    expect(behaviourTypes.map((t) => t.id), ['game.Blinker', 'game.Chime', 'game.Patrol', 'game.Spinner', 'game.Wielder']);
+    expect(dataTypes.map((t) => t.id), ['game.Weapon']);
     expect(gameSpinnerType.version, 1);
     expect(gameBlinkerType.version, 2);
     expect(gameSpinnerType.fields.map((f) => f.name), ['axis', 'showcase', 'speed', 'spinning']);
@@ -100,6 +102,52 @@ void main() {
     c.delays.add(3); // a set list is growable
     expect(() => registry.instantiate('game.Chime', fields: {'moods': ['loud']}), throwsA(isA<BehaviourDataError>()));
     expect(() => registry.instantiate('game.Chime', fields: {'delays': 1}), throwsA(isA<BehaviourDataError>()));
+  });
+
+  test('a data type (ADR-0027): registered with the behaviours, built from its data, shared by reference', () {
+    final registry = BehaviourRegistry();
+    registerBehaviours(registry);
+    expect(registry.lookupData('game.Weapon'), same(registry.dataTypes.single));
+    final damage = gameWeaponType.field('damage')!;
+    expect((damage.defaultValue, damage.min), (1, 0), reason: 'the constructor default');
+    expect(gameWeaponType.field('cooldown')!.defaultValue, 0.5);
+    expect(gameWeaponType.field('upgrade')!.dataType, 'game.Weapon');
+    final sword = registry.instantiateData('game.Weapon', fields: {
+      'damage': 3,
+      'sounds': [
+        {'asset': 'c0000000-0000-4000-8000-000000000002'},
+      ],
+      // Resolved by the world, not here.
+      'upgrade': {'asset': 'c0000000-0000-4000-8000-000000000a02'},
+    }) as Weapon;
+    expect((sword.damage, sword.cooldown, sword.upgrade), (3, 0.5, null));
+    final weapon = registry.lookupData('game.Weapon');
+    expect(sword.dataType, same(weapon));
+    expect(sword.asset, isNull, reason: 'made from data, not loaded');
+    expect(gameWeaponType.field('sounds')!.get(sword), [
+      {'asset': 'c0000000-0000-4000-8000-000000000002'},
+    ]);
+    expect(registry.dataTypeOf(Weapon()), same(weapon));
+    expect(() => registry.instantiateData('game.Weapon', fields: {'damage': 'lots'}), throwsA(isA<DataAssetError>()));
+    expect(() => registry.instantiateData('game.Shield'), throwsA(isA<DataAssetError>()));
+    expect(() => registerBehaviours(registry), throwsArgumentError, reason: 'data ids are registered once too');
+
+    // A behaviour's data-typed fields hold the instance; its JSON is the
+    // instance's asset (none for one made in code).
+    final w = registry.instantiate('game.Wielder', fields: {
+      'weapon': {'asset': 'c0000000-0000-4000-8000-000000000a01'},
+    }) as Wielder;
+    expect(w.weapon, isNull, reason: 'the world resolves it');
+    final field = gameWielderType.field('weapon')!;
+    expect((field.type, field.dataType, field.holdsData), ('data', 'game.Weapon', true));
+    field.set(w, sword);
+    gameWielderType.field('spares')!.set(w, [sword, Weapon(damage: 5)]);
+    w.hit();
+    expect(w.dealt, 3);
+    expect(field.target!(w), same(sword));
+    expect(field.get(w), isNull);
+    expect(gameWielderType.field('spares')!.get(w), [null, null]);
+    expect(dataJson(null), isNull);
   });
 
   test('a List<Vec3> field (a @Gizmo.path) round-trips', () {

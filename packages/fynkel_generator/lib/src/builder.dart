@@ -23,6 +23,8 @@ const _behaviourAnnotation = TypeChecker.typeNamedLiterally('FynkelBehaviour', i
 const _exposeAnnotation = TypeChecker.typeNamedLiterally('Expose', inPackage: 'fynkel');
 const _gizmoAnnotation = TypeChecker.typeNamedLiterally('Gizmo', inPackage: 'fynkel');
 const _behaviourBase = TypeChecker.typeNamedLiterally('Behaviour', inPackage: 'fynkel');
+const _dataAnnotation = TypeChecker.typeNamedLiterally('FynkelDataAsset', inPackage: 'fynkel');
+const _dataBase = TypeChecker.typeNamedLiterally('DataAsset', inPackage: 'fynkel');
 
 /// Aggregates the package's `@FynkelBehaviour` classes into
 /// `lib/generated/behaviours.g.dart` and `.g.json`. Runs once per package
@@ -47,8 +49,9 @@ class BehaviourBuilder implements Builder {
     await buildStep.writeAsString(json, emitJson(package, classes));
   }
 
-  /// Every behaviour class in the package, sorted by id; throws
-  /// [BehaviourGenerationError] on the first problem.
+  /// Every behaviour and data class in the package, sorted by id (one id
+  /// space for both); throws [BehaviourGenerationError] on the first
+  /// problem.
   static Future<List<BehaviourClass>> collect(BuildStep buildStep) async {
     final resolver = buildStep.resolver;
     final out = <BehaviourClass>[];
@@ -60,12 +63,15 @@ class BehaviourBuilder implements Builder {
       if (!await resolver.isLibrary(id)) continue;
       final library = await resolver.libraryFor(id);
       final reader = LibraryReader(library);
-      for (final annotated in reader.annotatedWith(_behaviourAnnotation)) {
-        final c = await _readClass(resolver, library, annotated);
+      for (final (annotated, data) in [
+        for (final a in reader.annotatedWith(_behaviourAnnotation)) (a, false),
+        for (final a in reader.annotatedWith(_dataAnnotation)) (a, true),
+      ]) {
+        final c = await _readClass(resolver, library, annotated, data: data);
         final previous = byId[c.id];
         if (previous != null) {
           throw BehaviourGenerationError(
-            'behaviour id "${c.id}" is also used by ${previous.className} in ${previous.libraryUri}',
+            '${data ? 'data type' : 'behaviour'} id "${c.id}" is also used by ${previous.className} in ${previous.libraryUri}',
             library: c.libraryUri,
             member: c.className,
           );
@@ -79,22 +85,33 @@ class BehaviourBuilder implements Builder {
   }
 }
 
-Future<BehaviourClass> _readClass(Resolver resolver, LibraryElement library, AnnotatedElement annotated) async {
+Future<BehaviourClass> _readClass(
+  Resolver resolver,
+  LibraryElement library,
+  AnnotatedElement annotated, {
+  required bool data,
+}) async {
   final element = annotated.element;
   final libraryUri = library.uri.toString();
   final name = element.name ?? '<unnamed>';
+  final what = data ? '@FynkelDataAsset' : '@FynkelBehaviour';
+  final base = data ? _dataBase : _behaviourBase;
   if (element is! ClassElement) {
-    throw BehaviourGenerationError('@FynkelBehaviour applies to classes only', library: libraryUri, member: name);
+    throw BehaviourGenerationError('$what applies to classes only', library: libraryUri, member: name);
   }
-  if (!_behaviourBase.isAssignableFrom(element)) {
-    throw BehaviourGenerationError('@FynkelBehaviour class must extend Behaviour', library: libraryUri, member: name);
+  if (!base.isAssignableFrom(element)) {
+    throw BehaviourGenerationError(
+      '$what class must extend ${data ? 'DataAsset' : 'Behaviour'}',
+      library: libraryUri,
+      member: name,
+    );
   }
   if (element.isAbstract) {
-    throw BehaviourGenerationError('@FynkelBehaviour class must be concrete', library: libraryUri, member: name);
+    throw BehaviourGenerationError('$what class must be concrete', library: libraryUri, member: name);
   }
   if (element.isPrivate) {
     throw BehaviourGenerationError(
-      '@FynkelBehaviour class must be public (the generated file constructs it)',
+      '$what class must be public (the generated file constructs it)',
       library: libraryUri,
       member: name,
     );
@@ -102,7 +119,7 @@ Future<BehaviourClass> _readClass(Resolver resolver, LibraryElement library, Ann
   final ctor = element.unnamedConstructor;
   if (ctor == null || ctor.formalParameters.any((p) => p.isRequired)) {
     throw BehaviourGenerationError(
-      '@FynkelBehaviour class needs an unnamed constructor without required parameters',
+      '$what class needs an unnamed constructor without required parameters',
       library: libraryUri,
       member: name,
     );
@@ -110,7 +127,7 @@ Future<BehaviourClass> _readClass(Resolver resolver, LibraryElement library, Ann
   final id = annotated.annotation.peek('id')?.stringValue;
   if (id == null || !RegExp(r'^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)+$').hasMatch(id)) {
     throw BehaviourGenerationError(
-      'id must be a namespaced type id such as "game.Spinner" (got ${id == null ? 'none' : '"$id"'})',
+      'id must be a namespaced type id such as "${data ? 'game.Weapon' : 'game.Spinner'}" (got ${id == null ? 'none' : '"$id"'})',
       library: libraryUri,
       member: name,
     );
@@ -123,10 +140,10 @@ Future<BehaviourClass> _readClass(Resolver resolver, LibraryElement library, Ann
     throw BehaviourGenerationError('version must be >= 1', library: libraryUri, member: name);
   }
 
-  // Own fields first, then inherited ones up to (not including) Behaviour.
+  // Own fields first, then inherited ones up to (not including) the base.
   final fields = <ExposedField>[];
   final seen = <String>{};
-  for (InterfaceElement? cls = element; cls != null && !_behaviourBase.isExactly(cls); cls = cls.supertype?.element) {
+  for (InterfaceElement? cls = element; cls != null && !base.isExactly(cls); cls = cls.supertype?.element) {
     for (final f in cls.fields) {
       final annotation = _exposeAnnotation.firstAnnotationOf(f);
       if (annotation == null) {
@@ -137,7 +154,20 @@ Future<BehaviourClass> _readClass(Resolver resolver, LibraryElement library, Ann
       }
       final fieldName = f.name ?? '';
       if (!seen.add(fieldName)) continue;
-      fields.add(await _readField(resolver, f, ConstantReader(annotation), libraryUri, '$name.$fieldName'));
+      final field = await _readField(resolver, f, ConstantReader(annotation), libraryUri, '$name.$fieldName');
+      if (data && field.kind.isReference) {
+        throw BehaviourGenerationError(
+          '@Expose ${f.type.getDisplayString()} on a data asset: an asset cannot point into a scene '
+          '(GameObject and script fields belong on a behaviour)',
+          library: libraryUri,
+          member: '$name.$fieldName',
+        );
+      }
+      if (data && field.gizmo != null) {
+        throw BehaviourGenerationError('@Gizmo on a data asset: it has no place in the scene',
+            library: libraryUri, member: '$name.$fieldName');
+      }
+      fields.add(field);
     }
   }
   fields.sort((a, b) => a.name.compareTo(b.name));
@@ -172,7 +202,9 @@ Future<BehaviourClass> _readClass(Resolver resolver, LibraryElement library, Ann
     fields: fields,
     doc: description ?? _doc(element.documentationComment),
     icon: annotated.annotation.peek('icon')?.stringValue,
-    category: annotated.annotation.peek('category')?.stringValue,
+    category: data ? null : annotated.annotation.peek('category')?.stringValue,
+    isData: data,
+    menu: data ? annotated.annotation.peek('menu')?.stringValue : null,
   );
 }
 
@@ -228,13 +260,35 @@ Future<ExposedField> _readField(
     }
     if (element is EnumElement) enumValues = [for (final c in element.constants) c.name ?? ''];
   }
-  if (kind.isReference && !nullable) {
+  if ((kind.isReference || kind == FieldKind.data) && !nullable) {
     throw BehaviourGenerationError(
       '@Expose ${type.getDisplayString()} field must be nullable (${type.getDisplayString()}?): '
       'a reference is None until one is picked, and again when its object is deleted',
       library: libraryUri,
       member: member,
     );
+  }
+  String? dataId;
+  if (describedKind == FieldKind.data) {
+    final element = (described as InterfaceType).element;
+    final annotation = _dataAnnotation.firstAnnotationOfExact(element);
+    dataId = annotation == null ? null : ConstantReader(annotation).peek('id')?.stringValue;
+    typeLibrary = element.library.uri.toString();
+    typeName = element.name;
+    if (dataId == null) {
+      throw BehaviourGenerationError(
+        '@Expose ${type.getDisplayString()} field: $typeName is not a @FynkelDataAsset class',
+        library: libraryUri,
+        member: member,
+      );
+    }
+    if (element.isPrivate) {
+      throw BehaviourGenerationError(
+        '@Expose field type $typeName must be public (the generated file names it)',
+        library: libraryUri,
+        member: member,
+      );
+    }
   }
   if (kind == FieldKind.behaviour) {
     final element = (type as InterfaceType).element;
@@ -252,14 +306,23 @@ Future<ExposedField> _readField(
   Object? defaultValue;
   var hasDefault = false;
   final node = await resolver.astNodeFor(f.firstFragment);
-  if (node is VariableDeclaration) {
-    final init = node.initializer;
-    if (init != null) {
-      final v = _literal(init, kind, item: item);
-      if (v != null) {
-        defaultValue = v.value;
-        hasDefault = true;
-      }
+  // The initializer, else the unnamed constructor's `this.<field> = …`
+  // default (`Weapon({this.damage = 1})`, ADR-0027 §2).
+  var init = node is VariableDeclaration ? node.initializer : null;
+  if (init == null) {
+    final owner = f.enclosingElement;
+    final ctor = owner is ClassElement ? owner.unnamedConstructor : null;
+    for (final p in ctor?.formalParameters ?? const <FormalParameterElement>[]) {
+      if (p is! FieldFormalParameterElement || p.name != fieldName) continue;
+      final param = await resolver.astNodeFor(p.firstFragment);
+      if (param is FormalParameter) init = param.defaultClause?.value;
+    }
+  }
+  if (init != null) {
+    final v = _literal(init, kind, item: item);
+    if (v != null) {
+      defaultValue = v.value;
+      hasDefault = true;
     }
   }
   if (hasDefault && defaultValue == null && !nullable) hasDefault = false;
@@ -314,6 +377,7 @@ Future<ExposedField> _readField(
     enumValues: enumValues,
     behaviourId: behaviourId,
     item: item,
+    dataId: dataId,
   );
 }
 
@@ -332,6 +396,9 @@ FieldKind? _kindOf(DartType type) {
   if (element is EnumElement) return FieldKind.enumeration;
   if (element is ClassElement && _behaviourBase.isAssignableFrom(element) && !_behaviourBase.isExactly(element)) {
     return FieldKind.behaviour;
+  }
+  if (element is ClassElement && _dataBase.isAssignableFrom(element) && !_dataBase.isExactly(element)) {
+    return FieldKind.data;
   }
   final lib = element.library.uri;
   if (lib.isScheme('dart') && lib.path == 'core' && name != 'List') {
@@ -407,6 +474,7 @@ _Literal? _literal(Expression e, FieldKind kind, {FieldKind? item}) {
       };
     case FieldKind.gameObject:
     case FieldKind.behaviour:
+    case FieldKind.data:
       return null;
     case FieldKind.list:
       if (e is! ListLiteral || item == null) return null;

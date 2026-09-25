@@ -321,6 +321,90 @@ void main() {
     expect(exposeKindProblem('asset(physics_material)', FieldKind.assetRef), isNull);
   });
 
+  test('a data type (ADR-0027): DataType and DataFields, its schema under data/, its metadata under dataTypes', () {
+    const weapon = BehaviourClass(
+      id: 'game.Weapon',
+      version: 2,
+      className: 'Weapon',
+      libraryUri: 'package:demo/weapon.dart',
+      isData: true,
+      menu: 'Game/Weapon',
+      icon: 'swords',
+      doc: 'What a weapon does.',
+      fields: [
+        ExposedField(name: 'damage', kind: FieldKind.integer, defaultValue: 1, hasDefault: true, min: 0),
+        ExposedField(
+          name: 'upgrade',
+          kind: FieldKind.data,
+          nullable: true,
+          dataId: 'game.Weapon',
+          typeLibrary: 'package:demo/weapon.dart',
+          typeName: 'Weapon',
+        ),
+      ],
+    );
+    const wielder = BehaviourClass(
+      id: 'game.Wielder',
+      version: 1,
+      className: 'Wielder',
+      libraryUri: 'package:demo/wielder.dart',
+      fields: [
+        ExposedField(
+          name: 'spares',
+          kind: FieldKind.list,
+          item: FieldKind.data,
+          dataId: 'game.Weapon',
+          typeLibrary: 'package:demo/weapon.dart',
+          typeName: 'Weapon',
+        ),
+      ],
+    );
+    final src = emitDart('demo', [weapon, wielder, spinner]);
+    expect(src, contains('DataType get gameWeaponType => DataType('));
+    expect(src, contains('DataField('));
+    expect(src, contains("dataType: 'game.Weapon',"));
+    expect(src, contains('get: (b) => dataJson((b as _lib1.Weapon).upgrade)'));
+    expect(src, contains('target: (b) => (b as _lib1.Weapon).upgrade'));
+    expect(src, contains('set: (b, v) => (b as _lib1.Weapon).upgrade = v as _lib1.Weapon?'),
+        reason: 'the world resolves it to the shared instance');
+    expect(src, contains('get: (b) => [for (final x in (b as _lib2.Wielder).spares) dataJson(x)]'));
+    expect(src, contains('(b as _lib2.Wielder).spares = [for (final x in v as List) x as _lib1.Weapon]'));
+    expect(src, contains('List<BehaviourType> get behaviourTypes => List.unmodifiable([gameSpinnerType, gameWielderType])'));
+    expect(src, contains('List<DataType> get dataTypes => List.unmodifiable([gameWeaponType])'));
+    expect(src, contains('registry.registerData(t, replace: replace);'));
+    expect(emitDart('demo', [spinner]), isNot(contains('dataTypes')), reason: 'a game without data types is unchanged');
+
+    final schema = schemaFor(weapon);
+    expect(schema[r'$id'], 'https://fynkel.dev/schemas/data/game.Weapon.schema.json');
+    expect(schema['x-fynkel'], {
+      'kind': 'data',
+      'id': 'game.Weapon',
+      'version': 2,
+      'dart': 'package:demo/weapon.dart#Weapon',
+      'menu': 'Game/Weapon',
+      'icon': 'swords',
+    });
+    expect((schema['properties'] as Map)['upgrade'], {
+      'anyOf': [
+        {r'$ref': r'https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef'},
+        {'type': 'null'},
+      ],
+      'x-fynkel': {'type': 'data', 'nullable': true, 'data': 'game.Weapon'},
+    });
+    final spares = (schemaFor(wielder)['properties'] as Map)['spares'] as Map;
+    expect(spares['items'], {
+      r'$ref': r'https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef',
+      'x-fynkel': {'type': 'data', 'data': 'game.Weapon'},
+    });
+
+    final doc = jsonDecode(emitJson('demo', [weapon, wielder])) as Map<String, Object?>;
+    expect((doc['behaviours'] as List).map((b) => (b as Map)['id']), ['game.Wielder']);
+    final data = (doc['dataTypes'] as List).single as Map;
+    expect((data['id'], data['menu'], data['icon'], data['description']),
+        ('game.Weapon', 'Game/Weapon', 'swords', 'What a weapon does.'));
+    expect(jsonDecode(emitJson('demo', [spinner])), isNot(contains('dataTypes')));
+  });
+
   test('emitJson: metadata plus schema per type, sorted, JSON-parseable', () {
     final text = emitJson('demo', [spinner, blinker]);
     final doc = jsonDecode(text) as Map<String, Object?>;

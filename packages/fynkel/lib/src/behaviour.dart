@@ -498,6 +498,7 @@ class BehaviourField {
     required this.get,
     required this.set,
     this.target,
+    this.dataType,
     this.defaultValue,
     this.label,
     this.tooltip,
@@ -523,6 +524,11 @@ class BehaviourField {
   /// [GameObject.clone] copies. Null for any other field, and in code
   /// generated before it existed.
   final Object? Function(Behaviour behaviour)? target;
+
+  /// The type id a data-typed field (or list of them) holds (ADR-0027 §4):
+  /// its JSON is `{"asset": id}` and [set] takes the shared [DataAsset]
+  /// instance(s); [target] answers them as they are. Null otherwise.
+  final String? dataType;
   final Object? defaultValue;
   final String? label;
   final String? tooltip;
@@ -536,6 +542,9 @@ class BehaviourField {
   /// null) — the world resolves it once every behaviour of the load is
   /// attached, so a reference may name one attached after it.
   bool get isReference => type == 'gameObject' || type == 'behaviour';
+
+  /// Whether it holds data assets ([dataType]).
+  bool get holdsData => dataType != null;
 }
 
 /// The JSON a reference field's `get` answers for [target] (a
@@ -600,8 +609,59 @@ class BehaviourDataError extends Error {
 /// runtime.
 class BehaviourRegistry {
   final Map<String, BehaviourType> _types = {};
+  final Map<String, DataType> _dataTypes = {};
 
   Iterable<BehaviourType> get types => _types.values;
+
+  /// The `@FynkelDataAsset` types (ADR-0027), which the generated
+  /// `registerBehaviours` registers with the behaviours.
+  Iterable<DataType> get dataTypes => _dataTypes.values;
+
+  /// Registers a data type; like [register], a second registration of an
+  /// id is an error unless [replace] is set.
+  void registerData(DataType type, {bool replace = false}) {
+    if (!replace && _dataTypes.containsKey(type.id)) {
+      throw ArgumentError.value(type.id, 'type', 'a data type with this id is already registered');
+    }
+    _dataTypes[type.id] = type;
+  }
+
+  DataType? lookupData(String id) => _dataTypes[id];
+
+  /// The registered data type of [instance]'s class, or null.
+  DataType? dataTypeOf(DataAsset instance) {
+    final known = instance._dataType;
+    if (known != null) return known;
+    for (final t in _dataTypes.values) {
+      if (t.create().runtimeType == instance.runtimeType) return instance._dataType = t;
+    }
+    return null;
+  }
+
+  /// Builds a data asset of type [id] with its authored [fields] set, as
+  /// [instantiate] does for a behaviour. Data-typed fields are left for
+  /// the caller to resolve ([DataField.holdsData]).
+  DataAsset instantiateData(String id, {Map<String, Object?> fields = const {}, int? version}) {
+    final type = _dataTypes[id];
+    if (type == null) throw DataAssetError(id, 'unknown data type');
+    if (version != null && version > type.version) {
+      throw DataAssetError(id, 'authored version $version is newer than the registered ${type.version}');
+    }
+    final d = type.create().._dataType = type;
+    for (final entry in fields.entries) {
+      final f = type.field(entry.key);
+      if (f == null) throw DataAssetError(id, 'unknown field', field: entry.key);
+      if (f.holdsData) continue;
+      try {
+        f.set(d, entry.value);
+      } on DataAssetError {
+        rethrow;
+      } catch (e) {
+        throw DataAssetError(id, 'cannot set from ${entry.value.runtimeType} (${entry.value}): $e', field: entry.key);
+      }
+    }
+    return d;
+  }
 
   /// Registers a type; a second registration of the same id replaces the
   /// first only when [replace] is set, otherwise it is an error.
@@ -632,8 +692,9 @@ class BehaviourRegistry {
       final f = type.field(entry.key);
       if (f == null) throw BehaviourDataError(id, 'unknown field', field: entry.key);
       // A reference names an object of the load: the world sets it once
-      // they are all there (World._attachBehaviours).
-      if (f.isReference) continue;
+      // they are all there (World._attachBehaviours); a data asset is
+      // resolved by the world too.
+      if (f.isReference || f.holdsData) continue;
       try {
         f.set(b, entry.value);
       } on BehaviourDataError {

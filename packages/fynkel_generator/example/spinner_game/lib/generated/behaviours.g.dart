@@ -5,6 +5,7 @@
 
 import 'package:fynkel/fynkel.dart';
 import 'package:spinner_game/spinner.dart' as _lib0;
+import 'package:spinner_game/weapon.dart' as _lib1;
 
 /// `game.Blinker` v2 → [_lib0.Blinker].
 BehaviourType get gameBlinkerType =>
@@ -122,19 +123,109 @@ BehaviourType get gameSpinnerType => BehaviourType(
   ],
 );
 
-/// Every `@FynkelBehaviour` type of package `spinner_game`, by id.
-List<BehaviourType> get behaviourTypes =>
-    List.unmodifiable([gameBlinkerType, gameChimeType, gamePatrolType, gameSpinnerType]);
+/// `game.Weapon` v1 → [_lib1.Weapon].
+DataType get gameWeaponType => DataType(
+  id: 'game.Weapon',
+  version: 1,
+  create: _lib1.Weapon.new,
+  fields: [
+    DataField(
+      name: 'cooldown',
+      type: 'number',
+      defaultValue: 0.5,
+      min: 0,
+      get: (b) => (b as _lib1.Weapon).cooldown,
+      set: (b, v) => (b as _lib1.Weapon).cooldown = _double(v),
+    ),
+    DataField(
+      name: 'damage',
+      type: 'integer',
+      defaultValue: 1,
+      min: 0,
+      get: (b) => (b as _lib1.Weapon).damage,
+      set: (b, v) => (b as _lib1.Weapon).damage = _int(v),
+    ),
+    DataField(
+      name: 'projectile',
+      type: 'assetRef',
+      get: (b) => _assetRefJson((b as _lib1.Weapon).projectile),
+      set: (b, v) => (b as _lib1.Weapon).projectile = _orNull(v, _assetRef),
+    ),
+    DataField(
+      name: 'sounds',
+      type: 'list',
+      defaultValue: const [],
+      get: (b) => [for (final x in (b as _lib1.Weapon).sounds) _assetRefJson(x)],
+      set: (b, v) => (b as _lib1.Weapon).sounds = [for (final x in v as List) _assetRef(x)],
+    ),
+    DataField(
+      name: 'upgrade',
+      type: 'data',
+      dataType: 'game.Weapon',
+      get: (b) => dataJson((b as _lib1.Weapon).upgrade),
+      target: (b) => (b as _lib1.Weapon).upgrade,
+      set: (b, v) => (b as _lib1.Weapon).upgrade = v as _lib1.Weapon?,
+    ),
+  ],
+);
 
-/// Registers every type of this package in [registry].
+/// `game.Wielder` v1 → [_lib1.Wielder].
+BehaviourType get gameWielderType => BehaviourType(
+  id: 'game.Wielder',
+  version: 1,
+  create: _lib1.Wielder.new,
+  fields: [
+    BehaviourField(
+      name: 'spares',
+      type: 'list',
+      defaultValue: const [],
+      dataType: 'game.Weapon',
+      get: (b) => [for (final x in (b as _lib1.Wielder).spares) dataJson(x)],
+      target: (b) => (b as _lib1.Wielder).spares,
+      set: (b, v) => (b as _lib1.Wielder).spares = [for (final x in v as List) x as _lib1.Weapon],
+    ),
+    BehaviourField(
+      name: 'weapon',
+      type: 'data',
+      dataType: 'game.Weapon',
+      get: (b) => dataJson((b as _lib1.Wielder).weapon),
+      target: (b) => (b as _lib1.Wielder).weapon,
+      set: (b, v) => (b as _lib1.Wielder).weapon = v as _lib1.Weapon?,
+    ),
+  ],
+);
+
+/// Every `@FynkelBehaviour` type of package `spinner_game`, by id.
+List<BehaviourType> get behaviourTypes => List.unmodifiable([
+  gameBlinkerType,
+  gameChimeType,
+  gamePatrolType,
+  gameSpinnerType,
+  gameWielderType,
+]);
+
+/// Every `@FynkelDataAsset` type of package `spinner_game`, by id.
+List<DataType> get dataTypes => List.unmodifiable([gameWeaponType]);
+
+/// Registers every type of this package in [registry] (the data types too).
 void registerBehaviours(BehaviourRegistry registry, {bool replace = false}) {
   for (final t in behaviourTypes) {
     registry.register(t, replace: replace);
+  }
+  for (final t in dataTypes) {
+    registry.registerData(t, replace: replace);
   }
 }
 
 // JSON ↔ field value converters.
 double _double(Object? v) => (v as num).toDouble();
+
+int _int(Object? v) {
+  if (v is int) return v;
+  final d = v as double;
+  if (d != d.truncateToDouble()) throw FormatException('expected an integer, got $d');
+  return d.toInt();
+}
 
 Vec3 _vec3(Object? v) {
   final l = (v as List).cast<num>();

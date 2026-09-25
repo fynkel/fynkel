@@ -33,6 +33,7 @@ import 'wire/support.dart' show WireRecord, WireStrings, writeVec3;
 export 'native/bridge.dart' show BridgeStats, CommandLane, FramePlan, StepResult;
 
 part 'behaviour.dart';
+part 'data_asset.dart';
 part 'object_spec.dart';
 part 'projection.dart';
 part 'scenes.dart';
@@ -1379,7 +1380,8 @@ class World {
         for (final f in type.fields) {
           if (f.isReference) continue;
           try {
-            f.set(c, f.get(b));
+            // A data asset is shared, not copied.
+            f.set(c, f.holdsData ? f.target!(b) : f.get(b));
           } on Object catch (e) {
             warnings.add(LoadDiagnostic(
               code: 'FYN-B0002',

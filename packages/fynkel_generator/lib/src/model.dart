@@ -44,10 +44,14 @@ enum FieldKind {
 
   /// `List<T>` ↔ a JSON array of T's JSON (`list`), for T one of
   /// [listItems] (ADR-0027 §5); `List<Vec3>` stays [vec3List].
-  list('list');
+  list('list'),
+
+  /// A `@FynkelDataAsset` class, nullable ↔ `{ "asset": id }` (`data`):
+  /// the shared instance of a data asset (ADR-0027 §4), resolved at load.
+  data('data');
 
   /// The kinds a [list] may hold.
-  static const listItems = [number, integer, boolean, string, quat, assetRef, enumeration];
+  static const listItems = [number, integer, boolean, string, quat, assetRef, enumeration, data];
 
   const FieldKind(this.typeName);
 
@@ -67,7 +71,8 @@ enum FieldKind {
         FieldKind.enumeration => 'an enum',
         FieldKind.gameObject => 'GameObject?',
         FieldKind.behaviour => 'a @FynkelBehaviour class (nullable)',
-        FieldKind.list => 'List<T> (T one of double, int, bool, String, Quat, AssetRef, an enum)',
+        FieldKind.list => 'List<T> (T one of double, int, bool, String, Quat, AssetRef, an enum, a data class)',
+        FieldKind.data => 'a @FynkelDataAsset class (nullable)',
       };
 
   /// A reference to an object of the scene, resolved at load.
@@ -109,6 +114,7 @@ class ExposedField {
     this.enumValues = const [],
     this.behaviourId,
     this.item,
+    this.dataId,
   });
 
   /// The Dart field name; also the JSON/scene field name.
@@ -164,6 +170,10 @@ class ExposedField {
   /// item.
   final FieldKind? item;
 
+  /// The type id of the data class a [FieldKind.data] field (or a list of
+  /// them) holds.
+  final String? dataId;
+
   /// The `x-fynkel` hints beyond the type, in a fixed key order (what the
   /// schema and the metadata both carry).
   Map<String, Object?> get hints => item != null ? _listHints : _hints;
@@ -182,6 +192,7 @@ class ExposedField {
         if (step != null) 'step': step,
         if (unit != null) 'unit': unit,
         if (displayKind != null) 'kind': displayKind,
+        if (dataId != null) 'data': dataId,
       };
 
   Map<String, Object?> get _hints => {
@@ -200,6 +211,7 @@ class ExposedField {
         if (showIf != null) 'showIf': showIf,
         if (gizmo != null) 'gizmo': gizmo!.json,
         if (behaviourId != null) 'behaviour': behaviourId,
+        if (dataId != null) 'data': dataId,
       };
 }
 
@@ -300,7 +312,8 @@ String? exposeKindProblem(String kind, FieldKind type) {
   };
 }
 
-/// One `@FynkelBehaviour` class.
+/// One `@FynkelBehaviour` class, or (with [isData]) one
+/// `@FynkelDataAsset` class (ADR-0027).
 class BehaviourClass {
   const BehaviourClass({
     required this.id,
@@ -311,6 +324,8 @@ class BehaviourClass {
     this.doc,
     this.icon,
     this.category,
+    this.isData = false,
+    this.menu,
   });
 
   /// The stable, namespaced type id scene components use (`game.Spinner`).
@@ -328,6 +343,12 @@ class BehaviourClass {
   /// `@FynkelBehaviour(icon:, category:)` for Add Component and the Hierarchy.
   final String? icon;
   final String? category;
+
+  /// A data type: a [DataAsset] subclass, its schema in `schemas/data/`.
+  final bool isData;
+
+  /// `@FynkelDataAsset(menu:)`: the Create menu path (`Game/Weapon`).
+  final String? menu;
 }
 
 /// A generator error: the offending declaration and why.

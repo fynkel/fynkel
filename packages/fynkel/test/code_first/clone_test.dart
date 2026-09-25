@@ -21,6 +21,12 @@ class Spinner extends Behaviour {
 class Turret extends Behaviour {
   GameObject? target;
   Spinner? spinner;
+  Ammo? ammo;
+}
+
+/// A data asset (ADR-0027): shared by the copy, never copied.
+class Ammo extends DataAsset {
+  int rounds = 10;
 }
 
 /// Unregistered: a clone leaves it out, with a warning.
@@ -56,6 +62,14 @@ final turretType = BehaviourType(
       get: (b) => referenceJson((b as Turret).spinner),
       target: (b) => (b as Turret).spinner,
       set: (b, v) => (b as Turret).spinner = v as Spinner?,
+    ),
+    BehaviourField(
+      name: 'ammo',
+      type: 'data',
+      dataType: 'clone.Ammo',
+      get: (b) => dataJson((b as Turret).ammo),
+      target: (b) => (b as Turret).ammo,
+      set: (b, v) => (b as Turret).ammo = v as Ammo?,
     ),
   ],
 );
@@ -106,9 +120,11 @@ void main() {
         ],
       ),
     );
+    final ammo = Ammo();
     turret
       ..target = player
-      ..spinner = barrelSpinner;
+      ..spinner = barrelSpinner
+      ..ammo = ammo;
     tick(w);
 
     final copy = ship.clone(transform: const Transform(position: Vec3(10, 0, 0)));
@@ -130,6 +146,7 @@ void main() {
     expect(copiedTurret.spinner, copiedSpinner, reason: 'a script inside the tree: its copy');
     expect(copiedTurret.target, player, reason: 'an object outside the tree: kept');
     expect(turret.spinner, barrelSpinner, reason: 'the source untouched');
+    expect(copiedTurret.ammo, same(ammo), reason: 'a data asset is shared, not copied');
 
     tick(w);
     expect(copiedSpinner.created, 1, reason: 'the copy is created like any new script');
