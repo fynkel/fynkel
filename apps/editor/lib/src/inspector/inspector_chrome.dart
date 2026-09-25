@@ -19,12 +19,14 @@ class InspectorCaption extends StatelessWidget {
   final String text;
   final Widget? trailing;
 
+  // Unity's [Header]: the group's name in bold, as written — not a
+  // spaced-out capital label (docs/ui-refresh).
   static TextStyle style(BuildContext context) => TextStyle(
     fontFamily: uiFontFamily,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: FontWeight.w600,
-    letterSpacing: 0.7,
-    color: context.tokens.textDisabled,
+    letterSpacing: -0.15,
+    color: context.tokens.text,
   );
 
   @override
@@ -32,7 +34,7 @@ class InspectorCaption extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: Text(text.toUpperCase(), style: style(context), maxLines: 1, overflow: TextOverflow.ellipsis),
+          child: Text(text, style: style(context), maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
         ?trailing,
       ],

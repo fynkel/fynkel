@@ -12,7 +12,8 @@
 // A mixed value (the selection disagrees) is drawn as `—` until edited.
 //
 // Item 9b: the Inspector reads left to right — one label column, the value
-// left-aligned right after it, the unit right after the number, the axis
+// left-aligned right after it, a ° after an angle (other units are the
+// label's tooltip, docs/ui-refresh), the axis
 // letter inside a vector's field, an empty value `—` and an empty slot
 // `None`. A number shows at most three decimals until it is clicked, then
 // its full precision, so a narrow field never cuts a value off.
@@ -92,8 +93,8 @@ class FieldRow extends StatelessWidget {
   final Widget child;
   final String? error;
 
-  /// Shown dim after the label — vectors carry their unit here, not in
-  /// their narrow per-axis fields.
+  /// The value's unit, told by the label's tooltip — Unity draws none, and
+  /// a unit in every box was most of the Inspector's noise (docs/ui-refresh).
   final String? unit;
 
   /// Unity's override marking: a bold label and a blue bar in the margin;
@@ -119,8 +120,12 @@ class FieldRow extends StatelessWidget {
         fontWeight: overridden ? FontWeight.w600 : null,
       ),
     );
-    if (tooltip != null && tooltip!.isNotEmpty) {
-      text = Tooltip(message: tooltip!, waitDuration: const Duration(milliseconds: 500), child: text);
+    final tip = [
+      if (tooltip != null && tooltip!.isNotEmpty) tooltip!,
+      if (unit != null && unit!.isNotEmpty) 'In $unit',
+    ].join('\n');
+    if (tip.isNotEmpty) {
+      text = Tooltip(message: tip, waitDuration: const Duration(milliseconds: 500), child: text);
     }
     if (dragLabel != null) text = dragLabel!(text);
     Widget row = Padding(
@@ -134,20 +139,7 @@ class FieldRow extends StatelessWidget {
               children: [
                 SizedBox(
                   width: math.max(48, labelColumnWidth(c.maxWidth + indent) - indent),
-                  child: Row(
-                    children: [
-                      Expanded(child: text),
-                      if (unit != null && unit!.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 5, right: 2),
-                          child: Text(
-                            unit!,
-                            key: const ValueKey('field.unit'),
-                            style: theme.textTheme.labelSmall?.copyWith(color: context.tokens.textDisabled),
-                          ),
-                        ),
-                    ],
-                  ),
+                  child: Row(children: [Expanded(child: text)]),
                 ),
                 const SizedBox(width: _labelGap),
                 Expanded(child: child),
@@ -734,8 +726,9 @@ class _NumberFieldState extends State<NumberField> {
   Widget build(BuildContext context) {
     final t = context.tokens;
     final unit = widget.unit ?? (widget.angle ? '°' : null);
-    // A compact (per-axis) field is too narrow for "20 m"; the row's label carries the unit. Degrees stay.
-    final shownUnit = widget.compact && unit != '°' ? null : unit;
+    // Only degrees are drawn, as a ° after the number; any other unit is the
+    // label's tooltip (docs/ui-refresh: Unity draws none).
+    final shownUnit = unit == '°' || unit == 'deg' ? '°' : null;
     // A vector component: its axis letter inside the field, in the gizmo's colour, is the drag handle.
     final letter = widget.compact ? widget.label : null;
     final text = _CommitText(
@@ -809,6 +802,7 @@ class _NumberFieldState extends State<NumberField> {
     return FieldRow(
       label: widget.label!,
       tooltip: widget.tooltip,
+      unit: shownUnit == null ? unit : null,
       error: widget.error,
       overridden: widget.overridden,
       onRevert: widget.onRevert,

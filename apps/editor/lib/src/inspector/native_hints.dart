@@ -38,9 +38,9 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
     'ortho_height': {'label': 'Orthographic height', 'unit': 'm', 'min': 0, 'group': 'Lens', 'order': 2},
     'near': {'unit': 'm', 'min': 0, 'group': 'Clipping', 'order': 3},
     'far': {'unit': 'm', 'min': 0, 'group': 'Clipping', 'order': 4},
-    'priority': {'group': 'Output', 'order': 5},
-    'exposure_mode': {'group': 'Exposure', 'order': 6},
-    'exposure': {'label': 'Exposure (EV100)', 'group': 'Exposure', 'order': 7, 'step': 0.1},
+    'exposure_mode': {'group': 'Exposure', 'order': 5},
+    'exposure': {'label': 'Exposure (EV100)', 'group': 'Exposure', 'order': 6, 'step': 0.1},
+    'priority': {'group': 'Output', 'order': 7},
     'culling_mask': {'kind': 'layerMask', 'label': 'Culling mask', 'group': 'Output', 'order': 8},
   },
   'fynkel.DirectionalLight': {

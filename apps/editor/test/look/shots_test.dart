@@ -27,6 +27,8 @@ Future<void> _font(String family, List<String> files) async {
     if (file.existsSync()) loader.addFont(Future.value(ByteData.sublistView(file.readAsBytesSync())));
   }
   await loader.load();
+  // Material's icons (the card menus' ⋯).
+  await (FontLoader('MaterialIcons')..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
 }
 
 Future<void> _loadFonts() async {

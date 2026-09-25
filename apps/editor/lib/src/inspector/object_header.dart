@@ -67,7 +67,7 @@ class ActiveToggle extends StatelessWidget {
   }
 }
 
-/// The Layer and Tags rows under the header's name.
+/// The Tags and Layer row under the header's name.
 class LayerTagsRows extends StatelessWidget {
   const LayerTagsRows({super.key, required this.model, this.onEditLayers, this.onEditTags});
 
@@ -79,28 +79,55 @@ class LayerTagsRows extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        FieldRow(
-          key: const ValueKey('inspector.layer'),
-          label: 'Layer',
-          tooltip: 'What the object is for physics (what it collides with), cameras and lights',
-          child: LayerField(
-            value: model.layer,
-            layers: model.layerNames,
-            enabled: model.canEdit,
-            onCommit: model.setLayer,
-            onEdit: onEditLayers,
+    final t = context.tokens;
+    Widget label(String text, String tooltip) => Padding(
+      padding: EdgeInsets.only(right: t.gap),
+      child: Tooltip(
+        message: tooltip,
+        waitDuration: const Duration(milliseconds: 500),
+        child: Text(
+          text,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: t.textSecondary),
+        ),
+      ),
+    );
+    // Unity's one row: Tag ▾ and Layer ▾ side by side (docs/ui-refresh).
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: t.fieldHeight,
+            child: Center(child: label('Tags', 'What the object is for gameplay: world.findWithTag, go.hasTag')),
           ),
-        ),
-        FieldRow(
-          key: const ValueKey('inspector.tags'),
-          label: 'Tags',
-          tooltip: 'What the object is for gameplay: world.findWithTag, go.hasTag',
-          child: TagsField(model: model, onEdit: onEditTags),
-        ),
-      ],
+          Expanded(
+            child: KeyedSubtree(
+              key: const ValueKey('inspector.tags'),
+              child: TagsField(model: model, onEdit: onEditTags),
+            ),
+          ),
+          SizedBox(width: t.pad),
+          SizedBox(
+            height: t.fieldHeight,
+            child: Center(
+              child: label('Layer', 'What the object is for physics (what it collides with), cameras and lights'),
+            ),
+          ),
+          Expanded(
+            child: KeyedSubtree(
+              key: const ValueKey('inspector.layer'),
+              child: LayerField(
+                value: model.layer,
+                layers: model.layerNames,
+                enabled: model.canEdit,
+                onCommit: model.setLayer,
+                onEdit: onEditLayers,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -268,7 +295,14 @@ class TagsField extends StatelessWidget {
                   Icon(FIcons.add, size: 12, color: enabled ? t.textSecondary : t.textDisabled),
                   if (model.tagsInUse.isEmpty) ...[
                     const SizedBox(width: 3),
-                    Text('Add tag', style: theme.textTheme.bodySmall?.copyWith(color: t.textDisabled)),
+                    Flexible(
+                      child: Text(
+                        'Add tag',
+                        maxLines: 1,
+                        overflow: TextOverflow.clip,
+                        style: theme.textTheme.bodySmall?.copyWith(color: t.textDisabled),
+                      ),
+                    ),
                   ],
                 ],
               ),

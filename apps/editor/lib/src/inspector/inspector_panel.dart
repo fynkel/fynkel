@@ -32,7 +32,6 @@ import 'field_spec.dart';
 import 'overrides_popup.dart';
 import 'field_widgets.dart';
 import 'inspector_chrome.dart';
-import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import 'inspector_model.dart';
 import 'prefab_actions.dart' show applyTargetLabel;
@@ -249,14 +248,20 @@ class _InspectorPanelState extends State<InspectorPanel> {
                     children: [
                       Padding(
                         padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-                        child: Builder(
-                          builder: (button) => OutlinedButton.icon(
-                            key: const ValueKey('inspector.addComponent'),
-                            onPressed: model.canEdit
-                                ? () => showAddComponent(context, model, anchor: globalRectOf(button))
-                                : null,
-                            icon: const Icon(FIcons.add),
-                            label: const Text('Add Component'),
+                        // Unity's: a centred button of its own width.
+                        child: Center(
+                          child: SizedBox(
+                            width: 230,
+                            child: Builder(
+                              builder: (button) => OutlinedButton(
+                                key: const ValueKey('inspector.addComponent'),
+                                style: OutlinedButton.styleFrom(backgroundColor: context.tokens.header),
+                                onPressed: model.canEdit
+                                    ? () => showAddComponent(context, model, anchor: globalRectOf(button))
+                                    : null,
+                                child: const Text('Add Component'),
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -381,10 +386,20 @@ class _InspectorPanelState extends State<InspectorPanel> {
               children: [
                 ActiveToggle(model: model),
                 const SizedBox(width: 2),
-                Icon(
-                  single.prefab != null ? FIcons.widgetsOutlined : FIcons.categoryOutlined,
-                  size: t.icon,
-                  color: single.prefab != null ? t.accent : t.textSecondary,
+                // The id is not a line of its own (docs/ui-refresh: Unity
+                // shows none): the icon's tooltip, and a click copies it.
+                Tooltip(
+                  message: '${single.id}\nClick to copy the id',
+                  waitDuration: const Duration(milliseconds: 500),
+                  child: GestureDetector(
+                    key: const ValueKey('inspector.copyId'),
+                    onTap: () => Clipboard.setData(ClipboardData(text: single.id)),
+                    child: Icon(
+                      single.prefab != null ? FIcons.widgetsOutlined : FIcons.categoryOutlined,
+                      size: t.icon,
+                      color: single.prefab != null ? t.accent : t.textSecondary,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 6),
                 Expanded(
@@ -402,19 +417,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
                 ],
               ],
             ),
-            const SizedBox(height: 2),
-            Row(
-              children: [
-                Expanded(child: SelectableText(single.id, style: monoStyle(context, size: 10))),
-                IconButton(
-                  tooltip: 'Copy id',
-                  icon: const Icon(FIcons.copy, size: 12),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-                  onPressed: () => Clipboard.setData(ClipboardData(text: single.id)),
-                ),
-              ],
-            ),
+            const SizedBox(height: 4),
             _layerTags(context),
           ],
         ),

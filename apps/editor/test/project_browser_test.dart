@@ -837,7 +837,7 @@ void main() {
       expect(find.byKey(const Key('inspector.applyBar')), findsNothing);
       // What uses it (an image has no parts of its own).
       expect(find.byKey(const Key('asset.sub.image/0')), findsNothing);
-      expect(find.textContaining('USED BY · 1'), findsOneWidget);
+      expect(find.textContaining('Used by · 1'), findsOneWidget);
       expect(find.text('materials/rusted.material.json'), findsOneWidget);
       await tester.tap(find.byKey(const Key('asset.dependent.materials/rusted.material.json/base_color_texture')));
       await tester.pumpAndSettle();
@@ -862,7 +862,7 @@ void main() {
         subAssets: {'mesh/0': 'u-mesh', 'material/Painted': 'u-painted', 'material/Glass': 'u-glass', 'prefab': 'u-prefab'},
       );
       final (project, model, _, _, _) = await pumpAsset(tester, robot, given: given);
-      expect(find.text('MATERIALS'), findsOneWidget);
+      expect(find.text('Materials'), findsOneWidget);
       expect(find.byKey(const Key('asset.materials.material/Painted')), findsOneWidget);
       expect(find.byKey(const Key('asset.materials.material/Glass')), findsOneWidget);
       expect(find.text('None (embedded)'), findsNWidgets(2));
@@ -922,7 +922,7 @@ void main() {
       expect(find.text('fynkel.pbr@1'), findsOneWidget);
       expect(find.text('base_color'), findsOneWidget);
       expect(find.text('[0.5,0.25,0.125,1.0]'), findsOneWidget);
-      expect(find.textContaining('USED BY · 2'), findsOneWidget);
+      expect(find.textContaining('Used by · 2'), findsOneWidget);
       expect(find.byKey(const Key('asset.open')), findsNothing);
       model.select(mainScene);
       await tester.pumpAndSettle();
@@ -935,7 +935,7 @@ void main() {
       expect(find.byKey(const Key('inspector.empty')), findsOneWidget);
       model.select(robot);
       await tester.pumpAndSettle();
-      expect(find.textContaining('PARTS · 3'), findsOneWidget);
+      expect(find.textContaining('Parts · 3'), findsOneWidget);
       expect(find.byKey(const Key('asset.sub.mesh/0')), findsOneWidget);
       expect(find.byKey(const Key('asset.sub.prefab')), findsOneWidget);
       expect(find.byKey(const Key('asset.settings.allowExternalFiles')), findsOneWidget);
@@ -946,7 +946,7 @@ void main() {
     ) async {
       addTearDown(() => AssetDocumentSections.unregister('scene'));
       final (_, model, _, _, _) = await pumpAsset(tester, mainScene);
-      expect(find.textContaining('SCENE'), findsWidgets, reason: 'the generic summary');
+      expect(find.textContaining('Scene'), findsWidgets, reason: 'the generic summary');
       expect(find.byKey(const Key('test.sceneSection')), findsNothing);
       // What a later data-asset kind does: one registration, no new panel.
       AssetDocumentSections.register(
@@ -964,7 +964,7 @@ void main() {
       model.select(mainScene);
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('test.sceneSection')), findsOneWidget);
-      expect(find.textContaining('LEVEL'), findsOneWidget);
+      expect(find.textContaining('Level'), findsOneWidget);
       expect(AssetDocumentSections.kinds, containsAll(['material', 'scene']));
       // The material's own sections are untouched.
       model.select(rusted);

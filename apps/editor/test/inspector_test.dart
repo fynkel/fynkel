@@ -384,7 +384,7 @@ void main() {
       expect(specs['fynkel.Name']!.authored, isFalse);
       // Order: the hints put fields in their stated order.
       expect(camera.fields.map((f) => f.name).take(3), ['projection', 'fov_y', 'ortho_height']);
-      expect(camera.groups, ['Lens', 'Clipping', 'Output', 'Exposure']);
+      expect(camera.groups, ['Lens', 'Clipping', 'Exposure', 'Output']);
     });
 
     test(
@@ -1021,8 +1021,8 @@ void main() {
       expect(find.byKey(const ValueKey('card.fynkel.Transform#0')), findsOneWidget);
       expect(find.byKey(const ValueKey('card.game.Spinner#0')), findsOneWidget);
       // Groups from the hints.
-      expect(find.text('MOTION'), findsOneWidget);
-      expect(find.text('SHADOWS'), findsOneWidget);
+      expect(find.text('Motion'), findsOneWidget);
+      expect(find.text('Shadows'), findsOneWidget);
 
       // Drag X of position by 100 px: 0.01 per pixel → 3.0.
       final before = tab.document.history;
@@ -1063,8 +1063,8 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();
       expect(find.text('below the minimum 0'), findsNothing);
-      // The unit shows.
-      expect(find.text('rad/s'), findsOneWidget);
+      // The unit is the label's tooltip.
+      expect(find.byWidgetPredicate((w) => w is Tooltip && (w.message ?? '').endsWith('In rad/s')), findsOneWidget);
     });
 
     testWidgets('checkbox, enum menu, show-if, mixed values and the multi header', (tester) async {
@@ -1492,7 +1492,7 @@ void main() {
       expect(find.byKey(const ValueKey('inspector.lastError')), findsNothing);
     });
 
-    testWidgets('an angle shows rounded degrees; compact axis fields drop the unit, the row label carries it', (
+    testWidgets('an angle shows rounded degrees; other units are the label tooltip, never in a box', (
       tester,
     ) async {
       final commits = <Object>[];
@@ -1536,22 +1536,19 @@ void main() {
         '45',
       );
       expect(commits, isEmpty);
-      // The axis fields: no suffix inside; the unit once after the row label.
+      // The axis fields: no suffix inside; the unit is the row label's tooltip.
       final axisFields = tester.widgetList<TextField>(
         find.descendant(of: find.byType(VecField), matching: find.byType(TextField)),
       );
       expect(axisFields.map((f) => f.controller!.text), ['20', '0', '1.5']);
       expect(axisFields.map((f) => f.decoration!.suffixText), everyElement(isNull));
-      expect(find.byKey(const ValueKey('field.unit')), findsOneWidget);
-      expect(tester.widget<Text>(find.byKey(const ValueKey('field.unit'))).data, 'm');
-      // A full-width number draws its unit right after the value; a compact degree field keeps °.
-      String unitOf(String key) => tester
-          .widget<Text>(
-            find.descendant(of: find.byKey(ValueKey(key)), matching: find.byKey(const ValueKey('number.unit'))),
-          )
-          .data!;
-      expect(unitOf('plain'), 'm');
-      expect(unitOf('angle'), '°');
+      expect(find.text('m'), findsNothing);
+      expect(find.byTooltip('In m'), findsOneWidget, reason: 'the vector row');
+      // Only an angle draws its unit, a ° after the number.
+      Finder unitIn(String key) =>
+          find.descendant(of: find.byKey(ValueKey(key)), matching: find.byKey(const ValueKey('number.unit')));
+      expect(unitIn('plain'), findsNothing);
+      expect(tester.widget<Text>(unitIn('angle')).data, '°');
     });
 
     testWidgets('the layer mask names the project layers; the colour picker commits linear values', (tester) async {
