@@ -921,6 +921,44 @@ fn dart(fp: u64) -> String {
             }
             let _ = writeln!(o, "      );");
         }
+        // toJson: the document form (a component's `data`, a nested
+        // record's object), as `fynkel_document`'s codec writes it.
+        if matches!(s.kind, SchemaKind::Component | SchemaKind::Record) {
+            let _ = writeln!(o);
+            let _ = writeln!(
+                o,
+                "  /// The document form: a component's `data` in a scene or prefab (the"
+            );
+            let _ = writeln!(
+                o,
+                "  /// schema's field names, `f32`s at their shortest, enums by name)."
+            );
+            if s.fields.is_empty() {
+                let _ = writeln!(o, "  Map<String, Object?> toJson() => {{}};");
+            } else {
+                let _ = writeln!(o, "  Map<String, Object?> toJson() => {{");
+                for f in s.fields {
+                    let v = camel(f.name);
+                    let k = f.name;
+                    let line = match f.ty {
+                        FieldType::F32 => format!("'{k}': docFloat({v}),"),
+                        FieldType::Vec3 => format!("'{k}': docVec3({v}),"),
+                        FieldType::Vec4 => format!("'{k}': docVec4({v}),"),
+                        FieldType::Quat => format!("'{k}': docQuat({v}),"),
+                        FieldType::Nested(_) => format!("'{k}': {v}.toJson(),"),
+                        FieldType::AssetRef => format!("'{k}': docAssetRef({v}),"),
+                        FieldType::OptionalAssetRef => {
+                            format!("if ({v} != null) '{k}': docAssetRef({v}!),")
+                        }
+                        FieldType::Enum(_) => format!("'{k}': {v}.name,"),
+                        FieldType::OptionalEntity => format!("if ({v} != null) '{k}': {v},"),
+                        _ => format!("'{k}': {v},"),
+                    };
+                    let _ = writeln!(o, "        {line}");
+                }
+                let _ = writeln!(o, "      }};");
+            }
+        }
         // equality + toString
         let _ = writeln!(o);
         // The parameter steps aside for a field named `other`

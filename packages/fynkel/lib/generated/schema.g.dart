@@ -206,6 +206,14 @@ class Transform implements WireRecord {
         scale: scale ?? this.scale,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'position': docVec3(position),
+        'rotation': docQuat(rotation),
+        'scale': docVec3(scale),
+      };
+
   @override
   bool operator ==(Object other) =>
       other is Transform && other.position == position && other.rotation == rotation && other.scale == scale;
@@ -251,6 +259,12 @@ class Name implements WireRecord {
       Name(
         value: value ?? this.value,
       );
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'value': value,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -759,6 +773,14 @@ class SnapshotTransformRecord implements WireRecord {
     );
   }
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'entity': entity,
+        'local': local.toJson(),
+        'world': world.toJson(),
+      };
+
   @override
   bool operator ==(Object other) =>
       other is SnapshotTransformRecord && other.entity == entity && other.local == local && other.world == world;
@@ -820,6 +842,17 @@ class DiagnosticRecord implements WireRecord {
     );
   }
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'command_index': commandIndex,
+        'code': code,
+        'entity': entity,
+        'component': component,
+        'lane': lane,
+        'message': message,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is DiagnosticRecord && other.commandIndex == commandIndex && other.code == code && other.entity == entity && other.component == component && other.lane == lane && other.message == message;
@@ -861,6 +894,13 @@ class CommandHeader implements WireRecord {
       size: d.getUint32(offset + 4, Endian.little),
     );
   }
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'kind': kind,
+        'size': size,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -912,6 +952,15 @@ class EventHeader implements WireRecord {
       flags: d.getUint32(offset + 12, Endian.little),
     );
   }
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'kind': kind,
+        'size': size,
+        'tick_lo': tickLo,
+        'flags': flags,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -985,6 +1034,16 @@ class MeshRenderer implements WireRecord {
         receiveShadows: receiveShadows ?? this.receiveShadows,
         visible: visible ?? this.visible,
       );
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'mesh': docAssetRef(mesh),
+        'material': docAssetRef(material),
+        'cast_shadows': castShadows,
+        'receive_shadows': receiveShadows,
+        'visible': visible,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -1087,6 +1146,20 @@ class Camera implements WireRecord {
         cullingMask: cullingMask ?? this.cullingMask,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'projection': projection.name,
+        'fov_y': docFloat(fovY),
+        'ortho_height': docFloat(orthoHeight),
+        'near': docFloat(near),
+        'far': docFloat(far),
+        'priority': priority,
+        'exposure_mode': exposureMode.name,
+        'exposure': docFloat(exposure),
+        'culling_mask': cullingMask,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is Camera && other.projection == projection && other.fovY == fovY && other.orthoHeight == orthoHeight && other.near == near && other.far == far && other.priority == priority && other.exposureMode == exposureMode && other.exposure == exposure && other.cullingMask == cullingMask;
@@ -1146,6 +1219,14 @@ class DirectionalLight implements WireRecord {
         intensity: intensity ?? this.intensity,
         castShadows: castShadows ?? this.castShadows,
       );
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'color': docVec3(color),
+        'intensity': docFloat(intensity),
+        'cast_shadows': castShadows,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -1214,6 +1295,15 @@ class PointLight implements WireRecord {
         range: range ?? this.range,
         cullingMask: cullingMask ?? this.cullingMask,
       );
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'color': docVec3(color),
+        'intensity': docFloat(intensity),
+        'range': docFloat(range),
+        'culling_mask': cullingMask,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -1358,6 +1448,26 @@ class PbrMaterial implements WireRecord {
         emissiveTexture: emissiveTexture ?? this.emissiveTexture,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'base_color': docVec4(baseColor),
+        'metallic': docFloat(metallic),
+        'roughness': docFloat(roughness),
+        'emissive': docVec3(emissive),
+        'emissive_strength': docFloat(emissiveStrength),
+        'normal_scale': docFloat(normalScale),
+        'occlusion_strength': docFloat(occlusionStrength),
+        'alpha_mode': alphaMode.name,
+        'alpha_cutoff': docFloat(alphaCutoff),
+        'double_sided': doubleSided,
+        if (baseColorTexture != null) 'base_color_texture': docAssetRef(baseColorTexture!),
+        if (normalTexture != null) 'normal_texture': docAssetRef(normalTexture!),
+        if (metallicRoughnessTexture != null) 'metallic_roughness_texture': docAssetRef(metallicRoughnessTexture!),
+        if (occlusionTexture != null) 'occlusion_texture': docAssetRef(occlusionTexture!),
+        if (emissiveTexture != null) 'emissive_texture': docAssetRef(emissiveTexture!),
+      };
+
   @override
   bool operator ==(Object other) =>
       other is PbrMaterial && other.baseColor == baseColor && other.metallic == metallic && other.roughness == roughness && other.emissive == emissive && other.emissiveStrength == emissiveStrength && other.normalScale == normalScale && other.occlusionStrength == occlusionStrength && other.alphaMode == alphaMode && other.alphaCutoff == alphaCutoff && other.doubleSided == doubleSided && other.baseColorTexture == baseColorTexture && other.normalTexture == normalTexture && other.metallicRoughnessTexture == metallicRoughnessTexture && other.occlusionTexture == occlusionTexture && other.emissiveTexture == emissiveTexture;
@@ -1440,6 +1550,17 @@ class SpotLight implements WireRecord {
         cullingMask: cullingMask ?? this.cullingMask,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'color': docVec3(color),
+        'intensity': docFloat(intensity),
+        'range': docFloat(range),
+        'inner_angle': docFloat(innerAngle),
+        'outer_angle': docFloat(outerAngle),
+        'culling_mask': cullingMask,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is SpotLight && other.color == color && other.intensity == intensity && other.range == range && other.innerAngle == innerAngle && other.outerAngle == outerAngle && other.cullingMask == cullingMask;
@@ -1515,6 +1636,16 @@ class Environment implements WireRecord {
         skyRotation: skyRotation ?? this.skyRotation,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'ambient_color': docVec3(ambientColor),
+        'ambient_intensity': docFloat(ambientIntensity),
+        if (sky != null) 'sky': docAssetRef(sky!),
+        'sky_intensity': docFloat(skyIntensity),
+        'sky_rotation': docFloat(skyRotation),
+      };
+
   @override
   bool operator ==(Object other) =>
       other is Environment && other.ambientColor == ambientColor && other.ambientIntensity == ambientIntensity && other.sky == sky && other.skyIntensity == skyIntensity && other.skyRotation == skyRotation;
@@ -1568,6 +1699,16 @@ class InputEventRecord implements WireRecord {
       y: d.getFloat32(offset + 20, Endian.little),
     );
   }
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'device': device,
+        'control': control,
+        'phase': phase,
+        'x': docFloat(x),
+        'y': docFloat(y),
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -1647,6 +1788,22 @@ class InputActionRecord implements WireRecord {
       frameY: d.getFloat32(offset + 32, Endian.little),
     );
   }
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'name': name,
+        'kind': kind,
+        'held': held,
+        'pressed': pressed,
+        'released': released,
+        'frame_pressed': framePressed,
+        'frame_released': frameReleased,
+        'x': docFloat(x),
+        'y': docFloat(y),
+        'frame_x': docFloat(frameX),
+        'frame_y': docFloat(frameY),
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -1776,6 +1933,13 @@ class ComponentHeader implements WireRecord {
     );
   }
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'component': component,
+        'size': size,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is ComponentHeader && other.component == component && other.size == size;
@@ -1856,6 +2020,17 @@ class RigidBody implements WireRecord {
         gravityScale: gravityScale ?? this.gravityScale,
         ccd: ccd ?? this.ccd,
       );
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'body_type': bodyType.name,
+        'mass': docFloat(mass),
+        'linear_damping': docFloat(linearDamping),
+        'angular_damping': docFloat(angularDamping),
+        'gravity_scale': docFloat(gravityScale),
+        'ccd': ccd,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -1958,6 +2133,20 @@ class Collider implements WireRecord {
         isSensor: isSensor ?? this.isSensor,
         mask: mask ?? this.mask,
       );
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'shape': shape.name,
+        'size': docVec3(size),
+        if (mesh != null) 'mesh': docAssetRef(mesh!),
+        'offset': docVec3(offset),
+        if (material != null) 'material': docAssetRef(material!),
+        'friction': docFloat(friction),
+        'restitution': docFloat(restitution),
+        'is_sensor': isSensor,
+        'mask': mask,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -2096,6 +2285,23 @@ class PhysicsQueryRecord implements WireRecord {
     );
   }
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'kind': kind.name,
+        'shape': shape.name,
+        'size': docVec3(size),
+        'origin': docVec3(origin),
+        'rotation': docQuat(rotation),
+        'direction': docVec3(direction),
+        'max_distance': docFloat(maxDistance),
+        'mask': mask,
+        if (exclude != null) 'exclude': exclude,
+        'max_hits': maxHits,
+        'hit_sensors': hitSensors,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is PhysicsQueryRecord && other.id == id && other.kind == kind && other.shape == shape && other.size == size && other.origin == origin && other.rotation == rotation && other.direction == direction && other.maxDistance == maxDistance && other.mask == mask && other.exclude == exclude && other.maxHits == maxHits && other.hitSensors == hitSensors;
@@ -2149,6 +2355,16 @@ class PhysicsHitRecord implements WireRecord {
     );
   }
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'query': query,
+        'entity': entity,
+        'point': docVec3(point),
+        'normal': docVec3(normal),
+        'distance': docFloat(distance),
+      };
+
   @override
   bool operator ==(Object other) =>
       other is PhysicsHitRecord && other.query == query && other.entity == entity && other.point == point && other.normal == normal && other.distance == distance;
@@ -2197,6 +2413,15 @@ class BodyStateRecord implements WireRecord {
       sleeping: d.getUint8(offset + 32) != 0,
     );
   }
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'entity': entity,
+        'linear_velocity': docVec3(linearVelocity),
+        'angular_velocity': docVec3(angularVelocity),
+        'sleeping': sleeping,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -2254,6 +2479,17 @@ class EntityInfoRecord implements WireRecord {
       active: d.getUint8(offset + 32) != 0,
     );
   }
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'entity': entity,
+        'parent': parent,
+        'name': name,
+        'layer': layer,
+        'tags': tags,
+        'active': active,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -2400,6 +2636,26 @@ class CharacterController implements WireRecord {
         mask: mask ?? this.mask,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'radius': docFloat(radius),
+        'height': docFloat(height),
+        'center': docVec3(center),
+        'skin_width': docFloat(skinWidth),
+        'max_slope': docFloat(maxSlope),
+        'max_step_height': docFloat(maxStepHeight),
+        'snap_to_ground': docFloat(snapToGround),
+        'gravity_scale': docFloat(gravityScale),
+        'mass': docFloat(mass),
+        'speed': docFloat(speed),
+        'jump_speed': docFloat(jumpSpeed),
+        'turn_speed': docFloat(turnSpeed),
+        'move_action': moveAction,
+        'jump_action': jumpAction,
+        'mask': mask,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is CharacterController && other.radius == radius && other.height == height && other.center == center && other.skinWidth == skinWidth && other.maxSlope == maxSlope && other.maxStepHeight == maxStepHeight && other.snapToGround == snapToGround && other.gravityScale == gravityScale && other.mass == mass && other.speed == speed && other.jumpSpeed == jumpSpeed && other.turnSpeed == turnSpeed && other.moveAction == moveAction && other.jumpAction == jumpAction && other.mask == mask;
@@ -2522,6 +2778,23 @@ class ThirdPersonCamera implements WireRecord {
         mask: mask ?? this.mask,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'target': target,
+        'pivot': docVec3(pivot),
+        'distance': docFloat(distance),
+        'min_distance': docFloat(minDistance),
+        'yaw': docFloat(yaw),
+        'pitch': docFloat(pitch),
+        'min_pitch': docFloat(minPitch),
+        'max_pitch': docFloat(maxPitch),
+        'look_action': lookAction,
+        'sensitivity': docFloat(sensitivity),
+        'collision_radius': docFloat(collisionRadius),
+        'mask': mask,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is ThirdPersonCamera && other.target == target && other.pivot == pivot && other.distance == distance && other.minDistance == minDistance && other.yaw == yaw && other.pitch == pitch && other.minPitch == minPitch && other.maxPitch == maxPitch && other.lookAction == lookAction && other.sensitivity == sensitivity && other.collisionRadius == collisionRadius && other.mask == mask;
@@ -2573,6 +2846,15 @@ class CharacterStateRecord implements WireRecord {
       velocity: readVec3(d, offset + 12),
     );
   }
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'entity': entity,
+        'grounded': grounded,
+        'sliding': sliding,
+        'velocity': docVec3(velocity),
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -2633,6 +2915,14 @@ class Rotator implements WireRecord {
         speed: speed ?? this.speed,
         space: space ?? this.space,
       );
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'axis': docVec3(axis),
+        'speed': docFloat(speed),
+        'space': space.name,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -2708,6 +2998,16 @@ class Oscillate implements WireRecord {
         space: space ?? this.space,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'axis': docVec3(axis),
+        'amplitude': docFloat(amplitude),
+        'frequency': docFloat(frequency),
+        'phase': docFloat(phase),
+        'space': space.name,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is Oscillate && other.axis == axis && other.amplitude == amplitude && other.frequency == frequency && other.phase == phase && other.space == space;
@@ -2776,6 +3076,15 @@ class Follow implements WireRecord {
         lookAt: lookAt ?? this.lookAt,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'target': target,
+        'offset': docVec3(offset),
+        'smoothing': docFloat(smoothing),
+        'look_at': lookAt,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is Follow && other.target == target && other.offset == offset && other.smoothing == smoothing && other.lookAt == lookAt;
@@ -2823,6 +3132,12 @@ class LookAtCamera implements WireRecord {
         lockY: lockY ?? this.lockY,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'lock_y': lockY,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is LookAtCamera && other.lockY == lockY;
@@ -2869,6 +3184,12 @@ class LifetimeDespawn implements WireRecord {
       LifetimeDespawn(
         seconds: seconds ?? this.seconds,
       );
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'seconds': docFloat(seconds),
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -2951,6 +3272,17 @@ class Emitter implements WireRecord {
         enabled: enabled ?? this.enabled,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'prefab': docAssetRef(prefab),
+        'rate': docFloat(rate),
+        'lifetime': docFloat(lifetime),
+        'max_alive': maxAlive,
+        'velocity': docVec3(velocity),
+        'enabled': enabled,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is Emitter && other.prefab == prefab && other.rate == rate && other.lifetime == lifetime && other.maxAlive == maxAlive && other.velocity == velocity && other.enabled == enabled;
@@ -2996,6 +3328,14 @@ class SystemTimeRecord implements WireRecord {
       micros: d.getUint32(offset + 8, Endian.little),
     );
   }
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'system': system.name,
+        'entities': entities,
+        'micros': micros,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -3050,6 +3390,13 @@ class TriggerZone implements WireRecord {
         event: event ?? this.event,
         once: once ?? this.once,
       );
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'event': event,
+        'once': once,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -3216,6 +3563,16 @@ class Settings implements WireRecord {
         quality: quality ?? this.quality,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'master_volume': docFloat(masterVolume),
+        'music_volume': docFloat(musicVolume),
+        'sfx_volume': docFloat(sfxVolume),
+        'muted': muted,
+        'quality': quality,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is Settings && other.masterVolume == masterVolume && other.musicVolume == musicVolume && other.sfxVolume == sfxVolume && other.muted == muted && other.quality == quality;
@@ -3260,6 +3617,14 @@ class ProjectionAnchorRecord implements WireRecord {
       mask: d.getUint32(offset + 20, Endian.little),
     );
   }
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'entity': entity,
+        'offset': docVec3(offset),
+        'mask': mask,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -3313,6 +3678,16 @@ class ProjectedPointRecord implements WireRecord {
       flags: d.getUint32(offset + 20, Endian.little),
     );
   }
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'entity': entity,
+        'x': docFloat(x),
+        'y': docFloat(y),
+        'depth': docFloat(depth),
+        'flags': flags,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -3401,6 +3776,18 @@ class Animator implements WireRecord {
         rootMotion: rootMotion ?? this.rootMotion,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'clip': docAssetRef(clip),
+        'speed': docFloat(speed),
+        'looping': looping,
+        'playing': playing,
+        'weight': docFloat(weight),
+        'additive': additive,
+        'root_motion': rootMotion,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is Animator && other.clip == clip && other.speed == speed && other.looping == looping && other.playing == playing && other.weight == weight && other.additive == additive && other.rootMotion == rootMotion;
@@ -3454,6 +3841,13 @@ class Skin implements WireRecord {
         skin: skin ?? this.skin,
         skeleton: skeleton ?? this.skeleton,
       );
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'skin': docAssetRef(skin),
+        'skeleton': skeleton,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -3658,6 +4052,23 @@ class AnimatorStateRecord implements WireRecord {
     );
   }
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'entity': entity,
+        'time': docFloat(time),
+        'duration': docFloat(duration),
+        'speed': docFloat(speed),
+        'fade_remaining': docFloat(fadeRemaining),
+        'playing': playing,
+        'looping': looping,
+        'clip': docAssetRef(clip),
+        'weight': docFloat(weight),
+        'parameter': docFloat(parameter),
+        'root_delta': docVec3(rootDelta),
+        'root_yaw': docFloat(rootYaw),
+      };
+
   @override
   bool operator ==(Object other) =>
       other is AnimatorStateRecord && other.entity == entity && other.time == time && other.duration == duration && other.speed == speed && other.fadeRemaining == fadeRemaining && other.playing == playing && other.looping == looping && other.clip == clip && other.weight == weight && other.parameter == parameter && other.rootDelta == rootDelta && other.rootYaw == rootYaw;
@@ -3792,6 +4203,18 @@ class AudioSource implements WireRecord {
         priority: priority ?? this.priority,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'clip': docAssetRef(clip),
+        'bus': bus.name,
+        'volume': docFloat(volume),
+        'pitch': docFloat(pitch),
+        'looping': looping,
+        'playing': playing,
+        'priority': priority,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is AudioSource && other.clip == clip && other.bus == bus && other.volume == volume && other.pitch == pitch && other.looping == looping && other.playing == playing && other.priority == priority;
@@ -3838,6 +4261,12 @@ class AudioListener implements WireRecord {
       AudioListener(
         volume: volume ?? this.volume,
       );
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'volume': docFloat(volume),
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -4112,6 +4541,22 @@ class AudioStateRecord implements WireRecord {
     );
   }
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'entity': entity,
+        'playing': playing,
+        'paused': paused,
+        'time': docFloat(time),
+        'duration': docFloat(duration),
+        'volume': docFloat(volume),
+        'pitch': docFloat(pitch),
+        'looping': looping,
+        'clip': docAssetRef(clip),
+        'bus': bus.name,
+        'voice': voice,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is AudioStateRecord && other.entity == entity && other.playing == playing && other.paused == paused && other.time == time && other.duration == duration && other.volume == volume && other.pitch == pitch && other.looping == looping && other.clip == clip && other.bus == bus && other.voice == voice;
@@ -4212,6 +4657,26 @@ class AudioStatsRecord implements WireRecord {
     );
   }
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'device': device,
+        'sample_rate': sampleRate,
+        'channels': channels,
+        'voices': voices,
+        'max_voices': maxVoices,
+        'started': started,
+        'stolen': stolen,
+        'refused': refused,
+        'ended': ended,
+        'clips': clips,
+        'callbacks': callbacks,
+        'underruns': underruns,
+        'suspended': suspended,
+        'streams': streams,
+        'starved': starved,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is AudioStatsRecord && other.device == device && other.sampleRate == sampleRate && other.channels == channels && other.voices == voices && other.maxVoices == maxVoices && other.started == started && other.stolen == stolen && other.refused == refused && other.ended == ended && other.clips == clips && other.callbacks == callbacks && other.underruns == underruns && other.suspended == suspended && other.streams == streams && other.starved == starved;
@@ -4306,6 +4771,19 @@ class Volume implements WireRecord {
         enabled: enabled ?? this.enabled,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'profile': docAssetRef(profile),
+        'shape': shape.name,
+        'size': docVec3(size),
+        'radius': docFloat(radius),
+        'blend_distance': docFloat(blendDistance),
+        'weight': docFloat(weight),
+        'priority': priority,
+        'enabled': enabled,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is Volume && other.profile == profile && other.shape == shape && other.size == size && other.radius == radius && other.blendDistance == blendDistance && other.weight == weight && other.priority == priority && other.enabled == enabled;
@@ -4353,6 +4831,12 @@ class Layer implements WireRecord {
         layer: layer ?? this.layer,
       );
 
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'layer': layer,
+      };
+
   @override
   bool operator ==(Object other) =>
       other is Layer && other.layer == layer;
@@ -4399,6 +4883,12 @@ class Tags implements WireRecord {
       Tags(
         bits: bits ?? this.bits,
       );
+
+  /// The document form: a component's `data` in a scene or prefab (the
+  /// schema's field names, `f32`s at their shortest, enums by name).
+  Map<String, Object?> toJson() => {
+        'bits': bits,
+      };
 
   @override
   bool operator ==(Object other) =>

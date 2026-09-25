@@ -140,3 +140,29 @@ T enumValue<T extends Enum>(List<T> values, int index, String name) {
   }
   return values[index];
 }
+
+// ---- document JSON (the generated `toJson`, `fynkel_document`'s codec)
+
+final _f32 = Float32List(1);
+
+/// [v] as the `f32` the engine keeps, in the shortest decimal that reads
+/// back as that `f32` — the lexeme the Rust codec writes (`0.05`, not
+/// `0.05000000074505806`).
+double docFloat(double v) {
+  if (!v.isFinite) return v;
+  _f32[0] = v;
+  final f = _f32[0];
+  for (var p = 1; p < 10; p++) {
+    final d = double.parse(f.toStringAsPrecision(p));
+    _f32[0] = d;
+    if (_f32[0] == f) return d;
+  }
+  return f;
+}
+
+List<double> docVec3(Vec3 v) => [docFloat(v.x), docFloat(v.y), docFloat(v.z)];
+List<double> docVec4(Vec4 v) => [docFloat(v.x), docFloat(v.y), docFloat(v.z), docFloat(v.w)];
+List<double> docQuat(Quat q) => [docFloat(q.x), docFloat(q.y), docFloat(q.z), docFloat(q.w)];
+
+/// `{ "asset": id, "sub"? }`.
+Map<String, Object?> docAssetRef(AssetRef r) => {'asset': r.asset, if ((r.sub ?? '').isNotEmpty) 'sub': r.sub};
