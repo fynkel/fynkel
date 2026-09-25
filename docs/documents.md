@@ -1854,6 +1854,20 @@ error — nothing migrates silently; `fynkel project lock` rewrites the lock
 once the upgrade is meant. The lock is canonical JSON (sorted maps), so it
 diffs cleanly in version control.
 
+**One lock shape (ADR-0029 §4).** `runtime` may also carry `store` (the
+release store's base URL, `{version}` replaced) and `artifacts { target →
+{ file, sha256 } }`: the prebuilt runtime libraries of that version.
+`package:fynkel` ships a lock in exactly this shape
+(`packages/fynkel/fynkel.lock.json`, kept equal to the build by a test) with
+the store and one library per Apple target; a project's lock usually has
+neither. The build hook reads the package's lock and, through the app's
+`hooks.user_defines.fynkel.project`, the project's: the project pins the
+runtime, so a different `version` or `abiVersion` stops a prebuilt download
+and names the fix; a `store` or `artifacts` it names replace the package's
+(a mirror). `fynkel project lock` keeps a lock's `store`, and its
+`artifacts` while the runtime version stays the same; `Lock::check` ignores
+both.
+
 `validate_project(dir, schemas, expectedLock)` is the whole-project check
 behind `fynkel validate`: the project file (schema, then semantics), the lock
 against the build, the asset root, the asset database scan (every sidecar),
@@ -1961,13 +1975,14 @@ A package runs `fynkel codegen --project .` in its own folder and commits
 ## New projects: `fynkel create`
 
 `fynkel create <dir> [--name <package>] [--title <text>] [--org
-<reverse.domain>] [--no-flutter] [--force] [--json]` (`apps/cli/src/create.rs`,
+<reverse.domain>] [--no-flutter] [--hosted] [--store <url>] [--force]
+[--json]` (`apps/cli/src/create.rs`,
 blueprint §13.2/§13.3, ADR-0017, §19.2c item 17) writes a complete game
 project — the blueprint's project model, filled in:
 
 ```text
 my_game/
-  pubspec.yaml                 Flutter app on package:fynkel + package:fynkel_flutter (path dependencies into the checkout) + fynkel_generator (dev)
+  pubspec.yaml                 Flutter app on package:fynkel + package:fynkel_flutter + fynkel_generator (dev): path dependencies into the checkout when the CLI finds one; otherwise, or with --hosted, `^<version>` from pub.dev, or from the --store pub server (ADR-0029 §4); `hooks.user_defines.fynkel.project: .` so the hook reads the lock and modules
   fynkel.project.json          startup scene, assets root, input actions (move, jump, pause), quality profiles, registry (game.Spinner, game.Mover declared)
   fynkel.lock.json             `expected_lock()` for the tools that created it
   AGENTS.md  README.md         layout, every command, the validate → codegen → build → test loop, do/don't

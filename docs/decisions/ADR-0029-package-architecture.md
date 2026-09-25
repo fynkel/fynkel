@@ -297,6 +297,40 @@ What Fynkel has (mapped 2026-09-25):
    - one lock shape;
    - `fynkel create` with hosted dependencies;
    - the local release-store rehearsal.
+
+   Done 2026-09-25.
+   - **One lock shape.** `package:fynkel`'s `fynkel.lock.json` is a
+     project lock (`lock.schema.json`, kept equal to the build by a test)
+     whose `runtime` also carries `store` and `artifacts`; the snake_case
+     hook lock is gone. The hook reads the game's lock through
+     `hooks.user_defines.fynkel.project` (the same define as
+     `modules.strip`; `lock_file` removed): the project pins the runtime,
+     so another version or ABI stops a prebuilt download and names the
+     fix; a store the project names replaces the package's (a mirror).
+     `fynkel project lock` keeps the store. The hook also takes `file://`
+     stores.
+   - **`fynkel create`** writes path dependencies when it finds a
+     checkout, hosted ones (`^<version>`) otherwise or with `--hosted`,
+     and `--store <url>` names the pub server; every created project has
+     `hooks.user_defines.fynkel.project: .`. A CLI built with
+     `FYNKEL_RELEASE=1` forgets the checkout it was built from.
+   - **The store** (`tools/release_store.py`) is one directory that a
+     static server serves as a pub server and a release host at once:
+     the runtime per target (built with the hook's arguments), the CLI,
+     the four Dart packages with their path dependencies turned hosted,
+     `index.json`. Pub's hosted protocol needs HTTP, so the rehearsal
+     serves the directory on `127.0.0.1` rather than naming it by
+     `file://`.
+   - **The rehearsal passed 2026-09-25:** outside the checkout, with no
+     cargo on `PATH` and a fresh pub cache, the store's CLI created a
+     game with hosted dependencies; `flutter pub get` resolved all
+     Fynkel packages from the store, `fynkel validate` and `fynkel test
+     --headless` passed, `flutter test` passed on the downloaded runtime
+     (`from prebuilt`, SHA-256 checked), and `flutter build macos
+     --debug` built the app (universal: the arm64 and x64 libraries).
+     Store sizes: runtime 18.3 MB (arm64) and 19.1 MB (x64) as built,
+     CLI 24.7 MB, packages fynkel 254 KB, fynkel_flutter 60 KB,
+     fynkel_generator 35 KB, fynkel_editor_api 9 KB (compressed).
 7. **Acceptance:**
    - code_only plays with the pickups package: its prefab placed in the
      editor, its Inspector shown; as a path package its assets edit in

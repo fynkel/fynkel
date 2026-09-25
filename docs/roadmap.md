@@ -112,7 +112,10 @@ Three ADRs, then their implementation:
    done 2026-09-25; step 5 (modules: `fynkel_animation`, the cargo
    features and `modules.strip`, `FYN-P0018`/`R0014`, `world.modules`,
    Project ▸ Modules…, the sizes in the ADR; code_only plays with
-   animation off and stripped) done 2026-09-25.
+   animation off and stripped) done 2026-09-25; step 6 (one lock shape,
+   `fynkel create --hosted`/`--store`, `tools/release_store.py`: a game
+   made outside the checkout built and ran against the local store with no
+   cargo) done 2026-09-25.
 
 ## Phase 4 — Rendering resumes
 
