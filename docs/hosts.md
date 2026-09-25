@@ -227,6 +227,19 @@ tests: `crates/fynkel_native/tests/load.rs`
 (`scenes_stack_unload_replace_and_zones_fire_through_the_abi`),
 `crates/fynkel_core/tests/scenes.rs`; the contract [scenes.md](scenes.md).
 
+### Data assets at runtime (ADR-0027)
+
+`fynkel_world_asset_json(world, id, out)` (additive; the ABI stays 1)
+points `out` at the cooked JSON of the document with the 16 id bytes
+`id` in the loaded project's cache — a data asset's `{ type, version,
+data }` envelope, which `World.data<T>` makes its shared instance from.
+No project loaded (`FYN-R0003`), an unknown id or a source return
+`FYNKEL_STATUS_LOAD_FAILED` with a diagnostic JSON in `out`; null
+pointers are `INVALID_ARGUMENT`. The view lives until the next call.
+Reference test: `crates/fynkel_native/tests/load.rs`
+(`a_documents_cooked_json_through_the_abi`); the contract
+[documents.md](documents.md) § Data assets.
+
 ## Flutter host
 
 `hosts/flutter_apple` uses **one** dylib, `libfynkel_platform_apple.dylib`,

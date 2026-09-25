@@ -1226,7 +1226,25 @@ document new data <name> --type <type id>` (or the authoring session's
 `newDocument` with kind `data`, `type` and an optional `data`) writes one
 with an empty `data`. The cook validates it (errors fail the asset) and
 writes it through the generic document path as a JSON chunk
-(`documentKind: data`). The lock's `documents` gains `data: 1`.
+(`documentKind: data`). The lock's `documents` gains `data: 1`. A data
+asset's references neither key nor order its cook (the chunk holds only
+their ids), so data assets may reference each other in a cycle; the
+index still lists them as its dependencies, what a load retains.
+
+At runtime `fynkel_world_asset_json(world, id, out)` hands over the
+cooked JSON of any document in the loaded project's cache (the 16 id
+bytes in; `FYNKEL_STATUS_LOAD_FAILED` with a diagnostic JSON for an
+unknown id, a source, or no project loaded). `World.data<T>(ref)`
+builds one instance per data asset from it — the registered `DataType`,
+the class defaults, then the asset's `data` — and keeps it for the
+world's life, across scene loads; every data-typed field of a loaded
+behaviour or data asset is set to that shared instance (a cycle shares
+it too). A reference that cannot be made — a missing asset, one of
+another type, a type that is not registered — leaves the field None
+with the warning `FYN-B0004` (`onLoadDiagnostics`); `World.data` itself
+throws (`ArgumentError` for a bad or unknown ref or a non-data asset,
+`StateError` for no project or an unregistered type). Game code may
+change an instance's fields for the run; nothing is written back.
 
 ## Migrations
 
