@@ -281,6 +281,8 @@ pub struct Layer {
     pub blending: Blending,
     /// The node it poses from; None: the whole character.
     pub root: Option<String>,
+    /// Which nodes it poses (ADR-0033 § 5); empty: every node.
+    pub mask: Vec<MaskEntry>,
     pub default_state: Option<String>,
     pub states: Vec<State>,
     pub transitions: Vec<Transition>,
@@ -348,6 +350,67 @@ impl Layer {
     }
 }
 
+/// One node of a layer's mask.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MaskEntry {
+    pub node: String,
+    pub include: bool,
+    pub subtree: bool,
+    /// `/layers/<l>/mask/<i>`.
+    pub pointer: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IkType {
+    TwoBone,
+    LookAt,
+    FootPlacement,
+}
+
+impl IkType {
+    pub fn parse(s: &str) -> Option<IkType> {
+        match s {
+            "twoBone" => Some(IkType::TwoBone),
+            "lookAt" => Some(IkType::LookAt),
+            "footPlacement" => Some(IkType::FootPlacement),
+            _ => None,
+        }
+    }
+}
+
+/// An IK goal's weight: a number, or a float parameter's name.
+#[derive(Clone, Debug, PartialEq)]
+pub enum IkWeight {
+    Value(f32),
+    Parameter(String),
+}
+
+/// One IK goal (ADR-0033 § 5), as written: the fields of its type are
+/// set, the others `None`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Ik {
+    pub name: String,
+    /// None: not one of the three (reported).
+    pub kind: Option<IkType>,
+    pub weight: IkWeight,
+    pub target: Option<String>,
+    pub tip: Option<String>,
+    pub middle: Option<String>,
+    pub root: Option<String>,
+    pub pole: Option<String>,
+    pub head: Option<String>,
+    pub spine: Vec<String>,
+    /// Degrees.
+    pub limit: f32,
+    pub body: f32,
+    pub hips: Option<String>,
+    pub left: Option<String>,
+    pub right: Option<String>,
+    pub reach: f32,
+    /// `/ik/<i>`.
+    pub pointer: String,
+}
+
 /// A layer or a sub-state machine: states whose names `from`, `to` and
 /// `defaultState` resolve among.
 #[derive(Clone, Debug)]
@@ -381,6 +444,7 @@ pub struct Controller {
     pub document: Document,
     pub parameters: Vec<Parameter>,
     pub layers: Vec<Layer>,
+    pub ik: Vec<Ik>,
     read_diagnostics: Vec<Diagnostic>,
 }
 
@@ -798,6 +862,20 @@ impl Controller {
                 }
             };
             let root_node = r.string(node, "root", &lp);
+            let mut mask = Vec::new();
+            for (e, ep) in r.objects(node, "mask", &lp) {
+                let entry = r.string(e, "node", &ep);
+                let include = r.boolean(e, "include", &ep);
+                let subtree = r.boolean(e, "subtree", &ep).unwrap_or(true);
+                if let (Some(node), Some(include)) = (entry, include) {
+                    mask.push(MaskEntry {
+                        node,
+                        include,
+                        subtree,
+                        pointer: ep,
+                    });
+                }
+            }
             let default_state = r.string(node, "defaultState", &lp);
 
             let states = r.states(node, &lp, 0);
@@ -808,6 +886,7 @@ impl Controller {
                 weight,
                 blending,
                 root: root_node,
+                mask,
                 default_state,
                 states,
                 transitions,
@@ -815,10 +894,77 @@ impl Controller {
             });
         }
 
+        let mut ik = Vec::new();
+        for (node, ip) in r.objects(&root, "ik", "") {
+            let name = r.string(node, "name", &ip).unwrap_or_default();
+            let kind = match node.get("type").map(|t| t.as_str().and_then(IkType::parse)) {
+                Some(Some(k)) => Some(k),
+                Some(None) => {
+                    r.bad(
+                        "type must be twoBone, lookAt or footPlacement".into(),
+                        &format!("{ip}/type"),
+                    );
+                    None
+                }
+                None => None,
+            };
+            let weight = match node.get("weight") {
+                None => IkWeight::Value(1.0),
+                Some(w) => match (w.as_f64(), w.as_str()) {
+                    (Some(v), _) if (0.0..=1.0).contains(&v) => IkWeight::Value(v as f32),
+                    (_, Some(p)) if !p.is_empty() => IkWeight::Parameter(p.to_string()),
+                    _ => {
+                        r.bad(
+                            "weight must be a number within [0, 1] or a float parameter's name"
+                                .into(),
+                            &format!("{ip}/weight"),
+                        );
+                        IkWeight::Value(1.0)
+                    }
+                },
+            };
+            let mut spine = Vec::new();
+            match node.get("spine").map(|v| v.as_array()) {
+                None => {}
+                Some(None) => r.bad(
+                    "spine must be an array of node names".into(),
+                    &format!("{ip}/spine"),
+                ),
+                Some(Some(list)) => {
+                    for (i, v) in list.iter().enumerate() {
+                        match v.as_str() {
+                            Some(n) if !n.is_empty() => spine.push(n.to_string()),
+                            _ => r.bad("a node is a name".into(), &format!("{ip}/spine/{i}")),
+                        }
+                    }
+                }
+            }
+            ik.push(Ik {
+                name,
+                kind,
+                weight,
+                target: r.string(node, "target", &ip),
+                tip: r.string(node, "tip", &ip),
+                middle: r.string(node, "middle", &ip),
+                root: r.string(node, "root", &ip),
+                pole: r.string(node, "pole", &ip),
+                head: r.string(node, "head", &ip),
+                spine,
+                limit: r.number(node, "limit", &ip).unwrap_or(70.0) as f32,
+                body: r.number(node, "body", &ip).unwrap_or(0.3) as f32,
+                hips: r.string(node, "hips", &ip),
+                left: r.string(node, "left", &ip),
+                right: r.string(node, "right", &ip),
+                reach: r.number(node, "reach", &ip).unwrap_or(0.5) as f32,
+                pointer: ip,
+            });
+        }
+
         Controller {
             document,
             parameters,
             layers,
+            ik,
             read_diagnostics: diags,
         }
     }
@@ -925,7 +1071,52 @@ impl Controller {
                 self.validate_scope(l, &scope, &mut out);
             }
         }
+        self.validate_ik(&mut out);
         finish(out, &self.document)
+    }
+
+    /// The IK goals' names (`D1101`) and weight parameters (`D1101`,
+    /// `D1102`); the nodes each type needs are the schema's.
+    fn validate_ik(&self, out: &mut Vec<Diagnostic>) {
+        let root = &self.document.root;
+        let mut seen = HashSet::new();
+        for g in &self.ik {
+            if !g.name.is_empty() && !seen.insert(g.name.as_str()) {
+                out.push(anchor(
+                    root,
+                    Diagnostic::error(
+                        Code::CONTROLLER_NAMES,
+                        format!("two IK goals are named `{}`", g.name),
+                    ),
+                    &format!("{}/name", g.pointer),
+                ));
+            }
+            if let IkWeight::Parameter(p) = &g.weight {
+                let at = format!("{}/weight", g.pointer);
+                match self.parameter(p) {
+                    None => out.push(
+                        anchor(
+                            root,
+                            Diagnostic::error(
+                                Code::CONTROLLER_NAMES,
+                                format!("weight `{p}` is not a parameter"),
+                            ),
+                            &at,
+                        )
+                        .with_suggestion("a number within [0, 1], or a float parameter's name"),
+                    ),
+                    Some(q) if q.kind != ParameterType::Float => out.push(anchor(
+                        root,
+                        Diagnostic::error(
+                            Code::CONTROLLER_CONDITION,
+                            format!("weight `{p}` is a {}, not a float", q.kind.name()),
+                        ),
+                        &at,
+                    )),
+                    Some(_) => {}
+                }
+            }
+        }
     }
 
     /// One scope's names (`D1101`) and types (`D1102`): a layer's own

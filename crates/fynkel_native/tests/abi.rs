@@ -2290,6 +2290,7 @@ fn animator_controller_ops_events_and_queries() {
         root_motion: None,
     };
     let def = ControllerDef {
+        ik: vec![],
         name: "Player".into(),
         parameters: vec![
             ParameterDef {
@@ -2329,6 +2330,7 @@ fn animator_controller_ops_events_and_queries() {
                 interruptible_by: Default::default(),
             }],
             machines: vec![],
+            mask: vec![],
         }],
     };
     unsafe {

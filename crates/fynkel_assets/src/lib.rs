@@ -1968,8 +1968,8 @@ fn bounds_of(vertices: &[fynkel_cooked::payload::Vertex]) -> ([f32; 3], [f32; 3]
 /// state the machines around it are checked before its own transitions.
 pub fn controller_def(c: &fynkel_document::Controller) -> Result<ControllerDef, String> {
     use fynkel_core::animation::controller::{
-        Blending, ChildDef, Condition, Interruption, LayerDef, MotionDef, ParameterDef,
-        ParameterKind, StateDef, Test, TransitionDef, TreeDef, Value,
+        Blending, ChildDef, Condition, IkDef, IkKind, IkWeight, Interruption, LayerDef, MaskEntry,
+        MotionDef, ParameterDef, ParameterKind, StateDef, Test, TransitionDef, TreeDef, Value,
     };
     use fynkel_document::controller as doc;
     let parameters: Vec<ParameterDef> = c
@@ -2149,12 +2149,61 @@ pub fn controller_def(c: &fynkel_document::Controller) -> Result<ControllerDef, 
             states,
             transitions,
             machines,
+            mask: l
+                .mask
+                .iter()
+                .map(|m| MaskEntry {
+                    node: m.node.clone(),
+                    include: m.include,
+                    subtree: m.subtree,
+                })
+                .collect(),
+        });
+    }
+    let mut ik = Vec::with_capacity(c.ik.len());
+    for g in &c.ik {
+        let need = |v: &Option<String>, field: &str| {
+            v.clone()
+                .ok_or_else(|| format!("IK goal `{}` needs `{field}`", g.name))
+        };
+        let kind = match g
+            .kind
+            .ok_or_else(|| format!("IK goal `{}` without a type", g.name))?
+        {
+            doc::IkType::TwoBone => IkKind::TwoBone {
+                root: g.root.clone(),
+                middle: g.middle.clone(),
+                tip: need(&g.tip, "tip")?,
+                pole: g.pole.clone(),
+            },
+            doc::IkType::LookAt => IkKind::LookAt {
+                head: need(&g.head, "head")?,
+                spine: g.spine.clone(),
+                limit: g.limit.to_radians(),
+                body: g.body,
+            },
+            doc::IkType::FootPlacement => IkKind::FootPlacement {
+                hips: need(&g.hips, "hips")?,
+                left: need(&g.left, "left")?,
+                right: need(&g.right, "right")?,
+                reach: g.reach,
+            },
+        };
+        ik.push(IkDef {
+            name: g.name.clone(),
+            kind,
+            weight: match &g.weight {
+                doc::IkWeight::Value(v) => IkWeight::Value(*v),
+                doc::IkWeight::Parameter(p) => IkWeight::Parameter(parameter(p)?),
+            },
+            target: g.target.clone(),
         });
     }
     Ok(ControllerDef {
         name: c.name().to_string(),
         parameters,
         layers,
+        ik,
     })
 }
 

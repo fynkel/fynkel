@@ -618,3 +618,51 @@ fn a_sub_state_machine_flattens_to_paths() {
         ]
     );
 }
+
+/// ADR-0033 § 5: a layer's mask and the IK goals reach the runtime's
+/// def, a weight parameter by index and a look-at's limit in radians.
+#[test]
+fn a_mask_and_ik_goals_reach_the_def() {
+    let text = r#"{"$schema":"https://fynkel.dev/schemas/controller.schema.json","formatVersion":1,
+  "id":"c0000000-0000-4000-8000-000000000062","name":"Player",
+  "parameters":[{"name":"aim","type":"float"}],
+  "layers":[{"name":"Base Layer","mask":[{"node":"Spine","include":true},{"node":"Head","include":false,"subtree":false}]}],
+  "ik":[{"name":"look","type":"lookAt","head":"Head","limit":90,"weight":"aim","target":"Coin"},
+        {"name":"feet","type":"footPlacement","hips":"Hips","left":"LeftFoot","right":"RightFoot","reach":0.4}]}"#;
+    let doc = fynkel_document::Document::parse(
+        fynkel_document::DocumentKind::Controller,
+        Some("player.controller.json"),
+        text,
+    )
+    .unwrap();
+    let c = fynkel_document::Controller::from_document(doc);
+    let def = fynkel_assets::controller_def(&c).unwrap();
+    def.validate().unwrap();
+    use fynkel_core::animation::controller::{IkKind, IkWeight, MaskEntry};
+    assert_eq!(
+        def.layers[0].mask,
+        [
+            MaskEntry {
+                node: "Spine".into(),
+                include: true,
+                subtree: true
+            },
+            MaskEntry {
+                node: "Head".into(),
+                include: false,
+                subtree: false
+            }
+        ]
+    );
+    assert_eq!(def.ik[0].weight, IkWeight::Parameter(0));
+    assert_eq!(def.ik[0].target.as_deref(), Some("Coin"));
+    match &def.ik[0].kind {
+        IkKind::LookAt { limit, body, .. } => {
+            assert!((limit - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+            assert_eq!(*body, 0.3);
+        }
+        k => panic!("{k:?}"),
+    }
+    assert!(matches!(&def.ik[1].kind, IkKind::FootPlacement { reach, .. } if *reach == 0.4));
+    assert_eq!(def.ik_index("feet"), Some(1));
+}

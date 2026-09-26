@@ -170,17 +170,68 @@
           "minLength": 1,
           "description": "The node it poses from (`spine`): it poses only that node and those under it. Absent: the whole character."
         },
+        "mask": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/maskEntry" },
+          "maxItems": 256,
+          "description": "Which nodes the layer poses (Unity's Avatar Mask, inside the layer). Each entry includes or excludes a node, with everything under it (`subtree`, the default) or alone. The nearest entry at or above a node decides; with none, the node is included unless some entry includes. Absent: every node."
+        },
         "defaultState": { "$ref": "#/$defs/name", "description": "The state the layer starts in (Unity's orange state). Required when there are states." },
         "states": { "type": "array", "items": { "$ref": "#/$defs/state" }, "maxItems": 128 },
         "transitions": { "type": "array", "items": { "$ref": "#/$defs/transition" }, "maxItems": 512 }
       },
       "required": ["name"],
       "additionalProperties": false
+    },
+    "maskEntry": {
+      "type": "object",
+      "description": "One node of a layer's mask.",
+      "properties": {
+        "node": { "type": "string", "minLength": 1, "description": "The node's name under the animator (`Spine`)." },
+        "include": { "type": "boolean", "description": "Posed by the layer (true), or left to the layers below (false)." },
+        "subtree": { "type": "boolean", "default": true, "description": "Also every node under it, unless a nearer entry says otherwise." }
+      },
+      "required": ["node", "include"],
+      "additionalProperties": false
+    },
+    "ik": {
+      "type": "object",
+      "description": "One IK goal (ADR-0033 § 5), solved after all layers, in order.",
+      "properties": {
+        "name": { "$ref": "#/$defs/name", "description": "What code calls it: `animation.setIKTarget('leftHand', …)`." },
+        "type": { "type": "string", "enum": ["twoBone", "lookAt", "footPlacement"] },
+        "weight": {
+          "oneOf": [{ "type": "number", "minimum": 0, "maximum": 1 }, { "$ref": "#/$defs/identifier" }],
+          "default": 1,
+          "description": "How much it bends the pose: a number, or the name of a float parameter."
+        },
+        "target": { "type": "string", "minLength": 1, "description": "The object it reaches for or looks at: a node under the animator, else the first object with that name. A target set from code wins." },
+        "tip": { "type": "string", "minLength": 1, "description": "twoBone: the hand or the foot." },
+        "middle": { "type": "string", "minLength": 1, "description": "twoBone: the elbow or the knee. Absent: the tip's parent." },
+        "root": { "type": "string", "minLength": 1, "description": "twoBone: the upper arm or the thigh. Absent: the middle's parent." },
+        "pole": { "type": "string", "minLength": 1, "description": "twoBone: an object the elbow or the knee points to. Absent: it bends the way it already does." },
+        "head": { "type": "string", "minLength": 1, "description": "lookAt: the head." },
+        "spine": { "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 8, "description": "lookAt: nodes that turn a little with the head." },
+        "limit": { "type": "number", "minimum": 0, "maximum": 180, "default": 70, "description": "lookAt: the most it turns, in degrees." },
+        "body": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.3, "description": "lookAt: the share of the turn the spine takes." },
+        "hips": { "type": "string", "minLength": 1, "description": "footPlacement: the node that goes down so both feet reach the ground." },
+        "left": { "type": "string", "minLength": 1, "description": "footPlacement: the left foot (its parent is the knee, the knee's the thigh)." },
+        "right": { "type": "string", "minLength": 1, "description": "footPlacement: the right foot." },
+        "reach": { "type": "number", "exclusiveMinimum": 0, "maximum": 10, "default": 0.5, "description": "footPlacement: how far above and below the feet it looks for ground, in meters." }
+      },
+      "required": ["name", "type"],
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "twoBone" } } }, "then": { "required": ["tip"] } },
+        { "if": { "properties": { "type": { "const": "lookAt" } } }, "then": { "required": ["head"] } },
+        { "if": { "properties": { "type": { "const": "footPlacement" } } }, "then": { "required": ["hips", "left", "right"] } }
+      ],
+      "additionalProperties": false
     }
   },
   "properties": {
     "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" }, "maxItems": 64 },
     "layers": { "type": "array", "items": { "$ref": "#/$defs/layer" }, "minItems": 1, "maxItems": 16 },
+    "ik": { "type": "array", "items": { "$ref": "#/$defs/ik" }, "maxItems": 16, "description": "IK goals, solved in order after all layers (ADR-0033 § 5)." },
     "editor": {
       "type": "object",
       "description": "Where the Animator window draws each state, by layer name then state name: `[x, y]`. The runtime never reads it."

@@ -138,6 +138,7 @@ fn layer(name: &str, states: Vec<StateDef>, transitions: Vec<TransitionDef>) -> 
         states,
         transitions,
         machines: vec![],
+        mask: vec![],
     }
 }
 
@@ -146,6 +147,7 @@ fn layer(name: &str, states: Vec<StateDef>, transitions: Vec<TransitionDef>) -> 
 /// Jump returns at its end when `grounded`.
 fn player() -> ControllerDef {
     ControllerDef {
+        ik: vec![],
         name: "Player".into(),
         parameters: vec![
             ParameterDef {
@@ -501,6 +503,7 @@ fn a_layer_overrides_at_its_weight_or_adds_from_its_root_node() {
         ),
     );
     let def = ControllerDef {
+        ik: vec![],
         name: "Layers".into(),
         parameters: Vec::new(),
         layers: vec![
@@ -655,6 +658,7 @@ fn strafer() -> ControllerDef {
         ],
     };
     ControllerDef {
+        ik: vec![],
         name: "Strafer".into(),
         parameters: vec![float("moveX"), float("moveY")],
         layers: vec![layer(
@@ -750,6 +754,7 @@ fn slotted(w: &mut World) -> (Entity, Entity) {
         ),
     );
     let def = ControllerDef {
+        ik: vec![],
         name: "Slots".into(),
         parameters: Vec::new(),
         layers: vec![
@@ -978,6 +983,7 @@ fn an_interruption_fades_from_the_pose_it_held() {
         )
     };
     let def = ControllerDef {
+        ik: vec![],
         name: "Interrupt".into(),
         parameters: vec![ParameterDef {
             name: "go".into(),

@@ -199,6 +199,86 @@ pub struct LayerDef {
     /// Each sub-state machine's path (`Airborne`) and the state it enters
     /// (its default, followed down).
     pub machines: Vec<(String, usize)>,
+    /// Which nodes it poses (ADR-0033 § 5); empty: every node.
+    pub mask: Vec<MaskEntry>,
+}
+
+/// One node of a layer's mask (Unity's Avatar Mask, inside the layer).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MaskEntry {
+    pub node: String,
+    pub include: bool,
+    /// Also every node under it (unless a nearer entry says otherwise).
+    pub subtree: bool,
+}
+
+/// Whether a layer with `mask` poses a node, given the names from the
+/// node up to the animator (the node's own first): the nearest entry
+/// decides (the node's own, else a subtree entry of the nearest ancestor
+/// that has one; the last in the list if two name the same node); with
+/// none, the node is posed unless some entry includes.
+pub fn masked_in<'a>(mask: &[MaskEntry], names: impl IntoIterator<Item = &'a str>) -> bool {
+    if mask.is_empty() {
+        return true;
+    }
+    for (depth, name) in names.into_iter().enumerate() {
+        if let Some(e) = mask
+            .iter()
+            .rev()
+            .find(|e| e.node == name && (depth == 0 || e.subtree))
+        {
+            return e.include;
+        }
+    }
+    !mask.iter().any(|e| e.include)
+}
+
+/// How much an IK goal bends the pose: a number, or a float parameter.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum IkWeight {
+    Value(f32),
+    Parameter(usize),
+}
+
+/// What an IK goal moves (ADR-0033 § 5). Node names resolve under the
+/// animator.
+#[derive(Clone, Debug, PartialEq)]
+pub enum IkKind {
+    /// An arm or a leg reaches the target: `tip` (the hand or the foot),
+    /// `middle` (default: the tip's parent), `root` (default: the
+    /// middle's parent); the middle points to `pole`, or keeps the way
+    /// it bends.
+    TwoBone {
+        root: Option<String>,
+        middle: Option<String>,
+        tip: String,
+        pole: Option<String>,
+    },
+    /// The head (and the spine, `body` of it) turns to the target, at
+    /// most `limit` radians.
+    LookAt {
+        head: String,
+        spine: Vec<String>,
+        limit: f32,
+        body: f32,
+    },
+    /// A ray down at each foot: the feet land on the ground within
+    /// `reach` meters, the hips go down so both reach. Needs physics.
+    FootPlacement {
+        hips: String,
+        left: String,
+        right: String,
+        reach: f32,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IkDef {
+    pub name: String,
+    pub kind: IkKind,
+    pub weight: IkWeight,
+    /// An object it reaches for or looks at (code's target wins).
+    pub target: Option<String>,
 }
 
 impl LayerDef {
@@ -219,12 +299,19 @@ pub struct ControllerDef {
     pub name: String,
     pub parameters: Vec<ParameterDef>,
     pub layers: Vec<LayerDef>,
+    /// IK goals, solved in order after all layers (ADR-0033 § 5).
+    pub ik: Vec<IkDef>,
 }
 
 impl ControllerDef {
     /// The limits the schema holds.
     pub const MAX_PARAMETERS: usize = 64;
     pub const MAX_LAYERS: usize = 16;
+    pub const MAX_IK: usize = 16;
+
+    pub fn ik_index(&self, name: &str) -> Option<usize> {
+        self.ik.iter().position(|g| g.name == name)
+    }
 
     pub fn parameter_index(&self, name: &str) -> Option<usize> {
         self.parameters.iter().position(|p| p.name == name)
@@ -333,6 +420,32 @@ impl ControllerDef {
                         return bad("a condition does not fit its parameter");
                     }
                 }
+            }
+        }
+        if self.ik.len() > Self::MAX_IK {
+            return Err(format!("{n}: at most {} IK goals", Self::MAX_IK));
+        }
+        for g in &self.ik {
+            let bad = |what: &str| Err(format!("{n} IK {}: {what}", g.name));
+            match g.weight {
+                IkWeight::Value(w) if !(0.0..=1.0).contains(&w) => {
+                    return bad("the weight is not within [0, 1]")
+                }
+                IkWeight::Parameter(p) if float(p) != Some(ParameterKind::Float) => {
+                    return bad("the weight parameter is not a float")
+                }
+                _ => {}
+            }
+            match &g.kind {
+                IkKind::LookAt { limit, body, .. }
+                    if !limit.is_finite() || *limit < 0.0 || !(0.0..=1.0).contains(body) =>
+                {
+                    return bad("the limit or the body share is out of range")
+                }
+                IkKind::FootPlacement { reach, .. } if !reach.is_finite() || *reach <= 0.0 => {
+                    return bad("the reach must be finite and > 0")
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -737,6 +850,7 @@ mod tests {
             default,
         };
         ControllerDef {
+            ik: vec![],
             name: "Player".into(),
             parameters: vec![
                 p("speed", ParameterKind::Float, Value::Float(1.0)),
@@ -788,6 +902,7 @@ mod tests {
                     },
                 ],
                 machines: vec![],
+                mask: vec![],
             }],
         }
     }
@@ -1270,10 +1385,38 @@ mod tests {
             states: vec![],
             transitions: vec![],
             machines: vec![],
+            mask: vec![],
         });
         def.validate().unwrap();
         let mut run = ControllerRun::new(&def);
         assert_eq!(tick(&def, &mut run), [entered(LOCOMOTION, None)]);
         assert_eq!(run.layers[1].state, None);
+    }
+
+    #[test]
+    fn the_nearest_mask_entry_decides() {
+        let e = |node: &str, include, subtree| MaskEntry {
+            node: node.into(),
+            include,
+            subtree,
+        };
+        // The ADR's example: the spine and all above it, not the head
+        // itself (its children still are).
+        let mask = [e("Spine", true, true), e("Head", false, false)];
+        let path = |p: &[&'static str]| p.to_vec();
+        assert!(masked_in(&mask, path(&["Spine", "Hips", "Player"])));
+        assert!(masked_in(&mask, path(&["Neck", "Spine", "Hips", "Player"])));
+        assert!(!masked_in(&mask, path(&["Head", "Neck", "Spine", "Hips"])));
+        assert!(masked_in(&mask, path(&["Eye", "Head", "Neck", "Spine"])));
+        // Something is included: what no entry reaches is not.
+        assert!(!masked_in(&mask, path(&["LeftLeg", "Hips", "Player"])));
+        // Only exclusions: the rest is posed.
+        let mask = [e("LeftArm", false, true)];
+        assert!(!masked_in(&mask, path(&["LeftHand", "LeftArm", "Spine"])));
+        assert!(masked_in(&mask, path(&["RightHand", "RightArm", "Spine"])));
+        // No mask: everything; two entries for a node: the last.
+        assert!(masked_in(&[], path(&["Anything"])));
+        let mask = [e("Spine", true, true), e("Spine", false, true)];
+        assert!(!masked_in(&mask, path(&["Spine"])));
     }
 }

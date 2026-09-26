@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use fynkel_document::controller::{
-    Blending, Interruption, ParameterType, Test, ANY_STATE, DEFAULT_DURATION,
+    Blending, IkType, IkWeight, Interruption, ParameterType, Test, ANY_STATE, DEFAULT_DURATION,
 };
 use fynkel_document::{Controller, Document, DocumentKind, SchemaSet};
 
@@ -509,4 +509,51 @@ fn a_sub_state_machines_names_are_its_own() {
         r#"{"from":"Airborne","to":"Locomotion","exitTime":1,"interruptibleBy":"always"}"#,
     ));
     assert!(!codes(&c).is_empty());
+}
+
+#[test]
+fn a_mask_and_ik_goals_read_and_validate() {
+    let body = player(JUMP)
+        .replace(
+            r#""name":"Base Layer","#,
+            r#""name":"Base Layer","mask":[{"node":"Spine","include":true},{"node":"Head","include":false,"subtree":false}],"#,
+        )
+        + r#","ik":[
+            {"name":"leftHand","type":"twoBone","tip":"LeftHand","pole":"Elbow","weight":"speed"},
+            {"name":"look","type":"lookAt","head":"Head","spine":["Spine1","Spine2"],"limit":60,"target":"Coin"},
+            {"name":"feet","type":"footPlacement","hips":"Hips","left":"LeftFoot","right":"RightFoot"}]"#;
+    let c = doc(&body);
+    assert_eq!(codes(&c), []);
+    let mask = &c.layers[0].mask;
+    assert_eq!(mask.len(), 2);
+    assert!(mask[0].include && mask[0].subtree);
+    assert!(!mask[1].include && !mask[1].subtree);
+    assert_eq!(mask[1].pointer, "/layers/0/mask/1");
+    assert_eq!(c.ik.len(), 3);
+    assert_eq!(c.ik[0].kind, Some(IkType::TwoBone));
+    assert_eq!(c.ik[0].weight, IkWeight::Parameter("speed".into()));
+    assert_eq!(c.ik[1].spine, ["Spine1", "Spine2"]);
+    assert_eq!(c.ik[1].limit, 60.0);
+    assert_eq!(c.ik[1].target.as_deref(), Some("Coin"));
+    assert_eq!(c.ik[2].reach, 0.5);
+    assert_eq!(c.ik[2].weight, IkWeight::Value(1.0));
+
+    // Names unique, the weight a float parameter, each type's nodes.
+    let body = player(JUMP)
+        + r#","ik":[
+            {"name":"a","type":"twoBone","tip":"LeftHand","weight":"grounded"},
+            {"name":"a","type":"lookAt","head":"Head","weight":"nope"},
+            {"name":"b","type":"footPlacement","hips":"Hips","left":"LeftFoot"}]"#;
+    let got = codes(&doc(&body));
+    for want in [
+        ("FYN-D1102", "/ik/0/weight"),
+        ("FYN-D1101", "/ik/1/name"),
+        ("FYN-D1101", "/ik/1/weight"),
+    ] {
+        assert!(
+            got.contains(&(want.0.into(), want.1.into())),
+            "{want:?} in {got:?}"
+        );
+    }
+    assert!(got.iter().any(|(_, p)| p.starts_with("/ik/2")), "{got:?}");
 }
