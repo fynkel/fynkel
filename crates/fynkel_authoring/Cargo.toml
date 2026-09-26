@@ -9,6 +9,9 @@ license.workspace = true
 [dependencies]
 fynkel_contracts.workspace = true
 fynkel_document.workspace = true
+# The `shaders` query and the live edit of a shader asset's material
+# (ADR-0031).
+fynkel_shader.workspace = true
 # `expected_lock()` for the lock check and the imported-prefab provider
 # for project validation. Development-only code, like this crate.
 fynkel_import.workspace = true

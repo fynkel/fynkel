@@ -880,6 +880,7 @@ dependencies = [
  "fynkel_physics",
  "fynkel_render",
  "fynkel_scene",
+ "fynkel_shader",
  "glam 0.33.7",
  "serde_json",
  "uuid",

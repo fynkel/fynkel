@@ -275,15 +275,86 @@ impl OpenProject {
     /// compiles (ADR-0031).
     pub fn shaders(&self) -> ShaderLibrary {
         let mut shaders = ShaderLibrary::builtin();
-        for e in self.assets.entries() {
-            if matches!(&e.kind, AssetKind::Source { importer, .. } if importer == fynkel_document::asset::SHADER_IMPORTER) {
-                let file = e.file(self.assets.root());
-                if let Ok(m) = fynkel_document::material::read_shader_file(e.id, &e.path, &file) {
-                    shaders.add(m);
-                }
+        for (e, file) in self.shader_files() {
+            if let Ok(m) = fynkel_document::material::read_shader_file(e.id, &e.path, &file) {
+                shaders.add(m);
             }
         }
         shaders
+    }
+
+    /// Every `.shader` asset (ADR-0031) with its file: the project's, then
+    /// its packages' that no project asset shadows.
+    fn shader_files(&self) -> Vec<(&fynkel_document::AssetEntry, PathBuf)> {
+        let packaged = self
+            .package_assets
+            .entries()
+            .iter()
+            .filter(|e| self.assets.get(e.id).is_none())
+            .map(|e| (e, e.file(self.package_assets.root())));
+        self.assets
+            .entries()
+            .iter()
+            .map(|e| (e, e.file(self.assets.root())))
+            .chain(packaged)
+            .filter(|(e, _)| {
+                matches!(&e.kind, AssetKind::Source { importer, .. } if importer == fynkel_document::asset::SHADER_IMPORTER)
+            })
+            .collect()
+    }
+
+    /// The `shaders` query (ADR-0031 § 7): what the material Inspector's
+    /// Shader dropdown lists and a shader's Inspector page shows. The
+    /// built-in Lit first, then every `.shader` asset, the project's before
+    /// its packages'. Each is `{ shader, name, builtin, path?, file?,
+    /// package?, ok, lighting, alpha, shadows, vertex, properties,
+    /// diagnostics }`; `shader` is what a material's `shader` names (the
+    /// built-in's `fynkel.pbr@1`, else the asset id). A shader that does
+    /// not compile keeps its path and diagnostics and has no properties.
+    pub fn shaders_json(&self) -> Value {
+        let mut out = vec![builtin_shader_json()];
+        for (e, file) in self.shader_files() {
+            let mut v = json!({
+                "shader": e.id.to_string(),
+                "name": e.name,
+                "builtin": false,
+                "path": e.path,
+                "file": file.display().to_string(),
+            });
+            if let Some(package) = fynkel_document::packages::package_of(&e.path) {
+                v["package"] = package.into();
+            }
+            let checked = std::fs::read_to_string(&file)
+                .map_err(|err| {
+                    vec![
+                        Diagnostic::error(Code::IO, format!("cannot read {}: {err}", e.path))
+                            .with_document(e.path.clone()),
+                    ]
+                })
+                .and_then(|text| fynkel_shader::check(Some(&e.path), &text));
+            match checked {
+                Ok(shader) => {
+                    let i = &shader.interface;
+                    v["name"] = i.name.clone().into();
+                    v["ok"] = true.into();
+                    v["lighting"] = i.lighting.name().into();
+                    v["alpha"] = json!(i.alpha.iter().map(|m| m.name()).collect::<Vec<_>>());
+                    v["shadows"] = i.shadows.into();
+                    v["vertex"] = shader.has_vertex().into();
+                    v["properties"] =
+                        Value::Array(i.properties.iter().map(property_json).collect());
+                    v["diagnostics"] = json!([]);
+                }
+                Err(diags) => {
+                    v["ok"] = false.into();
+                    v["properties"] = json!([]);
+                    v["diagnostics"] =
+                        fynkel_document::diagnostics_json(&diags)["diagnostics"].clone();
+                }
+            }
+            out.push(v);
+        }
+        Value::Array(out)
     }
 
     /// Refreshes the asset database and the reference index. With `paths`
@@ -907,4 +978,106 @@ pub(crate) fn to_contract(id: Uuid) -> fynkel_contracts::Uuid {
 
 pub(crate) fn from_contract(id: fynkel_contracts::Uuid) -> Uuid {
     Uuid::from_bytes(id.0)
+}
+
+/// One header property as the `shaders` query lists it.
+fn property_json(p: &fynkel_shader::Property) -> Value {
+    use fynkel_shader::{PropertyKind, ValueType};
+    let mut v = json!({
+        "name": p.name,
+        "label": p.label(),
+        "line": p.line,
+    });
+    if let Some(t) = &p.tooltip {
+        v["tooltip"] = t.clone().into();
+    }
+    match &p.kind {
+        PropertyKind::Value {
+            ty,
+            default,
+            min,
+            max,
+        } => {
+            v["type"] = ty.name().into();
+            v["default"] = match ty {
+                ValueType::Float => json!(default[0]),
+                ValueType::Int => json!(default[0] as i64),
+                ValueType::Bool => json!(default[0] != 0.0),
+                _ => json!(default),
+            };
+            if let Some(m) = min {
+                v["min"] = json!(m);
+            }
+            if let Some(m) = max {
+                v["max"] = json!(m);
+            }
+        }
+        PropertyKind::Texture {
+            fallback,
+            color_space,
+            required,
+        } => {
+            v["type"] = "texture".into();
+            v["default"] = fallback.name().into();
+            v["colorSpace"] = color_space.name().into();
+            v["required"] = (*required).into();
+        }
+    }
+    v
+}
+
+/// The built-in `fynkel.pbr@1` as the `shaders` query lists it: Unity's
+/// Lit, drawn by the engine's own shader. Its properties carry the
+/// manifest's names (`baseColor`); a material holds them as the
+/// `PbrMaterial` fields (`base_color`, `base_color_texture`).
+fn builtin_shader_json() -> Value {
+    let library = ShaderLibrary::builtin();
+    let pbr = library
+        .get(fynkel_document::material::PBR_SHADER_ID)
+        .expect("the built-in PBR shader");
+    let mut properties = Vec::new();
+    for p in &pbr.parameters {
+        let mut v = json!({
+            "name": p.name,
+            "label": fynkel_shader::nicify(&p.name),
+            "type": match p.ty.name() { "color4" => "color", other => other },
+            "default": p.default.as_ref().map(|d| d.to_json()),
+        });
+        if let Some(m) = p.min {
+            v["min"] = json!(m);
+        }
+        if let Some(m) = p.max {
+            v["max"] = json!(m);
+        }
+        if !p.description.is_empty() {
+            v["tooltip"] = p.description.clone().into();
+        }
+        properties.push(v);
+    }
+    for t in &pbr.textures {
+        let mut v = json!({
+            "name": t.name,
+            "label": fynkel_shader::nicify(&t.name),
+            "type": "texture",
+            "default": t.default.clone().unwrap_or_else(|| "white".into()),
+            "colorSpace": t.color_space.name(),
+            "required": t.required,
+        });
+        if !t.description.is_empty() {
+            v["tooltip"] = t.description.clone().into();
+        }
+        properties.push(v);
+    }
+    json!({
+        "shader": pbr.shader_id,
+        "name": "Lit",
+        "builtin": true,
+        "ok": true,
+        "lighting": "lit",
+        "alpha": ["opaque", "mask", "blend"],
+        "shadows": true,
+        "vertex": false,
+        "properties": properties,
+        "diagnostics": [],
+    })
 }

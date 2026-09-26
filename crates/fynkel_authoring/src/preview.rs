@@ -871,7 +871,15 @@ impl Preview {
     /// every renderer on `assets`, the file untouched. The save's recook
     /// brings the cache to the same values; [`Preview::restore_material`]
     /// puts the cooked one back (a cancelled edit).
+    ///
+    /// When `data`'s `shader` is a shader asset's reference (ADR-0031),
+    /// its values are checked against that shader as the cook checks them
+    /// (the shader's cooked text) and drawn the same way; a value that
+    /// does not fit is refused.
     pub fn set_material(assets: &Assets, material: Uuid, data: &Value) -> Result<(), Diagnostic> {
+        if data.get("shader").is_some_and(Value::is_object) {
+            return set_shader_material(assets, material, data);
+        }
         let node = fynkel_document::Node::from_serde(data);
         let m = fynkel_document::material::PbrMaterial::from_node(&node).map_err(|err| {
             Diagnostic::error(
@@ -1708,4 +1716,45 @@ fn asset_refs_of(c: &ComponentValue) -> Vec<AssetRef> {
 /// `id` as the contracts' UUID (the world's key type).
 pub fn contracts_uuid(id: Uuid) -> fynkel_contracts::Uuid {
     from_uuid(id)
+}
+
+/// [`Preview::set_material`] for a shader asset's material.
+fn set_shader_material(assets: &Assets, material: Uuid, data: &Value) -> Result<(), Diagnostic> {
+    let refuse = |message: String| {
+        Diagnostic::error(Code::SESSION_INVALID_REQUEST, message).with_id(material.to_string())
+    };
+    let kind = fynkel_document::DocumentKind::Material;
+    let mut fields = fynkel_document::Document::new(kind, "live").root.to_serde();
+    let fields = fields.as_object_mut().expect("a document is an object");
+    fields.retain(|k, _| matches!(k.as_str(), "$schema" | "formatVersion" | "id" | "name"));
+    for (k, v) in data.as_object().into_iter().flatten() {
+        if !matches!(k.as_str(), "$schema" | "formatVersion" | "id" | "name") {
+            fields.insert(k.clone(), v.clone());
+        }
+    }
+    let m = fynkel_document::Material::parse(None, &Value::Object(fields.clone()).to_string())
+        .map_err(|d| refuse(format!("material: {}", d[0].message)))?;
+    if let Some(d) = m.read_diagnostics().iter().find(|d| d.is_error()) {
+        return Err(refuse(format!("material: {}", d.message)));
+    }
+    let shader_id = m.shader.parse::<fynkel_contracts::Uuid>().map_err(|_| {
+        refuse(format!(
+            "material: `{}` is not a shader asset's id",
+            m.shader
+        ))
+    })?;
+    let text = assets.shader_source(shader_id)?;
+    let shader = fynkel_shader::parse(None, &text)
+        .map_err(|d| refuse(format!("material's shader: {}", d[0].message)))?;
+    let (payload, checked) = m.custom_payload(&shader);
+    if let Some(d) = checked.iter().find(|d| d.is_error()) {
+        return Err(refuse(format!("material: {}", d.message)));
+    }
+    let payload =
+        payload.ok_or_else(|| refuse("material: its values do not fit its shader".into()))?;
+    assets.override_custom_material(
+        &AssetRef::new(fynkel_contracts::Uuid(*material.as_bytes())),
+        payload,
+    );
+    Ok(())
 }

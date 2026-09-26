@@ -30,6 +30,7 @@ use crate::{AuthoringSession, Handle, COMMANDS};
 /// | `schemas` | | component and behaviour types with schemas |
 /// | `schema` | `type` | one schema |
 /// | `metadata` | | `behaviours.g.json` or null |
+/// | `shaders` | | the built-in Lit and every `.shader` asset: menu name, lighting, alpha modes, shadows, properties, and the file's diagnostics ([`crate::OpenProject::shaders_json`], ADR-0031) |
 /// | `migrations` | | [`crate::OpenProject::migrations_json`]: the outdated documents and what `fynkel migrate` would do |
 /// | `defaults` | `type` | `{ type, data }`: a native component's `Default` as document data ([`crate::component_default`]) |
 /// | `revision` | `path` | the revision and identity of a document file on disk now ([`AuthoringSession::file_revision`]) |
@@ -51,6 +52,7 @@ pub const KINDS: &[&str] = &[
     "schemas",
     "schema",
     "metadata",
+    "shaders",
     "migrations",
     "defaults",
     "revision",
@@ -166,6 +168,11 @@ impl AuthoringSession {
                 .metadata
                 .clone()
                 .unwrap_or(Value::Null)),
+            "shaders" => Ok(self
+                .project()
+                .ok_or_else(no_project)
+                .map_err(one)?
+                .shaders_json()),
             "migrations" => Ok(self
                 .project()
                 .ok_or_else(no_project)
