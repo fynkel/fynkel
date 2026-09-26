@@ -274,6 +274,23 @@ fn new_documents_are_valid_named_after_their_file_and_undo_removes_them() {
         fynkel_document::PhysicsMaterialDocument::from_document(ice).material,
         fynkel_core::physics::PhysicsMaterial::default()
     );
+    // An Animator Controller (Unity's Create → Animator Controller,
+    // ADR-0032): one Base Layer, no parameters.
+    let v = ok(s.operate(
+        "newDocument",
+        &json!({ "kind": "controller", "path": "anim/Player" }),
+    ));
+    assert_eq!(v["entry"]["document"], "controller");
+    let player = fynkel_document::Controller::from_document(
+        Document::read(
+            &copy.path("assets/anim/Player.controller.json"),
+            Some(DocumentKind::Controller),
+        )
+        .unwrap(),
+    );
+    assert_eq!(player.name(), "Player");
+    assert_eq!(player.layers.len(), 1);
+    assert!(player.parameters.is_empty());
     let d = refused(
         s.operate(
             "newDocument",

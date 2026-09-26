@@ -398,11 +398,12 @@ impl AuthoringSession {
                 | DocumentKind::Material
                 | DocumentKind::Volume
                 | DocumentKind::PhysicsMaterial
+                | DocumentKind::Controller
                 | DocumentKind::Data),
             ) => k,
             _ => {
                 return Err(invalid(format!(
-                    "{OP}: kind must be \"scene\", \"prefab\", \"material\", \"volume\", \"physics_material\" or \"data\", not {kind_name:?}"
+                    "{OP}: kind must be \"scene\", \"prefab\", \"material\", \"volume\", \"physics_material\", \"controller\" or \"data\", not {kind_name:?}"
                 )))
             }
         };
