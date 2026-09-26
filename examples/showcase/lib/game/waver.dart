@@ -1,10 +1,13 @@
 import 'package:fynkel/fynkel.dart';
 
+import '../generated/animators.g.dart';
+
 /// Waves the runner's right arm every [every] seconds while it keeps
 /// running: a clip made in code ([ClipBuilder], no file) played as a
 /// one-shot in the Animator Controller's `UpperBody` slot (ADR-0033 § 2 —
 /// assets/models/runner.controller.json's second layer, rooted at the
-/// spine, has no states: it shows only its one-shots).
+/// spine, has no states: it shows only its one-shots), named through the
+/// generated `RunnerAnimator` (ADR-0033 § 3).
 @FynkelBehaviour(id: 'game.Waver')
 class Waver extends Behaviour {
   @Expose(min: 0.5, step: 0.5, tooltip: 'Seconds between two waves')
@@ -40,7 +43,7 @@ class Waver extends Behaviour {
     _wait -= context.dt;
     if (_wait > 0) return;
     _wait += every;
-    animation.playOneShot(clip, slot: 'UpperBody', blendIn: 0.15, blendOut: 0.2);
+    RunnerAnimator(animation).playOneShot(clip, slot: RunnerSlot.upperBody, blendIn: 0.15, blendOut: 0.2);
     waves++;
   }
 }
