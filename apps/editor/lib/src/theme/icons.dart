@@ -127,6 +127,7 @@ abstract final class FIcons {
   static const IconData sportsEsports = LucideIcons.gamepad2;
   static const IconData star = LucideIcons.star;
   static const IconData stop = LucideIcons.square;
+  static const IconData repeat = LucideIcons.repeat;
   static const IconData syncProblem = LucideIcons.refreshCwOff;
   static const IconData terminal = LucideIcons.terminal;
   static const IconData textFields = LucideIcons.type;

@@ -14,6 +14,7 @@ import '../extensions/editor_extensions.dart';
 import '../theme/icons.dart';
 import '../theme/tokens.dart';
 import 'preview_provider.dart';
+import 'sound_preview.dart';
 import 'stage_previews.dart';
 import 'stage_view.dart';
 import 'texture_preview.dart';
@@ -41,6 +42,7 @@ void registerBuiltInPreviews() {
   PreviewProviders.register(modelPreview);
   PreviewProviders.register(rigPreview);
   PreviewProviders.register(prefabPreview);
+  PreviewProviders.register(soundPreview);
 }
 
 /// The preview area for [asset], or nothing when no preview takes it.
@@ -333,4 +335,20 @@ class _Preview implements PreviewContext {
         shape: shape,
         onStats: onStats,
       );
+
+  @override
+  Widget sound({
+    String? asset,
+    bool playing = false,
+    bool loop = false,
+    void Function(bool playing)? onPlaying,
+    void Function(PreviewSoundInfo info)? onInfo,
+  }) => SoundView(
+    key: ValueKey('preview.sound.${asset ?? this.asset.id}.$revision'),
+    asset: asset ?? this.asset.id,
+    playing: playing,
+    loop: loop,
+    onPlaying: onPlaying,
+    onInfo: onInfo,
+  );
 }

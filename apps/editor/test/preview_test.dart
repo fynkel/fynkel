@@ -10,9 +10,11 @@ import 'package:fynkel_editor/src/extensions/editor_extensions.dart';
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 import 'package:fynkel_editor/src/inspector/inspector_panel.dart';
 import 'package:fynkel_editor/src/preview/preview_area.dart';
+import 'package:fynkel_editor/src/preview/sound_preview.dart';
 import 'package:fynkel_editor/src/preview/stage_previews.dart';
 import 'package:fynkel_editor/src/preview/stage_view.dart';
 import 'package:fynkel_editor/src/preview/texture_preview.dart';
+import 'package:fynkel_editor/src/theme/icons.dart';
 
 import 'parity/harness.dart';
 
@@ -211,5 +213,55 @@ void main() {
     await select(e, pathId(e, 'prefabs/crate.prefab.json'));
     expect(stageOf(tester).stage!.state.subject, 'hierarchy');
     expect(info(tester), contains('verts'));
+  });
+
+  test('the sound line reads as Unity\'s', () {
+    const vorbis = PreviewSoundInfo(sampleRate: 44100, channels: 2, duration: 3.21, codec: 'vorbis', streamed: false);
+    expect(soundInfo(vorbis, bytes: 212 * 1024), 'Vorbis, 44100 Hz, Stereo, 0:03.210, 212 KB');
+    const long = PreviewSoundInfo(sampleRate: 22050, channels: 1, duration: 75.5, codec: 'pcm', streamed: true);
+    expect(soundInfo(long), 'PCM, 22050 Hz, Mono, 1:15.500, Streamed');
+  });
+
+  testWidgets('a sound: the waveform, the line, play and stop, a click plays from there', (tester) async {
+    final e = await Editor.open(tester, tag: 'preview');
+    await select(e, pathId(e, 'audio/tone.wav'));
+    expect(find.byKey(const Key('preview.waveform')), findsOneWidget);
+    expect(find.byKey(const Key('preview.sound.error')), findsNothing);
+    expect(info(tester), 'PCM, 8000 Hz, Stereo, 0:00.050, 2 KB');
+    SoundViewState view() => tester.state<SoundViewState>(find.byType(SoundView));
+    expect(view().stage!.state.sound!.frames, 400);
+
+    await tester.tap(find.byKey(const Key('preview.loop')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('preview.play')));
+    await tester.pump();
+    expect(view().isPlaying, isTrue, reason: 'looping, it keeps playing');
+    expect(find.descendant(of: find.byKey(const Key('preview.play')), matching: find.byIcon(FIcons.stop)), findsOneWidget);
+    await tester.tap(find.byKey(const Key('preview.play')));
+    await tester.pump();
+    expect(view().isPlaying, isFalse);
+    expect(view().time, 0);
+
+    // A click three quarters in plays from there.
+    final wave = tester.getRect(find.byKey(const Key('preview.waveform')));
+    await tester.tapAt(Offset(wave.left + wave.width * 0.75, wave.center.dy));
+    await tester.pump();
+    expect(view().isPlaying, isTrue);
+    expect(view().time, closeTo(0.0375, 0.005));
+    expect(find.byKey(const Key('preview.sound.time')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('preview.play')));
+    await tester.pumpAndSettle();
+
+    // Not looping, it runs out by itself: the button is Play again.
+    await tester.tap(find.byKey(const Key('preview.loop')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('preview.play')));
+    await tester.pump();
+    expect(view().isPlaying, isTrue);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 120)));
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pumpAndSettle();
+    expect(view().isPlaying, isFalse);
+    expect(find.descendant(of: find.byKey(const Key('preview.play')), matching: find.byIcon(FIcons.playArrow)), findsOneWidget);
   });
 }

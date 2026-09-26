@@ -5,7 +5,6 @@
 // unsaved material edit shows at once. With FYNKEL_STAGE_SHOTS set, the
 // frames are written there as PNGs to look at.
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';

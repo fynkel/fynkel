@@ -49,6 +49,42 @@ abstract interface class PreviewContext {
   /// `{'asset': id, 'sub': 'mesh/…'}`. [onStats] gets what is drawn once
   /// it is staged.
   Widget stage({String? asset, String? sub, Object? shape, void Function(PreviewStageStats stats)? onStats});
+
+  /// The editor's sound view (the sound preview's): the waveform of
+  /// [asset] (this preview's by default), one lane per channel, with a
+  /// playhead. Clicking it plays from that point. [playing] and [loop]
+  /// start, stop and loop the playback (a toolbar's buttons);
+  /// [onPlaying] is told when it starts or stops by itself (a click, the
+  /// end). [onInfo] gets the sound's format once it is read.
+  Widget sound({
+    String? asset,
+    bool playing = false,
+    bool loop = false,
+    void Function(bool playing)? onPlaying,
+    void Function(PreviewSoundInfo info)? onInfo,
+  });
+}
+
+/// A sound's format, for a sound preview's info line.
+final class PreviewSoundInfo {
+  const PreviewSoundInfo({
+    required this.sampleRate,
+    required this.channels,
+    required this.duration,
+    required this.codec,
+    this.streamed = false,
+  });
+
+  final int sampleRate, channels;
+
+  /// Seconds.
+  final double duration;
+
+  /// `pcm` or `vorbis`.
+  final String codec;
+
+  /// Decoded as it plays, not held in memory.
+  final bool streamed;
 }
 
 /// What a [PreviewContext.stage] draws: its meshes, and their size.

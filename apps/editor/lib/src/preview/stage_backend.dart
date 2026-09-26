@@ -27,6 +27,13 @@ abstract class StageBackend {
   /// A material document's fields drawn by every world of the session.
   void setMaterial(String material, Map<String, Object?> data);
 
+  /// A sound stage's waveform, playback and playhead.
+  SoundPeaks peaks(int columns);
+  SoundPlayhead play({double from = 0, bool? loop, bool device = true});
+  SoundPlayhead stop();
+  SoundPlayhead setLoop(bool loop);
+  SoundPlayhead playhead();
+
   void close();
 }
 
@@ -50,6 +57,17 @@ final class SessionStage implements StageBackend {
   StageState refresh() => stage.refresh();
   @override
   void setMaterial(String material, Map<String, Object?> data) => stage.setMaterial(material, data);
+  @override
+  SoundPeaks peaks(int columns) => stage.peaks(columns);
+  @override
+  SoundPlayhead play({double from = 0, bool? loop, bool device = true}) =>
+      stage.play(from: from, loop: loop, device: device);
+  @override
+  SoundPlayhead stop() => stage.stop();
+  @override
+  SoundPlayhead setLoop(bool loop) => stage.setLoop(loop);
+  @override
+  SoundPlayhead playhead() => stage.playhead();
   @override
   void close() => stage.close();
 }
