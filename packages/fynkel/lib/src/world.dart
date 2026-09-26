@@ -2056,10 +2056,35 @@ class AnimationControl {
     return info?.oneShot != null;
   }
 
-  void _needsController(String call) {
+  /// Where IK goal [goal] of the animator's controller reaches or looks
+  /// (ADR-0033 § 5), in world space, from the next tick until
+  /// [clearIKTarget]: a hand to a door handle, the head to the nearest
+  /// coin. It wins over the object the goal names in the controller;
+  /// [weight] (0 → 1) scales the goal's own weight. A `twoBone` goal's tip
+  /// reaches [position], a `lookAt` goal's head turns to it (eased, within
+  /// its limit); `footPlacement` finds its ground itself.
+  ///
+  /// An unknown goal is an `invalidPayload` diagnostic that lists the
+  /// goals. Throws a [StateError] on an animator without a controller.
+  void setIKTarget(String goal, Vec3 position, {double weight = 1}) {
+    _needsController('setIKTarget', what: 'IK goals live in a controller');
+    if (!(weight >= 0 && weight <= 1)) {
+      throw ArgumentError.value(weight, 'weight', 'within [0, 1]');
+    }
+    _go._animate(gen.AnimateOp.setIkTarget, name: goal, point: position, value: weight);
+  }
+
+  /// Drops the target [setIKTarget] gave [goal]: back to the object the
+  /// goal names, or to nothing (a goal without a target does not bend).
+  void clearIKTarget(String goal) {
+    _needsController('clearIKTarget', what: 'IK goals live in a controller');
+    _go._animate(gen.AnimateOp.clearIkTarget, name: goal);
+  }
+
+  void _needsController(String call, {String? what}) {
     if (!_controlled) {
-      throw StateError('animation.$call: ${_go.name} has no Animator Controller; a one-shot plays in a '
-          "controller's slot (play the clip instead)");
+      throw StateError('animation.$call: ${_go.name} has no Animator Controller; '
+          "${what ?? "a one-shot plays in a controller's slot (play the clip instead)"}");
     }
   }
 
@@ -2982,7 +3007,8 @@ class GameObject {
       double value = 0,
       String name = '',
       int integer = 0,
-      int layer = -1}) {
+      int layer = -1,
+      Vec3 point = Vec3.zero}) {
     world.modules.require(Module.animation, 'animation command ${op.name}');
     final e = _simulationEntity('animation command');
     world._simulation.animate(e, op,
@@ -2993,7 +3019,8 @@ class GameObject {
         value: value,
         name: name,
         integer: integer,
-        layer: layer);
+        layer: layer,
+        point: point);
     world._simulationTargets.add(this);
   }
 

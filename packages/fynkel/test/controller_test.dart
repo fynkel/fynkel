@@ -299,6 +299,24 @@ void main() {
         reason: 'no asset store before a load');
   });
 
+  test('IK targets from code reach the engine (ADR-0033 § 5)', () {
+    final (w, rig, _) = withController();
+    final a = rig.animation;
+    expect(() => a.setIKTarget('hand', const Vec3(1, 2, 3), weight: 2), throwsArgumentError);
+    // The controller has no goals: the engine says so, naming none.
+    w.throwOnDiagnostics = false;
+    final seen = <FynkelDiagnostic>[];
+    w.onDiagnostics = seen.addAll;
+    a.setIKTarget('hand', const Vec3(1, 2, 3));
+    w.frame(1 / 60);
+    expect(seen.single.code, DiagnosticCode.invalidPayload);
+    expect(seen.single.message, contains('no IK goal `hand` (the controller has none)'));
+    seen.clear();
+    a.clearIKTarget('hand');
+    w.frame(1 / 60);
+    expect(seen.single.message, contains('no IK goal `hand`'));
+  });
+
   test('an animator without a controller has no states or parameters', () {
     final w = fresh();
     expect(w.loadScene(rigScene, cacheDir: cache).ok, isTrue);
@@ -315,5 +333,7 @@ void main() {
     expect(() => rig.animation.playOneShot(const AssetRef(rigAsset, sub: 'anim/bob')),
         throwsA(isA<StateError>().having((e) => e.message, 'message', contains('play the clip instead'))));
     expect(rig.animation.isPlayingOneShot(), isFalse);
+    expect(() => rig.animation.setIKTarget('hand', Vec3.zero),
+        throwsA(isA<StateError>().having((e) => e.message, 'message', contains('IK goals live in a controller'))));
   });
 }
