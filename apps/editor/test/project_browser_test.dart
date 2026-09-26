@@ -507,7 +507,8 @@ void main() {
       expect(model.folder, 'scenes');
       expect(find.byKey(const Key('project.asset.$mainScene')), findsOneWidget);
       expect(find.byTooltip('1 of 7 assets in assets/scenes'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('project.up')));
+      // The path header's `assets` goes back up.
+      await tester.tap(find.byKey(const Key('project.path.0')));
       await tester.pumpAndSettle();
       expect(model.folder, '');
       await tester.tap(find.byKey(const Key('project.folder.row.models')));
@@ -518,7 +519,7 @@ void main() {
       expect(shown, [robot]);
       expect(opened, isEmpty);
       // The flat list shows every asset; the search narrows it.
-      await tester.tap(find.byIcon(FIcons.viewListOutlined));
+      model.setView(BrowserView.list);
       await tester.pumpAndSettle();
       expect(model.view, BrowserView.list);
       expect(find.byKey(const Key('project.asset.$mainScene')), findsOneWidget);
@@ -559,7 +560,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(model.entry(created)!.path, 'gold.material.json');
       expect(model.renamingAsset, isNull);
-      expect(find.text('gold.material.json'), findsOneWidget);
+      expect(find.text('gold'), findsOneWidget, reason: 'the name as Unity shows it; the file on hover');
       // Context menu → Rename → ⎋ leaves the name.
       await tester.tap(find.byKey(Key('project.asset.$created')), buttons: kSecondaryButton);
       await tester.pumpAndSettle();
@@ -582,9 +583,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(project.extraFolders, contains('New Folder'), reason: 'the fake\'s folder list is what it is');
       expect(model.renamingFolder, isNull);
-      // The undo button takes the material back.
+      // Undo (Edit ▸ Undo Asset Operation) takes the material back.
       expect(model.history.canUndo, isTrue);
-      await tester.tap(find.byKey(const Key('project.undo')));
+      model.undo();
       await tester.pumpAndSettle();
       expect(model.entry(created)!.path, 'New Material.material.json');
     });
@@ -671,7 +672,7 @@ void main() {
       'Delete on a referenced asset shows the dependents and "Delete anyway" forces it; the error bar shows refusals',
       (tester) async {
         final (_, model, _, _) = await pumpPanel(tester);
-        await tester.tap(find.byIcon(FIcons.viewListOutlined));
+        model.setView(BrowserView.list);
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const Key('project.asset.$rusted')));
         await tester.pumpAndSettle();
@@ -708,7 +709,7 @@ void main() {
       expect(find.byKey(const Key('project.columns')), findsOneWidget);
       expect(find.text('Contents'), findsOneWidget);
       expect(tester.widget<Text>(find.byKey(const Key('project.contents.folder.models'))).data, '1 asset');
-      await tester.tap(find.byIcon(FIcons.viewListOutlined));
+      model.setView(BrowserView.list);
       await tester.pumpAndSettle();
       expect(tester.widget<Text>(find.byKey(Key('project.contents.$robot'))).data, '3 parts');
       expect(find.byKey(Key('project.contents.$tone')), findsNothing, reason: 'a whole file has no parts to count');
@@ -738,12 +739,12 @@ void main() {
       tester,
     ) async {
       final (project, model, _, _) = await pumpPanel(tester);
-      await tester.tap(find.byIcon(FIcons.viewListOutlined));
+      model.setView(BrowserView.list);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('project.asset.$tone')));
       await tester.pumpAndSettle();
-      // Back to folders: the tree is there; the row still shows in the root? No — list rows are in the list.
-      await tester.tap(find.byIcon(FIcons.folderOutlined).first);
+      // Back to folders: the tree is there.
+      model.setView(BrowserView.folders);
       await tester.pumpAndSettle();
       model.setFolder('sounds');
       await tester.pumpAndSettle();

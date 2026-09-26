@@ -150,6 +150,10 @@ void main() {
 
     await e.click(find.byKey(const Key('project.expand.$robot')));
     final part = find.byKey(const Key('project.part.$robot.mesh/PyramidAndQuad/0'));
+    // The parts run past a short panel: scroll to the mesh.
+    final list = tester.widget<ListView>(find.byKey(const Key('project.list')));
+    list.controller!.jumpTo(44);
+    await tester.pumpAndSettle();
     expect(part, findsOneWidget);
     expect(find.byKey(const Key('project.part.$robot.material/Glass')), findsOneWidget);
     expect(e.selectedNames, ['Robot'], reason: 'the ▸ selects nothing');

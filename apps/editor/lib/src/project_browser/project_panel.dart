@@ -890,6 +890,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        _pathBar(context, theme, assets.length),
                         if (!model.grid) _columnHeader(context, theme, columns: columns),
                         Expanded(
                           child: scripts
@@ -905,7 +906,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
           ),
         ),
         if (model.lastError != null) _errorBar(context, theme, model.lastError!),
-        scripts ? _scriptStatus(context, theme) : _status(context, theme, assets.length),
+        _footer(context, theme),
       ],
     );
   }
@@ -1126,52 +1127,6 @@ class _ProjectPanelState extends State<ProjectPanel> {
     );
   }
 
-  Widget _scriptStatus(BuildContext context, ThemeData theme) {
-    final t = context.tokens;
-    final total = model.scripts.files.length;
-    final shown = model.visibleScripts.length;
-    final where = model.view == BrowserView.list
-        ? 'lib'
-        : model.scriptFolder.isEmpty
-        ? 'lib'
-        : 'lib/${model.scriptFolder}';
-    final text =
-        model.scriptsBusy ??
-        [shown == total ? '$total script${total == 1 ? '' : 's'}' : '$shown of $total scripts', 'in $where'].join(' ');
-    return Container(
-      height: t.row + 2,
-      alignment: Alignment.centerLeft,
-      padding: EdgeInsets.symmetric(horizontal: t.pad),
-      decoration: BoxDecoration(
-        color: t.header,
-        border: Border(top: t.hairline),
-      ),
-      child: Row(
-        children: [
-          if (model.view == BrowserView.folders && model.scriptFolder.isNotEmpty)
-            InkWell(
-              key: const Key('project.up'),
-              onTap: model.scriptsUp,
-              child: const Padding(padding: EdgeInsets.only(right: 6), child: Icon(FIcons.arrowUpward, size: 13)),
-            ),
-          if (model.scriptsBusy != null) ...[
-            const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.5)),
-            const SizedBox(width: 6),
-          ],
-          Expanded(
-            child: Text(
-              text,
-              key: const Key('project.status'),
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          _zoomSlider(context),
-        ],
-      ),
-    );
-  }
-
   /// Name | Kind | Contents | Size. Name and Kind sort (again to flip).
   Widget _columnHeader(BuildContext context, ThemeData theme, {required bool columns}) {
     final t = context.tokens;
@@ -1229,8 +1184,9 @@ class _ProjectPanelState extends State<ProjectPanel> {
     );
   }
 
+  /// Unity's: + first, the search, the kind filter, the lock. Folders or
+  /// one list, sorting (the column headers), undo and redo are in the menus.
   Widget _toolbar(BuildContext context, ThemeData theme) {
-    final history = model.history;
     final kinds = model.kinds;
     final counts = model.countsByKind;
     final t = context.tokens;
@@ -1316,28 +1272,6 @@ class _ProjectPanelState extends State<ProjectPanel> {
               _ => model.newDocument(v),
             },
           ),
-          SegmentedButton<BrowserView>(
-            key: const Key('project.view'),
-            showSelectedIcon: false,
-            style: const ButtonStyle(
-              visualDensity: VisualDensity.compact,
-              padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 6)),
-            ),
-            segments: const [
-              ButtonSegment(
-                value: BrowserView.folders,
-                icon: Icon(FIcons.folderOutlined, size: 14),
-                tooltip: 'Folders',
-              ),
-              ButtonSegment(
-                value: BrowserView.list,
-                icon: Icon(FIcons.viewListOutlined, size: 14),
-                tooltip: 'Flat list',
-              ),
-            ],
-            selected: {model.view},
-            onSelectionChanged: (s) => model.setView(s.first),
-          ),
           const SizedBox(width: 6),
           Expanded(
             child: TextField(
@@ -1401,40 +1335,12 @@ class _ProjectPanelState extends State<ProjectPanel> {
               },
             ),
           ),
-          PopupMenuButton<AssetSort>(
-            popUpAnimationStyle: AnimationStyle.noAnimation,
-            key: const Key('project.sort'),
-            tooltip: 'Sort (again to flip)',
-            icon: Icon(model.descending ? FIcons.arrowDownward : FIcons.arrowUpward),
-            itemBuilder: (context) => [
-              for (final s in AssetSort.values)
-                CheckedPopupMenuItem(
-                  key: Key('project.sort.${s.name}'),
-                  value: s,
-                  checked: model.sort == s,
-                  child: Text('By ${s.name}'),
-                ),
-            ],
-            onSelected: (s) => model.setSort(s),
-          ),
           LockButton(
             key: const Key('project.lock'),
             locked: model.locked,
             lockTip: 'Lock: stay in this folder when an asset is shown elsewhere',
             unlockTip: 'Unlock: follow "Show in Project" again',
             onChanged: model.setLocked,
-          ),
-          IconButton(
-            key: const Key('project.undo'),
-            tooltip: history.canUndo ? 'Undo ${history.undoLabel}  ⌥⌘Z' : 'Nothing to undo',
-            icon: const Icon(FIcons.undo),
-            onPressed: history.canUndo && model.canEdit ? model.undo : null,
-          ),
-          IconButton(
-            key: const Key('project.redo'),
-            tooltip: history.canRedo ? 'Redo ${history.redoLabel}  ⇧⌥⌘Z' : 'Nothing to redo',
-            icon: const Icon(FIcons.redo),
-            onPressed: history.canRedo && model.canEdit ? model.redo : null,
           ),
         ],
       ),
@@ -1555,25 +1461,102 @@ class _ProjectPanelState extends State<ProjectPanel> {
     );
   }
 
-  Widget _status(BuildContext context, ThemeData theme, int shown) {
-    final total = model.entries.length;
-    final selected = model.selection.length;
-    final where = model.view == BrowserView.list
-        ? 'every folder'
-        : model.folder.isEmpty
-        ? 'assets'
-        : ProjectBrowserModel.inPackages(model.folder)
-        ? model.folder
-        : 'assets/${model.folder}';
-    final text = [
-      shown == total ? '$total asset${total == 1 ? '' : 's'}' : '$shown of $total assets',
-      'in $where',
-      if (selected > 0) '· $selected selected',
-    ].join(' ');
+  /// Where the list is, as Unity's header over it (`assets › prefabs`):
+  /// each part goes back to that folder; the counts are its tooltip.
+  Widget _pathBar(BuildContext context, ThemeData theme, int shown) {
     final t = context.tokens;
+    final String counts;
+    final List<(String, VoidCallback?)> parts;
+    if (model.inScripts) {
+      final total = model.scripts.files.length;
+      final visible = model.visibleScripts.length;
+      final where = model.view == BrowserView.list || model.scriptFolder.isEmpty ? 'lib' : 'lib/${model.scriptFolder}';
+      counts = '${visible == total ? '$total script${total == 1 ? '' : 's'}' : '$visible of $total scripts'} in $where';
+      final folders = model.view == BrowserView.list ? const <String>[] : _prefixes(model.scriptFolder);
+      parts = [
+        ('lib', () => model.showScripts('')),
+        for (final f in folders) (p.basename(f), () => model.showScripts(f)),
+      ];
+    } else {
+      final total = model.entries.length;
+      final selected = model.selection.length;
+      final packages = ProjectBrowserModel.inPackages(model.folder);
+      final where = model.view == BrowserView.list
+          ? 'every folder'
+          : model.folder.isEmpty
+          ? 'assets'
+          : packages
+          ? model.folder
+          : 'assets/${model.folder}';
+      counts = [
+        shown == total ? '$total asset${total == 1 ? '' : 's'}' : '$shown of $total assets',
+        'in $where',
+        if (selected > 0) '· $selected selected',
+      ].join(' ');
+      if (model.view == BrowserView.list) {
+        parts = [('All assets', null)];
+      } else {
+        final folders = _prefixes(model.folder);
+        parts = [
+          if (!packages) ('assets', () => model.setFolder('')),
+          for (final f in folders) (p.basename(f), () => model.setFolder(f)),
+        ];
+      }
+    }
+    final style = theme.textTheme.bodySmall;
+    return Tooltip(
+      message: counts,
+      waitDuration: const Duration(milliseconds: 500),
+      child: Container(
+        key: const Key('project.path'),
+        height: t.row + 2,
+        padding: EdgeInsets.symmetric(horizontal: t.pad),
+        decoration: BoxDecoration(
+          color: t.header,
+          border: Border(bottom: t.hairline),
+        ),
+        child: Row(
+          children: [
+            for (final (i, (name, onTap)) in parts.indexed) ...[
+              if (i > 0)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Icon(FIcons.chevronRight, size: 12, color: t.textDisabled),
+                ),
+              Flexible(
+                child: i == parts.length - 1 || onTap == null
+                    ? Text(
+                        name,
+                        key: const Key('project.path.here'),
+                        style: style?.copyWith(color: t.text, fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis,
+                      )
+                    : InkWell(
+                        key: Key('project.path.$i'),
+                        onTap: onTap,
+                        child: Text(name, style: style?.copyWith(color: t.textSecondary), overflow: TextOverflow.ellipsis),
+                      ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// `a/b/c` → `a`, `a/b`, `a/b/c`.
+  static List<String> _prefixes(String rel) {
+    if (rel.isEmpty) return const [];
+    final segments = rel.split('/');
+    return [for (var i = 1; i <= segments.length; i++) segments.take(i).join('/')];
+  }
+
+  /// Unity's footer: only the slider (and a script scan while it runs).
+  Widget _footer(BuildContext context, ThemeData theme) {
+    final t = context.tokens;
+    final busy = model.inScripts ? model.scriptsBusy : null;
     return Container(
       height: t.row + 2,
-      alignment: Alignment.centerLeft,
       padding: EdgeInsets.symmetric(horizontal: t.pad),
       decoration: BoxDecoration(
         color: t.header,
@@ -1581,25 +1564,19 @@ class _ProjectPanelState extends State<ProjectPanel> {
       ),
       child: Row(
         children: [
-          if (model.view == BrowserView.folders && model.folder.isNotEmpty)
-            InkWell(
-              key: const Key('project.up'),
-              onTap: model.goUp,
-              child: const Padding(padding: EdgeInsets.only(right: 6), child: Icon(FIcons.arrowUpward, size: 13)),
-            ),
-          // Where the list is, as Unity's breadcrumb; the counts are its tooltip.
-          Expanded(
-            child: Tooltip(
-              message: text,
-              waitDuration: const Duration(milliseconds: 500),
+          if (busy != null) ...[
+            const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.5)),
+            const SizedBox(width: 6),
+            Expanded(
               child: Text(
-                where.replaceAll('/', '  ›  '),
+                busy,
                 key: const Key('project.status'),
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+                style: theme.textTheme.bodySmall?.copyWith(color: t.textSecondary),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-          ),
+          ] else
+            const Spacer(),
           _zoomSlider(context),
         ],
       ),
@@ -1974,7 +1951,6 @@ class _AssetRow extends StatelessWidget {
     final file = p.basename(e.path);
     final kind = browserKindOf(e);
     final stem = ProjectBrowserModel.editableName(e);
-    final showName = !e.isSource && e.name.isNotEmpty && e.name != stem;
     final t = context.tokens;
     final focused = PanelFocus.of(context);
     // The lead row in full; the rest of a multi-selection a step quieter.
@@ -2052,25 +2028,20 @@ class _AssetRow extends StatelessWidget {
                   Expanded(
                     child: Row(
                       children: [
+                        // The name as Unity shows it (the kind is its own
+                        // column); the file on hover.
                         Flexible(
                           flex: 3,
-                          child: Text(
-                            file,
-                            style: theme.textTheme.bodyMedium?.copyWith(color: on),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (showName) ...[
-                          const SizedBox(width: 8),
-                          Flexible(
-                            flex: 2,
+                          child: Tooltip(
+                            message: file,
+                            waitDuration: const Duration(milliseconds: 800),
                             child: Text(
-                              '“${e.name}”',
-                              style: theme.textTheme.bodySmall?.copyWith(color: dim),
+                              stem,
+                              style: theme.textTheme.bodyMedium?.copyWith(color: on),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                        ],
+                        ),
                         if (showPath && e.path.contains('/')) ...[
                           const SizedBox(width: 8),
                           Flexible(

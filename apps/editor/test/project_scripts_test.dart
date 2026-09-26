@@ -490,7 +490,7 @@ void main() {
       expect(find.byKey(const Key('project.script.game/player.dart')), findsOneWidget);
       expect(find.byKey(const Key('project.script.contents.game/player.dart')), findsOneWidget);
       expect(find.text('behaviour'), findsOneWidget);
-      expect(find.text('2 of 4 scripts in lib/game'), findsOneWidget);
+      expect(find.byTooltip('2 of 4 scripts in lib/game'), findsOneWidget);
 
       // Double-click opens the file in the IDE; ↩ does too.
       final row = find.byKey(const Key('project.script.game/hud.dart'));
