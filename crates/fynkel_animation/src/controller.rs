@@ -25,7 +25,7 @@
 //! tick whose clock crosses `e`, `1 + e`, `2 + e`, … (Unity: the check
 //! repeats every loop); otherwise once the clock has reached `e`.
 
-use fynkel_contracts::AssetRef;
+pub use crate::blend_tree::{ChildDef, MotionDef, TreeDef, TreeKind};
 
 /// Unity's name for Any State in a transition's `from`.
 pub const ANY_STATE: &str = "any";
@@ -127,8 +127,9 @@ impl Condition {
 #[derive(Clone, Debug, PartialEq)]
 pub struct StateDef {
     pub name: String,
-    /// A clip or a blend space; `None` holds the pose.
-    pub motion: Option<AssetRef>,
+    /// A clip, a blend space or a blend tree (ADR-0033); `None` holds
+    /// the pose.
+    pub motion: Option<MotionDef>,
     pub speed: f32,
     /// Index of a float parameter the speed is multiplied by.
     pub speed_parameter: Option<usize>,
@@ -245,6 +246,11 @@ impl ControllerDef {
                 _ => {}
             }
             for s in &layer.states {
+                if let Some(MotionDef::Tree(tree)) = &s.motion {
+                    let is_float = |i: usize| float(i) == Some(ParameterKind::Float);
+                    tree.validate(&is_float)
+                        .map_err(|e| format!("{n} state {}: {e}", s.name))?;
+                }
                 if !s.speed.is_finite() {
                     return Err(format!("{n} state {}: the speed is not finite", s.name));
                 }
@@ -610,6 +616,7 @@ impl ControllerRun {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fynkel_contracts::AssetRef;
 
     fn clip(n: u8) -> Option<AssetRef> {
         let mut bytes = [0u8; 16];
@@ -623,7 +630,7 @@ mod tests {
     fn state(name: &str, looping: bool) -> StateDef {
         StateDef {
             name: name.into(),
-            motion: clip(1),
+            motion: clip(1).map(Into::into),
             speed: 1.0,
             speed_parameter: None,
             looping,
