@@ -1,7 +1,7 @@
 //! `fynkel material …` and `fynkel shader …` (§14.1): `validate` and
-//! `inspect` for material documents and shader manifests. Materials are
-//! checked against the built-in shaders plus any manifests passed with
-//! `--shader <path>` (repeatable). Same exit codes and `--json` shape as
+//! `inspect` for material documents and `.shader` files (ADR-0031).
+//! Materials are checked against the built-in shaders plus any `.shader`
+//! passed with `--shader <path>` (repeatable). Same exit codes and `--json` shape as
 //! `fynkel document`.
 
 use std::path::{Path, PathBuf};
@@ -16,11 +16,11 @@ use fynkel_document::{
 pub fn usage(cmd: &str) -> ExitCode {
     if cmd == "shader" {
         eprintln!(
-            "usage:\n  fynkel shader inspect <path> [--json] [--schemas <dir>]      parameters, texture slots and passes of a manifest\n  fynkel shader validate <path>... [--json] [--schemas <dir>]  schema + manifest rules\n  fynkel shader inspect --builtin <shaderId>                   the same for a built-in shader (fynkel.pbr@1)"
+            "usage:\n  fynkel shader inspect <path> [--json] [--schemas <dir>]      a .shader's properties, texture slots and passes\n  fynkel shader validate <path>... [--json] [--schemas <dir>]  the header's rules, then the WGSL compiled against surface@1\n  fynkel shader inspect --builtin <shaderId>                   the same for a built-in shader (fynkel.pbr@1)"
         );
     } else {
         eprintln!(
-            "usage:\n  fynkel material inspect <path> [--json] [--schemas <dir>] [--shader <manifest>]...\n                                               resolved parameters and texture bindings\n  fynkel material validate <path>... [--json] [--schemas <dir>] [--shader <manifest>]...\n                                               schema + validation against the shader manifest"
+            "usage:\n  fynkel material inspect <path> [--json] [--schemas <dir>] [--shader <file.shader>]...\n                                               resolved parameters and texture bindings\n  fynkel material validate <path>... [--json] [--schemas <dir>] [--shader <file.shader>]...\n                                               schema + validation against its shader's properties"
         );
     }
     ExitCode::from(2)
