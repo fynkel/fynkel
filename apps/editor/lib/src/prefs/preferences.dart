@@ -64,6 +64,10 @@ final class Preferences extends ChangeNotifier {
       flutterCommand = json['flutterCommand'] as String? ?? 'flutter',
       zoomToPointer = json['zoomToPointer'] as bool? ?? true,
       playModeTint = json['playModeTint'] as bool? ?? true,
+      _colorSwatches = [
+        for (final h in json['colorSwatches'] as List? ?? const [])
+          if (h is String) h,
+      ],
       _recents = [
         for (final r in json['recents'] as List? ?? const [])
           if (r is Map<String, Object?>) RecentProject.fromJson(r),
@@ -123,6 +127,11 @@ final class Preferences extends ChangeNotifier {
   /// Unity's is: what is changed then does not stay.
   bool playModeTint;
 
+  /// The colour picker's saved swatches (`#RRGGBB[AA]`), Unity's Swatches.
+  List<String> _colorSwatches;
+  List<String> get colorSwatches => List.unmodifiable(_colorSwatches);
+  void setColorSwatches(List<String> hexes) => _update(() => _colorSwatches = [...hexes]);
+
   List<RecentProject> _recents;
   List<RecentProject> get recents => List.unmodifiable(_recents);
 
@@ -161,6 +170,7 @@ final class Preferences extends ChangeNotifier {
     'flutterCommand': flutterCommand,
     'zoomToPointer': zoomToPointer,
     'playModeTint': playModeTint,
+    if (_colorSwatches.isNotEmpty) 'colorSwatches': _colorSwatches,
     'recents': [for (final r in _recents) r.toJson()],
   };
 

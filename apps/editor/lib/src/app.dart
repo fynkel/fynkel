@@ -23,6 +23,7 @@ import 'hierarchy/presets.dart';
 import 'hierarchy/hierarchy_panel.dart';
 import 'hierarchy/hierarchy_tree.dart';
 import 'documents/editor_document.dart';
+import 'inspector/field_widgets.dart' show ColorSwatches;
 import 'inspector/codegen_check.dart';
 import 'l10n/strings.dart';
 import 'inspector/inspector_model.dart';
@@ -490,6 +491,9 @@ class EditorShellState extends State<EditorShell> {
     )..addListener(_onExtensionLog);
     _registerExtensions();
     widget.prefs.addListener(_onPrefsChanged);
+    // The colour picker's swatches live in the preferences.
+    ColorSwatches.read = () => widget.prefs.colorSwatches;
+    ColorSwatches.write = widget.prefs.setColorSwatches;
     final detected = _detect();
     // A project named at launch opens once the tools are known: its open runs
     // the codegen check, which needs the CLI the detection is still finding.

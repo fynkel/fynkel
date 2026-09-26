@@ -138,5 +138,19 @@ Before/after pictures of each step are in `steps/` (from
    (`images/script-unity.png`): whatever the Project selects shows in
    the Inspector.
 
-Left: the status bar (Unity shows the last Console line); Project
-icons/breadcrumb header; one merged Console list.
+7. Project: the folder path over the list (`assets › prefabs`, each
+   part goes back), the toolbar down to +, search, filter, lock (one
+   list, sorting, undo and redo are in the menus and the column titles),
+   a footer of only the slider, names without the document suffix.
+8. The status bar: the Console's newest line, the counts at the right.
+9. The Console: one list at a time with Project ▾ / Game ▾ (Unity's
+   Editor ▾) instead of sub-tabs, Collapse and the counts as flat
+   toggles, copy/open/validate in a ⋮ menu; the Game's footer only after
+   a run.
+10. The colour picker as Unity's (`images/picker-unity.png`): hue ring
+    around the square, new | old, RGB 0–255 / RGB 0–1 / HSV sliders with
+    their numbers, hexadecimal, the Defaults palette, the user's
+    Swatches (kept in the preferences). No eyedropper yet.
+
+Left: the Project list keeps its Kind / Contents / Size columns (Unity
+shows names only).

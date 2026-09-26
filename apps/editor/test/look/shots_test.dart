@@ -8,6 +8,7 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/material.dart' show Dialog;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -84,6 +85,21 @@ void main() {
       final f = find.byType(type);
       if (f.evaluate().isNotEmpty) await save(name, f.first);
     }
+    // The Project inside a folder (its path header), and the status bar.
+    e.shell.browser!.setFolder('prefabs');
+    await tester.pumpAndSettle();
+    await save('project-folder', find.byType(ProjectPanel).first);
+    e.shell.browser!.setFolder('');
+    await tester.pumpAndSettle();
+    await save('status', find.byKey(const Key('window.status')));
+    // With a problem to show: a material that is not JSON.
+    final broken = File('${e.dir.path}/assets/materials/broken.material.json')..writeAsStringSync('{');
+    await tester.runAsync(() => e.shell.project!.revalidate());
+    await tester.pumpAndSettle();
+    await save('status-line', find.byKey(const Key('window.status')));
+    broken.deleteSync();
+    await tester.runAsync(() => e.shell.project!.revalidate());
+    await tester.pumpAndSettle();
     // The Console shares the Project's dock: bring its tab forward.
     await tester.tap(find.text('Console').first);
     await tester.pumpAndSettle();
@@ -119,6 +135,19 @@ void main() {
       await tester.pumpAndSettle();
       await save('asset-info', find.byType(InspectorPanel).first);
       await tester.tap(find.byKey(const Key('section.Info')));
+      await tester.pumpAndSettle();
+    }
+    // The colour picker, from the material's base colour.
+    {
+      final browser = e.shell.browser!;
+      browser.select(browser.entries.firstWhere((a) => a.path == 'materials/rusted.material.json').id);
+      await tester.pumpAndSettle();
+      final swatch = find.byKey(const Key('color.swatch')).first;
+      await tester.ensureVisible(swatch);
+      await tester.tap(swatch);
+      await tester.pumpAndSettle();
+      await save('picker', find.byType(Dialog));
+      await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
     }
     // A script, as Unity's MonoScript page.
