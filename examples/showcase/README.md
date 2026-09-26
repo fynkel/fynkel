@@ -35,7 +35,7 @@ What is in the scene (`assets/scenes/main.scene.json`):
 - the **runner**: the reference game's rigged character
   (`assets/models/character.glb`, a byte copy of what
   `examples/reference_game/tools/character.py` generates — CI compares
-  them), a skinned body of eleven boxes over an eleven-joint skeleton:
+  them), a skinned body of thirteen boxes over a thirteen-joint skeleton:
   `Runner` instances the file's own hierarchy — `prefab: { asset,
   sub: "prefab" }`, so `Character` → `Body` (with the `fynkel.Skin`) and
   `hips` → `spine` → `head`, the limbs, are the glTF's nodes — with the

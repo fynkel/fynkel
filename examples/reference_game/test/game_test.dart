@@ -655,4 +655,48 @@ void main() {
       expect(again.bindingsOf('jump').first, 'keyboard:J');
     },
   );
+
+  test('IK (ADR-0033 § 5): the feet on the Playground\'s steps, the head to the nearest coin', () {
+    final game = playing(projectDir);
+    addTearDown(game.dispose);
+    final player = game.world.behaviours.whereType<Player>().single;
+    Vec3 at(String name) => game.world.find(name)!.transform.world.position;
+    void run(int frames) {
+      for (var i = 0; i < frames; i++) {
+        game.frame(1 / 60);
+      }
+    }
+
+    // Across the edge of step 3 (top 0.6 m) and step 4 (0.8 m), turned so
+    // the left foot is over the lower one: the controller stands on the
+    // higher, the left foot goes down to its step and the hips with it.
+    player.transform.position = const Vec3(12, 0.8, 15.5);
+    player.transform.rotation = Quat.axisAngle(Vec3.up, math.pi / 2);
+    run(90);
+    final root = player.transform.position.y;
+    expect(root, closeTo(0.8, 0.03), reason: 'on step 4');
+    final left = at('foot_l').y, right = at('foot_r').y;
+    expect(right - root, closeTo(0.06, 0.03), reason: 'the right foot\'s ankle on step 4, was $right');
+    expect(left - root, closeTo(-0.14, 0.04), reason: 'the left foot\'s ankle on step 3, was $left');
+    expect(at('hips').y - root, lessThan(0.85), reason: 'the hips go down as far as the lower foot needs');
+
+    // Back on flat ground the goal has nothing to do.
+    player.transform.position = const Vec3(20, 0, 20);
+    run(90);
+    expect(at('hips').y - player.transform.position.y, closeTo(0.95, 0.05));
+    expect(at('foot_l').y, closeTo(at('foot_r').y, 0.02));
+
+    // The head turns to a coin 3 m to the right (within its 60°), the
+    // nearest in 8 m; far from every coin the target is cleared.
+    final coin = game.world.findAllWithTag('pickup').first.worldTransform!.position;
+    player.transform.position = Vec3(coin.x - 3, 0, coin.z);
+    player.transform.rotation = Quat.identity;
+    run(60);
+    expect(player.lookingAt, coin);
+    final looking = game.world.find('head')!.transform.world.rotation.rotate(const Vec3(0, 0, -1));
+    expect(looking.x, greaterThan(0.5), reason: 'turned to the +X side, was $looking');
+    player.transform.position = const Vec3(20, 0, 20);
+    run(30);
+    expect(player.lookingAt, isNull);
+  });
 }

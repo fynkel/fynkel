@@ -6,7 +6,7 @@ origin. `fynkel import` turns it into `mesh/Body` (the skinned body),
 authors the skeleton's entities under the Player from SKELETON below, so
 the same table is the source of both.
 
-The body is eleven rigid boxes, one per joint, 1.8 m tall with its feet
+The body is thirteen rigid boxes, one per joint, 1.8 m tall with its feet
 at y = 0 and facing -Z (the engine's forward):
 
   hips                the root at y 0.95; the pelvis box
@@ -15,7 +15,8 @@ at y = 0 and facing -Z (the engine's forward):
       upperarm_l/r    hanging from the shoulders (+X is the left side)
         forearm_l/r
     thigh_l/r         hanging from the hips
-      shin_l/r        down to the feet
+      shin_l/r        down to the ankles
+        foot_l/r      the shoes, what foot placement tilts (ADR-0033 § 5)
 
 Every vertex is bound to its box's joint alone (JOINTS_0 with weight 1),
 so the skinned mesh is the exact union of the boxes at the bind pose and
@@ -73,9 +74,12 @@ SKELETON = [
     ("upperarm_r", "spine", (-0.29, 0.3, 0.0), (0.12, 0.3, 0.12), (0.0, -0.15, 0.0)),
     ("forearm_r", "upperarm_r", (0.0, -0.3, 0.0), (0.1, 0.3, 0.1), (0.0, -0.15, 0.0)),
     ("thigh_l", "hips", (0.11, -0.03, 0.0), (0.16, 0.46, 0.16), (0.0, -0.23, 0.0)),
-    ("shin_l", "thigh_l", (0.0, -0.46, 0.0), (0.14, 0.46, 0.15), (0.0, -0.23, 0.0)),
+    ("shin_l", "thigh_l", (0.0, -0.46, 0.0), (0.14, 0.4, 0.15), (0.0, -0.2, 0.0)),
     ("thigh_r", "hips", (-0.11, -0.03, 0.0), (0.16, 0.46, 0.16), (0.0, -0.23, 0.0)),
-    ("shin_r", "thigh_r", (0.0, -0.46, 0.0), (0.14, 0.46, 0.15), (0.0, -0.23, 0.0)),
+    ("shin_r", "thigh_r", (0.0, -0.46, 0.0), (0.14, 0.4, 0.15), (0.0, -0.2, 0.0)),
+    # Last, so the joints above keep their skin indices (ADR-0033 § 5).
+    ("foot_l", "shin_l", (0.0, -0.4, 0.0), (0.14, 0.06, 0.24), (0.0, -0.03, -0.04)),
+    ("foot_r", "shin_r", (0.0, -0.4, 0.0), (0.14, 0.06, 0.24), (0.0, -0.03, -0.04)),
 ]
 
 # The clips as `anim/<name>`: name, duration, loop, and channels — joint,

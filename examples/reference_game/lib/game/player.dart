@@ -40,6 +40,14 @@ import 'game_state.dart';
 /// a Freeform Directional blend tree over `moveX`/`moveY`, the planar
 /// velocity in the player's own frame.
 ///
+/// Two IK goals of the controller (ADR-0033 § 5) finish the pose. `feet`
+/// (foot placement) sets each foot on what is under it, so on the
+/// Playground's steps one foot stands a step higher than the other and
+/// the hips go down; its weight is the `feet` parameter, 1 on the ground
+/// and 0 in the air (a jump's legs are the clip's). `look` turns the head,
+/// and a little of the spine, to the nearest coin within [lookRadius]:
+/// [lookAtCoin] sets its target from code.
+///
 /// The controller's own `moveAction`/`jumpAction` are left empty in the
 /// scene so this behaviour is the one mover (a behaviour's `move` in the
 /// same tick would win anyway; docs/physics.md).
@@ -95,6 +103,13 @@ class Player extends Behaviour {
   /// Whether the aim mode is on (for the tests).
   bool aiming = false;
 
+  /// How near a coin must be for the head to turn to it, in metres.
+  double lookRadius = 8;
+
+  /// Where the head looks: the coin [lookAtCoin] picked (null: none).
+  Vec3? lookingAt;
+  int _lookIn = 0;
+
   /// The controller's `turnSpeed` before the aim mode set it to 0.
   double _turnSpeed = 0;
   double _elapsed = 0;
@@ -149,6 +164,7 @@ class Player extends Behaviour {
       jumps++;
     }
     pose(jumped: jumped, grounded: me.grounded, velocity: me.velocity);
+    lookAtCoin();
     if (Input.pressed('wave')) waveOnce();
 
     if (!state.won.value) {
@@ -192,10 +208,39 @@ class Player extends Behaviour {
     anim
       ..speed = math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
       ..grounded = grounded && !jumped
+      ..feet = grounded && !jumped ? 1 : 0
       ..aim = aiming
       ..moveX = velocity.x * right.x + velocity.z * right.z
       ..moveY = velocity.x * forward.x + velocity.z * forward.z;
     if (jumped) anim.jump();
+  }
+
+  /// The `look` goal's target: the nearest coin (tagged `pickup`) within
+  /// [lookRadius], picked again every quarter second. The coins do not
+  /// move, so the engine is told only when the pick changes; with none
+  /// near, the target is cleared and the head eases back.
+  void lookAtCoin() {
+    if (_lookIn-- > 0) return;
+    _lookIn = 15;
+    final here = transform.position;
+    Vec3? best;
+    var nearest = lookRadius * lookRadius;
+    for (final coin in world.findAllWithTag('pickup')) {
+      final at = coin.worldTransform?.position;
+      if (at == null) continue;
+      final d = (at - here).lengthSquared;
+      if (d < nearest) {
+        nearest = d;
+        best = at;
+      }
+    }
+    if (best == lookingAt) return;
+    lookingAt = best;
+    if (best == null) {
+      animation.clearIKTarget('look');
+    } else {
+      animation.setIKTarget('look', best);
+    }
   }
 
   /// The Animator typed from its controller (ADR-0033 § 3,

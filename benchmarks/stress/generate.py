@@ -23,7 +23,7 @@ git — the generator is the source):
                           project has no Dart, so they stand still there
   200 animated rigs      "Rig NNN": the reference game's box character
                           (examples/reference_game/assets/models/character.glb,
-                          copied in: a skinned Body over 11 joint entities
+                          copied in: a skinned Body over 13 joint entities
                           authored from tools/character.py's SKELETON), each
                           with a `fynkel.Animator` — by turns the walk, the
                           run and the locomotion blend space

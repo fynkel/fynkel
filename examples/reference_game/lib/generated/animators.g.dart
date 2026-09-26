@@ -71,6 +71,10 @@ extension type const PlayerAnimator(AnimationControl animation) {
   double get moveY => animation.getFloat('moveY');
   set moveY(double value) => animation.setFloat('moveY', value);
 
+  /// The float `feet`.
+  double get feet => animation.getFloat('feet');
+  set feet(double value) => animation.setFloat('feet', value);
+
   /// The base layer's state now (null before the first tick).
   PlayerState? get state => PlayerState._of(animation.stateOf()?.name);
 

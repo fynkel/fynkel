@@ -469,7 +469,9 @@
     "c8d50718-24e6-55c2-a3b8-2688f3b70e3c": {
       "name": "shin_l",
       "parent": "a0bc0253-7b9b-5e2f-9c4b-9510401efcdc",
-      "children": [],
+      "children": [
+        "d17147f7-0b83-5ebf-87c6-bda2008bd0af"
+      ],
       "components": {
         "b0724dc5-bb38-5455-8d25-e2e3881d1c0f": {
           "type": "fynkel.Transform",
@@ -529,7 +531,9 @@
     "ad417575-fb56-5958-a594-e22e5726becf": {
       "name": "shin_r",
       "parent": "0a613c4d-531d-50db-bad9-d8447052d3f7",
-      "children": [],
+      "children": [
+        "693b4d0f-17d7-582e-a5e5-1b69a34f17ba"
+      ],
       "components": {
         "bfba3467-a153-5e55-a5ab-b7b97d50f439": {
           "type": "fynkel.Transform",
@@ -538,6 +542,64 @@
             "position": [
               0.0,
               -0.46,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      }
+    },
+    "d17147f7-0b83-5ebf-87c6-bda2008bd0af": {
+      "name": "foot_l",
+      "parent": "c8d50718-24e6-55c2-a3b8-2688f3b70e3c",
+      "children": [],
+      "components": {
+        "2892fcc4-5d77-5d5e-ab6a-5141b1caefbe": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              -0.4,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      }
+    },
+    "693b4d0f-17d7-582e-a5e5-1b69a34f17ba": {
+      "name": "foot_r",
+      "parent": "ad417575-fb56-5958-a594-e22e5726becf",
+      "children": [],
+      "components": {
+        "0dbbb1a1-cd8c-5753-92a8-ce7c779f6dfb": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              -0.4,
               0.0
             ],
             "rotation": [

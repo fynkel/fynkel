@@ -55,8 +55,9 @@ up close, with a `Jingle` source that plays the win sting from the load)
 seven meshes `tools/kit.py` writes as `assets/models/kit.glb` and `fynkel
 import` splits into `mesh/0..6`, and the player's rigged character
 `tools/character.py` writes as `assets/models/character.glb` (a skinned
-body of eleven boxes on an eleven-joint skeleton with idle, walk, run and
-jump clips → `mesh/0`, `skin/0`, `anim/0..3`) — the repository carries no
+body of thirteen boxes on a thirteen-joint skeleton — feet included, for
+foot placement — with idle, walk, run and jump clips → `mesh/0`,
+`skin/0`, `anim/0..3`) — the repository carries no
 binary of unknown origin. 169 entities: a 60 m arena of walls, pillars
 with point lights, benches, planters, trees and a fountain (113 static
 meshes, all colliders); 22 rigid bodies (a crate pyramid, a pen of balls,

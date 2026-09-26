@@ -28,6 +28,11 @@
     {
       "name": "moveY",
       "type": "float"
+    },
+    {
+      "name": "feet",
+      "type": "float",
+      "default": 1
     }
   ],
   "layers": [
@@ -282,6 +287,27 @@
     {
       "name": "UpperBody",
       "root": "spine"
+    }
+  ],
+  "ik": [
+    {
+      "name": "look",
+      "type": "lookAt",
+      "head": "head",
+      "spine": [
+        "spine"
+      ],
+      "limit": 60,
+      "body": 0.3
+    },
+    {
+      "name": "feet",
+      "type": "footPlacement",
+      "weight": "feet",
+      "hips": "hips",
+      "left": "foot_l",
+      "right": "foot_r",
+      "reach": 0.5
     }
   ],
   "editor": {

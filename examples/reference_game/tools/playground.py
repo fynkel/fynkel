@@ -710,6 +710,11 @@ def playground():
         static(f"Stone {i + 1}", "cylinder", "floor", (-10 + 3.2 * math.cos(a), 0.06, 12 + 3.2 * math.sin(a)), scale=(1.0, 0.12, 1.0), collide=False)
     static("Fountain", "cylinder", "pillar", (-10, 0.4, 12), scale=(2.2, 0.8, 2.2), shape="box", size=(0.5, 0.5, 0.5))
     static("Fountain spire", "cone", "gate", (-10, 1.6, 12), scale=(0.6, 1.6, 0.6), collide=False)
+    # Four 0.2 m steps up to a 0.8 m terrace, off the route: where the
+    # Player's foot placement (ADR-0033 § 5) is seen, a foot on each step.
+    for k in range(1, 5):
+        static(f"Step {k}", "cube", "platform", (12.0, round(0.1 * k, 2), 13.75 + 0.5 * k), scale=(3.0, round(0.2 * k, 2), 0.5))
+    static("Terrace", "cube", "platform", (12.0, 0.4, 17.5), scale=(3.0, 0.8, 3.0))
 
     # --- the route ---------------------------------------------------------
     coins = {}
