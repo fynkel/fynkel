@@ -499,7 +499,9 @@ final class _AssetsModels {
   /// `models/kit.glb` (fynkel.gltf) and its parts
   _AssetsModelsKit get kit => const _AssetsModelsKit();
   /// `models/player.blend.json` (blend)
-  AssetRef get player => const AssetRef('fe19bb98-79ee-5ad4-aa1d-c147149b490b');
+  AssetRef get playerBlend => const AssetRef('fe19bb98-79ee-5ad4-aa1d-c147149b490b');
+  /// `models/player.controller.json` (controller)
+  AssetRef get playerController => const AssetRef('dc6664dd-aa4e-5906-80c9-0d095d403646');
 }
 
 final class _AssetsPrefabs {

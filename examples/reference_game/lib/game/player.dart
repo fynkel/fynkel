@@ -13,12 +13,14 @@ import 'game_state.dart';
 /// after the last coin, ends the run (`finishRun`: the Results scene).
 ///
 /// Its rigged character (tools/character.py) is posed from the same
-/// state (M3-19c): the `fynkel.Animator` the scene puts on the player
-/// plays the locomotion blend space (assets/models/player.blend.json:
-/// idle, walk, run along `speed`) and every tick this behaviour sets
-/// `speed` to the controller's planar velocity — the stride follows the
-/// speed, phase-synced, with no clip switching. The jump press plays
-/// [jumpClip] once over it and the landing crossfades back. The `wave`
+/// state: the `fynkel.Animator` on the player runs an Animator Controller
+/// (ADR-0032; assets/models/player.controller.json) whose Locomotion state
+/// plays the blend space (assets/models/player.blend.json: idle, walk, run
+/// along `speed`) and whose Jump state plays the jump once. Every tick
+/// this behaviour only sets the parameters — `speed` to the controller's
+/// planar velocity, `grounded`, and the `jump` trigger on a jump — and
+/// the controller does the rest: the stride follows the speed,
+/// phase-synced, and the landing goes back to Locomotion. The `wave`
 /// action plays the wave layer — a second, additive animator on the
 /// entity named [waveLayer] — once. Footstep markers of the walk and
 /// the run (`step_l`/`step_r`) count into [GameState.footsteps] and play
@@ -56,25 +58,11 @@ class Player extends Behaviour {
   /// Where a death puts the player back: the scene position.
   late Vec3 spawn;
 
-  /// Seconds the landing blends back into the locomotion over.
-  @Expose(min: 0, step: 0.05)
-  double blend = 0.15;
-
-  /// The jump, played once over the locomotion: `anim/jump` of the box
-  /// character, `anim/jump` of a rig document (`--hero` sets it), so the
-  /// model can be swapped without touching the code.
-  @Expose()
-  AssetRef jumpClip = AssetRef.none;
-
   /// The entity below the player carrying the wave layer's animator
   /// (`spine` on the box character, `Rig` on a downloaded one); empty
   /// when the character has no wave.
   @Expose()
   String waveLayer = 'spine';
-
-  /// The name of the blend space's parameter (player.blend.json).
-  @Expose()
-  String speedParameter = 'speed';
 
   /// The footstep sounds, one per `step_l`/`step_r` marker (assets/audio;
   /// none when unset: the markers still count).
@@ -91,12 +79,6 @@ class Player extends Behaviour {
   @Expose(min: 0, max: 1, step: 0.05)
   double stepVolume = 0.6;
 
-  /// The locomotion blend space: what the scene's animator started on.
-  late AssetRef locomotion;
-
-  /// Whether the jump one-shot is playing (held until the landing).
-  bool inJump = false;
-
   /// Ticks the player has been in the air (for the HUD's readout and the
   /// tests).
   int jumps = 0;
@@ -109,7 +91,6 @@ class Player extends Behaviour {
   @override
   void start() {
     spawn = transform.position;
-    locomotion = get<Animator>()?.clip ?? AssetRef.none;
   }
 
   @override
@@ -165,21 +146,17 @@ class Player extends Behaviour {
     }
   }
 
-  /// The blend space's parameter is the controller's planar speed as
-  /// the last tick applied it (so a wall stops the stride with the
-  /// player); the jump plays once and holds its last frame until the
-  /// player lands (the controller is airborne longer than the clip), then
-  /// the locomotion blends back in.
+  /// The Animator Controller's parameters: `speed` is the character
+  /// controller's planar speed as the last tick applied it (so a wall
+  /// stops the stride with the player), `grounded` whether it stands, and
+  /// a jump sets the `jump` trigger. The controller plays the jump once,
+  /// holds its last frame in the air and goes back to Locomotion when
+  /// `grounded` is true again.
   void pose({required bool jumped, required bool grounded, required Vec3 velocity}) {
-    animation.setParameter(speedParameter, math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z));
-    if (jumped) {
-      inJump = true;
-      animation.play(jumpClip, looping: false);
-      return;
-    }
-    if (!inJump || !grounded) return;
-    inJump = false;
-    animation.crossfade(locomotion, blend);
+    animation
+      ..setFloat('speed', math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z))
+      ..setBool('grounded', grounded && !jumped);
+    if (jumped) animation.setTrigger('jump');
   }
 
   /// Plays the wave layer once (the additive animator on [waveLayer]).

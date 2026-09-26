@@ -68,10 +68,6 @@
             "jumpSpeed": 5.5,
             "cameraName": "Camera",
             "fallY": -6.0,
-            "jumpClip": {
-              "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
-              "sub": "anim/jump"
-            },
             "waveLayer": "spine",
             "stepLeft": {
               "asset": "008a0fd4-9de7-4134-bc58-b30348388418"
@@ -96,7 +92,10 @@
             "playing": true,
             "weight": 1.0,
             "additive": false,
-            "root_motion": false
+            "root_motion": false,
+            "controller": {
+              "asset": "dc6664dd-aa4e-5906-80c9-0d095d403646"
+            }
           }
         },
         "7a362a77-50f5-503e-a56f-79e8fe521152": {

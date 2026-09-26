@@ -68,15 +68,6 @@ BehaviourType get gamePlayerType => BehaviourType(
   create: _lib2.Player.new,
   fields: [
     BehaviourField(
-      name: 'blend',
-      type: 'number',
-      defaultValue: 0.15,
-      min: 0,
-      step: 0.05,
-      get: (b) => (b as _lib2.Player).blend,
-      set: (b, v) => (b as _lib2.Player).blend = _double(v),
-    ),
-    BehaviourField(
       name: 'cameraName',
       type: 'string',
       defaultValue: 'Camera',
@@ -99,13 +90,6 @@ BehaviourType get gamePlayerType => BehaviourType(
       set: (b, v) => (b as _lib2.Player).hit = _assetRef(v),
     ),
     BehaviourField(
-      name: 'jumpClip',
-      type: 'assetRef',
-      defaultValue: const {'asset': '00000000-0000-0000-0000-000000000000'},
-      get: (b) => _assetRefJson((b as _lib2.Player).jumpClip),
-      set: (b, v) => (b as _lib2.Player).jumpClip = _assetRef(v),
-    ),
-    BehaviourField(
       name: 'jumpSpeed',
       type: 'number',
       defaultValue: 5.5,
@@ -113,13 +97,6 @@ BehaviourType get gamePlayerType => BehaviourType(
       step: 0.1,
       get: (b) => (b as _lib2.Player).jumpSpeed,
       set: (b, v) => (b as _lib2.Player).jumpSpeed = _double(v),
-    ),
-    BehaviourField(
-      name: 'speedParameter',
-      type: 'string',
-      defaultValue: 'speed',
-      get: (b) => (b as _lib2.Player).speedParameter,
-      set: (b, v) => (b as _lib2.Player).speedParameter = v as String,
     ),
     BehaviourField(
       name: 'sprintFactor',

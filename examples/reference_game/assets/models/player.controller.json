@@ -1,0 +1,87 @@
+{
+  "$schema": "https://fynkel.dev/schemas/controller.schema.json",
+  "formatVersion": 1,
+  "id": "dc6664dd-aa4e-5906-80c9-0d095d403646",
+  "name": "Player",
+  "parameters": [
+    {
+      "name": "speed",
+      "type": "float"
+    },
+    {
+      "name": "grounded",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "name": "jump",
+      "type": "trigger"
+    }
+  ],
+  "layers": [
+    {
+      "name": "Base Layer",
+      "defaultState": "Locomotion",
+      "states": [
+        {
+          "name": "Locomotion",
+          "motion": {
+            "asset": "fe19bb98-79ee-5ad4-aa1d-c147149b490b"
+          }
+        },
+        {
+          "name": "Jump",
+          "motion": {
+            "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+            "sub": "anim/jump"
+          },
+          "loop": false
+        }
+      ],
+      "transitions": [
+        {
+          "from": "Locomotion",
+          "to": "Jump",
+          "duration": 0.1,
+          "conditions": [
+            {
+              "parameter": "jump"
+            }
+          ]
+        },
+        {
+          "from": "Jump",
+          "to": "Locomotion",
+          "exitTime": 0.2,
+          "duration": 0.15,
+          "conditions": [
+            {
+              "parameter": "grounded",
+              "is": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "editor": {
+    "Base Layer": {
+      "Locomotion": [
+        0,
+        0
+      ],
+      "Jump": [
+        260,
+        0
+      ],
+      "#entry": [
+        -220,
+        0
+      ],
+      "#any": [
+        -220,
+        120
+      ]
+    }
+  }
+}

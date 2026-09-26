@@ -6,17 +6,6 @@
   "description": "The player: walks its `fynkel.CharacterController` from the `move` action in the frame of the `fynkel.ThirdPersonCamera` named [cameraName], sprints while `sprint` is held, jumps on the `jump` press while grounded, dies on a `hazard` zone or below [fallY] (respawns at the start), restarts the run on `restart`, keeps the clock and, [winDelay] after the last coin, ends the run (`finishRun`: the Results scene).",
   "type": "object",
   "properties": {
-    "blend": {
-      "type": "number",
-      "minimum": 0,
-      "default": 0.15,
-      "description": "Seconds the landing blends back into the locomotion over.",
-      "x-fynkel": {
-        "type": "number",
-        "min": 0,
-        "step": 0.05
-      }
-    },
     "cameraName": {
       "type": "string",
       "default": "Camera",
@@ -44,16 +33,6 @@
         "type": "assetRef"
       }
     },
-    "jumpClip": {
-      "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef",
-      "default": {
-        "asset": "00000000-0000-0000-0000-000000000000"
-      },
-      "description": "The jump, played once over the locomotion: `anim/jump` of the box character, `anim/jump` of a rig document (`--hero` sets it), so the model can be swapped without touching the code.",
-      "x-fynkel": {
-        "type": "assetRef"
-      }
-    },
     "jumpSpeed": {
       "type": "number",
       "minimum": 0,
@@ -63,14 +42,6 @@
         "type": "number",
         "min": 0,
         "step": 0.1
-      }
-    },
-    "speedParameter": {
-      "type": "string",
-      "default": "speed",
-      "description": "The name of the blend space's parameter (player.blend.json).",
-      "x-fynkel": {
-        "type": "string"
       }
     },
     "sprintFactor": {

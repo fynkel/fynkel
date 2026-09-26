@@ -51,11 +51,13 @@ camera's yaw starts at 0 so "forward" on the keyboard is -Z and "right"
     character of tools/character.py — the skinned Body, the joint tree
     from that file's SKELETON authored as entities under the Player (so
     a behaviour can reach a joint by name, the Visor hangs off `head`),
-    and a `fynkel.Animator` playing the locomotion blend space
-    (assets/models/player.blend.json, written here: idle at 0, walk at 4,
-    run at 7 m/s by `speed`, which `game.Player` sets from the controller
-    every tick; M3-19c). The jump is a one-shot `game.Player` plays over
-    it. A second animator on the `spine` joint is the wave layer: the
+    and a `fynkel.Animator` running the Animator Controller
+    (assets/models/player.controller.json, written here; ADR-0032):
+    Locomotion plays the blend space (assets/models/player.blend.json,
+    written here too: idle at 0, walk at 4, run at 7 m/s by `speed`),
+    Jump the jump clip once, on the `jump` trigger, back to Locomotion
+    on `grounded`; `game.Player` only sets those parameters every tick.
+    A second animator on the `spine` joint is the wave layer: the
     character's `wave` clip, additive, played on the `wave` action.
     With `--hero`, the layer sits on the `Rig` and needs a `wave` clip
     on the rig (skipped when there is none);
@@ -334,6 +336,42 @@ def locomotion_blend():
         "sync": "phase",
     }
 
+
+# The Player's Animator Controller (ADR-0032): Locomotion (the blend space
+# above) and Jump (the jump clip, once, holding its last frame in the air).
+# game.Player only sets the parameters: `speed` (the planar speed),
+# `grounded` and the `jump` trigger; the landing goes back to Locomotion.
+PLAYER_CONTROLLER = uid("controller", "player")
+
+
+def player_controller():
+    return {
+        "$schema": "https://fynkel.dev/schemas/controller.schema.json",
+        "formatVersion": 1,
+        "id": PLAYER_CONTROLLER,
+        "name": "Player",
+        "parameters": [
+            {"name": "speed", "type": "float"},
+            {"name": "grounded", "type": "bool", "default": True},
+            {"name": "jump", "type": "trigger"},
+        ],
+        "layers": [
+            {
+                "name": "Base Layer",
+                "defaultState": "Locomotion",
+                "states": [
+                    {"name": "Locomotion", "motion": {"asset": LOCOMOTION}},
+                    {"name": "Jump", "motion": CLIPS["jump"], "loop": False},
+                ],
+                "transitions": [
+                    {"from": "Locomotion", "to": "Jump", "duration": 0.1, "conditions": [{"parameter": "jump"}]},
+                    {"from": "Jump", "to": "Locomotion", "exitTime": 0.2, "duration": 0.15, "conditions": [{"parameter": "grounded", "is": True}]},
+                ],
+            }
+        ],
+        "editor": {"Base Layer": {"Locomotion": [0, 0], "Jump": [260, 0], "#entry": [-220, 0], "#any": [-220, 120]}},
+    }
+
 MATERIAL_DOCS = {
     "floor": dict(base_color=[0.55, 0.56, 0.52, 1.0], metallic=0.0, roughness=0.9),
     "wall": dict(base_color=[0.78, 0.74, 0.66, 1.0], metallic=0.0, roughness=0.8),
@@ -510,9 +548,8 @@ def playground():
                 jumpSpeed=5.5,
                 cameraName="Camera",
                 fallY=-6.0,
-                # The one-shot over the blend space, and the entity carrying
-                # the wave layer's animator ('' when the character has no wave).
-                jumpClip=CLIPS["jump"],
+                # The entity carrying the wave layer's animator ('' when the
+                # character has no wave).
                 waveLayer=("Rig" if HERO else "spine") if WAVE else "",
                 # The one-shots (M3-11): a footstep per `step_l`/`step_r`
                 # marker, the hit on a death.
@@ -520,12 +557,14 @@ def playground():
                 stepRight=SOUNDS["step_right"],
                 hit=SOUNDS["hit"],
             ),
-            # The locomotion blend space from the first tick (its parameter
-            # starts at the first point: idle); game.Player sets `speed` from
-            # the controller and plays the jump over it (all clips authored
-            # in place: the controller moves).
+            # The Animator Controller (ADR-0032) from the first tick:
+            # Locomotion (its `speed` starts at 0: idle), Jump on the `jump`
+            # trigger and back on `grounded`; game.Player only sets the
+            # parameters (all clips authored in place: the character
+            # controller moves).
             ("fynkel.Animator", {"clip": {"asset": LOCOMOTION}, "speed": 1.0, "looping": True, "playing": True,
-                                 "weight": 1.0, "additive": False, "root_motion": False}),
+                                 "weight": 1.0, "additive": False, "root_motion": False,
+                                 "controller": {"asset": PLAYER_CONTROLLER}}),
         ],
         tags=TAG_PLAYER,
     )
@@ -865,6 +904,7 @@ def main():
     write(ASSETS / "prefabs" / "ball.prefab.json", ball_prefab())
     write(ASSETS / "prefabs" / "burst.prefab.json", burst_prefab())
     write(ASSETS / "models" / "player.blend.json", locomotion_blend())
+    write(ASSETS / "models" / "player.controller.json", player_controller())
     doc, counts = playground()
     write(ASSETS / "scenes" / "playground.scene.json", doc)
     print(f"Playground: {len(doc['entities'])} entities, {counts['static']} static meshes, {counts['bodies']} bodies, {counts['coins']} coins, {counts['lights']} point lights; scene id {SCENE_ID}")

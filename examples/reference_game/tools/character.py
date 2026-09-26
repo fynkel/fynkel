@@ -38,7 +38,9 @@ The walk and the run carry footstep markers (the animation's `extras`,
 what `fynkel import` reads; docs/animation.md): `step_l` and `step_r`
 at the two dips of the hips, a quarter and three quarters into the
 cycle. tools/playground.py mixes idle, walk and run in the Player's
-blend space (assets/models/player.blend.json) by the controller's speed.
+blend space (assets/models/player.blend.json) by the controller's speed,
+and plays it and the jump from the Player's Animator Controller
+(assets/models/player.controller.json).
 
 Limb swing is a rotation about +X (positive swings the foot forward,
 toward -Z); the arms rise sideways about Z. Run from the project

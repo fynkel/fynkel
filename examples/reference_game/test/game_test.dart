@@ -60,8 +60,8 @@ void main() {
     final report = game.scenes.lastReport!;
     expect(report.sceneName, 'Playground');
     expect(report.entityCount, greaterThanOrEqualTo(150));
-    // The player, ten coins, the switch and the gate.
-    expect(report.behavioursAttached, 13);
+    // The player, ten coins, the switch, the gate and SomethingFun2.
+    expect(report.behavioursAttached, 14);
     expect(game.world.behaviours.whereType<Player>().single.walkSpeed, 4, reason: 'authored in the scene');
     expect(game.world.behaviours.whereType<Collectible>(), hasLength(10));
     expect(game.world.behaviours.whereType<Switch>().single.target, 'Gate');
@@ -174,7 +174,7 @@ void main() {
   });
 
   test(
-    'the character is posed from the controller: the locomotion blend space, the jump, the wave layer, footsteps',
+    'the character is posed from the controller: the Animator Controller\'s Locomotion and Jump, the wave layer, footsteps',
     () {
       final game = playing(projectDir);
       addTearDown(game.dispose);
@@ -185,7 +185,8 @@ void main() {
       // Rig-agnostic (M3-19a/b): the committed box character authors its
       // joints under the Player; `tools/playground.py --hero <rig.json>`
       // instances a downloaded one under a `Rig` child instead — the scene
-      // tells the Player its jump clip and wave layer. Either way a skinned
+      // tells the Player its wave layer, the controller names the jump
+      // clip. Either way a skinned
       // body sits somewhere below the Player and the clips pose the joints
       // — every entity under the Player is watched, not a named thigh.
       Iterable<GameObject> descendants(GameObject o) sync* {
@@ -204,8 +205,8 @@ void main() {
         expect(me.findChild('hips/spine/head/Visor'), isNotNull, reason: 'the visor rides the head joint');
         expect(
           game.scenes.lastReport!.animation.clips,
-          2,
-          reason: 'the locomotion blend space and the wave layer from the scene',
+          3,
+          reason: 'the Animator Controller (its blend space and jump count once each) and the wave layer',
         );
       }
       List<Quat> pose() => [for (final j in joints) j.localTransform.rotation];
@@ -219,16 +220,18 @@ void main() {
         return m;
       }
 
-      // Standing: the blend space at speed 0 is the idle (the box
-      // character's legs straight, a 2 s lap).
-      var s = me.animation.state!;
-      expect(s.clip, player.locomotion);
-      expect((s.playing, s.looping), (true, true));
-      expect(s.parameter, 0);
-      expect(s.duration, greaterThan(0));
+      // Standing: the controller starts in Locomotion, whose blend space
+      // at speed 0 is the idle (the box character's legs straight, a 2 s
+      // lap).
+      var s = me.animation.stateOf()!;
+      expect(s.name, 'Locomotion');
+      expect(s.next, isNull);
+      expect(me.animation.getFloat('speed'), 0);
+      expect(me.animation.getBool('grounded'), isTrue);
+      expect(s.length, greaterThan(0));
       final idle = pose();
       if (boxRig) {
-        expect(s.duration, closeTo(2, 1e-6));
+        expect(s.length, closeTo(2, 1e-6));
         expect(me.findChild('hips/thigh_l')!.localTransform.rotation.x, closeTo(0, 1e-6));
       }
 
@@ -241,10 +244,10 @@ void main() {
       for (var i = 0; i < 30; i++) {
         game.frame(1 / 60);
       }
-      s = me.animation.state!;
-      expect(s.clip, player.locomotion, reason: 'no clip switch: the blend space plays on');
-      expect(s.parameter, closeTo(4, 1e-3));
-      if (boxRig) expect(s.duration, closeTo(1, 1e-5));
+      s = me.animation.stateOf()!;
+      expect(s.name, 'Locomotion', reason: 'no state switch: the blend space plays on');
+      expect(me.animation.getFloat('speed'), closeTo(4, 1e-3));
+      if (boxRig) expect(s.length, closeTo(1, 1e-5));
       expect(maxChange(idle, pose()), greaterThan(0.1), reason: 'mid-stride: some joint left its idle pose');
       if (boxRig) {
         expect(me.findChild('hips/thigh_l')!.localTransform.rotation.x.abs(), greaterThan(0.1), reason: 'mid-stride');
@@ -259,45 +262,45 @@ void main() {
       // between the two, phase-synced.
       game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'ShiftLeft')]);
       game.frame(1 / 60);
-      s = me.animation.state!;
-      expect(s.parameter, closeTo(7, 1e-3));
-      if (boxRig) expect(s.duration, closeTo(0.6, 1e-5));
+      s = me.animation.stateOf()!;
+      expect(me.animation.getFloat('speed'), closeTo(7, 1e-3));
+      if (boxRig) expect(s.length, closeTo(0.6, 1e-5));
       game.frame(
         1 / 60,
         input: const [InputEvent.up(InputDevice.keyboard, 'ShiftLeft'), InputEvent.up(InputDevice.keyboard, 'W')],
       );
       game.frame(1 / 60);
-      s = me.animation.state!;
-      expect(s.parameter, 0, reason: 'released: the stride stops with the player');
-      if (boxRig) expect(s.duration, closeTo(2, 1e-5));
+      s = me.animation.stateOf()!;
+      expect(me.animation.getFloat('speed'), 0, reason: 'released: the stride stops with the player');
+      if (boxRig) expect(s.length, closeTo(2, 1e-5));
 
-      // A jump: the one-shot is held in the air (the box character's 0.8 s
+      // A jump: the Player only sets the `jump` trigger; the controller
+      // fades into Jump, holds it in the air (the box character's 0.8 s
       // clip ends before the landing and holds its last frame; a longer
-      // downloaded jump is still playing when the feet touch), and the
-      // locomotion blends back in on landing.
+      // downloaded jump is still playing when the feet touch), and goes
+      // back to Locomotion once `grounded` is true again.
       game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'Space')]);
       game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'Space')]);
-      s = me.animation.state!;
-      expect(s.clip, player.jumpClip);
-      expect(s.looping, isFalse);
+      s = me.animation.stateOf()!;
+      expect(s.next ?? s.name, 'Jump');
       expect(player.jumps, 1);
       var airborne = 0;
       while (!player.characterState()!.grounded && airborne < 180) {
-        expect(me.animation.state!.clip, player.jumpClip, reason: 'held until grounded');
+        final now = me.animation.stateOf()!;
+        expect(now.next ?? now.name, 'Jump', reason: 'held until grounded');
         game.frame(1 / 60);
         airborne++;
       }
       expect(airborne, inInclusiveRange(30, 179), reason: 'a 5.5 m/s jump is in the air about a second');
       if (boxRig) {
-        expect(me.animation.state!.playing, isFalse, reason: 'the 0.8 s clip ended before the landing');
+        expect(me.animation.stateOf()!.normalizedTime, greaterThanOrEqualTo(1), reason: 'the 0.8 s clip ended before the landing');
       }
       for (var i = 0; i < 5; i++) {
         game.frame(1 / 60);
       }
       expect(player.characterState()!.grounded, isTrue);
-      s = me.animation.state!;
-      expect(s.clip, player.locomotion);
-      expect(s.isFading, isTrue, reason: 'blending back from the jump');
+      s = me.animation.stateOf()!;
+      expect((s.name, s.next), ('Jump', 'Locomotion'), reason: 'blending back from the jump');
 
       // The wave: the layer's animator on the spine plays its clip once,
       // additively — the right arm rises while the legs keep the idle.
@@ -314,7 +317,7 @@ void main() {
           game.frame(1 / 60);
         }
         expect(arm.localTransform.rotation.z, lessThan(-0.5), reason: 'the arm is raised (about Z, -160° at most)');
-        expect(me.animation.state!.clip, player.locomotion, reason: 'the base animator plays on underneath');
+        expect(me.animation.stateOf()!.name, 'Locomotion', reason: 'the base animator plays on underneath');
         for (var i = 0; i < 60; i++) {
           game.frame(1 / 60);
         }

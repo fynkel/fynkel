@@ -63,9 +63,11 @@ meshes, all colliders); 22 rigid bodies (a crate pyramid, a pen of balls,
 barrels); 16 PBR materials; a sun with shadows and a cool ambient; the
 player with its skinned `Body` (`fynkel.Skin`), the joint entities
 `hips` → `spine` → `head` … in their bind pose (the visor hangs off
-`head`), a `fynkel.Animator` playing the locomotion blend space
-(`assets/models/player.blend.json`: idle, walk, run along `speed`,
-phase-synced; M3-19c) and, on the `spine`, the additive wave layer — or,
+`head`), a `fynkel.Animator` running an Animator Controller
+(`assets/models/player.controller.json`, ADR-0032: Locomotion — the
+blend space `assets/models/player.blend.json`, idle, walk, run along
+`speed`, phase-synced — and Jump, back on `grounded`) and, on the
+`spine`, the additive wave layer — or,
 opt-in, a downloaded character: `fynkel import Idle.fbx Walking.fbx
 "Fast Run.fbx" Jumping.fbx --rig hero` writes `hero.rig.json` (the first
 file's skeleton, every file's clip, matched by bone name; rename its
