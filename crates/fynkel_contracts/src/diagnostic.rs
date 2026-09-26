@@ -134,6 +134,22 @@ impl Code {
     /// A data asset whose `data` does not fit its type's schema, or that
     /// was written for another version of the type.
     pub const DATA_INVALID: Code = Code("FYN-D1002");
+    // Documents (FYN-D): Animator Controllers (ADR-0032;
+    // `fynkel_document::controller`).
+    /// A field the schema accepts but the controller cannot use (a
+    /// malformed assetRef, a number that is not finite, a parameter's
+    /// default of another type).
+    pub const CONTROLLER_MALFORMED_ENTRY: Code = Code("FYN-D1100");
+    /// A name that does not resolve or is not unique: two states, layers
+    /// or parameters with one name, a transition or condition naming
+    /// one that is not there, a layer with states and no default state.
+    pub const CONTROLLER_NAMES: Code = Code("FYN-D1101");
+    /// A condition that does not fit its parameter's type (`greater` on a
+    /// bool, `is` on a float), a speed parameter that is not a float, or
+    /// an Any State transition with neither conditions nor exit time.
+    pub const CONTROLLER_CONDITION: Code = Code("FYN-D1102");
+    /// A state's motion is not an animation clip or a blend space.
+    pub const CONTROLLER_MOTION: Code = Code("FYN-D1103");
 
     // Assets (`FYN-A####`, blueprint §19.2c item 8): the asset database.
     /// A source file under `assets/` has no `.meta.json` sidecar.
