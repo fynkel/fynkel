@@ -49,6 +49,7 @@ use serde_json::{json, Value};
 
 use crate::{FynkelBufferView, FynkelWorld};
 
+mod sound;
 mod stage;
 pub use stage::{
     fynkel_authoring_stage_call, fynkel_authoring_stage_close, fynkel_authoring_stage_open,
@@ -71,6 +72,8 @@ pub struct FynkelAuthoringSession {
     /// The Inspector's preview stages (version 4), by the id
     /// `fynkel_authoring_stage_open` gave; boxed for the same reason.
     stages: BTreeMap<u32, Box<stage::StageSlot>>,
+    /// The sound previews' stages, in the same id space (no world).
+    sounds: BTreeMap<u32, Box<sound::SoundSlot>>,
     next_stage: u32,
     /// The project's cooked cache every preview draws from: opened by the
     /// first preview (a cook in process), replaced by `recook`, dropped
@@ -176,6 +179,7 @@ impl FynkelAuthoringSession {
     fn drop_previews(&mut self) {
         self.previews.clear();
         self.stages.clear();
+        self.sounds.clear();
         self.assets = None;
     }
 
@@ -343,6 +347,7 @@ pub extern "C" fn fynkel_authoring_session_create() -> *mut FynkelAuthoringSessi
         inner: AuthoringSession::new(),
         previews: BTreeMap::new(),
         stages: BTreeMap::new(),
+        sounds: BTreeMap::new(),
         next_stage: 0,
         assets: None,
         result: Vec::new(),

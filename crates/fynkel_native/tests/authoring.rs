@@ -1243,3 +1243,69 @@ fn preview_stages_cross_the_edge() {
     );
     assert_eq!(codes(&host.result()), ["FYN-T0002"]);
 }
+
+/// The sound preview's stage (ADR-0030 step 6): no world, its format,
+/// its waveform as peaks, playback on its own clock (silent here: no
+/// device asked for).
+#[test]
+fn a_sound_stage_has_a_waveform_and_a_playhead() {
+    const TONE: &str = "c0000000-0000-4000-8000-000000000006";
+    let copy = Copy::new("sound-stage");
+    let host = Host::new();
+    assert_eq!(host.open_project(&copy.dir), Status::Ok);
+    assert_eq!(host.stage_open(&json!({ "asset": TONE })), Status::Ok);
+    let opened = host.result();
+    assert_eq!(opened["subject"], "sound", "{opened}");
+    let sound = &opened["sound"];
+    assert!(sound["sampleRate"].as_u64().unwrap() > 0);
+    assert!(sound["duration"].as_f64().unwrap() > 0.0);
+    let stage = opened["stage"].as_u64().unwrap() as u32;
+    assert!(unsafe { fynkel_authoring_stage_world(host.0, stage) }.is_null());
+
+    assert_eq!(
+        host.stage_call(stage, "peaks", &json!({ "columns": 64 })),
+        Status::Ok
+    );
+    let peaks = host.result();
+    let channels = peaks["channels"].as_u64().unwrap() as usize;
+    let values = peaks["peaks"].as_array().unwrap();
+    assert_eq!(values.len(), channels * 64 * 2);
+    assert!(
+        values.iter().any(|v| v.as_f64().unwrap() > 0.05),
+        "a tone is not silence"
+    );
+    assert_eq!(
+        host.stage_call(stage, "peaks", &json!({ "columns": 0 })),
+        Status::InvalidArgument
+    );
+
+    // Played from half-way, looping, with no device: the clock runs.
+    let half = sound["duration"].as_f64().unwrap() / 2.0;
+    let play = json!({ "from": half, "loop": true, "device": false });
+    assert_eq!(host.stage_call(stage, "play", &play), Status::Ok);
+    let head = host.result();
+    assert_eq!(head["playing"], true, "{head}");
+    assert_eq!(head["device"], false);
+    assert!(
+        (head["time"].as_f64().unwrap() - half).abs() < 0.05,
+        "{head}"
+    );
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    assert_eq!(host.stage_call(stage, "playhead", &json!({})), Status::Ok);
+    let later = host.result();
+    assert_eq!(later["loop"], true);
+    assert_ne!(later["time"], head["time"], "{later}");
+
+    assert_eq!(host.stage_call(stage, "stop", &json!({})), Status::Ok);
+    assert_eq!(host.result()["playing"], false);
+    assert_eq!(
+        host.stage_call(stage, "shape", &json!({ "shape": "cube" })),
+        Status::InvalidArgument
+    );
+    assert_eq!(codes(&host.result()), ["FYN-T0004"]);
+    assert_eq!(
+        unsafe { fynkel_authoring_stage_close(host.0, stage) },
+        Status::Ok
+    );
+    assert_eq!(host.result()["closed"], true);
+}

@@ -72,6 +72,79 @@ final class StageStats {
   final List<double>? boundsMin, boundsMax;
 }
 
+/// A sound's format, as its stage reports it.
+final class StageSound {
+  const StageSound({
+    required this.sampleRate,
+    required this.channels,
+    required this.frames,
+    required this.duration,
+    required this.streamed,
+    required this.codec,
+  });
+
+  factory StageSound.fromJson(Map<String, Object?> j) => StageSound(
+    sampleRate: (j['sampleRate'] as num?)?.toInt() ?? 0,
+    channels: (j['channels'] as num?)?.toInt() ?? 1,
+    frames: (j['frames'] as num?)?.toInt() ?? 0,
+    duration: (j['duration'] as num?)?.toDouble() ?? 0,
+    streamed: j['streamed'] == true,
+    codec: j['codec'] as String? ?? 'pcm',
+  );
+
+  final int sampleRate, channels, frames;
+
+  /// Seconds.
+  final double duration;
+
+  /// Decoded as it plays (the sidecar's `stream: true`).
+  final bool streamed;
+
+  /// `pcm` or `vorbis`.
+  final String codec;
+}
+
+/// A waveform: per channel, per column, the lowest and highest sample.
+final class SoundPeaks {
+  const SoundPeaks(this.channels, this.columns, this.values);
+
+  final int channels, columns;
+
+  /// `[channel][column][min, max]` flattened.
+  final Float32List values;
+
+  double min(int channel, int column) => values[(channel * columns + column) * 2];
+  double max(int channel, int column) => values[(channel * columns + column) * 2 + 1];
+}
+
+/// Where a sound stage's playback is.
+final class SoundPlayhead {
+  const SoundPlayhead({
+    required this.playing,
+    required this.time,
+    required this.duration,
+    required this.loop,
+    required this.device,
+  });
+
+  factory SoundPlayhead.fromJson(Map<String, Object?> j) => SoundPlayhead(
+    playing: j['playing'] == true,
+    time: (j['time'] as num?)?.toDouble() ?? 0,
+    duration: (j['duration'] as num?)?.toDouble() ?? 0,
+    loop: j['loop'] == true,
+    device: j['device'] == true,
+  );
+
+  final bool playing;
+
+  /// Seconds into the sound.
+  final double time, duration;
+  final bool loop;
+
+  /// Whether it is heard (an output device is open).
+  final bool device;
+}
+
 /// A stage's state after a call that (re)loaded or reported it.
 final class StageState {
   const StageState({
@@ -81,9 +154,11 @@ final class StageState {
     required this.light,
     required this.stats,
     this.diagnostics = const [],
+    this.sound,
   });
 
   factory StageState.fromJson(Map<String, Object?> j) => StageState(
+    sound: j['sound'] is Map<String, Object?> ? StageSound.fromJson(j['sound'] as Map<String, Object?>) : null,
     subject: j['subject'] as String? ?? 'hierarchy',
     shape: j['shape'],
     framing: StageFraming.fromJson(_mapOf(j['framing'])),
@@ -92,8 +167,11 @@ final class StageState {
     diagnostics: _strings(j['diagnostics']),
   );
 
-  /// `hierarchy`, `mesh` or `material`.
+  /// `hierarchy`, `mesh`, `material` or `sound`.
   final String subject;
+
+  /// A sound stage's format (it has no world).
+  final StageSound? sound;
 
   /// A material's: `sphere`, `cube`, `cylinder`, `capsule`, `plane`, or
   /// `{asset, sub}` for a mesh; null for the others.
@@ -155,6 +233,28 @@ final class PreviewStage {
 
   void restoreMaterial(String material) =>
       _call('restoreMaterial', {'material': material});
+
+  /// A sound stage's waveform in [columns] columns.
+  SoundPeaks peaks(int columns) {
+    final r = _call('peaks', {'columns': columns});
+    return SoundPeaks(
+      (r['channels'] as num).toInt(),
+      (r['columns'] as num).toInt(),
+      Float32List.fromList(_doubles(r['peaks'])),
+    );
+  }
+
+  /// Plays a sound stage [from] a time (seconds), looping or not; with
+  /// [device] false it is not heard (tests), its clock still runs.
+  SoundPlayhead play({double from = 0, bool? loop, bool device = true}) =>
+      SoundPlayhead.fromJson(_call('play', {'from': from, 'loop': ?loop, 'device': device}));
+
+  SoundPlayhead stop() => SoundPlayhead.fromJson(_call('stop'));
+
+  SoundPlayhead setLoop(bool loop) => SoundPlayhead.fromJson(_call('loop', {'loop': loop}));
+
+  /// Where the playback is now.
+  SoundPlayhead playhead() => SoundPlayhead.fromJson(_call('playhead'));
 
   void close() {
     if (_closed || session._disposed) return;

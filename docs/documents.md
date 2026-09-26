@@ -770,7 +770,10 @@ window, never running game code and never reading a cooked cache
 added `fynkel_authoring_operate(session, kind, kind_len, args_json,
 args_len)` for M4-05, version 3 the edit-preview world below for M4-06,
 version 4 the Inspector's preview stages (`fynkel_authoring_stage_*`,
-ADR-0030);
+ADR-0030; a sound's stage has no world and answers `peaks`
+(`columns` 1–8192 → `[channel][column][min, max]`), `play` (`from`
+seconds, `loop`, `device`), `stop`, `loop`, `playhead` → `{playing,
+time, duration, loop, device}`);
 an editor built against an older version still loads) is the
 session one call per method: text in as UTF-8 with a length, one JSON result out
 (`fynkel_authoring_result`, `{ "ok": true, ... }` or `{ "ok": false,

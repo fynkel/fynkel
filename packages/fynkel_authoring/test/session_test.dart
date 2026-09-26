@@ -620,6 +620,21 @@ void main() {
       throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-T0003')),
     );
 
+    // A sound: no world, its format, waveform and playhead.
+    final tone = session.openStage('c0000000-0000-4000-8000-000000000006');
+    expect(tone.state.subject, 'sound');
+    expect(tone.worldAddress, 0);
+    expect(tone.state.sound!.duration, greaterThan(0));
+    final peaks = tone.peaks(32);
+    expect(peaks.values, hasLength(peaks.channels * 32 * 2));
+    expect([for (var c = 0; c < 32; c++) peaks.max(0, c)].any((v) => v > 0.05), isTrue);
+    final head = tone.play(from: 0, loop: true, device: false);
+    expect(head.playing, isTrue);
+    expect(head.device, isFalse);
+    expect(tone.setLoop(false).loop, isFalse);
+    expect(tone.stop().playing, isFalse);
+    tone.close();
+
     material.close();
     expect(material.worldAddress, 0);
     session.closeProject();

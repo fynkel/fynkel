@@ -451,8 +451,8 @@ FynkelStatus fynkel_authoring_preview_call(FynkelAuthoringSession* session,
  * [3], target [3], fovY (radians), near, far, radius, world [16] },
  * light [3] (toward the sun), stats: { meshes, vertices, triangles,
  * skinned, bounds: { min [3], max [3] } | null }, diagnostics: [text] }.
- * FYN-T0003 for an asset with nothing to show (a texture, a sound) or
- * one that failed to cook. */
+ * A sound opens a sound stage (below). FYN-T0003 for an asset with
+ * nothing to show (a texture) or one that failed to cook. */
 FynkelStatus fynkel_authoring_stage_open(FynkelAuthoringSession* session,
                                          const uint8_t* args_json_utf8,
                                          uint32_t args_len);
@@ -475,6 +475,22 @@ const FynkelWorld* fynkel_authoring_stage_world(const FynkelAuthoringSession* se
  *   stats                               → the open result, not reloaded
  *   setMaterial     material, data      as the edit-preview's, on every store
  *   restoreMaterial material            → "stores"
+ * A sound's stage has no world (fynkel_authoring_stage_world is NULL):
+ * its open result is { ok, stage, cook?, subject: "sound", sound: {
+ * sampleRate, channels, frames, duration (s), streamed, codec: "pcm" |
+ * "vorbis" } }, and its calls are:
+ *   peaks           columns (1..8192)   the waveform: per channel, per column, the
+ *                                       lowest and highest sample (with zero) →
+ *                                       "channels", "columns", "peaks": [ch][col][2]
+ *                                       flattened (a stream is decoded once for it)
+ *   play            from? (s), loop?, device? (default true)
+ *                                       from that point; the output device opened on
+ *                                       the first play (none, or device false: the
+ *                                       clock runs silently) → the playhead
+ *   stop, loop (loop), playhead         → { playing, time, duration, loop, device },
+ *                                       the clock advanced by the time since the last
+ *                                       call
+ *   stats                               → the open result
  * FYN-T0002 for a stage that is not open, FYN-T0004 for an unknown kind. */
 FynkelStatus fynkel_authoring_stage_call(FynkelAuthoringSession* session,
                                          uint32_t stage,

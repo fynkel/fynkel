@@ -220,6 +220,26 @@ pub unsafe extern "C" fn fynkel_authoring_stage_open(
         let asset = asset_id(args.get("asset"), "asset")?;
         let sub = args.get("sub").and_then(Value::as_str);
         let (assets, cook) = s.ensure_assets()?;
+        // A sound has a stage without a world (the sound preview).
+        if sub.is_none()
+            && assets
+                .entry(asset)
+                .is_some_and(|e| fynkel_preview::kind_name(&e.kind) == "sound")
+        {
+            let r = AssetRef::new(asset);
+            let clip = assets
+                .sound(&r)
+                .map_err(|d| invalid(format!("stage: {}", d.message)))?;
+            let slot = super::sound::SoundSlot::new(r, clip);
+            let mut v = slot.json();
+            s.next_stage += 1;
+            let id = s.next_stage;
+            s.sounds.insert(id, Box::new(slot));
+            v["ok"] = json!(true);
+            v["stage"] = json!(id);
+            v["cook"] = cook.unwrap_or(Value::Null);
+            return Ok(v);
+        }
         let mut subject = fynkel_preview::subject(&assets, asset, sub).map_err(refusal)?;
         if let (Subject::Material { shape, .. }, Some(v)) =
             (&mut subject, args.get("shape").filter(|v| !v.is_null()))
@@ -259,7 +279,7 @@ pub unsafe extern "C" fn fynkel_authoring_stage_close(
     stage: u32,
 ) -> Status {
     guarded_session(session, move |s| {
-        let closed = s.stages.remove(&stage).is_some();
+        let closed = s.stages.remove(&stage).is_some() | s.sounds.remove(&stage).is_some();
         Ok(json!({ "ok": true, "stage": stage, "closed": closed }))
     })
 }
@@ -311,6 +331,12 @@ pub unsafe extern "C" fn fynkel_authoring_stage_call(
 }
 
 fn stage_call(s: &mut FynkelAuthoringSession, stage: u32, kind: &str, args: &Value) -> Outcome {
+    if let Some(sound) = s.sounds.get_mut(&stage) {
+        let mut v = sound.call(kind, args)?;
+        v["ok"] = json!(true);
+        v["stage"] = json!(stage);
+        return Ok(v);
+    }
     let (assets, _) = s.ensure_assets()?;
     let mut v = match kind {
         "shape" => {
