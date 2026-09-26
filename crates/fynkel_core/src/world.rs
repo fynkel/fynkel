@@ -254,6 +254,10 @@ pub struct ExtractVolume {
 pub struct Extract {
     pub tick: Tick,
     pub alpha: f32,
+    /// Simulated seconds at this extract, interpolated between ticks
+    /// (`tick * fixed_dt` + `alpha * fixed_dt`): a paused world's time
+    /// stands still. Shaders read it as `globals.time` (ADR-0031).
+    pub time: f32,
     pub records: Vec<ExtractRecord>,
     pub meshes: Vec<ExtractMesh>,
     /// Every skinned mesh's palette, back to back (`ExtractMesh::skin`).
@@ -1975,6 +1979,7 @@ impl World {
         let mut out = Extract {
             tick: self.clock.tick(),
             alpha,
+            time: (self.clock.elapsed() + alpha as f64 * self.clock.fixed_dt() as f64) as f32,
             records: Vec::with_capacity(self.ecs.len() as usize),
             ..Extract::default()
         };

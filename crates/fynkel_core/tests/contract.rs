@@ -441,3 +441,19 @@ fn temp_references_build_an_object_in_the_tick_of_its_spawn() {
     assert_eq!(w.diagnostics()[0].code, DiagnosticCode::INVALID_TEMP_ID);
     assert_eq!(w.live_entities(), 3);
 }
+
+#[test]
+fn the_extract_carries_the_worlds_time_between_ticks() {
+    let mut w = world();
+    assert_eq!(w.extract().time, 0.0);
+    // Two ticks and half of a third: the time is interpolated like the
+    // transforms (ADR-0031 `globals.time`).
+    let plan = w.begin_frame(2.5 / 60.0);
+    assert_eq!(plan.steps, 2);
+    w.step();
+    w.step();
+    let t = w.extract().time;
+    assert!((t - 2.5 / 60.0).abs() < 1e-5, "{t}");
+    // No frame, no time: a paused world's time stands still.
+    assert_eq!(w.extract().time, t);
+}
