@@ -23,6 +23,7 @@ final class LivePreview implements PreviewBackend {
   /// post-frame callbacks, where the Scene view draws — so the view asks
   /// here before every frame instead.
   final bool Function()? alive;
+
   /// Called after the drag wrote the world (a paused Game view draws it
   /// again).
   void Function()? written;
@@ -96,8 +97,8 @@ final class LivePreview implements PreviewBackend {
   @override
   void restoreComponents(Iterable<String> ids) {}
 
-  /// A material edited during Play is saved; the running game draws it
-  /// from its next Play.
+  /// A material edited during Play is saved, and the running game draws
+  /// it at once through [LivePlay.assetEdited] — not through here.
   @override
   void setMaterial(String material, Map<String, Object?> data) {}
   @override
@@ -121,6 +122,7 @@ final class LivePreview implements PreviewBackend {
       ]);
     }
   }
+
   @override
   PreviewSyncReport resync() => throw _refused('resync');
   @override

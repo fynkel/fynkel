@@ -82,6 +82,11 @@ abstract class LiveBackend {
 
   List<String> removeBehaviour(Object instance) => throw _notWritable('removeComponent');
 
+  /// A material or volume profile ([kind]) edited in the Inspector during
+  /// Play: the running game draws asset [id] with [fields] from its next
+  /// frame ([LiveWorld.setMaterial]). False when this world takes none.
+  bool setAsset(String kind, String id, Map<String, Object?> fields) => false;
+
   /// Makes an entity at once ([LiveWorld.spawn]): answers its id and the
   /// components the world refused.
   ({String id, List<String> refused}) spawn({
@@ -92,10 +97,11 @@ abstract class LiveBackend {
     String? authoringId,
   }) => throw _notWritable('createObject');
 
-  static AuthoringException _notWritable(String what) =>
-      AuthoringException('live $what', AuthoringStatus.invalidArgument, [
-        Diagnostic(code: 'FYN-T0003', severity: Severity.error, message: '$what: this world is not written'),
-      ]);
+  static AuthoringException _notWritable(String what) => AuthoringException(
+    'live $what',
+    AuthoringStatus.invalidArgument,
+    [Diagnostic(code: 'FYN-T0003', severity: Severity.error, message: '$what: this world is not written')],
+  );
 }
 
 /// A package:fynkel world the game is running.
@@ -110,6 +116,19 @@ final class WorldLiveBackend extends LiveBackend {
 
   @override
   List<LiveEntity> entities() => _keep(live.entities());
+
+  @override
+  bool setAsset(String kind, String id, Map<String, Object?> fields) {
+    switch (kind) {
+      case 'material':
+        live.setMaterial(id, fields);
+      case 'volume':
+        live.setVolume(id, fields);
+      default:
+        return false;
+    }
+    return true;
+  }
 
   @override
   List<LiveEntity>? changedEntities() {
@@ -490,7 +509,11 @@ final class PlayDocument extends EditorDocument {
           components: [for (final x in c['components'] as List? ?? const []) (x as Map).cast<String, Object?>()],
         );
         touched.addAll([r.id, ?parent]);
-        mutations.add({'command': 'createObject', 'ok': true, 'affectedIds': [r.id]});
+        mutations.add({
+          'command': 'createObject',
+          'ok': true,
+          'affectedIds': [r.id],
+        });
         return r.refused;
       case 'duplicateObject':
         // The subtree copied with fresh ids, the copy right after the
@@ -551,7 +574,8 @@ final class PlayDocument extends EditorDocument {
       authoringId: id,
       components: [
         for (final c in components)
-          if (_isNative(c['type'] as String? ?? '')) {'type': c['type'], 'data': c['data'] ?? const <String, Object?>{}},
+          if (_isNative(c['type'] as String? ?? ''))
+            {'type': c['type'], 'data': c['data'] ?? const <String, Object?>{}},
       ],
     );
     createdHere.add(r.id);
@@ -627,6 +651,7 @@ final class PlayDocument extends EditorDocument {
   Map<String, Object?> inspect() => root();
   @override
   PrefabExpansion instance(String anchor) => throw _refused('instance');
+
   /// The running world for the Scene view (L5): opened once, closed with
   /// the document (the world itself is the game's).
   @override

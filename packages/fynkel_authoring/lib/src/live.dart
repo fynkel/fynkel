@@ -192,6 +192,15 @@ final class LiveWorld {
     );
   }
 
+  /// A material edited in the Inspector during Play (saved at once, as in
+  /// Unity): the running game draws [id] with [fields] (the material
+  /// document's) from its next frame, until the run ends. Throws an
+  /// [AuthoringException] when a value does not fit (the cook's check).
+  void setMaterial(String id, Map<String, Object?> fields) => call('setMaterial', {'id': id, 'data': fields});
+
+  /// [setMaterial] for a volume profile.
+  void setVolume(String id, Map<String, Object?> fields) => call('setVolume', {'id': id, 'data': fields});
+
   // ── The Scene view on the running world (L5) ──────────────────────────
   // The edit preview's picking and overlays, over every live entity, each
   // named by its own id (a running prefab instance has no anchor).

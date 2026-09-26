@@ -2390,7 +2390,11 @@ document's fields, so the picture never waits for the recook the save
 starts. **⌘Z / ⇧⌘Z undo and redo the material** while the Inspector or
 the Project holds the keyboard and the Inspector shows it (the menu reads
 "Undo Material Change"); anywhere else they undo the focused tab. Every
-Inspector slider is live now, a component's included. Not yet: a preview
+Inspector slider is live now, a component's included. **During Play** the
+running game draws the edit at once too, as Unity's does: the same fields
+reach the game's world (`LivePlay.assetEdited` → the live call
+`setMaterial`, checked as the cook checks), and the change stays, since
+the file is saved. A volume profile's edit does the same (`setVolume`). Not yet: a preview
 sphere at the bottom of the page, and a custom-shader material, whose page
 stays read-only.
 

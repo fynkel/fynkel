@@ -345,6 +345,20 @@ class EditorShellState extends State<EditorShell> {
   /// running game's world while it runs.
   LivePlay? _livePlay;
 
+  /// A material or volume profile's Inspector edit (null: the cooked one
+  /// again): the Scene view's edit worlds draw it and, during Play, so
+  /// does the running game. A value the game refuses (the cook's check)
+  /// stays the file's problem: validation reports it.
+  void _assetEdited(String kind, String id, Map<String, Object?>? fields) {
+    kind == 'volume' ? scene?.previewVolume(id, fields) : scene?.previewMaterial(id, fields);
+    if (fields == null) return;
+    try {
+      _livePlay?.assetEdited(kind, id, fields);
+    } on AuthoringException {
+      // Validation reports the saved file.
+    }
+  }
+
   void _onPlayWorlds() {
     final t = tabs;
     if (!identical(_livePlay?.tabs, t)) {
@@ -2022,8 +2036,9 @@ class EditorShellState extends State<EditorShell> {
       final t = DocumentTabs(project: opened);
       final me = AssetEdits(opened)
         ..preview = (kind, id, fields) => switch (kind) {
-          'volume' => scene?.previewVolume(id, fields),
-          'material' => scene?.previewMaterial(id, fields),
+          // The Scene view's edit worlds draw it, and so does a running
+          // game (as in Unity, a material changed in Play shows at once).
+          'volume' || 'material' => _assetEdited(kind, id, fields),
           // During Play the running game's instance takes the saved data.
           'data' when fields?['data'] is Map => _livePlay?.dataEdited(
             id,

@@ -44,6 +44,18 @@ final class LivePlay {
     return applied;
   }
 
+  /// A material or volume profile's Inspector edit (saved at once, as in
+  /// Unity): the running game draws it too, from its next frame — Unity's
+  /// material asset changes in Play the same way. False when no game runs
+  /// or [kind] is not drawn.
+  bool assetEdited(String kind, String id, Map<String, Object?> fields) {
+    final doc = document;
+    if (_world == null || doc == null) return false;
+    final applied = doc.backend.setAsset(kind, id, fields);
+    if (applied) written?.call();
+    return applied;
+  }
+
   /// Shows [world] — the running game's, or null when none runs.
   void follow(fynkel.World? world) {
     if (identical(world, _world)) return;

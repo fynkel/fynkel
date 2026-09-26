@@ -36,6 +36,16 @@ final class FakeLive extends LiveBackend {
   final scripts = <int, List<LiveBehaviour>>{};
   int entityReads = 0;
 
+  /// What [setAsset] drew: `kind:id` → fields.
+  final assets = <String, Map<String, Object?>>{};
+
+  @override
+  bool setAsset(String kind, String id, Map<String, Object?> fields) {
+    if (kind != 'material' && kind != 'volume') return false;
+    assets['$kind:$id'] = fields;
+    return true;
+  }
+
   void add(String id, String name, {String? parent, int? handle, List<String> types = const ['fynkel.Transform']}) {
     rows.add(
       LiveEntity(
@@ -92,7 +102,14 @@ final class FakeLive extends LiveBackend {
   LiveEntityState entity(String id) {
     entityReads++;
     final r = rows.firstWhere((r) => r.id == id);
-    return LiveEntityState(id: id, handle: r.handle, name: r.name, parent: r.parent, world: const {}, components: native[id]!);
+    return LiveEntityState(
+      id: id,
+      handle: r.handle,
+      name: r.name,
+      parent: r.parent,
+      world: const {},
+      components: native[id]!,
+    );
   }
 
   @override
@@ -208,9 +225,7 @@ FakeLive running() {
     ..add('robot', 'Robot', handle: 7, types: ['fynkel.Transform', 'fynkel.PointLight'])
     ..add('floor', 'Floor')
     ..add('runtime:99', 'Bullet', handle: 99)
-    ..scripts[7] = [
-      LiveBehaviour(type: 'game.Spinner', data: spinner, authoredComponentId: 'spin', instance: spinner),
-    ];
+    ..scripts[7] = [LiveBehaviour(type: 'game.Spinner', data: spinner, authoredComponentId: 'spin', instance: spinner)];
 }
 
 /// A game that shows a (real, empty) world the way `FynkelGameView` does:
@@ -266,9 +281,15 @@ void main() {
   test('edits go to the running world at once: fields, components, names, parents, deletes (L3)', () {
     final live = running();
     var written = 0;
-    final doc = PlayDocument(backend: live, scene: scene(), written: () => written++, interval: const Duration(days: 1));
+    final doc = PlayDocument(
+      backend: live,
+      scene: scene(),
+      written: () => written++,
+      interval: const Duration(days: 1),
+    );
     addTearDown(doc.dispose);
-    Map<String, Object?> components(String id) => doc.entities([id]).entities[id]!['components'] as Map<String, Object?>;
+    Map<String, Object?> components(String id) =>
+        doc.entities([id]).entities[id]!['components'] as Map<String, Object?>;
     Object? data(String id, String component) => (components(id)[component] as Map)['data'];
 
     final revision = doc.revision;
@@ -286,8 +307,16 @@ void main() {
     expect(data('robot', 'spin'), {'speed': 9});
 
     doc.apply([
-      Command.addComponent('floor', {'type': 'fynkel.PointLight', 'version': 1, 'data': {'range': 4}}),
-      Command.addComponent('floor', {'type': 'game.Spinner', 'version': 2, 'data': {'speed': 1}}),
+      Command.addComponent('floor', {
+        'type': 'fynkel.PointLight',
+        'version': 1,
+        'data': {'range': 4},
+      }),
+      Command.addComponent('floor', {
+        'type': 'game.Spinner',
+        'version': 2,
+        'data': {'speed': 1},
+      }),
     ]);
     expect(live.writes.sublist(live.writes.length - 2), ['set floor', 'addBehaviour 2 game.Spinner']);
     expect(components('floor').keys, containsAll(['floor/fynkel.PointLight', 'floor/game.Spinner']));
@@ -307,7 +336,9 @@ void main() {
     expect(doc.entities(['runtime:99']).entities['runtime:99'], isNull, reason: 'its subtree went with it');
 
     final writes = live.writes.length;
-    a = doc.apply([Command.setPrefabOverrideOp('floor', const {'op': 'removeObject', 'entity': 'x'})]);
+    a = doc.apply([
+      Command.setPrefabOverrideOp('floor', const {'op': 'removeObject', 'entity': 'x'}),
+    ]);
     expect(a.ok, isFalse, reason: 'no prefab overrides while the game runs');
     expect(doc.apply([Command.renameObject('robot', 'x')]).ok, isFalse, reason: 'gone');
     expect(doc.apply([Command.setField('floor', 'nope', 'x', 1)]).ok, isFalse);
@@ -338,7 +369,11 @@ void main() {
               'scale': [1, 1, 1],
             },
           },
-          {'type': 'game.Spinner', 'version': 1, 'data': {'speed': 3}},
+          {
+            'type': 'game.Spinner',
+            'version': 1,
+            'data': {'speed': 3},
+          },
         ],
       ),
     ]);
@@ -356,11 +391,10 @@ void main() {
     expect(copy, isNot('robot'));
     final copied = doc.entities([copy]).entities[copy]!;
     expect(copied['name'], 'Robot', reason: "a copy keeps its original's name, as in the scene");
-    expect([for (final c in (copied['components'] as Map).values) (c as Map)['type']], [
-      'fynkel.Transform',
-      'fynkel.PointLight',
-      'game.Spinner',
-    ]);
+    expect(
+      [for (final c in (copied['components'] as Map).values) (c as Map)['type']],
+      ['fynkel.Transform', 'fynkel.PointLight', 'game.Spinner'],
+    );
     expect(doc.createdHere, {'lamp', copy});
 
     doc.apply([Command.deleteObject('floor'), Command.deleteObject('runtime:99')]);
@@ -395,7 +429,11 @@ void main() {
           name: 'Lamp',
           parent: 'robot',
           components: [
-            {'type': 'fynkel.PointLight', 'version': 1, 'data': {'range': 4}},
+            {
+              'type': 'fynkel.PointLight',
+              'version': 1,
+              'data': {'range': 4},
+            },
           ],
         ),
         Command.deleteObject('floor'),
@@ -423,7 +461,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: SizedBox(width: 260, child: HierarchyPanel(model: hierarchy, onOpenDocument: () {})),
+          body: SizedBox(
+            width: 260,
+            child: HierarchyPanel(model: hierarchy, onOpenDocument: () {}),
+          ),
         ),
       ),
     );
@@ -601,7 +642,11 @@ void main() {
 
     // The card menu and a field's right click offer it during Play.
     tabs.live!.setSelection(['robot']);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: InspectorPanel(model: inspector))));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: InspectorPanel(model: inspector)),
+      ),
+    );
     await tester.tap(find.byKey(const ValueKey('card.menu.fynkel.Transform#0')));
     await tester.pumpAndSettle();
     expect(find.text('Apply to Scene'), findsOneWidget);
@@ -646,12 +691,47 @@ void main() {
     expect(inspector.cannotApplyToScene(light), isNull, reason: "found through its instance's expansion");
     expect(inspector.applyToScene(light, field: 'intensity'), isTrue);
     final overrides = (sceneDoc.entitiesView['inst']!['prefab'] as Map)['overrides'] as List;
-    expect(
-      overrides.where((o) => (o as Map)['field'] == 'intensity').single,
-      {'op': 'setField', 'entity': 'mesh', 'component': 'l', 'field': 'intensity', 'value': 7},
-    );
+    expect(overrides.where((o) => (o as Map)['field'] == 'intensity').single, {
+      'op': 'setField',
+      'entity': 'mesh',
+      'component': 'l',
+      'field': 'intensity',
+      'value': 7,
+    });
     expect(inspector.applyToScene(light), isFalse, reason: 'the rest is as the scene has it');
     play.follow(null);
+  });
+
+  test('a material or volume edited during Play reaches the running game at once; nothing without a game', () {
+    final project = FakeProject(dir: '/fake/game')..addDocument(scene());
+    final tabs = DocumentTabs(project: project);
+    addTearDown(tabs.dispose);
+    tabs.openDocument('main');
+    final live = running();
+    var written = 0;
+    final play = LivePlay(tabs: tabs, backend: (_) => live, written: () => written++);
+    final fields = {'shader': 'fynkel.pbr@1', 'metallic': 0.7};
+
+    expect(play.assetEdited('material', 'm1', fields), isFalse, reason: 'no game runs');
+
+    final world = fynkel.World.create();
+    addTearDown(world.dispose);
+    play.follow(world);
+    expect(play.assetEdited('material', 'm1', fields), isTrue);
+    expect(
+      play.assetEdited('volume', 'v1', {
+        'bloom': {'intensity': 1},
+      }),
+      isTrue,
+    );
+    expect(live.assets.keys, ['material:m1', 'volume:v1']);
+    expect(live.assets['material:m1'], fields);
+    expect(written, 2, reason: 'a paused Game view draws it again');
+    expect(play.assetEdited('physics_material', 'p1', const {}), isFalse, reason: 'draws nothing');
+
+    play.follow(null);
+    expect(play.assetEdited('material', 'm1', fields), isFalse, reason: 'Play ended');
+    play.dispose();
   });
 
   testWidgets('during Play the Hierarchy and the Inspector show the running game; Stop brings the scene back', (
@@ -738,7 +818,9 @@ void main() {
     play.follow(world);
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: SizedBox(width: 420, height: 1200, child: InspectorPanel(model: inspector))),
+        home: Scaffold(
+          body: SizedBox(width: 420, height: 1200, child: InspectorPanel(model: inspector)),
+        ),
       ),
     );
     final generation = inspector.generation;
@@ -780,11 +862,16 @@ void main() {
     play.follow(world);
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: SizedBox(width: 420, height: 1200, child: InspectorPanel(model: inspector))),
+        home: Scaffold(
+          body: SizedBox(width: 420, height: 1200, child: InspectorPanel(model: inspector)),
+        ),
       ),
     );
     Finder box(String field, String axis) => find.descendant(
-      of: find.descendant(of: find.byKey(ValueKey('field.fynkel.Transform#0.$field')), matching: find.byKey(ValueKey(axis))),
+      of: find.descendant(
+        of: find.byKey(ValueKey('field.fynkel.Transform#0.$field')),
+        matching: find.byKey(ValueKey(axis)),
+      ),
       matching: find.byType(EditableText),
     );
     String text(String field, String axis) => tester.widget<EditableText>(box(field, axis)).controller.text;
@@ -819,7 +906,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: SizedBox(width: 300, child: NumberField(value: 2, live: value, label: 'Y', onCommit: commits.add)),
+          body: SizedBox(
+            width: 300,
+            child: NumberField(value: 2, live: value, label: 'Y', onCommit: commits.add),
+          ),
         ),
       ),
     );
