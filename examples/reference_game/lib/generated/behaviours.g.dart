@@ -141,11 +141,11 @@ BehaviourType get gamePlayerType => BehaviourType(
       set: (b, v) => (b as _lib2.Player).walkSpeed = _double(v),
     ),
     BehaviourField(
-      name: 'waveLayer',
-      type: 'string',
-      defaultValue: 'spine',
-      get: (b) => (b as _lib2.Player).waveLayer,
-      set: (b, v) => (b as _lib2.Player).waveLayer = v as String,
+      name: 'wave',
+      type: 'assetRef',
+      defaultValue: const {'asset': '00000000-0000-0000-0000-000000000000'},
+      get: (b) => _assetRefJson((b as _lib2.Player).wave),
+      set: (b, v) => (b as _lib2.Player).wave = _assetRef(v),
     ),
   ],
 );

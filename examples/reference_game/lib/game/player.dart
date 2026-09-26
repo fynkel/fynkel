@@ -21,8 +21,9 @@ import 'game_state.dart';
 /// planar velocity, `grounded`, and the `jump` trigger on a jump — and
 /// the controller does the rest: the stride follows the speed,
 /// phase-synced, and the landing goes back to Locomotion. The `wave`
-/// action plays the wave layer — a second, additive animator on the
-/// entity named [waveLayer] — once. Footstep markers of the walk and
+/// action plays [wave] once as a one-shot in the controller's `UpperBody`
+/// slot (ADR-0033 § 2: a layer with no states, rooted at the spine), so
+/// the arm waves while the legs keep walking. Footstep markers of the walk and
 /// the run (`step_l`/`step_r`) count into [GameState.footsteps] and play
 /// [stepLeft]/[stepRight] as one-shots (M3-11: `world.audio.play`, no
 /// source on the entity; the pitch wanders a little with the count so a
@@ -64,11 +65,10 @@ class Player extends Behaviour {
   /// Where a death puts the player back: the scene position.
   late Vec3 spawn;
 
-  /// The entity below the player carrying the wave layer's animator
-  /// (`spine` on the box character, `Rig` on a downloaded one); empty
-  /// when the character has no wave.
+  /// The clip the `wave` action plays in the `UpperBody` slot (none when
+  /// the character has no wave).
   @Expose()
-  String waveLayer = 'spine';
+  AssetRef wave = AssetRef.none;
 
   /// The footstep sounds, one per `step_l`/`step_r` marker (assets/audio;
   /// none when unset: the markers still count).
@@ -146,7 +146,7 @@ class Player extends Behaviour {
       jumps++;
     }
     pose(jumped: jumped, grounded: me.grounded, velocity: me.velocity);
-    if (Input.pressed('wave')) wave();
+    if (Input.pressed('wave')) waveOnce();
 
     if (!state.won.value) {
       _elapsed += context.dt;
@@ -194,13 +194,11 @@ class Player extends Behaviour {
     if (jumped) animation.setTrigger('jump');
   }
 
-  /// Plays the wave layer once (the additive animator on [waveLayer]).
-  void wave() {
-    if (waveLayer.isEmpty) return;
-    final layer = gameObject.findDescendant(waveLayer);
-    final clip = layer?.get<Animator>()?.clip;
-    if (layer == null || clip == null) return;
-    layer.animation.play(clip, looping: false);
+  /// Plays [wave] once over the upper body; a wave already playing
+  /// blends into the new one.
+  void waveOnce() {
+    if (wave.isNone) return;
+    animation.playOneShot(wave, slot: 'UpperBody', blendIn: 0.15, blendOut: 0.25);
     waves++;
   }
 

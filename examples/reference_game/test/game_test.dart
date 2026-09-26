@@ -175,7 +175,7 @@ void main() {
   });
 
   test(
-    'the character is posed from the controller: the Animator Controller\'s Locomotion and Jump, the wave layer, footsteps',
+    'the character is posed from the controller: the Animator Controller\'s Locomotion and Jump, the wave one-shot, footsteps',
     () {
       final game = playing(projectDir);
       addTearDown(game.dispose);
@@ -186,7 +186,7 @@ void main() {
       // Rig-agnostic (M3-19a/b): the committed box character authors its
       // joints under the Player; `tools/playground.py --hero <rig.json>`
       // instances a downloaded one under a `Rig` child instead — the scene
-      // tells the Player its wave layer, the controller names the jump
+      // tells the Player its wave clip, the controller names the jump
       // clip. Either way a skinned
       // body sits somewhere below the Player and the clips pose the joints
       // — every entity under the Player is watched, not a named thigh.
@@ -206,9 +206,9 @@ void main() {
         expect(me.findChild('hips/spine/head/Visor'), isNotNull, reason: 'the visor rides the head joint');
         expect(
           game.scenes.lastReport!.animation.clips,
-          9,
+          8,
           reason: 'the Animator Controller (its blend space, the jump and the Aim tree\'s six strafe clips count once '
-              'each; its idle, walk and run came with the blend space) and the wave layer',
+              'each; its idle, walk and run came with the blend space); the wave registers when it plays',
         );
       }
       List<Quat> pose() => [for (final j in joints) j.localTransform.rotation];
@@ -304,26 +304,28 @@ void main() {
       s = me.animation.stateOf()!;
       expect((s.name, s.next), ('Jump', 'Locomotion'), reason: 'blending back from the jump');
 
-      // The wave: the layer's animator on the spine plays its clip once,
-      // additively — the right arm rises while the legs keep the idle.
+      // The wave: a one-shot in the controller's UpperBody slot (ADR-0033
+      // § 2: a layer with no states, rooted at the spine) — the right arm
+      // rises while the legs keep the idle.
       if (boxRig) {
-        final layer = me.findChild('hips/spine')!;
         final arm = me.findChild('hips/spine/upperarm_r')!;
-        expect(layer.animation.state!.playing, isFalse);
+        expect(me.animation.isPlayingOneShot(slot: 'UpperBody'), isFalse);
+        expect(me.animation.stateOf(layer: 1)!.slot, 'UpperBody');
         expect(arm.localTransform.rotation.z, inInclusiveRange(-0.07, -0.03), reason: 'at rest: the idle\'s breathing');
         game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'F')]);
         game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'F')]);
         expect(player.waves, 1);
-        expect(layer.animation.state!.playing, isTrue);
+        expect(me.animation.isPlayingOneShot(slot: 'UpperBody'), isTrue);
         for (var i = 0; i < 18; i++) {
           game.frame(1 / 60);
         }
         expect(arm.localTransform.rotation.z, lessThan(-0.5), reason: 'the arm is raised (about Z, -160° at most)');
-        expect(me.animation.stateOf()!.name, 'Locomotion', reason: 'the base animator plays on underneath');
+        expect(me.animation.stateOf(layer: 1)!.oneShot, player.wave);
+        expect(me.animation.stateOf()!.name, 'Locomotion', reason: 'the machine plays on underneath');
         for (var i = 0; i < 60; i++) {
           game.frame(1 / 60);
         }
-        expect(layer.animation.state!.playing, isFalse, reason: 'the 1.2 s wave ended');
+        expect(me.animation.isPlayingOneShot(slot: 'UpperBody'), isFalse, reason: 'the 1.2 s wave ended');
         expect(
           arm.localTransform.rotation.z,
           inInclusiveRange(-0.07, -0.03),

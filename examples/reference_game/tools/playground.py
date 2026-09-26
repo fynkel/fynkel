@@ -57,10 +57,11 @@ camera's yaw starts at 0 so "forward" on the keyboard is -Z and "right"
     written here too: idle at 0, walk at 4, run at 7 m/s by `speed`),
     Jump the jump clip once, on the `jump` trigger, back to Locomotion
     on `grounded`; `game.Player` only sets those parameters every tick.
-    A second animator on the `spine` joint is the wave layer: the
-    character's `wave` clip, additive, played on the `wave` action.
-    With `--hero`, the layer sits on the `Rig` and needs a `wave` clip
-    on the rig (skipped when there is none);
+    The controller's second layer, `UpperBody` (root `spine`, no
+    states: only its slot; ADR-0033 § 2), plays the character's `wave`
+    clip as a one-shot on the `wave` action while the legs keep walking.
+    With `--hero` the layer poses the whole character and needs a `wave`
+    clip on the rig (no layer when there is none);
   - the sound (M3-11): a `fynkel.AudioListener` on the Camera, the
     `Music` entity's looping, streamed `fynkel.AudioSource` on the music
     bus, and the clips `game.Player` (footsteps on the step markers, the
@@ -407,7 +408,10 @@ def player_controller():
                     {"from": "Jump", "to": "Locomotion", "exitTime": 0.2, "duration": 0.15, "conditions": [{"parameter": "grounded", "is": True}]},
                 ],
             }
-        ],
+        ]
+        # The wave's slot (ADR-0033 § 2): a layer with no states over the
+        # upper body; game.Player plays the wave there as a one-shot.
+        + ([{"name": "UpperBody"} | ({} if HERO else {"root": "spine"})] if WAVE else []),
         "editor": {"Base Layer": {"Locomotion": [0, 0], "Jump": [260, 0], "Aim": [130, 160], "#entry": [-220, 0], "#any": [-220, 120]}},
     }
 
@@ -587,9 +591,9 @@ def playground():
                 jumpSpeed=5.5,
                 cameraName="Camera",
                 fallY=-6.0,
-                # The entity carrying the wave layer's animator ('' when the
-                # character has no wave).
-                waveLayer=("Rig" if HERO else "spine") if WAVE else "",
+                # The wave, played as a one-shot in the controller's
+                # UpperBody slot (none when the character has no wave).
+                wave=WAVE or {"asset": "00000000-0000-0000-0000-000000000000"},
                 # The one-shots (M3-11): a footstep per `step_l`/`step_r`
                 # marker, the hit on a death.
                 stepLeft=SOUNDS["step_left"],
@@ -607,16 +611,11 @@ def playground():
         ],
         tags=TAG_PLAYER,
     )
-    # The wave layer (M3-19c): a second animator on a descendant, additive,
-    # paused on its first frame (the rest pose, so it adds nothing) until
-    # game.Player plays it once on the `wave` action.
-    wave_layer = ("fynkel.Animator", {"clip": WAVE, "speed": 1.0, "looping": False, "playing": False,
-                                      "weight": 1.0, "additive": True, "root_motion": False})
     if HERO:
         # The downloaded character's own hierarchy (its skinned meshes and
         # joints, as `fynkel import` derived them) instanced under a Rig
         # turned to face -Z; the animator above finds the joints by name.
-        rig = s.add("Rig", [transform((0, 0, 0), quat_axis_angle((0, 1, 0), math.pi))] + ([wave_layer] if WAVE else []), parent=player)
+        rig = s.add("Rig", [transform((0, 0, 0), quat_axis_angle((0, 1, 0), math.pi))], parent=player)
         model = s.add("Model", [], parent=rig)
         s.entities[model]["prefab"] = {"asset": {"asset": CHARACTER, "sub": "prefab"}, "instance": uid(s.key, "Rig", "instance"), "overrides": []}
     else:
@@ -631,8 +630,7 @@ def playground():
         )
         joints = {}
         for name, parent, local, _, _ in SKELETON:
-            layer = [wave_layer] if name == "spine" and WAVE else []
-            joints[name] = s.add(name, [transform(local)] + layer, parent=joints[parent] if parent else player)
+            joints[name] = s.add(name, [transform(local)], parent=joints[parent] if parent else player)
         s.add("Visor", [transform((0, 0.13, -0.13), scale=(0.2, 0.07, 0.06)), mesh_renderer("cube", "gate", cast=False)], parent=joints["head"])
 
     # The rig's own pose at yaw 0, pitch 0.35, distance 6 from the pivot

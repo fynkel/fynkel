@@ -210,6 +210,10 @@
           ]
         }
       ]
+    },
+    {
+      "name": "UpperBody",
+      "root": "spine"
     }
   ],
   "editor": {

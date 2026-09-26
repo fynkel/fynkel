@@ -218,11 +218,13 @@
           "description": "Metres per second on the ground."
         },
         {
-          "name": "waveLayer",
-          "type": "string",
+          "name": "wave",
+          "type": "assetRef",
           "nullable": false,
-          "default": "spine",
-          "description": "The entity below the player carrying the wave layer's animator (`spine` on the box character, `Rig` on a downloaded one); empty when the character has no wave."
+          "default": {
+            "asset": "00000000-0000-0000-0000-000000000000"
+          },
+          "description": "The clip the `wave` action plays in the `UpperBody` slot (none when the character has no wave)."
         }
       ],
       "schema": {
@@ -325,12 +327,14 @@
               "step": 0.1
             }
           },
-          "waveLayer": {
-            "type": "string",
-            "default": "spine",
-            "description": "The entity below the player carrying the wave layer's animator (`spine` on the box character, `Rig` on a downloaded one); empty when the character has no wave.",
+          "wave": {
+            "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef",
+            "default": {
+              "asset": "00000000-0000-0000-0000-000000000000"
+            },
+            "description": "The clip the `wave` action plays in the `UpperBody` slot (none when the character has no wave).",
             "x-fynkel": {
-              "type": "string"
+              "type": "assetRef"
             }
           }
         },
