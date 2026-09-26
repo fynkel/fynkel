@@ -868,6 +868,62 @@ final class ProjectBrowserModel extends ChangeNotifier {
     return r;
   }
 
+  /// Unity's Create Animator Controller on a model (ADR-0032 § 8):
+  /// `<model>.controller.json` beside it with a state per clip, the first
+  /// the layer's default, selected and ready to rename. Null when the
+  /// source has no clips or the controller could not be made.
+  OperationResult? newControllerFor(AssetEntry source) {
+    final clips = [
+      for (final sub in source.subAssets.keys)
+        if (AssetEntry.subKind(sub) == 'clip') sub,
+    ];
+    if (clips.isEmpty) return null;
+    final slash = source.path.lastIndexOf('/');
+    final inFolder = slash < 0 ? '' : source.path.substring(0, slash);
+    if (_refusedInPackages(inFolder)) return null;
+    final rel = _freshPath(inFolder, p.basenameWithoutExtension(source.path), '.controller.json');
+    final r = _guard(() => project.newDocument('controller', rel));
+    final id = r?.id;
+    if (r == null || id == null) return r;
+    // A state per clip, named after it (`anim/Run` is `Run`), in rows of four.
+    final names = <String>[];
+    for (final sub in clips) {
+      final base = sub.split('/').last;
+      var name = base;
+      for (var n = 1; names.contains(name); n++) {
+        name = '$base $n';
+      }
+      names.add(name);
+    }
+    try {
+      final doc = project.openDocument(id);
+      doc.apply([
+        Command.setDocumentField('/layers/0/states', [
+          for (final (i, sub) in clips.indexed)
+            {
+              'name': names[i],
+              'motion': {'asset': source.id, 'sub': sub},
+            },
+        ]),
+        Command.setDocumentField('/layers/0/defaultState', names.first),
+        Command.setDocumentField('/editor', {
+          'Base Layer': {
+            for (final (i, name) in names.indexed) name: [(i % 4) * 220.0, (i ~/ 4) * 90.0],
+          },
+        }),
+      ]);
+      doc.save();
+    } on AuthoringException catch (e) {
+      lastError = '$e';
+    }
+    if (entry(id) != null) {
+      select(id);
+      renamingAsset = id;
+    }
+    notifyListeners();
+    return r;
+  }
+
   /// Unity's Create ▸ Prefab Variant on the prefab [baseId]:
   /// `<Base> Variant` beside it, its root an instance of the base, selected and
   /// ready to rename.

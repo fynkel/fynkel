@@ -173,4 +173,29 @@ void main() {
     await e.click(e.row('Robot'));
     expect(e.shell.animator!.id, controllerId, reason: 'the Robot has no controller: the window stays');
   });
+
+  testWidgets('Create Animator Controller on a model: a state per clip, the first the default', (tester) async {
+    final e = await Editor.open(tester);
+    e.shell.browser!.setFolder('models');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('project.asset.$rigAsset')), buttons: kSecondaryMouseButton);
+    await tester.pumpAndSettle();
+    await e.click(find.byKey(const Key('project.menu.createController')));
+    final file = File('${e.dir.path}/assets/models/rig.controller.json');
+    final saved = jsonDecode(file.readAsStringSync()) as Map<String, Object?>;
+    final base = (saved['layers'] as List).single as Map;
+    // In the order the project lists the model's parts.
+    expect(base['defaultState'], 'bob');
+    expect(base['states'], [
+      {
+        'name': 'bob',
+        'motion': {'asset': rigAsset, 'sub': 'anim/bob'},
+      },
+      {
+        'name': 'wave',
+        'motion': {'asset': rigAsset, 'sub': 'anim/wave'},
+      },
+    ]);
+    expect(e.shell.browser!.lead, saved['id']);
+  });
 }

@@ -600,6 +600,13 @@ class _ProjectPanelState extends State<ProjectPanel> {
         ),
         if (e.isSource)
           PopupMenuItem(value: 'reimport', enabled: editable && !many, child: const Text('Reimport  ⇧⌥⌘I')),
+        if (e.isSource && e.offeredKinds.contains('clip'))
+          PopupMenuItem(
+            key: const Key('project.menu.createController'),
+            value: 'createController',
+            enabled: canHere && !many,
+            child: const Text('Create Animator Controller'),
+          ),
         if (e.document == 'prefab')
           PopupMenuItem(
             key: const Key('project.menu.createVariant'),
@@ -640,6 +647,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
         _activate(e);
       case 'createVariant':
         model.newPrefabVariant(e.id);
+      case 'createController':
+        model.newControllerFor(e);
       case 'openAdditive':
         widget.onOpenScene?.call(e.id, additive: true);
       case 'show':
