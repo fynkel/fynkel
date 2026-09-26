@@ -189,6 +189,24 @@ pub enum AnimateOp {
         seconds: f32,
         offset: f32,
     },
+    /// A one-shot in a layer's slot (ADR-0033 § 2): `motion` (a clip or
+    /// a blend space) covers the layer's state machine — blending in over
+    /// `blend_in` seconds, playing once at `speed`, blending out over the
+    /// last `blend_out` seconds — while the machine keeps running under
+    /// it. `slot` is a layer's name; empty is the base layer. Another
+    /// one-shot in the slot blends from the one playing.
+    PlayOneShot {
+        motion: AssetRef,
+        slot: String,
+        blend_in: f32,
+        blend_out: f32,
+        speed: f32,
+    },
+    /// Blends the slot's one-shot out over `blend_out` seconds.
+    StopOneShot {
+        slot: String,
+        blend_out: f32,
+    },
 }
 
 impl Command {

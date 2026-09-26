@@ -13,6 +13,12 @@
 //! (ADR-0033 § 1): a clip is one leaf, a blend space a 1D tree of its
 //! points, a blend tree itself; every leaf shares the state's normalized
 //! time, and the state's length is the leaves' weighted by the tree.
+//!
+//! Every layer also has a **slot** (ADR-0033 § 2): a one-shot played into
+//! it from code covers the layer's machine — blending in, playing once,
+//! blending out — while the machine keeps running underneath. A layer
+//! without states shows only its slot: the one-shot's weight scales the
+//! layer's then.
 
 #![cfg_attr(not(feature = "animation"), allow(dead_code, unused_imports))]
 
@@ -60,6 +66,78 @@ pub struct ControllerPlay {
     offsets: Vec<usize>,
     before: Vec<Before>,
     incoming: Pose,
+    /// Each layer's slot (ADR-0033 § 2).
+    pub slots: Vec<SlotRun>,
+    /// Scratch: a one-shot's pose.
+    shot_pose: Pose,
+}
+
+/// A layer's slot: the one-shot playing, and one blending out (stopped,
+/// or replaced by the one playing).
+#[derive(Clone, Debug, Default)]
+pub struct SlotRun {
+    pub current: Option<OneShot>,
+    pub fading: Option<OneShot>,
+}
+
+/// A one-shot (ADR-0033 § 2).
+#[derive(Clone, Debug)]
+pub struct OneShot {
+    /// The clip or blend space.
+    pub motion: AssetRef,
+    /// Seconds played (its own, times its speed).
+    pub elapsed: f32,
+    pub speed: f32,
+    pub blend_in: f32,
+    pub blend_out: f32,
+    /// Stopped (or replaced): seconds since, over how long it blends
+    /// out, from which weight.
+    stop: Option<(f32, f32, f32)>,
+    /// Played this tick: its first tick samples the start.
+    fresh: bool,
+    /// The motion resolved under the layer's root.
+    resolved: Option<Motion>,
+    /// Its length when last resolved, seconds.
+    pub length: f32,
+}
+
+impl OneShot {
+    /// How much of it shows now.
+    pub fn weight(&self) -> f32 {
+        if let Some((since, over, from)) = self.stop {
+            return if over <= 0.0 {
+                0.0
+            } else {
+                from * (1.0 - since / over).clamp(0.0, 1.0)
+            };
+        }
+        let win = if self.blend_in > 0.0 {
+            (self.elapsed / self.blend_in).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let wout = if self.blend_out > 0.0 && self.length > 0.0 {
+            ((self.length - self.elapsed) / self.blend_out).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        win * wout
+    }
+
+    /// Its normalized time, 0 → 1.
+    pub fn normalized(&self) -> f32 {
+        if self.length > 0.0 {
+            (self.elapsed / self.length).clamp(0.0, 1.0)
+        } else {
+            1.0
+        }
+    }
+
+    fn stopped(mut self, blend_out: f32) -> OneShot {
+        let from = self.weight();
+        self.stop = Some((0.0, blend_out, from));
+        self
+    }
 }
 
 impl ControllerPlay {
@@ -83,6 +161,8 @@ impl ControllerPlay {
             offsets,
             before: Vec::with_capacity(def.layers.len()),
             incoming: Pose::default(),
+            slots: vec![SlotRun::default(); def.layers.len()],
+            shot_pose: Pose::default(),
             def,
             pending: Vec::new(),
         }
@@ -307,6 +387,95 @@ fn resolve(
     });
 }
 
+/// A one-shot's motion resolved under the layer's root (again when a
+/// target went); `None` when it cannot be (reported through `missing`).
+fn resolve_shot(
+    t: &Tables,
+    entity: Entity,
+    def: &ControllerDef,
+    layer: usize,
+    shot: &mut OneShot,
+    run: &ControllerRun,
+    missing: &mut Option<AssetRef>,
+) {
+    if shot.resolved.as_ref().is_some_and(|m| m.valid(t.ecs)) {
+        shot.length = shot.resolved.as_ref().map_or(0.0, |m| m.length(run));
+        return;
+    }
+    shot.resolved = None;
+    let root = match &def.layers[layer].root {
+        None => entity,
+        Some(name) => match find_named(t.ecs, entity, name) {
+            Some(e) => e,
+            None => return,
+        },
+    };
+    let mut slots = Vec::new();
+    let motion = MotionDef::Asset(shot.motion.clone());
+    let Some(node) = build(t, root, def, &motion, &mut slots, missing) else {
+        return;
+    };
+    let Some(first) = slots.first() else {
+        return;
+    };
+    let mut reference = Pose::default();
+    first.clip.sample(0.0, &first.targets, &mut reference);
+    let m = Motion {
+        root: node,
+        slots,
+        reference,
+    };
+    shot.length = m.length(run);
+    shot.resolved = Some(m);
+}
+
+/// A one-shot's pose at its time into `into` (cleared first).
+fn sample_shot(shot: &OneShot, run: &ControllerRun, into: &mut Pose, scratch: &mut Pose) -> bool {
+    let Some(m) = shot.resolved.as_ref() else {
+        return false;
+    };
+    into.clear();
+    let n = shot.normalized();
+    let mut acc = 0.0f32;
+    m.leaves(run, &mut |i, w, _| {
+        let slot = &m.slots[i];
+        let time = wrap(&slot.clip, seconds(&slot.clip, n, false), false);
+        if acc == 0.0 {
+            slot.clip.sample(time, &slot.targets, into);
+        } else {
+            scratch.clear();
+            slot.clip.sample(time, &slot.targets, scratch);
+            into.blend(scratch, w / (acc + w));
+        }
+        acc += w;
+    });
+    true
+}
+
+/// `pose` blended towards `other` by `weight`, what `pose` does not set
+/// starting from rest (so a node only `other` poses is not snapped).
+fn blend_over(
+    t: &Tables,
+    rest: &HashMap<Entity, Transform>,
+    pose: &mut Pose,
+    other: &Pose,
+    weight: f32,
+) {
+    for e in &other.entries {
+        if pose.get(e.entity).is_none() {
+            if let Some(tr) = rest_of(t, rest, e.entity) {
+                pose.entries.push(crate::animation::PoseEntry {
+                    entity: e.entity,
+                    translation: Some(tr.position),
+                    rotation: Some(tr.rotation),
+                    scale: Some(tr.scale),
+                });
+            }
+        }
+    }
+    pose.blend(other, weight);
+}
+
 /// A motion's node, its clips resolved under `root` into `slots`.
 fn build(
     t: &Tables,
@@ -429,11 +598,93 @@ pub(super) fn tick(
             .step(&def, dt * animator.speed, &mut length, &mut events);
     }
 
+    // The slots: each one-shot resolved and its clock advanced; one that
+    // reached its end is gone (and ended), one blended out is dropped.
+    for l in 0..def.layers.len() {
+        let mut slot = std::mem::take(&mut play.slots[l]);
+        for shot in [&mut slot.current, &mut slot.fading].into_iter().flatten() {
+            let mut missing = None;
+            resolve_shot(t, entity, &def, l, shot, &play.run, &mut missing);
+            if let Some(m) = missing {
+                if out.unavailable.is_none() {
+                    out.unavailable = Some(m);
+                }
+            }
+            let prev = shot.elapsed;
+            if shot.fresh {
+                shot.fresh = false;
+            } else if advanced {
+                let step = dt * animator.speed * shot.speed;
+                shot.elapsed = (shot.elapsed + step).min(shot.length.max(0.0));
+                if let Some((since, _, _)) = &mut shot.stop {
+                    *since += dt * animator.speed;
+                }
+            }
+            // Its markers, while it plays (not while it blends out).
+            if shot.stop.is_none() && shot.elapsed > prev {
+                shot_markers(shot, &play.run, prev, out);
+            }
+        }
+        if let Some(shot) = &slot.current {
+            if shot.resolved.is_some() && shot.elapsed >= shot.length {
+                out.one_shots_ended.push(shot.motion.clone());
+                slot.current = None;
+            }
+        }
+        if slot
+            .fading
+            .as_ref()
+            .is_some_and(|f| f.weight() <= 0.0 || f.elapsed >= f.length)
+        {
+            slot.fading = None;
+        }
+        play.slots[l] = slot;
+    }
+
     // The layers, base first.
     pose.clear();
     for (l, layer) in def.layers.iter().enumerate() {
         let lr = play.run.layers[l].clone();
+        let shots = [
+            play.slots[l].fading.as_ref(),
+            play.slots[l].current.as_ref(),
+        ];
         let Some(current) = lr.state else {
+            // A layer without states (ADR-0033 § 2): only its slot shows,
+            // at the one-shots' weight times the layer's.
+            layer_pose.clear();
+            let mut shown = 0.0f32;
+            for shot in shots.into_iter().flatten() {
+                let w = shot.weight();
+                if w <= 0.0 || !sample_shot(shot, &play.run, &mut play.shot_pose, scratch) {
+                    continue;
+                }
+                if shown == 0.0 {
+                    layer_pose.clear();
+                    layer_pose
+                        .entries
+                        .extend_from_slice(&play.shot_pose.entries);
+                } else {
+                    layer_pose.blend(&play.shot_pose, w);
+                }
+                shown = w + shown * (1.0 - w);
+            }
+            let weight = layer.weight.clamp(0.0, 1.0) * shown;
+            if weight <= 0.0 {
+                continue;
+            }
+            let reference = play.slots[l]
+                .current
+                .as_ref()
+                .or(play.slots[l].fading.as_ref())
+                .and_then(|s| s.resolved.as_ref())
+                .map(|m| &m.reference);
+            match (layer.blending, reference) {
+                (Blending::Additive, Some(r)) if l > 0 => {
+                    pose.add_delta(layer_pose, r, weight, &mut |e| rest_of(t, &play.rest, e));
+                }
+                _ => blend_over(t, &play.rest, pose, layer_pose, weight),
+            }
             continue;
         };
         let target: &mut Pose = if l == 0 { &mut *pose } else { &mut *layer_pose };
@@ -486,6 +737,13 @@ pub(super) fn tick(
             }
             None => {
                 sample(current, lr.time, target);
+            }
+        }
+        // The slot covers the machine (ADR-0033 § 2).
+        for shot in shots.into_iter().flatten() {
+            let w = shot.weight();
+            if w > 0.0 && sample_shot(shot, &play.run, &mut play.shot_pose, scratch) {
+                blend_over(t, &play.rest, target, &play.shot_pose, w);
             }
         }
 
@@ -625,6 +883,33 @@ fn markers(
     }
 }
 
+/// The markers a one-shot's heaviest clip crossed since `prev` seconds.
+fn shot_markers(shot: &OneShot, run: &ControllerRun, prev: f32, out: &mut AnimatorTick) {
+    let Some(m) = shot.resolved.as_ref() else {
+        return;
+    };
+    let Some(k) = m.dominant(run) else {
+        return;
+    };
+    let slot = &m.slots[k];
+    let (a, b) = if shot.length > 0.0 {
+        (prev / shot.length, shot.elapsed / shot.length)
+    } else {
+        return;
+    };
+    let mut crossed = Vec::new();
+    slot.clip.markers_crossed(
+        seconds(&slot.clip, a, false),
+        seconds(&slot.clip, b, false),
+        false,
+        &mut crossed,
+    );
+    for i in crossed {
+        out.markers
+            .push((slot.clip_ref.clone(), slot.clip.markers[i].name.clone()));
+    }
+}
+
 /// A state's root motion between two normalized times: its clips'
 /// deltas, blended like its pose.
 #[allow(clippy::too_many_arguments)]
@@ -674,12 +959,20 @@ pub(super) fn state(
             let lr = &play.run.layers[l];
             let name =
                 |s: Option<usize>| s.map(|s| layer.states[s].name.clone()).unwrap_or_default();
+            let current = play.slots[l].current.as_ref();
+            let shot = current.map(|s| s.motion.clone()).unwrap_or_default();
+            let shot_time = current.map_or(0.0, |s| s.normalized());
+            let shot_weight = current.map_or(0.0, |s| s.weight());
             match lr.crossfade {
                 // Unity: the current state is the one fading out, the
                 // next the one fading in.
                 Some(f) => AnimatorLayerStateRecord {
                     entity,
                     layer: l as u32,
+                    slot: layer.name.clone(),
+                    one_shot: shot.clone(),
+                    one_shot_time: shot_time,
+                    one_shot_weight: shot_weight,
                     state: name(Some(f.from)),
                     normalized_time: f.from_time,
                     length: motions_length(l, f.from),
@@ -691,6 +984,10 @@ pub(super) fn state(
                 None => AnimatorLayerStateRecord {
                     entity,
                     layer: l as u32,
+                    slot: layer.name.clone(),
+                    one_shot: shot,
+                    one_shot_time: shot_time,
+                    one_shot_weight: shot_weight,
                     state: name(lr.state),
                     normalized_time: lr.time,
                     length: lr.state.map_or(0.0, |s| motions_length(l, s)),
@@ -730,6 +1027,56 @@ pub(super) fn state(
 }
 
 impl ControllerPlay {
+    /// The layer a slot names: a layer's name; empty is the base layer.
+    pub fn slot_index(&self, slot: &str) -> Result<usize, String> {
+        if slot.is_empty() {
+            return Ok(0);
+        }
+        self.def
+            .layers
+            .iter()
+            .position(|l| l.name == slot)
+            .ok_or_else(|| {
+                let names: Vec<&str> = self.def.layers.iter().map(|l| l.name.as_str()).collect();
+                format!("no slot `{slot}` (a slot is a layer: {})", names.join(", "))
+            })
+    }
+
+    /// Plays `motion` once in layer `l`'s slot; the one playing there
+    /// blends out over the new one's blend in.
+    pub fn play_one_shot(
+        &mut self,
+        l: usize,
+        motion: AssetRef,
+        blend_in: f32,
+        blend_out: f32,
+        speed: f32,
+    ) {
+        let slot = &mut self.slots[l];
+        if let Some(old) = slot.current.take() {
+            slot.fading = Some(old.stopped(blend_in));
+        }
+        slot.current = Some(OneShot {
+            motion,
+            elapsed: 0.0,
+            speed,
+            blend_in,
+            blend_out,
+            stop: None,
+            fresh: true,
+            resolved: None,
+            length: 0.0,
+        });
+    }
+
+    /// Blends layer `l`'s one-shot out over `blend_out` seconds.
+    pub fn stop_one_shot(&mut self, l: usize, blend_out: f32) {
+        let slot = &mut self.slots[l];
+        if let Some(old) = slot.current.take() {
+            slot.fading = Some(old.stopped(blend_out));
+        }
+    }
+
     /// A state's motion length now, seconds; 0 without a resolved motion.
     pub(super) fn length(&self, l: usize, s: usize) -> f32 {
         self.motions[l][s]

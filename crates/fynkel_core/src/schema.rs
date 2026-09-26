@@ -224,6 +224,14 @@ pub enum AnimateOp {
     PlayState,
     /// Like `playState`, fading the state playing out over `seconds`.
     CrossFadeState,
+    /// `clip` (a clip or a blend space), `name` (the slot: a layer's
+    /// name; empty is the base layer), `seconds` (blend in), `value`
+    /// (blend out), `speed`: play it once over the layer's state machine
+    /// (ADR-0033 § 2).
+    PlayOneShot,
+    /// `name` (the slot), `value` (blend out): blend the slot's one-shot
+    /// out.
+    StopOneShot,
 }
 
 /// Drives a `fynkel.Animator` (M3-19; simulation lane only). Rejected at
@@ -247,10 +255,12 @@ pub struct AnimateCommandRecord {
     pub clip: AssetRef,
     /// The weight for `setWeight`, the parameter value for
     /// `setParameter`/`setFloat`/`setBool`, the start fraction for
-    /// `playState`/`crossFadeState`.
+    /// `playState`/`crossFadeState`, the blend out for
+    /// `playOneShot`/`stopOneShot`.
     pub value: f32,
     /// The parameter name for `setParameter` and the typed setters, the
-    /// state name for `playState`/`crossFadeState`.
+    /// state name for `playState`/`crossFadeState`, the slot for
+    /// `playOneShot`/`stopOneShot`.
     pub name: String,
     /// The value for `setInteger` (ADR-0032).
     pub integer: i32,
@@ -507,6 +517,15 @@ pub struct AnimatorLayerStateRecord {
     pub next_normalized_time: f32,
     /// How far the crossfade is, 0 → 1; `0` without one.
     pub transition_progress: f32,
+    /// The layer's slot (ADR-0033 § 2): its name, the layer's.
+    pub slot: String,
+    /// The one-shot playing in it (not one blending out after a stop);
+    /// nil for none.
+    pub one_shot: AssetRef,
+    /// Its normalized time, 0 → 1.
+    pub one_shot_time: f32,
+    /// How much of it shows, 0 → 1.
+    pub one_shot_weight: f32,
 }
 
 /// `FYNKEL_QUERY_ANIMATOR_PARAMETERS` (ADR-0032): one record per

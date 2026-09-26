@@ -730,3 +730,226 @@ fn a_clips_root_travel_is_per_second_of_a_lap() {
     );
     assert!(w.clip_root_travel(root, &clip_ref(22)).is_none());
 }
+
+/// Base: Move (arm y 0 → 1 over 1 s, looping); UpperBody: no states,
+/// only its slot (ADR-0033 § 2). Clip 3 holds the arm at y 10 for 1 s.
+fn slotted(w: &mut World) -> (Entity, Entity) {
+    w.register_clip(
+        clip_ref(1),
+        slide("arm", Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), 1.0),
+    );
+    w.register_clip(
+        clip_ref(3),
+        slide(
+            "arm",
+            Vec3::new(0.0, 10.0, 0.0),
+            Vec3::new(0.0, 10.0, 0.0),
+            1.0,
+        ),
+    );
+    let def = ControllerDef {
+        name: "Slots".into(),
+        parameters: Vec::new(),
+        layers: vec![
+            layer("Base", vec![state("Move", Some(clip_ref(1)), true)], vec![]),
+            LayerDef {
+                default_state: None,
+                ..layer("UpperBody", vec![], vec![])
+            },
+        ],
+    };
+    w.register_controller(controller_ref(3), def).unwrap();
+    let root = spawn(w, 1, None, "Rig");
+    let arm = spawn(w, 2, Some(root), "arm");
+    set(w, root, controlled(controller_ref(3)));
+    (root, arm)
+}
+
+fn one_shot(slot: &str, blend_in: f32, blend_out: f32) -> AnimateOp {
+    AnimateOp::PlayOneShot {
+        motion: clip_ref(3),
+        slot: slot.into(),
+        blend_in,
+        blend_out,
+        speed: 1.0,
+    }
+}
+
+fn ended(w: &mut World) -> Vec<AssetRef> {
+    w.drain_events()
+        .into_iter()
+        .filter_map(|e| match e.payload {
+            EventPayload::AnimationEnded { clip, .. } => Some(clip),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The arm's height for the machine's time `n` under a one-shot at `w`.
+fn covered(n: f32, w: f32) -> f32 {
+    let machine = n - n.floor();
+    machine * (1.0 - w) + 10.0 * w
+}
+
+#[test]
+fn a_one_shot_covers_the_machine_blending_in_and_out_and_ends() {
+    let mut w = world();
+    let (root, arm) = slotted(&mut w);
+    for _ in 0..10 {
+        w.step();
+    }
+    let report = animate(&mut w, root, one_shot("", 0.2, 0.2));
+    assert_eq!(report.rejected, 0, "{:?}", w.diagnostics());
+    let b = base(&w, root);
+    assert_eq!(b.slot, "Base");
+    assert_eq!(b.one_shot, clip_ref(3), "it plays in the base layer's slot");
+    assert_eq!(b.one_shot_weight, 0.0, "its first tick is its start");
+    ended(&mut w);
+    let mut seen = Vec::new();
+    for _ in 0..70 {
+        w.step();
+        let b = base(&w, root);
+        let n = b.normalized_time;
+        assert!(
+            (y(&w, arm) - covered(n, b.one_shot_weight)).abs() < 1e-4,
+            "{} vs {} at weight {}",
+            y(&w, arm),
+            covered(n, b.one_shot_weight),
+            b.one_shot_weight
+        );
+        seen.push(b.one_shot_weight);
+        let e = ended(&mut w);
+        if !e.is_empty() {
+            assert_eq!(e, [clip_ref(3)]);
+            assert!(b.one_shot.is_nil(), "gone at its end");
+            break;
+        }
+    }
+    // It blended in, held at 1 in the middle, and blended out.
+    assert!(seen.iter().any(|&x| x > 0.0 && x < 1.0));
+    assert!(seen.contains(&1.0));
+    assert!(seen.len() >= 59 && seen.len() <= 61, "{} ticks", seen.len());
+    // The machine ran underneath: Move kept its clock all along.
+    let b = base(&w, root);
+    assert_eq!(b.state, "Move");
+    assert!(
+        (b.normalized_time - 71.0 * DT).abs() < 0.05,
+        "{}",
+        b.normalized_time
+    );
+}
+
+#[test]
+fn a_layer_without_states_shows_only_its_slot_and_a_stop_blends_out() {
+    let mut w = world();
+    let (root, arm) = slotted(&mut w);
+    for _ in 0..3 {
+        w.step();
+    }
+    let n = base(&w, root).normalized_time;
+    assert!((y(&w, arm) - n).abs() < 1e-5, "an empty slot shows nothing");
+    animate(&mut w, root, one_shot("UpperBody", 0.0, 0.0));
+    w.step();
+    assert!((y(&w, arm) - 10.0).abs() < 1e-5, "{}", y(&w, arm));
+    let (layers, _) = w.animator_controller_state(root).unwrap();
+    assert_eq!(layers[1].slot, "UpperBody");
+    assert_eq!(layers[1].one_shot, clip_ref(3));
+    assert!(layers[0].one_shot.is_nil());
+
+    // Stopped: not playing at once, blending out over 0.1 s.
+    let report = animate(
+        &mut w,
+        root,
+        AnimateOp::StopOneShot {
+            slot: "UpperBody".into(),
+            blend_out: 0.1,
+        },
+    );
+    assert_eq!(report.rejected, 0, "{:?}", w.diagnostics());
+    let (layers, _) = w.animator_controller_state(root).unwrap();
+    assert!(layers[1].one_shot.is_nil());
+    let h = y(&w, arm);
+    assert!(h > 1.0 && h < 10.0, "halfway out: {h}");
+    for _ in 0..8 {
+        w.step();
+    }
+    let n = base(&w, root).normalized_time;
+    assert!((y(&w, arm) - n).abs() < 1e-4, "blended out: {}", y(&w, arm));
+    assert!(ended(&mut w).is_empty(), "a stopped one-shot does not end");
+}
+
+#[test]
+fn another_one_shot_blends_from_the_first() {
+    let mut w = world();
+    let (root, arm) = slotted(&mut w);
+    w.register_clip(
+        clip_ref(4),
+        slide(
+            "arm",
+            Vec3::new(0.0, 20.0, 0.0),
+            Vec3::new(0.0, 20.0, 0.0),
+            1.0,
+        ),
+    );
+    animate(&mut w, root, one_shot("UpperBody", 0.0, 0.0));
+    w.step();
+    assert!((y(&w, arm) - 10.0).abs() < 1e-5);
+    animate(
+        &mut w,
+        root,
+        AnimateOp::PlayOneShot {
+            motion: clip_ref(4),
+            slot: "UpperBody".into(),
+            blend_in: 0.2,
+            blend_out: 0.0,
+            speed: 1.0,
+        },
+    );
+    for _ in 0..6 {
+        w.step();
+    }
+    let h = y(&w, arm);
+    assert!(h > 10.0 && h < 20.0, "between the two: {h}");
+    for _ in 0..10 {
+        w.step();
+    }
+    assert!((y(&w, arm) - 20.0).abs() < 1e-4, "{}", y(&w, arm));
+}
+
+#[test]
+fn a_one_shot_is_checked() {
+    let mut w = world();
+    let (root, _) = slotted(&mut w);
+    fn why(w: &World, r: StepReport) -> String {
+        assert_eq!(r.rejected, 1);
+        w.diagnostics()[0].message.clone()
+    }
+    let r = animate(&mut w, root, one_shot("Arms", 0.1, 0.1));
+    assert!(why(&w, r).contains("no slot `Arms` (a slot is a layer: Base, UpperBody)"));
+    let r = animate(&mut w, root, one_shot("", -1.0, 0.1));
+    assert!(why(&w, r).contains("blends must be finite"));
+    let r = animate(
+        &mut w,
+        root,
+        AnimateOp::PlayOneShot {
+            motion: clip_ref(9),
+            slot: String::new(),
+            blend_in: 0.0,
+            blend_out: 0.0,
+            speed: 1.0,
+        },
+    );
+    assert!(why(&w, r).contains("not a clip or blend space the world has"));
+    // Without a controller: play the clip instead.
+    let lone = spawn(&mut w, 9, None, "Lone");
+    set(
+        &mut w,
+        lone,
+        ComponentValue::Animator(Animator {
+            speed: 1.0,
+            ..Animator::default()
+        }),
+    );
+    let r = animate(&mut w, lone, one_shot("", 0.1, 0.1));
+    assert!(why(&w, r).contains("a one-shot plays in a controller's slot"));
+}

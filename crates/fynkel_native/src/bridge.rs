@@ -199,6 +199,17 @@ fn decode_command(kind: u32, body: &[u8], tail: &[u8]) -> Result<Command, Diagno
                         },
                         offset: c.value,
                     },
+                    AnimateOp::PlayOneShot => CoreAnimateOp::PlayOneShot {
+                        motion: c.clip,
+                        slot: c.name,
+                        blend_in: c.seconds,
+                        blend_out: c.value,
+                        speed: c.speed,
+                    },
+                    AnimateOp::StopOneShot => CoreAnimateOp::StopOneShot {
+                        slot: c.name,
+                        blend_out: c.value,
+                    },
                 };
                 Command::Animate {
                     entity: c.entity,

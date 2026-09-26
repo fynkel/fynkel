@@ -633,6 +633,10 @@ fn fixtures_match_generated_codecs() {
             next: "Jump".into(),
             next_normalized_time: 0.25,
             transition_progress: 0.5,
+            slot: "UpperBody".into(),
+            one_shot: AssetRef::with_sub(mesh_id, "anim/wave"),
+            one_shot_time: 0.25,
+            one_shot_weight: 0.75,
         },
     );
     check(

@@ -455,6 +455,9 @@ pub(super) struct AnimatorTick {
     /// A controller's state events (ADR-0032), in order: the layer,
     /// entered (else exited), the state and the state left.
     pub(super) states: Vec<(u32, bool, String, String)>,
+    /// One-shots that reached their end (ADR-0033 § 2): each an
+    /// `AnimationEnded`, the animator playing on.
+    pub(super) one_shots_ended: Vec<AssetRef>,
 }
 
 /// Hops from the tree root down to `entity`.
@@ -681,6 +684,53 @@ impl World {
                     bad("crossfade seconds must be finite and >= 0, the offset within [0, 1]"),
                 );
             }
+            AnimateOp::PlayOneShot {
+                blend_in,
+                blend_out,
+                speed,
+                ..
+            } if !blend_in.is_finite()
+                || *blend_in < 0.0
+                || !blend_out.is_finite()
+                || *blend_out < 0.0
+                || !speed.is_finite()
+                || *speed <= 0.0 =>
+            {
+                return self.reject(
+                    index,
+                    lane,
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    entity,
+                    ComponentId::ANIMATOR,
+                    bad("a one-shot's blends must be finite and >= 0, its speed finite and > 0"),
+                );
+            }
+            AnimateOp::StopOneShot { blend_out, .. }
+                if !blend_out.is_finite() || *blend_out < 0.0 =>
+            {
+                return self.reject(
+                    index,
+                    lane,
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    entity,
+                    ComponentId::ANIMATOR,
+                    bad("the blend out must be finite and >= 0"),
+                );
+            }
+            AnimateOp::PlayOneShot { motion, .. }
+                if !self.clips.contains_key(motion) && !self.blends.contains_key(motion) =>
+            {
+                return self.reject(
+                    index,
+                    lane,
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    entity,
+                    ComponentId::ANIMATOR,
+                    bad(&format!(
+                        "the one-shot's motion {motion} is not a clip or blend space the world has"
+                    )),
+                );
+            }
             _ => {}
         }
         // ADR-0032: a controller owns what plays; the clip ops are for an
@@ -700,7 +750,10 @@ impl World {
         );
         let controller_op = matches!(
             op,
-            AnimateOp::SetControllerParameter { .. } | AnimateOp::PlayState { .. }
+            AnimateOp::SetControllerParameter { .. }
+                | AnimateOp::PlayState { .. }
+                | AnimateOp::PlayOneShot { .. }
+                | AnimateOp::StopOneShot { .. }
         );
         if clip_op && controlled.is_some() {
             return self.reject(
@@ -723,7 +776,11 @@ impl World {
                     DiagnosticCode::INVALID_PAYLOAD,
                     entity,
                     ComponentId::ANIMATOR,
-                    bad("the animator has no controller"),
+                    bad(if matches!(op, AnimateOp::PlayOneShot { .. } | AnimateOp::StopOneShot { .. }) {
+                        "the animator has no controller: a one-shot plays in a controller's slot (play the clip instead)"
+                    } else {
+                        "the animator has no controller"
+                    }),
                 );
             };
             let result = {
@@ -773,6 +830,18 @@ impl World {
                                 }
                             }
                         }
+                        AnimateOp::PlayOneShot {
+                            motion,
+                            slot,
+                            blend_in,
+                            blend_out,
+                            speed,
+                        } => play
+                            .slot_index(&slot)
+                            .map(|l| play.play_one_shot(l, motion, blend_in, blend_out, speed)),
+                        AnimateOp::StopOneShot { slot, blend_out } => play
+                            .slot_index(&slot)
+                            .map(|l| play.stop_one_shot(l, blend_out)),
                         _ => unreachable!("a controller op"),
                     },
                 }
@@ -891,7 +960,10 @@ impl World {
             }
             AnimateOp::SetWeight(w) => animator.weight = w,
             AnimateOp::SetParameter { name, value } => run.set_parameter(&name, value),
-            AnimateOp::SetControllerParameter { .. } | AnimateOp::PlayState { .. } => {}
+            AnimateOp::SetControllerParameter { .. }
+            | AnimateOp::PlayState { .. }
+            | AnimateOp::PlayOneShot { .. }
+            | AnimateOp::StopOneShot { .. } => {}
         }
         true
     }
@@ -949,6 +1021,7 @@ impl World {
                 markers: Vec::new(),
                 root: None,
                 states: Vec::new(),
+                one_shots_ended: Vec::new(),
             };
             pose.clear();
             run.root_delta = Vec3::ZERO;
@@ -1396,6 +1469,15 @@ impl World {
                             layer,
                             state,
                         }
+                    },
+                });
+            }
+            for clip in t.one_shots_ended {
+                self.events.push(Event {
+                    tick,
+                    payload: EventPayload::AnimationEnded {
+                        entity: t.entity,
+                        clip,
                     },
                 });
             }
