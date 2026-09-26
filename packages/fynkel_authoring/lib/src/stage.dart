@@ -87,6 +87,7 @@ final class StageClip {
     required this.fps,
     required this.inPlace,
     this.blend,
+    this.treeValues,
   });
 
   factory StageClip.fromJson(Map<String, Object?> j) {
@@ -99,6 +100,13 @@ final class StageClip {
       fps: (j['fps'] as num?)?.toDouble() ?? 30,
       inPlace: j['inPlace'] != false,
       blend: j['blend'] is Map<String, Object?> ? StageBlend.fromJson(j['blend'] as Map<String, Object?>) : null,
+      treeValues: switch (_mapOf(j['tree'])['values']) {
+        final Map<String, Object?> v => {
+          for (final e in v.entries)
+            if (e.value is num) e.key: (e.value as num).toDouble(),
+        },
+        _ => null,
+      },
     );
   }
 
@@ -115,7 +123,16 @@ final class StageClip {
   /// Root motion held in place.
   final bool inPlace;
   final StageBlend? blend;
+
+  /// A blend tree's parameter values (ADR-0033); null for a clip or a
+  /// blend space.
+  final Map<String, double>? treeValues;
 }
+
+/// A clip's root travel per second on a stage's subject (Compute
+/// Positions, ADR-0033): the root's velocity in its parent's space and
+/// its turn in radians per second.
+typedef StageTravel = ({List<double> velocity, double angularSpeed});
 
 /// A blend space's parameter and points.
 final class StageBlend {
@@ -305,17 +322,38 @@ final class PreviewStage {
 
   /// A clip on the hierarchy (`{'asset', 'sub'}`; null takes it off,
   /// leave it out to keep it), seeked to [time] seconds; [inPlace] holds
-  /// root motion; [parameter] is a blend space's. The host runs the clock.
-  /// Null when no clip is on.
-  StageClip? setClip({Object? clip = _keep, double? time, bool? inPlace, double? parameter}) {
+  /// root motion; [parameter] is a blend space's. Or a blend tree
+  /// ([tree]: a state's `motion`, `{'blendTree': …}`; ADR-0033) at
+  /// [values] of its parameters. The host runs the clock. Null when no
+  /// clip is on.
+  StageClip? setClip({
+    Object? clip = _keep,
+    double? time,
+    bool? inPlace,
+    double? parameter,
+    Map<String, Object?>? tree,
+    Map<String, double>? values,
+  }) {
     final r = _call('clip', {
       if (!identical(clip, _keep)) 'clip': clip,
+      'tree': ?tree,
+      'values': ?values,
       'time': ?time,
       'inPlace': ?inPlace,
       'parameter': ?parameter,
     });
     return r['clip'] is Map<String, Object?> ? StageClip.fromJson(r) : null;
   }
+
+  /// Each clip's (`{'asset', 'sub'}`) root travel on the subject; null for
+  /// one that does not load or keys no translation.
+  List<StageTravel?> travel(List<Map<String, Object?>> clips) => [
+    for (final t in (_call('travel', {'clips': clips})['travel'] as List?) ?? const [])
+      if (t is Map<String, Object?>)
+        (velocity: _doubles(t['velocity']), angularSpeed: (t['angularSpeed'] as num?)?.toDouble() ?? 0)
+      else
+        null,
+  ];
 
   /// A sound stage's waveform in [columns] columns.
   SoundPeaks peaks(int columns) {

@@ -647,6 +647,35 @@ void main() {
     expect(posed.setClip(time: wave.duration / 2)!.time, closeTo(wave.duration / 2, 1e-4));
     expect(posed.setClip(inPlace: false)!.inPlace, isFalse);
     expect(posed.setClip(clip: null), isNull);
+    // A blend tree (ADR-0033) at its values, and the clips' root travel.
+    final tree = posed.setClip(
+      tree: {
+        'blendTree': {
+          'type': '1d',
+          'parameters': ['x'],
+          'children': [
+            {
+              'motion': {'asset': rig, 'sub': 'anim/wave'},
+              'threshold': 0,
+            },
+            {
+              'motion': {'asset': rig, 'sub': 'anim/bob'},
+              'threshold': 1,
+            },
+          ],
+        },
+      },
+      values: {'x': 0.5},
+    )!;
+    expect(tree.treeValues, {'x': 0.5});
+    expect(tree.duration, closeTo(1.5, 1e-4), reason: 'half the 1 s wave, half the 2 s bob');
+    final travel = posed.travel([
+      {'asset': rig, 'sub': 'anim/wave'},
+      {'asset': rig, 'sub': 'anim/missing'},
+    ]);
+    expect(travel, hasLength(2));
+    expect(travel[0]!.velocity, hasLength(3));
+    expect(travel[1], isNull);
     posed.close();
 
     material.close();
