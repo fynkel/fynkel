@@ -17,7 +17,8 @@
 //!
 //! A goal's weight is a number or a float parameter, times the weight of
 //! a target set from code. What a goal wrote is taken back the next tick
-//! when no layer posed the node again, so it never compounds.
+//! when no layer posed the node again (each of its position, rotation and
+//! scale on its own), so it never compounds.
 
 #![cfg_attr(not(feature = "animation"), allow(dead_code, unused_imports))]
 
@@ -289,10 +290,26 @@ impl World {
         problems: &mut Vec<String>,
     ) {
         let ecs = &self.ecs;
-        // Last tick's writes that no layer posed again are taken back.
+        // Last tick's writes that no layer posed again are taken back,
+        // property by property: a clip keying a node's position alone (a
+        // breathing spine) rewrites it every tick but keeps the rotation
+        // IK gave it, which must not be turned again on top.
         for (e, before, after) in ik.touched.drain(..) {
-            if ecs.copy::<Transform>(e).is_ok_and(|now| now == after) {
-                let _ = scene::set_local(ecs, e, before);
+            let Ok(mut now) = ecs.copy::<Transform>(e) else {
+                continue;
+            };
+            let kept = now;
+            if now.position == after.position {
+                now.position = before.position;
+            }
+            if now.rotation == after.rotation {
+                now.rotation = before.rotation;
+            }
+            if now.scale == after.scale {
+                now.scale = before.scale;
+            }
+            if now != kept {
+                let _ = scene::set_local(ecs, e, now);
             }
         }
         let mut touched = std::mem::take(&mut ik.touched);

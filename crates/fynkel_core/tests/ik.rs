@@ -516,3 +516,86 @@ fn foot_placement_lands_each_foot_and_lowers_the_hips() {
     );
     assert!((at(&w, hips).y - 1.0).abs() < 1e-4, "{}", at(&w, hips));
 }
+
+/// The reference game's idle keys the spine's position (it breathes) and
+/// not its rotation: the layer rewrites the node every tick yet keeps the
+/// turn IK gave it, so taking IK's write back must go property by
+/// property, or the look-at turns the spine again on top every tick.
+#[test]
+fn a_node_whose_position_breathes_keeps_its_look_at_turn_bounded() {
+    let mut w = world();
+    w.register_clip(
+        clip_ref(3),
+        Clip {
+            name: "breathe".into(),
+            duration: 2.0,
+            markers: Vec::new(),
+            channels: vec![Channel {
+                target: "Spine".into(),
+                property: Property::Translation,
+                interpolation: Interpolation::Linear,
+                times: vec![0.0, 1.0, 2.0],
+                values: vec![0.0, 1.0, 0.0, 0.0, 1.015, 0.0, 0.0, 1.0, 0.0],
+            }],
+        },
+    );
+    let root = spawn(&mut w, 1, Vec3::ZERO, None, "Rig");
+    let spine = spawn(&mut w, 2, Vec3::new(0.0, 1.0, 0.0), Some(root), "Spine");
+    spawn(&mut w, 3, Vec3::new(0.0, 0.6, 0.0), Some(spine), "Head");
+    run(
+        &mut w,
+        root,
+        ControllerDef {
+            name: "Breathe".into(),
+            parameters: vec![],
+            layers: vec![layer("Base Layer", Some(clip_ref(3)), vec![])],
+            ik: vec![IkDef {
+                name: "look".into(),
+                kind: IkKind::LookAt {
+                    head: "Head".into(),
+                    spine: vec!["Spine".into()],
+                    limit: 60f32.to_radians(),
+                    body: 0.3,
+                },
+                weight: IkWeight::Value(1.0),
+                target: None,
+            }],
+        },
+    );
+    // A coin on the ground ahead: down 40°-odd, within the limit.
+    animate(
+        &mut w,
+        root,
+        AnimateOp::SetIkTarget {
+            goal: "look".into(),
+            position: Vec3::new(0.0, 0.3, -1.5),
+            weight: 1.0,
+        },
+    );
+    let turn = |w: &World| {
+        let r = w.ecs().copy::<Transform>(spine).unwrap().rotation;
+        r.angle_between(glam::Quat::IDENTITY).to_degrees()
+    };
+    steps(&mut w, 120);
+    let settled = turn(&w);
+    steps(&mut w, 240);
+    let later = turn(&w);
+    assert!(
+        settled > 1.0 && settled < 0.3 * 60.0 + 0.5,
+        "the spine's share: {settled}°"
+    );
+    assert!(
+        (later - settled).abs() < 0.5,
+        "it stays put: {settled}° then {later}°"
+    );
+    // Cleared: the spine goes back upright.
+    animate(
+        &mut w,
+        root,
+        AnimateOp::ClearIkTarget {
+            goal: "look".into(),
+        },
+    );
+    steps(&mut w, 120);
+    assert!(turn(&w) < 0.2, "{}°", turn(&w));
+}
