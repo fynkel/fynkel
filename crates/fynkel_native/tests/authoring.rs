@@ -150,6 +150,7 @@ fn codes(v: &Value) -> Vec<&str> {
 #[test]
 fn version_and_null_safety() {
     assert_eq!(fynkel_authoring_abi_version(), AUTHORING_ABI_VERSION);
+    assert_eq!(AUTHORING_ABI_VERSION, 4);
     unsafe {
         assert_eq!(fynkel_authoring_result(ptr::null()).length, 0);
         assert_eq!(fynkel_authoring_is_poisoned(ptr::null()), 0);
@@ -1079,4 +1080,166 @@ fn the_edit_preview_world_crosses_the_edge() {
         },
         Status::InvalidArgument
     );
+}
+
+impl Host {
+    fn stage_open(&self, args: &Value) -> Status {
+        let text = args.to_string();
+        unsafe { fynkel_authoring_stage_open(self.0, text.as_ptr(), text.len() as u32) }
+    }
+
+    fn stage_call(&self, stage: u32, kind: &str, args: &Value) -> Status {
+        let text = args.to_string();
+        unsafe {
+            fynkel_authoring_stage_call(
+                self.0,
+                stage,
+                kind.as_ptr(),
+                kind.len() as u32,
+                text.as_ptr(),
+                text.len() as u32,
+            )
+        }
+    }
+}
+
+/// The Inspector's preview stages (version 4, ADR-0030 §3): one asset
+/// alone in its world, lit by the stage's sun, framed, following unsaved
+/// material edits, reloaded by a recook.
+#[test]
+fn preview_stages_cross_the_edge() {
+    const CRATE: &str = "c0000000-0000-4000-8000-000000000040";
+    const ROBOT: &str = "c0000000-0000-4000-8000-000000000001";
+    let copy = Copy::new("stages");
+    let host = Host::new();
+    assert_eq!(host.open_project(&copy.dir), Status::Ok);
+
+    // A material: on the Sphere, with the stage's sun and nothing else.
+    assert_eq!(host.stage_open(&json!({ "asset": RUSTED })), Status::Ok);
+    let opened = host.result();
+    assert_eq!(opened["cook"]["ok"], true, "{opened}");
+    assert_eq!(opened["subject"], "material");
+    assert_eq!(opened["shape"], "sphere");
+    assert_eq!(opened["stats"]["meshes"], 1);
+    assert!(opened["stats"]["triangles"].as_u64().unwrap() > 100);
+    let material = opened["stage"].as_u64().unwrap() as u32;
+    let world = unsafe { fynkel_authoring_stage_world(host.0, material) };
+    assert!(!world.is_null());
+    let extract = unsafe { (*world).core() }.extract();
+    assert_eq!(extract.directional_lights.len(), 1);
+    let toward: Vec<f32> = serde_json::from_value(opened["light"].clone()).unwrap();
+    let dir = extract.directional_lights[0].direction;
+    assert!(
+        (dir + glam::Vec3::from_slice(&toward)).length() < 1e-4,
+        "{dir}"
+    );
+
+    // Another shape; a mesh that does not load keeps it.
+    assert_eq!(
+        host.stage_call(material, "shape", &json!({ "shape": "cube" })),
+        Status::Ok
+    );
+    assert_eq!(host.result()["shape"], "cube");
+    assert_eq!(host.result()["stats"]["triangles"], 12);
+    let missing =
+        json!({ "shape": { "asset": "c0000000-0000-4000-8000-0000000000ff", "sub": "mesh/X" } });
+    assert_eq!(
+        host.stage_call(material, "shape", &missing),
+        Status::InvalidArgument
+    );
+    assert_eq!(host.stage_call(material, "stats", &json!({})), Status::Ok);
+    assert_eq!(host.result()["shape"], "cube");
+    assert_eq!(
+        unsafe { fynkel_authoring_stage_world(host.0, material) },
+        world,
+        "the world stays put across reloads"
+    );
+
+    // The sun turns; the world follows.
+    assert_eq!(
+        host.stage_call(material, "light", &json!({ "toward": [0, 1, 0] })),
+        Status::Ok
+    );
+    let dir = unsafe { (*world).core() }.extract().directional_lights[0].direction;
+    assert!((dir - glam::Vec3::NEG_Y).length() < 1e-4, "{dir}");
+    assert_eq!(
+        host.stage_call(material, "light", &json!({ "yaw": 0.5, "pitch": 0.2 })),
+        Status::Ok
+    );
+
+    // An unsaved edit shows through the shared store.
+    let data = json!({ "shader": "fynkel.pbr@1", "base_color": [0, 1, 0, 1] });
+    assert_eq!(
+        host.stage_call(
+            material,
+            "setMaterial",
+            &json!({ "material": RUSTED, "data": data })
+        ),
+        Status::Ok
+    );
+    assert!(host.result()["stores"].as_u64().unwrap() >= 1);
+    assert_eq!(
+        host.stage_call(material, "restoreMaterial", &json!({ "material": RUSTED })),
+        Status::Ok
+    );
+
+    // A prefab and a model: their hierarchy, framed around it.
+    assert_eq!(host.stage_open(&json!({ "asset": CRATE })), Status::Ok);
+    assert_eq!(host.result()["subject"], "hierarchy");
+    assert!(host.result()["stats"]["meshes"].as_u64().unwrap() >= 1);
+    assert_eq!(host.stage_open(&json!({ "asset": ROBOT })), Status::Ok);
+    let robot = host.result();
+    assert!(
+        robot["cook"].is_null(),
+        "the store is shared: no second cook"
+    );
+    let bounds = &robot["stats"]["bounds"];
+    let (lo, hi): (Vec<f32>, Vec<f32>) = (
+        serde_json::from_value(bounds["min"].clone()).unwrap(),
+        serde_json::from_value(bounds["max"].clone()).unwrap(),
+    );
+    let centre = (glam::Vec3::from_slice(&lo) + glam::Vec3::from_slice(&hi)) * 0.5;
+    let target: Vec<f32> = serde_json::from_value(robot["framing"]["target"].clone()).unwrap();
+    assert!((glam::Vec3::from_slice(&target) - centre).length() < 1e-4);
+
+    // A mesh on its own.
+    assert_eq!(
+        host.stage_open(&json!({ "asset": ROBOT, "sub": "mesh/Cube" })),
+        Status::Ok
+    );
+    assert_eq!(host.result()["subject"], "mesh");
+    assert_eq!(host.result()["stats"]["meshes"], 1);
+
+    // A texture has nothing to stage; unknown calls and stages are refused.
+    assert_eq!(
+        host.stage_open(&json!({ "asset": "c0000000-0000-4000-8000-000000000002" })),
+        Status::InvalidArgument
+    );
+    assert_eq!(
+        host.stage_call(material, "spin", &json!({})),
+        Status::InvalidArgument
+    );
+    assert_eq!(codes(&host.result()), ["FYN-T0004"]);
+
+    // A recook reloads every stage in place.
+    let (_, scene) = host.open_document(MAIN_SCENE);
+    assert_eq!(
+        unsafe { fynkel_authoring_preview_open(host.0, scene) },
+        Status::Ok
+    );
+    assert_eq!(host.preview_call(scene, "recook", &json!({})), Status::Ok);
+    assert_eq!(host.stage_call(material, "stats", &json!({})), Status::Ok);
+    assert_eq!(host.result()["shape"], "cube");
+
+    assert_eq!(
+        unsafe { fynkel_authoring_stage_close(host.0, material) },
+        Status::Ok
+    );
+    assert_eq!(host.result()["closed"], true);
+    assert!(unsafe { fynkel_authoring_stage_world(host.0, material) }.is_null());
+    assert_eq!(
+        host.stage_call(material, "stats", &json!({})),
+        Status::InvalidArgument
+    );
+    assert_eq!(codes(&host.result()), ["FYN-T0002"]);
 }

@@ -19,9 +19,10 @@ use fynkel_assets::{Assets, Residency};
 use fynkel_contracts::{AssetRef, Uuid};
 use fynkel_cooked::payload::{MeshPayload, Vertex};
 use fynkel_core::{
-    ComponentValue, EntityDescription, Extract, MeshRenderer, SceneDescription, World, WorldConfig,
+    Command, ComponentValue, DirectionalLight, Entity, EntityDescription, Extract, MeshRenderer,
+    SceneDescription, Transform, World, WorldConfig,
 };
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Quat, Vec3};
 
 /// The built-in primitives asset (ADR-0023, `fynkel_authoring::PRIMITIVES_ID`).
 pub const PRIMITIVES_ID: Uuid =
@@ -35,6 +36,8 @@ const STAGE_SCENE: Uuid =
     Uuid::from_bytes(u128::to_be_bytes(0x7b0e0000_0000_4000_8000_000000000001));
 const STAGE_ENTITY: Uuid =
     Uuid::from_bytes(u128::to_be_bytes(0x7b0e0000_0000_4000_8000_000000000002));
+/// The stage's own sun, when the world is drawn as it is.
+const STAGE_SUN: Uuid = Uuid::from_bytes(u128::to_be_bytes(0x7b0e0000_0000_4000_8000_000000000003));
 
 /// Where the camera looks from, relative to the bounds' centre.
 pub const VIEW_FROM: Vec3 = Vec3::new(1.0, 0.8, 1.0);
@@ -290,13 +293,35 @@ pub struct Staged {
 }
 
 /// Puts `subject` alone into a world made with `config`, and steps it
-/// once. A hierarchy also gets what its components reference from the
-/// cache: the skins a skinned model deforms with (drawn at the first
-/// step's pose), the prefabs its emitters would spawn.
+/// once (see [`stage_into`]).
 pub fn stage(assets: &Assets, subject: &Subject, config: WorldConfig) -> Result<Staged, Refusal> {
-    let (description, hierarchy) = match subject {
+    let mut world = World::new(config);
+    let stood = stage_into(assets, subject, &mut world, None)?;
+    world.begin_frame(1.0 / 60.0);
+    world.step();
+    Ok(Staged {
+        world,
+        residency: stood.residency,
+        diagnostics: stood.diagnostics,
+    })
+}
+
+/// What [`stage_into`] put in a world.
+pub struct Stood {
+    /// Keeps the subject's closure resident while the world is shown.
+    pub residency: Residency,
+    /// What loading the hierarchy's prefabs and animation reported.
+    pub diagnostics: Vec<String>,
+    /// The stage's sun, when it has its own.
+    pub sun: Option<Entity>,
+}
+
+/// The description `subject` loads as: a hierarchy's own, or one entity
+/// with the mesh (a material on its shape).
+pub fn description(assets: &Assets, subject: &Subject) -> Result<SceneDescription, Refusal> {
+    Ok(match subject {
         Subject::Hierarchy(id) => match assets.prefab(*id) {
-            Ok(p) => (p.description, true),
+            Ok(p) => p.description,
             Err(diags) => {
                 return Err(Refusal::Failed(
                     diags
@@ -310,7 +335,7 @@ pub fn stage(assets: &Assets, subject: &Subject, config: WorldConfig) -> Result<
             if let Err(d) = assets.mesh(mesh) {
                 return Err(Refusal::Failed(d.message));
             }
-            (single(mesh.clone(), material.clone()), false)
+            single(mesh.clone(), material.clone())
         }
         Subject::Material { material, shape } => {
             if let Err(d) = assets.material(material) {
@@ -320,9 +345,42 @@ pub fn stage(assets: &Assets, subject: &Subject, config: WorldConfig) -> Result<
             if let Err(d) = assets.mesh(&mesh) {
                 return Err(Refusal::Failed(d.message));
             }
-            (single(mesh, material.clone()), false)
+            single(mesh, material.clone())
         }
-    };
+    })
+}
+
+/// Loads `subject` into `world` (replacing what it held) and holds its
+/// assets resident. A hierarchy also gets what its components reference
+/// from the cache: the skins a skinned model deforms with, the prefabs
+/// its emitters would spawn. With a `sun` (toward the light, as
+/// [`Framing::light_dir`]), the asset's cameras, lights, environment,
+/// volumes and audio listeners are left out of the world itself
+/// ([`strip_description`]) and the stage's own sun is put in, as the
+/// renderer's fallback one (10 000 lux, shadows) — for a world drawn as
+/// it is, where [`strip`] on an extract is not possible. The world is not
+/// stepped.
+pub fn stage_into(
+    assets: &Assets,
+    subject: &Subject,
+    world: &mut World,
+    sun: Option<Vec3>,
+) -> Result<Stood, Refusal> {
+    let mut description = description(assets, subject)?;
+    if let Some(dir) = sun {
+        strip_description(&mut description);
+        description.entities.push(EntityDescription {
+            id: STAGE_SUN,
+            name: "Preview Sun".to_string(),
+            active: true,
+            parent: None,
+            children: Vec::new(),
+            components: vec![
+                ComponentValue::Transform(sun_transform(dir)),
+                ComponentValue::DirectionalLight(DirectionalLight::default()),
+            ],
+        });
+    }
     let mut closure = assets.closure(subject.owner());
     if let Subject::Material {
         shape: Shape::Mesh(mesh),
@@ -332,14 +390,14 @@ pub fn stage(assets: &Assets, subject: &Subject, config: WorldConfig) -> Result<
         closure.extend(assets.closure(mesh.asset));
     }
     let residency = assets.retain(&closure);
-    let mut world = World::new(config);
-    if let Err(e) = world.load_scene(&description) {
-        return Err(Refusal::Failed(format!("{e:?}")));
-    }
+    let loaded = match world.load_scene(&description) {
+        Ok(l) => l,
+        Err(e) => return Err(Refusal::Failed(format!("{e:?}"))),
+    };
     let mut diagnostics = Vec::new();
-    if hierarchy {
-        let (_, prefab_diags) = assets.register_prefabs(&description, &mut world);
-        let (_, _, anim_diags) = assets.register_animation(&description, &mut world);
+    if matches!(subject, Subject::Hierarchy(_)) {
+        let (_, prefab_diags) = assets.register_prefabs(&description, world);
+        let (_, _, anim_diags) = assets.register_animation(&description, world);
         diagnostics.extend(
             prefab_diags
                 .iter()
@@ -347,13 +405,50 @@ pub fn stage(assets: &Assets, subject: &Subject, config: WorldConfig) -> Result<
                 .map(|d| d.to_string()),
         );
     }
-    world.begin_frame(1.0 / 60.0);
-    world.step();
-    Ok(Staged {
-        world,
+    Ok(Stood {
         residency,
         diagnostics,
+        sun: sun.and_then(|_| loaded.handle_of(STAGE_SUN)),
     })
+}
+
+/// The stage's sun shining along `-toward` (a light shines down its -Z).
+pub fn sun_transform(toward: Vec3) -> Transform {
+    let along = -toward.try_normalize().unwrap_or(Vec3::Y);
+    Transform {
+        rotation: Quat::from_rotation_arc(Vec3::NEG_Z, along),
+        ..Transform::default()
+    }
+}
+
+/// Turns the stage's `sun` to shine from `toward` (applied now).
+pub fn set_sun(world: &mut World, sun: Entity, toward: Vec3) {
+    world.apply_now(vec![Command::SetTransform {
+        entity: sun,
+        transform: sun_transform(toward),
+    }]);
+}
+
+/// Takes the components that are not the asset's own look out of a
+/// description: cameras (and their rigs), lights, the environment,
+/// volumes and audio listeners.
+pub fn strip_description(description: &mut SceneDescription) {
+    for e in &mut description.entities {
+        e.components.retain(|c| {
+            !matches!(
+                c,
+                ComponentValue::Camera(_)
+                    | ComponentValue::ThirdPersonCamera(_)
+                    | ComponentValue::LookAtCamera(_)
+                    | ComponentValue::DirectionalLight(_)
+                    | ComponentValue::PointLight(_)
+                    | ComponentValue::SpotLight(_)
+                    | ComponentValue::Environment(_)
+                    | ComponentValue::Volume(_)
+                    | ComponentValue::AudioListener(_)
+            )
+        });
+    }
 }
 
 /// Only the asset's own geometry: its cameras, lights, environment and
@@ -394,6 +489,33 @@ pub fn world_bounds(assets: &Assets, extract: &Extract) -> Option<(Vec3, Vec3)> 
         }
     }
     bounds
+}
+
+/// What the drawn meshes add up to (the info line under a 3D preview).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MeshStats {
+    pub meshes: usize,
+    pub vertices: usize,
+    pub triangles: usize,
+    /// Of them, the ones a skin deforms.
+    pub skinned: usize,
+}
+
+/// Counts the extract's meshes from their cooked payloads.
+pub fn mesh_stats(assets: &Assets, extract: &Extract) -> MeshStats {
+    let mut stats = MeshStats::default();
+    for m in &extract.meshes {
+        let Ok(payload) = assets.mesh(&m.mesh) else {
+            continue;
+        };
+        stats.meshes += 1;
+        stats.vertices += payload.vertices.len();
+        stats.triangles += payload.indices.len() / 3;
+        if !payload.skin.is_empty() {
+            stats.skinned += 1;
+        }
+    }
+    stats
 }
 
 /// A camera fitting some bounds, and the sun that lights them.
@@ -492,6 +614,13 @@ mod tests {
         };
         strip(&mut e);
         assert!(e.camera.is_none());
+    }
+
+    #[test]
+    fn the_sun_shines_away_from_toward() {
+        let toward = Vec3::new(0.3, 1.0, 0.2).normalize();
+        let t = sun_transform(toward);
+        assert!((t.rotation * Vec3::NEG_Z + toward).length() < 1e-5);
     }
 
     #[test]

@@ -2,7 +2,7 @@
 # hand-written C header (ADR-0004, blueprint §19.2e item 1). Run from
 # packages/fynkel_authoring:  dart run ffigen
 name: FynkelAuthoringBindings
-description: Generated dart:ffi bindings for crates/fynkel_native/include/fynkel_authoring.h (authoring ABI v3). Do not edit.
+description: Generated dart:ffi bindings for crates/fynkel_native/include/fynkel_authoring.h (authoring ABI v4). Do not edit.
 output: lib/src/native/fynkel_authoring_bindings.g.dart
 headers:
   entry-points:

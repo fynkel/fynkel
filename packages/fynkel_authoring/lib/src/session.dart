@@ -19,6 +19,7 @@ import 'native/fynkel_authoring_bindings.g.dart' as n;
 
 part 'live.dart';
 part 'preview.dart';
+part 'stage.dart';
 
 /// The authoring ABI version this package was written against.
 const int authoringAbiVersion = n.FYNKEL_AUTHORING_ABI_VERSION;
@@ -163,6 +164,7 @@ final class AuthoringSession implements Finalizable {
   late final Pointer<n.FynkelAuthoringSession> _ptr;
   final _events = StreamController<AuthoringEvent>.broadcast(sync: true);
   final _documents = <int, DocumentHandle>{};
+  final _stages = <int, PreviewStage>{};
   ProjectInfo? _project;
   bool _disposed = false;
 
@@ -472,6 +474,10 @@ final class AuthoringSession implements Finalizable {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    for (final st in _stages.values) {
+      st._closed = true;
+    }
+    _stages.clear();
     for (final d in _documents.values) {
       d._closed = true;
       d._preview?._closed = true;
@@ -489,6 +495,10 @@ final class AuthoringSession implements Finalizable {
   }
 
   void _closeAllHandles() {
+    for (final st in _stages.values) {
+      st._closed = true;
+    }
+    _stages.clear();
     for (final d in _documents.values) {
       d._closed = true;
       d._preview?._closed = true;

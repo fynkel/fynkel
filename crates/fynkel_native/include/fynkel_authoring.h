@@ -63,7 +63,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_AUTHORING_ABI_VERSION 3u
+#define FYNKEL_AUTHORING_ABI_VERSION 4u
 
 typedef struct FynkelAuthoringSession FynkelAuthoringSession;
 /* The edit-preview world's type is fynkel.h's FynkelWorld. */
@@ -431,6 +431,57 @@ FynkelStatus fynkel_authoring_preview_call(FynkelAuthoringSession* session,
                                            uint32_t kind_len,
                                            const uint8_t* args_json_utf8,
                                            uint32_t args_len);
+
+/* ---- The Inspector's preview stages (version 4; ADR-0030 §3) ----------
+ *
+ * One small edit-mode world per open 3D preview, holding one asset alone
+ * as the Project's tiles show it (fynkel_preview): a prefab or a model's
+ * hierarchy, a mesh with the material its model pairs it with, a material
+ * on a shape. The asset's own cameras, lights, environment, volumes and
+ * listeners are left out; the stage's own sun (10 000 lux, shadows) lights
+ * it from the upper left of the three-quarter view. The world shares the
+ * session's cooked store (the first stage or preview cooks the project),
+ * so an unsaved material edit shows in it, and a recook reloads it.
+ *
+ * Open: args { asset: uuid, sub?: "mesh/…" | "material/…" | "prefab",
+ * shape?: a shape }. A shape is "sphere" | "cube" | "cylinder" |
+ * "capsule" | "plane", or { asset, sub? } for any mesh. Result (and
+ * every call's that loads): { ok, stage, cook?, subject: "hierarchy" |
+ * "mesh" | "material", shape (a material's, else null), framing: { eye
+ * [3], target [3], fovY (radians), near, far, radius, world [16] },
+ * light [3] (toward the sun), stats: { meshes, vertices, triangles,
+ * skinned, bounds: { min [3], max [3] } | null }, diagnostics: [text] }.
+ * FYN-T0003 for an asset with nothing to show (a texture, a sound) or
+ * one that failed to cook. */
+FynkelStatus fynkel_authoring_stage_open(FynkelAuthoringSession* session,
+                                         const uint8_t* args_json_utf8,
+                                         uint32_t args_len);
+/* Drops a stage. Result: { ok, stage, closed }. */
+FynkelStatus fynkel_authoring_stage_close(FynkelAuthoringSession* session, uint32_t stage);
+/* A stage's world for the viewport ABI (drawn through the host's own
+ * view: fynkel_apple_viewport_set_view). NULL when the stage is not open,
+ * or the session is NULL or poisoned. Valid until the stage's close, the
+ * project's close or the session's destruction, and stable across its
+ * reloads. Never write to it. */
+const FynkelWorld* fynkel_authoring_stage_world(const FynkelAuthoringSession* session,
+                                                uint32_t stage);
+/* A call on a stage:
+ *   shape           shape               a material's stage on another shape (a mesh
+ *                                       that does not load is refused and the stage
+ *                                       keeps its shape) → the open result
+ *   light           toward [3], or yaw + pitch (radians, turning it)
+ *                                       the stage's sun → "light"
+ *   reload                              loaded again from the store → the open result
+ *   stats                               → the open result, not reloaded
+ *   setMaterial     material, data      as the edit-preview's, on every store
+ *   restoreMaterial material            → "stores"
+ * FYN-T0002 for a stage that is not open, FYN-T0004 for an unknown kind. */
+FynkelStatus fynkel_authoring_stage_call(FynkelAuthoringSession* session,
+                                         uint32_t stage,
+                                         const uint8_t* kind_utf8,
+                                         uint32_t kind_len,
+                                         const uint8_t* args_json_utf8,
+                                         uint32_t args_len);
 
 /* A live call on a RUNNING game's world (ADR-0021 P7, live Play mode) —
  * not a preview: no session, the world is the game's. Kinds:

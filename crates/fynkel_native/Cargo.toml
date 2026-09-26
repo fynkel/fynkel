@@ -17,7 +17,7 @@ crate-type = ["cdylib", "rlib"]
 # `fynkel_authoring_*` symbol and none of `fynkel_authoring`'s code reaches
 # a game (§1.1 rule 6; CI asserts it with `nm`).
 default = ["authoring", "physics", "audio", "animation"]
-authoring = ["dep:fynkel_authoring", "dep:uuid"]
+authoring = ["dep:fynkel_authoring", "dep:fynkel_preview", "dep:uuid"]
 # The optional modules (ADR-0029): passed to `fynkel_core`. The hook
 # builds with all three unless the project's `modules.strip` leaves an
 # off one out; the prebuilt runtime carries every one.
@@ -27,6 +27,8 @@ animation = ["fynkel_core/animation"]
 
 [dependencies]
 fynkel_authoring = { workspace = true, optional = true }
+# The Inspector's preview stages (authoring ABI v4, ADR-0030).
+fynkel_preview = { workspace = true, optional = true }
 # Entity ids of the edit-preview world's calls (authoring ABI v3).
 uuid = { workspace = true, optional = true }
 fynkel_contracts.workspace = true

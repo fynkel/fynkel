@@ -49,9 +49,15 @@ use serde_json::{json, Value};
 
 use crate::{FynkelBufferView, FynkelWorld};
 
+mod stage;
+pub use stage::{
+    fynkel_authoring_stage_call, fynkel_authoring_stage_close, fynkel_authoring_stage_open,
+    fynkel_authoring_stage_world,
+};
+
 /// Version of `fynkel_authoring.h`. Bumped on any incompatible change;
 /// independent of `FYNKEL_ABI_VERSION`.
-pub const AUTHORING_ABI_VERSION: u32 = 3;
+pub const AUTHORING_ABI_VERSION: u32 = 4;
 
 /// One editor session: the open project, its documents, their edit-preview
 /// worlds, and the last result. Opaque to the host.
@@ -62,6 +68,10 @@ pub struct FynkelAuthoringSession {
     /// `fynkel_authoring_preview_world` hands out stays put while the map
     /// changes.
     previews: BTreeMap<Handle, Box<PreviewSlot>>,
+    /// The Inspector's preview stages (version 4), by the id
+    /// `fynkel_authoring_stage_open` gave; boxed for the same reason.
+    stages: BTreeMap<u32, Box<stage::StageSlot>>,
+    next_stage: u32,
     /// The project's cooked cache every preview draws from: opened by the
     /// first preview (a cook in process), replaced by `recook`, dropped
     /// with the project.
@@ -146,6 +156,7 @@ impl FynkelAuthoringSession {
         for slot in self.previews.values_mut() {
             slot.world.assets = Some(assets.clone());
         }
+        self.reload_stages(&assets);
         Ok((assets, report.json()))
     }
 
@@ -164,6 +175,7 @@ impl FynkelAuthoringSession {
 
     fn drop_previews(&mut self) {
         self.previews.clear();
+        self.stages.clear();
         self.assets = None;
     }
 
@@ -330,6 +342,8 @@ pub extern "C" fn fynkel_authoring_session_create() -> *mut FynkelAuthoringSessi
     match catch_unwind(|| FynkelAuthoringSession {
         inner: AuthoringSession::new(),
         previews: BTreeMap::new(),
+        stages: BTreeMap::new(),
+        next_stage: 0,
         assets: None,
         result: Vec::new(),
         poisoned: false,
@@ -1024,16 +1038,10 @@ fn preview_call(
                 None
             };
             s.slot(handle)?;
-            // Every open preview's store: the material shows the edit in
-            // every Scene view (after a recook they share one store).
-            let mut stores: Vec<fynkel_assets::Assets> = Vec::new();
-            for slot in s.previews.values() {
-                if let Some(a) = slot.world.assets() {
-                    if !stores.iter().any(|b| b.same_store(a)) {
-                        stores.push(a.clone());
-                    }
-                }
-            }
+            // Every store the session draws from: the material shows the
+            // edit in every Scene view and Inspector preview (after a
+            // recook they share one store).
+            let stores = s.stores();
             for a in &stores {
                 match data {
                     Some(d) => Preview::set_material(a, material, d).map_err(one)?,

@@ -766,9 +766,11 @@ window, never running game code and never reading a cooked cache
   `T0005` a caught panic, `T0006` I/O.
 
 **The C ABI** (`crates/fynkel_native/include/fynkel_authoring.h`,
-`fynkel_authoring_*`, `FYNKEL_AUTHORING_ABI_VERSION` **3** — version 2
+`fynkel_authoring_*`, `FYNKEL_AUTHORING_ABI_VERSION` **4** — version 2
 added `fynkel_authoring_operate(session, kind, kind_len, args_json,
-args_len)` for M4-05, version 3 the edit-preview world below for M4-06;
+args_len)` for M4-05, version 3 the edit-preview world below for M4-06,
+version 4 the Inspector's preview stages (`fynkel_authoring_stage_*`,
+ADR-0030);
 an editor built against an older version still loads) is the
 session one call per method: text in as UTF-8 with a length, one JSON result out
 (`fynkel_authoring_result`, `{ "ok": true, ... }` or `{ "ok": false,

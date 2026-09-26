@@ -72,7 +72,7 @@ String nameOf(DocumentHandle doc, String id) => entity(doc, id)['name'] as Strin
 void main() {
   test('the loaded runtime speaks authoring ABI v3', () {
     expect(AuthoringSession.loadedAbiVersion, authoringAbiVersion);
-    expect(authoringAbiVersion, 3);
+    expect(authoringAbiVersion, 4);
   });
 
   test('a complete edit session on the main scene', () {
@@ -586,6 +586,46 @@ void main() {
     expect(e.diagnostics.single.toString(), 'error FYN-E0001: stale (a:3)');
   });
 
+  test('preview stages: one asset alone, framed and lit — ABI v4, ADR-0030', () {
+    final dir = copyFixture('stages');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final session = AuthoringSession();
+    addTearDown(session.dispose);
+    session.openProject(dir.path);
+
+    final material = session.openStage(rustedId);
+    expect(material.cook?.ok, isTrue);
+    expect(material.worldAddress, isNot(0));
+    expect(material.state.subject, 'material');
+    expect(material.state.shape, 'sphere');
+    expect(material.state.stats.meshes, 1);
+    expect(material.state.framing.world, hasLength(16));
+    expect(material.setShape('cube').stats.triangles, 12);
+    expect(
+      () => material.setShape({'asset': 'c0000000-0000-4000-8000-0000000000ff', 'sub': 'mesh/X'}),
+      throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-T0003')),
+    );
+    expect(material.refresh().shape, 'cube');
+    expect(material.setLight([0, 2, 0]), [0, 1, 0]);
+    material.setMaterial(rustedId, {'shader': 'fynkel.pbr@1', 'base_color': [0, 1, 0, 1]});
+    material.restoreMaterial(rustedId);
+
+    final robot = session.openStage('c0000000-0000-4000-8000-000000000001');
+    expect(robot.cook, isNull, reason: 'the store is shared');
+    expect(robot.state.subject, 'hierarchy');
+    expect(robot.state.stats.boundsMin, hasLength(3));
+    expect(session.openStage('c0000000-0000-4000-8000-000000000001', sub: 'mesh/Cube').state.subject, 'mesh');
+    expect(
+      () => session.openStage('c0000000-0000-4000-8000-000000000002'),
+      throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-T0003')),
+    );
+
+    material.close();
+    expect(material.worldAddress, 0);
+    session.closeProject();
+    expect(robot.isClosed, isTrue);
+  });
+
   test('the edit-preview world follows the document and never edits it — item 6', () {
     final dir = copyFixture('preview');
     addTearDown(() => dir.deleteSync(recursive: true));
@@ -703,12 +743,12 @@ void main() {
     const rusted = 'c0000000-0000-4000-8000-000000000020';
     final rustedFile = File('${dir.path}/assets/materials/rusted.material.json');
     final rustedBytes = rustedFile.readAsStringSync();
-    preview.setMaterial(rusted, {'shader': 'fynkel.pbr@1', 'metallic': 0.9});
+    preview.setMaterial(rustedId, {'shader': 'fynkel.pbr@1', 'metallic': 0.9});
     expect(rustedFile.readAsStringSync(), rustedBytes);
     expect(preview.material(rusted)['metallic'], 0.9);
-    preview.restoreMaterial(rusted);
+    preview.restoreMaterial(rustedId);
     expect(preview.material(rusted)['metallic'], 0.25);
-    expect(() => preview.setMaterial(rusted, {'metallic': 'shiny'}), throwsA(isA<AuthoringException>()));
+    expect(() => preview.setMaterial(rustedId, {'metallic': 'shiny'}), throwsA(isA<AuthoringException>()));
     const look = 'c0000000-0000-4000-8000-0000000000f7';
     preview.setVolume(look, {
       'bloom': {'intensity': 2},

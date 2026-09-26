@@ -1025,6 +1025,7 @@ dependencies = [
  "fynkel_core",
  "fynkel_document",
  "fynkel_import",
+ "fynkel_preview",
  "fynkel_scene",
  "fynkel_wire",
  "glam 0.33.7",
