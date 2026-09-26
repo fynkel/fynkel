@@ -131,6 +131,32 @@ void main() {
       expect(w.materialValue(tinted, 'power'), isNull);
     });
 
+    test('an Inspector edit during Play: the saved fields, with what code set kept on top', () {
+      final w = fresh()..loadProject(project, cacheDir: shaderCache);
+      final tinted = w.assets.find('materials/tinted')!;
+      Map<String, Object?> saved(List<num> tint, num power) => {
+            r'$schema': 'https://fynkel.dev/schemas/material.schema.json',
+            'formatVersion': 2,
+            'id': tinted.asset,
+            'name': 'Tinted',
+            'shader': {'asset': _tintId},
+            'parameters': {'tint': tint, 'power': power},
+          };
+      expect(w.applyMaterialEdit(tinted.asset, saved([1, 0, 0], 1)), isFalse,
+          reason: 'code has not touched it: the editor draws it over the cooked one');
+
+      w.setMaterialValue(tinted, 'power', 3);
+      expect(w.applyMaterialEdit(tinted.asset, saved([1, 0, 0], 1)), isTrue);
+      expect(w.materialValue(tinted, 'tint'), [1, 0, 0], reason: 'the edit shows');
+      expect(w.materialValue(tinted, 'power'), 3, reason: 'the code drives power');
+      w.setMaterialValue(tinted, 'power', 2);
+      expect(w.materialValue(tinted, 'tint'), [1, 0, 0], reason: 'the next SetFloat keeps the edit');
+
+      // Switched to Lit in the Inspector: the code's copy goes.
+      expect(w.applyMaterialEdit(tinted.asset, {'shader': 'fynkel.pbr@1'}), isFalse);
+      expect(w.materialValue(tinted, 'power'), isNull);
+    });
+
     test('a Lit material is not a shader material', () {
       final w = fresh()..loadProject(project, cacheDir: shaderCache);
       expect(() => w.setMaterialValue(w.assets.find('materials/rusted')!, 'tint', 1), throwsArgumentError);

@@ -371,6 +371,30 @@ class World {
     _putValue(changed, name, value);
     _sendShaderMaterial(ref, changed, 'setMaterialValue');
     _shaderMaterials[ref.asset] = changed;
+    (_codeValues[ref.asset] ??= {})[name] = value;
+  }
+
+  /// An Inspector edit of the material [id] during Play, saved (as in
+  /// Unity): when code changed it with [setMaterialValue], its values for
+  /// this run start again from the saved [fields], with what code set on
+  /// top — so the edit shows, and a property the code drives stays the
+  /// code's. False when code has not touched [id] (the editor draws the
+  /// edit over the cooked material itself), or the edit left `.shader`
+  /// (a Lit material now: the code's copy is dropped).
+  bool applyMaterialEdit(String id, Map<String, Object?> fields) {
+    if (!_shaderMaterials.containsKey(id)) return false;
+    final ref = AssetRef(id);
+    if (fields['shader'] is! Map) {
+      _shaderMaterials.remove(id);
+      _codeValues.remove(id);
+      _sendShaderMaterial(ref, null, 'applyMaterialEdit');
+      return false;
+    }
+    final changed = _copyDoc(fields);
+    _codeValues[id]?.forEach((name, value) => _putValue(changed, name, value));
+    _sendShaderMaterial(ref, changed, 'applyMaterialEdit');
+    _shaderMaterials[id] = changed;
+    return true;
   }
 
   /// The value [setMaterialValue] or [createShaderMaterial] gave the property
@@ -388,6 +412,10 @@ class World {
   }
 
   final Map<String, Map<String, Object?>> _shaderMaterials = {};
+
+  /// What [setMaterialValue] set, per cooked material: the values an
+  /// [applyMaterialEdit] keeps.
+  final Map<String, Map<String, Object?>> _codeValues = {};
 
   /// The cooked shader material [ref]'s document, the start of its
   /// runtime values.
@@ -492,6 +520,7 @@ class World {
   /// Removes the runtime material [ref]: a created one draws as missing
   /// again, a replaced cooked one goes back to its cooked values.
   void destroyMaterial(AssetRef ref) {
+    _codeValues.remove(ref.asset);
     if (_shaderMaterials.remove(ref.asset) != null) {
       _sendShaderMaterial(ref, null, 'destroyMaterial');
       return;
