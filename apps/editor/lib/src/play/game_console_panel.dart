@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
+import '../console/console_panel.dart' show ConsoleToggle, ConsoleToolbarDivider;
 import '../theme/icons.dart';
 import '../theme/panel_focus.dart';
 import 'dart_stack.dart';
@@ -18,9 +19,19 @@ import '../theme/theme.dart';
 import '../theme/tokens.dart';
 
 class GameConsoleView extends StatefulWidget {
-  const GameConsoleView({super.key, required this.model, required this.onPlay, required this.onStop, this.searchFocus});
+  const GameConsoleView({
+    super.key,
+    required this.model,
+    required this.onPlay,
+    required this.onStop,
+    this.searchFocus,
+    this.source,
+  });
 
   final GameConsoleModel model;
+
+  /// The Console's source picker, at the toolbar's left.
+  final Widget? source;
   final VoidCallback onPlay;
   final VoidCallback onStop;
   final FocusNode? searchFocus;
@@ -89,13 +100,12 @@ class _GameConsoleViewState extends State<GameConsoleView> {
           builder: (context, box) => Column(
             children: [
               _toolbar(theme),
-              const Divider(height: 1),
               Expanded(
                 child: entries.isEmpty
                     ? Center(
                         child: Text(
                           model.session.records.isEmpty
-                              ? 'Not playing. ⌘P runs the project; its logs and diagnostics land here.'
+                              ? 'Not playing. ⌘P runs the project; its output lands here.'
                               : 'Nothing matches the filter.',
                           key: const Key('console.game.empty'),
                           style: theme.textTheme.bodyMedium?.copyWith(color: theme.disabledColor),
@@ -135,8 +145,11 @@ class _GameConsoleViewState extends State<GameConsoleView> {
                 const Divider(height: 1),
                 _detail(theme, model.selected!, box.maxHeight * 0.4),
               ],
-              const Divider(height: 1),
-              _status(theme),
+              // Unity has no footer: this one only once there was a run.
+              if (model.session.isActive || model.session.records.isNotEmpty || model.session.failure != null) ...[
+                const Divider(height: 1),
+                _status(theme),
+              ],
             ],
           ),
         );
@@ -144,33 +157,53 @@ class _GameConsoleViewState extends State<GameConsoleView> {
     );
   }
 
+  /// The Project list's twin (docs/ui-refresh): the source ▾, Clear,
+  /// Collapse, the search, the counts; the rest in the ⋮ menu. Play and
+  /// Stop are the title bar's.
   Widget _toolbar(ThemeData theme) {
     final session = model.session;
-    final active = session.isActive;
     final t = theme.tokens;
+    final small = theme.textTheme.bodySmall?.copyWith(color: t.text);
+    PopupMenuEntry<String> item(String key, String label, {bool enabled = true, bool? checked}) => checked != null
+        ? CheckedPopupMenuItem(
+            key: Key(key),
+            value: key,
+            height: 26,
+            checked: checked,
+            child: Text(label, style: small),
+          )
+        : PopupMenuItem(
+            key: Key(key),
+            value: key,
+            height: 26,
+            enabled: enabled,
+            child: Text(label, style: enabled ? small : small?.copyWith(color: t.textDisabled)),
+          );
     return Container(
+      height: t.row + 6,
       decoration: BoxDecoration(
         color: t.header,
         border: Border(bottom: t.hairline),
       ),
-      padding: const EdgeInsets.fromLTRB(4, 3, 4, 3),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
         children: [
-          IconButton(
-            key: const Key('console.game.play'),
-            tooltip: active ? 'Stop the game (⌘.)' : 'Play the project (⌘P)',
-            icon: Icon(active ? FIcons.stop : FIcons.playArrow, size: t.icon + 2, color: active ? t.error : t.accent),
-            onPressed: active ? widget.onStop : widget.onPlay,
+          if (widget.source case final source?) ...[source, const ConsoleToolbarDivider()],
+          ConsoleToggle(
+            key: const Key('console.game.clear'),
+            label: 'Clear',
+            tooltip: 'Clear the game\'s rows (⇧⌘K)',
+            on: false,
+            onTap: session.records.isEmpty ? () {} : session.clear,
           ),
-          FilterChip(
+          ConsoleToggle(
             key: const Key('console.game.collapse'),
-            label: const Text('Collapse'),
+            label: 'Collapse',
             tooltip: 'Collapse identical rows into one with a count',
-            selected: model.collapse,
-            onSelected: model.setCollapse,
-            visualDensity: VisualDensity.compact,
+            on: model.collapse,
+            onTap: () => model.setCollapse(!model.collapse),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 6),
           Expanded(
             child: TextField(
               key: const Key('console.game.search'),
@@ -196,54 +229,38 @@ class _GameConsoleViewState extends State<GameConsoleView> {
               onChanged: model.setQuery,
             ),
           ),
-          const SizedBox(width: 8),
-          for (final s in Severity.values) ...[
-            FilterChip(
+          const SizedBox(width: 6),
+          for (final s in Severity.values)
+            ConsoleToggle(
               key: Key('console.game.filter.${s.name}'),
-              avatar: Icon(_iconOf(s), size: 13, color: _colorOf(theme, s)),
-              label: Text('${model.countOf(s)}'),
-              tooltip: '${s.name}s',
-              selected: model.severities.contains(s),
-              onSelected: (_) => model.toggleSeverity(s),
-              visualDensity: VisualDensity.compact,
+              icon: _iconOf(s),
+              iconColor: _colorOf(theme, s),
+              label: '${model.countOf(s)}',
+              tooltip: 'Show ${s.name}s',
+              on: model.severities.contains(s),
+              onTap: () => model.toggleSeverity(s),
             ),
-            const SizedBox(width: 4),
-          ],
-          FilterChip(
-            key: const Key('console.game.output'),
-            label: const Text('Output'),
-            tooltip: 'The process\'s own lines: the CLI, Flutter, anything the game printed',
-            selected: model.showOutput,
-            onSelected: model.setShowOutput,
-            visualDensity: VisualDensity.compact,
-          ),
-          const SizedBox(width: 4),
-          FilterChip(
-            key: const Key('console.game.stats'),
-            label: const Text('Stats'),
-            tooltip: 'One row per stats window (the Profiler charts them)',
-            selected: model.showStats,
-            onSelected: model.setShowStats,
-            visualDensity: VisualDensity.compact,
-          ),
-          const SizedBox(width: 4),
-          IconButton(
-            key: const Key('console.game.copy'),
-            tooltip: 'Copy the selected row, or every visible row',
-            icon: const Icon(FIcons.copy),
-            onPressed: model.entries.isEmpty ? null : model.copy,
-          ),
-          IconButton(
-            key: const Key('console.game.open'),
-            tooltip: 'Open what this row is about (↩)',
-            icon: const Icon(FIcons.accountTreeOutlined),
-            onPressed: model.canOpenSelected ? model.openSelected : null,
-          ),
-          IconButton(
-            key: const Key('console.game.clear'),
-            tooltip: 'Clear the Game tab (⇧⌘K)',
-            icon: const Icon(FIcons.clearAll),
-            onPressed: session.records.isEmpty ? null : session.clear,
+          PopupMenuButton<String>(
+            key: const Key('console.game.more'),
+            popUpAnimationStyle: AnimationStyle.noAnimation,
+            tooltip: 'More',
+            padding: EdgeInsets.zero,
+            icon: Icon(FIcons.moreVert, size: 14, color: t.textSecondary),
+            style: IconButton.styleFrom(minimumSize: const Size(24, 24), fixedSize: const Size(24, 24)),
+            itemBuilder: (_) => [
+              item('console.game.output', 'Show the Process\'s Output', checked: model.showOutput),
+              item('console.game.stats', 'Show Stats Rows', checked: model.showStats),
+              const PopupMenuDivider(),
+              item('console.game.copy', 'Copy  ⌘C', enabled: model.entries.isNotEmpty),
+              item('console.game.open', 'Open  ↩', enabled: model.canOpenSelected),
+            ],
+            onSelected: (key) => switch (key) {
+              'console.game.output' => model.setShowOutput(!model.showOutput),
+              'console.game.stats' => model.setShowStats(!model.showStats),
+              'console.game.copy' => model.copy(),
+              'console.game.open' => model.openSelected(),
+              _ => null,
+            },
           ),
         ],
       ),

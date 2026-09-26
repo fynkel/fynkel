@@ -348,64 +348,34 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
     final game = widget.game;
     final tabs = _tabs;
     if (game == null || tabs == null) return _project(context);
+    // One list at a time, as Unity's: the toolbar's Project ▾ / Game ▾
+    // picks the source (docs/ui-refresh); Play puts the Game in front.
     return ListenableBuilder(
-      listenable: Listenable.merge([model, model.project, game.session]),
-      builder: (context, _) {
-        final theme = Theme.of(context);
-        final t = context.tokens;
-        final errors = model.project.errorCount;
-        final gameErrors = game.session.errorCount;
-        return Column(
-          children: [
-            ColoredBox(
-              color: t.header,
-              child: TabBar(
-                key: const Key('console.tabs'),
-                controller: tabs,
-                labelStyle: theme.textTheme.labelLarge,
-                tabAlignment: TabAlignment.start,
-                isScrollable: true,
-                tabs: [
-                  Tab(
-                    key: const Key('console.tab.project'),
-                    height: t.tab,
-                    text: 'Project${errors > 0 ? ' ($errors)' : ''}',
-                  ),
-                  Tab(
-                    key: const Key('console.tab.game'),
-                    height: t.tab,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (game.session.isActive)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: Icon(FIcons.playArrow, size: 13, color: t.accent),
-                          ),
-                        Text('Game${gameErrors > 0 ? ' ($gameErrors)' : ''}'),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+      listenable: Listenable.merge([tabs, game.session]),
+      // Only the picked list is built, so its rows take the panel's focus.
+      builder: (context, _) => tabs.index == ConsolePanel.projectTab
+          ? _project(context)
+          : GameConsoleView(
+              model: game,
+              searchFocus: widget.gameSearchFocus,
+              onPlay: widget.onPlay ?? () {},
+              onStop: widget.onStop ?? () {},
+              source: _source(context, game: true),
             ),
-            Expanded(
-              child: TabBarView(
-                controller: tabs,
-                children: [
-                  _project(context),
-                  GameConsoleView(
-                    model: game,
-                    searchFocus: widget.gameSearchFocus,
-                    onPlay: widget.onPlay ?? () {},
-                    onStop: widget.onStop ?? () {},
-                  ),
-                ],
-              ),
-            ),
-          ],
-        );
-      },
+    );
+  }
+
+  /// The source picker at the toolbar's left; null without a Game source.
+  Widget? _source(BuildContext context, {required bool game}) {
+    final tabs = _tabs;
+    final g = widget.game;
+    if (tabs == null || g == null) return null;
+    return ConsoleSourceButton(
+      game: game,
+      playing: g.session.isActive,
+      projectErrors: model.project.errorCount,
+      gameErrors: g.session.errorCount,
+      onPick: (i) => tabs.index = i,
     );
   }
 
@@ -421,7 +391,6 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
           builder: (context, box) => Column(
             children: [
               _toolbar(context, theme),
-              const Divider(height: 1),
               if (upgrade > 0) _upgradeStrip(context, theme, upgrade),
               Expanded(
                 child: entries.isEmpty
@@ -515,26 +484,38 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
     );
   }
 
+  /// Unity's: the source ▾, Collapse, the search, the counts as flat
+  /// toggles; copy, open and validate again in the ⋮ menu.
   Widget _toolbar(BuildContext context, ThemeData theme) {
     final project = model.project;
     final t = context.tokens;
+    final source = _source(context, game: false);
+    final small = theme.textTheme.bodySmall?.copyWith(color: t.text);
+    PopupMenuItem<String> item(String key, String label, {bool enabled = true}) => PopupMenuItem(
+      key: Key(key),
+      value: key,
+      height: 26,
+      enabled: enabled,
+      child: Text(label, style: enabled ? small : small?.copyWith(color: t.textDisabled)),
+    );
     return Container(
+      height: t.row + 6,
       decoration: BoxDecoration(
         color: t.header,
         border: Border(bottom: t.hairline),
       ),
-      padding: const EdgeInsets.fromLTRB(4, 3, 4, 3),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
         children: [
-          FilterChip(
+          if (source != null) ...[source, const ConsoleToolbarDivider()],
+          ConsoleToggle(
             key: const Key('console.collapse'),
-            label: const Text('Collapse'),
+            label: 'Collapse',
             tooltip: 'Collapse identical diagnostics into one row with a count',
-            selected: model.collapse,
-            onSelected: model.setCollapse,
-            visualDensity: VisualDensity.compact,
+            on: model.collapse,
+            onTap: () => model.setCollapse(!model.collapse),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 6),
           Expanded(
             child: TextField(
               key: const Key('console.search'),
@@ -560,49 +541,43 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
               onChanged: model.setQuery,
             ),
           ),
-          const SizedBox(width: 8),
-          for (final s in Severity.values) ...[
-            FilterChip(
+          const SizedBox(width: 6),
+          for (final s in Severity.values)
+            ConsoleToggle(
               key: Key('console.filter.${s.name}'),
-              avatar: Icon(_iconOf(s), size: 13, color: _colorOf(theme, s)),
-              label: Text('${model.countOf(s)}'),
-              tooltip: '${s.name}s',
-              selected: model.severities.contains(s),
-              onSelected: (_) => model.toggleSeverity(s),
-              visualDensity: VisualDensity.compact,
+              icon: _iconOf(s),
+              iconColor: _colorOf(theme, s),
+              label: '${model.countOf(s)}',
+              tooltip: 'Show ${s.name}s',
+              on: model.severities.contains(s),
+              onTap: () => model.toggleSeverity(s),
             ),
-            const SizedBox(width: 4),
-          ],
-          IconButton(
-            key: const Key('console.copy'),
-            tooltip: 'Copy the selected row, or every visible row',
-            icon: const Icon(FIcons.copy),
-            onPressed: model.entries.isEmpty ? null : model.copy,
-          ),
-          IconButton(
-            key: const Key('console.openInEditor'),
-            tooltip: 'Open in Editor — the scene or prefab into a tab, its entity selected (⌥⌘E)',
-            icon: const Icon(FIcons.accountTreeOutlined),
-            onPressed: model.canOpenSelectedInEditor ? model.openSelectedInEditor : null,
-          ),
-          IconButton(
-            key: const Key('console.open'),
-            tooltip: 'Open in IDE (⌥⌘O)',
-            icon: const Icon(FIcons.openInNew),
-            onPressed: model.canOpenSelected ? model.openSelected : null,
-          ),
-          IconButton(
-            key: const Key('console.revalidate'),
+          PopupMenuButton<String>(
+            key: const Key('console.more'),
+            popUpAnimationStyle: AnimationStyle.noAnimation,
             // The footer's facts, now the footer is gone (docs/ui-refresh).
             tooltip: [
-              'Validate the project again',
+              'More',
               '${project.documents} documents, ${project.sources} sources, ${project.references} references',
               if (project.validatedAt case final at?) 'validated ${_time(at)}',
             ].join('\n'),
-            icon: project.validating
-                ? SizedBox(width: t.icon, height: t.icon, child: const CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(FIcons.refresh),
-            onPressed: project.validating ? null : project.revalidate,
+            padding: EdgeInsets.zero,
+            icon: Icon(FIcons.moreVert, size: 14, color: t.textSecondary),
+            style: IconButton.styleFrom(minimumSize: const Size(24, 24), fixedSize: const Size(24, 24)),
+            itemBuilder: (_) => [
+              item('console.copy', 'Copy  ⌘C', enabled: model.entries.isNotEmpty),
+              item('console.openInEditor', 'Open in Editor  ⌥⌘E', enabled: model.canOpenSelectedInEditor),
+              item('console.open', 'Open in IDE  ⌥⌘O', enabled: model.canOpenSelected),
+              const PopupMenuDivider(),
+              item('console.revalidate', 'Validate Again', enabled: !project.validating),
+            ],
+            onSelected: (key) => switch (key) {
+              'console.copy' => model.copy(),
+              'console.openInEditor' => model.openSelectedInEditor(),
+              'console.open' => model.openSelected(),
+              'console.revalidate' => project.revalidate(),
+              _ => null,
+            },
           ),
         ],
       ),
@@ -745,4 +720,138 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
     Severity.warning => theme.tokens.warning,
     Severity.info => theme.tokens.info,
   };
+}
+
+/// Picks what the Console lists (Unity's Editor ▾): the project's
+/// diagnostics or the running game's records. Their error counts show in
+/// the menu, so a Play that errors is visible from the Project list.
+class ConsoleSourceButton extends StatelessWidget {
+  const ConsoleSourceButton({
+    super.key,
+    required this.game,
+    required this.playing,
+    required this.projectErrors,
+    required this.gameErrors,
+    required this.onPick,
+  });
+
+  final bool game;
+  final bool playing;
+  final int projectErrors;
+  final int gameErrors;
+  final ValueChanged<int> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final small = Theme.of(context).textTheme.bodySmall;
+    Widget label(String text, int errors, {bool play = false}) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (play) ...[Icon(FIcons.playArrow, size: 12, color: t.accent), const SizedBox(width: 4)],
+        Text(text, style: small?.copyWith(color: t.text)),
+        if (errors > 0) ...[
+          const SizedBox(width: 6),
+          Icon(FIcons.error, size: 12, color: t.error),
+          const SizedBox(width: 2),
+          Text('$errors', style: small?.copyWith(color: t.textSecondary)),
+        ],
+      ],
+    );
+    return PopupMenuButton<int>(
+      key: const Key('console.source'),
+      popUpAnimationStyle: AnimationStyle.noAnimation,
+      tooltip: 'What the Console lists: the project\'s diagnostics or the game\'s output',
+      onSelected: onPick,
+      itemBuilder: (_) => [
+        PopupMenuItem(
+          key: const Key('console.tab.project'),
+          value: ConsolePanel.projectTab,
+          height: 26,
+          child: label('Project', projectErrors),
+        ),
+        PopupMenuItem(
+          key: const Key('console.tab.game'),
+          value: ConsolePanel.gameTab,
+          height: 26,
+          child: label('Game', gameErrors, play: playing),
+        ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (game && playing) ...[Icon(FIcons.playArrow, size: 12, color: t.accent), const SizedBox(width: 4)],
+            Text(game ? 'Game' : 'Project', style: small?.copyWith(color: t.text)),
+            const SizedBox(width: 3),
+            Icon(FIcons.chevronDown, size: 12, color: t.textDisabled),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A thin upright line between toolbar groups.
+class ConsoleToolbarDivider extends StatelessWidget {
+  const ConsoleToolbarDivider({super.key});
+
+  @override
+  Widget build(BuildContext context) =>
+      Container(width: 1, height: 14, margin: const EdgeInsets.symmetric(horizontal: 6), color: context.tokens.line);
+}
+
+/// A flat toolbar toggle (Unity's Collapse, the counts): text, or an icon
+/// and a count, on a quiet grey fill while on; the accent is not used.
+class ConsoleToggle extends StatelessWidget {
+  const ConsoleToggle({
+    super.key,
+    this.icon,
+    this.iconColor,
+    required this.label,
+    required this.tooltip,
+    required this.on,
+    required this.onTap,
+  });
+
+  final IconData? icon;
+  final Color? iconColor;
+  final String label;
+  final String tooltip;
+  final bool on;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 500),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: t.cornerControl,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(color: on ? t.selectionQuiet : null, borderRadius: t.cornerControl),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 13, color: on ? iconColor : t.textDisabled),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                label,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: on ? t.text : t.textSecondary,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

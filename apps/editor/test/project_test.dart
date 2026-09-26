@@ -102,6 +102,8 @@ void main() {
     );
     await tester.tap(find.text('FYN-D0206'));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('console.more')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('console.open')));
     await tester.pumpAndSettle();
     expect(opened.single, (d.document, 83, 13));

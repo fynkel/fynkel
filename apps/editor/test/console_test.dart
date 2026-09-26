@@ -133,12 +133,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(opened.length, 2);
 
+    await tester.tap(find.byKey(const Key('console.more')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('console.copy')));
     await tester.pumpAndSettle();
     expect(clipboard, startsWith('error FYN-D0206: unknown field "speeed" (assets/scenes/main.scene.json:75:13)'));
     expect(clipboard!.split('\n').length, 1);
 
     model.select(null);
+    await tester.tap(find.byKey(const Key('console.more')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('console.copy')));
     await tester.pumpAndSettle();
     expect(clipboard!.split('\n').length, 4);
@@ -152,6 +156,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Nothing matches the filter.'), findsOneWidget);
 
+    await tester.tap(find.byKey(const Key('console.more')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('console.revalidate')));
     await tester.pumpAndSettle();
     expect(project.revalidations, 1);
@@ -170,6 +176,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     model.select(ConsoleEntry.keyOf(project.diagnostics.first));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('console.more')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('console.open')));
     await tester.pumpAndSettle();
