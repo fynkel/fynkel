@@ -27,8 +27,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use fynkel_contracts::{AssetRef, Code, Diagnostic, Uuid};
+pub use fynkel_cooked::payload::{
+    decode_animation, encode_animation, AnimationChannel, AnimationMarker, AnimationPayload,
+};
 use fynkel_cooked::payload::{
-    decode_animation, decode_clip, decode_environment, decode_skin, decode_stream, decode_texture,
+    decode_clip, decode_environment, decode_skin, decode_stream, decode_texture,
     ANIM_INTERPOLATION_CUBIC_SPLINE, ANIM_INTERPOLATION_LINEAR, ANIM_INTERPOLATION_STEP,
     ANIM_PROPERTY_ROTATION, ANIM_PROPERTY_SCALE, ANIM_PROPERTY_TRANSLATION,
 };
@@ -379,6 +382,9 @@ struct Store {
     /// what changed since it last looked.
     mesh_edits: u64,
     mesh_changes: HashMap<AssetRef, u64>,
+    /// Clips made by the game at runtime (`world.createClip`, ADR-0033
+    /// § 2), read before the cooked ones and kept like the meshes.
+    runtime_clips: HashMap<AssetRef, Arc<Clip>>,
     clips: HashMap<AssetRef, Arc<Clip>>,
     blends: HashMap<AssetRef, Arc<BlendSpace>>,
     controllers: HashMap<AssetRef, Arc<ControllerDef>>,
@@ -472,6 +478,7 @@ impl Assets {
                 runtime_meshes: HashMap::new(),
                 mesh_edits: 0,
                 mesh_changes: HashMap::new(),
+                runtime_clips: HashMap::new(),
                 clips: HashMap::new(),
                 blends: HashMap::new(),
                 controllers: HashMap::new(),
@@ -630,15 +637,17 @@ impl Assets {
         if Arc::ptr_eq(&self.inner, &from.inner) {
             return;
         }
-        let (materials, custom, meshes) = {
+        let (materials, custom, meshes, clips) = {
             let f = from.lock();
             (
                 f.runtime_materials.clone(),
                 f.runtime_custom_materials.clone(),
                 f.runtime_meshes.clone(),
+                f.runtime_clips.clone(),
             )
         };
         let mut s = self.lock();
+        s.runtime_clips.extend(clips);
         s.runtime_materials.extend(materials);
         s.live_edits += 1;
         for (r, m) in custom {
@@ -672,6 +681,27 @@ impl Assets {
         s.mesh_edits += 1;
         let at = s.mesh_edits;
         s.mesh_changes.insert(r.clone(), at);
+    }
+
+    /// `c` as the runtime clip `r` (`world.createClip`, ADR-0033 § 2), or
+    /// `None` to remove it: read by [`clip`](Self::clip) before the cooked
+    /// ones, kept across clears and evictions. Validated first (the reason
+    /// is the error; the store is unchanged then).
+    pub fn set_runtime_clip(&self, r: &AssetRef, c: Option<Clip>) -> Result<(), String> {
+        if let Some(c) = &c {
+            c.validate()?;
+        }
+        let mut s = self.lock();
+        match c {
+            Some(c) => s.runtime_clips.insert(r.clone(), Arc::new(c)),
+            None => s.runtime_clips.remove(r),
+        };
+        Ok(())
+    }
+
+    /// Whether `r` is a clip the game made at runtime.
+    pub fn is_runtime_clip(&self, r: &AssetRef) -> bool {
+        self.lock().runtime_clips.contains_key(r)
     }
 
     /// Whether `r` is a mesh the game made or replaced at runtime.
@@ -1392,47 +1422,16 @@ impl Assets {
     /// The cooked animation clip (an `ANIM` chunk, `anim/<a>`) as the
     /// core's `Clip`, validated (M3-19).
     pub fn clip(&self, r: &AssetRef) -> Result<Arc<Clip>, Diagnostic> {
-        if let Some(c) = self.lock().clips.get(r) {
-            return Ok(c.clone());
+        {
+            let s = self.lock();
+            if let Some(c) = s.runtime_clips.get(r).or_else(|| s.clips.get(r)) {
+                return Ok(c.clone());
+            }
         }
         let bytes = self.chunk(r, KIND_ANIMATION)?;
         let payload = decode_animation(&bytes).ok_or_else(|| self.malformed(r, "ANIM"))?;
-        let clip = Clip {
-            name: r.to_string(),
-            duration: payload.duration,
-            channels: payload
-                .channels
-                .into_iter()
-                .map(|c| {
-                    Some(Channel {
-                        target: c.target,
-                        property: match c.property {
-                            ANIM_PROPERTY_TRANSLATION => Property::Translation,
-                            ANIM_PROPERTY_ROTATION => Property::Rotation,
-                            ANIM_PROPERTY_SCALE => Property::Scale,
-                            _ => return None,
-                        },
-                        interpolation: match c.interpolation {
-                            ANIM_INTERPOLATION_STEP => Interpolation::Step,
-                            ANIM_INTERPOLATION_LINEAR => Interpolation::Linear,
-                            ANIM_INTERPOLATION_CUBIC_SPLINE => Interpolation::CubicSpline,
-                            _ => return None,
-                        },
-                        times: c.times,
-                        values: c.values,
-                    })
-                })
-                .collect::<Option<Vec<_>>>()
-                .ok_or_else(|| self.malformed(r, "ANIM"))?,
-            markers: payload
-                .markers
-                .into_iter()
-                .map(|m| Marker {
-                    time: m.time,
-                    name: m.name,
-                })
-                .collect(),
-        };
+        let clip =
+            clip_from_payload(r.to_string(), payload).ok_or_else(|| self.malformed(r, "ANIM"))?;
         clip.validate().map_err(|why| {
             let mut d = self.malformed(r, "ANIM");
             d.message = format!("{}: {why}", d.message);
@@ -2110,5 +2109,45 @@ pub fn controller_def(c: &fynkel_document::Controller) -> Result<ControllerDef, 
         name: c.name().to_string(),
         parameters,
         layers,
+    })
+}
+
+/// An `ANIM` payload as the core's `Clip` named `name` (not validated);
+/// `None` for an unknown property or interpolation.
+pub fn clip_from_payload(name: String, payload: AnimationPayload) -> Option<Clip> {
+    Some(Clip {
+        name,
+        duration: payload.duration,
+        channels: payload
+            .channels
+            .into_iter()
+            .map(|c| {
+                Some(Channel {
+                    target: c.target,
+                    property: match c.property {
+                        ANIM_PROPERTY_TRANSLATION => Property::Translation,
+                        ANIM_PROPERTY_ROTATION => Property::Rotation,
+                        ANIM_PROPERTY_SCALE => Property::Scale,
+                        _ => return None,
+                    },
+                    interpolation: match c.interpolation {
+                        ANIM_INTERPOLATION_STEP => Interpolation::Step,
+                        ANIM_INTERPOLATION_LINEAR => Interpolation::Linear,
+                        ANIM_INTERPOLATION_CUBIC_SPLINE => Interpolation::CubicSpline,
+                        _ => return None,
+                    },
+                    times: c.times,
+                    values: c.values,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?,
+        markers: payload
+            .markers
+            .into_iter()
+            .map(|m| Marker {
+                time: m.time,
+                name: m.name,
+            })
+            .collect(),
     })
 }
