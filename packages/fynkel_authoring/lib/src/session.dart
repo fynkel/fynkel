@@ -441,6 +441,15 @@ final class AuthoringSession implements Finalizable {
     return v == null ? null : _mapOf(v);
   }
 
+  /// The shaders a material can draw with (`shaders` query, ADR-0031): the
+  /// built-in Lit first, then every `.shader` asset — the project's, then
+  /// its packages' — with its properties, or its errors when it does not
+  /// compile.
+  List<ShaderInfo> shaders() => [
+        for (final s in queryValue('shaders') as List? ?? const [])
+          ShaderInfo.fromJson(_mapOf(s))
+      ];
+
   /// What `fynkel migrate --dry-run` would do to the project's outdated
   /// documents (`migrations` query); nothing is written.
   MigrationPreview migrationPreview() => MigrationPreview.fromJson(query('migrations'));

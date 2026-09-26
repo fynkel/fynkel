@@ -925,3 +925,107 @@ final class CookReport {
 }
 
 List<double> _doubles(Object? v) => v is List ? [for (final x in v) if (x is num) x.toDouble()] : const [];
+
+/// One shader a material can draw with, from the `shaders` query
+/// (ADR-0031 § 7): the built-in Lit ([builtin], `fynkel.pbr@1`) or a
+/// `.shader` asset. A shader that does not compile ([ok] false) has its
+/// [diagnostics] and no [properties].
+final class ShaderInfo {
+  ShaderInfo.fromJson(this.json)
+      : shader = json['shader'] as String? ?? '',
+        name = json['name'] as String? ?? '',
+        builtin = json['builtin'] == true,
+        path = json['path'] as String?,
+        file = json['file'] as String?,
+        package = json['package'] as String?,
+        ok = json['ok'] == true,
+        lighting = json['lighting'] as String? ?? 'lit',
+        alpha = _strings(json['alpha']),
+        shadows = json['shadows'] != false,
+        vertex = json['vertex'] == true,
+        properties = [
+          for (final p in json['properties'] as List? ?? const [])
+            if (p is Map<String, Object?>) ShaderProperty.fromJson(p)
+        ],
+        diagnostics = Diagnostic.listOf(json['diagnostics']);
+
+  final Map<String, Object?> json;
+
+  /// What a material's `shader` names: `fynkel.pbr@1`, else the asset id.
+  final String shader;
+
+  /// The menu path (`Examples/Water`); the file name when it does not compile.
+  final String name;
+  final bool builtin;
+
+  /// Relative to the asset root; null for the built-in.
+  final String? path;
+
+  /// The absolute file; null for the built-in.
+  final String? file;
+
+  /// The package that ships it (ADR-0029), or null.
+  final String? package;
+  final bool ok;
+
+  /// `lit` or `unlit`.
+  final String lighting;
+
+  /// The alpha modes its materials may choose (`opaque`, `mask`, `blend`).
+  final List<String> alpha;
+  final bool shadows;
+
+  /// Whether it moves vertices (`vertex()`).
+  final bool vertex;
+  final List<ShaderProperty> properties;
+  final List<Diagnostic> diagnostics;
+
+  ShaderProperty? property(String name) => properties.where((p) => p.name == name).firstOrNull;
+}
+
+/// One line of a shader's `properties { … }`.
+final class ShaderProperty {
+  ShaderProperty.fromJson(this.json)
+      : name = json['name'] as String? ?? '',
+        label = json['label'] as String? ?? '',
+        type = json['type'] as String? ?? 'float',
+        defaultValue = json['default'],
+        min = (json['min'] as num?)?.toDouble(),
+        max = (json['max'] as num?)?.toDouble(),
+        tooltip = json['tooltip'] as String?,
+        colorSpace = json['colorSpace'] as String?,
+        required = json['required'] == true,
+        line = (json['line'] as num?)?.toInt();
+
+  final Map<String, Object?> json;
+  final String name;
+
+  /// The nicified name the Inspector shows (`base_color` → Base Color).
+  final String label;
+
+  /// `float int bool vec2 vec3 vec4 color3 color`, or `texture`.
+  final String type;
+
+  /// A number, a bool, a list of numbers; a texture's fallback texel name.
+  final Object? defaultValue;
+  final double? min, max;
+  final String? tooltip;
+
+  /// A texture's `srgb` or `linear`.
+  final String? colorSpace;
+  final bool required;
+
+  /// Where it is written (1-based); null for the built-in.
+  final int? line;
+
+  bool get isTexture => type == 'texture';
+
+  /// How many numbers a value holds (1 for a float, int or bool; 0 for a texture).
+  int get components => switch (type) {
+        'vec2' => 2,
+        'vec3' || 'color3' => 3,
+        'vec4' || 'color' => 4,
+        'texture' => 0,
+        _ => 1,
+      };
+}

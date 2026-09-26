@@ -1168,6 +1168,45 @@ void main() {
     );
     expect(project.readAsStringSync(), text);
   });
+
+  test('the shaders a material can pick, with their properties or their errors (ADR-0031)', () {
+    final dir = copyFixture('shaders');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    const id = 'c0000000-0000-4000-8000-000000000801';
+    Directory('${dir.path}/assets/shaders').createSync();
+    File('${dir.path}/assets/shaders/rim.shader').writeAsStringSync(
+        'shader "Examples/Rim" {\n    properties {\n        rim color3 = (1, 1, 1) "Edge colour"\n        power float = 2 range(0.5, 8)\n    }\n}\n\n'
+        'fn surface(in: SurfaceInput) -> Surface {\n    var s = default_surface();\n    s.emission = material.rim * material.power;\n    return s;\n}\n');
+    File('${dir.path}/assets/shaders/rim.shader.meta.json').writeAsStringSync(
+        '{"\$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"$id","name":"rim.shader",'
+        '"importer":"fynkel.shader","importerVersion":1,"settings":{},"subAssets":{}}');
+    final session = AuthoringSession();
+    addTearDown(session.dispose);
+    session.openProject(dir.path);
+
+    final shaders = session.shaders();
+    expect(shaders.first.builtin, isTrue);
+    expect(shaders.first.name, 'Lit');
+    expect(shaders.first.shader, 'fynkel.pbr@1');
+    final rim = shaders.singleWhere((s) => s.shader == id);
+    expect(rim.ok, isTrue, reason: '${rim.diagnostics}');
+    expect(rim.name, 'Examples/Rim');
+    expect(rim.path, 'shaders/rim.shader');
+    expect(rim.alpha, ['opaque', 'mask', 'blend']);
+    expect(rim.properties.map((p) => p.label), ['Rim', 'Power']);
+    expect(rim.property('rim')!.tooltip, 'Edge colour');
+    expect(rim.property('rim')!.components, 3);
+    expect((rim.property('power')!.min, rim.property('power')!.max), (0.5, 8.0));
+
+    // Broken: the errors, each with its line.
+    File('${dir.path}/assets/shaders/rim.shader')
+        .writeAsStringSync('shader "Examples/Rim" {\n}\n\nfn surface(in: SurfaceInput) -> Surface {\n    return nope;\n}\n');
+    session.rescan();
+    final broken = session.shaders().singleWhere((s) => s.shader == id);
+    expect(broken.ok, isFalse);
+    expect(broken.properties, isEmpty);
+    expect(broken.diagnostics.first.line, 5);
+  });
 }
 
 /// Names of [id] and its descendants, depth-first in children order.
