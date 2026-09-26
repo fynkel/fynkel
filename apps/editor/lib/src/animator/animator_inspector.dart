@@ -6,6 +6,7 @@
 // and the exit time, the duration, the offset, and its conditions with
 // + and −. Every change is one undo step on the controller, saved at
 // once; ⌘Z undoes it while the Inspector holds the keyboard.
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
 import '../inspector/asset_edits.dart';
@@ -45,7 +46,7 @@ class AnimatorItemPage extends StatefulWidget {
 class _AnimatorItemPageState extends State<AnimatorItemPage> {
   AssetEdits get edits => widget.edits;
   InspectAnimator get target => widget.target;
-  late ControllerEdits c = ControllerEdits(edits, target.controller);
+  late ControllerEdits c = ControllerEdits(edits, target.controller, machine: target.machine);
 
   @override
   void initState() {
@@ -61,7 +62,7 @@ class _AnimatorItemPageState extends State<AnimatorItemPage> {
       old.edits.removeListener(_changed);
       edits.addListener(_changed);
     }
-    c = ControllerEdits(edits, target.controller);
+    c = ControllerEdits(edits, target.controller, machine: target.machine);
     edits.shown = target.controller;
   }
 
@@ -79,10 +80,12 @@ class _AnimatorItemPageState extends State<AnimatorItemPage> {
   /// Shows another state or transition of the same layer.
   void _go({String? state, int? transition}) {
     final a = widget.animator;
-    if (a != null && a.id == target.controller && a.layer == target.layer) {
+    if (a != null && a.id == target.controller && a.layer == target.layer && listEquals(a.machine, target.machine)) {
       state != null ? a.selectState(state) : a.selectTransition(transition);
     } else {
-      widget.selection?.inspect(InspectAnimator(target.controller, target.layer, state: state, transition: transition));
+      widget.selection?.inspect(
+        InspectAnimator(target.controller, target.layer, state: state, transition: transition, machine: target.machine),
+      );
     }
   }
 
@@ -119,7 +122,10 @@ class _AnimatorItemPageState extends State<AnimatorItemPage> {
             leading: inspectorPictureBox(context, Icon(FIcons.animator, size: 20, color: t.textSecondary)),
             titleKey: const Key('animatorItem.title'),
             title: Text(title),
-            subtitle: Text('${state != null ? 'State' : 'Transition'} · ${root['name'] ?? ''} › $layerName'),
+            subtitle: Text(
+              '${state == null ? 'Transition' : (ControllerEdits.isMachine(state) ? 'Sub-State Machine' : 'State')} · '
+              '${[root['name'] ?? '', layerName, ...target.machine].join(' › ')}',
+            ),
             selection: widget.selection,
           ),
           Expanded(
@@ -127,7 +133,12 @@ class _AnimatorItemPageState extends State<AnimatorItemPage> {
               key: const Key('animatorItem.page'),
               padding: const EdgeInsets.only(bottom: 16),
               children: [
-                if (state != null) ..._state(context, state) else ..._transition(context, transition!, index!),
+                if (state != null && ControllerEdits.isMachine(state))
+                  ..._machine(context, state)
+                else if (state != null)
+                  ..._state(context, state)
+                else
+                  ..._transition(context, transition!, index!),
                 if (edits.lastError != null)
                   Padding(
                     padding: EdgeInsets.fromLTRB(t.pad + 2, 8, t.pad + 2, 0),
@@ -182,7 +193,7 @@ class _AnimatorItemPageState extends State<AnimatorItemPage> {
               onCommit: (to) {
                 final next = to.trim();
                 final a = widget.animator;
-                if (a != null && a.id == target.controller && a.layer == layer) {
+                if (a != null && a.id == target.controller && a.layer == layer && listEquals(a.machine, target.machine)) {
                   a.renameState(name, next);
                 } else if (c.renameState(layer, name, next)) {
                   _go(state: next);
@@ -286,7 +297,9 @@ class _AnimatorItemPageState extends State<AnimatorItemPage> {
           child: PageAction(
             key: const Key('animatorItem.setDefault'),
             icon: FIcons.flag,
-            label: isDefault ? 'The layer\'s default state' : 'Set as Layer Default State',
+            label: target.machine.isEmpty
+                ? (isDefault ? 'The layer\'s default state' : 'Set as Layer Default State')
+                : (isDefault ? 'The default state' : 'Set as Default State'),
             onPressed: enabled && !isDefault ? () => c.setDefault(layer, name) : null,
           ),
         ),
@@ -310,6 +323,7 @@ class _AnimatorItemPageState extends State<AnimatorItemPage> {
           edits: edits,
           controller: target.controller,
           layer: layer,
+          machine: target.machine,
           state: name,
           animator: widget.animator,
           onPing: widget.onPing,
@@ -323,6 +337,96 @@ class _AnimatorItemPageState extends State<AnimatorItemPage> {
               child: Text(
                 'None. Right-click the state in the Animator window: Make Transition.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(color: t.textDisabled),
+              ),
+            )
+          else
+            for (final (n, i) in out.indexed) _transitionRow(context, i, n == 0, n == out.length - 1),
+        ],
+      ),
+    ];
+  }
+
+  // ── A sub-state machine (ADR-0033 § 4) ────────────────────────────────────
+
+  List<Widget> _machine(BuildContext context, Map<String, Object?> s) {
+    final t = context.tokens;
+    final layer = target.layer;
+    final name = s['name'] as String;
+    final enabled = c.canEdit;
+    final inner = c.inMachine([...target.machine, name]);
+    final names = [for (final x in inner.states(layer)) x['name'] as String];
+    final isDefault = c.defaultState(layer) == name;
+    final out = [
+      for (var i = 0; i < c.transitions(layer).length; i++)
+        if (c.transitions(layer)[i]['from'] == name) i,
+    ];
+    final small = Theme.of(context).textTheme.bodySmall;
+    return [
+      InspectorFields(
+        children: [
+          FieldRow(
+            label: 'Name',
+            child: StringField(
+              key: const Key('animatorItem.name'),
+              value: name,
+              enabled: enabled,
+              onCommit: (to) {
+                final next = to.trim();
+                final a = widget.animator;
+                if (a != null && a.id == target.controller && a.layer == layer && listEquals(a.machine, target.machine)) {
+                  a.renameState(name, next);
+                } else if (c.renameState(layer, name, next)) {
+                  _go(state: next);
+                }
+              },
+            ),
+          ),
+          FieldRow(
+            label: 'Enters',
+            tooltip: 'The state a transition into the machine enters.',
+            child: EnumField(
+              key: const Key('animatorItem.machineDefault'),
+              value: inner.defaultState(layer) ?? (names.isEmpty ? '' : names.first),
+              values: names.isEmpty ? const [''] : names,
+              enabled: enabled && names.isNotEmpty,
+              onCommit: (v) => inner.setDefault(layer, v),
+            ),
+          ),
+        ],
+      ),
+      Padding(
+        padding: EdgeInsets.fromLTRB(t.pad + 2, 2, t.pad + 2, 6),
+        child: Text(
+          'A sub-state machine: ${names.length} state${names.length == 1 ? '' : 's'} inside. '
+          'Double-click it in the Animator window to open it. A transition from it is checked from every state '
+          'inside; code names those by path: play(\'${ControllerEdits(edits, target.controller, machine: target.machine).pathOf(name)}/…\').',
+          key: const Key('animatorItem.machineHint'),
+          style: small?.copyWith(color: t.textSecondary),
+        ),
+      ),
+      Padding(
+        padding: EdgeInsets.fromLTRB(t.pad + 2, 2, t.pad + 2, 6),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: PageAction(
+            key: const Key('animatorItem.setDefault'),
+            icon: FIcons.flag,
+            label: target.machine.isEmpty
+                ? (isDefault ? 'The layer\'s default state' : 'Set as Layer Default State')
+                : (isDefault ? 'The default state' : 'Set as Default State'),
+            onPressed: enabled && !isDefault ? () => c.setDefault(layer, name) : null,
+          ),
+        ),
+      ),
+      InspectorSection(
+        title: 'Transitions',
+        children: [
+          if (out.isEmpty)
+            Padding(
+              padding: EdgeInsets.fromLTRB(t.pad + 2, 6, t.pad + 2, 6),
+              child: Text(
+                'None. Right-click the machine in the Animator window: Make Transition.',
+                style: small?.copyWith(color: t.textDisabled),
               ),
             )
           else
@@ -493,7 +597,39 @@ class _AnimatorItemPageState extends State<AnimatorItemPage> {
                 onCommit: (v) => v ? set('canTransitionToSelf', true) : set('canTransitionToSelf', unset),
               ),
             ),
+          FieldRow(
+            label: 'Interruption',
+            tooltip: 'What may cut its crossfade short. It then fades on from the pose of that moment, so nothing pops.',
+            child: EnumField(
+              key: const Key('animatorItem.interruptibleBy'),
+              value: switch (tr['interruptibleBy']) {
+                'next' => 'next',
+                'any' => 'any',
+                _ => 'none',
+              },
+              values: const ['none', 'next', 'any'],
+              display: (v) => switch (v) {
+                'next' => 'The next state\'s transitions',
+                'any' => 'Any State\'s and the next state\'s',
+                _ => 'Nothing',
+              },
+              enabled: enabled,
+              onCommit: (v) => v == 'none' ? set('interruptibleBy', unset) : set('interruptibleBy', v),
+            ),
+          ),
         ],
+      ),
+      Padding(
+        padding: EdgeInsets.fromLTRB(t.pad + 2, 0, t.pad + 2, 6),
+        child: Text(
+          'Can be interrupted by: ${switch (tr['interruptibleBy']) {
+            'next' => 'the next state\'s transitions',
+            'any' => 'Any State\'s and the next state\'s transitions',
+            _ => 'nothing — its crossfade always ends first',
+          }}.',
+          key: const Key('animatorItem.interruptionHint'),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: t.textSecondary),
+        ),
       ),
       InspectorSection(
         title: 'Conditions',

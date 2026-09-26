@@ -79,12 +79,16 @@ final class InspectScript extends InspectTarget {
 /// the Animator window selected. [state] names a state; [transition] is a
 /// transition's index in the layer; neither is the layer itself.
 final class InspectAnimator extends InspectTarget {
-  const InspectAnimator(this.controller, this.layer, {this.state, this.transition});
+  const InspectAnimator(this.controller, this.layer, {this.state, this.transition, this.machine = const []});
 
   final String controller;
   final int layer;
   final String? state;
   final int? transition;
+
+  /// The sub-state machine the state or transition is in (ADR-0033 § 4),
+  /// as the names down from the layer; empty: the layer's own.
+  final List<String> machine;
 
   @override
   bool operator ==(Object other) =>
@@ -92,10 +96,11 @@ final class InspectAnimator extends InspectTarget {
       other.controller == controller &&
       other.layer == layer &&
       other.state == state &&
-      other.transition == transition;
+      other.transition == transition &&
+      listEquals(other.machine, machine);
 
   @override
-  int get hashCode => Object.hash(controller, layer, state, transition);
+  int get hashCode => Object.hash(controller, layer, state, transition, Object.hashAll(machine));
 }
 
 final class EditorSelection extends ChangeNotifier {

@@ -9,6 +9,12 @@
 // delete takes what named it along. Where each box sits in the graph is
 // the document's `editor` member: `{layer: {state: [x, y]}}`.
 //
+// A state may be a sub-state machine (ADR-0033 § 4): its own `states`,
+// `transitions` and `defaultState` instead of a motion. An edits object
+// works in one scope ([ControllerEdits.machine]: the layer's own states
+// when empty, else the machine that path of state names leads to); the
+// places inside a machine are keyed by path (`Airborne/Fall`).
+//
 // A state's motion may be a blend tree (ADR-0033): `{blendTree: {type,
 // parameters, children: [{motion, threshold | position, timeScale,
 // parameter}]}}`, nested. A tree is found by its state and the path of
@@ -51,10 +57,17 @@ List<Map<String, Object?>> _maps(Object? v) => [
 
 /// One controller's edits, by its asset id.
 final class ControllerEdits {
-  ControllerEdits(this.edits, this.id);
+  ControllerEdits(this.edits, this.id, {this.machine = const []});
 
   final AssetEdits edits;
   final String id;
+
+  /// The sub-state machine the scope-wide edits work in, as the names
+  /// down from the layer (`['Airborne']`); empty: the layer's own states.
+  final List<String> machine;
+
+  /// These edits in another scope.
+  ControllerEdits inMachine(List<String> machine) => ControllerEdits(edits, id, machine: machine);
 
   /// Why the last edit was refused, until the next one.
   String? get lastError => edits.lastError;
@@ -70,9 +83,43 @@ final class ControllerEdits {
     return i >= 0 && i < l.length ? l[i] : null;
   }
 
-  List<Map<String, Object?>> states(int layer) => _maps(this.layer(layer)?['states']);
-  List<Map<String, Object?>> transitions(int layer) => _maps(this.layer(layer)?['transitions']);
-  String? defaultState(int layer) => this.layer(layer)?['defaultState'] as String?;
+  /// The layer, or the sub-state machine [machine] leads to in it.
+  Map<String, Object?>? scope(int layer) {
+    var at = this.layer(layer);
+    for (final m in machine) {
+      at = _maps(at?['states']).where((s) => s['name'] == m).firstOrNull;
+    }
+    return at;
+  }
+
+  /// The pointer of [scope].
+  String? scopePointer(int layer) {
+    var at = this.layer(layer);
+    if (at == null) return null;
+    var p = '/layers/$layer';
+    for (final m in machine) {
+      final i = _maps(at!['states']).indexWhere((s) => s['name'] == m);
+      if (i < 0) return null;
+      p += '/states/$i';
+      at = _maps(at['states'])[i];
+    }
+    return p;
+  }
+
+  List<Map<String, Object?>> states(int layer) => _maps(scope(layer)?['states']);
+  List<Map<String, Object?>> transitions(int layer) => _maps(scope(layer)?['transitions']);
+  String? defaultState(int layer) => scope(layer)?['defaultState'] as String?;
+
+  /// Whether [s] is a sub-state machine (it has states, not a motion).
+  static bool isMachine(Map<String, Object?>? s) =>
+      s != null && (s.containsKey('states') || s.containsKey('transitions') || s.containsKey('defaultState'));
+
+  /// [name]'s path from the layer (its key in `editor`).
+  String pathOf(String name) => [...machine, name].join('/');
+
+  /// Where a state's place is kept: its path; Entry's and Any State's in
+  /// a machine by the machine's path.
+  String _placeKey(String key) => machine.isEmpty ? key : pathOf(key);
 
   Map<String, Object?>? state(int layer, String name) => states(layer).where((s) => s['name'] == name).firstOrNull;
 
@@ -81,7 +128,7 @@ final class ControllerEdits {
   /// Where [key] (a state, [entryKey] or [anyKey]) sits in [layer]'s graph.
   Offset positionOf(int layer, String key) {
     final name = this.layer(layer)?['name'];
-    final at = _map(_map(root?['editor'])[name])[key];
+    final at = _map(_map(root?['editor'])[name])[_placeKey(key)];
     if (at is List && at.length == 2 && at[0] is num && at[1] is num) {
       return Offset((at[0] as num).toDouble(), (at[1] as num).toDouble());
     }
@@ -112,25 +159,41 @@ final class ControllerEdits {
     if (name.length > 64) return 'A state\'s name is 64 characters at most.';
     if (name == 'any') return '`any` is Any State\'s name in a transition.';
     if (name.startsWith('#')) return 'A state\'s name cannot start with #.';
-    if (name != except && state(layer, name) != null) return 'The layer already has a state named $name.';
+    if (name.contains('/')) return 'A state\'s name cannot hold / (code names a state in a sub-state machine by path).';
+    if (name != except && state(layer, name) != null) {
+      return machine.isEmpty
+          ? 'The layer already has a state named $name.'
+          : 'The sub-state machine already has a state named $name.';
+    }
     return null;
   }
 
   /// Unity's Create State: a state named after [motion]'s clip (or
   /// `New State`) at [at]; the layer's first state becomes its default.
   /// Returns the new state's name, or null when refused.
-  String? createState(int layer, Offset at, {Map<String, Object?>? motion, String? name}) {
-    final l = this.layer(layer);
-    if (l == null) return null;
-    final base = name ?? _motionName(motion) ?? 'New State';
+  String? createState(int layer, Offset at, {Map<String, Object?>? motion, String? name}) =>
+      _addState(layer, at, name ?? _motionName(motion) ?? 'New State', {'motion': ?motion});
+
+  /// Unity's Create Sub-State Machine: a machine at [at] holding one empty
+  /// state, its default (a machine is never empty). Returns its name.
+  String? createMachine(int layer, Offset at) => _addState(layer, at, 'New Sub-State Machine', {
+    'defaultState': 'New State',
+    'states': [
+      {'name': 'New State'},
+    ],
+  });
+
+  String? _addState(int layer, Offset at, String base, Map<String, Object?> fields) {
+    final p = scopePointer(layer);
+    if (p == null) return null;
     final made = unique(base, states(layer).map((s) => s['name']));
     final list = [
       ...states(layer),
-      {'name': made, 'motion': ?motion},
+      {'name': made, ...fields},
     ];
     final ok = edits.edit(id, {
-      '/layers/$layer/states': list,
-      if (defaultState(layer) == null) '/layers/$layer/defaultState': made,
+      '$p/states': list,
+      if (defaultState(layer) == null) '$p/defaultState': made,
       ..._placed(layer, {made: at}),
     });
     return ok ? made : null;
@@ -154,7 +217,8 @@ final class ControllerEdits {
     final problem = stateNameProblem(layer, to, except: from);
     if (problem != null) return _refuse(problem);
     final l = this.layer(layer);
-    if (l == null || state(layer, from) == null) return false;
+    final p = scopePointer(layer);
+    if (l == null || p == null || state(layer, from) == null) return false;
     final states = [
       for (final s in this.states(layer)) s['name'] == from ? {...s, 'name': to} : s,
     ];
@@ -163,16 +227,23 @@ final class ControllerEdits {
     ];
     final editor = _map(root?['editor']);
     final places = _map(editor[l['name']]);
-    final place = places.remove(from);
+    // Its place, and (a machine) the places of everything inside it.
+    final (old, next) = (_placeKey(from), _placeKey(to));
+    final moved = {
+      for (final e in places.entries)
+        if (e.key == old)
+          next: e.value
+        else if (e.key.startsWith('$old/'))
+          '$next${e.key.substring(old.length)}': e.value
+        else
+          e.key: e.value,
+    };
+    final changed = moved.length != places.length || !moved.keys.every(places.containsKey);
     return edits.edit(id, {
-      '/layers/$layer/states': states,
-      if (transitions.isNotEmpty) '/layers/$layer/transitions': transitions,
-      if (l['defaultState'] == from) '/layers/$layer/defaultState': to,
-      if (place != null)
-        '/editor': {
-          ...editor,
-          l['name'] as String: {...places, to: place},
-        },
+      '$p/states': states,
+      if (transitions.isNotEmpty) '$p/transitions': transitions,
+      if (defaultState(layer) == from) '$p/defaultState': to,
+      if (changed) '/editor': {...editor, l['name'] as String: moved},
     });
   }
 
@@ -186,29 +257,39 @@ final class ControllerEdits {
   /// state left (none: unset).
   bool deleteState(int layer, String name) {
     final l = this.layer(layer);
-    if (l == null || state(layer, name) == null) return false;
+    final sc = scope(layer);
+    final p = scopePointer(layer);
+    if (l == null || sc == null || p == null || state(layer, name) == null) return false;
     final states = [
       for (final s in this.states(layer))
         if (s['name'] != name) s,
     ];
+    if (states.isEmpty && machine.isNotEmpty) {
+      return _refuse('A sub-state machine keeps one state at least: delete the machine instead.');
+    }
     final transitions = [
       for (final t in this.transitions(layer))
         if (t['from'] != name && t['to'] != name) t,
     ];
     final editor = _map(root?['editor']);
     final places = _map(editor[l['name']]);
-    final hadPlace = places.remove(name) != null;
+    final key = _placeKey(name);
+    final kept = {
+      for (final e in places.entries)
+        if (e.key != key && !e.key.startsWith('$key/')) e.key: e.value,
+    };
     return edits.edit(id, {
-      '/layers/$layer/states': states,
-      if (l['transitions'] != null) '/layers/$layer/transitions': transitions.isEmpty ? unset : transitions,
-      if (l['defaultState'] == name) '/layers/$layer/defaultState': states.isEmpty ? unset : states.first['name'],
-      if (hadPlace) '/editor': {...editor, l['name'] as String: places},
+      '$p/states': states,
+      if (sc['transitions'] != null) '$p/transitions': transitions.isEmpty ? unset : transitions,
+      if (sc['defaultState'] == name) '$p/defaultState': states.isEmpty ? unset : states.first['name'],
+      if (kept.length != places.length) '/editor': {...editor, l['name'] as String: kept},
     });
   }
 
-  /// Unity's Set as Layer Default State.
+  /// Unity's Set as Layer Default State (in a sub-state machine: the
+  /// state a transition into it enters).
   bool setDefault(int layer, String name) =>
-      state(layer, name) != null && edits.edit(id, {'/layers/$layer/defaultState': name});
+      state(layer, name) != null && edits.edit(id, {'${scopePointer(layer)}/defaultState': name});
 
   /// Moves boxes in [layer]'s graph (a drag's end: one undo step).
   bool place(int layer, Map<String, Offset> at) => edits.edit(id, _placed(layer, at));
@@ -222,7 +303,7 @@ final class ControllerEdits {
         ...editor,
         name: {
           ..._map(editor[name]),
-          for (final e in at.entries) e.key: [e.value.dx.roundToDouble(), e.value.dy.roundToDouble()],
+          for (final e in at.entries) _placeKey(e.key): [e.value.dx.roundToDouble(), e.value.dy.roundToDouble()],
         },
       },
     };
@@ -233,7 +314,7 @@ final class ControllerEdits {
     final i = states(layer).indexWhere((s) => s['name'] == name);
     if (i < 0) return false;
     if (key == 'name') return renameState(layer, name, value as String);
-    return edits.edit(id, {'/layers/$layer/states/$i/$key': value});
+    return edits.edit(id, {'${scopePointer(layer)}/states/$i/$key': value});
   }
 
   // ── Blend trees (ADR-0033) ──────────────────────────────────────────────
@@ -260,7 +341,7 @@ final class ControllerEdits {
   String? motionPointer(int layer, String state, List<int> path) {
     final i = states(layer).indexWhere((s) => s['name'] == state);
     if (i < 0) return null;
-    return ['/layers/$layer/states/$i/motion', for (final k in path) '/blendTree/children/$k/motion'].join();
+    return ['${scopePointer(layer)}/states/$i/motion', for (final k in path) '/blendTree/children/$k/motion'].join();
   }
 
   /// The motion at [path] (a clip's ref, a tree, or null).
@@ -486,20 +567,28 @@ final class ControllerEdits {
   /// fires without conditions; from Any State it waits for one.
   /// Returns the new transition's index, or null.
   int? makeTransition(int layer, String from, String to) {
-    if (this.layer(layer) == null || state(layer, to) == null) return null;
+    final p = scopePointer(layer);
+    if (p == null || state(layer, to) == null) return null;
+    if (from == 'any' && machine.isNotEmpty) {
+      _refuse('Any State\'s transitions belong to the layer: make it there.');
+      return null;
+    }
     if (from != 'any' && state(layer, from) == null) return null;
+    // Out of a sub-state machine: when every condition holds, from any
+    // state inside it (no exit time: its states have their own clocks).
+    final exit = from != 'any' && !isMachine(state(layer, from));
     final list = [
       ...transitions(layer),
-      {'from': from, 'to': to, if (from != 'any') 'exitTime': 0.75, 'duration': 0.25},
+      {'from': from, 'to': to, if (exit) 'exitTime': 0.75, 'duration': 0.25},
     ];
-    return edits.edit(id, {'/layers/$layer/transitions': list}) ? list.length - 1 : null;
+    return edits.edit(id, {'$p/transitions': list}) ? list.length - 1 : null;
   }
 
   bool deleteTransition(int layer, int index) {
     final list = transitions(layer);
     if (index < 0 || index >= list.length) return false;
     list.removeAt(index);
-    return edits.edit(id, {'/layers/$layer/transitions': list.isEmpty ? unset : list});
+    return edits.edit(id, {'${scopePointer(layer)}/transitions': list.isEmpty ? unset : list});
   }
 
   /// Moves the transition at [index] one place up ([by] -1) or down among
@@ -517,13 +606,13 @@ final class ControllerEdits {
     final t = list[index];
     list[index] = list[j];
     list[j] = t;
-    return edits.edit(id, {'/layers/$layer/transitions': list}) ? j : null;
+    return edits.edit(id, {'${scopePointer(layer)}/transitions': list}) ? j : null;
   }
 
   /// Sets (or with [unset], removes) one member of a transition.
   bool setTransitionField(int layer, int index, String key, Object? value) {
     if (index < 0 || index >= transitions(layer).length) return false;
-    return edits.edit(id, {'/layers/$layer/transitions/$index/$key': value});
+    return edits.edit(id, {'${scopePointer(layer)}/transitions/$index/$key': value});
   }
 
   /// Replaces a transition's conditions (an empty list removes them).
@@ -652,7 +741,12 @@ final class ControllerEdits {
     Map<String, Object?>? Function(Map<String, Object?>) condition,
   ) => {
     ...l,
-    if (l['states'] != null) 'states': [for (final s in _maps(l['states'])) state(s)],
+    // A sub-state machine's states and transitions too.
+    if (l['states'] != null)
+      'states': [
+        for (final s in _maps(l['states']))
+          isMachine(s) ? _mapLayer(state(s), state, condition) : state(s),
+      ],
     if (l['transitions'] != null)
       'transitions': [
         for (final t in _maps(l['transitions']))

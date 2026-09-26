@@ -79,6 +79,7 @@ class BlendTreeSection extends StatefulWidget {
     required this.edits,
     required this.controller,
     required this.layer,
+    this.machine = const [],
     required this.state,
     this.animator,
     this.onPing,
@@ -87,6 +88,9 @@ class BlendTreeSection extends StatefulWidget {
   final AssetEdits edits;
   final String controller;
   final int layer;
+
+  /// The sub-state machine the state is in (ADR-0033 § 4).
+  final List<String> machine;
   final String state;
 
   /// During Play, its running Animator takes the red dot's values.
@@ -98,7 +102,7 @@ class BlendTreeSection extends StatefulWidget {
 }
 
 class BlendTreeSectionState extends State<BlendTreeSection> with SingleTickerProviderStateMixin {
-  ControllerEdits get c => ControllerEdits(widget.edits, widget.controller);
+  ControllerEdits get c => ControllerEdits(widget.edits, widget.controller, machine: widget.machine);
 
   /// The child indices down to the tree shown ([] is the state's own).
   List<int> path = [];

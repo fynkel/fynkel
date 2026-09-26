@@ -86,7 +86,7 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
   double? _pinchStart;
 
   /// What [_pan] was framed for (controller and layer); a new one frames again.
-  (String?, int)? _framed;
+  (String?, int, String)? _framed;
 
   /// Boxes being dragged: their place so far (written on release).
   final _dragged = <String, Offset>{};
@@ -125,7 +125,11 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
   /// Fits the layer's boxes in the view (Unity's Frame): centred, and
   /// smaller when they do not fit at full size.
   void _frame(ControllerEdits c) {
-    final keys = [entryKey, anyKey, for (final s in c.states(model.layer)) s['name'] as String];
+    final keys = [
+      entryKey,
+      if (model.machine.isEmpty) anyKey,
+      for (final s in c.states(model.layer)) s['name'] as String,
+    ];
     Rect boxOf(String k) =>
         Rect.fromCenter(center: c.positionOf(model.layer, k), width: _sizeOf(k).width, height: _sizeOf(k).height);
     var bounds = boxOf(keys.first);
@@ -262,6 +266,7 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
     }
     final choice = await _menu(global, [
       _item('state.empty', 'Create State ▸ Empty', enabled: c.canEdit),
+      _item('machine', 'Create Sub-State Machine', enabled: c.canEdit),
       _item('state.clip', 'Create State ▸ From Clip…', enabled: c.canEdit && widget.assets != null),
       _item('state.blend', 'Create State ▸ From Blend Space…', enabled: c.canEdit && widget.assets != null),
       _item('state.tree', 'Create State ▸ From New Blend Tree…', enabled: c.canEdit && widget.assets != null),
@@ -273,6 +278,8 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
     switch (choice) {
       case 'state.empty':
         model.createState(at);
+      case 'machine':
+        model.createMachine(at);
       case 'state.clip' || 'state.blend' || 'state.tree':
         // A new blend tree starts with a clip (a tree is never empty).
         final kind = choice == 'state.blend' ? 'blend' : 'clip';
@@ -299,14 +306,22 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
       return;
     }
     model.selectState(key);
+    final machine = ControllerEdits.isMachine(c.state(model.layer, key));
     final choice = await _menu(global, [
+      if (machine) _item('open', 'Open'),
       _item('link', 'Make Transition', enabled: c.canEdit),
-      _item('default', 'Set as Layer Default State', enabled: c.canEdit && c.defaultState(model.layer) != key),
+      _item(
+        'default',
+        model.machine.isEmpty ? 'Set as Layer Default State' : 'Set as Default State',
+        enabled: c.canEdit && c.defaultState(model.layer) != key,
+      ),
       const PopupMenuDivider(),
       _item('rename', 'Rename', enabled: c.canEdit),
       _item('delete', 'Delete', enabled: c.canEdit),
     ]);
     switch (choice) {
+      case 'open':
+        model.enterMachine(key);
       case 'link':
         model.startLink(key);
       case 'default':
@@ -371,10 +386,11 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
                         if (model.layer > 0) _LayerSettings(controller: c, layer: model.layer),
                         _SlotRow(
                           name: c.layer(model.layer)?['name'] as String? ?? '',
-                          empty: c.states(model.layer).isEmpty,
+                          empty: c.inMachine(const []).states(model.layer).isEmpty,
                           info: model.live?.layers.where((s) => s.layer == model.layer).firstOrNull,
                           assets: widget.assets,
                         ),
+                        if (model.machine.isNotEmpty) _pathBar(context, t, c),
                         Expanded(child: _graph(context, t, c)),
                       ],
                     ),
@@ -467,6 +483,50 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
     );
   }
 
+  /// Where the graph is (ADR-0033 § 4): "Base Layer ▸ Airborne"; a click
+  /// goes back up.
+  Widget _pathBar(BuildContext context, FynkelTokens t, ControllerEdits c) {
+    final small = Theme.of(context).textTheme.bodySmall;
+    final names = [c.layer(model.layer)?['name'] as String? ?? '', ...model.machine];
+    return Container(
+      key: const Key('animator.path'),
+      height: 24,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      decoration: BoxDecoration(
+        color: t.header,
+        border: Border(bottom: t.hairline),
+      ),
+      child: Row(
+        children: [
+          for (final (i, name) in names.indexed) ...[
+            if (i > 0) Icon(FIcons.chevronRight, size: 12, color: t.textSecondary),
+            InkWell(
+              key: Key('animator.path.$i'),
+              onTap: i == names.length - 1 ? null : () => model.openMachine(i),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Text(
+                  name,
+                  style: small?.copyWith(color: i == names.length - 1 ? t.text : t.accent),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// A running state's path (`Airborne/Fall`) as the box of the graph
+  /// shown that holds it: the state, or the sub-state machine it is in;
+  /// null when it is outside the machine shown.
+  String? _boxOf(String? path) {
+    if (path == null) return null;
+    final prefix = model.machine.isEmpty ? '' : '${model.machine.join('/')}/';
+    if (!path.startsWith(prefix)) return null;
+    return path.substring(prefix.length).split('/').first;
+  }
+
   Widget _graph(BuildContext context, FynkelTokens t, ControllerEdits c) {
     final layer = model.layer;
     final states = c.states(layer);
@@ -474,7 +534,7 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
     return LayoutBuilder(
       builder: (context, box) {
         _view = box.biggest;
-        final key = (model.id, layer);
+        final key = (model.id, layer, model.machine.join('/'));
         if (_framed != key && _view.width > 0) {
           _framed = key;
           _frame(c);
@@ -486,15 +546,17 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
         final info = live?.layers.where((s) => s.layer == layer).firstOrNull;
         double progressOf(String name, double t) =>
             c.state(layer, name)?['loop'] == false ? t.clamp(0.0, 1.0) : t - t.floorToDouble();
+        // A state inside a sub-state machine lights the machine's box.
         final progress = <String, double>{};
+        final (now, next) = (_boxOf(info?.name), _boxOf(info?.next));
         if (info != null) {
-          progress[info.name] = progressOf(info.name, info.normalizedTime);
-          if (info.next case final next?) progress[next] = progressOf(next, info.nextNormalizedTime);
+          if (now != null) progress[now] = progressOf(now, info.normalizedTime);
+          if (next != null) progress[next] = progressOf(next, info.nextNormalizedTime);
         }
         // The transition being taken: from the state, else from Any State.
-        final taking = switch (info) {
-          fynkel.AnimatorStateInfo(:final name, next: final next?) =>
-            pairs.containsKey((name, next)) ? (name, next) : (anyKey, next),
+        final taking = switch ((now, next)) {
+          (final a?, final b?) when a != b => pairs.containsKey((a, b)) ? (a, b) : (anyKey, b),
+          (null, final b?) => (anyKey, b),
           _ => null,
         };
         return Focus(
@@ -565,7 +627,8 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
                         ),
                       ),
                       _node(context, t, c, entryKey, 'Entry', entryColor),
-                      _node(context, t, c, anyKey, 'Any State', anyColor),
+                      // Any State belongs to the layer, not to a machine.
+                      if (model.machine.isEmpty) _node(context, t, c, anyKey, 'Any State', anyColor),
                       for (final s in states)
                         _node(
                           context,
@@ -576,6 +639,7 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
                           s['name'] == def ? defaultStateColor : null,
                           progress: progress[s['name']],
                           tree: s['motion'] is Map && (s['motion'] as Map)['blendTree'] is Map,
+                          machine: ControllerEdits.isMachine(s),
                         ),
                     ],
                   ),
@@ -597,6 +661,7 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
     Color? fill, {
     double? progress,
     bool tree = false,
+    bool machine = false,
   }) {
     final r = _box(c, key);
     final selected = key == model.selectedState;
@@ -610,6 +675,8 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
         child: GestureDetector(
           key: Key('animator.state.$key'),
           onTap: () => _tapBox(key),
+          // A sub-state machine opens on a double-click (ADR-0033 § 4).
+          onDoubleTap: machine && model.linkFrom == null ? () => model.enterMachine(key) : null,
           onSecondaryTapUp: (d) => _boxMenu(c, key, d.globalPosition),
           onPanStart: c.canEdit ? (_) => _focus.requestFocus() : null,
           onPanUpdate: c.canEdit ? (d) => setState(() => _dragged[key] = _at(c, key) + d.delta / _scale) : null,
@@ -624,9 +691,13 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 decoration: BoxDecoration(
                   color: fill ?? t.field,
-                  borderRadius: BorderRadius.circular(5),
+                  // A sub-state machine: rounder, as a stack of states.
+                  borderRadius: BorderRadius.circular(machine ? 12 : 5),
                   border: Border.all(color: selected ? t.accent : t.lineStrong, width: selected ? 2 : 1),
-                  boxShadow: [BoxShadow(color: t.shadow, blurRadius: 4, offset: const Offset(0, 1))],
+                  boxShadow: [
+                    BoxShadow(color: t.shadow, blurRadius: 4, offset: const Offset(0, 1)),
+                    if (machine) BoxShadow(color: t.lineStrong, offset: const Offset(3, 3)),
+                  ],
                 ),
                 foregroundDecoration: progress == null
                     ? null
@@ -645,6 +716,16 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
                     : Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          if (machine)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 4),
+                              child: Icon(
+                                FIcons.categoryOutlined,
+                                key: Key('animator.state.$key.machine'),
+                                size: 11,
+                                color: fill == null ? t.textSecondary : Colors.white70,
+                              ),
+                            ),
                           // A state playing a blend tree (ADR-0033): the Inspector edits it.
                           if (tree)
                             Padding(

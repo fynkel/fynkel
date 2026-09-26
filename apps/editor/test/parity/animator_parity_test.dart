@@ -443,6 +443,84 @@ void main() {
       ],
     });
   });
+
+  testWidgets('a sub-state machine (ADR-0033 § 4): made, opened with a double-click, a path bar back, interruptions', (
+    tester,
+  ) async {
+    final e = await Editor.open(tester, prepare: writeController);
+    Map<String, Object?> saved() =>
+        jsonDecode(File('${e.dir.path}/$controllerPath').readAsStringSync()) as Map<String, Object?>;
+    Map<String, Object?> base() => (saved()['layers'] as List).first as Map<String, Object?>;
+    final doc = e.shell.assetEdits!.document(controllerId) ?? (throw StateError(e.shell.assetEdits!.lastError ?? "?"));
+    e.shell.workspace!.show(PanelRegistry.animation);
+    e.shell.selection!.inspect(const InspectAsset(controllerId));
+    await tester.pumpAndSettle();
+    final model = e.shell.animator!;
+    expect(model.createState(const Offset(0, 0)), 'New State');
+
+    // Right-click the graph: Create Sub-State Machine — one state inside, its default.
+    final graph = tester.getRect(find.byKey(const Key('animator.graph')));
+    await tester.tapAt(graph.center + const Offset(150, 60), buttons: kSecondaryMouseButton);
+    await tester.pumpAndSettle();
+    await e.click(find.byKey(const Key('animator.menu.machine')));
+    expect((base()['states'] as List)[1], {
+      'name': 'New Sub-State Machine',
+      'defaultState': 'New State',
+      'states': [
+        {'name': 'New State'},
+      ],
+    });
+    expect(find.byKey(const Key('animator.state.New Sub-State Machine.machine')), findsOneWidget);
+    expect(find.byKey(const Key('animatorItem.machineHint')), findsOneWidget);
+    expect(model.renameState('New Sub-State Machine', 'Airborne'), isTrue);
+    await tester.pumpAndSettle();
+    final history = doc.history;
+
+    // A double-click opens it: the path bar, Entry, no Any State.
+    await tester.tap(find.byKey(const Key('animator.state.Airborne')));
+    await tester.pump(kDoubleTapMinTime);
+    await tester.tap(find.byKey(const Key('animator.state.Airborne')));
+    await tester.pumpAndSettle();
+    expect(model.machine, ['Airborne']);
+    expect(find.byKey(const Key('animator.path')), findsOneWidget);
+    expect(find.text('Any State'), findsNothing);
+
+    // A state made inside lands inside, placed by path; a transition between them.
+    expect(model.createState(const Offset(220, 0)), 'New State 1');
+    await tester.pumpAndSettle();
+    expect(model.renameState('New State 1', 'Fall'), isTrue);
+    final c = model.controller!;
+    expect(c.makeTransition(0, 'New State', 'Fall'), 0);
+    final airborne = (base()['states'] as List)[1] as Map;
+    expect((airborne['states'] as List).map((s) => (s as Map)['name']), ['New State', 'Fall']);
+    expect(airborne['transitions'], [
+      {'from': 'New State', 'to': 'Fall', 'exitTime': 0.75, 'duration': 0.25},
+    ]);
+    expect(((saved()['editor'] as Map)['Base Layer'] as Map).containsKey('Airborne/Fall'), isTrue);
+    expect(c.makeTransition(0, 'any', 'Fall'), isNull, reason: 'Any State belongs to the layer');
+    expect(doc.history, history + 3);
+
+    // The transition's interruption, in words.
+    model.selectTransition(0);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Can be interrupted by: nothing'), findsOneWidget);
+    expect(c.setTransitionField(0, 0, 'interruptibleBy', 'next'), isTrue);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Can be interrupted by: the next state'), findsOneWidget);
+
+    // The path bar goes back; a rename from outside moves the places inside.
+    await e.click(find.byKey(const Key('animator.path.0')));
+    expect(model.machine, isEmpty);
+    expect(find.text('Any State'), findsOneWidget);
+    expect(model.renameState('Airborne', 'Air'), isTrue);
+    final places = (saved()['editor'] as Map)['Base Layer'] as Map;
+    expect(places.containsKey('Air/Fall'), isTrue);
+    expect(places.containsKey('Airborne/Fall'), isFalse);
+
+    // Out of the machine: no exit time (its states have their own clocks).
+    expect(model.controller!.makeTransition(0, 'Air', 'New State'), 0);
+    expect((base()['transitions'] as List).single, {'from': 'Air', 'to': 'New State', 'duration': 0.25});
+  });
 }
 
 final class _FakeLive implements AnimatorLive {

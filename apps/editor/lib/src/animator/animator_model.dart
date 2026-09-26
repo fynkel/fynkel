@@ -82,6 +82,7 @@ final class AnimatorModel extends ChangeNotifier {
 
   String? _id;
   int _layer = 0;
+  List<String> _machine = const [];
   String? _state;
   int? _transition;
   String? _linkFrom;
@@ -104,9 +105,33 @@ final class AnimatorModel extends ChangeNotifier {
 
   /// The controller shown, or null (nothing picked yet).
   String? get id => _id;
-  ControllerEdits? get controller => _id == null ? null : ControllerEdits(edits, _id!);
+  ControllerEdits? get controller => _id == null ? null : ControllerEdits(edits, _id!, machine: _machine);
 
   int get layer => _layer;
+
+  /// The sub-state machine the graph shows (ADR-0033 § 4), as the names
+  /// down from the layer; empty: the layer's own states.
+  List<String> get machine => _machine;
+
+  /// Opens a sub-state machine of the graph shown (a double-click).
+  void enterMachine(String name) {
+    if (!ControllerEdits.isMachine(controller?.state(_layer, name))) return;
+    _openMachine([..._machine, name]);
+  }
+
+  /// The path bar: back up to [depth] names (0: the layer).
+  void openMachine(int depth) {
+    if (depth >= _machine.length) return;
+    _openMachine(_machine.sublist(0, depth));
+  }
+
+  void _openMachine(List<String> path) {
+    _machine = List.unmodifiable(path);
+    _state = null;
+    _transition = null;
+    _linkFrom = null;
+    notifyListeners();
+  }
   String? get selectedState => _state;
   int? get selectedTransition => _transition;
 
@@ -125,6 +150,7 @@ final class AnimatorModel extends ChangeNotifier {
     _object = object;
     _id = id;
     _layer = 0;
+    _machine = const [];
     _state = null;
     _transition = null;
     _linkFrom = null;
@@ -161,6 +187,7 @@ final class AnimatorModel extends ChangeNotifier {
   set layer(int i) {
     if (i == _layer) return;
     _layer = i;
+    _machine = const [];
     _state = null;
     _transition = null;
     _linkFrom = null;
@@ -172,7 +199,7 @@ final class AnimatorModel extends ChangeNotifier {
     _state = name;
     _transition = null;
     notifyListeners();
-    if (name != null && _id != null) inspect?.call(InspectAnimator(_id!, _layer, state: name));
+    if (name != null && _id != null) inspect?.call(InspectAnimator(_id!, _layer, state: name, machine: _machine));
   }
 
   /// Picks a transition by its index in the layer and shows it.
@@ -180,7 +207,9 @@ final class AnimatorModel extends ChangeNotifier {
     _transition = index;
     _state = null;
     notifyListeners();
-    if (index != null && _id != null) inspect?.call(InspectAnimator(_id!, _layer, transition: index));
+    if (index != null && _id != null) {
+      inspect?.call(InspectAnimator(_id!, _layer, transition: index, machine: _machine));
+    }
   }
 
   void clearSelection() {
@@ -226,6 +255,13 @@ final class AnimatorModel extends ChangeNotifier {
 
   /// Create State at [at], playing [motion] (with [tree], a blend tree
   /// holding it, ADR-0033): the new state is selected.
+  /// Create Sub-State Machine at [at]: the new machine is selected.
+  String? createMachine(Offset at) {
+    final name = controller?.createMachine(_layer, at);
+    if (name != null) selectState(name);
+    return name;
+  }
+
   String? createState(Offset at, {Map<String, Object?>? motion, bool tree = false}) {
     final c = controller;
     final name = tree && motion != null
@@ -282,6 +318,12 @@ final class AnimatorModel extends ChangeNotifier {
     // An undo can take the layer or the selection away.
     final layers = c.layers.length;
     if (layers > 0 && _layer >= layers) _layer = layers - 1;
+    // A machine renamed or deleted (or undone away): back to the layer.
+    if (_machine.isNotEmpty && c.scope(_layer) == null) {
+      _machine = const [];
+      _state = null;
+      _transition = null;
+    }
     if (_state != null && c.state(_layer, _state!) == null) _state = null;
     if (_transition != null && _transition! >= c.transitions(_layer).length) _transition = null;
     notifyListeners();
