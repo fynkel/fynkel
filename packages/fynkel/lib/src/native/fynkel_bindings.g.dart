@@ -691,6 +691,45 @@ FynkelStatus fynkel_world_set_mesh(
   _fynkel_world_set_mesh(world, id, payload, payload_len),
 );
 
+/// A clip made at runtime (ADR-0033 § 2, `world.createClip`): `payload` is
+/// an ANIM chunk payload — u32 channel count, f32 duration, per channel
+/// the target node's name (u32 length + UTF-8, zero-padded to 4 bytes),
+/// u32 property (0 translation, 1 rotation, 2 scale), u32 interpolation (0
+/// step, 1 linear, 2 cubic spline), u32 key count, the key times (f32),
+/// the values (f32, 3 or 4 per key, × 3 for a cubic spline); then
+/// optionally u32 marker count and per marker f32 time + name (as above) —
+/// registered as the clip `id` (16 bytes, big-endian UUID, no sub-asset
+/// path: one the cache does not have) that `Animator`s, one-shots and
+/// blend spaces play like a cooked one, until `payload_len` 0 removes it
+/// (animators already playing it keep it). A changed clip plays from the
+/// next tick. Kept across scene loads. FYNKEL_STATUS_LOAD_FAILED before
+/// any project is loaded; FYNKEL_STATUS_INVALID_ARGUMENT for a payload
+/// that does not decode or a clip that is not valid (keys out of order or
+/// past the duration, a value that is not finite, markers out of order).
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+  )
+>(symbol: 'fynkel_world_set_clip')
+external int _fynkel_world_set_clip(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> id,
+  ffi.Pointer<ffi.Uint8> payload,
+  int payload_len,
+);
+
+FynkelStatus fynkel_world_set_clip(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> id,
+  ffi.Pointer<ffi.Uint8> payload,
+  int payload_len,
+) => FynkelStatus.fromValue(
+  _fynkel_world_set_clip(world, id, payload, payload_len),
+);
+
 /// The cooked JSON of a document asset (ADR-0027 §6): the text of asset
 /// `id` (16 bytes, big-endian UUID; no sub-asset) as the cook wrote it — a
 /// data asset's `{ "$schema", "formatVersion", "id", "name", "type",

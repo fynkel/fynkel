@@ -14,6 +14,7 @@ import 'animation.dart';
 import 'asset_index.dart';
 import 'asset_ref.dart';
 import 'audio.dart';
+import 'clip_data.dart';
 import 'context.dart';
 import 'diagnostics.dart';
 import 'editor_channel.dart';
@@ -598,6 +599,44 @@ class World {
         throw StateError('meshes need a loaded project or scene (their asset store) — loadProject or loadScene first');
       default:
         throw FynkelBridgeError('setMesh: $status');
+    }
+  }
+
+  // ---------------------------------------------- runtime clips (ADR-0033 § 2)
+
+  /// A clip made in code ([ClipBuilder]; Unity's `new AnimationClip()`):
+  /// a new asset id that an `Animator`'s `clip`, a one-shot
+  /// (`animation.playOneShot`) and `animation.play` take like an imported
+  /// clip, kept across scene loads until [destroyClip]. Change it with
+  /// [setClip]. Throws [StateError] before a project or scene is loaded
+  /// (the clip lives in that asset store).
+  AssetRef createClip(ClipData clip) {
+    final ref = _newAssetId();
+    setClip(ref, clip);
+    return ref;
+  }
+
+  /// Gives the clip [ref] (one [createClip] made) new keys: animators
+  /// playing it follow from the next tick.
+  void setClip(AssetRef ref, ClipData clip) => _setClip(ref, clip);
+
+  /// Removes the clip [ref]; animators already playing it keep it.
+  void destroyClip(AssetRef ref) => _setClip(ref, null);
+
+  void _setClip(AssetRef ref, ClipData? clip) {
+    final id = ref.bytes;
+    if (id == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
+    if (ref.sub?.isNotEmpty ?? false) throw ArgumentError.value(ref, 'ref', 'a made clip is a whole asset, not a sub-asset of a model');
+    final status = _native.setClip(id, clip?.toPayload());
+    switch (status) {
+      case FynkelStatus.FYNKEL_STATUS_OK:
+        return;
+      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
+        throw StateError('clips need a loaded project or scene (their asset store) — loadProject or loadScene first');
+      case FynkelStatus.FYNKEL_STATUS_INVALID_ARGUMENT:
+        throw ArgumentError.value(ref, 'clip', 'the engine refused it (keys out of order or past its length?)');
+      default:
+        throw FynkelBridgeError('setClip: $status');
     }
   }
 

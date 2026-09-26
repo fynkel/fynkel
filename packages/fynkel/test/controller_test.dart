@@ -65,8 +65,11 @@ class States extends Behaviour {
   @override
   void onAnimationEnded(AnimationEnded event) {
     expect(event.entity, gameObject.entity);
-    log.add('ended ${event.clip.sub}');
+    log.add('ended ${event.clip.sub ?? event.clip.asset}');
   }
+
+  @override
+  void onAnimationMarker(AnimationMarker event) => log.add('marker ${event.name}');
 }
 
 void copyTree(Directory from, Directory to) {
@@ -253,6 +256,47 @@ void main() {
     a.playOneShot(bob, slot: 'Arms');
     w.frame(1 / 60);
     expect(seen.single.message, contains('Base Layer'));
+  });
+
+  test('a clip made in code plays as a one-shot, changes and is refused when wrong', () {
+    final (w, rig, states) = withController();
+    final hips = rig.findChild('hips')!;
+    final lift = w.createClip((ClipBuilder()
+          ..position('hips', {0: const Vec3(0, 3, 0), 1: const Vec3(0, 3, 0)})
+          ..marker(0.5, 'top'))
+        .build());
+    expect(lift.sub, isNull);
+
+    rig.animation.playOneShot(lift, blendIn: 0.05, blendOut: 0.05);
+    ticks(w, 30);
+    expect(rig.animation.stateOf()!.oneShot, lift);
+    expect(hips.localTransform.position.y, closeTo(3, 1e-4), reason: 'the one-shot covers the machine');
+    ticks(w, 5);
+    expect(states.log, contains('marker top'));
+    ticks(w, 30);
+    expect(states.log.last, 'ended ${lift.asset}');
+    expect(hips.localTransform.position.y, lessThan(1), reason: 'the machine shows again');
+
+    // Changed: the next play reads the new keys.
+    w.setClip(lift, (ClipBuilder()..position('hips', {0: const Vec3(0, 5, 0), 1: const Vec3(0, 5, 0)})).build());
+    rig.animation.playOneShot(lift, blendIn: 0.05);
+    ticks(w, 20);
+    expect(hips.localTransform.position.y, closeTo(5, 1e-4));
+
+    // The builder's own checks, then the engine's.
+    expect(() => ClipBuilder().build(), throwsStateError);
+    expect(() => ClipBuilder()..position('hips', {}), throwsArgumentError);
+    expect(() => (ClipBuilder(length: 0.5)..position('hips', {0: Vec3.zero, 1: Vec3.zero})).build(), throwsArgumentError);
+    expect(() => ClipBuilder()..marker(0.5, ''), throwsArgumentError);
+    expect(() => (ClipBuilder()..scale('hips', {0: const Vec3(double.nan, 1, 1)})).build(), throwsArgumentError);
+    expect(() => w.setClip(const AssetRef(rigAsset, sub: 'anim/wave'), (ClipBuilder()..scale('hips', {0: Vec3.one})).build()),
+        throwsArgumentError);
+
+    w.destroyClip(lift);
+    final fresh2 = World.create(library: lib);
+    addTearDown(fresh2.dispose);
+    expect(() => fresh2.createClip((ClipBuilder()..scale('hips', {0: Vec3.one})).build()), throwsStateError,
+        reason: 'no asset store before a load');
   });
 
   test('an animator without a controller has no states or parameters', () {

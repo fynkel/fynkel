@@ -564,6 +564,26 @@ class NativeWorld {
     }
   }
 
+  /// `fynkel_world_set_clip` (ADR-0033 § 2): the `ANIM` [payload]
+  /// registered as the runtime clip [id] (16 UUID bytes); null removes it.
+  FynkelStatus setClip(Uint8List id, Uint8List? payload) {
+    ffiCalls++;
+    final idp = calloc<Uint8>(16);
+    try {
+      idp.asTypedList(16).setAll(0, id);
+      if (payload == null) return fynkel_world_set_clip(_w, idp, nullptr, 0);
+      final p = calloc<Uint8>(payload.length);
+      try {
+        p.asTypedList(payload.length).setAll(0, payload);
+        return fynkel_world_set_clip(_w, idp, p, payload.length);
+      } finally {
+        calloc.free(p);
+      }
+    } finally {
+      calloc.free(idp);
+    }
+  }
+
   /// `fynkel_world_asset_json` (ADR-0027 §6): the cooked JSON of the
   /// document asset [id] (16 UUID bytes) — `(OK, the document)`, or
   /// `(LOAD_FAILED, the diagnostic)` when no project is loaded or the

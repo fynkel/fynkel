@@ -74,6 +74,7 @@ export 'generated/schema.g.dart'
         componentCodecs,
         componentIds;
 export 'src/animation.dart' show AnimationAssets, AnimatorParameter, AnimatorState, AnimatorStateInfo;
+export 'src/clip_data.dart';
 export 'src/audio.dart' show AudioAssets, AudioState, AudioStats;
 export 'src/asset_index.dart';
 export 'src/asset_ref.dart';
