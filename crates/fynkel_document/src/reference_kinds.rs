@@ -47,6 +47,7 @@ pub const NATIVE: &[(&str, &str, &[&str])] = &[
     ("fynkel.Volume", "profile", &["volume"]),
     ("fynkel.Skin", "skin", &["skin"]),
     ("fynkel.Animator", "clip", &["clip", "blend"]),
+    ("fynkel.Animator", "controller", &["controller"]),
     ("fynkel.Emitter", "prefab", &["prefab"]),
 ];
 

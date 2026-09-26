@@ -795,6 +795,36 @@ fn references_of_the_wrong_kind_fail_validate() {
     assert_eq!(t.codes(), Vec::<(String, Option<String>)>::new());
 }
 
+/// An Animator's `controller` takes an Animator Controller (ADR-0032):
+/// a blend space there is `A0007`.
+#[test]
+fn an_animator_controller_field_takes_a_controller() {
+    let t = Temp::new("controller-kind");
+    let scene = t.read("assets/scenes/rig.scene.json");
+    let wave = r#""sub": "anim/wave"
+            },
+            "speed": 1.0,"#;
+    assert!(scene.contains(wave));
+    t.write(
+        "assets/scenes/rig.scene.json",
+        &scene.replacen(
+            wave,
+            r#""sub": "anim/wave"
+            },
+            "controller": { "asset": "c0000000-0000-4000-8000-000000000051" },
+            "speed": 1.0,"#,
+            1,
+        ),
+    );
+    let codes = t.codes();
+    assert!(
+        codes.iter().any(|(c, p)| c == "FYN-A0007"
+            && p.as_deref()
+                .is_some_and(|p| p.ends_with("/data/controller"))),
+        "{codes:?}"
+    );
+}
+
 /// M3-19a/19b: the Rig scene's `Imported` entity instances the Column
 /// rig's `prefab` — the skeleton file `rig.glb`'s hierarchy under the rig
 /// document's id. Without a provider the instance is `D0401` (the
