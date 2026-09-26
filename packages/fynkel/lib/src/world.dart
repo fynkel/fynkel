@@ -301,12 +301,173 @@ class World {
   /// asset id that a `MeshRenderer`'s `material` takes like a cooked one,
   /// drawn with [material]'s values from the next frame and kept across
   /// scene loads until [destroyMaterial]. Change it with [setMaterial].
-  /// Throws [StateError] before a project or scene is loaded (the
-  /// material lives in that asset store).
+  /// [createShaderMaterial] makes one of a `.shader` instead. Throws
+  /// [StateError] before a project or scene is loaded (the material lives
+  /// in that asset store).
   AssetRef createMaterial([gen.PbrMaterial material = const gen.PbrMaterial()]) {
     final ref = _newAssetId();
     setMaterial(ref, material);
     return ref;
+  }
+
+  /// A material of a `.shader` asset made in code (Unity's
+  /// `new Material(shader)`, ADR-0031): [shader] is the shader's
+  /// [AssetRef] or its path under `assets/` (`'shaders/water.shader'`).
+  /// A new asset id that a `MeshRenderer`'s `material` takes like a cooked
+  /// one, drawn from the next frame and kept across scene loads until
+  /// [destroyMaterial]. Its properties are set from [values] by name, the
+  /// rest at the shader's defaults; change one with [setMaterialValue].
+  ///
+  /// A value is a number, a bool, a [Vec2]/[Vec3]/[Vec4] (a colour is a
+  /// [Vec3] or [Vec4], linear), or an [AssetRef] for a texture property.
+  /// Values are checked against the shader's header as the cook checks a
+  /// material file: a wrong name, type or range throws [ArgumentError]
+  /// with the diagnostic. Throws [StateError] before a project is loaded.
+  AssetRef createShaderMaterial(
+    Object shader, {
+    Map<String, Object> values = const {},
+    gen.AlphaMode alphaMode = gen.AlphaMode.opaque,
+    double alphaCutoff = 0.5,
+    bool doubleSided = false,
+  }) {
+    final shaderRef = switch (shader) {
+      AssetRef r => r,
+      String path => assets.find(path) ??
+          (throw ArgumentError.value(path, 'shader', 'no such asset in the last cook')),
+      _ => throw ArgumentError.value(shader, 'shader', 'an AssetRef or a path under assets/'),
+    };
+    final ref = _newAssetId();
+    final doc = <String, Object?>{
+      r'$schema': 'https://fynkel.dev/schemas/material.schema.json',
+      'formatVersion': 2,
+      'id': ref.asset,
+      'name': 'Made in code',
+      'shader': {'asset': shaderRef.asset},
+      'parameters': <String, Object?>{},
+      'textures': <String, Object?>{},
+      'alpha_mode': alphaMode.name,
+      'alpha_cutoff': alphaCutoff,
+      'double_sided': doubleSided,
+    };
+    values.forEach((name, value) => _putValue(doc, name, value));
+    _sendShaderMaterial(ref, doc, 'createShaderMaterial');
+    _shaderMaterials[ref.asset] = doc;
+    return ref;
+  }
+
+  /// Sets the property [name] of the shader material [ref] to [value]
+  /// (Unity's `material.SetFloat` / `SetColor` / `SetTexture`, ADR-0031):
+  /// one [createShaderMaterial] made, or a cooked material of a
+  /// `.shader`, changed for this run until [destroyMaterial]. Every
+  /// renderer using it changes from the next frame; a new value rewrites
+  /// the material's uniform and nothing else, so calling this every frame
+  /// is fine. [value] is as [createShaderMaterial]'s `values`; null puts the
+  /// shader's default back. A wrong name, type or range throws
+  /// [ArgumentError] with the diagnostic, and the material keeps its
+  /// values.
+  void setMaterialValue(AssetRef ref, String name, Object? value) {
+    final doc = _shaderMaterials[ref.asset] ?? _cookedShaderMaterial(ref);
+    final changed = _copyDoc(doc);
+    _putValue(changed, name, value);
+    _sendShaderMaterial(ref, changed, 'setMaterialValue');
+    _shaderMaterials[ref.asset] = changed;
+  }
+
+  /// The value [setMaterialValue] or [createShaderMaterial] gave the property
+  /// [name] of [ref] — a number, bool, list of numbers or [AssetRef] —
+  /// or null when code did not set it (the material's own value holds).
+  Object? materialValue(AssetRef ref, String name) {
+    final doc = _shaderMaterials[ref.asset];
+    if (doc == null) return null;
+    final texture = (doc['textures'] as Map)[name];
+    if (texture is Map) {
+      final t = (texture['texture'] as Map).cast<String, Object?>();
+      return AssetRef(t['asset'] as String, sub: t['sub'] as String?);
+    }
+    return (doc['parameters'] as Map)[name];
+  }
+
+  final Map<String, Map<String, Object?>> _shaderMaterials = {};
+
+  /// The cooked shader material [ref]'s document, the start of its
+  /// runtime values.
+  Map<String, Object?> _cookedShaderMaterial(AssetRef ref) {
+    final id = ref.bytes;
+    if (id == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
+    if (_cacheDir == null) {
+      throw StateError('materials need a loaded project (their asset store) — loadProject first');
+    }
+    final (status, json) = _native.assetJson(id);
+    if (status != FynkelStatus.FYNKEL_STATUS_OK) {
+      throw ArgumentError.value(ref, 'ref', '${json['message'] ?? 'not in the cache'}');
+    }
+    final shader = json['shader'];
+    if (json[r'$schema'] is! String ||
+        !(json[r'$schema'] as String).endsWith('/material.schema.json') ||
+        shader is! Map) {
+      throw ArgumentError.value(ref, 'ref',
+          '${json['name'] ?? ref.asset} is not a material of a .shader (a Lit material changes with setMaterial)');
+    }
+    final doc = _copyDoc(json);
+    doc['parameters'] ??= <String, Object?>{};
+    doc['textures'] ??= <String, Object?>{};
+    return doc;
+  }
+
+  static Map<String, Object?> _copyDoc(Map<String, Object?> doc) => {
+        ...doc,
+        'parameters': {...?(doc['parameters'] as Map?)?.cast<String, Object?>()},
+        'textures': {...?(doc['textures'] as Map?)?.cast<String, Object?>()},
+      };
+
+  /// [value] as the material document holds the property [name].
+  static void _putValue(Map<String, Object?> doc, String name, Object? value) {
+    final parameters = doc['parameters'] as Map<String, Object?>;
+    final textures = doc['textures'] as Map<String, Object?>;
+    parameters.remove(name);
+    textures.remove(name);
+    switch (value) {
+      case null:
+        return;
+      case AssetRef r:
+        textures[name] = {
+          'texture': {'asset': r.asset, if (r.sub?.isNotEmpty ?? false) 'sub': r.sub},
+        };
+      case bool b:
+        parameters[name] = b;
+      case num n:
+        parameters[name] = n;
+      case Vec2 v:
+        parameters[name] = [v.x, v.y];
+      case Vec3 v:
+        parameters[name] = [v.x, v.y, v.z];
+      case Vec4 v:
+        parameters[name] = [v.x, v.y, v.z, v.w];
+      case List<num> l:
+        parameters[name] = l;
+      default:
+        throw ArgumentError.value(value, name,
+            'a material value is a number, a bool, a Vec2/Vec3/Vec4, a list of numbers or an AssetRef (a texture)');
+    }
+  }
+
+  void _sendShaderMaterial(AssetRef ref, Map<String, Object?>? doc, String call) {
+    final id = ref.bytes;
+    if (id == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
+    final (status, diagnostics) = _native.setShaderMaterial(id, doc == null ? null : jsonEncode(doc));
+    final errors = [for (final d in diagnostics) if (d['severity'] == 'error') d];
+    String describe() => errors.map((d) => '${d['code']}: ${d['message']}').join('; ');
+    switch (status) {
+      case FynkelStatus.FYNKEL_STATUS_OK:
+        return;
+      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED when _cacheDir == null:
+        throw StateError('materials need a loaded project (their asset store) — loadProject first');
+      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
+      case FynkelStatus.FYNKEL_STATUS_INVALID_ARGUMENT:
+        throw ArgumentError('$call: ${describe()}');
+      default:
+        throw FynkelBridgeError('$call: $status');
+    }
   }
 
   /// A new random (v4) asset id: what a made material or mesh is named.
@@ -331,6 +492,10 @@ class World {
   /// Removes the runtime material [ref]: a created one draws as missing
   /// again, a replaced cooked one goes back to its cooked values.
   void destroyMaterial(AssetRef ref) {
+    if (_shaderMaterials.remove(ref.asset) != null) {
+      _sendShaderMaterial(ref, null, 'destroyMaterial');
+      return;
+    }
     _setMaterial(ref, null);
     _runtimeMaterials.remove(ref.asset);
   }

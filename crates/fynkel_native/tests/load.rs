@@ -1319,3 +1319,140 @@ fn a_documents_cooked_json_through_the_abi() {
         Status::InvalidArgument
     );
 }
+
+/// `fynkel_world_set_shader_material` (ADR-0031): a material of a
+/// `.shader` made from a document at runtime, checked against the shader
+/// as the cook checks it; new values change the payload's block only.
+#[test]
+fn runtime_shader_materials_through_the_abi() {
+    use fynkel_contracts::{AssetRef, Uuid};
+
+    const SHADER_ID: &str = "c0000000-0000-4000-8000-000000000601";
+    let project = std::env::temp_dir().join(format!(
+        "fynkel-native-shader-project-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&project);
+    copy_dir(&fixture(), &project);
+    let shaders = project.join("assets/shaders");
+    std::fs::create_dir_all(&shaders).unwrap();
+    std::fs::write(
+        shaders.join("tint.shader"),
+        "shader \"Tests/Tint\" {\n    lighting unlit\n    properties {\n        tint color3 = (1, 1, 1)\n        power float = 1 range(0, 4)\n        glow texture = black\n    }\n}\n\nfn surface(in: SurfaceInput) -> Surface {\n    var s = default_surface();\n    s.base_color = material.tint * material.power + sample_glow(in.uv0).rgb;\n    return s;\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        shaders.join("tint.shader.meta.json"),
+        format!(r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"{SHADER_ID}","name":"tint.shader","importer":"fynkel.shader","importerVersion":1,"settings":{{}},"subAssets":{{}}}}"#),
+    )
+    .unwrap();
+    let cache = project.join(".fynkel/cache");
+    let report = cook_project(&project, Some(&cache), &CookOptions::default())
+        .unwrap_or_else(|d| panic!("{d:?}"));
+    assert!(!report.has_errors(), "{}", report.text());
+
+    let host = Host::new();
+    let made = AssetRef::new(Uuid(*b"runtime-shader-m"));
+    let doc = |params: &str| {
+        format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/material.schema.json","formatVersion":2,"id":"72756e74-696d-652d-7368-616465722d6d","name":"Made","shader":{{"asset":"{SHADER_ID}"}},"parameters":{params}}}"#
+        )
+    };
+    let set = |text: &str| unsafe {
+        let mut out = FynkelBufferView {
+            data: ptr::null(),
+            length: 0,
+        };
+        let s = fynkel_world_set_shader_material(
+            host.w,
+            made.asset.0.as_ptr(),
+            text.as_ptr(),
+            text.len() as u32,
+            &mut out,
+        );
+        let diagnostics = if out.length == 0 {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_slice(std::slice::from_raw_parts(out.data, out.length as usize))
+                .unwrap()
+        };
+        (s, diagnostics)
+    };
+    let store = || unsafe { &*host.w }.assets().unwrap().clone();
+    let floats = |block: &[u8]| -> Vec<f32> {
+        block
+            .chunks(4)
+            .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+            .collect()
+    };
+
+    let (s, d) = set(&doc(r#"{"tint":[1,0,0]}"#));
+    assert_eq!(s, Status::LoadFailed, "no store before a load");
+    assert_eq!(d[0]["code"], "FYN-R0003");
+    assert_eq!(host.load_project(&cache.display().to_string()), Status::Ok);
+
+    let (s, d) = set(&doc(r#"{"tint":[1,0,0],"power":2}"#));
+    assert_eq!(s, Status::Ok, "{d}");
+    let m = store().custom_material(&made).unwrap().unwrap();
+    assert_eq!(
+        m.shader,
+        *SHADER_ID.parse::<uuid::Uuid>().unwrap().as_bytes()
+    );
+    // tint at 0, power at 16 (a vec3 takes a whole slot).
+    assert_eq!(floats(&m.block)[..5], [1.0, 0.0, 0.0, 0.0, 2.0]);
+    assert_eq!(m.slots.len(), 1);
+    let seen = store().material_edits();
+
+    // New values: the same material, a new block.
+    let (s, _) = set(&doc(r#"{"tint":[0,1,0]}"#));
+    assert_eq!(s, Status::Ok);
+    let m = store().custom_material(&made).unwrap().unwrap();
+    assert_eq!(
+        floats(&m.block)[..5],
+        [0.0, 1.0, 0.0, 0.0, 1.0],
+        "power back to its default"
+    );
+    assert_eq!(store().materials_changed_since(seen), vec![made.clone()]);
+
+    // Checked as the cook checks: a value out of range, an unknown name.
+    let (s, d) = set(&doc(r#"{"power":9}"#));
+    assert_eq!(s, Status::InvalidArgument);
+    assert_eq!(d[0]["code"], "FYN-D0303", "{d}");
+    let (s, d) = set(&doc(r#"{"powr":1}"#));
+    assert_eq!(s, Status::InvalidArgument);
+    assert_eq!(d[0]["code"], "FYN-D0301", "{d}");
+    let m = store().custom_material(&made).unwrap().unwrap();
+    assert_eq!(
+        &floats(&m.block)[..3],
+        &[0.0, 1.0, 0.0],
+        "the material unchanged"
+    );
+
+    // A shader the cache does not have.
+    let (s, d) = set(&doc("{}").replace(SHADER_ID, "c0000000-0000-4000-8000-0000000006ff"));
+    assert_eq!(s, Status::LoadFailed);
+    assert!(d.as_array().is_some_and(|a| !a.is_empty()), "{d}");
+
+    // Removed.
+    let (s, _) = unsafe {
+        let mut out = FynkelBufferView {
+            data: ptr::null(),
+            length: 0,
+        };
+        (
+            fynkel_world_set_shader_material(
+                host.w,
+                made.asset.0.as_ptr(),
+                ptr::null(),
+                0,
+                &mut out,
+            ),
+            (),
+        )
+    };
+    assert_eq!(s, Status::Ok);
+    assert!(store().custom_material(&made).unwrap_or(None).is_none());
+    assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
+    drop(host);
+    let _ = std::fs::remove_dir_all(&project);
+}

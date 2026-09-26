@@ -614,6 +614,47 @@ FynkelStatus fynkel_world_set_material(
   _fynkel_world_set_material(world, id, payload, payload_len),
 );
 
+/// A shader asset material made at runtime (ADR-0031,
+/// `world.createShaderMaterial`): `json_utf8` is a material document as a
+/// `.material.json` holds it, its `shader` a `.shader` asset's id — checked
+/// against the shader's header as the cook checks it (types, ranges, alpha
+/// modes, required textures), then drawn as the material `id` (16 bytes,
+/// big-endian UUID; one the cache does not have, or a cooked material's to
+/// replace it) by every renderer on the world's asset store until
+/// `json_len` 0 removes it. Setting it again with new values alone rewrites
+/// its uniform. Kept across scene loads. `*out` is empty, or the
+/// diagnostics as a JSON array ([{"code", "severity", "message",
+/// "pointer"?, ...}], warnings too), valid until the next call on this
+/// world. FYNKEL_STATUS_LOAD_FAILED before any project is loaded or when
+/// the cache has no such shader; FYNKEL_STATUS_INVALID_ARGUMENT when the
+/// material does not fit its shader (the world's material is unchanged).
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+    ffi.Pointer<FynkelBufferView>,
+  )
+>(symbol: 'fynkel_world_set_shader_material')
+external int _fynkel_world_set_shader_material(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> id,
+  ffi.Pointer<ffi.Uint8> json_utf8,
+  int json_len,
+  ffi.Pointer<FynkelBufferView> out,
+);
+
+FynkelStatus fynkel_world_set_shader_material(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> id,
+  ffi.Pointer<ffi.Uint8> json_utf8,
+  int json_len,
+  ffi.Pointer<FynkelBufferView> out,
+) => FynkelStatus.fromValue(
+  _fynkel_world_set_shader_material(world, id, json_utf8, json_len, out),
+);
+
 /// A mesh made at runtime (ADR-0026 §4, `world.createMesh`): `payload` is a
 /// static MESH chunk payload — u32 vertex count, u32 index count, 6 × f32
 /// bounds (recomputed here), the 72-byte vertices (position, normal,

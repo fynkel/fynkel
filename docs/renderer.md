@@ -720,7 +720,11 @@ instance carries white, the material's alpha mode and cutoff and its
 sides; the property values live in the block only. A shader with
 `shadows off` does not cast. A shader is kept while a material uses it;
 a sample-count change rebuilds its pipelines and keeps its layout, so
-the material bind groups stay.
+the material bind groups stay. A material the game made or changed at
+runtime (`world.createShaderMaterial`, `setMaterialValue`) reaches the
+renderer through `Assets::materials_changed_since`: new values alone are
+one `write_buffer` into its block; a new texture, sampler, alpha mode or
+shader rebuilds that one material on its next use.
 
 When the shader is missing from the cache, or the material was cooked
 for another version of it, the material is the **error material**:

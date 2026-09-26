@@ -512,6 +512,111 @@ pub unsafe extern "C" fn fynkel_world_set_material(
     })
 }
 
+/// A shader asset material made at runtime (ADR-0031): see the header.
+///
+/// # Safety
+/// `world` live or NULL; `id` points at 16 readable bytes; `json` at
+/// `json_len` readable bytes (NULL when 0); `out` writable.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_set_shader_material(
+    world: *mut FynkelWorld,
+    id: *const u8,
+    json: *const u8,
+    json_len: u32,
+    out: *mut FynkelBufferView,
+) -> Status {
+    if id.is_null() || out.is_null() || (json.is_null() && json_len != 0) {
+        return Status::InvalidArgument;
+    }
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(std::slice::from_raw_parts(id, 16));
+    let key = fynkel_contracts::AssetRef::new(fynkel_contracts::Uuid(bytes));
+    let text =
+        (json_len != 0).then(|| std::slice::from_raw_parts(json, json_len as usize).to_vec());
+    *out = FynkelBufferView::empty();
+    guarded(world, move |w| {
+        let (status, diagnostics) = match &w.assets {
+            None => (
+                Status::LoadFailed,
+                vec![fynkel_contracts::Diagnostic::error(
+                    fynkel_contracts::Code::RUNTIME_ASSET_MISSING,
+                    "no project is loaded: load one before making materials",
+                )],
+            ),
+            Some(assets) => match text {
+                None => {
+                    assets.set_runtime_custom_material(&key, None);
+                    (Status::Ok, Vec::new())
+                }
+                Some(text) => shader_material(assets, &key, &text),
+            },
+        };
+        w.asset_json = if diagnostics.is_empty() {
+            Vec::new()
+        } else {
+            serde_json::Value::Array(
+                diagnostics
+                    .iter()
+                    .map(fynkel_document::diagnostic_json)
+                    .collect(),
+            )
+            .to_string()
+            .into_bytes()
+        };
+        *out = FynkelBufferView::of(&w.asset_json);
+        status
+    })
+}
+
+/// Checks the material document `text` against its shader (read from the
+/// cache) as the cook does, and on success sets it as the runtime
+/// material `key`. The diagnostics, warnings included.
+fn shader_material(
+    assets: &fynkel_assets::Assets,
+    key: &fynkel_contracts::AssetRef,
+    text: &[u8],
+) -> (Status, Vec<fynkel_contracts::Diagnostic>) {
+    use fynkel_contracts::{Code, Diagnostic};
+    let Ok(text) = std::str::from_utf8(text) else {
+        return (Status::InvalidArgument, Vec::new());
+    };
+    let material = match fynkel_document::Material::parse(None, text) {
+        Ok(m) => m,
+        Err(d) => return (Status::InvalidArgument, d),
+    };
+    let mut diagnostics = material.read_diagnostics().to_vec();
+    let Ok(shader_id) = material.shader.parse::<fynkel_contracts::Uuid>() else {
+        diagnostics.push(Diagnostic::error(
+            Code::MATERIAL_UNKNOWN_SHADER,
+            format!("`{}` is not a shader asset's id", material.shader),
+        ));
+        return (Status::InvalidArgument, diagnostics);
+    };
+    let shader = match assets.shader_source(shader_id) {
+        Ok(text) => fynkel_shader::parse(None, &text),
+        Err(d) => {
+            diagnostics.push(d);
+            return (Status::LoadFailed, diagnostics);
+        }
+    };
+    let shader = match shader {
+        Ok(s) => s,
+        Err(d) => {
+            diagnostics.extend(d);
+            return (Status::LoadFailed, diagnostics);
+        }
+    };
+    let (payload, checked) = material.custom_payload(&shader);
+    diagnostics.extend(checked);
+    match payload {
+        Some(p) if !fynkel_contracts::has_errors(&diagnostics) => {
+            assets.set_runtime_custom_material(key, Some(p));
+            (Status::Ok, diagnostics)
+        }
+        _ => (Status::InvalidArgument, diagnostics),
+    }
+}
+
 /// A mesh made at runtime (ADR-0026 §4): see the header.
 ///
 /// # Safety

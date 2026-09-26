@@ -264,14 +264,22 @@ unchanged: these are cooked chunks, not wire records.
 `SetFloat`:
 
 ```dart
-final water = world.createMaterial(
-  shader: 'shaders/water.shader',
-  values: {'deep': Color(0.02, 0.1, 0.2), 'roughness': 0.1},
+final water = world.createShaderMaterial(
+  'shaders/water.shader',
+  values: {'deep': Vec3(0.02, 0.1, 0.2), 'roughness': 0.1},
 );
-pond.meshRenderer.material = water;
+pond.set(pond.get<MeshRenderer>()!.copyWith(material: water));
 
-crate.material.set('dissolve', t);   // every frame
+world.setMaterialValue(crate, 'dissolve', t);   // every frame
 ```
+
+*Amended 2026-09-26 (step 6):* the names follow the code API that
+exists. Dart cannot mix optional positional and named parameters, so
+`createMaterial([PbrMaterial])` stays as it is and a shader's material
+comes from `createShaderMaterial(shader, values:)`. Values change
+through `world.setMaterialValue(material, name, value)`, beside
+`setMaterial` for a Lit one; it works on a cooked shader material too.
+Colours are `Vec3`/`Vec4`.
 
 - **Where a value goes.** `material.set` changes that material, and every
   object using it sees the change, as in Unity.
@@ -412,8 +420,9 @@ These are later, beside the surface shader, not replacing it:
    - pixel tests: an unlit colour, a property and a texture moving the
      pixels, `vertex` moving the shadow, the error colour, and a PBR-copy
      shader close to the built-in.
-6. **Code:** `createMaterial(shader:, values:)` and `material.set(…)` in
-   `package:fynkel`, with the runtime uniform write.
+6. **Code:** `createShaderMaterial(shader, values:)` and
+   `setMaterialValue(…)` in `package:fynkel`, with the runtime uniform
+   write (amended, see § 7).
 7. **The editor:**
    - Create ▸ Shader and the shader's page with its errors;
    - the material Inspector's Shader dropdown and fields;

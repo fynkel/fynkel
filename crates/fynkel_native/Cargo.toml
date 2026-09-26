@@ -36,6 +36,7 @@ fynkel_core.workspace = true
 fynkel_audio.workspace = true
 fynkel_assets.workspace = true
 fynkel_document.workspace = true
+fynkel_shader.workspace = true
 fynkel_scene.workspace = true
 fynkel_wire.workspace = true
 log.workspace = true

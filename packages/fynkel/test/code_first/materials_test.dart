@@ -66,9 +66,111 @@ void main() {
     expect(w.runtimeMaterial(rusted), isNull);
   });
 
+  group('a material of a .shader (ADR-0031)', () {
+    late String project;
+    late String shaderCache;
+    setUpAll(() {
+      project = Directory.systemTemp.createTempSync('fynkel-code-first-shader-').path;
+      _copy(Directory(fixture), Directory(project));
+      Directory('$project/assets/shaders').createSync(recursive: true);
+      File('$project/assets/shaders/tint.shader').writeAsStringSync(_tintShader);
+      File('$project/assets/shaders/tint.shader.meta.json').writeAsStringSync(
+          '{"\$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"$_tintId",'
+          '"name":"tint.shader","importer":"fynkel.shader","importerVersion":1,"settings":{},"subAssets":{}}');
+      File('$project/assets/materials/tinted.material.json').writeAsStringSync(
+          '{"\$schema":"https://fynkel.dev/schemas/material.schema.json","formatVersion":2,'
+          '"id":"c0000000-0000-4000-8000-000000000602","name":"Tinted","shader":{"asset":"$_tintId"},'
+          '"parameters":{"tint":[0,0,1]}}');
+      shaderCache = '$project/.fynkel/cache';
+      cookProject(project, cacheDir: shaderCache);
+    });
+    tearDownAll(() => Directory(project).deleteSync(recursive: true));
+
+    test('made with values, changed one at a time, checked as the cook checks, destroyed', () {
+      final w = fresh()..loadProject(project, cacheDir: shaderCache);
+      final glow = w.createShaderMaterial('shaders/tint.shader', values: {'tint': const Vec3(1, 0, 0), 'power': 2});
+      expect(glow.isValid, isTrue);
+      expect(w.createShaderMaterial(const AssetRef(_tintId)), isNot(glow));
+
+      final cube = w.createPrimitive(Primitive.cube);
+      cube.set(cube.get<MeshRenderer>()!.copyWith(material: glow));
+      w.frame(1 / 60);
+
+      // Unity's `material.SetFloat`: every frame is fine.
+      for (var i = 0; i < 3; i++) {
+        w.setMaterialValue(glow, 'power', i.toDouble());
+        w.frame(1 / 60);
+      }
+      expect(w.materialValue(glow, 'power'), 2.0);
+      expect(w.materialValue(glow, 'tint'), [1.0, 0.0, 0.0]);
+      w.setMaterialValue(glow, 'glow', w.assets.find('textures/swatch')!);
+      expect(w.materialValue(glow, 'glow'), isA<AssetRef>());
+      w.setMaterialValue(glow, 'power', null);
+      expect(w.materialValue(glow, 'power'), isNull, reason: 'the default again');
+
+      // Checked at the call, the material unchanged.
+      expect(() => w.setMaterialValue(glow, 'power', 9), throwsA(isA<ArgumentError>().having((e) => '$e', 'message', contains('FYN-D0303'))));
+      expect(() => w.setMaterialValue(glow, 'powr', 1), throwsA(isA<ArgumentError>().having((e) => '$e', 'message', contains('FYN-D0301'))));
+      expect(() => w.setMaterialValue(glow, 'tint', 'red'), throwsArgumentError);
+      expect(w.materialValue(glow, 'power'), isNull);
+      expect(() => w.createShaderMaterial('shaders/nope.shader'), throwsArgumentError);
+      expect(() => w.createShaderMaterial(42), throwsArgumentError);
+
+      w.destroyMaterial(glow);
+      expect(w.materialValue(glow, 'tint'), isNull);
+    });
+
+    test('a cooked shader material changed for the run, then back', () {
+      final w = fresh()..loadProject(project, cacheDir: shaderCache);
+      final tinted = w.assets.find('materials/tinted')!;
+      expect(w.materialValue(tinted, 'power'), isNull);
+      w.setMaterialValue(tinted, 'power', 3);
+      expect(w.materialValue(tinted, 'power'), 3);
+      expect(w.materialValue(tinted, 'tint'), [0, 0, 1], reason: 'its cooked values kept');
+      w.destroyMaterial(tinted);
+      expect(w.materialValue(tinted, 'power'), isNull);
+    });
+
+    test('a Lit material is not a shader material', () {
+      final w = fresh()..loadProject(project, cacheDir: shaderCache);
+      expect(() => w.setMaterialValue(w.assets.find('materials/rusted')!, 'tint', 1), throwsArgumentError);
+    });
+  });
+
   test('before any load there is no store to hold it', () {
     final w = fresh();
     expect(() => w.createMaterial(), throwsStateError);
     expect(() => w.setMaterial(const AssetRef('not-a-uuid'), const PbrMaterial()), throwsArgumentError);
   });
+}
+
+const _tintId = 'c0000000-0000-4000-8000-000000000601';
+
+const _tintShader = r'''shader "Tests/Tint" {
+    lighting unlit
+    properties {
+        tint color3 = (1, 1, 1)
+        power float = 1 range(0, 4)
+        glow texture = black
+    }
+}
+
+fn surface(in: SurfaceInput) -> Surface {
+    var s = default_surface();
+    s.base_color = material.tint * material.power + sample_glow(in.uv0).rgb;
+    return s;
+}
+''';
+
+void _copy(Directory from, Directory to) {
+  to.createSync(recursive: true);
+  for (final e in from.listSync()) {
+    final name = e.uri.pathSegments.lastWhere((s) => s.isNotEmpty);
+    if (e is Directory) {
+      if (name == '.fynkel') continue;
+      _copy(e, Directory('${to.path}/$name'));
+    } else if (e is File) {
+      e.copySync('${to.path}/$name');
+    }
+  }
 }

@@ -510,6 +510,38 @@ class NativeWorld {
     }
   }
 
+  /// `fynkel_world_set_shader_material` (ADR-0031): the material document
+  /// [json] (its `shader` a `.shader` asset's id) checked against its
+  /// shader and drawn as the runtime material [id] (16 UUID bytes); null
+  /// removes it. The diagnostics come back with the status, warnings too.
+  (FynkelStatus, List<Map<String, Object?>>) setShaderMaterial(Uint8List id, String? json) {
+    ffiCalls++;
+    final idp = calloc<Uint8>(16);
+    final out = calloc<FynkelBufferView>();
+    Pointer<Uint8> text = nullptr;
+    try {
+      idp.asTypedList(16).setAll(0, id);
+      var length = 0;
+      if (json != null) {
+        final bytes = utf8.encode(json);
+        length = bytes.length;
+        text = calloc<Uint8>(length);
+        text.asTypedList(length).setAll(0, bytes);
+      }
+      final s = fynkel_world_set_shader_material(_w, idp, text, length, out);
+      final v = out.ref;
+      if (v.length == 0) return (s, const []);
+      dartCopies++;
+      dartBytesCopied += v.length;
+      final list = jsonDecode(utf8.decode(v.data.asTypedList(v.length))) as List<Object?>;
+      return (s, [for (final d in list) (d as Map).cast<String, Object?>()]);
+    } finally {
+      calloc.free(idp);
+      calloc.free(out);
+      if (text != nullptr) calloc.free(text);
+    }
+  }
+
   /// `fynkel_world_set_mesh` (ADR-0026 §4): the static `MESH` [payload]
   /// drawn as the runtime mesh [id] (16 UUID bytes); null removes it.
   FynkelStatus setMesh(Uint8List id, Uint8List? payload) {
