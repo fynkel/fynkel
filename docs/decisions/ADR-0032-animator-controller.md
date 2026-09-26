@@ -248,6 +248,12 @@ s.next;                                   // the state being faded to, or null
 
 - A wrong parameter name or type throws an `ArgumentError`, with the
   names the controller has.
+
+> **As built (step 4):** Dart has no overloads, so the existing
+> `play` and `crossfade` (spelled as before, not `crossFade`) take a
+> state name (`String`) or a clip (`AssetRef`). `stateOf` has a
+> companion `layers` (every layer) and `parameters` (the values, for
+> the editor's live view).
 - **`onAnimatorStateEntered` / `onAnimatorStateExited`** on `Behaviour`
   receive the events of § 6 (Unity's `StateMachineBehaviour.OnStateEnter`,
   kept on the object's own scripts rather than on the state).

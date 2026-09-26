@@ -8,7 +8,83 @@ import '../generated/schema.g.dart' as gen;
 import 'asset_ref.dart';
 import '../math.dart';
 
-export '../generated/schema.g.dart' show AnimateOp, Animator, Skin;
+export '../generated/schema.g.dart' show AnimateOp, Animator, AnimatorParameterKind, Skin;
+
+/// One layer of an Animator Controller as the last tick left it
+/// (`GameObject.animation.stateOf`, ADR-0032; Unity's
+/// `AnimatorStateInfo`). During a crossfade, [name] is the state fading
+/// out and [next] the one fading in, as Unity reports them.
+class AnimatorStateInfo {
+  const AnimatorStateInfo({
+    required this.layer,
+    required this.name,
+    required this.normalizedTime,
+    required this.length,
+    this.next,
+    this.nextNormalizedTime = 0,
+    this.transitionProgress = 0,
+  });
+
+  factory AnimatorStateInfo.fromRecord(gen.AnimatorLayerStateRecord r) => AnimatorStateInfo(
+        layer: r.layer,
+        name: r.state,
+        normalizedTime: r.normalizedTime,
+        length: r.length,
+        next: r.inTransition ? r.next : null,
+        nextNormalizedTime: r.nextNormalizedTime,
+        transitionProgress: r.transitionProgress,
+      );
+
+  final int layer;
+
+  /// The state playing (the one fading out during a crossfade).
+  final String name;
+
+  /// How far into the state, in lengths of its motion: 1.5 is halfway
+  /// through the second loop.
+  final double normalizedTime;
+
+  /// The state's motion's length in seconds (0 for no motion).
+  final double length;
+
+  /// The state being faded to, or null when no crossfade runs.
+  final String? next;
+  final double nextNormalizedTime;
+
+  /// How far the crossfade is, 0 → 1 (0 without one).
+  final double transitionProgress;
+
+  bool get isInTransition => next != null;
+
+  @override
+  String toString() => 'AnimatorStateInfo($layer: $name ${normalizedTime.toStringAsFixed(3)}'
+      '${next == null ? '' : ' → $next ${(transitionProgress * 100).round()}%'})';
+}
+
+/// One parameter of an Animator Controller and its value after the last
+/// tick (`GameObject.animation.parameters`, ADR-0032).
+class AnimatorParameter {
+  const AnimatorParameter(this.name, this.kind, this.value);
+
+  factory AnimatorParameter.fromRecord(gen.AnimatorParameterRecord r) => AnimatorParameter(
+        r.name,
+        r.kind,
+        switch (r.kind) {
+          gen.AnimatorParameterKind.float => r.value,
+          gen.AnimatorParameterKind.int => r.integer,
+          gen.AnimatorParameterKind.bool || gen.AnimatorParameterKind.trigger => r.flag,
+        },
+      );
+
+  final String name;
+  final gen.AnimatorParameterKind kind;
+
+  /// A `double`, an `int` or a `bool` (a trigger: whether it is set).
+  final Object value;
+
+  @override
+  String toString() => 'AnimatorParameter($name: ${kind.name} = $value)';
+}
 
 /// An animator's playback as the last tick left it
 /// (`GameObject.animation.state`, `FYNKEL_QUERY_ANIMATOR`).

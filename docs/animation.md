@@ -606,7 +606,49 @@ behaviours of the animator's object right after each tick's step, with
 the contact and zone callbacks and before `afterPhysics`; the events are
 also in `drainEvents()` for a host that reads the world raw.
 `LoadReport.animation` (`AnimationAssets { clips, skins }`) says what a
-load registered. The joints are objects: `findChild('hips')`,
+load registered.
+
+**With an Animator Controller** (ADR-0032, Unity's `Animator` API):
+
+```dart
+animation.setFloat('speed', v);            // SetFloat; also setInteger, setBool
+animation.setTrigger('jump');              // SetTrigger; resetTrigger
+animation.getFloat('speed');               // GetFloat; getInteger, getBool
+animation.play('Jump');                    // Play(stateName): at once
+animation.crossfade('Locomotion', 0.1);    // CrossFade(stateName, seconds)
+final s = animation.stateOf(layer: 0);     // GetCurrentAnimatorStateInfo
+s?.name; s?.normalizedTime; s?.isInTransition; s?.next;
+```
+
+- The setters are commands for the next tick. The getters read what
+  this tick set, else the last tick's value.
+- A wrong parameter name or type throws an `ArgumentError` that lists
+  the parameters. Before the controller's first tick the SDK does not
+  know them yet, so the engine checks the command instead (an
+  `invalidPayload` diagnostic).
+- `play` and `crossfade` take a state name (`String`, with `layer` and
+  `offset`) or a clip (`AssetRef`, with `looping` and `speed`). The clip
+  calls (`play(clip)`, `crossfade(clip, …)`, `time =`, `setParameter`)
+  throw a `StateError` on an animator with a controller; the parameter
+  calls throw one on an animator without.
+- `stateOf({layer})` is an `AnimatorStateInfo { layer, name,
+  normalizedTime, length, next, nextNormalizedTime, transitionProgress,
+  isInTransition }` (`FYNKEL_QUERY_ANIMATOR_CONTROLLER`); during a
+  crossfade `name` is the state fading out and `next` the one fading
+  in. `layers` gives them all, `parameters` the
+  `AnimatorParameter { name, kind, value }` list
+  (`FYNKEL_QUERY_ANIMATOR_PARAMETERS`).
+- `Behaviour.onAnimatorStateEntered(AnimatorStateEntered { entity,
+  layer, state, from })` and `onAnimatorStateExited(AnimatorStateExited {
+  entity, layer, state })` run after the step, after
+  `onAnimationEnded` and before `onAnimationMarker` (Unity's
+  `StateMachineBehaviour.OnStateEnter`/`OnStateExit`, on the object's
+  own scripts).
+- Code can set a controller on an Animator
+  (`set(animator.copyWith(controller: ref))`); the native layer
+  registers it and its motions from the cache.
+
+Tests: `packages/fynkel/test/controller_test.dart`. The joints are objects: `findChild('hips')`,
 `localTransform`, `worldTransform`, `get<Transform>()` and a transform
 write (which the next tick's pose overrides for the properties the clip
 keys — write the ones it does not, or a joint it does not key).

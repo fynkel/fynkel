@@ -11,6 +11,11 @@ export 'generated/schema.g.dart'
         AnimationEndedEvent,
         AnimationMarkerEvent,
         Animator,
+        AnimatorLayerStateRecord,
+        AnimatorParameterKind,
+        AnimatorParameterRecord,
+        AnimatorStateEnteredEvent,
+        AnimatorStateExitedEvent,
         AnimatorStateRecord,
         AudioBus,
         AudioBusCommandRecord,
@@ -68,7 +73,7 @@ export 'generated/schema.g.dart'
         VolumeShape,
         componentCodecs,
         componentIds;
-export 'src/animation.dart' show AnimationAssets, AnimatorState;
+export 'src/animation.dart' show AnimationAssets, AnimatorParameter, AnimatorState, AnimatorStateInfo;
 export 'src/audio.dart' show AudioAssets, AudioState, AudioStats;
 export 'src/asset_index.dart';
 export 'src/asset_ref.dart';

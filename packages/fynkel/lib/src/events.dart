@@ -113,6 +113,38 @@ class AnimationMarker extends EngineEvent {
   String toString() => 'AnimationMarker(${entity.toRadixString(16)} $clip "$name")';
 }
 
+/// A layer of a `fynkel.Animator`'s controller entered or left a state
+/// (ADR-0032): [entity] is the animator's, [layer] the layer's index,
+/// [state] the state's name.
+sealed class AnimatorStateEvent extends EngineEvent {
+  const AnimatorStateEvent(super.tickLo, this.entity, this.layer, this.state);
+  final int entity;
+  final int layer;
+  final String state;
+}
+
+/// A state started: at the start of the crossfade into it, or at once
+/// for a jump. [from] is the state left, empty on the first tick.
+/// Behaviours see it in `onAnimatorStateEntered` (Unity's
+/// `OnStateEnter`).
+class AnimatorStateEntered extends AnimatorStateEvent {
+  const AnimatorStateEntered(super.tickLo, super.entity, super.layer, super.state, this.from);
+  final String from;
+
+  @override
+  String toString() => 'AnimatorStateEntered(${entity.toRadixString(16)} $layer: $from → $state)';
+}
+
+/// A state stopped playing: at the end of the crossfade out of it, or at
+/// once for a jump. Behaviours see it in `onAnimatorStateExited`
+/// (Unity's `OnStateExit`).
+class AnimatorStateExited extends AnimatorStateEvent {
+  const AnimatorStateExited(super.tickLo, super.entity, super.layer, super.state);
+
+  @override
+  String toString() => 'AnimatorStateExited(${entity.toRadixString(16)} $layer: $state)';
+}
+
 enum ContactKind { collisionEnter, collisionStay, collisionExit, triggerEnter, triggerExit }
 
 /// A collision or trigger event between two colliders (M3-08). For
@@ -180,6 +212,8 @@ Iterable<EngineEvent> decodeEvents(WireBuffer b) sync* {
       gen.AnimationEndedEvent.eventKind => _animationEnded(d, body, tail, h.tickLo),
       gen.AnimationMarkerEvent.eventKind => _animationMarker(d, body, tail, h.tickLo),
       gen.PlaybackEndedEvent.eventKind => _playbackEnded(d, body, tail, h.tickLo),
+      gen.AnimatorStateEnteredEvent.eventKind => _stateEntered(d, body, tail, h.tickLo),
+      gen.AnimatorStateExitedEvent.eventKind => _stateExited(d, body, tail, h.tickLo),
       >= _physicsFirst && < _physicsFirst + 5 => _contact(d, body, tail, h),
       _ => UnknownEvent(h.tickLo, h.kind),
     };
@@ -204,6 +238,16 @@ ZoneEvent _zone(ByteData d, int o, Uint8List tail, int tickLo, {required bool en
 AnimationEnded _animationEnded(ByteData d, int o, Uint8List tail, int tickLo) {
   final e = gen.AnimationEndedEvent.decode(d, o, tail);
   return AnimationEnded(tickLo, e.entity, e.clip);
+}
+
+AnimatorStateEntered _stateEntered(ByteData d, int o, Uint8List tail, int tickLo) {
+  final e = gen.AnimatorStateEnteredEvent.decode(d, o, tail);
+  return AnimatorStateEntered(tickLo, e.entity, e.layer, e.state, e.from);
+}
+
+AnimatorStateExited _stateExited(ByteData d, int o, Uint8List tail, int tickLo) {
+  final e = gen.AnimatorStateExitedEvent.decode(d, o, tail);
+  return AnimatorStateExited(tickLo, e.entity, e.layer, e.state);
 }
 
 AnimationMarker _animationMarker(ByteData d, int o, Uint8List tail, int tickLo) {

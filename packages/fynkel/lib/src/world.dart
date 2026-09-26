@@ -815,7 +815,7 @@ class World {
       t._native.stop();
       t._behaviours.start();
       _behaviours.afterPhysics(stepped, _contacts(events), _zoneEvents(events), _animationEvents(events),
-          _markerEvents(events), _playbackEvents(events));
+          _markerEvents(events), _playbackEvents(events), _stateEvents(events));
       t._behaviours.stop();
       _carry(events);
     }
@@ -886,6 +886,11 @@ class World {
   static List<AnimationMarker> _markerEvents(List<EngineEvent> events) {
     if (events.isEmpty) return const [];
     return [for (final e in events) if (e is AnimationMarker) e];
+  }
+
+  static List<AnimatorStateEvent> _stateEvents(List<EngineEvent> events) {
+    if (events.isEmpty) return const [];
+    return [for (final e in events) if (e is AnimatorStateEvent) e];
   }
 
   static List<PlaybackEnded> _playbackEvents(List<EngineEvent> events) {
@@ -1924,19 +1929,50 @@ class AnimationControl {
   AnimationControl._(this._go);
   final GameObject _go;
 
-  /// Plays [clip] from its start (or its end, at a negative [speed]),
-  /// replacing what plays, no blend. [clip] may name a blend space
-  /// (`<name>.blend.json`, M3-19c): its points are then mixed by the
-  /// parameter it names ([setParameter]), phase-synced, and [state]
-  /// reports the blended duration.
-  void play(AssetRef clip, {bool looping = true, double speed = 1}) =>
-      _go._animate(gen.AnimateOp.play, clip: clip, speed: speed, looping: looping);
+  /// Plays [target] at once, replacing what plays, no blend.
+  ///
+  /// A `String` is a state of the animator's controller (ADR-0032,
+  /// Unity's `Play(stateName)`): it starts at [offset] (a fraction of its
+  /// motion, 0…1) in [layer] (null: the first layer that has it); an
+  /// unknown state is an `invalidPayload` diagnostic that lists the
+  /// states.
+  ///
+  /// An [AssetRef] is a clip, for an animator without a controller: it
+  /// plays from its start (or its end, at a negative [speed]). It may
+  /// name a blend space (`<name>.blend.json`, M3-19c): its points are
+  /// then mixed by the parameter it names ([setParameter]),
+  /// phase-synced, and [state] reports the blended duration. On an
+  /// animator with a controller it throws a [StateError]: the controller
+  /// owns what plays.
+  void play(Object target, {bool looping = true, double speed = 1, int? layer, double offset = 0}) {
+    if (target is String) {
+      _go._animate(gen.AnimateOp.playState, name: target, layer: layer ?? -1, value: offset);
+    } else if (target is AssetRef) {
+      _noController('play(clip)', 'play(stateName)');
+      _go._animate(gen.AnimateOp.play, clip: target, speed: speed, looping: looping);
+    } else {
+      throw ArgumentError.value(target, 'target', 'a state name (String) or a clip (AssetRef)');
+    }
+  }
 
-  /// Blends from the current pose into [clip] over [seconds]: the old clip
-  /// keeps advancing underneath until the fade ends. A fade of 0 is a
-  /// [play]; a negative fade is rejected (`INVALID_PAYLOAD`).
-  void crossfade(AssetRef clip, double seconds, {bool looping = true, double speed = 1}) =>
-      _go._animate(gen.AnimateOp.crossfade, clip: clip, seconds: seconds, speed: speed, looping: looping);
+  /// Blends from the current pose into [target] over [seconds]: what
+  /// played keeps advancing underneath until the fade ends. A fade of 0
+  /// is a [play]; a negative fade is rejected (`INVALID_PAYLOAD`).
+  ///
+  /// A `String` is a state of the animator's controller (Unity's
+  /// `CrossFade(stateName, seconds)`), started at [offset] in [layer];
+  /// an [AssetRef] a clip, for an animator without one (see [play]).
+  void crossfade(Object target, double seconds,
+      {bool looping = true, double speed = 1, int? layer, double offset = 0}) {
+    if (target is String) {
+      _go._animate(gen.AnimateOp.crossFadeState, name: target, seconds: seconds, layer: layer ?? -1, value: offset);
+    } else if (target is AssetRef) {
+      _noController('crossfade(clip, …)', 'crossfade(stateName, seconds)');
+      _go._animate(gen.AnimateOp.crossfade, clip: target, seconds: seconds, speed: speed, looping: looping);
+    } else {
+      throw ArgumentError.value(target, 'target', 'a state name (String) or a clip (AssetRef)');
+    }
+  }
 
   /// Stops and rewinds: the nodes keep the pose of the last tick until
   /// another clip plays.
@@ -1947,11 +1983,16 @@ class AnimationControl {
   void resume() => _go._animate(gen.AnimateOp.resume);
 
   /// Playback rate from the next tick; negative plays backwards, 0 holds.
+  /// With a controller, it scales every state (Unity's `animator.speed`).
   set speed(double value) => _go._animate(gen.AnimateOp.setSpeed, speed: value);
 
   /// Seeks to [seconds] into the clip (clamped to its length); the pose
-  /// there is applied at the next tick without advancing.
-  set time(double seconds) => _go._animate(gen.AnimateOp.setTime, seconds: seconds);
+  /// there is applied at the next tick without advancing. Not for an
+  /// animator with a controller (use [play] with an `offset`).
+  set time(double seconds) {
+    _noController('time =', "play(stateName, offset: …)");
+    _go._animate(gen.AnimateOp.setTime, seconds: seconds);
+  }
 
   /// Layer weight from the next tick, `0…1` (M3-19c): how far this
   /// animator's pose replaces (or, `additive`, is added onto) what the
@@ -1962,8 +2003,12 @@ class AnimationControl {
   /// Sets a named blend parameter (M3-19c): a playing blend space reads
   /// the one it names every tick (clamped to its points; the phase is
   /// kept across a change); a plain clip keeps the value for the next
-  /// blend space. [value] must be finite and [name] non-empty.
-  void setParameter(String name, double value) => _go._animate(gen.AnimateOp.setParameter, name: name, value: value);
+  /// blend space. [value] must be finite and [name] non-empty. With a
+  /// controller, use [setFloat].
+  void setParameter(String name, double value) {
+    _noController('setParameter', 'setFloat');
+    _go._animate(gen.AnimateOp.setParameter, name: name, value: value);
+  }
 
   /// The animator's playback after the last tick (`FYNKEL_QUERY_ANIMATOR`);
   /// `null` without an `Animator` or before the object spawned.
@@ -1977,6 +2022,163 @@ class AnimationControl {
 
   /// True while a clip advances ([AnimatorState.playing]).
   bool get isPlaying => state?.playing ?? false;
+
+  // ------------------------------------ the Animator Controller (ADR-0032)
+
+  /// Sets a float parameter of the animator's controller (Unity's
+  /// `SetFloat`) for the next tick. A wrong name or type throws an
+  /// [ArgumentError] that lists the parameters; an animator without a
+  /// controller a [StateError].
+  void setFloat(String name, double value) {
+    _check(name, gen.AnimatorParameterKind.float, 'setFloat');
+    _go._animate(gen.AnimateOp.setFloat, name: name, value: value);
+    (_pending ??= {})[name] = value;
+  }
+
+  /// Sets an int parameter (Unity's `SetInteger`).
+  void setInteger(String name, int value) {
+    _check(name, gen.AnimatorParameterKind.int, 'setInteger');
+    _go._animate(gen.AnimateOp.setInteger, name: name, integer: value);
+    (_pending ??= {})[name] = value;
+  }
+
+  /// Sets a bool parameter (Unity's `SetBool`).
+  void setBool(String name, bool value) {
+    _check(name, gen.AnimatorParameterKind.bool, 'setBool');
+    _go._animate(gen.AnimateOp.setBool, name: name, value: value ? 1 : 0);
+    (_pending ??= {})[name] = value;
+  }
+
+  /// Sets a trigger (Unity's `SetTrigger`): it stays set until a
+  /// transition that tests it fires, which clears it.
+  void setTrigger(String name) {
+    _check(name, gen.AnimatorParameterKind.trigger, 'setTrigger');
+    _go._animate(gen.AnimateOp.setTrigger, name: name);
+    (_pending ??= {})[name] = true;
+  }
+
+  /// Clears a trigger nothing used (Unity's `ResetTrigger`).
+  void resetTrigger(String name) {
+    _check(name, gen.AnimatorParameterKind.trigger, 'resetTrigger');
+    _go._animate(gen.AnimateOp.resetTrigger, name: name);
+    (_pending ??= {})[name] = false;
+  }
+
+  /// A float parameter: what this tick set, else the last tick's value
+  /// (Unity's `GetFloat`). A wrong name or type throws an
+  /// [ArgumentError]; a controller not running yet (before the first
+  /// tick) reads 0.
+  double getFloat(String name) => (_read(name, gen.AnimatorParameterKind.float, 'getFloat') as double?) ?? 0;
+
+  /// An int parameter (Unity's `GetInteger`).
+  int getInteger(String name) => (_read(name, gen.AnimatorParameterKind.int, 'getInteger') as int?) ?? 0;
+
+  /// A bool parameter, or whether a trigger is set (Unity's `GetBool`).
+  bool getBool(String name) => (_read(name, gen.AnimatorParameterKind.bool, 'getBool') as bool?) ?? false;
+
+  /// The controller's parameters after the last tick
+  /// (`FYNKEL_QUERY_ANIMATOR_PARAMETERS`); empty without a running
+  /// controller.
+  List<AnimatorParameter> get parameters {
+    final e = _go._entity;
+    if (e == null || !_go._alive) return const [];
+    final b = _go.world._native.query(QueryKind.animatorParameters, entity: e);
+    return [
+      for (var i = 0; i < b.recordCount; i++)
+        AnimatorParameter.fromRecord(
+            gen.AnimatorParameterRecord.decode(b.records, i * gen.AnimatorParameterRecord.wireSize, b.tail)),
+    ];
+  }
+
+  /// Every layer's state after the last tick
+  /// (`FYNKEL_QUERY_ANIMATOR_CONTROLLER`); empty without a running
+  /// controller.
+  List<AnimatorStateInfo> get layers {
+    final e = _go._entity;
+    if (e == null || !_go._alive) return const [];
+    final b = _go.world._native.query(QueryKind.animatorController, entity: e);
+    return [
+      for (var i = 0; i < b.recordCount; i++)
+        AnimatorStateInfo.fromRecord(
+            gen.AnimatorLayerStateRecord.decode(b.records, i * gen.AnimatorLayerStateRecord.wireSize, b.tail)),
+    ];
+  }
+
+  /// One layer's state after the last tick (Unity's
+  /// `GetCurrentAnimatorStateInfo`, with `next` for
+  /// `GetNextAnimatorStateInfo`); null without a running controller or
+  /// such a layer.
+  AnimatorStateInfo? stateOf({int layer = 0}) {
+    final all = layers;
+    return layer >= 0 && layer < all.length ? all[layer] : null;
+  }
+
+  /// Values set since the last step (read-your-writes for the getters);
+  /// cleared with the object's overlay after every step.
+  Map<String, Object>? _pending;
+
+  /// The controller's parameters as last read, for the setters' checks;
+  /// read again on a miss (the animator may name another controller).
+  List<AnimatorParameter>? _known;
+
+  bool get _controlled => _go.get<gen.Animator>()?.controller != null;
+
+  void _noController(String call, String instead) {
+    if (_controlled) {
+      throw StateError('animation.$call: ${_go.name} runs an Animator Controller, which owns what plays; '
+          'use animation.$instead');
+    }
+  }
+
+  static bool _fits(gen.AnimatorParameterKind have, gen.AnimatorParameterKind want) => switch (want) {
+        gen.AnimatorParameterKind.float => have == gen.AnimatorParameterKind.float,
+        gen.AnimatorParameterKind.int => have == gen.AnimatorParameterKind.int,
+        // A bool value fits a bool and a trigger, as in the engine.
+        _ => have == gen.AnimatorParameterKind.bool || have == gen.AnimatorParameterKind.trigger,
+      };
+
+  /// The parameter [name], checked against [kind]; null while the
+  /// controller has not run a tick (the engine checks the command then).
+  AnimatorParameter? _check(String name, gen.AnimatorParameterKind kind, String call) {
+    if (_go.get<gen.Animator>() != null && !_controlled) {
+      throw StateError('animation.$call: ${_go.name} has no Animator Controller '
+          '(set Animator.controller, or play clips with play(clip))');
+    }
+    AnimatorParameter? find() {
+      for (final p in _known ?? const <AnimatorParameter>[]) {
+        if (p.name == name) return p;
+      }
+      return null;
+    }
+
+    var p = find();
+    if (p == null || !_fits(p.kind, kind)) {
+      final fresh = parameters;
+      _known = fresh.isEmpty ? null : fresh;
+      if (fresh.isEmpty) return null;
+      p = find();
+    }
+    if (p == null) {
+      throw ArgumentError.value(
+          name, 'name', 'no parameter `$name` (the parameters: ${[for (final k in _known!) k.name].join(', ')})');
+    }
+    if (!_fits(p.kind, kind)) {
+      throw ArgumentError.value(name, 'name', 'parameter `$name` is a ${p.kind.name}, not a ${kind.name}');
+    }
+    return p;
+  }
+
+  Object? _read(String name, gen.AnimatorParameterKind kind, String call) {
+    final p = _check(name, kind, call);
+    final pending = _pending?[name];
+    if (pending != null) return pending;
+    if (p == null) return null;
+    // The value after the last tick (the cached list may be older).
+    for (final q in parameters) {
+      if (q.name == name) return q.value;
+    }
+    return null;
+  }
 }
 
 /// Playback of one object's `fynkel.AudioSource` ([GameObject.audio],
@@ -2082,6 +2284,7 @@ class GameObject {
     _components?.clear();
     _componentsQueried = false;
     _presentMask = 0;
+    _animation?._pending?.clear();
   }
 
   /// The staged writer, seeded from the current local value when nothing is
@@ -2687,11 +2890,20 @@ class GameObject {
       double speed = 1,
       bool looping = true,
       double value = 0,
-      String name = ''}) {
+      String name = '',
+      int integer = 0,
+      int layer = -1}) {
     world.modules.require(Module.animation, 'animation command ${op.name}');
     final e = _simulationEntity('animation command');
-    world._simulation
-        .animate(e, op, clip: clip, seconds: seconds, speed: speed, looping: looping, value: value, name: name);
+    world._simulation.animate(e, op,
+        clip: clip,
+        seconds: seconds,
+        speed: speed,
+        looping: looping,
+        value: value,
+        name: name,
+        integer: integer,
+        layer: layer);
     world._simulationTargets.add(this);
   }
 

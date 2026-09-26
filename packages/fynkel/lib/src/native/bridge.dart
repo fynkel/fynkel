@@ -30,7 +30,9 @@ enum QueryKind {
   systems,
   animator,
   audio,
-  audioStats
+  audioStats,
+  animatorController,
+  animatorParameters
 }
 
 class FramePlan {

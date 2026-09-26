@@ -484,6 +484,15 @@ abstract class Behaviour {
   /// and backwards playback included.
   void onAnimationMarker(AnimationMarker event) {}
 
+  /// Animator Controller callbacks (ADR-0032; Unity's
+  /// `StateMachineBehaviour.OnStateEnter`/`OnStateExit`, kept on the
+  /// object's own scripts): right after the tick's step, when a layer of
+  /// this object's `fynkel.Animator` controller entered a state (at the
+  /// start of the crossfade into it) or stopped playing one (at the end
+  /// of the crossfade out). On a jump the exit comes first.
+  void onAnimatorStateEntered(AnimatorStateEntered event) {}
+  void onAnimatorStateExited(AnimatorStateExited event) {}
+
   /// Audio callback (M3-11): right after the tick's step, when this
   /// object's `fynkel.AudioSource` finished a non-looping clip
   /// (`event.clip`). A looping clip never ends; `stop` and a stolen voice
@@ -987,10 +996,12 @@ class _BehaviourSystem {
   /// (in contact order, side `a` then `b`), then `afterPhysics` for the
   /// behaviours that opted in.
   void afterPhysics(int tick, List<Contact> contacts, List<ZoneEvent> zones, List<AnimationEnded> animations,
-      List<AnimationMarker> markers, List<PlaybackEnded> playback) {
+      List<AnimationMarker> markers, List<PlaybackEnded> playback,
+      [List<AnimatorStateEvent> states = const []]) {
     if (contacts.isNotEmpty) _dispatchContacts(contacts);
     if (zones.isNotEmpty) _dispatchZones(zones);
     if (animations.isNotEmpty) _dispatchAnimations(animations);
+    if (states.isNotEmpty) _dispatchStates(states);
     if (markers.isNotEmpty) _dispatchMarkers(markers);
     if (playback.isNotEmpty) _dispatchPlayback(playback);
     final ctx = AfterPhysicsContext(tick: tick, contacts: contacts, context: world.context);
@@ -1032,6 +1043,30 @@ class _BehaviourSystem {
             b.onAnimationEnded(e);
           } catch (err, st) {
             _threw(b, 'onAnimationEnded', err, st);
+          }
+        }
+      }
+    });
+  }
+
+  void _dispatchStates(List<AnimatorStateEvent> states) {
+    if (_all.isEmpty) return;
+    world.context.run(() {
+      for (final s in states) {
+        final go = world._byEntity[s.entity];
+        if (go == null || go._behaviours.isEmpty) continue;
+        for (final b in go._behaviours.toList(growable: false)) {
+          if (!b._active || b._destroyRequested) continue;
+          final entered = s is AnimatorStateEntered;
+          try {
+            switch (s) {
+              case AnimatorStateEntered():
+                b.onAnimatorStateEntered(s);
+              case AnimatorStateExited():
+                b.onAnimatorStateExited(s);
+            }
+          } catch (err, st) {
+            _threw(b, entered ? 'onAnimatorStateEntered' : 'onAnimatorStateExited', err, st);
           }
         }
       }
