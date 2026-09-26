@@ -17,6 +17,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
+import '../animator/animator_inspector.dart';
+import '../animator/animator_model.dart';
 import '../extensions/editor_extensions.dart' show ContextEntry, EditorExtensionScope;
 import 'custom_inspector.dart';
 import '../env/tools.dart';
@@ -52,9 +54,14 @@ class InspectorPanel extends StatefulWidget {
     this.onOpenScript,
     this.run = runProcess,
     this.assetEdits,
+    this.animator,
   });
 
   final InspectorModel model;
+
+  /// The Animator window's model: a state or a transition picked there
+  /// shows here (ADR-0032).
+  final AnimatorModel? animator;
 
   /// A material asset's page edits it through this (Tier 2).
   final AssetEdits? assetEdits;
@@ -172,7 +179,16 @@ class _InspectorPanelState extends State<InspectorPanel> {
             onOpenScript: widget.onOpenScript,
             run: widget.run,
           );
-        case InspectEntities() || null:
+        case InspectAnimator() when widget.assetEdits != null:
+          return AnimatorItemPage(
+            key: ValueKey('inspector.animator.${target.controller}.${target.layer}.${target.state}.${target.transition}'),
+            edits: widget.assetEdits!,
+            target: target,
+            animator: widget.animator,
+            selection: sel,
+            onPing: browser.ping,
+          );
+        case InspectAnimator() || InspectEntities() || null:
           break;
       }
     }

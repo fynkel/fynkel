@@ -16,12 +16,52 @@ import 'package:fynkel_editor/src/console/console_panel.dart';
 import 'package:fynkel_editor/src/hierarchy/hierarchy_panel.dart';
 import 'package:fynkel_editor/src/inspector/inspector_panel.dart';
 import 'package:fynkel_editor/src/play/game_panel.dart';
+import 'package:fynkel_editor/src/shell/editor_selection.dart';
 import 'package:fynkel_editor/src/shell/workspace.dart';
 import 'package:fynkel_editor/src/project_browser/project_panel.dart';
 
 import '../parity/harness.dart';
 
 final _out = Platform.environment['FYNKEL_SHOTS'];
+
+const _controllerId = 'c0000000-0000-4000-8000-00000000c0de';
+const _controller = '''
+{
+  "\$schema": "https://fynkel.dev/schemas/controller.schema.json",
+  "formatVersion": 1,
+  "id": "$_controllerId",
+  "name": "Hero",
+  "parameters": [
+    { "name": "speed", "type": "float" },
+    { "name": "grounded", "type": "bool", "default": true },
+    { "name": "jump", "type": "trigger" }
+  ],
+  "layers": [
+    {
+      "name": "Base Layer",
+      "defaultState": "Locomotion",
+      "states": [
+        { "name": "Locomotion", "motion": { "asset": "c0000000-0000-4000-8000-00000000b1e0" } },
+        { "name": "Jump", "motion": { "asset": "c0000000-0000-4000-8000-000000000005", "sub": "anim/bob" }, "loop": false },
+        { "name": "Wave", "motion": { "asset": "c0000000-0000-4000-8000-000000000005", "sub": "anim/wave" } }
+      ],
+      "transitions": [
+        { "from": "Locomotion", "to": "Jump", "duration": 0.1, "conditions": [{ "parameter": "jump" }] },
+        { "from": "Jump", "to": "Locomotion", "exitTime": 0.9, "duration": 0.2, "conditions": [{ "parameter": "grounded", "is": true }] },
+        { "from": "Locomotion", "to": "Wave", "duration": 0.25, "conditions": [{ "parameter": "speed", "less": 0.1 }] },
+        { "from": "Wave", "to": "Locomotion", "exitTime": 1 }
+      ]
+    },
+    { "name": "Upper Body", "weight": 0.5, "root": "spine" }
+  ],
+  "editor": {
+    "Base Layer": {
+      "#entry": [-260, 0], "#any": [-260, 110],
+      "Locomotion": [0, 0], "Jump": [280, -80], "Wave": [280, 80]
+    }
+  }
+}
+''';
 
 Future<void> _font(String family, List<String> files) async {
   final loader = FontLoader(family);
@@ -60,6 +100,8 @@ void main() {
           '{"at":0,"clip":{"asset":"c0000000-0000-4000-8000-000000000005","sub":"anim/wave"}},'
           '{"at":2,"clip":{"asset":"c0000000-0000-4000-8000-000000000005","sub":"anim/bob"}}],"sync":"phase"}',
         );
+        // An Animator Controller over them, for the Animator window (ADR-0032).
+        File('${dir.path}/assets/models/hero.controller.json').writeAsStringSync(_controller);
       },
     );
     tester.view.physicalSize = const Size(2880, 1800);
@@ -124,6 +166,18 @@ void main() {
     await tester.pumpAndSettle();
     await save('game', find.byType(GamePanel).first);
     await save('window-game');
+    // The Animator window with a transition selected, and the Inspector for it and for a state.
+    e.shell.workspace!.show(PanelRegistry.animation);
+    e.shell.selection!.inspect(const InspectAsset(_controllerId));
+    await tester.pumpAndSettle();
+    e.shell.animator!.selectTransition(0);
+    await tester.pumpAndSettle();
+    await save('animator', find.byKey(const Key('animator.panel')));
+    await save('animator-transition', find.byType(InspectorPanel).first);
+    await save('window-animator');
+    e.shell.animator!.selectState('Locomotion');
+    await tester.pumpAndSettle();
+    await save('animator-state', find.byType(InspectorPanel).first);
     // The asset pages (docs/ui-refresh/images/asset-*).
     for (final (name, path) in [
       ('asset-prefab', 'prefabs/coin.prefab.json'),

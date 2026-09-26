@@ -1346,6 +1346,7 @@ class AssetField extends StatefulWidget {
     required this.candidates,
     required this.onCommit,
     this.kind,
+    this.kinds,
     this.dataType,
     this.subject,
     this.thumbnail,
@@ -1366,6 +1367,10 @@ class AssetField extends StatefulWidget {
   /// The assets the picker lists (already filtered by [kind]).
   final List<AssetEntry> Function() candidates;
   final String? kind;
+
+  /// Several kinds instead of one [kind]: a state's motion is a clip or a
+  /// blend space (ADR-0032).
+  final Set<String>? kinds;
 
   /// A data-typed field's type (ADR-0027): a drop must be a data asset of it.
   final String? dataType;
@@ -1407,8 +1412,10 @@ String _folderOf(String path) {
 List<PickerItem<String>> assetPickerItems(
   List<AssetEntry> entries, {
   String? kind,
+  Set<String>? kinds,
   Widget Function(AssetEntry entry, double size)? thumbnail,
 }) {
+  bool fits(String k) => kinds != null ? kinds.contains(k) : kind == null || k == kind;
   final byFolder = <String, List<PickerItem<String>>>{};
   final bySource = <AssetEntry, List<PickerItem<String>>>{};
   List<(String, String)> facts(AssetEntry a, String k, [String? sub]) => [
@@ -1426,7 +1433,7 @@ List<PickerItem<String>> assetPickerItems(
   for (final a in entries) {
     final folder = _folderOf(a.path);
     if (!a.isSource) {
-      if (kind != null && a.document != kind) continue;
+      if ((kind != null || kinds != null) && !fits(a.document ?? '')) continue;
       final k = a.document ?? 'document';
       byFolder
           .putIfAbsent(folder, () => [])
@@ -1444,7 +1451,7 @@ List<PickerItem<String>> assetPickerItems(
       continue;
     }
     final whole = a.wholeKind;
-    if (whole != null && (kind == null || whole == kind)) {
+    if (whole != null && fits(whole)) {
       byFolder
           .putIfAbsent(folder, () => [])
           .add(
@@ -1461,7 +1468,7 @@ List<PickerItem<String>> assetPickerItems(
     }
     for (final sub in a.subAssets.keys) {
       final k = AssetEntry.subKind(sub);
-      if (kind != null && k != kind) continue;
+      if (!fits(k)) continue;
       bySource
           .putIfAbsent(a, () => [])
           .add(
@@ -1492,18 +1499,19 @@ Future<({Map<String, Object?>? ref})?> pickAssetRef(
   required String? kind,
   required String? subject,
   required List<AssetEntry> Function() candidates,
+  Set<String>? kinds,
   Widget Function(AssetEntry entry, double size)? thumbnail,
   bool nullable = false,
   Map<String, Object?>? current,
 }) async {
-  // `physics_material` reads "physics material".
-  final noun = kind?.replaceAll('_', ' ');
+  // `physics_material` reads "physics material"; several kinds read "motion".
+  final noun = kinds != null ? 'motion' : kind?.replaceAll('_', ' ');
   final choice = await showPicker<String>(
     context,
     title: noun == null ? 'Choose an asset' : 'Choose a $noun',
     subject: subject,
     anchor: globalRectOf(context),
-    items: assetPickerItems(candidates(), kind: kind, thumbnail: thumbnail),
+    items: assetPickerItems(candidates(), kind: kind, kinds: kinds, thumbnail: thumbnail),
     allowNone: nullable,
     current: _refKey(current).isEmpty ? null : _refKey(current),
     hint: 'Search by name or path',
@@ -1520,6 +1528,7 @@ class _AssetFieldState extends State<AssetField> {
     final choice = await pickAssetRef(
       context,
       kind: widget.kind,
+      kinds: widget.kinds,
       subject: widget.subject,
       candidates: widget.candidates,
       thumbnail: widget.thumbnail,
@@ -1554,7 +1563,7 @@ class _AssetFieldState extends State<AssetField> {
     return DragTarget<AssetDragPayload>(
       onWillAcceptWithDetails: (d) =>
           widget.enabled &&
-          (widget.kind == null || d.data.kind == widget.kind) &&
+          (widget.kinds?.contains(d.data.kind) ?? (widget.kind == null || d.data.kind == widget.kind)) &&
           (widget.dataType == null || d.data.dataType == widget.dataType),
       onAcceptWithDetails: (d) => widget.onCommit(d.data.toRef()),
       builder: (context, candidatesIn, rejected) {

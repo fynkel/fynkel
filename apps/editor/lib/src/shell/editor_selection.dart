@@ -75,6 +75,29 @@ final class InspectScript extends InspectTarget {
   int get hashCode => Object.hash(rel, folder);
 }
 
+/// A state or a transition of an Animator Controller (ADR-0032 § 8): what
+/// the Animator window selected. [state] names a state; [transition] is a
+/// transition's index in the layer; neither is the layer itself.
+final class InspectAnimator extends InspectTarget {
+  const InspectAnimator(this.controller, this.layer, {this.state, this.transition});
+
+  final String controller;
+  final int layer;
+  final String? state;
+  final int? transition;
+
+  @override
+  bool operator ==(Object other) =>
+      other is InspectAnimator &&
+      other.controller == controller &&
+      other.layer == layer &&
+      other.state == state &&
+      other.transition == transition;
+
+  @override
+  int get hashCode => Object.hash(controller, layer, state, transition);
+}
+
 final class EditorSelection extends ChangeNotifier {
   EditorSelection({required this.inspector, ProjectBrowserModel? browser}) {
     inspector.addListener(_onInspector);

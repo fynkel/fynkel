@@ -11,6 +11,8 @@ import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:path/path.dart' as p;
 
+import 'animator/animator_model.dart';
+import 'animator/animator_panel.dart';
 import 'commands/commands.dart';
 import 'commands/palette.dart';
 import 'console/console_panel.dart';
@@ -68,7 +70,6 @@ import 'shell/editor_selection.dart';
 import 'shell/main_window.dart';
 import 'shell/menu_bar.dart';
 import 'shell/notices.dart';
-import 'shell/panels.dart';
 import 'shell/workspace.dart';
 import 'theme/focus_ring.dart';
 import 'theme/icons.dart';
@@ -267,6 +268,9 @@ class EditorShellState extends State<EditorShell> {
 
   /// The material Inspector's edits, project-wide (Tier 2).
   AssetEdits? assetEdits;
+
+  /// The Animator window's controller, layer and selection (ADR-0032).
+  AnimatorModel? animator;
   CodegenCheck? codegen;
   EditorState? editorState;
 
@@ -617,6 +621,7 @@ class EditorShellState extends State<EditorShell> {
     editorState?.dispose();
     codegen?.dispose();
     tabs?.dispose();
+    animator?.dispose();
     assetEdits?.dispose();
     project?.removeListener(_onProjectChanged);
     project?.close();
@@ -715,6 +720,7 @@ class EditorShellState extends State<EditorShell> {
           onOpenScript: (file) => ide.open(file),
           run: widget.run,
           assetEdits: assetEdits,
+          animator: animator,
         );
       },
     ),
@@ -777,14 +783,13 @@ class EditorShellState extends State<EditorShell> {
     PanelSpec(
       id: PanelRegistry.animation,
       title: EditorStrings.panelAnimation,
-      icon: FIcons.animation,
+      icon: FIcons.animator,
       home: PanelHome.bottom,
-      builder: (_, _) => const ComingPanel(
-        title: EditorStrings.panelAnimation,
-        item: 6,
-        what: 'Clips and the pose of the selection.',
-        icon: FIcons.animation,
-      ),
+      builder: (_, _) {
+        final a = animator;
+        if (a == null) return const SizedBox.shrink();
+        return AnimatorPanel(key: const Key('animator.panel'), model: a, assets: () => project?.assets() ?? const []);
+      },
     ),
   ];
 
@@ -797,6 +802,11 @@ class EditorShellState extends State<EditorShell> {
   /// focused tab: the one the Inspector shows, while the Inspector or the Project has the keyboard.
   EditorDocument? _assetUndo({bool redo = false}) {
     final panel = PanelIds.base(workspace?.focusedPanel.value ?? '');
+    // The Animator window undoes its controller's changes (ADR-0032).
+    if (panel == PanelRegistry.animation) {
+      final id = animator?.id;
+      return id == null ? null : assetEdits?.undoTarget(inspectorFocused: false, redo: redo, asset: id);
+    }
     return assetEdits?.undoTarget(
       inspectorFocused: panel == PanelRegistry.inspector || panel == PanelRegistry.project,
       redo: redo,
@@ -2040,6 +2050,7 @@ class EditorShellState extends State<EditorShell> {
       editorState?.dispose();
       codegen?.dispose();
       tabs?.dispose();
+      animator?.dispose();
       assetEdits?.dispose();
       final ws = Workspace(registry: _panels, store: widget.layoutStore);
       final t = DocumentTabs(project: opened);
@@ -2094,6 +2105,8 @@ class EditorShellState extends State<EditorShell> {
       project = opened;
       tabs = t;
       assetEdits = me;
+      // A state or transition picked in the Animator window shows in the Inspector last used.
+      animator = AnimatorModel(edits: me)..inspect = (target) => selection?.inspect(target);
       codegen = cg;
       editorState = es;
       _sceneOps = h;
@@ -2962,6 +2975,11 @@ class EditorShellState extends State<EditorShell> {
         sel.recall(es.panel(id));
         ins.addListener(registry.refresh);
         sel.addListener(() => _onCopyChanged(id));
+        // The Animator window follows the selection: an object's controller, or one picked in the Project.
+        sel.addListener(() => animator?.follow(sel.target, ins));
+        ins.addListener(() {
+          if (sel.target is InspectEntities) animator?.follow(sel.target, ins);
+        });
         _inspectors[id] = ins;
         _selections[id] = sel;
       case PanelRegistry.project:

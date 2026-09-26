@@ -1,0 +1,227 @@
+// The Animator window's state (ADR-0032 § 8): which Animator Controller it
+// shows, the layer in front, what is selected in the graph and a Make
+// Transition waiting for its target.
+//
+// As Unity's window, it follows the selection: an object whose Animator
+// names a controller, or a controller selected in the Project, shows that
+// controller; anything else leaves it where it was. A state or transition
+// picked in the graph goes to the Inspector ([inspect]); every change is
+// one undo step on the controller ([ControllerEdits]).
+import 'dart:ui' show Offset;
+
+import 'package:flutter/foundation.dart';
+
+import '../inspector/asset_edits.dart';
+import '../inspector/inspector_model.dart';
+import '../shell/editor_selection.dart';
+import 'controller_edits.dart';
+
+final class AnimatorModel extends ChangeNotifier {
+  AnimatorModel({required this.edits}) {
+    edits.addListener(_onEdits);
+  }
+
+  final AssetEdits edits;
+
+  /// Shows a state or a transition in the Inspector (the shell points it
+  /// at the Inspector the user last used).
+  void Function(InspectTarget target)? inspect;
+
+  String? _id;
+  int _layer = 0;
+  String? _state;
+  int? _transition;
+  String? _linkFrom;
+
+  /// The object the window follows (its Animator names the controller);
+  /// null when a controller was picked in the Project.
+  String? get object => _object;
+  String? _object;
+
+  /// The controller shown, or null (nothing picked yet).
+  String? get id => _id;
+  ControllerEdits? get controller => _id == null ? null : ControllerEdits(edits, _id!);
+
+  int get layer => _layer;
+  String? get selectedState => _state;
+  int? get selectedTransition => _transition;
+
+  /// Make Transition's source, waiting for a click on the target.
+  String? get linkFrom => _linkFrom;
+
+  /// Shows controller [id] ([object]: the one whose Animator names it).
+  void show(String? id, {String? object}) {
+    if (id == _id) {
+      if (object != _object) {
+        _object = object;
+        notifyListeners();
+      }
+      return;
+    }
+    _object = object;
+    _id = id;
+    _layer = 0;
+    _state = null;
+    _transition = null;
+    _linkFrom = null;
+    notifyListeners();
+  }
+
+  /// Follows the Inspector's target: an object with an Animator that names
+  /// a controller, a controller asset, or a state of one.
+  void follow(InspectTarget? target, InspectorModel? objects) {
+    switch (target) {
+      case InspectAsset(:final id, sub: null) when _isController(id):
+        show(id);
+      case InspectAnimator(:final controller):
+        if (controller != _id) show(controller);
+      case InspectEntities():
+        final one = objects?.single;
+        if (one == null) return;
+        final slot = objects!.slots.where((s) => s.type == 'fynkel.Animator').firstOrNull;
+        final ref = slot?.value('controller');
+        final asset = ref is Map ? ref['asset'] : null;
+        if (asset is String) show(asset, object: one.id);
+      default:
+        break;
+    }
+  }
+
+  bool _isController(String id) {
+    for (final a in edits.project.assets()) {
+      if (a.id == id) return a.document == 'controller';
+    }
+    return false;
+  }
+
+  set layer(int i) {
+    if (i == _layer) return;
+    _layer = i;
+    _state = null;
+    _transition = null;
+    _linkFrom = null;
+    notifyListeners();
+  }
+
+  /// Picks a state (null: nothing) and shows it in the Inspector.
+  void selectState(String? name) {
+    _state = name;
+    _transition = null;
+    notifyListeners();
+    if (name != null && _id != null) inspect?.call(InspectAnimator(_id!, _layer, state: name));
+  }
+
+  /// Picks a transition by its index in the layer and shows it.
+  void selectTransition(int? index) {
+    _transition = index;
+    _state = null;
+    notifyListeners();
+    if (index != null && _id != null) inspect?.call(InspectAnimator(_id!, _layer, transition: index));
+  }
+
+  void clearSelection() {
+    if (_state == null && _transition == null && _linkFrom == null) return;
+    _state = null;
+    _transition = null;
+    _linkFrom = null;
+    notifyListeners();
+  }
+
+  /// Unity's Make Transition: the arrow follows the pointer until a state
+  /// is clicked ([link]) or it is cancelled.
+  void startLink(String from) {
+    _linkFrom = from;
+    notifyListeners();
+  }
+
+  void cancelLink() {
+    if (_linkFrom == null) return;
+    _linkFrom = null;
+    notifyListeners();
+  }
+
+  /// Ends Make Transition on [to]: the transition is made and selected.
+  bool link(String to) {
+    final from = _linkFrom;
+    final c = controller;
+    _linkFrom = null;
+    if (from == null || c == null) {
+      notifyListeners();
+      return false;
+    }
+    final i = c.makeTransition(_layer, from, to);
+    if (i == null) {
+      notifyListeners();
+      return false;
+    }
+    selectTransition(i);
+    return true;
+  }
+
+  // The edits that move the selection with them.
+
+  /// Create State at [at]: the new state is selected.
+  String? createState(Offset at, {Map<String, Object?>? motion}) {
+    final name = controller?.createState(_layer, at, motion: motion);
+    if (name != null) selectState(name);
+    return name;
+  }
+
+  bool renameState(String from, String to) {
+    final ok = controller?.renameState(_layer, from, to) ?? false;
+    if (ok && _state == from) selectState(to);
+    return ok;
+  }
+
+  bool deleteState(String name) {
+    final ok = controller?.deleteState(_layer, name) ?? false;
+    if (ok) clearSelection();
+    return ok;
+  }
+
+  bool deleteTransition(int index) {
+    final ok = controller?.deleteTransition(_layer, index) ?? false;
+    if (ok) clearSelection();
+    return ok;
+  }
+
+  /// Deletes what is selected (⌫ in the graph).
+  bool deleteSelected() => switch ((_state, _transition)) {
+    (final s?, _) => deleteState(s),
+    (_, final t?) => deleteTransition(t),
+    _ => false,
+  };
+
+  int? addLayer() {
+    final i = controller?.addLayer();
+    if (i != null) layer = i;
+    return i;
+  }
+
+  bool deleteLayer(int i) {
+    final ok = controller?.deleteLayer(i) ?? false;
+    if (ok && _layer >= i) {
+      _layer = i - 1;
+      clearSelection();
+      notifyListeners();
+    }
+    return ok;
+  }
+
+  void _onEdits() {
+    final c = controller;
+    if (c == null) return;
+    // An undo can take the layer or the selection away.
+    final layers = c.layers.length;
+    if (layers > 0 && _layer >= layers) _layer = layers - 1;
+    if (_state != null && c.state(_layer, _state!) == null) _state = null;
+    if (_transition != null && _transition! >= c.transitions(_layer).length) _transition = null;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    edits.removeListener(_onEdits);
+    super.dispose();
+  }
+}

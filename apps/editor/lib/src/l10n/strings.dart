@@ -301,5 +301,5 @@ abstract final class EditorStrings {
   static const panelProjectFull = 'Project Browser';
   static const panelConsole = 'Console';
   static const panelProfiler = 'Profiler';
-  static const panelAnimation = 'Animation';
+  static const panelAnimation = 'Animator';
 }

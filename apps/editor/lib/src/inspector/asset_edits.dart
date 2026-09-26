@@ -111,6 +111,13 @@ final class AssetEdits extends ChangeNotifier {
     return true;
   }
 
+  /// Refuses a change before it reaches the document: [why] becomes
+  /// [lastError], shown where the change was asked for.
+  void refuse(String why) {
+    lastError = why;
+    notifyListeners();
+  }
+
   /// The Scene view draws [id] with [changes] (top-level fields) over its
   /// fields, nothing written; null draws the document's fields again.
   void show(String id, Map<String, Object?>? changes) {
@@ -131,9 +138,11 @@ final class AssetEdits extends ChangeNotifier {
 
   /// The asset ⌘Z undoes now (redo: ⇧⌘Z): the one shown, when
   /// [inspectorFocused] and it has something to undo (redo).
-  EditorDocument? undoTarget({required bool inspectorFocused, bool redo = false}) {
-    final id = shown;
-    if (id == null || !inspectorFocused) return null;
+  /// [asset] names the one instead: the Animator window's controller
+  /// while that window holds the keyboard.
+  EditorDocument? undoTarget({required bool inspectorFocused, bool redo = false, String? asset}) {
+    final id = asset ?? shown;
+    if (id == null || (asset == null && !inspectorFocused)) return null;
     final doc = _documents[id];
     if (doc == null || doc.isClosed) return null;
     return (redo ? doc.canRedo : doc.canUndo) ? doc : null;
