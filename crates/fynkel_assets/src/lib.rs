@@ -36,11 +36,11 @@ pub use fynkel_cooked::payload::{
     decode_mesh, encode_mesh, encode_skinned_mesh, EnvironmentPayload, MeshPayload, TexturePayload,
     Vertex,
 };
+pub use fynkel_cooked::payload::{CustomMaterialPayload, MaterialSlot};
 use fynkel_cooked::{
     ChunkFile, KIND_ANIMATION, KIND_CLIP, KIND_CUSTOM_MATERIAL, KIND_ENVIRONMENT, KIND_JSON,
     KIND_MATERIAL, KIND_MESH, KIND_SHADER, KIND_SKIN, KIND_STREAM, KIND_TEXTURE,
 };
-pub use fynkel_cooked::payload::{CustomMaterialPayload, MaterialSlot};
 use fynkel_core::animation::{
     BlendPoint, BlendSpace, BlendSync, Channel, Clip, Interpolation, Joint, Marker, Property, Skin,
 };
@@ -362,6 +362,14 @@ struct Store {
     /// ADR-0026 §4) under ids the cache does not have: read before the
     /// cooked ones, never evicted or cleared — only the game removes one.
     runtime_materials: HashMap<AssetRef, Arc<PbrMaterial>>,
+    /// Shader asset materials made or replaced by the game at runtime
+    /// (`world.createShaderMaterial`, ADR-0031), kept like the others.
+    runtime_custom_materials: HashMap<AssetRef, Arc<CustomMaterialPayload>>,
+    /// Bumps on every runtime shader material set or removed;
+    /// `material_changes` holds the count each last changed at, so a
+    /// renderer rewrites only those (a value's change is the uniform only).
+    material_edits: u64,
+    material_changes: HashMap<AssetRef, u64>,
     /// Meshes made by the game at runtime (`world.createMesh`, ADR-0026
     /// §4), read before the cooked ones and kept like the materials.
     runtime_meshes: HashMap<AssetRef, Arc<MeshPayload>>,
@@ -430,6 +438,14 @@ fn object_error(e: &IndexEntry, what: impl std::fmt::Display) -> Diagnostic {
     .with_suggestion("run `fynkel cook --force`")
 }
 
+impl Store {
+    fn note_material_change(&mut self, r: &AssetRef) {
+        self.material_edits += 1;
+        let at = self.material_edits;
+        self.material_changes.insert(r.clone(), at);
+    }
+}
+
 impl Assets {
     /// Opens the cache (see [`CacheIndex::open`]); nothing is loaded yet.
     pub fn open(cache_dir: &Path) -> Result<Assets, Diagnostic> {
@@ -448,6 +464,9 @@ impl Assets {
                 custom_materials: HashMap::new(),
                 shaders: HashMap::new(),
                 runtime_materials: HashMap::new(),
+                runtime_custom_materials: HashMap::new(),
+                material_edits: 0,
+                material_changes: HashMap::new(),
                 runtime_meshes: HashMap::new(),
                 mesh_edits: 0,
                 mesh_changes: HashMap::new(),
@@ -535,7 +554,50 @@ impl Assets {
             Some(m) => s.runtime_materials.insert(r.clone(), Arc::new(m)),
             None => s.runtime_materials.remove(r),
         };
+        if s.runtime_custom_materials.remove(r).is_some() {
+            s.note_material_change(r);
+        }
         s.live_edits += 1;
+    }
+
+    /// `m` as the runtime shader asset material `r`
+    /// (`world.createShaderMaterial`, ADR-0031), or `None` to remove
+    /// it: drawn by every renderer on this store like a cooked one, kept
+    /// across clears and evictions. A renderer sees the change through
+    /// [`materials_changed_since`] — for new values alone, it rewrites the
+    /// material's uniform and nothing else.
+    ///
+    /// [`materials_changed_since`]: Assets::materials_changed_since
+    pub fn set_runtime_custom_material(&self, r: &AssetRef, m: Option<CustomMaterialPayload>) {
+        let mut s = self.lock();
+        match m {
+            Some(m) => s.runtime_custom_materials.insert(r.clone(), Arc::new(m)),
+            None => s.runtime_custom_materials.remove(r),
+        };
+        if s.runtime_materials.remove(r).is_some() {
+            s.live_edits += 1;
+        }
+        s.note_material_change(r);
+    }
+
+    /// Bumps on every [`set_runtime_custom_material`].
+    ///
+    /// [`set_runtime_custom_material`]: Assets::set_runtime_custom_material
+    pub fn material_edits(&self) -> u64 {
+        self.lock().material_edits
+    }
+
+    /// The runtime shader materials set or removed after the
+    /// [`material_edits`] count `seen`.
+    ///
+    /// [`material_edits`]: Assets::material_edits
+    pub fn materials_changed_since(&self, seen: u64) -> Vec<AssetRef> {
+        let s = self.lock();
+        s.material_changes
+            .iter()
+            .filter(|(_, at)| **at > seen)
+            .map(|(r, _)| r.clone())
+            .collect()
     }
 
     /// The runtime materials and meshes of `from` (the store a load to
@@ -544,13 +606,21 @@ impl Assets {
         if Arc::ptr_eq(&self.inner, &from.inner) {
             return;
         }
-        let (materials, meshes) = {
+        let (materials, custom, meshes) = {
             let f = from.lock();
-            (f.runtime_materials.clone(), f.runtime_meshes.clone())
+            (
+                f.runtime_materials.clone(),
+                f.runtime_custom_materials.clone(),
+                f.runtime_meshes.clone(),
+            )
         };
         let mut s = self.lock();
         s.runtime_materials.extend(materials);
         s.live_edits += 1;
+        for (r, m) in custom {
+            s.note_material_change(&r);
+            s.runtime_custom_materials.insert(r, m);
+        }
         for (r, m) in meshes {
             s.mesh_edits += 1;
             let at = s.mesh_edits;
@@ -1120,8 +1190,14 @@ impl Assets {
         &self,
         r: &AssetRef,
     ) -> Result<Option<Arc<CustomMaterialPayload>>, Diagnostic> {
-        if self.lock().runtime_materials.contains_key(r) {
-            return Ok(None);
+        {
+            let s = self.lock();
+            if let Some(m) = s.runtime_custom_materials.get(r) {
+                return Ok(Some(m.clone()));
+            }
+            if s.runtime_materials.contains_key(r) {
+                return Ok(None);
+            }
         }
         if let Some(m) = self.lock().custom_materials.get(r) {
             return Ok(m.clone());
@@ -1134,7 +1210,9 @@ impl Assets {
         } else {
             None
         };
-        self.lock().custom_materials.insert(r.clone(), payload.clone());
+        self.lock()
+            .custom_materials
+            .insert(r.clone(), payload.clone());
         Ok(payload)
     }
 
