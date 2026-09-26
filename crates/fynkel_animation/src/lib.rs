@@ -21,6 +21,8 @@ use fynkel_contracts::Entity;
 use fynkel_scene::Transform;
 use glam::{Mat4, Quat, Vec3};
 
+pub mod controller;
+
 /// The property a channel keys.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Property {
