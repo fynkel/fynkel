@@ -1727,6 +1727,52 @@ fn volume_profiles_edit_through_document_fields() {
 }
 
 #[test]
+fn animator_controllers_edit_through_document_fields() {
+    // ADR-0032 § 8: the Animator window edits a controller one step at a
+    // time; the naming rules refuse a step that breaks them.
+    let s = schemas();
+    let doc = Document::new(DocumentKind::Controller, "Rig");
+    let original = doc.write().unwrap();
+    let mut editor = Editor::open(doc, &s).unwrap();
+    apply(
+        &mut editor,
+        vec![
+            Command::SetDocumentField {
+                pointer: "/layers/0/states".into(),
+                value: Node::from_serde(&json!([{ "name": "Idle" }, { "name": "Jump" }])),
+            },
+            Command::SetDocumentField {
+                pointer: "/layers/0/defaultState".into(),
+                value: Node::from_serde(&json!("Idle")),
+            },
+            Command::SetDocumentField {
+                pointer: "/editor".into(),
+                value: Node::from_serde(&json!({ "Base Layer": { "Idle": [0.0, 0.0] } })),
+            },
+        ],
+    );
+    let root = &editor.document().root;
+    assert_eq!(
+        root.pointer("/layers/0/defaultState")
+            .and_then(Node::as_str),
+        Some("Idle")
+    );
+    // Two states with one name: refused whole.
+    let before = text(&editor);
+    let r = editor.apply(
+        Request::new(vec![Command::SetDocumentField {
+            pointer: "/layers/0/states/1/name".into(),
+            value: Node::from_serde(&json!("Idle")),
+        }]),
+        &s,
+    );
+    assert!(!r.ok);
+    assert_eq!(text(&editor), before);
+    editor.undo().unwrap();
+    assert_eq!(text(&editor), original);
+}
+
+#[test]
 fn document_fields_on_scenes_leave_the_entity_tree_to_entity_commands() {
     let (mut editor, original) = open("scene/hierarchy_ok.scene.json");
     let s = schemas();
