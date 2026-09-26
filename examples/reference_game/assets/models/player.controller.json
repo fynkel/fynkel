@@ -16,6 +16,18 @@
     {
       "name": "jump",
       "type": "trigger"
+    },
+    {
+      "name": "aim",
+      "type": "bool"
+    },
+    {
+      "name": "moveX",
+      "type": "float"
+    },
+    {
+      "name": "moveY",
+      "type": "float"
     }
   ],
   "layers": [
@@ -36,6 +48,110 @@
             "sub": "anim/jump"
           },
           "loop": false
+        },
+        {
+          "name": "Aim",
+          "motion": {
+            "blendTree": {
+              "type": "freeformDirectional",
+              "parameters": [
+                "moveX",
+                "moveY"
+              ],
+              "children": [
+                {
+                  "motion": {
+                    "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+                    "sub": "anim/idle"
+                  },
+                  "position": [
+                    0,
+                    0
+                  ]
+                },
+                {
+                  "motion": {
+                    "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+                    "sub": "anim/walk"
+                  },
+                  "position": [
+                    0,
+                    4
+                  ]
+                },
+                {
+                  "motion": {
+                    "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+                    "sub": "anim/walk_back"
+                  },
+                  "position": [
+                    0,
+                    -4
+                  ]
+                },
+                {
+                  "motion": {
+                    "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+                    "sub": "anim/walk_left"
+                  },
+                  "position": [
+                    -4,
+                    0
+                  ]
+                },
+                {
+                  "motion": {
+                    "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+                    "sub": "anim/walk_right"
+                  },
+                  "position": [
+                    4,
+                    0
+                  ]
+                },
+                {
+                  "motion": {
+                    "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+                    "sub": "anim/run"
+                  },
+                  "position": [
+                    0,
+                    7
+                  ]
+                },
+                {
+                  "motion": {
+                    "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+                    "sub": "anim/run_back"
+                  },
+                  "position": [
+                    0,
+                    -7
+                  ]
+                },
+                {
+                  "motion": {
+                    "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+                    "sub": "anim/run_left"
+                  },
+                  "position": [
+                    -7,
+                    0
+                  ]
+                },
+                {
+                  "motion": {
+                    "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+                    "sub": "anim/run_right"
+                  },
+                  "position": [
+                    7,
+                    0
+                  ]
+                }
+              ]
+            }
+          }
         }
       ],
       "transitions": [
@@ -46,6 +162,38 @@
           "conditions": [
             {
               "parameter": "jump"
+            }
+          ]
+        },
+        {
+          "from": "Aim",
+          "to": "Jump",
+          "duration": 0.1,
+          "conditions": [
+            {
+              "parameter": "jump"
+            }
+          ]
+        },
+        {
+          "from": "Locomotion",
+          "to": "Aim",
+          "duration": 0.15,
+          "conditions": [
+            {
+              "parameter": "aim",
+              "is": true
+            }
+          ]
+        },
+        {
+          "from": "Aim",
+          "to": "Locomotion",
+          "duration": 0.15,
+          "conditions": [
+            {
+              "parameter": "aim",
+              "is": false
             }
           ]
         },
@@ -73,6 +221,10 @@
       "Jump": [
         260,
         0
+      ],
+      "Aim": [
+        130,
+        160
       ],
       "#entry": [
         -220,

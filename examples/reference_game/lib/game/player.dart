@@ -30,6 +30,12 @@ import 'game_state.dart';
 /// clips are authored in place: the controller moves the entity, the
 /// animator only poses the joints (docs/animation.md).
 ///
+/// Holding `aim` (the right mouse button) is the aim mode (ADR-0033): the
+/// player faces where the camera looks — the controller's `turnSpeed` is
+/// 0 meanwhile and this behaviour turns it — and the Aim state strafes on
+/// a Freeform Directional blend tree over `moveX`/`moveY`, the planar
+/// velocity in the player's own frame.
+///
 /// The controller's own `moveAction`/`jumpAction` are left empty in the
 /// scene so this behaviour is the one mover (a behaviour's `move` in the
 /// same tick would win anyway; docs/physics.md).
@@ -82,6 +88,12 @@ class Player extends Behaviour {
   /// Ticks the player has been in the air (for the HUD's readout and the
   /// tests).
   int jumps = 0;
+
+  /// Whether the aim mode is on (for the tests).
+  bool aiming = false;
+
+  /// The controller's `turnSpeed` before the aim mode set it to 0.
+  double _turnSpeed = 0;
   double _elapsed = 0;
   double _sinceWin = 0;
   bool _dead = false;
@@ -120,6 +132,8 @@ class Player extends Behaviour {
     final forward = Vec3(-math.sin(yaw), 0, -math.cos(yaw));
     final right = Vec3(math.cos(yaw), 0, -math.sin(yaw));
 
+    aim(Input.held('aim'), yaw);
+
     var stick = Input.action2D('move');
     if (stick.length > 1) stick = stick.normalized;
     final speed = walkSpeed * (Input.held('sprint') ? sprintFactor : 1);
@@ -146,16 +160,37 @@ class Player extends Behaviour {
     }
   }
 
+  /// Turns the aim mode on or off, and while it is on faces the camera's
+  /// [yaw].
+  void aim(bool on, double yaw) {
+    if (on != aiming) {
+      final controller = get<CharacterController>();
+      if (controller != null) {
+        if (on) _turnSpeed = controller.turnSpeed;
+        set(controller.copyWith(turnSpeed: on ? 0 : _turnSpeed));
+      }
+      aiming = on;
+    }
+    if (aiming) transform.rotation = Quat.axisAngle(Vec3.up, yaw);
+  }
+
   /// The Animator Controller's parameters: `speed` is the character
   /// controller's planar speed as the last tick applied it (so a wall
   /// stops the stride with the player), `grounded` whether it stands, and
   /// a jump sets the `jump` trigger. The controller plays the jump once,
   /// holds its last frame in the air and goes back to Locomotion when
-  /// `grounded` is true again.
+  /// `grounded` is true again. `aim` and the velocity in the player's
+  /// frame (`moveX` right, `moveY` forward) drive the Aim state.
   void pose({required bool jumped, required bool grounded, required Vec3 velocity}) {
+    final facing = transform.rotation;
+    final forward = facing.rotate(const Vec3(0, 0, -1));
+    final right = facing.rotate(const Vec3(1, 0, 0));
     animation
       ..setFloat('speed', math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z))
-      ..setBool('grounded', grounded && !jumped);
+      ..setBool('grounded', grounded && !jumped)
+      ..setBool('aim', aiming)
+      ..setFloat('moveX', velocity.x * right.x + velocity.z * right.z)
+      ..setFloat('moveY', velocity.x * forward.x + velocity.z * forward.z);
     if (jumped) animation.setTrigger('jump');
   }
 

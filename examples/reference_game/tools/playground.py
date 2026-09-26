@@ -344,6 +344,38 @@ def locomotion_blend():
 PLAYER_CONTROLLER = uid("controller", "player")
 
 
+# The aim mode's strafe clips (ADR-0033; tools/character.py): the walk
+# and the run in each direction, when the character has them.
+STRAFE = {
+    f"{gait}_{way}": {"asset": CHARACTER, "sub": f"anim/{gait}_{way}"}
+    for gait in ("walk", "run")
+    for way in ("back", "left", "right")
+}
+if HERO and HERO.name.endswith(".rig.json"):
+    STRAFE = {n: c for n, c in STRAFE.items() if n in rig.get("clips", {})}
+else:
+    STRAFE = {n: c for n, c in STRAFE.items() if c["sub"] in character_meta["subAssets"]}
+
+
+def aim_motion():
+    """The Aim state's motion: a Freeform Directional blend tree on
+    `moveX`/`moveY` (the planar velocity in the character's frame, m/s;
+    +X right, +Y forward) with the walk ring at 4 and the run ring at 7,
+    the blend space's speeds. A character without the strafe clips aims
+    on the blend space."""
+    if len(STRAFE) < 6:
+        return {"asset": LOCOMOTION}
+    children = [{"motion": CLIPS["idle"], "position": [0, 0]}]
+    for gait, r in (("walk", 4), ("run", 7)):
+        children += [
+            {"motion": CLIPS[gait], "position": [0, r]},
+            {"motion": STRAFE[f"{gait}_back"], "position": [0, -r]},
+            {"motion": STRAFE[f"{gait}_left"], "position": [-r, 0]},
+            {"motion": STRAFE[f"{gait}_right"], "position": [r, 0]},
+        ]
+    return {"blendTree": {"type": "freeformDirectional", "parameters": ["moveX", "moveY"], "children": children}}
+
+
 def player_controller():
     return {
         "$schema": "https://fynkel.dev/schemas/controller.schema.json",
@@ -354,6 +386,9 @@ def player_controller():
             {"name": "speed", "type": "float"},
             {"name": "grounded", "type": "bool", "default": True},
             {"name": "jump", "type": "trigger"},
+            {"name": "aim", "type": "bool"},
+            {"name": "moveX", "type": "float"},
+            {"name": "moveY", "type": "float"},
         ],
         "layers": [
             {
@@ -362,14 +397,18 @@ def player_controller():
                 "states": [
                     {"name": "Locomotion", "motion": {"asset": LOCOMOTION}},
                     {"name": "Jump", "motion": CLIPS["jump"], "loop": False},
+                    {"name": "Aim", "motion": aim_motion()},
                 ],
                 "transitions": [
                     {"from": "Locomotion", "to": "Jump", "duration": 0.1, "conditions": [{"parameter": "jump"}]},
+                    {"from": "Aim", "to": "Jump", "duration": 0.1, "conditions": [{"parameter": "jump"}]},
+                    {"from": "Locomotion", "to": "Aim", "duration": 0.15, "conditions": [{"parameter": "aim", "is": True}]},
+                    {"from": "Aim", "to": "Locomotion", "duration": 0.15, "conditions": [{"parameter": "aim", "is": False}]},
                     {"from": "Jump", "to": "Locomotion", "exitTime": 0.2, "duration": 0.15, "conditions": [{"parameter": "grounded", "is": True}]},
                 ],
             }
         ],
-        "editor": {"Base Layer": {"Locomotion": [0, 0], "Jump": [260, 0], "#entry": [-220, 0], "#any": [-220, 120]}},
+        "editor": {"Base Layer": {"Locomotion": [0, 0], "Jump": [260, 0], "Aim": [130, 160], "#entry": [-220, 0], "#any": [-220, 120]}},
     }
 
 MATERIAL_DOCS = {

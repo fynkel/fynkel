@@ -9,6 +9,7 @@
 // Menu's Play button does.
 
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
@@ -205,8 +206,9 @@ void main() {
         expect(me.findChild('hips/spine/head/Visor'), isNotNull, reason: 'the visor rides the head joint');
         expect(
           game.scenes.lastReport!.animation.clips,
-          3,
-          reason: 'the Animator Controller (its blend space and jump count once each) and the wave layer',
+          9,
+          reason: 'the Animator Controller (its blend space, the jump and the Aim tree\'s six strafe clips count once '
+              'each; its idle, walk and run came with the blend space) and the wave layer',
         );
       }
       List<Quat> pose() => [for (final j in joints) j.localTransform.rotation];
@@ -328,6 +330,39 @@ void main() {
           reason: 'back to what the idle leaves: its -4°…-7° breathing (z = sin of half)',
         );
       }
+
+      // The aim mode (ADR-0033): holding the right mouse button faces the
+      // camera's yaw (the controller's turnSpeed 0 meanwhile) and strafes
+      // on the Aim state's blend tree — D walks right, and `moveX` is the
+      // walk's 4 m/s in the player's own frame.
+      final turnSpeed = player.get<CharacterController>()!.turnSpeed;
+      game.frame(1 / 60, input: const [InputEvent.down(InputDevice.mouse, 'right')]);
+      expect(player.aiming, isTrue);
+      expect(player.get<CharacterController>()!.turnSpeed, 0);
+      game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'D')]);
+      for (var i = 0; i < 30; i++) {
+        game.frame(1 / 60);
+      }
+      s = me.animation.stateOf()!;
+      expect((s.name, s.next), ('Aim', null));
+      expect(me.animation.getBool('aim'), isTrue);
+      expect(me.animation.getFloat('moveX'), closeTo(4, 1e-2));
+      expect(me.animation.getFloat('moveY'), closeTo(0, 1e-2));
+      final yaw = game.world.find('Camera')!.get<ThirdPersonCamera>()!.yaw;
+      final facing = player.transform.rotation.rotate(const Vec3(0, 0, -1));
+      expect(facing.x, closeTo(-math.sin(yaw), 1e-3), reason: 'facing where the camera looks');
+      expect(facing.z, closeTo(-math.cos(yaw), 1e-3));
+      if (boxRig) expect(s.length, closeTo(1, 1e-5), reason: 'the walk ring: walk_right alone');
+      game.frame(
+        1 / 60,
+        input: const [InputEvent.up(InputDevice.keyboard, 'D'), InputEvent.up(InputDevice.mouse, 'right')],
+      );
+      for (var i = 0; i < 20; i++) {
+        game.frame(1 / 60);
+      }
+      expect(player.aiming, isFalse);
+      expect(player.get<CharacterController>()!.turnSpeed, turnSpeed, reason: 'restored');
+      expect(me.animation.stateOf()!.name, 'Locomotion');
       expect(game.world.isPoisoned, isFalse);
     },
   );

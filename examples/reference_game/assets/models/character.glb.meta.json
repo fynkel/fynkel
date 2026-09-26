@@ -14,6 +14,12 @@
     "anim/run": "3f0dac32-38cf-5b39-944f-e31e6e7defdc",
     "anim/jump": "0bea1305-1fa4-5e56-a54b-bc065f35320d",
     "anim/wave": "bfdf2f77-3ba8-5426-8b6f-0bfbd95283fb",
+    "anim/walk_back": "b8610cf3-8f3d-5081-84a8-c8a2b94dc906",
+    "anim/walk_left": "e0079292-9bf2-5894-bc04-0c32fff5278b",
+    "anim/walk_right": "bbce5cb4-cb5b-576b-8cac-15f0162c693c",
+    "anim/run_back": "dd127a6a-9d92-5773-8436-0d7516c66965",
+    "anim/run_left": "1fd5fc2a-d59a-5532-b9a8-56ed18ae33ee",
+    "anim/run_right": "9b6a6a42-b4ae-5981-8832-899baa7baaf8",
     "prefab": "304f2888-f688-577c-9693-4be5ead75576"
   }
 }

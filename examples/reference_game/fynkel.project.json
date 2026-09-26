@@ -43,6 +43,14 @@
         "touch:overlay/sprint"
       ]
     },
+    "aim": {
+      "type": "button",
+      "description": "Held: face where the camera looks and strafe.",
+      "bindings": [
+        "mouse:right",
+        "gamepad:leftTrigger"
+      ]
+    },
     "interact": {
       "type": "button",
       "description": "Use what the player stands on (the Switch opens the Gate).",

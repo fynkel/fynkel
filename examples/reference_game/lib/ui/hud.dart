@@ -99,7 +99,7 @@ class Hint extends StatelessWidget {
         String key(String action) => keyboardKey(game.bindingsOf(action)) ?? '—';
         return Text(
           'WASD / left stick: walk   mouse / right stick: look   ${key('jump')} / A: jump   '
-          '${key('sprint')} / LB: sprint   ${key('interact')} / X: use   ${key('wave')} / B: wave   ${key('restart')} / Y: restart',
+          '${key('sprint')} / LB: sprint   right mouse / LT: aim   ${key('interact')} / X: use   ${key('wave')} / B: wave   ${key('restart')} / Y: restart',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(shadows: const [Shadow(blurRadius: 6)]),
           textAlign: TextAlign.center,
         );

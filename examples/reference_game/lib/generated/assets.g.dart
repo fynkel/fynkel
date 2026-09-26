@@ -356,8 +356,20 @@ final class _AssetsModelsCharacterClips {
   AssetRef get jump => const AssetRef('88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6', sub: 'anim/jump');
   /// `anim/run`
   AssetRef get run => const AssetRef('88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6', sub: 'anim/run');
+  /// `anim/run_back`
+  AssetRef get runBack => const AssetRef('88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6', sub: 'anim/run_back');
+  /// `anim/run_left`
+  AssetRef get runLeft => const AssetRef('88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6', sub: 'anim/run_left');
+  /// `anim/run_right`
+  AssetRef get runRight => const AssetRef('88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6', sub: 'anim/run_right');
   /// `anim/walk`
   AssetRef get walk => const AssetRef('88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6', sub: 'anim/walk');
+  /// `anim/walk_back`
+  AssetRef get walkBack => const AssetRef('88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6', sub: 'anim/walk_back');
+  /// `anim/walk_left`
+  AssetRef get walkLeft => const AssetRef('88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6', sub: 'anim/walk_left');
+  /// `anim/walk_right`
+  AssetRef get walkRight => const AssetRef('88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6', sub: 'anim/walk_right');
   /// `anim/wave`
   AssetRef get wave => const AssetRef('88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6', sub: 'anim/wave');
 }

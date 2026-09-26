@@ -33,8 +33,13 @@ Clips, authored in place (blueprint item 19 (d): no root motion — the
                              additive layer's clip: it keys the arm alone and
                              starts and ends on the rest pose, so it adds
                              nothing before and after; M3-19c)
+  anim/walk_back, walk_left, walk_right (1.0 s) and run_back, run_left,
+  run_right (0.6 s), loops: the strafe clips (ADR-0033) — the gait walked
+                             backwards, and side steps (the leading leg out
+                             about Z, the trailing leg closing in) for the
+                             aim mode's 2D blend tree
 
-The walk and the run carry footstep markers (the animation's `extras`,
+Every walk and run (the strafes too) carries footstep markers (the animation's `extras`,
 what `fynkel import` reads; docs/animation.md): `step_l` and `step_r`
 at the two dips of the hips, a quarter and three quarters into the
 cycle. tools/playground.py mixes idle, walk and run in the Player's
@@ -75,7 +80,10 @@ SKELETON = [
 
 # The clips as `anim/<name>`: name, duration, loop, and channels — joint,
 # path, list of (time, value) with rotations given as (axis, degrees).
-CLIPS = ["idle", "walk", "run", "jump", "wave"]
+CLIPS = [
+    "idle", "walk", "run", "jump", "wave",
+    "walk_back", "walk_left", "walk_right", "run_back", "run_left", "run_right",
+]
 
 
 def deg(axis, degrees):
@@ -117,6 +125,39 @@ def gait(period, leg, knee, arm, elbow, bob, lean):
     ]
 
 
+def back(period, leg, knee, arm, elbow, bob, lean):
+    """The gait walked backwards: each knee bends while its leg swings
+    back instead of forward, and the torso leans back a little."""
+    channels = gait(period, leg, knee, arm, elbow, bob, -lean / 3)
+    # Each leg lifts while it travels backwards: the knees' phases swap.
+    keys = {joint: k for joint, _, k in channels}
+    return [(joint, path, keys["shin_r" if joint == "shin_l" else "shin_l"] if joint.startswith("shin") else k) for joint, path, k in channels]
+
+
+def side(period, leg, knee, bob, lean, direction):
+    """A side step toward +X (`direction` 1) or -X (-1). Facing -Z, +X is
+    the character's right (`walk_right`), where the joints named `_l`
+    hang: the leading leg steps out (about Z) in the first half, the
+    trailing one closes in the second; each knee lifts as its leg moves;
+    the torso leans a little into the step. The arms hang nearly still."""
+    h = period / 2
+    q = period / 4
+    lead, trail = ("l", "r") if direction > 0 else ("r", "l")
+    lift = lambda at: [(0.0, deg("x", -knee[0])), (at, deg("x", -knee[1])), (at + q, deg("x", -knee[0])), (period, deg("x", -knee[0]))] if at == q else [(0.0, deg("x", -knee[0])), (at - q, deg("x", -knee[0])), (at, deg("x", -knee[1])), (period, deg("x", -knee[0]))]
+    hips_y = 0.95
+    rest = {"l": 4, "r": -4}
+    return [
+        (f"thigh_{lead}", "rotation", [(0.0, deg("z", 0)), (q, deg("z", direction * leg)), (h, deg("z", 0)), (period, deg("z", 0))]),
+        (f"thigh_{trail}", "rotation", [(0.0, deg("z", 0)), (h, deg("z", 0)), (h + q, deg("z", direction * leg * 0.6)), (period, deg("z", 0))]),
+        (f"shin_{lead}", "rotation", lift(q)),
+        (f"shin_{trail}", "rotation", lift(h + q)),
+        ("upperarm_l", "rotation", [(0.0, deg("z", rest["l"])), (q, deg("z", rest["l"] + 6)), (h, deg("z", rest["l"])), (period, deg("z", rest["l"]))]),
+        ("upperarm_r", "rotation", [(0.0, deg("z", rest["r"])), (q, deg("z", rest["r"] - 6)), (h, deg("z", rest["r"])), (period, deg("z", rest["r"]))]),
+        ("hips", "translation", [(t, (0.0, hips_y - bob * (1 - math.cos(4 * math.pi * t / period)) / 2, 0.0)) for t in (0, q / 2, q, 3 * q / 2, h, 5 * q / 2, 3 * q, 7 * q / 2, period)]),
+        ("spine", "rotation", [(0.0, deg("z", -direction * lean)), (period, deg("z", -direction * lean))]),
+    ]
+
+
 def channels_jump():
     return [
         ("hips", "translation", [(0.0, (0.0, 0.95, 0.0)), (0.15, (0.0, 0.82, 0.0)), (0.4, (0.0, 1.02, 0.0)), (0.65, (0.0, 0.9, 0.0)), (0.8, (0.0, 0.95, 0.0))]),
@@ -148,16 +189,24 @@ def clip_channels(name):
         return gait(0.6, leg=50, knee=(15, 75), arm=45, elbow=70, bob=0.06, lean=12)
     if name == "jump":
         return channels_jump()
-    return channels_wave()
+    if name == "wave":
+        return channels_wave()
+    gait_name, _, way = name.partition("_")
+    walk = gait_name == "walk"
+    period = clip_duration(name)
+    if way == "back":
+        return back(period, leg=25 if walk else 40, knee=(5, 40) if walk else (15, 70), arm=20 if walk else 35, elbow=15 if walk else 60, bob=0.03 if walk else 0.05, lean=3 if walk else 12)
+    return side(period, leg=18 if walk else 28, knee=(5, 30) if walk else (15, 55), bob=0.03 if walk else 0.05, lean=3 if walk else 6, direction=1 if way == "right" else -1)
 
 
 def clip_duration(name):
-    return {"idle": 2.0, "walk": 1.0, "run": 0.6, "jump": 0.8, "wave": 1.2}[name]
+    durations = {"idle": 2.0, "walk": 1.0, "run": 0.6, "jump": 0.8, "wave": 1.2}
+    return durations.get(name) or durations[name.partition("_")[0]]
 
 
 def clip_markers(name):
     """Footsteps on the gaits: at the hips' two dips (see `gait`)."""
-    if name not in ("walk", "run"):
+    if name.partition("_")[0] not in ("walk", "run"):
         return None
     period = clip_duration(name)
     return [{"at": round(period / 4, 4), "name": "step_l"}, {"at": round(3 * period / 4, 4), "name": "step_r"}]
