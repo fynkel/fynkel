@@ -4,6 +4,7 @@ import 'assets.dart';
 import 'context.dart';
 import 'field.dart';
 import 'inspector.dart';
+import 'preview.dart';
 import 'scene.dart';
 
 /// What `registerEditor` is given: one package's way into the editor. The
@@ -86,6 +87,29 @@ abstract interface class EditorExtensions {
     String? menu,
     IconData? icon,
     required Widget Function(BuildContext context, EditorContext editor) build,
+  });
+
+  /// A preview (Unity's `ObjectPreview`, ADR-0030): what the Inspector's
+  /// preview area shows for an asset, below its page.
+  ///
+  /// It is offered for the assets of [kind] (`texture`, `material`,
+  /// `data`, …), of the data type [dataType] (`game.CoinKind`), or that
+  /// [accepts] takes; at least one must be given, and all that are given
+  /// must hold. A package's preview comes before the editor's own for the
+  /// same asset.
+  ///
+  /// [build] draws the picture; [toolbar], when given, sits at the right
+  /// of the area's header; [info] is the line under the picture
+  /// (`512x512  RGBA8 sRGB`). They share state through
+  /// [PreviewContext.value] and [PreviewContext.set]. A throw in any of
+  /// them shows the error in the picture and a Console error.
+  void preview({
+    String? kind,
+    String? dataType,
+    bool Function(EditorAsset asset)? accepts,
+    required Widget Function(BuildContext context, PreviewContext preview) build,
+    Widget Function(BuildContext context, PreviewContext preview)? toolbar,
+    String? Function(PreviewContext preview)? info,
   });
 
   /// An entry in the Hierarchy's context menu (Unity's `GameObject/` menu

@@ -309,6 +309,7 @@ class ExtensionsList extends StatelessWidget {
                 for (final i in p.inspectors) Text('Inspector: ${i.dartType}  (${i.typeId})', style: small),
                 for (final d in p.drawers)
                   Text(d.record != null ? 'Drawer: ${d.record} records' : 'Drawer: "${d.name}"', style: small),
+                for (final v in p.previews) Text('Preview: ${v.title}', style: small),
               ],
             ),
           ),

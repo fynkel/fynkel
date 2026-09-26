@@ -68,6 +68,10 @@ final class Preferences extends ChangeNotifier {
         for (final h in json['colorSwatches'] as List? ?? const [])
           if (h is String) h,
       ],
+      _previewLayout = {
+        for (final e in (json['previews'] as Map? ?? const {}).entries)
+          if (e.key is String && e.value is Map) e.key as String: Map<String, Object?>.from(e.value as Map),
+      },
       _recents = [
         for (final r in json['recents'] as List? ?? const [])
           if (r is Map<String, Object?>) RecentProject.fromJson(r),
@@ -132,6 +136,17 @@ final class Preferences extends ChangeNotifier {
   List<String> get colorSwatches => List.unmodifiable(_colorSwatches);
   void setColorSwatches(List<String> hexes) => _update(() => _colorSwatches = [...hexes]);
 
+  /// The Inspector's preview area per preview (ADR-0030):
+  /// `{texture: {height: 240, open: true}}`.
+  Map<String, Map<String, Object?>> _previewLayout;
+  Map<String, Map<String, Object?>> get previewLayout => Map.unmodifiable(_previewLayout);
+  void setPreviewLayout(String preview, Map<String, Object?> layout) => _update(
+    () => _previewLayout = {
+      ..._previewLayout,
+      preview: {...layout},
+    },
+  );
+
   List<RecentProject> _recents;
   List<RecentProject> get recents => List.unmodifiable(_recents);
 
@@ -171,6 +186,7 @@ final class Preferences extends ChangeNotifier {
     'zoomToPointer': zoomToPointer,
     'playModeTint': playModeTint,
     if (_colorSwatches.isNotEmpty) 'colorSwatches': _colorSwatches,
+    if (_previewLayout.isNotEmpty) 'previews': _previewLayout,
     'recents': [for (final r in _recents) r.toJson()],
   };
 

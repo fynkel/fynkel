@@ -151,6 +151,12 @@ Before/after pictures of each step are in `steps/` (from
     around the square, new | old, RGB 0–255 / RGB 0–1 / HSV sliders with
     their numbers, hexadecimal, the Defaults palette, the user's
     Swatches (kept in the preferences). No eyedropper yet.
+11. The Inspector's preview area (ADR-0030 steps 1–2,
+    `steps/11-texture-preview*.png`): under an asset's page, the name
+    and the preview's toolbar, the picture and an info line; folds and
+    resizes, kept per preview. Textures first: RGB / R / G / B / A, a
+    mip slider, zoom and pan, F to fit, `16x16  RGBA8  Linear  1.3 KB
+    mips 5`. Packages add theirs with `editor.preview(…)`.
 
 Left: the Project list keeps its Kind / Contents / Size columns (Unity
 shows names only).

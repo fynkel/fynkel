@@ -24,6 +24,7 @@ import 'hierarchy/hierarchy_panel.dart';
 import 'hierarchy/hierarchy_tree.dart';
 import 'documents/editor_document.dart';
 import 'inspector/field_widgets.dart' show ColorSwatches;
+import 'preview/preview_area.dart' show PreviewLayout;
 import 'inspector/codegen_check.dart';
 import 'l10n/strings.dart';
 import 'inspector/inspector_model.dart';
@@ -466,11 +467,8 @@ class EditorShellState extends State<EditorShell> {
     if (status != null) codeReload = CodeReloadStatus(status)..addListener(_onCodeReload);
     final game = widget.game;
     if (game != null) {
-      gameRun = GameRun(
-        game: game,
-        onRecord: _receiveRecord,
-        onQuit: () => unawaited(stopPlaying()),
-      )..addListener(registry.refresh);
+      gameRun = GameRun(game: game, onRecord: _receiveRecord, onQuit: () => unawaited(stopPlaying()))
+        ..addListener(registry.refresh);
       gameRun!.addListener(_onPlayWorlds);
       gameRun!.control.worldsChanged.addListener(_onPlayWorlds);
     }
@@ -494,6 +492,9 @@ class EditorShellState extends State<EditorShell> {
     // The colour picker's swatches live in the preferences.
     ColorSwatches.read = () => widget.prefs.colorSwatches;
     ColorSwatches.write = widget.prefs.setColorSwatches;
+    // So do the preview area's height and fold, per preview.
+    PreviewLayout.read = (preview) => widget.prefs.previewLayout[preview];
+    PreviewLayout.write = widget.prefs.setPreviewLayout;
     final detected = _detect();
     // A project named at launch opens once the tools are known: its open runs
     // the codegen check, which needs the CLI the detection is still finding.
@@ -786,6 +787,7 @@ class EditorShellState extends State<EditorShell> {
       redo: redo,
     );
   }
+
   bool get _hasTab => _focusedTab != null;
   bool get _canEdit => hierarchy?.canEdit ?? false;
   bool get _hasSelection => hierarchy?.hasSelection ?? false;
@@ -1418,13 +1420,7 @@ class EditorShellState extends State<EditorShell> {
           browser?.toggleView();
         },
       ),
-      EditorCommand(
-        id: 'project.new',
-        menu: EditorMenu.project,
-        group: 0,
-        order: 0,
-        run: newProject,
-      ),
+      EditorCommand(id: 'project.new', menu: EditorMenu.project, group: 0, order: 0, run: newProject),
       EditorCommand(
         id: 'project.open',
         menu: EditorMenu.project,
@@ -2007,18 +2003,17 @@ class EditorShellState extends State<EditorShell> {
       final ws = Workspace(registry: _panels, store: widget.layoutStore);
       final t = DocumentTabs(project: opened);
       final me = AssetEdits(opened)
-        ..preview = (kind, id, fields) =>
-            switch (kind) {
-              'volume' => scene?.previewVolume(id, fields),
-              'material' => scene?.previewMaterial(id, fields),
-              // During Play the running game's instance takes the saved data.
-              'data' when fields?['data'] is Map => _livePlay?.dataEdited(
-                id,
-                Map<String, Object?>.from(fields!['data'] as Map),
-              ),
-              // A physics material draws nothing; Play reads it from the cook.
-              _ => null,
-            };
+        ..preview = (kind, id, fields) => switch (kind) {
+          'volume' => scene?.previewVolume(id, fields),
+          'material' => scene?.previewMaterial(id, fields),
+          // During Play the running game's instance takes the saved data.
+          'data' when fields?['data'] is Map => _livePlay?.dataEdited(
+            id,
+            Map<String, Object?>.from(fields!['data'] as Map),
+          ),
+          // A physics material draws nothing; Play reads it from the cook.
+          _ => null,
+        };
       me.addListener(registry.refresh);
       final h = HierarchyModel(tabs: t, project: opened);
       final c = ConsoleModel(
@@ -2270,7 +2265,8 @@ class EditorShellState extends State<EditorShell> {
     if (cg != null && cg.watching && cg.status == CodegenStatus.failed) {
       _showError(
         'All script errors have to be fixed before you can enter Play mode. '
-        '${cg.error ?? ''}'.trim(),
+                '${cg.error ?? ''}'
+            .trim(),
       );
       return true;
     }

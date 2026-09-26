@@ -30,6 +30,8 @@ import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:path/path.dart' as p;
 
 import '../env/tools.dart';
+import '../extensions/editor_access.dart' show assetOf;
+import '../preview/preview_area.dart';
 import '../project/editor_project.dart';
 import '../project_browser/asset_preview.dart';
 import 'asset_edits.dart';
@@ -499,47 +501,65 @@ class _AssetPageState extends State<AssetPage> {
     final editsPhysics = widget.assetEdits != null && e.document == 'physics_material';
     return Material(
       type: MaterialType.transparency,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _header(context, e, d),
-          Expanded(
-            child: ListView(
-              key: Key('asset.panel.${e.id}'),
-              padding: const EdgeInsets.only(bottom: 16),
-              children: [
-                if (editsMaterial)
-                  MaterialInspector(key: Key('material.${e.id}'), edits: widget.assetEdits!, browser: model, id: e.id),
-                if (editsVolume) VolumeInspector(key: Key('volume.${e.id}'), edits: widget.assetEdits!, id: e.id),
-                if (editsPhysics)
-                  PhysicsMaterialInspector(key: Key('physicsMaterial.${e.id}'), edits: widget.assetEdits!, id: e.id),
-                if (e.document == 'prefab') _PrefabRoot(model: model, entry: e, onOpen: () => widget.onOpenDocument(e.id)),
-                if (draft != null) _importSettings(context, e, d, draft),
-                if (draft != null && _isModel(e)) _materials(context, e, d, draft),
-                if (e.isSource && d.subAssets.isNotEmpty) _parts(context, e, d),
-                if (!editsMaterial && !editsVolume && !editsPhysics)
-                  for (final section in AssetDocumentSections.of(context, e, d))
-                    // A registered section edits through the page's AssetEdits.
-                    if (widget.assetEdits case final edits?)
-                      AssetPageScope(edits: edits, browser: model, child: section)
-                    else
-                      section,
-                _info(context, e, d),
-              ],
+      child: LayoutBuilder(
+        builder: (context, box) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _header(context, e, d),
+            Expanded(
+              child: ListView(
+                key: Key('asset.panel.${e.id}'),
+                padding: const EdgeInsets.only(bottom: 16),
+                children: [
+                  if (editsMaterial)
+                    MaterialInspector(
+                      key: Key('material.${e.id}'),
+                      edits: widget.assetEdits!,
+                      browser: model,
+                      id: e.id,
+                    ),
+                  if (editsVolume) VolumeInspector(key: Key('volume.${e.id}'), edits: widget.assetEdits!, id: e.id),
+                  if (editsPhysics)
+                    PhysicsMaterialInspector(key: Key('physicsMaterial.${e.id}'), edits: widget.assetEdits!, id: e.id),
+                  if (e.document == 'prefab')
+                    _PrefabRoot(model: model, entry: e, onOpen: () => widget.onOpenDocument(e.id)),
+                  if (draft != null) _importSettings(context, e, d, draft),
+                  if (draft != null && _isModel(e)) _materials(context, e, d, draft),
+                  if (e.isSource && d.subAssets.isNotEmpty) _parts(context, e, d),
+                  if (!editsMaterial && !editsVolume && !editsPhysics)
+                    for (final section in AssetDocumentSections.of(context, e, d))
+                      // A registered section edits through the page's AssetEdits.
+                      if (widget.assetEdits case final edits?)
+                        AssetPageScope(edits: edits, browser: model, child: section)
+                      else
+                        section,
+                  _info(context, e, d),
+                ],
+              ),
             ),
-          ),
-          if (pending)
-            ApplyBar(
-              message: _jsonError != null
-                  ? 'The settings JSON does not parse: $_jsonError'
-                  : 'Import settings changed. Apply writes the sidecar and reimports.',
-              applyLabel: 'Apply and Reimport',
-              applyKey: const Key('asset.applySettings'),
-              revertKey: const Key('asset.revertSettings'),
-              onApply: model.canEdit && _dirty(d) ? () => _apply(d) : null,
-              onRevert: () => setState(() => _draftFor = null),
+            if (pending)
+              ApplyBar(
+                message: _jsonError != null
+                    ? 'The settings JSON does not parse: $_jsonError'
+                    : 'Import settings changed. Apply writes the sidecar and reimports.',
+                applyLabel: 'Apply and Reimport',
+                applyKey: const Key('asset.applySettings'),
+                revertKey: const Key('asset.revertSettings'),
+                onApply: model.canEdit && _dirty(d) ? () => _apply(d) : null,
+                onRevert: () => setState(() => _draftFor = null),
+              ),
+            InspectorPreviewArea(
+              key: const Key('asset.preview'),
+              asset: assetOf(e),
+              file: model.project.assetFile(e.path),
+              title: e.isSource ? p.basenameWithoutExtension(e.path) : ProjectBrowserModel.editableName(e),
+              importSettings: d.settings,
+              revision: d.modified,
+              // The page keeps its header and a few rows.
+              maxHeight: box.maxHeight - 160,
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -843,7 +863,9 @@ class _AssetPageState extends State<AssetPage> {
     final r = model.extractMaterials(e.id);
     if (r == null) return;
     final n = (r.json['materials'] as List?)?.length ?? 0;
-    Notices.maybeOf(context)?.show('Extracted $n material${n == 1 ? '' : 's'} to ${p.dirname(e.path) == '.' ? '' : '${p.dirname(e.path)}/'}Materials');
+    Notices.maybeOf(context)?.show(
+      'Extracted $n material${n == 1 ? '' : 's'} to ${p.dirname(e.path) == '.' ? '' : '${p.dirname(e.path)}/'}Materials',
+    );
     _draftFor = null;
     _runReimport(e.id);
   }
@@ -855,7 +877,10 @@ class _AssetPageState extends State<AssetPage> {
   Widget _materials(BuildContext context, AssetEntry e, AssetDetail d, Map<String, Object?> draft) {
     final t = context.tokens;
     final theme = Theme.of(context);
-    final keys = [for (final k in d.subAssets.keys) if (k.startsWith('material/')) k];
+    final keys = [
+      for (final k in d.subAssets.keys)
+        if (k.startsWith('material/')) k,
+    ];
     final remaps = _remaps(draft);
     String describe(Map<String, Object?>? ref) {
       if (ref == null || ref['asset'] == null) return 'None (embedded)';
@@ -873,10 +898,7 @@ class _AssetPageState extends State<AssetPage> {
       title: 'Materials',
       children: [
         if (keys.isEmpty)
-          Text(
-            'The file has no materials.',
-            style: theme.textTheme.bodySmall?.copyWith(color: t.textDisabled),
-          )
+          Text('The file has no materials.', style: theme.textTheme.bodySmall?.copyWith(color: t.textDisabled))
         else ...[
           for (final k in keys)
             FieldRow(

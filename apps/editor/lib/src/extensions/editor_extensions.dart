@@ -11,6 +11,7 @@ import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 import '../commands/commands.dart';
 import '../documents/open_document.dart';
 import '../inspector/inspector_model.dart' show readEntities;
+import '../preview/preview_provider.dart';
 import 'editor_access.dart';
 
 /// One package's editor part, as the generated host passes it:
@@ -194,12 +195,18 @@ class PackageExtensions {
   final contextItems = <ExtensionContextItem>[];
   final inspectors = <ExtensionInspector>[];
   final drawers = <ExtensionDrawer>[];
+  final previews = <PreviewProvider>[];
 
   /// `registerEditor` threw: nothing of the package's is used.
   String? error;
 
   bool get isEmpty =>
-      menuItems.isEmpty && windows.isEmpty && contextItems.isEmpty && inspectors.isEmpty && drawers.isEmpty;
+      menuItems.isEmpty &&
+      windows.isEmpty &&
+      contextItems.isEmpty &&
+      inspectors.isEmpty &&
+      drawers.isEmpty &&
+      previews.isEmpty;
 
   void clear() {
     menuItems.clear();
@@ -207,6 +214,7 @@ class PackageExtensions {
     contextItems.clear();
     inspectors.clear();
     drawers.clear();
+    previews.clear();
   }
 }
 
@@ -250,6 +258,10 @@ class EditorExtensionHost extends ChangeNotifier {
   ExtensionDrawer? drawerFor({String? named, String? record}) =>
       (named == null ? null : _drawers['name:$named']) ?? (record == null ? null : _drawers['record:$record']);
   var _drawers = <String, ExtensionDrawer>{};
+
+  /// Every preview the packages registered, in registration order (the
+  /// Inspector asks them before the editor's own).
+  Iterable<PreviewProvider> get previews => _packages.expand((p) => p.previews);
 
   Iterable<ExtensionContextItem> _contextItems(ContextMenuPlace place) =>
       _packages.expand((p) => p.contextItems).where((i) => i.place == place);
@@ -351,6 +363,7 @@ class EditorExtensionHost extends ChangeNotifier {
     _drawers = drawers;
     _inspectorErrors.clear();
     _drawerErrors.clear();
+    _previewErrors.clear();
     notifyListeners();
   }
 
@@ -485,6 +498,17 @@ class EditorExtensionHost extends ChangeNotifier {
   }
 
   final _windowErrors = <String, String>{};
+
+  /// A preview's builder failed: the Console says so once per distinct
+  /// error.
+  void previewFailed(PreviewProvider provider, Object error, StackTrace stack) {
+    final line = 'the ${provider.title} preview failed: $error';
+    if (_previewErrors[provider.title] == line) return;
+    _previewErrors[provider.title] = line;
+    _error(provider.package, line, stack);
+  }
+
+  final _previewErrors = <String, String>{};
 
   /// Runs [item] with its package's context; a throw is a Console error.
   void run(ExtensionMenuItem item) {
@@ -651,6 +675,32 @@ class _Registrar implements EditorExtensions {
         : null;
     if (why != null) host._error(package, 'context entry "$label" left out: $why.');
     return why == null;
+  }
+
+  @override
+  void preview({
+    String? kind,
+    String? dataType,
+    bool Function(EditorAsset asset)? accepts,
+    required Widget Function(BuildContext context, PreviewContext preview) build,
+    Widget Function(BuildContext context, PreviewContext preview)? toolbar,
+    String? Function(PreviewContext preview)? info,
+  }) {
+    if (kind == null && dataType == null && accepts == null) {
+      host._error(package, 'a preview left out: say which assets it takes (kind:, dataType: or accepts:).');
+      return;
+    }
+    registered.previews.add(
+      PreviewProvider(
+        package: package,
+        kind: kind,
+        dataType: dataType,
+        accepts: accepts,
+        build: build,
+        toolbar: toolbar,
+        info: info,
+      ),
+    );
   }
 
   @override

@@ -90,6 +90,16 @@ class _Items implements EditorExtensions {
     required void Function(EditorContext context, List<EditorObject> objects) run,
     bool Function(EditorContext context, List<EditorObject> objects)? enabled,
   }) => entries.add('$type|$label');
+
+  @override
+  void preview({
+    String? kind,
+    String? dataType,
+    bool Function(EditorAsset asset)? accepts,
+    required Widget Function(BuildContext context, PreviewContext preview) build,
+    Widget Function(BuildContext context, PreviewContext preview)? toolbar,
+    String? Function(PreviewContext preview)? info,
+  }) => entries.add('Preview|$kind|$dataType');
 }
 
 class _Log implements EditorContext {

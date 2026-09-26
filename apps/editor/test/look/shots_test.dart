@@ -117,10 +117,17 @@ void main() {
       ('asset-scene', 'scenes/main.scene.json'),
       ('asset-material', 'materials/rusted.material.json'),
       ('asset-texture', 'textures/swatch.png'),
+      ('asset-texture-normal', 'textures/rusted_normal.png'),
       ('asset-model', 'models/robot.glb'),
     ]) {
       final browser = e.shell.browser!;
       browser.select(browser.entries.firstWhere((a) => a.path == path).id);
+      await tester.pumpAndSettle();
+      // A preview's image is read and decoded off the fake clock.
+      for (var i = 0; i < 8; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+        await tester.pump();
+      }
       await tester.pumpAndSettle();
       await save(name, find.byType(InspectorPanel).first);
     }
