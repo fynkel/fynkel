@@ -1,0 +1,507 @@
+//! `fynkel_preview` — the preview stage's scene (ADR-0030 §3), shared by
+//! `fynkel thumbnail` (the Project's tiles) and the editor's Inspector
+//! previews, so a tile and a preview always show an asset alike.
+//!
+//! An asset is put alone into a small world: a prefab or a model's node
+//! hierarchy as it is, a mesh with the material its model pairs it with,
+//! a material on a shape (the built-in primitives' Sphere by default,
+//! ADR-0023; a stand-in sphere made here when the cache has none). What
+//! is not the asset's own is taken out of what gets drawn
+//! ([`strip`]): its cameras, lights, environment and volumes. The drawn
+//! meshes' world bounds are measured ([`world_bounds`]) and framed
+//! ([`frame`]) from (1, 0.8, 1) with a 30° lens and a sun from the upper
+//! left front of that view — every asset lit alike, whatever it authored.
+//!
+//! No GPU here: the caller draws the world's extract with its own
+//! renderer (the CLI offscreen, the editor through a viewport).
+
+use fynkel_assets::{Assets, Residency};
+use fynkel_contracts::{AssetRef, Uuid};
+use fynkel_cooked::payload::{MeshPayload, Vertex};
+use fynkel_core::{
+    ComponentValue, EntityDescription, Extract, MeshRenderer, SceneDescription, World, WorldConfig,
+};
+use glam::{Mat4, Vec3};
+
+/// The built-in primitives asset (ADR-0023, `fynkel_authoring::PRIMITIVES_ID`).
+pub const PRIMITIVES_ID: Uuid =
+    Uuid::from_bytes(u128::to_be_bytes(0xf7a1e5d0_0000_4000_8000_000000000023));
+/// The stand-in sphere's reference: an id no cache has.
+const STAND_IN_SPHERE: Uuid =
+    Uuid::from_bytes(u128::to_be_bytes(0x7b0e0000_0000_4000_8000_00000000a5f1));
+/// The world the asset is placed in, and the entity carrying a mesh or
+/// material on its own.
+const STAGE_SCENE: Uuid =
+    Uuid::from_bytes(u128::to_be_bytes(0x7b0e0000_0000_4000_8000_000000000001));
+const STAGE_ENTITY: Uuid =
+    Uuid::from_bytes(u128::to_be_bytes(0x7b0e0000_0000_4000_8000_000000000002));
+
+/// Where the camera looks from, relative to the bounds' centre.
+pub const VIEW_FROM: Vec3 = Vec3::new(1.0, 0.8, 1.0);
+pub const FOV_Y_DEGREES: f32 = 30.0;
+/// Room around the bounding sphere (1 = touching the picture's edges).
+pub const MARGIN: f32 = 1.1;
+
+/// What a material is shown on (Unity's preview shapes), or any mesh the
+/// user drops in.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub enum Shape {
+    #[default]
+    Sphere,
+    Cube,
+    Cylinder,
+    Capsule,
+    Plane,
+    Mesh(AssetRef),
+}
+
+impl Shape {
+    /// `sphere`, `cube`, `cylinder`, `capsule`, `plane`; `None` for
+    /// anything else.
+    pub fn parse(name: &str) -> Option<Shape> {
+        Some(match name {
+            "sphere" => Shape::Sphere,
+            "cube" => Shape::Cube,
+            "cylinder" => Shape::Cylinder,
+            "capsule" => Shape::Capsule,
+            "plane" => Shape::Plane,
+            _ => return None,
+        })
+    }
+
+    /// The primitives' sub-asset of a built-in shape.
+    fn primitive(&self) -> Option<&'static str> {
+        Some(match self {
+            Shape::Sphere => "mesh/Sphere",
+            Shape::Cube => "mesh/Cube",
+            Shape::Cylinder => "mesh/Cylinder",
+            Shape::Capsule => "mesh/Capsule",
+            Shape::Plane => "mesh/Plane",
+            Shape::Mesh(_) => return None,
+        })
+    }
+}
+
+/// What one asset is shown as.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Subject {
+    /// A prefab document, or a model's (or rig's) node hierarchy.
+    Hierarchy(Uuid),
+    /// One mesh with a material (nil: the renderer's default).
+    Mesh { mesh: AssetRef, material: AssetRef },
+    /// A material on a shape.
+    Material { material: AssetRef, shape: Shape },
+}
+
+impl Subject {
+    /// The asset whose closure must be resident while it is shown.
+    pub fn owner(&self) -> Uuid {
+        match self {
+            Subject::Hierarchy(id) => *id,
+            Subject::Mesh { mesh, .. } => mesh.asset,
+            Subject::Material { material, .. } => material.asset,
+        }
+    }
+}
+
+/// Why an asset has no subject.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    /// Nothing to show for this kind (a texture, a sound…): not a failure.
+    Nothing(String),
+    /// The asset could not be read.
+    Failed(String),
+}
+
+impl Refusal {
+    pub fn message(&self) -> &str {
+        match self {
+            Refusal::Nothing(m) | Refusal::Failed(m) => m,
+        }
+    }
+}
+
+fn article(word: &str) -> &'static str {
+    match word.chars().next() {
+        Some('a' | 'e' | 'i' | 'o' | 'u') => "an",
+        _ => "a",
+    }
+}
+
+fn nothing_for(kind: &str) -> Refusal {
+    Refusal::Nothing(format!("no thumbnail for {} {kind}", article(kind)))
+}
+
+/// The editor's word for an index kind (`document/<kind>` or an importer).
+pub fn kind_name(kind: &str) -> &str {
+    match kind {
+        "fynkel.image" => "texture",
+        "fynkel.audio" => "sound",
+        "fynkel.gltf" | "fynkel.fbx" => "model",
+        "fynkel.file" => "file",
+        k => k.strip_prefix("document/").unwrap_or(k),
+    }
+}
+
+/// How `id#sub` is shown, from the cache's index, or why it is not.
+pub fn subject(assets: &Assets, id: Uuid, sub: Option<&str>) -> Result<Subject, Refusal> {
+    let Some(entry) = assets.entry(id) else {
+        return Err(Refusal::Failed(format!(
+            "{id} is not in the project's cache"
+        )));
+    };
+    if entry.file.is_none() {
+        return Err(Refusal::Failed(format!("{}: its cook failed", entry.path)));
+    }
+    let kind = kind_name(&entry.kind);
+    let hierarchy = matches!(kind, "prefab" | "model" | "rig");
+    match sub {
+        None | Some("prefab") if hierarchy => Ok(Subject::Hierarchy(id)),
+        None if kind == "material" => Ok(Subject::Material {
+            material: AssetRef::new(id),
+            shape: Shape::Sphere,
+        }),
+        None => Err(nothing_for(kind)),
+        Some(s) if s.starts_with("mesh/") => {
+            let mesh = AssetRef::with_sub(id, s);
+            let material = default_material(assets, &mesh);
+            Ok(Subject::Mesh { mesh, material })
+        }
+        Some(s) if s.starts_with("material/") => Ok(Subject::Material {
+            material: AssetRef::with_sub(id, s),
+            shape: Shape::Sphere,
+        }),
+        Some(s) => Err(nothing_for(match s.split('/').next().unwrap_or(s) {
+            "image" => "texture",
+            "clip" => "clip",
+            other => other,
+        })),
+    }
+}
+
+/// The material a model draws `mesh` with: the one its own hierarchy
+/// pairs it with (the model's `prefab`), nil — the renderer's default —
+/// when it has none or the mesh is not in it.
+pub fn default_material(assets: &Assets, mesh: &AssetRef) -> AssetRef {
+    let Ok(prefab) = assets.prefab(mesh.asset) else {
+        return AssetRef::default();
+    };
+    prefab
+        .description
+        .entities
+        .iter()
+        .flat_map(|e| &e.components)
+        .find_map(|c| match c {
+            ComponentValue::MeshRenderer(r) if r.mesh == *mesh => Some(r.material.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+/// The mesh `shape` is: the project's primitive, a dropped-in mesh as it
+/// is, or — when the cache has no primitives — a stand-in UV sphere of
+/// the Sphere's size made resident in the store (never written to the
+/// cache).
+pub fn shape_mesh(assets: &Assets, shape: &Shape) -> AssetRef {
+    if let Shape::Mesh(mesh) = shape {
+        return mesh.clone();
+    }
+    let sub = shape.primitive().unwrap_or("mesh/Sphere");
+    let primitive = AssetRef::with_sub(PRIMITIVES_ID, sub);
+    if assets.entry(PRIMITIVES_ID).is_some() && assets.mesh(&primitive).is_ok() {
+        return primitive;
+    }
+    let stand_in = AssetRef::with_sub(STAND_IN_SPHERE, "mesh/Sphere");
+    if assets.mesh(&stand_in).is_err() {
+        assets.insert_mesh(&stand_in, uv_sphere(0.5, 32, 16));
+    }
+    stand_in
+}
+
+/// A UV sphere of `radius` with `segments` around and `rings` from pole
+/// to pole, counter-clockwise seen from outside (the cooked winding),
+/// with normals, tangents along the longitude and UVs.
+pub fn uv_sphere(radius: f32, segments: u32, rings: u32) -> MeshPayload {
+    use std::f32::consts::{PI, TAU};
+    let mut vertices = Vec::with_capacity(((segments + 1) * (rings + 1)) as usize);
+    for i in 0..=rings {
+        let theta = PI * i as f32 / rings as f32;
+        for j in 0..=segments {
+            let phi = TAU * j as f32 / segments as f32;
+            let n = [
+                theta.sin() * phi.cos(),
+                theta.cos(),
+                theta.sin() * phi.sin(),
+            ];
+            vertices.push(Vertex {
+                position: n.map(|c| c * radius),
+                normal: n,
+                tangent: [-phi.sin(), 0.0, phi.cos(), 1.0],
+                uv0: [j as f32 / segments as f32, i as f32 / rings as f32],
+                ..Vertex::default()
+            });
+        }
+    }
+    let mut indices = Vec::with_capacity((segments * rings * 6) as usize);
+    let row = segments + 1;
+    for i in 0..rings {
+        for j in 0..segments {
+            let a = i * row + j;
+            let (b, c, d) = (a + row, a + row + 1, a + 1);
+            indices.extend_from_slice(&[a, d, c, a, c, b]);
+        }
+    }
+    MeshPayload {
+        bounds_min: [-radius; 3],
+        bounds_max: [radius; 3],
+        vertices,
+        indices,
+        skin: Vec::new(),
+    }
+}
+
+/// One entity drawing `mesh` with `material` at the origin.
+pub fn single(mesh: AssetRef, material: AssetRef) -> SceneDescription {
+    SceneDescription {
+        id: STAGE_SCENE,
+        name: "Preview".to_string(),
+        entities: vec![EntityDescription {
+            id: STAGE_ENTITY,
+            name: "Preview".to_string(),
+            active: true,
+            parent: None,
+            children: Vec::new(),
+            components: vec![ComponentValue::MeshRenderer(MeshRenderer {
+                mesh,
+                material,
+                ..MeshRenderer::default()
+            })],
+        }],
+    }
+}
+
+/// A subject in its world, stepped once, its assets held resident.
+pub struct Staged {
+    pub world: World,
+    /// Keeps the subject's closure resident while the world is shown.
+    pub residency: Residency,
+    /// What loading the hierarchy's prefabs and animation reported.
+    pub diagnostics: Vec<String>,
+}
+
+/// Puts `subject` alone into a world made with `config`, and steps it
+/// once. A hierarchy also gets what its components reference from the
+/// cache: the skins a skinned model deforms with (drawn at the first
+/// step's pose), the prefabs its emitters would spawn.
+pub fn stage(assets: &Assets, subject: &Subject, config: WorldConfig) -> Result<Staged, Refusal> {
+    let (description, hierarchy) = match subject {
+        Subject::Hierarchy(id) => match assets.prefab(*id) {
+            Ok(p) => (p.description, true),
+            Err(diags) => {
+                return Err(Refusal::Failed(
+                    diags
+                        .first()
+                        .map(|d| d.message.clone())
+                        .unwrap_or_else(|| format!("{id}: not a prefab")),
+                ))
+            }
+        },
+        Subject::Mesh { mesh, material } => {
+            if let Err(d) = assets.mesh(mesh) {
+                return Err(Refusal::Failed(d.message));
+            }
+            (single(mesh.clone(), material.clone()), false)
+        }
+        Subject::Material { material, shape } => {
+            if let Err(d) = assets.material(material) {
+                return Err(Refusal::Failed(d.message));
+            }
+            let mesh = shape_mesh(assets, shape);
+            if let Err(d) = assets.mesh(&mesh) {
+                return Err(Refusal::Failed(d.message));
+            }
+            (single(mesh, material.clone()), false)
+        }
+    };
+    let mut closure = assets.closure(subject.owner());
+    if let Subject::Material {
+        shape: Shape::Mesh(mesh),
+        ..
+    } = subject
+    {
+        closure.extend(assets.closure(mesh.asset));
+    }
+    let residency = assets.retain(&closure);
+    let mut world = World::new(config);
+    if let Err(e) = world.load_scene(&description) {
+        return Err(Refusal::Failed(format!("{e:?}")));
+    }
+    let mut diagnostics = Vec::new();
+    if hierarchy {
+        let (_, prefab_diags) = assets.register_prefabs(&description, &mut world);
+        let (_, _, anim_diags) = assets.register_animation(&description, &mut world);
+        diagnostics.extend(
+            prefab_diags
+                .iter()
+                .chain(&anim_diags)
+                .map(|d| d.to_string()),
+        );
+    }
+    world.begin_frame(1.0 / 60.0);
+    world.step();
+    Ok(Staged {
+        world,
+        residency,
+        diagnostics,
+    })
+}
+
+/// Only the asset's own geometry: its cameras, lights, environment and
+/// volumes are taken out; the stage's own take their place.
+pub fn strip(extract: &mut Extract) {
+    extract.camera = None;
+    extract.directional_lights.clear();
+    extract.point_lights.clear();
+    extract.spot_lights.clear();
+    extract.environment = None;
+    extract.volumes.clear();
+}
+
+/// The drawn meshes' world bounds (min, max), from their cooked bounds;
+/// `None` when nothing measurable is drawn.
+pub fn world_bounds(assets: &Assets, extract: &Extract) -> Option<(Vec3, Vec3)> {
+    let mut bounds: Option<(Vec3, Vec3)> = None;
+    for m in &extract.meshes {
+        let Ok(payload) = assets.mesh(&m.mesh) else {
+            continue;
+        };
+        let world: Mat4 = extract.records[m.record as usize].world;
+        let (lo, hi) = (
+            Vec3::from(payload.bounds_min),
+            Vec3::from(payload.bounds_max),
+        );
+        for k in 0..8 {
+            let corner = Vec3::new(
+                if k & 1 == 0 { lo.x } else { hi.x },
+                if k & 2 == 0 { lo.y } else { hi.y },
+                if k & 4 == 0 { lo.z } else { hi.z },
+            );
+            let p = world.transform_point3(corner);
+            bounds = Some(match bounds {
+                Some((a, b)) => (a.min(p), b.max(p)),
+                None => (p, p),
+            });
+        }
+    }
+    bounds
+}
+
+/// A camera fitting some bounds, and the sun that lights them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Framing {
+    pub eye: Vec3,
+    pub target: Vec3,
+    pub fov_y_radians: f32,
+    pub near: f32,
+    pub far: f32,
+    /// Toward the light (the renderer's `light_dir`).
+    pub light_dir: Vec3,
+    /// The bounding sphere's radius (what an orbit keeps its distance by).
+    pub radius: f32,
+}
+
+impl Framing {
+    /// The camera's world matrix (it looks down its -Z).
+    pub fn camera_world(&self) -> Mat4 {
+        glam::camera::rh::view::look_at_mat4(self.eye, self.target, Vec3::Y).inverse()
+    }
+}
+
+/// The camera fitting the bounds' sphere from `view_from` (by default
+/// [`VIEW_FROM`]), and the sun from the upper left front of that view.
+pub fn frame((lo, hi): (Vec3, Vec3), view_from: Vec3) -> Framing {
+    let centre = (lo + hi) * 0.5;
+    let radius = match (hi - lo).length() * 0.5 {
+        r if r > 1e-4 && r.is_finite() => r,
+        _ => 0.5,
+    };
+    let fov = FOV_Y_DEGREES.to_radians();
+    let distance = radius * MARGIN / (fov * 0.5).sin();
+    let toward = view_from.normalize();
+    // The view's left: across the view direction, level with the ground
+    // ((-1, 0, 1) for an eye on (1, ·, 1)).
+    let left = match Vec3::new(-view_from.z, 0.0, view_from.x).try_normalize() {
+        Some(l) => l,
+        None => Vec3::new(-1.0, 0.0, 1.0).normalize(),
+    };
+    Framing {
+        eye: centre + toward * distance,
+        target: centre,
+        fov_y_radians: fov,
+        near: (distance - radius * 1.5).max(distance * 0.01),
+        far: distance + radius * 1.5,
+        light_dir: (toward + left * 0.7 + Vec3::Y * 0.8).normalize(),
+        radius,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn framing_fits_the_sphere_from_the_three_quarter_view() {
+        let f = frame((Vec3::splat(-0.5), Vec3::splat(0.5)), VIEW_FROM);
+        assert_eq!(f.target, Vec3::ZERO);
+        let d = (f.eye - f.target).length();
+        let r = (3.0f32).sqrt() * 0.5;
+        assert!((d - r * MARGIN / (15f32.to_radians()).sin()).abs() < 1e-4);
+        assert!((f.eye.normalize() - VIEW_FROM.normalize()).length() < 1e-5);
+        // The thumbnail's sun: toward + left·0.7 + up·0.8, left = (-1, 0, 1).
+        let toward = VIEW_FROM.normalize();
+        let want =
+            (toward + Vec3::new(-1.0, 0.0, 1.0).normalize() * 0.7 + Vec3::Y * 0.8).normalize();
+        assert!((f.light_dir - want).length() < 1e-5);
+        assert!(f.near > 0.0 && f.far > d);
+        // Its world matrix looks from the eye to the target.
+        let fwd = f.camera_world().transform_vector3(-Vec3::Z);
+        assert!((fwd - (f.target - f.eye).normalize()).length() < 1e-5);
+    }
+
+    #[test]
+    fn empty_bounds_frame_a_unit_sphere() {
+        assert_eq!(frame((Vec3::ONE, Vec3::ONE), VIEW_FROM).radius, 0.5);
+    }
+
+    #[test]
+    fn shapes_by_name() {
+        assert_eq!(Shape::parse("cube"), Some(Shape::Cube));
+        assert_eq!(Shape::parse("torus"), None);
+        assert_eq!(Shape::Capsule.primitive(), Some("mesh/Capsule"));
+    }
+
+    #[test]
+    fn strip_leaves_only_geometry() {
+        let mut e = Extract {
+            camera: Some(fynkel_core::ExtractCamera {
+                record: 0,
+                world: Mat4::IDENTITY,
+                camera: Default::default(),
+            }),
+            ..Extract::default()
+        };
+        strip(&mut e);
+        assert!(e.camera.is_none());
+    }
+
+    #[test]
+    fn the_uv_sphere_is_closed_and_sized() {
+        let s = uv_sphere(0.5, 8, 4);
+        assert_eq!(s.vertices.len(), 9 * 5);
+        assert_eq!(s.indices.len(), 8 * 4 * 6);
+        assert!(s
+            .vertices
+            .iter()
+            .all(|v| (Vec3::from(v.position).length() - 0.5).abs() < 1e-5));
+    }
+}

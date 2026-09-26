@@ -897,6 +897,7 @@ dependencies = [
  "fynkel_document",
  "fynkel_host_headless",
  "fynkel_import",
+ "fynkel_preview",
  "fynkel_render",
  "glam 0.33.7",
  "image",
@@ -1064,6 +1065,17 @@ dependencies = [
  "objc2-metal 0.3.2",
  "wgpu",
  "wgpu-hal",
+]
+
+[[package]]
+name = "fynkel_preview"
+version = "0.0.1"
+dependencies = [
+ "fynkel_assets",
+ "fynkel_contracts",
+ "fynkel_cooked",
+ "fynkel_core",
+ "glam 0.33.7",
 ]
 
 [[package]]

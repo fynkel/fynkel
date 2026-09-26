@@ -20,6 +20,7 @@ fynkel_import.workspace = true
 fynkel_cooked.workspace = true
 fynkel_host_headless.workspace = true
 fynkel_render.workspace = true
+fynkel_preview.workspace = true
 wgpu.workspace = true
 image.workspace = true
 glam.workspace = true
