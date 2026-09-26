@@ -1096,7 +1096,7 @@ fn cook_one(
                 info["states"] = json!(controller
                     .layers
                     .iter()
-                    .map(|l| l.states.len())
+                    .map(|l| l.leaves().len())
                     .sum::<usize>());
             }
             // A volume profile (R3a) likewise: its fields in range and

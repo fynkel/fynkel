@@ -200,9 +200,27 @@ pub struct State {
     pub looping: bool,
     /// None: the Animator's `root_motion`.
     pub root_motion: Option<bool>,
-    /// `/layers/<l>/states/<i>`.
+    /// Some: a sub-state machine (ADR-0033 § 4), which has states
+    /// instead of a motion.
+    pub machine: Option<Machine>,
+    /// `/layers/<l>/states/<i>` (`…/states/<i>/states/<j>` inside a
+    /// sub-state machine).
     pub pointer: String,
 }
+
+/// A sub-state machine's own states and transitions (ADR-0033 § 4). A
+/// transition into it enters its default state; one from it is checked
+/// from every state inside it. Its names are its own: `from` and `to`
+/// name its states, and code names them by path (`Airborne/Fall`).
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Machine {
+    pub default_state: Option<String>,
+    pub states: Vec<State>,
+    pub transitions: Vec<Transition>,
+}
+
+/// How deep sub-state machines may nest (a layer's states are depth 0).
+pub const MAX_DEPTH: usize = 8;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Transition {
@@ -214,8 +232,34 @@ pub struct Transition {
     pub duration: f32,
     pub offset: f32,
     pub can_transition_to_self: bool,
+    /// What may cut its crossfade short (ADR-0033 § 4).
+    pub interruptible_by: Interruption,
     /// `/layers/<l>/transitions/<i>`.
     pub pointer: String,
+}
+
+/// A transition's `interruptibleBy`: which transitions may fire while its
+/// crossfade runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Interruption {
+    /// None: its crossfade always ends first (the default).
+    #[default]
+    None,
+    /// The transitions of the state it goes to.
+    Next,
+    /// Any State's and the next state's.
+    Any,
+}
+
+impl Interruption {
+    /// The Inspector's words.
+    pub fn name(self) -> &'static str {
+        match self {
+            Interruption::None => "none",
+            Interruption::Next => "next",
+            Interruption::Any => "any",
+        }
+    }
 }
 
 impl Transition {
@@ -247,6 +291,88 @@ pub struct Layer {
 impl Layer {
     pub fn state(&self, name: &str) -> Option<&State> {
         self.states.iter().find(|s| s.name == name)
+    }
+
+    /// The layer and every sub-state machine in it, outer first: what
+    /// its names are checked in.
+    pub fn scopes(&self) -> Vec<Scope<'_>> {
+        fn walk<'a>(path: String, states: &'a [State], out: &mut Vec<Scope<'a>>) {
+            for s in states {
+                if let Some(m) = &s.machine {
+                    let p = if path.is_empty() {
+                        s.name.clone()
+                    } else {
+                        format!("{path}/{}", s.name)
+                    };
+                    out.push(Scope {
+                        path: p.clone(),
+                        default_state: m.default_state.as_deref(),
+                        states: &m.states,
+                        transitions: &m.transitions,
+                        pointer: &s.pointer,
+                    });
+                    walk(p, &m.states, out);
+                }
+            }
+        }
+        let mut out = vec![Scope {
+            path: String::new(),
+            default_state: self.default_state.as_deref(),
+            states: &self.states,
+            transitions: &self.transitions,
+            pointer: &self.pointer,
+        }];
+        walk(String::new(), &self.states, &mut out);
+        out
+    }
+
+    /// Every state that plays (not a sub-state machine), by path
+    /// (`Airborne/Fall`), in file order.
+    pub fn leaves(&self) -> Vec<(String, &State)> {
+        fn walk<'a>(path: &str, states: &'a [State], out: &mut Vec<(String, &'a State)>) {
+            for s in states {
+                let p = if path.is_empty() {
+                    s.name.clone()
+                } else {
+                    format!("{path}/{}", s.name)
+                };
+                match &s.machine {
+                    Some(m) => walk(&p, &m.states, out),
+                    None => out.push((p, s)),
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk("", &self.states, &mut out);
+        out
+    }
+}
+
+/// A layer or a sub-state machine: states whose names `from`, `to` and
+/// `defaultState` resolve among.
+#[derive(Clone, Debug)]
+pub struct Scope<'a> {
+    /// `""` for the layer, else the machine's path (`Airborne`).
+    pub path: String,
+    pub default_state: Option<&'a str>,
+    pub states: &'a [State],
+    pub transitions: &'a [Transition],
+    /// The layer's or the machine state's.
+    pub pointer: &'a str,
+}
+
+impl Scope<'_> {
+    pub fn state(&self, name: &str) -> Option<&State> {
+        self.states.iter().find(|s| s.name == name)
+    }
+
+    /// `name`'s path from the layer.
+    pub fn path_of(&self, name: &str) -> String {
+        if self.path.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}/{name}", self.path)
+        }
     }
 }
 
@@ -413,6 +539,138 @@ impl Reader<'_> {
         }
     }
 
+    /// The `states` of a layer or of a sub-state machine; `depth` is 0
+    /// for a layer's.
+    fn states(&mut self, node: &Node, pointer: &str, depth: usize) -> Vec<State> {
+        let mut states = Vec::new();
+        for (s, sp) in self.objects(node, "states", pointer) {
+            let Some(name) = self.string(s, "name", &sp) else {
+                continue;
+            };
+            let motion = self.motion(s, &sp);
+            let machine = ["states", "transitions", "defaultState"]
+                .iter()
+                .any(|k| s.get(k).is_some())
+                .then(|| {
+                    if motion.is_some() {
+                        self.bad(
+                            "a sub-state machine has states, not a motion".into(),
+                            &format!("{sp}/motion"),
+                        );
+                    }
+                    if depth + 1 >= MAX_DEPTH {
+                        self.bad(
+                            format!("sub-state machines nest at most {MAX_DEPTH} deep"),
+                            &sp,
+                        );
+                        return Machine::default();
+                    }
+                    Machine {
+                        default_state: self.string(s, "defaultState", &sp),
+                        states: self.states(s, &sp, depth + 1),
+                        transitions: self.transitions(s, &sp),
+                    }
+                });
+            states.push(State {
+                name,
+                motion,
+                speed: self.number(s, "speed", &sp).unwrap_or(1.0) as f32,
+                speed_parameter: self.string(s, "speedParameter", &sp),
+                looping: self.boolean(s, "loop", &sp).unwrap_or(true),
+                root_motion: self.boolean(s, "rootMotion", &sp),
+                machine,
+                pointer: sp,
+            });
+        }
+        states
+    }
+
+    /// The `transitions` of a layer or of a sub-state machine.
+    fn transitions(&mut self, node: &Node, pointer: &str) -> Vec<Transition> {
+        let mut transitions = Vec::new();
+        for (t, tp) in self.objects(node, "transitions", pointer) {
+            let from = self.string(t, "from", &tp);
+            let to = self.string(t, "to", &tp);
+            let mut conditions = Vec::new();
+            for (c, cp) in self.objects(t, "conditions", &tp) {
+                let Some(parameter) = self.string(c, "parameter", &cp) else {
+                    continue;
+                };
+                let mut tests = Vec::new();
+                if let Some(v) = self.number(c, "greater", &cp) {
+                    tests.push(Test::Greater(v));
+                }
+                if let Some(v) = self.number(c, "less", &cp) {
+                    tests.push(Test::Less(v));
+                }
+                for (key, not) in [("equals", false), ("notEquals", true)] {
+                    if let Some(v) = self.number(c, key, &cp) {
+                        if v.fract() != 0.0 {
+                            self.bad(
+                                format!("{key} takes a whole number"),
+                                &format!("{cp}/{key}"),
+                            );
+                        }
+                        let v = v as i64;
+                        tests.push(if not {
+                            Test::NotEquals(v)
+                        } else {
+                            Test::Equals(v)
+                        });
+                    }
+                }
+                if let Some(v) = self.boolean(c, "is", &cp) {
+                    tests.push(Test::Is(v));
+                }
+                let test = match tests.as_slice() {
+                    [] => Test::Set,
+                    [one] => *one,
+                    _ => {
+                        self.bad("a condition has one test".into(), &cp);
+                        tests[0]
+                    }
+                };
+                conditions.push(Condition {
+                    parameter,
+                    test,
+                    pointer: cp,
+                });
+            }
+            let exit_time = self.number(t, "exitTime", &tp).map(|v| v as f32);
+            let duration = self
+                .number(t, "duration", &tp)
+                .map_or(DEFAULT_DURATION, |v| v as f32);
+            let offset = self.number(t, "offset", &tp).unwrap_or(0.0) as f32;
+            let to_self = self.boolean(t, "canTransitionToSelf", &tp).unwrap_or(false);
+            let interruptible_by = match t.get("interruptibleBy").map(Node::as_str) {
+                None | Some(Some("none")) => Interruption::None,
+                Some(Some("next")) => Interruption::Next,
+                Some(Some("any")) => Interruption::Any,
+                Some(_) => {
+                    self.bad(
+                        "interruptibleBy must be none, next or any".into(),
+                        &format!("{tp}/interruptibleBy"),
+                    );
+                    Interruption::None
+                }
+            };
+            if let (Some(from), Some(to)) = (from, to) {
+                transitions.push(Transition {
+                    from,
+                    to,
+                    conditions,
+                    exit_time,
+                    duration,
+                    offset,
+                    can_transition_to_self: to_self,
+                    interruptible_by,
+                    pointer: tp,
+                });
+            }
+        }
+        transitions
+    }
+
     /// The objects of the array `key` with their pointers; a non-object
     /// item is reported and left out.
     fn objects<'n>(&mut self, node: &'n Node, key: &str, pointer: &str) -> Vec<(&'n Node, String)> {
@@ -542,91 +800,8 @@ impl Controller {
             let root_node = r.string(node, "root", &lp);
             let default_state = r.string(node, "defaultState", &lp);
 
-            let mut states = Vec::new();
-            for (s, sp) in r.objects(node, "states", &lp) {
-                let Some(name) = r.string(s, "name", &sp) else {
-                    continue;
-                };
-                let motion = r.motion(s, &sp);
-                states.push(State {
-                    name,
-                    motion,
-                    speed: r.number(s, "speed", &sp).unwrap_or(1.0) as f32,
-                    speed_parameter: r.string(s, "speedParameter", &sp),
-                    looping: r.boolean(s, "loop", &sp).unwrap_or(true),
-                    root_motion: r.boolean(s, "rootMotion", &sp),
-                    pointer: sp,
-                });
-            }
-
-            let mut transitions = Vec::new();
-            for (t, tp) in r.objects(node, "transitions", &lp) {
-                let from = r.string(t, "from", &tp);
-                let to = r.string(t, "to", &tp);
-                let mut conditions = Vec::new();
-                for (c, cp) in r.objects(t, "conditions", &tp) {
-                    let Some(parameter) = r.string(c, "parameter", &cp) else {
-                        continue;
-                    };
-                    let mut tests = Vec::new();
-                    if let Some(v) = r.number(c, "greater", &cp) {
-                        tests.push(Test::Greater(v));
-                    }
-                    if let Some(v) = r.number(c, "less", &cp) {
-                        tests.push(Test::Less(v));
-                    }
-                    for (key, not) in [("equals", false), ("notEquals", true)] {
-                        if let Some(v) = r.number(c, key, &cp) {
-                            if v.fract() != 0.0 {
-                                r.bad(
-                                    format!("{key} takes a whole number"),
-                                    &format!("{cp}/{key}"),
-                                );
-                            }
-                            let v = v as i64;
-                            tests.push(if not {
-                                Test::NotEquals(v)
-                            } else {
-                                Test::Equals(v)
-                            });
-                        }
-                    }
-                    if let Some(v) = r.boolean(c, "is", &cp) {
-                        tests.push(Test::Is(v));
-                    }
-                    let test = match tests.as_slice() {
-                        [] => Test::Set,
-                        [one] => *one,
-                        _ => {
-                            r.bad("a condition has one test".into(), &cp);
-                            tests[0]
-                        }
-                    };
-                    conditions.push(Condition {
-                        parameter,
-                        test,
-                        pointer: cp,
-                    });
-                }
-                let exit_time = r.number(t, "exitTime", &tp).map(|v| v as f32);
-                let duration = r
-                    .number(t, "duration", &tp)
-                    .map_or(DEFAULT_DURATION, |v| v as f32);
-                let offset = r.number(t, "offset", &tp).unwrap_or(0.0) as f32;
-                let to_self = r.boolean(t, "canTransitionToSelf", &tp).unwrap_or(false);
-                if let (Some(from), Some(to)) = (from, to) {
-                    transitions.push(Transition {
-                        from,
-                        to,
-                        conditions,
-                        exit_time,
-                        duration,
-                        offset,
-                        can_transition_to_self: to_self,
-                        pointer: tp,
-                    });
-                }
-            }
+            let states = r.states(node, &lp, 0);
+            let transitions = r.transitions(node, &lp);
 
             layers.push(Layer {
                 name,
@@ -663,16 +838,15 @@ impl Controller {
     /// "state `Walk`" or "a blend tree child of state `Walk`" for a
     /// motion's pointer.
     fn who(&self, pointer: &str) -> String {
-        let state = self
-            .layers
+        let leaves: Vec<(String, &State)> = self.layers.iter().flat_map(Layer::leaves).collect();
+        let state = leaves
             .iter()
-            .flat_map(|l| &l.states)
-            .find(|s| pointer.starts_with(&format!("{}/", s.pointer)));
+            .find(|(_, s)| pointer.starts_with(&format!("{}/", s.pointer)));
         match state {
-            Some(s) if pointer.contains("/blendTree/") => {
-                format!("a blend tree child of state `{}`", s.name)
+            Some((path, _)) if pointer.contains("/blendTree/") => {
+                format!("a blend tree child of state `{path}`")
             }
-            Some(s) => format!("state `{}`", s.name),
+            Some((path, _)) => format!("state `{path}`"),
             None => "a motion".to_string(),
         }
     }
@@ -697,7 +871,7 @@ impl Controller {
     /// pointer of its `motion`.
     pub fn motion_refs(&self) -> Vec<(&AssetRef, String)> {
         let mut out = Vec::new();
-        for s in self.layers.iter().flat_map(|l| &l.states) {
+        for (_, s) in self.layers.iter().flat_map(Layer::leaves) {
             if let Some(m) = &s.motion {
                 m.assets(&format!("{}/motion", s.pointer), &mut out);
             }
@@ -730,14 +904,6 @@ impl Controller {
                 pointer,
             )
         };
-        let typed = |message: String, pointer: &str| {
-            anchor(
-                root,
-                Diagnostic::error(Code::CONTROLLER_CONDITION, message),
-                pointer,
-            )
-        };
-
         let mut seen = HashSet::new();
         for p in &self.parameters {
             if !seen.insert(p.name.as_str()) {
@@ -747,14 +913,6 @@ impl Controller {
                 ));
             }
         }
-        let parameter_names = || {
-            self.parameters
-                .iter()
-                .map(|p| p.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-
         let mut seen_layers = HashSet::new();
         for l in &self.layers {
             if !l.name.is_empty() && !seen_layers.insert(l.name.as_str()) {
@@ -763,137 +921,212 @@ impl Controller {
                     &format!("{}/name", l.pointer),
                 ));
             }
-            let mut seen_states = HashSet::new();
-            for s in &l.states {
-                if s.name == ANY_STATE {
-                    out.push(
-                        names(
-                            format!("a state may not be named `{ANY_STATE}` (it means Any State)"),
-                            &format!("{}/name", s.pointer),
-                        )
-                        .with_suggestion("rename the state"),
-                    );
-                } else if !seen_states.insert(s.name.as_str()) {
-                    out.push(names(
-                        format!("two states of layer `{}` are named `{}`", l.name, s.name),
-                        &format!("{}/name", s.pointer),
-                    ));
-                }
-                if let Some(Motion::Tree(tree)) = &s.motion {
-                    self.validate_tree(tree, 1, &mut out);
-                }
-                if let Some(sp) = &s.speed_parameter {
-                    match self.parameter(sp) {
-                        None => out.push(
-                            names(
-                                format!("speedParameter `{sp}` is not a parameter"),
-                                &format!("{}/speedParameter", s.pointer),
-                            )
-                            .with_suggestion(format!("the parameters: {}", parameter_names())),
-                        ),
-                        Some(p) if p.kind != ParameterType::Float => out.push(typed(
-                            format!("speedParameter `{sp}` is a {}, not a float", p.kind.name()),
-                            &format!("{}/speedParameter", s.pointer),
-                        )),
-                        Some(_) => {}
-                    }
-                }
-            }
-            let state_names = || {
-                l.states
-                    .iter()
-                    .map(|s| s.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
-            match &l.default_state {
-                Some(d) if l.state(d).is_none() => out.push(
-                    names(
-                        format!("defaultState `{d}` is not a state of layer `{}`", l.name),
-                        &format!("{}/defaultState", l.pointer),
-                    )
-                    .with_suggestion(format!("the states: {}", state_names())),
-                ),
-                None if !l.states.is_empty() => out.push(
-                    names(
-                        format!("layer `{}` has states but no defaultState", l.name),
-                        &l.pointer,
-                    )
-                    .with_suggestion(format!(
-                        "name the state it starts in: one of {}",
-                        state_names()
-                    )),
-                ),
-                _ => {}
-            }
-            for t in &l.transitions {
-                if !t.from_any() && l.state(&t.from).is_none() {
-                    out.push(
-                        names(
-                            format!("from `{}` is not a state of layer `{}`", t.from, l.name),
-                            &format!("{}/from", t.pointer),
-                        )
-                        .with_suggestion(format!("a state ({}) or `{ANY_STATE}`", state_names())),
-                    );
-                }
-                if l.state(&t.to).is_none() {
-                    out.push(
-                        names(
-                            format!("to `{}` is not a state of layer `{}`", t.to, l.name),
-                            &format!("{}/to", t.pointer),
-                        )
-                        .with_suggestion(format!("the states: {}", state_names())),
-                    );
-                }
-                for c in &t.conditions {
-                    match self.parameter(&c.parameter) {
-                        None => out.push(
-                            names(
-                                format!("`{}` is not a parameter", c.parameter),
-                                &format!("{}/parameter", c.pointer),
-                            )
-                            .with_suggestion(format!("the parameters: {}", parameter_names())),
-                        ),
-                        Some(p) if !c.test.fits(p.kind) => out.push(
-                            typed(
-                                format!(
-                                    "`{}` is a {}: a condition on it cannot use {}",
-                                    p.name,
-                                    p.kind.name(),
-                                    c.test.word()
-                                ),
-                                &c.pointer,
-                            )
-                            .with_suggestion(match p.kind {
-                                ParameterType::Float => "a float takes `greater` or `less`",
-                                ParameterType::Int => {
-                                    "an int takes `greater`, `less`, `equals` or `notEquals`"
-                                }
-                                ParameterType::Bool => "a bool takes `is: true` or `is: false`",
-                                ParameterType::Trigger => {
-                                    "a trigger takes no test: `{ \"parameter\": \"jump\" }`"
-                                }
-                            }),
-                        ),
-                        Some(_) => {}
-                    }
-                }
-                if t.from_any() && t.conditions.is_empty() && t.exit_time.is_none() {
-                    out.push(
-                        anchor(
-                            root,
-                            Diagnostic::warning(
-                                Code::CONTROLLER_CONDITION,
-                                format!("an Any State transition to `{}` with no condition and no exit time fires every tick", t.to),
-                            ),
-                            &t.pointer,
-                        )
-                        .with_suggestion("give it a condition"),
-                    );
-                }
+            for scope in l.scopes() {
+                self.validate_scope(l, &scope, &mut out);
             }
         }
         finish(out, &self.document)
+    }
+
+    /// One scope's names (`D1101`) and types (`D1102`): a layer's own
+    /// states and transitions, or a sub-state machine's.
+    fn validate_scope(&self, l: &Layer, scope: &Scope<'_>, out: &mut Vec<Diagnostic>) {
+        let root = &self.document.root;
+        let names = |message: String, pointer: &str| {
+            anchor(
+                root,
+                Diagnostic::error(Code::CONTROLLER_NAMES, message),
+                pointer,
+            )
+        };
+        let typed = |message: String, pointer: &str| {
+            anchor(
+                root,
+                Diagnostic::error(Code::CONTROLLER_CONDITION, message),
+                pointer,
+            )
+        };
+        let parameter_names = || {
+            self.parameters
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let within = if scope.path.is_empty() {
+            format!("layer `{}`", l.name)
+        } else {
+            format!("sub-state machine `{}`", scope.path)
+        };
+
+        let mut seen_states = HashSet::new();
+        for s in scope.states {
+            if s.name == ANY_STATE {
+                out.push(
+                    names(
+                        format!("a state may not be named `{ANY_STATE}` (it means Any State)"),
+                        &format!("{}/name", s.pointer),
+                    )
+                    .with_suggestion("rename the state"),
+                );
+            } else if s.name.contains('/') {
+                out.push(
+                    names(
+                        format!(
+                            "a state's name may not hold `/` (`{}`): it separates a path",
+                            s.name
+                        ),
+                        &format!("{}/name", s.pointer),
+                    )
+                    .with_suggestion("rename the state"),
+                );
+            } else if !seen_states.insert(s.name.as_str()) {
+                let message = if scope.path.is_empty() {
+                    format!("two states of layer `{}` are named `{}`", l.name, s.name)
+                } else {
+                    format!("two states of {within} are named `{}`", s.name)
+                };
+                out.push(names(message, &format!("{}/name", s.pointer)));
+            }
+            if let Some(m) = &s.machine {
+                if m.states.is_empty() {
+                    out.push(
+                        names(
+                            format!(
+                                "sub-state machine `{}` has no states",
+                                scope.path_of(&s.name)
+                            ),
+                            &s.pointer,
+                        )
+                        .with_suggestion("give it states, or make it a state with a motion"),
+                    );
+                }
+            }
+            if let Some(Motion::Tree(tree)) = &s.motion {
+                self.validate_tree(tree, 1, out);
+            }
+            if let Some(sp) = &s.speed_parameter {
+                match self.parameter(sp) {
+                    None => out.push(
+                        names(
+                            format!("speedParameter `{sp}` is not a parameter"),
+                            &format!("{}/speedParameter", s.pointer),
+                        )
+                        .with_suggestion(format!("the parameters: {}", parameter_names())),
+                    ),
+                    Some(p) if p.kind != ParameterType::Float => out.push(typed(
+                        format!("speedParameter `{sp}` is a {}, not a float", p.kind.name()),
+                        &format!("{}/speedParameter", s.pointer),
+                    )),
+                    Some(_) => {}
+                }
+            }
+        }
+        let state_names = || {
+            scope
+                .states
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        match scope.default_state {
+            Some(d) if scope.state(d).is_none() => out.push(
+                names(
+                    format!("defaultState `{d}` is not a state of {within}"),
+                    &format!("{}/defaultState", scope.pointer),
+                )
+                .with_suggestion(format!("the states: {}", state_names())),
+            ),
+            None if !scope.states.is_empty() => out.push(
+                names(
+                    format!("{within} has states but no defaultState"),
+                    scope.pointer,
+                )
+                .with_suggestion(format!(
+                    "name the state it starts in: one of {}",
+                    state_names()
+                )),
+            ),
+            _ => {}
+        }
+        for t in scope.transitions {
+            if t.from_any() && !scope.path.is_empty() {
+                out.push(
+                    names(
+                        format!("Any State's transitions belong to the layer, not to {within}"),
+                        &format!("{}/from", t.pointer),
+                    )
+                    .with_suggestion(format!(
+                        "move it to layer `{}`'s transitions, or from `{}` there: that is checked from every state inside it",
+                        l.name, scope.path
+                    )),
+                );
+            } else if !t.from_any() && scope.state(&t.from).is_none() {
+                out.push(
+                    names(
+                        format!("from `{}` is not a state of {within}", t.from),
+                        &format!("{}/from", t.pointer),
+                    )
+                    .with_suggestion(format!("a state ({}) or `{ANY_STATE}`", state_names())),
+                );
+            }
+            if scope.state(&t.to).is_none() {
+                out.push(
+                    names(
+                        format!("to `{}` is not a state of {within}", t.to),
+                        &format!("{}/to", t.pointer),
+                    )
+                    .with_suggestion(format!("the states: {}", state_names())),
+                );
+            }
+            for c in &t.conditions {
+                match self.parameter(&c.parameter) {
+                    None => out.push(
+                        names(
+                            format!("`{}` is not a parameter", c.parameter),
+                            &format!("{}/parameter", c.pointer),
+                        )
+                        .with_suggestion(format!("the parameters: {}", parameter_names())),
+                    ),
+                    Some(p) if !c.test.fits(p.kind) => out.push(
+                        typed(
+                            format!(
+                                "`{}` is a {}: a condition on it cannot use {}",
+                                p.name,
+                                p.kind.name(),
+                                c.test.word()
+                            ),
+                            &c.pointer,
+                        )
+                        .with_suggestion(match p.kind {
+                            ParameterType::Float => "a float takes `greater` or `less`",
+                            ParameterType::Int => {
+                                "an int takes `greater`, `less`, `equals` or `notEquals`"
+                            }
+                            ParameterType::Bool => "a bool takes `is: true` or `is: false`",
+                            ParameterType::Trigger => {
+                                "a trigger takes no test: `{ \"parameter\": \"jump\" }`"
+                            }
+                        }),
+                    ),
+                    Some(_) => {}
+                }
+            }
+            if t.from_any() && t.conditions.is_empty() && t.exit_time.is_none() {
+                out.push(
+                    anchor(
+                        root,
+                        Diagnostic::warning(
+                            Code::CONTROLLER_CONDITION,
+                            format!("an Any State transition to `{}` with no condition and no exit time fires every tick", t.to),
+                        ),
+                        &t.pointer,
+                    )
+                    .with_suggestion("give it a condition"),
+                );
+            }
+        }
     }
 
     /// A blend tree's shape (`D1104`) and names (`D1101`/`D1102`),

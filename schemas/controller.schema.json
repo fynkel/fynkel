@@ -28,9 +28,9 @@
     },
     "state": {
       "type": "object",
-      "description": "A state plays one motion while it is the layer's current state.",
+      "description": "A state plays one motion while it is the layer's current state. With `states` instead of a motion it is a sub-state machine (ADR-0033 § 4): drawn as one box, a transition into it enters its `defaultState`, and a transition from it is checked from every state inside it.",
       "properties": {
-        "name": { "$ref": "#/$defs/name", "description": "Unique in its layer; what transitions and `play('Jump')` name. Not `any`." },
+        "name": { "$ref": "#/$defs/name", "description": "Unique in its layer (or its sub-state machine); what transitions and `play('Jump')` name. Not `any`, no `/`: code names a state inside a sub-state machine by path (`Airborne/Fall`)." },
         "motion": {
           "$ref": "#/$defs/motion",
           "description": "An animation clip (a model's or a rig's `anim/<n>`), a blend space (`.blend.json`) or a blend tree. Absent: the state holds the pose (Unity's empty state)."
@@ -38,10 +38,22 @@
         "speed": { "type": "number", "default": 1, "description": "The motion's playback speed." },
         "speedParameter": { "$ref": "#/$defs/identifier", "description": "A float parameter the speed is multiplied by." },
         "loop": { "type": "boolean", "default": true, "description": "Whether the motion loops." },
-        "rootMotion": { "type": "boolean", "description": "Whether its root motion moves the character. Absent: the Animator's `root_motion`." }
+        "rootMotion": { "type": "boolean", "description": "Whether its root motion moves the character. Absent: the Animator's `root_motion`." },
+        "defaultState": { "$ref": "#/$defs/name", "description": "A sub-state machine's: the state a transition into it enters. Required when it has states." },
+        "states": { "type": "array", "items": { "$ref": "#/$defs/state" }, "maxItems": 128, "description": "A sub-state machine's states (at most 8 deep)." },
+        "transitions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/transition" },
+          "maxItems": 512,
+          "description": "A sub-state machine's transitions between its own states (not `any`: Any State's belong to the layer)."
+        }
       },
       "required": ["name"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": { "anyOf": [{ "required": ["states"] }, { "required": ["transitions"] }, { "required": ["defaultState"] }] },
+      "then": {
+        "properties": { "motion": false, "speed": false, "speedParameter": false, "loop": false, "rootMotion": false }
+      }
     },
     "motion": {
       "oneOf": [
@@ -114,10 +126,10 @@
     },
     "transition": {
       "type": "object",
-      "description": "From a state (or `any`: Any State) to another, when every condition holds and, with an exit time, once the state has played that far. Any State's transitions are checked first, then the current state's, each in file order; one fires per tick, and none while a transition's crossfade runs.",
+      "description": "From a state (or `any`: Any State) to another, when every condition holds and, with an exit time, once the state has played that far. Any State's transitions are checked first, then those from the sub-state machines the state is in (outer first), then the state's own, each in file order; one fires per tick, and none while a transition's crossfade runs unless `interruptibleBy` allows it.",
       "properties": {
-        "from": { "$ref": "#/$defs/name", "description": "A state's name, or `any`." },
-        "to": { "$ref": "#/$defs/name", "description": "A state's name." },
+        "from": { "$ref": "#/$defs/name", "description": "A state's name (in the same layer or sub-state machine as the transition), or `any`." },
+        "to": { "$ref": "#/$defs/name", "description": "A state's name; a sub-state machine's enters its default state." },
         "conditions": { "type": "array", "items": { "$ref": "#/$defs/condition" }, "maxItems": 16 },
         "exitTime": {
           "type": "number",
@@ -130,6 +142,12 @@
           "type": "boolean",
           "default": false,
           "description": "Any State only: whether it may fire into the state already playing (restarting it)."
+        },
+        "interruptibleBy": {
+          "type": "string",
+          "enum": ["none", "next", "any"],
+          "default": "none",
+          "description": "What may cut its crossfade short: `none` (it always ends first), `next` (the transitions of the state it goes to), `any` (Any State's and the next state's). An interruption fades from the pose of that moment, held, so nothing pops."
         }
       },
       "required": ["from", "to"],

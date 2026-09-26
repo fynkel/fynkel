@@ -4,7 +4,9 @@
 
 use std::path::Path;
 
-use fynkel_document::controller::{Blending, ParameterType, Test, ANY_STATE, DEFAULT_DURATION};
+use fynkel_document::controller::{
+    Blending, Interruption, ParameterType, Test, ANY_STATE, DEFAULT_DURATION,
+};
 use fynkel_document::{Controller, Document, DocumentKind, SchemaSet};
 
 fn schemas() -> SchemaSet {
@@ -406,4 +408,105 @@ fn a_blend_trees_shape_and_parameters_are_checked() {
         "{:?}",
         codes(&c)
     );
+}
+
+/// The ADR's Airborne (ADR-0033 § 4): Jump → Fall → Land inside one
+/// state, left from the machine on `grounded`.
+fn airborne(inner: &str, outer: &str) -> String {
+    format!(
+        r#","parameters":[
+            {{"name":"grounded","type":"bool","default":true}},
+            {{"name":"jump","type":"trigger"}}],
+          "layers":[{{"name":"Base Layer","defaultState":"Locomotion",
+            "states":[
+              {{"name":"Locomotion","motion":{CLIP}}},
+              {{"name":"Airborne","defaultState":"Jump",
+                "states":[
+                  {{"name":"Jump","motion":{CLIP},"loop":false}},
+                  {{"name":"Fall","motion":{CLIP}}},
+                  {{"name":"Land","motion":{CLIP},"loop":false}}],
+                "transitions":[{inner}]}}],
+            "transitions":[{outer}]}}]"#
+    )
+}
+
+const INNER: &str = r#"{"from":"Jump","to":"Fall","exitTime":0.9},
+    {"from":"Fall","to":"Land","conditions":[{"parameter":"grounded","is":true}]}"#;
+const OUTER: &str = r#"{"from":"Locomotion","to":"Airborne","conditions":[{"parameter":"jump"}]},
+    {"from":"Airborne","to":"Locomotion","exitTime":1,"interruptibleBy":"next"}"#;
+
+#[test]
+fn a_sub_state_machine_reads_as_a_state_with_states() {
+    let c = doc(&airborne(INNER, OUTER));
+    assert_eq!(codes(&c), []);
+    let base = &c.layers[0];
+    let m = base.states[1].machine.as_ref().unwrap();
+    assert_eq!(m.default_state.as_deref(), Some("Jump"));
+    assert_eq!(m.states.len(), 3);
+    assert_eq!(m.transitions[1].pointer, "/layers/0/states/1/transitions/1");
+    assert_eq!(base.transitions[1].interruptible_by, Interruption::Next);
+    assert_eq!(base.transitions[0].interruptible_by, Interruption::None);
+    let leaves: Vec<_> = base.leaves().into_iter().map(|(p, _)| p).collect();
+    assert_eq!(
+        leaves,
+        [
+            "Locomotion",
+            "Airborne/Jump",
+            "Airborne/Fall",
+            "Airborne/Land"
+        ]
+    );
+    let scopes: Vec<_> = base.scopes().into_iter().map(|s| s.path).collect();
+    assert_eq!(scopes, ["", "Airborne"]);
+    assert_eq!(c.motion_refs().len(), 4);
+}
+
+#[test]
+fn a_sub_state_machines_names_are_its_own() {
+    // From/to name the machine's own states, not the layer's.
+    let c = doc(&airborne(
+        r#"{"from":"Jump","to":"Locomotion"},{"from":"any","to":"Fall","conditions":[{"parameter":"jump"}]}"#,
+        r#"{"from":"Locomotion","to":"Fall"}"#,
+    ));
+    assert_eq!(
+        codes(&c),
+        [
+            ("FYN-D1101".into(), "/layers/0/transitions/0/to".into()),
+            (
+                "FYN-D1101".into(),
+                "/layers/0/states/1/transitions/0/to".into()
+            ),
+            (
+                "FYN-D1101".into(),
+                "/layers/0/states/1/transitions/1/from".into()
+            ),
+        ]
+    );
+    // A default, states, no motion, no `/`.
+    let body = airborne(INNER, OUTER)
+        .replace(r#""defaultState":"Jump","#, "")
+        .replace(r#""name":"Fall""#, r#""name":"Fall/Down""#);
+    let c = doc(&body);
+    let got = codes(&c);
+    assert!(
+        got.contains(&("FYN-D1101".into(), "/layers/0/states/1".into())),
+        "{got:?}"
+    );
+    assert!(
+        got.contains(&(
+            "FYN-D1101".into(),
+            "/layers/0/states/1/states/1/name".into()
+        )),
+        "{got:?}"
+    );
+    let c = doc(&airborne(INNER, OUTER).replace(
+        r#"{"name":"Airborne","#,
+        &format!(r#"{{"name":"Airborne","motion":{CLIP},"#),
+    ));
+    assert!(!codes(&c).is_empty());
+    let c = doc(&airborne(INNER, OUTER).replace(
+        r#"{"from":"Airborne","to":"Locomotion","exitTime":1,"interruptibleBy":"next"}"#,
+        r#"{"from":"Airborne","to":"Locomotion","exitTime":1,"interruptibleBy":"always"}"#,
+    ));
+    assert!(!codes(&c).is_empty());
 }
