@@ -65,8 +65,8 @@ fn pixel(p: Vec3) -> usize {
 
 #[test]
 fn extra_worlds_draw_into_the_next_frame_only_and_equal_offscreen() {
-    assert_eq!(fynkel_apple_abi_version(), 9);
-    assert_eq!(APPLE_ABI_VERSION, 9);
+    assert_eq!(fynkel_apple_abi_version(), 10);
+    assert_eq!(APPLE_ABI_VERSION, 10);
     let rt = fynkel_runtime_create();
     let (main, context) = unsafe { (cube_world(rt, Vec3::ZERO), cube_world(rt, Vec3::ZERO)) };
     let mut vp = Viewport::new(W, H, 3, SyncMode::MetalCompletion).expect("viewport");

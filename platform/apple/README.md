@@ -8,7 +8,7 @@ builds unchanged for `aarch64-apple-ios[-sim]`:
 | Item | Contract |
 | --- | --- |
 | Graphics backend | wgpu, Metal backend only (`Backends::METAL`). |
-| Adapter/device ownership | The viewport owns its `wgpu::Device`/`Queue` (one per viewport). The engine core has no GPU dependency. |
+| Adapter/device ownership | Every viewport of the process shares one `wgpu::Device`/`Queue` (ABI 10, ADR-0030 §4): the first viewport makes it, the last one frees it; each viewport keeps its own ring and renderer. `FYNKEL_VIEWPORT_DEVICE=own` gives each viewport its own device instead. Numbers: `docs/perf/shared-gpu.md`. The engine core has no GPU dependency. |
 | Flutter renderer relationship | Impeller composites the viewport as an ordinary `Texture` layer (Path A, ADR-0002). Flutter never touches the engine's device. |
 | Native surface/texture ownership | Rust creates a ring of N `IOSurface`s (N ∈ 2..=8, default 4) and imports each as an `MTLTexture` on **wgpu's own `MTLDevice`** (asserted at import). Swift wraps the same surfaces as `CVPixelBuffer`s. IOSurfaces stay alive by CF refcount as long as either side holds them. |
 | Synchronization | Explicit per-slot state machine `Free → Rendering → Ready → Presented → Retiring → Free`. A slot becomes `Ready` only when the GPU work into it has **completed** (`MTLCommandBuffer.addCompletedHandler` on a fence buffer committed behind the frame; wgpu `on_submitted_work_done` and a blocking wait exist for tests). The presenter's current and previous slots are never rendered into; a full ring **drops** the frame. `acquire_presented` may wait a bounded time (default 3 ms, host-set) for the newest in-flight frame so a present shows the frame rendered this tick (lag 0). |
@@ -17,7 +17,7 @@ builds unchanged for `aarch64-apple-ios[-sim]`:
 | Alpha / premultiplication | Opaque: the renderer clears to alpha 1 and draws opaque geometry. Transparent viewports are out of scope for M1. |
 | DPI scaling | The host sizes the ring in **physical** pixels (`LayoutBuilder` size × `devicePixelRatio`); the texture is drawn 1:1 into the widget bounds. |
 | Resize path | Host loop: stop rendering → `fynkel_apple_viewport_resize` (waits for GPU idle, rebuilds the ring under a new *generation*; stale completions cannot promote new slots) → Swift re-wraps the new surfaces (`rebindTexture`) → resume. Old surfaces are released when nobody holds them. |
-| Device loss | Not handled in M1 (Metal on Apple silicon does not lose devices in practice); a failed `create` or `resize` returns an error/NULL and the host keeps the old state. |
+| Device loss | A lost shared device is logged and never handed to a new viewport (the next `create` makes a fresh one). Viewports already on it are not rebuilt yet (Metal on Apple silicon does not lose devices in practice); a failed `create` or `resize` returns an error/NULL and the host keeps the old state. |
 | Lifecycle / background | The host mutes its ticker on `hidden`/`paused` (no rendering, simulation clock paused); `inactive` keeps rendering. Resume re-bases the frame dt so the pause is not fed to the accumulator. |
 | Resource disposal | Ordered teardown: stop the host loop → clear the frame-ready callback (synchronous; waits for an in-progress callback) → Swift detaches and unregisters the texture (raster thread will not call into Rust afterwards) → `fynkel_apple_viewport_destroy` → dispose the world. |
 

@@ -152,8 +152,7 @@ impl FrameReadyCallback {
 }
 
 pub struct IoSurfaceRing {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    gpu: Arc<Gpu>,
     width: u32,
     height: u32,
     sync_mode: SyncMode,
@@ -165,32 +164,97 @@ pub struct IoSurfaceRing {
     frame_ready_cb: Arc<FrameReadyCallback>,
     /// Kept alive for the lifetime of the textures; indexed like `ring.slots`.
     surfaces: Vec<CFRetained<IOSurfaceRef>>,
+}
+
+/// Where a viewport's GPU comes from (ADR-0030 §4).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DeviceChoice {
+    /// The one device every viewport in the process shares: made by the
+    /// first viewport, freed with the last. The default.
+    Shared,
+    /// A device of its own, as every viewport had before ABI 10 (the
+    /// measurement's baseline, and `FYNKEL_VIEWPORT_DEVICE=own`).
+    Own,
+}
+
+impl DeviceChoice {
+    /// `FYNKEL_VIEWPORT_DEVICE=own` gives every viewport its own device
+    /// (a way back if sharing ever misbehaves); anything else shares.
+    pub fn from_env() -> DeviceChoice {
+        match std::env::var("FYNKEL_VIEWPORT_DEVICE").as_deref() {
+            Ok("own") => DeviceChoice::Own,
+            _ => DeviceChoice::Shared,
+        }
+    }
+}
+
+/// A wgpu device on Metal with its queue, and the raw Metal objects the
+/// ring imports surfaces on and fences with. wgpu's device and queue may be
+/// used from any thread; the viewports use them from the host loop.
+pub struct Gpu {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
     mtl_device: Retained<ProtocolObject<dyn MTLDevice>>,
     /// The MTLCommandQueue wgpu submits on; used by `SyncMode::MetalCompletion`.
     mtl_queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
+    lost: Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl IoSurfaceRing {
-    /// Creates a Metal device and a ring of `buffer_count` surfaces.
-    ///
-    /// Runs in its own autorelease pool, like [`Self::resize`] and the
-    /// completion path of [`Self::render_with`]: Metal and IOSurface
-    /// autorelease on the calling thread, which need not have a pool.
-    pub fn new(
-        width: u32,
-        height: u32,
-        buffer_count: u32,
-        sync_mode: SyncMode,
-    ) -> Result<Self, String> {
-        objc2::rc::autoreleasepool(|_| Self::new_in_pool(width, height, buffer_count, sync_mode))
+// SAFETY: the Metal device and command queue are thread-safe objects
+// (Apple documents MTLDevice and MTLCommandQueue as usable from any
+// thread); wgpu's device and queue are Send + Sync.
+unsafe impl Send for Gpu {}
+unsafe impl Sync for Gpu {}
+
+/// The shared device, while any viewport holds it.
+static SHARED_GPU: Mutex<std::sync::Weak<Gpu>> = Mutex::new(std::sync::Weak::new());
+
+impl Gpu {
+    /// The GPU for a new viewport: the shared one (made now if no viewport
+    /// holds it, or if it was lost), or one of its own.
+    pub fn get(choice: DeviceChoice) -> Result<Arc<Gpu>, String> {
+        if choice == DeviceChoice::Own {
+            return Gpu::create().map(Arc::new);
+        }
+        let mut shared = SHARED_GPU.lock().unwrap();
+        if let Some(gpu) = shared.upgrade() {
+            if !gpu.is_lost() {
+                return Ok(gpu);
+            }
+        }
+        let gpu = Arc::new(Gpu::create()?);
+        *shared = Arc::downgrade(&gpu);
+        Ok(gpu)
     }
 
-    fn new_in_pool(
-        width: u32,
-        height: u32,
-        buffer_count: u32,
-        sync_mode: SyncMode,
-    ) -> Result<Self, String> {
+    /// Whether the device was lost (a driver reset, the GPU removed): no
+    /// new viewport is given it any more.
+    pub fn is_lost(&self) -> bool {
+        self.lost.load(Ordering::Acquire)
+    }
+
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    /// The `MTLCommandQueue` wgpu submits on: one per wgpu device, so two
+    /// viewports share a device exactly when they share it. (The
+    /// `MTLDevice` is the system's one per GPU either way.)
+    pub fn mtl_queue_ptr(&self) -> *const c_void {
+        Retained::as_ptr(&self.mtl_queue) as *const c_void
+    }
+
+    /// Runs in its own autorelease pool: Metal autoreleases on the calling
+    /// thread, which need not have a pool.
+    fn create() -> Result<Gpu, String> {
+        objc2::rc::autoreleasepool(|_| Gpu::create_in_pool())
+    }
+
+    fn create_in_pool() -> Result<Gpu, String> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::METAL,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -218,6 +282,12 @@ impl IoSurfaceRing {
                 ..Default::default()
             }))
             .map_err(|e| format!("request_device: {e}"))?;
+        let lost = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = lost.clone();
+        device.set_device_lost_callback(move |reason, message| {
+            log::error!("fynkel apple viewport device lost ({reason:?}): {message}");
+            flag.store(true, Ordering::Release);
+        });
 
         // The MTLDevice wgpu owns. Every imported texture must come from it.
         let mtl_device: Retained<ProtocolObject<dyn MTLDevice>> = unsafe {
@@ -232,41 +302,80 @@ impl IoSurfaceRing {
                 .ok_or("queue is not Metal")?;
             Retained::from(hal.as_raw())
         };
-
-        let (slots, surfaces) = build_ring(&device, &mtl_device, width, height, buffer_count)?;
-
-        Ok(Self {
+        Ok(Gpu {
             device,
             queue,
-            width,
-            height,
-            sync_mode,
-            ring: Arc::new(RingShared {
-                ring: Mutex::new(Ring {
-                    slots,
-                    next_seq: 1,
-                    generation: 0,
-                }),
-                ready: Condvar::new(),
-            }),
-            acquire_wait: Mutex::new(Duration::ZERO),
-            stats: Arc::new(Mutex::new(RingStats::default())),
-            frame_ready_cb: Arc::new(FrameReadyCallback {
-                func: Mutex::new(None),
-                signalled: AtomicU32::new(0),
-            }),
-            surfaces,
             mtl_device,
             mtl_queue,
+            lost,
+        })
+    }
+}
+
+impl IoSurfaceRing {
+    /// A ring of `buffer_count` surfaces on the shared GPU (or on its own,
+    /// by `FYNKEL_VIEWPORT_DEVICE`).
+    pub fn new(
+        width: u32,
+        height: u32,
+        buffer_count: u32,
+        sync_mode: SyncMode,
+    ) -> Result<Self, String> {
+        let gpu = Gpu::get(DeviceChoice::from_env())?;
+        Self::with_gpu(gpu, width, height, buffer_count, sync_mode)
+    }
+
+    /// A ring of `buffer_count` surfaces on `gpu`.
+    ///
+    /// Runs in its own autorelease pool, like [`Self::resize`] and the
+    /// completion path of [`Self::render_with`]: Metal and IOSurface
+    /// autorelease on the calling thread, which need not have a pool.
+    pub fn with_gpu(
+        gpu: Arc<Gpu>,
+        width: u32,
+        height: u32,
+        buffer_count: u32,
+        sync_mode: SyncMode,
+    ) -> Result<Self, String> {
+        objc2::rc::autoreleasepool(|_| {
+            let (slots, surfaces) =
+                build_ring(&gpu.device, &gpu.mtl_device, width, height, buffer_count)?;
+            Ok(Self {
+                gpu,
+                width,
+                height,
+                sync_mode,
+                ring: Arc::new(RingShared {
+                    ring: Mutex::new(Ring {
+                        slots,
+                        next_seq: 1,
+                        generation: 0,
+                    }),
+                    ready: Condvar::new(),
+                }),
+                acquire_wait: Mutex::new(Duration::ZERO),
+                stats: Arc::new(Mutex::new(RingStats::default())),
+                frame_ready_cb: Arc::new(FrameReadyCallback {
+                    func: Mutex::new(None),
+                    signalled: AtomicU32::new(0),
+                }),
+                surfaces,
+            })
         })
     }
 
+    /// The GPU this ring draws with (shared with the process's other
+    /// viewports unless made with its own).
+    pub fn gpu(&self) -> &Arc<Gpu> {
+        &self.gpu
+    }
+
     pub fn device(&self) -> &wgpu::Device {
-        &self.device
+        &self.gpu.device
     }
 
     pub fn queue(&self) -> &wgpu::Queue {
-        &self.queue
+        &self.gpu.queue
     }
 
     pub fn size(&self) -> (u32, u32) {
@@ -297,9 +406,10 @@ impl IoSurfaceRing {
 
     fn resize_in_pool(&mut self, width: u32, height: u32) -> Result<(), String> {
         let t0 = Instant::now();
-        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        let _ = self.gpu.device.poll(wgpu::PollType::wait_indefinitely());
         let count = self.surfaces.len() as u32;
-        let (slots, surfaces) = build_ring(&self.device, &self.mtl_device, width, height, count)?;
+        let (slots, surfaces) =
+            build_ring(&self.gpu.device, &self.gpu.mtl_device, width, height, count)?;
         {
             let mut ring = self.ring.ring.lock().unwrap();
             ring.slots = slots;
@@ -344,9 +454,9 @@ impl IoSurfaceRing {
 
         let commands = {
             let ring = self.ring.ring.lock().unwrap();
-            record(&self.device, &self.queue, &ring.slots[index].view)
+            record(&self.gpu.device, &self.gpu.queue, &ring.slots[index].view)
         };
-        self.queue.submit(Some(commands));
+        self.gpu.queue.submit(Some(commands));
 
         let shared = self.ring.clone();
         let stats = self.stats.clone();
@@ -373,9 +483,9 @@ impl IoSurfaceRing {
         };
 
         match self.sync_mode {
-            SyncMode::Async => self.queue.on_submitted_work_done(mark_ready),
+            SyncMode::Async => self.gpu.queue.on_submitted_work_done(mark_ready),
             SyncMode::Blocking => {
-                let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+                let _ = self.gpu.device.poll(wgpu::PollType::wait_indefinitely());
                 mark_ready();
             }
             SyncMode::MetalCompletion => objc2::rc::autoreleasepool(|_| {
@@ -385,6 +495,7 @@ impl IoSurfaceRing {
                 // thread may have none: Rust hosts, tests), else every frame
                 // retains a command buffer (M1 leak test).
                 let fence = self
+                    .gpu
                     .mtl_queue
                     .commandBuffer()
                     .expect("MTLCommandQueue.commandBuffer");
@@ -513,7 +624,7 @@ impl IoSurfaceRing {
 
     /// Blocks until all submitted GPU work has completed (tests, teardown).
     pub fn wait_idle(&self) {
-        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        let _ = self.gpu.device.poll(wgpu::PollType::wait_indefinitely());
     }
 
     /// Test/diagnostic helper: read one BGRA pixel back from a surface on

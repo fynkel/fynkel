@@ -25,9 +25,9 @@ use fynkel_native::FynkelWorld;
 use fynkel_render::{Assets, Camera, ExtractRenderer, FrameStats};
 use glam::Vec3;
 
-pub use ring::{IoSurfaceRing, RingStats, SyncMode, TEXTURE_FORMAT};
+pub use ring::{DeviceChoice, Gpu, IoSurfaceRing, RingStats, SyncMode, TEXTURE_FORMAT};
 
-/// Ring + renderer. Owns the GPU device.
+/// Ring + renderer, on the GPU the process's viewports share (ADR-0030 §4).
 pub struct Viewport {
     ring: IoSurfaceRing,
     renderer: ExtractRenderer,
@@ -44,12 +44,29 @@ impl Viewport {
         sync_mode: SyncMode,
     ) -> Result<Self, String> {
         let ring = IoSurfaceRing::new(width, height, buffer_count, sync_mode)?;
+        Ok(Self::around(ring, width, height))
+    }
+
+    /// A viewport on `gpu` (the measurement's own-device baseline; the
+    /// host's viewports come from [`Viewport::new`]).
+    pub fn with_gpu(
+        gpu: std::sync::Arc<Gpu>,
+        width: u32,
+        height: u32,
+        buffer_count: u32,
+        sync_mode: SyncMode,
+    ) -> Result<Self, String> {
+        let ring = IoSurfaceRing::with_gpu(gpu, width, height, buffer_count, sync_mode)?;
+        Ok(Self::around(ring, width, height))
+    }
+
+    fn around(ring: IoSurfaceRing, width: u32, height: u32) -> Self {
         let renderer = ExtractRenderer::new(ring.device(), TEXTURE_FORMAT, width, height);
-        Ok(Self {
+        Self {
             ring,
             renderer,
             view: None,
-        })
+        }
     }
 
     pub fn ring(&self) -> &IoSurfaceRing {
@@ -282,8 +299,9 @@ pub const FYNKEL_APPLE_RENDER_NO_WORLD: i32 = -2;
 /// own camera over any world — ADR-0021 P7 L5; 8:
 /// `fynkel_apple_viewport_outline`, the selection outline; 9:
 /// `fynkel_apple_viewport_extra_worlds`, other worlds drawn into the frame
-/// — Prefab Mode in context, multi-scene editing).
-pub const APPLE_ABI_VERSION: u32 = 9;
+/// — Prefab Mode in context, multi-scene editing; 10: every viewport
+/// shares one GPU device, ADR-0030 §4 — no call changed).
+pub const APPLE_ABI_VERSION: u32 = 10;
 
 /// Bit 0 of an extra world's flags (`fynkel_apple_viewport_extra_worlds`):
 /// drawn greyed.
@@ -294,7 +312,9 @@ pub extern "C" fn fynkel_apple_abi_version() -> u32 {
     APPLE_ABI_VERSION
 }
 
-/// Creates a viewport with its own Metal device and an IOSurface ring.
+/// Creates a viewport with an IOSurface ring on the GPU every viewport in
+/// the process shares (ABI 10, ADR-0030 §4: made by the first, freed with
+/// the last; `FYNKEL_VIEWPORT_DEVICE=own` gives each its own instead).
 /// `buffer_count` is clamped to 2..=8; `sync_mode` see `SyncMode`.
 /// Returns NULL on failure (details in the log).
 #[no_mangle]

@@ -1,4 +1,4 @@
-/* Fynkel macOS viewport ABI v9 (platform/apple). Pairs with fynkel.h: the
+/* Fynkel macOS viewport ABI v10 (platform/apple). Pairs with fynkel.h: the
  * same dylib exports both. See platform/apple/README.md for the contract.
  * v3 added the M3-16 instrumentation fields of FynkelAppleViewportStats; v4
  * fynkel_apple_viewport_debug_lines and fynkel_apple_viewport_read_frame (the
@@ -8,7 +8,8 @@
  * the editor's Scene view on a running game, ADR-0021 P7 L5); v8
  * fynkel_apple_viewport_outline (the selection outline); v9
  * fynkel_apple_viewport_extra_worlds (other worlds drawn into the frame:
- * Prefab Mode in context, multi-scene editing). */
+ * Prefab Mode in context, multi-scene editing); v10 no call changed: every
+ * viewport shares one GPU device (ADR-0030 §4). */
 #ifndef FYNKEL_APPLE_H
 #define FYNKEL_APPLE_H
 
@@ -19,7 +20,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_APPLE_ABI_VERSION 9
+#define FYNKEL_APPLE_ABI_VERSION 10
 
 typedef struct FynkelAppleViewport FynkelAppleViewport;
 
@@ -98,7 +99,8 @@ typedef void (*FynkelAppleFrameReadyFn)(void *userdata);
 
 uint32_t fynkel_apple_abi_version(void);
 
-/* Host-loop thread. */
+/* Host-loop thread. Every viewport of the process draws with one shared GPU
+ * device (v10); FYNKEL_VIEWPORT_DEVICE=own gives each its own. */
 FynkelAppleViewport *fynkel_apple_viewport_create(uint32_t width, uint32_t height,
                                                   uint32_t buffer_count, int32_t sync_mode);
 void fynkel_apple_viewport_destroy(FynkelAppleViewport *vp);

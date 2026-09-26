@@ -52,7 +52,7 @@ void main() {
   }
 
   test('abi version matches the native library', () {
-    expect(viewportAbiVersion, 9);
+    expect(viewportAbiVersion, 10);
   });
 
   test('create, render, resize, stats, detach', () async {
