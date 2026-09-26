@@ -5,6 +5,7 @@
 // status bar (diagnostic counts → Console; the current notice, notices.dart).
 import 'package:docking/docking.dart';
 import 'package:flutter/material.dart';
+import 'package:fynkel_authoring/fynkel_authoring.dart' show Severity;
 import 'package:path/path.dart' as p;
 
 import '../inspector/codegen_check.dart';
@@ -631,48 +632,95 @@ class MainWindow extends StatelessWidget {
     );
   }
 
+  /// Unity's status bar: the Console's newest line (the run's while a game
+  /// has played, else the project's worst diagnostic), the counts at the
+  /// right; a notice takes the line while it shows. A click opens the Console.
   Widget _statusBar(BuildContext context, ThemeData theme) {
     final t = context.tokens;
     final notices = Notices.maybeOf(context);
+    final small = theme.textTheme.bodySmall;
     return ListenableBuilder(
-      listenable: project,
+      listenable: Listenable.merge([project, ?play]),
       builder: (context, _) {
-        final errors = project.errorCount;
-        final warnings = project.warningCount;
-        return InkWell(
-          key: const Key('window.status'),
-          onTap: onShowConsole,
-          child: Container(
-            height: t.row + 2,
-            padding: EdgeInsets.symmetric(horizontal: t.pad),
-            color: t.window,
-            child: Row(
-              children: [
-                Icon(FIcons.error, size: 13, color: errors > 0 ? t.error : t.textDisabled),
-                const SizedBox(width: 4),
-                Text('$errors', style: theme.textTheme.bodySmall),
-                const SizedBox(width: 10),
-                Icon(FIcons.warningAmber, size: 13, color: warnings > 0 ? t.warning : t.textDisabled),
-                const SizedBox(width: 4),
-                Text('$warnings', style: theme.textTheme.bodySmall),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: notices?.current != null
-                      ? NoticeLine(notices: notices!)
-                      : Text(
-                          project.validating
-                              ? 'Validating…'
-                              : project.validationError ??
-                                    '${project.documents} documents · ${project.assetCount} assets · ${project.references} references',
-                          style: theme.textTheme.bodySmall?.copyWith(color: theme.disabledColor),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                ),
-              ],
+        final errors = project.errorCount + (play?.errorCount ?? 0);
+        final warnings = project.warningCount + (play?.warningCount ?? 0);
+        final line = _lastLine(t);
+        return Tooltip(
+          message: '${project.documents} documents · ${project.assetCount} assets · ${project.references} references',
+          waitDuration: const Duration(milliseconds: 800),
+          child: InkWell(
+            key: const Key('window.status'),
+            onTap: onShowConsole,
+            child: Container(
+              height: t.row + 2,
+              padding: EdgeInsets.symmetric(horizontal: t.pad),
+              color: t.window,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: notices?.current != null
+                        ? NoticeLine(notices: notices!)
+                        : line == null
+                        ? const SizedBox.shrink()
+                        : Row(
+                            children: [
+                              if (line.$1 != null) ...[
+                                Icon(line.$1, size: 13, color: line.$2),
+                                const SizedBox(width: 6),
+                              ],
+                              Expanded(
+                                child: Text(
+                                  line.$3,
+                                  key: const Key('window.status.line'),
+                                  maxLines: 1,
+                                  style: small?.copyWith(color: t.textSecondary),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                  const SizedBox(width: 16),
+                  Icon(FIcons.error, size: 13, color: errors > 0 ? t.error : t.textDisabled),
+                  const SizedBox(width: 4),
+                  Text('$errors', key: const Key('window.status.errors'), style: small),
+                  const SizedBox(width: 10),
+                  Icon(FIcons.warningAmber, size: 13, color: warnings > 0 ? t.warning : t.textDisabled),
+                  const SizedBox(width: 4),
+                  Text('$warnings', key: const Key('window.status.warnings'), style: small),
+                ],
+              ),
             ),
           ),
         );
       },
     );
+  }
+
+  /// The line the status bar shows: an icon, its colour, the text; null
+  /// when there is nothing to say (a clean project, no run).
+  (IconData?, Color, String)? _lastLine(FynkelTokens t) {
+    (IconData, Color) look(Severity s) => switch (s) {
+      Severity.error => (FIcons.error, t.error),
+      Severity.warning => (FIcons.warningAmber, t.warning),
+      Severity.info => (FIcons.infoOutline, t.info),
+    };
+    final records = play?.records ?? const [];
+    if (records.isNotEmpty) {
+      final r = records.last;
+      final (icon, color) = look(r.severity);
+      return (icon, color, r.code == null ? r.message : '${r.code}: ${r.message}');
+    }
+    if (project.validating) return (null, t.textSecondary, 'Validating…');
+    if (project.validationError case final e?) return (FIcons.error, t.error, 'Validation failed: $e');
+    final ds = project.diagnostics;
+    for (final s in Severity.values) {
+      for (final d in ds) {
+        if (d.severity != s) continue;
+        final (icon, color) = look(s);
+        return (icon, color, '${d.code}: ${d.message}');
+      }
+    }
+    return null;
   }
 }

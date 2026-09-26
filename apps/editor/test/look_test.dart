@@ -157,18 +157,22 @@ void main() {
       await pumpLarge(tester, shellApp(prefs: prefs, projects: {'/fake/game': project}, initialProject: '/fake/game'));
       final shell = tester.state<EditorShellState>(find.byType(EditorShell));
       final status = find.byKey(const Key('window.status'));
-      expect(find.descendant(of: status, matching: find.textContaining('documents ·')), findsOneWidget);
+      // A clean project: an empty line (Unity's), the project's facts on hover.
+      expect(find.descendant(of: status, matching: find.byKey(const Key('window.status.line'))), findsNothing);
+      expect(
+        find.byWidgetPredicate((w) => w is Tooltip && (w.message ?? '').contains('documents ·')),
+        findsOneWidget,
+      );
       shell.notices.show('Reveal in Finder failed: no Finder');
       await tester.pump();
       expect(find.descendant(of: status, matching: find.text('Reveal in Finder failed: no Finder')), findsOneWidget);
-      expect(find.descendant(of: status, matching: find.textContaining('documents ·')), findsNothing);
       shell.notices.show('Reimport refused: locked');
       await tester.pump();
       expect(find.textContaining('Reveal in Finder'), findsNothing);
       expect(find.descendant(of: status, matching: find.text('Reimport refused: locked')), findsOneWidget);
       await tester.tap(find.byKey(const Key('notice.dismiss')));
       await tester.pump();
-      expect(find.descendant(of: status, matching: find.textContaining('documents ·')), findsOneWidget);
+      expect(find.descendant(of: status, matching: find.textContaining('Reimport refused')), findsNothing);
     });
   });
 
