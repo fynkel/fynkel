@@ -160,11 +160,12 @@ class _DataAssetInspectorState extends State<DataAssetInspector> {
             field: field,
             defaults: defaults,
           );
-    return InspectorSection(
-      title: title,
+    // The type is in the page's title (`coin (Coin Kind)`): the fields sit
+    // straight under it, as Unity's ScriptableObject page.
+    return InspectorFields(
       children: [
         Padding(
-          padding: EdgeInsets.fromLTRB(t.pad, 2, t.pad, 8),
+          padding: const EdgeInsets.only(bottom: 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

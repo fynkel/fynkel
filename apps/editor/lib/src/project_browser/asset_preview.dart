@@ -18,17 +18,32 @@ class AssetPreviewWidget extends StatelessWidget {
     final theme = Theme.of(context);
     final radius = BorderRadius.circular(size >= 40 ? 6 : 3);
     return switch (preview) {
-      TexturePreview(:final file) => ClipRRect(
-        borderRadius: radius,
-        child: Image.file(
-          File(file),
-          key: ValueKey('preview.texture.$file'),
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-          cacheWidth: (size * 2).round(),
-          filterQuality: FilterQuality.medium,
-          errorBuilder: (_, _, _) => Icon(assetKindIcon('texture'), size: size * .8, color: theme.hintColor),
+      // The texture's icon until the picture is decoded (a field's small
+      // thumbnail is never a blank gap before the name), and a hairline
+      // round it so a dark texture still shows on a dark field.
+      TexturePreview(:final file) => Container(
+        foregroundDecoration: BoxDecoration(
+          borderRadius: radius,
+          border: Border.all(color: theme.dividerColor),
+        ),
+        child: ClipRRect(
+          borderRadius: radius,
+          child: Image.file(
+            File(file),
+            key: ValueKey('preview.texture.$file'),
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            cacheWidth: (size * 2).round(),
+            filterQuality: FilterQuality.medium,
+            frameBuilder: (context, child, frame, sync) => frame == null && !sync
+                ? SizedBox.square(
+                    dimension: size,
+                    child: Icon(assetKindIcon('texture'), size: size * .8, color: theme.hintColor),
+                  )
+                : child,
+            errorBuilder: (_, _, _) => Icon(assetKindIcon('texture'), size: size * .8, color: theme.hintColor),
+          ),
         ),
       ),
       SwatchPreview(:final color) => Container(

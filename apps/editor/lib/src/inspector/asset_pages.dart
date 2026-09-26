@@ -1,14 +1,17 @@
 // The Inspector's pages for the Project browser's things (item 9c, "one
 // Inspector" — what the Asset panel of item 5 showed, moved here):
 //
-// * an asset: its picture, what it is, the facts row, Open / Reveal /
-//   Reimport / Delete; a source's import settings (edited here, written
+// * an asset, as Unity shows one (docs/ui-refresh): the header — its
+//   picture (the id in its tooltip, a click copies it), `name (Kind)`,
+//   Open for a scene or prefab and a ⋮ menu (Reveal, Reimport, Copy,
+//   Delete) — then only the asset itself: a source's import settings (edited here, written
 //   through the session with Apply and Reimport on the bar pinned to the
 //   bottom); a model's Materials (each embedded material remapped to a
 //   project material, or Extract Materials); its parts (click one to
 //   inspect it, drag it onto a field); a
-//   material's factors; a document's summary; and every document that uses
-//   it (a click opens the document at the field);
+//   material's factors; a prefab's root; and, folded away under Info, the
+//   file's facts and every object that uses it (a click opens the document
+//   at the field);
 // * a part of a source (`mesh/0`, `anim/1`): what it is, the file it comes
 //   from (a link back), its uuid, a drag handle and the uses of that part;
 // * a folder: what is inside it by kind, Open and Reveal.
@@ -19,6 +22,7 @@
 // stream's `@DataAsset`) registers a section here instead of adding a
 // panel or editing the page.
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -29,6 +33,9 @@ import '../env/tools.dart';
 import '../project/editor_project.dart';
 import '../project_browser/asset_preview.dart';
 import 'asset_edits.dart';
+import 'component_specs.dart';
+import 'field_spec.dart' show humanize;
+import 'inspector_panel.dart' show componentIcon;
 import 'data_asset_inspector.dart';
 import 'material_inspector.dart';
 import 'physics_material_inspector.dart';
@@ -55,55 +62,55 @@ Future<void> _reveal(BuildContext context, ProjectBrowserModel model, String rel
   if (err != null) notices?.show('Reveal in Finder failed: $err');
 }
 
-/// A square picture box for a page header.
-Widget _pictureBox(BuildContext context, Widget child) {
-  final t = context.tokens;
-  return Container(
-    width: 40,
-    height: 40,
-    decoration: BoxDecoration(
-      color: t.field,
-      border: Border.all(color: t.line),
-      borderRadius: BorderRadius.circular(t.radiusPanel),
-    ),
-    clipBehavior: Clip.antiAlias,
-    alignment: Alignment.center,
-    child: child,
-  );
-}
-
-Widget _idRow(BuildContext context, String id, {Key? copyKey, String tooltip = 'Copy id'}) {
-  final t = context.tokens;
-  return Row(
-    children: [
-      Flexible(
-        child: Text(
-          id,
-          style: monoStyle(context, size: 10, color: t.textDisabled),
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
-      IconButton(
-        key: copyKey,
-        tooltip: tooltip,
-        icon: const Icon(FIcons.copy, size: 11),
-        color: t.textDisabled,
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints.tightFor(width: 20, height: 18),
-        onPressed: () => Clipboard.setData(ClipboardData(text: id)),
-      ),
-    ],
-  );
-}
-
 /// The documents that reference an asset (or one part of it), grouped by
-/// document; a row opens the document at the field.
+/// document, each use named by the object that holds it (`Coin 3 ·
+/// MeshRenderer`); a row opens the document at the field.
 class _UsedBy extends StatelessWidget {
-  const _UsedBy({required this.dependents, required this.onOpenReference, this.empty});
+  const _UsedBy({required this.dependents, required this.onOpenReference, required this.model, this.empty});
 
   final List<Map<String, Object?>> dependents;
   final void Function(String documentPath, String? pointer) onOpenReference;
+  final ProjectBrowserModel model;
   final String? empty;
+
+  /// A document's entities (`entities` of its JSON) by file, while the
+  /// file is unchanged.
+  static final _documents = <String, (DateTime, Map<String, Object?>)>{};
+
+  Map<String, Object?> _entitiesOf(String documentPath) {
+    try {
+      final file = File(model.project.assetFile(documentPath));
+      final stamp = file.lastModifiedSync();
+      final cached = _documents[file.path];
+      if (cached != null && cached.$1 == stamp) return cached.$2;
+      final json = jsonDecode(file.readAsStringSync());
+      final entities = json is Map && json['entities'] is Map
+          ? Map<String, Object?>.from(json['entities'] as Map)
+          : <String, Object?>{};
+      _documents[file.path] = (stamp, entities);
+      return entities;
+    } on Object {
+      return const {};
+    }
+  }
+
+  /// What a person calls the use at [pointer]: the object's name and the
+  /// component, or the field of a document with no objects.
+  (String, String?) _describe(String documentPath, String pointer) {
+    final parts = pointer.split('/').where((s) => s.isNotEmpty).toList();
+    if (parts.length >= 2 && parts[0] == 'entities') {
+      final entity = _entitiesOf(documentPath)[parts[1]];
+      final name = entity is Map && entity['name'] is String ? entity['name'] as String : 'An object';
+      String? what;
+      if (parts.length >= 4 && parts[2] == 'components' && entity is Map && entity['components'] is Map) {
+        final c = (entity['components'] as Map)[parts[3]];
+        final type = c is Map ? c['type'] as String? : null;
+        if (type != null) what = type.contains('.') ? type.substring(type.indexOf('.') + 1) : type;
+      }
+      return (name, what);
+    }
+    return (parts.isEmpty ? 'The document' : humanize(parts.last), null);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -113,12 +120,16 @@ class _UsedBy extends StatelessWidget {
     for (final r in dependents) {
       byDoc.putIfAbsent(r['path'] as String? ?? '?', () => []).add(r);
     }
-    return InspectorSection(
-      title: 'Used by · ${dependents.length}',
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 8, bottom: 2),
+          child: InspectorCaption('Used by · ${dependents.length}'),
+        ),
         if (dependents.isEmpty)
           Text(
-            empty ?? 'Nothing uses this asset — it can be deleted without leaving a dangling reference.',
+            empty ?? 'Nothing uses this asset.',
             key: const Key('asset.noDependents'),
             style: theme.textTheme.bodySmall?.copyWith(color: t.textDisabled),
           ),
@@ -133,7 +144,7 @@ class _UsedBy extends StatelessWidget {
                   child: Text(
                     doc.key,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: t.text),
+                    style: theme.textTheme.bodySmall?.copyWith(color: t.textSecondary),
                   ),
                 ),
               ],
@@ -143,19 +154,38 @@ class _UsedBy extends StatelessWidget {
             _HoverRow(
               key: Key('asset.dependent.${doc.key}${r['pointer']}'),
               onTap: () => onOpenReference(doc.key, r['pointer'] as String?),
-              child: Row(
-                children: [
-                  const SizedBox(width: 18),
-                  Expanded(
-                    child: Text(
-                      '${r['pointer'] ?? ''}'
-                      '${r['sub'] is String && (r['sub'] as String).isNotEmpty ? '  › ${r['sub']}' : ''}',
-                      style: monoStyle(context, color: t.textSecondary),
-                      overflow: TextOverflow.ellipsis,
+              child: Builder(
+                builder: (context) {
+                  final (name, what) = _describe(doc.key, r['pointer'] as String? ?? '');
+                  final sub = r['sub'] is String && (r['sub'] as String).isNotEmpty ? r['sub'] as String : null;
+                  return Tooltip(
+                    message: '${r['pointer'] ?? ''}${sub == null ? '' : '  › $sub'}',
+                    waitDuration: const Duration(milliseconds: 600),
+                    child: Row(
+                      children: [
+                        const SizedBox(width: 18),
+                        Expanded(
+                          child: Text.rich(
+                            TextSpan(
+                              text: name,
+                              children: [
+                                if (what != null || sub != null)
+                                  TextSpan(
+                                    text: '  ·  ${[?what, ?sub].join(' › ')}',
+                                    style: TextStyle(color: t.textDisabled),
+                                  ),
+                              ],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(color: t.text),
+                          ),
+                        ),
+                        Icon(FIcons.arrowForward, size: 12, color: t.textDisabled),
+                      ],
                     ),
-                  ),
-                  Icon(FIcons.arrowForward, size: 12, color: t.textDisabled),
-                ],
+                  );
+                },
               ),
             ),
         ],
@@ -234,15 +264,11 @@ abstract final class AssetDocumentSections {
     return builder != null ? builder(context, e, d) : _generic(context, e, d);
   }
 
+  // A scene shows nothing but its header (Unity's); a prefab's root is
+  // drawn by the page; the object count is under Info.
   static List<Widget> _generic(BuildContext context, AssetEntry e, AssetDetail d) => [
     if (d.entities != null)
-      InspectorSection(
-        title: _capital(e.document ?? 'document'),
-        children: [
-          InspectorValueRow('Entities', '${d.entities}'),
-          if (!e.isSource && e.name.isNotEmpty) InspectorValueRow('Name', e.name),
-        ],
-      )
+      ...const <Widget>[]
     else if (d.fields != null && d.material == null)
       InspectorSection(
         title: _capital(e.document ?? 'document'),
@@ -482,38 +508,15 @@ class _AssetPageState extends State<AssetPage> {
               key: Key('asset.panel.${e.id}'),
               padding: const EdgeInsets.only(bottom: 16),
               children: [
-                FactsRow([
-                  ('Kind', browserKindOf(e)),
-                  ('Size', d.size == null ? '—' : formatBytes(d.size!)),
-                  if (e.isSource)
-                    ('Parts', '${d.subAssets.length}')
-                  else if (d.entities != null)
-                    ('Entities', '${d.entities}')
-                  else
-                    ('Modified', d.modified == null ? '—' : _date(d.modified!).split(' ').first),
-                ]),
-                _actions(context, e),
                 if (editsMaterial)
                   MaterialInspector(key: Key('material.${e.id}'), edits: widget.assetEdits!, browser: model, id: e.id),
                 if (editsVolume) VolumeInspector(key: Key('volume.${e.id}'), edits: widget.assetEdits!, id: e.id),
                 if (editsPhysics)
                   PhysicsMaterialInspector(key: Key('physicsMaterial.${e.id}'), edits: widget.assetEdits!, id: e.id),
-                InspectorSection(
-                  title: 'File',
-                  children: [
-                    InspectorValueRow('Path', 'assets/${e.path}', mono: true),
-                    if (d.modified != null) InspectorValueRow('Modified', _date(d.modified!)),
-                    if (e.isSource)
-                      InspectorValueRow(
-                        'Sidecar',
-                        d.sidecarPath == null ? '${p.basename(e.path)}.meta.json' : p.basename(d.sidecarPath!),
-                        mono: true,
-                      ),
-                  ],
-                ),
+                if (e.document == 'prefab') _PrefabRoot(model: model, entry: e, onOpen: () => widget.onOpenDocument(e.id)),
                 if (draft != null) _importSettings(context, e, d, draft),
                 if (draft != null && _isModel(e)) _materials(context, e, d, draft),
-                if (e.isSource) _parts(context, e, d),
+                if (e.isSource && d.subAssets.isNotEmpty) _parts(context, e, d),
                 if (!editsMaterial && !editsVolume && !editsPhysics)
                   for (final section in AssetDocumentSections.of(context, e, d))
                     // A registered section edits through the page's AssetEdits.
@@ -521,7 +524,7 @@ class _AssetPageState extends State<AssetPage> {
                       AssetPageScope(edits: edits, browser: model, child: section)
                     else
                       section,
-                _UsedBy(dependents: d.dependents, onOpenReference: widget.onOpenReference),
+                _info(context, e, d),
               ],
             ),
           ),
@@ -541,62 +544,132 @@ class _AssetPageState extends State<AssetPage> {
     );
   }
 
+  /// `coin (Prefab)`, `swatch (Texture)`, `coin (Coin Kind)`: Unity's title.
+  String _title(AssetEntry e, AssetDetail d) {
+    final file = p.basename(e.path);
+    final doc = e.document;
+    final stem = doc != null && file.endsWith(documentSuffix(doc))
+        ? file.substring(0, file.length - documentSuffix(doc).length)
+        : p.basenameWithoutExtension(file);
+    var kind = browserKindOf(e).split(' ').map(_capital).join(' ');
+    if (doc == 'data') {
+      final type = d.fields?['type'];
+      if (type is String && type.isNotEmpty) {
+        kind = model.project.dataTypes().where((x) => x.id == type).firstOrNull?.title ?? type.split('.').last;
+      }
+    }
+    return '$stem ($kind)';
+  }
+
   Widget _header(BuildContext context, AssetEntry e, AssetDetail d) {
-    final kind = browserKindOf(e);
+    final t = context.tokens;
+    final isDoc = e.document == 'scene' || e.document == 'prefab';
     return InspectorPageHeader(
-      leading: _pictureBox(context, AssetPreviewWidget(preview: model.preview(e), size: 40)),
-      titleKey: const Key('asset.title'),
-      title: Text(p.basename(e.path)),
-      subtitle: Text(
-        e.isSource
-            ? '$kind · imported by ${e.importer}${d.importerVersion == null ? '' : ' v${d.importerVersion}'}'
-            : '$kind document${e.name.isNotEmpty && e.name != ProjectBrowserModel.editableName(e) ? ' · “${e.name}”' : ''}',
+      // The id is in the picture's tooltip; a click copies it (as an object's).
+      leading: Tooltip(
+        message: '${e.id}\nClick to copy the id',
+        waitDuration: const Duration(milliseconds: 500),
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            key: const Key('asset.copyId'),
+            onTap: () => Clipboard.setData(ClipboardData(text: e.id)),
+            child: inspectorPictureBox(context, AssetPreviewWidget(preview: model.preview(e), size: 40)),
+          ),
+        ),
       ),
-      below: _idRow(context, e.id, copyKey: const Key('asset.copyId')),
+      titleKey: const Key('asset.title'),
+      title: Tooltip(
+        message: 'assets/${e.path}',
+        waitDuration: const Duration(milliseconds: 600),
+        child: Text(_title(e, d), maxLines: 1, overflow: TextOverflow.ellipsis),
+      ),
+      actions: [
+        if (isDoc)
+          Padding(
+            padding: const EdgeInsets.only(top: 1, right: 2),
+            child: OutlinedButton(
+              key: const Key('asset.open'),
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                backgroundColor: t.header,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                minimumSize: Size(0, t.row + 2),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: () => widget.onOpenDocument(e.id),
+              child: const Text('Open'),
+            ),
+          ),
+        _menu(context, e),
+      ],
       selection: widget.selection,
     );
   }
 
-  Widget _actions(BuildContext context, AssetEntry e) {
+  /// Unity's right-click entries for the asset, on the header's ⋮.
+  Widget _menu(BuildContext context, AssetEntry e) {
     final t = context.tokens;
-    final isDoc = e.document == 'scene' || e.document == 'prefab';
-    return Padding(
-      padding: EdgeInsets.fromLTRB(t.pad + 2, 8, t.pad + 2, 0),
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 4,
-        children: [
-          if (isDoc)
-            PageAction(
-              key: const Key('asset.open'),
-              primary: true,
-              icon: FIcons.openInNew,
-              label: 'Open',
-              onPressed: () => widget.onOpenDocument(e.id),
-            ),
-          PageAction(
-            key: const Key('asset.reveal'),
-            icon: FIcons.folderOpen,
-            label: 'Reveal in Finder',
-            onPressed: () => _reveal(context, model, e.path, widget.run),
-          ),
-          if (e.isSource)
-            PageAction(
-              key: const Key('asset.reimport'),
-              icon: FIcons.refresh,
-              label: 'Reimport',
-              onPressed: model.canEdit ? () => _runReimport(e.id) : null,
-            ),
-          PageAction(
-            key: const Key('asset.delete'),
-            icon: FIcons.deleteOutline,
-            label: 'Delete',
-            onPressed: model.canEdit ? () => model.delete(ids: [e.id]) : null,
-          ),
-        ],
-      ),
+    final small = Theme.of(context).textTheme.bodySmall;
+    PopupMenuItem<String> item(String key, String label, {bool enabled = true}) => PopupMenuItem(
+      key: Key(key),
+      value: key,
+      enabled: enabled,
+      height: 26,
+      child: Text(label, style: small?.copyWith(color: enabled ? t.text : t.textDisabled)),
+    );
+    return PopupMenuButton<String>(
+      key: const Key('asset.menu'),
+      popUpAnimationStyle: AnimationStyle.noAnimation,
+      tooltip: 'More',
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 180),
+      icon: Icon(FIcons.moreVert, size: 14, color: t.textSecondary),
+      style: IconButton.styleFrom(minimumSize: const Size(24, 24), fixedSize: const Size(24, 24)),
+      onSelected: (key) => switch (key) {
+        'asset.reveal' => _reveal(context, model, e.path, widget.run),
+        'asset.reimport' => _runReimport(e.id),
+        'asset.copyPath' => Clipboard.setData(ClipboardData(text: 'assets/${e.path}')),
+        'asset.copyIdItem' => Clipboard.setData(ClipboardData(text: e.id)),
+        'asset.delete' => model.delete(ids: [e.id]),
+        _ => null,
+      },
+      itemBuilder: (_) => [
+        item('asset.reveal', 'Reveal in Finder'),
+        if (e.isSource) item('asset.reimport', 'Reimport', enabled: model.canEdit),
+        const PopupMenuDivider(),
+        item('asset.copyPath', 'Copy Path'),
+        item('asset.copyIdItem', 'Copy ID'),
+        const PopupMenuDivider(),
+        item('asset.delete', 'Delete', enabled: model.canEdit),
+      ],
     );
   }
+
+  /// The file's facts and its uses, folded away (Unity keeps them off the
+  /// page; they are here for when they are wanted).
+  Widget _info(BuildContext context, AssetEntry e, AssetDetail d) => InspectorSection(
+    title: 'Info',
+    initiallyOpen: false,
+    children: [
+      InspectorValueRow('Path', 'assets/${e.path}', mono: true),
+      if (d.size != null) InspectorValueRow('Size', formatBytes(d.size!)),
+      if (d.modified != null) InspectorValueRow('Modified', _date(d.modified!)),
+      if (d.entities != null) InspectorValueRow('Objects', '${d.entities}'),
+      if (e.isSource) ...[
+        InspectorValueRow(
+          'Importer',
+          '${d.importer ?? e.importer}${d.importerVersion == null ? '' : ' v${d.importerVersion}'}',
+        ),
+        InspectorValueRow(
+          'Sidecar',
+          d.sidecarPath == null ? '${p.basename(e.path)}.meta.json' : p.basename(d.sidecarPath!),
+          mono: true,
+        ),
+      ],
+      _UsedBy(dependents: d.dependents, onOpenReference: widget.onOpenReference, model: model),
+    ],
+  );
 
   Widget _help(BuildContext context, String text) {
     final t = context.tokens;
@@ -612,9 +685,7 @@ class _AssetPageState extends State<AssetPage> {
     final t = context.tokens;
     final theme = Theme.of(context);
     final enabled = model.canEdit;
-    final controls = <Widget>[
-      InspectorValueRow('Importer', '${d.importer ?? e.importer}  v${d.importerVersion ?? '?'}'),
-    ];
+    final controls = <Widget>[];
     switch (e.importer) {
       case 'fynkel.image':
         final linear = draft['colorSpace'] == 'linear';
@@ -720,7 +791,7 @@ class _AssetPageState extends State<AssetPage> {
         );
     }
     return InspectorSection(
-      title: 'Import settings',
+      title: 'Import Settings',
       children: [
         ...controls,
         Theme(
@@ -1022,6 +1093,115 @@ class _Choice extends StatelessWidget {
 
 // ── A part of a source ─────────────────────────────────────────────────────
 
+/// A prefab asset's root object, as Unity shows it on the asset's page:
+/// its name, then its components (open the prefab to edit them).
+class _PrefabRoot extends StatelessWidget {
+  const _PrefabRoot({required this.model, required this.entry, required this.onOpen});
+
+  final ProjectBrowserModel model;
+  final AssetEntry entry;
+  final VoidCallback onOpen;
+
+  /// The root entity of the prefab file, or null when it cannot be read.
+  Map<String, Object?>? _root() {
+    try {
+      final json = jsonDecode(File(model.project.assetFile(entry.path)).readAsStringSync());
+      final entities = json is Map && json['entities'] is Map ? json['entities'] as Map : const {};
+      for (final e in entities.values) {
+        if (e is Map && e['parent'] == null) return Map<String, Object?>.from(e);
+      }
+    } on Object {
+      return null;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final theme = Theme.of(context);
+    final root = _root();
+    if (root == null) return const SizedBox.shrink();
+    final specs = ComponentSpecs(model.project);
+    final components = [
+      for (final c in (root['components'] is Map ? root['components'] as Map : const {}).values)
+        if (c is Map && c['type'] is String) specs.of(c['type'] as String),
+    ];
+    return Column(
+      key: const Key('asset.prefabRoot'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          margin: const EdgeInsets.only(top: 8),
+          padding: EdgeInsets.fromLTRB(t.pad + 2, 5, t.pad + 2, 5),
+          decoration: BoxDecoration(
+            color: t.header,
+            border: Border(top: t.hairline, bottom: t.hairline),
+          ),
+          child: Text.rich(
+            TextSpan(
+              text: 'Root in Prefab Asset ',
+              children: [
+                TextSpan(
+                  text: '(Open for full editing)',
+                  style: TextStyle(color: t.textDisabled),
+                ),
+              ],
+            ),
+            style: theme.textTheme.bodySmall?.copyWith(color: t.textSecondary),
+          ),
+        ),
+        Padding(
+          padding: EdgeInsets.fromLTRB(t.pad + 2, 8, t.pad + 2, 6),
+          child: Row(
+            children: [
+              Icon(FIcons.viewInArOutlined, size: 16, color: t.prefab),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  root['name'] as String? ?? entry.name,
+                  key: const Key('asset.prefabRoot.name'),
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(color: t.text, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Each component as its header band; the fields are the prefab's
+        // to edit in Prefab mode (a double-click opens it).
+        for (final spec in components)
+          GestureDetector(
+            onDoubleTap: onOpen,
+            child: Container(
+              key: ValueKey('asset.prefabRoot.${spec.type}'),
+              height: t.row + 6,
+              decoration: BoxDecoration(
+                color: t.header,
+                border: Border(top: t.hairline),
+              ),
+              padding: EdgeInsets.only(left: t.pad + 2, right: t.pad),
+              child: Row(
+                children: [
+                  Icon(componentIcon(spec), size: 14, color: t.textSecondary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      spec.title,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: t.text),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        if (components.isNotEmpty) Container(height: 1, color: t.line),
+      ],
+    );
+  }
+}
+
 class SubAssetPage extends StatelessWidget {
   const SubAssetPage({
     super.key,
@@ -1071,7 +1251,7 @@ class SubAssetPage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               InspectorPageHeader(
-                leading: _pictureBox(context, Icon(assetKindIcon(kind), size: 20, color: t.textSecondary)),
+                leading: inspectorPictureBox(context, Icon(assetKindIcon(kind), size: 20, color: t.textSecondary)),
                 titleKey: const Key('asset.part.title'),
                 title: Text(sub),
                 subtitle: Text('$kind · a part of $file'),
@@ -1097,7 +1277,6 @@ class SubAssetPage extends StatelessWidget {
                   key: Key('asset.part.$id.$sub'),
                   padding: const EdgeInsets.only(bottom: 16),
                   children: [
-                    FactsRow([('Kind', kind), ('Source', file), ('Importer', e.importer ?? '—')]),
                     Padding(
                       padding: EdgeInsets.fromLTRB(t.pad + 2, 8, t.pad + 2, 0),
                       child: Wrap(
@@ -1147,7 +1326,17 @@ class SubAssetPage extends StatelessWidget {
                         InspectorValueRow('File', 'assets/${e.path}', mono: true),
                       ],
                     ),
-                    _UsedBy(dependents: uses, onOpenReference: onOpenReference, empty: 'Nothing uses this part.'),
+                    InspectorSection(
+                      title: 'Uses',
+                      children: [
+                        _UsedBy(
+                          dependents: uses,
+                          onOpenReference: onOpenReference,
+                          model: model,
+                          empty: 'Nothing uses this part.',
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -1199,7 +1388,7 @@ class FolderPage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               InspectorPageHeader(
-                leading: _pictureBox(context, Icon(FIcons.folderOutlined, size: 20, color: t.textSecondary)),
+                leading: inspectorPictureBox(context, Icon(FIcons.folderOutlined, size: 20, color: t.textSecondary)),
                 titleKey: const Key('folder.title'),
                 title: Text(name),
                 subtitle: Text(rel.isEmpty ? 'the asset root' : 'folder'),
@@ -1210,11 +1399,6 @@ class FolderPage extends StatelessWidget {
                   key: Key('folder.page.$rel'),
                   padding: const EdgeInsets.only(bottom: 16),
                   children: [
-                    FactsRow([
-                      ('Assets', '$direct'),
-                      ('Folders', '${subfolders.length}'),
-                      ('All inside', '${inside.length}'),
-                    ]),
                     Padding(
                       padding: EdgeInsets.fromLTRB(t.pad + 2, 8, t.pad + 2, 0),
                       child: Wrap(
@@ -1238,12 +1422,10 @@ class FolderPage extends StatelessWidget {
                       ),
                     ),
                     InspectorSection(
-                      title: 'Folder',
-                      children: [InspectorValueRow('Path', rel.isEmpty ? 'assets' : 'assets/$rel', mono: true)],
-                    ),
-                    InspectorSection(
                       title: 'Inside, by kind',
                       children: [
+                        InspectorValueRow('Here', '$direct asset${direct == 1 ? '' : 's'}'),
+                        InspectorValueRow('All inside', '${inside.length}'),
                         if (byKind.isEmpty)
                           Text(
                             'Empty.',

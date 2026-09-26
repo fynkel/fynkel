@@ -130,8 +130,13 @@ Before/after pictures of each step are in `steps/` (from
 4. Empty panels one quiet line; the Scene pill only for a passing state;
    the Game caption on hover; grey sliders: 1a320dc.
 5. The title bar's controls centred on the traffic lights; a Game view
-   toolbar (camera, aspect ratio, scale, Stats): see the next commit.
+   toolbar (camera, aspect ratio, scale, Stats): 435e6e5.
+6. Asset pages as Unity's (`images/asset-*`): `name (Kind)` with Open
+   and a ⋮ menu, no facts box or button row, fold-out section bands, a
+   prefab's root, the file's facts and named uses folded under Info;
+   texture thumbnails never a blank gap. Then a script page
+   (`images/script-unity.png`): whatever the Project selects shows in
+   the Inspector.
 
 Left: the status bar (Unity shows the last Console line); Project
-icons/breadcrumb header; one merged Console list; the asset pages
-(next).
+icons/breadcrumb header; one merged Console list.

@@ -89,8 +89,7 @@ class _PhysicsMaterialInspectorState extends State<PhysicsMaterialInspector> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        InspectorSection(
-          title: 'Physics Material',
+        InspectorFields(
           children: [
             KeyedSubtree(
               key: const Key('physicsMaterial.friction'),

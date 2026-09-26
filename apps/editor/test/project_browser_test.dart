@@ -816,11 +816,16 @@ void main() {
     }
 
     testWidgets('a source: import settings applied from the bar with a reimport, and what uses it', (tester) async {
+      InspectorSection.setOpen('Info', null);
+      addTearDown(() => InspectorSection.setOpen('Info', null));
       final (project, model, _, _, refs) = await pumpAsset(tester, swatch);
       expect(find.byKey(const Key('asset.title')), findsOneWidget);
-      expect(find.text('swatch.png'), findsOneWidget);
-      expect(find.textContaining('imported by fynkel.image'), findsOneWidget);
-      expect(find.byKey(const Key('facts.Kind')), findsOneWidget);
+      expect(find.text('swatch (Texture)'), findsOneWidget, reason: "Unity's `name (Kind)`");
+      // The file's facts and its uses are folded under Info.
+      expect(find.textContaining('fynkel.image'), findsNothing);
+      await tester.tap(find.byKey(const Key('section.Info')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('fynkel.image'), findsOneWidget);
       expect(find.byKey(const Key('inspector.applyBar')), findsNothing, reason: 'nothing to apply yet');
       await chooseLinear(tester);
       expect(find.byKey(const Key('inspector.applyBar')), findsOneWidget);
@@ -847,6 +852,8 @@ void main() {
       expect(refs, [('materials/rusted.material.json', '/base_color_texture')]);
       // A refused reimport shows the importer's diagnostics.
       project.reimportRefusal = 'settings.colorSpace must be srgb or linear';
+      await tester.tap(find.byKey(const Key('asset.menu')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('asset.reimport')));
       await tester.pumpAndSettle();
       expect(find.textContaining('The importer refused'), findsOneWidget);
@@ -920,6 +927,8 @@ void main() {
     testWidgets('a material shows its swatch and factors; a scene has Open; a cleared selection empties the page', (
       tester,
     ) async {
+      InspectorSection.setOpen('Info', true);
+      addTearDown(() => InspectorSection.setOpen('Info', null));
       final (_, model, _, opened, _) = await pumpAsset(tester, rusted);
       expect(find.byKey(const Key('preview.swatch')), findsWidgets);
       expect(find.text('fynkel.pbr@1'), findsOneWidget);
@@ -1008,7 +1017,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(selection.locked, isFalse);
       expect(selection.target, const InspectAsset(swatch));
-      expect(find.text('swatch.png'), findsOneWidget);
+      expect(find.text('swatch (Texture)'), findsOneWidget);
     });
 
     testWidgets('a folder shows what is inside it by kind; Open goes there in the browser', (tester) async {

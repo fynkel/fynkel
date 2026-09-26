@@ -1,7 +1,6 @@
 // The pieces every Inspector page is built from (item 9b/9c), so an
 // entity, an asset, a part and a folder read the same way: the page header
-// (picture, name, what it is, the padlock), the facts row, uppercase
-// section captions, label/value rows on the fields' label column, and the
+// (picture, name, what it is, the padlock), fold-out section bands, label/value rows on the fields' label column, and the
 // apply bar pinned to the bottom while something is not applied yet.
 import 'package:flutter/material.dart';
 
@@ -42,29 +41,91 @@ class InspectorCaption extends StatelessWidget {
   }
 }
 
-/// A page section: its caption, then its rows, on the page's padding.
-class InspectorSection extends StatelessWidget {
-  const InspectorSection({super.key, required this.title, required this.children, this.trailing});
+/// A page section as Unity draws one: a full-width fold-out band (▾ and
+/// the name, like a component's header), then its rows on the page's
+/// padding. Whether it is open is kept per title while the editor runs.
+class InspectorSection extends StatefulWidget {
+  const InspectorSection({
+    super.key,
+    required this.title,
+    required this.children,
+    this.trailing,
+    this.initiallyOpen = true,
+  });
 
   final String title;
   final List<Widget> children;
   final Widget? trailing;
 
+  /// Open the first time the section is shown (Info starts closed).
+  final bool initiallyOpen;
+
+  /// Which sections were folded or unfolded, by title.
+  static final _open = <String, bool>{};
+
+  /// Folds or unfolds every section titled [title]; null forgets the choice.
+  @visibleForTesting
+  static void setOpen(String title, bool? open) => open == null ? _open.remove(title) : _open[title] = open;
+
+  @override
+  State<InspectorSection> createState() => _InspectorSectionState();
+}
+
+class _InspectorSectionState extends State<InspectorSection> {
+  bool get _isOpen => InspectorSection._open[widget.title] ?? widget.initiallyOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final open = _isOpen;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Material(
+            color: t.header,
+            child: InkWell(
+              key: ValueKey('section.${widget.title}'),
+              onTap: () => setState(() => InspectorSection._open[widget.title] = !open),
+              child: Container(
+                height: t.row + 6,
+                decoration: BoxDecoration(border: Border(top: t.hairline, bottom: t.hairline)),
+                padding: const EdgeInsets.only(left: 2, right: 4),
+                child: Row(
+                  children: [
+                    Icon(open ? FIcons.expandMore : FIcons.chevronRight, size: 14, color: t.textSecondary),
+                    const SizedBox(width: 4),
+                    Expanded(child: InspectorCaption(widget.title, trailing: widget.trailing)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (open)
+          Padding(
+            padding: EdgeInsets.fromLTRB(t.pad + 2, 6, t.pad + 2, 2),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: widget.children),
+          ),
+      ],
+    );
+  }
+}
+
+/// An asset's own fields straight under the page header, with no band
+/// (Unity's ScriptableObject and Physics Material pages).
+class InspectorFields extends StatelessWidget {
+  const InspectorFields({super.key, required this.children});
+
+  final List<Widget> children;
+
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
     return Padding(
-      padding: EdgeInsets.fromLTRB(t.pad + 2, 12, t.pad + 2, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: InspectorCaption(title, trailing: trailing),
-          ),
-          ...children,
-        ],
-      ),
+      padding: EdgeInsets.fromLTRB(t.pad + 2, 8, t.pad + 2, 4),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
     );
   }
 }
@@ -100,6 +161,9 @@ class InspectorValueRow extends StatelessWidget {
             Expanded(
               child: SelectableText(
                 value,
+                // minLines: without it, maxLines makes the box three lines
+                // tall and the value sits above its label.
+                minLines: 1,
                 maxLines: 3,
                 style: mono ? monoStyle(context, color: t.text) : theme.textTheme.bodySmall?.copyWith(color: t.text),
               ),
@@ -112,52 +176,21 @@ class InspectorValueRow extends StatelessWidget {
   }
 }
 
-/// Three facts side by side under a page header: `KIND mesh`, `SIZE 2.1 MB`.
-class FactsRow extends StatelessWidget {
-  const FactsRow(this.facts, {super.key});
-
-  final List<(String, String)> facts;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-    final theme = Theme.of(context);
-    return Container(
-      margin: EdgeInsets.fromLTRB(t.pad + 2, 8, t.pad + 2, 0),
-      decoration: BoxDecoration(
-        border: Border.all(color: t.line),
-        borderRadius: BorderRadius.circular(t.radiusPanel),
-      ),
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (final (i, (label, value)) in facts.indexed)
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(8, 5, 6, 6),
-                  decoration: BoxDecoration(border: i == 0 ? null : Border(left: t.hairline)),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(label.toUpperCase(), style: InspectorCaption.style(context)),
-                      const SizedBox(height: 2),
-                      Text(
-                        value,
-                        key: ValueKey('facts.$label'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(color: t.text),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
+/// A square picture box for a page header.
+Widget inspectorPictureBox(BuildContext context, Widget child) {
+  final t = context.tokens;
+  return Container(
+    width: 40,
+    height: 40,
+    decoration: BoxDecoration(
+      color: t.field,
+      border: Border.all(color: t.line),
+      borderRadius: BorderRadius.circular(t.radiusPanel),
+    ),
+    clipBehavior: Clip.antiAlias,
+    alignment: Alignment.center,
+    child: child,
+  );
 }
 
 /// The top of a page: a picture, the name and a line saying what it is,
@@ -171,6 +204,7 @@ class InspectorPageHeader extends StatelessWidget {
     this.subtitle,
     this.selection,
     this.below,
+    this.actions = const [],
   });
 
   final Widget leading;
@@ -182,6 +216,9 @@ class InspectorPageHeader extends StatelessWidget {
   /// Under the name: an id row, a back-link.
   final Widget? below;
 
+  /// Beside the padlock: Open, the ⋮ menu.
+  final List<Widget> actions;
+
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
@@ -192,7 +229,6 @@ class InspectorPageHeader extends StatelessWidget {
       ),
       padding: EdgeInsets.fromLTRB(t.pad + 2, 8, 4, 8),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           leading,
           const SizedBox(width: 10),
@@ -217,6 +253,7 @@ class InspectorPageHeader extends StatelessWidget {
               ],
             ),
           ),
+          ...actions,
           if (selection != null) InspectorLockButton(selection: selection!),
         ],
       ),
