@@ -556,7 +556,12 @@ class MainWindow extends StatelessWidget {
             children: [
               IconButton(
                 key: const Key('window.play'),
-                tooltip: active ? 'Stop the game (⌘P)' : 'Play the project (⌘P)',
+                tooltip: active
+                    ? 'Stop the game (⌘P)'
+                    : run == null
+                    ? 'Play the project in its own window (⌘P) — this editor has no game compiled in; '
+                          'open the project with `fynkel editor` to play in the Game view'
+                    : 'Play the project (⌘P)',
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints.tightFor(width: 34, height: 26),
                 iconSize: 15,
@@ -612,7 +617,7 @@ class MainWindow extends StatelessWidget {
                         ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 220),
                           child: Text(
-                            paused ? 'Paused' : session.statusText,
+                            paused ? 'Paused' : _playLabel(session, ownWindow: run == null),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(
@@ -630,6 +635,18 @@ class MainWindow extends StatelessWidget {
         );
       },
     );
+  }
+
+  /// The pill's words. The plain editor's Play is Build and Run: the
+  /// first build takes minutes and the game opens in a window of its own
+  /// (often behind this one), so the pill says so.
+  static String _playLabel(PlaySession session, {required bool ownWindow}) {
+    if (!ownWindow) return session.statusText;
+    return switch (session.state) {
+      PlayState.starting => 'Building… (opens in its own window)',
+      PlayState.running => '${session.statusText} · own window',
+      _ => session.statusText,
+    };
   }
 
   /// Unity's status bar: the Console's newest line (the run's while a game

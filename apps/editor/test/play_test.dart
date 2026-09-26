@@ -638,7 +638,8 @@ void main() {
       expect(launcher.calls.single.$4!['FYNKEL_EDITOR_CHANNEL'], 'stdio');
       expect(launcher.calls.single.$4!['FYNKEL_GIZMOS'], '1');
       expect(shell.consoleTab.value, ConsolePanel.gameTab);
-      expect(find.text('Starting…'), findsOneWidget);
+      // The plain editor's Play builds and opens its own window: the pill says so.
+      expect(find.text('Building… (opens in its own window)'), findsOneWidget);
       expect(shell.registry.byId('play.start')!.label, 'Stop Playing', reason: '⌘P toggles, as in Unity');
       expect(shell.registry.byId('play.start')!.enabled!(), isTrue);
       expect(shell.registry.byId('play.stop')!.enabled!(), isTrue);
@@ -664,7 +665,7 @@ void main() {
         }),
       );
       await pumpLines(tester);
-      expect(find.text('Playing · Playground'), findsOneWidget);
+      expect(find.text('Playing · Playground · own window'), findsOneWidget);
       expect(find.text('the entity is gone'), findsOneWidget);
       expect(find.textContaining('the game process started (pid 7100)'), findsOneWidget);
       // The status line names the GAME's pid (7100), not the CLI's (7000):
