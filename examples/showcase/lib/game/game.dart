@@ -9,8 +9,6 @@
 // (lib/main.dart, or a test) owns the loop and calls [frame] once per frame
 // (ADR-0007/0008).
 
-import 'dart:io';
-
 import 'package:fynkel/fynkel.dart';
 
 import '../generated/behaviours.g.dart';
@@ -62,17 +60,4 @@ class Game {
   FramePlan frame(double dtSeconds) => world.frame(dtSeconds);
 
   void dispose() => world.dispose();
-}
-
-/// The project directory this process should load: `FYNKEL_PROJECT`
-/// (`--dart-define` or environment variable; `fynkel run` sets it), else the
-/// working directory when it holds `fynkel.project.json`.
-String? projectDirectory() {
-  const defined = String.fromEnvironment('FYNKEL_PROJECT');
-  if (defined.isNotEmpty) return defined;
-  final env = Platform.environment['FYNKEL_PROJECT'];
-  if (env != null && env.isNotEmpty) return env;
-  final cwd = Directory.current.path;
-  if (File('$cwd/fynkel.project.json').existsSync()) return cwd;
-  return null;
 }
