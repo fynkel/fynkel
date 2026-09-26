@@ -43,6 +43,10 @@ to the Project and the Console.
   blend tree shows a small tree icon.
 - **Right-click a state** for Make Transition (then click the target
   state), Set as Layer Default State, Rename and Delete.
+- **Right-click the empty graph ▸ Create Sub-State Machine** makes a
+  box that holds a small graph of its own (see below). Double-click it
+  to open it; the path bar above the graph ("Base Layer ▸ Airborne")
+  takes you back.
 - **Click** a state or an arrow to edit it in the Inspector. **⌫** deletes
   it. **⌘Z** undoes (while the window has the keyboard).
 - **Parameters** are on the left: **+** adds a Float, Int, Bool or
@@ -125,8 +129,54 @@ A transition fires when **all** its conditions hold. In the Inspector:
   already playing?
 
 A state with several transitions checks them in order; the arrows in
-the Inspector change the order. Only one transition fires per tick, and none
-while a blend is running.
+the Inspector change the order. Only one transition fires per tick.
+
+- **Interruption**: what may cut the transition's blend short. By
+  default nothing can: the blend always ends first. **The next state's
+  transitions** lets the state it goes to leave again at once (a new
+  jump during a landing). **Any State's and the next state's** also
+  lets Any State in. An interrupted blend fades on from the pose of that
+  moment, so nothing pops. The Inspector says it in words: "Can be
+  interrupted by: the next state's transitions". In the file:
+  `"interruptibleBy": "next"` (or `"any"`, or `"none"`).
+
+## Sub-state machines
+
+A big graph gets hard to read. A **sub-state machine** is one box that
+holds states and transitions of its own: an `Airborne` box with Jump,
+Fall and Land inside, instead of three more boxes in the base graph.
+
+- **Into it:** a transition to the box enters its **default state**
+  (the orange one inside; the Inspector's **Enters** field for the box).
+- **Out of it:** a transition *from the box* is checked from every
+  state inside it, like an Any State that only covers the box. There is
+  no Exit node to learn.
+- **Inside it:** transitions join its own states. Any State belongs to
+  the layer, so it is not shown inside.
+- **Order:** Any State's transitions are checked first, then the
+  transitions from the boxes a state is in (the outer one first), then
+  the state's own.
+- **From code**, a state inside a box is named by its path:
+  `animation.play('Airborne/Fall')`. `play('Airborne')` enters the box's
+  default state. `stateOf()!.name` gives the path.
+
+```json
+{ "name": "Airborne", "defaultState": "Jump",
+  "states": [
+    { "name": "Jump", "motion": { "asset": "…", "sub": "anim/jump" }, "loop": false },
+    { "name": "Fall", "motion": { "asset": "…", "sub": "anim/jump" }, "speed": 0, "loop": false },
+    { "name": "Land", "motion": { "asset": "…", "sub": "anim/idle" }, "loop": false }
+  ],
+  "transitions": [
+    { "from": "Jump", "to": "Fall", "exitTime": 1, "offset": 0.99 },
+    { "from": "Fall", "to": "Land", "interruptibleBy": "next",
+      "conditions": [{ "parameter": "grounded", "is": true }] },
+    { "from": "Land", "to": "Jump", "conditions": [{ "parameter": "jump" }] }
+  ] }
+```
+
+A state's name may not hold `/`, boxes nest at most 8 deep, and a box
+always keeps one state.
 
 ## From code
 
@@ -142,7 +192,9 @@ void fixedUpdate(FixedUpdateContext context) {
 - `animation.stateOf()!.name` is the state playing now (`next` is the
   one it is blending into); `normalizedTime` is how far it has played.
 - `animation.play('Jump')` and `animation.crossfade('Jump', 0.1)` jump
-  to a state by name, without conditions.
+  to a state by name, without conditions. A state in a sub-state
+  machine is named by its path (`'Airborne/Fall'`); the machine's own
+  name enters its default state.
 - `onAnimatorStateEntered` and `onAnimatorStateExited` tell a behaviour
   when states change.
 - A wrong parameter name or type throws, and the message lists the
@@ -165,7 +217,8 @@ anim.playOneShot(Assets.models.character.clips.wave, slot: PlayerSlot.upperBody)
 ```
 
 It also has `nextState`, `play(PlayerState.x)`, `crossfade(…)` and
-`resetJump()`. The string calls stay for code that does not know its
+`resetJump()`. A state inside a sub-state machine gets its path in
+camel case: `Airborne/Fall` is `PlayerState.airborneFall`. The string calls stay for code that does not know its
 controller. `fynkel codegen --check` fails when the file is stale.
 
 ## Layers

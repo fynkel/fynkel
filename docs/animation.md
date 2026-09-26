@@ -553,6 +553,34 @@ a replacement, the one blending out.
   (normalized) and `one_shot_weight`; Dart reads them as
   `AnimatorStateInfo.slot`/`oneShot`/`oneShotTime`/`oneShotWeight`.
 
+## Sub-state machines and interruptions (ADR-0033)
+
+The document keeps sub-state machines as a tree ([animator.md](animator.md)
+§ Sub-state machines is the guide); `fynkel_assets::controller_def`
+flattens them, so the runtime only ever sees a flat layer:
+
+- The states that play become the layer's, named by path
+  (`Airborne/Fall`), in file order.
+- A transition into a machine goes to its default state, followed down
+  through nested machines.
+- A transition from a machine becomes one transition per state inside
+  it. Scopes are emitted outer first, so for a state the machines it is
+  in are checked before its own transitions (Any State still first).
+- `LayerDef::machines` maps a machine's path to the state it enters:
+  `find_state("Airborne")` (what `PlayState` and Dart's `play` use)
+  gives that state.
+
+**Interruptions.** `TransitionDef::interruptible_by` is `None` (the
+default: nothing fires while its crossfade runs), `Next` (the incoming
+state's transitions) or `Any` (Any State's too). The pure runtime
+checks them during the fade; when one fires, the outgoing state exits
+and the new `Crossfade` has `frozen: true` and bumps
+`LayerRun::interruptions`. The world keeps each layer's machine pose
+from the last tick (under its slot) and copies it when the count
+changes; a frozen fade blends from that held pose instead of sampling
+`from`, whose clock stops. Code's `play`/`crossFade` are not
+interruptions: they cut a fade as before.
+
 **Clips made in code.** `fynkel_world_set_clip(world, id, payload,
 len)` registers an `ANIM` payload as the runtime clip `id`, on the
 asset store (read before cooked clips, kept across clears and scene

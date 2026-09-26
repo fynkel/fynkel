@@ -1388,8 +1388,17 @@ parameters, is done** (2026-09-26): `lib/generated/animators.g.dart`
 gives each controller a `…Animator` type with its parameters, its
 states and slots as enums; `codegen --check` sees it stale and the
 editor rewrites it when a controller is saved. The reference game's
-Player uses `PlayerAnimator`. Next: sub-state machines and
-interruptions, masks and IK.
+Player uses `PlayerAnimator`. **Step 4, sub-state machines and
+interruptions, is done** (2026-09-27): a state may hold states and
+transitions of its own (entered at its default, left by a transition
+from the box, checked from every state inside; code names states by
+path, `play('Airborne/Fall')`), flattened when the controller loads; a
+transition's `interruptibleBy` (`none`, `next`, `any`) lets a blend be
+cut short, fading from the pose of that moment. The Animator window
+makes, opens (double-click) and leaves (the path bar) sub-state
+machines. The reference game's jump is an `Airborne` machine (Jump →
+Fall → Land) whose landing a new jump may interrupt. Next: masks and
+IK.
 
 **Tags and layers** (ADR-0020, 2026-09-23) come in while the joint R3a +
 R3b capture waits for a quiet machine: several tags and one engine-wide

@@ -1974,7 +1974,9 @@ class AnimationControl {
   /// Unity's `Play(stateName)`): it starts at [offset] (a fraction of its
   /// motion, 0…1) in [layer] (null: the first layer that has it); an
   /// unknown state is an `invalidPayload` diagnostic that lists the
-  /// states.
+  /// states. A state inside a sub-state machine is named by its path
+  /// (`'Airborne/Fall'`, ADR-0033 § 4); the machine's own path enters
+  /// its default state.
   ///
   /// An [AssetRef] is a clip, for an animator without a controller: it
   /// plays from its start (or its end, at a negative [speed]). It may
