@@ -1821,7 +1821,14 @@ decoded `TEXR` in the colour space the importer assigned them (dual-use
 images arrive as two sub-assets, one per colour space), the asset's own
 texture → `TEXR` (an HDR image as RGBA16F plus its prefiltered `ENVM`,
 E1; cache version 6), clips → `CLIP` (or `STRM` for a sidecar's `stream: true`: the source bytes, M3-11 part 2), the prefab → `JSON`. A `fynkel.file` source: its bytes in one
-`BLOB` chunk. A sidecar whose `subAssets` fall behind the import cooks with
+`BLOB` chunk. A `fynkel.shader` source (ADR-0031): its text in one `SHDR`
+chunk once it compiles against `surface@1` — the cook refuses one that
+does not (`FYN-D0313`/`D0314`/`D0315` at the line in the file), and fails
+its materials with it. A material whose `shader` is a `.shader` asset
+cooks `JSON` **plus** `MATC` instead of `MATL`, after the checks against
+the shader's header (`D0300`–`D0306`); the shader is one of its
+dependencies, so editing the shader recooks its materials (cache version
+9). A sidecar whose `subAssets` fall behind the import cooks with
 a warning (the container carries the derived ids) — `fynkel import`
 updates the sidecar; the cooker never writes outside the cache.
 
@@ -1851,6 +1858,8 @@ Chunk kinds and payloads:
 | `META` | JSON: `{ fynkel: "cooked", version, id, name, path, kind, importer, importerVersion, profile, key, dependencies: [uuid], subAssets: { sub: uuid }, chunks: [{ index, kind, name, sub?, id?, … }] }` — per-chunk extras: `documentKind`; `vertices`, `indices`, `material`; `width`, `height`, `colorSpace`, `sourceHasAlpha`, `hdr`, `mipLevels`; `specularSize`, `specularMips`, `irradianceSize`, `meanIrradiance`; `sampleRate`, `channels`, `frames`, `codec` (+ `streamed: true`, `bytes` for a `STRM`); `entities`; `extension` |
 | `JSON` | A document's canonical text (scene, prefab, material, …) |
 | `MATL` | `u32` payload version (1), `u32` record size (`PbrMaterial::SIZE`, 184), `u32` string-tail length, `u32` reserved, then the `fynkel.PbrMaterial` wire record (ADR-0012 layout: `Vec4` 16 bytes, optional asset refs as a nil id when unbound) and its string tail (the `sub` ids). `fynkel_wire::material::{encode_material, decode_material}`. META extras: `shader`, `alphaMode`, `textures` (the bound slot names). |
+| `SHDR` | A `.shader` file's text as checked (ADR-0031): the header is the interface, parsed again at load by `fynkel_shader::parse`, so the cook, the renderer and `fynkel shader validate` read one definition. META extras: `contract` (`surface@1`), `shaderName`, `lighting`, `alpha`, `shadows`, `blockBytes`, `textures` (the texture properties in order). |
+| `MATC` | A material of a shader asset (ADR-0031): `u32` layout version (1), the shader's id (16 bytes), `u32` alpha mode (0 opaque, 1 mask, 2 blend), `f32` alpha cutoff, `u32` double-sided, `u32` block length and the property block in the shader's layout (a multiple of 16 bytes, every default filled — `fynkel_shader::Layout`), `u32` slot count, then per texture property in the header's order: `u32` flags (1 bound, 2 mipmaps), `u32` colour space (0 sRGB, 1 linear), `u32` fallback (0 white, 1 black, 2 normal, 3 gray), `u32` filter (0 linear, 1 nearest), `u32` wrap (0 repeat, 1 clamp, 2 mirror), `u32` anisotropy, `u32` uv set, and when bound the texture's id (16 bytes) and its `sub` (a `u32` length, the bytes, padded to 4). `fynkel_cooked::payload::{encode_custom_material, decode_custom_material}`. META extras: `shader`, `alphaMode`, `blockBytes`, `textures` (the bound slots). |
 | `MESH` | `u32` vertex count, `u32` index count, `[f32; 3]` bounds min, `[f32; 3]` bounds max, vertices (72 bytes each, the intermediate's layout), `u32` indices |
 | `TEXR` | `u32` width, `u32` height, `u32` format (1 = RGBA8 sRGB, 2 = RGBA8 linear, 3 = RGBA16F linear — an HDR image, E1), `u32` mip levels (the full chain, `full_mip_count(w, h)`), then every level's `w × h` texels (4 bytes each, 8 for format 3) concatenated, level 0 first, top row first (`TexturePayload::level(i)` / `base()` / `texel_bytes()`) |
 | `ENVM` | `u32` specular face size, `u32` specular mip levels, `u32` irradiance face size, `[f32; 3]` mean irradiance, then the specular cube — per level, per face (+X −X +Y −Y +Z −Z), `size²` RGBA16F texels — and the irradiance cube (six faces of `size²` RGBA16F texels of E/π). An HDR image's prefiltered environment (E1); `EnvironmentPayload::specular_level(m)`; faces are bounded to `MAX_ENVIRONMENT_FACE` (2048) on decode. META extras: `specularSize`, `specularMips`, `irradianceSize`, `meanIrradiance`. |

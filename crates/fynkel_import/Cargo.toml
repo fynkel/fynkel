@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 fynkel_contracts.workspace = true
 fynkel_document.workspace = true
+fynkel_shader.workspace = true
 fynkel_cooked.workspace = true
 fynkel_wire.workspace = true
 fynkel_core = { workspace = true, features = ["default"] }

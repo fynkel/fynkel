@@ -1004,6 +1004,7 @@ dependencies = [
  "fynkel_cooked",
  "fynkel_core",
  "fynkel_document",
+ "fynkel_shader",
  "fynkel_wire",
  "glam 0.33.7",
  "gltf",

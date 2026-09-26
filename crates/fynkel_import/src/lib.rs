@@ -71,6 +71,8 @@ pub const IMPORTERS: &[(&str, u32)] = &[
         audio::IMPORTER_VERSION,
     ),
     (fynkel_document::asset::FILE_IMPORTER, 1),
+    // A `.shader` file (ADR-0031): checked and carried as its text (`SHDR`).
+    (fynkel_document::asset::SHADER_IMPORTER, 1),
 ];
 
 /// The lock this build writes (`fynkel project lock`) and checks
@@ -164,7 +166,7 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
             )
             .with_document(path.display().to_string())
             .with_suggestion(
-                "importers: fynkel.gltf (.gltf/.glb), fynkel.fbx (.fbx), fynkel.image (.png/.jpg), fynkel.audio (.wav/.ogg); fynkel.file has none (`fynkel cook` carries such files as they are)",
+                "importers: fynkel.gltf (.gltf/.glb), fynkel.fbx (.fbx), fynkel.image (.png/.jpg), fynkel.audio (.wav/.ogg); fynkel.shader and fynkel.file need no import (`fynkel cook` checks a .shader and carries other files as they are)",
             )],
         },
     }

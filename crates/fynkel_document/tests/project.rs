@@ -43,12 +43,13 @@ const IMPORTERS: &[(&str, u32)] = &[
     ("fynkel.image", 1),
     ("fynkel.audio", 2),
     ("fynkel.file", 1),
+    ("fynkel.shader", 1),
 ];
 
 /// What `fynkel_import::expected_lock()` produces; mirrored here because
-/// this crate cannot depend on the importers (cache version 8, container 1).
+/// this crate cannot depend on the importers (cache version 9, container 1).
 fn expected_lock() -> Lock {
-    Lock::expected(IMPORTERS, 8, 1)
+    Lock::expected(IMPORTERS, 9, 1)
 }
 
 /// A temporary copy of the fixture project, removed on drop.

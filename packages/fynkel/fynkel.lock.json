@@ -50,10 +50,11 @@
     "fynkel.fbx": 4,
     "fynkel.file": 1,
     "fynkel.gltf": 8,
-    "fynkel.image": 1
+    "fynkel.image": 1,
+    "fynkel.shader": 1
   },
   "cache": {
-    "version": 8,
+    "version": 9,
     "container": 1
   }
 }

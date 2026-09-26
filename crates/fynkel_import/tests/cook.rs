@@ -1640,3 +1640,119 @@ fn data_assets_that_reference_each_other_cook() {
     assert_eq!(status(&r, GREAT), Status::Cooked);
     assert_eq!(r.get(id(SWORD)).unwrap().dependencies, [id(GREAT)]);
 }
+
+const GLOW: &str = "c0000000-0000-4000-8000-000000000040";
+const GLOW_MATERIAL: &str = "c0000000-0000-4000-8000-000000000041";
+
+const GLOW_SHADER: &str = "shader \"Tests/Glow\" {
+    lighting lit
+    alpha opaque, mask
+    properties {
+        tint  color3 = (1, 0.5, 0.25)
+        power float = 2 range(0, 10)
+        on    bool = true
+        mask  texture = black
+    }
+}
+
+fn surface(in: SurfaceInput) -> Surface {
+    var s = default_surface();
+    s.emission = material.tint * material.power * sample_mask(in.uv0).r;
+    return s;
+}
+";
+
+fn glow_material(power: f64) -> String {
+    format!(
+        r#"{{"$schema":"https://fynkel.dev/schemas/material.schema.json","formatVersion":2,"id":"{GLOW_MATERIAL}","name":"Glow","shader":{{"asset":"{GLOW}"}},"parameters":{{"power":{power}}},"textures":{{"mask":{{"texture":{{"asset":"{SWATCH}"}},"sampler":{{"wrap":"clamp"}}}}}},"alpha_mode":"mask"}}"#
+    )
+}
+
+#[test]
+fn a_shader_cooks_to_shdr_and_its_materials_to_matc() {
+    use fynkel_cooked::payload::{decode_custom_material, ALPHA_MASK, FALLBACK_BLACK};
+    let p = Project::new("shader");
+    std::fs::create_dir_all(p.assets().join("shaders")).unwrap();
+    p.write("shaders/glow.shader", GLOW_SHADER);
+    p.write(
+        "shaders/glow.shader.meta.json",
+        &format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"{GLOW}","name":"glow.shader","importer":"fynkel.shader","importerVersion":1,"settings":{{}},"subAssets":{{}}}}"#
+        ),
+    );
+    p.write("materials/glow.material.json", &glow_material(4.0));
+    let first = p.cook();
+    assert!(!first.has_errors(), "{:?}", first.diagnostics);
+    let read = |r: &CookReport, asset: &str| {
+        let a = r.get(id(asset)).unwrap();
+        std::fs::read(a.file.as_ref().unwrap()).unwrap()
+    };
+
+    // The shader: its text, checked, with its interface in the meta.
+    let bytes = read(&first, GLOW);
+    let c = Container::parse(&bytes).unwrap();
+    assert_eq!(c.chunks()[1].kind_str(), "SHDR");
+    assert_eq!(c.read(1, 1 << 20).unwrap(), GLOW_SHADER.as_bytes());
+    let meta: serde_json::Value = serde_json::from_slice(c.meta(1 << 20).unwrap()).unwrap();
+    let info = &meta["chunks"][1];
+    assert_eq!(info["contract"], "surface@1");
+    assert_eq!(info["shaderName"], "Tests/Glow");
+    assert_eq!(info["blockBytes"], 32);
+    assert_eq!(info["textures"], serde_json::json!(["mask"]));
+
+    // The material: its document, then the block in the shader's layout.
+    let bytes = read(&first, GLOW_MATERIAL);
+    let c = Container::parse(&bytes).unwrap();
+    let kinds: Vec<_> = c.chunks()[1..].iter().map(|k| k.kind_str()).collect();
+    assert_eq!(kinds, ["JSON", "MATC"]);
+    let m = decode_custom_material(c.read(2, 1 << 20).unwrap()).unwrap();
+    assert_eq!(m.shader, id(GLOW).into_bytes());
+    assert_eq!(m.alpha_mode, ALPHA_MASK);
+    let f = |o: usize| f32::from_le_bytes(m.block[o..o + 4].try_into().unwrap());
+    assert_eq!((f(0), f(4), f(8), f(16)), (1.0, 0.5, 0.25, 4.0));
+    assert_eq!(u32::from_le_bytes(m.block[20..24].try_into().unwrap()), 1);
+    assert_eq!(m.block.len(), 32);
+    assert_eq!(m.slots.len(), 1);
+    assert_eq!(
+        m.slots[0].texture,
+        Some((id(SWATCH).into_bytes(), String::new()))
+    );
+    assert_eq!((m.slots[0].wrap, m.slots[0].fallback), (1, FALLBACK_BLACK));
+
+    // Editing the shader recooks its materials, nothing else.
+    p.write(
+        "shaders/glow.shader",
+        &GLOW_SHADER.replace("power float = 2", "power float = 3"),
+    );
+    let second = p.cook();
+    assert!(!second.has_errors(), "{:?}", second.diagnostics);
+    assert_eq!(status(&second, GLOW), Status::Cooked);
+    assert_eq!(status(&second, GLOW_MATERIAL), Status::Cooked);
+    assert_eq!(status(&second, RUSTED), Status::Cached);
+
+    // A value outside its range fails the material at its line.
+    p.write("materials/glow.material.json", &glow_material(20.0));
+    let third = p.cook();
+    assert_eq!(status(&third, GLOW_MATERIAL), Status::Failed);
+    assert!(third
+        .diagnostics
+        .iter()
+        .any(|d| d.code == Code::MATERIAL_PARAMETER_RANGE), "{:?}", third.diagnostics);
+
+    // Code that does not compile fails the shader, at its line in the
+    // file, and every material of it.
+    p.write("materials/glow.material.json", &glow_material(4.0));
+    p.write(
+        "shaders/glow.shader",
+        &GLOW_SHADER.replace("material.power", "material.powr"),
+    );
+    let fourth = p.cook();
+    assert_eq!(status(&fourth, GLOW), Status::Failed);
+    assert_eq!(status(&fourth, GLOW_MATERIAL), Status::Failed);
+    let d = fourth
+        .diagnostics
+        .iter()
+        .find(|d| d.code == Code::SHADER_COMPILE)
+        .unwrap_or_else(|| panic!("{:?}", fourth.diagnostics));
+    assert_eq!(d.line, Some(14));
+}
