@@ -48,7 +48,20 @@ void main() {
     // The dark theme, the one the user works in (the editor follows the system).
     tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
     addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
-    final e = await Editor.open(tester, tag: 'shots', prepare: writeDemoScripts);
+    final e = await Editor.open(
+      tester,
+      tag: 'shots',
+      prepare: (dir) {
+        writeDemoScripts(dir);
+        // A blend space over the rig's clips, for its preview.
+        File('${dir.path}/assets/models/loco.blend.json').writeAsStringSync(
+          '{"\$schema":"https://fynkel.dev/schemas/blend.schema.json","formatVersion":1,'
+          '"id":"c0000000-0000-4000-8000-00000000b1e0","name":"Loco","parameter":"speed","points":['
+          '{"at":0,"clip":{"asset":"c0000000-0000-4000-8000-000000000005","sub":"anim/wave"}},'
+          '{"at":2,"clip":{"asset":"c0000000-0000-4000-8000-000000000005","sub":"anim/bob"}}],"sync":"phase"}',
+        );
+      },
+    );
     tester.view.physicalSize = const Size(2880, 1800);
     tester.view.devicePixelRatio = 2;
     await tester.pumpAndSettle();
@@ -119,6 +132,7 @@ void main() {
       ('asset-texture', 'textures/swatch.png'),
       ('asset-texture-normal', 'textures/rusted_normal.png'),
       ('asset-model', 'models/robot.glb'),
+      ('asset-sound', 'audio/tone.wav'),
     ]) {
       final browser = e.shell.browser!;
       browser.select(browser.entries.firstWhere((a) => a.path == path).id);
@@ -130,6 +144,31 @@ void main() {
       }
       await tester.pumpAndSettle();
       await save(name, find.byType(InspectorPanel).first);
+    }
+    // A clip on its model and a blend space (ADR-0030 step 7): paused
+    // half-way, since a playing clip never lets the frames settle.
+    Future<void> pause() async {
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      await tester.tap(find.byKey(const Key('preview.clip.play')));
+      await tester.pump();
+      final scrub = tester.getRect(find.byKey(const Key('preview.clip.scrub')));
+      await tester.tapAt(scrub.center);
+      await tester.pumpAndSettle();
+    }
+    {
+      final browser = e.shell.browser!;
+      browser.select(browser.entries.firstWhere((a) => a.path == 'models/rig.glb').id);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('preview.anim')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('preview.anim.anim/wave')));
+      await pause();
+      await save('asset-clip', find.byType(InspectorPanel).first);
+      browser.select(browser.entries.firstWhere((a) => a.path == 'models/loco.blend.json').id);
+      await pause();
+      await save('asset-blend', find.byType(InspectorPanel).first);
     }
     // Info unfolded: the file's facts and who uses it.
     {

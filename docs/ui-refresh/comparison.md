@@ -157,6 +157,30 @@ Before/after pictures of each step are in `steps/` (from
     resizes, kept per preview. Textures first: RGB / R / G / B / A, a
     mip slider, zoom and pan, F to fit, `16x16  RGBA8  Linear  1.3 KB
     mips 5`. Packages add theirs with `editor.preview(…)`.
+12. The rest of the previews (ADR-0030 steps 3–7). The widget shots
+    (`steps/11-*-preview.png`) have no GPU, so their 3D picture is
+    empty; the real Metal frames are `steps/11-render-*.png` (from
+    `FYNKEL_STAGE_SHOTS=<dir> flutter test test/stage_render_test.dart`).
+    - Material (`images/asset-material-unity.png`): the shape menu
+      (Sphere, Cube, Cylinder, Capsule, Plane) or a mesh dropped on the
+      picture; drag to orbit, the wheel to zoom, the middle button or
+      Shift to pan, the right button to turn the light, F or a
+      double-click to frame; an unsaved edit shows at once
+      (`11-render-material-sphere` → `-green`).
+    - Model, rig and prefab: the whole thing or one mesh; `2 meshes
+      1 skinned  3 bones  40 verts  36 tris  size`.
+    - Clip: a clip menu on a model or rig (or a clip dropped on the
+      picture), a play bar as Unity's: play/pause, scrub, `0:00.50
+      (15)` (time and frame), 0.25×–2×, loop, root motion in place or
+      moving (`11-render-clip-rest` → `-posed`: the skin bends).
+    - Blend space: on the model of its clips, the parameter's slider
+      over the play bar.
+    - Sound: the waveform, one lane per channel, a playhead; Play/Stop
+      and Loop; a click plays from there; `PCM, 8000 Hz, Stereo,
+      0:00.050, 2 KB`.
+
+    No Unity picture yet for the model, clip, sound and blend
+    previews; the check is the user's, in the app.
 
 Left: the Project list keeps its Kind / Contents / Size columns (Unity
 shows names only).
