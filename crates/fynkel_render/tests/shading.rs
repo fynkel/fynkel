@@ -3453,3 +3453,43 @@ fn a_shaders_vertex_moves_its_shadow_too() {
     // Sunk a hundred metres by its vertex(): its shadow goes with it.
     assert_eq!(shadowed(1.0), 0);
 }
+
+#[test]
+fn a_shader_materials_values_change_at_runtime_through_its_uniform() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut lab = Lab::new("shader-runtime");
+    let shader = lab.shader(FLAT_SHADER);
+    let m = lab.material(json!({
+        "shader": asset(&shader.to_string()), "parameters": { "tint": [0.2, 0.6, 1.0] } }));
+    let (assets, extract) = lab.extract(Vec3::new(0.0, 0.0, 3.0), &[(Vec3::ZERO, m)], false);
+    let (px, mut r) = render_lab(&device, &queue, &assets, &extract);
+    let center = |px: &[[u8; 4]]| px[(H / 2 * W + W / 2) as usize];
+    let cooked = srgb8([0.2, 0.6, 1.0, 1.0]);
+    assert!(near(center(&px), cooked));
+
+    // `material.set('tint', …)`: the same material, new values.
+    let r_m = AssetRef::new(m);
+    let mut red = (*assets.custom_material(&r_m).unwrap().unwrap()).clone();
+    for (i, v) in [1.0f32, 0.0, 0.0].into_iter().enumerate() {
+        red.block[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    assets.set_runtime_custom_material(&r_m, Some(red.clone()));
+    let px = render_offscreen(&device, &queue, &mut r, &extract);
+    assert!(near(center(&px), [255, 0, 0]), "{:?}", center(&px));
+
+    // A texture bound at runtime rebuilds the material.
+    let mut textured = red;
+    textured.slots[0].texture = Some((SWATCH.parse::<Uuid>().unwrap().0, String::new()));
+    assets.set_runtime_custom_material(&r_m, Some(textured));
+    let px = render_offscreen(&device, &queue, &mut r, &extract);
+    let coloured = px.iter().filter(|p| p[1] > 60 || p[2] > 60).count();
+    assert!(coloured > 500, "the swatch adds to red on {coloured} px");
+
+    // Removed: the cooked values again.
+    assets.set_runtime_custom_material(&r_m, None);
+    let px = render_offscreen(&device, &queue, &mut r, &extract);
+    assert!(near(center(&px), cooked), "{:?}", center(&px));
+    assert_eq!(r.asset_errors(), &[] as &[String]);
+}

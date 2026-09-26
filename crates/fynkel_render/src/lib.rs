@@ -41,6 +41,7 @@
 //! count); bind groups are cached per material and per texture.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use fynkel_contracts::{AssetRef, Uuid};
 use fynkel_cooked::payload::{
@@ -378,6 +379,21 @@ struct GpuMaterial {
     textures: Vec<AssetRef>,
     /// The shader asset it is drawn with (ADR-0031); `None`: the built-in.
     shader: Option<Uuid>,
+    /// A shader asset material's payload and its block's uniform buffer,
+    /// rewritten in place when only the values change.
+    custom: Option<Arc<CustomMaterialPayload>>,
+    block: Option<wgpu::Buffer>,
+}
+
+/// Whether `b` differs from `a` in its property values alone: the same
+/// shader, textures, samplers, alpha and sides.
+fn same_but_values(a: &CustomMaterialPayload, b: &CustomMaterialPayload) -> bool {
+    a.shader == b.shader
+        && a.alpha_mode == b.alpha_mode
+        && a.alpha_cutoff == b.alpha_cutoff
+        && a.double_sided == b.double_sided
+        && a.slots == b.slots
+        && a.block.len() == b.block.len()
 }
 
 /// What [`Renderer::material`] found for a draw.
@@ -1044,6 +1060,7 @@ pub struct ExtractRenderer {
     evictions_seen: u64,
     live_edits_seen: u64,
     mesh_edits_seen: u64,
+    material_edits_seen: u64,
     meshes: HashMap<AssetRef, Option<GpuMesh>>,
     textures: HashMap<AssetRef, Option<GpuTexture>>,
     /// The cooked environments read for an HDR sky (E1; `None`: the
@@ -1462,6 +1479,7 @@ impl ExtractRenderer {
             evictions_seen: 0,
             live_edits_seen: 0,
             mesh_edits_seen: 0,
+            material_edits_seen: 0,
             meshes: HashMap::new(),
             textures: HashMap::new(),
             environments: HashMap::new(),
@@ -1749,6 +1767,7 @@ impl ExtractRenderer {
         self.evictions_seen = assets.as_ref().map(Assets::evictions).unwrap_or(0);
         self.live_edits_seen = assets.as_ref().map(Assets::live_edits).unwrap_or(0);
         self.mesh_edits_seen = assets.as_ref().map(Assets::mesh_edits).unwrap_or(0);
+        self.material_edits_seen = assets.as_ref().map(Assets::material_edits).unwrap_or(0);
         self.assets = assets;
         self.clear_assets();
     }
@@ -1759,7 +1778,7 @@ impl ExtractRenderer {
 
     /// Drops the GPU copies of assets the store evicted since the last
     /// frame (a scene unload released them); nothing to do otherwise.
-    fn reconcile_evictions(&mut self) {
+    fn reconcile_evictions(&mut self, queue: &wgpu::Queue) {
         let Some(assets) = &self.assets else { return };
         // A material or volume profile edited in place (the editor's
         // Inspector): every bind group is rebuilt and every profile re-read
@@ -1779,6 +1798,34 @@ impl ExtractRenderer {
                 self.meshes.remove(&r);
             }
             self.mesh_edits_seen = mesh_edits;
+        }
+        // A shader material the game made or changed
+        // (`world.createShaderMaterial`): new values alone rewrite its
+        // uniform; anything else rebuilds it on its next use.
+        let material_edits = assets.material_edits();
+        if material_edits != self.material_edits_seen {
+            for r in assets.materials_changed_since(self.material_edits_seen) {
+                let now = assets.custom_material(&r).ok().flatten();
+                let rewritten = match (self.materials.get(&r), &now) {
+                    (Some(Some(gpu)), Some(now)) => match (&gpu.custom, &gpu.block) {
+                        (Some(was), Some(block)) if same_but_values(was, now) => {
+                            queue.write_buffer(block, 0, &now.block);
+                            true
+                        }
+                        _ => false,
+                    },
+                    _ => false,
+                };
+                if rewritten {
+                    if let Some(Some(gpu)) = self.materials.get_mut(&r) {
+                        gpu.custom = now;
+                    }
+                } else {
+                    self.materials.remove(&r);
+                    self.broken_materials.remove(&r);
+                }
+            }
+            self.material_edits_seen = material_edits;
         }
         let now = assets.evictions();
         if now == self.evictions_seen {
@@ -1853,7 +1900,7 @@ impl ExtractRenderer {
         // Consumed by this frame; handed back empty at the end to keep
         // the queue's capacity.
         let mut extras = std::mem::take(&mut self.extra_worlds);
-        self.reconcile_evictions();
+        self.reconcile_evictions(queue);
         self.resolve_quality(device);
         self.ensure_fallbacks(device, queue);
         if let Some(timer) = self.gpu_timer.as_mut() {
@@ -3566,6 +3613,8 @@ impl ExtractRenderer {
                 bind_group,
                 textures,
                 shader: None,
+                custom: None,
+                block: None,
             }
         });
         let out = match &gpu {
@@ -3617,7 +3666,7 @@ impl ExtractRenderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         r: &AssetRef,
-        c: &CustomMaterialPayload,
+        c: &Arc<CustomMaterialPayload>,
     ) -> Option<GpuMaterial> {
         let id = Uuid::from_bytes(c.shader);
         if !self.surfaces.contains_key(&id) {
@@ -3661,7 +3710,7 @@ impl ExtractRenderer {
         let block = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("fynkel material {r} block")),
             contents: &c.block,
-            usage: wgpu::BufferUsages::UNIFORM,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let mut entries = vec![wgpu::BindGroupEntry {
             binding: 0,
@@ -3711,6 +3760,8 @@ impl ExtractRenderer {
             bind_group,
             textures,
             shader: Some(id),
+            custom: Some(c.clone()),
+            block: Some(block),
         })
     }
 
