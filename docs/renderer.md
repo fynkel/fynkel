@@ -714,7 +714,8 @@ loops set the pipeline per batch and only when it changes.
 
 A material's bind group holds its block in a uniform buffer, each bound
 texture (or the slot's fallback texel: white, black, flat normal or
-gray) and a sampler per slot's settings (filter, mipmaps, wrap,
+gray; a bound texture is read in the colour space its image was
+cooked in — the slot's own `colorSpace` is not a view switch) and a sampler per slot's settings (filter, mipmaps, wrap,
 anisotropy — at least the quality's, as the built-in's maps). The
 instance carries white, the material's alpha mode and cutoff and its
 sides; the property values live in the block only. A shader with

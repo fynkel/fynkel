@@ -1013,7 +1013,12 @@ transparent pass sorted back to front per mesh and without depth writes
 yields an untextured `fynkel.pbr@1` material carrying only `shader`.
 
 Texture colour spaces are fixed per slot: `base_color_texture` and
-`emissive_texture` sample sRGB, the other three linear. The renderer takes
+`emissive_texture` sample sRGB, the other three linear. For a `.shader`
+material the texture is read in its **image's** colour space — the
+image sidecar's `settings.colorSpace`, `srgb` unless it says `linear`
+(the editor's *Colour space* on the texture's page); the property's
+`srgb`/`linear` states what the shader expects. A normal map left `srgb`
+reads tilted (`docs/shaders.md` § Textures). The renderer takes
 the record straight from the cooked `MATL` chunk (below), never from JSON.
 
 `fynkel_document::material` holds the typed views (`ShaderManifest`,

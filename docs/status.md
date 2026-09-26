@@ -382,7 +382,10 @@ Not bugs — things done the simple way with a note to revisit.
   sky is a texture reference on `fynkel.Environment`, not the blueprint's
   `fynkel.sky@1` material (`docs/renderer.md` § Deviations). A scene that
   authors no lighting at all still gets the host's fallback sun (the M1
-  demo scene). Custom-shader materials have no cooked record.
+  demo scene). A `.shader` material's texture is read in its image's
+  colour space (the sidecar's `colorSpace`); the property's `srgb`/`linear`
+  is not a view switch, so a normal map must be marked `linear` on its
+  image (`docs/shaders.md` § Textures).
 - The runtime store keeps every retained payload decoded in memory
   (`ResidencyStats.bytes`); eviction happens only when the last `Residency`
   of a scene drops. No streaming, no budget — fine at fixture sizes.
@@ -1346,6 +1349,14 @@ the fourth block, § Contact shadows; 2026-09-26); then the package architecture
 game-defined data asset, a `ScriptableObject`-like `@DataAsset`) and the
 shader assets the user asked for. M4 closed on 2026-09-25 (item 30
 below).
+
+**Shader assets** (ADR-0031) are done as of 2026-09-26: one `.shader`
+file — a header and a WGSL `surface()` the engine lights — cooked,
+drawn with its own pipelines, changed from Dart (`createShaderMaterial`,
+`setMaterialValue`), made and edited in the editor (Create ▸ Shader, the
+shader's page, the material's Shader menu), with three examples in the
+showcase (dissolve, water, rim light) and `docs/shaders.md`. The user's
+check in the app is pending.
 
 **Tags and layers** (ADR-0020, 2026-09-23) come in while the joint R3a +
 R3b capture waits for a quiet machine: several tags and one engine-wide
