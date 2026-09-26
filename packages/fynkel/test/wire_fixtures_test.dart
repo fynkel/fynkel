@@ -624,6 +624,7 @@ void main() {
       name: 'speed',
       integer: -3,
       layer: 1,
+      point: Vec3(1, -2, 3.5),
     ),
     AnimateCommandRecord.wireSize,
     AnimateCommandRecord.decode,

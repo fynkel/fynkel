@@ -210,6 +210,12 @@ fn decode_command(kind: u32, body: &[u8], tail: &[u8]) -> Result<Command, Diagno
                         slot: c.name,
                         blend_out: c.value,
                     },
+                    AnimateOp::SetIkTarget => CoreAnimateOp::SetIkTarget {
+                        goal: c.name,
+                        position: c.point,
+                        weight: c.value,
+                    },
+                    AnimateOp::ClearIkTarget => CoreAnimateOp::ClearIkTarget { goal: c.name },
                 };
                 Command::Animate {
                     entity: c.entity,

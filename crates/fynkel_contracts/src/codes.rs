@@ -107,6 +107,10 @@ impl DiagnosticCode {
     /// command with physics off, `Animate` with animation off, an audio
     /// command with audio off. Rejected; the module's systems do not run.
     pub const MODULE_OFF: DiagnosticCode = DiagnosticCode(21);
+    /// An IK goal (ADR-0033 § 5) that cannot run: a node it names is
+    /// not under the animator, or foot placement with the physics module
+    /// off. Reported once per goal; the goal is skipped.
+    pub const IK_UNAVAILABLE: DiagnosticCode = DiagnosticCode(22);
 
     pub const fn name(self) -> &'static str {
         match self.0 {
@@ -131,6 +135,7 @@ impl DiagnosticCode {
             19 => "audio_device",
             20 => "snapshot_budget",
             21 => "module_off",
+            22 => "ik_unavailable",
             _ => "unknown",
         }
     }

@@ -5,6 +5,7 @@
 import 'dart:typed_data';
 
 import '../../generated/schema.g.dart';
+import '../../math.dart' show Vec3;
 import '../asset_ref.dart';
 import '../transform_writer.dart';
 import 'support.dart';
@@ -221,7 +222,8 @@ class CommandBatch {
       double value = 0,
       String name = '',
       int integer = 0,
-      int layer = -1}) {
+      int layer = -1,
+      Vec3 point = Vec3.zero}) {
     final o = _begin(AnimateCommandRecord.commandKind, AnimateCommandRecord.wireSize);
     AnimateCommandRecord(
             entity: entity,
@@ -233,7 +235,8 @@ class CommandBatch {
             value: value,
             name: name,
             integer: integer,
-            layer: layer)
+            layer: layer,
+            point: point)
         .encode(_bytes, o, _strings);
   }
 

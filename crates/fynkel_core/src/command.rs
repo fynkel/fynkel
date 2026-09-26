@@ -207,6 +207,19 @@ pub enum AnimateOp {
         slot: String,
         blend_out: f32,
     },
+    /// Where an IK goal of the controller reaches or looks (ADR-0033 §
+    /// 5), in world space, and how much (`weight`, within `[0, 1]`): it
+    /// wins over the object the goal names until cleared.
+    SetIkTarget {
+        goal: String,
+        position: glam::Vec3,
+        weight: f32,
+    },
+    /// Drops the goal's target from code: back to the object it names
+    /// (or to nothing).
+    ClearIkTarget {
+        goal: String,
+    },
 }
 
 impl Command {

@@ -57,6 +57,7 @@ mod animation;
 mod audio;
 mod catalogue;
 mod controller;
+mod ik;
 pub use animation::{AnimatorRun, Fade, SkinRun};
 pub use audio::AudioRun;
 pub use catalogue::{EmitterRun, Oscillation};

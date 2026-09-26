@@ -27,15 +27,16 @@ use std::sync::Arc;
 
 use fynkel_contracts::{AssetRef, Entity};
 use fynkel_ecs::World as Ecs;
-use fynkel_scene::Transform;
+use fynkel_scene::{Parent, Transform};
 use glam::Vec3;
 
 use super::animation::{
     find_named, pin_root, root_delta, AnimatorTick, BlendSlot, BlendTable, ClipTable,
 };
+use super::Name;
 use crate::animation::blend_tree::{direct_weights, weights, TreeDef, TreeKind};
 use crate::animation::controller::{
-    Blending, ControllerDef, ControllerRun, MotionDef, ParameterKind, StateEvent, Value,
+    masked_in, Blending, ControllerDef, ControllerRun, MotionDef, ParameterKind, StateEvent, Value,
 };
 use crate::animation::{Clip, Pose};
 use crate::components::Animator;
@@ -76,6 +77,11 @@ pub struct ControllerPlay {
     shown: Vec<Pose>,
     frozen: Vec<Pose>,
     interruptions: Vec<u32>,
+    /// Per layer with a mask: whether it poses each node met so far.
+    masks: Vec<HashMap<Entity, bool>>,
+    /// The IK goals' targets from code and what they carry over ticks
+    /// (ADR-0033 § 5).
+    pub ik: super::ik::IkRun,
 }
 
 /// A layer's slot: the one-shot playing, and one blending out (stopped,
@@ -172,6 +178,8 @@ impl ControllerPlay {
             shown: vec![Pose::default(); def.layers.len()],
             frozen: vec![Pose::default(); def.layers.len()],
             interruptions: vec![0; def.layers.len()],
+            masks: vec![HashMap::new(); def.layers.len()],
+            ik: super::ik::IkRun::new(def.ik.len()),
             def,
             pending: Vec::new(),
         }
@@ -682,6 +690,7 @@ pub(super) fn tick(
             if weight <= 0.0 {
                 continue;
             }
+            mask_pose(t, entity, &def, play, l, layer_pose);
             let reference = play.slots[l]
                 .current
                 .as_ref()
@@ -774,6 +783,9 @@ pub(super) fn tick(
                 blend_over(t, &play.rest, target, &play.shot_pose, w);
             }
         }
+        // The mask (ADR-0033 § 5): the nodes it leaves out keep what the
+        // layers below gave them.
+        mask_pose(t, entity, &def, play, l, target);
 
         // Markers and root motion: what advanced this tick.
         let b = play.before[l];
@@ -873,6 +885,42 @@ pub(super) fn tick(
         });
     }
     play.pending = events;
+}
+
+/// Drops from `pose` what layer `l`'s mask does not pose (ADR-0033 § 5):
+/// a node's names from it up to the animator, decided once per node.
+fn mask_pose(
+    t: &Tables,
+    entity: Entity,
+    def: &ControllerDef,
+    play: &mut ControllerPlay,
+    l: usize,
+    pose: &mut Pose,
+) {
+    let mask = &def.layers[l].mask;
+    if mask.is_empty() {
+        return;
+    }
+    let cache = &mut play.masks[l];
+    pose.entries.retain(|e| {
+        *cache.entry(e.entity).or_insert_with(|| {
+            let mut names = Vec::new();
+            let mut at = e.entity;
+            loop {
+                if let Ok(n) = t.ecs.get::<Name>(at) {
+                    names.push(n.value.clone());
+                }
+                if at == entity {
+                    break;
+                }
+                match t.ecs.get::<Parent>(at) {
+                    Ok(p) => at = p.0,
+                    Err(_) => break,
+                }
+            }
+            masked_in(mask, names.iter().map(String::as_str))
+        })
+    });
 }
 
 /// A target's rest transform (its transform now if it has none).
@@ -1055,6 +1103,18 @@ pub(super) fn state(
 }
 
 impl ControllerPlay {
+    /// An IK goal by name (ADR-0033 § 5).
+    pub fn ik_index(&self, goal: &str) -> Result<usize, String> {
+        self.def.ik_index(goal).ok_or_else(|| {
+            let names: Vec<&str> = self.def.ik.iter().map(|g| g.name.as_str()).collect();
+            if names.is_empty() {
+                format!("no IK goal `{goal}` (the controller has none)")
+            } else {
+                format!("no IK goal `{goal}` (the goals: {})", names.join(", "))
+            }
+        })
+    }
+
     /// The layer a slot names: a layer's name; empty is the base layer.
     pub fn slot_index(&self, slot: &str) -> Result<usize, String> {
         if slot.is_empty() {

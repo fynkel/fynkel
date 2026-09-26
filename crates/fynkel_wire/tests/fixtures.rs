@@ -568,6 +568,7 @@ fn fixtures_match_generated_codecs() {
             name: "speed".into(),
             integer: -3,
             layer: 1,
+            point: Vec3::new(1.0, -2.0, 3.5),
         },
     );
     check(

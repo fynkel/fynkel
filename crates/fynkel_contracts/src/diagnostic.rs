@@ -375,6 +375,10 @@ impl Code {
     /// A command of a module the project turned off (ADR-0029 §3); the
     /// world reports it as `DiagnosticCode::MODULE_OFF`.
     pub const RUNTIME_MODULE_OFF: Code = Code("FYN-R0014");
+    /// An IK goal that cannot run (ADR-0033 § 5): a node it names is
+    /// not under the animator, or foot placement with physics off; the
+    /// world reports it as `DiagnosticCode::IK_UNAVAILABLE`, once per goal.
+    pub const RUNTIME_IK_UNAVAILABLE: Code = Code("FYN-R0015");
 
     // User settings (`FYN-U`, blueprint §19.2d item 12): `settings.json`.
     /// The settings file is not a settings document (wrong `fynkel` kind

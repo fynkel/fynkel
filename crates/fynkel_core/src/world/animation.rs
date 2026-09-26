@@ -717,6 +717,18 @@ impl World {
                     bad("the blend out must be finite and >= 0"),
                 );
             }
+            AnimateOp::SetIkTarget {
+                position, weight, ..
+            } if !position.is_finite() || !(0.0..=1.0).contains(weight) => {
+                return self.reject(
+                    index,
+                    lane,
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    entity,
+                    ComponentId::ANIMATOR,
+                    bad("an IK target must be finite, its weight within [0, 1]"),
+                );
+            }
             AnimateOp::PlayOneShot { motion, .. }
                 if !self.clips.contains_key(motion) && !self.blends.contains_key(motion) =>
             {
@@ -754,6 +766,8 @@ impl World {
                 | AnimateOp::PlayState { .. }
                 | AnimateOp::PlayOneShot { .. }
                 | AnimateOp::StopOneShot { .. }
+                | AnimateOp::SetIkTarget { .. }
+                | AnimateOp::ClearIkTarget { .. }
         );
         if clip_op && controlled.is_some() {
             return self.reject(
@@ -842,6 +856,16 @@ impl World {
                         AnimateOp::StopOneShot { slot, blend_out } => play
                             .slot_index(&slot)
                             .map(|l| play.stop_one_shot(l, blend_out)),
+                        AnimateOp::SetIkTarget {
+                            goal,
+                            position,
+                            weight,
+                        } => play
+                            .ik_index(&goal)
+                            .map(|i| play.ik.targets[i] = Some((position, weight))),
+                        AnimateOp::ClearIkTarget { goal } => {
+                            play.ik_index(&goal).map(|i| play.ik.targets[i] = None)
+                        }
                         _ => unreachable!("a controller op"),
                     },
                 }
@@ -963,7 +987,9 @@ impl World {
             AnimateOp::SetControllerParameter { .. }
             | AnimateOp::PlayState { .. }
             | AnimateOp::PlayOneShot { .. }
-            | AnimateOp::StopOneShot { .. } => {}
+            | AnimateOp::StopOneShot { .. }
+            | AnimateOp::SetIkTarget { .. }
+            | AnimateOp::ClearIkTarget { .. } => {}
         }
         true
     }
@@ -1410,6 +1436,9 @@ impl World {
                         let _ = scene::set_local(&self.ecs, entry.entity, next);
                     }
                 }
+            }
+            if controlled.is_some() {
+                self.run_ik(entity, dt);
             }
             ticks.push(out);
         }

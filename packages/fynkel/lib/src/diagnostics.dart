@@ -38,7 +38,8 @@ enum DiagnosticCode {
   soundUnavailable(18),
   audioDevice(19),
   snapshotBudget(20),
-  moduleOff(21);
+  moduleOff(21),
+  ikUnavailable(22);
 
   const DiagnosticCode(this.value);
   final int value;

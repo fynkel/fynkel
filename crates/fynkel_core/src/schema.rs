@@ -232,6 +232,12 @@ pub enum AnimateOp {
     /// `name` (the slot), `value` (blend out): blend the slot's one-shot
     /// out.
     StopOneShot,
+    /// `name` (an IK goal), `point` (world space), `value` (the weight,
+    /// within `[0, 1]`): where the goal reaches or looks, until cleared
+    /// (ADR-0033 § 5).
+    SetIkTarget,
+    /// `name` (an IK goal): drop the target set from code.
+    ClearIkTarget,
 }
 
 /// Drives a `fynkel.Animator` (M3-19; simulation lane only). Rejected at
@@ -256,17 +262,20 @@ pub struct AnimateCommandRecord {
     /// The weight for `setWeight`, the parameter value for
     /// `setParameter`/`setFloat`/`setBool`, the start fraction for
     /// `playState`/`crossFadeState`, the blend out for
-    /// `playOneShot`/`stopOneShot`.
+    /// `playOneShot`/`stopOneShot`, the weight for `setIkTarget`.
     pub value: f32,
     /// The parameter name for `setParameter` and the typed setters, the
     /// state name for `playState`/`crossFadeState`, the slot for
-    /// `playOneShot`/`stopOneShot`.
+    /// `playOneShot`/`stopOneShot`, the goal for `setIkTarget`/
+    /// `clearIkTarget`.
     pub name: String,
     /// The value for `setInteger` (ADR-0032).
     pub integer: i32,
     /// The layer for `playState`/`crossFadeState`; `-1` is the first
     /// layer with a state of that name.
     pub layer: i32,
+    /// The target for `setIkTarget`, in world space (ADR-0033 § 5).
+    pub point: Vec3,
 }
 
 /// What a `fynkel.cmd.Audio` does (`fynkel_core::command::AudioOp`).
@@ -1049,12 +1058,12 @@ mod tests {
         assert_eq!(Animator::SCHEMA.wire_size(), 64);
         assert_eq!(Skin::SCHEMA.wire_size(), 32);
         // entity @0, op @8, seconds @12, speed @16, looping @20, clip @24,
-        // value @48, name @52, integer @60, layer @64 → 72.
+        // value @48, name @52, integer @60, layer @64, point @68 → 80.
         assert_eq!(
             AnimateCommandRecord::SCHEMA.offsets(),
-            vec![0, 8, 12, 16, 20, 24, 48, 52, 60, 64]
+            vec![0, 8, 12, 16, 20, 24, 48, 52, 60, 64, 68]
         );
-        assert_eq!(AnimateCommandRecord::SCHEMA.wire_size(), 72);
+        assert_eq!(AnimateCommandRecord::SCHEMA.wire_size(), 80);
         assert_eq!(AnimationEndedEvent::SCHEMA.wire_size(), 32);
         // entity @0, clip @8, name @32 → 40.
         assert_eq!(AnimationMarkerEvent::SCHEMA.wire_size(), 40);

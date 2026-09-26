@@ -1580,6 +1580,7 @@ fn animation_commands_events_and_query() {
         name: String::new(),
         integer: 0,
         layer: -1,
+        point: Vec3::ZERO,
     };
     let (s, r) = h.submit(
         Lane::Simulation,
@@ -1658,6 +1659,7 @@ fn animation_commands_events_and_query() {
                 name: String::new(),
                 integer: 0,
                 layer: -1,
+                point: Vec3::ZERO,
             }
         )],
     );
@@ -1701,6 +1703,7 @@ fn animation_commands_events_and_query() {
                 name: String::new(),
                 integer: 0,
                 layer: -1,
+                point: Vec3::ZERO,
             }
         )],
     );
@@ -1755,6 +1758,7 @@ fn animation_commands_events_and_query() {
                     name: String::new(),
                     integer: 0,
                     layer: -1,
+                    point: Vec3::ZERO,
                 }
             ),
             (
@@ -1770,6 +1774,7 @@ fn animation_commands_events_and_query() {
                     name: String::new(),
                     integer: 0,
                     layer: -1,
+                    point: Vec3::ZERO,
                 }
             ),
             (
@@ -1785,6 +1790,7 @@ fn animation_commands_events_and_query() {
                     name: "speed".into(),
                     integer: 0,
                     layer: -1,
+                    point: Vec3::ZERO,
                 }
             ),
         ],
@@ -1830,6 +1836,7 @@ fn animation_commands_events_and_query() {
                 name: String::new(),
                 integer: 0,
                 layer: -1,
+                point: Vec3::ZERO,
             }
         )],
     );
@@ -2397,6 +2404,7 @@ fn animator_controller_ops_events_and_queries() {
         name: name.into(),
         integer,
         layer: -1,
+        point: Vec3::ZERO,
     };
     // Parameters of each type; a wrong type is refused.
     let (s, r) = h.submit(
