@@ -3493,3 +3493,43 @@ fn a_shader_materials_values_change_at_runtime_through_its_uniform() {
     assert!(near(center(&px), cooked), "{:?}", center(&px));
     assert_eq!(r.asset_errors(), &[] as &[String]);
 }
+
+#[test]
+fn the_inspectors_live_edit_of_a_shader_material_draws_and_restores() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut lab = Lab::new("shader-live");
+    let shader = lab.shader(FLAT_SHADER);
+    let m = lab.material(json!({
+        "shader": asset(&shader.to_string()), "parameters": { "tint": [0.2, 0.6, 1.0] } }));
+    let (assets, extract) = lab.extract(Vec3::new(0.0, 0.0, 3.0), &[(Vec3::ZERO, m)], false);
+    let (px, mut r) = render_lab(&device, &queue, &assets, &extract);
+    let center = |px: &[[u8; 4]]| px[(H / 2 * W + W / 2) as usize];
+    let cooked = srgb8([0.2, 0.6, 1.0, 1.0]);
+    assert!(near(center(&px), cooked));
+
+    // A colour being picked in the Inspector: its new values, nothing cooked.
+    let r_m = AssetRef::new(m);
+    let mut green = (*assets.custom_material(&r_m).unwrap().unwrap()).clone();
+    for (i, v) in [0.0f32, 1.0, 0.0].into_iter().enumerate() {
+        green.block[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    assets.override_custom_material(&r_m, green);
+    let px = render_offscreen(&device, &queue, &mut r, &extract);
+    assert!(near(center(&px), [0, 255, 0]), "{:?}", center(&px));
+
+    // The Shader dropdown on the built-in: drawn lit, no longer flat.
+    let mut pbr = fynkel_core::material::PbrMaterial::default();
+    pbr.base_color = glam::Vec4::new(1.0, 0.0, 0.0, 1.0);
+    assets.override_material(&r_m, pbr);
+    let px = render_offscreen(&device, &queue, &mut r, &extract);
+    let c = center(&px);
+    assert!(c[0] > 60 && c[1] < 30 && c[2] < 30, "{c:?}");
+
+    // Restored: the cooked shader material again.
+    assets.restore_material(&r_m);
+    let px = render_offscreen(&device, &queue, &mut r, &extract);
+    assert!(near(center(&px), cooked), "{:?}", center(&px));
+    assert_eq!(r.asset_errors(), &[] as &[String]);
+}
