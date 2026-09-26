@@ -104,6 +104,10 @@ impl EventKind {
     pub const ANIMATION_MARKER: EventKind = EventKind(10);
     /// A `fynkel.AudioSource`'s non-looping clip reached its end (M3-11).
     pub const PLAYBACK_ENDED: EventKind = EventKind(11);
+    /// An Animator Controller's layer entered a state (ADR-0032).
+    pub const ANIMATOR_STATE_ENTERED: EventKind = EventKind(12);
+    /// An Animator Controller's layer finished leaving a state (ADR-0032).
+    pub const ANIMATOR_STATE_EXITED: EventKind = EventKind(13);
 
     pub const PHYSICS_FIRST: u32 = 0x100;
     pub const COLLISION_ENTER: EventKind = EventKind(0x100);
