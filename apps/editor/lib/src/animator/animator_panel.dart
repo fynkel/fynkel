@@ -22,6 +22,7 @@ import 'package:fynkel/fynkel.dart' as fynkel;
 
 import '../inspector/asset_edits.dart' show unset;
 import '../inspector/field_widgets.dart';
+import '../inspector/inspector_model.dart' show describeAssetRef;
 import '../inspector/inspector_chrome.dart';
 import '../project/editor_project.dart' show AssetEntry;
 import '../theme/icons.dart';
@@ -368,6 +369,12 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         if (model.layer > 0) _LayerSettings(controller: c, layer: model.layer),
+                        _SlotRow(
+                          name: c.layer(model.layer)?['name'] as String? ?? '',
+                          empty: c.states(model.layer).isEmpty,
+                          info: model.live?.layers.where((s) => s.layer == model.layer).firstOrNull,
+                          assets: widget.assets,
+                        ),
                         Expanded(child: _graph(context, t, c)),
                       ],
                     ),
@@ -974,6 +981,91 @@ class _ParameterList extends StatelessWidget {
 
 /// A layer after the base one: its weight, how it blends, the node it
 /// poses from (Unity's layer settings).
+/// The layer's slot (ADR-0033 § 2): its name — what
+/// `animation.playOneShot(clip, slot: …)` names — and during Play the
+/// one-shot covering the machine, with how much of it shows.
+class _SlotRow extends StatelessWidget {
+  const _SlotRow({required this.name, required this.empty, required this.info, required this.assets});
+
+  final String name;
+
+  /// The layer has no states: it shows only its slot.
+  final bool empty;
+  final fynkel.AnimatorStateInfo? info;
+  final List<AssetEntry> Function()? assets;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final small = Theme.of(context).textTheme.bodySmall;
+    final shot = info?.oneShot;
+    String label(fynkel.AssetRef r) {
+      final ref = {'asset': r.asset, if (r.sub != null) 'sub': r.sub};
+      final named = describeAssetRef(assets?.call() ?? const [], ref);
+      return named.startsWith(r.asset) ? 'a clip made in code' : named;
+    }
+
+    return Container(
+      key: const Key('animator.slot'),
+      height: 24,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: t.panel,
+        border: Border(bottom: t.hairline),
+      ),
+      child: Row(
+        children: [
+          Tooltip(
+            message: "A one-shot played into this slot covers the layer's states, which keep running under it",
+            child: Text('Slot', style: small?.copyWith(color: t.textSecondary)),
+          ),
+          const SizedBox(width: 6),
+          Text(name, key: const Key('animator.slot.name'), style: small?.copyWith(color: t.text)),
+          const SizedBox(width: 12),
+          if (shot != null) ...[
+            Icon(FIcons.playArrow, size: 11, color: t.accent),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                label(shot),
+                key: const Key('animator.slot.oneShot'),
+                overflow: TextOverflow.ellipsis,
+                style: small?.copyWith(color: t.text),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 80,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(2),
+                child: LinearProgressIndicator(
+                  key: const Key('animator.slot.weight'),
+                  value: info!.oneShotWeight.clamp(0.0, 1.0),
+                  minHeight: 4,
+                  color: t.accent,
+                  backgroundColor: t.line,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text('${(info!.oneShotTime.clamp(0.0, 1.0) * 100).round()}%', style: small?.copyWith(color: t.textSecondary)),
+          ] else
+            Flexible(
+              child: Text(
+                empty
+                    ? "No states: this layer shows only one-shots — animation.playOneShot(clip, slot: '$name')"
+                    : 'No one-shot playing',
+                key: const Key('animator.slot.hint'),
+                overflow: TextOverflow.ellipsis,
+                style: small?.copyWith(color: t.textSecondary),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _LayerSettings extends StatelessWidget {
   const _LayerSettings({required this.controller, required this.layer});
 

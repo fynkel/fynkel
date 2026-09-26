@@ -268,6 +268,33 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 16));
     expect(barsIn('Jump'), hasLength(1));
+    // The slot row (ADR-0033 § 2): the layer's name, then the one-shot
+    // over the machine and how much of it shows.
+    expect(tester.widget<Text>(find.byKey(const Key('animator.slot.name'))).data, 'Base Layer');
+    expect(find.byKey(const Key('animator.slot.oneShot')), findsNothing);
+    running.state = const fynkel.AnimatorStateInfo(
+      layer: 0,
+      name: 'Idle',
+      normalizedTime: 0.7,
+      length: 1,
+      slot: 'Base Layer',
+      oneShot: fynkel.AssetRef(rigAsset, sub: 'anim/wave'),
+      oneShotTime: 0.25,
+      oneShotWeight: 0.5,
+    );
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(tester.widget<Text>(find.byKey(const Key('animator.slot.oneShot'))).data, endsWith('anim/wave'));
+    expect(tester.widget<LinearProgressIndicator>(find.byKey(const Key('animator.slot.weight'))).value, 0.5);
+    running.state = const fynkel.AnimatorStateInfo(
+      layer: 0,
+      name: 'Idle',
+      normalizedTime: 0.7,
+      length: 1,
+      oneShot: fynkel.AssetRef('c0000000-0000-4000-8000-00000000abcd'),
+      oneShotWeight: 1,
+    );
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(tester.widget<Text>(find.byKey(const Key('animator.slot.oneShot'))).data, 'a clip made in code');
     final saved = jsonDecode(File('${e.dir.path}/$controllerPath').readAsStringSync()) as Map;
     expect((saved['parameters'] as List).last, {'name': 'jump', 'type': 'trigger'}, reason: 'the file is left alone');
 
