@@ -343,15 +343,16 @@ void main() {
     // A metadata `min` reaches the spec.
     expect(model.specFor('game.Collectible').field('value')!.min, 1);
     expect(model.specFor('game.Collectible').field('value')!.kind, FieldKind.integer);
-    // The script path resolves into the copy.
+    // The script path resolves into the copy (the Gate: the Player lives
+    // in its prefab since c7e23f9).
     tabs.openDocument(
       (jsonDecode(File('${dir.path}/assets/scenes/playground.scene.json').readAsStringSync()) as Map)['id'] as String,
     );
     final tab = tabs.focused!;
-    final playerId = tab.tree.nodes.entries.firstWhere((e) => e.value.componentTypes.contains('game.Player')).key;
-    tab.select(playerId);
-    final player = model.slots.singleWhere((s) => s.type == 'game.Player');
-    final script = model.scriptPath(player)!;
+    final gateId = tab.tree.nodes.entries.firstWhere((e) => e.value.componentTypes.contains('game.Gate')).key;
+    tab.select(gateId);
+    final gate = model.slots.singleWhere((s) => s.type == 'game.Gate');
+    final script = model.scriptPath(gate)!;
     expect(script, startsWith(dir.path));
     expect(File(script).existsSync(), isTrue, reason: script);
 

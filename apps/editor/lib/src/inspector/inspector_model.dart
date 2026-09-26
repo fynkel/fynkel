@@ -544,7 +544,6 @@ final class InspectorModel extends ChangeNotifier {
     ];
   }
 
-
   /// Components of the first entity, in its order; each kept only when every
   /// other entity has a component of that type at the same position.
   List<ComponentSlot> _pair(List<List<ComponentInstance>> perEntity) {
@@ -639,7 +638,11 @@ final class InspectorModel extends ChangeNotifier {
     final nodes = t.tree.nodes;
     String pathOf(HierarchyNode n) {
       final parts = <String>[];
-      for (var p = n.parent == null ? null : nodes[n.parent]; p != null; p = p.parent == null ? null : nodes[p.parent]) {
+      for (
+        var p = n.parent == null ? null : nodes[n.parent];
+        p != null;
+        p = p.parent == null ? null : nodes[p.parent]
+      ) {
         parts.insert(0, p.name);
       }
       return parts.join('/');
@@ -708,7 +711,6 @@ final class InspectorModel extends ChangeNotifier {
   /// ([precheckField]). Returns the problem or null.
   String? precheck(FieldSpec spec, Object? value) => precheckField(project, spec, value);
 
-
   /// Sets [field] (a name or a `/pointer`) to [value] on every instance of
   /// [slot] in one transaction. [spec] is the field's spec when the
   /// precheck should run (a component of a vector passes null).
@@ -748,13 +750,11 @@ final class InspectorModel extends ChangeNotifier {
     final ids = [for (final i in slot.instances) i.entityId];
     if (slot.type == 'fynkel.Transform') {
       previewTransforms?.call(t, {
-        for (final i in slot.instances)
-          i.entityId: Trs.fromData({...i.data, top: valueFor(i)}),
+        for (final i in slot.instances) i.entityId: Trs.fromData({...i.data, top: valueFor(i)}),
       }, ids);
     } else if (slot.type.startsWith('fynkel.')) {
       previewComponents?.call(t, slot.type, {
-        for (final i in slot.instances)
-          i.entityId: {...i.data, top: _copyJson(valueFor(i))},
+        for (final i in slot.instances) i.entityId: {...i.data, top: _copyJson(valueFor(i))},
       }, ids);
     }
   }
@@ -1377,7 +1377,8 @@ final class InspectorModel extends ChangeNotifier {
     String? why = cannotApplyToScene(slot);
     final commands = <Map<String, Object?>>[];
     if (why == null) {
-      final defaults = (slot.spec.isBehaviour ? slot.spec.schemaDefaults() : project.componentDefaults(slot.type)) ?? {};
+      final defaults =
+          (slot.spec.isBehaviour ? slot.spec.schemaDefaults() : project.componentDefaults(slot.type)) ?? {};
       try {
         for (final i in slot.instances) {
           commands.addAll(
@@ -1679,6 +1680,8 @@ String? precheckField(EditorProject project, FieldSpec spec, Object? value) {
       if (value is! Map) return 'not an asset reference';
       final id = value['asset'] as String? ?? '';
       final sub = value['sub'] as String?;
+      // The nil id is None (Add Component's default), as validation reads it.
+      if (id == _nilAsset) return null;
       if (!project.assetExists(id, sub: sub)) {
         return 'FYN-A0004: unknown asset ${sub == null || sub.isEmpty ? id : '$id#$sub'}';
       }
@@ -1766,13 +1769,7 @@ String describeAssetRef(List<AssetEntry> assets, Map<String, Object?>? ref) {
     final p = prefabInstanceOf(e);
     final x = p == null ? null : t.expansionOf(id);
     infos.add(
-      EntityInfo(
-        id: id,
-        name: e['name'] as String? ?? '',
-        active: e['active'] != false,
-        prefab: p,
-        expansion: x,
-      ),
+      EntityInfo(id: id, name: e['name'] as String? ?? '', active: e['active'] != false, prefab: p, expansion: x),
     );
     final comps = <ComponentInstance>[];
     // A prefab instance is its prefab's root (ADR-0022): the root's
@@ -1836,3 +1833,5 @@ PrefabInstanceInfo? prefabInstanceOf(Map<String, Object?> e) {
     ],
   );
 }
+
+const _nilAsset = '00000000-0000-0000-0000-000000000000';
