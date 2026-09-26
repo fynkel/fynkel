@@ -943,6 +943,7 @@ dependencies = [
  "fynkel_import",
  "fynkel_physics",
  "fynkel_scene",
+ "fynkel_shader",
  "glam 0.33.7",
  "jsonschema",
  "serde",

@@ -813,6 +813,12 @@ fn bad_name(name: &str) -> Option<&'static str> {
     if name.starts_with("fynkel_") || name.starts_with("__") {
         return Some("names starting with `fynkel_` or `__` are the engine's");
     }
+    if !name.starts_with(|c: char| c.is_ascii_lowercase()) {
+        return Some("a property name starts with a lowercase letter (`baseColor`, `base_color`)");
+    }
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Some("a property name is ASCII letters, digits and `_`");
+    }
     if WGSL_WORDS.contains(&name) {
         return Some("it is a WGSL word");
     }
@@ -1029,10 +1035,12 @@ fn surface(in: SurfaceInput) -> Surface { return default_surface(); }
 
     #[test]
     fn engine_and_wgsl_names_are_refused() {
-        let e = errors("shader \"A\" {\n properties {\n  fynkel_x float\n  let float\n }\n}\n");
-        assert_eq!(e.len(), 2);
+        let e = errors("shader \"A\" {\n properties {\n  fynkel_x float\n  let float\n  Tint color\n  _x float\n }\n}\n");
+        assert_eq!(e.len(), 4, "{e:?}");
         assert!(e[0].3.contains("the engine's"));
         assert!(e[1].3.contains("WGSL word"));
+        assert!(e[2].3.contains("lowercase"));
+        assert!(e[3].3.contains("lowercase"));
     }
 
     #[test]

@@ -1,8 +1,8 @@
 //! Material / shader corpus (`fixtures/material/*`): each document's
 //! `*.expected.json` lists the diagnostics validation must report (code,
 //! pointer, optional severity), in order. Materials are checked against the
-//! built-in library plus every `*.shader.json` in the directory; manifests
-//! are checked on their own.
+//! built-in library plus every `*.shader` file in the directory (ADR-0031);
+//! JSON manifests (the built-in's form) are checked on their own.
 
 use std::path::{Path, PathBuf};
 
@@ -19,18 +19,17 @@ fn schemas() -> SchemaSet {
     SchemaSet::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas")).unwrap()
 }
 
-fn library_with_fixture_shaders(schemas: &SchemaSet) -> ShaderLibrary {
+fn library_with_fixture_shaders(_schemas: &SchemaSet) -> ShaderLibrary {
     let mut lib = ShaderLibrary::builtin();
     for path in std::fs::read_dir(fixtures_dir()).unwrap() {
         let path = path.unwrap().path();
-        if path.to_string_lossy().ends_with(".shader.json") {
-            let doc = Document::read(&path, Some(DocumentKind::Shader)).unwrap();
-            let manifest = ShaderManifest::from_document(doc);
-            // Broken manifests stay out of the library; their own fixture
-            // reports them.
-            if !fynkel_document::has_errors(&manifest.validate(schemas)) {
-                lib.add(manifest);
-            }
+        if path.extension().is_some_and(|e| e == "shader") {
+            let meta = fynkel_document::asset::sidecar_path(&path);
+            let id = Document::read(&meta, Some(DocumentKind::Meta)).unwrap().envelope.id;
+            let manifest =
+                fynkel_document::material::read_shader_file(id, &path.display().to_string(), &path)
+                    .unwrap_or_else(|d| panic!("{d:#?}"));
+            lib.add(manifest);
         }
     }
     lib
@@ -91,7 +90,7 @@ fn shader_fixtures_report_exact_diagnostics() {
         .filter(|p| p.to_string_lossy().ends_with(".shader.json"))
         .collect();
     paths.sort();
-    assert!(paths.len() >= 2);
+    assert!(!paths.is_empty());
     for path in paths {
         let doc = Document::read(&path, Some(DocumentKind::Shader)).unwrap();
         let manifest = ShaderManifest::from_document(doc);

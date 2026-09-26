@@ -307,8 +307,11 @@ fn material_schema(s: &RecordSchema) -> Value {
     properties.insert(
         "shader".into(),
         json!({
-            "$ref": format!("{shader_schema}#/$defs/shaderId"),
-            "description": "The shader this material sets values for: `fynkel.pbr@1` (built in, the fields below) or a custom manifest's id (`parameters` and `textures`).",
+            "oneOf": [
+                {"$ref": format!("{shader_schema}#/$defs/shaderId")},
+                {"$ref": format!("{ENVELOPE_ID}#/$defs/assetRef")},
+            ],
+            "description": "The shader this material sets values for: the built-in `fynkel.pbr@1` (the fields below), or a `.shader` file by asset reference (`parameters` and `textures`, ADR-0031).",
         }),
     );
     properties.extend(document_properties(s));

@@ -24,6 +24,8 @@ pub const GLTF_IMPORTER: &str = "fynkel.gltf";
 pub const FBX_IMPORTER: &str = "fynkel.fbx";
 pub const IMAGE_IMPORTER: &str = "fynkel.image";
 pub const AUDIO_IMPORTER: &str = "fynkel.audio";
+/// `.shader` files (ADR-0031): the header read and the WGSL compiled.
+pub const SHADER_IMPORTER: &str = "fynkel.shader";
 
 /// The importer a fresh sidecar names, from the file extension. Importer
 /// versions start at 1 and are owned by the importers (M2-10/11).
@@ -38,6 +40,7 @@ pub fn importer_for(path: &Path) -> &'static str {
         "fbx" => FBX_IMPORTER,
         "png" | "jpg" | "jpeg" | "hdr" => IMAGE_IMPORTER,
         "wav" | "ogg" => AUDIO_IMPORTER,
+        "shader" => SHADER_IMPORTER,
         _ => FILE_IMPORTER,
     }
 }

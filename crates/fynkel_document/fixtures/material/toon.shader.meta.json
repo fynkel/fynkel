@@ -1,0 +1,10 @@
+{
+  "$schema": "https://fynkel.dev/schemas/meta.schema.json",
+  "formatVersion": 2,
+  "id": "be5b7a9c-6f8b-4dae-9ac1-5b6d7e8f9a01",
+  "name": "toon.shader",
+  "importer": "fynkel.shader",
+  "importerVersion": 1,
+  "settings": {},
+  "subAssets": {}
+}

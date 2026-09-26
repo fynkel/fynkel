@@ -1236,3 +1236,78 @@ fn blend_documents_validate_against_the_database() {
             .any(|d| d.code == fynkel_document::Code::BLEND_MALFORMED_ENTRY));
     }
 }
+
+/// A `.shader` file (ADR-0031) is an asset with a sidecar: its header and
+/// WGSL are checked, and a material names it by asset reference and is
+/// validated against its properties. A `.shader.json` manifest is no
+/// longer a project document.
+#[test]
+fn shader_files_are_checked_and_materials_use_them() {
+    let t = Temp::new("shaders");
+    std::fs::create_dir_all(t.dir.join("assets/shaders")).unwrap();
+    let shader = "shader \"Examples/Glow\" {\n    properties {\n        tint color = (1, 0.5, 0.2, 1)\n        power float = 2 range(0, 10)\n    }\n}\n\nfn surface(in: SurfaceInput) -> Surface {\n    var s = default_surface();\n    s.emission = material.tint.rgb * material.power;\n    return s;\n}\n";
+    t.write("assets/shaders/glow.shader", shader);
+    t.write(
+        "assets/shaders/glow.shader.meta.json",
+        r#"{
+  "$schema": "https://fynkel.dev/schemas/meta.schema.json",
+  "formatVersion": 2,
+  "id": "c0000000-0000-4000-8000-0000000000a1",
+  "name": "glow.shader",
+  "importer": "fynkel.shader",
+  "importerVersion": 1,
+  "settings": {},
+  "subAssets": {}
+}
+"#,
+    );
+    let material = |power: &str| {
+        format!(
+            r#"{{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "c0000000-0000-4000-8000-0000000000a2",
+  "name": "Glow",
+  "shader": {{ "asset": "c0000000-0000-4000-8000-0000000000a1" }},
+  "parameters": {{ "power": {power} }}
+}}
+"#
+        )
+    };
+    t.write("assets/materials/glow.material.json", &material("4"));
+    assert_eq!(t.codes(), Vec::<(String, Option<String>)>::new());
+
+    // The material is checked against the header's properties.
+    t.write("assets/materials/glow.material.json", &material("20"));
+    assert_eq!(
+        t.codes(),
+        vec![("FYN-D0303".to_string(), Some("/parameters/power".to_string()))]
+    );
+    t.write("assets/materials/glow.material.json", &material("4"));
+
+    // A WGSL mistake is at its line in the file; the material then names
+    // a shader that is not there.
+    t.write(
+        "assets/shaders/glow.shader",
+        &shader.replace("material.power", "material.powr"),
+    );
+    let report = validate_project(&t.dir, &schemas(), Some(&expected_lock()));
+    let d = &report.diagnostics;
+    assert_eq!(d[0].code.as_str(), "FYN-D0313", "{d:#?}");
+    assert_eq!(d[0].line, Some(10));
+    assert!(d[0].document.as_deref().unwrap().ends_with("glow.shader"));
+    assert!(d.iter().any(|d| d.code.as_str() == "FYN-D0300"), "{d:#?}");
+    t.write("assets/shaders/glow.shader", shader);
+
+    // A manifest is refused, with the header that says the same.
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/material/bad_manifest.shader.json"),
+        t.dir.join("assets/shaders/old.shader.json"),
+    )
+    .unwrap();
+    let report = validate_project(&t.dir, &schemas(), Some(&expected_lock()));
+    let d: Vec<_> = report.diagnostics.iter().filter(|d| d.is_error()).collect();
+    assert_eq!(d.len(), 1, "{d:#?}");
+    assert_eq!(d[0].code.as_str(), "FYN-D0015");
+    assert!(d[0].suggestion.as_deref().unwrap().contains("a float = 2 range(0, 1)"));
+}

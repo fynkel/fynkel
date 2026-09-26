@@ -1411,6 +1411,15 @@ pub fn validate_project_with(
                 }
                 // The scan validated the sidecar; its material remaps
                 // are references it did not check.
+                // A `.shader` (ADR-0031): its header and WGSL checked, its
+                // interface what materials are validated against.
+                if matches!(&entry.kind, AssetKind::Source { importer, .. } if importer == crate::asset::SHADER_IMPORTER) {
+                    let file = entry.file(db.root());
+                    match crate::material::read_shader_file(entry.id, &file.display().to_string(), &file) {
+                        Ok(manifest) => shaders.add(manifest),
+                        Err(diags) => report.diagnostics.extend(diags),
+                    }
+                }
                 let sidecar = entry.sidecar(db.root()).expect("a source has a sidecar");
                 if let Ok(doc) = Document::read(&sidecar, Some(DocumentKind::Meta)) {
                     report.diagnostics.extend(db.check_references(&doc));
@@ -1438,15 +1447,8 @@ pub fn validate_project_with(
         .diagnostics
         .extend(prefabs.add_sources(&db, &wanted, sources));
     for (kind, doc) in &docs {
-        match kind {
-            DocumentKind::Prefab => prefabs.add(Prefab::from_document(doc.clone())),
-            DocumentKind::Shader => {
-                let manifest = ShaderManifest::from_document(doc.clone());
-                if !has_errors(&manifest.validate(schemas)) {
-                    shaders.add(manifest);
-                }
-            }
-            _ => {}
+        if *kind == DocumentKind::Prefab {
+            prefabs.add(Prefab::from_document(doc.clone()));
         }
     }
     // Nested prefabs expand once here (a cycle or a bad inner override is
@@ -1518,9 +1520,10 @@ pub fn validate_project_with(
                     .extend(Material::from_document(doc).validate(schemas, &shaders));
             }
             DocumentKind::Shader => {
-                report
-                    .diagnostics
-                    .extend(ShaderManifest::from_document(doc).validate(schemas));
+                // Manifests are the engine's own now (ADR-0031): a project's
+                // shader is one `.shader` file.
+                let manifest = ShaderManifest::from_document(doc);
+                report.diagnostics.push(crate::material::legacy_manifest(&manifest));
             }
             DocumentKind::Rig => {
                 let rig = crate::rig::Rig::from_document(doc);

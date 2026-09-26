@@ -301,6 +301,9 @@ pub struct TextureSlot {
 pub enum ShaderSource {
     Builtin(String),
     Wgsl(fynkel_contracts::AssetRef),
+    /// A `.shader` file (ADR-0031): the interface is its header, the code
+    /// its body ([`ShaderManifest::shader`]).
+    File,
     /// Malformed or missing (reported).
     Unknown,
 }
@@ -309,7 +312,15 @@ pub enum ShaderSource {
 #[derive(Clone, Debug)]
 pub struct ShaderManifest {
     pub document: Document,
+    /// What a material's `shader` names: the built-in's `name@version`, or
+    /// a `.shader` file's asset id (hyphenated).
     pub shader_id: String,
+    /// The name people see: a `.shader` file's menu path
+    /// (`Examples/Water`), the built-in's document name.
+    pub name: String,
+    /// The parsed file, for a `.shader` (ADR-0031); `None` for a JSON
+    /// manifest (the built-in).
+    pub shader: Option<std::sync::Arc<fynkel_shader::Shader>>,
     pub source: ShaderSource,
     pub passes: Vec<Pass>,
     pub features: Vec<String>,
@@ -508,9 +519,12 @@ impl ShaderManifest {
                 d.document = document.path.clone();
             }
         }
+        let name = document.envelope.name.clone();
         ShaderManifest {
             document,
             shader_id,
+            name,
+            shader: None,
             source,
             passes,
             features,
@@ -520,9 +534,99 @@ impl ShaderManifest {
         }
     }
 
+    /// The interface of a `.shader` file (ADR-0031) whose asset id is `id`:
+    /// its header's properties as parameters and slots, its alpha modes
+    /// (and `shadows`) as passes. Materials name it by `id`.
+    pub fn from_shader(id: Uuid, shader: fynkel_shader::Shader) -> ShaderManifest {
+        use fynkel_shader::{PropertyKind, ValueType};
+        let interface = &shader.interface;
+        let mut document = Document::new(DocumentKind::Shader, &interface.name);
+        document.path = shader.path.clone();
+        document.envelope.id = id;
+        document.root.set("id", Node::string(id.to_string()));
+        let mut passes: Vec<Pass> = interface
+            .alpha
+            .iter()
+            .map(|m| match m {
+                fynkel_shader::AlphaMode::Opaque => Pass::Opaque,
+                fynkel_shader::AlphaMode::Mask => Pass::Mask,
+                fynkel_shader::AlphaMode::Blend => Pass::Blend,
+            })
+            .collect();
+        if interface.shadows {
+            passes.push(Pass::Shadow);
+        }
+        let mut parameters = Vec::new();
+        let mut textures = Vec::new();
+        for p in &interface.properties {
+            let description = p.tooltip.clone().unwrap_or_default();
+            match &p.kind {
+                PropertyKind::Value { ty, default, min, max } => {
+                    let pty = match ty {
+                        ValueType::Float => ParameterType::Float,
+                        ValueType::Int => ParameterType::Int,
+                        ValueType::Bool => ParameterType::Bool,
+                        ValueType::Vec2 => ParameterType::Vec2,
+                        ValueType::Vec3 => ParameterType::Vec3,
+                        ValueType::Vec4 => ParameterType::Vec4,
+                        ValueType::Color3 => ParameterType::Color3,
+                        ValueType::Color => ParameterType::Color4,
+                    };
+                    let value = match ty {
+                        ValueType::Float => ParameterValue::Float(default[0]),
+                        ValueType::Int => ParameterValue::Int(default[0] as i64),
+                        ValueType::Bool => ParameterValue::Bool(default[0] != 0.0),
+                        _ => ParameterValue::Vector(default.clone()),
+                    };
+                    parameters.push(ParameterSpec {
+                        name: p.name.clone(),
+                        ty: pty,
+                        default: Some(value),
+                        min: *min,
+                        max: *max,
+                        description,
+                        pointer: String::new(),
+                    });
+                }
+                PropertyKind::Texture { fallback, color_space, required } => textures.push(TextureSlot {
+                    name: p.name.clone(),
+                    color_space: match color_space {
+                        fynkel_shader::ColorSpace::Srgb => ColorSpace::Srgb,
+                        fynkel_shader::ColorSpace::Linear => ColorSpace::Linear,
+                    },
+                    required: *required,
+                    default: Some(fallback.name().to_string()),
+                    description,
+                    pointer: String::new(),
+                }),
+            }
+        }
+        ShaderManifest {
+            document,
+            shader_id: id.to_string(),
+            name: interface.name.clone(),
+            source: ShaderSource::File,
+            passes,
+            features: Vec::new(),
+            parameters,
+            textures,
+            shader: Some(std::sync::Arc::new(shader)),
+            read_diagnostics: Vec::new(),
+        }
+    }
+
     /// Parses manifest text (no file involved; `path` is for diagnostics).
     pub fn parse(path: Option<&str>, text: &str) -> Result<ShaderManifest, Vec<Diagnostic>> {
         Document::parse(DocumentKind::Shader, path, text).map(ShaderManifest::from_document)
+    }
+
+    /// How messages name the shader: a `.shader`'s menu path, the
+    /// built-in's id.
+    pub fn label(&self) -> &str {
+        match self.source {
+            ShaderSource::File => &self.name,
+            _ => &self.shader_id,
+        }
     }
 
     pub fn parameter(&self, name: &str) -> Option<&ParameterSpec> {
@@ -543,6 +647,10 @@ impl ShaderManifest {
 
     /// Envelope + JSON Schema, read problems, and the manifest rules.
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
+        if self.source == ShaderSource::File {
+            // A `.shader`'s header was checked when it was read.
+            return self.read_diagnostics.clone();
+        }
         let mut out = self.document.validate(schemas);
         let schema_pointers: Vec<String> = out.iter().filter_map(|d| d.pointer.clone()).collect();
         let mut rest = self.read_diagnostics.clone();
@@ -648,6 +756,21 @@ impl ShaderLibrary {
         &self.manifests
     }
 
+    /// Every shader as people see it, sorted, for messages: the built-in's
+    /// id, a file's `Menu/Path (id)`.
+    pub fn names(&self) -> Vec<String> {
+        let mut v: Vec<String> = self
+            .manifests
+            .iter()
+            .map(|m| match m.source {
+                ShaderSource::File => format!("{} ({})", m.name, m.shader_id),
+                _ => m.shader_id.clone(),
+            })
+            .collect();
+        v.sort_unstable();
+        v
+    }
+
     /// `shaderId`s, sorted, for messages.
     pub fn ids(&self) -> Vec<&str> {
         let mut v: Vec<&str> = self
@@ -739,18 +862,30 @@ impl Material {
             )
         };
 
-        let shader = match root.get("shader").and_then(Node::as_str) {
+        // The built-in by its `name@version`, or a `.shader` file by
+        // asset reference (ADR-0031) — kept as its hyphenated id.
+        let shader_node = root.get("shader");
+        let shader = match shader_node.and_then(Node::as_str) {
             Some(s) => s.to_string(),
-            None => {
-                diags.push(
-                    malformed(
-                        "shader must be a string such as \"fynkel.pbr@1\"",
-                        "/shader",
-                    )
-                    .with_suggestion(format!("add \"shader\": \"{PBR_SHADER_ID}\"")),
-                );
-                String::new()
-            }
+            None => match root
+                .as_object()
+                .filter(|_| shader_node.is_some_and(|n| n.as_object().is_some()))
+                .map(|members| crate::codec::asset_ref_field(members, "shader"))
+            {
+                Some(Ok(r)) => r.asset.to_string(),
+                _ => {
+                    diags.push(
+                        malformed(
+                            "shader must be \"fynkel.pbr@1\" or a .shader file's asset reference",
+                            "/shader",
+                        )
+                        .with_suggestion(format!(
+                            "add \"shader\": \"{PBR_SHADER_ID}\" or \"shader\": {{ \"asset\": \"<the .shader's id>\" }}"
+                        )),
+                    );
+                    String::new()
+                }
+            },
         };
         let is_pbr = shader == PBR_SHADER_ID;
         let mut pbr = None;
@@ -975,14 +1110,25 @@ impl Material {
         let mut out = Vec::new();
         let Some(manifest) = shaders.get(&self.shader) else {
             if !self.shader.is_empty() {
-                out.push(anchor(
+                let by_name = self.document.root.get("shader").and_then(Node::as_str).is_some();
+                let d = if by_name {
+                    // A custom `name@version` from before ADR-0031.
                     Diagnostic::error(
                         Code::MATERIAL_UNKNOWN_SHADER,
                         format!("unknown shader {:?}", self.shader),
                     )
-                    .with_suggestion(format!("known shaders: {}", shaders.ids().join(", "))),
-                    "/shader",
-                ));
+                    .with_suggestion(format!(
+                        "the built-in is \"{PBR_SHADER_ID}\"; a custom shader is a .shader file, named by its asset reference: \"shader\": {{ \"asset\": \"<id>\" }} (known: {})",
+                        shaders.names().join(", ")
+                    ))
+                } else {
+                    Diagnostic::error(
+                        Code::MATERIAL_UNKNOWN_SHADER,
+                        format!("no .shader file has the id {}", self.shader),
+                    )
+                    .with_suggestion(format!("known shaders: {}", shaders.names().join(", ")))
+                };
+                out.push(anchor(d, "/shader"));
             }
             return finish(out, &self.document);
         };
@@ -1006,7 +1152,7 @@ impl Material {
                 out.push(anchor(
                     Diagnostic::error(
                         Code::MATERIAL_UNKNOWN_PARAMETER,
-                        format!("{} has no parameter {:?}", manifest.shader_id, p.name),
+                        format!("{} has no parameter {:?}", manifest.label(), p.name),
                     )
                     .with_suggestion(format!(
                         "parameters: {}",
@@ -1050,7 +1196,7 @@ impl Material {
                 out.push(anchor(
                     Diagnostic::error(
                         Code::MATERIAL_UNKNOWN_TEXTURE,
-                        format!("{} has no texture slot {:?}", manifest.shader_id, t.slot),
+                        format!("{} has no texture slot {:?}", manifest.label(), t.slot),
                     )
                     .with_suggestion(format!(
                         "slots: {}",
@@ -1090,7 +1236,7 @@ impl Material {
                 out.push(anchor(
                     Diagnostic::error(
                         Code::MATERIAL_MISSING_TEXTURE,
-                        format!("{} requires texture {:?}", manifest.shader_id, slot.name),
+                        format!("{} requires texture {:?}", manifest.label(), slot.name),
                     )
                     .with_suggestion(format!(
                         "add \"textures\": {{ \"{}\": {{ \"texture\": {{ \"asset\": <uuid> }} }} }}",
@@ -1111,7 +1257,7 @@ impl Material {
                     Code::MATERIAL_UNSUPPORTED_ALPHA_MODE,
                     format!(
                         "{} has no {} pass",
-                        manifest.shader_id,
+                        manifest.label(),
                         alpha_mode_name(self.alpha_mode)
                     ),
                 )
@@ -1399,8 +1545,11 @@ pub fn manifest_json(m: &ShaderManifest) -> serde_json::Value {
         "source": match &m.source {
             ShaderSource::Builtin(b) => serde_json::json!({ "builtin": b }),
             ShaderSource::Wgsl(r) => serde_json::json!({ "wgsl": r.to_string() }),
+            ShaderSource::File => serde_json::json!({ "file": m.document.path }),
             ShaderSource::Unknown => serde_json::Value::Null,
         },
+        "shaderName": m.name,
+        "lighting": m.shader.as_ref().map_or("lit", |s| s.interface.lighting.name()),
         "passes": m.passes.iter().map(|p| p.name()).collect::<Vec<_>>(),
         "features": m.features,
         "parameters": m.parameters.iter().map(|p| serde_json::json!({
@@ -1413,6 +1562,97 @@ pub fn manifest_json(m: &ShaderManifest) -> serde_json::Value {
             "default": t.default, "description": t.description,
         })).collect::<Vec<_>>(),
     })
+}
+
+/// Reads and compiles the `.shader` file at `file` (ADR-0031), whose
+/// asset id is `id`; `path` is what diagnostics name.
+pub fn read_shader_file(id: Uuid, path: &str, file: &std::path::Path) -> Result<ShaderManifest, Vec<Diagnostic>> {
+    let text = std::fs::read_to_string(file).map_err(|e| {
+        vec![Diagnostic::error(Code::IO, format!("cannot read {path}: {e}")).with_document(path)]
+    })?;
+    fynkel_shader::check(Some(path), &text).map(|shader| ShaderManifest::from_shader(id, shader))
+}
+
+/// What a `.shader.json` in a project gets (ADR-0031): no longer a
+/// project document, with the `.shader` header that says the same.
+pub fn legacy_manifest(m: &ShaderManifest) -> Diagnostic {
+    let d = Diagnostic::error(
+        Code::UNKNOWN_DOCUMENT_KIND,
+        "a .shader.json manifest is no longer a project document: a shader is one .shader file (ADR-0031)",
+    )
+    .with_pointer("")
+    .with_suggestion(format!(
+        "write <name>.shader with this header and the code, then point its materials at it by asset reference:\n{}",
+        header_for(m)
+    ));
+    match &m.document.path {
+        Some(p) => d.with_document(p.clone()),
+        None => d,
+    }
+}
+
+/// The `.shader` header that says what a `.shader.json` manifest said
+/// (ADR-0031: manifests are no longer project documents) — what the
+/// diagnostic about one suggests.
+pub fn header_for(m: &ShaderManifest) -> String {
+    use std::fmt::Write;
+    let mut s = format!("shader \"{}\" {{\n", if m.name.is_empty() { &m.shader_id } else { &m.name });
+    let alpha: Vec<&str> = m
+        .passes
+        .iter()
+        .filter(|p| **p != Pass::Shadow)
+        .map(|p| p.name())
+        .collect();
+    if !alpha.is_empty() && alpha.len() < 3 {
+        let _ = writeln!(s, "    alpha {}", alpha.join(", "));
+    }
+    if !m.passes.contains(&Pass::Shadow) {
+        s.push_str("    shadows off\n");
+    }
+    s.push_str("    properties {\n");
+    let num = |x: f64| {
+        let t = format!("{x}");
+        t
+    };
+    for p in &m.parameters {
+        let ty = match p.ty {
+            ParameterType::Color4 => "color",
+            t => t.name(),
+        };
+        let _ = write!(s, "        {} {ty}", p.name);
+        if let Some(v) = &p.default {
+            let c = v.components();
+            let text = match v {
+                ParameterValue::Bool(b) => b.to_string(),
+                _ if c.len() == 1 => num(c[0]),
+                _ => format!("({})", c.iter().map(|x| num(*x)).collect::<Vec<_>>().join(", ")),
+            };
+            let _ = write!(s, " = {text}");
+        }
+        if let (Some(a), Some(b)) = (p.min, p.max) {
+            let _ = write!(s, " range({}, {})", num(a), num(b));
+        }
+        if !p.description.is_empty() {
+            let _ = write!(s, " {:?}", p.description);
+        }
+        s.push('\n');
+    }
+    for t in &m.textures {
+        let _ = write!(s, "        {} texture", t.name);
+        if let Some(d) = &t.default {
+            let _ = write!(s, " = {d}");
+        }
+        let _ = write!(s, " {}", t.color_space.name());
+        if t.required {
+            s.push_str(" required");
+        }
+        if !t.description.is_empty() {
+            let _ = write!(s, " {:?}", t.description);
+        }
+        s.push('\n');
+    }
+    s.push_str("    }\n}\n\nfn surface(in: SurfaceInput) -> Surface {\n    var s = default_surface();\n    return s;\n}\n");
+    s
 }
 
 /// Why `value` falls outside `spec`'s range, if it does.
