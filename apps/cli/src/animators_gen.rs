@@ -96,10 +96,8 @@ pub fn generate(project: &Path) -> Result<Option<String>, String> {
             layers: names(Some(&doc), "layers")
                 .iter()
                 .filter_map(|l| {
-                    let states = names(Some(l), "states")
-                        .iter()
-                        .filter_map(|s| text_of(s, "name"))
-                        .collect();
+                    let mut states = Vec::new();
+                    leaves(l, "", &mut states);
                     Some((text_of(l, "name")?, states))
                 })
                 .collect(),
@@ -109,6 +107,23 @@ pub fn generate(project: &Path) -> Result<Option<String>, String> {
         return Ok(None);
     }
     Ok(Some(render(&controllers)))
+}
+
+/// The states of a layer or a sub-state machine that play, by path
+/// (`Airborne/Fall`, ADR-0033 § 4): a sub-state machine is not one.
+fn leaves(scope: &Value, prefix: &str, out: &mut Vec<String>) {
+    let states = scope.get("states").and_then(Value::as_array);
+    for s in states.into_iter().flatten() {
+        let Some(name) = s.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let path = format!("{prefix}{name}");
+        if s.get("states").is_some() {
+            leaves(s, &format!("{path}/"), out);
+        } else {
+            out.push(path);
+        }
+    }
 }
 
 /// Names every `AnimationControl` wrapper already uses, and what an enum
@@ -419,6 +434,22 @@ mod tests {
                 ("Arms".into(), vec!["Aim".into()]),
             ],
         }
+    }
+
+    #[test]
+    fn a_sub_state_machines_states_are_named_by_path() {
+        let layer: Value = serde_json::from_str(
+            r#"{"name":"Base Layer","states":[{"name":"Locomotion"},
+                {"name":"Airborne","states":[{"name":"Jump"},{"name":"Fall"}]}]}"#,
+        )
+        .unwrap();
+        let mut out = Vec::new();
+        leaves(&layer, "", &mut out);
+        assert_eq!(out, ["Locomotion", "Airborne/Jump", "Airborne/Fall"]);
+        assert_eq!(
+            distinct(&out, ENUM_TAKEN, "State"),
+            ["locomotion", "airborneJump", "airborneFall"]
+        );
     }
 
     #[test]
