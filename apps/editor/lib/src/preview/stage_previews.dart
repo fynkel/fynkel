@@ -51,8 +51,9 @@ String stageInfo(PreviewStageStats? s, {String? lead}) {
 }
 
 /// A material's shape: a built-in's name, or `{asset, sub, name}` for a
-/// dropped mesh.
-Object _shapeOf(PreviewContext preview) => preview.value<Object>('shape', 'sphere');
+/// dropped mesh. One for every material, kept across restarts: Unity's
+/// material preview keeps the shape last picked.
+Object _shapeOf(PreviewContext preview) => preview.setting<Object>('shape', 'sphere');
 
 String _shapeName(Object shape) => shape is Map ? '${shape['name'] ?? 'Mesh'}' : _title('$shape');
 
@@ -63,7 +64,7 @@ final materialPreview = PreviewProvider(
     final shape = _shapeOf(preview);
     return DragTarget<AssetDragPayload>(
       onWillAcceptWithDetails: (d) => d.data.kind == 'mesh',
-      onAcceptWithDetails: (d) => preview.set('shape', {'asset': d.data.id, 'sub': d.data.sub, 'name': d.data.name}),
+      onAcceptWithDetails: (d) => preview.setSetting('shape', {'asset': d.data.id, 'sub': d.data.sub, 'name': d.data.name}),
       builder: (context, over, _) => Stack(
         fit: StackFit.expand,
         children: [
@@ -91,7 +92,7 @@ final materialPreview = PreviewProvider(
       tooltip: 'Preview shape (or drop a mesh on the picture)',
       items: [for (final s in _shapes) (key: 'preview.shape.$s', value: s, label: _title(s))],
       selected: shape is String ? shape : null,
-      onSelected: (s) => preview.set('shape', s),
+      onSelected: (s) => preview.setSetting('shape', s),
       style: small?.copyWith(color: t.textSecondary),
     );
   },

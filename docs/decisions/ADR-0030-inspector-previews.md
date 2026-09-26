@@ -197,8 +197,12 @@ What exists (mapped 2026-09-26):
         the wheel, and turn the light with a right-drag. The same
         `EditorCamera` maths as the Scene view is used.
       - A material has a shape menu, and any mesh can be dropped in. The
-        choice is remembered per material in the editor's state, never in
-        the file.
+        choice is one for every material, as Unity's: kept in the
+        editor's preferences across restarts, never in the file
+        (amended 2026-09-26 at the user's request; it was per material).
+        A remembered mesh that no longer loads falls back to the sphere.
+        Any preview keeps settings like this with
+        `PreviewContext.setting` / `setSetting`.
       - The line: triangles, vertices, sub-meshes, bounds, and bones for
         a skinned model.
    3. **Sound:**

@@ -29,6 +29,16 @@ abstract interface class PreviewContext {
   /// Changes a shared value and draws the preview again.
   void set(String key, Object? value);
 
+  /// A setting of this preview, by [key]: the same for every asset it
+  /// shows and kept across restarts in the editor's preferences, as
+  /// Unity's preview settings are (a material preview's shape). [initial]
+  /// until [setSetting] changes it. The value must be JSON (strings,
+  /// numbers, bools, lists and maps of them).
+  T setting<T>(String key, T initial);
+
+  /// Changes a setting, keeps it, and draws the preview again.
+  void setSetting(String key, Object? value);
+
   /// The editor's image view (the texture preview's): [file] fitted,
   /// zoomed with the wheel, panned with a drag, F to fit again, a
   /// checkerboard behind transparency. [channel] is `rgb`, `r`, `g`, `b`

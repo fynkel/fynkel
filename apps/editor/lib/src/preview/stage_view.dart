@@ -182,7 +182,18 @@ class StageViewState extends State<StageView> with SingleTickerProviderStateMixi
       return;
     }
     try {
-      final stage = scope.project.openStage(widget.asset, sub: widget.sub, shape: widget.shape);
+      StageBackend stage;
+      try {
+        stage = scope.project.openStage(widget.asset, sub: widget.sub, shape: widget.shape);
+      } on AuthoringException catch (e) {
+        // A remembered mesh that no longer loads: the default shape.
+        if (widget.shape is! Map) rethrow;
+        stage = scope.project.openStage(widget.asset, sub: widget.sub);
+        final why = e.diagnostics.firstOrNull?.message ?? '$e';
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          if (!_disposed) _toast(why);
+        });
+      }
       _stage = stage;
       _error = null;
       _camera = cameraOf(stage.state.framing);

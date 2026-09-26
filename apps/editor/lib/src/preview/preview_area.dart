@@ -19,8 +19,9 @@ import 'stage_previews.dart';
 import 'stage_view.dart';
 import 'texture_preview.dart';
 
-/// The area's height and fold per preview, read from and written to the
-/// preferences (bound at start; in memory otherwise).
+/// The area's height and fold per preview, and the preview's settings
+/// ([PreviewContext.setting]: a material's shape), read from and written
+/// to the preferences (bound at start; in memory otherwise).
 abstract final class PreviewLayout {
   static Map<String, Object?>? Function(String preview) read = (p) => _memory[p];
   static void Function(String preview, Map<String, Object?> layout) write = (p, l) => _memory[p] = l;
@@ -31,8 +32,23 @@ abstract final class PreviewLayout {
 
   static double heightOf(String preview) => (read(preview)?['height'] as num?)?.toDouble() ?? defaultHeight;
   static bool isOpen(String preview) => read(preview)?['open'] as bool? ?? true;
-  static void set(String preview, {double? height, bool? open}) =>
-      write(preview, {'height': height ?? heightOf(preview), 'open': open ?? isOpen(preview)});
+  static void set(String preview, {double? height, bool? open}) => write(preview, {
+    ...?read(preview),
+    'height': height ?? heightOf(preview),
+    'open': open ?? isOpen(preview),
+  });
+
+  static Object? setting(String preview, String key) => (read(preview)?['settings'] as Map?)?[key];
+
+  static void setSetting(String preview, String key, Object? value) {
+    final settings = <String, Object?>{...?(read(preview)?['settings'] as Map?)?.cast<String, Object?>()};
+    if (value == null) {
+      settings.remove(key);
+    } else {
+      settings[key] = value;
+    }
+    write(preview, {...?read(preview), 'settings': settings});
+  }
 }
 
 /// Registers the editor's own previews (once; idempotent).
@@ -112,6 +128,7 @@ class _InspectorPreviewAreaState extends State<InspectorPreviewArea> {
     final provider = PreviewProviders.forAsset(widget.asset, packages: host.previews);
     if (provider == null) return const SizedBox.shrink();
     final preview = _Preview(
+      layout: provider.title,
       asset: widget.asset,
       file: widget.file,
       importSettings: widget.importSettings,
@@ -283,6 +300,7 @@ class _Failed extends StatelessWidget {
 /// A preview's [PreviewContext]: the area's shared values.
 class _Preview implements PreviewContext {
   _Preview({
+    required this.layout,
     required this.asset,
     required this.file,
     required this.importSettings,
@@ -304,6 +322,9 @@ class _Preview implements PreviewContext {
   final Object? revision;
   final VoidCallback onSet;
 
+  /// The provider's key in [PreviewLayout].
+  final String layout;
+
   @override
   T value<T>(String key, T initial) {
     final v = values[key];
@@ -314,6 +335,18 @@ class _Preview implements PreviewContext {
   void set(String key, Object? value) {
     if (values[key] == value) return;
     values[key] = value;
+    onSet();
+  }
+
+  @override
+  T setting<T>(String key, T initial) {
+    final v = PreviewLayout.setting(layout, key);
+    return v is T ? v : initial;
+  }
+
+  @override
+  void setSetting(String key, Object? value) {
+    PreviewLayout.setSetting(layout, key, value);
     onSet();
   }
 

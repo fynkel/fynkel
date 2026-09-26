@@ -164,6 +164,19 @@ void main() {
     expect(find.byKey(const Key('preview.area')), findsNothing);
   });
 
+  test('a preview\'s settings outlive its height and fold', () {
+    final prefs = <String, Map<String, Object?>>{};
+    PreviewLayout.read = (p) => prefs[p];
+    PreviewLayout.write = (p, l) => prefs[p] = l;
+    PreviewLayout.setSetting('material', 'shape', 'cube');
+    PreviewLayout.set('material', height: 300, open: false);
+    expect(PreviewLayout.setting('material', 'shape'), 'cube');
+    expect(PreviewLayout.heightOf('material'), 300);
+    PreviewLayout.setSetting('material', 'shape', null);
+    expect(PreviewLayout.setting('material', 'shape'), isNull);
+    expect(PreviewLayout.isOpen('material'), isFalse);
+  });
+
   test('the info line counts what the stage draws', () {
     expect(stageInfo(null, lead: 'Sphere'), 'Sphere');
     const cube = PreviewStageStats(meshes: 1, vertices: 24, triangles: 12, size: [1, 1, 1]);
@@ -177,7 +190,17 @@ void main() {
   StageViewState stageOf(WidgetTester tester) => tester.state<StageViewState>(find.byType(StageView));
 
   testWidgets('a material on a shape, from the menu; the stage follows its edits', (tester) async {
-    final e = await Editor.open(tester, tag: 'preview');
+    final e = await Editor.open(
+      tester,
+      tag: 'preview',
+      // A second material: the rusted one under another id.
+      prepare: (dir) {
+        final rusted = File('${dir.path}/assets/materials/rusted.material.json').readAsStringSync();
+        File('${dir.path}/assets/materials/hazard.material.json').writeAsStringSync(
+          rusted.replaceFirst(RegExp(r'"id":\s*"[^"]+"'), '"id": "c0000000-0000-4000-8000-0000000000a1"'),
+        );
+      },
+    );
     await select(e, pathId(e, 'materials/rusted.material.json'));
     expect(find.byKey(const Key('preview.stage')), findsOneWidget);
     expect(find.byKey(const Key('preview.stage.error')), findsNothing);
@@ -192,6 +215,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(identical(stageOf(tester).stage, stage), isTrue, reason: 'the same stage, reshaped');
     expect(info(tester), 'Cube  24 verts  12 tris  1.00 × 1.00 × 1.00 m');
+
+    // As Unity's: the shape last picked is every material's, and kept.
+    await select(e, pathId(e, 'materials/hazard.material.json'));
+    expect(stageOf(tester).stage!.state.shape, 'cube');
+    expect(info(tester), startsWith('Cube  '));
+    expect(PreviewLayout.setting(materialPreview.title, 'shape'), 'cube', reason: 'in the preferences');
+    await select(e, pathId(e, 'materials/rusted.material.json'));
+    expect(stageOf(tester).stage!.state.shape, 'cube');
 
     // Its page's edits are drawn by the stage too (no Scene view needed).
     final edits = e.shell.assetEdits!;
