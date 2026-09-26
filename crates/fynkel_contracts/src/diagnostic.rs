@@ -63,6 +63,16 @@ impl Code {
     pub const SHADER_BAD_DEFAULT: Code = Code("FYN-D0310");
     pub const SHADER_BAD_RANGE: Code = Code("FYN-D0311");
     pub const SHADER_MALFORMED_ENTRY: Code = Code("FYN-D0312");
+    // Documents (FYN-D): `.shader` files (ADR-0031; `fynkel_shader`).
+    /// The WGSL does not compile (parse or validation), at its line in
+    /// the `.shader` file.
+    pub const SHADER_COMPILE: Code = Code("FYN-D0313");
+    /// `surface` is missing, or `surface`/`vertex` has the wrong signature
+    /// for the contract.
+    pub const SHADER_ENTRY: Code = Code("FYN-D0314");
+    /// The header does not read: syntax, an unknown word, a duplicate or
+    /// badly named property, a limit exceeded.
+    pub const SHADER_HEADER: Code = Code("FYN-D0315");
     // Documents (FYN-D): prefabs and instances (blueprint §6 Prefabs;
     // `fynkel_document::prefab`).
     /// A prefab's `root` is not its one parentless entity (ADR-0022).
