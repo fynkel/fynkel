@@ -37,9 +37,10 @@ pub use fynkel_cooked::payload::{
     Vertex,
 };
 use fynkel_cooked::{
-    ChunkFile, KIND_ANIMATION, KIND_CLIP, KIND_ENVIRONMENT, KIND_JSON, KIND_MATERIAL, KIND_MESH,
-    KIND_SKIN, KIND_STREAM, KIND_TEXTURE,
+    ChunkFile, KIND_ANIMATION, KIND_CLIP, KIND_CUSTOM_MATERIAL, KIND_ENVIRONMENT, KIND_JSON,
+    KIND_MATERIAL, KIND_MESH, KIND_SHADER, KIND_SKIN, KIND_STREAM, KIND_TEXTURE,
 };
+pub use fynkel_cooked::payload::{CustomMaterialPayload, MaterialSlot};
 use fynkel_core::animation::{
     BlendPoint, BlendSpace, BlendSync, Channel, Clip, Interpolation, Joint, Marker, Property, Skin,
 };
@@ -352,6 +353,11 @@ struct Store {
     /// `Some` for an HDR image, `None` recorded for one without an `ENVM`.
     environments: HashMap<AssetRef, Option<Arc<EnvironmentPayload>>>,
     materials: HashMap<AssetRef, Arc<PbrMaterial>>,
+    /// Materials of shader assets (ADR-0031, `MATC`); `None` recorded for
+    /// a `fynkel.pbr@1` one.
+    custom_materials: HashMap<AssetRef, Option<Arc<CustomMaterialPayload>>>,
+    /// Shader assets' text (`SHDR`) by the shader's id.
+    shaders: HashMap<Uuid, Arc<str>>,
     /// Materials made by the game at runtime (`world.createMaterial`,
     /// ADR-0026 §4) under ids the cache does not have: read before the
     /// cooked ones, never evicted or cleared — only the game removes one.
@@ -439,6 +445,8 @@ impl Assets {
                 textures: HashMap::new(),
                 environments: HashMap::new(),
                 materials: HashMap::new(),
+                custom_materials: HashMap::new(),
+                shaders: HashMap::new(),
                 runtime_materials: HashMap::new(),
                 runtime_meshes: HashMap::new(),
                 mesh_edits: 0,
@@ -1003,6 +1011,8 @@ impl Assets {
         s.textures.retain(|r, _| !gone.contains(&r.asset));
         s.environments.retain(|r, _| !gone.contains(&r.asset));
         s.materials.retain(|r, _| !gone.contains(&r.asset));
+        s.custom_materials.retain(|r, _| !gone.contains(&r.asset));
+        s.shaders.retain(|id, _| !gone.contains(id));
         s.clips.retain(|r, _| !gone.contains(&r.asset));
         s.blends.retain(|r, _| !gone.contains(&r.asset));
         s.volumes.retain(|r, _| !gone.contains(&r.asset));
@@ -1020,6 +1030,8 @@ impl Assets {
         s.textures.clear();
         s.environments.clear();
         s.materials.clear();
+        s.custom_materials.clear();
+        s.shaders.clear();
         s.clips.clear();
         s.blends.clear();
         s.volumes.clear();
@@ -1098,6 +1110,50 @@ impl Assets {
         let m = decode_material(&bytes).ok_or_else(|| self.malformed(r, "MATL"))?;
         self.lock().materials.insert(r.clone(), Arc::new(m.clone()));
         Ok(m)
+    }
+
+    /// The cooked material of a shader asset (ADR-0031, `MATC`): `Ok(None)`
+    /// for a `fynkel.pbr@1` material, which [`material`] reads.
+    ///
+    /// [`material`]: Assets::material
+    pub fn custom_material(
+        &self,
+        r: &AssetRef,
+    ) -> Result<Option<Arc<CustomMaterialPayload>>, Diagnostic> {
+        if self.lock().runtime_materials.contains_key(r) {
+            return Ok(None);
+        }
+        if let Some(m) = self.lock().custom_materials.get(r) {
+            return Ok(m.clone());
+        }
+        let payload = if self.has_chunk(r, KIND_CUSTOM_MATERIAL)? {
+            let bytes = self.chunk(r, KIND_CUSTOM_MATERIAL)?;
+            let m = fynkel_cooked::payload::decode_custom_material(&bytes)
+                .ok_or_else(|| self.malformed(r, "MATC"))?;
+            Some(Arc::new(m))
+        } else {
+            None
+        };
+        self.lock().custom_materials.insert(r.clone(), payload.clone());
+        Ok(payload)
+    }
+
+    /// A shader asset's text as the cook checked it (ADR-0031, `SHDR`):
+    /// the header and the WGSL, for `fynkel_shader::parse`.
+    pub fn shader_source(&self, id: Uuid) -> Result<Arc<str>, Diagnostic> {
+        if let Some(t) = self.lock().shaders.get(&id) {
+            return Ok(t.clone());
+        }
+        let r = AssetRef {
+            asset: id,
+            sub: String::new(),
+        };
+        let bytes = self.chunk(&r, KIND_SHADER)?;
+        let text: Arc<str> = String::from_utf8(bytes)
+            .map_err(|_| self.malformed(&r, "SHDR"))?
+            .into();
+        self.lock().shaders.insert(id, text.clone());
+        Ok(text)
     }
 
     /// The cooked sound as the audio engine's clip (M3-11): a `CLIP`
