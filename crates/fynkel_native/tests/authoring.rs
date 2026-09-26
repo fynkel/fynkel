@@ -1349,7 +1349,8 @@ fn a_clip_poses_its_model_on_the_stage() {
     let at0 = host.result();
     let duration = at0["duration"].as_f64().unwrap();
     assert!(duration > 0.0, "{at0}");
-    assert!(at0["fps"].as_f64().unwrap() >= 1.0);
+    // The fixture's keys are half a second apart: set by hand, shown at 30.
+    assert_eq!(at0["fps"], 30.0);
     assert_eq!(at0["inPlace"], true);
     let first = joints();
     assert!(!first.is_empty(), "posed: the skin follows its joints");

@@ -248,7 +248,9 @@ impl StageSlot {
 }
 
 /// The rate a clip's keys were baked at: the closest spacing of any
-/// channel's keys, as frames per second (30 when nothing says).
+/// channel's keys, as frames per second. Keys farther apart than a tenth
+/// of a second were set by hand, not baked: then 30, as Unity shows a
+/// clip with no rate of its own.
 fn key_rate(clip: &fynkel_core::animation::Clip) -> f32 {
     let gap = clip
         .channels
@@ -256,8 +258,8 @@ fn key_rate(clip: &fynkel_core::animation::Clip) -> f32 {
         .flat_map(|c| c.times.windows(2).map(|w| w[1] - w[0]))
         .filter(|g| *g > 1e-4)
         .fold(f32::INFINITY, f32::min);
-    if gap.is_finite() {
-        (1.0 / gap).round().clamp(1.0, 240.0)
+    if gap.is_finite() && gap <= 0.1 {
+        (1.0 / gap).round().clamp(10.0, 240.0)
     } else {
         30.0
     }
