@@ -695,6 +695,17 @@ void main() {
     expect(player.lookingAt, coin);
     final looking = game.world.find('head')!.transform.world.rotation.rotate(const Vec3(0, 0, -1));
     expect(looking.x, greaterThan(0.5), reason: 'turned to the +X side, was $looking');
+    // The idle breathes the spine's position, not its rotation: the
+    // spine's share of the turn stays put instead of adding up each tick.
+    double bow() {
+      final r = game.world.find('spine')!.transform.value.rotation;
+      return 2 * math.acos(r.w.abs().clamp(0, 1)) * 180 / math.pi;
+    }
+
+    final settled = bow();
+    run(180);
+    expect(settled, lessThan(0.3 * 60 + 1), reason: 'the spine takes at most its share');
+    expect(bow(), closeTo(settled, 0.5), reason: 'and keeps it');
     player.transform.position = const Vec3(20, 0, 20);
     run(30);
     expect(player.lookingAt, isNull);
