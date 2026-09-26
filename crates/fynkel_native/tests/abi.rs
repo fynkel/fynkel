@@ -2326,7 +2326,9 @@ fn animator_controller_ops_events_and_queries() {
                 duration: 0.0,
                 offset: 0.0,
                 can_transition_to_self: false,
+                interruptible_by: Default::default(),
             }],
+            machines: vec![],
         }],
     };
     unsafe {

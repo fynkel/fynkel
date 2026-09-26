@@ -543,3 +543,78 @@ fn an_animator_controller_reads_and_registers_with_its_motions() {
     drop(assets);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// ADR-0033 § 4: a sub-state machine runs flattened — its states by path,
+/// a transition into it to its default (followed down), one from it once
+/// per state inside, the outer scope's before the inner.
+#[test]
+fn a_sub_state_machine_flattens_to_paths() {
+    const CLIP: &str = r#"{"asset":"c0000000-0000-4000-8000-000000000005","sub":"anim/bob"}"#;
+    let text = format!(
+        r#"{{"$schema":"https://fynkel.dev/schemas/controller.schema.json","formatVersion":1,
+  "id":"c0000000-0000-4000-8000-000000000061","name":"Player",
+  "parameters":[{{"name":"grounded","type":"bool","default":true}},{{"name":"jump","type":"trigger"}}],
+  "layers":[{{"name":"Base Layer","defaultState":"Locomotion",
+    "states":[{{"name":"Locomotion","motion":{CLIP}}},
+      {{"name":"Airborne","defaultState":"Rise","states":[
+        {{"name":"Rise","defaultState":"Jump","states":[{{"name":"Jump","motion":{CLIP}}}]}},
+        {{"name":"Fall","motion":{CLIP}}},
+        {{"name":"Land","motion":{CLIP},"loop":false}}],
+       "transitions":[{{"from":"Rise","to":"Fall","exitTime":0.9}},
+                      {{"from":"Fall","to":"Land","conditions":[{{"parameter":"grounded","is":true}}]}}]}}],
+    "transitions":[{{"from":"Locomotion","to":"Airborne","conditions":[{{"parameter":"jump"}}]}},
+                   {{"from":"Airborne","to":"Airborne","conditions":[{{"parameter":"jump"}}],"interruptibleBy":"any"}},
+                   {{"from":"Airborne","to":"Locomotion","exitTime":1}}]}}]}}"#
+    );
+    let doc = fynkel_document::Document::parse(
+        fynkel_document::DocumentKind::Controller,
+        Some("player.controller.json"),
+        &text,
+    )
+    .unwrap();
+    let c = fynkel_document::Controller::from_document(doc);
+    let def = fynkel_assets::controller_def(&c).unwrap();
+    def.validate().unwrap();
+    let base = &def.layers[0];
+    let names: Vec<_> = base.states.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "Locomotion",
+            "Airborne/Rise/Jump",
+            "Airborne/Fall",
+            "Airborne/Land"
+        ]
+    );
+    assert_eq!(
+        base.machines,
+        [
+            ("Airborne".to_string(), 1),
+            ("Airborne/Rise".to_string(), 1)
+        ]
+    );
+    assert_eq!(def.find_state("Airborne"), Some((0, 1)));
+    use fynkel_core::animation::controller::Interruption;
+    let t: Vec<_> = base
+        .transitions
+        .iter()
+        .map(|t| (t.from, t.to, t.interruptible_by))
+        .collect();
+    let (n, a) = (Interruption::None, Interruption::Any);
+    assert_eq!(
+        t,
+        [
+            (Some(0), 1, n),
+            // From the machine: once per state inside, outer first.
+            (Some(1), 1, a),
+            (Some(2), 1, a),
+            (Some(3), 1, a),
+            (Some(1), 0, n),
+            (Some(2), 0, n),
+            (Some(3), 0, n),
+            // Its own, by path.
+            (Some(1), 2, n),
+            (Some(2), 3, n),
+        ]
+    );
+}

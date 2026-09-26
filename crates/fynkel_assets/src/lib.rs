@@ -1960,10 +1960,16 @@ fn bounds_of(vertices: &[fynkel_cooked::payload::Vertex]) -> ([f32; 3], [f32; 3]
 
 /// A controller document as the runtime runs it (ADR-0032): parameters,
 /// states and transitions by index. `Err` names what does not resolve.
+///
+/// Sub-state machines (ADR-0033 § 4) are flattened: the states that play
+/// are the layer's, named by path (`Airborne/Fall`); a transition into a
+/// machine goes to its default state (followed down); one from a machine
+/// is one per state inside it. Scopes are listed outer first, so for a
+/// state the machines around it are checked before its own transitions.
 pub fn controller_def(c: &fynkel_document::Controller) -> Result<ControllerDef, String> {
     use fynkel_core::animation::controller::{
-        Blending, ChildDef, Condition, LayerDef, MotionDef, ParameterDef, ParameterKind, StateDef,
-        Test, TransitionDef, TreeDef, Value,
+        Blending, ChildDef, Condition, Interruption, LayerDef, MotionDef, ParameterDef,
+        ParameterKind, StateDef, Test, TransitionDef, TreeDef, Value,
     };
     use fynkel_document::controller as doc;
     let parameters: Vec<ParameterDef> = c
@@ -2033,18 +2039,32 @@ pub fn controller_def(c: &fynkel_document::Controller) -> Result<ControllerDef, 
     }
     let mut layers = Vec::with_capacity(c.layers.len());
     for l in &c.layers {
-        let state = |name: &str| {
-            l.states
-                .iter()
-                .position(|s| s.name == name)
-                .ok_or_else(|| format!("layer {}: no state `{name}`", l.name))
+        let leaves = l.leaves();
+        let scopes = l.scopes();
+        // A path to the state it enters: itself, or a machine's default
+        // followed down.
+        let enter = |path: &str| -> Result<usize, String> {
+            let mut path = path.to_string();
+            for _ in 0..=fynkel_document::controller::MAX_DEPTH {
+                if let Some(i) = leaves.iter().position(|(p, _)| *p == path) {
+                    return Ok(i);
+                }
+                let Some(scope) = scopes.iter().find(|s| !s.path.is_empty() && s.path == path)
+                else {
+                    break;
+                };
+                let d = scope
+                    .default_state
+                    .ok_or_else(|| format!("layer {}: `{path}` has no default state", l.name))?;
+                path = scope.path_of(d);
+            }
+            Err(format!("layer {}: no state `{path}`", l.name))
         };
-        let states = l
-            .states
+        let states = leaves
             .iter()
-            .map(|s| {
+            .map(|(path, s)| {
                 Ok(StateDef {
-                    name: s.name.clone(),
+                    name: path.clone(),
                     motion: s
                         .motion
                         .as_ref()
@@ -2057,40 +2077,65 @@ pub fn controller_def(c: &fynkel_document::Controller) -> Result<ControllerDef, 
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
-        let transitions = l
-            .transitions
-            .iter()
-            .map(|t| {
-                Ok(TransitionDef {
-                    from: if t.from_any() {
-                        None
-                    } else {
-                        Some(state(&t.from)?)
-                    },
-                    to: state(&t.to)?,
-                    conditions: t
-                        .conditions
+        let mut transitions = Vec::new();
+        for scope in &scopes {
+            for t in scope.transitions {
+                let from: Vec<Option<usize>> = if t.from_any() {
+                    vec![None]
+                } else {
+                    let path = scope.path_of(&t.from);
+                    let inside = format!("{path}/");
+                    let from: Vec<_> = leaves
                         .iter()
-                        .map(|c| {
-                            Ok(Condition {
-                                parameter: parameter(&c.parameter)?,
-                                test: match c.test {
-                                    doc::Test::Greater(x) => Test::Greater(x as f32),
-                                    doc::Test::Less(x) => Test::Less(x as f32),
-                                    doc::Test::Equals(x) => Test::Equals(x as i32),
-                                    doc::Test::NotEquals(x) => Test::NotEquals(x as i32),
-                                    doc::Test::Is(b) => Test::Is(b),
-                                    doc::Test::Set => Test::Set,
-                                },
-                            })
+                        .enumerate()
+                        .filter(|(_, (p, _))| *p == path || p.starts_with(&inside))
+                        .map(|(i, _)| Some(i))
+                        .collect();
+                    if from.is_empty() {
+                        return Err(format!("layer {}: no state `{path}`", l.name));
+                    }
+                    from
+                };
+                let to = enter(&scope.path_of(&t.to))?;
+                let conditions = t
+                    .conditions
+                    .iter()
+                    .map(|c| {
+                        Ok(Condition {
+                            parameter: parameter(&c.parameter)?,
+                            test: match c.test {
+                                doc::Test::Greater(x) => Test::Greater(x as f32),
+                                doc::Test::Less(x) => Test::Less(x as f32),
+                                doc::Test::Equals(x) => Test::Equals(x as i32),
+                                doc::Test::NotEquals(x) => Test::NotEquals(x as i32),
+                                doc::Test::Is(b) => Test::Is(b),
+                                doc::Test::Set => Test::Set,
+                            },
                         })
-                        .collect::<Result<Vec<_>, String>>()?,
-                    exit_time: t.exit_time,
-                    duration: t.duration,
-                    offset: t.offset,
-                    can_transition_to_self: t.can_transition_to_self,
-                })
-            })
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                for from in from {
+                    transitions.push(TransitionDef {
+                        from,
+                        to,
+                        conditions: conditions.clone(),
+                        exit_time: t.exit_time,
+                        duration: t.duration,
+                        offset: t.offset,
+                        can_transition_to_self: t.can_transition_to_self,
+                        interruptible_by: match t.interruptible_by {
+                            doc::Interruption::None => Interruption::None,
+                            doc::Interruption::Next => Interruption::Next,
+                            doc::Interruption::Any => Interruption::Any,
+                        },
+                    });
+                }
+            }
+        }
+        let machines = scopes
+            .iter()
+            .filter(|s| !s.path.is_empty())
+            .map(|s| Ok((s.path.clone(), enter(&s.path)?)))
             .collect::<Result<Vec<_>, String>>()?;
         layers.push(LayerDef {
             name: l.name.clone(),
@@ -2100,9 +2145,10 @@ pub fn controller_def(c: &fynkel_document::Controller) -> Result<ControllerDef, 
                 doc::Blending::Additive => Blending::Additive,
             },
             root: l.root.clone(),
-            default_state: l.default_state.as_deref().map(state).transpose()?,
+            default_state: l.default_state.as_deref().map(enter).transpose()?,
             states,
             transitions,
+            machines,
         });
     }
     Ok(ControllerDef {

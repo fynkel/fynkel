@@ -70,6 +70,12 @@ pub struct ControllerPlay {
     pub slots: Vec<SlotRun>,
     /// Scratch: a one-shot's pose.
     shot_pose: Pose,
+    /// Per layer: the machine's pose last tick (under its slot), the
+    /// pose an interruption froze (ADR-0033 § 4) and the run's
+    /// interruption count it was frozen at.
+    shown: Vec<Pose>,
+    frozen: Vec<Pose>,
+    interruptions: Vec<u32>,
 }
 
 /// A layer's slot: the one-shot playing, and one blending out (stopped,
@@ -163,6 +169,9 @@ impl ControllerPlay {
             incoming: Pose::default(),
             slots: vec![SlotRun::default(); def.layers.len()],
             shot_pose: Pose::default(),
+            shown: vec![Pose::default(); def.layers.len()],
+            frozen: vec![Pose::default(); def.layers.len()],
+            interruptions: vec![0; def.layers.len()],
             def,
             pending: Vec::new(),
         }
@@ -725,7 +734,23 @@ pub(super) fn tick(
             });
             true
         };
+        // An interruption this tick: what showed last tick is held.
+        if lr.interruptions != play.interruptions[l] {
+            play.interruptions[l] = lr.interruptions;
+            let frozen = &mut play.frozen[l];
+            frozen.clear();
+            frozen.entries.extend_from_slice(&play.shown[l].entries);
+        }
         match lr.crossfade {
+            Some(fade) if fade.frozen => {
+                // The held pose under, the incoming blended in.
+                let mut incoming = std::mem::take(&mut play.incoming);
+                incoming.clear();
+                target.entries.extend_from_slice(&play.frozen[l].entries);
+                sample(current, lr.time, &mut incoming);
+                target.blend(&incoming, fade.weight());
+                play.incoming = incoming;
+            }
             Some(fade) => {
                 // The outgoing state under, the incoming blended in.
                 let mut incoming = std::mem::take(&mut play.incoming);
@@ -739,6 +764,9 @@ pub(super) fn tick(
                 sample(current, lr.time, target);
             }
         }
+        let shown = &mut play.shown[l];
+        shown.clear();
+        shown.entries.extend_from_slice(&target.entries);
         // The slot covers the machine (ADR-0033 § 2).
         for shot in shots.into_iter().flatten() {
             let w = shot.weight();

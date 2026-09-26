@@ -14,12 +14,24 @@
 //!    blend space whose length changes with its parameter keeps its
 //!    phase; the crossfade by `dt`. A crossfade that ends exits the
 //!    outgoing state.
-//! 2. Unless a crossfade runs (no interruptions in V1), the transitions
-//!    are checked — Any State's first, then the current state's, each in
-//!    file order — and the first whose conditions all hold (and whose
-//!    exit time has come) fires: it uses up the triggers it tests, the
-//!    next state starts at `offset` and is entered at once; a
-//!    zero-length transition exits the outgoing state in the same tick.
+//! 2. Unless a crossfade runs, the transitions are checked — Any
+//!    State's first, then the current state's, each in file order — and
+//!    the first whose conditions all hold (and whose exit time has come)
+//!    fires: it uses up the triggers it tests, the next state starts at
+//!    `offset` and is entered at once; a zero-length transition exits
+//!    the outgoing state in the same tick. During a crossfade only the
+//!    transition that started it may allow more (ADR-0033 § 4,
+//!    [`Interruption`]): the incoming state's transitions (`next`), and
+//!    Any State's too (`any`). An interruption exits the outgoing state
+//!    and fades from the pose of that moment, frozen
+//!    ([`Crossfade::frozen`]; the world keeps the pose).
+//!
+//! A sub-state machine (ADR-0033 § 4) is flattened before it gets here:
+//! its states are the layer's, named by path (`Airborne/Fall`), and a
+//! transition from the machine is one per state inside it, listed before
+//! the machine's own so that the outer scope is checked first.
+//! [`LayerDef::machines`] maps the machine's path to the state a jump
+//! into it enters.
 //!
 //! An exit time `e` has come, for a looping state and `e < 1`, in each
 //! tick whose clock crosses `e`, `1 + e`, `2 + e`, … (Unity: the check
@@ -150,6 +162,20 @@ pub struct TransitionDef {
     /// Where the next state starts, as a fraction of its motion.
     pub offset: f32,
     pub can_transition_to_self: bool,
+    /// What may cut its crossfade short (ADR-0033 § 4).
+    pub interruptible_by: Interruption,
+}
+
+/// Which transitions may fire while a transition's crossfade runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Interruption {
+    /// None: the crossfade always ends first.
+    #[default]
+    None,
+    /// The transitions of the state it goes to.
+    Next,
+    /// Any State's, then the next state's.
+    Any,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -170,11 +196,20 @@ pub struct LayerDef {
     pub default_state: Option<usize>,
     pub states: Vec<StateDef>,
     pub transitions: Vec<TransitionDef>,
+    /// Each sub-state machine's path (`Airborne`) and the state it enters
+    /// (its default, followed down).
+    pub machines: Vec<(String, usize)>,
 }
 
 impl LayerDef {
+    /// A state by name or path; a sub-state machine's path gives the
+    /// state it enters.
     pub fn state_index(&self, name: &str) -> Option<usize> {
-        self.states.iter().position(|s| s.name == name)
+        self.states.iter().position(|s| s.name == name).or_else(|| {
+            self.machines
+                .iter()
+                .find_map(|(path, s)| (path == name).then_some(*s))
+        })
     }
 }
 
@@ -263,6 +298,11 @@ impl ControllerDef {
                     }
                 }
             }
+            if layer.machines.iter().any(|(_, s)| *s >= states) {
+                return Err(format!(
+                    "{n} layer {l}: a sub-state machine's state is out of range"
+                ));
+            }
             for (i, t) in layer.transitions.iter().enumerate() {
                 let bad = |what: &str| Err(format!("{n} layer {l} transition {i}: {what}"));
                 if t.from.is_some_and(|f| f >= states) || t.to >= states {
@@ -308,6 +348,12 @@ pub struct Crossfade {
     pub from_time: f32,
     pub elapsed: f32,
     pub duration: f32,
+    /// What may interrupt it (the transition's; `None` for code's
+    /// `play`/`crossFade`).
+    pub interruptible_by: Interruption,
+    /// It interrupted another crossfade: what fades out is the pose of
+    /// that moment, held (the world keeps it), not `from` sampled.
+    pub frozen: bool,
 }
 
 impl Crossfade {
@@ -334,6 +380,9 @@ pub struct LayerRun {
     /// The state has just been entered and its clock not yet advanced:
     /// this tick samples it at its start.
     pub fresh: bool,
+    /// How many interruptions so far: when it changes, the world freezes
+    /// the pose it showed last.
+    pub interruptions: u32,
 }
 
 /// What happened in a layer this tick, in order.
@@ -477,6 +526,8 @@ impl ControllerRun {
                     from_time: run.time,
                     elapsed: 0.0,
                     duration: seconds,
+                    interruptible_by: Interruption::None,
+                    frozen: false,
                 });
             }
             Some(f) => events.push(StateEvent::Exited { layer, state: f }),
@@ -555,10 +606,13 @@ impl ControllerRun {
             self.layers[l].time += r;
         }
         let now = self.layers[l].time;
-        let fading = self.layers[l].crossfade.is_some();
+        // A crossfade that ends this tick still holds the check back.
+        let fading = self.layers[l].crossfade.map(|f| f.interruptible_by);
         if let Some(mut fade) = self.layers[l].crossfade {
             fade.elapsed += dt.abs();
-            fade.from_time += rate(self, fade.from, length);
+            if !fade.frozen {
+                fade.from_time += rate(self, fade.from, length);
+            }
             if fade.elapsed >= fade.duration {
                 self.layers[l].crossfade = None;
                 events.push(StateEvent::Exited {
@@ -569,11 +623,13 @@ impl ControllerRun {
                 self.layers[l].crossfade = Some(fade);
             }
         }
-        if fading {
+        let interruptible = fading.unwrap_or(Interruption::Any);
+        if interruptible == Interruption::None {
             return;
         }
 
-        // 2. At most one transition: Any State's, then the current state's.
+        // 2. At most one transition: Any State's, then the current state's
+        // (during a crossfade: what it may be interrupted by).
         let state = &layer.states[current];
         let exit_reached = |e: f32| {
             if state.looping && e < 1.0 {
@@ -587,7 +643,10 @@ impl ControllerRun {
                 now >= e
             }
         };
-        let any = layer.transitions.iter().filter(|t| t.from.is_none());
+        let any = layer
+            .transitions
+            .iter()
+            .filter(|t| t.from.is_none() && interruptible == Interruption::Any);
         let own = layer.transitions.iter().filter(|t| t.from == Some(current));
         let fired = any.chain(own).find(|t| {
             if t.from.is_none() && t.to == current && !t.can_transition_to_self {
@@ -607,9 +666,18 @@ impl ControllerRun {
             }
         }
         let (to, duration, offset) = (t.to, t.duration, t.offset);
+        let interrupting = self.layers[l].crossfade.is_some();
         self.cross_fade(l, to, duration, offset, events);
+        let run = &mut self.layers[l];
+        if let Some(fade) = &mut run.crossfade {
+            fade.interruptible_by = t.interruptible_by;
+            fade.frozen = interrupting;
+        }
+        if interrupting {
+            run.interruptions = run.interruptions.wrapping_add(1);
+        }
         // Sampled at `offset` this tick; the next one advances it.
-        self.layers[l].fresh = false;
+        run.fresh = false;
     }
 }
 
@@ -647,6 +715,7 @@ mod tests {
             duration: 0.25,
             offset: 0.0,
             can_transition_to_self: false,
+            interruptible_by: Interruption::None,
         }
     }
 
@@ -718,6 +787,7 @@ mod tests {
                         ..transition(Some(LAND), LOCOMOTION, vec![])
                     },
                 ],
+                machines: vec![],
             }],
         }
     }
@@ -929,6 +999,85 @@ mod tests {
     }
 
     #[test]
+    fn an_interruptible_crossfade_gives_way_to_the_next_states_transitions() {
+        let mut def = player();
+        def.layers[0].transitions[0].duration = 0.5;
+        def.layers[0].transitions[0].interruptible_by = Interruption::Next;
+        def.layers[0].transitions[1].exit_time = None;
+        // Any State → Locomotion on weapon == 1: not for `next`.
+        def.layers[0].transitions.push(TransitionDef {
+            can_transition_to_self: false,
+            ..transition(
+                None,
+                LOCOMOTION,
+                vec![Condition {
+                    parameter: WEAPON,
+                    test: Test::Equals(1),
+                }],
+            )
+        });
+        let mut run = ControllerRun::new(&def);
+        tick(&def, &mut run);
+        run.set(&def, "jump", Value::Bool(true)).unwrap();
+        run.set(&def, "grounded", Value::Bool(false)).unwrap();
+        assert_eq!(tick(&def, &mut run), [entered(JUMPING, Some(LOCOMOTION))]);
+        run.set(&def, "weapon", Value::Int(1)).unwrap();
+        assert_eq!(tick(&def, &mut run), [], "Any State waits");
+        run.set(&def, "weapon", Value::Int(0)).unwrap();
+        run.set(&def, "grounded", Value::Bool(true)).unwrap();
+        // Jump → Land cuts the fade: Locomotion exits, the pose freezes.
+        assert_eq!(
+            tick(&def, &mut run),
+            [exited(LOCOMOTION), entered(LAND, Some(JUMPING))]
+        );
+        let fade = run.layers[0].crossfade.unwrap();
+        assert_eq!((fade.from, fade.frozen), (JUMPING, true));
+        assert_eq!(fade.interruptible_by, Interruption::None);
+        assert_eq!(run.layers[0].interruptions, 1);
+        let t = fade.from_time;
+        tick(&def, &mut run);
+        assert_eq!(run.layers[0].crossfade.unwrap().from_time, t, "held");
+    }
+
+    #[test]
+    fn any_lets_any_state_interrupt_too() {
+        let mut def = player();
+        def.layers[0].transitions[0].duration = 0.5;
+        def.layers[0].transitions[0].interruptible_by = Interruption::Any;
+        def.layers[0].transitions.push(transition(
+            None,
+            LAND,
+            vec![Condition {
+                parameter: WEAPON,
+                test: Test::Equals(1),
+            }],
+        ));
+        let mut run = ControllerRun::new(&def);
+        tick(&def, &mut run);
+        run.set(&def, "jump", Value::Bool(true)).unwrap();
+        run.set(&def, "grounded", Value::Bool(false)).unwrap();
+        tick(&def, &mut run);
+        run.set(&def, "weapon", Value::Int(1)).unwrap();
+        assert_eq!(
+            tick(&def, &mut run),
+            [exited(LOCOMOTION), entered(LAND, Some(JUMPING))]
+        );
+        assert!(run.layers[0].crossfade.unwrap().frozen);
+    }
+
+    #[test]
+    fn a_machine_path_names_the_state_it_enters() {
+        let mut def = player();
+        def.layers[0].states[JUMPING].name = "Airborne/Jump".into();
+        def.layers[0].machines.push(("Airborne".into(), JUMPING));
+        def.validate().unwrap();
+        assert_eq!(def.find_state("Airborne"), Some((0, JUMPING)));
+        assert_eq!(def.find_state("Airborne/Jump"), Some((0, JUMPING)));
+        def.layers[0].machines[0].1 = 9;
+        assert!(def.validate().is_err());
+    }
+
+    #[test]
     fn exit_time_repeats_each_loop_below_one_and_holds_from_one() {
         let mut def = player();
         // Locomotion → Land at 0.5 of each loop, while weapon == 2.
@@ -1120,6 +1269,7 @@ mod tests {
             default_state: None,
             states: vec![],
             transitions: vec![],
+            machines: vec![],
         });
         def.validate().unwrap();
         let mut run = ControllerRun::new(&def);

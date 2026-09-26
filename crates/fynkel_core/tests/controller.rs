@@ -7,8 +7,8 @@
 use fynkel_contracts::{AssetRef, DiagnosticCode, Uuid, DEFAULT_FIXED_DT};
 use fynkel_core::animation::blend_tree::{ChildDef, MotionDef, TreeDef, TreeKind};
 use fynkel_core::animation::controller::{
-    Blending, Condition, ControllerDef, LayerDef, ParameterDef, ParameterKind, StateDef, Test,
-    TransitionDef, Value,
+    Blending, Condition, ControllerDef, Interruption, LayerDef, ParameterDef, ParameterKind,
+    StateDef, Test, TransitionDef, Value,
 };
 use fynkel_core::animation::{Channel, Clip, Interpolation, Property};
 use fynkel_core::components::ComponentValue;
@@ -124,6 +124,7 @@ fn transition(from: Option<usize>, to: usize, conditions: Vec<Condition>) -> Tra
         duration: 0.0,
         offset: 0.0,
         can_transition_to_self: false,
+        interruptible_by: Interruption::None,
     }
 }
 
@@ -136,6 +137,7 @@ fn layer(name: &str, states: Vec<StateDef>, transitions: Vec<TransitionDef>) -> 
         default_state: Some(0),
         states,
         transitions,
+        machines: vec![],
     }
 }
 
@@ -952,4 +954,69 @@ fn a_one_shot_is_checked() {
     );
     let r = animate(&mut w, lone, one_shot("", 0.1, 0.1));
     assert!(why(&w, r).contains("a one-shot plays in a controller's slot"));
+}
+
+/// ADR-0033 § 4: a crossfade that its transition lets the next state's
+/// transitions interrupt fades on from the pose of that moment, held —
+/// the arm does not jump to the state it was fading into.
+#[test]
+fn an_interruption_fades_from_the_pose_it_held() {
+    let mut w = world();
+    for (n, y) in [(11, 0.0), (12, 10.0), (13, 20.0)] {
+        w.register_clip(clip_ref(n), hold(Vec3::new(0.0, y, 0.0), 1.0));
+    }
+    let go = |to: usize, from: usize, value: i32| TransitionDef {
+        duration: 0.5,
+        interruptible_by: Interruption::Next,
+        ..transition(
+            Some(from),
+            to,
+            vec![Condition {
+                parameter: 0,
+                test: Test::Equals(value),
+            }],
+        )
+    };
+    let def = ControllerDef {
+        name: "Interrupt".into(),
+        parameters: vec![ParameterDef {
+            name: "go".into(),
+            kind: ParameterKind::Int,
+            default: Value::Int(0),
+        }],
+        layers: vec![layer(
+            "Base Layer",
+            vec![
+                state("A", Some(clip_ref(11)), true),
+                state("B", Some(clip_ref(12)), true),
+                state("C", Some(clip_ref(13)), true),
+            ],
+            vec![go(1, 0, 1), go(2, 1, 2)],
+        )],
+    };
+    w.register_controller(controller_ref(4), def).unwrap();
+    let root = spawn(&mut w, 1, None, "Rig");
+    let arm = spawn(&mut w, 2, Some(root), "arm");
+    set(&mut w, root, controlled(controller_ref(4)));
+    w.step();
+    animate(&mut w, root, param("go", Value::Int(1)));
+    for _ in 0..6 {
+        w.step();
+    }
+    let held = y(&w, arm);
+    assert!(held > 0.5 && held < 9.5, "fading A → B: {held}");
+    states(&mut w);
+    // B → C cuts the fade: A exits, and the arm starts from where it was.
+    animate(&mut w, root, param("go", Value::Int(2)));
+    assert_eq!(states(&mut w), [exited("A"), entered("C", "B")]);
+    assert!((y(&w, arm) - held).abs() < 1e-4, "{} vs {held}", y(&w, arm));
+    let b = base(&w, root);
+    assert_eq!((b.state.as_str(), b.next.as_str()), ("B", "C"));
+    for _ in 0..3 {
+        w.step();
+    }
+    let n = y(&w, arm);
+    let weight = 3.0 * DEFAULT_FIXED_DT as f32 / 0.5;
+    let want = held + (20.0 - held) * weight;
+    assert!((n - want).abs() < 1e-3, "{n} vs {want}");
 }
