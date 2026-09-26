@@ -692,6 +692,7 @@ class EditorShellState extends State<EditorShell> {
           browser: _browsers[PanelRegistry.project],
           onOpenDocument: openDocument,
           onOpenReference: openReference,
+          onOpenScript: (file) => ide.open(file),
           run: widget.run,
           assetEdits: assetEdits,
         );

@@ -47,7 +47,7 @@ void main() {
     // The dark theme, the one the user works in (the editor follows the system).
     tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
     addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
-    final e = await Editor.open(tester, tag: 'shots');
+    final e = await Editor.open(tester, tag: 'shots', prepare: writeDemoScripts);
     tester.view.physicalSize = const Size(2880, 1800);
     tester.view.devicePixelRatio = 2;
     await tester.pumpAndSettle();
@@ -95,6 +95,39 @@ void main() {
     await tester.pumpAndSettle();
     await save('game', find.byType(GamePanel).first);
     await save('window-game');
+    // The asset pages (docs/ui-refresh/images/asset-*).
+    for (final (name, path) in [
+      ('asset-prefab', 'prefabs/coin.prefab.json'),
+      ('asset-scene', 'scenes/main.scene.json'),
+      ('asset-material', 'materials/rusted.material.json'),
+      ('asset-texture', 'textures/swatch.png'),
+      ('asset-model', 'models/robot.glb'),
+    ]) {
+      final browser = e.shell.browser!;
+      browser.select(browser.entries.firstWhere((a) => a.path == path).id);
+      await tester.pumpAndSettle();
+      await save(name, find.byType(InspectorPanel).first);
+    }
+    // Info unfolded: the file's facts and who uses it.
+    {
+      final browser = e.shell.browser!;
+      browser.select(browser.entries.firstWhere((a) => a.path == 'materials/rusted.material.json').id);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('section.Info')));
+      await tester.pumpAndSettle();
+      await tester.drag(find.byKey(const Key('section.Info')), const Offset(0, -600));
+      await tester.pumpAndSettle();
+      await save('asset-info', find.byType(InspectorPanel).first);
+      await tester.tap(find.byKey(const Key('section.Info')));
+      await tester.pumpAndSettle();
+    }
+    // A script, as Unity's MonoScript page.
+    e.shell.browser!.showScripts('game');
+    e.shell.browser!.selectScript('game/player.dart');
+    await tester.pumpAndSettle();
+    await save('script', find.byType(InspectorPanel).first);
+    e.shell.browser!.selectScript(null);
+    await tester.pumpAndSettle();
     // With no document open: the empty panels.
     e.shell.registry.execute('document.close');
     await tester.pumpAndSettle();

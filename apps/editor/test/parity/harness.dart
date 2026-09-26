@@ -159,3 +159,46 @@ final class Editor {
   Map<String, dynamic> savedScene([String relative = 'assets/scenes/main.scene.json']) =>
       jsonDecode(File('${dir.path}/$relative').readAsStringSync()) as Map<String, dynamic>;
 }
+
+/// A behaviour script and its committed metadata in [dir]'s `lib/` (the
+/// Project's Scripts): `game/player.dart` declares `game.Player`, and
+/// `game/flow.dart` is a plain script.
+void writeDemoScripts(Directory dir) {
+  File('${dir.path}/lib/game/player.dart')
+    ..createSync(recursive: true)
+    ..writeAsStringSync('''import 'package:fynkel/fynkel.dart';
+
+/// The player: runs at [speed] and picks up coins.
+class Player extends Behaviour {
+  /// Metres per second.
+  double speed = 4;
+
+  /// The coin it counts as.
+  CoinKind? kind;
+
+  @override
+  void update(UpdateContext context) {}
+}
+''');
+  File('${dir.path}/lib/game/flow.dart').writeAsStringSync('// The game flow.\nvoid start() {}\n');
+  File('${dir.path}/lib/generated/behaviours.g.json')
+    ..createSync(recursive: true)
+    ..writeAsStringSync(
+      jsonEncode({
+        'package': 'fixture',
+        'behaviours': [
+          {
+            'id': 'game.Player',
+            'version': 1,
+            'class': 'Player',
+            'library': 'package:fixture/game/player.dart',
+            'description': 'The player: runs at [speed] and picks up coins.',
+            'fields': [
+              {'name': 'speed', 'type': 'double', 'default': 4, 'description': 'Metres per second.'},
+              {'name': 'kind', 'type': 'data', 'data': 'game.CoinKind', 'nullable': true},
+            ],
+          },
+        ],
+      }),
+    );
+}

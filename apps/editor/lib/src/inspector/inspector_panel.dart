@@ -26,6 +26,7 @@ import '../shell/editor_selection.dart';
 import '../shell/notices.dart';
 import '../theme/icons.dart';
 import 'asset_pages.dart';
+import 'script_page.dart';
 import 'codegen_check.dart';
 import 'field_editor.dart';
 import 'field_spec.dart';
@@ -48,6 +49,7 @@ class InspectorPanel extends StatefulWidget {
     this.browser,
     this.onOpenDocument,
     this.onOpenReference,
+    this.onOpenScript,
     this.run = runProcess,
     this.assetEdits,
   });
@@ -63,6 +65,9 @@ class InspectorPanel extends StatefulWidget {
   final ProjectBrowserModel? browser;
   final void Function(String id)? onOpenDocument;
   final void Function(String documentPath, String? pointer)? onOpenReference;
+
+  /// Opens a script (a `lib/` file) in the IDE; the error, if any.
+  final Future<String?> Function(String file)? onOpenScript;
   final RunProcess run;
 
   @override
@@ -154,6 +159,16 @@ class _InspectorPanelState extends State<InspectorPanel> {
             model: browser,
             rel: rel,
             selection: sel,
+            run: widget.run,
+          );
+        case InspectScript(:final rel, :final folder):
+          return ScriptPage(
+            key: ValueKey('inspector.script.$rel.$folder'),
+            model: browser,
+            rel: rel,
+            folder: folder,
+            selection: sel,
+            onOpenScript: widget.onOpenScript,
             run: widget.run,
           );
         case InspectEntities() || null:

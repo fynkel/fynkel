@@ -1,7 +1,7 @@
 // What the Inspector shows (blueprint item 9c, "one Inspector"): the last
 // thing the user selected, wherever it was — entities in the Hierarchy or
 // the Scene view, an asset or a part of one in the Project browser, a
-// folder. The Inspector draws the page registered for the target's kind.
+// folder, a script or a scripts folder — whatever was selected shows. The Inspector draws the page registered for the target's kind.
 //
 // Selecting in one place moves the Inspector there; so does coming back to
 // a panel (a click in the Hierarchy shows its selection again even when it
@@ -60,6 +60,21 @@ final class InspectFolder extends InspectTarget {
   int get hashCode => rel.hashCode;
 }
 
+/// A script under `lib/` (the Project's Scripts), by its `lib/`-relative
+/// path, or a scripts folder when [folder] ('' is `lib/` itself).
+final class InspectScript extends InspectTarget {
+  const InspectScript(this.rel, {this.folder = false});
+
+  final String rel;
+  final bool folder;
+
+  @override
+  bool operator ==(Object other) => other is InspectScript && other.rel == rel && other.folder == folder;
+
+  @override
+  int get hashCode => Object.hash(rel, folder);
+}
+
 final class EditorSelection extends ChangeNotifier {
   EditorSelection({required this.inspector, ProjectBrowserModel? browser}) {
     inspector.addListener(_onInspector);
@@ -80,7 +95,9 @@ final class EditorSelection extends ChangeNotifier {
   /// Follows [b] too (a Project browser copy opened).
   void addBrowser(ProjectBrowserModel b) {
     if (_browsers.containsKey(b)) return;
-    final seen = _BrowserSeen(b.lead, b.folder);
+    final seen = _BrowserSeen(b.lead, b.folder)
+      ..script = b.scriptLead
+      ..scriptFolder = b.inScripts ? b.scriptFolder : null;
     seen.listener = () => _onBrowser(b);
     _browsers[b] = seen;
     b.addListener(seen.listener);
@@ -136,6 +153,7 @@ final class EditorSelection extends ChangeNotifier {
   Map<String, Object?>? get remembered => switch (_locked ? _target : null) {
     InspectAsset(:final id, :final sub) => {'asset': id, 'sub': ?sub},
     InspectFolder(:final rel) => {'folder': rel},
+    InspectScript(:final rel, :final folder) => {'script': rel, if (folder) 'scriptFolder': true},
     _ => null,
   };
 
@@ -144,6 +162,16 @@ final class EditorSelection extends ChangeNotifier {
   void recall(Object? json) {
     if (json is! Map) return;
     final b = browser;
+    final script = json['script'];
+    if (script is String && b != null) {
+      final folder = json['scriptFolder'] == true;
+      final exists = folder ? script.isEmpty || b.scripts.folders.contains(script) : b.scripts.files.contains(script);
+      if (!exists) return;
+      _target = _latest = InspectScript(script, folder: folder);
+      _locked = true;
+      notifyListeners();
+      return;
+    }
     final InspectTarget? target = switch ((json['asset'], json['sub'], json['folder'])) {
       (final String id, final Object? sub, _) when b?.entry(id) != null => InspectAsset(
         id,
@@ -176,8 +204,13 @@ final class EditorSelection extends ChangeNotifier {
         if (inspector.selection.isNotEmpty) _set(const InspectEntities());
       case 'project':
         final b = from ?? browser;
+        final script = b?.scriptLead;
         final lead = b?.lead;
-        if (lead != null) _set(InspectAsset(lead, sub: b?.leadPart));
+        if (b != null && b.inScripts && script != null) {
+          _set(InspectScript(script));
+        } else if (lead != null) {
+          _set(InspectAsset(lead, sub: b?.leadPart));
+        }
     }
   }
 
@@ -216,6 +249,13 @@ final class EditorSelection extends ChangeNotifier {
     seen.lead = lead;
     seen.folder = folder;
     seen.part = part;
+    // The Scripts root: the script, or the scripts folder, shown.
+    final script = b.scriptLead;
+    final scriptFolder = b.inScripts ? b.scriptFolder : null;
+    final scriptMoved = script != seen.script;
+    final scriptFolderMoved = scriptFolder != seen.scriptFolder;
+    seen.script = script;
+    seen.scriptFolder = scriptFolder;
     // A deleted asset or folder cannot stay on the page.
     final t = _target;
     if (t is InspectAsset && b.entry(t.id) == null) {
@@ -228,6 +268,29 @@ final class EditorSelection extends ChangeNotifier {
       _locked = false;
       _target = _latest = null;
       notifyListeners();
+      return;
+    }
+    if (t is InspectScript && !(t.folder ? t.rel.isEmpty || b.scripts.folders.contains(t.rel) : b.scripts.files.contains(t.rel))) {
+      _locked = false;
+      _target = _latest = null;
+      notifyListeners();
+      return;
+    }
+    if (scriptMoved && script != null) {
+      _set(InspectScript(script));
+      return;
+    }
+    if (scriptFolderMoved && scriptFolder != null) {
+      _set(InspectScript(scriptFolder, folder: true));
+      return;
+    }
+    if (scriptMoved && _latest is InspectScript && !(_latest as InspectScript).folder) {
+      // The script selection was cleared: the page empties too.
+      _latest = null;
+      if (!_locked) {
+        _target = null;
+        notifyListeners();
+      }
       return;
     }
     if (leadMoved && lead != null) {
@@ -261,5 +324,7 @@ final class _BrowserSeen {
   String? lead;
   String? folder;
   String? part;
+  String? script;
+  String? scriptFolder;
   late VoidCallback listener;
 }
