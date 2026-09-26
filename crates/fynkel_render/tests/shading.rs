@@ -3309,3 +3309,147 @@ fn a_material_whose_shader_is_missing_draws_magenta() {
         "{center:?}"
     );
 }
+
+#[test]
+fn a_texture_property_samples_its_bound_texture() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut lab = Lab::new("shader-texture");
+    let shader = lab.shader(FLAT_SHADER);
+    let unbound = lab.material(json!({
+        "shader": asset(&shader.to_string()), "parameters": { "tint": [0.0, 0.0, 0.0] } }));
+    let bound = lab.material(json!({
+        "shader": asset(&shader.to_string()), "parameters": { "tint": [0.0, 0.0, 0.0] },
+        "textures": { "glow": { "texture": asset(SWATCH) } } }));
+    let eye = Vec3::new(0.0, 0.0, 2.0);
+    let render = |m: Uuid| {
+        let (assets, extract) = lab.extract(eye, &[(Vec3::ZERO, m)], false);
+        render_lab(&device, &queue, &assets, &extract).0
+    };
+    let black = render(unbound);
+    let swatch = render(bound);
+    dump(&swatch, "shader-texture");
+    let center = black[(H / 2 * W + W / 2) as usize];
+    assert!(near(center, [0, 0, 0]), "the black fallback: {center:?}");
+    // The swatch's coloured texels, unlit.
+    let coloured = swatch
+        .iter()
+        .filter(|p| !is_background(**p) && (0..3).any(|c| p[c] > 60))
+        .count();
+    assert!(coloured > 2000, "{coloured} px show the swatch");
+}
+
+const PBR_COPY_SHADER: &str = "shader \"Tests/PBR Copy\" {
+    lighting lit
+    properties {
+        tint      color = (1, 1, 1, 1)
+        metallic  float = 0 range(0, 1)
+        roughness float = 0.5 range(0, 1)
+    }
+}
+
+fn surface(in: SurfaceInput) -> Surface {
+    var s = default_surface();
+    s.base_color = material.tint.rgb * in.color.rgb;
+    s.metallic = material.metallic;
+    s.roughness = material.roughness;
+    return s;
+}
+";
+
+#[test]
+fn a_pbr_copy_shader_is_lit_as_the_built_in_is() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut lab = Lab::new("shader-pbr");
+    let shader = lab.shader(PBR_COPY_SHADER);
+    let builtin = lab.material(json!({
+        "base_color": [0.8, 0.3, 0.2, 1.0], "metallic": 0.25, "roughness": 0.65 }));
+    let copy = lab.material(json!({
+        "shader": asset(&shader.to_string()),
+        "parameters": { "tint": [0.8, 0.3, 0.2, 1.0], "metallic": 0.25, "roughness": 0.65 } }));
+    let eye = Vec3::new(0.0, 0.3, 3.0);
+    let render = |m: Uuid| {
+        let (assets, extract) = lab.extract(eye, &[(Vec3::ZERO, m)], true);
+        render_lab(&device, &queue, &assets, &extract).0
+    };
+    let a = render(builtin);
+    let b = render(copy);
+    dump(&b, "shader-pbr");
+    assert!(drawn_mean(&a).1 > 500);
+    let worst = a
+        .iter()
+        .zip(&b)
+        .map(|(p, q)| {
+            (0..3)
+                .map(|c| (p[c] as i32 - q[c] as i32).abs())
+                .max()
+                .unwrap()
+        })
+        .max()
+        .unwrap();
+    assert!(worst <= 1, "the copy is off by up to {worst}");
+}
+
+const SINK_SHADER: &str = "shader \"Tests/Sink\" {
+    lighting lit
+    properties {
+        depth float = 100
+    }
+}
+
+fn surface(in: SurfaceInput) -> Surface {
+    return default_surface();
+}
+
+fn vertex(in: VertexInput) -> VertexInput {
+    var v = in;
+    v.position.y -= globals.time * material.depth;
+    return v;
+}
+";
+
+#[test]
+fn a_shaders_vertex_moves_its_shadow_too() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut lab = Lab::new("shader-shadow");
+    lab.sun_shadows = true;
+    let floor_material =
+        lab.material(json!({ "base_color": [0.8, 0.8, 0.8, 1.0], "roughness": 0.9 }));
+    let shader = lab.shader(SINK_SHADER);
+    let sink = lab.material(json!({ "shader": asset(&shader.to_string()) }));
+    let eye = Vec3::new(0.0, 3.0, 6.0);
+    let darker_by = |a: &[[u8; 4]], b: &[[u8; 4]]| {
+        a.iter()
+            .zip(b)
+            .filter(|(p, q)| luminance(**q) - luminance(**p) > 20.0)
+            .count()
+    };
+    // The cube with and without casting, at a time: what the cast darkens.
+    let shadowed = |time: f32| {
+        let mut px = Vec::new();
+        for casts in [true, false] {
+            let floor = LabCube {
+                scale: Vec3::new(8.0, 0.1, 8.0),
+                ..LabCube::new(Vec3::new(0.0, -0.55, 0.0), floor_material)
+            };
+            let cube = LabCube {
+                cast_shadows: casts,
+                ..LabCube::new(Vec3::ZERO, sink)
+            };
+            let (assets, mut extract) = lab.extract_cubes(eye, &[floor, cube], true);
+            extract.time = time;
+            px.push(render_lab(&device, &queue, &assets, &extract).0);
+        }
+        dump(&px[0], &format!("shader-shadow-{time}"));
+        darker_by(&px[0], &px[1])
+    };
+    let still = shadowed(0.0);
+    assert!(still > 40, "the cube shadows {still} floor pixels");
+    // Sunk a hundred metres by its vertex(): its shadow goes with it.
+    assert_eq!(shadowed(1.0), 0);
+}
