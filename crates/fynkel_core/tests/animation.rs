@@ -1183,3 +1183,35 @@ fn a_blend_space_waits_for_its_clips_and_a_bad_parameter_is_refused() {
     assert!((s.duration - 1.0).abs() < 1e-6, "{s:?}");
     assert_eq!(s.parameter, 0.0, "the space's own parameter is unset");
 }
+
+#[test]
+fn an_edit_world_poses_its_animators_only_when_asked() {
+    // ADR-0030: the Inspector's preview stages seek an animator in an
+    // edit-mode world; a plain edit world stays still.
+    let mut w = World::new(WorldConfig {
+        edit_mode: true,
+        ..WorldConfig::default()
+    });
+    w.register_clip(clip_ref(1), rise());
+    let root = spawn(&mut w, 1, Vec3::ZERO, None, "Rig");
+    let arm = spawn(&mut w, 2, Vec3::new(0.0, 0.0, 1.0), Some(root), "arm");
+    set(&mut w, root, animator(clip_ref(1), true));
+    animate(&mut w, root, AnimateOp::SetTime(0.5));
+    assert_eq!(local(&w, arm).position, Vec3::new(0.0, 0.0, 1.0));
+
+    assert!(w.set_edit_animation(true));
+    animate(&mut w, root, AnimateOp::SetTime(0.25));
+    assert!((local(&w, arm).position.y - 0.25).abs() < 1e-5);
+    // The propagated world transform follows at once (no interpolation).
+    let world_y = w
+        .ecs()
+        .copy::<fynkel_scene::WorldTransform>(arm)
+        .unwrap()
+        .matrix
+        .w_axis
+        .y;
+    assert!((world_y - 0.25).abs() < 1e-5, "{world_y}");
+
+    // A game world ignores the switch.
+    assert!(!world().set_edit_animation(true));
+}

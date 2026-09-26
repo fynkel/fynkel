@@ -325,6 +325,8 @@ pub struct World {
     /// Edit mode only: entities `extract()` leaves out (their meshes,
     /// lights and camera) — the editor's hidden flag, never the document's.
     edit_hidden: HashSet<Entity>,
+    /// [`World::set_edit_animation`].
+    edit_animation: bool,
     /// The last step's per-phase wall time, one entry per `SystemKind`.
     system_times: Vec<SystemTimeRecord>,
     /// Scratch of the native systems, kept for its capacity.
@@ -395,6 +397,7 @@ impl World {
             scenes: Vec::new(),
             edit_camera: None,
             edit_hidden: HashSet::new(),
+            edit_animation: false,
             system_times: SYSTEMS
                 .iter()
                 .map(|&system| SystemTimeRecord {
@@ -510,6 +513,18 @@ impl World {
             .copied()
             .filter(|e| self.ecs.contains(*e))
             .collect();
+        true
+    }
+    /// Edit mode only: `step()` also runs the animators and resolves the
+    /// skins — the Inspector's preview stages (ADR-0030), which seek an
+    /// `Animator` to the time the editor shows and draw the skinned mesh
+    /// posed. Every other system stays off. Returns `false` in a game
+    /// world.
+    pub fn set_edit_animation(&mut self, on: bool) -> bool {
+        if !self.config.edit_mode {
+            return false;
+        }
+        self.edit_animation = on;
         true
     }
     pub fn edit_hidden(&self) -> impl Iterator<Item = Entity> + '_ {
@@ -1396,7 +1411,7 @@ impl World {
         // In edit mode (M4-06) every system below is skipped: commands,
         // propagation and the snapshot are the whole tick.
         let t0 = Instant::now();
-        let n = if edit || !modules.animation {
+        let n = if (edit && !self.edit_animation) || !modules.animation {
             0
         } else {
             self.run_animation(next_tick)
