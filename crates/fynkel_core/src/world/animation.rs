@@ -484,6 +484,21 @@ impl World {
         self.clips.get(clip)
     }
 
+    /// A registered clip's root travel on `animator`'s hierarchy, per
+    /// second of one lap: the root's translation (in its parent's space)
+    /// and its yaw in radians — what a blend tree's Compute Positions
+    /// reads (ADR-0033). The root is the one root motion takes. `None`
+    /// when the clip is not registered, has no length or keys no
+    /// translation under `animator`.
+    pub fn clip_root_travel(&self, animator: Entity, clip: &AssetRef) -> Option<(Vec3, f32)> {
+        let data = self.clips.get(clip)?;
+        if data.duration <= 0.0 {
+            return None;
+        }
+        let root = BlendSlot::resolve(&self.ecs, animator, clip.clone(), data).root?;
+        Some((root.lap / data.duration, root.lap_yaw / data.duration))
+    }
+
     /// Makes a blend space available to `Animator`s that name `blend` as
     /// their clip (M3-19c); its points' clips are registered separately.
     pub fn register_blend(&mut self, blend: AssetRef, data: BlendSpace) {

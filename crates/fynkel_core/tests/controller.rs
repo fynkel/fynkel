@@ -708,3 +708,25 @@ fn a_blend_tree_weighs_its_leaves_and_their_lengths() {
     let s = base(&w, root);
     assert!((s.length - 0.75).abs() < 1e-4, "{s:?}");
 }
+
+#[test]
+fn a_clips_root_travel_is_per_second_of_a_lap() {
+    let mut w = world();
+    // `arm` is the shallowest translation: 3 m forward (-Z) over 2 s.
+    w.register_clip(
+        clip_ref(20),
+        slide("arm", Vec3::ZERO, Vec3::new(1.0, 0.5, -3.0), 2.0),
+    );
+    w.register_clip(clip_ref(21), hold(Vec3::ONE, 1.0));
+    let root = spawn(&mut w, 1, None, "Rig");
+    let _arm = spawn(&mut w, 2, Some(root), "arm");
+    let (v, yaw) = w.clip_root_travel(root, &clip_ref(20)).unwrap();
+    assert!((v - Vec3::new(0.5, 0.25, -1.5)).length() < 1e-6, "{v}");
+    assert_eq!(yaw, 0.0);
+    // In place: no travel. Not registered: nothing.
+    assert_eq!(
+        w.clip_root_travel(root, &clip_ref(21)).unwrap().0,
+        Vec3::ZERO
+    );
+    assert!(w.clip_root_travel(root, &clip_ref(22)).is_none());
+}
