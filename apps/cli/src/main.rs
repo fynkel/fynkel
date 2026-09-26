@@ -15,6 +15,7 @@
 // `fynkel render --json` nests deeply enough for serde_json's default.
 #![recursion_limit = "256"]
 
+mod animators_gen;
 mod asset;
 mod assets_gen;
 mod behaviours;
@@ -165,14 +166,17 @@ fn usage() -> ExitCode {
 }
 
 /// `fynkel codegen --project <dir> --assets-only [--check] [--json]`:
-/// only `lib/generated/assets.g.dart` (ADR-0026 §3), no build_runner — what
+/// only `lib/generated/assets.g.dart` (ADR-0026 §3) and `animators.g.dart`
+/// (ADR-0033 § 3), no build_runner — what
 /// the editor runs after an asset is created, imported, renamed or
 /// deleted. `--json` prints `{ ok, check, assets: { status, error? } }`
 /// with `status` `written`, `upToDate`, `stale`, `skipped` (not a
 /// project's package) or `error`. Exit codes as for `codegen`.
 fn assets_only_run(project: &Path, check: bool, json: bool) -> ExitCode {
     let mut drift = Vec::new();
-    let (status, code, error) = match behaviours::write_assets(project, check, &mut drift) {
+    let written = behaviours::write_assets(project, check, &mut drift)
+        .and_then(|n| Ok(n + behaviours::write_animators(project, check, &mut drift)?));
+    let (status, code, error) = match written {
         Err(e) => ("error", ExitCode::from(1), Some(e)),
         Ok(_) if !project.join("fynkel.project.json").is_file() => {
             ("skipped", ExitCode::SUCCESS, None)

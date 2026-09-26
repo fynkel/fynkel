@@ -33,12 +33,18 @@ pub const DART_OUT: &str = "lib/generated/assets.g.dart";
 /// project's (no `fynkel.project.json` beside its pubspec). A project
 /// without an assets directory gives an empty `Assets`.
 pub fn generate(project: &Path) -> Result<Option<String>, String> {
+    Ok(assets_dir(project)?.map(|dir| render(&scan(&dir))))
+}
+
+/// The directory holding the assets of the project (or Fynkel package) at
+/// `project`; `None` when the Dart package is neither.
+pub(crate) fn assets_dir(project: &Path) -> Result<Option<std::path::PathBuf>, String> {
     if !project.join("fynkel.project.json").is_file() {
         // A Fynkel package names its own assets the same way (ADR-0029 §2).
         let Some(manifest) = fynkel_document::packages::own_manifest(project) else {
             return Ok(None);
         };
-        return Ok(Some(render(&scan(&project.join(manifest.assets)))));
+        return Ok(Some(project.join(manifest.assets)));
     }
     let project_file = Project::read(project).map_err(|d| {
         format!(
@@ -50,11 +56,11 @@ pub fn generate(project: &Path) -> Result<Option<String>, String> {
                 .join("; ")
         )
     })?;
-    Ok(Some(render(&scan(&project_file.assets_dir(project)))))
+    Ok(Some(project_file.assets_dir(project)))
 }
 
 /// Every asset under `assets` (none when it is missing).
-fn scan(assets: &Path) -> Vec<AssetEntry> {
+pub(crate) fn scan(assets: &Path) -> Vec<AssetEntry> {
     if !assets.is_dir() {
         return Vec::new();
     }
@@ -272,7 +278,7 @@ fn unique(items: Vec<(String, Option<String>)>) -> Vec<String> {
 
 /// A file's stem and the extension that tells it apart: `coin.prefab.json`
 /// → (`coin`, `prefab`), `kit.glb` → (`kit`, `glb`).
-fn stem(e: &AssetEntry) -> (String, String) {
+pub(crate) fn stem(e: &AssetEntry) -> (String, String) {
     let file = e.path.rsplit('/').next().unwrap_or(&e.path);
     let base = match e.kind {
         AssetKind::Document(_) => file.strip_suffix(".json").unwrap_or(file),
@@ -284,7 +290,7 @@ fn stem(e: &AssetEntry) -> (String, String) {
     }
 }
 
-const KEYWORDS: &[&str] = &[
+pub(crate) const KEYWORDS: &[&str] = &[
     "abstract",
     "as",
     "assert",
@@ -361,7 +367,7 @@ const KEYWORDS: &[&str] = &[
 ];
 
 /// A lowerCamel Dart identifier for a file or folder name.
-fn ident(name: &str) -> String {
+pub(crate) fn ident(name: &str) -> String {
     let c = camel(name);
     let c = if c.is_empty() { "asset".to_string() } else { c };
     if c.starts_with(|ch: char| ch.is_ascii_digit()) {
@@ -376,7 +382,7 @@ fn ident(name: &str) -> String {
 /// `step_left` → `stepLeft`, `Fast Run` → `fastRun`, `HDR sky` → `hdrSky`,
 /// `SomethingFun2` → `somethingFun2`; characters that are not ASCII
 /// letters or digits separate words.
-fn camel(name: &str) -> String {
+pub(crate) fn camel(name: &str) -> String {
     let mut out = String::new();
     for (i, w) in name
         .split(|c: char| !c.is_ascii_alphanumeric())
@@ -398,7 +404,7 @@ fn camel(name: &str) -> String {
     out
 }
 
-fn upper_first(s: &str) -> String {
+pub(crate) fn upper_first(s: &str) -> String {
     let mut cs = s.chars();
     match cs.next() {
         Some(c) => c.to_ascii_uppercase().to_string() + cs.as_str(),
@@ -406,7 +412,7 @@ fn upper_first(s: &str) -> String {
     }
 }
 
-fn dart_string(s: &str) -> String {
+pub(crate) fn dart_string(s: &str) -> String {
     let mut o = String::from("'");
     for c in s.chars() {
         match c {

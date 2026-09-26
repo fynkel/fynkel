@@ -152,6 +152,7 @@ fn generate(
     }
     written += sync_schemas(project, &schemas, check, &mut drift)?;
     written += write_assets(project, check, &mut drift)?;
+    written += write_animators(project, check, &mut drift)?;
     written += write_packages(project, check, &mut drift)?;
 
     if check {
@@ -189,6 +190,30 @@ pub fn write_assets(
         return Ok(0);
     }
     drift.push(PathBuf::from(crate::assets_gen::DART_OUT));
+    if check {
+        return Ok(0);
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(1)
+}
+
+/// `lib/generated/animators.g.dart` (ADR-0033 § 3), as [`write_assets`].
+pub fn write_animators(
+    project: &Path,
+    check: bool,
+    drift: &mut Vec<PathBuf>,
+) -> Result<usize, String> {
+    let Some(text) = crate::animators_gen::generate(project)? else {
+        return Ok(0);
+    };
+    let path = project.join(crate::animators_gen::DART_OUT);
+    if read_opt(&path).as_deref() == Some(text.as_str()) {
+        return Ok(0);
+    }
+    drift.push(PathBuf::from(crate::animators_gen::DART_OUT));
     if check {
         return Ok(0);
     }

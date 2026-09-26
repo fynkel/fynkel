@@ -277,6 +277,45 @@ fn codegen_assets_only_names_every_asset_by_id() {
     ));
     assert_eq!(run(&check), "upToDate");
 
+    // A controller (ADR-0033 § 3): animators.g.dart appears, typed; a
+    // renamed parameter makes it stale.
+    let animators = dir.join("lib/generated/animators.g.dart");
+    assert!(!animators.exists(), "no controllers, no file");
+    let controller = |parameter: &str| {
+        serde_json::json!({
+            "$schema": "https://fynkel.dev/schemas/controller.schema.json",
+            "formatVersion": 1,
+            "id": "5d1c62c4-8f0e-4c55-9d64-3f3e8f7c1a02",
+            "name": "Hero",
+            "parameters": [{ "name": parameter, "type": "float" }],
+            "layers": [{ "name": "Base Layer" }]
+        })
+        .to_string()
+    };
+    std::fs::write(dir.join("assets/hero.controller.json"), controller("speed")).unwrap();
+    assert_eq!(run(&check), "stale");
+    assert_eq!(run(&write), "written");
+    let text = std::fs::read_to_string(&animators).unwrap();
+    assert!(
+        text.contains("extension type const HeroAnimator(AnimationControl animation)")
+            && text.contains("double get speed => animation.getFloat('speed');")
+            && text.contains("enum HeroSlot {\n  baseLayer('Base Layer'),"),
+        "{text}"
+    );
+    std::fs::write(dir.join("assets/hero.controller.json"), controller("pace")).unwrap();
+    assert_eq!(run(&check), "stale");
+    assert_eq!(run(&write), "written");
+    assert!(std::fs::read_to_string(&animators)
+        .unwrap()
+        .contains("double get pace"));
+    // Removed: the file stays, emptied, so imports keep compiling.
+    std::fs::remove_file(dir.join("assets/hero.controller.json")).unwrap();
+    assert_eq!(run(&write), "written");
+    assert!(!std::fs::read_to_string(&animators)
+        .unwrap()
+        .contains("Hero"));
+    assert_eq!(run(&check), "upToDate");
+
     // Not a project's package: nothing to write.
     std::fs::remove_file(dir.join("fynkel.project.json")).unwrap();
     assert_eq!(run(&write), "skipped");
