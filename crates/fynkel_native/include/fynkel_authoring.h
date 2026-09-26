@@ -480,6 +480,14 @@ const FynkelWorld* fynkel_authoring_stage_world(const FynkelAuthoringSession* se
  *                                       → { clip | null, time, duration, fps,
  *                                       inPlace, blend: { parameter, value,
  *                                       points: [{ at, clip }] } | null }
+ *                   or tree ({ blendTree }), values? ({ name: value }), time?
+ *                                       a blend tree (ADR-0033), played at its
+ *                                       parameters' values → { clip, time,
+ *                                       duration, fps, inPlace, tree: { values } }
+ *   travel          clips [{ asset, sub? }]
+ *                                       each clip's root travel on the subject, per
+ *                                       second → { travel: [{ velocity [3],
+ *                                       angularSpeed } | null] }
  *   reload                              loaded again from the store → the open result
  *   stats                               → the open result, not reloaded
  *   setMaterial     material, data      as the edit-preview's, on every store

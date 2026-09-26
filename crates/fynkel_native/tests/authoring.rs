@@ -1404,3 +1404,99 @@ fn a_clip_poses_its_model_on_the_stage() {
     let m = host.result()["stage"].as_u64().unwrap() as u32;
     assert_eq!(host.stage_call(m, "clip", &wave), Status::InvalidArgument);
 }
+
+#[test]
+fn a_blend_tree_poses_its_model_and_its_clips_travel() {
+    const RIG: &str = "c0000000-0000-4000-8000-000000000005";
+    let copy = Copy::new("tree-stage");
+    let host = Host::new();
+    assert_eq!(host.open_project(&copy.dir), Status::Ok);
+    assert_eq!(host.stage_open(&json!({ "asset": RIG })), Status::Ok);
+    let stage = host.result()["stage"].as_u64().unwrap() as u32;
+    let world = unsafe { fynkel_authoring_stage_world(host.0, stage) };
+    let joints = || unsafe { (*world).core() }.extract().joints;
+    // `bob` moves the Prop alone (no joint).
+    let prop = || {
+        let core = unsafe { (*world).core() };
+        let ecs = core.ecs();
+        let e = ecs
+            .entities()
+            .find(|&e| {
+                ecs.copy::<fynkel_core::Name>(e)
+                    .is_ok_and(|n| n.value == "Prop")
+            })
+            .expect("the rig's Prop");
+        ecs.copy::<fynkel_core::Transform>(e).unwrap().position
+    };
+
+    // ADR-0033: a 2D tree over the rig's two clips, played at its values.
+    let tree = json!({ "blendTree": {
+        "type": "freeformCartesian", "parameters": ["x", "y"],
+        "children": [
+            { "motion": { "asset": RIG, "sub": "anim/wave" }, "position": [0, 0] },
+            { "motion": { "asset": RIG, "sub": "anim/bob" }, "position": [1, 0] },
+        ],
+    }});
+    let call = json!({ "tree": tree, "values": { "x": 0.0, "y": 0.0 }, "time": 0.0 });
+    assert_eq!(
+        host.stage_call(stage, "clip", &call),
+        Status::Ok,
+        "{}",
+        host.result()
+    );
+    let at0 = host.result();
+    assert_eq!(at0["tree"]["values"]["x"], 0.0, "{at0}");
+    let duration = at0["duration"].as_f64().unwrap();
+    assert!(duration > 0.0, "{at0}");
+    let rest = joints();
+    assert!(!rest.is_empty(), "posed by the tree");
+    assert_eq!(
+        host.stage_call(stage, "clip", &json!({ "time": duration / 2.0 })),
+        Status::Ok
+    );
+    assert!(
+        (host.result()["time"].as_f64().unwrap() - duration / 2.0).abs() < 1e-3,
+        "{}",
+        host.result()
+    );
+    let wave = joints();
+    assert_ne!(wave, rest, "the pose moved with the time");
+    let still = prop();
+    // The other end: the other clip's pose.
+    assert_eq!(
+        host.stage_call(stage, "clip", &json!({ "values": { "x": 1.0 } })),
+        Status::Ok
+    );
+    assert_eq!(host.result()["tree"]["values"]["x"], 1.0);
+    assert_ne!(prop(), still, "the values moved the pose: bob plays");
+    // The same tree again keeps the values; a broken one is refused and
+    // the stage keeps what it showed.
+    assert_eq!(
+        host.stage_call(stage, "clip", &json!({ "tree": tree })),
+        Status::Ok
+    );
+    assert_eq!(host.result()["tree"]["values"]["x"], 1.0);
+    let broken = json!({ "tree": { "blendTree": { "type": "freeformCartesian", "parameters": ["x"],
+        "children": [{ "motion": { "asset": RIG, "sub": "anim/wave" }, "position": [0, 0] }] } } });
+    assert_eq!(
+        host.stage_call(stage, "clip", &broken),
+        Status::InvalidArgument
+    );
+    assert_eq!(host.stage_call(stage, "clip", &json!({})), Status::Ok);
+    assert_eq!(host.result()["tree"]["values"]["x"], 1.0);
+
+    // Compute Positions' input: each clip's root travel per second (the
+    // fixture's clips travel or not; a missing one is null).
+    let clips = json!({ "clips": [
+        { "asset": RIG, "sub": "anim/wave" },
+        { "asset": RIG, "sub": "anim/nothing" },
+    ]});
+    assert_eq!(host.stage_call(stage, "travel", &clips), Status::Ok);
+    let travel = host.result()["travel"].as_array().unwrap().clone();
+    assert_eq!(travel.len(), 2);
+    assert!(travel[1].is_null());
+    assert!(
+        travel[0].is_null() || travel[0]["velocity"].as_array().unwrap().len() == 3,
+        "{travel:?}"
+    );
+}

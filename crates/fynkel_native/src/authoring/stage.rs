@@ -39,6 +39,8 @@ pub(super) struct StageSlot {
     bones: usize,
     /// The clip or blend shown on the subject, and where it stands.
     posed: Option<Posed>,
+    /// Blend trees shown so far: each gets a controller of its own.
+    trees: u32,
 }
 
 /// A clip (or blend space) on a stage's subject (ADR-0030 step 7). The
@@ -53,6 +55,84 @@ struct Posed {
     in_place: bool,
     /// A blend space's parameter: its name and value.
     parameter: Option<(String, f32)>,
+    /// A blend tree (ADR-0033): the state's `motion` (`{ "blendTree" }`)
+    /// played by a one-state controller registered as `clip`, and the
+    /// values of its float parameters.
+    tree: Option<Value>,
+    values: Vec<(String, f32)>,
+}
+
+/// The one-state controllers a stage plays a blend tree on: this id, a
+/// new sub each time the tree changes.
+const TREE_PREVIEW: fynkel_contracts::Uuid =
+    fynkel_contracts::Uuid::from_bytes(*b"fynkel.treeprevw");
+
+/// Every float parameter a tree names: its own and its direct children's,
+/// nested trees too.
+fn tree_parameters(motion: &Value, out: &mut Vec<String>) {
+    let Some(tree) = motion.get("blendTree") else {
+        return;
+    };
+    fn add(out: &mut Vec<String>, name: Option<&str>) {
+        if let Some(n) = name {
+            if !out.iter().any(|o| o == n) {
+                out.push(n.to_string());
+            }
+        }
+    }
+    for p in tree
+        .get("parameters")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        add(out, p.as_str());
+    }
+    for c in tree
+        .get("children")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        add(out, c.get("parameter").and_then(Value::as_str));
+        if let Some(m) = c.get("motion") {
+            tree_parameters(m, out);
+        }
+    }
+}
+
+/// The controller a stage plays `motion` (a blend tree) with: its float
+/// parameters and one layer whose one state plays it.
+fn tree_controller(
+    motion: &Value,
+) -> Result<fynkel_core::animation::controller::ControllerDef, Vec<Diagnostic>> {
+    let mut names = Vec::new();
+    tree_parameters(motion, &mut names);
+    let text = json!({
+        "formatVersion": 1,
+        "id": TREE_PREVIEW.to_string(),
+        "name": "Preview",
+        "parameters": names.iter().map(|n| json!({ "name": n, "type": "float" })).collect::<Vec<_>>(),
+        "layers": [{ "name": "Base Layer", "defaultState": "Tree",
+                     "states": [{ "name": "Tree", "motion": motion }] }],
+    })
+    .to_string();
+    let doc =
+        fynkel_document::Document::parse(fynkel_document::DocumentKind::Controller, None, &text)
+            .map_err(|_| invalid("stage: the blend tree is not JSON"))?;
+    let controller = fynkel_document::Controller::from_document(doc);
+    // The reader's problems; the shape's are the definition's to refuse.
+    if let Some(d) = controller
+        .read_diagnostics()
+        .iter()
+        .find(|d| d.severity == fynkel_contracts::Severity::Error)
+    {
+        return Err(invalid(format!("stage: {}", d.message)));
+    }
+    let def = fynkel_assets::controller_def(&controller)
+        .and_then(|def| def.validate().map(|()| def))
+        .map_err(|why| invalid(format!("stage: {why}")))?;
+    Ok(def)
 }
 
 impl StageSlot {
@@ -71,6 +151,7 @@ impl StageSlot {
             root: None,
             bones: 0,
             posed: None,
+            trees: 0,
         }
     }
 
@@ -125,21 +206,47 @@ impl StageSlot {
         };
         let world = self.world.core_mut();
         world.set_edit_animation(true);
-        assets
-            .register_clip(&posed.clip, world)
-            .map_err(|d| invalid(format!("stage: {}", d.message)))?;
+        let animator = if let Some(tree) = &posed.tree {
+            let def = tree_controller(tree)?;
+            for state in &def.layers[0].states {
+                let mut leaves = Vec::new();
+                if let Some(m) = &state.motion {
+                    m.assets(&mut leaves);
+                }
+                for leaf in leaves {
+                    assets
+                        .register_clip(leaf, world)
+                        .map_err(|d| invalid(format!("stage: {}", d.message)))?;
+                }
+            }
+            world
+                .register_controller(posed.clip.clone(), def)
+                .map_err(|why| invalid(format!("stage: {why}")))?;
+            Animator {
+                controller: Some(posed.clip.clone()),
+                speed: 1.0,
+                playing: false,
+                root_motion: posed.in_place,
+                ..Animator::default()
+            }
+        } else {
+            assets
+                .register_clip(&posed.clip, world)
+                .map_err(|d| invalid(format!("stage: {}", d.message)))?;
+            Animator {
+                clip: posed.clip.clone(),
+                speed: 1.0,
+                looping: true,
+                playing: false,
+                root_motion: posed.in_place,
+                ..Animator::default()
+            }
+        };
         world.submit(
             Lane::Simulation,
             vec![Command::SetComponent {
                 entity: root,
-                value: ComponentValue::Animator(Animator {
-                    clip: posed.clip.clone(),
-                    speed: 1.0,
-                    looping: true,
-                    playing: false,
-                    root_motion: posed.in_place,
-                    ..Animator::default()
-                }),
+                value: ComponentValue::Animator(animator),
             }],
         );
         world.step();
@@ -152,6 +259,50 @@ impl StageSlot {
         let (Some(posed), Some(root)) = (&self.posed, self.root) else {
             return Ok(());
         };
+        if posed.tree.is_some() {
+            // The values first: they decide the tree's length, and the
+            // time is a fraction of it.
+            let world = self.world.core_mut();
+            world.submit(
+                Lane::Simulation,
+                posed
+                    .values
+                    .iter()
+                    .map(|(name, value)| Command::Animate {
+                        entity: root,
+                        op: AnimateOp::SetControllerParameter {
+                            name: name.clone(),
+                            value: fynkel_core::animation::controller::Value::Float(*value),
+                        },
+                    })
+                    .collect(),
+            );
+            world.step();
+            let length = world
+                .animator_controller_state(root)
+                .and_then(|(layers, _)| layers.first().map(|l| l.length))
+                .unwrap_or(0.0);
+            let offset = if length > 0.0 {
+                (posed.time.max(0.0) / length).fract()
+            } else {
+                0.0
+            };
+            world.submit(
+                Lane::Simulation,
+                vec![Command::Animate {
+                    entity: root,
+                    op: AnimateOp::PlayState {
+                        state: "Tree".into(),
+                        layer: Some(0),
+                        seconds: 0.0,
+                        offset,
+                    },
+                }],
+            );
+            world.step();
+            world.drain_events();
+            return Ok(());
+        }
         let mut commands = Vec::new();
         if let Some((name, value)) = &posed.parameter {
             commands.push(Command::Animate {
@@ -178,6 +329,36 @@ impl StageSlot {
         let (Some(posed), Some(root)) = (&self.posed, self.root) else {
             return Value::Null;
         };
+        if let Some(tree) = &posed.tree {
+            let layer = self
+                .world
+                .core()
+                .animator_controller_state(root)
+                .and_then(|(layers, _)| layers.into_iter().next());
+            let length = layer.as_ref().map_or(0.0, |l| l.length);
+            let mut leaves = Vec::new();
+            if let Ok(def) = tree_controller(tree) {
+                if let Some(m) = &def.layers[0].states[0].motion {
+                    m.assets(&mut leaves);
+                }
+                let fps = leaves
+                    .first()
+                    .and_then(|r| assets.clip(r).ok())
+                    .map(|c| key_rate(&c))
+                    .unwrap_or(30.0);
+                return json!({
+                    "clip": { "asset": posed.clip.asset.to_string(), "sub": posed.clip.sub },
+                    "time": layer.as_ref().map_or(posed.time, |l| l.normalized_time * length),
+                    "duration": length,
+                    "fps": fps,
+                    "inPlace": posed.in_place,
+                    "tree": {
+                        "values": posed.values.iter().map(|(n, v)| (n.clone(), json!(v))).collect::<serde_json::Map<_, _>>(),
+                    },
+                });
+            }
+            return Value::Null;
+        }
         let state = self.world.core().animator_state(root);
         let blend = assets
             .is_blend(&posed.clip)
@@ -415,6 +596,8 @@ pub unsafe extern "C" fn fynkel_authoring_stage_open(
                     time: 0.0,
                     in_place: true,
                     parameter: Some((space.parameter.clone(), first.at)),
+                    tree: None,
+                    values: Vec::new(),
                 },
             ))
         } else {
@@ -479,13 +662,24 @@ pub unsafe extern "C" fn fynkel_authoring_stage_world(
     }
 }
 
-const STAGE_KINDS: [&str; 6] = ["shape", "light", "clip", "reload", "stats", "setMaterial"];
+const STAGE_KINDS: [&str; 7] = [
+    "shape",
+    "light",
+    "clip",
+    "travel",
+    "reload",
+    "stats",
+    "setMaterial",
+];
 
 /// A call on a stage, by kind with JSON arguments: `shape` (a material's:
 /// `{ "shape" }`), `light` (`{ "toward": [x, y, z] }` or `{ "yaw",
 /// "pitch" }` radians turning it), `clip` (`{ "clip"?: { "asset", "sub"? }
 /// | null, "time"?, "inPlace"?, "parameter"? }`: a clip or blend space on
-/// a hierarchy, seeked), `reload`, `stats`, and `setMaterial` /
+/// a hierarchy, seeked; or `{ "tree": { "blendTree" }, "values"?: { name:
+/// value } }`, a blend tree, ADR-0033), `travel` (`{ "clips": [{ "asset",
+/// "sub" }] }`: each clip's root travel per second), `reload`, `stats`,
+/// and `setMaterial` /
 /// `restoreMaterial` (as the edit-preview's: on every store).
 ///
 /// # Safety
@@ -595,6 +789,31 @@ fn stage_call(s: &mut FynkelAuthoringSession, stage: u32, kind: &str, args: &Val
                         time: 0.0,
                         in_place,
                         parameter,
+                        tree: None,
+                        values: Vec::new(),
+                    });
+                    reload = true;
+                }
+            } else if let Some(tree) = args.get("tree").filter(|t| !t.is_null()) {
+                // A blend tree (ADR-0033), played by a one-state
+                // controller of its own; a changed tree is a new one.
+                if slot.posed.as_ref().and_then(|p| p.tree.as_ref()) != Some(tree) {
+                    tree_controller(tree)?;
+                    slot.trees += 1;
+                    let in_place = slot.posed.as_ref().is_none_or(|p| p.in_place);
+                    let time = slot.posed.as_ref().map_or(0.0, |p| p.time);
+                    let values = slot
+                        .posed
+                        .as_mut()
+                        .map(|p| std::mem::take(&mut p.values))
+                        .unwrap_or_default();
+                    slot.posed = Some(Posed {
+                        clip: AssetRef::with_sub(TREE_PREVIEW, format!("tree/{}", slot.trees)),
+                        time,
+                        in_place,
+                        parameter: None,
+                        tree: Some(tree.clone()),
+                        values,
                     });
                     reload = true;
                 }
@@ -612,6 +831,17 @@ fn stage_call(s: &mut FynkelAuthoringSession, stage: u32, kind: &str, args: &Val
                     let value = f32_arg(args, "parameter")?;
                     if let Some(p) = &mut posed.parameter {
                         p.1 = value;
+                    }
+                }
+                if let Some(values) = args.get("values").and_then(Value::as_object) {
+                    for (name, v) in values {
+                        let value = v.as_f64().filter(|v| v.is_finite()).ok_or_else(|| {
+                            invalid(format!("stage: `values.{name}` must be a number"))
+                        })? as f32;
+                        match posed.values.iter_mut().find(|(n, _)| n == name) {
+                            Some(slot) => slot.1 = value,
+                            None => posed.values.push((name.clone(), value)),
+                        }
                     }
                 }
             }
@@ -633,6 +863,37 @@ fn stage_call(s: &mut FynkelAuthoringSession, stage: u32, kind: &str, args: &Val
                 Value::Null => json!({ "clip": null }),
                 v => v,
             }
+        }
+        "travel" => {
+            // Each clip's root travel on the subject, per second (ADR-0033:
+            // a blend tree's Compute Positions); null for a clip that does
+            // not load or keys no translation.
+            let slot = s.stage(stage)?;
+            let root = slot
+                .root
+                .ok_or_else(|| invalid("stage: this stage has nothing to play a clip on"))?;
+            let clips = args
+                .get("clips")
+                .and_then(Value::as_array)
+                .ok_or_else(|| invalid("stage: `clips` must be a list of { asset, sub }"))?;
+            let world = slot.world.core_mut();
+            let mut out = Vec::with_capacity(clips.len());
+            for c in clips {
+                let asset = asset_id(c.get("asset"), "clips[].asset")?;
+                let r = match c.get("sub").and_then(Value::as_str) {
+                    Some(sub) if !sub.is_empty() => AssetRef::with_sub(asset, sub),
+                    _ => AssetRef::new(asset),
+                };
+                let travel = assets
+                    .register_clip(&r, world)
+                    .ok()
+                    .and_then(|_| world.clip_root_travel(root, &r));
+                out.push(match travel {
+                    Some((v, yaw)) => json!({ "velocity": v.to_array(), "angularSpeed": yaw }),
+                    None => Value::Null,
+                });
+            }
+            json!({ "travel": out })
         }
         "reload" => s.stage(stage)?.load(&assets)?,
         "stats" => {
