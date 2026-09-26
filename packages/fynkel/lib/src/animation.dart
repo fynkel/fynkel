@@ -23,6 +23,10 @@ class AnimatorStateInfo {
     this.next,
     this.nextNormalizedTime = 0,
     this.transitionProgress = 0,
+    this.slot = '',
+    this.oneShot,
+    this.oneShotTime = 0,
+    this.oneShotWeight = 0,
   });
 
   factory AnimatorStateInfo.fromRecord(gen.AnimatorLayerStateRecord r) => AnimatorStateInfo(
@@ -33,6 +37,10 @@ class AnimatorStateInfo {
         next: r.inTransition ? r.next : null,
         nextNormalizedTime: r.nextNormalizedTime,
         transitionProgress: r.transitionProgress,
+        slot: r.slot,
+        oneShot: r.oneShot.isNone ? null : r.oneShot,
+        oneShotTime: r.oneShotTime,
+        oneShotWeight: r.oneShotWeight,
       );
 
   final int layer;
@@ -56,9 +64,21 @@ class AnimatorStateInfo {
 
   bool get isInTransition => next != null;
 
+  /// The layer's slot (ADR-0033 § 2): the layer's name.
+  final String slot;
+
+  /// The one-shot playing in the slot ([AnimationControl.playOneShot]),
+  /// or null; one blending out after a stop is not reported.
+  final AssetRef? oneShot;
+
+  /// Its normalized time, 0 → 1, and how much of it shows, 0 → 1.
+  final double oneShotTime;
+  final double oneShotWeight;
+
   @override
   String toString() => 'AnimatorStateInfo($layer: $name ${normalizedTime.toStringAsFixed(3)}'
-      '${next == null ? '' : ' → $next ${(transitionProgress * 100).round()}%'})';
+      '${next == null ? '' : ' → $next ${(transitionProgress * 100).round()}%'}'
+      '${oneShot == null ? '' : ' + one-shot ${(oneShotWeight * 100).round()}%'})';
 }
 
 /// One parameter of an Animator Controller and its value after the last

@@ -61,6 +61,12 @@ class States extends Behaviour {
     expect(event.entity, gameObject.entity);
     log.add('exit ${event.state}');
   }
+
+  @override
+  void onAnimationEnded(AnimationEnded event) {
+    expect(event.entity, gameObject.entity);
+    log.add('ended ${event.clip.sub}');
+  }
 }
 
 void copyTree(Directory from, Directory to) {
@@ -205,6 +211,50 @@ void main() {
     expect(seen.single.message, contains('the states: Idle, Jump'));
   });
 
+  test('a one-shot in the base slot: over the machine, stopped, played to its end', () {
+    final (w, rig, states) = withController();
+    final a = rig.animation;
+    const bob = AssetRef(rigAsset, sub: 'anim/bob');
+    expect(a.isPlayingOneShot(), isFalse);
+    expect(a.stateOf()!.slot, 'Base Layer');
+
+    a.playOneShot(bob, blendIn: 0.1, blendOut: 0.2);
+    expect(a.isPlayingOneShot(), isTrue, reason: 'read-your-writes');
+    expect(a.isPlayingOneShot(slot: 'Base Layer'), isFalse, reason: 'asked by the empty name');
+    ticks(w, 3);
+    var s = a.stateOf()!;
+    expect((s.name, s.oneShot), ('Idle', bob), reason: 'the machine keeps running under it');
+    expect(s.oneShotWeight, inExclusiveRange(0, 1), reason: 'blending in');
+    ticks(w, 10);
+    s = a.stateOf()!;
+    expect(s.oneShotWeight, closeTo(1, 1e-6));
+    expect(s.oneShotTime, inExclusiveRange(0, 0.5));
+    expect(a.isPlayingOneShot(slot: 'Base Layer'), isTrue);
+
+    a.stopOneShot(blendOut: 0.1);
+    expect(a.isPlayingOneShot(), isFalse);
+    w.frame(1 / 60);
+    expect(a.isPlayingOneShot(), isFalse, reason: 'one blending out does not count');
+    expect(a.stateOf()!.oneShot, isNull);
+    ticks(w, 10);
+    expect(states.log.where((l) => l.startsWith('ended')), isEmpty, reason: 'a stop is not an end');
+
+    // Played to its end (2 s): AnimationEnded, once.
+    a.playOneShot(bob);
+    ticks(w, 125);
+    expect(a.isPlayingOneShot(), isFalse);
+    expect(states.log.where((l) => l.startsWith('ended')), ['ended anim/bob']);
+    expect(a.stateOf()!.name, 'Idle');
+
+    // An unknown slot is the engine's diagnostic, with the slots.
+    w.throwOnDiagnostics = false;
+    final seen = <FynkelDiagnostic>[];
+    w.onDiagnostics = seen.addAll;
+    a.playOneShot(bob, slot: 'Arms');
+    w.frame(1 / 60);
+    expect(seen.single.message, contains('Base Layer'));
+  });
+
   test('an animator without a controller has no states or parameters', () {
     final w = fresh();
     expect(w.loadScene(rigScene, cacheDir: cache).ok, isTrue);
@@ -218,5 +268,8 @@ void main() {
     rig.animation.crossfade(const AssetRef(rigAsset, sub: 'anim/bob'), 0.1, looping: false);
     w.frame(1 / 60);
     expect(rig.animation.state!.clip, const AssetRef(rigAsset, sub: 'anim/bob'));
+    expect(() => rig.animation.playOneShot(const AssetRef(rigAsset, sub: 'anim/bob')),
+        throwsA(isA<StateError>().having((e) => e.message, 'message', contains('play the clip instead'))));
+    expect(rig.animation.isPlayingOneShot(), isFalse);
   });
 }

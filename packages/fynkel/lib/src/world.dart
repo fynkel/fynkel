@@ -1978,6 +1978,50 @@ class AnimationControl {
   /// another clip plays.
   void stop() => _go._animate(gen.AnimateOp.stop);
 
+  /// Plays [motion] (a clip or a blend space) once in a **slot** of the
+  /// animator's controller (ADR-0033 § 2): it covers the layer's state
+  /// machine — blending in over [blendIn] seconds, blending out over the
+  /// last [blendOut] — while the machine keeps running underneath, so it
+  /// is in the right state when the one-shot ends. [slot] is a layer's
+  /// name (empty: the base layer); a layer with no states shows only its
+  /// slot, which is how an upper-body attack plays over walking legs.
+  /// Another one-shot in the same slot blends from the one playing. Its
+  /// markers arrive as usual and [Behaviour.onAnimationEnded] fires at
+  /// its end (not after [stopOneShot]).
+  ///
+  /// An unknown slot is an `invalidPayload` diagnostic that lists the
+  /// slots. Throws a [StateError] on an animator without a controller:
+  /// [play] the clip there.
+  void playOneShot(AssetRef motion, {String slot = '', double blendIn = 0.1, double blendOut = 0.2, double speed = 1}) {
+    _needsController('playOneShot');
+    _go._animate(gen.AnimateOp.playOneShot, clip: motion, name: slot, seconds: blendIn, value: blendOut, speed: speed);
+    (_oneShots ??= {})[slot] = true;
+  }
+
+  /// Blends [slot]'s one-shot out over [blendOut] seconds.
+  void stopOneShot({String slot = '', double blendOut = 0.2}) {
+    _needsController('stopOneShot');
+    _go._animate(gen.AnimateOp.stopOneShot, name: slot, value: blendOut);
+    (_oneShots ??= {})[slot] = false;
+  }
+
+  /// Whether a one-shot plays in [slot] (one blending out after
+  /// [stopOneShot] does not count): what this tick asked, else the last
+  /// tick's.
+  bool isPlayingOneShot({String slot = ''}) {
+    if (_oneShots?[slot] case final asked?) return asked;
+    final all = layers;
+    final info = slot.isEmpty ? all.firstOrNull : all.where((l) => l.slot == slot).firstOrNull;
+    return info?.oneShot != null;
+  }
+
+  void _needsController(String call) {
+    if (!_controlled) {
+      throw StateError('animation.$call: ${_go.name} has no Animator Controller; a one-shot plays in a '
+          "controller's slot (play the clip instead)");
+    }
+  }
+
   /// Holds the current time; [resume] continues from it.
   void pause() => _go._animate(gen.AnimateOp.pause);
   void resume() => _go._animate(gen.AnimateOp.resume);
@@ -2116,6 +2160,10 @@ class AnimationControl {
   /// Values set since the last step (read-your-writes for the getters);
   /// cleared with the object's overlay after every step.
   Map<String, Object>? _pending;
+
+  /// One-shots played (true) or stopped (false) since the last step, by
+  /// slot.
+  Map<String, bool>? _oneShots;
 
   /// The controller's parameters as last read, for the setters' checks;
   /// read again on a miss (the animator may name another controller).
@@ -2285,6 +2333,7 @@ class GameObject {
     _componentsQueried = false;
     _presentMask = 0;
     _animation?._pending?.clear();
+    _animation?._oneShots?.clear();
   }
 
   /// The staged writer, seeded from the current local value when nothing is
