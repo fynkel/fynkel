@@ -1,6 +1,6 @@
 # ADR-0033: Animation v2 — blend trees, one-shot slots, typed parameters, sub-state machines, masks and IK
 
-**Status:** Proposed — by the assistant 2026-09-26 after the user's question ("should we have gone with a more complex system like Unreal's? … follow how Unity works but make it much better, not copy its limits") and "yes please let's go"; waiting for the user's confirmation  
+**Status:** Accepted — proposed by the assistant 2026-09-26 after the user's question ("should we have gone with a more complex system like Unreal's? … follow how Unity works but make it much better, not copy its limits") and "yes please let's go"; confirmed by the user 2026-09-26 ("ok cool let's go")  
 **Date:** 2026-09-26  
 **Related:** ADR-0032 (the Animator Controller; its § 9 lists what this ADR takes up), ADR-0026 (code-first; `ClipBuilder` still waits), ADR-0030 (Inspector previews), ADR-0016 (codegen), ADR-0029 (the optional animation and physics modules), `docs/animation.md`, `docs/animator.md`, `docs/roadmap.md` Phase 5
 
