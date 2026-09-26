@@ -150,14 +150,66 @@ void fixedUpdate(FixedUpdateContext context) {
 
 ## Layers
 
-A second layer plays over the first — for example, a wave on the arms
-while the legs keep walking. Each layer has its own graph. Its settings:
+A second layer plays over the first — for example, an aim pose on the
+arms while the legs keep walking. Each layer has its own graph. Its
+settings:
 
 - **Weight**: how much of it shows (0 to 1).
 - **Blending**: `override` replaces the pose below. `additive` adds
   the motion's change from its first frame.
 - **Root**: a node such as `spine`. The layer then moves only that node
   and the nodes under it. Empty moves the whole character.
+
+A layer may have **no states**. It then shows nothing until a one-shot
+plays in its slot (below).
+
+## Slots and one-shots
+
+Every layer has a **slot** with the layer's name. The window shows it
+in a row above the graph. A **one-shot** played into a slot covers that
+layer's states: it blends in, plays once and blends out. The states
+keep running under it, so the layer is in the right state when the
+one-shot ends. There is no need for an arrow from Any State for every
+attack or emote.
+
+```dart
+animation.playOneShot(attack, slot: 'UpperBody', blendIn: 0.1, blendOut: 0.2);
+animation.stopOneShot(slot: 'UpperBody');           // blends it out
+if (animation.isPlayingOneShot(slot: 'UpperBody')) { … }
+```
+
+- `slot` is a layer's name; empty is the base layer.
+- The motion is a clip or a blend space.
+- The clip's markers arrive as usual. `onAnimationEnded` fires when it
+  reaches its end (not after `stopOneShot`).
+- A second one-shot in the same slot blends from the first.
+- The usual way to play an attack or a wave over walking legs: add a
+  layer named `UpperBody`, set its Root to `spine`, give it no states,
+  and play the one-shot there.
+- `play(clip)` and `crossfade(clip)` still refuse an animator with a
+  controller. A one-shot is how to play a clip over one.
+
+During Play the slot row shows the one-shot playing, how much of it
+shows and how far it has played.
+
+### Clips made in code
+
+A clip can be made in Dart and played the same way:
+
+```dart
+final wave = world.createClip((ClipBuilder()
+      ..rotation('upperarm_r', {0: rest, 0.25: raised, 0.75: raised, 1: rest})
+      ..marker(0.25, 'hello'))
+    .build());
+animation.playOneShot(wave, slot: 'UpperBody');
+```
+
+`ClipBuilder` keys a node's `position`, `rotation` or `scale` as
+`{seconds: value}` (linear, or `ClipInterpolation.step`), by the node's
+name under the animator. The clip is as long as its last key unless
+`ClipBuilder(length:)` says otherwise. `world.setClip` changes it and
+`world.destroyClip` removes it. It lasts across scene loads. An
+`Animator`'s `clip` and `animation.play` take it too.
 
 ## In Play
 
@@ -178,8 +230,12 @@ changes are not saved.
   while facing the camera.
   The `jump` trigger goes to Jump; `grounded` being true goes back.
   `game.Player` only sets `speed`, `grounded` and `jump`
-  (`lib/game/player.dart`).
+  (`lib/game/player.dart`). The `UpperBody` layer (Root `spine`, no
+  states) is the wave's slot: the wave key plays the wave clip there.
+
 - **The showcase's Runner**
   (`examples/showcase/assets/models/runner.controller.json`): Run for
   four loops, then Jump once, then Run again. It uses exit times only,
-  so it needs no code at all.
+  so it needs no code at all. Every 3 s `game.Waver`
+  (`lib/game/waver.dart`) plays a wave made in code in its `UpperBody`
+  slot.

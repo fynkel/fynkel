@@ -526,6 +526,40 @@ shallowest translation channel, the one root motion takes, and its
 yaw): the editor's Compute Positions reads it through the preview
 stage's `travel` call.
 
+## Slots and one-shots (ADR-0033)
+
+Every layer of a controller has a slot named after the layer
+([animator.md](animator.md) § Slots and one-shots is the guide). The
+`Animate` ops `PlayOneShot { motion, slot, blend_in, blend_out, speed }`
+and `StopOneShot { slot, blend_out }` drive it; an empty slot is the
+base layer. Each layer keeps the one-shot playing and, after a stop or
+a replacement, the one blending out.
+
+- A one-shot's weight is `in × out`: `in` rises over `blend_in` from
+  its start, `out` falls over the last `blend_out` of its length (or
+  over `blend_out` from a stop).
+- **A layer with states**: the one-shot's pose is blended over the
+  state machine's by that weight; a node the one-shot does not key
+  keeps the machine's pose. The machine keeps ticking under it.
+- **A layer without states**: the one-shot is the layer's pose, and the
+  layer shows by its weight times the one-shot's.
+- Markers come from the one-shot (its leading leaf for a blend space)
+  while it is not stopped. `AnimationEnded` fires at its natural end
+  only. A one-shot moves no root.
+- Refused with a diagnostic that says why: an unknown slot (the message
+  lists the layers), blends that are not finite and ≥ 0, a motion the
+  world does not have, an animator without a controller.
+- The layer state record carries `slot`, `one_shot`, `one_shot_time`
+  (normalized) and `one_shot_weight`; Dart reads them as
+  `AnimatorStateInfo.slot`/`oneShot`/`oneShotTime`/`oneShotWeight`.
+
+**Clips made in code.** `fynkel_world_set_clip(world, id, payload,
+len)` registers an `ANIM` payload as the runtime clip `id`, on the
+asset store (read before cooked clips, kept across clears and scene
+loads) and the world at once; an invalid clip is refused and the old
+one kept, an empty payload removes it. Dart's `ClipBuilder` writes the
+payload and `world.createClip`/`setClip`/`destroyClip` call it.
+
 ## Import and the cache
 
 The glTF importer (`fynkel.gltf` **version 5**; `docs/documents.md`)
@@ -604,7 +638,7 @@ code only sets parameters:
 
 ```dart
 class Player extends Behaviour {
-  @Expose() String waveLayer = 'spine';              // the entity carrying the wave layer's animator
+  @Expose() AssetRef wave = AssetRef.none;           // played in the UpperBody slot
 
   @override
   void fixedUpdate(FixedUpdateContext c) {
@@ -618,8 +652,7 @@ class Player extends Behaviour {
       ..setBool('grounded', me.grounded && !jumped);           // Jump → Locomotion on landing
     if (jumped) animation.setTrigger('jump');                  // Locomotion → Jump
     if (Input.pressed('wave')) {
-      final layer = gameObject.findDescendant(waveLayer)!;       // the layer is an entity
-      layer.animation.play(layer.get<Animator>()!.clip, looping: false);   // additive: the arm over the walk
+      animation.playOneShot(wave, slot: 'UpperBody');          // the arm over the walk (ADR-0033 § 2)
     }
   }
 

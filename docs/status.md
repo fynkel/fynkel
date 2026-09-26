@@ -1376,7 +1376,14 @@ allocating; the editor's Inspector edits it (type, parameters, the map
 with the live red dot, the children, Compute Positions, the preview on
 the model) and the Animator window makes one (From New Blend Tree…).
 The reference game's Player gains an aim mode that strafes on a
-freeform directional tree. Next: slots (`playOneShot`), typed
+freeform directional tree. **Step 2, slots, is done** (2026-09-26):
+every layer has a slot, `animation.playOneShot`/`stopOneShot`/
+`isPlayingOneShot` play a clip or blend space once over the layer's
+state machine, a layer may have no states, and the Animator window
+shows the slot and the running one-shot. Clips can be made in code
+(`ClipBuilder`, `world.createClip`), which closes ADR-0026's last item.
+The reference game's wave is a one-shot in an `UpperBody` slot, and the
+showcase's Runner waves with a clip made in code. Next: typed
 parameters, sub-state machines and interruptions, masks and IK.
 
 **Tags and layers** (ADR-0020, 2026-09-23) come in while the joint R3a +
