@@ -45,6 +45,11 @@ git — the generator is the source):
   Fountain               an `Emitter` at the field's centre: 10 Sparks/s
                           (assets/prefabs/spark.prefab.json, a small dynamic
                           cube) launched upwards, 4 s each, 40 alive at most
+  Global Volume          the showcase's look (assets/volumes/look.volume.json:
+                          ambient occlusion, bloom, colour grading, contact
+                          shadows — R3a–R3d measured at stress scale; since
+                          1a5e266 a scene without a volume draws no post
+                          effects). --no-look leaves it out
   floor (a box Collider: the ground the bodies land on), sun (casting),
   Environment, one perspective camera over the field. The movers carry
   box colliders too (5 500 colliders in the broad phase), so the bodies
@@ -81,6 +86,7 @@ Usage: python3 benchmarks/stress/generate.py [--out DIR] [--static 5000]
        [--bodies 500] [--behaviours 300] [--rigs 200] [--seed 1] [--app]
        [--no-movers]   (the statics stand still: the item 6/8 baseline)
        [--lights 0]    (the many-lights variant, E1)
+       [--no-look]     (no Global Volume: no post effects)
 """
 import argparse
 import json
@@ -102,6 +108,7 @@ PROJECT_ID = uuid.UUID("5b6a1c2e-0000-4000-8000-00000000c0de")
 SCENE_ID = uuid.UUID("5b6a1c2e-0000-4000-8000-0000000005ce")
 SPARK_ID = uuid.UUID("5b6a1c2e-0000-4000-8000-00000000fab1")
 BLEND_ID = uuid.UUID("5b6a1c2e-0000-4000-8000-00000000b1e0")
+LOOK_ID = uuid.UUID("5b6a1c2e-0000-4000-8000-00000000100c")
 CHARACTER = json.loads((REFERENCE / "assets/models/character.glb.meta.json").read_text())["id"]  # the box character
 CUBE_GLB = "f74c43aa-7e0b-4a48-a124-ef002a901e34"   # showcase cube.glb (mesh/Cube)
 ROBOT_GLB = "0b89f746-0ebe-4a88-b91f-e632b7c7e9e1"  # showcase robot.glb (mesh/Cube, mesh/PyramidAndQuad/0 pyramid, …/1 quad)
@@ -242,6 +249,16 @@ def locomotion_blend():
             "sync": "phase"}
 
 
+def look_volume():
+    """The showcase's look (R3a–R3d): every post effect on, as a game has."""
+    return {"$schema": "https://fynkel.dev/schemas/volume.schema.json", "formatVersion": 1,
+            "id": str(LOOK_ID), "name": "Stress Look",
+            "ambientOcclusion": {"radius": 0.9, "intensity": 1.6},
+            "bloom": {"intensity": 1.0, "threshold": 0.7, "scatter": 0.7},
+            "colorGrading": {"temperature": 20, "contrast": 15, "saturation": 5},
+            "contactShadows": {"intensity": 1.0, "length": 0.3}}
+
+
 def spark_prefab():
     """A small dynamic cube the Fountain emits (item 10)."""
     k, v = entity("Spark", [transform((0, 0, 0), scale=(0.3, 0.3, 0.3)), mesh_renderer("cube", "body"),
@@ -262,7 +279,7 @@ def project_doc():
               "fynkel.PointLight", "fynkel.SpotLight", "fynkel.Environment", "fynkel.RigidBody", "fynkel.Collider",
               "fynkel.CharacterController", "fynkel.ThirdPersonCamera", "fynkel.Rotator", "fynkel.Oscillate",
               "fynkel.Follow", "fynkel.LookAtCamera", "fynkel.LifetimeDespawn", "fynkel.Emitter",
-              "fynkel.TriggerZone", "fynkel.Animator", "fynkel.Skin"]
+              "fynkel.TriggerZone", "fynkel.Animator", "fynkel.Skin", "fynkel.Volume"]
     return {
         "$schema": "https://fynkel.dev/schemas/project.schema.json", "formatVersion": 2,
         "id": str(PROJECT_ID), "name": "Fynkel Stress", "startupScene": {"asset": str(SCENE_ID)},
@@ -279,7 +296,7 @@ def project_doc():
     }
 
 
-def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, movers=True, n_lights=0):
+def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, movers=True, n_lights=0, look=True):
     rng = random.Random(seed)
     entities = {}
 
@@ -311,6 +328,10 @@ def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, mover
                 {"type": "fynkel.DirectionalLight", "version": 1, "data": {"color": [1.0, 0.95, 0.85], "intensity": 10000.0, "cast_shadows": True}}])
     add("Environment", [{"type": "fynkel.Environment", "version": 1, "data": {
         "ambient_color": [0.55, 0.65, 0.9], "ambient_intensity": 2500.0, "sky": None, "sky_intensity": 0.0, "sky_rotation": 0.0}}])
+    if look:
+        add("Global Volume", [transform((0, 0, 0)), {"type": "fynkel.Volume", "version": 1, "data": {
+            "profile": {"asset": str(LOOK_ID)}, "shape": "global", "size": [10.0, 10.0, 10.0], "radius": 5.0,
+            "blend_distance": 1.0, "weight": 1.0, "priority": 0, "enabled": True}}])
     add("Floor", [transform((0, -0.1, 0), scale=(FIELD_W + 20, 0.2, FIELD_D + 20)), mesh_renderer("cube", "floor", cast=False),
                   collider()])
     if movers:
@@ -440,11 +461,13 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--app", action="store_true", help="wrap the project in the `fynkel create` starter app so it runs on a device")
     ap.add_argument("--no-movers", action="store_true", help="no catalogue components: the statics stand still (the item 6/8 baseline)")
+    ap.add_argument("--no-look", action="store_true", help="no Global Volume: the scene draws no post effects")
     a = ap.parse_args()
     out = a.out
     if a.app:
         create_app(out)
-    for d in ("assets/models", "assets/materials", "assets/scenes", "assets/prefabs", "assets/textures", "assets/audio"):
+    for d in ("assets/models", "assets/materials", "assets/scenes", "assets/prefabs", "assets/textures", "assets/audio",
+              "assets/volumes"):
         (out / d).mkdir(parents=True, exist_ok=True)
     for f in ("cube.glb", "cube.glb.meta.json", "robot.glb", "robot.glb.meta.json"):
         shutil.copyfile(SHOWCASE / "assets/models" / f, out / "assets/models" / f)
@@ -473,7 +496,13 @@ def main():
         if not (out / ".gitignore").exists():  # an earlier --app run keeps the starter's
             (out / ".gitignore").write_text(".fynkel/\n")
     (out / "fynkel.project.json").write_text(json.dumps(project, indent=2) + "\n")
-    scene = scene_doc(a.static, a.bodies, a.behaviours, a.rigs, a.seed, orbit=a.app, movers=not a.no_movers, n_lights=a.lights)
+    look = out / "assets/volumes/look.volume.json"
+    if a.no_look:
+        look.unlink(missing_ok=True)
+    else:
+        look.write_text(json.dumps(look_volume(), indent=2) + "\n")
+    scene = scene_doc(a.static, a.bodies, a.behaviours, a.rigs, a.seed, orbit=a.app, movers=not a.no_movers,
+                      n_lights=a.lights, look=not a.no_look)
     (out / "assets/scenes/stress.scene.json").write_text(json.dumps(scene) + "\n")
     (out / "assets/prefabs/spark.prefab.json").write_text(json.dumps(spark_prefab(), indent=2) + "\n")
     if a.app:
