@@ -281,9 +281,11 @@ final class CodegenCheck extends ChangeNotifier {
   /// The command line [regenerateAssets] runs.
   List<String> assetsArguments() => ['codegen', '--project', projectDir, '--assets-only', '--json'];
 
-  /// Keeps `lib/generated/assets.g.dart` (ADR-0026 §3) matching the
-  /// project's assets: [delay] after anything under [assetsDir] is
-  /// created, imported, renamed or deleted, runs `fynkel codegen
+  /// Keeps `lib/generated/assets.g.dart` (ADR-0026 §3) and
+  /// `animators.g.dart` (ADR-0033 § 3: a saved Animator Controller's typed
+  /// parameters, states and slots) matching the project's assets: [delay]
+  /// after anything under [assetsDir] is created, imported, renamed or
+  /// deleted, runs `fynkel codegen
   /// --assets-only`, which scans the assets and rewrites the file only when
   /// it changed — no build_runner, so it is quick. Game code then names the
   /// new asset as `Assets.…` without anyone running codegen.
