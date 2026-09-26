@@ -41,8 +41,8 @@ pub mod contract;
 mod header;
 pub mod layout;
 
-pub use check::{assemble, check, Assembled};
-pub use contract::CONTRACT;
+pub use check::{assemble, check, top_level_names, validate, Assembled};
+pub use contract::{is_engine_name, CONTRACT, ENGINE_NAMES};
 pub use header::parse;
 pub use layout::{Field, Layout};
 
@@ -303,6 +303,14 @@ impl Shader {
     /// The WGSL after the header.
     pub fn body(&self) -> &str {
         &self.text[self.body_start..]
+    }
+
+    /// Whether the code defines `vertex()` (the engine calls it before
+    /// placing each vertex).
+    pub fn has_vertex(&self) -> bool {
+        check::declarations(self.body())
+            .iter()
+            .any(|(name, _)| *name == "vertex")
     }
 }
 

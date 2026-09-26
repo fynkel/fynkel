@@ -27,6 +27,60 @@ use crate::{Interface, ValueType};
 /// written against it is a new version.
 pub const CONTRACT: &str = "surface@1";
 
+/// Top-level names of the engine's own WGSL that a shader's module is
+/// compiled with (`fynkel_render`: the frame, the mesh stage, the light
+/// and the entry points). A shader's code may not declare them, nor any
+/// name starting with `fynkel`/`Fynkel`; `fynkel_render`'s tests hold
+/// this list to its WGSL.
+pub const ENGINE_NAMES: &[&str] = &[
+    "CASCADES",
+    "Cascade",
+    "CascadeHit",
+    "Frame",
+    "GRAY_DIM",
+    "Grade",
+    "LIGHT_POINT",
+    "LIGHT_POOL",
+    "LIGHT_SPOT",
+    "Light",
+    "LitSurface",
+    "MAX_LIGHTS",
+    "PI",
+    "VsIn",
+    "VsOut",
+    "VsSkin",
+    "brdf_lut",
+    "cascade_project",
+    "cube_sampler",
+    "d_ggx",
+    "f_schlick",
+    "frame",
+    "fullscreen",
+    "grayed",
+    "instance_lights",
+    "irradiance_cube",
+    "joints",
+    "light_surface",
+    "punctual",
+    "rotate_sky",
+    "shade",
+    "shadow_map",
+    "shadow_pcf",
+    "shadow_sampler",
+    "specular_cube",
+    "srgb_encode",
+    "ssao_tex",
+    "sun_visibility",
+    "v_smith",
+    "vs_main",
+    "vs_skinned",
+];
+
+/// Whether a shader's code may not declare `name` at the top level.
+pub fn is_engine_name(name: &str) -> bool {
+    ENGINE_NAMES.contains(&name) || name.to_ascii_lowercase().starts_with("fynkel")
+}
+
 /// The fixed part of the prelude: the types every body sees.
 pub const PRELUDE_TYPES: &str = r#"// surface@1 (ADR-0031): written by the engine above the shader's body.
 

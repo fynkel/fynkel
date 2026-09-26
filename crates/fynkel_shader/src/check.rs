@@ -79,6 +79,7 @@ pub fn check(path: Option<&str>, text: &str) -> Result<Shader, Vec<Diagnostic>> 
         }
     };
     let has_vertex = signatures(&shader, &module, &bare, text).map_err(|d| vec![doc(d)])?;
+    engine_names(&shader, text).map_err(|d| vec![doc(d)])?;
 
     // Then the whole with the check's entry points, validated.
     let checked = assemble(&shader, &check_entries(has_vertex));
@@ -164,6 +165,108 @@ fn signatures(
             ));
     }
     wants("vertex", "VertexInput", "VertexInput")
+}
+
+/// A top-level name of the body's that the engine's own WGSL declares
+/// ([`crate::contract::ENGINE_NAMES`]): the renderer's module would not
+/// compile, so the check refuses it here, at its line. Read from the text
+/// (naga folds an unused abstract `const` away).
+fn engine_names(shader: &Shader, text: &str) -> Result<(), Diagnostic> {
+    for (name, at) in declarations(shader.body()) {
+        if crate::contract::is_engine_name(name) {
+            let (line, column) = line_col(text, shader.body_start + at);
+            return Err(Diagnostic::error(
+                Code::SHADER_COMPILE,
+                format!("`{name}` is a name the engine's shader code uses; rename it"),
+            )
+            .at(line, column));
+        }
+    }
+    Ok(())
+}
+
+/// The names WGSL `code` declares at the top level (`fn`, `struct`,
+/// `const`, `var`, `alias`, `override`) with their byte offsets.
+pub(crate) fn declarations(code: &str) -> Vec<(&str, usize)> {
+    let b = code.as_bytes();
+    let ident = |i: usize| {
+        let end = b[i..]
+            .iter()
+            .position(|c| !(c.is_ascii_alphanumeric() || *c == b'_'))
+            .map_or(b.len(), |n| i + n);
+        (&code[i..end], end)
+    };
+    let mut out = Vec::new();
+    let (mut i, mut depth, mut want_name) = (0, 0i32, false);
+    while i < b.len() {
+        match b[i] {
+            b'/' if b.get(i + 1) == Some(&b'/') => {
+                i = b[i..].iter().position(|c| *c == b'\n').map_or(b.len(), |n| i + n);
+            }
+            b'/' if b.get(i + 1) == Some(&b'*') => {
+                i = code[i + 2..].find("*/").map_or(b.len(), |n| i + 2 + n + 2);
+            }
+            b'{' | b'(' => {
+                depth += 1;
+                i += 1;
+            }
+            b'}' | b')' => {
+                depth -= 1;
+                i += 1;
+            }
+            b'<' if want_name => {
+                // `var<uniform>`: the address space before the name.
+                i = b[i..].iter().position(|c| *c == b'>').map_or(b.len(), |n| i + n + 1);
+            }
+            c if c.is_ascii_alphabetic() || c == b'_' => {
+                let (word, end) = ident(i);
+                if want_name {
+                    out.push((word, i));
+                    want_name = false;
+                } else if depth == 0 {
+                    want_name =
+                        matches!(word, "fn" | "struct" | "const" | "var" | "alias" | "override");
+                }
+                i = end;
+            }
+            c if c.is_ascii_digit() => i = ident(i).1,
+            _ => i += 1,
+        }
+    }
+    out
+}
+
+/// The names `source` declares at the top level: functions, types,
+/// constants and globals (for `fynkel_render`'s check of
+/// [`crate::contract::ENGINE_NAMES`]).
+pub fn top_level_names(source: &str) -> Result<Vec<String>, String> {
+    let m = naga::front::wgsl::parse_str(source).map_err(|e| e.emit_to_string(source))?;
+    let mut names: Vec<String> = Vec::new();
+    names.extend(m.functions.iter().filter_map(|(_, f)| f.name.clone()));
+    names.extend(m.entry_points.iter().map(|e| e.name.clone()));
+    names.extend(m.types.iter().filter_map(|(_, t)| t.name.clone()));
+    names.extend(m.constants.iter().filter_map(|(_, c)| c.name.clone()));
+    names.extend(
+        m.global_variables
+            .iter()
+            .filter_map(|(_, g)| g.name.clone()),
+    );
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
+/// Parses and validates a whole WGSL module — the renderer's assembled
+/// shader, before it reaches the GPU.
+pub fn validate(source: &str) -> Result<(), String> {
+    let module = naga::front::wgsl::parse_str(source).map_err(|e| e.emit_to_string(source))?;
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::default(),
+    )
+    .validate(&module)
+    .map_err(|e| e.emit_to_string(source))?;
+    Ok(())
 }
 
 /// The check's entry points: `surface` in a fragment stage, `vertex` in a
@@ -272,6 +375,22 @@ mod tests {
         assert_eq!(d.document.as_deref(), Some("t.shader"));
         assert_eq!(d.line, Some(13), "{d:#?}");
         assert!(d.message.contains("base_colour"), "{}", d.message);
+    }
+
+    #[test]
+    fn the_engines_names_are_refused_at_their_line() {
+        // `shade` is the light's own function; line 12 declares it.
+        let text = with_body(
+            "\nfn surface(in: SurfaceInput) -> Surface {\n    return default_surface();\n}\nfn shade(x: f32) -> f32 {\n    return x;\n}\n",
+        );
+        let d = one_error(&text);
+        assert_eq!(d.code.as_str(), "FYN-D0313");
+        assert_eq!(d.line, Some(14), "{d:#?}");
+        assert!(d.message.contains("`shade`"), "{}", d.message);
+        let text = with_body(
+            "\nfn surface(in: SurfaceInput) -> Surface {\n    return default_surface();\n}\nconst fynkel_x = 1.0;\n",
+        );
+        assert!(one_error(&text).message.contains("fynkel_x"));
     }
 
     #[test]
