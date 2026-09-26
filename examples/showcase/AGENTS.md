@@ -271,8 +271,11 @@ character) instances the file's node hierarchy — `prefab: { asset:
 own nodes: `Character` → `Body` with `fynkel.Skin { skin, skeleton:
 "hips" }` and the joints `hips` → `spine` → `head`, the arms and the legs
 in their bind pose; the suit is a `setField` override on the body's
-renderer (`node/Character/Body/renderer`, `material`). Its animator loops `anim/run`
-(run) in place — clips are authored in place, whatever moves the entity
+renderer (`node/Character/Body/renderer`, `material`). Its animator runs an
+Animator Controller (`assets/models/runner.controller.json`, ADR-0032):
+Run loops `anim/run` in place for four laps, then Jump plays `anim/jump`
+once and Run comes back, both on exit times — no code (open it in the
+editor's Animator window) — clips are authored in place, whatever moves the entity
 moves it, unless the `Animator` opts into `rootMotion` (the root's planar
 travel and yaw taken out of the pose and fed to a `CharacterController`
 or the transform); a second `Animator` on a child entity is a layer

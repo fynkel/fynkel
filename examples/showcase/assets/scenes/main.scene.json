@@ -1582,7 +1582,10 @@
               "playing": true,
               "weight": 1.0,
               "additive": false,
-              "root_motion": false
+              "root_motion": false,
+              "controller": {
+                "asset": "a690f374-02ba-4a92-a8b7-0b9a6bd443e9"
+              }
             }
           }
         ]

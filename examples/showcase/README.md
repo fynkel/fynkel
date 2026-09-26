@@ -40,8 +40,10 @@ What is in the scene (`assets/scenes/main.scene.json`):
   sub: "prefab" }`, so `Character` → `Body` (with the `fynkel.Skin`) and
   `hips` → `spine` → `head`, the limbs, are the glTF's nodes — with the
   suit as a material override on the body's renderer and a
-  `fynkel.Animator` looping the `run` clip in place (M3-19a; before it
-  the same tree was authored by hand) — the skinned pipeline variants,
+  `fynkel.Animator` running an Animator Controller
+  (`assets/models/runner.controller.json`: the `run` clip in place for
+  four laps, then the `jump` once, on exit times — no code; ADR-0032)
+  (M3-19a; before it the same tree was authored by hand) — the skinned pipeline variants,
   the joint palette and a skinned caster in the shadow map (M3-19)
 - a **camera** that orbits the scene (`game.Orbit`, `lib/game/orbit.dart`)
   so shadows and the transparent sort are seen moving; its authored

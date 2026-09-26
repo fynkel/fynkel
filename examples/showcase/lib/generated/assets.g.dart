@@ -208,6 +208,8 @@ final class _AssetsModels {
   _AssetsModelsCube get cube => const _AssetsModelsCube();
   /// `models/robot.glb` (fynkel.gltf) and its parts
   _AssetsModelsRobot get robot => const _AssetsModelsRobot();
+  /// `models/runner.controller.json` (controller)
+  AssetRef get runner => const AssetRef('a690f374-02ba-4a92-a8b7-0b9a6bd443e9');
 }
 
 final class _AssetsScenes {
