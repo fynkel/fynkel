@@ -542,7 +542,27 @@ impl Assets {
     pub fn override_material(&self, r: &AssetRef, m: PbrMaterial) {
         let mut s = self.lock();
         s.materials.insert(r.clone(), Arc::new(m));
+        // A shader asset's material switched to the built-in.
+        if let Some(Some(_)) = s.custom_materials.insert(r.clone(), None) {
+            s.note_material_change(r);
+        }
         s.live_edits += 1;
+    }
+
+    /// `m` in place of the cooked material `r` until [`restore_material`]
+    /// — the editor's live Inspector edit of a shader asset's material
+    /// (ADR-0031), as [`override_material`] for a `fynkel.pbr@1` one. New
+    /// values alone rewrite the material's uniform (see
+    /// [`materials_changed_since`]).
+    ///
+    /// [`restore_material`]: Assets::restore_material
+    /// [`override_material`]: Assets::override_material
+    /// [`materials_changed_since`]: Assets::materials_changed_since
+    pub fn override_custom_material(&self, r: &AssetRef, m: CustomMaterialPayload) {
+        let mut s = self.lock();
+        s.materials.remove(r);
+        s.custom_materials.insert(r.clone(), Some(Arc::new(m)));
+        s.note_material_change(r);
     }
 
     /// `m` as the runtime material `r` (`world.createMaterial`, ADR-0026
@@ -580,14 +600,15 @@ impl Assets {
         s.note_material_change(r);
     }
 
-    /// Bumps on every [`set_runtime_custom_material`].
+    /// Bumps on every [`set_runtime_custom_material`] and every live edit
+    /// of a shader asset's material.
     ///
     /// [`set_runtime_custom_material`]: Assets::set_runtime_custom_material
     pub fn material_edits(&self) -> u64 {
         self.lock().material_edits
     }
 
-    /// The runtime shader materials set or removed after the
+    /// The shader materials set, edited live or removed after the
     /// [`material_edits`] count `seen`.
     ///
     /// [`material_edits`]: Assets::material_edits
@@ -680,6 +701,9 @@ impl Assets {
     pub fn restore_material(&self, r: &AssetRef) {
         let mut s = self.lock();
         s.materials.remove(r);
+        if s.custom_materials.remove(r).is_some() {
+            s.note_material_change(r);
+        }
         s.live_edits += 1;
     }
 
