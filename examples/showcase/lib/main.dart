@@ -17,8 +17,9 @@
 // copy the app bundles (fynkel_cache/, unpacked at start-up) — which is
 // how the same build runs on an iPhone.
 // Q cycles the project's quality profiles (fynkel.project.json `quality`);
-// 1–4 switch between the showcase and the example shaders' scenes
-// (dissolve, water, rim light: assets/shaders/); Space pauses and resumes
+// 1–4 (or the buttons at the bottom, on a phone) switch between the
+// showcase and the example shaders' scenes (dissolve, water, rim light:
+// assets/shaders/); Space pauses and resumes
 // the orbit. The `move` action (A/D, the left
 // stick, the touch overlay's stick on a phone) scrubs the orbit.
 
@@ -64,6 +65,9 @@ class _GamePageState extends State<GamePage> {
   FynkelViewportController? _viewport;
   FynkelFrameStats? _stats;
   final _input = FynkelInputCapture();
+
+  /// Whether a tap folded the HUD to its first lines.
+  bool _hudFolded = false;
 
   /// The orbit's authored speed while paused (0 = paused).
   double _pausedSpeed = 0;
@@ -190,18 +194,44 @@ class _GamePageState extends State<GamePage> {
               ],
             ),
             TouchOverlay.fromActions(game.report.inputActions, input: _input),
+            // The scenes as buttons too, for a phone (no number keys there).
+            SafeArea(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 170),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      for (final MapEntry(key: name, value: id) in Game.scenes.entries)
+                        FilledButton.tonal(
+                          key: Key('scene.$name'),
+                          onPressed: () => setState(() => game.loadScene(id)),
+                          child: Text(name),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
             Padding(
               padding: const EdgeInsets.all(16),
               child: Align(
                 alignment: Alignment.topLeft,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.55),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Hud(game: game, stats: _stats, viewport: _viewport!),
+                // A tap folds the HUD to its first lines (a phone's screen).
+                child: GestureDetector(
+                  onTap: () => setState(() => _hudFolded = !_hudFolded),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Hud(game: game, stats: _stats, viewport: _viewport!, folded: _hudFolded),
+                    ),
                   ),
                 ),
               ),
@@ -215,11 +245,14 @@ class _GamePageState extends State<GamePage> {
 
 /// The HUD: ordinary Flutter widgets composited over the 3D viewport.
 class Hud extends StatelessWidget {
-  const Hud({super.key, required this.game, required this.stats, required this.viewport});
+  const Hud({super.key, required this.game, required this.stats, required this.viewport, this.folded = false});
 
   final Game game;
   final FynkelFrameStats? stats;
   final FynkelViewportController viewport;
+
+  /// Only the title and the scene line (a tap on the HUD toggles it).
+  final bool folded;
 
   @override
   Widget build(BuildContext context) {
@@ -267,7 +300,7 @@ class Hud extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [for (final l in lines) Text(l, style: style)],
+      children: [for (final l in folded ? lines.take(2) : lines) Text(l, style: style)],
     );
   }
 }

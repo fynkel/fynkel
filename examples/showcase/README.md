@@ -57,8 +57,9 @@ Three example shaders (ADR-0031) live in `assets/shaders/`, each shown in
 its own small scene. A `.shader` file is a short header — the name in the
 material's Shader menu, the lighting, the alpha modes, the properties —
 then plain WGSL: `surface()` says what the surface is and the engine
-lights it. In the app, keys 1–4 switch between the showcase and these
-scenes.
+lights it. In the app, keys 1–4 — or the buttons at the bottom of the
+screen, on a phone — switch between the showcase and these scenes; a tap
+on the HUD folds it.
 
 | Shader | Scene | What it shows |
 | --- | --- | --- |
