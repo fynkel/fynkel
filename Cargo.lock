@@ -1116,6 +1116,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fynkel_shader"
+version = "0.0.1"
+dependencies = [
+ "fynkel_contracts",
+ "naga",
+]
+
+[[package]]
 name = "fynkel_wire"
 version = "0.0.1"
 dependencies = [

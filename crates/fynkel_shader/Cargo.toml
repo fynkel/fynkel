@@ -1,0 +1,11 @@
+[package]
+name = "fynkel_shader"
+description = "`.shader` files (ADR-0031): the header's parser, the `surface@1` contract, the property layout and the assembled WGSL checked by naga, with every error at its line in the file. One place for the cooker, the renderer and the CLI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+fynkel_contracts.workspace = true
+naga = { version = "30.0.1", features = ["wgsl-in"] }
