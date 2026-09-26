@@ -14,7 +14,7 @@ use fynkel_document::asset::{asset_refs, entry_json, sidecar_path, source_path};
 use fynkel_document::migrate::migrated_json;
 use fynkel_document::{
     diagnostics_json, AssetDatabase, AssetKind, Document, DocumentKind, Lock, Migrations, Project,
-    SchemaSet, ShaderLibrary, ShaderManifest,
+    SchemaSet, ShaderLibrary,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -71,9 +71,6 @@ pub struct OpenProject {
     /// add. What a document's references resolve against
     /// ([`OpenProject::resolving_assets`]).
     with_builtins: Option<AssetDatabase>,
-    /// Every shader manifest document under the asset root (a material
-    /// may name them; rebuilt into a library per open document).
-    shader_docs: Vec<Document>,
     /// Every reference every document under the asset root makes.
     pub references: Vec<Reference>,
     /// `behaviours.g.json` when the project has one.
@@ -147,7 +144,6 @@ impl OpenProject {
             assets: AssetDatabase::default(),
             package_assets: AssetDatabase::default(),
             with_builtins: None,
-            shader_docs: Vec::new(),
             references: Vec::new(),
             metadata: None,
             schema_sources: HashMap::new(),
@@ -275,13 +271,16 @@ impl OpenProject {
     }
 
     /// The shader library a material document is validated against: the
-    /// built-ins plus every manifest under the asset root that validates.
+    /// built-ins plus every `.shader` file under the asset root that
+    /// compiles (ADR-0031).
     pub fn shaders(&self) -> ShaderLibrary {
         let mut shaders = ShaderLibrary::builtin();
-        for doc in &self.shader_docs {
-            let manifest = ShaderManifest::from_document(doc.clone());
-            if !fynkel_contracts::has_errors(&manifest.validate(&self.schemas)) {
-                shaders.add(manifest);
+        for e in self.assets.entries() {
+            if matches!(&e.kind, AssetKind::Source { importer, .. } if importer == fynkel_document::asset::SHADER_IMPORTER) {
+                let file = e.file(self.assets.root());
+                if let Ok(m) = fynkel_document::material::read_shader_file(e.id, &e.path, &file) {
+                    shaders.add(m);
+                }
             }
         }
         shaders
@@ -638,37 +637,15 @@ impl OpenProject {
 
     // ------------------------------------------------------------ indexing
 
-    /// Reads the documents under the asset root for their references and
-    /// shader manifests — all of them, or the ones at the given relative
+    /// Reads the documents under the asset root for their references — all
+    /// of them, or the ones at the given relative
     /// paths (their previous entries dropped first).
     fn index_documents(&mut self, only: Option<&[String]>) {
         let only: Option<HashSet<&str>> = only.map(|p| p.iter().map(String::as_str).collect());
         let only = only.as_ref();
         match only {
-            None => {
-                self.references.clear();
-                self.shader_docs.clear();
-            }
-            Some(paths) => {
-                self.references.retain(|r| !paths.contains(r.path.as_str()));
-                let shader_paths: Vec<Option<String>> = self
-                    .shader_docs
-                    .iter()
-                    .map(|d| {
-                        d.path
-                            .as_deref()
-                            .and_then(|p| self.relative_to_assets(Path::new(p)))
-                    })
-                    .collect();
-                let mut i = 0;
-                self.shader_docs.retain(|_| {
-                    let keep = shader_paths[i]
-                        .as_ref()
-                        .is_none_or(|rel| !paths.contains(rel.as_str()));
-                    i += 1;
-                    keep
-                });
-            }
+            None => self.references.clear(),
+            Some(paths) => self.references.retain(|r| !paths.contains(r.path.as_str())),
         }
         let root = self.assets.root().to_path_buf();
         let entries: Vec<(Uuid, String, DocumentKind)> = self
@@ -696,9 +673,6 @@ impl OpenProject {
                     pointer,
                     asset,
                 });
-            }
-            if kind == DocumentKind::Shader {
-                self.shader_docs.push(doc);
             }
         }
         self.references

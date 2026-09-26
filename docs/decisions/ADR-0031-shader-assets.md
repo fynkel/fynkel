@@ -126,8 +126,11 @@ never breaks its materials. The built-in keeps its string `fynkel.pbr@1`,
 so a material's `shader` is either that string or an asset reference.
 
 **Migration.** `.shader.json` stops being a project document (only
-fixtures use it). `fynkel migrate` rewrites one to `.shader`, and a
-material's `name@version` string to the asset reference.
+fixtures used it). *Amended 2026-09-26 (step 2):* no `fynkel migrate`
+step — a `.shader.json` in a project is `FYN-D0015`, and its suggestion
+is the `.shader` header that says the same; a material naming a custom
+`name@version` is `FYN-D0300`, whose suggestion shows the asset
+reference. A converter would have had no real file to convert.
 
 ### 3. What the user's code sees (`surface@1`)
 
@@ -396,7 +399,8 @@ These are later, beside the surface shader, not replacing it:
    - the material's `shader` as an asset reference, validated through
      the parsed interface;
    - `fynkel shader validate`/`inspect` on `.shader`;
-   - `fynkel migrate` from `.shader.json`;
+   - a `.shader.json` refused with its header as the suggestion
+     (amended, see § 2);
    - the fixtures moved over.
 3. **Split `mesh.wgsl`** into the lighting library and the built-in's
    surface, and add `time`/`delta_time` to the frame. Every existing

@@ -105,8 +105,20 @@ pub fn run(root: Option<&Path>, cmd: &str, args: &[String]) -> ExitCode {
     }
 }
 
+/// A `.shader` file (ADR-0031), its asset id from the sidecar beside it
+/// (nil without one). A `.shader.json` manifest is refused with the
+/// header that says the same.
 fn read_manifest(path: &Path) -> Result<ShaderManifest, Vec<Diagnostic>> {
-    Document::read(path, Some(DocumentKind::Shader)).map(ShaderManifest::from_document)
+    let shown = path.display().to_string();
+    if shown.ends_with(".shader.json") {
+        let m = Document::read(path, Some(DocumentKind::Shader)).map(ShaderManifest::from_document)?;
+        return Err(vec![fynkel_document::material::legacy_manifest(&m)]);
+    }
+    let sidecar = fynkel_document::asset::sidecar_path(path);
+    let id = Document::read(&sidecar, Some(DocumentKind::Meta))
+        .map(|d| d.envelope.id)
+        .unwrap_or(uuid::Uuid::nil());
+    fynkel_document::material::read_shader_file(id, &shown, path)
 }
 
 /// Built-ins plus `--shader` manifests. A manifest with errors is reported
@@ -177,10 +189,11 @@ fn shader_inspect(opts: &Opts, schemas: &SchemaSet) -> ExitCode {
 }
 
 fn manifest_text(m: &ShaderManifest) -> String {
+    let lighting = m.shader.as_ref().map_or("lit", |s| s.interface.lighting.name());
     let mut s = format!(
-        "{} ({})\n  passes {}\n  parameters\n",
+        "{} ({})\n  lighting {lighting}\n  passes {}\n  parameters\n",
+        m.name,
         m.shader_id,
-        m.document.envelope.name,
         m.passes
             .iter()
             .map(|p| p.name())
@@ -237,7 +250,7 @@ fn shader_validate(opts: &Opts, schemas: &SchemaSet) -> ExitCode {
         }
         if !has_errors(&diags) {
             eprintln!(
-                "fynkel shader validate: {} manifest(s) ok",
+                "fynkel shader validate: {} shader(s) ok",
                 opts.paths.len()
             );
         }

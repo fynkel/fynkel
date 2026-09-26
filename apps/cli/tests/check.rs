@@ -439,9 +439,10 @@ fn material_and_shader_commands_validate_and_inspect() {
     assert_eq!(v["diagnostics"][0]["pointer"], "/base_colour");
     assert_eq!(v["diagnostics"][3]["code"], "FYN-D0303");
 
-    // A custom manifest via --shader; without it the material's shader is unknown.
+    // A .shader via --shader (its id from the sidecar beside it); without
+    // it the material's shader is unknown.
     let toon = fixtures.join("material/toon_missing_ramp.material.json");
-    let manifest = fixtures.join("material/toon.shader.json");
+    let manifest = fixtures.join("material/toon.shader");
     let out = run(&["material", "validate", "--json", toon.to_str().unwrap()]);
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["diagnostics"][0]["code"], "FYN-D0300");
@@ -462,11 +463,42 @@ fn material_and_shader_commands_validate_and_inspect() {
     assert_eq!(v["shaderId"], "fynkel.pbr@1");
     assert_eq!(v["textures"][2]["name"], "normal");
 
-    let broken = fixtures.join("material/bad_manifest.shader.json");
-    let out = run(&["shader", "validate", "--json", broken.to_str().unwrap()]);
+    // A .shader: its header and interface (ADR-0031).
+    let out = run(&["shader", "inspect", "--json", manifest.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["shaderName"], "Studio/Toon");
+    assert_eq!(v["shaderId"], "be5b7a9c-6f8b-4dae-9ac1-5b6d7e8f9a01");
+    assert_eq!(v["lighting"], "lit");
+    assert_eq!(v["passes"], serde_json::json!(["opaque", "shadow"]));
+    assert_eq!(v["parameters"][0]["name"], "bands");
+    assert_eq!(v["textures"][0]["name"], "ramp");
+    let out = run(&["shader", "validate", manifest.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    // A WGSL mistake is at its line in the file.
+    let dir = std::env::temp_dir().join(format!("fynkel-shader-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let bad = dir.join("bad.shader");
+    std::fs::write(
+        &bad,
+        "shader \"Bad\" {\n}\n\nfn surface(in: SurfaceInput) -> Surface {\n    var s = default_surface();\n    s.base_colour = vec3<f32>(1.0);\n    return s;\n}\n",
+    )
+    .unwrap();
+    let out = run(&["shader", "validate", "--json", bad.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["diagnostics"][2]["code"], "FYN-D0311");
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0313");
+    assert_eq!(v["diagnostics"][0]["line"], 6);
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // A .shader.json manifest is refused, with the header that says the same.
+    let old = fixtures.join("material/bad_manifest.shader.json");
+    let out = run(&["shader", "validate", "--json", old.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0015");
+    assert!(v["diagnostics"][0]["suggestion"].as_str().unwrap().contains("shader \"Bad manifest\" {"));
 }
 
 #[test]
