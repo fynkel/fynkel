@@ -1169,6 +1169,88 @@ fn runtime_meshes_through_the_abi() {
     assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
 }
 
+/// `fynkel_world_set_clip` (ADR-0033 § 2): a clip made at runtime is one
+/// the store and the world play like a cooked one, across scene loads and
+/// clears; a payload that is not a valid clip is refused and the clip kept.
+#[test]
+fn runtime_clips_through_the_abi() {
+    use fynkel_assets::{encode_animation, AnimationChannel, AnimationMarker, AnimationPayload};
+    use fynkel_contracts::{AssetRef, Uuid};
+
+    let cooked = Cooked::new("clips");
+    let cache = cooked.text();
+    let host = Host::new();
+    let made = AssetRef::new(Uuid(*b"runtime-clip-001"));
+    let clip = |times: Vec<f32>, values: Vec<f32>, property: u32| {
+        encode_animation(&AnimationPayload {
+            duration: 1.0,
+            channels: vec![AnimationChannel {
+                target: "Arm".into(),
+                property,
+                interpolation: 1, // linear
+                times,
+                values,
+            }],
+            markers: vec![AnimationMarker {
+                time: 0.5,
+                name: "hit".into(),
+            }],
+        })
+    };
+    let payload = clip(vec![0.0, 1.0], vec![0.0, 0.0, 0.0, 0.0, 2.0, 0.0], 0);
+    let set = |payload: &[u8]| unsafe {
+        fynkel_world_set_clip(
+            host.w,
+            made.asset.0.as_ptr(),
+            payload.as_ptr(),
+            payload.len() as u32,
+        )
+    };
+    let store = || unsafe { &*host.w }.assets().unwrap().clone();
+
+    assert_eq!(set(&payload), Status::LoadFailed, "no store before a load");
+    assert_eq!(host.load_project(&cache), Status::Ok);
+    assert_eq!(set(&payload), Status::Ok);
+    let c = store().clip(&made).unwrap();
+    assert_eq!(
+        (c.duration, c.channels.len(), c.markers[0].name.as_str()),
+        (1.0, 1, "hit")
+    );
+    assert!(store().is_runtime_clip(&made));
+    assert!(
+        unsafe { &*host.w }.core().has_clip(&made),
+        "the world has it at once"
+    );
+
+    // Across a scene load (same cache, same store) and a clear.
+    assert_eq!(host.load_scene(&cache, PLAYGROUND), Status::Ok);
+    store().clear();
+    assert_eq!(store().clip(&made).unwrap().channels.len(), 1);
+
+    // What is not a valid clip is refused; the clip stays.
+    let refused = [
+        payload[..payload.len() - 1].to_vec(),
+        clip(vec![0.0, 1.0], vec![0.0; 6], 7),
+        clip(vec![1.0, 0.5], vec![0.0; 6], 0),
+        clip(vec![0.0, 2.0], vec![0.0; 6], 0),
+        clip(vec![0.0, 1.0], vec![f32::NAN, 0.0, 0.0, 0.0, 0.0, 0.0], 0),
+    ];
+    for (i, p) in refused.iter().enumerate() {
+        assert_eq!(set(p), Status::InvalidArgument, "payload {i}");
+    }
+    assert_eq!(
+        unsafe { fynkel_world_set_clip(host.w, ptr::null(), ptr::null(), 0) },
+        Status::InvalidArgument
+    );
+    assert_eq!(store().clip(&made).unwrap().channels[0].values[4], 2.0);
+
+    // Removed.
+    assert_eq!(set(&[]), Status::Ok);
+    assert!(store().clip(&made).is_err());
+    assert!(!store().is_runtime_clip(&made));
+    assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
+}
+
 /// `fynkel_world_clone` (ADR-0026 §4): a live subtree copied, placed and
 /// reported as source → copy pairs, without any project; a stale source
 /// fails with a report and spawns nothing.

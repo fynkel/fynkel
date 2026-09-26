@@ -277,7 +277,10 @@ impl FynkelWorld {
                     let _ = assets.register_sound(&a.clip, &mut self.inner);
                 }
                 Command::Animate {
-                    op: AnimateOp::Play { clip, .. } | AnimateOp::Crossfade { clip, .. },
+                    op:
+                        AnimateOp::Play { clip, .. }
+                        | AnimateOp::Crossfade { clip, .. }
+                        | AnimateOp::PlayOneShot { motion: clip, .. },
                     ..
                 } => {
                     let _ = assets.register_clip(clip, &mut self.inner);
@@ -677,6 +680,51 @@ pub unsafe extern "C" fn fynkel_world_set_mesh(
             let _ = physics.replace_mesh(&key, positions.as_deref().zip(triangles));
         }
         assets.set_runtime_mesh(&key, mesh);
+        Status::Ok
+    })
+}
+
+/// A clip made at runtime (ADR-0033 § 2): see the header.
+///
+/// # Safety
+/// `world` live or NULL; `id` points at 16 readable bytes; `payload` at
+/// `payload_len` readable bytes (NULL when 0).
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_set_clip(
+    world: *mut FynkelWorld,
+    id: *const u8,
+    payload: *const u8,
+    payload_len: u32,
+) -> Status {
+    if id.is_null() || (payload.is_null() && payload_len != 0) {
+        return Status::InvalidArgument;
+    }
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(std::slice::from_raw_parts(id, 16));
+    let key = fynkel_contracts::AssetRef::new(fynkel_contracts::Uuid(bytes));
+    let clip = if payload_len == 0 {
+        None
+    } else {
+        let payload = std::slice::from_raw_parts(payload, payload_len as usize);
+        let Some(clip) = fynkel_assets::decode_animation(payload)
+            .and_then(|p| fynkel_assets::clip_from_payload(key.to_string(), p))
+        else {
+            return Status::InvalidArgument;
+        };
+        Some(clip)
+    };
+    guarded(world, move |w| {
+        let Some(assets) = w.assets.clone() else {
+            return Status::LoadFailed;
+        };
+        if assets.set_runtime_clip(&key, clip.clone()).is_err() {
+            return Status::InvalidArgument;
+        }
+        // The world's copy follows at once; a removed clip stays there for
+        // the animators already playing it.
+        if let Some(clip) = clip {
+            w.core_mut().register_clip(key, clip);
+        }
         Status::Ok
     })
 }
