@@ -1427,6 +1427,7 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
     _Zone? assetZone(DragTargetDetails<AssetDragPayload> d) {
       if (d.data.kind == 'material') return model.canAssignMaterial(d.data.kind, row.id) ? _Zone.onto : null;
       if (d.data.kind == 'script') return model.canAddScript(d.data.id, row.id) ? _Zone.onto : null;
+      if (d.data.kind == 'controller') return model.canAssignController(d.data.kind, row.id) ? _Zone.onto : null;
       final z = _zoneAt(d.offset);
       return model.canDropAsset(d.data.toRef(), d.data.kind, _target(z)) ? z : null;
     }
@@ -1450,6 +1451,10 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
         }
         if (d.data.kind == 'script') {
           model.addScript(d.data.id, row.id);
+          return;
+        }
+        if (d.data.kind == 'controller') {
+          model.assignController(d.data.toRef(), row.id);
           return;
         }
         final z = _zoneAt(d.offset);

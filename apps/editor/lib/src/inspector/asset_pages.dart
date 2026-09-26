@@ -197,7 +197,7 @@ class _UsedBy extends StatelessWidget {
   }
 
   static String? _documentKindOf(String path) {
-    for (final k in ['scene', 'prefab', 'material', 'rig', 'blend', 'volume', 'physics_material', 'data']) {
+    for (final k in ['scene', 'prefab', 'material', 'rig', 'blend', 'volume', 'physics_material', 'controller', 'data']) {
       if (path.endsWith(documentSuffix(k))) return k;
     }
     return null;

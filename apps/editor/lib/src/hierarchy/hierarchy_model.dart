@@ -1080,6 +1080,54 @@ final class HierarchyModel extends ChangeNotifier {
     return a != null && a.ok;
   }
 
+  // ── An Animator Controller dropped on an object (ADR-0032 § 8) ─────────
+
+  /// Whether a dragged asset of [kind] dropped on [id] sets its Animator's
+  /// controller: an Animator Controller onto an object of an editable
+  /// document (an Animator is added when it has none).
+  bool canAssignController(String kind, String id) => kind == 'controller' && canEdit && _held(id) != null;
+
+  /// Unity's controller drop: [ref] becomes the controller of [id]'s
+  /// Animator — one `setField` (or an override on a prefab's object), or
+  /// an Animator with its defaults and [ref] added when it has none. One
+  /// undo step; the selection stays.
+  bool assignController(Map<String, Object?> ref, String id) {
+    final h = _held(id);
+    if (h == null || !canEdit) return false;
+    final value = {'asset': ref['asset']};
+    final animator = h.components.where((c) => c.type == _animatorType).firstOrNull;
+    final Map<String, Object?> command;
+    if (animator != null) {
+      command = animator.anchor == null
+          ? Command.setField(id, animator.component, 'controller', value)
+          : Command.setPrefabOverrideOp(
+              animator.anchor!,
+              prefab.setFieldOverride(
+                entity: animator.entityLocal!,
+                component: animator.local ?? animator.component,
+                data: animator.data,
+                path: 'controller',
+                value: value,
+              ),
+            );
+    } else {
+      final defaults = project.componentDefaults(_animatorType);
+      if (defaults == null) return false;
+      final data = {...defaults, 'controller': value};
+      final version = ComponentSpecs(project).of(_animatorType).version ?? 1;
+      command = h.anchor == null
+          ? Command.addComponent(id, {'type': _animatorType, 'version': version, 'data': data})
+          : Command.setPrefabOverrideOp(
+              h.anchor!,
+              prefab.addComponentOverride(entity: h.entityLocal!, type: _animatorType, version: version, data: data),
+            );
+    }
+    final a = _run([command]);
+    return a != null && a.ok;
+  }
+
+  static const _animatorType = 'fynkel.Animator';
+
   /// [id]'s MeshRenderer data as the object has it (null: none).
   Map<String, Object?>? meshRendererOf(String id) => _renderer(id)?.data;
 

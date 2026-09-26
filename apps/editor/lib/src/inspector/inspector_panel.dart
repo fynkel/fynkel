@@ -187,11 +187,16 @@ class _InspectorPanelState extends State<InspectorPanel> {
   }
 
   /// A script dropped on the Inspector goes onto the selection (Unity's
-  /// script drop; Add Component's rules, so not twice on one object).
+  /// script drop; Add Component's rules, so not twice on one object); an
+  /// Animator Controller becomes its Animator's controller (ADR-0032).
   Widget _scriptDrop(Widget child) => DragTarget<AssetDragPayload>(
-    onWillAcceptWithDetails: (d) =>
-        d.data.kind == 'script' && model.canEdit && model.entities.isNotEmpty && model.entitiesWith(d.data.id).isEmpty,
-    onAcceptWithDetails: (d) => model.addComponent(d.data.id),
+    onWillAcceptWithDetails: (d) => switch (d.data.kind) {
+      'script' => model.canEdit && model.entities.isNotEmpty && model.entitiesWith(d.data.id).isEmpty,
+      'controller' => model.canEdit && model.entities.isNotEmpty,
+      _ => false,
+    },
+    onAcceptWithDetails: (d) =>
+        d.data.kind == 'controller' ? model.assignController(d.data.toRef()) : model.addComponent(d.data.id),
     builder: (context, candidates, _) => DecoratedBox(
       key: const ValueKey('inspector.scriptDrop'),
       position: DecorationPosition.foreground,

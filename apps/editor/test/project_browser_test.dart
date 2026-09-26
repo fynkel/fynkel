@@ -538,6 +538,8 @@ void main() {
       await tester.enterText(find.byKey(const Key('project.search')), '');
       await tester.tap(find.byKey(const Key('project.filter')));
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('project.filter.texture')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('project.filter.texture')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('project.asset.$swatch')), findsOneWidget);

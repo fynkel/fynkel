@@ -144,6 +144,7 @@ final class AssetEdits extends ChangeNotifier {
   static String noun(EditorDocument doc) => switch (doc.kind) {
     'volume' => 'Volume Profile',
     'physics_material' => 'Physics Material',
+    'controller' => 'Animator Controller',
     'data' => 'Data Asset',
     _ => 'Material',
   };

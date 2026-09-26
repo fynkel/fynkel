@@ -35,6 +35,7 @@ const browserKinds = [
   'blend',
   'volume',
   'physics_material',
+  'controller',
   'data',
   'shader',
   'texture',
@@ -70,6 +71,7 @@ String documentSuffix(String kind) => kind == 'physics_material' ? '.physicsmate
 String documentKindTitle(String kind) => switch (kind) {
   'volume' => 'Volume Profile',
   'physics_material' => 'Physics Material',
+  'controller' => 'Animator Controller',
   'data' => 'Data Asset',
   _ => kind.isEmpty ? kind : '${kind[0].toUpperCase()}${kind.substring(1)}',
 };

@@ -1652,6 +1652,7 @@ IconData assetKindIcon(String? kind) => switch (kind) {
   'skin' || 'rig' => FIcons.accessibilityNew,
   'volume' => FIcons.tune,
   'physics_material' => FIcons.physicsMaterial,
+  'controller' => FIcons.animator,
   'data' => FIcons.dataAsset,
   'shader' => FIcons.shader,
   'script' => FIcons.descriptionOutlined,

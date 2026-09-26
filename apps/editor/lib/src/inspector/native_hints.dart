@@ -110,13 +110,16 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
     'skeleton': {'kind': 'entity', 'order': 1},
   },
   'fynkel.Animator': {
-    'clip': {'kind': 'asset(clip)', 'order': 0},
-    'speed': {'step': 0.05, 'order': 1},
-    'playing': {'order': 2},
-    'looping': {'order': 3},
-    'weight': {'kind': 'slider', 'min': 0, 'max': 1, 'step': 0.01, 'group': 'Blending', 'order': 4},
-    'additive': {'group': 'Blending', 'order': 5},
-    'root_motion': {'label': 'Root motion', 'order': 6},
+    // Unity's order: the Controller first (ADR-0032); with one, the clip
+    // is not used.
+    'controller': {'kind': 'asset(controller)', 'order': 0},
+    'clip': {'kind': 'asset(clip)', 'order': 1},
+    'speed': {'step': 0.05, 'order': 2},
+    'playing': {'order': 3},
+    'looping': {'order': 4},
+    'weight': {'kind': 'slider', 'min': 0, 'max': 1, 'step': 0.01, 'group': 'Blending', 'order': 5},
+    'additive': {'group': 'Blending', 'order': 6},
+    'root_motion': {'label': 'Root motion', 'order': 7},
   },
   'fynkel.RigidBody': {
     'body_type': {'label': 'Type', 'order': 0},

@@ -1068,6 +1068,52 @@ final class InspectorModel extends ChangeNotifier {
     return a?.ok ?? false;
   }
 
+  /// An Animator Controller dropped on the Inspector (ADR-0032 § 8): [ref]
+  /// becomes the controller of every selected object's Animator, added
+  /// with its defaults where there is none. One transaction.
+  bool assignController(Map<String, Object?> ref) {
+    if (_entities.isEmpty || !canEdit) return false;
+    const type = 'fynkel.Animator';
+    final value = {'asset': ref['asset']};
+    final holders = {for (final e in entitiesWith(type)) e.id};
+    final slot = _slots.where((s) => s.type == type).firstOrNull;
+    final commands = <Map<String, Object?>>[];
+    if (slot != null) {
+      for (final i in slot.instances) {
+        commands.add(
+          i.isDerived
+              ? Command.setPrefabOverrideOp(
+                  i.anchor!,
+                  prefab.setFieldOverride(
+                    entity: i.entityLocal!,
+                    component: i.local ?? i.componentId,
+                    data: i.data,
+                    path: 'controller',
+                    value: value,
+                  ),
+                )
+              : Command.setField(i.entityId, i.componentId, 'controller', value),
+        );
+      }
+    } else if (holders.isNotEmpty) {
+      lastError = 'Some of the selected objects have an Animator and some do not: set the controller on each.';
+      notifyListeners();
+      return false;
+    }
+    if (holders.isEmpty) {
+      final d = project.componentDefaults(type);
+      if (d == null) return false;
+      final data = {...d, 'controller': value};
+      for (final e in _entities) {
+        final c = _addCommand(e, type, specFor(type).version ?? 1, data);
+        if (c != null) commands.add(c);
+      }
+    }
+    final a = _run(commands);
+    notifyListeners();
+    return a?.ok ?? false;
+  }
+
   /// Adds a [type] component with [data] to [e]: an `addComponent`, or an
   /// `addComponent` override on a derived entity's anchor (null when its
   /// expansion is gone).

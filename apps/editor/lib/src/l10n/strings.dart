@@ -38,6 +38,10 @@ abstract final class EditorStrings {
       label: 'New Physics Material',
       description: 'Friction and bounciness a Collider can share, with how two surfaces combine them',
     ),
+    'assets.newAnimatorController': (
+      label: 'New Animator Controller',
+      description: 'States, transitions and parameters an Animator runs, edited in the Animator window',
+    ),
     'assets.newLitShader': (
       label: 'New Lit Shader',
       description: 'A .shader file whose surface() the engine lights; double-click opens it in the IDE',

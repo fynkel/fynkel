@@ -1299,6 +1299,15 @@ class EditorShellState extends State<EditorShell> {
         enabled: () => _canEditAssets,
         run: () => _newAsset('physics_material'),
       ),
+      // Unity's Create → Animator Controller (ADR-0032).
+      EditorCommand(
+        id: 'assets.newAnimatorController',
+        menu: EditorMenu.project,
+        group: 4,
+        order: 3,
+        enabled: () => _canEditAssets,
+        run: () => _newAsset('controller'),
+      ),
       // Unity's Create → Shader (ADR-0031; no shortcut there either).
       EditorCommand(
         id: 'assets.newLitShader',

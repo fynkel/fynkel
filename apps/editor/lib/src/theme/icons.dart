@@ -22,6 +22,7 @@ abstract final class FIcons {
   static const IconData addBoxOutlined = LucideIcons.squarePlus;
   static const IconData adjust = LucideIcons.crosshair;
   static const IconData animation = LucideIcons.film;
+  static const IconData animator = LucideIcons.workflow;
   static const IconData arrowDownward = LucideIcons.arrowDown;
   static const IconData arrowDropDown = LucideIcons.chevronDown;
   static const IconData arrowForward = LucideIcons.arrowRight;
