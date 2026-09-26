@@ -7,6 +7,7 @@ import 'package:fynkel/fynkel.dart';
 import 'package:showcase/game/dissolve.dart' as _lib0;
 import 'package:showcase/game/orbit.dart' as _lib1;
 import 'package:showcase/game/spinner.dart' as _lib2;
+import 'package:showcase/game/waver.dart' as _lib3;
 
 /// `game.Dissolve` v1 → [_lib0.Dissolve].
 BehaviourType get gameDissolveType => BehaviourType(
@@ -117,9 +118,28 @@ BehaviourType get gameSpinnerType => BehaviourType(
   ],
 );
 
+/// `game.Waver` v1 → [_lib3.Waver].
+BehaviourType get gameWaverType => BehaviourType(
+  id: 'game.Waver',
+  version: 1,
+  create: _lib3.Waver.new,
+  fields: [
+    BehaviourField(
+      name: 'every',
+      type: 'number',
+      defaultValue: 3.0,
+      tooltip: 'Seconds between two waves',
+      min: 0.5,
+      step: 0.5,
+      get: (b) => (b as _lib3.Waver).every,
+      set: (b, v) => (b as _lib3.Waver).every = _double(v),
+    ),
+  ],
+);
+
 /// Every `@FynkelBehaviour` type of package `showcase`, by id.
 List<BehaviourType> get behaviourTypes =>
-    List.unmodifiable([gameDissolveType, gameOrbitType, gameSpinnerType]);
+    List.unmodifiable([gameDissolveType, gameOrbitType, gameSpinnerType, gameWaverType]);
 
 /// Registers every type of this package in [registry].
 void registerBehaviours(BehaviourRegistry registry, {bool replace = false}) {

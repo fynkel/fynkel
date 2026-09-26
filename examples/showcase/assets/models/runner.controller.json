@@ -38,6 +38,10 @@
           "duration": 0.15
         }
       ]
+    },
+    {
+      "name": "UpperBody",
+      "root": "spine"
     }
   ],
   "editor": {

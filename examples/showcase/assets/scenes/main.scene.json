@@ -1587,6 +1587,16 @@
                 "asset": "a690f374-02ba-4a92-a8b7-0b9a6bd443e9"
               }
             }
+          },
+          {
+            "op": "addComponent",
+            "entity": "13961cb6-aa3a-5351-a50d-9f3273e39129",
+            "component": "3c7ffc15-4f3c-5492-9be7-2deeba13fdd5",
+            "type": "game.Waver",
+            "version": 1,
+            "data": {
+              "every": 3.0
+            }
           }
         ]
       }

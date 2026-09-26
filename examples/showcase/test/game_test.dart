@@ -15,6 +15,7 @@ import 'package:showcase/game/dissolve.dart';
 import 'package:showcase/game/game.dart';
 import 'package:showcase/game/orbit.dart';
 import 'package:showcase/game/spinner.dart';
+import 'package:showcase/game/waver.dart';
 
 void main() {
   final projectDir = Directory.current.path;
@@ -28,7 +29,7 @@ void main() {
     expect(game.report.diagnostics, isEmpty, reason: 'no load warnings expected');
     expect(game.report.entityCount, 48, reason: 'the Runner instance is the glTF scene root (ADR-0022), with Body and the joints under it; the Global Volume (R3a) is one more');
     expect((game.report.animation.clips, game.report.animation.skins), (2, 1), reason: 'the runner\'s controller: run and jump, one skin');
-    expect(game.report.behavioursAttached, 2);
+    expect(game.report.behavioursAttached, 3);
     final spinner = game.world.behaviours.whereType<Spinner>().single;
     final orbit = game.world.behaviours.whereType<Orbit>().single;
     expect(spinner.speed, 0.6, reason: 'authored in assets/scenes/main.scene.json');
@@ -75,6 +76,40 @@ void main() {
     }
     s = runner.animation.stateOf()!;
     expect(s.next ?? s.name, 'Run', reason: 'the 0.8 s jump played once, then the run again');
+  });
+
+  test('the runner waves: a clip made in code, a one-shot in the UpperBody slot over the run (ADR-0033)', () {
+    final game = Game.load(projectDir);
+    addTearDown(game.dispose);
+    final runner = game.world.find('Runner')!;
+    final waver = game.world.behaviours.whereType<Waver>().single;
+    final arm = runner.findChild('hips/spine/upperarm_r')!;
+    final thigh = runner.findChild('hips/thigh_l')!;
+    expect(waver.every, 3.0, reason: 'authored on the instance in main.scene.json');
+    game.frame(1 / 60);
+    expect(waver.clip.sub, isNull, reason: 'a runtime clip: a whole asset of its own');
+    expect(runner.animation.stateOf(layer: 1)!.slot, 'UpperBody');
+    expect(runner.animation.isPlayingOneShot(slot: 'UpperBody'), isFalse);
+
+    // 3 s in: the first wave; the arm up at 0.25 s, the legs still running.
+    while (game.world.tick < 3 * 60 + 20) {
+      game.frame(1 / 60);
+    }
+    expect(waver.waves, 1);
+    expect(runner.animation.isPlayingOneShot(slot: 'UpperBody'), isTrue);
+    expect(runner.animation.stateOf(layer: 1)!.oneShot, waver.clip);
+    expect(arm.localTransform.rotation.z, lessThan(-0.5), reason: 'raised (about Z, -150° at the top)');
+    final swing = thigh.localTransform.rotation.x;
+    game.frame(1 / 60);
+    game.frame(1 / 60);
+    expect(thigh.localTransform.rotation.x, isNot(closeTo(swing, 1e-4)), reason: 'the run plays on under the slot');
+
+    // The 1 s wave ends; the arm is the run's again.
+    for (var i = 0; i < 60; i++) {
+      game.frame(1 / 60);
+    }
+    expect(runner.animation.isPlayingOneShot(slot: 'UpperBody'), isFalse);
+    expect(arm.localTransform.rotation.z, greaterThan(-0.3));
   });
 
   test('the shader scenes load, and Dissolve drives its material from code (ADR-0031)', () {
