@@ -287,6 +287,9 @@ impl FynkelWorld {
                     ..
                 } => {
                     let _ = assets.register_clip(&a.clip, &mut self.inner);
+                    if let Some(c) = &a.controller {
+                        let _ = assets.register_controller(c, &mut self.inner);
+                    }
                 }
                 Command::SetComponent {
                     value: ComponentValue::Skin(k),

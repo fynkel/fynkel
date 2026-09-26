@@ -471,3 +471,75 @@ fn a_failed_cook_is_reported_by_id() {
     // renderer reports the miss when it draws).
     assert!(assets.scene(id(MAIN)).is_ok());
 }
+
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for e in std::fs::read_dir(from).unwrap() {
+        let e = e.unwrap();
+        let name = e.file_name();
+        if name == ".fynkel" {
+            continue;
+        }
+        if e.file_type().unwrap().is_dir() {
+            copy_dir(&e.path(), &to.join(name));
+        } else {
+            std::fs::copy(e.path(), to.join(name)).unwrap();
+        }
+    }
+}
+
+/// ADR-0032: an Animator Controller reads as the core's, names resolved
+/// to indices, and registering it with a world brings its motions along.
+#[test]
+fn an_animator_controller_reads_and_registers_with_its_motions() {
+    let dir = std::env::temp_dir().join(format!("fynkel-assets-controller-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let project = dir.join("project");
+    copy_dir(&fixture(), &project);
+    const CONTROLLER: &str = "c0000000-0000-4000-8000-000000000052";
+    std::fs::write(
+        project.join("assets/rigs/column.controller.json"),
+        format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/controller.schema.json","formatVersion":1,
+  "id":"{CONTROLLER}","name":"Column",
+  "parameters":[{{"name":"energy","type":"float","default":0.25}},{{"name":"wave","type":"trigger"}}],
+  "layers":[{{"name":"Base Layer","defaultState":"Idle",
+    "states":[{{"name":"Idle","motion":{{"asset":"{ENERGY}"}}}},
+              {{"name":"Wave","motion":{{"asset":"{COLUMN}","sub":"anim/wave"}},"loop":false}}],
+    "transitions":[{{"from":"any","to":"Wave","conditions":[{{"parameter":"wave"}}]}},
+                   {{"from":"Wave","to":"Idle","exitTime":1}}]}}]}}"#
+        ),
+    )
+    .unwrap();
+    let cache = dir.join("cache");
+    let report = cook_project(&project, Some(&cache), &CookOptions::default())
+        .unwrap_or_else(|d| panic!("{d:#?}"));
+    assert!(!report.has_errors(), "{}", report.text());
+    let assets = Assets::open(&cache).unwrap();
+
+    let r = AssetRef::new(id(CONTROLLER));
+    let def = assets.controller(&r).unwrap_or_else(|d| panic!("{d}"));
+    assert_eq!(def.name, "Column");
+    assert_eq!(def.parameter_index("wave"), Some(1));
+    let base = &def.layers[0];
+    assert_eq!(base.default_state, Some(0));
+    assert_eq!(
+        base.transitions
+            .iter()
+            .map(|t| (t.from, t.to, t.exit_time))
+            .collect::<Vec<_>>(),
+        [(None, 1, None), (Some(1), 0, Some(1.0))]
+    );
+    let mut world = fynkel_core::World::new(fynkel_core::WorldConfig::default());
+    // The blend space brings `anim/wave` along: one motion new, not two.
+    assert_eq!(assets.register_controller(&r, &mut world).unwrap(), 1);
+    assert!(world.has_controller(&r));
+    assert!(world.has_blend(&AssetRef::new(id(ENERGY))));
+    assert!(world.has_clip(&AssetRef::with_sub(id(COLUMN), "anim/wave")));
+    assert_eq!(assets.register_controller(&r, &mut world).unwrap(), 0);
+    // A clip is not a controller.
+    let d = assets.controller(&AssetRef::new(id(ENERGY))).unwrap_err();
+    assert_eq!(d.code, Code::RUNTIME_CHUNK_MISSING, "{d}");
+    drop(assets);
+    let _ = std::fs::remove_dir_all(&dir);
+}

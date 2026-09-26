@@ -56,9 +56,11 @@ use crate::schema::{SystemKind, SystemTimeRecord};
 mod animation;
 mod audio;
 mod catalogue;
+mod controller;
 pub use animation::{AnimatorRun, Fade, SkinRun};
 pub use audio::AudioRun;
 pub use catalogue::{EmitterRun, Oscillation};
+pub use controller::ControllerPlay;
 mod projection;
 pub use projection::{
     projection_matrix, view_matrix, ProjectionInfo, MAX_PROJECTION_ANCHORS, PROJECTED_DROPPED,
@@ -315,6 +317,8 @@ pub struct World {
     clips: animation::ClipTable,
     /// Blend spaces an `Animator` may play in a clip's place (M3-19c).
     blends: animation::BlendTable,
+    /// Animator Controllers an `Animator` may run (ADR-0032).
+    controllers: controller::ControllerTable,
     skins: animation::SkinTable,
     /// The audio engine (M3-11): clips, voices, buses; the device the host
     /// opened.
@@ -349,6 +353,8 @@ pub struct World {
     pose_scratch: Pose,
     #[cfg_attr(not(feature = "animation"), allow(dead_code))]
     fade_pose_scratch: Pose,
+    #[cfg_attr(not(feature = "animation"), allow(dead_code))]
+    layer_pose_scratch: Pose,
 }
 
 fn micros(since: Instant) -> u64 {
@@ -396,6 +402,7 @@ impl World {
             prefabs: HashMap::new(),
             clips: HashMap::new(),
             blends: HashMap::new(),
+            controllers: HashMap::new(),
             skins: HashMap::new(),
             audio: fynkel_audio::Audio::new(),
             scenes: Vec::new(),
@@ -420,6 +427,7 @@ impl World {
             animator_order_scratch: Vec::new(),
             pose_scratch: Pose::default(),
             fade_pose_scratch: Pose::default(),
+            layer_pose_scratch: Pose::default(),
         }
     }
 

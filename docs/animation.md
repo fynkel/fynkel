@@ -349,9 +349,10 @@ extracts), or from the outgoing clip of a crossfade.
 
 ## Commands, the query and the event
 
-`fynkel.cmd.Animate` (command kind 9, simulation lane, 64 bytes:
-`{ entity, op, seconds, speed, looping, clip, value, name }`) carries one
-`AnimateOp`:
+`fynkel.cmd.Animate` (command kind 9, simulation lane, 72 bytes:
+`{ entity, op, seconds, speed, looping, clip, value, name, integer,
+layer }`) carries one `AnimateOp`. The clip ops are for an animator
+without a controller; the last seven (ADR-0032) are for one with:
 
 | `op` | Effect | Rejection |
 | --- | --- | --- |
@@ -363,6 +364,15 @@ extracts), or from the outgoing clip of a crossfade.
 | `setTime` | seek to `seconds` (clamped to the clip) on the next tick, without advancing | negative or non-finite → `INVALID_PAYLOAD` |
 | `setWeight` | the layer weight `value` (§ Layers) | outside 0…1 or non-finite → `INVALID_PAYLOAD` |
 | `setParameter` | set the named parameter `name` to `value` on this animator (what a blend space reads every tick, clamped to its points, the phase kept; kept on the animator across clips) | empty `name` or non-finite `value` → `INVALID_PAYLOAD` |
+| `setFloat` / `setInteger` / `setBool` | the controller's parameter `name` to `value` / `integer` / `value != 0` | no such name (the message lists the names), another type, or no controller → `INVALID_PAYLOAD` |
+| `setTrigger` / `resetTrigger` | set / clear the trigger `name`; the transition it fires clears it | as above |
+| `playState` | jump to the state `name` at once (Unity's `Play`), at `value` of its motion (0…1), in `layer` (`-1`: the first layer that has it) | no such state (the message lists the states), offset outside 0…1 → `INVALID_PAYLOAD` |
+| `crossFadeState` | like `playState`, the current state blended out over `seconds` (Unity's `CrossFade`) | as above, and `seconds < 0` |
+
+A clip op (`play`, `crossfade`, `setTime`, `setParameter`) on an animator
+that runs a controller is `INVALID_PAYLOAD`: the controller owns what
+plays. `stop`, `pause`, `resume`, `setSpeed` and `setWeight` work on
+both.
 
 An entity without an `Animator` is `MISSING_COMPONENT` (component 21).
 The native layer (`fynkel_native`) registers from the cache, before the
@@ -381,11 +391,87 @@ an animator; `parameter` is the value the playing blend space reads
 (else the last value `setParameter` set), `duration` a space's blended
 lap.
 
+`FYNKEL_QUERY_ANIMATOR_CONTROLLER` (14) answers one
+`fynkel.rec.AnimatorLayerState { entity, layer, state, normalized_time,
+length, in_transition, next, next_normalized_time, transition_progress }`
+per layer of the controller the animator runs, and
+`FYNKEL_QUERY_ANIMATOR_PARAMETERS` (15) one `fynkel.rec.AnimatorParameter
+{ entity, name, kind, value, integer, flag }` per parameter; no records
+without a running controller (§ Animator Controllers).
+
 `fynkel.ev.AnimationEnded { entity, clip }` (event kind 9, general lane)
 is raised the tick a one-shot passes its end (`playing` is cleared the
 same tick); a looping clip never raises it, and neither does `stop`.
 `fynkel.ev.AnimationMarker { entity, clip, name }` (kind 10) is raised
 once per marker crossed (§ Markers).
+
+## Animator Controllers (ADR-0032)
+
+An `Animator` whose `controller` names an Animator Controller
+(`<name>.controller.json`, [documents.md](documents.md) § Animator
+Controllers) runs the controller's states instead of its `clip`. The
+animator's `speed`, `playing`, `root_motion` and `weight` still apply
+to the whole animator. Without a `controller` nothing changes.
+
+**The machine** is `fynkel_animation::controller` (pure, no world): a
+`ControllerDef` (the document with names turned into indices) and one
+`ControllerRun` per animator (the parameter values and, per layer, the
+current state, its normalized time and the crossfade). Unity's rules:
+
+- The first tick enters each layer's default state at time 0; the next
+  tick advances it.
+- A state's clock moves by `speed × speed parameter × dt` over its
+  motion's length (a blend space's blended length, so its phase is
+  kept; no motion counts as one second). Normalized time is not wrapped:
+  1.5 is halfway through the second loop.
+- At most one transition per layer per tick: Any State's first (never
+  into the current state unless `canTransitionToSelf`), then the current
+  state's, in file order. Every condition must hold. A trigger it tests
+  is cleared when it fires.
+- An exit time below 1 on a looping state is reached once per loop; any
+  other exit time holds once reached.
+- No interruptions: while a crossfade runs, no transition is checked.
+  The check starts again on the tick after it ends.
+- `playState` and `crossFadeState` jump without conditions. A crossfade
+  already running is cut short: its outgoing state exits.
+
+**Events.** `fynkel.ev.AnimatorStateEntered { entity, layer, state, from }`
+(event kind 12; `from` is empty on the first tick) when a state starts —
+at the start of its crossfade — and `fynkel.ev.AnimatorStateExited {
+entity, layer, state }` (kind 13) when the state stops playing: at the
+end of its crossfade out, at once for a jump. On a jump the exit comes
+first.
+
+**The pose** (`fynkel_core::world::controller`). Each state's motion
+resolves by name under the animator, or under the layer's `root` node
+(the mask by placement). During a crossfade the outgoing state is
+sampled at its clock and the incoming one blended over it by the
+crossfade's progress. Layers after the first go over the layers below:
+`override` at the layer's weight, or `additive` (the motion's change
+from its first frame, at the weight). A node the layers below do not
+pose starts from its rest transform (its transform when the controller
+first resolved it), so an additive layer does not add to itself each
+tick. Root motion comes from the base layer (the two states' deltas
+weighted by the crossfade); markers from each layer's dominant state.
+
+**Loading.** `Assets::register_controller` (and `register_animation`
+for an `Animator` that names one) registers the controller's motions and
+then the controller; `World::register_controller` checks it
+(`ControllerDef::validate`). An animator whose controller is not
+registered reports `CLIP_UNAVAILABLE` once and plays once it is.
+
+**The query.** `World::animator_controller_state(entity)` gives the
+layers and parameters as the last step left them, as Unity reports them:
+during a crossfade, `state` is the state fading out and `next` the one
+fading in.
+
+Tests: `crates/fynkel_animation/src/controller.rs` (the rules),
+`crates/fynkel_core/tests/controller.rs` (a whole jump, determinism, the
+commands, layers, a missing controller),
+`crates/fynkel_native/tests/abi.rs`
+(`animator_controller_ops_events_and_queries`) and
+`crates/fynkel_assets/tests/store.rs` (a cooked controller registers with
+its motions).
 
 ## Import and the cache
 

@@ -595,6 +595,7 @@ void main() {
       weight: 0.75,
       additive: true,
       rootMotion: true,
+      controller: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330'),
     ),
     Animator.wireSize,
     Animator.decode,
@@ -621,6 +622,8 @@ void main() {
       clip: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'anim/0'),
       value: 0.5,
       name: 'speed',
+      integer: -3,
+      layer: 1,
     ),
     AnimateCommandRecord.wireSize,
     AnimateCommandRecord.decode,
@@ -666,6 +669,52 @@ void main() {
     ),
     AnimationMarkerEvent.wireSize,
     AnimationMarkerEvent.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  // ADR-0032.
+  check(
+    'AnimatorStateEnteredEvent',
+    AnimatorStateEnteredEvent(entity: entity(4, 2), layer: 1, state: 'Jump', from: 'Locomotion'),
+    AnimatorStateEnteredEvent.wireSize,
+    AnimatorStateEnteredEvent.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'AnimatorStateExitedEvent',
+    AnimatorStateExitedEvent(entity: entity(4, 2), layer: 0, state: 'Locomotion'),
+    AnimatorStateExitedEvent.wireSize,
+    AnimatorStateExitedEvent.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'AnimatorLayerStateRecord',
+    AnimatorLayerStateRecord(
+      entity: entity(4, 2),
+      layer: 0,
+      state: 'Locomotion',
+      normalizedTime: 1.5,
+      length: 0.8,
+      inTransition: true,
+      next: 'Jump',
+      nextNormalizedTime: 0.25,
+      transitionProgress: 0.5,
+    ),
+    AnimatorLayerStateRecord.wireSize,
+    AnimatorLayerStateRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'AnimatorParameterRecord',
+    AnimatorParameterRecord(
+      entity: entity(4, 2),
+      name: 'weapon',
+      kind: AnimatorParameterKind.int,
+      value: 2,
+      integer: 2,
+      flag: false,
+    ),
+    AnimatorParameterRecord.wireSize,
+    AnimatorParameterRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
   // M3-11.

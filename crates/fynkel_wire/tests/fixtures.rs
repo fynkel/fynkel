@@ -545,6 +545,7 @@ fn fixtures_match_generated_codecs() {
             weight: 0.75,
             additive: true,
             root_motion: true,
+            controller: Some(AssetRef::new(mesh_id)),
         },
     );
     check(
@@ -565,6 +566,8 @@ fn fixtures_match_generated_codecs() {
             clip: AssetRef::with_sub(mesh_id, "anim/0"),
             value: 0.5,
             name: "speed".into(),
+            integer: -3,
+            layer: 1,
         },
     );
     check(
@@ -598,6 +601,49 @@ fn fixtures_match_generated_codecs() {
             entity: e(4, 2),
             clip: AssetRef::with_sub(mesh_id, "anim/0"),
             name: "footstep".into(),
+        },
+    );
+    // ADR-0032.
+    check(
+        "AnimatorStateEnteredEvent",
+        &AnimatorStateEnteredEvent {
+            entity: e(4, 2),
+            layer: 1,
+            state: "Jump".into(),
+            from: "Locomotion".into(),
+        },
+    );
+    check(
+        "AnimatorStateExitedEvent",
+        &AnimatorStateExitedEvent {
+            entity: e(4, 2),
+            layer: 0,
+            state: "Locomotion".into(),
+        },
+    );
+    check(
+        "AnimatorLayerStateRecord",
+        &AnimatorLayerStateRecord {
+            entity: e(4, 2),
+            layer: 0,
+            state: "Locomotion".into(),
+            normalized_time: 1.5,
+            length: 0.8,
+            in_transition: true,
+            next: "Jump".into(),
+            next_normalized_time: 0.25,
+            transition_progress: 0.5,
+        },
+    );
+    check(
+        "AnimatorParameterRecord",
+        &AnimatorParameterRecord {
+            entity: e(4, 2),
+            name: "weapon".into(),
+            kind: AnimatorParameterKind::Int,
+            value: 2.0,
+            integer: 2,
+            flag: false,
         },
     );
     // M3-11.

@@ -59,6 +59,21 @@ pub enum EventPayload {
         clip: AssetRef,
         name: String,
     },
+    /// ADR-0032: a layer of the `Animator`'s controller entered `state`
+    /// this tick, leaving `from` (empty on the first tick).
+    AnimatorStateEntered {
+        entity: Entity,
+        layer: u32,
+        state: String,
+        from: String,
+    },
+    /// ADR-0032: a layer of the `Animator`'s controller stopped playing
+    /// `state` this tick (its crossfade out ended).
+    AnimatorStateExited {
+        entity: Entity,
+        layer: u32,
+        state: String,
+    },
     /// M3-11: an `AudioSource`'s non-looping clip reached its end this
     /// tick (`playing` is cleared with it).
     PlaybackEnded {
@@ -87,6 +102,8 @@ impl EventPayload {
             EventPayload::ZoneExited { .. } => EventKind::ZONE_EXITED,
             EventPayload::AnimationEnded { .. } => EventKind::ANIMATION_ENDED,
             EventPayload::AnimationMarker { .. } => EventKind::ANIMATION_MARKER,
+            EventPayload::AnimatorStateEntered { .. } => EventKind::ANIMATOR_STATE_ENTERED,
+            EventPayload::AnimatorStateExited { .. } => EventKind::ANIMATOR_STATE_EXITED,
             EventPayload::PlaybackEnded { .. } => EventKind::PLAYBACK_ENDED,
             EventPayload::CollisionEnter(_) => EventKind::COLLISION_ENTER,
             EventPayload::CollisionStay(_) => EventKind::COLLISION_STAY,

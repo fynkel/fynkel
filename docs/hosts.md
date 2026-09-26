@@ -387,14 +387,25 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   `GameObject.animation` `play`/`crossfade`/`stop`/`pause`/`resume`/
   `speed =`/`time =`/`weight =`/`setParameter` are
   `FYNKEL_COMMAND_ANIMATE` (9: `AnimateCommandRecord { entity, op,
-  seconds, speed, looping, clip, value, name }`, simulation lane),
+  seconds, speed, looping, clip, value, name, integer, layer }`,
+  simulation lane),
   `animation.state` is `FYNKEL_QUERY_ANIMATOR` (11: one
   `AnimatorStateRecord { entity, time, duration, speed, fade_remaining,
   playing, looping, clip, weight, parameter, root_delta, root_yaw }`, none
   without an `Animator`), a one-shot's end is
   `FYNKEL_EVENT_ANIMATION_ENDED` (9: `AnimationEndedEvent { entity,
   clip }`) and a marker crossed `FYNKEL_EVENT_ANIMATION_MARKER` (10:
-  `AnimationMarkerEvent { entity, clip, name }`) on the general lane, and the
+  `AnimationMarkerEvent { entity, clip, name }`) on the general lane. An
+  Animator Controller (ADR-0032) is driven through the same command's
+  `setFloat`/`setInteger`/`setBool`/`setTrigger`/`resetTrigger`/
+  `playState`/`crossFadeState` ops (with `integer` and `layer`), its
+  state read through `FYNKEL_QUERY_ANIMATOR_CONTROLLER` (14: one
+  `AnimatorLayerStateRecord` per layer) and
+  `FYNKEL_QUERY_ANIMATOR_PARAMETERS` (15: one `AnimatorParameterRecord`
+  per parameter), and its states reported as
+  `FYNKEL_EVENT_ANIMATOR_STATE_ENTERED` (12) and `_EXITED` (13); the
+  native layer registers a set `Animator`'s controller from the cache
+  with its motions. The
   components are ids 21 `Animator` and 22 `Skin` in the header on the
   M3-07a path; the native layer registers from the cache, before a batch
   is applied, a clip a `play`/`crossfade` or a set `Animator` names and

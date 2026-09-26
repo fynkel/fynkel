@@ -173,6 +173,22 @@ pub enum AnimateOp {
         name: String,
         value: f32,
     },
+    /// Set a parameter of the controller the animator runs (ADR-0032),
+    /// by name; the value must be of its type (a trigger takes a bool).
+    SetControllerParameter {
+        name: String,
+        value: crate::animation::controller::Value,
+    },
+    /// Jump to a state of the controller (Unity's `Play`): at once, or
+    /// fading over `seconds` (`CrossFade`); `layer` `None` is the first
+    /// layer with the state; `offset` where it starts, a fraction of its
+    /// motion.
+    PlayState {
+        state: String,
+        layer: Option<u32>,
+        seconds: f32,
+        offset: f32,
+    },
 }
 
 impl Command {

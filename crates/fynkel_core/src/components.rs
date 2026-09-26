@@ -792,6 +792,11 @@ impl TriggerZone {
 /// translation and yaw of the clip's root channel out of the pose and
 /// publishes the per-tick delta: a `CharacterController` on the entity
 /// walks by it, else the entity's own transform moves.
+///
+/// ADR-0032: with a `controller` (an Animator Controller,
+/// `.controller.json`) the animator runs its state machine instead and
+/// `clip` and `looping` are not used; `speed`, `playing`, `weight` and
+/// `root_motion` still apply to the whole animator.
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "component", id = 21, name = "fynkel.Animator")]
 pub struct Animator {
@@ -809,6 +814,8 @@ pub struct Animator {
     pub additive: bool,
     /// Extract the root channel's planar motion (see above).
     pub root_motion: bool,
+    /// The Animator Controller it runs (ADR-0032); none plays `clip`.
+    pub controller: Option<AssetRef>,
 }
 
 impl Default for Animator {
@@ -821,6 +828,7 @@ impl Default for Animator {
             weight: 1.0,
             additive: false,
             root_motion: false,
+            controller: None,
         }
     }
 }

@@ -179,6 +179,11 @@ be any of the controller's floats.
 `fynkel.Animator` (id 21) gains one field, **`controller`** (an asset
 reference, None by default), and goes to version 2:
 
+> **As built (step 3):** `controller` is an `Option<AssetRef>`. An
+> optional reference is never a required schema field, so, as with
+> ADR-0025's `Collider.material`, the documents need no new version and
+> no migration: a missing `controller` reads as None.
+
 - **With a controller**, the Animator runs the controller. Its `clip`
   is not used. `speed`, `playing`, `weight` and `root_motion` still
   apply to the whole Animator (Unity's `animator.speed`,

@@ -219,10 +219,21 @@ class CommandBatch {
       double speed = 1,
       bool looping = true,
       double value = 0,
-      String name = ''}) {
+      String name = '',
+      int integer = 0,
+      int layer = -1}) {
     final o = _begin(AnimateCommandRecord.commandKind, AnimateCommandRecord.wireSize);
     AnimateCommandRecord(
-            entity: entity, op: op, seconds: seconds, speed: speed, looping: looping, clip: clip, value: value, name: name)
+            entity: entity,
+            op: op,
+            seconds: seconds,
+            speed: speed,
+            looping: looping,
+            clip: clip,
+            value: value,
+            name: name,
+            integer: integer,
+            layer: layer)
         .encode(_bytes, o, _strings);
   }
 

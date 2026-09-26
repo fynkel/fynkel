@@ -171,6 +171,34 @@ fn decode_command(kind: u32, body: &[u8], tail: &[u8]) -> Result<Command, Diagno
                         name: c.name,
                         value: c.value,
                     },
+                    AnimateOp::SetFloat
+                    | AnimateOp::SetInteger
+                    | AnimateOp::SetBool
+                    | AnimateOp::SetTrigger
+                    | AnimateOp::ResetTrigger => {
+                        use fynkel_core::animation::controller::Value;
+                        let value = match c.op {
+                            AnimateOp::SetFloat => Value::Float(c.value),
+                            AnimateOp::SetInteger => Value::Int(c.integer),
+                            AnimateOp::SetBool => Value::Bool(c.value != 0.0),
+                            AnimateOp::SetTrigger => Value::Bool(true),
+                            _ => Value::Bool(false),
+                        };
+                        CoreAnimateOp::SetControllerParameter {
+                            name: c.name,
+                            value,
+                        }
+                    }
+                    AnimateOp::PlayState | AnimateOp::CrossFadeState => CoreAnimateOp::PlayState {
+                        state: c.name,
+                        layer: u32::try_from(c.layer).ok(),
+                        seconds: if c.op == AnimateOp::CrossFadeState {
+                            c.seconds
+                        } else {
+                            0.0
+                        },
+                        offset: c.value,
+                    },
                 };
                 Command::Animate {
                     entity: c.entity,
@@ -340,6 +368,34 @@ fn encode_event_body(p: &EventPayload, out: &mut Vec<u8>, strings: &mut fynkel_w
             },
             strings,
         ),
+        EventPayload::AnimatorStateEntered {
+            entity,
+            layer,
+            state,
+            from,
+        } => push(
+            out,
+            &AnimatorStateEnteredEvent {
+                entity: *entity,
+                layer: *layer,
+                state: state.clone(),
+                from: from.clone(),
+            },
+            strings,
+        ),
+        EventPayload::AnimatorStateExited {
+            entity,
+            layer,
+            state,
+        } => push(
+            out,
+            &AnimatorStateExitedEvent {
+                entity: *entity,
+                layer: *layer,
+                state: state.clone(),
+            },
+            strings,
+        ),
         EventPayload::PlaybackEnded { entity, clip } => push(
             out,
             &PlaybackEndedEvent {
@@ -380,6 +436,8 @@ pub fn event_body_size(kind: EventKind) -> Option<usize> {
         EventKind::ANIMATION_ENDED => AnimationEndedEvent::SIZE,
         EventKind::ANIMATION_MARKER => AnimationMarkerEvent::SIZE,
         EventKind::PLAYBACK_ENDED => PlaybackEndedEvent::SIZE,
+        EventKind::ANIMATOR_STATE_ENTERED => AnimatorStateEnteredEvent::SIZE,
+        EventKind::ANIMATOR_STATE_EXITED => AnimatorStateExitedEvent::SIZE,
         k if k.is_physics() => ContactEvent::SIZE,
         _ => return None,
     })
@@ -400,6 +458,8 @@ pub const QUERY_SYSTEMS: u32 = 10;
 pub const QUERY_ANIMATOR: u32 = 11;
 pub const QUERY_AUDIO: u32 = 12;
 pub const QUERY_AUDIO_STATS: u32 = 13;
+pub const QUERY_ANIMATOR_CONTROLLER: u32 = 14;
+pub const QUERY_ANIMATOR_PARAMETERS: u32 = 15;
 
 pub fn query(
     world: &World,
@@ -547,6 +607,22 @@ pub fn query(
         QUERY_ANIMATOR => {
             if let Some(s) = world.animator_state(entity) {
                 w.record(&s);
+            }
+        }
+        // The controller an animator runs (ADR-0032): one record per
+        // layer, then one per parameter; none without a running controller.
+        QUERY_ANIMATOR_CONTROLLER => {
+            if let Some((layers, _)) = world.animator_controller_state(entity) {
+                for l in &layers {
+                    w.record(l);
+                }
+            }
+        }
+        QUERY_ANIMATOR_PARAMETERS => {
+            if let Some((_, parameters)) = world.animator_controller_state(entity) {
+                for p in &parameters {
+                    w.record(p);
+                }
             }
         }
         // The last step's per-phase wall time (M3-10), one record per

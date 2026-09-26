@@ -1501,6 +1501,7 @@ fn animation_commands_events_and_query() {
         weight: 1.0,
         additive: false,
         root_motion: false,
+        controller: None,
     };
     h.submit(
         Lane::Simulation,
@@ -1577,6 +1578,8 @@ fn animation_commands_events_and_query() {
         clip: clip.clone(),
         value: 0.0,
         name: String::new(),
+        integer: 0,
+        layer: -1,
     };
     let (s, r) = h.submit(
         Lane::Simulation,
@@ -1653,6 +1656,8 @@ fn animation_commands_events_and_query() {
                 clip: AssetRef::default(),
                 value: 0.0,
                 name: String::new(),
+                integer: 0,
+                layer: -1,
             }
         )],
     );
@@ -1694,6 +1699,8 @@ fn animation_commands_events_and_query() {
                 clip: AssetRef::with_sub(AssetId::from_bytes([9; 16]), "anim/7"),
                 value: 0.0,
                 name: String::new(),
+                integer: 0,
+                layer: -1,
             }
         )],
     );
@@ -1746,6 +1753,8 @@ fn animation_commands_events_and_query() {
                     clip: marked.clone(),
                     value: 0.0,
                     name: String::new(),
+                    integer: 0,
+                    layer: -1,
                 }
             ),
             (
@@ -1759,6 +1768,8 @@ fn animation_commands_events_and_query() {
                     clip: AssetRef::default(),
                     value: 0.5,
                     name: String::new(),
+                    integer: 0,
+                    layer: -1,
                 }
             ),
             (
@@ -1772,6 +1783,8 @@ fn animation_commands_events_and_query() {
                     clip: AssetRef::default(),
                     value: 4.0,
                     name: "speed".into(),
+                    integer: 0,
+                    layer: -1,
                 }
             ),
         ],
@@ -1815,6 +1828,8 @@ fn animation_commands_events_and_query() {
                 clip: AssetRef::default(),
                 value: 2.0,
                 name: String::new(),
+                integer: 0,
+                layer: -1,
             }
         )],
     );
@@ -2238,4 +2253,228 @@ fn memory_stats_and_the_snapshot_budget() {
         unsafe { fynkel_world_set_snapshot_budget(ptr::null_mut(), 1) },
         Status::InvalidArgument
     );
+}
+
+/// ADR-0032 through the wire: an `Animator` naming a controller, the
+/// typed parameter ops and `crossFadeState` (kind 9), the state events
+/// (kinds 12 and 13) and the two controller queries (14 and 15).
+#[test]
+fn animator_controller_ops_events_and_queries() {
+    use fynkel_contracts::{AssetId, AssetRef};
+    use fynkel_core::animation::controller::{
+        Condition, ControllerDef, LayerDef, ParameterDef, ParameterKind, StateDef, Test,
+        TransitionDef, Value,
+    };
+    use fynkel_core::animation::{Channel, Clip, Interpolation, Property};
+    use fynkel_core::components::ComponentValue;
+    use fynkel_core::Animator;
+    let h = Host::new();
+    h.submit(Lane::Simulation, &batch![(1, spawn(1, 0.0, None, "Rig"))]);
+    h.step();
+    let rig = h.spawned()[0];
+    h.submit(
+        Lane::Simulation,
+        &batch![(1, spawn(2, 0.0, Some(rig), "arm"))],
+    );
+    h.step();
+    h.spawned();
+
+    let clip = AssetRef::with_sub(AssetId::from_bytes([9; 16]), "anim/0");
+    let controller = AssetRef::new(AssetId::from_bytes([8; 16]));
+    let state = |name: &str, looping: bool| StateDef {
+        name: name.into(),
+        motion: Some(clip.clone()),
+        speed: 1.0,
+        speed_parameter: None,
+        looping,
+        root_motion: None,
+    };
+    let def = ControllerDef {
+        name: "Player".into(),
+        parameters: vec![
+            ParameterDef {
+                name: "speed".into(),
+                kind: ParameterKind::Float,
+                default: Value::Float(0.0),
+            },
+            ParameterDef {
+                name: "weapon".into(),
+                kind: ParameterKind::Int,
+                default: Value::Int(0),
+            },
+            ParameterDef {
+                name: "jump".into(),
+                kind: ParameterKind::Trigger,
+                default: Value::Bool(false),
+            },
+        ],
+        layers: vec![LayerDef {
+            name: "Base Layer".into(),
+            weight: 1.0,
+            blending: Default::default(),
+            root: None,
+            default_state: Some(0),
+            states: vec![state("Idle", true), state("Jump", false)],
+            transitions: vec![TransitionDef {
+                from: Some(0),
+                to: 1,
+                conditions: vec![Condition {
+                    parameter: 2,
+                    test: Test::Set,
+                }],
+                exit_time: None,
+                duration: 0.0,
+                offset: 0.0,
+                can_transition_to_self: false,
+            }],
+        }],
+    };
+    unsafe {
+        let core = (*h.w).core_mut();
+        core.register_clip(
+            clip.clone(),
+            Clip {
+                name: "rise".into(),
+                duration: 0.5,
+                markers: Vec::new(),
+                channels: vec![Channel {
+                    target: "arm".into(),
+                    property: Property::Translation,
+                    interpolation: Interpolation::Linear,
+                    times: vec![0.0, 0.5],
+                    values: vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                }],
+            },
+        );
+        core.register_controller(controller.clone(), def).unwrap();
+    }
+    let animator = Animator {
+        controller: Some(controller.clone()),
+        speed: 1.0,
+        playing: true,
+        ..Animator::default()
+    };
+    h.submit(
+        Lane::Simulation,
+        &set_component(rig, &ComponentValue::Animator(animator)),
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0, "{:?}", h.diagnostics());
+    let states = || -> Vec<(u32, String, String)> {
+        let (events, tail) = h.events_with_tail();
+        events
+            .into_iter()
+            .filter_map(|(k, b)| match k {
+                12 => {
+                    let e = AnimatorStateEnteredEvent::decode(&b, &tail).unwrap();
+                    assert_eq!((e.entity, e.layer), (rig, 0));
+                    Some((12, e.state, e.from))
+                }
+                13 => {
+                    let e = AnimatorStateExitedEvent::decode(&b, &tail).unwrap();
+                    Some((13, e.state, String::new()))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(states(), [(12, "Idle".into(), String::new())]);
+    assert_eq!(EventKind::ANIMATOR_STATE_ENTERED.0, 12);
+    assert_eq!(EventKind::ANIMATOR_STATE_EXITED.0, 13);
+
+    let cmd = |op: AnimateOp, value: f32, integer: i32, name: &str| AnimateCommandRecord {
+        entity: rig,
+        op,
+        seconds: 0.25,
+        speed: 0.0,
+        looping: false,
+        clip: AssetRef::default(),
+        value,
+        name: name.into(),
+        integer,
+        layer: -1,
+    };
+    // Parameters of each type; a wrong type is refused.
+    let (s, r) = h.submit(
+        Lane::Simulation,
+        &batch![
+            (9, cmd(AnimateOp::SetFloat, 2.5, 0, "speed")),
+            (9, cmd(AnimateOp::SetInteger, 0.0, 7, "weapon")),
+            (9, cmd(AnimateOp::SetInteger, 0.0, 1, "speed")),
+        ],
+    );
+    assert_eq!((s, r.rejected), (Status::Ok, 0));
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 1);
+    assert!(h.diagnostics()[0].message.contains("`speed` is a float"));
+    let (s, n, body, tail) = h.query(bridge::QUERY_ANIMATOR_PARAMETERS, rig);
+    assert_eq!((s, n), (Status::Ok, 3));
+    let size = AnimatorParameterRecord::SIZE;
+    let p: Vec<_> = (0..3)
+        .map(|i| AnimatorParameterRecord::decode(&body[i * size..], &tail).unwrap())
+        .collect();
+    assert_eq!(
+        p.iter()
+            .map(|p| (p.name.as_str(), p.kind, p.value, p.integer, p.flag))
+            .collect::<Vec<_>>(),
+        [
+            ("speed", AnimatorParameterKind::Float, 2.5, 0, false),
+            ("weapon", AnimatorParameterKind::Int, 7.0, 7, false),
+            ("jump", AnimatorParameterKind::Trigger, 0.0, 0, false),
+        ]
+    );
+
+    // The trigger fires the jump; it is used up.
+    h.submit(
+        Lane::Simulation,
+        &batch![(9, cmd(AnimateOp::SetTrigger, 0.0, 0, "jump"))],
+    );
+    h.step();
+    assert_eq!(
+        states(),
+        [
+            (13, "Idle".into(), String::new()),
+            (12, "Jump".into(), "Idle".into())
+        ]
+    );
+    let (s, n, body, tail) = h.query(bridge::QUERY_ANIMATOR_CONTROLLER, rig);
+    assert_eq!((s, n), (Status::Ok, 1));
+    let l = AnimatorLayerStateRecord::decode(&body, &tail).unwrap();
+    assert_eq!((l.entity, l.layer, l.state.as_str()), (rig, 0, "Jump"));
+    assert_eq!((l.length, l.in_transition), (0.5, false));
+
+    // crossFadeState into Idle over 0.25 s: Unity's view mid-fade.
+    h.submit(
+        Lane::Simulation,
+        &batch![(9, cmd(AnimateOp::CrossFadeState, 0.0, 0, "Idle"))],
+    );
+    h.step();
+    assert_eq!(states(), [(12, "Idle".into(), "Jump".into())]);
+    let (_, _, body, tail) = h.query(bridge::QUERY_ANIMATOR_CONTROLLER, rig);
+    let l = AnimatorLayerStateRecord::decode(&body, &tail).unwrap();
+    assert_eq!(
+        (l.state.as_str(), l.next.as_str(), l.in_transition),
+        ("Jump", "Idle", true)
+    );
+    // An unknown state names the states; a controller op on a clip-less,
+    // controller-less animator names what is missing.
+    h.submit(
+        Lane::Simulation,
+        &batch![(9, cmd(AnimateOp::PlayState, 0.0, 0, "Fly"))],
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 1);
+    assert!(h.diagnostics()[0]
+        .message
+        .contains("the states: Idle, Jump"));
+    // Without a controller the queries answer nothing.
+    h.submit(
+        Lane::Simulation,
+        &set_component(rig, &ComponentValue::Animator(Animator::default())),
+    );
+    h.step();
+    let (s, n, _, _) = h.query(bridge::QUERY_ANIMATOR_CONTROLLER, rig);
+    assert_eq!((s, n), (Status::Ok, 0));
+    let (s, n, _, _) = h.query(bridge::QUERY_ANIMATOR_PARAMETERS, rig);
+    assert_eq!((s, n), (Status::Ok, 0));
 }

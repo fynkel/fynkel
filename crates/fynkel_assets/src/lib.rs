@@ -41,6 +41,7 @@ use fynkel_cooked::{
     ChunkFile, KIND_ANIMATION, KIND_CLIP, KIND_CUSTOM_MATERIAL, KIND_ENVIRONMENT, KIND_JSON,
     KIND_MATERIAL, KIND_MESH, KIND_SHADER, KIND_SKIN, KIND_STREAM, KIND_TEXTURE,
 };
+use fynkel_core::animation::controller::ControllerDef;
 use fynkel_core::animation::{
     BlendPoint, BlendSpace, BlendSync, Channel, Clip, Interpolation, Joint, Marker, Property, Skin,
 };
@@ -380,6 +381,7 @@ struct Store {
     mesh_changes: HashMap<AssetRef, u64>,
     clips: HashMap<AssetRef, Arc<Clip>>,
     blends: HashMap<AssetRef, Arc<BlendSpace>>,
+    controllers: HashMap<AssetRef, Arc<ControllerDef>>,
     volumes: HashMap<AssetRef, VolumeProfile>,
     physics_materials: HashMap<AssetRef, PhysicsMaterial>,
     skins: HashMap<AssetRef, Arc<Skin>>,
@@ -472,6 +474,7 @@ impl Assets {
                 mesh_changes: HashMap::new(),
                 clips: HashMap::new(),
                 blends: HashMap::new(),
+                controllers: HashMap::new(),
                 volumes: HashMap::new(),
                 physics_materials: HashMap::new(),
                 skins: HashMap::new(),
@@ -955,11 +958,19 @@ impl Assets {
         for e in &scene.entities {
             for c in &e.components {
                 match c {
-                    ComponentValue::Animator(a) => match self.register_clip(&a.clip, world) {
-                        Ok(true) => clips += 1,
-                        Ok(false) => {}
-                        Err(d) => diags.push(d),
-                    },
+                    ComponentValue::Animator(a) => {
+                        match self.register_clip(&a.clip, world) {
+                            Ok(true) => clips += 1,
+                            Ok(false) => {}
+                            Err(d) => diags.push(d),
+                        }
+                        if let Some(c) = &a.controller {
+                            match self.register_controller(c, world) {
+                                Ok(n) => clips += n,
+                                Err(d) => diags.push(d),
+                            }
+                        }
+                    }
                     ComponentValue::Skin(k) => match self.register_skin(&k.skin, world) {
                         Ok(true) => skins += 1,
                         Ok(false) => {}
@@ -1045,6 +1056,81 @@ impl Assets {
         Ok(true)
     }
 
+    /// Registers the Animator Controller `r` (ADR-0032) with `world` and
+    /// every motion its states play (clips and blend spaces, as
+    /// [`register_clip`](Self::register_clip)) unless it is nil or already
+    /// there; the number of clips and spaces this call registered. A
+    /// motion that does not read is the error and the controller is not
+    /// registered.
+    pub fn register_controller(
+        &self,
+        r: &AssetRef,
+        world: &mut fynkel_core::World,
+    ) -> Result<usize, Diagnostic> {
+        if r.asset.is_nil() || world.has_controller(r) {
+            return Ok(0);
+        }
+        let def = self.controller(r)?;
+        let mut n = 0;
+        for layer in &def.layers {
+            for state in &layer.states {
+                if let Some(m) = &state.motion {
+                    if self.register_clip(m, world)? {
+                        n += 1;
+                    }
+                }
+            }
+        }
+        world
+            .register_controller(r.clone(), (*def).clone())
+            .map_err(|why| self.malformed(r, "JSON").with_suggestion(why))?;
+        Ok(n)
+    }
+
+    /// The cooked Animator Controller (ADR-0032: the document's JSON
+    /// chunk) as the core's `ControllerDef`, names resolved to indices and
+    /// validated. The cook checked the document against the schema and
+    /// the database, so this only reads it.
+    pub fn controller(&self, r: &AssetRef) -> Result<Arc<ControllerDef>, Diagnostic> {
+        if let Some(c) = self.lock().controllers.get(r) {
+            return Ok(c.clone());
+        }
+        let (entry, meta) = {
+            let mut s = self.lock();
+            let entry = s
+                .index
+                .object(r.asset)
+                .map_err(|d| d.with_pointer(r.sub.clone()))?
+                .clone();
+            let meta = s.meta(&entry)?;
+            (entry, meta)
+        };
+        if entry.kind != "document/controller" || !r.sub.is_empty() {
+            return Err(Diagnostic::error(
+                Code::RUNTIME_CHUNK_MISSING,
+                format!(
+                    "{}: {r} is a {} asset, not an Animator Controller",
+                    entry.path, entry.kind
+                ),
+            )
+            .with_id(r.asset.to_string()));
+        }
+        let bytes = self.read_chunk(&entry, &meta, KIND_JSON, "")?;
+        let text = String::from_utf8(bytes).map_err(|_| self.malformed_entry(&entry, "JSON"))?;
+        let doc = Document::parse(DocumentKind::Controller, Some(&entry.path), &text)
+            .map_err(|_| self.malformed_entry(&entry, "JSON"))?;
+        let document = fynkel_document::Controller::from_document(doc);
+        let def = controller_def(&document).and_then(|def| def.validate().map(|()| def));
+        let def = def.map_err(|why| {
+            let mut d = self.malformed_entry(&entry, "JSON");
+            d.message = format!("{}: {why}", d.message);
+            d
+        })?;
+        let def = Arc::new(def);
+        self.lock().controllers.insert(r.clone(), def.clone());
+        Ok(def)
+    }
+
     /// Whether `r` names a blend-space document (no sub).
     pub fn is_blend(&self, r: &AssetRef) -> bool {
         r.sub.is_empty()
@@ -1109,6 +1195,7 @@ impl Assets {
         s.shaders.retain(|id, _| !gone.contains(id));
         s.clips.retain(|r, _| !gone.contains(&r.asset));
         s.blends.retain(|r, _| !gone.contains(&r.asset));
+        s.controllers.retain(|r, _| !gone.contains(&r.asset));
         s.volumes.retain(|r, _| !gone.contains(&r.asset));
         s.physics_materials.retain(|r, _| !gone.contains(&r.asset));
         s.skins.retain(|r, _| !gone.contains(&r.asset));
@@ -1128,6 +1215,7 @@ impl Assets {
         s.shaders.clear();
         s.clips.clear();
         s.blends.clear();
+        s.controllers.clear();
         s.volumes.clear();
         s.physics_materials.clear();
         s.skins.clear();
@@ -1865,4 +1953,112 @@ fn bounds_of(vertices: &[fynkel_cooked::payload::Vertex]) -> ([f32; 3], [f32; 3]
         }
     }
     (min, max)
+}
+
+/// A controller document as the runtime runs it (ADR-0032): parameters,
+/// states and transitions by index. `Err` names what does not resolve.
+pub fn controller_def(c: &fynkel_document::Controller) -> Result<ControllerDef, String> {
+    use fynkel_core::animation::controller::{
+        Blending, Condition, LayerDef, ParameterDef, ParameterKind, StateDef, Test, TransitionDef,
+        Value,
+    };
+    use fynkel_document::controller as doc;
+    let parameters: Vec<ParameterDef> = c
+        .parameters
+        .iter()
+        .map(|p| {
+            let (kind, default) = match p.kind {
+                doc::ParameterType::Float => (ParameterKind::Float, Value::Float(p.default as f32)),
+                doc::ParameterType::Int => (ParameterKind::Int, Value::Int(p.default as i32)),
+                doc::ParameterType::Bool => (ParameterKind::Bool, Value::Bool(p.default != 0.0)),
+                doc::ParameterType::Trigger => (ParameterKind::Trigger, Value::Bool(false)),
+            };
+            ParameterDef {
+                name: p.name.clone(),
+                kind,
+                default,
+            }
+        })
+        .collect();
+    let parameter = |name: &str| {
+        parameters
+            .iter()
+            .position(|p| p.name == name)
+            .ok_or_else(|| format!("no parameter `{name}`"))
+    };
+    let mut layers = Vec::with_capacity(c.layers.len());
+    for l in &c.layers {
+        let state = |name: &str| {
+            l.states
+                .iter()
+                .position(|s| s.name == name)
+                .ok_or_else(|| format!("layer {}: no state `{name}`", l.name))
+        };
+        let states = l
+            .states
+            .iter()
+            .map(|s| {
+                Ok(StateDef {
+                    name: s.name.clone(),
+                    motion: s.motion.clone(),
+                    speed: s.speed,
+                    speed_parameter: s.speed_parameter.as_deref().map(parameter).transpose()?,
+                    looping: s.looping,
+                    root_motion: s.root_motion,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let transitions = l
+            .transitions
+            .iter()
+            .map(|t| {
+                Ok(TransitionDef {
+                    from: if t.from_any() {
+                        None
+                    } else {
+                        Some(state(&t.from)?)
+                    },
+                    to: state(&t.to)?,
+                    conditions: t
+                        .conditions
+                        .iter()
+                        .map(|c| {
+                            Ok(Condition {
+                                parameter: parameter(&c.parameter)?,
+                                test: match c.test {
+                                    doc::Test::Greater(x) => Test::Greater(x as f32),
+                                    doc::Test::Less(x) => Test::Less(x as f32),
+                                    doc::Test::Equals(x) => Test::Equals(x as i32),
+                                    doc::Test::NotEquals(x) => Test::NotEquals(x as i32),
+                                    doc::Test::Is(b) => Test::Is(b),
+                                    doc::Test::Set => Test::Set,
+                                },
+                            })
+                        })
+                        .collect::<Result<Vec<_>, String>>()?,
+                    exit_time: t.exit_time,
+                    duration: t.duration,
+                    offset: t.offset,
+                    can_transition_to_self: t.can_transition_to_self,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        layers.push(LayerDef {
+            name: l.name.clone(),
+            weight: l.weight,
+            blending: match l.blending {
+                doc::Blending::Override => Blending::Override,
+                doc::Blending::Additive => Blending::Additive,
+            },
+            root: l.root.clone(),
+            default_state: l.default_state.as_deref().map(state).transpose()?,
+            states,
+            transitions,
+        });
+    }
+    Ok(ControllerDef {
+        name: c.name().to_string(),
+        parameters,
+        layers,
+    })
 }

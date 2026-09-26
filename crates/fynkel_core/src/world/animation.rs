@@ -31,7 +31,7 @@ use fynkel_physics::CharacterController;
 use fynkel_scene::{self as scene, Children, Parent, Transform};
 use glam::{Mat4, Quat, Vec3};
 
-use super::{Diagnostic, Name, World};
+use super::{controller, Diagnostic, Name, World};
 use crate::animation::{BlendSpace, Clip, Pose, Property, Skin};
 use crate::command::{AnimateOp, Lane};
 use crate::components::{Animator, Skin as SkinComponent};
@@ -79,6 +79,8 @@ pub struct AnimatorRun {
     pub blend_duration: f32,
     /// The blend's active segment: the two points and the fraction.
     pub blend_segment: (usize, usize, f32),
+    /// The Animator Controller it runs (ADR-0032), made on first use.
+    pub controller: Option<super::controller::ControllerPlay>,
 }
 
 impl Default for AnimatorRun {
@@ -99,6 +101,7 @@ impl Default for AnimatorRun {
             blend: Vec::new(),
             blend_duration: 0.0,
             blend_segment: (0, 0, 0.0),
+            controller: None,
         }
     }
 }
@@ -114,7 +117,12 @@ pub struct BlendSlot {
 }
 
 impl BlendSlot {
-    fn resolve(ecs: &Ecs, animator: Entity, clip_ref: AssetRef, clip: &Arc<Clip>) -> BlendSlot {
+    pub(super) fn resolve(
+        ecs: &Ecs,
+        animator: Entity,
+        clip_ref: AssetRef,
+        clip: &Arc<Clip>,
+    ) -> BlendSlot {
         let names: Vec<&str> = clip.channels.iter().map(|c| c.target.as_str()).collect();
         let targets = resolve_names(ecs, animator, &names);
         let root = RootChannels::resolve(ecs, animator, clip, &targets);
@@ -126,7 +134,7 @@ impl BlendSlot {
         }
     }
 
-    fn valid(&self, ecs: &Ecs) -> bool {
+    pub(super) fn valid(&self, ecs: &Ecs) -> bool {
         let names: Vec<&str> = self
             .clip
             .channels
@@ -291,7 +299,7 @@ impl RootChannels {
 /// Root motion out of a sampled pose (M3-19c): the root keeps its
 /// first-frame place and heading — its height and the rest of its
 /// rotation stay — so the motion reaches the entity as a delta instead.
-fn pin_root(pose: &mut Pose, clip: &Clip, root: &RootChannels, time: f32) {
+pub(super) fn pin_root(pose: &mut Pose, clip: &Clip, root: &RootChannels, time: f32) {
     let yaw_now = root.yaw_at(clip, time, false);
     if let Some(e) = pose.entries.iter_mut().find(|e| e.entity == root.entity) {
         if let Some(t) = e.translation.as_mut() {
@@ -307,7 +315,7 @@ fn pin_root(pose: &mut Pose, clip: &Clip, root: &RootChannels, time: f32) {
 /// The root's planar motion and yaw between two unwrapped clocks, in
 /// the animator's parent space (through the locals from the animator
 /// down to the root's parent): `(delta, yaw axis, yaw)`.
-fn root_delta(
+pub(super) fn root_delta(
     ecs: &Ecs,
     animator: Entity,
     clip: &Clip,
@@ -369,7 +377,7 @@ pub struct SkinRun {
 
 /// The first entity in depth-first order under `root` (itself included)
 /// named `name`.
-fn find_named(ecs: &Ecs, root: Entity, name: &str) -> Option<Entity> {
+pub(super) fn find_named(ecs: &Ecs, root: Entity, name: &str) -> Option<Entity> {
     let mut stack = vec![root];
     while let Some(e) = stack.pop() {
         if ecs.get::<Name>(e).is_ok_and(|n| n.value == name) {
@@ -438,12 +446,15 @@ fn at_end(time: f32, speed: f32, duration: f32) -> bool {
 pub(super) struct AnimatorTick {
     entity: Entity,
     ended: Option<AssetRef>,
-    unavailable: Option<AssetRef>,
+    pub(super) unavailable: Option<AssetRef>,
     /// Markers crossed this tick, in order: the clip and the name.
-    markers: Vec<(AssetRef, String)>,
+    pub(super) markers: Vec<(AssetRef, String)>,
     /// Root motion to apply: the delta and the yaw axis in the animator's
     /// parent space, the yaw in radians.
-    root: Option<(Vec3, Vec3, f32)>,
+    pub(super) root: Option<(Vec3, Vec3, f32)>,
+    /// A controller's state events (ADR-0032), in order: the layer,
+    /// entered (else exited), the state and the state left.
+    pub(super) states: Vec<(u32, bool, String, String)>,
 }
 
 /// Hops from the tree root down to `entity`.
@@ -489,6 +500,51 @@ impl World {
 
     pub fn registered_blends(&self) -> impl Iterator<Item = &AssetRef> {
         self.blends.keys()
+    }
+
+    /// Makes an Animator Controller available to `Animator`s that name it
+    /// (ADR-0032); its motions' clips and blend spaces are registered
+    /// separately. `Err` for a def the runtime cannot run.
+    pub fn register_controller(
+        &mut self,
+        controller: AssetRef,
+        data: crate::animation::controller::ControllerDef,
+    ) -> Result<(), String> {
+        data.validate()?;
+        self.controllers.insert(controller, Arc::new(data));
+        Ok(())
+    }
+
+    pub fn has_controller(&self, controller: &AssetRef) -> bool {
+        self.controllers.contains_key(controller)
+    }
+
+    pub fn controller(
+        &self,
+        controller: &AssetRef,
+    ) -> Option<&Arc<crate::animation::controller::ControllerDef>> {
+        self.controllers.get(controller)
+    }
+
+    pub fn registered_controllers(&self) -> impl Iterator<Item = &AssetRef> {
+        self.controllers.keys()
+    }
+
+    /// `FYNKEL_QUERY_ANIMATOR_CONTROLLER` (ADR-0032): the layers' states
+    /// and the parameters of the controller the animator runs; `None`
+    /// before its first tick with one, or without one.
+    pub fn animator_controller_state(
+        &self,
+        entity: Entity,
+    ) -> Option<(
+        Vec<crate::schema::AnimatorLayerStateRecord>,
+        Vec<crate::schema::AnimatorParameterRecord>,
+    )> {
+        let animator = self.ecs.get::<Animator>(entity).ok()?;
+        let run = self.ecs.get::<AnimatorRun>(entity).ok()?;
+        let play = run.controller.as_ref()?;
+        (animator.controller.as_ref() == Some(&play.controller))
+            .then(|| controller::state(entity, play))
     }
 
     /// Makes a skin available to `Skin` components that name it.
@@ -594,10 +650,129 @@ impl World {
                     bad("parameter needs a name and a finite value"),
                 );
             }
+            AnimateOp::PlayState {
+                seconds, offset, ..
+            } if !seconds.is_finite()
+                || *seconds < 0.0
+                || !offset.is_finite()
+                || !(0.0..=1.0).contains(offset) =>
+            {
+                return self.reject(
+                    index,
+                    lane,
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    entity,
+                    ComponentId::ANIMATOR,
+                    bad("crossfade seconds must be finite and >= 0, the offset within [0, 1]"),
+                );
+            }
             _ => {}
+        }
+        // ADR-0032: a controller owns what plays; the clip ops are for an
+        // animator without one, the state and parameter ops for one with.
+        let controlled = self
+            .ecs
+            .get::<Animator>(entity)
+            .ok()
+            .and_then(|a| a.controller.clone())
+            .filter(|c| !c.is_nil());
+        let clip_op = matches!(
+            op,
+            AnimateOp::Play { .. }
+                | AnimateOp::Crossfade { .. }
+                | AnimateOp::SetTime(_)
+                | AnimateOp::SetParameter { .. }
+        );
+        let controller_op = matches!(
+            op,
+            AnimateOp::SetControllerParameter { .. } | AnimateOp::PlayState { .. }
+        );
+        if clip_op && controlled.is_some() {
+            return self.reject(
+                index,
+                lane,
+                DiagnosticCode::INVALID_PAYLOAD,
+                entity,
+                ComponentId::ANIMATOR,
+                bad("the animator runs a controller: play its states by name and set its parameters (setFloat, setInteger, setBool, setTrigger)"),
+            );
         }
         if !self.ecs.has::<AnimatorRun>(entity) {
             let _ = self.ecs.insert(entity, AnimatorRun::default());
+        }
+        if controller_op {
+            let Some(c) = controlled else {
+                return self.reject(
+                    index,
+                    lane,
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    entity,
+                    ComponentId::ANIMATOR,
+                    bad("the animator has no controller"),
+                );
+            };
+            let result = {
+                let Ok(mut run) = self.ecs.get_mut::<AnimatorRun>(entity) else {
+                    return false;
+                };
+                match controller::play_for(&self.controllers, &c, &mut run.controller) {
+                    Err(missing) => Err(format!(
+                        "controller {missing} is not registered with the world"
+                    )),
+                    Ok(play) => match op {
+                        AnimateOp::SetControllerParameter { name, value } => play
+                            .run
+                            .set(&play.def, &name, value)
+                            .map_err(|e| e.to_string()),
+                        AnimateOp::PlayState {
+                            state,
+                            layer,
+                            seconds,
+                            offset,
+                        } => {
+                            let found =
+                                match layer {
+                                    Some(l) => play.def.layers.get(l as usize).and_then(|ly| {
+                                        ly.state_index(&state).map(|s| (l as usize, s))
+                                    }),
+                                    None => play.def.find_state(&state),
+                                };
+                            match found {
+                                Some((l, s)) => {
+                                    play.run
+                                        .cross_fade(l, s, seconds, offset, &mut play.pending);
+                                    Ok(())
+                                }
+                                None => {
+                                    let names: Vec<&str> = play
+                                        .def
+                                        .layers
+                                        .iter()
+                                        .flat_map(|l| l.states.iter().map(|s| s.name.as_str()))
+                                        .collect();
+                                    Err(format!(
+                                        "no state `{state}`{} (the states: {})",
+                                        layer.map(|l| format!(" in layer {l}")).unwrap_or_default(),
+                                        names.join(", ")
+                                    ))
+                                }
+                            }
+                        }
+                        _ => unreachable!("a controller op"),
+                    },
+                }
+            };
+            return match result {
+                Ok(()) => true,
+                Err(why) => self.reject(
+                    index,
+                    lane,
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    entity,
+                    ComponentId::ANIMATOR,
+                    bad(&why),
+                ),
+            };
         }
         let Ok(mut animator) = self.ecs.get_mut::<Animator>(entity) else {
             return false;
@@ -701,6 +876,7 @@ impl World {
             }
             AnimateOp::SetWeight(w) => animator.weight = w,
             AnimateOp::SetParameter { name, value } => run.set_parameter(&name, value),
+            AnimateOp::SetControllerParameter { .. } | AnimateOp::PlayState { .. } => {}
         }
         true
     }
@@ -741,6 +917,7 @@ impl World {
         animators.sort_unstable();
         let mut pose = std::mem::take(&mut self.pose_scratch);
         let mut fade_pose = std::mem::take(&mut self.fade_pose_scratch);
+        let mut layer_pose = std::mem::take(&mut self.layer_pose_scratch);
         let mut crossed: Vec<usize> = Vec::new();
         for &(_, entity) in &animators {
             count += 1;
@@ -756,12 +933,54 @@ impl World {
                 unavailable: None,
                 markers: Vec::new(),
                 root: None,
+                states: Vec::new(),
             };
             pose.clear();
             run.root_delta = Vec3::ZERO;
             run.root_yaw = 0.0;
+            // ADR-0032: an animator with a controller runs its state
+            // machine; its own clip is not used.
+            let controlled = animator.controller.clone().filter(|c| !c.is_nil());
+            if let Some(c) = &controlled {
+                let run = &mut *run;
+                match controller::play_for(&self.controllers, c, &mut run.controller) {
+                    Ok(play) => {
+                        let tables = controller::Tables {
+                            ecs: &self.ecs,
+                            clips: &self.clips,
+                            blends: &self.blends,
+                        };
+                        controller::tick(
+                            &tables,
+                            entity,
+                            &animator,
+                            play,
+                            dt,
+                            &mut pose,
+                            &mut fade_pose,
+                            &mut layer_pose,
+                            &mut out,
+                        );
+                    }
+                    Err(missing) => out.unavailable = Some(missing),
+                }
+                // Reported once per missing asset, like a clip.
+                if let Some(m) = out.unavailable.take() {
+                    if run.reported.as_ref() != Some(&m) {
+                        run.reported = Some(m.clone());
+                        out.unavailable = Some(m);
+                    }
+                }
+                if let Some((delta, _, yaw)) = out.root {
+                    run.root_delta = delta;
+                    run.root_yaw = yaw;
+                }
+                run.fade = None;
+            } else {
+                run.controller = None;
+            }
             let clip_ref = animator.clip.clone();
-            let playing = if clip_ref.is_nil() {
+            let playing = if controlled.is_some() || clip_ref.is_nil() {
                 None
             } else if let Some(c) = self.clips.get(&clip_ref) {
                 Some(Playing::Clip(c.clone()))
@@ -1108,8 +1327,10 @@ impl World {
         }
         pose.clear();
         fade_pose.clear();
+        layer_pose.clear();
         self.pose_scratch = pose;
         self.fade_pose_scratch = fade_pose;
+        self.layer_pose_scratch = layer_pose;
         self.animator_order_scratch = animators;
 
         for t in ticks.drain(..) {
@@ -1121,7 +1342,16 @@ impl World {
                     entity: t.entity,
                     component: ComponentId::ANIMATOR,
                     message: format!(
-                        "animator: clip {clip} is not registered with the world (not in the loaded scene's closure?)"
+                        "animator: {what} {clip} is not registered with the world (not in the loaded scene's closure?)",
+                        what = if self
+                            .ecs
+                            .get::<Animator>(t.entity)
+                            .is_ok_and(|a| a.controller.as_ref() == Some(&clip))
+                        {
+                            "controller"
+                        } else {
+                            "clip"
+                        }
                     ),
                 });
             }
@@ -1132,6 +1362,25 @@ impl World {
                         entity: t.entity,
                         clip,
                         name,
+                    },
+                });
+            }
+            for (layer, entered, state, from) in t.states {
+                self.events.push(Event {
+                    tick,
+                    payload: if entered {
+                        EventPayload::AnimatorStateEntered {
+                            entity: t.entity,
+                            layer,
+                            state,
+                            from,
+                        }
+                    } else {
+                        EventPayload::AnimatorStateExited {
+                            entity: t.entity,
+                            layer,
+                            state,
+                        }
                     },
                 });
             }

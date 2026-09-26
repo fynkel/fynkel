@@ -208,12 +208,30 @@ pub enum AnimateOp {
     SetWeight,
     /// `name`, `value`: a blend-space parameter (M3-19c).
     SetParameter,
+    /// `name`, `value`: a float parameter of the controller (ADR-0032).
+    SetFloat,
+    /// `name`, `integer`: an int parameter of the controller.
+    SetInteger,
+    /// `name`, `value` (non-zero is true): a bool parameter.
+    SetBool,
+    /// `name`: set a trigger; the transition it fires resets it.
+    SetTrigger,
+    /// `name`: reset a trigger nothing used.
+    ResetTrigger,
+    /// `name` (a state), `layer` (`-1`: the first layer that has it),
+    /// `value` (where it starts, a fraction of its motion): jump to the
+    /// state at once, without conditions.
+    PlayState,
+    /// Like `playState`, fading the state playing out over `seconds`.
+    CrossFadeState,
 }
 
 /// Drives a `fynkel.Animator` (M3-19; simulation lane only). Rejected at
 /// the tick with `MISSING_COMPONENT` (no animator) or `INVALID_PAYLOAD`
 /// (non-finite value, negative fade, a weight outside `[0, 1]`, an empty
-/// parameter name).
+/// parameter name; ADR-0032: a clip op on an animator that runs a
+/// controller, a controller op on one that does not, a parameter or
+/// state the controller does not have, a value of another type).
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "command", id = 9, name = "fynkel.cmd.Animate")]
 pub struct AnimateCommandRecord {
@@ -227,10 +245,18 @@ pub struct AnimateCommandRecord {
     pub looping: bool,
     /// For `play`/`crossfade`.
     pub clip: AssetRef,
-    /// The weight for `setWeight`, the parameter value for `setParameter`.
+    /// The weight for `setWeight`, the parameter value for
+    /// `setParameter`/`setFloat`/`setBool`, the start fraction for
+    /// `playState`/`crossFadeState`.
     pub value: f32,
-    /// The parameter name for `setParameter`.
+    /// The parameter name for `setParameter` and the typed setters, the
+    /// state name for `playState`/`crossFadeState`.
     pub name: String,
+    /// The value for `setInteger` (ADR-0032).
+    pub integer: i32,
+    /// The layer for `playState`/`crossFadeState`; `-1` is the first
+    /// layer with a state of that name.
+    pub layer: i32,
 }
 
 /// What a `fynkel.cmd.Audio` does (`fynkel_core::command::AudioOp`).
@@ -449,6 +475,57 @@ pub struct AnimatorStateRecord {
     pub root_yaw: f32,
 }
 
+/// What an Animator Controller's parameter holds (ADR-0032).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Schema)]
+#[schema(name = "fynkel.AnimatorParameterKind")]
+pub enum AnimatorParameterKind {
+    Float,
+    Int,
+    Bool,
+    /// A bool that the transition it fires resets.
+    Trigger,
+}
+
+/// `FYNKEL_QUERY_ANIMATOR_CONTROLLER` (ADR-0032): one record per layer
+/// of the controller an animator runs, as the last step left it (Unity's
+/// `GetCurrentAnimatorStateInfo` / `GetNextAnimatorStateInfo`). No
+/// records for an animator without a running controller.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.AnimatorLayerState")]
+pub struct AnimatorLayerStateRecord {
+    pub entity: Entity,
+    pub layer: u32,
+    /// The state playing; during a crossfade the one fading out.
+    pub state: String,
+    /// Its normalized time: 1.5 = halfway through the second loop.
+    pub normalized_time: f32,
+    /// Its motion's length, seconds (`0` for no motion).
+    pub length: f32,
+    pub in_transition: bool,
+    /// During a crossfade: the state faded to; empty otherwise.
+    pub next: String,
+    pub next_normalized_time: f32,
+    /// How far the crossfade is, 0 → 1; `0` without one.
+    pub transition_progress: f32,
+}
+
+/// `FYNKEL_QUERY_ANIMATOR_PARAMETERS` (ADR-0032): one record per
+/// parameter of the controller an animator runs, in the controller's
+/// order. No records for an animator without a running controller.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.AnimatorParameter")]
+pub struct AnimatorParameterRecord {
+    pub entity: Entity,
+    pub name: String,
+    pub kind: AnimatorParameterKind,
+    /// A float's value (an int's and a bool's as a number too).
+    pub value: f32,
+    /// An int's value.
+    pub integer: i32,
+    /// A bool's or a trigger's value.
+    pub flag: bool,
+}
+
 /// A phase of `World::step` whose time is measured (M3-10, blueprint
 /// §15.4): the whole step, then its phases in tick order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Schema)]
@@ -652,6 +729,33 @@ pub struct AnimationMarkerEvent {
     pub name: String,
 }
 
+/// A layer of an Animator Controller entered a state (ADR-0032): the body
+/// of `ANIMATOR_STATE_ENTERED` (12), general lane — on the first tick
+/// (the default state, `from` empty), when a transition fires, and for a
+/// `playState`/`crossFadeState`. The state is entered when its
+/// crossfade starts.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "event", id = 12, name = "fynkel.ev.AnimatorStateEntered")]
+pub struct AnimatorStateEnteredEvent {
+    pub entity: Entity,
+    /// The layer's index in the controller (0 is the base layer).
+    pub layer: u32,
+    pub state: String,
+    /// The state left; empty on the first tick.
+    pub from: String,
+}
+
+/// A layer of an Animator Controller stopped playing a state (ADR-0032):
+/// the body of `ANIMATOR_STATE_EXITED` (13), general lane, when its
+/// crossfade out ended (the tick of a transition without one).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "event", id = 13, name = "fynkel.ev.AnimatorStateExited")]
+pub struct AnimatorStateExitedEvent {
+    pub entity: Entity,
+    pub layer: u32,
+    pub state: String,
+}
+
 /// A `fynkel.AudioSource`'s non-looping clip reached its end (M3-11): the
 /// body of `PLAYBACK_ENDED` (11), general lane, the tick it happened;
 /// `playing` is cleared the same tick. A stopped or stolen voice raises
@@ -847,6 +951,10 @@ pub const ALL: &[&RecordSchema] = &[
     &Layer::SCHEMA,
     &Tags::SCHEMA,
     &SetActiveCommand::SCHEMA,
+    &AnimatorStateEnteredEvent::SCHEMA,
+    &AnimatorStateExitedEvent::SCHEMA,
+    &AnimatorLayerStateRecord::SCHEMA,
+    &AnimatorParameterRecord::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this
@@ -913,17 +1021,21 @@ mod tests {
         assert_eq!(Emitter::SCHEMA.wire_size(), 56);
         assert_eq!(SystemTimeRecord::SCHEMA.wire_size(), 16);
         // M3-19: clip 24 @0, speed @24, looping @28, playing @29; M3-19c:
-        // weight @32, additive @36, root_motion @37 → 40.
-        assert_eq!(Animator::SCHEMA.offsets(), vec![0, 24, 28, 29, 32, 36, 37]);
-        assert_eq!(Animator::SCHEMA.wire_size(), 40);
+        // weight @32, additive @36, root_motion @37; ADR-0032: controller
+        // (an optional ref) @40.
+        assert_eq!(
+            Animator::SCHEMA.offsets(),
+            vec![0, 24, 28, 29, 32, 36, 37, 40]
+        );
+        assert_eq!(Animator::SCHEMA.wire_size(), 64);
         assert_eq!(Skin::SCHEMA.wire_size(), 32);
         // entity @0, op @8, seconds @12, speed @16, looping @20, clip @24,
-        // value @48, name @52 → 64.
+        // value @48, name @52, integer @60, layer @64 → 72.
         assert_eq!(
             AnimateCommandRecord::SCHEMA.offsets(),
-            vec![0, 8, 12, 16, 20, 24, 48, 52]
+            vec![0, 8, 12, 16, 20, 24, 48, 52, 60, 64]
         );
-        assert_eq!(AnimateCommandRecord::SCHEMA.wire_size(), 64);
+        assert_eq!(AnimateCommandRecord::SCHEMA.wire_size(), 72);
         assert_eq!(AnimationEndedEvent::SCHEMA.wire_size(), 32);
         // entity @0, clip @8, name @32 → 40.
         assert_eq!(AnimationMarkerEvent::SCHEMA.wire_size(), 40);

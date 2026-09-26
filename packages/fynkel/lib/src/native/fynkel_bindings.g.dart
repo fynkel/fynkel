@@ -1006,6 +1006,14 @@ enum FynkelEventKind {
   /// An AudioSource's non-looping clip reached its end (M3-11)
   /// (`fynkel.ev.PlaybackEnded` body: entity, clip).
   FYNKEL_EVENT_PLAYBACK_ENDED(11),
+
+  /// ADR-0032: a layer of an Animator Controller entered a state
+  /// (`fynkel.ev.AnimatorStateEntered` body: entity, layer, state, from).
+  FYNKEL_EVENT_ANIMATOR_STATE_ENTERED(12),
+
+  /// ADR-0032: a layer stopped playing a state, its crossfade out ended
+  /// (`fynkel.ev.AnimatorStateExited` body: entity, layer, state).
+  FYNKEL_EVENT_ANIMATOR_STATE_EXITED(13),
   FYNKEL_EVENT_COLLISION_ENTER(256),
   FYNKEL_EVENT_COLLISION_STAY(257),
   FYNKEL_EVENT_COLLISION_EXIT(258),
@@ -1027,6 +1035,8 @@ enum FynkelEventKind {
     9 => FYNKEL_EVENT_ANIMATION_ENDED,
     10 => FYNKEL_EVENT_ANIMATION_MARKER,
     11 => FYNKEL_EVENT_PLAYBACK_ENDED,
+    12 => FYNKEL_EVENT_ANIMATOR_STATE_ENTERED,
+    13 => FYNKEL_EVENT_ANIMATOR_STATE_EXITED,
     256 => FYNKEL_EVENT_COLLISION_ENTER,
     257 => FYNKEL_EVENT_COLLISION_STAY,
     258 => FYNKEL_EVENT_COLLISION_EXIT,
@@ -1085,7 +1095,17 @@ enum FynkelQueryKind {
 
   /// (no entity) -> one AudioStatsRecord: the audio engine's device,
   /// voices and counters (M3-11).
-  FYNKEL_QUERY_AUDIO_STATS(13);
+  FYNKEL_QUERY_AUDIO_STATS(13),
+
+  /// entity -> one AnimatorLayerStateRecord per layer of the Animator
+  /// Controller it runs (0 records without a running controller)
+  /// (ADR-0032).
+  FYNKEL_QUERY_ANIMATOR_CONTROLLER(14),
+
+  /// entity -> one AnimatorParameterRecord per parameter of the Animator
+  /// Controller it runs (0 records without a running controller)
+  /// (ADR-0032).
+  FYNKEL_QUERY_ANIMATOR_PARAMETERS(15);
 
   final int value;
   const FynkelQueryKind(this.value);
@@ -1104,6 +1124,8 @@ enum FynkelQueryKind {
     11 => FYNKEL_QUERY_ANIMATOR,
     12 => FYNKEL_QUERY_AUDIO,
     13 => FYNKEL_QUERY_AUDIO_STATS,
+    14 => FYNKEL_QUERY_ANIMATOR_CONTROLLER,
+    15 => FYNKEL_QUERY_ANIMATOR_PARAMETERS,
     _ => throw ArgumentError('Unknown value for FynkelQueryKind: $value'),
   };
 }

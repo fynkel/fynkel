@@ -189,6 +189,12 @@ typedef enum FynkelEventKind {
   /* An AudioSource's non-looping clip reached its end (M3-11)
    * (`fynkel.ev.PlaybackEnded` body: entity, clip). */
   FYNKEL_EVENT_PLAYBACK_ENDED = 11,
+  /* ADR-0032: a layer of an Animator Controller entered a state
+   * (`fynkel.ev.AnimatorStateEntered` body: entity, layer, state, from). */
+  FYNKEL_EVENT_ANIMATOR_STATE_ENTERED = 12,
+  /* ADR-0032: a layer stopped playing a state, its crossfade out ended
+   * (`fynkel.ev.AnimatorStateExited` body: entity, layer, state). */
+  FYNKEL_EVENT_ANIMATOR_STATE_EXITED = 13,
   FYNKEL_EVENT_COLLISION_ENTER = 0x100,
   FYNKEL_EVENT_COLLISION_STAY = 0x101,
   FYNKEL_EVENT_COLLISION_EXIT = 0x102,
@@ -233,7 +239,15 @@ typedef enum FynkelQueryKind {
   FYNKEL_QUERY_AUDIO = 12,
   /* (no entity) -> one AudioStatsRecord: the audio engine's device,
    * voices and counters (M3-11). */
-  FYNKEL_QUERY_AUDIO_STATS = 13
+  FYNKEL_QUERY_AUDIO_STATS = 13,
+  /* entity -> one AnimatorLayerStateRecord per layer of the Animator
+   * Controller it runs (0 records without a running controller)
+   * (ADR-0032). */
+  FYNKEL_QUERY_ANIMATOR_CONTROLLER = 14,
+  /* entity -> one AnimatorParameterRecord per parameter of the Animator
+   * Controller it runs (0 records without a running controller)
+   * (ADR-0032). */
+  FYNKEL_QUERY_ANIMATOR_PARAMETERS = 15
 } FynkelQueryKind;
 
 /* ---- Buffer header ------------------------------------------------------ */
