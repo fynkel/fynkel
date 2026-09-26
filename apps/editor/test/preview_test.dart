@@ -3,12 +3,16 @@
 // its info line; folded and resized per preview, kept in the preferences.
 // The texture preview: channels, mips, the GPU size line. A package's
 // preview comes before the editor's own, and one that throws fails alone.
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel_editor/src/extensions/editor_extensions.dart';
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 import 'package:fynkel_editor/src/inspector/inspector_panel.dart';
+import 'package:fynkel_editor/src/preview/clip_bar.dart';
 import 'package:fynkel_editor/src/preview/preview_area.dart';
 import 'package:fynkel_editor/src/preview/sound_preview.dart';
 import 'package:fynkel_editor/src/preview/stage_previews.dart';
@@ -166,6 +170,8 @@ void main() {
     expect(stageInfo(cube, lead: 'Cube'), 'Cube  24 verts  12 tris  1.00 × 1.00 × 1.00 m');
     const model = PreviewStageStats(meshes: 3, vertices: 12345, triangles: 20000, skinned: 1, size: [0.5, 12, 2]);
     expect(stageInfo(model), '3 meshes  1 skinned  12,345 verts  20,000 tris  0.50 × 12.0 × 2.00 m');
+    const rigged = PreviewStageStats(meshes: 1, vertices: 8, triangles: 12, skinned: 1, bones: 3);
+    expect(stageInfo(rigged), '1 mesh  1 skinned  3 bones  8 verts  12 tris');
   });
 
   StageViewState stageOf(WidgetTester tester) => tester.state<StageViewState>(find.byType(StageView));
@@ -263,5 +269,124 @@ void main() {
     await tester.pumpAndSettle();
     expect(view().isPlaying, isFalse);
     expect(find.descendant(of: find.byKey(const Key('preview.play')), matching: find.byIcon(FIcons.playArrow)), findsOneWidget);
+  });
+
+  test('the clip bar\'s time and speed labels', () {
+    expect(clipTime(1.2), '0:01.20');
+    expect(clipTime(75.456), '1:15.46');
+    expect(speedLabel(0.25), '0.25×');
+    expect(speedLabel(1), '1×');
+  });
+
+  testWidgets('a clip on its model: from the menu, played, paused, scrubbed, slowed, once', (tester) async {
+    final e = await Editor.open(tester, tag: 'preview');
+    await select(e, pathId(e, 'models/rig.glb'));
+    expect(info(tester), contains(' bones  '));
+    expect(find.byKey(const Key('preview.clip')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('preview.anim')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview.anim.anim/wave')));
+    await tester.pump();
+    final view = stageOf(tester);
+    expect(view.clip!.sub, 'anim/wave');
+    expect(view.isPlaying, isTrue, reason: 'as Unity, it starts playing');
+    expect(find.byKey(const Key('preview.clip')), findsOneWidget);
+    expect(find.byKey(const Key('preview.part')), findsNothing, reason: 'a clip poses the whole model');
+    final duration = view.clip!.duration;
+    expect(duration, greaterThan(0));
+
+    // The clock runs with the frames.
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+    final t1 = view.clip!.time;
+    expect(t1, greaterThan(0));
+
+    await tester.tap(find.byKey(const Key('preview.clip.play')));
+    await tester.pump();
+    expect(view.isPlaying, isFalse);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(view.clip!.time, t1, reason: 'paused');
+
+    // A scrub to the start pauses and poses there.
+    final scrub = tester.getRect(find.byKey(const Key('preview.clip.scrub')));
+    await tester.tapAt(scrub.centerLeft + const Offset(1, 0));
+    await tester.pump();
+    expect(view.clip!.time, lessThan(duration * 0.1));
+    expect(tester.widget<Text>(find.byKey(const Key('preview.clip.time'))).data, startsWith('0:00.'));
+
+    // Half speed, no loop: runs out at the end and stops there.
+    await tester.tap(find.byKey(const Key('preview.clip.speed')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview.clip.speed.0.5')));
+    await tester.pumpAndSettle();
+    expect(view.speed, 0.5);
+    await tester.tap(find.byKey(const Key('preview.clip.loop')));
+    await tester.pump();
+    expect(view.loop, isFalse);
+    await tester.tap(find.byKey(const Key('preview.clip.play')));
+    await tester.pump();
+    for (var i = 0; i < (duration * 2 / 0.1).ceil() + 3; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(view.isPlaying, isFalse);
+    expect(view.clip!.time, closeTo(duration, 1e-3));
+
+    // Root motion let move, then back in place.
+    await tester.tap(find.byKey(const Key('preview.clip.move')));
+    await tester.pump();
+    expect(view.clip!.inPlace, isFalse);
+
+    // No clip: the bar goes, the parts come back.
+    await tester.tap(find.byKey(const Key('preview.anim')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview.anim.none')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('preview.clip')), findsNothing);
+    expect(find.byKey(const Key('preview.part')), findsOneWidget);
+  });
+
+  testWidgets('a blend space plays on its model with its parameter', (tester) async {
+    const rig = 'c0000000-0000-4000-8000-000000000005';
+    final e = await Editor.open(
+      tester,
+      tag: 'preview',
+      prepare: (dir) => File('${dir.path}/assets/models/loco.blend.json').writeAsStringSync(
+        jsonEncode({
+          r'$schema': 'https://fynkel.dev/schemas/blend.schema.json',
+          'formatVersion': 1,
+          'id': 'c0000000-0000-4000-8000-00000000b1e0',
+          'name': 'Loco',
+          'parameter': 'speed',
+          'points': [
+            {
+              'at': 0.0,
+              'clip': {'asset': rig, 'sub': 'anim/wave'},
+            },
+            {
+              'at': 2.0,
+              'clip': {'asset': rig, 'sub': 'anim/bob'},
+            },
+          ],
+          'sync': 'phase',
+        }),
+      ),
+    );
+    // It plays at once: frames never settle while it does.
+    e.shell.browser!.select(pathId(e, 'models/loco.blend.json'));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.byKey(const Key('preview.stage.error')), findsNothing);
+    final view = stageOf(tester);
+    expect(view.clip!.blend!.parameter, 'speed');
+    expect(view.isPlaying, isTrue);
+    final slider = tester.getRect(find.byKey(const Key('preview.clip.parameter')));
+    await tester.tapAt(slider.centerRight - const Offset(2, 0));
+    await tester.pump();
+    expect(view.clip!.blend!.value, greaterThan(1.5));
+    await tester.tap(find.byKey(const Key('preview.clip.play')));
+    await tester.pump();
+    expect(view.isPlaying, isFalse);
   });
 }

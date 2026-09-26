@@ -103,4 +103,24 @@ void main() {
     final share = covered / ((w ~/ 4) * (h ~/ 4));
     expect(share, inInclusiveRange(0.08, 0.8), reason: 'covers $share');
   });
+
+  test('a clip poses the skinned model in the picture', () async {
+    const rig = 'c0000000-0000-4000-8000-000000000005';
+    final dir = copyFixture('stage-render-clip');
+    final project = await SessionProject.open(dir.path, watch: false);
+    addTearDown(project.close);
+    final stage = project.openStage(rig);
+    final rest = await draw(stage, 'clip-rest');
+    final wave = stage.setClip(keep: false, clip: {'asset': rig, 'sub': 'anim/wave'}, time: 0)!;
+    final posed = stage.setClip(time: wave.duration / 2)!;
+    expect(posed.time, closeTo(wave.duration / 2, 1e-4));
+    final moved = await draw(stage, 'clip-posed');
+    var changed = 0;
+    for (var y = 0; y < h; y += 2) {
+      for (var x = 0; x < w; x += 2) {
+        if (diff(at(rest, x, y), at(moved, x, y)) > 30) changed++;
+      }
+    }
+    expect(changed, greaterThan(20), reason: 'the pose shows: $changed samples changed');
+  });
 }

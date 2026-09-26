@@ -23,6 +23,7 @@ import '../inspector/asset_edits.dart';
 import '../project/editor_project.dart';
 import '../scene_view/scene_math.dart';
 import '../theme/tokens.dart';
+import 'clip_bar.dart';
 import 'stage_backend.dart';
 
 /// What the 3D previews draw with: the project's stages, the Inspector's
@@ -52,6 +53,7 @@ PreviewStageStats stageStats(StageState state) {
     vertices: s.vertices,
     triangles: s.triangles,
     skinned: s.skinned,
+    bones: s.bones,
     size: lo == null || hi == null || lo.length < 3 || hi.length < 3
         ? null
         : [for (var i = 0; i < 3; i++) hi[i] - lo[i]],
@@ -73,18 +75,21 @@ EditorCamera cameraOf(StageFraming f) {
 }
 
 class StageView extends StatefulWidget {
-  const StageView({super.key, required this.asset, this.sub, this.shape, this.onStats});
+  const StageView({super.key, required this.asset, this.sub, this.shape, this.clip, this.onStats});
 
   final String asset;
   final String? sub;
   final Object? shape;
+
+  /// Played on the model (a blend space's stage plays its own).
+  final PreviewClip? clip;
   final void Function(PreviewStageStats stats)? onStats;
 
   @override
   State<StageView> createState() => StageViewState();
 }
 
-class StageViewState extends State<StageView> {
+class StageViewState extends State<StageView> with SingleTickerProviderStateMixin {
   PreviewStageScope? _scope;
   StageBackend? _stage;
   String? _error;
@@ -97,6 +102,20 @@ class StageViewState extends State<StageView> {
 
   /// Frames drawn (tests).
   int frames = 0;
+
+  // ── The clip's playback: the editor runs the clock, the stage poses ──
+  StageClip? _clip;
+  bool _playing = false;
+  bool _loop = true;
+  double _speed = 1;
+  late final Ticker _ticker = createTicker(_tick);
+  Duration _elapsed = Duration.zero;
+
+  /// The clip posing the model, as the stage last reported it (tests).
+  StageClip? get clip => _clip;
+  bool get isPlaying => _playing;
+  double get speed => _speed;
+  bool get loop => _loop;
 
   /// The stage shown; null while it failed (tests).
   StageBackend? get stage => _stage;
@@ -121,6 +140,8 @@ class StageViewState extends State<StageView> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.asset != widget.asset || oldWidget.sub != widget.sub) {
       _open();
+    } else if (oldWidget.clip != widget.clip) {
+      _putClip();
     } else if (!_sameShape(oldWidget.shape, widget.shape) && widget.shape != null) {
       _setShape(widget.shape!);
     }
@@ -171,12 +192,90 @@ class StageViewState extends State<StageView> {
         if (scope.edits?.drawn(widget.asset) case final fields?) stage.setMaterial(widget.asset, fields);
       }
       _stats(stage.state);
+      _clip = stage.state.clip;
+      if (widget.clip != null) {
+        _putClip();
+      } else if (_clip != null) {
+        _play(true);
+      }
     } on AuthoringException catch (e) {
       _error = e.diagnostics.firstOrNull?.message ?? '$e';
     } on UnsupportedError {
       _error = 'This project draws no 3D previews.';
     }
     _schedule();
+  }
+
+  /// The widget's clip on the stage, from its start, playing (as Unity's
+  /// preview starts it); none takes it off.
+  void _putClip() {
+    final stage = _stage;
+    if (stage == null) return;
+    final c = widget.clip;
+    try {
+      _clip = stage.setClip(keep: false, clip: c == null ? null : {'asset': c.asset, 'sub': c.sub}, time: 0);
+    } on AuthoringException catch (e) {
+      _clip = null;
+      _toast(e.diagnostics.firstOrNull?.message ?? '$e');
+    }
+    _play(_clip != null);
+    _schedule();
+  }
+
+  void _play(bool on) {
+    if (!mounted) return;
+    setState(() => _playing = on);
+    if (on && !_ticker.isActive) {
+      _elapsed = Duration.zero;
+      _ticker.start();
+    } else if (!on && _ticker.isActive) {
+      _ticker.stop();
+    }
+  }
+
+  void _tick(Duration elapsed) {
+    final clip = _clip;
+    final dt = (elapsed - _elapsed).inMicroseconds / 1e6;
+    _elapsed = elapsed;
+    if (clip == null || !_playing) return;
+    final d = clip.duration;
+    var time = clip.time + dt * _speed;
+    var ended = false;
+    if (d <= 0) {
+      time = 0;
+    } else if (time >= d) {
+      if (_loop) {
+        time %= d;
+      } else {
+        time = d;
+        ended = true;
+      }
+    }
+    _seek(time);
+    if (ended) _play(false);
+  }
+
+  /// The model posed at [time] seconds.
+  void _seek(double time, {bool? inPlace, double? parameter}) {
+    final stage = _stage;
+    if (stage == null || stage.isClosed) return;
+    try {
+      final next = stage.setClip(time: time, inPlace: inPlace, parameter: parameter);
+      if (mounted) setState(() => _clip = next);
+    } on AuthoringException {
+      _play(false);
+      return;
+    }
+    _schedule();
+  }
+
+  /// The play button: from the start again once a clip that does not loop
+  /// ran out.
+  void togglePlay() {
+    final clip = _clip;
+    if (clip == null) return;
+    if (!_playing && !_loop && clip.duration > 0 && clip.time >= clip.duration) _seek(0);
+    _play(!_playing);
   }
 
   void _setShape(Object shape) {
@@ -336,6 +435,7 @@ class StageViewState extends State<StageView> {
   @override
   void dispose() {
     _disposed = true;
+    _ticker.dispose();
     _noticeTimer?.cancel();
     _detach();
     _focus.dispose();
@@ -348,7 +448,7 @@ class StageViewState extends State<StageView> {
     final error = _error;
     final controller = _controller;
     final small = Theme.of(context).textTheme.bodySmall;
-    return Focus(
+    final stageArea = Focus(
       focusNode: _focus,
       onKeyEvent: _key,
       child: Listener(
@@ -384,7 +484,7 @@ class StageViewState extends State<StageView> {
                 Positioned(
                   left: 6,
                   right: 6,
-                  bottom: 4,
+                  bottom: _clip == null ? 4 : 30,
                   child: Text(
                     notice,
                     key: const Key('preview.stage.notice'),
@@ -396,6 +496,34 @@ class StageViewState extends State<StageView> {
           ),
         ),
       ),
+    );
+    // The play bar stands outside the steering: its drags scrub, never orbit.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        stageArea,
+        if (_clip case final clip? when error == null)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: ClipBar(
+              clip: clip,
+              playing: _playing,
+              speed: _speed,
+              loop: _loop,
+              onPlay: togglePlay,
+              onScrub: (t) {
+                _play(false);
+                _seek(t);
+              },
+              onSpeed: (s) => setState(() => _speed = s),
+              onLoop: () => setState(() => _loop = !_loop),
+              onInPlace: () => _seek(clip.time, inPlace: !clip.inPlace),
+              onParameter: (v) => _seek(clip.time, parameter: v),
+            ),
+          ),
+      ],
     );
   }
 }

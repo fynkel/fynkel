@@ -48,7 +48,18 @@ abstract interface class PreviewContext {
   /// `sphere`, `cube`, `cylinder`, `capsule`, `plane`, or a mesh as
   /// `{'asset': id, 'sub': 'mesh/…'}`. [onStats] gets what is drawn once
   /// it is staged.
-  Widget stage({String? asset, String? sub, Object? shape, void Function(PreviewStageStats stats)? onStats});
+  ///
+  /// [clip] plays a clip on a model, a rig or a prefab (a blend space's
+  /// stage plays its space on its own): a play bar over the picture's
+  /// foot plays, pauses and scrubs it, at a speed from 0.25× to 2×,
+  /// looping or not, with root motion in place or moving.
+  Widget stage({
+    String? asset,
+    String? sub,
+    Object? shape,
+    PreviewClip? clip,
+    void Function(PreviewStageStats stats)? onStats,
+  });
 
   /// The editor's sound view (the sound preview's): the waveform of
   /// [asset] (this preview's by default), one lane per channel, with a
@@ -89,14 +100,43 @@ final class PreviewSoundInfo {
 
 /// What a [PreviewContext.stage] draws: its meshes, and their size.
 final class PreviewStageStats {
-  const PreviewStageStats({this.meshes = 0, this.vertices = 0, this.triangles = 0, this.skinned = 0, this.size});
+  const PreviewStageStats({
+    this.meshes = 0,
+    this.vertices = 0,
+    this.triangles = 0,
+    this.skinned = 0,
+    this.bones = 0,
+    this.size,
+  });
 
   final int meshes, vertices, triangles;
 
   /// Of the meshes, the ones a skin deforms.
   final int skinned;
 
+  /// The joints of the skins.
+  final int bones;
+
   /// The bounds' width, height and depth in metres; null when nothing
   /// measurable is drawn.
   final List<double>? size;
+}
+
+/// A clip for [PreviewContext.stage] to play: an animation of a model or
+/// a rig ([asset] with [sub] `anim/Run`).
+final class PreviewClip {
+  const PreviewClip({required this.asset, required this.sub, this.name});
+
+  final String asset, sub;
+
+  /// What the toolbar calls it; the sub's last part by default.
+  final String? name;
+
+  String get label => name ?? sub.split('/').last;
+
+  @override
+  bool operator ==(Object other) => other is PreviewClip && other.asset == asset && other.sub == sub;
+
+  @override
+  int get hashCode => Object.hash(asset, sub);
 }

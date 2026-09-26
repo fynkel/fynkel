@@ -42,6 +42,7 @@ void registerBuiltInPreviews() {
   PreviewProviders.register(modelPreview);
   PreviewProviders.register(rigPreview);
   PreviewProviders.register(prefabPreview);
+  PreviewProviders.register(blendPreview);
   PreviewProviders.register(soundPreview);
 }
 
@@ -327,14 +328,20 @@ class _Preview implements PreviewContext {
       );
 
   @override
-  Widget stage({String? asset, String? sub, Object? shape, void Function(PreviewStageStats stats)? onStats}) =>
-      StageView(
-        key: ValueKey('preview.stage.${asset ?? this.asset.id}.$sub.$revision'),
-        asset: asset ?? this.asset.id,
-        sub: sub,
-        shape: shape,
-        onStats: onStats,
-      );
+  Widget stage({
+    String? asset,
+    String? sub,
+    Object? shape,
+    PreviewClip? clip,
+    void Function(PreviewStageStats stats)? onStats,
+  }) => StageView(
+    key: ValueKey('preview.stage.${asset ?? this.asset.id}.$sub.$revision'),
+    asset: asset ?? this.asset.id,
+    sub: sub,
+    shape: shape,
+    clip: clip,
+    onStats: onStats,
+  );
 
   @override
   Widget sound({

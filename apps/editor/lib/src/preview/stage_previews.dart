@@ -4,9 +4,12 @@
 //   Plane from the toolbar), or on any mesh dropped onto the picture from
 //   the Project;
 // - a model (or a rig) whole, or one of its meshes from the toolbar;
-// - a prefab as it is.
+// - a prefab as it is;
+// - a clip of a model or rig on it, from the toolbar or dropped onto the
+//   picture from the Project, with a play bar (ADR-0030 step 7);
+// - a blend space on the model of its clips, with its parameter.
 // The info line counts what is drawn: meshes, vertices, triangles, the
-// skinned ones, and the bounds' size.
+// skinned ones and their bones, and the bounds' size.
 import 'package:flutter/material.dart';
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 
@@ -40,6 +43,7 @@ String stageInfo(PreviewStageStats? s, {String? lead}) {
     ?lead,
     if (s.meshes != 1 || lead == null) '${s.meshes} ${s.meshes == 1 ? 'mesh' : 'meshes'}',
     if (s.skinned > 0) '${s.skinned} skinned',
+    if (s.bones > 0) '${_count(s.bones)} bones',
     '${_count(s.vertices)} verts',
     '${_count(s.triangles)} tris',
     if (s.size case final size?) '${size.map(_metres).join(' × ')} m',
@@ -103,27 +107,87 @@ List<String> modelMeshes(BuildContext context, String asset) {
   ];
 }
 
+/// A model's or rig's clips (`anim/Run`), from its asset detail.
+List<String> modelClips(BuildContext context, String asset) {
+  final detail = PreviewStageScope.maybeOf(context)?.project.assetDetail(asset);
+  return [
+    for (final sub in detail?.subAssets.keys ?? const <String>[])
+      if (sub.startsWith('anim/')) sub,
+  ];
+}
+
 Widget _modelToolbar(BuildContext context, PreviewContext preview) {
   final meshes = modelMeshes(context, preview.asset.id);
-  if (meshes.isEmpty) return const SizedBox.shrink();
+  final clips = modelClips(context, preview.asset.id);
   final part = preview.value<String?>('part', null);
+  final clip = preview.value<PreviewClip?>('clip', null);
   final t = context.tokens;
-  return _Menu(
-    key: const Key('preview.part'),
-    label: part == null ? 'Whole' : part.substring('mesh/'.length),
-    tooltip: 'Show the whole model or one mesh',
-    items: [
-      (key: 'preview.part.whole', value: '', label: 'Whole'),
-      for (final m in meshes) (key: 'preview.part.$m', value: m, label: m.substring('mesh/'.length)),
+  final style = Theme.of(context).textTheme.bodySmall?.copyWith(color: t.textSecondary);
+  return Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      // A clip poses the whole model: one mesh alone has no bones to move.
+      if (clips.isNotEmpty || clip != null)
+        _Menu(
+          key: const Key('preview.anim'),
+          label: clip?.label ?? 'No clip',
+          tooltip: 'Play one of its clips (or drop a clip on the picture)',
+          items: [
+            (key: 'preview.anim.none', value: '', label: 'No clip'),
+            for (final c in clips) (key: 'preview.anim.$c', value: c, label: c.substring('anim/'.length)),
+          ],
+          selected: clip == null ? '' : (clip.asset == preview.asset.id ? clip.sub : null),
+          onSelected: (c) {
+            preview.set('clip', c.isEmpty ? null : PreviewClip(asset: preview.asset.id, sub: c));
+            if (c.isNotEmpty) preview.set('part', null);
+          },
+          style: style,
+        ),
+      if (meshes.isNotEmpty && clip == null) ...[
+        const SizedBox(width: 4),
+        _Menu(
+          key: const Key('preview.part'),
+          label: part == null ? 'Whole' : part.substring('mesh/'.length),
+          tooltip: 'Show the whole model or one mesh',
+          items: [
+            (key: 'preview.part.whole', value: '', label: 'Whole'),
+            for (final m in meshes) (key: 'preview.part.$m', value: m, label: m.substring('mesh/'.length)),
+          ],
+          selected: part ?? '',
+          onSelected: (m) => preview.set('part', m.isEmpty ? null : m),
+          style: style,
+        ),
+      ],
     ],
-    selected: part ?? '',
-    onSelected: (m) => preview.set('part', m.isEmpty ? null : m),
-    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: t.textSecondary),
   );
 }
 
-Widget _hierarchy(BuildContext context, PreviewContext preview) =>
-    preview.stage(sub: preview.value<String?>('part', null), onStats: (s) => preview.set('stats', s));
+Widget _hierarchy(BuildContext context, PreviewContext preview) {
+  final clip = preview.value<PreviewClip?>('clip', null);
+  return DragTarget<AssetDragPayload>(
+    onWillAcceptWithDetails: (d) => d.data.kind == 'clip' && d.data.sub != null,
+    onAcceptWithDetails: (d) {
+      preview.set('part', null);
+      preview.set('clip', PreviewClip(asset: d.data.id, sub: d.data.sub!));
+    },
+    builder: (context, over, _) => Stack(
+      fit: StackFit.expand,
+      children: [
+        preview.stage(
+          sub: clip == null ? preview.value<String?>('part', null) : null,
+          clip: clip,
+          onStats: (s) => preview.set('stats', s),
+        ),
+        if (over.isNotEmpty)
+          IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(border: Border.all(color: context.tokens.accent, width: 2)),
+            ),
+          ),
+      ],
+    ),
+  );
+}
 
 String _hierarchyInfo(PreviewContext preview) => stageInfo(preview.value<PreviewStageStats?>('stats', null));
 
@@ -140,6 +204,15 @@ final rigPreview = PreviewProvider(
   kind: 'rig',
   build: _hierarchy,
   toolbar: _modelToolbar,
+  info: _hierarchyInfo,
+);
+
+/// A blend space on the model of its clips: the stage plays the space,
+/// its play bar carries the parameter's slider.
+final blendPreview = PreviewProvider(
+  package: PreviewProvider.editorPackage,
+  kind: 'blend',
+  build: (context, preview) => preview.stage(onStats: (s) => preview.set('stats', s)),
   info: _hierarchyInfo,
 );
 
