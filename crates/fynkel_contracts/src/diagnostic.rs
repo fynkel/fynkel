@@ -150,6 +150,11 @@ impl Code {
     pub const CONTROLLER_CONDITION: Code = Code("FYN-D1102");
     /// A state's motion is not an animation clip or a blend space.
     pub const CONTROLLER_MOTION: Code = Code("FYN-D1103");
+    /// A blend tree (ADR-0033) of the wrong shape: a parameter count
+    /// that does not fit its type, no children or too many, a child
+    /// without its threshold, position or parameter, two children at one
+    /// position, nesting too deep, too many motions in all.
+    pub const CONTROLLER_BLEND_TREE: Code = Code("FYN-D1104");
 
     // Assets (`FYN-A####`, blueprint §19.2c item 8): the asset database.
     /// A source file under `assets/` has no `.meta.json` sidecar.
