@@ -7,6 +7,7 @@
 // selection when those entities appear, unless something else was
 // selected first.
 import 'package:fynkel/fynkel.dart' as fynkel;
+import 'package:fynkel_authoring/fynkel_authoring.dart' show AuthoringException;
 
 import '../documents/document_tabs.dart';
 import '../documents/open_document.dart';
@@ -67,6 +68,20 @@ final class LivePlay {
     final applied = doc.backend.setAsset(kind, id, fields);
     if (applied) written?.call();
     return applied;
+  }
+
+  /// The running object the live document names [id] (an authoring id,
+  /// or `runtime:<handle>`), or null: no game runs, or it is gone.
+  fynkel.GameObject? objectOf(String id) {
+    final world = _world;
+    final backend = document?.backend;
+    if (world == null || backend is! WorldLiveBackend) return null;
+    try {
+      final handle = backend.live.entity(id).handle;
+      return world.byEntity(handle) ?? world.attach(handle);
+    } on AuthoringException {
+      return null;
+    }
   }
 
   /// Shows [world] — the running game's, or null when none runs.

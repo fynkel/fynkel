@@ -16,7 +16,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter/services.dart';
+import 'package:fynkel/fynkel.dart' as fynkel;
 
 import '../inspector/asset_edits.dart' show unset;
 import '../inspector/field_widgets.dart';
@@ -49,7 +51,17 @@ class AnimatorPanel extends StatefulWidget {
   State<AnimatorPanel> createState() => _AnimatorPanelState();
 }
 
-class _AnimatorPanelState extends State<AnimatorPanel> {
+class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProviderStateMixin {
+  /// During Play: a frame's read of the running animator (the progress
+  /// bars fill as the game plays).
+  late final Ticker _ticker = createTicker((_) {
+    if (model.live == null) {
+      _ticker.stop();
+    } else {
+      setState(() {});
+    }
+  });
+
   final _focus = FocusNode(debugLabel: 'animator.graph');
 
   /// Graph → screen: a box at graph point p is drawn at p × _scale + _pan.
@@ -91,6 +103,7 @@ class _AnimatorPanelState extends State<AnimatorPanel> {
 
   @override
   void dispose() {
+    _ticker.dispose();
     _focus.dispose();
     _renameText?.dispose();
     super.dispose();
@@ -345,7 +358,7 @@ class _AnimatorPanelState extends State<AnimatorPanel> {
                 children: [
                   SizedBox(
                     width: 230,
-                    child: _ParameterList(model: model, controller: c),
+                    child: _ParameterList(model: model, controller: c, live: model.live),
                   ),
                   VerticalDivider(width: 1, color: t.line),
                   Expanded(
@@ -458,6 +471,23 @@ class _AnimatorPanelState extends State<AnimatorPanel> {
           _frame(c);
         }
         final pairs = _pairs(c);
+        // During Play: the layer's running state, and the one it fades to.
+        final live = model.live;
+        if (live != null && !_ticker.isActive) _ticker.start();
+        final info = live?.layers.where((s) => s.layer == layer).firstOrNull;
+        double progressOf(String name, double t) =>
+            c.state(layer, name)?['loop'] == false ? t.clamp(0.0, 1.0) : t - t.floorToDouble();
+        final progress = <String, double>{};
+        if (info != null) {
+          progress[info.name] = progressOf(info.name, info.normalizedTime);
+          if (info.next case final next?) progress[next] = progressOf(next, info.nextNormalizedTime);
+        }
+        // The transition being taken: from the state, else from Any State.
+        final taking = switch (info) {
+          fynkel.AnimatorStateInfo(:final name, next: final next?) =>
+            pairs.containsKey((name, next)) ? (name, next) : (anyKey, next),
+          _ => null,
+        };
         return Focus(
           focusNode: _focus,
           onKeyEvent: _onKey,
@@ -504,7 +534,13 @@ class _AnimatorPanelState extends State<AnimatorPanel> {
                                   () {
                                     final (from, to) = e.key;
                                     final (a, b) = _ends(c, from, to, pairs.containsKey((to, from)));
-                                    return _Arrow(a, b, e.value.length, e.value.contains(model.selectedTransition));
+                                    return _Arrow(
+                                      a,
+                                      b,
+                                      e.value.length,
+                                      e.value.contains(model.selectedTransition),
+                                      active: e.key == taking ? info!.transitionProgress : null,
+                                    );
                                   }(),
                               ],
                               entry: def == null || c.state(layer, def) == null
@@ -529,6 +565,7 @@ class _AnimatorPanelState extends State<AnimatorPanel> {
                           s['name'] as String,
                           s['name'] as String,
                           s['name'] == def ? defaultStateColor : null,
+                          progress: progress[s['name']],
                         ),
                     ],
                   ),
@@ -541,7 +578,15 @@ class _AnimatorPanelState extends State<AnimatorPanel> {
     );
   }
 
-  Widget _node(BuildContext context, FynkelTokens t, ControllerEdits c, String key, String label, Color? fill) {
+  Widget _node(
+    BuildContext context,
+    FynkelTokens t,
+    ControllerEdits c,
+    String key,
+    String label,
+    Color? fill, {
+    double? progress,
+  }) {
     final r = _box(c, key);
     final selected = key == model.selectedState;
     final linking = model.linkFrom != null;
@@ -572,6 +617,9 @@ class _AnimatorPanelState extends State<AnimatorPanel> {
                   border: Border.all(color: selected ? t.accent : t.lineStrong, width: selected ? 2 : 1),
                   boxShadow: [BoxShadow(color: t.shadow, blurRadius: 4, offset: const Offset(0, 1))],
                 ),
+                foregroundDecoration: progress == null
+                    ? null
+                    : _ProgressDecoration(progress: progress, color: t.ok, track: t.window),
                 child: renaming
                     ? TextField(
                         key: const Key('animator.rename'),
@@ -620,7 +668,10 @@ Future<String?> _askName(BuildContext context, String title, String current) {
 }
 
 final class _Arrow {
-  const _Arrow(this.a, this.b, this.count, this.selected);
+  const _Arrow(this.a, this.b, this.count, this.selected, {this.active});
+
+  /// During Play, the transition being taken: how far its crossfade is.
+  final double? active;
 
   final Offset a;
   final Offset b;
@@ -665,6 +716,16 @@ class _GraphPainter extends CustomPainter {
     if (entry case final e?) _arrow(canvas, e, defaultStateColor.withValues(alpha: 0.9));
     for (final a in arrows) {
       _arrow(canvas, a, a.selected ? t.accent : t.textSecondary);
+      if (a.active case final p?) {
+        // Unity's running transition: the arrow fills as the crossfade goes.
+        canvas.drawLine(
+          a.a,
+          Offset.lerp(a.a, a.b, p.clamp(0.0, 1.0))!,
+          Paint()
+            ..color = t.ok
+            ..strokeWidth = 3,
+        );
+      }
     }
     if (link case (final a, final b)) _arrow(canvas, _Arrow(a, b, 1, true), t.accent);
     if (drop) {
@@ -708,7 +769,11 @@ class _GraphPainter extends CustomPainter {
 /// The parameters (Unity's Parameters tab): + adds one, the name field
 /// renames it everywhere, the value is its default, ⋯ deletes it.
 class _ParameterList extends StatelessWidget {
-  const _ParameterList({required this.model, required this.controller});
+  const _ParameterList({required this.model, required this.controller, this.live});
+
+  /// During Play: the running values, shown and set in place of the
+  /// defaults (Unity's way to try a transition).
+  final AnimatorLive? live;
 
   final AnimatorModel model;
   final ControllerEdits controller;
@@ -728,7 +793,22 @@ class _ParameterList extends StatelessWidget {
           decoration: BoxDecoration(border: Border(bottom: t.hairline)),
           child: Row(
             children: [
-              Expanded(child: Text('Parameters', style: theme.textTheme.labelMedium)),
+              Expanded(
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      const TextSpan(text: 'Parameters'),
+                      if (live != null)
+                        TextSpan(
+                          text: '  live',
+                          style: TextStyle(color: t.ok),
+                        ),
+                    ],
+                  ),
+                  key: const Key('animator.parameters.title'),
+                  style: theme.textTheme.labelMedium,
+                ),
+              ),
               PopupMenuButton<String>(
                 key: const Key('animator.addParameter'),
                 tooltip: 'Add a parameter',
@@ -788,23 +868,47 @@ class _ParameterList extends StatelessWidget {
     final c = controller;
     final name = p['name'] as String? ?? '';
     final type = p['type'] as String? ?? 'float';
-    final value = p['default'];
-    final enabled = c.canEdit;
+    final running = live;
+    final value = running == null ? p['default'] : running.parameters.where((x) => x.name == name).firstOrNull?.value;
+    // During Play a value goes to the running animator; otherwise it is the default.
+    final bool enabled;
+    final void Function(Object v) commit;
+    if (running != null) {
+      enabled = true;
+      commit = (v) => running.setParameter(name, v);
+    } else {
+      enabled = c.canEdit;
+      commit = (v) => c.setParameterDefault(name, v);
+    }
     final Widget editor = switch (type) {
       'float' || 'int' => SizedBox(
         width: 58,
         child: NumberField(
+          key: Key('animator.parameter.$name.value'),
           value: value is num ? value : 0,
           integer: type == 'int',
           step: type == 'int' ? 1 : 0.1,
           enabled: enabled,
-          onCommit: (v) => c.setParameterDefault(name, v),
+          onCommit: commit,
         ),
       ),
-      'bool' => BoolField(value: value == true, enabled: enabled, onCommit: (v) => c.setParameterDefault(name, v)),
-      _ => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Icon(FIcons.circleOutlined, size: 13, color: t.textDisabled),
+      'bool' => BoolField(
+        key: Key('animator.parameter.$name.value'),
+        value: value == true,
+        enabled: enabled,
+        onCommit: commit,
+      ),
+      // A trigger: set during Play by a click (filled while set).
+      _ => IconButton(
+        key: Key('animator.parameter.$name.value'),
+        tooltip: running == null ? 'A trigger starts unset' : 'Set the trigger',
+        visualDensity: VisualDensity.compact,
+        icon: Icon(
+          value == true ? FIcons.circle : FIcons.circleOutlined,
+          size: 13,
+          color: value == true ? t.ok : t.textDisabled,
+        ),
+        onPressed: running == null ? null : () => running.setParameter(name, true),
       ),
     };
     return Padding(
@@ -917,6 +1021,39 @@ class _LayerSettings extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A running state's progress: a bar along the bottom of its box.
+class _ProgressDecoration extends Decoration {
+  const _ProgressDecoration({required this.progress, required this.color, required this.track});
+
+  final double progress;
+  final Color color;
+  final Color track;
+
+  @override
+  BoxPainter createBoxPainter([VoidCallback? onChanged]) => _ProgressPainter(this);
+}
+
+class _ProgressPainter extends BoxPainter {
+  _ProgressPainter(this.d);
+
+  final _ProgressDecoration d;
+
+  @override
+  void paint(Canvas canvas, Offset offset, ImageConfiguration configuration) {
+    final size = configuration.size;
+    if (size == null) return;
+    final bar = Rect.fromLTWH(offset.dx + 4, offset.dy + size.height - 7, size.width - 8, 3);
+    canvas.drawRRect(RRect.fromRectAndRadius(bar, const Radius.circular(1.5)), Paint()..color = d.track);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(bar.left, bar.top, bar.width * d.progress.clamp(0.0, 1.0), bar.height),
+        const Radius.circular(1.5),
+      ),
+      Paint()..color = d.color,
     );
   }
 }

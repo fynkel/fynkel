@@ -372,6 +372,8 @@ class EditorShellState extends State<EditorShell> {
     final run = gameRun;
     final running = run != null && run.running;
     _livePlay?.follow(running ? run.control.world : null);
+    // The Animator window shows the running animator of its object (ADR-0032).
+    animator?.playChanged();
     // A command enabled only during Play (an extension's, on context.play)
     // reads the world: the menus look again once it shows.
     registry.refresh();
@@ -2106,7 +2108,12 @@ class EditorShellState extends State<EditorShell> {
       tabs = t;
       assetEdits = me;
       // A state or transition picked in the Animator window shows in the Inspector last used.
-      animator = AnimatorModel(edits: me)..inspect = (target) => selection?.inspect(target);
+      animator = AnimatorModel(edits: me)
+        ..inspect = ((target) => selection?.inspect(target))
+        ..liveOf = (object) => switch (_livePlay?.objectOf(object)) {
+          final go? => GameObjectLive(go),
+          null => null,
+        };
       codegen = cg;
       editorState = es;
       _sceneOps = h;

@@ -10,11 +10,64 @@
 import 'dart:ui' show Offset;
 
 import 'package:flutter/foundation.dart';
+import 'package:fynkel/fynkel.dart' as fynkel;
 
 import '../inspector/asset_edits.dart';
 import '../inspector/inspector_model.dart';
 import '../shell/editor_selection.dart';
 import 'controller_edits.dart';
+
+/// A running animator during Play (ADR-0032 § 8): the state of each layer
+/// and the parameters as the last tick left them, and the parameters set
+/// by hand (Unity's way to try a transition).
+abstract interface class AnimatorLive {
+  List<fynkel.AnimatorStateInfo> get layers;
+  List<fynkel.AnimatorParameter> get parameters;
+
+  /// Sets [name] to a `double`, an `int` or a `bool`; for a trigger, true
+  /// sets it and false resets it.
+  void setParameter(String name, Object value);
+}
+
+/// A running object's animator ([fynkel.GameObject.animation]).
+final class GameObjectLive implements AnimatorLive {
+  GameObjectLive(this.object);
+
+  final fynkel.GameObject object;
+
+  @override
+  List<fynkel.AnimatorStateInfo> get layers => _read(() => object.animation.layers);
+
+  @override
+  List<fynkel.AnimatorParameter> get parameters => _read(() => object.animation.parameters);
+
+  /// An object gone (or its Animator) reads as nothing.
+  static List<T> _read<T>(List<T> Function() f) {
+    try {
+      return f();
+    } on StateError {
+      return const [];
+    }
+  }
+
+  @override
+  void setParameter(String name, Object value) {
+    final a = object.animation;
+    final kind = parameters.where((p) => p.name == name).firstOrNull?.kind;
+    switch ((kind, value)) {
+      case (fynkel.AnimatorParameterKind.trigger, final bool on):
+        on ? a.setTrigger(name) : a.resetTrigger(name);
+      case (fynkel.AnimatorParameterKind.float, final num v):
+        a.setFloat(name, v.toDouble());
+      case (fynkel.AnimatorParameterKind.int, final num v):
+        a.setInteger(name, v.round());
+      case (fynkel.AnimatorParameterKind.bool, final bool v):
+        a.setBool(name, v);
+      default:
+        break;
+    }
+  }
+}
 
 final class AnimatorModel extends ChangeNotifier {
   AnimatorModel({required this.edits}) {
@@ -37,6 +90,17 @@ final class AnimatorModel extends ChangeNotifier {
   /// null when a controller was picked in the Project.
   String? get object => _object;
   String? _object;
+
+  /// During Play, the running animator of the object [object] names (the
+  /// shell looks it up in the game's world); null otherwise.
+  AnimatorLive? Function(String object)? liveOf;
+
+  /// The running animator the window shows, during Play with an object
+  /// followed; null otherwise.
+  AnimatorLive? get live => _object == null ? null : liveOf?.call(_object!);
+
+  /// Play started or stopped: the window looks for [live] again.
+  void playChanged() => notifyListeners();
 
   /// The controller shown, or null (nothing picked yet).
   String? get id => _id;

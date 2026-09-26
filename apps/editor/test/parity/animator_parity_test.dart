@@ -12,6 +12,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fynkel/fynkel.dart' as fynkel;
+import 'package:fynkel_editor/src/animator/animator_model.dart';
 import 'package:fynkel_editor/src/shell/editor_selection.dart';
 import 'package:fynkel_editor/src/shell/workspace.dart';
 
@@ -198,4 +200,103 @@ void main() {
     ]);
     expect(e.shell.browser!.lead, saved['id']);
   });
+
+  testWidgets('during Play: the running state fills its bar, and the parameters are the live ones', (tester) async {
+    final e = await Editor.open(
+      tester,
+      prepare: (dir) {
+        writeController(dir);
+        final f = File('${dir.path}/$controllerPath');
+        final json = jsonDecode(f.readAsStringSync()) as Map<String, Object?>;
+        json['parameters'] = [
+          {'name': 'speed', 'type': 'float'},
+          {'name': 'jump', 'type': 'trigger'},
+        ];
+        json['layers'] = [
+          {
+            'name': 'Base Layer',
+            'defaultState': 'Idle',
+            'states': [
+              {'name': 'Idle'},
+              {'name': 'Jump'},
+            ],
+            'transitions': [
+              {
+                'from': 'Idle',
+                'to': 'Jump',
+                'conditions': [
+                  {'parameter': 'jump'},
+                ],
+              },
+            ],
+          },
+        ];
+        f.writeAsStringSync(jsonEncode(json));
+      },
+    );
+    e.shell.workspace!.show(PanelRegistry.animation);
+    final running = _FakeLive();
+    final a = e.shell.animator!
+      ..liveOf = ((object) => object == 'hero' ? running : null)
+      ..show(controllerId, object: 'hero');
+    a.playChanged();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    Iterable<Container> barsIn(String state) => tester.widgetList<Container>(
+      find.descendant(
+        of: find.byKey(Key('animator.state.$state')),
+        matching: find.byWidgetPredicate((w) => w is Container && w.foregroundDecoration != null),
+      ),
+    );
+    expect(barsIn('Idle'), hasLength(1), reason: 'Idle runs');
+    expect(barsIn('Jump'), isEmpty);
+    expect(find.textContaining('live', findRichText: true), findsWidgets);
+
+    // A trigger clicked goes to the running animator, not the file.
+    await tester.tap(find.byKey(const Key('animator.parameter.jump.value')));
+    await tester.pump();
+    expect(running.set, [('jump', true)]);
+    // The crossfade: both boxes fill.
+    running.state = const fynkel.AnimatorStateInfo(
+      layer: 0,
+      name: 'Idle',
+      normalizedTime: 0.6,
+      length: 1,
+      next: 'Jump',
+      nextNormalizedTime: 0.1,
+      transitionProgress: 0.4,
+    );
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(barsIn('Jump'), hasLength(1));
+    final saved = jsonDecode(File('${e.dir.path}/$controllerPath').readAsStringSync()) as Map;
+    expect((saved['parameters'] as List).last, {'name': 'jump', 'type': 'trigger'}, reason: 'the file is left alone');
+
+    // Stop: the window is the controller's again.
+    a.liveOf = null;
+    a.playChanged();
+    await tester.pumpAndSettle();
+    expect(barsIn('Idle'), isEmpty);
+  });
+}
+
+final class _FakeLive implements AnimatorLive {
+  fynkel.AnimatorStateInfo state = const fynkel.AnimatorStateInfo(
+    layer: 0,
+    name: 'Idle',
+    normalizedTime: 1.25,
+    length: 1,
+  );
+  final set = <(String, Object)>[];
+
+  @override
+  List<fynkel.AnimatorStateInfo> get layers => [state];
+
+  @override
+  List<fynkel.AnimatorParameter> get parameters => [
+    const fynkel.AnimatorParameter('speed', fynkel.AnimatorParameterKind.float, 2.5),
+    const fynkel.AnimatorParameter('jump', fynkel.AnimatorParameterKind.trigger, false),
+  ];
+
+  @override
+  void setParameter(String name, Object value) => set.add((name, value));
 }
