@@ -464,7 +464,13 @@ impl AuthoringSession {
         }
         if kind == DocumentKind::Material {
             if let Some(shader) = args.get("shader").and_then(Value::as_str) {
-                doc.root.set("shader", Node::string(shader));
+                // The built-in by name; a `.shader` asset by its id, as a
+                // reference (ADR-0031).
+                let node = match Uuid::parse_str(shader) {
+                    Ok(id) => Node::from_serde(&serde_json::json!({ "asset": id.to_string() })),
+                    Err(_) => Node::string(shader),
+                };
+                doc.root.set("shader", node);
                 if shader != fynkel_document::material::PBR_SHADER_ID {
                     fynkel_document::material::strip_pbr_fields(&mut doc.root);
                 }

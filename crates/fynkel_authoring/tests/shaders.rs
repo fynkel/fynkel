@@ -192,3 +192,31 @@ fn the_inspectors_live_edit_of_a_shader_material_is_checked_and_drawn() {
     Preview::restore_material(&assets, tinted);
     assert_eq!(floats(&block(&assets), 2), 1.0);
 }
+
+#[test]
+fn a_new_material_can_name_a_shader_asset() {
+    let copy = Copy::new("new-material");
+    let mut s = open(&copy);
+    let done = s
+        .operate(
+            "newDocument",
+            &json!({ "kind": "material", "path": "materials/glow", "shader": TINT }),
+        )
+        .unwrap();
+    let text =
+        std::fs::read_to_string(copy.dir.join("assets/materials/glow.material.json")).unwrap();
+    let doc: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(doc["shader"], json!({ "asset": TINT }), "{done:#}");
+    assert!(doc.get("base_color").is_none(), "{text}");
+    let report = s.validate_project().unwrap();
+    let about_glow: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|d| {
+            d.document
+                .as_deref()
+                .is_some_and(|p| p.ends_with("glow.material.json"))
+        })
+        .collect();
+    assert!(about_glow.is_empty(), "{about_glow:?}");
+}
