@@ -232,6 +232,19 @@ settings:
   the motion's change from its first frame.
 - **Root**: a node such as `spine`. The layer then moves only that node
   and the nodes under it. Empty moves the whole character.
+- **Mask**: Unity's Avatar Mask, per node. The button opens the
+  followed object's nodes as a tree with a tick on each. Untick a node
+  and the layer leaves it, and the nodes under it, to the layers below.
+  Right-click a node to tick or untick only that node. The list under
+  the tree shows the entries the mask keeps; **Clear** makes it pose the
+  whole character again. Follow an object with the controller (select
+  it) to see its nodes.
+
+How a mask decides: the nearest entry wins. That is the node's own
+entry, else the entry of the nearest node above it (unless that entry
+is for its node only). With no entry that applies, a node is posed
+unless some entry includes a node — so "only the arms" is one ticked
+entry per arm, and "all but the head" is one unticked entry.
 
 A layer may have **no states**. It then shows nothing until a one-shot
 plays in its slot (below).
@@ -284,6 +297,44 @@ name under the animator. The clip is as long as its last key unless
 `world.destroyClip` removes it. It lasts across scene loads. An
 `Animator`'s `clip` and `animation.play` take it too.
 
+## IK
+
+The **IK** tab, beside Parameters, lists the controller's IK goals.
+They bend the pose after all the layers, in order. **+** adds one of
+three kinds, with the node names a humanoid usually has (the window
+picks the nearest name the followed object has, like
+`mixamorig:RightHand`). Each node field can be typed or picked from the
+object's nodes.
+
+- **Two Bone**: a hand or a foot (the *tip*) reaches a target. The
+  *middle* (elbow, knee) and the *root* (upper arm, thigh) are the
+  tip's parent and grandparent unless named. The *pole* is an object
+  the elbow or knee points to.
+- **Look At**: the *head* turns to a target, within a *limit* in
+  degrees, eased. The *spine* nodes take a share (*body*, 0 to 1) of
+  the turn.
+- **Foot Placement**: each foot (*left*, *right*) stands on what is
+  under it. A ray goes down from each foot, up to *reach* metres above
+  and below the character. The *hips* go down as far as the lower foot
+  needs, the legs bend and each foot tilts to the ground. It needs the
+  physics module.
+
+Every goal has a **weight**: a number, or a float parameter so code
+can fade it (for example 0 in the air). A goal's **target** is an
+object's name; code can set one instead:
+
+```dart
+animation.setIKTarget('look', coin.position);          // world space
+animation.setIKTarget('hand', handle, weight: 0.5);    // scales the goal's weight
+animation.clearIKTarget('look');                       // back to its object, or nothing
+```
+
+A goal without a target does not bend anything (foot placement finds
+its own ground). A wrong goal name is reported with the goals the
+controller has. A node the character lacks, or foot placement without
+physics, is reported once per goal (`FYN-R0015`) and the goal is
+skipped.
+
 ## In Play
 
 Press Play with the object selected and the Animator window shows the
@@ -302,9 +353,12 @@ changes are not saved.
   walks at 4 and runs at 7 in each direction, so the Player strafes
   while facing the camera.
   The `jump` trigger goes to Jump; `grounded` being true goes back.
-  `game.Player` only sets `speed`, `grounded` and `jump`
+  `game.Player` only sets the parameters and the look target
   (`lib/game/player.dart`). The `UpperBody` layer (Root `spine`, no
   states) is the wave's slot: the wave key plays the wave clip there.
+  Its `feet` goal stands each foot on the Playground's steps (its
+  weight is the `feet` parameter: 0 in the air), and its `look` goal
+  turns the head to the nearest coin (`setIKTarget`).
 
 - **The showcase's Runner**
   (`examples/showcase/assets/models/runner.controller.json`): Run for

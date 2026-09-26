@@ -350,10 +350,11 @@ extracts), or from the outgoing clip of a crossfade.
 
 ## Commands, the query and the event
 
-`fynkel.cmd.Animate` (command kind 9, simulation lane, 72 bytes:
+`fynkel.cmd.Animate` (command kind 9, simulation lane, 80 bytes:
 `{ entity, op, seconds, speed, looping, clip, value, name, integer,
-layer }`) carries one `AnimateOp`. The clip ops are for an animator
-without a controller; the last seven (ADR-0032) are for one with:
+layer, point }`) carries one `AnimateOp`. The clip ops are for an animator
+without a controller; the ones from `setFloat` on (ADR-0032, ADR-0033)
+are for one with:
 
 | `op` | Effect | Rejection |
 | --- | --- | --- |
@@ -369,6 +370,8 @@ without a controller; the last seven (ADR-0032) are for one with:
 | `setTrigger` / `resetTrigger` | set / clear the trigger `name`; the transition it fires clears it | as above |
 | `playState` | jump to the state `name` at once (Unity's `Play`), at `value` of its motion (0…1), in `layer` (`-1`: the first layer that has it) | no such state (the message lists the states), offset outside 0…1 → `INVALID_PAYLOAD` |
 | `crossFadeState` | like `playState`, the current state blended out over `seconds` (Unity's `CrossFade`) | as above, and `seconds < 0` |
+| `setIkTarget` | the IK goal `name`'s target is the world `point` from the next tick, `value` (0…1) scaling the goal's weight (§ Masks and IK) | no such goal (the message lists the goals), a non-finite `point`, `value` outside 0…1 → `INVALID_PAYLOAD` |
+| `clearIkTarget` | drop the target code gave the goal `name` | no such goal |
 
 A clip op (`play`, `crossfade`, `setTime`, `setParameter`) on an animator
 that runs a controller is `INVALID_PAYLOAD`: the controller owns what
@@ -588,6 +591,54 @@ loads) and the world at once; an invalid clip is refused and the old
 one kept, an empty payload removes it. Dart's `ClipBuilder` writes the
 payload and `world.createClip`/`setClip`/`destroyClip` call it.
 
+## Masks and IK (ADR-0033)
+
+[animator.md](animator.md) § Layers and § IK are the guide; this is how
+the runtime does it.
+
+**Masks.** `LayerDef::mask` is a list of `MaskEntry { node, include,
+subtree }`; `controller::masked_in(mask, names)` decides for a node
+given its name and its parents' up to the animator: the node's own
+entry, else the nearest ancestor's entry with `subtree` (the last of
+two for one node), else "posed unless some entry includes". The world
+filters each layer's pose with it before the layer blends (the base
+layer after its slot, a stateless layer's one-shot too), and caches the
+answer per layer and node. A root and a mask together: the node must be
+under the root and masked in.
+
+**IK.** `ControllerDef::ik` holds up to 16 `IkDef { name, kind, weight,
+target }`, `weight` a number or a float parameter (read each tick),
+`target` an object's name (a node under the animator first, else the
+first object so named). `world/ik.rs` runs after an animator's layers
+have written the pose, goal by goal:
+
+- `twoBone { tip, middle?, root?, pole? }`: the analytic two-bone
+  solve — the root and the middle turn so the tip reaches the target
+  (clamped to the chain's reach), bending towards the pole (else the
+  way the chain already bends); the rotations are blended by the weight.
+- `lookAt { head, spine, limit, body }`: the target's yaw and pitch
+  from the character's forward (−Z, up +Y), each clamped to `limit`
+  (radians at runtime; degrees in the document) and scaled by the
+  weight, then eased (rate 10 per second, so the head follows rather
+  than snaps); the spine nodes share `body` of the turn evenly, the
+  head the rest.
+- `footPlacement { hips, left, right, reach }`: a ray down at each
+  foot, from `reach` above the animator's height to `reach` below
+  (the character's own `CharacterController` body left out); the hips
+  go down by the lower foot's drop (never up), each leg is a two-bone
+  solve to its foot's ground (the foot's parent the knee, the knee's
+  the thigh), and each foot turns to the ground's normal (at most
+  0.6 rad). The drop and the lifts are eased and scaled by the weight;
+  on flat ground it does nothing.
+
+What IK writes is taken back on the next tick when no layer poses the
+node again (a node's transform that still equals what IK wrote is
+restored), so goals never pile up on nodes the clips do not key. A
+node the character lacks, or foot placement with the physics module
+off, is `IK_UNAVAILABLE` (22, `FYN-R0015`) once per goal, and the goal
+is skipped. Code's target (`SetIkTarget`) wins over the document's
+`target`; `ClearIkTarget` goes back to it.
+
 ## Import and the cache
 
 The glTF importer (`fynkel.gltf` **version 5**; `docs/documents.md`)
@@ -801,9 +852,8 @@ markers counted, and the tick's p50 under 4 ms with everything else on
   extraction, blend spaces~~ — done as item **19c** (§ Blend spaces,
   § Layers, § Markers, § Root motion); 2D blending as blend trees
   (ADR-0033 step 1, § Blend trees). Still out: 2D blend spaces and
-  other sync modes than phase, per-channel masks beyond "the layer keys
-  what it keys", root motion from a layer or a crossfade's outgoing
-  clip, IK, retargeting between skeletons, morph targets, a node-graph
+  other sync modes than phase, root motion from a layer or a
+  crossfade's outgoing clip, retargeting between skeletons, morph targets, a node-graph
   editor.
 - Compressed or quantized clips; a clip is cooked as `f32` keys.
 - A skinned mesh collider following the pose (a `Collider` on a joint

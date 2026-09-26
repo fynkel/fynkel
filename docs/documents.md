@@ -1219,15 +1219,36 @@ nothing (a trigger). A layer has `weight` (1), `blending` (`override` |
 parameters, each child at a `position`) or `direct` (no tree parameter;
 each child names the float `parameter` that is its weight). A child's
 `motion` is a clip, a blend space or another tree; `timeScale` (1)
-speeds it up. Every clip in a tree shares the state's normalized time. `editor` holds
+speeds it up. Every clip in a tree shares the state's normalized time.
+
+A layer's `mask` (ADR-0033 § 5) lists nodes it poses or leaves:
+`[ { "node": "spine", "include": true }, { "node": "head", "include":
+false, "subtree": false } ]` — an entry covers the node and what is under
+it unless `subtree` is `false`; the nearest entry decides, and with none a
+node is posed unless some entry includes. The controller's `ik` (at most
+16) holds goals solved after the layers, each with a `name`, a `type`
+and a `weight` (a number 0…1 or a float parameter's name; 1) and an
+optional `target` (an object's name):
+
+```json
+"ik": [ { "name": "hand", "type": "twoBone", "tip": "hand_r", "pole": "Elbow Hint" },
+        { "name": "look", "type": "lookAt", "head": "head", "spine": [ "spine" ], "limit": 60, "body": 0.3 },
+        { "name": "feet", "type": "footPlacement", "weight": "feet",
+          "hips": "hips", "left": "foot_l", "right": "foot_r", "reach": 0.5 } ]
+```
+
+`twoBone` needs `tip` (`middle` and `root` default to its parent and
+grandparent); `lookAt` needs `head` (`spine` up to 8, `limit` in degrees
+70, `body` 0.3); `footPlacement` needs `hips`, `left` and `right`
+(`reach` 0.5 m). `editor` holds
 the Animator window's state positions; the runtime never reads it. The
 checks:
 
 | Code | Severity | When |
 | --- | --- | --- |
 | `FYN-D1100` | error | an entry the reader cannot use that the schema lets through: a `default` of another type than its parameter (a number for a bool, a fraction for an int, any default on a trigger) |
-| `FYN-D1101` | error | a name that does not resolve or is not unique: two parameters, layers or states (in one layer) with one name; a state named `any`; a `defaultState` that is not a state, or missing when the layer has states; a transition's `from` / `to` or a condition's or `speedParameter`'s parameter that does not exist |
-| `FYN-D1102` | error / warning | a condition whose test does not fit its parameter's type (`is` on a float, `greater` on a bool, a test on a trigger, no test on anything else), a `speedParameter` that is not a float; a **warning** for an Any State transition with neither conditions nor `exitTime` (it would fire every tick) |
+| `FYN-D1101` | error | a name that does not resolve or is not unique: two parameters, layers or states (in one layer) with one name; a state named `any`; a `defaultState` that is not a state, or missing when the layer has states; a transition's `from` / `to` or a condition's or `speedParameter`'s parameter that does not exist; two IK goals with one name, or a goal's `weight` naming no parameter |
+| `FYN-D1102` | error / warning | a condition whose test does not fit its parameter's type (`is` on a float, `greater` on a bool, a test on a trigger, no test on anything else), a `speedParameter` or an IK goal's `weight` parameter that is not a float; a **warning** for an Any State transition with neither conditions nor `exitTime` (it would fire every tick) |
 | `FYN-D1103` | error | a `motion` that is neither a clip (an `anim/*` sub-asset of a model or rig) nor a blend space; an unknown sub is also `A0005` |
 | `FYN-D1104` | error | a blend tree of the wrong shape: the wrong number of `parameters` for it, no children or more than 32, deeper than 4 trees or more than 64 clips, a child without its `threshold` (1D), `position` (2D) or `parameter` (direct), two children at one place, a `timeScale` that is not above 0; a tree parameter that is not there is `D1101`, one that is not a float `D1102`, an unknown `type` `D1100` |
 

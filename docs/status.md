@@ -1397,8 +1397,22 @@ transition's `interruptibleBy` (`none`, `next`, `any`) lets a blend be
 cut short, fading from the pose of that moment. The Animator window
 makes, opens (double-click) and leaves (the path bar) sub-state
 machines. The reference game's jump is an `Airborne` machine (Jump →
-Fall → Land) whose landing a new jump may interrupt. Next: masks and
-IK.
+Fall → Land) whose landing a new jump may interrupt. **Step 5, masks
+and IK, is done** (2026-09-27): a layer's mask ticks nodes in or out
+(a node and what is under it, or the node alone; the nearest entry
+decides), and a controller's IK goals bend the pose after the layers —
+two-bone (a hand or foot to a target, towards a pole), look-at (the
+head and a share of the spine, within a limit, eased) and foot
+placement (rays down, the hips lowered, each foot on and tilted to the
+ground; needs physics). Weights are numbers or float parameters;
+`animation.setIKTarget`/`clearIKTarget` set a target from code; a
+missing node is `IK_UNAVAILABLE` (22, `FYN-R0015`) once per goal
+(fingerprint `0xd21b7fb595a078a6`). The Animator window has an IK tab
+and a Mask dialog on the followed object's nodes. The reference
+game's character has feet now, the Playground has four steps up to a
+terrace, and the Player's feet stand on them while its head turns to
+the nearest coin. **Step 6** is these docs; what remains is the
+user's check in the editor.
 
 **Tags and layers** (ADR-0020, 2026-09-23) come in while the joint R3a +
 R3b capture waits for a quiet machine: several tags and one engine-wide
