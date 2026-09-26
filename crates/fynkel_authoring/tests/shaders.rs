@@ -194,6 +194,48 @@ fn the_inspectors_live_edit_of_a_shader_material_is_checked_and_drawn() {
 }
 
 #[test]
+fn a_material_edited_during_play_is_drawn_by_the_running_game() {
+    let copy = Copy::new("live-play");
+    let s = open(&copy);
+    let _ = s.project().unwrap().cook();
+    let assets = Assets::open(&s.project().unwrap().cache_dir()).unwrap();
+    let r = fynkel_contracts::AssetRef::new(fynkel_contracts::Uuid(
+        *Uuid::parse_str(TINTED).unwrap().as_bytes(),
+    ));
+    let mut world = fynkel_core::World::new(fynkel_core::WorldConfig::default());
+    let call = |w: &mut fynkel_core::World, kind: &str, args: Value| {
+        fynkel_authoring::live::call_with(w, Some(&assets), kind, &args)
+    };
+
+    let fields = json!({ "shader": { "asset": TINT }, "parameters": { "power": 3 } });
+    let ok = call(
+        &mut world,
+        "setMaterial",
+        json!({ "id": TINTED, "data": fields }),
+    )
+    .unwrap();
+    assert_eq!(ok["ok"], true);
+    let block = assets.custom_material(&r).unwrap().unwrap().block.clone();
+    assert_eq!(f32::from_le_bytes(block[16..20].try_into().unwrap()), 3.0);
+
+    // Checked as the cook checks, and a world with no assets refuses.
+    let wrong = json!({ "shader": { "asset": TINT }, "parameters": { "power": 9 } });
+    assert!(call(
+        &mut world,
+        "setMaterial",
+        json!({ "id": TINTED, "data": wrong })
+    )
+    .is_err());
+    let bare = fynkel_authoring::live::call_with(
+        &mut world,
+        None,
+        "setMaterial",
+        &json!({ "id": TINTED, "data": fields }),
+    );
+    assert!(bare.is_err());
+}
+
+#[test]
 fn a_new_material_can_name_a_shader_asset() {
     let copy = Copy::new("new-material");
     let mut s = open(&copy);

@@ -39,7 +39,7 @@ use crate::preview::{self, Line, Ray, View};
 /// The prefix of the id of an entity no loaded scene spawned.
 pub const RUNTIME_PREFIX: &str = "runtime:";
 
-pub const KINDS: [&str; 14] = [
+pub const KINDS: [&str; 16] = [
     "entities",
     "entity",
     "set",
@@ -54,6 +54,8 @@ pub const KINDS: [&str; 14] = [
     "lines",
     "worldMatrix",
     "handles",
+    "setMaterial",
+    "setVolume",
 ];
 
 /// The selection outline's colour when a `lines` call gives none (the
@@ -308,6 +310,29 @@ pub fn call_with(
             let mut r = rejections(&rejected);
             r["id"] = json!(id_of(world, e));
             Ok(r)
+        }
+        "setMaterial" | "setVolume" => {
+            // An asset document edited in the Inspector during Play (saved
+            // at once, as in Unity): `data` (its fields) drawn for the
+            // asset `id` by the running game from its next frame, as the
+            // Scene view's edit preview draws it
+            // ([`preview::Preview::set_material`] / `set_volume`). It lasts
+            // the run; the next Play cooks the saved file.
+            let assets =
+                assets.ok_or_else(|| vec![invalid(format!("{kind}: this world has no assets"))])?;
+            let id = str_arg(args, "id")?;
+            let id = Uuid::parse_str(id)
+                .map_err(|_| vec![invalid(format!("{kind}: `id` must be a UUID"))])?;
+            let data = args
+                .get("data")
+                .ok_or_else(|| vec![invalid(format!("{kind}: `data` is required"))])?;
+            let r = if kind == "setMaterial" {
+                preview::Preview::set_material(assets, id, data)
+            } else {
+                preview::Preview::set_volume(assets, id, data)
+            };
+            r.map_err(|d| vec![d])?;
+            Ok(json!({ "ok": true }))
         }
         _ => Err(vec![invalid(format!(
             "unknown live call `{kind}`; one of {}",
