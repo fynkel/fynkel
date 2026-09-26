@@ -92,6 +92,9 @@ struct Frame {
     // post pass must sRGB-encode (the target is a Unorm format); w: 1
     // when `ssao_tex` holds this frame's screen-space stage.
     counts: vec4<u32>,
+    // x: the world's time (s), still while paused; y: seconds since the
+    // previous frame; zw: the internal target's size in pixels (ADR-0031).
+    time: vec4<f32>,
     // The frame's lights. A mesh reads only the ones its instance lists
     // (E1 light culling); the index is a byte of `Instance.lights`.
     lights: array<Light, LIGHT_POOL>,

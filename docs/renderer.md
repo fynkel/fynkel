@@ -216,7 +216,7 @@ shadow and the scene:
    per-pixel rotation back into a smooth term without smearing across a
    silhouette.
 
-`mesh.wgsl` multiplies the blurred value into `ao` — the material's own
+`light.wgsl` multiplies the blurred value into `ao` — the material's own
 occlusion factor — so it scales **only** the ambient and IBL term:
 
 ```wgsl
@@ -433,7 +433,7 @@ the normal against the sun: the normal from depth is least sure at a
 foot, where contact shadows matter most, and a face turned from the sun
 gets no sunlight to darken anyway.
 
-`mesh.wgsl` darkens the **sun's** light only, by the nearer of the two
+`light.wgsl` darkens the **sun's** light only, by the nearer of the two
 shadows (`min(shadow map, contact)`), on instances that receive shadows
 and are in the prepass (not blend ones). Point and spot lights are not
 marched. With the green channel off it is 1 and nothing reads it: a
@@ -674,7 +674,20 @@ Placeholder cubes (entities without a `MeshRenderer`, when
 `placeholders` is on) are lit like a rough white dielectric in their
 palette tint; a mesh missing from the cache is the unlit magenta cube.
 
-## Shading (`shaders/mesh.wgsl`)
+## Shading (`shaders/mesh.wgsl`, `light.wgsl`, `pbr.wgsl`)
+
+The mesh shader is three files after `frame.wgsl` (ADR-0031):
+`mesh.wgsl` the vertex stage (static and skinned), `light.wgsl` the
+engine's light — everything below once a surface is known, in
+`light_surface(in, front_facing, LitSurface)` — and `pbr.wgsl` the
+built-in `fynkel.pbr@1` surface: its maps and factors, the alpha
+cutoff, the unlit path and the depth/mask fragments. A `lit` shader asset
+ends in the same `light_surface`, so it is lit exactly as the built-in
+is. The split changed no pixel (the reference game and showcase render
+byte-identical before and after). `Frame.time` carries the world's time
+(`Extract::time`, interpolated between ticks, still while paused), the
+seconds since the previous frame and the internal target's size — a
+shader's `globals`.
 
 Cook-Torrance per light: GGX normal distribution (`α = roughness²`),
 height-correlated Smith visibility (Heitz), Schlick Fresnel with
@@ -740,7 +753,7 @@ renderer:
   samples per texel, the same height-correlated Smith visibility as
   `mesh.wgsl`, written in `ensure_fallbacks`). A scene without an
   environment binds 1 × 1 black cubes, which wgpu zero-initialises.
-- `mesh.wgsl` samples `irradiance_cube` along `rotate_sky(n)` and
+- `light.wgsl` samples `irradiance_cube` along `rotate_sky(n)` and
   `specular_cube` along `rotate_sky(reflect(−v, n))` at
   `roughness · (mips − 1)`, and the LUT at `(N·V, roughness)`:
   `diffuse · irradiance + prefiltered · (f0 · a + b)`, all × the

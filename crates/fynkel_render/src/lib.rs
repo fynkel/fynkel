@@ -176,6 +176,12 @@ struct GpuLight {
 const LIGHT_POINT: f32 = 0.0;
 const LIGHT_SPOT: f32 = 1.0;
 
+/// The mesh vertex stage every surface is drawn over, and the engine's
+/// light every lit surface ends in (ADR-0031): the built-in `pbr.wgsl`
+/// and each shader asset are assembled after `frame.wgsl` from these.
+const MESH_STAGE: &str = include_str!("shaders/mesh.wgsl");
+const LIGHT_LIBRARY: &str = include_str!("shaders/light.wgsl");
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct FrameUniforms {
@@ -194,6 +200,9 @@ struct FrameUniforms {
     bloom_tint: [f32; 4],
     grade: GpuGrade,
     counts: [u32; 4],
+    /// x: the world's time (s); y: seconds since the previous frame's;
+    /// zw: the internal target's size in pixels (ADR-0031 `globals`).
+    time: [f32; 4],
     lights: [GpuLight; LIGHT_POOL],
 }
 
@@ -979,6 +988,8 @@ pub struct ExtractRenderer {
     /// profile allows it, the chain exists and the volumes give it an
     /// intensity.
     bloom_active: bool,
+    /// The previous frame's `Extract::time`, for `globals.delta_time`.
+    last_time: Option<f32>,
     /// The look the last `prepare` resolved from the volumes (R3a).
     post: PostSettings,
     sky_bind_group: Option<(AssetRef, wgpu::BindGroup)>,
@@ -1390,6 +1401,7 @@ impl ExtractRenderer {
             shadow_active: false,
             ao_active: false,
             bloom_active: false,
+            last_time: None,
             post: PostSettings::default(),
             sky_bind_group: None,
             ibl: None,
@@ -2566,9 +2578,17 @@ impl ExtractRenderer {
                 self.pipelines.encode_srgb as u32,
                 self.ao_active as u32,
             ],
+            time: [
+                extract.time,
+                self.last_time
+                    .map_or(0.0, |t| (extract.time - t).max(0.0)),
+                self.attachments.width as f32,
+                self.attachments.height as f32,
+            ],
             lights: packed,
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&u));
+        self.last_time = Some(extract.time);
 
         // The overlay (ADR-0019): its queue and the debug lines, uploaded
         // and cleared for the next frame.
@@ -3650,7 +3670,10 @@ fn create_pipelines(
             ),
         })
     };
-    let mesh_shader = module("fynkel mesh shader", include_str!("shaders/mesh.wgsl"));
+    let mesh_shader = module(
+        "fynkel mesh shader",
+        &format!("{MESH_STAGE}{LIGHT_LIBRARY}{}", include_str!("shaders/pbr.wgsl")),
+    );
     let sky_shader = module("fynkel sky shader", include_str!("shaders/sky.wgsl"));
     let post_shader = module("fynkel post shader", include_str!("shaders/post.wgsl"));
     let bloom_shader = module("fynkel bloom shader", include_str!("shaders/bloom.wgsl"));
