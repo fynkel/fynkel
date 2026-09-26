@@ -1204,7 +1204,22 @@ crossfade in seconds (0.25), `offset` where the next motion starts,
 state. A condition names a parameter and at most one test: `greater` /
 `less` (float, int), `equals` / `notEquals` (int), `is` (bool), or
 nothing (a trigger). A layer has `weight` (1), `blending` (`override` |
-`additive`) and an optional `root` node it poses from. `editor` holds
+`additive`) and an optional `root` node it poses from. A state's
+`motion` may instead be a **blend tree** (ADR-0033), Unity's:
+
+```json
+"motion": { "blendTree": { "type": "freeformDirectional", "parameters": [ "moveX", "moveY" ],
+  "children": [ { "motion": { "asset": "<character>", "sub": "anim/idle" }, "position": [ 0, 0 ] },
+                { "motion": { "asset": "<character>", "sub": "anim/walk" }, "position": [ 0, 1 ] },
+                { "motion": { "blendTree": { … } }, "position": [ 1, 0 ], "timeScale": 1.2 } ] } }
+```
+
+`type` is `1d` (one parameter, each child at a `threshold`),
+`simpleDirectional`, `freeformDirectional` or `freeformCartesian` (two
+parameters, each child at a `position`) or `direct` (no tree parameter;
+each child names the float `parameter` that is its weight). A child's
+`motion` is a clip, a blend space or another tree; `timeScale` (1)
+speeds it up. Every clip in a tree shares the state's normalized time. `editor` holds
 the Animator window's state positions; the runtime never reads it. The
 checks:
 
@@ -1214,6 +1229,7 @@ checks:
 | `FYN-D1101` | error | a name that does not resolve or is not unique: two parameters, layers or states (in one layer) with one name; a state named `any`; a `defaultState` that is not a state, or missing when the layer has states; a transition's `from` / `to` or a condition's or `speedParameter`'s parameter that does not exist |
 | `FYN-D1102` | error / warning | a condition whose test does not fit its parameter's type (`is` on a float, `greater` on a bool, a test on a trigger, no test on anything else), a `speedParameter` that is not a float; a **warning** for an Any State transition with neither conditions nor `exitTime` (it would fire every tick) |
 | `FYN-D1103` | error | a `motion` that is neither a clip (an `anim/*` sub-asset of a model or rig) nor a blend space; an unknown sub is also `A0005` |
+| `FYN-D1104` | error | a blend tree of the wrong shape: the wrong number of `parameters` for it, no children or more than 32, deeper than 4 trees or more than 64 clips, a child without its `threshold` (1D), `position` (2D) or `parameter` (direct), two children at one place, a `timeScale` that is not above 0; a tree parameter that is not there is `D1101`, one that is not a float `D1102`, an unknown `type` `D1100` |
 
 `fynkel document new controller <name>` writes one with a single empty
 `Base Layer`. The asset database lists it as `document/controller` with

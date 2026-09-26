@@ -15,12 +15,15 @@
 //! `D1101`; a condition that does not fit its parameter's type, a speed
 //! parameter that is not a float, an Any State transition that would
 //! fire every tick is `D1102`; a motion that is not a clip or a blend
-//! space is `D1103`. Unknown ids are the asset database's `A0004`/`A0005`.
+//! space is `D1103`; a blend tree (ADR-0033) of the wrong shape is
+//! `D1104`. Unknown ids are the asset database's `A0004`/`A0005`.
 
 use std::collections::HashSet;
 
 use fynkel_contracts::{AssetRef, Code, Diagnostic};
 use uuid::Uuid;
+
+pub use fynkel_core::animation::blend_tree::TreeKind;
 
 use crate::asset::{AssetDatabase, AssetKind};
 use crate::json::Node;
@@ -117,11 +120,81 @@ pub struct Condition {
     pub pointer: String,
 }
 
+/// What a state or a blend tree's child plays.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Motion {
+    /// A clip or a blend space document.
+    Asset(AssetRef),
+    Tree(BlendTree),
+}
+
+impl Motion {
+    pub fn as_asset(&self) -> Option<&AssetRef> {
+        match self {
+            Motion::Asset(a) => Some(a),
+            Motion::Tree(_) => None,
+        }
+    }
+
+    /// Every asset it plays with the pointer of its `motion`, depth first.
+    pub fn assets<'a>(&'a self, pointer: &str, out: &mut Vec<(&'a AssetRef, String)>) {
+        match self {
+            Motion::Asset(a) => out.push((a, pointer.to_string())),
+            Motion::Tree(t) => {
+                for c in &t.children {
+                    if let Some(m) = &c.motion {
+                        m.assets(&format!("{}/motion", c.pointer), out);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A blend tree (ADR-0033 § 1): `{ "blendTree": { type, parameters,
+/// children } }` in a state's (or a child's) `motion`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlendTree {
+    /// None: the type did not read (`D1100`).
+    pub kind: Option<TreeKind>,
+    pub parameters: Vec<String>,
+    pub children: Vec<Child>,
+    /// `…/motion/blendTree`.
+    pub pointer: String,
+}
+
+impl BlendTree {
+    /// The motions at the bottom, counting nested trees'.
+    pub fn leaf_count(&self) -> usize {
+        self.children
+            .iter()
+            .map(|c| match &c.motion {
+                Some(Motion::Tree(t)) => t.leaf_count(),
+                _ => 1,
+            })
+            .sum()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Child {
+    pub motion: Option<Motion>,
+    /// A 1D tree's.
+    pub threshold: Option<f64>,
+    /// A 2D tree's.
+    pub position: Option<[f64; 2]>,
+    pub time_scale: f64,
+    /// A direct tree's: the float parameter that is its weight.
+    pub parameter: Option<String>,
+    /// `…/blendTree/children/<i>`.
+    pub pointer: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct State {
     pub name: String,
     /// None: an empty state (it holds the pose).
-    pub motion: Option<AssetRef>,
+    pub motion: Option<Motion>,
     pub speed: f32,
     pub speed_parameter: Option<String>,
     pub looping: bool,
@@ -236,6 +309,104 @@ impl Reader<'_> {
                 self.bad(
                     format!("{key} must be true or false"),
                     &format!("{pointer}/{key}"),
+                );
+                None
+            }
+        }
+    }
+
+    /// `node`'s `motion`: an assetRef or `{ "blendTree": … }`; absent is
+    /// None, and so is one that does not read (reported).
+    fn motion(&mut self, node: &Node, pointer: &str) -> Option<Motion> {
+        let value = node.get("motion")?;
+        let mp = format!("{pointer}/motion");
+        if let Some(tree) = value.get("blendTree") {
+            let tp = format!("{mp}/blendTree");
+            if tree.as_object().is_none() {
+                self.bad("blendTree must be an object".into(), &tp);
+                return None;
+            }
+            let kind = match tree
+                .get("type")
+                .map(|t| t.as_str().and_then(TreeKind::parse))
+            {
+                Some(Some(k)) => Some(k),
+                Some(None) => {
+                    self.bad(
+                        "type must be 1d, simpleDirectional, freeformDirectional, freeformCartesian or direct".into(),
+                        &format!("{tp}/type"),
+                    );
+                    None
+                }
+                None => {
+                    self.bad("a blend tree needs a type".into(), &tp);
+                    None
+                }
+            };
+            let mut parameters = Vec::new();
+            match tree.get("parameters").map(|v| v.as_array()) {
+                None => {}
+                Some(None) => self.bad(
+                    "parameters must be an array of names".into(),
+                    &format!("{tp}/parameters"),
+                ),
+                Some(Some(list)) => {
+                    for (i, v) in list.iter().enumerate() {
+                        match v.as_str() {
+                            Some(n) if !n.is_empty() => parameters.push(n.to_string()),
+                            _ => self.bad(
+                                "a parameter is a name".into(),
+                                &format!("{tp}/parameters/{i}"),
+                            ),
+                        }
+                    }
+                }
+            }
+            let mut children = Vec::new();
+            for (c, cp) in self.objects(tree, "children", &tp) {
+                let position = match c.get("position") {
+                    None => None,
+                    Some(v) => match v
+                        .as_array()
+                        .map(|a| a.iter().map(Node::as_f64).collect::<Vec<_>>())
+                    {
+                        Some(xs)
+                            if xs.len() == 2
+                                && xs.iter().all(|x| x.is_some_and(f64::is_finite)) =>
+                        {
+                            Some([xs[0].unwrap_or(0.0), xs[1].unwrap_or(0.0)])
+                        }
+                        _ => {
+                            self.bad(
+                                "position must be two finite numbers [x, y]".into(),
+                                &format!("{cp}/position"),
+                            );
+                            None
+                        }
+                    },
+                };
+                children.push(Child {
+                    motion: self.motion(c, &cp),
+                    threshold: self.number(c, "threshold", &cp),
+                    position,
+                    time_scale: self.number(c, "timeScale", &cp).unwrap_or(1.0),
+                    parameter: self.string(c, "parameter", &cp),
+                    pointer: cp,
+                });
+            }
+            return Some(Motion::Tree(BlendTree {
+                kind,
+                parameters,
+                children,
+                pointer: tp,
+            }));
+        }
+        match crate::codec::asset_ref_field(node.as_object()?, "motion") {
+            Ok(a) => Some(Motion::Asset(a)),
+            Err(e) => {
+                self.bad(
+                    format!("motion: {}", e.message),
+                    &format!("{pointer}/motion{}", e.pointer),
                 );
                 None
             }
@@ -376,19 +547,7 @@ impl Controller {
                 let Some(name) = r.string(s, "name", &sp) else {
                     continue;
                 };
-                let motion = match s.as_object().filter(|_| s.get("motion").is_some()) {
-                    None => None,
-                    Some(members) => match crate::codec::asset_ref_field(members, "motion") {
-                        Ok(a) => Some(a),
-                        Err(e) => {
-                            r.bad(
-                                format!("motion: {}", e.message),
-                                &format!("{sp}/motion{}", e.pointer),
-                            );
-                            None
-                        }
-                    },
-                };
+                let motion = r.motion(s, &sp);
                 states.push(State {
                     name,
                     motion,
@@ -501,6 +660,23 @@ impl Controller {
         &self.read_diagnostics
     }
 
+    /// "state `Walk`" or "a blend tree child of state `Walk`" for a
+    /// motion's pointer.
+    fn who(&self, pointer: &str) -> String {
+        let state = self
+            .layers
+            .iter()
+            .flat_map(|l| &l.states)
+            .find(|s| pointer.starts_with(&format!("{}/", s.pointer)));
+        match state {
+            Some(s) if pointer.contains("/blendTree/") => {
+                format!("a blend tree child of state `{}`", s.name)
+            }
+            Some(s) => format!("state `{}`", s.name),
+            None => "a motion".to_string(),
+        }
+    }
+
     pub fn parameter(&self, name: &str) -> Option<&Parameter> {
         self.parameters.iter().find(|p| p.name == name)
     }
@@ -509,11 +685,21 @@ impl Controller {
     /// controller depend on and the runtime registers).
     pub fn motions(&self) -> Vec<AssetRef> {
         let mut out: Vec<AssetRef> = Vec::new();
+        for (m, _) in self.motion_refs() {
+            if !m.is_nil() && !out.contains(m) {
+                out.push(m.clone());
+            }
+        }
+        out
+    }
+
+    /// Every asset a state or a blend tree's child plays, with the
+    /// pointer of its `motion`.
+    pub fn motion_refs(&self) -> Vec<(&AssetRef, String)> {
+        let mut out = Vec::new();
         for s in self.layers.iter().flat_map(|l| &l.states) {
             if let Some(m) = &s.motion {
-                if !m.is_nil() && !out.contains(m) {
-                    out.push(m.clone());
-                }
+                m.assets(&format!("{}/motion", s.pointer), &mut out);
             }
         }
         out
@@ -592,6 +778,9 @@ impl Controller {
                         format!("two states of layer `{}` are named `{}`", l.name, s.name),
                         &format!("{}/name", s.pointer),
                     ));
+                }
+                if let Some(Motion::Tree(tree)) = &s.motion {
+                    self.validate_tree(tree, 1, &mut out);
                 }
                 if let Some(sp) = &s.speed_parameter {
                     match self.parameter(sp) {
@@ -707,6 +896,165 @@ impl Controller {
         finish(out, &self.document)
     }
 
+    /// A blend tree's shape (`D1104`) and names (`D1101`/`D1102`),
+    /// nested trees included; `depth` is 1 for a state's own tree.
+    fn validate_tree(&self, tree: &BlendTree, depth: usize, out: &mut Vec<Diagnostic>) {
+        use fynkel_core::animation::blend_tree::TreeDef;
+        let root = &self.document.root;
+        let shape = |message: String, pointer: &str| {
+            anchor(
+                root,
+                Diagnostic::error(Code::CONTROLLER_BLEND_TREE, message),
+                pointer,
+            )
+        };
+        let parameter_names = || {
+            self.parameters
+                .iter()
+                .filter(|p| p.kind == ParameterType::Float)
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        // A float parameter, or the diagnostic for the one named.
+        let float = |name: &str, pointer: &str| -> Option<Diagnostic> {
+            match self.parameter(name) {
+                None => Some(
+                    anchor(
+                        root,
+                        Diagnostic::error(
+                            Code::CONTROLLER_NAMES,
+                            format!("`{name}` is not a parameter"),
+                        ),
+                        pointer,
+                    )
+                    .with_suggestion(format!("the float parameters: {}", parameter_names())),
+                ),
+                Some(p) if p.kind != ParameterType::Float => Some(anchor(
+                    root,
+                    Diagnostic::error(
+                        Code::CONTROLLER_CONDITION,
+                        format!(
+                            "`{name}` is a {}: a blend tree reads float parameters",
+                            p.kind.name()
+                        ),
+                    ),
+                    pointer,
+                )),
+                Some(_) => None,
+            }
+        };
+        if depth > TreeDef::MAX_DEPTH {
+            out.push(shape(
+                format!("blend trees nest at most {} deep", TreeDef::MAX_DEPTH),
+                &tree.pointer,
+            ));
+            return;
+        }
+        if depth == 1 && tree.leaf_count() > TreeDef::MAX_LEAVES {
+            out.push(shape(
+                format!(
+                    "the tree plays {} motions; at most {}",
+                    tree.leaf_count(),
+                    TreeDef::MAX_LEAVES
+                ),
+                &tree.pointer,
+            ));
+        }
+        let Some(kind) = tree.kind else {
+            return;
+        };
+        let want = kind.parameter_count();
+        if tree.parameters.len() != want {
+            out.push(
+                shape(
+                    format!(
+                        "a {} tree reads {want} parameter(s); it names {}",
+                        kind.name(),
+                        tree.parameters.len()
+                    ),
+                    &format!("{}/parameters", tree.pointer),
+                )
+                .with_suggestion(match want {
+                    0 => "a direct tree names a parameter on each child instead".to_string(),
+                    1 => format!("one float parameter: {}", parameter_names()),
+                    _ => format!("two float parameters (x, y): {}", parameter_names()),
+                }),
+            );
+        }
+        for (i, name) in tree.parameters.iter().enumerate() {
+            if let Some(d) = float(name, &format!("{}/parameters/{i}", tree.pointer)) {
+                out.push(d);
+            }
+        }
+        if tree.children.is_empty() || tree.children.len() > TreeDef::MAX_CHILDREN {
+            out.push(shape(
+                format!(
+                    "a blend tree has 1 to {} children; this one has {}",
+                    TreeDef::MAX_CHILDREN,
+                    tree.children.len()
+                ),
+                &format!("{}/children", tree.pointer),
+            ));
+        }
+        let mut seen: Vec<([f64; 2], usize)> = Vec::new();
+        for (i, c) in tree.children.iter().enumerate() {
+            let missing = |what: &str| {
+                shape(
+                    format!("child {i} of a {} tree needs {what}", kind.name()),
+                    &c.pointer,
+                )
+            };
+            let at = match kind {
+                TreeKind::OneD => match c.threshold {
+                    Some(t) => Some([t, 0.0]),
+                    None => {
+                        out.push(missing("a threshold"));
+                        None
+                    }
+                },
+                TreeKind::Direct => {
+                    match &c.parameter {
+                        None => out.push(missing("a parameter (its weight)")),
+                        Some(name) => {
+                            if let Some(d) = float(name, &format!("{}/parameter", c.pointer)) {
+                                out.push(d);
+                            }
+                        }
+                    }
+                    None
+                }
+                _ => {
+                    if c.position.is_none() {
+                        out.push(missing("a position [x, y]"));
+                    }
+                    c.position
+                }
+            };
+            if let Some(at) = at {
+                if let Some((_, j)) = seen.iter().find(|(p, _)| *p == at) {
+                    out.push(shape(
+                        format!("children {j} and {i} are at the same position"),
+                        &c.pointer,
+                    ));
+                } else {
+                    seen.push((at, i));
+                }
+            }
+            if c.time_scale.is_nan() || c.time_scale <= 0.0 {
+                out.push(shape(
+                    "timeScale must be above 0".into(),
+                    &format!("{}/timeScale", c.pointer),
+                ));
+            }
+            match &c.motion {
+                None => out.push(missing("a motion")),
+                Some(Motion::Tree(t)) => self.validate_tree(t, depth + 1, out),
+                Some(Motion::Asset(_)) => {}
+            }
+        }
+    }
+
     /// The rule against the asset database: a state's motion is an
     /// animation clip — a rig document's `anim/<name>` or a model
     /// source's `anim/<n>` — or a blend space (`D1103`). A reference the
@@ -715,10 +1063,10 @@ impl Controller {
     pub fn validate_references(&self, db: &AssetDatabase) -> Vec<Diagnostic> {
         let root = &self.document.root;
         let mut out = Vec::new();
-        for s in self.layers.iter().flat_map(|l| &l.states) {
-            let Some(motion) = s.motion.as_ref().filter(|m| !m.is_nil()) else {
+        for (motion, pointer) in self.motion_refs() {
+            if motion.is_nil() {
                 continue;
-            };
+            }
             let Ok(resolved) = db.resolve(motion) else {
                 continue;
             };
@@ -736,8 +1084,8 @@ impl Controller {
                     Diagnostic::error(
                         Code::CONTROLLER_MOTION,
                         format!(
-                            "state `{}` plays {}{}, which is not an animation clip (anim/<n>) or a blend space",
-                            s.name,
+                            "{} plays {}{}, which is not an animation clip (anim/<n>) or a blend space",
+                            self.who(&pointer),
                             resolved.entry.path,
                             match &resolved.sub {
                                 Some((sub, _)) => format!("#{sub}"),
@@ -747,7 +1095,7 @@ impl Controller {
                     )
                     .with_id(motion.to_string())
                     .with_suggestion("pick a model's anim/<n>, a rig's clip or a .blend.json"),
-                    &format!("{}/motion", s.pointer),
+                    &pointer,
                 ));
             }
         }

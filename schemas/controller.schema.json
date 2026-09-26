@@ -32,8 +32,8 @@
       "properties": {
         "name": { "$ref": "#/$defs/name", "description": "Unique in its layer; what transitions and `play('Jump')` name. Not `any`." },
         "motion": {
-          "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef",
-          "description": "An animation clip (a model's or a rig's `anim/<n>`) or a blend space (`.blend.json`). Absent: the state holds the pose (Unity's empty state)."
+          "$ref": "#/$defs/motion",
+          "description": "An animation clip (a model's or a rig's `anim/<n>`), a blend space (`.blend.json`) or a blend tree. Absent: the state holds the pose (Unity's empty state)."
         },
         "speed": { "type": "number", "default": 1, "description": "The motion's playback speed." },
         "speedParameter": { "$ref": "#/$defs/identifier", "description": "A float parameter the speed is multiplied by." },
@@ -41,6 +41,60 @@
         "rootMotion": { "type": "boolean", "description": "Whether its root motion moves the character. Absent: the Animator's `root_motion`." }
       },
       "required": ["name"],
+      "additionalProperties": false
+    },
+    "motion": {
+      "oneOf": [
+        { "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef" },
+        {
+          "type": "object",
+          "properties": { "blendTree": { "$ref": "#/$defs/blendTree" } },
+          "required": ["blendTree"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "blendTree": {
+      "type": "object",
+      "description": "Several motions mixed by parameters (ADR-0033, Unity's blend tree). Every child shares the state's normalized time; the state's length is the children's weighted by the tree. The weights follow Unity's methods.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["1d", "simpleDirectional", "freeformDirectional", "freeformCartesian", "direct"],
+          "description": "`1d`: children at a `threshold` along one parameter. `simpleDirectional`: 2D, one child per direction plus one at the centre. `freeformDirectional`: 2D, several children per direction (walk and run every way). `freeformCartesian`: 2D, where the two values are not a direction. `direct`: each child's own `parameter` is its weight."
+        },
+        "parameters": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" },
+          "maxItems": 2,
+          "description": "The float parameters it reads: one for `1d`, two (x, y) for the 2D types, none for `direct`."
+        },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/blendChild" },
+          "minItems": 1,
+          "maxItems": 32
+        }
+      },
+      "required": ["type", "children"],
+      "additionalProperties": false
+    },
+    "blendChild": {
+      "type": "object",
+      "properties": {
+        "motion": { "$ref": "#/$defs/motion", "description": "A clip, a blend space or another blend tree (at most 4 deep)." },
+        "threshold": { "type": "number", "description": "A `1d` tree's: where on the parameter it plays alone." },
+        "position": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "A 2D tree's: `[x, y]` where it plays alone."
+        },
+        "timeScale": { "type": "number", "exclusiveMinimum": 0, "default": 1, "description": "How much faster its clock runs than the tree's." },
+        "parameter": { "$ref": "#/$defs/identifier", "description": "A `direct` tree's: the float parameter that is its weight." }
+      },
+      "required": ["motion"],
       "additionalProperties": false
     },
     "condition": {

@@ -95,7 +95,10 @@ fn the_adr_example_reads_and_validates() {
         (jump.looping, jump.speed, jump.root_motion),
         (false, 1.2, Some(true))
     );
-    assert_eq!(jump.motion.as_ref().unwrap().sub, "anim/bob");
+    assert_eq!(
+        jump.motion.as_ref().unwrap().as_asset().unwrap().sub,
+        "anim/bob"
+    );
     let loco = base.state("Locomotion").unwrap();
     assert_eq!(
         (
@@ -294,5 +297,113 @@ fn malformed_entries_are_the_schemas_or_the_readers() {
             ("FYN-D1100".into(), "/parameters/1/default".into()),
             ("FYN-D1100".into(), "/parameters/2/default".into()),
         ]
+    );
+}
+
+/// A state playing a 2D tree (ADR-0033): idle at the centre, a walk
+/// forward and a 1D tree of two clips to the right.
+fn strafe(tree: &str) -> String {
+    format!(
+        r#","parameters":[
+            {{"name":"moveX","type":"float"}},
+            {{"name":"moveY","type":"float"}},
+            {{"name":"jump","type":"trigger"}}],
+          "layers":[{{"name":"Base Layer","defaultState":"Strafe",
+            "states":[{{"name":"Strafe","motion":{{"blendTree":{tree}}}}}]}}]"#
+    )
+}
+
+#[test]
+fn a_blend_tree_reads_with_its_nested_trees() {
+    use fynkel_document::controller::{Motion, TreeKind};
+    let c = doc(&strafe(&format!(
+        r#"{{"type":"freeformDirectional","parameters":["moveX","moveY"],"children":[
+            {{"motion":{CLIP},"position":[0,0]}},
+            {{"motion":{CLIP},"position":[0,2],"timeScale":1.5}},
+            {{"motion":{{"blendTree":{{"type":"1d","parameters":["moveX"],"children":[
+                {{"motion":{CLIP},"threshold":1}},
+                {{"motion":{CLIP},"threshold":4}}]}}}},"position":[2,0]}}]}}"#
+    )));
+    assert_eq!(codes(&c), []);
+    let Some(Motion::Tree(t)) = &c.layers[0].states[0].motion else {
+        panic!("a tree");
+    };
+    assert_eq!(t.kind, Some(TreeKind::FreeformDirectional));
+    assert_eq!(t.parameters, ["moveX", "moveY"]);
+    assert_eq!(t.children[1].position, Some([0.0, 2.0]));
+    assert_eq!(t.children[1].time_scale, 1.5);
+    assert_eq!(t.leaf_count(), 4);
+    let Some(Motion::Tree(inner)) = &t.children[2].motion else {
+        panic!("a nested tree");
+    };
+    assert_eq!(inner.children[1].threshold, Some(4.0));
+    // The motions a cook depends on: the one clip, once.
+    assert_eq!(c.motions().len(), 1);
+    assert_eq!(c.motion_refs().len(), 4);
+    assert_eq!(
+        c.motion_refs()[3].1,
+        "/layers/0/states/0/motion/blendTree/children/2/motion/blendTree/children/1/motion"
+    );
+}
+
+#[test]
+fn a_blend_trees_shape_and_parameters_are_checked() {
+    let at = |p: &str| format!("/layers/0/states/0/motion/blendTree{p}");
+    let d1104 = |p: &str| ("FYN-D1104".to_string(), at(p));
+    // One parameter for a 2D tree; a child without a position; two
+    // children at one place.
+    let c = doc(&strafe(&format!(
+        r#"{{"type":"simpleDirectional","parameters":["moveX"],"children":[
+            {{"motion":{CLIP},"position":[0,0]}},
+            {{"motion":{CLIP}}},
+            {{"motion":{CLIP},"position":[0,0]}}]}}"#
+    )));
+    assert_eq!(
+        codes(&c),
+        [
+            d1104("/parameters"),
+            d1104("/children/1"),
+            d1104("/children/2"),
+        ]
+    );
+    // A parameter that is not there (D1101) or not a float (D1102); a
+    // direct child without its weight's parameter.
+    let c = doc(&strafe(&format!(
+        r#"{{"type":"1d","parameters":["speed"],"children":[{{"motion":{CLIP},"threshold":0}}]}}"#
+    )));
+    assert_eq!(codes(&c), [("FYN-D1101".to_string(), at("/parameters/0"))]);
+    let c = doc(&strafe(&format!(
+        r#"{{"type":"1d","parameters":["jump"],"children":[{{"motion":{CLIP},"threshold":0}}]}}"#
+    )));
+    assert_eq!(codes(&c), [("FYN-D1102".to_string(), at("/parameters/0"))]);
+    let c = doc(&strafe(&format!(
+        r#"{{"type":"direct","children":[{{"motion":{CLIP}}},{{"motion":{CLIP},"parameter":"moveX"}}]}}"#
+    )));
+    assert_eq!(codes(&c), [d1104("/children/0")]);
+    // An unknown type is the schema's (and the reader's) problem.
+    let c = doc(&strafe(&format!(
+        r#"{{"type":"3d","children":[{{"motion":{CLIP}}}]}}"#
+    )));
+    assert!(
+        codes(&c)
+            .iter()
+            .any(|(code, _)| code == "FYN-D0002" || code == "FYN-D1100"),
+        "{:?}",
+        codes(&c)
+    );
+    // Nesting five deep.
+    let mut tree = format!(
+        r#"{{"type":"1d","parameters":["moveX"],"children":[{{"motion":{CLIP},"threshold":0}}]}}"#
+    );
+    for _ in 0..4 {
+        tree = format!(
+            r#"{{"type":"1d","parameters":["moveX"],"children":[{{"motion":{{"blendTree":{tree}}},"threshold":0}}]}}"#
+        );
+    }
+    let c = doc(&strafe(&tree));
+    assert!(
+        codes(&c).iter().any(|(code, p)| code == "FYN-D1104" && p.ends_with("/blendTree/children/0/motion/blendTree/children/0/motion/blendTree/children/0/motion/blendTree/children/0/motion/blendTree")),
+        "{:?}",
+        codes(&c)
     );
 }
