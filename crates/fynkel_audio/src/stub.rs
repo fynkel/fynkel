@@ -71,6 +71,16 @@ impl Audio {
     }
 
     /// Always refused: there is no voice to give.
+    pub fn play_at(
+        &mut self,
+        source: Option<Entity>,
+        clip: &AssetRef,
+        params: PlayParams,
+        _start: u64,
+    ) -> Result<VoiceId, PlayError> {
+        self.play(source, clip, params)
+    }
+
     pub fn play(
         &mut self,
         _source: Option<Entity>,

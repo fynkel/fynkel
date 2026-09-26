@@ -417,3 +417,47 @@ fn a_streamed_clip_is_decoded_as_it_plays_loops_by_seek_and_ends_by_the_clock() 
     assert!(!audio.is_playing(late));
     assert_eq!(audio.stats().streams, 0);
 }
+
+#[test]
+fn a_voice_starts_where_asked_and_the_clock_ends_it_from_there() {
+    let mut audio = Audio::new();
+    let rate = NULL_SAMPLE_RATE;
+    audio
+        .register_clip(r(9), constant(rate, 1, rate as usize, 0.5))
+        .unwrap();
+    // Half-way into a one-second clip.
+    let v = audio
+        .play_at(None, &r(9), PlayParams::default(), rate as u64 / 2)
+        .unwrap();
+    let t = audio.state(v).unwrap().time;
+    assert!((t - 0.5).abs() < 1e-4, "{t}");
+    let mut out = vec![0.0; 256 * NULL_CHANNELS];
+    let (l, _) = settle(&mut audio, &mut out);
+    assert!(l > 0.4, "it sounds from there: {l}");
+    assert!(audio.advance(0.4).is_empty());
+    assert_eq!(audio.advance(0.2).len(), 1, "half a second was left");
+    // Past the end: at the end, ended by the next step.
+    let v = audio
+        .play_at(None, &r(9), PlayParams::default(), 10 * rate as u64)
+        .unwrap();
+    assert!((audio.state(v).unwrap().time - 1.0).abs() < 1e-4);
+    assert_eq!(audio.advance(0.0).len(), 1);
+}
+
+#[test]
+fn a_streamed_clip_has_a_waveform_too() {
+    let frames = 4_000;
+    let bytes = ramp_wav(NULL_SAMPLE_RATE, 2, frames);
+    let clip = AudioClip::streamed(NULL_SAMPLE_RATE, 2, frames as u64, "pcm", bytes).unwrap();
+    let p = fynkel_audio::peaks(&clip, 4).unwrap();
+    assert_eq!(p.len(), 2 * 4 * 2);
+    // The ramp rises on the left, falls on the right; the last column
+    // holds the highest.
+    assert!(p[7] > p[5] && p[7] > 0.1, "{p:?}");
+    assert!(p[8 + 6] < -0.1, "{p:?}");
+    let memory = constant(NULL_SAMPLE_RATE, 1, 100, 0.25);
+    assert_eq!(
+        fynkel_audio::peaks(&memory, 2).unwrap(),
+        vec![0.0, 0.25, 0.0, 0.25]
+    );
+}

@@ -217,6 +217,19 @@ impl Audio {
         clip: &AssetRef,
         params: PlayParams,
     ) -> Result<VoiceId, PlayError> {
+        self.play_at(source, clip, params, 0)
+    }
+
+    /// [`play`](Audio::play) from frame `start` of the clip (the
+    /// editor's preview, started where its waveform was clicked); a start
+    /// past the end starts at the end.
+    pub fn play_at(
+        &mut self,
+        source: Option<Entity>,
+        clip: &AssetRef,
+        params: PlayParams,
+        start: u64,
+    ) -> Result<VoiceId, PlayError> {
         let (clip_slot, frames, data) = {
             let entry = self.clips.get(clip).ok_or(PlayError::UnknownClip)?;
             (entry.slot, entry.clip.frames(), entry.clip.clone())
@@ -250,7 +263,7 @@ impl Audio {
             looping: params.looping,
             priority: params.priority,
             paused: false,
-            position: 0.0,
+            position: start.min(frames) as f64,
             seq,
             stream: shared.clone(),
         });
@@ -264,7 +277,7 @@ impl Audio {
                 volume,
                 pitch,
                 looping: params.looping,
-                position: 0.0,
+                position: start.min(frames) as f64,
             };
             match shared {
                 Some(shared) => self.start_stream(start, &data, shared),

@@ -34,7 +34,21 @@ pub mod stream;
 #[cfg(not(feature = "engine"))]
 mod stub;
 
-pub use clip::{AudioClip, StreamSource, MAX_CLIP_CHANNELS};
+pub use clip::{AudioClip, PeakBuilder, StreamSource, MAX_CLIP_CHANNELS};
+
+/// A clip's waveform, `[channel][column][min, max]` flattened (the
+/// editor's sound preview): a stream is decoded once for it. `Err` for a
+/// stream that does not decode (or, without the engine, any stream).
+pub fn peaks(clip: &AudioClip, columns: usize) -> Result<Vec<f32>, String> {
+    if let Some(p) = clip.peaks(columns) {
+        return Ok(p);
+    }
+    #[cfg(feature = "engine")]
+    if let Some((source, frames)) = &clip.stream {
+        return stream::peaks(source, clip.channels, *frames, columns);
+    }
+    Err("no waveform for a streamed sound in this build".to_string())
+}
 pub use components::{AudioBus, AudioListener, AudioSource, MAX_PITCH, MIN_PITCH};
 #[cfg(feature = "engine")]
 pub use engine::Audio;

@@ -272,6 +272,48 @@ fn open(bytes: &Arc<[u8]>, start_frame: u64) -> Result<Reader, SymphoniaError> {
     Ok(reader)
 }
 
+/// The waveform of a streamed clip ([`crate::clip::PeakBuilder`]),
+/// decoding its whole source once, on the caller's thread.
+pub fn peaks(
+    source: &StreamSource,
+    channels: u32,
+    frames: u64,
+    columns: usize,
+) -> Result<Vec<f32>, String> {
+    let mut builder = crate::clip::PeakBuilder::new(channels, frames, columns);
+    let mut reader = open(&source.bytes, 0).map_err(|e| e.to_string())?;
+    let mut chunk: Vec<f32> = Vec::new();
+    let channels = channels.max(1) as usize;
+    let mut frame = vec![0.0f32; channels];
+    loop {
+        let packet = match reader.format.next_packet().map_err(|e| e.to_string())? {
+            Some(p) => p,
+            None => return Ok(builder.finish()),
+        };
+        if packet.track_id != reader.track_id {
+            continue;
+        }
+        let buffer = match reader.decoder.decode(&packet) {
+            Ok(b) => b,
+            Err(SymphoniaError::DecodeError(_)) => continue,
+            Err(e) => return Err(e.to_string()),
+        };
+        let source_channels = buffer.spec().channels().count().max(1);
+        buffer.copy_to_vec_interleaved(&mut chunk);
+        for f in chunk.chunks_exact(source_channels) {
+            for (c, v) in frame.iter_mut().enumerate() {
+                *v = f
+                    .get(c)
+                    .or(f.first())
+                    .copied()
+                    .unwrap_or(0.0)
+                    .clamp(-1.0, 1.0);
+            }
+            builder.push(&frame);
+        }
+    }
+}
+
 fn decode_loop(
     source: Arc<StreamSource>,
     channels: usize,

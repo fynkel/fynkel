@@ -124,3 +124,75 @@ impl AudioClip {
         }
     }
 }
+
+/// A waveform's columns (the editor's sound preview): per channel, the
+/// lowest and highest sample (and the zero line) of each of `columns` equal spans of the
+/// clip, fed one frame at a time.
+pub struct PeakBuilder {
+    columns: usize,
+    channels: usize,
+    frames: u64,
+    seen: u64,
+    /// `[channel][column][min, max]`, flattened.
+    out: Vec<f32>,
+}
+
+impl PeakBuilder {
+    pub fn new(channels: u32, frames: u64, columns: usize) -> PeakBuilder {
+        let channels = channels.max(1) as usize;
+        PeakBuilder {
+            columns,
+            channels,
+            frames,
+            seen: 0,
+            out: vec![0.0; channels * columns * 2],
+        }
+    }
+
+    /// One interleaved frame.
+    pub fn push(&mut self, frame: &[f32]) {
+        if self.columns == 0 || self.frames == 0 {
+            return;
+        }
+        let column =
+            ((self.seen * self.columns as u64) / self.frames).min(self.columns as u64 - 1) as usize;
+        for (c, &s) in frame.iter().take(self.channels).enumerate() {
+            let i = (c * self.columns + column) * 2;
+            self.out[i] = self.out[i].min(s);
+            self.out[i + 1] = self.out[i + 1].max(s);
+        }
+        self.seen += 1;
+    }
+
+    pub fn finish(self) -> Vec<f32> {
+        self.out
+    }
+}
+
+impl AudioClip {
+    /// The waveform of a clip held in memory ([`PeakBuilder`]); `None` for
+    /// a stream (decoded by `stream::peaks`).
+    pub fn peaks(&self, columns: usize) -> Option<Vec<f32>> {
+        if self.is_stream() {
+            return None;
+        }
+        let mut b = PeakBuilder::new(self.channels, self.frames(), columns);
+        for frame in self.samples.chunks_exact(self.channels as usize) {
+            b.push(frame);
+        }
+        Some(b.finish())
+    }
+}
+
+#[cfg(test)]
+mod peak_tests {
+    use super::*;
+
+    #[test]
+    fn peaks_per_channel_and_column() {
+        // Stereo, 4 frames, 2 columns: left rises, right falls.
+        let clip = AudioClip::new(8, 2, vec![0.1, -0.1, 0.2, -0.2, 0.5, -0.5, 0.9, -0.9]).unwrap();
+        let p = clip.peaks(2).unwrap();
+        assert_eq!(p, vec![0.0, 0.2, 0.0, 0.9, -0.2, 0.0, -0.9, 0.0]);
+    }
+}
