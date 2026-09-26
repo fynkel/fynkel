@@ -6,6 +6,8 @@
 // other asset in the Inspector (item 9c). Below the assets, the Scripts
 // root lists `lib/`: a double-click opens a script in the IDE, and New ▾ →
 // Behaviour makes one from a template (roadmap Phase 2 item 1).
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
@@ -254,7 +256,11 @@ class _ProjectPanelState extends State<ProjectPanel> {
   // ── Actions ───────────────────────────────────────────────────────────
 
   void _activate(AssetEntry e) {
-    if (e.document == 'scene' && widget.onOpenScene != null) {
+    if (e.importer == 'fynkel.shader' && widget.onOpenScript != null) {
+      // Unity's double-click on a shader: its code in the IDE.
+      model.select(e.id);
+      unawaited(_openInIde(e.file ?? model.project.assetFile(e.path)));
+    } else if (e.document == 'scene' && widget.onOpenScene != null) {
       widget.onOpenScene!(e.id);
     } else if (e.document == 'scene' || e.document == 'prefab') {
       widget.onOpenDocument(e.id);
@@ -284,6 +290,11 @@ class _ProjectPanelState extends State<ProjectPanel> {
       return;
     }
     model.select(e.id, toggle: meta, range: shift);
+  }
+
+  Future<void> _openInIde(String file) async {
+    final err = await widget.onOpenScript?.call(file);
+    if (err != null && mounted) Notices.maybeOf(context)?.show('Open in IDE failed: $err');
   }
 
   Future<void> _openScript(String rel) async {
@@ -608,6 +619,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
         PopupMenuItem(value: 'new:volume', enabled: canHere, child: const Text('New Volume Profile Here')),
         PopupMenuItem(value: 'new:physics_material', enabled: canHere, child: const Text('New Physics Material Here')),
         ..._dataItems(here: true, enabled: canHere),
+        PopupMenuItem(value: 'shader:lit', enabled: canHere, child: const Text('New Lit Shader Here')),
+        PopupMenuItem(value: 'shader:unlit', enabled: canHere, child: const Text('New Unlit Shader Here')),
         PopupMenuItem(value: 'new:folder', enabled: canHere, child: const Text('New Folder Here')),
         if (extensionEntries.isNotEmpty) ...[
           const PopupMenuDivider(),
@@ -657,6 +670,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
         await Clipboard.setData(ClipboardData(text: e.path));
       case 'new:folder':
         model.newFolder(inFolder: here);
+      case 'shader:lit' || 'shader:unlit':
+        model.newShader(lit: choice == 'shader:lit', inFolder: here);
       case null:
         break;
       default:
@@ -722,6 +737,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
         PopupMenuItem(value: 'new:volume', enabled: canHere, child: const Text('New Volume Profile Here')),
         PopupMenuItem(value: 'new:physics_material', enabled: canHere, child: const Text('New Physics Material Here')),
         ..._dataItems(here: true, enabled: canHere),
+        PopupMenuItem(value: 'shader:lit', enabled: canHere, child: const Text('New Lit Shader Here')),
+        PopupMenuItem(value: 'shader:unlit', enabled: canHere, child: const Text('New Unlit Shader Here')),
         PopupMenuItem(value: 'new:folder', enabled: canHere, child: const Text('New Folder Here')),
         if (!isRoot && canHere) ...[
           const PopupMenuDivider(),
@@ -744,6 +761,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
         model.deleteFolder(rel);
       case 'new:folder':
         model.newFolder(inFolder: rel);
+      case 'shader:lit' || 'shader:unlit':
+        model.newShader(lit: choice == 'shader:lit', inFolder: rel);
       case null:
         break;
       default:
@@ -1244,6 +1263,24 @@ class _ProjectPanelState extends State<ProjectPanel> {
                 ),
               ),
               ..._dataItems(),
+              PopupMenuItem(
+                key: const Key('project.new.shader.lit'),
+                value: 'shader:lit',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(assetKindIcon('shader')),
+                  title: const Text('New Lit Shader'),
+                ),
+              ),
+              PopupMenuItem(
+                key: const Key('project.new.shader.unlit'),
+                value: 'shader:unlit',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(assetKindIcon('shader')),
+                  title: const Text('New Unlit Shader'),
+                ),
+              ),
               const PopupMenuDivider(),
               const PopupMenuItem(
                 key: Key('project.new.folder'),
@@ -1268,6 +1305,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
             onSelected: (v) => switch (v) {
               'folder' => model.newFolder(),
               'behaviour' => _newBehaviour(),
+              'shader:lit' || 'shader:unlit' => model.newShader(lit: v == 'shader:lit'),
               _ when v.startsWith('data:') => _newData(v.substring(5)),
               _ => model.newDocument(v),
             },

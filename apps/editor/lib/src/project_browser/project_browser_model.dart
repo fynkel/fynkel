@@ -18,6 +18,7 @@ import 'package:path/path.dart' as p;
 import '../inspector/field_widgets.dart' show AssetDragPayload;
 import '../project/editor_project.dart';
 import 'scripts.dart';
+import 'shaders.dart';
 import 'thumbnails.dart';
 
 enum BrowserView { folders, list }
@@ -25,7 +26,7 @@ enum BrowserView { folders, list }
 enum AssetSort { name, kind, path, modified }
 
 /// The kinds the filter menu offers, in order; a source is one of the last
-/// four by its importer.
+/// five by its importer.
 const browserKinds = [
   'scene',
   'prefab',
@@ -35,6 +36,7 @@ const browserKinds = [
   'volume',
   'physics_material',
   'data',
+  'shader',
   'texture',
   'model',
   'sound',
@@ -48,6 +50,7 @@ String browserKindOf(AssetEntry e) {
     'fynkel.image' => 'texture',
     'fynkel.gltf' || 'fynkel.fbx' => 'model',
     'fynkel.audio' => 'sound',
+    'fynkel.shader' => 'shader',
     _ => 'other',
   };
 }
@@ -809,6 +812,52 @@ final class ProjectBrowserModel extends ChangeNotifier {
     if (r == null) return null;
     final id = r.id;
     if (view == BrowserView.folders && !filtering) folder = target;
+    if (id != null && entry(id) != null) {
+      select(id);
+      renamingAsset = id;
+      notifyListeners();
+    }
+    return r;
+  }
+
+  /// Unity's Create ▸ Shader ▸ Lit / Unlit (ADR-0031 § 7): `New Lit
+  /// Shader.shader` from the template in [inFolder] (the shown folder by
+  /// default), with its sidecar — one undo step, as a file dropped in —
+  /// selected and ready to rename. Double-click opens it in the IDE.
+  OperationResult? newShader({required bool lit, String? inFolder}) {
+    final target = inFolder ?? (view == BrowserView.folders ? folder : '');
+    if (_refusedInPackages(target)) return null;
+    final rel = _freshPath(target, lit ? 'New Lit Shader' : 'New Unlit Shader', '.shader');
+    final name = p.basenameWithoutExtension(rel);
+    final temp = Directory.systemTemp.createTempSync('fynkel_shader');
+    try {
+      final file = File(p.join(temp.path, '$name.shader'))
+        ..writeAsStringSync(shaderSource(lit: lit, name: name));
+      final r = importFiles([file.path], inFolder: target);
+      if (r == null) return null;
+      final id = selection.lastOrNull;
+      if (view == BrowserView.folders && !filtering) folder = target;
+      if (id != null && entry(id) != null) {
+        renamingAsset = id;
+        notifyListeners();
+      }
+      return r;
+    } finally {
+      temp.deleteSync(recursive: true);
+    }
+  }
+
+  /// Create Material on a shader's page (ADR-0031 § 7): `Water Material`
+  /// beside `Water.shader`, drawn with it, selected and ready to rename.
+  OperationResult? newMaterialFor(AssetEntry shader) {
+    final slash = shader.path.lastIndexOf('/');
+    final inFolder = slash < 0 ? '' : shader.path.substring(0, slash);
+    if (_refusedInPackages(inFolder)) return null;
+    final rel = _freshPath(inFolder, '${p.basenameWithoutExtension(shader.path)} Material', '.material.json');
+    final r = _guard(() => project.newDocument('material', rel, shader: shader.id));
+    if (r == null) return null;
+    final id = r.id;
+    if (view == BrowserView.folders && !filtering) folder = inFolder;
     if (id != null && entry(id) != null) {
       select(id);
       renamingAsset = id;

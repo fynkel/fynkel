@@ -137,6 +137,9 @@ abstract final class FIcons {
   static const IconData tune = LucideIcons.sliders;
   static const IconData physicsMaterial = LucideIcons.volleyball;
 
+  /// A `.shader` asset (ADR-0031).
+  static const IconData shader = LucideIcons.blend;
+
   /// A data asset (ADR-0027) whose type names no icon.
   static const IconData dataAsset = LucideIcons.fileJson;
   static const IconData swords = LucideIcons.swords;

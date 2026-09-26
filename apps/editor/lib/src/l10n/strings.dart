@@ -38,6 +38,14 @@ abstract final class EditorStrings {
       label: 'New Physics Material',
       description: 'Friction and bounciness a Collider can share, with how two surfaces combine them',
     ),
+    'assets.newLitShader': (
+      label: 'New Lit Shader',
+      description: 'A .shader file whose surface() the engine lights; double-click opens it in the IDE',
+    ),
+    'assets.newUnlitShader': (
+      label: 'New Unlit Shader',
+      description: 'A .shader file whose surface() colour is drawn as it is',
+    ),
     'assets.newScene': (label: 'New Scene', description: 'An empty scene document in the Project browser\'s folder'),
     'assets.open': (
       label: 'Open Asset',

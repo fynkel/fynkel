@@ -153,11 +153,13 @@ final class AssetEntry {
 
   /// The kind a source is referenced as **whole** (no sub-asset): an audio
   /// source is a `sound` (`fynkel.AudioSource.clip`), an image a `texture`
-  /// (a material's texture slots name the image's own id). Null for the
-  /// others, which are only referenced through their sub-assets.
+  /// (a material's texture slots name the image's own id), a `.shader` a
+  /// `shader` (a material's shader, ADR-0031). Null for the others, which
+  /// are only referenced through their sub-assets.
   String? get wholeKind => switch (isSource ? importer : null) {
     'fynkel.audio' => 'sound',
     'fynkel.image' => 'texture',
+    'fynkel.shader' => 'shader',
     _ => null,
   };
 
@@ -237,6 +239,11 @@ abstract class EditorProject extends ChangeNotifier {
   /// The data types (ADR-0027) the project's `schemas/data/` declares, by
   /// id; a type declared in the registry without a schema has no fields.
   List<DataTypeInfo> dataTypes() => const [];
+
+  /// The shaders a material can pick (ADR-0031): the built-in Lit first,
+  /// then every `.shader` asset with its properties, or its errors when it
+  /// does not compile. Read again when [assetsRevision] moves.
+  List<ShaderInfo> shaders() => const [];
 
   /// The committed behaviour metadata (`lib/generated/behaviours.g.json`)
   /// as the session last read it (at open, and at `registerBehaviour`), or
@@ -671,6 +678,22 @@ final class SessionProject extends EditorProject {
             dart: b['dart'] as String?,
           ),
     ];
+  }
+
+  List<ShaderInfo>? _shaders;
+  int _shadersAt = -1;
+
+  @override
+  List<ShaderInfo> shaders() {
+    if (_shaders == null || _shadersAt != _assetsRevision) {
+      try {
+        _shaders = session.shaders();
+      } on AuthoringException {
+        _shaders = const [];
+      }
+      _shadersAt = _assetsRevision;
+    }
+    return _shaders!;
   }
 
   @override

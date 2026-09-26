@@ -41,6 +41,7 @@ import 'inspector_panel.dart' show componentIcon;
 import 'data_asset_inspector.dart';
 import 'material_inspector.dart';
 import 'physics_material_inspector.dart';
+import 'shader_page.dart';
 import 'volume_inspector.dart';
 import '../project_browser/project_browser_model.dart';
 import '../shell/editor_selection.dart';
@@ -309,10 +310,14 @@ class AssetPage extends StatefulWidget {
     this.selection,
     this.run = runProcess,
     this.assetEdits,
+    this.openInIde,
   });
 
   final ProjectBrowserModel model;
   final String id;
+
+  /// Opens a file in the IDE at a line: a shader's Open and its errors.
+  final OpenInIde? openInIde;
 
   /// Edits a `fynkel.pbr@1` material in place (its page's fields); the
   /// material's summary is read-only without it.
@@ -494,9 +499,11 @@ class _AssetPageState extends State<AssetPage> {
         message: '${e.path} could not be read.',
       );
     }
-    final draft = e.isSource ? _draftOf(e.id, d) : null;
+    final isShader = e.importer == 'fynkel.shader';
+    // A shader has no import settings: its header says everything.
+    final draft = e.isSource && !isShader ? _draftOf(e.id, d) : null;
     final pending = draft != null && (_dirty(d) || _jsonError != null);
-    final editsMaterial = widget.assetEdits != null && d.material?['shader'] == pbrShader;
+    final editsMaterial = widget.assetEdits != null && e.document == 'material';
     final editsVolume = widget.assetEdits != null && e.document == 'volume';
     final editsPhysics = widget.assetEdits != null && e.document == 'physics_material';
     return Material(
@@ -523,6 +530,7 @@ class _AssetPageState extends State<AssetPage> {
                     PhysicsMaterialInspector(key: Key('physicsMaterial.${e.id}'), edits: widget.assetEdits!, id: e.id),
                   if (e.document == 'prefab')
                     _PrefabRoot(model: model, entry: e, onOpen: () => widget.onOpenDocument(e.id)),
+                  if (isShader) ShaderSections(model: model, entry: e, openInIde: widget.openInIde),
                   if (draft != null) _importSettings(context, e, d, draft),
                   if (draft != null && _isModel(e)) _materials(context, e, d, draft),
                   if (e.isSource && d.subAssets.isNotEmpty) _parts(context, e, d),
@@ -584,6 +592,7 @@ class _AssetPageState extends State<AssetPage> {
   Widget _header(BuildContext context, AssetEntry e, AssetDetail d) {
     final t = context.tokens;
     final isDoc = e.document == 'scene' || e.document == 'prefab';
+    final isShader = e.importer == 'fynkel.shader' && widget.openInIde != null;
     return InspectorPageHeader(
       // The id is in the picture's tooltip; a click copies it (as an object's).
       leading: Tooltip(
@@ -618,6 +627,26 @@ class _AssetPageState extends State<AssetPage> {
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               onPressed: () => widget.onOpenDocument(e.id),
+              child: const Text('Open'),
+            ),
+          ),
+        if (isShader)
+          Padding(
+            padding: const EdgeInsets.only(top: 1, right: 2),
+            child: OutlinedButton(
+              key: const Key('asset.open'),
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                backgroundColor: t.header,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                minimumSize: Size(0, t.row + 2),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: () async {
+                final notices = Notices.maybeOf(context);
+                final err = await widget.openInIde!(e.file ?? model.project.assetFile(e.path));
+                if (err != null) notices?.show('Open in IDE failed: $err');
+              },
               child: const Text('Open'),
             ),
           ),

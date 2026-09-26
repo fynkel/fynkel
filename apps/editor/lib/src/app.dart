@@ -1285,6 +1285,23 @@ class EditorShellState extends State<EditorShell> {
         enabled: () => _canEditAssets,
         run: () => _newAsset('physics_material'),
       ),
+      // Unity's Create → Shader (ADR-0031; no shortcut there either).
+      EditorCommand(
+        id: 'assets.newLitShader',
+        menu: EditorMenu.project,
+        group: 4,
+        order: 2,
+        enabled: () => _canEditAssets,
+        run: () => _newShader(lit: true),
+      ),
+      EditorCommand(
+        id: 'assets.newUnlitShader',
+        menu: EditorMenu.project,
+        group: 4,
+        order: 2,
+        enabled: () => _canEditAssets,
+        run: () => _newShader(lit: false),
+      ),
       EditorCommand(
         id: 'assets.newFolder',
         menu: EditorMenu.project,
@@ -2688,6 +2705,11 @@ class EditorShellState extends State<EditorShell> {
   void _newAsset(String kind) {
     workspace?.show(PanelRegistry.project);
     browser?.newDocument(kind);
+  }
+
+  void _newShader({required bool lit}) {
+    workspace?.show(PanelRegistry.project);
+    browser?.newShader(lit: lit);
   }
 
   /// The Project browser's "Move to…" for the selection.

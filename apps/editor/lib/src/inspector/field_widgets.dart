@@ -1653,6 +1653,7 @@ IconData assetKindIcon(String? kind) => switch (kind) {
   'volume' => FIcons.tune,
   'physics_material' => FIcons.physicsMaterial,
   'data' => FIcons.dataAsset,
+  'shader' => FIcons.shader,
   'script' => FIcons.descriptionOutlined,
   _ => FIcons.insertDriveFileOutlined,
 };

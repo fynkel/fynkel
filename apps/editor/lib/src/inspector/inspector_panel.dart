@@ -142,6 +142,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
             onOpenReference: openReference,
             run: widget.run,
             assetEdits: widget.assetEdits,
+            openInIde: model.openInIde,
           );
         case InspectAsset(:final id, :final sub?):
           return SubAssetPage(
