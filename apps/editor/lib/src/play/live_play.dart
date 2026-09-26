@@ -48,9 +48,22 @@ final class LivePlay {
   /// Unity): the running game draws it too, from its next frame — Unity's
   /// material asset changes in Play the same way. False when no game runs
   /// or [kind] is not drawn.
+  ///
+  /// A material the game's code changes (`setMaterialValue`) is drawn from
+  /// the code's copy, which takes the edit with the code's values on top
+  /// ([fynkel.World.applyMaterialEdit]) — Unity's rule too.
   bool assetEdited(String kind, String id, Map<String, Object?> fields) {
+    final world = _world;
     final doc = document;
-    if (_world == null || doc == null) return false;
+    if (world == null || doc == null) return false;
+    if (kind == 'material') {
+      try {
+        world.applyMaterialEdit(id, fields);
+      } on ArgumentError {
+        // A value the code set no longer fits the saved material: the
+        // code's copy keeps its last good values.
+      }
+    }
     final applied = doc.backend.setAsset(kind, id, fields);
     if (applied) written?.call();
     return applied;
