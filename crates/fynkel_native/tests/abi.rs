@@ -2283,7 +2283,7 @@ fn animator_controller_ops_events_and_queries() {
     let controller = AssetRef::new(AssetId::from_bytes([8; 16]));
     let state = |name: &str, looping: bool| StateDef {
         name: name.into(),
-        motion: Some(clip.clone()),
+        motion: Some(clip.clone().into()),
         speed: 1.0,
         speed_parameter: None,
         looping,

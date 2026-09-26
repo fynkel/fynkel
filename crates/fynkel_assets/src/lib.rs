@@ -1074,8 +1074,12 @@ impl Assets {
         let mut n = 0;
         for layer in &def.layers {
             for state in &layer.states {
+                let mut assets = Vec::new();
                 if let Some(m) = &state.motion {
-                    if self.register_clip(m, world)? {
+                    m.assets(&mut assets);
+                }
+                for a in assets {
+                    if self.register_clip(a, world)? {
                         n += 1;
                     }
                 }
@@ -1959,8 +1963,8 @@ fn bounds_of(vertices: &[fynkel_cooked::payload::Vertex]) -> ([f32; 3], [f32; 3]
 /// states and transitions by index. `Err` names what does not resolve.
 pub fn controller_def(c: &fynkel_document::Controller) -> Result<ControllerDef, String> {
     use fynkel_core::animation::controller::{
-        Blending, Condition, LayerDef, ParameterDef, ParameterKind, StateDef, Test, TransitionDef,
-        Value,
+        Blending, ChildDef, Condition, LayerDef, MotionDef, ParameterDef, ParameterKind, StateDef,
+        Test, TransitionDef, TreeDef, Value,
     };
     use fynkel_document::controller as doc;
     let parameters: Vec<ParameterDef> = c
@@ -1986,6 +1990,48 @@ pub fn controller_def(c: &fynkel_document::Controller) -> Result<ControllerDef, 
             .position(|p| p.name == name)
             .ok_or_else(|| format!("no parameter `{name}`"))
     };
+    fn motion(
+        m: &doc::Motion,
+        parameter: &dyn Fn(&str) -> Result<usize, String>,
+    ) -> Result<MotionDef, String> {
+        Ok(match m {
+            doc::Motion::Asset(a) => MotionDef::Asset(a.clone()),
+            doc::Motion::Tree(t) => {
+                let kind = t.kind.ok_or("a blend tree without a type")?;
+                let children = t
+                    .children
+                    .iter()
+                    .map(|c| {
+                        let position = match (c.position, c.threshold) {
+                            (Some([x, y]), _) => [x as f32, y as f32],
+                            (None, Some(t)) => [t as f32, 0.0],
+                            (None, None) => [0.0, 0.0],
+                        };
+                        Ok(ChildDef {
+                            motion: motion(
+                                c.motion
+                                    .as_ref()
+                                    .ok_or("a blend tree child without a motion")?,
+                                parameter,
+                            )?,
+                            position,
+                            time_scale: c.time_scale as f32,
+                            parameter: c.parameter.as_deref().map(parameter).transpose()?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                MotionDef::Tree(Box::new(TreeDef {
+                    kind,
+                    parameters: t
+                        .parameters
+                        .iter()
+                        .map(|p| parameter(p))
+                        .collect::<Result<Vec<_>, String>>()?,
+                    children,
+                }))
+            }
+        })
+    }
     let mut layers = Vec::with_capacity(c.layers.len());
     for l in &c.layers {
         let state = |name: &str| {
@@ -2000,7 +2046,11 @@ pub fn controller_def(c: &fynkel_document::Controller) -> Result<ControllerDef, 
             .map(|s| {
                 Ok(StateDef {
                     name: s.name.clone(),
-                    motion: s.motion.clone(),
+                    motion: s
+                        .motion
+                        .as_ref()
+                        .map(|m| motion(m, &parameter))
+                        .transpose()?,
                     speed: s.speed,
                     speed_parameter: s.speed_parameter.as_deref().map(parameter).transpose()?,
                     looping: s.looping,

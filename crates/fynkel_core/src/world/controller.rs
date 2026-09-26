@@ -8,8 +8,11 @@
 //!
 //! Motions resolve like the animator's own clip does: by name under the
 //! animator (under the layer's `root` node when it has one — the mask by
-//! placement moved into the asset), cached per layer and motion while
-//! every target still lives under its name.
+//! placement moved into the asset), cached per state while every target
+//! still lives under its name. A state's motion is a tree of clips
+//! (ADR-0033 § 1): a clip is one leaf, a blend space a 1D tree of its
+//! points, a blend tree itself; every leaf shares the state's normalized
+//! time, and the state's length is the leaves' weighted by the tree.
 
 #![cfg_attr(not(feature = "animation"), allow(dead_code, unused_imports))]
 
@@ -24,8 +27,11 @@ use glam::Vec3;
 use super::animation::{
     find_named, pin_root, root_delta, AnimatorTick, BlendSlot, BlendTable, ClipTable,
 };
-use crate::animation::controller::{Blending, ControllerDef, ControllerRun, StateEvent, Value};
-use crate::animation::{BlendSpace, Clip, Pose};
+use crate::animation::blend_tree::{direct_weights, weights, TreeDef, TreeKind};
+use crate::animation::controller::{
+    Blending, ControllerDef, ControllerRun, MotionDef, ParameterKind, StateEvent, Value,
+};
+use crate::animation::{Clip, Pose};
 use crate::components::Animator;
 use crate::schema::{AnimatorLayerStateRecord, AnimatorParameterKind, AnimatorParameterRecord};
 
@@ -41,8 +47,8 @@ pub struct ControllerPlay {
     pub run: ControllerRun,
     /// Events of `PlayState` commands, raised with the next tick's.
     pub pending: Vec<StateEvent>,
-    /// Resolved motions, per layer by motion.
-    motions: Vec<HashMap<AssetRef, Motion>>,
+    /// Resolved motions, per layer and state.
+    motions: Vec<Vec<Option<Motion>>>,
     /// Each target's transform when a motion first resolved it: what a
     /// layer over a node the layers below do not pose starts from (its
     /// transform now would be last tick's pose, compounding).
@@ -67,7 +73,11 @@ impl ControllerPlay {
         ControllerPlay {
             controller,
             run: ControllerRun::new(&def),
-            motions: vec![HashMap::new(); def.layers.len()],
+            motions: def
+                .layers
+                .iter()
+                .map(|l| vec![None; l.states.len()])
+                .collect(),
             rest: HashMap::new(),
             lengths: vec![0.0; n],
             offsets,
@@ -79,96 +89,122 @@ impl ControllerPlay {
     }
 }
 
+/// A parameter a tree reads: the controller's, or a fixed value (a
+/// blend space whose parameter the controller does not have stays at
+/// its first point).
+#[derive(Clone, Copy, Debug)]
+enum Param {
+    Index(usize),
+    Fixed(f32),
+}
+
+impl Param {
+    fn value(self, run: &ControllerRun) -> f32 {
+        match self {
+            Param::Index(i) => run.values.get(i).map_or(0.0, |v| v.as_f32()),
+            Param::Fixed(v) => v,
+        }
+    }
+}
+
+/// A resolved motion's shape: a clip (an index into the motion's slots)
+/// or a tree of them.
+#[derive(Clone, Debug)]
+enum Node {
+    Leaf(usize),
+    Tree {
+        kind: TreeKind,
+        params: [Param; 2],
+        positions: Vec<[f32; 2]>,
+        /// Each child with its time scale and (a direct tree's) weight
+        /// parameter.
+        children: Vec<(Node, f32, Param)>,
+    },
+}
+
+impl Node {
+    /// Calls `f(slot, weight, scale)` for every leaf with a weight, the
+    /// weights multiplied down the tree, `scale` the time scales'.
+    fn visit(&self, run: &ControllerRun, w: f32, scale: f32, f: &mut dyn FnMut(usize, f32, f32)) {
+        match self {
+            Node::Leaf(i) => f(*i, w, scale),
+            Node::Tree {
+                kind,
+                params,
+                positions,
+                children,
+            } => {
+                let n = children.len().min(TreeDef::MAX_CHILDREN);
+                let mut ws = [0.0f32; TreeDef::MAX_CHILDREN];
+                if *kind == TreeKind::Direct {
+                    let mut values = [0.0f32; TreeDef::MAX_CHILDREN];
+                    for (v, (_, _, p)) in values.iter_mut().zip(children) {
+                        *v = p.value(run);
+                    }
+                    direct_weights(&values[..n], &mut ws[..n]);
+                } else {
+                    let input = [params[0].value(run), params[1].value(run)];
+                    weights(*kind, &positions[..n], input, &mut ws[..n]);
+                }
+                for (k, (child, time_scale, _)) in children.iter().take(n).enumerate() {
+                    if ws[k] > 0.0 {
+                        child.visit(run, w * ws[k], scale * time_scale, f);
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// A state's motion as a layer of one animator resolved it.
 #[derive(Clone, Debug)]
-enum Motion {
-    Clip {
-        slot: BlendSlot,
-        /// The clip's first frame over its targets: an additive layer's
-        /// zero.
-        reference: Pose,
-    },
-    Blend {
-        space: Arc<BlendSpace>,
-        slots: Vec<BlendSlot>,
-        reference: Pose,
-    },
+struct Motion {
+    root: Node,
+    slots: Vec<BlendSlot>,
+    /// The first clip's first frame over its targets: an additive
+    /// layer's zero.
+    reference: Pose,
 }
 
 impl Motion {
     fn valid(&self, ecs: &Ecs) -> bool {
-        match self {
-            Motion::Clip { slot, .. } => slot.valid(ecs),
-            Motion::Blend { slots, .. } => slots.iter().all(|s| s.valid(ecs)),
-        }
+        self.slots.iter().all(|s| s.valid(ecs))
     }
 
-    fn reference(&self) -> &Pose {
-        match self {
-            Motion::Clip { reference, .. } | Motion::Blend { reference, .. } => reference,
-        }
+    /// Every clip playing now: `f(slot, weight, time scale)`.
+    fn leaves(&self, run: &ControllerRun, f: &mut dyn FnMut(usize, f32, f32)) {
+        self.root.visit(run, 1.0, 1.0, f);
     }
 
-    /// The segment of a blend space at the run's parameter: `(i, j, t)`.
-    fn segment(
-        space: &BlendSpace,
-        def: &ControllerDef,
-        run: &ControllerRun,
-    ) -> (usize, usize, f32) {
-        let value = run
-            .float(def, &space.parameter)
-            .unwrap_or(space.points.first().map_or(0.0, |p| p.at));
-        space.segment(value)
+    /// The motion's length now, seconds: its clips' lengths (over their
+    /// time scales) weighted as they play.
+    fn length(&self, run: &ControllerRun) -> f32 {
+        let mut length = 0.0;
+        self.leaves(run, &mut |i, w, scale| {
+            length += w * self.slots[i].clip.duration.max(0.0) / scale;
+        });
+        length
     }
 
-    /// The motion's length now, seconds (a blend space's is its two
-    /// active clips' interpolated).
-    fn length(&self, def: &ControllerDef, run: &ControllerRun) -> f32 {
-        match self {
-            Motion::Clip { slot, .. } => slot.clip.duration.max(0.0),
-            Motion::Blend { space, slots, .. } => {
-                let (i, j, t) = Self::segment(space, def, run);
-                slots[i].clip.duration.max(0.0) * (1.0 - t) + slots[j].clip.duration.max(0.0) * t
+    /// The heaviest clip now (markers come from it).
+    fn dominant(&self, run: &ControllerRun) -> Option<usize> {
+        let mut best: Option<(usize, f32)> = None;
+        self.leaves(run, &mut |i, w, _| {
+            if best.is_none_or(|(_, b)| w > b) {
+                best = Some((i, w));
             }
-        }
+        });
+        best.map(|(i, _)| i)
     }
+}
 
-    /// The clips that play at this moment with their weight in the blend
-    /// and their seconds for a normalized time `n`.
-    fn parts(
-        &self,
-        def: &ControllerDef,
-        run: &ControllerRun,
-        n: f32,
-        looping: bool,
-    ) -> [(Option<&BlendSlot>, f32, f32); 2] {
-        let seconds = |clip: &Clip, n: f32| {
-            let d = clip.duration.max(0.0);
-            if looping {
-                n * d
-            } else {
-                n.clamp(0.0, 1.0) * d
-            }
-        };
-        match self {
-            Motion::Clip { slot, .. } => {
-                [(Some(slot), 1.0, seconds(&slot.clip, n)), (None, 0.0, 0.0)]
-            }
-            Motion::Blend { space, slots, .. } => {
-                let (i, j, t) = Self::segment(space, def, run);
-                let a = &slots[i];
-                let b = &slots[j];
-                let second = (j != i && t > 0.0).then_some(b);
-                [
-                    (
-                        Some(a),
-                        1.0 - if second.is_some() { t } else { 0.0 },
-                        seconds(&a.clip, n),
-                    ),
-                    (second, t, seconds(&b.clip, n)),
-                ]
-            }
-        }
+/// A clip's unwrapped seconds at the state's normalized time `n`.
+fn seconds(clip: &Clip, n: f32, looping: bool) -> f32 {
+    let d = clip.duration.max(0.0);
+    if looping {
+        n * d
+    } else {
+        n.clamp(0.0, 1.0) * d
     }
 }
 
@@ -218,75 +254,127 @@ pub(super) fn play_for<'p>(
     Ok(play.as_mut().expect("just set"))
 }
 
-/// Resolves (or re-resolves) the motion of `state` in `layer`; `None`
-/// for no motion, one that is not registered (reported through
-/// `missing`), or a layer whose root node is not there.
-fn resolve<'m>(
+/// Resolves (or re-resolves) the motion of `state` in `layer`; left
+/// `None` for no motion, one with a clip or space that is not registered
+/// (reported through `missing`), or a layer whose root node is not
+/// there.
+fn resolve(
     t: &Tables,
     entity: Entity,
-    play: &'m mut ControllerPlay,
+    play: &mut ControllerPlay,
     layer: usize,
-    motion: &AssetRef,
+    state: usize,
     missing: &mut Option<AssetRef>,
-) -> Option<&'m Motion> {
-    let valid = play.motions[layer]
-        .get(motion)
-        .is_some_and(|m| m.valid(t.ecs));
-    if !valid {
-        play.motions[layer].remove(motion);
-        let root = match &play.def.layers[layer].root {
-            None => entity,
-            Some(name) => find_named(t.ecs, entity, name)?,
-        };
-        let slot = |clip_ref: &AssetRef, clip: &Arc<Clip>| {
-            BlendSlot::resolve(t.ecs, root, clip_ref.clone(), clip)
-        };
-        let m = if let Some(clip) = t.clips.get(motion) {
-            let slot = slot(motion, clip);
-            let mut reference = Pose::default();
-            clip.sample(0.0, &slot.targets, &mut reference);
-            Motion::Clip { slot, reference }
-        } else if let Some(space) = t.blends.get(motion) {
-            let mut slots = Vec::with_capacity(space.points.len());
-            for p in &space.points {
-                match t.clips.get(&p.clip) {
-                    Some(c) => slots.push(slot(&p.clip, c)),
-                    None => {
-                        *missing = Some(p.clip.clone());
-                        return None;
-                    }
-                }
-            }
-            let mut reference = Pose::default();
-            if let Some(first) = slots.first() {
-                first.clip.sample(0.0, &first.targets, &mut reference);
-            }
-            if slots.is_empty() {
-                return None;
-            }
-            Motion::Blend {
-                space: space.clone(),
-                slots,
-                reference,
-            }
-        } else {
-            *missing = Some(motion.clone());
-            return None;
-        };
-        let slots: &[BlendSlot] = match &m {
-            Motion::Clip { slot, .. } => std::slice::from_ref(slot),
-            Motion::Blend { slots, .. } => slots,
-        };
-        for e in slots.iter().flat_map(|s| s.targets.iter().flatten()) {
-            if let std::collections::hash_map::Entry::Vacant(v) = play.rest.entry(*e) {
-                if let Ok(tr) = t.ecs.copy::<Transform>(*e) {
-                    v.insert(tr);
-                }
+) {
+    if play.motions[layer][state]
+        .as_ref()
+        .is_some_and(|m| m.valid(t.ecs))
+    {
+        return;
+    }
+    play.motions[layer][state] = None;
+    let def = play.def.clone();
+    let Some(motion) = def.layers[layer].states[state].motion.as_ref() else {
+        return;
+    };
+    let root = match &def.layers[layer].root {
+        None => entity,
+        Some(name) => match find_named(t.ecs, entity, name) {
+            Some(e) => e,
+            None => return,
+        },
+    };
+    let mut slots = Vec::new();
+    let Some(node) = build(t, root, &def, motion, &mut slots, missing) else {
+        return;
+    };
+    let Some(first) = slots.first() else {
+        return;
+    };
+    let mut reference = Pose::default();
+    first.clip.sample(0.0, &first.targets, &mut reference);
+    for e in slots.iter().flat_map(|s| s.targets.iter().flatten()) {
+        if let std::collections::hash_map::Entry::Vacant(v) = play.rest.entry(*e) {
+            if let Ok(tr) = t.ecs.copy::<Transform>(*e) {
+                v.insert(tr);
             }
         }
-        play.motions[layer].insert(motion.clone(), m);
     }
-    play.motions[layer].get(motion)
+    play.motions[layer][state] = Some(Motion {
+        root: node,
+        slots,
+        reference,
+    });
+}
+
+/// A motion's node, its clips resolved under `root` into `slots`.
+fn build(
+    t: &Tables,
+    root: Entity,
+    def: &ControllerDef,
+    motion: &MotionDef,
+    slots: &mut Vec<BlendSlot>,
+    missing: &mut Option<AssetRef>,
+) -> Option<Node> {
+    let clip = |r: &AssetRef, slots: &mut Vec<BlendSlot>, missing: &mut Option<AssetRef>| {
+        let Some(c) = t.clips.get(r) else {
+            *missing = Some(r.clone());
+            return None;
+        };
+        slots.push(BlendSlot::resolve(t.ecs, root, r.clone(), c));
+        Some(Node::Leaf(slots.len() - 1))
+    };
+    match motion {
+        MotionDef::Asset(r) => {
+            if t.clips.contains_key(r) {
+                return clip(r, slots, missing);
+            }
+            let Some(space) = t.blends.get(r) else {
+                *missing = Some(r.clone());
+                return None;
+            };
+            // A blend space is a 1D tree of its points.
+            let first = space.points.first().map_or(0.0, |p| p.at);
+            let param = def
+                .parameter_index(&space.parameter)
+                .filter(|&i| def.parameters[i].kind == ParameterKind::Float)
+                .map_or(Param::Fixed(first), Param::Index);
+            let mut children = Vec::with_capacity(space.points.len());
+            for p in &space.points {
+                children.push((clip(&p.clip, slots, missing)?, 1.0, Param::Fixed(0.0)));
+            }
+            if children.is_empty() {
+                return None;
+            }
+            Some(Node::Tree {
+                kind: TreeKind::OneD,
+                params: [param, Param::Fixed(0.0)],
+                positions: space.points.iter().map(|p| [p.at, 0.0]).collect(),
+                children,
+            })
+        }
+        MotionDef::Tree(tree) => {
+            let mut params = [Param::Fixed(0.0); 2];
+            for (k, &p) in tree.parameters.iter().take(2).enumerate() {
+                params[k] = Param::Index(p);
+            }
+            let mut children = Vec::with_capacity(tree.children.len());
+            for c in &tree.children {
+                let node = build(t, root, def, &c.motion, slots, missing)?;
+                children.push((
+                    node,
+                    c.time_scale,
+                    c.parameter.map_or(Param::Fixed(0.0), Param::Index),
+                ));
+            }
+            Some(Node::Tree {
+                kind: tree.kind,
+                params,
+                positions: tree.children.iter().map(|c| c.position).collect(),
+                children,
+            })
+        }
+    }
 }
 
 /// One tick of an animator that runs a controller: the machine steps
@@ -316,9 +404,9 @@ pub(super) fn tick(
     // Every state's motion resolved before the step, for its length.
     let mut missing = None;
     for (l, layer) in def.layers.iter().enumerate() {
-        for s in &layer.states {
-            if let Some(m) = &s.motion {
-                resolve(t, entity, play, l, m, &mut missing);
+        for (s, st) in layer.states.iter().enumerate() {
+            if st.motion.is_some() {
+                resolve(t, entity, play, l, s, &mut missing);
             }
         }
     }
@@ -355,37 +443,35 @@ pub(super) fn tick(
         // The incoming (current) state.
         let mut sample = |state: usize, n: f32, into: &mut Pose| -> bool {
             let st = &layer.states[state];
-            let Some(m) = st.motion.as_ref().and_then(|m| play.motions[l].get(m)) else {
+            let Some(m) = play.motions[l][state].as_ref() else {
                 return false;
             };
-            let parts = m.parts(&def, &play.run, n, st.looping);
             let pin = l == 0 && root_on(state);
-            let mut first = true;
-            for (slot, w, seconds) in parts {
-                let Some(slot) = slot else { continue };
-                if w <= 0.0 && !first {
-                    continue;
-                }
-                let time = wrap(&slot.clip, seconds, st.looping);
-                if first {
-                    slot.clip.sample(time, &slot.targets, into);
-                    if pin {
-                        if let Some(root) = &slot.root {
-                            pin_root(into, &slot.clip, root, time);
-                        }
-                    }
-                    first = false;
+            // The leaves blended in one by one, each by its share of
+            // what is in so far.
+            let mut acc = 0.0f32;
+            m.leaves(&play.run, &mut |i, w, _| {
+                let slot = &m.slots[i];
+                let time = wrap(&slot.clip, seconds(&slot.clip, n, st.looping), st.looping);
+                let dst: &mut Pose = if acc == 0.0 {
+                    &mut *into
                 } else {
-                    scratch.clear();
-                    slot.clip.sample(time, &slot.targets, scratch);
-                    if pin {
-                        if let Some(root) = &slot.root {
-                            pin_root(scratch, &slot.clip, root, time);
-                        }
-                    }
-                    into.blend(scratch, w);
+                    &mut *scratch
+                };
+                if acc != 0.0 {
+                    dst.clear();
                 }
-            }
+                slot.clip.sample(time, &slot.targets, dst);
+                if pin {
+                    if let Some(root) = &slot.root {
+                        pin_root(dst, &slot.clip, root, time);
+                    }
+                }
+                if acc != 0.0 {
+                    into.blend(scratch, w / (acc + w));
+                }
+                acc += w;
+            });
             true
         };
         match lr.crossfade {
@@ -473,12 +559,9 @@ pub(super) fn tick(
                     pose.blend(layer_pose, weight);
                 }
                 Blending::Additive => {
-                    let reference = layer.states[current]
-                        .motion
-                        .as_ref()
-                        .and_then(|m| play.motions[l].get(m));
+                    let reference = play.motions[l][current].as_ref();
                     if let Some(m) = reference {
-                        pose.add_delta(layer_pose, m.reference(), weight, &mut |e| {
+                        pose.add_delta(layer_pose, &m.reference, weight, &mut |e| {
                             rest_of(t, &play.rest, e)
                         });
                     }
@@ -525,21 +608,15 @@ fn markers(
     out: &mut AnimatorTick,
 ) {
     let st = &def.layers[l].states[s];
-    let Some(m) = st.motion.as_ref().and_then(|m| play.motions[l].get(m)) else {
+    let Some(m) = play.motions[l][s].as_ref() else {
         return;
     };
-    let parts = m.parts(def, &play.run, prev, st.looping);
-    let next_parts = m.parts(def, &play.run, next, st.looping);
-    // The heavier clip of the blend.
-    let k = if parts[1].0.is_some() && parts[1].1 > parts[0].1 {
-        1
-    } else {
-        0
-    };
-    let (Some(slot), _, a) = parts[k] else {
+    let Some(k) = m.dominant(&play.run) else {
         return;
     };
-    let b = next_parts[k].2;
+    let slot = &m.slots[k];
+    let a = seconds(&slot.clip, prev, st.looping);
+    let b = seconds(&slot.clip, next, st.looping);
     let mut crossed = Vec::new();
     slot.clip.markers_crossed(a, b, st.looping, &mut crossed);
     for i in crossed {
@@ -562,25 +639,22 @@ fn root_of(
     next: f32,
 ) -> Option<(Vec3, Vec3, f32)> {
     let st = &def.layers[l].states[s];
-    let m = st.motion.as_ref().and_then(|m| play.motions[l].get(m))?;
-    let a = m.parts(def, &play.run, prev, st.looping);
-    let b = m.parts(def, &play.run, next, st.looping);
+    let m = play.motions[l][s].as_ref()?;
     let mut result: Option<(Vec3, Vec3, f32)> = None;
-    for k in 0..2 {
-        let (Some(slot), w, from) = a[k] else {
-            continue;
-        };
-        let to = b[k].2;
-        let Some(root) = &slot.root else { continue };
+    m.leaves(&play.run, &mut |i, w, _| {
+        let slot = &m.slots[i];
+        let Some(root) = &slot.root else { return };
+        let from = seconds(&slot.clip, prev, st.looping);
+        let to = seconds(&slot.clip, next, st.looping);
         let Some((d, axis, y)) = root_delta(t.ecs, entity, &slot.clip, root, from, to, st.looping)
         else {
-            continue;
+            return;
         };
         result = Some(match result {
             None => (d * w, axis, y * w),
             Some((rd, ra, ry)) => (rd + d * w, ra, ry + y * w),
         });
-    }
+    });
     result
 }
 
@@ -658,10 +732,8 @@ pub(super) fn state(
 impl ControllerPlay {
     /// A state's motion length now, seconds; 0 without a resolved motion.
     pub(super) fn length(&self, l: usize, s: usize) -> f32 {
-        self.def.layers[l].states[s]
-            .motion
+        self.motions[l][s]
             .as_ref()
-            .and_then(|m| self.motions[l].get(m))
-            .map_or(0.0, |m| m.length(&self.def, &self.run))
+            .map_or(0.0, |m| m.length(&self.run))
     }
 }

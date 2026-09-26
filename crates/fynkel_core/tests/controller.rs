@@ -5,6 +5,7 @@
 //! layers over each other, and the query with the state. Deterministic.
 
 use fynkel_contracts::{AssetRef, DiagnosticCode, Uuid, DEFAULT_FIXED_DT};
+use fynkel_core::animation::blend_tree::{ChildDef, MotionDef, TreeDef, TreeKind};
 use fynkel_core::animation::controller::{
     Blending, Condition, ControllerDef, LayerDef, ParameterDef, ParameterKind, StateDef, Test,
     TransitionDef, Value,
@@ -106,7 +107,7 @@ fn slide(target: &str, from: Vec3, to: Vec3, seconds: f32) -> Clip {
 fn state(name: &str, motion: Option<AssetRef>, looping: bool) -> StateDef {
     StateDef {
         name: name.into(),
-        motion,
+        motion: motion.map(Into::into),
         speed: 1.0,
         speed_parameter: None,
         looping,
@@ -605,4 +606,105 @@ fn a_missing_controller_is_reported_once_and_runs_once_registered() {
     );
     assert!(w.animator_controller_state(root).is_none());
     assert!(y(&w, arm) >= 5.0);
+}
+
+/// A clip that holds `arm` at `at` for `seconds`.
+fn hold(at: Vec3, seconds: f32) -> Clip {
+    slide("arm", at, at, seconds)
+}
+
+fn child(motion: MotionDef, position: [f32; 2]) -> ChildDef {
+    ChildDef {
+        motion,
+        position,
+        time_scale: 1.0,
+        parameter: None,
+    }
+}
+
+/// ADR-0033 step 1: a Simple Directional tree on `moveX`/`moveY` —
+/// idle at the centre (y 0, 1 s), forward (y 10, 2 s) and at 0.75 right
+/// a 1D tree on `moveX` (x 10 at 0.5 s … x 20 at 1 s; its leaf at
+/// time scale 2).
+fn strafer() -> ControllerDef {
+    let float = |name: &str| ParameterDef {
+        name: name.into(),
+        kind: ParameterKind::Float,
+        default: Value::Float(0.0),
+    };
+    let right = TreeDef {
+        kind: TreeKind::OneD,
+        parameters: vec![0],
+        children: vec![
+            child(clip_ref(12).into(), [0.5, 0.0]),
+            ChildDef {
+                time_scale: 2.0,
+                ..child(clip_ref(13).into(), [1.0, 0.0])
+            },
+        ],
+    };
+    let tree = TreeDef {
+        kind: TreeKind::SimpleDirectional,
+        parameters: vec![0, 1],
+        children: vec![
+            child(clip_ref(10).into(), [0.0, 0.0]),
+            child(clip_ref(11).into(), [0.0, 1.0]),
+            child(MotionDef::Tree(Box::new(right)), [0.75, 0.0]),
+        ],
+    };
+    ControllerDef {
+        name: "Strafer".into(),
+        parameters: vec![float("moveX"), float("moveY")],
+        layers: vec![layer(
+            "Base Layer",
+            vec![StateDef {
+                motion: Some(MotionDef::Tree(Box::new(tree))),
+                ..state("Strafe", None, true)
+            }],
+            vec![],
+        )],
+    }
+}
+
+#[test]
+fn a_blend_tree_weighs_its_leaves_and_their_lengths() {
+    let mut w = world();
+    w.register_clip(clip_ref(10), hold(Vec3::ZERO, 1.0));
+    w.register_clip(clip_ref(11), hold(Vec3::new(0.0, 10.0, 0.0), 2.0));
+    w.register_clip(clip_ref(12), hold(Vec3::new(10.0, 0.0, 0.0), 1.0));
+    w.register_clip(clip_ref(13), hold(Vec3::new(20.0, 0.0, 0.0), 1.0));
+    w.register_controller(controller_ref(2), strafer()).unwrap();
+    let root = spawn(&mut w, 1, None, "Rig");
+    let arm = spawn(&mut w, 2, Some(root), "arm");
+    set(&mut w, root, controlled(controller_ref(2)));
+    let at = |w: &World| w.ecs().copy::<Transform>(arm).unwrap().position;
+
+    // At the centre: idle alone.
+    w.step();
+    assert!(at(&w).length() < 1e-5, "{}", at(&w));
+    assert!((base(&w, root).length - 1.0).abs() < 1e-5);
+
+    // Halfway forward: half idle, half forward.
+    animate(&mut w, root, param("moveY", Value::Float(0.5)));
+    w.step();
+    assert!(
+        (at(&w) - Vec3::new(0.0, 5.0, 0.0)).length() < 1e-4,
+        "{}",
+        at(&w)
+    );
+    let s = base(&w, root);
+    assert!((s.length - 1.5).abs() < 1e-4, "{s:?}");
+
+    // On the right child: the 1D tree is halfway between its two clips;
+    // the second one plays twice as fast (1 s / 2).
+    animate(&mut w, root, param("moveY", Value::Float(0.0)));
+    animate(&mut w, root, param("moveX", Value::Float(0.75)));
+    w.step();
+    assert!(
+        (at(&w) - Vec3::new(15.0, 0.0, 0.0)).length() < 1e-4,
+        "{}",
+        at(&w)
+    );
+    let s = base(&w, root);
+    assert!((s.length - 0.75).abs() < 1e-4, "{s:?}");
 }
