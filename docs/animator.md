@@ -148,6 +148,26 @@ void fixedUpdate(FixedUpdateContext context) {
 - A wrong parameter name or type throws, and the message lists the
   parameters the controller has.
 
+### Typed, from codegen
+
+`fynkel codegen` writes `lib/generated/animators.g.dart`, and the
+editor rewrites it whenever a controller is saved. Each controller gets
+a type named after its file, so a typo is a compile error instead of a
+throw:
+
+```dart
+final anim = PlayerAnimator(animation);   // player.controller.json
+anim.speed = planarSpeed;                 // setFloat('speed', …)
+anim.grounded = me.grounded;              // setBool
+anim.jump();                              // setTrigger('jump')
+if (anim.state == PlayerState.jump) { … } // the base layer's state
+anim.playOneShot(Assets.models.character.clips.wave, slot: PlayerSlot.upperBody);
+```
+
+It also has `nextState`, `play(PlayerState.x)`, `crossfade(…)` and
+`resetJump()`. The string calls stay for code that does not know its
+controller. `fynkel codegen --check` fails when the file is stale.
+
 ## Layers
 
 A second layer plays over the first — for example, an aim pose on the

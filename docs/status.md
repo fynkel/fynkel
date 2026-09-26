@@ -1383,8 +1383,13 @@ state machine, a layer may have no states, and the Animator window
 shows the slot and the running one-shot. Clips can be made in code
 (`ClipBuilder`, `world.createClip`), which closes ADR-0026's last item.
 The reference game's wave is a one-shot in an `UpperBody` slot, and the
-showcase's Runner waves with a clip made in code. Next: typed
-parameters, sub-state machines and interruptions, masks and IK.
+showcase's Runner waves with a clip made in code. **Step 3, typed
+parameters, is done** (2026-09-26): `lib/generated/animators.g.dart`
+gives each controller a `…Animator` type with its parameters, its
+states and slots as enums; `codegen --check` sees it stale and the
+editor rewrites it when a controller is saved. The reference game's
+Player uses `PlayerAnimator`. Next: sub-state machines and
+interruptions, masks and IK.
 
 **Tags and layers** (ADR-0020, 2026-09-23) come in while the joint R3a +
 R3b capture waits for a quiet machine: several tags and one engine-wide
