@@ -314,6 +314,10 @@ pub struct Stood {
     pub diagnostics: Vec<String>,
     /// The stage's sun, when it has its own.
     pub sun: Option<Entity>,
+    /// The subject's top entity (a clip's animator goes here).
+    pub root: Option<Entity>,
+    /// The joints of the hierarchy's skins, each skin counted once.
+    pub bones: usize,
 }
 
 /// The description `subject` loads as: a hierarchy's own, or one entity
@@ -405,10 +409,32 @@ pub fn stage_into(
                 .map(|d| d.to_string()),
         );
     }
+    // Spawn order is parents first: the first entity that is not the sun
+    // is the subject's top.
+    let root = loaded
+        .entities()
+        .iter()
+        .find(|(id, _)| *id != STAGE_SUN)
+        .map(|(_, e)| *e);
+    let mut skins: Vec<&fynkel_contracts::AssetRef> = Vec::new();
+    for c in description.entities.iter().flat_map(|e| &e.components) {
+        if let fynkel_core::components::ComponentValue::Skin(k) = c {
+            if !skins.contains(&&k.skin) {
+                skins.push(&k.skin);
+            }
+        }
+    }
+    let bones = skins
+        .iter()
+        .filter_map(|r| assets.skin(r).ok())
+        .map(|s| s.joints.len())
+        .sum();
     Ok(Stood {
         residency,
         diagnostics,
         sun: sun.and_then(|_| loaded.handle_of(STAGE_SUN)),
+        root,
+        bones,
     })
 }
 

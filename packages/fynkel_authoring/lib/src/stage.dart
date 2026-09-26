@@ -50,6 +50,7 @@ final class StageStats {
     this.vertices = 0,
     this.triangles = 0,
     this.skinned = 0,
+    this.bones = 0,
     this.boundsMin,
     this.boundsMax,
   });
@@ -61,6 +62,7 @@ final class StageStats {
       vertices: (j['vertices'] as num?)?.toInt() ?? 0,
       triangles: (j['triangles'] as num?)?.toInt() ?? 0,
       skinned: (j['skinned'] as num?)?.toInt() ?? 0,
+      bones: (j['bones'] as num?)?.toInt() ?? 0,
       boundsMin: b.isEmpty ? null : _doubles(b['min']),
       boundsMax: b.isEmpty ? null : _doubles(b['max']),
     );
@@ -68,8 +70,70 @@ final class StageStats {
 
   final int meshes, vertices, triangles, skinned;
 
+  /// The joints of the hierarchy's skins.
+  final int bones;
+
   /// Null when nothing measurable is drawn.
   final List<double>? boundsMin, boundsMax;
+}
+
+/// A clip or blend space posing a stage's hierarchy, and where it stands.
+final class StageClip {
+  const StageClip({
+    required this.asset,
+    required this.sub,
+    required this.time,
+    required this.duration,
+    required this.fps,
+    required this.inPlace,
+    this.blend,
+  });
+
+  factory StageClip.fromJson(Map<String, Object?> j) {
+    final c = _mapOf(j['clip']);
+    return StageClip(
+      asset: c['asset'] as String? ?? '',
+      sub: c['sub'] as String? ?? '',
+      time: (j['time'] as num?)?.toDouble() ?? 0,
+      duration: (j['duration'] as num?)?.toDouble() ?? 0,
+      fps: (j['fps'] as num?)?.toDouble() ?? 30,
+      inPlace: j['inPlace'] != false,
+      blend: j['blend'] is Map<String, Object?> ? StageBlend.fromJson(j['blend'] as Map<String, Object?>) : null,
+    );
+  }
+
+  /// The clip's asset and sub-asset (`anim/Run`); a blend space's has no
+  /// sub.
+  final String asset, sub;
+
+  /// Seconds.
+  final double time, duration;
+
+  /// The rate its keys were baked at, for the frame number.
+  final double fps;
+
+  /// Root motion held in place.
+  final bool inPlace;
+  final StageBlend? blend;
+}
+
+/// A blend space's parameter and points.
+final class StageBlend {
+  const StageBlend({required this.parameter, required this.value, required this.points});
+
+  factory StageBlend.fromJson(Map<String, Object?> j) => StageBlend(
+    parameter: j['parameter'] as String? ?? '',
+    value: (j['value'] as num?)?.toDouble() ?? 0,
+    points: [
+      for (final p in (j['points'] as List?) ?? const [])
+        if (p is Map<String, Object?>)
+          (at: (p['at'] as num?)?.toDouble() ?? 0, sub: _mapOf(p['clip'])['sub'] as String? ?? ''),
+    ],
+  );
+
+  final String parameter;
+  final double value;
+  final List<({double at, String sub})> points;
 }
 
 /// A sound's format, as its stage reports it.
@@ -155,6 +219,7 @@ final class StageState {
     required this.stats,
     this.diagnostics = const [],
     this.sound,
+    this.clip,
   });
 
   factory StageState.fromJson(Map<String, Object?> j) => StageState(
@@ -165,6 +230,7 @@ final class StageState {
     light: _doubles(j['light']),
     stats: StageStats.fromJson(_mapOf(j['stats'])),
     diagnostics: _strings(j['diagnostics']),
+    clip: j['clip'] is Map<String, Object?> ? StageClip.fromJson(j['clip'] as Map<String, Object?>) : null,
   );
 
   /// `hierarchy`, `mesh`, `material` or `sound`.
@@ -172,6 +238,9 @@ final class StageState {
 
   /// A sound stage's format (it has no world).
   final StageSound? sound;
+
+  /// The clip or blend posing the hierarchy, when one does.
+  final StageClip? clip;
 
   /// A material's: `sphere`, `cube`, `cylinder`, `capsule`, `plane`, or
   /// `{asset, sub}` for a mesh; null for the others.
@@ -233,6 +302,20 @@ final class PreviewStage {
 
   void restoreMaterial(String material) =>
       _call('restoreMaterial', {'material': material});
+
+  /// A clip on the hierarchy (`{'asset', 'sub'}`; null takes it off,
+  /// leave it out to keep it), seeked to [time] seconds; [inPlace] holds
+  /// root motion; [parameter] is a blend space's. The host runs the clock.
+  /// Null when no clip is on.
+  StageClip? setClip({Object? clip = _keep, double? time, bool? inPlace, double? parameter}) {
+    final r = _call('clip', {
+      if (!identical(clip, _keep)) 'clip': clip,
+      'time': ?time,
+      'inPlace': ?inPlace,
+      'parameter': ?parameter,
+    });
+    return r['clip'] is Map<String, Object?> ? StageClip.fromJson(r) : null;
+  }
 
   /// A sound stage's waveform in [columns] columns.
   SoundPeaks peaks(int columns) {
@@ -306,6 +389,9 @@ extension PreviewStages on AuthoringSession {
     return stage;
   }
 }
+
+/// [PreviewStage.setClip]'s "leave the clip as it is".
+const Object _keep = Object();
 
 List<double> _doubles(Object? v) => v is List
     ? [

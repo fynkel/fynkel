@@ -635,6 +635,20 @@ void main() {
     expect(tone.stop().playing, isFalse);
     tone.close();
 
+    // A clip on the rig, seeked by the host; off again.
+    const rig = 'c0000000-0000-4000-8000-000000000005';
+    final posed = session.openStage(rig);
+    expect(posed.state.stats.bones, greaterThan(0));
+    expect(posed.state.clip, isNull);
+    final wave = posed.setClip(clip: {'asset': rig, 'sub': 'anim/wave'}, time: 0)!;
+    expect(wave.sub, 'anim/wave');
+    expect(wave.duration, greaterThan(0));
+    expect(wave.inPlace, isTrue);
+    expect(posed.setClip(time: wave.duration / 2)!.time, closeTo(wave.duration / 2, 1e-4));
+    expect(posed.setClip(inPlace: false)!.inPlace, isFalse);
+    expect(posed.setClip(clip: null), isNull);
+    posed.close();
+
     material.close();
     expect(material.worldAddress, 0);
     session.closeProject();

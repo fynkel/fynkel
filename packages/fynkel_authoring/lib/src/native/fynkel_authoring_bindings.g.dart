@@ -652,8 +652,10 @@ FynkelStatus fynkel_authoring_preview_call(
 /// "mesh" | "material", shape (a material's, else null), framing: { eye
 /// [3], target [3], fovY (radians), near, far, radius, world [16] },
 /// light [3] (toward the sun), stats: { meshes, vertices, triangles,
-/// skinned, bounds: { min [3], max [3] } | null }, diagnostics: [text] }.
-/// A sound opens a sound stage (below). FYN-T0003 for an asset with
+/// skinned, bones, bounds: { min [3], max [3] } | null }, diagnostics:
+/// [text], clip: the clip result below | null }. A blend space opens on
+/// the model of its first point's clip, playing the space. A sound opens a
+/// sound stage (below). FYN-T0003 for an asset with
 /// nothing to show (a texture) or one that failed to cook.
 @ffi.Native<
   ffi.UnsignedInt Function(
@@ -712,6 +714,13 @@ external ffi.Pointer<FynkelWorld> fynkel_authoring_stage_world(
 /// keeps its shape) → the open result
 /// light           toward [3], or yaw + pitch (radians, turning it)
 /// the stage's sun → "light"
+/// clip            clip? ({ asset, sub? } | null), time?, inPlace?, parameter?
+/// a clip or blend space on a hierarchy, the
+/// world's animator seeked to time (the host
+/// runs the clock; inPlace holds root motion)
+/// → { clip | null, time, duration, fps,
+/// inPlace, blend: { parameter, value,
+/// points: [{ at, clip }] } | null }
 /// reload                              loaded again from the store → the open result
 /// stats                               → the open result, not reloaded
 /// setMaterial     material, data      as the edit-preview's, on every store

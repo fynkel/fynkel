@@ -1309,3 +1309,97 @@ fn a_sound_stage_has_a_waveform_and_a_playhead() {
     );
     assert_eq!(host.result()["closed"], true);
 }
+
+#[test]
+fn a_clip_poses_its_model_on_the_stage() {
+    const RIG: &str = "c0000000-0000-4000-8000-000000000005";
+    const LOCO: &str = "c0000000-0000-4000-8000-00000000b1e0";
+    let copy = Copy::new("clip-stage");
+    // A blend space over the rig's two clips, for the blend's stage.
+    std::fs::write(
+        copy.dir.join("assets/models/loco.blend.json"),
+        json!({
+            "$schema": "https://fynkel.dev/schemas/blend.schema.json",
+            "formatVersion": 1,
+            "id": LOCO,
+            "name": "Loco",
+            "parameter": "speed",
+            "points": [
+                { "at": 0.0, "clip": { "asset": RIG, "sub": "anim/wave" } },
+                { "at": 2.0, "clip": { "asset": RIG, "sub": "anim/bob" } },
+            ],
+            "sync": "phase",
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let host = Host::new();
+    assert_eq!(host.open_project(&copy.dir), Status::Ok);
+    assert_eq!(host.stage_open(&json!({ "asset": RIG })), Status::Ok);
+    let opened = host.result();
+    assert!(opened["stats"]["bones"].as_u64().unwrap() > 0, "{opened}");
+    assert!(opened["clip"].is_null());
+    let stage = opened["stage"].as_u64().unwrap() as u32;
+    let world = unsafe { fynkel_authoring_stage_world(host.0, stage) };
+    let joints = || unsafe { (*world).core() }.extract().joints;
+    assert!(joints().is_empty(), "unposed: the skin is not resolved");
+
+    let wave = json!({ "clip": { "asset": RIG, "sub": "anim/wave" }, "time": 0.0 });
+    assert_eq!(host.stage_call(stage, "clip", &wave), Status::Ok);
+    let at0 = host.result();
+    let duration = at0["duration"].as_f64().unwrap();
+    assert!(duration > 0.0, "{at0}");
+    assert!(at0["fps"].as_f64().unwrap() >= 1.0);
+    assert_eq!(at0["inPlace"], true);
+    let first = joints();
+    assert!(!first.is_empty(), "posed: the skin follows its joints");
+
+    let half = json!({ "time": duration / 2.0 });
+    assert_eq!(host.stage_call(stage, "clip", &half), Status::Ok);
+    let at_half = host.result();
+    assert!((at_half["time"].as_f64().unwrap() - duration / 2.0).abs() < 1e-4);
+    assert_ne!(joints(), first, "the pose moved with the time");
+
+    // Another clip, then none: back to the rest pose.
+    let bob = json!({ "clip": { "asset": RIG, "sub": "anim/bob" } });
+    assert_eq!(host.stage_call(stage, "clip", &bob), Status::Ok);
+    assert_eq!(host.result()["clip"]["sub"], "anim/bob");
+    assert_eq!(
+        host.stage_call(stage, "clip", &json!({ "clip": null })),
+        Status::Ok
+    );
+    assert!(
+        host.result()["clip"].is_null(),
+        "no clip: {}",
+        host.result()
+    );
+    assert_eq!(
+        unsafe { fynkel_authoring_stage_world(host.0, stage) },
+        world,
+        "the world stays put"
+    );
+
+    // A blend space opens on the model of its first point, with its parameter.
+    assert_eq!(host.stage_open(&json!({ "asset": LOCO })), Status::Ok);
+    let blend = host.result();
+    assert_eq!(blend["subject"], "hierarchy", "{blend}");
+    assert_eq!(blend["clip"]["blend"]["parameter"], "speed");
+    assert_eq!(
+        blend["clip"]["blend"]["points"].as_array().unwrap().len(),
+        2
+    );
+    let b = blend["stage"].as_u64().unwrap() as u32;
+    assert_eq!(
+        host.stage_call(b, "clip", &json!({ "parameter": 1.0, "time": 0.1 })),
+        Status::Ok
+    );
+    assert_eq!(host.result()["blend"]["value"], 1.0);
+
+    // A material has no clip.
+    assert_eq!(
+        host.stage_open(&json!({ "asset": "c0000000-0000-4000-8000-000000000020" })),
+        Status::Ok
+    );
+    let m = host.result()["stage"].as_u64().unwrap() as u32;
+    assert_eq!(host.stage_call(m, "clip", &wave), Status::InvalidArgument);
+}
