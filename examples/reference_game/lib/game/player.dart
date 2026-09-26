@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:fynkel/fynkel.dart';
 
+import '../generated/animators.g.dart';
 import 'game.dart';
 import 'game_state.dart';
 
@@ -185,20 +186,25 @@ class Player extends Behaviour {
     final facing = transform.rotation;
     final forward = facing.rotate(const Vec3(0, 0, -1));
     final right = facing.rotate(const Vec3(1, 0, 0));
-    animation
-      ..setFloat('speed', math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z))
-      ..setBool('grounded', grounded && !jumped)
-      ..setBool('aim', aiming)
-      ..setFloat('moveX', velocity.x * right.x + velocity.z * right.z)
-      ..setFloat('moveY', velocity.x * forward.x + velocity.z * forward.z);
-    if (jumped) animation.setTrigger('jump');
+    anim
+      ..speed = math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
+      ..grounded = grounded && !jumped
+      ..aim = aiming
+      ..moveX = velocity.x * right.x + velocity.z * right.z
+      ..moveY = velocity.x * forward.x + velocity.z * forward.z;
+    if (jumped) anim.jump();
   }
+
+  /// The Animator typed from its controller (ADR-0033 § 3,
+  /// lib/generated/animators.g.dart): a renamed parameter is a compile
+  /// error here.
+  PlayerAnimator get anim => PlayerAnimator(animation);
 
   /// Plays [wave] once over the upper body; a wave already playing
   /// blends into the new one.
   void waveOnce() {
     if (wave.isNone) return;
-    animation.playOneShot(wave, slot: 'UpperBody', blendIn: 0.15, blendOut: 0.25);
+    anim.playOneShot(wave, slot: PlayerSlot.upperBody, blendIn: 0.15, blendOut: 0.25);
     waves++;
   }
 

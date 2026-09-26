@@ -20,6 +20,7 @@ import 'package:reference_game/game/game_state.dart';
 import 'package:reference_game/game/gate.dart';
 import 'package:reference_game/game/player.dart';
 import 'package:reference_game/game/switch.dart';
+import 'package:reference_game/generated/animators.g.dart';
 
 /// A game in the Playground, one frame in (the transition the Menu's Play
 /// requests lands at the start of that frame and the level's behaviours
@@ -303,6 +304,8 @@ void main() {
       expect(player.characterState()!.grounded, isTrue);
       s = me.animation.stateOf()!;
       expect((s.name, s.next), ('Jump', 'Locomotion'), reason: 'blending back from the jump');
+      expect((player.anim.state, player.anim.nextState), (PlayerState.jump, PlayerState.locomotion),
+          reason: 'the same, typed (ADR-0033 § 3)');
 
       // The wave: a one-shot in the controller's UpperBody slot (ADR-0033
       // § 2: a layer with no states, rooted at the spine) — the right arm
