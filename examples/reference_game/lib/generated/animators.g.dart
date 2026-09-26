@@ -8,7 +8,9 @@ import 'package:fynkel/fynkel.dart' show AnimationControl, AssetRef;
 /// The states of `models/player.controller.json`'s base layer (`Base Layer`).
 enum PlayerState {
   locomotion('Locomotion'),
-  jump('Jump'),
+  airborneJump('Airborne/Jump'),
+  airborneFall('Airborne/Fall'),
+  airborneLand('Airborne/Land'),
   aim('Aim'),
   ;
 
@@ -19,7 +21,9 @@ enum PlayerState {
 
   static PlayerState? _of(String? name) => switch (name) {
         'Locomotion' => PlayerState.locomotion,
-        'Jump' => PlayerState.jump,
+        'Airborne/Jump' => PlayerState.airborneJump,
+        'Airborne/Fall' => PlayerState.airborneFall,
+        'Airborne/Land' => PlayerState.airborneLand,
         'Aim' => PlayerState.aim,
         _ => null,
       };

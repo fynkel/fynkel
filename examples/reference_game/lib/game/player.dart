@@ -17,11 +17,13 @@ import 'game_state.dart';
 /// state: the `fynkel.Animator` on the player runs an Animator Controller
 /// (ADR-0032; assets/models/player.controller.json) whose Locomotion state
 /// plays the blend space (assets/models/player.blend.json: idle, walk, run
-/// along `speed`) and whose Jump state plays the jump once. Every tick
+/// along `speed`) and whose Airborne sub-state machine (ADR-0033 § 4)
+/// plays the jump once, holds it in Fall and lands in Land. Every tick
 /// this behaviour only sets the parameters — `speed` to the controller's
 /// planar velocity, `grounded`, and the `jump` trigger on a jump — and
 /// the controller does the rest: the stride follows the speed,
-/// phase-synced, and the landing goes back to Locomotion. The `wave`
+/// phase-synced, and the landing goes back to Locomotion (a new jump may
+/// cut the landing short: its transition is `interruptibleBy: next`). The `wave`
 /// action plays [wave] once as a one-shot in the controller's `UpperBody`
 /// slot (ADR-0033 § 2: a layer with no states, rooted at the spine), so
 /// the arm waves while the legs keep walking. Footstep markers of the walk and
@@ -178,9 +180,10 @@ class Player extends Behaviour {
   /// The Animator Controller's parameters: `speed` is the character
   /// controller's planar speed as the last tick applied it (so a wall
   /// stops the stride with the player), `grounded` whether it stands, and
-  /// a jump sets the `jump` trigger. The controller plays the jump once,
-  /// holds its last frame in the air and goes back to Locomotion when
-  /// `grounded` is true again. `aim` and the velocity in the player's
+  /// a jump sets the `jump` trigger. The controller's Airborne machine
+  /// plays the jump once, holds its last frame in the air (Fall), lands
+  /// (Land) when `grounded` is true again and then goes back to
+  /// Locomotion. `aim` and the velocity in the player's
   /// frame (`moveX` right, `moveY` forward) drive the Aim state.
   void pose({required bool jumped, required bool grounded, required Vec3 velocity}) {
     final facing = transform.rotation;

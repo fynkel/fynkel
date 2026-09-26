@@ -278,34 +278,67 @@ void main() {
       if (boxRig) expect(s.length, closeTo(2, 1e-5));
 
       // A jump: the Player only sets the `jump` trigger; the controller
-      // fades into Jump, holds it in the air (the box character's 0.8 s
-      // clip ends before the landing and holds its last frame; a longer
-      // downloaded jump is still playing when the feet touch), and goes
-      // back to Locomotion once `grounded` is true again.
+      // enters the Airborne sub-state machine (ADR-0033 § 4) at its Jump,
+      // holds the jump's last pose in Fall while in the air (the box
+      // character's 0.8 s clip ends before the landing; a longer
+      // downloaded jump is still playing when the feet touch), lands in
+      // Land once `grounded` is true again, and leaves the machine for
+      // Locomotion at Land's end. Code names the states by path.
       game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'Space')]);
       game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'Space')]);
       s = me.animation.stateOf()!;
-      expect(s.next ?? s.name, 'Jump');
+      expect(s.next ?? s.name, 'Airborne/Jump');
       expect(player.jumps, 1);
       var airborne = 0;
+      final inAir = <String>{};
       while (!player.characterState()!.grounded && airborne < 180) {
         final now = me.animation.stateOf()!;
-        expect(now.next ?? now.name, 'Jump', reason: 'held until grounded');
+        inAir.add(now.next ?? now.name);
         game.frame(1 / 60);
         airborne++;
       }
       expect(airborne, inInclusiveRange(30, 179), reason: 'a 5.5 m/s jump is in the air about a second');
-      if (boxRig) {
-        expect(me.animation.stateOf()!.normalizedTime, greaterThanOrEqualTo(1), reason: 'the 0.8 s clip ended before the landing');
-      }
+      expect(inAir.difference({'Airborne/Jump', 'Airborne/Fall'}), isEmpty, reason: 'held until grounded');
+      if (boxRig) expect(inAir, contains('Airborne/Fall'), reason: 'the 0.8 s clip ended before the landing');
       for (var i = 0; i < 5; i++) {
         game.frame(1 / 60);
       }
       expect(player.characterState()!.grounded, isTrue);
       s = me.animation.stateOf()!;
-      expect((s.name, s.next), ('Jump', 'Locomotion'), reason: 'blending back from the jump');
-      expect((player.anim.state, player.anim.nextState), (PlayerState.jump, PlayerState.locomotion),
-          reason: 'the same, typed (ADR-0033 § 3)');
+      expect(s.next ?? s.name, 'Airborne/Land', reason: 'landing');
+      expect(player.anim.nextState ?? player.anim.state, PlayerState.airborneLand, reason: 'the same, typed (ADR-0033 § 3)');
+      var landing = 0;
+      while ((me.animation.stateOf()!.next ?? me.animation.stateOf()!.name) != 'Locomotion' && landing < 180) {
+        game.frame(1 / 60);
+        landing++;
+      }
+      expect(me.animation.stateOf()!.next ?? me.animation.stateOf()!.name, 'Locomotion', reason: 'out of the machine at Land\'s end');
+
+      // A new jump cuts a landing short: Fall → Land may be interrupted by
+      // Land's transitions (`interruptibleBy: next`), and the fade starts
+      // from the pose of that moment.
+      String showing() => me.animation.stateOf()!.next ?? me.animation.stateOf()!.name;
+      game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'Space')]);
+      game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'Space')]);
+      var wait = 0;
+      while (showing() != 'Airborne/Land' && wait < 240) {
+        game.frame(1 / 60);
+        wait++;
+      }
+      expect(showing(), 'Airborne/Land');
+      s = me.animation.stateOf()!;
+      expect(s.transitionProgress, lessThan(1), reason: 'still fading into the landing');
+      game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'Space')]);
+      game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'Space')]);
+      expect(player.jumps, 3);
+      s = me.animation.stateOf()!;
+      expect((s.name, s.next), ('Airborne/Land', 'Airborne/Jump'), reason: 'the landing interrupted');
+      wait = 0;
+      while ((me.animation.stateOf()!.name != 'Locomotion' || me.animation.stateOf()!.next != null) && wait < 400) {
+        game.frame(1 / 60);
+        wait++;
+      }
+      expect(me.animation.stateOf()!.name, 'Locomotion');
 
       // The wave: a one-shot in the controller's UpperBody slot (ADR-0033
       // § 2: a layer with no states, rooted at the spine) — the right arm
