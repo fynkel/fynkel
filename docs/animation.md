@@ -565,32 +565,25 @@ times before drawing so a pose can be captured (the showcase's
 
 ## From Dart
 
-The reference game's Player, cut down (`examples/reference_game/lib/game/player.dart`):
+The reference game's Player, cut down (`examples/reference_game/lib/game/player.dart`).
+Its Animator runs an Animator Controller (§ Animator Controllers), so the
+code only sets parameters:
 
 ```dart
 class Player extends Behaviour {
-  @Expose() AssetRef jumpClip = AssetRef.none;       // the scene tells it: the model's or a rig's anim/jump
   @Expose() String waveLayer = 'spine';              // the entity carrying the wave layer's animator
-  late AssetRef locomotion;                          // the blend space the scene's animator started on
-  bool inJump = false;
-
-  @override
-  void start() => locomotion = get<Animator>()!.clip;
 
   @override
   void fixedUpdate(FixedUpdateContext c) {
     final me = characterState()!;
     move(...);                                       // the controller moves the entity
+    final jumped = Input.pressed('jump') && me.grounded;
+    if (jumped) jump(jumpSpeed);
     final v = me.velocity;
-    animation.setParameter('speed', math.sqrt(v.x * v.x + v.z * v.z));   // idle → walk → run, phase-synced
-    if (Input.pressed('jump') && me.grounded) {
-      jump(jumpSpeed);
-      inJump = true;
-      animation.play(jumpClip, looping: false);      // a one-shot over the space
-    } else if (inJump && me.grounded) {
-      inJump = false;
-      animation.crossfade(locomotion, 0.15);         // back into the space on landing
-    }
+    animation
+      ..setFloat('speed', math.sqrt(v.x * v.x + v.z * v.z))   // Locomotion's blend space: idle → walk → run
+      ..setBool('grounded', me.grounded && !jumped);           // Jump → Locomotion on landing
+    if (jumped) animation.setTrigger('jump');                  // Locomotion → Jump
     if (Input.pressed('wave')) {
       final layer = gameObject.findDescendant(waveLayer)!;       // the layer is an entity
       layer.animation.play(layer.get<Animator>()!.clip, looping: false);   // additive: the arm over the walk
@@ -603,6 +596,11 @@ class Player extends Behaviour {
   }
 }
 ```
+
+Without a controller an animator is driven clip by clip — before
+ADR-0032 the Player did it by hand: `animation.setParameter('speed', v)`
+for the blend space, `animation.play(jumpClip, looping: false)` on the
+jump and `animation.crossfade(locomotion, 0.15)` on landing.
 
 `GameObject.animation` is an `AnimationControl`: `play(clip, {looping,
 speed})` (a clip or a blend space), `crossfade(clip, seconds, {looping,
