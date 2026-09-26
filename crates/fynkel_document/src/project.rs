@@ -1542,6 +1542,13 @@ pub fn validate_project_with(
                 report.diagnostics.extend(blend.validate(schemas));
                 report.diagnostics.extend(blend.validate_references(&db));
             }
+            DocumentKind::Controller => {
+                let controller = crate::controller::Controller::from_document(doc);
+                report.diagnostics.extend(controller.validate(schemas));
+                report
+                    .diagnostics
+                    .extend(controller.validate_references(&db));
+            }
             DocumentKind::Volume => {
                 let volume = crate::volume::VolumeDocument::from_document(doc);
                 report.diagnostics.extend(volume.validate(schemas));

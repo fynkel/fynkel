@@ -1170,6 +1170,60 @@ space; the runtime store reads the chunk into a `BlendSpace`
 (`register_clip` on a blend id counts once). The lock's `documents`
 gains `blend: 1`.
 
+## Animator Controllers (ADR-0032)
+
+`<name>.controller.json` (`schemas/controller.schema.json`, hand-written;
+kind `controller`, `fynkel_document::Controller`) is Unity's Animator
+Controller: parameters, and per layer a state machine whose states play
+a clip or a blend space and whose transitions fire on conditions over
+the parameters ([animator.md](animator.md)):
+
+```json
+{ "$schema": "https://fynkel.dev/schemas/controller.schema.json", "formatVersion": 1,
+  "id": "…", "name": "Player",
+  "parameters": [ { "name": "speed", "type": "float" },
+                  { "name": "grounded", "type": "bool", "default": true },
+                  { "name": "jump", "type": "trigger" } ],
+  "layers": [ { "name": "Base Layer", "defaultState": "Locomotion",
+    "states": [ { "name": "Locomotion", "motion": { "asset": "<locomotion blend>" } },
+                { "name": "Jump", "motion": { "asset": "<character>", "sub": "anim/jump" }, "loop": false } ],
+    "transitions": [
+      { "from": "any", "to": "Jump", "duration": 0.1, "conditions": [ { "parameter": "jump" } ] },
+      { "from": "Jump", "to": "Locomotion", "exitTime": 0.9,
+        "conditions": [ { "parameter": "grounded", "is": true } ] } ] } ] }
+```
+
+A parameter is `float`, `int`, `bool` or `trigger`, with an optional
+`default`. A state has a `name`, an optional `motion` (none: it holds the
+pose), `speed` (1), `speedParameter`, `loop` (true) and `rootMotion`
+(absent: the Animator's). A transition goes `from` a state or `any` (Any
+State) `to` a state, when every condition holds and, with an
+`exitTime`, once the state has played that fraction; `duration` is the
+crossfade in seconds (0.25), `offset` where the next motion starts,
+`canTransitionToSelf` lets an Any State transition restart the current
+state. A condition names a parameter and at most one test: `greater` /
+`less` (float, int), `equals` / `notEquals` (int), `is` (bool), or
+nothing (a trigger). A layer has `weight` (1), `blending` (`override` |
+`additive`) and an optional `root` node it poses from. `editor` holds
+the Animator window's state positions; the runtime never reads it. The
+checks:
+
+| Code | Severity | When |
+| --- | --- | --- |
+| `FYN-D1100` | error | an entry the reader cannot use that the schema lets through: a `default` of another type than its parameter (a number for a bool, a fraction for an int, any default on a trigger) |
+| `FYN-D1101` | error | a name that does not resolve or is not unique: two parameters, layers or states (in one layer) with one name; a state named `any`; a `defaultState` that is not a state, or missing when the layer has states; a transition's `from` / `to` or a condition's or `speedParameter`'s parameter that does not exist |
+| `FYN-D1102` | error / warning | a condition whose test does not fit its parameter's type (`is` on a float, `greater` on a bool, a test on a trigger, no test on anything else), a `speedParameter` that is not a float; a **warning** for an Any State transition with neither conditions nor `exitTime` (it would fire every tick) |
+| `FYN-D1103` | error | a `motion` that is neither a clip (an `anim/*` sub-asset of a model or rig) nor a blend space; an unknown sub is also `A0005` |
+
+`fynkel document new controller <name>` writes one with a single empty
+`Base Layer`. The asset database lists it as `document/controller` with
+no sub-assets; `fynkel validate` runs the checks. The cook validates it
+(errors fail the asset) and writes it through the generic document path
+as a JSON chunk (`documentKind: controller`, the info carrying the
+`parameters`, `layers` and `states` counts) whose dependencies are its
+motions' carriers, so a re-import re-cooks it. The lock's `documents`
+gains `controller: 1`.
+
 ## Volume profiles (R3a)
 
 `<name>.volume.json` (`schemas/volume.schema.json`, hand-written; kind

@@ -19,6 +19,7 @@
 pub mod asset;
 pub mod authoring;
 pub mod codec;
+pub mod controller;
 pub mod data;
 pub mod editor_part;
 #[rustfmt::skip]
@@ -50,6 +51,7 @@ pub use authoring::{
 };
 pub use blend::Blend;
 pub use codec::{DocumentCodec, FieldError};
+pub use controller::Controller;
 pub use data::DataDocument;
 pub use fynkel_contracts::{has_errors, Code, Diagnostic, Severity};
 pub use json::{Node, Value};
@@ -89,10 +91,13 @@ pub enum DocumentKind {
     /// `.data.json`: a data asset, an instance of a game-declared type
     /// (ADR-0027).
     Data,
+    /// `.controller.json`: an Animator Controller — parameters, states and
+    /// transitions (ADR-0032).
+    Controller,
 }
 
 impl DocumentKind {
-    pub const ALL: [DocumentKind; 11] = [
+    pub const ALL: [DocumentKind; 12] = [
         DocumentKind::Scene,
         DocumentKind::Prefab,
         DocumentKind::Material,
@@ -104,6 +109,7 @@ impl DocumentKind {
         DocumentKind::Volume,
         DocumentKind::PhysicsMaterial,
         DocumentKind::Data,
+        DocumentKind::Controller,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -119,6 +125,7 @@ impl DocumentKind {
             DocumentKind::Volume => "volume",
             DocumentKind::PhysicsMaterial => "physics_material",
             DocumentKind::Data => "data",
+            DocumentKind::Controller => "controller",
         }
     }
 
@@ -136,6 +143,7 @@ impl DocumentKind {
             DocumentKind::Volume => ".volume.json",
             DocumentKind::PhysicsMaterial => ".physicsmaterial.json",
             DocumentKind::Data => ".data.json",
+            DocumentKind::Controller => ".controller.json",
         }
     }
 
@@ -281,6 +289,24 @@ impl Document {
                     ])])),
                 ));
                 members.push(("sync".into(), Node::string("phase")));
+            }
+            DocumentKind::Controller => {
+                // Unity's new controller: no parameters, an empty Base Layer.
+                members.push((
+                    "parameters".into(),
+                    Node::synthetic(Value::Array(Vec::new())),
+                ));
+                members.push((
+                    "layers".into(),
+                    Node::synthetic(Value::Array(vec![Node::object(vec![
+                        ("name".into(), Node::string("Base Layer")),
+                        ("states".into(), Node::synthetic(Value::Array(Vec::new()))),
+                        (
+                            "transitions".into(),
+                            Node::synthetic(Value::Array(Vec::new())),
+                        ),
+                    ])])),
+                ));
             }
             DocumentKind::Volume => {
                 // A starting look (the engine has every effect off without

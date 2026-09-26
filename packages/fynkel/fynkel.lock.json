@@ -34,6 +34,7 @@
   "schemaFingerprint": "0xc9dc361258a0c148",
   "documents": {
     "blend": 1,
+    "controller": 1,
     "data": 1,
     "material": 2,
     "meta": 2,

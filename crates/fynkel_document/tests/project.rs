@@ -1238,6 +1238,59 @@ fn blend_documents_validate_against_the_database() {
     }
 }
 
+/// An Animator Controller (ADR-0032) names its states' motions by asset
+/// reference: a clip (a model's or a rig's `anim/<n>`) or a blend space.
+#[test]
+fn controller_motions_validate_against_the_database() {
+    const DOC: &str = "assets/rigs/column.controller.json";
+    const BLEND: &str = "c0000000-0000-4000-8000-000000000051";
+    const COLUMN: &str = "c0000000-0000-4000-8000-000000000050";
+    const RIG: &str = "c0000000-0000-4000-8000-000000000005";
+    const SWATCH: &str = "c0000000-0000-4000-8000-000000000003";
+
+    let t = Temp::new("controller-doc");
+    let write = |motion: serde_json::Value| {
+        let v = serde_json::json!({
+            "$schema": "https://fynkel.dev/schemas/controller.schema.json",
+            "formatVersion": 1,
+            "id": "c0000000-0000-4000-8000-000000000052",
+            "name": "Column",
+            "parameters": [{ "name": "energy", "type": "float" }],
+            "layers": [{
+                "name": "Base Layer",
+                "defaultState": "Idle",
+                "states": [
+                    { "name": "Idle", "motion": { "asset": COLUMN, "sub": "anim/bob" } },
+                    { "name": "Move", "motion": motion }
+                ],
+                "transitions": [
+                    { "from": "Idle", "to": "Move", "conditions": [{ "parameter": "energy", "greater": 0.5 }] }
+                ]
+            }]
+        });
+        t.write(DOC, &serde_json::to_string_pretty(&v).unwrap());
+        t.codes()
+    };
+    let d = |code: &str, pointer: &str| (code.to_string(), Some(pointer.to_string()));
+    const MOTION: &str = "/layers/0/states/1/motion";
+
+    // A rig's clip and a blend space are motions.
+    let codes = write(serde_json::json!({ "asset": RIG, "sub": "anim/wave" }));
+    assert!(codes.is_empty(), "{codes:?}");
+    let codes = write(serde_json::json!({ "asset": BLEND }));
+    assert!(codes.is_empty(), "{codes:?}");
+    // A mesh, a whole model, a texture are not.
+    let codes = write(serde_json::json!({ "asset": RIG, "sub": "mesh/Body" }));
+    assert_eq!(codes, [d("FYN-D1103", MOTION)]);
+    let codes = write(serde_json::json!({ "asset": COLUMN }));
+    assert_eq!(codes, [d("FYN-D1103", MOTION)]);
+    let codes = write(serde_json::json!({ "asset": SWATCH }));
+    assert_eq!(codes, [d("FYN-D1103", MOTION)]);
+    // An unknown sub is the database's.
+    let codes = write(serde_json::json!({ "asset": COLUMN, "sub": "anim/nope" }));
+    assert_eq!(codes, [d("FYN-A0005", MOTION)]);
+}
+
 /// A `.shader` file (ADR-0031) is an asset with a sidecar: its header and
 /// WGSL are checked, and a material names it by asset reference and is
 /// validated against its properties. A `.shader.json` manifest is no

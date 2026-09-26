@@ -12,7 +12,7 @@ use fynkel_document::{diagnostics_json, has_errors, Diagnostic, Document, Docume
 
 pub fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel document validate <path>... [--json] [--schemas <dir>] [--kind <kind>]\n  fynkel document format <path>... [--check] [--json]     rewrite in canonical form (or report drift)\n  fynkel document new <kind> <name> [--out <path>]        print (or write) a fresh document\n  fynkel document new data <name> --type <type id> [--out <path>]   a data asset of a type (ADR-0027)\n\nkinds: scene, prefab, material, shader, rig, blend, volume, physics_material, data, project, meta"
+        "usage:\n  fynkel document validate <path>... [--json] [--schemas <dir>] [--kind <kind>]\n  fynkel document format <path>... [--check] [--json]     rewrite in canonical form (or report drift)\n  fynkel document new <kind> <name> [--out <path>]        print (or write) a fresh document\n  fynkel document new data <name> --type <type id> [--out <path>]   a data asset of a type (ADR-0027)\n\nkinds: scene, prefab, material, shader, rig, blend, controller, volume, physics_material, data, project, meta"
     );
     ExitCode::from(2)
 }

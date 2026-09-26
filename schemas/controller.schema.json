@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fynkel.dev/schemas/controller.schema.json",
+  "title": "Fynkel Animator Controller",
+  "description": "`<name>.controller.json` (ADR-0032): Unity's Animator Controller — parameters, and per layer a state machine of states (each playing an animation clip or a blend space) and transitions between them on conditions over the parameters. A `fynkel.Animator` names it in `controller`; the engine runs it every tick, and gameplay code only sets parameters (`setFloat`, `setBool`, `setTrigger`) or jumps to a state by name (`play`, `crossFade`).",
+  "type": "object",
+  "allOf": [{ "$ref": "https://fynkel.dev/schemas/envelope.schema.json" }],
+  "$defs": {
+    "identifier": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "parameter": {
+      "type": "object",
+      "description": "A value the transitions test and code sets. Each animator has its own copy, starting at `default`.",
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier", "description": "What code and conditions call it (`speed`)." },
+        "type": {
+          "type": "string",
+          "enum": ["float", "int", "bool", "trigger"],
+          "description": "`trigger`: a bool that the transition it fires sets back to false (Unity's Trigger)."
+        },
+        "default": {
+          "type": ["number", "boolean"],
+          "description": "The starting value: a number for `float` and `int`, `true`/`false` for `bool`; a trigger starts unset. Absent: 0 or false."
+        }
+      },
+      "required": ["name", "type"],
+      "additionalProperties": false
+    },
+    "state": {
+      "type": "object",
+      "description": "A state plays one motion while it is the layer's current state.",
+      "properties": {
+        "name": { "$ref": "#/$defs/name", "description": "Unique in its layer; what transitions and `play('Jump')` name. Not `any`." },
+        "motion": {
+          "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef",
+          "description": "An animation clip (a model's or a rig's `anim/<n>`) or a blend space (`.blend.json`). Absent: the state holds the pose (Unity's empty state)."
+        },
+        "speed": { "type": "number", "default": 1, "description": "The motion's playback speed." },
+        "speedParameter": { "$ref": "#/$defs/identifier", "description": "A float parameter the speed is multiplied by." },
+        "loop": { "type": "boolean", "default": true, "description": "Whether the motion loops." },
+        "rootMotion": { "type": "boolean", "description": "Whether its root motion moves the character. Absent: the Animator's `root_motion`." }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "condition": {
+      "type": "object",
+      "description": "One test of a parameter: `greater`/`less` for a float or an int, `equals`/`notEquals` for an int, `is` for a bool, nothing more for a trigger (it holds while the trigger is set).",
+      "properties": {
+        "parameter": { "$ref": "#/$defs/identifier" },
+        "greater": { "type": "number" },
+        "less": { "type": "number" },
+        "equals": { "type": "integer" },
+        "notEquals": { "type": "integer" },
+        "is": { "type": "boolean" }
+      },
+      "required": ["parameter"],
+      "maxProperties": 2,
+      "additionalProperties": false
+    },
+    "transition": {
+      "type": "object",
+      "description": "From a state (or `any`: Any State) to another, when every condition holds and, with an exit time, once the state has played that far. Any State's transitions are checked first, then the current state's, each in file order; one fires per tick, and none while a transition's crossfade runs.",
+      "properties": {
+        "from": { "$ref": "#/$defs/name", "description": "A state's name, or `any`." },
+        "to": { "$ref": "#/$defs/name", "description": "A state's name." },
+        "conditions": { "type": "array", "items": { "$ref": "#/$defs/condition" }, "maxItems": 16 },
+        "exitTime": {
+          "type": "number",
+          "minimum": 0,
+          "description": "The fraction of the state's motion that must have played (0.9 = 90 %, 1.5 = halfway through the second loop). Without conditions the transition fires then."
+        },
+        "duration": { "type": "number", "minimum": 0, "default": 0.25, "description": "The crossfade, in seconds." },
+        "offset": { "type": "number", "minimum": 0, "maximum": 1, "default": 0, "description": "Where the next state's motion starts, as a fraction of it." },
+        "canTransitionToSelf": {
+          "type": "boolean",
+          "default": false,
+          "description": "Any State only: whether it may fire into the state already playing (restarting it)."
+        }
+      },
+      "required": ["from", "to"],
+      "additionalProperties": false
+    },
+    "layer": {
+      "type": "object",
+      "description": "A state machine. The first layer is the base; each next one is applied over the ones below.",
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "weight": { "type": "number", "minimum": 0, "maximum": 1, "default": 1, "description": "How much of it shows over the layers below (the base layer is always whole)." },
+        "blending": {
+          "type": "string",
+          "enum": ["override", "additive"],
+          "default": "override",
+          "description": "`override`: its pose replaces what is below, by `weight`; `additive`: its motion's change from its first frame is added."
+        },
+        "root": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The node it poses from (`spine`): it poses only that node and those under it. Absent: the whole character."
+        },
+        "defaultState": { "$ref": "#/$defs/name", "description": "The state the layer starts in (Unity's orange state). Required when there are states." },
+        "states": { "type": "array", "items": { "$ref": "#/$defs/state" }, "maxItems": 128 },
+        "transitions": { "type": "array", "items": { "$ref": "#/$defs/transition" }, "maxItems": 512 }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" }, "maxItems": 64 },
+    "layers": { "type": "array", "items": { "$ref": "#/$defs/layer" }, "minItems": 1, "maxItems": 16 },
+    "editor": {
+      "type": "object",
+      "description": "Where the Animator window draws each state, by layer name then state name: `[x, y]`. The runtime never reads it."
+    }
+  },
+  "required": ["layers"],
+  "patternProperties": { "^x-": true },
+  "unevaluatedProperties": false
+}
