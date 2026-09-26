@@ -73,6 +73,13 @@ pub const KIND_SKIN: [u8; 4] = *b"SKIN";
 /// `anim/<a>`).
 pub const KIND_ANIMATION: [u8; 4] = *b"ANIM";
 pub const KIND_BLOB: [u8; 4] = *b"BLOB";
+/// A `.shader` file (ADR-0031): its text, as checked by the cook — the
+/// header is the interface, parsed again by `fynkel_shader::parse` at
+/// load, so the cooker and the renderer read one definition.
+pub const KIND_SHADER: [u8; 4] = *b"SHDR";
+/// A material of a shader asset (`payload::CustomMaterialPayload`), next
+/// to the material document's `JSON` chunk as `MATL` is for PBR.
+pub const KIND_CUSTOM_MATERIAL: [u8; 4] = *b"MATC";
 
 #[derive(Debug)]
 pub enum Error {

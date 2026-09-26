@@ -928,9 +928,166 @@ pub fn decode_stream(bytes: &[u8]) -> Option<StreamPayload> {
     })
 }
 
+/// A `MATC` payload (ADR-0031): a material of a shader asset, ready for
+/// the GPU — the shader's asset id, the property block already in the
+/// shader's layout with every default filled (`fynkel_shader::Layout`),
+/// and one slot per texture property in the header's order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CustomMaterialPayload {
+    /// The `.shader` asset's id.
+    pub shader: [u8; 16],
+    /// [`ALPHA_OPAQUE`], [`ALPHA_MASK`] or [`ALPHA_BLEND`].
+    pub alpha_mode: u32,
+    pub alpha_cutoff: f32,
+    pub double_sided: bool,
+    /// A multiple of 16 bytes.
+    pub block: Vec<u8>,
+    pub slots: Vec<MaterialSlot>,
+}
+
+pub const ALPHA_OPAQUE: u32 = 0;
+pub const ALPHA_MASK: u32 = 1;
+pub const ALPHA_BLEND: u32 = 2;
+
+/// One texture property of a `MATC` material: what is bound, or nothing
+/// (the fallback texel), and how it is sampled.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MaterialSlot {
+    /// The texture's asset id and sub-asset key (empty for the whole
+    /// asset), as a PBR material's `AssetRef`.
+    pub texture: Option<([u8; 16], String)>,
+    /// [`COLOR_SPACE_SRGB`] or [`COLOR_SPACE_LINEAR`].
+    pub color_space: u32,
+    /// [`FALLBACK_WHITE`], [`FALLBACK_BLACK`], [`FALLBACK_NORMAL`] or
+    /// [`FALLBACK_GRAY`].
+    pub fallback: u32,
+    /// 0 linear, 1 nearest.
+    pub filter: u32,
+    pub mipmaps: bool,
+    /// 0 repeat, 1 clamp, 2 mirror.
+    pub wrap: u32,
+    pub anisotropy: u32,
+    pub uv_set: u32,
+}
+
+pub const COLOR_SPACE_SRGB: u32 = 0;
+pub const COLOR_SPACE_LINEAR: u32 = 1;
+pub const FALLBACK_WHITE: u32 = 0;
+pub const FALLBACK_BLACK: u32 = 1;
+pub const FALLBACK_NORMAL: u32 = 2;
+pub const FALLBACK_GRAY: u32 = 3;
+
+/// The `MATC` layout's version, its first word.
+pub const CUSTOM_MATERIAL_VERSION: u32 = 1;
+
+pub fn encode_custom_material(m: &CustomMaterialPayload) -> Vec<u8> {
+    let mut out = Vec::with_capacity(48 + m.block.len() + m.slots.len() * 48);
+    let u32s = |out: &mut Vec<u8>, vs: &[u32]| {
+        for v in vs {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+    };
+    u32s(&mut out, &[CUSTOM_MATERIAL_VERSION]);
+    out.extend_from_slice(&m.shader);
+    u32s(&mut out, &[m.alpha_mode, m.alpha_cutoff.to_bits(), m.double_sided as u32]);
+    u32s(&mut out, &[m.block.len() as u32]);
+    out.extend_from_slice(&m.block);
+    u32s(&mut out, &[m.slots.len() as u32]);
+    for s in &m.slots {
+        let flags = s.texture.is_some() as u32 | (s.mipmaps as u32) << 1;
+        u32s(
+            &mut out,
+            &[flags, s.color_space, s.fallback, s.filter, s.wrap, s.anisotropy, s.uv_set],
+        );
+        if let Some((id, sub)) = &s.texture {
+            out.extend_from_slice(id);
+            write_str(&mut out, sub);
+        }
+    }
+    out
+}
+
+/// `None` for a malformed payload or another layout version.
+pub fn decode_custom_material(bytes: &[u8]) -> Option<CustomMaterialPayload> {
+    let at = &mut 0usize;
+    let id = |bytes: &[u8], at: &mut usize| -> Option<[u8; 16]> {
+        let v: [u8; 16] = bytes.get(*at..*at + 16)?.try_into().ok()?;
+        *at += 16;
+        Some(v)
+    };
+    if read_u32(bytes, at)? != CUSTOM_MATERIAL_VERSION {
+        return None;
+    }
+    let shader = id(bytes, at)?;
+    let alpha_mode = read_u32(bytes, at)?;
+    let alpha_cutoff = read_f32(bytes, at)?;
+    let double_sided = read_u32(bytes, at)? != 0;
+    let len = read_u32(bytes, at)? as usize;
+    if alpha_mode > ALPHA_BLEND || !len.is_multiple_of(16) {
+        return None;
+    }
+    let block = bytes.get(*at..at.checked_add(len)?)?.to_vec();
+    *at += len;
+    let count = read_u32(bytes, at)?;
+    let mut slots = Vec::new();
+    for _ in 0..count {
+        let flags = read_u32(bytes, at)?;
+        let mut s = MaterialSlot {
+            texture: None,
+            color_space: read_u32(bytes, at)?,
+            fallback: read_u32(bytes, at)?,
+            filter: read_u32(bytes, at)?,
+            mipmaps: flags & 2 != 0,
+            wrap: read_u32(bytes, at)?,
+            anisotropy: read_u32(bytes, at)?,
+            uv_set: read_u32(bytes, at)?,
+        };
+        if flags & 1 != 0 {
+            s.texture = Some((id(bytes, at)?, read_str(bytes, at)?));
+        }
+        slots.push(s);
+    }
+    (*at == bytes.len()).then_some(CustomMaterialPayload {
+        shader,
+        alpha_mode,
+        alpha_cutoff,
+        double_sided,
+        block,
+        slots,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_materials_round_trip() {
+        let slot = |texture| MaterialSlot {
+            texture,
+            color_space: COLOR_SPACE_LINEAR,
+            fallback: FALLBACK_NORMAL,
+            filter: 1,
+            mipmaps: true,
+            wrap: 2,
+            anisotropy: 4,
+            uv_set: 1,
+        };
+        let m = CustomMaterialPayload {
+            shader: [3; 16],
+            alpha_mode: ALPHA_MASK,
+            alpha_cutoff: 0.25,
+            double_sided: true,
+            block: (0..32).collect(),
+            slots: vec![slot(Some(([5; 16], "image/0".into()))), slot(None)],
+        };
+        let bytes = encode_custom_material(&m);
+        assert_eq!(decode_custom_material(&bytes), Some(m));
+        assert_eq!(decode_custom_material(&bytes[..bytes.len() - 1]), None);
+        let mut other = bytes.clone();
+        other[0] = 9;
+        assert_eq!(decode_custom_material(&other), None);
+    }
 
     #[test]
     fn stream_round_trips_and_rejects_a_short_blob() {
