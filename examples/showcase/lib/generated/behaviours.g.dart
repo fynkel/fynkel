@@ -4,14 +4,44 @@
 // ignore_for_file: type=lint, unused_element
 
 import 'package:fynkel/fynkel.dart';
-import 'package:showcase/game/orbit.dart' as _lib0;
-import 'package:showcase/game/spinner.dart' as _lib1;
+import 'package:showcase/game/dissolve.dart' as _lib0;
+import 'package:showcase/game/orbit.dart' as _lib1;
+import 'package:showcase/game/spinner.dart' as _lib2;
 
-/// `game.Orbit` v1 → [_lib0.Orbit].
+/// `game.Dissolve` v1 → [_lib0.Dissolve].
+BehaviourType get gameDissolveType => BehaviourType(
+  id: 'game.Dissolve',
+  version: 1,
+  create: _lib0.Dissolve.new,
+  fields: [
+    BehaviourField(
+      name: 'hold',
+      type: 'number',
+      defaultValue: 1.0,
+      tooltip: 'Seconds to stay whole, and to stay gone',
+      min: 0,
+      step: 0.1,
+      get: (b) => (b as _lib0.Dissolve).hold,
+      set: (b, v) => (b as _lib0.Dissolve).hold = _double(v),
+    ),
+    BehaviourField(
+      name: 'period',
+      type: 'number',
+      defaultValue: 6.0,
+      tooltip: 'Seconds for one burn away and back',
+      min: 0.5,
+      step: 0.5,
+      get: (b) => (b as _lib0.Dissolve).period,
+      set: (b, v) => (b as _lib0.Dissolve).period = _double(v),
+    ),
+  ],
+);
+
+/// `game.Orbit` v1 → [_lib1.Orbit].
 BehaviourType get gameOrbitType => BehaviourType(
   id: 'game.Orbit',
   version: 1,
-  create: _lib0.Orbit.new,
+  create: _lib1.Orbit.new,
   fields: [
     BehaviourField(
       name: 'height',
@@ -19,8 +49,8 @@ BehaviourType get gameOrbitType => BehaviourType(
       defaultValue: 4.0,
       tooltip: 'Height above the target',
       step: 0.5,
-      get: (b) => (b as _lib0.Orbit).height,
-      set: (b, v) => (b as _lib0.Orbit).height = _double(v),
+      get: (b) => (b as _lib1.Orbit).height,
+      set: (b, v) => (b as _lib1.Orbit).height = _double(v),
     ),
     BehaviourField(
       name: 'phase',
@@ -28,8 +58,8 @@ BehaviourType get gameOrbitType => BehaviourType(
       defaultValue: 0.0,
       tooltip: 'Starting angle in radians',
       step: 0.1,
-      get: (b) => (b as _lib0.Orbit).phase,
-      set: (b, v) => (b as _lib0.Orbit).phase = _double(v),
+      get: (b) => (b as _lib1.Orbit).phase,
+      set: (b, v) => (b as _lib1.Orbit).phase = _double(v),
     ),
     BehaviourField(
       name: 'radius',
@@ -38,8 +68,8 @@ BehaviourType get gameOrbitType => BehaviourType(
       tooltip: 'Distance from the target on the ground plane',
       min: 0.1,
       step: 0.5,
-      get: (b) => (b as _lib0.Orbit).radius,
-      set: (b, v) => (b as _lib0.Orbit).radius = _double(v),
+      get: (b) => (b as _lib1.Orbit).radius,
+      set: (b, v) => (b as _lib1.Orbit).radius = _double(v),
     ),
     BehaviourField(
       name: 'speed',
@@ -47,32 +77,32 @@ BehaviourType get gameOrbitType => BehaviourType(
       defaultValue: 0.1,
       tooltip: 'Angular speed in radians per second (negative reverses)',
       step: 0.05,
-      get: (b) => (b as _lib0.Orbit).speed,
-      set: (b, v) => (b as _lib0.Orbit).speed = _double(v),
+      get: (b) => (b as _lib1.Orbit).speed,
+      set: (b, v) => (b as _lib1.Orbit).speed = _double(v),
     ),
     BehaviourField(
       name: 'target',
       type: 'vec3',
       defaultValue: const [0.0, 0.0, 0.0],
       tooltip: 'The point to circle and look at',
-      get: (b) => _vec3Json((b as _lib0.Orbit).target),
-      set: (b, v) => (b as _lib0.Orbit).target = _vec3(v),
+      get: (b) => _vec3Json((b as _lib1.Orbit).target),
+      set: (b, v) => (b as _lib1.Orbit).target = _vec3(v),
     ),
   ],
 );
 
-/// `game.Spinner` v1 → [_lib1.Spinner].
+/// `game.Spinner` v1 → [_lib2.Spinner].
 BehaviourType get gameSpinnerType => BehaviourType(
   id: 'game.Spinner',
   version: 1,
-  create: _lib1.Spinner.new,
+  create: _lib2.Spinner.new,
   fields: [
     BehaviourField(
       name: 'axis',
       type: 'vec3',
       defaultValue: const [0.0, 1.0, 0.0],
-      get: (b) => _vec3Json((b as _lib1.Spinner).axis),
-      set: (b, v) => (b as _lib1.Spinner).axis = _vec3(v),
+      get: (b) => _vec3Json((b as _lib2.Spinner).axis),
+      set: (b, v) => (b as _lib2.Spinner).axis = _vec3(v),
     ),
     BehaviourField(
       name: 'speed',
@@ -81,14 +111,15 @@ BehaviourType get gameSpinnerType => BehaviourType(
       tooltip: 'Angular speed in radians per second',
       min: 0,
       step: 0.1,
-      get: (b) => (b as _lib1.Spinner).speed,
-      set: (b, v) => (b as _lib1.Spinner).speed = _double(v),
+      get: (b) => (b as _lib2.Spinner).speed,
+      set: (b, v) => (b as _lib2.Spinner).speed = _double(v),
     ),
   ],
 );
 
 /// Every `@FynkelBehaviour` type of package `showcase`, by id.
-List<BehaviourType> get behaviourTypes => List.unmodifiable([gameOrbitType, gameSpinnerType]);
+List<BehaviourType> get behaviourTypes =>
+    List.unmodifiable([gameDissolveType, gameOrbitType, gameSpinnerType]);
 
 /// Registers every type of this package in [registry].
 void registerBehaviours(BehaviourRegistry registry, {bool replace = false}) {

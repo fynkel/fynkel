@@ -51,13 +51,31 @@ What is in the scene (`assets/scenes/main.scene.json`):
   `medium`: 2048² shadows, MSAA 4; `high`: 4096², MSAA 4, scale 1.5,
   anisotropy 16)
 
+## Shaders
+
+Three example shaders (ADR-0031) live in `assets/shaders/`, each shown in
+its own small scene. A `.shader` file is a short header — the name in the
+material's Shader menu, the lighting, the alpha modes, the properties —
+then plain WGSL: `surface()` says what the surface is and the engine
+lights it. In the app, keys 1–4 switch between the showcase and these
+scenes.
+
+| Shader | Scene | What it shows |
+| --- | --- | --- |
+| `dissolve.shader` | `shader_dissolve.scene.json` | A `mask` material that burns away through 3D noise, with a glowing edge in `emission`. The middle crate is driven from code: `game.Dissolve` (`lib/game/dissolve.dart`) calls `world.setMaterialValue(material, 'amount', t)` every frame |
+| `water.shader` | `shader_water.scene.json` | A `blend` material whose ripples move with `globals.time`: two copies of one tiling normal map (`textures/ripples.png`, written by `tools/ripples.py`, `colorSpace: linear` in its sidecar) scroll against each other, and `vertex()` lifts the plane into a slow swell |
+| `rim.shader` | `shader_rim.scene.json` | Fresnel emission: the edges that turn away from the camera glow, so the objects seem lit from behind; `pulse` makes the orange one beat |
+
+Each shader has a committed render (below). To render one:
+`fynkel render --project examples/showcase --scene examples/showcase/assets/scenes/shader_water.scene.json --out water.png --size 1280x720 --steps 10`.
+
 ```sh
-fynkel run                       # validate, cook, then the app: Q cycles quality, Space pauses the orbit, A/D (or a stick) scrub it
+fynkel run                       # validate, cook, then the app: Q cycles quality, 1–4 switch scenes, Space pauses the orbit, A/D (or a stick) scrub it
 fynkel run -d <iphone>           # the same on a device: the app carries the cooked cache (fynkel_cache/) as assets
 fynkel render --out render.png --steps 10   # the same view as a PNG after 10 ticks (the runner mid-stride); --quality low|medium|high
 fynkel validate                  # documents, references, lock
 fynkel test --headless           # the scene on the Rust headless host (no Dart, no GPU)
-flutter test                     # test/game_test.dart: the scene loads, the robot spins, the camera orbits, the runner's joints move
+flutter test                     # test/game_test.dart: the scene loads, the robot spins, the camera orbits, the runner's joints move; the shader scenes load and Dissolve drives its material
 ```
 
 The HUD (`lib/main.dart`) prints the frame rate (`fps`, with the frame
@@ -88,6 +106,9 @@ renderer item so the history is a before/after:
 | `r3b.png` | R3b — bloom: the same `showcase.volume.json` gains `bloom { intensity 1.0, threshold 0.7, scatter 0.7 }` (`bloom 1.00 >0.70` in the render line). The lamp heads, the sunlit face of the arch and the brightest sky over the wall glow softly into their surroundings; 849 468 pixels changed against `r3a.png`, every one of them lighter — most by a level or two (the mean 2.2), 133 085 by more than 5, at most 43 next to the lamp heads. With `intensity` 0 the render is `r3a.png` to the bit |
 | `r3c.png` | R3c — colour grading: `showcase.volume.json` gains `colorGrading { temperature 20, contrast 15, saturation 5 }` (`graded` in the render line). A little warmer and punchier: the blue cast the sky gives the floor and the walls eases toward neutral, the sunlit faces warm, the shadows keep their depth; every pixel changed against `r3b.png`, the mean red +10.8, green +4.7, blue −2.7 levels. Without the block (or with every field at its neutral value) the render is `r3b.png` to the bit |
 | `r3d.png` | R3d — contact shadows: `showcase.volume.json` gains `contactShadows { intensity 1, length 0.3 }` (`contact shadows 1.00 over 0.30 m` in the render line). Small in this view, and that is honest: the evening sun is behind the objects, so the floor at their feet is already in the shadow map's shadow. What changes is where that shadow was lifted off its caster by the map's bias: the lamp posts' shadows now meet their feet, and the pillars' bases close up — 674 pixels against `r3c.png`, 221 by more than 4 levels. Without the block the render is `r3c.png` to the bit |
+| `shader-dissolve.png` | ADR-0031 — the dissolve shader (`shader_dissolve.scene.json`): three stages of one shader — the rusted cube barely started (`amount` 0.3), the crate half gone (0.45, the one `game.Dissolve` animates in the app), the sphere with a blue edge (0.5). The holes are real: the floor and the cubes' insides show through, and the shadows have the same holes |
+| `shader-water.png` | ADR-0031 — the water shader (`shader_water.scene.json`), looking into the evening sun: the scrolling ripples break its reflection into sparkles, the sky shows at the far side, the stones and their shadows show through the blue |
+| `shader-rim.png` | ADR-0031 — the rim light shader (`shader_rim.scene.json`) at dusk (sun 600 lux): blue, orange and green rims glow on dark spheres and a capsule, and bloom spreads them |
 
 To regenerate: `fynkel render --project examples/showcase --out examples/showcase/renders/<item>.png` (`--steps 10` from M3-19, so the runner is posed).
 

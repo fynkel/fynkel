@@ -126,6 +126,11 @@
       "kind": "behaviour",
       "version": 1,
       "description": "Circles its object around a target, looking at it (lib/game/orbit.dart)."
+    },
+    "game.Dissolve": {
+      "kind": "behaviour",
+      "version": 1,
+      "description": "Burns its object away and back through its dissolve material (lib/game/dissolve.dart)."
     }
   },
   "targets": {

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "d784224f-fd71-596d-850b-99b03a9a0c1b",
+  "name": "Water",
+  "shader": {
+    "asset": "e54e26c1-ba62-5582-b12a-96bac8862e26"
+  },
+  "parameters": {},
+  "textures": {
+    "ripples": {
+      "texture": {
+        "asset": "f3f576fc-cd76-5bca-ae08-fd2251bf41f5"
+      }
+    }
+  },
+  "alpha_mode": "blend"
+}

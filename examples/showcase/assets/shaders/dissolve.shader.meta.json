@@ -1,0 +1,10 @@
+{
+  "$schema": "https://fynkel.dev/schemas/meta.schema.json",
+  "formatVersion": 2,
+  "id": "617a072c-61ff-5def-85cd-f6824cf5e87d",
+  "name": "dissolve.shader",
+  "importer": "fynkel.shader",
+  "importerVersion": 1,
+  "settings": {},
+  "subAssets": {}
+}

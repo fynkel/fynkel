@@ -1,0 +1,12 @@
+{
+  "$schema": "https://fynkel.dev/schemas/meta.schema.json",
+  "formatVersion": 2,
+  "id": "f3f576fc-cd76-5bca-ae08-fd2251bf41f5",
+  "name": "ripples.png",
+  "importer": "fynkel.image",
+  "importerVersion": 1,
+  "settings": {
+    "colorSpace": "linear"
+  },
+  "subAssets": {}
+}

@@ -11,6 +11,7 @@ import 'dart:math' as math;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/testing.dart';
+import 'package:showcase/game/dissolve.dart';
 import 'package:showcase/game/game.dart';
 import 'package:showcase/game/orbit.dart';
 import 'package:showcase/game/spinner.dart';
@@ -61,5 +62,33 @@ void main() {
     expect(s.time, closeTo((game.world.tick - 1) / 60 % 0.6, 1e-4));
     expect(thigh.localTransform.rotation.x.abs(), greaterThan(0.05), reason: 'a leg swings');
     expect(runner.transform.position.z, closeTo(2.6, 1e-5), reason: 'in place');
+  });
+
+  test('the shader scenes load, and Dissolve drives its material from code (ADR-0031)', () {
+    final game = Game.load(projectDir);
+    addTearDown(game.dispose);
+
+    for (final MapEntry(key: name, value: id) in Game.scenes.entries.skip(1)) {
+      final report = game.loadScene(id);
+      expect(report.ok, isTrue, reason: name);
+      expect(report.diagnostics, isEmpty, reason: name);
+    }
+
+    game.loadScene(Game.scenes['Dissolve']!);
+    game.frame(0); // the earlier scenes' behaviours leave on the next frame
+    final dissolve = game.world.behaviours.whereType<Dissolve>().single;
+    expect((dissolve.period, dissolve.hold), (6.0, 1.0), reason: 'authored in shader_dissolve.scene.json');
+    for (var i = 0; i < 150; i++) {
+      game.frame(1 / 60);
+    }
+    // 2.5 s in: whole for 1 s, then half of the 3 s burn.
+    expect(dissolve.amount, closeTo(0.5, 0.02));
+    final material = dissolve.get<MeshRenderer>()!.material;
+    expect(game.world.materialValue(material, 'amount'), dissolve.amount);
+
+    expect(dissolve.amountAt(0.5), 0);
+    expect(dissolve.amountAt(4.5), 1);
+    expect(dissolve.amountAt(6.5), closeTo(0.5, 1e-9));
+    expect(dissolve.amountAt(8.5), 0, reason: 'a new cycle');
   });
 }

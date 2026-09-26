@@ -16,13 +16,28 @@ import 'package:fynkel/fynkel.dart';
 import '../generated/behaviours.g.dart';
 
 class Game {
-  Game._(this.world, this.report);
+  Game._(this.world, this.report) : scene = report;
 
   final World world;
 
   /// What `World.loadProject` found: scene, entities, attached behaviours
   /// and any load diagnostics (warnings such as an unregistered type).
   final LoadReport report;
+
+  /// What the scene on screen reported: [report] until [loadScene].
+  LoadReport scene;
+
+  /// The scenes the app switches between with the number keys: the
+  /// startup scene, then one per example shader (ADR-0031).
+  static const scenes = {
+    'Showcase': '3a56fbbd-b340-41ca-ac2b-b5603d1dc0da',
+    'Dissolve': '6cdb53dd-cdd3-5638-a9d6-058f3d61059f',
+    'Water': 'e4593a1e-c8ba-5037-af95-02d1142b16cc',
+    'Rim Light': '4fa09cf3-8f27-5190-b783-5b8bc8651ec9',
+  };
+
+  /// Replaces what is loaded by the scene [id] from the same cache.
+  LoadReport loadScene(String id) => scene = world.loadScene(id);
 
   /// Loads the project at [projectDir] (the directory holding
   /// `fynkel.project.json`) from its cooked cache ([cacheDir], default

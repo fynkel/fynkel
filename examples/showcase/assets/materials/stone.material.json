@@ -1,0 +1,15 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "5194b57d-5278-552f-b77a-3ddca34e6a08",
+  "name": "Stone",
+  "shader": "fynkel.pbr@1",
+  "base_color": [
+    0.35,
+    0.34,
+    0.33,
+    1.0
+  ],
+  "metallic": 0.0,
+  "roughness": 0.8
+}

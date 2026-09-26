@@ -1,0 +1,26 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "ed968481-11d9-53ce-9bb2-dc51c4a0a679",
+  "name": "Rim Green Thin",
+  "shader": {
+    "asset": "24d681f6-9253-5a26-9aee-413486e14ce3"
+  },
+  "parameters": {
+    "base_color": [
+      0.6,
+      0.62,
+      0.6
+    ],
+    "rim_color": [
+      0.3,
+      1.0,
+      0.45
+    ],
+    "rim_power": 6.0,
+    "rim_strength": 8.0,
+    "metallic": 0.9,
+    "roughness": 0.25
+  },
+  "alpha_mode": "opaque"
+}

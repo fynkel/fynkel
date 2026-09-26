@@ -1,0 +1,347 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 5,
+  "id": "4fa09cf3-8f27-5190-b783-5b8bc8651ec9",
+  "name": "Shader: Rim Light",
+  "entities": {
+    "f521d526-a521-5255-bbf4-1ba14e762953": {
+      "name": "Sun",
+      "parent": null,
+      "children": [],
+      "components": {
+        "911cf95f-e9dd-56bf-9695-6743d75012bc": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              10,
+              0
+            ],
+            "rotation": [
+              -0.259014,
+              0.328771,
+              0.094274,
+              0.903291
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "6be59667-bd87-5938-88a1-07eb8c5a1561": {
+          "type": "fynkel.DirectionalLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1.0,
+              0.86,
+              0.7
+            ],
+            "intensity": 600.0,
+            "cast_shadows": true
+          }
+        }
+      }
+    },
+    "da87dd0a-74a4-5c39-a065-fee184670b69": {
+      "name": "Environment",
+      "parent": null,
+      "children": [],
+      "components": {
+        "ef639c6a-99f2-5a6a-8526-4faea980a460": {
+          "type": "fynkel.Environment",
+          "version": 1,
+          "data": {
+            "ambient_color": [
+              0.5,
+              0.6,
+              0.9
+            ],
+            "ambient_intensity": 1000.0,
+            "sky": {
+              "asset": "5f8acf8b-07b6-4a23-9b0a-f139e56e286b"
+            },
+            "sky_intensity": 250.0,
+            "sky_rotation": 0.0
+          }
+        }
+      }
+    },
+    "c5ea2ea2-f723-54b7-94ac-b70e411b909b": {
+      "name": "Global Volume",
+      "parent": null,
+      "children": [],
+      "components": {
+        "dcdea40b-0c00-5bb0-a85d-c971d570d300": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "70737707-3b04-537d-adbe-b596e7153f15": {
+          "type": "fynkel.Volume",
+          "version": 1,
+          "data": {
+            "profile": {
+              "asset": "66eab72c-84f3-4418-976e-eb7eca6381f9"
+            },
+            "shape": "global",
+            "size": [
+              10.0,
+              10.0,
+              10.0
+            ],
+            "radius": 5.0,
+            "blend_distance": 1.0,
+            "weight": 1.0,
+            "priority": 0,
+            "enabled": true
+          }
+        }
+      }
+    },
+    "47092265-96b9-5e26-8f32-ad0365e403a1": {
+      "name": "Floor",
+      "parent": null,
+      "children": [],
+      "components": {
+        "3116c0da-2043-53c0-be13-9e5c2fcd5a5d": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              -0.1,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              40,
+              0.2,
+              40
+            ]
+          }
+        },
+        "aa5d765d-465d-5d9d-8ff1-67eca000d1a8": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "74be3aea-fd34-5796-9263-86f7e35f1688"
+            },
+            "cast_shadows": false,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "c4364ea3-88ec-5a16-97a9-3f633c96813a": {
+      "name": "Blue Sphere",
+      "parent": null,
+      "children": [],
+      "components": {
+        "0a0dacfa-cc0e-576a-bcef-9c4cea603692": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -2.3,
+              1.0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              2,
+              2,
+              2
+            ]
+          }
+        },
+        "a658c879-41ce-5a83-abb6-9050ae6743eb": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Sphere"
+            },
+            "material": {
+              "asset": "ab44daf0-7b5b-59c0-873a-8519d69d912f"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "e848c106-6d0a-5365-b238-f86fbb76f728": {
+      "name": "Orange Capsule",
+      "parent": null,
+      "children": [],
+      "components": {
+        "73c9ea51-97d8-58c8-9e82-4d5026e81617": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              1.0,
+              -0.6
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "7e17e7ea-aa08-52e2-ad36-aae10b13321b": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Capsule"
+            },
+            "material": {
+              "asset": "055b951c-f300-5222-8a41-6dccfd23b19c"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "08fcf481-6990-5672-9ece-07bde2fca97f": {
+      "name": "Green Sphere",
+      "parent": null,
+      "children": [],
+      "components": {
+        "1019aa21-32b1-543b-81f1-965e1d6ccfa3": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              2.3,
+              1.0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              2,
+              2,
+              2
+            ]
+          }
+        },
+        "8288e06b-11a2-5a92-a82c-bda36a89f251": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Sphere"
+            },
+            "material": {
+              "asset": "ed968481-11d9-53ce-9bb2-dc51c4a0a679"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "8e7cba38-5a92-5c47-bf50-450a496b735a": {
+      "name": "Camera",
+      "parent": null,
+      "children": [],
+      "components": {
+        "bc76d75a-de68-557a-8a81-3962206cab87": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              2.4,
+              7.0
+            ],
+            "rotation": [
+              -0.098538,
+              0.0,
+              0.0,
+              0.995133
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "ce1d2431-1432-542e-a36a-52610f55960c": {
+          "type": "fynkel.Camera",
+          "version": 1,
+          "data": {
+            "projection": "perspective",
+            "fov_y": 0.8,
+            "ortho_height": 10.0,
+            "near": 0.1,
+            "far": 100.0,
+            "priority": 0,
+            "exposure_mode": "auto",
+            "exposure": 12.0,
+            "culling_mask": 4294967295
+          }
+        }
+      }
+    }
+  }
+}

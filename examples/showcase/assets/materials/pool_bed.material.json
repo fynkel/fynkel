@@ -1,0 +1,15 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "531499f6-c40b-51a6-9cd0-9de4bf40b1ea",
+  "name": "Pool Bed",
+  "shader": "fynkel.pbr@1",
+  "base_color": [
+    0.55,
+    0.48,
+    0.36,
+    1.0
+  ],
+  "metallic": 0.0,
+  "roughness": 0.9
+}

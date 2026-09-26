@@ -1,0 +1,400 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 5,
+  "id": "6cdb53dd-cdd3-5638-a9d6-058f3d61059f",
+  "name": "Shader: Dissolve",
+  "entities": {
+    "0f04c71c-3143-5175-bc0a-a639363a410f": {
+      "name": "Sun",
+      "parent": null,
+      "children": [],
+      "components": {
+        "ada7937e-a7e1-5e79-983d-ed9c31b4bda4": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              10,
+              0
+            ],
+            "rotation": [
+              -0.259014,
+              0.328771,
+              0.094274,
+              0.903291
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "fad4baca-77c4-5b7f-a6e2-86a9eab71215": {
+          "type": "fynkel.DirectionalLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1.0,
+              0.86,
+              0.7
+            ],
+            "intensity": 4000.0,
+            "cast_shadows": true
+          }
+        }
+      }
+    },
+    "bf7dc629-2c51-5244-b3de-570f0ef4fb57": {
+      "name": "Environment",
+      "parent": null,
+      "children": [],
+      "components": {
+        "1f9e0d8a-1ed2-58e4-a49a-d8e1cdf13521": {
+          "type": "fynkel.Environment",
+          "version": 1,
+          "data": {
+            "ambient_color": [
+              0.5,
+              0.6,
+              0.9
+            ],
+            "ambient_intensity": 1000.0,
+            "sky": {
+              "asset": "5f8acf8b-07b6-4a23-9b0a-f139e56e286b"
+            },
+            "sky_intensity": 1500.0,
+            "sky_rotation": 0.0
+          }
+        }
+      }
+    },
+    "174da47b-f4ec-5b2b-8f86-4503b455a8e7": {
+      "name": "Global Volume",
+      "parent": null,
+      "children": [],
+      "components": {
+        "bf738bd8-f63c-516b-bf39-2a7bb679c785": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "47cb9c4b-c4af-5665-9470-561e4c5f642a": {
+          "type": "fynkel.Volume",
+          "version": 1,
+          "data": {
+            "profile": {
+              "asset": "66eab72c-84f3-4418-976e-eb7eca6381f9"
+            },
+            "shape": "global",
+            "size": [
+              10.0,
+              10.0,
+              10.0
+            ],
+            "radius": 5.0,
+            "blend_distance": 1.0,
+            "weight": 1.0,
+            "priority": 0,
+            "enabled": true
+          }
+        }
+      }
+    },
+    "abfe3113-648e-5a1a-924f-19e646b08577": {
+      "name": "Floor",
+      "parent": null,
+      "children": [],
+      "components": {
+        "57ab0763-924e-5db8-8a19-1fd172854e75": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              -0.1,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              40,
+              0.2,
+              40
+            ]
+          }
+        },
+        "b106c34f-8633-56a1-b271-68c34a0de694": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "74be3aea-fd34-5796-9263-86f7e35f1688"
+            },
+            "cast_shadows": false,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "db16680a-ddf0-51ee-b1c9-18e7384cbbcc": {
+      "name": "Wall",
+      "parent": null,
+      "children": [],
+      "components": {
+        "3f0e4409-1068-5943-8b11-ec7fe3aabfba": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              2.0,
+              -3.5
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              14,
+              4.0,
+              0.4
+            ]
+          }
+        },
+        "4da80bf4-ee03-50a1-9519-fa077ddb8db7": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "e00e2adf-a76c-5051-ae3b-c3af289aa33d"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "41db464f-0a3f-5d1a-b648-b51e589f1013": {
+      "name": "Rust Crate",
+      "parent": null,
+      "children": [],
+      "components": {
+        "4c9424cd-3b7c-5355-9263-9f4b40313096": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -2.4,
+              0.8,
+              0
+            ],
+            "rotation": [
+              0.0,
+              0.173648,
+              0.0,
+              0.984808
+            ],
+            "scale": [
+              1.6,
+              1.6,
+              1.6
+            ]
+          }
+        },
+        "b7a9952a-6932-51d6-ba53-b4bdf5eacc76": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "3f0e3827-d3f0-5dfe-961a-be14304a5bce"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "f31035fe-d2dc-54ef-90ca-bfce5558e137": {
+      "name": "Dissolving Crate",
+      "parent": null,
+      "children": [],
+      "components": {
+        "d0d65435-7a31-55c5-975f-0649a6b21ea3": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0.8,
+              0.3
+            ],
+            "rotation": [
+              -0.0,
+              -0.104528,
+              -0.0,
+              0.994522
+            ],
+            "scale": [
+              1.6,
+              1.6,
+              1.6
+            ]
+          }
+        },
+        "a15260d2-908f-5ca6-853b-6921a061bfea": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "fb120172-08e0-5e51-80be-340e74fc6b08"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "bef43677-1050-5815-b12c-a91c483fb119": {
+          "type": "game.Dissolve",
+          "version": 1,
+          "data": {
+            "period": 6.0,
+            "hold": 1.0
+          }
+        }
+      }
+    },
+    "f802d9b4-29e8-5eda-9a57-0f09ff520c9e": {
+      "name": "Blue Edge Sphere",
+      "parent": null,
+      "children": [],
+      "components": {
+        "7c8d822b-dbbd-5de7-a5d1-2aebccca1ea7": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              2.4,
+              0.9,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1.6,
+              1.6,
+              1.6
+            ]
+          }
+        },
+        "fae29eb8-1238-5a71-a9bd-8140b449bb71": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Sphere"
+            },
+            "material": {
+              "asset": "a9242a7f-5258-5676-bcd8-8dcc4cc1cd91"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "c26279a2-51da-5e39-9cc2-1dfa63e20f0e": {
+      "name": "Camera",
+      "parent": null,
+      "children": [],
+      "components": {
+        "f0f24dbb-5159-5719-a8dd-395c4d680b0a": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              3.1,
+              7.2
+            ],
+            "rotation": [
+              -0.14773,
+              0.0,
+              0.0,
+              0.989028
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c5ca493d-a644-5aa5-b76c-05237db25cec": {
+          "type": "fynkel.Camera",
+          "version": 1,
+          "data": {
+            "projection": "perspective",
+            "fov_y": 0.8,
+            "ortho_height": 10.0,
+            "near": 0.1,
+            "far": 100.0,
+            "priority": 0,
+            "exposure_mode": "auto",
+            "exposure": 12.0,
+            "culling_mask": 4294967295
+          }
+        }
+      }
+    }
+  }
+}

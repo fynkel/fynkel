@@ -17,7 +17,9 @@
 // copy the app bundles (fynkel_cache/, unpacked at start-up) — which is
 // how the same build runs on an iPhone.
 // Q cycles the project's quality profiles (fynkel.project.json `quality`);
-// Space pauses and resumes the orbit. The `move` action (A/D, the left
+// 1–4 switch between the showcase and the example shaders' scenes
+// (dissolve, water, rim light: assets/shaders/); Space pauses and resumes
+// the orbit. The `move` action (A/D, the left
 // stick, the touch overlay's stick on a phone) scrubs the orbit.
 
 import 'dart:io';
@@ -67,9 +69,21 @@ class _GamePageState extends State<GamePage> {
   double _pausedSpeed = 0;
 
   /// Q: the next quality profile (the project default, `medium`, first).
+  /// 1–4: the showcase, then the dissolve, water and rim light scenes.
   /// Space: pause / resume the camera orbit.
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    const digits = [
+      LogicalKeyboardKey.digit1,
+      LogicalKeyboardKey.digit2,
+      LogicalKeyboardKey.digit3,
+      LogicalKeyboardKey.digit4,
+    ];
+    final scene = digits.indexOf(event.logicalKey);
+    if (scene >= 0) {
+      setState(() => _game!.loadScene(Game.scenes.values.elementAt(scene)));
+      return KeyEventResult.handled;
+    }
     if (event.logicalKey == LogicalKeyboardKey.keyQ) {
       final viewport = _viewport!;
       final current = profiles.indexOf(viewport.quality ?? 'medium');
@@ -213,7 +227,8 @@ class Hud extends StatelessWidget {
     final s = stats;
     final lines = <String>[
       'Fynkel Showcase',
-      'scene      ${game.report.sceneName} (${game.report.entityCount} entities)',
+      'scene      ${game.scene.sceneName} (${game.scene.entityCount} entities)  '
+          '[${[for (final (i, name) in Game.scenes.keys.indexed) '${i + 1} $name'].join(', ')}]',
       'tick       ${game.world.tick}',
       'behaviours ${game.world.behaviours.length} attached',
       for (final sp in game.world.behaviours.whereType<Spinner>())
