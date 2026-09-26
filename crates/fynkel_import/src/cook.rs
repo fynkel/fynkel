@@ -1079,6 +1079,26 @@ fn cook_one(
                 info["points"] = json!(blend.points.len());
                 info["sync"] = json!(blend.sync);
             }
+            // An Animator Controller (ADR-0032) likewise: its names resolve,
+            // its conditions fit their parameters and its states play clips
+            // or blend spaces; the runtime reads the document.
+            if doc.kind == DocumentKind::Controller {
+                let controller = fynkel_document::Controller::from_document(doc.clone());
+                let mut checked = controller.validate(schemas);
+                checked.extend(controller.validate_references(db));
+                let bad = has_errors(&checked);
+                diagnostics.extend(checked);
+                if bad {
+                    return None;
+                }
+                info["parameters"] = json!(controller.parameters.len());
+                info["layers"] = json!(controller.layers.len());
+                info["states"] = json!(controller
+                    .layers
+                    .iter()
+                    .map(|l| l.states.len())
+                    .sum::<usize>());
+            }
             // A volume profile (R3a) likewise: its fields in range and
             // readable, then written as it is for the renderer to blend.
             if doc.kind == DocumentKind::Volume {

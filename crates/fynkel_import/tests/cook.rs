@@ -1417,6 +1417,98 @@ fn a_blend_space_cooks_as_its_document_and_depends_on_its_clips() {
             && d.message.contains("energy.blend.json failed")));
 }
 
+/// ADR-0032: an Animator Controller cooks as its document once its
+/// names resolve and its states play clips or blend spaces, with their
+/// carriers as its dependencies; one that plays a mesh fails.
+#[test]
+fn an_animator_controller_cooks_as_its_document_and_depends_on_its_motions() {
+    const GLB: &str = "b0000000-0000-4000-8000-000000000012";
+    const SPACE: &str = "c0000000-0000-4000-8000-000000000051";
+    const PLAYER: &str = "c0000000-0000-4000-8000-000000000052";
+    let p = Project::new("controller-doc");
+    std::fs::copy(
+        fixtures().join("rig.glb"),
+        p.assets().join("models/rig.glb"),
+    )
+    .unwrap();
+    let file = p.assets().join("models/rig.glb");
+    let text = format!(
+        r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"{GLB}","name":"rig.glb","importer":"fynkel.gltf","importerVersion":{},"settings":{{}},"subAssets":{{}}}}"#,
+        fynkel_import::gltf::IMPORTER_VERSION
+    );
+    let mut meta = fynkel_document::Meta::from_document(
+        fynkel_document::Document::parse(fynkel_document::DocumentKind::Meta, None, &text).unwrap(),
+    );
+    let imported = fynkel_import::import(&file, &meta, &fynkel_import::Limits::default());
+    assert!(!imported.has_errors(), "{:?}", imported.diagnostics);
+    meta.sub_assets = imported.sub_assets;
+    p.write(
+        "models/rig.glb.meta.json",
+        &meta.to_document().write().unwrap(),
+    );
+    std::fs::create_dir_all(p.assets().join("rigs")).unwrap();
+    p.write(
+        "rigs/energy.blend.json",
+        &format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/blend.schema.json","formatVersion":1,"id":"{SPACE}","name":"Energy","parameter":"speed","points":[{{"at":0,"clip":{{"asset":"{GLB}","sub":"anim/bob"}}}},{{"at":1,"clip":{{"asset":"{GLB}","sub":"anim/wave"}}}}]}}"#
+        ),
+    );
+    let controller = |jump: &str| {
+        format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/controller.schema.json","formatVersion":1,"id":"{PLAYER}","name":"Player",
+              "parameters":[{{"name":"speed","type":"float"}},{{"name":"jump","type":"trigger"}}],
+              "layers":[{{"name":"Base Layer","defaultState":"Locomotion",
+                "states":[{{"name":"Locomotion","motion":{{"asset":"{SPACE}"}}}},{{"name":"Jump","motion":{jump},"loop":false}}],
+                "transitions":[{{"from":"any","to":"Jump","conditions":[{{"parameter":"jump"}}]}},{{"from":"Jump","to":"Locomotion","exitTime":1}}]}}]}}"#
+        )
+    };
+    p.write(
+        "rigs/player.controller.json",
+        &controller(&format!(r#"{{"asset":"{GLB}","sub":"anim/wave"}}"#)),
+    );
+    let r = p.cook();
+    assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    let cooked = r.get(id(PLAYER)).unwrap();
+    assert_eq!(cooked.status, Status::Cooked);
+    assert_eq!(cooked.kind, "document/controller");
+    let mut deps = cooked.dependencies.clone();
+    deps.sort();
+    assert_eq!(deps, vec![id(GLB), id(SPACE)]);
+    let mut f = ChunkFile::open_path(cooked.file.as_ref().unwrap()).unwrap();
+    f.verify().unwrap();
+    let kinds: Vec<String> = f.chunks().iter().map(|c| c.kind_str()).collect();
+    assert_eq!(kinds, ["META", "JSON"]);
+    let meta: serde_json::Value = serde_json::from_slice(&f.meta(1 << 20).unwrap()).unwrap();
+    let info = &meta["chunks"][1];
+    assert_eq!(info["documentKind"], "controller");
+    assert_eq!(
+        (
+            info["parameters"].as_u64(),
+            info["layers"].as_u64(),
+            info["states"].as_u64()
+        ),
+        (Some(2), Some(1), Some(2))
+    );
+    let again = p.cook();
+    assert!(all(&again, Status::Cached), "{:?}", statuses(&again));
+
+    // A state playing a mesh: D1103, the controller fails.
+    p.write(
+        "rigs/player.controller.json",
+        &controller(&format!(r#"{{"asset":"{GLB}","sub":"mesh/Body"}}"#)),
+    );
+    let r = p.cook();
+    assert_eq!(status(&r, PLAYER), Status::Failed);
+    assert!(
+        r.diagnostics
+            .iter()
+            .any(|d| d.code == fynkel_contracts::Code::CONTROLLER_MOTION
+                && d.pointer.as_deref() == Some("/layers/0/states/1/motion")),
+        "{:?}",
+        r.diagnostics
+    );
+}
+
 #[test]
 fn a_volume_profile_cooks_as_its_document_and_a_scene_depends_on_it() {
     const LOOK: &str = "c0000000-0000-4000-8000-000000000701";
