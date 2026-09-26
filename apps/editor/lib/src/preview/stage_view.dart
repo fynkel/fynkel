@@ -9,6 +9,7 @@
 // zoom, the middle button or Shift-drag to pan, the right button to turn
 // the light, F or a double-click to frame it again.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
@@ -75,7 +76,16 @@ EditorCamera cameraOf(StageFraming f) {
 }
 
 class StageView extends StatefulWidget {
-  const StageView({super.key, required this.asset, this.sub, this.shape, this.clip, this.onStats});
+  const StageView({
+    super.key,
+    required this.asset,
+    this.sub,
+    this.shape,
+    this.clip,
+    this.tree,
+    this.treeValues = const {},
+    this.onStats,
+  });
 
   final String asset;
   final String? sub;
@@ -83,6 +93,11 @@ class StageView extends StatefulWidget {
 
   /// Played on the model (a blend space's stage plays its own).
   final PreviewClip? clip;
+
+  /// A blend tree played on the model instead (a state's `motion`,
+  /// `{blendTree: …}`; ADR-0033), at [treeValues] of its parameters.
+  final Map<String, Object?>? tree;
+  final Map<String, double> treeValues;
   final void Function(PreviewStageStats stats)? onStats;
 
   @override
@@ -140,12 +155,18 @@ class StageViewState extends State<StageView> with SingleTickerProviderStateMixi
     super.didUpdateWidget(oldWidget);
     if (oldWidget.asset != widget.asset || oldWidget.sub != widget.sub) {
       _open();
+    } else if (!_sameJson(oldWidget.tree, widget.tree)) {
+      _putTree();
+    } else if (!_sameJson(oldWidget.treeValues, widget.treeValues)) {
+      if (_clip case final clip?) _seek(clip.time, values: widget.treeValues);
     } else if (oldWidget.clip != widget.clip) {
       _putClip();
     } else if (!_sameShape(oldWidget.shape, widget.shape) && widget.shape != null) {
       _setShape(widget.shape!);
     }
   }
+
+  static bool _sameJson(Object? a, Object? b) => a == b || (a != null && b != null && jsonEncode(a) == jsonEncode(b));
 
   static bool _sameShape(Object? a, Object? b) {
     if (a is Map && b is Map) return a['asset'] == b['asset'] && a['sub'] == b['sub'];
@@ -204,7 +225,9 @@ class StageViewState extends State<StageView> with SingleTickerProviderStateMixi
       }
       _stats(stage.state);
       _clip = stage.state.clip;
-      if (widget.clip != null) {
+      if (widget.tree != null) {
+        _putTree();
+      } else if (widget.clip != null) {
         _putClip();
       } else if (_clip != null) {
         _play(true);
@@ -225,6 +248,23 @@ class StageViewState extends State<StageView> with SingleTickerProviderStateMixi
     final c = widget.clip;
     try {
       _clip = stage.setClip(keep: false, clip: c == null ? null : {'asset': c.asset, 'sub': c.sub}, time: 0);
+    } on AuthoringException catch (e) {
+      _clip = null;
+      _toast(e.diagnostics.firstOrNull?.message ?? '$e');
+    }
+    _play(_clip != null);
+    _schedule();
+  }
+
+  /// The widget's blend tree on the stage, kept playing where it was; a
+  /// tree the stage refuses (a child with no clip yet) shows the rest pose.
+  void _putTree() {
+    final stage = _stage;
+    final tree = widget.tree;
+    if (stage == null || tree == null) return;
+    try {
+      _clip = stage.setClip(tree: tree, values: widget.treeValues, time: _clip?.time ?? 0);
+      _error = null;
     } on AuthoringException catch (e) {
       _clip = null;
       _toast(e.diagnostics.firstOrNull?.message ?? '$e');
@@ -267,11 +307,11 @@ class StageViewState extends State<StageView> with SingleTickerProviderStateMixi
   }
 
   /// The model posed at [time] seconds.
-  void _seek(double time, {bool? inPlace, double? parameter}) {
+  void _seek(double time, {bool? inPlace, double? parameter, Map<String, double>? values}) {
     final stage = _stage;
     if (stage == null || stage.isClosed) return;
     try {
-      final next = stage.setClip(time: time, inPlace: inPlace, parameter: parameter);
+      final next = stage.setClip(time: time, inPlace: inPlace, parameter: parameter, values: values);
       if (mounted) setState(() => _clip = next);
     } on AuthoringException {
       _play(false);

@@ -263,6 +263,7 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
       _item('state.empty', 'Create State ▸ Empty', enabled: c.canEdit),
       _item('state.clip', 'Create State ▸ From Clip…', enabled: c.canEdit && widget.assets != null),
       _item('state.blend', 'Create State ▸ From Blend Space…', enabled: c.canEdit && widget.assets != null),
+      _item('state.tree', 'Create State ▸ From New Blend Tree…', enabled: c.canEdit && widget.assets != null),
       const PopupMenuDivider(),
       _item('frame', 'Frame All  F'),
     ]);
@@ -271,8 +272,9 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
     switch (choice) {
       case 'state.empty':
         model.createState(at);
-      case 'state.clip' || 'state.blend':
-        final kind = choice == 'state.clip' ? 'clip' : 'blend';
+      case 'state.clip' || 'state.blend' || 'state.tree':
+        // A new blend tree starts with a clip (a tree is never empty).
+        final kind = choice == 'state.blend' ? 'blend' : 'clip';
         final picked = await pickAssetRef(
           context,
           kind: kind,
@@ -282,7 +284,7 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
               if (a.offeredKinds.contains(kind)) a,
           ],
         );
-        if (picked?.ref != null) model.createState(at, motion: picked!.ref);
+        if (picked?.ref != null) model.createState(at, motion: picked!.ref, tree: choice == 'state.tree');
       case 'frame':
         setState(() => _frame(c));
     }
@@ -566,6 +568,7 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
                           s['name'] as String,
                           s['name'] == def ? defaultStateColor : null,
                           progress: progress[s['name']],
+                          tree: s['motion'] is Map && (s['motion'] as Map)['blendTree'] is Map,
                         ),
                     ],
                   ),
@@ -586,6 +589,7 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
     String label,
     Color? fill, {
     double? progress,
+    bool tree = false,
   }) {
     final r = _box(c, key);
     final selected = key == model.selectedState;
@@ -631,11 +635,29 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
                         onSubmitted: _commitRename,
                         onTapOutside: (_) => _commitRename(_renameText?.text ?? ''),
                       )
-                    : Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(color: fill == null ? t.text : Colors.white),
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // A state playing a blend tree (ADR-0033): the Inspector edits it.
+                          if (tree)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 4),
+                              child: Icon(
+                                FIcons.accountTreeOutlined,
+                                key: Key('animator.state.$key.tree'),
+                                size: 11,
+                                color: fill == null ? t.textSecondary : Colors.white70,
+                              ),
+                            ),
+                          Flexible(
+                            child: Text(
+                              label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(color: fill == null ? t.text : Colors.white),
+                            ),
+                          ),
+                        ],
                       ),
               ),
             ),

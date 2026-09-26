@@ -27,8 +27,20 @@ abstract class StageBackend {
   /// A material document's fields drawn by every world of the session.
   void setMaterial(String material, Map<String, Object?> data);
 
-  /// A clip on a hierarchy's stage, seeked (see [PreviewStage.setClip]).
-  StageClip? setClip({Object? clip, bool keep = true, double? time, bool? inPlace, double? parameter});
+  /// A clip on a hierarchy's stage, seeked (see [PreviewStage.setClip]);
+  /// or a blend tree ([tree], at [values]; ADR-0033).
+  StageClip? setClip({
+    Object? clip,
+    bool keep = true,
+    double? time,
+    bool? inPlace,
+    double? parameter,
+    Map<String, Object?>? tree,
+    Map<String, double>? values,
+  });
+
+  /// Each clip's root travel on the subject (see [PreviewStage.travel]).
+  List<StageTravel?> travel(List<Map<String, Object?>> clips);
 
   /// A sound stage's waveform, playback and playhead.
   SoundPeaks peaks(int columns);
@@ -61,9 +73,19 @@ final class SessionStage implements StageBackend {
   @override
   void setMaterial(String material, Map<String, Object?> data) => stage.setMaterial(material, data);
   @override
-  StageClip? setClip({Object? clip, bool keep = true, double? time, bool? inPlace, double? parameter}) => keep
-      ? stage.setClip(time: time, inPlace: inPlace, parameter: parameter)
+  StageClip? setClip({
+    Object? clip,
+    bool keep = true,
+    double? time,
+    bool? inPlace,
+    double? parameter,
+    Map<String, Object?>? tree,
+    Map<String, double>? values,
+  }) => keep
+      ? stage.setClip(time: time, inPlace: inPlace, parameter: parameter, tree: tree, values: values)
       : stage.setClip(clip: clip, time: time, inPlace: inPlace, parameter: parameter);
+  @override
+  List<StageTravel?> travel(List<Map<String, Object?>> clips) => stage.travel(clips);
   @override
   SoundPeaks peaks(int columns) => stage.peaks(columns);
   @override

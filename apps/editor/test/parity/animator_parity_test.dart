@@ -277,6 +277,145 @@ void main() {
     await tester.pumpAndSettle();
     expect(barsIn('Idle'), isEmpty);
   });
+
+  testWidgets('a blend tree (ADR-0033): From New Blend Tree, its motions and map, a nested tree, one undo step each', (
+    tester,
+  ) async {
+    final e = await Editor.open(
+      tester,
+      prepare: (dir) {
+        writeController(dir);
+        final f = File('${dir.path}/$controllerPath');
+        final json = jsonDecode(f.readAsStringSync()) as Map<String, Object?>;
+        json['parameters'] = [
+          {'name': 'speed', 'type': 'float'},
+          {'name': 'turn', 'type': 'float'},
+        ];
+        f.writeAsStringSync(jsonEncode(json));
+      },
+    );
+    Map<String, Object?> saved() =>
+        jsonDecode(File('${e.dir.path}/$controllerPath').readAsStringSync()) as Map<String, Object?>;
+    Map<String, Object?> state(String name) => [
+      for (final s in ((saved()['layers'] as List).first as Map)['states'] as List)
+        if ((s as Map)['name'] == name) s.cast<String, Object?>(),
+    ].single;
+    Map tree(String name) => (state(name)['motion'] as Map)['blendTree'] as Map;
+    final doc = e.shell.assetEdits!.document(controllerId)!;
+    e.shell.workspace!.show(PanelRegistry.animation);
+    e.shell.selection!.inspect(const InspectAsset(controllerId));
+    await tester.pumpAndSettle();
+
+    // The preview plays in a loop: time is pumped, never settled.
+    Future<void> settle() async {
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+    }
+
+    Future<void> click(Finder f) async {
+      await tester.tap(f);
+      await settle();
+    }
+
+    Future<void> pick(String name) async {
+      await tester.enterText(find.byKey(const ValueKey('assetPicker.search')), name);
+      await settle();
+      // The one row the search leaves.
+      await click(find.byWidgetPredicate((w) => '${w.key}'.startsWith("[<'assetPicker.row.")).first);
+    }
+
+    const wave = {'asset': rigAsset, 'sub': 'anim/wave'};
+    const bob = {'asset': rigAsset, 'sub': 'anim/bob'};
+    // Right-click the graph: Create State ▸ From New Blend Tree…, a 1D tree on the first
+    // float holding the clip picked (a tree is never empty).
+    final graph = tester.getRect(find.byKey(const Key('animator.graph')));
+    await tester.tapAt(graph.center + const Offset(120, -40), buttons: kSecondaryMouseButton);
+    await settle();
+    await click(find.byKey(const Key('animator.menu.state.tree')));
+    await pick('wave');
+    expect(tree('Blend Tree'), {
+      'type': '1d',
+      'parameters': ['speed'],
+      'children': [
+        {'motion': wave, 'threshold': 0},
+      ],
+    });
+    expect(find.byKey(const Key('animator.state.Blend Tree.tree')), findsOneWidget, reason: 'the box shows a tree');
+    expect(find.byKey(const Key('blendTree.type')), findsOneWidget, reason: 'the Inspector edits it');
+    expect(find.byKey(const Key('animatorItem.motion')), findsNothing);
+
+    // + ▸ Add Motion…: bob, one past the last threshold. The last motion is not removed.
+    await click(find.byKey(const Key('blendTree.add')));
+    await click(find.byKey(const Key('blendTree.add.motion')));
+    await pick('bob');
+    expect(tree('Blend Tree')['children'], [
+      {'motion': wave, 'threshold': 0},
+      {'motion': bob, 'threshold': 1.0},
+    ]);
+    expect(doc.history, 2, reason: 'one step each');
+    final c = e.shell.animator!.controller!;
+
+    // speed 0: all wave. A click halfway along the line tries speed 0.5 (the file is left alone).
+    String weight(int i) => tester.widget<Text>(find.byKey(Key('blendTree.child.$i.weight'))).data!;
+    expect((weight(0), weight(1)), ('100 %', '0 %'));
+    final map = tester.getRect(find.byKey(const Key('blendTree.map')));
+    await tester.tapAt(map.centerLeft + Offset(map.width / 2, 0));
+    await tester.pump();
+    expect((weight(0), weight(1)), ('50 %', '50 %'));
+    expect((saved()['parameters'] as List).first, {'name': 'speed', 'type': 'float'});
+    expect(find.byKey(const Key('blendTree.preview')), findsOneWidget, reason: 'it plays on the clips\' model');
+
+    // Dragging a diamond moves the child, in one step.
+    final steps = doc.history;
+    final right = map.centerLeft + Offset(map.width * (0.12 + 1) / 1.24, 0);
+    final gesture = await tester.startGesture(right);
+    await gesture.moveBy(Offset(-map.width / 1.24 / 2, 0));
+    await gesture.moveBy(const Offset(-1, 0));
+    await gesture.up();
+    await settle();
+    expect(doc.history, steps + 1);
+    final moved = ((tree('Blend Tree')['children'] as List)[1] as Map)['threshold'] as num;
+    expect(moved, closeTo(0.5, 0.05));
+
+    // 2D Freeform Cartesian: two parameters, each threshold a position.
+    c.setTreeType(0, 'Blend Tree', const [], 'freeformCartesian');
+    expect(tree('Blend Tree')['parameters'], ['speed', 'turn']);
+    expect(((tree('Blend Tree')['children'] as List)[0] as Map)['position'], [0.0, 0.0]);
+
+    // + ▸ New Blend Tree: a child tree; open it, then back along the path.
+    await settle();
+    await click(find.byKey(const Key('blendTree.add')));
+    await click(find.byKey(const Key('blendTree.add.tree')));
+    await pick('wave');
+    final nested = (((tree('Blend Tree')['children'] as List)[2] as Map)['motion'] as Map)['blendTree'] as Map;
+    expect(nested['children'], [
+      {'motion': wave, 'threshold': 0},
+    ]);
+    await click(find.byKey(const Key('blendTree.child.2.open')));
+    expect(find.byKey(const Key('blendTree.path')), findsOneWidget);
+    expect(find.byKey(const Key('blendTree.child.1')), findsNothing, reason: 'the nested tree holds one');
+    expect(c.removeChild(0, 'Blend Tree', const [2], 0), isFalse, reason: 'a tree keeps one motion');
+    await click(find.byKey(const Key('blendTree.path.0')));
+    expect(find.byKey(const Key('blendTree.path')), findsNothing);
+    expect(find.byKey(const Key('blendTree.child.2.open')), findsOneWidget);
+
+    // A parameter renamed reaches the tree.
+    c.renameParameter('speed', 'pace');
+    expect(tree('Blend Tree')['parameters'], ['pace', 'turn']);
+
+    // Make Blend Tree on a state playing a clip: a 1D tree holding the clip.
+    final made = e.shell.animator!.createState(const Offset(0, 200), motion: bob)!;
+    await settle();
+    await click(find.byKey(const Key('animatorItem.makeTree')));
+    expect(tree(made), {
+      'type': '1d',
+      'parameters': ['pace'],
+      'children': [
+        {'motion': bob, 'threshold': 0},
+      ],
+    });
+  });
 }
 
 final class _FakeLive implements AnimatorLive {

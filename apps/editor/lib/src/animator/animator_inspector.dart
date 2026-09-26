@@ -1,5 +1,6 @@
 // The Inspector for what the Animator window selected (ADR-0032 § 8), as
-// Unity's: a **state** — its name, motion (a clip or a blend space),
+// Unity's: a **state** — its name, motion (a clip, a blend space, or a
+// blend tree edited in place: `blend_tree_inspector.dart`),
 // speed and speed parameter, loop, root motion, and the transitions out
 // of it in the order they are tried — or a **transition** — Has Exit Time
 // and the exit time, the duration, the offset, and its conditions with
@@ -15,6 +16,7 @@ import '../shell/editor_selection.dart';
 import '../theme/icons.dart';
 import '../theme/tokens.dart';
 import 'animator_model.dart';
+import 'blend_tree_inspector.dart';
 import 'controller_edits.dart';
 
 class AnimatorItemPage extends StatefulWidget {
@@ -161,6 +163,7 @@ class _AnimatorItemPageState extends State<AnimatorItemPage> {
     }
 
     final motion = s['motion'];
+    final isTree = motion is Map && motion['blendTree'] != null;
     final speed = s['speed'];
     final rootMotion = s['rootMotion'];
     final out = [
@@ -187,25 +190,45 @@ class _AnimatorItemPageState extends State<AnimatorItemPage> {
               },
             ),
           ),
-          FieldRow(
-            label: 'Motion',
-            tooltip: 'An animation clip or a blend space. None: the state holds the pose.',
-            child: AssetField(
-              key: const Key('animatorItem.motion'),
-              value: motion is Map ? motion.cast<String, Object?>() : null,
-              kinds: const {'clip', 'blend'},
-              nullable: true,
-              enabled: enabled,
-              subject: 'Motion',
-              describe: (r) => describeAssetRef(edits.project, r),
-              candidates: () => [
-                for (final a in edits.project.assets())
-                  if (a.offeredKinds.contains('clip') || a.offeredKinds.contains('blend')) a,
-              ],
-              onPing: widget.onPing,
-              onCommit: (r) => r == null ? clear('motion') : set('motion', r),
+          if (isTree)
+            FieldRow(
+              label: 'Motion',
+              tooltip: 'A blend tree: edit it below. Remove it to give the state a clip again.',
+              child: Row(
+                children: [
+                  Icon(FIcons.accountTreeOutlined, size: 13, color: t.textSecondary),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text('Blend Tree', style: Theme.of(context).textTheme.bodySmall)),
+                  IconButton(
+                    key: const Key('animatorItem.removeTree'),
+                    tooltip: 'Remove the blend tree',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(FIcons.remove, size: 13),
+                    onPressed: enabled ? () => clear('motion') : null,
+                  ),
+                ],
+              ),
+            )
+          else
+            FieldRow(
+              label: 'Motion',
+              tooltip: 'An animation clip or a blend space. None: the state holds the pose.',
+              child: AssetField(
+                key: const Key('animatorItem.motion'),
+                value: motion is Map ? motion.cast<String, Object?>() : null,
+                kinds: const {'clip', 'blend'},
+                nullable: true,
+                enabled: enabled,
+                subject: 'Motion',
+                describe: (r) => describeAssetRef(edits.project, r),
+                candidates: () => [
+                  for (final a in edits.project.assets())
+                    if (a.offeredKinds.contains('clip') || a.offeredKinds.contains('blend')) a,
+                ],
+                onPing: widget.onPing,
+                onCommit: (r) => r == null ? clear('motion') : set('motion', r),
+              ),
             ),
-          ),
           KeyedSubtree(
             key: const Key('animatorItem.speed'),
             child: NumberField(
@@ -268,6 +291,29 @@ class _AnimatorItemPageState extends State<AnimatorItemPage> {
           ),
         ),
       ),
+      if (!isTree)
+        Padding(
+          padding: EdgeInsets.fromLTRB(t.pad + 2, 0, t.pad + 2, 6),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: PageAction(
+              key: const Key('animatorItem.makeTree'),
+              icon: FIcons.accountTreeOutlined,
+              label: 'Make Blend Tree',
+              onPressed: enabled ? () => _makeTree(context, name, motion) : null,
+            ),
+          ),
+        )
+      else
+        BlendTreeSection(
+          key: ValueKey('blendTree.${target.controller}.$layer.$name'),
+          edits: edits,
+          controller: target.controller,
+          layer: layer,
+          state: name,
+          animator: widget.animator,
+          onPing: widget.onPing,
+        ),
       InspectorSection(
         title: 'Transitions',
         children: [
@@ -284,6 +330,27 @@ class _AnimatorItemPageState extends State<AnimatorItemPage> {
         ],
       ),
     ];
+  }
+
+  /// Make Blend Tree: a tree holding the state's motion, or (none yet) a
+  /// clip picked first (a tree is never empty).
+  Future<void> _makeTree(BuildContext context, String name, Object? motion) async {
+    Map<String, Object?>? first;
+    if (motion == null) {
+      final picked = await pickAssetRef(
+        context,
+        kind: null,
+        kinds: const {'clip', 'blend'},
+        subject: 'New Blend Tree',
+        candidates: () => [
+          for (final a in edits.project.assets())
+            if (a.offeredKinds.contains('clip') || a.offeredKinds.contains('blend')) a,
+        ],
+      );
+      first = picked?.ref;
+      if (first == null || !mounted) return;
+    }
+    c.makeTree(target.layer, name, first: first);
   }
 
   /// A transition out of the state: its target, ↑ ↓ to change the order

@@ -8,9 +8,19 @@
 // them, so a rename rewrites every reference in the same step, and a
 // delete takes what named it along. Where each box sits in the graph is
 // the document's `editor` member: `{layer: {state: [x, y]}}`.
+//
+// A state's motion may be a blend tree (ADR-0033): `{blendTree: {type,
+// parameters, children: [{motion, threshold | position, timeScale,
+// parameter}]}}`, nested. A tree is found by its state and the path of
+// child indices down to it ([] is the state's own); its edits keep the
+// shape the type needs (a threshold in 1D, a position in 2D, a weight
+// parameter in Direct), and a tree always holds a motion (the document
+// refuses an empty one), so a new tree starts with the clip it was made
+// from.
 import 'dart:ui' show Offset;
 
 import '../inspector/asset_edits.dart';
+import 'blend_tree_weights.dart';
 
 /// Entry's and Any State's places in `editor` (a state is never named so:
 /// the window refuses a name that starts with `#`).
@@ -166,6 +176,12 @@ final class ControllerEdits {
     });
   }
 
+  /// A new state playing a 1D blend tree on the first float parameter,
+  /// holding [first] (Unity's Create State ▸ From New Blend Tree; a tree
+  /// is never empty, so it starts with a motion).
+  String? createTreeState(int layer, Offset at, Map<String, Object?> first) =>
+      createState(layer, at, motion: newTree('1d', first: first), name: 'Blend Tree');
+
   /// Deletes a state with its transitions; the default moves to the first
   /// state left (none: unset).
   bool deleteState(int layer, String name) {
@@ -218,6 +234,249 @@ final class ControllerEdits {
     if (i < 0) return false;
     if (key == 'name') return renameState(layer, name, value as String);
     return edits.edit(id, {'/layers/$layer/states/$i/$key': value});
+  }
+
+  // ── Blend trees (ADR-0033) ──────────────────────────────────────────────
+
+  /// The float parameters, in order.
+  List<String> get floats => [
+    for (final p in parameters)
+      if (p['type'] == 'float') p['name'] as String,
+  ];
+
+  /// A tree of [type] on the first float parameters, [first] its one
+  /// child at the origin.
+  Map<String, Object?> newTree(String type, {required Map<String, Object?> first}) => {
+    'blendTree': {
+      'type': type,
+      if (treeParameterCount(type) > 0) 'parameters': floats.take(treeParameterCount(type)).toList(),
+      'children': [
+        _shaped({'motion': first, 'threshold': 0, 'position': const [0, 0]}, type),
+      ],
+    },
+  };
+
+  /// The pointer of the motion at [path] in [state] of [layer].
+  String? motionPointer(int layer, String state, List<int> path) {
+    final i = states(layer).indexWhere((s) => s['name'] == state);
+    if (i < 0) return null;
+    return ['/layers/$layer/states/$i/motion', for (final k in path) '/blendTree/children/$k/motion'].join();
+  }
+
+  /// The motion at [path] (a clip's ref, a tree, or null).
+  Map<String, Object?>? motionAt(int layer, String state, List<int> path) {
+    Object? m = this.state(layer, state)?['motion'];
+    for (final k in path) {
+      final tree = m is Map ? m['blendTree'] : null;
+      final children = tree is Map ? tree['children'] : null;
+      if (children is! List || k < 0 || k >= children.length) return null;
+      final child = children[k];
+      m = child is Map ? child['motion'] : null;
+    }
+    return m is Map ? _map(m) : null;
+  }
+
+  /// The tree at [path]: `{type, parameters, children}`; null when the
+  /// motion there is not a tree.
+  Map<String, Object?>? treeAt(int layer, String state, List<int> path) {
+    final t = motionAt(layer, state, path)?['blendTree'];
+    return t is Map ? _map(t) : null;
+  }
+
+  List<Map<String, Object?>> treeChildren(int layer, String state, List<int> path) =>
+      _maps(treeAt(layer, state, path)?['children']);
+
+  /// Replaces the tree at [path] (one undo step).
+  bool _setTree(int layer, String state, List<int> path, Map<String, Object?> tree) {
+    final at = motionPointer(layer, state, path);
+    return at != null && edits.edit(id, {'$at/blendTree': tree});
+  }
+
+  /// Makes the state's motion a blend tree: a 1D tree on the first float
+  /// parameter holding the motion it had, else [first] (Unity's Create
+  /// new BlendTree in State).
+  bool makeTree(int layer, String state, {Map<String, Object?>? first}) {
+    final old = motionAt(layer, state, const []);
+    if (old != null && old['blendTree'] != null) return true;
+    final motion = old ?? first;
+    if (motion == null) return _refuse('A blend tree starts with a motion: give the state a clip first.');
+    return setStateField(layer, state, 'motion', newTree('1d', first: motion));
+  }
+
+  /// A child's place as the type reads it: its position (2D), else its
+  /// threshold on x (1D; Direct has neither: 0, 0).
+  static (double, double) placeOf(Map<String, Object?> child) {
+    final p = child['position'];
+    if (p is List && p.length == 2 && p[0] is num && p[1] is num) {
+      return ((p[0] as num).toDouble(), (p[1] as num).toDouble());
+    }
+    final t = child['threshold'];
+    return (t is num ? t.toDouble() : 0, 0);
+  }
+
+  /// [child] with the member [type] needs, from what it had: a threshold
+  /// from a position's x, a position from a threshold, a weight parameter.
+  Map<String, Object?> _shaped(Map<String, Object?> child, String type) {
+    final (x, y) = placeOf(child);
+    final c = {...child}
+      ..remove('threshold')
+      ..remove('position');
+    if (type == '1d') c['threshold'] = x;
+    if (treeIs2d(type)) c['position'] = [x, y];
+    if (type == 'direct') {
+      c['parameter'] ??= floats.firstOrNull;
+      if (c['parameter'] == null) c.remove('parameter');
+    } else {
+      c.remove('parameter');
+    }
+    return c;
+  }
+
+  /// Changes the tree's type: its parameters to the count the type reads
+  /// (kept where they fit, else the next floats), each child reshaped.
+  bool setTreeType(int layer, String state, List<int> path, String type) {
+    final tree = treeAt(layer, state, path);
+    if (tree == null || !treeTypes.contains(type)) return false;
+    final n = treeParameterCount(type);
+    final parameters = [for (final p in (tree['parameters'] as List?) ?? const []) '$p'].take(n).toList();
+    for (final f in floats) {
+      if (parameters.length >= n) break;
+      if (!parameters.contains(f)) parameters.add(f);
+    }
+    final next = {
+      ...tree,
+      'type': type,
+      'parameters': parameters,
+      'children': [for (final c in _maps(tree['children'])) _shaped(c, type)],
+    };
+    if (parameters.isEmpty) next.remove('parameters');
+    return _setTree(layer, state, path, next);
+  }
+
+  /// Sets the tree's [index]th parameter.
+  bool setTreeParameter(int layer, String state, List<int> path, int index, String name) {
+    final tree = treeAt(layer, state, path);
+    if (tree == null) return false;
+    final list = [for (final p in (tree['parameters'] as List?) ?? const []) '$p'];
+    while (list.length <= index) {
+      list.add(name);
+    }
+    list[index] = name;
+    return _setTree(layer, state, path, {...tree, 'parameters': list});
+  }
+
+  /// A place for a new child of a tree of [type] that no child takes: 1D
+  /// one past the last threshold; 2D the first free spot of the unit
+  /// cross, then further out along +X.
+  static (double, double) freePlace(String type, List<Map<String, Object?>> children) {
+    final taken = [for (final c in children) placeOf(c)];
+    if (type == '1d') {
+      if (taken.isEmpty) return (0, 0);
+      return (taken.map((p) => p.$1).reduce((a, b) => a > b ? a : b) + 1, 0);
+    }
+    const cross = [(0.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0), (1.0, 0.0)];
+    for (final p in cross) {
+      if (!taken.contains(p)) return p;
+    }
+    for (var x = 2.0; ; x++) {
+      if (!taken.contains((x, 0.0))) return (x, 0);
+    }
+  }
+
+  /// Unity's + ▸ Add Motion ([motion], a clip or blend space) and
+  /// + ▸ New Blend Tree ([tree]: a 1D tree holding [motion]): a child at a
+  /// free place. Returns its index, or null.
+  int? addChild(int layer, String state, List<int> path, {required Map<String, Object?> motion, bool tree = false}) {
+    final t = treeAt(layer, state, path);
+    if (t == null) return null;
+    final type = t['type'] as String? ?? '1d';
+    final children = _maps(t['children']);
+    if (children.length >= 32) {
+      _refuse('A blend tree has 32 children at most.');
+      return null;
+    }
+    final (x, y) = freePlace(type, children);
+    final child = _shaped({
+      'motion': tree ? newTree('1d', first: motion) : motion,
+      'threshold': x,
+      'position': [x, y],
+    }, type);
+    final list = [...children, child];
+    return _setTree(layer, state, path, {...t, 'children': list}) ? list.length - 1 : null;
+  }
+
+  bool removeChild(int layer, String state, List<int> path, int index) {
+    final t = treeAt(layer, state, path);
+    final children = _maps(t?['children']);
+    if (t == null || index < 0 || index >= children.length) return false;
+    if (children.length == 1) return _refuse('A blend tree keeps one motion at least: remove the tree instead.');
+    children.removeAt(index);
+    return _setTree(layer, state, path, {...t, 'children': children});
+  }
+
+  /// Moves a child one place up ([by] -1) or down: its row in the list.
+  int? moveChild(int layer, String state, List<int> path, int index, int by) {
+    final t = treeAt(layer, state, path);
+    final children = _maps(t?['children']);
+    final j = index + by.sign;
+    if (t == null || index < 0 || index >= children.length || j < 0 || j >= children.length) return null;
+    final c = children[index];
+    children[index] = children[j];
+    children[j] = c;
+    return _setTree(layer, state, path, {...t, 'children': children}) ? j : null;
+  }
+
+  /// Sets (or with [unset], removes) one member of a child: `motion`,
+  /// `threshold`, `position`, `timeScale` or `parameter`.
+  bool setChildField(int layer, String state, List<int> path, int index, String key, Object? value) {
+    final at = motionPointer(layer, state, path);
+    if (at == null || index < 0 || index >= treeChildren(layer, state, path).length) return false;
+    return edits.edit(id, {'$at/blendTree/children/$index/$key': value});
+  }
+
+  /// Moves children on the map (a drag's end: one undo step): 1D sets the
+  /// threshold to x, 2D the position. Rounded to thousandths.
+  bool placeChildren(int layer, String state, List<int> path, Map<int, (double, double)> at) {
+    final t = treeAt(layer, state, path);
+    if (t == null || at.isEmpty) return false;
+    final type = t['type'] as String? ?? '1d';
+    double round(double v) => (v * 1000).roundToDouble() / 1000;
+    final children = [
+      for (final (i, c) in _maps(t['children']).indexed)
+        if (at[i] case (final x, final y))
+          {
+            ...c,
+            if (type == '1d') 'threshold': round(x) else 'position': [round(x), round(y)],
+          }
+        else
+          c,
+    ];
+    return _setTree(layer, state, path, {...t, 'children': children});
+  }
+
+  /// Unity's Compute Positions: each child's place from what [value] reads
+  /// of its clip (a child it has nothing for keeps its place). Two children
+  /// that would land on one place are refused, as the document would be.
+  bool computePlaces(int layer, String state, List<int> path, (double, double)? Function(int child) value) {
+    final t = treeAt(layer, state, path);
+    if (t == null) return false;
+    final children = _maps(t['children']);
+    final at = <int, (double, double)>{
+      for (var i = 0; i < children.length; i++)
+        i: ?value(i),
+    };
+    if (at.isEmpty) return _refuse('None of the children plays a clip that travels: the places are kept.');
+    double r(double v) => (v * 1000).roundToDouble() / 1000;
+    final places = [
+      for (var i = 0; i < children.length; i++)
+        switch (at[i] ?? placeOf(children[i])) {
+          (final x, final y) => (r(x), t['type'] == '1d' ? 0.0 : r(y)),
+        },
+    ];
+    if (places.toSet().length != places.length) {
+      return _refuse('Two children would be at one place (their clips travel alike): the places are kept.');
+    }
+    return placeChildren(layer, state, path, at);
   }
 
   // ── Transitions ─────────────────────────────────────────────────────────
@@ -324,7 +583,7 @@ final class ControllerEdits {
         for (final l in layers)
           _mapLayer(
             l,
-            (s) => s['speedParameter'] == from ? {...s, 'speedParameter': to} : s,
+            (s) => _renameInTrees(s['speedParameter'] == from ? {...s, 'speedParameter': to} : s, from, to),
             (c) => c['parameter'] == from ? {...c, 'parameter': to} : c,
           ),
       ],
@@ -349,6 +608,32 @@ final class ControllerEdits {
           ),
       ],
     });
+  }
+
+  /// [s] with every tree under its motion naming [from] naming [to].
+  static Map<String, Object?> _renameInTrees(Map<String, Object?> s, String from, String to) {
+    Object? motion(Object? m) {
+      if (m is! Map || m['blendTree'] is! Map) return m;
+      final t = _map(m['blendTree']);
+      return {
+        ..._map(m),
+        'blendTree': {
+          ...t,
+          if (t['parameters'] is List) 'parameters': [for (final p in t['parameters'] as List) p == from ? to : p],
+          if (t['children'] is List)
+            'children': [
+              for (final c in _maps(t['children']))
+                {
+                  ...c,
+                  if (c['parameter'] == from) 'parameter': to,
+                  if (c.containsKey('motion')) 'motion': motion(c['motion']),
+                },
+            ],
+        },
+      };
+    }
+
+    return s.containsKey('motion') ? {...s, 'motion': motion(s['motion'])} : s;
   }
 
   /// A parameter's default: a number for a float or an int, a bool for a

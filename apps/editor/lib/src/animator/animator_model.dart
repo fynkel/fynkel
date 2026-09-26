@@ -224,9 +224,13 @@ final class AnimatorModel extends ChangeNotifier {
 
   // The edits that move the selection with them.
 
-  /// Create State at [at]: the new state is selected.
-  String? createState(Offset at, {Map<String, Object?>? motion}) {
-    final name = controller?.createState(_layer, at, motion: motion);
+  /// Create State at [at], playing [motion] (with [tree], a blend tree
+  /// holding it, ADR-0033): the new state is selected.
+  String? createState(Offset at, {Map<String, Object?>? motion, bool tree = false}) {
+    final c = controller;
+    final name = tree && motion != null
+        ? c?.createTreeState(_layer, at, motion)
+        : c?.createState(_layer, at, motion: motion);
     if (name != null) selectState(name);
     return name;
   }
