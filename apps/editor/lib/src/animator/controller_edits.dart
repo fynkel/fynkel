@@ -36,6 +36,9 @@ const anyKey = '#any';
 /// The four parameter types, in Unity's order.
 const parameterTypes = ['float', 'int', 'bool', 'trigger'];
 
+/// The IK goals' types (ADR-0033 § 5), in the + menu's order.
+const ikTypes = ['twoBone', 'lookAt', 'footPlacement'];
+
 /// Where a new layer's Entry, Any State and first state go.
 const entryAt = Offset(-240, 0);
 const anyAt = Offset(-240, 90);
@@ -676,6 +679,10 @@ final class ControllerEdits {
             (c) => c['parameter'] == from ? {...c, 'parameter': to} : c,
           ),
       ],
+      if (ik.any((g) => g['weight'] == from))
+        '/ik': [
+          for (final g in ik) g['weight'] == from ? {...g, 'weight': to} : g,
+        ],
     });
   }
 
@@ -696,6 +703,11 @@ final class ControllerEdits {
             (c) => c['parameter'] == name ? null : c,
           ),
       ],
+      // A goal weighted by it keeps the value it had: whole.
+      if (ik.any((g) => g['weight'] == name))
+        '/ik': [
+          for (final g in ik) g['weight'] == name ? ({...g}..remove('weight')) : g,
+        ],
     });
   }
 
@@ -803,6 +815,96 @@ final class ControllerEdits {
   /// Sets (or with [unset], removes) a layer's `weight`, `blending` or `root`.
   bool setLayerField(int layer, String key, Object? value) =>
       this.layer(layer) != null && edits.edit(id, {'/layers/$layer/$key': value});
+
+  // ── Masks (ADR-0033 § 5) ───────────────────────────────────────────────
+
+  /// [layer]'s mask entries (`{node, include, subtree?}`); empty: every node.
+  List<Map<String, Object?>> mask(int layer) => _maps(this.layer(layer)?['mask']);
+
+  /// Whether a layer with [mask] poses a node, given its names from itself
+  /// up to the animator (the runtime's rule): the nearest entry decides —
+  /// the node's own, else a subtree entry of its nearest ancestor with one,
+  /// the last of two for the same node; with none, it is posed unless some
+  /// entry includes.
+  static bool maskedIn(List<Map<String, Object?>> mask, List<String> names) {
+    if (mask.isEmpty) return true;
+    for (final (depth, name) in names.indexed) {
+      final e = mask.reversed
+          .where((e) => e['node'] == name && (depth == 0 || e['subtree'] != false))
+          .firstOrNull;
+      if (e != null) return e['include'] == true;
+    }
+    return !mask.any((e) => e['include'] == true);
+  }
+
+  /// Unity's Avatar Mask tick: [node] (and what is under it, unless
+  /// [alone]) posed by [layer] or not. The entries for [node] and for the
+  /// nodes [under] it (their names) go, then one for [node] says it.
+  bool setMasked(int layer, String node, bool include, {bool alone = false, List<String> under = const []}) {
+    if (this.layer(layer) == null || node.isEmpty) return false;
+    final drop = {node, if (!alone) ...under};
+    final list = [
+      for (final e in mask(layer))
+        if (!drop.contains(e['node'])) e,
+      {'node': node, 'include': include, if (alone) 'subtree': false},
+    ];
+    return setLayerField(layer, 'mask', list);
+  }
+
+  /// Drops [layer]'s mask entry [index].
+  bool removeMaskEntry(int layer, int index) {
+    final list = mask(layer);
+    if (index < 0 || index >= list.length) return false;
+    list.removeAt(index);
+    return setLayerField(layer, 'mask', list.isEmpty ? unset : list);
+  }
+
+  /// The whole character again.
+  bool clearMask(int layer) => this.layer(layer)?['mask'] != null && setLayerField(layer, 'mask', unset);
+
+  // ── IK goals (ADR-0033 § 5) ────────────────────────────────────────────
+
+  List<Map<String, Object?>> get ik => _maps(root?['ik']);
+
+  /// + ▸ Two Bone / Look At / Foot Placement: a goal with the nodes a
+  /// humanoid usually has ([node] turns a wanted name into one the
+  /// character has, e.g. `mixamorig:RightHand`). Returns its index.
+  int? addIk(String type, {String Function(String wanted)? node}) {
+    if (!ikTypes.contains(type)) return null;
+    final n = node ?? (String w) => w;
+    final (base, fields) = switch (type) {
+      'twoBone' => ('hand', <String, Object?>{'tip': n('RightHand')}),
+      'lookAt' => ('look', <String, Object?>{'head': n('Head')}),
+      _ => ('feet', <String, Object?>{'hips': n('Hips'), 'left': n('LeftFoot'), 'right': n('RightFoot')}),
+    };
+    final name = unique(base, ik.map((g) => g['name']), sep: '');
+    final list = [
+      ...ik,
+      {'name': name, 'type': type, ...fields},
+    ];
+    return edits.edit(id, {'/ik': list}) ? list.length - 1 : null;
+  }
+
+  /// Sets (or with [unset], removes) a field of goal [index].
+  bool setIkField(int index, String key, Object? value) =>
+      index >= 0 && index < ik.length && edits.edit(id, {'/ik/$index/$key': value});
+
+  bool renameIk(int index, String to) {
+    if (index < 0 || index >= ik.length) return false;
+    if (ik[index]['name'] == to) return true;
+    if (to.trim().isEmpty || to != to.trim() || to.length > 64) {
+      return _refuse('A goal needs a name of 1 to 64 characters, with no space at either end.');
+    }
+    if (ik.any((g) => g['name'] == to)) return _refuse('The controller already has an IK goal named $to.');
+    return setIkField(index, 'name', to);
+  }
+
+  bool deleteIk(int index) {
+    final list = ik;
+    if (index < 0 || index >= list.length) return false;
+    list.removeAt(index);
+    return edits.edit(id, {'/ik': list.isEmpty ? unset : list});
+  }
 
   bool _refuse(String why) {
     edits.refuse(why);

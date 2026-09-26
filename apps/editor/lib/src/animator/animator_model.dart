@@ -12,6 +12,7 @@ import 'dart:ui' show Offset;
 import 'package:flutter/foundation.dart';
 import 'package:fynkel/fynkel.dart' as fynkel;
 
+import '../hierarchy/hierarchy_tree.dart';
 import '../inspector/asset_edits.dart';
 import '../inspector/inspector_model.dart';
 import '../shell/editor_selection.dart';
@@ -69,6 +70,26 @@ final class GameObjectLive implements AnimatorLive {
   }
 }
 
+/// A node of the followed object (ADR-0033 § 5): what a layer's mask
+/// ticks and an IK goal names.
+final class AnimatorNode {
+  const AnimatorNode(this.name, this.depth, this.names);
+
+  final String name;
+
+  /// 0 for the object itself.
+  final int depth;
+
+  /// Its name and its parents' up to the object's — what
+  /// [ControllerEdits.maskedIn] reads.
+  final List<String> names;
+}
+
+/// The names under [nodes]' node [i] (the ones after it that are deeper).
+List<String> namesUnder(List<AnimatorNode> nodes, int i) => [
+  for (var k = i + 1; k < nodes.length && nodes[k].depth > nodes[i].depth; k++) nodes[k].name,
+];
+
 final class AnimatorModel extends ChangeNotifier {
   AnimatorModel({required this.edits}) {
     edits.addListener(_onEdits);
@@ -91,6 +112,34 @@ final class AnimatorModel extends ChangeNotifier {
   /// null when a controller was picked in the Project.
   String? get object => _object;
   String? _object;
+
+  /// The open scene's hierarchy [object] is in (its nodes, imported models'
+  /// included); null when a controller was picked in the Project.
+  HierarchyTree? _tree;
+
+  /// Changes when the object's nodes may have (an imported model's nodes
+  /// arrive a moment after it is first looked at).
+  Listenable? get nodesChanged => _tree;
+
+  /// The object and every node under it, depth first; empty without one.
+  List<AnimatorNode> get nodes {
+    final tree = _tree;
+    final id = _object;
+    if (tree == null || id == null) return const [];
+    final out = <AnimatorNode>[];
+    void walk(String id, int depth, List<String> above) {
+      final n = tree[id];
+      if (n == null || out.length >= 4000 || depth > 48) return;
+      final names = [n.name, ...above];
+      out.add(AnimatorNode(n.name, depth, names));
+      for (final c in tree.childrenOf(id)) {
+        walk(c, depth + 1, names);
+      }
+    }
+
+    walk(id, 0, const []);
+    return out;
+  }
 
   /// During Play, the running animator of the object [object] names (the
   /// shell looks it up in the game's world); null otherwise.
@@ -140,6 +189,7 @@ final class AnimatorModel extends ChangeNotifier {
 
   /// Shows controller [id] ([object]: the one whose Animator names it).
   void show(String? id, {String? object}) {
+    if (object == null) _tree = null;
     if (id == _id) {
       if (object != _object) {
         _object = object;
@@ -171,7 +221,10 @@ final class AnimatorModel extends ChangeNotifier {
         final slot = objects!.slots.where((s) => s.type == 'fynkel.Animator').firstOrNull;
         final ref = slot?.value('controller');
         final asset = ref is Map ? ref['asset'] : null;
-        if (asset is String) show(asset, object: one.id);
+        if (asset is String) {
+          _tree = objects.tab?.tree;
+          show(asset, object: one.id);
+        }
       default:
         break;
     }

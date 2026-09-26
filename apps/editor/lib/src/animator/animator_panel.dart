@@ -28,6 +28,7 @@ import '../project/editor_project.dart' show AssetEntry;
 import '../theme/icons.dart';
 import '../theme/panel_focus.dart';
 import '../theme/tokens.dart';
+import 'animator_ik.dart';
 import 'animator_model.dart';
 import 'controller_edits.dart';
 
@@ -376,14 +377,24 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
                 children: [
                   SizedBox(
                     width: 230,
-                    child: _ParameterList(model: model, controller: c, live: model.live),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _sideTabs(context, t),
+                        Expanded(
+                          child: _side == 'ik'
+                              ? IkList(model: model, controller: c)
+                              : _ParameterList(model: model, controller: c, live: model.live),
+                        ),
+                      ],
+                    ),
                   ),
                   VerticalDivider(width: 1, color: t.line),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (model.layer > 0) _LayerSettings(controller: c, layer: model.layer),
+                        if (model.layer > 0) _LayerSettings(model: model, controller: c, layer: model.layer),
                         _SlotRow(
                           name: c.layer(model.layer)?['name'] as String? ?? '',
                           empty: c.inMachine(const []).states(model.layer).isEmpty,
@@ -401,6 +412,37 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
           ],
         );
       },
+    );
+  }
+
+  /// Unity's tabs over the left column: Parameters, and IK (ADR-0033 § 5).
+  String _side = 'parameters';
+
+  Widget _sideTabs(BuildContext context, FynkelTokens t) {
+    final small = Theme.of(context).textTheme.bodySmall;
+    Widget tab(String id, String label) {
+      final on = _side == id;
+      return InkWell(
+        key: Key('animator.tab.$id'),
+        onTap: () => setState(() => _side = id),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: on ? t.accent : Colors.transparent, width: 2)),
+          ),
+          child: Text(label, style: small?.copyWith(color: on ? t.text : t.textSecondary)),
+        ),
+      );
+    }
+
+    return Container(
+      height: 24,
+      decoration: BoxDecoration(
+        color: t.header,
+        border: Border(bottom: t.hairline),
+      ),
+      child: Row(children: [tab('parameters', 'Parameters'), tab('ik', 'IK')]),
     );
   }
 
@@ -1148,8 +1190,9 @@ class _SlotRow extends StatelessWidget {
 }
 
 class _LayerSettings extends StatelessWidget {
-  const _LayerSettings({required this.controller, required this.layer});
+  const _LayerSettings({required this.model, required this.controller, required this.layer});
 
+  final AnimatorModel model;
   final ControllerEdits controller;
   final int layer;
 
@@ -1212,6 +1255,20 @@ class _LayerSettings extends StatelessWidget {
                   c.setLayerField(layer, 'root', unset);
                 }
               },
+            ),
+          ),
+          const SizedBox(width: 12),
+          // Unity's Avatar Mask, inside the layer (ADR-0033 § 5).
+          Flexible(
+            child: TextButton.icon(
+              key: const Key('animator.layer.mask'),
+              onPressed: () => showMaskEditor(context, model, c, layer),
+              icon: const Icon(FIcons.person, size: 13),
+              label: Text(
+                'Mask: ${maskSummary(c.mask(layer))}',
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
             ),
           ),
         ],
