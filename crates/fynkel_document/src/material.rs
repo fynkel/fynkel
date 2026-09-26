@@ -561,7 +561,12 @@ impl ShaderManifest {
         for p in &interface.properties {
             let description = p.tooltip.clone().unwrap_or_default();
             match &p.kind {
-                PropertyKind::Value { ty, default, min, max } => {
+                PropertyKind::Value {
+                    ty,
+                    default,
+                    min,
+                    max,
+                } => {
                     let pty = match ty {
                         ValueType::Float => ParameterType::Float,
                         ValueType::Int => ParameterType::Int,
@@ -588,7 +593,11 @@ impl ShaderManifest {
                         pointer: String::new(),
                     });
                 }
-                PropertyKind::Texture { fallback, color_space, required } => textures.push(TextureSlot {
+                PropertyKind::Texture {
+                    fallback,
+                    color_space,
+                    required,
+                } => textures.push(TextureSlot {
                     name: p.name.clone(),
                     color_space: match color_space {
                         fynkel_shader::ColorSpace::Srgb => ColorSpace::Srgb,
@@ -1110,7 +1119,12 @@ impl Material {
         let mut out = Vec::new();
         let Some(manifest) = shaders.get(&self.shader) else {
             if !self.shader.is_empty() {
-                let by_name = self.document.root.get("shader").and_then(Node::as_str).is_some();
+                let by_name = self
+                    .document
+                    .root
+                    .get("shader")
+                    .and_then(Node::as_str)
+                    .is_some();
                 let d = if by_name {
                     // A custom `name@version` from before ADR-0031.
                     Diagnostic::error(
@@ -1278,6 +1292,93 @@ impl Material {
             ));
         }
         finish(out, &self.document)
+    }
+
+    /// A `.shader` asset's material (ADR-0031) as the renderer draws it:
+    /// checked against `shader`'s header — its values' types and ranges,
+    /// its alpha modes, its required textures, the document diagnostics —
+    /// then the property block in the shader's layout with the defaults
+    /// filled and one slot per texture property — `shader` being the
+    /// shader the material names. The cook's `MATC`, and
+    /// `world.createShaderMaterial`'s at runtime. The payload is `None`
+    /// when there are errors; the diagnostics (warnings too) either way.
+    pub fn custom_payload(
+        &self,
+        shader: &fynkel_shader::Shader,
+    ) -> (
+        Option<fynkel_cooked::payload::CustomMaterialPayload>,
+        Vec<Diagnostic>,
+    ) {
+        use fynkel_cooked::payload as pl;
+        let mut library = ShaderLibrary::builtin();
+        // `shader` is the one the material names (its `shader` asset id);
+        // any other name is reported unknown by the check below.
+        let id = self.shader.parse::<Uuid>().unwrap_or_default();
+        library.add(ShaderManifest::from_shader(id, shader.clone()));
+        let diagnostics = self.validate_semantics(&library);
+        if fynkel_contracts::has_errors(&diagnostics) {
+            return (None, diagnostics);
+        }
+        let Some(resolved) = self.resolve(&library) else {
+            return (None, diagnostics);
+        };
+        let values: std::collections::HashMap<&str, Vec<f64>> = resolved
+            .parameters
+            .iter()
+            .map(|p| (p.name.as_str(), p.value.components()))
+            .collect();
+        let block = shader
+            .layout
+            .pack(&shader.interface, |n| values.get(n).map(Vec::as_slice));
+        let slots = resolved
+            .textures
+            .iter()
+            .map(|t| {
+                let sampler = t
+                    .binding
+                    .as_ref()
+                    .map(|b| b.sampler.clone())
+                    .unwrap_or_default();
+                pl::MaterialSlot {
+                    texture: t
+                        .binding
+                        .as_ref()
+                        .map(|b| (b.texture.asset.0, b.texture.sub.clone())),
+                    color_space: match t.color_space {
+                        ColorSpace::Srgb => pl::COLOR_SPACE_SRGB,
+                        ColorSpace::Linear => pl::COLOR_SPACE_LINEAR,
+                    },
+                    fallback: match t.fallback.as_deref() {
+                        Some("black") => pl::FALLBACK_BLACK,
+                        Some("normal") => pl::FALLBACK_NORMAL,
+                        Some("gray") => pl::FALLBACK_GRAY,
+                        _ => pl::FALLBACK_WHITE,
+                    },
+                    filter: (sampler.filter == "nearest") as u32,
+                    mipmaps: sampler.mipmaps,
+                    wrap: match sampler.wrap.as_str() {
+                        "clamp" => 1,
+                        "mirror" => 2,
+                        _ => 0,
+                    },
+                    anisotropy: sampler.anisotropy,
+                    uv_set: t.binding.as_ref().map_or(0, |b| b.uv_set),
+                }
+            })
+            .collect();
+        let payload = pl::CustomMaterialPayload {
+            shader: id.into_bytes(),
+            alpha_mode: match self.alpha_mode {
+                AlphaMode::Opaque => pl::ALPHA_OPAQUE,
+                AlphaMode::Mask => pl::ALPHA_MASK,
+                AlphaMode::Blend => pl::ALPHA_BLEND,
+            },
+            alpha_cutoff: self.alpha_cutoff as f32,
+            double_sided: self.double_sided,
+            block,
+            slots,
+        };
+        (Some(payload), diagnostics)
     }
 
     /// Every parameter and slot of the manifest with the material's value
@@ -1566,7 +1667,11 @@ pub fn manifest_json(m: &ShaderManifest) -> serde_json::Value {
 
 /// Reads and compiles the `.shader` file at `file` (ADR-0031), whose
 /// asset id is `id`; `path` is what diagnostics name.
-pub fn read_shader_file(id: Uuid, path: &str, file: &std::path::Path) -> Result<ShaderManifest, Vec<Diagnostic>> {
+pub fn read_shader_file(
+    id: Uuid,
+    path: &str,
+    file: &std::path::Path,
+) -> Result<ShaderManifest, Vec<Diagnostic>> {
     let text = std::fs::read_to_string(file).map_err(|e| {
         vec![Diagnostic::error(Code::IO, format!("cannot read {path}: {e}")).with_document(path)]
     })?;
@@ -1596,7 +1701,14 @@ pub fn legacy_manifest(m: &ShaderManifest) -> Diagnostic {
 /// diagnostic about one suggests.
 pub fn header_for(m: &ShaderManifest) -> String {
     use std::fmt::Write;
-    let mut s = format!("shader \"{}\" {{\n", if m.name.is_empty() { &m.shader_id } else { &m.name });
+    let mut s = format!(
+        "shader \"{}\" {{\n",
+        if m.name.is_empty() {
+            &m.shader_id
+        } else {
+            &m.name
+        }
+    );
     let alpha: Vec<&str> = m
         .passes
         .iter()
@@ -1625,7 +1737,10 @@ pub fn header_for(m: &ShaderManifest) -> String {
             let text = match v {
                 ParameterValue::Bool(b) => b.to_string(),
                 _ if c.len() == 1 => num(c[0]),
-                _ => format!("({})", c.iter().map(|x| num(*x)).collect::<Vec<_>>().join(", ")),
+                _ => format!(
+                    "({})",
+                    c.iter().map(|x| num(*x)).collect::<Vec<_>>().join(", ")
+                ),
             };
             let _ = write!(s, " = {text}");
         }

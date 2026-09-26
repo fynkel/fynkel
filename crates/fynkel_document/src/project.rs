@@ -1413,9 +1413,14 @@ pub fn validate_project_with(
                 // are references it did not check.
                 // A `.shader` (ADR-0031): its header and WGSL checked, its
                 // interface what materials are validated against.
-                if matches!(&entry.kind, AssetKind::Source { importer, .. } if importer == crate::asset::SHADER_IMPORTER) {
+                if matches!(&entry.kind, AssetKind::Source { importer, .. } if importer == crate::asset::SHADER_IMPORTER)
+                {
                     let file = entry.file(db.root());
-                    match crate::material::read_shader_file(entry.id, &file.display().to_string(), &file) {
+                    match crate::material::read_shader_file(
+                        entry.id,
+                        &file.display().to_string(),
+                        &file,
+                    ) {
                         Ok(manifest) => shaders.add(manifest),
                         Err(diags) => report.diagnostics.extend(diags),
                     }
@@ -1523,7 +1528,9 @@ pub fn validate_project_with(
                 // Manifests are the engine's own now (ADR-0031): a project's
                 // shader is one `.shader` file.
                 let manifest = ShaderManifest::from_document(doc);
-                report.diagnostics.push(crate::material::legacy_manifest(&manifest));
+                report
+                    .diagnostics
+                    .push(crate::material::legacy_manifest(&manifest));
             }
             DocumentKind::Rig => {
                 let rig = crate::rig::Rig::from_document(doc);

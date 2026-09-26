@@ -1282,7 +1282,10 @@ fn shader_files_are_checked_and_materials_use_them() {
     t.write("assets/materials/glow.material.json", &material("20"));
     assert_eq!(
         t.codes(),
-        vec![("FYN-D0303".to_string(), Some("/parameters/power".to_string()))]
+        vec![(
+            "FYN-D0303".to_string(),
+            Some("/parameters/power".to_string())
+        )]
     );
     t.write("assets/materials/glow.material.json", &material("4"));
 
@@ -1310,5 +1313,9 @@ fn shader_files_are_checked_and_materials_use_them() {
     let d: Vec<_> = report.diagnostics.iter().filter(|d| d.is_error()).collect();
     assert_eq!(d.len(), 1, "{d:#?}");
     assert_eq!(d[0].code.as_str(), "FYN-D0015");
-    assert!(d[0].suggestion.as_deref().unwrap().contains("a float = 2 range(0, 1)"));
+    assert!(d[0]
+        .suggestion
+        .as_deref()
+        .unwrap()
+        .contains("a float = 2 range(0, 1)"));
 }

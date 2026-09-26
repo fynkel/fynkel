@@ -25,7 +25,10 @@ fn library_with_fixture_shaders(_schemas: &SchemaSet) -> ShaderLibrary {
         let path = path.unwrap().path();
         if path.extension().is_some_and(|e| e == "shader") {
             let meta = fynkel_document::asset::sidecar_path(&path);
-            let id = Document::read(&meta, Some(DocumentKind::Meta)).unwrap().envelope.id;
+            let id = Document::read(&meta, Some(DocumentKind::Meta))
+                .unwrap()
+                .envelope
+                .id;
             let manifest =
                 fynkel_document::material::read_shader_file(id, &path.display().to_string(), &path)
                     .unwrap_or_else(|d| panic!("{d:#?}"));
