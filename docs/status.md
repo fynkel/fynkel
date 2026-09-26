@@ -1368,6 +1368,17 @@ model, the live view in Play). The reference game's Player and the
 showcase's Runner run on one; `docs/animator.md` is the guide. The
 user's check in the editor is pending.
 
+**Animation v2** (ADR-0033) is under way. **Step 1, blend trees, is
+done** (2026-09-26): a state's motion may be a Unity-style blend tree
+(1D, 2D simple directional, freeform directional, freeform cartesian,
+direct; nested; `FYN-D1104` for its shape), run each tick without
+allocating; the editor's Inspector edits it (type, parameters, the map
+with the live red dot, the children, Compute Positions, the preview on
+the model) and the Animator window makes one (From New Blend Tree…).
+The reference game's Player gains an aim mode that strafes on a
+freeform directional tree. Next: slots (`playOneShot`), typed
+parameters, sub-state machines and interruptions, masks and IK.
+
 **Tags and layers** (ADR-0020, 2026-09-23) come in while the joint R3a +
 R3b capture waits for a quiet machine: several tags and one engine-wide
 layer per object, as the optional components `fynkel.Tags` and

@@ -37,9 +37,10 @@ to the Project and the Console.
   State** stands for every state: its transitions can fire from anywhere.
 - **Look around:** drag the empty graph, scroll or pinch to zoom, and
   press **F** to fit everything in view.
-- **Right-click the empty graph** for Create State ▸ Empty, From Clip… or
-  From Blend Space…. You can also drop a clip or a blend space from the
-  Project onto the graph.
+- **Right-click the empty graph** for Create State ▸ Empty, From Clip…,
+  From Blend Space… or From New Blend Tree…. You can also drop a clip or
+  a blend space from the Project onto the graph. A state that plays a
+  blend tree shows a small tree icon.
 - **Right-click a state** for Make Transition (then click the target
   state), Set as Layer Default State, Rename and Delete.
 - **Click** a state or an arrow to edit it in the Inspector. **⌫** deletes
@@ -54,12 +55,58 @@ Every change is saved at once, like a material.
 
 In the Inspector, a state has:
 
-- **Motion**: the clip or blend space it plays. Empty holds the pose.
+- **Motion**: the clip or blend space it plays, or a blend tree (see
+  below). Empty holds the pose. **Make Blend Tree** turns the motion into
+  a tree that holds it.
 - **Speed**, and **Multiplier**: a float parameter the speed is
   multiplied by.
 - **Loop**: whether the motion repeats. A jump does not.
 - **Root Motion**: whether the clip moves the character. Empty uses the
   Animator's setting.
+
+## Blend trees
+
+A **blend tree** mixes several clips by the values of parameters. For
+example, a character that strafes: idle in the middle, walk and run in
+each direction around it, picked by `moveX` and `moveY`. It works like
+Unity's blend trees, but you edit it right in the Inspector. The
+decisions are in [ADR-0033](decisions/ADR-0033-animation-v2.md).
+
+Make one with **Create State ▸ From New Blend Tree…** (pick its first
+clip), or **Make Blend Tree** on a state. A tree always holds at least
+one motion.
+
+In the Inspector, the **Blend Tree** section has:
+
+- **Type**: how the children are mixed.
+  - **1D**: one parameter; each child has a **threshold** on a line.
+  - **2D Simple Directional**: two parameters; one child per direction
+    (and maybe one in the middle).
+  - **2D Freeform Directional**: two parameters; several children per
+    direction, such as a walk and a run forward. Best for movement.
+  - **2D Freeform Cartesian**: two parameters that are not a direction.
+  - **Direct**: each child has its own parameter, which is its weight.
+- **Parameter** (or X and Y): the float parameters it reads.
+- **The map.** Each child is a diamond. The circle around it shows its
+  weight now. The red dot is the parameters' values: click or drag it
+  to try other values. In Play it moves with the game, and dragging it
+  sets the running Animator's parameters. Drag a diamond to move a
+  child.
+- **The children.** Each row has the motion (a clip, a blend space, or
+  a tree: click it to open it), the threshold or position, the speed,
+  its weight now, and buttons to move or remove it. **+** adds a motion
+  or a new tree inside this one. The path at the top takes you back out
+  of a tree inside a tree.
+- **Compute Positions** places the children from how far their clips
+  move the character each second. For 1D: Speed, Velocity X, Y or Z,
+  or Angular Speed. For 2D: Velocity XZ (right, forward) or Speed and
+  Angular Speed.
+- **The preview** plays the tree on the clips' model, at the red dot.
+
+All the clips in a tree play in step: a walk and a run lift the same
+foot at the same moment.
+
+Limits: 32 children in a tree, trees 4 deep, 64 clips in all.
 
 ## Transitions
 
@@ -125,6 +172,10 @@ changes are not saved.
 - **The reference game's Player**
   (`examples/reference_game/assets/models/player.controller.json`):
   Locomotion plays a blend space of idle, walk and run along `speed`.
+  Aim (hold the right mouse button or LT) plays a 2D Freeform
+  Directional blend tree over `moveX` and `moveY`: idle in the middle,
+  walks at 4 and runs at 7 in each direction, so the Player strafes
+  while facing the camera.
   The `jump` trigger goes to Jump; `grounded` being true goes back.
   `game.Player` only sets `speed`, `grounded` and `jump`
   (`lib/game/player.dart`).

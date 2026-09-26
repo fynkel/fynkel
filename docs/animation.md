@@ -493,6 +493,39 @@ once, then Run, on exit times alone — a controller with no code. Both
 games' tests follow the states (`stateOf()`), and `--hero` still works:
 the generator writes the Player's controller with the rig's jump.
 
+## Blend trees (ADR-0033)
+
+A state's `motion` may be a blend tree
+([documents.md](documents.md) § Animator Controllers has the format;
+[animator.md](animator.md) § Blend trees the editor). At load, each
+state's motion becomes a small tree of nodes; a blend space becomes a 1D
+node on the float of its name. Every tick the weights are computed
+without allocating:
+
+- **1D**: linear between the two nearest thresholds, clamped at the
+  ends.
+- **Simple directional**: the two children around the input's
+  direction, by barycentric weights (with the centre child when the
+  input is inside them); otherwise as freeform cartesian.
+- **Freeform cartesian**: the gradient band (Johansen): each child's
+  weight is its smallest `1 - (ip·ij)/|ij|²` over the others.
+- **Freeform directional**: the same in polar form, the angle weighed
+  twice a relative change of speed.
+- **Direct**: each child's parameter, negative as 0, normalized.
+
+Weights under 0.001 are dropped and the rest renormalized. Every leaf
+shares the state's normalized time; the tree's length is the leaves'
+durations (over their `timeScale`) weighted. Markers come from the
+leaf with the most weight; root motion is the weighted sum of the
+leaves'. The editor's map uses the same math
+(`apps/editor/lib/src/animator/blend_tree_weights.dart`), and both are
+tested against the same hand-worked values.
+
+`World::clip_root_travel` gives a clip's root travel per second (the
+shallowest translation channel, the one root motion takes, and its
+yaw): the editor's Compute Positions reads it through the preview
+stage's `travel` call.
+
 ## Import and the cache
 
 The glTF importer (`fynkel.gltf` **version 5**; `docs/documents.md`)
@@ -705,7 +738,8 @@ markers counted, and the tick's p50 under 4 ms with everything else on
   events) — the next items on this core (blueprint §9).
 - ~~Clip markers/events, layers, additive blending, root-motion
   extraction, blend spaces~~ — done as item **19c** (§ Blend spaces,
-  § Layers, § Markers, § Root motion). Still out: 2D blend spaces and
+  § Layers, § Markers, § Root motion); 2D blending as blend trees
+  (ADR-0033 step 1, § Blend trees). Still out: 2D blend spaces and
   other sync modes than phase, per-channel masks beyond "the layer keys
   what it keys", root motion from a layer or a crossfade's outgoing
   clip, IK, retargeting between skeletons, morph targets, a node-graph
