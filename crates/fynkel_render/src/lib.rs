@@ -40,11 +40,13 @@
 //! up front (rebuilt only when a quality switch changes the sample
 //! count); bind groups are cached per material and per texture.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use fynkel_contracts::AssetRef;
+use fynkel_contracts::{AssetRef, Uuid};
 use fynkel_cooked::payload::{
-    SkinWeight, Vertex, TEXTURE_FORMAT_RGBA16F_LINEAR, TEXTURE_FORMAT_RGBA8_SRGB,
+    CustomMaterialPayload, MaterialSlot, SkinWeight, Vertex, ALPHA_BLEND, ALPHA_MASK,
+    FALLBACK_BLACK, FALLBACK_GRAY, FALLBACK_NORMAL, TEXTURE_FORMAT_RGBA16F_LINEAR,
+    TEXTURE_FORMAT_RGBA8_SRGB,
 };
 use fynkel_core::material::AlphaMode;
 use fynkel_core::volume::{self, PostSettings, VolumeProfile};
@@ -59,6 +61,9 @@ mod outline;
 pub mod overlay;
 pub mod quality;
 pub mod shadow;
+mod surface;
+
+use surface::{Pass, SurfaceContext, SurfaceShader};
 
 pub use culling::{Frustum, Sphere};
 pub use debug::{DebugDraw, DebugVertex};
@@ -179,7 +184,10 @@ const LIGHT_SPOT: f32 = 1.0;
 /// The mesh vertex stage every surface is drawn over, and the engine's
 /// light every lit surface ends in (ADR-0031): the built-in `pbr.wgsl`
 /// and each shader asset are assembled after `frame.wgsl` from these.
-const MESH_STAGE: &str = include_str!("shaders/mesh.wgsl");
+const MESH_STAGE: &str = concat!(
+    include_str!("shaders/mesh_input.wgsl"),
+    include_str!("shaders/mesh.wgsl")
+);
 const LIGHT_LIBRARY: &str = include_str!("shaders/light.wgsl");
 
 #[repr(C)]
@@ -281,6 +289,10 @@ struct GpuCascade {
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct ShadowUniforms {
     view_proj: [[f32; 4]; 4],
+    /// `FrameUniforms::time`, and xyz the camera's position: a shader
+    /// asset's shadow stage fills its `globals` from them (ADR-0031).
+    time: [f32; 4],
+    camera_pos: [f32; 4],
 }
 
 /// One cascade's slot in the shadow pass's uniform buffer: the pass
@@ -357,13 +369,29 @@ struct GpuTexture {
     bytes: u64,
 }
 
-/// A material's five maps bound together, with the factors the instance
-/// carries.
+/// A material's group 1 — the built-in's five maps, or a shader asset's
+/// block, textures and samplers — with the factors the instance carries.
 struct GpuMaterial {
     material: PbrMaterial,
     bind_group: wgpu::BindGroup,
     /// The texture refs the bind group holds views of.
     textures: Vec<AssetRef>,
+    /// The shader asset it is drawn with (ADR-0031); `None`: the built-in.
+    shader: Option<Uuid>,
+}
+
+/// What [`Renderer::material`] found for a draw.
+struct LoadedMaterial {
+    /// The batch key's material; `None`: the default bind group.
+    key: Option<AssetRef>,
+    /// The factors for the instance (a shader asset's: white, its alpha
+    /// mode, cutoff and sides).
+    material: PbrMaterial,
+    /// `false` for a shader with `shadows off`.
+    casts: bool,
+    /// A shader asset's material whose shader is missing or does not
+    /// compile: drawn unlit magenta, like Unity's pink.
+    broken: bool,
 }
 
 /// One draw: a mesh, a material, a contiguous range of instances.
@@ -819,6 +847,9 @@ struct Pipelines {
 struct Fallbacks {
     white: GpuTexture,
     flat_normal: GpuTexture,
+    /// A shader asset's `black` and `gray` texture defaults.
+    black: GpuTexture,
+    gray: GpuTexture,
     default_material: wgpu::BindGroup,
 }
 
@@ -1019,6 +1050,15 @@ pub struct ExtractRenderer {
     /// texture has no `ENVM`, or it could not be read).
     environments: HashMap<AssetRef, Option<std::sync::Arc<EnvironmentPayload>>>,
     materials: HashMap<AssetRef, Option<GpuMaterial>>,
+    /// Shader asset materials that draw as the error material (their
+    /// `materials` entry is `None`).
+    broken_materials: HashSet<AssetRef>,
+    /// Shader assets compiled for their materials (ADR-0031; `None`: it
+    /// could not be read or compiled). Kept while a material uses one.
+    surfaces: HashMap<Uuid, Option<SurfaceShader>>,
+    /// Shader asset materials' samplers by (filter, mipmaps, wrap,
+    /// anisotropy).
+    surface_samplers: HashMap<[u32; 4], wgpu::Sampler>,
     /// Volume profiles (R3a; `None`: it could not be read).
     volume_profiles: HashMap<AssetRef, Option<VolumeProfile>>,
     asset_errors: Vec<String>,
@@ -1159,7 +1199,9 @@ impl ExtractRenderer {
             label: Some("fynkel shadow bgl"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                // A shader asset's shadow stage reads the time and the
+                // camera in its fragment too (ADR-0031).
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: true,
@@ -1424,6 +1466,9 @@ impl ExtractRenderer {
             textures: HashMap::new(),
             environments: HashMap::new(),
             materials: HashMap::new(),
+            broken_materials: HashSet::new(),
+            surfaces: HashMap::new(),
+            surface_samplers: HashMap::new(),
             volume_profiles: HashMap::new(),
             asset_errors: Vec::new(),
             stats: FrameStats::default(),
@@ -1632,6 +1677,15 @@ impl ExtractRenderer {
                     bloom: &self.bloom_layout,
                 },
             );
+            let ctx = SurfaceContext {
+                frame: &self.frame_layout,
+                shadow: &self.shadow_layout,
+                skin: &self.skin_layout,
+                sample_count: wanted.msaa,
+            };
+            for s in self.surfaces.values_mut().flatten() {
+                s.rebuild(device, &ctx);
+            }
         }
         let internal = wanted.internal_size(self.width, self.height);
         if internal != (self.attachments.width, self.attachments.height)
@@ -1655,6 +1709,7 @@ impl ExtractRenderer {
             self.sampler = create_material_sampler(device, wanted.anisotropy);
             self.fallbacks = None;
             self.materials.clear();
+            self.surface_samplers.clear();
             self.sky_bind_group = None;
         }
     }
@@ -1713,6 +1768,7 @@ impl ExtractRenderer {
         if edits != self.live_edits_seen {
             self.live_edits_seen = edits;
             self.materials.clear();
+            self.broken_materials.clear();
             self.volume_profiles.clear();
         }
         // A mesh the game made, changed or removed (`world.createMesh`):
@@ -1741,6 +1797,8 @@ impl ExtractRenderer {
                 && m.as_ref()
                     .is_none_or(|m| m.textures.iter().all(|t| textures.contains_key(t)))
         });
+        self.broken_materials.retain(|r| a.is_resident(r.asset));
+        self.retain_used_surfaces();
         if let Some((r, _)) = &self.sky_bind_group {
             if !self.textures.contains_key(r) {
                 self.sky_bind_group = None;
@@ -1762,6 +1820,8 @@ impl ExtractRenderer {
         self.textures.clear();
         self.environments.clear();
         self.materials.clear();
+        self.broken_materials.clear();
+        self.surfaces.clear();
         self.volume_profiles.clear();
         self.sky_bind_group = None;
         self.ibl_dirty |= self.ibl.take().is_some();
@@ -1862,6 +1922,16 @@ impl ExtractRenderer {
                 },
             ),
         };
+
+        // The world's time for the shaders (ADR-0031 `globals`): x the
+        // time, y the seconds since the previous frame, zw the internal
+        // target's size.
+        let frame_time = [
+            extract.time,
+            self.last_time.map_or(0.0, |t| (extract.time - t).max(0.0)),
+            self.attachments.width as f32,
+            self.attachments.height as f32,
+        ];
 
         // Sun, ambient, sky. A scene that authors no lighting at all (no
         // light, no Environment) gets the host's fallback sun.
@@ -2112,80 +2182,84 @@ impl ExtractRenderer {
                     stats.layer_hidden += 1;
                     continue;
                 }
-                let (key, double_sided, mut instance, casts, blend, bounds) = match mesh_of_record
-                    .get(&(ri as u32))
-                {
-                    Some(&mi) => {
-                        let m = &source.meshes[mi];
-                        let have_mesh = self.mesh(device, &m.mesh);
-                        let (material_key, material) = self.material(device, queue, &m.material);
-                        if have_mesh {
-                            stats.meshes += 1;
-                            let blend = material.alpha_mode == AlphaMode::Blend;
-                            let gpu = self.meshes.get(&m.mesh).and_then(Option::as_ref);
-                            let bounds = gpu.map_or(cube_bounds, |g| g.bounds);
-                            // Skinned when the mesh carries weights and
-                            // the extract a palette for this instance; a
-                            // skinned mesh without a `Skin` draws as
-                            // cooked (its bind pose).
-                            let palette = m
-                                .skin
-                                .filter(|_| gpu.is_some_and(|g| g.skin_buffer.is_some()));
-                            let mut instance = instance_for(&material, world, m.receive_shadows);
-                            if let Some(p) = palette {
-                                instance.emissive[3] = (joint_base + p.first_joint) as f32;
+                let (key, double_sided, mut instance, casts, blend, bounds) =
+                    match mesh_of_record.get(&(ri as u32)) {
+                        Some(&mi) => {
+                            let m = &source.meshes[mi];
+                            let have_mesh = self.mesh(device, &m.mesh);
+                            let loaded = self.material(device, queue, &m.material);
+                            let material = &loaded.material;
+                            if have_mesh {
+                                stats.meshes += 1;
+                                let blend = material.alpha_mode == AlphaMode::Blend;
+                                let gpu = self.meshes.get(&m.mesh).and_then(Option::as_ref);
+                                let bounds = gpu.map_or(cube_bounds, |g| g.bounds);
+                                // Skinned when the mesh carries weights and
+                                // the extract a palette for this instance; a
+                                // skinned mesh without a `Skin` draws as
+                                // cooked (its bind pose).
+                                let palette = m
+                                    .skin
+                                    .filter(|_| gpu.is_some_and(|g| g.skin_buffer.is_some()));
+                                let mut instance = instance_for(material, world, m.receive_shadows);
+                                if loaded.broken {
+                                    instance.tint = MISSING_TINT;
+                                    instance.flags[1] = 1.0;
+                                }
+                                if let Some(p) = palette {
+                                    instance.emissive[3] = (joint_base + p.first_joint) as f32;
+                                }
+                                (
+                                    BatchKey {
+                                        mesh: Some(m.mesh.clone()),
+                                        material: loaded.key.clone(),
+                                        skinned: palette.is_some(),
+                                    },
+                                    material.double_sided,
+                                    instance,
+                                    m.cast_shadows && loaded.casts && !blend,
+                                    blend,
+                                    bounds,
+                                )
+                            } else {
+                                stats.missing += 1;
+                                (
+                                    cube_key(),
+                                    false,
+                                    Instance {
+                                        model: world.to_cols_array_2d(),
+                                        tint: MISSING_TINT,
+                                        emissive: [0.0; 4],
+                                        params: [0.0, 1.0, 1.0, 1.0],
+                                        flags: [NO_CUTOFF, 1.0, 0.0, 0.0],
+                                    },
+                                    m.cast_shadows,
+                                    false,
+                                    cube_bounds,
+                                )
                             }
-                            (
-                                BatchKey {
-                                    mesh: Some(m.mesh.clone()),
-                                    material: material_key,
-                                    skinned: palette.is_some(),
-                                },
-                                material.double_sided,
-                                instance,
-                                m.cast_shadows && !blend,
-                                blend,
-                                bounds,
-                            )
-                        } else {
-                            stats.missing += 1;
+                        }
+                        None => {
+                            if !self.placeholders {
+                                continue;
+                            }
+                            stats.placeholders += 1;
                             (
                                 cube_key(),
                                 false,
                                 Instance {
                                     model: world.to_cols_array_2d(),
-                                    tint: MISSING_TINT,
+                                    tint: tint_for(r.entity.slot()),
                                     emissive: [0.0; 4],
                                     params: [0.0, 1.0, 1.0, 1.0],
-                                    flags: [NO_CUTOFF, 1.0, 0.0, 0.0],
+                                    flags: [NO_CUTOFF, 0.0, 0.0, 1.0],
                                 },
-                                m.cast_shadows,
+                                true,
                                 false,
                                 cube_bounds,
                             )
                         }
-                    }
-                    None => {
-                        if !self.placeholders {
-                            continue;
-                        }
-                        stats.placeholders += 1;
-                        (
-                            cube_key(),
-                            false,
-                            Instance {
-                                model: world.to_cols_array_2d(),
-                                tint: tint_for(r.entity.slot()),
-                                emissive: [0.0; 4],
-                                params: [0.0, 1.0, 1.0, 1.0],
-                                flags: [NO_CUTOFF, 0.0, 0.0, 1.0],
-                            },
-                            true,
-                            false,
-                            cube_bounds,
-                        )
-                    }
-                };
+                    };
                 if gray {
                     instance.flags[3] += GRAY_FLAG;
                 }
@@ -2484,6 +2558,8 @@ impl ExtractRenderer {
                     i as u64 * SHADOW_UNIFORM_STRIDE,
                     bytemuck::bytes_of(&ShadowUniforms {
                         view_proj: f.view_proj.to_cols_array_2d(),
+                        time: frame_time,
+                        camera_pos: camera_pos.extend(1.0).to_array(),
                     }),
                 );
             }
@@ -2578,13 +2654,7 @@ impl ExtractRenderer {
                 self.pipelines.encode_srgb as u32,
                 self.ao_active as u32,
             ],
-            time: [
-                extract.time,
-                self.last_time
-                    .map_or(0.0, |t| (extract.time - t).max(0.0)),
-                self.attachments.width as f32,
-                self.attachments.height as f32,
-            ],
+            time: frame_time,
             lights: packed,
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&u));
@@ -2793,7 +2863,7 @@ impl ExtractRenderer {
             );
             // Static casters, then the skinned ones: one pipeline switch.
             for skinned in [false, true] {
-                let mut bound = false;
+                let mut bound = None;
                 for b in self
                     .batches
                     .iter()
@@ -2802,14 +2872,7 @@ impl ExtractRenderer {
                     let Some(mesh) = self.mesh_for(&b.key) else {
                         continue;
                     };
-                    if !bound {
-                        pass.set_pipeline(if skinned {
-                            &self.pipelines.shadow_skinned
-                        } else {
-                            &self.pipelines.shadow
-                        });
-                        bound = true;
-                    }
+                    self.bind_pipeline(&mut pass, &mut bound, &b.key, Pass::Shadow, false);
                     pass.set_bind_group(1, self.material_for(&b.key, fallbacks), &[]);
                     bind_mesh(&mut pass, mesh, skinned);
                     pass.draw_indexed(
@@ -2854,17 +2917,14 @@ impl ExtractRenderer {
         // The scene pass's opaque loop exactly, with the colour dropped.
         for (skinned, double_sided) in [(false, false), (false, true), (true, false), (true, true)]
         {
-            let mut bound = false;
+            let mut bound = None;
             for b in self.batches.iter().filter(|b| {
                 b.key.skinned == skinned && b.double_sided == double_sided && b.count > 0
             }) {
                 let Some(mesh) = self.mesh_for(&b.key) else {
                     continue;
                 };
-                if !bound {
-                    pass.set_pipeline(self.pipelines.depth(skinned, double_sided));
-                    bound = true;
-                }
+                self.bind_pipeline(&mut pass, &mut bound, &b.key, Pass::Depth, double_sided);
                 pass.set_bind_group(1, self.material_for(&b.key, fallbacks), &[]);
                 bind_mesh(&mut pass, mesh, skinned);
                 pass.draw_indexed(0..mesh.index_count, 0, b.first..b.first + b.count);
@@ -2899,16 +2959,12 @@ impl ExtractRenderer {
         pass.set_bind_group(0, &self.frame_bind_group, &[]);
         pass.set_bind_group(2, &self.joint_bind_group, &[]);
         pass.set_vertex_buffer(1, self.outline_buffer.slice(..));
-        let mut bound: Option<(bool, bool)> = None;
+        let mut bound = None;
         for d in &self.outline_draws {
             let Some(mesh) = self.mesh_for(&d.key) else {
                 continue;
             };
-            let variant = (d.key.skinned, d.double_sided);
-            if bound != Some(variant) {
-                pass.set_pipeline(self.pipelines.mask(d.key.skinned, d.double_sided));
-                bound = Some(variant);
-            }
+            self.bind_pipeline(&mut pass, &mut bound, &d.key, Pass::Mask, d.double_sided);
             pass.set_bind_group(1, self.material_for(&d.key, fallbacks), &[]);
             bind_mesh(&mut pass, mesh, d.key.skinned);
             pass.draw_indexed(0..mesh.index_count, 0, d.index..d.index + 1);
@@ -3095,17 +3151,14 @@ impl ExtractRenderer {
             for (skinned, double_sided) in
                 [(false, false), (false, true), (true, false), (true, true)]
             {
-                let mut bound = false;
+                let mut bound = None;
                 for b in self.batches.iter().filter(|b| {
                     b.key.skinned == skinned && b.double_sided == double_sided && b.count > 0
                 }) {
                     let Some(mesh) = self.mesh_for(&b.key) else {
                         continue;
                     };
-                    if !bound {
-                        pass.set_pipeline(self.pipelines.opaque(skinned, double_sided));
-                        bound = true;
-                    }
+                    self.bind_pipeline(&mut pass, &mut bound, &b.key, Pass::Opaque, double_sided);
                     pass.set_bind_group(1, self.material_for(&b.key, fallbacks), &[]);
                     bind_mesh(&mut pass, mesh, skinned);
                     pass.draw_indexed(0..mesh.index_count, 0, b.first..b.first + b.count);
@@ -3119,16 +3172,18 @@ impl ExtractRenderer {
         }
         if !self.transparent.is_empty() {
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            let mut bound: Option<(bool, bool)> = None;
+            let mut bound = None;
             for t in &self.transparent {
                 let Some(mesh) = self.mesh_for(&t.key) else {
                     continue;
                 };
-                let variant = (t.key.skinned, t.double_sided);
-                if bound != Some(variant) {
-                    pass.set_pipeline(self.pipelines.transparent(t.key.skinned, t.double_sided));
-                    bound = Some(variant);
-                }
+                self.bind_pipeline(
+                    &mut pass,
+                    &mut bound,
+                    &t.key,
+                    Pass::Transparent,
+                    t.double_sided,
+                );
                 pass.set_bind_group(1, self.material_for(&t.key, fallbacks), &[]);
                 bind_mesh(&mut pass, mesh, t.key.skinned);
                 pass.draw_indexed(0..mesh.index_count, 0, t.index..t.index + 1);
@@ -3175,6 +3230,34 @@ impl ExtractRenderer {
         }
     }
 
+    /// Sets the pipeline `key` draws with in `pass` — its shader asset's
+    /// (ADR-0031) or the built-in's — unless `bound` is it already.
+    fn bind_pipeline<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'_>,
+        bound: &mut Option<&'a wgpu::RenderPipeline>,
+        key: &BatchKey,
+        which: Pass,
+        double_sided: bool,
+    ) {
+        let skinned = key.skinned;
+        let pipeline = match self.surface_for(key) {
+            Some(s) => s.pipeline(which, skinned, double_sided),
+            None => match which {
+                Pass::Opaque => self.pipelines.opaque(skinned, double_sided),
+                Pass::Transparent => self.pipelines.transparent(skinned, double_sided),
+                Pass::Depth => self.pipelines.depth(skinned, double_sided),
+                Pass::Mask => self.pipelines.mask(skinned, double_sided),
+                Pass::Shadow if skinned => &self.pipelines.shadow_skinned,
+                Pass::Shadow => &self.pipelines.shadow,
+            },
+        };
+        if !bound.is_some_and(|b| std::ptr::eq(b, pipeline)) {
+            pass.set_pipeline(pipeline);
+            *bound = Some(pipeline);
+        }
+    }
+
     fn material_for<'a>(&'a self, key: &BatchKey, fallbacks: &'a Fallbacks) -> &'a wgpu::BindGroup {
         match &key.material {
             Some(r) => match self.materials.get(r).and_then(Option::as_ref) {
@@ -3203,6 +3286,18 @@ impl ExtractRenderer {
             Rgba8Image::flat(wgpu::TextureFormat::Rgba8Unorm, &[128, 128, 255, 255]),
             "fynkel flat normal",
         );
+        let black = upload_rgba8(
+            device,
+            queue,
+            Rgba8Image::flat(wgpu::TextureFormat::Rgba8Unorm, &[0, 0, 0, 255]),
+            "fynkel black",
+        );
+        let gray = upload_rgba8(
+            device,
+            queue,
+            Rgba8Image::flat(wgpu::TextureFormat::Rgba8Unorm, &[128, 128, 128, 255]),
+            "fynkel gray",
+        );
         let default_material = create_material_bind_group(
             device,
             &self.material_layout,
@@ -3214,6 +3309,8 @@ impl ExtractRenderer {
         self.fallbacks = Some(Fallbacks {
             white,
             flat_normal,
+            black,
+            gray,
             default_material,
         });
     }
@@ -3360,19 +3457,69 @@ impl ExtractRenderer {
     /// The cooked material with its maps bound, loaded on first use; the
     /// model's defaults (and the default bind group: key `None`) when it
     /// cannot be read. A nil reference is not an error: "no material".
+    /// A shader asset's material compiles its shader on first use
+    /// (ADR-0031) and is the error material when that fails.
     fn material(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         r: &AssetRef,
-    ) -> (Option<AssetRef>, PbrMaterial) {
+    ) -> LoadedMaterial {
+        let plain = LoadedMaterial {
+            key: None,
+            material: PbrMaterial::default(),
+            casts: true,
+            broken: false,
+        };
         if r.is_nil() {
-            return (None, PbrMaterial::default());
+            return plain;
+        }
+        if self.broken_materials.contains(r) {
+            return LoadedMaterial {
+                broken: true,
+                ..plain
+            };
         }
         if let Some(m) = self.materials.get(r) {
             return match m {
-                Some(m) => (Some(r.clone()), m.material.clone()),
-                None => (None, PbrMaterial::default()),
+                Some(m) => LoadedMaterial {
+                    key: Some(r.clone()),
+                    material: m.material.clone(),
+                    casts: self.casts(m.shader),
+                    broken: false,
+                },
+                None => plain,
+            };
+        }
+        let custom = match self.assets.as_ref().map(|a| a.custom_material(r)) {
+            Some(Ok(c)) => c,
+            Some(Err(e)) => {
+                self.asset_errors
+                    .push(format!("material {r}: {}", e.message));
+                self.materials.insert(r.clone(), None);
+                return plain;
+            }
+            None => None,
+        };
+        if let Some(c) = custom {
+            return match self.custom_material(device, queue, r, &c) {
+                Some(gpu) => {
+                    let out = LoadedMaterial {
+                        key: Some(r.clone()),
+                        material: gpu.material.clone(),
+                        casts: self.casts(gpu.shader),
+                        broken: false,
+                    };
+                    self.materials.insert(r.clone(), Some(gpu));
+                    out
+                }
+                None => {
+                    self.broken_materials.insert(r.clone());
+                    LoadedMaterial {
+                        broken: true,
+                        ..plain
+                    }
+                }
             };
         }
         let loaded = match self.assets.as_ref().map(|a| a.material(r)) {
@@ -3418,14 +3565,199 @@ impl ExtractRenderer {
                 material,
                 bind_group,
                 textures,
+                shader: None,
             }
         });
         let out = match &gpu {
-            Some(g) => (Some(r.clone()), g.material.clone()),
-            None => (None, PbrMaterial::default()),
+            Some(g) => LoadedMaterial {
+                key: Some(r.clone()),
+                material: g.material.clone(),
+                casts: true,
+                broken: false,
+            },
+            None => plain,
         };
         self.materials.insert(r.clone(), gpu);
         out
+    }
+
+    /// Whether a material drawn with `shader` casts the sun's shadow.
+    fn casts(&self, shader: Option<Uuid>) -> bool {
+        shader.is_none_or(|id| self.surface(id).is_some_and(SurfaceShader::casts_shadows))
+    }
+
+    fn surface(&self, id: Uuid) -> Option<&SurfaceShader> {
+        self.surfaces.get(&id).and_then(Option::as_ref)
+    }
+
+    /// The shader asset a batch draws with; `None`: the built-in.
+    fn surface_for(&self, key: &BatchKey) -> Option<&SurfaceShader> {
+        let m = self.materials.get(key.material.as_ref()?)?.as_ref()?;
+        self.surface(m.shader?)
+    }
+
+    /// Drops the compiled shaders no material uses any more.
+    fn retain_used_surfaces(&mut self) {
+        let used: HashSet<Uuid> = self
+            .materials
+            .values()
+            .flatten()
+            .filter_map(|m| m.shader)
+            .collect();
+        self.surfaces.retain(|id, _| used.contains(id));
+    }
+
+    /// A shader asset's material (ADR-0031): its shader compiled on first
+    /// use, its block in a uniform buffer, each texture slot bound (or its
+    /// fallback texel) with the slot's sampler. `None` — reported once —
+    /// when the shader is missing or does not compile, or the material
+    /// was cooked for another version of it.
+    fn custom_material(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        r: &AssetRef,
+        c: &CustomMaterialPayload,
+    ) -> Option<GpuMaterial> {
+        let id = Uuid::from_bytes(c.shader);
+        if !self.surfaces.contains_key(&id) {
+            let built = self.surface_shader(device, id);
+            self.surfaces.insert(id, built);
+        }
+        let (size, count) = {
+            let s = self.surface(id)?;
+            (
+                s.shader.layout.size as usize,
+                s.shader.interface.textures().count(),
+            )
+        };
+        if c.block.len() != size || c.slots.len() != count {
+            self.asset_errors.push(format!(
+                "material {r}: cooked for another version of its shader (recook)"
+            ));
+            return None;
+        }
+        let mut textures = Vec::new();
+        let mut resolved: Vec<Option<AssetRef>> = Vec::with_capacity(count);
+        for slot in &c.slots {
+            let t = slot.texture.as_ref().map(|(asset, sub)| AssetRef {
+                asset: Uuid::from_bytes(*asset),
+                sub: sub.clone(),
+            });
+            let have = t.filter(|t| self.texture(device, queue, t));
+            if let Some(t) = &have {
+                textures.push(t.clone());
+            }
+            resolved.push(have);
+        }
+        for slot in &c.slots {
+            let key = self.slot_sampler_key(slot);
+            self.surface_samplers
+                .entry(key)
+                .or_insert_with(|| create_slot_sampler(device, key));
+        }
+        let surface = self.surface(id).expect("compiled above");
+        let fallbacks = self.fallbacks.as_ref().expect("ensure_fallbacks ran");
+        let block = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("fynkel material {r} block")),
+            contents: &c.block,
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let mut entries = vec![wgpu::BindGroupEntry {
+            binding: 0,
+            resource: block.as_entire_binding(),
+        }];
+        for (i, (slot, t)) in c.slots.iter().zip(&resolved).enumerate() {
+            let view = match t {
+                Some(t) => &self.textures[t].as_ref().expect("resolved").view,
+                None => match slot.fallback {
+                    FALLBACK_BLACK => &fallbacks.black.view,
+                    FALLBACK_NORMAL => &fallbacks.flat_normal.view,
+                    FALLBACK_GRAY => &fallbacks.gray.view,
+                    _ => &fallbacks.white.view,
+                },
+            };
+            let sampler = &self.surface_samplers[&self.slot_sampler_key(slot)];
+            entries.push(wgpu::BindGroupEntry {
+                binding: 1 + 2 * i as u32,
+                resource: wgpu::BindingResource::TextureView(view),
+            });
+            entries.push(wgpu::BindGroupEntry {
+                binding: 2 + 2 * i as u32,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            });
+        }
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("fynkel material {r}")),
+            layout: &surface.layout,
+            entries: &entries,
+        });
+        // The instance carries no factors for a shader asset (its values
+        // are in the block): white, and the material's alpha and sides.
+        let material = PbrMaterial {
+            base_color: glam::Vec4::ONE,
+            emissive: Vec3::ZERO,
+            alpha_mode: match c.alpha_mode {
+                ALPHA_MASK => AlphaMode::Mask,
+                ALPHA_BLEND => AlphaMode::Blend,
+                _ => AlphaMode::Opaque,
+            },
+            alpha_cutoff: c.alpha_cutoff,
+            double_sided: c.double_sided,
+            ..PbrMaterial::default()
+        };
+        Some(GpuMaterial {
+            material,
+            bind_group,
+            textures,
+            shader: Some(id),
+        })
+    }
+
+    /// Reads and compiles shader asset `id`; `None` (reported) when it
+    /// cannot be.
+    fn surface_shader(&mut self, device: &wgpu::Device, id: Uuid) -> Option<SurfaceShader> {
+        let text = match self.assets.as_ref()?.shader_source(id) {
+            Ok(t) => t,
+            Err(e) => {
+                self.asset_errors
+                    .push(format!("shader {id}: {}", e.message));
+                return None;
+            }
+        };
+        let shader = match fynkel_shader::parse(None, &text) {
+            Ok(s) => s,
+            Err(d) => {
+                let why = d.first().map_or("does not read", |d| d.message.as_str());
+                self.asset_errors.push(format!("shader {id}: {why}"));
+                return None;
+            }
+        };
+        let ctx = SurfaceContext {
+            frame: &self.frame_layout,
+            shadow: &self.shadow_layout,
+            skin: &self.skin_layout,
+            sample_count: self.pipelines.sample_count,
+        };
+        match SurfaceShader::new(device, &ctx, shader) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                self.asset_errors.push(format!("shader {id}: {e}"));
+                None
+            }
+        }
+    }
+
+    /// A slot's sampler settings: filter, mipmaps, wrap and anisotropy —
+    /// at least the quality's, as the built-in's maps, where the filter
+    /// allows it.
+    fn slot_sampler_key(&self, slot: &MaterialSlot) -> [u32; 4] {
+        let anisotropy = if slot.filter == 0 && slot.mipmaps {
+            slot.anisotropy.max(self.quality.anisotropy).clamp(1, 16)
+        } else {
+            1
+        };
+        [slot.filter, slot.mipmaps as u32, slot.wrap, anisotropy]
     }
 }
 
@@ -3645,6 +3977,76 @@ struct AttachmentLayouts<'a> {
 /// twins, the four outline mask twins (one sample whatever the scene's),
 /// SSAO, the AO blur, bloom's three, post, present. Nothing else is ever created; a quality switch to
 /// another sample count rebuilds this set.
+/// The mesh stages' vertex buffers: slot 0 the cooked 72-byte vertex,
+/// slot 1 the [`Instance`], and for the skinned stages slot 2 the cooked
+/// `SkinWeight` (four u16 joints, four f32 weights).
+fn vertex_buffers(skinned: bool) -> Vec<Option<wgpu::VertexBufferLayout<'static>>> {
+    const VERTEX: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
+        0 => Float32x3, 1 => Float32x3, 2 => Float32x4,
+        3 => Float32x2, 4 => Float32x2, 5 => Float32x4
+    ];
+    const INSTANCE: [wgpu::VertexAttribute; 8] = wgpu::vertex_attr_array![
+        6 => Float32x4, 7 => Float32x4, 8 => Float32x4, 9 => Float32x4,
+        10 => Float32x4, 11 => Float32x4, 12 => Float32x4, 13 => Float32x4
+    ];
+    const SKIN: [wgpu::VertexAttribute; 2] =
+        wgpu::vertex_attr_array![14 => Uint16x4, 15 => Float32x4];
+    let mut buffers = vec![
+        Some(wgpu::VertexBufferLayout {
+            array_stride: Vertex::STRIDE as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &VERTEX,
+        }),
+        Some(wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Instance>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &INSTANCE,
+        }),
+    ];
+    if skinned {
+        buffers.push(Some(wgpu::VertexBufferLayout {
+            array_stride: SkinWeight::STRIDE as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &SKIN,
+        }));
+    }
+    buffers
+}
+
+/// The transparent stage's target: premultiplied accumulation — colour by
+/// the fragment's alpha, the HDR alpha (the post pass's coverage) by
+/// `1 - alpha`.
+fn hdr_blend_target() -> wgpu::ColorTargetState {
+    wgpu::ColorTargetState {
+        format: HDR_FORMAT,
+        blend: Some(wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::SrcAlpha,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+        }),
+        write_mask: wgpu::ColorWrites::ALL,
+    }
+}
+
+/// The selection outline's mask target, blended by `keep`.
+fn mask_target(keep: wgpu::BlendComponent) -> wgpu::ColorTargetState {
+    wgpu::ColorTargetState {
+        format: outline::MASK_FORMAT,
+        blend: Some(wgpu::BlendState {
+            color: keep,
+            alpha: keep,
+        }),
+        write_mask: wgpu::ColorWrites::ALL,
+    }
+}
+
 fn create_pipelines(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
@@ -3672,7 +4074,10 @@ fn create_pipelines(
     };
     let mesh_shader = module(
         "fynkel mesh shader",
-        &format!("{MESH_STAGE}{LIGHT_LIBRARY}{}", include_str!("shaders/pbr.wgsl")),
+        &format!(
+            "{MESH_STAGE}{LIGHT_LIBRARY}{}",
+            include_str!("shaders/pbr.wgsl")
+        ),
     );
     let sky_shader = module("fynkel sky shader", include_str!("shaders/sky.wgsl"));
     let post_shader = module("fynkel post shader", include_str!("shaders/post.wgsl"));
@@ -3743,57 +4148,13 @@ fn create_pipelines(
         blend: Some(wgpu::BlendState::REPLACE),
         write_mask: wgpu::ColorWrites::ALL,
     })];
-    // Premultiplied accumulation: colour by the fragment's alpha, the
-    // HDR alpha (the post pass's coverage) by `1 - alpha`.
-    let hdr_blend_target = [Some(wgpu::ColorTargetState {
-        format: HDR_FORMAT,
-        blend: Some(wgpu::BlendState {
-            color: wgpu::BlendComponent {
-                src_factor: wgpu::BlendFactor::SrcAlpha,
-                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                operation: wgpu::BlendOperation::Add,
-            },
-            alpha: wgpu::BlendComponent {
-                src_factor: wgpu::BlendFactor::One,
-                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                operation: wgpu::BlendOperation::Add,
-            },
-        }),
-        write_mask: wgpu::ColorWrites::ALL,
-    })];
+    let hdr_blend_target = [Some(hdr_blend_target())];
     let multisample = wgpu::MultisampleState {
         count: sample_count,
         ..Default::default()
     };
-    let mesh_buffers = [
-        Some(wgpu::VertexBufferLayout {
-            array_stride: Vertex::STRIDE as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![
-                0 => Float32x3, 1 => Float32x3, 2 => Float32x4,
-                3 => Float32x2, 4 => Float32x2, 5 => Float32x4
-            ],
-        }),
-        Some(wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Instance>() as u64,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![
-                6 => Float32x4, 7 => Float32x4, 8 => Float32x4, 9 => Float32x4,
-                10 => Float32x4, 11 => Float32x4, 12 => Float32x4, 13 => Float32x4
-            ],
-        }),
-    ];
-    // The skinned stages add slot 2: the cooked `SkinWeight` (four u16
-    // joints, four f32 weights).
-    let skinned_buffers = [
-        mesh_buffers[0].clone(),
-        mesh_buffers[1].clone(),
-        Some(wgpu::VertexBufferLayout {
-            array_stride: SkinWeight::STRIDE as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![14 => Uint16x4, 15 => Float32x4],
-        }),
-    ];
+    let mesh_buffers = vertex_buffers(false);
+    let skinned_buffers = vertex_buffers(true);
     // `fs_depth` (no colour target) is the camera depth prepass; the rest
     // shade. The compare is `LessEqual` because a prepass has already
     // written exactly the depth the scene pass computes — the vertex
@@ -3893,14 +4254,7 @@ fn create_pipelines(
         dst_factor: wgpu::BlendFactor::One,
         operation: wgpu::BlendOperation::Max,
     };
-    let mask_target = [Some(wgpu::ColorTargetState {
-        format: outline::MASK_FORMAT,
-        blend: Some(wgpu::BlendState {
-            color: keep_max,
-            alpha: keep_max,
-        }),
-        write_mask: wgpu::ColorWrites::ALL,
-    })];
+    let mask_target = [Some(mask_target(keep_max))];
     let mask = |label, skinned: bool, cull_mode| {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(label),
@@ -4209,6 +4563,37 @@ fn create_material_sampler(device: &wgpu::Device, anisotropy: u32) -> wgpu::Samp
         min_filter: wgpu::FilterMode::Linear,
         mipmap_filter: wgpu::MipmapFilterMode::Linear,
         anisotropy_clamp: anisotropy.clamp(1, 16) as u16,
+        ..Default::default()
+    })
+}
+
+/// A shader asset slot's sampler for [`Renderer::slot_sampler_key`]'s
+/// settings.
+fn create_slot_sampler(
+    device: &wgpu::Device,
+    [filter, mipmaps, wrap, anisotropy]: [u32; 4],
+) -> wgpu::Sampler {
+    let address = match wrap {
+        1 => wgpu::AddressMode::ClampToEdge,
+        2 => wgpu::AddressMode::MirrorRepeat,
+        _ => wgpu::AddressMode::Repeat,
+    };
+    let (filter, mipmap_filter) = if filter == 1 {
+        (wgpu::FilterMode::Nearest, wgpu::MipmapFilterMode::Nearest)
+    } else {
+        (wgpu::FilterMode::Linear, wgpu::MipmapFilterMode::Linear)
+    };
+    device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("fynkel shader slot sampler"),
+        address_mode_u: address,
+        address_mode_v: address,
+        address_mode_w: address,
+        mag_filter: filter,
+        min_filter: filter,
+        mipmap_filter,
+        // Without mipmaps: the top level only.
+        lod_max_clamp: if mipmaps == 1 { 32.0 } else { 0.0 },
+        anisotropy_clamp: anisotropy as u16,
         ..Default::default()
     })
 }

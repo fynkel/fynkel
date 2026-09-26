@@ -1092,6 +1092,7 @@ dependencies = [
  "fynkel_core",
  "fynkel_import",
  "fynkel_scene",
+ "fynkel_shader",
  "glam 0.33.7",
  "pollster",
  "serde_json",

@@ -3116,3 +3116,196 @@ fn contact_shadows_darken_the_sunlit_floor_at_a_base_and_off_is_none() {
     assert_eq!(capped, plain);
     r.set_quality(Quality::default());
 }
+
+// -------------------------------------------------- shader assets (ADR-0031)
+
+const LAB_SHADER: &str = "c0000000-0000-4000-8000-000000000501";
+
+impl Lab {
+    /// Writes `assets/shaders/lab.shader` with its sidecar; returns its id.
+    fn shader(&self, text: &str) -> Uuid {
+        let dir = self.dir.join("assets/shaders");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("lab.shader"), text).unwrap();
+        let meta = json!({
+            "$schema": "https://fynkel.dev/schemas/meta.schema.json",
+            "formatVersion": 2,
+            "id": LAB_SHADER,
+            "name": "lab.shader",
+            "importer": "fynkel.shader",
+            "importerVersion": 1,
+            "settings": {},
+            "subAssets": {},
+        });
+        std::fs::write(
+            dir.join("lab.shader.meta.json"),
+            serde_json::to_string_pretty(&meta).unwrap(),
+        )
+        .unwrap();
+        LAB_SHADER.parse().unwrap()
+    }
+}
+
+const FLAT_SHADER: &str = "shader \"Tests/Flat\" {
+    lighting unlit
+    properties {
+        tint color3 = (1, 1, 1)
+        glow texture = black
+    }
+}
+
+fn surface(in: SurfaceInput) -> Surface {
+    var s = default_surface();
+    s.base_color = material.tint + sample_glow(in.uv0).rgb;
+    return s;
+}
+";
+
+#[test]
+fn a_shader_asset_draws_its_surface() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut lab = Lab::new("shader-flat");
+    let shader = lab.shader(FLAT_SHADER);
+    let m = lab.material(json!({
+        "shader": asset(&shader.to_string()), "parameters": { "tint": [0.2, 0.6, 1.0] } }));
+    let (assets, extract) = lab.extract(Vec3::new(0.0, 0.0, 3.0), &[(Vec3::ZERO, m)], true);
+    let (px, mut r) = render_lab(&device, &queue, &assets, &extract);
+    dump(&px, "shader-flat");
+    assert_eq!(r.stats().batches, 1);
+    // Unlit: the tint as it is, whatever the sun and the exposure; the
+    // unbound `glow` samples its black fallback.
+    let want = srgb8([0.2, 0.6, 1.0, 1.0]);
+    let center = px[(H / 2 * W + W / 2) as usize];
+    assert!(near(center, want), "{center:?} vs {want:?}");
+    // Another sample count rebuilds the shader's pipelines too.
+    let msaa = if r.stats().msaa == 1 { 4 } else { 1 };
+    r.set_quality(Quality {
+        msaa,
+        ..Quality::default()
+    });
+    let px = render_offscreen(&device, &queue, &mut r, &extract);
+    assert_eq!(r.stats().msaa, msaa);
+    assert_eq!(r.asset_errors(), &[] as &[String]);
+    let center = px[(H / 2 * W + W / 2) as usize];
+    assert!(near(center, want), "{center:?} at {msaa} samples");
+}
+
+const WAVE_SHADER: &str = "shader \"Tests/Wave\" {
+    lighting lit
+    shadows off
+    properties {
+        tint  color3 = (0.8, 0.8, 0.8)
+        shift float = 0.5
+    }
+}
+
+fn surface(in: SurfaceInput) -> Surface {
+    var s = default_surface();
+    s.base_color = material.tint;
+    return s;
+}
+
+fn vertex(in: VertexInput) -> VertexInput {
+    var v = in;
+    v.position.x += globals.time * material.shift;
+    return v;
+}
+";
+
+#[test]
+fn a_shaders_vertex_moves_with_the_worlds_time_and_shadows_off_does_not_cast() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut lab = Lab::new("shader-wave");
+    lab.sun_shadows = true;
+    let shader = lab.shader(WAVE_SHADER);
+    let m = lab.material(json!({ "shader": asset(&shader.to_string()) }));
+    let (assets, mut extract) = lab.extract(Vec3::new(0.0, 0.0, 4.0), &[(Vec3::ZERO, m)], true);
+    let centroid = |px: &[[u8; 4]]| {
+        let (mut sum, mut n) = (0.0, 0.0);
+        for (i, p) in px.iter().enumerate() {
+            if !is_background(*p) {
+                sum += (i as u32 % W) as f32;
+                n += 1.0;
+            }
+        }
+        assert!(n > 500.0, "{n} px drawn");
+        sum / n
+    };
+    extract.time = 0.0;
+    let (still, r) = render_lab(&device, &queue, &assets, &extract);
+    // Lit by the sun, and `shadows off`: no caster.
+    assert!(drawn_mean(&still).0 > 10.0);
+    assert_eq!(r.stats().shadow_casters, 0);
+    extract.time = 1.0;
+    let (moved, _) = render_lab(&device, &queue, &assets, &extract);
+    dump(&moved, "shader-wave");
+    let (a, b) = (centroid(&still), centroid(&moved));
+    assert!(b > a + 5.0, "half a unit to the right: {a} → {b}");
+
+    // The same shader with shadows on casts.
+    std::fs::write(
+        lab.dir.join("assets/shaders/lab.shader"),
+        WAVE_SHADER.replace("shadows off", "shadows on"),
+    )
+    .unwrap();
+    let (assets, extract) = lab.extract(Vec3::new(0.0, 0.0, 4.0), &[(Vec3::ZERO, m)], true);
+    let (_, r) = render_lab(&device, &queue, &assets, &extract);
+    assert_eq!(r.stats().shadow_casters, 1);
+}
+
+#[test]
+fn a_material_whose_shader_is_missing_draws_magenta() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut lab = Lab::new("shader-missing");
+    let shader = lab.shader(FLAT_SHADER);
+    let m = lab.material(json!({ "shader": asset(&shader.to_string()) }));
+    let (assets, extract) = lab.extract(Vec3::new(0.0, 0.0, 3.0), &[(Vec3::ZERO, m)], false);
+    // The shader's cooked object goes missing from the cache after the
+    // cook (the renderer never meets broken code, but may meet no code).
+    fn remove_containing(dir: &Path, marker: &[u8]) -> usize {
+        let mut n = 0;
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                n += remove_containing(&p, marker);
+            } else if std::fs::read(&p)
+                .unwrap()
+                .windows(marker.len())
+                .any(|w| w == marker)
+                && p.extension().is_some_and(|x| x == "fyna")
+            {
+                std::fs::remove_file(&p).unwrap();
+                n += 1;
+            }
+        }
+        n
+    }
+    assert!(
+        remove_containing(
+            &lab.dir.join(".fynkel/cache"),
+            b"fn surface(in: SurfaceInput)"
+        ) > 0
+    );
+    let mut r = renderer(&device);
+    r.placeholders = false;
+    r.set_assets(Some(assets.clone()));
+    let px = render_offscreen(&device, &queue, &mut r, &extract);
+    dump(&px, "shader-missing");
+    assert_eq!(r.asset_errors().len(), 1, "{:?}", r.asset_errors());
+    assert!(
+        r.asset_errors()[0].starts_with("shader "),
+        "{:?}",
+        r.asset_errors()
+    );
+    let center = px[(H / 2 * W + W / 2) as usize];
+    assert!(
+        near(center, srgb8(fynkel_render::MISSING_TINT)),
+        "{center:?}"
+    );
+}

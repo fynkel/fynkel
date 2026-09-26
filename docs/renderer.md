@@ -689,6 +689,45 @@ byte-identical before and after). `Frame.time` carries the world's time
 seconds since the previous frame and the internal target's size — a
 shader's `globals`.
 
+### Shader assets (ADR-0031, `src/surface.rs`)
+
+A material cooked for a `.shader` (a `MATC` chunk) is drawn with that
+shader's own pipelines. The first time one of its materials loads, the
+renderer reads the shader's text (`SHDR`) and compiles two modules:
+
+- **the scene module**: `frame.wgsl`, the shader's prelude and code
+  (`fynkel_shader::assemble`), the vertex stage, `light.wgsl` and
+  `shaders/surface.wgsl` — entry points that call the shader's
+  `vertex()` before the engine places the vertex, and its `surface()`
+  before the engine's light;
+- **the shadow module**: `mesh_input.wgsl` and
+  `shaders/surface_shadow.wgsl` — the same `vertex()`, and `surface()`
+  for a `mask` material's cutoff.
+
+Both are validated with naga before wgpu sees them. Each shader gets its
+own group 1 layout (binding 0 the property block, texture `i` at
+`1 + 2i`, its sampler at `2 + 2i`) and **eighteen** pipelines: scene,
+transparent, depth prepass and selection mask, each skinned or not and
+single- or double-sided, plus the two shadow stages. Groups 0 and 2 are
+the built-in's, so draws batch by `(mesh, material)` as always; the draw
+loops set the pipeline per batch and only when it changes.
+
+A material's bind group holds its block in a uniform buffer, each bound
+texture (or the slot's fallback texel: white, black, flat normal or
+gray) and a sampler per slot's settings (filter, mipmaps, wrap,
+anisotropy — at least the quality's, as the built-in's maps). The
+instance carries white, the material's alpha mode and cutoff and its
+sides; the property values live in the block only. A shader with
+`shadows off` does not cast. A shader is kept while a material uses it;
+a sample-count change rebuilds its pipelines and keeps its layout, so
+the material bind groups stay.
+
+When the shader is missing from the cache, or the material was cooked
+for another version of it, the material is the **error material**:
+unlit magenta (`MISSING_TINT`, Unity's pink), reported once in
+`asset_errors`. The built-in's pixels are unchanged by all this (the
+reference game and showcase render byte-identical).
+
 Cook-Torrance per light: GGX normal distribution (`α = roughness²`),
 height-correlated Smith visibility (Heitz), Schlick Fresnel with
 `f0 = mix(0.04, albedo, metallic)`; Lambert diffuse `albedo · (1 − metallic) / π`.
@@ -856,9 +895,10 @@ holds the shadow map (`texture_depth_2d`, binding 1 — a 1×1 map when
 shadows are off), its comparison sampler (binding 2), the environment's
 cube sampler (3), irradiance cube (4), prefiltered specular cube (5) and
 BRDF LUT (6) (§ Image-based lighting). The shadow pass
-binds its own 64-byte `view_proj` uniform at group 0, one slot per
-cascade at `SHADOW_UNIFORM_STRIDE` (256) bytes, chosen by a dynamic
-offset.
+binds its own 96-byte uniform at group 0 — `view_proj`, then `time` and
+`camera_pos` as in `Frame` (a shader asset's shadow stage fills its
+`globals` from them) — one slot per cascade at `SHADOW_UNIFORM_STRIDE`
+(256) bytes, chosen by a dynamic offset.
 
 Per instance (vertex buffer 1, 128 bytes, locations 6–13): model matrix,
 `tint` (base colour factor), `emissive` (rgb × strength; `w` = the
@@ -930,9 +970,11 @@ full table.
 
 ## Pipelines and caches — the variant cap
 
-Exactly **thirty** render pipelines exist, all created in `new`
+Exactly **thirty** built-in render pipelines exist, all created in `new`
 (`PIPELINE_VARIANTS`) and rebuilt as a set only when the sample count
-changes; nothing is compiled at draw time:
+changes; nothing is compiled at draw time. Each shader asset in use adds
+its own eighteen, built when its first material loads (§ Shader
+assets):
 
 | Pipeline | Target | Samples | Culling | Depth | Blend | Vertex entry |
 | --- | --- | --- | --- | --- | --- | --- |
