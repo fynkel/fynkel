@@ -1734,10 +1734,14 @@ fn a_shader_cooks_to_shdr_and_its_materials_to_matc() {
     p.write("materials/glow.material.json", &glow_material(20.0));
     let third = p.cook();
     assert_eq!(status(&third, GLOW_MATERIAL), Status::Failed);
-    assert!(third
-        .diagnostics
-        .iter()
-        .any(|d| d.code == Code::MATERIAL_PARAMETER_RANGE), "{:?}", third.diagnostics);
+    assert!(
+        third
+            .diagnostics
+            .iter()
+            .any(|d| d.code == Code::MATERIAL_PARAMETER_RANGE),
+        "{:?}",
+        third.diagnostics
+    );
 
     // Code that does not compile fails the shader, at its line in the
     // file, and every material of it.

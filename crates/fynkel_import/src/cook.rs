@@ -1123,7 +1123,9 @@ fn cook_one(
                 chunks.push(c);
             }
             if doc.kind == DocumentKind::Material {
-                if let Some(c) = custom_material_chunk(db, doc, &entry.name, &shown, diagnostics).ok()? {
+                if let Some(c) =
+                    custom_material_chunk(db, doc, &entry.name, &shown, diagnostics).ok()?
+                {
                     chunks.push(c);
                 }
             }
@@ -1135,7 +1137,13 @@ fn cook_one(
                 sub_assets.insert(sub.clone(), *id);
             }
             if meta.importer == fynkel_document::asset::SHADER_IMPORTER {
-                chunks.push(shader_chunk(&file, &entry.name, &entry.path, p, diagnostics)?);
+                chunks.push(shader_chunk(
+                    &file,
+                    &entry.name,
+                    &entry.path,
+                    p,
+                    diagnostics,
+                )?);
             } else if meta.importer == fynkel_document::asset::FILE_IMPORTER {
                 let bytes = match std::fs::read(&file) {
                     Ok(b) => b,
@@ -1897,8 +1905,11 @@ fn shader_chunk(
     };
     if hash_bytes(text.as_bytes()) != p.source {
         diagnostics.push(
-            Diagnostic::error(Code::IO, format!("{path} changed during the cook; cook again"))
-                .with_document(shown),
+            Diagnostic::error(
+                Code::IO,
+                format!("{path} changed during the cook; cook again"),
+            )
+            .with_document(shown),
         );
         return None;
     }
@@ -1941,7 +1952,7 @@ fn custom_material_chunk(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Option<ChunkPlan>, ()> {
     use fynkel_cooked::payload as pl;
-    use fynkel_document::material::{ColorSpace as Cs, ShaderLibrary, ShaderManifest};
+    use fynkel_document::material::ShaderLibrary;
     let material = fynkel_document::Material::from_document(doc.clone());
     if material.pbr.is_some() {
         return Ok(None);
@@ -1961,72 +1972,33 @@ fn custom_material_chunk(
             let shader = fynkel_shader::parse(Some(&e.path), &text).ok()?;
             Some((e.id, shader))
         });
-    let mut library = ShaderLibrary::builtin();
-    let layout = shader.as_ref().map(|(id, s)| {
-        library.add(ShaderManifest::from_shader(*id, s.clone()));
-        (*id, s.interface.clone(), s.layout.clone())
-    });
-    let checked: Vec<Diagnostic> = material
-        .validate_semantics(&library)
-        .into_iter()
-        .map(|d| if d.document.is_none() { d.with_document(shown.to_string()) } else { d })
-        .collect();
-    let bad = has_errors(&checked);
-    diagnostics.extend(checked);
-    let (Some((shader_id, interface, layout)), false) = (layout, bad) else {
+    let tag = |d: Diagnostic| {
+        if d.document.is_none() {
+            d.with_document(shown.to_string())
+        } else {
+            d
+        }
+    };
+    let Some((shader_id, shader)) = shader else {
+        // No such shader: the document check says so.
+        let checked: Vec<Diagnostic> = material
+            .validate_semantics(&ShaderLibrary::builtin())
+            .into_iter()
+            .map(tag)
+            .collect();
+        diagnostics.extend(checked);
         return Err(());
     };
-    let resolved = material.resolve(&library).ok_or(())?;
-    let values: HashMap<&str, Vec<f64>> = resolved
-        .parameters
-        .iter()
-        .map(|p| (p.name.as_str(), p.value.components()))
+    let (payload, checked) = material.custom_payload(&shader);
+    diagnostics.extend(checked.into_iter().map(tag));
+    let payload = payload.ok_or(())?;
+    let bound: Vec<&str> = shader
+        .interface
+        .textures()
+        .zip(&payload.slots)
+        .filter(|(_, s)| s.texture.is_some())
+        .map(|(p, _)| p.name.as_str())
         .collect();
-    let block = layout.pack(&interface, |n| values.get(n).map(Vec::as_slice));
-    let slots = resolved
-        .textures
-        .iter()
-        .map(|t| {
-            let sampler = t.binding.as_ref().map(|b| b.sampler.clone()).unwrap_or_default();
-            pl::MaterialSlot {
-                texture: t
-                    .binding
-                    .as_ref()
-                    .map(|b| (b.texture.asset.0, b.texture.sub.clone())),
-                color_space: match t.color_space {
-                    Cs::Srgb => pl::COLOR_SPACE_SRGB,
-                    Cs::Linear => pl::COLOR_SPACE_LINEAR,
-                },
-                fallback: match t.fallback.as_deref() {
-                    Some("black") => pl::FALLBACK_BLACK,
-                    Some("normal") => pl::FALLBACK_NORMAL,
-                    Some("gray") => pl::FALLBACK_GRAY,
-                    _ => pl::FALLBACK_WHITE,
-                },
-                filter: (sampler.filter == "nearest") as u32,
-                mipmaps: sampler.mipmaps,
-                wrap: match sampler.wrap.as_str() {
-                    "clamp" => 1,
-                    "mirror" => 2,
-                    _ => 0,
-                },
-                anisotropy: sampler.anisotropy,
-                uv_set: t.binding.as_ref().map_or(0, |b| b.uv_set),
-            }
-        })
-        .collect::<Vec<_>>();
-    let payload = pl::CustomMaterialPayload {
-        shader: shader_id.into_bytes(),
-        alpha_mode: match material.alpha_mode {
-            fynkel_core::material::AlphaMode::Opaque => pl::ALPHA_OPAQUE,
-            fynkel_core::material::AlphaMode::Mask => pl::ALPHA_MASK,
-            fynkel_core::material::AlphaMode::Blend => pl::ALPHA_BLEND,
-        },
-        alpha_cutoff: material.alpha_cutoff as f32,
-        double_sided: material.double_sided,
-        block,
-        slots,
-    };
     Ok(Some(ChunkPlan {
         kind: KIND_CUSTOM_MATERIAL,
         name: name.to_string(),
@@ -2035,7 +2007,7 @@ fn custom_material_chunk(
             "shader": shader_id.to_string(),
             "alphaMode": fynkel_document::material::alpha_mode_name(material.alpha_mode),
             "blockBytes": payload.block.len(),
-            "textures": resolved.textures.iter().filter(|t| t.binding.is_some()).map(|t| t.slot.clone()).collect::<Vec<_>>(),
+            "textures": bound,
         }),
         payload: pl::encode_custom_material(&payload),
     }))
