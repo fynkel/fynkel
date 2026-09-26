@@ -25,6 +25,7 @@ import 'hierarchy/hierarchy_tree.dart';
 import 'documents/editor_document.dart';
 import 'inspector/field_widgets.dart' show ColorSwatches;
 import 'preview/preview_area.dart' show PreviewLayout;
+import 'preview/stage_view.dart' show PreviewStageScope;
 import 'inspector/codegen_check.dart';
 import 'l10n/strings.dart';
 import 'inspector/inspector_model.dart';
@@ -3043,6 +3044,13 @@ class EditorShellState extends State<EditorShell> {
 
   /// Every copy's models, the Scene views first (they use the Hierarchy
   /// operations) — the project is closing.
+  /// The Inspector's 3D previews draw from the open project's stages
+  /// (ADR-0030), with its unsaved material edits.
+  Widget _previewStages(Widget child) => switch (project) {
+    final p? => PreviewStageScope(project: p, edits: assetEdits, viewports: widget.sceneViewport, child: child),
+    null => child,
+  };
+
   void _disposeCopies() {
     _gamePreview?.dispose();
     _gamePreview = null;
@@ -3203,14 +3211,16 @@ class EditorShellState extends State<EditorShell> {
                 host: extensions,
                 child: NoticesScope(
                   notices: notices,
-                  child: p0 == null || workspace == null
-                      ? Column(
-                          children: [
-                            Expanded(child: body),
-                            NoticeStrip(key: const Key('shell.error'), notices: notices),
-                          ],
-                        )
-                      : body,
+                  child: _previewStages(
+                    p0 == null || workspace == null
+                        ? Column(
+                            children: [
+                              Expanded(child: body),
+                              NoticeStrip(key: const Key('shell.error'), notices: notices),
+                            ],
+                          )
+                        : body,
+                  ),
                 ),
               ),
             ),

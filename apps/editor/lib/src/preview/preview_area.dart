@@ -14,6 +14,8 @@ import '../extensions/editor_extensions.dart';
 import '../theme/icons.dart';
 import '../theme/tokens.dart';
 import 'preview_provider.dart';
+import 'stage_previews.dart';
+import 'stage_view.dart';
 import 'texture_preview.dart';
 
 /// The area's height and fold per preview, read from and written to the
@@ -35,6 +37,10 @@ abstract final class PreviewLayout {
 /// Registers the editor's own previews (once; idempotent).
 void registerBuiltInPreviews() {
   PreviewProviders.register(texturePreview);
+  PreviewProviders.register(materialPreview);
+  PreviewProviders.register(modelPreview);
+  PreviewProviders.register(rigPreview);
+  PreviewProviders.register(prefabPreview);
 }
 
 /// The preview area for [asset], or nothing when no preview takes it.
@@ -316,5 +322,15 @@ class _Preview implements PreviewContext {
         channel: channel,
         mip: mip,
         onSize: onSize,
+      );
+
+  @override
+  Widget stage({String? asset, String? sub, Object? shape, void Function(PreviewStageStats stats)? onStats}) =>
+      StageView(
+        key: ValueKey('preview.stage.${asset ?? this.asset.id}.$sub.$revision'),
+        asset: asset ?? this.asset.id,
+        sub: sub,
+        shape: shape,
+        onStats: onStats,
       );
 }

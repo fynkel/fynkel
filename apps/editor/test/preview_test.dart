@@ -7,8 +7,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel_editor/src/extensions/editor_extensions.dart';
+import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 import 'package:fynkel_editor/src/inspector/inspector_panel.dart';
 import 'package:fynkel_editor/src/preview/preview_area.dart';
+import 'package:fynkel_editor/src/preview/stage_previews.dart';
+import 'package:fynkel_editor/src/preview/stage_view.dart';
 import 'package:fynkel_editor/src/preview/texture_preview.dart';
 
 import 'parity/harness.dart';
@@ -153,5 +156,60 @@ void main() {
     final e = await Editor.open(tester, tag: 'preview');
     await select(e, e.shell.browser!.entries.firstWhere((a) => a.path == 'scenes/main.scene.json').id);
     expect(find.byKey(const Key('preview.area')), findsNothing);
+  });
+
+  test('the info line counts what the stage draws', () {
+    expect(stageInfo(null, lead: 'Sphere'), 'Sphere');
+    const cube = PreviewStageStats(meshes: 1, vertices: 24, triangles: 12, size: [1, 1, 1]);
+    expect(stageInfo(cube, lead: 'Cube'), 'Cube  24 verts  12 tris  1.00 × 1.00 × 1.00 m');
+    const model = PreviewStageStats(meshes: 3, vertices: 12345, triangles: 20000, skinned: 1, size: [0.5, 12, 2]);
+    expect(stageInfo(model), '3 meshes  1 skinned  12,345 verts  20,000 tris  0.50 × 12.0 × 2.00 m');
+  });
+
+  StageViewState stageOf(WidgetTester tester) => tester.state<StageViewState>(find.byType(StageView));
+
+  testWidgets('a material on a shape, from the menu; the stage follows its edits', (tester) async {
+    final e = await Editor.open(tester, tag: 'preview');
+    await select(e, pathId(e, 'materials/rusted.material.json'));
+    expect(find.byKey(const Key('preview.stage')), findsOneWidget);
+    expect(find.byKey(const Key('preview.stage.error')), findsNothing);
+    final stage = stageOf(tester).stage!;
+    expect(stage.state.subject, 'material');
+    expect(info(tester), startsWith('Sphere  '));
+    expect(info(tester), contains(' tris  1.00 × 1.00 × 1.00 m'));
+
+    await tester.tap(find.byKey(const Key('preview.shape')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview.shape.cube')));
+    await tester.pumpAndSettle();
+    expect(identical(stageOf(tester).stage, stage), isTrue, reason: 'the same stage, reshaped');
+    expect(info(tester), 'Cube  24 verts  12 tris  1.00 × 1.00 × 1.00 m');
+
+    // Its page's edits are drawn by the stage too (no Scene view needed).
+    final edits = e.shell.assetEdits!;
+    expect(edits.watchers, isNotEmpty);
+  });
+
+  testWidgets('a model whole or one mesh; a prefab as it is', (tester) async {
+    final e = await Editor.open(tester, tag: 'preview');
+    await select(e, pathId(e, 'models/robot.glb'));
+    expect(stageOf(tester).stage!.state.subject, 'hierarchy');
+    final whole = info(tester);
+    expect(whole, contains('meshes'));
+
+    await tester.tap(find.byKey(const Key('preview.part')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview.part.mesh/Cube')));
+    await tester.pumpAndSettle();
+    expect(stageOf(tester).stage!.state.subject, 'mesh');
+    expect(info(tester), startsWith('1 mesh  24 verts  12 tris'));
+    expect(
+      tester.widget<Text>(find.descendant(of: find.byKey(const Key('preview.part')), matching: find.byType(Text))).data,
+      'Cube',
+    );
+
+    await select(e, pathId(e, 'prefabs/crate.prefab.json'));
+    expect(stageOf(tester).stage!.state.subject, 'hierarchy');
+    expect(info(tester), contains('verts'));
   });
 }

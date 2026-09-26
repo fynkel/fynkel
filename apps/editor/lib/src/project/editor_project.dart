@@ -12,6 +12,7 @@ import 'package:path/path.dart' as p;
 import 'package:watcher/watcher.dart';
 
 import '../documents/editor_document.dart';
+import '../preview/stage_backend.dart';
 
 /// A document in the asset database, as the Open Document dialog lists it.
 final class DocumentAsset {
@@ -305,6 +306,13 @@ abstract class EditorProject extends ChangeNotifier {
   /// The asset operations' undo/redo state.
   AssetHistory assetHistory();
 
+  /// A preview stage for the Inspector's 3D previews (ADR-0030): [asset]
+  /// (a part of it by [sub]) alone in a small world, a material on
+  /// [shape]. Throws `AuthoringException` when there is nothing to stage;
+  /// `UnsupportedError` when this project draws no 3D previews.
+  StageBackend openStage(String asset, {String? sub, Object? shape}) =>
+      throw UnsupportedError('this project has no preview stages');
+
   /// An asset operation through the session (`newDocument`, `renameAsset`,
   /// `duplicateAsset`, `installPrimitives`, `importFiles`, `deleteAsset`, `setImportSettings`, `extractMaterials`, `reimport`, `setLayersAndTags`,
   /// `registerBehaviour`, `setStartupScene`, `undoAsset`, `redoAsset`) — one history step each, the database re-read
@@ -562,6 +570,10 @@ final class SessionProject extends EditorProject {
       return const [];
     }
   }
+
+  @override
+  StageBackend openStage(String asset, {String? sub, Object? shape}) =>
+      SessionStage(session.openStage(asset, sub: sub, shape: shape));
 
   @override
   AssetHistory assetHistory() {

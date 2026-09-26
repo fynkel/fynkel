@@ -33,6 +33,16 @@ final class AssetEdits extends ChangeNotifier {
   /// points it at the Scene view.
   void Function(String kind, String id, Map<String, Object?>? fields)? preview;
 
+  /// Also told every drawn change, after [preview]: the Inspector's own
+  /// 3D preview of the asset (ADR-0030), which draws with no Scene view.
+  final watchers = <void Function(String kind, String id, Map<String, Object?> fields)>{};
+
+  /// The fields last drawn for [id] since the editor started — an asset
+  /// edited, undone or being picked — else null (the cooked asset is
+  /// what it holds).
+  Map<String, Object?>? drawn(String id) => _drawn[id];
+  final _drawn = <String, Map<String, Object?>>{};
+
   /// The asset an Inspector page shows (what ⌘Z undoes while the
   /// Inspector holds the keyboard); set and cleared by the page.
   String? shown;
@@ -106,10 +116,18 @@ final class AssetEdits extends ChangeNotifier {
   void show(String id, Map<String, Object?>? changes) {
     final doc = document(id);
     if (doc == null) return;
-    preview?.call(doc.kind, id, {...doc.root(), ...?changes});
+    _draw(doc.kind, id, {...doc.root(), ...?changes});
   }
 
-  void _show(String id, EditorDocument doc) => preview?.call(doc.kind, id, doc.root());
+  void _show(String id, EditorDocument doc) => _draw(doc.kind, id, doc.root());
+
+  void _draw(String kind, String id, Map<String, Object?> fields) {
+    _drawn[id] = fields;
+    preview?.call(kind, id, fields);
+    for (final w in List.of(watchers)) {
+      w(kind, id, fields);
+    }
+  }
 
   /// The asset ⌘Z undoes now (redo: ⇧⌘Z): the one shown, when
   /// [inspectorFocused] and it has something to undo (redo).

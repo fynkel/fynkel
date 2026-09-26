@@ -83,7 +83,7 @@ final texturePreview = PreviewProvider(
           const SizedBox(width: 6),
         ],
         for (final c in _channels)
-          _ChannelButton(
+          PreviewToggle(
             key: Key('preview.channel.$c'),
             label: c.toUpperCase(),
             on: c == channel,
@@ -111,8 +111,9 @@ final texturePreview = PreviewProvider(
   },
 );
 
-class _ChannelButton extends StatelessWidget {
-  const _ChannelButton({super.key, required this.label, required this.on, required this.onTap});
+/// A small toggle of a preview's toolbar (a channel, a shape).
+class PreviewToggle extends StatelessWidget {
+  const PreviewToggle({super.key, required this.label, required this.on, required this.onTap});
 
   final String label;
   final bool on;

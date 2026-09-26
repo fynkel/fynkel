@@ -36,4 +36,31 @@ abstract interface class PreviewContext {
   /// mip level's size. [onSize] gets the image's full size once it is
   /// read.
   Widget image(String file, {String channel = 'rgb', int mip = 0, void Function(Size size)? onSize});
+
+  /// The editor's 3D view (the material, model and prefab previews'):
+  /// an asset alone on a stage, as the Project's tiles show it — lit by
+  /// the stage's sun, framed from the front-right. Drag to orbit, the
+  /// wheel to zoom, the middle button (or Shift) to pan, the right button
+  /// to turn the light, F or a double-click to frame it again.
+  ///
+  /// [asset] is this preview's by default; [sub] a part of it
+  /// (`mesh/Body`, `material/Skin`). A material is shown on [shape]:
+  /// `sphere`, `cube`, `cylinder`, `capsule`, `plane`, or a mesh as
+  /// `{'asset': id, 'sub': 'mesh/…'}`. [onStats] gets what is drawn once
+  /// it is staged.
+  Widget stage({String? asset, String? sub, Object? shape, void Function(PreviewStageStats stats)? onStats});
+}
+
+/// What a [PreviewContext.stage] draws: its meshes, and their size.
+final class PreviewStageStats {
+  const PreviewStageStats({this.meshes = 0, this.vertices = 0, this.triangles = 0, this.skinned = 0, this.size});
+
+  final int meshes, vertices, triangles;
+
+  /// Of the meshes, the ones a skin deforms.
+  final int skinned;
+
+  /// The bounds' width, height and depth in metres; null when nothing
+  /// measurable is drawn.
+  final List<double>? size;
 }
