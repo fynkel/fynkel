@@ -45,8 +45,8 @@ survey → walk → run by `speed`: every bone at 1.5 is the midpoint of the
 walk and the run at one phase, the phase kept across a change),
 `packages/fynkel/test/animation_test.dart` (the fixture's `column.blend.json`
 from Dart), the reference game's `test/game_test.dart` (the character
-posed from the controller through the blend space, the jump, the wave
-layer, the footsteps). The fixture is `crates/fynkel_import/fixtures/rig.glb`
+posed through its Animator Controller — the blend space, the jump — the
+wave layer, the footsteps). The fixture is `crates/fynkel_import/fixtures/rig.glb`
 (written by `rig.py`): a skinned column on three joints under a "wave"
 clip, a static Prop under a one-shot "bob"; the document fixture
 project's `Rig` scene (`c0000000-…-000034`) plays both, its
@@ -260,7 +260,8 @@ and:
 
 The reference game's Player sets `speed` from the controller's planar
 velocity every tick and never switches locomotion clips
-(`examples/reference_game/lib/game/player.dart`); the Khronos Fox's
+(`examples/reference_game/lib/game/player.dart`; since ADR-0032 the
+space is its Animator Controller's Locomotion state); the Khronos Fox's
 survey → walk → run is the acceptance test (`apps/cli/tests/check.rs`).
 
 ## Layers (M3-19c)
@@ -407,6 +408,10 @@ once per marker crossed (§ Markers).
 
 ## Animator Controllers (ADR-0032)
 
+How to make and edit one — the Animator window, states, transitions,
+parameters and the code — is the guide [animator.md](animator.md). This
+section is the engine's side.
+
 An `Animator` whose `controller` names an Animator Controller
 (`<name>.controller.json`, [documents.md](documents.md) § Animator
 Controllers) runs the controller's states instead of its `clip`. The
@@ -472,6 +477,21 @@ commands, layers, a missing controller),
 (`animator_controller_ops_events_and_queries`) and
 `crates/fynkel_assets/tests/store.rs` (a cooked controller registers with
 its motions).
+
+**In the games** (step 7). The reference game's Player runs
+`assets/models/player.controller.json` (written by
+`tools/playground.py`): parameters `speed` (float), `grounded` (bool,
+default true) and `jump` (trigger); Locomotion plays the blend space,
+Jump the jump clip once. Locomotion → Jump on `jump` (0.1 s), Jump →
+Locomotion when `grounded` is true, after 20 % of the jump (0.15 s).
+`game.Player` sets the three parameters every tick and nothing else —
+its own jump and land code is gone. It sends `grounded` as false on the
+tick it jumps, so the landing test cannot pass before the character
+leaves the ground. The showcase's Runner runs
+`assets/models/runner.controller.json`: Run for four loops, then Jump
+once, then Run, on exit times alone — a controller with no code. Both
+games' tests follow the states (`stateOf()`), and `--hero` still works:
+the generator writes the Player's controller with the rig's jump.
 
 ## Import and the cache
 
@@ -842,7 +862,8 @@ character's idle at 0, walk at 4, run at 7 m/s along `speed` — and puts
 the Player's `Animator` on it; `game.Player` sets `speed` every tick from
 the controller's planar velocity (so a wall stops the stride with the
 player), plays the jump once over the space and crossfades back on
-landing, plays the **wave layer** — a second, additive `Animator` on the
+landing (since ADR-0032 an Animator Controller does the jump and the
+landing; § Animator Controllers), plays the **wave layer** — a second, additive `Animator` on the
 `spine` joint (the character's `anim/wave`, keying the right arm alone,
 paused on its first frame so it adds nothing at rest) — on the `wave`
 action, and counts the walk's and the run's `step_l`/`step_r` markers

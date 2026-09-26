@@ -1358,6 +1358,16 @@ shader's page, the material's Shader menu), with three examples in the
 showcase (dissolve, water, rim light) and `docs/shaders.md`. The user's
 check in the app is pending.
 
+**The Animator Controller** (ADR-0032, Phase 5) is done as of
+2026-09-26: a `.controller.json` of parameters, states and transitions
+per layer, run by the engine every tick (`fynkel_animation::controller`);
+`setFloat`/`setBool`/`setTrigger`, `stateOf` and the state events from
+Dart; the editor's Animator window (the graph, parameters, layers, the
+Inspector for states and transitions, Create Animator Controller on a
+model, the live view in Play). The reference game's Player and the
+showcase's Runner run on one; `docs/animator.md` is the guide. The
+user's check in the editor is pending.
+
 **Tags and layers** (ADR-0020, 2026-09-23) come in while the joint R3a +
 R3b capture waits for a quiet machine: several tags and one engine-wide
 layer per object, as the optional components `fynkel.Tags` and
