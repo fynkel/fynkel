@@ -386,6 +386,7 @@ String maskSummary(List<Map<String, Object?>> mask) {
 Future<void> showMaskEditor(BuildContext context, AnimatorModel model, ControllerEdits controller, int layer) {
   return showDialog<void>(
     context: context,
+    animationStyle: AnimationStyle.noAnimation,
     builder: (context) => Dialog(
       key: const Key('animator.mask'),
       child: SizedBox(

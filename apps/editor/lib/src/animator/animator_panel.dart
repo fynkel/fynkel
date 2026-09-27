@@ -803,6 +803,7 @@ Future<String?> _askName(BuildContext context, String title, String current) {
   final text = TextEditingController(text: current);
   return showDialog<String>(
     context: context,
+    animationStyle: AnimationStyle.noAnimation,
     builder: (context) => AlertDialog(
       title: Text(title),
       content: TextField(
