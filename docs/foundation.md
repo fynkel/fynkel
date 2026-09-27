@@ -53,7 +53,7 @@ What every script touches. Most of it is `packages/fynkel`.
 
 | | Sev | Unity | Fynkel today | Status |
 |---|---|---|---|---|
-| 2.1 | C | Child colliders join the nearest parent Rigidbody as one compound; their events go to the Rigidbody's object | Each entity is its own Rapier body: a child `Collider` under a dynamic parent is a separate fixed collider, one tick behind, no mass, and may collide with its own parent. `docs/physics.md` recommends child entities for several colliders | ❌ |
+| 2.1 | C | Child colliders join the nearest parent Rigidbody as one compound; their events go to the Rigidbody's object | Each entity is its own Rapier body: a child `Collider` under a dynamic parent is a separate fixed collider, one tick behind, no mass, and may collide with its own parent. `docs/physics.md` recommends child entities for several colliders. Confirmed: a body whose only collider is a child's fell to y −75 in 4 s instead of resting at 1.5 (`crates/fynkel_core/tests/compound.rs`, ignored until the ADR) | 🔬 ADR-0034 proposed 2026-09-27, waits for the user |
 | 2.2 | I | Changing a collider, layer or scale keeps velocity and fires nothing | The body is rebuilt: velocity and sleep are lost, a false Exit then Enter fires (`sim.rs` sync) | ❌ |
 | 2.3 | I | `OnTriggerStay` | None (sensor pairs are skipped for Stay) | ❌ |
 | 2.4 | I | `OnControllerColliderHit`, `CollisionFlags` | The character reports no hits against static or kinematic geometry; only `grounded`/`sliding` | ❌ |
