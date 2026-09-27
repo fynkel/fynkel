@@ -25,8 +25,9 @@ commit) · ✅ not a bug (the test stays) · ⏸ decided later (why) · 👀 wat
 |---|---|---|
 | 0.1 | Push the 63 local commits | 🔧 `5fc7285` pushed 2026-09-27 |
 | 0.2 | CI running again: GitHub-hosted jobs have not started since 2026-09-23 (the account's billing). A self-hosted runner on the developer's Mac (`~/actions-runner`, a launchd service, label `fynkel`) | 🔧 `.github/workflows/ci.yml` |
-| 0.3 | The drift CI finds on its first run: Rust formatting in five files and one clippy lint; the Homebrew `dart` and the stale `~/.cargo/bin/fynkel` on the runner; two steps that needed a `pub get` first (the generator's example, code_only's package graph); the showcase's stale codegen; the projection test still expecting the crate's pre-ADR-0022 root; two Animator dialogs that animated (the look test); `tools/playground.py` rewriting the level and the Player's controller, which are edited documents since ADR-0022 and 120b030 (now only with `--level`) | 🔧 |
+| 0.3 | The drift CI finds on its first run: Rust formatting in five files and one clippy lint; the Homebrew `dart` and the stale `~/.cargo/bin/fynkel` on the runner; two steps that needed a `pub get` first (the generator's example, code_only's package graph); the showcase's stale codegen; the reference game's `assets.g.dart` naming the git-excluded Mixamo hero (generated with it present, abf2787); the projection test still expecting the crate's pre-ADR-0022 root; two Animator dialogs that animated (the look test); `tools/playground.py` rewriting the level and the Player's controller, which are edited documents since ADR-0022 and 120b030 (now only with `--level`) | 🔧 |
 | 0.5 | Flaky: `compile_error_parity_test` (the IDE's `opened.txt` not written within 20 s) failed once in a full editor run on the runner and passed alone and paired 4 times; watch it | 👀 |
+| 0.6 | `platform/apple` `viewport_lifetimes_do_not_grow_the_process`: 4.4 MiB of Metal cache slack on a busy runner against a 4 MiB bound (a leaked ring would be ~240 MiB); the bound is 8 MiB | 🔧 |
 | 0.4 | This checklist | 🔧 |
 
 ## Step 1 — how scripts feel
