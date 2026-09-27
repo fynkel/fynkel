@@ -252,6 +252,10 @@ name, jump on the press while grounded — and a behaviour only reads:
 final s = characterState();                        // null without a controller
 if (s != null && s.grounded && Input.pressed('jump')) jump();   // your own rules: leave the actions empty and drive it
 move((right * stick.x + forward * stick.y) * speed);            // metres per second, this tick only; none = standing still
+if (s != null && s.collisionFlags & CollisionFlags.above != 0) { /* bumped the ceiling */ }
+
+@override
+void onControllerColliderHit(Contact hit) { /* hit.b: the wall, floor or platform the move touched this tick */ }
 ```
 
 The pattern with sprint and a double jump is

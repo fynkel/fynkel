@@ -426,7 +426,8 @@ fn encode_event_body(p: &EventPayload, out: &mut Vec<u8>, strings: &mut fynkel_w
         | EventPayload::CollisionExit(c)
         | EventPayload::TriggerEnter(c)
         | EventPayload::TriggerExit(c)
-        | EventPayload::TriggerStay(c) => push(
+        | EventPayload::TriggerStay(c)
+        | EventPayload::ControllerHit(c) => push(
             out,
             &ContactEvent {
                 a: c.a,
@@ -672,6 +673,7 @@ pub fn query(
                     grounded: s.grounded,
                     sliding: s.sliding,
                     velocity: s.velocity,
+                    collision_flags: s.collision_flags,
                 });
             }
         }

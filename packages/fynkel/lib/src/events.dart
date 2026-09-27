@@ -146,7 +146,20 @@ class AnimatorStateExited extends AnimatorStateEvent {
 }
 
 /// In wire order: kind `0x100 + index` (`triggerStay` is 0x105, foundation 2.3).
-enum ContactKind { collisionEnter, collisionStay, collisionExit, triggerEnter, triggerExit, triggerStay }
+enum ContactKind {
+  collisionEnter,
+  collisionStay,
+  collisionExit,
+  triggerEnter,
+  triggerExit,
+  triggerStay,
+
+  /// A character's move touched a collider (Unity's
+  /// `OnControllerColliderHit`, foundation 2.4): [Contact.a] the character,
+  /// [Contact.b] the collider, [Contact.bodyB] its body, [Contact.normal]
+  /// from the character into it, no impulse.
+  controllerHit,
+}
 
 /// A collision or trigger event between two colliders (M3-08). For
 /// collisions, [point] is the deepest contact point (world space), [normal]
@@ -233,7 +246,7 @@ Iterable<EngineEvent> decodeEvents(WireBuffer b) sync* {
       gen.PlaybackEndedEvent.eventKind => _playbackEnded(d, body, tail, h.tickLo),
       gen.AnimatorStateEnteredEvent.eventKind => _stateEntered(d, body, tail, h.tickLo),
       gen.AnimatorStateExitedEvent.eventKind => _stateExited(d, body, tail, h.tickLo),
-      >= _physicsFirst && < _physicsFirst + 6 => _contact(d, body, tail, h),
+      >= _physicsFirst && < _physicsFirst + 7 => _contact(d, body, tail, h),
       _ => UnknownEvent(h.tickLo, h.kind),
     };
   }

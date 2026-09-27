@@ -237,16 +237,29 @@ sets the vertical speed (the controller's `jumpSpeed` when 0) whether or
 not grounded: the caller decides when, normally on the action's press
 edge while `characterState().grounded`. Gravity accumulates in the air
 and is zero on the ground. `characterState()` (`FYNKEL_QUERY_CHARACTER`,
-9, `fynkel.rec.CharacterState` 24 B) is held state as the last tick left
+9, `fynkel.rec.CharacterState` 32 B) is held state as the last tick left
 it: `grounded` (walkable ground within `skinWidth` + 5 cm under the feet,
 never while rising — our own test, Rapier's counts any upward contact,
 a ledge brushed mid-jump included), `sliding` (pressed against a contact
 steeper than `maxSlope`, slope or overhang) and `velocity` (the movement
-actually applied, m/s, gravity included, zero at rest). The character is
-not `PhysicsOwned`: like a kinematic body it follows an external
-transform write (a teleport; the vertical speed resets), and physics
-writes its pose back every tick. Contact events are reported like a
-kinematic body's.
+actually applied, m/s, gravity included, zero at rest) and
+`collisionFlags` (where the last move touched something, Unity's
+`CollisionFlags` bits: `sides` 1, `above` 2 — above the capsule's upper
+sphere centre —, `below` 4 — below its lower one, and whenever
+grounded). The character is not `PhysicsOwned`: like a kinematic body it
+follows an external transform write (a teleport; the vertical speed
+resets), and physics writes its pose back every tick. Contact events are
+reported like a kinematic body's — so walls, floors and kinematic
+platforms, which a kinematic body never reports, are its **controller
+hits** instead (foundation 2.4, Unity's `OnControllerColliderHit`):
+every tick, each collider the move touched — and the ground it stands
+on — is one `CONTROLLER_HIT` (0x106, a `fynkel.ev.Contact`: `a` the
+character, `b` the collider, `bodyB` its body, `point` on the collider,
+`normal` from the character into it, no impulse), for subscribed
+characters only, as the stays, and reaches
+`onControllerColliderHit(hit)` on the character's object alone
+(`hit.normalFor(hit.b)` is Unity's `hit.normal`). Unity's
+`moveDirection`/`moveLength` are not carried.
 
 Inside `Physics::step` the characters move after the queued commands and
 before Rapier's step, against the previous step's broad phase (a

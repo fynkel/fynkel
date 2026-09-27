@@ -463,6 +463,9 @@ pub struct CharacterStateRecord {
     pub sliding: bool,
     /// The movement applied over the last tick, metres per second.
     pub velocity: Vec3,
+    /// Where the last move touched something (Unity's `CollisionFlags`):
+    /// 1 sides, 2 above, 4 below.
+    pub collision_flags: u32,
 }
 
 /// `FYNKEL_QUERY_ANIMATOR` (M3-19): a `fynkel.Animator`'s playback state
@@ -1035,9 +1038,13 @@ mod tests {
         assert_eq!(PhysicsQueryRecord::SCHEMA.wire_size(), 88);
         assert_eq!(PhysicsHitRecord::SCHEMA.wire_size(), 48);
         assert_eq!(BodyStateRecord::SCHEMA.wire_size(), 40);
-        // M3-09: entity @0, grounded @8, sliding @9, velocity @12 → 24.
-        assert_eq!(CharacterStateRecord::SCHEMA.offsets(), vec![0, 8, 9, 12]);
-        assert_eq!(CharacterStateRecord::SCHEMA.wire_size(), 24);
+        // M3-09: entity @0, grounded @8, sliding @9, velocity @12,
+        // collision_flags @24 (foundation 2.4) → 32 (aligned to 8).
+        assert_eq!(
+            CharacterStateRecord::SCHEMA.offsets(),
+            vec![0, 8, 9, 12, 24]
+        );
+        assert_eq!(CharacterStateRecord::SCHEMA.wire_size(), 32);
         assert_eq!(ThirdPersonCamera::SCHEMA.wire_size(), 64);
         // M3-10: axis 12 @0, speed @12, space u32 @16 → 24 (padded).
         assert_eq!(Rotator::SCHEMA.offsets(), vec![0, 12, 16]);

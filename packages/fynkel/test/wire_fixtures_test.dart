@@ -471,7 +471,8 @@ void main() {
   );
   check(
     'CharacterStateRecord',
-    CharacterStateRecord(entity: entity(5, 1), grounded: true, sliding: false, velocity: const Vec3(0, 0, -4)),
+    CharacterStateRecord(
+        entity: entity(5, 1), grounded: true, sliding: false, velocity: const Vec3(0, 0, -4), collisionFlags: 5),
     CharacterStateRecord.wireSize,
     CharacterStateRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),

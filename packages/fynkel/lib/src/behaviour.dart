@@ -478,6 +478,14 @@ abstract class Behaviour {
   /// tick of the enter. No contact geometry.
   void onTriggerStay(Contact contact) {}
 
+  /// Every tick this object's `CharacterController` touched a collider
+  /// while moving — walls, floors, ceilings, static and kinematic
+  /// geometry too (Unity's `OnControllerColliderHit`): `hit.b` the
+  /// collider, `hit.bodyB` its body, `hit.point`, `hit.normalFor(hit.b)`
+  /// the surface normal. Once per collider per tick; the character's
+  /// object only. `characterState.collisionFlags` says where it touched.
+  void onControllerColliderHit(Contact hit) {}
+
   /// Zone callbacks (M3-12): right after the tick's step, for every
   /// `fynkel.TriggerZone` event one of whose sides — the zone or what
   /// entered it — is this behaviour's object. `event.event` is the zone's
@@ -1077,6 +1085,8 @@ class _BehaviourSystem {
         // object (a child collider joined its parent's Rigidbody,
         // ADR-0034) — once each, as Unity calls both.
         _contactTo(world._byEntity[c.a], c);
+        // A controller hit is the character's alone, as Unity's.
+        if (c.kind == ContactKind.controllerHit) continue;
         final bodyA = c.bodyA;
         if (bodyA != null && bodyA != c.a) _contactTo(world._byEntity[bodyA], c);
         if (c.b != c.a) _contactTo(world._byEntity[c.b], c);
@@ -1210,6 +1220,8 @@ class _BehaviourSystem {
             b.onTriggerExit(c);
           case ContactKind.triggerStay:
             b.onTriggerStay(c);
+          case ContactKind.controllerHit:
+            b.onControllerColliderHit(c);
         }
       } catch (e, st) {
         _threw(b, 'on${c.kind.name[0].toUpperCase()}${c.kind.name.substring(1)}', e, st);

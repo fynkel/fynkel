@@ -170,6 +170,8 @@ impl Physics {
 
     pub fn record(&mut self, _ecs: &Ecs) {}
 
+    pub fn refresh(&mut self, _ecs: &mut Ecs) {}
+
     pub fn query(&self, _q: &QuerySpec, _out: &mut Vec<Hit>) {}
 
     pub fn debug_lines(&self, _out: &mut Vec<(Vec3, Vec3, bool)>) {}

@@ -421,6 +421,7 @@ fn fixtures_match_generated_codecs() {
             grounded: true,
             sliding: false,
             velocity: Vec3::new(0.0, 0.0, -4.0),
+            collision_flags: 5,
         },
     );
     check("Layer", &Layer { layer: 3 });

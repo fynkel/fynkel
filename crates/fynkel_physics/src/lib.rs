@@ -156,6 +156,13 @@ pub enum PhysicsEvent {
     /// 2.3): watched pairs only, as [`PhysicsEvent::CollisionStay`]; no
     /// contact geometry.
     TriggerStay(Contact),
+    /// A character's move touched a collider (Unity's
+    /// `OnControllerColliderHit`, foundation 2.4): `a` the character, `b`
+    /// the collider, `body_b` its body, `point` on the collider, `normal`
+    /// from the character into it, `impulse` 0. Static and kinematic
+    /// geometry included; once per collider per tick, watched characters
+    /// only, as the stays.
+    ControllerHit(Contact),
 }
 
 /// Why a body command or a component could not be honoured.
@@ -214,6 +221,17 @@ pub struct CharacterState {
     /// The movement actually applied over the last tick, metres per
     /// second (gravity included).
     pub velocity: Vec3,
+    /// Where the last move touched something (Unity's `collisionFlags`):
+    /// [`CharacterState::SIDES`], [`CharacterState::ABOVE`],
+    /// [`CharacterState::BELOW`], or 0.
+    pub collision_flags: u32,
+}
+
+impl CharacterState {
+    /// Unity's `CollisionFlags` values.
+    pub const SIDES: u32 = 1;
+    pub const ABOVE: u32 = 2;
+    pub const BELOW: u32 = 4;
 }
 
 /// What a spatial query asks (`fynkel.rec.PhysicsQuery`).

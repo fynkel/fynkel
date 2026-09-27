@@ -1165,3 +1165,136 @@ fn a_destroyed_or_deactivated_side_exits() {
         "the zone's named exit fires though the zone is gone"
     );
 }
+
+/// Foundation 2.4 (Unity's `OnControllerColliderHit` and
+/// `CharacterController.collisionFlags`): a character's move reports what
+/// it touched — static and kinematic geometry too — once per collider per
+/// tick, `a` the character, `b` the collider, the normal pointing from the
+/// character into it; the flags say where (below, sides, above).
+#[test]
+fn a_character_reports_what_its_move_touches() {
+    use fynkel_physics::CharacterState;
+    let mut w = world();
+    let floor = floor(&mut w);
+    let wall = spawn(
+        &mut w,
+        2,
+        Vec3::new(2.0, 1.0, 0.0),
+        vec![ComponentValue::Collider(Collider {
+            size: Vec3::new(0.25, 1.0, 3.0),
+            ..Collider::default()
+        })],
+    );
+    let block = spawn(
+        &mut w,
+        3,
+        Vec3::new(-2.0, 1.0, 0.0),
+        vec![
+            ComponentValue::RigidBody(RigidBody {
+                body_type: BodyType::Kinematic,
+                ..RigidBody::default()
+            }),
+            ComponentValue::Collider(Collider {
+                size: Vec3::new(0.25, 1.0, 3.0),
+                ..Collider::default()
+            }),
+        ],
+    );
+    let ceiling = spawn(
+        &mut w,
+        4,
+        Vec3::new(0.0, 2.6, 0.0),
+        vec![ComponentValue::Collider(Collider {
+            size: Vec3::new(1.0, 0.2, 1.0),
+            ..Collider::default()
+        })],
+    );
+    let player = spawn(
+        &mut w,
+        5,
+        Vec3::ZERO,
+        vec![ComponentValue::CharacterController(
+            CharacterController::default(),
+        )],
+    );
+    w.subscribe(&[player], true);
+    for _ in 0..10 {
+        w.step();
+    }
+    w.drain_events();
+    let flags = |w: &World| w.physics().character_state(player).unwrap().collision_flags;
+    /// Moves the character at `v` for `ticks`; the colliders it hit (and
+    /// how often, `a` always the character) and the union of its flags.
+    fn walk(
+        w: &mut World,
+        player: Entity,
+        v: Vec3,
+        ticks: usize,
+    ) -> (Vec<(Entity, Option<Entity>, Vec3)>, u32) {
+        let (mut hits, mut flags) = (Vec::new(), 0);
+        for _ in 0..ticks {
+            w.submit(
+                Lane::Simulation,
+                vec![Command::Body {
+                    entity: player,
+                    op: BodyCommand::Move(v),
+                }],
+            );
+            w.step();
+            for e in w.after_physics_events() {
+                if let EventPayload::ControllerHit(c) = &e.payload {
+                    assert_eq!(c.a, player);
+                    hits.push((c.b, c.body_b, c.normal));
+                }
+            }
+            flags |= w.physics().character_state(player).unwrap().collision_flags;
+        }
+        w.drain_events();
+        (hits, flags)
+    }
+
+    // Standing: the floor below, every tick.
+    let (hits, f) = walk(&mut w, player, Vec3::ZERO, 5);
+    assert!(hits.iter().all(|h| h.0 == floor), "{hits:?}");
+    assert_eq!(hits.len(), 5, "{hits:?}");
+    assert_eq!(f, CharacterState::BELOW);
+
+    // Into the static wall: its hits point +x, the flags gain the sides.
+    let (hits, f) = walk(&mut w, player, Vec3::X * 4.0, 40);
+    let at_wall: Vec<_> = hits.iter().filter(|h| h.0 == wall).collect();
+    assert!(at_wall.len() > 5, "{hits:?}");
+    assert!(
+        at_wall.iter().all(|h| h.1.is_none() && h.2.x > 0.9),
+        "{at_wall:?}"
+    );
+    assert_eq!(flags(&w), CharacterState::BELOW | CharacterState::SIDES);
+    assert_eq!(f, CharacterState::BELOW | CharacterState::SIDES);
+
+    // Into the kinematic block: its body is reported.
+    let (hits, _) = walk(&mut w, player, -Vec3::X * 4.0, 80);
+    let at_block: Vec<_> = hits.iter().filter(|h| h.0 == block).collect();
+    assert!(!at_block.is_empty(), "{hits:?}");
+    assert!(
+        at_block.iter().all(|h| h.1 == Some(block) && h.2.x < -0.9),
+        "{at_block:?}"
+    );
+
+    // Back under the ceiling and jump: above.
+    walk(&mut w, player, Vec3::X * 4.0, 25);
+    let x = pos(&w, player).x;
+    assert!(x.abs() < 0.6, "under the ceiling: {x}");
+    w.submit(
+        Lane::Simulation,
+        vec![Command::Body {
+            entity: player,
+            op: BodyCommand::Jump(0.0),
+        }],
+    );
+    let (hits, f) = walk(&mut w, player, Vec3::ZERO, 30);
+    assert!(
+        hits.iter().any(|h| h.0 == ceiling && h.2.y > 0.9),
+        "{hits:?}"
+    );
+    assert!(f & CharacterState::ABOVE != 0, "{f}");
+    assert_eq!(flags(&w), CharacterState::BELOW, "landed again");
+}

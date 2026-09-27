@@ -1864,6 +1864,7 @@ impl World {
                 PhysicsEvent::TriggerEnter(c) => EventPayload::TriggerEnter(c),
                 PhysicsEvent::TriggerExit(c) => EventPayload::TriggerExit(c),
                 PhysicsEvent::TriggerStay(c) => EventPayload::TriggerStay(c),
+                PhysicsEvent::ControllerHit(c) => EventPayload::ControllerHit(c),
             };
             self.events.push(Event { tick, payload });
             let (entered, c) = match *e {

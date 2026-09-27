@@ -479,7 +479,7 @@ impl Physics {
             return;
         }
         self.world.integration_parameters.dt = dt;
-        self.move_characters(dt);
+        self.move_characters(dt, watched);
         let collector = Collector {
             events: Mutex::new(Vec::new()),
         };
@@ -1388,9 +1388,9 @@ impl Physics {
     /// The characters' tick: gravity, this tick's `Move`/`Jump`, Rapier's
     /// controller against the last step's geometry (slopes, steps, snap),
     /// the kinematic target for the step, impulses on the dynamic bodies
-    /// met, and the held state. Entity order, so equal inputs give equal
-    /// motion.
-    fn move_characters(&mut self, dt: f32) {
+    /// met, the held state and the hits of watched characters. Entity
+    /// order, so equal inputs give equal motion.
+    fn move_characters(&mut self, dt: f32, watched: &BTreeSet<Entity>) {
         if self.characters.is_empty() || dt <= 0.0 {
             return;
         }
@@ -1484,7 +1484,9 @@ impl Physics {
             // the character): walkable ground (within `max_slope`) just
             // below the feet, and not while rising.
             let ascending = !flying && run.vertical > 0.0 && translation.y > 1e-6;
-            let grounded = !ascending && {
+            let ground = if ascending {
+                None
+            } else {
                 let after = Pose::from_translation(translation) * start;
                 let queries = self.world.query_pipeline_with_filter(filter);
                 queries
@@ -1499,8 +1501,9 @@ impl Physics {
                             compute_impact_geometry_on_penetration: true,
                         },
                     )
-                    .is_some_and(|(_, hit)| hit.normal1.dot(up) >= spec.max_slope.cos() - 1e-3)
+                    .filter(|(_, hit)| hit.normal1.dot(up) >= spec.max_slope.cos() - 1e-3)
             };
+            let grounded = ground.is_some();
             if !flying {
                 run.vertical = if grounded {
                     0.0
@@ -1521,11 +1524,62 @@ impl Physics {
                 let cos = n.dot(up);
                 cos.abs() > 0.05 && cos < spec.max_slope.cos() - 1e-3
             };
+            // Where each hit touched the capsule (foundation 2.4, Unity's
+            // rule): below its lower sphere's centre, above its upper
+            // one's, or on the sides between them.
+            let (low, high) = shape
+                .as_capsule()
+                .map(|c| {
+                    (
+                        c.segment.a.y.min(c.segment.b.y),
+                        c.segment.a.y.max(c.segment.b.y),
+                    )
+                })
+                .unwrap_or((0.0, 0.0));
+            let mut collision_flags = if grounded { CharacterState::BELOW } else { 0 };
+            for c in collisions.iter() {
+                let y = c.hit.witness2.y;
+                collision_flags |= if y < low - 1e-3 {
+                    CharacterState::BELOW
+                } else if y > high + 1e-3 {
+                    CharacterState::ABOVE
+                } else {
+                    CharacterState::SIDES
+                };
+            }
+            if watched.contains(entity) {
+                // The ground stood on counts as hit every tick (a Unity
+                // move carries gravity into it), found by the probe when
+                // the move itself stopped short in the skin gap.
+                let ground = ground.filter(|(h, _)| collisions.iter().all(|c| c.handle != *h));
+                let hits = collisions.iter().map(|c| (c.handle, &c.hit));
+                for (i, (handle, hit)) in hits
+                    .chain(ground.iter().map(|(h, hit)| (*h, hit)))
+                    .enumerate()
+                {
+                    if collisions.iter().take(i).any(|d| d.handle == handle) {
+                        continue;
+                    }
+                    let Some(&(b, body_b)) = self.by_collider.get(&handle) else {
+                        continue;
+                    };
+                    self.events.push(PhysicsEvent::ControllerHit(Contact {
+                        a: *entity,
+                        b,
+                        body_a: None,
+                        body_b,
+                        point: hit.witness1,
+                        normal: -hit.normal1,
+                        impulse: 0.0,
+                    }));
+                }
+            }
             run.state = CharacterState {
                 grounded,
                 sliding: moved.is_sliding_down_slope
                     && collisions.iter().any(|c| steep(c.hit.normal1)),
                 velocity,
+                collision_flags,
             };
             let body_ref = &mut self.world.bodies[body];
             let current = *body_ref.position();
@@ -2148,7 +2202,7 @@ mod tests {
                         assert!(c.impulse >= 0.0);
                         assert!(c.normal.length() > 0.9);
                     }
-                    PhysicsEvent::CollisionExit(_) => {}
+                    PhysicsEvent::CollisionExit(_) | PhysicsEvent::ControllerHit(_) => {}
                     PhysicsEvent::TriggerStay(c) => {
                         t_stays += 1;
                         assert!((c.a == zone && c.b == ball) || (c.a == ball && c.b == zone));

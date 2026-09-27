@@ -63,10 +63,11 @@ class BodyState {
 /// A character controller's held state as the last tick left it (M3-09,
 /// [GameObject.characterState]).
 class CharacterState {
-  const CharacterState({required this.grounded, required this.sliding, required this.velocity});
+  const CharacterState(
+      {required this.grounded, required this.sliding, required this.velocity, this.collisionFlags = CollisionFlags.none});
 
-  factory CharacterState.fromRecord(gen.CharacterStateRecord r) =>
-      CharacterState(grounded: r.grounded, sliding: r.sliding, velocity: r.velocity);
+  factory CharacterState.fromRecord(gen.CharacterStateRecord r) => CharacterState(
+      grounded: r.grounded, sliding: r.sliding, velocity: r.velocity, collisionFlags: r.collisionFlags);
 
   /// Standing on walkable ground (a slope within `maxSlope`) after the
   /// last move; a jump needs it.
@@ -79,8 +80,28 @@ class CharacterState {
   /// (gravity included; zero when standing still).
   final Vec3 velocity;
 
+  /// Where the last move touched something, [CollisionFlags] bits
+  /// (Unity's `CharacterController.collisionFlags`):
+  /// `collisionFlags & CollisionFlags.sides != 0` while pushing a wall.
+  final int collisionFlags;
+
   @override
   String toString() => 'CharacterState(${grounded ? 'grounded' : 'airborne'}${sliding ? ', sliding' : ''}, v: $velocity)';
+}
+
+/// The bits of [CharacterState.collisionFlags] (Unity's `CollisionFlags`,
+/// the same values).
+abstract final class CollisionFlags {
+  static const int none = 0;
+
+  /// Touched on the sides of the capsule (a wall).
+  static const int sides = 1;
+
+  /// Touched above the capsule's upper sphere centre (a ceiling).
+  static const int above = 2;
+
+  /// Touched below its lower sphere centre (the ground).
+  static const int below = 4;
 }
 
 /// One hit of a physics query, nearest first within a query.

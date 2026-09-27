@@ -1115,7 +1115,8 @@ enum FynkelQueryKind {
   FYNKEL_QUERY_ENTITIES(8),
 
   /// entity -> one CharacterStateRecord { entity, grounded, sliding,
-  /// velocity } (0 records without a CharacterController) (M3-09).
+  /// velocity, collision_flags } (0 records without a CharacterController)
+  /// (M3-09; collision_flags foundation 2.4).
   FYNKEL_QUERY_CHARACTER(9),
 
   /// (no entity) -> one SystemTimeRecord { system, entities, micros } per

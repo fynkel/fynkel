@@ -348,7 +348,7 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   `move(v)`/`jump([speed])` the `Move`/`Jump` body ops (a `Jump` carries
   its speed in `vector.y`) and `characterState()` is
   `FYNKEL_QUERY_CHARACTER` (9: one `CharacterStateRecord { entity,
-  grounded, sliding, velocity }`) (M3-09; component ids 12
+  grounded, sliding, velocity, collision_flags }`) (M3-09; component ids 12
   `CharacterController` and 13 `ThirdPersonCamera` in the header),
   the native catalogue's six components are ids 14–19 in the header
   and travel the M3-07a path, and `World.systemTimes()` is

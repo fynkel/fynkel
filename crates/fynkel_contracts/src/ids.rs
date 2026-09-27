@@ -117,6 +117,8 @@ impl EventKind {
     pub const TRIGGER_EXIT: EventKind = EventKind(0x104);
     /// A watched sensor pair still overlapping (foundation 2.3).
     pub const TRIGGER_STAY: EventKind = EventKind(0x105);
+    /// A watched character's move touched a collider (foundation 2.4).
+    pub const CONTROLLER_HIT: EventKind = EventKind(0x106);
     pub const PHYSICS_LAST: u32 = 0x1ff;
 
     pub const fn is_physics(self) -> bool {
