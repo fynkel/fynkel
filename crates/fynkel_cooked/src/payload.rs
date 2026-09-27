@@ -989,7 +989,14 @@ pub fn encode_custom_material(m: &CustomMaterialPayload) -> Vec<u8> {
     };
     u32s(&mut out, &[CUSTOM_MATERIAL_VERSION]);
     out.extend_from_slice(&m.shader);
-    u32s(&mut out, &[m.alpha_mode, m.alpha_cutoff.to_bits(), m.double_sided as u32]);
+    u32s(
+        &mut out,
+        &[
+            m.alpha_mode,
+            m.alpha_cutoff.to_bits(),
+            m.double_sided as u32,
+        ],
+    );
     u32s(&mut out, &[m.block.len() as u32]);
     out.extend_from_slice(&m.block);
     u32s(&mut out, &[m.slots.len() as u32]);
@@ -997,7 +1004,15 @@ pub fn encode_custom_material(m: &CustomMaterialPayload) -> Vec<u8> {
         let flags = s.texture.is_some() as u32 | (s.mipmaps as u32) << 1;
         u32s(
             &mut out,
-            &[flags, s.color_space, s.fallback, s.filter, s.wrap, s.anisotropy, s.uv_set],
+            &[
+                flags,
+                s.color_space,
+                s.fallback,
+                s.filter,
+                s.wrap,
+                s.anisotropy,
+                s.uv_set,
+            ],
         );
         if let Some((id, sub)) = &s.texture {
             out.extend_from_slice(id);

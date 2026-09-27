@@ -111,7 +111,8 @@ pub fn run(root: Option<&Path>, cmd: &str, args: &[String]) -> ExitCode {
 fn read_manifest(path: &Path) -> Result<ShaderManifest, Vec<Diagnostic>> {
     let shown = path.display().to_string();
     if shown.ends_with(".shader.json") {
-        let m = Document::read(path, Some(DocumentKind::Shader)).map(ShaderManifest::from_document)?;
+        let m =
+            Document::read(path, Some(DocumentKind::Shader)).map(ShaderManifest::from_document)?;
         return Err(vec![fynkel_document::material::legacy_manifest(&m)]);
     }
     let sidecar = fynkel_document::asset::sidecar_path(path);
@@ -189,7 +190,10 @@ fn shader_inspect(opts: &Opts, schemas: &SchemaSet) -> ExitCode {
 }
 
 fn manifest_text(m: &ShaderManifest) -> String {
-    let lighting = m.shader.as_ref().map_or("lit", |s| s.interface.lighting.name());
+    let lighting = m
+        .shader
+        .as_ref()
+        .map_or("lit", |s| s.interface.lighting.name());
     let mut s = format!(
         "{} ({})\n  lighting {lighting}\n  passes {}\n  parameters\n",
         m.name,
@@ -249,10 +253,7 @@ fn shader_validate(opts: &Opts, schemas: &SchemaSet) -> ExitCode {
             eprintln!("{d}");
         }
         if !has_errors(&diags) {
-            eprintln!(
-                "fynkel shader validate: {} shader(s) ok",
-                opts.paths.len()
-            );
+            eprintln!("fynkel shader validate: {} shader(s) ok", opts.paths.len());
         }
     }
     exit(&diags)

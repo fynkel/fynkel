@@ -201,7 +201,10 @@ pub(crate) fn declarations(code: &str) -> Vec<(&str, usize)> {
     while i < b.len() {
         match b[i] {
             b'/' if b.get(i + 1) == Some(&b'/') => {
-                i = b[i..].iter().position(|c| *c == b'\n').map_or(b.len(), |n| i + n);
+                i = b[i..]
+                    .iter()
+                    .position(|c| *c == b'\n')
+                    .map_or(b.len(), |n| i + n);
             }
             b'/' if b.get(i + 1) == Some(&b'*') => {
                 i = code[i + 2..].find("*/").map_or(b.len(), |n| i + 2 + n + 2);
@@ -216,7 +219,10 @@ pub(crate) fn declarations(code: &str) -> Vec<(&str, usize)> {
             }
             b'<' if want_name => {
                 // `var<uniform>`: the address space before the name.
-                i = b[i..].iter().position(|c| *c == b'>').map_or(b.len(), |n| i + n + 1);
+                i = b[i..]
+                    .iter()
+                    .position(|c| *c == b'>')
+                    .map_or(b.len(), |n| i + n + 1);
             }
             c if c.is_ascii_alphabetic() || c == b'_' => {
                 let (word, end) = ident(i);
@@ -224,8 +230,10 @@ pub(crate) fn declarations(code: &str) -> Vec<(&str, usize)> {
                     out.push((word, i));
                     want_name = false;
                 } else if depth == 0 {
-                    want_name =
-                        matches!(word, "fn" | "struct" | "const" | "var" | "alias" | "override");
+                    want_name = matches!(
+                        word,
+                        "fn" | "struct" | "const" | "var" | "alias" | "override"
+                    );
                 }
                 i = end;
             }

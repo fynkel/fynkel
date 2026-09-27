@@ -3520,8 +3520,10 @@ fn the_inspectors_live_edit_of_a_shader_material_draws_and_restores() {
     assert!(near(center(&px), [0, 255, 0]), "{:?}", center(&px));
 
     // The Shader dropdown on the built-in: drawn lit, no longer flat.
-    let mut pbr = fynkel_core::material::PbrMaterial::default();
-    pbr.base_color = glam::Vec4::new(1.0, 0.0, 0.0, 1.0);
+    let pbr = fynkel_core::material::PbrMaterial {
+        base_color: glam::Vec4::new(1.0, 0.0, 0.0, 1.0),
+        ..Default::default()
+    };
     assets.override_material(&r_m, pbr);
     let px = render_offscreen(&device, &queue, &mut r, &extract);
     let c = center(&px);

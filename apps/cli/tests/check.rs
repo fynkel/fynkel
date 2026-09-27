@@ -465,7 +465,11 @@ fn material_and_shader_commands_validate_and_inspect() {
 
     // A .shader: its header and interface (ADR-0031).
     let out = run(&["shader", "inspect", "--json", manifest.to_str().unwrap()]);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["shaderName"], "Studio/Toon");
     assert_eq!(v["shaderId"], "be5b7a9c-6f8b-4dae-9ac1-5b6d7e8f9a01");
@@ -474,7 +478,11 @@ fn material_and_shader_commands_validate_and_inspect() {
     assert_eq!(v["parameters"][0]["name"], "bands");
     assert_eq!(v["textures"][0]["name"], "ramp");
     let out = run(&["shader", "validate", manifest.to_str().unwrap()]);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     // A WGSL mistake is at its line in the file.
     let dir = std::env::temp_dir().join(format!("fynkel-shader-{}", std::process::id()));
@@ -498,7 +506,10 @@ fn material_and_shader_commands_validate_and_inspect() {
     assert_eq!(out.status.code(), Some(1));
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["diagnostics"][0]["code"], "FYN-D0015");
-    assert!(v["diagnostics"][0]["suggestion"].as_str().unwrap().contains("shader \"Bad manifest\" {"));
+    assert!(v["diagnostics"][0]["suggestion"]
+        .as_str()
+        .unwrap()
+        .contains("shader \"Bad manifest\" {"));
 }
 
 #[test]
