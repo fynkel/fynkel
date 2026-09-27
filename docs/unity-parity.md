@@ -117,6 +117,17 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   radians (`Quat.axisAngle`), per ADR-0013's amendment.
 - A post effect needs a volume (as Unity's URP/HDRP): no volume, no
   ambient occlusion or bloom (2026-09-24).
+- Writes are commands the next fixed tick applies (ADR-0008), so a few
+  reads show the world as the last tick left it, where Unity's show the
+  change at once: `find`/`findAll`/`findWithTag` (an object spawned or
+  renamed this tick is found from the next; keep the handle `spawn`
+  returns), `activeInHierarchy` (after `setActive`; `activeSelf` shows it
+  at once, and `onEnable`/`onDisable` run when the tick applies it) and
+  `worldTransform` (null until the tick after its first read). Everything
+  else reads your writes at once: `transform.position` and the rest of
+  `transform`, `get<T>`, `activeSelf`, `parent`/`children`, `name`,
+  `behaviour<T>()` (docs/foundation.md 1.10,
+  `packages/fynkel/test/read_timing_test.dart`).
 
 ## Log
 
