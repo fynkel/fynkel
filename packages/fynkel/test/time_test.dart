@@ -55,6 +55,24 @@ class PauseMenu extends Behaviour {
   }
 }
 
+/// Records `Time.elapsed` and `Time.delta` each update; runs a one-second
+/// coroutine wait, noting the game time it resumed at.
+class ClockProbe extends Behaviour {
+  final List<(double, double)> seen = []; // (Time.elapsed, Time.delta)
+  double? waitStarted, waitEnded;
+
+  @override
+  void update(UpdateContext context) => seen.add((Time.elapsed, Time.delta));
+
+  void wait() => startCoroutine(_wait());
+
+  Iterable<Object?> _wait() sync* {
+    waitStarted = Time.elapsed;
+    yield const WaitForSeconds(1);
+    waitEnded = Time.elapsed;
+  }
+}
+
 void main() {
   late NativeLibrary lib;
   setUpAll(() => lib = NativeLibrary.open());
@@ -145,6 +163,40 @@ void main() {
     expect(w.tick, greaterThan(tick));
 
     expect(() => w.context.run(() => Time.timeScale = -1), throwsArgumentError);
+  });
+
+  test('one clock: Time.elapsed in update moves every frame, and a long frame counts as the clamp (foundation 1.4)', () {
+    final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 30)..throwOnDiagnostics = true;
+    addTearDown(w.dispose);
+    final probe = w.spawn(name: 'probe').addBehaviour(ClockProbe());
+    w.frame(1 / 60);
+    w.frame(1 / 60);
+
+    // A 240 Hz display: three of four frames run no tick, and game time
+    // (Unity's Time.time) still moves by Time.delta each of them.
+    probe.seen.clear();
+    for (var i = 0; i < 8; i++) {
+      w.frame(1 / 240);
+    }
+    for (var i = 1; i < probe.seen.length; i++) {
+      expect(probe.seen[i].$1 - probe.seen[i - 1].$1, closeTo(probe.seen[i].$2, 1e-6),
+          reason: 'frame $i: elapsed moved by the delta');
+    }
+
+    // A two-second hitch (a breakpoint, a load): the clock takes 0.25 s
+    // (the frame clamp), and so do update, Time.elapsed and a coroutine's
+    // WaitForSeconds — it does not end a second's wait early.
+    w.context.run(probe.wait);
+    w.frame(1 / 60); // the coroutine starts
+    final before = probe.seen.last.$1;
+    w.frame(2);
+    expect(probe.seen.last.$2, closeTo(0.25, 1e-6), reason: 'Time.delta is clamped as the ticks are');
+    expect(probe.seen.last.$1 - before, closeTo(0.25, 1e-6));
+    expect(probe.waitEnded, isNull, reason: 'the wait has had 0.25 s of game time, not 2');
+    for (var i = 0; i < 600 && probe.waitEnded == null; i++) {
+      w.frame(1 / 60);
+    }
+    expect(probe.waitEnded! - probe.waitStarted!, closeTo(1, 1 / 60 + 1e-6));
   });
 }
 

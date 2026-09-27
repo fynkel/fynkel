@@ -73,8 +73,15 @@ class World {
     final lib = library ?? NativeLibrary.open();
     final native = lib.createWorld(
         worldId: worldId, fixedDt: fixedDt, maxStepsPerFrame: maxStepsPerFrame, maxFrameDt: maxFrameDt);
-    return World._(lib, native, ownsLibrary: library == null, fixedDt: fixedDt > 0 ? fixedDt : 1 / 60, registry: registry);
+    return World._(lib, native, ownsLibrary: library == null, fixedDt: fixedDt > 0 ? fixedDt : 1 / 60, registry: registry)
+      ..maxFrameDt = maxFrameDt > 0 && maxFrameDt.isFinite ? maxFrameDt : 0.25;
   }
+
+  /// The most game time one host frame counts for (seconds; the native
+  /// clock's clamp, `MAX_FRAME_DT` 0.25 by default — Unity's
+  /// `Time.maximumDeltaTime`): after a two-second hitch the ticks,
+  /// `Time.delta`, `Time.elapsed` and coroutine waits all move 0.25 s.
+  late final double maxFrameDt;
 
   /// Seconds per fixed tick (the engine default when not given).
   final double fixedDt;
@@ -732,8 +739,10 @@ class World {
     _presentationTargets.clear();
     _frameCount++;
     _unscaledDt = dtSeconds;
-    _frameDt = dtSeconds * _timeScale;
-    final plan = _native.beginFrame(_frameDt);
+    final scaled = dtSeconds * _timeScale;
+    // The native clock clamps the same way (and counts a bad dt as 0).
+    _frameDt = scaled.isFinite && scaled > 0 ? math.min(scaled, maxFrameDt) : 0;
+    final plan = _native.beginFrame(scaled);
     if (plan.missedDeadline) _collectDiagnostics('begin_frame');
     return plan;
   }
@@ -3424,8 +3433,12 @@ class _WorldTime implements TimeService {
   double get fixedDelta => world.fixedDt;
   @override
   int get tick => world.tick;
+  // Game time, one clock (foundation 1.4): in the fixed phase the tick's
+  // (Unity's fixedTime), elsewhere the ticks plus the clock's remainder
+  // (Unity's time) — so it moves by `delta` every frame, also on a frame
+  // that runs no tick.
   @override
-  double get elapsed => world.tick * world.fixedDt;
+  double get elapsed => world._inFixedPhase ? world.tick * world.fixedDt : (world.tick + world.alpha) * world.fixedDt;
   @override
   int get frame => world._frameCount;
   @override

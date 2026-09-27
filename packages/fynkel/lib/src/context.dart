@@ -37,7 +37,10 @@ abstract interface class TimeService {
   /// Fixed ticks completed so far.
   int get tick;
 
-  /// Simulated seconds: `tick * fixedDelta`.
+  /// Game seconds (Unity's `Time.time`): `tick * fixedDelta` in the fixed
+  /// phase; elsewhere that plus the part of a tick the clock holds, so it
+  /// moves by [delta] every frame. Scaled by [timeScale], clamped per frame
+  /// as the ticks are.
   double get elapsed;
 
   /// Host frames begun so far.
