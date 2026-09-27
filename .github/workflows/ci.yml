@@ -90,8 +90,11 @@ jobs:
       - name: Rust toolchain
         run: rustup show active-toolchain
       # Flutter's Dart is the toolchain of record (docs/toolchain.md).
+      # Flutter's bin goes first on PATH: a Homebrew `dart` would shadow it.
       - name: Flutter
-        run: flutter --version | tee /dev/stderr | grep -q "Flutter $FLUTTER_VERSION "
+        run: |
+          flutter --version | tee /dev/stderr | grep -q "Flutter $FLUTTER_VERSION "
+          dirname "$(command -v flutter)" >> "$GITHUB_PATH"
       - name: pub get
         working-directory: packages/fynkel
         run: dart pub get
