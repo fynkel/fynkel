@@ -868,6 +868,46 @@ class _BehaviourSystem {
     }
     _all.insert(lo, b);
     _dirty = true;
+    _collecting?.add(b);
+  }
+
+  /// The behaviours attached during [creating]'s build (null outside one).
+  List<Behaviour>? _collecting;
+
+  /// Runs [build] — an `instantiate` or a `clone` — then, as Unity's
+  /// `Instantiate` does, `onCreate` and `onEnable` of the behaviours it
+  /// attached, before returning (docs/foundation.md 1.7): parents first,
+  /// then callback order; only those whose object is active in the
+  /// hierarchy (the others are created when it first is, by [settle]).
+  /// `start` still runs before the first gameplay callback.
+  T creating<T>(T Function() build) {
+    final outer = _collecting;
+    final attached = _collecting = [];
+    final T result;
+    try {
+      result = build();
+    } finally {
+      _collecting = outer;
+    }
+    outer?.addAll(attached);
+    final ready = [
+      for (final b in attached)
+        if (!b._created && !b._destroyRequested && !b._gameObject!.isPending && b._gameObject!.activeInHierarchy) b
+    ];
+    if (ready.isEmpty) return result;
+    if (ready.length > 1) ready.sort(_byDepth);
+    world.context.run(() {
+      for (final b in ready) {
+        if (b._created || b._destroyRequested) continue;
+        b._created = true;
+        _call(b, 'onCreate', b.onCreate);
+        if (b._enabled && !b._active && !b._destroyRequested) {
+          b._active = true;
+          _call(b, 'onEnable', b.onEnable);
+        }
+      }
+    });
+    return result;
   }
 
   /// Applies pending lifecycle transitions. Called at the start of every

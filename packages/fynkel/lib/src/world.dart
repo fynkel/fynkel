@@ -1873,12 +1873,17 @@ class World {
   /// has the report. Throws [FynkelInstantiateError] when the prefab is
   /// not in the loaded cache, does not decode (recook) or [parent] is not
   /// spawned yet; throws [StateError] before any project is loaded.
+  /// The prefab's behaviours run `onCreate`/`onEnable` before it returns,
+  /// as Unity's `Instantiate` runs `Awake`/`OnEnable` (foundation 1.7).
   GameObject instantiate(
     Object prefab, {
     Transform transform = identityTransform,
     GameObject? parent,
     String? name,
-  }) {
+  }) =>
+      _behaviours.creating(() => _instantiate(prefab, transform, parent, name));
+
+  GameObject _instantiate(Object prefab, Transform transform, GameObject? parent, String? name) {
     final id = switch (prefab) {
       AssetRef r when (r.sub ?? '').isEmpty || r.sub == importedPrefabSub => r.asset,
       AssetRef r => throw ArgumentError.value(
@@ -2583,8 +2588,12 @@ class GameObject {
   /// before them — except this object's own [localTransform], which the
   /// default placement reads. A script whose type is not registered is
   /// left out, with an `FYN-B0001` warning through
-  /// [World.onLoadDiagnostics].
-  GameObject clone({GameObject? parent, Transform? transform, String? name}) {
+  /// [World.onLoadDiagnostics]. The copied scripts run `onCreate`/`onEnable`
+  /// before it returns, as Unity's `Instantiate` (foundation 1.7).
+  GameObject clone({GameObject? parent, Transform? transform, String? name}) =>
+      world._behaviours.creating(() => _clone(parent, transform, name));
+
+  GameObject _clone(GameObject? parent, Transform? transform, String? name) {
     final source = _requireResolved('clone');
     final parentEntity = parent?._requireResolved('clone parent') ?? 0;
     final at = transform ?? (parent != null || this.parent == null ? localTransform : worldTransform ?? localTransform);
