@@ -162,6 +162,12 @@ class World {
   int _frameCount = 0;
   double _frameDt = 0;
 
+  /// True while [frame] runs its ticks (the host's and the behaviours'
+  /// `fixedUpdate`, the step, `afterPhysics` and the contact callbacks):
+  /// `Time.delta` is then the fixed step, as Unity's `Time.deltaTime` is
+  /// `fixedDeltaTime` inside FixedUpdate.
+  bool _inFixedPhase = false;
+
   final NativeLibrary _lib;
   final NativeWorld _native;
   final bool ownsLibrary;
@@ -841,8 +847,28 @@ class World {
     captureInput(input);
     _carry(drainEvents());
     t._native.stop();
+    _inFixedPhase = true;
+    try {
+      _ticks(plan, t, fixedUpdate);
+    } finally {
+      _inFixedPhase = false;
+    }
+    this.input.refresh(frameEdges: true);
+    t._behaviours.start();
+    _behaviours.update(dtSeconds);
+    update?.call();
+    t._behaviours.stop();
+    t._presentation.start();
+    flushPresentation();
+    t._presentation.stop();
+    t._end(plan.steps);
+    return plan;
+  }
+
+  /// [frame]'s fixed phase: `plan.steps` ticks.
+  void _ticks(FramePlan plan, FrameTimes t, void Function(int tick)? fixedUpdate) {
     for (var i = 0; i < plan.steps; i++) {
-      this.input.refresh();
+      input.refresh();
       t._behaviours.start();
       fixedUpdate?.call(tick);
       _behaviours.fixedUpdate(tick, _takeCarried());
@@ -858,16 +884,6 @@ class World {
       t._behaviours.stop();
       _carry(events);
     }
-    this.input.refresh(frameEdges: true);
-    t._behaviours.start();
-    _behaviours.update(dtSeconds);
-    update?.call();
-    t._behaviours.stop();
-    t._presentation.start();
-    flushPresentation();
-    t._presentation.stop();
-    t._end(plan.steps);
-    return plan;
   }
 
   /// Where the last [frame] spent its time (M3-16, blueprint §15.4). One
@@ -3346,7 +3362,7 @@ class _WorldTime implements TimeService {
   final World world;
 
   @override
-  double get delta => world._frameDt;
+  double get delta => world._inFixedPhase ? world.fixedDt : world._frameDt;
   @override
   double get fixedDelta => world.fixedDt;
   @override

@@ -36,7 +36,7 @@ What every script touches. Most of it is `packages/fynkel`.
 
 | | Sev | Unity | Fynkel today | Status |
 |---|---|---|---|---|
-| 1.1 | C | `Time.deltaTime` inside `FixedUpdate` is the fixed step | `Time.delta` is the frame's dt everywhere (`world.dart` `Time`, `context.dart`): `x += v * Time.delta` in `fixedUpdate` runs 2× at 30 fps, ½× at 120 fps | ❌ |
+| 1.1 | C | `Time.deltaTime` inside `FixedUpdate` is the fixed step | `Time.delta` was the frame's dt everywhere: `x += v * Time.delta` in `fixedUpdate` moved 6 m a second at 30 fps instead of 3 (`test/time_test.dart` failed so). Now the fixed step in `fixedUpdate`, `afterPhysics`, the contact callbacks and the host's `fixedUpdate` callback | 🔧 |
 | 1.2 | C | A `transform` write in `Update` shows that frame | Writes go to the simulation lane and reach the screen at the next tick (1–2 ticks later; two `update` writes on a 120 Hz frame with no tick collapse into one). This is why the examples move things in `fixedUpdate` (ADR-0008 lanes) | ❌ ADR-0008 amendment first |
 | 1.3 | I | `Time.timeScale`; `timeScale = 0` still runs `Update` | No time scale; pause stops the host, so `update` and the UI logic stop too, and a `pause` action cannot resume | ❌ |
 | 1.4 | I | One clock | `Time.elapsed` counts ticks, coroutines sum the raw frame dt, `update` gets the unclamped dt | ❌ |

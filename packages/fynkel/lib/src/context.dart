@@ -13,7 +13,10 @@ import 'settings.dart';
 
 /// Frame and fixed-step timing.
 abstract interface class TimeService {
-  /// Seconds of the current (or last) host frame.
+  /// Seconds per call of the callback that reads it: [fixedDelta] in the
+  /// fixed phase (`fixedUpdate`, `afterPhysics`, the contact callbacks),
+  /// the current (or last) host frame's seconds everywhere else — Unity's
+  /// `Time.deltaTime`.
   double get delta;
 
   /// Seconds per fixed tick.

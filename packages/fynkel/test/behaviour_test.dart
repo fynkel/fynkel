@@ -295,9 +295,9 @@ void main() {
     w.frame(1 / 60);
     w.frame(1 / 30);
     expect(seen, [
-      'tick=1 fixed=0.0167 delta=0.0333 frame=2',
-      'tick=2 fixed=0.0167 delta=0.0333 frame=2',
-    ], reason: 'a 1/30 s frame runs two ticks');
+      'tick=1 fixed=0.0167 delta=0.0167 frame=2',
+      'tick=2 fixed=0.0167 delta=0.0167 frame=2',
+    ], reason: 'a 1/30 s frame runs two ticks; in fixedUpdate Time.delta is the fixed step (Unity)');
 
     // A test context: its clock and log, its installed services.
     final ctx = TestGameContext(time: TestTime(fixedDelta: 0.5, tick: 41));
