@@ -136,7 +136,8 @@ jobs:
       # Dart behaviour.
       - name: generator pub get + analyze + test
         working-directory: packages/fynkel_generator
-        run: dart pub get && dart analyze --fatal-infos && dart test
+        # The example is analyzed with the generator: resolve it first.
+        run: (cd example/spinner_game && dart pub get) && dart pub get && dart analyze --fatal-infos && dart test
       - name: example pub get + analyze + test
         working-directory: packages/fynkel_generator/example/spinner_game
         run: dart pub get && dart analyze --fatal-infos && dart test
@@ -207,7 +208,10 @@ jobs:
       # both ways — built live and from the written scenes.
       - name: code-only game validate + headless + codegen
         working-directory: examples/code_only
+        # pub get first: the pickups package's assets are found through the
+        # package graph (ADR-0029).
         run: |
+          flutter pub get
           "$GITHUB_WORKSPACE/target/debug/fynkel" validate
           "$GITHUB_WORKSPACE/target/debug/fynkel" test --headless --scene assets/scenes/level.scene.json
           "$GITHUB_WORKSPACE/target/debug/fynkel" codegen --check --project .
