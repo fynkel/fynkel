@@ -81,6 +81,11 @@ jobs:
   dart:
     name: dart (package:fynkel, fynkel_authoring, fynkel_flutter, fynkel_generator, example, starter project and showcase)
     runs-on: [self-hosted, macOS, fynkel]
+    # Every Dart test that cooks uses this build's CLI, never a `fynkel`
+    # installed on the machine (a stale one cooks for another schema
+    # fingerprint: FYN-R0002).
+    env:
+      FYNKEL_CLI: ${{ github.workspace }}/target/debug/fynkel
     steps:
       - uses: actions/checkout@v4
         with:
@@ -95,6 +100,8 @@ jobs:
         run: |
           flutter --version | tee /dev/stderr | grep -q "Flutter $FLUTTER_VERSION "
           dirname "$(command -v flutter)" >> "$GITHUB_PATH"
+      - name: build the CLI
+        run: cargo build -p fynkel_cli
       - name: pub get
         working-directory: packages/fynkel
         run: dart pub get
