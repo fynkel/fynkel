@@ -124,13 +124,18 @@ impl BodyCommand {
     }
 }
 
-/// One contact as an event carries it: `point` and `normal` in world
-/// space, the normal pointing from `a` towards `b`, `impulse` the total
-/// impulse of the pair over the last step (0 for triggers).
+/// One contact as an event carries it: `a` and `b` the colliders'
+/// entities, `body_a`/`body_b` the entity whose `RigidBody` each collider
+/// belongs to (its own, or its parent's when it joined it — ADR-0034;
+/// `None` for static geometry and characters), `point` and `normal` in
+/// world space, the normal pointing from `a` towards `b`, `impulse` the
+/// total impulse of the pair over the last step (0 for triggers).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Contact {
     pub a: Entity,
     pub b: Entity,
+    pub body_a: Option<Entity>,
+    pub body_b: Option<Entity>,
     pub point: Vec3,
     pub normal: Vec3,
     pub impulse: f32,

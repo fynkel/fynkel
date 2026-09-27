@@ -896,6 +896,7 @@ pub unsafe extern "C" fn fynkel_world_physics_query(
         w.stats.query_calls += 1;
         w.stats.bytes_in += bytes.len() as u64;
         let buf = std::mem::take(&mut w.query_buf);
+        w.inner.refresh_physics();
         match bridge::physics_queries(&w.inner, bytes, buf) {
             Ok(b) => {
                 w.query_buf = b;

@@ -48,6 +48,17 @@ class StaySensor extends Behaviour {
   }
 }
 
+/// Records the landings its object hears.
+class Landing extends Behaviour {
+  final List<String> log = [];
+  @override
+  void onCollisionEnter(Contact contact) {
+    final me = gameObject.entity;
+    log.add('${world.byEntity(contact.other(me))?.name} body=${world.byEntity(contact.bodyOf(me) ?? 0)?.name} '
+        'n=${contact.normalFor(me).y.toStringAsFixed(1)}');
+  }
+}
+
 class Sensor extends Behaviour {
   final List<String> log = [];
   @override
@@ -157,6 +168,28 @@ void main() {
     expect(crate.localTransform.position.y, lessThan(4), reason: 'falling again after the teleport');
   });
 
+  test("a child's collider joins its parent's body; both objects hear the landing (ADR-0034)", () {
+    final w = fresh();
+    floor(w);
+    final cart = w.spawn(
+      transform: identityTransform.copyWith(position: const Vec3(0, 3, 0)),
+      name: 'cart',
+    )..add(dynamicBody);
+    final wheel = w.spawn(
+      transform: identityTransform.copyWith(position: const Vec3(0, -1, 0)),
+      name: 'wheel',
+      parent: cart,
+    )..add(unitBox);
+    final onCart = cart.addBehaviour(Landing());
+    final onWheel = wheel.addBehaviour(Landing());
+    for (var i = 0; i < 240; i++) {
+      w.frame(1 / 60);
+    }
+    expect(cart.localTransform.position.y, closeTo(1.5, 0.05), reason: "the wheel's box holds the cart up");
+    expect(onWheel.log, ['floor body=cart n=-1.0']);
+    expect(onCart.log, ['floor body=cart n=-1.0'], reason: "the body's object hears its child's contact, once");
+  });
+
   test('body commands: impulse, velocity, teleport; rejections name the reason', () {
     final w = fresh();
     floor(w);
@@ -242,6 +275,93 @@ void main() {
     expect(s.entered, 1);
     expect(s.stays, greaterThanOrEqualTo(28), reason: 'one a tick after the enter');
     expect(s.others, {'crate'});
+  });
+
+  test('objects made overlapping get their enter, on both sides (foundation 2.13)', () {
+    final w = fresh();
+    floor(w);
+    final zone = w.spawn(
+      transform: identityTransform.copyWith(position: const Vec3(0, 1, 0)),
+      name: 'zone',
+    )..add(unitBox.copyWith(isSensor: true, size: const Vec3(2, 1, 2)));
+    final crate =
+        w.spawn(
+            transform: identityTransform.copyWith(position: const Vec3(0, 0.5, 0)),
+            name: 'crate',
+          )
+          ..add(dynamicBody)
+          ..add(unitBox);
+    final onZone = zone.addBehaviour(StaySensor());
+    final onCrate = crate.addBehaviour(StaySensor());
+    for (var i = 0; i < 5; i++) {
+      w.frame(1 / 60);
+    }
+    expect(onZone.entered, 1, reason: 'the zone was made with the crate inside');
+    expect(onCrate.entered, 1);
+  });
+
+  test('a disabled behaviour gets no contact callbacks (foundation 2.10, on purpose)', () {
+    final w = fresh();
+    floor(w);
+    final crate =
+        w.spawn(
+            transform: identityTransform.copyWith(position: const Vec3(0, 2, 0)),
+            name: 'crate',
+          )
+          ..add(dynamicBody)
+          ..add(unitBox);
+    final on = crate.addBehaviour(Landing());
+    final off = crate.addBehaviour(Landing())..enabled = false;
+    for (var i = 0; i < 90; i++) {
+      w.frame(1 / 60);
+    }
+    expect(on.log, hasLength(1));
+    expect(off.log, isEmpty, reason: 'Unity would call it; here disabled means off');
+  });
+
+  test('a clone is found by a query before the next tick, as Unity (foundation 2.7)', () {
+    final w = fresh();
+    final template = w.spawn(
+      transform: identityTransform.copyWith(position: const Vec3(0, 0.5, 0)),
+      name: 'crate',
+    )..add(unitBox);
+    w.frame(1 / 60);
+    w.frame(1 / 60);
+    final copy = template.clone(name: 'copy');
+    final hit = w.raycast(const Vec3(0, 5, 0), const Vec3(0, -1, 0), exclude: template);
+    expect(hit?.entity, copy.entity, reason: "Instantiate's collider is in the physics scene at once");
+  });
+
+  test('queries hit triggers by default and skip a collider they start in, as Unity (foundation 2.8)', () {
+    final w = fresh();
+    final f = floor(w);
+    final zone = w.spawn(
+      transform: identityTransform.copyWith(position: const Vec3(0, 2, 0)),
+      name: 'zone',
+    )..add(unitBox.copyWith(isSensor: true));
+    w.spawn(
+      transform: identityTransform.copyWith(position: const Vec3(5, 0.5, 0)),
+      name: 'crate',
+    ).add(unitBox);
+    w.frame(1 / 60);
+    w.frame(1 / 60);
+    const down = Vec3(0, -1, 0);
+    expect(w.raycast(const Vec3(0, 5, 0), down)?.entity, zone.entity, reason: "Unity's queriesHitTriggers");
+    expect(w.raycast(const Vec3(0, 5, 0), down, hitSensors: false)?.entity, f.entity);
+    expect(
+      w.overlap(ColliderShape.sphere, const Vec3(0.1, 0, 0), const Vec3(0, 2, 0)).map((h) => h.entity),
+      [zone.entity],
+    );
+    // From inside the crate: the crate is skipped, the floor below is hit.
+    final inside = w.raycast(const Vec3(5, 0.5, 0), down);
+    expect(inside?.entity, f.entity, reason: 'a ray does not detect a collider it starts in');
+    expect(inside!.distance, closeTo(0.5, 1e-3));
+    expect(w.raycastAll(const Vec3(5, 0.5, 0), down).map((h) => h.entity), [f.entity]);
+    expect(
+      w.shapeCast(ColliderShape.sphere, const Vec3(0.1, 0, 0), const Vec3(5, 0.5, 0), const Vec3(1, 0, 0)),
+      isNull,
+      reason: 'nor does a cast it starts in',
+    );
   });
 
   test('raycast, shape cast and overlap read the last step', () {

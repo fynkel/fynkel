@@ -458,6 +458,9 @@ pub(crate) fn validate_entities<'a>(
             ));
         }
     }
+    // A lone collider joins its nearest ancestor with a RigidBody
+    // (ADR-0034): child → body.
+    let joins = joined_bodies(entities);
     for e in entities {
         let mut types: HashMap<&str, &Component> = HashMap::new();
         for c in &e.components {
@@ -526,7 +529,50 @@ pub(crate) fn validate_entities<'a>(
                     }
                 }
         }
-        physics_entity_rules(e, &types, &mut out, &anchor);
+        physics_entity_rules(e, &types, &joins, &mut out, &anchor);
+    }
+    out
+}
+
+/// Each entity whose lone `fynkel.Collider` joins an ancestor's body
+/// (ADR-0034), mapped to that body's `body_type` (absent = dynamic), and
+/// each body a collider joins, mapped to itself — the runtime's rule: the
+/// nearest ancestor with a `RigidBody`, none past a `CharacterController`.
+fn joined_bodies(entities: &[Entity]) -> HashMap<Uuid, (Uuid, Option<String>)> {
+    let by_id: HashMap<Uuid, &Entity> = entities.iter().map(|e| (e.id, e)).collect();
+    let has = |e: &Entity, t: &str| e.components.iter().any(|c| c.type_id == t);
+    let mut out = HashMap::new();
+    for e in entities {
+        if !has(e, "fynkel.Collider")
+            || has(e, "fynkel.RigidBody")
+            || has(e, "fynkel.CharacterController")
+        {
+            continue;
+        }
+        let mut seen = 0;
+        let mut at = e.parent.and_then(|p| by_id.get(&p));
+        // Bounded: a parent cycle is reported elsewhere.
+        while let Some(a) = at.filter(|_| seen < entities.len()) {
+            seen += 1;
+            if has(a, "fynkel.CharacterController") {
+                break;
+            }
+            if let Some(b) = a
+                .components
+                .iter()
+                .find(|c| c.type_id == "fynkel.RigidBody")
+            {
+                let kind = b
+                    .data
+                    .get("body_type")
+                    .and_then(Node::as_str)
+                    .map(str::to_string);
+                out.insert(e.id, (a.id, kind));
+                out.entry(a.id).or_insert((a.id, None));
+                break;
+            }
+            at = a.parent.and_then(|p| by_id.get(&p));
+        }
     }
     out
 }
@@ -593,13 +639,17 @@ fn physics_value_rules(
 fn physics_entity_rules(
     e: &Entity,
     types: &HashMap<&str, &Component>,
+    joins: &HashMap<Uuid, (Uuid, Option<String>)>,
     out: &mut Vec<Diagnostic>,
     anchor: &dyn Fn(Diagnostic, &str) -> Diagnostic,
 ) {
     let body = types.get("fynkel.RigidBody");
     let collider = types.get("fynkel.Collider");
     let body_type = body.and_then(|b| b.data.get("body_type").and_then(Node::as_str));
-    let moving = body.is_some() && body_type != Some("static");
+    // A child's collider on a moving parent body moves with it (ADR-0034).
+    let joined = joins.get(&e.id).filter(|(b, _)| *b != e.id);
+    let moving = (body.is_some() && body_type != Some("static"))
+        || joined.is_some_and(|(_, kind)| kind.as_deref() != Some("static"));
     if let (true, Some(k)) = (moving, collider) {
         if k.data.get("shape").and_then(Node::as_str) == Some("mesh") {
             out.push(anchor(
@@ -651,7 +701,9 @@ fn physics_entity_rules(
             ));
         }
     }
-    if let (Some(b), None) = (body, collider) {
+    // A child's collider that joins it is the body's shape too (ADR-0034).
+    let has_children_shape = joins.get(&e.id).is_some_and(|(b, _)| *b == e.id);
+    if let (Some(b), None, false) = (body, collider, has_children_shape) {
         if body_type.is_none_or(|t| t == "dynamic") {
             out.push(anchor(
                 Diagnostic::new(
@@ -663,7 +715,7 @@ fn physics_entity_rules(
                     ),
                 )
                 .with_id(b.id.to_string())
-                .with_suggestion("add a fynkel.Collider"),
+                .with_suggestion("add a fynkel.Collider to it or to a child"),
                 &b.pointer,
             ));
         }

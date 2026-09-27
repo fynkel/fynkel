@@ -37,7 +37,8 @@ sections below.
 | `ccd` | false | continuous collision detection for fast bodies |
 
 `fynkel.Collider` (id 11) — alone it is static geometry, with a
-`RigidBody` it is that body's shape (one collider per entity in V1):
+`RigidBody` it is that body's shape. One collider per entity; a body's
+shape is its own collider plus its children's (below).
 
 | Field | Default | Meaning |
 | --- | --- | --- |
@@ -51,11 +52,35 @@ sections below.
 | `isSensor` | false | reports trigger events, applies no forces |
 | `mask` | all | the layers it collides with; bit `i` is the project's `layers[i]`. Its own layer is its entity's `fynkel.Layer` (absent = 0, `default`; ADR-0020): two colliders touch when each one's mask has the other's layer |
 
+**Compound colliders** (ADR-0034, Unity's rule). A `Collider` on an
+entity with no `RigidBody` and no `CharacterController` joins the body of
+its nearest ancestor with a `RigidBody` (static, dynamic or kinematic),
+through any empty objects in between. A car is a body and four wheel
+children; a table is a body and a top and four legs. Each joined collider
+sits where its entity is inside the body, sized by its own world scale,
+and keeps its own material, `isSensor`, `mask` and layer. The body's
+`mass` is still the `RigidBody`'s; its centre of mass and inertia come
+from all of its shapes. Only the body is physics-owned: a child follows
+it through the hierarchy, and moving the child (a transform write, an
+animation) moves its shape inside the body at the next tick.
+Deactivating, removing or reparenting a child changes the body's shape
+and the body keeps moving. A child with its own `RigidBody` is its own
+body. A `CharacterController` takes no children's colliders: its capsule
+is its whole shape. Without such an ancestor a collider is static
+geometry.
+
+Changing a collider (its values, size or material), its object's layer
+or its scale updates it in place: the body keeps its velocity, and a pair
+that still touches fires neither exit nor enter (foundation 2.2). Only
+adding or removing the `RigidBody` or `CharacterController` rebuilds the
+body, at rest.
+
 `fynkel validate` checks what the schema cannot: `FYN-H0001` a body
 value the runtime would reject (mass, damping), `H0002` a collider value
 (size per shape, friction, restitution, a mesh collider without `mesh`),
-`H0003` a mesh collider on a dynamic or kinematic body, `H0004` (warning)
-a dynamic body without a collider (it falls through everything), `H0005`
+`H0003` a mesh collider on a dynamic or kinematic body (its own or the
+one it joins), `H0004` (warning) a dynamic body without a collider of its
+own or a child's (it falls through everything), `H0005`
 a character controller value, `H0006` a body or collider next to a
 character controller, `H0007` a camera rig value (the corpus fixture
 `fixtures/scene/physics_rules.scene.json` lists them all). The same
@@ -310,32 +335,47 @@ ticks); a game that wants a lazy camera writes its own rig behaviour.
 The step's events go on the physics lane and reach behaviours the same
 tick, right after the step and before `afterPhysics`: `onCollisionEnter`,
 `onCollisionStay`, `onCollisionExit`, `onTriggerEnter`, `onTriggerStay`,
-`onTriggerExit` on every behaviour of both objects (side `a` then `b`, contact order).
-`Contact` carries `a`, `b`, `point` (world, the deepest point), `normal`
+`onTriggerExit` on every enabled behaviour of both objects (side `a`
+then `b`, contact order; a disabled behaviour gets none, where Unity
+sends them — foundation 2.10). The behaviours of objects the tick made
+are created first, so objects made overlapping get their enter
+(foundation 2.13).
+When a side's collider joined a parent's body, the body's object gets the
+callback too, once, after the collider's (Unity calls both).
+`Contact` carries `a`, `b` (the colliders' entities, Unity's
+`Collision.collider`), `bodyA`, `bodyB` (the entity whose `RigidBody`
+each collider belongs to, Unity's `Collision.rigidbody`; null for static
+geometry and characters), `point` (world, the deepest point), `normal`
 (from `a` towards `b`; `normalFor(entity)` flips it), `impulse` (N·s the
 solver applied to the pair this step; 0 for exits and triggers),
-`other(entity)`, `involves`, `isTrigger`. A sensor overlaps dynamic
+`other(entity)`, `bodyOf(entity)`, `involves`, `isTrigger`;
+`other`, `normalFor` and `bodyOf` take a collider or its body. A sensor overlaps dynamic
 *and* kinematic bodies — a character's capsule walking into a static
 pickup fires its trigger (Rapier's default pairs a fixed collider with
 dynamic bodies only; sensors are widened) — while two non-sensor
 kinematic/static colliders never report a contact. A `fynkel.TriggerZone`
 next to a sensor turns its enter/exit into a named general-lane event
 (`ZONE_ENTERED`/`ZONE_EXITED`, [scenes.md](scenes.md)). Enter/exit are
-exact (a removed collider still exits); **stay** — a collision pair
+exact: a removed collider still exits, so when one side is destroyed or
+deactivated the other hears the exit (Unity sends none; a destroyed
+zone's occupants still get its `ZONE_EXITED`, foundation 2.6); **stay** — a collision pair
 while it has a contact, a sensor pair while it overlaps (`TRIGGER_STAY`,
 0x105, no geometry) — is reported only for pairs where at least
-one entity is subscribed — every `GameObject`, so every object with a
+one entity, or the body a side joined, is subscribed — every `GameObject`, so every object with a
 behaviour — so
 the stay stream scales with what gameplay observes, not with the scene
 (the stress scene's 500 bodies produce 1 430 enters and 657 exits over
-600 ticks and no stays). `fynkel.rec.ContactEvent` (48 B) is the wire
+600 ticks and no stays). `fynkel.ev.Contact` (64 B; 48 before ADR-0034 added the bodies) is the wire
 record, `fynkel_world_after_physics_events` the raw view (the same tick's
 events; drained with the general events next).
 
 ## Queries
 
-Spatial queries read the world as the last step left it (one FFI call
-each; `physicsQuery(records)` batches many):
+Spatial queries read the world as the last step left it, plus the
+colliders made since by `instantiate` or `clone`, which are found at once
+as in Unity (foundation 2.7; one added by `world.spawn` or `add(Collider)`
+is found from the tick that applies it). One FFI call each;
+`physicsQuery(records)` batches many:
 
 ```dart
 final hit = world.raycast(origin, dir, maxDistance: 20, mask: world.layerMask(['default']), exclude: gameObject);
@@ -346,8 +386,12 @@ final inside = world.overlap(ColliderShape.sphere, const Vec3(2, 0, 0), centre, 
 
 `PhysicsHit`: `entity`, `point`, `normal` (zero for an overlap),
 `distance` along the ray or cast (0 for an overlap); nearest first
-within a query; a shape cast reports the first hit only; sensors are
-skipped unless `hitSensors`; `exclude` skips the caster's own collider.
+within a query; a shape cast reports the first hit only. As in Unity
+(foundation 2.8), triggers are hit unless `hitSensors: false`
+(`queriesHitTriggers`), and a ray or shape cast does not detect a
+collider it starts in (a mesh collider is a surface, so a ray from inside
+the space it encloses still hits it). `exclude` skips the caster's own
+collider, and the colliders of the body it names.
 Wire: `fynkel.rec.PhysicsQuery` (88 B) in a `PHYSICS_QUERIES` buffer
 (kind 8) to `fynkel_world_physics_query`, answered by a `QUERY` buffer of
 `fynkel.rec.PhysicsHit` (48 B) in query order; a framing error is

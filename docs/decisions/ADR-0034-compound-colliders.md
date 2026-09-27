@@ -1,6 +1,6 @@
 # ADR-0034: Child colliders join their parent's Rigidbody
 
-**Status:** Proposed by the assistant 2026-09-27 — waits for the user's confirmation (docs/foundation.md 2.1)  
+**Status:** Accepted 2026-09-27 (the user confirmed it; docs/foundation.md 2.1)  
 **Date:** 2026-09-27  
 **Related:** blueprint §9 (physics), `docs/physics.md` § Components ("one collider per entity in V1") and § Contacts, ADR-0008 (transform ownership), ADR-0020 (an object's layer), ADR-0012 (schema codegen)
 

@@ -161,14 +161,14 @@ void main() {
     addTearDown(w.dispose);
     final bad = w.spawn(name: 'Bad').addBehaviour(BadWriter());
     w.frame(1 / 60); // resolves; the behaviour starts in update
-    final updates = bad.updates;
+    final updates = bad.updates, after = bad.after;
 
     expect(
       () => w.frame(1 / 30), // two ticks
       throwsA(isA<FynkelError>().having((e) => e.diagnostics.single.code, 'code', DiagnosticCode.invalidPayload)),
     );
     expect(bad.fixed, 2, reason: 'the second tick still ran');
-    expect(bad.after, 2, reason: "both ticks' afterPhysics ran");
+    expect(bad.after, after + 2, reason: "both ticks' afterPhysics ran");
     expect(bad.updates, updates + 1, reason: 'update ran');
     expect(bad.lates, updates + 1, reason: 'lateUpdate ran');
 

@@ -231,12 +231,14 @@ final hit = world.raycast(origin, direction, maxDistance: 20, mask: world.layerM
 world.overlap(ColliderShape.sphere, const Vec3(2, 0, 0), centre);   // also shapeCast, raycastAll
 ```
 
-Contact callbacks run right after each tick's step on the behaviours of
-both objects; `Contact` carries `point`, `normal` (a → b) and `impulse`
-(0 for triggers and exits). `fynkel validate` checks values (`FYN-H0001`/
+A `Collider` on a child of a `RigidBody` is part of that body (a
+compound, as in Unity). Contact callbacks run right after each tick's
+step on the behaviours of both objects, and of a joined child's body;
+`Contact` carries `point`, `normal` (a → b), `impulse` (0 for triggers
+and exits) and each side's `bodyA`/`bodyB`. `fynkel validate` checks values (`FYN-H0001`/
 `H0002`, `H0005`/`H0007` for the character and camera rig), a mesh collider
-on a moving body (`H0003`), a dynamic body without a collider (`H0004`,
-warning) and a body or collider next to a `CharacterController` (`H0006`).
+on a moving body (`H0003`), a dynamic body without a collider of its own
+or a child's (`H0004`, warning) and a body or collider next to a `CharacterController` (`H0006`).
 `fynkel test --headless` prints the run's bodies, colliders, characters
 and contact counts; the simulation is deterministic per platform (same
 scene, same commands → same checksum).

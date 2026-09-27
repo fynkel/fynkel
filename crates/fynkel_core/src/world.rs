@@ -1,7 +1,7 @@
 //! The runtime world: lifecycle, command lanes, `step()`, snapshots,
 //! events, diagnostics, render extraction.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -342,6 +342,9 @@ pub struct World {
     rig_scratch: Vec<RigPlacement>,
     driver_scratch: Vec<(Entity, BodyCommand)>,
     hits_scratch: Vec<fynkel_physics::Hit>,
+    /// Each occupied zone's event name by `(zone, occupant)`, so the exit
+    /// still fires when the zone itself is destroyed (foundation 2.6).
+    zone_names: BTreeMap<(Entity, Entity), String>,
     entity_scratch: Vec<Entity>,
     emission_scratch: Vec<catalogue::Emission>,
     placement_scratch: Vec<catalogue::Placement>,
@@ -421,6 +424,7 @@ impl World {
             rig_scratch: Vec::new(),
             driver_scratch: Vec::new(),
             hits_scratch: Vec::new(),
+            zone_names: BTreeMap::new(),
             entity_scratch: Vec::new(),
             emission_scratch: Vec::new(),
             placement_scratch: Vec::new(),
@@ -446,6 +450,16 @@ impl World {
 
     pub fn physics(&self) -> &Physics {
         &self.physics
+    }
+
+    /// Before a host's queries: the colliders made since the last step
+    /// (`instantiate`, a clone, `apply_now`) join the query tree, so a
+    /// query sees them at once, as Unity's (foundation 2.7). Nothing is
+    /// simulated.
+    pub fn refresh_physics(&mut self) {
+        if self.modules.physics {
+            self.physics.refresh(&mut self.ecs);
+        }
     }
 
     /// The optional modules on (ADR-0029 §3); all until the project says.
@@ -1861,12 +1875,18 @@ impl World {
                 if fired.contains(&zone) {
                     continue;
                 }
-                let Ok(z) = self.ecs.get::<TriggerZone>(zone) else {
-                    continue;
+                let remembered = self.zone_names.remove(&(zone, other));
+                let (event, once) = match self.ecs.get::<TriggerZone>(zone) {
+                    Ok(z) => (z.event.clone(), z.once),
+                    // Destroyed: its occupants still hear it go.
+                    Err(_) => match remembered {
+                        Some(event) if !entered => (event, false),
+                        _ => continue,
+                    },
                 };
-                let event = z.event.clone();
-                let once = z.once;
-                drop(z);
+                if entered && !once {
+                    self.zone_names.insert((zone, other), event.clone());
+                }
                 let payload = if entered {
                     EventPayload::ZoneEntered { zone, other, event }
                 } else {

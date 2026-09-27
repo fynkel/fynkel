@@ -155,27 +155,44 @@ enum ContactKind { collisionEnter, collisionStay, collisionExit, triggerEnter, t
 /// geometry (zeros).
 class Contact extends EngineEvent {
   const Contact(super.tickLo, this.kind, this.a, this.b,
-      {this.point = Vec3.zero, this.normal = Vec3.zero, this.impulse = 0});
+      {this.point = Vec3.zero, this.normal = Vec3.zero, this.impulse = 0, this.bodyA, this.bodyB});
   final ContactKind kind;
+
+  /// The colliders' entities (Unity's `Collision.collider`): for a collider
+  /// on a child of a Rigidbody, the child.
   final int a, b;
   final Vec3 point;
   final Vec3 normal;
   final double impulse;
 
+  /// The entity whose `RigidBody` each collider belongs to (Unity's
+  /// `Collision.rigidbody`): the collider's own, or its parent's when it
+  /// joined it (ADR-0034); null for static geometry and characters.
+  final int? bodyA, bodyB;
+
   bool get isTrigger =>
       kind == ContactKind.triggerEnter || kind == ContactKind.triggerExit || kind == ContactKind.triggerStay;
 
-  bool involves(int entity) => a == entity || b == entity;
+  /// Whether [entity] is a side of this contact: a collider or its body.
+  bool involves(int entity) => entity == a || entity == b || entity == bodyA || entity == bodyB;
 
-  /// The other side seen from [entity] (which must be [a] or [b]).
-  int other(int entity) {
-    if (entity == a) return b;
-    if (entity == b) return a;
+  /// The body of the side [entity] is on (a collider or a body), null for
+  /// static geometry.
+  int? bodyOf(int entity) => _isA(entity) ? bodyA : bodyB;
+
+  /// The other side's collider seen from [entity] — a collider of this
+  /// contact or a body one belongs to.
+  int other(int entity) => _isA(entity) ? b : a;
+
+  /// [normal] as seen from [entity] (a collider or its body): pointing away
+  /// from it.
+  Vec3 normalFor(int entity) => _isA(entity) ? normal : Vec3(-normal.x, -normal.y, -normal.z);
+
+  bool _isA(int entity) {
+    if (entity == a || entity == bodyA) return true;
+    if (entity == b || entity == bodyB) return false;
     throw ArgumentError.value(entity, 'entity', 'not a side of this contact');
   }
-
-  /// [normal] as seen from [entity]: pointing away from it.
-  Vec3 normalFor(int entity) => entity == a ? normal : Vec3(-normal.x, -normal.y, -normal.z);
 
   @override
   String toString() => 'Contact($kind ${a.toRadixString(16)}↔${b.toRadixString(16)} at $point n=$normal j=$impulse)';
@@ -270,5 +287,5 @@ ParentChanged _parent(ByteData d, int o, Uint8List tail, int tickLo) {
 Contact _contact(ByteData d, int o, Uint8List tail, gen.EventHeader h) {
   final e = gen.ContactEvent.decode(d, o, tail);
   return Contact(h.tickLo, ContactKind.values[h.kind - _physicsFirst], e.a, e.b,
-      point: e.point, normal: e.normal, impulse: e.impulse);
+      point: e.point, normal: e.normal, impulse: e.impulse, bodyA: e.bodyA, bodyB: e.bodyB);
 }

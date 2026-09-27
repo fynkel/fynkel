@@ -796,9 +796,12 @@ pub struct PlaybackEndedEvent {
 }
 
 /// Physics-lane events share one body (collision/trigger enter/stay/exit):
-/// `point` and `normal` in world space, the normal pointing from `a`
-/// towards `b`; `impulse` the pair's total impulse over the step (0 for
-/// triggers and exits).
+/// `a` and `b` the colliders' entities, `point` and `normal` in world
+/// space, the normal pointing from `a` towards `b`; `impulse` the pair's
+/// total impulse over the step (0 for triggers and exits); `body_a` and
+/// `body_b` the entity whose `RigidBody` each collider belongs to — its
+/// own, or the parent's it joined (ADR-0034) — absent for static geometry
+/// and characters.
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "event", id = 256, name = "fynkel.ev.Contact")]
 pub struct ContactEvent {
@@ -807,6 +810,8 @@ pub struct ContactEvent {
     pub point: Vec3,
     pub normal: Vec3,
     pub impulse: f32,
+    pub body_a: Option<Entity>,
+    pub body_b: Option<Entity>,
 }
 
 /// Snapshot record for a subscribed transform.
@@ -1026,7 +1031,7 @@ mod tests {
         // M3-08: entity @0, op @8, vector @12, rotation @24 → 40.
         assert_eq!(BodyCommandRecord::SCHEMA.offsets(), vec![0, 8, 12, 24]);
         assert_eq!(BodyCommandRecord::SCHEMA.wire_size(), 40);
-        assert_eq!(ContactEvent::SCHEMA.wire_size(), 48);
+        assert_eq!(ContactEvent::SCHEMA.wire_size(), 64);
         assert_eq!(PhysicsQueryRecord::SCHEMA.wire_size(), 88);
         assert_eq!(PhysicsHitRecord::SCHEMA.wire_size(), 48);
         assert_eq!(BodyStateRecord::SCHEMA.wire_size(), 40);

@@ -463,9 +463,10 @@ abstract class Behaviour {
   void afterPhysics(AfterPhysicsContext context) {}
 
   /// Contact callbacks (M3-08): right after the tick's step, for every
-  /// contact one of whose sides is this behaviour's object. `contact.other(
-  /// gameObject.entity)` is the other side; `world.byEntity` finds its
-  /// object. Writes here are commands for the next tick.
+  /// contact one of whose sides is this behaviour's object — its collider,
+  /// or the body a child's collider joined (ADR-0034). `contact.other(
+  /// gameObject.entity)` is the other side's collider; `world.byEntity`
+  /// finds its object. Writes here are commands for the next tick.
   void onCollisionEnter(Contact contact) {}
   void onCollisionStay(Contact contact) {}
   void onCollisionExit(Contact contact) {}
@@ -1043,12 +1044,18 @@ class _BehaviourSystem {
     });
   }
 
-  /// Right after `step()`: the contact callbacks of the objects involved
-  /// (in contact order, side `a` then `b`), then `afterPhysics` for the
+  /// Right after `step()`: the behaviours of the objects the tick made are
+  /// created, then the contact callbacks of the objects involved (in
+  /// contact order, side `a` then `b`), then `afterPhysics` for the
   /// behaviours that opted in.
   void afterPhysics(int tick, List<Contact> contacts, List<ZoneEvent> zones, List<AnimationEnded> animations,
       List<AnimationMarker> markers, List<PlaybackEnded> playback,
       [List<AnimatorStateEvent> states = const []]) {
+    // Objects the tick made are created (onCreate/onEnable) before its
+    // events reach anyone, so a pair made overlapping gets its enter on
+    // both sides, as Unity's Awake runs before the next physics step
+    // (foundation 2.13).
+    settle();
     if (contacts.isNotEmpty) _dispatchContacts(contacts);
     if (zones.isNotEmpty) _dispatchZones(zones);
     if (animations.isNotEmpty) _dispatchAnimations(animations);
@@ -1066,8 +1073,15 @@ class _BehaviourSystem {
     if (_all.isEmpty) return;
     world.context.run(() {
       for (final c in contacts) {
+        // Each collider's object, then its body's when that is another
+        // object (a child collider joined its parent's Rigidbody,
+        // ADR-0034) — once each, as Unity calls both.
         _contactTo(world._byEntity[c.a], c);
+        final bodyA = c.bodyA;
+        if (bodyA != null && bodyA != c.a) _contactTo(world._byEntity[bodyA], c);
         if (c.b != c.a) _contactTo(world._byEntity[c.b], c);
+        final bodyB = c.bodyB;
+        if (bodyB != null && bodyB != c.b && bodyB != bodyA) _contactTo(world._byEntity[bodyB], c);
       }
     });
   }

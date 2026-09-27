@@ -1382,16 +1382,19 @@ class World {
   }
 
   /// The nearest collider along a ray, or null. Spatial queries read the
-  /// world as the last step left it (one FFI call each; batch with
-  /// [physicsQuery] when asking many at once).
+  /// world as the last step left it, plus the colliders made since
+  /// (`instantiate`, `clone`), as Unity's are at once (foundation 2.7; one
+  /// FFI call each; batch with [physicsQuery] when asking many at once).
+  /// As in Unity, triggers are hit unless [hitSensors] is false, and a ray
+  /// or cast does not detect a collider it starts in (foundation 2.8).
   PhysicsHit? raycast(Vec3 origin, Vec3 direction,
-          {double maxDistance = 1000, int mask = 0xffffffff, GameObject? exclude, bool hitSensors = false}) =>
+          {double maxDistance = 1000, int mask = 0xffffffff, GameObject? exclude, bool hitSensors = true}) =>
       raycastAll(origin, direction, maxDistance: maxDistance, mask: mask, exclude: exclude, hitSensors: hitSensors, maxHits: 1)
           .firstOrNull;
 
   /// Every collider along a ray, nearest first, at most [maxHits].
   List<PhysicsHit> raycastAll(Vec3 origin, Vec3 direction,
-      {double maxDistance = 1000, int mask = 0xffffffff, GameObject? exclude, bool hitSensors = false, int maxHits = 16}) {
+      {double maxDistance = 1000, int mask = 0xffffffff, GameObject? exclude, bool hitSensors = true, int maxHits = 16}) {
     modules.require(Module.physics, 'raycast');
     _physicsQueries.clear();
     _physicsQueries.add(gen.PhysicsQueryRecord(
@@ -1419,7 +1422,7 @@ class World {
       double maxDistance = 1000,
       int mask = 0xffffffff,
       GameObject? exclude,
-      bool hitSensors = false}) {
+      bool hitSensors = true}) {
     modules.require(Module.physics, 'shapeCast');
     _physicsQueries.clear();
     _physicsQueries.add(gen.PhysicsQueryRecord(
@@ -1442,7 +1445,7 @@ class World {
   /// Every collider intersecting a `box`/`sphere`/`capsule` of [size] at
   /// [origin] (distance 0, normal zero).
   List<PhysicsHit> overlap(gen.ColliderShape shape, Vec3 size, Vec3 origin,
-      {Quat rotation = Quat.identity, int mask = 0xffffffff, GameObject? exclude, bool hitSensors = false, int maxHits = 16}) {
+      {Quat rotation = Quat.identity, int mask = 0xffffffff, GameObject? exclude, bool hitSensors = true, int maxHits = 16}) {
     modules.require(Module.physics, 'overlap');
     _physicsQueries.clear();
     _physicsQueries.add(gen.PhysicsQueryRecord(

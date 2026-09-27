@@ -143,6 +143,8 @@ fn fixtures_match_generated_codecs() {
             point: Vec3::new(0.5, 1.0, -0.25),
             normal: Vec3::Y,
             impulse: 3.5,
+            body_a: Some(e(4, 1)),
+            body_b: None,
         },
     );
     check(

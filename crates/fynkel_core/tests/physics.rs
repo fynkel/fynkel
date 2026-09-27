@@ -937,3 +937,231 @@ fn a_body_inside_a_trigger_stays() {
     assert_eq!(unwatched, 0, "nobody watched the pair: no stays");
     assert_eq!(stays, 30, "one a tick once the zone is watched");
 }
+
+// Foundation 2.2: in Unity, changing a collider's size or values, the
+// object's layer or its scale leaves the Rigidbody as it is — it keeps
+// moving, and a pair that still touches fires neither Exit nor Enter.
+#[test]
+fn changing_a_collider_keeps_the_body_moving_and_fires_nothing() {
+    let mut w = world();
+    let floor = floor(&mut w);
+    let crate_ = spawn(
+        &mut w,
+        2,
+        Vec3::new(0.0, 0.5, 0.0),
+        vec![
+            ComponentValue::RigidBody(RigidBody::default()),
+            ComponentValue::Collider(Collider::default()),
+        ],
+    );
+    // A ball drifting without gravity.
+    let ball_collider = Collider {
+        shape: ColliderShape::Sphere,
+        size: Vec3::new(0.5, 0.0, 0.0),
+        ..Collider::default()
+    };
+    let ball = spawn(
+        &mut w,
+        3,
+        Vec3::new(0.0, 5.0, 0.0),
+        vec![
+            ComponentValue::RigidBody(RigidBody {
+                gravity_scale: 0.0,
+                ..RigidBody::default()
+            }),
+            ComponentValue::Collider(ball_collider.clone()),
+        ],
+    );
+    w.submit(
+        Lane::Simulation,
+        vec![Command::Body {
+            entity: ball,
+            op: BodyCommand::SetLinearVelocity(Vec3::X * 3.0),
+        }],
+    );
+    for _ in 0..60 {
+        w.step();
+    }
+    let scaled = |w: &World, e: Entity| {
+        let mut t = w.ecs().copy::<Transform>(e).unwrap();
+        t.scale = Vec3::splat(1.2);
+        t
+    };
+    let changes: Vec<(&str, Vec<Command>)> = vec![
+        (
+            "a collider value",
+            vec![
+                Command::SetComponent {
+                    entity: crate_,
+                    value: ComponentValue::Collider(Collider {
+                        friction: 0.2,
+                        ..Collider::default()
+                    }),
+                },
+                Command::SetComponent {
+                    entity: ball,
+                    value: ComponentValue::Collider(Collider {
+                        size: Vec3::new(0.6, 0.0, 0.0),
+                        ..ball_collider
+                    }),
+                },
+            ],
+        ),
+        (
+            "the layer",
+            vec![
+                Command::SetComponent {
+                    entity: crate_,
+                    value: ComponentValue::Layer(Layer { layer: 1 }),
+                },
+                Command::SetComponent {
+                    entity: ball,
+                    value: ComponentValue::Layer(Layer { layer: 1 }),
+                },
+            ],
+        ),
+        // Built when it is sent: the ball moves meanwhile.
+        ("the scale", Vec::new()),
+    ];
+    for (what, cmds) in changes {
+        let cmds = if what == "the scale" {
+            vec![
+                Command::SetTransform {
+                    entity: crate_,
+                    transform: scaled(&w, crate_),
+                },
+                Command::SetTransform {
+                    entity: ball,
+                    transform: scaled(&w, ball),
+                },
+            ]
+        } else {
+            cmds
+        };
+        w.submit(Lane::Simulation, cmds);
+        let mut events = Vec::new();
+        for _ in 0..10 {
+            w.step();
+            for e in w.after_physics_events() {
+                match &e.payload {
+                    EventPayload::CollisionEnter(c) | EventPayload::CollisionExit(c) => {
+                        events.push((what, c.a, c.b))
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(
+            events.is_empty(),
+            "changing {what}: the crate still rests on the floor ({floor:?}), so nothing fires: {events:?}"
+        );
+        let v = w.physics().body_state(ball).unwrap().linear_velocity;
+        assert!(
+            (v - Vec3::X * 3.0).length() < 1e-3,
+            "changing {what}: the ball keeps its velocity, got {v}"
+        );
+    }
+}
+
+// Foundation 2.6: in Unity no OnTriggerExit fires when the other object is
+// destroyed or deactivated. Fynkel's is better and kept: the survivor hears
+// the exit. Pinned here, with the zone's named exit — lost before when the
+// zone itself went.
+#[test]
+fn a_destroyed_or_deactivated_side_exits() {
+    fn zone_and_crate(w: &mut World, temp: u64) -> (Entity, Entity) {
+        let zone = spawn(
+            w,
+            temp,
+            Vec3::new(0.0, 0.5, 0.0),
+            vec![
+                ComponentValue::Collider(Collider {
+                    size: Vec3::new(2.0, 1.0, 2.0),
+                    is_sensor: true,
+                    ..Collider::default()
+                }),
+                ComponentValue::TriggerZone(components::TriggerZone {
+                    event: "area".into(),
+                    once: false,
+                }),
+            ],
+        );
+        let crate_ = spawn(
+            w,
+            temp + 1,
+            Vec3::new(0.0, 0.5, 0.0),
+            vec![
+                ComponentValue::RigidBody(RigidBody::default()),
+                ComponentValue::Collider(Collider::default()),
+            ],
+        );
+        for _ in 0..5 {
+            w.step();
+        }
+        w.drain_events();
+        (zone, crate_)
+    }
+    /// The trigger exits and the zone exits over the ticks after `cmd`.
+    type Exits = (Vec<(Entity, Entity)>, Vec<(Entity, Entity, String)>);
+    fn exits(w: &mut World, cmd: Command) -> Exits {
+        w.submit(Lane::Simulation, vec![cmd]);
+        let (mut triggers, mut zones) = (Vec::new(), Vec::new());
+        for _ in 0..3 {
+            w.step();
+            for e in w.after_physics_events() {
+                if let EventPayload::TriggerExit(c) = &e.payload {
+                    triggers.push((c.a, c.b));
+                }
+            }
+            for e in w.drain_events() {
+                if let EventPayload::ZoneExited { zone, other, event } = e.payload {
+                    zones.push((zone, other, event));
+                }
+            }
+        }
+        (triggers, zones)
+    }
+    let mut w = world();
+    floor(&mut w);
+
+    let (zone, crate_) = zone_and_crate(&mut w, 10);
+    let (t, z) = exits(&mut w, Command::Destroy(crate_));
+    assert_eq!(
+        t.len(),
+        1,
+        "the zone hears the destroyed crate leave: {t:?}"
+    );
+    assert_eq!(z, vec![(zone, crate_, "area".to_string())]);
+
+    let crate_ = spawn(
+        &mut w,
+        20,
+        Vec3::new(0.0, 0.5, 0.0),
+        vec![
+            ComponentValue::RigidBody(RigidBody::default()),
+            ComponentValue::Collider(Collider::default()),
+        ],
+    );
+    for _ in 0..5 {
+        w.step();
+    }
+    w.drain_events();
+    let (t, z) = exits(
+        &mut w,
+        Command::SetActive {
+            entity: crate_,
+            active: false,
+        },
+    );
+    assert_eq!(t.len(), 1, "a deactivated crate leaves: {t:?}");
+    assert_eq!(z, vec![(zone, crate_, "area".to_string())]);
+
+    let (zone, crate_) = zone_and_crate(&mut w, 30);
+    let (t, z) = exits(&mut w, Command::Destroy(zone));
+    assert_eq!(t.len(), 1, "the crate hears the destroyed zone go: {t:?}");
+    assert_eq!(
+        z,
+        vec![(zone, crate_, "area".to_string())],
+        "the zone's named exit fires though the zone is gone"
+    );
+}

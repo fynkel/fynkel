@@ -149,6 +149,7 @@ void main() {
       point: const Vec3(0.5, 1.0, -0.25),
       normal: const Vec3(0, 1, 0),
       impulse: 3.5,
+      bodyA: entity(4, 1),
     ),
     ContactEvent.wireSize,
     ContactEvent.decode,

@@ -128,6 +128,17 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   `transform`, `get<T>`, `activeSelf`, `parent`/`children`, `name`,
   `behaviour<T>()` (docs/foundation.md 1.10,
   `packages/fynkel/test/read_timing_test.dart`).
+- A disabled behaviour gets no contact callbacks (`onCollisionEnter`,
+  `onTriggerEnter` and the rest); Unity sends collision messages to
+  disabled scripts too. Here disabled means off (docs/foundation.md
+  2.10, `physics_test.dart`).
+- When one side of a touching pair is destroyed or deactivated, the
+  other side gets its exit (`onCollisionExit`/`onTriggerExit`, and a
+  zone's `onZoneExit`); Unity sends none (foundation 2.6,
+  `crates/fynkel_core/tests/physics.rs`).
+- A collider made by `instantiate` or `clone` is found by queries at
+  once, as in Unity; one added by `world.spawn` or `add(Collider)` is
+  found from the next tick, where the command is applied (foundation 2.7).
 
 ## Log
 

@@ -434,6 +434,8 @@ fn encode_event_body(p: &EventPayload, out: &mut Vec<u8>, strings: &mut fynkel_w
                 point: c.point,
                 normal: c.normal,
                 impulse: c.impulse,
+                body_a: c.body_a,
+                body_b: c.body_b,
             },
             strings,
         ),

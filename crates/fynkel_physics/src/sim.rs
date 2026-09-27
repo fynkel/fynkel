@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use fynkel_contracts::{AssetRef, Entity};
 use fynkel_ecs::internal::Handle;
 use fynkel_ecs::World as Ecs;
-use fynkel_scene::{self as scene, Layer, Transform, WorldTransform};
+use fynkel_scene::{self as scene, Layer, Parent, Transform, WorldTransform};
 use glam::Mat4;
 use rapier3d::control::{
     CharacterAutostep, CharacterCollision, CharacterLength, KinematicCharacterController,
@@ -42,6 +42,13 @@ struct Entry {
     scale: Vec3,
     /// The object's layer bit (`fynkel.Layer`) the collider was built with.
     layer: u32,
+    /// The body this entity's collider joined (ADR-0034) — its nearest
+    /// ancestor with a `RigidBody` — and that body's type when it did.
+    joined: Option<(Entity, BodyType)>,
+    /// A joined collider's transform relative to its body: the product of
+    /// the local transforms between them, exact, so a moving body leaves
+    /// it the same.
+    rel: Mat4,
     /// The entity's world matrix as recorded after the last propagate; a
     /// different matrix at sync means the entity was moved by a command.
     last_world: Mat4,
@@ -59,6 +66,8 @@ struct NewEntry {
     character: Option<CharacterController>,
     /// The object's layer bit.
     layer: u32,
+    joined: Option<(Entity, BodyType)>,
+    rel: Mat4,
 }
 
 /// The moving state of a character entry.
@@ -140,9 +149,10 @@ pub struct Physics {
     world: PhysicsWorld,
     entries: BTreeMap<Entity, Entry>,
     characters: BTreeMap<Entity, CharacterRun>,
-    /// Collider → entity, kept until the step after a removal so the
-    /// `Stopped` events Rapier emits for a removed collider still resolve.
-    by_collider: HashMap<ColliderHandle, Entity>,
+    /// Collider → its entity and the entity whose body it belongs to
+    /// (ADR-0034), kept until the step after a removal so the `Stopped`
+    /// events Rapier emits for a removed collider still resolve.
+    by_collider: HashMap<ColliderHandle, (Entity, Option<Entity>)>,
     retired: Vec<ColliderHandle>,
     meshes: HashMap<AssetRef, (Vec<Vec3>, Vec<[u32; 3]>)>,
     /// Physics materials by reference (ADR-0025), registered by the loader.
@@ -158,11 +168,15 @@ pub struct Physics {
     /// Sync scratch, kept for its capacity.
     scratch_entities: Vec<Entity>,
     scratch_changed: Vec<Entity>,
+    scratch_nested: Vec<Entity>,
     scratch_gone: Vec<Entity>,
     /// Entities whose transform the last step wrote (`record` refreshes
     /// their `last_world`).
     scratch_written: Vec<Entity>,
     forced: Vec<RigidBodyHandle>,
+    /// Colliders a sync made or moved since the last step: the broad phase
+    /// learns of them at the step, or at [`Physics::refresh`] for queries.
+    unplaced: Vec<ColliderHandle>,
     stats: PhysicsStats,
 }
 
@@ -189,9 +203,11 @@ impl Physics {
             touching: BTreeMap::new(),
             scratch_entities: Vec::new(),
             scratch_changed: Vec::new(),
+            scratch_nested: Vec::new(),
             scratch_gone: Vec::new(),
             scratch_written: Vec::new(),
             forced: Vec::new(),
+            unplaced: Vec::new(),
             stats: PhysicsStats::default(),
         }
     }
@@ -449,6 +465,8 @@ impl Physics {
     pub fn step(&mut self, ecs: &mut Ecs, dt: f32, watched: &BTreeSet<Entity>) {
         self.events.clear();
         self.sync(ecs);
+        // The step's broad-phase update places them.
+        self.unplaced.clear();
         self.apply_pending(ecs);
         for (entity, v) in self.root_motion.drain(..) {
             if let Some(run) = self.characters.get_mut(&entity) {
@@ -506,14 +524,39 @@ impl Physics {
         self.scratch_written = written;
     }
 
+    /// Between steps, before a query: brings the physics world in line with
+    /// the entities (a collider made by `instantiate` since the last step)
+    /// and puts the colliders made or moved into the query tree, so a
+    /// query sees them at once, as Unity's (foundation 2.7). Nothing is
+    /// simulated and no event fires.
+    pub fn refresh(&mut self, ecs: &mut Ecs) {
+        if !self.has_work(ecs) {
+            return;
+        }
+        self.sync(ecs);
+        for h in self.unplaced.drain(..) {
+            if let Some(co) = self.world.colliders.get(h) {
+                let aabb = co.compute_broad_phase_aabb(
+                    &self.world.integration_parameters,
+                    &self.world.bodies,
+                );
+                self.world
+                    .broad_phase
+                    .set_aabb(&self.world.integration_parameters, h, aabb);
+            }
+        }
+    }
+
     fn sync(&mut self, ecs: &mut Ecs) {
         // Every entity with a physics component, in handle order. The
         // scratch vectors keep their capacity: with thousands of static
         // colliders this runs every tick and must not allocate.
         let mut candidates = std::mem::take(&mut self.scratch_entities);
         let mut changed = std::mem::take(&mut self.scratch_changed);
+        let mut nested = std::mem::take(&mut self.scratch_nested);
         candidates.clear();
         changed.clear();
+        nested.clear();
         {
             // One pass over the archetypes: every active entity with a
             // physics component and a world transform, and — the fast path — which
@@ -521,7 +564,7 @@ impl Physics {
             // the world matrix moved by gameplay). A resting or static
             // collider costs a few comparisons here and nothing below.
             let h = ecs.hecs();
-            for (handle, wt, rigid, shape, character, layer) in h
+            for (handle, wt, rigid, shape, character, layer, parent) in h
                 .query::<(
                     &Handle,
                     &WorldTransform,
@@ -529,6 +572,7 @@ impl Physics {
                     Option<&Collider>,
                     Option<&CharacterController>,
                     Option<&Layer>,
+                    Option<&Parent>,
                 )>()
                 // Not active in the hierarchy: out of the simulation (the
                 // entry goes, and comes back at rest when reactivated).
@@ -540,8 +584,16 @@ impl Physics {
                 }
                 let entity = handle.0;
                 candidates.push(entity);
+                // A lone collider under a parent may belong to an
+                // ancestor's body (ADR-0034): decided once the bodies are
+                // synced.
+                if rigid.is_none() && character.is_none() && parent.is_some() {
+                    nested.push(entity);
+                    continue;
+                }
                 let same = self.entries.get(&entity).is_some_and(|entry| {
-                    entry.rigid.is_some() == rigid.is_some()
+                    entry.joined.is_none()
+                        && entry.rigid.is_some() == rigid.is_some()
                         && entry.shape.is_some() == shape.is_some()
                         && entry.character.is_some() == character.is_some()
                         && entry.shape.as_ref().zip(shape).is_none_or(|(a, b)| a == b)
@@ -562,6 +614,7 @@ impl Physics {
         }
         candidates.sort_unstable();
         changed.sort_unstable();
+        nested.sort_unstable();
         // Entries whose entity lost its components or was destroyed.
         let mut gone = std::mem::take(&mut self.scratch_gone);
         gone.clear();
@@ -578,128 +631,193 @@ impl Physics {
         for e in gone.drain(..) {
             self.remove_entry(ecs, e);
         }
+        // The bodies and the colliders that stand alone first, then the
+        // nested colliders, which may join a body synced just above.
         for &entity in &changed {
-            let Ok(world) = ecs.get::<WorldTransform>(entity).map(|w| w.matrix) else {
-                continue;
-            };
-            let rigid = ecs.copy::<RigidBody>(entity).ok();
-            let shape = ecs.get::<Collider>(entity).ok();
-            let character = ecs.get::<CharacterController>(entity).ok();
-            let layer = ecs.copy::<Layer>(entity).unwrap_or_default().bit();
-            let existing = self.entries.get(&entity);
-            // A character's capsule follows its every field; its body and
-            // collider components are ignored, so their changes are only
-            // remembered (a new body/collider means a `CharacterWithBody`).
-            let structural = match existing {
-                None => true,
-                Some(entry) => {
-                    entry.stale
-                        || entry.layer != layer
-                        || entry.rigid.is_some() != rigid.is_some()
-                        || entry.shape.is_some() != shape.is_some()
-                        || entry.character.is_some() != character.is_some()
-                        || entry
-                            .shape
-                            .as_ref()
-                            .zip(shape.as_deref())
-                            .is_some_and(|(a, b)| a != b)
-                        || entry
-                            .character
-                            .as_ref()
-                            .zip(character.as_deref())
-                            .is_some_and(|(a, b)| a != b)
-                }
-            };
-            let moved = existing.is_none_or(|e| e.last_world != world);
-            let (position, rotation, scale) = pose_of(&world);
-            let rebuild = structural
-                || existing.is_some_and(|e| {
-                    (e.scale - scale).abs().max_element()
-                        > 1e-4 * scale.abs().max_element().max(1.0)
-                });
-            if rebuild {
-                let shape = shape.map(|s| s.clone());
-                let character = character.map(|c| c.clone());
-                self.remove_entry(ecs, entity);
-                self.create_entry(
-                    ecs,
-                    entity,
-                    NewEntry {
-                        rigid,
-                        shape,
-                        character,
-                        layer,
-                    },
-                    position,
-                    rotation,
-                    scale,
-                    world,
-                );
-                continue;
-            }
-            drop(shape);
-            drop(character);
-            let entry = self.entries.get_mut(&entity).unwrap();
-            let mut moved = moved;
-            if entry.character.is_some() {
-                // The capsule ignores the body component; remember the
-                // value so the comparison above stays quiet.
-                entry.rigid = rigid;
-            } else if let (Some(h), Some(new), Some(old)) = (entry.body, rigid, entry.rigid) {
-                if new != old {
-                    let body = &mut self.world.bodies[h];
-                    if new.body_type != old.body_type {
-                        body.set_body_type(body_type(new.body_type), true);
-                        set_owned(ecs, entity, new.body_type == BodyType::Dynamic);
-                        moved = true;
-                    }
-                    body.set_linear_damping(new.linear_damping);
-                    body.set_angular_damping(new.angular_damping);
-                    body.set_gravity_scale(new.gravity_scale, true);
-                    body.enable_ccd(new.ccd);
-                    body.set_additional_mass(mass_of(&new), true);
-                    entry.rigid = Some(new);
-                }
-            }
-            if moved {
-                let p = pose(position, rotation);
-                let kind = if entry.character.is_some() {
-                    Some(BodyType::Kinematic)
-                } else {
-                    entry.rigid.map(|r| r.body_type)
-                };
-                match (entry.body, entry.collider, kind) {
-                    // A character teleports (a transform write is not a
-                    // walk): vertical speed resets.
-                    (Some(h), _, _) if entry.character.is_some() => {
-                        self.world.bodies[h].set_position(p, true);
-                        self.world.bodies[h].set_next_kinematic_position(p);
-                        if let Some(run) = self.characters.get_mut(&entity) {
-                            run.vertical = 0.0;
-                        }
-                    }
-                    // A queued `SetKinematicTarget` is applied after the
-                    // sync, so it wins over a transform write in the same batch.
-                    (Some(h), _, Some(BodyType::Kinematic)) => {
-                        self.world.bodies[h].set_next_kinematic_position(p);
-                    }
-                    (Some(h), _, _) => self.world.bodies[h].set_position(p, true),
-                    (None, Some(c), _) => {
-                        let offset = entry
-                            .shape
-                            .as_ref()
-                            .map(|s| s.offset * scale)
-                            .unwrap_or(Vec3::ZERO);
-                        self.world.colliders[c].set_position(p * Pose::from_translation(offset));
-                    }
-                    (None, None, _) => {}
-                }
-                entry.last_world = world;
+            self.update_entry(ecs, entity, None);
+        }
+        for &entity in &nested {
+            let join = home_of(ecs, entity)
+                .filter(|b| self.entries.get(b).is_some_and(|e| e.body.is_some()))
+                .map(|b| (b, relative(ecs, entity, b)));
+            if !self.unchanged(ecs, entity, join) {
+                self.update_entry(ecs, entity, join);
             }
         }
         self.scratch_entities = candidates;
         self.scratch_changed = changed;
+        self.scratch_nested = nested;
         self.scratch_gone = gone;
+    }
+
+    /// Whether a nested collider's entry still matches its entity: joined
+    /// to the same body at the same relative place (so a moving body costs
+    /// nothing), or, standing alone, where it was.
+    fn unchanged(&self, ecs: &Ecs, entity: Entity, join: Option<(Entity, Mat4)>) -> bool {
+        let Some(entry) = self.entries.get(&entity) else {
+            return false;
+        };
+        let (Ok(wt), Ok(shape)) = (
+            ecs.get::<WorldTransform>(entity),
+            ecs.get::<Collider>(entity),
+        ) else {
+            return false;
+        };
+        if entry.stale
+            || entry.shape.as_ref() != Some(&*shape)
+            || entry.layer != ecs.copy::<Layer>(entity).unwrap_or_default().bit()
+        {
+            return false;
+        }
+        match (join, entry.joined) {
+            (None, None) => entry.last_world == wt.matrix,
+            (Some((body, rel)), Some((was, kind))) => {
+                body == was
+                    && rel == entry.rel
+                    && Some(kind) == self.body_type_of(body)
+                    && !rescaled(entry.scale, pose_of(&wt.matrix).2)
+            }
+            _ => false,
+        }
+    }
+
+    /// The type of the body `entity` has, `None` without one.
+    fn body_type_of(&self, entity: Entity) -> Option<BodyType> {
+        self.entries
+            .get(&entity)
+            .and_then(|e| e.rigid)
+            .map(|r| r.body_type)
+    }
+
+    /// Brings `entity`'s entry in line with its components: a new entry,
+    /// one rebuilt because its body or character came or went, or — every
+    /// other change — the same body and collider updated in place, so the
+    /// body keeps its velocity and a pair that still touches fires nothing
+    /// (foundation 2.2). `join` is the body a nested collider joins and its
+    /// place relative to it.
+    fn update_entry(&mut self, ecs: &mut Ecs, entity: Entity, join: Option<(Entity, Mat4)>) {
+        let Ok(world) = ecs.get::<WorldTransform>(entity).map(|w| w.matrix) else {
+            return;
+        };
+        let rigid = ecs.copy::<RigidBody>(entity).ok();
+        let shape = ecs.get::<Collider>(entity).ok().map(|s| s.clone());
+        let character = ecs
+            .get::<CharacterController>(entity)
+            .ok()
+            .map(|c| c.clone());
+        let layer = ecs.copy::<Layer>(entity).unwrap_or_default().bit();
+        let (position, rotation, scale) = pose_of(&world);
+        let joined = join.and_then(|(b, _)| Some((b, self.body_type_of(b)?)));
+        let rel = join.map_or(Mat4::IDENTITY, |(_, rel)| rel);
+        let recreate = match self.entries.get(&entity) {
+            None => true,
+            Some(e) => {
+                e.rigid.is_some() != rigid.is_some()
+                    || e.character.is_some() != character.is_some()
+                    // A character's capsule follows its every field; its
+                    // body and collider components are ignored, so their
+                    // changes are only remembered (a new body/collider
+                    // means a `CharacterWithBody`).
+                    || (e.character.is_some()
+                        && (e.stale
+                            || e.layer != layer
+                            || e.shape != shape
+                            || e.character != character
+                            || rescaled(e.scale, scale)))
+            }
+        };
+        if recreate {
+            self.remove_entry(ecs, entity);
+            self.create_entry(
+                ecs,
+                entity,
+                NewEntry {
+                    rigid,
+                    shape,
+                    character,
+                    layer,
+                    joined,
+                    rel,
+                },
+                position,
+                rotation,
+                scale,
+                world,
+            );
+            return;
+        }
+        let entry = self.entries.get_mut(&entity).unwrap();
+        let mut moved = entry.last_world != world;
+        entry.last_world = world;
+        if entry.character.is_some() {
+            // The capsule ignores the body component; remember the value
+            // so the comparison above stays quiet.
+            entry.rigid = rigid;
+            if moved {
+                // A character teleports (a transform write is not a walk):
+                // vertical speed resets.
+                let h = entry.body.unwrap();
+                let p = pose(position, rotation);
+                self.world.bodies[h].set_position(p, true);
+                self.world.bodies[h].set_next_kinematic_position(p);
+                if let Some(run) = self.characters.get_mut(&entity) {
+                    run.vertical = 0.0;
+                }
+            }
+            return;
+        }
+        let mut refit = entry.stale
+            || entry.shape != shape
+            || entry.layer != layer
+            || entry.joined != joined
+            || rescaled(entry.scale, scale);
+        if entry.shape != shape {
+            // Report a still-broken value again once it changes.
+            entry.reported = false;
+        }
+        if let (Some(h), Some(new), Some(old)) = (entry.body, rigid, entry.rigid) {
+            if new != old {
+                let body = &mut self.world.bodies[h];
+                if new.body_type != old.body_type {
+                    body.set_body_type(body_type(new.body_type), true);
+                    set_owned(ecs, entity, new.body_type == BodyType::Dynamic);
+                    moved = true;
+                    // A mesh collider may no longer fit the body.
+                    refit = true;
+                }
+                body.set_linear_damping(new.linear_damping);
+                body.set_angular_damping(new.angular_damping);
+                body.set_gravity_scale(new.gravity_scale, true);
+                body.enable_ccd(new.ccd);
+                body.set_additional_mass(mass_of(&new), true);
+                entry.rigid = Some(new);
+            }
+        }
+        let placed = entry.rel != rel;
+        entry.shape = shape;
+        entry.layer = layer;
+        entry.joined = joined;
+        entry.rel = rel;
+        entry.scale = scale;
+        entry.stale = false;
+        let (body, kind) = (entry.body, entry.rigid.map(|r| r.body_type));
+        if moved {
+            let p = pose(position, rotation);
+            match (body, kind) {
+                // A queued `SetKinematicTarget` is applied after the
+                // sync, so it wins over a transform write in the same batch.
+                (Some(h), Some(BodyType::Kinematic)) => {
+                    self.world.bodies[h].set_next_kinematic_position(p);
+                }
+                (Some(h), _) => self.world.bodies[h].set_position(p, true),
+                (None, _) => {}
+            }
+        }
+        if refit {
+            self.fit_collider(entity);
+        } else if (moved && body.is_none()) || placed {
+            self.place_collider(entity);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -718,6 +836,8 @@ impl Physics {
             shape,
             character,
             layer,
+            joined,
+            rel,
         } = new;
         if let Some(c) = character {
             self.create_character(
@@ -740,97 +860,195 @@ impl Physics {
             }
             self.world.insert_body(b)
         });
-        let mut entry = Entry {
-            body,
-            collider: None,
-            rigid,
-            shape: shape.clone(),
-            character: None,
-            scale,
-            layer,
-            last_world: world,
-            reported: false,
-            stale: false,
-        };
-        if let Some(c) = &shape {
-            match self.build_shape(c, scale, rigid.map(|r| r.body_type)) {
-                Ok(s) => {
-                    let offset = c.offset * scale;
-                    // A sensor also sees kinematic bodies — the character
-                    // controller's capsule walking into a static pickup
-                    // (Rapier's default is dynamic-vs-anything only).
-                    let types = if c.is_sensor {
-                        ActiveCollisionTypes::default()
-                            | ActiveCollisionTypes::KINEMATIC_FIXED
-                            | ActiveCollisionTypes::KINEMATIC_KINEMATIC
-                    } else {
-                        ActiveCollisionTypes::default()
-                    };
-                    let surface = match self.surface(c) {
-                        Ok(m) => m,
-                        Err((own, message)) => {
-                            if !entry.reported {
-                                entry.reported = true;
-                                self.rejections.push(Rejection {
-                                    index: u32::MAX,
-                                    entity,
-                                    kind: RejectionKind::MaterialUnavailable,
-                                    message,
-                                });
-                            }
-                            own
-                        }
-                    };
-                    let builder = ColliderBuilder::new(s)
-                        .friction(surface.friction)
-                        .friction_combine_rule(surface.friction_combine.rapier())
-                        .restitution(surface.bounciness)
-                        .restitution_combine_rule(surface.bounce_combine.rapier())
-                        .sensor(c.is_sensor)
-                        .collision_groups(groups(layer, c.mask))
-                        .active_events(ActiveEvents::COLLISION_EVENTS)
-                        .active_collision_types(types)
-                        .density(0.0)
-                        .user_data(user);
-                    let handle = match body {
-                        Some(b) => self
-                            .world
-                            .insert_collider(builder.translation(offset), Some(b)),
-                        None => self.world.insert_collider(
-                            builder.position(p * Pose::from_translation(offset)),
-                            None,
-                        ),
-                    };
-                    self.by_collider.insert(handle, entity);
-                    entry.collider = Some(handle);
-                    // The effective inverse mass is otherwise refreshed by
-                    // the step: a body command queued in the tick that
-                    // created the body (spawn + components + impulse in one
-                    // batch) must see the mass now.
-                    if let Some(b) = body {
-                        self.world.bodies[b]
-                            .recompute_mass_properties_from_colliders(&self.world.colliders);
-                    }
-                }
-                Err((kind, message)) => {
-                    if !entry.reported {
-                        entry.reported = true;
-                        self.rejections.push(Rejection {
-                            index: u32::MAX,
-                            entity,
-                            kind,
-                            message,
-                        });
-                    }
-                }
-            }
-        }
+        self.entries.insert(
+            entity,
+            Entry {
+                body,
+                collider: None,
+                rigid,
+                shape,
+                character: None,
+                scale,
+                layer,
+                joined,
+                rel,
+                last_world: world,
+                reported: false,
+                stale: false,
+            },
+        );
+        self.fit_collider(entity);
         set_owned(
             ecs,
             entity,
             rigid.is_some_and(|r| r.body_type == BodyType::Dynamic),
         );
-        self.entries.insert(entity, entry);
+    }
+
+    /// Where an entry's collider goes: the body it is attached to and its
+    /// pose relative to that body, or, without one, its world pose.
+    fn collider_place(&self, entry: &Entry) -> (Option<RigidBodyHandle>, Pose) {
+        let offset = Pose::from_translation(
+            entry.shape.as_ref().map_or(Vec3::ZERO, |s| s.offset) * entry.scale,
+        );
+        if let Some((home, _)) = entry.joined {
+            let body = &self.entries[&home];
+            let (t, r, _) = pose_of(&entry.rel);
+            // The body's pose carries no scale: its scale stretches the
+            // child's place within it.
+            return (body.body, pose(t * body.scale, r) * offset);
+        }
+        if entry.body.is_some() {
+            return (entry.body, offset);
+        }
+        let (t, r, _) = pose_of(&entry.last_world);
+        (None, pose(t, r) * offset)
+    }
+
+    /// Moves an entry's collider to its place (the entity or its place in
+    /// the body moved; nothing else changed).
+    fn place_collider(&mut self, entity: Entity) {
+        let entry = &self.entries[&entity];
+        let Some(h) = entry.collider else {
+            return;
+        };
+        let (parent, place) = self.collider_place(entry);
+        let co = &mut self.world.colliders[h];
+        if parent.is_some() {
+            co.set_position_wrt_parent(place);
+        } else {
+            co.set_position(place);
+        }
+        self.unplaced.push(h);
+    }
+
+    /// Makes an entry's Rapier collider match its `Collider`: built when
+    /// missing, else updated in place — the same handle keeps the pairs it
+    /// is in, so nothing fires for a pair that still touches (foundation
+    /// 2.2) — or removed when the component went or cannot be built.
+    fn fit_collider(&mut self, entity: Entity) {
+        let entry = &self.entries[&entity];
+        let Some(c) = entry.shape.clone() else {
+            self.drop_collider(entity);
+            return;
+        };
+        let body_type = match entry.joined {
+            Some((_, kind)) => Some(kind),
+            None => entry.rigid.map(|r| r.body_type),
+        };
+        let built = self.build_shape(&c, entry.scale, body_type);
+        let surface = self.surface(&c);
+        let (parent, place) = self.collider_place(entry);
+        let body_entity = match entry.joined {
+            Some((home, _)) => Some(home),
+            None => entry.rigid.is_some().then_some(entity),
+        };
+        let (layer, existing) = (entry.layer, entry.collider);
+        let shape = match built {
+            Ok(s) => s,
+            Err((kind, message)) => {
+                self.report(entity, kind, message);
+                self.drop_collider(entity);
+                return;
+            }
+        };
+        let surface = match surface {
+            Ok(m) => m,
+            Err((own, message)) => {
+                self.report(entity, RejectionKind::MaterialUnavailable, message);
+                own
+            }
+        };
+        // A sensor also sees kinematic bodies — the character controller's
+        // capsule walking into a static pickup (Rapier's default is
+        // dynamic-vs-anything only).
+        let types = if c.is_sensor {
+            ActiveCollisionTypes::default()
+                | ActiveCollisionTypes::KINEMATIC_FIXED
+                | ActiveCollisionTypes::KINEMATIC_KINEMATIC
+        } else {
+            ActiveCollisionTypes::default()
+        };
+        let handle = match existing {
+            Some(h) => {
+                if self.world.colliders[h].parent() != parent {
+                    self.world
+                        .colliders
+                        .set_parent(h, parent, &mut self.world.bodies);
+                }
+                let co = &mut self.world.colliders[h];
+                co.set_shape(shape);
+                co.set_friction(surface.friction);
+                co.set_friction_combine_rule(surface.friction_combine.rapier());
+                co.set_restitution(surface.bounciness);
+                co.set_restitution_combine_rule(surface.bounce_combine.rapier());
+                co.set_sensor(c.is_sensor);
+                co.set_collision_groups(groups(layer, c.mask));
+                co.set_active_collision_types(types);
+                if parent.is_some() {
+                    co.set_position_wrt_parent(place);
+                } else {
+                    co.set_position(place);
+                }
+                h
+            }
+            None => {
+                let builder = ColliderBuilder::new(shape)
+                    .friction(surface.friction)
+                    .friction_combine_rule(surface.friction_combine.rapier())
+                    .restitution(surface.bounciness)
+                    .restitution_combine_rule(surface.bounce_combine.rapier())
+                    .sensor(c.is_sensor)
+                    .collision_groups(groups(layer, c.mask))
+                    .active_events(ActiveEvents::COLLISION_EVENTS)
+                    .active_collision_types(types)
+                    .density(0.0)
+                    .position(place)
+                    .user_data(entity.to_bits() as u128);
+                let h = self.world.insert_collider(builder, parent);
+                self.entries.get_mut(&entity).unwrap().collider = Some(h);
+                h
+            }
+        };
+        self.by_collider.insert(handle, (entity, body_entity));
+        self.unplaced.push(handle);
+        // The effective inverse mass is otherwise refreshed by the step: a
+        // body command queued in the tick that created the body (spawn +
+        // components + impulse in one batch) must see the mass now.
+        if let Some(b) = parent {
+            self.world.bodies[b].recompute_mass_properties_from_colliders(&self.world.colliders);
+        }
+    }
+
+    /// Reports a component `entity`'s entry cannot realise, once.
+    fn report(&mut self, entity: Entity, kind: RejectionKind, message: String) {
+        let entry = self.entries.get_mut(&entity).unwrap();
+        if !entry.reported {
+            entry.reported = true;
+            self.rejections.push(Rejection {
+                index: u32::MAX,
+                entity,
+                kind,
+                message,
+            });
+        }
+    }
+
+    /// Removes an entry's Rapier collider, if it has one.
+    fn drop_collider(&mut self, entity: Entity) {
+        let Some(h) = self
+            .entries
+            .get_mut(&entity)
+            .and_then(|e| e.collider.take())
+        else {
+            return;
+        };
+        let parent = self.world.colliders.get(h).and_then(|c| c.parent());
+        self.retired.push(h);
+        self.world.remove_collider(h);
+        if let Some(b) = parent.filter(|b| self.world.bodies.contains(*b)) {
+            self.world.bodies[b].recompute_mass_properties_from_colliders(&self.world.colliders);
+        }
     }
 
     /// A character: a kinematic body with the controller's capsule, a
@@ -869,7 +1087,7 @@ impl Physics {
                 .user_data(user),
             Some(body),
         );
-        self.by_collider.insert(collider, entity);
+        self.by_collider.insert(collider, (entity, None));
         let mut reported = false;
         if rigid.is_some() || shape.is_some() {
             reported = true;
@@ -923,6 +1141,8 @@ impl Physics {
                 character: Some(c),
                 scale,
                 layer,
+                joined: None,
+                rel: Mat4::IDENTITY,
                 last_world: world,
                 reported,
                 stale: false,
@@ -981,6 +1201,17 @@ impl Physics {
             self.world.remove_collider(c);
         }
         if let Some(b) = entry.body {
+            // Rapier takes the colliders that joined the body with it; their
+            // entries rebuild at this sync's nested pass (ADR-0034).
+            for &h in self.world.bodies[b].colliders() {
+                if let Some(&(e, _)) = self.by_collider.get(&h) {
+                    if let Some(j) = self.entries.get_mut(&e) {
+                        j.collider = None;
+                        j.stale = true;
+                    }
+                    self.retired.push(h);
+                }
+            }
             self.world.remove_body(b);
         }
         // A rebuild re-inserts the run (`create_character`); a removal
@@ -1325,7 +1556,8 @@ impl Physics {
                 CollisionEvent::Started(a, b, f) => (a, b, f, true),
                 CollisionEvent::Stopped(a, b, f) => (a, b, f, false),
             };
-            let (Some(&a), Some(&b)) = (self.by_collider.get(&h1), self.by_collider.get(&h2))
+            let (Some(&(a, body_a)), Some(&(b, body_b))) =
+                (self.by_collider.get(&h1), self.by_collider.get(&h2))
             else {
                 continue;
             };
@@ -1351,6 +1583,8 @@ impl Physics {
             let contact = Contact {
                 a,
                 b,
+                body_a,
+                body_b,
                 point,
                 normal,
                 impulse: if sensor { 0.0 } else { impulse },
@@ -1377,20 +1611,26 @@ impl Physics {
             if started.contains(&(a, b)) {
                 continue;
             }
-            if !(watched.contains(&a) || watched.contains(&b)) {
-                continue;
-            }
             let (Some(ca), Some(cb)) = (
                 self.entries.get(&a).and_then(|e| e.collider),
                 self.entries.get(&b).and_then(|e| e.collider),
             ) else {
                 continue;
             };
+            let body_a = self.by_collider.get(&ca).and_then(|&(_, body)| body);
+            let body_b = self.by_collider.get(&cb).and_then(|&(_, body)| body);
+            // Watching a body watches the colliders that joined it.
+            let seen = |e: Option<Entity>| e.is_some_and(|e| watched.contains(&e));
+            if !(seen(Some(a)) || seen(Some(b)) || seen(body_a) || seen(body_b)) {
+                continue;
+            }
             if sensor {
                 if self.world.narrow_phase.intersection_pair(ca, cb) == Some(true) {
                     stays.push(PhysicsEvent::TriggerStay(Contact {
                         a,
                         b,
+                        body_a,
+                        body_b,
                         point: Vec3::ZERO,
                         normal: Vec3::ZERO,
                         impulse: 0.0,
@@ -1413,6 +1653,8 @@ impl Physics {
             stays.push(PhysicsEvent::CollisionStay(Contact {
                 a,
                 b,
+                body_a,
+                body_b,
                 point,
                 normal,
                 impulse,
@@ -1428,8 +1670,32 @@ impl Physics {
     pub fn query(&self, q: &QuerySpec, out: &mut Vec<Hit>) {
         let max_hits = q.max_hits.max(1) as usize;
         let mask = q.mask;
+        // As Unity, a ray or a cast does not detect a collider it starts
+        // in (foundation 2.8). A mesh is a surface: nothing is inside it.
+        let start = pose(q.origin, q.rotation.normalize());
+        let start_shape = match q.kind {
+            QueryKind::ShapeCast => query_shape(q),
+            _ => None,
+        };
+        let (kind, origin) = (q.kind, q.origin);
         let predicate = move |_: ColliderHandle, co: &rapier3d::geometry::Collider| {
-            co.collision_groups().memberships.bits() & mask != 0
+            if co.collision_groups().memberships.bits() & mask == 0 {
+                return false;
+            }
+            if co.shape().as_trimesh().is_some() {
+                return true;
+            }
+            match (kind, &start_shape) {
+                (QueryKind::Raycast, _) => !co.shape().contains_point(co.position(), origin),
+                (QueryKind::ShapeCast, Some(s)) => !rapier3d::parry::query::intersection_test(
+                    &start,
+                    &**s,
+                    co.position(),
+                    co.shape(),
+                )
+                .unwrap_or(false),
+                _ => true,
+            }
         };
         let mut filter = QueryFilter::new().predicate(&predicate);
         if !q.hit_sensors {
@@ -1674,6 +1940,49 @@ fn query_shape(q: &QuerySpec) -> Option<SharedShape> {
         }
         ColliderShape::Mesh => return None,
     })
+}
+
+/// Whether a world scale differs from the one a shape was built with by
+/// more than float noise.
+fn rescaled(was: Vec3, now: Vec3) -> bool {
+    (was - now).abs().max_element() > 1e-4 * now.abs().max_element().max(1.0)
+}
+
+/// The body a lone collider on `entity` joins (ADR-0034): its nearest
+/// ancestor with a `RigidBody`. A `CharacterController` on the way keeps
+/// its children out (its capsule is its whole shape). An active entity's
+/// ancestors are active, so the body is too.
+fn home_of(ecs: &Ecs, entity: Entity) -> Option<Entity> {
+    let mut e = entity;
+    while let Ok(Parent(p)) = ecs.copy::<Parent>(e) {
+        if ecs.has::<CharacterController>(p) {
+            return None;
+        }
+        if ecs.has::<RigidBody>(p) {
+            return Some(p);
+        }
+        e = p;
+    }
+    None
+}
+
+/// `entity`'s transform relative to its ancestor `body`: the product of
+/// the local transforms between them.
+fn relative(ecs: &Ecs, entity: Entity, body: Entity) -> Mat4 {
+    let local = |e: Entity| {
+        ecs.copy::<Transform>(e)
+            .map_or(Mat4::IDENTITY, |t| t.matrix())
+    };
+    let mut m = local(entity);
+    let mut e = entity;
+    while let Ok(Parent(p)) = ecs.copy::<Parent>(e) {
+        if p == body {
+            break;
+        }
+        m = local(p) * m;
+        e = p;
+    }
+    m
 }
 
 fn body_type(t: BodyType) -> RigidBodyType {
