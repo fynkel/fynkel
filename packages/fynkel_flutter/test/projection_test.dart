@@ -28,7 +28,7 @@ void main() {
   });
 
   /// The fixture's Main scene: the camera at (0, 2, 6), fov 1 rad, looking
-  /// down -Z; Crate A at (2, 0, 0).
+  /// down -Z; Crate A at (2, 0.5, 0) (the box is the prefab's root since ADR-0022).
   World loaded() {
     final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8);
     addTearDown(w.dispose);
@@ -98,12 +98,12 @@ void main() {
     // Frame 1: the crate is where the scene put it.
     advance(w);
     await tester.pump();
-    var at = expected(const Vec3(2, 1, 0), const Vec3(0, 2, 6), 400, 300);
+    var at = expected(const Vec3(2, 1.5, 0), const Vec3(0, 2, 6), 400, 300);
     var label = tester.getRect(find.byType(WorldLabel));
     expect(label.bottomCenter - origin, offsetMoreOrLessEquals(at, epsilon: 0.05));
     expect(
       tester.getCenter(find.byKey(const Key('dot'))) - origin,
-      offsetMoreOrLessEquals(expected(const Vec3(2, 0, 0), const Vec3(0, 2, 6), 400, 300), epsilon: 0.05),
+      offsetMoreOrLessEquals(expected(const Vec3(2, 0.5, 0), const Vec3(0, 2, 6), 400, 300), epsilon: 0.05),
     );
     expect(find.text('Crate A').hitTestable(), findsOneWidget);
 
@@ -114,7 +114,7 @@ void main() {
       camera.setLocalPosition(i.toDouble(), 2, 6);
       advance(w);
       await tester.pump();
-      at = expected(const Vec3(2, 1, 0), Vec3(i.toDouble(), 2, 6), 400, 300);
+      at = expected(const Vec3(2, 1.5, 0), Vec3(i.toDouble(), 2, 6), 400, 300);
       label = tester.getRect(find.byType(WorldLabel));
       expect(label.bottomCenter - origin, offsetMoreOrLessEquals(at, epsilon: 0.05), reason: 'frame $i');
     }
