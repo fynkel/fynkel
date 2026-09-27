@@ -72,9 +72,11 @@ fn viewport_lifetimes_do_not_grow_the_process() {
         after >> 20
     );
     // One 512×512 BGRA ring is 4 MiB; a leaked ring per cycle would show as
-    // hundreds of MiB. The bound absorbs allocator and Metal heap slack.
+    // hundreds of MiB (240 over these 60). The bound absorbs allocator and
+    // Metal heap slack: 4 MiB sat right on the slack's measured 2.5–3.9 MiB
+    // and a CI run on a busy machine measured 4.4, so 8.
     assert!(
-        growth < 4 << 20,
+        growth < 8 << 20,
         "resident size grew by {} MiB over {CYCLES} viewport lifetimes",
         growth >> 20
     );
