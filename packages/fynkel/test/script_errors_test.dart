@@ -49,6 +49,29 @@ class Thrower extends Behaviour {
   }
 }
 
+/// Writes a NaN position on the first tick it sees (the step rejects it:
+/// `INVALID_PAYLOAD`), and counts everything after.
+class BadWriter extends Behaviour {
+  int fixed = 0, after = 0, updates = 0, lates = 0;
+
+  @override
+  bool get wantsAfterPhysics => true;
+
+  @override
+  void fixedUpdate(FixedUpdateContext context) {
+    if (fixed++ == 0) {
+      gameObject.setLocalTransform(const Transform(position: Vec3(double.nan, 0, 0), rotation: Quat.identity, scale: Vec3.one));
+    }
+  }
+
+  @override
+  void afterPhysics(AfterPhysicsContext context) => after++;
+  @override
+  void update(UpdateContext context) => updates++;
+  @override
+  void lateUpdate(UpdateContext context) => lates++;
+}
+
 void main() {
   late NativeLibrary lib;
   setUpAll(() => lib = NativeLibrary.open());
@@ -127,5 +150,30 @@ void main() {
     final seen = <Object>[];
     runZonedGuarded(() => w..frame(1 / 60)..frame(1 / 60), (e, _) => seen.add(e));
     expect(seen.whereType<StateError>().map((e) => e.message), containsAll(['no fixed', 'no ground']));
+  });
+
+  test('a rejected command in debug finishes the frame, then throws (foundation 1.5)', () {
+    // ADR-0014: debug builds throw FynkelError. Thrown from inside the
+    // tick, it lost the rest of the frame: that tick's afterPhysics and
+    // contacts, the next tick, update, lateUpdate and the presentation
+    // flush. Unity logs the error and the frame goes on.
+    final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8)..throwOnDiagnostics = true;
+    addTearDown(w.dispose);
+    final bad = w.spawn(name: 'Bad').addBehaviour(BadWriter());
+    w.frame(1 / 60); // resolves; the behaviour starts in update
+    final updates = bad.updates;
+
+    expect(
+      () => w.frame(1 / 30), // two ticks
+      throwsA(isA<FynkelError>().having((e) => e.diagnostics.single.code, 'code', DiagnosticCode.invalidPayload)),
+    );
+    expect(bad.fixed, 2, reason: 'the second tick still ran');
+    expect(bad.after, 2, reason: "both ticks' afterPhysics ran");
+    expect(bad.updates, updates + 1, reason: 'update ran');
+    expect(bad.lates, updates + 1, reason: 'lateUpdate ran');
+
+    // The next frame is an ordinary one.
+    w.frame(1 / 60);
+    expect(bad.fixed, 3);
   });
 }

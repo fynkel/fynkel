@@ -841,6 +841,7 @@ class World {
   FramePlan frame(double dtSeconds,
       {List<InputEvent> input = const [], void Function(int tick)? fixedUpdate, void Function()? update}) {
     final t = frameTimes.._begin();
+    _deferredErrors.clear(); // a frame that threw something else left them
     scenes._perform();
     t._native.start();
     final plan = beginFrame(dtSeconds);
@@ -859,10 +860,39 @@ class World {
     update?.call();
     t._behaviours.stop();
     t._presentation.start();
-    flushPresentation();
+    _deferring(flushPresentation);
     t._presentation.stop();
     t._end(plan.steps);
+    _throwDeferred();
     return plan;
+  }
+
+  /// The debug-mode [FynkelError]s of this [frame]'s steps and flush
+  /// (ADR-0014), held until the frame is done: thrown from inside a tick,
+  /// one lost the rest of the frame — that tick's contacts and
+  /// `afterPhysics`, the ticks after it, `update`, `lateUpdate` and the
+  /// presentation flush. Unity logs and the frame goes on; here the frame
+  /// goes on and then throws.
+  final List<(FynkelError, StackTrace)> _deferredErrors = [];
+
+  void _deferring(void Function() f) {
+    try {
+      f();
+    } on FynkelError catch (e, st) {
+      _deferredErrors.add((e, st));
+    }
+  }
+
+  /// Throws this frame's deferred errors as one: every diagnostic, the
+  /// first one's context and stack.
+  void _throwDeferred() {
+    if (_deferredErrors.isEmpty) return;
+    final (first, stack) = _deferredErrors.first;
+    final error = _deferredErrors.length == 1
+        ? first
+        : FynkelError([for (final (e, _) in _deferredErrors) ...e.diagnostics], context: first.context);
+    _deferredErrors.clear();
+    Error.throwWithStackTrace(error, stack);
   }
 
   /// [frame]'s fixed phase: `plan.steps` ticks.
@@ -875,7 +905,7 @@ class World {
       t._behaviours.stop();
       final stepped = tick;
       t._native.start();
-      step();
+      _deferring(step);
       final events = drainEvents();
       t._native.stop();
       t._behaviours.start();
