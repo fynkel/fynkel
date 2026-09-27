@@ -1,6 +1,13 @@
 # The same gate `docs/status.md` describes, run on every push and pull
 # request so "green" is a machine's word, not a person's. Keep the step list
 # in sync with the "Verification" section of docs/status.md.
+#
+# The jobs run on a self-hosted runner on the developer's Mac (label
+# `fynkel`; ~/actions-runner, a launchd service), since GitHub-hosted
+# minutes are unavailable on this account. The runner uses the machine's
+# own rustup and Flutter (checked against FLUTTER_VERSION below), and it
+# keeps `target/` between runs: the checkout does not clean, a step
+# cleans everything else, so each run still starts from the commit alone.
 name: ci
 
 on:
@@ -21,14 +28,17 @@ jobs:
   rust:
     name: rust (fmt, clippy, test, codegen --check)
     # Apple crates (platform/apple, hosts/flutter_apple) need a macOS toolchain.
-    runs-on: macos-15
+    runs-on: [self-hosted, macOS, fynkel]
     steps:
       - uses: actions/checkout@v4
+        with:
+          clean: false
+      - name: clean (all but target/)
+        run: git clean -ffdx -e /target/ && git reset --hard HEAD
       # rust-toolchain.toml pins the channel and the Apple targets; rustup
       # installs them on first use.
       - name: Rust toolchain
         run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@v2
       - name: fmt
         run: cargo fmt --all --check
       - name: clippy
@@ -56,29 +66,32 @@ jobs:
   # run. Kept green while it costs nothing to keep green.
   wasm:
     name: wasm32 check (core, scene, physics, render)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, fynkel]
     steps:
       - uses: actions/checkout@v4
+        with:
+          clean: false
+      - name: clean (all but target/)
+        run: git clean -ffdx -e /target/ && git reset --hard HEAD
       - name: Rust toolchain
         run: rustup show active-toolchain && rustup target add wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
       - name: cargo check --target wasm32-unknown-unknown
         run: cargo check --target wasm32-unknown-unknown -p fynkel_core -p fynkel_scene -p fynkel_physics -p fynkel_render
 
   dart:
     name: dart (package:fynkel, fynkel_authoring, fynkel_flutter, fynkel_generator, example, starter project and showcase)
-    runs-on: macos-15
+    runs-on: [self-hosted, macOS, fynkel]
     steps:
       - uses: actions/checkout@v4
+        with:
+          clean: false
+      - name: clean (all but target/)
+        run: git clean -ffdx -e /target/ && git reset --hard HEAD
       - name: Rust toolchain
         run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@v2
       # Flutter's Dart is the toolchain of record (docs/toolchain.md).
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: true
+      - name: Flutter
+        run: flutter --version | tee /dev/stderr | grep -q "Flutter $FLUTTER_VERSION "
       - name: pub get
         working-directory: packages/fynkel
         run: dart pub get
