@@ -35,6 +35,19 @@ class Crate extends Behaviour {
   }
 }
 
+class StaySensor extends Behaviour {
+  int entered = 0, stays = 0;
+  final Set<String?> others = {};
+  @override
+  void onTriggerEnter(Contact contact) => entered++;
+  @override
+  void onTriggerStay(Contact contact) {
+    stays++;
+    expect(contact.isTrigger, isTrue);
+    others.add(world.byEntity(contact.other(gameObject.entity))?.name);
+  }
+}
+
 class Sensor extends Behaviour {
   final List<String> log = [];
   @override
@@ -206,6 +219,29 @@ void main() {
       w.frame(1 / 60);
     }
     expect(s.log, ['in ball', 'out ball']);
+  });
+
+  test('a body resting in a sensor gets onTriggerStay every tick, as Unity (foundation 2.3)', () {
+    final w = fresh();
+    floor(w);
+    final zone = w.spawn(
+      transform: identityTransform.copyWith(position: const Vec3(0, 1, 0)),
+      name: 'zone',
+    )..add(unitBox.copyWith(isSensor: true, size: const Vec3(2, 1, 2)));
+    final s = zone.addBehaviour(StaySensor());
+    w.frame(1 / 60); // the zone's script exists before anything enters
+    w.spawn(
+        transform: identityTransform.copyWith(position: const Vec3(0, 0.5, 0)),
+        name: 'crate',
+      )
+      ..add(dynamicBody)
+      ..add(unitBox);
+    for (var i = 0; i < 30; i++) {
+      w.frame(1 / 60);
+    }
+    expect(s.entered, 1);
+    expect(s.stays, greaterThanOrEqualTo(28), reason: 'one a tick after the enter');
+    expect(s.others, {'crate'});
   });
 
   test('raycast, shape cast and overlap read the last step', () {

@@ -147,6 +147,10 @@ pub enum PhysicsEvent {
     CollisionExit(Contact),
     TriggerEnter(Contact),
     TriggerExit(Contact),
+    /// A sensor pair still overlapping (Unity's `OnTriggerStay`, foundation
+    /// 2.3): watched pairs only, as [`PhysicsEvent::CollisionStay`]; no
+    /// contact geometry.
+    TriggerStay(Contact),
 }
 
 /// Why a body command or a component could not be honoured.

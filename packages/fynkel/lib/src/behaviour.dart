@@ -472,6 +472,11 @@ abstract class Behaviour {
   void onTriggerEnter(Contact contact) {}
   void onTriggerExit(Contact contact) {}
 
+  /// Every tick a collider stays inside this object's sensor, or this
+  /// object stays inside another's (Unity's `OnTriggerStay`), after the
+  /// tick of the enter. No contact geometry.
+  void onTriggerStay(Contact contact) {}
+
   /// Zone callbacks (M3-12): right after the tick's step, for every
   /// `fynkel.TriggerZone` event one of whose sides — the zone or what
   /// entered it — is this behaviour's object. `event.event` is the zone's
@@ -1189,6 +1194,8 @@ class _BehaviourSystem {
             b.onTriggerEnter(c);
           case ContactKind.triggerExit:
             b.onTriggerExit(c);
+          case ContactKind.triggerStay:
+            b.onTriggerStay(c);
         }
       } catch (e, st) {
         _threw(b, 'on${c.kind.name[0].toUpperCase()}${c.kind.name.substring(1)}', e, st);

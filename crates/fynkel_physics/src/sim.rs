@@ -1369,10 +1369,12 @@ impl Physics {
                 self.touching.remove(&key);
             }
         }
-        // Stay events for watched, still-touching, non-sensor pairs.
+        // Stay events for watched, still-touching pairs: a sensor pair
+        // while it overlaps (no geometry), a collision pair while it has a
+        // contact.
         let mut stays = Vec::new();
         for (&(a, b), &sensor) in &self.touching {
-            if sensor || started.contains(&(a, b)) {
+            if started.contains(&(a, b)) {
                 continue;
             }
             if !(watched.contains(&a) || watched.contains(&b)) {
@@ -1384,6 +1386,18 @@ impl Physics {
             ) else {
                 continue;
             };
+            if sensor {
+                if self.world.narrow_phase.intersection_pair(ca, cb) == Some(true) {
+                    stays.push(PhysicsEvent::TriggerStay(Contact {
+                        a,
+                        b,
+                        point: Vec3::ZERO,
+                        normal: Vec3::ZERO,
+                        impulse: 0.0,
+                    }));
+                }
+                continue;
+            }
             let Some(pair) = self.world.narrow_phase.contact_pair(ca, cb) else {
                 continue;
             };
@@ -1507,10 +1521,11 @@ impl Physics {
                 let pipeline = self.world.query_pipeline_with_filter(filter);
                 let mut hits: Vec<Hit> = pipeline
                     .intersect_shape(p, &*shape)
-                    .filter_map(|(h, _)| {
+                    .filter_map(|(h, c)| {
                         Some(Hit {
                             entity: entity_of(h)?,
-                            point: Vec3::ZERO,
+                            // The collider's origin (its offset included).
+                            point: c.position().translation,
                             normal: Vec3::ZERO,
                             distance: 0.0,
                         })
@@ -1804,7 +1819,7 @@ mod tests {
             }),
         );
         let watched: BTreeSet<Entity> = [ball].into_iter().collect();
-        let (mut t_enter, mut t_exit, mut stays, mut c_enter) = (0, 0, 0, 0);
+        let (mut t_enter, mut t_exit, mut stays, mut c_enter, mut t_stays) = (0, 0, 0, 0, 0);
         for _ in 0..240 {
             tick(&mut p, &mut ecs, &watched);
             for e in p.events() {
@@ -1825,10 +1840,18 @@ mod tests {
                         assert!(c.normal.length() > 0.9);
                     }
                     PhysicsEvent::CollisionExit(_) => {}
+                    PhysicsEvent::TriggerStay(c) => {
+                        t_stays += 1;
+                        assert!((c.a == zone && c.b == ball) || (c.a == ball && c.b == zone));
+                    }
                 }
             }
         }
         assert_eq!(t_enter, 1, "the trigger fires exactly once");
+        assert!(
+            t_stays > 0,
+            "the watched ball stays in the zone while it falls through"
+        );
         assert_eq!(t_exit, 1);
         assert_eq!(c_enter, 1);
         assert!(stays > 100, "resting on the floor reports stays: {stays}");
@@ -2088,6 +2111,8 @@ mod tests {
             hits.iter().map(|h| h.entity).collect::<Vec<_>>(),
             vec![sensor]
         );
+        // An overlap's point is the collider's origin (foundation 2.11).
+        assert_eq!(hits[0].point, Vec3::new(0.0, 3.0, -2.0));
         // Layers on contacts: a ball on layer 2 with mask 1 (only the floor)
         // passes through the wall's layer mate? No — both sides must agree:
         // the wall's mask is all, the ball's mask excludes bit 1.

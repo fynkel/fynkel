@@ -884,3 +884,56 @@ fn a_move_before_a_destroy_in_one_batch_is_dropped() {
     assert!(w.diagnostics().is_empty());
     assert!(w.physics().character_state(player).is_none());
 }
+
+/// `OnTriggerStay` (docs/foundation.md 2.3): a body resting inside a
+/// sensor reports a stay every tick after the enter, until the exit — for
+/// watched pairs, as collision stays are.
+#[test]
+fn a_body_inside_a_trigger_stays() {
+    let mut w = world();
+    let _floor = floor(&mut w);
+    let zone = spawn(
+        &mut w,
+        2,
+        Vec3::new(0.0, 0.5, 0.0),
+        vec![ComponentValue::Collider(Collider {
+            size: Vec3::new(2.0, 1.0, 2.0),
+            is_sensor: true,
+            ..Collider::default()
+        })],
+    );
+    let crate_ = spawn(
+        &mut w,
+        3,
+        Vec3::new(0.0, 0.5, 0.0),
+        vec![
+            ComponentValue::RigidBody(RigidBody::default()),
+            ComponentValue::Collider(Collider::default()),
+        ],
+    );
+    let (mut enters, mut stays, mut unwatched) = (0, 0, 0);
+    for i in 0..60 {
+        if i == 30 {
+            w.subscribe(&[zone], true);
+        }
+        w.step();
+        for e in w.after_physics_events() {
+            match &e.payload {
+                EventPayload::TriggerEnter(_) => enters += 1,
+                EventPayload::TriggerStay(c) => {
+                    assert!((c.a == zone && c.b == crate_) || (c.a == crate_ && c.b == zone));
+                    assert_eq!(c.impulse, 0.0);
+                    if i < 30 {
+                        unwatched += 1;
+                    } else {
+                        stays += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(enters, 1);
+    assert_eq!(unwatched, 0, "nobody watched the pair: no stays");
+    assert_eq!(stays, 30, "one a tick once the zone is watched");
+}

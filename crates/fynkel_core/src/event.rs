@@ -87,6 +87,7 @@ pub enum EventPayload {
     CollisionExit(Contact),
     TriggerEnter(Contact),
     TriggerExit(Contact),
+    TriggerStay(Contact),
 }
 
 impl EventPayload {
@@ -110,6 +111,7 @@ impl EventPayload {
             EventPayload::CollisionExit(_) => EventKind::COLLISION_EXIT,
             EventPayload::TriggerEnter(_) => EventKind::TRIGGER_ENTER,
             EventPayload::TriggerExit(_) => EventKind::TRIGGER_EXIT,
+            EventPayload::TriggerStay(_) => EventKind::TRIGGER_STAY,
         }
     }
 

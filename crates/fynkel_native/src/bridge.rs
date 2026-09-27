@@ -425,7 +425,8 @@ fn encode_event_body(p: &EventPayload, out: &mut Vec<u8>, strings: &mut fynkel_w
         | EventPayload::CollisionStay(c)
         | EventPayload::CollisionExit(c)
         | EventPayload::TriggerEnter(c)
-        | EventPayload::TriggerExit(c) => push(
+        | EventPayload::TriggerExit(c)
+        | EventPayload::TriggerStay(c) => push(
             out,
             &ContactEvent {
                 a: c.a,

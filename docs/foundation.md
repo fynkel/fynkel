@@ -55,7 +55,7 @@ What every script touches. Most of it is `packages/fynkel`.
 |---|---|---|---|---|
 | 2.1 | C | Child colliders join the nearest parent Rigidbody as one compound; their events go to the Rigidbody's object | Each entity is its own Rapier body: a child `Collider` under a dynamic parent is a separate fixed collider, one tick behind, no mass, and may collide with its own parent. `docs/physics.md` recommends child entities for several colliders. Confirmed: a body whose only collider is a child's fell to y −75 in 4 s instead of resting at 1.5 (`crates/fynkel_core/tests/compound.rs`, ignored until the ADR) | 🔬 ADR-0034 proposed 2026-09-27, waits for the user |
 | 2.2 | I | Changing a collider, layer or scale keeps velocity and fires nothing | The body is rebuilt: velocity and sleep are lost, a false Exit then Enter fires (`sim.rs` sync) | ❌ |
-| 2.3 | I | `OnTriggerStay` | None (sensor pairs are skipped for Stay) | ❌ |
+| 2.3 | I | `OnTriggerStay` | There was none: sensor pairs were skipped for stays (`physics_test` and `tests/physics.rs` failed so). Now `TRIGGER_STAY` (event kind 0x105, the contact record unchanged; an older SDK skips it as unknown) every tick a watched sensor pair overlaps after its enter, and `Behaviour.onTriggerStay` | 🔧 |
 | 2.4 | I | `OnControllerColliderHit`, `CollisionFlags` | The character reports no hits against static or kinematic geometry; only `grounded`/`sliding` | ❌ |
 | 2.5 | I | `RigidbodyConstraints` (freeze position/rotation axes) | None (Rapier has locked axes) | ❌ |
 | 2.6 | I | No Exit when the other object is destroyed or deactivated (Fynkel's Exit is better) | Exit fires but no test covers it; a destroyed zone's own `ZoneExited` is lost | ❌ |
@@ -63,8 +63,9 @@ What every script touches. Most of it is `packages/fynkel`.
 | 2.8 | m | Queries hit triggers by default; a ray starting inside a collider ignores it | `hitSensors: false` by default; hits at distance 0 | ❌ decide |
 | 2.9 | m | `Collision` has contacts, impulse vector, relative velocity | One deepest point, a normal, a scalar impulse | ❌ |
 | 2.10 | m | Collision messages reach disabled scripts | Disabled behaviours get none | ❌ decide |
-| 2.11 | m | — | `physics.dart` says an overlap's point is the collider's origin; the code returns zero | ❌ |
+| 2.11 | m | — | `physics.dart` said an overlap's point is the collider's origin; the code returned zero (`sim.rs` `queries_and_layers` failed so). Now it is the collider's origin, as documented | 🔧 |
 | 2.12 | I | Joints; ForceMode; AddForceAtPosition; convex mesh colliders | Missing | ⏸ features, after the pass |
+| 2.13 | I | A collider already overlapping when its object is made gets `OnTriggerEnter` | Objects spawned together overlap in the tick that makes them; their scripts are created after that tick, so the enter is dropped (found writing 2.3's test). Same root as 1.7's left-over: `spawn` resolves at the tick | ❌ |
 
 ## Step 3 — objects at scale
 
