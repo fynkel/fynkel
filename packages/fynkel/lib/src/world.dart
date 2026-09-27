@@ -187,6 +187,12 @@ class World {
   /// `fixedDeltaTime` inside FixedUpdate.
   bool _inFixedPhase = false;
 
+  /// True while [frame] runs `update`, its coroutines, `lateUpdate` and the
+  /// host's `update` callback: a `transform` write there is a
+  /// presentation command, shown this frame (ADR-0008 amendment,
+  /// foundation 1.2) — [GameObject._presentsWrite].
+  bool _inUpdatePhase = false;
+
   final NativeLibrary _lib;
   final NativeWorld _native;
   final bool ownsLibrary;
@@ -879,8 +885,13 @@ class World {
     }
     this.input.refresh(frameEdges: true);
     t._behaviours.start();
-    _behaviours.update(_frameDt);
-    if (update != null) _deferring(update);
+    _inUpdatePhase = true;
+    try {
+      _behaviours.update(_frameDt);
+      if (update != null) _deferring(update);
+    } finally {
+      _inUpdatePhase = false;
+    }
     t._behaviours.stop();
     t._presentation.start();
     _deferring(flushPresentation);
@@ -3140,8 +3151,22 @@ class GameObject {
   /// on the parent chain and is only known after a tick).
   Transform? get worldTransform => world._snapshotOf(_entity ?? -1)?.world;
 
-  /// Simulation-lane write: applied at the next tick, readable now.
+  /// Whether a transform write goes to the presentation lane (ADR-0008
+  /// amendment, foundation 1.2): during [World.frame]'s `update` and
+  /// `lateUpdate`, on a resolved object that is not a dynamic body — it
+  /// shows this frame and the next tick takes it. A dynamic body's write
+  /// stays a teleport at the next tick; everywhere else writes are
+  /// simulation commands.
+  bool _presentsWrite() {
+    if (!world._inUpdatePhase || _entity == null || !_alive) return false;
+    final body = _lookup(gen.RigidBody.componentId);
+    return body is! gen.RigidBody || body.bodyType != gen.BodyType.dynamic;
+  }
+
+  /// Local transform write, readable now: applied at the next tick — or,
+  /// in `update`/`lateUpdate`, shown this frame as well ([_presentsWrite]).
   void setLocalTransform(Transform t) {
+    if (_presentsWrite()) return setPresentationTransform(t);
     final e = _simulationEntity('setLocalTransform');
     _overlay = t;
     _stagedValid = false;
@@ -3149,8 +3174,9 @@ class GameObject {
     world._simulationTargets.add(this);
   }
 
-  /// Simulation-lane write from a reusable writer (allocation-free, C1).
+  /// [setLocalTransform] from a reusable writer (allocation-free, C1).
   void writeLocal(TransformWriter w) {
+    if (_presentsWrite()) return writePresentation(w);
     final e = _simulationEntity('writeLocal');
     _stage().copyFrom(w);
     world._simulation.setTransformFrom(e, w);
@@ -3166,6 +3192,7 @@ class GameObject {
   void setLocalScale(double x, double y, double z) => _submitLocal(_stage().setScale(x, y, z));
 
   void _submitLocal(TransformWriter w) {
+    if (_presentsWrite()) return _submitPresentation(w);
     final e = _simulationEntity('setLocal');
     world._simulation.setTransformFrom(e, w);
     world._simulationTargets.add(this);
@@ -3239,8 +3266,9 @@ enum Space { self, world }
 /// (the object's and its ancestors'), from the parent chain as the last
 /// tick left it or as [GameObject.setParent] / `spawn(parent:)` set it
 /// this tick; each ancestor is one component query per tick at most.
-/// Writes go to the local transform on the simulation lane, as
-/// [GameObject.setLocalTransform] does.
+/// Writes go to the local transform, as
+/// [GameObject.setLocalTransform] does: shown this frame from `update` and
+/// `lateUpdate`, at the next tick from `fixedUpdate` (ADR-0008 amendment).
 class TransformRef {
   TransformRef._(this._go);
   final GameObject _go;

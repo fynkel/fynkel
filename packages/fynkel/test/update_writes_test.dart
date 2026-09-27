@@ -56,9 +56,9 @@ void main() {
     return (p.x / halfW * 0.5 + 0.5) * 800;
   }
 
-  // Fails today (the frame draws the value from before update: ~183 px
-  // off on a frame with no tick); on once the amendment is confirmed.
-  test('an update write shows in the same frame, also on a frame with no tick', skip: 'waits for the ADR-0008 amendment (foundation 1.2)', () {
+  // Failed before the amendment: the frame drew the value from before
+  // update, ~183 px off on a frame with no tick.
+  test('an update write shows in the same frame, also on a frame with no tick', () {
     final w = loaded();
     final crate = w.find('Crate A')!;
     final mover = crate.addBehaviour(UpdateMover());

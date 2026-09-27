@@ -1,6 +1,6 @@
 # ADR-0008: Dart execution model main isolate synchronous step timestep and events
 
-**Status:** Accepted; amendment proposed 2026-09-27 (a `transform` write in `update`/`lateUpdate` shows that frame, below — waiting for the user's confirmation)  
+**Status:** Accepted; amended 2026-09-27 (a `transform` write in `update`/`lateUpdate` shows that frame, below)  
 **Date:** 2026-09-19  
 **Related:** `docs/blueprint.md`
 
@@ -28,9 +28,9 @@ Given ADR-0007, the remaining questions are which isolate runs gameplay, how tim
 
 M1 has one thread of control and no locks. Dart allocation/GC per frame becomes an M1 gate. Loading screens that need immediate asset-ready notification must run a tick loop.
 
-## Amendment (2026-09-27, proposed): a `transform` write in `update` shows that frame
+## Amendment (2026-09-27): a `transform` write in `update` shows that frame
 
-**Status:** Proposed — waits for the user's confirmation (docs/foundation.md 1.2).
+**Status:** Accepted by the user 2026-09-27 (docs/foundation.md 1.2). The SDK decides the lane per write: `GameObject._presentsWrite` — in `World.frame`'s update phase, on a resolved object whose `RigidBody` (staged or the tick's) is not dynamic.
 
 **Context.** The decision above makes "transforms of non-physics objects set in `lateUpdate`" presentation commands: shown in the frame being rendered, staged as the authoritative value for the next tick. The SDK never used that lane for `transform`: `transform.position = …`, `setLocalTransform` and the partial writes are always simulation commands, applied at the next tick. So a write in `update` reached the screen one to two ticks later (17–33 ms at 60 Hz), and on a frame with no tick (a 120 Hz display: every other frame) it was not shown at all — two `update` writes collapsed into one. That is why the examples move things in `fixedUpdate`. In Unity a `transform` write in `Update` or `LateUpdate` shows in that frame, and scripts move things there; the explicit `setPresentationTransform` is not what a Unity user reaches for.
 
