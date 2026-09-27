@@ -31,7 +31,7 @@
   "tools": {
     "version": "0.0.1"
   },
-  "schemaFingerprint": "0xb676a19d4d87b551",
+  "schemaFingerprint": "0xe004369561706025",
   "documents": {
     "blend": 1,
     "controller": 1,
@@ -39,10 +39,10 @@
     "material": 2,
     "meta": 2,
     "physics_material": 1,
-    "prefab": 5,
+    "prefab": 6,
     "project": 2,
     "rig": 1,
-    "scene": 5,
+    "scene": 6,
     "shader": 1,
     "volume": 1
   },
@@ -55,7 +55,7 @@
     "fynkel.shader": 1
   },
   "cache": {
-    "version": 9,
+    "version": 10,
     "container": 1
   }
 }

@@ -134,7 +134,7 @@ fn test_headless_reports_json() {
 /// asset references.
 const SECOND_SCENE: &str = r#"{
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 5,
+  "formatVersion": 6,
   "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968331",
   "name": "Second",
   "entities": {
@@ -929,7 +929,7 @@ fn migrate_dry_runs_then_writes_with_backup() {
     assert!(docs[2]["diff"]
         .as_str()
         .unwrap()
-        .contains("+  \"formatVersion\": 5,"));
+        .contains("+  \"formatVersion\": 6,"));
     assert_eq!(docs[2]["written"], false);
     assert_eq!(std::fs::read(&scene).unwrap(), original);
     assert!(!dir.join("scenes/room.scene.json.bak").exists());

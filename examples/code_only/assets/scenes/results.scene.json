@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 5,
+  "formatVersion": 6,
   "id": "e73c5b02-1c9e-5ecf-ab32-18b22828993d",
   "name": "Results",
   "entities": {

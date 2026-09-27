@@ -366,6 +366,17 @@ class FieldEditor extends StatelessWidget {
             onCommit: _commit,
           ),
         );
+      case FieldKind.freezeAxes:
+        return _row(
+          label,
+          error,
+          FreezeAxesField(
+            value: value is num ? value.toInt() : null,
+            mixed: mixed,
+            enabled: _enabled,
+            onCommit: _commit,
+          ),
+        );
       case FieldKind.array:
         return _array(context, label, error, value);
       case FieldKind.object:
@@ -594,7 +605,7 @@ class FieldEditor extends StatelessWidget {
   /// A fresh value of a spec (an added array item, a nullable object set).
   static Object? _blank(FieldSpec s) => switch (s.kind) {
     FieldKind.number => 0,
-    FieldKind.integer || FieldKind.layerMask => 0,
+    FieldKind.integer || FieldKind.layerMask || FieldKind.freezeAxes => 0,
     FieldKind.boolean => false,
     FieldKind.string || FieldKind.entity => '',
     FieldKind.enumeration => s.enumValues.isEmpty ? '' : s.enumValues.first,

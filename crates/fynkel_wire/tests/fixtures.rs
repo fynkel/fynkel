@@ -316,6 +316,7 @@ fn fixtures_match_generated_codecs() {
             angular_damping: 0.2,
             gravity_scale: 0.5,
             ccd: true,
+            constraints: 116,
         },
     );
     check(

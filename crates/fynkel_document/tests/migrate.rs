@@ -45,12 +45,14 @@ fn builtin_steps_chain_to_the_current_version() {
             "prefab/2-3/animator-layers",
             "prefab/3-4/object-layers",
             "prefab/4-5/one-root",
+            "prefab/5-6/rigidbody-constraints",
             "project/1-2/layers",
             "scene/0-1/entities-keyed-by-id",
             "scene/1-2/camera-exposure",
             "scene/2-3/animator-layers",
             "scene/3-4/object-layers",
-            "scene/4-5/one-root"
+            "scene/4-5/one-root",
+            "scene/5-6/rigidbody-constraints"
         ]
     );
 }
@@ -74,14 +76,15 @@ fn v0_scene_migrates_to_v1_exactly() {
     // 2 → 3 (animator layers) and 3 → 4 (object layers) — the middle two
     // have nothing to do here, the scene has no camera and no animator; the
     // last gives the light its culling mask.
-    assert_eq!((m.from, m.to), (0, 5));
-    assert_eq!(m.applied.len(), 5);
+    assert_eq!((m.from, m.to), (0, 6));
+    assert_eq!(m.applied.len(), 6);
     assert_eq!(m.applied[0].name, "scene/0-1/entities-keyed-by-id");
     assert_eq!(m.applied[1].name, "scene/1-2/camera-exposure");
     assert_eq!(m.applied[2].name, "scene/2-3/animator-layers");
     assert_eq!(m.applied[3].name, "scene/3-4/object-layers");
     assert_eq!(m.applied[4].name, "scene/4-5/one-root");
-    assert_eq!(m.document.envelope.format_version, 5);
+    assert_eq!(m.applied[5].name, "scene/5-6/rigidbody-constraints");
+    assert_eq!(m.document.envelope.format_version, 6);
     assert!(!m.document.is_outdated());
 
     let text = m.document.write().unwrap();
@@ -97,7 +100,7 @@ fn v0_scene_migrates_to_v1_exactly() {
     assert!(m.diff.contains("(formatVersion 0)\n+++ "));
     assert!(m
         .diff
-        .contains("-  \"formatVersion\": 0,\n+  \"formatVersion\": 5,"));
+        .contains("-  \"formatVersion\": 0,\n+  \"formatVersion\": 6,"));
     assert!(m.diff.contains("-  \"entities\": [\n-    {\n-      \"id\": \"b0000000-0000-4000-8000-0000000000e1\",\n+  \"entities\": {\n+    \"b0000000-0000-4000-8000-0000000000e1\": {"));
 
     // Order kept, ids became keys, everything else untouched; the result
@@ -205,12 +208,13 @@ fn v1_scene_with_a_camera_migrates_to_v2_exactly() {
     assert!(doc.is_outdated());
     let m = migrate(&doc, &Migrations::builtin(), &schemas);
     assert!(m.diagnostics.is_empty(), "{:#?}", m.diagnostics);
-    assert_eq!((m.from, m.to), (1, 5));
-    assert_eq!(m.applied.len(), 4);
+    assert_eq!((m.from, m.to), (1, 6));
+    assert_eq!(m.applied.len(), 5);
     assert_eq!(m.applied[0].name, "scene/1-2/camera-exposure");
     assert_eq!(m.applied[1].name, "scene/2-3/animator-layers");
     assert_eq!(m.applied[2].name, "scene/3-4/object-layers");
     assert_eq!(m.applied[3].name, "scene/4-5/one-root");
+    assert_eq!(m.applied[4].name, "scene/5-6/rigidbody-constraints");
 
     let text = m.document.write().unwrap();
     let expected_path = fixtures().join("v1_lookout.scene.migrated.json");
@@ -243,11 +247,12 @@ fn v2_scene_with_animators_migrates_to_v3_exactly() {
     assert!(doc.is_outdated());
     let m = migrate(&doc, &Migrations::builtin(), &schemas);
     assert!(m.diagnostics.is_empty(), "{:#?}", m.diagnostics);
-    assert_eq!((m.from, m.to), (2, 5));
-    assert_eq!(m.applied.len(), 3);
+    assert_eq!((m.from, m.to), (2, 6));
+    assert_eq!(m.applied.len(), 4);
     assert_eq!(m.applied[0].name, "scene/2-3/animator-layers");
     assert_eq!(m.applied[1].name, "scene/3-4/object-layers");
     assert_eq!(m.applied[2].name, "scene/4-5/one-root");
+    assert_eq!(m.applied[3].name, "scene/5-6/rigidbody-constraints");
 
     let text = m.document.write().unwrap();
     let expected_path = fixtures().join("v2_dancer.scene.migrated.json");
@@ -280,10 +285,11 @@ fn v3_scene_with_collider_layers_migrates_to_v4_exactly() {
     assert!(doc.is_outdated());
     let m = migrate(&doc, &Migrations::builtin(), &schemas);
     assert!(m.diagnostics.is_empty(), "{:#?}", m.diagnostics);
-    assert_eq!((m.from, m.to), (3, 5));
-    assert_eq!(m.applied.len(), 2);
+    assert_eq!((m.from, m.to), (3, 6));
+    assert_eq!(m.applied.len(), 3);
     assert_eq!(m.applied[0].name, "scene/3-4/object-layers");
     assert_eq!(m.applied[1].name, "scene/4-5/one-root");
+    assert_eq!(m.applied[2].name, "scene/5-6/rigidbody-constraints");
 
     let text = m.document.write().unwrap();
     let expected_path = fixtures().join("v3_arena.scene.migrated.json");
@@ -442,7 +448,7 @@ fn failures_leave_the_document_untouched() {
 
     // A step whose output the schema rejects is reported and discarded.
     let mut reg = Migrations::empty();
-    for from in [1, 2, 3, 4] {
+    for from in [1, 2, 3, 4, 5] {
         reg.add(
             Migrations::builtin()
                 .step(DocumentKind::Scene, from)
@@ -497,4 +503,42 @@ fn writing_keeps_a_backup() {
     let again = migrate(&migrated, &Migrations::builtin(), &schemas);
     assert!(again.write_with_backup(&path).is_err());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Foundation 2.5: every `fynkel.RigidBody` — an entity's, and one an
+/// instance override adds — gains `constraints: 0` (nothing frozen).
+#[test]
+fn v5_scene_with_bodies_migrates_to_v6_exactly() {
+    let schemas = schemas();
+    let path = fixtures().join("v5_crates.scene.json");
+    let doc = Document::read(&path, None).unwrap();
+    assert!(doc.is_outdated());
+    let m = migrate(&doc, &Migrations::builtin(), &schemas);
+    assert!(m.diagnostics.is_empty(), "{:#?}", m.diagnostics);
+    assert_eq!((m.from, m.to), (5, 6));
+    assert_eq!(m.applied.len(), 1);
+    assert_eq!(m.applied[0].name, "scene/5-6/rigidbody-constraints");
+
+    let text = m.document.write().unwrap();
+    let expected_path = fixtures().join("v5_crates.scene.migrated.json");
+    let expected = std::fs::read_to_string(&expected_path).unwrap_or_default();
+    if text != expected {
+        std::fs::write(expected_path.with_extension("actual.json"), &text).unwrap();
+    }
+    assert_eq!(text, expected, "see the .actual.json next to the fixture");
+    assert_eq!(m.diff.matches("+            \"constraints\": 0").count(), 1);
+    assert_eq!(
+        m.diff.matches("+              \"constraints\": 0").count(),
+        1
+    );
+    let scene = Scene::from_document(m.document.clone());
+    // Only the hint that the crate has no collider.
+    let diags = scene.validate(&schemas);
+    assert!(
+        diags.iter().all(|d| d.code.as_str() == "FYN-H0004"),
+        "{diags:#?}"
+    );
+
+    let again = migrate(&m.document, &Migrations::builtin(), &schemas);
+    assert!(!again.changed());
 }

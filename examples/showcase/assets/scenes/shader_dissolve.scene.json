@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 5,
+  "formatVersion": 6,
   "id": "6cdb53dd-cdd3-5638-a9d6-058f3d61059f",
   "name": "Shader: Dissolve",
   "entities": {

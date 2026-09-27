@@ -1298,3 +1298,72 @@ fn a_character_reports_what_its_move_touches() {
     assert!(f & CharacterState::ABOVE != 0, "{f}");
     assert_eq!(flags(&w), CharacterState::BELOW, "landed again");
 }
+
+/// Foundation 2.5 (Unity's `Rigidbody.constraints`): a dynamic body's
+/// frozen axes do not move — a frozen Y does not fall, a frozen X ignores
+/// a push along X, frozen rotations ignore a spin — while its free axes
+/// behave as an unconstrained twin's. Unity's bit values.
+#[test]
+fn a_bodys_frozen_axes_stay_put() {
+    use fynkel_physics::components::constraints as c;
+    let mut w = world();
+    let body = |constraints| {
+        vec![
+            ComponentValue::RigidBody(RigidBody {
+                gravity_scale: 1.0,
+                constraints,
+                ..RigidBody::default()
+            }),
+            ComponentValue::Collider(Collider::default()),
+        ]
+    };
+    let free = spawn(&mut w, 1, Vec3::new(0.0, 5.0, 0.0), body(0));
+    let frozen = spawn(
+        &mut w,
+        2,
+        Vec3::new(10.0, 5.0, 0.0),
+        body(c::FREEZE_POSITION_X | c::FREEZE_POSITION_Y | c::FREEZE_ROTATION),
+    );
+    w.step();
+    let push = |e| {
+        vec![
+            Command::Body {
+                entity: e,
+                op: BodyCommand::SetLinearVelocity(Vec3::new(2.0, 0.0, 3.0)),
+            },
+            Command::Body {
+                entity: e,
+                op: BodyCommand::ApplyTorqueImpulse(Vec3::new(0.3, 0.3, 0.3)),
+            },
+        ]
+    };
+    let mut cmds = push(free);
+    cmds.extend(push(frozen));
+    w.submit(Lane::Simulation, cmds);
+    for _ in 0..30 {
+        w.step();
+    }
+    let (f, z) = (pos(&w, free), pos(&w, frozen));
+    assert!(
+        f.y < 4.5 && f.x > 0.5,
+        "the free twin falls and slides: {f}"
+    );
+    assert!((z.y - 5.0).abs() < 1e-4, "frozen Y: {z}");
+    assert!((z.x - 10.0).abs() < 1e-4, "frozen X: {z}");
+    assert!(
+        (z.z - f.z).abs() < 1e-3 && z.z > 0.5,
+        "Z is free: {z} vs {f}"
+    );
+    let turned = |e| {
+        w.ecs()
+            .copy::<Transform>(e)
+            .unwrap()
+            .rotation
+            .angle_between(Quat::IDENTITY)
+    };
+    assert!(turned(free) > 0.1, "the free twin spins");
+    assert!(turned(frozen) < 1e-4, "frozen rotation: {}", turned(frozen));
+    let s = w.physics().body_state(frozen).unwrap();
+    assert_eq!(s.angular_velocity, Vec3::ZERO);
+    assert_eq!((s.linear_velocity.x, s.linear_velocity.y), (0.0, 0.0));
+}

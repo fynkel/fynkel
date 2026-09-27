@@ -43,6 +43,24 @@ pub struct RigidBody {
     /// Continuous collision detection: fast bodies do not tunnel through
     /// thin geometry (costs a little per body).
     pub ccd: bool,
+    /// Frozen axes, Unity's `RigidbodyConstraints` bits (dynamic bodies;
+    /// see [`constraints`]): 2/4/8 freeze the position along X/Y/Z,
+    /// 16/32/64 the rotation about X/Y/Z, 0 none.
+    pub constraints: u32,
+}
+
+/// The bits of [`RigidBody::constraints`], Unity's `RigidbodyConstraints`
+/// values (foundation 2.5).
+pub mod constraints {
+    pub const FREEZE_POSITION_X: u32 = 2;
+    pub const FREEZE_POSITION_Y: u32 = 4;
+    pub const FREEZE_POSITION_Z: u32 = 8;
+    pub const FREEZE_ROTATION_X: u32 = 16;
+    pub const FREEZE_ROTATION_Y: u32 = 32;
+    pub const FREEZE_ROTATION_Z: u32 = 64;
+    pub const FREEZE_POSITION: u32 = FREEZE_POSITION_X | FREEZE_POSITION_Y | FREEZE_POSITION_Z;
+    pub const FREEZE_ROTATION: u32 = FREEZE_ROTATION_X | FREEZE_ROTATION_Y | FREEZE_ROTATION_Z;
+    pub const FREEZE_ALL: u32 = FREEZE_POSITION | FREEZE_ROTATION;
 }
 
 impl Default for RigidBody {
@@ -54,6 +72,7 @@ impl Default for RigidBody {
             angular_damping: 0.05,
             gravity_scale: 1.0,
             ccd: false,
+            constraints: 0,
         }
     }
 }
@@ -150,6 +169,12 @@ impl RigidBody {
             return Err(format!(
                 "gravity_scale must be finite, got {}",
                 self.gravity_scale
+            ));
+        }
+        if self.constraints & !constraints::FREEZE_ALL != 0 {
+            return Err(format!(
+                "constraints has bits outside the freeze flags (2..64): {}",
+                self.constraints
             ));
         }
         Ok(())
@@ -374,9 +399,10 @@ mod tests {
     fn layouts_and_ids() {
         assert_eq!(RigidBody::SCHEMA.id, 10);
         assert_eq!(RigidBody::SCHEMA.name, "fynkel.RigidBody");
-        // body_type u32 @0, mass @4, linear @8, angular @12, gravity @16, ccd @20 → 24.
-        assert_eq!(RigidBody::SCHEMA.offsets(), vec![0, 4, 8, 12, 16, 20]);
-        assert_eq!(RigidBody::SCHEMA.wire_size(), 24);
+        // body_type u32 @0, mass @4, linear @8, angular @12, gravity @16,
+        // ccd @20, constraints @24 (foundation 2.5) → 32 (aligned to 8).
+        assert_eq!(RigidBody::SCHEMA.offsets(), vec![0, 4, 8, 12, 16, 20, 24]);
+        assert_eq!(RigidBody::SCHEMA.wire_size(), 32);
         assert_eq!(Collider::SCHEMA.id, 11);
         // shape @0, size 12 @4, mesh 24 @16, offset 12 @40, material 24
         // @56 (ADR-0025; an asset ref aligns to 8), friction @80,

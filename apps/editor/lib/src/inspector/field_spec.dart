@@ -46,6 +46,10 @@ enum FieldKind {
   /// An integer of physics-layer bits (`layer`, `mask`).
   layerMask,
 
+  /// A `fynkel.RigidBody`'s `constraints`: Unity's Freeze Position and
+  /// Freeze Rotation X/Y/Z check boxes over `RigidbodyConstraints` bits.
+  freezeAxes,
+
   /// A variable-length array of [FieldSpec.item]s.
   array,
 
@@ -582,6 +586,8 @@ FieldSpec _parseField(
           slider = kind == FieldKind.number || kind == FieldKind.integer;
         case 'layerMask':
           if (kind == FieldKind.integer) kind = FieldKind.layerMask;
+        case 'freezeAxes':
+          if (kind == FieldKind.integer) kind = FieldKind.freezeAxes;
         case 'quaternion':
           if (kind == FieldKind.vec4) kind = FieldKind.quaternion;
       }

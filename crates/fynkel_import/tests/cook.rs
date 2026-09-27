@@ -719,7 +719,7 @@ fn cycles_and_unresolved_references_fail_only_the_assets_involved() {
     let b = "c0000000-0000-4000-8000-0000000000b0";
     let scene = |own: &str, other: &str| {
         format!(
-            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":5,"id":"{own}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"game.Link","version":1,"data":{{"to":{{"asset":"{other}"}}}}}}}}}}}}}}"#
+            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":6,"id":"{own}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"game.Link","version":1,"data":{{"to":{{"asset":"{other}"}}}}}}}}}}}}}}"#
         )
     };
     p.write("scenes/a.scene.json", &scene(a, b));
@@ -784,7 +784,7 @@ fn cycles_and_unresolved_references_fail_only_the_assets_involved() {
     p.write(
         "scenes/c.scene.json",
         &format!(
-            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":5,"id":"{c}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"fynkel.MeshRenderer","version":1,"data":{{"mesh":{{"asset":"{RUSTED}"}},"material":{{"asset":"{RUSTED}"}},"cast_shadows":true,"receive_shadows":true,"visible":true}}}}}}}}}}}}"#
+            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":6,"id":"{c}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"fynkel.MeshRenderer","version":1,"data":{{"mesh":{{"asset":"{RUSTED}"}},"material":{{"asset":"{RUSTED}"}},"cast_shadows":true,"receive_shadows":true,"visible":true}}}}}}}}}}}}"#
         ),
     );
     let r = p.cook();

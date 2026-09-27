@@ -264,7 +264,7 @@ fn nested_prefabs_flatten_and_cycles_are_refused() {
     // instance (and only sees its own prefab's problems).
     let scene_json = r#"{
       "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-      "formatVersion": 5,
+      "formatVersion": 6,
       "id": "20000000-0000-4000-8000-000000000077",
       "name": "Nesting",
       "entities": {
@@ -337,7 +337,7 @@ fn script_references_inside_a_prefab_reach_the_instance_copies() {
     let schemas = schemas();
     let prefab_json = r#"{
       "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-      "formatVersion": 5,
+      "formatVersion": 6,
       "id": "30000000-0000-4000-8000-000000000001",
       "name": "Turret",
       "root": "30000000-0000-4000-8000-0000000000b1",
@@ -362,7 +362,7 @@ fn script_references_inside_a_prefab_reach_the_instance_copies() {
     }"#;
     let scene_json = r#"{
       "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-      "formatVersion": 5,
+      "formatVersion": 6,
       "id": "30000000-0000-4000-8000-000000000002",
       "name": "Turrets",
       "entities": {
@@ -454,7 +454,7 @@ fn variant() -> Prefab {
         "turret_variant.prefab.json",
         serde_json::json!({
             "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-            "formatVersion": 5, "id": VARIANT, "name": "Turret Variant", "root": V_ROOT,
+            "formatVersion": 6, "id": VARIANT, "name": "Turret Variant", "root": V_ROOT,
             "entities": {
                 V_ROOT: { "name": "Base", "parent": null, "children": [V_FLAG], "components": {},
                     "prefab": { "asset": { "asset": TURRET }, "instance": V_INSTANCE, "overrides": [
@@ -501,7 +501,7 @@ fn variants_flatten_through_chains_and_refuse_themselves() {
         "turret_variant_2.prefab.json",
         serde_json::json!({
             "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-            "formatVersion": 5, "id": CHAIN, "name": "Turret Variant 2", "root": C_ROOT,
+            "formatVersion": 6, "id": CHAIN, "name": "Turret Variant 2", "root": C_ROOT,
             "entities": { C_ROOT: { "name": "Base", "parent": null, "children": [], "components": {},
                 "prefab": { "asset": { "asset": VARIANT }, "instance": C_INSTANCE, "overrides": [
                     { "op": "setField", "entity": turret_barrel.to_string(), "component": turret_barrel_t.to_string(),
@@ -562,7 +562,7 @@ fn variants_flatten_through_chains_and_refuse_themselves() {
     let flag_t = derive_id(uu(C_INSTANCE), uu(V_FLAG_TRANSFORM));
     let scene_json = serde_json::json!({
         "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-        "formatVersion": 5, "id": "50000000-0000-4000-8000-000000000003", "name": "Variants",
+        "formatVersion": 6, "id": "50000000-0000-4000-8000-000000000003", "name": "Variants",
         "entities": { "50000000-0000-4000-8000-0000000000a3": {
             "name": "Turret V2", "parent": null, "children": [], "components": {},
             "prefab": { "asset": { "asset": CHAIN }, "instance": "50000000-0000-4000-8000-0000000000e3", "overrides": [
@@ -625,7 +625,7 @@ fn variants_flatten_through_chains_and_refuse_themselves() {
         "self.prefab.json",
         serde_json::json!({
             "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-            "formatVersion": 5, "id": "50000000-0000-4000-8000-000000000009", "name": "Self",
+            "formatVersion": 6, "id": "50000000-0000-4000-8000-000000000009", "name": "Self",
             "root": "50000000-0000-4000-8000-0000000000a9",
             "entities": { "50000000-0000-4000-8000-0000000000a9": {
                 "name": "Self", "parent": null, "children": [], "components": {},

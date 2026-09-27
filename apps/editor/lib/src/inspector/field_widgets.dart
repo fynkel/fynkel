@@ -1935,6 +1935,57 @@ class LayerMaskField extends StatelessWidget {
   }
 }
 
+// ── Freeze axes ────────────────────────────────────────────────────────────
+
+/// A `fynkel.RigidBody`'s `constraints` as Unity draws them: Freeze
+/// Position and Freeze Rotation, an X/Y/Z check box each, over Unity's
+/// `RigidbodyConstraints` bits (2/4/8 position, 16/32/64 rotation).
+class FreezeAxesField extends StatelessWidget {
+  const FreezeAxesField({
+    super.key,
+    required this.value,
+    required this.onCommit,
+    this.mixed = false,
+    this.enabled = true,
+  });
+
+  final int? value;
+  final bool mixed;
+  final bool enabled;
+  final void Function(int bits) onCommit;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final v = value ?? 0;
+    Widget line(String title, int first) => SizedBox(
+      height: _rowHeight(context),
+      child: Row(
+        children: [
+          SizedBox(width: 64, child: Text(title, style: theme.textTheme.bodySmall)),
+          for (final (i, axis) in const ['X', 'Y', 'Z'].indexed) ...[
+            Checkbox(
+              key: ValueKey('freeze.$title.$axis'),
+              tristate: mixed,
+              value: mixed ? null : (v & (first << i)) != 0,
+              onChanged: enabled ? (_) => onCommit(v ^ (first << i)) : null,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+            ),
+            Text(axis, style: theme.textTheme.bodySmall),
+            const SizedBox(width: 6),
+          ],
+        ],
+      ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [line('Position', 2), line('Rotation', 16)],
+    );
+  }
+}
+
 // ── JSON fallback ──────────────────────────────────────────────────────────
 
 /// Any value as JSON text; commits when the text parses.

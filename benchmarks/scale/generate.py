@@ -124,7 +124,7 @@ def main() -> None:
         prefabs.append((pid, root, uid(f"prefab/{i}/t")))
         write(assets / "prefabs" / f"p{i:05d}.prefab.json", {
             "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-            "formatVersion": 5,
+            "formatVersion": 6,
             "id": pid,
             "name": f"P{i:05d}",
             "entities": {
@@ -177,7 +177,7 @@ def main() -> None:
             }
         write(assets / "scenes" / f"s{s:04d}.scene.json", {
             "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-            "formatVersion": 5,
+            "formatVersion": 6,
             "id": sid,
             "name": f"S{s:04d}",
             "entities": entities,

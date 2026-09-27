@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 5,
+  "formatVersion": 6,
   "id": "bca5eecb-c8d8-58fe-825c-5fce41819bf1",
   "name": "Playground",
   "entities": {
@@ -7951,7 +7951,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "b9cd7cd0-d680-5eab-b65c-82e9062e9d18": {
@@ -8037,7 +8038,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "ac27e4ad-769e-5a6f-a71a-fa1c8acef839": {
@@ -8123,7 +8125,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "3e00055e-4ec9-5ce4-913a-b21bdabb3029": {
@@ -8209,7 +8212,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "36a0f40b-fcb3-563a-a96d-81e68dec8d33": {
@@ -8295,7 +8299,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "7bdd8f07-4d97-535a-8afb-bdf1a89e596a": {
@@ -8381,7 +8386,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "b62e4416-35ea-5f06-a595-df0791eac2a1": {
@@ -8467,7 +8473,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "048ae98b-4d6a-5e9e-9fa2-15661a32d755": {
@@ -8553,7 +8560,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "e30ef6c6-de59-5e3c-9263-2706c533710e": {
@@ -8639,7 +8647,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "b50b24f5-7736-5488-83d0-e4ea347324d2": {
@@ -8725,7 +8734,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "d9174f07-5aed-5ff6-861e-afa5eff18f1f": {
@@ -8811,7 +8821,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "669f11c2-4d75-5dc1-aa22-46b043b760a0": {
@@ -8897,7 +8908,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "00eb7862-f0c0-5b3a-a6b3-3688b66c8719": {
@@ -8983,7 +8995,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "298c34c3-3e0e-595a-8a5b-40ca43bc7c84": {
@@ -9069,7 +9082,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "99d40b3e-77ef-52dd-8c6a-918783d88d35": {
@@ -9155,7 +9169,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "901ab19a-6138-5fcd-89f6-3f6958082263": {
@@ -9241,7 +9256,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "91f01559-c49f-5f7c-90ea-2de469f2fc68": {
@@ -9327,7 +9343,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "2730877e-6468-53c0-ba0f-b507e8c3cc88": {
@@ -9413,7 +9430,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "8aca9a6b-5667-5533-8c91-19f674dd100a": {
@@ -9499,7 +9517,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "186328b9-8592-5107-8b88-affdb3112048": {
@@ -9585,7 +9604,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "cfede295-f95f-5088-bb7d-f3506c92b2cd": {
@@ -9671,7 +9691,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "0e2df105-3e5e-56d3-9d3a-332153b11f05": {

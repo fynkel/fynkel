@@ -378,6 +378,7 @@ void main() {
       expect(collider.field('mask')!.kind, FieldKind.layerMask);
       expect(collider.field('layer'), isNull);
       expect(camera.field('culling_mask')!.kind, FieldKind.layerMask);
+      expect(specs['fynkel.RigidBody']!.field('constraints')!.kind, FieldKind.freezeAxes);
       expect(collider.field('mesh')!.nullable, isTrue);
       expect(collider.field('restitution')!.slider, isTrue);
       expect(specs['fynkel.Skin']!.field('skeleton')!.kind, FieldKind.entity);
@@ -1549,6 +1550,41 @@ void main() {
           find.descendant(of: find.byKey(ValueKey(key)), matching: find.byKey(const ValueKey('number.unit')));
       expect(unitIn('plain'), findsNothing);
       expect(tester.widget<Text>(unitIn('angle')).data, '°');
+    });
+
+    testWidgets("a body's constraints are Unity's Freeze Position/Rotation boxes (foundation 2.5)", (tester) async {
+      final r = rig();
+      r.doc.reject = null;
+      final tab = r.tabs.openDocument('main')!;
+      tab.transaction([
+        {
+          'command': 'addComponent',
+          'entity': 'cam',
+          'component': {
+            'id': 'rb',
+            'type': 'fynkel.RigidBody',
+            'data': {
+              'body_type': 'dynamic',
+              'mass': 1.0,
+              'linear_damping': 0.0,
+              'angular_damping': 0.05,
+              'gravity_scale': 1.0,
+              'ccd': false,
+              'constraints': 4,
+            },
+          },
+        },
+      ]);
+      tab.select('cam');
+      await pumpPanel(tester, r.model);
+      bool checked(String key) =>
+          tester.widget<Checkbox>(inField('fynkel.RigidBody#0', 'constraints', find.byKey(ValueKey(key)))).value!;
+      expect(checked('freeze.Position.Y'), isTrue);
+      expect(checked('freeze.Position.X'), isFalse);
+      await tester.tap(inField('fynkel.RigidBody#0', 'constraints', find.byKey(const ValueKey('freeze.Rotation.Z'))));
+      await tester.pumpAndSettle();
+      expect(r.model.slots.singleWhere((s) => s.type == 'fynkel.RigidBody').value('constraints'), 4 | 64);
+      expect(checked('freeze.Rotation.Z'), isTrue);
     });
 
     testWidgets('the layer mask names the project layers; the colour picker commits linear values', (tester) async {

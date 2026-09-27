@@ -789,6 +789,9 @@ impl Physics {
                 body.set_angular_damping(new.angular_damping);
                 body.set_gravity_scale(new.gravity_scale, true);
                 body.enable_ccd(new.ccd);
+                let (t, r) = freedoms(new.constraints);
+                body.set_enabled_translations(t[0], t[1], t[2], true);
+                body.set_enabled_rotations(r[0], r[1], r[2], true);
                 body.set_additional_mass(mass_of(&new), true);
                 entry.rigid = Some(new);
             }
@@ -848,8 +851,11 @@ impl Physics {
         let p = pose(position, rotation);
         let user = entity.to_bits() as u128;
         let body = rigid.map(|r| {
+            let (t, rot) = freedoms(r.constraints);
             let mut b = RigidBodyBuilder::new(body_type(r.body_type))
                 .pose(p)
+                .enabled_translations(t[0], t[1], t[2])
+                .enabled_rotations(rot[0], rot[1], rot[2])
                 .linear_damping(r.linear_damping)
                 .angular_damping(r.angular_damping)
                 .gravity_scale(r.gravity_scale)
@@ -1318,12 +1324,12 @@ impl Physics {
                         }),
                     BodyCommand::SetLinearVelocity(v) => needs_dynamic("setLinearVelocity")
                         .or_else(|| {
-                            body.set_linvel(v, true);
+                            body.set_linvel(masked(v, body.locked_axes(), false), true);
                             None
                         }),
                     BodyCommand::SetAngularVelocity(v) => needs_dynamic("setAngularVelocity")
                         .or_else(|| {
-                            body.set_angvel(v, true);
+                            body.set_angvel(masked(v, body.locked_axes(), true), true);
                             None
                         }),
                     BodyCommand::SetKinematicTarget { position, rotation } => {
@@ -2000,6 +2006,46 @@ fn query_shape(q: &QuerySpec) -> Option<SharedShape> {
 /// more than float noise.
 fn rescaled(was: Vec3, now: Vec3) -> bool {
     (was - now).abs().max_element() > 1e-4 * now.abs().max_element().max(1.0)
+}
+
+/// `v` without its components along a body's frozen axes (translations,
+/// or rotations when `angular`): Rapier's locks act through the mass, so a
+/// velocity set directly would still move a frozen axis (foundation 2.5).
+fn masked(v: Vec3, locked: LockedAxes, angular: bool) -> Vec3 {
+    let axes = if angular {
+        [
+            LockedAxes::ROTATION_LOCKED_X,
+            LockedAxes::ROTATION_LOCKED_Y,
+            LockedAxes::ROTATION_LOCKED_Z,
+        ]
+    } else {
+        [
+            LockedAxes::TRANSLATION_LOCKED_X,
+            LockedAxes::TRANSLATION_LOCKED_Y,
+            LockedAxes::TRANSLATION_LOCKED_Z,
+        ]
+    };
+    let keep = |i: usize| if locked.contains(axes[i]) { 0.0 } else { 1.0 };
+    v * Vec3::new(keep(0), keep(1), keep(2))
+}
+
+/// Which axes a body may translate along and rotate about, from Unity's
+/// `RigidbodyConstraints` bits (foundation 2.5).
+fn freedoms(bits: u32) -> ([bool; 3], [bool; 3]) {
+    use crate::components::constraints as c;
+    let free = |b| bits & b == 0;
+    (
+        [
+            free(c::FREEZE_POSITION_X),
+            free(c::FREEZE_POSITION_Y),
+            free(c::FREEZE_POSITION_Z),
+        ],
+        [
+            free(c::FREEZE_ROTATION_X),
+            free(c::FREEZE_ROTATION_Y),
+            free(c::FREEZE_ROTATION_Z),
+        ],
+    )
 }
 
 /// The body a lone collider on `entity` joins (ADR-0034): its nearest

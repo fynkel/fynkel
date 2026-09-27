@@ -263,7 +263,7 @@ class ProjectWriter {
     final kept = existing == null ? const <String>[] : doc.keep(existing, prefab: prefab);
     final out = <String, Object?>{
       r'$schema': 'https://fynkel.dev/schemas/$kind.schema.json',
-      'formatVersion': 5,
+      'formatVersion': 6,
       'id': id,
       'name': name,
       'entities': doc.entities,

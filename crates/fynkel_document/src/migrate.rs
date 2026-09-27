@@ -112,6 +112,13 @@ impl Migrations {
                 description: "a prefab has one root and an instance is that root (ADR-0022): `roots` becomes `root` (several get a new root named after the prefab), and an instance's own components become overrides of the root — its Transform composed with the root's; needs the project (`fynkel migrate <project dir>`) when an instance has components or a prefab several roots",
                 apply: crate::one_root::step_4_to_5,
             });
+            m.add(Migration {
+                kind,
+                from: 5,
+                name: "rigidbody-constraints",
+                description: "fynkel.RigidBody gained constraints (Unity's RigidbodyConstraints, foundation 2.5); every body, and every RigidBody an override adds, gets 0 (nothing frozen)",
+                apply: rigidbody_constraints_5_to_6,
+            });
         }
         m
     }
@@ -669,6 +676,42 @@ fn camera_exposure_1_to_2(root: &mut Node) -> Result<(), String> {
             data.set("exposure", Node::float(12.0));
         }
     })
+}
+
+/// Scene/prefab 5 → 6 (foundation 2.5): every `fynkel.RigidBody`'s `data`
+/// — an entity's component or an `addComponent` override's — gains
+/// `constraints: 0` (nothing frozen, as before) unless it is there.
+fn rigidbody_constraints_5_to_6(root: &mut Node) -> Result<(), String> {
+    const TY: &str = "fynkel.RigidBody";
+    let fill = |data: &mut Node| {
+        if data.as_object().is_some() && data.get("constraints").is_none() {
+            data.set("constraints", Node::integer(0));
+        }
+    };
+    for_each_component_data(root, TY, &mut |d| fill(d))?;
+    let Some(entities) = root.get_mut("entities").and_then(Node::as_object_mut) else {
+        return Ok(());
+    };
+    for entity in entities.iter_mut() {
+        let Some(overrides) = entity
+            .value
+            .get_mut("prefab")
+            .and_then(|p| p.get_mut("overrides"))
+            .and_then(Node::as_array_mut)
+        else {
+            continue;
+        };
+        for o in overrides.iter_mut() {
+            if o.get("op").and_then(Node::as_str) == Some("addComponent")
+                && o.get("type").and_then(Node::as_str) == Some(TY)
+            {
+                if let Some(data) = o.get_mut("data") {
+                    fill(data);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The components whose `layer` bits moved to the object (ADR-0020).

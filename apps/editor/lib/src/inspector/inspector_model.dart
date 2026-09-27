@@ -1701,7 +1701,7 @@ Object? _copyJson(Object? v) => switch (v) {
 /// The number to write into a field that held [previous] (keeps `1` an int
 /// where the document had one — the byte-exact round trip).
 Object numberFor(FieldSpec spec, double v, {Object? previous}) =>
-    jsonNumber(v, previous: previous, integer: spec.kind == FieldKind.integer || spec.kind == FieldKind.layerMask);
+    jsonNumber(v, previous: previous, integer: spec.kind == FieldKind.integer || spec.kind == FieldKind.layerMask || spec.kind == FieldKind.freezeAxes);
 
 /// Validates [value] against [spec] before a field is written: the hints'
 /// bounds, an asset that must exist, an enum value that must be listed.

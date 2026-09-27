@@ -1,0 +1,80 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 6,
+  "id": "b0000000-0000-4000-8000-000000000008",
+  "name": "Crates",
+  "entities": {
+    "b0000000-0000-4000-8000-0000000000e1": {
+      "name": "Crate",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b0000000-0000-4000-8000-0000000000c1": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              1,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "b0000000-0000-4000-8000-0000000000c2": {
+          "type": "fynkel.RigidBody",
+          "version": 1,
+          "data": {
+            "body_type": "dynamic",
+            "mass": 2.0,
+            "linear_damping": 0.0,
+            "angular_damping": 0.05,
+            "gravity_scale": 1.0,
+            "ccd": false,
+            "constraints": 0
+          }
+        }
+      }
+    },
+    "b0000000-0000-4000-8000-0000000000e2": {
+      "name": "Barrel",
+      "parent": null,
+      "children": [],
+      "components": {},
+      "prefab": {
+        "asset": {
+          "asset": "b0000000-0000-4000-8000-0000000000a2"
+        },
+        "instance": "b0000000-0000-4000-8000-0000000000f1",
+        "overrides": [
+          {
+            "op": "addComponent",
+            "entity": "10000000-0000-4000-8000-0000000000e1",
+            "component": "b0000000-0000-4000-8000-0000000000c3",
+            "type": "fynkel.RigidBody",
+            "version": 1,
+            "data": {
+              "body_type": "dynamic",
+              "mass": 1.0,
+              "linear_damping": 0.0,
+              "angular_damping": 0.05,
+              "gravity_scale": 1.0,
+              "ccd": true,
+              "constraints": 0
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 5,
+  "formatVersion": 6,
   "id": "b0000000-0000-4000-8000-000000000007",
   "name": "Arena",
   "entities": {

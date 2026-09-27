@@ -163,9 +163,10 @@ with `sub` omitted for the asset itself — never a path. Built-in authored
 components today: `fynkel.Transform`, `fynkel.MeshRenderer`, `fynkel.Camera`,
 `fynkel.DirectionalLight`, `fynkel.PointLight`, `fynkel.SpotLight`,
 `fynkel.Environment` (`fixtures/valid/training_room.scene.json` uses all of
-them). Scenes and prefabs are **formatVersion 5** since ADR-0022 (a
+them). Scenes and prefabs are **formatVersion 6** since foundation 2.5
+(`fynkel.RigidBody` carries `constraints`); 5 (ADR-0022): a
 prefab has one `root` and an instance *is* that root, § Prefab
-documents). FormatVersion 4 (ADR-0020, tags and layers): every object may carry `fynkel.Layer { layer }` (the index
+documents. FormatVersion 4 (ADR-0020, tags and layers): every object may carry `fynkel.Layer { layer }` (the index
 of one of the project's `layers`; absent is 0, `default`) and
 `fynkel.Tags { bits }` (bit `i` is the project's `tags[i]`; absent is no
 tag) — optional authored components like any other, always allowed by a
@@ -1503,6 +1504,11 @@ Built-in steps (`fynkel migrate --list`):
 
   Nested anchors inside prefabs are rewritten the same way; a second run
   changes nothing.
+- **scene 5 → 6** `scene/5-6/rigidbody-constraints` and **prefab 5 → 6**
+  `prefab/5-6/rigidbody-constraints` (foundation 2.5): every
+  `fynkel.RigidBody` — an entity's, and the `data` of an `addComponent`
+  override — gains `constraints: 0` (nothing frozen, as before) unless it
+  has one (`fixtures/migrate/v5_crates.scene.json`).
 
 New steps follow the same shape when a format changes: add the
 `Migration`, bump the kind's version, keep the fixture pair. Until a

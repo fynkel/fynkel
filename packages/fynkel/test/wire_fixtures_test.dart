@@ -347,6 +347,7 @@ void main() {
       angularDamping: 0.2,
       gravityScale: 0.5,
       ccd: true,
+      constraints: 116,
     ),
     RigidBody.wireSize,
     RigidBody.decode,

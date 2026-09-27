@@ -178,12 +178,13 @@ impl DocumentKind {
     /// (M3-19c): `fynkel.Animator` carries `weight`/`additive`/`root_motion`;
     /// 4 (ADR-0020): a collider's layer is its object's `fynkel.Layer`, and
     /// cameras and point/spot lights carry `culling_mask`; 5 (ADR-0022): a
-    /// prefab has one `root`, and an instance is that root. Project 2
+    /// prefab has one `root`, and an instance is that root; 6 (foundation
+    /// 2.5): `fynkel.RigidBody` carries `constraints`. Project 2
     /// (ADR-0020): `layers` and `tags` at the top level. Meta 2 (stable
     /// sub-asset ids): a model's sub-asset keys are the parts' names.
     pub const fn supported_format_version(self) -> u32 {
         match self {
-            DocumentKind::Scene | DocumentKind::Prefab => 5,
+            DocumentKind::Scene | DocumentKind::Prefab => 6,
             DocumentKind::Project | DocumentKind::Meta => 2,
             DocumentKind::Material => 2,
             _ => 1,

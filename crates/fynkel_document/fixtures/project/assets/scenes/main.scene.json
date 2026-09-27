@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 5,
+  "formatVersion": 6,
   "id": "c0000000-0000-4000-8000-000000000030",
   "name": "Main",
   "entities": {
@@ -266,7 +266,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "c0000000-0000-4000-8000-0000000000d4": {

@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 5,
+  "formatVersion": 6,
   "id": "4fa09cf3-8f27-5190-b783-5b8bc8651ec9",
   "name": "Shader: Rim Light",
   "entities": {

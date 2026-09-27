@@ -36,6 +36,12 @@
     "ccd": {
       "type": "boolean",
       "description": "Continuous collision detection: fast bodies do not tunnel through thin geometry (costs a little per body)."
+    },
+    "constraints": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295,
+      "description": "Frozen axes, Unity's `RigidbodyConstraints` bits (dynamic bodies; see [`constraints`]): 2/4/8 freeze the position along X/Y/Z, 16/32/64 the rotation about X/Y/Z, 0 none."
     }
   },
   "required": [
@@ -44,14 +50,15 @@
     "linear_damping",
     "angular_damping",
     "gravity_scale",
-    "ccd"
+    "ccd",
+    "constraints"
   ],
   "additionalProperties": false,
   "x-fynkel": {
     "kind": "component",
     "id": 10,
     "rust": "fynkel_physics::components::RigidBody",
-    "wireSize": 24,
+    "wireSize": 32,
     "authored": true
   }
 }

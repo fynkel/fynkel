@@ -128,6 +128,7 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
     'angular_damping': {'unit': '/s', 'min': 0, 'group': 'Damping', 'order': 3},
     'gravity_scale': {'step': 0.1, 'order': 4},
     'ccd': {'label': 'Continuous collision detection', 'order': 5},
+    'constraints': {'kind': 'freezeAxes', 'order': 6},
   },
   'fynkel.Collider': {
     'shape': {'order': 0},

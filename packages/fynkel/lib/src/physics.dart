@@ -89,6 +89,23 @@ class CharacterState {
   String toString() => 'CharacterState(${grounded ? 'grounded' : 'airborne'}${sliding ? ', sliding' : ''}, v: $velocity)';
 }
 
+/// The bits of a `RigidBody`'s `constraints` (Unity's
+/// `RigidbodyConstraints`, the same values, foundation 2.5): a frozen axis
+/// does not move, whatever pushes it — `RigidBody(constraints:
+/// RigidbodyConstraints.freezeRotation)` keeps a body upright.
+abstract final class RigidbodyConstraints {
+  static const int none = 0;
+  static const int freezePositionX = 2;
+  static const int freezePositionY = 4;
+  static const int freezePositionZ = 8;
+  static const int freezeRotationX = 16;
+  static const int freezeRotationY = 32;
+  static const int freezeRotationZ = 64;
+  static const int freezePosition = freezePositionX | freezePositionY | freezePositionZ;
+  static const int freezeRotation = freezeRotationX | freezeRotationY | freezeRotationZ;
+  static const int freezeAll = freezePosition | freezeRotation;
+}
+
 /// The bits of [CharacterState.collisionFlags] (Unity's `CollisionFlags`,
 /// the same values).
 abstract final class CollisionFlags {

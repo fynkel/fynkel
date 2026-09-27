@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 5,
+  "formatVersion": 6,
   "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968331",
   "name": "PhysicsRules",
   "entities": {
@@ -40,7 +40,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         }
       }
@@ -81,7 +82,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "22222222-0000-4000-8000-000000000005": {
@@ -223,7 +225,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.05,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "22222222-0000-4000-8000-000000000011": {

@@ -35,6 +35,7 @@ sections below.
 | `linearDamping` / `angularDamping` | 0 / 0.05 | per-second velocity decay, `>= 0` |
 | `gravityScale` | 1 | multiplies the world's gravity (0 floats) |
 | `ccd` | false | continuous collision detection for fast bodies |
+| `constraints` | 0 | frozen axes, Unity's `RigidbodyConstraints` bits (`RigidbodyConstraints` in Dart): 2/4/8 freeze the position along X/Y/Z, 16/32/64 the rotation about X/Y/Z; a frozen axis does not move whatever pushes it — gravity, contacts, impulses, a velocity set directly (foundation 2.5). The Inspector draws Freeze Position/Rotation X/Y/Z boxes |
 
 `fynkel.Collider` (id 11) — alone it is static geometry, with a
 `RigidBody` it is that body's shape. One collider per entity; a body's

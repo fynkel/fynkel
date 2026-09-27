@@ -235,6 +235,30 @@ void main() {
     expect(seen[1].message, contains('kinematic'));
   });
 
+  test("a body's frozen axes stay put, as Unity's constraints (foundation 2.5)", () {
+    final w = fresh();
+    GameObject crate(String name, double x, int constraints) => w.spawn(
+        name: name,
+        transform: identityTransform.copyWith(position: Vec3(x, 3, 0)),
+      )
+      ..add(dynamicBody.copyWith(constraints: constraints))
+      ..add(unitBox);
+    final free = crate('free', 0, RigidbodyConstraints.none);
+    final held = crate('held', 5, RigidbodyConstraints.freezePositionY | RigidbodyConstraints.freezeRotation);
+    w.frame(1 / 60);
+    for (final c in [free, held]) {
+      c.applyTorqueImpulse(const Vec3(0.2, 0.2, 0.2));
+    }
+    for (var i = 0; i < 30; i++) {
+      w.frame(1 / 60);
+    }
+    expect(free.localTransform.position.y, lessThan(2.5));
+    expect(held.localTransform.position.y, closeTo(3, 1e-4));
+    expect(free.bodyState()!.angularVelocity.length, greaterThan(0.1));
+    expect(held.bodyState()!.angularVelocity, Vec3.zero);
+    expect(held.get<RigidBody>()!.constraints, RigidbodyConstraints.freezePositionY | RigidbodyConstraints.freezeRotation);
+  });
+
   test('a sensor reports triggers once per entry and exit', () {
     final w = fresh();
     final zone = w.spawn(

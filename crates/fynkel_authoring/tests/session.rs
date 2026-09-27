@@ -659,7 +659,7 @@ fn other_kinds_and_bad_paths_are_refused_and_nothing_works_without_a_project() {
     assert_eq!(on_disk["revision"], s.state_json(h).unwrap()["revision"]);
     assert_eq!(on_disk["kind"], "scene");
     assert_eq!(on_disk["name"], "Rig");
-    assert_eq!(on_disk["formatVersion"], 5);
+    assert_eq!(on_disk["formatVersion"], 6);
     assert_eq!(
         on_disk["path"],
         copy.path(RIG_SCENE)
@@ -967,11 +967,11 @@ fn the_migrations_query_previews_outdated_documents_without_writing() {
     let doc = &preview["documents"][0];
     assert_eq!(doc["kind"], "scene");
     assert_eq!(doc["from"], 0);
-    // Scenes are at formatVersion 5 (ADR-0022): five steps, the v0 one first.
-    assert_eq!(doc["to"], 5);
+    // Scenes are at formatVersion 6 (foundation 2.5): six steps, the v0 one first.
+    assert_eq!(doc["to"], 6);
     assert_eq!(doc["ok"], true);
     assert_eq!(doc["path"], target.display().to_string());
-    assert_eq!(doc["applied"].as_array().unwrap().len(), 5);
+    assert_eq!(doc["applied"].as_array().unwrap().len(), 6);
     assert_eq!(doc["applied"][0]["name"], "scene/0-1/entities-keyed-by-id");
     assert_eq!(doc["applied"][1]["from"], 1);
     assert!(doc["diff"].as_str().unwrap().contains("formatVersion"));

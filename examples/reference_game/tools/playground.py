@@ -246,7 +246,7 @@ class Scene:
     def document(self, kind, id_, extra=None):
         doc = {
             "$schema": f"https://fynkel.dev/schemas/{kind}.schema.json",
-            "formatVersion": 5,
+            "formatVersion": 6,
             "id": id_,
             "name": self.name,
             "entities": self.entities,

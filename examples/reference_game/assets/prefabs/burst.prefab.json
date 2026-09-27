@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 5,
+  "formatVersion": 6,
   "id": "88641ff3-d525-5d0b-b21f-226ee8e246a8",
   "name": "Burst",
   "entities": {
@@ -92,7 +92,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.5,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "4351c932-d02b-509a-a7d0-e28fddbc1502": {
@@ -185,7 +186,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.5,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "80ac4c0d-1372-5a3c-be93-0eaeedfdb044": {
@@ -278,7 +280,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.5,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "4cde561b-8937-545e-b043-40b991057dc6": {
@@ -371,7 +374,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.5,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "ad80d46a-df36-5dcd-9287-93cf711accc4": {
@@ -464,7 +468,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.5,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "4c506a63-b2fb-5c6e-9f43-8cd36ef29661": {
@@ -557,7 +562,8 @@
             "linear_damping": 0.0,
             "angular_damping": 0.5,
             "gravity_scale": 1.0,
-            "ccd": false
+            "ccd": false,
+            "constraints": 0
           }
         },
         "0ca2726f-97d6-556f-8b7d-90a61468475a": {

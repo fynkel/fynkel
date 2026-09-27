@@ -1138,11 +1138,11 @@ void main() {
     final doc = preview.documents.single;
     expect(doc.kind, 'scene');
     expect(doc.from, 0);
-    expect(doc.to, 5, reason: 'scenes are at formatVersion 5 (ADR-0022): five steps');
+    expect(doc.to, 6, reason: 'scenes are at formatVersion 6 (foundation 2.5): six steps');
     expect(doc.ok, isTrue);
     expect(doc.path, target.path);
     expect(doc.applied.first.id, 'scene/0-1/entities-keyed-by-id');
-    expect(doc.applied.map((a) => a.from), [0, 1, 2, 3, 4]);
+    expect(doc.applied.map((a) => a.from), [0, 1, 2, 3, 4, 5]);
     expect(doc.diff, contains('formatVersion'));
     expect(target.readAsStringSync(), before, reason: 'a preview writes nothing');
     expect(session.validateProject().diagnostics.map((d) => d.code), contains('FYN-D0016'));

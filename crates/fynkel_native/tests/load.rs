@@ -860,7 +860,7 @@ fn variants_and_nested_instances_cook_and_instantiate() {
     };
     let prefab_header = |id: &str, name: &str, root: &str| {
         serde_json::json!({ "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-            "formatVersion": 5, "id": id, "name": name, "root": root })
+            "formatVersion": 6, "id": id, "name": name, "root": root })
     };
     // The variant: the Crate twice as big, with a Flag of its own.
     let mut variant = prefab_header(
@@ -892,7 +892,7 @@ fn variants_and_nested_instances_cook_and_instantiate() {
                                  "field": "position", "value": [0, 5, 0] } ] } }
     });
     let scene = serde_json::json!({ "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-        "formatVersion": 5, "id": SCENE, "name": "Variants", "entities": {
+        "formatVersion": 6, "id": SCENE, "name": "Variants", "entities": {
             "c0000000-0000-4000-8000-0000000007d0": { "name": "Stand", "parent": null,
                 "children": [], "components": {},
                 "prefab": { "asset": { "asset": HOLDER }, "instance": "c0000000-0000-4000-8000-0000000007e2" } }
