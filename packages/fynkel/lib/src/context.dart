@@ -19,6 +19,18 @@ abstract interface class TimeService {
   /// `Time.deltaTime`.
   double get delta;
 
+  /// The host frame's seconds before [timeScale] — Unity's
+  /// `Time.unscaledDeltaTime`, for a pause menu's own animation.
+  double get unscaledDelta;
+
+  /// How fast game time runs (Unity's `Time.timeScale`): 1 is real time,
+  /// 0.5 half speed, 0 paused — no fixed tick runs and [delta] is 0 in
+  /// `update`, which still runs, so the game can read the input that
+  /// resumes it. [fixedDelta] does not change: the ticks come less often.
+  /// Must be >= 0.
+  double get timeScale;
+  set timeScale(double value);
+
   /// Seconds per fixed tick.
   double get fixedDelta;
 
@@ -149,10 +161,22 @@ class GameContext {
 
 /// A clock a test drives by hand.
 class TestTime implements TimeService {
-  TestTime({this.delta = 1 / 60, this.fixedDelta = 1 / 60, this.tick = 0, this.frame = 0, this.alpha = 0});
+  TestTime(
+      {this.delta = 1 / 60,
+      double? unscaledDelta,
+      this.timeScale = 1,
+      this.fixedDelta = 1 / 60,
+      this.tick = 0,
+      this.frame = 0,
+      this.alpha = 0})
+      : unscaledDelta = unscaledDelta ?? delta;
 
   @override
   double delta;
+  @override
+  double unscaledDelta;
+  @override
+  double timeScale;
   @override
   double fixedDelta;
   @override
@@ -200,6 +224,9 @@ class TestGameContext extends GameContext {
 /// Static facade over the current context's [TimeService].
 abstract final class Time {
   static double get delta => GameContext.require('Time.delta').time.delta;
+  static double get unscaledDelta => GameContext.require('Time.unscaledDelta').time.unscaledDelta;
+  static double get timeScale => GameContext.require('Time.timeScale').time.timeScale;
+  static set timeScale(double value) => GameContext.require('Time.timeScale').time.timeScale = value;
   static double get fixedDelta => GameContext.require('Time.fixedDelta').time.fixedDelta;
   static int get tick => GameContext.require('Time.tick').time.tick;
   static double get elapsed => GameContext.require('Time.elapsed').time.elapsed;

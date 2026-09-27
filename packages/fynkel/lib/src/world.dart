@@ -158,9 +158,21 @@ class World {
   /// Every attached behaviour, in callback order.
   List<Behaviour> get behaviours => List.unmodifiable(_behaviours._all);
 
-  /// Host frames begun and the last frame's dt (for [TimeService]).
+  /// Host frames begun and the last frame's dt, scaled and not (for
+  /// [TimeService]).
   int _frameCount = 0;
-  double _frameDt = 0;
+  double _frameDt = 0, _unscaledDt = 0;
+
+  /// How fast game time runs (`Time.timeScale`, foundation 1.3): [beginFrame]
+  /// hands the clock `dt * timeScale`, so 0 runs no tick while `update`
+  /// still runs with a delta of 0.
+  double get timeScale => _timeScale;
+  set timeScale(double value) {
+    if (!(value >= 0) || !value.isFinite) throw ArgumentError.value(value, 'timeScale', 'must be finite and >= 0');
+    _timeScale = value;
+  }
+
+  double _timeScale = 1;
 
   /// True while [frame] runs its ticks (the host's and the behaviours'
   /// `fixedUpdate`, the step, `afterPhysics` and the contact callbacks):
@@ -711,15 +723,17 @@ class World {
 
   // ---------------------------------------------------------------- frame
 
-  /// Starts a host frame; run [step] `plan.steps` times, then presentation
-  /// writes, then extract/render.
+  /// Starts a host frame of [dtSeconds] real seconds (scaled by
+  /// [timeScale] for the clock); run [step] `plan.steps` times, then
+  /// presentation writes, then extract/render.
   FramePlan beginFrame(double dtSeconds) {
     if (Gizmos.compiled) gizmos?.clear();
     _presentation.clear();
     _presentationTargets.clear();
     _frameCount++;
-    _frameDt = dtSeconds;
-    final plan = _native.beginFrame(dtSeconds);
+    _unscaledDt = dtSeconds;
+    _frameDt = dtSeconds * _timeScale;
+    final plan = _native.beginFrame(_frameDt);
     if (plan.missedDeadline) _collectDiagnostics('begin_frame');
     return plan;
   }
@@ -856,7 +870,7 @@ class World {
     }
     this.input.refresh(frameEdges: true);
     t._behaviours.start();
-    _behaviours.update(dtSeconds);
+    _behaviours.update(_frameDt);
     if (update != null) _deferring(update);
     t._behaviours.stop();
     t._presentation.start();
@@ -3400,6 +3414,12 @@ class _WorldTime implements TimeService {
 
   @override
   double get delta => world._inFixedPhase ? world.fixedDt : world._frameDt;
+  @override
+  double get unscaledDelta => world._unscaledDt;
+  @override
+  double get timeScale => world.timeScale;
+  @override
+  set timeScale(double value) => world.timeScale = value;
   @override
   double get fixedDelta => world.fixedDt;
   @override
