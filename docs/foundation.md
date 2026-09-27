@@ -81,9 +81,10 @@ What every script touches. Most of it is `packages/fynkel`.
 | 3.6 | I | `DontDestroyOnLoad` | A replace load destroys everything | ❌ |
 | 3.7 | I | `LoadSceneAsync` | Loads are synchronous on the main isolate | ❌ |
 | 3.8 | I | An override whose target is gone is kept and listed for cleanup | One stale override (D0403) skips the whole instance: deleting a child from a prefab breaks every scene that overrode it | ❌ |
-| 3.9 | — | — | A 50k-entity headless benchmark, the gate for 3.1–3.4 (nothing is measured above ~16k) | ❌ |
+| 3.9 | — | — | A 50k-entity headless benchmark, the gate for 3.1–3.4 (nothing is measured above ~16k). Now `cargo run --release -p fynkel_native --example objects` ([benchmarks/objects](../benchmarks/objects/README.md)); the baseline: an instantiate 5.5–7.7 ms, the first tick after 8 333 of them 755 ms, an idle tick 6.7 ms, 1 000 keep-world reparents 2.3 s, +57 MiB kept after destroying everything | 🔧 |
 | 3.10 | m | — | `despawn_deferred`/`flush_deferred` despawn one entity, not the subtree (no callers today) | ❌ |
 | 3.11 | m | — | 24-bit generations wrap after 16.7M reuses of one slot (LIFO free list) | ⏸ |
+| 3.12 | I | — | Found by 3.9: the physics phase costs 2.4 ms per idle tick at 50 000 entities with no collider or body in the scene | ❌ |
 
 ## Step 4 — the bridge
 
