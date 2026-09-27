@@ -26,7 +26,8 @@ matrix of the skinning path (`docs/animation.md`) is still exercised.
 Clips, authored in place (blueprint item 19 (d): no root motion — the
 `CharacterController` moves the entity, the clips only pose the joints):
 
-  anim/idle     2.0 s loop   the torso breathes, the head nods a little
+  anim/idle     2.0 s loop   the torso breathes, the head nods a little; the
+                             legs, hips and elbows held at rest
   anim/walk     1.0 s loop   two steps: legs ±30°, arms opposite ±25°, a hip bob
   anim/run      0.6 s loop   legs ±50°, bent knees, arms ±45° with bent elbows, a lean
   anim/jump     0.8 s once   a crouch, the arms thrown up, the legs tucked, a landing
@@ -100,7 +101,13 @@ def channels_idle():
         ("head", "rotation", [(0.0, deg("x", 0)), (1.0, deg("x", 4)), (2.0, deg("x", 0))]),
         ("upperarm_l", "rotation", [(0.0, deg("z", 4)), (1.0, deg("z", 7)), (2.0, deg("z", 4))]),
         ("upperarm_r", "rotation", [(0.0, deg("z", -4)), (1.0, deg("z", -7)), (2.0, deg("z", -4))]),
-    ]
+    ] + [
+        # Standing: what the walk, the run and the jump move, at rest, so
+        # stopping blends back to it (a property only one clip of a blend
+        # keys keeps that clip's value: the legs stayed mid-stride).
+        ("hips", "translation", [(0.0, (0.0, 0.95, 0.0))]),
+        ("spine", "rotation", [(0.0, deg("x", 0))]),
+    ] + [(joint, "rotation", [(0.0, deg("x", 0))]) for joint in ("thigh_l", "thigh_r", "shin_l", "shin_r", "forearm_l", "forearm_r")]
 
 
 def gait(period, leg, knee, arm, elbow, bob, lean):

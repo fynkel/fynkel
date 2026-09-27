@@ -715,5 +715,13 @@ void main() {
     game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'W')]);
     run(30);
     expect(player.anim.feet, 0, reason: 'faded out by ${player.feetFadeSpeed} m/s');
+
+    // Stopped, the idle stands the legs at rest again (it keys them) and
+    // the feet are planted side by side, not left mid-stride.
+    game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'W')]);
+    run(60);
+    expect(player.anim.feet, 1);
+    final l = at('foot_l'), r = at('foot_r');
+    expect((l.z - r.z).abs() + (l.y - r.y).abs(), lessThan(0.05), reason: 'feet together, was $l and $r');
   });
 }
