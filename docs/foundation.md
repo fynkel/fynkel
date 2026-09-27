@@ -30,7 +30,7 @@ commit) · ✅ not a bug (the test stays) · ⏸ decided later (why) · 👀 wat
 | 0.6 | `platform/apple` `viewport_lifetimes_do_not_grow_the_process`: 4.4 MiB of Metal cache slack on a busy runner against a 4 MiB bound (a leaked ring would be ~240 MiB); the bound is 8 MiB | 🔧 |
 | 0.4 | This checklist | 🔧 |
 
-## Step 1 — how scripts feel
+## Step 1 — how scripts feel (done 2026-09-27)
 
 What every script touches. Most of it is `packages/fynkel`.
 
