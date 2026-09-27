@@ -679,6 +679,7 @@ void main() {
     expect(right - root, closeTo(0.06, 0.03), reason: 'the right foot\'s ankle on step 4, was $right');
     expect(left - root, closeTo(-0.14, 0.04), reason: 'the left foot\'s ankle on step 3, was $left');
     expect(at('hips').y - root, lessThan(0.85), reason: 'the hips go down as far as the lower foot needs');
+    expect(player.anim.feet, 1, reason: 'standing: the feet are planted');
 
     // Back on flat ground the goal has nothing to do.
     player.transform.position = const Vec3(20, 0, 20);
@@ -709,5 +710,10 @@ void main() {
     player.transform.position = const Vec3(20, 0, 20);
     run(30);
     expect(player.lookingAt, isNull);
+
+    // Walking, foot placement is off: a stride's legs are the clip's.
+    game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'W')]);
+    run(30);
+    expect(player.anim.feet, 0, reason: 'faded out by ${player.feetFadeSpeed} m/s');
   });
 }

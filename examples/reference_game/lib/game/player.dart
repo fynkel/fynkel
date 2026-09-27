@@ -43,8 +43,10 @@ import 'game_state.dart';
 /// Two IK goals of the controller (ADR-0033 § 5) finish the pose. `feet`
 /// (foot placement) sets each foot on what is under it, so on the
 /// Playground's steps one foot stands a step higher than the other and
-/// the hips go down; its weight is the `feet` parameter, 1 on the ground
-/// and 0 in the air (a jump's legs are the clip's). `look` turns the head,
+/// the hips go down; its weight is the `feet` parameter, 1 standing on the
+/// ground, fading to 0 by [feetFadeSpeed] and 0 in the air (a stride's and
+/// a jump's legs are the clip's: pinning a running character's trailing
+/// foot to a slope crouches it). `look` turns the head,
 /// and a little of the spine, to the nearest coin within [lookRadius]:
 /// [lookAtCoin] sets its target from code.
 ///
@@ -102,6 +104,11 @@ class Player extends Behaviour {
 
   /// Whether the aim mode is on (for the tests).
   bool aiming = false;
+
+  /// The speed (m/s) by which foot placement has faded out: the feet are
+  /// planted standing and shuffling, the clip's own while walking and
+  /// running (Unity's usual IK weight by speed).
+  double feetFadeSpeed = 2;
 
   /// How near a coin must be for the head to turn to it, in metres.
   double lookRadius = 8;
@@ -205,10 +212,11 @@ class Player extends Behaviour {
     final facing = transform.rotation;
     final forward = facing.rotate(const Vec3(0, 0, -1));
     final right = facing.rotate(const Vec3(1, 0, 0));
+    final speed = math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
     anim
-      ..speed = math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
+      ..speed = speed
       ..grounded = grounded && !jumped
-      ..feet = grounded && !jumped ? 1 : 0
+      ..feet = grounded && !jumped ? (1 - speed / feetFadeSpeed).clamp(0.0, 1.0) : 0
       ..aim = aiming
       ..moveX = velocity.x * right.x + velocity.z * right.z
       ..moveY = velocity.x * forward.x + velocity.z * forward.z;

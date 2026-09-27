@@ -357,7 +357,8 @@ changes are not saved.
   (`lib/game/player.dart`). The `UpperBody` layer (Root `spine`, no
   states) is the wave's slot: the wave key plays the wave clip there.
   Its `feet` goal stands each foot on the Playground's steps (its
-  weight is the `feet` parameter: 0 in the air), and its `look` goal
+  weight is the `feet` parameter: 1 standing, fading to 0 by 2 m/s, 0
+  in the air — pinned feet suit standing, not a stride), and its `look` goal
   turns the head to the nearest coin (`setIKTarget`).
 
 - **The showcase's Runner**
