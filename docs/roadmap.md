@@ -131,6 +131,14 @@ compression (ASTC/BC). R3c done 2026-09-25 (the volume profile's
 `docs/renderer.md` § Contact shadows; `renders/r3d.png`). The capture,
 skipped on 2026-09-25, will cover R3a–R3d at once.
 
+## Foundation pass (from 2026-09-27, the current focus)
+
+Before Phase 5, what exists is made solid: the behaviour lifecycle and
+time, physics, objects at scale, the Rust ↔ Dart bridge, the asset
+pipeline, then the structure (`World` split into systems, the component
+table generated). The checklist and its order are `docs/foundation.md`;
+every row is confirmed by a failing test before it is fixed.
+
 ## Phase 5 — M5: a real game
 
 Tier-2 reference game and a pilot project; an **Animator state machine**;
