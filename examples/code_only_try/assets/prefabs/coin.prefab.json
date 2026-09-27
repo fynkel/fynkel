@@ -1,0 +1,150 @@
+{
+  "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
+  "formatVersion": 5,
+  "id": "becedaed-a5e2-54b0-b85f-00eda8cb729c",
+  "name": "Coin",
+  "entities": {
+    "e9af29fb-145f-5e73-88d3-3effc361ce29": {
+      "name": "Coin",
+      "parent": null,
+      "children": [
+        "bd4fc57a-b06f-5d35-908b-7ae7aa70f3be"
+      ],
+      "components": {
+        "96c0490f-1bae-5392-989a-0df2449c92df": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "35af21b2-45d7-5260-949e-babe60738576": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "speed": 2.5,
+            "space": "world"
+          }
+        },
+        "9d9bc1cf-1edd-59b7-9852-36f027d5f21c": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "sphere",
+            "size": [
+              0.8,
+              0.8,
+              0.8
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": true,
+            "mask": 4
+          }
+        },
+        "1565d25f-a943-5b13-a03f-6dfa21cc72c8": {
+          "type": "fynkel.TriggerZone",
+          "version": 1,
+          "data": {
+            "event": "collect",
+            "once": true
+          }
+        },
+        "16b631e1-97ff-5994-9153-93b75ebbbc82": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 3
+          }
+        },
+        "a16d7fd0-7147-55a1-914d-541918e44d0a": {
+          "type": "fynkel.Tags",
+          "version": 1,
+          "data": {
+            "bits": 2
+          }
+        },
+        "12c9aab6-50fb-5685-bca0-b85c80580f55": {
+          "type": "game.Collectible",
+          "version": 1,
+          "data": {
+            "kind": {
+              "asset": "3d9bb115-a763-5ce4-8bd6-d1ab9fc0ad58"
+            }
+          }
+        }
+      }
+    },
+    "bd4fc57a-b06f-5d35-908b-7ae7aa70f3be": {
+      "name": "Disc",
+      "parent": "e9af29fb-145f-5e73-88d3-3effc361ce29",
+      "children": [],
+      "components": {
+        "a878b823-26fa-5b29-bba6-c5dc9c25eaed": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.7,
+              0.0
+            ],
+            "rotation": [
+              0.70710677,
+              0.0,
+              0.0,
+              0.70710677
+            ],
+            "scale": [
+              0.7,
+              0.06,
+              0.7
+            ]
+          }
+        },
+        "74520f92-c12a-551f-95b5-16429563da7c": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cylinder"
+            },
+            "material": {
+              "asset": "1a765874-6dba-512c-84ec-74c6ac87d1b6"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    }
+  },
+  "root": "e9af29fb-145f-5e73-88d3-3effc361ce29"
+}

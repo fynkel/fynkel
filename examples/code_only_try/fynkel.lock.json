@@ -1,0 +1,36 @@
+{
+  "$schema": "https://fynkel.dev/schemas/lock.schema.json",
+  "formatVersion": 1,
+  "runtime": {
+    "version": "0.0.1",
+    "abiVersion": 1
+  },
+  "tools": {
+    "version": "0.0.1"
+  },
+  "schemaFingerprint": "0xc9dc361258a0c148",
+  "documents": {
+    "blend": 1,
+    "data": 1,
+    "material": 2,
+    "meta": 2,
+    "physics_material": 1,
+    "prefab": 5,
+    "project": 2,
+    "rig": 1,
+    "scene": 5,
+    "shader": 1,
+    "volume": 1
+  },
+  "importers": {
+    "fynkel.audio": 2,
+    "fynkel.fbx": 4,
+    "fynkel.file": 1,
+    "fynkel.gltf": 8,
+    "fynkel.image": 1
+  },
+  "cache": {
+    "version": 8,
+    "container": 1
+  }
+}

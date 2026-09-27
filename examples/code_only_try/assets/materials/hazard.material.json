@@ -1,0 +1,26 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "9ace0e10-47c8-5c9f-b48d-715f2224c7e5",
+  "name": "hazard",
+  "shader": "fynkel.pbr@1",
+  "base_color": [
+    0.6,
+    0.05,
+    0.05,
+    1.0
+  ],
+  "metallic": 0.0,
+  "roughness": 0.5,
+  "emissive": [
+    1.0,
+    0.1,
+    0.05
+  ],
+  "emissive_strength": 0.8,
+  "normal_scale": 1.0,
+  "occlusion_strength": 1.0,
+  "alpha_mode": "opaque",
+  "alpha_cutoff": 0.5,
+  "double_sided": false
+}

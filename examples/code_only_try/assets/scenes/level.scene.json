@@ -1,0 +1,1527 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 5,
+  "id": "9f5c3884-502a-5d03-9eae-81593ede92a9",
+  "name": "Level",
+  "entities": {
+    "71d9b944-57ff-55b9-8163-6a27fe39b4ff": {
+      "name": "Sun",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b394cda0-298e-5419-8c9d-67c3859e9756": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              20.0,
+              0.0
+            ],
+            "rotation": [
+              -0.418082,
+              0.27027258,
+              0.13182075,
+              0.85719514
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "705aab64-a624-5673-8555-e619a5d20abe": {
+          "type": "fynkel.DirectionalLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1.0,
+              0.95,
+              0.85
+            ],
+            "intensity": 9000.0,
+            "cast_shadows": true
+          }
+        }
+      }
+    },
+    "09865985-16a3-5edc-a1c0-ce658c5a4d21": {
+      "name": "Environment",
+      "parent": null,
+      "children": [],
+      "components": {
+        "cee12fd6-a8ab-573c-9b21-6889a05e7d00": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "aabd5a75-2949-5c60-a455-a6f1e3c9b4f2": {
+          "type": "fynkel.Environment",
+          "version": 1,
+          "data": {
+            "ambient_color": [
+              0.55,
+              0.65,
+              0.9
+            ],
+            "ambient_intensity": 600.0,
+            "sky": {
+              "asset": "193cf336-13f4-415b-a4b4-1c38ba3b91d0"
+            },
+            "sky_intensity": 1500.0,
+            "sky_rotation": 0.0
+          }
+        }
+      }
+    },
+    "bb714ce6-b22f-5f2c-89df-7535cc857deb": {
+      "name": "Camera",
+      "parent": null,
+      "children": [],
+      "components": {
+        "50421643-b7d0-5209-acc9-a029c20070bd": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              4.5,
+              7.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "8aa256e4-a705-5682-968e-382fb9267b95": {
+          "type": "fynkel.Camera",
+          "version": 1,
+          "data": {
+            "projection": "perspective",
+            "fov_y": 0.95,
+            "ortho_height": 10.0,
+            "near": 0.1,
+            "far": 120.0,
+            "priority": 0,
+            "exposure_mode": "auto",
+            "exposure": 12.0,
+            "culling_mask": 4294967295
+          }
+        },
+        "34e740b3-229b-542d-859f-df1cd886885a": {
+          "type": "fynkel.ThirdPersonCamera",
+          "version": 1,
+          "data": {
+            "target": "Player",
+            "pivot": [
+              0.0,
+              1.5,
+              0.0
+            ],
+            "distance": 7.0,
+            "min_distance": 0.5,
+            "yaw": 0.0,
+            "pitch": 0.45,
+            "min_pitch": -0.2,
+            "max_pitch": 1.2,
+            "look_action": "",
+            "sensitivity": 2.5,
+            "collision_radius": 0.25,
+            "mask": 4294967295
+          }
+        },
+        "b14b7522-c131-59a6-9605-96f9c5a1417e": {
+          "type": "fynkel.AudioListener",
+          "version": 1,
+          "data": {
+            "volume": 1.0
+          }
+        }
+      }
+    },
+    "87192e82-9b90-575c-8439-3aec3ae1e2c1": {
+      "name": "Player",
+      "parent": null,
+      "children": [
+        "ef9d9696-66a5-5faa-a7bf-746c77651eb0",
+        "3e287dbe-789d-552c-aea8-fba571901378"
+      ],
+      "components": {
+        "4709a0fb-c075-50f6-8bae-b940885b176a": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "b145514f-10f6-5ca8-827c-7a247d701867": {
+          "type": "fynkel.CharacterController",
+          "version": 1,
+          "data": {
+            "radius": 0.4,
+            "height": 1.8,
+            "center": [
+              0.0,
+              0.9,
+              0.0
+            ],
+            "skin_width": 0.02,
+            "max_slope": 0.7853982,
+            "max_step_height": 0.35,
+            "snap_to_ground": 0.25,
+            "gravity_scale": 1.0,
+            "mass": 70.0,
+            "speed": 4.0,
+            "jump_speed": 5.5,
+            "turn_speed": 10.0,
+            "move_action": "",
+            "jump_action": "",
+            "mask": 4294967295
+          }
+        },
+        "66611f53-348d-5b98-9066-62fc94d2b4da": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 2
+          }
+        },
+        "a51b9747-3522-537c-9091-170e7ddf7238": {
+          "type": "fynkel.Tags",
+          "version": 1,
+          "data": {
+            "bits": 1
+          }
+        },
+        "0bbb03e7-69c6-5b5d-bd43-0faee8899656": {
+          "type": "game.Player",
+          "version": 1,
+          "data": {
+            "cameraName": "Camera",
+            "fallY": -6.0,
+            "jumpSpeed": 5.5,
+            "walkSpeed": 4.0
+          }
+        }
+      }
+    },
+    "ef9d9696-66a5-5faa-a7bf-746c77651eb0": {
+      "name": "Body",
+      "parent": "87192e82-9b90-575c-8439-3aec3ae1e2c1",
+      "children": [],
+      "components": {
+        "a716f18a-a33e-5a3e-a8a1-56dffc2ec6ca": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.9,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.8,
+              0.9,
+              0.8
+            ]
+          }
+        },
+        "521b2236-1977-5864-9b1e-2e47e7c58f0d": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Capsule"
+            },
+            "material": {
+              "asset": "726fa746-775a-54a6-a804-94314900237f"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "3e287dbe-789d-552c-aea8-fba571901378": {
+      "name": "Visor",
+      "parent": "87192e82-9b90-575c-8439-3aec3ae1e2c1",
+      "children": [],
+      "components": {
+        "64eb1ed8-02ac-51be-810b-c85302895d17": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              1.5,
+              -0.33
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.45,
+              0.14,
+              0.12
+            ]
+          }
+        },
+        "1a55a592-098a-5cd9-9e0b-085342731509": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "f03d1a4c-9f6b-5cbc-80b4-606b62ff0410"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "e01750d1-97b6-5074-8203-450d9ae6e487": {
+      "name": "Floor",
+      "parent": null,
+      "children": [],
+      "components": {
+        "9e6acc22-d4e0-5d8c-a99f-203700c2625f": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              -0.5,
+              -4.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              34.0,
+              1.0,
+              26.0
+            ]
+          }
+        },
+        "e99ce948-ea0e-5ddb-aa8f-e1b319475f00": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "fc6b4840-b70f-5b4b-846d-fcda21287498"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "0978d5ef-cce2-5e68-8fa1-7d97f527ce3a": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "77f62718-1624-5628-b2c1-3fb7ae576673": {
+      "name": "Wall N",
+      "parent": null,
+      "children": [],
+      "components": {
+        "1367d3a6-82b1-5b05-8f9f-2ce929b96966": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              1.0,
+              -17.25
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              34.0,
+              3.0,
+              0.5
+            ]
+          }
+        },
+        "5836c640-7d70-5762-ab77-d86c54a0211a": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "dc2edd62-1818-5edb-b3f1-b423d667f2dd"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "d1d4cf8c-13be-5f05-99d5-fc222d1f2cdf": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "ad7c11ee-e47d-56b1-9257-3650f70b367c": {
+      "name": "Wall S",
+      "parent": null,
+      "children": [],
+      "components": {
+        "0a34e1f6-ff75-5f91-8674-a016329ba50c": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              1.0,
+              9.25
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              34.0,
+              3.0,
+              0.5
+            ]
+          }
+        },
+        "8c5d45b7-3a30-50a3-bed7-66e7aff99032": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "dc2edd62-1818-5edb-b3f1-b423d667f2dd"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "7fd93bfc-8b24-5940-a7f9-7702ee62a18d": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "05eaa0ca-6aa1-5416-8f62-4e8af475c6ba": {
+      "name": "Wall E",
+      "parent": null,
+      "children": [],
+      "components": {
+        "638c1d0b-476a-5316-a3f8-bc7e93f9fd79": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              17.25,
+              1.0,
+              -4.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.5,
+              3.0,
+              26.0
+            ]
+          }
+        },
+        "c1973f1d-d2fc-5da9-91f0-3bcca77493fb": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "dc2edd62-1818-5edb-b3f1-b423d667f2dd"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "5c5c0567-be2d-5d72-a7b6-f26f8efab27b": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "870d4981-93bb-5ce5-9c18-f2aa2da9e20b": {
+      "name": "Wall W",
+      "parent": null,
+      "children": [],
+      "components": {
+        "d86f4021-5881-51bb-97ce-df3a684b56fb": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -17.25,
+              1.0,
+              -4.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.5,
+              3.0,
+              26.0
+            ]
+          }
+        },
+        "2393db5a-e0e7-5c79-9bcf-7fd084d8d7d2": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "dc2edd62-1818-5edb-b3f1-b423d667f2dd"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "174f2b39-e9b3-51bd-9b7d-b846ae1b2945": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "479381da-5885-5323-ab80-154d0d33ba71": {
+      "name": "Pillar 1",
+      "parent": null,
+      "children": [],
+      "components": {
+        "60516a1b-1529-518c-988d-c9f8e0390672": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -16.0,
+              2.0,
+              8.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              4.0,
+              1.0
+            ]
+          }
+        },
+        "84cf3865-57f0-584d-84a2-58cc7a1e5bfd": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "579b9d4c-df7d-5134-af4e-312898eeef9b"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "d2333630-d64f-5176-84ca-c57e1f83e5e6": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "27cddcd0-6708-5169-bb03-ac85e3610242": {
+      "name": "Pillar 2",
+      "parent": null,
+      "children": [],
+      "components": {
+        "0744754b-5aa5-553f-855d-3641fd5a4724": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              16.0,
+              2.0,
+              8.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              4.0,
+              1.0
+            ]
+          }
+        },
+        "43ddb7fe-63d6-5797-84e8-899113e61f62": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "579b9d4c-df7d-5134-af4e-312898eeef9b"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "21aadeb8-c7ee-5fa2-88b3-17b78fe3db89": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "e920132a-0059-5bd6-aa06-c344b01461ac": {
+      "name": "Pillar 3",
+      "parent": null,
+      "children": [],
+      "components": {
+        "513bedf4-17e8-5f38-8b4b-6b72c3d809a6": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              16.0,
+              2.0,
+              -16.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              4.0,
+              1.0
+            ]
+          }
+        },
+        "2ddd9e7a-9d80-589f-8bf8-e2c98103f7db": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "579b9d4c-df7d-5134-af4e-312898eeef9b"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "0bd91741-9091-5c74-81a3-82cafdb3a037": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "316f1f2b-2db9-5fe7-a70f-740b7be55e73": {
+      "name": "Pillar 4",
+      "parent": null,
+      "children": [],
+      "components": {
+        "58e6790c-40d8-5a0b-8f9b-82544a7621aa": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -16.0,
+              2.0,
+              -16.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              4.0,
+              1.0
+            ]
+          }
+        },
+        "b0a5f30f-9541-539e-a038-adfd85a6bc5e": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "579b9d4c-df7d-5134-af4e-312898eeef9b"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "0977b946-9dbb-5973-a378-d6f9de53eacf": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "9563ac52-1cf5-5ef9-91c8-ca386b0d46a6": {
+      "name": "Cell N",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b2a19fc6-0968-5974-8c20-25ef3205cb1d": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -13.25,
+              1.0,
+              -11.25
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              7.5,
+              3.0,
+              0.5
+            ]
+          }
+        },
+        "c792eb0c-41c4-54be-aaa7-d7de5abced8d": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "dc2edd62-1818-5edb-b3f1-b423d667f2dd"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "0008305e-6dcb-5353-a3fd-eb4b72fb0f95": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "a2706fa4-127f-55b4-a016-289868353fea": {
+      "name": "Cell S",
+      "parent": null,
+      "children": [],
+      "components": {
+        "59ab2249-0f9c-5cf1-b4cf-f70142b777f4": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -13.25,
+              1.0,
+              -6.75
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              7.5,
+              3.0,
+              0.5
+            ]
+          }
+        },
+        "74d409f0-44e2-538e-8934-8426daefe493": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "dc2edd62-1818-5edb-b3f1-b423d667f2dd"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "cddaadb8-92c2-5d35-b5ac-ce688e068912": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "120268c5-6161-5815-9726-2ad13661a988": {
+      "name": "Gate",
+      "parent": null,
+      "children": [],
+      "components": {
+        "4816a24c-308f-53d8-915c-53e4af7d7f0f": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -9.5,
+              1.2,
+              -9.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.6,
+              2.4,
+              4.0
+            ]
+          }
+        },
+        "f060ddf4-5a3c-54ad-a88c-aaa735445dc6": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "98374c4e-cfe7-5285-9cc4-09d614962d98"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "a8e625bb-bd1b-51ea-8613-58d6ca92dc7b": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        },
+        "b0c8a7fe-3f08-529e-bcc9-f932bb0420fd": {
+          "type": "game.Gate",
+          "version": 1,
+          "data": {
+            "rise": 2.6,
+            "seconds": 1.2
+          }
+        }
+      }
+    },
+    "ad754707-3468-5dc8-b1ee-4800997bca6d": {
+      "name": "Switch",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c4dd435b-e6af-58ff-a7d0-6f06e82e8bcb": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -6.0,
+              0.06,
+              -9.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.6,
+              0.12,
+              1.6
+            ]
+          }
+        },
+        "277a6ed2-b9a3-5965-88ef-901eb81a9905": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cylinder"
+            },
+            "material": {
+              "asset": "697ced50-8994-551d-9c3f-3bfb57f85bf0"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "f1d0b5c4-3085-563e-9665-48d7b8360a2b": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.6,
+              6.0,
+              0.6
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": true,
+            "mask": 4
+          }
+        },
+        "51454faa-ac50-51eb-8787-a8e361a4d101": {
+          "type": "fynkel.TriggerZone",
+          "version": 1,
+          "data": {
+            "event": "switch",
+            "once": false
+          }
+        },
+        "70034419-ae02-560f-a687-f4714c6f4c87": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 3
+          }
+        },
+        "2e344f5e-7627-51a1-a9c1-6e4bf645705d": {
+          "type": "game.Switch",
+          "version": 1,
+          "data": {
+            "prompt": "E — open the gate",
+            "target": "Gate"
+          }
+        }
+      }
+    },
+    "eee5f5e8-2d5d-53cf-ad44-889a3cf8310b": {
+      "name": "Sweeper",
+      "parent": null,
+      "children": [
+        "a952be7a-1e91-55a8-9edc-5829d145b8f5"
+      ],
+      "components": {
+        "d39b43a6-a4d2-5aa5-ad81-77de4df12933": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              6.0,
+              0.9,
+              -2.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              3.0,
+              1.6,
+              0.4
+            ]
+          }
+        },
+        "efdfae1a-65f0-5cc4-940b-17826b025815": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "9ace0e10-47c8-5c9f-b48d-715f2224c7e5"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "1e3e6cb0-3c79-5d67-9166-a5505238d36c": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        },
+        "d485b5ea-ecce-5a52-9acd-13fba56e6e8a": {
+          "type": "fynkel.Oscillate",
+          "version": 1,
+          "data": {
+            "axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "amplitude": 1.5,
+            "frequency": 0.25,
+            "phase": 0.0,
+            "space": "world"
+          }
+        }
+      }
+    },
+    "a952be7a-1e91-55a8-9edc-5829d145b8f5": {
+      "name": "Danger",
+      "parent": "eee5f5e8-2d5d-53cf-ad44-889a3cf8310b",
+      "children": [],
+      "components": {
+        "fdb0053b-b807-5af2-99ee-b46dfcf96a5d": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "545a14b4-23b3-53c2-ac70-1069eefb652a": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.55,
+              0.55,
+              0.9
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": true,
+            "mask": 4
+          }
+        },
+        "1c104a0b-c394-5161-b7c8-86fd138473b6": {
+          "type": "fynkel.TriggerZone",
+          "version": 1,
+          "data": {
+            "event": "hazard",
+            "once": false
+          }
+        },
+        "249964e5-18d8-557f-9ba3-a678acd61c38": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 3
+          }
+        }
+      }
+    },
+    "24761f5e-2f47-5a78-b895-1e7248ab8483": {
+      "name": "Coin 1",
+      "parent": null,
+      "children": [],
+      "components": {},
+      "prefab": {
+        "asset": {
+          "asset": "becedaed-a5e2-54b0-b85f-00eda8cb729c"
+        },
+        "instance": "569e9c8f-bd3d-550b-b8d8-f07a7f23fc75",
+        "overrides": [
+          {
+            "op": "setField",
+            "entity": "e9af29fb-145f-5e73-88d3-3effc361ce29",
+            "component": "96c0490f-1bae-5392-989a-0df2449c92df",
+            "field": "position",
+            "value": [
+              0.0,
+              0.0,
+              -3.0
+            ]
+          }
+        ]
+      }
+    },
+    "a7cd2115-c072-58ff-8f71-1539c1cc8a05": {
+      "name": "Coin 2",
+      "parent": null,
+      "children": [],
+      "components": {},
+      "prefab": {
+        "asset": {
+          "asset": "becedaed-a5e2-54b0-b85f-00eda8cb729c"
+        },
+        "instance": "438428cc-56e0-5c9f-94bd-5d13160cd312",
+        "overrides": [
+          {
+            "op": "setField",
+            "entity": "e9af29fb-145f-5e73-88d3-3effc361ce29",
+            "component": "96c0490f-1bae-5392-989a-0df2449c92df",
+            "field": "position",
+            "value": [
+              0.0,
+              0.0,
+              -6.5
+            ]
+          }
+        ]
+      }
+    },
+    "53e1fc98-3196-5535-b95f-3b4b4167cdc0": {
+      "name": "Coin 3",
+      "parent": null,
+      "children": [],
+      "components": {},
+      "prefab": {
+        "asset": {
+          "asset": "becedaed-a5e2-54b0-b85f-00eda8cb729c"
+        },
+        "instance": "db50bf15-69f5-546d-b891-3ea6db8d94a3",
+        "overrides": [
+          {
+            "op": "setField",
+            "entity": "e9af29fb-145f-5e73-88d3-3effc361ce29",
+            "component": "96c0490f-1bae-5392-989a-0df2449c92df",
+            "field": "position",
+            "value": [
+              4.0,
+              0.0,
+              -9.0
+            ]
+          }
+        ]
+      }
+    },
+    "862739f5-4cad-5a39-99e2-1cd07f27a5b1": {
+      "name": "Coin 4",
+      "parent": null,
+      "children": [],
+      "components": {},
+      "prefab": {
+        "asset": {
+          "asset": "becedaed-a5e2-54b0-b85f-00eda8cb729c"
+        },
+        "instance": "80c8865d-2878-5c94-9d4f-19ca78e77824",
+        "overrides": [
+          {
+            "op": "setField",
+            "entity": "e9af29fb-145f-5e73-88d3-3effc361ce29",
+            "component": "96c0490f-1bae-5392-989a-0df2449c92df",
+            "field": "position",
+            "value": [
+              -12.0,
+              0.0,
+              -9.0
+            ]
+          }
+        ]
+      }
+    },
+    "b94edbad-7d42-597a-88fe-75e4e1f237ae": {
+      "name": "Coin 5",
+      "parent": null,
+      "children": [],
+      "components": {},
+      "prefab": {
+        "asset": {
+          "asset": "d2749035-0813-5383-abbc-8649390c8b8c"
+        },
+        "instance": "c658af98-0e2e-55da-b321-b09b7acef797",
+        "overrides": [
+          {
+            "op": "setField",
+            "entity": "455191a3-9673-532d-8b52-82626804962b",
+            "component": "3d5304a3-ca96-52df-b4be-206f53c582b6",
+            "field": "position",
+            "value": [
+              -15.0,
+              0.0,
+              -9.0
+            ]
+          }
+        ]
+      }
+    },
+    "f655c198-30f7-5853-8c95-48454456a62a": {
+      "name": "Gem",
+      "parent": null,
+      "children": [],
+      "components": {},
+      "prefab": {
+        "asset": {
+          "asset": "0dd85a60-b1ab-52b3-999e-09eb00a048f4"
+        },
+        "instance": "bfa0c958-2e93-5035-80de-f8e50cc7781a",
+        "overrides": [
+          {
+            "op": "setField",
+            "entity": "d949d0fc-e370-552a-9e5f-e0662685bf34",
+            "component": "fd2b68bd-17ef-5947-b41b-fc0c9b8f9584",
+            "field": "position",
+            "value": [
+              0.0,
+              0.0,
+              -4.75
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

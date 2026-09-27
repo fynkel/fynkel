@@ -1,0 +1,1269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fynkel Engine — Architecture Atlas</title>
+<style>
+:root{
+  --bg:#0d1016; --panel:#141923; --panel2:#1a2130; --line:#263045; --text:#d7dde8; --dim:#8b95a8; --head:#f1f4fa;
+  --accent:#6aa8ff; --rust:#e3894b; --dart:#3fb8d9; --app:#b58cff; --host:#6bd49a; --ext:#6f7890; --game:#e6c85a;
+  --C:#ff5d5d; --I:#ffae42; --m:#6aa8ff; --W:#9aa3b5; --ok:#4fd18b;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+code,.mono{font-family:var(--mono);font-size:.86em;background:#1b2231;padding:1px 5px;border-radius:4px;color:#e9d6a8}
+pre{font-family:var(--mono);font-size:12.5px;background:#10141d;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;line-height:1.45}
+nav#toc{position:fixed;top:0;left:0;bottom:0;width:250px;overflow:auto;background:#0a0d12;border-right:1px solid var(--line);padding:18px 14px 40px}
+nav#toc .brand{font-weight:700;color:var(--head);font-size:17px;margin-bottom:2px}
+nav#toc .sub{color:var(--dim);font-size:12px;margin-bottom:14px}
+nav#toc a{display:block;color:var(--dim);font-size:13px;padding:3px 8px;border-radius:5px}
+nav#toc a:hover{background:var(--panel);color:var(--text);text-decoration:none}
+nav#toc a.l2{padding-left:20px;font-size:12px}
+main{margin-left:250px;padding:28px 44px 120px;max-width:1500px}
+h1{color:var(--head);font-size:34px;margin:0 0 6px}
+h2{color:var(--head);font-size:25px;margin:64px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
+h3{color:var(--head);font-size:18px;margin:30px 0 8px}
+h4{color:var(--head);font-size:15px;margin:18px 0 6px}
+p{margin:8px 0}
+.lead{color:var(--dim);font-size:16px;max-width:1000px}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))} .g3{grid-template-columns:repeat(3,minmax(0,1fr))} .g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:1200px){.g3,.g4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.card h4{margin-top:0}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.stat .v{font-size:26px;font-weight:700;color:var(--head)} .stat .k{color:var(--dim);font-size:12.5px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border-bottom:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em;background:#11161f;position:sticky;top:0}
+tr:hover td{background:#121826}
+.sev{display:inline-block;min-width:22px;text-align:center;font-weight:700;font-size:11.5px;border-radius:4px;padding:1px 6px;color:#0b0e13}
+.sev.C{background:var(--C)} .sev.I{background:var(--I)} .sev.m{background:var(--m)} .sev.W{background:var(--W)} .sev.F{background:var(--ok)}
+.tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:999px;padding:0 8px;margin:1px 2px;color:var(--dim)}
+.tag.rust{border-color:var(--rust);color:var(--rust)} .tag.dart{border-color:var(--dart);color:var(--dart)}
+.callout{border-left:4px solid var(--accent);background:var(--panel);padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+.callout.bad{border-color:var(--C)} .callout.warn{border-color:var(--I)} .callout.good{border-color:var(--ok)}
+.mermaid{background:#0f131b;border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0;overflow:auto;text-align:center}
+.legend span{margin-right:14px;font-size:12.5px;color:var(--dim)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:middle}
+/* graph */
+#graphWrap{position:relative;background:#0a0d13;border:1px solid var(--line);border-radius:12px;height:760px;overflow:hidden}
+#graph{width:100%;height:100%;cursor:grab;user-select:none}
+#graph.drag{cursor:grabbing}
+#gpanel{position:absolute;top:10px;right:10px;width:390px;max-height:740px;overflow:auto;background:rgba(20,25,35,.97);border:1px solid var(--line);border-radius:10px;padding:14px;font-size:13px;display:none}
+#gpanel h4{margin:0 0 4px;font-size:16px}
+#gpanel .x{float:right;cursor:pointer;color:var(--dim)}
+#gctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+#gctl label{font-size:13px;color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:4px 9px;cursor:pointer}
+#gctl button,.btn{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:13px}
+#gctl input[type=search]{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:4px 9px;width:200px}
+.node rect{rx:7;ry:7;stroke-width:1.5}
+.node text{font-size:12px;fill:#e8edf6;pointer-events:none;font-family:-apple-system,Inter,sans-serif}
+.node .sub{font-size:10px;fill:#9aa3b5}
+.edge{fill:none;stroke:#3a4760;stroke-width:1.2;opacity:.55}
+.edge.ffi{stroke:#ff6bd1;stroke-dasharray:5 4;opacity:.8;stroke-width:1.6}
+.edge.hot{stroke:#6aa8ff;opacity:1;stroke-width:2}
+.edge.hotin{stroke:#ffae42;opacity:1;stroke-width:2}
+.faded{opacity:.12}
+/* risk table */
+#rctl{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+#rctl .btn.on{background:var(--accent);color:#07101f;border-color:var(--accent)}
+#rtable td:nth-child(1){white-space:nowrap;font-family:var(--mono);font-size:12px;color:var(--dim)}
+#rtable td.d{color:var(--dim);font-size:12.8px}
+.bar{height:8px;border-radius:4px;background:#1c2332;overflow:hidden;display:flex}
+.bar i{display:block;height:100%}
+.bits{display:flex;font-family:var(--mono);font-size:12px;margin:8px 0;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.bits div{padding:8px;text-align:center;border-right:1px solid var(--line)}
+.kv{display:grid;grid-template-columns:170px 1fr;gap:4px 12px;font-size:13.5px}
+.kv div:nth-child(odd){color:var(--dim)}
+small.src{color:var(--dim);font-family:var(--mono);font-size:11.5px}
+.timeline{display:flex;flex-direction:column;gap:4px;margin:10px 0}
+.timeline .row{display:grid;grid-template-columns:34px 190px 1fr 150px;gap:10px;align-items:start;background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:13px}
+.timeline .n{font-family:var(--mono);color:var(--accent);font-weight:700}
+.timeline .nm{color:var(--head);font-weight:600}
+.timeline .cost{color:var(--dim);font-family:var(--mono);font-size:11.5px}
+.timeline .row.risk{border-color:#6b3030}
+</style>
+</head>
+<body>
+
+<nav id="toc">
+  <div class="brand">Fynkel Atlas</div>
+  <div class="sub">How the engine is built · where it is weak<br>Snapshot 2026-09-27 · <span class="mono">a1d6e5a</span> + working tree</div>
+  <a href="#overview">0 · At a glance</a>
+  <a href="#graph-sec">1 · Graph view (interactive)</a>
+  <a href="#layers">2 · Layers &amp; big picture</a>
+  <a href="#concepts">3 · Scenes, GameObjects, Components</a>
+  <a href="#loop">4 · The frame &amp; the tick (execution order)</a>
+  <a class="l2" href="#loop-frame">4.1 One frame, end to end</a>
+  <a class="l2" href="#loop-dart">4.2 Dart phases</a>
+  <a class="l2" href="#loop-tick">4.3 Rust tick order</a>
+  <a class="l2" href="#loop-time">4.4 Time model</a>
+  <a class="l2" href="#loop-life">4.5 Behaviour lifecycle</a>
+  <a class="l2" href="#loop-cost">4.6 Measured cost</a>
+  <a href="#bridge">5 · Rust ↔ Dart bridge</a>
+  <a class="l2" href="#bridge-wire">5.1 Wire format</a>
+  <a class="l2" href="#bridge-calls">5.2 FFI calls per frame</a>
+  <a class="l2" href="#bridge-mem">5.3 Memory &amp; lifetimes</a>
+  <a class="l2" href="#bridge-err">5.4 Errors &amp; panics</a>
+  <a class="l2" href="#bridge-gen">5.5 Codegen</a>
+  <a href="#physics">6 · Physics</a>
+  <a href="#anim">7 · Animation</a>
+  <a href="#audio">8 · Audio</a>
+  <a href="#render">9 · Rendering &amp; presentation</a>
+  <a href="#assets">10 · Documents &amp; asset pipeline</a>
+  <a href="#editor">11 · Editor</a>
+  <a href="#play">12 · Play mode</a>
+  <a href="#platforms">13 · Platforms &amp; hosts</a>
+  <a href="#health">14 · Engineering health</a>
+  <a href="#risks">15 · Risk register (filterable)</a>
+  <a href="#order">16 · Fix before building</a>
+  <a href="#glossary">17 · Glossary</a>
+</nav>
+
+<main>
+<h1>Fynkel Engine — Architecture Atlas</h1>
+<p class="lead">A map of how the engine is built: its systems, how data flows between Rust and Dart, when each piece of code runs in a frame, which platforms each part runs on, and where the implementation is <b>risky or wrong</b>. It was built by reading the code (every crate, package, host and the editor) and cross-checking it against <code>docs/foundation.md</code>, the ADRs and the gate reports. It is meant to answer one question: <i>is this foundation safe to build on, and what must be fixed first?</i></p>
+
+<div class="callout warn"><b>How to read it.</b> Severity: <span class="sev C">C</span> critical — a game hits it soon, or it corrupts/loses work or crashes · <span class="sev I">I</span> important · <span class="sev m">m</span> minor · <span class="sev W">W</span> watch / decided later · <span class="sev F">✓</span> fixed in the foundation pass. Where a finding matches a row in <code>docs/foundation.md</code>, its id (e.g. <b>F3.1</b>) is given and the severity is the one that row uses. Findings marked <b>NEW</b> are not in foundation.md yet. File references are <code>path:line</code> at this snapshot. The diagrams need an internet connection once to load Mermaid; the graph view and risk table do not.</div>
+
+<!-- ============================================================ -->
+<h2 id="overview">0 · At a glance</h2>
+<div class="grid g4">
+  <div class="stat"><div class="v">~147k</div><div class="k">lines of Rust (18 crates + platform + 2 hosts + CLI)</div></div>
+  <div class="stat"><div class="v">~95k</div><div class="k">lines of Dart (5 packages + editor 86k)</div></div>
+  <div class="stat"><div class="v">~700</div><div class="k">Rust <code>#[test]</code>s · ~875 Dart tests (editor 576)</div></div>
+  <div class="stat"><div class="v">701</div><div class="k">commits in 9 days (2026-09-19 → 27)</div></div>
+  <div class="stat"><div class="v">33</div><div class="k">ADRs (0005 licence still open)</div></div>
+  <div class="stat"><div class="v">2</div><div class="k">1.0 platforms: macOS + iOS (Metal)</div></div>
+  <div class="stat"><div class="v">1</div><div class="k">thread for gameplay: step, extract and render all run on the Flutter UI isolate</div></div>
+  <div class="stat"><div class="v" id="riskCountBig">–</div><div class="k">open findings in the register below</div></div>
+</div>
+
+<h3>The engine in one paragraph</h3>
+<p><b>Rust owns the world; Dart owns gameplay; Flutter is only a host and UI.</b> <code>fynkel_core::World</code> is a library (ADR-0007): an <code>hecs</code> ECS behind <code>fynkel_ecs</code>, transforms and hierarchy in <code>fynkel_scene</code>, Rapier physics, animation, its own audio mixer, and a fixed 60 Hz tick. Every frame, a <b>host</b> calls it synchronously. Here that is Flutter's <code>Ticker</code> in <code>FynkelGameView</code>, the winit standalone host, or the headless test host. Dart behaviours (<code>package:fynkel</code>) never touch Rust memory directly. They write <b>commands</b> into a binary batch, call <code>step()</code> through <code>dart:ffi</code>, and read back a zero-copy <b>snapshot</b> of transforms plus an <b>event</b> buffer (ADR-0004). The renderer (<code>fynkel_render</code>, wgpu) reads an interpolated <b>extract</b> of the world and draws into a ring of IOSurfaces that Flutter composites as a texture without any CPU copy (ADR-0002, <code>platform/apple</code>). Content is strict JSON documents (scenes, prefabs, materials, shaders, controllers) that <code>fynkel_import</code> <b>cooks</b> into a content-addressed binary cache. The runtime never reads a source document. The <b>editor</b> is a Flutter desktop app built per project. It edits documents through a Rust authoring session (transactions, undo) and runs <b>Play</b> in its own process by compiling the game in (ADR-0021).</p>
+
+<h3>Verdict</h3>
+<div class="grid g3">
+  <div class="card"><h4 style="color:var(--ok)">Solid — build on it</h4>
+  <ul>
+    <li>The layering is clean and points one way (contracts → ecs → scene → core → wire/native → Dart). <code>hecs</code> is provably hidden.</li>
+    <li>Batched command/snapshot protocol, generated codecs, a schema fingerprint and byte fixtures shared by Rust and Dart.</li>
+    <li>Determinism: physics iterates in entity order, the audio engine is deterministic, and headless checksums hold.</li>
+    <li>Audio is real-time safe: SPSC rings, and a test proves the mixer does zero allocations.</li>
+    <li>The cooked container is bounds-checked, CRC'd and <code>forbid(unsafe)</code>. The cache key is content-addressed and propagates through dependencies.</li>
+    <li>The authoring ABI and <code>fynkel_native</code> wrap every call in <code>catch_unwind</code> and poison instead of crashing.</li>
+    <li>The Animator state machine is pure and well tested.</li>
+  </ul></div>
+  <div class="card"><h4 style="color:var(--I)">Shaky — fix before scaling</h4>
+  <ul>
+    <li>Object cost: <code>instantiate</code> re-reads and re-parses the file on every call, <code>propagate</code> walks every node up to 6× per tick, and <code>refresh_active</code> walks the whole tree.</li>
+    <li>Prefab-internal references resolve by <i>name, world-wide</i>.</li>
+    <li>Physics: one Rapier body per entity (no compound), and a body is rebuilt on any collider, layer or scale change.</li>
+    <li>Everything runs on one thread: gameplay, physics, extract, render encode, editor cook, asset decode.</li>
+    <li>God objects: the Rust <code>World</code> (~40–59 fields, a 235-line <code>step()</code>), Dart's <code>world.dart</code> (3,632 lines), the editor's <code>app.dart</code> (3,303), and <code>fynkel_render/lib.rs</code> (5,737).</li>
+  </ul></div>
+  <div class="card"><h4 style="color:var(--C)">Unsafe — fix first</h4>
+  <ul>
+    <li><code>platform/apple</code>: 22 <code>extern "C"</code> functions with <b>zero</b> <code>catch_unwind</code> and 18 <code>lock().unwrap()</code>. A panic there aborts the app or editor.</li>
+    <li>After <code>World.dispose()</code>, Dart's snapshot view still points into freed native memory (a use-after-free).</li>
+    <li>A poisoned world throws every frame, forever.</li>
+    <li>Two live <code>&amp;mut</code> to one world in <code>input_view</code>/<code>drain_events</code> (undefined behaviour).</li>
+    <li>One shared query buffer: a held query view can silently change to another query's bytes.</li>
+    <li>One missing asset fails the cook of every document that depends on it.</li>
+  </ul></div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="graph-sec">1 · Graph view — every module, its dependencies and its risks</h2>
+<p>Each box is a crate, package, app or host. An edge <b>A → B</b> means A depends on B. Pink dashed edges are <b>FFI boundaries</b>, where Dart calls into a native library. Columns are dependency depth: the foundations are on the left and what users touch is on the right. <b>Click</b> a box for its purpose, size, tests, platforms and every risk filed against it. <b>Hover</b> to light up what it uses (blue) and what uses it (orange). Drag to pan, scroll to zoom.</p>
+<div id="gctl">
+  <label><input type="checkbox" id="gExt"> external libraries</label>
+  <label><input type="checkbox" id="gGames" checked> games &amp; examples</label>
+  <label><input type="checkbox" id="gRisk" checked> colour the border by worst risk</label>
+  <input type="search" id="gFind" placeholder="find module…">
+  <button id="gReset">reset view</button>
+  <span class="legend">
+    <span><i class="dot" style="background:var(--rust)"></i>Rust crate</span>
+    <span><i class="dot" style="background:var(--dart)"></i>Dart package</span>
+    <span><i class="dot" style="background:var(--app)"></i>App</span>
+    <span><i class="dot" style="background:var(--host)"></i>Host / platform</span>
+    <span><i class="dot" style="background:var(--game)"></i>Game</span>
+    <span><i class="dot" style="background:var(--ext)"></i>External</span>
+  </span>
+</div>
+<div id="graphWrap">
+  <svg id="graph"></svg>
+  <div id="gpanel"></div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="layers">2 · Layers &amp; the big picture</h2>
+<p>ADR-0007 is the rule that shapes everything: the <b>engine is a library and the host owns the loop</b>. <code>fynkel_core</code> starts no thread and knows nothing about Flutter. Each host drives the same <code>begin_frame → ticks → presentation → extract → render</code> sequence, so the pixel tests, <code>fynkel render</code> and the Flutter viewport all run the <i>same</i> code path.</p>
+<pre class="mermaid">
+flowchart TB
+  subgraph USER["What a game developer touches"]
+    GAME["Game code: Behaviours, DataAssets, ObjectSpec, HUD widgets"]
+    DOCS["Documents: .scene / .prefab / .material / .shader / .controller JSON"]
+    EDITOR["apps/editor - Flutter desktop, built per project, JIT"]
+    CLI["fynkel CLI - validate, cook, run, test, render, codegen, editor"]
+  end
+  subgraph DART["Dart layer - Flutter UI isolate"]
+    SDK["package:fynkel - World, GameObject, Behaviour, Time, Input, SceneManager"]
+    FFLUT["package:fynkel_flutter - FynkelGameView, Ticker, input capture, texture"]
+    FAUTH["package:fynkel_authoring - session FFI"]
+    FEAPI["package:fynkel_editor_api - extensions"]
+    GEN["fynkel_generator - build_runner codegen"]
+  end
+  subgraph ABI["C ABI - one dylib on Apple"]
+    NATIVE["fynkel_native - fynkel_world_*, fynkel_authoring_* - catch_unwind"]
+    APPLE["platform/apple - fynkel_apple_viewport_* - NO catch_unwind"]
+  end
+  subgraph RUNTIME["Rust runtime"]
+    CORE["fynkel_core - World, tick, commands, events, catalogue, load"]
+    SCENE["fynkel_scene - Transform, hierarchy, propagate, active"]
+    ECS["fynkel_ecs - hecs facade, Entity handles"]
+    PHYS["fynkel_physics - Rapier"]
+    ANIM["fynkel_animation - clips, skins, controller"]
+    AUD["fynkel_audio - engine + cpal mixer"]
+    WIRE["fynkel_wire - generated codecs, fingerprint"]
+    RENDER["fynkel_render - wgpu passes"]
+    SHADER["fynkel_shader - naga, .shader"]
+    ASSETS["fynkel_assets - cache index, residency, decode"]
+  end
+  subgraph TOOLS["Authoring and pipeline - editor and CLI only"]
+    DOC["fynkel_document - schemas, validation, prefabs, Editor transactions"]
+    IMPORT["fynkel_import - glTF, FBX, images, audio, cook"]
+    COOKED["fynkel_cooked - .fyna container"]
+    AUTH["fynkel_authoring - session, ops, preview world"]
+  end
+  CONTRACTS["fynkel_contracts - ids, Status, codes, schema, ABI_VERSION"]
+  GAME --> SDK
+  GAME --> FFLUT
+  EDITOR --> FAUTH
+  EDITOR --> FFLUT
+  EDITOR --> FEAPI
+  DOCS --> IMPORT
+  CLI --> IMPORT
+  SDK -. "dart:ffi" .-> NATIVE
+  FFLUT -. "dart:ffi" .-> APPLE
+  FAUTH -. "dart:ffi" .-> NATIVE
+  APPLE --> NATIVE
+  APPLE --> RENDER
+  NATIVE --> CORE
+  NATIVE --> WIRE
+  NATIVE --> ASSETS
+  NATIVE --> AUTH
+  CORE --> SCENE --> ECS
+  CORE --> PHYS
+  CORE --> ANIM
+  CORE --> AUD
+  RENDER --> ASSETS
+  RENDER --> SHADER
+  ASSETS --> COOKED
+  ASSETS -. "links the full validator - F6.4" .-> DOC
+  IMPORT --> DOC
+  IMPORT --> COOKED
+  AUTH --> DOC
+  ECS --> CONTRACTS
+</pre>
+
+<h3>Architectural rules (binding ADRs) and whether the code keeps them</h3>
+<table>
+<tr><th>Rule</th><th>ADR</th><th>Holds?</th><th>Notes</th></tr>
+<tr><td>Engine is a library; hosts own the loop; no Flutter dependency in core</td><td>0007</td><td><span class="sev F">✓</span></td><td>Three hosts share one path. The "render thread" is deferred (E4).</td></tr>
+<tr><td><code>hecs::Entity</code> never crosses a boundary</td><td>0003</td><td><span class="sev F">✓</span></td><td>Enforced by <code>fynkel_ecs/tests/contract.rs</code>.</td></tr>
+<tr><td>Batched commands in, snapshot/events out, one <code>step()</code> per tick</td><td>0004</td><td><span class="sev F">✓</span></td><td>~7 FFI calls per frame. Queries and <code>instantiate</code> are extra synchronous calls.</td></tr>
+<tr><td>Gameplay on the main isolate, sync step, fixed 60 Hz + interpolation</td><td>0008</td><td><span class="sev F">✓</span></td><td>Amended 2026-09-27: a transform write in <code>update</code> shows the same frame.</td></tr>
+<tr><td>Dart for the few, native components for the many</td><td>0011</td><td><span class="sev I">~</span></td><td>The "many" path still pays O(N) per tick in propagate/refresh_active/resolve_named (F3.3–3.5).</td></tr>
+<tr><td>Rust structs are the schema source of truth</td><td>0012</td><td><span class="sev I">~</span></td><td>A new component still takes ~9 hand steps. The <code>bridge::query</code> arm and editor hints are hand-written (F6.2).</td></tr>
+<tr><td>Panics never unwind across the ABI; the world is poisoned</td><td>0014</td><td><span class="sev C">✗</span></td><td>True for <code>fynkel_native</code>, <b>false for <code>platform/apple</code></b>. The Dart host also ignores poison (F4.1, F4.3).</td></tr>
+<tr><td>Runtime never reads a source document</td><td>M3-03</td><td><span class="sev I">~</span></td><td>True at run time, but the runtime binary still <i>links</i> <code>fynkel_document</code> and the JSON Schema validator (F6.4).</td></tr>
+<tr><td>A game's build has no authoring code</td><td>§1.1 r6</td><td><span class="sev F">✓</span></td><td>The <code>authoring</code> cargo feature is off in games; CI checks with <code>nm</code>.</td></tr>
+<tr><td>Renderer stays backend-neutral</td><td>0009</td><td><span class="sev m">~</span></td><td>Render crate uses <code>Backends::PRIMARY</code>, CI checks wasm32. The standalone host hard-codes <code>Backends::METAL</code>.</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="concepts">3 · Scenes, GameObjects, Components — the object model</h2>
+<p>The mental model is Unity's. The implementation is split across two languages, and knowing <b>which side owns what</b> is the most important thing in this document.</p>
+<table>
+<tr><th>Unity concept</th><th>Fynkel (Rust side)</th><th>Fynkel (Dart side)</th><th>Truth lives in</th></tr>
+<tr><td>GameObject</td><td>An ECS entity: <code>Entity</code> handle + <code>Transform</code> + <code>WorldTransform</code> + optional <code>Name</code>, <code>Parent</code>/<code>Children</code>, <code>Layer</code>, <code>Tags</code>, <code>InactiveSelf</code>. No "GameObject" record exists in Rust.</td><td><code>GameObject</code> (<code>world.dart:2432</code>) wraps an <code>int</code> entity, or a temp id while pending. Deduplicated in <code>_byEntity</code>.</td><td>Rust</td></tr>
+<tr><td>Transform</td><td><code>Transform</code> (local TRS, id 1, authoritative), <code>WorldTransform{matrix, dirty}</code> cache, <code>PrevWorld</code> for interpolation</td><td>Reads: staged overlay → last snapshot → query. <code>worldTransform</code> is <b>last tick only</b> (F1.10, documented).</td><td>Rust (Dart has a copy one tick behind)</td></tr>
+<tr><td>Built-in component (Rigidbody, Collider, Light, MeshRenderer…)</td><td>~25 native components, <code>#[derive(Schema)]</code> structs stored in hecs</td><td>Generated <code>WireRecord</code> classes in <code>schema.g.dart</code>; <code>get&lt;T&gt;()</code> = one components query per object per tick, cached</td><td>Rust</td></tr>
+<tr><td>MonoBehaviour</td><td>Nothing. Only a <code>fynkel.Behaviour</code> slot holding opaque JSON at load time.</td><td><code>Behaviour</code> subclass, <code>@FynkelBehaviour</code>, run by <code>_BehaviourSystem</code></td><td><b>Dart only</b></td></tr>
+<tr><td>Scene</td><td><code>LoadedScene</code> with <code>Uuid ↔ Entity</code> maps; replace/additive/unload in <code>load.rs</code></td><td><code>SceneManager</code>, deferred <code>transition</code></td><td>Documents on disk → cooked, <b>already expanded</b></td></tr>
+<tr><td>Prefab</td><td>Expanded <b>at cook time</b>. Runtime <code>instantiate</code> re-reads the cooked prefab chunk.</td><td><code>world.instantiate</code> / <code>clone</code> (the clone re-points script references)</td><td>Documents; ids are <code>derive_id(instance, local)</code> (UUIDv5)</td></tr>
+<tr><td>ScriptableObject</td><td>Cooked data record</td><td><code>@DataAsset</code>, one shared instance per world</td><td>Documents</td></tr>
+<tr><td>Tag / Layer</td><td><code>Tags{bits:u32}</code> (32 tags), <code>Layer{0..32}</code></td><td><code>LayersAndTags</code></td><td>Project file</td></tr>
+</table>
+
+<h3>The entity handle</h3>
+<p>Defined in <code>fynkel_contracts/src/handle.rs</code>: 64 bits, packed. <code>0</code> is NULL. A <b>temp</b> handle (world = 0, generation = 0) names an entity spawned in the same batch and is resolved inside <code>World::resolve_temps</code> (<code>world.rs:912</code>).</p>
+<div class="bits"><div style="flex:8;background:#1d2a3f">world : 8</div><div style="flex:24;background:#2a2340">generation : 24 (wraps after 16.7 M reuses of one slot — F3.11)</div><div style="flex:32;background:#1f3328">slot : 32 (LIFO free list)</div></div>
+
+<h3>Hierarchy &amp; active state</h3>
+<div class="grid g2">
+<div class="card"><h4>How it works</h4>
+<ul>
+<li><code>Parent(Entity)</code> + <code>Children(Vec)</code>, changed only through <code>fynkel_scene</code> functions. <code>is_ancestor</code> rejects cycles.</li>
+<li>Writing a <code>Transform</code> marks it dirty. <code>propagate()</code> is the only function that recomputes world matrices.</li>
+<li><code>InactiveSelf</code> (own flag) and <code>Inactive</code> (derived, i.e. <code>!activeInHierarchy</code>) are recomputed by <code>refresh_active()</code>.</li>
+<li>Names are a plain <code>Name(String)</code>, not indexed. <code>find</code>/<code>findWithTag</code> is one <code>EntityInfo</code> query per tick followed by a linear scan.</li>
+</ul></div>
+<div class="card"><h4 style="color:var(--C)">What's wrong</h4>
+<ul>
+<li><span class="sev C">C</span> <code>propagate</code> (<code>fynkel_scene/src/lib.rs:463</code>) collects every root and pushes <i>every</i> child. Its doc says "dirty subtrees only", but it only skips the multiply. It is called at <b>6 sites</b> in <code>world.rs</code> (733, 1057, 1463, 1485, 1498, 1519): up to 4× per tick, plus once per keep-world <code>SetParent</code> command. <b>F3.3</b></li>
+<li><span class="sev I">I</span> <code>refresh_active</code> does a full BFS from all roots as soon as <i>any</i> object is inactive. <b>F3.4</b></li>
+<li><span class="sev C">C</span> Named targets (<code>Follow.target</code>, camera targets) resolve to the first match <i>world-wide</i>, so two prefab instances bind to the same "Head". A miss costs an O(N) string scan every tick. <b>F3.5</b></li>
+<li><span class="sev I">I</span> <code>fynkel_scene</code> has <b>5 tests</b> but owns the most-called code in the runtime. <b>F6.5</b></li>
+</ul></div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="loop">4 · The frame &amp; the tick — execution order and time</h2>
+
+<h3 id="loop-frame">4.1 One frame, end to end (Flutter host)</h3>
+<p>Everything from the vsync tick to <code>queue.submit()</code> runs <b>synchronously on the Flutter UI thread</b>. Only GPU completion (a Metal completion handler) and texture acquire (the raster thread) happen elsewhere.</p>
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant T as Flutter Ticker - UI isolate
+  participant GV as FynkelGameView
+  participant W as Dart World.frame
+  participant N as fynkel_native - Rust World
+  participant V as platform/apple viewport
+  participant G as Metal GPU
+  participant R as Flutter raster thread
+  T->>GV: onTick(elapsed)
+  GV->>W: frame(dt, input, fixedUpdate, update)
+  W->>N: fynkel_world_begin_frame(dt x timeScale) -> plan.steps
+  W->>N: fynkel_world_capture_input(buf) - skipped if nothing changed
+  W->>N: fynkel_world_drain_events
+  loop plan.steps times, 0 to 4 at 60 Hz
+    W->>W: input.refresh, host fixedUpdate, Behaviour.fixedUpdate - stage commands
+    W->>N: fynkel_world_submit_commands(Simulation batch)
+    W->>N: fynkel_world_step -> native tick, see 4.3
+    W->>N: fynkel_world_snapshot - zero-copy view
+    W->>N: fynkel_world_drain_events
+    W->>W: contacts, zones, animation events, afterPhysics
+  end
+  W->>W: update, coroutines, lateUpdate, host update
+  W->>N: fynkel_world_submit_commands(Presentation batch) - applied now
+  W-->>GV: rethrow deferred errors at the end, F1.5 and F1.6
+  GV->>V: fynkel_apple_viewport_render(vp, world)
+  V->>N: world.extract - interpolate S n to S n+1 by alpha
+  V->>V: renderer.prepare - cull, instance, upload
+  V->>G: encode passes, queue.submit, then an empty fence command buffer
+  G-->>V: completion handler - slot Rendering to Ready
+  R->>V: acquire_presented - waits up to 3 ms for the newest frame
+  R->>R: Impeller composites the IOSurface texture, no CPU copy
+</pre>
+<div class="callout warn"><b>Consequence:</b> the whole simulation plus render encode shares the UI thread's ~8.3 ms budget at 120 Hz. The stress scene already measures <b>8.06 ms p95 total work</b> (simulate 3.80 + render 4.21). This is the documented E4 carry-over and ADR-0008's migration trigger. <code>FynkelGameView._frame</code> has <b>no try/catch</b> (F4.1).</div>
+
+<h3 id="loop-dart">4.2 The Dart phases inside <code>World.frame</code> (<code>world.dart:870-1025</code>)</h3>
+<pre class="mermaid">
+flowchart LR
+  A["scenes._perform - deferred transitions"] --> B["beginFrame - timeScale, clamp to maxFrameDt 0.25 s"]
+  B --> C["captureInput"] --> D["drainEvents - carry spawn and destroy"]
+  D --> E{"for each planned tick"}
+  E -->|tick| F["input.refresh - tick edges"]
+  F --> G["host.fixedUpdate - deferred"]
+  G --> H["settle lifecycle, then Behaviour.fixedUpdate, Time.delta = fixedDt"]
+  H --> I["step - flush simulation batch to native"]
+  I --> J["drainEvents - resolve temp ids, subscribe"]
+  J --> K["afterPhysics - contacts, zones, anim, markers, playback, then afterPhysics"]
+  K --> E
+  E -->|done| L["input.refresh frameEdges"]
+  L --> M["settle, then update, coroutines, lateUpdate - writes go to the PRESENTATION lane"]
+  M --> N2["host.update - deferred"]
+  N2 --> O["flushPresentation - deferred"]
+  O --> P["throwDeferred - frame is whole, then throw"]
+</pre>
+<p>Lanes (ADR-0008 + the 2026-09-27 amendment): a transform write made in <code>fixedUpdate</code> or outside a frame is a <b>simulation</b> command, applied at the next tick. A write in <code>update</code>/<code>lateUpdate</code> on a non-dynamic-body object is a <b>presentation</b> command: shown this frame and also taken by the next tick. A dynamic body's write is always a teleport at the next tick. <span class="sev m">m</span> <b>NEW:</b> the lane check <code>_presentsWrite()</code> (<code>world.dart:3172</code>) calls <code>_lookup(RigidBody)</code>. On an object's first write each tick that costs one native components query, cached for the rest of the tick. It is cheap but not free, and nothing measures it for many objects moved in <code>update</code>.</p>
+
+<h3 id="loop-tick">4.3 The Rust tick — <code>World::step()</code> (<code>crates/fynkel_core/src/world.rs:1345-1580</code>)</h3>
+<p>One 235-line function. The order is fixed by sequential code, and a hand-kept <code>SYSTEMS</code> array (<code>world.rs:9-25</code>) mirrors it for the timers. Each phase is timed into <code>SystemTime</code>.</p>
+<div class="timeline">
+  <div class="row"><span class="n">1</span><span class="nm">Characters</span><span><code>drive_characters</code>: CharacterControllers bound to actions queue Move/Jump <i>before</i> the batch, so a script command wins.</span><span class="cost">O(characters)</span></div>
+  <div class="row"><span class="n">2</span><span class="nm">record_prev_world</span><span>Copies every <code>WorldTransform</code> into <code>PrevWorld</code>; S[n] becomes the interpolation source.</span><span class="cost">O(N) every tick</span></div>
+  <div class="row"><span class="n">3</span><span class="nm">Commands</span><span>Drain <code>staged</code>, <code>resolve_temps</code>, <code>apply_simulation</code> each. Body commands are only <i>queued</i>. Then <code>refresh_active()</code> if anything structural changed.</span><span class="cost">O(cmds) + O(N) if any inactive</span></div>
+  <div class="row"><span class="n">4</span><span class="nm">Animation</span><span><code>run_animation</code>: animators pose subtrees first, then IK. Writes <code>Transform</code> via <code>set_local</code>. Root motion is handed to physics.</span><span class="cost">200 rigs ≈ 0.30 ms</span></div>
+  <div class="row"><span class="n">5</span><span class="nm">Catalogue movers</span><span>Rotator → Oscillate → LifetimeDespawn → Emitter (ADR-0011 "for the many"). The Emitter calls <code>instantiate_inner</code> without a propagate.</span><span class="cost">5,000 movers ≈ 0.13 ms</span></div>
+  <div class="row risk"><span class="n">6</span><span class="nm">Physics</span><span><code>propagate</code> (#1), then <code>Physics::step</code>: sync ECS→Rapier (rebuild on shape/layer/scale change), body commands, root motion, character move, <code>step_with_events</code>, write back dynamic/kinematic poses, collect contacts.</span><span class="cost">500 bodies ≈ 3.2 ms</span></div>
+  <div class="row"><span class="n">7</span><span class="nm">flush_deferred</span><span>Deferred despawns; the listed entities only, not their subtrees (F3.10).</span><span class="cost">O(pending)</span></div>
+  <div class="row risk"><span class="n">8</span><span class="nm">Transforms</span><span><code>propagate</code> (#2) → CameraRigs (<code>ThirdPersonCamera</code>) → <code>propagate</code> (#3 if a rig moved) → Follow + LookAtCamera → <code>propagate</code> (#4 if any moved) → <code>physics.record</code> → <code>seed_prev_world</code> → <code>apply_teleports</code></span><span class="cost">up to 4 full-tree walks</span></div>
+  <div class="row"><span class="n">9</span><span class="nm">Audio</span><span><code>run_audio</code> last, so a destroyed source's voice stops this tick. Reconciles AudioSources, then <code>Audio::advance(dt)</code> (the engine's own clock).</span><span class="cost">small</span></div>
+  <div class="row"><span class="n">10</span><span class="nm">input.end_tick</span><span>Consumes edges, so catch-up ticks in the same frame see held state only.</span><span class="cost">—</span></div>
+  <div class="row"><span class="n">11</span><span class="nm">clock.consume_step</span><span><code>tick++</code>, <code>accumulator -= fixed_dt</code>.</span><span class="cost">—</span></div>
+  <div class="row risk"><span class="n">12</span><span class="nm">Publish</span><span>Snapshot = every <b>subscribed</b> entity (88 B each), and subscriptions never shrink (F4.4). Events move from the physics lane to general. Diagnostics are rebuilt.</span><span class="cost">O(subscribed) — grows</span></div>
+</div>
+<pre class="mermaid">
+flowchart LR
+  subgraph ownership["Who wins a transform, within one tick"]
+    direction LR
+    CMD["Commands, sim lane"] --> AN["Animation pose"] --> MOV["Catalogue movers"] --> PH["Physics: dynamic bodies overwrite"] --> CAM["Camera rigs"] --> FOL["Follow / billboards"]
+  end
+  PRES["Presentation lane - update and lateUpdate writes"] -. "overrides this frame's extract, next tick takes it" .-> FOL
+</pre>
+
+<h3 id="loop-time">4.4 The time model (after foundation fixes 1.1, 1.3 and 1.4)</h3>
+<table>
+<tr><th>Value</th><th>In fixedUpdate / afterPhysics / contacts</th><th>In update / lateUpdate / coroutines</th><th>Source</th></tr>
+<tr><td><code>Time.delta</code></td><td><code>fixedDt</code> (1/60)</td><td>frame dt × timeScale, clamped to 0.25 s</td><td><code>context.dart</code>, <code>_WorldTime</code></td></tr>
+<tr><td><code>Time.unscaledDelta</code></td><td colspan="2">the real frame seconds, before timeScale</td><td></td></tr>
+<tr><td><code>Time.elapsed</code></td><td><code>tick × fixedDt</code> (Unity fixedTime)</td><td><code>(tick + alpha) × fixedDt</code> (Unity time)</td><td><code>world.dart:3477</code></td></tr>
+<tr><td><code>Time.timeScale</code></td><td colspan="2">scales what the native clock receives. At 0 no ticks run, but <code>update</code> still runs with delta = 0.</td><td><code>world.dart:176, 748</code></td></tr>
+<tr><td>Clamps</td><td colspan="2"><code>MAX_FRAME_DT = 0.25</code>, <code>DEFAULT_MAX_STEPS_PER_FRAME = 4</code>, <code>DEFAULT_FIXED_DT = 1/60</code> (<code>fynkel_contracts/src/lib.rs:33-37</code>). Excess time is dropped and a <code>MissedDeadline</code> is emitted.</td><td><code>clock.rs:84</code></td></tr>
+<tr><td>Interpolation</td><td colspan="2"><code>alpha = accumulator / fixed_dt</code>. <code>extract()</code> lerps PrevWorld → WorldTransform. An overridden entity and its subtree skip interpolation.</td><td><code>world.rs:1985</code></td></tr>
+</table>
+
+<h3 id="loop-life">4.5 Behaviour lifecycle</h3>
+<pre class="mermaid">
+stateDiagram-v2
+  [*] --> Attached: addBehaviour, or a scene load
+  Attached --> Created: settle - onCreate, parents first, active only
+  Created --> Enabled: onEnable
+  Enabled --> Started: start - every pending start runs before the pass, F1.8 fixed
+  Started --> Started: fixedUpdate, afterPhysics, update, lateUpdate, contacts
+  Started --> Disabled: SetActive false - onDisable, children first
+  Disabled --> Enabled: SetActive true - onEnable
+  Started --> Destroying: destroy - Destroy cmd at the next tick
+  Disabled --> Destroying
+  Destroying --> [*]: onDisable then onDestroy at the next settle
+  note right of Attached
+    instantiate and clone run onCreate and onEnable before returning - F1.7 fixed
+    world.spawn and addBehaviour on a live object wait for the next boundary
+  end note
+</pre>
+<table>
+<tr><th>Gap vs Unity</th><th>Sev</th><th>Where</th></tr>
+<tr><td><code>worldTransform</code>, <code>activeInHierarchy</code> and <code>find*</code> read the last tick (no read-your-writes). Decided: documented, not changed.</td><td><span class="sev F">✓</span> F1.10</td><td><code>docs/unity-parity.md</code> § On purpose; <code>test/read_timing_test.dart</code></td></tr>
+<tr><td>Spawn + addBehaviour defers; instantiate/clone/build don't. The asymmetry is not documented.</td><td><span class="sev m">m</span> NEW</td><td>Put it in <code>dart-sdk.md</code>.</td></tr>
+<tr><td>Debug builds throw <code>FynkelError</code> at the end of the frame instead of logging and continuing.</td><td><span class="sev W">W</span></td><td>Deliberate (ADR-0014), but it surprises Unity users.</td></tr>
+</table>
+
+<h3 id="loop-cost">4.6 Measured cost (M3 gate, M3 Max, <code>benchmarks/m3</code>)</h3>
+<table>
+<tr><th></th><th>Stress scene (8,406 entities, 6,001 meshes, 540 bodies, 200 rigs, 5,000 movers)</th><th>Reference game (179 entities)</th></tr>
+<tr><td>Flutter host</td><td>120 fps, <b>total work 8.06 ms p95</b> (simulate 3.80, render 4.21)</td><td>120 fps, total 1.52 ms p95</td></tr>
+<tr><td>Standalone</td><td>122 fps, GPU 4.4 ms p95</td><td>121 fps</td></tr>
+<tr><td>Headless</td><td>physics ≈ 3.2 ms · animation 0.30 ms · movers 0.13 ms</td><td>step p95 74 µs</td></tr>
+<tr><td>Dart heap</td><td>47 KB/frame</td><td>17.6–26 KB/frame (framework floor ≈ 12)</td></tr>
+<tr><td>Memory</td><td>native 26–28 MB, GPU 207–214 MB</td><td>native 6.5 MB, GPU 206 MB</td></tr>
+</table>
+<div class="callout bad"><b>What is not measured:</b> nothing above ~16k entities (F3.9 asks for a 50k headless benchmark). Spawn rate or <code>instantiate</code> throughput. A long session, where the subscription and residency growth would show. A physical iPhone running the game (only a smoke test and the simulator; E3). All numbers come from one M3 Max.</div>
+
+<!-- ============================================================ -->
+<h2 id="bridge">5 · The Rust ↔ Dart bridge</h2>
+
+<h3 id="bridge-wire">5.1 Wire format (ADR-0004, <code>crates/fynkel_native/src/buffer.rs</code>)</h3>
+<p>Every buffer that crosses the ABI starts with a 24-byte header. After it come the records, each at its field's natural alignment and padded to 8, followed by a string tail.</p>
+<div class="bits"><div style="flex:4">magic "FYNK" u32</div><div style="flex:2">abi u16</div><div style="flex:2">kind u16</div><div style="flex:4">record_count u32</div><div style="flex:4">byte_length u32</div><div style="flex:4">records_end u32</div><div style="flex:4">request_id u32</div></div>
+<div class="grid g3">
+<div class="card"><h4>Buffer kinds</h4>Commands 1 · Snapshot 2 · Events 3 · Diagnostics 4 · Query 5 · InputEvents 6 · InputActions 7 · PhysicsQueries 8 · ProjectionAnchors 9. A malformed header rejects the <i>whole</i> buffer (<code>Status::Protocol</code>) before any record is applied.</div>
+<div class="card"><h4>Commands (13 kinds)</h4>Spawn · Destroy · SetTransform · SetParent · SetName · SetComponent · RemoveComponent · Body · Animate · Audio · PlaySound · AudioBus · SetActive. Each is <code>{kind:u32,size:u32}</code> + body. <code>SetComponent</code> = entity + raw component bytes. One bad command is <i>rejected with its index</i> and the rest still apply.</div>
+<div class="card"><h4>Versioning</h4><code>ABI_VERSION = 1</code> (never bumped, despite many additive changes). <code>SCHEMA_FINGERPRINT = 0xd21b7fb595a078a6</code> is an FNV-1a hash over every schema's canonical text and is checked when Dart opens the library. The viewport ABI (v4) and authoring ABI (v3) are versioned separately.</div>
+</div>
+
+<h3 id="bridge-calls">5.2 FFI calls per frame</h3>
+<p>The minimum for a frame with one tick is 7 calls: <code>begin_frame</code>, <code>capture_input</code>, <code>drain_events</code>, <code>submit_commands(sim)</code>, <code>step</code>, <code>drain_events</code>, <code>submit_commands(pres)</code>. Then <code>fynkel_apple_viewport_render</code>. On top of that come on-demand <b>queries</b>, each one a synchronous call: 15 kinds, including components, body state, character, animator, audio, physics raycasts and projection. The components query runs <i>once per object per tick</i> on first access.</p>
+
+<h3 id="bridge-mem">5.3 Memory ownership &amp; lifetimes</h3>
+<pre class="mermaid">
+flowchart LR
+  subgraph DARTHEAP["Dart heap"]
+    CB["CommandBatch - Dart bytes"]
+    WB["WireBuffer - asTypedList view, zero-copy"]
+  end
+  subgraph NATHEAP["Native heap, owned by the FynkelWorld box"]
+    SCR["Dart-owned calloc scratch - grows x2"]
+    SNAP["snapshot_buf Vec"]
+    EVT["events_buf and after_physics_buf"]
+    QB["query_buf Vec - ONE for every query kind"]
+    INB["input_buf"]
+  end
+  CB -- "memcpy, then submit_commands" --> SCR
+  SNAP -- "FynkelBufferView ptr and len" --> WB
+  EVT --> WB
+  QB --> WB
+  WB -. "valid only until the next mutating call - nothing enforces it" .-> QB
+</pre>
+<div class="grid g2">
+<div class="card"><h4 style="color:var(--ok)">Good</h4>No per-frame native allocation in steady state: scratch buffers are reused and <code>_ViewCache</code> skips re-wrapping. Native never hands Dart memory that Dart must free.</div>
+<div class="card"><h4 style="color:var(--C)">Bad</h4>
+<span class="sev C">C</span> <b>F4.2</b> <code>World.dispose()</code> frees the <code>FynkelWorld</code>, but <code>_snapshot</code> still wraps freed memory, so any <code>GameObject</code> kept past dispose reads freed heap.<br>
+<span class="sev m">m</span> <b>F4.9</b> One <code>query_buf</code> serves the components, physics and projection queries. A <code>WireBuffer</code> held across a second query silently shows the second query's bytes. The Dart cache only notices when the address or length changes.<br>
+<span class="sev I">I</span> <b>F4.4</b> <code>fynkel_world_subscribe</code> has no unsubscribe. Every entity Dart ever touches stays in the snapshot at 88 B per tick, and <code>step()</code> walks all of them. <code>FYN-R0013</code> only warns.</div>
+</div>
+
+<h3 id="bridge-err">5.4 Errors &amp; panics — where a failure goes</h3>
+<pre class="mermaid">
+flowchart TB
+  P1["Panic inside fynkel_world_* or fynkel_authoring_*"] --> G1["guarded - catch_unwind"] --> PO["world or session poisoned, Status Panic"]
+  PO --> DH{"Dart host checks isPoisoned?"}
+  DH -- "no - F4.1" --> LOOP["beginFrame throws every frame, forever, no render"]
+  P2["Panic inside fynkel_apple_viewport_* - render, prepare, ring"] --> NO["NO catch_unwind - 22 extern C fns, 0 guards"]
+  NO --> ABORT["Unwinds across extern C: the process aborts. The app or EDITOR dies"]
+  P3["Poisoned Mutex in ring.rs - 18 lock unwrap"] --> ABORT
+  P4["Rejected command"] --> DIAG["DiagnosticRecord, command_index and code"] --> DBG{"debug build?"}
+  DBG -- "yes" --> THROW["FynkelError at the END of World.frame - F1.5 fixed"]
+  DBG -- "release" --> LOG["logged, the game goes on"]
+  P5["Exception in Behaviour code"] --> REP["reportBehaviourError - zone handler, or print if the root zone"]
+  P6["Infinite loop in game or extension code in the editor"] --> HANG["Editor freezes - accepted by ADR-0021, no autosave F1"]
+  style NO fill:#4a1c1c,stroke:#ff5d5d
+  style ABORT fill:#4a1c1c,stroke:#ff5d5d
+  style LOOP fill:#4a331c,stroke:#ffae42
+  style HANG fill:#4a331c,stroke:#ffae42
+</pre>
+<p><span class="sev I">I</span> <b>F4.5 (confirmed):</b> <code>fynkel_world_input_view</code> (<code>crates/fynkel_native/src/lib.rs:852</code>) and <code>fynkel_world_drain_events</code> take <code>world.as_mut()</code> for the outer <code>w</code>, then call <code>guarded(world, |w| …)</code>, which creates a second <code>&amp;mut</code> from the same pointer. The outer one is used again afterwards. That is two live mutable references, which is undefined behaviour under Rust's aliasing rules. It works today by luck of codegen.</p>
+
+<h3 id="bridge-gen">5.5 Codegen — one schema, many outputs (ADR-0012)</h3>
+<pre class="mermaid">
+flowchart LR
+  RS["Rust struct with derive Schema, in fynkel_core, scene, physics, audio"] --> ALL["fynkel_core schema ALL registry"]
+  ALL -->|fynkel codegen| JS["schemas/*.json - JSON Schema"]
+  ALL --> DG["packages/fynkel/lib/generated/schema.g.dart"]
+  ALL --> WR["crates/fynkel_wire/src/generated.rs + SCHEMA_FINGERPRINT"]
+  ALL --> DC["crates/fynkel_document/src/generated.rs"]
+  WR --> FX["tests/fixtures/wire/fingerprint/*.bin - round-tripped by Rust AND Dart"]
+  HAND["HAND-WRITTEN: ComponentValue arms, bridge query arm, editor native_hints.dart"]:::bad
+  ALL -. "must be kept in sync by hand - F6.2" .-> HAND
+  DB["Dart class with @FynkelBehaviour or @DataAsset"] -->|build_runner - fynkel_generator| BG["lib/generated/behaviours.g.dart + .g.json + schemas/behaviours"]
+  classDef bad fill:#4a331c,stroke:#ffae42
+</pre>
+<p>Adding a built-in component takes about 9 steps: allocate an id, write the struct, add it to <code>ALL</code>, add the <code>ComponentValue</code> arms (id/validate/set/remove), add the <code>bridge::query</code> arm (<code>bridge.rs:528-609</code>, 25 sequential <code>if let</code>s with no exhaustiveness check), add editor hints, run codegen, regenerate fixtures, bump the lock fingerprint. Forgetting the query arm compiles and fails silently: <code>get&lt;T&gt;()</code> returns null. <span class="sev I">I</span> <b>F6.2</b>.</p>
+
+<!-- ============================================================ -->
+<h2 id="physics">6 · Physics — <code>fynkel_physics</code> (Rapier 0.35)</h2>
+<div class="grid g2">
+<div class="card"><h4>How it works</h4>
+<ul>
+<li>One <code>Entry</code> per entity with RigidBody/Collider/CharacterController, kept in a <b>BTreeMap</b> for deterministic order (a test proves bit-identical runs).</li>
+<li><b>Ownership:</b> dynamic body = physics owns it (a presentation write is rejected, code 9; a sim write teleports). Kinematic/character = gameplay owns it, and physics pushes toward the target. Static = moves with its entity. An external move is detected by comparing <i>world</i> matrices.</li>
+<li><b>Sync</b> (<code>sim.rs:509-703</code>) runs every tick: a full archetype query plus a "same?" predicate. It is 0.64 ms for 5,541 colliders at rest and 2.0 ms when 5,000 statics move.</li>
+<li>Events: enter/exit exact; <b>stay is opt-in per watched entity</b>. Collector is a <code>Mutex&lt;Vec&gt;</code> (unneeded; Rapier forces &amp;self).</li>
+<li>Character controller: hand-written on Rapier's KCC with ~6 tuned epsilons (<code>REST_PROBE 1e-4</code>, <code>GROUND_PROBE 0.05</code>…).</li>
+<li>Queries: ray/shape/overlap against the <i>last stepped</i> state. Mesh colliders are static only, max 32,768 triangles.</li>
+<li>Materials (ADR-0025): one friction, combine rules.</li>
+</ul></div>
+<div class="card"><h4 style="color:var(--C)">Risks</h4>
+<ul>
+<li><span class="sev C">C</span> <b>F2.1</b> No compound bodies. A child Collider under a dynamic parent becomes a separate <i>fixed</i> collider: one tick behind, no mass, and it can collide with its own parent. <code>docs/physics.md</code> actually <i>recommends</i> child entities for multiple colliders. <b>ADR-0034</b> (proposed, awaiting your confirmation) fixes it, and <code>tests/compound.rs</code> measures the fall (y −75 instead of 1.5).</li>
+<li><span class="sev I">I</span> <b>F2.2</b> A collider, layer or scale change (relative epsilon 1e-4, <code>sim.rs:615</code>) <b>rebuilds</b> the body: velocity and sleep are lost and a false Exit→Enter fires. A scale tween on a collider rebuilds it every tick, silently.</li>
+<li><span class="sev I">I</span> F2.3 no OnTriggerStay · F2.4 the character reports no hits · F2.5 no axis constraints · F2.6 Exit on destroy untested</li>
+<li><span class="sev I">I</span> <b>NEW</b> No moving-platform carry. A platform pushed into a standing character tunnels (<code>physics.md:387</code>).</li>
+<li><span class="sev m">m</span> <b>NEW</b> 63 index/unwrap sites in <code>sim.rs</code> trust the bookkeeping invariants, and there is no guard around <code>Physics::step</code>. One bookkeeping bug panics the step and poisons the world.</li>
+<li><span class="sev m">m</span> <b>NEW</b> Character epsilons have outcome tests on a single scene only. A Rapier upgrade or a timestep change could silently bring back the "shoved into the floor" bug.</li>
+<li><span class="sev W">⏸</span> F2.12 no joints, ForceMode, AddForceAtPosition or convex mesh colliders. Ragdolls, vehicles and doors are blocked.</li>
+<li>Tests: <b>17</b> for a 2,739-line <code>sim.rs</code> (F6.5).</li>
+</ul></div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="anim">7 · Animation — <code>fynkel_animation</code> + <code>fynkel_core/world/animation.rs</code></h2>
+<div class="grid g2">
+<div class="card"><h4>How it works</h4>
+<ul>
+<li><b>Clip</b> = channels targeting nodes <b>by name</b>, resolved per instance and cached until the clip switches or a target dies.</li>
+<li><b>Pose</b> = a flat <code>Vec&lt;PoseEntry&gt;</code> with linear lookup; fine up to <code>Skin::MAX_JOINTS = 256</code>.</li>
+<li>Runs at tick step 4, before physics, and writes <code>Transform</code> via <code>set_local</code> only when it changed. Fully serial, even though posing each animator is independent work.</li>
+<li><b>Animator Controller</b> (ADR-0032, <code>controller.rs</code>): a pure state machine with no ECS types. 17 tests: triggers, Any State, exit time per lap, interruption, determinism.</li>
+<li>Animation v2 (ADR-0033): blend trees, code-built clips (<code>ClipBuilder</code>), IK (TwoBone/LookAt/FootPlacement in <code>world/ik.rs</code>).</li>
+<li>Root motion: planar translation + yaw only (Y-up). The clip's vertical motion is dropped for character-driven entities.</li>
+<li>Skinned render path: joint palette storage buffer, grows by doubling.</li>
+</ul></div>
+<div class="card"><h4 style="color:var(--I)">Risks &amp; gaps</h4>
+<ul>
+<li><span class="sev I">I</span> <b>NEW</b> Name-based target resolution has the same shape as F3.5: duplicated bone or node names inside one hierarchy resolve to the first match.</li>
+<li><span class="sev m">m</span> A trigger nothing consumes stays set forever. This matches Unity but produces phantom transitions much later.</li>
+<li><span class="sev m">m</span> Clips are <code>f32</code> keys, uncompressed. No retargeting, morph targets, 2D blend spaces, or root motion from non-primary layers (documented V1 gaps).</li>
+<li><span class="sev W">W</span> The IK solver <code>world/ik.rs</code> is not audited here. FootPlacement couples to physics.</li>
+<li>Tests: 30 in the crate plus the core's animation tests. The 200-rig gate is &lt; 1 ms.</li>
+</ul></div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="audio">8 · Audio — <code>fynkel_audio</code> (own mixer on cpal)</h2>
+<pre class="mermaid">
+flowchart LR
+  subgraph TICK["UI thread - the world's tick, step 9"]
+    RA["run_audio - reconcile AudioSource components"] --> ENG["Audio engine - voices 32, priority stealing, own clock, deterministic"]
+  end
+  subgraph DEV["cpal device thread"]
+    MIX["Mixer.render - no alloc, no lock, tested"]
+  end
+  subgraph DEC["one decoder thread per streamed voice"]
+    ST["symphonia stream"]
+  end
+  ENG -- "rtrb SPSC Command ring, 1024" --> MIX
+  MIX -- "Return ring, 512" --> ENG
+  ST -- "ring" --> MIX
+</pre>
+<p>This is the best-built subsystem. The engine decides and the device only renders, so a headless run gives bit-identical <code>PlaybackEnded</code> events. Gaps: <span class="sev I">I</span> no spatial audio (<code>AudioListener.volume</code> is a global gain; M5) · <span class="sev I">I</span> <code>PlaySound</code> one-shots discard their <code>VoiceId</code>, so they can't be stopped · <span class="sev m">m</span> N voices of one stream = N decoders · <span class="sev m">m</span> default output device only, no device picker · 3 buses, 256 clips max · Android/oboe untested.</p>
+
+<!-- ============================================================ -->
+<h2 id="render">9 · Rendering &amp; presentation — <code>fynkel_render</code>, <code>fynkel_shader</code>, <code>platform/apple</code></h2>
+<h3>Pass chain (fixed, hand-written in <code>ExtractRenderer::draw</code>, <code>lib.rs:2793</code>, ~1,150 lines)</h3>
+<pre class="mermaid">
+flowchart LR
+  EX["world.extract - interpolated records, lights, camera"] --> PREP["prepare - frustum cull, light cull 64 pool 8 per object, instance buffer rebuilt each frame, uploads"]
+  PREP --> SH["Shadow - cascades, Depth32 atlas"]
+  SH --> DP["Depth prepass - if AO or contact shadows"]
+  DP --> AO["AO + contact shadows - Rg8"] --> AOB["AO blur"]
+  AOB --> OP["Opaque + sky - Rgba16F HDR, MSAA, PBR, IBL split-sum"]
+  OP --> TR["Transparent - sorted per object"]
+  TR --> BL["Bloom - 6 mips half res"]
+  BL --> PO["Post - exposure, ACES, grading, volumes"]
+  PO --> PS["Presentation - render_scale not 1"]
+  PS --> OV["Overlay - debug lines, grid, gizmos, selection outline"]
+  OV --> TGT["Host target: IOSurface slot, winit swapchain, or offscreen"]
+</pre>
+<div class="grid g2">
+<div class="card"><h4>How it works</h4>
+<ul>
+<li>30 built-in pipelines are created up front, with no compiles at draw time. Each <code>.shader</code> asset adds 18 pipelines on first use (naga assembles its <code>surface()</code> WGSL).</li>
+<li>One draw per (mesh, material) pair, instanced. Bind groups are cached per material and texture. Eviction is a generation diff against <code>Assets::evictions</code>.</li>
+<li>GPU memory is a hand-kept estimate (<code>gpu_bytes()</code>). Metal pass timestamps lag 3–4 frames.</li>
+</ul>
+<h4>IOSurface ring (<code>platform/apple/src/ring.rs</code>)</h4>
+<pre class="mermaid">
+stateDiagram-v2
+  [*] --> Free
+  Free --> Rendering: render_with - UI thread
+  Rendering --> Ready: Metal completion handler
+  Ready --> Presented: acquire_presented - raster thread
+  Presented --> Retiring: a newer frame is presented
+  Retiring --> Free
+  note right of Free: 4 slots by default, 2 to 8. A full ring DROPS the frame
+</pre>
+</div>
+<div class="card"><h4 style="color:var(--C)">Risks</h4>
+<ul>
+<li><span class="sev C">C</span> <b>F4.3</b> The viewport ABI has <b>no catch_unwind</b> (verified: 0 in <code>platform/apple/src</code>). Every frame the game and the editor call <code>prepare</code>/<code>draw</code> through it, so any panic there aborts the process.</li>
+<li><span class="sev C">C</span> <b>NEW</b> 18 <code>lock().unwrap()</code> calls in <code>ring.rs</code>, and all viewports share one wgpu <code>Device</code> (a <code>SHARED_GPU</code> global since ADR-0030). One poisoned mutex takes down every viewport: the Scene view, the Game view and the Inspector previews.</li>
+<li><span class="sev I">I</span> <b>F6.3</b> <code>lib.rs</code> is 5,737 lines, with <code>prepare</code> ≈ 900 lines and <code>draw</code> ≈ 1,150. There is no render-graph abstraction, and every pass is a manual <code>if</code>.</li>
+<li><span class="sev I">I</span> <b>F5.5</b> No texture compression (RGBA8/RGBA16F only). A 4K texture ≈ 85 MB. This blocks iOS.</li>
+<li><span class="sev m">m</span> Per-cascade shadow caster culling is not done. The shadow cost ≈ 4× going from 1 to 4 cascades.</li>
+<li><span class="sev m">m</span> Normals use the model matrix, not the inverse-transpose, so they are wrong under non-uniform scale. Transparency is sorted per object.</li>
+<li><span class="sev m">m</span> <code>read_frame</code> waits for the GPU to go idle. Nothing stops it being called every frame.</li>
+<li><span class="sev m">m</span> <b>NEW</b> <code>World::extract()</code> allocates a <code>Vec&lt;Entity&gt;</code> and a <code>HashMap</code> every frame (<code>world.rs:1987, 1995</code>). The rest of the code carefully reuses scratch buffers.</li>
+</ul></div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="assets">10 · Documents &amp; the asset pipeline</h2>
+<h3>Lifecycle of an asset</h3>
+<pre class="mermaid">
+flowchart TB
+  SRC["assets/hero.fbx, crate.png, level.scene.json"] --> META["sidecar .meta.json - GUID, importer, settings, stable sub-asset ids by NAME"]
+  META --> DB["AssetDatabase::scan - a directory walk, no hidden DB"]
+  DB --> TOPO["cook: topological order over AssetRef dependencies"]
+  TOPO --> STAMP{"stamp size and mtime unchanged?"}
+  STAMP -- "no" --> HASH["BLAKE3 the source"]
+  STAMP -- "yes" --> KEY
+  HASH --> KEY["cache key = BLAKE3 of CACHE_VERSION 9, container version, id, importer, source hash, settings, dependency KEYS, profile"]
+  KEY --> HIT{"objects/key.fyna exists?"}
+  HIT -- "yes" --> IDX
+  HIT -- "no" --> IMP["importer: gltf, ufbx, image, symphonia, HDR prefilter - SINGLE THREAD"]
+  IMP --> WRITE["fynkel_cooked Writer - MESH TEXR ENVM CLIP MATL SKIN ANIM SHDR MATC - CRC per chunk - atomic temp and rename"]
+  WRITE --> IDX[".fynkel/cache/index.json + schema fingerprint"]
+  IDX --> OPEN["runtime: CacheIndex::open - refuses another fingerprint, FYN-R0002"]
+  OPEN --> RES["Assets store - Arc Mutex Store - retain returns a Residency token"]
+  RES --> DEC["decode on FIRST USE, synchronous, on the caller thread - F5.4"]
+  DEC --> GPU["fynkel_render upload - missing mesh = magenta"]
+</pre>
+<h3>Document graph</h3>
+<pre class="mermaid">
+flowchart LR
+  PROJ["fynkel.project.json - startup scene, input actions, layers, tags, physics, modules"] --> SC["Scene"]
+  SC --> PF["Prefab - one root, ADR-0022"]
+  PF --> PF2["nested Prefab or Variant"]
+  SC --> MODEL["Imported model - its prefab sub-asset"]
+  PF --> MAT["Material - fynkel.pbr or a .shader"]
+  MODEL --> MAT
+  MAT --> SHD[".shader - WGSL surface"]
+  MAT --> TEX["Texture"]
+  SC --> CTRL["Animator Controller"] --> CLIP["Clips and blend spaces"]
+  SC --> PM["Physics material"]
+  SC --> DATA["Data assets"]
+  SC --> VOL["Volume profile"]
+  SC --> SND["Audio clip"]
+</pre>
+<div class="grid g2">
+<div class="card"><h4>Prefabs</h4>
+<ul>
+<li>A scene entity with <code>prefab:{asset, instance, overrides[]}</code> <i>is</i> the prefab's root (ADR-0022). Override ops: setField, unsetField, add/removeComponent, add/removeObject, setActive, all addressed by prefab-local ids.</li>
+<li>Expanded at <b>cook</b> time, innermost first. A cycle is <code>D0402</code>. Ids are <code>derive_id(instance, local)</code> = UUIDv5.</li>
+<li>Imported model hierarchies use the same prefab machinery. That is elegant, but a prefab bug is then a bug in every model.</li>
+</ul></div>
+<div class="card"><h4 style="color:var(--C)">Risks</h4>
+<ul>
+<li><span class="sev C">C</span> <b>F5.1</b> A missing reference fails the cook of that document <i>and everything that depends on it</i>. One deleted PNG and the scenes won't load.</li>
+<li><span class="sev I">I</span> <b>F3.8</b> One stale override (D0403) skips the <i>whole</i> instance. Deleting a child from a prefab breaks every scene that overrode it.</li>
+<li><span class="sev I">I</span> <b>F5.2</b> A Finder copy keeps the GUID, and scan order decides which file wins.</li>
+<li><span class="sev I">I</span> <b>F5.3</b> The cook is single-threaded (no rayon or thread anywhere in <code>cook.rs</code>) and runs on the editor's UI thread.</li>
+<li><span class="sev I">I</span> <b>F5.4</b> Decode happens on first use, synchronously, so the first frame that uses an asset hitches. <code>register_*</code> during load decodes inline.</li>
+<li><span class="sev I">I</span> <b>F6.4</b> <code>fynkel_assets</code> → <code>fynkel_document</code>, so the shipped runtime links jsonschema, similar and uuid.</li>
+<li><span class="sev m">m</span> <b>NEW</b> A <code>CACHE_VERSION</code> or schema fingerprint bump invalidates 100% of the cache (9 bumps so far). A big project pays a full single-threaded recook each time.</li>
+<li><span class="sev m">m</span> Stamps miss a same-size edit inside the same mtime (documented, <code>--force</code>). F5.6: the bundled cache is only checked with <code>exists()</code>. F5.7: no fuzzing of the glTF/FBX readers.</li>
+<li>Tests: <code>fynkel_assets</code> has only <b>10</b> for the runtime's one door to content.</li>
+</ul></div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="editor">11 · The editor</h2>
+<pre class="mermaid">
+flowchart TB
+  subgraph PROC["ONE macOS process, ONE Dart isolate, JIT, built per project in .fynkel/editor_host"]
+    SHELL["EditorShellState - app.dart, 3,303 lines - holds every panel model"]
+    PANELS["Hierarchy, Inspector, Project, Scene view, Game view, Console, Profiler, Animator, Prefab mode"]
+    EXT["Editor extensions - lib/editor/editor.dart of every package - compiled in"]
+    GAMECODE["The game's Behaviours - compiled in"]
+    MIRROR["Dart mirrors: OpenDocument, HierarchyTree - patched from affectedIds"]
+    SHELL --> PANELS
+    PANELS --> MIRROR
+  end
+  subgraph RUST["libfynkel_native, feature authoring - catch_unwind per call"]
+    SESS["AuthoringSession - project, lock, schemas, asset DB"]
+    ED["fynkel_document Editor per open document - transactions, undo, revision = blake3 of the canonical text"]
+    PREV["Edit-preview World - edit_mode, no behaviours"]
+    COOK["cook - SYNCHRONOUS"]
+  end
+  DISK[("documents on disk + .fynkel/authoring.log - unbounded F5")]
+  MIRROR -- "apply commands, baseRevision - sync FFI" --> SESS
+  SESS --> ED --> DISK
+  SESS --> PREV
+  SESS --> COOK
+  PANELS -- "viewport render - NO catch_unwind" --> VP["platform/apple viewport"]
+  PREV --> VP
+</pre>
+<div class="grid g2">
+<div class="card"><h4 style="color:var(--ok)">Good</h4>
+<ul>
+<li>A single source of truth: the Rust session. Every edit is a transaction with optimistic concurrency (<code>FYN-E0001</code> on a stale revision). The CLI reads the same files.</li>
+<li>Extensions edit through the same transaction path (<code>EditorContext.edit</code> = one undo step), so they can't corrupt documents.</li>
+<li>Authoring ABI panics poison the <i>session</i> (<code>FYN-T0005</code>), not the process.</li>
+<li>576+ editor tests, including a 32-file Unity parity harness.</li>
+</ul></div>
+<div class="card"><h4 style="color:var(--C)">Risks</h4>
+<ul>
+<li><span class="sev I">I</span> <b>NEW</b> <i>Every</i> authoring call is synchronous on the UI isolate: <code>openProject</code>, <code>apply</code>, <code>recook</code>, validate, picking, thumbnails (<code>session.dart:191</code>, <code>preview.dart:198</code>). No isolate is used anywhere in <code>apps/editor/lib</code>. The editor freezes in proportion to project size. F5.3 covers only the cook.</li>
+<li><span class="sev I">I</span> Play and extensions run in-process: an infinite loop freezes the editor, and there is <b>no autosave</b> (F1 carry-over). A hang loses unsaved edits.</li>
+<li><span class="sev I">I</span> <b>NEW</b> The Dart mirrors are patched from <code>affectedIds</code>. Any Rust command that under-reports them desyncs the UI from the truth, silently.</li>
+<li><span class="sev I">I</span> <b>NEW</b> God file: <code>app.dart</code> (3,303 lines), plus nine more files over 1,200 lines.</li>
+<li><span class="sev m">m</span> Two undo stacks (document ⌘Z and asset ⌥⌘Z) over overlapping state. Creating or deleting an empty folder can't be undone.</li>
+<li><span class="sev m">m</span> Native Inspector hints are a hand-kept Dart table (E9). The <code>compile_error_parity</code> test is flaky (F0.5), and the play_process kill -9 test is flaky on a cold build.</li>
+</ul></div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="play">12 · Play mode (ADR-0021)</h2>
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant E as Editor shell
+  participant A as Authoring session - Rust
+  participant G as Game view - buildGame, same isolate
+  participant W as Play World - all systems
+  U->>E: Play
+  E->>E: write dirty docs to .fynkel/recovery, as a hang net
+  E->>A: cook UNSAVED in-memory documents to the play cache - sync
+  E->>G: mount buildGame with FynkelLaunch
+  G->>W: World.frame every Ticker tick
+  E->>E: LivePlay follows the running world: Hierarchy and Inspector show live state
+  U->>E: edit a field in the Inspector
+  E->>W: write to the running World - NOT a transaction, lost on Stop
+  U->>E: Apply to Scene
+  E->>E: apply_to_scene.dart - recursive diff of the live tree against the document, 385 lines
+  E->>A: ordinary Commands - setField, addComponent, createObject, prefab overrides
+  U->>E: save a .dart file
+  E->>G: hot reload - patched in, or Restart to Apply
+  U->>E: Stop
+  E->>G: unmount - World disposed, only applied changes remain
+</pre>
+<p>A separate <b>Build and Run</b> path (<code>play_session.dart</code>) spawns <code>fynkel run</code> with <code>FYNKEL_EDITOR_CHANNEL=stdio</code> and a JSON-lines channel, and stops it by killing the process tree. That is the only crash-isolated way to run a game. <span class="sev I">I</span> <b>NEW</b> <code>apply_to_scene.dart</code> is an intricate recursive tree diff (prefab-derived vs plain entities, objects created during Play, <code>runtime:</code> ids, f32 renormalisation), and it has scenario tests only, no property or fuzz tests. A wrong edge case writes bad data into a saved scene.</p>
+
+<!-- ============================================================ -->
+<h2 id="platforms">13 · Platforms &amp; hosts</h2>
+<table>
+<tr><th>Component</th><th>macOS</th><th>iOS</th><th>Headless (CI)</th><th>Windows/Linux</th><th>Android</th><th>Web/wasm</th></tr>
+<tr><td>fynkel_core, scene, ecs, physics, animation</td><td>✅</td><td>✅</td><td>✅</td><td>compiles (pure Rust)</td><td>compiles</td><td>✅ <code>cargo check</code> in CI</td></tr>
+<tr><td>fynkel_audio (cpal)</td><td>✅ CoreAudio</td><td>✅</td><td>engine only, no device</td><td>untested</td><td>untested (oboe)</td><td>—</td></tr>
+<tr><td>fynkel_render (wgpu)</td><td>✅ Metal</td><td>✅ Metal</td><td>offscreen <code>Backends::PRIMARY</code></td><td>should work, never run</td><td>—</td><td>✅ <code>cargo check</code></td></tr>
+<tr><td>platform/apple (IOSurface ring)</td><td>✅</td><td>✅ smoke test + simulator</td><td>—</td><td colspan="3">N/A, Metal-only by design (ADR-0002). A new platform needs a new texture-interop crate.</td></tr>
+<tr><td>hosts/standalone (winit)</td><td>✅</td><td>—</td><td>—</td><td>❌ hard-coded <code>Backends::METAL</code> (<code>main.rs:54</code>)</td><td>—</td><td>—</td></tr>
+<tr><td>hosts/headless</td><td>✅</td><td>—</td><td>✅</td><td>✅</td><td>—</td><td>—</td></tr>
+<tr><td>package:fynkel_flutter + game</td><td>✅</td><td>✅ simulator; device smoke only (E3)</td><td>flutter test</td><td>❌</td><td>❌</td><td>❌</td></tr>
+<tr><td>apps/editor</td><td>✅</td><td colspan="5">macOS only</td></tr>
+</table>
+<p>Distribution (ADR-0015): <code>package:fynkel/hook/build.dart</code> resolves the native library as (1) a user-defined path, (2) <code>cargo build</code> inside the workspace, (3) a SHA-256-checked prebuilt from the release store, (4) a cargo fallback. On Apple, <b>one dylib</b> (<code>fynkel_platform_apple</code>) exports both <code>fynkel_*</code> and <code>fynkel_apple_*</code>. The engine ABI's version is still 1; the bump is deferred to the first external consumer. <code>fynkel_native</code> installs a counting global allocator for the whole process.</p>
+
+<!-- ============================================================ -->
+<h2 id="health">14 · Engineering health</h2>
+<h3>Size, tests and danger markers per crate (counted 2026-09-27)</h3>
+<table id="healthT">
+<tr><th>Crate</th><th>Lines</th><th>#[test]</th><th>tests / kLOC</th><th>unsafe</th><th>.unwrap()</th><th>extern "C"</th><th>catch_unwind</th></tr>
+</table>
+<h3>Largest files (the refactor hot-spots)</h3>
+<div class="grid g2">
+<table>
+<tr><th>Rust file</th><th>Lines</th></tr>
+<tr><td>fynkel_render/src/lib.rs</td><td>5,737</td></tr>
+<tr><td>fynkel_document/src/authoring.rs</td><td>3,613</td></tr>
+<tr><td>fynkel_physics/src/sim.rs</td><td>2,739</td></tr>
+<tr><td>fynkel_assets/src/lib.rs</td><td>2,248</td></tr>
+<tr><td>fynkel_import/src/cook.rs</td><td>2,246</td></tr>
+<tr><td>fynkel_core/src/world.rs</td><td>2,161</td></tr>
+<tr><td>fynkel_authoring/src/ops.rs</td><td>2,129</td></tr>
+<tr><td>fynkel_core/src/world/animation.rs</td><td>1,739</td></tr>
+</table>
+<table>
+<tr><th>Dart file</th><th>Lines</th></tr>
+<tr><td>packages/fynkel/lib/src/world.dart</td><td>3,632</td></tr>
+<tr><td>apps/editor/lib/src/app.dart</td><td>3,303</td></tr>
+<tr><td>scene_view/scene_view_model.dart</td><td>2,734</td></tr>
+<tr><td>project_browser/project_panel.dart</td><td>2,590</td></tr>
+<tr><td>inspector/field_widgets.dart</td><td>1,973</td></tr>
+<tr><td>inspector/inspector_model.dart</td><td>1,883</td></tr>
+<tr><td>hierarchy/hierarchy_panel.dart</td><td>1,533</td></tr>
+<tr><td>packages/fynkel/lib/src/behaviour.dart</td><td>1,328</td></tr>
+</table>
+</div>
+<div class="grid g2">
+<div class="card"><h4>Dart tests</h4><code>package:fynkel</code> 214 · <code>fynkel_flutter</code> 34 · <code>fynkel_authoring</code> 15 · <code>fynkel_generator</code> 12 · <code>fynkel_editor_api</code> <b>0</b> · editor 576 · reference_game 11 · code_only 13</div>
+<div class="card"><h4 style="color:var(--I)">Process risk</h4>701 commits in 9 days. CI was down from 2026-09-23 to 09-27, so Phases 1–3 and ADR-0027…0033 landed without remote CI; it is now on a self-hosted runner on the dev Mac. Several features still await an in-app check by the user (ADR-0030…0033, ADR-0028 hot reload, ADR-0029 editor check). Speed has outpaced verification. That is the reason for the foundation pass.</div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="risks">15 · Risk register</h2>
+<p>Every finding in one place. Filter by severity or area; click a column header to sort. <b>F</b>x.y = a row in <code>docs/foundation.md</code> (its severity is kept). <b>NEW</b> = found by this atlas, not yet in foundation.md.</p>
+<div id="rctl"></div>
+<div class="bar" id="rbar" style="margin:6px 0 10px"></div>
+<table id="rtable"><thead><tr><th data-k="id">Id</th><th data-k="sev">Sev</th><th data-k="area">Area</th><th>Finding</th><th>Evidence</th><th>Fix direction</th><th data-k="ref">Ref</th></tr></thead><tbody></tbody></table>
+
+<h3>Already fixed in the foundation pass (keep the tests)</h3>
+<table>
+<tr><th></th><th>What was wrong</th><th>Commit</th></tr>
+<tr><td><span class="sev F">1.1</span></td><td><code>Time.delta</code> in <code>fixedUpdate</code> was the frame dt (moved 2× too far at 30 fps)</td><td>—</td></tr>
+<tr><td><span class="sev F">1.2</span></td><td>A transform write in <code>update</code> showed 1–2 ticks late (~183 px behind)</td><td>96b63b8</td></tr>
+<tr><td><span class="sev F">1.3</span></td><td>No <code>Time.timeScale</code>; pausing stopped <code>update</code></td><td>284dde3</td></tr>
+<tr><td><span class="sev F">1.4</span></td><td>Two clocks: <code>elapsed</code> stood still between ticks, and coroutines used the unclamped dt</td><td>c7fa8f3</td></tr>
+<tr><td><span class="sev F">1.5</span></td><td>A rejected command threw out of the tick and lost the rest of the frame</td><td>—</td></tr>
+<tr><td><span class="sev F">1.6</span></td><td>A host callback that threw lost the remaining ticks and the flush</td><td>8525f72</td></tr>
+<tr><td><span class="sev F">1.7</span></td><td><code>instantiate</code> didn't run <code>onCreate</code>/<code>onEnable</code> before returning</td><td>9cefd4c</td></tr>
+<tr><td><span class="sev F">1.8</span></td><td>A pending <code>start</code> ran interleaved, so an earlier script's <code>update</code> ran before a later one's <code>start</code></td><td>d6bc914</td></tr>
+<tr><td><span class="sev F">1.9</span></td><td><code>behaviour&lt;T&gt;()</code>/<code>sibling&lt;T&gt;()</code> disagreed with <code>getInChildren</code> about destroy-requested behaviours</td><td>97bbd61</td></tr>
+<tr><td><span class="sev F">1.10</span></td><td>Last-tick reads were undocumented (now said where a Unity user looks)</td><td>a0df815</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="order">16 · What to fix before building more — recommended order</h2>
+<p>This order puts <b>anything that crashes, corrupts or loses work</b> first, then <b>anything whose cost grows with every asset and every line of game code</b>, then structure. It mostly agrees with <code>foundation.md</code>'s Step 1–6 order. Where it differs, the reason is given.</p>
+<div class="grid g2">
+<div class="card"><h4>Wave A — crash safety (days, not weeks) <span class="sev C">C</span></h4>
+<ol>
+<li><b>F4.3 + ring mutexes:</b> wrap all 22 <code>fynkel_apple_*</code> in the same <code>guarded()</code> pattern <code>fynkel_native</code> uses. Replace <code>lock().unwrap()</code> with poison-tolerant locking. Add a panic-injection test per entry point. <i>(Move this ahead of Step 2: it is the one bug that kills the editor.)</i></li>
+<li><b>F4.1:</b> <code>FynkelGameView._frame</code> try/catch; check <code>isPoisoned</code> once; show an error widget; stop ticking.</li>
+<li><b>F4.2:</b> <code>World.dispose</code> nulls <code>_snapshot</code>/<code>_snapshotIndex</code> and marks every <code>GameObject</code> dead, so a read afterwards throws.</li>
+<li><b>F4.5:</b> remove the double <code>&amp;mut</code> by returning the view from inside the <code>guarded</code> closure. Run Miri over <code>fynkel_native</code> in CI.</li>
+<li><b>F4.9:</b> one buffer per query kind, or invalidate held <code>WireBuffer</code>s (a generation counter checked on read, in debug builds).</li>
+</ol></div>
+<div class="card"><h4>Wave B — objects at scale <span class="sev C">C</span></h4>
+<ol>
+<li><b>F3.9 first:</b> the 50k-entity headless benchmark and a spawn-rate benchmark. Measure before fixing.</li>
+<li><b>F3.3:</b> a true dirty-subtree <code>propagate</code> (a dirty-root list), and fold the 4 per-tick calls into 1–2.</li>
+<li><b>F3.1:</b> cache a spawn-ready template per prefab: no re-read, re-validate or re-register per <code>instantiate</code>; residency per template, not per call. Then add pooling guidance (F3.2).</li>
+<li><b>F3.5:</b> resolve named targets per prefab instance at instantiate time (entity refs, like Unity), and index names.</li>
+<li><b>F3.4</b> incremental active refresh; <b>F4.4</b> unsubscribe on destroy and drop untouched handles.</li>
+</ol></div>
+<div class="card"><h4>Wave C — content never breaks the game <span class="sev C">C</span>/<span class="sev I">I</span></h4>
+<ol>
+<li><b>F5.1:</b> a missing reference becomes a warning plus an empty field, and the cook continues.</li>
+<li><b>F3.8:</b> a stale override is kept and listed; the instance still loads.</li>
+<li><b>F5.2:</b> detect duplicate GUIDs on scan and re-id the <i>newer</i> file.</li>
+<li><b>F2.1:</b> compound bodies (ADR-0034 is drafted — confirm it). Child colliders join the nearest parent body. Do it before content relies on the current behaviour, which <code>physics.md</code> recommends today.</li>
+<li><b>F2.2:</b> update the collider in place and keep velocity. No rebuild on scale.</li>
+</ol></div>
+<div class="card"><h4>Wave D — threads &amp; structure <span class="sev I">I</span></h4>
+<ol>
+<li>Editor: move <code>recook</code>/<code>openProject</code>/validate off the UI isolate (a worker thread on the Rust side, with a progress callback). Parallelise the cook per asset (F5.3). Add autosave (F1).</li>
+<li>Runtime: an async/preload path for decode (F5.4) before any level streaming.</li>
+<li>F6.1: split the Rust <code>World</code> into subsystem states behind an ordered system trait, and generate <code>SYSTEMS</code> from it. Do the same with Dart's <code>world.dart</code>.</li>
+<li>F6.2: generate the <code>ComponentValue</code> arms, the <code>bridge::query</code> arm and the editor hints from the schema registry.</li>
+<li>F6.3: split <code>fynkel_render/lib.rs</code> by pass. F6.4: a runtime-only crate that doesn't link <code>fynkel_document</code>.</li>
+<li>F6.5: tests for <code>fynkel_scene</code> (property tests: random hierarchies, reparent, destroy mid-walk), <code>fynkel_physics</code>, <code>fynkel_assets</code>, <code>fynkel_editor_api</code>.</li>
+</ol></div>
+</div>
+<div class="callout good"><b>Rule for new features until Waves A–B are done:</b> nothing new that spawns at runtime (projectiles, particles, crowds), relies on child colliders, or adds another <code>extern "C"</code> surface. Those are exactly the paths where the current foundation is weakest.</div>
+
+<!-- ============================================================ -->
+<h2 id="glossary">17 · Glossary</h2>
+<div class="kv">
+<div>Host</div><div>Whatever owns the loop and calls the engine: Flutter's <code>FynkelGameView</code>, the winit standalone host, the headless host, the editor's Scene view.</div>
+<div>Tick / step</div><div>One fixed simulation step (1/60 s) inside <code>World::step()</code>. A frame runs 0–4 of them.</div>
+<div>Frame</div><div>One host frame (vsync). <code>update</code>/<code>lateUpdate</code> run once per frame.</div>
+<div>Simulation lane</div><div>Commands applied at the next tick boundary.</div>
+<div>Presentation lane</div><div>Commands applied immediately, for this frame's picture only; transform writes are also taken by the next tick.</div>
+<div>Snapshot</div><div>The per-tick buffer of transforms for <i>subscribed</i> entities, read by Dart zero-copy.</div>
+<div>Extract</div><div>The renderer's per-frame view of the world, interpolated by alpha.</div>
+<div>Cook</div><div>Turning source documents and imported files into the content-addressed <code>.fyna</code> cache the runtime reads.</div>
+<div>Residency</div><div>Which cooked assets are held in memory; <code>retain</code> returns an RAII token.</div>
+<div>Poisoned</div><div>A world or session that caught a panic. Every later call refuses; the host must destroy and recreate it.</div>
+<div>Catalogue</div><div>Native, Behaviour-free components for bulk motion: Rotator, Oscillate, Follow, LookAtCamera, LifetimeDespawn, Emitter.</div>
+<div>Fingerprint</div><div>A hash of every wire schema. Dart and the cache refuse a native library or cache built with a different one.</div>
+</div>
+<p style="margin-top:40px;color:var(--dim);font-size:12.5px">Built by reading the source on 2026-09-27 (commit a1d6e5a (foundation step 1 done) plus the uncommitted ADR-0034 draft). Line numbers drift. Re-run the counts in §14 after large changes. Sources: <code>docs/foundation.md</code>, <code>status.md</code>, <code>m3-gate-report.md</code>, <code>m4-gate-report.md</code>, ADR-0001…0033, and the code.</p>
+</main>
+
+<script>
+/* ======================= DATA ======================= */
+const NODES = [
+ // id, label, kind, lang, lines, tests, platforms, purpose, files
+ {id:'contracts',label:'fynkel_contracts',kind:'rust',lines:1524,tests:8,plat:'all',purpose:'Shared stable types: Entity handle (world:8|gen:24|slot:32), Status codes, DiagnosticCode registry, AssetRef/Uuid, RecordSchema + fingerprint, ABI_VERSION=1, clock constants.',files:'crates/fynkel_contracts/src/{lib,handle,codes,schema}.rs'},
+ {id:'derive',label:'fynkel_schema_derive',kind:'rust',lines:341,tests:0,plat:'build-time',purpose:'#[derive(Schema)] proc-macro — the entry point of the ADR-0012 codegen pipeline.',files:'crates/fynkel_schema_derive/src/lib.rs'},
+ {id:'ecs',label:'fynkel_ecs',kind:'rust',lines:460,tests:8,plat:'all',purpose:'Facade over hecs (ADR-0003). Owns handles, generations, LIFO free list, deferred despawn (Mutex).',files:'crates/fynkel_ecs/src/lib.rs'},
+ {id:'scene',label:'fynkel_scene',kind:'rust',lines:719,tests:5,plat:'all',purpose:'Transform/WorldTransform/Parent/Children, Layer, Tags, active flags; propagate() and refresh_active().',files:'crates/fynkel_scene/src/lib.rs'},
+ {id:'physics',label:'fynkel_physics',kind:'rust',lines:3787,tests:17,plat:'all',purpose:'Rapier adapter: ECS→Rapier sync, body commands, contacts/triggers, queries, character controller, camera rig, physics materials.',files:'crates/fynkel_physics/src/sim.rs'},
+ {id:'audio',label:'fynkel_audio',kind:'rust',lines:3501,tests:14,plat:'macOS, iOS (cpal)',purpose:'Deterministic audio engine on the tick + real-time mixer on the cpal thread joined by rtrb rings; 32 voices, 3 buses, streaming.',files:'crates/fynkel_audio/src/{engine,mixer,backend}.rs'},
+ {id:'anim',label:'fynkel_animation',kind:'rust',lines:2942,tests:30,plat:'all',purpose:'Clips (channels by node name), poses, blending, skins, Animator Controller state machine, blend trees.',files:'crates/fynkel_animation/src/{lib,controller,blend_tree}.rs'},
+ {id:'core',label:'fynkel_core',kind:'rust',lines:20660,tests:137,plat:'all (wasm32 checked)',purpose:'The World: command lanes, the fixed tick, catalogue movers, scene load/instantiate, events, snapshot, extract, input, system timers.',files:'crates/fynkel_core/src/{world,command,event,clock,load}.rs, world/*.rs'},
+ {id:'wire',label:'fynkel_wire',kind:'rust',lines:3062,tests:4,plat:'all',purpose:'Generated Rust wire codecs + SCHEMA_FINGERPRINT; material payload codec.',files:'crates/fynkel_wire/src/generated.rs'},
+ {id:'shader',label:'fynkel_shader',kind:'rust',lines:2320,tests:23,plat:'all',purpose:'.shader assets (ADR-0031): header parsing, naga validation, WGSL surface() assembly.',files:'crates/fynkel_shader/src'},
+ {id:'cooked',label:'fynkel_cooked',kind:'rust',lines:1950,tests:9,plat:'all',purpose:'.fyna container (48 B header, 32 B chunk table, CRC32, forbid(unsafe)) and typed payload codecs.',files:'crates/fynkel_cooked/src/{lib,payload}.rs'},
+ {id:'document',label:'fynkel_document',kind:'rust',lines:28502,tests:135,plat:'macOS (tools)',purpose:'Strict JSON, envelope, JSON Schema + semantic validation, prefab expansion, asset DB, packages graph, the transactional Editor (undo).',files:'crates/fynkel_document/src/{authoring,prefab,asset,project,material}.rs'},
+ {id:'import',label:'fynkel_import',kind:'rust',lines:15023,tests:89,plat:'macOS (tools)',purpose:'Importers (glTF, FBX via ufbx, images, audio, HDR env) and the incremental content-addressed cook.',files:'crates/fynkel_import/src/{cook,cache,gltf,fbx}.rs'},
+ {id:'assets',label:'fynkel_assets',kind:'rust',lines:3075,tests:10,plat:'all',purpose:'Runtime door to content: CacheIndex, residency store (Arc<Mutex>), decode on first use, register colliders/anim/audio.',files:'crates/fynkel_assets/src/lib.rs'},
+ {id:'render',label:'fynkel_render',kind:'rust',lines:12135,tests:76,plat:'Metal (wgpu PRIMARY offscreen)',purpose:'ExtractRenderer: prepare (cull, instance, lights) + fixed pass chain (shadow, AO, opaque, transparent, bloom, post, overlay).',files:'crates/fynkel_render/src/lib.rs (5,737 lines)'},
+ {id:'preview',label:'fynkel_preview',kind:'rust',lines:662,tests:6,plat:'macOS',purpose:'Inspector previews (ADR-0030): material/prefab/clip preview scenes.',files:'crates/fynkel_preview/src'},
+ {id:'authoring',label:'fynkel_authoring',kind:'rust',lines:14492,tests:69,plat:'macOS (editor)',purpose:'AuthoringSession: project, schemas, asset DB, one Editor per document, ops, edit-preview world, play cook, log.',files:'crates/fynkel_authoring/src/{ops,preview,project,log}.rs'},
+ {id:'native',label:'fynkel_native',kind:'rust',lines:11372,tests:42,plat:'macOS, iOS, headless',purpose:'The C ABI: fynkel_world_* (and fynkel_authoring_* behind a feature). guarded()=catch_unwind+poison; buffers; bridge::query; counting global allocator.',files:'crates/fynkel_native/src/{lib,bridge,buffer,load,authoring}.rs'},
+ {id:'apple',label:'platform/apple',kind:'host',lines:3215,tests:14,plat:'macOS, iOS',purpose:'The dylib a Flutter app loads: re-exports fynkel_native and adds fynkel_apple_viewport_* — IOSurface ring, Metal fence sync, shared wgpu Device.',files:'platform/apple/src/{lib,ring}.rs'},
+ {id:'headless',label:'hosts/headless',kind:'host',lines:1929,tests:12,plat:'any',purpose:'No-GPU host for fynkel test --headless, recordings, checksums, CI.',files:'hosts/headless/src'},
+ {id:'standalone',label:'hosts/standalone',kind:'host',lines:623,tests:0,plat:'macOS (Metal hard-coded)',purpose:'winit + wgpu host: the renderer without Flutter; the perf ruler.',files:'hosts/standalone/src/main.rs'},
+ {id:'cli',label:'apps/cli (fynkel)',kind:'app',lines:14376,tests:43,plat:'macOS',purpose:'validate, cook, run, test, render, codegen, create, editor, import, migrate, state dump — the agent interface (ADR-0017).',files:'apps/cli/src'},
+ {id:'dfynkel',label:'package:fynkel',kind:'dart',lines:29395,tests:214,plat:'Flutter + dart:ffi',purpose:'Gameplay SDK: World, GameObject, Behaviour, Time, Input, coroutines, tweens, SceneManager, DataAsset, ObjectSpec, HUD models, native bridge.',files:'packages/fynkel/lib/src/{world,behaviour,context,input}.dart, native/bridge.dart'},
+ {id:'dgen',label:'fynkel_generator',kind:'dart',lines:3097,tests:12,plat:'build-time',purpose:'build_runner generator for @FynkelBehaviour/@DataAsset/@FynkelRecord → behaviours.g.dart + schemas.',files:'packages/fynkel_generator'},
+ {id:'dflutter',label:'package:fynkel_flutter',kind:'dart',lines:5339,tests:34,plat:'macOS, iOS',purpose:'FynkelGameView (Ticker loop), viewport controller, input capture, touch overlay, ModelBinding, projection layer, frame stats, bundled cache.',files:'packages/fynkel_flutter/lib/src/{game_view,viewport_controller,input_capture}.dart'},
+ {id:'dauth',label:'package:fynkel_authoring',kind:'dart',lines:5407,tests:15,plat:'macOS',purpose:'Dart FFI binding to the authoring session (all calls synchronous).',files:'packages/fynkel_authoring/lib/src/{session,preview,models}.dart'},
+ {id:'deapi',label:'fynkel_editor_api',kind:'dart',lines:734,tests:0,plat:'macOS (editor)',purpose:'ADR-0028 extension API: EditorExtensions, EditorContext, custom inspectors, drawers, windows.',files:'packages/fynkel_editor_api/lib'},
+ {id:'editor',label:'apps/editor',kind:'app',lines:86185,tests:576,plat:'macOS',purpose:'Flutter desktop editor, built per project in JIT: docking shell, Hierarchy, Inspector, Project, Scene/Game views, Console, Profiler, Animator, Prefab mode, Play.',files:'apps/editor/lib/src/app.dart (3,303 lines)'},
+ {id:'fapple',label:'hosts/flutter_apple',kind:'host',lines:0,tests:0,plat:'macOS, iOS',purpose:'Reference Flutter host app (Swift plugin: FynkelViewportTexture, input plugin).',files:'hosts/flutter_apple'},
+ {id:'refgame',label:'reference_game',kind:'game',lines:0,tests:11,plat:'macOS, iOS sim',purpose:'Tier-1 reference game: three scenes, player with Animator, coins, hazards, HUD, settings.',files:'examples/reference_game'},
+ {id:'codeonly',label:'code_only',kind:'game',lines:0,tests:13,plat:'macOS',purpose:'ADR-0026 acceptance: a game built entirely from Dart (ObjectSpec, createMesh, ClipBuilder).',files:'examples/code_only'},
+ {id:'showcase',label:'showcase',kind:'game',lines:0,tests:0,plat:'macOS',purpose:'Renderer showcase scene.',files:'examples/showcase'},
+ // externals
+ {id:'x_hecs',label:'hecs 0.11',kind:'ext'},{id:'x_rapier',label:'rapier3d 0.35',kind:'ext'},{id:'x_wgpu',label:'wgpu 30',kind:'ext'},
+ {id:'x_naga',label:'naga 30',kind:'ext'},{id:'x_cpal',label:'cpal + rtrb',kind:'ext'},{id:'x_symph',label:'symphonia',kind:'ext'},
+ {id:'x_gltf',label:'gltf + ufbx + image',kind:'ext'},{id:'x_json',label:'jsonschema + serde',kind:'ext'},{id:'x_objc',label:'objc2 Metal/IOSurface',kind:'ext'},
+ {id:'x_winit',label:'winit',kind:'ext'},{id:'x_flutter',label:'Flutter SDK',kind:'ext'},{id:'x_docking',label:'docking 1.16',kind:'ext'},{id:'x_build',label:'build_runner/analyzer',kind:'ext'},
+];
+const EDGES = [
+ ['ecs','contracts'],['scene','ecs'],['scene','contracts'],['scene','derive'],
+ ['physics','scene'],['physics','ecs'],['physics','contracts'],['physics','derive'],
+ ['audio','contracts'],['audio','derive'],['anim','scene'],['anim','contracts'],
+ ['core','ecs'],['core','scene'],['core','physics'],['core','audio'],['core','anim'],['core','contracts'],['core','derive'],
+ ['wire','core'],['wire','scene'],['wire','physics'],['wire','audio'],['wire','contracts'],
+ ['shader','contracts'],['cooked','contracts'],
+ ['document','core'],['document','scene'],['document','physics'],['document','audio'],['document','shader'],['document','cooked'],['document','contracts'],
+ ['import','document'],['import','shader'],['import','cooked'],['import','wire'],['import','core'],
+ ['assets','cooked'],['assets','core'],['assets','wire'],['assets','document'],['assets','contracts'],
+ ['render','shader'],['render','cooked'],['render','core'],['render','assets'],
+ ['preview','cooked'],['preview','core'],['preview','assets'],
+ ['authoring','document'],['authoring','shader'],['authoring','import'],['authoring','core'],['authoring','physics'],['authoring','scene'],['authoring','audio'],['authoring','assets'],
+ ['native','authoring'],['native','preview'],['native','core'],['native','audio'],['native','assets'],['native','document'],['native','shader'],['native','scene'],['native','wire'],['native','contracts'],
+ ['apple','native'],['apple','render'],['apple','core'],['apple','contracts'],
+ ['headless','core'],['headless','scene'],['headless','document'],['headless','assets'],
+ ['standalone','core'],['standalone','audio'],['standalone','assets'],['standalone','document'],['standalone','render'],['standalone','headless'],
+ ['cli','authoring'],['cli','core'],['cli','document'],['cli','import'],['cli','cooked'],['cli','headless'],['cli','render'],['cli','preview'],
+ ['dfynkel','native','ffi'],
+ ['dflutter','dfynkel'],['dflutter','apple','ffi'],
+ ['dauth','dfynkel'],['dauth','native','ffi'],
+ ['deapi','dfynkel'],
+ ['editor','dauth'],['editor','dflutter'],['editor','deapi'],['editor','dfynkel'],['editor','cli','proc'],
+ ['fapple','dfynkel'],['fapple','dflutter'],
+ ['refgame','dfynkel'],['refgame','dflutter'],['refgame','dgen'],['refgame','cli','proc'],
+ ['codeonly','dfynkel'],['codeonly','dflutter'],['codeonly','dgen'],
+ ['showcase','dfynkel'],['showcase','dflutter'],
+ ['ecs','x_hecs'],['physics','x_rapier'],['render','x_wgpu'],['apple','x_wgpu'],['standalone','x_wgpu'],['shader','x_naga'],['audio','x_cpal'],['audio','x_symph'],['import','x_symph'],
+ ['import','x_gltf'],['document','x_json'],['apple','x_objc'],['standalone','x_winit'],['dflutter','x_flutter'],['editor','x_flutter'],['editor','x_docking'],['dgen','x_build'],
+];
+
+const RISKS = [
+ // Bridge / ABI
+ {id:'B1',sev:'C',area:'Bridge',nodes:['apple','editor','dflutter'],ref:'F4.3',t:'Viewport ABI has no catch_unwind',d:'22 extern "C" fynkel_apple_* functions call prepare/draw/ring code with zero catch_unwind (grep: 0). A panic unwinds across the C ABI → process abort; kills a game or the whole editor.',e:'platform/apple/src/lib.rs, ring.rs',f:'Reuse fynkel_native::guarded; return a status; poison the viewport; panic-injection test per fn.'},
+ {id:'B2',sev:'C',area:'Bridge',nodes:['apple'],ref:'NEW',t:'18 lock().unwrap() in the IOSurface ring + one shared Device',d:'A poisoned Mutex<Ring>/stats makes every later lock panic; since ADR-0030 all viewports (Scene, Game, previews) share one wgpu Device via a global — one panic cascades to all.',e:'platform/apple/src/ring.rs:180-228, lock sites',f:'Poison-tolerant locks (into_inner) or parking_lot; isolate per-viewport state.'},
+ {id:'B3',sev:'C',area:'Bridge',nodes:['dflutter','dfynkel'],ref:'F4.1',t:'Poisoned world throws every frame, forever',d:'After a Rust panic, beginFrame returns Poisoned each frame; FynkelGameView._frame has no try/catch → ~60 exceptions/s, no render, no recovery UI.',e:'packages/fynkel_flutter/lib/src/game_view.dart:562-630',f:'Catch once, check isPoisoned, stop the Ticker, show an error widget, offer restart.'},
+ {id:'B4',sev:'C',area:'Bridge',nodes:['dfynkel','native'],ref:'F4.2',t:'Use-after-free after World.dispose',d:'dispose() destroys the native world (freeing snapshot_buf) but _snapshot (asTypedList view) and _snapshotIndex remain; any GameObject read afterwards reads freed native memory.',e:'packages/fynkel/lib/src/world.dart:1951 vs 1131',f:'Null the views, mark objects dead, throw StateError on access.'},
+ {id:'B5',sev:'I',area:'Bridge',nodes:['native'],ref:'F4.5',t:'Two live &mut to one FynkelWorld (UB)',d:'fynkel_world_input_view / drain_events take world.as_mut() then guarded() re-derives a second &mut and the outer is used again — undefined behaviour under Rust aliasing rules.',e:'crates/fynkel_native/src/lib.rs:852-869, 1119-1135',f:'Return the view from inside the closure; add Miri to CI.'},
+ {id:'B6',sev:'I',area:'Bridge',nodes:['native','dfynkel'],ref:'F4.4',t:'Snapshot subscriptions only grow',d:'Every handle Dart attaches/finds is subscribed and never dropped: 88 B/entity/tick copied forever, step() walks all. FYN-R0013 only warns.',e:'crates/fynkel_native/src/lib.rs:1069; world.dart _toSubscribe',f:'Unsubscribe on destroy; weak GameObject handles; subscribe on read.'},
+ {id:'B7',sev:'m',area:'Bridge',nodes:['native','dfynkel'],ref:'F4.9',t:'One query buffer for every query kind',d:'components, physics and projection queries all write query_buf; a held WireBuffer silently shows another query\'s bytes (no crash — wrong data).',e:'crates/fynkel_native/src/lib.rs:44, 898-1013',f:'Buffer per kind, or a generation stamp checked on read in debug.'},
+ {id:'B8',sev:'I',area:'Bridge',nodes:['core','dfynkel','dflutter'],ref:'E4 / ADR-0008',t:'Everything on the Flutter UI thread',d:'Gameplay, physics, extract, render prepare+encode all run synchronously in the Ticker callback. Stress scene: 8.06 ms p95 of a 8.3 ms 120 Hz budget. No headroom; a heavy tick drops a Flutter frame.',e:'game_view.dart:562-630; docs/m3-gate-report.md §3',f:'Measure on device; plan the render-thread / sim-thread ADR before content grows.'},
+ {id:'B9',sev:'m',area:'Bridge',nodes:['contracts','native'],ref:'NEW',t:'ABI_VERSION stuck at 1',d:'Many additive struct/function changes since M1 without a bump; safety rests on "append only" convention with no check. A reorder silently corrupts callers.',e:'crates/fynkel_contracts/src/lib.rs:30',f:'Bump at first external consumer (decided); add a struct-layout test (size/offset asserts) now.'},
+ {id:'B10',sev:'m',area:'Bridge',nodes:['core','native'],ref:'F4.8',t:'Per-tick allocations on event drain / input view',d:'drain() mem::takes the event Vec (loses capacity); input view clones action names each tick; rejected commands format! a String.',e:'crates/fynkel_core/src/event.rs:155; bridge.rs:813',f:'clear() and reuse; intern names.'},
+ {id:'B11',sev:'I',area:'Bridge',nodes:['core','wire','native','editor'],ref:'F6.2',t:'A built-in component is ~9 hand steps',d:'ComponentValue arms, bridge::query arm (25 sequential if-lets, no exhaustiveness), editor native_hints.dart are hand-written; forgetting the query arm compiles and get<T>() returns null.',e:'crates/fynkel_native/src/bridge.rs:528-609',f:'Generate them from the schema registry.'},
+ {id:'B12',sev:'I',area:'Input',nodes:['dflutter'],ref:'F4.6',t:'Trackpad scroll never reaches mouse:wheel',d:'Pan-zoom events are dropped by FynkelInputCapture.',e:'packages/fynkel_flutter/lib/src/input_capture.dart',f:'Map PointerPanZoom to wheel.'},
+ {id:'B13',sev:'I',area:'Input',nodes:['dflutter'],ref:'F4.7',t:'A focusable HUD widget steals game keys',d:'Focus moves to the widget, the viewport resets input; keys dead until a click.',e:'game_view.dart',f:'Keep the viewport as key sink; ExcludeFocus by default for HUD.'},
+ // Objects
+ {id:'O1',sev:'C',area:'Objects',nodes:['core','assets','native'],ref:'F3.1',t:'instantiate re-reads and re-parses the cooked prefab every call',d:'Each runtime instantiate re-reads the file, re-parses, rebuilds the schema set, re-validates structure (spawn_order), re-registers colliders/animation/audio, pushes a residency token released only by a replace load (memory grows per spawn), runs refresh_active + propagate. Blocking, on the UI thread.',e:'crates/fynkel_core/src/load.rs:399-611; fynkel_native/src/load.rs',f:'Per-prefab spawn template cached on first use; residency per template; batch spawns.'},
+ {id:'O2',sev:'C',area:'Objects',nodes:['scene','core'],ref:'F3.3',t:'propagate walks every node, up to 4× per tick',d:'Collects all roots and pushes every child; only the multiply is skipped for clean nodes (doc says "dirty subtrees only"). Called at 6 sites in world.rs incl. once per keep-world SetParent command. record_prev_world also decomposes every matrix.',e:'crates/fynkel_scene/src/lib.rs:463; world.rs:733,1057,1463,1485,1498,1519',f:'Dirty-root list; merge the post-physics/rig/follower passes; benchmark at 50k.'},
+ {id:'O3',sev:'C',area:'Objects',nodes:['core','anim'],ref:'F3.5',t:'Prefab-internal references resolved by name, world-wide',d:'Follow.target, ThirdPersonCamera targets: first match in the whole world — two instances bind to the same "Head"; a miss is an O(N) string scan every tick.',e:'crates/fynkel_core/src/world/catalogue.rs:479-497',f:'Remap to entity refs per instance at instantiate (as Unity); name index.'},
+ {id:'O4',sev:'I',area:'Objects',nodes:['scene'],ref:'F3.4',t:'refresh_active walks the whole hierarchy',d:'O(1) only while no object anywhere is inactive; otherwise every structural change → full BFS from all roots.',e:'crates/fynkel_scene/src/lib.rs:416-459',f:'Incremental: recompute only the changed subtree.'},
+ {id:'O5',sev:'I',area:'Objects',nodes:['dfynkel'],ref:'F3.2',t:'No pooling API or guidance',d:'Combined with O1, a projectile/particle game pays full load cost per spawn.',e:'—',f:'Pool helper after O1; document.'},
+ {id:'O6',sev:'I',area:'Objects',nodes:['core','dfynkel'],ref:'F3.6',t:'No DontDestroyOnLoad',d:'A replace load destroys everything including managers/music.',e:'crates/fynkel_core/src/load.rs take_down',f:'A persistent scene slot.'},
+ {id:'O7',sev:'I',area:'Objects',nodes:['core','native','dfynkel'],ref:'F3.7',t:'No async scene load',d:'Loads are synchronous on the main isolate: a big level freezes the frame.',e:'—',f:'Background decode + staged spawn over frames.'},
+ {id:'O8',sev:'I',area:'Objects',nodes:['document','import'],ref:'F3.8',t:'One stale override skips the whole prefab instance',d:'D0403: deleting a child from a prefab breaks every scene that overrode it.',e:'crates/fynkel_document/src/prefab.rs',f:'Keep and list stale overrides; load the rest.'},
+ {id:'O9',sev:'I',area:'Objects',nodes:['core','headless'],ref:'F3.9',t:'Nothing measured above ~16k entities',d:'No 50k benchmark, no spawn-rate benchmark, no long-session growth test.',e:'benchmarks/',f:'Add them before fixing O1–O4.'},
+ {id:'O10',sev:'I',area:'Objects',nodes:['core','dfynkel'],ref:'F6.1',t:'God objects: Rust World and Dart world.dart',d:'Rust World ~40–59 fields, step() is one 235-line function with a hand-synced SYSTEMS array; Dart world.dart 3,632 lines holding spawn, materials, meshes, clips, data assets, physics queries, loads, the entity table.',e:'crates/fynkel_core/src/world.rs:277-359, 1345-1580; packages/fynkel/lib/src/world.dart',f:'Subsystem states behind an ordered system trait; split Dart World into services.'},
+ {id:'O11',sev:'m',area:'Objects',nodes:['ecs'],ref:'F3.10',t:'Deferred despawn is not recursive',d:'despawn_deferred/flush_deferred remove the listed entity only (no callers today — a trap).',e:'crates/fynkel_ecs/src/lib.rs:205-219',f:'Despawn the subtree, or delete the API.'},
+ {id:'O12',sev:'W',area:'Objects',nodes:['contracts','ecs'],ref:'F3.11',t:'24-bit generation wraps',d:'After 16.7M reuses of one LIFO slot a stale handle can alias a live entity.',e:'crates/fynkel_contracts/src/handle.rs:38',f:'FIFO free list or retire slots at max generation.'},
+ {id:'O13',sev:'m',area:'Objects',nodes:['core'],ref:'NEW',t:'extract() allocates every frame',d:'Vec<Entity> of all entities + a fresh HashMap memo per call — unlike the scratch-buffer discipline elsewhere.',e:'crates/fynkel_core/src/world.rs:1987,1995',f:'Scratch buffers on World.'},
+ {id:'O14',sev:'m',area:'Objects',nodes:['core'],ref:'NEW',t:'unreachable!/unwrap coupled to hand-kept matches',d:'unreachable!("allowed_on_presentation") and component.name().unwrap() panic if a new Command/ComponentId is added without updating both places; deferred_despawn Mutex lock().unwrap() compounds a first panic.',e:'world.rs:905,1147,1168,1281; fynkel_ecs/src/lib.rs:206',f:'Exhaustive matches; no unwrap on locks.'},
+ {id:'O15',sev:'m',area:'Objects',nodes:['core','dfynkel'],ref:'NEW',t:'find/findWithTag are linear scans per query',d:'EntityInfo query = full scan; findObjectOfType walks all behaviours. "Not for every frame" is only a doc comment.',e:'world.dart:1223-1285; schema.rs:664',f:'Name/tag index; debug warning when called per frame.'},
+ // Scripts
+ {id:'S4',sev:'m',area:'Scripts',nodes:['dfynkel'],ref:'NEW',t:'Transform write in update does a components query',d:'_presentsWrite() → _lookup(RigidBody) → one native components query per object per tick on first write. Unmeasured for many objects moved in update.',e:'packages/fynkel/lib/src/world.dart:3172',f:'Cache body type on the GameObject from spawn/load events.'},
+ {id:'S5',sev:'m',area:'Scripts',nodes:['dfynkel'],ref:'NEW',t:'Error reporting depends on the current Zone',d:'reportBehaviourError goes to the zone handler or print() depending on root-zone; tests in their own zone can swallow behaviour errors.',e:'world.dart:251-259',f:'One explicit error sink on World.'},
+ {id:'S6',sev:'m',area:'Scripts',nodes:['dfynkel'],ref:'NEW',t:'Global static zone cache in GameContext',d:'_zone/_zoneParent are statics shared by every World in the isolate.',e:'packages/fynkel/lib/src/context.dart:131-151',f:'Per-World.'},
+ // Physics
+ {id:'P1',sev:'C',area:'Physics',nodes:['physics'],ref:'F2.1',t:'No compound bodies — child colliders are separate fixed bodies',d:'A child Collider under a dynamic parent is its own fixed collider: a tick behind, no mass, can hit its parent. docs/physics.md recommends child entities for multi-collider objects.',e:'crates/fynkel_physics/src/sim.rs (one Entry per entity)',f:'ADR-0034 (proposed 2026-09-27, awaiting confirmation): child colliders join the nearest ancestor body; events go to the body\'s object. Failing test: crates/fynkel_core/tests/compound.rs.'},
+ {id:'P2',sev:'I',area:'Physics',nodes:['physics'],ref:'F2.2',t:'Collider/layer/scale change rebuilds the body',d:'Velocity and sleep lost; false Exit→Enter. A scale change > 1e-4 relative rebuilds every tick (scale tweens!).',e:'crates/fynkel_physics/src/sim.rs:615-638',f:'Mutate the Rapier collider in place.'},
+ {id:'P3',sev:'I',area:'Physics',nodes:['physics'],ref:'F2.3',t:'No OnTriggerStay',d:'Sensor pairs skipped for Stay.',e:'sim.rs:1372-1407',f:'Emit stay for watched sensors.'},
+ {id:'P4',sev:'I',area:'Physics',nodes:['physics'],ref:'F2.4',t:'Character controller reports no hits',d:'Only grounded/sliding; no OnControllerColliderHit / CollisionFlags.',e:'sim.rs:1162-1319',f:'Collect KCC collisions.'},
+ {id:'P5',sev:'I',area:'Physics',nodes:['physics'],ref:'F2.5',t:'No axis constraints (freeze position/rotation)',d:'Rapier has locked axes; not exposed.',e:'—',f:'Expose in RigidBody.'},
+ {id:'P6',sev:'I',area:'Physics',nodes:['physics'],ref:'F2.6',t:'Exit on destroy untested; a destroyed zone\'s own ZoneExited is lost',d:'',e:'—',f:'Tests + fix.'},
+ {id:'P7',sev:'I',area:'Physics',nodes:['physics'],ref:'NEW',t:'No moving-platform carry; platforms tunnel into standing characters',d:'Documented V1 gap; elevators/platforms are a first-week feature.',e:'docs/physics.md:387',f:'Depenetration at rest + platform velocity inheritance.'},
+ {id:'P8',sev:'m',area:'Physics',nodes:['physics'],ref:'NEW',t:'Character controller rests on ~6 hand-tuned epsilons',d:'Outcome-tested on fixed scenes only; a Rapier upgrade or timestep change can silently regress.',e:'sim.rs:1200-1291',f:'Property tests over random geometry/timesteps.'},
+ {id:'P9',sev:'m',area:'Physics',nodes:['physics','core'],ref:'NEW',t:'63 panicking index/unwrap sites trust bookkeeping',d:'A single Entry/Rapier desync panics the whole step (→ poisoned world).',e:'crates/fynkel_physics/src/sim.rs',f:'get() + diagnostics on stale handles.'},
+ {id:'P10',sev:'m',area:'Physics',nodes:['physics'],ref:'F2.7–2.11',t:'Query/collision semantics differ from Unity',d:'New colliders not queryable until a step; hitSensors false by default; one contact point; disabled scripts get no collisions; overlap point doc wrong.',e:'docs/foundation.md Step 2',f:'Decide per row.'},
+ {id:'P11',sev:'W',area:'Physics',nodes:['physics'],ref:'F2.12',t:'No joints, ForceMode, AddForceAtPosition, convex mesh colliders',d:'Blocks ragdolls, vehicles, doors, ropes.',e:'sim.rs imports no joint types',f:'After the pass.'},
+ // Animation / audio
+ {id:'A1',sev:'I',area:'Animation',nodes:['anim','core'],ref:'NEW',t:'Clip channels bind by node name',d:'Same shape as O3 inside one hierarchy: duplicate node names resolve to the first match; re-resolve walks on cache invalidation.',e:'crates/fynkel_core/src/world/animation.rs:395-427',f:'Path-based binding, or unique-name validation at import.'},
+ {id:'A2',sev:'m',area:'Animation',nodes:['anim'],ref:'NEW',t:'Unconsumed triggers stay set forever',d:'Unity-compatible, but a common source of late phantom transitions.',e:'crates/fynkel_animation/src/controller.rs:776-779',f:'Document; optional auto-reset.'},
+ {id:'A3',sev:'m',area:'Animation',nodes:['anim'],ref:'NEW',t:'Uncompressed f32 clips; no retargeting/morphs/2D blend',d:'Memory grows with clip library; documented V1 gaps.',e:'docs/animation.md:857-876',f:'Later.'},
+ {id:'A4',sev:'W',area:'Animation',nodes:['core'],ref:'NEW',t:'IK solver not audited',d:'world/ik.rs not covered by this atlas; FootPlacement couples to physics.',e:'crates/fynkel_core/src/world/ik.rs',f:'Review.'},
+ {id:'U1',sev:'I',area:'Audio',nodes:['audio'],ref:'NEW',t:'No spatial audio',d:'AudioListener.volume is a global gain; no attenuation/panning (M5).',e:'crates/fynkel_core/src/world/audio.rs:255-267',f:'M5.'},
+ {id:'U2',sev:'m',area:'Audio',nodes:['audio'],ref:'NEW',t:'One-shots cannot be stopped; N decoders per shared stream; default device only',d:'PlaySound discards its VoiceId.',e:'world/audio.rs:216; backend.rs:107-149',f:'Return a handle; share decoders.'},
+ // Render
+ {id:'R1',sev:'I',area:'Render',nodes:['render'],ref:'F6.3',t:'fynkel_render/lib.rs is 5,737 lines',d:'prepare ≈900 and draw ≈1,150 lines; no render graph; every pass a manual if.',e:'crates/fynkel_render/src/lib.rs:1893-3948',f:'Split by pass; a small pass list.'},
+ {id:'R2',sev:'I',area:'Render',nodes:['render','import','cooked'],ref:'F5.5',t:'No texture compression',d:'RGBA8/RGBA16F only; a 4K texture ≈ 85 MB; CPU copies retained for residency lifetime. Blocks iOS.',e:'crates/fynkel_cooked/src/payload.rs:34-37',f:'ASTC (iOS) / BC (mac) at cook.'},
+ {id:'R3',sev:'m',area:'Render',nodes:['render'],ref:'NEW',t:'No per-cascade shadow caster culling',d:'Shadow cost ≈4× from 1 to 4 cascades.',e:'docs/renderer.md:150',f:'Cull per cascade.'},
+ {id:'R4',sev:'m',area:'Render',nodes:['render'],ref:'NEW',t:'Normals without inverse-transpose; per-object transparency sort',d:'Wrong lighting under non-uniform scale.',e:'docs/renderer.md:766, 499',f:'Normal matrix in instance data.'},
+ {id:'R5',sev:'m',area:'Render',nodes:['standalone'],ref:'NEW',t:'Standalone host hard-codes Backends::METAL',d:'The only host that could prove Windows/Linux can\'t; ADR-0009 guard is cargo check only.',e:'hosts/standalone/src/main.rs:54',f:'Backends::PRIMARY.'},
+ {id:'R6',sev:'m',area:'Render',nodes:['apple'],ref:'NEW',t:'read_frame waits idle — nothing prevents per-frame use',d:'A future editor feature could stall rendering silently.',e:'platform/apple/src/ring.rs:647-674',f:'Debug assertion on call rate.'},
+ {id:'R7',sev:'m',area:'Render',nodes:['apple','dflutter'],ref:'NEW',t:'GPU stats in the Flutter host are noisy',d:'Timestamps trail 3–4 frames and share the GPU with Impeller (post pass 1.5 ms vs 6 ms between captures).',e:'docs/instrumentation.md:87-93',f:'Use the standalone host for A/B.'},
+ // Assets
+ {id:'D1',sev:'C',area:'Assets',nodes:['import','document'],ref:'F5.1',t:'A missing reference fails the cook of every dependent',d:'One deleted PNG → its material → every scene using it cannot load.',e:'crates/fynkel_import/src/cook.rs:8-15',f:'Warning + empty field; cook continues.'},
+ {id:'D2',sev:'I',area:'Assets',nodes:['document'],ref:'F5.2',t:'Finder copy keeps the GUID',d:'Which file wins depends on scan order; a copy can take the original\'s id.',e:'crates/fynkel_document/src/asset.rs',f:'Detect duplicates; re-id the newer file.'},
+ {id:'D3',sev:'I',area:'Assets',nodes:['import','authoring','editor'],ref:'F5.3',t:'Single-threaded cook on the editor UI thread',d:'No thread/rayon in cook.rs; synchronous FFI. A big FBX freezes the editor.',e:'crates/fynkel_import/src/cook.rs',f:'Parallel per asset + worker thread + progress.'},
+ {id:'D4',sev:'I',area:'Assets',nodes:['assets'],ref:'F5.4',t:'Decode on first use, synchronous',d:'First frame using a mesh/texture hitches; register_* decodes inline during load.',e:'crates/fynkel_assets/src/lib.rs:789-1041, 1272',f:'Preload + background decode.'},
+ {id:'D5',sev:'I',area:'Assets',nodes:['assets','native','document'],ref:'F6.4',t:'Shipped runtime links fynkel_document',d:'fynkel_assets → fynkel_document pulls jsonschema/similar/uuid/validation into every game binary.',e:'crates/fynkel_assets/Cargo.toml; lib.rs:57-61',f:'Split a runtime-types crate.'},
+ {id:'D6',sev:'m',area:'Assets',nodes:['import','assets'],ref:'NEW',t:'Any CACHE_VERSION / fingerprint bump recooks 100%',d:'9 bumps so far; with a single-threaded cook a big project pays minutes each time.',e:'crates/fynkel_import/src/cache.rs:29-34',f:'Parallel cook; finer versioning per importer.'},
+ {id:'D7',sev:'m',area:'Assets',nodes:['dflutter'],ref:'F5.6',t:'Bundled cache checked only with exists()',d:'A cut-short unpack stays broken.',e:'packages/fynkel_flutter/lib/src/bundled_cache.dart',f:'Checksum marker.'},
+ {id:'D8',sev:'m',area:'Assets',nodes:['import'],ref:'F5.7',t:'No fuzzing of glTF/FBX/.fyna readers',d:'An importer panic poisons the authoring session.',e:'—',f:'cargo-fuzz targets.'},
+ {id:'D9',sev:'m',area:'Assets',nodes:['assets'],ref:'F6.5',t:'fynkel_assets has 10 tests',d:'The runtime\'s only door to content; residency/eviction/live-edit barely tested directly.',e:'crates/fynkel_assets/tests',f:'Store-level tests.'},
+ {id:'D10',sev:'m',area:'Assets',nodes:['import'],ref:'NEW',t:'Stamp misses same-size edits within one mtime',d:'Documented; --force fixes; traps sync tools that preserve mtimes.',e:'crates/fynkel_import/src/cache.rs:272-280',f:'Hash small files always.'},
+ // Editor
+ {id:'E1',sev:'I',area:'Editor',nodes:['editor','dauth','authoring'],ref:'NEW',t:'Every authoring call is synchronous on the UI isolate',d:'openProject, apply, recook, validate, picking, thumbnails — no isolate/compute anywhere in apps/editor/lib. Freezes scale with project size (F5.3 covers only the cook).',e:'packages/fynkel_authoring/lib/src/session.dart:191; preview.dart:198',f:'Rust worker thread + async Dart API.'},
+ {id:'E2',sev:'I',area:'Editor',nodes:['editor','deapi'],ref:'ADR-0021 / F1',t:'Play and extensions in-process; no autosave',d:'An infinite loop in game or extension code freezes the editor; force-quit loses unsaved edits (recovery only snapshots before Play).',e:'ADR-0021:57-62; m4-gate-report F1',f:'Autosave to .fynkel/recovery on a timer; a watchdog that offers "stop Play".'},
+ {id:'E3',sev:'I',area:'Editor',nodes:['editor','authoring'],ref:'NEW',t:'Dart mirror of the document patched from affectedIds',d:'A Rust command that under-reports affectedIds desyncs the UI from the truth silently.',e:'apps/editor/lib/src/hierarchy/hierarchy_tree.dart; open_document.dart',f:'Debug-mode full re-read + diff after each apply.'},
+ {id:'E4',sev:'I',area:'Editor',nodes:['editor'],ref:'NEW',t:'Apply to Scene is an intricate recursive diff without property tests',d:'Prefab-derived vs plain, created-in-Play objects, runtime: ids, f32 renormalisation — a wrong edge case writes bad data into a saved scene.',e:'apps/editor/lib/src/play/apply_to_scene.dart',f:'Property test: random live edits → apply → reload → equal.'},
+ {id:'E5',sev:'I',area:'Editor',nodes:['editor'],ref:'NEW',t:'EditorShellState god object',d:'app.dart 3,303 lines holds every panel model and cross-panel wiring as imperative callbacks; nine more files > 1,200 lines.',e:'apps/editor/lib/src/app.dart:253-412',f:'Per-panel controllers + an event bus.'},
+ {id:'E6',sev:'m',area:'Editor',nodes:['editor'],ref:'NEW',t:'Two undo stacks over overlapping state',d:'Document ⌘Z and asset ⌥⌘Z; empty folder create/delete not undoable.',e:'docs/unity-parity.md:69',f:'One history, or cross-links.'},
+ {id:'E7',sev:'m',area:'Editor',nodes:['authoring'],ref:'F5 (M4)',t:'.fynkel/authoring.log grows without bound',d:'52-line append-only writer, no rotation.',e:'crates/fynkel_authoring/src/log.rs',f:'Rotate by size.'},
+ {id:'E8',sev:'m',area:'Editor',nodes:['editor'],ref:'E9 (M3)',t:'Native Inspector hints are a hand-kept Dart table',d:'A schema field with no hint silently falls back to defaults.',e:'apps/editor/lib/src/inspector/native_hints.dart',f:'#[fynkel(...)] attributes → generated.'},
+ {id:'E9',sev:'m',area:'Editor',nodes:['editor'],ref:'F0.5',t:'Flaky tests',d:'compile_error_parity (IDE file not written in 20 s), play_process kill -9 on cold build.',e:'apps/editor/test',f:'Watch; raise timeouts / warm build.'},
+ // Health
+ {id:'H1',sev:'I',area:'Health',nodes:['scene','physics','standalone','deapi'],ref:'F6.5',t:'Thin tests where it matters most',d:'fynkel_scene 5, fynkel_physics 17, fynkel_assets 10, hosts/standalone 0, fynkel_editor_api 0, fynkel_wire 4.',e:'§14 table',f:'Property tests for hierarchy and physics sync first.'},
+ {id:'H2',sev:'I',area:'Health',nodes:['core','editor'],ref:'NEW',t:'Velocity outpaced verification',d:'701 commits in 9 days; CI off 09-23→09-27 while Phases 1–3 and ADR-0027…0033 landed; several features await the user\'s in-app check; CI runs on the dev Mac.',e:'git log; docs/foundation.md 0.2',f:'Keep the foundation pass rule: failing test first; no feature without CI green.'},
+ {id:'H3',sev:'W',area:'Health',nodes:['cli'],ref:'ADR-0005',t:'Licence still open',d:'Blocks publishing artifacts (E2) and outside contributors.',e:'docs/decisions/ADR-0005',f:'Decide at public readiness (b).'},
+];
+
+/* ======================= HEALTH TABLE ======================= */
+const HEALTH = [
+ ['fynkel_animation',2942,30,0,37,0,0],['fynkel_assets',3075,10,0,66,0,0],['fynkel_audio',3501,14,5,60,0,0],['fynkel_authoring',14492,69,0,779,0,0],
+ ['fynkel_contracts',1524,8,1,3,0,0],['fynkel_cooked',1950,9,1,49,0,0],['fynkel_core',20660,137,11,259,0,0],['fynkel_document',28502,135,3,583,0,0],
+ ['fynkel_ecs',460,8,0,22,0,0],['fynkel_import',15023,89,1,473,0,0],['fynkel_native',11372,42,259,263,66,10],['fynkel_physics',3787,17,0,63,0,0],
+ ['fynkel_preview',662,6,0,0,0,0],['fynkel_render',12135,76,1,73,0,0],['fynkel_scene',719,5,0,38,0,0],['fynkel_schema_derive',341,0,0,4,0,0],
+ ['fynkel_shader',2320,23,0,13,0,0],['fynkel_wire',3062,4,1,13,0,0],['platform/apple',3215,14,77,29,22,0],['hosts/headless',1929,12,0,42,0,0],
+ ['hosts/standalone',623,0,0,2,0,0],['apps/cli',14376,43,0,497,0,0]];
+(function(){
+  const t=document.getElementById('healthT');
+  HEALTH.forEach(r=>{
+    const dens=(r[2]/(r[1]/1000)).toFixed(1);
+    const tr=document.createElement('tr');
+    const bad = (r[0]==='platform/apple') ? ' style="color:var(--C);font-weight:700"' : '';
+    const lowT = (dens<3)?' style="color:var(--I)"':'';
+    tr.innerHTML=`<td>${r[0]}</td><td>${r[1].toLocaleString()}</td><td>${r[2]}</td><td${lowT}>${dens}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td${bad}>${r[6]}${r[5]>0&&r[6]==0?' ⚠':''}</td>`;
+    t.appendChild(tr);
+  });
+  const note=document.createElement('tr');
+  note.innerHTML='<td colspan="8" style="color:var(--dim);font-size:12px">Counts include each crate\'s tests/ directory. "extern \"C\"" in fynkel_native counts every declaration line (≈ 1–2 per exported fn). unwrap counts are dominated by tests in authoring/document/import/cli; the ones that matter are in non-test runtime code (sim.rs, ring.rs, fynkel_ecs).</td>';
+  t.appendChild(note);
+})();
+
+/* ======================= RISK TABLE ======================= */
+(function(){
+  const order={C:0,I:1,m:2,W:3};
+  const tb=document.querySelector('#rtable tbody');
+  const areas=[...new Set(RISKS.map(r=>r.area))];
+  const state={sev:new Set(['C','I','m','W']),area:'all',sort:'sev',dir:1};
+  document.getElementById('riskCountBig').textContent=RISKS.length;
+  const ctl=document.getElementById('rctl');
+  const mk=(label,on,fn)=>{const b=document.createElement('button');b.className='btn'+(on?' on':'');b.textContent=label;b.onclick=()=>{fn(b)};ctl.appendChild(b);return b;};
+  ['C','I','m','W'].forEach(s=>{
+    const n=RISKS.filter(r=>r.sev===s).length;
+    mk(`${{C:'Critical',I:'Important',m:'Minor',W:'Watch'}[s]} (${n})`,true,b=>{state.sev.has(s)?state.sev.delete(s):state.sev.add(s);b.classList.toggle('on');draw();});
+  });
+  const sp=document.createElement('span');sp.style.width='16px';ctl.appendChild(sp);
+  const areaBtns=[];
+  const ab=mk('All areas',true,b=>{state.area='all';areaBtns.forEach(x=>x.classList.remove('on'));b.classList.add('on');draw();});areaBtns.push(ab);
+  areas.forEach(a=>{const b=mk(a,false,b=>{state.area=a;areaBtns.forEach(x=>x.classList.remove('on'));b.classList.add('on');draw();});areaBtns.push(b);});
+  document.querySelectorAll('#rtable th[data-k]').forEach(th=>{th.style.cursor='pointer';th.onclick=()=>{const k=th.dataset.k;state.dir=(state.sort===k)?-state.dir:1;state.sort=k;draw();};});
+  const bar=document.getElementById('rbar');
+  ['C','I','m','W'].forEach(s=>{const i=document.createElement('i');i.style.background=`var(--${s})`;i.style.width=(100*RISKS.filter(r=>r.sev===s).length/RISKS.length)+'%';i.title=s;bar.appendChild(i);});
+  function draw(){
+    let rows=RISKS.filter(r=>state.sev.has(r.sev)&&(state.area==='all'||r.area===state.area));
+    rows.sort((a,b)=>{let x,y;if(state.sort==='sev'){x=order[a.sev];y=order[b.sev];}else{x=a[state.sort]||'';y=b[state.sort]||'';}return (x<y?-1:x>y?1:0)*state.dir;});
+    tb.innerHTML=rows.map(r=>`<tr id="risk-${r.id}"><td>${r.id}</td><td><span class="sev ${r.sev}">${r.sev==='W'?'W':r.sev}</span></td><td>${r.area}</td><td><b>${r.t}</b>${r.d?`<div class="d" style="color:var(--dim);font-size:12.8px">${r.d}</div>`:''}</td><td><small class="src">${r.e}</small></td><td class="d">${r.f}</td><td><span class="tag">${r.ref}</span></td></tr>`).join('');
+  }
+  draw();
+})();
+
+/* ======================= GRAPH ======================= */
+(function(){
+  const svg=document.getElementById('graph'), panel=document.getElementById('gpanel');
+  const NS='http://www.w3.org/2000/svg';
+  const colors={rust:'#e3894b',dart:'#3fb8d9',app:'#b58cff',host:'#6bd49a',ext:'#6f7890',game:'#e6c85a'};
+  const sevRank={C:3,I:2,m:1,W:0};
+  const sevCol={3:'#ff5d5d',2:'#ffae42',1:'#6aa8ff',0:'#9aa3b5'};
+  const byId=Object.fromEntries(NODES.map(n=>[n.id,n]));
+  NODES.forEach(n=>{n.risks=RISKS.filter(r=>r.nodes.includes(n.id));n.worst=n.risks.reduce((m,r)=>Math.max(m,sevRank[r.sev]),-1);});
+  let showExt=false, showGames=true, riskMode=true;
+  let view={x:0,y:0,k:1};
+  function visible(n){ if(n.kind==='ext'&&!showExt) return false; if(n.kind==='game'&&!showGames) return false; return true; }
+  function layout(){
+    const vis=NODES.filter(visible), ids=new Set(vis.map(n=>n.id));
+    const es=EDGES.filter(e=>ids.has(e[0])&&ids.has(e[1]));
+    const depth={};
+    const deps=id=>es.filter(e=>e[0]===id).map(e=>e[1]);
+    const d=(id,seen=new Set())=>{ if(depth[id]!=null) return depth[id]; if(seen.has(id)) return 0; seen.add(id); const ds=deps(id); depth[id]=ds.length?1+Math.max(...ds.map(x=>d(x,seen))):0; return depth[id]; };
+    vis.forEach(n=>d(n.id));
+    // externals to column 0
+    vis.forEach(n=>{ if(n.kind==='ext') depth[n.id]=0; });
+    if(showExt) vis.forEach(n=>{ if(n.kind!=='ext') depth[n.id]+=1; });
+    const cols={}; vis.forEach(n=>{(cols[depth[n.id]]=cols[depth[n.id]]||[]).push(n);});
+    const W=210,H=64;
+    Object.keys(cols).forEach(c=>{
+      const arr=cols[c];
+      arr.sort((a,b)=>(a.kind>b.kind?1:-1)||a.label.localeCompare(b.label));
+      arr.forEach((n,i)=>{ n.x=40+c*W; n.y=40+i*H + (c%2)*16; });
+    });
+    // barycentric smoothing
+    for(let it=0;it<6;it++){
+      Object.keys(cols).forEach(c=>{
+        const arr=cols[c];
+        arr.forEach(n=>{ const nb=es.filter(e=>e[0]===n.id||e[1]===n.id).map(e=>byId[e[0]===n.id?e[1]:e[0]]); n.bc=nb.length?nb.reduce((s,m)=>s+m.y,0)/nb.length:n.y; });
+        arr.sort((a,b)=>a.bc-b.bc);
+        arr.forEach((n,i)=>{ n.y=40+i*H+(c%2)*16; });
+      });
+    }
+    return {vis,es};
+  }
+  let G;
+  function render(){
+    G=layout();
+    svg.innerHTML='';
+    const defs=document.createElementNS(NS,'defs');
+    defs.innerHTML='<marker id="arr" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5a6886"/></marker>';
+    svg.appendChild(defs);
+    const g=document.createElementNS(NS,'g'); g.id='vp'; svg.appendChild(g);
+    const eg=document.createElementNS(NS,'g'); g.appendChild(eg);
+    const ng=document.createElementNS(NS,'g'); g.appendChild(ng);
+    const BW=170,BH=40;
+    G.es.forEach(e=>{
+      const a=byId[e[0]],b=byId[e[1]];
+      const p=document.createElementNS(NS,'path');
+      const x1=a.x, y1=a.y+BH/2, x2=b.x+BW, y2=b.y+BH/2;
+      const mx=(x1+x2)/2;
+      p.setAttribute('d',`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
+      p.setAttribute('class','edge'+(e[2]==='ffi'?' ffi':''));
+      if(e[2]==='proc') p.setAttribute('stroke-dasharray','2 4');
+      p.setAttribute('marker-end','url(#arr)');
+      p.dataset.a=e[0]; p.dataset.b=e[1];
+      eg.appendChild(p);
+    });
+    G.vis.forEach(n=>{
+      const gg=document.createElementNS(NS,'g'); gg.setAttribute('class','node'); gg.setAttribute('transform',`translate(${n.x},${n.y})`); gg.dataset.id=n.id; gg.style.cursor='pointer';
+      const r=document.createElementNS(NS,'rect'); r.setAttribute('width',BW); r.setAttribute('height',BH);
+      r.setAttribute('fill','#141b27');
+      const stroke = (riskMode&&n.worst>=0)?sevCol[n.worst]:colors[n.kind];
+      r.setAttribute('stroke',stroke); r.setAttribute('stroke-width',(riskMode&&n.worst>=2)?3:1.5);
+      gg.appendChild(r);
+      const band=document.createElementNS(NS,'rect'); band.setAttribute('width',6); band.setAttribute('height',BH); band.setAttribute('fill',colors[n.kind]); gg.appendChild(band);
+      const t=document.createElementNS(NS,'text'); t.setAttribute('x',13); t.setAttribute('y',17); t.textContent=n.label; gg.appendChild(t);
+      if(n.kind!=='ext'){
+        const s=document.createElementNS(NS,'text'); s.setAttribute('x',13); s.setAttribute('y',32); s.setAttribute('class','sub');
+        const cnt={C:0,I:0,m:0}; n.risks.forEach(r=>{if(cnt[r.sev]!=null)cnt[r.sev]++;});
+        s.textContent=`${n.lines?(n.lines/1000).toFixed(1)+'k LOC · ':''}${n.tests!=null?n.tests+' tests':''}${(cnt.C+cnt.I+cnt.m)?` · ${cnt.C?cnt.C+'C ':''}${cnt.I?cnt.I+'I ':''}${cnt.m?cnt.m+'m':''}`:''}`;
+        gg.appendChild(s);
+      }
+      gg.addEventListener('mouseenter',()=>hi(n.id)); gg.addEventListener('mouseleave',()=>hi(null));
+      gg.addEventListener('click',ev=>{ev.stopPropagation();show(n);});
+      ng.appendChild(gg);
+    });
+    apply();
+  }
+  function hi(id){
+    const nodes=svg.querySelectorAll('.node'), edges=svg.querySelectorAll('.edge');
+    if(!id){ nodes.forEach(n=>n.classList.remove('faded')); edges.forEach(e=>e.classList.remove('faded','hot','hotin')); return; }
+    const keep=new Set([id]);
+    edges.forEach(e=>{ e.classList.remove('hot','hotin'); if(e.dataset.a===id){e.classList.add('hot');keep.add(e.dataset.b);} else if(e.dataset.b===id){e.classList.add('hotin');keep.add(e.dataset.a);} else e.classList.add('faded'); });
+    nodes.forEach(n=>n.classList.toggle('faded',!keep.has(n.dataset.id)));
+  }
+  function show(n){
+    const uses=EDGES.filter(e=>e[0]===n.id).map(e=>byId[e[1]].label+(e[2]==='ffi'?' (FFI)':''));
+    const usedBy=EDGES.filter(e=>e[1]===n.id).map(e=>byId[e[0]].label);
+    const rs=[...n.risks].sort((a,b)=>sevRank[b.sev]-sevRank[a.sev]);
+    panel.innerHTML=`<span class="x" onclick="this.parentNode.style.display='none'">✕</span><h4 style="color:${colors[n.kind]}">${n.label}</h4>
+      <div style="color:var(--dim);margin-bottom:8px">${{rust:'Rust crate',dart:'Dart package',app:'Application',host:'Host / platform',ext:'External dependency',game:'Game / example'}[n.kind]}${n.plat?' · runs on: '+n.plat:''}</div>
+      ${n.purpose?`<p>${n.purpose}</p>`:''}
+      ${n.lines!=null&&n.kind!=='ext'?`<div class="kv"><div>Lines</div><div>${n.lines?n.lines.toLocaleString():'—'}</div><div>Tests</div><div>${n.tests??'—'}</div><div>Key files</div><div><small class="src">${n.files||''}</small></div></div>`:''}
+      <h4 style="margin-top:12px">Uses (${uses.length})</h4><div>${uses.map(u=>`<span class="tag">${u}</span>`).join('')||'—'}</div>
+      <h4>Used by (${usedBy.length})</h4><div>${usedBy.map(u=>`<span class="tag">${u}</span>`).join('')||'—'}</div>
+      <h4>Risks (${rs.length})</h4>${rs.map(r=>`<div style="margin:6px 0"><span class="sev ${r.sev}">${r.sev}</span> <a href="#risk-${r.id}"><b>${r.id}</b></a> ${r.t} <span class="tag">${r.ref}</span></div>`).join('')||'<div style="color:var(--dim)">none filed</div>'}`;
+    panel.style.display='block';
+  }
+  function apply(){ const vp=document.getElementById('vp'); if(vp) vp.setAttribute('transform',`translate(${view.x},${view.y}) scale(${view.k})`); }
+  function fit(){
+    const xs=G.vis.map(n=>n.x), ys=G.vis.map(n=>n.y);
+    const w=Math.max(...xs)+220, h=Math.max(...ys)+80;
+    const bw=svg.clientWidth-20;
+    view.k=Math.min(bw/w,1.4); view.x=10; view.y=10; document.getElementById('graphWrap').style.height=Math.max(660,Math.min(900,h*view.k+30))+'px'; apply();
+  }
+  let drag=null;
+  svg.addEventListener('mousedown',e=>{drag={x:e.clientX-view.x,y:e.clientY-view.y};svg.classList.add('drag');});
+  window.addEventListener('mousemove',e=>{if(!drag)return;view.x=e.clientX-drag.x;view.y=e.clientY-drag.y;apply();});
+  window.addEventListener('mouseup',()=>{drag=null;svg.classList.remove('drag');});
+  svg.addEventListener('wheel',e=>{e.preventDefault();const r=svg.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;const f=Math.exp(-e.deltaY*0.0015);const nk=Math.min(3,Math.max(0.25,view.k*f));view.x=mx-(mx-view.x)*(nk/view.k);view.y=my-(my-view.y)*(nk/view.k);view.k=nk;apply();},{passive:false});
+  svg.addEventListener('click',()=>{panel.style.display='none';});
+  document.getElementById('gExt').onchange=e=>{showExt=e.target.checked;render();fit();};
+  document.getElementById('gGames').onchange=e=>{showGames=e.target.checked;render();fit();};
+  document.getElementById('gRisk').onchange=e=>{riskMode=e.target.checked;render();};
+  document.getElementById('gReset').onclick=()=>fit();
+  document.getElementById('gFind').oninput=e=>{const q=e.target.value.toLowerCase();if(!q){hi(null);return;}const n=G.vis.find(n=>n.label.toLowerCase().includes(q));if(n){hi(n.id);}};
+  document.getElementById('gFind').onkeydown=e=>{if(e.key==='Enter'){const q=e.target.value.toLowerCase();const n=G.vis.find(n=>n.label.toLowerCase().includes(q));if(n)show(n);}};
+  render(); fit(); window.addEventListener('resize',fit);
+})();
+</script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({startOnLoad:false, theme:'dark', securityLevel:'loose', flowchart:{curve:'basis', useMaxWidth:true}, sequence:{useMaxWidth:true}, themeVariables:{fontSize:'13px', primaryColor:'#1a2332', primaryBorderColor:'#3a4a66', lineColor:'#6a7a99'}});
+  try { await mermaid.run({querySelector:'.mermaid'}); } catch(e){ console.error(e); }
+</script>
+</body>
+</html>

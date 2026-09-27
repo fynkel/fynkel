@@ -1,0 +1,10 @@
+{
+  "$schema": "https://fynkel.dev/schemas/meta.schema.json",
+  "formatVersion": 2,
+  "id": "1e071bfd-1128-45ad-92fc-d60e86f916c2",
+  "name": "hit.ogg",
+  "importer": "fynkel.audio",
+  "importerVersion": 1,
+  "settings": {},
+  "subAssets": {}
+}

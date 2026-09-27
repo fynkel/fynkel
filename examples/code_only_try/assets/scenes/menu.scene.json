@@ -1,0 +1,412 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 5,
+  "id": "b137049d-19e3-50cf-90f1-5a3ebbab8a26",
+  "name": "Menu",
+  "entities": {
+    "8d75538b-9968-5a45-a3af-64b658b71c00": {
+      "name": "Sun",
+      "parent": null,
+      "children": [],
+      "components": {
+        "d1999500-eb07-5fcb-96fc-78649272be39": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              20.0,
+              0.0
+            ],
+            "rotation": [
+              -0.418082,
+              0.27027258,
+              0.13182075,
+              0.85719514
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "2a6f8932-08d3-594b-bb17-c87e9d128453": {
+          "type": "fynkel.DirectionalLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1.0,
+              0.95,
+              0.85
+            ],
+            "intensity": 9000.0,
+            "cast_shadows": true
+          }
+        }
+      }
+    },
+    "cf94276c-cf02-5242-bf9c-2f6811ac4618": {
+      "name": "Environment",
+      "parent": null,
+      "children": [],
+      "components": {
+        "f00077b4-4510-5ae6-9134-d4c59fdfce98": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "279f8fb8-e23c-536a-b8af-043d0f993154": {
+          "type": "fynkel.Environment",
+          "version": 1,
+          "data": {
+            "ambient_color": [
+              0.55,
+              0.65,
+              0.9
+            ],
+            "ambient_intensity": 600.0,
+            "sky": {
+              "asset": "193cf336-13f4-415b-a4b4-1c38ba3b91d0"
+            },
+            "sky_intensity": 1500.0,
+            "sky_rotation": 0.0
+          }
+        }
+      }
+    },
+    "35ff592a-dc57-523f-86b0-2aae4bcbaf35": {
+      "name": "Floor",
+      "parent": null,
+      "children": [],
+      "components": {
+        "57a65ea6-c153-5152-8364-5920d6986eb0": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              -0.5,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              40.0,
+              1.0,
+              40.0
+            ]
+          }
+        },
+        "08b28719-0726-5cbd-b16c-9e31a32ff4e8": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cube"
+            },
+            "material": {
+              "asset": "fc6b4840-b70f-5b4b-846d-fcda21287498"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "6dcc961d-7a50-58c5-adc0-c63f7e56c8be": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "c3120b8b-0a25-562c-b808-5fde36bb0830": {
+      "name": "Podium",
+      "parent": null,
+      "children": [],
+      "components": {
+        "580deed1-1d95-53b4-b6a3-ccdae14f791b": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.3,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              3.0,
+              0.3,
+              3.0
+            ]
+          }
+        },
+        "8d326f71-0fda-5f73-b2bb-b6e2f84874d3": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cylinder"
+            },
+            "material": {
+              "asset": "579b9d4c-df7d-5134-af4e-312898eeef9b"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "c436df2c-6e63-5ee7-871f-824662e4cb9f": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "capsule",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "2f2948b1-ba0c-563f-83de-64123fe4a401": {
+      "name": "Big coin",
+      "parent": null,
+      "children": [
+        "5f15ecae-cb9f-53f1-b54a-df6e0cb71227"
+      ],
+      "components": {
+        "f85819ac-5efa-5950-a666-1e606cb1be74": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              2.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              2.2,
+              2.2,
+              2.2
+            ]
+          }
+        },
+        "6c79686d-1bc4-59cb-96de-147e47e75e10": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "speed": 0.8,
+            "space": "world"
+          }
+        }
+      }
+    },
+    "5f15ecae-cb9f-53f1-b54a-df6e0cb71227": {
+      "name": "Disc",
+      "parent": "2f2948b1-ba0c-563f-83de-64123fe4a401",
+      "children": [],
+      "components": {
+        "a5c72119-b948-5b4a-a639-137f1c41865c": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.70710677,
+              0.0,
+              0.0,
+              0.70710677
+            ],
+            "scale": [
+              0.7,
+              0.06,
+              0.7
+            ]
+          }
+        },
+        "74ed51c3-ba12-5b25-b330-5982fefffe40": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "f7a1e5d0-0000-4000-8000-000000000023",
+              "sub": "mesh/Cylinder"
+            },
+            "material": {
+              "asset": "1a765874-6dba-512c-84ec-74c6ac87d1b6"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "81a384bf-1f3a-5613-a3e5-472d0e2e4b86": {
+      "name": "Camera pivot",
+      "parent": null,
+      "children": [
+        "79f42448-326b-5882-8b5b-424533c52cff"
+      ],
+      "components": {
+        "0474917c-71c0-55bb-a5a0-9fb74ab26d01": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              1.2,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "8b29c620-ad8e-5233-9d78-d670bfb40ced": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "speed": 0.125,
+            "space": "world"
+          }
+        }
+      }
+    },
+    "79f42448-326b-5882-8b5b-424533c52cff": {
+      "name": "Camera",
+      "parent": "81a384bf-1f3a-5613-a3e5-472d0e2e4b86",
+      "children": [],
+      "components": {
+        "41e514f5-b936-587b-bfeb-bd7a14186069": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              3.7747986,
+              11.390825
+            ],
+            "rotation": [
+              -0.15931821,
+              -0.0,
+              -0.0,
+              0.98722726
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "c546c3c7-8802-52fb-8587-3769d7fff4cb": {
+          "type": "fynkel.Camera",
+          "version": 1,
+          "data": {
+            "projection": "perspective",
+            "fov_y": 0.95,
+            "ortho_height": 10.0,
+            "near": 0.1,
+            "far": 120.0,
+            "priority": 0,
+            "exposure_mode": "auto",
+            "exposure": 12.0,
+            "culling_mask": 4294967295
+          }
+        },
+        "e17cb7bc-5c9a-50b4-b03b-f71960ca408b": {
+          "type": "fynkel.AudioListener",
+          "version": 1,
+          "data": {
+            "volume": 1.0
+          }
+        }
+      }
+    }
+  }
+}
