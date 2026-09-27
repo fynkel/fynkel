@@ -798,13 +798,28 @@ pub struct PlaybackEndedEvent {
     pub clip: AssetRef,
 }
 
-/// Physics-lane events share one body (collision/trigger enter/stay/exit):
-/// `a` and `b` the colliders' entities, `point` and `normal` in world
-/// space, the normal pointing from `a` towards `b`; `impulse` the pair's
-/// total impulse over the step (0 for triggers and exits); `body_a` and
-/// `body_b` the entity whose `RigidBody` each collider belongs to — its
-/// own, or the parent's it joined (ADR-0034) — absent for static geometry
-/// and characters.
+/// One contact point of a [`ContactEvent`] (Unity's `ContactPoint`):
+/// world `point`, `normal` from `a` towards `b`, `separation` (negative
+/// when overlapping), `impulse` the solver's along the normal (N·s).
+#[derive(Clone, Debug, Default, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.ContactPoint")]
+pub struct ContactPointRecord {
+    pub point: Vec3,
+    pub normal: Vec3,
+    pub separation: f32,
+    pub impulse: f32,
+}
+
+/// Physics-lane events share one body (collision/trigger enter/stay/exit,
+/// controller hits): `a` and `b` the colliders' entities, `point` and
+/// `normal` the deepest point in world space, the normal pointing from `a`
+/// towards `b`; `impulse` the impulse the solver applied to `a` over the
+/// step (zero for triggers and exits); `body_a` and `body_b` the entity
+/// whose `RigidBody` each collider belongs to — its own, or the parent's
+/// it joined (ADR-0034) — absent for static geometry and characters;
+/// `relative_velocity` `b`'s velocity minus `a`'s (at an enter, before the
+/// solver stopped them); `contact_count` points in `contact0`… (the
+/// deepest first, at most four; foundation 2.9).
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "event", id = 256, name = "fynkel.ev.Contact")]
 pub struct ContactEvent {
@@ -812,9 +827,15 @@ pub struct ContactEvent {
     pub b: Entity,
     pub point: Vec3,
     pub normal: Vec3,
-    pub impulse: f32,
+    pub impulse: Vec3,
     pub body_a: Option<Entity>,
     pub body_b: Option<Entity>,
+    pub relative_velocity: Vec3,
+    pub contact_count: u32,
+    pub contact0: ContactPointRecord,
+    pub contact1: ContactPointRecord,
+    pub contact2: ContactPointRecord,
+    pub contact3: ContactPointRecord,
 }
 
 /// Snapshot record for a subscribed transform.
@@ -929,6 +950,7 @@ pub const ALL: &[&RecordSchema] = &[
     &ParentChangedEvent::SCHEMA,
     &MissedDeadlineEvent::SCHEMA,
     &SceneReadyEvent::SCHEMA,
+    &ContactPointRecord::SCHEMA,
     &ContactEvent::SCHEMA,
     &SnapshotTransformRecord::SCHEMA,
     &DiagnosticRecord::SCHEMA,
@@ -1034,7 +1056,7 @@ mod tests {
         // M3-08: entity @0, op @8, vector @12, rotation @24 → 40.
         assert_eq!(BodyCommandRecord::SCHEMA.offsets(), vec![0, 8, 12, 24]);
         assert_eq!(BodyCommandRecord::SCHEMA.wire_size(), 40);
-        assert_eq!(ContactEvent::SCHEMA.wire_size(), 64);
+        assert_eq!(ContactEvent::SCHEMA.wire_size(), 216);
         assert_eq!(PhysicsQueryRecord::SCHEMA.wire_size(), 88);
         assert_eq!(PhysicsHitRecord::SCHEMA.wire_size(), 48);
         assert_eq!(BodyStateRecord::SCHEMA.wire_size(), 40);

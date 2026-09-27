@@ -161,14 +161,51 @@ enum ContactKind {
   controllerHit,
 }
 
-/// A collision or trigger event between two colliders (M3-08). For
-/// collisions, [point] is the deepest contact point (world space), [normal]
-/// points from [a] towards [b] and [impulse] is the impulse the solver
-/// applied at this pair (N·s; 0 on exit). Triggers carry no contact
-/// geometry (zeros).
+/// One point of a [Contact] (Unity's `ContactPoint`): [point] in world
+/// space, [normal] from the contact's `a` towards `b`, [separation] the
+/// distance between the shapes there (negative when they overlap),
+/// [impulse] the solver's push along the normal at this point (N·s).
+class ContactPoint {
+  const ContactPoint(this.point, this.normal, this.separation, this.impulse);
+  final Vec3 point;
+  final Vec3 normal;
+  final double separation;
+  final double impulse;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ContactPoint &&
+      other.point == point &&
+      other.normal == normal &&
+      other.separation == separation &&
+      other.impulse == impulse;
+
+  @override
+  int get hashCode => Object.hash(point, normal, separation, impulse);
+
+  @override
+  String toString() => 'ContactPoint($point n=$normal d=$separation j=$impulse)';
+}
+
+/// A collision or trigger event between two colliders (M3-08), Unity's
+/// `Collision`. For collisions, [contacts] are the pair's points (the
+/// deepest first, at most four), [point] and [normal] the deepest one's,
+/// the normal pointing from [a] towards [b]; [impulse] the impulse the
+/// solver applied to [a] over the step (N·s; `impulseFor` gives either
+/// side's) and [relativeVelocity] `b`'s velocity minus `a`'s — at an
+/// enter, the speed of the impact before the solver stopped it
+/// (`relativeVelocityFor(me).length > 2` plays the thud; foundation 2.9).
+/// Exits carry no points and no impulse; triggers carry nothing but the
+/// sides.
 class Contact extends EngineEvent {
   const Contact(super.tickLo, this.kind, this.a, this.b,
-      {this.point = Vec3.zero, this.normal = Vec3.zero, this.impulse = 0, this.bodyA, this.bodyB});
+      {this.point = Vec3.zero,
+      this.normal = Vec3.zero,
+      this.impulse = Vec3.zero,
+      this.relativeVelocity = Vec3.zero,
+      this.contacts = const [],
+      this.bodyA,
+      this.bodyB});
   final ContactKind kind;
 
   /// The colliders' entities (Unity's `Collision.collider`): for a collider
@@ -176,12 +213,27 @@ class Contact extends EngineEvent {
   final int a, b;
   final Vec3 point;
   final Vec3 normal;
-  final double impulse;
+  final Vec3 impulse;
+  final Vec3 relativeVelocity;
+  final List<ContactPoint> contacts;
 
   /// The entity whose `RigidBody` each collider belongs to (Unity's
   /// `Collision.rigidbody`): the collider's own, or its parent's when it
   /// joined it (ADR-0034); null for static geometry and characters.
   final int? bodyA, bodyB;
+
+  /// Unity's `Collision.contactCount`.
+  int get contactCount => contacts.length;
+
+  /// Unity's `Collision.GetContact`.
+  ContactPoint getContact(int index) => contacts[index];
+
+  /// The impulse the side [entity] (a collider or its body) received.
+  Vec3 impulseFor(int entity) => _isA(entity) ? impulse : -impulse;
+
+  /// The other side's velocity minus [entity]'s (Unity's
+  /// `Collision.relativeVelocity` as that side hears it).
+  Vec3 relativeVelocityFor(int entity) => _isA(entity) ? relativeVelocity : -relativeVelocity;
 
   bool get isTrigger =>
       kind == ContactKind.triggerEnter || kind == ContactKind.triggerExit || kind == ContactKind.triggerStay;
@@ -208,7 +260,9 @@ class Contact extends EngineEvent {
   }
 
   @override
-  String toString() => 'Contact($kind ${a.toRadixString(16)}↔${b.toRadixString(16)} at $point n=$normal j=$impulse)';
+  String toString() =>
+      'Contact($kind ${a.toRadixString(16)}↔${b.toRadixString(16)} at $point n=$normal j=$impulse '
+      'v=$relativeVelocity points=$contactCount)';
 }
 
 /// An event whose kind this SDK does not know (newer engine); skipped safely.
@@ -299,6 +353,16 @@ ParentChanged _parent(ByteData d, int o, Uint8List tail, int tickLo) {
 
 Contact _contact(ByteData d, int o, Uint8List tail, gen.EventHeader h) {
   final e = gen.ContactEvent.decode(d, o, tail);
+  final points = [e.contact0, e.contact1, e.contact2, e.contact3]
+      .take(e.contactCount)
+      .map((p) => ContactPoint(p.point, p.normal, p.separation, p.impulse))
+      .toList(growable: false);
   return Contact(h.tickLo, ContactKind.values[h.kind - _physicsFirst], e.a, e.b,
-      point: e.point, normal: e.normal, impulse: e.impulse, bodyA: e.bodyA, bodyB: e.bodyB);
+      point: e.point,
+      normal: e.normal,
+      impulse: e.impulse,
+      relativeVelocity: e.relativeVelocity,
+      contacts: points,
+      bodyA: e.bodyA,
+      bodyB: e.bodyB);
 }

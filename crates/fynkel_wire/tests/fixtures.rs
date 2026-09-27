@@ -142,9 +142,25 @@ fn fixtures_match_generated_codecs() {
             b: e(2, 1),
             point: Vec3::new(0.5, 1.0, -0.25),
             normal: Vec3::Y,
-            impulse: 3.5,
+            impulse: Vec3::new(0.0, 3.5, 0.0),
             body_a: Some(e(4, 1)),
             body_b: None,
+            relative_velocity: Vec3::new(0.0, 7.0, 0.5),
+            contact_count: 2,
+            contact0: ContactPointRecord {
+                point: Vec3::new(0.5, 1.0, -0.25),
+                normal: Vec3::Y,
+                separation: -0.01,
+                impulse: 2.0,
+            },
+            contact1: ContactPointRecord {
+                point: Vec3::new(-0.5, 1.0, 0.25),
+                normal: Vec3::Y,
+                separation: 0.0,
+                impulse: 1.5,
+            },
+            contact2: ContactPointRecord::default(),
+            contact3: ContactPointRecord::default(),
         },
     );
     check(

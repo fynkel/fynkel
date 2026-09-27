@@ -224,7 +224,7 @@ final v = bodyState()?.linearVelocity;             // one query; null without a 
 @override
 void onCollisionEnter(Contact c) {                  // also Stay/Exit, onTriggerEnter/Exit
   final other = world.byEntity(c.other(gameObject.entity));
-  if (c.impulse > 10) crack(c.point, c.normalFor(gameObject.entity));
+  if (c.relativeVelocityFor(gameObject.entity).length > 2) crack(c.point, c.normalFor(gameObject.entity));
 }
 
 final hit = world.raycast(origin, direction, maxDistance: 20, mask: world.layerMask(['default']));
@@ -234,8 +234,10 @@ world.overlap(ColliderShape.sphere, const Vec3(2, 0, 0), centre);   // also shap
 A `Collider` on a child of a `RigidBody` is part of that body (a
 compound, as in Unity). Contact callbacks run right after each tick's
 step on the behaviours of both objects, and of a joined child's body;
-`Contact` carries `point`, `normal` (a → b), `impulse` (0 for triggers
-and exits) and each side's `bodyA`/`bodyB`. `fynkel validate` checks values (`FYN-H0001`/
+`Contact` carries Unity's `Collision` data — `contacts` (up to four
+`ContactPoint`s), `point`, `normal` (a → b), `impulse` (a vector, zero for
+triggers and exits; `impulseFor(me)`), `relativeVelocity`
+(`relativeVelocityFor(me)`, the impact speed at an enter) and each side's `bodyA`/`bodyB`. `fynkel validate` checks values (`FYN-H0001`/
 `H0002`, `H0005`/`H0007` for the character and camera rig), a mesh collider
 on a moving body (`H0003`), a dynamic body without a collider of its own
 or a child's (`H0004`, warning) and a body or collider next to a `CharacterController` (`H0006`).

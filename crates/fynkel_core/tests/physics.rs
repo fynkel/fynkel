@@ -85,7 +85,7 @@ fn a_dynamic_body_falls_is_owned_and_lands_once() {
                     enters += 1;
                     assert!((c.a == crate_ && c.b == floor) || (c.a == floor && c.b == crate_));
                     assert!(c.normal.y.abs() > 0.9, "{:?}", c.normal);
-                    assert!(c.impulse > 0.0);
+                    assert!(c.impulse.length() > 0.0);
                     assert!(c.point.y.abs() < 0.1, "{:?}", c.point);
                 }
                 EventPayload::CollisionStay(_) => stays += 1,
@@ -316,7 +316,7 @@ fn a_trigger_reaches_after_physics_exactly_once() {
                     enter += 1;
                     enter_tick = e.tick;
                     assert!((c.a == zone && c.b == ball) || (c.a == ball && c.b == zone));
-                    assert_eq!(c.impulse, 0.0);
+                    assert_eq!(c.impulse, Vec3::ZERO);
                     assert!(w.tick() == e.tick, "reported the tick it happened");
                 }
                 EventPayload::TriggerExit(_) => exit += 1,
@@ -922,7 +922,7 @@ fn a_body_inside_a_trigger_stays() {
                 EventPayload::TriggerEnter(_) => enters += 1,
                 EventPayload::TriggerStay(c) => {
                     assert!((c.a == zone && c.b == crate_) || (c.a == crate_ && c.b == zone));
-                    assert_eq!(c.impulse, 0.0);
+                    assert_eq!(c.impulse, Vec3::ZERO);
                     if i < 30 {
                         unwatched += 1;
                     } else {
@@ -1366,4 +1366,93 @@ fn a_bodys_frozen_axes_stay_put() {
     let s = w.physics().body_state(frozen).unwrap();
     assert_eq!(s.angular_velocity, Vec3::ZERO);
     assert_eq!((s.linear_velocity.x, s.linear_velocity.y), (0.0, 0.0));
+}
+
+/// Unity's `Collision` (foundation 2.9): every contact point of the pair
+/// (the deepest first), the impulse as a vector and the relative velocity
+/// at impact — before the solver stops the fall, so a landing's speed is
+/// readable (`relativeVelocity.magnitude > 2` plays the thud).
+#[test]
+fn a_collision_carries_its_points_impulse_and_relative_velocity() {
+    let mut w = world();
+    let floor = floor(&mut w);
+    let crate_ = spawn(
+        &mut w,
+        2,
+        Vec3::new(0.0, 3.0, 0.0),
+        vec![
+            ComponentValue::RigidBody(RigidBody::default()),
+            ComponentValue::Collider(Collider::default()),
+        ],
+    );
+    let mut enter = None;
+    for _ in 0..240 {
+        w.step();
+        for e in w.after_physics_events() {
+            if let EventPayload::CollisionEnter(c) = &e.payload {
+                enter = Some(*c);
+            }
+        }
+        if enter.is_some() {
+            break;
+        }
+    }
+    let c = enter.expect("the crate lands");
+    // Seen from the crate: the side it is on.
+    let (up, sign) = if c.a == crate_ {
+        assert_eq!(c.b, floor);
+        (-c.normal, 1.0)
+    } else {
+        (c.normal, -1.0)
+    };
+    assert!(up.y > 0.9, "{:?}", c.normal);
+    // A flat face on a flat floor: four corners.
+    assert_eq!(c.point_count, 4, "{c:?}");
+    let points = &c.points[..c.point_count as usize];
+    for p in points {
+        assert!(p.point.y.abs() < 0.1, "{p:?}");
+        assert!((p.point.x.abs() - 0.5).abs() < 0.05, "{p:?}");
+        assert!((p.point.z.abs() - 0.5).abs() < 0.05, "{p:?}");
+        assert!((p.normal - c.normal).length() < 1e-3, "{p:?}");
+        assert!(p.separation <= 0.05, "{p:?}");
+        assert!(p.impulse >= 0.0, "{p:?}");
+    }
+    assert_eq!(points[0].point, c.point, "the deepest first");
+    for p in &c.points[c.point_count as usize..] {
+        assert_eq!(*p, ContactPoint::default());
+    }
+    // The impulse pushes the crate up (on `a`), the points' sum.
+    let impulse = c.impulse * sign;
+    assert!(impulse.y > 0.1, "{:?}", c.impulse);
+    let sum: f32 = points.iter().map(|p| p.impulse).sum();
+    assert!(
+        (c.impulse.length() - sum).abs() < 1e-3 * sum.max(1.0),
+        "{c:?}"
+    );
+    // Relative velocity (the other's minus this one's, as Unity): the
+    // floor comes up at the falling crate at about √(2·g·2.5) ≈ 7 m/s.
+    let relative = c.relative_velocity * sign;
+    assert!(relative.y > 5.0, "{:?}", c.relative_velocity);
+    assert!(relative.xz().length() < 0.1, "{:?}", c.relative_velocity);
+
+    // A trigger and an exit carry no points and no impulse.
+    w.submit(
+        Lane::Simulation,
+        vec![Command::SetTransform {
+            entity: crate_,
+            transform: Transform::from_position(Vec3::new(0.0, 5.0, 0.0)),
+        }],
+    );
+    let mut exit = None;
+    for _ in 0..3 {
+        w.step();
+        for e in w.after_physics_events() {
+            if let EventPayload::CollisionExit(c) = &e.payload {
+                exit = Some(*c);
+            }
+        }
+    }
+    let x = exit.expect("teleporting off the floor exits");
+    assert_eq!(x.point_count, 0);
+    assert_eq!(x.impulse, Vec3::ZERO);
 }

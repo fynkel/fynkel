@@ -124,12 +124,34 @@ impl BodyCommand {
     }
 }
 
-/// One contact as an event carries it: `a` and `b` the colliders'
-/// entities, `body_a`/`body_b` the entity whose `RigidBody` each collider
-/// belongs to (its own, or its parent's when it joined it — ADR-0034;
-/// `None` for static geometry and characters), `point` and `normal` in
-/// world space, the normal pointing from `a` towards `b`, `impulse` the
-/// total impulse of the pair over the last step (0 for triggers).
+/// The most contact points one event carries: the deepest four of the
+/// pair (a face on a face has four corners; a mesh pair keeps its four
+/// deepest).
+pub const MAX_CONTACT_POINTS: usize = 4;
+
+/// One point of a contact (Unity's `ContactPoint`): `point` in world
+/// space, `normal` from `a` towards `b`, `separation` the distance between
+/// the shapes there (negative when they overlap), `impulse` the solver's
+/// impulse along the normal at this point over the last step (N·s).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ContactPoint {
+    pub point: Vec3,
+    pub normal: Vec3,
+    pub separation: f32,
+    pub impulse: f32,
+}
+
+/// One contact as an event carries it (Unity's `Collision`): `a` and `b`
+/// the colliders' entities, `body_a`/`body_b` the entity whose `RigidBody`
+/// each collider belongs to (its own, or its parent's when it joined it —
+/// ADR-0034; `None` for static geometry and characters), `point` and
+/// `normal` the deepest point in world space, the normal pointing from `a`
+/// towards `b`; `points` the pair's contact points (the deepest first,
+/// `point_count` of them, at most [`MAX_CONTACT_POINTS`]); `impulse` the
+/// total impulse the solver applied to `a` over the last step (N·s, zero
+/// for triggers and exits; `b` got its opposite); `relative_velocity` the
+/// velocity of `b` minus that of `a` at the deepest point — at an enter,
+/// before the step's solver stopped them (foundation 2.9).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Contact {
     pub a: Entity,
@@ -138,7 +160,28 @@ pub struct Contact {
     pub body_b: Option<Entity>,
     pub point: Vec3,
     pub normal: Vec3,
-    pub impulse: f32,
+    pub impulse: Vec3,
+    pub relative_velocity: Vec3,
+    pub points: [ContactPoint; MAX_CONTACT_POINTS],
+    pub point_count: u32,
+}
+
+impl Contact {
+    /// A contact between two sides with no geometry (triggers, exits).
+    pub fn between(a: Entity, b: Entity, body_a: Option<Entity>, body_b: Option<Entity>) -> Self {
+        Self {
+            a,
+            b,
+            body_a,
+            body_b,
+            point: Vec3::ZERO,
+            normal: Vec3::ZERO,
+            impulse: Vec3::ZERO,
+            relative_velocity: Vec3::ZERO,
+            points: [ContactPoint::default(); MAX_CONTACT_POINTS],
+            point_count: 0,
+        }
+    }
 }
 
 /// The physics events of one tick (§5.1 physics lane).

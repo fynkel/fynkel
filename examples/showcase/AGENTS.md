@@ -228,7 +228,7 @@ final v = bodyState()?.linearVelocity;             // one query; null without a 
 @override
 void onCollisionEnter(Contact c) {                  // also Stay/Exit, onTriggerEnter/Exit
   final other = world.byEntity(c.other(gameObject.entity));
-  if (c.impulse > 10) crack(c.point, c.normalFor(gameObject.entity));
+  if (c.relativeVelocityFor(gameObject.entity).length > 2) crack(c.point, c.normalFor(gameObject.entity));
 }
 
 final hit = world.raycast(origin, direction, maxDistance: 20, mask: world.layerMask(['default']));
@@ -236,7 +236,7 @@ world.overlap(ColliderShape.sphere, const Vec3(2, 0, 0), centre);   // also shap
 ```
 
 Contact callbacks run right after each tick's step on the behaviours of
-both objects; `Contact` carries `point`, `normal` (a → b) and `impulse`
+both objects; `Contact` carries `contacts`, `point`, `normal` (a → b), `impulse` (a vector) and `relativeVelocity`
 (0 for triggers and exits). `fynkel validate` checks values (`FYN-H0001`/
 `H0002`, `H0005`/`H0007` for the character and camera rig), a mesh collider
 on a moving body (`H0003`), a dynamic body without a collider (`H0004`,

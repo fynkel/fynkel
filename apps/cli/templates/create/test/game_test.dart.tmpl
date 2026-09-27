@@ -177,7 +177,7 @@ void main() {
     expect(crate.get<RigidBody>()!.bodyType, BodyType.dynamic);
     expect(crate.transform.position.y, closeTo(0.5, 0.05), reason: 'resting on the floor');
     expect(landings.floorHits, greaterThanOrEqualTo(1));
-    expect(landings.lastImpulse, greaterThan(0));
+    expect(landings.lastImpulse.y, greaterThan(0), reason: 'the floor pushed the crate up');
     final rest = crate.bodyState()!;
     expect(rest.sleeping, isTrue, reason: '$rest');
     expect(cube.bodyState(), isNotNull, reason: 'the cube is a kinematic body');
@@ -213,11 +213,11 @@ class _Heard extends Behaviour {
 /// Counts the crate's landings on the floor.
 class _Landings extends Behaviour {
   int floorHits = 0;
-  double lastImpulse = 0;
+  Vec3 lastImpulse = Vec3.zero;
 
   @override
   void onCollisionEnter(Contact contact) {
     if (world.nameOfEntity(contact.other(gameObject.entity)) == 'Floor') floorHits++;
-    lastImpulse = contact.impulse;
+    lastImpulse = contact.impulseFor(gameObject.entity);
   }
 }

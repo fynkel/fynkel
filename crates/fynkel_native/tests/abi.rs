@@ -902,8 +902,13 @@ fn physics_bodies_commands_queries_and_contacts() {
         "the crate is one side"
     );
     assert!(c.normal.y.abs() > 0.9, "{c:?}");
-    assert!(c.impulse > 0.0);
+    assert!(c.impulse.y.abs() > 0.0, "{c:?}");
     assert!((c.point.y).abs() < 0.2, "{c:?}");
+    assert_eq!(c.contact_count, 4, "a face on the floor: {c:?}");
+    assert!(
+        c.relative_velocity.y.abs() > 1.0,
+        "the landing speed: {c:?}"
+    );
     let (_, _, body, tail) = h.query(bridge::QUERY_BODY, krate);
     let state = BodyStateRecord::decode(&body, &tail).unwrap();
     assert!(state.sleeping, "{state:?}");

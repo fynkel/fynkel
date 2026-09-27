@@ -16,8 +16,9 @@ use rapier3d::prelude::*;
 
 use crate::{
     BodyCommand, BodyState, BodyType, CharacterController, CharacterState, Collider, ColliderShape,
-    CombineRule, Contact, Hit, PhysicsEvent, PhysicsMaterial, PhysicsOwned, PhysicsStats, Quat,
-    QueryKind, QuerySpec, Rejection, RejectionKind, RigidBody, Vec3, MAX_MESH_COLLIDER_TRIANGLES,
+    CombineRule, Contact, ContactPoint, Hit, PhysicsEvent, PhysicsMaterial, PhysicsOwned,
+    PhysicsStats, Quat, QueryKind, QuerySpec, Rejection, RejectionKind, RigidBody, Vec3,
+    MAX_CONTACT_POINTS, MAX_MESH_COLLIDER_TRIANGLES,
 };
 
 /// How far below a character's skin the ground may be for it to count as
@@ -89,20 +90,33 @@ struct CharacterRun {
 
 /// Collects the step's collision events; their contact data is read from
 /// the narrow phase after the step, once the solver has produced the
-/// tick's impulses (the event itself is raised before solving).
+/// tick's impulses (the event itself is raised before solving). A start
+/// keeps the relative velocity of its two colliders at that moment — the
+/// speed of the impact, before the solver stops it (Unity's
+/// `relativeVelocity`, foundation 2.9).
 struct Collector {
-    events: Mutex<Vec<CollisionEvent>>,
+    events: Mutex<Vec<(CollisionEvent, Vec3)>>,
 }
 
 impl EventHandler for Collector {
     fn handle_collision_event(
         &self,
-        _bodies: &RigidBodySet,
-        _colliders: &ColliderSet,
+        bodies: &RigidBodySet,
+        colliders: &ColliderSet,
         event: CollisionEvent,
-        _pair: Option<&ContactPair>,
+        pair: Option<&ContactPair>,
     ) {
-        self.events.lock().unwrap().push(event);
+        let relative = match event {
+            CollisionEvent::Started(h1, h2, _) => {
+                let at = pair
+                    .and_then(|p| deepest_point(colliders, p))
+                    .or_else(|| colliders.get(h1).map(|c| c.position().translation))
+                    .unwrap_or(Vec3::ZERO);
+                velocity_at(bodies, colliders, h2, at) - velocity_at(bodies, colliders, h1, at)
+            }
+            CollisionEvent::Stopped(..) => Vec3::ZERO,
+        };
+        self.events.lock().unwrap().push((event, relative));
     }
 
     fn handle_contact_force_event(
@@ -116,14 +130,70 @@ impl EventHandler for Collector {
     }
 }
 
-/// Deepest contact point (world), its normal (from collider 1 to 2) and
-/// the pair's impulse.
-fn contact_data(colliders: &ColliderSet, pair: &ContactPair) -> Option<(Vec3, Vec3, f32)> {
-    let (manifold, contact) = pair.find_deepest_contact()?;
-    let c1 = colliders.get(pair.collider1)?;
-    let point = c1.position().transform_point(contact.local_p1);
-    let normal = manifold.data.normal;
-    Some((point, normal, pair.total_impulse_magnitude()))
+/// The velocity at `point` (world) of the body `collider` is attached to;
+/// zero for a collider without one.
+fn velocity_at(
+    bodies: &RigidBodySet,
+    colliders: &ColliderSet,
+    collider: ColliderHandle,
+    point: Vec3,
+) -> Vec3 {
+    colliders
+        .get(collider)
+        .and_then(|c| c.parent())
+        .and_then(|b| bodies.get(b))
+        .map_or(Vec3::ZERO, |b| b.velocity_at_point(point))
+}
+
+/// The pair's deepest point in world space.
+fn deepest_point(colliders: &ColliderSet, pair: &ContactPair) -> Option<Vec3> {
+    let (_, contact) = pair.find_deepest_contact()?;
+    Some(
+        colliders
+            .get(pair.collider1)?
+            .position()
+            .transform_point(contact.local_p1),
+    )
+}
+
+/// Fills `contact`'s geometry from the pair seen from `first` (the
+/// collider of side `a`): its points, the deepest first and at most
+/// [`MAX_CONTACT_POINTS`], each normal pointing from `a` to `b`; the
+/// deepest point and normal; the impulse on `a` (the sum over every
+/// point, not only the kept ones).
+fn fill_contact(
+    colliders: &ColliderSet,
+    pair: &ContactPair,
+    first: ColliderHandle,
+    contact: &mut Contact,
+) {
+    let Some(c1) = colliders.get(pair.collider1) else {
+        return;
+    };
+    let flip = if pair.collider1 == first { 1.0 } else { -1.0 };
+    let mut all: Vec<ContactPoint> = Vec::new();
+    let mut impulse = Vec3::ZERO;
+    for m in pair.solver_manifolds() {
+        let normal = m.data.normal * flip;
+        for p in &m.points {
+            impulse -= normal * p.data.impulse;
+            all.push(ContactPoint {
+                point: c1.position().transform_point(p.local_p1),
+                normal,
+                separation: p.dist,
+                impulse: p.data.impulse,
+            });
+        }
+    }
+    all.sort_by(|x, y| x.separation.total_cmp(&y.separation));
+    let n = all.len().min(MAX_CONTACT_POINTS);
+    contact.points[..n].copy_from_slice(&all[..n]);
+    contact.point_count = n as u32;
+    if let Some(deepest) = all.first() {
+        contact.point = deepest.point;
+        contact.normal = deepest.normal;
+    }
+    contact.impulse = impulse;
 }
 
 fn pose_of(m: &Mat4) -> (Vec3, Quat, Vec3) {
@@ -1569,15 +1639,17 @@ impl Physics {
                     let Some(&(b, body_b)) = self.by_collider.get(&handle) else {
                         continue;
                     };
-                    self.events.push(PhysicsEvent::ControllerHit(Contact {
-                        a: *entity,
-                        b,
-                        body_a: None,
-                        body_b,
-                        point: hit.witness1,
-                        normal: -hit.normal1,
+                    let mut contact = Contact::between(*entity, b, None, body_b);
+                    contact.point = hit.witness1;
+                    contact.normal = -hit.normal1;
+                    contact.points[0] = ContactPoint {
+                        point: contact.point,
+                        normal: contact.normal,
+                        separation: 0.0,
                         impulse: 0.0,
-                    }));
+                    };
+                    contact.point_count = 1;
+                    self.events.push(PhysicsEvent::ControllerHit(contact));
                 }
             }
             run.state = CharacterState {
@@ -1609,9 +1681,26 @@ impl Physics {
         }
     }
 
-    fn collect_events(&mut self, raw: Vec<CollisionEvent>, watched: &BTreeSet<Entity>) {
+    /// The velocity of `h2`'s body minus `h1`'s, at `h1`'s position.
+    fn relative_velocity(&self, h1: ColliderHandle, h2: ColliderHandle) -> Vec3 {
+        let at = self
+            .world
+            .colliders
+            .get(h1)
+            .map_or(Vec3::ZERO, |c| c.position().translation);
+        self.relative_velocity_at(h1, h2, at)
+    }
+
+    /// The velocity of `h2`'s body minus `h1`'s, at `point`.
+    fn relative_velocity_at(&self, h1: ColliderHandle, h2: ColliderHandle, point: Vec3) -> Vec3 {
+        let w = &self.world;
+        velocity_at(&w.bodies, &w.colliders, h2, point)
+            - velocity_at(&w.bodies, &w.colliders, h1, point)
+    }
+
+    fn collect_events(&mut self, raw: Vec<(CollisionEvent, Vec3)>, watched: &BTreeSet<Entity>) {
         let mut started: HashSet<(Entity, Entity)> = HashSet::new();
-        for event in raw {
+        for (event, relative) in raw {
             let (h1, h2, flags, start) = match event {
                 CollisionEvent::Started(a, b, f) => (a, b, f, true),
                 CollisionEvent::Stopped(a, b, f) => (a, b, f, false),
@@ -1622,33 +1711,16 @@ impl Physics {
                 continue;
             };
             let sensor = flags.contains(CollisionEventFlags::SENSOR);
-            let (point, mut normal, impulse) = self
-                .world
-                .narrow_phase
-                .contact_pair(h1, h2)
-                .and_then(|p| {
-                    let d = contact_data(&self.world.colliders, p)?;
-                    // The pair's collider1 may be either side; the normal
-                    // reported points a → b.
-                    Some(if p.collider1 == h1 {
-                        d
-                    } else {
-                        (d.0, -d.1, d.2)
-                    })
-                })
-                .unwrap_or((Vec3::ZERO, Vec3::ZERO, 0.0));
-            if !start {
-                normal = Vec3::ZERO;
+            let mut contact = Contact::between(a, b, body_a, body_b);
+            if start && !sensor {
+                if let Some(pair) = self.world.narrow_phase.contact_pair(h1, h2) {
+                    fill_contact(&self.world.colliders, pair, h1, &mut contact);
+                }
+                contact.relative_velocity = relative;
+            } else if !sensor {
+                // An exit: no geometry, the velocities as they are now.
+                contact.relative_velocity = self.relative_velocity(h1, h2);
             }
-            let contact = Contact {
-                a,
-                b,
-                body_a,
-                body_b,
-                point,
-                normal,
-                impulse: if sensor { 0.0 } else { impulse },
-            };
             let key = if a < b { (a, b) } else { (b, a) };
             self.events.push(match (start, sensor) {
                 (true, false) => PhysicsEvent::CollisionEnter(contact),
@@ -1686,15 +1758,9 @@ impl Physics {
             }
             if sensor {
                 if self.world.narrow_phase.intersection_pair(ca, cb) == Some(true) {
-                    stays.push(PhysicsEvent::TriggerStay(Contact {
-                        a,
-                        b,
-                        body_a,
-                        body_b,
-                        point: Vec3::ZERO,
-                        normal: Vec3::ZERO,
-                        impulse: 0.0,
-                    }));
+                    stays.push(PhysicsEvent::TriggerStay(Contact::between(
+                        a, b, body_a, body_b,
+                    )));
                 }
                 continue;
             }
@@ -1704,21 +1770,10 @@ impl Physics {
             if !pair.has_any_active_contact() {
                 continue;
             }
-            let (point, mut normal, impulse) =
-                contact_data(&self.world.colliders, pair).unwrap_or((Vec3::ZERO, Vec3::ZERO, 0.0));
-            // The pair's collider1 may be either entity; the normal points a → b.
-            if pair.collider1 != ca {
-                normal = -normal;
-            }
-            stays.push(PhysicsEvent::CollisionStay(Contact {
-                a,
-                b,
-                body_a,
-                body_b,
-                point,
-                normal,
-                impulse,
-            }));
+            let mut contact = Contact::between(a, b, body_a, body_b);
+            fill_contact(&self.world.colliders, pair, ca, &mut contact);
+            contact.relative_velocity = self.relative_velocity_at(ca, cb, contact.point);
+            stays.push(PhysicsEvent::CollisionStay(contact));
         }
         self.events.extend(stays);
     }
@@ -2236,7 +2291,7 @@ mod tests {
                     PhysicsEvent::TriggerEnter(c) => {
                         t_enter += 1;
                         assert!((c.a == zone && c.b == ball) || (c.a == ball && c.b == zone));
-                        assert_eq!(c.impulse, 0.0);
+                        assert_eq!(c.impulse, Vec3::ZERO);
                     }
                     PhysicsEvent::TriggerExit(_) => t_exit += 1,
                     PhysicsEvent::CollisionStay(c) => {
@@ -2245,7 +2300,7 @@ mod tests {
                     }
                     PhysicsEvent::CollisionEnter(c) => {
                         c_enter += 1;
-                        assert!(c.impulse >= 0.0);
+                        assert!(c.impulse.is_finite());
                         assert!(c.normal.length() > 0.9);
                     }
                     PhysicsEvent::CollisionExit(_) | PhysicsEvent::ControllerHit(_) => {}

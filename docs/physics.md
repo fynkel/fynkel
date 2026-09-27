@@ -359,11 +359,24 @@ callback too, once, after the collider's (Unity calls both).
 `Contact` carries `a`, `b` (the colliders' entities, Unity's
 `Collision.collider`), `bodyA`, `bodyB` (the entity whose `RigidBody`
 each collider belongs to, Unity's `Collision.rigidbody`; null for static
-geometry and characters), `point` (world, the deepest point), `normal`
-(from `a` towards `b`; `normalFor(entity)` flips it), `impulse` (N·s the
-solver applied to the pair this step; 0 for exits and triggers),
-`other(entity)`, `bodyOf(entity)`, `involves`, `isTrigger`;
-`other`, `normalFor` and `bodyOf` take a collider or its body. A sensor overlaps dynamic
+geometry and characters), `contacts` (Unity's `ContactPoint`s: `point`
+in world space, `normal`, `separation` — negative when overlapping —,
+`impulse` along the normal; the pair's deepest four, the deepest first;
+`contactCount`, `getContact(i)`), `point` and `normal` (the deepest
+point's; the normal from `a` towards `b`, `normalFor(entity)` flips it),
+`impulse` (a vector, N·s: the push the solver gave `a` this step, the sum
+over every point — `impulseFor(entity)` gives either side's; zero for
+exits and triggers), `relativeVelocity` (`b`'s velocity minus `a`'s at the
+deepest point, `relativeVelocityFor(entity)` the other's minus that
+side's, as Unity's; at an enter it is taken when Rapier raises the event,
+before the step's solver stops the pair, so a landing reads the speed it
+hit with — `relativeVelocityFor(me).length > 2` plays the thud; stays and
+exits read the velocities as they are), `other(entity)`,
+`bodyOf(entity)`, `involves`, `isTrigger`; `other`, `normalFor`,
+`impulseFor`, `relativeVelocityFor` and `bodyOf` take a collider or its
+body (foundation 2.9). A mesh pair with more than four points keeps its
+four deepest (Unity reports all); a controller hit carries its one
+point. A sensor overlaps dynamic
 *and* kinematic bodies — a character's capsule walking into a static
 pickup fires its trigger (Rapier's default pairs a fixed collider with
 dynamic bodies only; sensors are widened) — while two non-sensor
@@ -379,7 +392,7 @@ one entity, or the body a side joined, is subscribed — every `GameObject`, so 
 behaviour — so
 the stay stream scales with what gameplay observes, not with the scene
 (the stress scene's 500 bodies produce 1 430 enters and 657 exits over
-600 ticks and no stays). `fynkel.ev.Contact` (64 B; 48 before ADR-0034 added the bodies) is the wire
+600 ticks and no stays). `fynkel.ev.Contact` (216 B: 48, then 64 with ADR-0034's bodies, then foundation 2.9's impulse vector, relative velocity and four `fynkel.rec.ContactPoint`s) is the wire
 record, `fynkel_world_after_physics_events` the raw view (the same tick's
 events; drained with the general events next).
 

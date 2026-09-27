@@ -20,7 +20,7 @@ class Crate extends Behaviour {
     final other = world.byEntity(contact.other(gameObject.entity));
     log.add(
       'enter ${other?.name ?? '?'} n=${contact.normalFor(gameObject.entity).y.toStringAsFixed(1)} '
-      'j>0=${contact.impulse > 0}',
+      'j>0=${contact.impulseFor(gameObject.entity).y > 0}',
     );
     if (enters == 1) applyImpulse(const Vec3(0, 6, 0));
   }
@@ -57,6 +57,13 @@ class Landing extends Behaviour {
     log.add('${world.byEntity(contact.other(me))?.name} body=${world.byEntity(contact.bodyOf(me) ?? 0)?.name} '
         'n=${contact.normalFor(me).y.toStringAsFixed(1)}');
   }
+}
+
+/// Keeps the first landing's `Collision` data, as Unity's.
+class Thud extends Behaviour {
+  Contact? landing;
+  @override
+  void onCollisionEnter(Contact contact) => landing ??= contact;
 }
 
 class Sensor extends Behaviour {
@@ -188,6 +195,42 @@ void main() {
     expect(cart.localTransform.position.y, closeTo(1.5, 0.05), reason: "the wheel's box holds the cart up");
     expect(onWheel.log, ['floor body=cart n=-1.0']);
     expect(onCart.log, ['floor body=cart n=-1.0'], reason: "the body's object hears its child's contact, once");
+  });
+
+  test("a collision carries its points, impulse and the impact's relative velocity, as Unity (foundation 2.9)", () {
+    final w = fresh();
+    floor(w);
+    final crate =
+        w.spawn(
+            transform: identityTransform.copyWith(position: const Vec3(0, 3, 0)),
+            name: 'crate',
+          )
+          ..add(dynamicBody)
+          ..add(unitBox);
+    final b = crate.addBehaviour(Thud());
+    for (var i = 0; i < 120 && b.landing == null; i++) {
+      w.frame(1 / 60);
+    }
+    final c = b.landing!;
+    final me = crate.entity;
+    // A face on the floor: four corners, the deepest first.
+    expect(c.contactCount, 4, reason: '$c');
+    expect(c.getContact(0).point, c.point);
+    for (final p in c.contacts) {
+      expect(p.point.y, closeTo(0, 0.1));
+      expect(p.point.x.abs(), closeTo(0.5, 0.05));
+      expect(p.point.z.abs(), closeTo(0.5, 0.05));
+      expect(p.normal, c.normal);
+      expect(p.impulse, greaterThanOrEqualTo(0));
+    }
+    // The floor pushed the crate up; the floor came up at it at about
+    // √(2·g·2.5) ≈ 7 m/s — the speed of the impact, not after it.
+    expect(c.impulseFor(me).y, greaterThan(0.1));
+    expect(c.impulseFor(me).length, closeTo(c.contacts.fold<double>(0, (s, p) => s + p.impulse), 1e-3));
+    expect(c.relativeVelocityFor(me).y, greaterThan(5));
+    final floorSide = c.other(me);
+    expect(c.relativeVelocityFor(floorSide).y, lessThan(-5));
+    expect(c.impulseFor(floorSide).y, lessThan(-0.1));
   });
 
   test('body commands: impulse, velocity, teleport; rejections name the reason', () {

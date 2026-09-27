@@ -437,9 +437,24 @@ fn encode_event_body(p: &EventPayload, out: &mut Vec<u8>, strings: &mut fynkel_w
                 impulse: c.impulse,
                 body_a: c.body_a,
                 body_b: c.body_b,
+                relative_velocity: c.relative_velocity,
+                contact_count: c.point_count,
+                contact0: contact_point(&c.points[0]),
+                contact1: contact_point(&c.points[1]),
+                contact2: contact_point(&c.points[2]),
+                contact3: contact_point(&c.points[3]),
             },
             strings,
         ),
+    }
+}
+
+fn contact_point(p: &fynkel_core::ContactPoint) -> ContactPointRecord {
+    ContactPointRecord {
+        point: p.point,
+        normal: p.normal,
+        separation: p.separation,
+        impulse: p.impulse,
     }
 }
 
