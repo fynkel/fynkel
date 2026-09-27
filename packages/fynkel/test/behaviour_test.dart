@@ -116,15 +116,15 @@ void main() {
       [
         'b:onCreate',
         'b:onEnable',
-        'fixedUpdate@2',
         'b:start',
+        'fixedUpdate@2',
         'b:fixedUpdate@2',
         'update',
         'b:update',
         'lateUpdate',
         'b:lateUpdate',
       ],
-      reason: 'created before the phase; same order (0), later sequence, so it runs after the first one, and start runs right before its first callback',
+      reason: 'created before the phase; same order (0), later sequence, so it runs after the first one; its start runs before the pass (foundation 1.8)',
     );
   });
 

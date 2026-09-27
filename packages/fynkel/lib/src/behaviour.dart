@@ -240,6 +240,10 @@ abstract class Behaviour {
   bool _created = false;
   bool _active = false;
   bool _started = false;
+
+  /// Its `start` threw in [_BehaviourSystem._startPending]: the pass's
+  /// callback is skipped this once.
+  bool _startThrew = false;
   bool _destroyRequested = false;
   bool _destroyed = false;
   BehaviourType? _type;
@@ -1027,6 +1031,7 @@ class _BehaviourSystem {
   void fixedUpdate(int tick, List<EngineEvent> events) {
     settle();
     final ctx = FixedUpdateContext(tick: tick, dt: world.fixedDt, events: events, context: world.context);
+    _startPending(ctx.context);
     _run(ctx.context, 'fixedUpdate', (b) {
       if (_startIfNeeded(b)) b.fixedUpdate(ctx);
     });
@@ -1194,6 +1199,7 @@ class _BehaviourSystem {
   void update(double dt) {
     settle();
     final ctx = UpdateContext(dt: dt, alpha: world.alpha, tick: world.tick, context: world.context);
+    _startPending(ctx.context);
     _run(ctx.context, 'update', (b) {
       if (_startIfNeeded(b)) b.update(ctx);
     });
@@ -1272,11 +1278,36 @@ class _BehaviourSystem {
   }
 
   /// Runs `start` the first time; false when it threw (reported, and the
-  /// callback after it skipped this once — Unity's order).
+  /// callback after it skipped this once — Unity's order). After
+  /// [_startPending] this only reports that throw.
   bool _startIfNeeded(Behaviour b) {
-    if (b._started) return true;
+    if (b._started) {
+      if (!b._startThrew) return true;
+      b._startThrew = false;
+      return false;
+    }
     b._started = true;
     return _call(b, 'start', b.start);
+  }
+
+  /// Every active behaviour's pending `start`, in callback order, before
+  /// the pass's first `fixedUpdate` or `update` (docs/foundation.md 1.8):
+  /// as in Unity, a script early in the order sees the `start` of one after
+  /// it. Nothing to do (and no allocation) when all have started.
+  void _startPending(GameContext context) {
+    var pending = false;
+    for (final b in _all) {
+      if (!b._started && b._active && !b._destroyRequested) {
+        pending = true;
+        break;
+      }
+    }
+    if (!pending) return;
+    _run(context, 'start', (b) {
+      if (b._started) return;
+      b._started = true;
+      b._startThrew = !_call(b, 'start', b.start);
+    });
   }
 
   /// Calls [f], one of [b]'s callbacks; a throw goes to
