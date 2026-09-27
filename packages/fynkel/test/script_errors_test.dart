@@ -176,4 +176,23 @@ void main() {
     w.frame(1 / 60);
     expect(bad.fixed, 3);
   });
+
+  test("a host callback that throws finishes the frame, then throws (foundation 1.6)", () {
+    final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8)..throwOnDiagnostics = true;
+    addTearDown(w.dispose);
+    final counter = w.spawn(name: 'Counter').addBehaviour(Counter());
+    w.frame(1 / 60);
+    final updates = counter.updates, fixed = counter.fixed;
+
+    var hostTicks = 0;
+    expect(
+      () => w.frame(1 / 30, fixedUpdate: (_) {
+        if (hostTicks++ == 0) throw StateError('host tick');
+      }),
+      throwsA(isA<StateError>().having((e) => e.message, 'message', 'host tick')),
+    );
+    expect(hostTicks, 2, reason: 'the second tick still ran');
+    expect(counter.fixed, fixed + 2);
+    expect(counter.updates, updates + 1, reason: 'update ran');
+  });
 }

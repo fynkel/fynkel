@@ -857,7 +857,7 @@ class World {
     this.input.refresh(frameEdges: true);
     t._behaviours.start();
     _behaviours.update(dtSeconds);
-    update?.call();
+    if (update != null) _deferring(update);
     t._behaviours.stop();
     t._presentation.start();
     _deferring(flushPresentation);
@@ -867,32 +867,39 @@ class World {
     return plan;
   }
 
-  /// The debug-mode [FynkelError]s of this [frame]'s steps and flush
-  /// (ADR-0014), held until the frame is done: thrown from inside a tick,
-  /// one lost the rest of the frame — that tick's contacts and
+  /// What this [frame]'s steps, flush and host callbacks threw — the
+  /// debug-mode [FynkelError]s (ADR-0014), a [FynkelBridgeError], or the
+  /// host's own error — held until the frame is done: thrown from inside
+  /// a tick, one lost the rest of the frame — that tick's contacts and
   /// `afterPhysics`, the ticks after it, `update`, `lateUpdate` and the
-  /// presentation flush. Unity logs and the frame goes on; here the frame
-  /// goes on and then throws.
-  final List<(FynkelError, StackTrace)> _deferredErrors = [];
+  /// presentation flush (foundation 1.5, 1.6). Unity logs and the frame
+  /// goes on; here the frame goes on and then throws.
+  final List<(Object, StackTrace)> _deferredErrors = [];
 
   void _deferring(void Function() f) {
     try {
       f();
-    } on FynkelError catch (e, st) {
+    } catch (e, st) {
       _deferredErrors.add((e, st));
     }
   }
 
-  /// Throws this frame's deferred errors as one: every diagnostic, the
-  /// first one's context and stack.
+  /// Throws this frame's deferred errors: [FynkelError]s alone as one
+  /// (every diagnostic, the first one's context and stack); otherwise the
+  /// first error, with the others printed so none is lost silently.
   void _throwDeferred() {
     if (_deferredErrors.isEmpty) return;
-    final (first, stack) = _deferredErrors.first;
-    final error = _deferredErrors.length == 1
-        ? first
-        : FynkelError([for (final (e, _) in _deferredErrors) ...e.diagnostics], context: first.context);
+    final errors = List.of(_deferredErrors);
     _deferredErrors.clear();
-    Error.throwWithStackTrace(error, stack);
+    final (first, stack) = errors.first;
+    if (errors.length > 1 && errors.every((e) => e.$1 is FynkelError)) {
+      final all = [for (final (e, _) in errors) ...(e as FynkelError).diagnostics];
+      Error.throwWithStackTrace(FynkelError(all, context: (first as FynkelError).context), stack);
+    }
+    for (final (e, st) in errors.skip(1)) {
+      print('[frame] also thrown this frame: $e\n$st');
+    }
+    Error.throwWithStackTrace(first, stack);
   }
 
   /// [frame]'s fixed phase: `plan.steps` ticks.
@@ -900,7 +907,7 @@ class World {
     for (var i = 0; i < plan.steps; i++) {
       input.refresh();
       t._behaviours.start();
-      fixedUpdate?.call(tick);
+      if (fixedUpdate != null) _deferring(() => fixedUpdate(tick));
       _behaviours.fixedUpdate(tick, _takeCarried());
       t._behaviours.stop();
       final stepped = tick;
