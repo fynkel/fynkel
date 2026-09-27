@@ -639,6 +639,18 @@ off, is `IK_UNAVAILABLE` (22, `FYN-R0015`) once per goal, and the goal
 is skipped. Code's target (`SetIkTarget`) wins over the document's
 `target`; `ClearIkTarget` goes back to it.
 
+**Checked on a rig we did not make.** `examples/reference_game/tools/hero_copy.py`
+makes `examples/rg_hero`, a local copy whose Player wears the downloaded
+Mixamo character (§ Four downloads, one character) with the goals on its
+`mixamorig:` bones, and `test/hero_ik_test.dart` runs there (it skips
+anywhere else): on flat ground, across two steps in four facings and
+stopped on the ramp, each ankle stays at its flat-ground height (0.088 m)
+above the ground under it, the hips go down one step when a foot is on
+the lower, the knees keep bending forward, and the head turns to a coin
+as far as the limit with the spine's share steady. Mixamo's tilted bone
+axes, the ankle above the sole and the knees bent at rest need nothing
+special: IK turns bones in world space.
+
 ## Import and the cache
 
 The glTF importer (`fynkel.gltf` **version 5**; `docs/documents.md`)
