@@ -2803,12 +2803,15 @@ class GameObject {
     return out;
   }
 
-  /// The first [T] on this object alone: a live behaviour, or the native
-  /// component's value.
+  /// The first [T] on this object alone: a behaviour not destroyed yet —
+  /// one whose `destroy()` was called is still found until the boundary
+  /// that destroys it, as Unity's lookups find a component until the end
+  /// of the frame of its `Destroy` ([behaviour] agrees; foundation 1.9) —
+  /// or the native component's value.
   T? _own<T extends Object>() {
     if (World._isBehaviourType<T>()) {
       for (final b in _behaviours) {
-        if (b is T && !b._destroyed && !b._destroyRequested) return b as T;
+        if (b is T && !b._destroyed) return b as T;
       }
       return null;
     }
@@ -2819,7 +2822,7 @@ class GameObject {
   Iterable<T> _allOwn<T extends Object>() sync* {
     if (World._isBehaviourType<T>()) {
       for (final b in _behaviours) {
-        if (b is T && !b._destroyed && !b._destroyRequested) yield b as T;
+        if (b is T && !b._destroyed) yield b as T;
       }
       return;
     }

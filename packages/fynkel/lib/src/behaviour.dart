@@ -341,7 +341,8 @@ abstract class Behaviour {
     _system!._dirty = true;
   }
 
-  /// Another behaviour on the same object.
+  /// Another behaviour on the same object (one whose `destroy()` was called
+  /// is found until the next boundary destroys it, as in Unity).
   T? sibling<T extends Behaviour>() => gameObject.behaviour<T>();
 
   // ---- coroutines and Invoke (Unity's, docs/unity-parity.md § Tier 2)
