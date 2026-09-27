@@ -14,6 +14,14 @@ assets/audio/*.ogg`:
 
     python3 tools/playground.py && fynkel document format assets/**/*.json && fynkel validate
 
+The level (playground.scene.json) and the Player's Animator Controller
+(models/player.controller.json) are edited documents now: the level in
+the editor since the Player became a prefab (ADR-0022) and 120b030, the
+controller by hand through ADR-0032/0033. A plain run leaves them alone
+(CI checks that it rewrites everything else byte for byte); `--level`
+writes both from the layout below again, as a starting point that drops
+those edits. `--hero` implies `--level`.
+
 `--hero <name>.rig.json` (M3-19b, opt-in, never committed) dresses the
 Player in a downloaded character instead: the rig document's skeleton
 hierarchy is instanced as `{ asset: <rig>, sub: "prefab" }` under a
@@ -266,6 +274,7 @@ for m in MESHES:
 # character's hierarchy (see the module doc).
 HERO = None
 CLIP_NAMES = ("idle", "walk", "run", "jump")
+LEVEL = "--level" in sys.argv or "--hero" in sys.argv
 if "--hero" in sys.argv:
     HERO = Path(sys.argv[sys.argv.index("--hero") + 1])
     if not HERO.is_absolute():
@@ -946,9 +955,12 @@ def main():
     write(ASSETS / "prefabs" / "ball.prefab.json", ball_prefab())
     write(ASSETS / "prefabs" / "burst.prefab.json", burst_prefab())
     write(ASSETS / "models" / "player.blend.json", locomotion_blend())
-    write(ASSETS / "models" / "player.controller.json", player_controller())
     doc, counts = playground()
-    write(ASSETS / "scenes" / "playground.scene.json", doc)
+    if LEVEL:
+        write(ASSETS / "models" / "player.controller.json", player_controller())
+        write(ASSETS / "scenes" / "playground.scene.json", doc)
+    else:
+        print("the level and the Player's controller are left as edited (--level rewrites them)")
     print(f"Playground: {len(doc['entities'])} entities, {counts['static']} static meshes, {counts['bodies']} bodies, {counts['coins']} coins, {counts['lights']} point lights; scene id {SCENE_ID}")
     menu_doc = menu()
     write(ASSETS / "scenes" / "menu.scene.json", menu_doc)
