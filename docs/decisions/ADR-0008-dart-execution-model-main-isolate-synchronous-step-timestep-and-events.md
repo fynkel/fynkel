@@ -1,6 +1,6 @@
 # ADR-0008: Dart execution model main isolate synchronous step timestep and events
 
-**Status:** Accepted  
+**Status:** Accepted; amendment proposed 2026-09-27 (a `transform` write in `update`/`lateUpdate` shows that frame, below — waiting for the user's confirmation)  
 **Date:** 2026-09-19  
 **Related:** `docs/blueprint.md`
 
@@ -27,3 +27,19 @@ Given ADR-0007, the remaining questions are which isolate runs gameplay, how tim
 ## Consequences
 
 M1 has one thread of control and no locks. Dart allocation/GC per frame becomes an M1 gate. Loading screens that need immediate asset-ready notification must run a tick loop.
+
+## Amendment (2026-09-27, proposed): a `transform` write in `update` shows that frame
+
+**Status:** Proposed — waits for the user's confirmation (docs/foundation.md 1.2).
+
+**Context.** The decision above makes "transforms of non-physics objects set in `lateUpdate`" presentation commands: shown in the frame being rendered, staged as the authoritative value for the next tick. The SDK never used that lane for `transform`: `transform.position = …`, `setLocalTransform` and the partial writes are always simulation commands, applied at the next tick. So a write in `update` reached the screen one to two ticks later (17–33 ms at 60 Hz), and on a frame with no tick (a 120 Hz display: every other frame) it was not shown at all — two `update` writes collapsed into one. That is why the examples move things in `fixedUpdate`. In Unity a `transform` write in `Update` or `LateUpdate` shows in that frame, and scripts move things there; the explicit `setPresentationTransform` is not what a Unity user reaches for.
+
+**Decision.**
+
+1. A `transform` write — `transform.position`/`rotation`/`localPosition`/`localRotation`/`localScale`/`value`, `setLocalTransform`, `setLocalPosition`/`Rotation`/`Scale`, `writeLocal` — made while the world runs `update` or `lateUpdate` (the behaviours', their coroutines' and the host's `update` callback) is a **presentation command** when the object is resolved and is not a dynamic body: it shows in the frame being rendered and is staged as the authoritative value for the next tick, exactly as the decision above describes for `lateUpdate`. Reads return it at once, as today.
+2. A **dynamic body** (physics-owned) written in `update` stays a simulation command: a teleport at the next tick that keeps its velocity (what Unity does when a script sets a Rigidbody's `transform`). Moving a body smoothly is still `fixedUpdate`'s job (`move`, velocity, forces), as in Unity.
+3. Writes in `fixedUpdate`, `afterPhysics`, the contact callbacks and outside a frame are simulation commands, unchanged. `setPresentationTransform` stays for code that wants the presentation lane explicitly (a camera from a host callback).
+4. A character controller or kinematic body written in `update` is a presentation command too: it shows that frame and teleports at the next tick (Unity's CharacterController has the same rule: a transform write teleports it; `move` is the way to walk it).
+
+**Consequences.** Moving things in `update` works as in Unity, at any display rate. `fixedUpdate` stays right for anything physics or input-edge driven and for anything a headless replay must reproduce (presentation writes do not change the simulation until the next tick takes them). The examples keep their `fixedUpdate` movers; the docs stop recommending it for plain movement. Test: `packages/fynkel/test/update_writes_test.dart` (a write in `update` shows in the same frame's projection on a frame with no tick; a dynamic body's teleports at the tick; `fixedUpdate` writes unchanged).
+
