@@ -402,6 +402,19 @@ impl World {
         self.persistent.contains(&at)
     }
 
+    /// Stops keeping `root` and destroys it with its subtree now, with
+    /// the usual `Destroyed` events (ADR-0039: a second `load_project`
+    /// replaces the persistent objects the first one made). Returns how
+    /// many entities went; 0 when it is gone already.
+    pub fn destroy_persistent(&mut self, root: Entity) -> usize {
+        self.persistent.retain(|&e| e != root);
+        if !self.ecs().contains(root) {
+            return 0;
+        }
+        let tick = self.tick();
+        self.destroy_subtree(root, tick).unwrap_or(0)
+    }
+
     /// The persistent roots alive and still roots, in marking order.
     pub fn persistent_roots(&self) -> Vec<Entity> {
         self.persistent
