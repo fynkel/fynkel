@@ -533,6 +533,7 @@ impl World {
             return Err(LoadError::Poisoned);
         }
         let order = spawn_order(scene)?;
+        let markers_current = self.active_markers_current();
         let mut loaded = LoadedScene {
             id: scene.id,
             name: scene.name.clone(),
@@ -586,13 +587,29 @@ impl World {
                 }
             }
         }
-        if root_parent.is_some() {
-            // Under a parent that may be inactive itself.
+        // The new subtrees alone (foundation 3.1): their active markers
+        // from their parents' when every other marker was current, their
+        // world matrices from their parents' unless an ancestor is itself
+        // waiting for a propagate.
+        let roots: Vec<Entity> = scene
+            .entities
+            .iter()
+            .filter(|d| d.parent.is_none())
+            .map(|d| loaded.by_id[&d.id])
+            .collect();
+        if markers_current {
+            self.refresh_active_subtrees(&roots);
+        } else {
             self.mark_active_dirty();
+            self.refresh_active();
         }
-        self.refresh_active();
         if propagate {
-            scene::propagate(self.ecs_mut());
+            for &root in &roots {
+                if scene::propagate_subtree(self.ecs_mut(), root).is_none() {
+                    scene::propagate(self.ecs_mut());
+                    break;
+                }
+            }
         }
         Ok(loaded)
     }

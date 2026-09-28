@@ -8,8 +8,9 @@
 //! dropped); `FYNKEL_LOAD_ADDITIVE` keeps the world.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use fynkel_assets::{Assets, CookedScene};
+use fynkel_assets::{Assets, CookedPrefab, CookedScene};
 use fynkel_contracts::{Diagnostic, Entity, Status, Uuid};
 use fynkel_core::{LoadError, LoadMode, LoadedScene, Transform};
 use fynkel_document::diagnostic_json;
@@ -196,15 +197,13 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
             // closures resident.
             if mode == LoadMode::Replace {
                 w.residency.clear();
+                w.prefabs.clear();
             }
             let residency = assets.retain(&scene.closure);
             w.residency.push((Some(loaded.id), residency));
             let input = bind_project_input(w, &assets);
             let residency = residency_json(&assets);
-            if let Some(old) = &w.assets {
-                assets.adopt_runtime_assets(old);
-            }
-            w.assets = Some(assets);
+            w.set_assets(assets);
             Outcome {
                 status: Status::Ok,
                 report: json!({
@@ -257,10 +256,7 @@ fn open_project(w: &mut FynkelWorld, assets: Assets, cache: Value) -> Outcome {
     };
     let input = bind_project_input(w, &assets);
     let residency = residency_json(&assets);
-    if let Some(old) = &w.assets {
-        assets.adopt_runtime_assets(old);
-    }
-    w.assets = Some(assets);
+    w.set_assets(assets);
     Outcome {
         status: Status::Ok,
         report: json!({
@@ -448,7 +444,50 @@ fn load(w: &mut FynkelWorld, cache_dir: &Path, scene: Option<Uuid>, mode: LoadMo
     }
 }
 
-/// Instantiates a cooked prefab from the world's store (M3-08b).
+/// A prefab as the world keeps it after its first instantiate
+/// (foundation 3.1): the cooked document, what registering its assets
+/// reported, and the token keeping its closure resident.
+pub struct LoadedPrefab {
+    prefab: CookedPrefab,
+    mesh_colliders: usize,
+    nested: usize,
+    diagnostics: Vec<Diagnostic>,
+    _residency: fynkel_assets::Residency,
+}
+
+/// The prefab `id` from the world's memory, or read from the store and
+/// registered the first time.
+fn loaded_prefab(
+    w: &mut FynkelWorld,
+    assets: &Assets,
+    id: Uuid,
+) -> Result<Arc<LoadedPrefab>, Vec<Diagnostic>> {
+    if let Some(p) = w.prefabs.get(&id) {
+        return Ok(p.clone());
+    }
+    let prefab = assets.prefab(id)?;
+    let (mesh_colliders, mut diagnostics) =
+        assets.register_mesh_colliders(&prefab.description, w.core_mut().physics_mut());
+    let (nested, prefab_diags) = assets.register_prefabs(&prefab.description, w.core_mut());
+    diagnostics.extend(prefab_diags);
+    let (_, _, anim_diags) = assets.register_animation(&prefab.description, w.core_mut());
+    diagnostics.extend(anim_diags);
+    let (_, audio_diags) = assets.register_audio(&prefab.description, w.core_mut());
+    diagnostics.extend(audio_diags);
+    let residency = assets.retain(&prefab.closure);
+    let loaded = Arc::new(LoadedPrefab {
+        prefab,
+        mesh_colliders,
+        nested,
+        diagnostics,
+        _residency: residency,
+    });
+    w.prefabs.insert(id, loaded.clone());
+    Ok(loaded)
+}
+
+/// Instantiates a cooked prefab from the world's store (M3-08b); from
+/// memory after the first time (foundation 3.1).
 fn instantiate_prefab(
     w: &mut FynkelWorld,
     id: Uuid,
@@ -467,32 +506,23 @@ fn instantiate_prefab(
         );
     };
     let cache = cache_json(&assets);
-    let prefab = match assets.prefab(id) {
+    let loaded = match loaded_prefab(w, &assets, id) {
         Ok(p) => p,
         Err(diags) => return failed(&diags, cache),
     };
-    let (meshes, mut mesh_diags) =
-        assets.register_mesh_colliders(&prefab.description, w.core_mut().physics_mut());
-    let (prefabs, prefab_diags) = assets.register_prefabs(&prefab.description, w.core_mut());
-    mesh_diags.extend(prefab_diags);
-    let (_, _, anim_diags) = assets.register_animation(&prefab.description, w.core_mut());
-    mesh_diags.extend(anim_diags);
-    let (_, audio_diags) = assets.register_audio(&prefab.description, w.core_mut());
-    mesh_diags.extend(audio_diags);
+    let prefab = &loaded.prefab;
     let name = name.unwrap_or(&prefab.name);
     match w
         .core_mut()
         .instantiate(&prefab.description, name, transform, parent)
     {
-        Ok((root, loaded)) => {
-            let residency = assets.retain(&prefab.closure);
+        Ok((root, instance)) => {
             let stats = assets.stats();
-            w.residency.push((None, residency));
             let behaviours: Vec<Value> = prefab
                 .behaviours
                 .iter()
                 .filter_map(|b| {
-                    let entity = loaded.handle_of(b.entity)?;
+                    let entity = instance.handle_of(b.entity)?;
                     Some(json!({
                         "entity": entity.to_bits(),
                         "authoringId": b.entity.to_string(),
@@ -501,14 +531,14 @@ fn instantiate_prefab(
                         "version": b.version,
                         "known": b.known,
                         "data": b.data,
-                        "references": references(&b.data, &loaded),
+                        "references": references(&b.data, &instance),
                         "pointer": b.pointer,
                     }))
                 })
                 .collect();
             let mut diagnostics: Vec<Value> =
                 prefab.diagnostics.iter().map(diagnostic_json).collect();
-            diagnostics.extend(mesh_diags.iter().map(diagnostic_json));
+            diagnostics.extend(loaded.diagnostics.iter().map(diagnostic_json));
             Outcome {
                 status: Status::Ok,
                 report: json!({
@@ -519,11 +549,11 @@ fn instantiate_prefab(
                         "name": name,
                         "path": prefab.path,
                         "root": root.to_bits(),
-                        "entities": loaded.entities().len(),
-                        "rejectedComponents": loaded.rejected_components,
+                        "entities": instance.entities().len(),
+                        "rejectedComponents": instance.rejected_components,
                         "assets": prefab.closure.len(),
-                        "meshColliders": meshes,
-                        "prefabs": prefabs,
+                        "meshColliders": loaded.mesh_colliders,
+                        "prefabs": loaded.nested,
                         "behaviours": behaviours,
                     },
                     "cache": cache,
@@ -539,7 +569,7 @@ fn instantiate_prefab(
             }
         }
         Err(e) => {
-            let mut diags = prefab.diagnostics;
+            let mut diags = prefab.diagnostics.clone();
             diags.push(load_error_diagnostic(&e));
             failed(&diags, cache)
         }

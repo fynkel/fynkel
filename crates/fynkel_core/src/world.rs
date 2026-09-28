@@ -1601,6 +1601,21 @@ impl World {
         }
     }
 
+    /// Whether the derived `Inactive` markers are current.
+    pub(crate) fn active_markers_current(&self) -> bool {
+        !self.active_dirty
+    }
+
+    /// Brings the markers up to date after a load spawned `roots`'
+    /// subtrees into a world whose markers were current: those subtrees
+    /// alone (foundation 3.1).
+    pub(crate) fn refresh_active_subtrees(&mut self, roots: &[Entity]) {
+        for &root in roots {
+            scene::refresh_active_subtree(&mut self.ecs, root);
+        }
+        self.active_dirty = false;
+    }
+
     /// Marks the markers stale (a load spawned under a parent).
     pub(crate) fn mark_active_dirty(&mut self) {
         self.active_dirty = true;

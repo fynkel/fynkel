@@ -157,7 +157,7 @@ impl FynkelAuthoringSession {
         let assets = Assets::open(&project.cache_dir()).map_err(one)?;
         self.assets = Some(assets.clone());
         for slot in self.previews.values_mut() {
-            slot.world.assets = Some(assets.clone());
+            slot.world.set_assets(assets.clone());
         }
         self.reload_stages(&assets);
         Ok((assets, report.json()))

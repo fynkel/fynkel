@@ -392,6 +392,21 @@ fn prefabs_instantiate_through_the_abi() {
     }
     assert_eq!(host.live(), 8);
 
+    // Every later instantiate is an in-memory copy, as Unity's (foundation
+    // 3.1): the prefab is not read again, so its cooked files can go.
+    std::fs::rename(cooked.dir.join("objects"), cooked.dir.join("objects-gone")).unwrap();
+    for _ in 0..3 {
+        assert_eq!(
+            unsafe { fynkel_world_instantiate(host.w, &desc(CRATE, "", 0)) },
+            Status::Ok,
+            "{:#}",
+            host.report()
+        );
+    }
+    assert_eq!(host.live(), 11);
+    assert_eq!(host.report()["instance"]["name"], "Crate");
+    std::fs::rename(cooked.dir.join("objects-gone"), cooked.dir.join("objects")).unwrap();
+
     // Not a prefab, unknown, a dead parent, malformed input.
     assert_eq!(
         unsafe { fynkel_world_instantiate(host.w, &desc(MAIN_SCENE, "", 0)) },
@@ -429,7 +444,7 @@ fn prefabs_instantiate_through_the_abi() {
     );
     assert_eq!(
         host.live(),
-        8,
+        11,
         "a failed instantiate leaves the world alone"
     );
     assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);

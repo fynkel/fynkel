@@ -50,10 +50,16 @@ pub struct FynkelWorld {
     /// The cache the last load opened (a renderer drawing this world adopts
     /// it, so both see one residency store).
     assets: Option<fynkel_assets::Assets>,
-    /// One token per loaded scene (keyed by its id) or instantiated prefab
-    /// (`None`): the closure stays resident until the scene is unloaded, a
-    /// replace load empties the world, or the world is destroyed (M3-12).
+    /// One token per loaded scene (keyed by its id): the closure stays
+    /// resident until the scene is unloaded, a replace load empties the
+    /// world, or the world is destroyed (M3-12).
     residency: Vec<(Option<fynkel_contracts::Uuid>, fynkel_assets::Residency)>,
+    /// The prefabs this world instantiated, kept in memory after the first
+    /// (Unity's `Instantiate` is an in-memory copy, foundation 3.1): read
+    /// once, their meshes, nested prefabs, clips and sounds registered
+    /// once, their closure held resident by one token each. Emptied by a
+    /// replace load and when the world's store changes.
+    prefabs: std::collections::HashMap<fynkel_contracts::Uuid, std::sync::Arc<load::LoadedPrefab>>,
     /// Action → bindings the user chose over the project's
     /// (`fynkel_world_bind_actions`, M3-12), re-applied after every load.
     rebinds: std::collections::BTreeMap<String, Vec<String>>,
@@ -233,11 +239,24 @@ impl FynkelWorld {
             asset_json: Vec::new(),
             assets: None,
             residency: Vec::new(),
+            prefabs: std::collections::HashMap::new(),
             rebinds: std::collections::BTreeMap::new(),
             anchors: Vec::new(),
             points: Vec::new(),
             stats: Counters::default(),
         }
+    }
+
+    /// Makes `assets` the world's store; a different store than before
+    /// drops the prefabs kept in memory (they came from the old one).
+    fn set_assets(&mut self, assets: fynkel_assets::Assets) {
+        if let Some(old) = &self.assets {
+            assets.adopt_runtime_assets(old);
+            if !old.same_store(&assets) {
+                self.prefabs.clear();
+            }
+        }
+        self.assets = Some(assets);
     }
 
     pub fn core(&self) -> &World {

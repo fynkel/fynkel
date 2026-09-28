@@ -48,8 +48,9 @@ fn main() {
     let status = unsafe { fynkel_world_load_project(w, cache.as_ptr(), cache.len() as u32) };
     assert_eq!(status, Status::Ok);
     step(w);
+    HEAP_WORLD.with(|c| c.set(w));
     let base_entities = live(w);
-    let base_rss = rss_kib();
+    let base_heap = heap_kib();
 
     println!("objects: {instances} instances of a {PER_INSTANCE}-entity prefab");
     println!();
@@ -74,7 +75,7 @@ fn main() {
         }
     }
     let total = started.elapsed();
-    let after_rss = rss_kib();
+    let after_heap = heap_kib();
     let entities = live(w);
     row(
         "instantiate, all",
@@ -90,15 +91,16 @@ fn main() {
         last / window as u32,
     );
     println!(
-        "  memory after instantiate: +{} MiB ({} KiB per instance)",
-        (after_rss - base_rss) / 1024,
-        (after_rss - base_rss) / instances as u64
+        "  live heap after instantiate: +{} MiB ({} bytes per entity)",
+        (after_heap - base_heap) / 1024,
+        (after_heap - base_heap) * 1024 / (entities - base_entities) as i64
     );
 
     // The first tick applies every instance's component writes.
     let t = Instant::now();
     step(w);
     row("first tick after instantiate", t.elapsed(), "");
+    phases(w);
 
     // 2. An idle tick (3.3): nothing moved.
     let idle = ticks(w, 100);
@@ -190,10 +192,32 @@ fn main() {
     );
     let idle = ticks(w, 100);
     row_ms("tick, idle after (mean of 100)", idle);
+    let end_heap = heap_kib();
     println!(
-        "  memory at the end: +{} MiB over the start",
-        (rss_kib().saturating_sub(base_rss)) / 1024
+        "  live heap at the end: {:+} KiB over the start",
+        end_heap - base_heap
     );
+
+    // 7. The same again, three times: a world that grows once and is
+    //    reused keeps its memory flat (no leak per instantiate, 3.1).
+    let mut previous = end_heap;
+    for cycle in 2..=4 {
+        let t = Instant::now();
+        let again: Vec<Entity> = (0..instances)
+            .map(|i| instantiate(w, [(i % 100) as f32 * 2.0, 0.0, (i / 100) as f32 * 2.0]))
+            .collect();
+        step(w);
+        let commands = again.iter().map(|&e| Command::Destroy(e)).collect();
+        world(w).core_mut().submit(Lane::Simulation, commands);
+        step(w);
+        let now = heap_kib();
+        row(
+            &format!("cycle {cycle}: instantiate all, tick, destroy all"),
+            t.elapsed(),
+            &format!("live heap {:+} KiB", now - previous),
+        );
+        previous = now;
+    }
 
     unsafe {
         fynkel_world_destroy(w);
@@ -229,9 +253,11 @@ fn world<'a>(w: *mut FynkelWorld) -> &'a mut FynkelWorld {
     unsafe { &mut *w }
 }
 
+/// One tick as a host runs it: step, then drain the events.
 fn step(w: *mut FynkelWorld) {
     let mut r = FynkelStepResult::default();
     assert_eq!(unsafe { fynkel_world_step(w, &mut r) }, Status::Ok);
+    unsafe { fynkel_world_drain_events(w) };
 }
 
 fn ticks(w: *mut FynkelWorld, n: u32) -> Duration {
@@ -266,16 +292,18 @@ fn instantiate(w: *mut FynkelWorld, position: [f32; 3]) -> Entity {
     Entity::from_bits(report["instance"]["root"].as_u64().unwrap())
 }
 
-/// The process's resident memory, from `ps`.
-fn rss_kib() -> u64 {
-    let out = std::process::Command::new("ps")
-        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
-        .output()
-        .expect("ps");
-    String::from_utf8_lossy(&out.stdout)
-        .trim()
-        .parse()
-        .unwrap_or(0)
+/// The live Rust heap in KiB (`FynkelWorldStats::native_bytes`, the
+/// engine's counting allocator): what a leak grows — the process's
+/// resident size also holds freed memory the allocator keeps for reuse.
+fn heap_kib() -> i64 {
+    let w = HEAP_WORLD.with(|c| c.get());
+    let mut s = FynkelWorldStats::default();
+    assert_eq!(unsafe { fynkel_world_stats(w, &mut s) }, Status::Ok);
+    s.native_bytes as i64 / 1024
+}
+
+thread_local! {
+    static HEAP_WORLD: std::cell::Cell<*mut FynkelWorld> = const { std::cell::Cell::new(ptr::null_mut()) };
 }
 
 /// The fixture project copied to a temporary directory with the

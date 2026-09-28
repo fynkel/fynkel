@@ -458,6 +458,90 @@ pub fn refresh_active(world: &mut World) -> usize {
     changes.len()
 }
 
+/// Sets [`Inactive`] on `root`'s subtree alone, from its parent's marker
+/// — a freshly spawned subtree, when every other marker is current
+/// (foundation 3.1). Returns how many entities changed state.
+pub fn refresh_active_subtree(world: &mut World, root: Entity) -> usize {
+    let parent_inactive = parent_of(world, root).is_some_and(|p| world.has::<Inactive>(p));
+    let Some(raw) = world.raw(root) else {
+        return 0;
+    };
+    let mut changes: Vec<(hecs::Entity, bool)> = Vec::new();
+    {
+        let h = world.hecs();
+        let mut stack = vec![(raw, parent_inactive)];
+        while let Some((raw, parent_inactive)) = stack.pop() {
+            let inactive = parent_inactive || h.satisfies::<&InactiveSelf>(raw);
+            if inactive != h.satisfies::<&Inactive>(raw) {
+                changes.push((raw, inactive));
+            }
+            if let Ok(children) = h.get::<&Children>(raw) {
+                for &c in children.0.iter() {
+                    if let Some(craw) = world.raw(c) {
+                        stack.push((craw, inactive));
+                    }
+                }
+            }
+        }
+    }
+    let h = world.hecs_mut();
+    for &(raw, inactive) in &changes {
+        if inactive {
+            let _ = h.insert_one(raw, Inactive);
+        } else {
+            let _ = h.remove_one::<Inactive>(raw);
+        }
+    }
+    changes.len()
+}
+
+/// Recomputes the world matrices of `root`'s subtree alone, from its
+/// parent's world matrix — what a freshly spawned subtree needs, without
+/// walking the rest of the world (an instantiate, foundation 3.1). `None`
+/// when an ancestor is dirty itself (its matrix is stale): then only a
+/// whole [`propagate`] is right. Otherwise how many were recomputed.
+pub fn propagate_subtree(world: &mut World, root: Entity) -> Option<usize> {
+    let mut parent_matrix = Mat4::IDENTITY;
+    let mut first = true;
+    let mut up = parent_of(world, root);
+    while let Some(p) = up {
+        let wt = world.copy::<WorldTransform>(p).ok()?;
+        if wt.dirty {
+            return None;
+        }
+        if first {
+            parent_matrix = wt.matrix;
+            first = false;
+        }
+        up = parent_of(world, p);
+    }
+    let raw = world.raw(root)?;
+    let mut count = 0;
+    let mut stack = vec![(raw, parent_matrix)];
+    while let Some((raw, parent_matrix)) = stack.pop() {
+        let h = world.hecs();
+        let Ok(local) = h.get::<&Transform>(raw).map(|t| t.matrix()) else {
+            continue;
+        };
+        let Ok(mut wt) = h.get::<&mut WorldTransform>(raw) else {
+            continue;
+        };
+        let m = parent_matrix * local;
+        wt.matrix = m;
+        wt.dirty = false;
+        drop(wt);
+        count += 1;
+        if let Ok(children) = h.get::<&Children>(raw) {
+            for &c in children.0.iter().rev() {
+                if let Some(craw) = world.raw(c) {
+                    stack.push((craw, m));
+                }
+            }
+        }
+    }
+    Some(count)
+}
+
 /// Recomputes world matrices for dirty subtrees. Returns how many entities
 /// were recomputed (a measure, and a test hook).
 pub fn propagate(world: &mut World) -> usize {

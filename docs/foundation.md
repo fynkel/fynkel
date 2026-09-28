@@ -73,7 +73,7 @@ What every script touches. Most of it is `packages/fynkel`.
 
 | | Sev | Unity | Fynkel today | Status |
 |---|---|---|---|---|
-| 3.1 | C | `Instantiate` is an in-memory copy | Each runtime `instantiate` re-reads the cooked file, re-parses the document, rebuilds the schema set, re-registers colliders/animation/audio, and pushes a residency token released only by a replace load (memory grows with every spawn); each also runs a full `refresh_active` and `propagate` | ❌ |
+| 3.1 | C | `Instantiate` is an in-memory copy | Each runtime `instantiate` re-read the cooked file, re-parsed the document, rebuilt the schema set, re-registered colliders/animation/audio, and pushed a residency token released only by a replace load; each also ran a full `refresh_active` and `propagate` (`prefabs_instantiate_through_the_abi` failed so: with the cooked files gone the next instantiate failed). Now the native world keeps each prefab in memory after its first instantiate (`LoadedPrefab`: assets registered once, one residency token per prefab, dropped by a replace load or a new store), and a load settles only its new subtrees (`scene::propagate_subtree`, `refresh_active_subtree`; the whole world only when an ancestor is itself dirty). Benchmark: 5.5–7.7 ms → 13–18 µs per instantiate; repeated instantiate–destroy cycles keep the live heap flat | 🔧 |
 | 3.2 | I | Pooling is a common pattern | No pooling API or guidance | ❌ |
 | 3.3 | C | Only changed transforms are recomputed | `propagate` walks every node 2–4 times per tick (it only skips the multiply when clean; its doc says "dirty subtrees only"); a keep-world `SetParent` runs a full pass per command; `record_prev_world` decomposes every matrix | ❌ |
 | 3.4 | I | — | `refresh_active` walks the whole hierarchy on any parented spawn while an inactive object exists | ❌ |
@@ -84,7 +84,7 @@ What every script touches. Most of it is `packages/fynkel`.
 | 3.9 | — | — | A 50k-entity headless benchmark, the gate for 3.1–3.4 (nothing is measured above ~16k). Now `cargo run --release -p fynkel_native --example objects` ([benchmarks/objects](../benchmarks/objects/README.md)); the baseline: an instantiate 5.5–7.7 ms, the first tick after 8 333 of them 755 ms, an idle tick 6.7 ms, 1 000 keep-world reparents 2.3 s, +57 MiB kept after destroying everything | 🔧 |
 | 3.10 | m | — | `despawn_deferred`/`flush_deferred` despawn one entity, not the subtree (no callers today) | ❌ |
 | 3.11 | m | — | 24-bit generations wrap after 16.7M reuses of one slot (LIFO free list) | ⏸ |
-| 3.12 | I | — | Found by 3.9: the physics phase costs 2.4 ms per idle tick at 50 000 entities with no collider or body in the scene | ❌ |
+| 3.12 | I | — | Found by 3.9: the physics phase costs 2.4 ms per idle tick at 50 000 entities with no collider or body in the scene — its sync visits every entity with a world transform to find the ones with a physics component | ❌ |
 
 ## Step 4 — the bridge
 

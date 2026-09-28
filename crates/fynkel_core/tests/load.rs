@@ -157,6 +157,25 @@ fn instantiate_places_the_prefab_root() {
     // Components went through the command path, like a scene's.
     assert!(w.ecs().has::<Camera>(c2));
 
+    // Under a parent moved this frame and not yet propagated, the copy
+    // still lands under the parent's new place (the subtree-only
+    // propagate falls back to the whole world, foundation 3.1).
+    scene::set_local(
+        w.ecs(),
+        e1,
+        Transform::from_position(Vec3::new(20.0, 0.0, 0.0)),
+    )
+    .unwrap();
+    let (_, moved) = w.instantiate(&prefab(), "", placed, Some(e1)).unwrap();
+    let m = scene::world_matrix(w.ecs(), moved.handle_of(id(2)).unwrap()).unwrap();
+    assert_eq!(m.transform_point3(Vec3::ZERO), Vec3::new(21.0, 5.0, 0.0));
+    let m = scene::world_matrix(w.ecs(), c2).unwrap();
+    assert_eq!(
+        m.transform_point3(Vec3::ZERO),
+        Vec3::new(21.0, 5.0, 0.0),
+        "the earlier copy moved with the parent"
+    );
+
     // No name: the root keeps its own. No parent: a root of the world.
     let (bare, _) = w
         .instantiate(&prefab(), "", Transform::IDENTITY, None)
