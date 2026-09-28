@@ -419,6 +419,57 @@ class NativeWorld {
         (c, cl) => _withUtf8(sceneId, (s, sl) => _load(() => fynkel_world_load_scene_with(_w, c, cl, s, sl, flags))),
       );
 
+  /// `fynkel_world_load_scene_async` (ADR-0038): starts loading [sceneId]
+  /// from [cacheDir] in the background; the ticket (0 when the status is
+  /// not OK) and, on `LOAD_FAILED`, the report.
+  (FynkelStatus, int, Map<String, Object?>) loadSceneAsync(String cacheDir, String sceneId) {
+    final ticket = calloc<Uint32>();
+    try {
+      final (s, report) = _withUtf8(
+        cacheDir,
+        (c, cl) => _withUtf8(sceneId, (i, il) {
+          ffiCalls++;
+          final s = fynkel_world_load_scene_async(_w, c, cl, i, il, ticket);
+          return s == FynkelStatus.FYNKEL_STATUS_LOAD_FAILED ? _load(() => s) : (s, const <String, Object?>{});
+        }),
+      );
+      return (s, s == FynkelStatus.FYNKEL_STATUS_OK ? ticket.value : 0, report);
+    } finally {
+      calloc.free(ticket);
+    }
+  }
+
+  /// `fynkel_world_load_progress`: the state (`FYNKEL_LOAD_*`) and the
+  /// share loaded of the load [ticket]; null for a ticket the world does
+  /// not hold.
+  (int, double)? loadProgress(int ticket) {
+    final state = calloc<Uint32>();
+    final progress = calloc<Float>();
+    try {
+      ffiCalls++;
+      if (fynkel_world_load_progress(_w, ticket, state, progress) != FynkelStatus.FYNKEL_STATUS_OK) return null;
+      return (state.value, progress.value);
+    } finally {
+      calloc.free(state);
+      calloc.free(progress);
+    }
+  }
+
+  static const int loadLoading = FYNKEL_LOAD_LOADING;
+  static const int loadReady = FYNKEL_LOAD_READY;
+  static const int loadFailed = FYNKEL_LOAD_FAILED;
+
+  /// `fynkel_world_load_activate`: spawns the ready load [ticket] with
+  /// [flags] as [loadSceneWith] does; the same status and report.
+  (FynkelStatus, Map<String, Object?>) loadActivate(int ticket, int flags) =>
+      _load(() => fynkel_world_load_activate(_w, ticket, flags));
+
+  /// `fynkel_world_load_cancel`: drops the load [ticket].
+  FynkelStatus loadCancel(int ticket) {
+    ffiCalls++;
+    return fynkel_world_load_cancel(_w, ticket);
+  }
+
   /// `fynkel_world_unload_scene` (M3-12): the loaded scene [sceneId] goes.
   (FynkelStatus, Map<String, Object?>) unloadScene(String sceneId) =>
       _withUtf8(sceneId, (s, sl) => _load(() => fynkel_world_unload_scene(_w, s, sl)));

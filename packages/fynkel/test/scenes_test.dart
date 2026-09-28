@@ -334,6 +334,73 @@ void main() {
     expect(w.findAll('Player'), hasLength(1), reason: "Playground's own, new");
   });
 
+  test('loadAsync loads in the background, activates at a frame start in request order (ADR-0038)', () async {
+    final w = fresh();
+    w.loadScene(playground, cacheDir: cache);
+    final states = <SceneState>[];
+    w.scenes.addListener(states.add);
+
+    /// Frames until [load] has done its background work.
+    void untilReady(SceneLoad load) {
+      final started = DateTime.now();
+      while (!load.isReady && !load.isDone) {
+        w.frame(1 / 60);
+        expect(DateTime.now().difference(started).inSeconds, lessThan(30), reason: 'the load never finished');
+        sleep(const Duration(milliseconds: 2));
+      }
+    }
+
+    // Additive, held: ready, but it waits until the game lets it go.
+    final held = w.scenes.loadAsync(results, mode: LoadMode.additive)..allowActivation = false;
+    expect((held.sceneId, held.mode, held.isDone), (results, LoadMode.additive, false));
+    expect(w.scenes.state, SceneState.loading);
+    untilReady(held);
+    expect(held.progress, 1.0, reason: 'progress reaches 1 when the loading is done');
+    w.frame(1 / 60);
+    w.frame(1 / 60);
+    expect(held.isDone, isFalse);
+    expect(w.loadedScenes.map((s) => s.name), ['Playground'], reason: 'the old level plays on');
+    expect(w.scenes.state, SceneState.loading);
+
+    // A held load holds only itself: a later one activates past it.
+    final unknown = w.scenes.loadAsync('c0000000-0000-4000-8000-0000000000ff', mode: LoadMode.additive);
+    untilReady(unknown);
+    w.frame(1 / 60);
+    expect(unknown.isDone, isTrue);
+    await expectLater(unknown.done, throwsA(isA<FynkelLoadError>()));
+    expect(w.scenes.error!.report.diagnostics.first.code, 'FYN-R0003');
+    expect(w.scenes.state, SceneState.loading, reason: 'the held load is still unfinished');
+
+    held.allowActivation = true;
+    w.frame(1 / 60);
+    expect(held.isDone, isTrue);
+    final report = await held.done;
+    expect(report.mode, 'additive');
+    expect(w.loadedScenes.map((s) => s.name), ['Playground', 'Results']);
+    expect(w.scenes.state, SceneState.ready);
+    expect(w.find('Trophy'), isNotNull);
+
+    // Cancelled: never activates, its future says so.
+    final dropped = w.scenes.loadAsync(playground, mode: LoadMode.additive);
+    dropped.cancel();
+    expect(dropped.isDone, isTrue);
+    await expectLater(dropped.done, throwsStateError);
+    w.frame(1 / 60);
+    expect(w.loadedScenes, hasLength(2));
+
+    // A replace load: the world is taken down at activation, not before.
+    final next = w.scenes.loadAsync(playground);
+    untilReady(next);
+    expect(w.loadedScenes, hasLength(2));
+    w.frame(1 / 60);
+    expect((await next.done).sceneName, 'Playground');
+    expect(w.loadedScenes.map((s) => s.name), ['Playground']);
+    expect(w.scenes.current, playground);
+    expect(w.find('Player'), isNotNull);
+    expect(states.first, SceneState.loading);
+    expect(states.last, SceneState.ready);
+  });
+
   test('the settings document reads leniently, validates, and a broken file falls back to the defaults', () {
     final doc = SettingsDocument.fromJson({'fynkel': 'settings', 'formatVersion': 1, 'sfx_volume': 0.25});
     expect(doc.sfxVolume, 0.25);
