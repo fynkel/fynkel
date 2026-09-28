@@ -33,7 +33,7 @@ List<WrittenDocument> writeScenes(String projectDir) {
     return d;
   }
 
-  final look = Look((name, material) => add(writer.writeMaterial('materials/$name', material)).ref);
+  final look = Look((name, material) => MaterialAsset.fromRef(add(writer.writeMaterial('materials/$name', material)).ref));
   // Written first: the instances then know their assets, so the prefab
   // and the level name them.
   final kinds = CoinKinds();

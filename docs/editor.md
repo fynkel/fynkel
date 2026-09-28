@@ -509,6 +509,19 @@ document stores only the quaternion) and shows one while the quaternion
 still matches, so Y 120 reads 120 after a reselect or an undo rather than
 X 180, Y 60, Z 180. An asset field's name **pings** the asset in the
 Project browser (⊙, or an empty field, opens the picker).
+**One object field for every type (ADR-0036 §6, 2026-09-28).** A
+`GameObject?`, script, `NativeComponent<T>?` or asset field is the same
+box: the icon, the name — `None (Type)` dim when empty, `Missing (Type)`
+red when what it held is gone (an object deleted, an asset not in the
+project) — × to clear and ⊙ for the picker. A click on the name pings
+what it holds: an object's Hierarchy row is revealed and outlined
+(`HierarchyModel.ping`; the selection stays, the next selection change
+clears it), an asset is outlined in the Project browser. The picker has
+Unity's **Scene** and **Assets** tabs: an object field opens on Scene
+(only objects with the script or component), an asset field on Assets
+(only its kind); **None** is on both. A Hierarchy row drops on an object
+field, a Project row on an asset field. Test:
+`test/parity/object_field_parity_test.dart`.
 With several objects, a Rotation axis edits that axis on each object's
 own Euler angles (`setFieldEach`: one quaternion per object, one
 transaction); an axis that differs shows `—`. Scrubbing a Transform

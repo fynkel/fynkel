@@ -45,7 +45,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Drag a value (label scrub) | the Scene view follows live | 🔧 `b5a9c11` (Transform values; one undo on release) |
 | A value that does not parse | goes back to the old value | ✅ (Unity does the same) |
 | Component header | enable checkbox, Copy/Paste Values, Move Up/Down, drag to reorder | 🔧 checkbox + Copy Component / Paste Component Values (`13d2876`); Move Up / Move Down (`moveComponent` `8b8e747`, `5d36af3`); drag a header onto another to reorder (`7d531c3`) |
-| Click an asset reference | pings the asset in the Project | 🔧 `2455f5d` (⊙ opens the picker) |
+| Click an asset or object reference | pings it in the Project or the Hierarchy | 🔧 `2455f5d` (⊙ opens the picker); objects too, ADR-0036 §6 (`HierarchyModel.ping`) |
 | Colour picker | live while picking, HDR intensity | 🔧 live in the Scene view, one undo on OK, Cancel restores (`ff6611e`, `7edb455`); HDR intensity goes with the Material Inspector (no component colour is HDR; emission is) |
 | Rotation after reselect/undo | keeps the typed Euler | 🔧 `10e1f8b` (editor-side hints) |
 | Typing, maths, Enter/Esc, drag-scrub with ⇧/⌥, one undo per edit, enums, sliders, tooltips, lock | | ✅ |
@@ -85,7 +85,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Coroutines / `Invoke` | | 🔧 `b92178e` (`startCoroutine` over a `sync*` generator; `WaitForSeconds`, `WaitUntil`, `WaitWhile`, `WaitForFixedUpdate`, nested routines; `invoke`, `invokeRepeating`, `cancelInvoke`; Unity's lifetimes) |
 | `Input.GetKey` | raw keys | 🔧 `6b25b52` (ADR-0024: `getKey` / `getKeyDown` / `getKeyUp`, `getMouseButton…`, `anyKey`, with the actions' tick rules; an undeclared action warns once in the Console) |
 | `Debug.Log` | Console, click to the line | 🔧 `9bdf3d6` (`Debug.log` / `logWarning` / `logError` / `logException` with the caller's stack: the row shows the line, ↩ opens it; `print` in game code is a Console row) |
-| Inspector fields | public fields; GameObject/component/colour/enum references | 🔧 `46c091a`, `de1de2c`, `962d30a` (ADR-0018 amended: `GameObject?` and script-typed fields — `None (Type)`, drop a Hierarchy row, ⊙, ×, `Missing` — resolved at load whatever the attach order, a prefab instance's to its own copies; Dart enums as a dropdown; colours were already `@Expose(kind: 'color')`; ADR-0036: built-in component fields `NativeComponent<T>?`, and a reference to something destroyed reads null); 🟡 fields still need `@Expose` (no implicit public fields), typed asset fields (`MaterialAsset?`, `AudioClipAsset?`, …, ADR-0036 §3) filter the picker; code-first specs reference each other through `spec.object` (ADR-0036 §4); no `List` of references |
+| Inspector fields | public fields; GameObject/component/colour/enum references | 🔧 `46c091a`, `de1de2c`, `962d30a` (ADR-0018 amended: `GameObject?` and script-typed fields — `None (Type)`, drop a Hierarchy row, ⊙, ×, `Missing` — resolved at load whatever the attach order, a prefab instance's to its own copies; Dart enums as a dropdown; colours were already `@Expose(kind: 'color')`; ADR-0036: built-in component fields `NativeComponent<T>?`, and a reference to something destroyed reads null); 🟡 fields still need `@Expose` (no implicit public fields), typed asset fields (`MaterialAsset?`, `AudioClipAsset?`, …, ADR-0036 §3) filter the picker; code-first specs reference each other through `spec.object` (ADR-0036 §4); one object field for every type — a click pings, ⊙ has Scene and Assets tabs, an asset reads `None (Type)` / `Missing (Type)` (ADR-0036 §6); no `List` of references |
 | A failed hot reload | blocks Play, errors in the Console | 🔧 `68f7d45` (each `file:line:column: Error:` is a Console row, ↩ opens the line in the IDE; Play and Build And Run refused until a reload goes through; the notice links the Console); 🟡 the old code keeps running in the game view meanwhile, as Unity keeps the old assemblies |
 | Drag a script onto an object | adds it | 🔧 `888092b` (a behaviour's file in Scripts drags it — of several, the one named after the file; onto a Hierarchy row, the Inspector for the selection, or the object under the pointer in the Scene view; schema defaults, an override on a prefab instance, one undo step, refused where it is already); 🟡 an entity still holds one of each script (FYN-D0204), Unity allows several; a file without a behaviour does not drag rather than saying why |
 
@@ -349,6 +349,14 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   Floor's Collider shows Material None with Friction and Bounciness, ⊙
   offers the one physics material only, picked it hides both, ⌘Z brings
   them back).
+- 2026-09-28: one object field (ADR-0036 §6) —
+  `object_field_parity_test.dart`: a click on a set `GameObject` field
+  outlines Crate B's Hierarchy row with the Sun still selected (the next
+  selection clears it), an empty one opens the picker; ⊙ opens an object
+  field on its Scene tab and an asset field on its Assets tab (the one
+  sound, nothing on Scene; None on both); an `AudioClipAsset?` field
+  reads `Missing (Audio Clip)` for an id not in the project and
+  `None (Audio Clip)` once cleared.
 - 2026-09-25: data assets in the editor (`7dec1d9`,
   `data_asset_parity_test.dart`: + ▸ New Game › Weapon writes `New
   Weapon.data.json` of `game.Weapon`; Damage typed is saved at once, a

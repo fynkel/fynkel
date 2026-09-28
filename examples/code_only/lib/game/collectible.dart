@@ -24,7 +24,7 @@ class Collectible extends Behaviour {
   GameState get state => context.service<GameState>();
 
   /// A material per kind and colour, made once for the world's life.
-  static final _materials = Expando<(Vec3, AssetRef)>();
+  static final _materials = Expando<(Vec3, MaterialAsset)>();
 
   @override
   void start() {
@@ -40,7 +40,7 @@ class Collectible extends Behaviour {
     }
   }
 
-  AssetRef _material(CoinKind k) {
+  MaterialAsset _material(CoinKind k) {
     final c = k.color;
     final ref = world.createMaterial(PbrMaterial(
       baseColor: Vec4(c.x, c.y, c.z, 1),

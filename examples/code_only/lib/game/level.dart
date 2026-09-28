@@ -28,7 +28,7 @@ final int defaultMask = layersAndTags.mask(['default'])!;
 /// The game's materials, one [make] call each: `world.createMaterial` when
 /// the game builds live, a written `.material.json` for the scenes.
 class Look {
-  Look(AssetRef Function(String name, PbrMaterial material) make)
+  Look(MaterialAsset Function(String name, PbrMaterial material) make)
       : floor = make('floor', const PbrMaterial(baseColor: Vec4(0.55, 0.56, 0.52, 1), roughness: 0.9)),
         wall = make('wall', const PbrMaterial(baseColor: Vec4(0.78, 0.74, 0.66, 1), roughness: 0.8)),
         pillar = make('pillar', const PbrMaterial(baseColor: Vec4(0.35, 0.36, 0.4, 1), metallic: 0.1, roughness: 0.6)),
@@ -54,7 +54,7 @@ class Look {
           const PbrMaterial(baseColor: Vec4(0.05, 0.3, 0.35, 1), emissive: Vec3(0.1, 0.9, 1), emissiveStrength: 1.5),
         );
 
-  final AssetRef floor, wall, pillar, gold, player, visor, hazard, gate, pad;
+  final MaterialAsset floor, wall, pillar, gold, player, visor, hazard, gate, pad;
 }
 
 // ---- building blocks
@@ -63,7 +63,7 @@ Pose at(double x, double y, double z, {Vec3 scale = Vec3.one, Quat rotation = Qu
     Pose(position: Vec3(x, y, z), rotation: rotation, scale: scale);
 
 /// A static box: the cube primitive (its collider scales with it).
-ObjectSpec box(String name, AssetRef material, Pose transform) => ObjectSpec.primitive(
+ObjectSpec box(String name, MaterialAsset material, Pose transform) => ObjectSpec.primitive(
       Primitive.cube,
       name: name,
       transform: transform,

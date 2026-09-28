@@ -250,6 +250,20 @@ The user accepted the ADR with the recommended answers:
   equals a plain `AssetRef` of the same asset. `ref` returns itself.
 - A model, a data asset and a blend stay plain `AssetRef`s in
   `assets.g.dart`: there is no one kind to type them with.
+- **The Inspector (§6)** keeps two widgets, `ObjectField` (stored
+  `{entity}` / `{entity, component}`) and `AssetField` (`{asset, sub?}`),
+  because the stored values differ, but they look and act the same: the
+  faces, the ping, ×, ⊙ and the picker's Scene and Assets tabs. Today an
+  object field's Assets tab and an asset field's Scene tab are always
+  empty: a `GameObject?` field can't hold a prefab asset, and no scene
+  object is an asset. An asset field shows Missing when its `describe`
+  gives back the raw id, which every describe does for an asset not in
+  the project.
+
+## Progress
+
+All seven steps are done (2026-09-28): 1 `a68efca` + `0dd9209`, 2 `7af0777`,
+3 `b2954ae`, 4 `c435e30`, 5 `13bc399`, 6 `f2d699a`, 7 the docs commit.
 
 ## Plan
 
