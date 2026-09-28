@@ -215,8 +215,10 @@ frames imply, deterministic run to run.
   Keys come from the viewport's `Focus` (physical keys by grammar name;
   repeats are not edges; the game view's `onKeyEvent` runs first, so a HUD
   can take Q for itself), mouse buttons from the button mask, movement as
-  `mouse:delta` in physical pixels (y up), the wheel as `mouse:wheel`;
-  touch pointers are the overlay's.
+  `mouse:delta` in physical pixels (y up), the wheel as `mouse:wheel` — a
+  trackpad's two-finger scroll too (macOS sends it as pan/zoom events;
+  foundation 4.6), as Unity's scroll delta; touch pointers are the
+  overlay's.
 - **Focus and pause rules.** Flutter consumes its own interactions first —
   a focused text field keeps its keys; the viewport must have focus to
   receive them (`autofocus` by default, `FynkelGameViewState.hasFocus`;

@@ -95,6 +95,25 @@ void main() {
     expect(FynkelInputCapture.keyName(PhysicalKeyboardKey.f12), 'F12');
   });
 
+  test('trackpad: two-finger scrolling is the mouse wheel, as Unity (foundation 4.6)', () {
+    final c = FynkelInputCapture();
+    const trackpad = PointerDeviceKind.trackpad;
+    // macOS sends a trackpad scroll as pan/zoom events, not as scrolls:
+    // fingers moving down (natural scrolling) is the same as a wheel
+    // turned away from the user, a scrollDelta of -dy.
+    c.handlePointer(const PointerPanZoomStartEvent(), 2);
+    c.handlePointer(const PointerPanZoomUpdateEvent(pan: Offset(0, 6), panDelta: Offset(0, 6)), 2);
+    c.handlePointer(const PointerPanZoomUpdateEvent(pan: Offset(0, 2), panDelta: Offset(0, -4)), 2);
+    c.handlePointer(const PointerPanZoomUpdateEvent(pan: Offset(3, 2), panDelta: Offset(3, 0)), 2);
+    c.handlePointer(const PointerPanZoomEndEvent(), 2);
+    c.handlePointer(const PointerScrollEvent(kind: trackpad, scrollDelta: Offset(0, -10)), 2);
+    expect(c.take(1 / 60), const [
+      InputEvent.move(InputDevice.mouse, 'wheel', 6),
+      InputEvent.move(InputDevice.mouse, 'wheel', -4),
+      InputEvent.move(InputDevice.mouse, 'wheel', 10),
+    ]);
+  });
+
   test('mouse: button edges from the button mask, deltas in physical pixels (y up), the wheel', () {
     final c = FynkelInputCapture();
     const mouse = PointerDeviceKind.mouse;

@@ -71,7 +71,8 @@ class FynkelInputCapture {
   }
 
   /// A pointer event from the viewport (mouse buttons, movement as
-  /// `mouse:delta` in physical pixels, the wheel as `mouse:wheel`). Touch
+  /// `mouse:delta` in physical pixels, the wheel — and a trackpad's
+  /// two-finger scroll — as `mouse:wheel`). Touch
   /// pointers are the overlay's business.
   void handlePointer(PointerEvent event, double devicePixelRatio) {
     if (event.kind != PointerDeviceKind.mouse && event.kind != PointerDeviceKind.trackpad) {
@@ -97,6 +98,13 @@ class FynkelInputCapture {
         // Positive away from the user (up), in logical pixels of scroll.
         if (event.scrollDelta.dy != 0) {
           _events.add(InputEvent.move(InputDevice.mouse, 'wheel', -event.scrollDelta.dy));
+        }
+      case PointerPanZoomUpdateEvent():
+        // A trackpad's two-finger scroll (macOS sends pan/zoom, not
+        // scrolls; foundation 4.6): the wheel, as Unity's scroll delta.
+        // Fingers moving down is a wheel turned away from the user.
+        if (event.panDelta.dy != 0) {
+          _events.add(InputEvent.move(InputDevice.mouse, 'wheel', event.panDelta.dy));
         }
       default:
         break;
