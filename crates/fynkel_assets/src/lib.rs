@@ -402,6 +402,26 @@ struct Store {
     evictions: u64,
     /// Bumps on every material or volume profile override or restore.
     live_edits: u64,
+    /// What [`Assets::preload`] made resident for a renderer to upload
+    /// ahead of the first draw ([`Assets::next_warm`], ADR-0038 §5).
+    warm: std::collections::VecDeque<Warm>,
+}
+
+/// A payload a background load made resident, for a renderer to put on
+/// the GPU before the scene first draws it (ADR-0038 §5).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Warm {
+    Mesh(AssetRef),
+    Texture(AssetRef),
+    Material(AssetRef),
+}
+
+impl Warm {
+    pub fn asset(&self) -> &AssetRef {
+        match self {
+            Warm::Mesh(r) | Warm::Texture(r) | Warm::Material(r) => r,
+        }
+    }
 }
 
 /// Residency numbers (`fynkel_world_load_report`, HUDs).
@@ -494,6 +514,7 @@ impl Assets {
                 counts: HashMap::new(),
                 evictions: 0,
                 live_edits: 0,
+                warm: std::collections::VecDeque::new(),
             })),
         }
     }
@@ -1767,11 +1788,18 @@ impl Assets {
                         asset: id,
                         sub: sub.clone(),
                     };
+                    let warm = match *kind {
+                        KIND_MESH => self.mesh(&r).ok().map(|_| Warm::Mesh(r.clone())),
+                        KIND_TEXTURE => self.texture(&r).ok().map(|_| Warm::Texture(r.clone())),
+                        KIND_MATERIAL => self.material(&r).ok().map(|_| Warm::Material(r.clone())),
+                        _ => None,
+                    };
+                    if let Some(w) = warm {
+                        self.lock().warm.push_back(w);
+                        continue;
+                    }
                     let _ = match *kind {
-                        KIND_MESH => self.mesh(&r).map(|_| ()),
-                        KIND_TEXTURE => self.texture(&r).map(|_| ()),
                         KIND_ENVIRONMENT => self.environment(&r).map(|_| ()),
-                        KIND_MATERIAL => self.material(&r).map(|_| ()),
                         KIND_CUSTOM_MATERIAL => self.custom_material(&r).map(|_| ()),
                         KIND_ANIMATION => self.clip(&r).map(|_| ()),
                         KIND_CLIP => self.sound(&r).map(|_| ()),
@@ -1782,6 +1810,19 @@ impl Assets {
             }
             done.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// The next payload a background load made resident for the GPU
+    /// (ADR-0038 §5), oldest first; one evicted since (a cancelled load)
+    /// is skipped. A renderer calls it within a per-frame budget.
+    pub fn next_warm(&self) -> Option<Warm> {
+        let mut s = self.lock();
+        while let Some(w) = s.warm.pop_front() {
+            if s.counts.get(&w.asset().asset).copied().unwrap_or(0) > 0 {
+                return Some(w);
+            }
+        }
+        None
     }
 
     fn read_prefab(&self, id: Uuid) -> Result<CookedPrefab, Vec<Diagnostic>> {

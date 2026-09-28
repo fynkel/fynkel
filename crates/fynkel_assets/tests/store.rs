@@ -666,3 +666,42 @@ fn a_mask_and_ik_goals_reach_the_def() {
     assert!(matches!(&def.ik[1].kind, IkKind::FootPlacement { reach, .. } if *reach == 0.4));
     assert_eq!(def.ik_index("feet"), Some(1));
 }
+
+/// ADR-0038: `preload` makes a scene's closure resident ahead of its
+/// activation (the prefab documents too) and lists the meshes, textures
+/// and materials for a renderer to upload; what is evicted before the
+/// renderer comes to it is skipped.
+#[test]
+fn preload_loads_a_closure_and_lists_it_for_the_gpu() {
+    use fynkel_assets::Warm;
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+
+    let cooked = Cooked::new("preload");
+    let assets = Assets::open(&cooked.0).unwrap();
+    let closure = assets.closure(id(MAIN));
+    let token = assets.retain(&closure);
+    let (done, stop) = (AtomicUsize::new(0), AtomicBool::new(false));
+    assets.preload(&closure, &done, &stop);
+    assert_eq!(done.into_inner(), closure.len());
+    let stats = assets.stats();
+    assert!(stats.meshes > 0 && stats.textures > 0 && stats.materials > 0);
+
+    let mut warm = Vec::new();
+    while let Some(w) = assets.next_warm() {
+        warm.push(w);
+    }
+    assert!(warm.contains(&Warm::Mesh(AssetRef::with_sub(id(ROBOT), "mesh/Cube"))));
+    assert!(warm.contains(&Warm::Texture(AssetRef::new(id(SWATCH)))));
+    assert!(warm.contains(&Warm::Material(AssetRef::new(id(RUSTED)))));
+    assert_eq!(assets.next_warm(), None, "drained");
+
+    // Stopped at once: nothing done. Evicted before the renderer came to
+    // it: nothing to warm.
+    let stop = AtomicBool::new(true);
+    let done = AtomicUsize::new(0);
+    assets.preload(&closure, &done, &stop);
+    assert_eq!(done.into_inner(), 0);
+    assets.preload(&closure, &AtomicUsize::new(0), &AtomicBool::new(false));
+    drop(token);
+    assert_eq!(assets.next_warm(), None, "evicted, so skipped");
+}
