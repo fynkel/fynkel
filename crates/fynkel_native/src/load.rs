@@ -761,9 +761,81 @@ pub unsafe extern "C" fn fynkel_world_load_project(
     let dir = PathBuf::from(dir);
     guarded(world, move |w| {
         let started = std::time::Instant::now();
-        let out = load(w, &dir, None, LoadMode::Replace);
+        // The objects the last load_project made go first (ADR-0039).
+        for root in std::mem::take(&mut w.project_persistent) {
+            w.core_mut().destroy_persistent(root);
+        }
+        let mut out = load(w, &dir, None, LoadMode::Replace);
+        if out.status == Status::Ok {
+            make_persistent_objects(w, &mut out);
+        }
         finish(w, out, started)
     })
+}
+
+/// Makes the project's `persistentObjects` (ADR-0039): each prefab
+/// instantiated as a root named after its entry and kept across loads, in
+/// list order. The report gains `persistentObjects` — per entry `name`,
+/// `prefab`, `entity` (null when it could not be made), `path` and the
+/// prefab's `behaviours` — for the host to attach their scripts first. A
+/// prefab that does not instantiate is a warning: the game starts without
+/// that object.
+fn make_persistent_objects(w: &mut FynkelWorld, out: &mut Outcome) {
+    let list = w
+        .assets
+        .as_ref()
+        .and_then(|a| a.project())
+        .map(|p| p.persistent_objects.clone())
+        .unwrap_or_default();
+    if list.is_empty() {
+        return;
+    }
+    let mut made = Vec::with_capacity(list.len());
+    let mut diagnostics = Vec::new();
+    for (name, prefab) in list {
+        let o = instantiate_prefab(w, prefab, Some(&name), Transform::IDENTITY, None);
+        let instance = &o.report["instance"];
+        let root = instance["root"].as_u64().filter(|_| o.status == Status::Ok);
+        match root {
+            Some(root) => {
+                let e = Entity::from_bits(root);
+                // A fresh root, so this cannot be refused.
+                let _ = w.core_mut().dont_destroy_on_load(e);
+                w.project_persistent.push(e);
+            }
+            None => diagnostics.push(diagnostic_json(&Diagnostic::warning(
+                Code::PERSISTENT_OBJECT,
+                format!(
+                    "persistent object {name:?}: prefab {prefab} could not be made; the game starts without it"
+                ),
+            )
+            .with_suggestion("recook the project"))),
+        }
+        diagnostics.extend(
+            o.report["diagnostics"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .cloned(),
+        );
+        made.push(json!({
+            "name": name,
+            "prefab": prefab.to_string(),
+            "entity": root,
+            "path": instance["path"],
+            "behaviours": instance.get("behaviours").cloned().unwrap_or_else(|| json!([])),
+        }));
+    }
+    let persistent = w.core().persistent_roots().len();
+    if let Some(r) = out.report.as_object_mut() {
+        r.insert("persistentObjects".into(), Value::Array(made));
+        r.insert("persistent".into(), json!(persistent));
+        if let Some(Value::Array(d)) = r.get_mut("diagnostics") {
+            d.extend(diagnostics);
+        } else {
+            r.insert("diagnostics".into(), Value::Array(diagnostics));
+        }
+    }
 }
 
 /// Loads the cooked scene `scene_id_utf8` (an asset id) from the cache at

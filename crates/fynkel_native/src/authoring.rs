@@ -1374,7 +1374,8 @@ pub unsafe extern "C" fn fynkel_world_live_call(
             ),
         };
         w.query_bufs[crate::AUTHORING_LANE].clear();
-        serde_json::to_writer(&mut w.query_bufs[crate::AUTHORING_LANE], &value).expect("JSON into a Vec");
+        serde_json::to_writer(&mut w.query_bufs[crate::AUTHORING_LANE], &value)
+            .expect("JSON into a Vec");
         w.stats.bytes_out += w.query_bufs[crate::AUTHORING_LANE].len() as u64;
         status
     });

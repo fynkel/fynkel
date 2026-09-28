@@ -86,6 +86,9 @@ pub struct ProjectInfo {
     pub layers_and_tags: LayersAndTags,
     /// The project's `modules` as cooked (ADR-0029 §3; all on when absent).
     pub modules: ModuleSettings,
+    /// The project's `persistentObjects` as cooked (ADR-0039): each name
+    /// with its prefab's asset id, in list order; empty when absent.
+    pub persistent_objects: Vec<(String, Uuid)>,
 }
 
 /// One asset as the index lists it.
@@ -207,6 +210,17 @@ impl CacheIndex {
             physics: PhysicsSettings::from_json(&p["physics"]),
             modules: ModuleSettings::from_json(&p["modules"]),
             layers_and_tags: LayersAndTags::from_json(&serde_json::Value::Object(p.clone())),
+            persistent_objects: p["persistentObjects"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|o| {
+                    Some((
+                        o["name"].as_str()?.to_string(),
+                        o["prefab"].as_str().and_then(parse_uuid)?,
+                    ))
+                })
+                .collect(),
         });
         Ok(CacheIndex {
             root: cache_dir.to_path_buf(),

@@ -1753,3 +1753,103 @@ fn runtime_shader_materials_through_the_abi() {
     drop(host);
     let _ = std::fs::remove_dir_all(&project);
 }
+
+/// ADR-0039: the project's `persistentObjects` are made by
+/// `load_project`, once, kept across scene loads (no duplicates), listed
+/// in the report with their scripts, and made afresh by the next
+/// `load_project`. A prefab the cache does not have is a diagnostic, not
+/// a failed load.
+#[test]
+fn persistent_objects_are_made_once_by_load_project() {
+    const CRATE: &str = "c0000000-0000-4000-8000-000000000040";
+    const CATALOGUE: &str = "c0000000-0000-4000-8000-000000000032";
+    let root = std::env::temp_dir().join(format!("fynkel-native-autoload-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let project = root.join("project");
+    copy_dir(&fixture(), &project);
+    let file = project.join("fynkel.project.json");
+    let mut v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    v["persistentObjects"] = serde_json::json!([
+        { "name": "GameManager", "prefab": { "asset": CRATE } },
+    ]);
+    std::fs::write(&file, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+    let cache_dir = root.join("cache");
+    let report = cook_project(&project, Some(&cache_dir), &CookOptions::default())
+        .unwrap_or_else(|d| panic!("{d:?}"));
+    assert!(!report.has_errors(), "{}", report.text());
+    let cache = cache_dir.display().to_string();
+
+    let host = Host::new();
+    assert_eq!(host.load_project(&cache), Status::Ok);
+    let r = host.report();
+    assert_eq!(r["ok"], true, "{r:#}");
+    assert_eq!(r["persistent"], 1, "{r:#}");
+    let made = &r["persistentObjects"];
+    assert_eq!(made.as_array().map(Vec::len), Some(1), "{r:#}");
+    assert_eq!(made[0]["name"], "GameManager");
+    assert_eq!(made[0]["prefab"], CRATE);
+    assert!(made[0]["behaviours"].is_array());
+    let first = made[0]["entity"].as_u64().unwrap();
+    let w = unsafe { &*host.w };
+    assert!(w.core().is_persistent(Entity::from_bits(first)));
+    assert_eq!(
+        w.core()
+            .ecs()
+            .get::<Name>(Entity::from_bits(first))
+            .map(|n| n.value.clone())
+            .ok(),
+        Some("GameManager".to_string())
+    );
+
+    // A scene load keeps it and makes no second one.
+    assert_eq!(host.load_scene(&cache, CATALOGUE), Status::Ok);
+    assert_eq!(host.report()["persistent"], 1);
+    assert!(
+        host.report()["persistentObjects"].is_null(),
+        "only load_project makes them"
+    );
+    assert!(unsafe { &*host.w }
+        .core()
+        .ecs()
+        .contains(Entity::from_bits(first)));
+
+    // The next load_project makes them afresh: the old one goes.
+    assert_eq!(host.load_project(&cache), Status::Ok);
+    let r = host.report();
+    assert_eq!(r["persistent"], 1, "{r:#}");
+    let second = r["persistentObjects"][0]["entity"].as_u64().unwrap();
+    assert_ne!(second, first);
+    assert!(!unsafe { &*host.w }
+        .core()
+        .ecs()
+        .contains(Entity::from_bits(first)));
+
+    // A prefab the cache does not have: reported, the game still starts.
+    let index = cache_dir.join("index.json");
+    let text = std::fs::read_to_string(&index).unwrap();
+    std::fs::write(
+        &index,
+        text.replace(
+            &format!("\"prefab\": \"{CRATE}\""),
+            "\"prefab\": \"c0000000-0000-4000-8000-0000000000ff\"",
+        ),
+    )
+    .unwrap();
+    let host = Host::new();
+    assert_eq!(host.load_project(&cache), Status::Ok);
+    let r = host.report();
+    assert_eq!(r["ok"], true, "{r:#}");
+    assert_eq!(r["persistent"], 0);
+    assert!(r["persistentObjects"][0]["entity"].is_null(), "{r:#}");
+    assert!(
+        r["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["message"].as_str().unwrap_or("").contains("GameManager")),
+        "{r:#}"
+    );
+    drop(host);
+    let _ = std::fs::remove_dir_all(&root);
+}

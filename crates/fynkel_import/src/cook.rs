@@ -90,6 +90,25 @@ pub struct CookProject {
     pub layers_and_tags: fynkel_document::project::LayersAndTags,
     /// The project's `modules` (ADR-0029 §3), carried the same way.
     pub modules: fynkel_document::project::ModuleSettings,
+    /// The project's `persistentObjects` (ADR-0039): each name with its
+    /// prefab resolved to an asset id, in list order.
+    pub persistent_objects: Vec<(String, Uuid)>,
+}
+
+impl CookProject {
+    /// `persistentObjects` with each prefab resolved against `db`; an
+    /// entry that does not resolve is left out (`FYN-P0020` stops the
+    /// cook before this).
+    pub fn persistent_objects(
+        project: &fynkel_document::Project,
+        db: &AssetDatabase,
+    ) -> Vec<(String, Uuid)> {
+        project
+            .persistent_objects
+            .iter()
+            .filter_map(|p| Some((p.name.clone(), db.resolve(&p.prefab).ok()?.entry.id)))
+            .collect()
+    }
 }
 
 impl Default for CookOptions {
@@ -656,6 +675,7 @@ pub fn cook_project(
             physics: project.physics.clone(),
             layers_and_tags: project.layers_and_tags.clone(),
             modules: project.modules,
+            persistent_objects: CookProject::persistent_objects(&project, &db),
         }),
         ..opts.clone()
     };
@@ -2219,6 +2239,10 @@ fn write_index(
             "modules": p.modules.to_json(),
             "layers": p.layers_and_tags.layers,
             "tags": p.layers_and_tags.tags,
+            "persistentObjects": p.persistent_objects.iter().map(|(name, prefab)| json!({
+                "name": name,
+                "prefab": prefab.to_string(),
+            })).collect::<Vec<_>>(),
         })),
         "assets": report.assets.iter().map(|a| json!({
             "id": a.id.to_string(),

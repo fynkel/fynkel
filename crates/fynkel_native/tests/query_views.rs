@@ -25,7 +25,10 @@ unsafe fn query(w: *mut FynkelWorld, kind: u32, request_id: u32) -> FynkelBuffer
         request_id,
         entity: 0,
     };
-    let mut v = FynkelBufferView { data: ptr::null(), length: 0 };
+    let mut v = FynkelBufferView {
+        data: ptr::null(),
+        length: 0,
+    };
     assert_eq!(fynkel_world_query(w, &desc, &mut v), Status::Ok);
     v
 }
@@ -39,23 +42,46 @@ fn a_held_view_survives_a_query_of_another_kind() {
         let kept = bytes(&entities).to_vec();
 
         query(w, QUERY_SYSTEMS, 2);
-        assert_eq!(bytes(&entities), &kept[..], "a systems query rewrote the entities view");
+        assert_eq!(
+            bytes(&entities),
+            &kept[..],
+            "a systems query rewrote the entities view"
+        );
 
-        let mut v = FynkelBufferView { data: ptr::null(), length: 0 };
+        let mut v = FynkelBufferView {
+            data: ptr::null(),
+            length: 0,
+        };
         let none = buffer::empty(BufferKind::PhysicsQueries);
         assert_eq!(
             fynkel_world_physics_query(w, none.as_ptr(), none.len() as u32, &mut v),
             Status::Ok
         );
-        assert_eq!(bytes(&entities), &kept[..], "a physics query rewrote the entities view");
+        assert_eq!(
+            bytes(&entities),
+            &kept[..],
+            "a physics query rewrote the entities view"
+        );
 
         let mut info = FynkelProjectionInfo::default();
         let anchors = buffer::empty(BufferKind::ProjectionAnchors);
         assert_eq!(
-            fynkel_world_project(w, 64, 64, anchors.as_ptr(), anchors.len() as u32, &mut info, &mut v),
+            fynkel_world_project(
+                w,
+                64,
+                64,
+                anchors.as_ptr(),
+                anchors.len() as u32,
+                &mut info,
+                &mut v
+            ),
             Status::Ok
         );
-        assert_eq!(bytes(&entities), &kept[..], "a projection rewrote the entities view");
+        assert_eq!(
+            bytes(&entities),
+            &kept[..],
+            "a projection rewrote the entities view"
+        );
 
         // The same kind again replaces it: the view's documented lifetime.
         let again = query(w, QUERY_ALL_ENTITIES, 3);

@@ -232,6 +232,10 @@ impl OpenProject {
                 physics: self.project.physics.clone(),
                 layers_and_tags: self.project.layers_and_tags.clone(),
                 modules: self.project.modules,
+                persistent_objects: fynkel_import::CookProject::persistent_objects(
+                    &self.project,
+                    &self.assets,
+                ),
             }),
             live,
             ..fynkel_import::CookOptions::default()

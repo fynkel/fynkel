@@ -71,6 +71,9 @@ pub struct FynkelWorld {
     /// once, their closure held resident by one token each. Emptied by a
     /// replace load and when the world's store changes.
     prefabs: std::collections::HashMap<fynkel_contracts::Uuid, std::sync::Arc<load::LoadedPrefab>>,
+    /// The roots the last `load_project` made from the project's
+    /// `persistentObjects` (ADR-0039); the next one destroys them first.
+    project_persistent: Vec<Entity>,
     /// The background loads not activated yet, by ticket (ADR-0038);
     /// dropping one stops its thread at the next asset.
     loads: std::collections::HashMap<u32, load::PendingLoad>,
@@ -259,7 +262,9 @@ impl FynkelWorld {
             events_buf: buffer::empty(BufferKind::Events),
             after_physics_buf: buffer::empty(BufferKind::Events),
             diagnostics_buf: buffer::empty(BufferKind::Diagnostics),
-            query_bufs: (0..QUERY_LANES).map(|_| buffer::empty(BufferKind::Query)).collect(),
+            query_bufs: (0..QUERY_LANES)
+                .map(|_| buffer::empty(BufferKind::Query))
+                .collect(),
             input_buf: buffer::empty(BufferKind::InputActions),
             input_states: Vec::new(),
             input_record: bridge::empty_input_record(),
@@ -270,6 +275,7 @@ impl FynkelWorld {
             assets: None,
             residency: Vec::new(),
             prefabs: std::collections::HashMap::new(),
+            project_persistent: Vec::new(),
             loads: std::collections::HashMap::new(),
             next_ticket: 0,
             rebinds: std::collections::BTreeMap::new(),
@@ -840,7 +846,8 @@ pub unsafe extern "C" fn fynkel_world_step(
         w.stats.snapshot_peak_bytes = w.stats.snapshot_peak_bytes.max(snapshot_bytes);
         w.check_snapshot_budget(snapshot_bytes);
         let buf = std::mem::take(&mut w.after_physics_buf);
-        w.after_physics_buf = bridge::encode_events(buf, w.inner.after_physics_events(), &mut w.strings);
+        w.after_physics_buf =
+            bridge::encode_events(buf, w.inner.after_physics_events(), &mut w.strings);
         w.rebuild_diagnostics();
         if let Some(out) = out_result.as_mut() {
             *out = FynkelStepResult {
@@ -906,7 +913,8 @@ pub unsafe extern "C" fn fynkel_world_input_view(world: *mut FynkelWorld) -> Fyn
     let status = guarded(world, |w| {
         w.inner.input_view_into(&mut w.input_states);
         let buf = std::mem::take(&mut w.input_buf);
-        w.input_buf = bridge::encode_input_view(buf, &w.input_states, &mut w.input_record, &mut w.strings);
+        w.input_buf =
+            bridge::encode_input_view(buf, &w.input_states, &mut w.input_record, &mut w.strings);
         w.stats.bytes_out += w.input_buf.len() as u64;
         Status::Ok
     });
