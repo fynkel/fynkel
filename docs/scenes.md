@@ -17,7 +17,7 @@ remembering the entities it spawned.
 
 | Call | What happens |
 | --- | --- |
-| `World::load_scene(desc)` / `load_scene_with(desc, LoadMode::Replace)` — ABI `fynkel_world_load_scene`, Dart `world.loadScene(id)` | **Replace**: every loaded scene is unloaded, last first (`SceneUnloaded` each), then every remaining root subtree is destroyed — runtime prefabs, spawned objects, everything — then the scene loads and `SceneReady { scene }` is emitted. Nothing survives a level change. |
+| `World::load_scene(desc)` / `load_scene_with(desc, LoadMode::Replace)` — ABI `fynkel_world_load_scene`, Dart `world.loadScene(id)` | **Replace**: every loaded scene is unloaded, last first (`SceneUnloaded` each), then every remaining root subtree is destroyed — runtime prefabs, spawned objects, everything but the objects kept with `dontDestroyOnLoad` (below) — then the scene loads and `SceneReady { scene }` is emitted. |
 | `LoadMode::Additive` — ABI `fynkel_world_load_scene_with(…, FYNKEL_LOAD_ADDITIVE)`, Dart `loadScene(id, mode: LoadMode.additive)` | The world is kept; the scene joins it. The same id twice is refused (`LoadError::AlreadyLoaded`, `FYN-R0011`) and nothing changes. |
 | `World::unload_scene(id)` — ABI `fynkel_world_unload_scene`, Dart `unloadScene(id)` | The scene's entities that are **still alive** are destroyed with their subtrees (`Destroyed` events, then one `SceneUnloaded { scene, entities }` counting what went); the scene is forgotten and its assets released from residency. Entities spawned since — a behaviour's `spawn`, an `instantiate`d prefab, an `Emitter`'s instances — are not the scene's and stay. A scene the world does not hold is `LoadError::NotLoaded` (`FYN-R0010`). |
 
@@ -31,11 +31,46 @@ Rules that follow:
 - Events arrive on the general lane in this order on the next drain:
   `DESTROYED` per entity, `SCENE_UNLOADED` per unloaded scene, then
   `SCENE_READY` for the new one. `SceneReady` now names its scene.
-- Residency: a replace load clears the world's residency list, an unload
-  drops the scene's token; prefab instances hold their own tokens
+- Residency: a replace load clears the world's residency list but for
+  what the kept objects use (ADR-0037), an unload drops the scene's token; prefab instances hold their own tokens
   (released with a replace load, kept by an unload).
 - Input rebinds (`fynkel_world_bind_actions`, below) sit over the
   project's actions again after **every** load.
+
+### Objects kept across loads (DontDestroyOnLoad, ADR-0037)
+
+`world.dontDestroyOnLoad(obj)` — a root `GameObject`, or a component
+(its object) — keeps the object and everything under it across scene
+loads, as Unity's `DontDestroyOnLoad`:
+
+```dart
+@override
+void onCreate() => world.dontDestroyOnLoad(this); // the music player lives on
+```
+
+- A replace load leaves it, and so does unloading the scene it came
+  from. Its scripts and their fields stay as they are; no `onDestroy`.
+- It takes effect at once, so a script can call it and then
+  `scenes.transition` in the same callback. An object not spawned yet is
+  kept the moment the tick makes it.
+- Only a root: on a child it does nothing and logs a warning, as Unity
+  does. Children made under a kept root later go with it. A kept root
+  given a parent stops being kept (it belongs to its new root).
+- `destroy()` ends it. `world.persistentObjects` lists the kept roots;
+  `LoadReport.persistent` counts the ones a load left standing. They are
+  in no loaded scene (`world.loadedScenes` does not list them).
+- What the kept objects use (meshes, materials, clips, sounds, their
+  dependencies) stays resident across the load.
+- During Play the editor's Hierarchy shows them last, under a
+  **DontDestroyOnLoad** header.
+
+Engine: `World::dont_destroy_on_load(entity)` (a child is
+`LoadError::NotARoot`), `is_persistent`, `persistent_roots`; ABI
+`fynkel_world_dont_destroy_on_load(world, entity)`. Tests:
+`crates/fynkel_core/tests/scenes.rs` (`dont_destroy_on_load_keeps_a_root_across_loads`),
+`crates/fynkel_native/tests/load.rs` (`dont_destroy_on_load_through_the_abi`),
+`packages/fynkel/test/scenes_test.dart`, the editor's
+`test/play_document_test.dart`.
 
 The Dart `SceneManager` (`world.scenes`) is the flow on top:
 `load`/`unload` now (not from inside a callback), `transition(to, mode:)`

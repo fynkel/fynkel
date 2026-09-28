@@ -70,8 +70,9 @@ So at a replace load, the native world first retains what the
 persistent subtrees use: the asset ids their components name (mesh,
 material, skin, clips, sounds, collider meshes, emitter prefabs) with
 their dependencies (`Assets::closure`). That token is held until the
-next replace load works it out again. The in-memory prefabs used by
-persistent objects stay in `w.prefabs`.
+next replace load or scene unload works it out again. The in-memory
+prefabs (foundation 3.1) are dropped as before; the next instantiate
+reads a prefab again.
 
 ### 4. What a load reports
 
@@ -89,7 +90,8 @@ persistent objects stay in `w.prefabs`.
 During Play the Hierarchy shows the persistent roots under their own
 header, **DontDestroyOnLoad**, below the loaded scenes, as Unity does.
 The rows work like any live row: select, inspect, edit, delete. Apply
-to Scene is not offered for them, because they are in no scene.
+to Scene works as for any live object: one a scene loaded writes back
+to that scene; one the game made is refused, as before.
 
 ## Consequences
 
@@ -127,3 +129,11 @@ to Scene is not offered for them, because they are in no scene.
    parity test.
 4. Docs: scenes.md § Loading, design/dart-sdk.md, unity-parity.md,
    foundation.md 3.6.
+
+## Progress
+
+All four steps done 2026-09-28: the engine (the persistent set, the
+ABI function, the residency token, `persistent` in the report), the SDK
+(`world.dontDestroyOnLoad`, `persistentObjects`), the editor (the
+DontDestroyOnLoad header) and the docs ([scenes.md](../scenes.md)
+§ Objects kept across loads).

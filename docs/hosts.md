@@ -222,9 +222,15 @@ bindingErrors[] } }`, `LoadFailed` before a project. Event kinds on the
 general lane are `SCENE_READY` 5 (now with its scene's `AssetRef`),
 `SCENE_UNLOADED` 6, `ZONE_ENTERED` 7 and `ZONE_EXITED` 8 (both a
 `fynkel.ev.Zone { zone, other, event }` — the `fynkel.TriggerZone`'s
-string comes through the events buffer's string table). The reference
+string comes through the events buffer's string table). `fynkel_world_dont_destroy_on_load(world, entity)` (ADR-0037,
+additive; the ABI stays 1) keeps a root and its subtree across loads: a
+replace load and the unload of its scene leave it, and what it uses
+stays resident; `INVALID_ARGUMENT` for an entity not live or with a
+parent. A load report's `persistent` counts the kept roots it left
+standing. The reference
 tests: `crates/fynkel_native/tests/load.rs`
-(`scenes_stack_unload_replace_and_zones_fire_through_the_abi`),
+(`scenes_stack_unload_replace_and_zones_fire_through_the_abi`,
+`dont_destroy_on_load_through_the_abi`),
 `crates/fynkel_core/tests/scenes.rs`; the contract [scenes.md](scenes.md).
 
 ### Data assets at runtime (ADR-0027)

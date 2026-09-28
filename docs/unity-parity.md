@@ -58,6 +58,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | ⌘⇧P / ⌘⌥P | Pause / Step | 🔧 `b5a9c11` (the Command Palette moved to ⌘K, asset search to ⌥⌘B) |
 | Start paused | yes | 🔧 `8d9e277` |
 | Changes during Play revert on Stop, tint | | ✅ |
+| DontDestroyOnLoad objects | their own scene in the Hierarchy | 🔧 ADR-0037: a **DontDestroyOnLoad** header, last |
 
 ### Project
 
