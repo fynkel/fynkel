@@ -64,8 +64,8 @@ class FynkelRecord {
 /// [kind] picks the widget when the type alone cannot: `'color'` (a `Vec3`
 /// as linear RGB with a picker), `'asset(<kind>)'` (an `AssetRef` whose
 /// picker lists only `texture`, `material`, `mesh`, `prefab`, `scene`,
-/// `audio`, `clip`, `skin` or `rig` assets), `'entity'` (a `String` holding
-/// an entity's name, picked from the scene), `'multiline'` (a `String` as a
+/// `audio`, `clip`, `skin` or `rig` assets; a typed asset field such as
+/// `MaterialAsset?` implies it), `'multiline'` (a `String` as a
 /// text area), `'angle'` (a `double` stored in radians, edited in degrees),
 /// `'slider'` (a `double`/`int` with [min] and [max] as a slider),
 /// `'layerMask'` (an `int` of physics-layer bits). [readOnly] shows the
@@ -147,8 +147,9 @@ enum GizmoSpace {
 /// - [Gizmo.cone] — a `double` length along the entity's −Z, with [angle]
 ///   naming a sibling `double` field holding the half angle in radians: a
 ///   spot light's shape.
-/// - [Gizmo.lineTo] — a `String` naming an entity: a line to it (nothing to
-///   drag; pick it in the Inspector).
+/// - [Gizmo.lineTo] — a reference (`GameObject?`, a script,
+///   `NativeComponent<T>?`): a line to its object (nothing to drag; pick
+///   it in the Inspector).
 /// - [Gizmo.path] — a `List<Vec3>`: a polyline through the points, each one
 ///   dragged in the view's plane.
 ///
@@ -614,6 +615,7 @@ class BehaviourField {
 /// `runtime:<handle>` — and a script's authored component id. Generated
 /// code calls it.
 Map<String, Object?>? referenceJson(Object? target) {
+  if (target != null && _writingReference != null) return _writingReference!(target);
   final GameObject go;
   String? component;
   switch (target) {
@@ -634,6 +636,25 @@ Map<String, Object?>? referenceJson(Object? target) {
   final id = go.world.liveIdOf?.call(go.entity) ?? go.authoringId ?? 'runtime:${go.entity}';
   return {'entity': id, 'component': ?component};
 }
+
+Map<String, Object?>? Function(Object target)? _writingReference;
+
+/// For `package:fynkel/authoring.dart`: runs [body] with every
+/// [referenceJson] answered by [resolve] — the ids of the document being
+/// written, for a spec's object or a script in it (ADR-0036 §4).
+T writingReferences<T>(Map<String, Object?> Function(Object target) resolve, T Function() body) {
+  final before = _writingReference;
+  _writingReference = resolve;
+  try {
+    return body();
+  } finally {
+    _writingReference = before;
+  }
+}
+
+/// The spec a [GameObject] stands for when it is an [ObjectSpec.object]
+/// not built yet; null for any other object.
+ObjectSpec? specOfObject(GameObject go) => go._spec;
 
 /// What a `NativeComponent<T>?` field's generated `set` stores: null, the
 /// handle itself, or the component [T] of a [GameObject] (what a load

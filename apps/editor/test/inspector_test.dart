@@ -763,10 +763,9 @@ void main() {
       expect(r.model.scriptPath(r.model.slots.singleWhere((s) => s.type == 'game.Spinner')), isNull);
     });
 
-    test('entity names, assets by kind, describing a reference', () {
+    test('assets by kind, describing a reference', () {
       final r = rig();
       r.tabs.openDocument('main');
-      expect(r.model.entityNames(), ['Camera', 'Crate A', 'Crate B', 'Instance']);
       expect(r.model.assetsFor('mesh').map((a) => a.name), ['robot']);
       expect(r.model.assetsFor('clip').map((a) => a.name), ['robot']);
       expect(r.model.assetsFor('material').map((a) => a.name), ['steel']);

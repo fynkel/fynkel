@@ -7864,7 +7864,10 @@
           "type": "game.Switch",
           "version": 1,
           "data": {
-            "target": "Gate"
+            "gate": {
+              "entity": "e4641377-f180-5d90-8890-fd4913755d3c",
+              "component": "8658026b-af60-5502-b940-d5541a465e26"
+            }
           }
         },
         "7cc55c3f-c44d-59a9-8c45-fee925839f57": {

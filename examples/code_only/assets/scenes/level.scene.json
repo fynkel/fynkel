@@ -1218,8 +1218,11 @@
           "type": "game.Switch",
           "version": 1,
           "data": {
-            "prompt": "E — open the gate",
-            "target": "Gate"
+            "gate": {
+              "entity": "120268c5-6161-5815-9726-2ad13661a988",
+              "component": "b0c8a7fe-3f08-529e-bcc9-f932bb0420fd"
+            },
+            "prompt": "E — open the gate"
           }
         }
       }

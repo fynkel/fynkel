@@ -618,17 +618,6 @@ final class InspectorModel extends ChangeNotifier {
     return out;
   }
 
-  /// Names of the document's entities (the entity picker), sorted, unique.
-  List<String> entityNames() {
-    final t = _tab;
-    if (t == null) return const [];
-    final names = <String>{};
-    for (final n in t.tree.nodes.values) {
-      if (n.name.isNotEmpty) names.add(n.name);
-    }
-    return names.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-  }
-
   /// The objects a GameObject or script field may take, in Hierarchy
   /// order with their paths: every object, or those carrying the script
   /// [spec] names.

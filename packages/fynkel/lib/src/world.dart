@@ -2465,11 +2465,33 @@ class AudioControl {
 }
 
 class GameObject extends FynkelObject {
-  GameObject._(this.world, this._tempId, this._initial, this._name) {
+  GameObject._(World this._world, this._tempId, this._initial, this._name) : _spec = null {
     transform = Transform._(this);
   }
 
-  final World world;
+  /// [ObjectSpec.object] before its spec is built (ADR-0036 §4): a script
+  /// field or a component can hold it, and [World.build] makes it the
+  /// built object. Anything else throws until then.
+  GameObject._placeholder(ObjectSpec this._spec)
+      : _world = null,
+        _tempId = 0,
+        _initial = _spec.transform,
+        _name = _spec.name ?? '' {
+    transform = Transform._(this);
+    _alive = false;
+  }
+
+  /// The world the object is in.
+  World get world => _world ?? _notBuilt();
+  final World? _world;
+
+  Never _notBuilt() =>
+      throw StateError('the object of $_spec is not built yet: world.build the spec, then use spec.object');
+
+  /// The spec whose [ObjectSpec.object] this stands for until it is
+  /// built, and what its latest build made.
+  final ObjectSpec? _spec;
+  GameObject? _built;
   final int _tempId;
   final Pose _initial;
   String _name;
@@ -2633,6 +2655,11 @@ class GameObject extends FynkelObject {
   /// world resolves at the tick (`Entity::temp`: world 0, generation 0,
   /// slot = temp id). Throws once destroyed.
   int _simulationEntity(String what) {
+    if (_spec != null) {
+      // A component value built with a spec's object (`Follow(target:
+      // hero.object)`) names what the build made.
+      return (_built ?? _notBuilt())._simulationEntity(what);
+    }
     final e = _entity;
     if (e != null) return _requireResolved(what);
     if (!_alive) throw StateError('GameObject "$name" (temp #$_tempId) was destroyed');
@@ -3315,7 +3342,9 @@ class GameObject extends FynkelObject {
   }
 
   @override
-  String toString() => 'GameObject($name, ${_entity == null ? 'pending #$_tempId' : '0x${_entity!.toRadixString(16)}'})';
+  String toString() => _spec != null
+      ? 'GameObject($name, the object of $_spec)'
+      : 'GameObject($name, ${_entity == null ? 'pending #$_tempId' : '0x${_entity!.toRadixString(16)}'})';
 }
 
 /// The objects a command batch targets, by command index (for rejection

@@ -212,6 +212,11 @@ def behaviour(type_, **data):
     return (type_, data)
 
 
+def component_of(scene, eid, type_):
+    """The id of the `type_` component of entity `eid` in `scene`."""
+    return next(cid for cid, c in scene.entities[eid]["components"].items() if c["type"] == type_)
+
+
 class Scene:
     def __init__(self, name, key):
         self.name = name
@@ -785,7 +790,7 @@ def playground():
     static("Cell N", "cube", "wall", (-15.0, 1.0, -28.5), scale=(8.0, 2.0, 0.6))
     static("Cell S", "cube", "wall", (-15.0, 1.0, -22.5), scale=(8.0, 2.0, 0.6))
     static("Cell W", "cube", "wall", (-19.3, 1.0, -25.5), scale=(0.6, 2.0, 6.6))
-    s.add(
+    gate = s.add(
         "Gate",
         [
             transform((-11.0, 1.0, -25.5), scale=(0.6, 2.0, 5.4)),
@@ -802,7 +807,8 @@ def playground():
             mesh_renderer("cylinder", "switch", cast=False),
             collider("box", size=(0.6, 6.0, 0.6), sensor=True, layer=TRIGGER, mask=PLAYER),
             trigger_zone("switch"),
-            behaviour("game.Switch", target="Gate"),
+            # A script reference (ADR-0036 §4): the Gate's game.Gate.
+            behaviour("game.Switch", gate={"entity": gate, "component": component_of(s, gate, "game.Gate")}),
         ],
     )
     counts["static"] += 1

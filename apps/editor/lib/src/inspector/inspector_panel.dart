@@ -1251,8 +1251,6 @@ final class _SlotTarget extends FieldTarget {
   @override
   void Function(String assetId)? get pingAsset => model.pingAsset;
   @override
-  List<String> entityNames() => model.entityNames();
-  @override
   List<String> layerNames() => model.project.layerNames();
   @override
   List<({String id, String name, String path})> objectsFor(FieldSpec spec) => model.objectsFor(spec);

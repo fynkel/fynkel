@@ -234,8 +234,8 @@ class PrefabNameScope extends InheritedWidget {
 /// A single line is drawn as the Inspector's own field box (item 9b): the
 /// recessed fill, a hairline that turns accent while editing, an optional
 /// [leading] inside it (a vector's axis letter, a colour swatch), the
-/// value left-aligned, the [unit] right after the value, and an optional
-/// [trailing] (a pick button). Multiline text keeps the theme's field.
+/// value left-aligned, and the [unit] right after the value. Multiline
+/// text keeps the theme's field.
 class _CommitText extends StatefulWidget {
   const _CommitText({
     super.key,
@@ -248,7 +248,6 @@ class _CommitText extends StatefulWidget {
     this.hint = '—',
     this.monospace = false,
     this.leading,
-    this.trailing,
     this.live,
   });
 
@@ -272,7 +271,6 @@ class _CommitText extends StatefulWidget {
   final String? hint;
   final bool monospace;
   final Widget? leading;
-  final Widget? trailing;
 
   @override
   State<_CommitText> createState() => _CommitTextState();
@@ -452,7 +450,6 @@ class _CommitTextState extends State<_CommitText> {
                         ],
                       ),
               ),
-              ?widget.trailing,
             ],
           ),
         ),
@@ -1667,66 +1664,6 @@ IconData assetKindIcon(String? kind) => switch (kind) {
   'script' => FIcons.descriptionOutlined,
   _ => FIcons.insertDriveFileOutlined,
 };
-
-// ── Entity reference ───────────────────────────────────────────────────────
-
-/// An entity named by its name (what authored components store): a text
-/// field with ⊙ inside, which opens [showPicker] with the document's names.
-class EntityField extends StatelessWidget {
-  const EntityField({
-    super.key,
-    required this.value,
-    required this.names,
-    required this.onCommit,
-    this.subject,
-    this.mixed = false,
-    this.enabled = true,
-  });
-
-  final String? value;
-  final List<String> Function() names;
-  final String? subject;
-  final bool mixed;
-  final bool enabled;
-  final void Function(String name) onCommit;
-
-  @override
-  Widget build(BuildContext context) {
-    return Builder(
-      builder: (context) => _CommitText(
-        text: mixed ? '—' : (value ?? ''),
-        hint: 'None',
-        enabled: enabled,
-        onCommit: onCommit,
-        trailing: _InBoxButton(
-          key: const ValueKey('entity.pick'),
-          tooltip: 'Choose an entity',
-          icon: FIcons.pick,
-          onPressed: enabled
-              ? () async {
-                  final choice = await showPicker<String>(
-                    context,
-                    title: 'Choose an entity',
-                    subject: subject,
-                    anchor: globalRectOf(context),
-                    items: [
-                      for (final n in names())
-                        PickerItem(value: n, id: 'entity.$n', title: n, icon: FIcons.cropSquare, facts: [('Name', n)]),
-                    ],
-                    current: value,
-                    hint: 'Search by name',
-                    keyPrefix: 'entityPicker',
-                    countNoun: 'entities',
-                    empty: 'No entity in this document has that name.',
-                  );
-                  if (choice != null && !choice.isNone) onCommit(choice.value!);
-                }
-              : null,
-        ),
-      ),
-    );
-  }
-}
 
 // ── Object reference ───────────────────────────────────────────────────────
 

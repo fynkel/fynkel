@@ -66,7 +66,8 @@ void main() {
     expect(report.behavioursAttached, 14);
     expect(game.world.behaviours.whereType<Player>().single.walkSpeed, 4, reason: 'authored in the scene');
     expect(game.world.behaviours.whereType<Collectible>(), hasLength(10));
-    expect(game.world.behaviours.whereType<Switch>().single.target, 'Gate');
+    expect(game.world.behaviours.whereType<Switch>().single.gate, same(game.world.find('Gate')!.behaviour<Gate>()),
+        reason: 'a script reference (ADR-0036 §4)');
     expect(game.world.behaviours.whereType<Gate>().single.opened, isFalse);
     expect(game.state.total.value, 10);
     expect(game.state.collected.value, 0);

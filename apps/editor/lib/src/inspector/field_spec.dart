@@ -32,9 +32,6 @@ enum FieldKind {
   /// `{ asset, sub? }` — the envelope's `$defs/assetRef`.
   assetRef,
 
-  /// An entity's name (authored components reference entities by name).
-  entity,
-
   /// A script's `GameObject?` field: `{ entity: id }` or null (Unity's
   /// object field — pick, or drag a Hierarchy row onto it).
   objectRef,
@@ -586,8 +583,6 @@ FieldSpec _parseField(
             kind = FieldKind.color;
             fixedLength ??= 3;
           }
-        case 'entity':
-          if (kind == FieldKind.string) kind = FieldKind.entity;
         case 'multiline':
           multiline = kind == FieldKind.string;
         case 'angle':

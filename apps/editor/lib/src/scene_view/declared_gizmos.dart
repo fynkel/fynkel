@@ -100,12 +100,11 @@ final class DeclaredGizmos extends ComponentHandles {
 
   /// The polylines of the gizmos [selected] decides on (`when: always`
   /// ones whatever it is). A `lineTo`'s target is an object reference
-  /// (`{entity: id}`, ADR-0035), whose position [findEntity] answers by
-  /// entity id, or a script's name string, which [find] answers by name.
+  /// (`{entity: id}`, ADR-0035/0036), whose position [findEntity] answers
+  /// by entity id.
   List<GizmoPolyline> lines(
     ComponentContext context, {
     required bool selected,
-    Vec3? Function(String name)? find,
     Vec3? Function(String id)? findEntity,
   }) {
     final c = _defaulted(context);
@@ -114,7 +113,7 @@ final class DeclaredGizmos extends ComponentHandles {
       final g = f.gizmo!;
       if (!selected && !g.always) continue;
       final color = _color(f);
-      for (final l in _shape(c, f, find, findEntity)) {
+      for (final l in _shape(c, f, findEntity)) {
         out.add((points: l, color: color));
       }
     }
@@ -124,7 +123,6 @@ final class DeclaredGizmos extends ComponentHandles {
   List<List<Vec3>> _shape(
     ComponentContext c,
     FieldSpec f,
-    Vec3? Function(String name)? find,
     Vec3? Function(String id)? findEntity,
   ) {
     final g = f.gizmo!;
@@ -161,7 +159,6 @@ final class DeclaredGizmos extends ComponentHandles {
       case 'lineTo':
         final target = switch (c.data[f.name]) {
           {'entity': final String id} => findEntity?.call(id),
-          final String name when name.isNotEmpty => find?.call(name),
           _ => null,
         };
         return target == null

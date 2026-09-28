@@ -91,6 +91,19 @@ final class ObjectSpec {
   final List<Behaviour> behaviours;
   final List<ObjectSpec> children;
 
+  /// The object this spec builds, to reference before it exists (ADR-0036
+  /// §4): `Switch()..door = gate.object` in another spec. Until the spec
+  /// is built it is a stand-in only a script field or a component value
+  /// (`Follow(target: hero.object)`) can hold, and [World.build] makes
+  /// those the built object; once built, this is the object the latest
+  /// build made.
+  GameObject get object {
+    final p = _objects[this] ??= GameObject._placeholder(this);
+    return p._built ?? p;
+  }
+
+  static final _objects = Expando<GameObject>('ObjectSpec.object');
+
   /// This spec and every spec under it, depth first.
   Iterable<ObjectSpec> get _all sync* {
     yield this;
@@ -139,7 +152,10 @@ extension on World {
   /// half-built object behind.
   void _checkSpec(ObjectSpec spec) {
     final seen = Set<Behaviour>.identity();
+    final specs = Set<ObjectSpec>.identity();
+    final twice = Set<ObjectSpec>.identity();
     for (final s in spec._all) {
+      if (!specs.add(s)) twice.add(s);
       for (final b in s.behaviours) {
         if (b._system != null) {
           throw StateError('$s: $b is already attached to ${b._gameObject} — build a spec with behaviours once, '
@@ -158,9 +174,34 @@ extension on World {
         }
       }
     }
+    // What the scripts reference: a spec's object in this build (once) or
+    // built before, a script in this build or attached already.
+    for (final s in specs) {
+      for (final b in s.behaviours) {
+        final type = b._type ?? _registeredTypeOf(b);
+        for (final f in type?.fields ?? const <BehaviourField>[]) {
+          if (!f.isReference) continue;
+          switch (f.target?.call(b)) {
+            case final GameObject g when g._spec != null:
+              final target = g._spec;
+              if (twice.contains(target)) {
+                throw StateError('$s: ${type!.id}.${f.name} references $target, which is twice in this build');
+              }
+              if (!specs.contains(target) && g._built == null) {
+                throw StateError('$s: ${type!.id}.${f.name} references $target, which is not in this build '
+                    'and was never built');
+              }
+            case final Behaviour r when r._system == null && !seen.contains(r):
+              throw StateError('$s: ${type!.id}.${f.name} holds $r, which is not in this build and not attached');
+          }
+        }
+      }
+    }
   }
 
-  GameObject _buildSpec(ObjectSpec spec, GameObject? parent, Pose transform) {
+  /// Spawns [spec]'s objects (depth first, into [made]) before anything
+  /// else, so every spec's object exists when references are set.
+  GameObject _spawnSpec(ObjectSpec spec, GameObject? parent, Pose transform, List<GameObject> made) {
     final GameObject go;
     if (spec.prefab case final prefab?) {
       // The native instantiate needs a spawned parent; under one this build
@@ -174,6 +215,39 @@ extension on World {
     } else {
       go = spawn(name: spec.name ?? '', transform: transform, parent: parent);
     }
+    ObjectSpec._objects[spec]?._built = go;
+    made.add(go);
+    for (final c in spec.children) {
+      _spawnSpec(c, go, c.transform, made);
+    }
+    return go;
+  }
+
+  /// Points every script field that holds a spec's object at the object
+  /// its build made.
+  void _resolveSpecReferences(ObjectSpec spec) {
+    for (final s in spec._all) {
+      for (final b in s.behaviours) {
+        final type = b._type ?? _registeredTypeOf(b);
+        for (final f in type?.fields ?? const <BehaviourField>[]) {
+          if (!f.isReference) continue;
+          if (f.target?.call(b) case final GameObject g when g._spec != null) f.set(b, g._built);
+        }
+      }
+    }
+  }
+
+  GameObject _buildSpec(ObjectSpec spec, GameObject? parent, Pose transform) {
+    final made = <GameObject>[];
+    final root = _spawnSpec(spec, parent, transform, made);
+    _resolveSpecReferences(spec);
+    _fillSpec(spec, made.iterator..moveNext());
+    return root;
+  }
+
+  /// Sets what [spec] puts on its objects, [made] at its object.
+  void _fillSpec(ObjectSpec spec, Iterator<GameObject> made) {
+    final go = made.current;
     for (final c in spec.components) {
       go.set(c);
     }
@@ -185,9 +259,9 @@ extension on World {
       go.addBehaviour(b);
     }
     for (final c in spec.children) {
-      _buildSpec(c, go, c.transform);
+      made.moveNext();
+      _fillSpec(c, made);
     }
     if (!spec.active) go.setActive(false);
-    return go;
   }
 }

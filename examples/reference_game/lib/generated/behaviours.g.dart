@@ -196,18 +196,18 @@ BehaviourType get gameSwitchType => BehaviourType(
   create: _lib4.Switch.new,
   fields: [
     BehaviourField(
+      name: 'gate',
+      type: 'behaviour',
+      get: (b) => referenceJson((b as _lib4.Switch).gate),
+      target: (b) => (b as _lib4.Switch).gate,
+      set: (b, v) => (b as _lib4.Switch).gate = v as _lib1.Gate?,
+    ),
+    BehaviourField(
       name: 'prompt',
       type: 'string',
       defaultValue: 'E — open the gate',
       get: (b) => (b as _lib4.Switch).prompt,
       set: (b, v) => (b as _lib4.Switch).prompt = v as String,
-    ),
-    BehaviourField(
-      name: 'target',
-      type: 'string',
-      defaultValue: 'Gate',
-      get: (b) => (b as _lib4.Switch).target,
-      set: (b, v) => (b as _lib4.Switch).target = v as String,
     ),
   ],
 );

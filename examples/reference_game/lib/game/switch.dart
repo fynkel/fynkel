@@ -5,15 +5,15 @@ import 'game_state.dart';
 import 'gate.dart';
 
 /// A floor pad: while the player (the object tagged `player`) stands in its
-/// `switch` zone the HUD shows a hint, and the `interact` press opens the
-/// [Gate] named [target].
+/// `switch` zone the HUD shows a hint, and the `interact` press opens
+/// [gate].
 @FynkelBehaviour(id: 'game.Switch')
 class Switch extends Behaviour {
-  /// The entity carrying the `game.Gate` to open (the Scene view draws a
-  /// line to it).
-  @Expose(kind: 'entity')
+  /// The gate to open (a script reference, as Unity's `public Gate
+  /// gate;`); the Scene view draws a line to it.
+  @Expose()
   @Gizmo.lineTo()
-  String target = 'Gate';
+  Gate? gate;
 
   /// The HUD's prompt while the player stands here.
   @Expose()
@@ -41,7 +41,7 @@ class Switch extends Behaviour {
   @override
   void fixedUpdate(FixedUpdateContext context) {
     if (!occupied || used || !Input.pressed('interact')) return;
-    final gate = world.find(target)?.behaviours.whereType<Gate>().firstOrNull;
+    final gate = this.gate;
     if (gate == null) return;
     gate.open();
     used = true;

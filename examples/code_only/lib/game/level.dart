@@ -169,7 +169,11 @@ List<ObjectSpec> level(
   Look look,
   CoinKinds kinds, {
   required ObjectSpec Function(String name, Vec3 at, CoinKind kind) coinAt,
-}) => [
+}) {
+  // The switch opens this gate: a script reference between two specs
+  // (ADR-0036 §4), set before either object exists.
+  final gate = Gate();
+  return [
       ...lighting(),
       ObjectSpec(
         'Camera',
@@ -217,7 +221,7 @@ List<ObjectSpec> level(
         name: 'Gate',
         transform: at(-9.5, 1.2, -9, scale: const Vec3(0.6, 2.4, 4)),
         components: [MeshRenderer(mesh: Primitive.cube.mesh, material: look.gate)],
-        behaviours: [Gate()],
+        behaviours: [gate],
       ),
       ObjectSpec(
         'Switch',
@@ -228,7 +232,7 @@ List<ObjectSpec> level(
           Collider(size: const Vec3(0.6, 6, 0.6), isSensor: true, mask: playerMask),
           const TriggerZone(event: 'switch'),
         ],
-        behaviours: [Switch()],
+        behaviours: [Switch()..gate = gate],
       ),
       // The hazard: a blade sweeping across x 4.5…7.5 at z −2.
       ObjectSpec.primitive(
@@ -256,6 +260,7 @@ List<ObjectSpec> level(
       // building: the cook mounts Packages/pickups beside assets/).
       ObjectSpec.prefab(pickups.Assets.prefabs.pickup, name: 'Gem', transform: Pose(position: gemSpot)),
     ];
+}
 
 /// A podium with a big spinning coin, seen by a camera orbiting it: the
 /// Menu's and the Results' backdrop.

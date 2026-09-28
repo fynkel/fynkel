@@ -132,8 +132,9 @@ void main() {
         final player = game.world.findWithTag(playerTag)!;
         expect(player.behaviour<Player>(), isNotNull);
         expect(player.layer, 'player');
-        expect(game.world.findObjectOfType<Switch>()!.target, 'Gate');
-        expect(game.world.find('Gate')!.behaviour<Gate>(), isNotNull);
+        final gate = game.world.find('Gate')!.behaviour<Gate>();
+        expect(gate, isNotNull);
+        expect(game.world.findObjectOfType<Switch>()!.gate, same(gate), reason: 'a reference, both ways (ADR-0036 §4)');
         expect(game.world.find('Sweeper')!.get<Oscillate>()!.amplitude, 1.5);
         expect(game.world.find('Coin 3')!.localTransform.position, coinSpots[2]);
 

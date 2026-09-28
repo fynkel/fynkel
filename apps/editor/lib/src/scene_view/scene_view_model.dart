@@ -1369,20 +1369,11 @@ final class SceneViewModel extends ChangeNotifier {
     if (vp == null) return;
     final items = _declaredItems(t, _hiddenAll(t));
     if (items.isEmpty) return;
-    final byName = <String, String>{};
-    for (final n in t.tab.tree.nodes.values) {
-      byName.putIfAbsent(n.name, () => n.id);
-    }
     final targets = <String>{};
     for (final item in items) {
       for (final f in declaredGizmos(item.type)!.fields) {
         if (f.gizmo!.shape != 'lineTo') continue;
-        switch (item.data[f.name]) {
-          case {'entity': final String id}:
-            targets.add(id);
-          case final String name:
-            targets.addAll([?byName[name]]);
-        }
+        if (item.data[f.name] case {'entity': final String id}) targets.add(id);
       }
     }
     final matrices = t.preview!.worldMatrices([...{for (final i in items) i.id}, ...targets]);
@@ -1400,10 +1391,6 @@ final class SceneViewModel extends ChangeNotifier {
       final lines = declaredGizmos(item.type)!.lines(
         c,
         selected: selection.contains(item.id),
-        find: (name) {
-          final m = matrices[byName[name]];
-          return m == null ? null : matTranslation(m);
-        },
         findEntity: (id) {
           final m = matrices[id];
           return m == null ? null : matTranslation(m);

@@ -42,10 +42,10 @@ Map<String, Object?> schema() {
         'x-fynkel': {'type': 'number', 'kind': 'angle', 'max': 1.0},
       },
       'target': {
-        'type': 'string',
+        'type': ['object', 'null'],
         'x-fynkel': {
-          'type': 'string',
-          'kind': 'entity',
+          'type': 'gameObject',
+          'nullable': true,
           'gizmo': {'shape': 'lineTo'},
         },
       },
@@ -138,24 +138,18 @@ void main() {
     expect(onlyLine.supports(const {}), isFalse, reason: 'a lineTo alone has nothing to drag');
   });
 
-  test('unselected, only the always-on ones draw; a lineTo reaches its target by name', () {
-    final c = contextOf({'target': 'Gate'}, world: placed([1, 0, 0]));
-    expect(gizmos.lines(c, selected: false).length, 3, reason: 'the reach sphere\'s three circles');
-    final all = gizmos.lines(c, selected: true, find: (name) => name == 'Gate' ? const [5, 0, 0] : null);
-    final line = all.where((l) => l.points.length == 2 && vDistance(l.points.last, const [5, 0, 0]) < 1e-9);
-    expect(line.single.points.first, [1, 0, 0]);
-    expect(gizmos.lines(contextOf({'target': 'Nobody'}), selected: true, find: (_) => null).length, lessThan(all.length));
-  });
-
-  test('a lineTo reaches an object reference by its entity id (ADR-0035)', () {
+  test('unselected, only the always-on ones draw; a lineTo reaches an object reference by its entity id', () {
     final c = contextOf({
       'target': {'entity': 'e1'},
     }, world: placed([1, 0, 0]));
+    expect(gizmos.lines(c, selected: false).length, 3, reason: 'the reach sphere\'s three circles');
     final all = gizmos.lines(c, selected: true, findEntity: (id) => id == 'e1' ? const [0, 0, 7] : null);
     final line = all.where((l) => l.points.length == 2 && vDistance(l.points.last, const [0, 0, 7]) < 1e-9);
     expect(line.single.points.first, [1, 0, 0]);
     final none = gizmos.lines(contextOf({'target': null}), selected: true, findEntity: (_) => const [0, 0, 7]);
     expect(none.length, lessThan(all.length), reason: 'None draws no line');
+    final gone = gizmos.lines(c, selected: true, findEntity: (_) => null);
+    expect(gone.length, none.length, reason: 'nor does an object not in the scene');
   });
 
   test('a radius: the schema default when the data has none, scaled with the entity, clamped to its minimum', () {

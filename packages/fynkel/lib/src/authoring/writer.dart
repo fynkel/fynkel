@@ -12,7 +12,7 @@ import 'package:crypto/crypto.dart';
 import '../../fynkel.dart';
 import '../../generated/schema.g.dart' as gen;
 import '../wire/support.dart' show docAssetRef, docQuat, docVec3, docVec4;
-import '../world.dart' show bindWrittenData;
+import '../world.dart' show bindWrittenData, specOfObject, writingReferences;
 
 /// A scene written from code: its objects, in order.
 final class SceneSpec {
@@ -192,10 +192,7 @@ class ProjectWriter {
   /// objects, in order. The ids derive from [key], as a document's from
   /// its id; the editor gives the objects fresh ones.
   ({Map<String, Object?> entities, List<String> roots}) entitiesOf(List<ObjectSpec> roots, {String key = 'editor'}) {
-    final doc = _Document(this, _uuid5(_ids, 'memory/$key'));
-    for (final r in roots) {
-      doc.add(r, null);
-    }
+    final doc = _Document(this, _uuid5(_ids, 'memory/$key'))..addAll(roots);
     return (entities: doc.entities, roots: List.unmodifiable(doc.roots));
   }
 
@@ -256,10 +253,7 @@ class ProjectWriter {
     final file = File('$assetsDir/$path');
     final existing = file.existsSync() ? jsonDecode(file.readAsStringSync()) as Map<String, Object?> : null;
     final id = existing?['id'] as String? ?? _uuid5(_ids, 'document/$path');
-    final doc = _Document(this, id);
-    for (final r in roots) {
-      doc.add(r, null);
-    }
+    final doc = _Document(this, id)..addAll(roots);
     final kept = existing == null ? const <String>[] : doc.keep(existing, prefab: prefab);
     final out = <String, Object?>{
       r'$schema': 'https://fynkel.dev/schemas/$kind.schema.json',
@@ -391,8 +385,28 @@ final class _Document {
   /// The derived id of each object written, by its path of names.
   final Map<String, String> _byPath = {};
 
-  /// Adds [spec] and everything under it below [parent] (an entity id).
-  void add(ObjectSpec spec, String? parent, [String parentPath = '']) {
+  /// Each spec's place (path of names) and id, depth first as [add]
+  /// writes them; the id of each spec and script, for references.
+  final List<(String, String)> _planned = [];
+  var _next = 0;
+  final Map<ObjectSpec, String?> _specIds = Map.identity();
+  final Map<Behaviour, String> _scriptIds = Map.identity();
+
+  /// Adds [roots] and everything under them: every id first, so a script
+  /// or a component can reference an object written after it (ADR-0036
+  /// §4).
+  void addAll(List<ObjectSpec> roots) {
+    for (final r in roots) {
+      _plan(r, '');
+    }
+    writingReferences(_reference, () {
+      for (final r in roots) {
+        add(r, null);
+      }
+    });
+  }
+
+  void _plan(ObjectSpec spec, String parentPath) {
     final root = spec.prefab == null ? null : writer._prefabRoot(spec.prefab!);
     final name = spec.name ?? root?.name ?? '';
     final base = '$parentPath/$name';
@@ -402,6 +416,44 @@ final class _Document {
     }
     final eid = _uuid5(id, 'entity$path');
     _byPath[path] = eid;
+    _planned.add((path, eid));
+    // A spec written twice (a const one) has no one object to name.
+    _specIds[spec] = _specIds.containsKey(spec) ? null : eid;
+    for (final b in spec.behaviours) {
+      _scriptIds[b] = eid;
+    }
+    for (final c in spec.children) {
+      _plan(c, path);
+    }
+  }
+
+  /// A reference in the document: to a spec's object or a script of it.
+  Map<String, Object?> _reference(Object target) {
+    switch (target) {
+      case final GameObject g when specOfObject(g) != null:
+        final spec = specOfObject(g)!;
+        if (!_specIds.containsKey(spec)) {
+          throw ArgumentError('a reference to the object of $spec, which is not in this document');
+        }
+        final eid = _specIds[spec] ??
+            (throw ArgumentError('a reference to the object of $spec, which is twice in this document'));
+        return {'entity': eid};
+      case final Behaviour b when _scriptIds.containsKey(b):
+        final eid = _scriptIds[b]!;
+        final type = b.behaviourType ?? _registered(b);
+        return {'entity': eid, 'component': _uuid5(eid, 'component/${type.id}')};
+      default:
+        throw ArgumentError('$target is not in this document: a written reference names a spec\'s object '
+            '(spec.object) or a script of a spec');
+    }
+  }
+
+  /// Adds [spec] and everything under it below [parent] (an entity id),
+  /// at the place [_plan] gave it.
+  void add(ObjectSpec spec, String? parent) {
+    final root = spec.prefab == null ? null : writer._prefabRoot(spec.prefab!);
+    final name = spec.name ?? root?.name ?? '';
+    final (_, eid) = _planned[_next++];
     final components = <String, Object?>{};
     final overrides = <Map<String, Object?>>[];
 
@@ -502,7 +554,7 @@ final class _Document {
       ((entities[parent] as Map<String, Object?>)['children'] as List<String>).add(eid);
     }
     for (final c in spec.children) {
-      add(c, eid, path);
+      add(c, eid);
     }
   }
 
@@ -580,11 +632,12 @@ final class _Document {
   }
 }
 
-/// A script's `data`: every field but references (an object of the
-/// scene is picked in the editor), through its registered `get`.
+/// A script's `data`, through its registered `get`: a reference only
+/// when it holds something (a spec's object or a script of a spec,
+/// ADR-0036 §4), so None leaves the key out.
 Map<String, Object?> _scriptData(BehaviourType type, Behaviour b) => {
       for (final f in type.fields)
-        if (!f.isReference)
+        if (!f.isReference || f.target?.call(b) != null)
           f.name: f.holdsData ? _dataValue(f.target!(b), f.get(b), '${type.id}.${f.name}') : f.get(b),
     };
 

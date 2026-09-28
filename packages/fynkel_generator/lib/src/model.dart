@@ -155,7 +155,7 @@ class ExposedField {
   final num? step;
 
   /// The ADR-0018 display hints, as written in the annotation (`kind` is
-  /// `color`, `asset(<kind>)`, `entity`, `multiline`, `angle`, `slider` or
+  /// `color`, `asset(<kind>)`, `multiline`, `angle`, `slider` or
   /// `layerMask`; `showIf` a sibling boolean's name, `!`-prefixed to invert).
   final String? group;
   final int? order;
@@ -313,7 +313,7 @@ String? gizmoProblem(GizmoSpec g, ExposedField field, List<ExposedField> sibling
     'radius' => t == FieldKind.number || t == FieldKind.integer,
     'box' || 'point' || 'direction' => t == FieldKind.vec3,
     'cone' => t == FieldKind.number,
-    'lineTo' => t == FieldKind.string,
+    'lineTo' => t.isReference,
     'path' => t == FieldKind.vec3List,
     _ => false,
   };
@@ -322,7 +322,7 @@ String? gizmoProblem(GizmoSpec g, ExposedField field, List<ExposedField> sibling
       'radius' => 'a double or int',
       'box' || 'point' || 'direction' => 'a Vec3',
       'cone' => 'a double (the length)',
-      'lineTo' => 'a String (an entity name)',
+      'lineTo' => 'a GameObject?, script or NativeComponent<T>?',
       'path' => 'a List<Vec3>',
       _ => 'nothing',
     };
@@ -389,11 +389,11 @@ String? exposeKindProblem(String kind, FieldKind type) {
   }
   return switch (kind) {
     'color' => type == FieldKind.vec3 ? null : "kind 'color' needs a Vec3 field (linear RGB)",
-    'entity' || 'multiline' => type == FieldKind.string ? null : "kind '$kind' needs a String field",
+    'multiline' => type == FieldKind.string ? null : "kind 'multiline' needs a String field",
     'angle' => type == FieldKind.number ? null : "kind 'angle' needs a double field (radians)",
     'slider' => type == FieldKind.number || type == FieldKind.integer ? null : "kind 'slider' needs a double or int field",
     'layerMask' => type == FieldKind.integer ? null : "kind 'layerMask' needs an int field",
-    _ => "unknown kind '$kind'; one of color, asset(<kind>), entity, multiline, angle, slider, layerMask",
+    _ => "unknown kind '$kind'; one of color, asset(<kind>), multiline, angle, slider, layerMask",
   };
 }
 

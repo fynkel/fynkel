@@ -407,10 +407,14 @@ turret.findChild('Barrel');                          // the prefab's entities ar
   children: [...]))`; a function returning an `ObjectSpec` is a code
   prefab (call it per copy — behaviour instances attach once).
   `ObjectSpec.prefab(Assets.prefabs.coin, tags: ['pickup'])` places a
-  prefab asset with overrides on its root.
+  prefab asset with overrides on its root. Specs reference each other
+  before anything exists: `Switch()..door = gate.object` (the object the
+  `gate` spec builds), `Follow(target: hero.object)`, or a script instance
+  itself (`final g = Gate();` in one spec, `Switch()..gate = g` in
+  another); build them together.
 - `world.createPrimitive(Primitive.cube)` (or `ObjectSpec.primitive`) makes
   a built-in shape with its collider; `world.createMaterial(PbrMaterial(
-  baseColor: …))` returns an `AssetRef` for a `MeshRenderer`, and
+  baseColor: …))` returns a `MaterialAsset` for a `MeshRenderer`, and
   `world.createMesh(MeshData(positions: …, triangles: …))` (or
   `MeshData.grid(height: …)` for terrain) one for its `mesh` and a mesh
   `Collider`, both following `setMesh`; `obj.clone()` copies a spawned object and its subtree, scripts and all

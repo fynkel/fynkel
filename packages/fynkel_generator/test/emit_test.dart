@@ -183,7 +183,8 @@ void main() {
     expect(exposeKindProblem('asset(mesh)', FieldKind.assetRef), isNull);
     expect(exposeKindProblem('asset(font)', FieldKind.assetRef), contains('unknown asset kind'));
     expect(exposeKindProblem('asset(mesh)', FieldKind.string), contains('AssetRef'));
-    expect(exposeKindProblem('entity', FieldKind.string), isNull);
+    expect(exposeKindProblem('entity', FieldKind.string), contains('unknown kind'),
+        reason: 'an object is a GameObject? field now (ADR-0036 §4), not a name');
     expect(exposeKindProblem('multiline', FieldKind.integer), contains('String'));
     expect(exposeKindProblem('angle', FieldKind.number), isNull);
     expect(exposeKindProblem('slider', FieldKind.integer), isNull);
@@ -263,7 +264,9 @@ void main() {
     }
     expect(gizmoProblem(const GizmoSpec(shape: 'radius'), path, fields), contains('double'));
     expect(gizmoProblem(const GizmoSpec(shape: 'box'), radius, fields), contains('Vec3'));
-    expect(gizmoProblem(const GizmoSpec(shape: 'lineTo'), radius, fields), contains('String'));
+    expect(gizmoProblem(const GizmoSpec(shape: 'lineTo'), radius, fields), contains('GameObject?'));
+    const door = ExposedField(name: 'door', kind: FieldKind.gameObject, nullable: true);
+    expect(gizmoProblem(const GizmoSpec(shape: 'lineTo'), door, fields), isNull);
     expect(gizmoProblem(const GizmoSpec(shape: 'cone', angle: 'nope'), cone, fields), contains("angle 'nope'"));
     expect(gizmoProblem(const GizmoSpec(shape: 'cone', angle: 'length'), cone, fields), contains('another'));
   });

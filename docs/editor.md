@@ -475,8 +475,7 @@ last one wins:
    hints` for the 23 built-in components (the audio pair included), in the same `x-fynkel`
    vocabulary the generator writes (Camera `fov_y` is an `angle` in the
    `Lens` group, lights' `color` is a `color`, `MeshRenderer.mesh` an
-   `asset(mesh)`, `Collider.layer` a `layerMask`, `Skin.skeleton` an
-   `entity`, units `m` / `lux` / `cd` / `kg` / `s`…). It stands in until
+   `asset(mesh)`, `Collider.layer` a `layerMask`, units `m` / `lux` / `cd` / `kg` / `s`…). It stands in until
    the Rust `#[fynkel(...)]` field attributes exist (ADR-0018 names them;
    `fynkel_schema_derive` and the component structs are the M3 stream's
    territory, not on the editor's closed shared-touch list), and it only
@@ -488,7 +487,7 @@ last one wins:
 
 The hint set is ADR-0018's: `label`, `tooltip`, `min`, `max`, `step`,
 `group`, `order`, `header`, `unit`, `kind` (`color`, `asset(<kind>)`,
-`entity`, `multiline`, `angle`, `slider`, `layerMask`), `readOnly`,
+`multiline`, `angle`, `slider`, `layerMask`), `readOnly`,
 `hidden`, `showIf: "<bool field>"` / `"!<bool field>"`, and ADR-0028's
 `drawer` (an extension's property drawer, § Editor extensions); a behaviour adds
 `icon` and `category` (`@FynkelBehaviour`). Fields are ordered by `order`,
@@ -549,7 +548,6 @@ reports an edit **once per gesture**:
 | quaternion | **Euler degrees** (X, Y, Z, `q = qz·qy·qx`) over the stored `[x, y, z, w]`; each axis commits the whole quaternion; the shown triple is kept across a commit so dragging Y never snaps X |
 | `color` | a swatch (linear → sRGB for display) with the hex next to it; the picker is HSV + hex + alpha for four components; values are written linear. As Unity's, the Scene view follows every change while picking (`preview.setComponents`, no transaction); OK writes one transaction, Cancel or a click outside puts the world back (`restoreComponents`) |
 | `assetRef` | the asset's name, `…` opens a **searchable picker** filtered by `asset(<kind>)` (a source offers its matching sub-assets; an audio source is offered whole as a `sound` — `AudioSource.clip` takes no sub), Clear when nullable, and a `DragTarget<AssetDragPayload>` for the Project browser's rows (item 5) |
-| `entity` | a name field with a menu of the document's entity names |
 | `layerMask` | a check-list of the project's `layers` (Everything / Nothing), the number beside it — a collider's `mask` ("Collides with"), a camera's or light's `culling_mask` |
 | array, object | rows per item / per child; a list's `+` copies the last item (Unity's rule; into an empty list the item's default, and an asset item — which cannot be None — is picked first), each item moves up or down and is removed; `any` and keys the schema does not list fall back to JSON text |
 

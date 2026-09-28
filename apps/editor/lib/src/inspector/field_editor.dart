@@ -69,7 +69,6 @@ abstract class FieldTarget {
   String describeAsset(Map<String, Object?>? ref);
   AssetPreview Function(AssetEntry entry)? get assetPreview => null;
   void Function(String assetId)? get pingAsset => null;
-  List<String> entityNames() => const [];
   List<String> layerNames() => const [];
   List<({String id, String name, String path})> objectsFor(FieldSpec spec) => const [];
   Map<String, Object?>? objectRef(FieldSpec spec, String entity) => null;
@@ -309,19 +308,6 @@ class FieldEditor extends StatelessWidget {
               null => null,
             },
             onPing: target.pingAsset,
-            onCommit: _commit,
-          ),
-        );
-      case FieldKind.entity:
-        return _row(
-          label,
-          error,
-          EntityField(
-            value: value?.toString(),
-            subject: label,
-            names: target.entityNames,
-            mixed: mixed,
-            enabled: _enabled,
             onCommit: _commit,
           ),
         );
@@ -609,7 +595,7 @@ class FieldEditor extends StatelessWidget {
     FieldKind.number => 0,
     FieldKind.integer || FieldKind.layerMask || FieldKind.freezeAxes => 0,
     FieldKind.boolean => false,
-    FieldKind.string || FieldKind.entity => '',
+    FieldKind.string => '',
     FieldKind.enumeration => s.enumValues.isEmpty ? '' : s.enumValues.first,
     FieldKind.vec2 || FieldKind.vec3 || FieldKind.vec4 => List<Object>.filled(s.components, 0),
     FieldKind.quaternion => [0, 0, 0, 1],
