@@ -1495,11 +1495,15 @@ impl World {
         }
         self.set_time(SystemKind::Physics, physics_entities, micros(t0));
 
-        // Deferred structural changes.
+        // Deferred structural changes: a queued despawn goes as
+        // `Command::Destroy` does — the subtree, the bookkeeping and the
+        // `Destroyed` events (foundation 3.10); one already gone with its
+        // parent (or twice in the queue) is skipped.
         let t0 = Instant::now();
-        for e in self.ecs.flush_deferred() {
-            self.subscriptions.remove(&e);
-            self.overrides.remove(&e);
+        for e in self.ecs.take_deferred() {
+            if self.ecs.contains(e) {
+                let _ = self.destroy_subtree(e, next_tick);
+            }
         }
 
         // Transform/hierarchy work for the tick; new entities start with

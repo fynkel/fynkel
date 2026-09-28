@@ -206,7 +206,16 @@ impl World {
         self.deferred_despawn.lock().unwrap().push(entity);
     }
 
+    /// The queued despawns, taken off the queue without applying them: for
+    /// a caller that removes more than the entity (a hierarchy's subtree,
+    /// its bookkeeping) — `fynkel_core`'s tick does (foundation 3.10).
+    pub fn take_deferred(&mut self) -> Vec<Entity> {
+        core::mem::take(&mut *self.deferred_despawn.lock().unwrap())
+    }
+
     /// Applies queued structural changes; returns the entities that were live.
+    /// Each goes alone: this crate knows no hierarchy (see
+    /// [`take_deferred`](Self::take_deferred)).
     pub fn flush_deferred(&mut self) -> Vec<Entity> {
         let pending = core::mem::take(&mut *self.deferred_despawn.lock().unwrap());
         let mut done = Vec::with_capacity(pending.len());

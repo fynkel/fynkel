@@ -116,6 +116,51 @@ fn spawn_maps_temp_ids_and_destroy_removes_subtree() {
     );
 }
 
+/// Foundation 3.10: a despawn queued on the ECS (`despawn_deferred`,
+/// reachable through `World::ecs()`) goes the way `Command::Destroy`
+/// does at the tick's flush — the subtree with it, a `Destroyed` event
+/// each, subscriptions dropped — instead of leaving the children behind.
+#[test]
+fn a_deferred_despawn_takes_the_subtree_like_destroy() {
+    let mut w = world();
+    let root = spawn_one(&mut w, 0.0);
+    w.submit(
+        Lane::Simulation,
+        vec![Command::Spawn {
+            temp_id: 7,
+            transform: at(1.0),
+            parent: Some(root),
+            name: Some("child".into()),
+        }],
+    );
+    w.step();
+    let child = match &w.drain_events()[0].payload {
+        EventPayload::Spawned { temp_id: 7, entity } => *entity,
+        p => panic!("{p:?}"),
+    };
+    w.subscribe(&[root, child], true);
+
+    w.ecs().despawn_deferred(root);
+    w.ecs().despawn_deferred(child); // already going with its parent: ignored
+    let r = w.step();
+    assert_eq!(r.live_entities, 0, "the child went with its parent");
+    assert!(!w.ecs().contains(child));
+    assert_eq!(
+        r.snapshot_records, 0,
+        "subscriptions of destroyed entities drop"
+    );
+    assert_eq!(
+        w.drain_events()
+            .iter()
+            .map(|e| e.payload.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            EventPayload::Destroyed { entity: root },
+            EventPayload::Destroyed { entity: child }
+        ]
+    );
+}
+
 #[test]
 fn presentation_lane_overrides_extract_and_stages_authoritative_value() {
     let mut w = world();
