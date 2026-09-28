@@ -352,6 +352,10 @@ struct ObjectMeta {
 struct Store {
     index: CacheIndex,
     metas: HashMap<Uuid, Arc<ObjectMeta>>,
+    /// Prefab documents read and described ([`Assets::prefab`]), kept
+    /// while resident so a load prepared in the background (ADR-0038)
+    /// reads none at activation.
+    prefab_docs: HashMap<Uuid, Arc<CookedPrefab>>,
     meshes: HashMap<AssetRef, Arc<MeshPayload>>,
     textures: HashMap<AssetRef, Arc<TexturePayload>>,
     /// `Some` for an HDR image, `None` recorded for one without an `ENVM`.
@@ -484,6 +488,7 @@ impl Assets {
                 controllers: HashMap::new(),
                 volumes: HashMap::new(),
                 physics_materials: HashMap::new(),
+                prefab_docs: HashMap::new(),
                 skins: HashMap::new(),
                 sounds: HashMap::new(),
                 counts: HashMap::new(),
@@ -1235,6 +1240,7 @@ impl Assets {
         s.skins.retain(|r, _| !gone.contains(&r.asset));
         s.sounds.retain(|r, _| !gone.contains(&r.asset));
         s.metas.retain(|id, _| !gone.contains(id));
+        s.prefab_docs.retain(|id, _| !gone.contains(id));
         s.evictions += 1;
     }
 
@@ -1715,6 +1721,70 @@ impl Assets {
     /// [`Assets::scene`] (`FYN-R0006` for an asset that is not a prefab,
     /// `R0008` when the chunk does not describe: recook).
     pub fn prefab(&self, id: Uuid) -> Result<CookedPrefab, Vec<Diagnostic>> {
+        if let Some(p) = self.lock().prefab_docs.get(&id) {
+            return Ok((**p).clone());
+        }
+        let prefab = self.read_prefab(id)?;
+        if self.is_resident(id) {
+            self.lock().prefab_docs.insert(id, Arc::new(prefab.clone()));
+        }
+        Ok(prefab)
+    }
+
+    /// Reads every payload of `ids` into memory — meshes, textures,
+    /// materials, environments, clips, sounds, skins, prefab documents —
+    /// so a load prepared on a background thread (ADR-0038) finds them all
+    /// at activation, and the renderer at its first draw. Call it with
+    /// the ids retained ([`retain`](Assets::retain)): what nothing retains
+    /// may be evicted again. `done` counts the ids finished (a load's
+    /// progress); `stop` ends it early. A payload that fails is left for
+    /// the activation to report.
+    pub fn preload(
+        &self,
+        ids: &[Uuid],
+        done: &std::sync::atomic::AtomicUsize,
+        stop: &std::sync::atomic::AtomicBool,
+    ) {
+        use std::sync::atomic::Ordering;
+        for &id in ids {
+            if stop.load(Ordering::Relaxed) {
+                return;
+            }
+            let chunks = {
+                let mut s = self.lock();
+                let entry = s.index.object(id).ok().cloned();
+                entry.and_then(|e| {
+                    let prefab = e.kind == "document/prefab";
+                    s.meta(&e).ok().map(|m| (m, prefab))
+                })
+            };
+            if let Some((meta, prefab)) = chunks {
+                if prefab {
+                    let _ = self.prefab(id);
+                }
+                for (kind, sub, _) in &meta.chunks {
+                    let r = AssetRef {
+                        asset: id,
+                        sub: sub.clone(),
+                    };
+                    let _ = match *kind {
+                        KIND_MESH => self.mesh(&r).map(|_| ()),
+                        KIND_TEXTURE => self.texture(&r).map(|_| ()),
+                        KIND_ENVIRONMENT => self.environment(&r).map(|_| ()),
+                        KIND_MATERIAL => self.material(&r).map(|_| ()),
+                        KIND_CUSTOM_MATERIAL => self.custom_material(&r).map(|_| ()),
+                        KIND_ANIMATION => self.clip(&r).map(|_| ()),
+                        KIND_CLIP => self.sound(&r).map(|_| ()),
+                        KIND_SKIN => self.skin(&r).map(|_| ()),
+                        _ => Ok(()),
+                    };
+                }
+            }
+            done.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn read_prefab(&self, id: Uuid) -> Result<CookedPrefab, Vec<Diagnostic>> {
         let (entry, meta) = {
             let mut s = self.lock();
             let entry = s.index.object(id).map_err(|d| vec![d])?.clone();
