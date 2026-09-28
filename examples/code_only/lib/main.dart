@@ -107,6 +107,7 @@ class _GamePageState extends State<GamePage> {
   /// The `pause` action, read after each frame: pausing is the app's.
   void _onFrame(double dt, FramePlan plan) {
     final game = _game!;
+    game.state.loading.value = game.flow.loading;
     if (game.state.screen.value == Screen.playing && game.world.input.pressed('pause')) _setPaused(true);
   }
 
@@ -316,6 +317,16 @@ class _Panel extends StatelessWidget {
               Wrap(
                 spacing: 12,
                 children: [for (final MapEntry(key: label, value: onPressed) in actions.entries) FilledButton(onPressed: onPressed, child: Text(label))],
+              ),
+              // The level loading in the background (ADR-0038).
+              ModelBuilder<double?>(
+                value: ModelBinding.of<GameState>(context).loading,
+                builder: (_, loading, _) => loading == null
+                    ? const SizedBox.shrink()
+                    : Padding(
+                        padding: const EdgeInsets.only(top: 16),
+                        child: SizedBox(width: 240, child: LinearProgressIndicator(value: loading)),
+                      ),
               ),
             ],
           ),

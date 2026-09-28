@@ -46,4 +46,8 @@ abstract class Flow {
   }
 
   void show(Screen screen);
+
+  /// How far the place being loaded in the background is, 0 to 1, for
+  /// the app's loading bar; null when nothing loads.
+  double? get loading => null;
 }

@@ -8,7 +8,9 @@
 //   at runtime (`world.createMaterial`); nothing is read from a document.
 // - [BuildMode.scenes]: the scene documents tool/scenes.dart wrote from
 //   those specs (`package:fynkel/authoring.dart`), cooked like any scene
-//   and loaded with `scenes.transition`, as a game made in the editor is.
+//   and loaded with `scenes.transition`, as a game made in the editor is;
+//   the level from the Menu or the Results with `scenes.loadAsync`, under
+//   a loading bar (ADR-0038).
 //
 // Menu → Level → Results → Menu or Level again. `GameState.screen` follows
 // the places, so the app's overlay switches on it.
@@ -81,8 +83,28 @@ class SceneFlow extends Flow {
     Screen.results: Assets.scenes.results,
   };
 
+  SceneLoad? _level;
+
   @override
-  void show(Screen screen) => world.scenes.transition(_places[screen]!);
+  void show(Screen screen) {
+    _level?.cancel();
+    _level = null;
+    final to = _places[screen]!;
+    // From the Menu or the Results the level loads in the background
+    // while the screen stays up; a restart inside the level, and the
+    // small screens, load at the next frame.
+    if (screen == Screen.playing && state.screen.value != Screen.playing) {
+      _level = world.scenes.loadAsync(to);
+    } else {
+      world.scenes.transition(to);
+    }
+  }
+
+  @override
+  double? get loading => switch (_level) {
+        final l? when !l.isDone => l.progress,
+        _ => null,
+      };
 
   void _onScene(SceneState s) {
     if (s != SceneState.ready) return;

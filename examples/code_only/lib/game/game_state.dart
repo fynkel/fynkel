@@ -65,6 +65,10 @@ class GameState extends GameModel implements PickupSink {
   /// Set by the app (the `pause` action).
   late final paused = field(ModelValue(false));
 
+  /// The level loading in the background, 0 to 1 (the app's loading
+  /// bar); null when nothing loads.
+  late final loading = field(ModelValue<double?>(null));
+
   /// The last run's numbers, for the Results screen.
   late final lastRun = field(ModelValue<RunResult?>(null));
 

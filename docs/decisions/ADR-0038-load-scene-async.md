@@ -162,3 +162,17 @@ any load.
 5. Docs: scenes.md, hosts.md § Scenes at runtime, unity-parity.md,
    foundation.md 3.7; code_only's menu to level change uses it with a
    loading bar.
+
+## Progress
+
+All five steps done 2026-09-28:
+
+1. the engine (`Assets::preload`, the ticketed load in `fynkel_native`);
+2. the SDK (`scenes.loadAsync`, `SceneLoad`, `SceneState.loading`);
+3. the renderer warm-up (`Assets::next_warm`, `warm_budget_us`);
+4. the measurement: the reference game's Playground stopped the game
+   for 15.7 ms; loaded in the background, the longest stop is the 0.8 ms
+   activation ([benchmarks/scene_load](../../benchmarks/scene_load/README.md));
+5. the docs ([scenes.md](../scenes.md) § Loading in the background) and
+   code_only, whose level loads under a loading bar from the Menu and
+   the Results.

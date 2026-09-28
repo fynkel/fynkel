@@ -97,12 +97,24 @@ void main() {
     return game;
   }
 
-  /// Plays until the level is up.
-  Game playing(BuildMode mode) {
-    final game = load(mode)..play();
+  /// Two frames and the level is up. From the Menu the written level
+  /// loads in the background (ADR-0038): wait for that first, without
+  /// frames, so both ways run the same frames.
+  void untilPlaying(Game game) {
+    final started = DateTime.now();
+    while (game.world.scenes.loading.any((l) => !l.isReady)) {
+      expect(DateTime.now().difference(started).inSeconds, lessThan(30), reason: 'the level never loaded');
+      sleep(const Duration(milliseconds: 1));
+    }
     game.frame(dt);
     game.frame(dt);
     expect(game.state.screen.value, Screen.playing);
+  }
+
+  /// Plays until the level is up.
+  Game playing(BuildMode mode) {
+    final game = load(mode)..play();
+    untilPlaying(game);
     return game;
   }
 
@@ -122,9 +134,12 @@ void main() {
         expect(game.world.modules.has(Module.physics), isTrue);
 
         game.play();
-        game.frame(dt);
-        game.frame(dt);
-        expect(game.state.screen.value, Screen.playing);
+        if (mode == BuildMode.scenes) {
+          expect(game.flow.loading, isNotNull, reason: 'the level loads in the background');
+          expect(game.world.scenes.state, SceneState.loading);
+        }
+        untilPlaying(game);
+        expect(game.flow.loading, isNull);
         expect(game.world.find('Big coin'), isNull, reason: 'the Menu is gone');
         expect(game.world.findObjectsOfType<Collectible>(), hasLength(5));
         expect(game.state.total.value, 5);

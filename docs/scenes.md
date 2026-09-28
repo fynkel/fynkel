@@ -79,10 +79,62 @@ where no behaviour callback is running, so a behaviour can ask for the
 next level from `fixedUpdate` or a zone callback without pulling its own
 object from under itself; it returns a `Future<LoadReport>` (the report,
 or the `FynkelLoadError`). `state` is `empty | pending | ready | failed`
-(`addListener`), `current` the scene of the last replace load (the
+(`addListener`), plus `loading` while a `loadAsync` (below) is
+unfinished; `current` the scene of the last replace load (the
 startup scene after `loadProject`), `loaded` / `world.loadedScenes` what
 the world holds, `error` the last failure, `cancel()` drops a pending
 request. `LoadReport.mode` and `.scenes` say what a load did.
+
+### Loading in the background (LoadSceneAsync, ADR-0038)
+
+`world.scenes.loadAsync(id, mode:)` is Unity's `LoadSceneAsync`. The
+scene is read, and every mesh, texture, material, clip, sound and
+prefab it uses is loaded, on another thread while the game runs on. The
+old level keeps playing and a loading screen can animate. It returns a
+`SceneLoad`:
+
+```dart
+final load = world.scenes.loadAsync(level2);
+// every frame, in the loading screen:
+bar.value = load.progress; // 0 to 1
+// or wait for it:
+final report = await load.done;
+```
+
+- `progress` goes from 0 to 1. It reaches **1** when the loading is
+  done (Unity's stops at 0.9); `isReady` says the load waits to
+  activate.
+- Once ready it **activates** at the start of the next `World.frame`,
+  where `transition` runs too: the objects are made (their scripts get
+  `onCreate` in that frame) and, for a replace load, the world is taken
+  down then, not before. Everything is in memory by then, so the
+  activation reads no file.
+- `allowActivation = false` holds a ready load (a "press any key"
+  screen) until the game sets it back to true. A held load holds only
+  itself: loads asked for after it still activate (in Unity they wait).
+- Loads activate in the order they were asked for; one still loading
+  holds the loads after it.
+- `done` completes with the same `LoadReport` as `loadScene`, or with the
+  `FynkelLoadError` (a scene the cache lacks fails at activation, and
+  `scenes.error` has it). `cancel()` drops a load that has not activated
+  (`done` then completes with a `StateError`); Unity cannot cancel.
+- `isDone` is true once activated, failed or cancelled. `scenes.loading`
+  lists the loads not finished; `scenes.state` is `loading` while there
+  are any.
+- While a load runs, the renderer also puts what it loaded on the GPU,
+  a little each frame (2 ms by default, `ExtractRenderer.warm_budget_us`),
+  so the first frames of the new level upload nothing.
+
+Engine: `Assets::preload` and `Assets::next_warm` (`fynkel_assets`); ABI
+`fynkel_world_load_scene_async` (a ticket), `fynkel_world_load_progress`,
+`fynkel_world_load_activate` (the same flags and report as
+`fynkel_world_load_scene_with`), `fynkel_world_load_cancel`. Tests:
+`crates/fynkel_native/tests/load.rs`
+(`a_scene_loads_in_the_background_then_activates`, which moves the cache
+away before activating), `crates/fynkel_assets/tests/store.rs`,
+`crates/fynkel_render/tests/project.rs`
+(`the_renderer_warms_what_a_background_load_made_resident`),
+`packages/fynkel/test/scenes_test.dart`.
 
 ## Zones
 

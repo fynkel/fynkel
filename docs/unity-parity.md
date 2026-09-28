@@ -59,6 +59,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Start paused | yes | 🔧 `8d9e277` |
 | Changes during Play revert on Stop, tint | | ✅ |
 | DontDestroyOnLoad objects | their own scene in the Hierarchy | 🔧 ADR-0037: a **DontDestroyOnLoad** header, last |
+| `SceneManager.LoadSceneAsync` | `AsyncOperation` | 🔧 ADR-0038: `scenes.loadAsync` → `SceneLoad` (see § On purpose) |
 
 ### Project
 
@@ -140,6 +141,13 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 - A collider made by `instantiate` or `clone` is found by queries at
   once, as in Unity; one added by `world.spawn` or `add(Collider)` is
   found from the next tick, where the command is applied (foundation 2.7).
+
+- `scenes.loadAsync` (ADR-0038) differs from `LoadSceneAsync` in three
+  ways: `progress` reaches 1 (Unity's stops at 0.9 while waiting;
+  `isReady` says it waits), a load held with `allowActivation = false`
+  holds only itself (Unity's holds every later load), and the renderer
+  uploads meshes as well as textures during the load. It can also be
+  cancelled, and `done` is a `Future`.
 
 ## Log
 

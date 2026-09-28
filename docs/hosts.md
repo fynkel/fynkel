@@ -227,10 +227,23 @@ additive; the ABI stays 1) keeps a root and its subtree across loads: a
 replace load and the unload of its scene leave it, and what it uses
 stays resident; `INVALID_ARGUMENT` for an entity not live or with a
 parent. A load report's `persistent` counts the kept roots it left
-standing. The reference
+standing. `fynkel_world_load_scene_async(world, cache, scene_id,
+out_ticket)` (ADR-0038, additive) reads the scene and makes its closure
+resident on a background thread that holds only the asset store;
+`fynkel_world_load_progress(world, ticket, out_state, out_progress)`
+answers `FYNKEL_LOAD_LOADING` (0) with the share loaded, `READY` (1) with
+1, or `FAILED` (2); `fynkel_world_load_activate(world, ticket, flags)`
+spawns it from memory with `fynkel_world_load_scene_with`'s flags and
+report (a failed load is `LOAD_FAILED` with its diagnostics; the ticket
+is spent either way); `fynkel_world_load_cancel(world, ticket)` drops
+it. A load still loading, an unknown ticket or unknown flags are
+`INVALID_ARGUMENT`; destroying the world stops its loads. A renderer
+sharing the world's store uploads what the load made resident within
+its warm budget. The reference
 tests: `crates/fynkel_native/tests/load.rs`
 (`scenes_stack_unload_replace_and_zones_fire_through_the_abi`,
-`dont_destroy_on_load_through_the_abi`),
+`dont_destroy_on_load_through_the_abi`,
+`a_scene_loads_in_the_background_then_activates`),
 `crates/fynkel_core/tests/scenes.rs`; the contract [scenes.md](scenes.md).
 
 ### Data assets at runtime (ADR-0027)
