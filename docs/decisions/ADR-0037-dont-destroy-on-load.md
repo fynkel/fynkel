@@ -1,6 +1,6 @@
 # ADR-0037: Objects that survive a scene change (DontDestroyOnLoad)
 
-**Status:** Proposed 2026-09-28 (docs/foundation.md 3.6)  
+**Status:** Accepted 2026-09-28 (the user agreed; docs/foundation.md 3.6)  
 **Date:** 2026-09-28  
 **Related:** ADR-0021 (Play in the editor), ADR-0035 (object references), ADR-0036 (everything is an Object), [scenes.md](../scenes.md) § Loading
 
@@ -107,6 +107,13 @@ to Scene is not offered for them, because they are in no scene.
   the same set.
 - Marking objects persistent in a document. In Unity this is always
   done from code.
+- **Persistent objects in Project Settings** (Godot's autoloads): a list
+  of prefabs the game makes once at startup and never destroys. It
+  answers Unity's duplicate problem — a manager marked DontDestroyOnLoad
+  in the Menu scene gets a second copy each time the Menu loads again,
+  and every project writes "if one exists, destroy myself" to stop it.
+  Agreed with the user as a later ADR; `dontDestroyOnLoad` stays as
+  Unity's.
 
 ## Plan
 
