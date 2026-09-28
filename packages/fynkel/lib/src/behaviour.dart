@@ -232,7 +232,7 @@ class UpdateContext {
 /// Dart gameplay logic attached to one [GameObject]. Subclass, override the
 /// callbacks you need, attach with [GameObject.addBehaviour] (or from a
 /// scene through the [BehaviourRegistry]).
-abstract class Behaviour {
+abstract class Behaviour extends Component {
   GameObject? _gameObject;
   _BehaviourSystem? _system;
   int _sequence = 0;
@@ -261,6 +261,7 @@ abstract class Behaviour {
   String? get authoredComponentId => _authoredComponent;
 
   /// The object this behaviour is attached to; throws before attachment.
+  @override
   GameObject get gameObject {
     final go = _gameObject;
     if (go == null) throw StateError('$runtimeType is not attached to a GameObject yet');
@@ -272,7 +273,12 @@ abstract class Behaviour {
   /// The world's services (current during callbacks; reachable here always).
   GameContext get context => world.context;
 
+  @override
   TransformRef get transform => gameObject.transform;
+
+  /// Attached, not destroyed, and its object alive.
+  @override
+  bool get isAlive => !_destroyed && (_gameObject?._alive ?? false);
 
   /// The object's native components (M3-07a): `get<MeshRenderer>()`,
   /// `set(light.copyWith(intensity: 0))`, `has<Camera>()`,
@@ -335,6 +341,7 @@ abstract class Behaviour {
 
   /// Removes this behaviour from its object at the next safe boundary
   /// (`onDisable` if active, then `onDestroy`). The object stays.
+  @override
   void destroy() {
     if (_destroyRequested || _system == null) return;
     _destroyRequested = true;

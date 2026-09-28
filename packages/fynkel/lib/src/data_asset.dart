@@ -30,13 +30,37 @@ class FynkelDataAsset {
 /// knows its [asset]. Every reference to one asset shares one instance
 /// for the world's life, and game code may change its fields for the run —
 /// such changes are never saved (ADR-0027 §3).
-abstract class DataAsset {
+abstract class DataAsset extends Asset {
   AssetRef? _asset;
   DataType? _dataType;
+  String? _name;
+  bool _destroyed = false;
 
   /// The asset this instance was loaded from or written to; null for one
   /// that exists only in code.
   AssetRef? get asset => _asset;
+
+  @override
+  AssetRef? get ref => _asset;
+
+  /// The asset's name (its file's, without the extension) when loaded;
+  /// the class name for one made in code. A data type may declare its own
+  /// `name` field instead.
+  @override
+  String get name => _name ?? runtimeType.toString();
+
+  /// True unless code destroyed an instance it made; a loaded one lives
+  /// for the world's life.
+  @override
+  bool get isAlive => !_destroyed;
+
+  /// Drops an instance made in code; one loaded from the project refuses
+  /// (Unity refuses to destroy an asset from a script).
+  @override
+  void destroy() {
+    if (_asset != null) throw UnsupportedError('$name is a project asset; it cannot be destroyed at runtime');
+    _destroyed = true;
+  }
 
   /// Its registered type, once the registry made it or saw it.
   DataType? get dataType => _dataType;
@@ -173,7 +197,8 @@ final class _DataAssets {
     }
     final data = (json['data'] as Map? ?? const {}).cast<String, Object?>();
     final d = world.registry.instantiateData(typeId, fields: data, version: json['version'] as int?)
-      .._asset = AssetRef(ref.asset);
+      .._asset = AssetRef(ref.asset)
+      .._name = json['name'] as String?;
     // Kept before its fields resolve: a cycle shares the instance.
     byId[ref.asset] = d;
     for (final f in type.fields) {

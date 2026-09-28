@@ -172,6 +172,16 @@ void main() {
     w.loadProject(project);
     final axeWeapon = w.data<Weapon>(const AssetRef(axe));
     expect((axeWeapon.damage, axeWeapon.dataType?.id), (1, 'test.Weapon'));
+    // A data asset is an Object (ADR-0036 §1): named after its document,
+    // alive for the world's life, and not destroyable from a script.
+    expect(axeWeapon, isA<Asset>());
+    expect((axeWeapon.ref, axeWeapon.isAlive), (const AssetRef(axe), true));
+    expect(axeWeapon.name, isNot('Weapon'));
+    expect(() => axeWeapon.destroy(), throwsUnsupportedError);
+    final made = Weapon();
+    expect((made.name, made.ref), ('Weapon', null));
+    made.destroy();
+    expect(made.isAlive, isFalse);
     expect(() => w.data<Weapon>(const AssetRef('c0000000-0000-4000-8000-0000000000ff')), throwsArgumentError);
     expect(() => w.data<Weapon>(const AssetRef('c0000000-0000-4000-8000-000000000020')), throwsArgumentError,
         reason: 'a material, not a data asset');

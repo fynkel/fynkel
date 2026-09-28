@@ -36,6 +36,7 @@ export 'native/bridge.dart' show BridgeStats, CommandLane, FramePlan, StepResult
 
 part 'behaviour.dart';
 part 'data_asset.dart';
+part 'object.dart';
 part 'object_spec.dart';
 part 'projection.dart';
 part 'scenes.dart';
@@ -2456,7 +2457,7 @@ class AudioControl {
   bool get isPlaying => state?.playing ?? false;
 }
 
-class GameObject {
+class GameObject extends FynkelObject {
   GameObject._(this.world, this._tempId, this._initial, this._name) {
     transform = TransformRef._(this);
   }
@@ -2470,6 +2471,7 @@ class GameObject {
   /// was renamed to through this handle since. Setting it renames the
   /// entity (a `fynkel.Name` write for the next tick, read-your-writes
   /// like [set]).
+  @override
   String get name => _name;
   set name(String value) => set(gen.Name(value: value));
 
@@ -2568,7 +2570,21 @@ class GameObject {
   Iterable<T> behavioursOf<T extends Behaviour>() => _behaviours.whereType<T>();
 
   bool get isPending => _entity == null;
+  @override
   bool get isAlive => _alive;
+
+  /// The first component of type [T] on this object (Unity's
+  /// `GetComponent<T>()`): the [transform] when [T] is `TransformRef` (or
+  /// `Component`, as in Unity the transform comes first), else the first
+  /// attached script of type [T].
+  T? getComponent<T extends Component>() {
+    final t = transform;
+    if (t is T) return t as T;
+    for (final b in _behaviours) {
+      if (b is T) return b as T;
+    }
+    return null;
+  }
 
   /// Runtime handle; throws while pending.
   int get entity => _requireResolved('entity');
@@ -2592,6 +2608,7 @@ class GameObject {
   }
 
   /// Queues destruction of this object and its subtree for the next tick.
+  @override
   void destroy() {
     final e = _simulationEntity('destroy');
     world._simulation.destroy(gen.DestroyCommand(entity: e));
@@ -3308,9 +3325,22 @@ enum Space { self, world }
 /// Writes go to the local transform, as
 /// [GameObject.setLocalTransform] does: shown this frame from `update` and
 /// `lateUpdate`, at the next tick from `fixedUpdate` (ADR-0008 amendment).
-class TransformRef {
+class TransformRef extends Component {
   TransformRef._(this._go);
   final GameObject _go;
+
+  @override
+  GameObject get gameObject => _go;
+
+  @override
+  TransformRef get transform => this;
+
+  @override
+  bool get isAlive => _go.isAlive;
+
+  /// Refused, as in Unity: destroy the [gameObject] instead.
+  @override
+  void destroy() => throw UnsupportedError('a transform cannot be destroyed; destroy its GameObject ("$name")');
 
   /// The local transform, whole.
   Transform get value => _go.localTransform;
