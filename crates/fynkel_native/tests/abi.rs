@@ -2498,3 +2498,51 @@ fn animator_controller_ops_events_and_queries() {
     let (s, n, _, _) = h.query(bridge::QUERY_ANIMATOR_PARAMETERS, rig);
     assert_eq!((s, n), (Status::Ok, 0));
 }
+
+/// Foundation 4.1: a panic inside the world is caught at the ABI edge,
+/// poisons the world and keeps its message for the host to report once;
+/// every later call answers `Poisoned` without running anything.
+/// `fynkel_world_debug_panic` is the way to test that path (Unity's
+/// `Utils.ForceCrash`).
+#[test]
+fn a_panic_poisons_the_world_and_keeps_its_message() {
+    let rt = fynkel_runtime_create();
+    let w = unsafe { fynkel_world_create(rt, std::ptr::null()) };
+    let message = |w| {
+        let v = unsafe { fynkel_world_panic_message(w) };
+        if v.length == 0 {
+            return String::new();
+        }
+        let b = unsafe { std::slice::from_raw_parts(v.data, v.length as usize) };
+        String::from_utf8(b.to_vec()).unwrap()
+    };
+    assert_eq!(message(w), "", "no panic yet");
+    assert_eq!(unsafe { fynkel_world_is_poisoned(w) }, 0);
+
+    assert_eq!(unsafe { fynkel_world_debug_panic(w) }, Status::Panic);
+    assert_eq!(unsafe { fynkel_world_is_poisoned(w) }, 1);
+    assert!(
+        message(w).contains("fynkel_world_debug_panic"),
+        "{}",
+        message(w)
+    );
+
+    let mut plan = FynkelFramePlan::default();
+    assert_eq!(
+        unsafe { fynkel_world_begin_frame(w, 1.0 / 60.0, &mut plan) },
+        Status::Poisoned
+    );
+    assert_eq!(
+        unsafe { fynkel_world_debug_panic(w) },
+        Status::Poisoned,
+        "nothing runs after"
+    );
+    assert!(
+        message(w).contains("fynkel_world_debug_panic"),
+        "the first panic's message stays"
+    );
+    unsafe {
+        fynkel_world_destroy(w);
+        fynkel_runtime_destroy(rt);
+    }
+}

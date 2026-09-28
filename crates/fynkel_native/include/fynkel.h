@@ -481,6 +481,12 @@ float fynkel_world_alpha(const FynkelWorld* world);
 /* Non-zero once a panic or fatal error was caught; every mutating call then
  * returns FYNKEL_STATUS_POISONED. */
 int32_t fynkel_world_is_poisoned(const FynkelWorld* world);
+/* The message (UTF-8) of the panic that poisoned the world, empty when
+ * none did (foundation 4.1); the host reports it once and stops. */
+FynkelBufferView fynkel_world_panic_message(const FynkelWorld* world);
+/* Panics inside the world on purpose (Unity's Utils.ForceCrash), to test
+ * a host's crash path: FYNKEL_STATUS_PANIC and the world is poisoned. */
+FynkelStatus fynkel_world_debug_panic(FynkelWorld* world);
 
 /* Cooked scenes (blueprint §6, §7; M3-03). A host reads the cache
  * `fynkel cook` wrote and never a source document. `cache_utf8` (UTF-8, not

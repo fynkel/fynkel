@@ -67,6 +67,9 @@ pub struct FynkelWorld {
     /// Action → bindings the user chose over the project's
     /// (`fynkel_world_bind_actions`, M3-12), re-applied after every load.
     rebinds: std::collections::BTreeMap<String, Vec<String>>,
+    /// The message of the panic that poisoned the world (foundation 4.1),
+    /// for the host to report once.
+    panic: Option<String>,
     /// Scratch of `fynkel_world_project`, kept for its capacity (M3-13).
     anchors: Vec<fynkel_core::schema::ProjectionAnchorRecord>,
     points: Vec<fynkel_core::schema::ProjectedPointRecord>,
@@ -223,6 +226,7 @@ fn guarded(world: *mut FynkelWorld, f: impl FnOnce(&mut FynkelWorld) -> Status) 
                 .or_else(|| payload.downcast_ref::<String>().cloned())
                 .unwrap_or_else(|| "non-string panic".into());
             log::error!("fynkel_native: panic caught at ABI edge, world poisoned: {msg}");
+            w.panic.get_or_insert(msg);
             w.inner.poison();
             Status::Panic
         }
@@ -247,6 +251,7 @@ impl FynkelWorld {
             loads: std::collections::HashMap::new(),
             next_ticket: 0,
             rebinds: std::collections::BTreeMap::new(),
+            panic: None,
             anchors: Vec::new(),
             points: Vec::new(),
             stats: Counters::default(),
@@ -1283,4 +1288,30 @@ pub unsafe extern "C" fn fynkel_world_is_poisoned(world: *const FynkelWorld) -> 
         .as_ref()
         .map(|w| w.inner.is_poisoned() as i32)
         .unwrap_or(1)
+}
+
+/// The message (UTF-8) of the panic that poisoned the world, empty when
+/// none did (foundation 4.1): the first one; nothing runs after it.
+///
+/// # Safety
+/// `world` live or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_panic_message(world: *const FynkelWorld) -> FynkelBufferView {
+    match world.as_ref().and_then(|w| w.panic.as_deref()) {
+        Some(m) => FynkelBufferView::of(m.as_bytes()),
+        None => FynkelBufferView::empty(),
+    }
+}
+
+/// Panics inside the world on purpose, as Unity's `Utils.ForceCrash`
+/// does, so a host can test its crash path: `Panic`, and the world is
+/// poisoned. `Poisoned` when it already is.
+///
+/// # Safety
+/// `world` live or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_debug_panic(world: *mut FynkelWorld) -> Status {
+    guarded(world, |_| {
+        panic!("fynkel_world_debug_panic: a panic asked for by the host")
+    })
 }
