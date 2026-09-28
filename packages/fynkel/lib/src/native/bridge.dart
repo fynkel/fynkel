@@ -11,6 +11,7 @@ import 'package:ffi/ffi.dart';
 import '../../generated/schema.g.dart' as gen;
 import '../wire/buffers.dart';
 import '../wire/support.dart' show WireStrings;
+import '../diagnostics.dart' show FynkelBridgeError, FynkelPanicError;
 import 'fynkel_bindings.g.dart';
 
 export 'fynkel_bindings.g.dart' show FynkelStatus;
@@ -204,6 +205,26 @@ class NativeWorld {
     ffiCalls++;
     return fynkel_world_is_poisoned(_w) != 0;
   }
+
+  /// `fynkel_world_panic_message`: why the world is poisoned; null when
+  /// it is not, or no panic said (foundation 4.1).
+  String? get panicMessage {
+    ffiCalls++;
+    final v = fynkel_world_panic_message(_w);
+    if (v.length == 0) return isPoisoned ? '(no message)' : null;
+    return utf8.decode(v.data.asTypedList(v.length), allowMalformed: true);
+  }
+
+  /// `fynkel_world_debug_panic`: panics inside the world on purpose.
+  void debugPanic() => _check(fynkel_world_debug_panic(_w), 'debug_panic');
+
+  /// The error for a call that answered [s]: a [FynkelPanicError] with
+  /// the panic's message when the world is poisoned, a
+  /// [FynkelBridgeError] otherwise.
+  FynkelBridgeError failure(String op, FynkelStatus s) =>
+      s == FynkelStatus.FYNKEL_STATUS_POISONED || s == FynkelStatus.FYNKEL_STATUS_PANIC
+          ? FynkelPanicError(op, panicMessage ?? '(no message)')
+          : FynkelBridgeError('$op: $s');
 
   int get tick {
     ffiCalls++;
@@ -763,7 +784,7 @@ class NativeWorld {
   }
 
   void _check(FynkelStatus s, String op) {
-    if (s != FynkelStatus.FYNKEL_STATUS_OK) throw StateError('fynkel_world_$op: $s');
+    if (s != FynkelStatus.FYNKEL_STATUS_OK) throw failure('fynkel_world_$op', s);
   }
 
   void dispose() {

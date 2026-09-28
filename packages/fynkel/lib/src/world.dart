@@ -289,6 +289,15 @@ class World {
   int get tick => _native.tick;
   double get alpha => _native.alpha;
   bool get isPoisoned => _native.isPoisoned;
+
+  /// Why the engine stopped this world ([isPoisoned]): the message of the
+  /// panic it caught; null while it runs (foundation 4.1).
+  String? get panicMessage => _native.isPoisoned ? _native.panicMessage : null;
+
+  /// Panics inside the engine on purpose (Unity's `Utils.ForceCrash`), to
+  /// test what a game does when the engine stops: throws the
+  /// [FynkelPanicError], and the world is poisoned for good.
+  void debugPanic() => _native.debugPanic();
   Iterable<GameObject> get objects => _byEntity.values;
 
   // ---------------------------------------------------------------- spawn
@@ -532,7 +541,7 @@ class World {
       case FynkelStatus.FYNKEL_STATUS_INVALID_ARGUMENT:
         throw ArgumentError('$call: ${describe()}');
       default:
-        throw FynkelBridgeError('$call: $status');
+        throw _native.failure(call, status);
     }
   }
 
@@ -585,7 +594,7 @@ class World {
       case FynkelStatus.FYNKEL_STATUS_INVALID_ARGUMENT:
         throw FynkelBridgeError('setMaterial: the native library has another PbrMaterial layout (rebuild it)');
       default:
-        throw FynkelBridgeError('setMaterial: $status');
+        throw _native.failure('setMaterial', status);
     }
   }
 
@@ -635,7 +644,7 @@ class World {
       case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
         throw StateError('meshes need a loaded project or scene (their asset store) — loadProject or loadScene first');
       default:
-        throw FynkelBridgeError('setMesh: $status');
+        throw _native.failure('setMesh', status);
     }
   }
 
@@ -676,7 +685,7 @@ class World {
       case FynkelStatus.FYNKEL_STATUS_INVALID_ARGUMENT:
         throw ArgumentError.value(ref, 'clip', 'the engine refused it (keys out of order or past its length?)');
       default:
-        throw FynkelBridgeError('setClip: $status');
+        throw _native.failure('setClip', status);
     }
   }
 
@@ -879,6 +888,7 @@ class World {
   /// frame's raw edges.
   FramePlan frame(double dtSeconds,
       {List<InputEvent> input = const [], void Function(int tick)? fixedUpdate, void Function()? update}) {
+    if (_native.isPoisoned) throw _native.failure('frame', FynkelStatus.FYNKEL_STATUS_POISONED);
     final t = frameTimes.._begin();
     _deferredErrors.clear(); // a frame that threw something else left them
     scenes._perform();
@@ -1069,7 +1079,7 @@ class World {
       case FynkelStatus.FYNKEL_STATUS_COMMANDS_REJECTED:
         return;
       default:
-        throw FynkelBridgeError('$op: $s');
+        throw _native.failure(op, s);
     }
   }
 
@@ -1630,7 +1640,7 @@ class World {
       case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
         throw FynkelUnloadError(report);
       default:
-        throw FynkelBridgeError('unloadScene: $status');
+        throw _native.failure('unloadScene', status);
     }
   }
 
@@ -1678,7 +1688,7 @@ class World {
         if (EditorChannel.enabled) _loadedForEditor(report, op);
         throw FynkelLoadError(report, context: op);
       default:
-        throw FynkelBridgeError('$op: $status');
+        throw _native.failure(op, status);
     }
   }
 
@@ -1988,7 +1998,7 @@ class World {
       case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
         throw FynkelInstantiateError(report);
       default:
-        throw FynkelBridgeError('instantiate: $status');
+        throw _native.failure('instantiate', status);
     }
     _entityTable = null;
     final root = attach(report.root, name: report.name, initial: transform);
@@ -2761,7 +2771,7 @@ class GameObject extends FynkelObject {
         final diagnostics = [for (final d in (json['diagnostics'] as List? ?? const [])) LoadDiagnostic.fromJson(d as Map<String, Object?>)];
         throw ArgumentError('clone of $this: ${diagnostics.map((d) => d.message).join('; ')}');
       default:
-        throw FynkelBridgeError('clone: $status');
+        throw world._native.failure('clone', status);
     }
     world._entityTable = null;
     final report = json['clone'] as Map<String, Object?>;

@@ -246,6 +246,25 @@ tests: `crates/fynkel_native/tests/load.rs`
 `a_scene_loads_in_the_background_then_activates`),
 `crates/fynkel_core/tests/scenes.rs`; the contract [scenes.md](scenes.md).
 
+### When the engine panics (foundation 4.1)
+
+A panic inside the engine is caught at the ABI edge. The call answers
+`PANIC`, the world is poisoned and every later call answers `POISONED`
+without running anything. `fynkel_world_panic_message(world)` gives the
+first panic's message (empty while the world runs), and
+`fynkel_world_debug_panic(world)` panics on purpose, as Unity's
+`Utils.ForceCrash`, so a host can test this path. In Dart a poisoned
+world throws `FynkelPanicError` (with `.panic`, the message) from
+`frame` and every other call; `world.panicMessage` and
+`world.debugPanic()` wrap the two functions. `FynkelGameView` reports
+the error once (`FlutterError.reportError`), stops its frames for good
+(a resume or the editor's Step does not start them again) and shows
+"The game stopped" with the message over the last picture. Tests:
+`crates/fynkel_native/tests/abi.rs`
+(`a_panic_poisons_the_world_and_keeps_its_message`),
+`packages/fynkel/test/sdk_test.dart`,
+`packages/fynkel_flutter/test/game_view_test.dart`.
+
 ### Data assets at runtime (ADR-0027)
 
 `fynkel_world_asset_json(world, id, out)` (additive; the ABI stays 1)

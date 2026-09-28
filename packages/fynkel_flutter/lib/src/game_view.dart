@@ -575,13 +575,21 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
 
   /// One frame of [dt] seconds: the world's frame, then the render.
   void _frame(double dt) {
+    if (_panic != null) return; // stopped for good (a Step, a resume)
     final world = widget.world;
     _frames++;
 
     final sim = _simWatch
       ..reset()
       ..start();
-    final plan = world.frame(dt, input: input.take(dt), fixedUpdate: widget.fixedUpdate);
+    final FramePlan plan;
+    try {
+      plan = world.frame(dt, input: input.take(dt), fixedUpdate: widget.fixedUpdate);
+    } on FynkelPanicError catch (e, stack) {
+      sim.stop();
+      _stopped(e, stack);
+      return;
+    }
     sim.stop();
     _simMs.add(sim.elapsedMicroseconds / 1000);
     final ft = world.frameTimes;
@@ -599,6 +607,22 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     widget.onFrame?.call(dt, plan);
     _render(world);
   }
+
+  /// The engine panicked (foundation 4.1): the world is poisoned for good,
+  /// so the frames stop, the error is reported once and the view says
+  /// why over the last picture.
+  void _stopped(FynkelPanicError error, StackTrace stack) {
+    _ticker.stop();
+    FlutterError.reportError(FlutterErrorDetails(
+      exception: error,
+      stack: stack,
+      library: 'fynkel_flutter',
+      context: ErrorDescription('while running the game; the engine stopped the world'),
+    ));
+    if (mounted) setState(() => _panic = error);
+  }
+
+  FynkelPanicError? _panic;
 
   /// The world's picture as it is now, with its gizmo lines.
   void _render(World world) {
@@ -684,7 +708,35 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       placeholder: widget.placeholder,
     );
     final overlay = widget.overlay;
+    final panic = _panic;
+    if (panic != null) {
+      return Stack(fit: StackFit.expand, children: [viewport, _Stopped(panic)]);
+    }
     if (overlay == null) return viewport;
     return Stack(fit: StackFit.expand, children: [viewport, overlay]);
   }
+}
+
+/// Over a game the engine stopped (foundation 4.1): what happened, in
+/// place of the game's own overlay.
+class _Stopped extends StatelessWidget {
+  const _Stopped(this.error);
+
+  final FynkelPanicError error;
+
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+        color: const Color(0xCC000000),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              'The game stopped: the engine panicked.\n${error.panic}',
+              textAlign: TextAlign.center,
+              textDirection: TextDirection.ltr,
+              style: const TextStyle(color: Color(0xFFFFFFFF), fontSize: 14),
+            ),
+          ),
+        ),
+      );
 }

@@ -117,6 +117,17 @@ class FynkelBridgeError extends Error {
   String toString() => 'FynkelBridgeError: $message';
 }
 
+/// The engine panicked (foundation 4.1): the world caught it, stopped and
+/// is poisoned — every later call throws this again, with the same
+/// [panic] message, and runs nothing. Dispose the world; a game view
+/// reports it once and stops its frames.
+class FynkelPanicError extends FynkelBridgeError {
+  FynkelPanicError(String op, this.panic) : super('$op: the engine panicked and the world stopped: $panic');
+
+  /// The panic's message.
+  final String panic;
+}
+
 /// One `fynkel_world_load_*` diagnostic (a document diagnostic: code
 /// `FYN-D####`/`FYN-P####`/`FYN-A####`, the file and JSON pointer when
 /// known) or an SDK one (`FYN-B####`: a behaviour the SDK could not attach).

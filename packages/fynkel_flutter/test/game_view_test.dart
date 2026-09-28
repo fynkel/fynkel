@@ -120,6 +120,55 @@ void main() {
     expect(controller.state, ViewportState.detached);
   });
 
+  testWidgets('an engine panic is reported once, the frames stop and the view says why (foundation 4.1)', (tester) async {
+    final world = World.create();
+    addTearDown(world.dispose);
+    final controller = FynkelViewportController(placeholders: false);
+    addTearDown(controller.dispose);
+    final frames = <FramePlan>[];
+    final view = GlobalKey<FynkelGameViewState>();
+    final reported = <FlutterErrorDetails>[];
+    final previous = FlutterError.onError;
+    FlutterError.onError = reported.add;
+    addTearDown(() => FlutterError.onError = previous);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SizedBox(
+          width: 100,
+          height: 50,
+          child: FynkelGameView(key: view, world: world, controller: controller, onFrame: (dt, plan) => frames.add(plan)),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    for (var i = 0; i < 3; i++) {
+      await tester.pump(const Duration(microseconds: 16667));
+    }
+    expect(frames, isNotEmpty);
+
+    expect(world.debugPanic, throwsA(isA<FynkelPanicError>()));
+    final before = frames.length;
+    for (var i = 0; i < 60; i++) {
+      await tester.pump(const Duration(microseconds: 16667));
+    }
+    // A pause and a resume (a pause menu, the window hidden and shown)
+    // do not start it again.
+    view.currentState!.setPaused(true);
+    await tester.pump(const Duration(microseconds: 16667));
+    view.currentState!.setPaused(false);
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(microseconds: 16667));
+    }
+    FlutterError.onError = previous;
+    expect(frames.length, before, reason: 'no frame after the panic');
+    expect(reported, hasLength(1), reason: 'reported once, not 60 times a second');
+    expect(reported.single.exception, isA<FynkelPanicError>());
+    expect(find.textContaining('The game stopped'), findsOneWidget);
+    expect(find.textContaining('fynkel_world_debug_panic'), findsOneWidget);
+  });
+
   testWidgets('audio: true opens the device (or reports none), suspends with the lifecycle and closes', (tester) async {
     final world = World.create();
     addTearDown(world.dispose);

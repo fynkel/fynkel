@@ -92,7 +92,7 @@ What every script touches. Most of it is `packages/fynkel`.
 
 | | Sev | Unity | Fynkel today | Status |
 |---|---|---|---|---|
-| 4.1 | C | A crash is reported once | After a Rust panic the world is poisoned and `beginFrame` throws every frame, forever (~60 exceptions a second, no render); `FynkelGameView._frame` has no try/catch | ❌ |
+| 4.1 | C | A crash is reported once | Was: after a Rust panic `beginFrame` threw a bare `StateError`; the throw killed the view's `Ticker`, so the game froze with no message, and every resume or editor Step threw and reported again (the failing test showed a second report; the "60 a second" of the audit does not happen, the ticker dies on the first). Now the world keeps the panic's message (`fynkel_world_panic_message`, `fynkel_world_debug_panic` to test it, both additive); Dart throws `FynkelPanicError` with it from every call; `FynkelGameView` reports it once, stops for good and shows "The game stopped" with the message | 🔧 |
 | 4.2 | C | A destroyed object throws | After `World.dispose`, `_snapshot` still points into freed native memory: a transform read reads freed memory | ❌ |
 | 4.3 | C | — | `platform/apple`'s 22 `extern "C"` functions have no `catch_unwind` (and `lock().unwrap()`): a panic there aborts the app | ❌ |
 | 4.4 | I | — | The snapshot grows with every handle Dart ever touched (subscribed on `attach`/`find`, never dropped, 88 B each per tick); `step()` walks every GameObject | ❌ |

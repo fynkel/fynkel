@@ -380,6 +380,23 @@ external double fynkel_world_alpha(ffi.Pointer<FynkelWorld> world);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FynkelWorld>)>()
 external int fynkel_world_is_poisoned(ffi.Pointer<FynkelWorld> world);
 
+/// The message (UTF-8) of the panic that poisoned the world, empty when
+/// none did (foundation 4.1); the host reports it once and stops.
+@ffi.Native<FynkelBufferView Function(ffi.Pointer<FynkelWorld>)>()
+external FynkelBufferView fynkel_world_panic_message(
+  ffi.Pointer<FynkelWorld> world,
+);
+
+/// Panics inside the world on purpose (Unity's Utils.ForceCrash), to test
+/// a host's crash path: FYNKEL_STATUS_PANIC and the world is poisoned.
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<FynkelWorld>)>(
+  symbol: 'fynkel_world_debug_panic',
+)
+external int _fynkel_world_debug_panic(ffi.Pointer<FynkelWorld> world);
+
+FynkelStatus fynkel_world_debug_panic(ffi.Pointer<FynkelWorld> world) =>
+    FynkelStatus.fromValue(_fynkel_world_debug_panic(world));
+
 /// Cooked scenes (blueprint §6, §7; M3-03). A host reads the cache
 /// `fynkel cook` wrote and never a source document. `cache_utf8` (UTF-8, not
 /// NUL-terminated) is the cache directory (`<project>/.fynkel/cache`).

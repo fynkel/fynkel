@@ -252,4 +252,21 @@ void main() {
     expect(() => w.loadProject('/nonexistent'), throwsA(isA<FynkelLoadError>()));
     expect(w.isPoisoned, isFalse);
   });
+
+  test('a panic in the world is a FynkelPanicError with its message, and the world stays stopped (foundation 4.1)', () {
+    final w = World.create(library: lib);
+    addTearDown(w.dispose);
+    w.spawn(name: 'Box');
+    w.frame(1 / 60);
+    expect(w.panicMessage, isNull);
+
+    final panic = isA<FynkelPanicError>().having((e) => e.panic, 'panic', contains('fynkel_world_debug_panic'));
+    expect(w.debugPanic, throwsA(panic));
+    expect(w.isPoisoned, isTrue);
+    expect(w.panicMessage, contains('fynkel_world_debug_panic'));
+    // Every later call says why, not a bare status.
+    expect(() => w.frame(1 / 60), throwsA(panic));
+    expect(() => w.frame(1 / 60), throwsA(panic));
+    expect(w.debugPanic, throwsA(panic));
+  });
 }
