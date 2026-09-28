@@ -1402,3 +1402,72 @@ fn shader_files_are_checked_and_materials_use_them() {
         .unwrap()
         .contains("a float = 2 range(0, 1)"));
 }
+
+/// ADR-0039: `persistentObjects` lists prefabs the game makes once at
+/// start. Each entry needs a prefab and a name no other entry uses
+/// (`FYN-P0020`); the name is an identifier (the schema), since codegen
+/// turns it into an accessor.
+#[test]
+fn persistent_objects_name_prefabs_once() {
+    let t = Temp::new("persistent");
+    let prefab = "c0000000-0000-4000-8000-000000000040";
+    let entry =
+        |name: &str, asset: &str| serde_json::json!({ "name": name, "prefab": { "asset": asset } });
+    t.edit_project(|v| {
+        v["persistentObjects"] =
+            serde_json::json!([entry("GameManager", prefab), entry("Music", prefab)]);
+    });
+    assert!(t.codes().is_empty(), "{:?}", t.codes());
+    let project = Project::read(&t.dir).unwrap();
+    let names: Vec<_> = project
+        .persistent_objects
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert_eq!(names, ["GameManager", "Music"]);
+    assert_eq!(project.persistent_objects[0].prefab.to_string(), prefab);
+
+    // The same name twice.
+    t.edit_project(|v| v["persistentObjects"][1]["name"] = "GameManager".into());
+    assert_eq!(
+        t.codes(),
+        [(
+            "FYN-P0020".to_string(),
+            Some("/persistentObjects/1/name".to_string())
+        )]
+    );
+    // A prefab that is not there, then an asset that is not a prefab.
+    t.edit_project(|v| {
+        v["persistentObjects"][1]["name"] = "Music".into();
+        v["persistentObjects"][1]["prefab"]["asset"] =
+            "c0000000-0000-4000-8000-0000000000ff".into();
+    });
+    assert_eq!(
+        t.codes(),
+        [(
+            "FYN-P0020".to_string(),
+            Some("/persistentObjects/1/prefab/asset".to_string())
+        )]
+    );
+    let scene = "c0000000-0000-4000-8000-000000000030";
+    t.edit_project(|v| v["persistentObjects"][1]["prefab"]["asset"] = scene.into());
+    assert_eq!(
+        t.codes(),
+        [(
+            "FYN-P0020".to_string(),
+            Some("/persistentObjects/1/prefab/asset".to_string())
+        )]
+    );
+    // A name that is not an identifier is the schema's.
+    t.edit_project(|v| {
+        v["persistentObjects"][1]["prefab"]["asset"] = prefab.into();
+        v["persistentObjects"][1]["name"] = "game manager".into();
+    });
+    assert!(
+        t.codes()
+            .iter()
+            .any(|(_, p)| p.as_deref() == Some("/persistentObjects/1/name")),
+        "{:?}",
+        t.codes()
+    );
+}

@@ -302,6 +302,14 @@ impl LayersAndTags {
     }
 }
 
+/// One `persistentObjects` entry (ADR-0039): a prefab the game makes once
+/// when the project loads, named `name`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PersistentObject {
+    pub name: String,
+    pub prefab: AssetRef,
+}
+
 /// Typed view of `fynkel.project.json`.
 #[derive(Clone, Debug)]
 pub struct Project {
@@ -320,6 +328,9 @@ pub struct Project {
     /// `None` = every built-in component type.
     pub components: Option<Vec<ComponentEntry>>,
     pub targets: Vec<Target>,
+    /// `persistentObjects` in list order (ADR-0039); entries the schema
+    /// refuses are left out.
+    pub persistent_objects: Vec<PersistentObject>,
     /// The game's Fynkel packages and the types they declare (ADR-0029),
     /// found by [`Project::read`]; none for a project built from a
     /// document alone.
@@ -451,6 +462,37 @@ impl Project {
                         &mut diags,
                     ),
                 }
+            }
+        }
+
+        let mut persistent_objects = Vec::new();
+        if let Some(list) = root.get("persistentObjects") {
+            match list.as_array() {
+                Some(items) => {
+                    for (i, item) in items.iter().enumerate() {
+                        let name = item.get("name").and_then(|n| n.as_str());
+                        let prefab = item
+                            .get("prefab")
+                            .and_then(|n| n.as_object())
+                            .and_then(as_asset_ref);
+                        match (name, prefab) {
+                            (Some(name), Some(prefab)) => persistent_objects.push(PersistentObject {
+                                name: name.to_string(),
+                                prefab,
+                            }),
+                            _ => malformed(
+                                &format!("/persistentObjects/{i}"),
+                                "a persistent object is { \"name\": \"<Name>\", \"prefab\": { \"asset\": \"<uuid>\" } }",
+                                &mut diags,
+                            ),
+                        }
+                    }
+                }
+                None => malformed(
+                    "/persistentObjects",
+                    "persistentObjects must be a list",
+                    &mut diags,
+                ),
             }
         }
 
@@ -612,6 +654,7 @@ impl Project {
             modules,
             components,
             targets,
+            persistent_objects,
             packages: Default::default(),
             read_diagnostics: diags,
         }
@@ -713,6 +756,21 @@ impl Project {
     pub fn validate_semantics(&self) -> Vec<Diagnostic> {
         let root = &self.document.root;
         let mut out = Vec::new();
+        for (i, p) in self.persistent_objects.iter().enumerate() {
+            if self.persistent_objects[..i]
+                .iter()
+                .any(|q| q.name == p.name)
+            {
+                out.push(anchor(
+                    root,
+                    Diagnostic::error(
+                        Code::PERSISTENT_OBJECT,
+                        format!("persistentObjects: {:?} is used twice", p.name),
+                    ),
+                    &format!("/persistentObjects/{i}/name"),
+                ));
+            }
+        }
         if let Some(q) = &self.quality {
             if !q.profiles.iter().any(|p| p.name == q.default) {
                 out.push(anchor(
@@ -870,6 +928,29 @@ impl Project {
                     "/startupScene/asset",
                 )),
             },
+        }
+        for (i, p) in self.persistent_objects.iter().enumerate() {
+            let problem = match db.resolve(&p.prefab) {
+                Ok(r) => {
+                    let prefab = r.entry.kind == AssetKind::Document(DocumentKind::Prefab)
+                        || r.sub.as_ref().is_some_and(|(name, _)| name == "prefab");
+                    (!prefab).then(|| {
+                        format!("{} ({}) is not a prefab", r.entry.path, r.entry.kind.name())
+                    })
+                }
+                Err(d) => Some(d.message),
+            };
+            if let Some(problem) = problem {
+                out.push(anchor(
+                    root,
+                    Diagnostic::error(
+                        Code::PERSISTENT_OBJECT,
+                        format!("persistentObjects {:?}: {problem}", p.name),
+                    )
+                    .with_id(p.prefab.to_string()),
+                    &format!("/persistentObjects/{i}/prefab/asset"),
+                ));
+            }
         }
         if let Some(entries) = &self.components {
             for e in entries {
@@ -1731,6 +1812,9 @@ pub fn describe_json(
         })).collect::<Vec<_>>()),
         "targets": project.targets.iter().map(|t| serde_json::json!({
             "name": t.name, "enabled": t.enabled, "profile": t.profile,
+        })).collect::<Vec<_>>(),
+        "persistentObjects": project.persistent_objects.iter().map(|p| serde_json::json!({
+            "name": p.name, "prefab": p.prefab.to_string(),
         })).collect::<Vec<_>>(),
         "assetCount": db.map(|db| db.len()),
         "lock": lock.map(|l| serde_json::to_value(l).expect("lock serializes")),

@@ -66,11 +66,33 @@
       "default": {},
       "propertyNames": { "enum": ["macos", "ios", "android", "windows", "linux", "web"] },
       "additionalProperties": { "$ref": "#/$defs/target" }
+    },
+    "persistentObjects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/persistentObject" },
+      "default": [],
+      "description": "Prefabs the game makes once when the project loads, before the startup scene, and never destroys on a scene load (ADR-0039, Godot's autoloads): a manager or a music player that exists whichever scene Play starts in. Made in list order; `World.persistentObject(name)` finds one. Names are unique (FYN-P0020)."
     }
   },
   "patternProperties": { "^x-": true },
   "unevaluatedProperties": false,
   "$defs": {
+    "persistentObject": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "description": "The object's name, and the name code finds it by; an identifier, since codegen turns it into an accessor."
+        },
+        "prefab": {
+          "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef",
+          "description": "The prefab made (a `.prefab.json`, or a model's `sub: \"prefab\"`)."
+        }
+      },
+      "required": ["name", "prefab"],
+      "additionalProperties": false
+    },
     "modules": {
       "type": "object",
       "properties": {

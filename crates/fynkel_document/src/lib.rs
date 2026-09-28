@@ -60,8 +60,8 @@ pub use migrate::{migrate, migrate_with, Migrated, Migration, Migrations, Rewrit
 pub use physics_material::PhysicsMaterialDocument;
 pub use prefab::{expand, Expanded, Prefab, PrefabLibrary};
 pub use project::{
-    validate_project, validate_project_with, Lock, NoSourcePrefabs, Project, ProjectReport,
-    SourcePrefabs,
+    validate_project, validate_project_with, Lock, NoSourcePrefabs, PersistentObject, Project,
+    ProjectReport, SourcePrefabs,
 };
 pub use rig::Rig;
 pub use runtime::{describe, AuthoredBehaviour, DescribedScene};
