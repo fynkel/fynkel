@@ -643,3 +643,57 @@ fn variants_flatten_through_chains_and_refuse_themselves() {
         Some("/entities/50000000-0000-4000-8000-0000000000a9/prefab/asset")
     );
 }
+
+/// Foundation 3.8, as Unity: an override whose target is gone (the prefab
+/// lost the object or the component) is kept in the file, skipped with a
+/// `D0403` warning, and the instance still expands with the rest applied.
+#[test]
+fn a_stale_override_is_skipped_and_the_instance_still_expands() {
+    let schemas = schemas();
+    let lib = library();
+    let path = fixtures().join("prefab/stale_overrides.scene.json");
+    let scene = Scene::from_document(Document::read(&path, None).unwrap());
+    let expanded = expand(&scene, &lib, &schemas);
+    assert!(!expanded.has_errors(), "{:#?}", expanded.diagnostics);
+    assert_eq!(expanded.diagnostics.len(), 2);
+    assert_eq!(expanded.instances.len(), 1, "the instance is expanded");
+
+    let out = expanded.scene();
+    let u = |s: &str| Uuid::parse_str(s).unwrap();
+    let anchor = u("20000000-0000-4000-8000-0000000000a5");
+    let root = out.entity(anchor).unwrap();
+    let renderer = root
+        .components
+        .iter()
+        .find(|c| c.type_id == "fynkel.MeshRenderer")
+        .unwrap();
+    assert_eq!(
+        renderer.data.get("visible").and_then(|v| v.as_bool()),
+        Some(false)
+    );
+    let barrel = out
+        .entity(derive_id(
+            u("20000000-0000-4000-8000-0000000000e5"),
+            u("10000000-0000-4000-8000-0000000000b2"),
+        ))
+        .unwrap();
+    let position = barrel.components[0]
+        .data
+        .get("position")
+        .unwrap()
+        .to_serde();
+    assert_eq!(position, serde_json::json!([0, 2, 0]));
+    // The file keeps what it had: nothing rewrites a stale override away.
+    assert_eq!(
+        scene
+            .instances()
+            .next()
+            .unwrap()
+            .prefab
+            .as_ref()
+            .unwrap()
+            .overrides
+            .len(),
+        4
+    );
+}

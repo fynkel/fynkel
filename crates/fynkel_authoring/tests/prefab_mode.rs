@@ -433,8 +433,9 @@ fn broken_and_missing_prefabs_are_shown_and_left_alone() {
     let h = s.open_document(MAIN_SCENE).unwrap();
     let text = copy.read(MAIN_SCENE);
 
-    // An override on an entity the prefab does not have: the instance
-    // keeps its data, the query says why it does not expand.
+    // An override on an entity the prefab does not have (foundation 3.8,
+    // as Unity): an unused override — kept, not applied, marked for
+    // cleanup with a D0403 warning; the rest of the instance expands.
     apply(
         &mut s,
         h,
@@ -443,16 +444,44 @@ fn broken_and_missing_prefabs_are_shown_and_left_alone() {
             "field": "cast_shadows", "value": true } }]),
     );
     let v = instance(&s, h, CRATE_A);
-    assert_eq!(v["expanded"], false);
-    assert_eq!(v["entities"], json!([]));
-    assert_eq!(v["prefab"]["name"], "Crate", "the prefab itself is known");
+    assert_eq!(v["expanded"], true, "{:#}", v["diagnostics"]);
+    assert_eq!(v["entities"][0]["id"], CRATE_A);
     assert_eq!(v["overrides"].as_array().unwrap().len(), 3);
     assert_eq!(v["overrides"][2]["entityId"], Value::Null);
+    assert_eq!(v["overrides"][2]["unused"], true);
+    assert_eq!(v["overrides"][0]["unused"], false);
     assert_eq!(v["diagnostics"][0]["code"], "FYN-D0403");
+    assert_eq!(v["diagnostics"][0]["severity"], "warning");
     assert_eq!(
         v["diagnostics"][0]["pointer"],
         format!("/entities/{CRATE_A}/prefab/overrides/2")
     );
+    // Reverting it by index removes it: the list is clean again.
+    apply(
+        &mut s,
+        h,
+        json!([{ "command": "revertPrefabOverride", "entity": CRATE_A, "index": 2 }]),
+    );
+    let v = instance(&s, h, CRATE_A);
+    assert_eq!(v["overrides"].as_array().unwrap().len(), 2);
+    assert_eq!(v["diagnostics"], json!([]));
+    s.undo(h).unwrap();
+    s.undo(h).unwrap();
+
+    // An override whose value does not fit the component: the instance
+    // keeps its data, the query says why it does not expand.
+    apply(
+        &mut s,
+        h,
+        json!([{ "command": "setPrefabOverride", "entity": CRATE_A, "override": {
+            "op": "setField", "entity": CRATE_LOCAL, "component": CRATE_LOCAL_RENDERER,
+            "field": "cast_shadows", "value": "yes" } }]),
+    );
+    let v = instance(&s, h, CRATE_A);
+    assert_eq!(v["expanded"], false);
+    assert_eq!(v["entities"], json!([]));
+    assert_eq!(v["prefab"]["name"], "Crate", "the prefab itself is known");
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0404");
     // Unpacking it is refused with the same diagnostic; nothing changes.
     let before = s.state_json(h).unwrap()["revision"].clone();
     let r = s
@@ -464,7 +493,7 @@ fn broken_and_missing_prefabs_are_shown_and_left_alone() {
     assert_eq!(r["ok"], false);
     let d = &r["mutations"][0]["diagnostics"][0];
     assert_eq!(d["code"], "FYN-E0004");
-    assert_eq!(d["related"][0]["code"], "FYN-D0403");
+    assert_eq!(d["related"][0]["code"], "FYN-D0404");
     assert_eq!(s.state_json(h).unwrap()["revision"], before);
     s.undo(h).unwrap();
 

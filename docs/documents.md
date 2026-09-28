@@ -402,7 +402,9 @@ instance's `children`, the children the scene added after them; the new
 entities follow the instance in document order, and the `prefab` key is
 gone from the result, which is a plain scene (`Expanded::scene()`).
 Overrides apply in order; a target that does not exist (or no longer exists)
-is `D0403`, an op whose result would not validate against the component
+is `D0403`, a **warning**: as Unity's unused override, the op is kept in the
+file and skipped, and the rest of the instance expands (foundation 3.8); a
+new variant made with one is refused. An op whose result would not validate against the component
 schema (or a duplicate unique component) is `D0404`, a malformed op is
 `D0407`. An unknown prefab is `D0401`; the whole instance is skipped and the
 instance entity kept (without components). `PrefabLibrary::scan(dir)` collects every `*.prefab.json`
@@ -639,9 +641,11 @@ window, never running game code and never reading a cooked cache
   then disk, imported hierarchies from the source's chunk or the rig — so
   `prefab.open`/`handle` say when the instance follows a tab; a prefab
   that is not available (`FYN-D0401`) or an override that does not apply
-  (`D0403`/`D0404`/`D0407`) is `expanded: false` with the diagnostics and
+  (`D0404`/`D0407`) is `expanded: false` with the diagnostics and
   no entities — the instance keeps its data and nothing is rewritten; not an
-  instance `FYN-E0008`, unknown entity `FYN-E0002`; `crates/fynkel_authoring/src/instance.rs`,
+  instance `FYN-E0008`, unknown entity `FYN-E0002`; an override whose target
+  is gone is listed with `unused: true` next to its `D0403` warning, the
+  instance expanded (foundation 3.8); `crates/fynkel_authoring/src/instance.rs`,
   `tests/prefab_mode.rs`), `commands`.
 - **`rescan(paths)`** re-reads only the files a watcher (or an operation)
   names — `AssetDatabase::update` (M4-05): a source or its sidecar names the

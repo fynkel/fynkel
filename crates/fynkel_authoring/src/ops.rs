@@ -591,12 +591,14 @@ impl AuthoringSession {
             &library,
             &project.schemas,
         );
-        if expanded.has_errors() {
+        // A new variant starts clean: an override that would be unused
+        // (a D0403 warning at load) is refused too.
+        if !expanded.diagnostics.is_empty() {
             let mut d = invalid(format!(
                 "{OP}: the variant of {} would not expand",
                 found.document.envelope.name
             ));
-            for e in expanded.diagnostics.into_iter().filter(|d| d.is_error()) {
+            for e in expanded.diagnostics {
                 d = d.with_related(e);
             }
             return Err(d);

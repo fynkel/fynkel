@@ -749,6 +749,16 @@ pub fn expand(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Ex
 }
 
 /// [`expand`] against a library already flattened.
+/// A `D0403` override as Unity's *unused override*: a warning, the rest of
+/// the instance expanded without it, the file untouched (foundation 3.8).
+fn unused(mut d: Diagnostic) -> Diagnostic {
+    d.severity = fynkel_contracts::Severity::Warning;
+    d.message = format!("{} (an unused override: kept, not applied)", d.message);
+    d.with_suggestion(
+        "remove the unused overrides from the instance (the editor's Overrides list), or revert it",
+    )
+}
+
 fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Expanded {
     let src = &scene.document.root;
     let mut diagnostics = Vec::new();
@@ -860,11 +870,10 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
             let entity_id = o.op.entity();
             let exists = work.entity(entity_id).is_some();
             if !exists && !matches!(o.op, OverrideOp::AddObject { .. }) {
-                diagnostics.push(fail(
+                diagnostics.push(unused(fail(
                     Code::PREFAB_OVERRIDE_TARGET,
                     format!("{}: entity {entity_id} is not in the prefab", o.op.name()),
-                ));
-                ok = false;
+                )));
                 continue;
             }
             let result: Result<(), Diagnostic> = match &o.op {
@@ -1026,9 +1035,15 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
                     Ok(())
                 }
             };
-            if let Err(d) = result {
-                diagnostics.push(d);
-                ok = false;
+            match result {
+                // As in Unity: a target the prefab no longer has leaves an
+                // unused override, kept in the file and skipped (3.8).
+                Err(d) if d.code == Code::PREFAB_OVERRIDE_TARGET => diagnostics.push(unused(d)),
+                Err(d) => {
+                    diagnostics.push(d);
+                    ok = false;
+                }
+                Ok(()) => {}
             }
         }
         // Touched component data must still fit its schema (in op order).

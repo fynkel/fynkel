@@ -279,7 +279,8 @@ final class ExpansionOverride {
         componentId = json['componentId'] as String?,
         componentType = json['componentType'] as String?,
         field = json['field'] as String?,
-        pointer = json['pointer'] as String? ?? '';
+        pointer = json['pointer'] as String? ?? '',
+        unused = json['unused'] == true;
 
   final Map<String, Object?> json;
 
@@ -302,6 +303,10 @@ final class ExpansionOverride {
   final String? field;
   final String pointer;
 
+  /// Its target is gone from the prefab (a `FYN-D0403` warning): Unity's
+  /// unused override — kept in the file, not applied (foundation 3.8).
+  final bool unused;
+
   /// The value a `setField` sets (`json['value']`).
   Object? get value => json['value'];
 
@@ -309,7 +314,8 @@ final class ExpansionOverride {
   /// the annotations — what `setPrefabOverride` takes back.
   Map<String, Object?> get rawOp => {
         for (final e in json.entries)
-          if (!const {'index', 'entityId', 'entityName', 'componentId', 'componentType', 'pointer'}.contains(e.key))
+          if (!const {'index', 'entityId', 'entityName', 'componentId', 'componentType', 'pointer', 'unused'}
+              .contains(e.key))
             e.key: e.value,
       };
 }

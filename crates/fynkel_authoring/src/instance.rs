@@ -27,7 +27,7 @@ impl AuthoringSession {
     ///   diagnostics: [...],                       // about this instance
     ///   entities: [ { id, local, name, active, activeOverridden, parent, children: [id], added,
     ///                 components: { <id>: { id, local, type, version, data, added, overridden: [field] } } } ],
-    ///   overrides: [ { index, op, entity, entityId, entityName, component?, componentId?, componentType?, field?, value?, pointer } ] }
+    ///   overrides: [ { index, op, entity, entityId, entityName, component?, componentId?, componentType?, field?, value?, pointer, unused } ] }
     /// ```
     ///
     /// `entities` are in the expansion's document order, the first is the
@@ -37,7 +37,10 @@ impl AuthoringSession {
     /// `overridden` lists the `setField`/`unsetField` fields of a
     /// component (the Inspector's bold), `activeOverridden` a `setActive`
     /// on the entity, `added` marks an `addComponent`
-    /// or `addObject`. A prefab that is not available (`FYN-D0401`) or an
+    /// or `addObject`. `unused` marks an override whose target the prefab
+    /// no longer has (a `D0403` warning): kept in the file, not applied,
+    /// listed for cleanup as Unity's unused overrides (foundation 3.8).
+    /// A prefab that is not available (`FYN-D0401`) or an
     /// instance whose overrides do not apply is `expanded: false` with
     /// the diagnostics and no entities — the anchor keeps its data. Not an
     /// instance: `FYN-E0008`.
@@ -164,6 +167,10 @@ impl AuthoringSession {
             v["op"] = json!(o.op.name());
             v["pointer"] = json!(o.pointer);
             v["entityId"] = json!(derived_e.map(|d| d.to_string()));
+            v["unused"] = json!(expanded.diagnostics.iter().any(|d| {
+                d.code == Code::PREFAB_OVERRIDE_TARGET
+                    && d.pointer.as_deref() == Some(o.pointer.as_str())
+            }));
             v["entityName"] = entity_index
                 .get(&local_e)
                 .map(|i| entities[*i]["name"].clone())

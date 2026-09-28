@@ -1,0 +1,48 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 7,
+  "id": "20000000-0000-4000-8000-000000000005",
+  "name": "Stale overrides",
+  "entities": {
+    "20000000-0000-4000-8000-0000000000a5": {
+      "name": "Turret",
+      "parent": null,
+      "children": [],
+      "components": {},
+      "prefab": {
+        "asset": {
+          "asset": "10000000-0000-4000-8000-000000000001"
+        },
+        "instance": "20000000-0000-4000-8000-0000000000e5",
+        "overrides": [
+          {
+            "op": "setField",
+            "entity": "10000000-0000-4000-8000-0000000000ff",
+            "component": "10000000-0000-4000-8000-0000000000c2",
+            "field": "visible",
+            "value": false
+          },
+          {
+            "op": "setField",
+            "entity": "10000000-0000-4000-8000-0000000000b1",
+            "component": "10000000-0000-4000-8000-0000000000c2",
+            "field": "visible",
+            "value": false
+          },
+          {
+            "op": "removeComponent",
+            "entity": "10000000-0000-4000-8000-0000000000b2",
+            "component": "10000000-0000-4000-8000-0000000000c8"
+          },
+          {
+            "op": "setField",
+            "entity": "10000000-0000-4000-8000-0000000000b2",
+            "component": "10000000-0000-4000-8000-0000000000c3",
+            "field": "position",
+            "value": [0, 2, 0]
+          }
+        ]
+      }
+    }
+  }
+}

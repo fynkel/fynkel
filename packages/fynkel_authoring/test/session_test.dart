@@ -940,7 +940,8 @@ void main() {
     expect(main.instance(crateA).overrides, hasLength(2));
     expect(prefab.state.dirty, isFalse);
 
-    // A broken override: shown with its diagnostic, the instance kept.
+    // An override whose target the prefab does not have: unused (a D0403
+    // warning), kept and not applied; the instance still expands (3.8).
     expect(
       main.apply([
         Command.setPrefabOverrideOp(crateA, {
@@ -954,12 +955,33 @@ void main() {
       isTrue,
     );
     x = main.instance(crateA);
+    expect(x.expanded, isTrue);
+    expect(x.overrides, hasLength(3));
+    expect(x.overrides[2].entityId, isNull);
+    expect([for (final o in x.overrides) o.unused], [false, false, true]);
+    expect(x.overrides[2].rawOp.containsKey('unused'), isFalse);
+    expect(x.diagnostics.single.code, 'FYN-D0403');
+    main.undo();
+
+    // A broken override (a value the component refuses): shown with its
+    // diagnostic, the instance kept.
+    expect(
+      main.apply([
+        Command.setPrefabOverrideOp(crateA, {
+          'op': 'setField',
+          'entity': cratePrefabEntity,
+          'component': cratePrefabRenderer,
+          'field': 'visible',
+          'value': 'yes',
+        }),
+      ]).ok,
+      isTrue,
+    );
+    x = main.instance(crateA);
     expect(x.expanded, isFalse);
     expect(x.entities, isEmpty);
     expect(x.prefab!.name, 'Crate');
-    expect(x.overrides, hasLength(3));
-    expect(x.overrides[2].entityId, isNull);
-    expect(x.diagnostics.single.code, 'FYN-D0403');
+    expect(x.diagnostics.single.code, 'FYN-D0404');
     final refused = main.apply([Command.unpackPrefab(crateA)]);
     expect(refused.ok, isFalse);
     expect(refused.mutations.single.diagnostics.single.code, 'FYN-E0004');
