@@ -144,10 +144,11 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     final int i;
     if (model.multiScene) {
       final r = t.rowIndexOf(id);
-      final header = _items.indexWhere((x) => x.row == null && identical(x.scene, tab));
+      final header = _items.indexWhere((x) => x.row == null && x.section == null && identical(x.scene, tab));
       i = r < 0 || header < 0 || _folded.contains(tab.document.id) ? -1 : header + 1 + r;
     } else {
-      i = t.rowIndexOf(id);
+      // The list's own index: a section header may sit above the row.
+      i = _items.indexWhere((x) => x.row?.id == id);
     }
     if (i < 0) return;
     final h = hierarchyRowHeight(context);
@@ -222,7 +223,7 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
                 for (final r in s.tree.rows) _Item(s, r),
             ],
           ]
-        : [for (final r in rows) _Item(tab, r)];
+        : _playItems(tab, rows);
     return Column(
       children: [
         _toolbar(context, theme),
@@ -609,13 +610,65 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     );
   }
 
+  /// One tab's rows; during Play the roots the game keeps across loads
+  /// (ADR-0037) under a DontDestroyOnLoad header, as Unity's scene of that
+  /// name — the world lists them last.
+  List<_Item> _playItems(OpenDocument tab, List<HierarchyRow> rows) {
+    final play = tab.document is PlayDocument ? tab.document as PlayDocument : null;
+    final out = <_Item>[];
+    var section = false;
+    for (final r in rows) {
+      if (!section && play != null && r.depth == 0 && play.isPersistent(r.id)) {
+        section = true;
+        out.add(_Item.section(tab, 'DontDestroyOnLoad'));
+      }
+      out.add(_Item(tab, r));
+    }
+    return out;
+  }
+
   // ── Scenes ────────────────────────────────────────────────────────────
 
   Widget _item(BuildContext context, ThemeData theme, _Item item) {
+    if (item.section case final label?) return _sectionHeader(context, theme, label);
     final r = item.row;
     if (r == null) return _sceneHeader(context, theme, item.scene);
     if (identical(item.scene, model.tab)) return _row(context, theme, item.scene.tree, r);
     return _otherRow(context, theme, item.scene, r);
+  }
+
+  /// A header over rows of no scene document: the DontDestroyOnLoad objects.
+  Widget _sectionHeader(BuildContext context, ThemeData theme, String label) {
+    final t = context.tokens;
+    return Semantics(
+      header: true,
+      label: '$label, objects kept across scene loads',
+      child: Container(
+        key: const Key('hierarchy.dontDestroyOnLoad'),
+        height: hierarchyRowHeight(context),
+        padding: const EdgeInsets.only(left: 20),
+        decoration: BoxDecoration(
+          color: t.header,
+          border: Border(bottom: t.hairline, top: t.hairline),
+        ),
+        child: Row(
+          children: [
+            Icon(assetKindIcon('scene'), size: 13, color: t.textSecondary),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Tooltip(
+                message: 'Kept across scene loads (dontDestroyOnLoad)',
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(color: t.text, fontWeight: FontWeight.w500),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _sceneHeader(BuildContext context, ThemeData theme, OpenDocument scene) {
@@ -1112,12 +1165,15 @@ class _SceneDropTargetState extends State<_SceneDropTarget> {
   }
 }
 
-/// One line of the list: a scene's header ([row] null) or one of its rows.
+/// One line of the list: a scene's header ([row] null), one of its rows,
+/// or a [section] header (DontDestroyOnLoad during Play).
 class _Item {
-  const _Item(this.scene, [this.row]);
+  const _Item(this.scene, [this.row]) : section = null;
+  const _Item.section(this.scene, String this.section) : row = null;
 
   final OpenDocument scene;
   final HierarchyRow? row;
+  final String? section;
 }
 
 enum _Zone { above, onto, below }

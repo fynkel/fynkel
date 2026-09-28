@@ -46,7 +46,14 @@ final class FakeLive extends LiveBackend {
     return true;
   }
 
-  void add(String id, String name, {String? parent, int? handle, List<String> types = const ['fynkel.Transform']}) {
+  void add(
+    String id,
+    String name, {
+    String? parent,
+    int? handle,
+    List<String> types = const ['fynkel.Transform'],
+    bool persistent = false,
+  }) {
     rows.add(
       LiveEntity(
         id: id,
@@ -57,6 +64,7 @@ final class FakeLive extends LiveBackend {
         layer: 0,
         childCount: 0,
         types: types,
+        persistent: persistent,
       ),
     );
     native[id] = [
@@ -937,6 +945,50 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
     expect(commits, [5]);
+  });
+
+  testWidgets('the objects kept across loads sit under a DontDestroyOnLoad header, last (ADR-0037)', (tester) async {
+    final project = FakeProject(dir: '/fake/game')..addDocument(scene());
+    final tabs = DocumentTabs(project: project);
+    addTearDown(tabs.dispose);
+    final hierarchy = HierarchyModel(tabs: tabs, project: project);
+    addTearDown(hierarchy.dispose);
+    tabs.openDocument('main');
+    final live = running()
+      ..add('runtime:50', 'Music', handle: 50, persistent: true)
+      ..add('runtime:51', 'Track', handle: 51, parent: 'runtime:50');
+    final play = LivePlay(tabs: tabs, backend: (_) => live);
+    addTearDown(play.dispose);
+    final world = fynkel.World.create();
+    addTearDown(world.dispose);
+    play.follow(world);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 260,
+            height: 600,
+            child: HierarchyPanel(model: hierarchy, onOpenDocument: () {}),
+          ),
+        ),
+      ),
+    );
+    final header = find.byKey(const Key('hierarchy.dontDestroyOnLoad'));
+    expect(header, findsOneWidget);
+    expect(find.descendant(of: header, matching: find.text('DontDestroyOnLoad')), findsOneWidget);
+    double top(Finder f) => tester.getTopLeft(f).dy;
+    expect(top(find.text('Bullet')), lessThan(top(header)), reason: 'the scene and the game\'s other objects first');
+    expect(top(header), lessThan(top(find.text('Music'))));
+    expect(play.document!.isPersistent('runtime:50'), isTrue);
+    expect(play.document!.isPersistent('robot'), isFalse);
+
+    // Nothing kept: no header.
+    live.rows.removeWhere((r) => r.id.startsWith('runtime:5'));
+    play.document!.refresh();
+    await tester.pump();
+    expect(header, findsNothing);
+    play.follow(null);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('Play tints the editor and the Hierarchy says it shows the running game; Stop ends both', (tester) async {

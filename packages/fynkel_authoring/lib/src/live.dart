@@ -21,6 +21,7 @@ final class LiveEntity {
     required this.types,
     this.activeSelf = true,
     this.activeInHierarchy = true,
+    this.persistent = false,
   });
 
   factory LiveEntity.fromJson(Map<String, Object?> j) => LiveEntity(
@@ -34,6 +35,7 @@ final class LiveEntity {
         types: [for (final t in j['types'] as List? ?? const []) t as String],
         activeSelf: j['activeSelf'] != false,
         activeInHierarchy: j['activeInHierarchy'] != false,
+        persistent: j['persistent'] == true,
       );
 
   /// The authoring id when a loaded scene spawned it (a prefab instance's
@@ -57,6 +59,10 @@ final class LiveEntity {
   /// Its own active flag, and whether it and every ancestor are active.
   final bool activeSelf;
   final bool activeInHierarchy;
+
+  /// A root kept across scene loads (`dontDestroyOnLoad`, ADR-0037); the
+  /// table lists these last.
+  final bool persistent;
 }
 
 /// One entity as the Inspector reads it: every native component as the

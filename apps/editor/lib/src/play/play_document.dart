@@ -305,6 +305,11 @@ final class PlayDocument extends EditorDocument {
   /// Whether [id] is in the running world now.
   bool has(String id) => _byId.containsKey(id);
 
+  /// Whether [id] is a root the game keeps across scene loads
+  /// (`dontDestroyOnLoad`, ADR-0037): the Hierarchy lists these last,
+  /// under a DontDestroyOnLoad header.
+  bool isPersistent(String id) => _byId[id]?.persistent ?? false;
+
   Timer? _poll;
   bool _closed = false;
   DocumentEdit? _lastEdit;
@@ -746,7 +751,7 @@ final class PlayDocument extends EditorDocument {
     }
     final next = {
       for (final r in rows)
-        r.id: jsonEncode([r.name, r.parent, children[r.id] ?? const [], r.types, r.layer, r.activeSelf]),
+        r.id: jsonEncode([r.name, r.parent, children[r.id] ?? const [], r.types, r.layer, r.activeSelf, r.persistent]),
     };
     final affected = <String>[
       for (final e in next.entries)

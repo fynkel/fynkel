@@ -361,7 +361,8 @@ pub fn resolve(world: &World, id: &str) -> Option<Entity> {
 }
 
 /// Every entity, parents before children: the loaded scenes' roots in
-/// document order, then the rest by handle; children in sibling order.
+/// document order, then the rest by handle, then the persistent roots
+/// (ADR-0037, `persistent: true`); children in sibling order.
 ///
 /// The answer carries a `revision` of the table (a hash of every row, this
 /// process only). Given `since` equal to it, the rows are left out
@@ -372,20 +373,30 @@ fn entities(world: &World, since: Option<&str>) -> Value {
     use std::hash::{Hash, Hasher};
 
     let ecs = world.ecs();
+    // The persistent roots (ADR-0037) last, as Unity's DontDestroyOnLoad
+    // scene is.
+    let persistent = world.persistent_roots();
     let mut roots: Vec<Entity> = Vec::new();
     for s in world.loaded_scenes() {
         for &(_, e) in s.entities() {
-            if ecs.contains(e) && scene::parent_of(ecs, e).is_none() && !roots.contains(&e) {
+            if ecs.contains(e)
+                && scene::parent_of(ecs, e).is_none()
+                && !roots.contains(&e)
+                && !persistent.contains(&e)
+            {
                 roots.push(e);
             }
         }
     }
     let mut rest: Vec<Entity> = ecs
         .entities()
-        .filter(|e| scene::parent_of(ecs, *e).is_none() && !roots.contains(e))
+        .filter(|e| {
+            scene::parent_of(ecs, *e).is_none() && !roots.contains(e) && !persistent.contains(e)
+        })
         .collect();
     rest.sort();
     roots.extend(rest);
+    roots.extend(persistent.iter().copied());
 
     struct Row {
         id: String,
@@ -398,6 +409,7 @@ fn entities(world: &World, since: Option<&str>) -> Value {
         tags: Option<Tags>,
         children: usize,
         types: Vec<&'static str>,
+        persistent: bool,
     }
     let mut rows = Vec::new();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -419,6 +431,7 @@ fn entities(world: &World, since: Option<&str>) -> Value {
                 .iter()
                 .filter_map(|c| c.id().name())
                 .collect(),
+            persistent: persistent.contains(&e),
             id,
         };
         (
@@ -430,7 +443,13 @@ fn entities(world: &World, since: Option<&str>) -> Value {
             (row.active_self, row.active),
         )
             .hash(&mut hasher);
-        (row.tags.map(|t| t.bits), row.children, &row.types).hash(&mut hasher);
+        (
+            row.tags.map(|t| t.bits),
+            row.children,
+            &row.types,
+            row.persistent,
+        )
+            .hash(&mut hasher);
         for c in children.into_iter().rev() {
             stack.push((c, Some(row.id.clone())));
         }
@@ -455,6 +474,7 @@ fn entities(world: &World, since: Option<&str>) -> Value {
                 "tags": r.tags.map(|t| t.to_node().to_serde()).unwrap_or(Value::Null),
                 "children": r.children,
                 "types": r.types,
+                "persistent": r.persistent,
             })
         })
         .collect();
