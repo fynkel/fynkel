@@ -85,6 +85,9 @@ pub enum LoadError {
     NotLoaded(Uuid),
     /// `clone_subtree`: the source is not a live entity of this world.
     UnknownSource(Entity),
+    /// `dont_destroy_on_load`: the entity has a parent; only a root can be
+    /// kept across loads (ADR-0037, Unity's rule).
+    NotARoot(Entity),
 }
 
 impl core::fmt::Display for LoadError {
@@ -127,6 +130,10 @@ impl core::fmt::Display for LoadError {
             LoadError::UnknownSource(e) => {
                 write!(f, "clone: source {e} is not a live entity of this world")
             }
+            LoadError::NotARoot(e) => write!(
+                f,
+                "dont_destroy_on_load: {e} has a parent; only a root object can be kept across loads"
+            ),
         }
     }
 }
@@ -362,9 +369,52 @@ impl World {
         self.scenes.iter().find(|s| s.id_of(entity).is_some())
     }
 
+    /// Keeps the root `entity` and its subtree across loads (ADR-0037,
+    /// Unity's `DontDestroyOnLoad`): a replace load leaves it, and so
+    /// does unloading the scene it came from. Children made under it
+    /// later go with it; given a parent, it stops being kept (it belongs
+    /// to its new root). Marking it twice is fine. A live entity with a
+    /// parent is [`LoadError::NotARoot`]; one not live,
+    /// [`LoadError::UnknownSource`].
+    pub fn dont_destroy_on_load(&mut self, entity: Entity) -> Result<(), LoadError> {
+        if !self.ecs().contains(entity) {
+            return Err(LoadError::UnknownSource(entity));
+        }
+        if scene::parent_of(self.ecs(), entity).is_some() {
+            return Err(LoadError::NotARoot(entity));
+        }
+        if !self.persistent.contains(&entity) {
+            self.persistent.push(entity);
+        }
+        Ok(())
+    }
+
+    /// Whether `entity` is kept across loads: its root is a persistent
+    /// root still without a parent.
+    pub fn is_persistent(&self, entity: Entity) -> bool {
+        if self.persistent.is_empty() || !self.ecs().contains(entity) {
+            return false;
+        }
+        let mut at = entity;
+        while let Some(p) = scene::parent_of(self.ecs(), at) {
+            at = p;
+        }
+        self.persistent.contains(&at)
+    }
+
+    /// The persistent roots alive and still roots, in marking order.
+    pub fn persistent_roots(&self) -> Vec<Entity> {
+        self.persistent
+            .iter()
+            .copied()
+            .filter(|&e| self.ecs().contains(e) && scene::parent_of(self.ecs(), e).is_none())
+            .collect()
+    }
+
     /// A replace load: the loaded scenes (last first) and then every
-    /// remaining entity, so nothing of the previous state survives.
+    /// remaining entity but the persistent roots' subtrees (ADR-0037).
     fn unload_all(&mut self) {
+        self.persistent = self.persistent_roots();
         while let Some(scene) = self.scenes.pop() {
             self.take_down(scene);
         }
@@ -373,6 +423,7 @@ impl World {
             .ecs()
             .entities()
             .filter(|&e| scene::parent_of(self.ecs(), e).is_none())
+            .filter(|e| !self.persistent.contains(e))
             .collect();
         for root in roots {
             if self.ecs().contains(root) {
@@ -387,7 +438,7 @@ impl World {
         // Parents before children in spawn order: a parent's subtree takes
         // its children, which then read as gone.
         for &(_, e) in scene.entities() {
-            if self.ecs().contains(e) {
+            if self.ecs().contains(e) && !self.is_persistent(e) {
                 if let Ok(n) = self.destroy_subtree(e, tick) {
                     entities += n as u32;
                 }

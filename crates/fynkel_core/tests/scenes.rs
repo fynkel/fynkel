@@ -220,6 +220,99 @@ fn unload_takes_the_scenes_live_entities_and_leaves_the_rest() {
     assert_eq!(w.live_entities(), 7);
 }
 
+/// ADR-0037: a persistent root and its subtree outlive a replace load and
+/// the unload of the scene it came from; only roots can be persistent; a
+/// persistent root given a parent stops being one.
+#[test]
+fn dont_destroy_on_load_keeps_a_root_across_loads() {
+    let mut w = world();
+    let a = w.load_scene(&scene(1)).unwrap();
+    let (root, child) = (a.entities()[0].1, a.entities()[1].1);
+    let extra = spawn(&mut w, 7, Vec3::ZERO, vec![]);
+    w.drain_events();
+
+    assert_eq!(
+        w.dont_destroy_on_load(child),
+        Err(LoadError::NotARoot(child)),
+        "a child is refused, as Unity's warning"
+    );
+    w.dont_destroy_on_load(root).unwrap();
+    w.dont_destroy_on_load(extra).unwrap();
+    w.dont_destroy_on_load(extra).unwrap(); // twice is fine
+    assert!(w.is_persistent(root) && w.is_persistent(child) && w.is_persistent(extra));
+    assert_eq!(w.persistent_roots(), vec![root, extra]);
+
+    // A child made later under the persistent root goes with it.
+    w.submit(
+        Lane::Simulation,
+        vec![Command::Spawn {
+            temp_id: 8,
+            transform: Transform::default(),
+            parent: Some(root),
+            name: None,
+        }],
+    );
+    w.step();
+    w.drain_events();
+    assert_eq!(w.live_entities(), 5);
+
+    let b = w.load_scene(&scene(2)).unwrap();
+    assert!(w.ecs().contains(root) && w.ecs().contains(child) && w.ecs().contains(extra));
+    assert!(
+        !w.ecs().contains(a.entities()[2].1),
+        "the scene's other root went"
+    );
+    assert_eq!(w.live_entities(), 4 + 3);
+    let ev = w.drain_events();
+    assert_eq!(
+        kinds(&ev),
+        vec![
+            EventKind::DESTROYED,
+            EventKind::SCENE_UNLOADED,
+            EventKind::SCENE_READY
+        ]
+    );
+    assert_eq!(
+        ev[1].payload,
+        EventPayload::SceneUnloaded {
+            scene: id(1),
+            entities: 1
+        }
+    );
+
+    // Unloading the scene a persistent root came from leaves it too.
+    let c = w.load_scene_with(&scene(3), LoadMode::Additive).unwrap();
+    let c_root = c.entities()[0].1;
+    w.dont_destroy_on_load(c_root).unwrap();
+    let gone = w.unload_scene(id(3)).unwrap();
+    assert_eq!(gone.entities, 1, "only the lone root");
+    assert!(w.ecs().contains(c_root) && w.ecs().contains(c.entities()[1].1));
+
+    // Parented under a scene object, it belongs to that scene's root now.
+    w.submit(
+        Lane::Simulation,
+        vec![Command::SetParent {
+            child: extra,
+            parent: Some(b.entities()[0].1),
+            keep_world: false,
+        }],
+    );
+    w.step();
+    assert!(!w.is_persistent(extra));
+    // Destroyed, it is no longer listed.
+    w.submit(Lane::Simulation, vec![Command::Destroy(c_root)]);
+    w.step();
+    assert_eq!(w.persistent_roots(), vec![root]);
+
+    w.load_scene(&scene(4)).unwrap();
+    assert!(
+        !w.ecs().contains(extra),
+        "no longer persistent: it went with scene 2"
+    );
+    assert!(w.ecs().contains(root));
+    assert_eq!(w.live_entities(), 3 + 3);
+}
+
 #[test]
 fn a_trigger_zone_fires_its_named_event_and_once_removes_it() {
     let mut w = world();

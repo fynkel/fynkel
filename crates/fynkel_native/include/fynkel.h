@@ -532,6 +532,14 @@ FynkelStatus fynkel_world_load_scene_with(FynkelWorld* world,
 FynkelStatus fynkel_world_unload_scene(FynkelWorld* world,
                                        const uint8_t* scene_id_utf8,
                                        uint32_t scene_id_len);
+/* DontDestroyOnLoad (ADR-0037): keeps the root `entity` and its subtree
+ * across loads — a replace load leaves it, and so does unloading the scene
+ * it came from; what it uses stays resident. Children made under it later
+ * go with it; given a parent it stops being kept. The load report counts
+ * the survivors ("persistent"). FYNKEL_STATUS_INVALID_ARGUMENT for an
+ * entity that is not live or has a parent. */
+FynkelStatus fynkel_world_dont_destroy_on_load(FynkelWorld* world,
+                                               uint64_t entity);
 /* Input rebinds (M3-12; the `input.rebinds` of settings.json): `json_utf8`
  * is a JSON object {"<action>": ["<device>:<control>", ...], ...} whose
  * bindings replace the loaded project's for those actions (an empty

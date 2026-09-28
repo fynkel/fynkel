@@ -769,6 +769,86 @@ fn scenes_stack_unload_replace_and_zones_fire_through_the_abi() {
     assert_eq!(jump["bindings"].as_array().unwrap().len(), 3);
 }
 
+/// ADR-0037: a root marked through the ABI outlives a replace load, the
+/// report counts it, and what it draws stays resident though the new
+/// scene uses none of it; a child is refused.
+#[test]
+fn dont_destroy_on_load_through_the_abi() {
+    const CRATE: &str = "c0000000-0000-4000-8000-000000000040";
+    const CATALOGUE: &str = "c0000000-0000-4000-8000-000000000032";
+    let cooked = Cooked::new("persistent");
+    let cache = cooked.text();
+    let host = Host::new();
+    assert_eq!(host.load_project(&cache), Status::Ok);
+    let desc = FynkelInstantiateDesc {
+        prefab_id_utf8: CRATE.as_ptr(),
+        prefab_id_len: CRATE.len() as u32,
+        name_utf8: ptr::null(),
+        name_len: 0,
+        parent: 0,
+        position: [0.0, 0.0, 0.0],
+        rotation: [0.0, 0.0, 0.0, 1.0],
+        scale: [1.0, 1.0, 1.0],
+    };
+    assert_eq!(
+        unsafe { fynkel_world_instantiate(host.w, &desc) },
+        Status::Ok
+    );
+    let root = host.report()["instance"]["root"].as_u64().unwrap();
+    let under = FynkelInstantiateDesc {
+        parent: root,
+        ..desc
+    };
+    assert_eq!(
+        unsafe { fynkel_world_instantiate(host.w, &under) },
+        Status::Ok
+    );
+    let child = host.report()["instance"]["root"].as_u64().unwrap();
+    assert_eq!(
+        unsafe { fynkel_world_dont_destroy_on_load(host.w, child) },
+        Status::InvalidArgument
+    );
+    assert_eq!(
+        unsafe { fynkel_world_dont_destroy_on_load(host.w, 0) },
+        Status::InvalidArgument
+    );
+    assert_eq!(
+        unsafe { fynkel_world_dont_destroy_on_load(host.w, root) },
+        Status::Ok
+    );
+
+    assert_eq!(host.load_scene(&cache, CATALOGUE), Status::Ok);
+    let r = host.report();
+    assert_eq!(r["ok"], true, "{r:#}");
+    assert_eq!(r["persistent"], 1);
+    let w = unsafe { &*host.w };
+    assert!(w.core().ecs().contains(Entity::from_bits(root)));
+    assert!(
+        w.core().ecs().contains(Entity::from_bits(child)),
+        "with its subtree"
+    );
+    let assets = w.assets().unwrap();
+    for id in [
+        "c0000000-0000-4000-8000-000000000001",
+        "c0000000-0000-4000-8000-000000000020",
+    ] {
+        assert!(
+            assets.is_resident(id.parse().unwrap()),
+            "{id}: the crate still draws it"
+        );
+    }
+    // Destroyed, nothing keeps it: the next replace load releases it.
+    unsafe { &mut *host.w }.core_mut().submit(
+        fynkel_core::Lane::Simulation,
+        vec![fynkel_core::Command::Destroy(Entity::from_bits(root))],
+    );
+    assert_eq!(host.step(), Status::Ok);
+    assert_eq!(host.load_scene(&cache, CATALOGUE), Status::Ok);
+    assert_eq!(host.report()["persistent"], 0);
+    let assets = unsafe { &*host.w }.assets().unwrap();
+    assert!(!assets.is_resident("c0000000-0000-4000-8000-000000000020".parse().unwrap()));
+}
+
 /// Live Play mode (ADR-0021 P7): the running world answers in the scene
 /// document's terms — its ids, including the ones the cook derived for a
 /// prefab instance's children — and takes a write at once.

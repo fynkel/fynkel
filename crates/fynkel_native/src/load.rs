@@ -58,7 +58,8 @@ fn load_error_diagnostic(e: &LoadError) -> Diagnostic {
         LoadError::DuplicateComponent { .. } => Code::SCENE_DUPLICATE_COMPONENT,
         LoadError::UnknownAnchorParent(_)
         | LoadError::AnchorTransform
-        | LoadError::UnknownSource(_) => Code::IO,
+        | LoadError::UnknownSource(_)
+        | LoadError::NotARoot(_) => Code::IO,
         LoadError::NotOneRoot(_) => Code::RUNTIME_SCENE_INVALID,
         LoadError::AlreadyLoaded(_) => Code::RUNTIME_SCENE_ALREADY_LOADED,
         LoadError::NotLoaded(_) => Code::RUNTIME_SCENE_NOT_LOADED,
@@ -192,11 +193,13 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
     };
     match w.core_mut().load_scene_with(&scene.description, mode) {
         Ok(loaded) => {
-            // A replace load emptied the world: nothing keeps the previous
-            // closures resident.
+            // A replace load emptied the world but for its persistent
+            // objects (ADR-0037): only what they use stays resident.
             if mode == LoadMode::Replace {
+                let kept = persistent_residency(w, &assets);
                 w.residency.clear();
                 w.prefabs.clear();
+                w.residency.extend(kept);
             }
             let residency = assets.retain(&scene.closure);
             w.residency.push((Some(loaded.id), residency));
@@ -213,6 +216,7 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
                     },
                     "scene": scene_json(&loaded, &scene),
                     "scenes": scenes_json(w),
+                    "persistent": w.core().persistent_roots().len(),
                     "cache": cache,
                     "residency": residency,
                     "diagnostics": scene
@@ -237,6 +241,37 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
             failed(&diags, cache)
         }
     }
+}
+
+/// A residency token (keyed `None`) for everything the persistent
+/// objects' components name, with their dependencies (ADR-0037 §3); none
+/// when there are no persistent objects.
+fn persistent_residency(
+    w: &FynkelWorld,
+    assets: &Assets,
+) -> Option<(Option<Uuid>, fynkel_assets::Residency)> {
+    let core = w.core();
+    let mut seen = std::collections::HashSet::new();
+    let mut closure = Vec::new();
+    for root in core.persistent_roots() {
+        let Some((description, _)) = core.describe_subtree(root) else {
+            continue;
+        };
+        for c in description.entities.iter().flat_map(|e| &e.components) {
+            let (_, node) = fynkel_document::generated::encode_component(c);
+            for (_, r) in fynkel_document::asset::asset_refs(&node) {
+                if r.asset.is_nil() {
+                    continue;
+                }
+                for id in assets.closure(r.asset) {
+                    if seen.insert(id) {
+                        closure.push(id);
+                    }
+                }
+            }
+        }
+    }
+    (!closure.is_empty()).then(|| (None, assets.retain(&closure)))
 }
 
 /// `fynkel_world_load_project` for a project without a startup scene: the
@@ -295,6 +330,12 @@ fn unload(w: &mut FynkelWorld, id: Uuid) -> Outcome {
     let cache = w.assets.as_ref().map(cache_json).unwrap_or(Value::Null);
     match w.core_mut().unload_scene(id) {
         Ok(gone) => {
+            // The persistent objects the scene gave up keep what they use.
+            if let Some(assets) = w.assets.clone() {
+                let kept = persistent_residency(w, &assets);
+                w.residency.retain(|(scene, _)| scene.is_some());
+                w.residency.extend(kept);
+            }
             w.residency.retain(|(scene, _)| *scene != Some(id));
             let residency = w.assets.as_ref().map(residency_json).unwrap_or(Value::Null);
             Outcome {
@@ -819,6 +860,26 @@ pub unsafe extern "C" fn fynkel_world_unload_scene(
         let started = std::time::Instant::now();
         let out = unload(w, id);
         finish(w, out, started)
+    })
+}
+
+/// Keeps the root `entity` and its subtree across loads (ADR-0037,
+/// Unity's `DontDestroyOnLoad`): a replace load leaves it, and so does
+/// unloading the scene it came from; what it uses stays resident.
+/// `InvalidArgument` for an entity that is not live or has a parent.
+///
+/// # Safety
+/// `world` live or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_dont_destroy_on_load(
+    world: *mut FynkelWorld,
+    entity: u64,
+) -> Status {
+    guarded(world, |w| {
+        match w.core_mut().dont_destroy_on_load(Entity::from_bits(entity)) {
+            Ok(()) => Status::Ok,
+            Err(_) => Status::InvalidArgument,
+        }
     })
 }
 

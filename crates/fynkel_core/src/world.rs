@@ -328,6 +328,9 @@ pub struct World {
     /// The scenes this world holds, in load order (M3-12): what a replace
     /// load or `unload_scene` takes down.
     pub(crate) scenes: Vec<LoadedScene>,
+    /// The roots marked `dont_destroy_on_load` (ADR-0037), in marking
+    /// order: a replace load and a scene's unload leave their subtrees.
+    pub(crate) persistent: Vec<Entity>,
     /// Edit mode only (M4-06): the editor camera `extract()` reports in
     /// the scene camera's place — its world matrix and the camera
     /// component it renders with.
@@ -411,6 +414,7 @@ impl World {
             skins: HashMap::new(),
             audio: fynkel_audio::Audio::new(),
             scenes: Vec::new(),
+            persistent: Vec::new(),
             edit_camera: None,
             edit_hidden: HashSet::new(),
             edit_animation: false,
