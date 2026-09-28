@@ -828,6 +828,24 @@ impl Input {
         self.actions.iter().map(|a| self.state_of(a)).collect()
     }
 
+    /// [`Input::view`] into `out`, reusing its states and their name
+    /// buffers: a warm view allocates nothing (foundation 4.8).
+    pub fn view_into(&self, out: &mut Vec<ActionState>) {
+        out.truncate(self.actions.len());
+        for (i, a) in self.actions.iter().enumerate() {
+            match out.get_mut(i) {
+                Some(s) => {
+                    if s.name != a.name {
+                        s.name.clear();
+                        s.name.push_str(&a.name);
+                    }
+                    self.fill_state(a, s);
+                }
+                None => out.push(self.state_of(a)),
+            }
+        }
+    }
+
     /// One action by name.
     pub fn action(&self, name: &str) -> Option<ActionState> {
         self.actions
@@ -837,9 +855,6 @@ impl Input {
     }
 
     fn state_of(&self, a: &Action) -> ActionState {
-        let get = |c: &Control| self.raw.get(c);
-        let down = |c: &Control| get(c).is_some_and(|r| r.down);
-        let unit = |c: &Control| if down(c) { 1.0 } else { 0.0 };
         let mut s = ActionState {
             name: a.name.clone(),
             kind: a.kind,
@@ -853,6 +868,25 @@ impl Input {
             frame_x: 0.0,
             frame_y: 0.0,
         };
+        self.fill_state(a, &mut s);
+        s
+    }
+
+    /// Every field of `s` but its name, from `a`'s bindings.
+    fn fill_state(&self, a: &Action, s: &mut ActionState) {
+        let get = |c: &Control| self.raw.get(c);
+        let down = |c: &Control| get(c).is_some_and(|r| r.down);
+        let unit = |c: &Control| if down(c) { 1.0 } else { 0.0 };
+        s.kind = a.kind;
+        s.held = false;
+        s.pressed = false;
+        s.released = false;
+        s.frame_pressed = false;
+        s.frame_released = false;
+        s.x = 0.0;
+        s.y = 0.0;
+        s.frame_x = 0.0;
+        s.frame_y = 0.0;
         let mut clamp = true;
         for b in &a.bindings {
             match b {
@@ -926,7 +960,6 @@ impl Input {
                 s.held = s.x != 0.0 || s.y != 0.0;
             }
         }
-        s
     }
 }
 
@@ -1014,6 +1047,22 @@ mod tests {
             parse_binding(ActionKind::Button, "gamepad:start").unwrap(),
             Binding::Button(Control::new(Device::Gamepad, "menu"))
         );
+    }
+
+    #[test]
+    fn view_into_reuses_a_stale_buffer_and_equals_view() {
+        let mut input = Input::with_tick_dt(1.0 / 60.0);
+        assert!(input.bind(&specs()).is_empty());
+        input.capture(&[
+            InputEvent::down(Device::Keyboard, "Space"),
+            InputEvent::down(Device::Keyboard, "D"),
+        ]);
+        // Longer than the actions, with other names in it.
+        let mut out = input.view();
+        out.reverse();
+        out.push(out[0].clone());
+        input.view_into(&mut out);
+        assert_eq!(out, input.view());
     }
 
     #[test]

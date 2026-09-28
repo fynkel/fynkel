@@ -643,6 +643,11 @@ impl World {
         self.input.view()
     }
 
+    /// [`World::input_view`] into `out`, reusing it (foundation 4.8).
+    pub fn input_view_into(&self, out: &mut Vec<ActionState>) {
+        self.input.view_into(out)
+    }
+
     pub fn input(&self) -> &Input {
         &self.input
     }
@@ -2009,6 +2014,12 @@ impl World {
     /// Pull-only drain: general events plus the last tick's physics events.
     pub fn drain_events(&mut self) -> Vec<Event> {
         self.events.drain()
+    }
+
+    /// [`World::drain_events`] into `out` (cleared first), keeping both
+    /// buffers' capacity (foundation 4.8).
+    pub fn drain_events_into(&mut self, out: &mut Vec<Event>) {
+        self.events.drain_into(out)
     }
 
     /// Physics events of the tick just stepped (for `afterPhysics`).

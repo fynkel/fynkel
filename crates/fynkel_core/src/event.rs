@@ -162,6 +162,15 @@ impl EventQueue {
         out
     }
 
+    /// [`EventQueue::drain`] into `out` (cleared first): the queue and
+    /// `out` keep their capacity, so a warm drain allocates nothing
+    /// (foundation 4.8).
+    pub fn drain_into(&mut self, out: &mut Vec<Event>) {
+        out.clear();
+        out.append(&mut self.general);
+        out.append(&mut self.physics_undrained);
+    }
+
     pub fn pending(&self) -> usize {
         self.general.len() + self.physics_undrained.len()
     }
