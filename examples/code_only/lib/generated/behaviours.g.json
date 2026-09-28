@@ -130,7 +130,7 @@
           "type": "string",
           "nullable": false,
           "default": "Camera",
-          "description": "The object with the `fynkel.ThirdPersonCamera`."
+          "description": "The object with the `fynkel.ThirdPersonCamera`; the player makes itself that camera's target when it starts."
         },
         {
           "name": "fallY",
@@ -171,7 +171,7 @@
           "cameraName": {
             "type": "string",
             "default": "Camera",
-            "description": "The object with the `fynkel.ThirdPersonCamera`.",
+            "description": "The object with the `fynkel.ThirdPersonCamera`; the player makes itself that camera's target when it starts.",
             "x-fynkel": {
               "type": "string"
             }
@@ -327,7 +327,7 @@
           "type": "assetRef",
           "nullable": true,
           "kind": "asset(audio)",
-          "description": "What it plays when taken."
+          "description": "What it plays when taken: a sound, the only kind its type takes."
         },
         {
           "name": "sparks",
@@ -402,7 +402,7 @@
                 "type": "null"
               }
             ],
-            "description": "What it plays when taken.",
+            "description": "What it plays when taken: a sound, the only kind its type takes.",
             "x-fynkel": {
               "type": "assetRef",
               "nullable": true,

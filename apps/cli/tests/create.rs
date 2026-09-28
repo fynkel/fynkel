@@ -228,13 +228,15 @@ fn codegen_assets_only_names_every_asset_by_id() {
     let meta: serde_json::Value = serde_json::from_str(&meta).unwrap();
     let jump = meta["id"].as_str().unwrap();
     assert!(
-        text.contains(&format!("AssetRef get jump => const AssetRef('{jump}');")),
+        text.contains(&format!(
+            "AudioClipAsset get jump => const AudioClipAsset('{jump}', name: 'jump');"
+        )),
         "{text}"
     );
     assert!(text.contains("static const scenes = "), "{text}");
     assert!(
-        text.contains("sub: 'mesh/"),
-        "the cube model's meshes: {text}"
+        text.contains("MeshAsset get") && text.contains("sub: 'mesh/"),
+        "the cube model's meshes, typed (ADR-0036 §3): {text}"
     );
 
     let run = |args: &[&str]| {
@@ -273,7 +275,7 @@ fn codegen_assets_only_names_every_asset_by_id() {
     );
     assert_eq!(run(&write), "written");
     assert!(std::fs::read_to_string(&generated).unwrap().contains(
-        "AssetRef get darkRed => const AssetRef('5d1c62c4-8f0e-4c55-9d64-3f3e8f7c1a01');"
+        "MaterialAsset get darkRed => const MaterialAsset('5d1c62c4-8f0e-4c55-9d64-3f3e8f7c1a01', name: 'dark_red');"
     ));
     assert_eq!(run(&check), "upToDate");
 

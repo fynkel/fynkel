@@ -237,6 +237,20 @@ The user accepted the ADR with the recommended answers:
 3. **Per-type component handles** (`body.velocity = v`) come later, on
    top of `NativeComponent<T>`.
 
+## Implementation notes
+
+- **Typed assets end in `Asset`** (`MaterialAsset`, `MeshAsset`,
+  `TextureAsset`, `AudioClipAsset`, `AnimationClipAsset`, `PrefabAsset`,
+  `SceneAsset`, `ShaderAsset`, `AnimatorControllerAsset`,
+  `VolumeProfileAsset`, `PhysicsMaterialAsset`, `SkinAsset`, `RigAsset`).
+  Flutter and `dart:ui` already own `Material`, `Texture`, `Shader` and
+  `Scene`, so Unity's bare names would clash in every Flutter file.
+- **A typed asset is also an `AssetRef`** (it extends it), not a wrapper:
+  every API that takes an `AssetRef` takes it with no `.ref`, and it
+  equals a plain `AssetRef` of the same asset. `ref` returns itself.
+- A model, a data asset and a blend stay plain `AssetRef`s in
+  `assets.g.dart`: there is no one kind to type them with.
+
 ## Plan
 
 As in the foundation pass, each step starts with a failing test.

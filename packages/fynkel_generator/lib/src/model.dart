@@ -25,7 +25,8 @@ enum FieldKind {
   quat('quat'),
 
   /// `AssetRef` ↔ `{ "asset": uuid, "sub"?: string }` (`assetRef`), the
-  /// envelope's `$defs/assetRef`.
+  /// envelope's `$defs/assetRef`; a typed asset (`MaterialAsset`, …,
+  /// [assetClasses]) too, with its kind implied (ADR-0036 §3).
   assetRef('assetRef'),
 
   /// `List<Vec3>` ↔ `[[x, y, z], …]` (`vec3List`): a path's points.
@@ -75,14 +76,15 @@ enum FieldKind {
         FieldKind.string => 'String',
         FieldKind.vec3 => 'Vec3',
         FieldKind.quat => 'Quat',
-        FieldKind.assetRef => 'AssetRef',
+        FieldKind.assetRef => 'AssetRef (or a typed asset: MaterialAsset, MeshAsset, …)',
         FieldKind.vec3List => 'List<Vec3>',
         FieldKind.enumeration => 'an enum',
         FieldKind.gameObject => 'GameObject?',
         FieldKind.behaviour => 'a @FynkelBehaviour class (nullable)',
         FieldKind.component => 'NativeComponent<T>? (T a built-in component: RigidBody, PointLight, …)',
         FieldKind.list =>
-          'List<T> (T one of double, int, bool, String, Quat, AssetRef, an enum, a data class, a record class)',
+          'List<T> (T one of double, int, bool, String, Quat, AssetRef or a typed asset, an enum, a data class, '
+              'a record class)',
         FieldKind.data => 'a @FynkelDataAsset class (nullable)',
         FieldKind.record => 'a @FynkelRecord class',
       };
@@ -128,6 +130,7 @@ class ExposedField {
     this.behaviourId,
     this.componentClass,
     this.componentName,
+    this.assetClass,
     this.item,
     this.dataId,
     this.record,
@@ -189,6 +192,10 @@ class ExposedField {
   /// name (`fynkel.RigidBody`).
   final String? componentClass;
   final String? componentName;
+
+  /// A typed asset field's class (`MaterialAsset`, [assetClasses]); null
+  /// for a plain `AssetRef`. Its `asset(<kind>)` hint is implied.
+  final String? assetClass;
 
   /// A [FieldKind.list]'s item kind (one of [FieldKind.listItems]); an
   /// enum item's class is [typeName], its values [enumValues]. The
@@ -346,7 +353,28 @@ const exposeAssetKinds = [
   'rig',
   'volume',
   'physics_material',
+  'shader',
+  'controller',
 ];
+
+/// The typed asset classes of `package:fynkel` (ADR-0036 §3) and the
+/// asset kind each implies: a `MaterialAsset?` field is an `AssetRef`
+/// field with `kind: 'asset(material)'`.
+const assetClasses = {
+  'MeshAsset': 'mesh',
+  'MaterialAsset': 'material',
+  'TextureAsset': 'texture',
+  'PrefabAsset': 'prefab',
+  'SceneAsset': 'scene',
+  'AudioClipAsset': 'audio',
+  'AnimationClipAsset': 'clip',
+  'SkinAsset': 'skin',
+  'ShaderAsset': 'shader',
+  'AnimatorControllerAsset': 'controller',
+  'VolumeProfileAsset': 'volume',
+  'PhysicsMaterialAsset': 'physics_material',
+  'RigAsset': 'rig',
+};
 
 /// Checks an `@Expose(kind:)` value against the field's type; returns the
 /// problem, or null when it fits. Pure, so the builder and its tests share it.

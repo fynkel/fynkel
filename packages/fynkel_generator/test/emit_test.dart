@@ -339,6 +339,40 @@ void main() {
     expect(exposeKindProblem('asset(physics_material)', FieldKind.assetRef), isNull);
   });
 
+  test('a typed asset field (ADR-0036 §3): MaterialAsset? converts to its class, its kind implied', () {
+    const lamp = BehaviourClass(
+      id: 'demo.Lamp',
+      version: 1,
+      className: 'Lamp',
+      libraryUri: 'package:demo/lamp.dart',
+      fields: [
+        ExposedField(
+          name: 'glow',
+          kind: FieldKind.assetRef,
+          nullable: true,
+          assetClass: 'MaterialAsset',
+          displayKind: 'asset(material)',
+        ),
+        ExposedField(
+          name: 'hums',
+          kind: FieldKind.list,
+          item: FieldKind.assetRef,
+          assetClass: 'AudioClipAsset',
+          displayKind: 'asset(audio)',
+        ),
+      ],
+    );
+    final src = emitDart('demo', [lamp]);
+    const l = '(b as _lib0.Lamp)';
+    expect(src, contains('get: (b) => _assetRefJson($l.glow)'), reason: 'a typed asset is an AssetRef');
+    expect(src, contains('$l.glow = _orNull(v, (v) => MaterialAsset.fromRef(_assetRef(v)))'));
+    expect(src.replaceAll(RegExp(r'\s+'), ' '),
+        contains('$l.hums = [ for (final x in v as List) AudioClipAsset.fromRef(_assetRef(x)), ]'));
+    final p = schemaFor(lamp)['properties'] as Map<String, Object?>;
+    expect((p['glow'] as Map)['x-fynkel'], {'type': 'assetRef', 'nullable': true, 'kind': 'asset(material)'});
+    expect(assetClasses.values.every(exposeAssetKinds.contains), isTrue, reason: 'every class names a known kind');
+  });
+
   test('a data type (ADR-0027): DataType and DataFields, its schema under data/, its metadata under dataTypes', () {
     const weapon = BehaviourClass(
       id: 'game.Weapon',

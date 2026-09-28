@@ -312,7 +312,7 @@ String _setter(ExposedField f, String? type, Map<String, String> records) {
       FieldKind.boolean => 'x as bool',
       FieldKind.string => 'x as String',
       FieldKind.quat => '_quat(x)',
-      FieldKind.assetRef => '_assetRef(x)',
+      FieldKind.assetRef => _typedAsset(f, '_assetRef(x)'),
       FieldKind.enumeration => '$type.values.byName(x as String)',
       FieldKind.data => 'x as $type',
       FieldKind.record => '$record(x)',
@@ -328,7 +328,7 @@ String _setter(ExposedField f, String? type, Map<String, String> records) {
     FieldKind.string => '(v) => v as String',
     FieldKind.vec3 => '_vec3',
     FieldKind.quat => '_quat',
-    FieldKind.assetRef => '_assetRef',
+    FieldKind.assetRef => f.assetClass == null ? '_assetRef' : '(v) => ${_typedAsset(f, '_assetRef(v)')}',
     FieldKind.vec3List => '_vec3List',
     FieldKind.enumeration => '(v) => $type.values.byName(v as String)',
     FieldKind.gameObject ||
@@ -347,6 +347,10 @@ String _setter(ExposedField f, String? type, Map<String, String> records) {
     _ => '$convert(v)',
   };
 }
+
+/// [ref] as the field's typed asset (`MaterialAsset.fromRef(…)`), or as
+/// it is for a plain `AssetRef` field.
+String _typedAsset(ExposedField f, String ref) => f.assetClass == null ? ref : '${f.assetClass}.fromRef($ref)';
 
 String _dartString(String s) =>
     s.replaceAll(r'\', r'\\').replaceAll("'", r"\'").replaceAll('\$', r'\$').replaceAll('\n', r'\n');

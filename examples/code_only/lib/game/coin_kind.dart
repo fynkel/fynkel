@@ -34,9 +34,9 @@ class CoinKind extends DataAsset {
   @Expose(min: 0.1)
   double size;
 
-  /// What it plays when taken.
-  @Expose(kind: 'asset(audio)')
-  AssetRef? sound;
+  /// What it plays when taken: a sound, the only kind its type takes.
+  @Expose()
+  AudioClipAsset? sound;
 
   /// The sound's pitch.
   @Expose(min: 0.05, max: 8)

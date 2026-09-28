@@ -3,7 +3,7 @@
 //
 // ignore_for_file: library_private_types_in_public_api
 
-import 'package:fynkel/fynkel.dart' show AssetRef;
+import 'package:fynkel/fynkel.dart' show AssetRef, MaterialAsset, PrefabAsset;
 
 /// Every asset under `assets/`, by folder and name: `Assets.audio.coin`,
 /// `Assets.prefabs.burst`, `Assets.models.kit.meshes.cube`. Each is the
@@ -12,10 +12,8 @@ import 'package:fynkel/fynkel.dart' show AssetRef;
 abstract final class Assets {
   /// `data/`
   static const data = _AssetsData();
-
   /// `materials/`
   static const materials = _AssetsMaterials();
-
   /// `prefabs/`
   static const prefabs = _AssetsPrefabs();
 }
@@ -31,12 +29,12 @@ final class _AssetsMaterials {
   const _AssetsMaterials();
 
   /// `materials/gem.material.json` (material)
-  AssetRef get gem => const AssetRef('cdc6e6dc-9175-5460-8e3f-af15fac42617');
+  MaterialAsset get gem => const MaterialAsset('cdc6e6dc-9175-5460-8e3f-af15fac42617', name: 'gem');
 }
 
 final class _AssetsPrefabs {
   const _AssetsPrefabs();
 
   /// `prefabs/pickup.prefab.json` (prefab)
-  AssetRef get pickup => const AssetRef('0dd85a60-b1ab-52b3-999e-09eb00a048f4');
+  PrefabAsset get pickup => const PrefabAsset('0dd85a60-b1ab-52b3-999e-09eb00a048f4', name: 'pickup');
 }

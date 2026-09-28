@@ -78,3 +78,184 @@ abstract class Asset extends FynkelObject {
   /// The asset in the project; null for one that exists only in code.
   AssetRef? get ref;
 }
+
+/// A project asset of one kind (ADR-0036 §3): what `Assets.materials.gold`
+/// and a field `MaterialAsset? highlight` hold. It is also the [AssetRef]
+/// it names, so every API that takes an `AssetRef` takes it, and it equals
+/// a plain `AssetRef` of the same asset. [kind] is the word a field's
+/// `asset(<kind>)` hint and the Inspector's picker use, so a typed field
+/// only takes that kind of asset. The names carry `Asset` because Flutter
+/// and `dart:ui` already own `Material`, `Texture`, `Shader` and `Scene`.
+abstract class TypedAsset extends AssetRef implements Asset {
+  // A private field cannot be a named initializing formal.
+  // ignore: prefer_initializing_formals
+  const TypedAsset(super.asset, {super.sub, String? name}) : _name = name;
+
+  final String? _name;
+
+  /// `material`, `mesh`, `texture`, …
+  String get kind;
+
+  /// The file's name without its extension, or the sub-asset's
+  /// (`mesh/cube` → `cube`), as `fynkel codegen` wrote it; else the id.
+  @override
+  String get name => _name ?? (sub == null ? asset : sub!.substring(sub!.indexOf('/') + 1));
+
+  @override
+  AssetRef get ref => this;
+
+  @override
+  bool get isAlive => !isNone;
+
+  /// Refused for a project asset, as Unity refuses; one made in code
+  /// (`world.createMaterial`, `createMesh`, `createClip`) is destroyed.
+  @override
+  void destroy() => throw UnsupportedError('$name is a project asset; only one made in code can be destroyed');
+
+  @override
+  String toString() => '$runtimeType($name, ${sub == null ? asset : '$asset#$sub'})';
+}
+
+/// A mesh: a model's `mesh/<name>` or one `world.createMesh` made.
+final class MeshAsset extends TypedAsset {
+  const MeshAsset(super.asset, {super.sub, super.name});
+  MeshAsset.fromRef(AssetRef r) : this(r.asset, sub: r.sub);
+  @override
+  String get kind => 'mesh';
+}
+
+/// A material: a `.material.json`, a model's `material/<name>`, or one
+/// `world.createMaterial` made.
+final class MaterialAsset extends TypedAsset {
+  const MaterialAsset(super.asset, {super.sub, super.name});
+  MaterialAsset.fromRef(AssetRef r) : this(r.asset, sub: r.sub);
+  @override
+  String get kind => 'material';
+}
+
+/// A texture: an image, or a model's `image/<name>`.
+final class TextureAsset extends TypedAsset {
+  const TextureAsset(super.asset, {super.sub, super.name});
+  TextureAsset.fromRef(AssetRef r) : this(r.asset, sub: r.sub);
+  @override
+  String get kind => 'texture';
+}
+
+/// A prefab: a `.prefab.json`, or a model's hierarchy (`prefab`).
+final class PrefabAsset extends TypedAsset {
+  const PrefabAsset(super.asset, {super.sub, super.name});
+  PrefabAsset.fromRef(AssetRef r) : this(r.asset, sub: r.sub);
+  @override
+  String get kind => 'prefab';
+}
+
+/// A scene (`.scene.json`).
+final class SceneAsset extends TypedAsset {
+  const SceneAsset(super.asset, {super.sub, super.name});
+  SceneAsset.fromRef(AssetRef r) : this(r.asset, sub: r.sub);
+  @override
+  String get kind => 'scene';
+}
+
+/// A sound (Unity's `AudioClip`): an audio file.
+final class AudioClipAsset extends TypedAsset {
+  const AudioClipAsset(super.asset, {super.sub, super.name});
+  AudioClipAsset.fromRef(AssetRef r) : this(r.asset, sub: r.sub);
+  @override
+  String get kind => 'audio';
+}
+
+/// An animation clip: a model's `anim/<name>`, or one `world.createClip`
+/// made.
+final class AnimationClipAsset extends TypedAsset {
+  const AnimationClipAsset(super.asset, {super.sub, super.name});
+  AnimationClipAsset.fromRef(AssetRef r) : this(r.asset, sub: r.sub);
+  @override
+  String get kind => 'clip';
+}
+
+/// A skin: a model's `skin/<name>`.
+final class SkinAsset extends TypedAsset {
+  const SkinAsset(super.asset, {super.sub, super.name});
+  SkinAsset.fromRef(AssetRef r) : this(r.asset, sub: r.sub);
+  @override
+  String get kind => 'skin';
+}
+
+/// A shader (`.shader`, ADR-0031).
+final class ShaderAsset extends TypedAsset {
+  const ShaderAsset(super.asset, {super.sub, super.name});
+  ShaderAsset.fromRef(AssetRef r) : this(r.asset, sub: r.sub);
+  @override
+  String get kind => 'shader';
+}
+
+/// An Animator Controller (`.controller.json`, ADR-0032).
+final class AnimatorControllerAsset extends TypedAsset {
+  const AnimatorControllerAsset(super.asset, {super.sub, super.name});
+  AnimatorControllerAsset.fromRef(AssetRef r) : this(r.asset, sub: r.sub);
+  @override
+  String get kind => 'controller';
+}
+
+/// A post-processing profile (`.volume.json`).
+final class VolumeProfileAsset extends TypedAsset {
+  const VolumeProfileAsset(super.asset, {super.sub, super.name});
+  VolumeProfileAsset.fromRef(AssetRef r) : this(r.asset, sub: r.sub);
+  @override
+  String get kind => 'volume';
+}
+
+/// A physics material (`.physicsmaterial.json`, ADR-0025).
+final class PhysicsMaterialAsset extends TypedAsset {
+  const PhysicsMaterialAsset(super.asset, {super.sub, super.name});
+  PhysicsMaterialAsset.fromRef(AssetRef r) : this(r.asset, sub: r.sub);
+  @override
+  String get kind => 'physics_material';
+}
+
+/// A rig (`.rig.json`): a character assembled from models.
+final class RigAsset extends TypedAsset {
+  const RigAsset(super.asset, {super.sub, super.name});
+  RigAsset.fromRef(AssetRef r) : this(r.asset, sub: r.sub);
+  @override
+  String get kind => 'rig';
+}
+
+/// A material [World.createMaterial] or [World.createShaderMaterial] made:
+/// alive until destroyed.
+final class _MadeMaterial extends MaterialAsset {
+  _MadeMaterial(this._world, AssetRef id) : super(id.asset, name: 'Made in code');
+  final World _world;
+
+  @override
+  bool get isAlive =>
+      _world._runtimeMaterials.containsKey(asset) || _world._shaderMaterials.containsKey(asset);
+
+  @override
+  void destroy() => _world.destroyMaterial(this);
+}
+
+/// A mesh [World.createMesh] made.
+final class _MadeMesh extends MeshAsset {
+  _MadeMesh(this._world, AssetRef id) : super(id.asset, name: 'Made in code');
+  final World _world;
+
+  @override
+  bool get isAlive => _world._runtimeMeshes.containsKey(asset);
+
+  @override
+  void destroy() => _world.destroyMesh(this);
+}
+
+/// A clip [World.createClip] made.
+final class _MadeClip extends AnimationClipAsset {
+  _MadeClip(this._world, AssetRef id) : super(id.asset, name: 'Made in code');
+  final World _world;
+
+  @override
+  bool get isAlive => _world._runtimeClips.contains(asset);
+
+  @override
+  void destroy() => _world.destroyClip(this);
+}

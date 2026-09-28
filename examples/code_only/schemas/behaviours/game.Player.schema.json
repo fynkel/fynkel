@@ -9,7 +9,7 @@
     "cameraName": {
       "type": "string",
       "default": "Camera",
-      "description": "The object with the `fynkel.ThirdPersonCamera`.",
+      "description": "The object with the `fynkel.ThirdPersonCamera`; the player makes itself that camera's target when it starts.",
       "x-fynkel": {
         "type": "string"
       }

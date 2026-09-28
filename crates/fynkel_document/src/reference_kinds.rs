@@ -8,7 +8,7 @@
 //! (`AssetEntry.offeredKinds`): a document is its kind; a source's
 //! sub-asset is its key's head (`mesh/0` → `mesh`, `anim/0` → `clip`,
 //! `image/0` → `texture`); a whole audio source is a `sound`, a whole
-//! image a `texture`. A reference the database cannot resolve is left to
+//! image a `texture`, a `.shader` file a `shader`. A reference the database cannot resolve is left to
 //! [`AssetDatabase::check_references`] (`A0004`/`A0005`).
 //!
 //! A data-typed field (`x-fynkel.type: "data"`, `x-fynkel.data` naming the
@@ -127,6 +127,7 @@ pub fn offered_kinds(r: &Resolved<'_>) -> Vec<String> {
         AssetKind::Source { importer, .. } => match importer.as_str() {
             "fynkel.audio" => vec!["sound".into()],
             "fynkel.image" => vec!["texture".into()],
+            crate::asset::SHADER_IMPORTER => vec!["shader".into()],
             _ => Vec::new(),
         },
     }
@@ -262,6 +263,34 @@ fn select<'a>(node: &'a Node, path: &[String], pointer: String, out: &mut Vec<(S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A whole source offers the kind the editor's picker lists it under
+    /// (`AssetEntry.wholeKind`): a `ShaderAsset?` field takes a `.shader`.
+    #[test]
+    fn whole_sources_offer_their_kind() {
+        let offered = |importer: &str| {
+            let entry = crate::asset::AssetEntry {
+                id: uuid::Uuid::nil(),
+                path: "x".into(),
+                name: "x".into(),
+                kind: AssetKind::Source {
+                    importer: importer.into(),
+                    importer_version: 1,
+                },
+                sub_assets: Default::default(),
+                origin: None,
+                data_type: None,
+            };
+            offered_kinds(&Resolved {
+                entry: &entry,
+                sub: None,
+            })
+        };
+        assert_eq!(offered("fynkel.audio"), ["sound"]);
+        assert_eq!(offered("fynkel.image"), ["texture"]);
+        assert_eq!(offered(crate::asset::SHADER_IMPORTER), ["shader"]);
+        assert!(offered("fynkel.gltf").is_empty());
+    }
 
     #[test]
     fn hints_are_found_on_fields_list_items_and_nested_objects() {

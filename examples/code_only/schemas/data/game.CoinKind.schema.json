@@ -55,7 +55,7 @@
           "type": "null"
         }
       ],
-      "description": "What it plays when taken.",
+      "description": "What it plays when taken: a sound, the only kind its type takes.",
       "x-fynkel": {
         "type": "assetRef",
         "nullable": true,

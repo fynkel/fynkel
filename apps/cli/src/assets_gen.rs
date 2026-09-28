@@ -4,7 +4,9 @@
 //! bindings, from the same asset database `fynkel validate` scans.
 //!
 //! The shape follows the folders under `assets/`: a folder is a getter
-//! returning a const object, a file an `AssetRef` getter, and a file with
+//! returning a const object, a file a getter of its typed asset (ADR-0036
+//! §3: `MaterialAsset`, `PrefabAsset`, `AudioClipAsset`…, or a plain
+//! `AssetRef` for a kind without a class), and a file with
 //! sub-assets (a model, a rig document) a group whose `asset` is the file,
 //! `prefab` its hierarchy, and `meshes`, `materials`, `images`, `skins`,
 //! `clips` its parts by name. Names are lowerCamel identifiers from the
@@ -99,7 +101,15 @@ fn render(entries: &[AssetEntry]) -> String {
     let _ = writeln!(o, "//");
     let _ = writeln!(o, "// ignore_for_file: library_private_types_in_public_api");
     let _ = writeln!(o);
-    let _ = writeln!(o, "import 'package:fynkel/fynkel.dart' show AssetRef;");
+    let mut used = BTreeSet::new();
+    let mut body = String::new();
+    let mut classes = Vec::new();
+    members(&root, "Assets", true, &mut body, &mut classes, &mut used);
+    if used.is_empty() {
+        used.insert("AssetRef");
+    }
+    let names: Vec<&str> = used.into_iter().collect();
+    let _ = writeln!(o, "import 'package:fynkel/fynkel.dart' show {};", names.join(", "));
     let _ = writeln!(o);
     let _ = writeln!(
         o,
@@ -115,8 +125,7 @@ fn render(entries: &[AssetEntry]) -> String {
     );
     let _ = writeln!(o, "/// next `fynkel codegen` renames its constant.");
     let _ = writeln!(o, "abstract final class Assets {{");
-    let mut classes = Vec::new();
-    members(&root, "Assets", true, &mut o, &mut classes);
+    o.push_str(&body);
     let _ = writeln!(o, "}}");
     for c in classes {
         o.push('\n');
@@ -127,7 +136,14 @@ fn render(entries: &[AssetEntry]) -> String {
 
 /// Writes the members of `folder` into `o` (static at the top, getters
 /// below) and the classes they need into `classes`.
-fn members(folder: &Folder, class: &str, top: bool, o: &mut String, classes: &mut Vec<String>) {
+fn members(
+    folder: &Folder,
+    class: &str,
+    top: bool,
+    o: &mut String,
+    classes: &mut Vec<String>,
+    used: &mut BTreeSet<&'static str>,
+) {
     for (name, item) in named(folder) {
         match item {
             Item::Folder(seg, f) => {
@@ -139,17 +155,20 @@ fn members(folder: &Folder, class: &str, top: bool, o: &mut String, classes: &mu
                     let _ = writeln!(o, "  {cls} get {name} => const {cls}();");
                 }
                 let mut body = String::new();
-                members(f, cls.trim_start_matches('_'), false, &mut body, classes);
+                members(f, cls.trim_start_matches('_'), false, &mut body, classes, used);
                 classes.push(format!(
                     "final class {cls} {{\n  const {cls}();\n\n{body}}}\n"
                 ));
             }
             Item::File(e) if e.sub_assets.is_empty() => {
                 let _ = writeln!(o, "  /// `{}` ({})", e.path, e.kind.name());
+                let ty = file_class(e);
+                used.insert(ty);
+                let value = typed(ty, &e.id.to_string(), None, Some(&stem(e).0));
                 if top {
-                    let _ = writeln!(o, "  static const AssetRef {name} = AssetRef('{}');", e.id);
+                    let _ = writeln!(o, "  static const {ty} {name} = {value};");
                 } else {
-                    let _ = writeln!(o, "  AssetRef get {name} => const AssetRef('{}');", e.id);
+                    let _ = writeln!(o, "  {ty} get {name} => const {value};");
                 }
             }
             Item::File(e) => {
@@ -160,7 +179,7 @@ fn members(folder: &Folder, class: &str, top: bool, o: &mut String, classes: &mu
                 } else {
                     let _ = writeln!(o, "  {cls} get {name} => const {cls}();");
                 }
-                group(e, &cls, classes);
+                group(e, &cls, classes, used);
             }
         }
     }
@@ -168,11 +187,17 @@ fn members(folder: &Folder, class: &str, top: bool, o: &mut String, classes: &mu
 
 /// The class of a file with sub-assets: `asset`, `prefab`, then one
 /// sub-group per kind of part.
-fn group(e: &AssetEntry, cls: &str, classes: &mut Vec<String>) {
-    let id = e.id;
+fn group(e: &AssetEntry, cls: &str, classes: &mut Vec<String>, used: &mut BTreeSet<&'static str>) {
+    let id = e.id.to_string();
     let mut body = String::new();
+    let ty = file_class(e);
+    used.insert(ty);
     let _ = writeln!(body, "  /// The file itself.");
-    let _ = writeln!(body, "  AssetRef get asset => const AssetRef('{id}');");
+    let _ = writeln!(
+        body,
+        "  {ty} get asset => const {};",
+        typed(ty, &id, None, Some(&stem(e).0))
+    );
     let mut kinds: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for sub in e.sub_assets.keys() {
         if sub == "prefab" {
@@ -180,9 +205,10 @@ fn group(e: &AssetEntry, cls: &str, classes: &mut Vec<String>) {
                 body,
                 "\n  /// Its hierarchy as a prefab (`world.instantiate`)."
             );
+            used.insert("PrefabAsset");
             let _ = writeln!(
                 body,
-                "  AssetRef get prefab => const AssetRef('{id}', sub: 'prefab');"
+                "  PrefabAsset get prefab => const PrefabAsset('{id}', sub: 'prefab');"
             );
             continue;
         }
@@ -199,14 +225,16 @@ fn group(e: &AssetEntry, cls: &str, classes: &mut Vec<String>) {
         let sub_cls = format!("{cls}{}", upper_first(&plural));
         let _ = writeln!(body, "\n  /// The `{kind}/…` parts.");
         let _ = writeln!(body, "  {sub_cls} get {plural} => const {sub_cls}();");
+        let ty = sub_class(kind);
+        used.insert(ty);
         let mut sub_body = String::new();
         let idents = unique(names.iter().map(|n| (ident(n), None)).collect());
         for (n, i) in names.iter().zip(idents) {
             let _ = writeln!(sub_body, "  /// `{kind}/{n}`");
             let _ = writeln!(
                 sub_body,
-                "  AssetRef get {i} => const AssetRef('{id}', sub: {});",
-                dart_string(&format!("{kind}/{n}"))
+                "  {ty} get {i} => const {};",
+                typed(ty, &id, Some(&format!("{kind}/{n}")), None)
             );
         }
         classes.push(format!(
@@ -216,6 +244,56 @@ fn group(e: &AssetEntry, cls: &str, classes: &mut Vec<String>) {
     classes.push(format!(
         "final class {cls} {{\n  const {cls}();\n\n{body}}}\n"
     ));
+}
+
+/// The Dart class of a whole file (ADR-0036 §3); a kind without one (a
+/// model, a data asset, a blend) stays an `AssetRef`.
+fn file_class(e: &AssetEntry) -> &'static str {
+    match &e.kind {
+        AssetKind::Document(k) => match k.name() {
+            "material" => "MaterialAsset",
+            "prefab" => "PrefabAsset",
+            "scene" => "SceneAsset",
+            "shader" => "ShaderAsset",
+            "controller" => "AnimatorControllerAsset",
+            "volume" => "VolumeProfileAsset",
+            "physics_material" => "PhysicsMaterialAsset",
+            "rig" => "RigAsset",
+            _ => "AssetRef",
+        },
+        AssetKind::Source { importer, .. } => match importer.as_str() {
+            "fynkel.audio" => "AudioClipAsset",
+            "fynkel.image" => "TextureAsset",
+            "fynkel.shader" => "ShaderAsset",
+            _ => "AssetRef",
+        },
+    }
+}
+
+/// The Dart class of a sub-asset by its key's head (`mesh/…`).
+fn sub_class(kind: &str) -> &'static str {
+    match kind {
+        "mesh" => "MeshAsset",
+        "material" => "MaterialAsset",
+        "image" => "TextureAsset",
+        "skin" => "SkinAsset",
+        "anim" => "AnimationClipAsset",
+        _ => "AssetRef",
+    }
+}
+
+/// `MaterialAsset('<id>', name: 'gold')`, `MeshAsset('<id>', sub:
+/// 'mesh/cube')`; a plain `AssetRef` takes no name.
+fn typed(ty: &str, id: &str, sub: Option<&str>, name: Option<&str>) -> String {
+    let mut o = format!("{ty}('{id}'");
+    if let Some(sub) = sub {
+        let _ = write!(o, ", sub: {}", dart_string(sub));
+    }
+    if let (Some(name), false) = (name, ty == "AssetRef") {
+        let _ = write!(o, ", name: {}", dart_string(name));
+    }
+    o.push(')');
+    o
 }
 
 enum Item<'f, 'a> {

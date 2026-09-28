@@ -44,7 +44,8 @@ DataType get gameCoinKindType => DataType(
       name: 'sound',
       type: 'assetRef',
       get: (b) => _assetRefJson((b as _lib0.CoinKind).sound),
-      set: (b, v) => (b as _lib0.CoinKind).sound = _orNull(v, _assetRef),
+      set: (b, v) =>
+          (b as _lib0.CoinKind).sound = _orNull(v, (v) => AudioClipAsset.fromRef(_assetRef(v))),
     ),
     DataField(
       name: 'sparks',

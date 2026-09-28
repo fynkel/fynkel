@@ -3,7 +3,7 @@
 //
 // ignore_for_file: library_private_types_in_public_api
 
-import 'package:fynkel/fynkel.dart' show AssetRef;
+import 'package:fynkel/fynkel.dart' show AnimationClipAsset, AnimatorControllerAsset, AssetRef, MaterialAsset, MeshAsset, PrefabAsset, SceneAsset, ShaderAsset, SkinAsset, TextureAsset, VolumeProfileAsset;
 
 /// Every asset under `assets/`, by folder and name: `Assets.audio.coin`,
 /// `Assets.prefabs.burst`, `Assets.models.kit.meshes.cube`. Each is the
@@ -28,78 +28,78 @@ final class _AssetsMaterials {
   const _AssetsMaterials();
 
   /// `materials/chrome.material.json` (material)
-  AssetRef get chrome => const AssetRef('592e1f1e-6ee1-5377-84f8-0b76823c96ef');
+  MaterialAsset get chrome => const MaterialAsset('592e1f1e-6ee1-5377-84f8-0b76823c96ef', name: 'chrome');
   /// `materials/crate.material.json` (material)
-  AssetRef get crate => const AssetRef('798b8b83-4528-5f97-92dc-4f5a3db41144');
+  MaterialAsset get crate => const MaterialAsset('798b8b83-4528-5f97-92dc-4f5a3db41144', name: 'crate');
   /// `materials/dissolve_crate.material.json` (material)
-  AssetRef get dissolveCrate => const AssetRef('fb120172-08e0-5e51-80be-340e74fc6b08');
+  MaterialAsset get dissolveCrate => const MaterialAsset('fb120172-08e0-5e51-80be-340e74fc6b08', name: 'dissolve_crate');
   /// `materials/dissolve_ghost.material.json` (material)
-  AssetRef get dissolveGhost => const AssetRef('a9242a7f-5258-5676-bcd8-8dcc4cc1cd91');
+  MaterialAsset get dissolveGhost => const MaterialAsset('a9242a7f-5258-5676-bcd8-8dcc4cc1cd91', name: 'dissolve_ghost');
   /// `materials/dissolve_rust.material.json` (material)
-  AssetRef get dissolveRust => const AssetRef('3f0e3827-d3f0-5dfe-961a-be14304a5bce');
+  MaterialAsset get dissolveRust => const MaterialAsset('3f0e3827-d3f0-5dfe-961a-be14304a5bce', name: 'dissolve_rust');
   /// `materials/floor.material.json` (material)
-  AssetRef get floor => const AssetRef('74be3aea-fd34-5796-9263-86f7e35f1688');
+  MaterialAsset get floor => const MaterialAsset('74be3aea-fd34-5796-9263-86f7e35f1688', name: 'floor');
   /// `materials/glass_amber.material.json` (material)
-  AssetRef get glassAmber => const AssetRef('4423ce05-5501-5d45-8f0b-85e274ed7bb1');
+  MaterialAsset get glassAmber => const MaterialAsset('4423ce05-5501-5d45-8f0b-85e274ed7bb1', name: 'glass_amber');
   /// `materials/glass_blue.material.json` (material)
-  AssetRef get glassBlue => const AssetRef('c21e63fc-57c1-5f74-ad26-5d73c155a719');
+  MaterialAsset get glassBlue => const MaterialAsset('c21e63fc-57c1-5f74-ad26-5d73c155a719', name: 'glass_blue');
   /// `materials/glass_green.material.json` (material)
-  AssetRef get glassGreen => const AssetRef('e5a5051e-afdc-5ea5-bd68-cdb9bc13f8f4');
+  MaterialAsset get glassGreen => const MaterialAsset('e5a5051e-afdc-5ea5-bd68-cdb9bc13f8f4', name: 'glass_green');
   /// `materials/gold.material.json` (material)
-  AssetRef get gold => const AssetRef('f8495363-c3df-5a03-90ce-252226704098');
+  MaterialAsset get gold => const MaterialAsset('f8495363-c3df-5a03-90ce-252226704098', name: 'gold');
   /// `materials/lamp_cool.material.json` (material)
-  AssetRef get lampCool => const AssetRef('e0db342f-de9d-5a2c-bdaa-20fa4f3ec47b');
+  MaterialAsset get lampCool => const MaterialAsset('e0db342f-de9d-5a2c-bdaa-20fa4f3ec47b', name: 'lamp_cool');
   /// `materials/lamp_warm.material.json` (material)
-  AssetRef get lampWarm => const AssetRef('21e2c746-1c49-5cd0-8204-a6a28942f6b5');
+  MaterialAsset get lampWarm => const MaterialAsset('21e2c746-1c49-5cd0-8204-a6a28942f6b5', name: 'lamp_warm');
   /// `materials/leaf.material.json` (material)
-  AssetRef get leaf => const AssetRef('a5f2375e-d315-56d6-a58f-5190a9a2afac');
+  MaterialAsset get leaf => const MaterialAsset('a5f2375e-d315-56d6-a58f-5190a9a2afac', name: 'leaf');
   /// `materials/pillar.material.json` (material)
-  AssetRef get pillar => const AssetRef('778281e3-d2bd-5a87-89e7-b853710354c6');
+  MaterialAsset get pillar => const MaterialAsset('778281e3-d2bd-5a87-89e7-b853710354c6', name: 'pillar');
   /// `materials/pool_bed.material.json` (material)
-  AssetRef get poolBed => const AssetRef('531499f6-c40b-51a6-9cd0-9de4bf40b1ea');
+  MaterialAsset get poolBed => const MaterialAsset('531499f6-c40b-51a6-9cd0-9de4bf40b1ea', name: 'pool_bed');
   /// `materials/rim_blue.material.json` (material)
-  AssetRef get rimBlue => const AssetRef('ab44daf0-7b5b-59c0-873a-8519d69d912f');
+  MaterialAsset get rimBlue => const MaterialAsset('ab44daf0-7b5b-59c0-873a-8519d69d912f', name: 'rim_blue');
   /// `materials/rim_green.material.json` (material)
-  AssetRef get rimGreen => const AssetRef('ed968481-11d9-53ce-9bb2-dc51c4a0a679');
+  MaterialAsset get rimGreen => const MaterialAsset('ed968481-11d9-53ce-9bb2-dc51c4a0a679', name: 'rim_green');
   /// `materials/rim_orange.material.json` (material)
-  AssetRef get rimOrange => const AssetRef('055b951c-f300-5222-8a41-6dccfd23b19c');
+  MaterialAsset get rimOrange => const MaterialAsset('055b951c-f300-5222-8a41-6dccfd23b19c', name: 'rim_orange');
   /// `materials/rusted.material.json` (material)
-  AssetRef get rusted => const AssetRef('7277c6be-6abd-59cd-baa0-e7d8d751d642');
+  MaterialAsset get rusted => const MaterialAsset('7277c6be-6abd-59cd-baa0-e7d8d751d642', name: 'rusted');
   /// `materials/stone.material.json` (material)
-  AssetRef get stone => const AssetRef('5194b57d-5278-552f-b77a-3ddca34e6a08');
+  MaterialAsset get stone => const MaterialAsset('5194b57d-5278-552f-b77a-3ddca34e6a08', name: 'stone');
   /// `materials/suit.material.json` (material)
-  AssetRef get suit => const AssetRef('0605f86c-548f-5a17-83a4-d07f21f52896');
+  MaterialAsset get suit => const MaterialAsset('0605f86c-548f-5a17-83a4-d07f21f52896', name: 'suit');
   /// `materials/wall.material.json` (material)
-  AssetRef get wall => const AssetRef('e00e2adf-a76c-5051-ae3b-c3af289aa33d');
+  MaterialAsset get wall => const MaterialAsset('e00e2adf-a76c-5051-ae3b-c3af289aa33d', name: 'wall');
   /// `materials/water.material.json` (material)
-  AssetRef get water => const AssetRef('d784224f-fd71-596d-850b-99b03a9a0c1b');
+  MaterialAsset get water => const MaterialAsset('d784224f-fd71-596d-850b-99b03a9a0c1b', name: 'water');
 }
 
 final class _AssetsModelsCharacterClips {
   const _AssetsModelsCharacterClips();
 
   /// `anim/idle`
-  AssetRef get idle => const AssetRef('b81d30e0-81e2-466d-9066-0eed7151d8b3', sub: 'anim/idle');
+  AnimationClipAsset get idle => const AnimationClipAsset('b81d30e0-81e2-466d-9066-0eed7151d8b3', sub: 'anim/idle');
   /// `anim/jump`
-  AssetRef get jump => const AssetRef('b81d30e0-81e2-466d-9066-0eed7151d8b3', sub: 'anim/jump');
+  AnimationClipAsset get jump => const AnimationClipAsset('b81d30e0-81e2-466d-9066-0eed7151d8b3', sub: 'anim/jump');
   /// `anim/run`
-  AssetRef get run => const AssetRef('b81d30e0-81e2-466d-9066-0eed7151d8b3', sub: 'anim/run');
+  AnimationClipAsset get run => const AnimationClipAsset('b81d30e0-81e2-466d-9066-0eed7151d8b3', sub: 'anim/run');
   /// `anim/walk`
-  AssetRef get walk => const AssetRef('b81d30e0-81e2-466d-9066-0eed7151d8b3', sub: 'anim/walk');
+  AnimationClipAsset get walk => const AnimationClipAsset('b81d30e0-81e2-466d-9066-0eed7151d8b3', sub: 'anim/walk');
 }
 
 final class _AssetsModelsCharacterMeshes {
   const _AssetsModelsCharacterMeshes();
 
   /// `mesh/Body`
-  AssetRef get body => const AssetRef('b81d30e0-81e2-466d-9066-0eed7151d8b3', sub: 'mesh/Body');
+  MeshAsset get body => const MeshAsset('b81d30e0-81e2-466d-9066-0eed7151d8b3', sub: 'mesh/Body');
 }
 
 final class _AssetsModelsCharacterSkins {
   const _AssetsModelsCharacterSkins();
 
   /// `skin/Skeleton`
-  AssetRef get skeleton => const AssetRef('b81d30e0-81e2-466d-9066-0eed7151d8b3', sub: 'skin/Skeleton');
+  SkinAsset get skeleton => const SkinAsset('b81d30e0-81e2-466d-9066-0eed7151d8b3', sub: 'skin/Skeleton');
 }
 
 final class _AssetsModelsCharacter {
@@ -109,7 +109,7 @@ final class _AssetsModelsCharacter {
   AssetRef get asset => const AssetRef('b81d30e0-81e2-466d-9066-0eed7151d8b3');
 
   /// Its hierarchy as a prefab (`world.instantiate`).
-  AssetRef get prefab => const AssetRef('b81d30e0-81e2-466d-9066-0eed7151d8b3', sub: 'prefab');
+  PrefabAsset get prefab => const PrefabAsset('b81d30e0-81e2-466d-9066-0eed7151d8b3', sub: 'prefab');
 
   /// The `anim/…` parts.
   _AssetsModelsCharacterClips get clips => const _AssetsModelsCharacterClips();
@@ -125,14 +125,14 @@ final class _AssetsModelsCubeMaterials {
   const _AssetsModelsCubeMaterials();
 
   /// `material/Starter`
-  AssetRef get starter => const AssetRef('f74c43aa-7e0b-4a48-a124-ef002a901e34', sub: 'material/Starter');
+  MaterialAsset get starter => const MaterialAsset('f74c43aa-7e0b-4a48-a124-ef002a901e34', sub: 'material/Starter');
 }
 
 final class _AssetsModelsCubeMeshes {
   const _AssetsModelsCubeMeshes();
 
   /// `mesh/Cube`
-  AssetRef get cube => const AssetRef('f74c43aa-7e0b-4a48-a124-ef002a901e34', sub: 'mesh/Cube');
+  MeshAsset get cube => const MeshAsset('f74c43aa-7e0b-4a48-a124-ef002a901e34', sub: 'mesh/Cube');
 }
 
 final class _AssetsModelsCube {
@@ -142,7 +142,7 @@ final class _AssetsModelsCube {
   AssetRef get asset => const AssetRef('f74c43aa-7e0b-4a48-a124-ef002a901e34');
 
   /// Its hierarchy as a prefab (`world.instantiate`).
-  AssetRef get prefab => const AssetRef('f74c43aa-7e0b-4a48-a124-ef002a901e34', sub: 'prefab');
+  PrefabAsset get prefab => const PrefabAsset('f74c43aa-7e0b-4a48-a124-ef002a901e34', sub: 'prefab');
 
   /// The `material/…` parts.
   _AssetsModelsCubeMaterials get materials => const _AssetsModelsCubeMaterials();
@@ -155,29 +155,29 @@ final class _AssetsModelsRobotImages {
   const _AssetsModelsRobotImages();
 
   /// `image/paint`
-  AssetRef get paint => const AssetRef('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'image/paint');
+  TextureAsset get paint => const TextureAsset('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'image/paint');
   /// `image/paint/linear`
-  AssetRef get paintLinear => const AssetRef('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'image/paint/linear');
+  TextureAsset get paintLinear => const TextureAsset('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'image/paint/linear');
 }
 
 final class _AssetsModelsRobotMaterials {
   const _AssetsModelsRobotMaterials();
 
   /// `material/Glass`
-  AssetRef get glass => const AssetRef('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'material/Glass');
+  MaterialAsset get glass => const MaterialAsset('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'material/Glass');
   /// `material/Painted`
-  AssetRef get painted => const AssetRef('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'material/Painted');
+  MaterialAsset get painted => const MaterialAsset('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'material/Painted');
 }
 
 final class _AssetsModelsRobotMeshes {
   const _AssetsModelsRobotMeshes();
 
   /// `mesh/Cube`
-  AssetRef get cube => const AssetRef('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'mesh/Cube');
+  MeshAsset get cube => const MeshAsset('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'mesh/Cube');
   /// `mesh/PyramidAndQuad/0`
-  AssetRef get pyramidAndQuad0 => const AssetRef('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'mesh/PyramidAndQuad/0');
+  MeshAsset get pyramidAndQuad0 => const MeshAsset('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'mesh/PyramidAndQuad/0');
   /// `mesh/PyramidAndQuad/1`
-  AssetRef get pyramidAndQuad1 => const AssetRef('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'mesh/PyramidAndQuad/1');
+  MeshAsset get pyramidAndQuad1 => const MeshAsset('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'mesh/PyramidAndQuad/1');
 }
 
 final class _AssetsModelsRobot {
@@ -187,7 +187,7 @@ final class _AssetsModelsRobot {
   AssetRef get asset => const AssetRef('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1');
 
   /// Its hierarchy as a prefab (`world.instantiate`).
-  AssetRef get prefab => const AssetRef('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'prefab');
+  PrefabAsset get prefab => const PrefabAsset('0b89f746-0ebe-4a88-b91f-e632b7c7e9e1', sub: 'prefab');
 
   /// The `image/…` parts.
   _AssetsModelsRobotImages get images => const _AssetsModelsRobotImages();
@@ -209,55 +209,55 @@ final class _AssetsModels {
   /// `models/robot.glb` (fynkel.gltf) and its parts
   _AssetsModelsRobot get robot => const _AssetsModelsRobot();
   /// `models/runner.controller.json` (controller)
-  AssetRef get runner => const AssetRef('a690f374-02ba-4a92-a8b7-0b9a6bd443e9');
+  AnimatorControllerAsset get runner => const AnimatorControllerAsset('a690f374-02ba-4a92-a8b7-0b9a6bd443e9', name: 'runner');
 }
 
 final class _AssetsScenes {
   const _AssetsScenes();
 
   /// `scenes/main.scene.json` (scene)
-  AssetRef get main => const AssetRef('3a56fbbd-b340-41ca-ac2b-b5603d1dc0da');
+  SceneAsset get main => const SceneAsset('3a56fbbd-b340-41ca-ac2b-b5603d1dc0da', name: 'main');
   /// `scenes/shader_dissolve.scene.json` (scene)
-  AssetRef get shaderDissolve => const AssetRef('6cdb53dd-cdd3-5638-a9d6-058f3d61059f');
+  SceneAsset get shaderDissolve => const SceneAsset('6cdb53dd-cdd3-5638-a9d6-058f3d61059f', name: 'shader_dissolve');
   /// `scenes/shader_rim.scene.json` (scene)
-  AssetRef get shaderRim => const AssetRef('4fa09cf3-8f27-5190-b783-5b8bc8651ec9');
+  SceneAsset get shaderRim => const SceneAsset('4fa09cf3-8f27-5190-b783-5b8bc8651ec9', name: 'shader_rim');
   /// `scenes/shader_water.scene.json` (scene)
-  AssetRef get shaderWater => const AssetRef('e4593a1e-c8ba-5037-af95-02d1142b16cc');
+  SceneAsset get shaderWater => const SceneAsset('e4593a1e-c8ba-5037-af95-02d1142b16cc', name: 'shader_water');
 }
 
 final class _AssetsShaders {
   const _AssetsShaders();
 
   /// `shaders/dissolve.shader` (fynkel.shader)
-  AssetRef get dissolve => const AssetRef('617a072c-61ff-5def-85cd-f6824cf5e87d');
+  ShaderAsset get dissolve => const ShaderAsset('617a072c-61ff-5def-85cd-f6824cf5e87d', name: 'dissolve');
   /// `shaders/rim.shader` (fynkel.shader)
-  AssetRef get rim => const AssetRef('24d681f6-9253-5a26-9aee-413486e14ce3');
+  ShaderAsset get rim => const ShaderAsset('24d681f6-9253-5a26-9aee-413486e14ce3', name: 'rim');
   /// `shaders/water.shader` (fynkel.shader)
-  AssetRef get water => const AssetRef('e54e26c1-ba62-5582-b12a-96bac8862e26');
+  ShaderAsset get water => const ShaderAsset('e54e26c1-ba62-5582-b12a-96bac8862e26', name: 'water');
 }
 
 final class _AssetsTextures {
   const _AssetsTextures();
 
   /// `textures/crate.png` (fynkel.image)
-  AssetRef get crate => const AssetRef('52dfc80f-aed9-41f3-9862-d4378ec6c815');
+  TextureAsset get crate => const TextureAsset('52dfc80f-aed9-41f3-9862-d4378ec6c815', name: 'crate');
   /// `textures/leaf.png` (fynkel.image)
-  AssetRef get leaf => const AssetRef('ecd17976-2be3-45e9-9205-63125dea989d');
+  TextureAsset get leaf => const TextureAsset('ecd17976-2be3-45e9-9205-63125dea989d', name: 'leaf');
   /// `textures/ripples.png` (fynkel.image)
-  AssetRef get ripples => const AssetRef('f3f576fc-cd76-5bca-ae08-fd2251bf41f5');
+  TextureAsset get ripples => const TextureAsset('f3f576fc-cd76-5bca-ae08-fd2251bf41f5', name: 'ripples');
   /// `textures/rust.png` (fynkel.image)
-  AssetRef get rust => const AssetRef('011dee14-036a-4a22-8762-e70404cab997');
+  TextureAsset get rust => const TextureAsset('011dee14-036a-4a22-8762-e70404cab997', name: 'rust');
   /// `textures/rusted_mr.png` (fynkel.image)
-  AssetRef get rustedMr => const AssetRef('945c36ef-3598-41c1-b04b-195ccdda7e35');
+  TextureAsset get rustedMr => const TextureAsset('945c36ef-3598-41c1-b04b-195ccdda7e35', name: 'rusted_mr');
   /// `textures/rusted_normal.png` (fynkel.image)
-  AssetRef get rustedNormal => const AssetRef('1552f46f-8556-4a86-86f3-b9542649782c');
+  TextureAsset get rustedNormal => const TextureAsset('1552f46f-8556-4a86-86f3-b9542649782c', name: 'rusted_normal');
   /// `textures/sky.hdr` (fynkel.image)
-  AssetRef get sky => const AssetRef('5f8acf8b-07b6-4a23-9b0a-f139e56e286b');
+  TextureAsset get sky => const TextureAsset('5f8acf8b-07b6-4a23-9b0a-f139e56e286b', name: 'sky');
 }
 
 final class _AssetsVolumes {
   const _AssetsVolumes();
 
   /// `volumes/showcase.volume.json` (volume)
-  AssetRef get showcase => const AssetRef('66eab72c-84f3-4418-976e-eb7eca6381f9');
+  VolumeProfileAsset get showcase => const VolumeProfileAsset('66eab72c-84f3-4418-976e-eb7eca6381f9', name: 'showcase');
 }

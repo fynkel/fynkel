@@ -355,7 +355,20 @@ Future<ExposedField> _readField(
     }
   }
   if (hasDefault && defaultValue == null && !nullable) hasDefault = false;
-  final hintKind = expose.peek('kind')?.stringValue;
+  var hintKind = expose.peek('kind')?.stringValue;
+  // A typed asset (`MaterialAsset?`) implies its `asset(<kind>)`.
+  final assetClass = describedKind == FieldKind.assetRef ? (described as InterfaceType).element.name : null;
+  final implied = assetClasses[assetClass];
+  if (implied != null) {
+    if (hintKind != null && hintKind != 'asset($implied)') {
+      throw BehaviourGenerationError(
+        "@Expose: a $assetClass field takes ${implied}s; drop kind: '$hintKind' (the type sets it)",
+        library: libraryUri,
+        member: member,
+      );
+    }
+    hintKind = 'asset($implied)';
+  }
   if (hintKind != null) {
     final problem = exposeKindProblem(hintKind, describedKind);
     if (problem != null) throw BehaviourGenerationError('@Expose: $problem', library: libraryUri, member: member);
@@ -408,6 +421,7 @@ Future<ExposedField> _readField(
     behaviourId: behaviourId,
     componentClass: componentClass,
     componentName: componentName,
+    assetClass: implied == null ? null : assetClass,
     item: item,
     dataId: dataId,
     record: record,
@@ -543,6 +557,7 @@ FieldKind? _kindOf(DartType type) {
       'Vec3' => FieldKind.vec3,
       'Quat' => FieldKind.quat,
       'AssetRef' => FieldKind.assetRef,
+      _ when assetClasses.containsKey(name) => FieldKind.assetRef,
       'GameObject' => FieldKind.gameObject,
       'NativeComponent' => FieldKind.component,
       _ => null,
@@ -675,18 +690,21 @@ _Literal? _vector(Expression e, String type, int arity, Map<String, List<double>
   return null;
 }
 
-/// `AssetRef('uuid')`, `AssetRef('uuid', sub: 'mesh/0')`, `AssetRef.none`.
+/// `AssetRef('uuid')`, `AssetRef('uuid', sub: 'mesh/0')`, `AssetRef.none`,
+/// and a typed asset's `MaterialAsset('uuid', name: 'gold')`.
 _Literal? _assetRef(Expression e) {
   if (e is PrefixedIdentifier && e.prefix.name == 'AssetRef' && e.identifier.name == 'none') {
     return const _Literal({'asset': '00000000-0000-0000-0000-000000000000'});
   }
   if (e is InstanceCreationExpression &&
-      e.constructorName.type.name.lexeme == 'AssetRef' &&
+      (e.constructorName.type.name.lexeme == 'AssetRef' ||
+          assetClasses.containsKey(e.constructorName.type.name.lexeme)) &&
       e.constructorName.name == null) {
     String? asset;
     String? sub;
     for (final a in e.argumentList.arguments) {
       if (a is NamedArgument) {
+        if (a.name.lexeme == 'name') continue;
         if (a.name.lexeme != 'sub') return null;
         final v = a.argumentExpression;
         if (v is NullLiteral) continue;

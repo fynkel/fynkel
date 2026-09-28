@@ -337,8 +337,8 @@ class World {
   /// [createShaderMaterial] makes one of a `.shader` instead. Throws
   /// [StateError] before a project or scene is loaded (the material lives
   /// in that asset store).
-  AssetRef createMaterial([gen.PbrMaterial material = const gen.PbrMaterial()]) {
-    final ref = _newAssetId();
+  MaterialAsset createMaterial([gen.PbrMaterial material = const gen.PbrMaterial()]) {
+    final ref = _MadeMaterial(this, _newAssetId());
     setMaterial(ref, material);
     return ref;
   }
@@ -356,7 +356,7 @@ class World {
   /// Values are checked against the shader's header as the cook checks a
   /// material file: a wrong name, type or range throws [ArgumentError]
   /// with the diagnostic. Throws [StateError] before a project is loaded.
-  AssetRef createShaderMaterial(
+  MaterialAsset createShaderMaterial(
     Object shader, {
     Map<String, Object> values = const {},
     gen.AlphaMode alphaMode = gen.AlphaMode.opaque,
@@ -369,7 +369,7 @@ class World {
           (throw ArgumentError.value(path, 'shader', 'no such asset in the last cook')),
       _ => throw ArgumentError.value(shader, 'shader', 'an AssetRef or a path under assets/'),
     };
-    final ref = _newAssetId();
+    final ref = _MadeMaterial(this, _newAssetId());
     final doc = <String, Object?>{
       r'$schema': 'https://fynkel.dev/schemas/material.schema.json',
       'formatVersion': 2,
@@ -592,8 +592,8 @@ class World {
   /// kept across scene loads until [destroyMesh]. Change it with
   /// [setMesh]. Throws [StateError] before a project or scene is loaded
   /// (the mesh lives in that asset store).
-  AssetRef createMesh(MeshData mesh) {
-    final ref = _newAssetId();
+  MeshAsset createMesh(MeshData mesh) {
+    final ref = _MadeMesh(this, _newAssetId());
     setMesh(ref, mesh);
     return ref;
   }
@@ -642,8 +642,8 @@ class World {
   /// clip, kept across scene loads until [destroyClip]. Change it with
   /// [setClip]. Throws [StateError] before a project or scene is loaded
   /// (the clip lives in that asset store).
-  AssetRef createClip(ClipData clip) {
-    final ref = _newAssetId();
+  AnimationClipAsset createClip(ClipData clip) {
+    final ref = _MadeClip(this, _newAssetId());
     setClip(ref, clip);
     return ref;
   }
@@ -655,7 +655,10 @@ class World {
   /// Removes the clip [ref]; animators already playing it keep it.
   void destroyClip(AssetRef ref) => _setClip(ref, null);
 
+  final Set<String> _runtimeClips = {};
+
   void _setClip(AssetRef ref, ClipData? clip) {
+    clip == null ? _runtimeClips.remove(ref.asset) : _runtimeClips.add(ref.asset);
     final id = ref.bytes;
     if (id == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
     if (ref.sub?.isNotEmpty ?? false) throw ArgumentError.value(ref, 'ref', 'a made clip is a whole asset, not a sub-asset of a model');
