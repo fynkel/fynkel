@@ -223,8 +223,14 @@ frames imply, deterministic run to run.
   a focused text field keeps its keys; the viewport must have focus to
   receive them (`autofocus` by default, `FynkelGameViewState.hasFocus`;
   a click on the viewport claims it back whenever something else took it
-  — on macOS a key nobody handles is the system beep).
-  Losing focus, `setPaused(true)`, the app going hidden: the capture
+  — on macOS a key nobody handles is the system beep). A widget of the
+  view's `overlay` with focus (a HUD button after a click or Tab) does not
+  take the game's keys, as in Unity: the keys it lets through still reach
+  the capture and nothing is let go; only a text field there keeps them
+  (foundation 4.7). The overlay needs no `ExcludeFocus` any more; a menu
+  that wants Flutter's own key navigation handles those keys in its own
+  `Focus`/`Shortcuts` first. Focus leaving the view (or reaching a text
+  field), `setPaused(true)`, the app going hidden: the capture
   `reset()`s (everything up with edges on the next tick) and the pointer
   is released. While paused no frame runs, so the loop cannot read a
   `pause` action to resume — resume from a key (`onKeyEvent`) or a button.

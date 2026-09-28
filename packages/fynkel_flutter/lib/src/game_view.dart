@@ -352,13 +352,35 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     }
   }
 
+  /// Around the overlay: never focused itself, it sees the keys a focused
+  /// HUD widget lets through (foundation 4.7).
+  final FocusNode _overlayFocus = FocusNode(debugLabel: 'FynkelGameView overlay', canRequestFocus: false, skipTraversal: true);
+
+  bool _viewportFocused = false;
+
   void _onFocusChange(bool focused) {
-    _hasFocus = focused;
-    if (!focused) {
+    _viewportFocused = focused;
+    _focusMoved();
+  }
+
+  /// Keys reach the game while the viewport or a widget of the overlay has
+  /// focus — a HUD button does not take them, as in Unity — but not while
+  /// a text field there does. Held keys are let go when they stop
+  /// reaching it (their key-ups would go elsewhere).
+  void _focusMoved() {
+    final reach = _viewportFocused || (_overlayFocus.hasFocus && !_typing());
+    if (reach == _hasFocus) return;
+    _hasFocus = reach;
+    if (!reach) {
       input.reset();
       unawaited(capturePointer(false));
     }
   }
+
+  /// Whether the focused widget is a text field (it keeps the keys).
+  bool _typing() => FocusManager.instance.primaryFocus?.context?.findAncestorWidgetOfExactType<EditableText>() != null;
+
+  KeyEventResult _onOverlayKey(FocusNode node, KeyEvent event) => _typing() ? KeyEventResult.ignored : _onKey(node, event);
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     final user = widget.onKeyEvent?.call(node, event);
@@ -390,6 +412,8 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     ChannelErrorReporting.install();
     WidgetsBinding.instance.addObserver(this);
     controller.addListener(_onViewportChanged);
+    // Any move of the focus: into the overlay, or within it to a text field.
+    FocusManager.instance.addListener(_focusMoved);
     FynkelInputChannel.attach(input);
     if (widget.audio && !widget.world.audio.isOpen) _openedAudio = widget.world.audio.open();
     _applyGizmos();
@@ -543,6 +567,8 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
 
   @override
   void dispose() {
+    FocusManager.instance.removeListener(_focusMoved);
+    _overlayFocus.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _play?.detach(widget.world);
     if (_openedAudio) widget.world.audio.close();
@@ -716,7 +742,10 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       onFocusChange: _onFocusChange,
       placeholder: widget.placeholder,
     );
-    final overlay = widget.overlay;
+    final hud = widget.overlay;
+    final overlay = hud == null
+        ? null
+        : Focus(focusNode: _overlayFocus, onKeyEvent: _onOverlayKey, child: hud);
     final panic = _panic;
     if (panic != null) {
       return Stack(fit: StackFit.expand, children: [viewport, _Stopped(panic)]);

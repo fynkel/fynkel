@@ -269,6 +269,70 @@ void main() {
     expect(find.textContaining('Viewport failed'), findsOneWidget);
   });
 
+  testWidgets('a focused HUD button does not take the game\'s keys; a text field does (foundation 4.7)', (tester) async {
+    final world = World.create();
+    addTearDown(world.dispose);
+    final controller = FynkelViewportController(placeholders: false);
+    addTearDown(controller.dispose);
+    final input = _CountingCapture();
+    final button = FocusNode(debugLabel: 'button');
+    final field = FocusNode(debugLabel: 'field');
+    addTearDown(button.dispose);
+    addTearDown(field.dispose);
+    final view = GlobalKey<FynkelGameViewState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SizedBox(
+          width: 200,
+          height: 100,
+          child: FynkelGameView(
+            key: view,
+            world: world,
+            controller: controller,
+            input: input,
+            overlay: Material(
+              type: MaterialType.transparency,
+              child: Row(
+                children: [
+                  ElevatedButton(focusNode: button, onPressed: () {}, child: const Text('P')),
+                  SizedBox(width: 80, child: TextField(focusNode: field)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(view.currentState!.hasFocus, isTrue);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyW);
+    input.take(1 / 60);
+
+    // A button takes focus (a click on some platforms, Tab): W is still
+    // held and D still reaches the game, as in Unity.
+    button.requestFocus();
+    await tester.pump();
+    expect(view.currentState!.hasFocus, isTrue, reason: 'keys still reach the game');
+    expect(input.resets, 0, reason: 'nothing let go');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyW);
+    expect(input.take(1 / 60), const [
+      InputEvent.down(InputDevice.keyboard, 'D'),
+      InputEvent.up(InputDevice.keyboard, 'W'),
+    ]);
+
+    // A text field takes the keys, and the game lets go of what it held.
+    field.requestFocus();
+    await tester.pump();
+    expect(view.currentState!.hasFocus, isFalse);
+    expect(input.resets, 1);
+    input.take(1 / 60);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    expect(input.take(1 / 60), isEmpty, reason: 'typed into the field');
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyD);
+  });
+
   testWidgets('forwards a trackpad\'s pan-zoom gesture, not only the wheel', (tester) async {
     final controller = FynkelViewportController();
     addTearDown(controller.dispose);
@@ -331,4 +395,14 @@ String _panZoomPhase(PointerEvent e) => switch (e) {
 class _Sphere extends Behaviour {
   @override
   void update(UpdateContext context) => Gizmos.wireSphere(Vec3.zero, 1);
+}
+
+class _CountingCapture extends FynkelInputCapture {
+  int resets = 0;
+
+  @override
+  void reset() {
+    resets++;
+    super.reset();
+  }
 }
