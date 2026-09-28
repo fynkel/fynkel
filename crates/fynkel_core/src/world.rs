@@ -116,9 +116,10 @@ impl Name {
     }
 }
 
-/// World transform at the start of the last tick (S[n]) for interpolation.
+/// World matrix at the start of the last tick (S[n]) for interpolation;
+/// decomposed only when the extract interpolates (foundation 3.3).
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct PrevWorld(Transform);
+struct PrevWorld(Mat4);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Diagnostic {
@@ -286,9 +287,13 @@ pub struct World {
     /// The tick's spawns by temp id, what a temp reference
     /// (`Entity::temp`) in a later command of the same tick resolves to.
     spawned_this_tick: HashMap<u64, Entity>,
-    /// A spawn, reparent or active flag changed since the last
-    /// `scene::refresh_active`.
-    active_dirty: bool,
+    /// The subtrees whose `Inactive` markers a spawn, reparent or active
+    /// flag made stale since the last refresh: each is refreshed alone
+    /// (foundation 3.4).
+    active_roots: Vec<Entity>,
+    /// Every marker may be stale (a load): the next refresh walks the
+    /// whole hierarchy.
+    active_all: bool,
     /// Entities whose next tick must not interpolate from S[n] (their
     /// authoritative value came from a presentation override already shown).
     teleported: Vec<Entity>,
@@ -389,7 +394,8 @@ impl World {
             clock,
             staged: Vec::new(),
             spawned_this_tick: HashMap::new(),
-            active_dirty: false,
+            active_roots: Vec::new(),
+            active_all: false,
             teleported: Vec::new(),
             overrides: HashMap::new(),
             events: EventQueue::default(),
@@ -1017,7 +1023,9 @@ impl World {
                     let _ = self.ecs.insert(e, Name::new(n));
                 }
                 self.spawned_this_tick.insert(temp_id, e);
-                self.active_dirty |= parent.is_some();
+                if parent.is_some() {
+                    self.active_roots.push(e);
+                }
                 self.events.push(Event {
                     tick,
                     payload: EventPayload::Spawned { temp_id, entity: e },
@@ -1066,16 +1074,15 @@ impl World {
                     }
                 }
                 let r = if keep_world {
-                    // Cached world matrices must reflect earlier commands in
-                    // this batch.
-                    scene::propagate(&mut self.ecs);
+                    // Reads the poses as of the earlier commands in this
+                    // batch from the local transforms (foundation 3.3).
                     scene::set_parent_keep_world(&mut self.ecs, child, parent)
                 } else {
                     scene::set_parent_keep_local(&mut self.ecs, child, parent)
                 };
                 match r {
                     Ok(()) => {
-                        self.active_dirty = true;
+                        self.active_roots.push(child);
                         self.events.push(Event {
                             tick,
                             payload: EventPayload::ParentChanged { child, parent },
@@ -1097,7 +1104,9 @@ impl World {
                 }
                 match scene::set_active(&mut self.ecs, entity, active) {
                     Ok(changed) => {
-                        self.active_dirty |= changed;
+                        if changed {
+                            self.active_roots.push(entity);
+                        }
                         true
                     }
                     Err(err) => self.reject_scene(index, lane, entity, err),
@@ -1596,14 +1605,23 @@ impl World {
     /// Brings the derived `Inactive` markers up to date after a spawn,
     /// reparent or flag change (nothing to do otherwise).
     pub(crate) fn refresh_active(&mut self) {
-        if std::mem::take(&mut self.active_dirty) {
+        let mut roots = std::mem::take(&mut self.active_roots);
+        if std::mem::take(&mut self.active_all) {
             scene::refresh_active(&mut self.ecs);
+        } else {
+            // In any order: a subtree refreshed before its ancestor's is
+            // redone by the ancestor's, which covers it.
+            for &root in &roots {
+                scene::refresh_active_subtree(&mut self.ecs, root);
+            }
         }
+        roots.clear();
+        self.active_roots = roots;
     }
 
     /// Whether the derived `Inactive` markers are current.
     pub(crate) fn active_markers_current(&self) -> bool {
-        !self.active_dirty
+        !self.active_all && self.active_roots.is_empty()
     }
 
     /// Brings the markers up to date after a load spawned `roots`'
@@ -1613,18 +1631,17 @@ impl World {
         for &root in roots {
             scene::refresh_active_subtree(&mut self.ecs, root);
         }
-        self.active_dirty = false;
     }
 
     /// Marks the markers stale (a load spawned under a parent).
     pub(crate) fn mark_active_dirty(&mut self) {
-        self.active_dirty = true;
+        self.active_all = true;
     }
 
     fn record_prev_world(&mut self) {
         let h = self.ecs.hecs_mut();
         for (wt, prev) in h.query_mut::<(&WorldTransform, &mut PrevWorld)>() {
-            prev.0 = Transform::from_matrix(wt.matrix);
+            prev.0 = wt.matrix;
         }
     }
 
@@ -1639,7 +1656,7 @@ impl World {
                     continue;
                 };
                 if let Ok(mut prev) = self.ecs.get_mut::<PrevWorld>(e) {
-                    prev.0 = Transform::from_matrix(wt.matrix);
+                    prev.0 = wt.matrix;
                 }
             }
         }
@@ -1930,7 +1947,7 @@ impl World {
                 >>()
                 .iter()
             {
-                fresh.push((e, Transform::from_matrix(wt.matrix)));
+                fresh.push((e, wt.matrix));
             }
         }
         let h = self.ecs.hecs_mut();
@@ -2168,10 +2185,21 @@ impl World {
             let cur = self
                 .ecs
                 .get::<WorldTransform>(e)
-                .map(|w| Transform::from_matrix(w.matrix))
-                .unwrap_or_default();
-            let prev = self.ecs.copy::<PrevWorld>(e).map(|p| p.0).unwrap_or(cur);
-            (lerp(prev, cur, alpha).matrix(), false)
+                .map(|w| w.matrix)
+                .unwrap_or(Mat4::IDENTITY);
+            match self.ecs.copy::<PrevWorld>(e) {
+                // Moved during the tick: interpolated.
+                Ok(prev) if prev.0 != cur => (
+                    lerp(
+                        Transform::from_matrix(prev.0),
+                        Transform::from_matrix(cur),
+                        alpha,
+                    )
+                    .matrix(),
+                    false,
+                ),
+                _ => (cur, false),
+            }
         };
         memo.insert(e, result);
         result

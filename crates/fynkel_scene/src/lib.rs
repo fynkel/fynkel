@@ -323,20 +323,48 @@ pub fn set_parent_keep_local(
 }
 
 /// Reparents, keeping the world transform (so the local transform changes).
-/// Uses cached world matrices: call [`propagate`] before if transforms changed.
+/// Reads both world poses from the local transforms ([`current_world`]), so
+/// a batch of reparents needs no [`propagate`] between them.
 pub fn set_parent_keep_world(
     world: &mut World,
     child: Entity,
     parent: Option<Entity>,
 ) -> Result<()> {
-    let child_world = world_matrix(world, child)?;
+    let child_world = current_world(world, child)?;
     let parent_world = match parent {
-        Some(p) => world_matrix(world, p)?,
+        Some(p) => current_world(world, p)?,
         None => Mat4::IDENTITY,
     };
     set_parent_keep_local(world, child, parent)?;
     let local = Transform::from_matrix(parent_world.inverse() * child_world);
     set_local(world, child, local)
+}
+
+/// The entity's world matrix as of now: the cached one when it and every
+/// ancestor are clean, else the cached matrix above the topmost dirty
+/// ancestor times the local transforms below it. Costs the depth, never
+/// the world.
+pub fn current_world(world: &World, entity: Entity) -> Result<Mat4> {
+    // The chain from the entity up, and how far up the topmost dirty is.
+    let mut chain = Vec::new();
+    let mut top_dirty = None;
+    let mut cur = Some(entity);
+    while let Some(e) = cur {
+        let wt = world.copy::<WorldTransform>(e)?;
+        if wt.dirty {
+            top_dirty = Some(chain.len());
+        }
+        chain.push((e, wt.matrix));
+        cur = parent_of(world, e);
+    }
+    let Some(top) = top_dirty else {
+        return Ok(chain[0].1);
+    };
+    let mut m = chain.get(top + 1).map_or(Mat4::IDENTITY, |c| c.1);
+    for &(e, _) in chain[..=top].iter().rev() {
+        m *= world.copy::<Transform>(e)?.matrix();
+    }
+    Ok(m)
 }
 
 /// Moves `child` within its parent's child list (clamped).
@@ -543,45 +571,63 @@ pub fn propagate_subtree(world: &mut World, root: Entity) -> Option<usize> {
 }
 
 /// Recomputes world matrices for dirty subtrees. Returns how many entities
-/// were recomputed (a measure, and a test hook).
+/// were recomputed (a measure, and a test hook). A clean world costs one
+/// pass over the dirty flags; each subtree under a dirty node is walked
+/// once, from its topmost dirty ancestor (foundation 3.3).
 pub fn propagate(world: &mut World) -> usize {
-    // Roots: spatial entities without a parent.
-    let roots: Vec<hecs::Entity> = world
+    let dirty: Vec<(hecs::Entity, Option<Entity>)> = world
         .hecs()
-        .query::<hecs::Without<(hecs::Entity, &Transform, &WorldTransform), &Parent>>()
+        .query::<(hecs::Entity, &Transform, &WorldTransform, Option<&Parent>)>()
         .iter()
-        .map(|(e, _, _)| e)
+        .filter(|(_, _, wt, _)| wt.dirty)
+        .map(|(e, _, _, p)| (e, p.map(|p| p.0)))
         .collect();
+    if dirty.is_empty() {
+        return 0;
+    }
+    // The tops: dirty nodes with no dirty ancestor, found before any flag
+    // is cleared. The parent of a top is clean, so its matrix is current.
+    let mut tops: Vec<(hecs::Entity, Mat4)> = Vec::new();
+    'next: for (raw, parent) in dirty {
+        let mut parent_matrix = Mat4::IDENTITY;
+        let mut first = true;
+        let mut up = parent;
+        while let Some(p) = up {
+            // An ancestor that is not spatial cuts the chain: its
+            // descendants are not reached from a root, as before.
+            let Ok(wt) = world.copy::<WorldTransform>(p) else {
+                continue 'next;
+            };
+            if wt.dirty {
+                continue 'next;
+            }
+            if first {
+                parent_matrix = wt.matrix;
+                first = false;
+            }
+            up = parent_of(world, p);
+        }
+        tops.push((raw, parent_matrix));
+    }
     let mut count = 0;
-    let mut stack: Vec<(hecs::Entity, Mat4, bool)> = roots
-        .into_iter()
-        .map(|e| (e, Mat4::IDENTITY, false))
-        .collect();
-    while let Some((raw, parent_matrix, parent_dirty)) = stack.pop() {
+    let mut stack = tops;
+    while let Some((raw, parent_matrix)) = stack.pop() {
         let h = world.hecs();
-        let (dirty, local) = {
-            let Ok(wt) = h.get::<&WorldTransform>(raw) else {
-                continue;
-            };
-            let Ok(t) = h.get::<&Transform>(raw) else {
-                continue;
-            };
-            (wt.dirty || parent_dirty, t.matrix())
+        let Ok(local) = h.get::<&Transform>(raw).map(|t| t.matrix()) else {
+            continue;
         };
-        let matrix = if dirty {
-            let m = parent_matrix * local;
-            let mut wt = h.get::<&mut WorldTransform>(raw).unwrap();
-            wt.matrix = m;
-            wt.dirty = false;
-            count += 1;
-            m
-        } else {
-            h.get::<&WorldTransform>(raw).unwrap().matrix
+        let Ok(mut wt) = h.get::<&mut WorldTransform>(raw) else {
+            continue;
         };
+        let m = parent_matrix * local;
+        wt.matrix = m;
+        wt.dirty = false;
+        drop(wt);
+        count += 1;
         if let Ok(children) = h.get::<&Children>(raw) {
             for &c in children.0.iter().rev() {
                 if let Some(craw) = world.raw(c) {
-                    stack.push((craw, matrix, dirty));
+                    stack.push((craw, m));
                 }
             }
         }

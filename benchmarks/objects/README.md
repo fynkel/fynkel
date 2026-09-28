@@ -36,20 +36,20 @@ keeps for reuse.
 
 ## Results — Apple M3 Max, release build, 50 000 entities
 
-| | baseline (2026-09-28) | after 3.1 |
-|---|---:|---:|
-| instantiate, all 8 333 | 55.4 s | 113 ms |
-| instantiate, each (first 1 000) | 5.5 ms | 18 µs |
-| instantiate, each (last 1 000) | 7.7 ms | 13 µs |
-| live heap after instantiating | — | +20 MiB (420 B per entity) |
-| first tick after instantiating | 755 ms | 762 ms (Follow 748 ms, 3.5) |
-| tick, idle | 6.7 ms | 6.6 ms |
-| — its phases | Transforms 2.9, Physics 2.4, Follow 1.4 ms | the same |
-| tick, 83 roots moved | 9.0 ms | 8.9 ms |
-| tick with 1 000 keep-world reparents | 2 329 ms | 2 241 ms |
-| tick with a parented spawn, one object inactive | 8.0 ms | 7.8 ms |
-| tick destroying every instance | 11.7 ms | 11.9 ms |
-| a further instantiate–tick–destroy cycle | — | 878 ms, live heap +0 KiB |
+| | baseline (2026-09-28) | after 3.1 | after 3.3/3.4 |
+|---|---:|---:|---:|
+| instantiate, all 8 333 | 55.4 s | 113 ms | 117 ms |
+| instantiate, each (first 1 000) | 5.5 ms | 18 µs | 19 µs |
+| instantiate, each (last 1 000) | 7.7 ms | 13 µs | 13 µs |
+| live heap after instantiating | — | +20 MiB (420 B per entity) | the same |
+| first tick after instantiating | 755 ms | 762 ms (Follow 748 ms, 3.5) | 759 ms (Follow 750 ms) |
+| tick, idle | 6.7 ms | 6.6 ms | 1.7 ms |
+| — its phases | Transforms 2.9, Physics 2.4, Follow 1.4 ms | the same | Transforms 0.2, Physics 0.1, Follow 1.4 ms |
+| tick, 83 roots moved | 9.0 ms | 8.9 ms | 2.4 ms |
+| tick with 1 000 keep-world reparents | 2 329 ms | 2 241 ms | 3.1 ms |
+| tick with a parented spawn, one object inactive | 8.0 ms | 7.8 ms | 1.7 ms |
+| tick destroying every instance | 11.7 ms | 11.9 ms | 11.0 ms |
+| a further instantiate–tick–destroy cycle | — | 878 ms, live heap +0 KiB | 870 ms, +0 KiB |
 
 The baseline measured the process's resident size, not the live heap:
 +24 MiB after instantiating and +57 MiB with everything destroyed. The
@@ -67,11 +67,16 @@ What it shows:
   new subtree: an in-memory copy, as Unity's `Instantiate`.
 - **The first tick after instantiating (3.5).** Follow resolves every
   new follower's target by name over the whole world: 748 ms for 8 333.
-- **An idle tick (3.3, 3.12).** Nothing moves, yet 6.6 ms goes, 40% of a
-  60 Hz frame. `propagate` walks every node. The physics sync visits
-  every entity with a world transform to find the few with a physics
-  component (3.12). Follow resolves its target by name every tick (3.5).
-- **Reparenting (3.3).** A keep-world `SetParent` runs a full transform
-  pass per command: 1 000 of them take 2.2 s.
-- **A parented spawn with one inactive object (3.4)** re-walks the whole
-  hierarchy for the active flags.
+- **An idle tick (3.3, fixed; 3.12).** Nothing moved, yet 6.6 ms went,
+  40% of a 60 Hz frame. `propagate` walked every node three or four
+  times per tick, once of them inside the physics phase, which is why
+  physics looked slow (3.12: its own step took 50 µs); and every tick
+  decomposed every world matrix for interpolation. Now `propagate`
+  scans the dirty flags and walks only dirty subtrees, and only an
+  object that moved is decomposed. What is left is Follow (3.5).
+- **Reparenting (3.3, fixed).** A keep-world `SetParent` ran a full
+  transform pass per command so the poses it kept were current; now it
+  reads them from the chain of local transforms: 1 000 of them take 3 ms.
+- **A parented spawn with one inactive object (3.4, fixed)** re-walked
+  the whole hierarchy for the active flags; now each change refreshes
+  its own subtree.

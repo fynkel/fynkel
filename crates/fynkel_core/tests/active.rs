@@ -321,3 +321,53 @@ fn an_inactive_source_goes_quiet_and_a_looping_one_resumes() {
     set_active(&mut w, once, true);
     assert_eq!(w.audio().voice_count(), 1, "the looping source again");
 }
+
+#[test]
+fn one_batch_of_flag_and_parent_changes_settles_every_subtree() {
+    // Foundation 3.4: each change refreshes only its own subtree, in the
+    // batch's order — a descendant's change before its ancestor's must
+    // still end right.
+    let mut w = world();
+    let top = spawn(&mut w, 1, None);
+    let mid = spawn(&mut w, 2, Some(top));
+    let leaf = spawn(&mut w, 3, Some(mid));
+    let loose = spawn(&mut w, 4, None);
+    w.submit(
+        Lane::Simulation,
+        vec![
+            Command::SetParent {
+                child: loose,
+                parent: Some(leaf),
+                keep_world: true,
+            },
+            Command::SetActive {
+                entity: mid,
+                active: false,
+            },
+            Command::Spawn {
+                temp_id: 5,
+                transform: Transform::IDENTITY,
+                parent: Some(loose),
+                name: None,
+            },
+        ],
+    );
+    assert_eq!(w.step().status, Status::Ok, "{:?}", w.diagnostics());
+    let born = w
+        .drain_events()
+        .into_iter()
+        .find_map(|e| match e.payload {
+            EventPayload::Spawned { temp_id: 5, entity } => Some(entity),
+            _ => None,
+        })
+        .unwrap();
+    assert!(is_active_in_hierarchy(w.ecs(), top));
+    for e in [mid, leaf, loose, born] {
+        assert!(!is_active_in_hierarchy(w.ecs(), e), "{e:?}");
+    }
+    // And back on: the whole chain below `mid` returns.
+    set_active(&mut w, mid, true);
+    for e in [mid, leaf, loose, born] {
+        assert!(is_active_in_hierarchy(w.ecs(), e), "{e:?}");
+    }
+}

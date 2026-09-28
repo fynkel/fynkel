@@ -211,3 +211,49 @@ fn destroy_subtree_and_unlink() {
     // Propagation copes with the survivors.
     assert_eq!(propagate(&mut w), 2);
 }
+
+#[test]
+fn keep_world_reparent_uses_the_current_poses() {
+    // Foundation 3.3: a keep-world reparent reads the poses from the
+    // local transforms, so a batch of them needs no whole-world pass.
+    let mut w = World::new(WorldId(1));
+    let a = spawn(
+        &mut w,
+        Transform::from_position(Vec3::new(10.0, 0.0, 0.0)),
+        None,
+    )
+    .unwrap();
+    let b = spawn(
+        &mut w,
+        Transform::from_position(Vec3::new(0.0, 4.0, 0.0)),
+        None,
+    )
+    .unwrap();
+    let c = spawn(&mut w, Transform::from_position(Vec3::ONE), Some(a)).unwrap();
+    propagate(&mut w);
+    // Both moved since the last propagate: the cached matrices are stale.
+    set_local(&w, a, Transform::from_position(Vec3::new(20.0, 0.0, 0.0))).unwrap();
+    set_local(&w, b, Transform::from_position(Vec3::new(0.0, 8.0, 0.0))).unwrap();
+    set_parent_keep_world(&mut w, c, Some(b)).unwrap();
+    propagate(&mut w);
+    let p = world_matrix(&w, c).unwrap().transform_point3(Vec3::ZERO);
+    assert!(p.abs_diff_eq(Vec3::new(21.0, 1.0, 1.0), 1e-4), "{p}");
+}
+
+#[test]
+fn a_dirty_node_under_a_dirty_ancestor_is_recomputed_once() {
+    let mut w = World::new(WorldId(1));
+    let root = spawn(&mut w, Transform::default(), None).unwrap();
+    let mid = spawn(&mut w, Transform::default(), Some(root)).unwrap();
+    let leaf = spawn(&mut w, Transform::default(), Some(mid)).unwrap();
+    let lone = spawn(&mut w, Transform::default(), None).unwrap();
+    let under_lone = spawn(&mut w, Transform::default(), Some(lone)).unwrap();
+    propagate(&mut w);
+    set_local(&w, leaf, Transform::from_position(Vec3::Z)).unwrap();
+    set_local(&w, root, Transform::from_position(Vec3::X)).unwrap();
+    set_local(&w, under_lone, Transform::from_position(Vec3::Y)).unwrap();
+    assert_eq!(propagate(&mut w), 4, "root, mid, leaf once, and under_lone");
+    let p = world_matrix(&w, leaf).unwrap().transform_point3(Vec3::ZERO);
+    assert!(p.abs_diff_eq(Vec3::new(1.0, 0.0, 1.0), 1e-4), "{p}");
+    assert_eq!(propagate(&mut w), 0);
+}
