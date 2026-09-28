@@ -660,12 +660,16 @@ final class InspectorModel extends ChangeNotifier {
     return out;
   }
 
-  /// The value a GameObject or script field takes for the object [entity]
-  /// (a picked or dropped one): `{entity}`, or `{entity, component}` of
-  /// its script of the field's type — null when it has none.
+  /// The value a GameObject, script or component field takes for the
+  /// object [entity] (a picked or dropped one): `{entity}`, or `{entity,
+  /// component}` of its script of the field's type — null when it has
+  /// none (for a component field, when it lacks the component).
   Map<String, Object?>? objectRef(FieldSpec spec, String entity) {
     final n = _tab?.tree.nodes[entity];
     if (n == null) return null;
+    if (spec.componentType case final c?) {
+      return n.components.any((x) => x.$2 == c) ? {'entity': entity} : null;
+    }
     if (spec.kind != FieldKind.scriptRef) return {'entity': entity};
     for (final (id, type) in n.components) {
       if (type == spec.behaviourType) return {'entity': entity, 'component': id};
@@ -674,11 +678,12 @@ final class InspectorModel extends ChangeNotifier {
   }
 
   /// The name of the object [ref] names; null when it (or, for a script
-  /// field, the script on it) is not in the document — the field shows
-  /// Missing.
-  String? describeObject(Map<String, Object?> ref) {
+  /// field, the script on it; for [spec]'s component field, the component)
+  /// is not in the document — the field shows Missing.
+  String? describeObject(Map<String, Object?> ref, {FieldSpec? spec}) {
     final n = _tab?.tree.nodes[ref['entity']];
     if (n == null) return null;
+    if (spec?.componentType case final c? when !n.components.any((x) => x.$2 == c)) return null;
     final component = ref['component'];
     if (component != null && !n.components.any((c) => c.$1 == component)) return null;
     return n.name;

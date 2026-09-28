@@ -552,6 +552,7 @@ class BehaviourField {
     required this.set,
     this.target,
     this.dataType,
+    this.component,
     this.defaultValue,
     this.label,
     this.tooltip,
@@ -582,6 +583,11 @@ class BehaviourField {
   /// its JSON is `{"asset": id}` and [set] takes the shared [DataAsset]
   /// instance(s); [target] answers them as they are. Null otherwise.
   final String? dataType;
+
+  /// The built-in component a `NativeComponent<T>` field holds (type
+  /// `component`, ADR-0036 §2): its schema name (`fynkel.RigidBody`).
+  /// Null otherwise.
+  final String? component;
   final Object? defaultValue;
   final String? label;
   final String? tooltip;
@@ -589,12 +595,14 @@ class BehaviourField {
   final num? max;
   final num? step;
 
-  /// A GameObject or script reference (type `gameObject` / `behaviour`):
-  /// its JSON is `{"entity": id}` (`, "component": id` for a script), and
-  /// [set] takes the resolved object ([GameObject] / the [Behaviour], or
-  /// null) — the world resolves it once every behaviour of the load is
-  /// attached, so a reference may name one attached after it.
-  bool get isReference => type == 'gameObject' || type == 'behaviour';
+  /// A GameObject, script or built-in component reference (type
+  /// `gameObject` / `behaviour` / `component`): its JSON is `{"entity":
+  /// id}` (`, "component": id` for a script), and [set] takes the resolved
+  /// object ([GameObject] / the [Behaviour], or null; a component field
+  /// takes the [GameObject] or the [NativeComponent]) — the world resolves
+  /// it once every behaviour of the load is attached, so a reference may
+  /// name one attached after it.
+  bool get isReference => type == 'gameObject' || type == 'behaviour' || type == 'component';
 
   /// Whether it holds data assets ([dataType]).
   bool get holdsData => dataType != null;
@@ -616,12 +624,32 @@ Map<String, Object?>? referenceJson(Object? target) {
     case Behaviour b:
       go = b.gameObject;
       component = b.authoredComponentId;
+    case NativeComponent c:
+      // One built-in component of a kind per object: the object names it.
+      go = c.gameObject;
     default:
-      throw ArgumentError.value(target, 'target', 'not a GameObject or a Behaviour');
+      throw ArgumentError.value(target, 'target', 'not a GameObject, a Behaviour or a NativeComponent');
   }
   if (go.isPending || !go.isAlive) return null;
   final id = go.world.liveIdOf?.call(go.entity) ?? go.authoringId ?? 'runtime:${go.entity}';
   return {'entity': id, 'component': ?component};
+}
+
+/// What a `NativeComponent<T>?` field's generated `set` stores: null, the
+/// handle itself, or the component [T] of a [GameObject] (what a load
+/// resolves). Throws [ArgumentError] when the object has no [T], so the
+/// load reports the field as None.
+NativeComponent<T>? nativeComponentOf<T extends WireRecord>(Object? value) => switch (value) {
+  null => null,
+  final NativeComponent<T> c => c,
+  final GameObject go => go.component<T>() ?? (throw ArgumentError('"${go.name}" has no ${componentSchemaName(T)}')),
+  _ => throw ArgumentError.value(value, 'value', 'not a GameObject or a NativeComponent<$T>'),
+};
+
+/// The schema name of the native component class [t] (`fynkel.RigidBody`).
+String componentSchemaName(Type t) {
+  final id = gen.componentIds[t];
+  return id == null ? '$t' : gen.componentCodecs[id]!.name;
 }
 
 /// A registered behaviour type: id, version, factory and fields — what the

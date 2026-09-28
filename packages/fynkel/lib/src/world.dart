@@ -1750,8 +1750,10 @@ class World {
           try {
             f.set(behaviour, target);
           } on Object {
-            problem = 'references a ${target is Behaviour ? target.behaviourType?.id ?? target.runtimeType : 'GameObject'}, '
-                'which does not fit the field';
+            problem = f.type == 'component' && target is GameObject
+                ? 'references "${target.name}", which has no ${f.component}'
+                : 'references a ${target is Behaviour ? target.behaviourType?.id ?? target.runtimeType : 'GameObject'}, '
+                    'which does not fit the field';
           }
         }
         if (problem != null) {
@@ -1855,6 +1857,8 @@ class World {
         final target = switch (read(b)) {
           final GameObject g => copies[g] ?? g,
           final Behaviour t => made[t] ?? t,
+          // The copy's own component, found through the copied object.
+          final NativeComponent n => copies[n.gameObject] ?? n,
           final other => other,
         };
         f.set(c, target);
@@ -2583,8 +2587,33 @@ class GameObject extends FynkelObject {
     for (final b in _behaviours) {
       if (b is T) return b as T;
     }
+    // A script type never matches a built-in component.
+    if (<T>[] is List<Behaviour>) return null;
+    for (final codec in gen.componentCodecs.values) {
+      if (codec.id == gen.Transform.componentId || codec.id == gen.Name.componentId) continue;
+      if (_lookup(codec.id) == null) continue;
+      final handle = codec.withType(<X extends WireRecord>() => _handle<X>(codec.id));
+      if (handle is T) return handle as T;
+    }
     return null;
   }
+
+  /// The built-in component [T] on this object as a live handle
+  /// ([NativeComponent], Unity's `GetComponent<Rigidbody>()`), or null
+  /// when the object has none. The transform is [transform]; a `Name` is
+  /// [name].
+  NativeComponent<T>? component<T extends WireRecord>() {
+    final codec = _codecOf(T);
+    if (codec.id == gen.Transform.componentId || codec.id == gen.Name.componentId) {
+      final use = codec.id == gen.Name.componentId ? 'name' : 'transform';
+      throw ArgumentError('${codec.name} is not a component handle: use $use');
+    }
+    return _lookup(codec.id) == null ? null : _handle<T>(codec.id);
+  }
+
+  NativeComponent<T> _handle<T extends WireRecord>(int id) =>
+      (_handles ??= {})[id] as NativeComponent<T>? ?? (_handles![id] = NativeComponent<T>._(this));
+  Map<int, NativeComponent>? _handles;
 
   /// Runtime handle; throws while pending.
   int get entity => _requireResolved('entity');

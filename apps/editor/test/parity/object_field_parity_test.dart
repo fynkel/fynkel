@@ -20,9 +20,10 @@ const floor = 'c0000000-0000-4000-8000-0000000000e4';
 const sun = 'c0000000-0000-4000-8000-0000000000e3';
 
 /// The schema `fynkel codegen` writes for
-/// `class Turret { GameObject? target; Spinner? spinner; Mode mode; }`.
+/// `class Turret { GameObject? target; Spinner? spinner;
+/// NativeComponent<DirectionalLight>? light; Mode mode; }`.
 Map<String, Object?> turretSchema() {
-  Map<String, Object?> reference(String type, {String? behaviour}) => {
+  Map<String, Object?> reference(String type, {String? behaviour, String? component}) => {
     'type': ['object', 'null'],
     'properties': {
       'entity': {'type': 'string'},
@@ -30,7 +31,7 @@ Map<String, Object?> turretSchema() {
     },
     'required': ['entity', if (behaviour != null) 'component'],
     'additionalProperties': false,
-    'x-fynkel': {'type': type, 'nullable': true, 'behaviour': ?behaviour},
+    'x-fynkel': {'type': type, 'nullable': true, 'behaviour': ?behaviour, 'component': ?component},
   };
   return {
     r'$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -40,6 +41,8 @@ Map<String, Object?> turretSchema() {
     'properties': {
       'target': reference('gameObject'),
       'spinner': reference('behaviour', behaviour: 'game.Spinner'),
+      // `NativeComponent<DirectionalLight>? light` (ADR-0036 §2).
+      'light': reference('component', component: 'fynkel.DirectionalLight'),
       'mode': {
         'type': 'string',
         'enum': ['idle', 'aim', 'fire'],
@@ -137,4 +140,23 @@ void main() {
       expect(turretData(e)['target'], {'entity': floor}, reason: 'the reference is kept, as Unity keeps it');
     },
   );
+
+  testWidgets('a built-in component field takes only objects with that component (ADR-0036 §2)', (tester) async {
+    final e = await Editor.open(tester, prepare: addTurret);
+    await e.click(e.row('Sun'));
+    expect(face(e, 'light'), 'None (Directional Light)');
+
+    // Crate B has no light: the field refuses it.
+    await e.drag(e.row('Crate B'), tester.getCenter(field('light')));
+    expect(face(e, 'light'), 'None (Directional Light)');
+
+    await e.click(find.descendant(of: field('light'), matching: find.byKey(const ValueKey('object.pick'))));
+    expect(find.byKey(const ValueKey('objectPicker.row.0')), findsOneWidget);
+    expect(find.byKey(const ValueKey('objectPicker.row.1')), findsNothing, reason: 'only the Sun has a light');
+    await e.click(find.byKey(const ValueKey('objectPicker.row.0')));
+    expect(face(e, 'light'), 'Sun (Directional Light)');
+
+    await e.press(LogicalKeyboardKey.keyS, command: true);
+    expect(turretData(e)['light'], {'entity': sun}, reason: 'the object names its one light');
+  });
 }

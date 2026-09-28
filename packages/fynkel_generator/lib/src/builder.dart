@@ -304,6 +304,34 @@ Future<ExposedField> _readField(
       );
     }
   }
+  String? componentClass, componentName;
+  if (kind == FieldKind.component) {
+    // `NativeComponent<RigidBody>`: the record class, and its schema name
+    // from its `static const schemaName`.
+    final arg = (type as InterfaceType).typeArguments.single;
+    final element = arg is InterfaceType ? arg.element : null;
+    componentClass = element?.name;
+    final lib = element?.library.uri;
+    final generated = lib != null && lib.isScheme('package') && lib.pathSegments.first == 'fynkel';
+    componentName =
+        element is ClassElement ? element.getField('schemaName')?.computeConstantValue()?.toStringValue() : null;
+    if (!generated || componentName == null) {
+      throw BehaviourGenerationError(
+        '@Expose ${type.getDisplayString()} field: NativeComponent holds a built-in component '
+        '(RigidBody, PointLight, …)',
+        library: libraryUri,
+        member: member,
+      );
+    }
+    if (componentName == 'fynkel.Transform' || componentName == 'fynkel.Name') {
+      throw BehaviourGenerationError(
+        '@Expose ${type.getDisplayString()} field: $componentName is not a component field; '
+        'use a GameObject? field and its ${componentName == 'fynkel.Name' ? 'name' : 'transform'}',
+        library: libraryUri,
+        member: member,
+      );
+    }
+  }
   Object? defaultValue;
   var hasDefault = false;
   final node = await resolver.astNodeFor(f.firstFragment);
@@ -378,6 +406,8 @@ Future<ExposedField> _readField(
     typeName: typeName,
     enumValues: enumValues,
     behaviourId: behaviourId,
+    componentClass: componentClass,
+    componentName: componentName,
     item: item,
     dataId: dataId,
     record: record,
@@ -514,6 +544,7 @@ FieldKind? _kindOf(DartType type) {
       'Quat' => FieldKind.quat,
       'AssetRef' => FieldKind.assetRef,
       'GameObject' => FieldKind.gameObject,
+      'NativeComponent' => FieldKind.component,
       _ => null,
     };
   }
@@ -565,6 +596,7 @@ _Literal? _literal(Expression e, FieldKind kind, {FieldKind? item, String? recor
       };
     case FieldKind.gameObject:
     case FieldKind.behaviour:
+    case FieldKind.component:
     case FieldKind.data:
       return null;
     case FieldKind.record:

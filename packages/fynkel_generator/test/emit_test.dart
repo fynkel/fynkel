@@ -569,6 +569,13 @@ void main() {
           typeName: 'Spinner',
           behaviourId: 'game.Spinner',
         ),
+        ExposedField(
+          name: 'body',
+          kind: FieldKind.component,
+          nullable: true,
+          componentClass: 'RigidBody',
+          componentName: 'fynkel.RigidBody',
+        ),
       ],
     );
     final src = emitDart('demo', [turret]);
@@ -585,6 +592,12 @@ void main() {
     expect(src, contains('target: (b) => (b as _lib2.Turret).target,'));
     expect(src, contains('(b as _lib2.Turret).target = v as GameObject?'));
     expect(src, contains('(b as _lib2.Turret).spinner = v as _lib1.Spinner?'));
+    // A built-in component field (ADR-0036 §2).
+    expect(src, contains("type: 'component'"));
+    expect(src, contains("component: 'fynkel.RigidBody'"));
+    expect(src, contains('get: (b) => referenceJson((b as _lib2.Turret).body)'));
+    expect(src, contains('target: (b) => (b as _lib2.Turret).body,'));
+    expect(src, contains('(b as _lib2.Turret).body = nativeComponentOf<RigidBody>(v)'));
 
     final props = schemaFor(turret)['properties'] as Map<String, Object?>;
     expect(props['mode'], containsPair('enum', ['idle', 'aim', 'fire']));
@@ -594,6 +607,8 @@ void main() {
     expect(props['target'], containsPair('type', ['object', 'null']));
     expect(props['spinner'], containsPair('required', ['entity', 'component']));
     expect((props['spinner'] as Map)['x-fynkel'], {'type': 'behaviour', 'nullable': true, 'behaviour': 'game.Spinner'});
+    expect(props['body'], containsPair('required', ['entity']));
+    expect((props['body'] as Map)['x-fynkel'], {'type': 'component', 'nullable': true, 'component': 'fynkel.RigidBody'});
   });
 
   test('errors name the declaration', () {

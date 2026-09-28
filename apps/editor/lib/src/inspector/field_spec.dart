@@ -93,6 +93,7 @@ final class FieldSpec {
     this.declarationIndex = 0,
     this.gizmo,
     this.behaviourType,
+    this.componentType,
     this.dataType,
     this.record,
     this.drawer,
@@ -156,6 +157,12 @@ final class FieldSpec {
 
   /// For [FieldKind.scriptRef]: the script type it takes (`game.Spinner`).
   final String? behaviourType;
+
+  /// For a [FieldKind.objectRef] that holds a built-in component
+  /// (`NativeComponent<PointLight>`, `x-fynkel.type: component`,
+  /// ADR-0036 §2): the component it takes (`fynkel.PointLight`); only
+  /// objects that have one fit.
+  final String? componentType;
 
   /// A data-typed field's type (ADR-0027, `x-fynkel.type: data`): an
   /// [FieldKind.assetRef] of [assetKind] `data` that takes only data
@@ -547,6 +554,9 @@ FieldSpec _parseField(
     case 'behaviour':
       kind = FieldKind.scriptRef;
       nullable = true;
+    case 'component':
+      kind = FieldKind.objectRef;
+      nullable = true;
     case 'data':
       kind = FieldKind.assetRef;
     case 'number' when kind == FieldKind.any:
@@ -630,6 +640,7 @@ FieldSpec _parseField(
     declarationIndex: index,
     gizmo: GizmoHint.parse(hints['gizmo']),
     behaviourType: kind == FieldKind.scriptRef ? hints['behaviour'] as String? : null,
+    componentType: hints['type'] == 'component' ? hints['component'] as String? : null,
     dataType: dataType,
     record: kind == FieldKind.object ? hints['record'] as String? : null,
     drawer: hints['drawer'] as String?,

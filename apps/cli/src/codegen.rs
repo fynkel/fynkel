@@ -1051,7 +1051,7 @@ fn dart(fp: u64) -> String {
         o,
         "/// How the world reads one native component off the wire."
     );
-    let _ = writeln!(o, "class ComponentCodec {{");
+    let _ = writeln!(o, "class ComponentCodec<T extends WireRecord> {{");
     let _ = writeln!(
         o,
         "  const ComponentCodec(this.id, this.name, this.type, this.wireSize, this.decode);"
@@ -1064,7 +1064,20 @@ fn dart(fp: u64) -> String {
     let _ = writeln!(o, "  final int wireSize;");
     let _ = writeln!(
         o,
-        "  final WireRecord Function(ByteData d, int offset, Uint8List tail) decode;"
+        "  final T Function(ByteData d, int offset, Uint8List tail) decode;"
+    );
+    let _ = writeln!(o);
+    let _ = writeln!(
+        o,
+        "  /// Calls [f] with this component's class as its type argument, so"
+    );
+    let _ = writeln!(
+        o,
+        "  /// code holding a codec can make a typed value (`NativeComponent<T>`)."
+    );
+    let _ = writeln!(
+        o,
+        "  R withType<R>(R Function<X extends WireRecord>() f) => f<T>();"
     );
     let _ = writeln!(o, "}}");
     let _ = writeln!(o);
@@ -1074,7 +1087,7 @@ fn dart(fp: u64) -> String {
         let name = rust_ident(s);
         let _ = writeln!(
             o,
-            "  {0}: ComponentCodec({0}, '{1}', {2}, {2}.wireSize, {2}.decode),",
+            "  {0}: ComponentCodec<{2}>({0}, '{1}', {2}, {2}.wireSize, {2}.decode),",
             s.id, s.name, name
         );
     }

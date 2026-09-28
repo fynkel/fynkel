@@ -1259,7 +1259,7 @@ final class _SlotTarget extends FieldTarget {
   @override
   Map<String, Object?>? objectRef(FieldSpec spec, String entity) => model.objectRef(spec, entity);
   @override
-  String? describeObject(Map<String, Object?> ref) => model.describeObject(ref);
+  String? describeObject(Map<String, Object?> ref, {FieldSpec? spec}) => model.describeObject(ref, spec: spec);
 }
 
 // ── Prefab overrides ───────────────────────────────────────────────────────

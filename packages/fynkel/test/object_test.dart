@@ -134,4 +134,29 @@ void main() {
       expect(h.home, same(home), reason: 'a live reference is kept');
     }
   });
+
+  test('a built-in component is a NativeComponent: a live handle on its object (ADR-0036 §2)', () {
+    final w = fresh();
+    final hero = w.spawn(name: 'Hero')..add(const PointLight(intensity: 2));
+    w.frame(1 / 60);
+    final light = hero.component<PointLight>()!;
+    expect(light, isA<Component>());
+    expect(hero.component<PointLight>(), same(light), reason: 'one handle per component');
+    expect(hero.getComponent<NativeComponent<PointLight>>(), same(light));
+    expect(hero.getComponent<NativeComponent<SpotLight>>(), isNull);
+    expect(hero.component<SpotLight>(), isNull);
+    expect((light.name, light.gameObject, light.transform), ('Hero', hero, hero.transform));
+    expect(light.value.intensity, 2);
+
+    light.value = light.value.copyWith(intensity: 5);
+    expect(hero.get<PointLight>()!.intensity, 5, reason: 'read-your-writes, as get/set');
+    w.frame(1 / 60);
+    expect(light.value.intensity, 5);
+
+    light.destroy();
+    expect(hero.has<PointLight>(), isFalse);
+    expect(light.isAlive, isFalse);
+    expect(() => light.value, throwsStateError);
+    expect(() => hero.component<Pose>(), throwsArgumentError, reason: 'the transform is hero.transform');
+  });
 }

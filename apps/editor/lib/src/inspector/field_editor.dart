@@ -73,7 +73,7 @@ abstract class FieldTarget {
   List<String> layerNames() => const [];
   List<({String id, String name, String path})> objectsFor(FieldSpec spec) => const [];
   Map<String, Object?>? objectRef(FieldSpec spec, String entity) => null;
-  String? describeObject(Map<String, Object?> ref) => null;
+  String? describeObject(Map<String, Object?> ref, {FieldSpec? spec}) => null;
 }
 
 /// The assets of [all] a [spec]'s asset field may take (every one when it
@@ -332,11 +332,13 @@ class FieldEditor extends StatelessWidget {
           error,
           ObjectField(
             value: value is Map ? Map<String, Object?>.from(value) : null,
-            typeLabel: spec.kind == FieldKind.objectRef
-                ? 'GameObject'
-                : humanize(spec.behaviourType?.split('.').last ?? 'Script'),
+            typeLabel: switch (spec) {
+              FieldSpec(componentType: final c?) => humanize(c.split('.').last),
+              FieldSpec(kind: FieldKind.objectRef) => 'GameObject',
+              _ => humanize(spec.behaviourType?.split('.').last ?? 'Script'),
+            },
             subject: label,
-            describe: target.describeObject,
+            describe: (ref) => target.describeObject(ref, spec: spec),
             candidates: () => [
               for (final o in target.objectsFor(spec))
                 PickerItem(

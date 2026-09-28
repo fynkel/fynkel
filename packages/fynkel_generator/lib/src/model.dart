@@ -42,6 +42,11 @@ enum FieldKind {
   /// id }` (`behaviour`): that script on an object of the scene.
   behaviour('behaviour'),
 
+  /// `NativeComponent<T>?` for a built-in component `T` ↔ `{ "entity": id
+  /// }` (`component`): that component on an object of the scene (ADR-0036
+  /// §2); an object has at most one of each, so the object names it.
+  component('component'),
+
   /// `List<T>` ↔ a JSON array of T's JSON (`list`), for T one of
   /// [listItems] (ADR-0027 §5); `List<Vec3>` stays [vec3List].
   list('list'),
@@ -75,6 +80,7 @@ enum FieldKind {
         FieldKind.enumeration => 'an enum',
         FieldKind.gameObject => 'GameObject?',
         FieldKind.behaviour => 'a @FynkelBehaviour class (nullable)',
+        FieldKind.component => 'NativeComponent<T>? (T a built-in component: RigidBody, PointLight, …)',
         FieldKind.list =>
           'List<T> (T one of double, int, bool, String, Quat, AssetRef, an enum, a data class, a record class)',
         FieldKind.data => 'a @FynkelDataAsset class (nullable)',
@@ -82,7 +88,7 @@ enum FieldKind {
       };
 
   /// A reference to an object of the scene, resolved at load.
-  bool get isReference => this == FieldKind.gameObject || this == FieldKind.behaviour;
+  bool get isReference => this == FieldKind.gameObject || this == FieldKind.behaviour || this == FieldKind.component;
 
   static FieldKind? fromDartType(String name) {
     for (final k in values) {
@@ -120,6 +126,8 @@ class ExposedField {
     this.typeName,
     this.enumValues = const [],
     this.behaviourId,
+    this.componentClass,
+    this.componentName,
     this.item,
     this.dataId,
     this.record,
@@ -176,6 +184,12 @@ class ExposedField {
   /// The type id of the script a [FieldKind.behaviour] field references.
   final String? behaviourId;
 
+  /// A [FieldKind.component] field's component: its Dart class
+  /// (`RigidBody`, exported by `package:fynkel/fynkel.dart`) and schema
+  /// name (`fynkel.RigidBody`).
+  final String? componentClass;
+  final String? componentName;
+
   /// A [FieldKind.list]'s item kind (one of [FieldKind.listItems]); an
   /// enum item's class is [typeName], its values [enumValues]. The
   /// display hints (`kind`, `min`, `max`, `step`, `unit`) describe each
@@ -229,6 +243,7 @@ class ExposedField {
         if (drawer != null) 'drawer': drawer,
         if (gizmo != null) 'gizmo': gizmo!.json,
         if (behaviourId != null) 'behaviour': behaviourId,
+        if (componentName != null) 'component': componentName,
         if (dataId != null) 'data': dataId,
         if (record != null && item == null) 'record': record!.className,
       };

@@ -23,6 +23,8 @@ class Turret extends Behaviour {
   Spinner? spinner;
   GameObject? gone;
   Mode mode = Mode.idle;
+  NativeComponent<PointLight>? lamp;
+  NativeComponent<PointLight>? dark;
 }
 
 /// What the generator emits for the two classes.
@@ -61,6 +63,22 @@ final turretType = BehaviourType(
       set: (b, v) => (b as Turret).gone = v as GameObject?,
     ),
     BehaviourField(
+      name: 'lamp',
+      type: 'component',
+      component: PointLight.schemaName,
+      get: (b) => referenceJson((b as Turret).lamp),
+      set: (b, v) => (b as Turret).lamp = nativeComponentOf<PointLight>(v),
+      target: (b) => (b as Turret).lamp,
+    ),
+    BehaviourField(
+      name: 'dark',
+      type: 'component',
+      component: PointLight.schemaName,
+      get: (b) => referenceJson((b as Turret).dark),
+      set: (b, v) => (b as Turret).dark = nativeComponentOf<PointLight>(v),
+      target: (b) => (b as Turret).dark,
+    ),
+    BehaviourField(
       name: 'mode',
       type: 'enum',
       get: (b) => (b as Turret).mode.name,
@@ -83,6 +101,17 @@ Map<String, Object?> transform() => {
         'position': [0, 0, 0],
         'rotation': [0, 0, 0, 1],
         'scale': [1, 1, 1],
+      },
+    };
+
+Map<String, Object?> light() => {
+      'type': 'fynkel.PointLight',
+      'version': 1,
+      'data': {
+        'color': [1, 1, 1],
+        'intensity': 40.0,
+        'range': 10.0,
+        'culling_mask': 4294967295,
       },
     };
 
@@ -128,6 +157,8 @@ void main() {
               'spinner': {'entity': spinnerObjectId, 'component': spinnerComponentId},
               'gone': {'entity': 'e0000000-0000-4000-8000-0000000000ff'},
               'mode': 'fire',
+              'lamp': {'entity': plainId},
+              'dark': {'entity': spinnerObjectId},
             },
           },
         }),
@@ -139,7 +170,10 @@ void main() {
             'data': {'speed': 3.0},
           },
         }),
-        plainId: entity('Plain', {'e0000000-0000-4000-8000-0000000000c4': transform()}),
+        plainId: entity('Plain', {
+          'e0000000-0000-4000-8000-0000000000c4': transform(),
+          'e0000000-0000-4000-8000-0000000000c5': light(),
+        }),
       },
     }));
     // A prefab whose root's script references its own child.
@@ -162,6 +196,7 @@ void main() {
                   'entity': 'e0000000-0000-4000-8000-0000000000b2',
                   'component': 'e0000000-0000-4000-8000-0000000000d3',
                 },
+                'lamp': {'entity': 'e0000000-0000-4000-8000-0000000000b2'},
               },
             },
           },
@@ -171,6 +206,7 @@ void main() {
           'Barrel',
           {
             'e0000000-0000-4000-8000-0000000000d2': transform(),
+            'e0000000-0000-4000-8000-0000000000d4': light(),
             'e0000000-0000-4000-8000-0000000000d3': {
               'type': 'game.Spinner',
               'version': 1,
@@ -213,14 +249,37 @@ void main() {
     expect(turret.spinner!.speed, 3.0);
     expect(turret.mode, Mode.fire);
     expect(turret.gone, isNull);
-    final warning = report.warnings.where((d) => d.code == 'FYN-B0003').single;
-    expect(warning.message, contains('game.Turret.gone'));
-    expect(warning.pointer, endsWith('/data/gone'));
+    final warnings = report.warnings.where((d) => d.code == 'FYN-B0003').toList();
+    expect(warnings.map((d) => d.pointer?.split('/').last), unorderedEquals(['gone', 'dark']));
+    expect(warnings.firstWhere((d) => d.pointer!.endsWith('/data/gone')).message, contains('game.Turret.gone'));
+    // A built-in component field (ADR-0036 §2): the light on that object;
+    // an object without one is None.
+    expect(turret.lamp, same(turret.target!.component<PointLight>()));
+    expect(turret.lamp!.value.intensity, 40);
+    expect(turret.dark, isNull);
+    expect(warnings.firstWhere((d) => d.pointer!.endsWith('/data/dark')).message, contains('no fynkel.PointLight'));
 
     // What the Inspector reads back in Play: the same JSON as the scene.
     expect(turretType.field('target')!.get(turret), {'entity': plainId});
     expect(turretType.field('spinner')!.get(turret), {'entity': spinnerObjectId, 'component': spinnerComponentId});
     expect(turretType.field('gone')!.get(turret), isNull);
+    expect(turretType.field('lamp')!.get(turret), {'entity': plainId});
+
+    // Removing the light clears the field at the next settle (ADR-0036 §5).
+    turret.lamp!.destroy();
+    w.frame(1 / 60);
+    expect(turret.lamp, isNull);
+  });
+
+  test('a clone\'s component field points at the copy\'s own component', () {
+    final w = world();
+    final a = w.instantiate(prefabId);
+    w.frame(1 / 60);
+    final copy = a.clone();
+    w.frame(1 / 60);
+    final t = copy.behaviour<Turret>()!;
+    expect(t.lamp!.gameObject.parent, copy);
+    expect(t.lamp, isNot(same(a.behaviour<Turret>()!.lamp)));
   });
 
   test('a prefab instance references its own copy, not another instance\'s', () {
@@ -234,6 +293,7 @@ void main() {
       expect(t.target, isNotNull);
       expect(t.target!.parent, root, reason: 'its own Barrel');
       expect(identical(t.spinner, t.target!.behaviour<Spinner>()), isTrue);
+      expect(t.lamp, same(t.target!.component<PointLight>()), reason: 'its own Barrel\'s light');
     }
     expect(identical(turrets[0].target, turrets[1].target), isFalse);
   });

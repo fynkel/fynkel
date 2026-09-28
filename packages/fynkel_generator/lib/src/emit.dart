@@ -129,6 +129,7 @@ String emitDart(String package, List<BehaviourClass> classes) {
         if (f.max != null) o.writeln('      max: ${_dartLiteral(f.max)},');
         if (f.step != null) o.writeln('      step: ${_dartLiteral(f.step)},');
         if (f.dataId != null) o.writeln("      dataType: '${_dartString(f.dataId!)}',");
+        if (f.componentName != null) o.writeln("      component: '${_dartString(f.componentName!)}',");
         o.writeln('      get: (b) => ${_getter(f, '(b as $cls).${f.name}', recordNames)},');
         if (f.kind.isReference || f.dataId != null) o.writeln('      target: (b) => (b as $cls).${f.name},');
         final type = f.typeName == null ? null : '${prefix[f.typeLibrary]}.${f.typeName}';
@@ -275,7 +276,7 @@ String _getter(ExposedField f, String read, Map<String, String> records) {
     FieldKind.assetRef => '_assetRefJson($read)',
     FieldKind.vec3List => '_vec3ListJson($read)',
     FieldKind.enumeration => f.nullable ? '$read?.name' : '$read.name',
-    FieldKind.gameObject || FieldKind.behaviour => 'referenceJson($read)',
+    FieldKind.gameObject || FieldKind.behaviour || FieldKind.component => 'referenceJson($read)',
     FieldKind.data => 'dataJson($read)',
     FieldKind.record => '${record}Json($read)',
     FieldKind.list => switch (f.item!) {
@@ -296,7 +297,9 @@ String _listJson(ExposedField f, String read, String item) =>
 
 /// [type]: the enum's or the referenced script's class, prefixed.
 String _setter(ExposedField f, String? type, Map<String, String> records) {
-  // References arrive resolved (BehaviourField.isReference).
+  // References arrive resolved (BehaviourField.isReference); a component
+  // field's as its object or the handle.
+  if (f.kind == FieldKind.component) return 'nativeComponentOf<${f.componentClass}>(v)';
   if (f.kind.isReference) return 'v as ${type ?? 'GameObject'}?';
   // Data assets arrive resolved too (the shared instance).
   if (f.kind == FieldKind.data) return 'v as $type?';
@@ -330,6 +333,7 @@ String _setter(ExposedField f, String? type, Map<String, String> records) {
     FieldKind.enumeration => '(v) => $type.values.byName(v as String)',
     FieldKind.gameObject ||
     FieldKind.behaviour ||
+    FieldKind.component ||
     FieldKind.list ||
     FieldKind.data ||
     FieldKind.record =>
@@ -442,6 +446,7 @@ Map<String, Object?> _propertySchema(ExposedField f) {
       s['enum'] = [...f.enumValues, if (f.nullable) null];
     case FieldKind.gameObject:
     case FieldKind.behaviour:
+    case FieldKind.component:
       final keys = ['entity', if (f.kind == FieldKind.behaviour) 'component'];
       s['type'] = ['object', 'null'];
       s['properties'] = {

@@ -5374,7 +5374,7 @@ class AnimatorParameterRecord implements WireRecord {
 }
 
 /// How the world reads one native component off the wire.
-class ComponentCodec {
+class ComponentCodec<T extends WireRecord> {
   const ComponentCodec(this.id, this.name, this.type, this.wireSize, this.decode);
 
   /// `ComponentId`.
@@ -5382,37 +5382,41 @@ class ComponentCodec {
   final String name;
   final Type type;
   final int wireSize;
-  final WireRecord Function(ByteData d, int offset, Uint8List tail) decode;
+  final T Function(ByteData d, int offset, Uint8List tail) decode;
+
+  /// Calls [f] with this component's class as its type argument, so
+  /// code holding a codec can make a typed value (`NativeComponent<T>`).
+  R withType<R>(R Function<X extends WireRecord>() f) => f<T>();
 }
 
 /// Every native component class by `ComponentId`.
 const Map<int, ComponentCodec> componentCodecs = {
-  1: ComponentCodec(1, 'fynkel.Transform', Transform, Transform.wireSize, Transform.decode),
-  3: ComponentCodec(3, 'fynkel.Name', Name, Name.wireSize, Name.decode),
-  4: ComponentCodec(4, 'fynkel.MeshRenderer', MeshRenderer, MeshRenderer.wireSize, MeshRenderer.decode),
-  5: ComponentCodec(5, 'fynkel.Camera', Camera, Camera.wireSize, Camera.decode),
-  6: ComponentCodec(6, 'fynkel.DirectionalLight', DirectionalLight, DirectionalLight.wireSize, DirectionalLight.decode),
-  7: ComponentCodec(7, 'fynkel.PointLight', PointLight, PointLight.wireSize, PointLight.decode),
-  8: ComponentCodec(8, 'fynkel.SpotLight', SpotLight, SpotLight.wireSize, SpotLight.decode),
-  9: ComponentCodec(9, 'fynkel.Environment', Environment, Environment.wireSize, Environment.decode),
-  10: ComponentCodec(10, 'fynkel.RigidBody', RigidBody, RigidBody.wireSize, RigidBody.decode),
-  11: ComponentCodec(11, 'fynkel.Collider', Collider, Collider.wireSize, Collider.decode),
-  12: ComponentCodec(12, 'fynkel.CharacterController', CharacterController, CharacterController.wireSize, CharacterController.decode),
-  13: ComponentCodec(13, 'fynkel.ThirdPersonCamera', ThirdPersonCamera, ThirdPersonCamera.wireSize, ThirdPersonCamera.decode),
-  14: ComponentCodec(14, 'fynkel.Rotator', Rotator, Rotator.wireSize, Rotator.decode),
-  15: ComponentCodec(15, 'fynkel.Oscillate', Oscillate, Oscillate.wireSize, Oscillate.decode),
-  16: ComponentCodec(16, 'fynkel.Follow', Follow, Follow.wireSize, Follow.decode),
-  17: ComponentCodec(17, 'fynkel.LookAtCamera', LookAtCamera, LookAtCamera.wireSize, LookAtCamera.decode),
-  18: ComponentCodec(18, 'fynkel.LifetimeDespawn', LifetimeDespawn, LifetimeDespawn.wireSize, LifetimeDespawn.decode),
-  19: ComponentCodec(19, 'fynkel.Emitter', Emitter, Emitter.wireSize, Emitter.decode),
-  20: ComponentCodec(20, 'fynkel.TriggerZone', TriggerZone, TriggerZone.wireSize, TriggerZone.decode),
-  21: ComponentCodec(21, 'fynkel.Animator', Animator, Animator.wireSize, Animator.decode),
-  22: ComponentCodec(22, 'fynkel.Skin', Skin, Skin.wireSize, Skin.decode),
-  23: ComponentCodec(23, 'fynkel.AudioSource', AudioSource, AudioSource.wireSize, AudioSource.decode),
-  24: ComponentCodec(24, 'fynkel.AudioListener', AudioListener, AudioListener.wireSize, AudioListener.decode),
-  25: ComponentCodec(25, 'fynkel.Volume', Volume, Volume.wireSize, Volume.decode),
-  26: ComponentCodec(26, 'fynkel.Layer', Layer, Layer.wireSize, Layer.decode),
-  27: ComponentCodec(27, 'fynkel.Tags', Tags, Tags.wireSize, Tags.decode),
+  1: ComponentCodec<Transform>(1, 'fynkel.Transform', Transform, Transform.wireSize, Transform.decode),
+  3: ComponentCodec<Name>(3, 'fynkel.Name', Name, Name.wireSize, Name.decode),
+  4: ComponentCodec<MeshRenderer>(4, 'fynkel.MeshRenderer', MeshRenderer, MeshRenderer.wireSize, MeshRenderer.decode),
+  5: ComponentCodec<Camera>(5, 'fynkel.Camera', Camera, Camera.wireSize, Camera.decode),
+  6: ComponentCodec<DirectionalLight>(6, 'fynkel.DirectionalLight', DirectionalLight, DirectionalLight.wireSize, DirectionalLight.decode),
+  7: ComponentCodec<PointLight>(7, 'fynkel.PointLight', PointLight, PointLight.wireSize, PointLight.decode),
+  8: ComponentCodec<SpotLight>(8, 'fynkel.SpotLight', SpotLight, SpotLight.wireSize, SpotLight.decode),
+  9: ComponentCodec<Environment>(9, 'fynkel.Environment', Environment, Environment.wireSize, Environment.decode),
+  10: ComponentCodec<RigidBody>(10, 'fynkel.RigidBody', RigidBody, RigidBody.wireSize, RigidBody.decode),
+  11: ComponentCodec<Collider>(11, 'fynkel.Collider', Collider, Collider.wireSize, Collider.decode),
+  12: ComponentCodec<CharacterController>(12, 'fynkel.CharacterController', CharacterController, CharacterController.wireSize, CharacterController.decode),
+  13: ComponentCodec<ThirdPersonCamera>(13, 'fynkel.ThirdPersonCamera', ThirdPersonCamera, ThirdPersonCamera.wireSize, ThirdPersonCamera.decode),
+  14: ComponentCodec<Rotator>(14, 'fynkel.Rotator', Rotator, Rotator.wireSize, Rotator.decode),
+  15: ComponentCodec<Oscillate>(15, 'fynkel.Oscillate', Oscillate, Oscillate.wireSize, Oscillate.decode),
+  16: ComponentCodec<Follow>(16, 'fynkel.Follow', Follow, Follow.wireSize, Follow.decode),
+  17: ComponentCodec<LookAtCamera>(17, 'fynkel.LookAtCamera', LookAtCamera, LookAtCamera.wireSize, LookAtCamera.decode),
+  18: ComponentCodec<LifetimeDespawn>(18, 'fynkel.LifetimeDespawn', LifetimeDespawn, LifetimeDespawn.wireSize, LifetimeDespawn.decode),
+  19: ComponentCodec<Emitter>(19, 'fynkel.Emitter', Emitter, Emitter.wireSize, Emitter.decode),
+  20: ComponentCodec<TriggerZone>(20, 'fynkel.TriggerZone', TriggerZone, TriggerZone.wireSize, TriggerZone.decode),
+  21: ComponentCodec<Animator>(21, 'fynkel.Animator', Animator, Animator.wireSize, Animator.decode),
+  22: ComponentCodec<Skin>(22, 'fynkel.Skin', Skin, Skin.wireSize, Skin.decode),
+  23: ComponentCodec<AudioSource>(23, 'fynkel.AudioSource', AudioSource, AudioSource.wireSize, AudioSource.decode),
+  24: ComponentCodec<AudioListener>(24, 'fynkel.AudioListener', AudioListener, AudioListener.wireSize, AudioListener.decode),
+  25: ComponentCodec<Volume>(25, 'fynkel.Volume', Volume, Volume.wireSize, Volume.decode),
+  26: ComponentCodec<Layer>(26, 'fynkel.Layer', Layer, Layer.wireSize, Layer.decode),
+  27: ComponentCodec<Tags>(27, 'fynkel.Tags', Tags, Tags.wireSize, Tags.decode),
 };
 
 /// `ComponentId` of every native component class.
