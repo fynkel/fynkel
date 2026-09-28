@@ -269,4 +269,27 @@ void main() {
     expect(() => w.frame(1 / 60), throwsA(panic));
     expect(w.debugPanic, throwsA(panic));
   });
+
+  test('after dispose the objects are dead, keep their last pose, and every call throws, never touching freed memory (foundation 4.2)', () {
+    final w = World.create(library: lib);
+    final go = w.spawn(name: 'Box', transform: identityTransform.copyWith(position: const Vec3(1, 2, 3)));
+    w.frame(1 / 60);
+    go.transform.position = const Vec3(4, 5, 6);
+    w.frame(1 / 60);
+    final pose = go.localTransform;
+    expect(pose.position, const Vec3(4, 5, 6));
+    expect(go.worldTransform, isNotNull);
+
+    w.dispose();
+    expect(w.isDisposed, isTrue);
+    expect(go.isAlive, isFalse);
+    expect(go.localTransform, pose, reason: 'the last pose, read from Dart');
+    expect(go.worldTransform, isNull);
+    final disposed = isA<StateError>().having((e) => e.message, 'message', contains('disposed'));
+    expect(() => w.frame(1 / 60), throwsA(disposed));
+    expect(() => w.spawn(name: 'Late'), throwsA(disposed));
+    expect(() => w.tick, throwsA(disposed));
+    expect(() => w.allEntities(), throwsA(disposed));
+    w.dispose(); // twice is fine
+  });
 }

@@ -169,7 +169,7 @@ class _ViewCache {
 }
 
 class NativeWorld {
-  NativeWorld._(this._w)
+  NativeWorld._(this._ptr)
       : _plan = calloc<FynkelFramePlan>(),
         _submit = calloc<FynkelSubmitResult>(),
         _step = calloc<FynkelStepResult>(),
@@ -178,7 +178,22 @@ class NativeWorld {
         _stats = calloc<FynkelWorldStats>(),
         _projection = calloc<FynkelProjectionInfo>();
 
-  Pointer<FynkelWorld> _w;
+  Pointer<FynkelWorld> _ptr;
+
+  /// The native world; after [dispose] every call throws here, before it
+  /// reaches freed native memory or the freed scratch below (foundation
+  /// 4.2).
+  Pointer<FynkelWorld> get _w {
+    _requireLive();
+    return _ptr;
+  }
+
+  void _requireLive() {
+    if (_ptr == nullptr) throw StateError('the world was disposed (World.dispose); it can no longer be used');
+  }
+
+  bool get isDisposed => _ptr == nullptr;
+
   final Pointer<FynkelFramePlan> _plan;
   final Pointer<FynkelSubmitResult> _submit;
   final Pointer<FynkelStepResult> _step;
@@ -194,8 +209,6 @@ class NativeWorld {
   int _scratchLen = 0;
 
   int ffiCalls = 0, dartCopies = 0, dartBytesCopied = 0;
-
-  bool get isDisposed => _w == nullptr;
 
   /// Raw `FynkelWorld*` for platform viewports that render this world's
   /// extract (e.g. `fynkel_apple_viewport_render`). Valid until [dispose].
@@ -244,11 +257,11 @@ class NativeWorld {
     return FramePlan(p.steps, p.dropped_seconds, p.clamped != 0, p.alpha);
   }
 
-  SubmitResult submit(CommandLane lane, Uint8List bytes) => submitBytes(lane, bytes, bytes.length);
-
-  /// Submits the first [length] bytes of [bytes]: one memcpy into reused
-  /// native scratch, one FFI call, no Dart allocation besides the result.
-  SubmitResult submitBytes(CommandLane lane, Uint8List bytes, int length) {
+  /// Copies the first [length] bytes of [bytes] into the reused native
+  /// scratch (grown on demand). Checks the world first: after [dispose]
+  /// the scratch is freed (foundation 4.2).
+  void _toScratch(Uint8List bytes, int length) {
+    _requireLive();
     if (length > _scratchLen) {
       if (_scratch != nullptr) calloc.free(_scratch);
       _scratchLen = length * 2;
@@ -258,6 +271,14 @@ class NativeWorld {
     _scratchView.setRange(0, length, bytes);
     dartCopies++;
     dartBytesCopied += length;
+  }
+
+  SubmitResult submit(CommandLane lane, Uint8List bytes) => submitBytes(lane, bytes, bytes.length);
+
+  /// Submits the first [length] bytes of [bytes]: one memcpy into reused
+  /// native scratch, one FFI call, no Dart allocation besides the result.
+  SubmitResult submitBytes(CommandLane lane, Uint8List bytes, int length) {
+    _toScratch(bytes, length);
     ffiCalls++;
     final s = fynkel_world_submit_commands(_w, lane.index, _scratch, length, _submit);
     return SubmitResult(s, _submit.ref.accepted, _submit.ref.rejected);
@@ -267,15 +288,7 @@ class NativeWorld {
   /// first [length] bytes of [bytes]) to the world: one memcpy into the
   /// reused scratch, one FFI call.
   FynkelStatus captureInputBytes(Uint8List bytes, int length) {
-    if (length > _scratchLen) {
-      if (_scratch != nullptr) calloc.free(_scratch);
-      _scratchLen = length * 2;
-      _scratch = calloc<Uint8>(_scratchLen);
-      _scratchView = _scratch.asTypedList(_scratchLen);
-    }
-    _scratchView.setRange(0, length, bytes);
-    dartCopies++;
-    dartBytesCopied += length;
+    _toScratch(bytes, length);
     ffiCalls++;
     return fynkel_world_capture_input(_w, _scratch, length);
   }
@@ -360,6 +373,7 @@ class NativeWorld {
 
   /// Explicit query; the view is valid until the next mutating call or query.
   WireBuffer query(QueryKind kind, {int entity = 0}) {
+    _requireLive(); // before the write into the scratch
     _query.ref.kind = kind.index + 1;
     _query.ref.request_id = ++_requestId;
     _query.ref.entity = entity;
@@ -376,15 +390,7 @@ class NativeWorld {
   /// hits come back as `PhysicsHitRecord`s in a query buffer read in
   /// place, valid until the next query or mutating call.
   WireBuffer physicsQuery(Uint8List bytes, int length) {
-    if (length > _scratchLen) {
-      if (_scratch != nullptr) calloc.free(_scratch);
-      _scratchLen = length * 2;
-      _scratch = calloc<Uint8>(_scratchLen);
-      _scratchView = _scratch.asTypedList(_scratchLen);
-    }
-    _scratchView.setRange(0, length, bytes);
-    dartCopies++;
-    dartBytesCopied += length;
+    _toScratch(bytes, length);
     ffiCalls++;
     final s = fynkel_world_physics_query(_w, _scratch, length, _view);
     _check(s, 'physics_query');
@@ -407,15 +413,7 @@ class NativeWorld {
   }
 
   void _copyToScratch(Uint8List bytes, int length) {
-    if (length > _scratchLen) {
-      if (_scratch != nullptr) calloc.free(_scratch);
-      _scratchLen = length * 2;
-      _scratch = calloc<Uint8>(_scratchLen);
-      _scratchView = _scratch.asTypedList(_scratchLen);
-    }
-    _scratchView.setRange(0, length, bytes);
-    dartCopies++;
-    dartBytesCopied += length;
+    _toScratch(bytes, length);
   }
 
   /// `fynkel_world_load_project`: the startup scene of the cooked cache at
@@ -788,9 +786,9 @@ class NativeWorld {
   }
 
   void dispose() {
-    if (_w == nullptr) return;
-    fynkel_world_destroy(_w);
-    _w = nullptr;
+    if (_ptr == nullptr) return;
+    fynkel_world_destroy(_ptr);
+    _ptr = nullptr;
     calloc.free(_plan);
     calloc.free(_submit);
     calloc.free(_step);
@@ -799,5 +797,8 @@ class NativeWorld {
     calloc.free(_stats);
     calloc.free(_projection);
     if (_scratch != nullptr) calloc.free(_scratch);
+    _scratch = nullptr;
+    _scratchLen = 0;
+    _scratchView = Uint8List(0);
   }
 }

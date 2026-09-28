@@ -312,6 +312,7 @@ class World {
   /// wait for the tick. Reads return the initial transform and the writes
   /// staged so far.
   GameObject spawn({Pose transform = identityTransform, GameObject? parent, String name = ''}) {
+    if (_native.isDisposed) throw StateError('spawn: the world was disposed (World.dispose); it can no longer be used');
     final tempId = _nextTempId++;
     final go = GameObject._(this, tempId, transform, name).._spawnParent = parent;
     _pendingByTempId[tempId] = go;
@@ -888,6 +889,7 @@ class World {
   /// frame's raw edges.
   FramePlan frame(double dtSeconds,
       {List<InputEvent> input = const [], void Function(int tick)? fixedUpdate, void Function()? update}) {
+    if (_native.isDisposed) throw StateError('frame: the world was disposed (World.dispose); it can no longer be used');
     if (_native.isPoisoned) throw _native.failure('frame', FynkelStatus.FYNKEL_STATUS_POISONED);
     final t = frameTimes.._begin();
     _deferredErrors.clear(); // a frame that threw something else left them
@@ -2039,10 +2041,26 @@ class World {
 
   BridgeStats stats() => _native.stats();
 
+  /// Frees the native world. Its objects go dead, as destroyed ones do,
+  /// keeping their last pose to read; every later call on the world
+  /// throws a [StateError] (foundation 4.2). Twice is fine.
   void dispose() {
+    if (_native.isDisposed) return;
+    for (final go in [..._byEntity.values, ..._pendingByTempId.values]) {
+      // Read from the snapshot while it is still there, then never again.
+      go._overlay = go._lastPose;
+      go._alive = false;
+    }
+    _byEntity.clear();
+    _pendingByTempId.clear();
+    _snapshot = WireBuffer.empty;
+    _snapshotIndex.clear();
     _native.dispose();
     if (ownsLibrary) _lib.dispose();
   }
+
+  /// Whether [dispose] ran.
+  bool get isDisposed => _native.isDisposed;
 }
 
 /// The audio engine of a [World] ([World.audio], M3-11, docs/audio.md).
@@ -3308,6 +3326,14 @@ class GameObject extends FynkelObject {
     if (_stagedValid) return _overlay = _staged!.toTransform();
     return world._snapshotOf(_entity ?? -1)?.local ?? _queriedTransform() ?? _initial;
   }
+
+  /// [localTransform] from what Dart holds, never asking the world (it
+  /// may be poisoned): for [World.dispose].
+  Pose get _lastPose =>
+      _overlay ??
+      (_stagedValid ? _staged!.toTransform() : null) ??
+      world._snapshotOf(_entity ?? -1)?.local ??
+      _initial;
 
   /// The world's own local transform before the first snapshot (one
   /// query per object per tick, shared with [get]), so a partial write at
