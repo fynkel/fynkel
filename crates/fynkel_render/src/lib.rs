@@ -68,7 +68,7 @@ use surface::{Pass, SurfaceContext, SurfaceShader};
 
 pub use culling::{Frustum, Sphere};
 pub use debug::{DebugDraw, DebugVertex};
-pub use fynkel_assets::{Assets, EnvironmentPayload, PbrMaterial, QualityProfile};
+pub use fynkel_assets::{Assets, EnvironmentPayload, PbrMaterial, QualityProfile, Warm};
 pub use overlay::{Grid, OutlineStyle, Overlay, OverlayLine, OverlayTriangle, MAX_OUTLINE_WIDTH};
 pub use quality::{Quality, QualityStatus};
 
@@ -553,6 +553,10 @@ pub struct FrameStats {
     /// (pass recording; the submit is the host's), in microseconds.
     pub prepare_us: u32,
     pub encode_us: u32,
+    /// Meshes, textures and materials a background load made resident
+    /// that this frame put on the GPU ahead of their first draw
+    /// (ADR-0038 §5).
+    pub warmed: u32,
     /// Estimated GPU memory held: resident meshes and textures, the
     /// attachments at the internal size, the shadow map, the instance,
     /// joint and debug buffers.
@@ -1096,6 +1100,10 @@ pub struct ExtractRenderer {
     /// Draw a lit cube for spatial entities without a `MeshRenderer`
     /// (the M1 behaviour; on by default).
     pub placeholders: bool,
+    /// How long each frame may spend uploading what a background scene
+    /// load made resident (ADR-0038 §5), in microseconds; 0 turns the
+    /// warm-up off. Default 2000.
+    pub warm_budget_us: u32,
     /// Test every instance's bounding sphere against the camera frustum
     /// (and the sun's box) before uploading it; off, everything is drawn.
     /// On by default; off only to prove the picture does not change.
@@ -1500,6 +1508,7 @@ impl ExtractRenderer {
             camera: Camera::default(),
             light_dir: Vec3::new(0.4, 1.0, 0.6).normalize(),
             placeholders: true,
+            warm_budget_us: 2000,
             frustum_culling: true,
         }
     }
@@ -1924,6 +1933,7 @@ impl ExtractRenderer {
             gpu_timed: self.gpu_timed,
             ..FrameStats::default()
         };
+        stats.warmed = self.warm_up(device, queue);
 
         // Camera.
         let aspect = self.width as f32 / self.height as f32;
@@ -3360,6 +3370,37 @@ impl ExtractRenderer {
             gray,
             default_material,
         });
+    }
+
+    /// Uploads what a background scene load made resident
+    /// ([`Assets::next_warm`]) until the frame's warm budget is spent, so
+    /// the scene's first frames after its activation upload nothing
+    /// (ADR-0038 §5). How many it uploaded.
+    fn warm_up(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> u32 {
+        if self.warm_budget_us == 0 {
+            return 0;
+        }
+        let budget = std::time::Duration::from_micros(self.warm_budget_us as u64);
+        let started = std::time::Instant::now();
+        let mut warmed = 0;
+        while started.elapsed() < budget {
+            let Some(next) = self.assets.as_ref().and_then(|a| a.next_warm()) else {
+                break;
+            };
+            match next {
+                Warm::Mesh(r) => {
+                    self.mesh(device, &r);
+                }
+                Warm::Texture(r) => {
+                    self.texture(device, queue, &r);
+                }
+                Warm::Material(r) => {
+                    self.material(device, queue, &r);
+                }
+            }
+            warmed += 1;
+        }
+        warmed
     }
 
     /// Loads the mesh on first use; `true` when it is on the GPU.

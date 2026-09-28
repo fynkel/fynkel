@@ -493,3 +493,50 @@ fn an_extra_worlds_skinned_meshes_follow_its_own_palette() {
     assert_eq!((s.extra_worlds, s.skinned, s.joints), (1, 2, 12));
     assert_eq!(px, px_posed);
 }
+
+/// ADR-0038 §5: while a scene loads in the background the renderer puts
+/// what the load made resident on the GPU, within a per-frame budget, so
+/// the first frames after the switch upload nothing.
+#[test]
+fn the_renderer_warms_what_a_background_load_made_resident() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("no GPU adapter; skipping");
+        return;
+    };
+    let project = TempProject::new("warm");
+    let cache = project.cook();
+    let assets = Assets::open(&cache).unwrap_or_else(|d| panic!("{d}"));
+    let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 64, 64);
+    renderer.placeholders = false;
+    renderer.set_assets(Some(assets.clone()));
+    let empty = World::new(WorldConfig::default()).extract();
+
+    let id = assets.startup_scene().unwrap();
+    let closure = assets.scene(id).unwrap().closure;
+    let _token = assets.retain(&closure);
+    assets.preload(&closure, &AtomicUsize::new(0), &AtomicBool::new(false));
+
+    // A zero budget warms nothing; the default does, while drawing none
+    // of it.
+    renderer.warm_budget_us = 0;
+    render_offscreen(&device, &queue, &mut renderer, &empty);
+    assert_eq!(renderer.stats().warmed, 0);
+    renderer.warm_budget_us = 1_000_000;
+    render_offscreen(&device, &queue, &mut renderer, &empty);
+    let warmed = renderer.stats().warmed;
+    assert!(
+        warmed >= 3,
+        "the robot's mesh, texture and material at least: {warmed}"
+    );
+    let bytes = renderer.stats().gpu_bytes;
+    render_offscreen(&device, &queue, &mut renderer, &empty);
+    assert_eq!(renderer.stats().warmed, 0, "drained");
+
+    // The scene then draws with nothing more to upload.
+    let (_world, extract, _residency) = load_startup(&assets);
+    render_offscreen(&device, &queue, &mut renderer, &extract);
+    assert_eq!(renderer.asset_errors(), &[] as &[String]);
+    assert_eq!(renderer.stats().gpu_bytes, bytes, "already on the GPU");
+}
