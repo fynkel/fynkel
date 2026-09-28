@@ -80,7 +80,7 @@ void main() {
     });
 
     test('the matrix scope draws in a local space and restores the previous one', () {
-      const local = Transform(position: Vec3(10, 0, 0), rotation: Quat.identity, scale: Vec3(2, 2, 2));
+      const local = Pose(position: Vec3(10, 0, 0), rotation: Quat.identity, scale: Vec3(2, 2, 2));
       context.run(() {
         Gizmos.withMatrix(local, () {
           Gizmos.withColor(const Vec4(0, 0, 1, 1), () => Gizmos.line(Vec3.zero, const Vec3(1, 0, 0)));
@@ -98,7 +98,7 @@ void main() {
     test('clear empties the lines and resets the colour and matrix', () {
       context.run(() {
         Gizmos.color = const Vec4(1, 0, 0, 1);
-        Gizmos.matrix = const Transform(position: Vec3.one, rotation: Quat.identity, scale: Vec3.one);
+        Gizmos.matrix = const Pose(position: Vec3.one, rotation: Quat.identity, scale: Vec3.one);
         Gizmos.line(Vec3.zero, Vec3.one);
       });
       buffer.clear();
@@ -116,7 +116,7 @@ void main() {
     test('off by default; on, a behaviour\'s gizmos are the frame\'s, cleared at the next', () {
       final w = World.create(library: lib)..throwOnDiagnostics = true;
       addTearDown(w.dispose);
-      final go = w.spawn(transform: const Transform(position: Vec3(0, 1, 0), rotation: Quat.identity, scale: Vec3.one));
+      final go = w.spawn(transform: const Pose(position: Vec3(0, 1, 0), rotation: Quat.identity, scale: Vec3.one));
       go.addBehaviour(Marker());
       w.frame(1 / 60);
       expect(w.gizmos, isNull);

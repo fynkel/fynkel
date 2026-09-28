@@ -54,7 +54,7 @@ final class ObjectSpec {
   factory ObjectSpec.primitive(
     Primitive shape, {
     String? name,
-    Transform transform = identityTransform,
+    Pose transform = identityTransform,
     bool active = true,
     Iterable<String> tags = const [],
     String? layer,
@@ -79,7 +79,7 @@ final class ObjectSpec {
   /// The prefab this is an instance of, or null for a new object.
   final AssetRef? prefab;
 
-  final Transform transform;
+  final Pose transform;
   final bool active;
   final Iterable<String> tags;
   final String? layer;
@@ -160,7 +160,7 @@ extension on World {
     }
   }
 
-  GameObject _buildSpec(ObjectSpec spec, GameObject? parent, Transform transform) {
+  GameObject _buildSpec(ObjectSpec spec, GameObject? parent, Pose transform) {
     final GameObject go;
     if (spec.prefab case final prefab?) {
       // The native instantiate needs a spawned parent; under one this build

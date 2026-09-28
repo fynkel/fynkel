@@ -144,7 +144,7 @@ void main() {
     w.frame(1 / 60);
     expect(crate.get<RigidBody>(), dynamicBody);
     expect(crate.get<Collider>(), unitBox);
-    expect(crate.components.map((c) => c.runtimeType), [Transform, Name, RigidBody, Collider]);
+    expect(crate.components.map((c) => c.runtimeType), [Pose, Name, RigidBody, Collider]);
     var state = crate.bodyState()!;
     expect(state.linearVelocity.y, lessThan(0), reason: 'falling after one tick');
     expect(state.sleeping, isFalse);

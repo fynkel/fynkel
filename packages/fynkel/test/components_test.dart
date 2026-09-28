@@ -70,9 +70,9 @@ void main() {
     expect(robot.has<Camera>(), isFalse);
     expect(robot.get<PointLight>(), isNull);
     expect(robot.get<Name>()!.value, 'Robot');
-    expect(robot.get<Transform>(), robot.localTransform);
-    expect(robot.has<Transform>(), isTrue);
-    expect(robot.components.map((c) => c.runtimeType), [Transform, Name, MeshRenderer, AudioSource]);
+    expect(robot.get<Pose>(), robot.localTransform);
+    expect(robot.has<Pose>(), isTrue);
+    expect(robot.components.map((c) => c.runtimeType), [Pose, Name, MeshRenderer, AudioSource]);
     expect(w.stats().queryCalls - q0, 1, reason: 'every read this tick came from one query');
     w.frame(1 / 60);
     robot.get<MeshRenderer>();
@@ -81,11 +81,11 @@ void main() {
     // The camera has its own set; the sun a directional light.
     expect(named(w, 'Camera').get<Camera>()!.projection, Projection.perspective);
     expect(named(w, 'Sun').get<DirectionalLight>()!.intensity, 10000);
-    expect(w.componentsOf(named(w, 'Sun').entity).map((c) => c.runtimeType), [Transform, Name, DirectionalLight]);
+    expect(w.componentsOf(named(w, 'Sun').entity).map((c) => c.runtimeType), [Pose, Name, DirectionalLight]);
 
     // Not a component; a component that cannot go.
     expect(() => robot.get<SnapshotTransformRecord>(), throwsArgumentError);
-    expect(() => robot.remove<Transform>(), throwsArgumentError);
+    expect(() => robot.remove<Pose>(), throwsArgumentError);
     expect(() => robot.remove<Name>(), throwsArgumentError);
   });
 
@@ -119,14 +119,14 @@ void main() {
 
     sun.remove<DirectionalLight>();
     expect(sun.has<DirectionalLight>(), isFalse);
-    expect(sun.components.map((c) => c.runtimeType), [Transform, Name]);
+    expect(sun.components.map((c) => c.runtimeType), [Pose, Name]);
     sun.set(const Name(value: 'Star'));
     expect(sun.get<Name>()!.value, 'Star');
     expect(sun.name, 'Star', reason: 'the handle follows its own rename');
     sun.set(const PointLight(color: Vec3(1, 1, 1), intensity: 100, range: -1, cullingMask: 0xffffffff));
     expect(sun.get<PointLight>()!.range, -1, reason: 'staged, not validated yet');
     w.frame(1 / 60);
-    expect(w.componentsOf(sun.entity).map((c) => c.runtimeType), [Transform, Name]);
+    expect(w.componentsOf(sun.entity).map((c) => c.runtimeType), [Pose, Name]);
     expect(w.nameOf(sun), 'Star');
     sun.name = 'Sun again';
     expect(sun.name, 'Sun again');
@@ -194,7 +194,7 @@ void main() {
   test('the typed table covers every native component the wire knows', () {
     expect(
       componentIds.keys,
-      containsAll([Transform, Name, MeshRenderer, Camera, DirectionalLight, PointLight, SpotLight, Environment]),
+      containsAll([Pose, Name, MeshRenderer, Camera, DirectionalLight, PointLight, SpotLight, Environment]),
     );
     for (final MapEntry(key: type, value: id) in componentIds.entries) {
       expect(componentCodecs[id]!.type, type);

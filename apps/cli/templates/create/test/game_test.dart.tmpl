@@ -128,7 +128,7 @@ void main() {
     sun.remove<DirectionalLight>();
     game.frame(1 / 60); // spawns
     game.frame(1 / 60); // applies the twin's components
-    expect(game.world.componentsOf(twin.entity).map((c) => c.runtimeType), [Transform, Name, MeshRenderer, PointLight]);
+    expect(game.world.componentsOf(twin.entity).map((c) => c.runtimeType), [Pose, Name, MeshRenderer, PointLight]);
     expect(sun.has<DirectionalLight>(), isFalse);
   });
 

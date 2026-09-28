@@ -59,7 +59,7 @@ class LiveFlow extends Flow {
           Screen.playing => level(
               look,
               kinds,
-              coinAt: (name, at, kind) => coin(look, kind, name: name, transform: Transform(position: at)),
+              coinAt: (name, at, kind) => coin(look, kind, name: name, transform: Pose(position: at)),
             ),
           Screen.results => results(look),
         }.map(world.build),

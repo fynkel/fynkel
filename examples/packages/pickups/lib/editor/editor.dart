@@ -27,7 +27,7 @@ void registerEditor(EditorExtensions editor) {
           ObjectSpec.prefab(
             Assets.prefabs.pickup,
             name: 'Pickup',
-            transform: const Transform(position: Vec3(0, 0.5, 0)),
+            transform: const Pose(position: Vec3(0, 0.5, 0)),
           ),
           parent: context.selection.firstOrNull,
         ),

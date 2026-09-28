@@ -53,7 +53,7 @@ List<WrittenDocument> writeScenes(String projectDir) {
         level(
           look,
           kinds,
-          coinAt: (name, at, kind) => ObjectSpec.prefab(prefabs[kind]!, name: name, transform: Transform(position: at)),
+          coinAt: (name, at, kind) => ObjectSpec.prefab(prefabs[kind]!, name: name, transform: Pose(position: at)),
         ),
       ),
     ),

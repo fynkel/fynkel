@@ -47,6 +47,6 @@ class Orbit extends Behaviour {
     // pitch it down onto the target.
     final pitch = math.atan2(height, radius);
     final rotation = Quat.axisAngle(Vec3.up, angle) * Quat.axisAngle(Vec3.right, -pitch);
-    transform.value = Transform(position: eye, rotation: rotation, scale: transform.scale);
+    transform.value = Pose(position: eye, rotation: rotation, scale: transform.scale);
   }
 }

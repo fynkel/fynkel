@@ -20,7 +20,7 @@ void main() {
     final w = world();
     addTearDown(w.dispose);
     final go = w.spawn(
-      transform: const Transform(position: Vec3(1, 2, 3), rotation: Quat.identity, scale: Vec3.one),
+      transform: const Pose(position: Vec3(1, 2, 3), rotation: Quat.identity, scale: Vec3.one),
       name: 'player',
     );
     expect(go.isPending, isTrue);
@@ -75,7 +75,7 @@ void main() {
     w.frame(1 / 60);
     b.transform.position = const Vec3(9, 9, 9);
     // NaN transform is rejected at the tick with INVALID_PAYLOAD.
-    b.setLocalTransform(const Transform(position: Vec3(double.nan, 0, 0), rotation: Quat.identity, scale: Vec3.one));
+    b.setLocalTransform(const Pose(position: Vec3(double.nan, 0, 0), rotation: Quat.identity, scale: Vec3.one));
     expect(b.transform.position.x.isNaN, isTrue, reason: 'overlay shows the staged value');
     expect(
       () => w.frame(1 / 60),
@@ -88,7 +88,7 @@ void main() {
     final seen = <FynkelDiagnostic>[];
     w.onDiagnostics = seen.addAll;
     b.setLocalTransform(
-      const Transform(position: Vec3(double.infinity, 0, 0), rotation: Quat.identity, scale: Vec3.one),
+      const Pose(position: Vec3(double.infinity, 0, 0), rotation: Quat.identity, scale: Vec3.one),
     );
     w.frame(1 / 60);
     expect(seen.single.code, DiagnosticCode.invalidPayload);
@@ -104,7 +104,7 @@ void main() {
     // A 120 Hz frame with no tick.
     final plan = w.beginFrame(1 / 240);
     expect(plan.steps, 0);
-    cam.setPresentationTransform(const Transform(position: Vec3(0, 3, 0), rotation: Quat.identity, scale: Vec3.one));
+    cam.setPresentationTransform(const Pose(position: Vec3(0, 3, 0), rotation: Quat.identity, scale: Vec3.one));
     expect(cam.transform.position, const Vec3(0, 3, 0));
     w.flushPresentation();
     expect(w.stats().stagedCommands, 1);
@@ -128,12 +128,12 @@ void main() {
     final w = world();
     addTearDown(w.dispose);
     final root = w.spawn(
-      transform: const Transform(position: Vec3(10, 0, 0), rotation: Quat.identity, scale: Vec3.one),
+      transform: const Pose(position: Vec3(10, 0, 0), rotation: Quat.identity, scale: Vec3.one),
       name: 'root',
     );
     w.frame(1 / 60);
     final child = w.spawn(
-      transform: const Transform(position: Vec3(1, 0, 0), rotation: Quat.identity, scale: Vec3.one),
+      transform: const Pose(position: Vec3(1, 0, 0), rotation: Quat.identity, scale: Vec3.one),
       parent: root,
       name: 'child',
     );

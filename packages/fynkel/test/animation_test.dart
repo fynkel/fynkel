@@ -153,7 +153,7 @@ void main() {
     final statue = w.instantiate(
       rigPrefab,
       name: 'Statue',
-      transform: const Transform(position: Vec3(3, 0, 0), rotation: Quat.identity, scale: Vec3.one),
+      transform: const Pose(position: Vec3(3, 0, 0), rotation: Quat.identity, scale: Vec3.one),
     );
     final report = w.lastInstantiate!;
     expect(report.ok, isTrue, reason: report.diagnostics.join('\n'));
@@ -209,7 +209,7 @@ void main() {
     final statue = w.instantiate(
       const AssetRef(columnRig, sub: World.importedPrefabSub),
       name: 'Column',
-      transform: const Transform(position: Vec3(-3, 0, 0), rotation: Quat.identity, scale: Vec3.one),
+      transform: const Pose(position: Vec3(-3, 0, 0), rotation: Quat.identity, scale: Vec3.one),
     );
     final report = w.lastInstantiate!;
     expect(report.ok, isTrue, reason: report.diagnostics.join('\n'));

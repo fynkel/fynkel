@@ -60,7 +60,7 @@ class BadWriter extends Behaviour {
   @override
   void fixedUpdate(FixedUpdateContext context) {
     if (fixed++ == 0) {
-      gameObject.setLocalTransform(const Transform(position: Vec3(double.nan, 0, 0), rotation: Quat.identity, scale: Vec3.one));
+      gameObject.setLocalTransform(const Pose(position: Vec3(double.nan, 0, 0), rotation: Quat.identity, scale: Vec3.one));
     }
   }
 

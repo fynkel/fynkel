@@ -46,7 +46,7 @@ class Collectible extends Behaviour {
     final here = (gameObject.worldTransform ?? transform.value).position;
     final burst = world.instantiate(
       burstPrefab,
-      transform: Transform(position: here, rotation: Quat.identity, scale: const Vec3(1, 1, 1)),
+      transform: Pose(position: here, rotation: Quat.identity, scale: const Vec3(1, 1, 1)),
       name: 'Burst',
     );
     var i = 0;

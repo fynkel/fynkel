@@ -149,7 +149,7 @@ void main() {
       expect(leaf.getInChildren<Marker>(), m1, reason: 'the object itself counts');
       expect(leaf.getInParent<PointLight>()!.range, 4);
       expect(root.getInParent<PointLight>(), isNull);
-      expect(root.getInChildren<Transform>(), identityTransform, reason: 'a native type: the value');
+      expect(root.getInChildren<Pose>(), identityTransform, reason: 'a native type: the value');
 
       tick(w);
       mid.setActive(false);

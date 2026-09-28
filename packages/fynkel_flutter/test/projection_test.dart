@@ -150,7 +150,7 @@ void main() {
     final camera = w.find('Camera')!;
     // A point under the floor, hidden by the floor's layer.
     final below = w.spawn(
-      transform: const Transform(position: Vec3(0, -1, 0), rotation: Quat.identity, scale: Vec3(1, 1, 1)),
+      transform: const Pose(position: Vec3(0, -1, 0), rotation: Quat.identity, scale: Vec3(1, 1, 1)),
       name: 'Below',
     );
     w.frame(1 / 60);

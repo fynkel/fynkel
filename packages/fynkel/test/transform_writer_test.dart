@@ -8,7 +8,7 @@ import 'package:test/test.dart';
 
 void main() {
   test('TransformWriter encodes exactly like Transform', () {
-    final t = Transform(
+    final t = Pose(
       position: const Vec3(1, 2, 3),
       rotation: Quat.axisAngle(Vec3.up, 0.7) * Quat.axisAngle(Vec3.right, 0.2),
       scale: const Vec3(2, 2, 2),
@@ -19,14 +19,14 @@ void main() {
     t.encode(a, 0, WireStrings());
     w.encode(b, 0);
     expect(b.buffer.asUint8List(), a.buffer.asUint8List());
-    expect(TransformWriter().decode(a, 0).toTransform(), Transform.decode(a, 0, Uint8List(0)));
+    expect(TransformWriter().decode(a, 0).toTransform(), Pose.decode(a, 0, Uint8List(0)));
   });
 
   test('scalar writes keep unspecified parts and read back before the tick', () {
     final world = World.create()..throwOnDiagnostics = true;
     final go = world.spawn(
       name: 'a',
-      transform: Transform(position: const Vec3(1, 1, 1), rotation: Quat.identity, scale: const Vec3.all(3)),
+      transform: Pose(position: const Vec3(1, 1, 1), rotation: Quat.identity, scale: const Vec3.all(3)),
     );
     world.frame(1 / 60);
     expect(go.isPending, isFalse);

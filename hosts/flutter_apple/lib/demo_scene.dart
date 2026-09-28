@@ -56,7 +56,7 @@ class DemoScene {
 
   final TransformWriter _w = TransformWriter();
 
-  static Transform _satelliteLocal(_Satellite s, double t) => _satelliteInto(s, t, TransformWriter()).toTransform();
+  static Pose _satelliteLocal(_Satellite s, double t) => _satelliteInto(s, t, TransformWriter()).toTransform();
 
   static TransformWriter _satelliteInto(_Satellite s, double t, TransformWriter w) {
     final a = s.phase + s.angularSpeed * t;

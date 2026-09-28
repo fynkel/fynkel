@@ -110,7 +110,7 @@ void main() {
     final ship = w.build(
       ObjectSpec(
         'Ship',
-        transform: const Transform(position: Vec3(0, 5, 0)),
+        transform: const Pose(position: Vec3(0, 5, 0)),
         tags: const ['enemy'],
         components: const [PointLight(range: 4)],
         behaviours: [turret],
@@ -127,7 +127,7 @@ void main() {
       ..ammo = ammo;
     tick(w);
 
-    final copy = ship.clone(transform: const Transform(position: Vec3(10, 0, 0)));
+    final copy = ship.clone(transform: const Pose(position: Vec3(10, 0, 0)));
     expect(copy, isNot(ship));
     expect(copy.isPending, isFalse, reason: 'made now');
     expect(copy.name, 'Ship');
@@ -157,9 +157,9 @@ void main() {
 
   test('placement: where the source is in the world, or its local pose under a parent', () {
     final w = fresh();
-    final holder = w.spawn(name: 'Holder', transform: const Transform(position: Vec3(0, 10, 0)));
-    final gun = w.spawn(name: 'Gun', parent: holder, transform: const Transform(position: Vec3(1, 0, 0)));
-    final rack = w.spawn(name: 'Rack', transform: const Transform(position: Vec3(-5, 0, 0)));
+    final holder = w.spawn(name: 'Holder', transform: const Pose(position: Vec3(0, 10, 0)));
+    final gun = w.spawn(name: 'Gun', parent: holder, transform: const Pose(position: Vec3(1, 0, 0)));
+    final rack = w.spawn(name: 'Rack', transform: const Pose(position: Vec3(-5, 0, 0)));
     tick(w, 2); // world poses come from the tick's snapshot
 
     final loose = gun.clone();
@@ -177,9 +177,9 @@ void main() {
   test('a physics object copied falls like the original', () {
     final w = fresh();
     w.build(const ObjectSpec('Floor', components: [Collider(size: Vec3(20, 0.5, 20), offset: Vec3(0, -0.5, 0))]));
-    final crate = w.build(const ObjectSpec('Crate', transform: Transform(position: Vec3(0, 3, 0)), components: [RigidBody(), Collider()]));
+    final crate = w.build(const ObjectSpec('Crate', transform: Pose(position: Vec3(0, 3, 0)), components: [RigidBody(), Collider()]));
     tick(w);
-    final second = crate.clone(transform: const Transform(position: Vec3(3, 6, 0)));
+    final second = crate.clone(transform: const Pose(position: Vec3(3, 6, 0)));
     tick(w, 240);
     expect(second.localTransform.position.y, closeTo(0.5, 0.05));
     expect(crate.localTransform.position.y, closeTo(0.5, 0.05));
@@ -188,7 +188,7 @@ void main() {
   test('a prefab instance copied, with its model and trigger', () {
     final w = fresh()..loadProject(fixture, cacheDir: cache);
     final coin = w.instantiate(w.assets.find('prefabs/coin')!, name: 'Coin');
-    final copy = coin.clone(transform: const Transform(position: Vec3(2, 0, 0)));
+    final copy = coin.clone(transform: const Pose(position: Vec3(2, 0, 0)));
     expect(copy.get<TriggerZone>(), isNotNull);
     expect(copy.get<MeshRenderer>(), coin.get<MeshRenderer>());
     expect(w.findObjectsWith<TriggerZone>(), hasLength(2));

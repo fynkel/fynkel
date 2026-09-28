@@ -22,7 +22,7 @@ void main() {
     final (:entities, :roots) = writer.entitiesOf([
       const ObjectSpec(
         'Ring',
-        transform: Transform(position: Vec3(0, 1, 0)),
+        transform: Pose(position: Vec3(0, 1, 0)),
         children: [ObjectSpec('Coin 1'), ObjectSpec('Coin 2', active: false)],
       ),
       const ObjectSpec('Light', components: [PointLight(range: 3)]),

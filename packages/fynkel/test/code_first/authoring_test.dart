@@ -53,7 +53,7 @@ void registerBehaviours(BehaviourRegistry r) => r.register(spinnerType);
 /// A code prefab.
 ObjectSpec lamp(AssetRef brass) => ObjectSpec(
       'Lamp',
-      transform: const Transform(position: Vec3(0, 2, 0)),
+      transform: const Pose(position: Vec3(0, 2, 0)),
       components: [const PointLight(range: 5), MeshRenderer(mesh: Primitive.cylinder.mesh, material: brass)],
       children: [
         ObjectSpec('Bulb', components: const [PointLight(range: 1)], behaviours: [Spinner()..speed = 2]),
@@ -65,22 +65,22 @@ List<ObjectSpec> level(AssetRef lampRef, AssetRef robotRef) => [
       for (var i = 0; i < 3; i++)
         ObjectSpec(
           'Crate',
-          transform: Transform(position: Vec3(i * 2.0, 1, 0)),
+          transform: Pose(position: Vec3(i * 2.0, 1, 0)),
           layer: 'props',
           tags: const ['pickup'],
           components: const [RigidBody(mass: 2), Collider()],
         ),
-      ObjectSpec.primitive(Primitive.sphere, transform: const Transform(position: Vec3(0, 4, 0))),
+      ObjectSpec.primitive(Primitive.sphere, transform: const Pose(position: Vec3(0, 4, 0))),
       ObjectSpec.prefab(
         lampRef,
         name: 'Red lamp',
-        transform: const Transform(position: Vec3(5, 3, 0)),
+        transform: const Pose(position: Vec3(5, 3, 0)),
         tags: const ['pickup'],
         components: const [PointLight(range: 9), Rotator()],
         behaviours: [Spinner()..speed = 4],
         children: const [ObjectSpec('Shade')],
       ),
-      ObjectSpec.prefab(robotRef, transform: const Transform(position: Vec3(-3, 0, 0))),
+      ObjectSpec.prefab(robotRef, transform: const Pose(position: Vec3(-3, 0, 0))),
       const ObjectSpec('Hidden', active: false, children: [ObjectSpec('Inside')]),
     ];
 

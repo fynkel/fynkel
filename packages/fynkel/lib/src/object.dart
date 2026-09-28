@@ -20,13 +20,13 @@ abstract class FynkelObject {
 }
 
 /// Something on one [GameObject] (Unity's `Component`): its
-/// [TransformRef] or a [Behaviour].
+/// [Transform] or a [Behaviour].
 abstract class Component extends FynkelObject {
   /// The object this component is on.
   GameObject get gameObject;
 
   /// The object's transform.
-  TransformRef get transform => gameObject.transform;
+  Transform get transform => gameObject.transform;
 
   @override
   String get name => gameObject.name;

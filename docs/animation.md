@@ -825,7 +825,7 @@ s?.name; s?.normalizedTime; s?.isInTransition; s?.next;
   registers it and its motions from the cache.
 
 Tests: `packages/fynkel/test/controller_test.dart`. The joints are objects: `findChild('hips')`,
-`localTransform`, `worldTransform`, `get<Transform>()` and a transform
+`localTransform`, `worldTransform`, `get<Pose>()` and a transform
 write (which the next tick's pose overrides for the properties the clip
 keys — write the ones it does not, or a joint it does not key).
 

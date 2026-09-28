@@ -38,7 +38,7 @@ void main() {
     final w = fresh();
     final hero = w.spawn(name: 'Hero');
     final health = hero.addBehaviour(Health());
-    expect(hero.getComponent<TransformRef>(), same(hero.transform));
+    expect(hero.getComponent<Transform>(), same(hero.transform));
     expect(hero.getComponent<Health>(), same(health));
     expect(hero.getComponent<Armor>(), isNull);
     expect(health.getComponent<Health>(), same(health));

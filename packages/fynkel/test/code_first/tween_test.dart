@@ -53,7 +53,7 @@ void main() {
 
   test('moveTo: halfway at half time, there at the end, then done', () async {
     final w = fresh();
-    final box = w.spawn(name: 'Box', transform: const Transform(position: Vec3(0, 0, 0)));
+    final box = w.spawn(name: 'Box', transform: const Pose(position: Vec3(0, 0, 0)));
     frames(w, 1);
     final move = box.transform.moveTo(const Vec3(10, 0, 0), 1, ease: Ease.linear);
     var finished = false;
@@ -72,7 +72,7 @@ void main() {
 
   test('moveTo is in the world under a parent; moveLocalTo, rotateTo and scaleTo', () {
     final w = fresh();
-    final parent = w.spawn(name: 'Parent', transform: const Transform(position: Vec3(0, 5, 0)));
+    final parent = w.spawn(name: 'Parent', transform: const Pose(position: Vec3(0, 5, 0)));
     final child = w.spawn(name: 'Child', parent: parent);
     frames(w, 2);
     child.transform.moveTo(const Vec3(0, 5, 4), 0.5);

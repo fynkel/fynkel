@@ -13,7 +13,7 @@ ObjectSpec pickup(
   PickupKind? kind,
   AssetRef material, {
   String name = 'Pickup',
-  Transform transform = const Transform(),
+  Pose transform = const Pose(),
 }) => ObjectSpec(
   name,
   transform: transform,
@@ -26,7 +26,7 @@ ObjectSpec pickup(
   children: [
     ObjectSpec(
       'Gem',
-      transform: Transform(
+      transform: Pose(
         position: const Vec3(0, 0.8, 0),
         rotation: Quat.axisAngle(const Vec3(0, 0, 1), math.pi / 4) * Quat.axisAngle(Vec3.right, math.pi / 4),
         scale: const Vec3(0.45, 0.45, 0.45),

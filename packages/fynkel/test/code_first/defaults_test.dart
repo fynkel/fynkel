@@ -20,7 +20,7 @@ void main() {
   test('a crate from RigidBody() and Collider() falls and comes to rest on a floor', () {
     final w = fresh();
     w.spawn(name: 'floor').add(const Collider(size: Vec3(10, 0.5, 10), offset: Vec3(0, -0.5, 0)));
-    final crate = w.spawn(name: 'crate', transform: const Transform(position: Vec3(0, 3, 0)))
+    final crate = w.spawn(name: 'crate', transform: const Pose(position: Vec3(0, 3, 0)))
       ..add(const RigidBody())
       ..add(const Collider());
     for (var i = 0; i < 240; i++) {
@@ -40,7 +40,7 @@ void main() {
     expect(body.ccd, isFalse);
     expect(body, const RigidBody().copyWith(mass: 5));
 
-    expect(const Transform(), identityTransform);
+    expect(const Pose(), identityTransform);
     expect(const MeshRenderer().mesh, AssetRef.none);
     expect(const MeshRenderer().castShadows, isTrue);
     expect(const Collider().shape, ColliderShape.box);

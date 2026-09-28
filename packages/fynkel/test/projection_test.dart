@@ -120,7 +120,7 @@ void main() {
     // A point under the floor (still in the viewport): hidden only for
     // anchors that ask the floor's layer to occlude them.
     final below = w.spawn(
-      transform: const Transform(position: Vec3(0, -1, 0), rotation: Quat.identity, scale: Vec3(1, 1, 1)),
+      transform: const Pose(position: Vec3(0, -1, 0), rotation: Quat.identity, scale: Vec3(1, 1, 1)),
       name: 'Below',
     );
     w.frame(1 / 60);

@@ -23,7 +23,7 @@ class Spinner extends Behaviour {
 /// A code prefab: a crate that falls, one per call.
 ObjectSpec crate(String name, Vec3 at) => ObjectSpec(
   name,
-  transform: Transform(position: at),
+  transform: Pose(position: at),
   components: const [RigidBody(), Collider()],
   behaviours: [Spinner()..speed = at.x],
 );
@@ -75,18 +75,18 @@ void main() {
     final root = w.build(
       ObjectSpec(
         'Ship',
-        transform: const Transform(position: Vec3(0, 10, 0)),
+        transform: const Pose(position: Vec3(0, 10, 0)),
         children: [
           ObjectSpec('Hull', components: const [PointLight(range: 3)]),
           ObjectSpec(
             'Turret',
-            transform: const Transform(position: Vec3(0, 1, 0)),
+            transform: const Pose(position: Vec3(0, 1, 0)),
             behaviours: [spinner],
             children: const [ObjectSpec('Barrel', layer: 'props', tags: ['enemy'])],
           ),
         ],
       ),
-      transform: const Transform(position: Vec3(5, 0, 0)),
+      transform: const Pose(position: Vec3(5, 0, 0)),
     );
     // Before any tick.
     expect(root.children.map((c) => c.name), ['Hull', 'Turret']);
@@ -128,7 +128,7 @@ void main() {
             ObjectSpec.prefab(
               coinRef,
               name: 'Coin $i',
-              transform: Transform(position: Vec3(i.toDouble(), 0, 0)),
+              transform: Pose(position: Vec3(i.toDouble(), 0, 0)),
               tags: const ['pickup'],
               components: const [PointLight(range: 2)],
               children: const [ObjectSpec('Glow')],

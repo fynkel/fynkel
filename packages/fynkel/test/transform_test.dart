@@ -48,11 +48,11 @@ void main() {
     final w = world();
     addTearDown(w.dispose);
     final parent = w.spawn(
-      transform: Transform(position: const Vec3(10, 0, 0), rotation: Quat.euler(const Vec3(0, 90, 0)), scale: const Vec3.all(2)),
+      transform: Pose(position: const Vec3(10, 0, 0), rotation: Quat.euler(const Vec3(0, 90, 0)), scale: const Vec3.all(2)),
       name: 'parent',
     );
     final child = w.spawn(
-      transform: const Transform(position: Vec3(0, 0, -1), rotation: Quat.identity, scale: Vec3.one),
+      transform: const Pose(position: Vec3(0, 0, -1), rotation: Quat.identity, scale: Vec3.one),
       parent: parent,
       name: 'child',
     );

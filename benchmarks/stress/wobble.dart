@@ -36,6 +36,6 @@ class Wobble extends Behaviour {
     final p = transform.position;
     final y = _restY + amplitude * math.sin(2 * math.pi * frequency * _t + phase);
     final rotation = Quat.axisAngle(Vec3.up, spin * context.dt) * transform.rotation;
-    transform.value = Transform(position: Vec3(p.x, y, p.z), rotation: rotation, scale: transform.scale);
+    transform.value = Pose(position: Vec3(p.x, y, p.z), rotation: rotation, scale: transform.scale);
   }
 }

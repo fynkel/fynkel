@@ -4,7 +4,7 @@
 // a prefab, nothing written when one change is refused.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart'
-    show AssetRef, BehaviourRegistry, DataAsset, DataField, DataType, ObjectSpec, Transform, Vec3;
+    show AssetRef, BehaviourRegistry, DataAsset, DataField, DataType, ObjectSpec, Pose, Vec3;
 import 'package:fynkel_authoring/fynkel_authoring.dart' show Severity;
 import 'package:fynkel_editor/src/documents/document_tabs.dart';
 import 'package:fynkel_editor/src/documents/open_document.dart';
@@ -186,8 +186,8 @@ void main() {
       edit.add(
         ObjectSpec(
           'Ring',
-          transform: Transform(position: Vec3(0, 1, 0)),
-          children: [ObjectSpec('Spark', transform: Transform(position: Vec3(1, 0, 0)))],
+          transform: Pose(position: Vec3(0, 1, 0)),
+          children: [ObjectSpec('Spark', transform: Pose(position: Vec3(1, 0, 0)))],
         ),
         parent: s.find('Level'),
       );

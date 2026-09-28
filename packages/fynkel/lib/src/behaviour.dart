@@ -274,7 +274,7 @@ abstract class Behaviour extends Component {
   GameContext get context => world.context;
 
   @override
-  TransformRef get transform => gameObject.transform;
+  Transform get transform => gameObject.transform;
 
   /// Attached, not destroyed, and its object alive.
   @override

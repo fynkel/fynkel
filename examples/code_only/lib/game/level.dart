@@ -59,11 +59,11 @@ class Look {
 
 // ---- building blocks
 
-Transform at(double x, double y, double z, {Vec3 scale = Vec3.one, Quat rotation = Quat.identity}) =>
-    Transform(position: Vec3(x, y, z), rotation: rotation, scale: scale);
+Pose at(double x, double y, double z, {Vec3 scale = Vec3.one, Quat rotation = Quat.identity}) =>
+    Pose(position: Vec3(x, y, z), rotation: rotation, scale: scale);
 
 /// A static box: the cube primitive (its collider scales with it).
-ObjectSpec box(String name, AssetRef material, Transform transform) => ObjectSpec.primitive(
+ObjectSpec box(String name, AssetRef material, Pose transform) => ObjectSpec.primitive(
       Primitive.cube,
       name: name,
       transform: transform,
@@ -74,7 +74,7 @@ ObjectSpec box(String name, AssetRef material, Transform transform) => ObjectSpe
 List<ObjectSpec> lighting() => [
       ObjectSpec(
         'Sun',
-        transform: Transform(
+        transform: Pose(
           position: const Vec3(0, 20, 0),
           rotation: Quat.axisAngle(Vec3.up, 35 * math.pi / 180) * Quat.axisAngle(Vec3.right, -52 * math.pi / 180),
         ),
@@ -94,7 +94,7 @@ List<ObjectSpec> lighting() => [
 /// listens to the player, and the [Collectible] that scores it (it takes
 /// the kind's colour and size). [transform] places it. tool/scenes.dart
 /// writes it as assets/prefabs/coin.prefab.json.
-ObjectSpec coin(Look look, CoinKind kind, {String name = 'Coin', Transform transform = const Transform()}) => ObjectSpec(
+ObjectSpec coin(Look look, CoinKind kind, {String name = 'Coin', Pose transform = const Pose()}) => ObjectSpec(
       name,
       transform: transform,
       layer: 'trigger',
@@ -108,7 +108,7 @@ ObjectSpec coin(Look look, CoinKind kind, {String name = 'Coin', Transform trans
       children: [
         ObjectSpec(
           'Disc',
-          transform: Transform(
+          transform: Pose(
             position: const Vec3(0, 0.7, 0),
             rotation: Quat.axisAngle(Vec3.right, math.pi / 2),
             scale: const Vec3(0.7, 0.06, 0.7),
@@ -124,13 +124,13 @@ ObjectSpec burst(AssetRef material, Vec3 where, [Sparks? sparks]) {
   final s = sparks ?? Sparks();
   return ObjectSpec(
     'Burst',
-    transform: Transform(position: where),
+    transform: Pose(position: where),
     children: [
       for (var i = 0; i < s.count; i++)
         ObjectSpec(
           'Spark $i',
           layer: 'props',
-          transform: Transform(
+          transform: Pose(
             position: Vec3(0.25 * math.cos(i * 2 * math.pi / s.count), 0.6, 0.25 * math.sin(i * 2 * math.pi / s.count)),
             scale: Vec3(s.size, s.size, s.size),
           ),
@@ -254,7 +254,7 @@ List<ObjectSpec> level(
         coinAt('Coin ${i + 1}', spot, i == coinSpots.length - 1 ? kinds.big : kinds.coin),
       // A package's prefab, placed as the game's own are (both ways of
       // building: the cook mounts Packages/pickups beside assets/).
-      ObjectSpec.prefab(pickups.Assets.prefabs.pickup, name: 'Gem', transform: Transform(position: gemSpot)),
+      ObjectSpec.prefab(pickups.Assets.prefabs.pickup, name: 'Gem', transform: Pose(position: gemSpot)),
     ];
 
 /// A podium with a big spinning coin, seen by a camera orbiting it: the
@@ -275,7 +275,7 @@ List<ObjectSpec> _podium(Look look, {required double spin, required double orbit
         children: [
           ObjectSpec(
             'Disc',
-            transform: Transform(rotation: Quat.axisAngle(Vec3.right, math.pi / 2), scale: const Vec3(0.7, 0.06, 0.7)),
+            transform: Pose(rotation: Quat.axisAngle(Vec3.right, math.pi / 2), scale: const Vec3(0.7, 0.06, 0.7)),
             components: [MeshRenderer(mesh: Primitive.cylinder.mesh, material: look.gold)],
           ),
         ],
@@ -287,7 +287,7 @@ List<ObjectSpec> _podium(Look look, {required double spin, required double orbit
         children: [
           ObjectSpec(
             'Camera',
-            transform: Transform(
+            transform: Pose(
               position: Vec3(0, 12 * math.sin(0.32), 12 * math.cos(0.32)),
               rotation: Quat.axisAngle(Vec3.right, -0.32),
             ),

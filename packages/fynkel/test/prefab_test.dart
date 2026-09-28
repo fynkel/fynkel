@@ -40,7 +40,7 @@ void main() {
     final before = w.allEntities().length;
     final crate = w.instantiate(
       cratePrefab,
-      transform: const Transform(position: Vec3(2, 0, -3), rotation: Quat.identity, scale: Vec3.one),
+      transform: const Pose(position: Vec3(2, 0, -3), rotation: Quat.identity, scale: Vec3.one),
     );
     final report = w.lastInstantiate!;
     expect(report.ok, isTrue);

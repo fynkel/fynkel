@@ -47,7 +47,7 @@ void main() {
     final diagnostics = <FynkelDiagnostic>[];
     final w = loaded()..onDiagnostics = diagnostics.addAll;
     final plane = w.createPrimitive(Primitive.plane);
-    final cube = w.createPrimitive(Primitive.cube, transform: const Transform(position: Vec3(1, 3, -2)))
+    final cube = w.createPrimitive(Primitive.cube, transform: const Pose(position: Vec3(1, 3, -2)))
       ..add(const RigidBody());
     expect(cube.name, 'Cube');
     expect(cube.get<MeshRenderer>()!.mesh, const AssetRef(Primitive.id, sub: 'mesh/Cube'));

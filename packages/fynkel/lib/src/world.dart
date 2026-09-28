@@ -43,9 +43,9 @@ part 'scenes.dart';
 part 'tween.dart';
 
 /// Immutable local transform value (position, rotation, scale).
-typedef Transform = gen.Transform;
+typedef Pose = gen.Transform;
 
-const Transform identityTransform = Transform(position: Vec3.zero, rotation: Quat.identity, scale: Vec3.one);
+const Pose identityTransform = Pose(position: Vec3.zero, rotation: Quat.identity, scale: Vec3.one);
 
 /// Runtime entity/component container over one native world.
 class World {
@@ -297,7 +297,7 @@ class World {
   /// presentation-lane writes and native reads need the real handle and
   /// wait for the tick. Reads return the initial transform and the writes
   /// staged so far.
-  GameObject spawn({Transform transform = identityTransform, GameObject? parent, String name = ''}) {
+  GameObject spawn({Pose transform = identityTransform, GameObject? parent, String name = ''}) {
     final tempId = _nextTempId++;
     final go = GameObject._(this, tempId, transform, name).._spawnParent = parent;
     _pendingByTempId[tempId] = go;
@@ -315,7 +315,7 @@ class World {
   /// spec is checked first — a behaviour already attached or listed twice,
   /// an unknown tag or layer, a sub-asset that is not a prefab — so a
   /// mistake throws before anything exists.
-  GameObject build(ObjectSpec spec, {GameObject? parent, Transform? transform}) {
+  GameObject build(ObjectSpec spec, {GameObject? parent, Pose? transform}) {
     _checkSpec(spec);
     return _buildSpec(spec, parent, transform ?? spec.transform);
   }
@@ -323,7 +323,7 @@ class World {
   /// A built-in shape (Unity's `GameObject.CreatePrimitive`, ADR-0026
   /// §4): [ObjectSpec.primitive] built under [parent] at [transform] —
   /// the shape's mesh, the default material and Unity's collider for it.
-  GameObject createPrimitive(Primitive shape, {String? name, Transform transform = identityTransform, GameObject? parent}) =>
+  GameObject createPrimitive(Primitive shape, {String? name, Pose transform = identityTransform, GameObject? parent}) =>
       build(ObjectSpec.primitive(shape, name: name, transform: transform), parent: parent);
 
   // ------------------------------------------ runtime materials (ADR-0026 §4)
@@ -1029,7 +1029,7 @@ class World {
   /// found by a query); the same handle comes back for the same entity.
   /// Its transform is subscribed from the next tick; until then
   /// [GameObject.localTransform] reads [initial].
-  GameObject attach(int entity, {String name = '', Transform initial = identityTransform}) {
+  GameObject attach(int entity, {String name = '', Pose initial = identityTransform}) {
     final existing = _byEntity[entity];
     if (existing != null) return existing;
     final go = GameObject._(this, 0, initial, name.isEmpty ? (nameOfEntity(entity) ?? '') : name);
@@ -1905,13 +1905,13 @@ class World {
   /// as Unity's `Instantiate` runs `Awake`/`OnEnable` (foundation 1.7).
   GameObject instantiate(
     Object prefab, {
-    Transform transform = identityTransform,
+    Pose transform = identityTransform,
     GameObject? parent,
     String? name,
   }) =>
       _behaviours.creating(() => _instantiate(prefab, transform, parent, name));
 
-  GameObject _instantiate(Object prefab, Transform transform, GameObject? parent, String? name) {
+  GameObject _instantiate(Object prefab, Pose transform, GameObject? parent, String? name) {
     final id = switch (prefab) {
       AssetRef r when (r.sub ?? '').isEmpty || r.sub == importedPrefabSub => r.asset,
       AssetRef r => throw ArgumentError.value(
@@ -2459,12 +2459,12 @@ class AudioControl {
 
 class GameObject extends FynkelObject {
   GameObject._(this.world, this._tempId, this._initial, this._name) {
-    transform = TransformRef._(this);
+    transform = Transform._(this);
   }
 
   final World world;
   final int _tempId;
-  final Transform _initial;
+  final Pose _initial;
   String _name;
 
   /// The object's name: what it was spawned or found with, and what it
@@ -2488,7 +2488,7 @@ class GameObject extends FynkelObject {
   /// scalars in [_staged] (valid while [_stagedValid]), materialised into
   /// [_overlay] only when read. Writes never allocate; a read after a
   /// scalar write allocates one `Transform` until the next write.
-  Transform? _overlay;
+  Pose? _overlay;
   TransformWriter? _staged;
   bool _stagedValid = false;
 
@@ -2540,7 +2540,7 @@ class GameObject extends FynkelObject {
     return w;
   }
 
-  late final TransformRef transform;
+  late final Transform transform;
 
   final List<Behaviour> _behaviours = [];
 
@@ -2574,7 +2574,7 @@ class GameObject extends FynkelObject {
   bool get isAlive => _alive;
 
   /// The first component of type [T] on this object (Unity's
-  /// `GetComponent<T>()`): the [transform] when [T] is `TransformRef` (or
+  /// `GetComponent<T>()`): the [transform] when [T] is `Transform` (or
   /// `Component`, as in Unity the transform comes first), else the first
   /// attached script of type [T].
   T? getComponent<T extends Component>() {
@@ -2634,10 +2634,10 @@ class GameObject extends FynkelObject {
   /// left out, with an `FYN-B0001` warning through
   /// [World.onLoadDiagnostics]. The copied scripts run `onCreate`/`onEnable`
   /// before it returns, as Unity's `Instantiate` (foundation 1.7).
-  GameObject clone({GameObject? parent, Transform? transform, String? name}) =>
+  GameObject clone({GameObject? parent, Pose? transform, String? name}) =>
       world._behaviours.creating(() => _clone(parent, transform, name));
 
-  GameObject _clone(GameObject? parent, Transform? transform, String? name) {
+  GameObject _clone(GameObject? parent, Pose? transform, String? name) {
     final source = _requireResolved('clone');
     final parentEntity = parent?._requireResolved('clone parent') ?? 0;
     final at = transform ?? (parent != null || this.parent == null ? localTransform : worldTransform ?? localTransform);
@@ -2859,7 +2859,7 @@ class GameObject extends FynkelObject {
       }
       return null;
     }
-    if (T == Transform) return localTransform as T;
+    if (T == Pose) return localTransform as T;
     return _lookup(_codecOf(T).id) as T?;
   }
 
@@ -2944,11 +2944,11 @@ class GameObject extends FynkelObject {
   /// query per object per tick. Not for a hot loop over thousands of
   /// objects — that is what snapshots are for.
   T? get<T extends WireRecord>() {
-    if (T == Transform) return localTransform as T;
+    if (T == Pose) return localTransform as T;
     return _lookup(_codecOf(T).id) as T?;
   }
 
-  bool has<T extends WireRecord>() => T == Transform || _lookup(_codecOf(T).id) != null;
+  bool has<T extends WireRecord>() => T == Pose || _lookup(_codecOf(T).id) != null;
 
   /// Every native component this object has, id order (`Transform` first,
   /// as [localTransform]), staged writes included.
@@ -3028,7 +3028,7 @@ class GameObject extends FynkelObject {
   void setPresentation<T extends WireRecord>(T value) => _setComponent(value, presentation: true);
 
   void _setComponent(WireRecord value, {required bool presentation}) {
-    if (value is Transform) {
+    if (value is Pose) {
       presentation ? setPresentationTransform(value) : setLocalTransform(value);
       return;
     }
@@ -3187,7 +3187,7 @@ class GameObject extends FynkelObject {
   /// Current local transform: staged overlay, else last snapshot, else
   /// (an object attached this tick, its subscription not yet served) the
   /// world's value through the component query, else the spawn value.
-  Transform get localTransform {
+  Pose get localTransform {
     final o = _overlay;
     if (o != null) return o;
     if (_stagedValid) return _overlay = _staged!.toTransform();
@@ -3198,14 +3198,14 @@ class GameObject extends FynkelObject {
   /// query per object per tick, shared with [get]), so a partial write at
   /// the first tick keeps the authored pose instead of seeding from
   /// identity.
-  Transform? _queriedTransform() {
+  Pose? _queriedTransform() {
     if (_entity == null || !_alive) return null;
-    return _lookup(gen.Transform.componentId) as Transform?;
+    return _lookup(gen.Transform.componentId) as Pose?;
   }
 
   /// World-space transform from the last snapshot (no overlay: it depends
   /// on the parent chain and is only known after a tick).
-  Transform? get worldTransform => world._snapshotOf(_entity ?? -1)?.world;
+  Pose? get worldTransform => world._snapshotOf(_entity ?? -1)?.world;
 
   /// Whether a transform write goes to the presentation lane (ADR-0008
   /// amendment, foundation 1.2): during [World.frame]'s `update` and
@@ -3221,7 +3221,7 @@ class GameObject extends FynkelObject {
 
   /// Local transform write, readable now: applied at the next tick — or,
   /// in `update`/`lateUpdate`, shown this frame as well ([_presentsWrite]).
-  void setLocalTransform(Transform t) {
+  void setLocalTransform(Pose t) {
     if (_presentsWrite()) return setPresentationTransform(t);
     final e = _simulationEntity('setLocalTransform');
     _overlay = t;
@@ -3256,7 +3256,7 @@ class GameObject extends FynkelObject {
 
   /// Presentation-lane write (lateUpdate/camera): shown this frame, staged
   /// as authoritative for the next tick. Rejected for physics-owned objects.
-  void setPresentationTransform(Transform t) {
+  void setPresentationTransform(Pose t) {
     final e = _requireResolved('setPresentationTransform');
     _overlay = t;
     _stagedValid = false;
@@ -3311,7 +3311,7 @@ class _Targets {
 }
 
 /// Property-style access with read-your-writes semantics.
-/// Which axes [TransformRef.translate] and [TransformRef.rotate] use:
+/// Which axes [Transform.translate] and [Transform.rotate] use:
 /// the object's own ([self], Unity's `Space.Self`) or the world's.
 enum Space { self, world }
 
@@ -3325,15 +3325,15 @@ enum Space { self, world }
 /// Writes go to the local transform, as
 /// [GameObject.setLocalTransform] does: shown this frame from `update` and
 /// `lateUpdate`, at the next tick from `fixedUpdate` (ADR-0008 amendment).
-class TransformRef extends Component {
-  TransformRef._(this._go);
+class Transform extends Component {
+  Transform._(this._go);
   final GameObject _go;
 
   @override
   GameObject get gameObject => _go;
 
   @override
-  TransformRef get transform => this;
+  Transform get transform => this;
 
   @override
   bool get isAlive => _go.isAlive;
@@ -3343,20 +3343,20 @@ class TransformRef extends Component {
   void destroy() => throw UnsupportedError('a transform cannot be destroyed; destroy its GameObject ("$name")');
 
   /// The local transform, whole.
-  Transform get value => _go.localTransform;
-  set value(Transform t) => _go.setLocalTransform(t);
+  Pose get value => _go.localTransform;
+  set value(Pose t) => _go.setLocalTransform(t);
 
   /// The parent's transform; null for a root.
-  TransformRef? get parent => _go._parentObject?.transform;
+  Transform? get parent => _go._parentObject?.transform;
 
   Vec3 get localPosition => value.position;
-  set localPosition(Vec3 p) => value = Transform(position: p, rotation: value.rotation, scale: value.scale);
+  set localPosition(Vec3 p) => value = Pose(position: p, rotation: value.rotation, scale: value.scale);
 
   Quat get localRotation => value.rotation;
-  set localRotation(Quat q) => value = Transform(position: value.position, rotation: q, scale: value.scale);
+  set localRotation(Quat q) => value = Pose(position: value.position, rotation: q, scale: value.scale);
 
   Vec3 get localScale => value.scale;
-  set localScale(Vec3 s) => value = Transform(position: value.position, rotation: value.rotation, scale: s);
+  set localScale(Vec3 s) => value = Pose(position: value.position, rotation: value.rotation, scale: s);
 
   /// [localScale] (kept from before world positions: Unity has no
   /// settable world scale either — [lossyScale] reads it).
@@ -3366,12 +3366,12 @@ class TransformRef extends Component {
   /// The whole world pose: the parent's composed with the local one
   /// (scale per axis, so a rotated child of a non-uniformly scaled parent
   /// is approximated, as Unity's [lossyScale] is).
-  Transform get world {
+  Pose get world {
     final local = value;
     final p = parent;
     if (p == null) return local;
     final pw = p.world;
-    return Transform(
+    return Pose(
       position: pw.position + pw.rotation.rotate(pw.scale.scaled(local.position)),
       rotation: pw.rotation * local.rotation,
       scale: pw.scale.scaled(local.scale),
@@ -3433,7 +3433,7 @@ class TransformRef extends Component {
   void rotateAround(Vec3 point, Vec3 axis, double degrees) {
     final turn = Quat.axisAngle(axis.normalized, degrees * math.pi / 180);
     final w = world;
-    value = Transform(
+    value = Pose(
       position: _localPoint(point + turn.rotate(w.position - point)),
       rotation: _localRotation(turn * w.rotation),
       scale: localScale,

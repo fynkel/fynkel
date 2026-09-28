@@ -97,7 +97,7 @@ void main() {
 
     GameObject drop(String name, String layer) => game.world.spawn(
           name: name,
-          transform: Transform(position: Vec3(at.x, at.y + 2, at.z), rotation: Quat.identity, scale: const Vec3(1, 1, 1)),
+          transform: Pose(position: Vec3(at.x, at.y + 2, at.z), rotation: Quat.identity, scale: const Vec3(1, 1, 1)),
         )
           ..add(const RigidBody(
               bodyType: BodyType.dynamic, mass: 1, linearDamping: 0, angularDamping: 0, gravityScale: 1, ccd: false))
@@ -203,7 +203,7 @@ void main() {
       expect(bodies, isNotEmpty, reason: 'a skinned body under the Player');
       final boxRig = me.findChild('Rig') == null;
       if (boxRig) {
-        expect(me.findChild('Body')!.get<Skin>()!.skeleton, 'hips');
+        expect(me.findChild('Body')!.get<Skin>()!.skeleton, same(me.findChild('hips')));
         expect(me.findChild('hips/spine/head/Visor'), isNotNull, reason: 'the visor rides the head joint');
         expect(
           game.scenes.lastReport!.animation.clips,

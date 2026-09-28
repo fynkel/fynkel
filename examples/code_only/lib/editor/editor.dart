@@ -56,7 +56,7 @@ void registerEditor(EditorExtensions editor) {
       final result = context.edit(
         'Add Coin',
         (edit) => edit.add(
-          ObjectSpec.prefab(Assets.prefabs.coin, name: 'Coin', transform: const Transform(position: Vec3(0, 0.5, 0))),
+          ObjectSpec.prefab(Assets.prefabs.coin, name: 'Coin', transform: const Pose(position: Vec3(0, 0.5, 0))),
           parent: parent,
         ),
       );
@@ -404,7 +404,7 @@ abstract final class LevelToolsRing {
             ObjectSpec.prefab(
               Assets.prefabs.coin,
               name: 'Coin ${i + 1}',
-              transform: Transform(
+              transform: Pose(
                 position: Vec3(radius * cos(2 * pi * i / count), 0.5, radius * sin(2 * pi * i / count)),
               ),
             ),
