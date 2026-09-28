@@ -1,0 +1,75 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 6,
+  "id": "b0000000-0000-4000-8000-000000000009",
+  "name": "Rigs",
+  "entities": {
+    "b0000000-0000-4000-8000-0000000000e1": {
+      "name": "Head",
+      "parent": null,
+      "children": [],
+      "components": {}
+    },
+    "b0000000-0000-4000-8000-0000000000e2": {
+      "name": "Head",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b0000000-0000-4000-8000-0000000000c5": {
+          "type": "fynkel.Skin",
+          "version": 1,
+          "data": { "skin": { "asset": "b0000000-0000-4000-8000-0000000000a3", "sub": "skin/0" }, "skeleton": "Head" }
+        }
+      }
+    },
+    "b0000000-0000-4000-8000-0000000000e3": {
+      "name": "Lantern",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b0000000-0000-4000-8000-0000000000c1": {
+          "type": "fynkel.Follow",
+          "version": 1,
+          "data": { "target": "Head", "offset": [0, 2, 0], "smoothing": 5.0, "look_at": true }
+        }
+      }
+    },
+    "b0000000-0000-4000-8000-0000000000e4": {
+      "name": "Camera",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b0000000-0000-4000-8000-0000000000c2": {
+          "type": "fynkel.ThirdPersonCamera",
+          "version": 1,
+          "data": {"target": "Nobody", "pivot": [0, 1.5, 0], "distance": 5.0, "min_distance": 0.5, "yaw": 0.0, "pitch": 0.35, "min_pitch": -0.5, "max_pitch": 1.3, "look_action": "look", "sensitivity": 2.5, "collision_radius": 0.2, "mask": 4294967295}
+        },
+        "b0000000-0000-4000-8000-0000000000c3": {
+          "type": "fynkel.Follow",
+          "version": 1,
+          "data": { "target": "", "offset": [0, 0, 0], "smoothing": 0.0, "look_at": false }
+        }
+      }
+    },
+    "b0000000-0000-4000-8000-0000000000e5": {
+      "name": "Crate",
+      "parent": null,
+      "children": [],
+      "components": {},
+      "prefab": {
+        "asset": { "asset": "b0000000-0000-4000-8000-0000000000a2" },
+        "instance": "b0000000-0000-4000-8000-0000000000f1",
+        "overrides": [
+          {
+            "op": "addComponent",
+            "entity": "10000000-0000-4000-8000-0000000000e1",
+            "component": "b0000000-0000-4000-8000-0000000000c4",
+            "type": "fynkel.Follow",
+            "version": 1,
+            "data": { "target": "Lantern", "offset": [0, 1, 0], "smoothing": 0.0, "look_at": false }
+          }
+        ]
+      }
+    }
+  }
+}

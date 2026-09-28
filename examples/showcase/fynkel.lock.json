@@ -8,7 +8,7 @@
   "tools": {
     "version": "0.0.1"
   },
-  "schemaFingerprint": "0x096a1c75d90b442b",
+  "schemaFingerprint": "0xe918a4acac42ad74",
   "documents": {
     "blend": 1,
     "controller": 1,
@@ -16,10 +16,10 @@
     "material": 2,
     "meta": 2,
     "physics_material": 1,
-    "prefab": 6,
+    "prefab": 7,
     "project": 2,
     "rig": 1,
-    "scene": 6,
+    "scene": 7,
     "shader": 1,
     "volume": 1
   },
@@ -32,7 +32,7 @@
     "fynkel.shader": 1
   },
   "cache": {
-    "version": 10,
+    "version": 11,
     "container": 1
   }
 }

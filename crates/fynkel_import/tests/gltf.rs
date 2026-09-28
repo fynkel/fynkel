@@ -721,7 +721,16 @@ fn rig_imports_skin_weights_skins_and_animations() {
     assert_eq!(components[2]["type"], "fynkel.Skin");
     assert_eq!(components[2]["data"]["skin"]["asset"], RIG_ID);
     assert_eq!(components[2]["data"]["skin"]["sub"], "skin/Skin");
-    assert_eq!(components[2]["data"]["skeleton"], "hips");
+    // The skeleton root is a reference to the hips' entity (ADR-0035).
+    let hips = entities
+        .iter()
+        .find(|(_, e)| e["name"] == "hips")
+        .unwrap()
+        .0;
+    assert_eq!(
+        components[2]["data"]["skeleton"],
+        serde_json::json!({ "entity": hips })
+    );
     assert!(body["components"]
         .as_object()
         .unwrap()

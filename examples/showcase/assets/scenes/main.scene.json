@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 6,
+  "formatVersion": 7,
   "id": "3a56fbbd-b340-41ca-ac2b-b5603d1dc0da",
   "name": "Showcase",
   "entities": {

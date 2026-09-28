@@ -342,7 +342,16 @@ fn rig_fbx_matches_the_gltf_rig() {
         meta.id().to_string()
     );
     assert_eq!(components[2]["data"]["skin"]["sub"], "skin/Rig");
-    assert_eq!(components[2]["data"]["skeleton"], "hips");
+    // The skeleton root is a reference to the hips' entity (ADR-0035).
+    let hips = entities
+        .iter()
+        .find(|(_, e)| e["name"] == "hips")
+        .unwrap()
+        .0;
+    assert_eq!(
+        components[2]["data"]["skeleton"],
+        serde_json::json!({ "entity": hips })
+    );
     let prop = entities.values().find(|e| e["name"] == "Prop").unwrap();
     assert_eq!(prop["components"].as_object().unwrap().len(), 2);
     let spine = entities.values().find(|e| e["name"] == "spine").unwrap();

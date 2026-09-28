@@ -134,7 +134,7 @@ fn test_headless_reports_json() {
 /// asset references.
 const SECOND_SCENE: &str = r#"{
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 6,
+  "formatVersion": 7,
   "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968331",
   "name": "Second",
   "entities": {
@@ -849,8 +849,8 @@ fn migrate_dry_runs_then_writes_with_backup() {
     let out = run(&["migrate", "--list", "--json"]);
     assert!(out.status.success());
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["current"]["scene"], 5);
-    assert_eq!(v["current"]["prefab"], 5);
+    assert_eq!(v["current"]["scene"], 7);
+    assert_eq!(v["current"]["prefab"], 7);
     assert_eq!(v["current"]["project"], 2);
     assert_eq!(v["current"]["material"], 2);
     assert_eq!(v["current"]["meta"], 2);
@@ -869,12 +869,16 @@ fn migrate_dry_runs_then_writes_with_backup() {
             "prefab/2-3/animator-layers",
             "prefab/3-4/object-layers",
             "prefab/4-5/one-root",
+            "prefab/5-6/rigidbody-constraints",
+            "prefab/6-7/object-references",
             "project/1-2/layers",
             "scene/0-1/entities-keyed-by-id",
             "scene/1-2/camera-exposure",
             "scene/2-3/animator-layers",
             "scene/3-4/object-layers",
-            "scene/4-5/one-root"
+            "scene/4-5/one-root",
+            "scene/5-6/rigidbody-constraints",
+            "scene/6-7/object-references"
         ]
     );
 
@@ -917,7 +921,7 @@ fn migrate_dry_runs_then_writes_with_backup() {
         .unwrap()
         .contains("+  \"base_color_texture\": {"));
     assert_eq!(docs[2]["from"], 0);
-    assert_eq!(docs[2]["to"], 5);
+    assert_eq!(docs[2]["to"], 7);
     assert_eq!(
         docs[2]["applied"][0]["name"],
         "scene/0-1/entities-keyed-by-id"
@@ -926,10 +930,15 @@ fn migrate_dry_runs_then_writes_with_backup() {
     assert_eq!(docs[2]["applied"][2]["name"], "scene/2-3/animator-layers");
     assert_eq!(docs[2]["applied"][3]["name"], "scene/3-4/object-layers");
     assert_eq!(docs[2]["applied"][4]["name"], "scene/4-5/one-root");
+    assert_eq!(
+        docs[2]["applied"][5]["name"],
+        "scene/5-6/rigidbody-constraints"
+    );
+    assert_eq!(docs[2]["applied"][6]["name"], "scene/6-7/object-references");
     assert!(docs[2]["diff"]
         .as_str()
         .unwrap()
-        .contains("+  \"formatVersion\": 6,"));
+        .contains("+  \"formatVersion\": 7,"));
     assert_eq!(docs[2]["written"], false);
     assert_eq!(std::fs::read(&scene).unwrap(), original);
     assert!(!dir.join("scenes/room.scene.json.bak").exists());

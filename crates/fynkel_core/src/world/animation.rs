@@ -1604,25 +1604,18 @@ impl World {
                 continue;
             };
             let names: Vec<&str> = skin.joints.iter().map(|j| j.name.as_str()).collect();
-            let root_ok = run.root.is_some_and(|r| {
-                self.ecs.has::<Transform>(r) && {
-                    component.skeleton.is_empty()
-                        || self
-                            .ecs
-                            .get::<Name>(r)
-                            .is_ok_and(|n| n.value == component.skeleton)
-                }
-            });
+            // The skeleton root is the referenced object (ADR-0035), the
+            // tree root when None; a destroyed one leaves the bind pose.
+            let expected = match component.skeleton.get() {
+                None => Some(tree_root(&self.ecs, entity)),
+                Some(r) => self.ecs.has::<Transform>(r).then_some(r),
+            };
+            let root_ok = run.root.is_some() && run.root == expected;
             if run.resolved.as_ref() != Some(&skin_ref)
                 || !root_ok
                 || !targets_valid(&self.ecs, &run.joints, &names)
             {
-                let top = tree_root(&self.ecs, entity);
-                let root = if component.skeleton.is_empty() {
-                    Some(top)
-                } else {
-                    find_named(&self.ecs, top, &component.skeleton)
-                };
+                let root = expected;
                 run.root = root;
                 run.joints = match root {
                     Some(r) => resolve_names(&self.ecs, r, &names),

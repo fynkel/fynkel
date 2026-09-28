@@ -147,6 +147,17 @@ void main() {
     expect(gizmos.lines(contextOf({'target': 'Nobody'}), selected: true, find: (_) => null).length, lessThan(all.length));
   });
 
+  test('a lineTo reaches an object reference by its entity id (ADR-0035)', () {
+    final c = contextOf({
+      'target': {'entity': 'e1'},
+    }, world: placed([1, 0, 0]));
+    final all = gizmos.lines(c, selected: true, findEntity: (id) => id == 'e1' ? const [0, 0, 7] : null);
+    final line = all.where((l) => l.points.length == 2 && vDistance(l.points.last, const [0, 0, 7]) < 1e-9);
+    expect(line.single.points.first, [1, 0, 0]);
+    final none = gizmos.lines(contextOf({'target': null}), selected: true, findEntity: (_) => const [0, 0, 7]);
+    expect(none.length, lessThan(all.length), reason: 'None draws no line');
+  });
+
   test('a radius: the schema default when the data has none, scaled with the entity, clamped to its minimum', () {
     final c = contextOf(const {}, world: placed([0, 0, 0], scale: 2));
     final h = handleOf(c, 'reach.+x');

@@ -354,6 +354,21 @@ pub(crate) fn prefab_document(
         if by_name { new } else { old }.to_string()
     };
     let entity_id = |node: usize| derive(node, "");
+    // A skin's skeleton root: a reference to the node's entity (ADR-0035),
+    // None when the file names none (the tree root at runtime).
+    let skeleton_of = |skin: &SkinData| -> Option<String> {
+        let name = skin.payload.skeleton.as_str();
+        let node = graph
+            .nodes
+            .iter()
+            .find(|n| !name.is_empty() && n.name == name)?;
+        let id = if by_name {
+            derive_sub_id(asset, &paths[node.index])
+        } else {
+            derive_sub_id(asset, &format!("node/{}", node.index))
+        };
+        Some(id.to_string())
+    };
     let material_of = |sub: &str| -> Option<String> {
         meshes
             .iter()
@@ -435,7 +450,10 @@ pub(crate) fn prefab_document(
                     renderer_component(meta, &subs[0].0, material_of(&subs[0].0)),
                 ));
                 if let Some(skin) = skin {
-                    components.push((derive(node.index, "/skin"), skin_component(meta, skin)));
+                    components.push((
+                        derive(node.index, "/skin"),
+                        skin_component(meta, skin, skeleton_of(skin)),
+                    ));
                 }
             } else {
                 for (p, (sub, sub_name)) in subs.iter().enumerate() {
@@ -455,7 +473,7 @@ pub(crate) fn prefab_document(
                         if meshes.iter().any(|m| &m.sub_id == sub && m.is_skinned()) {
                             prim_components.push((
                                 derive(node.index, &format!("/primitive/{p}/skin")),
-                                skin_component(meta, skin),
+                                skin_component(meta, skin, skeleton_of(skin)),
                             ));
                         }
                     }
@@ -593,16 +611,16 @@ pub(crate) fn transform_component(t: [f32; 3], r: [f32; 4], s: [f32; 3]) -> Valu
     })
 }
 
-/// `fynkel.Skin`: the skin sub-asset and the name of the skeleton root
-/// node (empty when the file names none: the runtime then searches the
-/// prefab's whole tree).
-pub(crate) fn skin_component(meta: &Meta, skin: &SkinData) -> Value {
+/// `fynkel.Skin`: the skin sub-asset and a reference to the skeleton root
+/// node's entity (ADR-0035; null when the file names none: the runtime
+/// then searches the prefab's whole tree).
+pub(crate) fn skin_component(meta: &Meta, skin: &SkinData, skeleton: Option<String>) -> Value {
     json!({
         "type": "fynkel.Skin",
         "version": 1,
         "data": {
             "skin": { "asset": meta.id().to_string(), "sub": skin.sub_id },
-            "skeleton": skin.payload.skeleton,
+            "skeleton": skeleton.map(|id| json!({ "entity": id })),
         },
     })
 }

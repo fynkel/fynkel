@@ -173,7 +173,7 @@ fn a_remap_points_the_models_hierarchy_at_the_project_material() {
         "scenes/robots.scene.json",
         &json!({
             "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-            "formatVersion": 6,
+            "formatVersion": 7,
             "id": ROBOTS,
             "name": "Robots",
             "entities": {

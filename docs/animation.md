@@ -95,7 +95,7 @@ interpolated world matrices like any other entity's. At most
 | Component | id | Fields | Rule |
 | --- | --- | --- | --- |
 | `fynkel.Animator` | 21 | `clip` (an `anim/<name>` asset ref, or a blend document's id with no sub — § Blend spaces; nil plays nothing), `speed` (finite; negative plays backwards), `looping`, `playing`, `weight` (0…1, default 1), `additive` (default false), `root_motion` (default false) | plays `clip` over the named nodes under this entity; a second animator on a descendant is a layer over its ancestors' pose (§ Layers); `speed` non-finite or `weight` outside 0…1 is `INVALID_PAYLOAD` (`FYN-H0008` at `fynkel validate`) |
-| `fynkel.Skin` | 22 | `skin` (a `skin/<name>` asset ref), `skeleton` (the name of the joint root entity; empty: the tree's root) | next to the `fynkel.MeshRenderer` of a skinned mesh: the joints are found by name under `skeleton`, itself found by name from the entity's tree root |
+| `fynkel.Skin` | 22 | `skin` (a `skin/<name>` asset ref), `skeleton` (the joint root object, a reference — Unity's `rootBone`, ADR-0035; None: the tree's root) | next to the `fynkel.MeshRenderer` of a skinned mesh: the joints are found by name under `skeleton` |
 
 Both are ordinary native components: authored in a scene or prefab,
 validated, listed in `fynkel.project.json` → `components`, `get<Animator>()`
@@ -179,10 +179,11 @@ child entity writes after the one above it and is a layer over it,
    lerp); an `additive` animator adds the clip's *change from its first
    frame*, scaled by `weight`, onto the current value instead.
 
-Then every `fynkel.Skin`: the skeleton root is found by name from the
-mesh entity's tree root (`skeleton` empty: the tree root itself), the
-skin's joints by name under it, cached while every one still lives under
-its name. A skin the world does not hold reports `SKIN_UNAVAILABLE` (17)
+Then every `fynkel.Skin`: the skeleton root is the object `skeleton`
+references (ADR-0035; resolved once when the scene loads or the prefab is
+instantiated, so each copy uses its own; None: the mesh entity's tree
+root; destroyed: the bind pose), the skin's joints by name under it,
+cached while every one still lives under its name. A skin the world does not hold reports `SKIN_UNAVAILABLE` (17)
 once and the mesh draws in its bind pose; so does a joint that did not
 resolve (its palette entry is the identity).
 
@@ -680,7 +681,7 @@ keeps what a rigged source carries:
   in the file is warned about (`A0105`). The animation's `extras.markers`
   become the clip's markers (§ Markers; a malformed entry is `A0104`).
 - the prefab puts a **`fynkel.Skin`** next to the `fynkel.MeshRenderer`
-  of a node that has a skin (`skin/<name>`, `skeleton` = the root's name);
+  of a node that has a skin (`skin/<name>`, `skeleton` = a reference to the root node's entity);
   a skin on a node without a skinned mesh, or a skinned mesh on a node
   without a skin, is a warning and the mesh draws in its bind pose.
 

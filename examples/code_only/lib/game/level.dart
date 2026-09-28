@@ -176,7 +176,9 @@ List<ObjectSpec> level(
         transform: at(0, 4.5, 7),
         components: const [
           Camera(fovY: 0.95, far: 120),
-          ThirdPersonCamera(target: 'Player', distance: 7, pitch: 0.45, minPitch: -0.2, maxPitch: 1.2, collisionRadius: 0.25),
+          // Its target is the player, which points it at itself when it
+          // starts (ADR-0035: a reference, set in code).
+          ThirdPersonCamera(distance: 7, pitch: 0.45, minPitch: -0.2, maxPitch: 1.2, collisionRadius: 0.25),
           AudioListener(),
         ],
       ),

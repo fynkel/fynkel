@@ -7,7 +7,7 @@
 //! candela (point, spot), luminance in nits (sky); exposure in EV100.
 
 use fynkel_audio::{AudioListener, AudioSource};
-use fynkel_contracts::{AssetRef, ComponentId};
+use fynkel_contracts::{AssetRef, ComponentId, ObjectRef};
 use fynkel_physics::{CharacterController, Collider, RigidBody};
 use fynkel_scene::{Layer, Tags, Transform};
 use fynkel_schema_derive::Schema;
@@ -413,13 +413,13 @@ mod tests {
 /// `collision_radius > 0` a sphere of that radius is cast from the pivot
 /// towards the rig against `mask` (the target's own colliders excluded)
 /// and the rig pulls in to the hit, never closer than `min_distance`.
-/// The target is named (`fynkel.Name`, the first match in entity order);
-/// an empty or unknown name leaves the entity where it is.
+/// The target is an object reference (ADR-0035); None or a destroyed
+/// target leaves the entity where it is.
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "component", id = 13, name = "fynkel.ThirdPersonCamera")]
 pub struct ThirdPersonCamera {
-    /// The followed entity's name; empty follows nothing.
-    pub target: String,
+    /// The followed object; None follows nothing.
+    pub target: ObjectRef,
     /// Offset from the target's world position the rig looks at and
     /// orbits, metres.
     pub pivot: Vec3,
@@ -446,7 +446,7 @@ pub struct ThirdPersonCamera {
 impl Default for ThirdPersonCamera {
     fn default() -> Self {
         Self {
-            target: String::new(),
+            target: ObjectRef::NONE,
             pivot: Vec3::new(0.0, 1.5, 0.0),
             distance: 5.0,
             min_distance: 0.5,
@@ -604,18 +604,18 @@ impl Oscillate {
     }
 }
 
-/// Keeps the entity at a named entity's world position plus `offset`,
+/// Keeps the entity at another object's world position plus `offset`,
 /// after the tick's physics, optionally turned to look at it. With
 /// `smoothing` 0 it snaps; otherwise it closes the gap at that rate per
 /// second (`1 − e^(−smoothing·dt)` of the distance per tick), the usual
-/// exponential follow. The target is named (`fynkel.Name`, the first
-/// match in entity order); an empty or unknown name leaves the entity
-/// where it is. A camera follows with `ThirdPersonCamera` instead.
+/// exponential follow. The target is an object reference (ADR-0035);
+/// None or a destroyed target leaves the entity where it is. A camera
+/// follows with `ThirdPersonCamera` instead.
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "component", id = 16, name = "fynkel.Follow")]
 pub struct Follow {
-    /// The followed entity's name; empty follows nothing.
-    pub target: String,
+    /// The followed object; None follows nothing.
+    pub target: ObjectRef,
     /// Metres from the target's world position, world axes.
     pub offset: Vec3,
     /// Per second, `>= 0`; `0` snaps.
@@ -627,7 +627,7 @@ pub struct Follow {
 impl Default for Follow {
     fn default() -> Self {
         Self {
-            target: String::new(),
+            target: ObjectRef::NONE,
             offset: Vec3::new(0.0, 2.0, 0.0),
             smoothing: 0.0,
             look_at: false,
@@ -847,9 +847,9 @@ impl Animator {
 
 /// Makes the entity's `MeshRenderer` a skinned draw (M3-19): the mesh's
 /// vertices carry joint weights into `skin` (an imported glTF `skin/<s>`),
-/// whose joints are resolved by name to entities under the one named
-/// `skeleton` — searched from the mesh entity's tree root, the root itself
-/// when `skeleton` is empty. Every frame the renderer gets one matrix per
+/// whose joints are resolved by name to entities under `skeleton`, an
+/// object reference (Unity's `rootBone`, ADR-0035) — the mesh entity's
+/// tree root when None; a destroyed skeleton leaves the bind pose. Every frame the renderer gets one matrix per
 /// joint from those entities' (interpolated) world matrices; a joint that
 /// does not resolve stays in its bind pose. The importer writes this next
 /// to the renderer of every skinned node; the world must know the skin
@@ -859,8 +859,8 @@ impl Animator {
 pub struct Skin {
     /// The skin sub-asset.
     pub skin: AssetRef,
-    /// Name of the skeleton root entity; empty for the tree root.
-    pub skeleton: String,
+    /// The skeleton root object; None for the mesh's tree root.
+    pub skeleton: ObjectRef,
 }
 
 fn finite_axis(what: &str, v: Vec3) -> Result<(), String> {
@@ -917,7 +917,34 @@ pub enum ComponentValue {
     Tags(Tags),
 }
 
+/// The component fields that hold an [`ObjectRef`] (ADR-0035): what
+/// [`ComponentValue::for_each_object_ref`] visits, pinned against the
+/// schemas by a test.
+pub const OBJECT_REF_FIELDS: &[(&str, &str)] = &[
+    ("fynkel.ThirdPersonCamera", "target"),
+    ("fynkel.Follow", "target"),
+    ("fynkel.Skin", "skeleton"),
+];
+
 impl ComponentValue {
+    /// Calls `f` with the component's schema name, the field's name and
+    /// the value of every object reference the component holds
+    /// (ADR-0035): a load maps their authoring ids to handles, a copy
+    /// re-points them into the copied tree.
+    pub fn for_each_object_ref(
+        &mut self,
+        mut f: impl FnMut(&'static str, &'static str, &mut ObjectRef),
+    ) {
+        match self {
+            ComponentValue::ThirdPersonCamera(c) => {
+                f("fynkel.ThirdPersonCamera", "target", &mut c.target)
+            }
+            ComponentValue::Follow(c) => f("fynkel.Follow", "target", &mut c.target),
+            ComponentValue::Skin(c) => f("fynkel.Skin", "skeleton", &mut c.skeleton),
+            _ => {}
+        }
+    }
+
     pub fn id(&self) -> ComponentId {
         match self {
             ComponentValue::Transform(_) => ComponentId::TRANSFORM,

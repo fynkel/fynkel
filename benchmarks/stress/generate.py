@@ -215,8 +215,9 @@ def spot_light(color, intensity, range_m, inner, outer):
 
 
 def follow(target, offset, smoothing):
+    """A `Follow` of the entity named `target` (its id: ADR-0035)."""
     return {"type": "fynkel.Follow", "version": 1, "data": {
-        "target": target, "offset": list(offset), "smoothing": smoothing, "look_at": False}}
+        "target": {"entity": uid(f"entity/{target}")}, "offset": list(offset), "smoothing": smoothing, "look_at": False}}
 
 
 def emitter(prefab, rate, lifetime, max_alive, velocity):
@@ -263,7 +264,7 @@ def spark_prefab():
     """A small dynamic cube the Fountain emits (item 10)."""
     k, v = entity("Spark", [transform((0, 0, 0), scale=(0.3, 0.3, 0.3)), mesh_renderer("cube", "body"),
                             rigid_body(mass=0.1), collider(friction=0.5), layer(1)])
-    return {"$schema": "https://fynkel.dev/schemas/prefab.schema.json", "formatVersion": 6,
+    return {"$schema": "https://fynkel.dev/schemas/prefab.schema.json", "formatVersion": 7,
             "id": str(SPARK_ID), "name": "Spark", "root": k, "entities": {k: v}}
 
 
@@ -398,7 +399,7 @@ def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, mover
         add("Body", [transform((0, 0, 0)), {"type": "fynkel.MeshRenderer", "version": 1, "data": {
                          "mesh": {"asset": CHARACTER, "sub": "mesh/Body"}, "material": {"asset": uid("material/rig")},
                          "cast_shadows": True, "receive_shadows": True, "visible": True}},
-                     {"type": "fynkel.Skin", "version": 1, "data": {"skin": {"asset": CHARACTER, "sub": "skin/Skeleton"}, "skeleton": "hips"}}],
+                     {"type": "fynkel.Skin", "version": 1, "data": {"skin": {"asset": CHARACTER, "sub": "skin/Skeleton"}, "skeleton": {"entity": uid(f"entity/Rig {n:03}/hips")}}}],
             key=f"Rig {n:03}/Body", parent=rig)
         joints = {}
         for name, parent, local, _, _ in SKELETON:
@@ -425,7 +426,7 @@ def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, mover
             light = point_light(hue, lrng.uniform(200, 320), 8.0)
             rot = (0, 0, 0, 1)
         add(f"Lamp {n:03}", [transform((x, lrng.uniform(2.5, 4.5), z), rot), light])
-    return {"$schema": "https://fynkel.dev/schemas/scene.schema.json", "formatVersion": 6,
+    return {"$schema": "https://fynkel.dev/schemas/scene.schema.json", "formatVersion": 7,
             "id": str(SCENE_ID), "name": "Stress", "entities": entities}
 
 

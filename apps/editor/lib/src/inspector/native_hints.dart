@@ -107,7 +107,7 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
   },
   'fynkel.Skin': {
     'skin': {'kind': 'asset(skin)', 'order': 0},
-    'skeleton': {'kind': 'entity', 'order': 1},
+    'skeleton': {'order': 1},
   },
   'fynkel.Animator': {
     // Unity's order: the Controller first (ADR-0032); with one, the clip
@@ -170,7 +170,6 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
   },
   'fynkel.ThirdPersonCamera': {
     'target': {
-      'kind': 'entity',
       'order': 0,
       'gizmo': {'shape': 'lineTo'},
     },
@@ -188,7 +187,6 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
   },
   'fynkel.Follow': {
     'target': {
-      'kind': 'entity',
       'order': 0,
       'gizmo': {'shape': 'lineTo'},
     },

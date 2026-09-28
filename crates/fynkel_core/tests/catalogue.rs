@@ -5,9 +5,9 @@
 
 use std::f32::consts::TAU;
 
-use fynkel_contracts::{AssetRef, DiagnosticCode, Uuid, DEFAULT_FIXED_DT};
+use fynkel_contracts::{AssetRef, DiagnosticCode, ObjectRef, Uuid, DEFAULT_FIXED_DT};
 use fynkel_core::components::ComponentValue;
-use fynkel_core::load::{EntityDescription, SceneDescription};
+use fynkel_core::load::{EntityDescription, MissingReference, SceneDescription};
 use fynkel_core::schema::SystemKind;
 use fynkel_core::*;
 use fynkel_scene::WorldTransform;
@@ -231,7 +231,7 @@ fn an_oscillator_bobs_and_keeps_a_moved_rest_position() {
 }
 
 #[test]
-fn a_follower_snaps_smooths_and_looks_at_its_named_target() {
+fn a_follower_snaps_smooths_and_looks_at_its_target() {
     let mut w = world();
     let target = spawn(
         &mut w,
@@ -248,7 +248,7 @@ fn a_follower_snaps_smooths_and_looks_at_its_named_target() {
         None,
         None,
         vec![ComponentValue::Follow(Follow {
-            target: "Hero".into(),
+            target: ObjectRef::to(target),
             offset: Vec3::new(0.0, 2.0, 0.0),
             smoothing: 0.0,
             look_at: false,
@@ -273,7 +273,7 @@ fn a_follower_snaps_smooths_and_looks_at_its_named_target() {
         None,
         None,
         vec![ComponentValue::Follow(Follow {
-            target: "Hero".into(),
+            target: ObjectRef::to(target),
             offset: Vec3::ZERO,
             smoothing: 6.0,
             look_at: true,
@@ -292,7 +292,7 @@ fn a_follower_snaps_smooths_and_looks_at_its_named_target() {
     let dir = (Vec3::new(5.0, 0.0, 4.0) - first).normalize();
     assert!(forward.dot(dir) > 0.99, "forward {forward:?} dir {dir:?}");
 
-    // A missing name leaves the follower where it is.
+    // No target leaves the follower where it is.
     let lost = spawn(
         &mut w,
         4,
@@ -300,7 +300,7 @@ fn a_follower_snaps_smooths_and_looks_at_its_named_target() {
         None,
         None,
         vec![ComponentValue::Follow(Follow {
-            target: "Nobody".into(),
+            target: ObjectRef::NONE,
             ..Follow::default()
         })],
     );
@@ -587,4 +587,122 @@ fn system_times_cover_every_slot_in_order() {
         1,
         "one command applied"
     );
+}
+
+fn doc_id(n: u8) -> Uuid {
+    let mut b = [0u8; 16];
+    b[15] = n;
+    b[6] = 0x40;
+    b[8] = 0x80;
+    Uuid(b)
+}
+
+#[test]
+fn each_instance_follows_its_own_head() {
+    // Foundation 3.5, ADR-0035: a prefab's reference to one of its own
+    // objects points at each instance's copy.
+    let prefab = SceneDescription {
+        id: doc_id(100),
+        name: "Enemy".into(),
+        entities: vec![
+            EntityDescription {
+                id: doc_id(1),
+                name: "Enemy".into(),
+                active: true,
+                parent: None,
+                children: vec![doc_id(2), doc_id(3)],
+                components: vec![ComponentValue::Transform(Transform::IDENTITY)],
+            },
+            EntityDescription {
+                id: doc_id(2),
+                name: "Head".into(),
+                active: true,
+                parent: Some(doc_id(1)),
+                children: vec![],
+                components: vec![ComponentValue::Transform(Transform::from_position(
+                    Vec3::new(0.0, 2.0, 0.0),
+                ))],
+            },
+            EntityDescription {
+                id: doc_id(3),
+                name: "Marker".into(),
+                active: true,
+                parent: Some(doc_id(1)),
+                children: vec![],
+                components: vec![
+                    ComponentValue::Transform(Transform::IDENTITY),
+                    ComponentValue::Follow(Follow {
+                        target: ObjectRef::authored(doc_id(2)),
+                        offset: Vec3::new(0.0, 1.0, 0.0),
+                        smoothing: 0.0,
+                        look_at: false,
+                    }),
+                ],
+            },
+        ],
+    };
+    let mut w = world();
+    let mut markers = Vec::new();
+    for x in [0.0, 10.0] {
+        let (_, loaded) = w
+            .instantiate(
+                &prefab,
+                "Enemy",
+                Transform::from_position(Vec3::new(x, 0.0, 0.0)),
+                None,
+            )
+            .unwrap();
+        markers.push(loaded.handle_of(doc_id(3)).unwrap());
+    }
+    w.step();
+    assert!(close(
+        world_pose(&w, markers[0]).0,
+        Vec3::new(0.0, 3.0, 0.0)
+    ));
+    assert!(
+        close(world_pose(&w, markers[1]).0, Vec3::new(10.0, 3.0, 0.0)),
+        "the second marker follows its own head: {:?}",
+        world_pose(&w, markers[1]).0
+    );
+}
+
+#[test]
+fn a_reference_to_an_object_outside_the_load_is_none_and_reported() {
+    // ADR-0035 §3: nothing searches the world for it.
+    let prefab = SceneDescription {
+        id: doc_id(100),
+        name: "Marker".into(),
+        entities: vec![EntityDescription {
+            id: doc_id(1),
+            name: "Marker".into(),
+            active: true,
+            parent: None,
+            children: vec![],
+            components: vec![
+                ComponentValue::Transform(Transform::IDENTITY),
+                ComponentValue::Follow(Follow {
+                    target: ObjectRef::authored(doc_id(9)),
+                    offset: Vec3::ZERO,
+                    smoothing: 0.0,
+                    look_at: false,
+                }),
+            ],
+        }],
+    };
+    let mut w = world();
+    let (_, loaded) = w
+        .instantiate(&prefab, "Marker", Transform::IDENTITY, None)
+        .unwrap();
+    assert_eq!(
+        loaded.missing_references,
+        [MissingReference {
+            entity: doc_id(1),
+            component: "fynkel.Follow",
+            field: "target",
+            target: doc_id(9),
+        }]
+    );
+    let marker = loaded.handle_of(doc_id(1)).unwrap();
+    let follow = w.ecs().copy::<Follow>(marker).unwrap().target;
+    assert!(follow.is_none(), "{follow:?}");
 }

@@ -33,7 +33,9 @@ use uuid::Uuid;
 /// 9: ADR-0031 (`.shader` files cook to `SHDR`, their materials to `MATC`).
 /// 10: foundation 2.5 (scenes and prefabs are `formatVersion` 6,
 /// `fynkel.RigidBody` carries `constraints`).
-pub const CACHE_VERSION: u32 = 10;
+/// 11: ADR-0035 (scenes and prefabs are `formatVersion` 7, object
+/// references).
+pub const CACHE_VERSION: u32 = 11;
 
 /// A BLAKE3 hash, shown as 64 hex characters.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

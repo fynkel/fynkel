@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fynkel_assets::{Assets, CookedPrefab, CookedScene};
-use fynkel_contracts::{Diagnostic, Entity, Status, Uuid};
+use fynkel_contracts::{Code, Diagnostic, Entity, Status, Uuid};
 use fynkel_core::{LoadError, LoadMode, LoadedScene, Transform};
 use fynkel_document::diagnostic_json;
 use glam::{Quat, Vec3};
@@ -47,7 +47,6 @@ fn failed(diagnostics: &[Diagnostic], cache: Value) -> Outcome {
 }
 
 fn load_error_diagnostic(e: &LoadError) -> Diagnostic {
-    use fynkel_contracts::Code;
     let code = match e {
         // Not document codes: the world's state, not the file's.
         LoadError::Poisoned | LoadError::Spawn(_) => Code::IO,
@@ -216,7 +215,12 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
                     "scenes": scenes_json(w),
                     "cache": cache,
                     "residency": residency,
-                    "diagnostics": scene.diagnostics.iter().map(diagnostic_json).collect::<Vec<_>>(),
+                    "diagnostics": scene
+                        .diagnostics
+                        .iter()
+                        .map(diagnostic_json)
+                        .chain(missing_references(&loaded, &scene.path))
+                        .collect::<Vec<_>>(),
                     "input": input,
                     "physics": physics,
                     "modules": modules_json(w.core().modules()),
@@ -373,6 +377,28 @@ fn references(data: &Value, loaded: &LoadedScene) -> serde_json::Map<String, Val
     let mut out = serde_json::Map::new();
     walk(data, loaded, &mut out);
     out
+}
+
+/// A `FYN-B0003` warning per object reference the load left None
+/// (ADR-0035 §3): its target is not in this load.
+fn missing_references<'a>(
+    loaded: &'a LoadedScene,
+    document: &'a str,
+) -> impl Iterator<Item = Value> + 'a {
+    loaded.missing_references.iter().map(move |m| {
+        diagnostic_json(
+            &Diagnostic::warning(
+                Code::LOAD_MISSING_REFERENCE,
+                format!(
+                    "{}.{} references an object that is not in the load; it is None",
+                    m.component, m.field
+                ),
+            )
+            .with_document(document)
+            .with_id(m.entity.to_string())
+            .with_suggestion("pick the object again in the Inspector"),
+        )
+    })
 }
 
 fn scene_json(loaded: &LoadedScene, scene: &CookedScene) -> Value {
@@ -539,6 +565,7 @@ fn instantiate_prefab(
             let mut diagnostics: Vec<Value> =
                 prefab.diagnostics.iter().map(diagnostic_json).collect();
             diagnostics.extend(loaded.diagnostics.iter().map(diagnostic_json));
+            diagnostics.extend(missing_references(&instance, &prefab.path));
             Outcome {
                 status: Status::Ok,
                 report: json!({

@@ -7,7 +7,7 @@
 //! weight (additive or not), root motion leaves the pose and moves the
 //! entity or its character.
 
-use fynkel_contracts::{AssetRef, DiagnosticCode, Uuid, DEFAULT_FIXED_DT};
+use fynkel_contracts::{AssetRef, DiagnosticCode, ObjectRef, Uuid, DEFAULT_FIXED_DT};
 use fynkel_core::animation::{Channel, Clip, Interpolation, Joint, Marker, Property};
 use fynkel_core::components::ComponentValue;
 use fynkel_core::schema::SystemKind;
@@ -490,7 +490,7 @@ fn a_skin_resolves_its_joints_and_the_extract_carries_the_palette() {
         body,
         ComponentValue::Skin(Skin {
             skin: AssetRef::with_sub(uuid(9), "skin/9"),
-            skeleton: "hips".into(),
+            skeleton: ObjectRef::to(hips),
         }),
     );
     assert_eq!(w.diagnostics().len(), 1, "{:?}", w.diagnostics());
@@ -507,7 +507,7 @@ fn a_skin_resolves_its_joints_and_the_extract_carries_the_palette() {
         body,
         ComponentValue::Skin(Skin {
             skin: skin_ref.clone(),
-            skeleton: "hips".into(),
+            skeleton: ObjectRef::to(hips),
         }),
     );
     assert!(w.diagnostics().is_empty());
@@ -537,15 +537,17 @@ fn a_skin_resolves_its_joints_and_the_extract_carries_the_palette() {
         "{:?}",
         extract.joints[1]
     );
-    // A skeleton name that is nowhere: the mesh draws in its bind pose
-    // (identity palette), no diagnostic — the joints simply resolve to
-    // nothing.
+    // A destroyed skeleton (ADR-0035 §5): the mesh draws in its bind pose
+    // (identity palette), no diagnostic — nothing searches for another.
+    let pelvis = spawn(&mut w, 5, Vec3::ZERO, Some(root), "pelvis");
+    w.submit(Lane::Simulation, vec![Command::Destroy(pelvis)]);
+    w.step();
     set(
         &mut w,
         body,
         ComponentValue::Skin(Skin {
             skin: skin_ref,
-            skeleton: "pelvis".into(),
+            skeleton: ObjectRef::to(pelvis),
         }),
     );
     let extract = w.extract();

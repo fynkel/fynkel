@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 6,
+  "formatVersion": 7,
   "id": "39b75119-91a6-4c94-a129-06e761e4d315",
   "name": "Player",
   "entities": {
@@ -168,7 +168,9 @@
               "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
               "sub": "skin/Skeleton"
             },
-            "skeleton": "hips"
+            "skeleton": {
+              "entity": "6185ea96-bbe9-572f-a526-4eacab5f0312"
+            }
           }
         }
       }

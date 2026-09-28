@@ -154,6 +154,14 @@ fn json_type(ty: &FieldType) -> Value {
         FieldType::I32 => json!({"type": "integer", "minimum": i32::MIN, "maximum": i32::MAX}),
         FieldType::U64 | FieldType::Entity => json!({"type": "integer", "minimum": 0}),
         FieldType::OptionalEntity => json!({"type": ["integer", "null"], "minimum": 0}),
+        // ADR-0035: what a script's `GameObject?` field stores.
+        FieldType::ObjectRef => json!({
+            "type": ["object", "null"],
+            "properties": {"entity": {"type": "string"}},
+            "required": ["entity"],
+            "additionalProperties": false,
+            "x-fynkel": {"type": "gameObject"}
+        }),
         FieldType::Bool => json!({"type": "boolean"}),
         FieldType::Vec3 => {
             json!({"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3})
@@ -187,7 +195,7 @@ fn json_schema(s: &RecordSchema) -> Value {
         props.insert(f.name.to_string(), t);
         if !matches!(
             f.ty,
-            FieldType::OptionalEntity | FieldType::OptionalAssetRef
+            FieldType::OptionalEntity | FieldType::OptionalAssetRef | FieldType::ObjectRef
         ) {
             required.push(f.name);
         }
@@ -569,6 +577,7 @@ fn dart_type(ty: &FieldType) -> String {
         FieldType::F32 => "double".into(),
         FieldType::U32 | FieldType::I32 | FieldType::U64 | FieldType::Entity => "int".into(),
         FieldType::OptionalEntity => "int?".into(),
+        FieldType::ObjectRef => "GameObject?".into(),
         FieldType::Bool => "bool".into(),
         FieldType::Vec3 => "Vec3".into(),
         FieldType::Vec4 => "Vec4".into(),
@@ -656,7 +665,10 @@ fn dart_const(ty: &FieldType, v: &Value) -> Option<String> {
             }
             format!("{}({})", rust_ident(s), args.join(", "))
         }
-        FieldType::Entity | FieldType::OptionalEntity | FieldType::OptionalAssetRef => return None,
+        FieldType::Entity
+        | FieldType::OptionalEntity
+        | FieldType::OptionalAssetRef
+        | FieldType::ObjectRef => return None,
     })
 }
 
@@ -697,6 +709,10 @@ fn dart(fp: u64) -> String {
     let _ = writeln!(o, "import '../math.dart';");
     let _ = writeln!(o, "import '../src/asset_ref.dart';");
     let _ = writeln!(o, "import '../src/wire/support.dart';");
+    let _ = writeln!(
+        o,
+        "import '../src/world.dart' show GameObject, objectRefBits, objectRefOf, referenceJson;"
+    );
     let _ = writeln!(o);
     let _ = writeln!(
         o,
@@ -764,7 +780,7 @@ fn dart(fp: u64) -> String {
                 let v = camel(f.name);
                 if matches!(
                     f.ty,
-                    FieldType::OptionalEntity | FieldType::OptionalAssetRef
+                    FieldType::OptionalEntity | FieldType::OptionalAssetRef | FieldType::ObjectRef
                 ) {
                     let _ = writeln!(o, "    this.{v},");
                     continue;
@@ -840,6 +856,9 @@ fn dart(fp: u64) -> String {
                 FieldType::OptionalEntity => {
                     format!("d.setUint64(offset + {off}, {v} ?? 0, Endian.little);")
                 }
+                FieldType::ObjectRef => {
+                    format!("d.setUint64(offset + {off}, objectRefBits({v}), Endian.little);")
+                }
                 FieldType::Bool => format!("d.setUint8(offset + {off}, {v} ? 1 : 0);"),
                 FieldType::Vec3 => format!("writeVec3(d, offset + {off}, {v});"),
                 FieldType::Vec4 => format!("writeVec4(d, offset + {off}, {v});"),
@@ -882,6 +901,9 @@ fn dart(fp: u64) -> String {
                     }
                     FieldType::OptionalEntity => {
                         format!("optionalEntity(d.getUint64(offset + {off}, Endian.little))")
+                    }
+                    FieldType::ObjectRef => {
+                        format!("objectRefOf(d.getUint64(offset + {off}, Endian.little))")
                     }
                     FieldType::Bool => format!("d.getUint8(offset + {off}) != 0"),
                     FieldType::Vec3 => format!("readVec3(d, offset + {off})"),
@@ -957,6 +979,9 @@ fn dart(fp: u64) -> String {
                         }
                         FieldType::Enum(_) => format!("'{k}': {v}.name,"),
                         FieldType::OptionalEntity => format!("if ({v} != null) '{k}': {v},"),
+                        FieldType::ObjectRef => {
+                            format!("'{k}': ?referenceJson({v}),")
+                        }
                         _ => format!("'{k}': {v},"),
                     };
                     let _ = writeln!(o, "        {line}");
@@ -1105,6 +1130,7 @@ fn rust(fp: u64) -> String {
                 FieldType::U64 => format!("put_u64(out, {off}, {v});"),
                 FieldType::Entity => format!("put_entity(out, {off}, {v});"),
                 FieldType::OptionalEntity => format!("put_opt_entity(out, {off}, {v});"),
+                FieldType::ObjectRef => format!("put_object_ref(out, {off}, {v});"),
                 FieldType::Bool => format!("put_bool(out, {off}, {v});"),
                 FieldType::Vec3 => format!("put_vec3(out, {off}, {v});"),
                 FieldType::Vec4 => format!("put_vec4(out, {off}, {v});"),
@@ -1142,6 +1168,7 @@ fn rust(fp: u64) -> String {
                     FieldType::U64 => format!("get_u64(b, {off})"),
                     FieldType::Entity => format!("get_entity(b, {off})"),
                     FieldType::OptionalEntity => format!("get_opt_entity(b, {off})"),
+                    FieldType::ObjectRef => format!("get_object_ref(b, {off})"),
                     FieldType::Bool => format!("get_bool(b, {off})"),
                     FieldType::Vec3 => format!("get_vec3(b, {off})"),
                     FieldType::Vec4 => format!("get_vec4(b, {off})"),
@@ -1343,6 +1370,7 @@ fn document_codecs(fp: u64) -> String {
                     FieldType::OptionalAssetRef => "opt_asset_ref_field",
                     FieldType::Enum(_) => "enum_field",
                     FieldType::Nested(_) => "nested_field",
+                    FieldType::ObjectRef => "object_ref_field",
                     FieldType::Entity | FieldType::OptionalEntity => panic!(
                         "{}.{}: authored records cannot hold entity handles",
                         s.name, name
@@ -1378,6 +1406,7 @@ fn document_codecs(fp: u64) -> String {
                 FieldType::OptionalAssetRef => format!("opt_asset_ref_node({v}.as_ref())"),
                 FieldType::Enum(_) => format!("enum_node(&{v})"),
                 FieldType::Nested(_) => format!("{v}.to_node()"),
+                FieldType::ObjectRef => format!("object_ref_node({v})"),
                 FieldType::Entity | FieldType::OptionalEntity => unreachable!(),
             };
             let _ = writeln!(o, "            (\"{name}\", {expr}),");

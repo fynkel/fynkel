@@ -277,7 +277,7 @@ stays there; one that lands rests `skinWidth` above the surface.
 **The action driver.** With `moveAction`/`jumpAction` named, `World::step`
 walks the character before the batch's commands from the tick's input:
 the 2D action (clamped to the unit disc) × `speed` in the frame of the
-`fynkel.ThirdPersonCamera` whose `target` is the entity's `Name` (forward
+`fynkel.ThirdPersonCamera` whose `target` is the character (forward
 = `(−sin yaw, 0, −cos yaw)`, right = `(cos yaw, 0, −sin yaw)`; world axes
 without a rig), and a `jump()` on the action's press while grounded — the
 press edge is consumed by exactly one tick (§5.1), so a 50 ms frame's
@@ -322,7 +322,7 @@ specialised:
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `target` | "" | the followed entity's `fynkel.Name` (an authored component cannot hold an entity reference; the lowest entity of that name wins and is cached while it keeps the name); empty or unknown: the rig does nothing |
+| `target` | None | the followed object, a reference (ADR-0035): `{ "entity": id }` in a document, resolved once at load, each prefab copy's own; `GameObject?` in Dart. None or destroyed: the rig holds its last pose |
 | `pivot` | (0, 1.5, 0) | the orbit centre in the target's frame |
 | `distance` / `minDistance` | 5 / 0.5 | metres from the pivot, and the closest the pull-in brings it |
 | `yaw` / `pitch` | 0 / 0.35 | radians, the current orbit angles — written back every tick, so a scene value is the start and a `set` from Dart snaps the camera |

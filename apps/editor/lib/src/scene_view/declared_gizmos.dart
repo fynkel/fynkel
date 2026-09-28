@@ -99,23 +99,34 @@ final class DeclaredGizmos extends ComponentHandles {
   // ── Drawing ────────────────────────────────────────────────────────
 
   /// The polylines of the gizmos [selected] decides on (`when: always`
-  /// ones whatever it is). [find] answers a `lineTo`'s target entity's
-  /// position by name.
-  List<GizmoPolyline> lines(ComponentContext context, {required bool selected, Vec3? Function(String name)? find}) {
+  /// ones whatever it is). A `lineTo`'s target is an object reference
+  /// (`{entity: id}`, ADR-0035), whose position [findEntity] answers by
+  /// entity id, or a script's name string, which [find] answers by name.
+  List<GizmoPolyline> lines(
+    ComponentContext context, {
+    required bool selected,
+    Vec3? Function(String name)? find,
+    Vec3? Function(String id)? findEntity,
+  }) {
     final c = _defaulted(context);
     final out = <GizmoPolyline>[];
     for (final f in fields) {
       final g = f.gizmo!;
       if (!selected && !g.always) continue;
       final color = _color(f);
-      for (final l in _shape(c, f, find)) {
+      for (final l in _shape(c, f, find, findEntity)) {
         out.add((points: l, color: color));
       }
     }
     return out;
   }
 
-  List<List<Vec3>> _shape(ComponentContext c, FieldSpec f, Vec3? Function(String name)? find) {
+  List<List<Vec3>> _shape(
+    ComponentContext c,
+    FieldSpec f,
+    Vec3? Function(String name)? find,
+    Vec3? Function(String id)? findEntity,
+  ) {
     final g = f.gizmo!;
     final m = frameOf(c, g);
     final o = matTranslation(m);
@@ -148,8 +159,11 @@ final class DeclaredGizmos extends ComponentHandles {
           for (final d in [a[0], a[1], vScale(a[0], -1), vScale(a[1], -1)]) [o, vAdd(end, vScale(d, r))],
         ];
       case 'lineTo':
-        final name = c.data[f.name];
-        final target = name is String && name.isNotEmpty ? find?.call(name) : null;
+        final target = switch (c.data[f.name]) {
+          {'entity': final String id} => findEntity?.call(id),
+          final String name when name.isNotEmpty => find?.call(name),
+          _ => null,
+        };
         return target == null
             ? const []
             : [

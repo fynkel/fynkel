@@ -313,10 +313,6 @@ pub struct World {
     /// The optional modules the project uses (ADR-0029 §3): one that is
     /// off runs no systems and its commands are rejected.
     modules: crate::Modules,
-    /// Named-target component (`ThirdPersonCamera`, `Follow`) → the entity
-    /// its `target` name resolved to (M3-09); re-resolved when that entity
-    /// dies or is renamed.
-    named_targets: HashMap<Entity, Entity>,
     /// Prefab descriptions `Emitter`s may instantiate (M3-10).
     prefabs: HashMap<Uuid, Arc<SceneDescription>>,
     /// Clips `Animator`s may play and skins `Skin`s deform with (M3-19).
@@ -408,7 +404,6 @@ impl World {
             input,
             physics: Physics::new(),
             modules: crate::Modules::COMPILED,
-            named_targets: HashMap::new(),
             prefabs: HashMap::new(),
             clips: HashMap::new(),
             blends: HashMap::new(),
@@ -946,10 +941,15 @@ impl World {
                 }
             }
             Command::Destroy(e) => resolve(e),
+            Command::SetComponent { entity, value } => {
+                resolve(entity);
+                // An object reference to an object spawned earlier in the
+                // batch (ADR-0035).
+                value.for_each_object_ref(|_, _, r| resolve(&mut r.entity));
+            }
             Command::SetTransform { entity, .. }
             | Command::SetName { entity, .. }
             | Command::SetActive { entity, .. }
-            | Command::SetComponent { entity, .. }
             | Command::RemoveComponent { entity, .. }
             | Command::Body { entity, .. }
             | Command::Animate { entity, .. }
@@ -1269,7 +1269,6 @@ impl World {
         for e in gone {
             self.subscriptions.remove(&e);
             self.overrides.remove(&e);
-            self.named_targets.remove(&e);
             self.events.push(Event {
                 tick,
                 payload: EventPayload::Destroyed { entity: e },
@@ -1748,16 +1747,11 @@ impl World {
                             v = v.normalize();
                         }
                         // The rig that targets this entity gives the frame.
-                        let yaw = self
-                            .ecs
-                            .get::<Name>(entity)
-                            .ok()
-                            .and_then(|name| {
-                                h.query::<&ThirdPersonCamera>()
-                                    .iter()
-                                    .find(|r| !r.target.is_empty() && r.target == name.value)
-                                    .map(|r| r.yaw)
-                            })
+                        let yaw = h
+                            .query::<&ThirdPersonCamera>()
+                            .iter()
+                            .find(|r| r.target.get() == Some(entity))
+                            .map(|r| r.yaw)
                             .unwrap_or(0.0);
                         let (sin, cos) = yaw.sin_cos();
                         let forward = Vec3::new(-sin, 0.0, -cos);
@@ -1793,7 +1787,6 @@ impl World {
     fn place_camera_rigs(&mut self) -> (u32, bool) {
         let mut placements = std::mem::take(&mut self.rig_scratch);
         placements.clear();
-        let mut placements_targets: Vec<(Entity, Entity)> = Vec::new();
         let dt = self.config.fixed_dt;
         {
             let h = self.ecs.hecs();
@@ -1803,10 +1796,7 @@ impl World {
                 .iter()
             {
                 let entity = handle.0;
-                if rig.target.is_empty() {
-                    continue;
-                }
-                let Some(target) = self.resolve_named(entity, &rig.target) else {
+                let Some(target) = self.live(rig.target) else {
                     continue;
                 };
                 let Ok(target_world) = self.ecs.get::<WorldTransform>(target) else {
@@ -1862,11 +1852,7 @@ impl World {
                     position: pivot + dir * distance,
                     rotation: Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch),
                 });
-                placements_targets.push((entity, target));
             }
-        }
-        for (rig, target) in placements_targets.drain(..) {
-            self.named_targets.insert(rig, target);
         }
         let moved = !placements.is_empty();
         let rigs = placements.len() as u32;

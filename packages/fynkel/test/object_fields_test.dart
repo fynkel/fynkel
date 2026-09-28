@@ -114,7 +114,7 @@ void main() {
     // Turret comes first, so its Spinner is attached after it.
     File('${project.path}/assets/scenes/refs.scene.json').writeAsStringSync(jsonEncode({
       r'$schema': 'https://fynkel.dev/schemas/scene.schema.json',
-      'formatVersion': 6,
+      'formatVersion': 7,
       'id': sceneId,
       'name': 'Refs',
       'entities': {
@@ -145,7 +145,7 @@ void main() {
     // A prefab whose root's script references its own child.
     File('${project.path}/assets/prefabs/turret.prefab.json').writeAsStringSync(jsonEncode({
       r'$schema': 'https://fynkel.dev/schemas/prefab.schema.json',
-      'formatVersion': 6,
+      'formatVersion': 7,
       'id': prefabId,
       'name': 'TurretPrefab',
       'entities': {

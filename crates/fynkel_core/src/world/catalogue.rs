@@ -10,13 +10,13 @@
 
 use std::sync::Arc;
 
-use fynkel_contracts::{ComponentId, DiagnosticCode, Entity, Tick, Uuid};
+use fynkel_contracts::{ComponentId, DiagnosticCode, Entity, ObjectRef, Tick, Uuid};
 use fynkel_ecs::internal::{hecs, Handle};
 use fynkel_physics::{BodyCommand, BodyType, RigidBody};
 use fynkel_scene::{self as scene, Parent, Transform, WorldTransform};
 use glam::{Mat3, Quat, Vec3};
 
-use super::{Diagnostic, Name, World};
+use super::{Diagnostic, World};
 use crate::command::Lane;
 use crate::components::{
     Camera, Emitter, Follow, LifetimeDespawn, LookAtCamera, MotionSpace, Oscillate, Rotator,
@@ -58,8 +58,6 @@ pub(super) struct Placement {
     pub entity: Entity,
     pub position: Vec3,
     pub rotation: Quat,
-    /// The named target this placement followed, cached afterwards.
-    pub target: Option<Entity>,
 }
 
 fn rotation_of(matrix: &glam::Mat4) -> Quat {
@@ -348,7 +346,7 @@ impl World {
         count
     }
 
-    /// Every `Follow` moves towards its named target's propagated world
+    /// Every `Follow` moves towards its target's propagated world
     /// position plus the offset. Returns the count and whether any moved.
     pub(super) fn run_followers(&mut self) -> (u32, bool) {
         let dt = self.config.fixed_dt;
@@ -364,7 +362,7 @@ impl World {
             {
                 count += 1;
                 let entity = handle.0;
-                let Some(target) = self.resolve_named(entity, &follow.target) else {
+                let Some(target) = self.live(follow.target) else {
                     continue;
                 };
                 let Ok(target_world) = self.ecs.get::<WorldTransform>(target) else {
@@ -387,7 +385,6 @@ impl World {
                     entity,
                     position,
                     rotation,
-                    target: Some(target),
                 });
             }
         }
@@ -425,7 +422,6 @@ impl World {
                     entity: handle.0,
                     position,
                     rotation,
-                    target: None,
                 });
             }
         }
@@ -460,9 +456,6 @@ impl World {
     fn apply_placements(&mut self, placements: &mut Vec<Placement>) -> bool {
         let mut moved = false;
         for p in placements.drain(..) {
-            if let Some(t) = p.target {
-                self.named_targets.insert(p.entity, t);
-            }
             let before = self.ecs.copy::<Transform>(p.entity).ok();
             if scene::set_world_pose(&self.ecs, p.entity, p.position, p.rotation).is_ok()
                 && self.ecs.copy::<Transform>(p.entity).ok() != before
@@ -473,27 +466,10 @@ impl World {
         moved
     }
 
-    /// The entity `name` resolves to for `owner`'s named-target component
-    /// (`Follow`, `ThirdPersonCamera`): the cached one while it lives under
-    /// that name, else the first match in entity order.
-    pub(super) fn resolve_named(&self, owner: Entity, name: &str) -> Option<Entity> {
-        if name.is_empty() {
-            return None;
-        }
-        let cached = self
-            .named_targets
-            .get(&owner)
-            .copied()
-            .filter(|t| self.ecs.get::<Name>(*t).is_ok_and(|n| n.value == name));
-        cached.or_else(|| {
-            self.ecs
-                .hecs()
-                .query::<(&Handle, &Name)>()
-                .iter()
-                .filter(|(_, n)| n.value == name)
-                .map(|(h, _)| h.0)
-                .min()
-        })
+    /// The object a reference names while it lives (ADR-0035): a
+    /// destroyed target is missing, never replaced by a search.
+    pub(super) fn live(&self, r: ObjectRef) -> Option<Entity> {
+        r.get().filter(|e| self.ecs.contains(*e))
     }
 
     /// Gives every entity with a `C` a default `S` (its runtime state) and

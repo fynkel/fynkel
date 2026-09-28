@@ -8,7 +8,7 @@
 //! field through [`or_default`].
 
 use fynkel_contracts::schema::{EnumSchema, HasEnumSchema};
-use fynkel_contracts::{AssetRef, Uuid};
+use fynkel_contracts::{AssetRef, Entity, ObjectRef, Uuid};
 use glam::{Quat, Vec3, Vec4};
 
 use crate::json::{Member, Node, Value};
@@ -199,6 +199,37 @@ pub fn opt_asset_ref_field(m: &[Member], name: &str) -> Result<Option<AssetRef>,
     }
 }
 
+/// An object reference (ADR-0035): `{ "entity": "<uuid>" }`, the
+/// authoring id the load resolves; `runtime:<handle>` for a live object
+/// written back by a host (what a script reference writes too). Absent or
+/// `null` is None.
+pub fn object_ref_field(m: &[Member], name: &str) -> Result<ObjectRef, FieldError> {
+    if !has(m, name) {
+        return Ok(ObjectRef::NONE);
+    }
+    (|| {
+        let inner = object(field(m, name)?)?;
+        if let Some(x) = inner.iter().find(|x| x.key != "entity") {
+            return Err(FieldError::new(
+                format!("/{}", x.key),
+                "unknown member of an object reference",
+            ));
+        }
+        let text = str_field(inner, "entity")?;
+        if let Some(bits) = text.strip_prefix("runtime:") {
+            let bits: u64 = bits
+                .parse()
+                .map_err(|_| FieldError::new("/entity", "expected runtime:<handle>"))?;
+            return Ok(ObjectRef::to(Entity::from_bits(bits)));
+        }
+        let id: Uuid = text
+            .parse()
+            .map_err(|e| FieldError::new("/entity", format!("{e}")))?;
+        Ok(ObjectRef::authored(id))
+    })()
+    .map_err(|e: FieldError| e.under(name))
+}
+
 pub fn enum_from_node<T: HasEnumSchema>(node: &Node) -> Result<T, FieldError> {
     let text = node
         .as_str()
@@ -301,6 +332,20 @@ pub fn opt_asset_ref_node(r: Option<&AssetRef>) -> Node {
         Some(r) => asset_ref_node(r),
         None => Node::synthetic(Value::Null),
     }
+}
+
+/// The authoring id when there is one, else the live handle as
+/// `runtime:<handle>`; None is a `null` node, which [`object_node`]
+/// leaves out.
+pub fn object_ref_node(r: ObjectRef) -> Node {
+    let text = if !r.id.is_nil() {
+        r.id.to_string()
+    } else if !r.entity.is_null() {
+        format!("runtime:{}", r.entity.to_bits())
+    } else {
+        return Node::synthetic(Value::Null);
+    };
+    Node::object(vec![("entity".to_string(), Node::string(text))])
 }
 
 pub fn enum_node<T: HasEnumSchema>(v: &T) -> Node {

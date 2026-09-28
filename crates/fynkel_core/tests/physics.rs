@@ -3,6 +3,7 @@
 //! them, contacts reach `after_physics_events`, dynamic transforms are
 //! physics-owned.
 
+use fynkel_contracts::ObjectRef;
 use fynkel_core::components::ComponentValue;
 use fynkel_core::*;
 use glam::{Quat, Vec3, Vec3Swizzles};
@@ -524,7 +525,7 @@ fn playground() -> (World, Entity, Entity) {
         "Camera",
         Vec3::new(0.0, 2.0, 6.0),
         vec![ComponentValue::ThirdPersonCamera(ThirdPersonCamera {
-            target: "Player".into(),
+            target: ObjectRef::to(player),
             look_action: "look".into(),
             ..ThirdPersonCamera::default()
         })],
@@ -687,15 +688,15 @@ fn the_rig_pulls_in_before_a_wall_and_needs_a_named_target() {
     w.step();
     w.step();
     assert!(((pos(&w, camera) - pivot).length() - rig.distance).abs() < 1e-3);
-    // No entity of that name: the rig stays where it is; the pitch is
-    // clamped when written back.
+    // No target: the rig stays where it is; the pitch is clamped when
+    // written back.
     let parked = pos(&w, camera);
     w.submit(
         Lane::Simulation,
         vec![Command::SetComponent {
             entity: camera,
             value: ComponentValue::ThirdPersonCamera(ThirdPersonCamera {
-                target: "Nobody".into(),
+                target: ObjectRef::NONE,
                 pitch: 3.0,
                 ..ThirdPersonCamera::default()
             }),
@@ -708,7 +709,7 @@ fn the_rig_pulls_in_before_a_wall_and_needs_a_named_target() {
         vec![Command::SetComponent {
             entity: camera,
             value: ComponentValue::ThirdPersonCamera(ThirdPersonCamera {
-                target: "Player".into(),
+                target: ObjectRef::to(player),
                 pitch: 3.0,
                 ..ThirdPersonCamera::default()
             }),

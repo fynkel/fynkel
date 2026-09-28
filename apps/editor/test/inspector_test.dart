@@ -381,7 +381,12 @@ void main() {
       expect(specs['fynkel.RigidBody']!.field('constraints')!.kind, FieldKind.freezeAxes);
       expect(collider.field('mesh')!.nullable, isTrue);
       expect(collider.field('restitution')!.slider, isTrue);
-      expect(specs['fynkel.Skin']!.field('skeleton')!.kind, FieldKind.entity);
+      // ADR-0035: object references, Unity's object field with its picker.
+      for (final type in ['fynkel.Follow', 'fynkel.ThirdPersonCamera']) {
+        final target = specs[type]!.field('target')!;
+        expect((target.kind, target.nullable, target.gizmo?.shape), (FieldKind.objectRef, true, 'lineTo'), reason: type);
+      }
+      expect(specs['fynkel.Skin']!.field('skeleton')!.kind, FieldKind.objectRef);
       expect(specs['fynkel.Name']!.authored, isFalse);
       // Order: the hints put fields in their stated order.
       expect(camera.fields.map((f) => f.name).take(3), ['projection', 'fov_y', 'ortho_height']);

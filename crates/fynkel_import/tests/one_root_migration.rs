@@ -245,7 +245,7 @@ fn every_prefab_gets_one_root_and_every_instance_becomes_it() {
     // Two roots: a wrapper named after the prefab over them.
     let pair = json_of(planned(&plans, "prefabs/pair.prefab.json"));
     let wrapper = wrapper_root(uid(PAIR)).to_string();
-    assert_eq!(pair["formatVersion"], 6);
+    assert_eq!(pair["formatVersion"], 7);
     assert_eq!(pair["root"], wrapper.as_str());
     assert!(pair.get("roots").is_none());
     let w = &pair["entities"][&wrapper];
@@ -262,7 +262,7 @@ fn every_prefab_gets_one_root_and_every_instance_becomes_it() {
     assert_eq!(lamp["entities"].as_object().unwrap().len(), 2);
 
     let main = json_of(planned(&plans, "scenes/main.scene.json"));
-    assert_eq!(main["formatVersion"], 6);
+    assert_eq!(main["formatVersion"], 7);
     let e = &main["entities"];
 
     // The Lamp: no components of its own. Its Transform (x 5) composed

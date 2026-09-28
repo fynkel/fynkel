@@ -106,7 +106,7 @@ void main() {
   test('the recorded walk lands the Player on the Platform and the rig follows', () {
     final (w, player, camera) = loaded();
     expect(player.get<CharacterController>()!.moveAction, 'move');
-    expect(camera.get<ThirdPersonCamera>()!.target, 'Player');
+    expect(camera.get<ThirdPersonCamera>()!.target, same(player), reason: 'the reference resolved at load (ADR-0035)');
     final recording = loadInputRecording('$fixture/test/platform.input.json');
     var airborne = 0;
     recording.replay(

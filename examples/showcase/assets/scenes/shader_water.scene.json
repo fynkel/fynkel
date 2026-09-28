@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 6,
+  "formatVersion": 7,
   "id": "e4593a1e-c8ba-5037-af95-02d1142b16cc",
   "name": "Shader: Water",
   "entities": {

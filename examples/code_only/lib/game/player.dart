@@ -24,7 +24,8 @@ class Player extends Behaviour {
   @Expose(min: 0, step: 0.1, drawer: 'jumpHeight')
   double jumpSpeed = 5.5;
 
-  /// The object with the `fynkel.ThirdPersonCamera`.
+  /// The object with the `fynkel.ThirdPersonCamera`; the player makes
+  /// itself that camera's target when it starts.
   @Expose()
   String cameraName = 'Camera';
 
@@ -47,6 +48,8 @@ class Player extends Behaviour {
   @override
   void start() {
     spawn = transform.position;
+    final camera = world.find(cameraName);
+    if (camera?.get<ThirdPersonCamera>() case final rig?) camera!.set(rig.copyWith(target: gameObject));
   }
 
   @override

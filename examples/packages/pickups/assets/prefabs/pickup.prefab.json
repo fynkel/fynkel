@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 6,
+  "formatVersion": 7,
   "id": "0dd85a60-b1ab-52b3-999e-09eb00a048f4",
   "name": "Pickup",
   "entities": {

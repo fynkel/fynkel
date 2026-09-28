@@ -379,6 +379,10 @@ impl Code {
     /// not under the animator, or foot placement with physics off; the
     /// world reports it as `DiagnosticCode::IK_UNAVAILABLE`, once per goal.
     pub const RUNTIME_IK_UNAVAILABLE: Code = Code("FYN-R0015");
+    /// A load's object reference (ADR-0035) names an object that is not in
+    /// that load: the field is None. A warning in the load report, the
+    /// same code the SDK gives a script's `GameObject?` field.
+    pub const LOAD_MISSING_REFERENCE: Code = Code("FYN-B0003");
 
     // User settings (`FYN-U`, blueprint §19.2d item 12): `settings.json`.
     /// The settings file is not a settings document (wrong `fynkel` kind

@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 6,
+  "formatVersion": 7,
   "id": "d2749035-0813-5383-abbc-8649390c8b8c",
   "name": "Big Coin",
   "entities": {

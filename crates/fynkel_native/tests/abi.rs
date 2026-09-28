@@ -3,7 +3,7 @@
 
 use std::ptr;
 
-use fynkel_contracts::{DiagnosticCode, Entity, EventKind, Status, WorldId};
+use fynkel_contracts::{DiagnosticCode, Entity, EventKind, ObjectRef, Status, WorldId};
 use fynkel_core::schema::*;
 use fynkel_core::Lane;
 use fynkel_native::buffer::{self, BufferKind, Writer};
@@ -1008,7 +1008,7 @@ fn character_commands_and_query() {
         &set_component(
             camera,
             &ComponentValue::ThirdPersonCamera(ThirdPersonCamera {
-                target: "Player".into(),
+                target: ObjectRef::to(player),
                 ..ThirdPersonCamera::default()
             }),
         ),
@@ -1042,7 +1042,7 @@ fn character_commands_and_query() {
         (13, ThirdPersonCamera::SIZE as u32)
     );
     let rig = ThirdPersonCamera::decode(&body[at + ComponentHeader::SIZE..], &tail).unwrap();
-    assert_eq!(rig.target, "Player");
+    assert_eq!(rig.target.get(), Some(player));
 
     // Walk one tick at 3 m/s along +X, then jump at 6 m/s.
     let walk = |x: f32| {
@@ -1171,7 +1171,7 @@ fn catalogue_components_and_the_systems_query() {
         (
             lamp,
             ComponentValue::Follow(Follow {
-                target: "Hero".into(),
+                target: ObjectRef::to(hero),
                 offset: Vec3::new(0.0, 2.0, 0.0),
                 smoothing: 0.0,
                 look_at: false,
@@ -1233,7 +1233,10 @@ fn catalogue_components_and_the_systems_query() {
     }
     let (seen, tail) = components_of(lamp);
     let follow = seen.iter().find(|(c, _, _)| *c == 16).unwrap();
-    assert_eq!(Follow::decode(&follow.2, &tail).unwrap().target, "Hero");
+    assert_eq!(
+        Follow::decode(&follow.2, &tail).unwrap().target.get(),
+        Some(hero)
+    );
 
     // They moved at the tick without a command: the lamp is 2 m over the
     // hero, the spinner turned.
@@ -1852,7 +1855,7 @@ fn animation_commands_events_and_query() {
     // A Skin component round-trips and an unknown skin is reported once.
     let skin = Skin {
         skin: AssetRef::with_sub(AssetId::from_bytes([9; 16]), "skin/0"),
-        skeleton: "hips".into(),
+        skeleton: fynkel_contracts::ObjectRef::to(rig),
     };
     h.submit(
         Lane::Simulation,

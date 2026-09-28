@@ -119,6 +119,13 @@ impl Migrations {
                 description: "fynkel.RigidBody gained constraints (Unity's RigidbodyConstraints, foundation 2.5); every body, and every RigidBody an override adds, gets 0 (nothing frozen)",
                 apply: rigidbody_constraints_5_to_6,
             });
+            m.add(Migration {
+                kind,
+                from: 6,
+                name: "object-references",
+                description: "fynkel.Follow and fynkel.ThirdPersonCamera hold an object reference instead of a name (ADR-0035): `target: \"Player\"` becomes `target: { \"entity\": <id> }`, the first entity of the document with that name; an empty name, or one no entity of the document has, becomes None (null) — pick it again in the Inspector",
+                apply: object_references_6_to_7,
+            });
         }
         m
     }
@@ -707,6 +714,73 @@ fn rigidbody_constraints_5_to_6(root: &mut Node) -> Result<(), String> {
             {
                 if let Some(data) = o.get_mut("data") {
                     fill(data);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The component fields whose name became an object reference (ADR-0035).
+const REFERENCING: [(&str, &str); 3] = [
+    ("fynkel.Follow", "target"),
+    ("fynkel.ThirdPersonCamera", "target"),
+    ("fynkel.Skin", "skeleton"),
+];
+
+/// Scene/prefab 6 → 7 (ADR-0035): a `fynkel.Follow`'s or
+/// `fynkel.ThirdPersonCamera`'s `target` name, and a `fynkel.Skin`'s
+/// `skeleton` name (None: the tree root, as the empty name was), becomes a reference to the
+/// first entity of the document with that name (document order) — in a
+/// prefab, one of its own, which is what makes each instance follow its
+/// own copy. An empty name, or one no entity of the document carries
+/// (an object inside a prefab instance, another scene's), becomes None:
+/// the runtime search it stood for is gone. The same rewrite applies to
+/// the `data` of an `addComponent` override.
+fn object_references_6_to_7(root: &mut Node) -> Result<(), String> {
+    let mut names: Vec<(String, String)> = Vec::new();
+    if let Some(entities) = root.get("entities").and_then(Node::as_object) {
+        for e in entities {
+            if let Some(name) = e.value.get("name").and_then(Node::as_str) {
+                if !names.iter().any(|(n, _)| n == name) {
+                    names.push((name.to_string(), e.key.clone()));
+                }
+            }
+        }
+    }
+    let rewrite = |data: &mut Node, field: &str| {
+        let Some(name) = data.get(field).and_then(Node::as_str) else {
+            return;
+        };
+        let target = names
+            .iter()
+            .find(|(n, _)| !name.is_empty() && n == name)
+            .map(|(_, id)| Node::object(vec![("entity".to_string(), Node::string(id.clone()))]))
+            .unwrap_or_else(|| Node::synthetic(Value::Null));
+        data.set(field, target);
+    };
+    for (ty, field) in REFERENCING {
+        for_each_component_data(root, ty, &mut |d| rewrite(d, field))?;
+    }
+    let Some(entities) = root.get_mut("entities").and_then(Node::as_object_mut) else {
+        return Ok(());
+    };
+    for entity in entities.iter_mut() {
+        let Some(overrides) = entity
+            .value
+            .get_mut("prefab")
+            .and_then(|p| p.get_mut("overrides"))
+            .and_then(Node::as_array_mut)
+        else {
+            continue;
+        };
+        for o in overrides.iter_mut() {
+            let ty = o.get("type").and_then(Node::as_str).unwrap_or_default();
+            let field = REFERENCING.iter().find(|(t, _)| *t == ty).map(|(_, f)| *f);
+            if let (Some(field), Some("addComponent")) = (field, o.get("op").and_then(Node::as_str))
+            {
+                if let Some(data) = o.get_mut("data") {
+                    rewrite(data, field);
                 }
             }
         }

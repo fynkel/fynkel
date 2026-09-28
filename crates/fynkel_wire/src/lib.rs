@@ -15,7 +15,7 @@ pub use generated::{
 };
 
 use fynkel_contracts::schema::HasEnumSchema;
-use fynkel_contracts::{AssetId, AssetRef, Entity};
+use fynkel_contracts::{AssetId, AssetRef, Entity, ObjectRef};
 use glam::{Quat, Vec3, Vec4};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,6 +137,11 @@ pub fn put_entity(b: &mut [u8], off: usize, v: Entity) {
 pub fn put_opt_entity(b: &mut [u8], off: usize, v: Option<Entity>) {
     put_u64(b, off, v.map(Entity::to_bits).unwrap_or(0));
 }
+/// The handle alone: an authoring id never crosses the wire (ADR-0035).
+#[inline]
+pub fn put_object_ref(b: &mut [u8], off: usize, v: ObjectRef) {
+    put_u64(b, off, v.entity.to_bits());
+}
 #[inline]
 pub fn put_str(b: &mut [u8], off: usize, v: &str, strings: &mut StringTable) {
     let (o, l) = strings.put(v);
@@ -215,6 +220,10 @@ pub fn get_vec4(b: &[u8], off: usize) -> Vec4 {
 #[inline]
 pub fn get_entity(b: &[u8], off: usize) -> Entity {
     Entity::from_bits(get_u64(b, off))
+}
+#[inline]
+pub fn get_object_ref(b: &[u8], off: usize) -> ObjectRef {
+    ObjectRef::to(Entity::from_bits(get_u64(b, off)))
 }
 #[inline]
 pub fn get_opt_entity(b: &[u8], off: usize) -> Option<Entity> {

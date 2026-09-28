@@ -60,7 +60,7 @@ void main() {
     write('assets/data/axe.data.json', weapon(axe, 'Axe', {}));
     write('assets/scenes/arena.scene.json', {
       r'$schema': 'https://fynkel.dev/schemas/scene.schema.json',
-      'formatVersion': 6,
+      'formatVersion': 7,
       'id': arena,
       'name': 'Arena',
       'entities': {

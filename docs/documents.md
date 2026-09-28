@@ -2402,7 +2402,7 @@ on `props` through its `fynkel.Layer`); since M3-09 a
 second scene, Playground (`assets/scenes/playground.scene.json`, id
 `…0031`: Floor, a 0.8 m Platform, a Player with a
 `fynkel.CharacterController` driven by the `move`/`jump` actions, a
-Camera with a `fynkel.ThirdPersonCamera` targeting it by name and turned
+Camera with a `fynkel.ThirdPersonCamera` targeting it (a reference) and turned
 by the `look` action, Sun) with `test/platform.input.json` (120 frames:
 W held, Space at frame 20, W released at 75) — the headless gate of item
 9 — so the main scene's counts are unchanged; since M3-10 a third scene,

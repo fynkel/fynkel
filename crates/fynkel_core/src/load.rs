@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use fynkel_contracts::{ComponentId, Entity, Uuid};
+use fynkel_contracts::{ComponentId, Entity, ObjectRef, Uuid};
 use fynkel_scene::{self as scene, Transform};
 
 use crate::command::Command;
@@ -162,6 +162,21 @@ pub struct LoadedScene {
     /// Component values rejected by the command path (see the world's
     /// diagnostics); the entities themselves exist.
     pub rejected_components: u32,
+    /// Object references (ADR-0035) whose target is not in the load: they
+    /// are None. For the load report.
+    pub missing_references: Vec<MissingReference>,
+}
+
+/// An object reference a load could not resolve.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MissingReference {
+    /// The authoring id of the entity holding the reference.
+    pub entity: Uuid,
+    /// The component's schema name and the field, `fynkel.Follow.target`.
+    pub component: &'static str,
+    pub field: &'static str,
+    /// The authoring id it names.
+    pub target: Uuid,
 }
 
 impl LoadedScene {
@@ -444,6 +459,21 @@ impl World {
             });
             i += 1;
         }
+        // A reference into the copied tree points at the copy, one to an
+        // object outside it at that object, as Unity's `Instantiate`
+        // (ADR-0035).
+        let inside: HashMap<Entity, Uuid> = entities
+            .iter()
+            .enumerate()
+            .map(|(i, &(e, _))| (e, synthetic_id(i + 1)))
+            .collect();
+        for d in &mut described {
+            for c in &mut d.components {
+                c.for_each_object_ref(|_, _, r| {
+                    r.id = inside.get(&r.entity).copied().unwrap_or(Uuid::NIL);
+                });
+            }
+        }
         let description = SceneDescription {
             id: synthetic_id(0),
             name: String::new(),
@@ -582,7 +612,30 @@ impl World {
                     // `spawn` itself, so re-applying would be redundant.
                     continue;
                 }
-                if !self.apply_loaded(e, c.clone(), tick) {
+                let mut c = c.clone();
+                // Object references (ADR-0035) resolve once, here, against
+                // this load: a prefab's reach each instance's own copies.
+                c.for_each_object_ref(|component, field, r| {
+                    if r.id.is_nil() {
+                        return;
+                    }
+                    match loaded.by_id.get(&r.id) {
+                        Some(&target) => r.entity = target,
+                        None if r.entity.is_null() => {
+                            loaded.missing_references.push(MissingReference {
+                                entity: d.id,
+                                component,
+                                field,
+                                target: r.id,
+                            });
+                            *r = ObjectRef::NONE;
+                        }
+                        // A copy's reference to an object outside the
+                        // copied tree keeps pointing at it.
+                        None => r.id = Uuid::NIL,
+                    }
+                });
+                if !self.apply_loaded(e, c, tick) {
                     loaded.rejected_components += 1;
                 }
             }

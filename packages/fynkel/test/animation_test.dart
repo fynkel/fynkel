@@ -89,10 +89,11 @@ void main() {
         const Animator(clip: wave, speed: 1, looping: true, playing: true, weight: 1, additive: false, rootMotion: false));
     expect(
       body.get<Skin>(),
-      const Skin(
-        skin: AssetRef(rigAsset, sub: 'skin/Skin'),
-        skeleton: 'hips',
+      Skin(
+        skin: const AssetRef(rigAsset, sub: 'skin/Skin'),
+        skeleton: hips,
       ),
+      reason: 'the skeleton is a reference to the hips (ADR-0035)',
     );
     expect(prop.get<Animator>()!.looping, isFalse);
 
@@ -168,7 +169,8 @@ void main() {
     final spine = hips.findChild('spine')!;
     final head = spine.findChild('head')!;
     w.frame(1 / 60);
-    expect(body.get<Skin>(), const Skin(skin: AssetRef(rigAsset, sub: 'skin/Skin'), skeleton: 'hips'));
+    expect(body.get<Skin>(), Skin(skin: const AssetRef(rigAsset, sub: 'skin/Skin'), skeleton: hips),
+        reason: "this instance's own hips (ADR-0035)");
     expect(body.get<MeshRenderer>()!.mesh, const AssetRef(rigAsset, sub: 'mesh/Body'));
     expect(head.worldTransform!.position, const Vec3(3, 1, 0), reason: 'bind pose under the root');
 
@@ -220,7 +222,7 @@ void main() {
     final hips = root.findChild('hips')!;
     final head = hips.findChild('spine')!.findChild('head')!;
     w.frame(1 / 60);
-    expect(body.get<Skin>(), const Skin(skin: AssetRef(rigAsset, sub: 'skin/Skin'), skeleton: 'hips'),
+    expect(body.get<Skin>(), Skin(skin: const AssetRef(rigAsset, sub: 'skin/Skin'), skeleton: hips),
         reason: 'meshes and skins stay the skeleton source\'s');
 
     // The clips are the rig's, by name: `anim/wave` poses the joints like

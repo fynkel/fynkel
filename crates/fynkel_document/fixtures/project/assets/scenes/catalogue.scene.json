@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 6,
+  "formatVersion": 7,
   "id": "c0000000-0000-4000-8000-000000000032",
   "name": "Catalogue",
   "entities": {
@@ -261,7 +261,9 @@
           "type": "fynkel.Follow",
           "version": 1,
           "data": {
-            "target": "Buoy",
+            "target": {
+              "entity": "c0000000-0000-4000-8000-0000000002e4"
+            },
             "offset": [
               0,
               2,

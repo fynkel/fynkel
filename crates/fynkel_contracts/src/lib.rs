@@ -12,6 +12,7 @@ pub mod codes;
 pub mod diagnostic;
 pub mod handle;
 pub mod ids;
+pub mod object;
 pub mod schema;
 pub mod uuid;
 
@@ -20,6 +21,7 @@ pub use codes::{DiagnosticCode, Status};
 pub use diagnostic::{has_errors, Code, Diagnostic, Severity};
 pub use handle::{Entity, WorldId};
 pub use ids::{ComponentId, EventKind};
+pub use object::ObjectRef;
 pub use schema::{
     EnumSchema, FieldSchema, FieldType, HasEnumSchema, HasSchema, RecordSchema, SchemaField,
     SchemaKind,

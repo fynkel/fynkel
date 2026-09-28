@@ -778,7 +778,7 @@ impl Lab {
         }
         let scene = json!({
             "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-            "formatVersion": 6,
+            "formatVersion": 7,
             "id": "c0000000-0000-4000-8000-000000000030",
             "name": "Lab",
             "entities": entities,

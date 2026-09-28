@@ -2025,7 +2025,7 @@ fn duplicate_object_in_prefabs_and_of_prefab_instances() {
 fn large_documents_with_many_diagnostics_validate_in_linear_time() {
     fn synthetic(n: usize) -> String {
         let mut s = String::with_capacity(n * 400);
-        s.push_str("{\n  \"$schema\": \"https://fynkel.dev/schemas/scene.schema.json\",\n  \"formatVersion\": 6,\n  \"id\": \"70d7ba8b-f7fb-4eba-920d-ec9e6b968330\",\n  \"name\": \"Big\",\n  \"entities\": {\n");
+        s.push_str("{\n  \"$schema\": \"https://fynkel.dev/schemas/scene.schema.json\",\n  \"formatVersion\": 7,\n  \"id\": \"70d7ba8b-f7fb-4eba-920d-ec9e6b968330\",\n  \"name\": \"Big\",\n  \"entities\": {\n");
         for i in 0..n {
             let id = format!("aaaaaaaa-0000-4000-8000-{:012x}", i + 1);
             let comp = format!("11111111-0000-4000-8000-{:012x}", i + 1);
@@ -2236,7 +2236,7 @@ fn one_instance(
 ) -> Editor {
     scene_of(json!({
         "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-        "formatVersion": 6, "id": "60000000-0000-4000-8000-000000000000", "name": "S",
+        "formatVersion": 7, "id": "60000000-0000-4000-8000-000000000000", "name": "S",
         "entities": { anchor: { "name": "Thing", "parent": null, "children": [], "components": {},
             "prefab": { "asset": { "asset": prefab }, "instance": instance, "overrides": overrides } } }
     }))
@@ -2285,7 +2285,7 @@ fn prefabs_hold_nested_instances_with_ids_and_overrides() {
     let lib = library();
     let holder = prefab_of(json!({
         "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-        "formatVersion": 6, "id": "60000000-0000-4000-8000-000000000001", "name": "Holder",
+        "formatVersion": 7, "id": "60000000-0000-4000-8000-000000000001", "name": "Holder",
         "root": "60000000-0000-4000-8000-0000000000a1",
         "entities": { "60000000-0000-4000-8000-0000000000a1": { "name": "Holder", "parent": null,
             "children": [], "components": { "60000000-0000-4000-8000-0000000000c1": full_transform(0.0) } } }
@@ -2370,7 +2370,7 @@ fn prefabs_hold_nested_instances_with_ids_and_overrides() {
     // A prefab that contains the Holder cannot go into it (a cycle).
     let outer = prefab_of(json!({
         "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-        "formatVersion": 6, "id": "60000000-0000-4000-8000-000000000002", "name": "Outer",
+        "formatVersion": 7, "id": "60000000-0000-4000-8000-000000000002", "name": "Outer",
         "root": "60000000-0000-4000-8000-0000000000b1",
         "entities": { "60000000-0000-4000-8000-0000000000b1": { "name": "Outer", "parent": null,
             "children": [], "components": {},
@@ -2563,7 +2563,7 @@ fn unpack_one_level_keeps_nested_instances_and_completely_does_not() {
     let scope = "62000000-0000-4000-8000-0000000000a3";
     lib.add(prefab_of(json!({
         "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-        "formatVersion": 6, "id": HOLDER, "name": "Holder", "root": h_root,
+        "formatVersion": 7, "id": HOLDER, "name": "Holder", "root": h_root,
         "entities": {
             h_root: { "name": "Holder", "parent": null, "children": [gun],
                       "components": { h_t: full_transform(0.0) } },
@@ -2652,7 +2652,7 @@ fn unpack_one_level_keeps_nested_instances_and_completely_does_not() {
     let flag = "62000000-0000-4000-8000-0000000000d2";
     lib.add(prefab_of(json!({
         "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-        "formatVersion": 6, "id": VARIANT, "name": "Turret Variant", "root": v_root,
+        "formatVersion": 7, "id": VARIANT, "name": "Turret Variant", "root": v_root,
         "entities": {
             v_root: { "name": "Base", "parent": null, "children": [flag], "components": {},
                 "prefab": { "asset": { "asset": TURRET }, "instance": vi.to_string(), "overrides": [

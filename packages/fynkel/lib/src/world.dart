@@ -1322,6 +1322,20 @@ class World {
   /// the body per component; a component this build has no codec for is
   /// skipped by its size.
   void _decodeComponents(WireBuffer b, void Function(int id, WireRecord value) sink) {
+    final outer = _decoding;
+    _decoding = this;
+    try {
+      _decodeComponentsIn(b, sink);
+    } finally {
+      _decoding = outer;
+    }
+  }
+
+  /// The world whose components are being decoded: an object reference
+  /// field ([objectRefOf]) names an object of this world.
+  static World? _decoding;
+
+  void _decodeComponentsIn(WireBuffer b, void Function(int id, WireRecord value) sink) {
     final d = b.records;
     var off = 0;
     for (var i = 0; i < b.recordCount; i++) {
@@ -1355,6 +1369,16 @@ class World {
   /// read in a `fixedUpdate` allocates that one record, not every
   /// component the object has.
   WireRecord? _decodeComponent(WireBuffer b, int wantId) {
+    final outer = _decoding;
+    _decoding = this;
+    try {
+      return _decodeComponentIn(b, wantId);
+    } finally {
+      _decoding = outer;
+    }
+  }
+
+  WireRecord? _decodeComponentIn(WireBuffer b, int wantId) {
     final d = b.records;
     var off = 0;
     for (var i = 0; i < b.recordCount; i++) {
@@ -3635,4 +3659,19 @@ class FrameTimes {
   @override
   String toString() =>
       'FrameTimes(total=$totalUs µs behaviours=$behavioursUs µs native=$nativeUs µs presentation=$presentationUs µs ticks=$ticks)';
+}
+
+/// Generated codecs (ADR-0035): an object reference field on the wire —
+/// the object's handle, or the temp reference of one spawned this tick,
+/// which the world resolves at the tick. `0` is None.
+int objectRefBits(GameObject? go) => go == null ? 0 : go._simulationEntity('an object reference');
+
+/// Generated codecs (ADR-0035): the object a handle names, in the world
+/// decoding the component. The native side reads a destroyed target as
+/// `0`, so a reference to one is null, as in Unity.
+GameObject? objectRefOf(int bits) {
+  if (bits == 0) return null;
+  final w = World._decoding;
+  if (w == null) return null;
+  return w.byEntity(bits) ?? w.attach(bits);
 }

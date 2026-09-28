@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 6,
+  "formatVersion": 7,
   "id": "bca5eecb-c8d8-58fe-825c-5fce41819bf1",
   "name": "Playground",
   "entities": {
@@ -63,7 +63,9 @@
           "type": "fynkel.ThirdPersonCamera",
           "version": 1,
           "data": {
-            "target": "Player",
+            "target": {
+              "entity": "2fd40fbe-11e2-5290-8efd-f4f22176300e"
+            },
             "pivot": [
               0,
               1.5,

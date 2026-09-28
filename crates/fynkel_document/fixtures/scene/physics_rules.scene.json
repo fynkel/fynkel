@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 6,
+  "formatVersion": 7,
   "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968331",
   "name": "PhysicsRules",
   "entities": {
@@ -284,7 +284,9 @@
           "type": "fynkel.ThirdPersonCamera",
           "version": 1,
           "data": {
-            "target": "Player",
+            "target": {
+              "entity": "bbbbbbbb-0000-4000-8000-000000000004"
+            },
             "pivot": [
               0,
               1.5,
@@ -360,7 +362,9 @@
           "type": "fynkel.ThirdPersonCamera",
           "version": 1,
           "data": {
-            "target": "Player",
+            "target": {
+              "entity": "bbbbbbbb-0000-4000-8000-000000000004"
+            },
             "pivot": [
               0,
               1.5,
@@ -439,7 +443,9 @@
           "type": "fynkel.Follow",
           "version": 1,
           "data": {
-            "target": "Player",
+            "target": {
+              "entity": "bbbbbbbb-0000-4000-8000-000000000004"
+            },
             "offset": [
               0,
               2,

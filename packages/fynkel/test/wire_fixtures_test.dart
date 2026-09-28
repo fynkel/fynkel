@@ -459,7 +459,6 @@ void main() {
   check(
     'ThirdPersonCamera',
     const ThirdPersonCamera(
-      target: 'Player',
       pivot: Vec3(0, 1.4, 0),
       distance: 6,
       minDistance: 0.75,
@@ -502,7 +501,7 @@ void main() {
   );
   check(
     'Follow',
-    const Follow(target: 'Player', offset: Vec3(0, 3, -1), smoothing: 4, lookAt: true),
+    const Follow(offset: Vec3(0, 3, -1), smoothing: 4, lookAt: true),
     Follow.wireSize,
     Follow.decode,
     (v, d, o, s) => v.encode(d, o, s),
@@ -614,7 +613,6 @@ void main() {
     'Skin',
     Skin(
       skin: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'skin/0'),
-      skeleton: 'skeleton',
     ),
     Skin.wireSize,
     Skin.decode,

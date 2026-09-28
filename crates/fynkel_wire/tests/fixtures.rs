@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 
-use fynkel_contracts::{AssetId, AssetRef, Entity, WorldId};
+use fynkel_contracts::{AssetId, AssetRef, Entity, ObjectRef, WorldId};
 use fynkel_core::components::{
     Camera, DirectionalLight, Environment, ExposureMode, MeshRenderer, PointLight, Projection,
     SpotLight,
@@ -417,7 +417,7 @@ fn fixtures_match_generated_codecs() {
     check(
         "ThirdPersonCamera",
         &ThirdPersonCamera {
-            target: "Player".into(),
+            target: ObjectRef::NONE,
             pivot: Vec3::new(0.0, 1.4, 0.0),
             distance: 6.0,
             min_distance: 0.75,
@@ -464,7 +464,7 @@ fn fixtures_match_generated_codecs() {
     check(
         "Follow",
         &Follow {
-            target: "Player".into(),
+            target: ObjectRef::NONE,
             offset: Vec3::new(0.0, 3.0, -1.0),
             smoothing: 4.0,
             look_at: true,
@@ -572,7 +572,7 @@ fn fixtures_match_generated_codecs() {
         "Skin",
         &Skin {
             skin: AssetRef::with_sub(mesh_id, "skin/0"),
-            skeleton: "skeleton".into(),
+            skeleton: ObjectRef::NONE,
         },
     );
     check(

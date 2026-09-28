@@ -351,8 +351,9 @@ fn enemy() -> String {
         )
     };
     let follow = format!(
-        r#""{}": {{ "type": "fynkel.Follow", "version": 1, "data": {{ "target": "Head", "offset": [0, 0.5, 0], "smoothing": 0, "look_at": false }} }}"#,
-        id(0x209)
+        r#""{}": {{ "type": "fynkel.Follow", "version": 1, "data": {{ "target": {{ "entity": "{}" }}, "offset": [0, 0.5, 0], "smoothing": 0, "look_at": false }} }}"#,
+        id(0x209),
+        id(0x103)
     );
     let entity = |n: u32,
                   name: &str,
@@ -397,7 +398,7 @@ fn enemy() -> String {
     format!(
         r#"{{
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 6,
+  "formatVersion": 7,
   "id": "{ENEMY}",
   "name": "Enemy",
   "entities": {{ {} }},

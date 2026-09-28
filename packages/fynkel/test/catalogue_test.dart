@@ -46,7 +46,7 @@ void main() {
     final w = fresh();
     final hero = w.spawn(name: 'Hero');
     final lamp = w.spawn(name: 'Lamp')
-      ..add(const Follow(target: 'Hero', offset: Vec3(0, 2, 0), smoothing: 0, lookAt: false));
+      ..add(Follow(target: hero, offset: const Vec3(0, 2, 0), smoothing: 0, lookAt: false));
     final spinner =
         w.spawn(
             name: 'Spinner',
@@ -57,7 +57,7 @@ void main() {
           ..add(const LookAtCamera(lockY: true))
           ..add(const LifetimeDespawn(seconds: 0.5));
     tick(w, 2);
-    expect(lamp.get<Follow>()?.target, 'Hero');
+    expect(lamp.get<Follow>()?.target, same(hero));
     expect(spinner.get<Rotator>()?.speed, 2);
     expect(spinner.has<Oscillate>(), isTrue);
     expect(spinner.get<LookAtCamera>()?.lockY, isTrue);
@@ -82,6 +82,14 @@ void main() {
     tick(w, 30);
     expect(spinner.isAlive, isFalse);
     expect(hero.isAlive && lamp.isAlive, isTrue);
+    // A destroyed target is missing, never replaced (ADR-0035 §5): the lamp
+    // stays where it is, even with another "Hero" in the world.
+    final at = lamp.worldTransform!.position;
+    hero.destroy();
+    w.spawn(name: 'Hero', transform: const Transform(position: Vec3(5, 0, 0), rotation: Quat.identity, scale: Vec3.one));
+    tick(w, 2);
+    expect(lamp.get<Follow>()!.target, isNull);
+    expect(lamp.worldTransform!.position.x, closeTo(at.x, 1e-6));
   });
 
   test('an emitter without its prefab is reported once', () {

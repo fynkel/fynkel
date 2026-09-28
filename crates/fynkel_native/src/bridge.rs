@@ -581,8 +581,19 @@ pub fn query(
             if let Ok(v) = ecs.get::<fynkel_core::CharacterController>(entity) {
                 w.component(ComponentId::CHARACTER_CONTROLLER.0, &*v);
             }
+            // A destroyed target reads as None (ADR-0035), as Unity's
+            // destroyed-object `null`.
+            let live = |r: fynkel_contracts::ObjectRef| {
+                if r.get().is_some_and(|t| ecs.contains(t)) {
+                    r
+                } else {
+                    fynkel_contracts::ObjectRef::NONE
+                }
+            };
             if let Ok(v) = ecs.get::<fynkel_core::ThirdPersonCamera>(entity) {
-                w.component(ComponentId::THIRD_PERSON_CAMERA.0, &*v);
+                let mut v = v.clone();
+                v.target = live(v.target);
+                w.component(ComponentId::THIRD_PERSON_CAMERA.0, &v);
             }
             if let Ok(v) = ecs.get::<fynkel_core::Rotator>(entity) {
                 w.component(ComponentId::ROTATOR.0, &*v);
@@ -591,7 +602,9 @@ pub fn query(
                 w.component(ComponentId::OSCILLATE.0, &*v);
             }
             if let Ok(v) = ecs.get::<fynkel_core::Follow>(entity) {
-                w.component(ComponentId::FOLLOW.0, &*v);
+                let mut v = v.clone();
+                v.target = live(v.target);
+                w.component(ComponentId::FOLLOW.0, &v);
             }
             if let Ok(v) = ecs.get::<fynkel_core::LookAtCamera>(entity) {
                 w.component(ComponentId::LOOK_AT_CAMERA.0, &*v);
@@ -609,7 +622,9 @@ pub fn query(
                 w.component(ComponentId::ANIMATOR.0, &*v);
             }
             if let Ok(v) = ecs.get::<fynkel_core::Skin>(entity) {
-                w.component(ComponentId::SKIN.0, &*v);
+                let mut v = v.clone();
+                v.skeleton = live(v.skeleton);
+                w.component(ComponentId::SKIN.0, &v);
             }
             if let Ok(v) = ecs.get::<fynkel_core::AudioSource>(entity) {
                 w.component(ComponentId::AUDIO_SOURCE.0, &*v);

@@ -11,7 +11,7 @@ components the runtime ticks itself, in Rust, with no `Behaviour`:
 | `fynkel.Oscillate` | 15 | moves along `axis` (local or world) by `amplitude · sin(2π · frequency · t + phase)` | pre-tick |
 | `fynkel.LifetimeDespawn` | 18 | destroys the entity and its subtree `seconds` after the component appeared | pre-tick |
 | `fynkel.Emitter` | 19 | instantiates `prefab` `rate` times a second at the emitter's world pose, each instance living `lifetime` seconds, at most `max_alive` alive, dynamic bodies launched at `velocity`; `enabled` pauses it | pre-tick |
-| `fynkel.Follow` | 16 | places the entity at the world position of the entity named `target` plus `offset`, snapped (`smoothing` 0) or eased at `smoothing`/s; `look_at` turns its −Z at the target | post-physics |
+| `fynkel.Follow` | 16 | places the entity at the world position of the `target` object plus `offset`, snapped (`smoothing` 0) or eased at `smoothing`/s; `look_at` turns its −Z at the target | post-physics |
 | `fynkel.LookAtCamera` | 17 | turns the entity's +Z at the active camera; `lock_y` keeps it upright (a billboard) | post-physics |
 | `fynkel.TriggerZone` | 20 | (M3-12, [scenes.md](scenes.md)) names the general-lane event (`ZONE_ENTERED`/`ZONE_EXITED` with `event`) the entity's sensor `Collider` raises; `once` fires one enter and removes the zone | physics events |
 
@@ -71,10 +71,13 @@ with it).
   current offset, so a gameplay write (`setLocalPosition`, a teleport)
   shifts the rest position instead of fighting the motion, and two
   oscillators on a parent and its child compose.
-- **Follow resolves `target` by name** — the first entity in entity
-  order with that `Name`, cached per follower while it lives under that
-  name (the same `named_targets` cache the `ThirdPersonCamera` rig
-  uses). An unknown name leaves the follower where it is. `look_at`
+- **Follow's `target` is an object reference** (ADR-0035), like the
+  `ThirdPersonCamera` rig's: `{ "entity": id }` in a document, resolved
+  once when the scene loads or the prefab is instantiated, so each copy
+  of a prefab follows its own object. None, or a destroyed target,
+  leaves the follower where it is; nothing searches for another object
+  with the same name. A reference to an object that is not in the load
+  is None, with the warning `FYN-B0003`. `look_at`
   keeps the last heading while the follower sits closer than a
   millimetre to its target (float noise would set it otherwise) or
   straight above/below it.

@@ -48,6 +48,9 @@ pub enum FieldType {
     Entity,
     /// `Option<Entity>`, `u64` with `0` = none.
     OptionalEntity,
+    /// [`crate::ObjectRef`] (ADR-0035): `u64` handle on the wire, `0` =
+    /// none; JSON: `{ "entity": uuid }` or `null`.
+    ObjectRef,
     /// `(offset: u32, len: u32)` into the buffer tail, UTF-8.
     Str,
     /// Another schema inlined at its own alignment.
@@ -76,6 +79,7 @@ impl FieldType {
             FieldType::Vec4 => "vec4",
             FieldType::Entity => "entity",
             FieldType::OptionalEntity => "entity?",
+            FieldType::ObjectRef => "objectRef",
             FieldType::Str => "str",
             FieldType::Nested(s) => s.name,
             FieldType::AssetRef => "assetRef",
@@ -96,7 +100,10 @@ impl FieldType {
     pub const fn wire_size(&self) -> usize {
         match self {
             FieldType::F32 | FieldType::U32 | FieldType::I32 => 4,
-            FieldType::U64 | FieldType::Entity | FieldType::OptionalEntity => 8,
+            FieldType::U64
+            | FieldType::Entity
+            | FieldType::OptionalEntity
+            | FieldType::ObjectRef => 8,
             FieldType::Bool => 1,
             FieldType::Vec3 => 12,
             FieldType::Quat | FieldType::Vec4 => 16,
@@ -115,7 +122,10 @@ impl FieldType {
             | FieldType::Vec3
             | FieldType::Quat
             | FieldType::Vec4 => 4,
-            FieldType::U64 | FieldType::Entity | FieldType::OptionalEntity => 8,
+            FieldType::U64
+            | FieldType::Entity
+            | FieldType::OptionalEntity
+            | FieldType::ObjectRef => 8,
             FieldType::Bool => 1,
             FieldType::Str => 4,
             FieldType::Nested(_) => 8,
@@ -244,6 +254,10 @@ pub trait HasEnumSchema: Sized {
 /// it does not recognise by name (nested records and enums).
 pub trait SchemaField {
     const TYPE: FieldType;
+}
+
+impl SchemaField for crate::ObjectRef {
+    const TYPE: FieldType = FieldType::ObjectRef;
 }
 
 /// FNV-1a 64 over the canonical text of every schema, in registry order,

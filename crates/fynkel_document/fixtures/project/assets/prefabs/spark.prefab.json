@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 6,
+  "formatVersion": 7,
   "id": "c0000000-0000-4000-8000-000000000041",
   "name": "Spark",
   "entities": {

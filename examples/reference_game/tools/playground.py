@@ -246,7 +246,7 @@ class Scene:
     def document(self, kind, id_, extra=None):
         doc = {
             "$schema": f"https://fynkel.dev/schemas/{kind}.schema.json",
-            "formatVersion": 6,
+            "formatVersion": 7,
             "id": id_,
             "name": self.name,
             "entities": self.entities,
@@ -629,12 +629,12 @@ def playground():
         s.entities[model]["prefab"] = {"asset": {"asset": CHARACTER, "sub": "prefab"}, "instance": uid(s.key, "Rig", "instance"), "overrides": []}
     else:
         # The skinned body, posed by the joint entities below (the skin's
-        # skeleton root is found by name under the Player), and the joints in
+        # skeleton is a reference to the `hips` entity), and the joints in
         # their bind pose — local translations from the same table that built
         # the model, so the entity tree and the skin's joint order agree.
         s.add(
             "Body",
-            [transform((0, 0, 0)), mesh_renderer("character", "player"), ("fynkel.Skin", {"skin": {"asset": CHARACTER, "sub": "skin/Skeleton"}, "skeleton": "hips"})],
+            [transform((0, 0, 0)), mesh_renderer("character", "player"), ("fynkel.Skin", {"skin": {"asset": CHARACTER, "sub": "skin/Skeleton"}, "skeleton": {"entity": uid(s.key, "hips")}})],
             parent=player,
         )
         joints = {}
@@ -653,7 +653,7 @@ def playground():
             (
                 "fynkel.ThirdPersonCamera",
                 {
-                    "target": "Player",
+                    "target": {"entity": player},
                     "pivot": [0, 1.5, 0],
                     "distance": dist,
                     "min_distance": 0.6,

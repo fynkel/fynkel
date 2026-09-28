@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 6,
+  "formatVersion": 7,
   "id": "88641ff3-d525-5d0b-b21f-226ee8e246a8",
   "name": "Burst",
   "entities": {
