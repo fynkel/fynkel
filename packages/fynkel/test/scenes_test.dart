@@ -5,6 +5,7 @@
 // the `SceneManager` for Results, and the user's `settings.json` is
 // saved and read back with its rebinds laid over the project's actions.
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:fynkel/fynkel.dart';
@@ -60,6 +61,16 @@ class Keeper extends Behaviour {
 
   @override
   void onDestroy() => destroyed++;
+}
+
+/// Logs its object's `onCreate`, standing in for `game.Spinner` (ADR-0039:
+/// the persistent objects' scripts are created before the scene's).
+class OrderLog extends Behaviour {
+  OrderLog(this.log);
+  final List<String> log;
+
+  @override
+  void onCreate() => log.add(gameObject.name);
 }
 
 void main() {
@@ -334,6 +345,73 @@ void main() {
     expect(w.findAll('Player'), hasLength(1), reason: "Playground's own, new");
   });
 
+  test('persistentObjects: made once by loadProject, scripts first, found by name, kept across loads (ADR-0039)', () {
+    const managerId = 'c0000000-0000-4000-8000-0000000000e0';
+    final root = Directory.systemTemp.createTempSync('fynkel-autoload-');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final dir = '${root.path}/project';
+    _copyDir(Directory(fixture), Directory(dir));
+    // A prefab with a script, and the project listing it.
+    final crate = jsonDecode(File('$dir/assets/prefabs/crate.prefab.json').readAsStringSync()) as Map<String, Object?>;
+    crate['id'] = managerId;
+    crate['name'] = 'Manager';
+    final entity = (crate['entities'] as Map).values.single as Map;
+    (entity['components'] as Map)['c0000000-0000-4000-8000-0000000000e1'] = {
+      'type': 'game.Spinner',
+      'version': 1,
+      'data': {'speed': 1.0, 'axis': [0, 1, 0]},
+    };
+    File('$dir/assets/prefabs/manager.prefab.json').writeAsStringSync(jsonEncode(crate));
+    final projectFile = File('$dir/fynkel.project.json');
+    final project = jsonDecode(projectFile.readAsStringSync()) as Map<String, Object?>;
+    project['persistentObjects'] = [
+      {'name': 'GameManager', 'prefab': {'asset': managerId}},
+    ];
+    projectFile.writeAsStringSync(jsonEncode(project));
+    final c = '${root.path}/cache';
+    cookProject(dir, cacheDir: c);
+
+    final log = <String>[];
+    final registry = BehaviourRegistry()
+      ..register(BehaviourType(id: 'game.Spinner', create: () => OrderLog(log), fields: [
+        BehaviourField(name: 'speed', type: 'number', get: (_) => null, set: (_, _) {}),
+        BehaviourField(name: 'axis', type: 'vec3', get: (_) => null, set: (_, _) {}),
+      ]));
+    final w = World.create(library: lib, registry: registry, fixedDt: 1 / 60, maxStepsPerFrame: 8);
+    w.onLoadDiagnostics = (_) {};
+    addTearDown(w.dispose);
+
+    final report = w.loadProject(dir, cacheDir: c);
+    expect(report.persistentObjects.map((p) => p.name), ['GameManager']);
+    final manager = w.persistentObject('GameManager')!;
+    expect(manager.name, 'GameManager');
+    expect(w.persistentObject('Nobody'), isNull);
+    expect(w.persistentObjects, [manager]);
+    w.frame(1 / 60);
+    expect(log.first, 'GameManager', reason: 'its scripts are created before the scene\'s');
+    expect(log.length, greaterThan(1), reason: 'the startup scene has a Spinner too');
+
+    // A scene load keeps it and makes no second one.
+    w.loadScene(playground);
+    w.frame(1 / 60);
+    expect(manager.isAlive, isTrue);
+    expect(w.findAll('GameManager'), [manager]);
+    expect(w.persistentObject('GameManager'), same(manager));
+
+    // Destroyed, it stays gone until the next loadProject.
+    manager.destroy();
+    w.frame(1 / 60);
+    expect(w.persistentObject('GameManager'), isNull);
+    w.loadScene(playground);
+    w.frame(1 / 60);
+    expect(w.persistentObject('GameManager'), isNull);
+    w.loadProject(dir, cacheDir: c);
+    w.frame(1 / 60);
+    final again = w.persistentObject('GameManager')!;
+    expect(again, isNot(same(manager)));
+    expect(w.findAll('GameManager'), [again]);
+  });
+
   test('loadAsync loads in the background, activates at a frame start in request order (ADR-0038)', () async {
     final w = fresh();
     w.loadScene(playground, cacheDir: cache);
@@ -466,4 +544,16 @@ void main() {
 
     expect(SettingsStore.defaultPath('My Game', environment: {'HOME': '/Users/me'}), endsWith('My Game/settings.json'));
   });
+}
+
+void _copyDir(Directory from, Directory to) {
+  to.createSync(recursive: true);
+  for (final e in from.listSync()) {
+    final name = e.uri.pathSegments.lastWhere((s) => s.isNotEmpty);
+    if (e is Directory) {
+      _copyDir(e, Directory('${to.path}/$name'));
+    } else if (e is File) {
+      e.copySync('${to.path}/$name');
+    }
+  }
 }

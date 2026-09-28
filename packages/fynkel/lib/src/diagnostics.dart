@@ -176,6 +176,39 @@ class LoadDiagnostic {
   }
 }
 
+/// One of the project's `persistentObjects` as [World.loadProject] made
+/// it (ADR-0039): its [name], its [prefab]'s asset id, the root's handle
+/// ([entity], null when the prefab could not be made — a warning in the
+/// report says why) and the prefab's scripts.
+class ProjectPersistentObject {
+  const ProjectPersistentObject({
+    required this.name,
+    required this.prefab,
+    this.entity,
+    this.path,
+    this.behaviours = const [],
+  });
+
+  factory ProjectPersistentObject.fromJson(Map<String, Object?> j) => ProjectPersistentObject(
+        name: j['name'] as String? ?? '',
+        prefab: j['prefab'] as String? ?? '',
+        entity: (j['entity'] as num?)?.toInt(),
+        path: j['path'] as String?,
+        behaviours: [
+          for (final b in (j['behaviours'] as List?) ?? const [])
+            AuthoredBehaviour.fromJson((b as Map).cast<String, Object?>()),
+        ],
+      );
+
+  final String name;
+  final String prefab;
+  final int? entity;
+
+  /// The prefab's authoring path, for messages.
+  final String? path;
+  final List<AuthoredBehaviour> behaviours;
+}
+
 /// One scene component of a non-native type in a load report: a Dart
 /// behaviour the SDK instantiates from the registry (`FYN-B0001` when the
 /// type is not registered, `FYN-B0002` when the data does not fit) and
@@ -433,6 +466,7 @@ class LoadReport {
     this.loadMs = 0,
     this.modules,
     this.persistent = 0,
+    this.persistentObjects = const [],
   });
 
   factory LoadReport.fromJson(Map<String, Object?> j) {
@@ -478,6 +512,10 @@ class LoadReport {
       loadMs: ((j['timing'] as Map?)?['ms'] as num?)?.toDouble() ?? 0,
       modules: j['modules'] is Map ? Modules.fromJson((j['modules'] as Map).cast<String, Object?>()) : null,
       persistent: (j['persistent'] as num?)?.toInt() ?? 0,
+      persistentObjects: [
+        for (final p in (j['persistentObjects'] as List?) ?? const [])
+          ProjectPersistentObject.fromJson((p as Map).cast<String, Object?>()),
+      ],
     );
   }
 
@@ -494,6 +532,10 @@ class LoadReport {
   /// The roots kept across this load by [World.dontDestroyOnLoad]
   /// (ADR-0037): what a replace load left standing.
   final int persistent;
+
+  /// The project's `persistentObjects` a [World.loadProject] made
+  /// (ADR-0039), in list order; empty for any other load.
+  final List<ProjectPersistentObject> persistentObjects;
 
   /// `replace` or `additive` for a scene load (M3-12); null for a report
   /// that loaded no scene (`bindActions`).
@@ -596,6 +638,7 @@ class LoadReport {
         loadMs: loadMs,
         modules: modules,
         persistent: persistent,
+        persistentObjects: persistentObjects,
       );
 
   /// This report after the SDK attached [attached] behaviours and found

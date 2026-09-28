@@ -216,6 +216,10 @@ class World {
   final List<GameObject> _persistent = [];
   final Set<GameObject> _persistentPending = {};
 
+  /// The project's `persistentObjects` the last [loadProject] made, by
+  /// name (ADR-0039).
+  final Map<String, GameObject> _projectPersistent = {};
+
   /// Objects [GameObject.setParent] moved this tick, for
   /// [GameObject.children]'s read-your-writes; cleared by the step.
   final List<GameObject> _reparented = [];
@@ -1667,8 +1671,20 @@ class World {
     if (!_persistent.contains(go)) _persistent.add(go);
   }
 
+  /// The project's persistent object named [name] (ADR-0039, Godot's
+  /// autoloads): made from the prefab `fynkel.project.json` lists under
+  /// `persistentObjects` when the project loaded, before the startup
+  /// scene, and kept across every scene load. Null when no entry has that
+  /// name or the object was destroyed; a destroyed one is made again only
+  /// by the next [loadProject]. Its scripts are reached as on any object:
+  /// `world.persistentObject('Music')?.behaviour<MusicPlayer>()`.
+  GameObject? persistentObject(String name) {
+    final go = _projectPersistent[name];
+    return go != null && go.isAlive ? go : null;
+  }
+
   /// The roots [dontDestroyOnLoad] keeps, in the order they were marked:
-  /// alive and still roots.
+  /// alive and still roots, the project's persistent objects among them.
   List<GameObject> get persistentObjects {
     _persistent.removeWhere((go) => !go.isAlive || go.parent != null);
     return List.unmodifiable(_persistent);
@@ -1730,6 +1746,7 @@ class World {
         if (op == 'loadProject') {
           physics = report.physics;
           layersAndTags = report.layersAndTags;
+          report = _attachPersistentObjects(report);
         }
         if (op != 'bindActions') _loadedScenes = report.scenes;
         if (report.modules case final m?) modules = m;
@@ -1787,6 +1804,24 @@ class World {
       'behaviours': report.behavioursAttached,
       'loadMs': report.loadMs,
     });
+  }
+
+  /// The project's persistent objects a [loadProject] made (ADR-0039):
+  /// each root attached under its name and kept, and its scripts attached
+  /// before the startup scene's, so theirs are created first and a scene
+  /// script finds them in its own `onCreate`.
+  LoadReport _attachPersistentObjects(LoadReport report) {
+    _projectPersistent.clear();
+    final extra = <LoadDiagnostic>[];
+    for (final p in report.persistentObjects) {
+      final entity = p.entity;
+      if (entity == null) continue;
+      final go = attach(entity, name: p.name);
+      _projectPersistent[p.name] = go;
+      if (!_persistent.contains(go)) _persistent.add(go);
+      if (p.behaviours.isNotEmpty) extra.addAll(_attachBehaviours(p.behaviours, p.path).$2);
+    }
+    return extra.isEmpty ? report : report.withBehaviours(attached: 0, extra: extra);
   }
 
   /// Instantiates every authored behaviour of a loaded scene from
