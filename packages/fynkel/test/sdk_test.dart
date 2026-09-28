@@ -40,7 +40,7 @@ void main() {
     expect(go.isPending, isFalse);
     expect(w.nameOf(go), 'player');
     expect(go.transform.position, const Vec3(1, 2, 3.5));
-    expect(go.worldTransform, isNull, reason: 'subscribed after resolution; first snapshot next tick');
+    expect(go.worldTransform!.position, const Vec3(1, 2, 3.5), reason: 'asked from the world until its first snapshot (foundation 4.4)');
 
     w.frame(1 / 60);
     expect(go.worldTransform!.position, const Vec3(1, 2, 3.5));
@@ -180,7 +180,7 @@ void main() {
     final w = world();
     addTearDown(w.dispose);
     for (var i = 0; i < 10; i++) {
-      w.spawn();
+      w.spawn().localTransform; // read: it rides the snapshot (foundation 4.4)
     }
     w.frame(1 / 60);
     w.frame(1 / 60);
@@ -291,5 +291,42 @@ void main() {
     expect(() => w.tick, throwsA(disposed));
     expect(() => w.allEntities(), throwsA(disposed));
     w.dispose(); // twice is fine
+  });
+
+  test('the snapshot carries only the objects Dart reads; a handle alone costs nothing (foundation 4.4)', () {
+    final w = World.create(library: lib);
+    addTearDown(w.dispose);
+    final parent = w.spawn(name: 'Parent', transform: identityTransform.copyWith(position: const Vec3(10, 0, 0)));
+    final all = [
+      for (var i = 0; i < 50; i++)
+        w.spawn(name: 'o$i', parent: parent, transform: identityTransform.copyWith(position: Vec3(i.toDouble(), 0, 0))),
+    ];
+    w.frame(1 / 60);
+    w.frame(1 / 60);
+    expect(w.native.snapshot.recordCount, 0, reason: 'spawned, never read');
+    expect(w.find('o7'), same(all[7]));
+    w.frame(1 / 60);
+    expect(w.native.snapshot.recordCount, 0, reason: 'found, never read');
+
+    // A read is right straight away (the world is asked), and the object
+    // rides the snapshot from the next tick.
+    final o7 = all[7];
+    expect(o7.localTransform.position, const Vec3(7, 0, 0));
+    expect(o7.worldTransform!.position, const Vec3(17, 0, 0));
+    w.frame(1 / 60);
+    expect(w.native.snapshot.recordCount, 1);
+    expect(o7.transform.position, const Vec3(17, 0, 0), reason: 'the parent is read too');
+    w.frame(1 / 60);
+    expect(w.native.snapshot.recordCount, 2);
+
+    // Not read for a while: dropped again; a later read is still right.
+    for (var i = 0; i < 130; i++) {
+      w.frame(1 / 60);
+    }
+    expect(w.native.snapshot.recordCount, 0);
+    parent.transform.localPosition = const Vec3(20, 0, 0);
+    w.frame(1 / 60);
+    expect(o7.worldTransform!.position, const Vec3(27, 0, 0));
+    expect(all[3].transform.position, const Vec3(23, 0, 0));
   });
 }

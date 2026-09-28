@@ -929,6 +929,9 @@ class _BehaviourSystem {
       .._system = this
       .._sequence = _nextSequence++;
     go._behaviours.add(b);
+    // Scripted objects stay in the snapshot: the physics reports stay
+    // events and character hits for what Dart observes (foundation 4.4).
+    go.world._observe(go);
     // Insert sorted by (order, sequence): the order key is read at attach
     // and expected constant afterwards (a getter, so it can depend on
     // constructor arguments).

@@ -248,6 +248,17 @@ tick's) and `snapshot_peak_bytes` are in the stats so the ceiling can be
 chosen from a measurement: eight subscribed transforms are 728 bytes
 (the 24-byte buffer header, 88 bytes per record).
 
+What is subscribed (foundation 4.4, blueprint §5.4: Dart receives only
+what it observes): an object joins the snapshot on its first transform
+read or write, or with its first behaviour, and leaves after 60 ticks
+without a read unless it has a behaviour. A handle alone (`spawn`,
+`find`, `attach`) costs nothing. A read of an object not in the snapshot
+asks the world, once per object per tick. The physics reports stay
+events and character hits for the same set. 10 000 handles that are
+never read cost 601 µs per idle frame before this and 45 µs after (a JIT
+test run); `step()` also clears only the objects touched since the last
+step, not every object.
+
 ## Where the numbers show up
 
 - **`fynkel test --headless`** (and `--json`): the report's `step_time`,

@@ -50,6 +50,9 @@ void main() {
     final seen = <FynkelDiagnostic>[];
     w.onDiagnostics = seen.addAll;
     final objects = [for (var i = 0; i < 8; i++) w.spawn(name: 'e$i')];
+    for (final o in objects) {
+      o.localTransform; // read: it rides the snapshot (foundation 4.4)
+    }
     w.frame(1 / 60);
     w.frame(1 / 60);
     var s = w.stats();
@@ -82,7 +85,7 @@ void main() {
     w.frame(1 / 60);
     expect(seen, isEmpty);
     for (var i = 0; i < 8; i++) {
-      w.spawn(name: 'again$i');
+      w.spawn(name: 'again$i').localTransform;
     }
     w.frame(1 / 60);
     w.frame(1 / 60);

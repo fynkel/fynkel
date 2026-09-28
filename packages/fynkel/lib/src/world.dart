@@ -227,6 +227,49 @@ class World {
 
   final List<int> _toSubscribe = [];
 
+  /// The objects whose transform rides the snapshot (foundation 4.4,
+  /// ADR-0004: Dart receives only what it observes). An object joins on
+  /// its first transform read or write, or with its first behaviour, and
+  /// leaves after [_observeTicks] ticks without a read unless it has a
+  /// behaviour; a handle alone costs nothing. The physics reports stay
+  /// events and character hits for these objects (Unity sends them to
+  /// scripts).
+  final Set<GameObject> _observed = {};
+  static const _observeTicks = 60;
+
+  /// The objects with per-tick state for [step] to clear
+  /// ([GameObject._touch]).
+  final List<GameObject> _touched = [];
+  int _steps = 0;
+
+  /// [go]'s transform was read or written: it rides the snapshot from the
+  /// next tick (a pending object from the tick after its spawn).
+  void _observe(GameObject go) {
+    go._readStep = _steps;
+    if (go._observed) return;
+    final e = go._entity;
+    if (e == null || !go._alive) {
+      go._observeOnSpawn = true;
+      return;
+    }
+    go._observed = true;
+    _observed.add(go);
+    _toSubscribe.add(e);
+  }
+
+  /// Drops the objects not read for [_observeTicks] ticks.
+  void _sweepObserved() {
+    final drop = <int>[];
+    _observed.removeWhere((go) {
+      if (go._alive && (go._behaviours.isNotEmpty || _steps - go._readStep < _observeTicks)) return false;
+      go._observed = false;
+      final e = go._entity;
+      if (go._alive && e != null) drop.add(e);
+      return true;
+    });
+    if (drop.isNotEmpty) _checkFatal(_native.subscribeTransforms(drop, enable: false), 'unsubscribe');
+  }
+
   /// Called with the diagnostics of each step/submit in release mode
   /// (debug mode throws [FynkelError] instead). Defaults to `print` —
   /// silent under the editor channel, which already carries the record
@@ -797,8 +840,11 @@ class World {
   /// world, resolves spawns, refreshes the snapshot, reports diagnostics.
   StepResult step() {
     _flush(CommandLane.simulation, _simulation, _simulationTargets, 'submit');
+    // Read since the last drain: in this tick's snapshot already.
+    _flushSubscriptions();
     final r = _native.step();
     _checkFatal(r.status, 'step');
+    if (++_steps % _observeTicks == 0) _sweepObserved();
     _snapshot = _native.snapshot;
     // entity → record index. Overwrite in place (no growth in steady state,
     // M1 gate); rebuild only when the subscribed set changed size, which is
@@ -816,10 +862,16 @@ class World {
         _snapshotIndex[d.getUint64(i * gen.SnapshotTransformRecord.wireSize, Endian.little)] = i;
       }
     }
-    // Overlays are consumed by the tick they were staged for.
-    for (final go in _byEntity.values) {
-      go._clearOverlay();
-    }
+    // Overlays are consumed by the tick they were staged for. Only the
+    // objects touched since the last step hold any (foundation 4.4); a
+    // pending one keeps its staged writes until its first snapshot and a
+    // dead one its last values, as before.
+    _touched.removeWhere((go) {
+      if (go._entity == null) return false;
+      go._touched = false;
+      if (go._alive) go._clearOverlay();
+      return true;
+    });
     _reparented.clear();
     _entityTableStale = true;
     _collectDiagnostics('step');
@@ -842,7 +894,7 @@ class World {
           if (go != null) {
             go._entity = entity;
             _byEntity[entity] = go;
-            _toSubscribe.add(entity);
+            if (go._observeOnSpawn) _observe(go);
             if (_persistentPending.remove(go)) _keep(go, entity);
             // The staged writes were applied with the spawn (a rejection
             // cleared them at the step); they stay readable until the
@@ -1048,15 +1100,14 @@ class World {
 
   /// A handle for an entity that already exists (loaded from a scene, or
   /// found by a query); the same handle comes back for the same entity.
-  /// Its transform is subscribed from the next tick; until then
-  /// [GameObject.localTransform] reads [initial].
+  /// Its transform rides the snapshot once it is read (the first read
+  /// asks the world).
   GameObject attach(int entity, {String name = '', Pose initial = identityTransform}) {
     final existing = _byEntity[entity];
     if (existing != null) return existing;
     final go = GameObject._(this, 0, initial, name.isEmpty ? (nameOfEntity(entity) ?? '') : name);
     go._entity = entity;
     _byEntity[entity] = go;
-    _toSubscribe.add(entity);
     return go;
   }
 
@@ -2595,6 +2646,37 @@ class GameObject extends FynkelObject {
   TransformWriter? _staged;
   bool _stagedValid = false;
 
+  /// Snapshot membership (foundation 4.4, [World._observe]).
+  bool _observed = false;
+  bool _observeOnSpawn = false;
+  int _readStep = 0;
+
+  /// The world's transform record, asked once per tick while the object
+  /// is not in the snapshot yet.
+  gen.SnapshotTransformRecord? _asked;
+  int _askedStep = -1;
+
+  /// This tick's snapshot record, null while the object is not in it
+  /// (marks the object read).
+  gen.SnapshotTransformRecord? _snapshotRecord() {
+    world._observe(this);
+    return world._snapshotOf(_entity ?? -1);
+  }
+
+  /// This tick's transform record: the snapshot's, else the world's.
+  gen.SnapshotTransformRecord? _record() {
+    final r = _snapshotRecord();
+    if (r != null) return r;
+    final e = _entity;
+    if (e == null || !_alive) return null;
+    if (_askedStep != world._steps) {
+      final b = world._native.query(QueryKind.transform, entity: e);
+      _asked = b.recordCount == 0 ? null : gen.SnapshotTransformRecord.decode(b.records, 0, b.tail);
+      _askedStep = world._steps;
+    }
+    return _asked;
+  }
+
   /// Native components as read this tick (one query per object per tick,
   /// on the first read) merged with this tick's staged writes — `null` is a
   /// staged removal. Cleared with the transform overlay after every step
@@ -2614,6 +2696,17 @@ class GameObject extends FynkelObject {
   WireBuffer? _componentView;
   int _presentMask = 0;
 
+  /// Whether this object holds per-tick state (a staged write, this
+  /// tick's component reads) that the next [World.step] clears: only the
+  /// objects touched since are visited (foundation 4.4), not all of them.
+  bool _touched = false;
+
+  void _touch() {
+    if (_touched) return;
+    _touched = true;
+    world._touched.add(this);
+  }
+
   void _clearOverlay() {
     _requestedActive = null;
     _stagedParent = null;
@@ -2629,6 +2722,8 @@ class GameObject extends FynkelObject {
   /// The staged writer, seeded from the current local value when nothing is
   /// staged yet, so partial writes (position only) keep the rest.
   TransformWriter _stage() {
+    world._observe(this);
+    _touch();
     final w = _staged ??= TransformWriter();
     if (!_stagedValid) {
       final o = _overlay;
@@ -2812,6 +2907,7 @@ class GameObject extends FynkelObject {
       gen.SetParentCommand(child: e, parent: parent?._simulationEntity('setParent'), keepWorld: keepWorld),
     );
     world._simulationTargets.add(this);
+    _touch();
     _stagedParent = (parent,);
     world._reparented.add(this);
   }
@@ -2905,6 +3001,7 @@ class GameObject extends FynkelObject {
     final e = _simulationEntity('setActive');
     world._simulation.setActive(gen.SetActiveCommand(entity: e, active: active));
     world._simulationTargets.add(this);
+    _touch();
     _requestedActive = active;
   }
 
@@ -3087,6 +3184,7 @@ class GameObject extends FynkelObject {
   /// as [localTransform]), staged writes included.
   List<WireRecord> get components {
     _decodeAllComponents();
+    _touch();
     final c = _components ??= {};
     final ids = c.keys.where((id) => c[id] != null).toList()..sort();
     return [for (final id in ids) id == gen.Transform.componentId ? localTransform : c[id]!];
@@ -3096,6 +3194,7 @@ class GameObject extends FynkelObject {
   /// world's value decoded from the tick's one query (see
   /// [_componentBytes]); an id the object lacks is answered from the mask.
   WireRecord? _lookup(int id) {
+    _touch();
     final c = _components ??= {};
     if (c.containsKey(id)) return c[id];
     _queryComponents();
@@ -3110,6 +3209,7 @@ class GameObject extends FynkelObject {
   /// and its mask read. Nothing on an object the world does not have.
   void _queryComponents() {
     if (_componentsQueried) return;
+    _touch();
     _componentsQueried = true;
     _presentMask = 0;
     final e = _entity;
@@ -3129,6 +3229,7 @@ class GameObject extends FynkelObject {
       buf.setAll(0, b.bytes);
       view.reparse();
     }
+    _touch();
     _presentMask = world._componentMask(view);
   }
 
@@ -3138,6 +3239,7 @@ class GameObject extends FynkelObject {
     _queryComponents();
     final view = _componentView;
     if (view == null) return;
+    _touch();
     final c = _components ??= {};
     world._decodeComponents(view, (id, v) {
       if (!c.containsKey(id)) c[id] = v;
@@ -3167,6 +3269,7 @@ class GameObject extends FynkelObject {
     }
     final codec = _codecOf(value.runtimeType);
     final e = presentation ? _requireResolved('setPresentation') : _simulationEntity('set');
+    _touch();
     (_components ??= {})[codec.id] = value;
     final batch = presentation ? world._presentation : world._simulation;
     if (value is gen.Name) {
@@ -3285,6 +3388,7 @@ class GameObject extends FynkelObject {
       int integer = 0,
       int layer = -1,
       Vec3 point = Vec3.zero}) {
+    _touch();
     world.modules.require(Module.animation, 'animation command ${op.name}');
     final e = _simulationEntity('animation command');
     world._simulation.animate(e, op,
@@ -3317,14 +3421,15 @@ class GameObject extends FynkelObject {
     world._simulationTargets.add(this);
   }
 
-  /// Current local transform: staged overlay, else last snapshot, else
-  /// (an object attached this tick, its subscription not yet served) the
-  /// world's value through the component query, else the spawn value.
+  /// Current local transform: staged overlay, else the last snapshot,
+  /// else (an object not in the snapshot yet: never read, or not for a
+  /// while — foundation 4.4) the world's value, asked once per tick, else
+  /// the spawn value.
   Pose get localTransform {
     final o = _overlay;
     if (o != null) return o;
     if (_stagedValid) return _overlay = _staged!.toTransform();
-    return world._snapshotOf(_entity ?? -1)?.local ?? _queriedTransform() ?? _initial;
+    return _snapshotRecord()?.local ?? _queriedTransform() ?? _initial;
   }
 
   /// [localTransform] from what Dart holds, never asking the world (it
@@ -3333,20 +3438,22 @@ class GameObject extends FynkelObject {
       _overlay ??
       (_stagedValid ? _staged!.toTransform() : null) ??
       world._snapshotOf(_entity ?? -1)?.local ??
+      (_components?[gen.Transform.componentId] as Pose?) ??
+      _asked?.local ??
       _initial;
 
-  /// The world's own local transform before the first snapshot (one
-  /// query per object per tick, shared with [get]), so a partial write at
-  /// the first tick keeps the authored pose instead of seeding from
-  /// identity.
+  /// The world's own local transform while the object is not in the
+  /// snapshot: one component query per object per tick, shared with
+  /// [get].
   Pose? _queriedTransform() {
     if (_entity == null || !_alive) return null;
     return _lookup(gen.Transform.componentId) as Pose?;
   }
 
-  /// World-space transform from the last snapshot (no overlay: it depends
-  /// on the parent chain and is only known after a tick).
-  Pose? get worldTransform => world._snapshotOf(_entity ?? -1)?.world;
+  /// World-space transform after the last tick, from the snapshot or asked
+  /// as [localTransform] is (no overlay: it depends on the parent chain and
+  /// is only known after a tick). Null for a pending or dead object.
+  Pose? get worldTransform => _record()?.world;
 
   /// Whether a transform write goes to the presentation lane (ADR-0008
   /// amendment, foundation 1.2): during [World.frame]'s `update` and
@@ -3365,6 +3472,7 @@ class GameObject extends FynkelObject {
   void setLocalTransform(Pose t) {
     if (_presentsWrite()) return setPresentationTransform(t);
     final e = _simulationEntity('setLocalTransform');
+    _touch();
     _overlay = t;
     _stagedValid = false;
     world._simulation.setTransformOf(e, t);
@@ -3399,6 +3507,7 @@ class GameObject extends FynkelObject {
   /// as authoritative for the next tick. Rejected for physics-owned objects.
   void setPresentationTransform(Pose t) {
     final e = _requireResolved('setPresentationTransform');
+    _touch();
     _overlay = t;
     _stagedValid = false;
     world._presentation.setTransformOf(e, t);

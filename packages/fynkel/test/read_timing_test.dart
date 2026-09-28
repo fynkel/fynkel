@@ -23,9 +23,9 @@ void main() {
     final parent = w.spawn(name: 'Parent');
     final child = w.spawn(name: 'Child', parent: parent);
     w.frame(1 / 60);
-    // worldTransform comes from the tick's snapshot of the objects read
-    // before: null on the first read, served from the next tick.
-    expect(child.worldTransform, isNull);
+    // worldTransform is the last tick's: asked from the world on the
+    // first read, from the snapshot after (foundation 4.4).
+    expect(child.worldTransform, isNotNull);
     w.frame(1 / 60);
     expect(child.worldTransform, isNotNull);
 

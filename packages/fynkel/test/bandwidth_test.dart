@@ -12,6 +12,9 @@ void main() {
     final w = World.create()..throwOnDiagnostics = true;
     addTearDown(w.dispose);
     final objects = [for (var i = 0; i < n; i++) w.spawn(name: 'e$i')];
+    for (final o in objects) {
+      o.localTransform; // read: it rides the snapshot (foundation 4.4)
+    }
     w.frame(1 / 60);
     w.frame(1 / 60);
     expect(w.stats().subscriptions, n);

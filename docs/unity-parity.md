@@ -125,7 +125,8 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   renamed this tick is found from the next; keep the handle `spawn`
   returns), `activeInHierarchy` (after `setActive`; `activeSelf` shows it
   at once, and `onEnable`/`onDisable` run when the tick applies it) and
-  `worldTransform` (null until the tick after its first read). Everything
+  `worldTransform` (the last tick's pose, never null for a live object
+  since foundation 4.4). Everything
   else reads your writes at once: `transform.position` and the rest of
   `transform`, `get<T>`, `activeSelf`, `parent`/`children`, `name`,
   `behaviour<T>()` (docs/foundation.md 1.10,
