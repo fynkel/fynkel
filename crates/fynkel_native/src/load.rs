@@ -8,7 +8,8 @@
 //! dropped); `FYNKEL_LOAD_ADDITIVE` keeps the world.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use fynkel_assets::{Assets, CookedPrefab, CookedScene};
 use fynkel_contracts::{Code, Diagnostic, Entity, Status, Uuid};
@@ -836,6 +837,229 @@ pub unsafe extern "C" fn fynkel_world_load_scene_with(
 
 /// `fynkel_world_load_scene_with` flag: keep what the world holds.
 pub const FYNKEL_LOAD_ADDITIVE: u32 = 1;
+
+/// `fynkel_world_load_progress` state: the background work runs.
+pub const FYNKEL_LOAD_LOADING: u32 = 0;
+/// `fynkel_world_load_progress` state: done; the load waits to activate.
+pub const FYNKEL_LOAD_READY: u32 = 1;
+/// `fynkel_world_load_progress` state: it failed; activating reports why.
+pub const FYNKEL_LOAD_FAILED: u32 = 2;
+
+/// What the background thread of a load hands over: the decoded scene
+/// and the token holding its closure resident, or why it failed.
+type Prepared = Result<(CookedScene, fynkel_assets::Residency), Vec<Diagnostic>>;
+
+/// A scene load running on a background thread (ADR-0038 §2): the thread
+/// holds a clone of the store, never the world. Dropped (cancelled, or
+/// the world destroyed), it stops its thread at the next asset.
+pub struct PendingLoad {
+    assets: Assets,
+    done: Arc<AtomicUsize>,
+    total: Arc<AtomicUsize>,
+    stop: Arc<AtomicBool>,
+    result: Arc<Mutex<Option<Prepared>>>,
+}
+
+impl Drop for PendingLoad {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+impl PendingLoad {
+    fn start(assets: Assets, id: Uuid) -> Self {
+        let load = PendingLoad {
+            assets: assets.clone(),
+            done: Arc::default(),
+            total: Arc::default(),
+            stop: Arc::default(),
+            result: Arc::default(),
+        };
+        let (done, total, stop, result) = (
+            load.done.clone(),
+            load.total.clone(),
+            load.stop.clone(),
+            load.result.clone(),
+        );
+        let spawned = std::thread::Builder::new()
+            .name("fynkel-load".into())
+            .spawn(move || {
+                let prepared = assets.scene(id).map(|scene| {
+                    let token = assets.retain(&scene.closure);
+                    total.store(scene.closure.len(), Ordering::Relaxed);
+                    assets.preload(&scene.closure, &done, &stop);
+                    (scene, token)
+                });
+                *result.lock().unwrap_or_else(|p| p.into_inner()) = Some(prepared);
+            });
+        if let Err(e) = spawned {
+            *load.result.lock().unwrap_or_else(|p| p.into_inner()) =
+                Some(Err(vec![Diagnostic::error(
+                    Code::IO,
+                    format!("no load thread: {e}"),
+                )]));
+        }
+        load
+    }
+
+    /// The state and the share of the closure loaded (1 once ready).
+    fn progress(&self) -> (u32, f32) {
+        match &*self.result.lock().unwrap_or_else(|p| p.into_inner()) {
+            Some(Ok(_)) => (FYNKEL_LOAD_READY, 1.0),
+            Some(Err(_)) => (FYNKEL_LOAD_FAILED, 1.0),
+            None => {
+                let total = self.total.load(Ordering::Relaxed);
+                let done = self.done.load(Ordering::Relaxed).min(total);
+                let share = if total == 0 {
+                    0.0
+                } else {
+                    done as f32 / total as f32
+                };
+                // 1 means ready: the thread still has to hand over.
+                (FYNKEL_LOAD_LOADING, share.min(0.999))
+            }
+        }
+    }
+
+    fn take(&self) -> Option<Prepared> {
+        self.result.lock().unwrap_or_else(|p| p.into_inner()).take()
+    }
+}
+
+/// Starts loading the cooked scene `scene_id_utf8` from `cache_utf8` on a
+/// background thread (ADR-0038): the scene is read and every payload of
+/// its closure made resident while the world runs on. Writes a ticket (never
+/// 0) for [`fynkel_world_load_progress`], [`fynkel_world_load_activate`]
+/// and [`fynkel_world_load_cancel`]. A cache that does not open answers
+/// `LoadFailed` with the report; a bad id `InvalidArgument`.
+///
+/// # Safety
+/// `world` is a live world; the strings are `len` readable UTF-8 bytes;
+/// `out_ticket` is writable.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_load_scene_async(
+    world: *mut FynkelWorld,
+    cache_utf8: *const u8,
+    cache_len: u32,
+    scene_id_utf8: *const u8,
+    scene_id_len: u32,
+    out_ticket: *mut u32,
+) -> Status {
+    let (Some(dir), Some(id)) = (
+        utf8(cache_utf8, cache_len),
+        utf8(scene_id_utf8, scene_id_len),
+    ) else {
+        return Status::InvalidArgument;
+    };
+    let Ok(id) = id.parse::<Uuid>() else {
+        return Status::InvalidArgument;
+    };
+    if out_ticket.is_null() {
+        return Status::InvalidArgument;
+    }
+    let dir = PathBuf::from(dir);
+    guarded(world, move |w| {
+        let assets = match open(w, &dir) {
+            Ok(a) => a,
+            Err(d) => return finish(w, failed(&[d], Value::Null), std::time::Instant::now()),
+        };
+        w.next_ticket = w.next_ticket.checked_add(1).unwrap_or(1);
+        let ticket = w.next_ticket;
+        w.loads.insert(ticket, PendingLoad::start(assets, id));
+        // SAFETY: checked non-null above; the caller promises it writable.
+        unsafe { *out_ticket = ticket };
+        Status::Ok
+    })
+}
+
+/// Where the background load `ticket` is: [`FYNKEL_LOAD_LOADING`] with
+/// the share of its assets loaded, [`FYNKEL_LOAD_READY`] (progress 1) or
+/// [`FYNKEL_LOAD_FAILED`]. An unknown ticket (activated, cancelled, never
+/// made) answers `InvalidArgument`.
+///
+/// # Safety
+/// `world` is a live world; the out pointers are writable.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_load_progress(
+    world: *mut FynkelWorld,
+    ticket: u32,
+    out_state: *mut u32,
+    out_progress: *mut f32,
+) -> Status {
+    if out_state.is_null() || out_progress.is_null() {
+        return Status::InvalidArgument;
+    }
+    guarded(world, |w| {
+        let Some(load) = w.loads.get(&ticket) else {
+            return Status::InvalidArgument;
+        };
+        let (state, progress) = load.progress();
+        // SAFETY: checked non-null above; the caller promises them writable.
+        unsafe {
+            *out_state = state;
+            *out_progress = progress;
+        }
+        Status::Ok
+    })
+}
+
+/// Activates the background load `ticket` (ADR-0038 §2): spawns its scene
+/// as [`fynkel_world_load_scene_with`] does, with the same `flags` and the
+/// same report, from what is already in memory. A failed load answers
+/// `LoadFailed` with its diagnostics and leaves the world alone. Either
+/// way the ticket is spent. A load not ready yet, an unknown ticket or
+/// unknown flags answer `InvalidArgument`.
+///
+/// # Safety
+/// `world` is a live world.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_load_activate(
+    world: *mut FynkelWorld,
+    ticket: u32,
+    flags: u32,
+) -> Status {
+    let mode = match flags {
+        0 => LoadMode::Replace,
+        FYNKEL_LOAD_ADDITIVE => LoadMode::Additive,
+        _ => return Status::InvalidArgument,
+    };
+    guarded(world, move |w| {
+        let Some(load) = w.loads.get(&ticket) else {
+            return Status::InvalidArgument;
+        };
+        if load.progress().0 == FYNKEL_LOAD_LOADING {
+            return Status::InvalidArgument;
+        }
+        let load = w.loads.remove(&ticket).expect("looked up above");
+        let started = std::time::Instant::now();
+        let assets = load.assets.clone();
+        let out = match load.take() {
+            Some(Ok((scene, token))) => {
+                let out = instantiate(w, assets, scene, mode);
+                // The scene's own token holds the closure now.
+                drop(token);
+                out
+            }
+            Some(Err(diags)) => failed(&diags, cache_json(&assets)),
+            None => unreachable!("a ready load has its result"),
+        };
+        finish(w, out, started)
+    })
+}
+
+/// Drops the background load `ticket` before it activates: its thread
+/// stops at the next asset and what it made resident may be evicted. An
+/// unknown ticket answers `InvalidArgument`.
+///
+/// # Safety
+/// `world` is a live world.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_load_cancel(world: *mut FynkelWorld, ticket: u32) -> Status {
+    guarded(world, |w| match w.loads.remove(&ticket) {
+        Some(_) => Status::Ok,
+        None => Status::InvalidArgument,
+    })
+}
 
 /// Unloads the loaded scene `scene_id_utf8` (M3-12): its still-alive
 /// entities are destroyed (`DESTROYED` events, then `SCENE_UNLOADED`) and

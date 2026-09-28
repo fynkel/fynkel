@@ -538,6 +538,95 @@ FynkelStatus fynkel_world_dont_destroy_on_load(
   int entity,
 ) => FynkelStatus.fromValue(_fynkel_world_dont_destroy_on_load(world, entity));
 
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+    ffi.Pointer<ffi.Uint32>,
+  )
+>(symbol: 'fynkel_world_load_scene_async')
+external int _fynkel_world_load_scene_async(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> cache_utf8,
+  int cache_len,
+  ffi.Pointer<ffi.Uint8> scene_id_utf8,
+  int scene_id_len,
+  ffi.Pointer<ffi.Uint32> out_ticket,
+);
+
+FynkelStatus fynkel_world_load_scene_async(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> cache_utf8,
+  int cache_len,
+  ffi.Pointer<ffi.Uint8> scene_id_utf8,
+  int scene_id_len,
+  ffi.Pointer<ffi.Uint32> out_ticket,
+) => FynkelStatus.fromValue(
+  _fynkel_world_load_scene_async(
+    world,
+    cache_utf8,
+    cache_len,
+    scene_id_utf8,
+    scene_id_len,
+    out_ticket,
+  ),
+);
+
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Uint32,
+    ffi.Pointer<ffi.Uint32>,
+    ffi.Pointer<ffi.Float>,
+  )
+>(symbol: 'fynkel_world_load_progress')
+external int _fynkel_world_load_progress(
+  ffi.Pointer<FynkelWorld> world,
+  int ticket,
+  ffi.Pointer<ffi.Uint32> out_state,
+  ffi.Pointer<ffi.Float> out_progress,
+);
+
+FynkelStatus fynkel_world_load_progress(
+  ffi.Pointer<FynkelWorld> world,
+  int ticket,
+  ffi.Pointer<ffi.Uint32> out_state,
+  ffi.Pointer<ffi.Float> out_progress,
+) => FynkelStatus.fromValue(
+  _fynkel_world_load_progress(world, ticket, out_state, out_progress),
+);
+
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<FynkelWorld>, ffi.Uint32, ffi.Uint32)
+>(symbol: 'fynkel_world_load_activate')
+external int _fynkel_world_load_activate(
+  ffi.Pointer<FynkelWorld> world,
+  int ticket,
+  int flags,
+);
+
+FynkelStatus fynkel_world_load_activate(
+  ffi.Pointer<FynkelWorld> world,
+  int ticket,
+  int flags,
+) => FynkelStatus.fromValue(_fynkel_world_load_activate(world, ticket, flags));
+
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<FynkelWorld>, ffi.Uint32)>(
+  symbol: 'fynkel_world_load_cancel',
+)
+external int _fynkel_world_load_cancel(
+  ffi.Pointer<FynkelWorld> world,
+  int ticket,
+);
+
+FynkelStatus fynkel_world_load_cancel(
+  ffi.Pointer<FynkelWorld> world,
+  int ticket,
+) => FynkelStatus.fromValue(_fynkel_world_load_cancel(world, ticket));
+
 /// Input rebinds (M3-12; the `input.rebinds` of settings.json): `json_utf8`
 /// is a JSON object {"<action>": ["<device>:<control>", ...], ...} whose
 /// bindings replace the loaded project's for those actions (an empty
@@ -1498,3 +1587,9 @@ const int FYNKEL_PROJECTED_NO_CAMERA = 16;
 const int FYNKEL_PROJECTED_DROPPED = 32;
 
 const int FYNKEL_LOAD_ADDITIVE = 1;
+
+const int FYNKEL_LOAD_LOADING = 0;
+
+const int FYNKEL_LOAD_READY = 1;
+
+const int FYNKEL_LOAD_FAILED = 2;

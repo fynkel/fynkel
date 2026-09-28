@@ -60,6 +60,10 @@ pub struct FynkelWorld {
     /// once, their closure held resident by one token each. Emptied by a
     /// replace load and when the world's store changes.
     prefabs: std::collections::HashMap<fynkel_contracts::Uuid, std::sync::Arc<load::LoadedPrefab>>,
+    /// The background loads not activated yet, by ticket (ADR-0038);
+    /// dropping one stops its thread at the next asset.
+    loads: std::collections::HashMap<u32, load::PendingLoad>,
+    next_ticket: u32,
     /// Action → bindings the user chose over the project's
     /// (`fynkel_world_bind_actions`, M3-12), re-applied after every load.
     rebinds: std::collections::BTreeMap<String, Vec<String>>,
@@ -240,6 +244,8 @@ impl FynkelWorld {
             assets: None,
             residency: Vec::new(),
             prefabs: std::collections::HashMap::new(),
+            loads: std::collections::HashMap::new(),
+            next_ticket: 0,
             rebinds: std::collections::BTreeMap::new(),
             anchors: Vec::new(),
             points: Vec::new(),

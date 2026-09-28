@@ -849,6 +849,126 @@ fn dont_destroy_on_load_through_the_abi() {
     assert!(!assets.is_resident("c0000000-0000-4000-8000-000000000020".parse().unwrap()));
 }
 
+/// Polls a background load until it is no longer loading.
+fn wait_ready(host: &Host, ticket: u32) -> (u32, f32) {
+    let started = std::time::Instant::now();
+    loop {
+        let (mut state, mut progress) = (0u32, 0f32);
+        assert_eq!(
+            unsafe { fynkel_world_load_progress(host.w, ticket, &mut state, &mut progress) },
+            Status::Ok
+        );
+        if state != FYNKEL_LOAD_LOADING {
+            return (state, progress);
+        }
+        assert!(
+            started.elapsed().as_secs() < 30,
+            "the background load never finished"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+fn load_async(host: &Host, cache: &str, id: &str) -> (Status, u32) {
+    let mut ticket = 0u32;
+    let s = unsafe {
+        fynkel_world_load_scene_async(
+            host.w,
+            cache.as_ptr(),
+            cache.len() as u32,
+            id.as_ptr(),
+            id.len() as u32,
+            &mut ticket,
+        )
+    };
+    (s, ticket)
+}
+
+/// ADR-0038: a scene read and made resident on a background thread while
+/// the world runs on, then activated: the same report as a load, and the
+/// activation reads nothing from the cache (it is gone by then).
+#[test]
+fn a_scene_loads_in_the_background_then_activates() {
+    let cooked = Cooked::new("async");
+    let cache = cooked.text();
+    let host = Host::new();
+    assert_eq!(host.load_project(&cache), Status::Ok);
+    let before = host.live();
+
+    let (s, ticket) = load_async(&host, &cache, PLAYGROUND);
+    assert_eq!(s, Status::Ok);
+    assert_ne!(ticket, 0);
+    assert_eq!(host.step(), Status::Ok, "the world runs on meanwhile");
+    let (state, progress) = wait_ready(&host, ticket);
+    assert_eq!(state, FYNKEL_LOAD_READY);
+    assert_eq!(progress, 1.0);
+    assert_eq!(host.live(), before, "nothing spawned before activation");
+    let assets = unsafe { &*host.w }.assets().unwrap();
+    assert!(
+        assets.stats().meshes > 0,
+        "the meshes are in memory already"
+    );
+
+    // Everything is in memory: the activation needs no file.
+    std::fs::rename(&cooked.dir, cooked.dir.with_extension("moved")).unwrap();
+    let status = unsafe { fynkel_world_load_activate(host.w, ticket, FYNKEL_LOAD_ADDITIVE) };
+    std::fs::rename(cooked.dir.with_extension("moved"), &cooked.dir).unwrap();
+    let r = host.report();
+    assert_eq!(status, Status::Ok, "{r:#}");
+    assert_eq!(r["mode"], "additive");
+    assert_eq!(r["scene"]["name"], "Playground");
+    assert_eq!(host.live(), before + 5);
+    // The ticket is spent.
+    assert_eq!(
+        unsafe { fynkel_world_load_activate(host.w, ticket, 0) },
+        Status::InvalidArgument
+    );
+
+    // A missing scene fails in the background, reported at activation.
+    let (s, bad) = load_async(&host, &cache, "c0000000-0000-4000-8000-0000000000ff");
+    assert_eq!(s, Status::Ok);
+    assert_eq!(wait_ready(&host, bad).0, FYNKEL_LOAD_FAILED);
+    assert_eq!(
+        unsafe { fynkel_world_load_activate(host.w, bad, 0) },
+        Status::LoadFailed
+    );
+    assert_eq!(host.report()["diagnostics"][0]["code"], "FYN-R0003");
+    assert_eq!(
+        host.live(),
+        before + 5,
+        "a failed load leaves the world alone"
+    );
+
+    // Cancelled: dropped, the ticket unknown after.
+    let (_, dropped) = load_async(&host, &cache, RESULTS);
+    assert_eq!(
+        unsafe { fynkel_world_load_cancel(host.w, dropped) },
+        Status::Ok
+    );
+    let (mut state, mut progress) = (0u32, 0f32);
+    assert_eq!(
+        unsafe { fynkel_world_load_progress(host.w, dropped, &mut state, &mut progress) },
+        Status::InvalidArgument
+    );
+    assert_eq!(
+        unsafe { fynkel_world_load_cancel(host.w, dropped) },
+        Status::InvalidArgument
+    );
+
+    // A replace activation takes the world down then, not before.
+    let (_, results) = load_async(&host, &cache, RESULTS);
+    assert_eq!(wait_ready(&host, results).0, FYNKEL_LOAD_READY);
+    assert_eq!(host.live(), before + 5);
+    assert_eq!(
+        unsafe { fynkel_world_load_activate(host.w, results, 0) },
+        Status::Ok
+    );
+    assert_eq!(host.report()["mode"], "replace");
+    assert_eq!(host.live(), 3);
+    // A world dropped with a load still running is fine.
+    let _ = load_async(&host, &cache, PLAYGROUND);
+}
+
 /// Live Play mode (ADR-0021 P7): the running world answers in the scene
 /// document's terms — its ids, including the ones the cook derived for a
 /// prefab instance's children — and takes a write at once.

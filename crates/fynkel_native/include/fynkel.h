@@ -540,6 +540,35 @@ FynkelStatus fynkel_world_unload_scene(FynkelWorld* world,
  * entity that is not live or has a parent. */
 FynkelStatus fynkel_world_dont_destroy_on_load(FynkelWorld* world,
                                                uint64_t entity);
+/* Loading a scene in the background (ADR-0038). _async starts reading
+ * the cooked scene `scene_id_utf8` from `cache_utf8` and making every
+ * asset it uses resident on a background thread while the world runs on;
+ * it writes a ticket (never 0). A cache that does not open is
+ * FYNKEL_STATUS_LOAD_FAILED with the report. _progress writes the state
+ * (FYNKEL_LOAD_LOADING with the share of assets loaded, FYNKEL_LOAD_READY
+ * with 1, FYNKEL_LOAD_FAILED). _activate spawns a ready load's scene as
+ * fynkel_world_load_scene_with does, with the same flags and report, from
+ * memory; a failed load is FYNKEL_STATUS_LOAD_FAILED with its diagnostics.
+ * Either way the ticket is spent. _cancel drops a load not activated.
+ * A load still loading, an unknown ticket or unknown flags are
+ * FYNKEL_STATUS_INVALID_ARGUMENT. Destroying the world drops its loads. */
+#define FYNKEL_LOAD_LOADING 0u
+#define FYNKEL_LOAD_READY 1u
+#define FYNKEL_LOAD_FAILED 2u
+FynkelStatus fynkel_world_load_scene_async(FynkelWorld* world,
+                                           const uint8_t* cache_utf8,
+                                           uint32_t cache_len,
+                                           const uint8_t* scene_id_utf8,
+                                           uint32_t scene_id_len,
+                                           uint32_t* out_ticket);
+FynkelStatus fynkel_world_load_progress(FynkelWorld* world,
+                                        uint32_t ticket,
+                                        uint32_t* out_state,
+                                        float* out_progress);
+FynkelStatus fynkel_world_load_activate(FynkelWorld* world,
+                                        uint32_t ticket,
+                                        uint32_t flags);
+FynkelStatus fynkel_world_load_cancel(FynkelWorld* world, uint32_t ticket);
 /* Input rebinds (M3-12; the `input.rebinds` of settings.json): `json_utf8`
  * is a JSON object {"<action>": ["<device>:<control>", ...], ...} whose
  * bindings replace the loaded project's for those actions (an empty
