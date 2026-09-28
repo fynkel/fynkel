@@ -140,8 +140,12 @@ ApplyOutcome applyOverrides(DocumentTabs tabs, OpenDocument tab, String anchor, 
   if (x == null) return const ApplyOutcome(ok: false, error: 'Not a prefab instance.');
   final why = cannotApply(tab, x);
   if (why != null) return ApplyOutcome(ok: false, error: why);
+  // An unused override has nothing in the prefab to go to (3.8).
   final chosen = indices == null
-      ? x.overrides
+      ? [
+          for (final o in x.overrides)
+            if (!o.unused) o,
+        ]
       : [
           for (final o in x.overrides)
             if (indices.contains(o.index)) o,

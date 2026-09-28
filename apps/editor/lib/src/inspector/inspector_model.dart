@@ -1566,6 +1566,20 @@ final class InspectorModel extends ChangeNotifier {
     return index == null ? null : (i.anchor!, index);
   }
 
+  /// Drops the unused overrides of the instance [entityId] (their target
+  /// is gone from the prefab), one transaction; Unity's Remove unused
+  /// overrides (foundation 3.8).
+  bool removeUnusedOverrides(String entityId) {
+    final unused = [
+      for (final o in expansionOf(entityId)?.overrides ?? const <ExpansionOverride>[])
+        if (o.unused) o.index,
+    ]..sort((a, b) => b.compareTo(a));
+    if (unused.isEmpty) return false;
+    final a = _run([for (final i in unused) Command.revertPrefabOverride(entityId, index: i)]);
+    notifyListeners();
+    return a?.ok ?? false;
+  }
+
   /// Drops one prefab override of [entityId] (all of them when [index] is null).
   bool revertOverride(String entityId, {int? index}) {
     final a = _run([Command.revertPrefabOverride(entityId, index: index)]);

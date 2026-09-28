@@ -128,4 +128,53 @@ void main() {
     expect(overrides(), isEmpty);
     expect(find.text('Overrides'), findsOneWidget);
   });
+
+  testWidgets('an override whose target the prefab lost is unused: listed, not applied, removed in one step (3.8)', (
+    tester,
+  ) async {
+    // Crate A's third override names an object the Crate prefab does not have.
+    final e = await Editor.open(
+      tester,
+      prepare: (dir) {
+        final file = File('${dir.path}/assets/scenes/main.scene.json');
+        final scene = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+        (scene['entities'][crateA]['prefab']['overrides'] as List).add({
+          'op': 'setField',
+          'entity': 'c0000000-0000-4000-8000-0000000000bb',
+          'component': 'c0000000-0000-4000-8000-0000000000c3',
+          'field': 'cast_shadows',
+          'value': true,
+        });
+        file.writeAsStringSync(jsonEncode(scene));
+      },
+    );
+    final tab = e.shell.tabs!.focused!;
+    await e.click(e.row('Crate A'));
+    Finder bar(String row) =>
+        find.descendant(of: find.byKey(ValueKey(row)), matching: find.byKey(const ValueKey('field.overrideBar')));
+    final x = tab.expansionOf(crateA)!;
+    expect(x.expanded, isTrue, reason: 'one stale override no longer breaks the instance');
+    expect([for (final o in x.overrides) o.unused], [false, false, true]);
+    expect(find.byKey(const ValueKey('prefab.broken')), findsNothing);
+    expect(
+      tester.widget<Text>(find.byKey(const ValueKey('prefab.unused'))).data,
+      '1 unused override: the prefab no longer has its target.',
+    );
+    expect(bar(castShadows), findsOneWidget, reason: 'the other overrides still apply');
+
+    await tester.tap(find.byKey(const ValueKey('prefab.overrides')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('prefab.unusedHeader')), findsOneWidget);
+    expect(find.byKey(const ValueKey('prefab.override.2')), findsOneWidget);
+    final before = tab.document.history;
+    await tester.tap(find.byKey(const ValueKey('prefab.removeUnused')));
+    await tester.pumpAndSettle();
+    expect(tab.expansionOf(crateA)!.overrides, hasLength(2));
+    expect(tab.document.history, before + 1, reason: 'one undo step');
+    expect(find.byKey(const ValueKey('prefab.unused')), findsNothing);
+    await tester.tapAt(const Offset(2, 2));
+    await tester.pumpAndSettle();
+    await e.press(LogicalKeyboardKey.keyZ, command: true);
+    expect(tab.expansionOf(crateA)!.overrides, hasLength(3));
+  });
 }

@@ -33,6 +33,7 @@ class PrefabBar extends StatelessWidget {
     final name = info == null || info.name.isEmpty ? assetText : info.name;
     final broken = x != null && !x.expanded;
     final missing = x == null || x.prefab == null;
+    final unused = x?.overrides.where((o) => o.unused).length ?? 0;
     final count = x?.overrides.length ?? p.overrides.length;
     final kind = info?.isVariant ?? false ? 'Prefab Variant' : 'Prefab';
     ButtonStyle compact() => TextButton.styleFrom(
@@ -126,7 +127,18 @@ class PrefabBar extends StatelessWidget {
             },
           ),
         ),
-        if (x != null && x.diagnostics.isNotEmpty)
+        if (x != null && x.diagnostics.isNotEmpty && !broken && !missing && unused > 0)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 8, 4),
+            child: Text(
+              unused == 1
+                  ? '1 unused override: the prefab no longer has its target.'
+                  : '$unused unused overrides: the prefab no longer has their targets.',
+              key: const ValueKey('prefab.unused'),
+              style: theme.textTheme.bodySmall?.copyWith(color: t.warning),
+            ),
+          ),
+        if (x != null && x.diagnostics.isNotEmpty && (broken || missing))
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 6, 8, 4),
             child: Column(
@@ -217,7 +229,12 @@ class _OverridesPanelState extends State<OverridesPanel> {
     if (_open != null && !overrides.any((o) => o.index == _open)) _open = null;
     // By object, in the order the instance lists them.
     final byObject = <String, List<ExpansionOverride>>{};
+    final unused = [
+      for (final o in overrides)
+        if (o.unused) o,
+    ];
     for (final o in overrides) {
+      if (o.unused) continue;
       byObject.putIfAbsent(o.entityName?.isNotEmpty ?? false ? o.entityName! : o.entity, () => []).add(o);
     }
 
@@ -263,6 +280,38 @@ class _OverridesPanelState extends State<OverridesPanel> {
                     ),
                   ),
                   for (final o in e.value) ..._row(context, o, applyWhy),
+                ],
+                if (unused.isNotEmpty) ...[
+                  Padding(
+                    key: const ValueKey('prefab.unusedHeader'),
+                    padding: const EdgeInsets.fromLTRB(12, 6, 4, 2),
+                    child: Row(
+                      children: [
+                        Icon(FIcons.warningAmber, size: 12, color: t.warning),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Tooltip(
+                            message: 'The prefab no longer has what these overrides change. '
+                                'They are kept in the file and not applied.',
+                            child: Text(
+                              'Unused Overrides',
+                              style: theme.textTheme.labelSmall?.copyWith(color: t.textSecondary),
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          key: const ValueKey('prefab.removeUnused'),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            textStyle: const TextStyle(fontSize: 11),
+                          ),
+                          onPressed: model.canEdit ? () => model.removeUnusedOverrides(id) : null,
+                          child: const Text('Remove'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  for (final o in unused) ..._row(context, o, 'The prefab no longer has its target'),
                 ],
               ],
             ),

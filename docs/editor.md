@@ -1533,9 +1533,19 @@ way to "make it mine".
 
 ### Missing and broken prefabs
 
+**Unused overrides (foundation 3.8, 2026-09-28).** An override whose
+target the prefab no longer has — an object or a component deleted from
+the prefab, a field it no longer sets — is Unity's *unused override*
+(`D0403`, a warning): it stays in the file, is not applied, and the rest
+of the instance expands and edits as usual. The Prefab bar says
+"1 unused override: the prefab no longer has its target."; the Overrides
+dropdown lists them under **Unused Overrides**, with **Remove** (one
+transaction, one undo step, `InspectorModel.removeUnusedOverrides`);
+Apply All skips them. Test: `test/parity/overrides_parity_test.dart`.
+
 An instance whose prefab is gone (`FYN-D0401`), or whose override no
-longer applies (`D0403` a component the prefab lost, `D0404`, `D0407`),
-still opens: the instance row keeps its badge and its data, the Inspector
+longer applies (`D0404` a value the component refuses, `D0407` a
+malformed op), still opens: the instance row keeps its badge and its data, the Inspector
 section shows the broken icon and the diagnostics, the Console lists them,
 Apply and Unpack are disabled with the reason, **Revert** (and Revert all)
 and **Select prefab asset** stay available, and saving the document
