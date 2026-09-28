@@ -40,7 +40,10 @@ M3-16 instrumentation fields, v4 the editor's
 `fynkel_native`'s ABI (`crates/fynkel_native/include/fynkel.h`), so a Flutter
 host loads one library. `fynkel_apple_viewport_render(viewport, world)` takes
 the `FynkelWorld*` the SDK holds and extracts it in Rust; the host never sees
-the renderer. `debug_lines` queues world-space segments (ten floats each,
+the renderer. A panic inside any viewport call is caught at the boundary
+(ABI 11, foundation 4.3): the viewport is broken from then on, `render`
+answers `FYNKEL_APPLE_RENDER_BROKEN` and `fynkel_apple_viewport_error`
+has the message; the process lives on. `debug_lines` queues world-space segments (ten floats each,
 linear RGBA) for the next render's depth-tested unlit debug pass and is
 cleared by that render; `read_frame(slot, out, cap)` copies a rendered
 slot as RGBA8, top row first, after waiting for the GPU — a screenshot

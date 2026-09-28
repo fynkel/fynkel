@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_APPLE_ABI_VERSION 10
+#define FYNKEL_APPLE_ABI_VERSION 11
 
 typedef struct FynkelAppleViewport FynkelAppleViewport;
 
@@ -31,9 +31,11 @@ enum FynkelAppleSyncMode {
   FYNKEL_APPLE_SYNC_METAL_COMPLETION = 2,
 };
 
-/* fynkel_apple_viewport_render: -1 = frame dropped (ring full), -2 = no world. */
+/* fynkel_apple_viewport_render: -1 = frame dropped (ring full), -2 = no world,
+ * -3 = the viewport is broken (below). */
 #define FYNKEL_APPLE_RENDER_DROPPED (-1)
 #define FYNKEL_APPLE_RENDER_NO_WORLD (-2)
+#define FYNKEL_APPLE_RENDER_BROKEN (-3)
 
 typedef struct FynkelAppleCamera {
   float eye[3];
@@ -133,6 +135,15 @@ void fynkel_apple_viewport_set_acquire_wait_us(const FynkelAppleViewport *vp, ui
 void fynkel_apple_viewport_set_frame_ready_callback(const FynkelAppleViewport *vp,
                                                     FynkelAppleFrameReadyFn func, void *userdata);
 void fynkel_apple_viewport_take_stats(const FynkelAppleViewport *vp, FynkelAppleViewportStats *out);
+/* ABI 11 (foundation 4.3): a panic inside any viewport call is caught at
+ * this boundary (it would abort the process). The viewport is broken from
+ * then on: every call fails (render answers FYNKEL_APPLE_RENDER_BROKEN,
+ * the others their failure value), except set_frame_ready_callback, which
+ * still detaches, and destroy. `error` copies the panic's message (UTF-8,
+ * cut at `cap`) and answers the bytes written, 0 while the viewport works.
+ * `debug_panic` panics on purpose, for tests of a host's broken path. */
+int32_t fynkel_apple_viewport_error(const FynkelAppleViewport *vp, uint8_t *out, uint32_t cap);
+int32_t fynkel_apple_viewport_debug_panic(FynkelAppleViewport *vp);
 /* Cooked assets (`fynkel cook` cache directory, UTF-8, not NUL-terminated;
  * NULL/empty clears). 0 on success, -1 when it is not a readable cache.
  * Rendering a world that loaded a scene from a cache adopts that world's

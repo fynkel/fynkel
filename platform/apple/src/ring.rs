@@ -24,7 +24,7 @@
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use objc2::rc::Retained;
@@ -132,6 +132,15 @@ pub struct RingStats {
     pub gpu_frame_us: Vec<u32>,
 }
 
+/// Locks `m`, and still does after a panic poisoned it (foundation 4.3):
+/// the ring's state is plain data a panic cannot leave half-written in a
+/// way the next frame cannot recover from, and an `unwrap` here would turn
+/// one caught panic into a second one on every later call — the presenter's
+/// on Flutter's raster thread included.
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 pub type FrameReadyFn = unsafe extern "C" fn(*mut c_void);
 
 struct FrameReadyCallback {
@@ -143,7 +152,7 @@ struct FrameReadyCallback {
 impl FrameReadyCallback {
     fn fire(&self) {
         self.signalled.fetch_add(1, Ordering::Relaxed);
-        if let Some((f, ud)) = *self.func.lock().unwrap() {
+        if let Some((f, ud)) = *lock(&self.func) {
             // SAFETY: the host registered this pointer pair and guarantees its
             // validity until it clears it or destroys the ring.
             unsafe { f(ud as *mut c_void) };
@@ -216,7 +225,7 @@ impl Gpu {
         if choice == DeviceChoice::Own {
             return Gpu::create().map(Arc::new);
         }
-        let mut shared = SHARED_GPU.lock().unwrap();
+        let mut shared = lock(&SHARED_GPU);
         if let Some(gpu) = shared.upgrade() {
             if !gpu.is_lost() {
                 return Ok(gpu);
@@ -411,14 +420,14 @@ impl IoSurfaceRing {
         let (slots, surfaces) =
             build_ring(&self.gpu.device, &self.gpu.mtl_device, width, height, count)?;
         {
-            let mut ring = self.ring.ring.lock().unwrap();
+            let mut ring = lock(&self.ring.ring);
             ring.slots = slots;
             ring.generation += 1;
         }
         self.surfaces = surfaces;
         self.width = width;
         self.height = height;
-        let mut st = self.stats.lock().unwrap();
+        let mut st = lock(&self.stats);
         st.resizes += 1;
         st.resize_us.push(t0.elapsed().as_micros() as u32);
         Ok(())
@@ -440,9 +449,9 @@ impl IoSurfaceRing {
     ) -> i32 {
         let t0 = Instant::now();
         let (index, seq, generation) = {
-            let mut ring = self.ring.ring.lock().unwrap();
+            let mut ring = lock(&self.ring.ring);
             let Some(i) = ring.slots.iter().position(|s| s.state == SlotState::Free) else {
-                self.stats.lock().unwrap().frames_dropped_no_free_buffer += 1;
+                lock(&self.stats).frames_dropped_no_free_buffer += 1;
                 return -1;
             };
             let seq = ring.next_seq;
@@ -453,7 +462,7 @@ impl IoSurfaceRing {
         };
 
         let commands = {
-            let ring = self.ring.ring.lock().unwrap();
+            let ring = lock(&self.ring.ring);
             record(&self.gpu.device, &self.gpu.queue, &ring.slots[index].view)
         };
         self.gpu.queue.submit(Some(commands));
@@ -464,7 +473,7 @@ impl IoSurfaceRing {
         let submitted = Instant::now();
         let mark_ready = move || {
             {
-                let mut ring = shared.ring.lock().unwrap();
+                let mut ring = lock(&shared.ring);
                 // A resize may have replaced the ring; only promote our own frame.
                 if ring.generation == generation {
                     let slot = &mut ring.slots[index];
@@ -474,9 +483,7 @@ impl IoSurfaceRing {
                 }
                 shared.ready.notify_all();
             }
-            stats
-                .lock()
-                .unwrap()
+            lock(&stats)
                 .gpu_complete_us
                 .push(submitted.elapsed().as_micros() as u32);
             cb.fire();
@@ -501,7 +508,12 @@ impl IoSurfaceRing {
                     .expect("MTLCommandQueue.commandBuffer");
                 let block = block2::RcBlock::new(
                     move |_cb: std::ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
-                        mark_ready();
+                        // Metal's thread: a panic here would abort the process.
+                        let ready =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(&mark_ready));
+                        if ready.is_err() {
+                            log::error!("fynkel_platform_apple: panic in a frame's completion");
+                        }
                     },
                 );
                 // SAFETY: the block is retained by Metal until it has run.
@@ -510,7 +522,7 @@ impl IoSurfaceRing {
             }),
         }
 
-        let mut st = self.stats.lock().unwrap();
+        let mut st = lock(&self.stats);
         st.frames_rendered += 1;
         st.cpu_us.push(t0.elapsed().as_micros() as u32);
         index as i32
@@ -518,7 +530,7 @@ impl IoSurfaceRing {
 
     /// Bounded wait `acquire_presented` may spend on the newest in-flight frame.
     pub fn set_acquire_wait(&self, wait: Duration) {
-        *self.acquire_wait.lock().unwrap() = wait;
+        *lock(&self.acquire_wait) = wait;
     }
 
     /// Called by the presenter (Flutter's raster thread) when it wants a frame.
@@ -526,9 +538,9 @@ impl IoSurfaceRing {
     /// If nothing new is ready, returns the currently presented slot again
     /// (or -1 if nothing has ever been presented). Safe from any thread.
     pub fn acquire_presented(&self) -> i32 {
-        let mut ring = self.ring.ring.lock().unwrap();
+        let mut ring = lock(&self.ring.ring);
         let mut waited = Duration::ZERO;
-        let max_wait = *self.acquire_wait.lock().unwrap();
+        let max_wait = *lock(&self.acquire_wait);
         if max_wait > Duration::ZERO {
             // If the newest submitted frame is still on the GPU, give it a
             // bounded chance to finish so this present shows it (lag 0).
@@ -543,7 +555,12 @@ impl IoSurfaceRing {
                 if !newest_in_flight || remaining.is_zero() {
                     break;
                 }
-                ring = self.ring.ready.wait_timeout(ring, remaining).unwrap().0;
+                ring = self
+                    .ring
+                    .ready
+                    .wait_timeout(ring, remaining)
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .0;
             }
             waited = t0.elapsed();
         }
@@ -555,7 +572,7 @@ impl IoSurfaceRing {
             .max_by_key(|(_, s)| s.seq)
             .map(|(i, _)| i);
 
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = lock(&self.stats);
         match newest_ready {
             Some(new) => {
                 for (i, s) in ring.slots.iter_mut().enumerate() {
@@ -589,7 +606,7 @@ impl IoSurfaceRing {
     /// frame becomes Ready. Takes the callback lock, so it returns only after
     /// any in-progress callback has finished.
     pub fn set_frame_ready_callback(&self, func: Option<FrameReadyFn>, userdata: *mut c_void) {
-        *self.frame_ready_cb.func.lock().unwrap() = func.map(|f| (f, userdata as usize));
+        *lock(&self.frame_ready_cb.func) = func.map(|f| (f, userdata as usize));
     }
 
     pub fn frame_ready_signals(&self) -> u32 {
@@ -597,7 +614,7 @@ impl IoSurfaceRing {
     }
 
     pub fn take_stats(&self) -> RingStats {
-        std::mem::take(&mut *self.stats.lock().unwrap())
+        std::mem::take(&mut *lock(&self.stats))
     }
 
     /// Records a rendered frame's stage times (M3-16); `gpu` is the pass
@@ -609,7 +626,7 @@ impl IoSurfaceRing {
         encode_us: u32,
         gpu: Option<(u32, u32, u32, u32, u32)>,
     ) {
-        let mut st = self.stats.lock().unwrap();
+        let mut st = lock(&self.stats);
         st.extract_us.push(extract_us);
         st.prepare_us.push(prepare_us);
         st.encode_us.push(encode_us);

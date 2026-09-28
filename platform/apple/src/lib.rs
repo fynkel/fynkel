@@ -17,6 +17,8 @@
 pub mod ring;
 
 use std::ffi::c_void;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use fynkel_core::components::{Camera as SceneCamera, ExposureMode, Projection};
@@ -34,6 +36,9 @@ pub struct Viewport {
     /// This viewport's own camera, drawn instead of the world's (the
     /// editor's Scene view on a running game, ADR-0021 P7 L5).
     view: Option<(glam::Mat4, SceneCamera)>,
+    /// Set by the first panic inside a viewport call (foundation 4.3):
+    /// every call fails from then on, `destroy` still frees it.
+    broken: OnceLock<String>,
 }
 
 impl Viewport {
@@ -66,7 +71,22 @@ impl Viewport {
             ring,
             renderer,
             view: None,
+            broken: OnceLock::new(),
         }
+    }
+
+    /// Why the viewport is broken (a panic inside one of its calls,
+    /// foundation 4.3), or `None` while it works.
+    pub fn error(&self) -> Option<&str> {
+        self.broken.get().map(String::as_str)
+    }
+
+    fn break_with(&self, payload: Box<dyn std::any::Any + Send>) {
+        let msg = panic_text(payload);
+        log::error!(
+            "fynkel_platform_apple: panic caught at the viewport ABI, viewport broken: {msg}"
+        );
+        let _ = self.broken.set(msg);
     }
 
     pub fn ring(&self) -> &IoSurfaceRing {
@@ -290,6 +310,60 @@ pub struct FynkelAppleViewportStats {
 /// null or the world is poisoned (distinct from -1 = frame dropped).
 pub const FYNKEL_APPLE_RENDER_NO_WORLD: i32 = -2;
 
+/// Returned by `fynkel_apple_viewport_render` when the viewport is broken:
+/// a panic inside one of its calls (foundation 4.3). Every call fails from
+/// then on; `fynkel_apple_viewport_error` says why. Destroy it (and make a
+/// new one to try again).
+pub const FYNKEL_APPLE_RENDER_BROKEN: i32 = -3;
+
+/// Runs a viewport call so a panic never crosses the C boundary (Rust
+/// aborts the process when one does): `None` for a NULL or broken
+/// viewport; a panic breaks the viewport and answers `None`.
+unsafe fn guard<R>(vp: *const Viewport, f: impl FnOnce(&Viewport) -> R) -> Option<R> {
+    let v = vp.as_ref()?;
+    if v.broken.get().is_some() {
+        return None;
+    }
+    match catch_unwind(AssertUnwindSafe(|| f(v))) {
+        Ok(r) => Some(r),
+        Err(payload) => {
+            v.break_with(payload);
+            None
+        }
+    }
+}
+
+/// [`guard`] for the calls that change the viewport.
+unsafe fn guard_mut<R>(vp: *mut Viewport, f: impl FnOnce(&mut Viewport) -> R) -> Option<R> {
+    let v = vp.as_mut()?;
+    if v.broken.get().is_some() {
+        return None;
+    }
+    match catch_unwind(AssertUnwindSafe(|| f(v))) {
+        Ok(r) => Some(r),
+        Err(payload) => {
+            (*vp).break_with(payload);
+            None
+        }
+    }
+}
+
+/// `FYNKEL_APPLE_RENDER_BROKEN` for a broken viewport, else `otherwise`.
+unsafe fn broken_or(vp: *const Viewport, otherwise: i32) -> i32 {
+    match vp.as_ref() {
+        Some(v) if v.broken.get().is_some() => FYNKEL_APPLE_RENDER_BROKEN,
+        _ => otherwise,
+    }
+}
+
+fn panic_text(payload: Box<dyn std::any::Any + Send>) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "non-string panic".into())
+}
+
 /// Viewport ABI version; bumped with `include/fynkel_apple.h` (3: the
 /// M3-16 instrumentation fields of `FynkelAppleViewportStats`; 4:
 /// `fynkel_apple_viewport_debug_lines` and `fynkel_apple_viewport_read_frame`,
@@ -300,8 +374,11 @@ pub const FYNKEL_APPLE_RENDER_NO_WORLD: i32 = -2;
 /// `fynkel_apple_viewport_outline`, the selection outline; 9:
 /// `fynkel_apple_viewport_extra_worlds`, other worlds drawn into the frame
 /// — Prefab Mode in context, multi-scene editing; 10: every viewport
-/// shares one GPU device, ADR-0030 §4 — no call changed).
-pub const APPLE_ABI_VERSION: u32 = 10;
+/// shares one GPU device, ADR-0030 §4 — no call changed; 11: a panic
+/// inside a call breaks the viewport instead of aborting the process —
+/// `FYNKEL_APPLE_RENDER_BROKEN`, `fynkel_apple_viewport_error`,
+/// `fynkel_apple_viewport_debug_panic`, foundation 4.3).
+pub const APPLE_ABI_VERSION: u32 = 11;
 
 /// Bit 0 of an extra world's flags (`fynkel_apple_viewport_extra_worlds`):
 /// drawn greyed.
@@ -326,12 +403,16 @@ pub extern "C" fn fynkel_apple_viewport_create(
 ) -> *mut Viewport {
     let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .try_init();
-    match Viewport::new(
-        width.max(1),
-        height.max(1),
-        buffer_count.clamp(2, 8),
-        SyncMode::from_i32(sync_mode),
-    ) {
+    let made = catch_unwind(|| {
+        Viewport::new(
+            width.max(1),
+            height.max(1),
+            buffer_count.clamp(2, 8),
+            SyncMode::from_i32(sync_mode),
+        )
+    })
+    .unwrap_or_else(|payload| Err(panic_text(payload)));
+    match made {
         Ok(vp) => Box::into_raw(Box::new(vp)),
         Err(e) => {
             log::error!("fynkel_apple_viewport_create failed: {e}");
@@ -346,7 +427,13 @@ pub extern "C" fn fynkel_apple_viewport_create(
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_apple_viewport_destroy(vp: *mut Viewport) {
     if !vp.is_null() {
-        drop(Box::from_raw(vp));
+        let vp = Box::from_raw(vp);
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(move || drop(vp))) {
+            log::error!(
+                "fynkel_apple_viewport_destroy: panic while freeing the viewport: {}",
+                panic_text(payload)
+            );
+        }
     }
 }
 
@@ -359,21 +446,21 @@ pub unsafe extern "C" fn fynkel_apple_viewport_resize(
     width: u32,
     height: u32,
 ) -> i32 {
-    let Some(v) = vp.as_mut() else { return -1 };
-    match v.resize(width.max(1), height.max(1)) {
+    guard_mut(vp, |v| match v.resize(width.max(1), height.max(1)) {
         Ok(()) => 0,
         Err(e) => {
             log::error!("fynkel_apple_viewport_resize failed: {e}");
             -1
         }
-    }
+    })
+    .unwrap_or(-1)
 }
 
 /// # Safety
 /// `vp` must be a live viewport.
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_apple_viewport_buffer_count(vp: *const Viewport) -> u32 {
-    vp.as_ref().map(|v| v.ring.buffer_count()).unwrap_or(0)
+    guard(vp, |v| v.ring.buffer_count()).unwrap_or(0)
 }
 
 /// The `IOSurfaceRef` of slot `index` (unretained; valid until the next
@@ -385,9 +472,7 @@ pub unsafe extern "C" fn fynkel_apple_viewport_iosurface(
     vp: *const Viewport,
     index: u32,
 ) -> *const c_void {
-    vp.as_ref()
-        .map(|v| v.ring.iosurface_ptr(index))
-        .unwrap_or(std::ptr::null())
+    guard(vp, |v| v.ring.iosurface_ptr(index)).unwrap_or(std::ptr::null())
 }
 
 /// Extracts `world` (interpolated by its current alpha, presentation
@@ -403,30 +488,32 @@ pub unsafe extern "C" fn fynkel_apple_viewport_render(
     vp: *mut Viewport,
     world: *const FynkelWorld,
 ) -> i32 {
-    let Some(v) = vp.as_mut() else { return -1 };
-    let Some(w) = world.as_ref() else {
-        return FYNKEL_APPLE_RENDER_NO_WORLD;
-    };
-    if w.core().is_poisoned() {
-        return FYNKEL_APPLE_RENDER_NO_WORLD;
-    }
-    // The world's scene came from a cooked cache: draw from the same
-    // store, so residency (what the scene retained) and the renderer's
-    // GPU copies agree. Re-pointing at the store it already has is free.
-    if let Some(assets) = w.assets() {
-        v.renderer.set_assets(Some(assets.clone()));
-    }
-    let t0 = std::time::Instant::now();
-    let mut extract = w.core().extract();
-    if let Some((world, camera)) = v.view {
-        extract.camera = Some(ExtractCamera {
-            record: u32::MAX,
-            world,
-            camera,
-        });
-    }
-    let extract_us = t0.elapsed().as_micros() as u32;
-    v.render_timed(&extract, extract_us)
+    guard_mut(vp, |v| {
+        let Some(w) = world.as_ref() else {
+            return FYNKEL_APPLE_RENDER_NO_WORLD;
+        };
+        if w.core().is_poisoned() {
+            return FYNKEL_APPLE_RENDER_NO_WORLD;
+        }
+        // The world's scene came from a cooked cache: draw from the same
+        // store, so residency (what the scene retained) and the renderer's
+        // GPU copies agree. Re-pointing at the store it already has is free.
+        if let Some(assets) = w.assets() {
+            v.renderer.set_assets(Some(assets.clone()));
+        }
+        let t0 = std::time::Instant::now();
+        let mut extract = w.core().extract();
+        if let Some((world, camera)) = v.view {
+            extract.camera = Some(ExtractCamera {
+                record: u32::MAX,
+                world,
+                camera,
+            });
+        }
+        let extract_us = t0.elapsed().as_micros() as u32;
+        v.render_timed(&extract, extract_us)
+    })
+    .unwrap_or_else(|| broken_or(vp, -1))
 }
 
 /// # Safety
@@ -436,12 +523,13 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_camera(
     vp: *mut Viewport,
     camera: *const FynkelAppleCamera,
 ) {
-    if let (Some(v), Some(c)) = (vp.as_mut(), camera.as_ref()) {
+    let Some(c) = camera.as_ref() else { return };
+    guard_mut(vp, |v| {
         let cam: Camera = (*c).into();
         if cam.eye.is_finite() && cam.target.is_finite() && cam.fov_y_radians > 0.0 {
             v.set_camera(cam);
         }
-    }
+    });
 }
 
 /// A viewport's own camera (`fynkel_apple_viewport_set_view`): the scene
@@ -478,45 +566,47 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_view(
     world: *const f32,
     camera: *const FynkelAppleViewCamera,
 ) -> i32 {
-    let Some(v) = vp.as_mut() else { return -1 };
-    if world.is_null() {
-        v.set_view(None);
-        return 0;
-    }
-    let Some(c) = camera.as_ref() else { return -1 };
-    let m = glam::Mat4::from_cols_slice(std::slice::from_raw_parts(world, 16));
-    let projection = match c.projection {
-        0 => Projection::Perspective,
-        1 => Projection::Orthographic,
-        _ => return -1,
-    };
-    let exposure_mode = match c.exposure_mode {
-        0 => ExposureMode::Auto,
-        1 => ExposureMode::Manual,
-        _ => return -1,
-    };
-    let finite = m.is_finite()
-        && [c.fov_y, c.ortho_height, c.near, c.far, c.exposure]
-            .iter()
-            .all(|f| f.is_finite());
-    if !finite || c.near <= 0.0 || c.far <= c.near {
-        return -1;
-    }
-    v.set_view(Some((
-        m,
-        SceneCamera {
-            projection,
-            fov_y: c.fov_y,
-            ortho_height: c.ortho_height,
-            near: c.near,
-            far: c.far,
-            priority: 0,
-            exposure_mode,
-            exposure: c.exposure,
-            culling_mask: c.culling_mask,
-        },
-    )));
-    0
+    guard_mut(vp, |v| {
+        if world.is_null() {
+            v.set_view(None);
+            return 0;
+        }
+        let Some(c) = camera.as_ref() else { return -1 };
+        let m = glam::Mat4::from_cols_slice(std::slice::from_raw_parts(world, 16));
+        let projection = match c.projection {
+            0 => Projection::Perspective,
+            1 => Projection::Orthographic,
+            _ => return -1,
+        };
+        let exposure_mode = match c.exposure_mode {
+            0 => ExposureMode::Auto,
+            1 => ExposureMode::Manual,
+            _ => return -1,
+        };
+        let finite = m.is_finite()
+            && [c.fov_y, c.ortho_height, c.near, c.far, c.exposure]
+                .iter()
+                .all(|f| f.is_finite());
+        if !finite || c.near <= 0.0 || c.far <= c.near {
+            return -1;
+        }
+        v.set_view(Some((
+            m,
+            SceneCamera {
+                projection,
+                fov_y: c.fov_y,
+                ortho_height: c.ortho_height,
+                near: c.near,
+                far: c.far,
+                priority: 0,
+                exposure_mode,
+                exposure: c.exposure,
+                culling_mask: c.culling_mask,
+            },
+        )));
+        0
+    })
+    .unwrap_or(-1)
 }
 
 /// Points the viewport's renderer at a cooked asset cache directory (the
@@ -534,25 +624,25 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_asset_cache(
     dir_utf8: *const u8,
     dir_len: u32,
 ) -> i32 {
-    let Some(v) = vp.as_mut() else {
-        return -1;
-    };
-    let dir = if dir_utf8.is_null() || dir_len == 0 {
-        None
-    } else {
-        let bytes = std::slice::from_raw_parts(dir_utf8, dir_len as usize);
-        match std::str::from_utf8(bytes) {
-            Ok(s) => Some(std::path::PathBuf::from(s)),
-            Err(_) => return -1,
+    guard_mut(vp, |v| {
+        let dir = if dir_utf8.is_null() || dir_len == 0 {
+            None
+        } else {
+            let bytes = std::slice::from_raw_parts(dir_utf8, dir_len as usize);
+            match std::str::from_utf8(bytes) {
+                Ok(s) => Some(std::path::PathBuf::from(s)),
+                Err(_) => return -1,
+            }
+        };
+        match v.set_asset_cache(dir.as_deref()) {
+            Ok(()) => 0,
+            Err(e) => {
+                log::error!("fynkel_apple_viewport_set_asset_cache: {e}");
+                -1
+            }
         }
-    };
-    match v.set_asset_cache(dir.as_deref()) {
-        Ok(()) => 0,
-        Err(e) => {
-            log::error!("fynkel_apple_viewport_set_asset_cache: {e}");
-            -1
-        }
-    }
+    })
+    .unwrap_or(-1)
 }
 
 /// Whether entities without a `MeshRenderer` draw as placeholder cubes
@@ -562,9 +652,7 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_asset_cache(
 /// `vp` must be a live viewport.
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_apple_viewport_set_placeholders(vp: *mut Viewport, enabled: i32) {
-    if let Some(v) = vp.as_mut() {
-        v.set_placeholders(enabled != 0);
-    }
+    guard_mut(vp, |v| v.set_placeholders(enabled != 0));
 }
 
 /// Selects the quality profile the renderer runs with, by name from the
@@ -584,28 +672,28 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_quality(
     name_utf8: *const u8,
     name_len: u32,
 ) -> i32 {
-    let Some(v) = vp.as_mut() else {
-        return -1;
-    };
-    let name = if name_utf8.is_null() || name_len == 0 {
-        None
-    } else {
-        let bytes = std::slice::from_raw_parts(name_utf8, name_len as usize);
-        match std::str::from_utf8(bytes) {
-            Ok(s) => Some(s.to_string()),
-            Err(_) => return -1,
+    guard_mut(vp, |v| {
+        let name = if name_utf8.is_null() || name_len == 0 {
+            None
+        } else {
+            let bytes = std::slice::from_raw_parts(name_utf8, name_len as usize);
+            match std::str::from_utf8(bytes) {
+                Ok(s) => Some(s.to_string()),
+                Err(_) => return -1,
+            }
+        };
+        if v.set_quality(name.as_deref()) {
+            0
+        } else {
+            log::warn!(
+                "fynkel_apple_viewport_set_quality: no profile {:?} (profiles: {})",
+                name.unwrap_or_default(),
+                v.renderer.quality_profiles().join(", ")
+            );
+            -1
         }
-    };
-    if v.set_quality(name.as_deref()) {
-        0
-    } else {
-        log::warn!(
-            "fynkel_apple_viewport_set_quality: no profile {:?} (profiles: {})",
-            name.unwrap_or_default(),
-            v.renderer.quality_profiles().join(", ")
-        );
-        -1
-    }
+    })
+    .unwrap_or(-1)
 }
 
 /// Queues `count` world-space line segments for the NEXT render of this
@@ -627,28 +715,30 @@ pub unsafe extern "C" fn fynkel_apple_viewport_debug_lines(
     lines: *const f32,
     count: u32,
 ) -> i32 {
-    let Some(v) = vp.as_mut() else { return -1 };
-    if count == 0 {
-        return 0;
-    }
-    if lines.is_null() {
-        return -1;
-    }
-    let floats = std::slice::from_raw_parts(lines, count as usize * 10);
-    let debug = v.renderer.debug();
-    let mut queued = 0;
-    for l in floats.chunks_exact(10) {
-        if l.iter().any(|f| !f.is_finite()) {
-            continue;
+    guard_mut(vp, |v| {
+        if count == 0 {
+            return 0;
         }
-        debug.line(
-            glam::Vec3::new(l[0], l[1], l[2]),
-            glam::Vec3::new(l[3], l[4], l[5]),
-            [l[6], l[7], l[8], l[9]],
-        );
-        queued += 1;
-    }
-    queued
+        if lines.is_null() {
+            return -1;
+        }
+        let floats = std::slice::from_raw_parts(lines, count as usize * 10);
+        let debug = v.renderer.debug();
+        let mut queued = 0;
+        for l in floats.chunks_exact(10) {
+            if l.iter().any(|f| !f.is_finite()) {
+                continue;
+            }
+            debug.line(
+                glam::Vec3::new(l[0], l[1], l[2]),
+                glam::Vec3::new(l[3], l[4], l[5]),
+                [l[6], l[7], l[8], l[9]],
+            );
+            queued += 1;
+        }
+        queued
+    })
+    .unwrap_or(-1)
 }
 
 /// Queues the NEXT render's overlay (ADR-0019): gizmos and handles drawn
@@ -677,67 +767,69 @@ pub unsafe extern "C" fn fynkel_apple_viewport_overlay(
     triangle_count: u32,
     grid: *const f32,
 ) -> i32 {
-    let Some(v) = vp.as_mut() else { return -1 };
-    if (line_count > 0 && lines.is_null()) || (triangle_count > 0 && triangles.is_null()) {
-        return -1;
-    }
-    let overlay = v.renderer.overlay();
-    let v3 = |f: &[f32]| glam::Vec3::new(f[0], f[1], f[2]);
-    let flags = |f: f32| {
-        if f != 0.0 {
-            fynkel_render::overlay::ON_TOP
-        } else {
-            0
+    guard_mut(vp, |v| {
+        if (line_count > 0 && lines.is_null()) || (triangle_count > 0 && triangles.is_null()) {
+            return -1;
         }
-    };
-    let mut queued = 0;
-    if line_count > 0 {
-        for l in std::slice::from_raw_parts(lines, line_count as usize * 12).chunks_exact(12) {
-            if l.iter().any(|f| !f.is_finite()) {
-                continue;
+        let overlay = v.renderer.overlay();
+        let v3 = |f: &[f32]| glam::Vec3::new(f[0], f[1], f[2]);
+        let flags = |f: f32| {
+            if f != 0.0 {
+                fynkel_render::overlay::ON_TOP
+            } else {
+                0
             }
-            overlay.push_line(
-                v3(&l[0..3]),
-                v3(&l[3..6]),
-                [l[6], l[7], l[8], l[9]],
-                l[10],
-                flags(l[11]),
-            );
-            queued += 1;
-        }
-    }
-    if triangle_count > 0 {
-        for t in
-            std::slice::from_raw_parts(triangles, triangle_count as usize * 14).chunks_exact(14)
-        {
-            if t.iter().any(|f| !f.is_finite()) {
-                continue;
+        };
+        let mut queued = 0;
+        if line_count > 0 {
+            for l in std::slice::from_raw_parts(lines, line_count as usize * 12).chunks_exact(12) {
+                if l.iter().any(|f| !f.is_finite()) {
+                    continue;
+                }
+                overlay.push_line(
+                    v3(&l[0..3]),
+                    v3(&l[3..6]),
+                    [l[6], l[7], l[8], l[9]],
+                    l[10],
+                    flags(l[11]),
+                );
+                queued += 1;
             }
-            overlay.push_triangle(
-                v3(&t[0..3]),
-                v3(&t[3..6]),
-                v3(&t[6..9]),
-                [t[9], t[10], t[11], t[12]],
-                flags(t[13]),
-            );
-            queued += 1;
         }
-    }
-    if !grid.is_null() {
-        let g = std::slice::from_raw_parts(grid, 18);
-        if g.iter().all(|f| f.is_finite()) {
-            let rgba = |i: usize| [g[i], g[i + 1], g[i + 2], g[i + 3]];
-            overlay.grid(fynkel_render::Grid {
-                minor: rgba(0),
-                major: rgba(4),
-                x_axis: rgba(8),
-                z_axis: rgba(12),
-                cell: g[16],
-                fade: g[17],
-            });
+        if triangle_count > 0 {
+            for t in
+                std::slice::from_raw_parts(triangles, triangle_count as usize * 14).chunks_exact(14)
+            {
+                if t.iter().any(|f| !f.is_finite()) {
+                    continue;
+                }
+                overlay.push_triangle(
+                    v3(&t[0..3]),
+                    v3(&t[3..6]),
+                    v3(&t[6..9]),
+                    [t[9], t[10], t[11], t[12]],
+                    flags(t[13]),
+                );
+                queued += 1;
+            }
         }
-    }
-    queued
+        if !grid.is_null() {
+            let g = std::slice::from_raw_parts(grid, 18);
+            if g.iter().all(|f| f.is_finite()) {
+                let rgba = |i: usize| [g[i], g[i + 1], g[i + 2], g[i + 3]];
+                overlay.grid(fynkel_render::Grid {
+                    minor: rgba(0),
+                    major: rgba(4),
+                    x_axis: rgba(8),
+                    z_axis: rgba(12),
+                    cell: g[16],
+                    fade: g[17],
+                });
+            }
+        }
+        queued
+    })
+    .unwrap_or(-1)
 }
 
 /// Queues the NEXT render's selection outline (Unity's Scene view): the
@@ -767,38 +859,41 @@ pub unsafe extern "C" fn fynkel_apple_viewport_outline(
     children_count: u32,
     style: *const f32,
 ) -> i32 {
-    let Some(v) = vp.as_mut() else { return -1 };
-    if (selected_count > 0 && selected.is_null()) || (children_count > 0 && children.is_null()) {
-        return -1;
-    }
-    let style = if style.is_null() {
-        fynkel_render::OutlineStyle::default()
-    } else {
-        let f = std::slice::from_raw_parts(style, 9);
-        if f.iter().any(|x| !x.is_finite()) {
+    guard_mut(vp, |v| {
+        if (selected_count > 0 && selected.is_null()) || (children_count > 0 && children.is_null())
+        {
             return -1;
         }
-        fynkel_render::OutlineStyle {
-            selected: [f[0], f[1], f[2], f[3]],
-            children: [f[4], f[5], f[6], f[7]],
-            width: f[8],
-        }
-    };
-    let entities = |bits: *const u64, count: u32| -> Vec<fynkel_contracts::Entity> {
-        if count == 0 {
-            return Vec::new();
-        }
-        std::slice::from_raw_parts(bits, count as usize)
-            .iter()
-            .map(|b| fynkel_contracts::Entity::from_bits(*b))
-            .collect()
-    };
-    let (selected, children) = (
-        entities(selected, selected_count),
-        entities(children, children_count),
-    );
-    v.renderer.overlay().outline(&selected, &children, style);
-    (selected.len() + children.len()) as i32
+        let style = if style.is_null() {
+            fynkel_render::OutlineStyle::default()
+        } else {
+            let f = std::slice::from_raw_parts(style, 9);
+            if f.iter().any(|x| !x.is_finite()) {
+                return -1;
+            }
+            fynkel_render::OutlineStyle {
+                selected: [f[0], f[1], f[2], f[3]],
+                children: [f[4], f[5], f[6], f[7]],
+                width: f[8],
+            }
+        };
+        let entities = |bits: *const u64, count: u32| -> Vec<fynkel_contracts::Entity> {
+            if count == 0 {
+                return Vec::new();
+            }
+            std::slice::from_raw_parts(bits, count as usize)
+                .iter()
+                .map(|b| fynkel_contracts::Entity::from_bits(*b))
+                .collect()
+        };
+        let (selected, children) = (
+            entities(selected, selected_count),
+            entities(children, children_count),
+        );
+        v.renderer.overlay().outline(&selected, &children, style);
+        (selected.len() + children.len()) as i32
+    })
+    .unwrap_or(-1)
 }
 
 /// Queues `count` other worlds for the NEXT render, drawn into the frame
@@ -833,38 +928,40 @@ pub unsafe extern "C" fn fynkel_apple_viewport_extra_worlds(
     flags: *const u32,
     count: u32,
 ) -> i32 {
-    let Some(v) = vp.as_mut() else { return -1 };
-    if count > 0 && (worlds.is_null() || transforms.is_null() || flags.is_null()) {
-        return -1;
-    }
-    let n = count as usize;
-    let (worlds, transforms, flags): (&[*const FynkelWorld], &[f32], &[u32]) = if n == 0 {
-        (&[], &[], &[])
-    } else {
-        (
-            std::slice::from_raw_parts(worlds, n),
-            std::slice::from_raw_parts(transforms, n * 16),
-            std::slice::from_raw_parts(flags, n),
-        )
-    };
-    if transforms.iter().any(|f| !f.is_finite()) {
-        return -1;
-    }
-    v.renderer.clear_extra_worlds();
-    let mut queued = 0;
-    for (i, w) in worlds.iter().enumerate() {
-        let Some(w) = w.as_ref() else { continue };
-        if w.core().is_poisoned() {
-            continue;
+    guard_mut(vp, |v| {
+        if count > 0 && (worlds.is_null() || transforms.is_null() || flags.is_null()) {
+            return -1;
         }
-        v.renderer.push_extra_world(fynkel_render::ExtraWorld {
-            extract: w.core().extract(),
-            transform: glam::Mat4::from_cols_slice(&transforms[i * 16..i * 16 + 16]),
-            gray: flags[i] & FYNKEL_APPLE_EXTRA_WORLD_GRAY != 0,
-        });
-        queued += 1;
-    }
-    queued
+        let n = count as usize;
+        let (worlds, transforms, flags): (&[*const FynkelWorld], &[f32], &[u32]) = if n == 0 {
+            (&[], &[], &[])
+        } else {
+            (
+                std::slice::from_raw_parts(worlds, n),
+                std::slice::from_raw_parts(transforms, n * 16),
+                std::slice::from_raw_parts(flags, n),
+            )
+        };
+        if transforms.iter().any(|f| !f.is_finite()) {
+            return -1;
+        }
+        v.renderer.clear_extra_worlds();
+        let mut queued = 0;
+        for (i, w) in worlds.iter().enumerate() {
+            let Some(w) = w.as_ref() else { continue };
+            if w.core().is_poisoned() {
+                continue;
+            }
+            v.renderer.push_extra_world(fynkel_render::ExtraWorld {
+                extract: w.core().extract(),
+                transform: glam::Mat4::from_cols_slice(&transforms[i * 16..i * 16 + 16]),
+                gray: flags[i] & FYNKEL_APPLE_EXTRA_WORLD_GRAY != 0,
+            });
+            queued += 1;
+        }
+        queued
+    })
+    .unwrap_or(-1)
 }
 
 /// Copies the frame in ring slot `slot` (what `fynkel_apple_viewport_render`
@@ -884,20 +981,22 @@ pub unsafe extern "C" fn fynkel_apple_viewport_read_frame(
     out: *mut u8,
     cap: u32,
 ) -> i32 {
-    let Some(v) = vp.as_ref() else { return -1 };
-    if out.is_null() || slot < 0 {
-        return -1;
-    }
-    let (w, h) = v.ring.size();
-    let needed = w as usize * h as usize * 4;
-    if (cap as usize) < needed {
-        return -1;
-    }
-    let Some(pixels) = v.ring.read_frame(slot as u32) else {
-        return -1;
-    };
-    std::ptr::copy_nonoverlapping(pixels.as_ptr(), out, needed);
-    needed as i32
+    guard(vp, |v| {
+        if out.is_null() || slot < 0 {
+            return -1;
+        }
+        let (w, h) = v.ring.size();
+        let needed = w as usize * h as usize * 4;
+        if (cap as usize) < needed {
+            return -1;
+        }
+        let Some(pixels) = v.ring.read_frame(slot as u32) else {
+            return -1;
+        };
+        std::ptr::copy_nonoverlapping(pixels.as_ptr(), out, needed);
+        needed as i32
+    })
+    .unwrap_or(-1)
 }
 
 /// Sets the bounded wait `fynkel_apple_viewport_acquire_presented` may spend
@@ -906,9 +1005,9 @@ pub unsafe extern "C" fn fynkel_apple_viewport_read_frame(
 /// `vp` must be a live viewport.
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_apple_viewport_set_acquire_wait_us(vp: *const Viewport, us: u32) {
-    if let Some(v) = vp.as_ref() {
-        v.ring.set_acquire_wait(Duration::from_micros(us as u64));
-    }
+    guard(vp, |v| {
+        v.ring.set_acquire_wait(Duration::from_micros(us as u64))
+    });
 }
 
 /// Presenter entry point (Flutter raster thread). See
@@ -917,9 +1016,7 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_acquire_wait_us(vp: *const Vi
 /// `vp` must be a live viewport. Safe to call from any thread.
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_apple_viewport_acquire_presented(vp: *const Viewport) -> i32 {
-    vp.as_ref()
-        .map(|v| v.ring.acquire_presented())
-        .unwrap_or(-1)
+    guard(vp, |v| v.ring.acquire_presented()).unwrap_or(-1)
 }
 
 /// # Safety
@@ -932,8 +1029,13 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_frame_ready_callback(
     func: Option<ring::FrameReadyFn>,
     userdata: *mut c_void,
 ) {
-    if let Some(v) = vp.as_ref() {
-        v.ring.set_frame_ready_callback(func, userdata);
+    // Also on a broken viewport: the host must be able to detach.
+    let Some(v) = vp.as_ref() else { return };
+    let set = catch_unwind(AssertUnwindSafe(|| {
+        v.ring.set_frame_ready_callback(func, userdata)
+    }));
+    if let Err(payload) = set {
+        v.break_with(payload);
     }
 }
 
@@ -945,9 +1047,11 @@ pub unsafe extern "C" fn fynkel_apple_viewport_take_stats(
     vp: *const Viewport,
     out: *mut FynkelAppleViewportStats,
 ) {
-    let (Some(v), Some(out)) = (vp.as_ref(), out.as_mut()) else {
-        return;
-    };
+    let Some(out) = out.as_mut() else { return };
+    guard(vp, |v| take_stats(v, out));
+}
+
+fn take_stats(v: &Viewport, out: &mut FynkelAppleViewportStats) {
     let mut s = v.ring.take_stats();
     let pct = ring::pct;
     *out = FynkelAppleViewportStats {
@@ -1017,4 +1121,38 @@ pub unsafe extern "C" fn fynkel_apple_viewport_take_stats(
         gpu_frame_p99_us: pct(&mut s.gpu_frame_us, 0.99),
         gpu_bytes: v.frame_stats().gpu_bytes,
     };
+}
+
+/// Copies why the viewport is broken (the panic's message, foundation 4.3)
+/// into `out`, cut at `cap` bytes; answers the bytes written — 0 while the
+/// viewport works, or for a NULL viewport or `out`.
+///
+/// # Safety
+/// `vp` must be a live viewport or NULL; `out` writable for `cap` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_error(
+    vp: *const Viewport,
+    out: *mut u8,
+    cap: u32,
+) -> i32 {
+    let (Some(v), false) = (vp.as_ref(), out.is_null()) else {
+        return 0;
+    };
+    let Some(msg) = v.error() else { return 0 };
+    let n = msg.len().min(cap as usize);
+    std::ptr::copy_nonoverlapping(msg.as_ptr(), out, n);
+    n as i32
+}
+
+/// Panics inside a viewport call, on purpose: the test of the host's
+/// broken-viewport path. Answers -1 (the viewport is broken afterwards).
+///
+/// # Safety
+/// `vp` must be a live viewport.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_debug_panic(vp: *mut Viewport) -> i32 {
+    guard_mut(vp, |_| -> i32 {
+        panic!("fynkel_apple_viewport_debug_panic: a panic on purpose")
+    })
+    .unwrap_or(-1)
 }
