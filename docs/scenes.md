@@ -84,6 +84,39 @@ it was spawned in leaves it; a replace load destroys it with everything
 else. Destroy it yourself (`root.destroy()`, the whole instance) when it is
 collected.
 
+## Pooling
+
+Objects made and destroyed many times a second (bullets, sparks,
+enemies) can come from a pool instead — Unity's
+`UnityEngine.Pool.ObjectPool<T>`, in `package:fynkel` as
+`ObjectPool<T>` (`packages/fynkel/lib/src/pool.dart`, tests
+`packages/fynkel/test/pool_test.dart`):
+
+```dart
+final bullets = ObjectPool.gameObjects(() => world.instantiate(Assets.prefabs.bullet));
+
+final b = bullets.get();          // switched on; a new one only when the pool is empty
+b.transform.position = muzzle;
+// … later, instead of b.destroy():
+bullets.release(b);               // switched off, kept for the next get()
+```
+
+- `ObjectPool<T>(create:, onGet:, onRelease:, onDestroy:,
+  collectionCheck:, maxSize:)` is the plain pool, for anything: `get()`
+  hands out the last released object, or a new one from `create`;
+  `release(x)` gives it back; `countAll`, `countActive`,
+  `countInactive`; `clear()` destroys what waits in it.
+- `ObjectPool.gameObjects(create)` sets it up for GameObjects: `get`
+  switches the object on (`setActive(true)`), `release` switches it off,
+  and one the pool lets go is destroyed. A pooled script resets itself in
+  `onEnable` (it gets `onDisable`/`onEnable` at the next tick, as with any
+  `setActive`).
+- Releasing an object the pool already holds throws (`collectionCheck`,
+  on by default). Past `maxSize` (10 000) a released object is destroyed.
+- An object destroyed while it waits in the pool — a replace load took
+  it, or the game destroyed it — is dropped by the next `get`, never
+  handed out.
+
 ## Settings
 
 One `settings.json` per user under the platform's application-support
