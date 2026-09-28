@@ -969,6 +969,7 @@ class _BehaviourSystem {
         }
         b._destroyed = true;
         b._destroyRequested = true;
+        _deaths = true;
         b._stopRoutines(invokes: true);
         _all.remove(b);
         go._behaviours.remove(b);
@@ -988,6 +989,10 @@ class _BehaviourSystem {
       }
     }
     _scratch.fillRange(0, n, null);
+    if (_deaths) {
+      _deaths = false;
+      _clearDeadReferences();
+    }
     if (_disabling.isNotEmpty) {
       if (_disabling.length > 1) _disabling.sort(_childrenFirst);
       for (final b in _disabling) {
@@ -1021,6 +1026,45 @@ class _BehaviourSystem {
 
   /// The entity table the last settle saw.
   Object? _table;
+
+  /// Set when an object or a script died since the last settle: the
+  /// settle then clears the script fields that point at it.
+  bool _deaths = false;
+
+  /// An object known to the SDK was destroyed.
+  void objectDied() {
+    _deaths = true;
+    _dirty = true;
+  }
+
+  /// Every script's registered reference fields, by class; rebuilt when
+  /// the registry gains types.
+  final Map<Type, List<BehaviourField>> _referenceFields = {};
+  int _referenceFieldsCount = -1;
+
+  /// Unity's `== null` after `Destroy` (ADR-0036 §5): a script's
+  /// GameObject or script field whose target died reads null from now
+  /// on. Visits only the scripts whose class has reference fields.
+  void _clearDeadReferences() {
+    if (_referenceFieldsCount != world.registry.types.length) {
+      _referenceFields.clear();
+      _referenceFieldsCount = world.registry.types.length;
+    }
+    for (final b in _all) {
+      if (b._destroyed) continue;
+      final fields = _referenceFields[b.runtimeType] ??= _referenceFieldsOf(b);
+      for (final f in fields) {
+        final target = f.target!(b);
+        if (target is FynkelObject && !target.isAlive) f.set(b, null);
+      }
+    }
+  }
+
+  List<BehaviourField> _referenceFieldsOf(Behaviour b) {
+    final type = b._type ?? world._registeredTypeOf(b);
+    if (type == null) return const [];
+    return [for (final f in type.fields) if (f.isReference && f.target != null) f];
+  }
 
   /// This settle's transitions (kept between settles: no allocation).
   final List<Behaviour> _enabling = [], _disabling = [];

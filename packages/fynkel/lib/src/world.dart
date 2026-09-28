@@ -836,7 +836,7 @@ class World {
           final go = _byEntity.remove(entity);
           if (go != null) {
             go._alive = false;
-            if (go._behaviours.isNotEmpty) _behaviours.objectChanged();
+            _behaviours.objectDied();
           }
         default:
           break;
