@@ -881,9 +881,6 @@ pub unsafe extern "C" fn fynkel_world_capture_input(
 /// `world` live or NULL.
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_world_input_view(world: *mut FynkelWorld) -> FynkelBufferView {
-    let Some(w) = world.as_mut() else {
-        return FynkelBufferView::empty();
-    };
     let status = guarded(world, |w| {
         let view = w.inner.input_view();
         let buf = std::mem::take(&mut w.input_buf);
@@ -891,10 +888,11 @@ pub unsafe extern "C" fn fynkel_world_input_view(world: *mut FynkelWorld) -> Fyn
         w.stats.bytes_out += w.input_buf.len() as u64;
         Status::Ok
     });
-    if status == Status::Ok {
-        FynkelBufferView::of(&w.input_buf)
-    } else {
-        FynkelBufferView::empty()
+    // Borrowed again after `guarded`: holding one `&mut` across it made
+    // two (undefined behaviour, foundation 4.5; Miri's `tests/aliasing.rs`).
+    match (status, world.as_ref()) {
+        (Status::Ok, Some(w)) => FynkelBufferView::of(&w.input_buf),
+        _ => FynkelBufferView::empty(),
     }
 }
 
@@ -1148,9 +1146,6 @@ pub unsafe extern "C" fn fynkel_world_diagnostics(world: *const FynkelWorld) -> 
 /// `world` live or NULL.
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_world_drain_events(world: *mut FynkelWorld) -> FynkelBufferView {
-    let Some(w) = world.as_mut() else {
-        return FynkelBufferView::empty();
-    };
     let status = guarded(world, |w| {
         let events = w.inner.drain_events();
         let buf = std::mem::take(&mut w.events_buf);
@@ -1158,10 +1153,11 @@ pub unsafe extern "C" fn fynkel_world_drain_events(world: *mut FynkelWorld) -> F
         w.stats.bytes_out += w.events_buf.len() as u64;
         Status::Ok
     });
-    if status == Status::Ok {
-        FynkelBufferView::of(&w.events_buf)
-    } else {
-        FynkelBufferView::empty()
+    // Borrowed again after `guarded`: holding one `&mut` across it made
+    // two (undefined behaviour, foundation 4.5; Miri's `tests/aliasing.rs`).
+    match (status, world.as_ref()) {
+        (Status::Ok, Some(w)) => FynkelBufferView::of(&w.events_buf),
+        _ => FynkelBufferView::empty(),
     }
 }
 
