@@ -42,6 +42,26 @@ class Collector extends Behaviour {
   }
 }
 
+/// Keeps its object across loads and asks for the next level in the same
+/// callback (ADR-0037): the mark must hold before the transition runs at
+/// the start of the next frame, ahead of any tick.
+class Keeper extends Behaviour {
+  String? next;
+  int destroyed = 0;
+
+  @override
+  void fixedUpdate(FixedUpdateContext context) {
+    final to = next;
+    if (to == null) return;
+    next = null;
+    world.dontDestroyOnLoad(this); // a component: its object
+    world.scenes.transition(to);
+  }
+
+  @override
+  void onDestroy() => destroyed++;
+}
+
 void main() {
   final fixture = Directory('../../crates/fynkel_document/fixtures/project').absolute.path;
   late String cache;
@@ -272,6 +292,46 @@ void main() {
     expect(() => bare.loadScene(playground), throwsStateError);
     expect(() => bare.unloadScene(playground), throwsA(isA<FynkelUnloadError>()));
     expect(() => bare.bindActions(const {}), throwsA(isA<FynkelLoadError>()));
+  });
+
+  test('dontDestroyOnLoad keeps roots with their children and scripts across a replace load (ADR-0037)', () {
+    const crateId = 'c0000000-0000-4000-8000-000000000040';
+    final w = fresh();
+    w.loadScene(playground, cacheDir: cache);
+    final music = w.spawn(name: 'Music');
+    w.dontDestroyOnLoad(music); // pending: marked when the tick makes it
+    final track = w.spawn(name: 'Track', parent: music);
+    final keeper = music.addBehaviour(Keeper());
+    final crate = w.instantiate(crateId);
+    final inner = w.instantiate(crateId, parent: crate);
+    w.dontDestroyOnLoad(inner); // a child: nothing kept, a warning
+    w.frame(1 / 60);
+    final player = w.find('Player')!;
+    w.dontDestroyOnLoad(player); // a scene's root
+    expect(w.persistentObjects, [music, player]);
+
+    keeper.next = results;
+    w.frame(1 / 60); // marks again and asks for Results
+    w.frame(1 / 60); // Results replaces Playground
+    expect(w.scenes.current, results);
+    expect(w.scenes.lastReport!.persistent, 2);
+    expect(music.isAlive && track.isAlive && player.isAlive, isTrue);
+    expect(track.parent, same(music));
+    expect(crate.isAlive || inner.isAlive, isFalse, reason: 'not kept: gone with the rest');
+    expect(keeper.destroyed, 0);
+    expect(music.behaviour<Keeper>(), same(keeper));
+    expect(w.find('Music'), same(music));
+    expect(w.loadedScenes.map((s) => s.name), ['Results'], reason: 'the kept objects are in no loaded scene');
+    expect(w.persistentObjects, [music, player]);
+
+    // Destroyed, it is no longer kept; the next load takes nothing more.
+    player.destroy();
+    w.frame(1 / 60);
+    expect(w.persistentObjects, [music]);
+    w.loadScene(playground);
+    w.frame(1 / 60);
+    expect(music.isAlive, isTrue);
+    expect(w.findAll('Player'), hasLength(1), reason: "Playground's own, new");
   });
 
   test('the settings document reads leniently, validates, and a broken file falls back to the defaults', () {

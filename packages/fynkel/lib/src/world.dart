@@ -211,6 +211,11 @@ class World {
   final Map<int, GameObject> _byEntity = {};
   final Map<int, GameObject> _pendingByTempId = {};
 
+  /// What [dontDestroyOnLoad] kept, in marking order; the objects asked
+  /// for while pending, marked when the tick makes them.
+  final List<GameObject> _persistent = [];
+  final Set<GameObject> _persistentPending = {};
+
   /// Objects [GameObject.setParent] moved this tick, for
   /// [GameObject.children]'s read-your-writes; cleared by the step.
   final List<GameObject> _reparented = [];
@@ -828,6 +833,7 @@ class World {
             go._entity = entity;
             _byEntity[entity] = go;
             _toSubscribe.add(entity);
+            if (_persistentPending.remove(go)) _keep(go, entity);
             // The staged writes were applied with the spawn (a rejection
             // cleared them at the step); they stay readable until the
             // first snapshot, and the next read of a native component asks
@@ -1563,6 +1569,46 @@ class World {
     _cacheDir = cache;
     scenes._loaded(report, mode);
     return report;
+  }
+
+  /// Keeps [target] — a root [GameObject], or a component's object — and
+  /// everything under it across scene loads (Unity's `DontDestroyOnLoad`,
+  /// ADR-0037): a replace load leaves it, and so does unloading the scene
+  /// it came from; its scripts stay as they are, and what it draws stays
+  /// resident. It takes effect at once, so a script can call it and then
+  /// `scenes.transition` in the same callback; an object not spawned yet
+  /// is kept the moment the tick makes it. Children made under it later
+  /// go with it; given a parent, it stops being kept. Only a root can be
+  /// kept: on a child it does nothing and logs a warning, as Unity does.
+  /// [persistentObjects] lists what is kept; `destroy` ends it.
+  void dontDestroyOnLoad(FynkelObject target) {
+    final go = switch (target) {
+      GameObject g => g,
+      Component c => c.gameObject,
+      _ => throw ArgumentError.value(target, 'target', 'a GameObject or a component'),
+    };
+    final e = go._entity;
+    if (e == null) {
+      if (!go.isAlive) throw StateError('dontDestroyOnLoad: "${go.name}" was destroyed');
+      _persistentPending.add(go);
+      return;
+    }
+    _keep(go, go._requireResolved('dontDestroyOnLoad'));
+  }
+
+  void _keep(GameObject go, int entity) {
+    if (_native.dontDestroyOnLoad(entity) != FynkelStatus.FYNKEL_STATUS_OK) {
+      Debug.logWarning('dontDestroyOnLoad only works for root objects: "${go.name}" has a parent');
+      return;
+    }
+    if (!_persistent.contains(go)) _persistent.add(go);
+  }
+
+  /// The roots [dontDestroyOnLoad] keeps, in the order they were marked:
+  /// alive and still roots.
+  List<GameObject> get persistentObjects {
+    _persistent.removeWhere((go) => !go.isAlive || go.parent != null);
+    return List.unmodifiable(_persistent);
   }
 
   /// Unloads the loaded scene [sceneId] (M3-12): its entities that are

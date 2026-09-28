@@ -423,6 +423,11 @@ class NativeWorld {
   (FynkelStatus, Map<String, Object?>) unloadScene(String sceneId) =>
       _withUtf8(sceneId, (s, sl) => _load(() => fynkel_world_unload_scene(_w, s, sl)));
 
+  /// `fynkel_world_dont_destroy_on_load` (ADR-0037): keeps the root
+  /// [entity] and its subtree across loads; `INVALID_ARGUMENT` for one not
+  /// live or with a parent.
+  FynkelStatus dontDestroyOnLoad(int entity) => fynkel_world_dont_destroy_on_load(_w, entity);
+
   /// `fynkel_world_bind_actions` (M3-12): [rebindsJson] is the JSON object
   /// `{ action: [bindings] }` laid over the project's actions.
   (FynkelStatus, Map<String, Object?>) bindActions(String rebindsJson) =>

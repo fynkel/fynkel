@@ -421,6 +421,7 @@ class LoadReport {
     this.scenes = const [],
     this.loadMs = 0,
     this.modules,
+    this.persistent = 0,
   });
 
   factory LoadReport.fromJson(Map<String, Object?> j) {
@@ -465,6 +466,7 @@ class LoadReport {
       ],
       loadMs: ((j['timing'] as Map?)?['ms'] as num?)?.toDouble() ?? 0,
       modules: j['modules'] is Map ? Modules.fromJson((j['modules'] as Map).cast<String, Object?>()) : null,
+      persistent: (j['persistent'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -477,6 +479,10 @@ class LoadReport {
   /// `modules`, ADR-0029); null for a report that does not say
   /// (`bindActions`).
   final Modules? modules;
+
+  /// The roots kept across this load by [World.dontDestroyOnLoad]
+  /// (ADR-0037): what a replace load left standing.
+  final int persistent;
 
   /// `replace` or `additive` for a scene load (M3-12); null for a report
   /// that loaded no scene (`bindActions`).
@@ -578,6 +584,7 @@ class LoadReport {
         scenes: scenes,
         loadMs: loadMs,
         modules: modules,
+        persistent: persistent,
       );
 
   /// This report after the SDK attached [attached] behaviours and found
