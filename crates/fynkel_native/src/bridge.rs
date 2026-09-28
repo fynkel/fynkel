@@ -286,8 +286,10 @@ pub fn encode_diagnostics(buf: Vec<u8>, diags: &[Diagnostic]) -> Vec<u8> {
     w.finish()
 }
 
-pub fn encode_events(buf: Vec<u8>, events: &[Event]) -> Vec<u8> {
-    let mut w = Writer::begin(buf, BufferKind::Events);
+/// `strings` is the string tail's buffer, kept by the caller so a warm
+/// encode allocates nothing (foundation 4.8).
+pub fn encode_events(buf: Vec<u8>, events: &[Event], strings: &mut Vec<u8>) -> Vec<u8> {
+    let mut w = Writer::begin_reusing(buf, BufferKind::Events, std::mem::take(strings));
     for e in events {
         let kind = e.payload.kind();
         // header + body count as one record; the body's strings (a zone's
@@ -307,7 +309,9 @@ pub fn encode_events(buf: Vec<u8>, events: &[Event]) -> Vec<u8> {
             .encode(&mut out[header_at..body_at], strings);
         });
     }
-    w.finish()
+    let (out, tail) = w.finish_reusing();
+    *strings = tail;
+    out
 }
 
 fn encode_event_body(p: &EventPayload, out: &mut Vec<u8>, strings: &mut fynkel_wire::StringTable) {
@@ -496,6 +500,9 @@ pub const QUERY_AUDIO: u32 = 12;
 pub const QUERY_AUDIO_STATS: u32 = 13;
 pub const QUERY_ANIMATOR_CONTROLLER: u32 = 14;
 pub const QUERY_ANIMATOR_PARAMETERS: u32 = 15;
+/// The highest query kind: kinds `1..=QUERY_KINDS` each answer into their
+/// own buffer (foundation 4.9).
+pub const QUERY_KINDS: u32 = 15;
 
 pub fn query(
     world: &World,
@@ -845,22 +852,48 @@ pub fn decode_input_events(buf: &[u8]) -> Result<Vec<InputEvent>, ProtocolError>
     Ok(out)
 }
 
-pub fn encode_input_view(buf: Vec<u8>, actions: &[ActionState]) -> Vec<u8> {
-    let mut w = Writer::begin(buf, BufferKind::InputActions);
+/// `record` and `strings` are scratch the caller keeps: the record's name
+/// and the string tail reuse their buffers, so a warm view encodes without
+/// allocating (foundation 4.8).
+pub fn encode_input_view(
+    buf: Vec<u8>,
+    actions: &[ActionState],
+    record: &mut InputActionRecord,
+    strings: &mut Vec<u8>,
+) -> Vec<u8> {
+    let mut w = Writer::begin_reusing(buf, BufferKind::InputActions, std::mem::take(strings));
     for a in actions {
-        w.record(&InputActionRecord {
-            name: a.name.clone(),
-            kind: a.kind as u32,
-            held: a.held,
-            pressed: a.pressed,
-            released: a.released,
-            frame_pressed: a.frame_pressed,
-            frame_released: a.frame_released,
-            x: a.x,
-            y: a.y,
-            frame_x: a.frame_x,
-            frame_y: a.frame_y,
-        });
+        record.name.clear();
+        record.name.push_str(&a.name);
+        record.kind = a.kind as u32;
+        record.held = a.held;
+        record.pressed = a.pressed;
+        record.released = a.released;
+        record.frame_pressed = a.frame_pressed;
+        record.frame_released = a.frame_released;
+        record.x = a.x;
+        record.y = a.y;
+        record.frame_x = a.frame_x;
+        record.frame_y = a.frame_y;
+        w.record(record);
     }
-    w.finish()
+    let (out, tail) = w.finish_reusing();
+    *strings = tail;
+    out
+}
+
+pub fn empty_input_record() -> InputActionRecord {
+    InputActionRecord {
+        name: String::new(),
+        kind: 0,
+        held: false,
+        pressed: false,
+        released: false,
+        frame_pressed: false,
+        frame_released: false,
+        x: 0.0,
+        y: 0.0,
+        frame_x: 0.0,
+        frame_y: 0.0,
+    }
 }

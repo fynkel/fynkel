@@ -41,8 +41,19 @@ pub struct FynkelWorld {
     events_buf: Vec<u8>,
     after_physics_buf: Vec<u8>,
     diagnostics_buf: Vec<u8>,
-    query_buf: Vec<u8>,
+    /// One answer buffer per query kind, then physics, projection and
+    /// authoring (foundation 4.9): a view stays valid until the next query of its
+    /// own kind or a mutating call, so views of different kinds can be
+    /// held together.
+    query_bufs: Vec<Vec<u8>>,
     input_buf: Vec<u8>,
+    /// Reused every frame so reading input and events allocates nothing
+    /// once warm (foundation 4.8).
+    input_states: Vec<fynkel_core::input::ActionState>,
+    input_record: fynkel_core::schema::InputActionRecord,
+    events: Vec<fynkel_core::event::Event>,
+    /// The string tail's buffer, shared by the per-frame encoders.
+    strings: Vec<u8>,
     /// JSON of the last `fynkel_world_load_*` call; empty before any.
     load_report: Vec<u8>,
     /// What the last `fynkel_world_asset_json` answered (ADR-0027 §6).
@@ -91,6 +102,13 @@ struct Counters {
     /// crossing, not per tick).
     over_budget: bool,
 }
+
+/// `query_bufs`: one per query kind, then physics, projection and the
+/// authoring call's JSON answer.
+const PHYSICS_LANE: usize = bridge::QUERY_KINDS as usize;
+const PROJECTION_LANE: usize = PHYSICS_LANE + 1;
+pub(crate) const AUTHORING_LANE: usize = PROJECTION_LANE + 1;
+const QUERY_LANES: usize = AUTHORING_LANE + 1;
 
 #[repr(C)]
 pub struct FynkelBufferView {
@@ -241,8 +259,12 @@ impl FynkelWorld {
             events_buf: buffer::empty(BufferKind::Events),
             after_physics_buf: buffer::empty(BufferKind::Events),
             diagnostics_buf: buffer::empty(BufferKind::Diagnostics),
-            query_buf: buffer::empty(BufferKind::Query),
+            query_bufs: (0..QUERY_LANES).map(|_| buffer::empty(BufferKind::Query)).collect(),
             input_buf: buffer::empty(BufferKind::InputActions),
+            input_states: Vec::new(),
+            input_record: bridge::empty_input_record(),
+            events: Vec::new(),
+            strings: Vec::new(),
             load_report: Vec::new(),
             asset_json: Vec::new(),
             assets: None,
@@ -818,7 +840,7 @@ pub unsafe extern "C" fn fynkel_world_step(
         w.stats.snapshot_peak_bytes = w.stats.snapshot_peak_bytes.max(snapshot_bytes);
         w.check_snapshot_budget(snapshot_bytes);
         let buf = std::mem::take(&mut w.after_physics_buf);
-        w.after_physics_buf = bridge::encode_events(buf, w.inner.after_physics_events());
+        w.after_physics_buf = bridge::encode_events(buf, w.inner.after_physics_events(), &mut w.strings);
         w.rebuild_diagnostics();
         if let Some(out) = out_result.as_mut() {
             *out = FynkelStepResult {
@@ -882,9 +904,9 @@ pub unsafe extern "C" fn fynkel_world_capture_input(
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_world_input_view(world: *mut FynkelWorld) -> FynkelBufferView {
     let status = guarded(world, |w| {
-        let view = w.inner.input_view();
+        w.inner.input_view_into(&mut w.input_states);
         let buf = std::mem::take(&mut w.input_buf);
-        w.input_buf = bridge::encode_input_view(buf, &view);
+        w.input_buf = bridge::encode_input_view(buf, &w.input_states, &mut w.input_record, &mut w.strings);
         w.stats.bytes_out += w.input_buf.len() as u64;
         Status::Ok
     });
@@ -899,7 +921,7 @@ pub unsafe extern "C" fn fynkel_world_input_view(world: *mut FynkelWorld) -> Fyn
 /// Answers a `FYNKEL_BUFFER_PHYSICS_QUERIES` buffer against the last
 /// stepped physics state (M3-08): the view is a `Query` buffer of
 /// `fynkel.rec.PhysicsHit` records, in query order, nearest first within
-/// a query, valid until the next query call or mutating call. A framing
+/// a query, valid until the next physics query or mutating call. A framing
 /// error is `Status::Protocol` with an empty view; the world stays usable.
 ///
 /// # Safety
@@ -923,24 +945,24 @@ pub unsafe extern "C" fn fynkel_world_physics_query(
     let status = guarded(world, |w| {
         w.stats.query_calls += 1;
         w.stats.bytes_in += bytes.len() as u64;
-        let buf = std::mem::take(&mut w.query_buf);
+        let buf = std::mem::take(&mut w.query_bufs[PHYSICS_LANE]);
         w.inner.refresh_physics();
         match bridge::physics_queries(&w.inner, bytes, buf) {
             Ok(b) => {
-                w.query_buf = b;
-                w.stats.bytes_out += w.query_buf.len() as u64;
+                w.query_bufs[PHYSICS_LANE] = b;
+                w.stats.bytes_out += w.query_bufs[PHYSICS_LANE].len() as u64;
                 Status::Ok
             }
             Err(e) => {
                 log::warn!("fynkel_world_physics_query: protocol error {e:?}");
-                w.query_buf = buffer::empty(BufferKind::Query);
+                w.query_bufs[PHYSICS_LANE] = buffer::empty(BufferKind::Query);
                 Status::Protocol
             }
         }
     });
     if let Some(out) = out_view.as_mut() {
         *out = match (status, world.as_ref()) {
-            (Status::Ok, Some(w)) => FynkelBufferView::of(&w.query_buf),
+            (Status::Ok, Some(w)) => FynkelBufferView::of(&w.query_bufs[PHYSICS_LANE]),
             _ => FynkelBufferView::empty(),
         };
     }
@@ -964,7 +986,7 @@ pub struct FynkelProjectionInfo {
 /// §10): every anchor projected into a `width` × `height` viewport from
 /// the frame's camera and interpolated poses — the same matrices the
 /// renderer uses — as a `Query` buffer of `fynkel.rec.ProjectedPoint`
-/// records in request order, valid until the next query call or mutating
+/// records in request order, valid until the next projection or mutating
 /// call. At most 64 anchors are projected; the rest come back
 /// `PROJECTED_DROPPED` and the world reports `TOO_MANY_ANCHORS`. A framing
 /// error is `Status::Protocol` with an empty view; the world stays usable.
@@ -994,7 +1016,7 @@ pub unsafe extern "C" fn fynkel_world_project(
     let status = guarded(world, |w| {
         w.stats.query_calls += 1;
         w.stats.bytes_in += bytes.len() as u64;
-        let buf = std::mem::take(&mut w.query_buf);
+        let buf = std::mem::take(&mut w.query_bufs[PROJECTION_LANE]);
         let mut anchors = std::mem::take(&mut w.anchors);
         let mut points = std::mem::take(&mut w.points);
         let r = bridge::project(
@@ -1010,8 +1032,8 @@ pub unsafe extern "C" fn fynkel_world_project(
         w.points = points;
         match r {
             Ok((b, i)) => {
-                w.query_buf = b;
-                w.stats.bytes_out += w.query_buf.len() as u64;
+                w.query_bufs[PROJECTION_LANE] = b;
+                w.stats.bytes_out += w.query_bufs[PROJECTION_LANE].len() as u64;
                 if i.dropped > 0 {
                     w.rebuild_diagnostics();
                 }
@@ -1024,7 +1046,7 @@ pub unsafe extern "C" fn fynkel_world_project(
             }
             Err(e) => {
                 log::warn!("fynkel_world_project: protocol error {e:?}");
-                w.query_buf = buffer::empty(BufferKind::Query);
+                w.query_bufs[PROJECTION_LANE] = buffer::empty(BufferKind::Query);
                 Status::Protocol
             }
         }
@@ -1034,7 +1056,7 @@ pub unsafe extern "C" fn fynkel_world_project(
     }
     if let Some(out) = out_view.as_mut() {
         *out = match (status, world.as_ref()) {
-            (Status::Ok, Some(w)) => FynkelBufferView::of(&w.query_buf),
+            (Status::Ok, Some(w)) => FynkelBufferView::of(&w.query_bufs[PROJECTION_LANE]),
             _ => FynkelBufferView::empty(),
         };
     }
@@ -1147,9 +1169,9 @@ pub unsafe extern "C" fn fynkel_world_diagnostics(world: *const FynkelWorld) -> 
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_world_drain_events(world: *mut FynkelWorld) -> FynkelBufferView {
     let status = guarded(world, |w| {
-        let events = w.inner.drain_events();
+        w.inner.drain_events_into(&mut w.events);
         let buf = std::mem::take(&mut w.events_buf);
-        w.events_buf = bridge::encode_events(buf, &events);
+        w.events_buf = bridge::encode_events(buf, &w.events, &mut w.strings);
         w.stats.bytes_out += w.events_buf.len() as u64;
         Status::Ok
     });
@@ -1173,6 +1195,10 @@ pub unsafe extern "C" fn fynkel_world_after_physics_events(
     }
 }
 
+/// Explicit query: the view is valid until the next query of the same
+/// kind or a mutating call (foundation 4.9). A kind outside
+/// `1..=QUERY_KINDS` is `Status::InvalidArgument` with an empty view.
+///
 /// # Safety
 /// `desc` must be non-NULL; `out_view` may be NULL.
 #[no_mangle]
@@ -1185,24 +1211,31 @@ pub unsafe extern "C" fn fynkel_world_query(
         return Status::InvalidArgument;
     };
     let (kind, request_id, entity) = (d.kind, d.request_id, Entity::from_bits(d.entity));
+    if !(1..=bridge::QUERY_KINDS).contains(&kind) {
+        if let Some(out) = out_view.as_mut() {
+            *out = FynkelBufferView::empty();
+        }
+        return Status::InvalidArgument;
+    }
+    let lane = (kind - 1) as usize;
     let status = guarded(world, |w| {
         w.stats.query_calls += 1;
-        let buf = std::mem::take(&mut w.query_buf);
+        let buf = std::mem::take(&mut w.query_bufs[lane]);
         match bridge::query(&w.inner, kind, request_id, entity, buf) {
             Some(b) => {
-                w.query_buf = b;
-                w.stats.bytes_out += w.query_buf.len() as u64;
+                w.query_bufs[lane] = b;
+                w.stats.bytes_out += w.query_bufs[lane].len() as u64;
                 Status::Ok
             }
             None => {
-                w.query_buf = buffer::empty(BufferKind::Query);
+                w.query_bufs[lane] = buffer::empty(BufferKind::Query);
                 Status::InvalidArgument
             }
         }
     });
     if let Some(out) = out_view.as_mut() {
         *out = match (status, world.as_ref()) {
-            (Status::Ok, Some(w)) => FynkelBufferView::of(&w.query_buf),
+            (Status::Ok, Some(w)) => FynkelBufferView::of(&w.query_bufs[lane]),
             _ => FynkelBufferView::empty(),
         };
     }

@@ -1332,7 +1332,7 @@ fn transform_of(v: &Value) -> Result<Transform, Vec<Diagnostic>> {
 /// and changes it in the scene document's terms, writing at once without
 /// a tick. `out_view` gets the JSON result, `{ "ok": true, ... }` or
 /// `{ "ok": false, "rejected" | "diagnostics": [...] }`, valid until the
-/// next query or mutating call on the world.
+/// next authoring call or mutating call on the world.
 ///
 /// # Safety
 /// `world` live or NULL; `kind_utf8` readable for `kind_len` bytes;
@@ -1373,15 +1373,15 @@ pub unsafe extern "C" fn fynkel_world_live_call(
                 status_for(&diagnostics),
             ),
         };
-        w.query_buf.clear();
-        serde_json::to_writer(&mut w.query_buf, &value).expect("JSON into a Vec");
-        w.stats.bytes_out += w.query_buf.len() as u64;
+        w.query_bufs[crate::AUTHORING_LANE].clear();
+        serde_json::to_writer(&mut w.query_bufs[crate::AUTHORING_LANE], &value).expect("JSON into a Vec");
+        w.stats.bytes_out += w.query_bufs[crate::AUTHORING_LANE].len() as u64;
         status
     });
     if let Some(out) = out_view.as_mut() {
         *out = match (status, world.as_ref()) {
             (Status::Ok | Status::CommandsRejected | Status::InvalidArgument, Some(w)) => {
-                FynkelBufferView::of(&w.query_buf)
+                FynkelBufferView::of(&w.query_bufs[crate::AUTHORING_LANE])
             }
             _ => FynkelBufferView::empty(),
         };

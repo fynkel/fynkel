@@ -398,14 +398,16 @@ FynkelBufferView fynkel_world_drain_events(FynkelWorld* world);
 FynkelBufferView fynkel_world_after_physics_events(const FynkelWorld* world);
 
 /* Explicit query; the response is valid until the next mutating call or
- * the next query. */
+ * the next query of the same kind (each kind answers into its own buffer,
+ * so views of different kinds can be held together). */
 FynkelStatus fynkel_world_query(FynkelWorld* world,
                                 const FynkelQueryDesc* desc,
                                 FynkelBufferView* out_view);
 
 /* Spatial queries (M3-08): `buffer` is a PHYSICS_QUERIES buffer; the
  * response (a QUERY buffer of PhysicsHitRecords, query order, nearest
- * first within a query) is valid until the next query or mutating call.
+ * first within a query) is valid until the next physics query or
+ * mutating call.
  * A framing error is FYNKEL_STATUS_PROTOCOL with an empty view. */
 FynkelStatus fynkel_world_physics_query(FynkelWorld* world,
                                         const uint8_t* buffer,
@@ -436,7 +438,7 @@ typedef struct FynkelProjectionInfo {
  * the response is a QUERY buffer of one ProjectedPointRecord per anchor
  * in request order (x/y in that viewport's pixels, origin top-left, y
  * down; depth metres along the view axis; flags above), valid until the
- * next query or mutating call. out_info/out_view may be NULL. A framing
+ * next projection or mutating call. out_info/out_view may be NULL. A framing
  * error is FYNKEL_STATUS_PROTOCOL with an empty view. */
 FynkelStatus fynkel_world_project(FynkelWorld* world,
                                   uint32_t width,

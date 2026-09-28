@@ -548,7 +548,7 @@ FynkelStatus fynkel_authoring_stage_call(FynkelAuthoringSession* session,
  *   16 floats } } for the ids still alive. `view` is the preview's shape.
  * A write applies at once, at the current tick, without stepping (it
  * shows while paused; no system runs). `out_view` gets the JSON result,
- * valid until the next query or mutating call on the world. The world
+ * valid until the next authoring call or mutating call on the world. The world
  * refusing a write is FYNKEL_STATUS_COMMANDS_REJECTED with { "ok": false,
  * "rejected": [{ code, message }] }; a malformed call, an unknown kind,
  * entity or component type is FYNKEL_STATUS_INVALID_ARGUMENT with

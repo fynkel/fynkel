@@ -202,9 +202,30 @@ impl Writer {
         self.count
     }
 
+    /// [`Writer::begin`] whose string table writes into `strings` (from
+    /// [`Writer::finish_reusing`]), so a writer made every frame allocates
+    /// nothing once warm (foundation 4.8).
+    pub fn begin_reusing(bytes: Vec<u8>, kind: BufferKind, strings: Vec<u8>) -> Self {
+        let mut w = Self::begin(bytes, kind);
+        w.strings = StringTable::with_buffer(strings);
+        w
+    }
+
+    /// [`Writer::finish`], handing the string table's buffer back.
+    pub fn finish_reusing(mut self) -> (Vec<u8>, Vec<u8>) {
+        let strings = std::mem::take(&mut self.strings);
+        let bytes = self.finish_with(&strings);
+        (bytes, strings.into_bytes())
+    }
+
     pub fn finish(mut self) -> Vec<u8> {
+        let strings = std::mem::take(&mut self.strings);
+        self.finish_with(&strings)
+    }
+
+    fn finish_with(mut self, strings: &StringTable) -> Vec<u8> {
         let records_end = self.bytes.len() as u32;
-        self.bytes.extend_from_slice(self.strings.as_bytes());
+        self.bytes.extend_from_slice(strings.as_bytes());
         let len = self.bytes.len() as u32;
         let b = &mut self.bytes;
         put_u32(b, 0, MAGIC);

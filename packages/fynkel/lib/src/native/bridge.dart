@@ -371,7 +371,10 @@ class NativeWorld {
 
   int _requestId = 0;
 
-  /// Explicit query; the view is valid until the next mutating call or query.
+  /// Explicit query; the view is valid until the next mutating call or the
+  /// next query of the same [kind] (each kind has its own native buffer).
+  /// Before foundation 4.9 all kinds shared one, and a `components` query
+  /// freed an `entities` view still being walked.
   WireBuffer query(QueryKind kind, {int entity = 0}) {
     _requireLive(); // before the write into the scratch
     _query.ref.kind = kind.index + 1;
@@ -388,7 +391,7 @@ class NativeWorld {
   /// Answers a `PhysicsQueries` buffer (the first [length] bytes of
   /// [bytes], M3-08): one memcpy into the reused scratch, one FFI call; the
   /// hits come back as `PhysicsHitRecord`s in a query buffer read in
-  /// place, valid until the next query or mutating call.
+  /// place, valid until the next physics query or mutating call.
   WireBuffer physicsQuery(Uint8List bytes, int length) {
     _toScratch(bytes, length);
     ffiCalls++;
@@ -401,7 +404,7 @@ class NativeWorld {
   /// [bytes], M3-13) into a [width] × [height] viewport: one memcpy into
   /// the reused scratch, one FFI call; the points come back as
   /// `ProjectedPointRecord`s in a query buffer read in place, valid until
-  /// the next query or mutating call, with the camera entity (0 = none)
+  /// the next projection or mutating call, with the camera entity (0 = none)
   /// and the projected/dropped counts.
   (WireBuffer, int camera, int projected, int dropped) project(Uint8List bytes, int length, int width, int height) {
     _copyToScratch(bytes, length);
