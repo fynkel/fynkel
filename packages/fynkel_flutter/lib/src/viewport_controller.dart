@@ -18,7 +18,7 @@ import 'package:fynkel/fynkel.dart';
 import 'viewport_native.dart';
 import 'viewport_overlay.dart';
 
-export 'viewport_native.dart' show ViewportStatsSnapshot, renderNoWorld, viewportAbiVersion;
+export 'viewport_native.dart' show ViewportStatsSnapshot, renderBroken, renderNoWorld, viewportAbiVersion;
 
 /// How the renderer learns that a frame's GPU work is complete.
 enum ViewportSyncMode {
@@ -357,9 +357,12 @@ class FynkelViewportController extends ChangeNotifier {
   int get resizes => _resizes;
 
   /// Renders [world]'s current extract into the next free ring slot.
-  /// Returns the slot index, -1 when the ring was full (frame dropped) or
-  /// [renderNoWorld]; null when the viewport is not attached or is mid-resize
-  /// (the simulation still advanced, so no time is lost).
+  /// Returns the slot index, -1 when the ring was full (frame dropped),
+  /// [renderNoWorld], or [renderBroken] — a panic inside the viewport
+  /// (viewport ABI 11): the controller is then [ViewportState.failed] with a
+  /// [ViewportBrokenError] and draws nothing more until [detach]; null when
+  /// the viewport is not attached or is mid-resize (the simulation still
+  /// advanced, so no time is lost).
   int? render(World world) => renderHandle(world.native.handleAddress);
 
   /// [render] for a world the host holds only as its native `FynkelWorld*`
@@ -369,7 +372,19 @@ class FynkelViewportController extends ChangeNotifier {
   /// ([renderNoWorld]).
   int? renderHandle(int worldAddress) {
     if (_state != ViewportState.attached) return null;
-    return _native!.render(_viewport, worldAddress);
+    final slot = _native!.render(_viewport, worldAddress);
+    if (slot == renderBroken) {
+      _error = ViewportBrokenError(_native!.error(_viewport) ?? 'no message');
+      _state = ViewportState.failed;
+      _notify();
+    }
+    return slot;
+  }
+
+  /// Panics inside the native viewport, on purpose: the next [render]
+  /// finds it broken. For tests of a host's failure path.
+  void debugPanic() {
+    if (_viewport != nullptr) _native!.debugPanic(_viewport);
   }
 
   /// Queues world-space line segments the next [render] draws on top of
@@ -491,4 +506,18 @@ class FynkelViewportController extends ChangeNotifier {
     unawaited(detach());
     super.dispose();
   }
+}
+
+/// [FynkelViewportController.error] after a panic inside the native
+/// viewport (viewport ABI 11): the Rust side caught it at the boundary,
+/// the app lives on, and this viewport draws nothing more. [detach] frees
+/// it; the next size request makes a new one.
+class ViewportBrokenError extends Error {
+  ViewportBrokenError(this.panic);
+
+  /// The panic's message.
+  final String panic;
+
+  @override
+  String toString() => 'The viewport stopped: the renderer panicked.\n$panic';
 }

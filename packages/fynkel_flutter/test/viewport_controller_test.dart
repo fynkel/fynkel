@@ -52,7 +52,7 @@ void main() {
   }
 
   test('abi version matches the native library', () {
-    expect(viewportAbiVersion, 10);
+    expect(viewportAbiVersion, 11);
   });
 
   test('create, render, resize, stats, detach', () async {
@@ -282,6 +282,40 @@ void main() {
     expect(controller.state, ViewportState.failed);
     await controller.detach();
     expect(controller.state, ViewportState.detached);
+  });
+
+  test('a panic in the viewport fails it with the message; the app lives on', () async {
+    final controller = FynkelViewportController(bufferCount: 2, placeholders: false);
+    addTearDown(controller.dispose);
+    var notified = 0;
+    controller.addListener(() => notified++);
+    controller.requestSize(16, 16);
+    await settle();
+    expect(controller.state, ViewportState.attached, reason: '${controller.error}');
+    final world = World.create();
+    addTearDown(world.dispose);
+    world.frame(1 / 60);
+    expect(controller.render(world), greaterThanOrEqualTo(0));
+    notified = 0;
+
+    controller.debugPanic();
+    // The next render finds the viewport broken: failed, with why.
+    expect(controller.render(world), renderBroken);
+    expect(controller.state, ViewportState.failed);
+    expect(controller.error, isA<ViewportBrokenError>());
+    expect('${controller.error}', contains('fynkel_apple_viewport_debug_panic'));
+    expect(notified, 1);
+    expect(controller.render(world), isNull, reason: 'not attached any more');
+    // The world is fine, and detach frees the broken viewport.
+    world.frame(1 / 60);
+    await controller.detach();
+    expect(controller.state, ViewportState.detached);
+    expect(calls.map((c) => c.method), ['registerTexture', 'unregisterTexture']);
+    // A new one comes up.
+    controller.requestSize(16, 16);
+    await settle();
+    expect(controller.state, ViewportState.attached);
+    expect(controller.render(world), greaterThanOrEqualTo(0));
   });
 
   test('percentiles', () {

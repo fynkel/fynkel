@@ -12,11 +12,16 @@ import 'package:ffi/ffi.dart';
 
 import 'percentiles.dart';
 
-const viewportAbiVersion = 10;
+const viewportAbiVersion = 11;
 
 /// `fynkel_apple_viewport_render` result when the world pointer is null or
 /// the world is poisoned.
 const renderNoWorld = -2;
+
+/// `fynkel_apple_viewport_render` result when the viewport is broken: a
+/// panic inside one of its calls (viewport ABI 11). Every call fails from
+/// then on; `ViewportNative.error` says why.
+const renderBroken = -3;
 
 final class ViewportStats extends Struct {
   @Uint64()
@@ -286,6 +291,10 @@ external int _extraWorlds(
   assetId: _asset,
 )
 external int _readFrame(Pointer<Void> vp, int slot, Pointer<Uint8> out, int cap);
+@Native<Int32 Function(Pointer<Void>, Pointer<Uint8>, Uint32)>(symbol: 'fynkel_apple_viewport_error', assetId: _asset)
+external int _error(Pointer<Void> vp, Pointer<Uint8> out, int cap);
+@Native<Int32 Function(Pointer<Void>)>(symbol: 'fynkel_apple_viewport_debug_panic', assetId: _asset)
+external int _debugPanic(Pointer<Void> vp);
 
 class ViewportNative {
   ViewportNative() {
@@ -310,6 +319,22 @@ class ViewportNative {
 
   void destroy(Pointer<Void> vp) => _destroy(vp);
 
+  /// Why the viewport is broken (the panic's message), or null while it
+  /// works.
+  String? error(Pointer<Void> vp) {
+    const cap = 4096;
+    final p = calloc<Uint8>(cap);
+    try {
+      final n = _error(vp, p, cap);
+      return n <= 0 ? null : utf8.decode(p.asTypedList(n), allowMalformed: true);
+    } finally {
+      calloc.free(p);
+    }
+  }
+
+  /// Panics inside a viewport call, on purpose (tests of the broken path).
+  void debugPanic(Pointer<Void> vp) => _debugPanic(vp);
+
   /// Rebuilds the IOSurface ring; the host must re-wrap the surfaces afterwards.
   bool resize(Pointer<Void> vp, int width, int height) => _resize(vp, width, height) == 0;
 
@@ -318,7 +343,7 @@ class ViewportNative {
   List<int> iosurfaceAddresses(Pointer<Void> vp) => List.generate(bufferCount(vp), (i) => _iosurface(vp, i).address);
 
   /// Renders the world's current extract. Returns the slot index, -1 if the
-  /// frame was dropped (ring full) or [renderNoWorld].
+  /// frame was dropped (ring full), [renderNoWorld] or [renderBroken].
   int render(Pointer<Void> vp, int worldHandleAddress) => _render(vp, Pointer.fromAddress(worldHandleAddress));
 
   void setCamera(

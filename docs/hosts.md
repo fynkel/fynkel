@@ -265,6 +265,22 @@ the error once (`FlutterError.reportError`), stops its frames for good
 `packages/fynkel/test/sdk_test.dart`,
 `packages/fynkel_flutter/test/game_view_test.dart`.
 
+The viewport catches its own panics too (viewport ABI 11, foundation
+4.3). Without that, a panic in the renderer crossed the C boundary and
+Rust aborted the whole app. Now the call answers its failure value and
+the viewport is broken from then on: `fynkel_apple_viewport_render`
+answers `FYNKEL_APPLE_RENDER_BROKEN` (-3), every other call fails, and
+`fynkel_apple_viewport_error` gives the message. Clearing the frame-ready
+callback and `destroy` still work. The world is not touched.
+`fynkel_apple_viewport_debug_panic` panics on purpose. The ring's locks
+no longer `unwrap`, so one panic cannot make the presenter panic on
+Flutter's raster thread. In Dart, `FynkelViewportController` becomes
+`failed` with a `ViewportBrokenError` (`.panic`) on the first broken
+render and notifies once; `FynkelViewport` shows the message and
+`FynkelGameView` reports it once. `detach()` frees it and the next size
+request makes a new one. Tests: `platform/apple/tests/panic.rs`,
+`packages/fynkel_flutter/test/viewport_controller_test.dart`.
+
 ### Data assets at runtime (ADR-0027)
 
 `fynkel_world_asset_json(world, id, out)` (additive; the ABI stays 1)

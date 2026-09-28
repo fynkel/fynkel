@@ -651,6 +651,15 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     if (slot == renderNoWorld) {
       debugPrint('[fynkel_flutter] render: no world (poisoned?)');
     }
+    if (slot == renderBroken) {
+      // Once: the controller is failed now and renders no more; the
+      // viewport widget shows the message.
+      FlutterError.reportError(FlutterErrorDetails(
+        exception: c.error!,
+        library: 'fynkel_flutter',
+        context: ErrorDescription('while drawing the game; the viewport stopped'),
+      ));
+    }
   }
 
   Future<void> _report() async {
