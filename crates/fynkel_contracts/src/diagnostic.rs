@@ -240,6 +240,9 @@ impl Code {
     /// (ADR-0029 §1), or a namespace the engine or the game owns (`fynkel`,
     /// `game`). The package is then not a Fynkel package.
     pub const PACKAGE_MANIFEST: Code = Code("FYN-P0019");
+    /// A `persistentObjects` entry (ADR-0039) whose name another entry
+    /// already uses, or whose prefab does not resolve to a prefab.
+    pub const PERSISTENT_OBJECT: Code = Code("FYN-P0020");
 
     // Physics (`FYN-H`, blueprint §9, §19.2d item 8): scene rules the
     // component schemas cannot express.
