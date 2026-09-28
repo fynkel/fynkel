@@ -38,6 +38,12 @@ impl StringTable {
     pub fn new() -> Self {
         Self::default()
     }
+    /// An empty table writing into `bytes` (cleared), keeping its
+    /// capacity: a writer reused every frame allocates nothing once warm.
+    pub fn with_buffer(mut bytes: Vec<u8>) -> Self {
+        bytes.clear();
+        Self { bytes }
+    }
     pub fn put(&mut self, s: &str) -> (u32, u32) {
         let off = self.bytes.len() as u32;
         self.bytes.extend_from_slice(s.as_bytes());
