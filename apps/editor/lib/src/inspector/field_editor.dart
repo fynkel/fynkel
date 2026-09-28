@@ -69,6 +69,7 @@ abstract class FieldTarget {
   String describeAsset(Map<String, Object?>? ref);
   AssetPreview Function(AssetEntry entry)? get assetPreview => null;
   void Function(String assetId)? get pingAsset => null;
+  void Function(String entity)? get pingObject => null;
   List<String> layerNames() => const [];
   List<({String id, String name, String path})> objectsFor(FieldSpec spec) => const [];
   Map<String, Object?>? objectRef(FieldSpec spec, String entity) => null;
@@ -334,9 +335,11 @@ class FieldEditor extends StatelessWidget {
                   detail: o.path.isEmpty ? null : o.path,
                   keywords: o.path,
                   facts: [('Name', o.name), if (o.path.isNotEmpty) ('Parent', o.path)],
+                  tab: 'Scene',
                 ),
             ],
             refFor: (entity) => target.objectRef(spec, entity),
+            onPing: target.pingObject,
             mixed: mixed,
             enabled: _enabled,
             onCommit: _commit,

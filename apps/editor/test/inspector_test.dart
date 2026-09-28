@@ -1307,7 +1307,7 @@ void main() {
       await pumpPanel(tester, r.model);
 
       // The Spinner's nullable showcase: None → set through the picker → Clear.
-      expect(inField('game.Spinner#0', 'showcase', find.text('None')), findsOneWidget);
+      expect(inField('game.Spinner#0', 'showcase', find.text('None (Mesh)')), findsOneWidget);
       await tester.tap(inField('game.Spinner#0', 'showcase', find.byKey(const ValueKey('asset.pick'))));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('assetPicker.row.0')));

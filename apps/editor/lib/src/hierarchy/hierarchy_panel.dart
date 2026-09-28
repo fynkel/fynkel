@@ -127,8 +127,15 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
       _lastLead = lead;
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollTo(lead));
     }
+    final pinged = model.pinged;
+    if (pinged != null && model.pingRequests != _seenPings) {
+      _seenPings = model.pingRequests;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollTo(pinged));
+    }
     if (mounted) setState(() {});
   }
+
+  int _seenPings = 0;
 
   void _scrollTo(String id) {
     final t = model.tree;
@@ -777,6 +784,7 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
       model: model,
       row: row,
       selected: selected,
+      pinged: model.pinged == n.id,
       inactive: !tree.activeInHierarchy(n.id),
       renaming: renaming,
       renameController: renaming ? _renameController(n) : null,
@@ -1121,6 +1129,7 @@ class _HierarchyRowWidget extends StatefulWidget {
     required this.row,
     this.scene,
     required this.selected,
+    this.pinged = false,
     this.inactive = false,
     required this.renaming,
     required this.renameController,
@@ -1141,6 +1150,9 @@ class _HierarchyRowWidget extends StatefulWidget {
   /// drop of the active scene's rows (they move there), not a drag.
   final OpenDocument? scene;
   final bool selected;
+
+  /// Outlined by an object field's ping (Unity's), not selected.
+  final bool pinged;
 
   /// Not active in the hierarchy: the row is greyed, as in Unity.
   final bool inactive;
@@ -1244,15 +1256,18 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
     final onRow = t.onSelectedRow(focused: focused);
     final onRowDim = t.onSelectedRowSecondary(focused: focused);
     final content = Container(
+      key: widget.pinged ? Key('hierarchy.pinged.${n.id}') : null,
       height: hierarchyRowHeight(context),
       padding: EdgeInsets.only(left: 4.0 + row.depth * 14),
       decoration: BoxDecoration(
-        color: widget.selected ? t.selectedRow(focused: focused) : null,
+        color: widget.selected
+            ? t.selectedRow(focused: focused)
+            : (widget.pinged ? t.surfaceOf(t.accent, .18) : null),
         border: switch (_zone) {
           _Zone.above => Border(top: BorderSide(color: t.accent, width: 2)),
           _Zone.below => Border(bottom: BorderSide(color: t.accent, width: 2)),
           _Zone.onto => Border.all(color: t.accent, width: 1.5),
-          null => null,
+          null => widget.pinged ? Border.all(color: t.accent, width: 1.5) : null,
         },
       ),
       child: Row(

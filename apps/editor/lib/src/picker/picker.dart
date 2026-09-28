@@ -33,6 +33,7 @@ final class PickerItem<T> {
     this.description,
     this.facts = const [],
     this.preview,
+    this.tab,
   });
 
   final T value;
@@ -71,6 +72,10 @@ final class PickerItem<T> {
   /// icon, large, when null.
   final WidgetBuilder? preview;
 
+  /// The tab the row is listed on, when the picker has [showPicker]'s
+  /// `tabs`.
+  final String? tab;
+
   String get _haystack => '$title ${detail ?? ''} ${group ?? ''} ${groupDetail ?? ''} $keywords'.toLowerCase();
 }
 
@@ -90,7 +95,10 @@ typedef PickerScore<T> = int Function(PickerItem<T> item, String query);
 /// Opens the picker. [anchor] is the asking field's global rectangle; null
 /// puts the picker at the top of the window. [allowNone] adds the **None**
 /// row. With [score], a query ranks the results into one flat list (the
-/// palette); without it, a query filters and the groups stay.
+/// palette); without it, a query filters and the groups stay. With
+/// [tabs] (an object field's Scene and Assets, ADR-0036 §6), each item is
+/// listed on its [PickerItem.tab]; [tab] is the one shown first, and
+/// **None** is on every tab.
 Future<PickerChoice<T>?> showPicker<T>(
   BuildContext context, {
   required String title,
@@ -105,6 +113,8 @@ Future<PickerChoice<T>?> showPicker<T>(
   String? countNoun,
   String empty = 'Nothing matches. Try part of a name or path.',
   PickerScore<T>? score,
+  List<String>? tabs,
+  String? tab,
 }) {
   return showDialog<PickerChoice<T>>(
     context: context,
@@ -124,6 +134,8 @@ Future<PickerChoice<T>?> showPicker<T>(
       countNoun: countNoun,
       empty: empty,
       score: score,
+      tabs: tabs,
+      tab: tab,
     ),
   );
 }
@@ -155,6 +167,8 @@ class _PickerRoute<T> extends StatelessWidget {
     required this.countNoun,
     required this.empty,
     required this.score,
+    required this.tabs,
+    required this.tab,
   });
 
   final String title;
@@ -169,6 +183,8 @@ class _PickerRoute<T> extends StatelessWidget {
   final String? countNoun;
   final String empty;
   final PickerScore<T>? score;
+  final List<String>? tabs;
+  final String? tab;
 
   @override
   Widget build(BuildContext context) {
@@ -205,6 +221,8 @@ class _PickerRoute<T> extends StatelessWidget {
                 countNoun: countNoun,
                 empty: empty,
                 score: score,
+                tabs: tabs,
+                tab: tab,
                 maxListHeight: (c.maxHeight - top - _chromeHeight - 8).clamp(120.0, _listMax).toDouble(),
               ),
             ),
@@ -252,6 +270,8 @@ class _Picker<T> extends StatefulWidget {
     required this.countNoun,
     required this.empty,
     required this.score,
+    required this.tabs,
+    required this.tab,
     required this.maxListHeight,
   });
 
@@ -266,6 +286,8 @@ class _Picker<T> extends StatefulWidget {
   final String? countNoun;
   final String empty;
   final PickerScore<T>? score;
+  final List<String>? tabs;
+  final String? tab;
   final double maxListHeight;
 
   @override
@@ -280,9 +302,13 @@ class _PickerState<T> extends State<_Picker<T>> {
   /// Index into the choosable rows (None and items), not into [_rows].
   int _cursor = 0;
 
+  /// The tab shown, when there are tabs.
+  String? _tab;
+
   @override
   void initState() {
     super.initState();
+    _tab = widget.tabs == null ? null : (widget.tab ?? widget.tabs!.first);
     _rows = _build('');
     // Start on what the field holds now, so ⏎ keeps it and ↑↓ move from it.
     final choosable = _choosable;
@@ -303,6 +329,8 @@ class _PickerState<T> extends State<_Picker<T>> {
       if (r is! _Header<T>) r,
   ];
 
+  bool _onTab(PickerItem<T> it) => _tab == null || it.tab == _tab;
+
   List<_Row<T>> _build(String query) {
     final q = query.trim().toLowerCase();
     final out = <_Row<T>>[];
@@ -310,6 +338,7 @@ class _PickerState<T> extends State<_Picker<T>> {
       if (widget.allowNone) out.add(const _NoneRow());
       String? group;
       for (final (i, it) in widget.items.indexed) {
+        if (!_onTab(it)) continue;
         if (it.group != null && it.group != group) out.add(_Header(it.group!, it.groupDetail));
         group = it.group;
         out.add(_ItemRow(it, i));
@@ -320,7 +349,7 @@ class _PickerState<T> extends State<_Picker<T>> {
     if (score != null) {
       final ranked = [
         for (final (i, it) in widget.items.indexed)
-          if (score(it, q) > 0) (i, it, score(it, q)),
+          if (_onTab(it) && score(it, q) > 0) (i, it, score(it, q)),
       ]..sort((a, b) => b.$3 != a.$3 ? b.$3.compareTo(a.$3) : a.$1.compareTo(b.$1));
       return [for (final r in ranked) _ItemRow(r.$2, r.$1)];
     }
@@ -328,12 +357,22 @@ class _PickerState<T> extends State<_Picker<T>> {
     String? group;
     for (final (i, it) in widget.items.indexed) {
       final hay = it._haystack;
-      if (!words.every(hay.contains)) continue;
+      if (!_onTab(it) || !words.every(hay.contains)) continue;
       if (it.group != null && it.group != group) out.add(_Header(it.group!, it.groupDetail));
       group = it.group;
       out.add(_ItemRow(it, i));
     }
     return out;
+  }
+
+  void _showTab(String tab) {
+    if (tab == _tab) return;
+    setState(() {
+      _tab = tab;
+      _rows = _build(_query.text);
+      _cursor = 0;
+    });
+    _scroll.hasClients ? _scroll.jumpTo(0) : null;
   }
 
   void _onQuery(String q) {
@@ -386,6 +425,36 @@ class _PickerState<T> extends State<_Picker<T>> {
     }
   }
 
+  /// Unity's Scene / Assets tab: a quiet label, filled when shown.
+  Widget _tabButton(BuildContext context, String tab) {
+    final t = context.tokens;
+    final on = tab == _tab;
+    return Semantics(
+      key: Key('${widget.keyPrefix}.tab.$tab'),
+      button: true,
+      selected: on,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _showTab(tab),
+          child: Container(
+            margin: const EdgeInsets.only(left: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(color: on ? t.lineStrong : null, borderRadius: t.cornerControl),
+            child: Text(
+              tab,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: on ? t.text : t.textSecondary,
+                fontWeight: on ? FontWeight.w600 : null,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _chooseCursor() {
     final c = _choosable;
     if (_cursor < c.length) _choose(c[_cursor]);
@@ -398,7 +467,7 @@ class _PickerState<T> extends State<_Picker<T>> {
     final choosable = _choosable;
     if (_cursor >= choosable.length) _cursor = choosable.isEmpty ? 0 : choosable.length - 1;
     final at = choosable.isEmpty ? null : choosable[_cursor];
-    final total = widget.items.length;
+    final total = widget.items.where(_onTab).length;
     final shown = choosable.whereType<_ItemRow<T>>().length;
     final small = theme.textTheme.bodySmall?.copyWith(color: t.textDisabled);
     return Material(
@@ -428,19 +497,27 @@ class _PickerState<T> extends State<_Picker<T>> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
-                child: Text.rich(
-                  TextSpan(
-                    children: [
-                      TextSpan(
-                        text: widget.title,
-                        style: TextStyle(color: t.textSecondary, fontWeight: FontWeight.w600),
+                padding: EdgeInsets.fromLTRB(10, 8, widget.tabs == null ? 10 : 8, 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: widget.title,
+                              style: TextStyle(color: t.textSecondary, fontWeight: FontWeight.w600),
+                            ),
+                            if (widget.subject != null) TextSpan(text: ' for ${widget.subject}'),
+                          ],
+                        ),
+                        key: Key('${widget.keyPrefix}.title'),
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(color: t.textDisabled),
                       ),
-                      if (widget.subject != null) TextSpan(text: ' for ${widget.subject}'),
-                    ],
-                  ),
-                  key: Key('${widget.keyPrefix}.title'),
-                  style: theme.textTheme.labelSmall?.copyWith(color: t.textDisabled),
+                    ),
+                    for (final tab in widget.tabs ?? const <String>[]) _tabButton(context, tab),
+                  ],
                 ),
               ),
               Row(
@@ -477,7 +554,7 @@ class _PickerState<T> extends State<_Picker<T>> {
                                   child: Padding(
                                     padding: const EdgeInsets.all(16),
                                     child: Text(
-                                      widget.items.isEmpty && _query.text.isEmpty
+                                      total == 0 && _query.text.isEmpty
                                           ? 'There is nothing to choose.'
                                           : widget.empty,
                                       key: Key('${widget.keyPrefix}.empty'),

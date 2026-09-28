@@ -85,7 +85,7 @@ void main() {
     }
 
     await reveal(tester, find.byKey(const ValueKey(material)));
-    expect(find.descendant(of: find.byKey(const ValueKey(material)), matching: find.text('None')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const ValueKey(material)), matching: find.text('None (Physics Material)')), findsOneWidget);
     expect(find.byKey(const ValueKey(friction)), findsOneWidget);
     expect(
       find.descendant(of: find.byKey(const ValueKey(restitution)), matching: find.text('Bounciness')),

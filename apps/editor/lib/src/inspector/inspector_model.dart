@@ -275,6 +275,10 @@ final class InspectorModel extends ChangeNotifier {
   /// selected (set by the shell).
   void Function(String assetId)? pingAsset;
 
+  /// The same for an object field: the object's row outlined in a
+  /// Hierarchy showing [tab], the selection left alone (set by the shell).
+  void Function(String entity)? pingObject;
+
   /// An asset's picture for the asset slots and their picker (a texture's
   /// pixels, a material's swatch), from the Project browser (wired by the
   /// shell); null draws the kind's icon.

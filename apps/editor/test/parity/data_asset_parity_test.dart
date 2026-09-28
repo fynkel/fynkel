@@ -163,7 +163,7 @@ void main() {
     await tester.pumpAndSettle();
     final upgrade = find.byKey(const ValueKey('field.data.$sword.upgrade'));
     await reveal(tester, upgrade);
-    expect(find.descendant(of: upgrade, matching: find.text('None')), findsOneWidget);
+    expect(find.descendant(of: upgrade, matching: find.text('None (Weapon)')), findsOneWidget);
     await e.click(find.descendant(of: upgrade, matching: find.byKey(const ValueKey('asset.pick'))));
     // The two weapons (the sword itself too); not the shield, not a material.
     expect(find.byKey(const ValueKey('assetPicker.row.1')), findsOneWidget);

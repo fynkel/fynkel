@@ -108,6 +108,7 @@ final class HierarchyModel extends ChangeNotifier {
       _tab = f;
       _tab?.addListener(_onTab);
       renaming = null;
+      pinged = null;
     }
     // The other scenes' rows are shown too: their changes redraw them.
     final others = {
@@ -223,6 +224,7 @@ final class HierarchyModel extends ChangeNotifier {
 
   void _onTab() {
     if (renaming != null && _tab?.tree[renaming!] == null) renaming = null;
+    if (pinged != null && !listEquals(_tab?.selection.toList(), _pingedSelection)) pinged = null;
     notifyListeners();
   }
 
@@ -335,6 +337,28 @@ final class HierarchyModel extends ChangeNotifier {
     notifyListeners();
     return true;
   }
+
+  /// Unity's ping: [id] revealed and outlined, the selection left alone;
+  /// the next selection change (or another document) clears it. False
+  /// when unknown.
+  bool ping(String id) {
+    final t = _tab;
+    if (t == null || !t.tree.locate(id)) return false;
+    if (!t.tree.filter.isEmpty && !t.tree.matching.contains(id)) t.tree.setFilter(const HierarchyFilter());
+    t.tree.reveal(id);
+    pinged = id;
+    _pingedSelection = t.selection.toList();
+    pingRequests++;
+    notifyListeners();
+    return true;
+  }
+
+  /// The row [ping] outlined.
+  String? pinged;
+  List<String> _pingedSelection = const [];
+
+  /// Bumped by [ping]: the panel scrolls [pinged] into view.
+  int pingRequests = 0;
 
   /// Moves the selection one visible row up or down (⇧ extends).
   void step(int delta, {bool extend = false}) {

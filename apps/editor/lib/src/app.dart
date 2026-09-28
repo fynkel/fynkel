@@ -2715,6 +2715,14 @@ class EditorShellState extends State<EditorShell> {
     return ws.openCopy(base) ?? base;
   }
 
+  /// Unity's ping from an object field: [tab]'s entity [id] outlined in a
+  /// Hierarchy showing [tab] (the one [_revealEntity] would use), nothing
+  /// selected.
+  void pingInHierarchy(OpenDocument tab, String id) {
+    final target = _revealEntity(tab, null);
+    if (target != null) _hierarchies[target]?.ping(id);
+  }
+
   /// [tab]'s entity [id] selected and scrolled to in a Hierarchy showing
   /// [tab]: the copy used last when it does, else another that does (an
   /// unlocked copy follows the focused tab); a new copy opens when every
@@ -2961,6 +2969,10 @@ class EditorShellState extends State<EditorShell> {
         final ins = InspectorModel(tabs: t, project: opened, codegen: codegen!, openInIde: ide.open);
         ins.revealAsset = (asset, sub) => revealInProject(asset);
         ins.pingAsset = pingInProject;
+        ins.pingObject = (entity) {
+          final tab = ins.tab;
+          if (tab != null) pingInHierarchy(tab, entity);
+        };
         // A Transform value dragged in the Inspector moves in every Scene view.
         ins.previewTransforms = (tab, locals, ids) {
           for (final sv in _scenes.values) {

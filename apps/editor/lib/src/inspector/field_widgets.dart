@@ -1329,12 +1329,14 @@ class ColorField extends StatelessWidget {
 // ── Asset reference ────────────────────────────────────────────────────────
 
 /// `{ asset, sub? }` as a slot (item 9b/9d): the asset's picture or icon,
-/// its name with the part dim after it (`robot › mesh/0`), **None** dim when
-/// empty, and inside the box a clear button (a nullable field) and ⊙,
-/// which opens [showPicker] with the assets of the field's kind grouped by
-/// folder and by source file. A drag from the Project browser drops in. An
-/// unknown asset is refused by the model's precheck (`FYN-A0004`) before
-/// any command is sent.
+/// its name with the part dim after it (`robot › mesh/0`), `None (Type)`
+/// dim when empty, `Missing (Type)` when the asset is not in the project,
+/// and inside the box a clear button (a nullable field) and ⊙, which opens
+/// [showPicker] on its Assets tab with the assets of the field's kind
+/// grouped by folder and by source file. A drag from the Project browser
+/// drops in. An unknown asset is refused by the model's precheck
+/// (`FYN-A0004`) before any command is sent. It looks and acts as an
+/// [ObjectField] does: one object field for every type (ADR-0036 §6).
 class AssetField extends StatefulWidget {
   const AssetField({
     super.key,
@@ -1354,6 +1356,9 @@ class AssetField extends StatefulWidget {
   });
 
   final Map<String, Object?>? value;
+
+  /// The asset's name, `robot › mesh/0` for a part; for an asset not in the
+  /// project, its id (`id#sub`), which the field shows as Missing.
   final String Function(Map<String, Object?>? ref) describe;
 
   /// A click on the asset's name: Unity's ping (the asset outlined in the
@@ -1443,6 +1448,7 @@ List<PickerItem<String>> assetPickerItems(
               keywords: '${a.path} ${a.id}',
               facts: facts(a, k),
               preview: picture(a),
+              tab: 'Assets',
             ),
           );
       continue;
@@ -1460,6 +1466,7 @@ List<PickerItem<String>> assetPickerItems(
               keywords: '${a.path} ${a.id}',
               facts: facts(a, whole),
               preview: picture(a),
+              tab: 'Assets',
             ),
           );
     }
@@ -1477,6 +1484,7 @@ List<PickerItem<String>> assetPickerItems(
               groupDetail: a.path,
               keywords: '${a.name} ${a.path} ${a.id}',
               facts: facts(a, k, sub),
+              tab: 'Assets',
             ),
           );
     }
@@ -1487,6 +1495,24 @@ List<PickerItem<String>> assetPickerItems(
     for (final e in bySource.entries) ('${e.key.path}\u0000', e.value),
   ]..sort((a, b) => byName(a.$1, b.$1));
   return [for (final g in groups) ...g.$2];
+}
+
+/// The tabs of an object field's picker (ADR-0036 §6): the scene's
+/// objects, and the project's assets.
+const objectPickerTabs = ['Scene', 'Assets'];
+
+/// What an asset field's face names the type as: `None (Audio Clip)`.
+String assetTypeLabel({String? kind, Set<String>? kinds, String? dataType}) {
+  if (dataType != null) return humanize(dataType.split('.').last);
+  if (kinds != null) return 'Motion';
+  return switch (kind) {
+    'audio' || 'sound' => 'Audio Clip',
+    'clip' => 'Animation Clip',
+    'controller' => 'Animator Controller',
+    'volume' => 'Volume Profile',
+    null => 'Asset',
+    final k => humanize(k),
+  };
 }
 
 /// The asset picker an [AssetField] opens: `null` when dismissed, else the
@@ -1515,6 +1541,8 @@ Future<({Map<String, Object?>? ref})?> pickAssetRef(
     keyPrefix: 'assetPicker',
     countNoun: noun == null ? 'assets' : '${noun}s',
     empty: 'No ${noun ?? 'asset'} matches.',
+    tabs: objectPickerTabs,
+    tab: 'Assets',
   );
   if (choice == null) return null;
   return (ref: choice.isNone ? null : _refOf(choice.value!));
@@ -1551,12 +1579,21 @@ class _AssetFieldState extends State<AssetField> {
     final theme = Theme.of(context);
     final style = theme.textTheme.bodySmall;
     final value = widget.value;
-    final face = widget.mixed ? '—' : widget.describe(value);
-    final split = face.indexOf(' › ');
+    final type = assetTypeLabel(kind: widget.kind, kinds: widget.kinds, dataType: widget.dataType);
+    final described = widget.describe(value);
+    final empty = value == null && !widget.mixed;
+    final missing = !widget.mixed && value != null && described == _refKey(value);
+    final face = widget.mixed
+        ? '—'
+        : missing
+        ? 'Missing ($type)'
+        : empty && described == 'None'
+        ? 'None ($type)'
+        : described;
+    final split = missing ? -1 : face.indexOf(' › ');
     final name = split < 0 ? face : face.substring(0, split);
     final part = split < 0 ? null : face.substring(split);
-    final empty = value == null && !widget.mixed;
-    final entry = _entry();
+    final entry = missing ? null : _entry();
     return DragTarget<AssetDragPayload>(
       onWillAcceptWithDetails: (d) =>
           widget.enabled &&
@@ -1573,14 +1610,18 @@ class _AssetFieldState extends State<AssetField> {
               if (entry != null && !empty)
                 SizedBox.square(dimension: 14, child: widget.thumbnail!(entry, 14))
               else
-                Icon(assetKindIcon(widget.kind), size: 13, color: empty ? t.textDisabled : t.textSecondary),
+                Icon(
+                  assetKindIcon(widget.kind),
+                  size: 13,
+                  color: empty ? t.textDisabled : (missing ? t.error : t.textSecondary),
+                ),
               const SizedBox(width: 5),
               Expanded(
                 child: MouseRegion(
                   cursor: widget.enabled ? SystemMouseCursors.click : MouseCursor.defer,
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onTap: switch ((widget.onPing, value?['asset'], widget.mixed)) {
+                    onTap: switch ((widget.onPing, value?['asset'], widget.mixed || missing)) {
                       (final ping?, final String id, false) => () => ping(id),
                       _ => widget.enabled ? _pick : null,
                     },
@@ -1600,7 +1641,7 @@ class _AssetFieldState extends State<AssetField> {
                         key: const ValueKey('asset.name'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: style?.copyWith(color: empty ? t.textDisabled : t.text),
+                        style: style?.copyWith(color: empty ? t.textDisabled : (missing ? t.error : t.text)),
                       ),
                     ),
                   ),
@@ -1667,11 +1708,14 @@ IconData assetKindIcon(String? kind) => switch (kind) {
 
 // ── Object reference ───────────────────────────────────────────────────────
 
-/// A script's GameObject or script field (Unity's object field): the
-/// object's name — `None (Type)` when empty, `Missing (Type)` when what it
-/// named is gone — with ⊙ for the picker and × to clear; a Hierarchy row
-/// dropped on it assigns that object (for a script field, its script of
-/// the type, refused when it has none).
+/// A script's GameObject, script or built-in component field (Unity's
+/// object field): the object's name — `None (Type)` when empty, `Missing
+/// (Type)` when what it named is gone — with ⊙ for the picker (on its Scene
+/// tab) and × to clear; a click on the name pings the object in the
+/// Hierarchy. A Hierarchy row dropped on it assigns that object (for a
+/// script or component field, its script or component of the type, refused
+/// when it has none). It looks and acts as an [AssetField] does (ADR-0036
+/// §6).
 class ObjectField extends StatelessWidget {
   const ObjectField({
     super.key,
@@ -1684,6 +1728,7 @@ class ObjectField extends StatelessWidget {
     this.subject,
     this.mixed = false,
     this.enabled = true,
+    this.onPing,
   });
 
   /// `{entity}` or `{entity, component}`; null for None.
@@ -1701,6 +1746,11 @@ class ObjectField extends StatelessWidget {
   /// The reference for an entity id (a dropped row, a picked one); null
   /// when the entity does not fit (no script of the type).
   final Map<String, Object?>? Function(String entity) refFor;
+
+  /// A click on the object's name: Unity's ping (its Hierarchy row
+  /// outlined). Without it — or with nothing there — the click opens the
+  /// picker, as ⊙ does.
+  final void Function(String entity)? onPing;
   final String? subject;
   final bool mixed;
   final bool enabled;
@@ -1719,6 +1769,8 @@ class ObjectField extends StatelessWidget {
       keyPrefix: 'objectPicker',
       countNoun: 'objects',
       empty: typeLabel == 'GameObject' ? 'No object has that name.' : 'No object with a $typeLabel has that name.',
+      tabs: objectPickerTabs,
+      tab: 'Scene',
     );
     if (choice == null) return;
     onCommit(choice.isNone ? null : refFor(choice.value!));
@@ -1760,7 +1812,10 @@ class ObjectField extends StatelessWidget {
                   cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onTap: enabled ? () => _pick(context) : null,
+                    onTap: switch ((onPing, v?['entity'], mixed || missing)) {
+                      (final ping?, final String id, false) => () => ping(id),
+                      _ => enabled ? () => _pick(context) : null,
+                    },
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
@@ -1899,16 +1954,27 @@ class FreezeAxesField extends StatelessWidget {
       height: _rowHeight(context),
       child: Row(
         children: [
-          SizedBox(width: 64, child: Text(title, style: theme.textTheme.bodySmall)),
-          for (final (i, axis) in const ['X', 'Y', 'Z'].indexed) ...[
-            Checkbox(
-              key: ValueKey('freeze.$title.$axis'),
-              tristate: mixed,
-              value: mixed ? null : (v & (first << i)) != 0,
-              onChanged: enabled ? (_) => onCommit(v ^ (first << i)) : null,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              visualDensity: VisualDensity.compact,
+          // The label gives way first: the Inspector's value column can be
+          // narrower than the label and three boxes.
+          Flexible(
+            child: SizedBox(
+              width: 64,
+              child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
             ),
+          ),
+          for (final (i, axis) in const ['X', 'Y', 'Z'].indexed) ...[
+            SizedBox.square(
+              dimension: 22,
+              child: Checkbox(
+                key: ValueKey('freeze.$title.$axis'),
+                tristate: mixed,
+                value: mixed ? null : (v & (first << i)) != 0,
+                onChanged: enabled ? (_) => onCommit(v ^ (first << i)) : null,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+            const SizedBox(width: 2),
             Text(axis, style: theme.textTheme.bodySmall),
             const SizedBox(width: 6),
           ],
