@@ -1,6 +1,8 @@
 // Pooling (docs/foundation.md 3.2): Unity's `UnityEngine.Pool.ObjectPool<T>`
 // and the usual setup of it for GameObjects.
 
+import 'dart:collection' show HashSet;
+
 import 'world.dart' show FynkelObject, GameObject;
 
 /// A stack of reusable objects (Unity's `ObjectPool<T>`): [get] hands out
@@ -70,6 +72,7 @@ class ObjectPool<T extends Object> {
   final int maxSize;
 
   final List<T> _stack = [];
+  final Set<T> _waiting = HashSet.identity();
 
   /// Every object the pool made and has not let go, in use or not.
   int get countAll => _countAll;
@@ -85,6 +88,7 @@ class ObjectPool<T extends Object> {
   T get() {
     while (_stack.isNotEmpty) {
       final element = _stack.removeLast();
+      _waiting.remove(element);
       if (element is FynkelObject && !element.isAlive) {
         _countAll--;
         continue;
@@ -98,14 +102,30 @@ class ObjectPool<T extends Object> {
     return element;
   }
 
+  /// Makes objects ahead of need — before a level starts, so the first
+  /// shots cost nothing — until [count] wait in the pool (no more than
+  /// [maxSize]). Each is made by `create` and put away as [release] does
+  /// (`onRelease` runs; a GameObject is switched off); `onGet` does not
+  /// run. Unity's `defaultCapacity` only reserves room; this makes them.
+  void prewarm(int count) {
+    while (_stack.length < count && _stack.length < maxSize) {
+      final element = _create();
+      _countAll++;
+      _onRelease?.call(element);
+      _stack.add(element);
+      _waiting.add(element);
+    }
+  }
+
   /// Gives [element] back: the next [get] may hand it out again.
   void release(T element) {
-    if (collectionCheck && _stack.any((e) => identical(e, element))) {
+    if (collectionCheck && _waiting.contains(element)) {
       throw StateError('release: this object is already in the pool');
     }
     _onRelease?.call(element);
     if (_stack.length < maxSize) {
       _stack.add(element);
+      _waiting.add(element);
     } else {
       _countAll--;
       _onDestroy?.call(element);
@@ -117,6 +137,7 @@ class ObjectPool<T extends Object> {
   void clear() {
     final waiting = _stack.toList(growable: false);
     _stack.clear();
+    _waiting.clear();
     _countAll = 0;
     for (final e in waiting) {
       _onDestroy?.call(e);

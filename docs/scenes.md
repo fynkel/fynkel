@@ -111,6 +111,9 @@ bullets.release(b);               // switched off, kept for the next get()
   and one the pool lets go is destroyed. A pooled script resets itself in
   `onEnable` (it gets `onDisable`/`onEnable` at the next tick, as with any
   `setActive`).
+- `prewarm(count)` makes objects ahead of need — before a level starts,
+  so the first shots cost nothing — and puts them away switched off.
+  Unity's `defaultCapacity` only reserves room.
 - Releasing an object the pool already holds throws (`collectionCheck`,
   on by default). Past `maxSize` (10 000) a released object is destroyed.
 - An object destroyed while it waits in the pool — a replace load took

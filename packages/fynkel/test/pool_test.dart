@@ -62,6 +62,24 @@ void main() {
       expect((pool.countAll, pool.countInactive), (0, 0));
     });
 
+    test('prewarm makes objects ahead, released and waiting, up to maxSize', () {
+      final log = <String>[];
+      var made = 0;
+      final pool = ObjectPool<Thing>(
+        create: () => Thing(made++),
+        onGet: (t) => log.add('get ${t.n}'),
+        onRelease: (t) => log.add('release ${t.n}'),
+        maxSize: 3,
+      );
+      pool.prewarm(2);
+      expect((made, pool.countAll, pool.countInactive), (2, 2, 2));
+      expect(log, ['release 0', 'release 1'], reason: 'made and put away; never handed out');
+      pool.prewarm(5);
+      expect((made, pool.countInactive), (3, 3), reason: 'no more than maxSize waiting');
+      pool.get();
+      expect(made, 3);
+    });
+
     test('releasing twice throws (collectionCheck), unless turned off', () {
       final pool = ObjectPool<Thing>(create: () => Thing(0));
       final a = pool.get();
@@ -127,6 +145,17 @@ void main() {
       expect(b, isNot(same(a)));
       expect(b.isAlive, isTrue);
       expect((pool.countAll, pool.countInactive), (1, 0));
+    });
+
+    test('prewarmed objects wait switched off', () {
+      final w = fresh();
+      final pool = ObjectPool.gameObjects(() => w.spawn(name: 'Bullet'))..prewarm(3);
+      w.frame(1 / 60);
+      final a = pool.get();
+      expect(pool.countInactive, 2);
+      w.frame(1 / 60);
+      expect(a.activeInHierarchy, isTrue);
+      expect(w.findAll('Bullet').where((o) => !o.activeInHierarchy), hasLength(2));
     });
 
     test('past maxSize, and on clear, the objects are destroyed', () {
