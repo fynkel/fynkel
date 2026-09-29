@@ -1092,3 +1092,119 @@ fn every_change_of_a_session_is_in_the_authoring_log_and_replays() {
     assert_eq!(other.read(RIG_SCENE), copy.read(RIG_SCENE));
     assert!(copy.read(RIG_SCENE).contains("\"Eye\""));
 }
+
+/// Foundation 5.2: a copy made in Finder keeps its original's id. The
+/// original keeps it — the path the project knew, whichever sorts or
+/// arrives first — and the editor gives the copy a fresh one, as Unity
+/// gives a copied asset a new GUID. `aaa/` sorts before `prefabs/`, so a
+/// plain sorted scan would hand the id to the copy.
+#[test]
+fn a_finder_copy_gets_a_fresh_id_and_the_original_keeps_its_own() {
+    const CRATE: &str = "c0000000-0000-4000-8000-000000000040";
+    const SWATCH: &str = "c0000000-0000-4000-8000-000000000002";
+    let crate_id = uuid::Uuid::parse_str(CRATE).unwrap();
+    let copy = Copy::new("finder-copy");
+    let id_in = |rel: &str| -> String {
+        let v: Value = serde_json::from_str(&copy.read(rel)).unwrap();
+        v["id"].as_str().unwrap().to_string()
+    };
+    let owner = |s: &AuthoringSession, id: &str| -> Option<String> {
+        s.project()
+            .unwrap()
+            .assets
+            .get(uuid::Uuid::parse_str(id).unwrap())
+            .map(|e| e.path.clone())
+    };
+    let duplicate_free = |s: &AuthoringSession| {
+        let p = s.project().unwrap();
+        assert!(
+            !code_of(&p.diagnostics).contains(&"FYN-A0003"),
+            "{:?}",
+            p.diagnostics
+        );
+    };
+    // The project has been cooked once: the cache index records its paths.
+    let report = fynkel_import::cook_project(&copy.dir, None, &Default::default())
+        .unwrap_or_else(|d| panic!("{d:?}"));
+    assert!(!report.has_errors(), "{}", report.text());
+
+    // Copied while the editor was closed, then the project opens.
+    std::fs::create_dir_all(copy.path("assets/aaa")).unwrap();
+    std::fs::copy(
+        copy.path("assets/prefabs/crate.prefab.json"),
+        copy.path("assets/aaa/crate.prefab.json"),
+    )
+    .unwrap();
+    // The headless cook never writes a document: the original keeps the
+    // id and the copy fails alone.
+    let report = fynkel_import::cook_project(&copy.dir, None, &Default::default())
+        .unwrap_or_else(|d| panic!("{d:?}"));
+    assert_eq!(
+        report.get(crate_id).map(|a| a.path.as_str()),
+        Some("prefabs/crate.prefab.json")
+    );
+    let mut s = open(&copy);
+    assert_eq!(
+        owner(&s, CRATE).as_deref(),
+        Some("prefabs/crate.prefab.json")
+    );
+    let fresh = id_in("assets/aaa/crate.prefab.json");
+    assert_ne!(fresh, CRATE);
+    assert_eq!(owner(&s, &fresh).as_deref(), Some("aaa/crate.prefab.json"));
+    assert_eq!(id_in("assets/prefabs/crate.prefab.json"), CRATE);
+    duplicate_free(&s);
+
+    // Copied while it is open: the watcher names the copy.
+    let second = copy.path("assets/aab/crate.prefab.json");
+    std::fs::create_dir_all(second.parent().unwrap()).unwrap();
+    std::fs::copy(copy.path("assets/prefabs/crate.prefab.json"), &second).unwrap();
+    s.rescan(std::slice::from_ref(&second)).unwrap();
+    assert_ne!(id_in("assets/aab/crate.prefab.json"), CRATE);
+    assert_eq!(
+        owner(&s, CRATE).as_deref(),
+        Some("prefabs/crate.prefab.json")
+    );
+    duplicate_free(&s);
+
+    // A source and its sidecar copied together: a fresh id and fresh
+    // sub-asset ids, on a full rescan.
+    std::fs::copy(
+        copy.path("assets/textures/swatch.png"),
+        copy.path("assets/aaa/swatch.png"),
+    )
+    .unwrap();
+    std::fs::copy(
+        copy.path("assets/textures/swatch.png.meta.json"),
+        copy.path("assets/aaa/swatch.png.meta.json"),
+    )
+    .unwrap();
+    s.rescan(&[]).unwrap();
+    assert_eq!(owner(&s, SWATCH).as_deref(), Some("textures/swatch.png"));
+    let meta: Value = serde_json::from_str(&copy.read("assets/aaa/swatch.png.meta.json")).unwrap();
+    let original: Value =
+        serde_json::from_str(&copy.read("assets/textures/swatch.png.meta.json")).unwrap();
+    assert_ne!(meta["id"], original["id"]);
+    for (key, id) in original["subAssets"].as_object().unwrap() {
+        assert_ne!(&meta["subAssets"][key], id, "{key}");
+    }
+    duplicate_free(&s);
+
+    // A move whose new path is seen before the old one is gone from the
+    // database is not a copy: the file keeps its id.
+    std::fs::rename(
+        copy.path("assets/prefabs/coin.prefab.json"),
+        copy.path("assets/prefabs/coin2.prefab.json"),
+    )
+    .unwrap();
+    let coin = id_in("assets/prefabs/coin2.prefab.json");
+    s.rescan(&[copy.path("assets/prefabs/coin2.prefab.json")])
+        .unwrap();
+    s.rescan(&[copy.path("assets/prefabs/coin.prefab.json")])
+        .unwrap();
+    assert_eq!(id_in("assets/prefabs/coin2.prefab.json"), coin);
+    assert_eq!(
+        owner(&s, &coin).as_deref(),
+        Some("prefabs/coin2.prefab.json")
+    );
+    duplicate_free(&s);
+}

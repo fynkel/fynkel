@@ -213,7 +213,14 @@ impl AuthoringSession {
     /// Rescans the asset root; see [`OpenProject::rescan`].
     pub fn rescan(&mut self, paths: &[PathBuf]) -> Result<Vec<Diagnostic>, Diagnostic> {
         self.require_project()?;
-        Ok(self.project.as_mut().unwrap().rescan(paths))
+        let open = self.open_paths();
+        Ok(self.project.as_mut().unwrap().rescan_keeping(paths, &open))
+    }
+
+    /// The files of the open documents: a rescan never gives them a
+    /// fresh id (foundation 5.2).
+    fn open_paths(&self) -> Vec<PathBuf> {
+        self.documents.values().map(|d| d.path.clone()).collect()
     }
 
     // ---------------------------------------------------------- documents
@@ -601,7 +608,11 @@ impl AuthoringSession {
                 .into_iter()
                 .map(|p| p.canonicalize().unwrap_or(p))
                 .collect();
-            self.project.as_mut().unwrap().rescan(&written);
+            let open = self.open_paths();
+            self.project
+                .as_mut()
+                .unwrap()
+                .rescan_keeping(&written, &open);
         }
         Ok(applied)
     }
@@ -679,10 +690,11 @@ impl AuthoringSession {
             doc.editor.relocate(&written);
         }
         doc.path = written.clone();
+        let open = self.open_paths();
         self.project
             .as_mut()
             .unwrap()
-            .rescan(std::slice::from_ref(&written));
+            .rescan_keeping(std::slice::from_ref(&written), &open);
         self.log(json!({ "op": "save", "document": self.logged_path(&written) }));
         Ok(written)
     }

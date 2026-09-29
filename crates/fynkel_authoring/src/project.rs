@@ -13,8 +13,8 @@ use fynkel_contracts::{AssetRef, Code, Diagnostic};
 use fynkel_document::asset::{asset_refs, entry_json, sidecar_path, source_path};
 use fynkel_document::migrate::migrated_json;
 use fynkel_document::{
-    diagnostics_json, AssetDatabase, AssetKind, Document, DocumentKind, Lock, Migrations, Project,
-    SchemaSet, ShaderLibrary,
+    diagnostics_json, AssetDatabase, AssetKind, Document, DocumentKind, Lock, Migrations, Node,
+    Project, SchemaSet, ShaderLibrary,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -87,6 +87,10 @@ pub struct OpenProject {
     /// The sidecars the last [`OpenProject::rescan`] wrote for source
     /// files that had none (absolute paths).
     pub sidecars_written: Vec<PathBuf>,
+    /// The files the last [`OpenProject::rescan`] gave a fresh id because
+    /// they were copies of another asset (absolute paths; a source's
+    /// sidecar).
+    pub ids_renewed: Vec<PathBuf>,
     /// The part of `diagnostics` a rescan keeps.
     base_diagnostics: Vec<Diagnostic>,
     /// The asset scan's diagnostics, one set per file: an incremental
@@ -149,6 +153,7 @@ impl OpenProject {
             schema_sources: HashMap::new(),
             diagnostics: Vec::new(),
             sidecars_written: Vec::new(),
+            ids_renewed: Vec::new(),
             base_diagnostics: diagnostics,
             scan_diagnostics: Vec::new(),
         };
@@ -380,11 +385,20 @@ impl OpenProject {
     /// project. The sidecars written are in
     /// [`OpenProject::sidecars_written`].
     pub fn rescan(&mut self, paths: &[PathBuf]) -> Vec<Diagnostic> {
+        self.rescan_keeping(paths, &[])
+    }
+
+    /// [`OpenProject::rescan`] that never gives the files at `open` a
+    /// fresh id: documents the session has open own their bytes (a Save
+    /// As keeps the document's id in memory).
+    pub fn rescan_keeping(&mut self, paths: &[PathBuf], open: &[PathBuf]) -> Vec<Diagnostic> {
         let mut scan = self.rescan_files(paths);
         self.sidecars_written.clear();
+        self.ids_renewed.clear();
         if self.read_only.is_some() {
             return scan;
         }
+        self.renew_copied_ids(&mut scan, open);
         let mut written = Vec::new();
         for d in &scan {
             if d.code != Code::ASSET_MISSING_SIDECAR {
@@ -419,10 +433,63 @@ impl OpenProject {
         scan
     }
 
+    /// Foundation 5.2: a file whose id is already another file's
+    /// (`FYN-A0003`) while that file is still there is a copy — made in
+    /// Finder, say — and gets a fresh id, as Unity gives a copied asset a
+    /// new GUID: a document its `id`, a sidecar its `id` and fresh
+    /// sub-asset ids under the same keys. Nothing refers to the copy yet;
+    /// the original keeps every reference. A file whose id's owner is
+    /// gone from disk was moved, not copied, and keeps it (the old path's
+    /// rescan admits it). The files renewed are in
+    /// [`OpenProject::ids_renewed`].
+    fn renew_copied_ids(&mut self, scan: &mut Vec<Diagnostic>, open: &[PathBuf]) {
+        let root = self.assets.root().to_path_buf();
+        let mut renewed: Vec<PathBuf> = Vec::new();
+        for d in scan.iter() {
+            if d.code != Code::ASSET_DUPLICATE_ID {
+                continue;
+            }
+            let (Some(file), Some(id)) = (
+                d.document.as_deref().map(PathBuf::from),
+                d.id.as_deref().and_then(|i| Uuid::parse_str(i).ok()),
+            ) else {
+                continue;
+            };
+            let owner_there = self
+                .assets
+                .owner(id)
+                .is_some_and(|e| e.file(&root).is_file());
+            if !owner_there || !file.is_file() || renewed.contains(&file) || open.contains(&file) {
+                continue;
+            }
+            if renew_id(&file).is_ok() {
+                renewed.push(file);
+            }
+        }
+        if renewed.is_empty() {
+            return;
+        }
+        scan.retain(|d| {
+            !d.document
+                .as_deref()
+                .is_some_and(|doc| renewed.iter().any(|r| r == Path::new(doc)))
+        });
+        scan.extend(self.rescan_files(&renewed));
+        self.ids_renewed = renewed;
+    }
+
     fn rescan_files(&mut self, paths: &[PathBuf]) -> Vec<Diagnostic> {
         let assets_dir = self.assets_dir();
         let scan = if paths.is_empty() {
-            let (assets, scan) = AssetDatabase::scan(&assets_dir, &self.schemas);
+            // The paths known before keep their ids when a copy claims
+            // one too (foundation 5.2): this session's, or at open the
+            // last cook's.
+            let known = if self.assets.is_empty() {
+                fynkel_import::indexed_paths(&self.cache_dir())
+            } else {
+                self.assets.paths()
+            };
+            let (assets, scan) = AssetDatabase::scan_preferring(&assets_dir, &self.schemas, &known);
             self.assets = assets;
             self.scan_diagnostics = scan.clone();
             scan
@@ -438,13 +505,16 @@ impl OpenProject {
                 })
                 .collect();
             // The files whose earlier diagnostics no longer stand: each
-            // path, its sidecar or its source, and everything under a folder.
+            // path, its sidecar or its source, and everything under a
+            // folder — and the files a duplicate id kept out, which the
+            // update reads again.
             let touched: Vec<PathBuf> = abs
                 .iter()
                 .flat_map(|p| match source_path(p) {
                     Some(source) => vec![p.clone(), source],
                     None => vec![p.clone(), sidecar_path(p)],
                 })
+                .chain(self.assets.rejected().iter().cloned())
                 .collect();
             self.scan_diagnostics.retain(|d| {
                 let Some(doc) = &d.document else { return true };
@@ -1084,4 +1154,29 @@ fn builtin_shader_json() -> Value {
         "properties": properties,
         "diagnostics": [],
     })
+}
+
+/// Gives the asset file at `file` — a document, or a source's sidecar — a
+/// fresh id in place (foundation 5.2): a document its `id` (a rig's
+/// derived sub-assets follow it), a sidecar its `id` and a fresh id for
+/// every sub-asset key. The rest of the file is written back as it was.
+fn renew_id(file: &Path) -> Result<(), Diagnostic> {
+    let text = if source_path(file).is_some() {
+        let doc = Document::read(file, Some(DocumentKind::Meta)).map_err(|mut v| v.remove(0))?;
+        let mut meta = fynkel_document::asset::Meta::from_document(doc);
+        meta.document
+            .root
+            .set("id", Node::string(Uuid::new_v4().to_string()));
+        for (_, sub) in &mut meta.sub_assets {
+            *sub = Uuid::new_v4();
+        }
+        meta.to_document().write()?
+    } else {
+        let kind = DocumentKind::from_path(file)
+            .ok_or_else(|| io_error(file, "not an asset document".to_string()))?;
+        let mut doc = Document::read(file, Some(kind)).map_err(|mut v| v.remove(0))?;
+        doc.root.set("id", Node::string(Uuid::new_v4().to_string()));
+        doc.write()?
+    };
+    std::fs::write(file, text).map_err(|e| io_error(file, format!("cannot write: {e}")))
 }
