@@ -11,6 +11,18 @@ it each frame, and every host draws through the same `ExtractRenderer`
 construction and `fynkel render` / the pixel tests are the same path as
 the Flutter viewport.
 
+**Where things are** (split from one `lib.rs` in foundation 6.3):
+`lib.rs` holds the formats and limits, the `ExtractRenderer` struct, its
+`new`, the accessors and quality switching. `prepare.rs` is `prepare`,
+`passes.rs` is `draw` and every pass, and `residency.rs` holds the
+meshes, textures, materials, surfaces and volumes loaded from the asset
+store. The GPU resources are in `pipelines.rs`, `targets.rs` (render
+targets, samplers, buffers, bind groups), `ibl.rs`, `upload.rs` and
+`gpu_types.rs`. `lights.rs` assigns lights to objects, `gpu_timer.rs`
+reads the timestamps, `stats.rs` is `FrameStats`, `camera.rs` the host's
+`Camera`, and `headless.rs` has `headless_device` and
+`render_offscreen`. The public API did not change.
+
 ## Units
 
 Everything is physical; nothing is "0 to 1" until the post pass.
