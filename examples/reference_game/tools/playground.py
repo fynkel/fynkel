@@ -196,6 +196,7 @@ def rigid_body(mass, body_type="dynamic", angular_damping=0.05, linear_damping=0
             "angular_damping": angular_damping,
             "gravity_scale": 1.0,
             "ccd": ccd,
+            "constraints": 0,
         },
     )
 
@@ -429,12 +430,22 @@ def player_controller():
         "editor": {"Base Layer": {"Locomotion": [0, 0], "Jump": [260, 0], "Aim": [130, 160], "#entry": [-220, 0], "#any": [-220, 120]}},
     }
 
+CRATE_TEXTURE = json.loads(
+    (ASSETS / "materials" / "ChatGPT Image 24. Sept. 2026, 16_33_05.png.meta.json").read_text()
+)["id"]
+
 MATERIAL_DOCS = {
     "floor": dict(base_color=[0.55, 0.56, 0.52, 1.0], metallic=0.0, roughness=0.9),
     "wall": dict(base_color=[0.78, 0.74, 0.66, 1.0], metallic=0.0, roughness=0.8),
     "pillar": dict(base_color=[0.35, 0.36, 0.4, 1.0], metallic=0.1, roughness=0.6),
     "platform": dict(base_color=[0.3, 0.6, 0.35, 1.0], metallic=0.0, roughness=0.7),
-    "crate": dict(base_color=[0.72, 0.45, 0.2, 1.0], metallic=0.0, roughness=0.75),
+    # The user's textured crate (daba087): the image and its sidecar are
+    # theirs, in assets/materials.
+    "crate": dict(
+        base_color=[1.0, 1.0, 1.0, 1.0], metallic=0.0, roughness=0.0,
+        base_color_texture={"asset": CRATE_TEXTURE}, alpha_mode="opaque",
+        occlusion_strength=1, double_sided=False, alpha_cutoff=0.537833567,
+    ),
     "barrel": dict(base_color=[0.35, 0.22, 0.12, 1.0], metallic=0.2, roughness=0.55),
     "ball": dict(base_color=[0.5, 0.08, 0.06, 1.0], metallic=0.6, roughness=0.35),
     "gold": dict(base_color=[1.0, 0.78, 0.3, 1.0], metallic=0.4, roughness=0.35, emissive=[1.0, 0.75, 0.25], emissive_strength=2.5),
