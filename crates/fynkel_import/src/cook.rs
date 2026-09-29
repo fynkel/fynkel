@@ -521,8 +521,12 @@ fn cook_index(
             results[i] = Some(base);
             break 'cook;
         }
+        // A dependency that failed (or is in a cycle) does not stop this
+        // asset (foundation 5.1): it cooks with its references to it
+        // cleared, as a reference to a broken asset is empty in Unity. It
+        // leaves the key, so the dependency's first good cook recooks this.
         let mut dep_keys = Vec::with_capacity(p.dependencies.len());
-        let mut blocked = false;
+        let mut failed_deps = Vec::new();
         for d in &p.dependencies {
             match keys.get(d) {
                 Some(k) => dep_keys.push((*d, *k)),
@@ -532,22 +536,52 @@ fn cook_index(
                         .map(|j| entries[*j].path.clone())
                         .unwrap_or_else(|| d.to_string());
                     diagnostics.push(
-                        Diagnostic::error(
+                        Diagnostic::warning(
                             Code::IMPORT_SKIPPED,
-                            format!("{}: not cooked because {dep_path} failed", entry.path),
+                            format!(
+                                "{}: {dep_path} failed, so its references to it load as none",
+                                entry.path
+                            ),
                         )
                         .with_document(entry.file(db.root()).display().to_string())
                         .with_id(entry.id.to_string()),
                     );
-                    blocked = true;
-                    break;
+                    failed_deps.push(*d);
                 }
             }
         }
-        if blocked {
-            results[i] = Some(base);
-            break 'cook;
-        }
+        let cleared;
+        let p = match &p.input {
+            Input::Document(doc) if !failed_deps.is_empty() => {
+                let mut doc = doc.clone();
+                clear_refs(&mut doc, |r| {
+                    db.resolve(r)
+                        .is_ok_and(|r| failed_deps.contains(&r.entry.id))
+                });
+                cleared = Prepared {
+                    kind: p.kind.clone(),
+                    version: p.version,
+                    source: p.source,
+                    extra_inputs: p.extra_inputs.clone(),
+                    settings: p.settings.clone(),
+                    dependencies: p.dependencies.clone(),
+                    runtime_dependencies: p
+                        .runtime_dependencies
+                        .iter()
+                        .filter(|d| !failed_deps.contains(d))
+                        .copied()
+                        .collect(),
+                    input: Input::Document(doc),
+                    failed: false,
+                };
+                &cleared
+            }
+            _ => p,
+        };
+        let base = CookedAsset {
+            dependencies: p.runtime_dependencies.clone(),
+            ..base
+        };
         let inputs = KeyInputs {
             asset: entry.id,
             kind: p.kind.clone(),
@@ -583,18 +617,29 @@ fn cook_index(
                 ),
             }
         }
-        match cook_one(
-            db,
-            schemas,
-            library,
-            entry,
-            p,
-            &inputs,
-            &key,
-            cache,
-            opts,
-            diagnostics,
-        ) {
+        // A panic in one asset's cook fails that asset (foundation 5.7).
+        let cooked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut own = Vec::new();
+            let out = cook_one(
+                db, schemas, library, entry, p, &inputs, &key, cache, opts, &mut own,
+            );
+            (out, own)
+        }));
+        let cooked = match cooked {
+            Ok((out, own)) => {
+                diagnostics.extend(own);
+                out
+            }
+            Err(payload) => {
+                diagnostics.push(
+                    crate::panic_diagnostic("the cook", payload.as_ref())
+                        .with_document(entry.file(db.root()).display().to_string())
+                        .with_id(entry.id.to_string()),
+                );
+                None
+            }
+        };
+        match cooked {
             Some((bytes, manifest)) => match cache.write(&key, &bytes, &manifest) {
                 Ok(()) => {
                     result.status = Status::Cooked;
@@ -613,6 +658,24 @@ fn cook_index(
     }
 }
 
+/// The asset paths the cache's `index.json` records (empty without one):
+/// the paths the project had at its last cook, which keep their ids when
+/// a copy claims one too (foundation 5.2).
+pub fn indexed_paths(cache_dir: &Path) -> std::collections::HashSet<String> {
+    let Ok(text) = std::fs::read_to_string(Cache::at(cache_dir).index_path()) else {
+        return Default::default();
+    };
+    let Ok(index) = serde_json::from_str::<Value>(&text) else {
+        return Default::default();
+    };
+    index["assets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|a| a["path"].as_str().map(str::to_string))
+        .collect()
+}
+
 /// Where a project's cache lives: `<dir>/.fynkel/cache`.
 pub fn project_cache_dir(project_dir: &Path) -> PathBuf {
     project_dir.join(".fynkel").join("cache")
@@ -622,9 +685,11 @@ pub fn project_cache_dir(project_dir: &Path) -> PathBuf {
 /// validates it, scans its asset root with the project's behaviour
 /// schemas, records the project (name, startup scene) in the index and
 /// cooks into `cache` (default [`project_cache_dir`]). `Err` when the
-/// project file, the database or the project's references have errors
-/// (nothing is cooked then); a cook with failed assets is an `Ok` report
-/// whose `has_errors()` says so.
+/// project file or the project's own references have errors (nothing is
+/// cooked then). A file the scan cannot read fails only itself, as a
+/// broken asset does in Unity (foundation 5.1): its errors join the
+/// report, whose `has_errors()` says so, and references to it load as
+/// none.
 pub fn cook_project(
     project_dir: &Path,
     cache: Option<&Path>,
@@ -641,26 +706,30 @@ pub fn cook_project(
         return Err(diagnostics);
     }
     let assets = project.assets_dir(project_dir);
-    let (db, scan) = AssetDatabase::scan(&assets, &schemas);
-    diagnostics.extend(scan);
+    let cache_dir = cache
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| project_cache_dir(project_dir));
+    // A copy that kept its original's id loses it to the path the last
+    // cook recorded (foundation 5.2).
+    let (db, mut scanned) =
+        AssetDatabase::scan_preferring(&assets, &schemas, &indexed_paths(&cache_dir));
     // The packages' assets are cooked with the project's (ADR-0029 §2).
     let (packaged, scan) = fynkel_document::packages::package_assets(&project.packages, &schemas);
-    diagnostics.extend(scan);
+    scanned.extend(scan);
     let db = if packaged.is_empty() {
         db
     } else {
         db.merged_with(&packaged)
     };
-    let cache_dir = cache
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| project_cache_dir(project_dir));
     // References to the built-in shapes resolve without an installed copy.
     let db =
         crate::builtin::with_builtins(&db, &cache_dir, &schemas, &mut diagnostics).unwrap_or(db);
     diagnostics.extend(project.validate_against(&db, &schemas));
     if has_errors(&diagnostics) {
+        diagnostics.extend(scanned);
         return Err(diagnostics);
     }
+    diagnostics.extend(scanned);
     let startup_scene = project
         .startup_scene
         .as_ref()
@@ -780,13 +849,27 @@ fn prepare(
                 Ok(text) => {
                     source = hash_bytes(text.as_bytes());
                     match Document::parse(*kind, Some(&shown), &text) {
-                        Ok(doc) => {
+                        Ok(mut doc) => {
                             let diags = doc.validate(schemas);
                             if has_errors(&diags) {
                                 failed = true;
                             }
                             diagnostics.extend(diags);
-                            let mut unresolved = db.check_references(&doc);
+                            // A reference to an asset that is gone warns and
+                            // loads as none (foundation 5.1); a reference of
+                            // the wrong kind is still an error.
+                            let mut unresolved: Vec<Diagnostic> = db
+                                .check_references(&doc)
+                                .into_iter()
+                                .map(|d| {
+                                    if is_missing(&d) {
+                                        missing_reference(d)
+                                    } else {
+                                        d
+                                    }
+                                })
+                                .collect();
+                            clear_refs(&mut doc, |r| db.resolve(r).is_err());
                             unresolved.extend(
                                 fynkel_document::reference_kinds::check_reference_kinds(
                                     &doc, schemas, db,
@@ -949,6 +1032,33 @@ fn prepare(
             }
         }
     }
+}
+
+/// A reference the database cannot resolve: no asset with the id, or no
+/// such sub-asset.
+fn is_missing(d: &Diagnostic) -> bool {
+    d.code == Code::ASSET_UNRESOLVED || d.code == Code::ASSET_UNKNOWN_SUB
+}
+
+/// A missing reference as the cook reports it: a warning, since the
+/// document still cooks with the reference cleared (foundation 5.1).
+fn missing_reference(mut d: Diagnostic) -> Diagnostic {
+    d.severity = fynkel_contracts::Severity::Warning;
+    d.suggestion = Some(match d.suggestion.take() {
+        Some(s) => format!("{s}; until then the reference loads as none"),
+        None => "the reference loads as none".to_string(),
+    });
+    d
+}
+
+/// Clears the references `missing` picks (see
+/// [`fynkel_document::asset::clear_asset_refs`]). A prefab instance's
+/// asset is left alone: the expansion reports an unknown prefab and keeps
+/// the entity as an empty placeholder, as Unity's Missing Prefab does.
+fn clear_refs(doc: &mut Document, missing: impl Fn(&fynkel_contracts::AssetRef) -> bool) -> usize {
+    fynkel_document::asset::clear_asset_refs(&mut doc.root, &mut |pointer, r| {
+        !pointer.ends_with("/prefab/asset") && missing(r)
+    })
 }
 
 /// The `settings` key input of every document: the schema fingerprint.

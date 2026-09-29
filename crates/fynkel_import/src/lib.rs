@@ -40,8 +40,8 @@ pub mod tangents;
 
 pub use cache::{Cache, CacheKey, KeyInputs, Manifest, CACHE_VERSION};
 pub use cook::{
-    cook, cook_project, project_cache_dir, CookOptions, CookProject, CookReport, CookedAsset,
-    Status,
+    cook, cook_project, indexed_paths, project_cache_dir, CookOptions, CookProject, CookReport,
+    CookedAsset, Status,
 };
 pub use intermediate::{
     AnimationData, AnimationPayload, AudioData, ColorSpace, ImageData, Intermediate, MaterialData,
@@ -149,8 +149,45 @@ impl Imported {
 
 /// Imports `path` with its sidecar's importer. The sidecar supplies the
 /// asset id (the namespace for every derived id), the settings and the
-/// sub-asset ids already assigned.
+/// sub-asset ids already assigned. An importer that panics on a file
+/// (a bug the file found) fails that file with an error, never its
+/// caller: the editor's session and the cook go on (foundation 5.7).
 pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        import_unguarded(path, meta, limits)
+    })) {
+        Ok(imported) => imported,
+        Err(payload) => Imported {
+            intermediate: None,
+            sub_assets: meta.sub_assets.clone(),
+            renames: Default::default(),
+            diagnostics: vec![panic_diagnostic(
+                &format!("the {} importer", meta.importer),
+                payload.as_ref(),
+            )
+            .with_document(path.display().to_string())],
+        },
+    }
+}
+
+/// A panic caught around one asset's import or cook, as the error that
+/// fails that asset.
+pub(crate) fn panic_diagnostic(what: &str, payload: &(dyn std::any::Any + Send)) -> Diagnostic {
+    let msg = payload
+        .downcast_ref::<&str>()
+        .map(|m| m.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "no message".into());
+    Diagnostic::error(
+        fynkel_contracts::Code::IMPORT_INVALID_DATA,
+        format!("{what} failed on this file: {msg}"),
+    )
+    .with_suggestion(
+        "the file may be damaged; this is a bug in Fynkel, please report it with the file",
+    )
+}
+
+fn import_unguarded(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
     match meta.importer.as_str() {
         fynkel_document::asset::GLTF_IMPORTER => gltf::import(path, meta, limits),
         fynkel_document::asset::FBX_IMPORTER => fbx::import(path, meta, limits),

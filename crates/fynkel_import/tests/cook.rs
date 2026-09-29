@@ -734,12 +734,15 @@ fn cycles_and_unresolved_references_fail_only_the_assets_involved() {
     let d = "c0000000-0000-4000-8000-0000000000d0";
     p.write("scenes/d.scene.json", &scene(d, a));
 
+    // The cycle fails its members; C's missing reference and D's reference
+    // into the cycle are warnings, and both cook with it cleared
+    // (foundation 5.1).
     let r = p.cook();
     assert!(r.has_errors());
     assert_eq!(status(&r, a), Status::Failed);
     assert_eq!(status(&r, b), Status::Failed);
-    assert_eq!(status(&r, c), Status::Failed);
-    assert_eq!(status(&r, d), Status::Failed);
+    assert_eq!(status(&r, c), Status::Cooked);
+    assert_eq!(status(&r, d), Status::Cooked);
     assert!(
         statuses(&r).iter().all(|(_, s)| *s == Status::Cooked),
         "{:?}",
@@ -755,22 +758,27 @@ fn cycles_and_unresolved_references_fail_only_the_assets_involved() {
         "{:?}",
         r.diagnostics
     );
-    assert_eq!(
-        codes
-            .iter()
-            .filter(|c| **c == Code::ASSET_UNRESOLVED)
-            .count(),
-        1
-    );
-    let blocked = r
+    let unresolved: Vec<_> = r
         .diagnostics
         .iter()
-        .filter(|d| d.code == Code::IMPORT_SKIPPED && d.message.contains("not cooked because"))
+        .filter(|d| d.code == Code::ASSET_UNRESOLVED)
+        .collect();
+    assert_eq!(unresolved.len(), 1);
+    assert!(!unresolved[0].is_error());
+    let cleared = r
+        .diagnostics
+        .iter()
+        .filter(|d| {
+            d.code == Code::IMPORT_SKIPPED
+                && !d.is_error()
+                && d.message.contains("so its references to it load as none")
+        })
         .count();
-    assert_eq!(blocked, 1, "{:?}", r.diagnostics);
-    assert!(r.get(id(d)).unwrap().key.is_none());
+    assert_eq!(cleared, 1, "{:?}", r.diagnostics);
+    assert!(!r.get(id(d)).unwrap().dependencies.contains(&id(a)));
 
-    // Fixing the cycle cooks the four scenes; nothing else moves.
+    // Fixing the cycle cooks the four scenes (C and D again, now with
+    // their references); nothing else moves.
     p.write("scenes/b.scene.json", &scene(b, RUSTED));
     p.write("scenes/c.scene.json", &scene(c, SWATCH));
     let r = p.cook();
@@ -812,10 +820,16 @@ fn a_sidecar_behind_its_import_warns_and_a_broken_source_fails() {
             r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"{ROBOT}","name":"robot.glb","importer":"fynkel.gltf","importerVersion":1,"settings":{{}},"subAssets":{{}}}}"#
         ),
     );
-    // The scene's `mesh/Cube` reference no longer resolves against the sidecar.
+    // The scene's `mesh/Cube` reference no longer resolves against the
+    // sidecar: a warning, and the scene cooks with it cleared (foundation
+    // 5.1).
     let r = p.cook();
     assert_eq!(status(&r, ROBOT), Status::Cooked);
-    assert_eq!(status(&r, MAIN), Status::Failed);
+    assert_eq!(status(&r, MAIN), Status::Cooked);
+    assert!(r
+        .diagnostics
+        .iter()
+        .any(|d| d.code == Code::ASSET_UNKNOWN_SUB && !d.is_error()));
     assert!(r
         .diagnostics
         .iter()
@@ -1400,7 +1414,8 @@ fn a_blend_space_cooks_as_its_document_and_depends_on_its_clips() {
     );
     let r = p.cook();
     assert_eq!(status(&r, SPACE), Status::Failed);
-    assert_eq!(status(&r, MAIN), Status::Failed);
+    // The scene cooks with the animator's clip cleared (foundation 5.1).
+    assert_eq!(status(&r, MAIN), Status::Cooked);
     assert!(
         r.diagnostics
             .iter()
@@ -1548,7 +1563,8 @@ fn a_volume_profile_cooks_as_its_document_and_a_scene_depends_on_it() {
     assert_eq!(kinds, ["META", "JSON"]);
     assert!(r.get(id(MAIN)).unwrap().dependencies.contains(&id(LOOK)));
 
-    // Out of range: the profile fails and the scene that uses it with it.
+    // Out of range: the profile fails; the scene that uses it cooks with
+    // the reference cleared (foundation 5.1).
     p.write("look.volume.json", &look(r#"{"radius":0}"#));
     let r = p.cook();
     assert_eq!(status(&r, LOOK), Status::Failed);
@@ -1559,7 +1575,8 @@ fn a_volume_profile_cooks_as_its_document_and_a_scene_depends_on_it() {
         "{:?}",
         r.diagnostics
     );
-    assert_ne!(status(&r, MAIN), Status::Cooked);
+    assert_eq!(status(&r, MAIN), Status::Cooked);
+    assert!(!r.get(id(MAIN)).unwrap().dependencies.contains(&id(LOOK)));
 }
 
 #[test]
@@ -1612,7 +1629,8 @@ fn a_physics_material_cooks_as_its_document_and_a_scene_depends_on_it() {
     assert_eq!(status(&r, ICE), Status::Cooked);
     assert_eq!(status(&r, MAIN), Status::Cooked);
 
-    // Out of range: the material fails and the scene that uses it with it.
+    // Out of range: the material fails; the scene that uses it cooks with
+    // the reference cleared (foundation 5.1).
     p.write("ice.physicsmaterial.json", &ice(r#","bounciness":2"#));
     let r = p.cook();
     assert_eq!(status(&r, ICE), Status::Failed);
@@ -1623,7 +1641,7 @@ fn a_physics_material_cooks_as_its_document_and_a_scene_depends_on_it() {
         "{:?}",
         r.diagnostics
     );
-    assert_ne!(status(&r, MAIN), Status::Cooked);
+    assert_eq!(status(&r, MAIN), Status::Cooked);
 }
 
 /// A data asset (ADR-0027) cooks as its document, like any JSON kind; its
