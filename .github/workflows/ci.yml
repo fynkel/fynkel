@@ -45,6 +45,13 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace
+      # A runtime built with `modules.strip` (ADR-0029): the physics
+      # stand-in keeps the adapter's contract, and a world without the
+      # modules refuses their commands (foundation 6.5).
+      - name: test a stripped runtime
+        run: |
+          cargo test -p fynkel_physics --no-default-features
+          cargo test -p fynkel_core --no-default-features --test modules
       - name: codegen --check
         run: cargo run -p fynkel_cli -- codegen --check
       # A game's runtime carries no editor code (blueprint §19.2e item 1):
@@ -125,6 +132,10 @@ jobs:
       # texture channel.
       - name: fynkel_flutter pub get + analyze + test
         working-directory: packages/fynkel_flutter
+        run: flutter pub get && flutter analyze --fatal-infos && flutter test
+      # The editor API a package's editor part is written against (ADR-0028).
+      - name: fynkel_editor_api pub get + analyze + test
+        working-directory: packages/fynkel_editor_api
         run: flutter pub get && flutter analyze --fatal-infos && flutter test
       # The measurement host is a thin app on the package; it must still
       # analyze (its macOS build is exercised by the benchmark capture, not CI).
