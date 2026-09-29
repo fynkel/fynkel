@@ -15,8 +15,12 @@
 // A `Diagnostic` is the error type on purpose: rich, and only ever built on
 // the failure path of tooling, where its size is irrelevant.
 #![allow(clippy::result_large_err)]
+// Without `validate` (ADR-0041, the runtime a game links) the helpers the
+// checks share go unused; the tools' build, with it, still reports dead code.
+#![cfg_attr(not(feature = "validate"), allow(dead_code, unused_imports))]
 
 pub mod asset;
+#[cfg(feature = "validate")]
 pub mod authoring;
 pub mod codec;
 pub mod controller;
@@ -28,7 +32,9 @@ pub mod generated;
 pub mod blend;
 pub mod json;
 pub mod material;
+#[cfg(feature = "validate")]
 pub mod migrate;
+#[cfg(feature = "validate")]
 pub mod one_root;
 pub mod packages;
 pub mod physics_material;
@@ -38,6 +44,7 @@ pub mod reference_kinds;
 pub mod rig;
 pub mod runtime;
 pub mod scene;
+#[cfg(feature = "validate")]
 pub mod schema;
 pub mod settings;
 pub mod volume;
@@ -45,6 +52,7 @@ pub mod volume;
 use std::path::Path;
 
 pub use asset::{AssetDatabase, AssetEntry, AssetKind, Meta, Resolved};
+#[cfg(feature = "validate")]
 pub use authoring::{
     Applied, Command, ComponentSpec, Edit, Editor, Mutation, Request, Requested, Revision,
     Transaction,
@@ -56,16 +64,21 @@ pub use data::DataDocument;
 pub use fynkel_contracts::{has_errors, Code, Diagnostic, Severity};
 pub use json::{Node, Value};
 pub use material::{Material, ResolvedMaterial, ShaderLibrary, ShaderManifest};
+#[cfg(feature = "validate")]
 pub use migrate::{migrate, migrate_with, Migrated, Migration, Migrations, Rewrite};
 pub use physics_material::PhysicsMaterialDocument;
-pub use prefab::{expand, Expanded, Prefab, PrefabLibrary};
-pub use project::{
-    validate_project, validate_project_with, Lock, NoSourcePrefabs, PersistentObject, Project,
-    ProjectReport, SourcePrefabs,
-};
+#[cfg(feature = "validate")]
+pub use prefab::expand;
+pub use prefab::{Expanded, Prefab, PrefabLibrary};
+#[cfg(feature = "validate")]
+pub use project::{validate_project, validate_project_with};
+pub use project::{Lock, NoSourcePrefabs, PersistentObject, Project, ProjectReport, SourcePrefabs};
 pub use rig::Rig;
-pub use runtime::{describe, describe_with, AuthoredBehaviour, DescribedScene};
+#[cfg(feature = "validate")]
+pub use runtime::describe;
+pub use runtime::{describe_with, AuthoredBehaviour, DescribedScene};
 pub use scene::Scene;
+#[cfg(feature = "validate")]
 pub use schema::{BehaviourInfo, ComponentInfo, SchemaSet};
 pub use volume::VolumeDocument;
 
@@ -428,6 +441,7 @@ impl Document {
     /// Envelope warnings (schema reference mismatch, newer format version)
     /// plus JSON Schema validation of the whole document. Semantic checks
     /// per kind are layered on by the kind modules (M2-03 onwards).
+    #[cfg(feature = "validate")]
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut out = Vec::new();
         if self.is_outdated() {

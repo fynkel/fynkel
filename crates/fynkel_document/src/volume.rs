@@ -19,6 +19,7 @@ use glam::Vec3;
 use uuid::Uuid;
 
 use crate::json::Node;
+#[cfg(feature = "validate")]
 use crate::schema::SchemaSet;
 use crate::{Document, DocumentKind};
 
@@ -102,6 +103,7 @@ impl VolumeDocument {
 
     /// Envelope + JSON Schema (the ranges) and the read problems the
     /// schema did not already report.
+    #[cfg(feature = "validate")]
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut out = self.document.validate(schemas);
         let schema_pointers: Vec<String> = out.iter().filter_map(|d| d.pointer.clone()).collect();

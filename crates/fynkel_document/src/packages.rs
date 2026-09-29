@@ -290,6 +290,7 @@ impl PackageTypes {
 /// Every Fynkel package's assets as one database of entries mounted at
 /// `Packages/<name>/` (ADR-0029 §2), in graph order, with their scans'
 /// diagnostics. A package without its asset folder adds nothing.
+#[cfg(feature = "validate")]
 pub fn package_assets(
     types: &PackageTypes,
     schemas: &crate::schema::SchemaSet,

@@ -20,6 +20,7 @@ use fynkel_contracts::diagnostic::{Code, Diagnostic};
 use crate::asset::{asset_refs, AssetDatabase, AssetKind, Resolved};
 use crate::json::{Locator, Node};
 use crate::scene::escape;
+#[cfg(feature = "validate")]
 use crate::schema::SchemaSet;
 use crate::{Document, DocumentKind};
 
@@ -136,6 +137,7 @@ pub fn offered_kinds(r: &Resolved<'_>) -> Vec<String> {
 /// `A0007` for every field of a scene's or prefab's components, or of a
 /// data asset, whose reference names an asset of another kind. Prefab
 /// overrides are not typed here.
+#[cfg(feature = "validate")]
 pub fn check_reference_kinds(
     doc: &Document,
     schemas: &SchemaSet,

@@ -20,6 +20,7 @@ use fynkel_core::{EntityDescription, SceneDescription};
 use crate::generated::decode_component;
 use crate::project::Project;
 use crate::scene::Scene;
+#[cfg(feature = "validate")]
 use crate::SchemaSet;
 
 /// One scene component of a non-native type: what the SDK needs to
@@ -63,6 +64,7 @@ fn to_uuid(u: &uuid::Uuid) -> Uuid {
 /// Builds the description in document order (entities as listed; components
 /// as listed). Every diagnostic carries the document path and a pointer.
 /// `schemas` says which non-native types are behaviours.
+#[cfg(feature = "validate")]
 pub fn describe(scene: &Scene, schemas: &SchemaSet) -> DescribedScene {
     describe_with(scene, |type_id| schemas.behaviour(type_id).is_some())
 }
@@ -168,6 +170,7 @@ pub const PROJECT_SCHEMAS_DIR: &str = "schemas";
 
 /// The embedded schemas plus the project's own (`<dir>/schemas`), with every
 /// behaviour the project registry declares made known.
+#[cfg(feature = "validate")]
 pub fn project_schemas(dir: &Path, project: &Project) -> Result<SchemaSet, Diagnostic> {
     project.schemas(&SchemaSet::embedded(), dir)
 }

@@ -54,9 +54,10 @@ use fynkel_contracts::{AssetRef, Code, Diagnostic};
 use uuid::Uuid;
 
 use crate::json::{Locator, Member, Node, Span, Value};
-use crate::scene::{
-    read_entities, validate_entities, Component, Entity, OverrideOp, PrefabInstance, Scene,
-};
+#[cfg(feature = "validate")]
+use crate::scene::validate_entities;
+use crate::scene::{read_entities, Component, Entity, OverrideOp, PrefabInstance, Scene};
+#[cfg(feature = "validate")]
 use crate::schema::SchemaSet;
 use crate::{Document, DocumentKind};
 
@@ -164,6 +165,7 @@ impl Prefab {
     /// Envelope + JSON Schema, read problems, hierarchy/component rules,
     /// and the prefab rules (`root`). Its own instances are checked by
     /// expansion (`PrefabLibrary::flattened`), as a scene's are.
+    #[cfg(feature = "validate")]
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut out = self.document.validate(schemas);
         let schema_pointers: HashSet<String> =
@@ -186,6 +188,7 @@ impl Prefab {
     }
 
     /// The semantic rules only (no schema pass).
+    #[cfg(feature = "validate")]
     pub fn validate_semantics(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let root = &self.document.root;
         let mut out = validate_entities(
@@ -316,6 +319,7 @@ impl PrefabLibrary {
     /// invalid overrides) is reported and left as it is, so a scene
     /// instantiating it is refused for the instance it still carries. The
     /// diagnostics are anchored in the prefab documents.
+    #[cfg(feature = "validate")]
     pub fn flattened(&self, schemas: &SchemaSet) -> (PrefabLibrary, Vec<Diagnostic>) {
         let mut out = PrefabLibrary::empty();
         out.imported = self.imported.clone();
@@ -329,6 +333,7 @@ impl PrefabLibrary {
         (out, diagnostics)
     }
 
+    #[cfg(feature = "validate")]
     fn flatten_one(
         &self,
         id: Uuid,
@@ -723,6 +728,7 @@ impl Expanded {
 /// validated against the component schema (`D0404`, at the last op that
 /// touched it). The library is flattened first (nested prefabs); its
 /// diagnostics come along, anchored in the prefab documents.
+#[cfg(feature = "validate")]
 pub fn expand(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Expanded {
     let (flat, flat_diagnostics) = library.flattened(schemas);
     let mut expanded = expand_in(scene, &flat, schemas);
@@ -759,6 +765,7 @@ fn unused(mut d: Diagnostic) -> Diagnostic {
     )
 }
 
+#[cfg(feature = "validate")]
 fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Expanded {
     let src = &scene.document.root;
     let mut diagnostics = Vec::new();
@@ -1347,6 +1354,7 @@ pub fn asset_ref_json(r: &AssetRef) -> serde_json::Value {
 }
 
 /// `inspect --json` payload for a prefab.
+#[cfg(feature = "validate")]
 pub fn inspect_json(prefab: &Prefab) -> serde_json::Value {
     serde_json::json!({
         "kind": "prefab",

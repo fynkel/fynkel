@@ -45,6 +45,7 @@ use uuid::Uuid;
 use crate::codec::DocumentCodec;
 use crate::json::{Node, Value};
 use crate::scene::escape;
+#[cfg(feature = "validate")]
 use crate::schema::SchemaSet;
 use crate::{Document, DocumentKind};
 
@@ -655,6 +656,7 @@ impl ShaderManifest {
     }
 
     /// Envelope + JSON Schema, read problems, and the manifest rules.
+    #[cfg(feature = "validate")]
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         if self.source == ShaderSource::File {
             // A `.shader`'s header was checked when it was read.
@@ -1090,6 +1092,7 @@ impl Material {
 
     /// Everything: envelope + JSON Schema ([`Document::validate`]), read
     /// problems, then the material-vs-manifest rules.
+    #[cfg(feature = "validate")]
     pub fn validate(&self, schemas: &SchemaSet, shaders: &ShaderLibrary) -> Vec<Diagnostic> {
         let mut out = self.document.validate(schemas);
         let schema_pointers: Vec<String> = out.iter().filter_map(|d| d.pointer.clone()).collect();

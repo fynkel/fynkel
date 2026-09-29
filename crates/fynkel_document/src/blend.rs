@@ -23,6 +23,7 @@ use uuid::Uuid;
 use crate::asset::{AssetDatabase, AssetKind};
 use crate::json::Node;
 use crate::rig::{is_model, RIG_CLIP_PREFIX};
+#[cfg(feature = "validate")]
 use crate::schema::SchemaSet;
 use crate::{Document, DocumentKind};
 
@@ -151,6 +152,7 @@ impl Blend {
     /// Envelope + JSON Schema, the read problems and the order rule
     /// (`D0600`); the rules that need the asset database are
     /// [`Blend::validate_references`].
+    #[cfg(feature = "validate")]
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut out = self.document.validate(schemas);
         let schema_pointers: Vec<String> = out.iter().filter_map(|d| d.pointer.clone()).collect();

@@ -6,6 +6,13 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+# Checking documents against their JSON Schemas, migration and the text
+# diffs (ADR-0041): the tools' side. The runtime a game links reads
+# cooked documents the cook already checked and builds without it.
+default = ["validate"]
+validate = ["dep:jsonschema", "dep:similar"]
+
 [dependencies]
 fynkel_contracts.workspace = true
 fynkel_core.workspace = true
@@ -17,9 +24,9 @@ fynkel_cooked.workspace = true
 glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-jsonschema.workspace = true
+jsonschema = { workspace = true, optional = true }
 uuid.workspace = true
-similar.workspace = true
+similar = { workspace = true, optional = true }
 blake3.workspace = true
 
 # `cargo check --target wasm32-unknown-unknown` over the render crate

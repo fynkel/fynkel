@@ -26,6 +26,7 @@ use uuid::Uuid;
 use crate::asset::{AssetDatabase, AssetKind, FBX_IMPORTER, GLTF_IMPORTER};
 use crate::json::Node;
 use crate::scene::escape;
+#[cfg(feature = "validate")]
 use crate::schema::SchemaSet;
 use crate::{Document, DocumentKind};
 
@@ -259,6 +260,7 @@ impl Rig {
 
     /// Envelope + JSON Schema and the read problems; the rules that need
     /// the asset database are [`Rig::validate_references`].
+    #[cfg(feature = "validate")]
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut out = self.document.validate(schemas);
         let schema_pointers: Vec<String> = out.iter().filter_map(|d| d.pointer.clone()).collect();

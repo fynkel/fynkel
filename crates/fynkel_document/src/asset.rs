@@ -16,7 +16,9 @@ use fynkel_contracts::{AssetRef, Code, Diagnostic};
 use uuid::Uuid;
 
 use crate::json::{Locator, Member, Node, Value};
-use crate::{Document, DocumentKind, SchemaSet};
+#[cfg(feature = "validate")]
+use crate::SchemaSet;
+use crate::{Document, DocumentKind};
 
 /// Importer for files no specialised importer claims: copied verbatim.
 pub const FILE_IMPORTER: &str = "fynkel.file";
@@ -180,6 +182,7 @@ impl Meta {
     }
 
     /// Schema validation plus the sidecar's own rules.
+    #[cfg(feature = "validate")]
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut out = self.document.validate(schemas);
         let pointers: Vec<String> = out.iter().filter_map(|d| d.pointer.clone()).collect();
@@ -448,6 +451,7 @@ impl AssetDatabase {
     /// (M2-13) checks their bodies. A duplicate id keeps the first path
     /// (`FYN-A0003` on the second); a file whose envelope does not parse is
     /// reported and left out.
+    #[cfg(feature = "validate")]
     pub fn scan(root: &Path, schemas: &SchemaSet) -> (AssetDatabase, Vec<Diagnostic>) {
         Self::scan_preferring(root, schemas, &HashSet::new())
     }
@@ -457,6 +461,7 @@ impl AssetDatabase {
     /// files claim one id — a copy made in Finder keeps its original's —
     /// the one the project knew keeps it, whichever sorts first
     /// (foundation 5.2). The other is `FYN-A0003`.
+    #[cfg(feature = "validate")]
     pub fn scan_preferring(
         root: &Path,
         schemas: &SchemaSet,
@@ -524,6 +529,7 @@ impl AssetDatabase {
     /// its sidecar, its source) first. One difference from a full scan: a
     /// duplicate id is judged against the entries already held, so the file
     /// that arrives later loses whatever its path sorts as.
+    #[cfg(feature = "validate")]
     pub fn update(&mut self, paths: &[PathBuf], schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         let root = self
@@ -604,6 +610,7 @@ impl AssetDatabase {
     /// installed its own copy (ADR-0026 §4). Nothing when the id is taken
     /// already (the project's own copy wins); the sidecar's diagnostics
     /// otherwise.
+    #[cfg(feature = "validate")]
     pub fn add_builtin(&mut self, file: &Path, path: &str, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         let meta = match Document::read(&sidecar_path(file), Some(DocumentKind::Meta)) {
@@ -712,6 +719,7 @@ impl AssetDatabase {
 
     /// Reads one file of the tree: a sidecar makes its source's entry, a
     /// document its own; a source without a sidecar is reported.
+    #[cfg(feature = "validate")]
     fn scan_file(&mut self, path: &Path, schemas: &SchemaSet, diags: &mut Vec<Diagnostic>) {
         let root = self.root.clone();
         let root = root.as_path();

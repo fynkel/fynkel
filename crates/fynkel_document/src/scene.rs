@@ -33,6 +33,7 @@ use fynkel_contracts::{AssetRef, Code, Diagnostic, Severity};
 use uuid::Uuid;
 
 use crate::json::{Locator, Node, Value};
+#[cfg(feature = "validate")]
 use crate::schema::SchemaSet;
 use crate::{parse_uuid, Document, DocumentKind};
 
@@ -229,6 +230,7 @@ impl Scene {
     /// Everything: envelope + JSON Schema ([`Document::validate`]), the read
     /// problems, and the semantic rules above. Ordered by kind of check,
     /// then document position.
+    #[cfg(feature = "validate")]
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut out = self.document.validate(schemas);
         out.extend(self.read_diagnostics.iter().cloned());
@@ -253,6 +255,7 @@ impl Scene {
     }
 
     /// The semantic rules only (no schema pass).
+    #[cfg(feature = "validate")]
     pub fn validate_semantics(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let at = Locator::new(&self.document.root);
         let root = &at;
@@ -295,6 +298,7 @@ fn anchor(at: &Locator<'_>, d: Diagnostic, pointer: &str) -> Diagnostic {
 }
 
 /// The hierarchy and component rules shared by scenes and prefabs.
+#[cfg(feature = "validate")]
 pub(crate) fn validate_entities<'a>(
     at: &Locator<'_>,
     entities: &'a [Entity],
@@ -1073,6 +1077,7 @@ pub fn escape(token: &str) -> String {
 }
 
 /// `inspect --json` payload: envelope, counts, and the tree.
+#[cfg(feature = "validate")]
 pub fn inspect_json(scene: &Scene) -> serde_json::Value {
     fn tree(scene: &Scene, e: &Entity, depth: usize) -> serde_json::Value {
         let children: Vec<serde_json::Value> = e

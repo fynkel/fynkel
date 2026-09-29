@@ -52,6 +52,13 @@ jobs:
         run: |
           cargo test -p fynkel_physics --no-default-features
           cargo test -p fynkel_core --no-default-features --test modules
+      # A game's runtime reads documents the cook already checked
+      # (ADR-0041): no JSON Schema or text diffs in it, and
+      # fynkel_document still builds without its `validate` feature.
+      - name: no document validation in a game runtime
+        run: |
+          ./tools/check_runtime_deps.sh
+          cargo clippy -p fynkel_document --no-default-features -- -D warnings
       - name: codegen --check
         run: cargo run -p fynkel_cli -- codegen --check
       # A game's runtime carries no editor code (blueprint §19.2e item 1):

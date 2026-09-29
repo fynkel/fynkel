@@ -28,6 +28,7 @@ pub use fynkel_core::animation::blend_tree::TreeKind;
 use crate::asset::{AssetDatabase, AssetKind};
 use crate::json::Node;
 use crate::rig::{is_model, RIG_CLIP_PREFIX};
+#[cfg(feature = "validate")]
 use crate::schema::SchemaSet;
 use crate::{Document, DocumentKind};
 
@@ -1028,6 +1029,7 @@ impl Controller {
     /// Envelope + JSON Schema, the read problems and the naming and type
     /// rules (`D1101`, `D1102`); the rule that needs the asset database is
     /// [`Controller::validate_references`].
+    #[cfg(feature = "validate")]
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut out = self.document.validate(schemas);
         let schema_pointers: Vec<String> = out.iter().filter_map(|d| d.pointer.clone()).collect();

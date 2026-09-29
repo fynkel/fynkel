@@ -8,7 +8,7 @@ license.workspace = true
 
 [dependencies]
 fynkel_contracts.workspace = true
-fynkel_document.workspace = true
+fynkel_document = { workspace = true, features = ["validate"] }
 # The `shaders` query and the live edit of a shader asset's material
 # (ADR-0031).
 fynkel_shader.workspace = true

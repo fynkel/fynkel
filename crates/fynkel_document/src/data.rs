@@ -17,6 +17,7 @@ use fynkel_contracts::{Code, Diagnostic, Severity};
 use uuid::Uuid;
 
 use crate::json::{Locator, Node};
+#[cfg(feature = "validate")]
 use crate::schema::SchemaSet;
 use crate::{Document, DocumentKind};
 
@@ -104,6 +105,7 @@ impl DataDocument {
 
     /// Envelope + JSON Schema, the read problems the schema did not already
     /// report, then the data against its type.
+    #[cfg(feature = "validate")]
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut out = self.document.validate(schemas);
         let schema_pointers: Vec<String> = out.iter().filter_map(|d| d.pointer.clone()).collect();

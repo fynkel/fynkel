@@ -71,7 +71,7 @@ fynkel_wire = { path = "crates/fynkel_wire" }
 fynkel_render = { path = "crates/fynkel_render" }
 fynkel_shader = { path = "crates/fynkel_shader" }
 fynkel_native = { path = "crates/fynkel_native", default-features = false }   # `authoring` is opted into per dependent (platform/apple passes it through)
-fynkel_document = { path = "crates/fynkel_document" }
+fynkel_document = { path = "crates/fynkel_document", default-features = false }
 fynkel_import = { path = "crates/fynkel_import" }
 fynkel_assets = { path = "crates/fynkel_assets" }
 fynkel_preview = { path = "crates/fynkel_preview" }

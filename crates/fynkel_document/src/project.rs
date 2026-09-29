@@ -19,9 +19,13 @@ use uuid::Uuid;
 use crate::asset::{AssetDatabase, AssetKind};
 use crate::json::{self, Node};
 use crate::material::{Material, ShaderLibrary, ShaderManifest};
-use crate::prefab::{expand, Prefab, PrefabLibrary};
+#[cfg(feature = "validate")]
+use crate::prefab::expand;
+use crate::prefab::{Prefab, PrefabLibrary};
 use crate::scene::Scene;
-use crate::{Document, DocumentKind, SchemaSet};
+#[cfg(feature = "validate")]
+use crate::SchemaSet;
+use crate::{Document, DocumentKind};
 
 pub const PROJECT_FILE: &str = "fynkel.project.json";
 pub const LOCK_FILE: &str = "fynkel.lock.json";
@@ -344,6 +348,7 @@ impl Project {
     /// `fynkel codegen --project` writes `behaviours/<id>.schema.json`),
     /// with every registry entry of kind `behaviour` declared so its type
     /// is known even without a schema.
+    #[cfg(feature = "validate")]
     #[allow(clippy::result_large_err)]
     pub fn schemas(&self, base: &SchemaSet, dir: &Path) -> Result<SchemaSet, Diagnostic> {
         let mut dirs = self.packages.schema_dirs();
@@ -728,6 +733,7 @@ impl Project {
 
     /// Envelope + JSON Schema, read problems, and the rules that need no
     /// asset database (quality default, targets, asset root shape).
+    #[cfg(feature = "validate")]
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut out = self.document.validate(schemas);
         let schema_pointers: Vec<String> = out.iter().filter_map(|d| d.pointer.clone()).collect();
@@ -890,6 +896,7 @@ impl Project {
     /// The rules that need the asset database and the component schemas:
     /// the startup scene resolves to a scene, native registry entries
     /// exist.
+    #[cfg(feature = "validate")]
     pub fn validate_against(&self, db: &AssetDatabase, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let root = &self.document.root;
         let mut out = Vec::new();
@@ -1118,6 +1125,7 @@ impl Lock {
     }
 
     /// Parses lock text: strict JSON, the lock schema, then the typed view.
+    #[cfg(feature = "validate")]
     pub fn parse(
         path: Option<&str>,
         text: &str,
@@ -1156,6 +1164,7 @@ impl Lock {
     }
 
     /// Reads `<dir>/fynkel.lock.json`.
+    #[cfg(feature = "validate")]
     pub fn read(dir: &Path, schemas: &SchemaSet) -> Result<Lock, Vec<Diagnostic>> {
         let path = dir.join(LOCK_FILE);
         let shown = path.display().to_string();
@@ -1338,6 +1347,7 @@ impl ProjectReport {
 /// (schema + semantics, scenes expanded with the project's prefabs,
 /// materials against the built-in shaders plus the project's manifests),
 /// every sidecar (through the asset database scan) and every reference.
+#[cfg(feature = "validate")]
 pub fn validate_project(
     dir: &Path,
     schemas: &SchemaSet,
@@ -1368,6 +1378,7 @@ pub trait SourcePrefabs {
     /// so references to them resolve as they do in the cook; `None` when
     /// there are none to add. The project at `dir` gives the cache the
     /// files are written under.
+    #[cfg(feature = "validate")]
     fn builtins(
         &self,
         _dir: &Path,
@@ -1394,6 +1405,7 @@ impl SourcePrefabs for NoSourcePrefabs {
 }
 
 /// [`validate_project`] with a [`SourcePrefabs`] provider.
+#[cfg(feature = "validate")]
 pub fn validate_project_with(
     dir: &Path,
     schemas: &SchemaSet,
