@@ -541,12 +541,14 @@ fn prefab_commands_validate_inspect_and_expand() {
     assert_eq!(v["diagnostics"][0]["code"], "FYN-D0400");
 
     // A scene with instances: prefabs come from --prefabs (default: the
-    // scene's directory, which here holds no prefab → D0401).
+    // scene's directory, which here holds no prefab → D0401, a warning
+    // since foundation 5.1: the instance stays as an empty placeholder).
     let scene = fixtures.join("prefab/instances_ok.scene.json");
     let out = run(&["scene", "validate", "--json", scene.to_str().unwrap()]);
-    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(out.status.code(), Some(0));
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["diagnostics"][0]["code"], "FYN-D0401");
+    assert_eq!(v["diagnostics"][0]["severity"], "warning");
     let out = run(&[
         "scene",
         "validate",
