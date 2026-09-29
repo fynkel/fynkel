@@ -465,7 +465,7 @@ never runs game code (ADR-0016/0018) — a behaviour's fields come from the
 committed metadata and its schema, a native component's from the
 generated schema.
 
-### Where a field's look comes from (`field_spec.dart`, `native_hints.dart`)
+### Where a field's look comes from (`field_spec.dart`)
 
 One parser, `parseComponentSpec`, turns a component's JSON Schema into a
 `ComponentSpec` of `FieldSpec`s. The widget kind is inferred from the
@@ -474,16 +474,12 @@ asset, `enum` a menu, a description that says "quaternion" a rotation) and
 then overridden by the ADR-0018 display hints, read in this order — the
 last one wins:
 
-1. **The editor's native table** (`native_hints.dart`): `type → field →
-   hints` for the 23 built-in components (the audio pair included), in the same `x-fynkel`
-   vocabulary the generator writes (Camera `fov_y` is an `angle` in the
-   `Lens` group, lights' `color` is a `color`, `MeshRenderer.mesh` an
-   `asset(mesh)`, `Collider.layer` a `layerMask`, units `m` / `lux` / `cd` / `kg` / `s`…). It stands in until
-   the Rust `#[fynkel(...)]` field attributes exist (ADR-0018 names them;
-   `fynkel_schema_derive` and the component structs are the M3 stream's
-   territory, not on the editor's closed shared-touch list), and it only
-   ever shrinks: `inspector_test.dart` fails when an entry names a type or
-   a field no schema has.
+1. A built-in component's hints are part of its schema: each Rust field's
+   `#[fynkel(...)]` attribute (Camera `fov_y` is an `angle` in the `Lens`
+   group, lights' `color` a `color`, `MeshRenderer.mesh` an
+   `asset(mesh)`, units `m` / `lux` / `cd` / `kg` / `s`…), which
+   `fynkel codegen` writes into the property's `x-fynkel` (foundation
+   6.2; `docs/codegen.md`). So they come in at step 3.
 2. **The behaviour metadata** (`lib/generated/behaviours.g.json`,
    `behaviours[].fields[]` and `icon` / `category` / `library`).
 3. **The schema's own `x-fynkel`** on each property and on the root.
@@ -1267,7 +1263,8 @@ draws (with `color: 0xAARRGGBB`, `when: GizmoWhen.always` and
 `space: GizmoSpace.world` as options), `fynkel codegen` writes a
 `gizmo` hint into the field's `x-fynkel` (docs/codegen.md), and the
 Inspector's spec parser reads it as `FieldSpec.gizmo`. Built-in
-components get theirs from `native_hints.dart`: an Emitter's `velocity`
+components get theirs from their Rust fields' `#[fynkel(gizmo(...))]`
+through the generated schemas: an Emitter's `velocity`
 is a world-space direction, a Follow's or camera rig's `target` a line
 to the entity. The Scene view draws them in the overlay — for the
 selection, and for every shown carrier of a `when: always` field — in

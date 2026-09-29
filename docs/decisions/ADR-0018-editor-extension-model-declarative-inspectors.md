@@ -49,7 +49,7 @@ the editor carries a table (`apps/editor/lib/src/inspector/native_hints.dart`,
 one code path for `fynkel.Camera` and `game.Player`; when the Rust
 attributes land, the generated schemas carry the hints, they win, and the
 table shrinks to nothing (`inspector_test.dart` fails when the table names
-a field no schema has). The `asset(<kind>)` kinds grew `clip`, `skin` and
+a field no schema has; **closed 2026-09-29, foundation 6.2:** the hints are the fields' `#[fynkel(...)]` attributes now, `fynkel codegen` writes them into the schemas, and the table is gone). The `asset(<kind>)` kinds grew `clip`, `skin` and
 `rig` (the sub-asset kinds the importers produce) beyond the six listed
 above.
 
