@@ -48,7 +48,7 @@ void main() {
     await tester.tap(e.row('Sun'));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(e.row('Sun'));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.byType(TextField).evaluate().where((el) => '${el.widget.key}'.contains('hierarchy.rename')), isEmpty);
     await e.press(LogicalKeyboardKey.f2);
     await e.type('Moon');
@@ -135,7 +135,7 @@ void main() {
     await e.click(e.row('Sun'));
     await e.press(LogicalKeyboardKey.keyC, command: true);
     e.shell.tabs!.openDocument('assets/scenes/results.scene.json');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final before = e.rows.length;
     await e.press(LogicalKeyboardKey.keyV, command: true);
     expect(e.rows, hasLength(before + 1));
@@ -219,7 +219,7 @@ void main() {
       await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
       await tester.tap(arrow);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
-      await tester.pumpAndSettle();
+      await settleCooks(tester);
     }
 
     await altClick();
@@ -237,7 +237,7 @@ void main() {
     final below = Offset(list.center.dx, e.rowRect('Crate B').bottom + 40);
     expect(below.dy, lessThan(list.bottom));
     await tester.tapAt(below, buttons: kSecondaryMouseButton);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.byKey(const Key('hierarchy.empty.paste')), findsOneWidget);
     await e.click(find.byKey(const Key('hierarchy.empty.createEmpty')));
     final tab = e.shell.tabs!.focused!;

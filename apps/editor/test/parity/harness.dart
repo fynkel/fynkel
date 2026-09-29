@@ -20,6 +20,23 @@ import '../support/fakes.dart';
 
 const mainScene = 'c0000000-0000-4000-8000-000000000030';
 
+/// Settles the frames, then waits for a cook the step started (ADR-0040:
+/// it runs on the session's real thread, and the editor takes nothing
+/// until it is applied), as a person waits for Importing Assets.
+Future<void> settleCooks(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  final shells = find.byType(EditorShell);
+  if (shells.evaluate().isEmpty) return;
+  final cooks = tester.state<EditorShellState>(shells).cooks;
+  if (!cooks.isRunning) return;
+  for (var i = 0; i < 2000 && cooks.isRunning; i++) {
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+    await tester.pump(const Duration(milliseconds: 16));
+  }
+  expect(cooks.isRunning, isFalse, reason: 'a cook still running after 10 s');
+  await tester.pumpAndSettle();
+}
+
 final class Editor {
   Editor._(this.tester, this.dir, this.shell);
 
@@ -54,13 +71,17 @@ final class Editor {
     );
     final shell = tester.state<EditorShellState>(find.byType(EditorShell));
     shell.tabs!.openDocument(scene);
-    await tester.pumpAndSettle();
-    return Editor._(tester, dir, shell);
+    final e = Editor._(tester, dir, shell);
+    await e.settle();
+    return e;
   }
 
   final WidgetTester tester;
   final Directory dir;
   final EditorShellState shell;
+
+  /// [settle] for this editor.
+  Future<void> settle() => settleCooks(tester);
 
   /// The Hierarchy's rows top to bottom, as the names a person reads.
   List<String> get rows => [
@@ -111,7 +132,7 @@ final class Editor {
     await tester.tap(f);
     if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     if (command) await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
+    await settle();
   }
 
   /// Presses [key] with the given modifiers, as a shortcut.
@@ -128,19 +149,19 @@ final class Editor {
     for (final m in mods.reversed) {
       await tester.sendKeyUpEvent(m);
     }
-    await tester.pumpAndSettle();
+    await settle();
   }
 
   /// Types into whatever has focus, as a person would.
   Future<void> type(String text) async {
     tester.testTextInput.enterText(text);
-    await tester.pumpAndSettle();
+    await settle();
   }
 
   /// Presses Return in the focused text field.
   Future<void> submit() async {
     await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pumpAndSettle();
+    await settle();
   }
 
   /// Drags [from] onto [to] with a mouse, pausing so drag targets see it.
@@ -152,7 +173,7 @@ final class Editor {
     await g.moveTo(to);
     await tester.pump(const Duration(milliseconds: 50));
     await g.up();
-    await tester.pumpAndSettle();
+    await settle();
   }
 
   /// The saved scene file, as JSON.

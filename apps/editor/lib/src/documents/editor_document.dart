@@ -156,9 +156,56 @@ abstract class PreviewBackend {
   PreviewStats reload();
   /// [live]: unsaved documents cook as the editor holds them (Play).
   CookReport recook({bool live = false});
+
+  /// [recook] on the session's cook thread (ADR-0040 §3): returns at once;
+  /// [CookRun.finish] applies it.
+  CookRun startCook({bool live = false});
+
+  /// Opened over a cache that may be stale or missing, without a cook
+  /// (ADR-0040 §4): the Scene view starts one.
+  bool get needsCook;
   Map<String, Object?> dump();
   PreviewStats refreshStats();
   void close();
+}
+
+/// A cook running on the session's thread ([PreviewBackend.startCook]):
+/// the package's `CookJob`, a scripted one in the widget tests.
+abstract class CookRun {
+  /// Assets finished and in all, and the asset last started, as of the
+  /// last [poll].
+  int get done;
+  int get total;
+  String get current;
+
+  /// Reads how far it got; true once it ended.
+  bool poll();
+
+  /// Stops it at its next asset; the cache stays as it was.
+  void cancel();
+
+  /// Applies the ended cook (every preview reloads over it) → its report.
+  CookReport finish();
+}
+
+/// The package's [CookJob] as a [CookRun].
+final class SessionCookRun implements CookRun {
+  SessionCookRun(this.job);
+
+  final CookJob job;
+
+  @override
+  int get done => job.done;
+  @override
+  int get total => job.total;
+  @override
+  String get current => job.current;
+  @override
+  bool poll() => job.poll();
+  @override
+  void cancel() => job.cancel();
+  @override
+  CookReport finish() => job.finish();
 }
 
 /// [ScenePreview] as a [PreviewBackend].
@@ -233,6 +280,10 @@ final class SessionPreview implements PreviewBackend {
   PreviewStats reload() => preview.reload();
   @override
   CookReport recook({bool live = false}) => preview.recook(live: live);
+  @override
+  CookRun startCook({bool live = false}) => SessionCookRun(preview.startCook(live: live));
+  @override
+  bool get needsCook => preview.needsCook;
   @override
   Map<String, Object?> dump() => preview.dump();
   @override
@@ -325,7 +376,9 @@ final class SessionDocument extends EditorDocument {
   PreviewBackend openPreview() {
     final open = _preview;
     if (open != null && !open.isClosed) return open;
-    return _preview = SessionPreview(handle.openPreview());
+    // No cook here (ADR-0040 §4): the Scene view cooks on the session's
+    // thread when the preview says it needs one.
+    return _preview = SessionPreview(handle.openPreview(cook: false));
   }
 
   @override

@@ -30,11 +30,11 @@ void main() {
     final main = e.shell.tabs!.focused!;
     // Open Scene Additive from the Project's menu.
     e.shell.browser!.setFolder('scenes');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const Key('project.asset.$results')), buttons: kSecondaryButton);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const Key('project.menu.openAdditive')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final added = e.shell.tabs!.scenes.firstWhere((s) => s.document.id == results);
     return (e, main, added);
   }
@@ -76,9 +76,9 @@ void main() {
 
       // The header's Set Active Scene.
       await tester.tap(find.byKey(Key('hierarchy.scene.menu.${main.document.id}')));
-      await tester.pumpAndSettle();
+      await settleCooks(tester);
       await tester.tap(find.byKey(Key('hierarchy.scene.${main.document.id}.setActive')));
-      await tester.pumpAndSettle();
+      await settleCooks(tester);
       expect(e.shell.tabs!.focused, same(main));
     },
   );
@@ -96,12 +96,12 @@ void main() {
       ..distance = 4
       ..pitch = -1.5;
     sv.current!.cameraVersion++;
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final px = sv.viewProjection!.project(matTranslation(m))!;
     final picture = find.byWidgetPredicate((w) => w.key is GlobalKey && '${w.key}'.contains('scene.picture'));
     await tester.tapAt(tester.getTopLeft(picture) + Offset(px[0], px[1]) / tester.view.devicePixelRatio);
     await tester.pump(const Duration(milliseconds: 600));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(e.shell.tabs!.focused, same(added));
     expect(added.selection, [trophy]);
     expect(main.selection, isEmpty);
@@ -137,9 +137,9 @@ void main() {
   ) async {
     final (e, main, added) = await twoScenes(tester);
     await tester.tap(find.byKey(Key('hierarchy.scene.menu.$results')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const Key('hierarchy.scene.$results.unload')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(e.shell.tabs!.isLoaded(added), isFalse);
     expect(
       e.shell.scene!.overlay(e.shell.scene!.current!).extraWorlds,
@@ -151,37 +151,37 @@ void main() {
 
     // The last loaded scene cannot unload.
     await tester.tap(find.byKey(Key('hierarchy.scene.menu.${main.document.id}')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(
       tester.widget<MenuItemButton>(find.byKey(Key('hierarchy.scene.${main.document.id}.unload'))).onPressed,
       isNull,
     );
     await tester.tapAt(Offset.zero);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
 
     await tester.tap(find.byKey(Key('hierarchy.scene.menu.$results')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const Key('hierarchy.scene.$results.load')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.byKey(const ValueKey('row.$trophy')), findsOneWidget);
 
     // A change in Main, then Results double-clicked: Main asks; Cancel keeps both, Discard leaves Results alone.
     e.shell.hierarchy!.rename(crateA, 'Crate Z');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     Future<void> doubleClick() async {
       await tester.tap(find.byKey(const Key('project.asset.$results')));
       await tester.pump(const Duration(milliseconds: 50));
       await tester.tap(find.byKey(const Key('project.asset.$results')));
-      await tester.pumpAndSettle();
+      await settleCooks(tester);
     }
 
     await doubleClick();
     await tester.tap(find.byKey(const Key('closePrompt.cancel')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(e.shell.tabs!.scenes, hasLength(2));
     await doubleClick();
     await tester.tap(find.byKey(const Key('closePrompt.discard')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(e.shell.tabs!.scenes.map((s) => s.document.id), [results]);
     expect(e.shell.tabs!.focused, same(added));
   });

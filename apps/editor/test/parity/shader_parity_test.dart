@@ -19,14 +19,14 @@ void main() {
 
   Future<void> reveal(WidgetTester tester, Finder f) async {
     await Scrollable.ensureVisible(tester.element(f), alignment: 0.5);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
   }
 
   testWidgets('Create ▸ Shader, its page, Create Material, and the Shader dropdown keeping values', (tester) async {
     final e = await Editor.open(tester, tag: 'shader');
     final browser = e.shell.browser!;
     browser.setFolder('materials');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
 
     // Create ▸ New Lit Shader: one file from the template, with its sidecar.
     await e.click(find.byKey(const Key('project.new')));
@@ -118,7 +118,7 @@ void main() {
       },
     );
     e.shell.browser!.setFolder('materials');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
 
     await e.click(find.byKey(const Key('project.asset.$broken')));
     expect(find.textContaining('1 error'), findsOneWidget);

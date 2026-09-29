@@ -40,10 +40,10 @@ void main() {
     expect(sv.beginDrag('move.x', grab), isTrue);
     final axis = sv.viewProjection!.project(vAdd(crate(), [2, 0, 0]))!;
     sv.updateDrag(grab + (Offset(axis[0], axis[1]) - sv.gizmoPivotPx!));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     near(sv.camera!.pivot, crate(), 'follows while dragging');
     sv.endDrag();
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(crate()[0], greaterThan(-1), reason: 'moved from -2 towards +X');
     near(sv.camera!.pivot, crate(), 'and after');
 
@@ -55,7 +55,7 @@ void main() {
     await g.moveBy(const Offset(40, 10));
     await g.up();
     await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(sv.isFollowing, isTrue, reason: 'an orbit keeps the lock');
     near(sv.camera!.pivot, crate(), 'orbiting the crate');
     expect(sv.camera!.distance, closeTo(distance, 1e-6));
@@ -65,7 +65,7 @@ void main() {
     await g.moveBy(const Offset(30, 0));
     await g.moveBy(const Offset(30, 0));
     await g.up();
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(sv.isFollowing, isFalse, reason: 'a pan lets go');
     expect(find.textContaining('following the selection'), findsNothing);
 
@@ -75,7 +75,7 @@ void main() {
     await e.press(LogicalKeyboardKey.keyF);
     expect(sv.isFollowing, isTrue, reason: 'F twice locks');
     await e.click(e.row('Floor'));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(sv.isFollowing, isFalse);
     expect(tab.selection, ['c0000000-0000-4000-8000-0000000000e4']);
 

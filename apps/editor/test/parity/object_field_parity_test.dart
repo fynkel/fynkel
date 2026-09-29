@@ -132,7 +132,7 @@ void main() {
 
       await e.click(find.descendant(of: field('target'), matching: find.byKey(const ValueKey('object.pick'))));
       await tester.enterText(find.byKey(const ValueKey('objectPicker.search')), 'Floor');
-      await tester.pumpAndSettle();
+      await settleCooks(tester);
       final rows = find.byWidgetPredicate(
         (w) => w.key is ValueKey<String> && (w.key! as ValueKey<String>).value.startsWith('objectPicker.row.'),
       );

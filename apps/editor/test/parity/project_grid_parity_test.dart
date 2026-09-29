@@ -59,7 +59,7 @@ final class FakeThumbnails {
 Future<void> drawn(WidgetTester tester) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 200));
-  await tester.pumpAndSettle();
+  await settleCooks(tester);
 }
 
 void main() {
@@ -67,13 +67,13 @@ void main() {
     final e = await Editor.open(tester);
     final browser = e.shell.browser!;
     browser.setFolder('prefabs');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.byKey(const Key('project.list')), findsOneWidget);
     expect(find.byKey(const Key('project.columns')), findsOneWidget);
 
     final slider = find.byKey(const Key('project.zoom'));
     await tester.tapAt(tester.getCenter(slider));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(browser.zoom, closeTo(.5, .15));
     expect(find.byKey(const Key('project.grid')), findsOneWidget);
     expect(find.byKey(const Key('project.list')), findsNothing);
@@ -87,7 +87,7 @@ void main() {
 
     // Further right, bigger tiles; remembered by a new browser.
     await tester.tapAt(tester.getTopRight(slider) + Offset(-4, tester.getSize(slider).height / 2));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(tester.getSize(find.byKey(const Key('project.asset.$coin'))).width, greaterThan(tile.width));
     final again = ProjectBrowserModel(project: browser.project)..recall(browser.remembered);
     addTearDown(again.dispose);
@@ -95,7 +95,7 @@ void main() {
     expect(again.grid, isTrue);
 
     await tester.tapAt(tester.getTopLeft(slider) + Offset(1, tester.getSize(slider).height / 2));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(browser.zoom, 0);
     expect(find.byKey(const Key('project.list')), findsOneWidget);
     expect(browser.remembered.containsKey('zoom'), isFalse);
@@ -111,7 +111,7 @@ void main() {
     final browser = e.shell.browser!;
     browser.setFolder('prefabs');
     browser.setZoom(.3);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
 
     final order = [for (final a in browser.visibleAssets) a.id];
     expect(order, containsAll([crate, spark, coin]));
@@ -140,23 +140,23 @@ void main() {
     await tester.tap(find.byKey(const Key('project.asset.$crate')));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(find.byKey(const Key('project.asset.$crate')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(e.shell.tabs!.focused!.path, endsWith('crate.prefab.json'));
 
     // A folder is a tile too: a click goes into it.
     browser.setFolder('');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const Key('project.folder.row.models')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(browser.folder, 'models');
 
     // A model's ▸ at its tile's edge: its parts as tiles after it.
     await tester.tap(find.byKey(const Key('project.expand.$robot')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final part = find.byKey(const Key('project.part.$robot.mesh/Cube'));
     expect(part, findsOneWidget);
     await tester.tap(part);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect((browser.lead, browser.leadPart), (robot, 'mesh/Cube'));
     await e.press(LogicalKeyboardKey.arrowRight);
     expect(browser.lead, robot);
@@ -164,7 +164,7 @@ void main() {
 
     // Scripts: tiles too.
     browser.showScripts();
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.byKey(const Key('project.scripts.grid')), findsOneWidget);
     expect(find.byKey(const Key('project.scripts.row.game')), findsOneWidget, reason: 'lib/game as a tile');
   });
@@ -177,7 +177,7 @@ void main() {
     addTearDown(browser.thumbnails!.dispose);
     browser.setFolder('prefabs');
     browser.setZoom(.5);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await drawn(tester);
 
     // One batch for what the folder shows that has a picture to draw.

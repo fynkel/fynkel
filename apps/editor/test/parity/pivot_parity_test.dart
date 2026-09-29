@@ -24,7 +24,7 @@ void main() {
       await e.click(e.row('Crate B'));
       await e.click(e.row('Floor'), command: true); // the Floor leads
       sv.frameSelected();
-      await tester.pumpAndSettle();
+      await settleCooks(tester);
 
       Vec3 at(String id) => matTranslation(sv.current!.preview!.worldMatrices([id])[id]!);
       List<double> rotationOf(String id) => tab.tree[id]!.transform!.rotation;

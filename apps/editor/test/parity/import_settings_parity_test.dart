@@ -20,7 +20,7 @@ void main() {
   Future<Editor> inModels(WidgetTester tester) async {
     final e = await Editor.open(tester);
     e.shell.browser!.setFolder('models');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     return e;
   }
 
@@ -30,7 +30,7 @@ void main() {
 
   Future<void> reveal(WidgetTester tester, Finder f) async {
     await Scrollable.ensureVisible(tester.element(f), alignment: 0.5);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
   }
 
   Future<Uint8List> render(Editor e, String name) async {
@@ -76,7 +76,7 @@ void main() {
     expect(find.byKey(const Key('asset.settings.smoothingAngle')), findsOneWidget);
 
     await e.click(find.byKey(const Key('asset.applySettings')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(sidecar(e, 'robot.glb'), {'scaleFactor': 2.5, 'normals': 'calculate'});
 
     final after = await render(e, 'after');
@@ -112,7 +112,7 @@ void main() {
 
     await untickAnimation();
     await e.click(find.byKey(const Key('asset.unapplied.apply')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(sidecar(e, 'rig.glb')['importAnimation'], false);
 
     // Nothing changed: no question.

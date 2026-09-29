@@ -239,6 +239,72 @@ void main() {
       expect(shell.gameRun?.running ?? false, isFalse);
     });
 
+    testWidgets('a slow cook shows Importing Assets and blocks the editor; Cancel stops Play (ADR-0040 §4)', (
+      tester,
+    ) async {
+      final project = FakeProject(dir: '/fake/game');
+      final doc = project.addDocument(_scene());
+      await pumpLarge(
+        tester,
+        shellApp(
+          prefs: prefs,
+          store: store,
+          projects: {'/fake/game': project},
+          initialProject: '/fake/game',
+          runner: runner,
+          game: _game(),
+        ),
+      );
+      final shell = tester.state<EditorShellState>(find.byType(EditorShell));
+      shell.openDocument(doc.id);
+      await tester.pumpAndSettle();
+      final preview = doc.fakePreview!..cookSteps = 50;
+
+      // ⌃⇧⌘R: a short moment shows nothing, but nothing else runs.
+      expect(shell.registry.execute('view.recook'), isTrue);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byKey(const Key('cook.window')), findsNothing);
+      expect(shell.registry.blocked, isTrue);
+      expect(shell.registry.execute('view.reload'), isFalse);
+      expect(shell.registry.execute('play.start'), isFalse);
+      // Past 0.3 s the window shows the file and the count.
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const Key('cook.window')), findsOneWidget);
+      expect(find.text('Importing Assets'), findsOneWidget);
+      expect(find.textContaining('models/asset'), findsOneWidget);
+      expect(find.textContaining('of 50'), findsOneWidget);
+      // It runs to the end: the window goes, the commands are back.
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(find.byKey(const Key('cook.window')), findsNothing);
+      expect(shell.registry.blocked, isFalse);
+      expect(preview.calls.last, 'cookFinish');
+
+      // Play waits for its cook; Escape cancels it, and Play does not start.
+      expect(shell.registry.execute('play.start'), isTrue);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byKey(const Key('cook.window')), findsOneWidget);
+      expect(shell.gameRun?.running ?? false, isFalse, reason: 'Play waits for the cook');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pumpAndSettle();
+      expect(preview.calls, containsAllInOrder(['cookCancel', 'cookFinish']));
+      expect(find.byKey(const Key('cook.window')), findsNothing);
+      expect(shell.gameRun?.running ?? false, isFalse, reason: 'a cancelled cook does not play');
+      expect(find.textContaining('could not cook'), findsNothing, reason: 'Cancel is not an error');
+      expect(shell.registry.blocked, isFalse);
+
+      // Play again, left to finish: the game starts on the new cache.
+      preview.cookSteps = 3;
+      expect(shell.registry.execute('play.start'), isTrue);
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pumpAndSettle();
+      expect(preview.lastRecookLive, isTrue);
+      expect(shell.gameRun!.running, isTrue);
+      shell.registry.execute('play.start');
+      await tester.pumpAndSettle();
+    });
+
     testWidgets('Build and Run runs the saved files as their own app, even in a project editor (P6)', (tester) async {
       final project = FakeProject(dir: '/fake/game');
       final doc = project.addDocument(_scene());

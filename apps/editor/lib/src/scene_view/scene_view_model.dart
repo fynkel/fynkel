@@ -26,6 +26,7 @@ import 'package:flutter/widgets.dart' show FocusNode, KeyEventResult;
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
+import '../cook/cook_coordinator.dart';
 import '../documents/document_tabs.dart';
 import '../documents/editor_document.dart';
 import '../documents/open_document.dart';
@@ -58,7 +59,12 @@ void releaseWorldCamera(PreviewBackend preview) => _worldCamera[preview] = null;
 
 /// The Scene view copies of one project (item 9e).
 final class SceneViews {
+  SceneViews({CookCoordinator? cooks}) : cooks = cooks ?? CookCoordinator();
+
   final _views = <SceneViewModel>{};
+
+  /// The project's cooks, one at a time, whichever copy asks (ADR-0040).
+  final CookCoordinator cooks;
   int? _recookedAt;
 
   /// Told of every change a view makes to a world (null: every world) —
@@ -292,6 +298,10 @@ final class SceneViewModel extends ChangeNotifier {
   /// The project's Scene view copies, when there can be more than one.
   final SceneViews? views;
 
+  /// Where this view's cooks run: the copies' shared one (ADR-0040).
+  CookCoordinator get cooks => views?.cooks ?? (_ownCooks ??= CookCoordinator());
+  CookCoordinator? _ownCooks;
+
   /// Whether a scroll or a pinch zooms about the point under the pointer
   /// (the preference) rather than the view's centre.
   final bool Function() zoomToPointer;
@@ -461,6 +471,9 @@ final class SceneViewModel extends ChangeNotifier {
       if (cook != null && !cook.ok) {
         notice = 'Cook: ${cook.failed} asset(s) failed — the picture shows what cooked';
       }
+      // Opened over the last cache as it is (ADR-0040 §4): the cook runs
+      // on the session's thread and the world draws once it is applied.
+      if (p.needsCook) unawaited(_recook(st, announce: false));
       if (p.diagnostics.any((d) => d.severity == Severity.error)) {
         notice = p.diagnostics
             .where((d) => d.severity == Severity.error)
@@ -554,7 +567,7 @@ final class SceneViewModel extends ChangeNotifier {
       // Scene view copy to hear of it.
       final t = current;
       if (t != null && t.hasPreview && !isLive && (views?.claimRecook(_assetsRevision) ?? true)) {
-        _recook(t, announce: false);
+        unawaited(_recook(t, announce: false));
       }
     }
     _repaint();
@@ -1018,35 +1031,45 @@ final class SceneViewModel extends ChangeNotifier {
 
   /// ⌃⇧⌘R: `fynkel cook` in process, the cache reopened, every preview
   /// reloaded. Play passes [live] (the unsaved documents cook as held,
-  /// ADR-0021 P5) and no [announce]. Null when nothing could cook (no
-  /// preview, or the cook threw — [notice] says why).
-  CookReport? recook({bool live = false, bool announce = true}) {
+  /// ADR-0021 P5) and no [announce]. The cook runs on the session's thread
+  /// behind the "Importing Assets" window (ADR-0040 §4); a cook already
+  /// running is waited for, then one more runs. Null when nothing could
+  /// cook (no preview, or the cook failed — [notice] says why, or the
+  /// window's Cancel dropped a waiting cook); [CookReport.cancelled] when
+  /// Cancel stopped it.
+  Future<CookReport?> recook({bool live = false, bool announce = true}) async {
     final t = current;
     if (t == null || !t.hasPreview) return null;
-    final r = _recook(t, announce: announce, live: live);
+    final r = await _recook(t, announce: announce, live: live);
     _repaint();
     return r;
   }
 
-  CookReport? _recook(SceneTab t, {required bool announce, bool live = false}) {
+  Future<CookReport?> _recook(SceneTab t, {required bool announce, bool live = false}) async {
     if (drag != null) cancelDrag();
-    try {
-      final r = t.preview!.recook(live: live);
-      for (final st in _sceneTabs.values) {
-        st.hiddenDirty = true;
-        if (st.preview case final p?) _worldCamera[p] = null;
-      }
-      views?.changed(this, null, reset: true);
-      if (announce || !r.ok) {
-        notice = r.ok
-            ? 'Cache rebuilt: ${r.cooked} cooked, ${r.cached} cached'
-            : 'Cache rebuilt with ${r.failed} failure(s): ${r.cooked} cooked, ${r.cached} cached';
-      }
-      return r;
-    } on AuthoringException catch (e) {
-      notice = 'Rebuild failed: $e';
+    final r = await cooks.cook(t.preview!, live: live);
+    if (_disposed) return r;
+    if (r == null) {
+      final error = cooks.error;
+      if (error != null) notice = 'Rebuild failed: $error';
       return null;
     }
+    if (r.cancelled) {
+      notice = 'Import cancelled — the Scene view shows the last cache';
+      return r;
+    }
+    for (final st in _sceneTabs.values) {
+      st.hiddenDirty = true;
+      if (st.preview case final p?) _worldCamera[p] = null;
+    }
+    views?.changed(this, null, reset: true);
+    if (announce || !r.ok) {
+      notice = r.ok
+          ? 'Cache rebuilt: ${r.cooked} cooked, ${r.cached} cached'
+          : 'Cache rebuilt with ${r.failed} failure(s): ${r.cooked} cooked, ${r.cached} cached';
+    }
+    _repaint();
+    return r;
   }
 
   /// The pixels of a fresh frame of the focused tab (RGBA8, the viewport's
@@ -2703,6 +2726,7 @@ final class SceneViewModel extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     views?._views.remove(this);
+    _ownCooks?.dispose();
     _stopFly();
     _stopCoast();
     tabs.removeListener(_onTabs);

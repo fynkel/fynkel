@@ -44,7 +44,7 @@ void main() {
   Future<Editor> open(WidgetTester tester) async {
     final e = await Editor.open(tester, prepare: addScripts);
     e.shell.browser!.showScripts('game');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     return e;
   }
 
@@ -111,7 +111,7 @@ void main() {
       final sv = e.shell.scene!;
       await e.click(e.row('Crate A'));
       sv.frameSelected();
-      await tester.pumpAndSettle();
+      await settleCooks(tester);
       final world = sv.current!.preview!;
       final m = world.worldMatrices([crateA])[crateA]!;
       final px = sv.viewProjection!.project([m[12], m[13], m[14]])!;

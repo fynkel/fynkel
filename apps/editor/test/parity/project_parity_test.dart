@@ -19,7 +19,7 @@ void main() {
   Future<Editor> inPrefabs(WidgetTester tester) async {
     final e = await Editor.open(tester);
     e.shell.browser!.setFolder('prefabs');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.click(find.byKey(const Key('project.asset.$coin')));
     return e;
   }
@@ -116,9 +116,9 @@ void main() {
     const robot = 'c0000000-0000-4000-8000-000000000001';
     Future<void> findReferences(String folder, String id) async {
       e.shell.browser!.setFolder(folder);
-      await tester.pumpAndSettle();
+      await settleCooks(tester);
       await tester.tap(find.byKey(Key('project.asset.$id')), buttons: kSecondaryMouseButton);
-      await tester.pumpAndSettle();
+      await settleCooks(tester);
       await e.click(find.byKey(const Key('project.menu.findReferences')));
     }
 
@@ -144,7 +144,7 @@ void main() {
     const robot = 'c0000000-0000-4000-8000-000000000001';
     final browser = e.shell.browser!;
     browser.setFolder('models');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.click(e.row('Robot'));
     expect(find.byKey(const Key('project.part.$robot.mesh/PyramidAndQuad/0')), findsNothing);
 
@@ -153,7 +153,7 @@ void main() {
     // The parts run past a short panel: scroll to the mesh.
     final list = tester.widget<ListView>(find.byKey(const Key('project.list')));
     list.controller!.jumpTo(44);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(part, findsOneWidget);
     expect(find.byKey(const Key('project.part.$robot.material/Glass')), findsOneWidget);
     expect(e.selectedNames, ['Robot'], reason: 'the ▸ selects nothing');
@@ -198,7 +198,7 @@ void main() {
         FileDrops.channel.codec.encodeMethodCall(MethodCall(method, args)),
         (_) {},
       );
-      await tester.pumpAndSettle();
+      await settleCooks(tester);
     }
 
     final at = tester.getCenter(find.byKey(const Key('project.list')));

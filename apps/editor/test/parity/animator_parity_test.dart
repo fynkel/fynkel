@@ -50,7 +50,7 @@ void main() {
   testWidgets('New Animator Controller; dropped on an object it becomes its Animator\'s controller', (tester) async {
     final e = await Editor.open(tester);
     e.shell.browser!.setFolder('');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.click(find.byKey(const Key('project.new')));
     await e.click(find.byKey(const Key('project.new.controller')));
     final file = File('${e.dir.path}/assets/New Animator Controller.controller.json');
@@ -80,19 +80,19 @@ void main() {
     Map<String, Object?> base() => (saved()['layers'] as List).first as Map<String, Object?>;
     final doc = e.shell.assetEdits!.document(controllerId) ?? (throw StateError(e.shell.assetEdits!.lastError ?? "?"));
     e.shell.workspace!.show(PanelRegistry.animation);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.byKey(const Key('animator.empty')), findsOneWidget);
 
     // A controller picked in the Project shows.
     e.shell.selection!.inspect(const InspectAsset(controllerId));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.text('Entry'), findsOneWidget);
     expect(find.text('Any State'), findsOneWidget);
 
     // Right-click the empty graph: Create State ▸ Empty. The first state is the default.
     final graph = tester.getRect(find.byKey(const Key('animator.graph')));
     await tester.tapAt(graph.center + const Offset(120, -40), buttons: kSecondaryMouseButton);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.click(find.byKey(const Key('animator.menu.state.empty')));
     expect(base()['states'], [
       {'name': 'New State'},
@@ -112,7 +112,7 @@ void main() {
 
     // A state that plays a clip (what a drop from the Project makes), named after it.
     expect(e.shell.animator!.createState(const Offset(260, 0), motion: {'asset': rigAsset, 'sub': 'anim/bob'}), 'bob');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
 
     // F frames the graph (bob was made out of view).
     await e.click(find.byKey(const Key('animator.state.Idle')));
@@ -121,7 +121,7 @@ void main() {
     expect(view.contains(tester.getCenter(find.byKey(const Key('animator.state.bob')))), isTrue);
     // Make Transition from Idle, then a click on bob.
     await tester.tap(find.byKey(const Key('animator.state.Idle')), buttons: kSecondaryMouseButton);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.click(find.byKey(const Key('animator.menu.link')));
     await e.click(find.byKey(const Key('animator.state.bob')));
     expect(base()['transitions'], [
@@ -172,7 +172,7 @@ void main() {
 
     // Selecting an object whose Animator names another controller follows it.
     e.shell.selection!.inspect(const InspectAsset(controllerId));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.click(e.row('Robot'));
     expect(e.shell.animator!.id, controllerId, reason: 'the Robot has no controller: the window stays');
   });
@@ -180,9 +180,9 @@ void main() {
   testWidgets('Create Animator Controller on a model: a state per clip, the first the default', (tester) async {
     final e = await Editor.open(tester);
     e.shell.browser!.setFolder('models');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const Key('project.asset.$rigAsset')), buttons: kSecondaryMouseButton);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.click(find.byKey(const Key('project.menu.createController')));
     final file = File('${e.dir.path}/assets/models/rig.controller.json');
     final saved = jsonDecode(file.readAsStringSync()) as Map<String, Object?>;
@@ -302,7 +302,7 @@ void main() {
     // Stop: the window is the controller's again.
     a.liveOf = null;
     a.playChanged();
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(barsIn('Idle'), isEmpty);
   });
 
@@ -332,7 +332,7 @@ void main() {
     final doc = e.shell.assetEdits!.document(controllerId)!;
     e.shell.workspace!.show(PanelRegistry.animation);
     e.shell.selection!.inspect(const InspectAsset(controllerId));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
 
     // The preview plays in a loop: time is pumped, never settled.
     Future<void> settle() async {
@@ -455,14 +455,14 @@ void main() {
     final doc = e.shell.assetEdits!.document(controllerId) ?? (throw StateError(e.shell.assetEdits!.lastError ?? "?"));
     e.shell.workspace!.show(PanelRegistry.animation);
     e.shell.selection!.inspect(const InspectAsset(controllerId));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final model = e.shell.animator!;
     expect(model.createState(const Offset(0, 0)), 'New State');
 
     // Right-click the graph: Create Sub-State Machine — one state inside, its default.
     final graph = tester.getRect(find.byKey(const Key('animator.graph')));
     await tester.tapAt(graph.center + const Offset(150, 60), buttons: kSecondaryMouseButton);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.click(find.byKey(const Key('animator.menu.machine')));
     expect((base()['states'] as List)[1], {
       'name': 'New Sub-State Machine',
@@ -474,21 +474,21 @@ void main() {
     expect(find.byKey(const Key('animator.state.New Sub-State Machine.machine')), findsOneWidget);
     expect(find.byKey(const Key('animatorItem.machineHint')), findsOneWidget);
     expect(model.renameState('New Sub-State Machine', 'Airborne'), isTrue);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final history = doc.history;
 
     // A double-click opens it: the path bar, Entry, no Any State.
     await tester.tap(find.byKey(const Key('animator.state.Airborne')));
     await tester.pump(kDoubleTapMinTime);
     await tester.tap(find.byKey(const Key('animator.state.Airborne')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(model.machine, ['Airborne']);
     expect(find.byKey(const Key('animator.path')), findsOneWidget);
     expect(find.text('Any State'), findsNothing);
 
     // A state made inside lands inside, placed by path; a transition between them.
     expect(model.createState(const Offset(220, 0)), 'New State 1');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(model.renameState('New State 1', 'Fall'), isTrue);
     final c = model.controller!;
     expect(c.makeTransition(0, 'New State', 'Fall'), 0);
@@ -503,10 +503,10 @@ void main() {
 
     // The transition's interruption, in words.
     model.selectTransition(0);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.textContaining('Can be interrupted by: nothing'), findsOneWidget);
     expect(c.setTransitionField(0, 0, 'interruptibleBy', 'next'), isTrue);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.textContaining('Can be interrupted by: the next state'), findsOneWidget);
 
     // The path bar goes back; a rename from outside moves the places inside.
@@ -549,10 +549,10 @@ void main() {
     final h = e.shell.hierarchy!;
     expect(h.createPreset(GameObjectPreset.cube, parent: robot), isTrue);
     expect(h.assignController({'asset': controllerId}, robot), isTrue);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.click(e.row('Robot'));
     e.shell.workspace!.show(PanelRegistry.animation);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final model = e.shell.animator!;
     expect(model.object, robot);
     expect(model.nodes.map((n) => n.name), ['Robot', 'Cube']);

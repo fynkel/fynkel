@@ -910,8 +910,11 @@ final class FakeDocument extends EditorDocument {
     final open = _preview;
     if (open != null && !open.isClosed) return open;
     previewsOpened++;
-    return _preview = FakePreviewBackend(this);
+    return _preview = FakePreviewBackend(this)..needsCook = previewNeedsCook;
   }
+
+  /// The previews open over no cache (ADR-0040 §4): the Scene view cooks.
+  bool previewNeedsCook = false;
 
   @override
   PreviewBackend? get preview => _preview == null || _preview!.isClosed ? null : _preview;

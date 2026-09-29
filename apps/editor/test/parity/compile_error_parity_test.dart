@@ -32,7 +32,7 @@ void main() {
       );
       File(status).setLastModifiedSync(DateTime(2027, 1, 1, 0, 0, seq));
       await tester.pump(const Duration(milliseconds: 500));
-      await tester.pumpAndSettle();
+      await settleCooks(tester);
     }
 
     final e = await Editor.open(tester, codeReloadStatus: status);

@@ -22,7 +22,7 @@ void main() {
     final e = await Editor.open(tester);
     final look = e.shell.project!.newDocument('volume', 'volumes/look.volume.json', name: 'Look').id!;
     e.shell.browser!.setFolder('volumes');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.click(find.byKey(Key('project.asset.$look')));
     return (e, look);
   }
@@ -32,7 +32,7 @@ void main() {
 
   Future<void> reveal(WidgetTester tester, Finder f) async {
     await Scrollable.ensureVisible(tester.element(f), alignment: 0.5);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
   }
 
   Finder inRow(String field, Finder f) => find.descendant(of: find.byKey(Key('volume.$field')), matching: f);

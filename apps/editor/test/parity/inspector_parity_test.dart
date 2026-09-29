@@ -67,7 +67,7 @@ void main() {
     expect(during, greaterThan(x0 + 1e-6), reason: 'the world follows the drag');
     expect(tab.document.history, 0, reason: 'nothing written yet');
     await g.up();
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(tab.document.history, 1, reason: 'one undo step on release');
     expect(world.worldMatrices([id])[id]![12], closeTo(during, 1e-6));
   });

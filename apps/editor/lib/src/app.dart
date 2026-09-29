@@ -15,6 +15,8 @@ import 'animator/animator_model.dart';
 import 'animator/animator_panel.dart';
 import 'commands/commands.dart';
 import 'commands/palette.dart';
+import 'cook/cook_coordinator.dart';
+import 'cook/cook_window.dart';
 import 'console/console_panel.dart';
 import 'documents/document_tab_bar.dart';
 import 'documents/document_tabs.dart';
@@ -253,6 +255,10 @@ class EditorShell extends StatefulWidget {
 
 class EditorShellState extends State<EditorShell> {
   final registry = CommandRegistry();
+
+  /// The project's cooks (ADR-0040): while one runs, no command runs and
+  /// the "Importing Assets" window is over the editor.
+  final cooks = CookCoordinator();
   final panels = PanelRegistry(const []);
   late PanelRegistry _panels;
   Toolchain? toolchain;
@@ -484,6 +490,7 @@ class EditorShellState extends State<EditorShell> {
   @override
   void initState() {
     super.initState();
+    cooks.addListener(_onCook);
     ide = IdeLauncher(widget.prefs);
     final status = widget.codeReloadStatus;
     if (status != null) codeReload = CodeReloadStatus(status)..addListener(_onCodeReload);
@@ -614,6 +621,9 @@ class EditorShellState extends State<EditorShell> {
 
   @override
   void dispose() {
+    cooks
+      ..removeListener(_onCook)
+      ..dispose();
     widget.prefs.removeListener(_onPrefsChanged);
     extensions.dispose();
     codeReload?.dispose();
@@ -641,6 +651,9 @@ class EditorShellState extends State<EditorShell> {
     notices.dispose();
     super.dispose();
   }
+
+  /// A cook started or ended: the commands wait for it (ADR-0040 §4).
+  void _onCook() => registry.blocked = cooks.isRunning;
 
   void _onPrefsChanged() {
     _registerRecents();
@@ -2126,7 +2139,7 @@ class EditorShellState extends State<EditorShell> {
       codegen = cg;
       editorState = es;
       _sceneOps = h;
-      _sceneViews = SceneViews();
+      _sceneViews = SceneViews(cooks: cooks);
       _gamePreview = GamePreview(tabs: t, scene: () => scene, views: _sceneViews);
       // The first copies, then any other the saved layout has.
       for (final base in _creationOrder) {
@@ -2415,7 +2428,7 @@ class EditorShellState extends State<EditorShell> {
     final tab = _focusedTab;
     final sceneId = tab != null && tab.kind == 'scene' ? tab.document.id : null;
     final cooked = await _cookForPlay(opened);
-    if (!mounted) return;
+    if (!mounted || cooked == '') return;
     if (cooked != null) {
       _showError('Play could not cook the project: $cooked');
       return;
@@ -2433,12 +2446,14 @@ class EditorShellState extends State<EditorShell> {
   /// Scene view's preview when one is open, with every unsaved document
   /// as the editor holds it (a copy of each goes to `.fynkel/recovery/`
   /// first; the files are untouched); else `fynkel cook` from the files.
-  /// Null when it worked, else why not.
+  /// Null when it worked, '' when the cook window's Cancel stopped it
+  /// (Play does not start, ADR-0040 §4), else why not.
   Future<String?> _cookForPlay(EditorProject opened) async {
     final sv = scene;
     if (sv != null && sv.current?.hasPreview == true) {
-      final r = sv.recook(live: true, announce: false);
-      if (r == null) return sv.notice ?? 'the cook did not run';
+      final r = await sv.recook(live: true, announce: false);
+      if (r == null) return sv.cooks.error ?? '';
+      if (r.cancelled) return '';
       if (!r.ok) return '${r.failed} asset(s) failed to cook — ⌃⇧⌘R in the Scene view shows the report';
       return null;
     }
@@ -3304,14 +3319,17 @@ class EditorShellState extends State<EditorShell> {
                 child: NoticesScope(
                   notices: notices,
                   child: _previewStages(
-                    p0 == null || workspace == null
-                        ? Column(
-                            children: [
-                              Expanded(child: body),
-                              NoticeStrip(key: const Key('shell.error'), notices: notices),
-                            ],
-                          )
-                        : body,
+                    CookWindow(
+                      cooks: cooks,
+                      child: p0 == null || workspace == null
+                          ? Column(
+                              children: [
+                                Expanded(child: body),
+                                NoticeStrip(key: const Key('shell.error'), notices: notices),
+                              ],
+                            )
+                          : body,
+                    ),
                   ),
                 ),
               ),

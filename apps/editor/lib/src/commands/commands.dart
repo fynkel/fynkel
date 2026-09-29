@@ -110,7 +110,7 @@ final class CommandAction extends Action<CommandIntent> {
   @override
   bool isEnabled(CommandIntent intent) {
     final c = registry.byId(intent.id);
-    if (c == null) return false;
+    if (c == null || registry.blocked) return false;
     if (intent.bare && CommandRegistry.focusOwnsBareKeys) return false;
     return c.isEnabled || (c.textIntent != null && CommandRegistry.focusIsTextField);
   }
@@ -154,6 +154,16 @@ final class CommandRegistry extends ChangeNotifier {
 
   EditorCommand? byId(String id) => _commands[id];
 
+  /// No command runs — a cook is importing assets (ADR-0040 §4): the keys,
+  /// the menus and the palette all wait for it.
+  bool get blocked => _blocked;
+  bool _blocked = false;
+  set blocked(bool value) {
+    if (value == _blocked) return;
+    _blocked = value;
+    notifyListeners();
+  }
+
   List<EditorCommand> inMenu(EditorMenu menu) => all.where((c) => c.menu == menu).toList();
 
   void register(EditorCommand command) {
@@ -188,7 +198,7 @@ final class CommandRegistry extends ChangeNotifier {
   /// focused text field instead, when there is one.
   bool execute(String id) {
     final c = _commands[id];
-    if (c == null) return false;
+    if (c == null || _blocked) return false;
     if (c.textIntent != null && focusIsTextField) {
       final ctx = primaryFocus!.context!;
       Actions.maybeInvoke(ctx, c.textIntent!);

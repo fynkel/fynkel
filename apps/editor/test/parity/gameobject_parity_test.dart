@@ -107,7 +107,7 @@ void main() {
     expect(e.rows, containsAllInOrder(['Directional Light', 'Camera']));
 
     await tester.tapAt(tester.getCenter(e.row('Robot')), buttons: kSecondaryMouseButton);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.click(find.byKey(const Key('hierarchy.menu.3dObject')));
     await e.click(find.byKey(const Key('hierarchy.menu.sphere')));
     await e.submit();

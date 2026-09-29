@@ -40,7 +40,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.byKey(const ValueKey('card.dropLine.fynkel.RigidBody#0')), findsOneWidget);
     await g.up();
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(order(), ['fynkel.Transform', 'fynkel.Collider', 'fynkel.RigidBody', 'fynkel.Layer']);
     expect(
       tester.getTopLeft(header('fynkel.Collider#0')).dy,

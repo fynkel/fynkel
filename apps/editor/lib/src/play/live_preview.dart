@@ -130,6 +130,10 @@ final class LivePreview implements PreviewBackend {
   @override
   CookReport recook({bool live = false}) => throw _refused('recook');
   @override
+  CookRun startCook({bool live = false}) => throw _refused('recook');
+  @override
+  bool get needsCook => false;
+  @override
   Map<String, Object?> dump() => const {};
 
   @override

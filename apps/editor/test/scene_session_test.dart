@@ -71,12 +71,15 @@ final class Stack {
   late final EditorState editorState;
   late final SceneViewModel model;
 
-  void close() {
+  /// Closes the project before its folder goes: a cook the first preview
+  /// started runs on the session's thread (ADR-0040), and closing the
+  /// session stops it and waits for it.
+  Future<void> close() async {
     model.dispose();
     hierarchy.dispose();
     tabs.dispose();
     editorState.dispose();
-    project.close();
+    await project.close();
     dir.deleteSync(recursive: true);
   }
 

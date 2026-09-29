@@ -21,7 +21,7 @@ const restitution = 'field.fynkel.Collider#0.restitution';
 void main() {
   Future<void> reveal(WidgetTester tester, Finder f) async {
     await Scrollable.ensureVisible(tester.element(f), alignment: 0.5);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
   }
 
   testWidgets('New Physics Material: the Inspector edits friction, bounciness and the combine rules; ⌘Z', (
@@ -30,7 +30,7 @@ void main() {
     final e = await Editor.open(tester);
     final scene = e.shell.tabs!.focused!;
     e.shell.browser!.setFolder('');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.click(find.byKey(const Key('project.new')));
     await e.click(find.byKey(const Key('project.new.physics_material')));
     final file = File('${e.dir.path}/assets/New Physics Material.physicsmaterial.json');
@@ -76,7 +76,7 @@ void main() {
     final bouncy = e.shell.project!
         .newDocument('physics_material', 'physics/Bouncy.physicsmaterial.json', name: 'Bouncy')
         .id!;
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.click(e.row('Floor'));
     Map<String, Object?> collider() {
       final components = (tab.document.root()['entities'] as Map)[floor]['components'] as Map;

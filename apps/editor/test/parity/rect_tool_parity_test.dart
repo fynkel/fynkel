@@ -33,7 +33,7 @@ void main() {
     final tab = e.shell.tabs!.focused!;
     await e.click(e.row('Crate B'));
     sv.frameSelected();
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.press(LogicalKeyboardKey.keyT);
     expect(sv.tool, SceneTool.rect);
     expect(e.shell.registry.byId('scene.tool.rect')!.label, contains('Rect'));
@@ -56,7 +56,7 @@ void main() {
     final history = tab.document.history;
     final target = vAdd(c00, vScale(vSub(c11, c00), 1.5));
     dragTo('rect.corner.11', target);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(tab.document.history, history + 1, reason: 'one undo step');
     near(grab('rect.corner.00'), c00, reason: 'the opposite corner stays');
     near(grab('rect.corner.11'), target, reason: 'the dragged corner is where the pointer is');
@@ -72,7 +72,7 @@ void main() {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
     dragTo('rect.edge.a1', vAdd(grab('rect.edge.a1'), along));
     await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     near(grab('rect.corner.00'), vSub(c00, along), reason: 'the far edge moved out as much');
     near(grab('rect.corner.01'), vSub(c01, along));
 
@@ -81,7 +81,7 @@ void main() {
     c00 = grab('rect.corner.00');
     final shift = vScale(vSub(grab('rect.corner.01'), c00), 0.5);
     dragTo('rect.move', vAdd(grab('rect.move'), shift));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     near(matTranslation(sv.current!.preview!.worldMatrices([crateB])[crateB]!), vAdd(before, shift));
     near(grab('rect.corner.00'), vAdd(c00, shift));
 
@@ -95,7 +95,7 @@ void main() {
     expect(sv.beginDrag('rect.rotate.11', zone), isTrue);
     sv.updateDrag(pivotPx + Offset(-rel.dy, rel.dx));
     expect(sv.endDrag()!.ok, isTrue);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(tab.tree[crateB]!.transform!.rotation, isNot(rotation));
     near(tab.tree[crateB]!.transform!.position, position, reason: 'turned about its own origin');
 
@@ -106,7 +106,7 @@ void main() {
     expect(sv.handleAt(crate)?.id, 'rect.move', reason: 'inside the rectangle');
     final picture = find.byWidgetPredicate((w) => w.key is GlobalKey && '${w.key}'.contains('scene.picture'));
     await tester.tapAt(tester.getTopLeft(picture) + crate / tester.view.devicePixelRatio);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(tab.selection, [crateA]);
   });
 
@@ -116,7 +116,7 @@ void main() {
     final tab = e.shell.tabs!.focused!;
     await e.click(e.row('Crate B'));
     sv.frameSelected();
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.press(LogicalKeyboardKey.keyE);
     final start = sv.current!.preview!.worldMatrices([crateB])[crateB]!;
     final frame = sv.gizmoFrame()!;
@@ -132,7 +132,7 @@ void main() {
     sv.updateDrag(grab + Offset(90 * sv.pixelRatio, 0));
     expect(sv.drag!.readout, '90°');
     expect(sv.endDrag()!.ok, isTrue);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(tab.document.history, 1);
 
     final now = sv.current!.preview!.worldMatrices([crateB])[crateB]!;

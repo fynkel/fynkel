@@ -52,7 +52,7 @@ void main() {
     final tab = e.shell.tabs!.focused!;
     await e.click(e.row('Crate A'));
     sv.frameSelected();
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     tab.clearSelection();
     // The Select tool: a gizmo on the clicked object would take the next click.
     await e.press(LogicalKeyboardKey.keyQ);
@@ -67,7 +67,7 @@ void main() {
     Future<void> tap(Offset p) async {
       await tester.tapAt(p);
       await tester.pump(const Duration(milliseconds: 600)); // not a double-click
-      await tester.pumpAndSettle();
+      await settleCooks(tester);
     }
 
     await tap(at);
@@ -79,12 +79,12 @@ void main() {
 
     // With the Lid selected, a click on it (anywhere on it) stays on it.
     tab.select(lid);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tap(at + const Offset(6, 4));
     expect(tab.selection, [lid]);
     // Selected from the Hierarchy, the root: a click on the Lid goes into it.
     tab.select(crateA);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tap(at + const Offset(-6, 3));
     expect(tab.selection, [lid]);
   });

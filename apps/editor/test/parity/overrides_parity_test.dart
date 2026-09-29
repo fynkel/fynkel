@@ -54,23 +54,23 @@ void main() {
 
     // The dropdown: by object, the comparison, Revert, one undo step.
     await tester.tap(find.byKey(const ValueKey('prefab.overrides')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.text("Review, Revert or Apply Overrides on 'Crate A'"), findsOneWidget);
     expect(find.byKey(const ValueKey('prefab.override.0')), findsOneWidget);
     expect(find.byKey(const ValueKey('prefab.override.1')), findsOneWidget);
     expect(find.byKey(const ValueKey('prefab.revert.0')), findsNothing, reason: 'a row opens on a click');
     await tester.tap(find.byKey(const ValueKey('prefab.override.0')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(tester.widget<SelectableText>(find.byKey(const ValueKey('prefab.compare.Prefab'))).data, 'true');
     expect(tester.widget<SelectableText>(find.byKey(const ValueKey('prefab.compare.Override'))).data, 'false');
     final before = tab.document.history;
     await tester.tap(find.byKey(const ValueKey('prefab.revert.0')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(overrides(), hasLength(1));
     expect(tab.document.history, before + 1);
     expect(find.byKey(const ValueKey('prefab.override.1')), findsNothing, reason: 'the dropdown follows');
     await tester.tapAt(const Offset(2, 2));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.byKey(const ValueKey('prefab.overridesPanel')), findsNothing);
     expect(bar(castShadows), findsNothing);
     await e.press(LogicalKeyboardKey.keyZ, command: true);
@@ -82,11 +82,11 @@ void main() {
       find.descendant(of: find.byKey(const ValueKey(castShadows)), matching: find.text('Cast Shadows')),
       buttons: kSecondaryMouseButton,
     );
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.text("Apply to Prefab 'Crate'"), findsOneWidget);
     expect(find.byKey(const ValueKey('field.revert')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('field.apply')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(
       prefabRoot()['c0000000-0000-4000-8000-0000000000c3']['data']['cast_shadows'],
       false,
@@ -97,23 +97,23 @@ void main() {
 
     // An added component: '+', the bar, Revert Added Component; again, Apply.
     expect(e.shell.inspector!.addComponent('fynkel.PointLight'), isTrue);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.byKey(const ValueKey('card.added.fynkel.PointLight#0')), findsOneWidget);
     expect(find.byKey(const ValueKey('card.overrideBar.fynkel.PointLight#0')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('card.menu.fynkel.PointLight#0')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.text("Apply Added Component to Prefab 'Crate'"), findsOneWidget);
     await tester.tap(find.byKey(const Key('card.menu.revertAdded')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.byKey(const ValueKey('card.fynkel.PointLight#0')), findsNothing);
     expect(overrides(), hasLength(1));
 
     expect(e.shell.inspector!.addComponent('fynkel.PointLight'), isTrue);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const ValueKey('card.menu.fynkel.PointLight#0')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const Key('card.menu.applyAdded')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(prefabRoot().values.map((c) => c['type']), contains('fynkel.PointLight'));
     expect(find.byKey(const ValueKey('card.added.fynkel.PointLight#0')), findsNothing, reason: "now the prefab's");
     expect(find.byKey(const ValueKey('card.fynkel.PointLight#0')), findsOneWidget);
@@ -121,9 +121,9 @@ void main() {
     // Apply All: the last override (the position) goes into the prefab too.
     expect(find.text('Overrides (1)'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('prefab.overrides')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const ValueKey('prefab.applyAll')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.byKey(const ValueKey('prefab.overridesPanel')), findsNothing, reason: 'Apply All closes it');
     expect(overrides(), isEmpty);
     expect(find.text('Overrides'), findsOneWidget);
@@ -163,17 +163,17 @@ void main() {
     expect(bar(castShadows), findsOneWidget, reason: 'the other overrides still apply');
 
     await tester.tap(find.byKey(const ValueKey('prefab.overrides')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.byKey(const ValueKey('prefab.unusedHeader')), findsOneWidget);
     expect(find.byKey(const ValueKey('prefab.override.2')), findsOneWidget);
     final before = tab.document.history;
     await tester.tap(find.byKey(const ValueKey('prefab.removeUnused')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(tab.expansionOf(crateA)!.overrides, hasLength(2));
     expect(tab.document.history, before + 1, reason: 'one undo step');
     expect(find.byKey(const ValueKey('prefab.unused')), findsNothing);
     await tester.tapAt(const Offset(2, 2));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.press(LogicalKeyboardKey.keyZ, command: true);
     expect(tab.expansionOf(crateA)!.overrides, hasLength(3));
   });

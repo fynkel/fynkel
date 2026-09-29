@@ -17,7 +17,7 @@ void main() {
   Future<Editor> onRusted(WidgetTester tester) async {
     final e = await Editor.open(tester);
     e.shell.browser!.setFolder('materials');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.click(find.byKey(const Key('project.asset.$rusted')));
     return e;
   }
@@ -32,7 +32,7 @@ void main() {
   /// Scrolls [f] to the middle of the Inspector (the top edge is under the page's header).
   Future<void> reveal(WidgetTester tester, Finder f) async {
     await Scrollable.ensureVisible(tester.element(f), alignment: 0.5);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
   }
 
   Finder inRow(String field, Finder f) => find.descendant(of: find.byKey(Key('material.$field')), matching: f);
@@ -63,7 +63,7 @@ void main() {
     expect(during, greaterThan(0.7), reason: 'drawn while dragging');
     expect(saved(e)['roughness'], 0.65, reason: 'nothing written while dragging');
     await g.up();
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect((saved(e)['roughness'] as num).toDouble(), closeTo(during, 1e-6));
 
     // Rendering Mode → Cutout: the cutoff appears.
@@ -102,7 +102,7 @@ void main() {
     final e = await Editor.open(tester);
     final blue = e.shell.project!.newDocument('material', 'materials/blue.material.json', name: 'Blue').id!;
     e.shell.browser!.setFolder('materials');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     return (e, blue);
   }
 
@@ -147,7 +147,7 @@ void main() {
     final sv = e.shell.scene!;
     await e.click(e.row('Robot'));
     sv.frameSelected();
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final world = sv.current!.preview!;
     final m = world.worldMatrices([robot])[robot]!;
     final px = sv.viewProjection!.project([m[12], m[13], m[14]])!;
@@ -173,7 +173,7 @@ void main() {
     expect(robotMaterial(e), {'asset': rusted});
 
     await g.up();
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(robotMaterial(e), {'asset': blue});
     expect(e.shell.tabs!.focused!.document.history, 1, reason: 'one undo step');
     await e.press(LogicalKeyboardKey.keyZ, command: true);

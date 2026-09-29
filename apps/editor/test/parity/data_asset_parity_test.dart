@@ -113,14 +113,14 @@ void weapons(Directory dir) {
 void main() {
   Future<void> reveal(WidgetTester tester, Finder f) async {
     await Scrollable.ensureVisible(tester.element(f), alignment: 0.5);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
   }
 
   testWidgets('Create ▸ Game › Weapon: the Inspector edits its fields from the schema; a refusal; ⌘Z', (tester) async {
     final e = await Editor.open(tester, prepare: weapons);
     final scene = e.shell.tabs!.focused!;
     e.shell.browser!.setFolder('');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.click(find.byKey(const Key('project.new')));
     expect(find.text('New Game › Weapon'), findsOneWidget, reason: "the type's menu path");
     expect(find.byKey(const Key('project.new.data.game.Shield')), findsOneWidget);
@@ -160,7 +160,7 @@ void main() {
   testWidgets("a data-typed field's picker offers only data assets of its type", (tester) async {
     final e = await Editor.open(tester, prepare: weapons);
     e.shell.browser!.select(sword);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final upgrade = find.byKey(const ValueKey('field.data.$sword.upgrade'));
     await reveal(tester, upgrade);
     expect(find.descendant(of: upgrade, matching: find.text('None (Weapon)')), findsOneWidget);
@@ -179,7 +179,7 @@ void main() {
   testWidgets('a record is a foldout, alone and as the items of a list; its fields edit in place', (tester) async {
     final e = await Editor.open(tester, prepare: weapons);
     e.shell.browser!.select(loot);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final file = File('${e.dir.path}/assets/data/loot.data.json');
     Map<String, Object?> data() => (jsonDecode(file.readAsStringSync()) as Map)['data'] as Map<String, Object?>;
 

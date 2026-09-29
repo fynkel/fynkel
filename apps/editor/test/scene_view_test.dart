@@ -795,19 +795,69 @@ void main() {
       expect(st.camera.alignedWorld, isNotNull);
     });
 
-    test('reload and rebuild go to the preview and say so; a changed asset set rebuilds on its own', () {
+    test('reload and rebuild go to the preview and say so; a changed asset set rebuilds on its own', () async {
       final r = Rig();
       addTearDown(r.dispose);
       r.open();
       r.model.reload();
       expect(r.preview.calls, contains('reload'));
       expect(r.model.notice, contains('reloaded'));
-      r.model.recook();
-      expect(r.preview.calls, contains('recook'));
+      // The cook runs on the session's thread (ADR-0040): started, then applied.
+      final report = await r.model.recook();
+      expect(report?.ok, isTrue);
+      expect(r.preview.calls, containsAllInOrder(['cookStart', 'cookFinish']));
       expect(r.model.notice, contains('Cache rebuilt'));
-      final before = r.preview.calls.where((c) => c == 'recook').length;
+      final before = r.preview.calls.where((c) => c == 'cookStart').length;
       r.project.createFolder('x');
-      expect(r.preview.calls.where((c) => c == 'recook').length, before + 1);
+      expect(r.preview.calls.where((c) => c == 'cookStart').length, before + 1);
+    });
+
+    test('rebuilds asked for while one cooks wait, then share one more cook (ADR-0040 §4)', () async {
+      final r = Rig();
+      addTearDown(r.dispose);
+      r.open();
+      r.preview.cookSteps = 4;
+      final first = r.model.recook();
+      final second = r.model.recook();
+      final third = r.model.recook(live: true, announce: false);
+      expect(r.model.cooks.isRunning, isTrue);
+      expect(r.preview.cookRuns, hasLength(1), reason: 'one cook at a time');
+      expect((await first)?.cooked, 4);
+      final a = await second;
+      final b = await third;
+      expect(a, isNotNull);
+      expect(b, same(a), reason: 'the waiting requests share one cook');
+      expect(r.preview.cookRuns, hasLength(2));
+      expect(r.preview.cookRuns.last.live, isTrue, reason: 'live when any of them asked for live');
+      expect(r.model.cooks.isRunning, isFalse);
+    });
+
+    test('Cancel stops the cook, drops the waiting one and keeps the last cache (ADR-0040 §4)', () async {
+      final r = Rig();
+      addTearDown(r.dispose);
+      r.open();
+      r.preview.cookSteps = 1000;
+      final running = r.model.recook();
+      final waiting = r.model.recook();
+      r.model.cooks.cancel();
+      expect(await waiting, isNull);
+      expect((await running)?.cancelled, isTrue);
+      expect(r.preview.calls, containsAllInOrder(['cookStart', 'cookCancel', 'cookFinish']));
+      expect(r.preview.cookRuns, hasLength(1));
+      expect(r.model.notice, contains('cancelled'));
+    });
+
+    test('a preview opened over no cache cooks on the thread and draws once it is applied (ADR-0040 §4)', () async {
+      final r = Rig(doc: scene()..previewNeedsCook = true);
+      addTearDown(r.dispose);
+      r.open();
+      expect(r.preview.calls, contains('cookStart'), reason: 'the first preview starts its cook');
+      expect(r.model.cooks.isRunning, isTrue);
+      while (r.model.cooks.isRunning) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(r.preview.calls, contains('cookFinish'));
+      expect(r.preview.needsCook, isFalse);
     });
 
     test('Save Frame without an attached viewport says so and writes nothing', () async {
@@ -1169,7 +1219,11 @@ void main() {
       expect(registry.execute('view.reload'), isTrue);
       expect(calls.last, 'reload');
       expect(registry.execute('view.recook'), isTrue);
-      expect(calls.last, 'recook');
+      expect(calls.last, 'cookStart');
+      // Nothing else runs until the cook is applied (ADR-0040 §4).
+      expect(registry.execute('view.reload'), isFalse);
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(calls, contains('cookFinish'));
       expect(registry.execute('view.saveFrame'), isTrue);
       await tester.pump();
       expect(sv.notice, contains('not attached'));

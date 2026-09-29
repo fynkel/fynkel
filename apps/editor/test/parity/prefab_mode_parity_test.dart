@@ -36,7 +36,7 @@ void main() {
     final e = await Editor.open(tester);
     final scene = e.shell.tabs!.focused!;
     await tester.tap(find.byKey(const Key('hierarchy.openPrefab.$crateA')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final prefab = e.shell.tabs!.focused!;
     expect(prefab.document.id, cratePrefab);
     expect(e.shell.tabs!.contextOf(prefab)?.instance, crateA);
@@ -53,7 +53,7 @@ void main() {
 
     // A change is on disk at once; so is its undo.
     expect(e.shell.hierarchy!.rename(crateRoot, 'Big Crate'), isTrue);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(prefab.dirty, isFalse);
     expect(rootName(e), 'Big Crate');
     await e.press(LogicalKeyboardKey.keyZ, command: true);
@@ -62,7 +62,7 @@ void main() {
 
     // ‹ back to the scene: the prefab's tab closes, the scene is focused.
     await tester.tap(find.byKey(const Key('scene.prefab.back')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(e.shell.tabs!.focused, same(scene));
     expect(e.shell.tabs!.open, isNot(contains(prefab)));
     expect(find.byKey(const Key('scene.prefabBar')), findsNothing);
@@ -74,48 +74,48 @@ void main() {
     final scene = e.shell.tabs!.focused!;
     await e.click(e.row('Crate A'));
     await tester.tap(find.byKey(const Key('prefab.open')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final prefab = e.shell.tabs!.focused!;
     expect(e.shell.tabs!.contextOf(prefab)?.instance, crateA, reason: "the Inspector's Open is in context too");
 
     await tester.tap(find.byKey(const Key('scene.prefab.autoSave')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(e.shell.tabs!.autoSavePrefabs, isFalse);
     expect(jsonDecode(File('${e.dir.path}/.fynkel/editor.json').readAsStringSync())['prefabAutoSave'], isFalse);
     expect(tester.widget<TextButton>(find.byKey(const Key('scene.prefab.save'))).onPressed, isNull);
 
     e.shell.hierarchy!.rename(crateRoot, 'Big Crate');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(prefab.dirty, isTrue);
     expect(rootName(e), 'Crate');
     await tester.tap(find.byKey(const Key('scene.prefab.save')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(prefab.dirty, isFalse);
     expect(rootName(e), 'Big Crate');
 
     e.shell.hierarchy!.rename(crateRoot, 'Huge Crate');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const Key('scene.crumb.0')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const Key('closePrompt.cancel')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(e.shell.tabs!.focused, same(prefab), reason: 'Cancel stays in Prefab mode');
     await tester.tap(find.byKey(const Key('hierarchy.prefab.back')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const Key('closePrompt.discard')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(e.shell.tabs!.focused, same(scene));
     expect(rootName(e), 'Big Crate', reason: 'the discarded change never reached the file');
 
     // Turned back on, a prefab with unsaved changes is saved at once.
     await e.click(e.row('Crate A'));
     await tester.tap(find.byKey(const Key('hierarchy.openPrefab.$crateA')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     e.shell.hierarchy!.rename(crateRoot, 'Crate');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(e.shell.tabs!.focused!.dirty, isTrue);
     await tester.tap(find.byKey(const Key('scene.prefab.autoSave')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(e.shell.tabs!.focused!.dirty, isFalse);
     expect(rootName(e), 'Crate');
   });
@@ -123,15 +123,15 @@ void main() {
   testWidgets('Context: Normal / Gray / Hidden, remembered; from the Project, isolation', (tester) async {
     final e = await Editor.open(tester);
     await tester.tap(find.byKey(const Key('hierarchy.openPrefab.$crateA')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final sv = e.shell.scene!;
     expect(sv.editorState.prefabContext, PrefabContextMode.gray, reason: "Unity's default");
     expect(sv.drawnContext?.instance, crateA);
 
     await tester.tap(find.byKey(const Key('scene.prefab.context')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const Key('scene.prefab.context.hidden')).last);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(sv.editorState.prefabContext, PrefabContextMode.hidden);
     expect(sv.drawnContext, isNull, reason: 'the prefab alone');
     expect(jsonDecode(File('${e.dir.path}/.fynkel/editor.json').readAsStringSync())['prefabContext'], 'hidden');
@@ -162,13 +162,13 @@ void main() {
 
     // Double-clicked in the Project: in isolation — no scene crumb, no Context.
     await tester.tap(find.byKey(const Key('scene.prefab.back')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     e.shell.browser!.setFolder('prefabs');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const Key('project.asset.$cratePrefab')));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(find.byKey(const Key('project.asset.$cratePrefab')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final prefab = e.shell.tabs!.focused!;
     expect(prefab.document.id, cratePrefab);
     expect(e.shell.tabs!.contextOf(prefab), isNull);
@@ -177,7 +177,7 @@ void main() {
     expect(find.byKey(const Key('scene.prefab.context')), findsNothing);
     expect(sv.drawnContext, isNull);
     await tester.tap(find.byKey(const Key('scene.prefab.back')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(e.shell.tabs!.open, isNot(contains(prefab)), reason: '‹ closes it');
   });
 }

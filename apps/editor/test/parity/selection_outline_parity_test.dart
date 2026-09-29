@@ -35,7 +35,7 @@ void main() {
 
     // A child under the Robot: blue while the Robot is selected, orange once it is.
     expect(e.shell.hierarchy!.createPreset(GameObjectPreset.cube, parent: robot), isTrue);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final cube = tab.selection.single;
     await e.click(e.row('Robot'));
     o = sv.overlay(sv.current!);

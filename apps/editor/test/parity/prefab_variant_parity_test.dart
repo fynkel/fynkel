@@ -41,13 +41,13 @@ void main() {
     await dragToProject(e, 'Crate A');
     expect(find.byKey(const Key('dialog.createPrefab')), findsOneWidget);
     await tester.tap(find.byKey(const Key('createPrefab.cancel')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(File('${e.dir.path}/assets/prefabs/Crate A.prefab.json').existsSync(), isFalse);
     expect(tab.expansionOf(crateA)!.overrides, hasLength(2));
 
     await dragToProject(e, 'Crate A');
     await tester.tap(find.byKey(const Key('createPrefab.variant')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final variant = read(e, 'prefabs/Crate A.prefab.json');
     final root = rootOf(variant)['prefab'] as Map;
     expect((root['asset'] as Map)['asset'], cratePrefab, reason: "the variant's root is an instance of its base");
@@ -61,17 +61,17 @@ void main() {
 
     // An override on the instance: Apply offers the variant and its base.
     await tester.tap(find.descendant(of: find.byKey(const ValueKey(receiveShadows)), matching: find.byType(Checkbox)));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(tab.expansionOf(crateA)!.overrides, hasLength(1));
     await tester.tap(
       find.descendant(of: find.byKey(const ValueKey(receiveShadows)), matching: find.text('Receive Shadows')),
       buttons: kSecondaryMouseButton,
     );
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(find.text("Apply to Prefab Variant 'Crate A'"), findsOneWidget);
     expect(find.text("Apply to Prefab 'Crate'"), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('field.apply.1')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final base = rootOf(read(e, 'prefabs/crate.prefab.json'));
     expect((base['components'] as Map)[meshRenderer]['data']['receive_shadows'], isFalse, reason: 'into the base');
     expect(
@@ -85,13 +85,13 @@ void main() {
 
     // Another: the Overrides dropdown's Apply All ▾ into the variant.
     await tester.tap(find.descendant(of: find.byKey(const ValueKey(receiveShadows)), matching: find.byType(Checkbox)));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const ValueKey('prefab.overrides')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const ValueKey('prefab.applyAll')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const ValueKey('prefab.applyAll.target.0')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(
       ((rootOf(read(e, 'prefabs/Crate A.prefab.json'))['prefab'] as Map)['overrides'] as List).where(
         (o) => (o as Map)['field'] == 'receive_shadows' && o['value'] == true,
@@ -107,7 +107,7 @@ void main() {
     final tab = e.shell.tabs!.focused!;
     await dragToProject(e, 'Crate A');
     await tester.tap(find.byKey(const Key('createPrefab.original')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final original = rootOf(read(e, 'prefabs/Crate A.prefab.json'));
     expect(original['prefab'], isNull, reason: 'an original prefab: the base unpacked into it');
     expect(tab.expansionOf(crateA)!.prefab?.isVariant, isFalse);
@@ -115,9 +115,9 @@ void main() {
 
     // Create ▸ Prefab Variant on a prefab in the Project.
     await tester.tap(find.byKey(const Key('project.asset.$cratePrefab')), buttons: kSecondaryButton);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await tester.tap(find.byKey(const Key('project.menu.createVariant')));
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final made = read(e, 'prefabs/crate Variant.prefab.json');
     expect(((rootOf(made)['prefab'] as Map)['asset'] as Map)['asset'], cratePrefab);
   });
@@ -128,10 +128,10 @@ void main() {
     final e = await Editor.open(tester);
     final tab = e.shell.tabs!.focused!;
     expect(e.shell.hierarchy!.createEmpty(underSelection: false), isTrue);
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     final holder = tab.selection.single;
     e.shell.hierarchy!.rename(holder, 'Holder');
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     await e.drag(e.row('Crate A'), tester.getCenter(find.byKey(ValueKey('row.$holder'))));
     expect(tab.tree[crateA]?.parent, holder);
 
@@ -146,9 +146,9 @@ void main() {
     // The Hierarchy's context menu on the Holder.
     Future<void> run(String command) async {
       await tester.tap(find.byKey(ValueKey('row.$holder')), buttons: kSecondaryButton);
-      await tester.pumpAndSettle();
+      await settleCooks(tester);
       await tester.tap(find.byKey(Key('hierarchy.menu.$command')));
-      await tester.pumpAndSettle();
+      await settleCooks(tester);
     }
 
     // The scene's own instances, by name.
@@ -161,7 +161,7 @@ void main() {
     expect(tab.tree[holder]?.isPrefabInstance, isFalse);
     expect(instances(), contains('Crate A'), reason: 'one level: the nested instance stays one');
     tab.undo();
-    await tester.pumpAndSettle();
+    await settleCooks(tester);
     expect(tab.tree[holder]?.isPrefabInstance, isTrue);
 
     await run('prefab.unpackCompletely');

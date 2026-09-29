@@ -497,6 +497,24 @@ final class FakePreviewBackend implements PreviewBackend {
     return cook = CookReport.fromJson({'ok': true, 'profile': 'desktop', 'cached': 0, 'cooked': 0, 'failed': 0});
   }
 
+  /// How many polls a [startCook] run takes to end (ADR-0040): a slow
+  /// cook for the progress window's tests.
+  int cookSteps = 1;
+
+  /// The runs [startCook] made, newest last.
+  final cookRuns = <FakeCookRun>[];
+
+  @override
+  bool needsCook = false;
+
+  @override
+  CookRun startCook({bool live = false}) {
+    _check('cookStart');
+    final run = FakeCookRun(this, live: live, steps: cookSteps);
+    cookRuns.add(run);
+    return run;
+  }
+
   /// `{ entities: { id: { name, world } } }` — the world matrices as the
   /// world holds them; equal after a drag's commit and after a fresh load.
   @override
@@ -527,5 +545,54 @@ final class FakePreviewBackend implements PreviewBackend {
     _closed = true;
     document.removeListener(_onDocument);
     _syncs.close();
+  }
+}
+
+/// A cook on the fake's "thread": [steps] polls, one asset each, then
+/// done; [finish] applies it like [FakePreviewBackend.recook].
+final class FakeCookRun implements CookRun {
+  FakeCookRun(this.preview, {required this.live, required this.steps});
+
+  final FakePreviewBackend preview;
+  final bool live;
+  final int steps;
+  bool cancelled = false;
+  bool finished = false;
+
+  @override
+  int done = 0;
+  @override
+  int get total => steps;
+  @override
+  String get current => done < steps ? 'models/asset$done.glb' : '';
+
+  @override
+  bool poll() {
+    if (!cancelled && done < steps) done++;
+    return cancelled || done >= steps;
+  }
+
+  @override
+  void cancel() {
+    preview.calls.add('cookCancel');
+    cancelled = true;
+  }
+
+  @override
+  CookReport finish() {
+    preview.calls.add('cookFinish');
+    finished = true;
+    if (cancelled) {
+      return CookReport.fromJson({'ok': true, 'profile': 'desktop', 'cancelled': true});
+    }
+    preview.lastRecookLive = live;
+    preview.needsCook = false;
+    return preview.cook = CookReport.fromJson({
+      'ok': true,
+      'profile': 'desktop',
+      'cached': 0,
+      'cooked': steps,
+      'failed': 0,
+    });
   }
 }
