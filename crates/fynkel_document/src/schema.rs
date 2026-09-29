@@ -263,15 +263,17 @@ impl SchemaSet {
                 asset_fields.insert(type_id.to_string(), fields);
             }
         }
+        // A built-in field's kinds are the table's, not its Inspector hint's
+        // (`asset(clip)` picks clips; the field also takes a blend space).
         for (type_id, field, kinds) in crate::reference_kinds::NATIVE {
             if components.contains_key(*type_id) {
-                asset_fields.entry(type_id.to_string()).or_default().push(
-                    crate::reference_kinds::AssetField {
-                        path: vec![field.to_string()],
-                        kinds: kinds.iter().map(|k| k.to_string()).collect(),
-                        data: None,
-                    },
-                );
+                let fields = asset_fields.entry(type_id.to_string()).or_default();
+                fields.retain(|f| f.path != [*field]);
+                fields.push(crate::reference_kinds::AssetField {
+                    path: vec![field.to_string()],
+                    kinds: kinds.iter().map(|k| k.to_string()).collect(),
+                    data: None,
+                });
             }
         }
         let mut validators = HashMap::new();
