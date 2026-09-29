@@ -552,42 +552,6 @@ pub fn query(
         // unknown entity is an empty response. What Dart's
         // `GameObject.get<T>()` reads (M3-07a).
         QUERY_COMPONENTS => {
-            use fynkel_core::components::{
-                Camera, DirectionalLight, Environment, MeshRenderer, PointLight, SpotLight,
-            };
-            if let Ok(t) = ecs.get::<Transform>(entity) {
-                w.component(ComponentId::TRANSFORM.0, &*t);
-            }
-            if let Ok(n) = ecs.get::<fynkel_core::Name>(entity) {
-                w.component(ComponentId::NAME.0, &*n);
-            }
-            if let Ok(v) = ecs.get::<MeshRenderer>(entity) {
-                w.component(ComponentId::MESH_RENDERER.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<Camera>(entity) {
-                w.component(ComponentId::CAMERA.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<DirectionalLight>(entity) {
-                w.component(ComponentId::DIRECTIONAL_LIGHT.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<PointLight>(entity) {
-                w.component(ComponentId::POINT_LIGHT.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<SpotLight>(entity) {
-                w.component(ComponentId::SPOT_LIGHT.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<Environment>(entity) {
-                w.component(ComponentId::ENVIRONMENT.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_core::RigidBody>(entity) {
-                w.component(ComponentId::RIGID_BODY.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_core::Collider>(entity) {
-                w.component(ComponentId::COLLIDER.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_core::CharacterController>(entity) {
-                w.component(ComponentId::CHARACTER_CONTROLLER.0, &*v);
-            }
             // A destroyed target reads as None (ADR-0035), as Unity's
             // destroyed-object `null`.
             let live = |r: fynkel_contracts::ObjectRef| {
@@ -597,57 +561,31 @@ pub fn query(
                     fynkel_contracts::ObjectRef::NONE
                 }
             };
-            if let Ok(v) = ecs.get::<fynkel_core::ThirdPersonCamera>(entity) {
-                let mut v = v.clone();
-                v.target = live(v.target);
-                w.component(ComponentId::THIRD_PERSON_CAMERA.0, &v);
+            // The table of built-in components (foundation 6.2), with
+            // `fynkel.Name` after the Transform to keep id order.
+            macro_rules! write_components {
+                ($($(#[$doc:meta])* $variant:ident($ty:ty) = $id:ident [$($field:ident),*];)*) => {
+                    $(
+                        if let Ok(v) = ecs.get::<$ty>(entity) {
+                            let refs: &[&str] = &[$(stringify!($field)),*];
+                            if refs.is_empty() {
+                                w.component(ComponentId::$id.0, &*v);
+                            } else {
+                                #[allow(unused_mut)]
+                                let mut v = (*v).clone();
+                                $(v.$field = live(v.$field);)*
+                                w.component(ComponentId::$id.0, &v);
+                            }
+                        }
+                        if ComponentId::$id == ComponentId::TRANSFORM {
+                            if let Ok(n) = ecs.get::<fynkel_core::Name>(entity) {
+                                w.component(ComponentId::NAME.0, &*n);
+                            }
+                        }
+                    )*
+                };
             }
-            if let Ok(v) = ecs.get::<fynkel_core::Rotator>(entity) {
-                w.component(ComponentId::ROTATOR.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_core::Oscillate>(entity) {
-                w.component(ComponentId::OSCILLATE.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_core::Follow>(entity) {
-                let mut v = v.clone();
-                v.target = live(v.target);
-                w.component(ComponentId::FOLLOW.0, &v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_core::LookAtCamera>(entity) {
-                w.component(ComponentId::LOOK_AT_CAMERA.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_core::LifetimeDespawn>(entity) {
-                w.component(ComponentId::LIFETIME_DESPAWN.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_core::Emitter>(entity) {
-                w.component(ComponentId::EMITTER.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_core::TriggerZone>(entity) {
-                w.component(ComponentId::TRIGGER_ZONE.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_core::Animator>(entity) {
-                w.component(ComponentId::ANIMATOR.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_core::Skin>(entity) {
-                let mut v = v.clone();
-                v.skeleton = live(v.skeleton);
-                w.component(ComponentId::SKIN.0, &v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_core::AudioSource>(entity) {
-                w.component(ComponentId::AUDIO_SOURCE.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_core::AudioListener>(entity) {
-                w.component(ComponentId::AUDIO_LISTENER.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_core::components::Volume>(entity) {
-                w.component(ComponentId::VOLUME.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_scene::Layer>(entity) {
-                w.component(ComponentId::LAYER.0, &*v);
-            }
-            if let Ok(v) = ecs.get::<fynkel_scene::Tags>(entity) {
-                w.component(ComponentId::TAGS.0, &*v);
-            }
+            fynkel_core::builtin_components!(write_components);
         }
         // A source's playback state (M3-11); no source is an empty
         // response.

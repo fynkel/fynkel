@@ -13,21 +13,40 @@
       },
       "minItems": 3,
       "maxItems": 3,
-      "description": "Linear RGB, each `0..=1`."
+      "description": "Linear RGB, each `0..=1`.",
+      "x-fynkel": {
+        "kind": "color",
+        "order": 0
+      }
     },
     "intensity": {
       "type": "number",
-      "description": "Luminous intensity in candela."
+      "description": "Luminous intensity in candela.",
+      "x-fynkel": {
+        "unit": "cd",
+        "min": 0,
+        "order": 1
+      }
     },
     "range": {
       "type": "number",
-      "description": "Metres; no contribution beyond this distance."
+      "description": "Metres; no contribution beyond this distance.",
+      "x-fynkel": {
+        "unit": "m",
+        "min": 0,
+        "order": 2
+      }
     },
     "culling_mask": {
       "type": "integer",
       "minimum": 0,
       "maximum": 4294967295,
-      "description": "The layers this light lights (ADR-0020); all by default."
+      "description": "The layers this light lights (ADR-0020); all by default.",
+      "x-fynkel": {
+        "kind": "layerMask",
+        "label": "Culling mask",
+        "order": 3
+      }
     }
   },
   "required": [

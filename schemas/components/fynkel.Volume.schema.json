@@ -8,7 +8,11 @@
   "properties": {
     "profile": {
       "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef",
-      "description": "The `.volume.json` profile."
+      "description": "The `.volume.json` profile.",
+      "x-fynkel": {
+        "kind": "asset(volume)",
+        "order": 0
+      }
     },
     "shape": {
       "type": "string",
@@ -18,7 +22,10 @@
         "sphere"
       ],
       "x-fynkel": {
-        "enum": "fynkel.VolumeShape"
+        "enum": "fynkel.VolumeShape",
+        "group": "Shape",
+        "order": 1,
+        "tooltip": "global: everywhere; box and sphere fade out over the blend distance."
       }
     },
     "size": {
@@ -28,28 +35,59 @@
       },
       "minItems": 3,
       "maxItems": 3,
-      "description": "A box's full size in the entity's local units, each `> 0`."
+      "description": "A box's full size in the entity's local units, each `> 0`.",
+      "x-fynkel": {
+        "label": "Box size",
+        "group": "Shape",
+        "order": 2
+      }
     },
     "radius": {
       "type": "number",
-      "description": "A sphere's radius in the entity's local units, `> 0`."
+      "description": "A sphere's radius in the entity's local units, `> 0`.",
+      "x-fynkel": {
+        "label": "Sphere radius",
+        "min": 0,
+        "group": "Shape",
+        "order": 3
+      }
     },
     "blend_distance": {
       "type": "number",
-      "description": "Metres outside the shape over which the volume fades out, `>= 0`."
+      "description": "Metres outside the shape over which the volume fades out, `>= 0`.",
+      "x-fynkel": {
+        "unit": "m",
+        "min": 0,
+        "group": "Shape",
+        "order": 4
+      }
     },
     "weight": {
       "type": "number",
-      "description": "How much of the profile applies, `0..=1`."
+      "description": "How much of the profile applies, `0..=1`.",
+      "x-fynkel": {
+        "kind": "slider",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "order": 5
+      }
     },
     "priority": {
       "type": "integer",
       "minimum": -2147483648,
       "maximum": 2147483647,
-      "description": "Higher priorities blend over lower ones."
+      "description": "Higher priorities blend over lower ones.",
+      "x-fynkel": {
+        "order": 6,
+        "tooltip": "Higher priorities blend over lower ones; ties go by scene order."
+      }
     },
     "enabled": {
-      "type": "boolean"
+      "type": "boolean",
+      "x-fynkel": {
+        "order": 7
+      }
     }
   },
   "required": [

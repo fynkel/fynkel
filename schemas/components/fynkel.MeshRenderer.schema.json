@@ -8,21 +8,40 @@
   "properties": {
     "mesh": {
       "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef",
-      "description": "Mesh asset (an imported glTF `mesh/<n>` sub-asset)."
+      "description": "Mesh asset (an imported glTF `mesh/<n>` sub-asset).",
+      "x-fynkel": {
+        "kind": "asset(mesh)",
+        "order": 0
+      }
     },
     "material": {
       "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef",
-      "description": "`.material.json` asset."
+      "description": "`.material.json` asset.",
+      "x-fynkel": {
+        "kind": "asset(material)",
+        "order": 1
+      }
     },
     "cast_shadows": {
-      "type": "boolean"
+      "type": "boolean",
+      "x-fynkel": {
+        "group": "Shadows",
+        "order": 2
+      }
     },
     "receive_shadows": {
-      "type": "boolean"
+      "type": "boolean",
+      "x-fynkel": {
+        "group": "Shadows",
+        "order": 3
+      }
     },
     "visible": {
       "type": "boolean",
-      "description": "`false` keeps the component but skips drawing."
+      "description": "`false` keeps the component but skips drawing.",
+      "x-fynkel": {
+        "order": 4
+      }
     }
   },
   "required": [

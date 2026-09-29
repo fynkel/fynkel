@@ -21,7 +21,11 @@
       ],
       "additionalProperties": false,
       "x-fynkel": {
-        "type": "gameObject"
+        "type": "gameObject",
+        "order": 0,
+        "gizmo": {
+          "shape": "lineTo"
+        }
       },
       "description": "The followed object; None follows nothing."
     },
@@ -32,15 +36,27 @@
       },
       "minItems": 3,
       "maxItems": 3,
-      "description": "Metres from the target's world position, world axes."
+      "description": "Metres from the target's world position, world axes.",
+      "x-fynkel": {
+        "unit": "m",
+        "order": 1
+      }
     },
     "smoothing": {
       "type": "number",
-      "description": "Per second, `>= 0`; `0` snaps."
+      "description": "Per second, `>= 0`; `0` snaps.",
+      "x-fynkel": {
+        "unit": "/s",
+        "min": 0,
+        "order": 2
+      }
     },
     "look_at": {
       "type": "boolean",
-      "description": "Also turn the entity's -Z towards the target's position."
+      "description": "Also turn the entity's -Z towards the target's position.",
+      "x-fynkel": {
+        "order": 3
+      }
     }
   },
   "required": [

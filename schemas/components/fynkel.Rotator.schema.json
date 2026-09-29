@@ -13,11 +13,19 @@
       },
       "minItems": 3,
       "maxItems": 3,
-      "description": "Spin axis, normalised at use; must not be zero."
+      "description": "Spin axis, normalised at use; must not be zero.",
+      "x-fynkel": {
+        "order": 0
+      }
     },
     "speed": {
       "type": "number",
-      "description": "Radians per second (negative spins the other way)."
+      "description": "Radians per second (negative spins the other way).",
+      "x-fynkel": {
+        "unit": "rad/s",
+        "step": 0.1,
+        "order": 1
+      }
     },
     "space": {
       "type": "string",
@@ -26,7 +34,8 @@
         "world"
       ],
       "x-fynkel": {
-        "enum": "fynkel.MotionSpace"
+        "enum": "fynkel.MotionSpace",
+        "order": 2
       }
     }
   },

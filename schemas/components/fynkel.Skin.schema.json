@@ -8,7 +8,11 @@
   "properties": {
     "skin": {
       "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef",
-      "description": "The skin sub-asset."
+      "description": "The skin sub-asset.",
+      "x-fynkel": {
+        "kind": "asset(skin)",
+        "order": 0
+      }
     },
     "skeleton": {
       "type": [
@@ -25,7 +29,8 @@
       ],
       "additionalProperties": false,
       "x-fynkel": {
-        "type": "gameObject"
+        "type": "gameObject",
+        "order": 1
       },
       "description": "The skeleton root object; None for the mesh's tree root."
     }

@@ -13,29 +13,64 @@
       },
       "minItems": 3,
       "maxItems": 3,
-      "description": "Linear RGB, each `0..=1`."
+      "description": "Linear RGB, each `0..=1`.",
+      "x-fynkel": {
+        "kind": "color",
+        "order": 0
+      }
     },
     "intensity": {
       "type": "number",
-      "description": "Luminous intensity in candela along the axis."
+      "description": "Luminous intensity in candela along the axis.",
+      "x-fynkel": {
+        "unit": "cd",
+        "min": 0,
+        "order": 1
+      }
     },
     "range": {
       "type": "number",
-      "description": "Metres; no contribution beyond this distance."
+      "description": "Metres; no contribution beyond this distance.",
+      "x-fynkel": {
+        "unit": "m",
+        "min": 0,
+        "order": 2
+      }
     },
     "inner_angle": {
       "type": "number",
-      "description": "Half-angle in radians inside which the light is full."
+      "description": "Half-angle in radians inside which the light is full.",
+      "x-fynkel": {
+        "kind": "angle",
+        "unit": "deg",
+        "min": 0,
+        "max": 1.5707963,
+        "group": "Cone",
+        "order": 3
+      }
     },
     "outer_angle": {
       "type": "number",
-      "description": "Half-angle in radians beyond which the light is zero, `>= inner_angle`."
+      "description": "Half-angle in radians beyond which the light is zero, `>= inner_angle`.",
+      "x-fynkel": {
+        "kind": "angle",
+        "unit": "deg",
+        "min": 0,
+        "max": 1.5707963,
+        "group": "Cone",
+        "order": 4
+      }
     },
     "culling_mask": {
       "type": "integer",
       "minimum": 0,
       "maximum": 4294967295,
-      "description": "The layers this light lights (ADR-0020); all by default."
+      "description": "The layers this light lights (ADR-0020); all by default.",
+      "x-fynkel": {
+        "kind": "layerMask",
+        "label": "Culling mask",
+        "order": 5
+      }
     }
   },
   "required": [

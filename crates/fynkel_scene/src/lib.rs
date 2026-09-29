@@ -30,9 +30,16 @@ use glam::{Mat4, Quat, Vec3};
 #[schema(kind = "component", id = 1, name = "fynkel.Transform")]
 pub struct Transform {
     /// Metres.
+    #[fynkel(unit = "m", order = 0)]
     pub position: Vec3,
     /// Unit quaternion `[x, y, z, w]`.
+    #[fynkel(
+        kind = "quaternion",
+        order = 1,
+        tooltip = "Edited as Euler degrees (X, Y, Z); stored as a unit quaternion."
+    )]
     pub rotation: Quat,
+    #[fynkel(order = 2)]
     pub scale: Vec3,
 }
 

@@ -8,7 +8,10 @@
   "properties": {
     "lock_y": {
       "type": "boolean",
-      "description": "Turn about the world Y axis only, staying upright (a tree card); `false` also tilts to face a camera above or below."
+      "description": "Turn about the world Y axis only, staying upright (a tree card); `false` also tilts to face a camera above or below.",
+      "x-fynkel": {
+        "label": "Lock Y axis"
+      }
     }
   },
   "required": [

@@ -13,19 +13,37 @@
       },
       "minItems": 3,
       "maxItems": 3,
-      "description": "Direction of travel, normalised at use; must not be zero."
+      "description": "Direction of travel, normalised at use; must not be zero.",
+      "x-fynkel": {
+        "order": 0
+      }
     },
     "amplitude": {
       "type": "number",
-      "description": "Metres either side of the rest position, `>= 0`."
+      "description": "Metres either side of the rest position, `>= 0`.",
+      "x-fynkel": {
+        "unit": "m",
+        "min": 0,
+        "order": 1
+      }
     },
     "frequency": {
       "type": "number",
-      "description": "Cycles per second, `>= 0`."
+      "description": "Cycles per second, `>= 0`.",
+      "x-fynkel": {
+        "unit": "Hz",
+        "min": 0,
+        "order": 2
+      }
     },
     "phase": {
       "type": "number",
-      "description": "Radians into the cycle at `t = 0`."
+      "description": "Radians into the cycle at `t = 0`.",
+      "x-fynkel": {
+        "kind": "angle",
+        "unit": "deg",
+        "order": 3
+      }
     },
     "space": {
       "type": "string",
@@ -34,7 +52,8 @@
         "world"
       ],
       "x-fynkel": {
-        "enum": "fynkel.MotionSpace"
+        "enum": "fynkel.MotionSpace",
+        "order": 4
       }
     }
   },

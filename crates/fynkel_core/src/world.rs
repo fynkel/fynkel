@@ -24,7 +24,7 @@ const SYSTEMS: [SystemKind; 15] = [
     SystemKind::Publish,
 ];
 
-use fynkel_audio::{AudioBus, AudioListener, AudioSource, PlayParams};
+use fynkel_audio::{AudioBus, PlayParams};
 use fynkel_contracts::{
     AssetRef, ComponentId, DiagnosticCode, Entity, Status, Tick, Uuid, WorldId, DEFAULT_FIXED_DT,
     DEFAULT_MAX_STEPS_PER_FRAME, MAX_FRAME_DT,
@@ -33,18 +33,16 @@ use fynkel_ecs::internal::Handle;
 use fynkel_ecs::{EcsError, World as Ecs};
 pub use fynkel_physics::PhysicsOwned;
 use fynkel_physics::{
-    BodyCommand, CharacterController, Collider, Physics, PhysicsEvent, QueryKind, QuerySpec,
-    RejectionKind, RigidBody,
+    BodyCommand, CharacterController, Physics, PhysicsEvent, QueryKind, QuerySpec, RejectionKind,
 };
-use fynkel_scene::{self as scene, Layer, Parent, SceneError, Tags, Transform, WorldTransform};
+use fynkel_scene::{self as scene, Layer, Parent, SceneError, Transform, WorldTransform};
 use fynkel_schema_derive::Schema;
 use glam::{Mat4, Quat, Vec3};
 
 use crate::clock::{FrameClock, FramePlan};
 use crate::command::{Command, Lane};
 use crate::components::{
-    Animator, Camera, ComponentValue, DirectionalLight, Emitter, Environment, Follow,
-    LifetimeDespawn, LookAtCamera, MeshRenderer, Oscillate, PointLight, Rotator, Skin, SpotLight,
+    Camera, ComponentValue, DirectionalLight, Environment, MeshRenderer, PointLight, SpotLight,
     ThirdPersonCamera, TriggerZone, Volume,
 };
 use crate::event::{Event, EventPayload, EventQueue};
@@ -107,6 +105,7 @@ impl Default for WorldConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Schema)]
 #[schema(kind = "component", id = 3, name = "fynkel.Name", authored = false)]
 pub struct Name {
+    #[fynkel(read_only)]
     pub value: String,
 }
 
@@ -1076,63 +1075,33 @@ impl World {
                 if !self.check_entity(index, lane, entity, "remove_component") {
                     return false;
                 }
-                let removed = match component {
-                    ComponentId::MESH_RENDERER => self.ecs.remove::<MeshRenderer>(entity).is_ok(),
-                    ComponentId::CAMERA => self.ecs.remove::<Camera>(entity).is_ok(),
-                    ComponentId::DIRECTIONAL_LIGHT => {
-                        self.ecs.remove::<DirectionalLight>(entity).is_ok()
-                    }
-                    ComponentId::POINT_LIGHT => self.ecs.remove::<PointLight>(entity).is_ok(),
-                    ComponentId::SPOT_LIGHT => self.ecs.remove::<SpotLight>(entity).is_ok(),
-                    ComponentId::ENVIRONMENT => self.ecs.remove::<Environment>(entity).is_ok(),
-                    ComponentId::RIGID_BODY => self.ecs.remove::<RigidBody>(entity).is_ok(),
-                    ComponentId::COLLIDER => self.ecs.remove::<Collider>(entity).is_ok(),
-                    ComponentId::CHARACTER_CONTROLLER => {
-                        self.ecs.remove::<CharacterController>(entity).is_ok()
-                    }
-                    ComponentId::THIRD_PERSON_CAMERA => {
-                        self.ecs.remove::<ThirdPersonCamera>(entity).is_ok()
-                    }
-                    ComponentId::ROTATOR => self.ecs.remove::<Rotator>(entity).is_ok(),
-                    ComponentId::OSCILLATE => self.ecs.remove::<Oscillate>(entity).is_ok(),
-                    ComponentId::FOLLOW => self.ecs.remove::<Follow>(entity).is_ok(),
-                    ComponentId::LOOK_AT_CAMERA => self.ecs.remove::<LookAtCamera>(entity).is_ok(),
-                    ComponentId::LIFETIME_DESPAWN => {
-                        self.ecs.remove::<LifetimeDespawn>(entity).is_ok()
-                    }
-                    ComponentId::EMITTER => self.ecs.remove::<Emitter>(entity).is_ok(),
-                    ComponentId::TRIGGER_ZONE => self.ecs.remove::<TriggerZone>(entity).is_ok(),
-                    ComponentId::ANIMATOR => self.ecs.remove::<Animator>(entity).is_ok(),
-                    ComponentId::SKIN => self.ecs.remove::<Skin>(entity).is_ok(),
-                    ComponentId::AUDIO_SOURCE => {
-                        // The voice stops at the phase (its source is gone).
-                        let _ = self.ecs.remove::<AudioRun>(entity);
-                        self.ecs.remove::<AudioSource>(entity).is_ok()
-                    }
-                    ComponentId::AUDIO_LISTENER => self.ecs.remove::<AudioListener>(entity).is_ok(),
-                    ComponentId::VOLUME => self.ecs.remove::<Volume>(entity).is_ok(),
-                    ComponentId::LAYER => self.ecs.remove::<Layer>(entity).is_ok(),
-                    ComponentId::TAGS => self.ecs.remove::<Tags>(entity).is_ok(),
-                    ComponentId::TRANSFORM | ComponentId::HIERARCHY | ComponentId::NAME => {
-                        return self.reject(
-                            index,
-                            lane,
-                            DiagnosticCode::INVALID_PAYLOAD,
-                            entity,
-                            component,
-                            format!("{} cannot be removed", component.name().unwrap()),
-                        )
-                    }
-                    other => {
-                        return self.reject(
-                            index,
-                            lane,
-                            DiagnosticCode::UNKNOWN_COMPONENT,
-                            entity,
-                            other,
-                            format!("unknown component id {}", other.0),
-                        )
-                    }
+                if matches!(
+                    component,
+                    ComponentId::TRANSFORM | ComponentId::HIERARCHY | ComponentId::NAME
+                ) {
+                    return self.reject(
+                        index,
+                        lane,
+                        DiagnosticCode::INVALID_PAYLOAD,
+                        entity,
+                        component,
+                        format!("{} cannot be removed", component.name().unwrap()),
+                    );
+                }
+                if component == ComponentId::AUDIO_SOURCE {
+                    // The voice stops at the phase (its source is gone).
+                    let _ = self.ecs.remove::<AudioRun>(entity);
+                }
+                let Some(removed) = ComponentValue::remove_from(&mut self.ecs, entity, component)
+                else {
+                    return self.reject(
+                        index,
+                        lane,
+                        DiagnosticCode::UNKNOWN_COMPONENT,
+                        entity,
+                        component,
+                        format!("unknown component id {}", component.0),
+                    );
                 };
                 if !removed {
                     return self.reject(
@@ -1252,34 +1221,7 @@ impl World {
                 msg,
             );
         }
-        let r = match value {
-            ComponentValue::Transform(_) => unreachable!("handled as SetTransform"),
-            ComponentValue::MeshRenderer(v) => self.ecs.insert(entity, v),
-            ComponentValue::Camera(v) => self.ecs.insert(entity, v),
-            ComponentValue::DirectionalLight(v) => self.ecs.insert(entity, v),
-            ComponentValue::PointLight(v) => self.ecs.insert(entity, v),
-            ComponentValue::SpotLight(v) => self.ecs.insert(entity, v),
-            ComponentValue::Environment(v) => self.ecs.insert(entity, v),
-            ComponentValue::RigidBody(v) => self.ecs.insert(entity, v),
-            ComponentValue::Collider(v) => self.ecs.insert(entity, v),
-            ComponentValue::CharacterController(v) => self.ecs.insert(entity, v),
-            ComponentValue::ThirdPersonCamera(v) => self.ecs.insert(entity, v),
-            ComponentValue::Rotator(v) => self.ecs.insert(entity, v),
-            ComponentValue::Oscillate(v) => self.ecs.insert(entity, v),
-            ComponentValue::Follow(v) => self.ecs.insert(entity, v),
-            ComponentValue::LookAtCamera(v) => self.ecs.insert(entity, v),
-            ComponentValue::LifetimeDespawn(v) => self.ecs.insert(entity, v),
-            ComponentValue::Emitter(v) => self.ecs.insert(entity, v),
-            ComponentValue::TriggerZone(v) => self.ecs.insert(entity, v),
-            ComponentValue::Animator(v) => self.ecs.insert(entity, v),
-            ComponentValue::Skin(v) => self.ecs.insert(entity, v),
-            ComponentValue::AudioSource(v) => self.ecs.insert(entity, v),
-            ComponentValue::AudioListener(v) => self.ecs.insert(entity, v),
-            ComponentValue::Volume(v) => self.ecs.insert(entity, v),
-            ComponentValue::Layer(v) => self.ecs.insert(entity, v),
-            ComponentValue::Tags(v) => self.ecs.insert(entity, v),
-        };
-        r.is_ok()
+        value.insert_into(&mut self.ecs, entity).is_ok()
     }
 
     fn reject_scene(&mut self, index: u32, lane: Lane, entity: Entity, err: SceneError) -> bool {

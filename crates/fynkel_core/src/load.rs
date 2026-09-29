@@ -15,10 +15,7 @@ use fynkel_contracts::{ComponentId, Entity, ObjectRef, Uuid};
 use fynkel_scene::{self as scene, Transform};
 
 use crate::command::Command;
-use crate::components::{
-    Animator, ComponentValue, Emitter, Follow, LifetimeDespawn, LookAtCamera, Oscillate, Rotator,
-    Skin, ThirdPersonCamera, TriggerZone,
-};
+use crate::components::ComponentValue;
 use crate::event::EventPayload;
 use crate::world::{Diagnostic, Name, World};
 
@@ -818,91 +815,4 @@ fn spawn_order(scene: &SceneDescription) -> Result<Vec<usize>, LoadError> {
         return Err(LoadError::Unreachable(scene.entities[lost].id));
     }
     Ok(order)
-}
-
-impl ComponentValue {
-    /// Every built-in component on `entity`, in registry order.
-    pub fn all_of(world: &World, entity: Entity) -> Vec<ComponentValue> {
-        use crate::components::{
-            Camera, DirectionalLight, Environment, MeshRenderer, PointLight, SpotLight,
-        };
-        let ecs = world.ecs();
-        let mut out = Vec::new();
-        if let Ok(t) = ecs.copy::<Transform>(entity) {
-            out.push(ComponentValue::Transform(t));
-        }
-        if let Ok(v) = ecs.copy::<MeshRenderer>(entity) {
-            out.push(ComponentValue::MeshRenderer(v));
-        }
-        if let Ok(v) = ecs.copy::<Camera>(entity) {
-            out.push(ComponentValue::Camera(v));
-        }
-        if let Ok(v) = ecs.copy::<DirectionalLight>(entity) {
-            out.push(ComponentValue::DirectionalLight(v));
-        }
-        if let Ok(v) = ecs.copy::<PointLight>(entity) {
-            out.push(ComponentValue::PointLight(v));
-        }
-        if let Ok(v) = ecs.copy::<SpotLight>(entity) {
-            out.push(ComponentValue::SpotLight(v));
-        }
-        if let Ok(v) = ecs.get::<Environment>(entity) {
-            out.push(ComponentValue::Environment(v.clone()));
-        }
-        if let Ok(v) = ecs.copy::<fynkel_physics::RigidBody>(entity) {
-            out.push(ComponentValue::RigidBody(v));
-        }
-        if let Ok(v) = ecs.get::<fynkel_physics::Collider>(entity) {
-            out.push(ComponentValue::Collider(v.clone()));
-        }
-        if let Ok(v) = ecs.get::<fynkel_physics::CharacterController>(entity) {
-            out.push(ComponentValue::CharacterController(v.clone()));
-        }
-        if let Ok(v) = ecs.get::<ThirdPersonCamera>(entity) {
-            out.push(ComponentValue::ThirdPersonCamera(v.clone()));
-        }
-        if let Ok(v) = ecs.copy::<Rotator>(entity) {
-            out.push(ComponentValue::Rotator(v));
-        }
-        if let Ok(v) = ecs.copy::<Oscillate>(entity) {
-            out.push(ComponentValue::Oscillate(v));
-        }
-        if let Ok(v) = ecs.get::<Follow>(entity) {
-            out.push(ComponentValue::Follow(v.clone()));
-        }
-        if let Ok(v) = ecs.copy::<LookAtCamera>(entity) {
-            out.push(ComponentValue::LookAtCamera(v));
-        }
-        if let Ok(v) = ecs.copy::<LifetimeDespawn>(entity) {
-            out.push(ComponentValue::LifetimeDespawn(v));
-        }
-        if let Ok(v) = ecs.get::<Emitter>(entity) {
-            out.push(ComponentValue::Emitter(v.clone()));
-        }
-        if let Ok(v) = ecs.get::<TriggerZone>(entity) {
-            out.push(ComponentValue::TriggerZone(v.clone()));
-        }
-        if let Ok(v) = ecs.get::<Animator>(entity) {
-            out.push(ComponentValue::Animator(v.clone()));
-        }
-        if let Ok(v) = ecs.get::<Skin>(entity) {
-            out.push(ComponentValue::Skin(v.clone()));
-        }
-        if let Ok(v) = ecs.get::<fynkel_audio::AudioSource>(entity) {
-            out.push(ComponentValue::AudioSource(v.clone()));
-        }
-        if let Ok(v) = ecs.copy::<fynkel_audio::AudioListener>(entity) {
-            out.push(ComponentValue::AudioListener(v));
-        }
-        if let Ok(v) = ecs.get::<crate::components::Volume>(entity) {
-            out.push(ComponentValue::Volume(v.clone()));
-        }
-        if let Ok(v) = ecs.copy::<fynkel_scene::Layer>(entity) {
-            out.push(ComponentValue::Layer(v));
-        }
-        if let Ok(v) = ecs.copy::<fynkel_scene::Tags>(entity) {
-            out.push(ComponentValue::Tags(v));
-        }
-        out
-    }
 }

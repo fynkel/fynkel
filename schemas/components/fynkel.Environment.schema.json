@@ -13,11 +13,22 @@
       },
       "minItems": 3,
       "maxItems": 3,
-      "description": "Linear RGB, each `0..=1`."
+      "description": "Linear RGB, each `0..=1`.",
+      "x-fynkel": {
+        "kind": "color",
+        "group": "Ambient",
+        "order": 0
+      }
     },
     "ambient_intensity": {
       "type": "number",
-      "description": "Ambient illuminance in lux, from every direction."
+      "description": "Ambient illuminance in lux, from every direction.",
+      "x-fynkel": {
+        "unit": "lux",
+        "min": 0,
+        "group": "Ambient",
+        "order": 1
+      }
     },
     "sky": {
       "oneOf": [
@@ -28,15 +39,32 @@
           "type": "null"
         }
       ],
-      "description": "Equirectangular sRGB texture asset drawn as the sky (no image-based lighting in V1: the sky is a backdrop, `ambient_*` lights surfaces)."
+      "description": "Equirectangular sRGB texture asset drawn as the sky (no image-based lighting in V1: the sky is a backdrop, `ambient_*` lights surfaces).",
+      "x-fynkel": {
+        "kind": "asset(texture)",
+        "group": "Sky",
+        "order": 2
+      }
     },
     "sky_intensity": {
       "type": "number",
-      "description": "Luminance in nits of a white sky texel."
+      "description": "Luminance in nits of a white sky texel.",
+      "x-fynkel": {
+        "unit": "nit",
+        "min": 0,
+        "group": "Sky",
+        "order": 3
+      }
     },
     "sky_rotation": {
       "type": "number",
-      "description": "Rotation of the sky about +Y in radians."
+      "description": "Rotation of the sky about +Y in radians.",
+      "x-fynkel": {
+        "kind": "angle",
+        "unit": "deg",
+        "group": "Sky",
+        "order": 4
+      }
     }
   },
   "required": [

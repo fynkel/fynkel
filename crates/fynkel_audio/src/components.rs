@@ -54,20 +54,40 @@ pub const MAX_PITCH: f32 = 8.0;
 #[schema(kind = "component", id = 23, name = "fynkel.AudioSource")]
 pub struct AudioSource {
     /// The audio asset (a `.wav`/`.ogg` source; no sub-asset).
+    #[fynkel(kind = "asset(sound)", order = 0)]
     pub clip: AssetRef,
+    #[fynkel(
+        order = 1,
+        tooltip = "The bus this source plays through: master, music or sfx."
+    )]
     pub bus: AudioBus,
     /// Linear gain, `0..=1`.
+    #[fynkel(kind = "slider", min = 0, max = 1, step = 0.01, order = 2)]
     pub volume: f32,
     /// Playback rate multiplier, `MIN_PITCH..=MAX_PITCH`; `1` is the
     /// clip's own rate.
+    #[fynkel(
+        min = 0.05,
+        max = 8,
+        step = 0.01,
+        order = 3,
+        tooltip = "Playback rate; 1 is the clip's own rate."
+    )]
     pub pitch: f32,
+    #[fynkel(group = "Playback", order = 4)]
     pub looping: bool,
     /// Whether the clip is playing (authored `true`: from the load).
+    #[fynkel(group = "Playback", order = 5)]
     pub playing: bool,
     /// Who keeps a voice when the voice limit is reached: a new sound
     /// steals the voice of the lowest-priority sound at or below its own
     /// priority (the oldest among equals) and is refused when every voice
     /// outranks it.
+    #[fynkel(
+        group = "Playback",
+        order = 6,
+        tooltip = "Past the voice limit a new sound steals the lowest-priority voice at or below its own."
+    )]
     pub priority: i32,
 }
 
@@ -103,6 +123,7 @@ impl AudioSource {
 #[schema(kind = "component", id = 24, name = "fynkel.AudioListener")]
 pub struct AudioListener {
     /// Linear gain over everything, `0..=1`.
+    #[fynkel(kind = "slider", min = 0, max = 1, step = 0.01)]
     pub volume: f32,
 }
 

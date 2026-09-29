@@ -6,10 +6,7 @@
 //! RGB; illuminance in lux (directional, ambient), luminous intensity in
 //! candela (point, spot), luminance in nits (sky); exposure in EV100.
 
-use fynkel_audio::{AudioListener, AudioSource};
 use fynkel_contracts::{AssetRef, ComponentId, ObjectRef};
-use fynkel_physics::{CharacterController, Collider, RigidBody};
-use fynkel_scene::{Layer, Tags, Transform};
 use fynkel_schema_derive::Schema;
 use glam::Vec3;
 
@@ -39,24 +36,52 @@ pub enum ExposureMode {
 #[derive(Clone, Copy, Debug, PartialEq, Schema)]
 #[schema(kind = "component", id = 5, name = "fynkel.Camera")]
 pub struct Camera {
+    #[fynkel(group = "Lens", order = 0)]
     pub projection: Projection,
     /// Vertical field of view in radians (perspective only).
+    #[fynkel(
+        label = "Field of view",
+        kind = "angle",
+        unit = "deg",
+        min = 0.01,
+        max = 3.1,
+        group = "Lens",
+        order = 1
+    )]
     pub fov_y: f32,
     /// Visible height in metres (orthographic only).
+    #[fynkel(
+        label = "Orthographic height",
+        unit = "m",
+        min = 0,
+        group = "Lens",
+        order = 2
+    )]
     pub ortho_height: f32,
     /// Near clip distance in metres, `> 0`.
+    #[fynkel(unit = "m", min = 0, group = "Clipping", order = 3)]
     pub near: f32,
     /// Far clip distance in metres, `> near`.
+    #[fynkel(unit = "m", min = 0, group = "Clipping", order = 4)]
     pub far: f32,
     /// Higher renders on top when several cameras are enabled.
+    #[fynkel(group = "Output", order = 7)]
     pub priority: i32,
+    #[fynkel(group = "Exposure", order = 5)]
     pub exposure_mode: ExposureMode,
     /// EV100 when `exposure_mode` is `manual` (12 ≈ a 10 000 lux sun;
     /// +1 halves the brightness).
+    #[fynkel(label = "Exposure (EV100)", group = "Exposure", order = 6, step = 0.1)]
     pub exposure: f32,
     /// The layers this camera draws (bit `i` = the project's `layers[i]`,
     /// ADR-0020); an object on a layer outside it is neither drawn nor
     /// casts a shadow in this camera's frame.
+    #[fynkel(
+        kind = "layerMask",
+        label = "Culling mask",
+        group = "Output",
+        order = 8
+    )]
     pub culling_mask: u32,
 }
 
@@ -81,12 +106,17 @@ impl Default for Camera {
 #[schema(kind = "component", id = 4, name = "fynkel.MeshRenderer")]
 pub struct MeshRenderer {
     /// Mesh asset (an imported glTF `mesh/<n>` sub-asset).
+    #[fynkel(kind = "asset(mesh)", order = 0)]
     pub mesh: AssetRef,
     /// `.material.json` asset.
+    #[fynkel(kind = "asset(material)", order = 1)]
     pub material: AssetRef,
+    #[fynkel(group = "Shadows", order = 2)]
     pub cast_shadows: bool,
+    #[fynkel(group = "Shadows", order = 3)]
     pub receive_shadows: bool,
     /// `false` keeps the component but skips drawing.
+    #[fynkel(order = 4)]
     pub visible: bool,
 }
 
@@ -108,9 +138,12 @@ impl Default for MeshRenderer {
 #[schema(kind = "component", id = 6, name = "fynkel.DirectionalLight")]
 pub struct DirectionalLight {
     /// Linear RGB, each `0..=1`.
+    #[fynkel(kind = "color", order = 0)]
     pub color: Vec3,
     /// Illuminance in lux.
+    #[fynkel(unit = "lux", min = 0, order = 1)]
     pub intensity: f32,
+    #[fynkel(order = 2)]
     pub cast_shadows: bool,
 }
 
@@ -129,12 +162,16 @@ impl Default for DirectionalLight {
 #[schema(kind = "component", id = 7, name = "fynkel.PointLight")]
 pub struct PointLight {
     /// Linear RGB, each `0..=1`.
+    #[fynkel(kind = "color", order = 0)]
     pub color: Vec3,
     /// Luminous intensity in candela.
+    #[fynkel(unit = "cd", min = 0, order = 1)]
     pub intensity: f32,
     /// Metres; no contribution beyond this distance.
+    #[fynkel(unit = "m", min = 0, order = 2)]
     pub range: f32,
     /// The layers this light lights (ADR-0020); all by default.
+    #[fynkel(kind = "layerMask", label = "Culling mask", order = 3)]
     pub culling_mask: u32,
 }
 
@@ -154,16 +191,36 @@ impl Default for PointLight {
 #[schema(kind = "component", id = 8, name = "fynkel.SpotLight")]
 pub struct SpotLight {
     /// Linear RGB, each `0..=1`.
+    #[fynkel(kind = "color", order = 0)]
     pub color: Vec3,
     /// Luminous intensity in candela along the axis.
+    #[fynkel(unit = "cd", min = 0, order = 1)]
     pub intensity: f32,
     /// Metres; no contribution beyond this distance.
+    #[fynkel(unit = "m", min = 0, order = 2)]
     pub range: f32,
     /// Half-angle in radians inside which the light is full.
+    #[fynkel(
+        kind = "angle",
+        unit = "deg",
+        min = 0,
+        max = 1.5707963,
+        group = "Cone",
+        order = 3
+    )]
     pub inner_angle: f32,
     /// Half-angle in radians beyond which the light is zero, `>= inner_angle`.
+    #[fynkel(
+        kind = "angle",
+        unit = "deg",
+        min = 0,
+        max = 1.5707963,
+        group = "Cone",
+        order = 4
+    )]
     pub outer_angle: f32,
     /// The layers this light lights (ADR-0020); all by default.
+    #[fynkel(kind = "layerMask", label = "Culling mask", order = 5)]
     pub culling_mask: u32,
 }
 
@@ -188,15 +245,20 @@ impl Default for SpotLight {
 #[schema(kind = "component", id = 9, name = "fynkel.Environment")]
 pub struct Environment {
     /// Linear RGB, each `0..=1`.
+    #[fynkel(kind = "color", group = "Ambient", order = 0)]
     pub ambient_color: Vec3,
     /// Ambient illuminance in lux, from every direction.
+    #[fynkel(unit = "lux", min = 0, group = "Ambient", order = 1)]
     pub ambient_intensity: f32,
     /// Equirectangular sRGB texture asset drawn as the sky (no image-based
     /// lighting in V1: the sky is a backdrop, `ambient_*` lights surfaces).
+    #[fynkel(kind = "asset(texture)", group = "Sky", order = 2)]
     pub sky: Option<AssetRef>,
     /// Luminance in nits of a white sky texel.
+    #[fynkel(unit = "nit", min = 0, group = "Sky", order = 3)]
     pub sky_intensity: f32,
     /// Rotation of the sky about +Y in radians.
+    #[fynkel(kind = "angle", unit = "deg", group = "Sky", order = 4)]
     pub sky_rotation: f32,
 }
 
@@ -239,18 +301,33 @@ pub enum VolumeShape {
 #[schema(kind = "component", id = 25, name = "fynkel.Volume")]
 pub struct Volume {
     /// The `.volume.json` profile.
+    #[fynkel(kind = "asset(volume)", order = 0)]
     pub profile: AssetRef,
+    #[fynkel(
+        group = "Shape",
+        order = 1,
+        tooltip = "global: everywhere; box and sphere fade out over the blend distance."
+    )]
     pub shape: VolumeShape,
     /// A box's full size in the entity's local units, each `> 0`.
+    #[fynkel(label = "Box size", group = "Shape", order = 2)]
     pub size: Vec3,
     /// A sphere's radius in the entity's local units, `> 0`.
+    #[fynkel(label = "Sphere radius", min = 0, group = "Shape", order = 3)]
     pub radius: f32,
     /// Metres outside the shape over which the volume fades out, `>= 0`.
+    #[fynkel(unit = "m", min = 0, group = "Shape", order = 4)]
     pub blend_distance: f32,
     /// How much of the profile applies, `0..=1`.
+    #[fynkel(kind = "slider", min = 0, max = 1, step = 0.01, order = 5)]
     pub weight: f32,
     /// Higher priorities blend over lower ones.
+    #[fynkel(
+        order = 6,
+        tooltip = "Higher priorities blend over lower ones; ties go by scene order."
+    )]
     pub priority: i32,
+    #[fynkel(order = 7)]
     pub enabled: bool,
 }
 
@@ -419,27 +496,39 @@ mod tests {
 #[schema(kind = "component", id = 13, name = "fynkel.ThirdPersonCamera")]
 pub struct ThirdPersonCamera {
     /// The followed object; None follows nothing.
+    #[fynkel(order = 0, gizmo(shape = "lineTo"))]
     pub target: ObjectRef,
     /// Offset from the target's world position the rig looks at and
     /// orbits, metres.
+    #[fynkel(unit = "m", order = 1)]
     pub pivot: Vec3,
     /// Orbit radius, metres, `> 0`.
+    #[fynkel(unit = "m", min = 0, group = "Orbit", order = 2)]
     pub distance: f32,
     /// Closest the pull-in brings the rig, metres, `0..=distance`.
+    #[fynkel(unit = "m", min = 0, group = "Orbit", order = 3)]
     pub min_distance: f32,
     /// Orbit yaw, radians (state).
+    #[fynkel(kind = "angle", unit = "deg", group = "Orbit", order = 4)]
     pub yaw: f32,
     /// Orbit elevation, radians (state), kept in `min_pitch..=max_pitch`.
+    #[fynkel(kind = "angle", unit = "deg", group = "Orbit", order = 5)]
     pub pitch: f32,
+    #[fynkel(kind = "angle", unit = "deg", group = "Orbit", order = 6)]
     pub min_pitch: f32,
+    #[fynkel(kind = "angle", unit = "deg", group = "Orbit", order = 7)]
     pub max_pitch: f32,
     /// A 2D action that turns the rig; empty leaves yaw/pitch to gameplay.
+    #[fynkel(group = "Input", order = 8)]
     pub look_action: String,
     /// Radians per second per unit of `look_action` input.
+    #[fynkel(unit = "rad/s", min = 0, group = "Input", order = 9)]
     pub sensitivity: f32,
     /// Radius of the pull-in sphere cast, metres (`0` disables).
+    #[fynkel(unit = "m", min = 0, group = "Collision", order = 10)]
     pub collision_radius: f32,
     /// Layers the pull-in cast hits.
+    #[fynkel(kind = "layerMask", group = "Collision", order = 11)]
     pub mask: u32,
 }
 
@@ -532,9 +621,12 @@ pub enum MotionSpace {
 #[schema(kind = "component", id = 14, name = "fynkel.Rotator")]
 pub struct Rotator {
     /// Spin axis, normalised at use; must not be zero.
+    #[fynkel(order = 0)]
     pub axis: Vec3,
     /// Radians per second (negative spins the other way).
+    #[fynkel(unit = "rad/s", step = 0.1, order = 1)]
     pub speed: f32,
+    #[fynkel(order = 2)]
     pub space: MotionSpace,
 }
 
@@ -570,13 +662,18 @@ impl Rotator {
 #[schema(kind = "component", id = 15, name = "fynkel.Oscillate")]
 pub struct Oscillate {
     /// Direction of travel, normalised at use; must not be zero.
+    #[fynkel(order = 0)]
     pub axis: Vec3,
     /// Metres either side of the rest position, `>= 0`.
+    #[fynkel(unit = "m", min = 0, order = 1)]
     pub amplitude: f32,
     /// Cycles per second, `>= 0`.
+    #[fynkel(unit = "Hz", min = 0, order = 2)]
     pub frequency: f32,
     /// Radians into the cycle at `t = 0`.
+    #[fynkel(kind = "angle", unit = "deg", order = 3)]
     pub phase: f32,
+    #[fynkel(order = 4)]
     pub space: MotionSpace,
 }
 
@@ -615,12 +712,16 @@ impl Oscillate {
 #[schema(kind = "component", id = 16, name = "fynkel.Follow")]
 pub struct Follow {
     /// The followed object; None follows nothing.
+    #[fynkel(order = 0, gizmo(shape = "lineTo"))]
     pub target: ObjectRef,
     /// Metres from the target's world position, world axes.
+    #[fynkel(unit = "m", order = 1)]
     pub offset: Vec3,
     /// Per second, `>= 0`; `0` snaps.
+    #[fynkel(unit = "/s", min = 0, order = 2)]
     pub smoothing: f32,
     /// Also turn the entity's -Z towards the target's position.
+    #[fynkel(order = 3)]
     pub look_at: bool,
 }
 
@@ -653,6 +754,7 @@ impl Follow {
 pub struct LookAtCamera {
     /// Turn about the world Y axis only, staying upright (a tree card);
     /// `false` also tilts to face a camera above or below.
+    #[fynkel(label = "Lock Y axis")]
     pub lock_y: bool,
 }
 
@@ -669,6 +771,7 @@ impl Default for LookAtCamera {
 #[schema(kind = "component", id = 18, name = "fynkel.LifetimeDespawn")]
 pub struct LifetimeDespawn {
     /// Seconds left, `>= 0`.
+    #[fynkel(unit = "s", min = 0)]
     pub seconds: f32,
 }
 
@@ -699,15 +802,21 @@ impl LifetimeDespawn {
 #[schema(kind = "component", id = 19, name = "fynkel.Emitter")]
 pub struct Emitter {
     /// The `.prefab.json` asset to instantiate.
+    #[fynkel(kind = "asset(prefab)", order = 0)]
     pub prefab: AssetRef,
     /// Instances per second, `>= 0`; `0` pauses.
+    #[fynkel(unit = "/s", min = 0, order = 1)]
     pub rate: f32,
     /// Seconds each instance lives, `>= 0`; `0` keeps them.
+    #[fynkel(unit = "s", min = 0, order = 2)]
     pub lifetime: f32,
     /// Ceiling on this emitter's live instances; `0` is unlimited.
+    #[fynkel(label = "Max alive", order = 3)]
     pub max_alive: u32,
     /// Initial linear velocity of each instance's dynamic bodies, m/s.
+    #[fynkel(unit = "m/s", order = 4, gizmo(shape = "direction", space = "world"))]
     pub velocity: Vec3,
+    #[fynkel(order = 5)]
     pub enabled: bool,
 }
 
@@ -748,8 +857,10 @@ impl Emitter {
 #[schema(kind = "component", id = 20, name = "fynkel.TriggerZone")]
 pub struct TriggerZone {
     /// The event name, non-empty.
+    #[fynkel(order = 0)]
     pub event: String,
     /// Fire on the first entry only, then drop the component.
+    #[fynkel(order = 1)]
     pub once: bool,
 }
 
@@ -802,19 +913,34 @@ impl TriggerZone {
 pub struct Animator {
     /// The clip (an imported glTF `anim/<a>` sub-asset or a blend space
     /// `.blend.json`); nil plays nothing.
+    #[fynkel(kind = "asset(clip)", order = 1)]
     pub clip: AssetRef,
     /// Playback rate, `1` is authored speed; finite.
+    #[fynkel(step = 0.05, order = 2)]
     pub speed: f32,
+    #[fynkel(order = 4)]
     pub looping: bool,
+    #[fynkel(order = 3)]
     pub playing: bool,
     /// Blend weight of this animator's pose over the pose beneath it, in
     /// `[0, 1]`; `1` (the default) replaces it.
+    #[fynkel(
+        kind = "slider",
+        min = 0,
+        max = 1,
+        step = 0.01,
+        group = "Blending",
+        order = 5
+    )]
     pub weight: f32,
     /// Add the clip's delta from its first frame instead of replacing.
+    #[fynkel(group = "Blending", order = 6)]
     pub additive: bool,
     /// Extract the root channel's planar motion (see above).
+    #[fynkel(label = "Root motion", order = 7)]
     pub root_motion: bool,
     /// The Animator Controller it runs (ADR-0032); none plays `clip`.
+    #[fynkel(kind = "asset(controller)", order = 0)]
     pub controller: Option<AssetRef>,
 }
 
@@ -858,8 +984,10 @@ impl Animator {
 #[schema(kind = "component", id = 22, name = "fynkel.Skin")]
 pub struct Skin {
     /// The skin sub-asset.
+    #[fynkel(kind = "asset(skin)", order = 0)]
     pub skin: AssetRef,
     /// The skeleton root object; None for the mesh's tree root.
+    #[fynkel(order = 1)]
     pub skeleton: ObjectRef,
 }
 
@@ -877,104 +1005,145 @@ fn non_negative(what: &str, v: f32) -> Result<(), String> {
     Ok(())
 }
 
-/// One typed built-in component value: what a scene document instantiates
-/// and what `Command::SetComponent` carries. `fynkel.Name` is not here —
-/// it mirrors the entity's `name` (`Command::SetName`).
-#[derive(Clone, Debug, PartialEq)]
-pub enum ComponentValue {
-    Transform(Transform),
-    MeshRenderer(MeshRenderer),
-    Camera(Camera),
-    DirectionalLight(DirectionalLight),
-    PointLight(PointLight),
-    SpotLight(SpotLight),
-    Environment(Environment),
-    /// `fynkel_physics` (M3-08).
-    RigidBody(RigidBody),
-    Collider(Collider),
-    /// M3-09.
-    CharacterController(CharacterController),
-    ThirdPersonCamera(ThirdPersonCamera),
-    /// The catalogue (M3-10).
-    Rotator(Rotator),
-    Oscillate(Oscillate),
-    Follow(Follow),
-    LookAtCamera(LookAtCamera),
-    LifetimeDespawn(LifetimeDespawn),
-    Emitter(Emitter),
-    /// M3-12.
-    TriggerZone(TriggerZone),
-    /// Animation (M3-19).
-    Animator(Animator),
-    Skin(Skin),
-    /// `fynkel_audio` (M3-11).
-    AudioSource(AudioSource),
-    AudioListener(AudioListener),
-    /// Post-processing (R3a).
-    Volume(Volume),
-    /// The object's layer and tags (ADR-0020).
-    Layer(Layer),
-    Tags(Tags),
+/// Every built-in component, once (foundation 6.2): its `ComponentValue`
+/// variant, its type, its `ComponentId` and the fields that hold an
+/// [`ObjectRef`] (ADR-0035). Calls the macro `$then` with the list, so each
+/// place that handles every component — the `ComponentValue` enum and its
+/// `id`, a world's set, remove and read-back, the bridge's component query
+/// — is written from it. `fynkel.Name` is not here: it mirrors the
+/// entity's `name`. Adding a component: `docs/codegen.md`.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! builtin_components {
+    ($then:ident) => {
+        $then! {
+            Transform($crate::Transform) = TRANSFORM [];
+            MeshRenderer($crate::MeshRenderer) = MESH_RENDERER [];
+            Camera($crate::Camera) = CAMERA [];
+            DirectionalLight($crate::DirectionalLight) = DIRECTIONAL_LIGHT [];
+            PointLight($crate::PointLight) = POINT_LIGHT [];
+            SpotLight($crate::SpotLight) = SPOT_LIGHT [];
+            Environment($crate::Environment) = ENVIRONMENT [];
+            /// `fynkel_physics` (M3-08).
+            RigidBody($crate::RigidBody) = RIGID_BODY [];
+            Collider($crate::Collider) = COLLIDER [];
+            /// M3-09.
+            CharacterController($crate::CharacterController) = CHARACTER_CONTROLLER [];
+            ThirdPersonCamera($crate::ThirdPersonCamera) = THIRD_PERSON_CAMERA [target];
+            /// The catalogue (M3-10).
+            Rotator($crate::Rotator) = ROTATOR [];
+            Oscillate($crate::Oscillate) = OSCILLATE [];
+            Follow($crate::Follow) = FOLLOW [target];
+            LookAtCamera($crate::LookAtCamera) = LOOK_AT_CAMERA [];
+            LifetimeDespawn($crate::LifetimeDespawn) = LIFETIME_DESPAWN [];
+            Emitter($crate::Emitter) = EMITTER [];
+            /// M3-12.
+            TriggerZone($crate::TriggerZone) = TRIGGER_ZONE [];
+            /// Animation (M3-19).
+            Animator($crate::Animator) = ANIMATOR [];
+            Skin($crate::Skin) = SKIN [skeleton];
+            /// `fynkel_audio` (M3-11).
+            AudioSource($crate::AudioSource) = AUDIO_SOURCE [];
+            AudioListener($crate::AudioListener) = AUDIO_LISTENER [];
+            /// Post-processing (R3a).
+            Volume($crate::Volume) = VOLUME [];
+            /// The object's layer and tags (ADR-0020).
+            Layer($crate::Layer) = LAYER [];
+            Tags($crate::Tags) = TAGS [];
+        }
+    };
 }
 
-/// The component fields that hold an [`ObjectRef`] (ADR-0035): what
-/// [`ComponentValue::for_each_object_ref`] visits, pinned against the
-/// schemas by a test.
-pub const OBJECT_REF_FIELDS: &[(&str, &str)] = &[
-    ("fynkel.ThirdPersonCamera", "target"),
-    ("fynkel.Follow", "target"),
-    ("fynkel.Skin", "skeleton"),
-];
+macro_rules! component_value {
+    ($($(#[$doc:meta])* $variant:ident($ty:ty) = $id:ident [$($field:ident),*];)*) => {
+        /// One typed built-in component value: what a scene document
+        /// instantiates and what `Command::SetComponent` carries.
+        /// `fynkel.Name` is not here — it mirrors the entity's `name`
+        /// (`Command::SetName`).
+        #[derive(Clone, Debug, PartialEq)]
+        pub enum ComponentValue {
+            $($(#[$doc])* $variant($ty),)*
+        }
+
+        /// The component fields that hold an [`ObjectRef`] (ADR-0035): what
+        /// [`ComponentValue::for_each_object_ref`] visits, pinned against
+        /// the schemas by a test.
+        pub const OBJECT_REF_FIELDS: &[(&str, &str)] = &[
+            $($((ComponentId::$id.name().unwrap(), stringify!($field)),)*)*
+        ];
+
+        // Each entry's id is its type's schema id.
+        const _: () = {
+            use fynkel_contracts::HasSchema;
+            $(assert!(<$ty as HasSchema>::SCHEMA.id == ComponentId::$id.0);)*
+        };
+
+        impl ComponentValue {
+            /// Every built-in component's id, in registry order.
+            pub const IDS: &[ComponentId] = &[$(ComponentId::$id),*];
+
+            /// Calls `f` with the component's schema name, the field's
+            /// name and the value of every object reference the component
+            /// holds (ADR-0035): a load maps their authoring ids to
+            /// handles, a copy re-points them into the copied tree.
+            pub fn for_each_object_ref(
+                &mut self,
+                mut f: impl FnMut(&'static str, &'static str, &mut ObjectRef),
+            ) {
+                match self {
+                    $(ComponentValue::$variant(_c) => {
+                        $(f(ComponentId::$id.name().unwrap(), stringify!($field), &mut _c.$field);)*
+                    })*
+                }
+                let _ = &mut f;
+            }
+
+            pub fn id(&self) -> ComponentId {
+                match self {
+                    $(ComponentValue::$variant(_) => ComponentId::$id,)*
+                }
+            }
+
+            /// Inserts (or replaces) the component on `entity`, unchecked.
+            pub(crate) fn insert_into(
+                self,
+                ecs: &mut fynkel_ecs::World,
+                entity: fynkel_contracts::Entity,
+            ) -> Result<(), fynkel_ecs::EcsError> {
+                match self {
+                    $(ComponentValue::$variant(v) => ecs.insert(entity, v),)*
+                }
+            }
+
+            /// Removes the component `id` from `entity`: whether it had
+            /// one; `None` for an id that is not a built-in component.
+            pub(crate) fn remove_from(
+                ecs: &mut fynkel_ecs::World,
+                entity: fynkel_contracts::Entity,
+                id: ComponentId,
+            ) -> Option<bool> {
+                match id {
+                    $(ComponentId::$id => Some(ecs.remove::<$ty>(entity).is_ok()),)*
+                    _ => None,
+                }
+            }
+
+            /// Every built-in component on `entity`, in registry order.
+            pub fn all_of(world: &crate::World, entity: fynkel_contracts::Entity) -> Vec<ComponentValue> {
+                let ecs = world.ecs();
+                let mut out = Vec::new();
+                $(if let Ok(v) = ecs.get::<$ty>(entity) {
+                    out.push(ComponentValue::$variant((*v).clone()));
+                })*
+                out
+            }
+        }
+    };
+}
+
+builtin_components!(component_value);
 
 impl ComponentValue {
-    /// Calls `f` with the component's schema name, the field's name and
-    /// the value of every object reference the component holds
-    /// (ADR-0035): a load maps their authoring ids to handles, a copy
-    /// re-points them into the copied tree.
-    pub fn for_each_object_ref(
-        &mut self,
-        mut f: impl FnMut(&'static str, &'static str, &mut ObjectRef),
-    ) {
-        match self {
-            ComponentValue::ThirdPersonCamera(c) => {
-                f("fynkel.ThirdPersonCamera", "target", &mut c.target)
-            }
-            ComponentValue::Follow(c) => f("fynkel.Follow", "target", &mut c.target),
-            ComponentValue::Skin(c) => f("fynkel.Skin", "skeleton", &mut c.skeleton),
-            _ => {}
-        }
-    }
-
-    pub fn id(&self) -> ComponentId {
-        match self {
-            ComponentValue::Transform(_) => ComponentId::TRANSFORM,
-            ComponentValue::MeshRenderer(_) => ComponentId::MESH_RENDERER,
-            ComponentValue::Camera(_) => ComponentId::CAMERA,
-            ComponentValue::DirectionalLight(_) => ComponentId::DIRECTIONAL_LIGHT,
-            ComponentValue::PointLight(_) => ComponentId::POINT_LIGHT,
-            ComponentValue::SpotLight(_) => ComponentId::SPOT_LIGHT,
-            ComponentValue::Environment(_) => ComponentId::ENVIRONMENT,
-            ComponentValue::RigidBody(_) => ComponentId::RIGID_BODY,
-            ComponentValue::Collider(_) => ComponentId::COLLIDER,
-            ComponentValue::CharacterController(_) => ComponentId::CHARACTER_CONTROLLER,
-            ComponentValue::ThirdPersonCamera(_) => ComponentId::THIRD_PERSON_CAMERA,
-            ComponentValue::Rotator(_) => ComponentId::ROTATOR,
-            ComponentValue::Oscillate(_) => ComponentId::OSCILLATE,
-            ComponentValue::Follow(_) => ComponentId::FOLLOW,
-            ComponentValue::LookAtCamera(_) => ComponentId::LOOK_AT_CAMERA,
-            ComponentValue::LifetimeDespawn(_) => ComponentId::LIFETIME_DESPAWN,
-            ComponentValue::Emitter(_) => ComponentId::EMITTER,
-            ComponentValue::TriggerZone(_) => ComponentId::TRIGGER_ZONE,
-            ComponentValue::Animator(_) => ComponentId::ANIMATOR,
-            ComponentValue::Skin(_) => ComponentId::SKIN,
-            ComponentValue::AudioSource(_) => ComponentId::AUDIO_SOURCE,
-            ComponentValue::AudioListener(_) => ComponentId::AUDIO_LISTENER,
-            ComponentValue::Volume(_) => ComponentId::VOLUME,
-            ComponentValue::Layer(_) => ComponentId::LAYER,
-            ComponentValue::Tags(_) => ComponentId::TAGS,
-        }
-    }
-
     pub fn type_name(&self) -> &'static str {
         self.id().name().unwrap()
     }

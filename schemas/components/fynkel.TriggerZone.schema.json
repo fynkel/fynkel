@@ -8,11 +8,17 @@
   "properties": {
     "event": {
       "type": "string",
-      "description": "The event name, non-empty."
+      "description": "The event name, non-empty.",
+      "x-fynkel": {
+        "order": 0
+      }
     },
     "once": {
       "type": "boolean",
-      "description": "Fire on the first entry only, then drop the component."
+      "description": "Fire on the first entry only, then drop the component.",
+      "x-fynkel": {
+        "order": 1
+      }
     }
   },
   "required": [

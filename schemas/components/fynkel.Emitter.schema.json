@@ -8,21 +8,39 @@
   "properties": {
     "prefab": {
       "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef",
-      "description": "The `.prefab.json` asset to instantiate."
+      "description": "The `.prefab.json` asset to instantiate.",
+      "x-fynkel": {
+        "kind": "asset(prefab)",
+        "order": 0
+      }
     },
     "rate": {
       "type": "number",
-      "description": "Instances per second, `>= 0`; `0` pauses."
+      "description": "Instances per second, `>= 0`; `0` pauses.",
+      "x-fynkel": {
+        "unit": "/s",
+        "min": 0,
+        "order": 1
+      }
     },
     "lifetime": {
       "type": "number",
-      "description": "Seconds each instance lives, `>= 0`; `0` keeps them."
+      "description": "Seconds each instance lives, `>= 0`; `0` keeps them.",
+      "x-fynkel": {
+        "unit": "s",
+        "min": 0,
+        "order": 2
+      }
     },
     "max_alive": {
       "type": "integer",
       "minimum": 0,
       "maximum": 4294967295,
-      "description": "Ceiling on this emitter's live instances; `0` is unlimited."
+      "description": "Ceiling on this emitter's live instances; `0` is unlimited.",
+      "x-fynkel": {
+        "label": "Max alive",
+        "order": 3
+      }
     },
     "velocity": {
       "type": "array",
@@ -31,10 +49,21 @@
       },
       "minItems": 3,
       "maxItems": 3,
-      "description": "Initial linear velocity of each instance's dynamic bodies, m/s."
+      "description": "Initial linear velocity of each instance's dynamic bodies, m/s.",
+      "x-fynkel": {
+        "unit": "m/s",
+        "order": 4,
+        "gizmo": {
+          "shape": "direction",
+          "space": "world"
+        }
+      }
     },
     "enabled": {
-      "type": "boolean"
+      "type": "boolean",
+      "x-fynkel": {
+        "order": 5
+      }
     }
   },
   "required": [

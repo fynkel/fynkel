@@ -151,6 +151,10 @@ pub struct FieldSchema {
     pub name: &'static str,
     pub ty: FieldType,
     pub doc: &'static str,
+    /// The Inspector's display hints (ADR-0018's `x-fynkel` vocabulary),
+    /// a JSON object from the field's `#[fynkel(...)]` attribute; empty
+    /// for none. Not part of the wire fingerprint.
+    pub hints: &'static str,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -297,11 +301,13 @@ mod tests {
                 name: "a",
                 ty: FieldType::Bool,
                 doc: "",
+                hints: "",
             },
             FieldSchema {
                 name: "b",
                 ty: FieldType::Vec3,
                 doc: "",
+                hints: "",
             },
         ],
     };
@@ -318,21 +324,25 @@ mod tests {
                 name: "id",
                 ty: FieldType::U32,
                 doc: "",
+                hints: "",
             },
             FieldSchema {
                 name: "e",
                 ty: FieldType::Entity,
                 doc: "",
+                hints: "",
             },
             FieldSchema {
                 name: "inner",
                 ty: FieldType::Nested(&INNER),
                 doc: "",
+                hints: "",
             },
             FieldSchema {
                 name: "s",
                 ty: FieldType::Str,
                 doc: "",
+                hints: "",
             },
         ],
     };

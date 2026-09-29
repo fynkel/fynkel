@@ -21,7 +21,11 @@
       ],
       "additionalProperties": false,
       "x-fynkel": {
-        "type": "gameObject"
+        "type": "gameObject",
+        "order": 0,
+        "gizmo": {
+          "shape": "lineTo"
+        }
       },
       "description": "The followed object; None follows nothing."
     },
@@ -32,47 +36,108 @@
       },
       "minItems": 3,
       "maxItems": 3,
-      "description": "Offset from the target's world position the rig looks at and orbits, metres."
+      "description": "Offset from the target's world position the rig looks at and orbits, metres.",
+      "x-fynkel": {
+        "unit": "m",
+        "order": 1
+      }
     },
     "distance": {
       "type": "number",
-      "description": "Orbit radius, metres, `> 0`."
+      "description": "Orbit radius, metres, `> 0`.",
+      "x-fynkel": {
+        "unit": "m",
+        "min": 0,
+        "group": "Orbit",
+        "order": 2
+      }
     },
     "min_distance": {
       "type": "number",
-      "description": "Closest the pull-in brings the rig, metres, `0..=distance`."
+      "description": "Closest the pull-in brings the rig, metres, `0..=distance`.",
+      "x-fynkel": {
+        "unit": "m",
+        "min": 0,
+        "group": "Orbit",
+        "order": 3
+      }
     },
     "yaw": {
       "type": "number",
-      "description": "Orbit yaw, radians (state)."
+      "description": "Orbit yaw, radians (state).",
+      "x-fynkel": {
+        "kind": "angle",
+        "unit": "deg",
+        "group": "Orbit",
+        "order": 4
+      }
     },
     "pitch": {
       "type": "number",
-      "description": "Orbit elevation, radians (state), kept in `min_pitch..=max_pitch`."
+      "description": "Orbit elevation, radians (state), kept in `min_pitch..=max_pitch`.",
+      "x-fynkel": {
+        "kind": "angle",
+        "unit": "deg",
+        "group": "Orbit",
+        "order": 5
+      }
     },
     "min_pitch": {
-      "type": "number"
+      "type": "number",
+      "x-fynkel": {
+        "kind": "angle",
+        "unit": "deg",
+        "group": "Orbit",
+        "order": 6
+      }
     },
     "max_pitch": {
-      "type": "number"
+      "type": "number",
+      "x-fynkel": {
+        "kind": "angle",
+        "unit": "deg",
+        "group": "Orbit",
+        "order": 7
+      }
     },
     "look_action": {
       "type": "string",
-      "description": "A 2D action that turns the rig; empty leaves yaw/pitch to gameplay."
+      "description": "A 2D action that turns the rig; empty leaves yaw/pitch to gameplay.",
+      "x-fynkel": {
+        "group": "Input",
+        "order": 8
+      }
     },
     "sensitivity": {
       "type": "number",
-      "description": "Radians per second per unit of `look_action` input."
+      "description": "Radians per second per unit of `look_action` input.",
+      "x-fynkel": {
+        "unit": "rad/s",
+        "min": 0,
+        "group": "Input",
+        "order": 9
+      }
     },
     "collision_radius": {
       "type": "number",
-      "description": "Radius of the pull-in sphere cast, metres (`0` disables)."
+      "description": "Radius of the pull-in sphere cast, metres (`0` disables).",
+      "x-fynkel": {
+        "unit": "m",
+        "min": 0,
+        "group": "Collision",
+        "order": 10
+      }
     },
     "mask": {
       "type": "integer",
       "minimum": 0,
       "maximum": 4294967295,
-      "description": "Layers the pull-in cast hits."
+      "description": "Layers the pull-in cast hits.",
+      "x-fynkel": {
+        "kind": "layerMask",
+        "group": "Collision",
+        "order": 11
+      }
     }
   },
   "required": [

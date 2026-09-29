@@ -8,7 +8,11 @@
   "properties": {
     "seconds": {
       "type": "number",
-      "description": "Seconds left, `>= 0`."
+      "description": "Seconds left, `>= 0`.",
+      "x-fynkel": {
+        "unit": "s",
+        "min": 0
+      }
     }
   },
   "required": [

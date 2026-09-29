@@ -21,6 +21,17 @@
 //! contain. `document = "material"` on a record makes it the top level of
 //! that document kind: every field optional, `Default` when absent.
 //!
+//! A field's `#[fynkel(...)]` attribute holds its Inspector hints
+//! (ADR-0018's `x-fynkel` vocabulary), which `fynkel codegen` writes into
+//! the component's JSON Schema: `key = literal` (a string, number or
+//! bool), a bare `key` for `true`, `key(inner = literal, ...)` for an
+//! object; snake_case keys become camelCase (`show_if` → `showIf`).
+//!
+//! ```ignore
+//! #[fynkel(kind = "angle", unit = "deg", min = 0.01, max = 3.1, group = "Lens", order = 1)]
+//! pub fov_y: f32,
+//! ```
+//!
 //! On a unit-variant enum the derive emits `HasEnumSchema`: the wire carries
 //! the declaration index, documents the lowerCamel variant name.
 //!
@@ -37,7 +48,7 @@ use syn::{
     PathArguments, Type,
 };
 
-#[proc_macro_derive(Schema, attributes(schema))]
+#[proc_macro_derive(Schema, attributes(schema, fynkel))]
 pub fn derive_schema(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match expand(input) {
@@ -145,6 +156,77 @@ fn doc_of(attrs: &[syn::Attribute]) -> String {
         }
     }
     lines.join(" ")
+}
+
+/// A field's `#[fynkel(...)]` hints as a JSON object's text ("" for none).
+fn hints_of(attrs: &[syn::Attribute]) -> syn::Result<String> {
+    let mut entries = Vec::new();
+    for a in attrs {
+        if a.path().is_ident("fynkel") {
+            a.parse_nested_meta(|meta| hint_entry(meta, &mut entries))?;
+        }
+    }
+    if entries.is_empty() {
+        return Ok(String::new());
+    }
+    Ok(format!("{{{}}}", entries.join(",")))
+}
+
+fn hint_entry(meta: syn::meta::ParseNestedMeta, out: &mut Vec<String>) -> syn::Result<()> {
+    let key = camel(&meta.path.require_ident()?.to_string());
+    if meta.input.peek(syn::token::Paren) {
+        let mut inner = Vec::new();
+        meta.parse_nested_meta(|m| hint_entry(m, &mut inner))?;
+        out.push(format!("{}:{{{}}}", json_string(&key), inner.join(",")));
+    } else if meta.input.peek(syn::Token![=]) {
+        let lit: Lit = meta.value()?.parse()?;
+        let value = match &lit {
+            Lit::Str(s) => json_string(&s.value()),
+            Lit::Int(i) => i.base10_digits().to_string(),
+            Lit::Float(f) => f.base10_digits().to_string(),
+            Lit::Bool(b) => b.value.to_string(),
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    lit,
+                    "a hint is a string, number or bool",
+                ))
+            }
+        };
+        out.push(format!("{}:{}", json_string(&key), value));
+    } else {
+        out.push(format!("{}:true", json_string(&key)));
+    }
+    Ok(())
+}
+
+fn camel(snake: &str) -> String {
+    let mut out = String::new();
+    let mut upper = false;
+    for c in snake.chars() {
+        if c == '_' {
+            upper = true;
+        } else if upper {
+            out.extend(c.to_uppercase());
+            upper = false;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn json_string(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn field_type(ty: &Type) -> syn::Result<proc_macro2::TokenStream> {
@@ -297,8 +379,9 @@ fn expand(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         let name = f.ident.as_ref().unwrap().to_string();
         let ty = field_type(&f.ty)?;
         let doc = doc_of(&f.attrs);
+        let hints = hints_of(&f.attrs)?;
         field_tokens.push(quote! {
-            ::fynkel_contracts::schema::FieldSchema { name: #name, ty: #ty, doc: #doc }
+            ::fynkel_contracts::schema::FieldSchema { name: #name, ty: #ty, doc: #doc, hints: #hints }
         });
     }
     let ident = &input.ident;

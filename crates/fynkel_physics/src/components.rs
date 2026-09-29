@@ -30,22 +30,29 @@ pub enum BodyType {
 #[derive(Clone, Copy, Debug, PartialEq, Schema)]
 #[schema(kind = "component", id = 10, name = "fynkel.RigidBody")]
 pub struct RigidBody {
+    #[fynkel(label = "Type", order = 0)]
     pub body_type: BodyType,
     /// Kilograms (dynamic only, `> 0`); the inertia follows the collider
     /// shape scaled to this mass.
+    #[fynkel(unit = "kg", min = 0, order = 1)]
     pub mass: f32,
     /// Per-second velocity decay, `>= 0`.
+    #[fynkel(unit = "/s", min = 0, group = "Damping", order = 2)]
     pub linear_damping: f32,
     /// Per-second angular velocity decay, `>= 0`.
+    #[fynkel(unit = "/s", min = 0, group = "Damping", order = 3)]
     pub angular_damping: f32,
     /// Multiplies the world's gravity for this body (0 floats).
+    #[fynkel(step = 0.1, order = 4)]
     pub gravity_scale: f32,
     /// Continuous collision detection: fast bodies do not tunnel through
     /// thin geometry (costs a little per body).
+    #[fynkel(label = "Continuous collision detection", order = 5)]
     pub ccd: bool,
     /// Frozen axes, Unity's `RigidbodyConstraints` bits (dynamic bodies;
     /// see [`constraints`]): 2/4/8 freeze the position along X/Y/Z,
     /// 16/32/64 the rotation about X/Y/Z, 0 none.
+    #[fynkel(kind = "freezeAxes", order = 6)]
     pub constraints: u32,
 }
 
@@ -100,28 +107,52 @@ pub enum ColliderShape {
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "component", id = 11, name = "fynkel.Collider")]
 pub struct Collider {
+    #[fynkel(order = 0)]
     pub shape: ColliderShape,
     /// Metres; what each component means depends on `shape`.
+    #[fynkel(unit = "m", order = 1)]
     pub size: Vec3,
     /// The mesh sub-asset for `shape: mesh` (`mesh/<n>` of an imported
     /// glTF), ignored otherwise.
+    #[fynkel(kind = "asset(mesh)", order = 2)]
     pub mesh: Option<AssetRef>,
     /// Local translation of the shape from the entity's origin, metres.
+    #[fynkel(unit = "m", order = 3)]
     pub offset: Vec3,
     /// A `.physicsmaterial.json` (ADR-0025): its friction, bounciness and
     /// combine rules replace `friction` and `restitution`. None: those two
     /// apply, averaged with the other collider's.
+    #[fynkel(kind = "asset(physics_material)", group = "Material", order = 4)]
     pub material: Option<AssetRef>,
     /// Coulomb friction coefficient, `>= 0` (0.5 is rubber on concrete);
     /// ignored when `material` names one.
+    #[fynkel(
+        min = 0,
+        step = 0.05,
+        group = "Material",
+        show_if = "!material",
+        order = 5
+    )]
     pub friction: f32,
     /// Bounciness `0..=1`; ignored when `material` names one.
+    #[fynkel(
+        kind = "slider",
+        label = "Bounciness",
+        min = 0,
+        max = 1,
+        step = 0.01,
+        group = "Material",
+        show_if = "!material",
+        order = 6
+    )]
     pub restitution: f32,
     /// A sensor reports trigger events and applies no forces.
+    #[fynkel(label = "Sensor", order = 7)]
     pub is_sensor: bool,
     /// Which layers this collider collides with (bit `i` = the project's
     /// `layers[i]`; both sides must agree). Its own layer is its entity's
     /// `fynkel.Layer` (ADR-0020).
+    #[fynkel(kind = "layerMask", label = "Collides with", order = 8)]
     pub mask: u32,
 }
 
@@ -237,45 +268,67 @@ impl Collider {
 #[schema(kind = "component", id = 12, name = "fynkel.CharacterController")]
 pub struct CharacterController {
     /// Capsule radius, metres, `> 0`.
+    #[fynkel(unit = "m", min = 0, group = "Capsule", order = 0)]
     pub radius: f32,
     /// Total capsule height (both caps included), `>= 2 * radius`.
+    #[fynkel(unit = "m", min = 0, group = "Capsule", order = 1)]
     pub height: f32,
     /// The capsule's centre in the entity's local frame (scaled by the
     /// entity's scale, like a collider offset).
+    #[fynkel(unit = "m", group = "Capsule", order = 2)]
     pub center: Vec3,
     /// Skin the controller keeps from geometry, metres, `>= 0`.
+    #[fynkel(unit = "m", min = 0, group = "Capsule", order = 3)]
     pub skin_width: f32,
     /// Steepest climbable slope, radians in `0..pi/2`; steeper ground
     /// slides the character down.
+    #[fynkel(
+        kind = "angle",
+        unit = "deg",
+        min = 0,
+        max = 1.5707963,
+        group = "Ground",
+        order = 4
+    )]
     pub max_slope: f32,
     /// Highest step climbed without a jump, metres (`0` disables).
+    #[fynkel(unit = "m", min = 0, group = "Ground", order = 5)]
     pub max_step_height: f32,
     /// How far below the feet ground still counts as touched when walking
     /// off a bump, metres (`0` disables).
+    #[fynkel(unit = "m", min = 0, group = "Ground", order = 6)]
     pub snap_to_ground: f32,
     /// Multiplies the world's gravity; `0` is a flying character whose
     /// `move` velocity is used in full (vertical included).
+    #[fynkel(step = 0.1, group = "Ground", order = 7)]
     pub gravity_scale: f32,
     /// Kilograms the character pushes dynamic bodies with (`0` pushes
     /// nothing).
+    #[fynkel(unit = "kg", min = 0, group = "Ground", order = 8)]
     pub mass: f32,
     /// Walk speed of the runtime driver (`move_action`), m/s.
+    #[fynkel(unit = "m/s", min = 0, group = "Driver", order = 9)]
     pub speed: f32,
     /// Take-off speed of a `jump` without an explicit speed, m/s.
+    #[fynkel(unit = "m/s", min = 0, group = "Driver", order = 10)]
     pub jump_speed: f32,
     /// Radians per second the entity turns towards its horizontal motion
     /// (`0` leaves the rotation to gameplay).
+    #[fynkel(unit = "rad/s", min = 0, group = "Driver", order = 11)]
     pub turn_speed: f32,
     /// A 2D action walked by the runtime every tick at `speed` (x right,
     /// y forward, relative to the camera that targets this entity);
     /// empty leaves movement to `move` commands.
+    #[fynkel(group = "Driver", order = 12)]
     pub move_action: String,
     /// A button action whose press jumps when grounded; empty leaves it
     /// to `jump` commands.
+    #[fynkel(group = "Driver", order = 13)]
     pub jump_action: String,
     /// Which layers the capsule collides with and walks on (bit `i` = the
     /// project's `layers[i]`); its own layer is its entity's `fynkel.Layer`
     /// (ADR-0020).
+    #[fynkel(kind = "layerMask", label = "Collides with", order = 14)]
     pub mask: u32,
 }
 

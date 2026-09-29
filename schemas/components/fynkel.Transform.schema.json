@@ -13,7 +13,11 @@
       },
       "minItems": 3,
       "maxItems": 3,
-      "description": "Metres."
+      "description": "Metres.",
+      "x-fynkel": {
+        "unit": "m",
+        "order": 0
+      }
     },
     "rotation": {
       "type": "array",
@@ -22,7 +26,12 @@
       },
       "minItems": 4,
       "maxItems": 4,
-      "description": "Unit quaternion `[x, y, z, w]`."
+      "description": "Unit quaternion `[x, y, z, w]`.",
+      "x-fynkel": {
+        "kind": "quaternion",
+        "order": 1,
+        "tooltip": "Edited as Euler degrees (X, Y, Z); stored as a unit quaternion."
+      }
     },
     "scale": {
       "type": "array",
@@ -30,7 +39,10 @@
         "type": "number"
       },
       "minItems": 3,
-      "maxItems": 3
+      "maxItems": 3,
+      "x-fynkel": {
+        "order": 2
+      }
     }
   },
   "required": [

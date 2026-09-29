@@ -184,6 +184,21 @@ fn json_type(ty: &FieldType) -> Value {
     }
 }
 
+/// Merges a field's `#[fynkel(...)]` hints into its `x-fynkel` (ADR-0018):
+/// what the Inspector shows for a built-in component's field.
+fn add_hints(t: &mut Value, hints: &str, record: &str, field: &str) {
+    if hints.is_empty() {
+        return;
+    }
+    let Ok(Value::Object(hints)) = serde_json::from_str::<Value>(hints) else {
+        panic!("{record}.{field}: the #[fynkel(...)] hints are not a JSON object: {hints}");
+    };
+    if !t["x-fynkel"].is_object() {
+        t["x-fynkel"] = json!({});
+    }
+    t["x-fynkel"].as_object_mut().unwrap().extend(hints);
+}
+
 fn json_schema(s: &RecordSchema) -> Value {
     let mut props = serde_json::Map::new();
     let mut required = Vec::new();
@@ -192,6 +207,7 @@ fn json_schema(s: &RecordSchema) -> Value {
         if !f.doc.is_empty() {
             t["description"] = Value::String(f.doc.to_string());
         }
+        add_hints(&mut t, f.hints, s.name, f.name);
         props.insert(f.name.to_string(), t);
         if !matches!(
             f.ty,
@@ -1542,4 +1558,32 @@ fn document_codecs(fp: u64) -> String {
     let _ = writeln!(o, "    }}");
     let _ = writeln!(o, "}}");
     o
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fynkel_contracts::HasSchema;
+
+    #[test]
+    fn a_component_schema_carries_its_fields_inspector_hints() {
+        let camera = json_schema(&fynkel_core::Camera::SCHEMA);
+        assert_eq!(
+            camera["properties"]["fov_y"]["x-fynkel"],
+            json!({"label": "Field of view", "kind": "angle", "unit": "deg", "min": 0.01, "max": 3.1, "group": "Lens", "order": 1})
+        );
+        // Merged with what the field's type already says.
+        let follow = json_schema(&fynkel_core::Follow::SCHEMA);
+        assert_eq!(
+            follow["properties"]["target"]["x-fynkel"],
+            json!({"type": "gameObject", "order": 0, "gizmo": {"shape": "lineTo"}})
+        );
+        let collider = json_schema(&fynkel_core::Collider::SCHEMA);
+        assert_eq!(
+            collider["properties"]["friction"]["x-fynkel"]["showIf"],
+            "!material"
+        );
+        let name = json_schema(&fynkel_core::Name::SCHEMA);
+        assert_eq!(name["properties"]["value"]["x-fynkel"]["readOnly"], true);
+    }
 }

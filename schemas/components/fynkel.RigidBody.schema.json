@@ -14,34 +14,65 @@
         "kinematic"
       ],
       "x-fynkel": {
-        "enum": "fynkel.BodyType"
+        "enum": "fynkel.BodyType",
+        "label": "Type",
+        "order": 0
       }
     },
     "mass": {
       "type": "number",
-      "description": "Kilograms (dynamic only, `> 0`); the inertia follows the collider shape scaled to this mass."
+      "description": "Kilograms (dynamic only, `> 0`); the inertia follows the collider shape scaled to this mass.",
+      "x-fynkel": {
+        "unit": "kg",
+        "min": 0,
+        "order": 1
+      }
     },
     "linear_damping": {
       "type": "number",
-      "description": "Per-second velocity decay, `>= 0`."
+      "description": "Per-second velocity decay, `>= 0`.",
+      "x-fynkel": {
+        "unit": "/s",
+        "min": 0,
+        "group": "Damping",
+        "order": 2
+      }
     },
     "angular_damping": {
       "type": "number",
-      "description": "Per-second angular velocity decay, `>= 0`."
+      "description": "Per-second angular velocity decay, `>= 0`.",
+      "x-fynkel": {
+        "unit": "/s",
+        "min": 0,
+        "group": "Damping",
+        "order": 3
+      }
     },
     "gravity_scale": {
       "type": "number",
-      "description": "Multiplies the world's gravity for this body (0 floats)."
+      "description": "Multiplies the world's gravity for this body (0 floats).",
+      "x-fynkel": {
+        "step": 0.1,
+        "order": 4
+      }
     },
     "ccd": {
       "type": "boolean",
-      "description": "Continuous collision detection: fast bodies do not tunnel through thin geometry (costs a little per body)."
+      "description": "Continuous collision detection: fast bodies do not tunnel through thin geometry (costs a little per body).",
+      "x-fynkel": {
+        "label": "Continuous collision detection",
+        "order": 5
+      }
     },
     "constraints": {
       "type": "integer",
       "minimum": 0,
       "maximum": 4294967295,
-      "description": "Frozen axes, Unity's `RigidbodyConstraints` bits (dynamic bodies; see [`constraints`]): 2/4/8 freeze the position along X/Y/Z, 16/32/64 the rotation about X/Y/Z, 0 none."
+      "description": "Frozen axes, Unity's `RigidbodyConstraints` bits (dynamic bodies; see [`constraints`]): 2/4/8 freeze the position along X/Y/Z, 16/32/64 the rotation about X/Y/Z, 0 none.",
+      "x-fynkel": {
+        "kind": "freezeAxes",
+        "order": 6
+      }
     }
   },
   "required": [

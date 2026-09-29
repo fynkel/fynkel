@@ -13,14 +13,26 @@
       },
       "minItems": 3,
       "maxItems": 3,
-      "description": "Linear RGB, each `0..=1`."
+      "description": "Linear RGB, each `0..=1`.",
+      "x-fynkel": {
+        "kind": "color",
+        "order": 0
+      }
     },
     "intensity": {
       "type": "number",
-      "description": "Illuminance in lux."
+      "description": "Illuminance in lux.",
+      "x-fynkel": {
+        "unit": "lux",
+        "min": 0,
+        "order": 1
+      }
     },
     "cast_shadows": {
-      "type": "boolean"
+      "type": "boolean",
+      "x-fynkel": {
+        "order": 2
+      }
     }
   },
   "required": [
