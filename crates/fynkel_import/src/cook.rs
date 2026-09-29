@@ -73,6 +73,19 @@ pub struct CookOptions {
     /// How far the cook got, readable from another thread, and its
     /// cancel (ADR-0040 §2).
     pub progress: Option<Arc<CookProgress>>,
+    /// Worker threads for the sources (ADR-0040 §1); 1 imports them one
+    /// after another on the calling thread. The result is the same for
+    /// any number.
+    pub jobs: usize,
+}
+
+/// The default worker count: the machine's cores less one, at most 8
+/// (each worker may hold a large model in memory).
+pub fn default_jobs() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().saturating_sub(1))
+        .unwrap_or(1)
+        .clamp(1, 8)
 }
 
 /// How far a cook got, shared with the thread that watches it (ADR-0040
@@ -178,6 +191,7 @@ impl Default for CookOptions {
             project: None,
             live: HashMap::new(),
             progress: None,
+            jobs: default_jobs(),
         }
     }
 }
@@ -435,14 +449,14 @@ pub fn cook(
         .partition(|i| matches!(entries[*i].kind, AssetKind::Source { .. }));
     let mut keys: HashMap<Uuid, CacheKey> = HashMap::new();
     let mut results: Vec<Option<CookedAsset>> = (0..entries.len()).map(|_| None).collect();
-    for i in sources {
-        if stopped() {
-            return cancelled(results, diagnostics);
-        }
+    // Sources depend on nothing, so they import on worker threads
+    // (ADR-0040 §1); their outcomes join below in this order, so the
+    // report, the keys and the library are what one worker makes.
+    let cook_source = |i: usize| {
         if let Some(p) = progress {
             p.start(&entries[i].path);
         }
-        cook_index(
+        let out = cook_asset(
             i,
             db,
             schemas,
@@ -453,13 +467,30 @@ pub fn cook(
             &by_id,
             cache,
             opts,
-            &mut keys,
-            &mut results,
-            &mut diagnostics,
+            &HashMap::new(),
         );
         if let Some(p) = progress {
             p.finish();
         }
+        out
+    };
+    let outcomes = in_parallel(&sources, opts.jobs, &stopped, cook_source);
+    for (&i, outcome) in sources.iter().zip(outcomes) {
+        let Some((result, own)) = outcome else {
+            continue;
+        };
+        diagnostics.extend(own);
+        if matches!(result.status, Status::Cached | Status::Cooked) {
+            if let Some(key) = result.key {
+                keys.insert(result.id, key);
+            }
+        }
+        results[i] = Some(result);
+    }
+    if stopped() {
+        return cancelled(results, diagnostics);
+    }
+    for &i in &sources {
         let entry = &entries[i];
         // Only a `JSON` chunk can be the prefab; a texture or a sound is
         // not opened again to find that out.
@@ -529,21 +560,16 @@ pub fn cook(
         if let Some(p) = progress {
             p.start(&entries[i].path);
         }
-        cook_index(
-            i,
-            db,
-            schemas,
-            &library,
-            entries,
-            &prepared,
-            &in_cycle,
-            &by_id,
-            cache,
-            opts,
-            &mut keys,
-            &mut results,
-            &mut diagnostics,
+        let (result, own) = cook_asset(
+            i, db, schemas, &library, entries, &prepared, &in_cycle, &by_id, cache, opts, &keys,
         );
+        diagnostics.extend(own);
+        if matches!(result.status, Status::Cached | Status::Cooked) {
+            if let Some(key) = result.key {
+                keys.insert(result.id, key);
+            }
+        }
+        results[i] = Some(result);
         if let Some(p) = progress {
             p.finish();
         }
@@ -590,11 +616,13 @@ fn imported_prefab(file: &Path) -> Result<Option<Document>, String> {
         .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())
 }
 
-/// One asset of `cook_project`'s order: its key from the dependencies'
-/// keys, the cached object when the key is in the cache, `cook_one`
-/// otherwise; the result lands in `results[i]` and its key in `keys`.
+/// One asset of `cook`'s order: its key from the dependencies' `keys`,
+/// the cached object when the key is in the cache, `cook_one` otherwise.
+/// Reads nothing another asset's cook writes, so sources run on worker
+/// threads (ADR-0040 §1); the caller records the key of a cached or
+/// cooked asset.
 #[allow(clippy::too_many_arguments)]
-fn cook_index(
+fn cook_asset(
     i: usize,
     db: &AssetDatabase,
     schemas: &SchemaSet,
@@ -605,11 +633,10 @@ fn cook_index(
     by_id: &HashMap<Uuid, usize>,
     cache: &Cache,
     opts: &CookOptions,
-    keys: &mut HashMap<Uuid, CacheKey>,
-    results: &mut [Option<CookedAsset>],
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    'cook: {
+    keys: &HashMap<Uuid, CacheKey>,
+) -> (CookedAsset, Vec<Diagnostic>) {
+    let mut diagnostics = Vec::new();
+    let result = 'cook: {
         let entry = &entries[i];
         let p = &prepared[i];
         let base = CookedAsset {
@@ -624,8 +651,7 @@ fn cook_index(
             bytes: 0,
         };
         if p.failed || in_cycle[i] {
-            results[i] = Some(base);
-            break 'cook;
+            break 'cook base;
         }
         // A dependency that failed (or is in a cycle) does not stop this
         // asset (foundation 5.1): it cooks with its references to it
@@ -710,9 +736,7 @@ fn cook_index(
                     result.status = Status::Cached;
                     result.chunks = m.chunks;
                     result.bytes = m.bytes;
-                    keys.insert(entry.id, key);
-                    results[i] = Some(result);
-                    break 'cook;
+                    break 'cook result;
                 }
                 // An unreadable manifest is a damaged cache entry: recook it.
                 Err(d) => diagnostics.push(
@@ -751,7 +775,6 @@ fn cook_index(
                     result.status = Status::Cooked;
                     result.chunks = manifest.chunks;
                     result.bytes = manifest.bytes;
-                    keys.insert(entry.id, key);
                 }
                 Err(d) => {
                     diagnostics.push(d);
@@ -760,8 +783,44 @@ fn cook_index(
             },
             None => result.file = None,
         }
-        results[i] = Some(result);
+        result
+    };
+    (result, diagnostics)
+}
+
+/// `f` over `items` on up to `jobs` scoped threads, the outcomes in
+/// `items`' order; an item not started once `stopped` is `None`.
+fn in_parallel<T: Send>(
+    items: &[usize],
+    jobs: usize,
+    stopped: &(dyn Fn() -> bool + Sync),
+    f: impl Fn(usize) -> T + Sync,
+) -> Vec<Option<T>> {
+    let workers = jobs.clamp(1, items.len().max(1));
+    if workers == 1 {
+        return items.iter().map(|&i| (!stopped()).then(|| f(i))).collect();
     }
+    let next = AtomicUsize::new(0);
+    let slots: Vec<Mutex<Option<T>>> = items.iter().map(|_| Mutex::new(None)).collect();
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| loop {
+                if stopped() {
+                    break;
+                }
+                let n = next.fetch_add(1, Ordering::Relaxed);
+                let Some(&i) = items.get(n) else {
+                    break;
+                };
+                let out = f(i);
+                *slots[n].lock().unwrap_or_else(|e| e.into_inner()) = Some(out);
+            });
+        }
+    });
+    slots
+        .into_iter()
+        .map(|m| m.into_inner().unwrap_or_else(|e| e.into_inner()))
+        .collect()
 }
 
 /// The asset paths the cache's `index.json` records (empty without one):

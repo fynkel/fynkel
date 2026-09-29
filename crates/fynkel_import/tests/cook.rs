@@ -217,6 +217,55 @@ fn a_cook_reports_progress_and_a_cancelled_cook_keeps_the_index() {
     assert_ne!(std::fs::read(p.cache().index_path()).unwrap(), index);
 }
 
+// ADR-0040 §1: sources import on worker threads, and the result is the
+// one-worker cook's: the same statuses, keys, chunks, diagnostics (in
+// the same order) and object bytes.
+#[test]
+fn parallel_import_cooks_what_one_worker_cooks() {
+    let one = Project::new("jobs-1");
+    let many = Project::new("jobs-8");
+    // A reference that does not resolve, so there are diagnostics to
+    // compare.
+    for p in [&one, &many] {
+        let text =
+            std::fs::read_to_string(p.assets().join("materials/rusted.material.json")).unwrap();
+        p.write(
+            "materials/rusted.material.json",
+            &text.replace(SWATCH, "c0000000-0000-4000-8000-0000000000ff"),
+        );
+    }
+    let a = one.cook_with(&CookOptions {
+        jobs: 1,
+        ..CookOptions::default()
+    });
+    let b = many.cook_with(&CookOptions {
+        jobs: 8,
+        ..CookOptions::default()
+    });
+    assert!(!a.diagnostics.is_empty());
+    assert_eq!(statuses(&a), statuses(&b));
+    let messages = |r: &CookReport| {
+        r.diagnostics
+            .iter()
+            .map(|d| (d.code, d.message.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(messages(&a), messages(&b));
+    for (x, y) in a.assets.iter().zip(&b.assets) {
+        assert_eq!((x.id, x.key, x.status), (y.id, y.key, y.status));
+        assert_eq!(x.chunks, y.chunks);
+        if let (Some(f), Some(g)) = (&x.file, &y.file) {
+            assert_eq!(
+                std::fs::read(f).unwrap(),
+                std::fs::read(g).unwrap(),
+                "{}",
+                x.path
+            );
+        }
+    }
+    assert!(CookOptions::default().jobs >= 1 && CookOptions::default().jobs <= 8);
+}
+
 #[test]
 fn editing_a_texture_invalidates_exactly_its_dependents() {
     let p = Project::new("edit-png");
