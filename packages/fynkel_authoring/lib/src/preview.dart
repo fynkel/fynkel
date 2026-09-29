@@ -21,6 +21,61 @@ final class PreviewSynced extends AuthoringEvent {
   final PreviewSyncReport report;
 }
 
+/// A cook running on its thread, from [ScenePreview.startCook]
+/// (ADR-0040 §3): how far it got, its cancel, and [finish] to apply it.
+final class CookJob {
+  CookJob._(this.preview, this.ticket, {required this.started});
+
+  final ScenePreview preview;
+  final int ticket;
+
+  /// False when a cook was already running and this is that one.
+  final bool started;
+
+  /// Assets finished and in all, as of the last [poll].
+  int done = 0;
+  int total = 0;
+
+  /// The asset path the cook last started, as of the last [poll].
+  String current = '';
+
+  bool isFinished = false;
+  bool isCancelled = false;
+
+  /// The share finished, 0 to 1.
+  double get progress => total == 0 ? 0 : done / total;
+
+  /// Reads how far the cook got; true once it ended ([finish] next).
+  bool poll() {
+    final r = preview._call('cookProgress', {'ticket': ticket});
+    done = (r['done'] as num?)?.toInt() ?? 0;
+    total = (r['total'] as num?)?.toInt() ?? 0;
+    current = r['current'] as String? ?? '';
+    isCancelled = r['cancelled'] == true;
+    return isFinished = r['state'] == 'done';
+  }
+
+  /// Stops the cook at its next asset: it writes no index, so the cache
+  /// stays as the last full cook left it ([CookReport.cancelled]).
+  void cancel() {
+    preview._call('cookCancel', {'ticket': ticket});
+    isCancelled = true;
+  }
+
+  /// Applies the cook — the cache reopened, every preview reloaded, as
+  /// [ScenePreview.recook] — and returns its report, waiting for it when
+  /// it still runs. Once; the ticket is spent after.
+  CookReport finish() => preview._applyCook(preview._call('cookFinish', {'ticket': ticket}));
+
+  /// [poll] every [every] until the cook ends, then [finish].
+  Future<CookReport> whenDone({Duration every = const Duration(milliseconds: 16)}) async {
+    while (!poll()) {
+      await Future<void>.delayed(every);
+    }
+    return finish();
+  }
+}
+
 /// The edit-preview world of one scene or prefab document, from
 /// [DocumentHandle.openPreview]. Its [worldAddress] is what the viewport
 /// renders (`FynkelViewportController.renderHandle`); everything else is a
@@ -195,8 +250,19 @@ final class ScenePreview {
   /// kept in [cook]. [live]: the documents with unsaved edits cook as
   /// the editor holds them, their files untouched — what Play runs
   /// (ADR-0021 P5).
-  CookReport recook({bool live = false}) {
-    final r = _call('recook', {if (live) 'live': true});
+  CookReport recook({bool live = false}) => _applyCook(_call('recook', {if (live) 'live': true}));
+
+  /// [recook] on a thread of the session's own (ADR-0040 §3): returns at
+  /// once, and the session answers other calls meanwhile. Poll the job
+  /// once a frame; [CookJob.finish] then applies it as [recook] does. One
+  /// cook runs at a time: while one runs, this returns that one
+  /// ([CookJob.started] false).
+  CookJob startCook({bool live = false}) {
+    final r = _call('cookStart', {if (live) 'live': true});
+    return CookJob._(this, (r['ticket'] as num).toInt(), started: r['started'] == true);
+  }
+
+  CookReport _applyCook(Map<String, Object?> r) {
     final report = CookReport.fromJson(_mapOf(r['cook']));
     for (final entry in r['previews'] as List? ?? const []) {
       final e = _mapOf(entry);

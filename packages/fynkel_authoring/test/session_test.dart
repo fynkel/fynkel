@@ -684,7 +684,7 @@ void main() {
     expect(robot.isClosed, isTrue);
   });
 
-  test('the edit-preview world follows the document and never edits it — item 6', () {
+  test('the edit-preview world follows the document and never edits it — item 6', () async {
     final dir = copyFixture('preview');
     addTearDown(() => dir.deleteSync(recursive: true));
     final session = AuthoringSession();
@@ -825,6 +825,19 @@ void main() {
     expect(preview.cook, same(recook));
     expect(preview.stats.loads, 3);
     expect(preview.worldAddress, address);
+
+    // The same on the session's cook thread (ADR-0040 §3): started, polled
+    // to the end, applied as a recook.
+    final job = preview.startCook();
+    expect(job.started, isTrue);
+    final report = await job.whenDone(every: const Duration(milliseconds: 1));
+    expect(report.ok && !report.cancelled, isTrue);
+    expect(job.total, greaterThan(0));
+    expect(job.done, job.total);
+    expect(job.progress, 1.0);
+    expect(preview.cook, same(report));
+    expect(preview.stats.loads, 4);
+    expect(() => job.poll(), throwsA(isA<AuthoringException>()), reason: 'the ticket is spent');
 
     // Play's recook (ADR-0021 P5): the unsaved scene cooks as held, a
     // recovery copy is written, and the file is left alone.

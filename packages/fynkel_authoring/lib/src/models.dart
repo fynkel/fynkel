@@ -925,6 +925,7 @@ final class CookReport {
         cached = json['cached'] as int? ?? 0,
         cooked = json['cooked'] as int? ?? 0,
         failed = json['failed'] as int? ?? 0,
+        cancelled = json['cancelled'] == true,
         diagnostics = Diagnostic.listOf(json['diagnostics']);
 
   final Map<String, Object?> json;
@@ -933,6 +934,10 @@ final class CookReport {
   final bool ok;
   final String profile;
   final int cached, cooked, failed;
+
+  /// Stopped by [CookJob.cancel] (ADR-0040 §2): no index was written, so
+  /// the cache is the last full cook's.
+  final bool cancelled;
   final List<Diagnostic> diagnostics;
 }
 
