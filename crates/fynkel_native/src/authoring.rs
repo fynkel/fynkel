@@ -588,6 +588,7 @@ pub unsafe extern "C" fn fynkel_authoring_rescan(
             "assetCount": project.assets.len(),
             "scanned": paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
             "sidecarsWritten": project.sidecars_written.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+            "idsRenewed": project.ids_renewed.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
             "diagnostics": scan.iter().map(diagnostic_json).collect::<Vec<_>>(),
         });
         Ok(s.resync_all(v))

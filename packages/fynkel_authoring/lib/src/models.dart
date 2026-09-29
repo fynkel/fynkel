@@ -520,6 +520,7 @@ final class RescanReport {
       : assetCount = (json['assetCount'] as num?)?.toInt() ?? 0,
         scanned = _strings(json['scanned']),
         sidecarsWritten = _strings(json['sidecarsWritten']),
+        idsRenewed = _strings(json['idsRenewed']),
         diagnostics = Diagnostic.listOf(json['diagnostics']),
         previews = PreviewSyncReport.listOf(json['previews']);
 
@@ -532,6 +533,11 @@ final class RescanReport {
   /// The sidecars the rescan wrote for source files that had none (a
   /// file dropped into `assets/` from Finder), absolute paths.
   final List<String> sidecarsWritten;
+
+  /// The files given a fresh id because they were copies of another asset
+  /// (a Finder copy keeps its original's id; foundation 5.2), absolute
+  /// paths — a source's sidecar.
+  final List<String> idsRenewed;
   final List<Diagnostic> diagnostics;
 
   /// The edit-preview worlds re-described over the rescanned database (a

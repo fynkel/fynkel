@@ -1853,3 +1853,88 @@ fn persistent_objects_are_made_once_by_load_project() {
     drop(host);
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Foundation 5.1: a deleted file leaves its references empty, as in
+/// Unity; the documents that use it still cook and the scenes load. The
+/// startup scene uses the rusted material (whose maps are the deleted
+/// PNGs), the robot model and the crate prefab; the rig scene uses the
+/// rig whose skeleton model is deleted.
+#[test]
+fn missing_references_cook_and_load_as_none() {
+    const MAIN: &str = "c0000000-0000-4000-8000-000000000030";
+    const RUSTED: &str = "c0000000-0000-4000-8000-000000000020";
+    const RIG_SCENE: &str = "c0000000-0000-4000-8000-000000000034";
+    let root = std::env::temp_dir().join(format!("fynkel-native-missing-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let project = root.join("project");
+    copy_dir(&fixture(), &project);
+    let assets = project.join("assets");
+    // A PNG deleted in Finder: its sidecar stays behind.
+    std::fs::remove_file(assets.join("textures/rusted_mr.png")).unwrap();
+    // A PNG deleted with its sidecar.
+    std::fs::remove_file(assets.join("textures/rusted_normal.png")).unwrap();
+    std::fs::remove_file(assets.join("textures/rusted_normal.png.meta.json")).unwrap();
+    // A model and a prefab the startup scene uses.
+    std::fs::remove_file(assets.join("models/robot.glb")).unwrap();
+    std::fs::remove_file(assets.join("models/robot.glb.meta.json")).unwrap();
+    std::fs::remove_file(assets.join("prefabs/crate.prefab.json")).unwrap();
+    // The rig's skeleton model.
+    std::fs::remove_file(assets.join("models/rig.glb")).unwrap();
+
+    let cache_dir = root.join("cache");
+    let report = cook_project(&project, Some(&cache_dir), &CookOptions::default())
+        .unwrap_or_else(|d| panic!("{d:?}"));
+    let cooked = |id: &str| {
+        report
+            .assets
+            .iter()
+            .find(|a| a.id.to_string() == id)
+            .is_some_and(|a| a.key.is_some())
+    };
+    assert!(cooked(MAIN), "{}", report.text());
+    assert!(cooked(RUSTED), "{}", report.text());
+    assert!(cooked(RIG_SCENE), "{}", report.text());
+    // Only the rig (its skeleton is its content) and the blend space (its
+    // clips are the rig's) fail themselves; a missing reference warns.
+    let errors: Vec<&str> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == fynkel_contracts::Severity::Error)
+        .map(|d| d.code.0)
+        .collect();
+    assert!(
+        errors
+            .iter()
+            .all(|c| *c == "FYN-D0500" || *c == "FYN-D0601"),
+        "{:?}",
+        report.diagnostics
+    );
+    let warned = |code: &str, text: &str| {
+        report
+            .diagnostics
+            .iter()
+            .any(|d| d.code.0 == code && d.message.contains(text))
+    };
+    assert!(warned("FYN-A0002", "rusted_mr.png is missing"));
+    assert!(warned("FYN-A0004", "c0000000-0000-4000-8000-000000000003"));
+    assert!(warned("FYN-D0401", "c0000000-0000-4000-8000-000000000040"));
+    assert!(warned("FYN-A0105", "rigs/column.rig.json failed"));
+
+    let cache = cache_dir.display().to_string();
+    let host = Host::new();
+    assert_eq!(host.load_project(&cache), Status::Ok);
+    let r = host.report();
+    assert_eq!(r["ok"], true, "{r:#}");
+    // The crate instance is an empty placeholder with its name.
+    let w = unsafe { &*host.w };
+    let ecs = w.core().ecs();
+    let names: Vec<String> = ecs
+        .entities()
+        .filter_map(|e| ecs.copy::<Name>(e).ok().map(|n| n.value))
+        .collect();
+    assert!(names.iter().any(|n| n == "Crate A"), "{names:?}");
+    assert_eq!(host.load_scene(&cache, RIG_SCENE), Status::Ok);
+    assert_eq!(host.report()["ok"], true, "{:#}", host.report());
+    drop(host);
+    let _ = std::fs::remove_dir_all(&root);
+}
