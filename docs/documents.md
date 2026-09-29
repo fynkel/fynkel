@@ -406,8 +406,10 @@ is `D0403`, a **warning**: as Unity's unused override, the op is kept in the
 file and skipped, and the rest of the instance expands (foundation 3.8); a
 new variant made with one is refused. An op whose result would not validate against the component
 schema (or a duplicate unique component) is `D0404`, a malformed op is
-`D0407`. An unknown prefab is `D0401`; the whole instance is skipped and the
-instance entity kept (without components). `PrefabLibrary::scan(dir)` collects every `*.prefab.json`
+`D0407`. An unknown prefab is `D0401`, a **warning** since foundation 5.1:
+as Unity's Missing Prefab, the whole instance is skipped and the instance
+entity kept (its name and place, without components), and the scene
+still cooks and loads. `PrefabLibrary::scan(dir)` collects every `*.prefab.json`
 under a directory (a later path with the same id wins, with a warning).
 The headless host expands before `describe`, so derived ids reach the
 runtime and `fynkel state dump` prints them.
@@ -1539,7 +1541,16 @@ does the editor for a source it finds without one (its session's scan;
 never in a read-only project); moving an
 asset means moving the file **and** its sidecar — the id, and every
 `assetRef` to it, survive because references never hold a path. A copy
-needs a new sidecar: two files sharing an id is an error.
+needs a new id: two files sharing an id is `A0003`. When that happens the
+path the project knew keeps the id (foundation 5.2): a scan reads the
+paths of the last cook's `index.json` first (the editor's session its own
+earlier paths), so a Finder copy never takes the id from its original,
+whichever sorts first. The editor then gives the copy a fresh id in place,
+as Unity gives a copied asset a new GUID: a document its `id`, a sidecar
+its `id` and fresh sub-asset ids (`OpenProject::rescan`, the report's
+`idsRenewed`). Not while the file's original is gone from disk (a move
+seen half done: the file keeps its id) and never a document the session
+has open. `fynkel cook` never writes a document: the copy fails alone.
 
 `fynkel_document::AssetDatabase::scan(dir, schemas)` is the asset database:
 a walk of the tree (hidden files skipped, path order), nothing persisted,
@@ -1552,7 +1563,8 @@ resolves to the same place). `check_references(&Document)` finds every
 skipped) and reports the ones that do not resolve, anchored at the
 reference — the project-wide check in `fynkel validate` (M2-13) builds on
 it. Codes: source file without a sidecar `FYN-A0001`, sidecar without a
-source `A0002`, duplicate id (across documents, sidecars and sub-assets;
+source `A0002` (a warning since foundation 5.1: the file was deleted, so
+its id resolves to nothing), duplicate id (across documents, sidecars and sub-assets;
 the first path wins) `A0003`, unknown asset `A0004`, unknown sub-asset
 `A0005`, malformed sidecar entry `A0006`, a reference to an asset of the
 wrong kind `A0007`: a model's material remap naming something that is
@@ -1876,10 +1888,20 @@ depend on nothing but their own files. Because a dependency's key is part
 of the dependent's key, editing a texture recooks the material that uses
 it and the scene that uses that material — and nothing else
 (`tests/cook.rs` pins that down). Assets are cooked in dependency order
-(Tarjan's SCCs); a cycle fails its members (`FYN-A0104`), an unresolved
-reference fails the document (`FYN-A0003`), and a dependent of a failed
-asset is skipped (`FYN-A0105`, "not cooked because … failed"). The rest of
-the database still cooks.
+(Tarjan's SCCs); a cycle fails its members (`FYN-A0104`). **A missing
+reference does not fail anything** (foundation 5.1, as in Unity, where it
+leaves the field empty): a reference that does not resolve (`A0004`,
+`A0005`) is a warning, and a reference to an asset that failed or is in a
+cycle is a warning too (`FYN-A0105`, "… failed, so its references to it
+load as none"). The cooked document has those references cleared to the
+nil id, so they load as none; a prefab instance's is left as it is and
+expands to an empty placeholder (`D0401`, above). A failed dependency
+stays out of the key, so its first good cook recooks what uses it.
+`cook_project` stops only on errors in the project file and its own
+references; a file the scan cannot read fails only itself. What still
+fails is an asset whose own content is gone: a rig whose skeleton model
+was deleted (`D0500`), a blend space with a point whose clip is gone
+(`D0601`) — what uses them still cooks.
 
 **Layout.** `<cache>/objects/<key>.fyna` next to `<key>.manifest.json`
 (both written to a temporary name and renamed, the object first), and
