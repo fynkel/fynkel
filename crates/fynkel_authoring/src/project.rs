@@ -50,6 +50,56 @@ impl Reference {
     }
 }
 
+/// A cook on its own thread ([`OpenProject::start_cook`]): how far it
+/// got, its cancel, and its report once it ends.
+pub struct CookJob {
+    progress: std::sync::Arc<fynkel_import::CookProgress>,
+    thread: Option<std::thread::JoinHandle<fynkel_import::CookReport>>,
+}
+
+impl CookJob {
+    pub fn progress(&self) -> &fynkel_import::CookProgress {
+        &self.progress
+    }
+
+    /// The thread has ended: [`wait`](Self::wait) returns at once.
+    pub fn is_finished(&self) -> bool {
+        self.thread.as_ref().is_none_or(|t| t.is_finished())
+    }
+
+    /// Stops the cook at its next asset ([`fynkel_import::CookProgress::cancel`]).
+    pub fn cancel(&self) {
+        self.progress.cancel();
+    }
+
+    /// The report, waiting for the thread when it still runs. A cook that
+    /// panicked outside an asset's guard is a report with the error.
+    pub fn wait(mut self) -> fynkel_import::CookReport {
+        let joined = self.thread.take().map(|t| t.join());
+        match joined {
+            Some(Ok(report)) => report,
+            Some(Err(payload)) => {
+                let msg = payload
+                    .downcast_ref::<&str>()
+                    .map(|m| m.to_string())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "no message".into());
+                fynkel_import::CookReport {
+                    profile: fynkel_import::cook::DEFAULT_PROFILE.to_string(),
+                    assets: Vec::new(),
+                    diagnostics: vec![Diagnostic::error(
+                        Code::IMPORT_INVALID_DATA,
+                        format!("the cook stopped: {msg}"),
+                    )
+                    .with_suggestion("this is a bug in Fynkel, please report it")],
+                    cancelled: false,
+                }
+            }
+            None => unreachable!("a job is waited for once"),
+        }
+    }
+}
+
 pub struct OpenProject {
     pub dir: PathBuf,
     pub project: Project,
@@ -58,8 +108,9 @@ pub struct OpenProject {
     /// Why the project is read-only (the lock was written by a newer
     /// Fynkel), or `None` when it is editable.
     pub read_only: Option<String>,
-    /// The embedded schemas plus the project's own.
-    pub schemas: SchemaSet,
+    /// The embedded schemas plus the project's own; shared with a cook
+    /// running on its thread (ADR-0040 §3).
+    pub schemas: std::sync::Arc<SchemaSet>,
     pub assets: AssetDatabase,
     /// The game's package assets, mounted at `Packages/<name>/`
     /// (ADR-0029 §2): scanned when the project opens (and again on every
@@ -144,7 +195,7 @@ impl OpenProject {
             project,
             lock,
             read_only,
-            schemas,
+            schemas: std::sync::Arc::new(schemas),
             assets: AssetDatabase::default(),
             package_assets: AssetDatabase::default(),
             with_builtins: None,
@@ -222,13 +273,60 @@ impl OpenProject {
         &self,
         live: std::collections::HashMap<PathBuf, String>,
     ) -> fynkel_import::CookReport {
+        self.start_cook(live).wait()
+    }
+
+    /// [`cook_live`](Self::cook_live) on a thread of its own (ADR-0040
+    /// §3): the database, the schemas and the settings are taken now, so
+    /// the session goes on answering while it runs, and what changes
+    /// meanwhile is the next cook's.
+    pub fn start_cook(&self, live: std::collections::HashMap<PathBuf, String>) -> CookJob {
+        let progress = fynkel_import::CookProgress::new();
+        let opts = fynkel_import::CookOptions {
+            progress: Some(progress.clone()),
+            ..self.cook_options(live)
+        };
+        let db = self.assets.clone();
+        let schemas = self.schemas.clone();
+        let cache = fynkel_import::Cache::at(&self.cache_dir());
+        let thread = std::thread::Builder::new()
+            .name("fynkel-cook".into())
+            .spawn(move || fynkel_import::cook(&db, &schemas, &cache, &opts));
+        match thread {
+            Ok(thread) => CookJob {
+                progress,
+                thread: Some(thread),
+            },
+            Err(e) => {
+                // No thread: the report says why, like a cook that failed.
+                let report = fynkel_import::CookReport {
+                    profile: fynkel_import::cook::DEFAULT_PROFILE.to_string(),
+                    assets: Vec::new(),
+                    diagnostics: vec![Diagnostic::error(
+                        Code::IO,
+                        format!("the cook could not start a thread: {e}"),
+                    )],
+                    cancelled: false,
+                };
+                CookJob {
+                    progress,
+                    thread: Some(std::thread::spawn(move || report)),
+                }
+            }
+        }
+    }
+
+    fn cook_options(
+        &self,
+        live: std::collections::HashMap<PathBuf, String>,
+    ) -> fynkel_import::CookOptions {
         let startup_scene = self
             .project
             .startup_scene
             .as_ref()
             .and_then(|r| self.assets.resolve(r).ok())
             .map(|r| r.entry.id);
-        let opts = fynkel_import::CookOptions {
+        fynkel_import::CookOptions {
             project: Some(fynkel_import::CookProject {
                 name: self.project.name().to_string(),
                 startup_scene,
@@ -244,13 +342,7 @@ impl OpenProject {
             }),
             live,
             ..fynkel_import::CookOptions::default()
-        };
-        fynkel_import::cook(
-            &self.assets,
-            &self.schemas,
-            &fynkel_import::Cache::at(&self.cache_dir()),
-            &opts,
-        )
+        }
     }
 
     /// Writes [texts] (canonical path → the editor's unsaved text) under
