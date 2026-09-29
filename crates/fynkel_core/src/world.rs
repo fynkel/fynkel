@@ -1,7 +1,7 @@
 //! The runtime world: lifecycle, command lanes, `step()`, snapshots,
 //! events, diagnostics, render extraction.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -40,7 +40,6 @@ use fynkel_scene::{self as scene, Layer, Parent, SceneError, Tags, Transform, Wo
 use fynkel_schema_derive::Schema;
 use glam::{Mat4, Quat, Vec3};
 
-use crate::animation::Pose;
 use crate::clock::{FrameClock, FramePlan};
 use crate::command::{Command, Lane};
 use crate::components::{
@@ -63,11 +62,14 @@ pub use audio::AudioRun;
 pub use catalogue::{EmitterRun, Oscillation};
 pub use controller::ControllerPlay;
 mod projection;
+mod state;
+mod systems;
 pub use projection::{
     projection_matrix, view_matrix, ProjectionInfo, MAX_PROJECTION_ANCHORS, PROJECTED_DROPPED,
     PROJECTED_IN_FRONT, PROJECTED_MISSING, PROJECTED_NO_CAMERA, PROJECTED_OCCLUDED,
     PROJECTED_ON_SCREEN, PROJECTED_VISIBLE,
 };
+use state::{ActiveMarkers, AnimationState, EditState, Lanes, Scratch};
 
 #[derive(Clone, Debug)]
 pub struct WorldConfig {
@@ -279,26 +281,10 @@ pub struct World {
     config: WorldConfig,
     clock: FrameClock,
     ecs: Ecs,
-    /// Simulation commands for the next tick with their batch index and
-    /// whether they were staged by the presentation lane. An `Err` is a
-    /// command the caller could not decode: it is reported as rejected at
-    /// the tick boundary so its diagnostic sits with the batch's others.
-    staged: Vec<(u32, Result<Command, Rejected>, bool)>,
-    /// The tick's spawns by temp id, what a temp reference
-    /// (`Entity::temp`) in a later command of the same tick resolves to.
-    spawned_this_tick: HashMap<u64, Entity>,
-    /// The subtrees whose `Inactive` markers a spawn, reparent or active
-    /// flag made stale since the last refresh: each is refreshed alone
-    /// (foundation 3.4).
-    active_roots: Vec<Entity>,
-    /// Every marker may be stale (a load): the next refresh walks the
-    /// whole hierarchy.
-    active_all: bool,
-    /// Entities whose next tick must not interpolate from S[n] (their
-    /// authoritative value came from a presentation override already shown).
-    teleported: Vec<Entity>,
-    /// Presentation-lane transform overrides for the current frame.
-    overrides: HashMap<Entity, Transform>,
+    /// The command lanes' state between ticks.
+    lanes: Lanes,
+    /// The subtrees whose `Inactive` markers are stale.
+    active: ActiveMarkers,
     events: EventQueue,
     subscriptions: BTreeSet<Entity>,
     snapshot: Vec<SnapshotRecord>,
@@ -315,13 +301,9 @@ pub struct World {
     modules: crate::Modules,
     /// Prefab descriptions `Emitter`s may instantiate (M3-10).
     prefabs: HashMap<Uuid, Arc<SceneDescription>>,
-    /// Clips `Animator`s may play and skins `Skin`s deform with (M3-19).
-    clips: animation::ClipTable,
-    /// Blend spaces an `Animator` may play in a clip's place (M3-19c).
-    blends: animation::BlendTable,
-    /// Animator Controllers an `Animator` may run (ADR-0032).
-    controllers: controller::ControllerTable,
-    skins: animation::SkinTable,
+    /// Clips, blend spaces, controllers and skins, and the animators'
+    /// scratch (M3-19).
+    anim: AnimationState,
     /// The audio engine (M3-11): clips, voices, buses; the device the host
     /// opened.
     audio: fynkel_audio::Audio,
@@ -331,38 +313,15 @@ pub struct World {
     /// The roots marked `dont_destroy_on_load` (ADR-0037), in marking
     /// order: a replace load and a scene's unload leave their subtrees.
     pub(crate) persistent: Vec<Entity>,
-    /// Edit mode only (M4-06): the editor camera `extract()` reports in
-    /// the scene camera's place — its world matrix and the camera
-    /// component it renders with.
-    edit_camera: Option<(Mat4, Camera)>,
-    /// Edit mode only: entities `extract()` leaves out (their meshes,
-    /// lights and camera) — the editor's hidden flag, never the document's.
-    edit_hidden: HashSet<Entity>,
-    /// [`World::set_edit_animation`].
-    edit_animation: bool,
+    /// Edit mode only (M4-06).
+    edit: EditState,
     /// The last step's per-phase wall time, one entry per `SystemKind`.
     system_times: Vec<SystemTimeRecord>,
-    /// Scratch of the native systems, kept for its capacity.
-    rig_scratch: Vec<RigPlacement>,
-    driver_scratch: Vec<(Entity, BodyCommand)>,
-    hits_scratch: Vec<fynkel_physics::Hit>,
     /// Each occupied zone's event name by `(zone, occupant)`, so the exit
     /// still fires when the zone itself is destroyed (foundation 2.6).
     zone_names: BTreeMap<(Entity, Entity), String>,
-    entity_scratch: Vec<Entity>,
-    emission_scratch: Vec<catalogue::Emission>,
-    placement_scratch: Vec<catalogue::Placement>,
-    #[cfg_attr(not(feature = "animation"), allow(dead_code))]
-    animator_scratch: Vec<animation::AnimatorTick>,
-    /// The animators of a tick, (depth, entity), ancestor-first.
-    #[cfg_attr(not(feature = "animation"), allow(dead_code))]
-    animator_order_scratch: Vec<(u32, Entity)>,
-    #[cfg_attr(not(feature = "animation"), allow(dead_code))]
-    pose_scratch: Pose,
-    #[cfg_attr(not(feature = "animation"), allow(dead_code))]
-    fade_pose_scratch: Pose,
-    #[cfg_attr(not(feature = "animation"), allow(dead_code))]
-    layer_pose_scratch: Pose,
+    /// Scratch of the native systems, kept for its capacity.
+    scratch: Scratch,
 }
 
 fn micros(since: Instant) -> u64 {
@@ -391,12 +350,8 @@ impl World {
             ecs: Ecs::new(config.id),
             config,
             clock,
-            staged: Vec::new(),
-            spawned_this_tick: HashMap::new(),
-            active_roots: Vec::new(),
-            active_all: false,
-            teleported: Vec::new(),
-            overrides: HashMap::new(),
+            lanes: Lanes::default(),
+            active: ActiveMarkers::default(),
             events: EventQueue::default(),
             subscriptions: BTreeSet::new(),
             snapshot: Vec::new(),
@@ -408,16 +363,11 @@ impl World {
             physics: Physics::new(),
             modules: crate::Modules::COMPILED,
             prefabs: HashMap::new(),
-            clips: HashMap::new(),
-            blends: HashMap::new(),
-            controllers: HashMap::new(),
-            skins: HashMap::new(),
+            anim: AnimationState::default(),
             audio: fynkel_audio::Audio::new(),
             scenes: Vec::new(),
             persistent: Vec::new(),
-            edit_camera: None,
-            edit_hidden: HashSet::new(),
-            edit_animation: false,
+            edit: EditState::default(),
             system_times: SYSTEMS
                 .iter()
                 .map(|&system| SystemTimeRecord {
@@ -426,18 +376,8 @@ impl World {
                     micros: 0,
                 })
                 .collect(),
-            rig_scratch: Vec::new(),
-            driver_scratch: Vec::new(),
-            hits_scratch: Vec::new(),
             zone_names: BTreeMap::new(),
-            entity_scratch: Vec::new(),
-            emission_scratch: Vec::new(),
-            placement_scratch: Vec::new(),
-            animator_scratch: Vec::new(),
-            animator_order_scratch: Vec::new(),
-            pose_scratch: Pose::default(),
-            fade_pose_scratch: Pose::default(),
-            layer_pose_scratch: Pose::default(),
+            scratch: Scratch::default(),
         }
     }
 
@@ -526,11 +466,11 @@ impl World {
         if !self.config.edit_mode {
             return false;
         }
-        self.edit_camera = camera;
+        self.edit.camera = camera;
         true
     }
     pub fn edit_camera(&self) -> Option<&(Mat4, Camera)> {
-        self.edit_camera.as_ref()
+        self.edit.camera.as_ref()
     }
     /// Edit mode only: the entities `extract()` leaves out — exactly this
     /// set (the caller passes the subtree it wants hidden), replacing the
@@ -540,7 +480,7 @@ impl World {
         if !self.config.edit_mode {
             return false;
         }
-        self.edit_hidden = entities
+        self.edit.hidden = entities
             .iter()
             .copied()
             .filter(|e| self.ecs.contains(*e))
@@ -556,11 +496,11 @@ impl World {
         if !self.config.edit_mode {
             return false;
         }
-        self.edit_animation = on;
+        self.edit.animation = on;
         true
     }
     pub fn edit_hidden(&self) -> impl Iterator<Item = Entity> + '_ {
-        self.edit_hidden.iter().copied()
+        self.edit.hidden.iter().copied()
     }
     pub fn id(&self) -> WorldId {
         self.config.id
@@ -599,7 +539,7 @@ impl World {
     /// Starts a host frame: clears last frame's presentation overrides,
     /// accumulates `dt`, records `MissedDeadline` when time is dropped.
     pub fn begin_frame(&mut self, dt: f32) -> FramePlan {
-        self.overrides.clear();
+        self.lanes.overrides.clear();
         let plan = self.clock.begin_frame(dt);
         if plan.dropped_seconds > 0.0 {
             self.diagnostics.push(Diagnostic {
@@ -689,7 +629,8 @@ impl World {
         match lane {
             Lane::Simulation => {
                 accepted = commands.len() as u32;
-                self.staged
+                self.lanes
+                    .staged
                     .extend(commands.into_iter().map(|(i, c)| (i, c, false)));
             }
             Lane::Presentation => {
@@ -757,8 +698,8 @@ impl World {
         scene::propagate(&mut self.ecs);
         for e in moved {
             if self.ecs.contains(e) {
-                self.overrides.remove(&e);
-                self.teleported.push(e);
+                self.lanes.overrides.remove(&e);
+                self.lanes.teleported.push(e);
             }
         }
         self.apply_teleports();
@@ -885,9 +826,12 @@ impl World {
                 }
                 // Override this frame's extract and become authoritative at
                 // the next tick (ADR-0008).
-                self.overrides.insert(entity, transform);
-                self.staged
-                    .push((index, Ok(Command::SetTransform { entity, transform }), true));
+                self.lanes.overrides.insert(entity, transform);
+                self.lanes.staged.push((
+                    index,
+                    Ok(Command::SetTransform { entity, transform }),
+                    true,
+                ));
                 true
             }
             Command::SetName { entity, name } => {
@@ -937,7 +881,7 @@ impl World {
         let mut failed = None;
         let mut resolve = |e: &mut Entity| {
             if let Some(t) = e.temp_id() {
-                match self.spawned_this_tick.get(&(t as u64)) {
+                match self.lanes.spawned_this_tick.get(&(t as u64)) {
                     Some(real) => *e = *real,
                     None => failed = Some(t),
                 }
@@ -1031,9 +975,9 @@ impl World {
                 if let Some(n) = name {
                     let _ = self.ecs.insert(e, Name::new(n));
                 }
-                self.spawned_this_tick.insert(temp_id, e);
+                self.lanes.spawned_this_tick.insert(temp_id, e);
                 if parent.is_some() {
-                    self.active_roots.push(e);
+                    self.active.roots.push(e);
                 }
                 self.events.push(Event {
                     tick,
@@ -1091,7 +1035,7 @@ impl World {
                 };
                 match r {
                     Ok(()) => {
-                        self.active_roots.push(child);
+                        self.active.roots.push(child);
                         self.events.push(Event {
                             tick,
                             payload: EventPayload::ParentChanged { child, parent },
@@ -1114,7 +1058,7 @@ impl World {
                 match scene::set_active(&mut self.ecs, entity, active) {
                     Ok(changed) => {
                         if changed {
-                            self.active_roots.push(entity);
+                            self.active.roots.push(entity);
                         }
                         true
                     }
@@ -1210,7 +1154,7 @@ impl World {
                 // writes; a rejection there carries this index. A teleport
                 // is shown at its target, never interpolated towards it.
                 if matches!(op, BodyCommand::Teleport { .. }) {
-                    self.teleported.push(entity);
+                    self.lanes.teleported.push(entity);
                 }
                 self.physics.queue(index, entity, op);
                 true
@@ -1277,7 +1221,7 @@ impl World {
         let count = gone.len();
         for e in gone {
             self.subscriptions.remove(&e);
-            self.overrides.remove(&e);
+            self.lanes.overrides.remove(&e);
             self.events.push(Event {
                 tick,
                 payload: EventPayload::Destroyed { entity: e },
@@ -1387,195 +1331,13 @@ impl World {
             };
         }
         let step_start = Instant::now();
-        let mut transforms_us: u64 = 0;
-        let mut propagated: u32 = 0;
         self.diagnostics.clear();
         self.events.begin_tick();
         let next_tick = self.clock.tick() + 1;
-        // Native pre-tick systems read the tick's input first (the
-        // characters' action driver, M3-09): its commands are queued ahead
-        // of the batch's, so an explicit `Move`/`Jump` from the game in the
-        // same tick wins.
         let edit = self.config.edit_mode;
-        let t0 = Instant::now();
-        let modules = self.modules;
-        let characters = if edit || !modules.physics {
-            0
-        } else {
-            self.drive_characters()
-        };
-        self.set_time(SystemKind::Characters, characters, micros(t0));
-
-        // S[n] becomes the interpolation source.
-        let t0 = Instant::now();
-        self.record_prev_world();
-        transforms_us += micros(t0);
-
-        // Validate/apply C[n] at the tick boundary.
-        let t0 = Instant::now();
-        let staged = std::mem::take(&mut self.staged);
-        self.spawned_this_tick.clear();
-        let mut applied: u32 = 0;
-        let mut rejected = 0;
-        for (index, cmd, from_presentation) in staged {
-            let cmd = match cmd {
-                Ok(cmd) => cmd,
-                Err(r) => {
-                    self.reject(
-                        index,
-                        Lane::Simulation,
-                        r.code,
-                        Entity::NULL,
-                        ComponentId::NONE,
-                        r.message,
-                    );
-                    rejected += 1;
-                    continue;
-                }
-            };
-            let Some(cmd) = self.resolve_temps(index, cmd) else {
-                rejected += 1;
-                continue;
-            };
-            let target = cmd.target();
-            if self.apply_simulation(index, cmd, next_tick) {
-                if from_presentation {
-                    self.teleported.extend(target);
-                }
-                applied += 1;
-            } else {
-                rejected += 1;
-            }
-        }
-        self.refresh_active();
-        self.set_time(SystemKind::Commands, applied, micros(t0));
-
-        // Animators pose their subtrees first among the pre-tick systems
-        // (M3-19): a mover or a body on a posed joint follows the pose.
-        // In edit mode (M4-06) every system below is skipped: commands,
-        // propagation and the snapshot are the whole tick.
-        let t0 = Instant::now();
-        let n = if (edit && !self.edit_animation) || !modules.animation {
-            0
-        } else {
-            self.run_animation(next_tick)
-        };
-        self.set_time(SystemKind::Animation, n, micros(t0));
-
-        // The catalogue's pre-tick movers (§3.5, M3-10): they see the
-        // batch's writes and physics sees theirs.
-        let t0 = Instant::now();
-        let n = if edit { 0 } else { self.run_rotators() };
-        self.set_time(SystemKind::Rotator, n, micros(t0));
-        let t0 = Instant::now();
-        let n = if edit { 0 } else { self.run_oscillators() };
-        self.set_time(SystemKind::Oscillate, n, micros(t0));
-        let t0 = Instant::now();
-        let n = if edit {
-            0
-        } else {
-            self.run_lifetimes(next_tick)
-        };
-        self.set_time(SystemKind::LifetimeDespawn, n, micros(t0));
-        let t0 = Instant::now();
-        let n = if edit {
-            0
-        } else {
-            self.run_emitters(next_tick)
-        };
-        self.set_time(SystemKind::Emitter, n, micros(t0));
-
-        // Physics at the §5.1 slot: bodies see the batch's transforms,
-        // step, and write their poses back before the tick's own
-        // propagate.
-        let t0 = Instant::now();
-        let mut physics_entities = 0;
-        if !edit && modules.physics && self.physics.has_work(&self.ecs) {
-            propagated += scene::propagate(&mut self.ecs) as u32;
-            self.physics
-                .step(&mut self.ecs, self.config.fixed_dt, &self.subscriptions);
-            // A body command counted as applied above may fail here.
-            let failed = self.physics_rejections();
-            rejected += failed;
-            applied = applied.saturating_sub(failed);
-            self.physics_events(next_tick);
-            let ps = self.physics.stats();
-            physics_entities = ps.bodies + ps.colliders + ps.characters;
-        }
-        self.set_time(SystemKind::Physics, physics_entities, micros(t0));
-
-        // Deferred structural changes: a queued despawn goes as
-        // `Command::Destroy` does — the subtree, the bookkeeping and the
-        // `Destroyed` events (foundation 3.10); one already gone with its
-        // parent (or twice in the queue) is skipped.
-        let t0 = Instant::now();
-        for e in self.ecs.take_deferred() {
-            if self.ecs.contains(e) {
-                let _ = self.destroy_subtree(e, next_tick);
-            }
-        }
-
-        // Transform/hierarchy work for the tick; new entities start with
-        // PrevWorld == current so they do not interpolate from the origin.
-        propagated += scene::propagate(&mut self.ecs) as u32;
-        transforms_us += micros(t0);
-        // Camera rigs follow the tick's final poses (a rig's own subtree
-        // is the only thing left dirty, so the second propagate is cheap).
-        let t0 = Instant::now();
-        let (rigs, moved) = if edit {
-            (0, false)
-        } else {
-            self.place_camera_rigs()
-        };
-        self.set_time(SystemKind::CameraRigs, rigs, micros(t0));
-        if moved {
-            let t0 = Instant::now();
-            propagated += scene::propagate(&mut self.ecs) as u32;
-            transforms_us += micros(t0);
-        }
-        // Followers and billboards read the propagated poses, the camera's
-        // included (M3-10).
-        let t0 = Instant::now();
-        let (followers, moved_followers) = if edit {
-            (0, false)
-        } else {
-            self.run_followers()
-        };
-        self.set_time(SystemKind::Follow, followers, micros(t0));
-        let t0 = Instant::now();
-        let (billboards, moved_billboards) = if edit {
-            (0, false)
-        } else {
-            self.run_billboards()
-        };
-        self.set_time(SystemKind::LookAtCamera, billboards, micros(t0));
-        let t0 = Instant::now();
-        if moved_followers || moved_billboards {
-            propagated += scene::propagate(&mut self.ecs) as u32;
-        }
-        if modules.physics {
-            self.physics.record(&self.ecs);
-        }
-        self.seed_prev_world();
-        self.apply_teleports();
-        if edit {
-            // No interpolation in the editor: the picture is the tick's
-            // own transforms whatever `alpha` the clock holds.
-            self.record_prev_world();
-        }
-        transforms_us += micros(t0);
-        self.set_time(SystemKind::Transforms, propagated, transforms_us);
-
-        // The audio sources reconciled with their voices and the voice
-        // clock advanced (M3-11); after the destroys of the tick, so a
-        // dead source's voice stops this tick.
-        let t0 = Instant::now();
-        let n = if edit || !modules.audio {
-            0
-        } else {
-            self.run_audio(next_tick)
-        };
-        self.set_time(SystemKind::Audio, n, micros(t0));
+        // The native systems in their declared order (`systems::TICK`).
+        let run = self.run_tick(next_tick);
+        let (applied, rejected) = (run.applied, run.rejected);
 
         // Every native system of the tick has read the same view the game
         // did (the rigs above read `look` last); this tick consumed the
@@ -1617,8 +1379,8 @@ impl World {
     /// Brings the derived `Inactive` markers up to date after a spawn,
     /// reparent or flag change (nothing to do otherwise).
     pub(crate) fn refresh_active(&mut self) {
-        let mut roots = std::mem::take(&mut self.active_roots);
-        if std::mem::take(&mut self.active_all) {
+        let mut roots = std::mem::take(&mut self.active.roots);
+        if std::mem::take(&mut self.active.all) {
             scene::refresh_active(&mut self.ecs);
         } else {
             // In any order: a subtree refreshed before its ancestor's is
@@ -1628,12 +1390,12 @@ impl World {
             }
         }
         roots.clear();
-        self.active_roots = roots;
+        self.active.roots = roots;
     }
 
     /// Whether the derived `Inactive` markers are current.
     pub(crate) fn active_markers_current(&self) -> bool {
-        !self.active_all && self.active_roots.is_empty()
+        !self.active.all && self.active.roots.is_empty()
     }
 
     /// Brings the markers up to date after a load spawned `roots`'
@@ -1647,7 +1409,7 @@ impl World {
 
     /// Marks the markers stale (a load spawned under a parent).
     pub(crate) fn mark_active_dirty(&mut self) {
-        self.active_all = true;
+        self.active.all = true;
     }
 
     fn record_prev_world(&mut self) {
@@ -1661,7 +1423,7 @@ impl World {
     /// interpolated towards from S[n] once it becomes authoritative, or the
     /// object would visibly snap back for one tick.
     fn apply_teleports(&mut self) {
-        let roots = std::mem::take(&mut self.teleported);
+        let roots = std::mem::take(&mut self.lanes.teleported);
         for root in roots {
             for e in scene::subtree(&self.ecs, root) {
                 let Ok(wt) = self.ecs.copy::<WorldTransform>(e) else {
@@ -1735,7 +1497,7 @@ impl World {
     /// press jumps when grounded (the edge is consumed by this tick, §5.1).
     /// Queued like body commands, outside any batch (`u32::MAX`).
     fn drive_characters(&mut self) -> u32 {
-        let mut cmds = std::mem::take(&mut self.driver_scratch);
+        let mut cmds = std::mem::take(&mut self.scratch.driver);
         cmds.clear();
         let mut driven = 0;
         {
@@ -1787,7 +1549,7 @@ impl World {
         for (entity, cmd) in cmds.drain(..) {
             self.physics.queue(u32::MAX, entity, cmd);
         }
-        self.driver_scratch = cmds;
+        self.scratch.driver = cmds;
         driven
     }
 
@@ -1798,7 +1560,7 @@ impl World {
     /// yaw/pitch are written back. Returns the rig count and whether any
     /// moved.
     fn place_camera_rigs(&mut self) -> (u32, bool) {
-        let mut placements = std::mem::take(&mut self.rig_scratch);
+        let mut placements = std::mem::take(&mut self.scratch.rigs);
         placements.clear();
         let dt = self.config.fixed_dt;
         {
@@ -1837,7 +1599,7 @@ impl World {
                 let mut distance = rig.distance;
                 // Without physics the rig does not pull in on walls.
                 if rig.collision_radius > 0.0 && self.modules.physics {
-                    self.hits_scratch.clear();
+                    self.scratch.hits.clear();
                     self.physics.query(
                         &QuerySpec {
                             kind: QueryKind::ShapeCast,
@@ -1852,9 +1614,9 @@ impl World {
                             max_hits: 1,
                             hit_sensors: false,
                         },
-                        &mut self.hits_scratch,
+                        &mut self.scratch.hits,
                     );
-                    if let Some(hit) = self.hits_scratch.first() {
+                    if let Some(hit) = self.scratch.hits.first() {
                         distance = hit.distance.clamp(rig.min_distance, rig.distance);
                     }
                 }
@@ -1876,7 +1638,7 @@ impl World {
             }
             let _ = scene::set_world_pose(&self.ecs, p.rig, p.position, p.rotation);
         }
-        self.rig_scratch = placements;
+        self.scratch.rigs = placements;
         (rigs, moved)
     }
 
@@ -1997,7 +1759,7 @@ impl World {
     }
 
     pub fn staged_count(&self) -> usize {
-        self.staged.len()
+        self.lanes.staged.len()
     }
 
     /// Coherent S[n+1] of subscribed entities, in handle order.
@@ -2060,7 +1822,7 @@ impl World {
                 // Not active in the hierarchy: as absent as a hidden one.
                 continue;
             }
-            if self.config.edit_mode && self.edit_hidden.contains(&e) {
+            if self.config.edit_mode && self.edit.hidden.contains(&e) {
                 // The editor's hidden flag: no record at all — nothing to
                 // draw, light with or look through.
                 continue;
@@ -2155,7 +1917,7 @@ impl World {
             }
         }
         if self.config.edit_mode {
-            if let Some((world, camera)) = &self.edit_camera {
+            if let Some((world, camera)) = &self.edit.camera {
                 // The editor looks through its own camera: no record backs
                 // it (`u32::MAX`), the renderer reads `world` and `camera`.
                 out.camera = Some(ExtractCamera {
@@ -2180,7 +1942,7 @@ impl World {
         let parent = self.ecs.get::<Parent>(e).ok().map(|p| p.0);
         let parent_res = parent.map(|p| self.resolve_extract(p, alpha, memo));
         let parent_overridden = parent_res.is_some_and(|r| r.1);
-        let result = if let Some(t) = self.overrides.get(&e) {
+        let result = if let Some(t) = self.lanes.overrides.get(&e) {
             let pw = parent_res.map(|r| r.0).unwrap_or(Mat4::IDENTITY);
             (pw * t.matrix(), true)
         } else if parent_overridden {

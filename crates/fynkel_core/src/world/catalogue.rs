@@ -191,7 +191,7 @@ impl World {
     /// subtree exactly as `Command::Destroy` would.
     pub(super) fn run_lifetimes(&mut self, tick: Tick) -> u32 {
         let dt = self.config.fixed_dt;
-        let mut expired = std::mem::take(&mut self.entity_scratch);
+        let mut expired = std::mem::take(&mut self.scratch.entities);
         expired.clear();
         let mut count = 0;
         {
@@ -216,7 +216,7 @@ impl World {
                 let _ = self.destroy_subtree(e, tick);
             }
         }
-        self.entity_scratch = expired;
+        self.scratch.entities = expired;
         count
     }
 
@@ -227,7 +227,7 @@ impl World {
     pub(super) fn run_emitters(&mut self, tick: Tick) -> u32 {
         let dt = self.config.fixed_dt;
         self.attach_state::<Emitter, EmitterRun>();
-        let mut emissions = std::mem::take(&mut self.emission_scratch);
+        let mut emissions = std::mem::take(&mut self.scratch.emissions);
         emissions.clear();
         let mut count = 0;
         {
@@ -342,7 +342,7 @@ impl World {
                 }
             }
         }
-        self.emission_scratch = emissions;
+        self.scratch.emissions = emissions;
         count
     }
 
@@ -350,7 +350,7 @@ impl World {
     /// position plus the offset. Returns the count and whether any moved.
     pub(super) fn run_followers(&mut self) -> (u32, bool) {
         let dt = self.config.fixed_dt;
-        let mut placements = std::mem::take(&mut self.placement_scratch);
+        let mut placements = std::mem::take(&mut self.scratch.placements);
         placements.clear();
         let mut count = 0;
         {
@@ -389,7 +389,7 @@ impl World {
             }
         }
         let moved = self.apply_placements(&mut placements);
-        self.placement_scratch = placements;
+        self.scratch.placements = placements;
         (count, moved)
     }
 
@@ -399,7 +399,7 @@ impl World {
         let Some(camera) = self.active_camera_position() else {
             return (0, false);
         };
-        let mut placements = std::mem::take(&mut self.placement_scratch);
+        let mut placements = std::mem::take(&mut self.scratch.placements);
         placements.clear();
         let mut count = 0;
         {
@@ -426,7 +426,7 @@ impl World {
             }
         }
         let moved = self.apply_placements(&mut placements);
-        self.placement_scratch = placements;
+        self.scratch.placements = placements;
         (count, moved)
     }
 
@@ -475,7 +475,7 @@ impl World {
     /// Gives every entity with a `C` a default `S` (its runtime state) and
     /// takes it away from those that lost their `C`.
     pub(super) fn attach_state<C: hecs::Component, S: hecs::Component + Default>(&mut self) {
-        let mut pending = std::mem::take(&mut self.entity_scratch);
+        let mut pending = std::mem::take(&mut self.scratch.entities);
         pending.clear();
         {
             let h = self.ecs.hecs();
@@ -501,6 +501,6 @@ impl World {
         for e in pending.drain(..) {
             let _ = self.ecs.remove::<S>(e);
         }
-        self.entity_scratch = pending;
+        self.scratch.entities = pending;
     }
 }

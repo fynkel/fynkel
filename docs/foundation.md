@@ -124,7 +124,7 @@ so the refactors cannot quietly change it.
 
 | | Sev | What | Status |
 |---|---|---|---|
-| 6.1 | I | `World` (`fynkel_core/src/world.rs`, ~59 fields) split into subsystem states behind a small system trait with a declared order | ❌ |
+| 6.1 | I | `World` (`fynkel_core/src/world.rs`, ~59 fields) split into subsystem states behind a small system trait with a declared order | ✅ The tick's order is written once: `world/systems.rs` holds a `System` trait (its kind, when it runs, what it does) and the `TICK` table `step` runs in order — the failing test `the_tick_runs_every_system_once_in_the_declared_order`, with `edit_mode_runs_only_commands_transforms_and_a_previewed_animation`. `World` has 24 fields, was 46: the command lanes, the active markers, animation, edit mode and scratch are their own states (`world/state.rs`). No behaviour change: every `fynkel_core` test passes as before; public API unchanged; `docs/catalogue.md` § Where they run |
 | 6.2 | I | A built-in component is ~9 hand steps (`docs/codegen.md`): generate the `ComponentValue` arms, the `bridge::query` arm and the editor hints from one table | ❌ |
 | 6.3 | I | `fynkel_render/src/lib.rs` (5,737 lines) split into modules | ✅ 1,015 lines left in `lib.rs`; 13 modules (`prepare`, `passes`, `residency`, `pipelines`, `targets`, `ibl`, `upload`, `gpu_types`, `lights`, `gpu_timer`, `stats`, `camera`, `headless`), moved whole by item with only `pub(crate)` added, checked line by line; public API unchanged; `docs/renderer.md` § Where things are |
 | 6.4 | I | The shipped runtime links `fynkel_document` (JSON Schema validation) through `fynkel_native` and `fynkel_assets` | ❌ |

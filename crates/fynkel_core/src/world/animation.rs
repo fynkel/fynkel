@@ -476,15 +476,15 @@ impl World {
     /// (`docs/animation.md`; the loaders do this for every clip a loaded
     /// scene's animators name and the bridge for every `Play`).
     pub fn register_clip(&mut self, clip: AssetRef, data: Clip) {
-        self.clips.insert(clip, Arc::new(data));
+        self.anim.clips.insert(clip, Arc::new(data));
     }
 
     pub fn has_clip(&self, clip: &AssetRef) -> bool {
-        self.clips.contains_key(clip)
+        self.anim.clips.contains_key(clip)
     }
 
     pub fn clip(&self, clip: &AssetRef) -> Option<&Arc<Clip>> {
-        self.clips.get(clip)
+        self.anim.clips.get(clip)
     }
 
     /// A registered clip's root travel on `animator`'s hierarchy, per
@@ -494,7 +494,7 @@ impl World {
     /// when the clip is not registered, has no length or keys no
     /// translation under `animator`.
     pub fn clip_root_travel(&self, animator: Entity, clip: &AssetRef) -> Option<(Vec3, f32)> {
-        let data = self.clips.get(clip)?;
+        let data = self.anim.clips.get(clip)?;
         if data.duration <= 0.0 {
             return None;
         }
@@ -505,19 +505,19 @@ impl World {
     /// Makes a blend space available to `Animator`s that name `blend` as
     /// their clip (M3-19c); its points' clips are registered separately.
     pub fn register_blend(&mut self, blend: AssetRef, data: BlendSpace) {
-        self.blends.insert(blend, Arc::new(data));
+        self.anim.blends.insert(blend, Arc::new(data));
     }
 
     pub fn has_blend(&self, blend: &AssetRef) -> bool {
-        self.blends.contains_key(blend)
+        self.anim.blends.contains_key(blend)
     }
 
     pub fn blend(&self, blend: &AssetRef) -> Option<&Arc<BlendSpace>> {
-        self.blends.get(blend)
+        self.anim.blends.get(blend)
     }
 
     pub fn registered_blends(&self) -> impl Iterator<Item = &AssetRef> {
-        self.blends.keys()
+        self.anim.blends.keys()
     }
 
     /// Makes an Animator Controller available to `Animator`s that name it
@@ -529,23 +529,23 @@ impl World {
         data: crate::animation::controller::ControllerDef,
     ) -> Result<(), String> {
         data.validate()?;
-        self.controllers.insert(controller, Arc::new(data));
+        self.anim.controllers.insert(controller, Arc::new(data));
         Ok(())
     }
 
     pub fn has_controller(&self, controller: &AssetRef) -> bool {
-        self.controllers.contains_key(controller)
+        self.anim.controllers.contains_key(controller)
     }
 
     pub fn controller(
         &self,
         controller: &AssetRef,
     ) -> Option<&Arc<crate::animation::controller::ControllerDef>> {
-        self.controllers.get(controller)
+        self.anim.controllers.get(controller)
     }
 
     pub fn registered_controllers(&self) -> impl Iterator<Item = &AssetRef> {
-        self.controllers.keys()
+        self.anim.controllers.keys()
     }
 
     /// `FYNKEL_QUERY_ANIMATOR_CONTROLLER` (ADR-0032): the layers' states
@@ -567,24 +567,24 @@ impl World {
 
     /// Makes a skin available to `Skin` components that name it.
     pub fn register_skin(&mut self, skin: AssetRef, data: Skin) {
-        self.skins.insert(skin, Arc::new(data));
+        self.anim.skins.insert(skin, Arc::new(data));
     }
 
     pub fn has_skin(&self, skin: &AssetRef) -> bool {
-        self.skins.contains_key(skin)
+        self.anim.skins.contains_key(skin)
     }
 
     pub fn skin(&self, skin: &AssetRef) -> Option<&Arc<Skin>> {
-        self.skins.get(skin)
+        self.anim.skins.get(skin)
     }
 
     /// The clips and skins the world knows, for reports.
     pub fn registered_clips(&self) -> impl Iterator<Item = &AssetRef> {
-        self.clips.keys()
+        self.anim.clips.keys()
     }
 
     pub fn registered_skins(&self) -> impl Iterator<Item = &AssetRef> {
-        self.skins.keys()
+        self.anim.skins.keys()
     }
 
     /// `Command::Animate` at the tick boundary: edits the animator and its
@@ -730,7 +730,8 @@ impl World {
                 );
             }
             AnimateOp::PlayOneShot { motion, .. }
-                if !self.clips.contains_key(motion) && !self.blends.contains_key(motion) =>
+                if !self.anim.clips.contains_key(motion)
+                    && !self.anim.blends.contains_key(motion) =>
             {
                 return self.reject(
                     index,
@@ -801,7 +802,7 @@ impl World {
                 let Ok(mut run) = self.ecs.get_mut::<AnimatorRun>(entity) else {
                     return false;
                 };
-                match controller::play_for(&self.controllers, &c, &mut run.controller) {
+                match controller::play_for(&self.anim.controllers, &c, &mut run.controller) {
                     Err(missing) => Err(format!(
                         "controller {missing} is not registered with the world"
                     )),
@@ -924,7 +925,7 @@ impl World {
                     && clip != animator.clip;
                 let outgoing = if !resolved {
                     None
-                } else if let Some(data) = self.clips.get(&animator.clip) {
+                } else if let Some(data) = self.anim.clips.get(&animator.clip) {
                     Some(Fade {
                         clip: data.clone(),
                         clip_ref: animator.clip.clone(),
@@ -1012,11 +1013,11 @@ impl World {
         self.attach_state::<Animator, AnimatorRun>();
         self.attach_state::<SkinComponent, SkinRun>();
         let dt = self.config.fixed_dt;
-        let mut ticks = std::mem::take(&mut self.animator_scratch);
+        let mut ticks = std::mem::take(&mut self.anim.animators);
         ticks.clear();
         let mut count = 0;
 
-        let mut animators = std::mem::take(&mut self.animator_order_scratch);
+        let mut animators = std::mem::take(&mut self.anim.order);
         animators.clear();
         animators.extend(
             self.ecs
@@ -1028,9 +1029,9 @@ impl World {
                 .map(|h| (depth_of(&self.ecs, h.0), h.0)),
         );
         animators.sort_unstable();
-        let mut pose = std::mem::take(&mut self.pose_scratch);
-        let mut fade_pose = std::mem::take(&mut self.fade_pose_scratch);
-        let mut layer_pose = std::mem::take(&mut self.layer_pose_scratch);
+        let mut pose = std::mem::take(&mut self.anim.pose);
+        let mut fade_pose = std::mem::take(&mut self.anim.fade_pose);
+        let mut layer_pose = std::mem::take(&mut self.anim.layer_pose);
         let mut crossed: Vec<usize> = Vec::new();
         for &(_, entity) in &animators {
             count += 1;
@@ -1057,12 +1058,12 @@ impl World {
             let controlled = animator.controller.clone().filter(|c| !c.is_nil());
             if let Some(c) = &controlled {
                 let run = &mut *run;
-                match controller::play_for(&self.controllers, c, &mut run.controller) {
+                match controller::play_for(&self.anim.controllers, c, &mut run.controller) {
                     Ok(play) => {
                         let tables = controller::Tables {
                             ecs: &self.ecs,
-                            clips: &self.clips,
-                            blends: &self.blends,
+                            clips: &self.anim.clips,
+                            blends: &self.anim.blends,
                         };
                         controller::tick(
                             &tables,
@@ -1096,9 +1097,9 @@ impl World {
             let clip_ref = animator.clip.clone();
             let playing = if controlled.is_some() || clip_ref.is_nil() {
                 None
-            } else if let Some(c) = self.clips.get(&clip_ref) {
+            } else if let Some(c) = self.anim.clips.get(&clip_ref) {
                 Some(Playing::Clip(c.clone()))
-            } else if let Some(b) = self.blends.get(&clip_ref) {
+            } else if let Some(b) = self.anim.blends.get(&clip_ref) {
                 Some(Playing::Blend(b.clone()))
             } else {
                 if run.reported.as_ref() != Some(&clip_ref) {
@@ -1153,7 +1154,7 @@ impl World {
                         let mut slots = Vec::with_capacity(space.points.len());
                         let mut missing = None;
                         for p in &space.points {
-                            match self.clips.get(&p.clip) {
+                            match self.anim.clips.get(&p.clip) {
                                 Some(c) => slots.push(BlendSlot::resolve(
                                     &self.ecs,
                                     entity,
@@ -1445,10 +1446,10 @@ impl World {
         pose.clear();
         fade_pose.clear();
         layer_pose.clear();
-        self.pose_scratch = pose;
-        self.fade_pose_scratch = fade_pose;
-        self.layer_pose_scratch = layer_pose;
-        self.animator_order_scratch = animators;
+        self.anim.pose = pose;
+        self.anim.fade_pose = fade_pose;
+        self.anim.layer_pose = layer_pose;
+        self.anim.order = animators;
 
         for t in ticks.drain(..) {
             if let Some(clip) = t.unavailable {
@@ -1523,7 +1524,7 @@ impl World {
                 self.apply_root_motion(t.entity, delta, axis, yaw, dt);
             }
         }
-        self.animator_scratch = ticks;
+        self.anim.animators = ticks;
 
         count += self.run_skins();
         count
@@ -1571,7 +1572,7 @@ impl World {
     /// Every `Skin` component's joints resolved to entities under its
     /// skeleton root, cached while they hold.
     fn run_skins(&mut self) -> u32 {
-        let mut skinned = std::mem::take(&mut self.entity_scratch);
+        let mut skinned = std::mem::take(&mut self.scratch.entities);
         skinned.clear();
         skinned.extend(
             self.ecs
@@ -1594,7 +1595,7 @@ impl World {
                 continue;
             };
             let skin_ref = component.skin.clone();
-            let Some(skin) = self.skins.get(&skin_ref) else {
+            let Some(skin) = self.anim.skins.get(&skin_ref) else {
                 if !skin_ref.is_nil() && run.reported.as_ref() != Some(&skin_ref) {
                     run.reported = Some(skin_ref.clone());
                     unavailable.push((entity, skin_ref));
@@ -1624,7 +1625,7 @@ impl World {
                 run.resolved = Some(skin_ref);
             }
         }
-        self.entity_scratch = skinned;
+        self.scratch.entities = skinned;
         for (entity, skin) in unavailable {
             self.diagnostics.push(Diagnostic {
                 command_index: u32::MAX,
@@ -1648,7 +1649,7 @@ impl World {
         if run.resolved.as_ref() != Some(&component.skin) {
             return None;
         }
-        let skin = self.skins.get(&component.skin)?.clone();
+        let skin = self.anim.skins.get(&component.skin)?.clone();
         Some((skin, run.joints.clone()))
     }
 
@@ -1656,7 +1657,7 @@ impl World {
     /// without an `Animator`.
     pub fn animator_state(&self, entity: Entity) -> Option<AnimatorStateRecord> {
         let animator = self.ecs.get::<Animator>(entity).ok()?;
-        let blend = self.blends.get(&animator.clip);
+        let blend = self.anim.blends.get(&animator.clip);
         let (time, fade_remaining, parameter, root_delta, root_yaw, blend_duration) =
             match self.ecs.get::<AnimatorRun>(entity) {
                 Ok(run) => (
@@ -1687,6 +1688,7 @@ impl World {
             // A blend space's length is the blended one of its two
             // active clips.
             duration: self
+                .anim
                 .clips
                 .get(&animator.clip)
                 .map(|c| c.duration)

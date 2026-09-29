@@ -27,6 +27,10 @@ reference test `crates/fynkel_core/tests/catalogue.rs`.
 
 ## Where they run (§5.1)
 
+The order is written once, in the `TICK` table of
+`crates/fynkel_core/src/world/systems.rs`: each system there says when it
+runs (most are off in edit mode) and `step` runs the table in order.
+
 ```text
 World::step
   drive_characters              the characters' action driver (M3-09)
