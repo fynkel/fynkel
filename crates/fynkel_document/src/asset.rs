@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use fynkel_contracts::{AssetRef, Code, Diagnostic};
 use uuid::Uuid;
 
-use crate::json::{Locator, Member, Node};
+use crate::json::{Locator, Member, Node, Value};
 use crate::{Document, DocumentKind, SchemaSet};
 
 /// Importer for files no specialised importer claims: copied verbatim.
@@ -449,6 +449,19 @@ impl AssetDatabase {
     /// (`FYN-A0003` on the second); a file whose envelope does not parse is
     /// reported and left out.
     pub fn scan(root: &Path, schemas: &SchemaSet) -> (AssetDatabase, Vec<Diagnostic>) {
+        Self::scan_preferring(root, schemas, &HashSet::new())
+    }
+
+    /// [`AssetDatabase::scan`] where the files at `known` (paths relative
+    /// to the root, as [`AssetEntry::path`]) are read first: when two
+    /// files claim one id — a copy made in Finder keeps its original's —
+    /// the one the project knew keeps it, whichever sorts first
+    /// (foundation 5.2). The other is `FYN-A0003`.
+    pub fn scan_preferring(
+        root: &Path,
+        schemas: &SchemaSet,
+        known: &HashSet<String>,
+    ) -> (AssetDatabase, Vec<Diagnostic>) {
         let mut db = AssetDatabase {
             root: root.to_path_buf(),
             ..Default::default()
@@ -463,10 +476,39 @@ impl AssetDatabase {
             return (db, diags);
         }
         files.sort();
+        if !known.is_empty() {
+            let is_known = |path: &PathBuf| {
+                let source = source_path(path).unwrap_or_else(|| path.clone());
+                known.contains(&relative(root, &source))
+            };
+            // Stable: sorted order within each group.
+            files.sort_by_key(|p| !is_known(p));
+        }
         for path in &files {
             db.scan_file(path, schemas, &mut diags);
         }
         (db, diags)
+    }
+
+    /// The files a duplicate id kept out (`FYN-A0003`); the next
+    /// [`AssetDatabase::update`] reads them again.
+    pub fn rejected(&self) -> &[PathBuf] {
+        &self.rejected
+    }
+
+    /// Every asset path of this database ([`AssetEntry::path`]): what a
+    /// later [`AssetDatabase::scan_preferring`] keeps ids for.
+    pub fn paths(&self) -> HashSet<String> {
+        self.entries.iter().map(|e| e.path.clone()).collect()
+    }
+
+    /// The entry that owns `id`: the asset with that id, or the source
+    /// with that sub-asset.
+    pub fn owner(&self, id: Uuid) -> Option<&AssetEntry> {
+        self.by_id
+            .get(&id)
+            .or_else(|| self.subs.get(&id).map(|(i, _)| i))
+            .map(|i| &self.entries[*i])
     }
 
     /// Re-reads the files at `paths` (absolute, or relative to the root; a
@@ -677,8 +719,10 @@ impl AssetDatabase {
         let rel = relative(root, path);
         if let Some(source) = source_path(path) {
             if !source.is_file() {
+                // A warning (foundation 5.1): the file is gone, so its id
+                // resolves to nothing and references to it load as none.
                 diags.push(
-                    Diagnostic::error(
+                    Diagnostic::warning(
                         Code::ASSET_ORPHANED_SIDECAR,
                         format!(
                             "sidecar has no source file ({} is missing)",
@@ -687,7 +731,7 @@ impl AssetDatabase {
                     )
                     .with_document(shown)
                     .with_suggestion(
-                        "move the sidecar with its file, or delete it if the file is gone",
+                        "move the sidecar with its file, or delete it if the file is gone; until then references to it load as none",
                     ),
                 );
                 return;
@@ -953,6 +997,54 @@ pub fn asset_refs(root: &Node) -> Vec<(String, AssetRef)> {
     let mut refs = Vec::new();
     collect_refs(root, String::new(), &mut refs);
     refs
+}
+
+/// Sets every `assetRef` in a tree that `missing` picks (given its
+/// pointer) to the nil id, its `sub` dropped: how the cook writes a
+/// reference to an asset that is gone or failed, so it loads as none, as
+/// a missing reference does in Unity (foundation 5.1). Returns how many
+/// it cleared.
+pub fn clear_asset_refs(
+    root: &mut Node,
+    missing: &mut dyn FnMut(&str, &AssetRef) -> bool,
+) -> usize {
+    fn walk(
+        node: &mut Node,
+        pointer: String,
+        missing: &mut dyn FnMut(&str, &AssetRef) -> bool,
+    ) -> usize {
+        match &mut node.value {
+            Value::Object(members) => {
+                if let Some(r) = as_asset_ref(members) {
+                    if r.is_nil() || !missing(&pointer, &r) {
+                        return 0;
+                    }
+                    members.retain(|m| m.key != "sub");
+                    for m in members.iter_mut() {
+                        if m.key == "asset" {
+                            m.value = Node::string(Uuid::nil().to_string());
+                        }
+                    }
+                    return 1;
+                }
+                let mut n = 0;
+                for m in members.iter_mut() {
+                    let at = format!("{pointer}/{}", crate::scene::escape(&m.key));
+                    n += walk(&mut m.value, at, missing);
+                }
+                n
+            }
+            Value::Array(items) => {
+                let mut n = 0;
+                for (i, item) in items.iter_mut().enumerate() {
+                    n += walk(item, format!("{pointer}/{i}"), missing);
+                }
+                n
+            }
+            _ => 0,
+        }
+    }
+    walk(root, String::new(), missing)
 }
 
 fn collect_refs(node: &Node, pointer: String, out: &mut Vec<(String, AssetRef)>) {

@@ -796,9 +796,11 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
             continue;
         }
         let Some(prefab) = library.get_ref(&inst.asset) else {
+            // A warning (foundation 5.1): the instance stays as an empty
+            // entity with its name and place, as Unity's Missing Prefab.
             diagnostics.push(anchor(
                 src,
-                Diagnostic::error(
+                Diagnostic::warning(
                     Code::PREFAB_UNKNOWN,
                     format!("prefab {} is not available", inst.describe()),
                 )
