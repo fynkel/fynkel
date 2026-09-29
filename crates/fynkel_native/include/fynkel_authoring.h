@@ -322,6 +322,17 @@ FynkelStatus fynkel_authoring_operate(FynkelAuthoringSession* session,
  * the preview draws the others and the report says which failed). */
 FynkelStatus fynkel_authoring_preview_open(FynkelAuthoringSession* session,
                                            uint32_t handle);
+/* fynkel_authoring_preview_open_with flag (ADR-0040 §4): never cook. The
+ * first preview opens the last cook's cache as it is, or none when the
+ * project was never cooked (the world then draws no meshes until a cook is
+ * applied); "needsCook": true says the host should start one (cookStart).
+ * Unknown bits are FYNKEL_STATUS_INVALID_ARGUMENT. */
+#define FYNKEL_PREVIEW_OPEN_NO_COOK 1u
+/* fynkel_authoring_preview_open with `flags`; the result gains
+ * "needsCook". */
+FynkelStatus fynkel_authoring_preview_open_with(FynkelAuthoringSession* session,
+                                                uint32_t handle,
+                                                uint32_t flags);
 /* Drops the edit-preview world of `handle`; the document stays open. The
  * world pointer must not be rendered from afterwards. Result:
  * { "ok", "handle", "closed" }. */

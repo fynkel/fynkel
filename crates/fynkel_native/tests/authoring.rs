@@ -633,6 +633,43 @@ impl Host {
 // returns at once with a ticket, the session answers other calls while
 // the cook runs, `cookProgress` counts it, `cookFinish` applies it as
 // `recook` does, and the ticket is then spent.
+// ADR-0040 §4: with no cache at all, a preview opened without a cook
+// draws nothing until the cook on the thread is applied.
+#[test]
+fn a_preview_opens_without_a_cook_and_draws_once_one_is_applied() {
+    let copy = Copy::new("no-cook");
+    let host = Host::new();
+    assert_eq!(host.open_project(&copy.dir), Status::Ok);
+    let (_, scene) = host.open_document(MAIN_SCENE);
+    assert_eq!(
+        unsafe { fynkel_authoring_preview_open_with(host.0, scene, FYNKEL_PREVIEW_OPEN_NO_COOK) },
+        Status::Ok
+    );
+    let opened = host.result();
+    assert_eq!(opened["needsCook"], true, "{opened}");
+    assert_eq!(opened["stats"]["entities"], 6);
+    assert!(
+        !copy.dir.join(".fynkel/cache/index.json").exists(),
+        "nothing cooked"
+    );
+    let world = unsafe { fynkel_authoring_preview_world(host.0, scene) };
+    assert!(unsafe { (*world).assets() }.is_none(), "no cache yet");
+
+    assert_eq!(
+        host.preview_call(scene, "cookStart", &json!({})),
+        Status::Ok
+    );
+    let ticket = host.result()["ticket"].clone();
+    assert_eq!(
+        host.preview_call(scene, "cookFinish", &json!({ "ticket": ticket })),
+        Status::Ok
+    );
+    let finished = host.result();
+    assert_eq!(finished["cook"]["ok"], true, "{finished}");
+    assert!(unsafe { (*world).assets() }.is_some(), "the cook's store");
+    assert!(copy.dir.join(".fynkel/cache/index.json").is_file());
+}
+
 #[test]
 fn a_cook_runs_on_its_thread_while_the_session_answers() {
     let copy = Copy::new("cook-job");
@@ -685,6 +722,30 @@ fn a_cook_runs_on_its_thread_while_the_session_answers() {
     assert_eq!(
         host.preview_call(scene, "cookProgress", &json!({ "ticket": ticket })),
         Status::InvalidArgument
+    );
+
+    // ADR-0040 §4: a preview opened without a cook, then cooked on the
+    // thread. The copy has a cache now, so a fresh session opens it as it
+    // is and says a cook is due.
+    let other = Host::new();
+    assert_eq!(other.open_project(&copy.dir), Status::Ok);
+    let (_, second) = other.open_document(MAIN_SCENE);
+    assert_eq!(
+        unsafe { fynkel_authoring_preview_open_with(other.0, second, 2) },
+        Status::InvalidArgument,
+        "unknown flag bits"
+    );
+    assert_eq!(
+        unsafe { fynkel_authoring_preview_open_with(other.0, second, FYNKEL_PREVIEW_OPEN_NO_COOK) },
+        Status::Ok
+    );
+    let opened = other.result();
+    assert_eq!(opened["needsCook"], true, "{opened}");
+    assert_eq!(opened["cook"], Value::Null);
+    let world = unsafe { fynkel_authoring_preview_world(other.0, second) };
+    assert!(
+        unsafe { (*world).assets() }.is_some(),
+        "the last cache draws"
     );
 
     // A cancel, whenever it lands, leaves the previews whole.

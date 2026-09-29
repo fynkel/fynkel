@@ -138,6 +138,19 @@ impl FynkelAuthoringSession {
         Ok((assets, Some(report)))
     }
 
+    /// The store every preview draws from, or the last cook's cache
+    /// opened as it is (no cook) when no preview opened one yet; `None`
+    /// when the project was never cooked.
+    fn last_cache(&mut self) -> Option<Assets> {
+        if let Some(a) = &self.assets {
+            return Some(a.clone());
+        }
+        let dir = self.inner.project()?.cache_dir();
+        let assets = Assets::open(&dir).ok()?;
+        self.assets = Some(assets.clone());
+        Some(assets)
+    }
+
     /// `fynkel cook` in process over the open project and the cache
     /// reopened: every preview's world points at the new store. The cook
     /// report is returned even when some assets failed (the preview draws
@@ -748,6 +761,34 @@ pub unsafe extern "C" fn fynkel_authoring_preview_open(
     session: *mut FynkelAuthoringSession,
     handle: u32,
 ) -> Status {
+    fynkel_authoring_preview_open_with(session, handle, 0)
+}
+
+/// `fynkel_authoring_preview_open_with` flag: never cook. The first
+/// preview opens the last cook's cache as it is, or none when there is
+/// no cache yet (the world draws nothing but gizmos until a cook is
+/// applied); the report says `"needsCook": true` and the host starts one
+/// (`cookStart`, ADR-0040 §4).
+pub const FYNKEL_PREVIEW_OPEN_NO_COOK: u32 = 1;
+
+/// [`fynkel_authoring_preview_open`] with `flags`
+/// ([`FYNKEL_PREVIEW_OPEN_NO_COOK`]); unknown bits are refused.
+///
+/// # Safety
+/// `session` live or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_authoring_preview_open_with(
+    session: *mut FynkelAuthoringSession,
+    handle: u32,
+    flags: u32,
+) -> Status {
+    if flags & !FYNKEL_PREVIEW_OPEN_NO_COOK != 0 {
+        return refused(
+            session,
+            invalid(format!("preview: unknown open flags {flags:#x}")),
+        );
+    }
+    let may_cook = flags & FYNKEL_PREVIEW_OPEN_NO_COOK == 0;
     guarded_session(session, move |s| {
         let handle = handle as Handle;
         if let Some(slot) = s.previews.get(&handle) {
@@ -770,16 +811,24 @@ pub unsafe extern "C" fn fynkel_authoring_preview_open(
             .document()
             .envelope
             .id;
-        let (assets, cook) = s.ensure_assets()?;
+        // Without a cook, the first preview's cache may be stale (or
+        // missing): the host cooks next.
+        let needs_cook = !may_cook && s.assets.is_none();
+        let (assets, cook) = if may_cook {
+            let (assets, report) = s.ensure_assets()?;
+            (Some(assets), report)
+        } else {
+            (s.last_cache(), None)
+        };
         let mut world = FynkelWorld::new(WorldConfig {
             edit_mode: true,
             ..WorldConfig::default()
         });
-        world.assets = Some(assets.clone());
+        world.assets = assets.clone();
         let mut preview = Preview::load(
             document,
             world.core_mut(),
-            Some(&assets),
+            assets.as_ref(),
             &described.description,
         );
         preview.set_anchors(anchors);
@@ -793,6 +842,7 @@ pub unsafe extern "C" fn fynkel_authoring_preview_open(
             "handle": handle,
             "opened": true,
             "cook": cook,
+            "needsCook": needs_cook,
             "stats": stats,
             "diagnostics": diags(&diagnostics),
         }))
