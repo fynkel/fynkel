@@ -1266,6 +1266,11 @@ fn cook_fills_the_cache_and_cooked_inspect_reads_it() {
     assert_eq!(second["cached"], 7);
     let ios = cook(&["--profile", "ios"]);
     assert_eq!(ios["cooked"], 7);
+    // One worker (ADR-0040 §1) cooks to the same keys: everything hits.
+    let one = cook(&["--jobs", "1"]);
+    assert_eq!(one["cached"], 7);
+    assert_eq!(one["cancelled"], false);
+    assert_eq!(run(&["cook", "--jobs", "0"]).status.code(), Some(2));
 
     // Inspect the scene's container.
     let scene = first["assets"]

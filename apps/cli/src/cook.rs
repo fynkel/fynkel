@@ -28,7 +28,7 @@ const MAX_META_BYTES: u64 = 16 << 20;
 
 pub fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel cook [--project <dir>] [--cache <dir>] [--profile <name>] [--force] [--prune] [--json]\n                                               cook the project's assets into its content-addressed cache (default .fynkel/cache, profile dev)\n  fynkel cook --assets <dir> [--cache <dir>] [--schemas <dir>] ...\n                                               cook a bare asset root (no project)\n  fynkel cooked inspect <file.fyna>... [--json]  print a cooked container's META and chunk table"
+        "usage:\n  fynkel cook [--project <dir>] [--cache <dir>] [--profile <name>] [--force] [--prune] [--jobs <n>] [--json]\n                                               cook the project's assets into its content-addressed cache (default .fynkel/cache, profile dev)\n  fynkel cook --assets <dir> [--cache <dir>] [--schemas <dir>] ...\n                                               cook a bare asset root (no project)\n  fynkel cooked inspect <file.fyna>... [--json]  print a cooked container's META and chunk table"
     );
     ExitCode::from(2)
 }
@@ -40,6 +40,9 @@ struct Opts {
     profile: String,
     force: bool,
     prune: bool,
+    /// Source import workers (ADR-0040 §1); the default is
+    /// `fynkel_import::cook::default_jobs()`.
+    jobs: Option<usize>,
     json: bool,
     schemas_dir: Option<PathBuf>,
     files: Vec<PathBuf>,
@@ -53,6 +56,7 @@ fn parse(args: &[String]) -> Option<Opts> {
         profile: fynkel_import::cook::DEFAULT_PROFILE.to_string(),
         force: false,
         prune: false,
+        jobs: None,
         json: false,
         schemas_dir: None,
         files: Vec::new(),
@@ -78,6 +82,10 @@ fn parse(args: &[String]) -> Option<Opts> {
             "--profile" => {
                 i += 1;
                 o.profile = args.get(i)?.clone();
+            }
+            "--jobs" => {
+                i += 1;
+                o.jobs = Some(args.get(i)?.parse().ok().filter(|n| *n > 0)?);
             }
             "--schemas" => {
                 i += 1;
@@ -111,10 +119,12 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
         eprintln!("fynkel cook: a profile name is ASCII letters, digits, '-' and '_'");
         return usage();
     }
+    let defaults = CookOptions::default();
     let cook_opts = CookOptions {
         profile: opts.profile.clone(),
         force: opts.force,
-        ..CookOptions::default()
+        jobs: opts.jobs.unwrap_or(defaults.jobs),
+        ..defaults
     };
     let (report, cache, mut diags) = match &opts.assets {
         // A bare asset root: the old M2 shape, no project record.
