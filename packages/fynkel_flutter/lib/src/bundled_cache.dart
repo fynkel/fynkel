@@ -11,6 +11,7 @@
 // reads a cache directory (`World.loadProject(dir, cacheDir: …)`).
 
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 
@@ -24,7 +25,10 @@ const bundledCacheAssetDir = 'fynkel_cache';
 ///
 /// The result is a cache directory (`index.json`, `objects/<key>.fyna`).
 /// The objects are content-addressed: those already present under [into]
-/// are kept, the others copied, `index.json` always rewritten. [into]
+/// are kept when whole, the others copied, `index.json` always rewritten.
+/// Every file is written under a temporary name and renamed, and a kept
+/// object's header must give its own length, so an unpack cut short (the
+/// app killed mid-write) is repaired by the next launch (foundation 5.6). [into]
 /// defaults to `<system temp>/fynkel_cache` (the app's own tmp directory
 /// on iOS and sandboxed macOS): unpacking again after an update is a few
 /// milliseconds, and nothing needs to be cleaned up.
@@ -43,17 +47,39 @@ Future<String?> unpackBundledCache({String? into, AssetBundle? bundle}) async {
     if (!name.endsWith('.fyna') || name.contains('/')) continue;
     wanted.add(name);
     final file = File('${objects.path}/$name');
-    if (await file.exists()) continue;
-    final data = await assets.load(key);
-    await file.writeAsBytes(data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes), flush: true);
+    if (await _isWhole(file)) continue;
+    await _writeWhole(file, await assets.load(key));
   }
   await for (final entity in objects.list()) {
     if (entity is File && !wanted.contains(entity.uri.pathSegments.last)) {
       await entity.delete();
     }
   }
-  final data = await assets.load(index);
-  await File('${dir.path}/index.json')
-      .writeAsBytes(data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes), flush: true);
+  await _writeWhole(File('${dir.path}/index.json'), await assets.load(index));
   return dir.path;
+}
+
+/// Writes [data] to `<file>.part` and renames it over [file]: a write cut
+/// short leaves only the `.part`, which the next unpack removes.
+Future<void> _writeWhole(File file, ByteData data) async {
+  final part = File('${file.path}.part');
+  await part.writeAsBytes(data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes), flush: true);
+  await part.rename(file.path);
+}
+
+/// Whether [file] is a whole cooked container: the `FYNC` magic and the
+/// header's whole-file length (bytes 24..32, little-endian; see
+/// `fynkel_cooked`) equal to its size. 32 bytes are read.
+Future<bool> _isWhole(File file) async {
+  if (!await file.exists()) return false;
+  final length = await file.length();
+  if (length < 48) return false;
+  final raf = await file.open();
+  try {
+    final head = await raf.read(32);
+    if (head.length < 32 || String.fromCharCodes(head.sublist(0, 4)) != 'FYNC') return false;
+    return ByteData.sublistView(head).getUint64(24, Endian.little) == length;
+  } finally {
+    await raf.close();
+  }
 }

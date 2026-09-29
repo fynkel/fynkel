@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -71,4 +72,39 @@ void main() {
     expect(File('${objects.path}/README.md').existsSync(), isFalse);
     expect(objects.listSync().length, 2);
   });
+
+  // Foundation 5.6: an unpack cut short (the app killed mid-write) left a
+  // short object that every later launch kept, since it existed.
+  test('an object cut short is written again; a write in progress never looks whole', () async {
+    final whole = _container(4096);
+    final bundle = _FakeBundle({'fynkel_cache/index.json': utf8.encode('{}'), 'fynkel_cache/cccc.fyna': whole});
+    final objects = Directory('${tmp.path}/objects')..createSync();
+    // The earlier launch's write stopped a third of the way in.
+    File('${objects.path}/cccc.fyna').writeAsBytesSync(whole.sublist(0, whole.length ~/ 3));
+    // And one stopped before its rename.
+    File('${objects.path}/dddd.fyna.part').writeAsBytesSync([1, 2]);
+
+    await unpackBundledCache(into: tmp.path, bundle: bundle);
+    expect(File('${objects.path}/cccc.fyna').readAsBytesSync(), whole);
+    expect(File('${objects.path}/dddd.fyna.part').existsSync(), isFalse);
+    expect(objects.listSync().length, 1);
+
+    // A whole object is kept as it is (not read from the bundle again).
+    final kept = File('${objects.path}/cccc.fyna').lastModifiedSync();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    await unpackBundledCache(into: tmp.path, bundle: bundle);
+    expect(File('${objects.path}/cccc.fyna').lastModifiedSync(), kept);
+  });
+}
+
+/// A `.fyna` as far as the unpack looks: the `FYNC` magic and the header's
+/// whole-file length (bytes 24..32, little-endian), then filler.
+List<int> _container(int length) {
+  final bytes = Uint8List(length);
+  bytes.setAll(0, ascii.encode('FYNC'));
+  ByteData.sublistView(bytes).setUint64(24, length, Endian.little);
+  for (var i = 48; i < length; i++) {
+    bytes[i] = i & 0xff;
+  }
+  return bytes;
 }
