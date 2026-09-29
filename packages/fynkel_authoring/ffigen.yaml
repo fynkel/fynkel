@@ -27,6 +27,7 @@ enums:
 macros:
   include:
     - FYNKEL_AUTHORING_ABI_VERSION
+    - FYNKEL_PREVIEW_OPEN_NO_COOK
 typedefs:
   exclude:
     - '.*'

@@ -595,18 +595,23 @@ final class DocumentHandle {
   /// kept equal to it from here on. Idempotent. Throws
   /// ([AuthoringStatus.invalidArgument], FYN-T0003) for a material,
   /// (`loadFailed`) when the cache cannot be opened.
-  ScenePreview openPreview() {
+  ///
+  /// [cook] false never cooks (ADR-0040 §4): the first preview opens the
+  /// last cook's cache as it is, or none, and [ScenePreview.needsCook]
+  /// says to start one ([ScenePreview.startCook]).
+  ScenePreview openPreview({bool cook = true}) {
     _check();
     final existing = _preview;
     if (existing != null && !existing._closed) return existing;
-    final r = session._call('previewOpen', () => n.fynkel_authoring_preview_open(session._ptr, handle));
-    final cook = r['cook'] is Map<String, Object?> ? CookReport.fromJson(r['cook'] as Map<String, Object?>) : null;
+    final flags = cook ? 0 : n.FYNKEL_PREVIEW_OPEN_NO_COOK;
+    final r = session._call('previewOpen', () => n.fynkel_authoring_preview_open_with(session._ptr, handle, flags));
+    final report = r['cook'] is Map<String, Object?> ? CookReport.fromJson(r['cook'] as Map<String, Object?>) : null;
     return _preview = ScenePreview._(
       this,
       PreviewStats.fromJson(_mapOf(r['stats'])),
       Diagnostic.listOf(r['diagnostics']),
-      cook,
-    );
+      report,
+    )..needsCook = r['needsCook'] == true;
   }
 
   /// Changes to this document only, from [AuthoringSession.events].

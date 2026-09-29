@@ -97,6 +97,10 @@ final class ScenePreview {
   /// a session), or the last `recook`.
   CookReport? cook;
 
+  /// Opened without a cook ([DocumentHandle.openPreview] `cook: false`)
+  /// over a cache that may be stale or missing: the host starts one.
+  bool needsCook = false;
+
   bool _closed = false;
   bool get isClosed => _closed;
 
@@ -269,6 +273,7 @@ final class ScenePreview {
       final p = session._documents[e['handle']]?._preview;
       if (p == null) continue;
       p.cook = report;
+      if (!report.cancelled) p.needsCook = false;
       p.stats = PreviewStats.fromJson(_mapOf(e['stats']));
       p.diagnostics = Diagnostic.listOf(e['diagnostics']);
     }

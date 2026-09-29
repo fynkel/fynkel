@@ -838,6 +838,7 @@ void main() {
     expect(preview.cook, same(report));
     expect(preview.stats.loads, 4);
     expect(() => job.poll(), throwsA(isA<AuthoringException>()), reason: 'the ticket is spent');
+    expect(preview.needsCook, isFalse, reason: 'opened with a cook');
 
     // Play's recook (ADR-0021 P5): the unsaved scene cooks as held, a
     // recovery copy is written, and the file is left alone.
@@ -879,6 +880,24 @@ void main() {
     expect(again.worldAddress, 0);
   });
 
+
+  test('a preview opened without a cook, then cooked on the thread — ADR-0040 §4', () async {
+    final dir = copyFixture('preview-no-cook');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final session = AuthoringSession();
+    addTearDown(session.dispose);
+    session.openProject(dir.path);
+    final preview = session.openDocument(mainScene).openPreview(cook: false);
+    expect(preview.needsCook, isTrue);
+    expect(preview.cook, isNull);
+    expect(File('${dir.path}/.fynkel/cache/index.json').existsSync(), isFalse, reason: 'nothing cooked');
+
+    final job = preview.startCook();
+    final report = await job.whenDone(every: const Duration(milliseconds: 1));
+    expect(report.ok, isTrue);
+    expect(preview.needsCook, isFalse);
+    expect(File('${dir.path}/.fynkel/cache/index.json').existsSync(), isTrue);
+  });
 
   test('prefab mode: the instance query, apply to prefab, unpack, imported hierarchies — item 7', () {
     final dir = copyFixture('prefab_mode');

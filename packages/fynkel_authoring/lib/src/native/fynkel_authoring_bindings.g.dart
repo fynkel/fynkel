@@ -474,6 +474,29 @@ FynkelStatus fynkel_authoring_preview_open(
   int handle,
 ) => FynkelStatus.fromValue(_fynkel_authoring_preview_open(session, handle));
 
+/// fynkel_authoring_preview_open with `flags`; the result gains
+/// "needsCook".
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelAuthoringSession>,
+    ffi.Uint32,
+    ffi.Uint32,
+  )
+>(symbol: 'fynkel_authoring_preview_open_with')
+external int _fynkel_authoring_preview_open_with(
+  ffi.Pointer<FynkelAuthoringSession> session,
+  int handle,
+  int flags,
+);
+
+FynkelStatus fynkel_authoring_preview_open_with(
+  ffi.Pointer<FynkelAuthoringSession> session,
+  int handle,
+  int flags,
+) => FynkelStatus.fromValue(
+  _fynkel_authoring_preview_open_with(session, handle, flags),
+);
+
 /// Drops the edit-preview world of `handle`; the document stays open. The
 /// world pointer must not be rendered from afterwards. Result:
 /// { "ok", "handle", "closed" }.
@@ -588,6 +611,17 @@ external ffi.Pointer<FynkelWorld> fynkel_authoring_preview_world(
 /// handle, stats, diagnostics }]; `live: true`
 /// cooks the documents with unsaved edits as they
 /// are, their files untouched (Play)
+/// cookStart [live]                    recook on the session's cook thread (ADR-0040):
+/// returns at once → "ticket", "started" (false:
+/// a cook already runs and this is its ticket)
+/// cookProgress ticket                 → "state" ("running" / "done"), "done",
+/// "total", "current" (the asset path last
+/// started), "cancelled"; cheap, once a frame
+/// cookCancel ticket                   stops the cook at its next asset; it writes
+/// no index, so the cache stays as it was
+/// cookFinish ticket                   applies the ended cook as recook does (waits
+/// while it runs) → the recook result; the ticket
+/// is spent
 /// dump                                the world as `fynkel state dump` prints it, in
 /// document order (the gate's incremental-vs-fresh
 /// comparison) → "dump": { document, entityCount,
@@ -721,6 +755,14 @@ external ffi.Pointer<FynkelWorld> fynkel_authoring_stage_world(
 /// → { clip | null, time, duration, fps,
 /// inPlace, blend: { parameter, value,
 /// points: [{ at, clip }] } | null }
+/// or tree ({ blendTree }), values? ({ name: value }), time?
+/// a blend tree (ADR-0033), played at its
+/// parameters' values → { clip, time,
+/// duration, fps, inPlace, tree: { values } }
+/// travel          clips [{ asset, sub? }]
+/// each clip's root travel on the subject, per
+/// second → { travel: [{ velocity [3],
+/// angularSpeed } | null] }
 /// reload                              loaded again from the store → the open result
 /// stats                               → the open result, not reloaded
 /// setMaterial     material, data      as the edit-preview's, on every store
@@ -811,7 +853,7 @@ FynkelStatus fynkel_authoring_stage_call(
 /// 16 floats } } for the ids still alive. `view` is the preview's shape.
 /// A write applies at once, at the current tick, without stepping (it
 /// shows while paused; no system runs). `out_view` gets the JSON result,
-/// valid until the next query or mutating call on the world. The world
+/// valid until the next authoring call or mutating call on the world. The world
 /// refusing a write is FYNKEL_STATUS_COMMANDS_REJECTED with { "ok": false,
 /// "rejected": [{ code, message }] }; a malformed call, an unknown kind,
 /// entity or component type is FYNKEL_STATUS_INVALID_ARGUMENT with
@@ -922,3 +964,5 @@ final class FynkelBufferView extends ffi.Struct {
 final class FynkelAuthoringSession extends ffi.Opaque {}
 
 const int FYNKEL_AUTHORING_ABI_VERSION = 4;
+
+const int FYNKEL_PREVIEW_OPEN_NO_COOK = 1;
