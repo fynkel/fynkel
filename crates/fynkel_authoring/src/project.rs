@@ -58,7 +58,7 @@ pub struct CookJob {
 }
 
 impl CookJob {
-    pub fn progress(&self) -> &fynkel_import::CookProgress {
+    pub fn progress(&self) -> &std::sync::Arc<fynkel_import::CookProgress> {
         &self.progress
     }
 
@@ -96,6 +96,18 @@ impl CookJob {
                 }
             }
             None => unreachable!("a job is waited for once"),
+        }
+    }
+}
+
+/// A job dropped before [`CookJob::wait`] is cancelled and waited for: no
+/// cook thread outlives its session (a project closed, perhaps deleted,
+/// under it). The imports already running finish first.
+impl Drop for CookJob {
+    fn drop(&mut self) {
+        if let Some(thread) = self.thread.take() {
+            self.progress.cancel();
+            let _ = thread.join();
         }
     }
 }

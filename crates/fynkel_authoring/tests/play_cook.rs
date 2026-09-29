@@ -96,3 +96,27 @@ fn play_cooks_unsaved_documents_and_leaves_their_files_alone() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A job dropped while it runs is cancelled and waited for (ADR-0040): no
+/// cook thread outlives its session, so none writes into a project that
+/// was closed (and perhaps deleted) under it.
+#[test]
+fn a_dropped_cook_job_stops_and_waits_for_its_thread() {
+    let dir = std::env::temp_dir().join(format!("fynkel-drop-cook-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_dir(&fixture(), &dir);
+    let dir = dir.canonicalize().unwrap();
+
+    let mut s = AuthoringSession::new();
+    s.open_project(&dir).map_err(|d| format!("{d:?}")).unwrap();
+    let job = s.project().unwrap().start_cook(Default::default());
+    let progress = job.progress().clone();
+    drop(job);
+    assert!(progress.is_cancelled(), "dropping the job cancels it");
+    assert_eq!(
+        std::sync::Arc::strong_count(&progress),
+        1,
+        "the cook's thread has ended and let go of its progress"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
