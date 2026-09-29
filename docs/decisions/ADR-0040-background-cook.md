@@ -172,4 +172,4 @@ The Scene view draws the old cache until the new one is applied.
 
 ## Progress
 
-None yet.
+- Step 1 (`CookProgress`, cancel): done. `CookOptions::progress`, `CookReport::cancelled` (`"cancelled"` in the JSON); the cook checks the stop before each asset, in the scan of inputs too. Test: `tests/cook.rs` `a_cook_reports_progress_and_a_cancelled_cook_keeps_the_index`.
