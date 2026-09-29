@@ -58,7 +58,7 @@ pub use fynkel_document::project::{
     LayersAndTags, ModuleSettings, PhysicsSettings, Quality, QualityProfile,
 };
 pub use fynkel_document::AuthoredBehaviour;
-use fynkel_document::{describe, Document, DocumentKind, Scene, SchemaSet};
+use fynkel_document::{describe_with, Document, DocumentKind, Scene};
 use fynkel_wire::material::decode_material;
 
 /// The sub-asset a cooked source's node hierarchy is stored under (the
@@ -361,6 +361,16 @@ struct ObjectMeta {
     /// (kind, sub, index)
     chunks: Vec<([u8; 4], String, usize)>,
     scene_info: Option<serde_json::Value>,
+}
+
+/// The behaviour types the cook declared for a scene or prefab
+/// (`behaviourTypes`): what `describe_with` counts as known.
+fn behaviour_types(meta: &ObjectMeta) -> HashSet<String> {
+    meta.scene_info
+        .iter()
+        .flat_map(|info| info["behaviourTypes"].as_array().into_iter().flatten())
+        .filter_map(|b| b["type"].as_str().map(str::to_string))
+        .collect()
 }
 
 struct Store {
@@ -1720,17 +1730,11 @@ impl Assets {
                 diags.insert(0, self.scene_invalid(&entry));
                 diags
             })?;
-        let mut schemas = SchemaSet::embedded();
-        if let Some(info) = &meta.scene_info {
-            for b in info["behaviourTypes"].as_array().into_iter().flatten() {
-                if let Some(t) = b["type"].as_str() {
-                    schemas.declare_behaviour(t, b["version"].as_u64().unwrap_or(1) as u32);
-                }
-            }
-        }
+        let behaviours = behaviour_types(&meta);
+        // The cook checked the document (ADR-0041); the load only decodes.
         let scene = Scene::from_document(doc);
-        let mut diagnostics = scene.validate(&schemas);
-        let described = describe(&scene, &schemas);
+        let mut diagnostics = scene.read_diagnostics().to_vec();
+        let described = describe_with(&scene, |t| behaviours.contains(t));
         diagnostics.extend(described.diagnostics);
         if fynkel_contracts::has_errors(&diagnostics) {
             diagnostics.insert(0, self.scene_invalid(&entry));
@@ -1882,20 +1886,13 @@ impl Assets {
                 diags.insert(0, self.scene_invalid(&entry));
                 diags
             })?;
-        let mut schemas = SchemaSet::embedded();
-        if let Some(info) = &meta.scene_info {
-            for b in info["behaviourTypes"].as_array().into_iter().flatten() {
-                if let Some(t) = b["type"].as_str() {
-                    schemas.declare_behaviour(t, b["version"].as_u64().unwrap_or(1) as u32);
-                }
-            }
-        }
+        let behaviours = behaviour_types(&meta);
         let prefab = fynkel_document::prefab::Prefab::from_document(doc);
         let mut diagnostics = prefab.read_diagnostics().to_vec();
         if prefab.has_instances() {
             diagnostics.push(self.scene_invalid(&entry));
         }
-        let described = describe(&prefab.scene(), &schemas);
+        let described = describe_with(&prefab.scene(), |t| behaviours.contains(t));
         diagnostics.extend(described.diagnostics);
         if fynkel_contracts::has_errors(&diagnostics) {
             diagnostics.insert(0, self.scene_invalid(&entry));

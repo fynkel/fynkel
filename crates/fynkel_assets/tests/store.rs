@@ -173,6 +173,52 @@ fn scenes_describe_from_the_expanded_chunk() {
     assert_eq!(d[0].code, Code::RUNTIME_ASSET_MISSING);
 }
 
+/// ADR-0041: a cooked load trusts the cook. The cook checked the
+/// document against the schemas; the load only decodes it, so a field the
+/// schema would refuse but the decoder skips does not fail the load.
+#[test]
+fn a_cooked_scene_loads_without_the_schema_check() {
+    let cooked = Cooked::new("trusted");
+    let object = std::fs::read_dir(cooked.0.join("objects"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|e| e == "fyna"))
+        .find(|p| {
+            let bytes = std::fs::read(p).unwrap();
+            let c = fynkel_cooked::Container::parse(&bytes).unwrap();
+            let meta = String::from_utf8_lossy(c.meta(1 << 20).unwrap()).into_owned();
+            meta.contains(MAIN)
+        })
+        .expect("the Main scene's object");
+    let bytes = std::fs::read(&object).unwrap();
+    let container = fynkel_cooked::Container::parse(&bytes).unwrap();
+    let mut writer = fynkel_cooked::Writer::new(container.meta(1 << 20).unwrap());
+    for (i, chunk) in container.chunks().iter().enumerate().skip(1) {
+        let payload = container.read(i, 1 << 24).unwrap();
+        if &chunk.kind == b"JSON" {
+            let mut doc: serde_json::Value = serde_json::from_slice(payload).unwrap();
+            let listener = doc["entities"]
+                .as_object_mut()
+                .unwrap()
+                .values_mut()
+                .flat_map(|e| e["components"].as_object_mut().unwrap().values_mut())
+                .find(|c| c["type"] == "fynkel.AudioListener")
+                .expect("the Camera's listener");
+            // `additionalProperties: false` in its schema.
+            listener["data"]["future"] = serde_json::json!(1);
+            writer.push(chunk.kind, &serde_json::to_vec(&doc).unwrap());
+        } else {
+            writer.push(chunk.kind, payload);
+        }
+    }
+    std::fs::write(&object, writer.finish()).unwrap();
+
+    let assets = Assets::open(&cooked.0).unwrap();
+    let scene = assets.scene(id(MAIN)).unwrap_or_else(|d| panic!("{d:#?}"));
+    assert_eq!(scene.description.entities.len(), 6);
+    assert_eq!(scene.diagnostics, vec![]);
+}
+
 /// A prefab describes from its own cooked chunk (M3-08b): flat entities,
 /// the declared roots, its closure; a scene is not a prefab.
 #[test]
