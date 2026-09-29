@@ -629,6 +629,81 @@ impl Host {
     }
 }
 
+// ADR-0040 §3: the cook on its own thread, in four calls. `cookStart`
+// returns at once with a ticket, the session answers other calls while
+// the cook runs, `cookProgress` counts it, `cookFinish` applies it as
+// `recook` does, and the ticket is then spent.
+#[test]
+fn a_cook_runs_on_its_thread_while_the_session_answers() {
+    let copy = Copy::new("cook-job");
+    let host = Host::new();
+    assert_eq!(host.open_project(&copy.dir), Status::Ok);
+    let (status, scene) = host.open_document(MAIN_SCENE);
+    assert_eq!(status, Status::Ok);
+    assert_eq!(
+        unsafe { fynkel_authoring_preview_open(host.0, scene) },
+        Status::Ok
+    );
+
+    assert_eq!(
+        host.preview_call(scene, "cookStart", &json!({})),
+        Status::Ok
+    );
+    let started = host.result();
+    assert_eq!(started["started"], true, "{started}");
+    let ticket = started["ticket"].clone();
+    assert_eq!(host.preview_call(scene, "stats", &json!({})), Status::Ok);
+    assert_eq!(host.result()["stats"]["entities"], 6);
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    let progress = loop {
+        assert_eq!(
+            host.preview_call(scene, "cookProgress", &json!({ "ticket": ticket })),
+            Status::Ok
+        );
+        let p = host.result();
+        if p["state"] == "done" {
+            break p;
+        }
+        assert_eq!(p["state"], "running", "{p}");
+        assert!(std::time::Instant::now() < deadline, "the cook never ended");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    assert!(progress["total"].as_u64().unwrap() > 0, "{progress}");
+    assert_eq!(progress["done"], progress["total"], "{progress}");
+
+    assert_eq!(
+        host.preview_call(scene, "cookFinish", &json!({ "ticket": ticket })),
+        Status::Ok
+    );
+    let finished = host.result();
+    assert_eq!(finished["cook"]["ok"], true, "{finished}");
+    assert_eq!(finished["cook"]["cancelled"], false);
+    assert_eq!(finished["previews"][0]["stats"]["entities"], 6);
+
+    // The ticket is spent.
+    assert_eq!(
+        host.preview_call(scene, "cookProgress", &json!({ "ticket": ticket })),
+        Status::InvalidArgument
+    );
+
+    // A cancel, whenever it lands, leaves the previews whole.
+    assert_eq!(
+        host.preview_call(scene, "cookStart", &json!({})),
+        Status::Ok
+    );
+    let ticket = host.result()["ticket"].clone();
+    assert_eq!(
+        host.preview_call(scene, "cookCancel", &json!({ "ticket": ticket })),
+        Status::Ok
+    );
+    assert_eq!(
+        host.preview_call(scene, "cookFinish", &json!({ "ticket": ticket })),
+        Status::Ok
+    );
+    assert_eq!(host.result()["previews"][0]["stats"]["entities"], 6);
+}
+
 /// The edit-preview world across the edge (ABI v3): opened over a cook,
 /// rendered from through its world pointer, picked, hidden, kept in step
 /// with the document by apply and undo (the incremental dump equals a

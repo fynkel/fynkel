@@ -416,6 +416,17 @@ const FynkelWorld* fynkel_authoring_preview_world(const FynkelAuthoringSession* 
  *                                       handle, stats, diagnostics }]; `live: true`
  *                                       cooks the documents with unsaved edits as they
  *                                       are, their files untouched (Play)
+ *   cookStart [live]                    recook on the session's cook thread (ADR-0040):
+ *                                       returns at once → "ticket", "started" (false:
+ *                                       a cook already runs and this is its ticket)
+ *   cookProgress ticket                 → "state" ("running" / "done"), "done",
+ *                                       "total", "current" (the asset path last
+ *                                       started), "cancelled"; cheap, once a frame
+ *   cookCancel ticket                   stops the cook at its next asset; it writes
+ *                                       no index, so the cache stays as it was
+ *   cookFinish ticket                   applies the ended cook as recook does (waits
+ *                                       while it runs) → the recook result; the ticket
+ *                                       is spent
  *   dump                                the world as `fynkel state dump` prints it, in
  *                                       document order (the gate's incremental-vs-fresh
  *                                       comparison) → "dump": { document, entityCount,

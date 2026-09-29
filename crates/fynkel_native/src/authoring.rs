@@ -79,6 +79,10 @@ pub struct FynkelAuthoringSession {
     /// first preview (a cook in process), replaced by `recook`, dropped
     /// with the project.
     assets: Option<Assets>,
+    /// The cook running on its thread (ADR-0040 §3) and its ticket; one
+    /// at a time.
+    cook_job: Option<(u32, fynkel_authoring::CookJob)>,
+    next_cook: u32,
     result: Vec<u8>,
     poisoned: bool,
 }
@@ -141,26 +145,82 @@ impl FynkelAuthoringSession {
     /// [live]: the documents with unsaved edits cook as the editor holds
     /// them, their files untouched (Play, ADR-0021 P5).
     fn cook(&mut self, live: bool) -> Result<(Assets, Value), Vec<Diagnostic>> {
+        let report = self.start_cook(live)?.wait();
+        self.apply_cook(report.json())
+    }
+
+    /// The cook on its thread (ADR-0040 §3), with the unsaved documents as
+    /// the editor holds them when [live] (a copy of each written to
+    /// `.fynkel/recovery/` first).
+    fn start_cook(&mut self, live: bool) -> Result<fynkel_authoring::CookJob, Vec<Diagnostic>> {
         let project = self.inner.project().ok_or_else(|| {
             one(Diagnostic::error(
                 Code::SESSION_NO_PROJECT,
                 "preview: no project is open",
             ))
         })?;
-        let report = if live {
+        Ok(if live {
             let texts = self.inner.unsaved_texts();
             project.write_recovery(&texts);
-            project.cook_live(texts)
+            project.start_cook(texts)
         } else {
-            project.cook()
-        };
+            project.start_cook(Default::default())
+        })
+    }
+
+    /// A finished cook's cache reopened under every preview and stage,
+    /// with its [report] (JSON) handed back. A cancelled cook wrote no
+    /// index, so the store reopens on the same cache as before.
+    fn apply_cook(&mut self, report: Value) -> Result<(Assets, Value), Vec<Diagnostic>> {
+        let project = self.inner.project().ok_or_else(|| {
+            one(Diagnostic::error(
+                Code::SESSION_NO_PROJECT,
+                "preview: no project is open",
+            ))
+        })?;
         let assets = Assets::open(&project.cache_dir()).map_err(one)?;
         self.assets = Some(assets.clone());
         for slot in self.previews.values_mut() {
             slot.world.set_assets(assets.clone());
         }
         self.reload_stages(&assets);
-        Ok((assets, report.json()))
+        Ok((assets, report))
+    }
+
+    /// Every preview reloaded over `assets`, per preview its handle, stats
+    /// and diagnostics.
+    fn reload_previews(&mut self, assets: &Assets) -> Vec<Value> {
+        let mut previews = Vec::with_capacity(self.previews.len());
+        for (h, slot) in self.previews.iter_mut() {
+            let mut entry = json!({ "handle": *h });
+            match self.inner.describe_with_anchors(*h) {
+                Ok((described, anchors)) => {
+                    slot.preview.reload(
+                        slot.world.core_mut(),
+                        Some(assets),
+                        &described.description,
+                    );
+                    slot.preview.set_anchors(anchors);
+                    entry["stats"] = slot.preview.stats(slot.world.core());
+                    entry["diagnostics"] = diags(&slot.preview.diagnostics);
+                }
+                Err(d) => entry["diagnostics"] = json!([diagnostic_json(&d)]),
+            }
+            previews.push(entry);
+        }
+        previews
+    }
+
+    /// The cook job `args.ticket` names.
+    fn cook_ticket(&self, args: &Value) -> Result<&fynkel_authoring::CookJob, Vec<Diagnostic>> {
+        let ticket = args.get("ticket").and_then(Value::as_u64);
+        match &self.cook_job {
+            Some((t, job)) if Some(*t as u64) == ticket => Ok(job),
+            _ => Err(invalid(format!(
+                "preview: no cook with ticket {}",
+                ticket.map_or("(none)".into(), |t| t.to_string())
+            ))),
+        }
     }
 
     fn slot(&mut self, handle: Handle) -> Result<&mut PreviewSlot, Vec<Diagnostic>> {
@@ -181,6 +241,10 @@ impl FynkelAuthoringSession {
         self.stages.clear();
         self.sounds.clear();
         self.assets = None;
+        // A cook still running stops at its next asset; nobody applies it.
+        if let Some((_, job)) = self.cook_job.take() {
+            job.cancel();
+        }
     }
 
     fn set_result(&mut self, v: &Value) {
@@ -350,6 +414,8 @@ pub extern "C" fn fynkel_authoring_session_create() -> *mut FynkelAuthoringSessi
         sounds: BTreeMap::new(),
         next_stage: 0,
         assets: None,
+        cook_job: None,
+        next_cook: 0,
         result: Vec::new(),
         poisoned: false,
     }) {
@@ -802,7 +868,7 @@ pub unsafe extern "C" fn fynkel_authoring_preview_call(
     })
 }
 
-const PREVIEW_KINDS: [&str; 22] = [
+const PREVIEW_KINDS: [&str; 26] = [
     "camera",
     "hidden",
     "pick",
@@ -823,6 +889,10 @@ const PREVIEW_KINDS: [&str; 22] = [
     "resync",
     "reload",
     "recook",
+    "cookStart",
+    "cookProgress",
+    "cookCancel",
+    "cookFinish",
     "dump",
     "stats",
 ];
@@ -1133,24 +1203,49 @@ fn preview_call(
             s.slot(handle)?;
             let live = args.get("live").and_then(Value::as_bool).unwrap_or(false);
             let (assets, cook) = s.cook(live)?;
-            let mut previews = Vec::with_capacity(s.previews.len());
-            for (h, slot) in s.previews.iter_mut() {
-                let mut entry = json!({ "handle": *h });
-                match s.inner.describe_with_anchors(*h) {
-                    Ok((described, anchors)) => {
-                        slot.preview.reload(
-                            slot.world.core_mut(),
-                            Some(&assets),
-                            &described.description,
-                        );
-                        slot.preview.set_anchors(anchors);
-                        entry["stats"] = slot.preview.stats(slot.world.core());
-                        entry["diagnostics"] = diags(&slot.preview.diagnostics);
-                    }
-                    Err(d) => entry["diagnostics"] = json!([diagnostic_json(&d)]),
+            let previews = s.reload_previews(&assets);
+            Ok(json!({ "ok": true, "handle": handle, "cook": cook, "previews": previews }))
+        }
+        // ADR-0040 §3: `recook` in four calls, the cook on its thread in
+        // between; the host polls `cookProgress` once a frame.
+        "cookStart" => {
+            s.slot(handle)?;
+            if let Some((ticket, job)) = &s.cook_job {
+                if !job.is_finished() {
+                    return Ok(json!({ "ok": true, "ticket": *ticket, "started": false }));
                 }
-                previews.push(entry);
             }
+            let live = args.get("live").and_then(Value::as_bool).unwrap_or(false);
+            let job = s.start_cook(live)?;
+            s.next_cook += 1;
+            let ticket = s.next_cook;
+            // A finished cook nobody applied is dropped: this one replaces it.
+            s.cook_job = Some((ticket, job));
+            Ok(json!({ "ok": true, "ticket": ticket, "started": true }))
+        }
+        "cookProgress" => {
+            let job = s.cook_ticket(args)?;
+            let p = job.progress();
+            Ok(json!({
+                "ok": true,
+                "state": if job.is_finished() { "done" } else { "running" },
+                "done": p.done(),
+                "total": p.total(),
+                "current": p.current(),
+                "cancelled": p.is_cancelled(),
+            }))
+        }
+        "cookCancel" => {
+            s.cook_ticket(args)?.cancel();
+            Ok(json!({ "ok": true }))
+        }
+        "cookFinish" => {
+            s.slot(handle)?;
+            s.cook_ticket(args)?;
+            let (_, job) = s.cook_job.take().expect("checked by cook_ticket");
+            let report = job.wait();
+            let (assets, cook) = s.apply_cook(report.json())?;
+            let previews = s.reload_previews(&assets);
             Ok(json!({ "ok": true, "handle": handle, "cook": cook, "previews": previews }))
         }
         "dump" => {
