@@ -23,7 +23,6 @@ import 'package:fynkel_editor/src/inspector/field_widgets.dart';
 import 'package:fynkel_editor/src/inspector/inspector_math.dart';
 import 'package:fynkel_editor/src/inspector/inspector_model.dart';
 import 'package:fynkel_editor/src/inspector/inspector_panel.dart';
-import 'package:fynkel_editor/src/inspector/native_hints.dart';
 import 'package:fynkel_editor/src/project/editor_project.dart';
 
 import 'support/fakes.dart';
@@ -334,7 +333,7 @@ void main() {
   });
 
   group('specs', () {
-    test('every native component schema parses with a real kind for every field, and the hint table names only real fields', () {
+    test('every native component schema parses with a real kind for every field', () {
       final schemas = nativeSchemas();
       expect(schemas.length, greaterThanOrEqualTo(21));
       final specs = {for (final s in schemas) s.type: parseComponentSpec(s.type, s.schema, authored: s.authored)};
@@ -344,19 +343,7 @@ void main() {
           expect(f.kind, isNot(FieldKind.any), reason: '${spec.type}.${f.name} fell through to JSON');
         }
       }
-      // The table only names types and fields the schemas have.
-      for (final entry in nativeFieldHints.entries) {
-        final spec = specs[entry.key];
-        expect(spec, isNotNull, reason: 'native_hints names ${entry.key}, which has no schema');
-        for (final field in entry.value.keys) {
-          expect(
-            spec!.field(field),
-            isNotNull,
-            reason: 'native_hints names ${entry.key}.$field, which the schema lacks',
-          );
-        }
-      }
-      // Kinds the structure and the table decide.
+      // Kinds the structure and the fields' hints decide.
       final transform = specs['fynkel.Transform']!;
       expect(transform.field('position')!.kind, FieldKind.vec3);
       expect(transform.field('rotation')!.kind, FieldKind.quaternion);

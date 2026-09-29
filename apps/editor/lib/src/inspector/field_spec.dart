@@ -4,13 +4,12 @@
 // `schemas/behaviours/<id>.schema.json` (plus the committed
 // `behaviours.g.json` entry) for a behaviour — and the ADR-0018 display
 // hints under `x-fynkel`. One code path: a hint means the same thing
-// wherever it came from. Until the Rust schema attributes carry the hints
-// for native components, `native_hints.dart` supplies them from the editor's
-// own table, underneath whatever the schema already says (the schema wins).
+// wherever it came from. A native component's hints are its Rust fields'
+// `#[fynkel(...)]` attributes, which `fynkel codegen` writes into the
+// schema (foundation 6.2).
 //
 // Nothing here touches a document or a widget; it is pure data the model
 // and the tests share.
-import 'native_hints.dart';
 
 /// The widget family a field gets.
 enum FieldKind {
@@ -220,7 +219,7 @@ final class FieldSpec {
 
 /// A field's `gizmo` hint: what the Scene view draws for it and drags
 /// (`@Gizmo.radius()` and the rest, ADR-0019 §3; native components'
-/// through `native_hints.dart`).
+/// through their Rust fields' `#[fynkel(gizmo(...))]`).
 final class GizmoHint {
   const GizmoHint({required this.shape, this.color, this.always = false, this.world = false, this.angle});
 
@@ -361,13 +360,11 @@ const assetRefDef = r'envelope.schema.json#/$defs/assetRef';
 
 /// Builds the spec of [type] from its JSON [schema] (null for a behaviour
 /// without a schema file). [metadata] is the type's `behaviours.g.json`
-/// entry when there is one; [nativeHints] the editor's table for native
-/// components (the schema's own `x-fynkel` wins over it).
+/// entry when there is one.
 ComponentSpec parseComponentSpec(
   String type,
   Map<String, Object?>? schema, {
   Map<String, Object?>? metadata,
-  Map<String, Map<String, Map<String, Object?>>> nativeHints = nativeFieldHints,
   bool allowed = true,
   bool authored = true,
 }) {
@@ -403,14 +400,13 @@ ComponentSpec parseComponentSpec(
     for (final f in metadata?['fields'] as List? ?? const [])
       if (f is Map) (f['name'] as String): _map(f),
   };
-  final table = nativeHints[type] ?? const {};
   final fields = <FieldSpec>[];
   var i = 0;
   for (final entry in properties.entries) {
     final name = entry.key;
     final p = _map(entry.value);
-    // Hint precedence: the schema's x-fynkel, the metadata entry, the native table.
-    final hints = <String, Object?>{...?table[name], ...?metaFields[name], ..._map(p['x-fynkel'])};
+    // Hint precedence: the schema's x-fynkel, then the metadata entry.
+    final hints = <String, Object?>{...?metaFields[name], ..._map(p['x-fynkel'])};
     fields.add(_parseField(name, p, hints, required: required.contains(name), index: i++, defs: schema));
   }
   _sortFields(fields);

@@ -2,7 +2,8 @@
 // never runs game code, so a behaviour describes its gizmos with
 // `@Gizmo.radius()` and the rest on the fields they draw, and the
 // generator writes them into the field's `x-fynkel` (`FieldSpec.gizmo`);
-// built-in components get theirs from `native_hints.dart`. The Scene view
+// built-in components get theirs from their Rust fields' `#[fynkel(gizmo(...))]`
+// through the generated schemas. The Scene view
 // draws them for the selection (or for every carrier, `when: always`),
 // and behind the Inspector's Edit toggle each is a handle whose drag sets
 // its field — one transaction, as every component handle.
