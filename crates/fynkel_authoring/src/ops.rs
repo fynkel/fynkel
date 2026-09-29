@@ -46,6 +46,7 @@ pub const OPERATIONS: &[&str] = &[
     "reloadBehaviours",
     "setStartupScene",
     "setModules",
+    "setPersistentObjects",
 ];
 
 /// The fixed id of the editor's built-in shapes (ADR-0023), and the
@@ -325,6 +326,7 @@ impl AuthoringSession {
             "reimport" => self.reimport(args).map_err(one),
             "setStartupScene" => self.set_startup_scene(args).map_err(one),
             "setModules" => self.set_modules(args).map_err(one),
+            "setPersistentObjects" => self.set_persistent_objects(args).map_err(one),
             "undoAsset" => self.undo_asset().map_err(one),
             "redoAsset" => self.redo_asset().map_err(one),
             crate::layers::OP => self.set_layers_and_tags(args).map_err(one),
@@ -1702,6 +1704,111 @@ impl AuthoringSession {
             label: label.clone(),
         });
         Ok(self.finish(OP, &label, None, json!({ "modules": new.to_json() })))
+    }
+
+    /// `setPersistentObjects` (ADR-0039): `{ "objects": [{ "name", "prefab" }] }`,
+    /// the whole list, in order; empty removes the key.
+    fn set_persistent_objects(&mut self, args: &Value) -> Result<Value, Diagnostic> {
+        const OP: &str = "setPersistentObjects";
+        let project = self.project().expect("operate checked the project");
+        let Some(items) = args.get("objects").and_then(Value::as_array) else {
+            return Err(invalid(format!("{OP}: `objects` must be a list")));
+        };
+        let mut new = Vec::with_capacity(items.len());
+        for (i, item) in items.iter().enumerate() {
+            let name = item.get("name").and_then(Value::as_str).unwrap_or("");
+            let identifier = name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+            if !identifier {
+                return Err(invalid(format!(
+                    "{OP}: object {i}: the name {name:?} must be a letter then letters, digits or _"
+                )));
+            }
+            if new
+                .iter()
+                .any(|p: &fynkel_document::PersistentObject| p.name == name)
+            {
+                return Err(invalid(format!("{OP}: the name {name:?} is used twice")));
+            }
+            let prefab = item
+                .get("prefab")
+                .and_then(|p| {
+                    let asset = p
+                        .get("asset")?
+                        .as_str()?
+                        .parse::<fynkel_contracts::Uuid>()
+                        .ok()?;
+                    let sub = match p.get("sub") {
+                        None => String::new(),
+                        Some(s) => s.as_str()?.to_string(),
+                    };
+                    Some(fynkel_contracts::AssetRef { asset, sub })
+                })
+                .filter(|r| !r.asset.is_nil())
+                .ok_or_else(|| {
+                    invalid(format!(
+                        "{OP}: object {i}: `prefab` must be {{ \"asset\": \"<uuid>\" }}"
+                    ))
+                })?;
+            let is_prefab = project.assets.resolve(&prefab).is_ok_and(|r| {
+                r.entry.kind == AssetKind::Document(DocumentKind::Prefab)
+                    || r.sub.as_ref().is_some_and(|(sub, _)| sub == "prefab")
+            });
+            if !is_prefab {
+                return Err(invalid(format!(
+                    "{OP}: {name:?}: {prefab} is not a prefab in this project"
+                )));
+            }
+            new.push(fynkel_document::PersistentObject {
+                name: name.to_string(),
+                prefab,
+            });
+        }
+        if new == project.project.persistent_objects {
+            return Err(invalid(format!(
+                "{OP}: the persistent objects are what the project already has"
+            )));
+        }
+        let label = if new.is_empty() {
+            "Set Persistent Objects (none)".to_string()
+        } else {
+            let names: Vec<&str> = new.iter().map(|p| p.name.as_str()).collect();
+            format!("Set Persistent Objects ({})", names.join(", "))
+        };
+        let project_file = project.dir.join(fynkel_document::project::PROJECT_FILE);
+        let before = std::fs::read_to_string(&project_file)
+            .map_err(|e| io(&project_file, format!("{OP}: cannot read: {e}")))?;
+        let mut doc = project.project.document.clone();
+        if new.is_empty() {
+            if let Some(members) = doc.root.as_object_mut() {
+                members.retain(|m| m.key != "persistentObjects");
+            }
+        } else {
+            let list: Vec<Value> = new
+                .iter()
+                .map(|p| {
+                    let mut prefab = json!({ "asset": p.prefab.asset.to_string() });
+                    if !p.prefab.sub.is_empty() {
+                        prefab["sub"] = p.prefab.sub.clone().into();
+                    }
+                    json!({ "name": p.name, "prefab": prefab })
+                })
+                .collect();
+            doc.root
+                .set("persistentObjects", Node::from_serde(&Value::Array(list)));
+        }
+        let files = vec![FileRewrite {
+            path: project_file,
+            before,
+            after: doc.write()?,
+        }];
+        // Re-reads the project (the project file is among the files).
+        self.reload_after = self.write_rewrites(&files, false, OP)?;
+        self.assets_history.push(Done {
+            op: AssetOp::Rewrote { files },
+            label: label.clone(),
+        });
+        Ok(self.finish(OP, &label, None, json!({ "count": new.len() })))
     }
 
     fn reimport(&mut self, args: &Value) -> Result<Value, Diagnostic> {

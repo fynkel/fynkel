@@ -1059,6 +1059,62 @@ fn the_modules_are_set_from_the_editor_and_undone() {
     assert!(s.project().unwrap().project.modules.modules.animation);
 }
 
+/// `setPersistentObjects` (Project Settings › Persistent Objects,
+/// ADR-0039): the whole list at once, written as the project file's
+/// `persistentObjects` (gone when empty), one undo step; a name that is
+/// not an identifier or used twice, an asset that is not a prefab and no
+/// change at all are refused.
+#[test]
+fn persistent_objects_are_set_from_the_editor_and_undone() {
+    let copy = Copy::new("persistent");
+    let mut s = open(&copy);
+    let before = copy.read("fynkel.project.json");
+    let entry = |name: &str, asset: &str| json!({ "name": name, "prefab": { "asset": asset } });
+
+    for bad in [
+        json!({ "objects": [entry("game manager", COIN)] }),
+        json!({ "objects": [entry("Coin", COIN), entry("Coin", COIN)] }),
+        json!({ "objects": [entry("Main", MAIN)] }),
+        json!({ "objects": [] }),
+        json!({}),
+    ] {
+        refused(s.operate("setPersistentObjects", &bad), "FYN-T0003");
+    }
+    assert_eq!(copy.read("fynkel.project.json"), before);
+
+    let v = ok(s.operate(
+        "setPersistentObjects",
+        &json!({ "objects": [entry("GameManager", COIN), entry("Music", COIN)] }),
+    ));
+    assert_eq!(v["label"], "Set Persistent Objects (GameManager, Music)");
+    let after: serde_json::Value = serde_json::from_str(&copy.read("fynkel.project.json")).unwrap();
+    assert_eq!(
+        after["persistentObjects"],
+        json!([entry("GameManager", COIN), entry("Music", COIN)])
+    );
+    let names: Vec<_> = s
+        .project()
+        .unwrap()
+        .project
+        .persistent_objects
+        .iter()
+        .map(|p| p.name.clone())
+        .collect();
+    assert_eq!(names, ["GameManager", "Music"]);
+    assert_clean(&s);
+
+    // Emptied: the key goes.
+    let v = ok(s.operate("setPersistentObjects", &json!({ "objects": [] })));
+    assert_eq!(v["label"], "Set Persistent Objects (none)");
+    let after: serde_json::Value = serde_json::from_str(&copy.read("fynkel.project.json")).unwrap();
+    assert!(after.get("persistentObjects").is_none(), "{after}");
+
+    ok(s.operate("undoAsset", &json!({})));
+    ok(s.operate("undoAsset", &json!({})));
+    assert_eq!(copy.read("fynkel.project.json"), before);
+    assert!(s.project().unwrap().project.persistent_objects.is_empty());
+}
+
 #[test]
 fn a_duplicate_is_a_fresh_asset_beside_its_original_and_undo_removes_it() {
     let copy = Copy::new("duplicate");
