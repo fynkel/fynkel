@@ -626,6 +626,26 @@ final class FakeProject extends EditorProject {
         _redo.clear();
         _undo.add((label, () => file.writeAsStringSync(before)));
         return _done(kind, label, null, {'modules': now});
+      case 'setPersistentObjects':
+        // The project file's `persistentObjects`, as the session writes it
+        // (gone when empty); its undo writes the file back.
+        final file = File('$dir/fynkel.project.json');
+        final before = file.existsSync() ? file.readAsStringSync() : '{}';
+        final json = Map<String, Object?>.from(jsonDecode(before) as Map);
+        final objects = args['objects'] as List;
+        if (jsonEncode(objects) == jsonEncode(json['persistentObjects'] ?? const [])) {
+          _refuse('FYN-T0003', 'setPersistentObjects: the persistent objects are what the project already has');
+        }
+        if (objects.isEmpty) {
+          json.remove('persistentObjects');
+        } else {
+          json['persistentObjects'] = objects;
+        }
+        file.writeAsStringSync(jsonEncode(json));
+        const label = 'Set Persistent Objects';
+        _redo.clear();
+        _undo.add((label, () => file.writeAsStringSync(before)));
+        return _done(kind, label, null, {'count': objects.length});
       case 'registerBehaviour':
         // The registry lives in the project file the fake does not keep: the
         // answer says whether the metadata (what `codegen` wrote) has the id.

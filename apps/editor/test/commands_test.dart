@@ -50,7 +50,7 @@ void main() {
     final shell = await openShell(tester);
     final registry = shell.registry;
     final commands = registry.all.where((c) => !c.generated).toList();
-    expect(commands.length, 136); // ADR-0032: New Animator Controller; ADR-0031: New Lit Shader, New Unlit Shader; ADR-0029: Project ▸ Tags and Layers…, Modules…; Unity parity: New Physics Material; Unpack Completely; Back from Prefab Mode; the Rect tool; Lock View to Selected; Pivot / Center; New Volume Profile; ADR-0023: ten GameObject presets; Unity parity: Duplicate asset; Copy, Cut, Paste, Paste as Child, Create Empty Child; 9c: the Asset panel went into the Inspector; 9e: four Window ▸ New <Panel>; 9g: the Transform tool; 9h: Show Gizmos in Play; ADR-0021: Pause, Step, the Game view, Restart to Apply; P6: Build and Run; item 9: seven Go to <Panel>
+    expect(commands.length, 137); // ADR-0039: Project ▸ Persistent Objects…; ADR-0032: New Animator Controller; ADR-0031: New Lit Shader, New Unlit Shader; ADR-0029: Project ▸ Tags and Layers…, Modules…; Unity parity: New Physics Material; Unpack Completely; Back from Prefab Mode; the Rect tool; Lock View to Selected; Pivot / Center; New Volume Profile; ADR-0023: ten GameObject presets; Unity parity: Duplicate asset; Copy, Cut, Paste, Paste as Child, Create Empty Child; 9c: the Asset panel went into the Inspector; 9e: four Window ▸ New <Panel>; 9g: the Transform tool; 9h: Show Gizmos in Play; ADR-0021: Pause, Step, the Game view, Restart to Apply; P6: Build and Run; item 9: seven Go to <Panel>
     for (final c in commands) {
       // A ⌘ shortcut, or Unity's bare key alone (the tools' Q W E R Y, the projection's 5).
       // New Project gave ⇧⌘N to Create Empty, as in Unity (which has no New Project key).
@@ -67,6 +67,7 @@ void main() {
           c.id != 'prefab.unpackCompletely' && // Unity's has none either
           c.id != 'project.tagsAndLayers' && // Unity's Project Settings pages have none
           c.id != 'project.modules' &&
+          c.id != 'project.persistentObjects' &&
           !c.id.startsWith('gameobject.')) {
         expect(c.shortcut ?? c.key, isNotNull, reason: '${c.id} has no shortcut');
       }

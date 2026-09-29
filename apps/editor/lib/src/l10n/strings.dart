@@ -193,6 +193,10 @@ abstract final class EditorStrings {
       description: 'The engine modules the game uses: physics, audio, animation (Project Settings)',
     ),
     'project.new': (label: 'New Project…', description: null),
+    'project.persistentObjects': (
+      label: 'Persistent Objects…',
+      description: 'Prefabs the game makes once at start and keeps across scene loads (Project Settings)',
+    ),
     'project.open': (label: 'Open Project…', description: null),
     'project.revalidate': (label: 'Validate Project', description: null),
     'project.reveal': (label: 'Reveal in Finder', description: null),

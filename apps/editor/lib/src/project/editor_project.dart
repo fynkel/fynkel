@@ -393,6 +393,14 @@ abstract class EditorProject extends ChangeNotifier {
   OperationResult setModules({bool? physics, bool? audio, bool? animation, bool? strip}) =>
       operate('setModules', {'physics': ?physics, 'audio': ?audio, 'animation': ?animation, 'strip': ?strip});
 
+  /// The project's persistent objects (ADR-0039; Project › Persistent
+  /// Objects…): the whole list replaced, in order, one step on the asset
+  /// history; an empty list removes it.
+  OperationResult setPersistentObjects(List<PersistentObjectEntry> objects) =>
+      operate('setPersistentObjects', {
+        'objects': [for (final o in objects) o.toJson()],
+      });
+
   /// A model's embedded materials written as `.material.json` documents
   /// (`Materials/` next to it, or [folder]) and remapped to them — one
   /// step on the asset history (`docs/design/material-remapping.md`).
@@ -475,6 +483,23 @@ abstract class EditorProject extends ChangeNotifier {
       // A missing or malformed project file: the validation reports it.
     }
     return const ProjectModules();
+  }
+
+  /// The project file's `persistentObjects` (ADR-0039), or none.
+  List<PersistentObjectEntry> persistentObjects() {
+    try {
+      final decoded = jsonDecode(File(p.join(dir, 'fynkel.project.json')).readAsStringSync());
+      final list = decoded is Map ? decoded['persistentObjects'] : null;
+      if (list is List) {
+        return [
+          for (final o in list)
+            if (o is Map) PersistentObjectEntry.fromJson(o.cast<String, Object?>()),
+        ];
+      }
+    } catch (_) {
+      // A missing or malformed project file: the validation reports it.
+    }
+    return const [];
   }
 
   List<String>? _projectList(String key) {
@@ -876,6 +901,47 @@ final class SessionProject extends EditorProject {
 
 /// True when [dir] holds a project file (the launcher's Open check).
 bool isFynkelProject(String dir) => File(p.join(dir, 'fynkel.project.json')).existsSync();
+
+/// One `persistentObjects` entry (ADR-0039): a prefab the game makes once
+/// when the project loads, and the name code finds it by. [prefab] is an
+/// asset reference (`{asset, sub?}`), null while the row has none.
+final class PersistentObjectEntry {
+  const PersistentObjectEntry({required this.name, this.prefab});
+
+  factory PersistentObjectEntry.fromJson(Map<String, Object?> j) => PersistentObjectEntry(
+    name: j['name'] as String? ?? '',
+    prefab: (j['prefab'] as Map?)?.cast<String, Object?>(),
+  );
+
+  final String name;
+  final Map<String, Object?>? prefab;
+
+  /// A letter, then letters, digits or `_`: codegen makes it an accessor.
+  static final identifier = RegExp(r'^[A-Za-z][A-Za-z0-9_]*$');
+
+  /// [text] made into a name: what is not a letter, digit or `_` dropped,
+  /// a leading digit prefixed (`2 Music` → `Object2Music`).
+  static String nameFrom(String text) {
+    final kept = text.replaceAll(RegExp(r'[^A-Za-z0-9_]'), '');
+    if (kept.isEmpty) return 'Object';
+    return RegExp(r'^[A-Za-z]').hasMatch(kept) ? kept : 'Object$kept';
+  }
+
+  PersistentObjectEntry copyWith({String? name, Map<String, Object?>? prefab}) =>
+      PersistentObjectEntry(name: name ?? this.name, prefab: prefab ?? this.prefab);
+
+  Map<String, Object?> toJson() => {'name': name, 'prefab': prefab};
+
+  @override
+  bool operator ==(Object other) =>
+      other is PersistentObjectEntry &&
+      other.name == name &&
+      other.prefab?['asset'] == prefab?['asset'] &&
+      (other.prefab?['sub'] ?? '') == (prefab?['sub'] ?? '');
+
+  @override
+  int get hashCode => Object.hash(name, prefab?['asset'], prefab?['sub'] ?? '');
+}
 
 /// The project's `modules` block (ADR-0029 §3): which optional engine
 /// modules the game uses, and whether a source build leaves the ones that
