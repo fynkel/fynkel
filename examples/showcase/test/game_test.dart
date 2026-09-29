@@ -56,7 +56,7 @@ void main() {
     final thigh = character.findChild('hips/thigh_l')!;
     expect(character.findChild('Body')!.get<MeshRenderer>()!.material.asset, '0605f86c-548f-5a17-83a4-d07f21f52896',
         reason: 'the suit, set by the instance\'s override on node/Character/Body/renderer');
-    expect(character.findChild('Body')!.get<Skin>()!.skeleton, 'hips');
+    expect(character.findChild('Body')!.get<Skin>()!.skeleton, same(character.findChild('hips')));
     // Its Animator Controller (assets/models/runner.controller.json) needs
     // no code: Run loops four laps, then Jump plays once and Run comes
     // back, both on exit times.
