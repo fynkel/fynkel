@@ -68,6 +68,9 @@ position; unexpected properties get one diagnostic each, anchored at the key.
 A kind without a schema yet validates against the shared
 `schemas/envelope.schema.json` with a `FYN-D0101` warning. Semantic checks
 (references, uniqueness, cycles) are per kind and documented with each.
+All of this is `fynkel_document`'s `validate` feature, on by default: the
+CLI, the cook and the editor have it; a game's runtime does not
+(ADR-0041).
 
 `schemas/envelope.schema.json` also hosts the shared `$defs`: `uuid`,
 `typeId` (`fynkel.Transform`, `game.PlayerController`), `assetRef`
@@ -256,11 +259,16 @@ An invalid scene is a failed cook, never an object.
   not in the cache (`R0003`), cook failed (`R0004`), object unreadable
   (`R0005`), no such chunk or sub-asset (`R0006`), payload malformed
   (`R0007`) — never a fallback to a source file.
-- `Assets::scene(id)` reads the expanded chunk, declares the recorded
-  behaviour types, validates and describes it →
+- `Assets::scene(id)` reads the expanded chunk and describes it, with
+  the recorded behaviour types as the known ones →
   `CookedScene { id, name, key, path, description, behaviours,
   diagnostics, closure }`; a chunk this build cannot describe is
   `FYN-R0008` (recook); a prefab or other non-scene asset is `R0006`.
+  It does not check the document again (ADR-0041): the cook did, and the
+  fingerprint refuses a cache from another build. `Assets::prefab` is the
+  same. So `fynkel_assets` links `fynkel_document` without its
+  `validate` feature, and a game's runtime has no JSON Schema code
+  (`tools/check_runtime_deps.sh`, run by CI).
   `startup_scene()` is the index's, or `FYN-R0009` for a cache cooked
   without a project (`fynkel cook --assets`).
 

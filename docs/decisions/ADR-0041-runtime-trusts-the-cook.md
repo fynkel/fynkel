@@ -99,8 +99,8 @@ code.
 - A scene load in a shipped game drops from about 9 – 15 ms to about
   1 – 1.5 ms on this Mac. The same saving applies to each first load of
   a prefab. LoadSceneAsync (ADR-0038) does less work on its thread.
-- The shipped library loses the `jsonschema` tree. I will measure the
-  new size when step 2 is done; I do not want to guess the number.
+- The shipped library loses the `jsonschema` tree: 13.0 → 6.5 MB
+  (release, see Progress).
 - A cache that was changed by hand after the cook is no longer checked
   against the schemas. It is read as long as it decodes. This is how
   Unity treats its built player data. The fingerprint still refuses a
@@ -160,3 +160,22 @@ Each step starts with a test that fails first.
   `Assets::scene` on `playground.scene.json` (163 entities, release, a
   `git archive` copy of the reference game): 8.7 – 12.7 ms before,
   1.7 – 2.0 ms after.
+- **Step 2 done.** The failing test was `tools/check_runtime_deps.sh`:
+  `cargo tree` of `fynkel_native` with only its runtime features listed
+  `jsonschema` and `similar`, both through `fynkel_document`. Now
+  `fynkel_document` has the `validate` feature (on by default): the
+  `schema`, `migrate`, `authoring` and `one_root` modules and every
+  `validate`/scan/expand item are behind it. The workspace takes
+  `fynkel_document` without default features; `fynkel_authoring`,
+  `fynkel_import` and the CLI ask for `validate`. CI runs the script and
+  clippy on `fynkel_document` without the feature.
+  `libfynkel_native.dylib` (release, `--no-default-features --features
+  physics,audio,animation`): 13.0 MB before step 1, 6.6 MB after step 1
+  (the linker already dropped the unused checks), 6.5 MB after step 2.
+  So step 1 gave the size; step 2 makes sure it stays: the runtime can
+  no longer call the checks by mistake.
+- **Found on the way:** since 6.2 (6a2c1ba) the component schemas carry
+  `asset(<kind>)` hints, and `SchemaSet` added them to the reference
+  table's kinds, so each built-in reference was checked twice and
+  `Animator.clip` refused a blend space (two `fynkel_import` cook tests
+  red). Fixed in 2934e74: the table's kinds replace the hint's.
