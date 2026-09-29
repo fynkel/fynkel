@@ -19,6 +19,11 @@
 //! The constants hold ids, never paths (ADR-0006): renaming a file keeps
 //! its constant working until codegen renames the constant, which is where
 //! the compiler then points.
+//!
+//! A project that lists `persistentObjects` (ADR-0039) also gets
+//! `Persistent`: one accessor per entry, `Persistent.gameManager(world)`
+//! for `world.persistentObject('GameManager')`, so a misspelled name fails
+//! to compile.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -35,7 +40,36 @@ pub const DART_OUT: &str = "lib/generated/assets.g.dart";
 /// project's (no `fynkel.project.json` beside its pubspec). A project
 /// without an assets directory gives an empty `Assets`.
 pub fn generate(project: &Path) -> Result<Option<String>, String> {
-    Ok(assets_dir(project)?.map(|dir| render(&scan(&dir))))
+    let Some(dir) = assets_dir(project)? else {
+        return Ok(None);
+    };
+    let entries = scan(&dir);
+    let persistent = persistent_objects(project, &entries);
+    Ok(Some(render(&entries, &persistent)))
+}
+
+/// The project's `persistentObjects` (ADR-0039): each name with its
+/// prefab's path (its id when the prefab is not among `entries`); none for
+/// a Fynkel package or a project file that does not read.
+fn persistent_objects(project: &Path, entries: &[AssetEntry]) -> Vec<(String, String)> {
+    if !project.join("fynkel.project.json").is_file() {
+        return Vec::new();
+    }
+    let Ok(p) = Project::read(project) else {
+        return Vec::new();
+    };
+    p.persistent_objects
+        .iter()
+        .map(|o| {
+            let id = o.prefab.asset.to_string();
+            let path = entries
+                .iter()
+                .find(|e| e.id.to_string() == id)
+                .map(|e| e.path.clone())
+                .unwrap_or(id);
+            (o.name.clone(), path)
+        })
+        .collect()
 }
 
 /// The directory holding the assets of the project (or Fynkel package) at
@@ -80,7 +114,7 @@ struct Folder<'a> {
     files: Vec<&'a AssetEntry>,
 }
 
-fn render(entries: &[AssetEntry]) -> String {
+fn render(entries: &[AssetEntry], persistent: &[(String, String)]) -> String {
     let mut root = Folder::default();
     for e in entries {
         let mut at = &mut root;
@@ -108,8 +142,16 @@ fn render(entries: &[AssetEntry]) -> String {
     if used.is_empty() {
         used.insert("AssetRef");
     }
+    if !persistent.is_empty() {
+        used.insert("GameObject");
+        used.insert("World");
+    }
     let names: Vec<&str> = used.into_iter().collect();
-    let _ = writeln!(o, "import 'package:fynkel/fynkel.dart' show {};", names.join(", "));
+    let _ = writeln!(
+        o,
+        "import 'package:fynkel/fynkel.dart' show {};",
+        names.join(", ")
+    );
     let _ = writeln!(o);
     let _ = writeln!(
         o,
@@ -127,10 +169,54 @@ fn render(entries: &[AssetEntry]) -> String {
     let _ = writeln!(o, "abstract final class Assets {{");
     o.push_str(&body);
     let _ = writeln!(o, "}}");
+    if !persistent.is_empty() {
+        o.push('\n');
+        o.push_str(&persistent_class(persistent));
+    }
     for c in classes {
         o.push('\n');
         o.push_str(&c);
     }
+    o
+}
+
+/// `Persistent`: one accessor per persistent object (ADR-0039), a name
+/// that lowerCamels into one already taken numbered.
+fn persistent_class(persistent: &[(String, String)]) -> String {
+    let mut o = String::new();
+    let _ = writeln!(
+        o,
+        "/// The project's persistent objects (ADR-0039; Project › Persistent Objects…),"
+    );
+    let _ = writeln!(
+        o,
+        "/// made once when the project loads and kept across scene loads. Each is"
+    );
+    let _ = writeln!(
+        o,
+        "/// `world.persistentObject(name)`: null once destroyed."
+    );
+    let _ = writeln!(o, "abstract final class Persistent {{");
+    let mut taken = BTreeSet::new();
+    for (name, path) in persistent {
+        let base = ident(name);
+        let mut id = base.clone();
+        let mut n = 2;
+        while !taken.insert(id.clone()) {
+            id = match base.strip_suffix('$') {
+                Some(stem) => format!("{stem}{n}"),
+                None => format!("{base}{n}"),
+            };
+            n += 1;
+        }
+        let _ = writeln!(o, "  /// `{name}`: `{path}`");
+        let _ = writeln!(
+            o,
+            "  static GameObject? {id}(World world) => world.persistentObject({});",
+            dart_string(name)
+        );
+    }
+    let _ = writeln!(o, "}}");
     o
 }
 
@@ -155,7 +241,14 @@ fn members(
                     let _ = writeln!(o, "  {cls} get {name} => const {cls}();");
                 }
                 let mut body = String::new();
-                members(f, cls.trim_start_matches('_'), false, &mut body, classes, used);
+                members(
+                    f,
+                    cls.trim_start_matches('_'),
+                    false,
+                    &mut body,
+                    classes,
+                    used,
+                );
                 classes.push(format!(
                     "final class {cls} {{\n  const {cls}();\n\n{body}}}\n"
                 ));
@@ -517,6 +610,40 @@ mod tests {
         assert_eq!(ident("switch"), "switch$");
         assert_eq!(ident("01 intro"), "$01Intro");
         assert_eq!(ident("..."), "asset");
+    }
+
+    /// ADR-0039: the project's persistent objects as typed accessors, only
+    /// when it lists some; a name codegen would lowercase into a clash or a
+    /// keyword still gets an accessor of its own.
+    #[test]
+    fn persistent_objects_get_accessors() {
+        assert!(!render(&[], &[]).contains("Persistent"));
+        let out = render(
+            &[],
+            &[
+                ("GameManager".into(), "prefabs/manager.prefab.json".into()),
+                ("gameManager".into(), "prefabs/other.prefab.json".into()),
+                ("Switch".into(), "prefabs/switch.prefab.json".into()),
+            ],
+        );
+        assert!(out.contains("show AssetRef, GameObject, World;"), "{out}");
+        assert!(out.contains("abstract final class Persistent {"), "{out}");
+        assert!(out.contains(
+            "  static GameObject? gameManager(World world) => world.persistentObject('GameManager');"
+        ), "{out}");
+        assert!(out.contains(
+            "  static GameObject? gameManager2(World world) => world.persistentObject('gameManager');"
+        ), "{out}");
+        assert!(
+            out.contains(
+                "  static GameObject? switch$(World world) => world.persistentObject('Switch');"
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains("/// `GameManager`: `prefabs/manager.prefab.json`"),
+            "{out}"
+        );
     }
 
     #[test]
