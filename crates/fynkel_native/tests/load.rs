@@ -225,6 +225,39 @@ fn project_and_scene_load_through_the_abi() {
     assert_eq!(host.load_scene(&cache, "robot"), Status::InvalidArgument);
 }
 
+// Foundation 5.4: a scene loaded by id decoded its meshes and textures at
+// their first draw, so that frame hitched. Now `load_scene` decodes its
+// closure before it returns (and queues it for the GPU warm-up); the
+// project's startup load still decodes at first draw, so Play from any
+// scene starts as fast as before.
+#[test]
+fn load_scene_decodes_what_the_scene_uses_before_it_returns() {
+    let cooked = Cooked::new("preload");
+    let cache = cooked.text();
+    let host = Host::new();
+    assert_eq!(host.load_project(&cache), Status::Ok);
+    assert_eq!(
+        host.report()["residency"]["meshes"],
+        0,
+        "the startup load stays lazy"
+    );
+
+    assert_eq!(host.load_scene(&cache, MAIN_SCENE), Status::Ok);
+    let r = host.report();
+    assert_eq!(r["ok"], true, "{r:#}");
+    // The robot's mesh, the crate prefab's mesh and the material's maps.
+    assert!(
+        r["residency"]["meshes"].as_u64().unwrap() > 0,
+        "{:#}",
+        r["residency"]
+    );
+    assert!(
+        r["residency"]["textures"].as_u64().unwrap() > 0,
+        "{:#}",
+        r["residency"]
+    );
+}
+
 #[test]
 fn the_cache_is_the_only_source() {
     // A cache cooked from the fixture, then the fixture's source tree is

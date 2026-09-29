@@ -502,12 +502,26 @@ fn load(w: &mut FynkelWorld, cache_dir: &Path, scene: Option<Uuid>, mode: LoadMo
     if scene.is_none() && assets.project().is_some_and(|p| p.startup_scene.is_none()) {
         return open_project(w, assets, cache);
     }
+    let scene_id_given = scene.is_some();
     let id = match scene.map(Ok).unwrap_or_else(|| assets.startup_scene()) {
         Ok(id) => id,
         Err(d) => return failed(&[d], cache),
     };
     match assets.scene(id) {
-        Ok(scene) => instantiate(w, assets, scene, mode),
+        Ok(scene) => {
+            // A scene loaded by id decodes what it uses now, not at its
+            // first draw (foundation 5.4), and queues it for the GPU
+            // warm-up. The startup load stays lazy: Play starts fast.
+            let preload = scene_id_given.then(|| (assets.clone(), scene.closure.clone()));
+            let mut out = instantiate(w, assets, scene, mode);
+            if let (Some((assets, closure)), Status::Ok) = (preload, out.status) {
+                assets.preload(&closure, &AtomicUsize::new(0), &AtomicBool::new(false));
+                if let Some(r) = out.report.as_object_mut() {
+                    r.insert("residency".into(), residency_json(&assets));
+                }
+            }
+            out
+        }
         Err(diags) => failed(&diags, cache),
     }
 }
