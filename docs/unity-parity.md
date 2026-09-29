@@ -59,6 +59,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Start paused | yes | 🔧 `8d9e277` |
 | Changes during Play revert on Stop, tint | | ✅ |
 | DontDestroyOnLoad objects | their own scene in the Hierarchy | 🔧 ADR-0037: a **DontDestroyOnLoad** header, last |
+| Managers that exist in every scene | a bootstrap scene, or a `RuntimeInitializeOnLoadMethod` | 🔧 ADR-0039: Project ▸ Persistent Objects… (Godot's autoloads): made once at start, found with `world.persistentObject(name)` / `Persistent.<name>(world)` |
 | `SceneManager.LoadSceneAsync` | `AsyncOperation` | 🔧 ADR-0038: `scenes.loadAsync` → `SceneLoad` (see § On purpose) |
 
 ### Project

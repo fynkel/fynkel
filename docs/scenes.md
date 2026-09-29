@@ -72,6 +72,47 @@ Engine: `World::dont_destroy_on_load(entity)` (a child is
 `packages/fynkel/test/scenes_test.dart`, the editor's
 `test/play_document_test.dart`.
 
+### Persistent objects in Project Settings (ADR-0039)
+
+A manager, a music player or a save system is best listed once in
+**Project › Persistent Objects…** instead: a name and a prefab per row,
+kept in `fynkel.project.json` as `persistentObjects`. This is Godot's
+autoloads:
+
+```json
+"persistentObjects": [
+  { "name": "GameManager", "prefab": { "asset": "…" } },
+  { "name": "Music", "prefab": { "asset": "…" } }
+]
+```
+
+- `world.loadProject` makes each one, in list order, as a root named
+  after its entry, and keeps it as `dontDestroyOnLoad` would. It happens
+  once per `loadProject`: once per game start and once per Play.
+- Their scripts are created before the startup scene's, so a scene
+  script can use them in its own `onCreate`.
+- Scene loads never make them again, so there are no duplicates and no
+  "destroy myself if one exists" code. Play in any scene has them.
+- Code finds one by name: `world.persistentObject('Music')` (null once
+  destroyed), or the generated accessor `Persistent.music(world)` in
+  `assets.g.dart`, where a misspelled name fails to compile.
+- `destroy()` works as on any object; a destroyed one is made again only
+  by the next `loadProject`.
+- `FYN-P0020` refuses a name used twice or an asset that is not a
+  prefab; a name is an identifier. A prefab missing from the cache at run
+  time is a warning, and the game starts without that object.
+- During Play they show under the **DontDestroyOnLoad** header.
+
+Engine: `fynkel_world_load_project` makes them after the scene and
+reports `persistentObjects` (`name`, `prefab`, `entity`, `path`,
+`behaviours`); the cook carries the list in the cache index. Tests:
+`crates/fynkel_document/tests/project.rs`
+(`persistent_objects_name_prefabs_once`),
+`crates/fynkel_native/tests/load.rs`
+(`persistent_objects_are_made_once_by_load_project`),
+`packages/fynkel/test/scenes_test.dart`, `crates/fynkel_authoring/tests/ops.rs`
+and the editor's `test/persistent_objects_dialog_test.dart`.
+
 The Dart `SceneManager` (`world.scenes`) is the flow on top:
 `load`/`unload` now (not from inside a callback), `transition(to, mode:)`
 performed at the start of the **next** `World.frame` — the one point

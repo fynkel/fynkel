@@ -177,3 +177,23 @@ Each step starts with a test that fails first.
 5. The generated `Persistent` accessors.
 6. Docs: scenes.md, documents.md (the project key), design/dart-sdk.md,
    unity-parity.md.
+
+## Progress
+
+All six steps done 2026-09-29: the document and `FYN-P0020` (b9ee6c0),
+the cook and the engine (47a9fb8), the SDK (27b5357), the authoring op
+and the editor page (e2005c2, a98106b), the generated `Persistent`
+accessors (3b896ec), and the docs ([scenes.md](../scenes.md)
+§ Persistent objects in Project Settings).
+
+Three details differ from the text above:
+
+- **No cook-cache bump (§7).** Every cook rewrites the index, and an
+  index without the key reads as an empty list, so a cache version bump
+  would only force a full recook.
+- **Made after the startup scene spawns (§2).** The native call loads
+  the scene first and then makes the objects. Their scripts are still
+  attached and created first, which is what a script can observe.
+- **No drop on the page (§8).** Project Settings pages are modal
+  dialogs, so nothing can be dragged onto them. A new row takes its
+  prefab from the picker (⊙) and is named after it.
