@@ -913,8 +913,16 @@ next sync).
   `resync`, `reload`, `recook` (cook
   again, point every preview at the new store, reload each; with
   `live: true` unsaved documents cook as held, their files untouched, and a
-  recovery copy goes to `.fynkel/recovery/` — ADR-0021 P5), `dump`,
-  `stats`. `close_document` reports `previewClosed`.
+  recovery copy goes to `.fynkel/recovery/` — ADR-0021 P5), `cookStart`
+  (`live` → a `ticket`: the same cook on its own thread, from a snapshot
+  of the session; one at a time), `cookProgress` (`state`: running, done,
+  failed or cancelled; `done`, `total`, `current`), `cookCancel`,
+  `cookFinish` (applies the ended cook as `recook` does and answers its
+  report; `recook` is start + wait), `dump`, `stats`. `close_document`
+  reports `previewClosed` and cancels a running cook.
+  `fynkel_authoring_preview_open_with(session, doc, flags)` with
+  `FYNKEL_PREVIEW_OPEN_NO_COOK` opens a preview over the last cache as it
+  is (or none) without cooking, and says `needsCook` (ADR-0040 §4).
 - **Dart.** `DocumentHandle.openPreview()` →
   `ScenePreview` (`worldAddress` for `FynkelViewportController.
   renderHandle`, `stats`, `diagnostics`, `cook`; `setCamera`,
@@ -923,7 +931,10 @@ next sync).
   `setComponents`/`restoreComponents`, `setMaterial`/`restoreMaterial`/
   `material`, `setVolume`/`restoreVolume`/`volume`,
   `resync` → `PreviewSyncReport`, `reload`/`refreshStats` →
-  `PreviewStats`, `recook` → `CookReport`, `dump`, `close`), and a
+  `PreviewStats`, `recook` → `CookReport`, `startCook` → `CookJob`
+  (`poll`, `done`/`total`/`current`, `cancel`, `finish` → `CookReport`,
+  `whenDone`), `needsCook` after `openPreview(cook: false)`, `dump`,
+  `close`), and a
   `PreviewSynced` event on the session's stream after every call that
   synced.
 
@@ -1932,6 +1943,25 @@ within two seconds of the cook is hashed but not stamped. The stamps
 are only an optimisation: deleting the file costs one full read of
 every source.
 
+**Workers, progress and cancel** (ADR-0040). The sources (models,
+images, sounds) depend on nothing, so they import at the same time on
+`CookOptions::jobs` worker threads (`std::thread::scope`). The default,
+`default_jobs()`, is the machine's cores less one, at most 8, because
+each worker can hold a large model in memory; `fynkel cook --jobs N`
+sets it and `--jobs 1` imports one source after another. Each source's
+result goes into its own slot and the prefab library and diagnostics are
+built afterwards in the old order, so the cache and the report are the
+same with any number of workers (`tests/cook.rs`
+`parallel_import_cooks_what_one_worker_cooks`). The documents then cook
+on the calling thread, in dependency order. The reference game's forced
+release cook of 39 assets takes 1.08 s with one worker and 0.34 s with
+13. `CookOptions::progress` takes a shared `CookProgress` that any
+thread can read: `total`, `done`, `current` (the path of the last asset
+started) and `cancel()`. A cancelled cook stops before its next asset
+(the running imports finish first) and writes no index, so the cache
+stays as the last full cook left it; the objects it already wrote stay,
+and the next cook reuses them. Its report says `cancelled`.
+
 **What is cooked.** A document: validated (schema + references + scene
 semantics; errors fail it) and stored as its canonical text in one `JSON`
 chunk — a scene **expanded** (prefabs applied, ids derived; see "Cooked
@@ -2273,7 +2303,7 @@ fynkel migrate --list [--json]
 fynkel import <file>... [--out <dir>] [--prefab] [--rig <name>] [--dry-run] [--json] [--schemas <dir>]
 fynkel rig inspect <path> [--json] [--schemas <dir>]
 fynkel rig validate <path>... [--json] [--schemas <dir>]
-fynkel cook [--project <dir>] [--cache <dir>] [--profile <name>] [--force] [--prune] [--json]
+fynkel cook [--project <dir>] [--cache <dir>] [--profile <name>] [--force] [--prune] [--jobs <n>] [--json]
 fynkel cook --assets <dir> [--cache <dir>] [--schemas <dir>] ...
 fynkel cooked inspect <file.fyna>... [--json]
 fynkel project describe [--project <dir>] [--json] [--schemas <dir>]
@@ -2338,8 +2368,10 @@ asset root with its behaviour schemas and cooks every asset into the cache
 the runtime can load its scenes by id only);
 each asset prints as `cooked|cached|failed  path (kind) key bytes`;
 `--force` cooks even when the key is present, `--prune` deletes every
-object the run did not produce (other profiles' objects included)
-(`--json`: `{ ok, profile, cooked, cached, failed, cache, pruned, assets:
+object the run did not produce (other profiles' objects included),
+`--jobs <n>` sets the number of import workers (default: cores − 1, at
+most 8; `0` is refused) (`--json`: `{ ok, profile, cooked, cached,
+failed, cancelled, cache, pruned, assets:
 [{ id, path, kind, status, key, file, dependencies, chunks, bytes }],
 diagnostics }`). `cooked inspect` prints a container's header, its chunk
 table with checksums verified, and the META summary (`--json`: `{ ok,

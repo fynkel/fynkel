@@ -240,7 +240,7 @@ run, Escape closes.
 | `view.reset` | View | ⇧⌘0 | the initial editor camera |
 | `view.toggleGrid` / `view.toggleOverlays` / `view.toggleStats` | View | ⌘G / ⌘I / ⌘T | grid and axes / light-camera-collider icons / the stats overlay |
 | `view.reload` | View | ⌃⌘R | the preview world emptied and loaded fresh from the live document |
-| `view.recook` | View | ⌃⇧⌘R | cook the project again and reload every preview over the new cache |
+| `view.recook` | View | ⌃⇧⌘R | cook the project again (behind the Importing Assets window) and reload every preview over the new cache |
 | `view.saveFrame` | View | ⌥⌘X | one frame of the viewport as a PNG at its physical size (the pixel gate's tool) |
 | `assets.undo` / `assets.redo` | Edit | ⌥⌘Z / ⇧⌥⌘Z | undo / redo the last **asset operation** (its own history; the label names it: "Undo Rename coin.prefab.json → gold.prefab.json") |
 | `assets.newScene` / `assets.newPrefab` / `assets.newMaterial` | Project | ⇧⌥⌘S / ⇧⌥⌘P / ⇧⌥⌘M | a new document in the Project browser's folder (`New Scene`, `New Scene 2`, …), selected and renaming at once |
@@ -1031,7 +1031,24 @@ only) and its camera. **Reload** (⌃⌘R) is the same fresh load on demand;
 **Rebuild cache** (⌃⇧⌘R) cooks the project again and reloads every
 preview over the new cache — the model also runs it on its own when the
 project's `assetsRevision` moves (an import, a reimport, a file the
-watcher saw). `nothing ticks`: the world's tick counter moves only with
+watcher saw).
+
+**Importing Assets** (ADR-0040 §4). Every cook runs on the session's
+own thread, one at a time (`CookCoordinator`, shared by the Scene view
+copies): Rebuild cache, the rebuild after a change on disk, Play's cook
+and the first preview's. While a cook runs no command runs
+(`CommandRegistry.blocked`: keys, menus and the palette) and the editor
+takes no clicks. The picture keeps showing the last cache until the new
+one is applied. A cook longer than 0.3 s shows Unity's window over the
+editor: "Importing Assets", the file being imported, "N of M", a bar
+and **Cancel** (Esc). A cancelled cook leaves the last cache in place
+and the Scene view says so. A rebuild asked for while a cook runs waits
+for it; all the requests that arrived meanwhile then share one more
+cook, so a burst of file changes cooks twice at most. A Scene view
+opens its preview without a cook (`openPreview(cook: false)`), over the
+last cache as it is or none, and starts the cook itself when the
+preview says `needsCook`: the tab shows at once and draws the world
+when the cook is applied. `nothing ticks`: the world's tick counter moves only with
 the sync's own steps, never with time — a rigid body stays where the
 document put it for as long as the tab is open.
 
@@ -2152,8 +2169,10 @@ default layout (⌥⌘8 shows or hides it), as in Unity. The Scene view stays
 the editor camera and its tools.
 
 - **Play (⌘P):** brings `.fynkel/cache` up to date with the files. When a
-  Scene view is open it cooks in process (⌃⇧⌘R's cook); otherwise it runs
-  `fynkel cook --project <dir>`. A failed cook does not play and says why.
+  Scene view is open it cooks in process (⌃⇧⌘R's cook, behind the
+  Importing Assets window); otherwise it runs `fynkel cook --project
+  <dir>`. A failed cook does not play and says why; a cook cancelled in
+  the window does not play and says nothing.
   Play then mounts the game's `buildGame(FynkelLaunch(projectDir, startScene,
   inEditor: true))` in the Game view. It starts in the scene open in the
   editor, brings the Game view to the front and gives it the keyboard.
