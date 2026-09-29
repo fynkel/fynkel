@@ -86,14 +86,13 @@ impl Physics {
         key: &AssetRef,
         mesh: Option<(&[[f32; 3]], &[u32])>,
     ) -> Result<(), String> {
+        // As the adapter: a refused replacement leaves the mesh forgotten.
+        self.meshes.remove(key);
         match mesh {
             Some((positions, indices)) => self
                 .register_mesh(key.clone(), positions, indices)
                 .map(|_| ()),
-            None => {
-                self.meshes.remove(key);
-                Ok(())
-            }
+            None => Ok(()),
         }
     }
 
@@ -106,6 +105,7 @@ impl Physics {
         key: AssetRef,
         material: PhysicsMaterial,
     ) -> Result<(), String> {
+        material.validate()?;
         self.materials.insert(key, material);
         Ok(())
     }
