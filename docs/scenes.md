@@ -25,6 +25,12 @@ Rules that follow:
 
 - A broken scene loads nothing and leaves the world as it was — a replace
   load checks the description first, before unloading anything.
+- `loadScene` (either mode) reads every mesh, texture and sound the
+  scene uses before it returns, and the renderer uploads them over the
+  next frames, so the first frame that draws them does not stall. The
+  project's startup load (`fynkel_world_load_project`) does not: it
+  reads each on its first draw, so Play starts fast. Use
+  `loadSceneAsync` (below) to do this reading off the frame.
 - Ids are per load: loading the same scene after unloading it gives new
   entities. Handles of destroyed entities (Dart `GameObject`) go dead on
   the next event drain; a `Behaviour` on one gets `onDestroy`.
