@@ -64,7 +64,7 @@ pub use project::{
     ProjectReport, SourcePrefabs,
 };
 pub use rig::Rig;
-pub use runtime::{describe, AuthoredBehaviour, DescribedScene};
+pub use runtime::{describe, describe_with, AuthoredBehaviour, DescribedScene};
 pub use scene::Scene;
 pub use schema::{BehaviourInfo, ComponentInfo, SchemaSet};
 pub use volume::VolumeDocument;

@@ -64,6 +64,13 @@ fn to_uuid(u: &uuid::Uuid) -> Uuid {
 /// as listed). Every diagnostic carries the document path and a pointer.
 /// `schemas` says which non-native types are behaviours.
 pub fn describe(scene: &Scene, schemas: &SchemaSet) -> DescribedScene {
+    describe_with(scene, |type_id| schemas.behaviour(type_id).is_some())
+}
+
+/// [`describe`] with the behaviour types given as a test: a cooked load
+/// (ADR-0041) answers from the cook's `behaviourTypes` and builds no
+/// schema set.
+pub fn describe_with(scene: &Scene, is_behaviour: impl Fn(&str) -> bool) -> DescribedScene {
     let mut diagnostics = Vec::new();
     let mut behaviours = Vec::new();
     let doc = scene.document.path.as_deref();
@@ -73,7 +80,7 @@ pub fn describe(scene: &Scene, schemas: &SchemaSet) -> DescribedScene {
         for c in &e.components {
             match decode_component(&c.type_id, &c.data) {
                 None => {
-                    let known = schemas.behaviour(&c.type_id).is_some();
+                    let known = is_behaviour(&c.type_id);
                     if !known {
                         diagnostics.push(diag(
                             Code::SCENE_UNKNOWN_COMPONENT_TYPE,
