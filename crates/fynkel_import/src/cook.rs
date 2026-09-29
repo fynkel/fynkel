@@ -19,6 +19,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use fynkel_contracts::{has_errors, Code, Diagnostic};
 use fynkel_cooked::{
@@ -68,6 +70,62 @@ pub struct CookOptions {
     /// the key hashes the text, so the next cook from disk sees the file
     /// again as a change.
     pub live: HashMap<PathBuf, String>,
+    /// How far the cook got, readable from another thread, and its
+    /// cancel (ADR-0040 §2).
+    pub progress: Option<Arc<CookProgress>>,
+}
+
+/// How far a cook got, shared with the thread that watches it (ADR-0040
+/// §2): the editor's progress window reads it each frame and its Cancel
+/// calls [`cancel`](CookProgress::cancel).
+#[derive(Debug, Default)]
+pub struct CookProgress {
+    total: AtomicUsize,
+    done: AtomicUsize,
+    current: Mutex<String>,
+    stop: AtomicBool,
+}
+
+impl CookProgress {
+    pub fn new() -> Arc<CookProgress> {
+        Arc::new(CookProgress::default())
+    }
+
+    /// The assets this cook visits (0 until it has scanned them).
+    pub fn total(&self) -> usize {
+        self.total.load(Ordering::Relaxed)
+    }
+
+    /// The assets finished, cooked, cached or failed.
+    pub fn done(&self) -> usize {
+        self.done.load(Ordering::Relaxed)
+    }
+
+    /// The path of the last asset started, relative to the assets root.
+    pub fn current(&self) -> String {
+        self.current.lock().map(|c| c.clone()).unwrap_or_default()
+    }
+
+    /// Stops the cook at its next asset. It writes no index, so the cache
+    /// stays as the last full cook left it; the objects it wrote stay (the
+    /// next cook finds them by key).
+    pub fn cancel(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.stop.load(Ordering::Relaxed)
+    }
+
+    fn start(&self, path: &str) {
+        if let Ok(mut c) = self.current.lock() {
+            path.clone_into(&mut c);
+        }
+    }
+
+    fn finish(&self) {
+        self.done.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 /// What the cache index says about its project.
@@ -119,6 +177,7 @@ impl Default for CookOptions {
             force: false,
             project: None,
             live: HashMap::new(),
+            progress: None,
         }
     }
 }
@@ -168,6 +227,9 @@ pub struct CookReport {
     /// In database (path) order.
     pub assets: Vec<CookedAsset>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Stopped by [`CookProgress::cancel`]: `assets` holds only what it
+    /// visited, and the index was not written (ADR-0040 §2).
+    pub cancelled: bool,
 }
 
 impl CookReport {
@@ -189,6 +251,7 @@ impl CookReport {
         v["cached"] = self.count(Status::Cached).into();
         v["cooked"] = self.count(Status::Cooked).into();
         v["failed"] = self.count(Status::Failed).into();
+        v["cancelled"] = self.cancelled.into();
         v["assets"] = self
             .assets
             .iter()
@@ -219,6 +282,9 @@ impl CookReport {
             self.count(Status::Cached),
             self.count(Status::Failed)
         ));
+        if self.cancelled {
+            out.push_str("cancelled: the index was not written\n");
+        }
         out
     }
 }
@@ -281,14 +347,35 @@ pub fn cook(
     let db = with_builtins.as_ref().unwrap_or(db);
     let entries = db.entries();
     let by_id: HashMap<Uuid, usize> = entries.iter().enumerate().map(|(i, e)| (e.id, i)).collect();
+    let progress = opts.progress.as_deref();
+    let stopped = || progress.is_some_and(CookProgress::is_cancelled);
+    if let Some(p) = progress {
+        p.total.store(entries.len(), Ordering::Relaxed);
+    }
+    let cancelled = |results: Vec<Option<CookedAsset>>, diagnostics| CookReport {
+        profile: opts.profile.clone(),
+        assets: results.into_iter().flatten().collect(),
+        diagnostics,
+        cancelled: true,
+    };
 
     // 1. Inputs and dependencies for every asset. A source unchanged since
     // the last cook (size and time) is not read again for its hash.
     let mut stamps = Stamps::load(cache, opts.force);
-    let prepared: Vec<Prepared> = entries
-        .iter()
-        .map(|e| prepare(db, schemas, e, &opts.live, &mut stamps, &mut diagnostics))
-        .collect();
+    let mut prepared: Vec<Prepared> = Vec::with_capacity(entries.len());
+    for e in entries {
+        if stopped() {
+            return cancelled(Vec::new(), diagnostics);
+        }
+        prepared.push(prepare(
+            db,
+            schemas,
+            e,
+            &opts.live,
+            &mut stamps,
+            &mut diagnostics,
+        ));
+    }
     if let Err(d) = stamps.save(cache) {
         diagnostics.push(
             Diagnostic::warning(d.code, d.message).with_document(
@@ -349,6 +436,12 @@ pub fn cook(
     let mut keys: HashMap<Uuid, CacheKey> = HashMap::new();
     let mut results: Vec<Option<CookedAsset>> = (0..entries.len()).map(|_| None).collect();
     for i in sources {
+        if stopped() {
+            return cancelled(results, diagnostics);
+        }
+        if let Some(p) = progress {
+            p.start(&entries[i].path);
+        }
         cook_index(
             i,
             db,
@@ -364,6 +457,9 @@ pub fn cook(
             &mut results,
             &mut diagnostics,
         );
+        if let Some(p) = progress {
+            p.finish();
+        }
         let entry = &entries[i];
         // Only a `JSON` chunk can be the prefab; a texture or a sound is
         // not opened again to find that out.
@@ -427,6 +523,12 @@ pub fn cook(
     // the diagnostics are re-derived against its cooked object.
     let (library, _) = library.flattened(schemas);
     for i in documents {
+        if stopped() {
+            return cancelled(results, diagnostics);
+        }
+        if let Some(p) = progress {
+            p.start(&entries[i].path);
+        }
         cook_index(
             i,
             db,
@@ -442,6 +544,9 @@ pub fn cook(
             &mut results,
             &mut diagnostics,
         );
+        if let Some(p) = progress {
+            p.finish();
+        }
     }
 
     let report = CookReport {
@@ -451,6 +556,7 @@ pub fn cook(
             .map(|r| r.expect("every asset visited"))
             .collect(),
         diagnostics,
+        cancelled: false,
     };
     let mut report = report;
     if let Err(d) = write_index(cache, &report, opts.project.as_ref(), db) {

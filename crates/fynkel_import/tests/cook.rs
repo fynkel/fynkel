@@ -17,7 +17,7 @@ use fynkel_import::cook::{
     decode_clip, decode_environment, decode_mesh, decode_stream, decode_texture,
     TEXTURE_FORMAT_RGBA16F_LINEAR, TEXTURE_FORMAT_RGBA8_LINEAR, TEXTURE_FORMAT_RGBA8_SRGB,
 };
-use fynkel_import::{cook, Cache, CookOptions, CookReport, Status};
+use fynkel_import::{cook, Cache, CookOptions, CookProgress, CookReport, Status};
 use fynkel_wire::material::decode_material;
 use uuid::Uuid;
 
@@ -165,6 +165,56 @@ fn a_clean_corpus_cooks_then_hits() {
         assert_eq!(a.key, b.key);
         assert_eq!(a.chunks, b.chunks);
     }
+}
+
+// ADR-0040 §2: a cook says how far it got, and a cancelled cook stops
+// without writing the index, so the cache stays as the last full cook
+// left it.
+#[test]
+fn a_cook_reports_progress_and_a_cancelled_cook_keeps_the_index() {
+    let p = Project::new("progress");
+    let progress = CookProgress::new();
+    let first = p.cook_with(&CookOptions {
+        progress: Some(progress.clone()),
+        ..CookOptions::default()
+    });
+    assert!(
+        !first.cancelled && !first.has_errors(),
+        "{:?}",
+        first.diagnostics
+    );
+    assert_eq!((progress.done(), progress.total()), (7, 7));
+    assert!(!progress.current().is_empty());
+    let index = std::fs::read(p.cache().index_path()).unwrap();
+
+    // A change the next full cook writes into the index; this one is
+    // cancelled before it starts.
+    std::fs::copy(
+        fixtures().join("textures/swatch_rgb.png"),
+        p.assets().join("textures/swatch.png"),
+    )
+    .unwrap();
+    let stop = CookProgress::new();
+    stop.cancel();
+    let cancelled = p.cook_with(&CookOptions {
+        progress: Some(stop.clone()),
+        ..CookOptions::default()
+    });
+    assert!(cancelled.cancelled);
+    assert!(cancelled.assets.is_empty(), "{:?}", statuses(&cancelled));
+    assert_eq!(cancelled.json()["cancelled"], true);
+    assert_eq!(stop.done(), 0);
+    assert_eq!(
+        std::fs::read(p.cache().index_path()).unwrap(),
+        index,
+        "the index is the last full cook's"
+    );
+
+    // The next cook finishes and writes it.
+    let third = p.cook();
+    assert!(!third.cancelled);
+    assert_eq!(status(&third, SWATCH), Status::Cooked);
+    assert_ne!(std::fs::read(p.cache().index_path()).unwrap(), index);
 }
 
 #[test]

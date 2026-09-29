@@ -40,8 +40,8 @@ pub mod tangents;
 
 pub use cache::{Cache, CacheKey, KeyInputs, Manifest, CACHE_VERSION};
 pub use cook::{
-    cook, cook_project, indexed_paths, project_cache_dir, CookOptions, CookProject, CookReport,
-    CookedAsset, Status,
+    cook, cook_project, indexed_paths, project_cache_dir, CookOptions, CookProgress, CookProject,
+    CookReport, CookedAsset, Status,
 };
 pub use intermediate::{
     AnimationData, AnimationPayload, AudioData, ColorSpace, ImageData, Intermediate, MaterialData,
