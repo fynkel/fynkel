@@ -1,6 +1,6 @@
 # ADR-0040: The cook runs in the background, with parallel imports
 
-**Status:** Proposed 2026-09-29 (docs/foundation.md 5.3)  
+**Status:** Accepted 2026-09-29 (the user agreed, with both recommendations below; docs/foundation.md 5.3)  
 **Date:** 2026-09-29  
 **Related:** ADR-0021 (Play in the editor), ADR-0038 (LoadSceneAsync, the same start/poll/finish shape), [documents.md](../documents.md) § The cook, [editor.md](../editor.md)
 
@@ -144,12 +144,13 @@ The Scene view draws the old cache until the new one is applied.
 - **Import a source only when something first uses it.** That would
   change what "cooked" means for the CLI and for builds.
 
-## Questions for the user
+## Questions for the user (answered)
 
 1. **Block edits during a cook, like Unity (§4)?** Recommended: yes,
-   with a progress window that repaints and has Cancel.
+   with a progress window that repaints and has Cancel. **Answer:
+   yes.**
 2. **The default number of workers (§1):** cores − 1, at most 8.
-   Recommended: yes.
+   Recommended: yes. **Answer: yes.**
 
 ## Plan
 
