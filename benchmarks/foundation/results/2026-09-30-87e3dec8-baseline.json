@@ -1,0 +1,398 @@
+{
+  "started_utc": "20260930T111654791896Z",
+  "revision": "87e3dec8afa33c2c439c6fe848a7f0599cc512aa",
+  "working_tree": "M docs/README.md\n M docs/decisions/ADR-0008-dart-execution-model-main-isolate-synchronous-step-timestep-and-events.md\n M docs/decisions/ADR-0011-scale-rule-dart-behaviours-for-the-few-native-components-for-the-many.md\n M docs/decisions/ADR-0036-everything-is-an-object.md\n M docs/foundation.md\n M docs/roadmap.md\n M docs/status.md\n M examples/reference_game/lib/generated/assets.g.dart\n?? docs/decisions/ADR-0042-ecs-centered-foundation-program.md\n?? docs/decisions/ADR-0043-unified-world-state-and-frame-contract.md\n?? docs/decisions/ADR-0044-components-systems-and-gameplay-access.md\n?? docs/decisions/ADR-0045-asset-readiness-and-render-resources.md\n?? docs/foundation-roadmap.md\n?? packages/fynkel/tool/foundation_probe.dart\n?? tools/foundation_baseline.py",
+  "tracked_diff_sha256": "0f8302104ede933d6548e9a2fe12ba55eccaf8562172d8783b3ba9cc9be3cf27",
+  "machine": {
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "architecture": "arm64",
+    "cpu": "Apple M3 Max"
+  },
+  "tools": {
+    "cargo": "cargo 1.93.0 (083ac5135 2025-12-15)",
+    "dart": "Dart SDK version: 3.13.2 (stable) (Tue Aug 25 01:01:12 2026 -0700) on \"macos_arm64\"",
+    "flutter": "Flutter 3.47.2 \u2022 channel stable \u2022 https://github.com/flutter/flutter.git\nFramework \u2022 revision d3b14c8769 (5 weeks ago) \u2022 2026-08-26 16:07:51 -0700\nEngine \u2022 hash 1cf1c4773fb941c4c74a7f8bb144a8837596c0f4 (revision a804b26164) (1 months ago) \u2022 2026-08-26 18:46:13.000Z\nTools \u2022 Dart 3.13.2 \u2022 DevTools 2.60.0"
+  },
+  "selected_suites": [
+    "probe",
+    "sdk",
+    "generator",
+    "authoring",
+    "flutter",
+    "editor-api",
+    "editor",
+    "hosts",
+    "stripped",
+    "codegen",
+    "headless-release",
+    "rust-lint",
+    "rust"
+  ],
+  "results": [
+    {
+      "suite": "probe",
+      "cwd": "packages/fynkel",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/dart",
+        "run",
+        "tool/foundation_probe.dart"
+      ],
+      "log": "probe-0.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 24.2
+    },
+    {
+      "suite": "sdk",
+      "cwd": "packages/fynkel",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/dart",
+        "pub",
+        "get"
+      ],
+      "log": "sdk-0.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 0.346
+    },
+    {
+      "suite": "sdk",
+      "cwd": "packages/fynkel",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/dart",
+        "analyze",
+        "--fatal-infos"
+      ],
+      "log": "sdk-1.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 1.1
+    },
+    {
+      "suite": "sdk",
+      "cwd": "packages/fynkel",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/dart",
+        "test"
+      ],
+      "log": "sdk-2.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 4.571
+    },
+    {
+      "suite": "generator",
+      "cwd": "packages/fynkel_generator/example/spinner_game",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/dart",
+        "pub",
+        "get"
+      ],
+      "log": "generator-0.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 0.346
+    },
+    {
+      "suite": "generator",
+      "cwd": "packages/fynkel_generator",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/dart",
+        "pub",
+        "get"
+      ],
+      "log": "generator-1.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 0.299
+    },
+    {
+      "suite": "generator",
+      "cwd": "packages/fynkel_generator",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/dart",
+        "analyze",
+        "--fatal-infos"
+      ],
+      "log": "generator-2.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 2.601
+    },
+    {
+      "suite": "generator",
+      "cwd": "packages/fynkel_generator",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/dart",
+        "test"
+      ],
+      "log": "generator-3.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 1.26
+    },
+    {
+      "suite": "generator",
+      "cwd": "packages/fynkel_generator/example/spinner_game",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/dart",
+        "pub",
+        "get"
+      ],
+      "log": "generator-4.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 0.289
+    },
+    {
+      "suite": "generator",
+      "cwd": "packages/fynkel_generator/example/spinner_game",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/dart",
+        "analyze",
+        "--fatal-infos"
+      ],
+      "log": "generator-5.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 1.691
+    },
+    {
+      "suite": "generator",
+      "cwd": "packages/fynkel_generator/example/spinner_game",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/dart",
+        "test"
+      ],
+      "log": "generator-6.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 2.534
+    },
+    {
+      "suite": "authoring",
+      "cwd": "packages/fynkel_authoring",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/dart",
+        "pub",
+        "get"
+      ],
+      "log": "authoring-0.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 0.341
+    },
+    {
+      "suite": "authoring",
+      "cwd": "packages/fynkel_authoring",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/dart",
+        "analyze",
+        "--fatal-infos"
+      ],
+      "log": "authoring-1.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 0.678
+    },
+    {
+      "suite": "authoring",
+      "cwd": "packages/fynkel_authoring",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/dart",
+        "test"
+      ],
+      "log": "authoring-2.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 20.412
+    },
+    {
+      "suite": "flutter",
+      "cwd": "packages/fynkel_flutter",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/flutter",
+        "pub",
+        "get"
+      ],
+      "log": "flutter-0.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 0.448
+    },
+    {
+      "suite": "flutter",
+      "cwd": "packages/fynkel_flutter",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/flutter",
+        "analyze",
+        "--fatal-infos"
+      ],
+      "log": "flutter-1.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 2.182
+    },
+    {
+      "suite": "flutter",
+      "cwd": "packages/fynkel_flutter",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/flutter",
+        "test"
+      ],
+      "log": "flutter-2.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 6.946
+    },
+    {
+      "suite": "editor-api",
+      "cwd": "packages/fynkel_editor_api",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/flutter",
+        "pub",
+        "get"
+      ],
+      "log": "editor-api-0.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 0.396
+    },
+    {
+      "suite": "editor-api",
+      "cwd": "packages/fynkel_editor_api",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/flutter",
+        "analyze",
+        "--fatal-infos"
+      ],
+      "log": "editor-api-1.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 1.85
+    },
+    {
+      "suite": "editor-api",
+      "cwd": "packages/fynkel_editor_api",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/flutter",
+        "test"
+      ],
+      "log": "editor-api-2.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 2.093
+    },
+    {
+      "suite": "editor",
+      "cwd": "apps/editor",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/flutter",
+        "pub",
+        "get"
+      ],
+      "log": "editor-0.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 0.719
+    },
+    {
+      "suite": "editor",
+      "cwd": "apps/editor",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/flutter",
+        "analyze",
+        "--fatal-infos"
+      ],
+      "log": "editor-1.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 2.815
+    },
+    {
+      "suite": "editor",
+      "cwd": "apps/editor",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/flutter",
+        "test"
+      ],
+      "log": "editor-2.log",
+      "state": "failed",
+      "exit_code": 1,
+      "seconds": 53.724
+    },
+    {
+      "suite": "hosts",
+      "cwd": "hosts/flutter_apple",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/flutter",
+        "pub",
+        "get"
+      ],
+      "log": "hosts-0.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 0.72
+    },
+    {
+      "suite": "hosts",
+      "cwd": "hosts/flutter_apple",
+      "command": [
+        "/Users/oumari/Documents/flutter/flutter/bin/flutter",
+        "analyze",
+        "--fatal-infos"
+      ],
+      "log": "hosts-1.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 2.174
+    },
+    {
+      "suite": "hosts",
+      "cwd": ".",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "fynkel_platform_apple",
+        "--locked"
+      ],
+      "log": "hosts-2.log",
+      "state": "interrupted",
+      "exit_code": -15,
+      "seconds": 490.479
+    },
+    {
+      "suite": "stripped",
+      "cwd": ".",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "fynkel_physics",
+        "--no-default-features",
+        "--locked"
+      ],
+      "log": "stripped-0.log",
+      "state": "interrupted",
+      "exit_code": -15,
+      "seconds": null
+    }
+  ],
+  "capture_state": "interrupted; partial baseline",
+  "capture_notes": [
+    "Native host cargo build made no output progress for roughly eight minutes; its compiler was observed idle, then its process group was explicitly terminated. The host exit -15 is an interruption, not a test assertion failure.",
+    "Stripped build was interrupted after compiler processes again made no output progress. Later selected suites did not run in this capture.",
+    "A separate ECS/scene/core test run passed multiple groups, then was interrupted while an idle modules test process remained. It is not a complete suite pass.",
+    "This capture used the existing checkout CLI for package tests. The revised runner now builds the CLI first and hashes untracked files; this original capture did neither.",
+    "The pre-existing generated reference-game Dart asset change was preserved. Editor tests created hero.prefab.json.bak.meta.json; that generated sidecar was removed after capture."
+  ],
+  "not_run_suites": [
+    "codegen",
+    "headless-release",
+    "rust-lint",
+    "rust"
+  ],
+  "raw_artifacts": "target/foundation-baseline/20260930T111654791896Z",
+  "editor_failure_excerpt": "Reference project validates with errors: hero.prefab.json formatVersion 5 older than current 7; two skeleton references are empty strings where null/object required (FYN-D0016, FYN-D0206)."
+}

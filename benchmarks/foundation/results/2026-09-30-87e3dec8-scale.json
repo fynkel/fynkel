@@ -1,0 +1,415 @@
+{
+  "started_utc": "20260930T113409597262Z",
+  "revision": "87e3dec8afa33c2c439c6fe848a7f0599cc512aa",
+  "working_tree": "M docs/README.md\n M docs/decisions/ADR-0008-dart-execution-model-main-isolate-synchronous-step-timestep-and-events.md\n M docs/decisions/ADR-0011-scale-rule-dart-behaviours-for-the-few-native-components-for-the-many.md\n M docs/decisions/ADR-0036-everything-is-an-object.md\n M docs/foundation.md\n M docs/roadmap.md\n M docs/status.md\n M examples/reference_game/lib/generated/assets.g.dart\n?? benchmarks/foundation/\n?? docs/decisions/ADR-0042-ecs-centered-foundation-program.md\n?? docs/decisions/ADR-0043-unified-world-state-and-frame-contract.md\n?? docs/decisions/ADR-0044-components-systems-and-gameplay-access.md\n?? docs/decisions/ADR-0045-asset-readiness-and-render-resources.md\n?? docs/design/foundation-ownership.md\n?? docs/foundation-baseline.md\n?? docs/foundation-roadmap.md\n?? packages/fynkel/tool/foundation_probe.dart\n?? tools/foundation_baseline.py",
+  "tracked_diff_sha256": "a2f7e34c18426c0097712f52d79ab2d27e4e52af2c593cb107ec2c52d4abb6b4",
+  "untracked_sha256": {
+    "benchmarks/foundation/results/2026-09-30-87e3dec8-baseline.json": "5fc918780a75e61a84c4bd994f53c5d5f9894c97b0cded2998f6ee4fe0351482",
+    "benchmarks/foundation/results/2026-09-30-87e3dec8-followup.json": "2a567fa4b2f3d76a5e16d52779b47e603f4df71268e9c5cfac58f0c6f73e1ae9",
+    "benchmarks/foundation/results/2026-09-30-87e3dec8-headless.json": "2160346b7879c8003bf625a16103aac813b0a5679f7d52439c455f9d6f753bf5",
+    "benchmarks/foundation/results/2026-09-30-87e3dec8-probe.json": "65a8598f5077774624a8862b3a6145950b6689955d4d3873ca69c12a993cb2e7",
+    "docs/decisions/ADR-0042-ecs-centered-foundation-program.md": "70c9abdf4f63a4bb8a4b1a7cee1e688c283444d6e23b323a155db899de7e6120",
+    "docs/decisions/ADR-0043-unified-world-state-and-frame-contract.md": "ed8baedd1e4abba3d29cb7031524eed2db41e44f9b751102be34340febfa1442",
+    "docs/decisions/ADR-0044-components-systems-and-gameplay-access.md": "eb0451d0b4cceb2cdcaff33d6f4ff55694a7be74552ffb5132441d0f1309a174",
+    "docs/decisions/ADR-0045-asset-readiness-and-render-resources.md": "048e412cca784da8613bf7365c3741d5a998eba4f9ebfe6190f88e363f0a54f2",
+    "docs/design/foundation-ownership.md": "44bec4eb7da1fce7d58a988cb72aac40e3c9980f57d7d773386dd93c357279f0",
+    "docs/foundation-baseline.md": "363e8a6ceebb0c684edb6dde6023f09c01d494c3ec8b534f5f94e4a657acf4a3",
+    "docs/foundation-roadmap.md": "c4d3cf9ae3959d1b54c2f1602243b68d9b0cdd72abce1128b0b28599ef715646",
+    "packages/fynkel/tool/foundation_probe.dart": "0dfe1ad309e453b20fbe0460a844d95cbb26baa6f557cecf08befeb39a9e1eaf",
+    "tools/foundation_baseline.py": "cc970e6476baa1f60dbf5eaf2a228106841dd1d6d0d14cd29719d5d5e4ae5573"
+  },
+  "machine": {
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "architecture": "arm64",
+    "cpu": "Apple M3 Max"
+  },
+  "tools": {
+    "cargo": "cargo 1.93.0 (083ac5135 2025-12-15)",
+    "dart": "Dart SDK version: 3.13.2 (stable) (Tue Aug 25 01:01:12 2026 -0700) on \"macos_arm64\"",
+    "flutter": "Flutter 3.47.2 \u2022 channel stable \u2022 https://github.com/flutter/flutter.git\nFramework \u2022 revision d3b14c8769 (5 weeks ago) \u2022 2026-08-26 16:07:51 -0700\nEngine \u2022 hash 1cf1c4773fb941c4c74a7f8bb144a8837596c0f4 (revision a804b26164) (1 months ago) \u2022 2026-08-26 18:46:13.000Z\nTools \u2022 Dart 3.13.2 \u2022 DevTools 2.60.0"
+  },
+  "selected_suites": [
+    "headless-scale"
+  ],
+  "results": [
+    {
+      "suite": "headless-scale",
+      "cwd": ".",
+      "command": [
+        "cargo",
+        "run",
+        "--release",
+        "-p",
+        "fynkel_host_headless",
+        "--locked",
+        "--",
+        "--steps",
+        "300",
+        "--satellites",
+        "1000",
+        "--json"
+      ],
+      "log": "headless-scale-0.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 0.768
+    },
+    {
+      "suite": "headless-scale",
+      "cwd": ".",
+      "command": [
+        "cargo",
+        "run",
+        "--release",
+        "-p",
+        "fynkel_host_headless",
+        "--locked",
+        "--",
+        "--steps",
+        "300",
+        "--satellites",
+        "10000",
+        "--json"
+      ],
+      "log": "headless-scale-1.log",
+      "state": "passed",
+      "exit_code": 0,
+      "seconds": 1.3
+    }
+  ],
+  "finished_utc": "2026-09-30T11:34:12.090222+00:00",
+  "raw_artifacts": "target/foundation-baseline/20260930T113409597262Z",
+  "workload_note": "Dense procedural transform updates, one hub plus requested satellites, seed42, 300 ticks per workload. Native-only: no Dart, GPU, colliders or asset streaming. Native verification was concurrently pending; these are observations rather than stable regression budgets.",
+  "workloads": [
+    {
+      "command": [
+        "cargo",
+        "run",
+        "--release",
+        "-p",
+        "fynkel_host_headless",
+        "--locked",
+        "--",
+        "--steps",
+        "300",
+        "--satellites",
+        "1000",
+        "--json"
+      ],
+      "result": {
+        "steps": 300,
+        "frames": 300,
+        "tick": 300,
+        "live_entities": 1001,
+        "commands_applied": 299300,
+        "commands_rejected": 0,
+        "events": 1001,
+        "diagnostics": 0,
+        "missed_deadlines": 0,
+        "dropped_seconds": 0.0,
+        "extract_records": 1001,
+        "checksum": "dd9a2fbc93ea4d54",
+        "step_time": {
+          "p50_us": 92,
+          "p95_us": 139,
+          "max_us": 2091
+        },
+        "extract_time": {
+          "p50_us": 189,
+          "p95_us": 255,
+          "max_us": 695
+        },
+        "frame_time": {
+          "p50_us": 301,
+          "p95_us": 444,
+          "max_us": 2898
+        },
+        "total_ms": 102.252,
+        "scene_ready": true,
+        "scene": null,
+        "input": null,
+        "physics": null,
+        "animation": null,
+        "audio": null,
+        "systems": [
+          {
+            "system": "step",
+            "entities": 1001,
+            "total_us": 32876,
+            "max_us": 2091,
+            "mean_us": 109.58667
+          },
+          {
+            "system": "commands",
+            "entities": 1001,
+            "total_us": 14784,
+            "max_us": 1584,
+            "mean_us": 49.28
+          },
+          {
+            "system": "characters",
+            "entities": 0,
+            "total_us": 152,
+            "max_us": 151,
+            "mean_us": 0.50666666
+          },
+          {
+            "system": "animation",
+            "entities": 0,
+            "total_us": 61,
+            "max_us": 50,
+            "mean_us": 0.20333333
+          },
+          {
+            "system": "rotator",
+            "entities": 0,
+            "total_us": 18,
+            "max_us": 16,
+            "mean_us": 0.06
+          },
+          {
+            "system": "oscillate",
+            "entities": 0,
+            "total_us": 5,
+            "max_us": 2,
+            "mean_us": 0.016666668
+          },
+          {
+            "system": "lifetimeDespawn",
+            "entities": 0,
+            "total_us": 1,
+            "max_us": 1,
+            "mean_us": 0.0033333334
+          },
+          {
+            "system": "emitter",
+            "entities": 0,
+            "total_us": 4,
+            "max_us": 2,
+            "mean_us": 0.013333334
+          },
+          {
+            "system": "physics",
+            "entities": 0,
+            "total_us": 130,
+            "max_us": 96,
+            "mean_us": 0.43333334
+          },
+          {
+            "system": "cameraRigs",
+            "entities": 0,
+            "total_us": 1,
+            "max_us": 1,
+            "mean_us": 0.0033333334
+          },
+          {
+            "system": "follow",
+            "entities": 0,
+            "total_us": 0,
+            "max_us": 0,
+            "mean_us": 0.0
+          },
+          {
+            "system": "lookAtCamera",
+            "entities": 0,
+            "total_us": 1,
+            "max_us": 1,
+            "mean_us": 0.0033333334
+          },
+          {
+            "system": "transforms",
+            "entities": 1001,
+            "total_us": 17083,
+            "max_us": 451,
+            "mean_us": 56.943333
+          },
+          {
+            "system": "audio",
+            "entities": 0,
+            "total_us": 4,
+            "max_us": 2,
+            "mean_us": 0.013333334
+          },
+          {
+            "system": "publish",
+            "entities": 0,
+            "total_us": 0,
+            "max_us": 0,
+            "mean_us": 0.0
+          }
+        ],
+        "memory": {
+          "native_bytes": 708817,
+          "native_peak_bytes": 1264793,
+          "resident_bytes": 5963776,
+          "residency_bytes": 0
+        }
+      }
+    },
+    {
+      "command": [
+        "cargo",
+        "run",
+        "--release",
+        "-p",
+        "fynkel_host_headless",
+        "--locked",
+        "--",
+        "--steps",
+        "300",
+        "--satellites",
+        "10000",
+        "--json"
+      ],
+      "result": {
+        "steps": 300,
+        "frames": 300,
+        "tick": 300,
+        "live_entities": 10001,
+        "commands_applied": 2990300,
+        "commands_rejected": 0,
+        "events": 10001,
+        "diagnostics": 0,
+        "missed_deadlines": 0,
+        "dropped_seconds": 0.0,
+        "extract_records": 10001,
+        "checksum": "bcdf4630bd83308c",
+        "step_time": {
+          "p50_us": 799,
+          "p95_us": 879,
+          "max_us": 11935
+        },
+        "extract_time": {
+          "p50_us": 1791,
+          "p95_us": 1949,
+          "max_us": 2357
+        },
+        "frame_time": {
+          "p50_us": 2798,
+          "p95_us": 3049,
+          "max_us": 15264
+        },
+        "total_ms": 859.6133,
+        "scene_ready": true,
+        "scene": null,
+        "input": null,
+        "physics": null,
+        "animation": null,
+        "audio": null,
+        "systems": [
+          {
+            "system": "step",
+            "entities": 10001,
+            "total_us": 252475,
+            "max_us": 11935,
+            "mean_us": 841.5833
+          },
+          {
+            "system": "commands",
+            "entities": 10001,
+            "total_us": 115394,
+            "max_us": 10401,
+            "mean_us": 384.64667
+          },
+          {
+            "system": "characters",
+            "entities": 0,
+            "total_us": 166,
+            "max_us": 164,
+            "mean_us": 0.55333334
+          },
+          {
+            "system": "animation",
+            "entities": 0,
+            "total_us": 84,
+            "max_us": 67,
+            "mean_us": 0.28
+          },
+          {
+            "system": "rotator",
+            "entities": 0,
+            "total_us": 19,
+            "max_us": 17,
+            "mean_us": 0.06333333
+          },
+          {
+            "system": "oscillate",
+            "entities": 0,
+            "total_us": 5,
+            "max_us": 3,
+            "mean_us": 0.016666668
+          },
+          {
+            "system": "lifetimeDespawn",
+            "entities": 0,
+            "total_us": 2,
+            "max_us": 1,
+            "mean_us": 0.006666667
+          },
+          {
+            "system": "emitter",
+            "entities": 0,
+            "total_us": 4,
+            "max_us": 2,
+            "mean_us": 0.013333334
+          },
+          {
+            "system": "physics",
+            "entities": 0,
+            "total_us": 150,
+            "max_us": 134,
+            "mean_us": 0.5
+          },
+          {
+            "system": "cameraRigs",
+            "entities": 0,
+            "total_us": 2,
+            "max_us": 1,
+            "mean_us": 0.006666667
+          },
+          {
+            "system": "follow",
+            "entities": 0,
+            "total_us": 0,
+            "max_us": 0,
+            "mean_us": 0.0
+          },
+          {
+            "system": "lookAtCamera",
+            "entities": 0,
+            "total_us": 1,
+            "max_us": 1,
+            "mean_us": 0.0033333334
+          },
+          {
+            "system": "transforms",
+            "entities": 10001,
+            "total_us": 136027,
+            "max_us": 1484,
+            "mean_us": 453.42334
+          },
+          {
+            "system": "audio",
+            "entities": 0,
+            "total_us": 3,
+            "max_us": 2,
+            "mean_us": 0.01
+          },
+          {
+            "system": "publish",
+            "entities": 0,
+            "total_us": 0,
+            "max_us": 0,
+            "mean_us": 0.0
+          }
+        ],
+        "memory": {
+          "native_bytes": 8176529,
+          "native_peak_bytes": 14750553,
+          "resident_bytes": 23904256,
+          "residency_bytes": 0
+        }
+      }
+    }
+  ]
+}
