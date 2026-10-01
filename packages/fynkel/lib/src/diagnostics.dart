@@ -21,7 +21,6 @@ enum DiagnosticCode {
   unknown(0),
   unknownCommand(1),
   staleEntity(2),
-  invalidTempId(3),
   invalidPayload(4),
   unknownComponent(5),
   missingComponent(6),
@@ -30,7 +29,6 @@ enum DiagnosticCode {
   physicsOwned(9),
   missedDeadline(10),
   duplicateComponent(11),
-  wrongLane(12),
   meshUnavailable(13),
   prefabUnavailable(14),
   tooManyAnchors(15),
@@ -236,8 +234,7 @@ class AuthoredBehaviour {
     known: j['known'] == true,
     data: (j['data'] as Map?)?.cast<String, Object?>() ?? const {},
     references: {
-      for (final e in ((j['references'] as Map?) ?? const {}).entries)
-        e.key as String: EntityRef.fromJson(e.value),
+      for (final e in ((j['references'] as Map?) ?? const {}).entries) e.key as String: EntityRef.fromJson(e.value),
     },
     pointer: j['pointer'] as String?,
   );
@@ -348,15 +345,13 @@ class UnloadReport {
     return UnloadReport(
       ok: j['ok'] == true,
       diagnostics: [
-        for (final d in (j['diagnostics'] as List?) ?? const [])
-          LoadDiagnostic.fromJson(d as Map<String, Object?>),
+        for (final d in (j['diagnostics'] as List?) ?? const []) LoadDiagnostic.fromJson(d as Map<String, Object?>),
       ],
       sceneId: gone?['id'] as String?,
       sceneName: gone?['name'] as String?,
       entityCount: (gone?['entities'] as num?)?.toInt() ?? 0,
       scenes: [
-        for (final s in (j['scenes'] as List?) ?? const [])
-          LoadedScene.fromJson((s as Map).cast<String, Object?>()),
+        for (final s in (j['scenes'] as List?) ?? const []) LoadedScene.fromJson((s as Map).cast<String, Object?>()),
       ],
       residency: residency == null ? const ResidencyStats() : ResidencyStats.fromJson(residency),
     );
@@ -401,8 +396,7 @@ class InstantiateReport {
     return InstantiateReport(
       ok: j['ok'] == true,
       diagnostics: [
-        for (final d in (j['diagnostics'] as List?) ?? const [])
-          LoadDiagnostic.fromJson(d as Map<String, Object?>),
+        for (final d in (j['diagnostics'] as List?) ?? const []) LoadDiagnostic.fromJson(d as Map<String, Object?>),
       ],
       prefabId: inst?['prefab'] as String?,
       prefabPath: inst?['path'] as String?,
@@ -440,21 +434,20 @@ class InstantiateReport {
 
   Iterable<LoadDiagnostic> get warnings => diagnostics.where((d) => d.severity == 'warning');
 
-  InstantiateReport withBehaviours({required int attached, required List<LoadDiagnostic> extra}) =>
-      InstantiateReport(
-        ok: ok,
-        diagnostics: [...diagnostics, ...extra],
-        prefabId: prefabId,
-        prefabPath: prefabPath,
-        name: name,
-        root: root,
-        entityCount: entityCount,
-        rejectedComponents: rejectedComponents,
-        assetCount: assetCount,
-        behaviours: behaviours,
-        behavioursAttached: attached,
-        residency: residency,
-      );
+  InstantiateReport withBehaviours({required int attached, required List<LoadDiagnostic> extra}) => InstantiateReport(
+    ok: ok,
+    diagnostics: [...diagnostics, ...extra],
+    prefabId: prefabId,
+    prefabPath: prefabPath,
+    name: name,
+    root: root,
+    entityCount: entityCount,
+    rejectedComponents: rejectedComponents,
+    assetCount: assetCount,
+    behaviours: behaviours,
+    behavioursAttached: attached,
+    residency: residency,
+  );
 }
 
 /// What [World.loadScene] / [World.loadProject] produced.
@@ -502,8 +495,7 @@ class LoadReport {
     return LoadReport(
       ok: j['ok'] == true,
       diagnostics: [
-        for (final d in (j['diagnostics'] as List?) ?? const [])
-          LoadDiagnostic.fromJson(d as Map<String, Object?>),
+        for (final d in (j['diagnostics'] as List?) ?? const []) LoadDiagnostic.fromJson(d as Map<String, Object?>),
       ],
       sceneId: scene?['id'] as String?,
       sceneName: scene?['name'] as String?,
@@ -535,8 +527,7 @@ class LoadReport {
       audio: audio == null ? const AudioAssets() : AudioAssets.fromJson(audio),
       mode: j['mode'] as String?,
       scenes: [
-        for (final s in (j['scenes'] as List?) ?? const [])
-          LoadedScene.fromJson((s as Map).cast<String, Object?>()),
+        for (final s in (j['scenes'] as List?) ?? const []) LoadedScene.fromJson((s as Map).cast<String, Object?>()),
       ],
       loadMs: ((j['timing'] as Map?)?['ms'] as num?)?.toDouble() ?? 0,
       modules: j['modules'] is Map ? Modules.fromJson((j['modules'] as Map).cast<String, Object?>()) : null,
@@ -642,45 +633,42 @@ class LoadReport {
   Iterable<LoadDiagnostic> get errors => diagnostics.where((d) => d.isError);
   Iterable<LoadDiagnostic> get warnings => diagnostics.where((d) => !d.isError);
 
-  LoadReport _copy({int? behavioursAttached, List<LoadDiagnostic>? diagnostics, String? projectDir}) =>
-      LoadReport(
-        ok: ok,
-        diagnostics: diagnostics ?? this.diagnostics,
-        sceneId: sceneId,
-        sceneName: sceneName,
-        scenePath: scenePath,
-        sceneKey: sceneKey,
-        entityCount: entityCount,
-        rejectedComponents: rejectedComponents,
-        assetCount: assetCount,
-        behaviours: behaviours,
-        behavioursAttached: behavioursAttached ?? this.behavioursAttached,
-        projectName: projectName,
-        projectDir: projectDir ?? this.projectDir,
-        cacheDir: cacheDir,
-        cacheProfile: cacheProfile,
-        startupScene: startupScene,
-        residency: residency,
-        inputActions: inputActions,
-        bindingErrors: bindingErrors,
-        physics: physics,
-        layersAndTags: layersAndTags,
-        animation: animation,
-        audio: audio,
-        mode: mode,
-        scenes: scenes,
-        loadMs: loadMs,
-        modules: modules,
-        persistent: persistent,
-        persistentObjects: persistentObjects,
-      );
+  LoadReport _copy({int? behavioursAttached, List<LoadDiagnostic>? diagnostics, String? projectDir}) => LoadReport(
+    ok: ok,
+    diagnostics: diagnostics ?? this.diagnostics,
+    sceneId: sceneId,
+    sceneName: sceneName,
+    scenePath: scenePath,
+    sceneKey: sceneKey,
+    entityCount: entityCount,
+    rejectedComponents: rejectedComponents,
+    assetCount: assetCount,
+    behaviours: behaviours,
+    behavioursAttached: behavioursAttached ?? this.behavioursAttached,
+    projectName: projectName,
+    projectDir: projectDir ?? this.projectDir,
+    cacheDir: cacheDir,
+    cacheProfile: cacheProfile,
+    startupScene: startupScene,
+    residency: residency,
+    inputActions: inputActions,
+    bindingErrors: bindingErrors,
+    physics: physics,
+    layersAndTags: layersAndTags,
+    animation: animation,
+    audio: audio,
+    mode: mode,
+    scenes: scenes,
+    loadMs: loadMs,
+    modules: modules,
+    persistent: persistent,
+    persistentObjects: persistentObjects,
+  );
 
   /// This report after the SDK attached [attached] behaviours and found
   /// [extra] problems doing so.
-  LoadReport withBehaviours({required int attached, required List<LoadDiagnostic> extra}) => _copy(
-    behavioursAttached: attached,
-    diagnostics: extra.isEmpty ? diagnostics : [...diagnostics, ...extra],
-  );
+  LoadReport withBehaviours({required int attached, required List<LoadDiagnostic> extra}) =>
+      _copy(behavioursAttached: attached, diagnostics: extra.isEmpty ? diagnostics : [...diagnostics, ...extra]);
 
   /// This report with the project directory it was loaded for.
   LoadReport withProjectDir(String dir) => _copy(projectDir: dir);
@@ -688,13 +676,7 @@ class LoadReport {
 
 /// What the world's asset store holds (`LoadReport.residency`).
 class ResidencyStats {
-  const ResidencyStats({
-    this.retained = 0,
-    this.meshes = 0,
-    this.textures = 0,
-    this.materials = 0,
-    this.bytes = 0,
-  });
+  const ResidencyStats({this.retained = 0, this.meshes = 0, this.textures = 0, this.materials = 0, this.bytes = 0});
 
   factory ResidencyStats.fromJson(Map<String, Object?> j) => ResidencyStats(
     retained: (j['retained'] as num?)?.toInt() ?? 0,

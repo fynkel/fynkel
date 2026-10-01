@@ -60,7 +60,6 @@ fn record(slot: u32, world: Mat4) -> ExtractRecord {
     ExtractRecord {
         entity: Entity::new(fynkel_contracts::WorldId(1), slot + 1, 1),
         world,
-        overridden: false,
         layer_bit: 1,
     }
 }

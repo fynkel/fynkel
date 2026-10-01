@@ -1,6 +1,6 @@
 # ADR-0043: Unified world state and frame contract
 
-**Status:** Accepted through ADR-0046 (pure-data transactions) and ADR-0047 (identity, clocks, frame order and presentation). F1 geometry/identity/clock migration is complete; F2 native transaction migration now covers existing-entity data and scoped structural edits. All built-in catalogue configuration now supports transactional reads/writes/removal and filtered queries, including live/pending object references. An owned-session binary bridge and internal Dart callback client now exercise the same journal. Ordinary SDK/callback routing remains pending.
+**Status:** Accepted through ADR-0046/0047 and clarified by [ADR-0051](ADR-0051-f2-boundaries-and-presentation-policy.md). F1 and the F2 unified gameplay-state migration are complete and [qualified](../foundation-f2-gate-report.md). F3–F8 remain separate milestones.
 **Date:** 2026-09-30  
 **Related:** ADR-0042, ADR-0004, ADR-0008, ADR-0013, ADR-0014, ADR-0035, ADR-0036; roadmap F1, F2, F4.
 

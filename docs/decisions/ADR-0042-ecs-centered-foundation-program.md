@@ -1,6 +1,6 @@
 # ADR-0042: ECS centered foundation program
 
-**Status:** Accepted for architectural direction; detailed replacement contracts remain proposed.  
+**Status:** Accepted for architectural direction. F1/F2 contracts are implemented and qualified; see the [active roadmap](../foundation-roadmap.md) for accepted later decisions and remaining milestones.
 **Date:** 2026-09-30  
 **Authority:** User agreement with the foundation review and ECS direction, followed by the request for a roadmap and ADRs.  
 **Related:** ADR-0003, ADR-0004, ADR-0007, ADR-0008, ADR-0011, ADR-0012, ADR-0036; [foundation roadmap](../foundation-roadmap.md).

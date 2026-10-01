@@ -22,6 +22,9 @@ pub(crate) struct WorldSlot {
     resources: fynkel_assets::PreparedGameplayResources,
     published: Vec<fynkel_assets::PublishedPrefab>,
     pending_bindings: Option<PendingBindings>,
+    materials: BTreeMap<fynkel_contracts::Uuid, RuntimeMaterial>,
+    meshes: BTreeMap<fynkel_contracts::Uuid, RuntimeMesh>,
+    clips: BTreeMap<fynkel_contracts::Uuid, Option<fynkel_core::animation::Clip>>,
 }
 impl WorldSlot {
     pub fn new(world: World) -> Self {
@@ -32,6 +35,9 @@ impl WorldSlot {
             resources: Default::default(),
             published: Vec::new(),
             pending_bindings: None,
+            materials: BTreeMap::new(),
+            meshes: BTreeMap::new(),
+            clips: BTreeMap::new(),
         }
     }
     pub fn is_editing(&self) -> bool {
@@ -49,6 +55,9 @@ impl WorldSlot {
         self.prepared.clear();
         self.resources = Default::default();
         self.pending_bindings = None;
+        self.clips.clear();
+        self.materials.clear();
+        self.meshes.clear();
         if let Some(session) = self.session.take() {
             self.world = Some(session.abort());
         }
@@ -157,13 +166,12 @@ pub unsafe extern "C" fn fynkel_world_gameplay_begin(
         }
     })
 }
-/// Atomically adopts the native simulation queue before opening a callback edit.
-/// Success: u32 spawn count, (u64 temp ID, entity) pairs (NULL if canceled),
-/// then u32 live count and (entity, u32 name length, UTF-8 name) pairs.
+/// Read-only live identity/name snapshot for SDK lifecycle reconciliation.
+/// Success: u32 live count and (entity, u32 name length, UTF-8 name) pairs.
 /// # Safety
 /// World must be live or NULL; out must be writable or NULL.
 #[no_mangle]
-pub unsafe extern "C" fn fynkel_world_gameplay_adopt(
+pub unsafe extern "C" fn fynkel_world_gameplay_state(
     world: *mut FynkelWorld,
     out: *mut FynkelBufferView,
 ) -> Status {
@@ -172,24 +180,19 @@ pub unsafe extern "C" fn fynkel_world_gameplay_adopt(
     }
     let status = boundary(world, |w| {
         if out.is_null() {
-            return reject(w, Status::InvalidArgument, "missing adoption output");
+            return reject(w, Status::InvalidArgument, "missing state output");
         }
         if !w.gameplay_allowed {
-            return reject(w, Status::Unsupported, "gameplay adoption unavailable");
+            return reject(w, Status::Unsupported, "gameplay state unavailable");
         }
         if w.inner.is_editing() {
-            return reject(w, Status::CommandsRejected, "adoption inside an edit");
+            return reject(
+                w,
+                Status::CommandsRejected,
+                "state reconciliation inside an edit",
+            );
         }
-        let commit = match w.inner.adopt_gameplay_commands() {
-            Ok(commit) => commit,
-            Err(error) => return reject(w, Status::CommandsRejected, error),
-        };
         let mut reply = Vec::new();
-        put32(&mut reply, commit.value.len() as u32);
-        for (id, pending) in &commit.value {
-            put64(&mut reply, *id);
-            entity(&mut reply, commit.resolve(*pending).unwrap_or(Entity::NULL));
-        }
         put32(&mut reply, w.inner.live_entities());
         for e in w.inner.ecs().entities() {
             entity(&mut reply, e);
@@ -271,6 +274,79 @@ pub unsafe extern "C" fn fynkel_world_gameplay_exchange(
                 Err(error) => reject(w, Status::CommandsRejected, error),
             };
         }
+        if let Request::RuntimeResource(kind, id, payload) = request {
+            if let Err(error) = w.inner.session.as_mut().unwrap().access(|_| Ok(())) {
+                return reject(w, Status::CommandsRejected, error);
+            }
+            let Some(assets) = &w.assets else {
+                return reject(
+                    w,
+                    Status::CommandsRejected,
+                    "runtime resources require a loaded asset store",
+                );
+            };
+            match kind {
+                29 => match decode_runtime_material(&payload) {
+                    Ok(material) => {
+                        w.inner.materials.insert(id, RuntimeMaterial::Pbr(material));
+                    }
+                    Err(error) => return reject(w, Status::CommandsRejected, error),
+                },
+                30 => match decode_runtime_mesh(&payload) {
+                    Ok(mesh) => {
+                        w.inner.meshes.insert(id, mesh);
+                    }
+                    Err(error) => return reject(w, Status::CommandsRejected, error),
+                },
+                31 => {
+                    let material = if payload.is_empty() {
+                        None
+                    } else {
+                        let (status, diagnostics, material) =
+                            crate::prepare_shader_material(assets, &payload);
+                        if status != Status::Ok {
+                            let message = diagnostics
+                                .iter()
+                                .map(|d| fynkel_document::diagnostic_json(d).to_string())
+                                .collect::<Vec<_>>()
+                                .join("; ");
+                            return reject(
+                                w,
+                                Status::CommandsRejected,
+                                format!("invalid shader material: {message}"),
+                            );
+                        }
+                        material
+                    };
+                    w.inner
+                        .materials
+                        .insert(id, RuntimeMaterial::Shader(material));
+                }
+                _ => unreachable!(),
+            }
+            w.gameplay_reply.clear();
+            return Status::Ok;
+        }
+        if let Request::RuntimeClip(id, payload) = request {
+            if let Err(error) = w.inner.session.as_mut().unwrap().access(|_| Ok(())) {
+                return reject(w, Status::CommandsRejected, error);
+            }
+            if w.assets.is_none() {
+                return reject(
+                    w,
+                    Status::CommandsRejected,
+                    "runtime clips require a loaded asset store",
+                );
+            }
+            let key = fynkel_contracts::AssetRef::new(id);
+            let clip = match decode_runtime_clip(&key, &payload) {
+                Ok(clip) => clip,
+                Err(error) => return reject(w, Status::CommandsRejected, error),
+            };
+            w.inner.clips.insert(id, clip);
+            w.gameplay_reply.clear();
+            return Status::Ok;
+        }
         if let Request::BindActions(rebinds) = request {
             return bind_actions(w, rebinds);
         }
@@ -346,6 +422,9 @@ pub unsafe extern "C" fn fynkel_world_gameplay_end(
         w.gameplay_reply.clear();
         let session = w.inner.session.take().unwrap();
         let bindings = w.inner.pending_bindings.take();
+        let clips = std::mem::take(&mut w.inner.clips);
+        let materials = std::mem::take(&mut w.inner.materials);
+        let meshes = std::mem::take(&mut w.inner.meshes);
         if commit == 0 {
             w.inner.world = Some(session.abort());
             w.inner.prepared.clear();
@@ -361,6 +440,15 @@ pub unsafe extern "C" fn fynkel_world_gameplay_end(
         w.inner.world = Some(core);
         match result {
             Ok((report, published)) => {
+                for (id, material) in materials {
+                    publish_runtime_material(w, fynkel_contracts::AssetRef::new(id), material);
+                }
+                for (id, mesh) in meshes {
+                    publish_runtime_mesh(w, fynkel_contracts::AssetRef::new(id), mesh);
+                }
+                for (id, clip) in clips {
+                    publish_runtime_clip(w, fynkel_contracts::AssetRef::new(id), clip);
+                }
                 if let Some(bindings) = bindings {
                     w.rebinds = bindings.rebinds;
                     w.load_report = bindings.report;
@@ -677,6 +765,22 @@ impl Reader<'_> {
                 self.boolean()?,
             ),
             26 => Request::AudioBus(self.audio_bus()?),
+            32 => Request::IdentityChanges,
+            33 => Request::Persist(self.owner()?),
+            34 => Request::PersistentRoots,
+            kind @ 29..=31 => {
+                let id = self
+                    .string()?
+                    .parse()
+                    .map_err(|_| "invalid resource UUID")?;
+                let length = self.u32()? as usize;
+                Request::RuntimeResource(kind, id, self.take(length)?.to_vec())
+            }
+            28 => {
+                let id = self.string()?.parse().map_err(|_| "invalid clip UUID")?;
+                let length = self.u32()? as usize;
+                Request::RuntimeClip(id, self.take(length)?.to_vec())
+            }
             27 => Request::BindActions(
                 serde_json::from_str(&self.string()?).map_err(|_| "invalid bindings JSON")?,
             ),
@@ -721,6 +825,11 @@ impl Reader<'_> {
     }
 }
 enum Request {
+    IdentityChanges,
+    Persist(GameplayEntity),
+    PersistentRoots,
+    RuntimeClip(fynkel_contracts::Uuid, Vec<u8>),
+    RuntimeResource(u32, fynkel_contracts::Uuid, Vec<u8>),
     SetAudioBus(fynkel_core::AudioBus, f32, bool),
     AudioBus(fynkel_core::AudioBus),
     BindActions(BTreeMap<String, Vec<String>>),
@@ -760,6 +869,7 @@ enum Request {
     Sound(fynkel_core::schema::PlaySoundCommandRecord),
 }
 enum Answer {
+    IdentityChanges(Vec<(GameplayEntity, Option<String>)>),
     Clone(fynkel_core::GameplayClone),
     Empty,
     Ref(Option<GameplayEntity>),
@@ -771,9 +881,14 @@ enum Answer {
 impl Request {
     fn apply(self, e: &mut GameplayEdit<'_>) -> Result<Answer, EditError> {
         Ok(match self {
-            Self::Instantiate(..) | Self::AssetJson(..) | Self::BindActions(..) => {
-                return Err(EditError::Aborted)
-            }
+            Self::IdentityChanges => Answer::IdentityChanges(e.identity_changes()?),
+            Self::Persist(owner) => Answer::Words(vec![e.dont_destroy_on_load(owner)? as u32]),
+            Self::PersistentRoots => Answer::Refs(e.persistent_roots()?),
+            Self::Instantiate(..)
+            | Self::AssetJson(..)
+            | Self::BindActions(..)
+            | Self::RuntimeClip(..)
+            | Self::RuntimeResource(..) => return Err(EditError::Aborted),
             Self::SetAudioBus(bus, volume, muted) => {
                 e.set_audio_bus(bus, volume, muted)?;
                 Answer::Empty
@@ -926,6 +1041,17 @@ impl Answer {
     fn encode(self, seq: u64, world: u64, pending: &mut Vec<PendingEntity>) -> Vec<u8> {
         let mut b = Vec::new();
         match self {
+            Self::IdentityChanges(changes) => {
+                put32(&mut b, changes.len() as u32);
+                for (owner, name) in changes {
+                    reference(&mut b, Some(owner), seq, world, pending);
+                    put32(&mut b, name.is_some() as u32);
+                    if let Some(name) = name {
+                        put32(&mut b, name.len() as u32);
+                        b.extend(name.as_bytes());
+                    }
+                }
+            }
             Self::Empty => {}
             Self::Clone(tree) => {
                 reference(&mut b, Some(tree.root.into()), seq, world, pending);
@@ -980,6 +1106,130 @@ impl Answer {
     }
 }
 
+/// Shared validation for the owned edit protocol and the direct native adapter.
+pub(crate) enum RuntimeMaterial {
+    Pbr(Option<fynkel_assets::PbrMaterial>),
+    Shader(Option<fynkel_assets::CustomMaterialPayload>),
+}
+pub(crate) struct RuntimeMesh {
+    mesh: Option<fynkel_assets::MeshPayload>,
+    collision: Option<fynkel_core::physics::PreparedMesh>,
+}
+pub(crate) fn decode_runtime_material(
+    payload: &[u8],
+) -> Result<Option<fynkel_assets::PbrMaterial>, &'static str> {
+    if payload.is_empty() {
+        return Ok(None);
+    }
+    let m = fynkel_wire::material::decode_material(payload).ok_or("invalid material payload")?;
+    if !m.base_color.is_finite()
+        || !m.emissive.is_finite()
+        || ![
+            m.metallic,
+            m.roughness,
+            m.emissive_strength,
+            m.normal_scale,
+            m.occlusion_strength,
+            m.alpha_cutoff,
+        ]
+        .iter()
+        .all(|v| v.is_finite())
+    {
+        return Err("material values must be finite");
+    }
+    Ok(Some(m))
+}
+pub(crate) fn publish_runtime_material(
+    w: &mut FynkelWorld,
+    key: fynkel_contracts::AssetRef,
+    material: RuntimeMaterial,
+) {
+    let assets = w.assets.as_ref().expect("prepared asset store");
+    match material {
+        RuntimeMaterial::Pbr(m) => assets.set_runtime_material(&key, m),
+        RuntimeMaterial::Shader(m) => assets.set_runtime_custom_material(&key, m),
+    }
+}
+pub(crate) fn decode_runtime_mesh(payload: &[u8]) -> Result<RuntimeMesh, &'static str> {
+    if payload.is_empty() {
+        return Ok(RuntimeMesh {
+            mesh: None,
+            collision: None,
+        });
+    }
+    let mesh = fynkel_assets::decode_mesh(payload).ok_or("invalid mesh payload")?;
+    if mesh.is_skinned()
+        || mesh.indices.is_empty()
+        || mesh.indices.len() % 3 != 0
+        || !mesh.vertices.iter().all(|v| {
+            v.position
+                .iter()
+                .chain(&v.normal)
+                .chain(&v.tangent)
+                .chain(&v.uv0)
+                .chain(&v.uv1)
+                .chain(&v.color)
+                .all(|x| x.is_finite())
+        })
+    {
+        return Err("invalid runtime mesh geometry");
+    }
+    let positions: Vec<_> = mesh.vertices.iter().map(|v| v.position).collect();
+    // Renderable meshes above the collision budget remain valid render assets.
+    // As before, colliders report meshUnavailable at the next physics step.
+    let collision = fynkel_core::physics::PreparedMesh::new(&positions, &mesh.indices).ok();
+    Ok(RuntimeMesh {
+        mesh: Some(mesh),
+        collision,
+    })
+}
+pub(crate) fn publish_runtime_mesh(
+    w: &mut FynkelWorld,
+    key: fynkel_contracts::AssetRef,
+    mesh: RuntimeMesh,
+) {
+    w.core_mut()
+        .physics_mut()
+        .replace_prepared_mesh(&key, mesh.collision);
+    w.assets
+        .as_ref()
+        .expect("prepared asset store")
+        .set_runtime_mesh(&key, mesh.mesh);
+}
+
+pub(crate) fn decode_runtime_clip(
+    key: &fynkel_contracts::AssetRef,
+    payload: &[u8],
+) -> Result<Option<fynkel_core::animation::Clip>, &'static str> {
+    if payload.is_empty() {
+        return Ok(None);
+    }
+    let clip = fynkel_assets::decode_animation(payload)
+        .and_then(|p| fynkel_assets::clip_from_payload(key.to_string(), p))
+        .ok_or("invalid runtime animation clip")?;
+    clip.validate()
+        .map_err(|_| "invalid runtime animation clip")?;
+    Ok(Some(clip))
+}
+
+/// Only validated clips and a stable asset store may reach publication.
+pub(crate) fn publish_runtime_clip(
+    world: &mut FynkelWorld,
+    key: fynkel_contracts::AssetRef,
+    clip: Option<fynkel_core::animation::Clip>,
+) {
+    world
+        .assets
+        .as_ref()
+        .expect("validated clip asset store")
+        .set_runtime_clip(&key, clip.clone())
+        .expect("validated runtime clip");
+    // Removal preserves already-playing clips, as the direct API has always done.
+    if let Some(clip) = clip {
+        world.core_mut().register_clip(key, clip);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1018,6 +1268,40 @@ mod tests {
             .into_iter()
             .flat_map(u32::to_le_bytes)
             .collect()
+    }
+
+    #[test]
+    fn runtime_resource_protocol_rejects_truncation_and_missing_assets_atomically() {
+        unsafe {
+            let w = fixture();
+            for operation in 28..=31 {
+                let mut request = Vec::new();
+                put32(&mut request, 1);
+                put32(&mut request, operation);
+                let id = "d0000000-0000-4000-8000-000000000099";
+                put32(&mut request, id.len() as u32);
+                request.extend(id.as_bytes());
+                put32(&mut request, 0);
+                for length in 0..=request.len() {
+                    let sequence = begin(w);
+                    assert_eq!(exchange(w, sequence, &spawn_request()), Status::Ok);
+                    assert_eq!(
+                        exchange(w, sequence, &request[..length]),
+                        if length == request.len() {
+                            Status::CommandsRejected
+                        } else {
+                            Status::Protocol
+                        }
+                    );
+                    assert_eq!(end(w, sequence, 1), Status::CommandsRejected);
+                    assert_eq!((*w).inner.live_entities(), 0);
+                    assert!((*w).inner.clips.is_empty());
+                    assert!((*w).inner.materials.is_empty());
+                    assert!((*w).inner.meshes.is_empty());
+                }
+            }
+            drop(Box::from_raw(w));
+        }
     }
 
     #[test]
@@ -1386,77 +1670,57 @@ mod tests {
         }
     }
     #[test]
-    fn adoption_report_resolves_live_and_canceled_spawns_without_replay() {
+    fn lifecycle_snapshot_is_read_only_and_reports_current_identity_and_name() {
         unsafe {
             let w = fixture();
-            (*w).inner.submit(
-                fynkel_core::Lane::Simulation,
-                vec![
-                    fynkel_core::Command::Spawn {
-                        temp_id: 3,
-                        transform: Default::default(),
-                        parent: None,
-                        name: Some("kept".into()),
-                    },
-                    fynkel_core::Command::Spawn {
-                        temp_id: 4,
-                        transform: Default::default(),
-                        parent: None,
-                        name: None,
-                    },
-                    fynkel_core::Command::Destroy(Entity::temp(4)),
-                ],
-            );
+            let commit = (*w)
+                .inner
+                .edit_gameplay(|edit| {
+                    let kept = edit.spawn("kept", Transform::IDENTITY, None)?;
+                    let canceled = edit.spawn("canceled", Transform::IDENTITY, None)?;
+                    edit.destroy(canceled)?;
+                    Ok(kept)
+                })
+                .unwrap();
+            let kept = commit.resolve(commit.value).unwrap();
             let mut out = FynkelBufferView::empty();
-            assert_eq!(fynkel_world_gameplay_adopt(w, &mut out), Status::Ok);
-            let bytes = &(*w).gameplay_reply;
-            assert_eq!(u32::from_le_bytes(bytes[0..4].try_into().unwrap()), 2);
-            assert_eq!(u64::from_le_bytes(bytes[4..12].try_into().unwrap()), 3);
-            assert!(bytes[12..28].iter().any(|b| *b != 0));
-            assert_eq!(u64::from_le_bytes(bytes[28..36].try_into().unwrap()), 4);
-            assert_eq!(&bytes[36..52], &[0; 16]);
-            assert_eq!(u32::from_le_bytes(bytes[52..56].try_into().unwrap()), 1);
-            assert_eq!(&bytes[76..], b"kept");
-            assert_eq!((*w).inner.tick(), 0);
-            (*w).inner.step();
-            assert_eq!((*w).inner.live_entities(), 1);
-            assert!(!(*w)
+            for _ in 0..2 {
+                assert_eq!(fynkel_world_gameplay_state(w, &mut out), Status::Ok);
+                let bytes = &(*w).gameplay_reply;
+                assert_eq!(u32::from_le_bytes(bytes[..4].try_into().unwrap()), 1);
+                assert_eq!(&bytes[24..], b"kept");
+                assert_eq!((*w).inner.tick(), 0);
+            }
+            (*w).inner.edit_gameplay(|edit| edit.destroy(kept)).unwrap();
+            assert_eq!(fynkel_world_gameplay_state(w, &mut out), Status::Ok);
+            assert_eq!((*w).gameplay_reply, 0u32.to_le_bytes());
+            assert!((*w)
                 .inner
                 .drain_events()
                 .iter()
-                .any(|e| matches!(e.payload, fynkel_core::EventPayload::Spawned { .. })));
+                .any(|event| matches!(event.payload,
+                fynkel_core::EventPayload::Destroyed { entity, .. } if entity == kept)));
             fynkel_world_destroy(w);
         }
     }
 
     #[test]
-    fn adoption_rejection_preserves_queue_and_active_session_is_sticky() {
+    fn lifecycle_snapshot_checks_nulls_and_rejects_active_session_stickily() {
         unsafe {
             let w = fixture();
-            (*w).inner.submit(
-                fynkel_core::Lane::Simulation,
-                vec![fynkel_core::Command::SetName {
-                    entity: Entity::NULL,
-                    name: "invalid".into(),
-                }],
-            );
             let mut out = FynkelBufferView::empty();
             assert_eq!(
-                fynkel_world_gameplay_adopt(w, std::ptr::null_mut()),
+                fynkel_world_gameplay_state(w, std::ptr::null_mut()),
                 Status::InvalidArgument
             );
-            for _ in 0..2 {
-                assert_eq!(
-                    fynkel_world_gameplay_adopt(w, &mut out),
-                    Status::CommandsRejected
-                );
-            }
-            let report = (*w).inner.step();
-            assert_eq!(report.rejected, 1);
+            assert_eq!(
+                fynkel_world_gameplay_state(std::ptr::null_mut(), &mut out),
+                Status::InvalidArgument
+            );
             let seq = begin(w);
             assert_eq!(exchange(w, seq, &spawn_request()), Status::Ok);
             assert_eq!(
-                fynkel_world_gameplay_adopt(w, &mut out),
+                fynkel_world_gameplay_state(w, &mut out),
                 Status::CommandsRejected
             );
             assert_eq!(end(w, seq, 1), Status::CommandsRejected);
@@ -1554,6 +1818,59 @@ mod tests {
             fynkel_world_destroy(w);
         }
     }
+    #[test]
+    fn immediate_sound_protocol_and_edit_exclusion_preserve_pending_data() {
+        unsafe {
+            let w = fixture();
+            let record = fynkel_core::schema::PlaySoundCommandRecord {
+                clip: fynkel_core::AssetRef::default(),
+                bus: fynkel_core::AudioBus::Sfx,
+                volume: 1.0,
+                pitch: 1.0,
+                priority: 0,
+            };
+            let mut body = vec![0; 40];
+            record.encode(&mut body, &mut StringTable::new());
+            assert_eq!(
+                fynkel_world_audio_play(std::ptr::null_mut(), body.as_ptr(), 40),
+                Status::InvalidArgument
+            );
+            assert_eq!(
+                fynkel_world_audio_play(w, std::ptr::null(), 40),
+                Status::InvalidArgument
+            );
+            assert_eq!(
+                fynkel_world_audio_play(w, body.as_ptr(), 39),
+                Status::InvalidArgument
+            );
+            let mut invalid = body.clone();
+            invalid[24..28].copy_from_slice(&u32::MAX.to_le_bytes());
+            assert_eq!(
+                fynkel_world_audio_play(w, invalid.as_ptr(), 40),
+                Status::Protocol
+            );
+            let seq = begin(w);
+            assert_eq!(exchange(w, seq, &spawn_request()), Status::Ok);
+            assert_eq!(
+                fynkel_world_audio_play(w, body.as_ptr(), 40),
+                Status::CommandsRejected
+            );
+            assert_eq!(end(w, seq, 1), Status::CommandsRejected);
+            assert_eq!((*w).inner.live_entities(), 0);
+            assert_eq!((*w).inner.audio_stats().started, 0);
+            assert_eq!((*w).inner.tick(), 0);
+            assert_eq!(
+                fynkel_world_audio_play(w, body.as_ptr(), 40),
+                Status::CommandsRejected
+            );
+            assert_eq!(
+                (*w).inner.diagnostics().last().unwrap().code,
+                fynkel_contracts::DiagnosticCode::SOUND_UNAVAILABLE
+            );
+            fynkel_world_destroy(w);
+        }
+    }
+
     #[test]
     fn malformed_audio_controls_fail_stickily() {
         unsafe {

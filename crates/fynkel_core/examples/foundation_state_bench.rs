@@ -1,7 +1,7 @@
 //! F0 strategy comparison: staging + validation + commit + native tick + extraction.
 mod state_kernel;
 use fynkel_contracts::Entity;
-use fynkel_core::{memory, Command, EventPayload, Lane, Transform};
+use fynkel_core::{memory, Command, Transform};
 use serde_json::json;
 use state_kernel::{Health, Kernel, Key, Strategy, Transaction};
 use std::{hint::black_box, time::Instant};
@@ -82,25 +82,11 @@ fn workload(strategy: Strategy, count: usize, dense: bool) -> serde_json::Value 
 
 fn current_partial_apply() -> serde_json::Value {
     let mut world = fynkel_core::World::new(fynkel_core::WorldConfig::default());
-    world.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id: 1,
-            transform: Transform::IDENTITY,
-            parent: None,
-            name: Some("before".into()),
-        }],
-    );
-    world.step();
-    let entity = world
-        .drain_events()
-        .into_iter()
-        .find_map(|e| match e.payload {
-            EventPayload::Spawned { entity, .. } => Some(entity),
-            _ => None,
-        })
+    let commit = world
+        .edit_gameplay(|edit| edit.spawn("before", Transform::IDENTITY, None))
         .unwrap();
-    let rejections = world.apply_now(vec![
+    let entity = commit.resolve(commit.value).unwrap();
+    let rejections = world.apply_gameplay_now(vec![
         Command::SetName {
             entity,
             name: "after".into(),

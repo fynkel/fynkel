@@ -6,14 +6,13 @@
 
 use std::ptr;
 
-use fynkel_contracts::{Entity, EventKind, Status};
-use fynkel_core::schema::*;
-use fynkel_core::Lane;
-use fynkel_native::buffer::{self, BufferKind, Writer};
+use fynkel_contracts::Status;
 use fynkel_native::*;
 use fynkel_scene::Transform;
-use fynkel_wire::{get_u32, WireRecord};
 use glam::Vec3;
+#[path = "support/edit.rs"]
+mod edit;
+use edit::Edit;
 
 // The counting allocator is `fynkel_native`'s own (`fynkel_core::memory`,
 // M3-16): this test binary links the crate that installs it, so the
@@ -30,51 +29,36 @@ fn cycle() {
     let w = unsafe { fynkel_world_create(rt, ptr::null(), std::ptr::null_mut()) };
     assert!(!w.is_null());
 
-    let mut writer = Writer::begin(Vec::new(), BufferKind::Commands);
-    writer.command(
-        1,
-        &SpawnCommand {
-            temp_id: 1,
-            transform: Transform::IDENTITY,
-            parent: None,
-            name: "hub".into(),
-        },
-    );
-    submit(w, &writer.finish());
-    step(w);
-    let hub = spawned(w)[0];
-
-    let mut writer = Writer::begin(Vec::new(), BufferKind::Commands);
+    let mut edit = Edit::new(w);
+    let hub = edit.spawn("hub", Transform::IDENTITY, None);
+    let mut pending = Vec::new();
     for i in 0..ENTITIES {
-        writer.command(
-            1,
-            &SpawnCommand {
-                temp_id: 2 + i,
-                transform: Transform::from_position(Vec3::new(i as f32, 0.0, 0.0)),
-                parent: Some(hub),
-                name: format!("e{i}"),
-            },
-        );
+        pending.push(edit.spawn(
+            &format!("e{i}"),
+            Transform::from_position(Vec3::new(i as f32, 0.0, 0.0)),
+            Some(hub),
+        ));
     }
-    submit(w, &writer.finish());
-    step(w);
-    let entities = spawned(w);
+    let commit = edit.commit();
+    let hub = commit.resolve(hub);
+    let entities: Vec<_> = pending
+        .into_iter()
+        .map(|reference| commit.resolve(reference))
+        .collect();
     assert_eq!(entities.len(), ENTITIES as usize);
+    step(w);
     let bits = entities.clone();
     unsafe { fynkel_world_subscribe(w, 1, bits.as_ptr(), bits.len() as u32, 1) };
 
     for t in 0..TICKS {
-        let mut writer = Writer::begin(Vec::new(), BufferKind::Commands);
-        for (i, e) in entities.iter().enumerate() {
-            writer.command(
-                3,
-                &SetTransformCommand {
-                    entity: *e,
-                    transform: Transform::from_position(Vec3::new(i as f32, t as f32, 0.0)),
-                },
+        let mut edit = Edit::new(w);
+        for (i, entity) in entities.iter().enumerate() {
+            edit.set_transform(
+                *entity,
+                Transform::from_position(Vec3::new(i as f32, t as f32, 0.0)),
             );
         }
-        submit(w, &writer.finish());
+        edit.commit();
         step(w);
         let snap = unsafe { fynkel_world_snapshot(w) };
         assert!(snap.length > 0);
@@ -93,11 +77,11 @@ fn cycle() {
     unsafe { fynkel_world_query(w, &q, &mut out) };
     assert!(out.length > 0);
 
-    let mut writer = Writer::begin(Vec::new(), BufferKind::Commands);
-    for e in entities.iter().take(ENTITIES as usize / 2) {
-        writer.command(2, &DestroyCommand { entity: *e });
+    let mut edit = Edit::new(w);
+    for entity in entities.iter().take(ENTITIES as usize / 2) {
+        edit.destroy(*entity);
     }
-    submit(w, &writer.finish());
+    edit.commit();
     step(w);
     unsafe { fynkel_world_drain_events(w) };
 
@@ -107,46 +91,10 @@ fn cycle() {
     }
 }
 
-fn submit(w: *mut FynkelWorld, buf: &[u8]) {
-    let mut r = FynkelSubmitResult::default();
-    let s = unsafe {
-        fynkel_world_submit_commands(
-            w,
-            Lane::Simulation as u32,
-            buf.as_ptr(),
-            buf.len() as u32,
-            &mut r,
-        )
-    };
-    assert_eq!((s, r.rejected), (Status::Ok, 0));
-}
-
 fn step(w: *mut FynkelWorld) {
     let mut r = FynkelStepResult::default();
     assert_eq!(unsafe { fynkel_world_step(w, &mut r) }, Status::Ok);
     assert_eq!(r.commands_rejected, 0);
-}
-
-fn spawned(w: *mut FynkelWorld) -> Vec<Entity> {
-    let v = unsafe { fynkel_world_drain_events(w) };
-    let b = unsafe { std::slice::from_raw_parts(v.data, v.length as usize) };
-    let (h, records, _) = buffer::validate(b, BufferKind::Events).unwrap();
-    let mut out = Vec::new();
-    let mut off = 0;
-    for _ in 0..h.record_count {
-        let kind = get_u32(records, off);
-        let size = get_u32(records, off + 4) as usize;
-        off += EventHeader::SIZE;
-        if kind == EventKind::SPAWNED.0 {
-            out.push(
-                SpawnedEvent::decode(&records[off..off + size], &[])
-                    .unwrap()
-                    .entity,
-            );
-        }
-        off += size;
-    }
-    out
 }
 
 #[test]

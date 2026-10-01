@@ -1,6 +1,6 @@
 //! `fynkel_native` — the C ABI (`include/fynkel.h`) over `fynkel_core`.
 //!
-//! ABI v3 (blueprint §5.3, ADR-0004, ADR-0014). Every exported function:
+//! ABI v4 (blueprint §5.3, ADR-0004, ADR-0014). Every exported function:
 //! * accepts NULL and returns an error status instead of crashing;
 //! * runs inside `catch_unwind`; a panic poisons the world and returns
 //!   `FYNKEL_STATUS_PANIC`;
@@ -96,7 +96,6 @@ pub struct FynkelWorld {
 
 #[derive(Default)]
 struct Counters {
-    submit_calls: u64,
     step_calls: u64,
     query_calls: u64,
     bytes_in: u64,
@@ -163,13 +162,6 @@ pub struct FynkelFramePlan {
 
 #[repr(C)]
 #[derive(Default)]
-pub struct FynkelSubmitResult {
-    pub accepted: u32,
-    pub rejected: u32,
-}
-
-#[repr(C)]
-#[derive(Default)]
 pub struct FynkelStepResult {
     pub tick: u64,
     pub simulation_elapsed: f64,
@@ -216,14 +208,12 @@ pub struct FynkelQueryDesc {
 pub struct FynkelWorldStats {
     pub tick: u64,
     pub frame: u64,
-    pub submit_calls: u64,
     pub step_calls: u64,
     pub query_calls: u64,
     pub bytes_in: u64,
     pub bytes_out: u64,
     pub live_entities: u32,
     pub subscriptions: u32,
-    pub staged_commands: u32,
     pub poisoned: u32,
     /// Memory and the subscription budget (M3-16, blueprint §15.4 / C5):
     /// the last snapshot's bytes, the largest so far, the host's ceiling
@@ -316,6 +306,8 @@ impl FynkelWorld {
                 self.prefabs.clear();
             }
         }
+        self.inner
+            .set_command_resource_source(Some(std::sync::Arc::new(assets.clone())));
         self.assets = Some(assets);
     }
 
@@ -329,67 +321,6 @@ impl FynkelWorld {
     /// The residency store of the last successful load, if any.
     pub fn assets(&self) -> Option<&fynkel_assets::Assets> {
         self.assets.as_ref()
-    }
-
-    /// Registers from the cache the clip, skin or sound a command names
-    /// before the batch is applied (M3-19, M3-11): a `Play`/`Crossfade` of
-    /// a clip a loaded scene never named, an `Animator`/`Skin`/`AudioSource`
-    /// set from a behaviour, a `PlaySound`. A clip the cache cannot read
-    /// stays unregistered and the component reports `CLIP_UNAVAILABLE` /
-    /// `SOUND_UNAVAILABLE` at the tick.
-    fn register_animation_assets(&mut self, commands: &[bridge::IndexedCommand]) {
-        use fynkel_core::components::ComponentValue;
-        use fynkel_core::{AnimateOp, Command};
-        let Some(assets) = self.assets.clone() else {
-            return;
-        };
-        for (_, c) in commands {
-            let Ok(c) = c else { continue };
-            match c {
-                Command::PlaySound { clip, .. } => {
-                    let _ = assets.register_sound(clip, &mut self.inner);
-                }
-                Command::SetComponent {
-                    value: ComponentValue::AudioSource(a),
-                    ..
-                } => {
-                    let _ = assets.register_sound(&a.clip, &mut self.inner);
-                }
-                Command::Animate {
-                    op:
-                        AnimateOp::Play { clip, .. }
-                        | AnimateOp::Crossfade { clip, .. }
-                        | AnimateOp::PlayOneShot { motion: clip, .. },
-                    ..
-                } => {
-                    let _ = assets.register_clip(clip, &mut self.inner);
-                }
-                Command::SetComponent {
-                    value: ComponentValue::Animator(a),
-                    ..
-                } => {
-                    let _ = assets.register_clip(&a.clip, &mut self.inner);
-                    if let Some(c) = &a.controller {
-                        let _ = assets.register_controller(c, &mut self.inner);
-                    }
-                }
-                Command::SetComponent {
-                    value: ComponentValue::Skin(k),
-                    ..
-                } => {
-                    let _ = assets.register_skin(&k.skin, &mut self.inner);
-                }
-                // A mesh collider or physics material from code (ADR-0026
-                // §4): what a load would have registered for it.
-                Command::SetComponent {
-                    value: ComponentValue::Collider(c),
-                    ..
-                } => {
-                    let _ = assets.register_collider(c, self.inner.physics_mut());
-                }
-                _ => {}
-            }
-        }
     }
 
     /// The subscription budget diagnostic (C5): `SNAPSHOT_BUDGET` once
@@ -578,52 +509,6 @@ pub unsafe extern "C" fn fynkel_world_snap_interpolation(world: *mut FynkelWorld
     })
 }
 
-/// # Safety
-/// `buffer` must point to `length` readable bytes for the call; `out_result` may be NULL.
-#[no_mangle]
-pub unsafe extern "C" fn fynkel_world_submit_commands(
-    world: *mut FynkelWorld,
-    lane: u32,
-    buffer: *const u8,
-    length: u32,
-    out_result: *mut FynkelSubmitResult,
-) -> Status {
-    let Some(lane) = Lane::from_u32(lane) else {
-        return Status::InvalidArgument;
-    };
-    if buffer.is_null() && length != 0 {
-        return Status::InvalidArgument;
-    }
-    let bytes: &[u8] = if length == 0 {
-        &[]
-    } else {
-        std::slice::from_raw_parts(buffer, length as usize)
-    };
-    guarded(world, |w| {
-        w.stats.submit_calls += 1;
-        w.stats.bytes_in += bytes.len() as u64;
-        let commands = match bridge::decode_commands(bytes) {
-            Ok(v) => v,
-            Err(e) => {
-                log::warn!("fynkel_world_submit_commands: protocol error {e:?}");
-                return Status::Protocol;
-            }
-        };
-        w.register_animation_assets(&commands);
-        let report = w.inner.submit_indexed(lane, commands);
-        if lane == Lane::Presentation {
-            w.rebuild_diagnostics();
-        }
-        if let Some(out) = out_result.as_mut() {
-            *out = FynkelSubmitResult {
-                accepted: report.accepted,
-                rejected: report.rejected,
-            };
-        }
-        report.status
-    })
-}
-
 /// A material made at runtime (ADR-0026 §4): see the header.
 ///
 /// # Safety
@@ -642,20 +527,19 @@ pub unsafe extern "C" fn fynkel_world_set_material(
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(std::slice::from_raw_parts(id, 16));
     let key = fynkel_contracts::AssetRef::new(fynkel_contracts::Uuid(bytes));
-    let material = if payload_len == 0 {
-        None
+    let payload = if payload_len == 0 {
+        &[][..]
     } else {
-        let payload = std::slice::from_raw_parts(payload, payload_len as usize);
-        match fynkel_wire::material::decode_material(payload) {
-            Some(m) => Some(m),
-            None => return Status::InvalidArgument,
-        }
+        std::slice::from_raw_parts(payload, payload_len as usize)
+    };
+    let Ok(material) = gameplay::decode_runtime_material(payload) else {
+        return Status::InvalidArgument;
     };
     guarded(world, move |w| {
-        let Some(assets) = &w.assets else {
+        if w.assets.is_none() {
             return Status::LoadFailed;
-        };
-        assets.set_runtime_material(&key, material);
+        }
+        gameplay::publish_runtime_material(w, key, gameplay::RuntimeMaterial::Pbr(material));
         Status::Ok
     })
 }
@@ -724,13 +608,28 @@ fn shader_material(
     key: &fynkel_contracts::AssetRef,
     text: &[u8],
 ) -> (Status, Vec<fynkel_contracts::Diagnostic>) {
+    let (status, diagnostics, payload) = prepare_shader_material(assets, text);
+    if status == Status::Ok {
+        assets.set_runtime_custom_material(key, payload);
+    }
+    (status, diagnostics)
+}
+
+fn prepare_shader_material(
+    assets: &fynkel_assets::Assets,
+    text: &[u8],
+) -> (
+    Status,
+    Vec<fynkel_contracts::Diagnostic>,
+    Option<fynkel_assets::CustomMaterialPayload>,
+) {
     use fynkel_contracts::{Code, Diagnostic};
     let Ok(text) = std::str::from_utf8(text) else {
-        return (Status::InvalidArgument, Vec::new());
+        return (Status::InvalidArgument, Vec::new(), None);
     };
     let material = match fynkel_document::Material::parse(None, text) {
         Ok(m) => m,
-        Err(d) => return (Status::InvalidArgument, d),
+        Err(d) => return (Status::InvalidArgument, d, None),
     };
     let mut diagnostics = material.read_diagnostics().to_vec();
     let Ok(shader_id) = material.shader.parse::<fynkel_contracts::Uuid>() else {
@@ -738,30 +637,29 @@ fn shader_material(
             Code::MATERIAL_UNKNOWN_SHADER,
             format!("`{}` is not a shader asset's id", material.shader),
         ));
-        return (Status::InvalidArgument, diagnostics);
+        return (Status::InvalidArgument, diagnostics, None);
     };
     let shader = match assets.shader_source(shader_id) {
         Ok(text) => fynkel_shader::parse(None, &text),
         Err(d) => {
             diagnostics.push(d);
-            return (Status::LoadFailed, diagnostics);
+            return (Status::LoadFailed, diagnostics, None);
         }
     };
     let shader = match shader {
         Ok(s) => s,
         Err(d) => {
             diagnostics.extend(d);
-            return (Status::LoadFailed, diagnostics);
+            return (Status::LoadFailed, diagnostics, None);
         }
     };
     let (payload, checked) = material.custom_payload(&shader);
     diagnostics.extend(checked);
     match payload {
         Some(p) if !fynkel_contracts::has_errors(&diagnostics) => {
-            assets.set_runtime_custom_material(key, Some(p));
-            (Status::Ok, diagnostics)
+            (Status::Ok, diagnostics, Some(p))
         }
-        _ => (Status::InvalidArgument, diagnostics),
+        _ => (Status::InvalidArgument, diagnostics, None),
     }
 }
 
@@ -783,45 +681,19 @@ pub unsafe extern "C" fn fynkel_world_set_mesh(
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(std::slice::from_raw_parts(id, 16));
     let key = fynkel_contracts::AssetRef::new(fynkel_contracts::Uuid(bytes));
-    let mesh = if payload_len == 0 {
-        None
+    let payload = if payload_len == 0 {
+        &[][..]
     } else {
-        let payload = std::slice::from_raw_parts(payload, payload_len as usize);
-        match fynkel_assets::decode_mesh(payload) {
-            Some(m) if !m.is_skinned() && !m.indices.is_empty() && m.indices.len() % 3 == 0 => {
-                let finite = m.vertices.iter().all(|v| {
-                    v.position
-                        .iter()
-                        .chain(&v.normal)
-                        .chain(&v.tangent)
-                        .chain(&v.uv0)
-                        .chain(&v.uv1)
-                        .chain(&v.color)
-                        .all(|x| x.is_finite())
-                });
-                if !finite {
-                    return Status::InvalidArgument;
-                }
-                Some(m)
-            }
-            _ => return Status::InvalidArgument,
-        }
+        std::slice::from_raw_parts(payload, payload_len as usize)
+    };
+    let Ok(mesh) = gameplay::decode_runtime_mesh(payload) else {
+        return Status::InvalidArgument;
     };
     guarded(world, move |w| {
-        let Some(assets) = w.assets.clone() else {
+        if w.assets.is_none() {
             return Status::LoadFailed;
-        };
-        // The mesh colliders built from it follow at the next step (one
-        // over the triangle limit reports it there).
-        let physics = w.core_mut().physics_mut();
-        if physics.uses_mesh(&key) {
-            let positions: Option<Vec<[f32; 3]>> = mesh
-                .as_ref()
-                .map(|m| m.vertices.iter().map(|v| v.position).collect());
-            let triangles = mesh.as_ref().map(|m| m.indices.as_slice());
-            let _ = physics.replace_mesh(&key, positions.as_deref().zip(triangles));
         }
-        assets.set_runtime_mesh(&key, mesh);
+        gameplay::publish_runtime_mesh(w, key, mesh);
         Status::Ok
     })
 }
@@ -844,29 +716,19 @@ pub unsafe extern "C" fn fynkel_world_set_clip(
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(std::slice::from_raw_parts(id, 16));
     let key = fynkel_contracts::AssetRef::new(fynkel_contracts::Uuid(bytes));
-    let clip = if payload_len == 0 {
-        None
+    let payload = if payload_len == 0 {
+        &[][..]
     } else {
-        let payload = std::slice::from_raw_parts(payload, payload_len as usize);
-        let Some(clip) = fynkel_assets::decode_animation(payload)
-            .and_then(|p| fynkel_assets::clip_from_payload(key.to_string(), p))
-        else {
-            return Status::InvalidArgument;
-        };
-        Some(clip)
+        std::slice::from_raw_parts(payload, payload_len as usize)
+    };
+    let Ok(clip) = gameplay::decode_runtime_clip(&key, payload) else {
+        return Status::InvalidArgument;
     };
     guarded(world, move |w| {
-        let Some(assets) = w.assets.clone() else {
+        if w.assets.is_none() {
             return Status::LoadFailed;
-        };
-        if assets.set_runtime_clip(&key, clip.clone()).is_err() {
-            return Status::InvalidArgument;
         }
-        // The world's copy follows at once; a removed clip stays there for
-        // the animators already playing it.
-        if let Some(clip) = clip {
-            w.core_mut().register_clip(key, clip);
-        }
+        gameplay::publish_runtime_clip(w, key, clip);
         Status::Ok
     })
 }
@@ -1161,6 +1023,49 @@ pub unsafe extern "C" fn fynkel_world_project(
     status
 }
 
+/// Immediate one-shot audio, with a fixed PlaySound record and its string tail.
+/// There is no command envelope, queue, transaction sequence or tick advancement.
+/// # Safety
+/// World must be live or NULL. Non-NULL buffer must contain length readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_audio_play(
+    world: *mut FynkelWorld,
+    buffer: *const u8,
+    length: u32,
+) -> Status {
+    guarded(world, |w| {
+        use fynkel_wire::WireRecord;
+        if buffer.is_null() || length < 40 {
+            return Status::InvalidArgument;
+        }
+        let bytes = std::slice::from_raw_parts(buffer, length as usize);
+        let Ok(sound) =
+            fynkel_core::schema::PlaySoundCommandRecord::decode(&bytes[..40], &bytes[40..])
+        else {
+            return Status::Protocol;
+        };
+        let result = w.inner.play_sound_now(
+            sound.clip,
+            fynkel_core::PlayParams {
+                bus: sound.bus,
+                volume: sound.volume,
+                pitch: sound.pitch,
+                priority: sound.priority,
+                looping: false,
+            },
+        );
+        w.rebuild_diagnostics();
+        match result {
+            Ok(true) => Status::Ok,
+            Ok(false) => Status::CommandsRejected,
+            Err(error) => {
+                w.gameplay_reply = error.to_string().into_bytes();
+                Status::CommandsRejected
+            }
+        }
+    })
+}
+
 /// Opens the default output device and moves the mixer into its callback
 /// (M3-11): what a host that plays calls once after the world is created.
 /// `Status::Unsupported` when the library was built without the `device`
@@ -1367,14 +1272,12 @@ pub unsafe extern "C" fn fynkel_world_stats(
     *out = FynkelWorldStats {
         tick: w.inner.tick(),
         frame: w.inner.clock().frame(),
-        submit_calls: w.stats.submit_calls,
         step_calls: w.stats.step_calls,
         query_calls: w.stats.query_calls,
         bytes_in: w.stats.bytes_in,
         bytes_out: w.stats.bytes_out,
         live_entities: w.inner.live_entities(),
         subscriptions: w.inner.subscription_count() as u32,
-        staged_commands: w.inner.staged_count() as u32,
         poisoned: w.inner.is_poisoned() as u32,
         snapshot_bytes: w.snapshot_buf.len() as u64,
         snapshot_peak_bytes: w.stats.snapshot_peak_bytes,

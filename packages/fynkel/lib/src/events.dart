@@ -16,12 +16,6 @@ sealed class EngineEvent {
   final int tickLo;
 }
 
-class EntitySpawned extends EngineEvent {
-  const EntitySpawned(super.tickLo, this.tempId, this.entity);
-  final int tempId;
-  final EntityRef entity;
-}
-
 class EntityDestroyed extends EngineEvent {
   const EntityDestroyed(super.tickLo, this.entity);
   final EntityRef entity;
@@ -201,14 +195,19 @@ class ContactPoint {
 /// Exits carry no points and no impulse; triggers carry nothing but the
 /// sides.
 class Contact extends EngineEvent {
-  const Contact(super.tickLo, this.kind, this.a, this.b,
-      {this.point = Vec3.zero,
-      this.normal = Vec3.zero,
-      this.impulse = Vec3.zero,
-      this.relativeVelocity = Vec3.zero,
-      this.contacts = const [],
-      this.bodyA,
-      this.bodyB});
+  const Contact(
+    super.tickLo,
+    this.kind,
+    this.a,
+    this.b, {
+    this.point = Vec3.zero,
+    this.normal = Vec3.zero,
+    this.impulse = Vec3.zero,
+    this.relativeVelocity = Vec3.zero,
+    this.contacts = const [],
+    this.bodyA,
+    this.bodyB,
+  });
   final ContactKind kind;
 
   /// The colliders' entities (Unity's `Collision.collider`): for a collider
@@ -289,12 +288,16 @@ Iterable<EngineEvent> decodeEvents(WireBuffer b) sync* {
     off += h.size;
     final tail = b.tail;
     yield switch (h.kind) {
-      gen.SpawnedEvent.eventKind => _spawned(d, body, tail, h.tickLo),
       gen.DestroyedEvent.eventKind => EntityDestroyed(h.tickLo, gen.DestroyedEvent.decode(d, body, tail).entity),
       gen.ParentChangedEvent.eventKind => _parent(d, body, tail, h.tickLo),
-      gen.MissedDeadlineEvent.eventKind =>
-        MissedDeadline(h.tickLo, gen.MissedDeadlineEvent.decode(d, body, tail).droppedSeconds),
-      gen.SceneReadyEvent.eventKind => SceneReady(h.tickLo, scene: gen.SceneReadyEvent.decode(d, body, tail).scene.asset),
+      gen.MissedDeadlineEvent.eventKind => MissedDeadline(
+        h.tickLo,
+        gen.MissedDeadlineEvent.decode(d, body, tail).droppedSeconds,
+      ),
+      gen.SceneReadyEvent.eventKind => SceneReady(
+        h.tickLo,
+        scene: gen.SceneReadyEvent.decode(d, body, tail).scene.asset,
+      ),
       gen.SceneUnloadedEvent.eventKind => _unloaded(d, body, tail, h.tickLo),
       gen.ZoneEvent.eventKind => _zone(d, body, tail, h.tickLo, entered: true),
       _zoneExitedKind => _zone(d, body, tail, h.tickLo, entered: false),
@@ -307,11 +310,6 @@ Iterable<EngineEvent> decodeEvents(WireBuffer b) sync* {
       _ => UnknownEvent(h.tickLo, h.kind),
     };
   }
-}
-
-EntitySpawned _spawned(ByteData d, int o, Uint8List tail, int tickLo) {
-  final e = gen.SpawnedEvent.decode(d, o, tail);
-  return EntitySpawned(tickLo, e.tempId, e.entity);
 }
 
 SceneUnloaded _unloaded(ByteData d, int o, Uint8List tail, int tickLo) {
@@ -356,16 +354,23 @@ ParentChanged _parent(ByteData d, int o, Uint8List tail, int tickLo) {
 
 Contact _contact(ByteData d, int o, Uint8List tail, gen.EventHeader h) {
   final e = gen.ContactEvent.decode(d, o, tail);
-  final points = [e.contact0, e.contact1, e.contact2, e.contact3]
-      .take(e.contactCount)
-      .map((p) => ContactPoint(p.point, p.normal, p.separation, p.impulse))
-      .toList(growable: false);
-  return Contact(h.tickLo, ContactKind.values[h.kind - _physicsFirst], e.a, e.b,
-      point: e.point,
-      normal: e.normal,
-      impulse: e.impulse,
-      relativeVelocity: e.relativeVelocity,
-      contacts: points,
-      bodyA: e.bodyA,
-      bodyB: e.bodyB);
+  final points = [
+    e.contact0,
+    e.contact1,
+    e.contact2,
+    e.contact3,
+  ].take(e.contactCount).map((p) => ContactPoint(p.point, p.normal, p.separation, p.impulse)).toList(growable: false);
+  return Contact(
+    h.tickLo,
+    ContactKind.values[h.kind - _physicsFirst],
+    e.a,
+    e.b,
+    point: e.point,
+    normal: e.normal,
+    impulse: e.impulse,
+    relativeVelocity: e.relativeVelocity,
+    contacts: points,
+    bodyA: e.bodyA,
+    bodyB: e.bodyB,
+  );
 }

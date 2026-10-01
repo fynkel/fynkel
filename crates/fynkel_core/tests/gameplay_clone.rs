@@ -326,25 +326,17 @@ fn runtime_body_velocity_is_not_cloned_with_rigid_body_configuration() {
 }
 
 #[test]
-fn legacy_clone_adopts_queued_edits_and_preserves_breadth_first_report_order() {
+fn clone_observes_committed_edits_and_preserves_breadth_first_report_order() {
     let mut w = World::new(WorldConfig::default());
     let root = spawn(&mut w, "root", at(0.0), None);
     let a = spawn(&mut w, "a", at(1.0), Some(root));
     let b = spawn(&mut w, "b", at(2.0), Some(root));
     let grandchild = spawn(&mut w, "grandchild", at(3.0), Some(a));
-    w.submit(
-        Lane::Simulation,
-        vec![
-            Command::SetName {
-                entity: a,
-                name: "queued".into(),
-            },
-            Command::SetTransform {
-                entity: b,
-                transform: at(9.0),
-            },
-        ],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_name(a, "committed")?;
+        edit.set_transform(b, at(9.0))
+    })
+    .unwrap();
     let cloned = w.clone_subtree(root, None, at(10.0), None).unwrap();
     assert_eq!(
         cloned.pairs.iter().map(|p| p.0).collect::<Vec<_>>(),
@@ -356,7 +348,7 @@ fn legacy_clone_adopts_queued_edits_and_preserves_breadth_first_report_order() {
             .unwrap()
             .value
             .as_str(),
-        "queued"
+        "committed"
     );
     assert_eq!(
         w.ecs()
@@ -384,13 +376,8 @@ fn legacy_clone_rejects_invalid_configuration_atomically_after_older_commit() {
     w.edit_gameplay(|e| e.set_component(root, follow(target)))
         .unwrap();
     w.edit_gameplay(|e| e.destroy(target)).unwrap();
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetName {
-            entity: root,
-            name: "older commit".into(),
-        }],
-    );
+    w.edit_gameplay(|edit| edit.set_name(root, "older commit"))
+        .unwrap();
     assert!(matches!(
         w.clone_subtree(root, None, at(5.0), None),
         Err(LoadError::CloneRejected(_))
@@ -403,54 +390,35 @@ fn legacy_clone_rejects_invalid_configuration_atomically_after_older_commit() {
 }
 
 #[test]
-fn legacy_clone_adoption_reports_spawn_mappings_once_even_when_clone_fails() {
+fn clone_failure_does_not_change_an_earlier_spawn_commit_or_resolve_canceled_spawns() {
     for fail_clone in [false, true] {
         let mut w = World::new(WorldConfig::default());
         let root = spawn(&mut w, "root", at(0.0), None);
         if fail_clone {
             let stale = spawn(&mut w, "stale", at(0.0), None);
-            w.edit_gameplay(|e| e.set_component(root, follow(stale)))
+            w.edit_gameplay(|edit| edit.set_component(root, follow(stale)))
                 .unwrap();
-            w.edit_gameplay(|e| e.destroy(stale)).unwrap();
+            w.edit_gameplay(|edit| edit.destroy(stale)).unwrap();
         }
         w.drain_events();
-        w.submit(
-            Lane::Simulation,
-            vec![
-                Command::Spawn {
-                    temp_id: 17,
-                    transform: at(1.0),
-                    parent: None,
-                    name: None,
-                },
-                Command::Spawn {
-                    temp_id: 18,
-                    transform: at(2.0),
-                    parent: None,
-                    name: None,
-                },
-                Command::Destroy(Entity::temp(18)),
-            ],
-        );
+        let prior = w
+            .edit_gameplay(|edit| {
+                let kept = edit.spawn("kept", at(1.0), None)?;
+                let canceled = edit.spawn("canceled", at(2.0), None)?;
+                edit.destroy(canceled)?;
+                Ok((kept, canceled))
+            })
+            .unwrap();
+        let kept = prior.resolve(prior.value.0).unwrap();
+        assert_eq!(prior.resolve(prior.value.1), None);
         assert_eq!(
             w.clone_subtree(root, None, at(5.0), None).is_err(),
             fail_clone
         );
-        let spawned: Vec<_> = w
-            .drain_events()
-            .into_iter()
-            .filter_map(|event| match event.payload {
-                EventPayload::Spawned { temp_id, entity } => Some((temp_id, entity)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(spawned.len(), 1);
-        assert_eq!(spawned[0].0, 17);
-        assert!(w.ecs().contains(spawned[0].1));
+        assert!(w.ecs().contains(kept));
+        assert!(w.drain_events().is_empty());
         w.step();
-        assert!(!w
-            .drain_events()
-            .iter()
-            .any(|event| matches!(event.payload, EventPayload::Spawned { .. })));
+        assert!(w.ecs().contains(kept));
+        assert!(w.drain_events().is_empty());
     }
 }

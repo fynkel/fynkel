@@ -334,6 +334,19 @@ impl Physics {
             .is_some_and(|c| c.shape == ColliderShape::Mesh && c.mesh.as_ref() == Some(key))
     }
 
+    /// Publishes a prevalidated runtime replacement and invalidates built colliders.
+    pub fn replace_prepared_mesh(&mut self, key: &AssetRef, mesh: Option<crate::PreparedMesh>) {
+        self.meshes.remove(key);
+        for e in self.entries.values_mut() {
+            if Self::built_from(e, key) {
+                e.stale = true;
+            }
+        }
+        if let Some(mesh) = mesh {
+            self.register_prepared_mesh(key.clone(), mesh);
+        }
+    }
+
     /// The collision mesh `key` changed at runtime (a mesh made in code set
     /// again or removed): `Some((positions, indices))` registers the new
     /// triangles, `None` forgets them, and every collider using `key` is

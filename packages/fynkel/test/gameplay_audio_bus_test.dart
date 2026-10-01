@@ -25,11 +25,7 @@ void main() {
     expect(world.audio.muted, isFalse);
     expect(world.tick, 0);
     world.frame(1 / 60);
-    expect(
-      world.audio.busVolume(AudioBus.music),
-      0.25,
-      reason: 'a later tick cannot replay stale bus configuration',
-    );
+    expect(world.audio.busVolume(AudioBus.music), 0.25, reason: 'a later tick cannot replay stale bus configuration');
   });
 
   test('aborted explicit and automatic callbacks leave all buses and mute unchanged', () {
@@ -55,12 +51,7 @@ void main() {
     final object = world.edit(() => world.spawn(name: 'original'));
     world.audio.applySettings(const SettingsDocument(masterVolume: 0.5, musicVolume: 0.5, sfxVolume: 0.5));
     for (final invalid in [-1.0, 2.0, double.nan, double.infinity]) {
-      final settings = SettingsDocument(
-        masterVolume: 0.25,
-        musicVolume: 0.75,
-        sfxVolume: invalid,
-        muted: true,
-      );
+      final settings = SettingsDocument(masterVolume: 0.25, musicVolume: 0.75, sfxVolume: invalid, muted: true);
       expect(
         () => world.edit(() {
           object.name = 'discarded';
@@ -121,22 +112,20 @@ void main() {
     expect(world.tick, 0);
   });
 
-  test('failed adoption cannot apply bus writes or duplicate older invalid commands', () {
-    final object = world.edit(() => world.spawn());
-    world.native.submit(
-      CommandLane.simulation,
-      (CommandBatch()..setTransformOf(object.entity, const Pose(position: Vec3(double.nan, 0, 0)))).encoded(),
+  test('invalid component edit cannot publish bus writes or replay them later', () {
+    final object = world.spawn();
+    expect(
+      () => world.edit(() {
+        world.audio.setBus(AudioBus.master, 0.25, muted: true);
+        object.setLocalTransform(const Pose(position: Vec3(double.nan, 0, 0)));
+      }),
+      throwsStateError,
     );
-    expect(() => world.audio.setBus(AudioBus.master, 0.25, muted: true), throwsStateError);
-    final diagnostics = <FynkelDiagnostic>[];
-    world.throwOnDiagnostics = false;
-    world.onDiagnostics = diagnostics.addAll;
-    world.step();
-    world.drainEvents();
-    expect(diagnostics.single.code, DiagnosticCode.invalidPayload);
     expect(world.audio.busVolume(AudioBus.master), 1);
     expect(world.audio.muted, isFalse);
     world.step();
-    expect(diagnostics, hasLength(1));
+    world.step();
+    expect(world.audio.busVolume(AudioBus.master), 1);
+    expect(world.audio.muted, isFalse);
   });
 }

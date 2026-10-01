@@ -824,7 +824,9 @@ pub unsafe extern "C" fn fynkel_authoring_preview_open_with(
             edit_mode: true,
             ..WorldConfig::default()
         });
-        world.assets = assets.clone();
+        if let Some(assets) = &assets {
+            world.set_assets(assets.clone());
+        }
         let mut preview = Preview::load(
             document,
             world.core_mut(),

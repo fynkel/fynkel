@@ -154,7 +154,6 @@ void main() {
 
     lamp.setPresentation(lamp.get<PointLight>()!.copyWith(intensity: 5));
     expect(lamp.get<PointLight>()!.intensity, 5);
-    w.flushPresentation();
     expect(w.componentsOf(lamp.entity).whereType<PointLight>().single.intensity, 5, reason: 'no tick needed');
 
     final entity = lamp.entity;

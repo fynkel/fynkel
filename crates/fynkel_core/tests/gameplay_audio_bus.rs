@@ -114,46 +114,25 @@ mod enabled {
     }
 
     #[test]
-    fn adoption_coalesces_bus_writes_with_presentation_replay_and_never_replays_old_values() {
+    fn audio_bus_and_pose_writes_coalesce_without_replaying_old_values() {
         let mut world = World::new(WorldConfig::default());
         let c = world
-            .edit_gameplay(|e| e.spawn("root", Transform::IDENTITY, None))
+            .edit_gameplay(|edit| {
+                let root = edit.spawn("root", Transform::IDENTITY, None)?;
+                edit.set_audio_bus(AudioBus::Music, 0.2, true)?;
+                edit.set_audio_bus(AudioBus::Sfx, 0.3, false)?;
+                edit.set_audio_bus(AudioBus::Music, 0.4, true)?;
+                edit.set_transform(root, Transform::from_position(Vec3::X * 4.0))?;
+                Ok(root)
+            })
             .unwrap();
         let root = c.resolve(c.value).unwrap();
-        world.submit(
-            Lane::Simulation,
-            vec![
-                Command::AudioBus {
-                    bus: AudioBus::Music,
-                    volume: 0.2,
-                    muted: true,
-                },
-                Command::AudioBus {
-                    bus: AudioBus::Sfx,
-                    volume: 0.3,
-                    muted: false,
-                },
-                Command::AudioBus {
-                    bus: AudioBus::Music,
-                    volume: 0.4,
-                    muted: true,
-                },
-            ],
-        );
-        world.submit(
-            Lane::Presentation,
-            vec![Command::SetTransform {
-                entity: root,
-                transform: Transform::from_position(Vec3::X * 4.0),
-            }],
-        );
-        world.adopt_gameplay_commands().unwrap();
         assert_eq!(world.audio().bus(AudioBus::Music), 0.4);
         assert_eq!(world.audio().bus(AudioBus::Sfx), 0.3);
         assert!(world.audio().muted());
         assert_eq!(world.ecs().copy::<Transform>(root).unwrap().position.x, 4.0);
         world
-            .edit_gameplay(|e| e.set_audio_bus(AudioBus::Music, 0.8, false))
+            .edit_gameplay(|edit| edit.set_audio_bus(AudioBus::Music, 0.8, false))
             .unwrap();
         world.step();
         assert_eq!(world.audio().bus(AudioBus::Music), 0.8);
@@ -161,33 +140,20 @@ mod enabled {
     }
 
     #[test]
-    fn failed_adoption_preserves_the_queue_without_partial_bus_publication() {
+    fn rejected_bus_edit_publishes_nothing_and_leaves_no_deferred_writes() {
         let mut world = World::new(WorldConfig::default());
-        world.submit(
-            Lane::Simulation,
-            vec![
-                Command::AudioBus {
-                    bus: AudioBus::Music,
-                    volume: 0.2,
-                    muted: true,
-                },
-                Command::AudioBus {
-                    bus: AudioBus::Sfx,
-                    volume: 2.0,
-                    muted: false,
-                },
-            ],
-        );
-        assert!(world.adopt_gameplay_commands().is_err());
+        assert!(world
+            .edit_gameplay(|edit| {
+                edit.set_audio_bus(AudioBus::Music, 0.2, true)?;
+                edit.set_audio_bus(AudioBus::Sfx, 2.0, false)
+            })
+            .is_err());
         assert_eq!(world.audio().bus(AudioBus::Music), 1.0);
         assert!(!world.audio().muted());
-        assert!(matches!(
-            world.edit_gameplay(|_| Ok(())),
-            Err(EditError::PendingCommands)
-        ));
+        world.edit_gameplay(|_| Ok(())).unwrap();
         world.step();
-        assert_eq!(world.audio().bus(AudioBus::Music), 0.2);
-        assert!(world.audio().muted());
-        assert_eq!(world.diagnostics().len(), 1);
+        assert_eq!(world.audio().bus(AudioBus::Music), 1.0);
+        assert!(!world.audio().muted());
+        assert!(world.diagnostics().is_empty());
     }
 }

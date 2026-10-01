@@ -35,6 +35,7 @@ abstract class DataAsset extends Asset {
   DataType? _dataType;
   String? _name;
   bool _destroyed = false;
+  World? _owner;
 
   /// The asset this instance was loaded from or written to; null for one
   /// that exists only in code.
@@ -52,7 +53,7 @@ abstract class DataAsset extends Asset {
   /// True unless destroyed in code or newly loaded by an aborted edit.
   /// A successfully published loaded instance lives for the world's life.
   @override
-  bool get isAlive => !_destroyed;
+  bool get isAlive => !_destroyed && !(_owner?.isDisposed ?? false);
 
   /// Drops an instance made in code; one loaded from the project refuses
   /// (Unity refuses to destroy an asset from a script).
@@ -175,6 +176,7 @@ final class _DataAssets {
   /// first use. Its data-typed fields are resolved the same way; one that
   /// names a missing asset stays null with `FYN-B0004` in [warnings].
   DataAsset load(AssetRef ref, List<LoadDiagnostic> warnings) {
+    if (world.isDisposed) throw StateError('data assets require a live world');
     final edit = world._gameplay;
     if (edit == null) return _load(ref, warnings, null);
     return edit.guard(() {
@@ -226,6 +228,7 @@ final class _DataAssets {
     }
     final data = (json['data'] as Map? ?? const {}).cast<String, Object?>();
     final d = world.registry.instantiateData(typeId, fields: data, version: json['version'] as int?)
+      .._owner = world
       .._asset = AssetRef(ref.asset)
       .._name = json['name'] as String?;
     // Kept before its fields resolve: a cycle shares the instance.

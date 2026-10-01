@@ -339,11 +339,6 @@ pub enum EditError {
     ExpiredQuery,
     Destroyed(GameplayEntity),
     /// Drain the legacy command boundary before entering the replacement API.
-    PendingCommands,
-    LegacyCommand {
-        index: u32,
-        message: String,
-    },
     StaleEntity(Entity),
     MissingTransform(GameplayEntity),
     InvalidTransform(GameplayEntity),
@@ -381,7 +376,18 @@ pub struct GameplayEdit<'world> {
 }
 
 pub(super) enum CommittedEffect {
-    Command(crate::Command),
+    Body {
+        entity: Entity,
+        op: crate::BodyCommand,
+    },
+    Audio {
+        entity: Entity,
+        op: crate::AudioOp,
+    },
+    Sound {
+        clip: crate::AssetRef,
+        params: crate::PlayParams,
+    },
     Animation {
         entity: Entity,
         op: crate::AnimateOp,
@@ -389,6 +395,17 @@ pub(super) enum CommittedEffect {
         /// The selected component was removed after this request committed.
         invalidated: bool,
     },
+}
+
+impl CommittedEffect {
+    pub(super) fn target(&self) -> Option<Entity> {
+        match self {
+            Self::Body { entity, .. }
+            | Self::Audio { entity, .. }
+            | Self::Animation { entity, .. } => Some(*entity),
+            Self::Sound { .. } => None,
+        }
+    }
 }
 
 enum GameplayEffect {
@@ -405,6 +422,7 @@ struct AudioBusChanges {
 }
 
 struct GameplayJournal {
+    persistent: Vec<GameplayEntity>,
     publication_tick: fynkel_contracts::Tick,
     native_phase: bool,
     scope: (WorldId, u64),
@@ -444,6 +462,59 @@ impl GameplayEdit<'_> {
         let first = self.journal.failed.borrow().clone().unwrap_or(error);
         self.journal.failed.replace(Some(first.clone()));
         Err(first)
+    }
+
+    /// Marks a logical root for scene persistence. Non-roots are refused
+    /// without changing the edit; destroyed/stale references remain errors.
+    pub fn dont_destroy_on_load(&mut self, entity: impl Into<GameplayEntity>) -> EditResult<bool> {
+        let entity = entity.into();
+        self.require(entity)?;
+        if self.parent(entity)?.is_some() {
+            return Ok(false);
+        }
+        if !self.journal.persistent.contains(&entity) {
+            self.journal.persistent.push(entity);
+        }
+        Ok(true)
+    }
+    pub fn persistent_roots(&self) -> EditResult<Vec<GameplayEntity>> {
+        self.check()?;
+        let mut roots = Vec::new();
+        for entity in self
+            .world
+            .persistent
+            .iter()
+            .copied()
+            .map(GameplayEntity::Live)
+            .chain(self.journal.persistent.iter().copied())
+        {
+            if self.contains(entity)? && self.parent(entity)?.is_none() && !roots.contains(&entity)
+            {
+                roots.push(entity);
+            }
+        }
+        Ok(roots)
+    }
+
+    /// Identity changes only: removed handles have no name; surviving spawns
+    /// and name writes carry their final logical name. No whole-world scan.
+    pub fn identity_changes(&self) -> EditResult<Vec<(GameplayEntity, Option<String>)>> {
+        self.check()?;
+        let mut changes: BTreeMap<_, _> = self
+            .journal
+            .changes
+            .iter()
+            .filter_map(|(&entity, change)| {
+                change
+                    .name
+                    .as_ref()
+                    .map(|name| (entity, Some(name.clone())))
+            })
+            .collect();
+        for &entity in &self.journal.removed {
+            changes.insert(entity, None);
+        }
+        Ok(changes.into_iter().collect())
     }
 
     pub fn contains(&self, entity: impl Into<GameplayEntity>) -> EditResult<bool> {
@@ -749,21 +820,8 @@ impl GameplayEdit<'_> {
         params: crate::PlayParams,
     ) -> EditResult<()> {
         self.check()?;
-        let owner = GameplayEntity::Live(Entity::NULL);
-        if !self.world.modules.audio {
-            return self.fail(EditError::InvalidEffect(
-                owner,
-                "audio module is disabled".into(),
-            ));
-        }
-        if params.looping {
-            return self.fail(EditError::InvalidEffect(
-                owner,
-                "one-shot sounds cannot loop".into(),
-            ));
-        }
-        if let Err(message) = params.validate() {
-            return self.fail(EditError::InvalidEffect(owner, message));
+        if let Err(error) = self.world.validate_sound_request(&params) {
+            return self.fail(error);
         }
         self.journal
             .effects
@@ -1516,106 +1574,52 @@ impl GameplayEdit<'_> {
     }
 }
 
-pub(super) fn adopt_command(
-    edit: &mut GameplayEdit<'_>,
-    pending: &mut BTreeMap<u64, PendingEntity>,
-    command: &crate::Command,
-) -> EditResult<()> {
-    use crate::Command;
-    let resolve = |entity: Entity| -> EditResult<GameplayEntity> {
-        match entity.temp_id() {
-            Some(id) => pending
-                .get(&u64::from(id))
-                .copied()
-                .map(GameplayEntity::Pending)
-                .ok_or_else(|| {
-                    EditError::InvalidEffect(
-                        GameplayEntity::Live(entity),
-                        format!("no earlier spawn for temp reference #{id}"),
-                    )
-                }),
-            None => Ok(GameplayEntity::Live(entity)),
-        }
-    };
-    match command {
-        Command::Spawn {
-            temp_id,
-            transform,
-            parent,
-            name,
-        } => {
-            if *temp_id == 0 || pending.contains_key(temp_id) {
-                return Err(EditError::InvalidEffect(
-                    GameplayEntity::Live(Entity::NULL),
-                    "spawn temp id must be nonzero and unique in the adopted queue".into(),
-                ));
-            }
-            let parent = parent.map(resolve).transpose()?;
-            let spawned = edit.spawn(name.clone().unwrap_or_default(), *transform, parent)?;
-            pending.insert(*temp_id, spawned);
-        }
-        Command::Destroy(e) => edit.destroy(resolve(*e)?)?,
-        Command::SetTransform { entity, transform } => {
-            edit.set_transform(resolve(*entity)?, *transform)?
-        }
-        Command::SetParent {
-            child,
-            parent,
-            keep_world,
-        } => edit.set_parent(
-            resolve(*child)?,
-            parent.map(resolve).transpose()?,
-            *keep_world,
-        )?,
-        Command::SetName { entity, name } => edit.set_name(resolve(*entity)?, name.clone())?,
-        Command::SetActive { entity, active } => edit.set_active(resolve(*entity)?, *active)?,
-        Command::SetComponent { entity, value } => {
-            let mut failure = None;
-            let value = GameplayComponentValue::from(value.clone()).map_object_refs(|reference| {
-                if let GameplayObjectRef::Stored(reference) = reference {
-                    if reference.entity.temp_id().is_some() {
-                        match resolve(reference.entity) {
-                            Ok(GameplayEntity::Pending(p)) => return GameplayObjectRef::Pending(p),
-                            Err(e) => failure = Some(e),
-                            _ => unreachable!(),
-                        }
-                    }
-                }
-                reference
-            });
-            if let Some(e) = failure {
-                return Err(e);
-            }
-            edit.set_component(resolve(*entity)?, value)?;
-        }
-        Command::RemoveComponent { entity, component } => {
-            edit.remove_component(resolve(*entity)?, *component)?
-        }
-        Command::Body { entity, op } => edit.body_effect(resolve(*entity)?, *op)?,
-        Command::Animate { entity, op } => edit.animate_control(resolve(*entity)?, op.clone())?,
-        Command::Audio { entity, op } => edit.audio_control(resolve(*entity)?, *op)?,
-        Command::PlaySound {
-            clip,
-            bus,
-            volume,
-            pitch,
-            priority,
-        } => edit.play_sound(
-            clip.clone(),
-            crate::PlayParams {
-                bus: *bus,
-                volume: *volume,
-                pitch: *pitch,
-                priority: *priority,
-                looping: false,
-            },
-        )?,
-        Command::AudioBus { bus, volume, muted } => edit.set_audio_bus(*bus, *volume, *muted)?,
-    }
-    Ok(())
-}
-
 impl World {
+    /// Deliver a committed subsystem request. Authored mutations cannot enter
+    /// this queue: its type contains only body, playback and one-shot effects.
+    pub(super) fn deliver_committed_effect(
+        &mut self,
+        index: u32,
+        lane: crate::Lane,
+        effect: CommittedEffect,
+    ) -> bool {
+        match effect {
+            CommittedEffect::Body { entity, op } => {
+                if !self.module_allows(index, lane, &crate::Command::Body { entity, op }) {
+                    return false;
+                }
+                if matches!(op, crate::BodyCommand::Teleport { .. }) {
+                    self.teleported.push(entity);
+                }
+                self.physics.queue(index, entity, op);
+                true
+            }
+            CommittedEffect::Audio { entity, op } => self.apply_audio_intent(entity, op),
+            CommittedEffect::Animation {
+                entity,
+                op,
+                before,
+                invalidated,
+            } => self.apply_animate_intent(entity, op, before, invalidated),
+            CommittedEffect::Sound { clip, params } => {
+                if !self.module_allows(
+                    index,
+                    lane,
+                    &crate::Command::PlaySound {
+                        clip: clip.clone(),
+                        bus: params.bus,
+                        volume: params.volume,
+                        pitch: params.pitch,
+                        priority: params.priority,
+                    },
+                ) {
+                    return false;
+                }
+                self.apply_play_sound(index, lane, clip, params)
+            }
+        }
+    }
+
     /// Publishes pure gameplay edits without a tick. Errors (even caught ones)
     /// or callback panics discard the journal. Pending references resolve only
     /// through the returned commit report; aborted tokens expire permanently.
@@ -1695,56 +1699,9 @@ impl World {
         Ok(EditCommit { value, spawned })
     }
 
-    /// Atomically adopts queued simulation commands into the gameplay journal.
-    /// This is an explicit migration boundary, not a tick or an implicit fallback.
-    /// On failure the complete original queue remains available. On success data
-    /// is committed and effects wait for the next tick. Spawn mappings replace
-    /// legacy Spawned events, including canceled spawns (resolve returns None).
-    /// Presentation transform replays join the same ordered commit: their shown
-    /// values become gameplay state and cannot replay over subsequent edits.
-    pub fn adopt_gameplay_commands(&mut self) -> EditResult<EditCommit<Vec<(u64, PendingEntity)>>> {
-        if self.poisoned {
-            return Err(EditError::Poisoned);
-        }
-        let queued = std::mem::take(&mut self.lanes.staged);
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            self.edit_gameplay(|edit| {
-                let mut pending = BTreeMap::<u64, PendingEntity>::new();
-                for (index, command, _) in &queued {
-                    let command = command.as_ref().map_err(|e| EditError::LegacyCommand {
-                        index: *index,
-                        message: e.message.clone(),
-                    })?;
-
-                    adopt_command(edit, &mut pending, command).map_err(|error| {
-                        EditError::LegacyCommand {
-                            index: *index,
-                            message: error.to_string(),
-                        }
-                    })?;
-                }
-                Ok(pending.into_iter().collect())
-            })
-        }));
-        match result {
-            Ok(Ok(commit)) => Ok(commit),
-            Ok(Err(error)) => {
-                self.lanes.staged = queued;
-                Err(error)
-            }
-            Err(panic) => {
-                self.lanes.staged = queued;
-                resume_unwind(panic)
-            }
-        }
-    }
-
     fn begin_gameplay_journal(&mut self) -> EditResult<GameplayJournal> {
         if self.poisoned {
             return Err(EditError::Poisoned);
-        }
-        if !self.lanes.staged.is_empty() {
-            return Err(EditError::PendingCommands);
         }
         self.next_gameplay_edit = self
             .next_gameplay_edit
@@ -1754,6 +1711,7 @@ impl World {
             publication_tick: self.clock.tick(),
             native_phase: false,
             scope: (self.id(), self.next_gameplay_edit),
+            persistent: Vec::new(),
             next_pending: 1,
             changes: BTreeMap::new(),
             parent_order: Vec::new(),
@@ -1773,6 +1731,7 @@ impl World {
         journal: GameplayJournal,
     ) -> EditResult<BTreeMap<PendingEntity, Entity>> {
         let GameplayJournal {
+            persistent,
             changes,
             parent_order,
             removed,
@@ -1783,7 +1742,8 @@ impl World {
             native_phase,
             ..
         } = journal;
-        if changes.is_empty()
+        if persistent.is_empty()
+            && changes.is_empty()
             && removed.is_empty()
             && effects.is_empty()
             && audio_buses.muted.is_none()
@@ -1893,9 +1853,8 @@ impl World {
         for (&key, change) in &changes {
             if !removed.contains(&key) && (change.transform.is_some() || change.parent.is_some()) {
                 let entity = resolve(key);
-                self.lanes.overrides.remove(&entity);
                 if !native_phase && !self.gameplay_tick_prepared {
-                    self.lanes.teleported.push(entity);
+                    self.teleported.push(entity);
                 }
             }
         }
@@ -1912,6 +1871,16 @@ impl World {
                 });
             }
         }
+        for key in persistent {
+            if !removed.contains(&key) {
+                let entity = resolve(key);
+                if scene::parent_of(&self.ecs, entity).is_none()
+                    && !self.persistent.contains(&entity)
+                {
+                    self.persistent.push(entity);
+                }
+            }
+        }
         for effect in effects {
             match effect {
                 GameplayEffect::Body(entity, op) if !removed.contains(&entity) => {
@@ -1921,22 +1890,20 @@ impl World {
                         // Commands stage. Deliver validated effects to this
                         // tick's physics boundary, without next-tick replay.
                         if matches!(op, crate::BodyCommand::Teleport { .. }) {
-                            self.lanes.teleported.push(entity);
+                            self.teleported.push(entity);
                         }
                         self.physics.queue(u32::MAX, entity, op);
                     } else {
-                        self.gameplay_effects.push(CommittedEffect::Command(
-                            crate::Command::Body { entity, op },
-                        ));
+                        self.gameplay_effects
+                            .push(CommittedEffect::Body { entity, op });
                     }
                 }
                 GameplayEffect::Body(..) => {}
                 GameplayEffect::Audio(entity, op) if !removed.contains(&entity) => {
-                    self.gameplay_effects
-                        .push(CommittedEffect::Command(crate::Command::Audio {
-                            entity: resolve(entity),
-                            op,
-                        }));
+                    self.gameplay_effects.push(CommittedEffect::Audio {
+                        entity: resolve(entity),
+                        op,
+                    });
                 }
                 GameplayEffect::Audio(..) => {}
                 GameplayEffect::Animation(entity, op, before) if !removed.contains(&entity) => {
@@ -1949,15 +1916,8 @@ impl World {
                 }
                 GameplayEffect::Animation(..) => {}
                 GameplayEffect::Sound(clip, params) => {
-                    self.gameplay_effects.push(CommittedEffect::Command(
-                        crate::Command::PlaySound {
-                            clip,
-                            bus: params.bus,
-                            volume: params.volume,
-                            pitch: params.pitch,
-                            priority: params.priority,
-                        },
-                    ));
+                    self.gameplay_effects
+                        .push(CommittedEffect::Sound { clip, params });
                 }
             }
         }

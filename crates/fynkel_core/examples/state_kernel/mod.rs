@@ -387,7 +387,7 @@ impl Kernel {
             });
             write_custom(&mut preview, e, &node);
         }
-        if !preview.apply_now(commands).is_empty() {
+        if !preview.apply_gameplay_now(commands).is_empty() {
             return Err("Preflight reconstruction rejected".into());
         }
         apply(&mut preview, &mut mapping, tx)?;
@@ -604,14 +604,14 @@ fn apply(
             }
         }
     }
-    if !world.apply_now(commands).is_empty() {
+    if !world.apply_gameplay_now(commands).is_empty() {
         return Err("Detach rejected".into());
     }
     for (key, node) in &tx.changes {
         if node.is_none() {
             if let Some(e) = mapping.remove(key) {
                 if world.ecs().contains(e) {
-                    let diagnostics = world.apply_now(vec![Command::Destroy(e)]);
+                    let diagnostics = world.apply_gameplay_now(vec![Command::Destroy(e)]);
                     if !diagnostics.is_empty() {
                         return Err("Destroy rejected".into());
                     }
@@ -671,7 +671,7 @@ fn apply(
             }
         }
     }
-    if !world.apply_now(commands).is_empty() {
+    if !world.apply_gameplay_now(commands).is_empty() {
         return Err("Validated built-in edit rejected".into());
     }
     for (key, node) in &tx.changes {

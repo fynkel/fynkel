@@ -404,3 +404,440 @@ fn component_resource_plan_publishes_only_with_successful_session() {
     assert!(published.has_clip(&clip()));
     assert!(published.has_sound(&sound()));
 }
+
+fn resource_world(assets: &Assets) -> (World, fynkel_core::Entity) {
+    let mut w = world();
+    w.set_command_resource_source(Some(std::sync::Arc::new(assets.clone())));
+    let commit = w
+        .edit_gameplay(|e| e.spawn("owner", Default::default(), None))
+        .unwrap();
+    let owner = commit.resolve(commit.value).unwrap();
+    (w, owner)
+}
+fn sound_change(owner: fynkel_core::Entity, volume: f32) -> fynkel_core::Command {
+    fynkel_core::Command::SetComponent {
+        entity: owner,
+        value: fynkel_core::ComponentValue::AudioSource(fynkel_core::AudioSource {
+            clip: sound(),
+            volume,
+            playing: false,
+            ..Default::default()
+        }),
+    }
+}
+
+#[test]
+fn live_edit_resource_preparation_does_not_publish_rejected_dependencies() {
+    let f = Fixture::new("live-reject");
+    let assets = f.assets();
+    let (mut w, owner) = resource_world(&assets);
+    assert_eq!(
+        w.apply_gameplay_now(vec![sound_change(owner, 2.0)]).len(),
+        1
+    );
+    untouched(&w);
+    assert!(!w.ecs().has::<fynkel_core::AudioSource>(owner));
+    assert_eq!(w.step().rejected, 0);
+    untouched(&w);
+    assert!(w
+        .edit_gameplay(|edit| edit.animate_control(
+            owner,
+            fynkel_core::AnimateOp::Play {
+                clip: clip(),
+                looping: false,
+                speed: 1.0
+            }
+        ))
+        .is_err());
+    untouched(&w);
+    assert!(w
+        .apply_gameplay_now(vec![sound_change(owner, 1.0)])
+        .is_empty());
+    assert!(w.has_sound(&sound()));
+    assert_eq!(w.audio().clip_count(), 1);
+    w.edit_gameplay(|_| Ok(())).unwrap();
+    assert_eq!(w.step().rejected, 0);
+}
+
+fn audio_values(volumes: &[f32]) -> Vec<fynkel_core::ComponentValue> {
+    use fynkel_core::{Animator, AudioSource, ComponentValue};
+    let mut values = vec![ComponentValue::Animator(Animator {
+        clip: clip(),
+        playing: false,
+        ..Default::default()
+    })];
+    values.extend(volumes.iter().map(|&volume| {
+        ComponentValue::AudioSource(AudioSource {
+            clip: sound(),
+            volume,
+            playing: false,
+            ..Default::default()
+        })
+    }));
+    values
+}
+fn audio_plan(
+    assets: &Assets,
+    world: &World,
+    values: &[fynkel_core::ComponentValue],
+) -> fynkel_assets::PreparedGameplayResources {
+    let mut plan = fynkel_assets::PreparedGameplayResources::default();
+    for value in values {
+        plan.component(assets, world, value);
+    }
+    plan
+}
+
+#[test]
+fn rejected_prepared_edit_preserves_data_and_all_resource_registries() {
+    let f = Fixture::new("prepared-edit-reject");
+    let assets = f.assets();
+    let (mut w, owner) = resource_world(&assets);
+    let values = audio_values(&[1.0]);
+    assert!(audio_plan(&assets, &w, &values)
+        .commit(&mut w, |edit| {
+            for value in &values {
+                edit.set_component(owner, value.clone())?;
+            }
+            edit.set_parent(owner, Some(owner.into()), false)
+        })
+        .is_err());
+    untouched(&w);
+    assert!(!w.ecs().has::<fynkel_core::Animator>(owner));
+    assert!(!w.ecs().has::<fynkel_core::AudioSource>(owner));
+    w.step();
+    untouched(&w);
+    audio_plan(&assets, &w, &values)
+        .commit(&mut w, |edit| {
+            for value in &values {
+                edit.set_component(owner, value.clone())?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert!(w.has_clip(&clip()));
+    assert!(w.has_sound(&sound()));
+}
+
+#[test]
+fn prepared_edit_preflights_capacity_before_any_data_or_dependency_publication() {
+    let f = Fixture::new("prepared-edit-capacity");
+    let assets = f.assets();
+    let (mut w, owner) = resource_world(&assets);
+    let data = assets.sound(&sound()).unwrap();
+    for i in 1..=fynkel_core::audio::MAX_CLIPS {
+        w.register_sound(
+            AssetRef::new(Uuid::from_bytes((i as u128).to_be_bytes())),
+            data.clone(),
+        )
+        .unwrap();
+    }
+    let values = audio_values(&[1.0]);
+    let mut entered = false;
+    assert!(audio_plan(&assets, &w, &values)
+        .commit(&mut w, |edit| {
+            entered = true;
+            for value in &values {
+                edit.set_component(owner, value.clone())?;
+            }
+            Ok(())
+        })
+        .is_err());
+    assert!(!entered);
+    untouched(&w);
+    assert!(!w.ecs().has::<fynkel_core::Animator>(owner));
+    assert!(!w.ecs().has::<fynkel_core::AudioSource>(owner));
+    w.step();
+    untouched(&w);
+}
+
+#[test]
+fn prepared_edit_deduplicates_dependencies_and_publishes_only_after_success() {
+    let f = Fixture::new("prepared-edit-union");
+    let assets = f.assets();
+    let (mut w, owner) = resource_world(&assets);
+    let data = assets.sound(&sound()).unwrap();
+    for i in 1..fynkel_core::audio::MAX_CLIPS {
+        w.register_sound(
+            AssetRef::new(Uuid::from_bytes((i as u128).to_be_bytes())),
+            data.clone(),
+        )
+        .unwrap();
+    }
+    let values = audio_values(&[0.2, 0.8]);
+    let plan = audio_plan(&assets, &w, &values);
+    untouched(&w);
+    plan.commit(&mut w, |edit| {
+        for value in &values {
+            edit.set_component(owner, value.clone())?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(w.audio().clip_count(), fynkel_core::audio::MAX_CLIPS);
+    assert!(w.has_clip(&clip()));
+    assert_eq!(
+        w.ecs()
+            .copy::<fynkel_core::AudioSource>(owner)
+            .unwrap()
+            .volume,
+        0.8
+    );
+}
+
+#[test]
+fn prepared_and_immediate_sound_publish_dependencies_without_replay() {
+    let f = Fixture::new("typed-sound");
+    let assets = f.assets();
+    for immediate in [false, true] {
+        let (mut w, _) = resource_world(&assets);
+        let params = |volume| fynkel_core::PlayParams {
+            volume,
+            priority: 128,
+            ..Default::default()
+        };
+        if immediate {
+            assert!(!w.play_sound_now(sound(), params(-1.0)).unwrap());
+            assert_eq!(w.diagnostics().len(), 1);
+            assert_eq!(
+                w.diagnostics()[0].code,
+                fynkel_core::DiagnosticCode::INVALID_PAYLOAD
+            );
+        } else {
+            let mut plan = fynkel_assets::PreparedGameplayResources::default();
+            plan.sound_request(&assets, &w, &sound());
+            assert!(plan
+                .commit(&mut w, |edit| edit.play_sound(sound(), params(-1.0)))
+                .is_err());
+        }
+        assert!(!w.has_sound(&sound()));
+        assert_eq!(w.audio_stats().started, 0);
+        if immediate {
+            assert!(w.play_sound_now(sound(), params(1.0)).unwrap());
+        } else {
+            let mut plan = fynkel_assets::PreparedGameplayResources::default();
+            plan.sound_request(&assets, &w, &sound());
+            plan.commit(&mut w, |edit| edit.play_sound(sound(), params(1.0)))
+                .unwrap();
+            assert!(w.has_sound(&sound()));
+            assert_eq!(w.audio_stats().started, 0);
+            assert_eq!(w.step().rejected, 0);
+        }
+        assert!(w.has_sound(&sound()));
+        assert_eq!(w.audio_stats().started, 1);
+        w.step();
+        assert_eq!(w.audio_stats().started, 1);
+    }
+}
+
+#[test]
+fn rejected_live_mesh_and_skin_writes_drop_prepared_resources() {
+    use fynkel_core::{Collider, ColliderShape, Command, ComponentValue, Skin};
+    let f = Fixture::new("raw-mesh-skin");
+    let assets = f.assets();
+    let (mut w, owner) = resource_world(&assets);
+    let skin = AssetRef::with_sub(id(RIG), "skin/Skin");
+    let other = world();
+    let foreign = fynkel_contracts::Entity::new(other.id(), 0, 1);
+    let commands = vec![
+        Command::SetComponent {
+            entity: owner,
+            value: ComponentValue::Collider(Collider {
+                shape: ColliderShape::Mesh,
+                mesh: Some(mesh()),
+                friction: -1.0,
+                ..Default::default()
+            }),
+        },
+        Command::SetComponent {
+            entity: owner,
+            value: ComponentValue::Skin(Skin {
+                skin: skin.clone(),
+                skeleton: fynkel_contracts::ObjectRef::to(foreign),
+            }),
+        },
+    ];
+    assert_eq!(w.apply_gameplay_now(commands).len(), 1);
+    assert!(!w.physics().has_mesh(&mesh()));
+    assert!(!w.has_skin(&skin));
+    assert!(!w.ecs().has::<Collider>(owner));
+    assert!(!w.ecs().has::<Skin>(owner));
+    assert!(w
+        .apply_gameplay_now(vec![
+            Command::SetComponent {
+                entity: owner,
+                value: ComponentValue::Collider(Collider {
+                    shape: ColliderShape::Mesh,
+                    mesh: Some(mesh()),
+                    ..Default::default()
+                })
+            },
+            Command::SetComponent {
+                entity: owner,
+                value: ComponentValue::Skin(Skin {
+                    skin: skin.clone(),
+                    skeleton: fynkel_contracts::ObjectRef::to(owner)
+                })
+            },
+        ])
+        .is_empty());
+    assert!(w.physics().has_mesh(&mesh()));
+    assert!(w.has_skin(&skin));
+}
+
+#[test]
+fn native_resource_edit_rejects_without_registration_and_retry_publishes_once() {
+    use fynkel_assets::PreparedGameplayResources;
+    use fynkel_core::{ComponentValue, EditError, Transform};
+    let fixture = Fixture::new("native-edit-resources");
+    let assets = fixture.assets();
+    let mut w = world();
+    let prepared = assets.prepare_prefab(id(PREFAB)).unwrap();
+    let values = &prepared.prefab().description.entities[0].components;
+    let prepare = |w: &World| {
+        let mut resources = PreparedGameplayResources::default();
+        for value in values {
+            resources.component(&assets, w, value);
+        }
+        resources
+    };
+    let result = prepare(&w).commit(&mut w, |edit| {
+        let pending = edit.spawn("aborted", Transform::IDENTITY, None)?;
+        for value in values {
+            edit.set_component(pending, value.clone())?;
+        }
+        Err::<(), _>(EditError::Aborted)
+    });
+    assert!(result.is_err());
+    assert_eq!(w.live_entities(), 0);
+    untouched(&w);
+    let commit = prepare(&w)
+        .commit(&mut w, |edit| {
+            let pending = edit.spawn("accepted", Transform::IDENTITY, None)?;
+            for value in values {
+                if !matches!(value, ComponentValue::Skin(_)) {
+                    edit.set_component(pending, value.clone())?;
+                }
+            }
+            Ok(pending)
+        })
+        .unwrap();
+    assert!(commit.resolve(commit.value).is_some());
+    assert!(w.has_clip(&clip()));
+    assert!(w.has_sound(&sound()));
+    let clips = w.audio().clip_count();
+    prepare(&w).commit(&mut w, |_| Ok(())).unwrap();
+    assert_eq!(w.audio().clip_count(), clips);
+    assert_eq!(w.step().applied, 0);
+}
+
+#[test]
+fn immediate_sound_prepares_only_valid_requests_and_never_flushes_simulation_effects() {
+    use fynkel_core::PlayParams;
+    let fixture = Fixture::new("immediate-sound");
+    let mut w = world();
+    w.set_command_resource_source(Some(std::sync::Arc::new(fixture.assets())));
+    let invalid = PlayParams {
+        volume: f32::NAN,
+        ..PlayParams::default()
+    };
+    assert!(!w.play_sound_now(sound(), invalid).unwrap());
+    assert!(!w.has_sound(&sound()));
+    assert_eq!(w.audio_stats().started, 0);
+    assert_eq!(w.tick(), 0);
+    w.edit_gameplay(|edit| edit.play_sound(sound(), PlayParams::default()))
+        .unwrap();
+    assert!(w.play_sound_now(sound(), PlayParams::default()).unwrap());
+    assert!(w.has_sound(&sound()));
+    assert_eq!(w.audio_stats().started, 1);
+    assert_eq!(w.tick(), 0);
+    w.begin_frame(0.0);
+    assert_eq!(w.audio_stats().started, 1);
+    w.step();
+    assert_eq!(w.audio_stats().started, 2);
+    w.step();
+    assert_eq!(w.audio_stats().started, 2);
+    let count = w.audio().clip_count();
+    assert!(w.play_sound_now(sound(), PlayParams::default()).unwrap());
+    assert_eq!(w.audio().clip_count(), count);
+    assert_eq!(w.audio_stats().started, 3);
+}
+
+#[test]
+fn scene_resources_publish_with_activation_and_failed_replacement_can_retry() {
+    use fynkel_assets::PreparedGameplayResources;
+    use fynkel_core::{Camera, ComponentValue, LoadMode, SceneDescription};
+    let fixture = Fixture::new("scene-activation");
+    let assets = fixture.assets();
+    let mut w = world();
+    let old = w
+        .load_scene(&SceneDescription {
+            id: id(ROBOT),
+            ..Default::default()
+        })
+        .unwrap();
+    w.drain_events();
+    let mut description = assets.prefab(id(PREFAB)).unwrap().description;
+    description.entities[0]
+        .components
+        .push(ComponentValue::Camera(Camera {
+            near: 0.0,
+            ..Default::default()
+        }));
+    let (plan, report) = PreparedGameplayResources::for_scene(&assets, &w, &description);
+    assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+    assert!(report.sounds > 0);
+    assert!(w
+        .load_scene_prepared(&description, LoadMode::Replace, Some(Box::new(plan)))
+        .is_err());
+    assert_eq!(w.loaded_scenes(), &[old]);
+    assert!(!w.has_sound(&sound()));
+    assert!(!w.has_clip(&clip()));
+    assert!(!w.physics().has_mesh(&mesh()));
+    assert!(w.drain_events().is_empty());
+    description.entities[0].components.pop();
+    let (plan, _) = PreparedGameplayResources::for_scene(&assets, &w, &description);
+    let loaded = w
+        .load_scene_prepared(&description, LoadMode::Replace, Some(Box::new(plan)))
+        .unwrap();
+    assert_eq!(w.live_entities(), loaded.len() as u32);
+    assert!(w.has_sound(&sound()));
+    assert!(w.has_clip(&clip()));
+    assert!(w.physics().has_mesh(&mesh()));
+    assert_eq!(w.audio_stats().started, 0);
+}
+
+#[test]
+fn scene_capacity_preflight_preserves_old_scene_and_all_other_resource_registries() {
+    use fynkel_assets::PreparedGameplayResources;
+    use fynkel_core::{LoadMode, SceneDescription};
+    let fixture = Fixture::new("scene-capacity");
+    let assets = fixture.assets();
+    let mut w = world();
+    let old = w
+        .load_scene(&SceneDescription {
+            id: id(ROBOT),
+            ..Default::default()
+        })
+        .unwrap();
+    let sample = assets.sound(&sound()).unwrap();
+    for i in 1..=fynkel_core::audio::MAX_CLIPS {
+        w.register_sound(
+            AssetRef::new(Uuid::from_bytes((i as u128).to_be_bytes())),
+            sample.clone(),
+        )
+        .unwrap();
+    }
+    w.drain_events();
+    let description = assets.prefab(id(PREFAB)).unwrap().description;
+    let (plan, _) = PreparedGameplayResources::for_scene(&assets, &w, &description);
+    assert!(w
+        .load_scene_prepared(&description, LoadMode::Replace, Some(Box::new(plan)))
+        .is_err());
+    assert_eq!(w.loaded_scenes(), &[old]);
+    assert!(!w.has_clip(&clip()));
+    assert!(!w.has_sound(&sound()));
+    assert!(!w.physics().has_mesh(&mesh()));
+    assert!(w.drain_events().is_empty());
+    assert_eq!(w.step().rejected, 0);
+}

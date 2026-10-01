@@ -17,36 +17,18 @@ fn id(e: Entity) -> String {
 }
 
 #[test]
-fn inspector_write_refuses_pending_work_without_consuming_it_then_succeeds_paused() {
-    let mut w = World::new(WorldConfig::default());
+fn inspector_write_observes_committed_gameplay_and_succeeds_paused() {
+    let mut w = World::new(Default::default());
     let e = spawn(&mut w, "initial");
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetName {
-            entity: e,
-            name: "queued".into(),
-        }],
-    );
-    let result = live::call(
-        &mut w,
-        "rename",
-        &json!({ "id": id(e), "name": "inspector" }),
-    )
-    .unwrap();
-    assert_eq!(result["ok"], false);
-    assert_eq!(w.ecs().copy::<Name>(e).unwrap().value, "initial");
-    w.adopt_gameplay_commands().unwrap();
-    assert_eq!(w.ecs().copy::<Name>(e).unwrap().value, "queued");
+    w.edit_gameplay(|edit| edit.set_name(e, "gameplay"))
+        .unwrap();
     let tick = w.tick();
-    let result = live::call(
-        &mut w,
-        "rename",
-        &json!({ "id": id(e), "name": "inspector" }),
-    )
-    .unwrap();
+    let result = live::call(&mut w, "rename", &json!({"id":id(e),"name":"inspector"})).unwrap();
     assert_eq!(result["ok"], true);
     assert_eq!(w.ecs().copy::<Name>(e).unwrap().value, "inspector");
     assert_eq!(w.tick(), tick);
+    w.step();
+    assert_eq!(w.ecs().copy::<Name>(e).unwrap().value, "inspector");
 }
 
 #[test]
@@ -112,23 +94,17 @@ fn inspector_spawn_rejects_stale_component_reference_without_partial_object() {
 }
 
 #[test]
-fn inspector_spawn_keeps_queued_work_at_the_explicit_host_boundary() {
-    let mut w = World::new(WorldConfig::default());
+fn inspector_spawn_preserves_preceding_gameplay_commit_without_a_tick() {
+    let mut w = World::new(Default::default());
     let parent = spawn(&mut w, "original");
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetName {
-            entity: parent,
-            name: "queued".into(),
-        }],
-    );
-    assert!(live::call(&mut w, "spawn", &json!({"name": "editor"})).is_err());
-    assert_eq!(w.live_entities(), 1);
-    assert_eq!(w.ecs().copy::<Name>(parent).unwrap().value, "original");
-    w.adopt_gameplay_commands().unwrap();
-    assert_eq!(w.ecs().copy::<Name>(parent).unwrap().value, "queued");
+    w.edit_gameplay(|edit| edit.set_name(parent, "latest"))
+        .unwrap();
+    let tick = w.tick();
     assert_eq!(
-        live::call(&mut w, "spawn", &json!({"name": "editor"})).unwrap()["ok"],
+        live::call(&mut w, "spawn", &json!({"name":"editor"})).unwrap()["ok"],
         true
     );
+    assert_eq!(w.live_entities(), 2);
+    assert_eq!(w.ecs().copy::<Name>(parent).unwrap().value, "latest");
+    assert_eq!(w.tick(), tick);
 }

@@ -1,168 +1,14 @@
 //! Translation between the wire buffers and `fynkel_core` values.
 
-use fynkel_contracts::{AssetRef, ComponentId, DiagnosticCode, Entity, EventKind};
+use fynkel_contracts::{AssetRef, ComponentId, Entity, EventKind};
 use fynkel_core::input::{ActionState, Control, Device, InputEvent, Phase};
 use fynkel_core::physics::{Hit, QueryKind, QuerySpec};
 use fynkel_core::schema::*;
-use fynkel_core::{
-    Command, Diagnostic, Event, EventPayload, ProjectionInfo, Rejected, SnapshotRecord, World,
-};
+use fynkel_core::{Diagnostic, Event, EventPayload, ProjectionInfo, SnapshotRecord, World};
 use fynkel_scene::Transform;
-use fynkel_wire::{decode_component_value, get_u32, WireRecord};
+use fynkel_wire::WireRecord;
 
 use crate::buffer::{self, BufferKind, ProtocolError, Writer};
-
-/// Decodes a command buffer. Framing errors reject the whole buffer
-/// (`Status::Protocol`); a bad body or unknown kind becomes an `Err` entry
-/// that the world rejects with a diagnostic at the same batch index while
-/// the rest is still applied.
-/// Batch index plus the decoded command or why it could not be decoded.
-pub type IndexedCommand = (u32, Result<Command, Rejected>);
-
-pub fn decode_commands(buf: &[u8]) -> Result<Vec<IndexedCommand>, ProtocolError> {
-    let (h, records, tail) = buffer::validate(buf, BufferKind::Commands)?;
-    let mut out = Vec::with_capacity(h.record_count as usize);
-    let mut off = 0;
-    for index in 0..h.record_count {
-        if off + CommandHeader::SIZE > records.len() {
-            return Err(ProtocolError::Truncated { at: off });
-        }
-        let kind = get_u32(records, off);
-        let size = get_u32(records, off + 4) as usize;
-        off += CommandHeader::SIZE;
-        if off + size > records.len() {
-            return Err(ProtocolError::Truncated { at: off });
-        }
-        let body = &records[off..off + size];
-        off += size;
-        let decoded = decode_command(kind, body, tail).map_err(|code| Rejected {
-            code,
-            message: match code {
-                DiagnosticCode::UNKNOWN_COMMAND => format!("unknown command kind {kind}"),
-                _ => format!("command body of kind {kind} does not decode"),
-            },
-        });
-        out.push((index, decoded));
-    }
-    Ok(out)
-}
-
-fn decode_command(kind: u32, body: &[u8], tail: &[u8]) -> Result<Command, DiagnosticCode> {
-    let bad = |_| DiagnosticCode::INVALID_PAYLOAD;
-    Ok(
-        match CommandKind::from_u32(kind).ok_or(DiagnosticCode::UNKNOWN_COMMAND)? {
-            CommandKind::Spawn => {
-                let c = SpawnCommand::decode(body, tail).map_err(bad)?;
-                Command::Spawn {
-                    temp_id: c.temp_id,
-                    transform: c.transform,
-                    parent: c.parent,
-                    name: if c.name.is_empty() {
-                        None
-                    } else {
-                        Some(c.name)
-                    },
-                }
-            }
-            CommandKind::Destroy => {
-                Command::Destroy(DestroyCommand::decode(body, tail).map_err(bad)?.entity)
-            }
-            CommandKind::SetTransform => {
-                let c = SetTransformCommand::decode(body, tail).map_err(bad)?;
-                Command::SetTransform {
-                    entity: c.entity,
-                    transform: c.transform,
-                }
-            }
-            CommandKind::SetParent => {
-                let c = SetParentCommand::decode(body, tail).map_err(bad)?;
-                Command::SetParent {
-                    child: c.child,
-                    parent: c.parent,
-                    keep_world: c.keep_world,
-                }
-            }
-            CommandKind::SetName => {
-                let c = SetNameCommand::decode(body, tail).map_err(bad)?;
-                Command::SetName {
-                    entity: c.entity,
-                    name: c.name,
-                }
-            }
-            CommandKind::SetActive => {
-                let c = SetActiveCommand::decode(body, tail).map_err(bad)?;
-                Command::SetActive {
-                    entity: c.entity,
-                    active: c.active,
-                }
-            }
-            // The component's bytes follow the header record; a component
-            // id the wire cannot carry as a value (`Name`, the hierarchy,
-            // an id this build does not know) is an invalid payload.
-            CommandKind::SetComponent => {
-                let c = SetComponentCommand::decode(body, tail).map_err(bad)?;
-                let value = decode_component_value(
-                    c.component,
-                    &body[SetComponentCommand::SIZE.min(body.len())..],
-                    tail,
-                )
-                .ok_or(DiagnosticCode::INVALID_PAYLOAD)?
-                .map_err(bad)?;
-                Command::SetComponent {
-                    entity: c.entity,
-                    value,
-                }
-            }
-            CommandKind::RemoveComponent => {
-                let c = RemoveComponentCommand::decode(body, tail).map_err(bad)?;
-                Command::RemoveComponent {
-                    entity: c.entity,
-                    component: ComponentId(c.component),
-                }
-            }
-            CommandKind::Body => {
-                let c = BodyCommandRecord::decode(body, tail).map_err(bad)?;
-                let op = c.operation();
-                Command::Body {
-                    entity: c.entity,
-                    op,
-                }
-            }
-            CommandKind::Animate => {
-                let c = AnimateCommandRecord::decode(body, tail).map_err(bad)?;
-                let entity = c.entity;
-                let op = c.operation();
-                Command::Animate { entity, op }
-            }
-            CommandKind::Audio => {
-                let c = AudioCommandRecord::decode(body, tail).map_err(bad)?;
-                let op = c.operation();
-                Command::Audio {
-                    entity: c.entity,
-                    op,
-                }
-            }
-            CommandKind::PlaySound => {
-                let c = PlaySoundCommandRecord::decode(body, tail).map_err(bad)?;
-                Command::PlaySound {
-                    clip: c.clip,
-                    bus: c.bus,
-                    volume: c.volume,
-                    pitch: c.pitch,
-                    priority: c.priority,
-                }
-            }
-            CommandKind::AudioBus => {
-                let c = AudioBusCommandRecord::decode(body, tail).map_err(bad)?;
-                Command::AudioBus {
-                    bus: c.bus,
-                    volume: c.volume,
-                    muted: c.muted,
-                }
-            }
-        },
-    )
-}
 
 pub fn encode_snapshot(buf: Vec<u8>, records: &[SnapshotRecord]) -> Vec<u8> {
     let mut w = Writer::begin(buf, BufferKind::Snapshot);
@@ -226,14 +72,6 @@ fn encode_event_body(p: &EventPayload, out: &mut Vec<u8>, strings: &mut fynkel_w
         v.encode(&mut out[start..], s);
     }
     match p {
-        EventPayload::Spawned { temp_id, entity } => push(
-            out,
-            &SpawnedEvent {
-                temp_id: *temp_id,
-                entity: *entity,
-            },
-            strings,
-        ),
         EventPayload::Destroyed { entity } => {
             push(out, &DestroyedEvent { entity: *entity }, strings)
         }
@@ -371,7 +209,6 @@ fn contact_point(p: &fynkel_core::ContactPoint) -> ContactPointRecord {
 /// above) and the physics range maps to `ContactEvent`.
 pub fn event_body_size(kind: EventKind) -> Option<usize> {
     Some(match kind {
-        EventKind::SPAWNED => SpawnedEvent::SIZE,
         EventKind::DESTROYED => DestroyedEvent::SIZE,
         EventKind::PARENT_CHANGED => ParentChangedEvent::SIZE,
         EventKind::MISSED_DEADLINE => MissedDeadlineEvent::SIZE,

@@ -82,6 +82,57 @@ class NativeGameplayEdit {
     }
   }
 
+  bool persist(NativeGameplayRef owner) => _guard(() {
+    final writer = _GameplayWriter(33)..reference(owner);
+    return _send(writer).u32() != 0;
+  });
+  List<NativeGameplayRef> persistentRoots() => _guard(() {
+    final reader = _send(_GameplayWriter(34));
+    return List.generate(reader.u32(), (_) => _ref(reader)!);
+  });
+
+  Map<NativeGameplayRef, String?> identityChanges() => _guard(() {
+    final reader = _send(_GameplayWriter(32));
+    final result = <NativeGameplayRef, String?>{};
+    final length = reader.u32();
+    for (var i = 0; i < length; i++) {
+      final owner = _ref(reader)!;
+      result[owner] = reader.u32() == 0 ? null : reader.string();
+    }
+    return result;
+  });
+
+  void setRuntimeMaterial(String id, gen.PbrMaterial? material) =>
+      _runtimeResource(
+        29,
+        id,
+        material == null ? null : NativeWorld.materialPayload(material),
+      );
+  void setRuntimeMesh(String id, Uint8List? payload) =>
+      _runtimeResource(30, id, payload);
+  void setRuntimeShaderMaterial(String id, String? document) =>
+      _runtimeResource(
+        31,
+        id,
+        document == null ? null : Uint8List.fromList(utf8.encode(document)),
+      );
+  void _runtimeResource(int operation, String id, Uint8List? payload) =>
+      _guard(() {
+        final writer = _GameplayWriter(operation)
+          ..string(id)
+          ..u32(payload?.length ?? 0);
+        if (payload != null) writer.bytes.add(payload);
+        _send(writer);
+      });
+
+  void setRuntimeClip(String id, Uint8List? payload) => _guard(() {
+    final writer = _GameplayWriter(28)
+      ..string(id)
+      ..u32(payload?.length ?? 0);
+    if (payload != null) writer.bytes.add(payload);
+    _send(writer);
+  });
+
   _GameplayReader _send(_GameplayWriter writer) => _guard(() {
     final bytes = writer.bytes.takeBytes();
     _native._toScratch(bytes, bytes.length);

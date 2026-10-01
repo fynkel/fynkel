@@ -16,7 +16,7 @@ use std::ptr;
 use std::time::{Duration, Instant};
 
 use fynkel_contracts::{Entity, Status};
-use fynkel_core::{Command, Lane};
+use fynkel_core::Command;
 use fynkel_import::{cook_project, CookOptions};
 use fynkel_native::load::*;
 use fynkel_native::*;
@@ -121,7 +121,7 @@ fn main() {
                 transform: Transform::from_position(Vec3::new(phase.sin(), 0.0, phase.cos())),
             })
             .collect();
-        world(w).core_mut().submit(Lane::Simulation, commands);
+        assert!(world(w).core_mut().apply_gameplay_now(commands).is_empty());
         step(w);
     }
     row_ms(
@@ -138,7 +138,7 @@ fn main() {
             keep_world: true,
         })
         .collect();
-    world(w).core_mut().submit(Lane::Simulation, commands);
+    assert!(world(w).core_mut().apply_gameplay_now(commands).is_empty());
     let t = Instant::now();
     step(w);
     row(
@@ -148,25 +148,17 @@ fn main() {
     );
 
     // 5. One inactive object, then spawns under a parent (3.4).
-    world(w).core_mut().submit(
-        Lane::Simulation,
-        vec![Command::SetActive {
-            entity: roots[instances - 1],
-            active: false,
-        }],
-    );
+    world(w)
+        .core_mut()
+        .edit_gameplay(|edit| edit.set_active(roots[instances - 1], false))
+        .unwrap();
     step(w);
     let t = Instant::now();
-    for i in 0..100 {
-        world(w).core_mut().submit(
-            Lane::Simulation,
-            vec![Command::Spawn {
-                temp_id: i + 1,
-                transform: Transform::IDENTITY,
-                parent: Some(roots[0]),
-                name: None,
-            }],
-        );
+    for _ in 0..100 {
+        world(w)
+            .core_mut()
+            .edit_gameplay(|edit| edit.spawn("", Transform::IDENTITY, Some(roots[0].into())))
+            .unwrap();
         step(w);
     }
     row_ms(
@@ -182,7 +174,7 @@ fn main() {
         .filter(|(i, _)| !(i % 2 == 1 && *i < 2 * count))
         .map(|(_, &e)| Command::Destroy(e))
         .collect();
-    world(w).core_mut().submit(Lane::Simulation, commands);
+    assert!(world(w).core_mut().apply_gameplay_now(commands).is_empty());
     let t = Instant::now();
     step(w);
     row(
@@ -208,7 +200,7 @@ fn main() {
             .collect();
         step(w);
         let commands = again.iter().map(|&e| Command::Destroy(e)).collect();
-        world(w).core_mut().submit(Lane::Simulation, commands);
+        assert!(world(w).core_mut().apply_gameplay_now(commands).is_empty());
         step(w);
         let now = heap_kib();
         row(

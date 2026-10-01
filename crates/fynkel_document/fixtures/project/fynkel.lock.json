@@ -3,12 +3,12 @@
   "formatVersion": 1,
   "runtime": {
     "version": "0.0.1",
-    "abiVersion": 3
+    "abiVersion": 4
   },
   "tools": {
     "version": "0.0.1"
   },
-  "schemaFingerprint": "0x52ca2a9cfe616eff",
+  "schemaFingerprint": "0xbd96f0308508f61f",
   "documents": {
     "blend": 1,
     "controller": 1,

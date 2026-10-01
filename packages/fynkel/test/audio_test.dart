@@ -330,6 +330,28 @@ void main() {
     expect(w.byEntity(w.find('Camera')!.entity)!.audio.state, isNull, reason: 'no source');
   });
 
+  test('invalid immediate audio does not flush effects and valid retry plays once', () {
+    final w = fresh();
+    expect(w.loadProject(fixture, cacheDir: cache).ok, isTrue);
+    w.frame(1 / 60);
+    final started = w.audio.stats.started;
+    final tick = w.tick;
+    w.audio.play(tone);
+    expect(() => w.audio.play(tone, volume: double.nan, presentation: true), throwsA(isA<FynkelError>()));
+    expect(w.audio.stats.started, started);
+    expect(w.tick, tick);
+    w.audio.play(tone, presentation: true);
+    expect(w.audio.stats.started, started + 1);
+    w.frame(0);
+    expect(w.audio.stats.started, started + 1);
+    w.frame(1 / 60);
+    expect(w.audio.stats.started, started + 2);
+    w.frame(1 / 60);
+    expect(w.audio.stats.started, started + 2);
+    expect(() => w.audio.play(tone, priority: 2147483648, presentation: true), throwsArgumentError);
+    expect(w.audio.stats.started, started + 2);
+  });
+
   test('world.audio.play fires a sound without an object; the buses follow the settings', () {
     final w = fresh();
     w.loadProject(fixture, cacheDir: cache);

@@ -11,7 +11,7 @@
 use fynkel_assets::{Assets, Residency};
 use fynkel_contracts::{AssetRef, Code, Diagnostic, Status};
 use fynkel_core::components::{Animator, ComponentValue};
-use fynkel_core::{AnimateOp, Command, Entity, Lane, WorldConfig};
+use fynkel_core::{AnimateOp, Entity, WorldConfig};
 use fynkel_preview::{Framing, Shape, Subject};
 use glam::Vec3;
 use serde_json::{json, Value};
@@ -160,7 +160,7 @@ impl StageSlot {
     /// what is drawn. The camera the host steers starts from the framing;
     /// the sun keeps the direction it was turned to.
     fn load(&mut self, assets: &Assets) -> Outcome {
-        self.world.assets = Some(assets.clone());
+        self.world.set_assets(assets.clone());
         let first = self.framing.is_none();
         let stood = fynkel_preview::stage_into(
             assets,
@@ -186,7 +186,8 @@ impl StageSlot {
         if first {
             self.toward = framing.light_dir;
             if let Some(sun) = self.sun {
-                fynkel_preview::set_sun(self.world.core_mut(), sun, self.toward);
+                fynkel_preview::set_sun(self.world.core_mut(), sun, self.toward)
+                    .map_err(|error| invalid(format!("stage light: {error}")))?;
             }
         }
         self.framing = Some(framing);
@@ -242,13 +243,9 @@ impl StageSlot {
                 ..Animator::default()
             }
         };
-        world.submit(
-            Lane::Simulation,
-            vec![Command::SetComponent {
-                entity: root,
-                value: ComponentValue::Animator(animator),
-            }],
-        );
+        world
+            .edit_gameplay(|edit| edit.set_component(root, ComponentValue::Animator(animator)))
+            .map_err(|error| invalid(format!("stage: {error}")))?;
         world.step();
         world.drain_events();
         self.seek()
@@ -263,20 +260,20 @@ impl StageSlot {
             // The values first: they decide the tree's length, and the
             // time is a fraction of it.
             let world = self.world.core_mut();
-            world.submit(
-                Lane::Simulation,
-                posed
-                    .values
-                    .iter()
-                    .map(|(name, value)| Command::Animate {
-                        entity: root,
-                        op: AnimateOp::SetControllerParameter {
-                            name: name.clone(),
-                            value: fynkel_core::animation::controller::Value::Float(*value),
-                        },
-                    })
-                    .collect(),
-            );
+            world
+                .edit_gameplay(|edit| {
+                    for (name, value) in &posed.values {
+                        edit.animate_control(
+                            root,
+                            AnimateOp::SetControllerParameter {
+                                name: name.clone(),
+                                value: fynkel_core::animation::controller::Value::Float(*value),
+                            },
+                        )?;
+                    }
+                    Ok(())
+                })
+                .map_err(|error| invalid(format!("stage: {error}")))?;
             world.step();
             let length = world
                 .animator_controller_state(root)
@@ -287,38 +284,38 @@ impl StageSlot {
             } else {
                 0.0
             };
-            world.submit(
-                Lane::Simulation,
-                vec![Command::Animate {
-                    entity: root,
-                    op: AnimateOp::PlayState {
-                        state: "Tree".into(),
-                        layer: Some(0),
-                        seconds: 0.0,
-                        offset,
-                    },
-                }],
-            );
+            world
+                .edit_gameplay(|edit| {
+                    edit.animate_control(
+                        root,
+                        AnimateOp::PlayState {
+                            state: "Tree".into(),
+                            layer: Some(0),
+                            seconds: 0.0,
+                            offset,
+                        },
+                    )
+                })
+                .map_err(|error| invalid(format!("stage: {error}")))?;
             world.step();
             world.drain_events();
             return Ok(());
         }
-        let mut commands = Vec::new();
-        if let Some((name, value)) = &posed.parameter {
-            commands.push(Command::Animate {
-                entity: root,
-                op: AnimateOp::SetParameter {
-                    name: name.clone(),
-                    value: *value,
-                },
-            });
-        }
-        commands.push(Command::Animate {
-            entity: root,
-            op: AnimateOp::SetTime(posed.time.max(0.0)),
-        });
         let world = self.world.core_mut();
-        world.submit(Lane::Simulation, commands);
+        world
+            .edit_gameplay(|edit| {
+                if let Some((name, value)) = &posed.parameter {
+                    edit.animate_control(
+                        root,
+                        AnimateOp::SetParameter {
+                            name: name.clone(),
+                            value: *value,
+                        },
+                    )?;
+                }
+                edit.animate_control(root, AnimateOp::SetTime(posed.time.max(0.0)))
+            })
+            .map_err(|error| invalid(format!("stage: {error}")))?;
         world.step();
         world.drain_events();
         Ok(())
@@ -750,7 +747,8 @@ fn stage_call(s: &mut FynkelAuthoringSession, stage: u32, kind: &str, args: &Val
                 }
             };
             if let Some(sun) = slot.sun {
-                fynkel_preview::set_sun(slot.world.core_mut(), sun, slot.toward);
+                fynkel_preview::set_sun(slot.world.core_mut(), sun, slot.toward)
+                    .map_err(|error| invalid(format!("stage light: {error}")))?;
             }
             json!({ "light": slot.toward.to_array() })
         }

@@ -148,22 +148,6 @@ impl Entity {
     pub const fn slot(self) -> u32 {
         self.slot
     }
-    // Transitional tick-command references only. Never accepted by live ECS
-    // lookup. F2 replaces the old command protocol with scoped tagged targets.
-    pub const fn temp(temp_id: u32) -> Self {
-        Self {
-            world: 0,
-            slot: temp_id,
-            generation: 0,
-        }
-    }
-    pub const fn temp_id(self) -> Option<u32> {
-        if self.world == 0 && self.generation == 0 && self.slot != 0 {
-            Some(self.slot)
-        } else {
-            None
-        }
-    }
     /// Exhaustion retires the slot; generations never wrap.
     pub const fn next_generation(g: u32) -> Option<u32> {
         g.checked_add(1)
@@ -174,9 +158,6 @@ impl fmt::Debug for Entity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_null() {
             return f.write_str("Entity(NULL)");
-        }
-        if let Some(t) = self.temp_id() {
-            return write!(f, "Entity(temp #{t})");
         }
         write!(
             f,
@@ -206,8 +187,6 @@ mod tests {
         assert_eq!(core::mem::align_of::<Entity>(), 8);
         assert_eq!(Entity::next_generation(u32::MAX), None);
         assert_eq!(Entity::next_generation(1), Some(2));
-        assert_eq!(Entity::temp(7).temp_id(), Some(7));
-        assert_ne!(Entity::temp(7), Entity::new(WorldId(7), 0, 1));
     }
     #[test]
     fn authority_exhaustion_is_permanent() {

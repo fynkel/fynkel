@@ -35,11 +35,7 @@ void main() {
     final red = w.createMaterial(const PbrMaterial(baseColor: Vec4(1, 0, 0, 1), roughness: 0.3));
     expect(red.isValid, isTrue);
     expect(red.asset[14], '4', reason: 'a v4 UUID');
-    expect(
-      w.createMaterial(),
-      isNot(red),
-      reason: 'a new id each time; PbrMaterial() is the default material',
-    );
+    expect(w.createMaterial(), isNot(red), reason: 'a new id each time; PbrMaterial() is the default material');
 
     final cube = w.createPrimitive(Primitive.cube);
     cube.set(cube.get<MeshRenderer>()!.copyWith(material: red));
@@ -94,10 +90,7 @@ void main() {
 
     test('made with values, changed one at a time, checked as the cook checks, destroyed', () {
       final w = fresh()..loadProject(project, cacheDir: shaderCache);
-      final glow = w.createShaderMaterial(
-        'shaders/tint.shader',
-        values: {'tint': const Vec3(1, 0, 0), 'power': 2},
-      );
+      final glow = w.createShaderMaterial('shaders/tint.shader', values: {'tint': const Vec3(1, 0, 0), 'power': 2});
       expect(glow.isValid, isTrue);
       expect(w.createShaderMaterial(const AssetRef(_tintId)), isNot(glow));
 
@@ -133,6 +126,64 @@ void main() {
 
       w.destroyMaterial(glow);
       expect(w.materialValue(glow, 'tint'), isNull);
+    });
+
+    test('shader edits, representation changes and Inspector overrides share rollback', () {
+      final w = fresh()..loadProject(project, cacheDir: shaderCache);
+      final material = w.createShaderMaterial(const AssetRef(_tintId), values: {'power': 1});
+      expect(
+        () => w.edit(() {
+          w.setMaterialValue(material, 'power', 2);
+          expect(w.materialValue(material, 'power'), 2);
+          w.setMaterial(material, const PbrMaterial());
+          expect(w.materialValue(material, 'power'), isNull);
+          expect(w.runtimeMaterial(material), isNotNull);
+          throw StateError('abort');
+        }),
+        throwsStateError,
+      );
+      expect(w.materialValue(material, 'power'), 1);
+      expect(w.runtimeMaterial(material), isNull);
+      expect(
+        () => w.edit(() {
+          w.applyMaterialEdit(material.asset, {'shader': 'fynkel.pbr@1'});
+          expect(material.isAlive, isFalse);
+          throw StateError('abort');
+        }),
+        throwsStateError,
+      );
+      expect(material.isAlive, isTrue);
+      expect(w.materialValue(material, 'power'), 1);
+      expect(
+        () => w.edit(() {
+          w.setMaterialValue(material, 'power', 2);
+          try {
+            w.setMaterialValue(material, 'power', 9);
+          } catch (_) {}
+        }),
+        throwsStateError,
+      );
+      expect(w.materialValue(material, 'power'), 1);
+      final tint = <num>[1, 0, 0];
+      w.setMaterialValue(material, 'tint', tint);
+      tint[0] = 0;
+      expect(w.materialValue(material, 'tint'), [1, 0, 0]);
+      expect(() => (w.materialValue(material, 'tint') as List)[0] = 0, throwsUnsupportedError);
+      w.edit(() {
+        w.setMaterial(material, const PbrMaterial());
+      });
+      expect(w.materialValue(material, 'power'), isNull);
+      expect(w.runtimeMaterial(material), isNotNull);
+      material.destroy();
+      expect(material.isAlive, isFalse);
+    });
+
+    test('shader resource ownership ends with its world', () {
+      final w = fresh()..loadProject(project, cacheDir: shaderCache);
+      final material = w.createShaderMaterial(const AssetRef(_tintId), values: {'power': 1});
+      w.dispose();
+      expect(material.isAlive, isFalse);
+      expect(w.materialValue(material, 'power'), isNull);
     });
 
     test('a cooked shader material changed for the run, then back', () {

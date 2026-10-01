@@ -928,3 +928,158 @@ fn the_edit_world_draws_the_same_pixels_as_a_game_world() {
         s.close_document(h).unwrap();
     }
 }
+
+#[test]
+fn rejected_preview_transform_batch_keeps_every_object_and_clock_unchanged() {
+    let copy = Copy::new("atomic-transforms");
+    let (mut session, assets) = open(&copy);
+    let handle = session.open_document(SCENES[1]).unwrap();
+    let desired = describe(&session, handle);
+    let mut world = edit_world();
+    let preview = Preview::load(Uuid::nil(), &mut world, Some(&assets), &desired);
+    let ids: Vec<_> = desired
+        .entities
+        .iter()
+        .take(2)
+        .map(|e| Uuid::from_bytes(*e.id.as_bytes()))
+        .collect();
+    let before = preview.dump(&world);
+    let tick = world.tick();
+    let valid = Transform::from_position(Vec3::splat(12.0));
+    let invalid = Transform {
+        rotation: Quat::from_xyzw(0.0, 0.0, 0.0, 0.0),
+        ..valid
+    };
+    assert!(preview
+        .set_transforms(&mut world, &[(ids[0], valid), (ids[1], invalid)])
+        .is_err());
+    assert_eq!(preview.dump(&world), before);
+    assert_eq!(world.tick(), tick);
+    assert!(world.drain_events().is_empty());
+    preview
+        .set_transforms(&mut world, &[(ids[0], valid), (ids[1], valid)])
+        .unwrap();
+    for id in ids {
+        assert_eq!(
+            world
+                .ecs()
+                .copy::<Transform>(preview.entity(id).unwrap())
+                .unwrap(),
+            valid
+        );
+    }
+    assert_eq!(
+        world.step().applied,
+        0,
+        "no compatibility work is left to replay"
+    );
+}
+
+#[test]
+fn preview_identity_resolution_does_not_consume_unrelated_lifecycle_events() {
+    let copy = Copy::new("identity-without-transport");
+    let (mut session, assets) = open(&copy);
+    let handle = session.open_document(SCENES[0]).unwrap();
+    let mut desired = describe(&session, handle);
+    let mut world = edit_world();
+    let mut preview = Preview::load(Uuid::nil(), &mut world, Some(&assets), &desired);
+    // An unrelated lifecycle event must not be consumed by document synchronization.
+    let commit = world
+        .edit_gameplay(|edit| edit.spawn("unrelated", Transform::IDENTITY, None))
+        .unwrap();
+    let unrelated = commit.resolve(commit.value).unwrap();
+    world.edit_gameplay(|edit| edit.destroy(unrelated)).unwrap();
+    let mut added = desired.entities[0].clone();
+    added.id = fynkel_core::Uuid::from_bytes([42; 16]);
+    added.name = "transaction-spawn".into();
+    added.parent = None;
+    added.children.clear();
+    added.components = vec![fynkel_core::ComponentValue::Transform(Transform::IDENTITY)];
+    let id = Uuid::from_bytes(*added.id.as_bytes());
+    desired.entities.push(added);
+    let report = preview.sync(&mut world, Some(&assets), &desired);
+    assert!(!report.reloaded, "{:?}", report.diagnostics);
+    assert_eq!(report.spawned, 1);
+    let entity = preview.entity(id).unwrap();
+    assert_eq!(
+        world.ecs().copy::<fynkel_core::Name>(entity).unwrap().value,
+        "transaction-spawn"
+    );
+    assert_eq!(preview.sync(&mut world, Some(&assets), &desired).steps, 0);
+    let events = world.drain_events();
+    assert_eq!(
+        events.iter().filter(|event| matches!(
+            event.payload, fynkel_core::EventPayload::Destroyed { entity } if entity == unrelated
+        )).count(),
+        1
+    );
+    assert!(world.drain_events().is_empty());
+}
+
+#[test]
+fn rejected_inspector_batch_rolls_back_earlier_component_writes() {
+    use fynkel_core::ComponentValue;
+    let copy = Copy::new("atomic-inspector");
+    let (mut session, assets) = open(&copy);
+    let handle = session.open_document(SCENES[1]).unwrap();
+    let desired = describe(&session, handle);
+    let mut world = edit_world();
+    let preview = Preview::load(Uuid::nil(), &mut world, Some(&assets), &desired);
+    let before = preview.dump(&world);
+    let tick = world.tick();
+    let payload = |index: usize, rotation: Quat| {
+        let value = ComponentValue::Transform(Transform {
+            position: Vec3::splat(33.0),
+            rotation,
+            scale: Vec3::ONE,
+        });
+        let (name, node) = fynkel_document::generated::encode_component(&value);
+        (
+            Uuid::from_bytes(*desired.entities[index].id.as_bytes()),
+            name.to_owned(),
+            node.to_serde(),
+        )
+    };
+    let good = payload(0, Quat::IDENTITY);
+    let invalid = payload(1, Quat::from_xyzw(0.0, 0.0, 0.0, 0.0));
+    assert!(preview
+        .set_components(&mut world, &[good.clone(), invalid])
+        .is_err());
+    assert_eq!(preview.dump(&world), before);
+    assert_eq!(world.tick(), tick);
+    assert_eq!(preview.set_components(&mut world, &[good]).unwrap(), 1);
+    assert_eq!(world.step().applied, 0);
+}
+
+#[test]
+fn failed_preview_reload_keeps_identity_mapping_and_previous_description() {
+    let copy = Copy::new("reload-rollback");
+    let (mut session, assets) = open(&copy);
+    let handle = session.open_document(SCENES[0]).unwrap();
+    let desired = describe(&session, handle);
+    let mut world = edit_world();
+    let mut preview = Preview::load(Uuid::nil(), &mut world, Some(&assets), &desired);
+    let before = preview.dump(&world);
+    let id = Uuid::from_bytes(*desired.entities[0].id.as_bytes());
+    let entity = preview.entity(id).unwrap();
+    let tick = world.tick();
+    let mut invalid = desired.clone();
+    invalid.entities[0]
+        .components
+        .push(fynkel_core::ComponentValue::AudioSource(
+            fynkel_core::AudioSource {
+                volume: -1.0,
+                ..Default::default()
+            },
+        ));
+    preview.reload(&mut world, Some(&assets), &invalid);
+    assert!(!preview.diagnostics.is_empty());
+    assert_eq!(preview.entity(id), Some(entity));
+    assert_eq!(preview.dump(&world), before);
+    assert_eq!(world.tick(), tick);
+    assert!(world.ecs().contains(entity));
+    assert!(world.drain_events().is_empty());
+    preview.reload(&mut world, Some(&assets), &desired);
+    assert!(preview.diagnostics.is_empty(), "{:?}", preview.diagnostics);
+    assert_ne!(preview.entity(id), Some(entity));
+}

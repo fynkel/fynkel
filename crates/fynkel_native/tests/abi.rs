@@ -1,11 +1,12 @@
-//! Exercises the C ABI from Rust exactly as a host would (§5.7: batched
-//! traffic, stale handles fail safely, buffers validated, panic boundary).
+//! Exercises owned C transactions, queries, effects, and the panic boundary.
 
 use std::ptr;
 
 use fynkel_contracts::{DiagnosticCode, Entity, EventKind, ObjectRef, Status, WorldId};
 use fynkel_core::schema::*;
-use fynkel_core::Lane;
+#[path = "support/edit.rs"]
+mod edit;
+use edit::{Edit, Reference};
 use fynkel_native::buffer::{self, BufferKind, Writer};
 use fynkel_native::*;
 use fynkel_scene::Transform;
@@ -25,18 +26,26 @@ impl Host {
         Self { rt, w }
     }
 
-    fn submit(&self, lane: Lane, buf: &[u8]) -> (Status, FynkelSubmitResult) {
-        let mut r = FynkelSubmitResult::default();
-        let s = unsafe {
-            fynkel_world_submit_commands(
-                self.w,
-                lane as u32,
-                buf.as_ptr(),
-                buf.len() as u32,
-                &mut r,
-            )
-        };
-        (s, r)
+    fn edit(&self, f: impl FnOnce(&mut Edit) -> Result<(), Status>) -> Status {
+        let mut edit = Edit::new(self.w);
+        match f(&mut edit) {
+            Ok(()) => edit.finish(),
+            Err(status) => status,
+        }
+    }
+    fn spawn_many(&self, values: &[(&str, Transform, Option<Entity>)]) -> Vec<Entity> {
+        let mut edit = Edit::new(self.w);
+        let pending: Vec<_> = values
+            .iter()
+            .map(|(name, transform, parent)| {
+                edit.spawn(name, *transform, parent.map(Reference::live))
+            })
+            .collect();
+        let commit = edit.commit();
+        pending.into_iter().map(|p| commit.resolve(p)).collect()
+    }
+    fn set_component(&self, entity: Entity, value: &fynkel_core::ComponentValue) -> Status {
+        self.edit(|edit| edit.component(entity, value))
     }
 
     fn step(&self) -> (Status, FynkelStepResult) {
@@ -82,14 +91,6 @@ impl Host {
             off += size;
         }
         (out, tail.to_vec())
-    }
-
-    fn spawned(&self) -> Vec<Entity> {
-        self.events()
-            .iter()
-            .filter(|(k, _)| *k == EventKind::SPAWNED.0)
-            .map(|(_, b)| SpawnedEvent::decode(b, &[]).unwrap().entity)
-            .collect()
     }
 
     fn diagnostics(&self) -> Vec<DiagnosticRecord> {
@@ -143,31 +144,13 @@ impl Drop for Host {
     }
 }
 
-/// One command batch: each entry is (kind, body).
-macro_rules! batch {
-    ($( ($kind:expr, $body:expr) ),* $(,)?) => {{
-        let mut w = Writer::begin(Vec::new(), BufferKind::Commands);
-        $( w.command($kind, &$body); )*
-        w.finish()
-    }};
-}
-
 fn at(x: f32) -> Transform {
     Transform::from_position(Vec3::new(x, 0.0, 0.0))
 }
 
-fn spawn(temp_id: u64, x: f32, parent: Option<Entity>, name: &str) -> SpawnCommand {
-    SpawnCommand {
-        temp_id,
-        transform: at(x),
-        parent,
-        name: name.into(),
-    }
-}
-
 #[test]
 fn version_and_fingerprint() {
-    assert_eq!(fynkel_abi_version(), 3);
+    assert_eq!(fynkel_abi_version(), 4);
     assert_eq!(
         fynkel_schema_fingerprint(),
         fynkel_core::schema::schema_fingerprint()
@@ -175,186 +158,113 @@ fn version_and_fingerprint() {
 }
 
 #[test]
-fn spawn_set_destroy_round_trip_with_diagnostics() {
+fn spawn_set_destroy_round_trip_with_rollback() {
     let h = Host::new();
-    let (s, r) = h.submit(
-        Lane::Simulation,
-        &batch![(1, spawn(1, 1.0, None, "")), (1, spawn(2, 1.0, None, ""))],
+    let entities = h.spawn_many(&[("a", at(1.0), None), ("b", at(1.0), None)]);
+    let (a, b) = (entities[0], entities[1]);
+    assert!(
+        h.events().is_empty(),
+        "identity comes from commit, not synthetic spawn events"
     );
-    assert_eq!((s, r.accepted, r.rejected), (Status::Ok, 2, 0));
-    let (s, r) = h.step();
     assert_eq!(
-        (s, r.commands_applied, r.live_entities, r.event_records),
-        (Status::Ok, 2, 2, 2)
-    );
-
-    let ev = h.events();
-    assert_eq!(ev.len(), 2);
-    let spawned: Vec<SpawnedEvent> = ev
-        .iter()
-        .map(|(_, b)| SpawnedEvent::decode(b, &[]).unwrap())
-        .collect();
-    assert_eq!((spawned[0].temp_id, spawned[1].temp_id), (1, 2));
-    let (a, b) = (spawned[0].entity, spawned[1].entity);
-    assert!(h.events().is_empty(), "drained");
-
-    let handles = [a, b];
-    assert_eq!(
-        unsafe { fynkel_world_subscribe(h.w, 1, handles.as_ptr(), 2, 1) },
+        unsafe { fynkel_world_subscribe(h.w, 1, entities.as_ptr(), 2, 1) },
         Status::Ok
     );
-    let (s, _) = h.submit(
-        Lane::Simulation,
-        &batch![
-            (
-                3,
-                SetTransformCommand {
-                    entity: a,
-                    transform: at(5.0)
-                }
-            ),
-            (2, DestroyCommand { entity: b }),
-        ],
-    );
-    assert_eq!(s, Status::Ok);
-    let (s, r) = h.step();
+    let mut edit = Edit::new(h.w);
+    edit.set_transform(a, at(5.0));
+    edit.destroy(b);
+    edit.commit();
+    let (status, report) = h.step();
     assert_eq!(
-        (s, r.commands_applied, r.snapshot_records, r.live_entities),
-        (Status::Ok, 2, 1, 1)
+        (status, report.live_entities, report.snapshot_records),
+        (Status::Ok, 1, 1)
     );
-    let snap = h.snapshot();
-    assert_eq!(snap[0].entity, a);
-    assert_eq!(snap[0].local.position.x, 5.0);
-    assert_eq!(snap[0].world.position.x, 5.0);
-
-    // Stale handle, unknown kind, non-finite payload: three diagnostics with
-    // their batch indexes; the valid command still applies.
-    let (s, r) = h.submit(
-        Lane::Simulation,
-        &batch![
-            (2, DestroyCommand { entity: b }),
-            (99, DestroyCommand { entity: a }),
-            (
-                3,
-                SetTransformCommand {
-                    entity: a,
-                    transform: Transform {
-                        position: Vec3::NAN,
-                        ..Transform::IDENTITY
-                    }
-                }
-            ),
-            (
-                3,
-                SetTransformCommand {
-                    entity: a,
-                    transform: at(6.0)
-                }
-            ),
-        ],
+    assert_eq!(h.snapshot()[0].local.position.x, 5.0);
+    let events = h.events();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.0 == EventKind::DESTROYED.0)
+            .count(),
+        1
+    );
+    assert!(h.events().is_empty());
+    let mut edit = Edit::new(h.w);
+    edit.set_transform(a, at(6.0));
+    assert_eq!(edit.try_destroy(b), Status::CommandsRejected);
+    assert_eq!(edit.finish(), Status::CommandsRejected);
+    assert_eq!(h.step().0, Status::Ok);
+    assert_eq!(
+        h.snapshot()[0].local.position.x,
+        5.0,
+        "a rejected edit publishes nothing"
     );
     assert_eq!(
-        (s, r.accepted, r.rejected),
-        (Status::Ok, 4, 0),
-        "simulation lane validates at the tick"
+        h.edit(|e| e.component(a, &fynkel_core::ComponentValue::Transform(at(f32::NAN)))),
+        Status::CommandsRejected
     );
-    let (s, r) = h.step();
-    assert_eq!(s, Status::CommandsRejected);
-    assert_eq!((r.commands_applied, r.commands_rejected), (1, 3));
-    let d = h.diagnostics();
-    let codes: Vec<(u32, u32)> = d.iter().map(|d| (d.command_index, d.code)).collect();
     assert_eq!(
-        codes,
-        vec![
-            (0, DiagnosticCode::STALE_ENTITY.0),
-            (1, DiagnosticCode::UNKNOWN_COMMAND.0),
-            (2, DiagnosticCode::INVALID_PAYLOAD.0)
-        ]
+        h.edit(|e| {
+            e.set_transform(a, at(7.0));
+            Ok(())
+        }),
+        Status::Ok
     );
-    assert_eq!(d[0].entity, b);
-    assert_eq!(d[0].message, "destroy: stale or unknown entity");
-    assert_eq!(h.snapshot()[0].local.position.x, 6.0);
+    h.step();
+    assert_eq!(h.snapshot()[0].local.position.x, 7.0);
 }
 
 #[test]
-fn presentation_lane_and_frame_plan() {
+fn committed_transform_and_frame_plan() {
     let h = Host::new();
-    h.submit(Lane::Simulation, &batch![(1, spawn(1, 0.0, None, "cam"))]);
-    h.step();
-    let e = h.spawned()[0];
-
+    let e = h.spawn_many(&[("cam", at(0.0), None)])[0];
     let mut plan = FynkelFramePlan::default();
     assert_eq!(
         unsafe { fynkel_world_begin_frame(h.w, 0.001, 1.0, &mut plan) },
         Status::Ok
     );
     assert_eq!(plan.steps, 0);
-    let (s, r) = h.submit(
-        Lane::Presentation,
-        &batch![
-            (
-                3,
-                SetTransformCommand {
-                    entity: e,
-                    transform: at(3.0)
-                }
-            ),
-            (2, DestroyCommand { entity: e }),  // wrong lane
-            (99, DestroyCommand { entity: e }), // unknown, rejected now
-        ],
-    );
     assert_eq!(
-        (s, r.accepted, r.rejected),
-        (Status::CommandsRejected, 1, 2)
-    );
-    let d = h.diagnostics();
-    assert_eq!(d[0].code, DiagnosticCode::WRONG_LANE.0);
-    assert_eq!((d[0].command_index, d[0].lane), (1, 1));
-    assert_eq!(
-        (d[1].command_index, d[1].code),
-        (2, DiagnosticCode::UNKNOWN_COMMAND.0)
+        h.edit(|edit| {
+            edit.set_transform(e, at(3.0));
+            Ok(())
+        }),
+        Status::Ok
     );
     assert_eq!(
         unsafe { (*h.w).core() }.extract().records[0].world.w_axis.x,
         3.0
     );
-
     let (s, n, body, tail) = h.query(bridge::QUERY_NAME, e);
     assert_eq!((s, n), (Status::Ok, 1));
     assert_eq!(
         fynkel_core::Name::decode(&body, &tail).unwrap().value,
         "cam"
     );
-
+    assert_eq!(h.step().0, Status::Ok);
+    let (_, _, body, tail) = h.query(bridge::QUERY_TRANSFORM, e);
+    assert_eq!(
+        SnapshotTransformRecord::decode(&body, &tail)
+            .unwrap()
+            .local
+            .position
+            .x,
+        3.0
+    );
     let mut stats = FynkelWorldStats::default();
     assert_eq!(unsafe { fynkel_world_stats(h.w, &mut stats) }, Status::Ok);
-    assert_eq!(
-        (stats.submit_calls, stats.step_calls, stats.query_calls),
-        (2, 1, 1)
-    );
-    assert!(stats.bytes_in > 0 && stats.bytes_out > 0);
-    assert_eq!(
-        stats.staged_commands, 1,
-        "presentation transform staged for next tick"
-    );
     assert_eq!(stats.subscriptions, 0);
 }
 
 #[test]
 fn hierarchy_queries() {
     let h = Host::new();
-    h.submit(Lane::Simulation, &batch![(1, spawn(1, 1.0, None, ""))]);
+    let spawned = h.spawn_many(&[("", at(1.0), None)]);
     h.step();
-    let root = h.spawned()[0];
-    h.submit(
-        Lane::Simulation,
-        &batch![
-            (1, spawn(1, 1.0, Some(root), "")),
-            (1, spawn(2, 2.0, Some(root), ""))
-        ],
-    );
+    let root = spawned[0];
+    let spawned = h.spawn_many(&[("", at(1.0), Some(root)), ("", at(2.0), Some(root))]);
     h.step();
-    let kids = h.spawned();
+    let kids = spawned;
     let (c1, c2) = (kids[0], kids[1]);
 
     let (s, n, body, _) = h.query(bridge::QUERY_CHILDREN, root);
@@ -371,30 +281,27 @@ fn hierarchy_queries() {
     let (_, n, _, _) = h.query(bridge::QUERY_ALL_ENTITIES, Entity::NULL);
     assert_eq!(n, 3);
     // The whole table in one answer (M3-08b): entity, parent, name.
-    h.submit(
-        Lane::Simulation,
-        &batch![(
-            5,
-            SetNameCommand {
-                entity: c1,
-                name: "Left".into()
-            }
-        )],
+    assert_eq!(
+        h.edit(|edit| {
+            edit.name(c1, "Left")?;
+            Ok(())
+        }),
+        Status::Ok
     );
     // Its layer and tags ride along (ADR-0020); absent components are 0.
-    h.submit(
-        Lane::Simulation,
-        &set_component(
+    assert_eq!(
+        h.set_component(
             c1,
             &fynkel_core::components::ComponentValue::Layer(fynkel_core::Layer { layer: 3 }),
         ),
+        Status::Ok
     );
-    h.submit(
-        Lane::Simulation,
-        &set_component(
+    assert_eq!(
+        h.set_component(
             c1,
             &fynkel_core::components::ComponentValue::Tags(fynkel_core::Tags { bits: 0b101 }),
         ),
+        Status::Ok
     );
     h.step();
     let (s, n, body, tail) = h.query(bridge::QUERY_ENTITIES, Entity::NULL);
@@ -416,16 +323,12 @@ fn hierarchy_queries() {
     let (_, n, _, _) = h.query(bridge::QUERY_TRANSFORM, Entity::NULL);
     assert_eq!(n, 0, "unknown entity: empty response, not an error");
 
-    h.submit(
-        Lane::Simulation,
-        &batch![(
-            4,
-            SetParentCommand {
-                child: c2,
-                parent: None,
-                keep_world: true
-            }
-        )],
+    assert_eq!(
+        h.edit(|edit| {
+            edit.parent(c2, None, true)?;
+            Ok(())
+        }),
+        Status::Ok
     );
     h.step();
     let (_, _, body, _) = h.query(bridge::QUERY_TRANSFORM, c2);
@@ -434,37 +337,15 @@ fn hierarchy_queries() {
     assert_eq!(h.events()[0].0, EventKind::PARENT_CHANGED.0);
 }
 
-/// A `SetComponent` command: the header record then the value's bytes.
-fn set_component(entity: Entity, value: &fynkel_core::components::ComponentValue) -> Vec<u8> {
-    use fynkel_wire::{component_value_size, encode_component_value, StringTable};
-    let mut w = Writer::begin(Vec::new(), BufferKind::Commands);
-    let mut body = vec![0u8; SetComponentCommand::SIZE + component_value_size(value)];
-    let mut strings = StringTable::new();
-    SetComponentCommand {
-        entity,
-        component: value.id().0,
-    }
-    .encode(&mut body, &mut strings);
-    encode_component_value(value, &mut body[SetComponentCommand::SIZE..], &mut strings);
-    // The writer frames a typed record; hand-frame the composite body.
-    w.raw_command(6, &body, strings);
-    w.finish()
-}
-
 #[test]
-fn component_commands_and_query() {
-    use fynkel_core::components::{ComponentValue, MeshRenderer, PointLight};
+fn component_edits_and_query() {
+    use fynkel_core::{ComponentValue, MeshRenderer, PointLight};
     let h = Host::new();
-    h.submit(Lane::Simulation, &batch![(1, spawn(1, 1.0, None, "lamp"))]);
-    h.step();
-    let lamp = h.spawned()[0];
-
-    // Add a light and a renderer (with strings: the material's sub id).
+    let lamp = h.spawn_many(&[("lamp", at(1.0), None)])[0];
     let light = PointLight {
-        color: Vec3::new(1.0, 0.5, 0.25),
         intensity: 800.0,
         range: 12.0,
-        culling_mask: u32::MAX,
+        ..Default::default()
     };
     let renderer = MeshRenderer {
         mesh: fynkel_contracts::AssetRef::with_sub(
@@ -472,189 +353,86 @@ fn component_commands_and_query() {
             "mesh/0",
         ),
         material: fynkel_contracts::AssetRef::new(fynkel_contracts::AssetId::from_bytes([8; 16])),
-        cast_shadows: true,
-        receive_shadows: false,
-        visible: true,
+        ..Default::default()
     };
-    let (s, r) = h.submit(
-        Lane::Simulation,
-        &set_component(lamp, &ComponentValue::PointLight(light)),
+    assert_eq!(
+        h.edit(|e| {
+            e.component(lamp, &ComponentValue::PointLight(light))?;
+            e.component(lamp, &ComponentValue::MeshRenderer(renderer.clone()))
+        }),
+        Status::Ok
     );
-    assert_eq!((s, r.rejected), (Status::Ok, 0));
-    h.submit(
-        Lane::Simulation,
-        &set_component(lamp, &ComponentValue::MeshRenderer(renderer.clone())),
-    );
-    let (_, r) = h.step();
-    assert_eq!(r.commands_rejected, 0);
-
-    // The query frames every component, id order: Transform, Name, then ours.
     let (s, n, body, tail) = h.query(bridge::QUERY_COMPONENTS, lamp);
     assert_eq!((s, n), (Status::Ok, 4));
-    let mut off = 0;
-    let mut seen = Vec::new();
+    let mut offset = 0;
+    let mut values = Vec::new();
     for _ in 0..n {
-        let hdr = ComponentHeader::decode(&body[off..], &tail).unwrap();
-        off += ComponentHeader::SIZE;
-        let value = fynkel_wire::decode_component_value(
-            hdr.component,
-            &body[off..off + hdr.size as usize],
-            &tail,
-        );
-        seen.push((hdr.component, value.map(|v| v.unwrap())));
-        off += hdr.size as usize;
+        let header = ComponentHeader::decode(&body[offset..], &tail).unwrap();
+        offset += ComponentHeader::SIZE;
+        values.push((
+            header.component,
+            fynkel_wire::decode_component_value(
+                header.component,
+                &body[offset..offset + header.size as usize],
+                &tail,
+            )
+            .map(Result::unwrap),
+        ));
+        offset += header.size as usize;
     }
-    assert_eq!(seen[0].0, 1);
-    assert_eq!(seen[1].0, 3, "Name is framed too (no ComponentValue)");
-    assert!(seen[1].1.is_none());
-    assert_eq!(seen[2].1, Some(ComponentValue::MeshRenderer(renderer)));
-    assert_eq!(seen[3].1, Some(ComponentValue::PointLight(light)));
-
-    // Replace on the presentation lane (plain data applies immediately),
-    // remove on the simulation lane, and the rejections.
-    let dim = PointLight {
-        intensity: 1.0,
-        ..light
-    };
-    let (s, r) = h.submit(
-        Lane::Presentation,
-        &set_component(lamp, &ComponentValue::PointLight(dim)),
-    );
-    assert_eq!((s, r.rejected), (Status::Ok, 0));
-    let (_, n, body, tail) = h.query(bridge::QUERY_COMPONENTS, lamp);
-    assert_eq!(n, 4);
-    let last = ComponentHeader::decode(
-        &body[body.len() - ComponentHeader::SIZE - PointLight::SIZE..],
-        &tail,
-    )
-    .unwrap();
-    assert_eq!(last.component, 7);
+    assert_eq!(values.iter().map(|v| v.0).collect::<Vec<_>>(), [1, 3, 4, 7]);
+    assert_eq!(values[2].1, Some(ComponentValue::MeshRenderer(renderer)));
+    assert_eq!(values[3].1, Some(ComponentValue::PointLight(light)));
     assert_eq!(
-        PointLight::decode(&body[body.len() - PointLight::SIZE..], &tail).unwrap(),
-        dim
+        h.edit(|e| {
+            e.remove(lamp, 4)?;
+            e.remove(lamp, 1)
+        }),
+        Status::CommandsRejected
     );
-    h.submit(
-        Lane::Simulation,
-        &batch![
-            (
-                7,
-                RemoveComponentCommand {
-                    entity: lamp,
-                    component: 4
-                }
-            ),
-            (
-                7,
-                RemoveComponentCommand {
-                    entity: lamp,
-                    component: 1
-                }
-            ),
-            (
-                7,
-                RemoveComponentCommand {
-                    entity: lamp,
-                    component: 4
-                }
-            ),
-        ],
-    );
-    let (_, r) = h.step();
     assert_eq!(
-        r.commands_rejected, 2,
-        "Transform cannot be removed; the renderer is already gone"
+        h.query(bridge::QUERY_COMPONENTS, lamp).1,
+        4,
+        "removal rolled back"
     );
-    let d = h.diagnostics();
-    assert_eq!(d[0].code, DiagnosticCode::INVALID_PAYLOAD.0);
-    assert_eq!(d[0].component, 1);
-    assert_eq!(d[1].code, DiagnosticCode::MISSING_COMPONENT.0);
-    let (_, n, _, _) = h.query(bridge::QUERY_COMPONENTS, lamp);
-    assert_eq!(n, 3);
-
-    // A value that fails validation, a component id the wire cannot carry
-    // as a value, a truncated body: rejected at the batch index, the rest
-    // still applies.
-    let bad = PointLight {
-        range: -1.0,
-        ..light
-    };
-    let (s, r) = h.submit(
-        Lane::Simulation,
-        &set_component(lamp, &ComponentValue::PointLight(bad)),
-    );
-    assert_eq!((s, r.rejected), (Status::Ok, 0), "validated at the tick");
-    let mut name_as_value = Writer::begin(Vec::new(), BufferKind::Commands);
-    name_as_value.command(
-        6,
-        &SetComponentCommand {
-            entity: lamp,
-            component: 3,
-        },
-    );
-    let (s, r) = h.submit(Lane::Simulation, &name_as_value.finish());
+    assert_eq!(h.edit(|e| e.remove(lamp, 4)), Status::Ok);
+    assert_eq!(h.edit(|e| e.remove(lamp, 4)), Status::CommandsRejected);
     assert_eq!(
-        (s, r.rejected),
-        (Status::Ok, 0),
-        "a bad body is rejected at the tick, with the batch's others"
+        h.set_component(
+            lamp,
+            &ComponentValue::PointLight(PointLight {
+                range: -1.0,
+                ..light
+            })
+        ),
+        Status::CommandsRejected
     );
-    let mut short = Writer::begin(Vec::new(), BufferKind::Commands);
-    short.command(
-        6,
-        &SetComponentCommand {
-            entity: lamp,
-            component: 7,
-        },
+    assert_eq!(h.query(bridge::QUERY_COMPONENTS, lamp).1, 3);
+    assert_eq!(h.query(bridge::QUERY_COMPONENTS, Entity::NULL).1, 0);
+    assert_eq!(
+        h.step().0,
+        Status::Ok,
+        "failed edits leave no deferred work"
     );
-    let (s, r) = h.submit(Lane::Simulation, &short.finish());
-    assert_eq!((s, r.rejected), (Status::Ok, 0));
-    let (_, r) = h.step();
-    assert_eq!(r.commands_rejected, 3);
-    let d = h.diagnostics();
-    assert!(
-        d.iter()
-            .all(|d| d.code == DiagnosticCode::INVALID_PAYLOAD.0),
-        "{d:?}"
-    );
-    assert!(d[0].message.contains("range"), "{}", d[0].message);
-    assert_eq!(d[1].component, 0, "undecodable: no component known");
-    let (_, n, _, _) = h.query(bridge::QUERY_COMPONENTS, Entity::NULL);
-    assert_eq!(n, 0);
 }
 
 #[test]
 fn protocol_errors_apply_nothing() {
     let h = Host::new();
-    let good = batch![(1, spawn(1, 0.0, None, ""))];
-    let mut bad_magic = good.clone();
-    bad_magic[0] ^= 0xff;
-    assert_eq!(h.submit(Lane::Simulation, &bad_magic).0, Status::Protocol);
-    let mut bad_version = good.clone();
-    bad_version[4] = 9;
-    assert_eq!(h.submit(Lane::Simulation, &bad_version).0, Status::Protocol);
-    assert_eq!(
-        h.submit(Lane::Simulation, &good[..good.len() - 1]).0,
-        Status::Protocol
-    );
-    let mut wrong_kind = good.clone();
-    wrong_kind[6] = 2;
-    assert_eq!(h.submit(Lane::Simulation, &wrong_kind).0, Status::Protocol);
-    let mut lying_size = good.clone();
-    fynkel_wire::put_u32(&mut lying_size, buffer::HEADER_SIZE + 4, 1000);
-    assert_eq!(h.submit(Lane::Simulation, &lying_size).0, Status::Protocol);
-    assert_eq!(h.submit(Lane::Simulation, &[]).0, Status::Protocol);
-    assert_eq!(
-        h.submit(Lane::Simulation, &buffer::empty(BufferKind::Commands))
-            .0,
-        Status::Ok
-    );
-    let (_, r) = h.step();
-    assert_eq!(r.live_entities, 0);
-    assert_eq!(
-        unsafe {
-            fynkel_world_submit_commands(h.w, 7, good.as_ptr(), good.len() as u32, ptr::null_mut())
-        },
-        Status::InvalidArgument
-    );
+    for (opcode, payload) in [
+        (999, vec![]),
+        (1, vec![0; 39]),
+        (3, vec![0; 32]),
+        (2, vec![0; 32]),
+    ] {
+        let mut edit = Edit::new(h.w);
+        edit.spawn("discarded", at(0.0), None);
+        assert_eq!(edit.request_status(opcode, &payload).0, Status::Protocol);
+        assert_eq!(edit.finish(), Status::CommandsRejected);
+        assert_eq!(h.query(bridge::QUERY_ALL_ENTITIES, Entity::NULL).1, 0);
+    }
+    assert_eq!(h.step().0, Status::Ok);
+    assert_eq!(h.spawn_many(&[("retry", at(0.0), None)]).len(), 1);
 }
 
 #[test]
@@ -692,8 +470,7 @@ fn null_safety_and_panic_boundary() {
         Status::Poisoned
     );
     assert_eq!(
-        h.submit(Lane::Simulation, &buffer::empty(BufferKind::Commands))
-            .0,
+        unsafe { fynkel_native::gameplay::fynkel_world_gameplay_begin(h.w, &mut 0) },
         Status::Poisoned
     );
 }
@@ -709,9 +486,9 @@ fn world_desc_and_entity_world_id() {
     };
     let w = unsafe { fynkel_world_create(rt, &desc, std::ptr::null_mut()) };
     let h = Host { rt, w };
-    h.submit(Lane::Simulation, &batch![(1, spawn(1, 0.0, None, ""))]);
+    let spawned = h.spawn_many(&[("", at(0.0), None)]);
     h.step();
-    assert_ne!(h.spawned()[0].world(), WorldId::NONE);
+    assert_ne!(spawned[0].world(), WorldId::NONE);
     let mut plan = FynkelFramePlan::default();
     unsafe { fynkel_world_begin_frame(h.w, 2.0, 1.0, &mut plan) };
     assert_eq!(plan.steps, 0, "2 s clamped to 0.25 < fixed_dt 0.5");
@@ -744,23 +521,16 @@ fn physics_bodies_commands_queries_and_contacts() {
     use fynkel_core::components::ComponentValue;
     use fynkel_core::{Collider, RigidBody};
     let h = Host::new();
-    h.submit(
-        Lane::Simulation,
-        &batch![
-            (1, spawn(1, 0.0, None, "floor")),
-            (
-                1,
-                SpawnCommand {
-                    temp_id: 2,
-                    transform: Transform::from_position(Vec3::new(0.0, 3.0, 0.0)),
-                    parent: None,
-                    name: "crate".into(),
-                }
-            ),
-        ],
-    );
+    let spawned = h.spawn_many(&[
+        ("floor", at(0.0), None),
+        (
+            "crate",
+            Transform::from_position(Vec3::new(0.0, 3.0, 0.0)),
+            None,
+        ),
+    ]);
     h.step();
-    let ids = h.spawned();
+    let ids = spawned;
     let (floor, krate) = (ids[0], ids[1]);
 
     // Static floor: a collider alone. The crate: a dynamic body on a box.
@@ -769,24 +539,21 @@ fn physics_bodies_commands_queries_and_contacts() {
         offset: Vec3::new(0.0, -0.5, 0.0),
         ..Collider::default()
     };
-    let (s, r) = h.submit(
-        Lane::Simulation,
-        &set_component(floor, &ComponentValue::Collider(floor_shape.clone())),
-    );
-    assert_eq!((s, r.rejected), (Status::Ok, 0));
-    h.submit(
-        Lane::Simulation,
-        &set_component(
+    let s = h.set_component(floor, &ComponentValue::Collider(floor_shape.clone()));
+    assert_eq!(s, Status::Ok);
+    assert_eq!(
+        h.set_component(
             krate,
             &ComponentValue::RigidBody(RigidBody {
                 mass: 2.0,
                 ..RigidBody::default()
             }),
         ),
+        Status::Ok
     );
-    h.submit(
-        Lane::Simulation,
-        &set_component(krate, &ComponentValue::Collider(Collider::default())),
+    assert_eq!(
+        h.set_component(krate, &ComponentValue::Collider(Collider::default())),
+        Status::Ok
     );
     let (_, r) = h.step();
     assert_eq!(r.commands_rejected, 0);
@@ -831,63 +598,33 @@ fn physics_bodies_commands_queries_and_contacts() {
     let (s, n, _, _) = h.query(bridge::QUERY_BODY, floor);
     assert_eq!((s, n), (Status::Ok, 0));
 
-    // A body command through the wire (kind 8): a sideways impulse.
-    let (s, r) = h.submit(
-        Lane::Simulation,
-        &batch![(
-            8,
-            BodyCommandRecord {
-                entity: krate,
-                op: BodyOp::ApplyImpulse,
-                vector: Vec3::new(4.0, 0.0, 0.0),
-                rotation: glam::Quat::IDENTITY,
-            }
-        )],
-    );
-    assert_eq!((s, r.rejected), (Status::Ok, 0));
+    // A body effect through the owned protocol: a sideways impulse.
+    let s = h.edit(|edit| {
+        edit.body(BodyCommandRecord {
+            entity: krate,
+            op: BodyOp::ApplyImpulse,
+            vector: Vec3::new(4.0, 0.0, 0.0),
+            rotation: glam::Quat::IDENTITY,
+        })?;
+        Ok(())
+    });
+    assert_eq!(s, Status::Ok);
     let (_, r) = h.step();
     assert_eq!(r.commands_rejected, 0);
     let (_, _, body, tail) = h.query(bridge::QUERY_BODY, krate);
     let state = BodyStateRecord::decode(&body, &tail).unwrap();
     assert!((state.linear_velocity.x - 2.0).abs() < 1e-3, "{state:?}");
 
-    // Rejected at the tick: a body command on the floor (no body), on the
-    // presentation lane (wrong lane, rejected at submit).
-    let (_, r) = h.submit(
-        Lane::Simulation,
-        &batch![(
-            8,
-            BodyCommandRecord {
-                entity: floor,
-                op: BodyOp::ApplyForce,
-                vector: Vec3::Y,
-                rotation: glam::Quat::IDENTITY,
-            }
-        )],
-    );
-    assert_eq!(r.rejected, 0);
-    let (_, r) = h.step();
-    assert_eq!(r.commands_rejected, 1);
-    let d = h.diagnostics();
-    assert_eq!(d[0].code, DiagnosticCode::MISSING_COMPONENT.0);
-    assert_eq!(d[0].component, 10);
-    let (s, r) = h.submit(
-        Lane::Presentation,
-        &batch![(
-            8,
-            BodyCommandRecord {
-                entity: krate,
-                op: BodyOp::ApplyForce,
-                vector: Vec3::Y,
-                rotation: glam::Quat::IDENTITY,
-            }
-        )],
-    );
-    assert_eq!((s, r.rejected), (Status::CommandsRejected, 1));
     assert_eq!(
-        h.diagnostics().last().unwrap().code,
-        DiagnosticCode::WRONG_LANE.0
+        h.edit(|e| e.body(BodyCommandRecord {
+            entity: floor,
+            op: BodyOp::ApplyForce,
+            vector: Vec3::Y,
+            rotation: glam::Quat::IDENTITY
+        })),
+        Status::CommandsRejected
     );
+    assert_eq!(h.step().0, Status::Ok);
 
     // Let it land: a CollisionEnter with a contact (point, normal, impulse).
     let mut entered = Vec::new();
@@ -962,7 +699,7 @@ fn physics_bodies_commands_queries_and_contacts() {
 
     // A malformed buffer is a protocol error with an empty view; the
     // world stays usable.
-    let bad = buffer::empty(BufferKind::Commands);
+    let bad = buffer::empty(BufferKind::Snapshot);
     let mut v = empty_view();
     let s = unsafe { fynkel_world_physics_query(h.w, bad.as_ptr(), bad.len() as u32, &mut v) };
     assert_eq!(s, Status::Protocol);
@@ -980,20 +717,16 @@ fn character_commands_and_query() {
     use fynkel_core::components::ComponentValue;
     use fynkel_core::{CharacterController, Collider, RigidBody, ThirdPersonCamera};
     let h = Host::new();
-    h.submit(
-        Lane::Simulation,
-        &batch![
-            (1, spawn(1, 0.0, None, "Floor")),
-            (1, spawn(2, 0.0, None, "Player")),
-            (1, spawn(3, 0.0, None, "Camera")),
-        ],
-    );
+    let spawned = h.spawn_many(&[
+        ("Floor", at(0.0), None),
+        ("Player", at(0.0), None),
+        ("Camera", at(0.0), None),
+    ]);
     h.step();
-    let ids = h.spawned();
+    let ids = spawned;
     let (floor, player, camera) = (ids[0], ids[1], ids[2]);
-    h.submit(
-        Lane::Simulation,
-        &set_component(
+    assert_eq!(
+        h.set_component(
             floor,
             &ComponentValue::Collider(Collider {
                 size: Vec3::new(10.0, 0.5, 10.0),
@@ -1001,23 +734,24 @@ fn character_commands_and_query() {
                 ..Collider::default()
             }),
         ),
+        Status::Ok
     );
-    h.submit(
-        Lane::Simulation,
-        &set_component(
+    assert_eq!(
+        h.set_component(
             player,
             &ComponentValue::CharacterController(CharacterController::default()),
         ),
+        Status::Ok
     );
-    h.submit(
-        Lane::Simulation,
-        &set_component(
+    assert_eq!(
+        h.set_component(
             camera,
             &ComponentValue::ThirdPersonCamera(ThirdPersonCamera {
                 target: ObjectRef::to(player),
                 ..ThirdPersonCamera::default()
             }),
         ),
+        Status::Ok
     );
     let (_, r) = h.step();
     assert_eq!(r.commands_rejected, 0);
@@ -1051,20 +785,15 @@ fn character_commands_and_query() {
     assert_eq!(rig.target.get(), Some(player));
 
     // Walk one tick at 3 m/s along +X, then jump at 6 m/s.
-    let walk = |x: f32| {
-        batch![(
-            8,
-            BodyCommandRecord {
-                entity: player,
-                op: BodyOp::Move,
-                vector: Vec3::new(x, 0.0, 0.0),
-                rotation: glam::Quat::IDENTITY,
-            }
-        )]
+    let walk = |x: f32| BodyCommandRecord {
+        entity: player,
+        op: BodyOp::Move,
+        vector: Vec3::new(x, 0.0, 0.0),
+        rotation: glam::Quat::IDENTITY,
     };
-    h.submit(Lane::Simulation, &walk(3.0));
+    assert_eq!(h.edit(|e| e.body(walk(3.0))), Status::Ok);
     h.step();
-    h.submit(Lane::Simulation, &walk(3.0));
+    assert_eq!(h.edit(|e| e.body(walk(3.0))), Status::Ok);
     let (_, r) = h.step();
     assert_eq!(r.commands_rejected, 0);
     let (s, n, body, tail) = h.query(bridge::QUERY_CHARACTER, player);
@@ -1075,17 +804,17 @@ fn character_commands_and_query() {
     assert!((state.velocity.x - 3.0).abs() < 1e-3, "{state:?}");
     let (s, n, _, _) = h.query(bridge::QUERY_CHARACTER, floor);
     assert_eq!((s, n), (Status::Ok, 0));
-    h.submit(
-        Lane::Simulation,
-        &batch![(
-            8,
-            BodyCommandRecord {
+    assert_eq!(
+        h.edit(|edit| {
+            edit.body(BodyCommandRecord {
                 entity: player,
                 op: BodyOp::Jump,
                 vector: Vec3::new(0.0, 6.0, 0.0),
                 rotation: glam::Quat::IDENTITY,
-            }
-        )],
+            })?;
+            Ok(())
+        }),
+        Status::Ok
     );
     let (_, r) = h.step();
     assert_eq!(r.commands_rejected, 0);
@@ -1093,40 +822,26 @@ fn character_commands_and_query() {
     let state = CharacterStateRecord::decode(&body, &tail).unwrap();
     assert!(!state.grounded && state.velocity.y > 5.0, "{state:?}");
 
-    // A `Move` on the floor: MISSING_COMPONENT 12 at the tick. A
-    // RigidBody next to the controller: INVALID_PAYLOAD 12, once.
-    h.submit(
-        Lane::Simulation,
-        &batch![(
-            8,
-            BodyCommandRecord {
-                entity: floor,
-                op: BodyOp::Move,
-                vector: Vec3::X,
-                rotation: glam::Quat::IDENTITY,
-            }
-        )],
-    );
-    let (_, r) = h.step();
-    assert_eq!(r.commands_rejected, 1);
-    let d = h.diagnostics();
     assert_eq!(
-        (d[0].code, d[0].component),
-        (DiagnosticCode::MISSING_COMPONENT.0, 12)
+        h.edit(|e| e.body(BodyCommandRecord {
+            entity: floor,
+            op: BodyOp::Move,
+            vector: Vec3::X,
+            rotation: glam::Quat::IDENTITY
+        })),
+        Status::CommandsRejected
     );
-    h.submit(
-        Lane::Simulation,
-        &set_component(player, &ComponentValue::RigidBody(RigidBody::default())),
+    assert_eq!(
+        h.set_component(player, &ComponentValue::RigidBody(RigidBody::default())),
+        Status::Ok
     );
-    let (_, r) = h.step();
-    assert_eq!(r.commands_rejected, 0);
+    h.step();
     let d = h.diagnostics();
     assert_eq!(d.len(), 1);
     assert_eq!(
         (d[0].code, d[0].component),
         (DiagnosticCode::INVALID_PAYLOAD.0, 12)
     );
-    assert_eq!(d[0].command_index, u32::MAX);
     h.step();
     assert!(h.diagnostics().is_empty());
 }
@@ -1143,16 +858,13 @@ fn catalogue_components_and_the_systems_query() {
         Emitter, Follow, LifetimeDespawn, LookAtCamera, MotionSpace, Oscillate, Rotator,
     };
     let h = Host::new();
-    h.submit(
-        Lane::Simulation,
-        &batch![
-            (1, spawn(1, 0.0, None, "Hero")),
-            (1, spawn(2, 5.0, None, "Spinner")),
-            (1, spawn(3, 0.0, None, "Lamp")),
-        ],
-    );
+    let spawned = h.spawn_many(&[
+        ("Hero", at(0.0), None),
+        ("Spinner", at(5.0), None),
+        ("Lamp", at(0.0), None),
+    ]);
     h.step();
-    let ids = h.spawned();
+    let ids = spawned;
     let (hero, spinner, lamp) = (ids[0], ids[1], ids[2]);
     let values: [(Entity, ComponentValue, u32, usize); 6] = [
         (
@@ -1208,7 +920,7 @@ fn catalogue_components_and_the_systems_query() {
         ),
     ];
     for (entity, value, _, _) in &values {
-        h.submit(Lane::Simulation, &set_component(*entity, value));
+        assert_eq!(h.set_component(*entity, value), Status::Ok);
     }
     let (_, r) = h.step();
     assert_eq!(r.commands_rejected, 0, "{:?}", h.diagnostics());
@@ -1335,32 +1047,21 @@ fn projection_of_world_anchors() {
         (s, info, points)
     };
 
-    h.submit(
-        Lane::Simulation,
-        &batch![
-            (
-                1,
-                SpawnCommand {
-                    temp_id: 1,
-                    transform: Transform::from_position(Vec3::new(0.0, 0.0, 5.0)),
-                    parent: None,
-                    name: "camera".into(),
-                }
-            ),
-            (1, spawn(2, 0.0, None, "cube")),
-            (
-                1,
-                SpawnCommand {
-                    temp_id: 3,
-                    transform: Transform::from_position(Vec3::new(0.0, 0.0, 2.5)),
-                    parent: None,
-                    name: "wall".into(),
-                }
-            ),
-        ],
-    );
+    let spawned = h.spawn_many(&[
+        (
+            "camera",
+            Transform::from_position(Vec3::new(0.0, 0.0, 5.0)),
+            None,
+        ),
+        ("cube", at(0.0), None),
+        (
+            "wall",
+            Transform::from_position(Vec3::new(0.0, 0.0, 2.5)),
+            None,
+        ),
+    ]);
     h.step();
-    let ids = h.spawned();
+    let ids = spawned;
     let (camera, cube, wall) = (ids[0], ids[1], ids[2]);
 
     // No camera yet: flagged, nothing placed.
@@ -1372,32 +1073,32 @@ fn projection_of_world_anchors() {
     );
     assert_eq!(points[0].flags, PROJECTED_NO_CAMERA);
 
-    h.submit(
-        Lane::Simulation,
-        &set_component(
+    assert_eq!(
+        h.set_component(
             camera,
             &ComponentValue::Camera(Camera {
                 fov_y: 60f32.to_radians(),
                 ..Camera::default()
             }),
         ),
+        Status::Ok
     );
-    h.submit(
-        Lane::Simulation,
-        &set_component(
+    assert_eq!(
+        h.set_component(
             wall,
             &ComponentValue::Collider(Collider {
                 size: Vec3::new(4.0, 4.0, 0.2),
                 ..Collider::default()
             }),
         ),
+        Status::Ok
     );
-    h.submit(
-        Lane::Simulation,
-        &set_component(
+    assert_eq!(
+        h.set_component(
             wall,
             &ComponentValue::Layer(fynkel_core::Layer { layer: 1 }),
         ),
+        Status::Ok
     );
     let (_, r) = h.step();
     assert_eq!(r.commands_rejected, 0);
@@ -1463,7 +1164,7 @@ fn projection_of_world_anchors() {
 }
 
 /// Animation (M3-19): `fynkel.Animator`/`fynkel.Skin` through
-/// SetComponent, `AnimateCommandRecord` (kind 9) for every op, the
+/// SetComponent, `AnimateCommandRecord` payloads for every op, the
 /// `AnimationEnded` event, `QUERY_ANIMATOR` and the rejections.
 #[test]
 fn animation_commands_events_and_query() {
@@ -1472,22 +1173,13 @@ fn animation_commands_events_and_query() {
     use fynkel_core::components::ComponentValue;
     use fynkel_core::{Animator, Skin};
     let h = Host::new();
-    h.submit(
-        Lane::Simulation,
-        &batch![
-            (1, spawn(1, 0.0, None, "Rig")),
-            (1, spawn(2, 0.0, None, "Bare"))
-        ],
-    );
+    let spawned = h.spawn_many(&[("Rig", at(0.0), None), ("Bare", at(0.0), None)]);
     h.step();
-    let ids = h.spawned();
+    let ids = spawned;
     let (rig, bare) = (ids[0], ids[1]);
-    h.submit(
-        Lane::Simulation,
-        &batch![(1, spawn(3, 0.0, Some(rig), "arm"))],
-    );
+    let spawned = h.spawn_many(&[("arm", at(0.0), Some(rig))]);
     h.step();
-    let arm = h.spawned()[0];
+    let arm = spawned[0];
 
     // The clip a loaded project would have registered from its cache.
     let clip = AssetRef::with_sub(AssetId::from_bytes([9; 16]), "anim/0");
@@ -1509,7 +1201,7 @@ fn animation_commands_events_and_query() {
         );
     }
 
-    // The animator as a component (kind 6), one-shot; it queries back.
+    // The animator as a committed component, one-shot; it queries back.
     let animator = Animator {
         clip: clip.clone(),
         speed: 1.0,
@@ -1520,9 +1212,9 @@ fn animation_commands_events_and_query() {
         root_motion: false,
         controller: None,
     };
-    h.submit(
-        Lane::Simulation,
-        &set_component(rig, &ComponentValue::Animator(animator.clone())),
+    assert_eq!(
+        h.set_component(rig, &ComponentValue::Animator(animator.clone())),
+        Status::Ok
     );
     let (_, r) = h.step();
     assert_eq!(r.commands_rejected, 0);
@@ -1583,7 +1275,7 @@ fn animation_commands_events_and_query() {
     let (s, n, _, _) = h.query(bridge::QUERY_ANIMATOR, bare);
     assert_eq!((s, n), (Status::Ok, 0));
 
-    // Every op through the wire (kind 9): play looping at half speed,
+    // Every operation through the owned protocol: play looping at half speed,
     // set_time, pause, set_speed, resume, crossfade to the same clip
     // (no fade), stop.
     let cmd = |op: AnimateOp, seconds: f32, speed: f32, looping: bool| AnimateCommandRecord {
@@ -1599,27 +1291,33 @@ fn animation_commands_events_and_query() {
         layer: -1,
         point: Vec3::ZERO,
     };
-    let (s, r) = h.submit(
-        Lane::Simulation,
-        &batch![(9, cmd(AnimateOp::Play, 0.0, 0.5, true))],
-    );
-    assert_eq!((s, r.rejected), (Status::Ok, 0));
+    let s = h.edit(|edit| {
+        edit.animate(cmd(AnimateOp::Play, 0.0, 0.5, true))?;
+        Ok(())
+    });
+    assert_eq!(s, Status::Ok);
     let (_, r) = h.step();
     assert_eq!(r.commands_rejected, 0);
     let (_, _, body, tail) = h.query(bridge::QUERY_ANIMATOR, rig);
     let state = AnimatorStateRecord::decode(&body, &tail).unwrap();
     assert!(state.playing && state.looping && state.time == 0.0 && state.speed == 0.5);
-    h.submit(
-        Lane::Simulation,
-        &batch![(9, cmd(AnimateOp::SetTime, 0.25, 0.0, false))],
+    assert_eq!(
+        h.edit(|edit| {
+            edit.animate(cmd(AnimateOp::SetTime, 0.25, 0.0, false))?;
+            Ok(())
+        }),
+        Status::Ok
     );
     h.step();
     let (_, _, body, tail) = h.query(bridge::QUERY_ANIMATOR, rig);
     let state = AnimatorStateRecord::decode(&body, &tail).unwrap();
     assert!((state.time - 0.25).abs() < 1e-5, "{state:?}");
-    h.submit(
-        Lane::Simulation,
-        &batch![(9, cmd(AnimateOp::Pause, 0.0, 0.0, false))],
+    assert_eq!(
+        h.edit(|edit| {
+            edit.animate(cmd(AnimateOp::Pause, 0.0, 0.0, false))?;
+            Ok(())
+        }),
+        Status::Ok
     );
     h.step();
     h.step();
@@ -1629,12 +1327,13 @@ fn animation_commands_events_and_query() {
         !state.playing && (state.time - 0.25).abs() < 1e-5,
         "{state:?}"
     );
-    h.submit(
-        Lane::Simulation,
-        &batch![
-            (9, cmd(AnimateOp::SetSpeed, 0.0, 2.0, false)),
-            (9, cmd(AnimateOp::Resume, 0.0, 0.0, false)),
-        ],
+    assert_eq!(
+        h.edit(|edit| {
+            edit.animate(cmd(AnimateOp::SetSpeed, 0.0, 2.0, false))?;
+            edit.animate(cmd(AnimateOp::Resume, 0.0, 0.0, false))?;
+            Ok(())
+        }),
+        Status::Ok
     );
     let (_, r) = h.step();
     assert_eq!(r.commands_rejected, 0);
@@ -1642,74 +1341,47 @@ fn animation_commands_events_and_query() {
     let state = AnimatorStateRecord::decode(&body, &tail).unwrap();
     assert!(state.playing && state.speed == 2.0, "{state:?}");
     assert!((state.time - (0.25 + 2.0 / 60.0)).abs() < 1e-4, "{state:?}");
-    h.submit(
-        Lane::Simulation,
-        &batch![(9, cmd(AnimateOp::Crossfade, 0.2, 1.0, true))],
+    assert_eq!(
+        h.edit(|edit| {
+            edit.animate(cmd(AnimateOp::Crossfade, 0.2, 1.0, true))?;
+            Ok(())
+        }),
+        Status::Ok
     );
     h.step();
     let (_, _, body, tail) = h.query(bridge::QUERY_ANIMATOR, rig);
     let state = AnimatorStateRecord::decode(&body, &tail).unwrap();
     assert_eq!(state.fade_remaining, 0.0, "same clip: nothing to fade");
     assert!(state.time == 0.0 && state.speed == 1.0);
-    h.submit(
-        Lane::Simulation,
-        &batch![(9, cmd(AnimateOp::Stop, 0.0, 0.0, false))],
+    assert_eq!(
+        h.edit(|edit| {
+            edit.animate(cmd(AnimateOp::Stop, 0.0, 0.0, false))?;
+            Ok(())
+        }),
+        Status::Ok
     );
     h.step();
     let (_, _, body, tail) = h.query(bridge::QUERY_ANIMATOR, rig);
     let state = AnimatorStateRecord::decode(&body, &tail).unwrap();
     assert!(!state.playing && state.time == 0.0);
 
-    // Rejections: no animator (at the tick), a NaN speed, the wrong lane.
-    h.submit(
-        Lane::Simulation,
-        &batch![(
-            9,
-            AnimateCommandRecord {
-                entity: bare,
-                op: AnimateOp::Pause,
-                seconds: 0.0,
-                speed: 0.0,
-                looping: false,
-                clip: AssetRef::default(),
-                value: 0.0,
-                name: String::new(),
-                integer: 0,
-                layer: -1,
-                point: Vec3::ZERO,
-            }
-        )],
-    );
-    let (_, r) = h.step();
-    assert_eq!(r.commands_rejected, 1);
-    let d = h.diagnostics();
     assert_eq!(
-        (d[0].code, d[0].component),
-        (DiagnosticCode::MISSING_COMPONENT.0, 21)
+        h.edit(|e| e.animate(AnimateCommandRecord {
+            entity: bare,
+            ..cmd(AnimateOp::Pause, 0.0, 0.0, false)
+        })),
+        Status::CommandsRejected
     );
-    h.submit(
-        Lane::Simulation,
-        &batch![(9, cmd(AnimateOp::SetSpeed, 0.0, f32::NAN, false))],
-    );
-    let (_, r) = h.step();
-    assert_eq!(r.commands_rejected, 1);
-    assert_eq!(h.diagnostics()[0].code, DiagnosticCode::INVALID_PAYLOAD.0);
-    let (s, r) = h.submit(
-        Lane::Presentation,
-        &batch![(9, cmd(AnimateOp::Resume, 0.0, 0.0, false))],
-    );
-    assert_eq!((s, r.rejected), (Status::CommandsRejected, 1));
     assert_eq!(
-        h.diagnostics().last().unwrap().code,
-        DiagnosticCode::WRONG_LANE.0
+        h.edit(|e| e.animate(cmd(AnimateOp::SetSpeed, 0.0, f32::NAN, false))),
+        Status::CommandsRejected
     );
+    assert_eq!(h.step().0, Status::Ok);
 
     // A clip nothing registered: CLIP_UNAVAILABLE once, at the tick.
-    h.submit(
-        Lane::Simulation,
-        &batch![(
-            9,
-            AnimateCommandRecord {
+    assert_eq!(
+        h.edit(|edit| {
+            edit.animate(AnimateCommandRecord {
                 entity: rig,
                 op: AnimateOp::Play,
                 seconds: 0.0,
@@ -1721,8 +1393,10 @@ fn animation_commands_events_and_query() {
                 integer: 0,
                 layer: -1,
                 point: Vec3::ZERO,
-            }
-        )],
+            })?;
+            Ok(())
+        }),
+        Status::Ok
     );
     h.step();
     let d = h.diagnostics();
@@ -1736,7 +1410,7 @@ fn animation_commands_events_and_query() {
 
     // M3-19c through the wire: a marked clip raises ANIMATION_MARKER (kind
     // 10, the name in the tail), setWeight / setParameter reach the state
-    // record (the name rides the batch's string table), a weight outside
+    // record (the name rides the request's string tail), a weight outside
     // [0, 1] is rejected.
     let marked = AssetRef::with_sub(AssetId::from_bytes([9; 16]), "anim/1");
     unsafe {
@@ -1759,58 +1433,50 @@ fn animation_commands_events_and_query() {
             },
         );
     }
-    h.submit(
-        Lane::Simulation,
-        &batch![
-            (
-                9,
-                AnimateCommandRecord {
-                    entity: rig,
-                    op: AnimateOp::Play,
-                    seconds: 0.0,
-                    speed: 1.0,
-                    looping: true,
-                    clip: marked.clone(),
-                    value: 0.0,
-                    name: String::new(),
-                    integer: 0,
-                    layer: -1,
-                    point: Vec3::ZERO,
-                }
-            ),
-            (
-                9,
-                AnimateCommandRecord {
-                    entity: rig,
-                    op: AnimateOp::SetWeight,
-                    seconds: 0.0,
-                    speed: 0.0,
-                    looping: false,
-                    clip: AssetRef::default(),
-                    value: 0.5,
-                    name: String::new(),
-                    integer: 0,
-                    layer: -1,
-                    point: Vec3::ZERO,
-                }
-            ),
-            (
-                9,
-                AnimateCommandRecord {
-                    entity: rig,
-                    op: AnimateOp::SetParameter,
-                    seconds: 0.0,
-                    speed: 0.0,
-                    looping: false,
-                    clip: AssetRef::default(),
-                    value: 4.0,
-                    name: "speed".into(),
-                    integer: 0,
-                    layer: -1,
-                    point: Vec3::ZERO,
-                }
-            ),
-        ],
+    assert_eq!(
+        h.edit(|edit| {
+            edit.animate(AnimateCommandRecord {
+                entity: rig,
+                op: AnimateOp::Play,
+                seconds: 0.0,
+                speed: 1.0,
+                looping: true,
+                clip: marked.clone(),
+                value: 0.0,
+                name: String::new(),
+                integer: 0,
+                layer: -1,
+                point: Vec3::ZERO,
+            })?;
+            edit.animate(AnimateCommandRecord {
+                entity: rig,
+                op: AnimateOp::SetWeight,
+                seconds: 0.0,
+                speed: 0.0,
+                looping: false,
+                clip: AssetRef::default(),
+                value: 0.5,
+                name: String::new(),
+                integer: 0,
+                layer: -1,
+                point: Vec3::ZERO,
+            })?;
+            edit.animate(AnimateCommandRecord {
+                entity: rig,
+                op: AnimateOp::SetParameter,
+                seconds: 0.0,
+                speed: 0.0,
+                looping: false,
+                clip: AssetRef::default(),
+                value: 4.0,
+                name: "speed".into(),
+                integer: 0,
+                layer: -1,
+                point: Vec3::ZERO,
+            })?;
+            Ok(())
+        }),
+        Status::Ok
     );
     let (_, r) = h.step();
     assert_eq!(r.commands_rejected, 0, "{:?}", h.diagnostics());
@@ -1838,37 +1504,23 @@ fn animation_commands_events_and_query() {
     let state = AnimatorStateRecord::decode(&body, &tail).unwrap();
     assert_eq!((state.weight, state.parameter), (0.5, 4.0), "{state:?}");
     assert_eq!((state.root_delta, state.root_yaw), (Vec3::ZERO, 0.0));
-    h.submit(
-        Lane::Simulation,
-        &batch![(
-            9,
-            AnimateCommandRecord {
-                entity: rig,
-                op: AnimateOp::SetWeight,
-                seconds: 0.0,
-                speed: 0.0,
-                looping: false,
-                clip: AssetRef::default(),
-                value: 2.0,
-                name: String::new(),
-                integer: 0,
-                layer: -1,
-                point: Vec3::ZERO,
-            }
-        )],
+    assert_eq!(
+        h.edit(|e| e.animate(AnimateCommandRecord {
+            value: 2.0,
+            ..cmd(AnimateOp::SetWeight, 0.0, 0.0, false)
+        })),
+        Status::CommandsRejected
     );
-    let (_, r) = h.step();
-    assert_eq!(r.commands_rejected, 1);
-    assert_eq!(h.diagnostics()[0].code, DiagnosticCode::INVALID_PAYLOAD.0);
+    assert_eq!(h.step().0, Status::Ok);
 
     // A Skin component round-trips and an unknown skin is reported once.
     let skin = Skin {
         skin: AssetRef::with_sub(AssetId::from_bytes([9; 16]), "skin/0"),
         skeleton: fynkel_contracts::ObjectRef::to(rig),
     };
-    h.submit(
-        Lane::Simulation,
-        &set_component(arm, &ComponentValue::Skin(skin.clone())),
+    assert_eq!(
+        h.set_component(arm, &ComponentValue::Skin(skin.clone())),
+        Status::Ok
     );
     h.step();
     let d = h.diagnostics();
@@ -1901,15 +1553,9 @@ fn audio_commands_events_and_queries() {
     use fynkel_core::components::ComponentValue;
     use fynkel_core::{AudioBus, AudioListener, AudioSource};
     let h = Host::new();
-    h.submit(
-        Lane::Simulation,
-        &batch![
-            (1, spawn(1, 0.0, None, "Speaker")),
-            (1, spawn(2, 0.0, None, "Ear"))
-        ],
-    );
+    let spawned = h.spawn_many(&[("Speaker", at(0.0), None), ("Ear", at(0.0), None)]);
     h.step();
-    let ids = h.spawned();
+    let ids = spawned;
     let (speaker, ear) = (ids[0], ids[1]);
 
     // The clip a loaded project would have registered from its cache:
@@ -1926,7 +1572,7 @@ fn audio_commands_events_and_queries() {
             .unwrap();
     }
 
-    // The source and the listener as components (kind 6); both query
+    // The source and the listener as committed components; both query
     // back through QUERY_COMPONENTS.
     let source = AudioSource {
         clip: clip.clone(),
@@ -1937,16 +1583,16 @@ fn audio_commands_events_and_queries() {
         playing: true,
         priority: 1,
     };
-    h.submit(
-        Lane::Simulation,
-        &set_component(speaker, &ComponentValue::AudioSource(source.clone())),
+    assert_eq!(
+        h.set_component(speaker, &ComponentValue::AudioSource(source.clone())),
+        Status::Ok
     );
-    h.submit(
-        Lane::Simulation,
-        &set_component(
+    assert_eq!(
+        h.set_component(
             ear,
             &ComponentValue::AudioListener(AudioListener { volume: 0.5 }),
         ),
+        Status::Ok
     );
     let (_, r) = h.step();
     assert_eq!(r.commands_rejected, 0, "{:?}", h.diagnostics());
@@ -2023,29 +1669,33 @@ fn audio_commands_events_and_queries() {
     let state = AudioStateRecord::decode(&body, &tail).unwrap();
     assert!(!state.playing && state.voice == 0, "{state:?}");
 
-    // The audio command (kind 10): play, set volume/pitch, pause, resume,
+    // Audio control through the owned protocol: play, set volume/pitch, pause, resume,
     // stop; each visible in the state.
     let cmd = |op: AudioOp, value: f32| AudioCommandRecord {
         entity: speaker,
         op,
         value,
     };
-    let (s, r) = h.submit(
-        Lane::Simulation,
-        &batch![
-            (10, cmd(AudioOp::Play, 0.0)),
-            (10, cmd(AudioOp::SetVolume, 0.4)),
-            (10, cmd(AudioOp::SetPitch, 2.0)),
-        ],
-    );
-    assert_eq!((s, r.rejected), (Status::Ok, 0));
+    let s = h.edit(|edit| {
+        edit.audio(cmd(AudioOp::Play, 0.0))?;
+        edit.audio(cmd(AudioOp::SetVolume, 0.4))?;
+        edit.audio(cmd(AudioOp::SetPitch, 2.0))?;
+        Ok(())
+    });
+    assert_eq!(s, Status::Ok);
     let (_, r) = h.step();
     assert_eq!(r.commands_rejected, 0, "{:?}", h.diagnostics());
     let (_, _, body, tail) = h.query(bridge::QUERY_AUDIO, speaker);
     let state = AudioStateRecord::decode(&body, &tail).unwrap();
     assert!(state.playing && !state.paused, "{state:?}");
     assert_eq!((state.volume, state.pitch), (0.4, 2.0));
-    h.submit(Lane::Simulation, &batch![(10, cmd(AudioOp::Pause, 0.0))]);
+    assert_eq!(
+        h.edit(|edit| {
+            edit.audio(cmd(AudioOp::Pause, 0.0))?;
+            Ok(())
+        }),
+        Status::Ok
+    );
     h.step();
     let (_, _, body, tail) = h.query(bridge::QUERY_AUDIO, speaker);
     let paused = AudioStateRecord::decode(&body, &tail).unwrap();
@@ -2057,95 +1707,61 @@ fn audio_commands_events_and_queries() {
         paused.time,
         "held"
     );
-    h.submit(
-        Lane::Simulation,
-        &batch![
-            (10, cmd(AudioOp::Resume, 0.0)),
-            (10, cmd(AudioOp::Stop, 0.0))
-        ],
+    assert_eq!(
+        h.edit(|edit| {
+            edit.audio(cmd(AudioOp::Resume, 0.0))?;
+            edit.audio(cmd(AudioOp::Stop, 0.0))?;
+            Ok(())
+        }),
+        Status::Ok
     );
     h.step();
     let (_, _, body, tail) = h.query(bridge::QUERY_AUDIO, speaker);
     assert!(!AudioStateRecord::decode(&body, &tail).unwrap().playing);
 
-    // Fire-and-forget (kind 11) on the presentation lane and the bus
-    // command (kind 12); rejections: a bad volume on either kind, a bad
-    // pitch, an unknown clip, an audio command on the wrong lane, an
-    // entity without a source.
-    let sound = |clip: &AssetRef, volume: f32, pitch: f32| PlaySoundCommandRecord {
-        clip: clip.clone(),
-        bus: AudioBus::Sfx,
-        volume,
-        pitch,
-        priority: 0,
+    let sound = |clip: fynkel_contracts::AssetRef, volume: f32, pitch: f32| {
+        let record = PlaySoundCommandRecord {
+            clip,
+            bus: AudioBus::Sfx,
+            volume,
+            pitch,
+            priority: 0,
+        };
+        let mut body = vec![0; PlaySoundCommandRecord::SIZE];
+        let mut strings = fynkel_wire::StringTable::new();
+        record.encode(&mut body, &mut strings);
+        body.extend(strings.as_bytes());
+        unsafe { fynkel_world_audio_play(h.w, body.as_ptr(), body.len() as u32) }
     };
-    let (s, r) = h.submit(
-        Lane::Presentation,
-        &batch![
-            (11, sound(&clip, 1.0, 1.0)),
-            (
-                12,
-                AudioBusCommandRecord {
-                    bus: AudioBus::Music,
-                    volume: 0.3,
-                    muted: false,
-                }
-            ),
-            (11, sound(&clip, 1.5, 1.0)),
-            (11, sound(&clip, 1.0, 100.0)),
-            (
-                11,
-                sound(&AssetRef::new(AssetId::from_bytes([8; 16])), 1.0, 1.0)
-            ),
-            (
-                12,
-                AudioBusCommandRecord {
-                    bus: AudioBus::Master,
-                    volume: -0.1,
-                    muted: false,
-                }
-            ),
-            (10, cmd(AudioOp::Play, 0.0)),
-        ],
-    );
-    // The presentation lane applies at submit: its rejections are
-    // reported there.
-    assert_eq!((s, r.rejected), (Status::CommandsRejected, 5));
-    let d = h.diagnostics();
-    let codes: Vec<u32> = d.iter().map(|d| d.code).collect();
+    assert_eq!(sound(clip.clone(), 1.0, 1.0), Status::Ok);
+    assert_eq!(sound(clip.clone(), 1.5, 1.0), Status::CommandsRejected);
+    assert_eq!(sound(clip.clone(), 1.0, 100.0), Status::CommandsRejected);
     assert_eq!(
-        codes,
-        vec![
-            DiagnosticCode::INVALID_PAYLOAD.0,
-            DiagnosticCode::INVALID_PAYLOAD.0,
-            DiagnosticCode::SOUND_UNAVAILABLE.0,
-            DiagnosticCode::INVALID_PAYLOAD.0,
-            DiagnosticCode::WRONG_LANE.0,
-        ],
-        "{d:?}"
+        sound(AssetRef::new(AssetId::from_bytes([8; 16])), 1.0, 1.0),
+        Status::CommandsRejected
     );
-    h.submit(
-        Lane::Simulation,
-        &batch![(
-            10,
-            AudioCommandRecord {
-                entity: ear,
-                op: AudioOp::Play,
-                value: 0.0,
-            }
-        )],
+    assert_eq!(h.edit(|e| e.bus(AudioBus::Music, 0.3, false)), Status::Ok);
+    assert_eq!(
+        h.edit(|e| e.bus(AudioBus::Master, -0.1, false)),
+        Status::CommandsRejected
     );
-    let (_, r) = h.step();
-    let d = h.diagnostics();
-    assert_eq!(r.commands_rejected, 1, "{d:?}");
-    assert_eq!(d[0].code, DiagnosticCode::MISSING_COMPONENT.0);
+    assert_eq!(
+        h.edit(|e| e.audio(AudioCommandRecord {
+            entity: ear,
+            op: AudioOp::Play,
+            value: 0.0
+        })),
+        Status::CommandsRejected
+    );
     let (_, _, body, tail) = h.query(bridge::QUERY_AUDIO_STATS, Entity::NULL);
     let stats = AudioStatsRecord::decode(&body, &tail).unwrap();
-    assert_eq!(stats.voices, 1, "the fire-and-forget voice");
+    assert_eq!(stats.voices, 1);
+    assert_eq!(stats.started, 3, "source twice, immediate sound once");
     unsafe {
         assert_eq!((*h.w).core().audio().bus(AudioBus::Music), 0.3);
         assert_eq!((*h.w).core().audio().bus(AudioBus::Master), 1.0);
     }
+    h.step();
 
     // The device ABI: opening either works (a machine with an output
     // device) or is Unsupported with an `audio_device` diagnostic; the
@@ -2189,14 +1805,12 @@ fn audio_commands_events_and_queries() {
 #[test]
 fn memory_stats_and_the_snapshot_budget() {
     let h = Host::new();
-    let cmds: Vec<SpawnCommand> = (1..=8).map(|i| spawn(i, i as f32, None, "e")).collect();
-    let mut w = Writer::begin(Vec::new(), BufferKind::Commands);
-    for c in &cmds {
-        w.command(1, c);
-    }
-    h.submit(Lane::Simulation, &w.finish());
+    let entities = h.spawn_many(
+        &(1..=8)
+            .map(|i| ("e", at(i as f32), None))
+            .collect::<Vec<_>>(),
+    );
     h.step();
-    let entities = h.spawned();
     assert_eq!(entities.len(), 8);
     let handles = entities.clone();
 
@@ -2280,7 +1894,7 @@ fn memory_stats_and_the_snapshot_budget() {
 }
 
 /// ADR-0032 through the wire: an `Animator` naming a controller, the
-/// typed parameter ops and `crossFadeState` (kind 9), the state events
+/// typed parameter ops and `crossFadeState`, the state events
 /// (kinds 12 and 13) and the two controller queries (14 and 15).
 #[test]
 fn animator_controller_ops_events_and_queries() {
@@ -2293,15 +1907,12 @@ fn animator_controller_ops_events_and_queries() {
     use fynkel_core::components::ComponentValue;
     use fynkel_core::Animator;
     let h = Host::new();
-    h.submit(Lane::Simulation, &batch![(1, spawn(1, 0.0, None, "Rig"))]);
+    let spawned = h.spawn_many(&[("Rig", at(0.0), None)]);
     h.step();
-    let rig = h.spawned()[0];
-    h.submit(
-        Lane::Simulation,
-        &batch![(1, spawn(2, 0.0, Some(rig), "arm"))],
-    );
+    let rig = spawned[0];
+    let spawned = h.spawn_many(&[("arm", at(0.0), Some(rig))]);
     h.step();
-    h.spawned();
+    assert_eq!(spawned.len(), 1);
 
     let clip = AssetRef::with_sub(AssetId::from_bytes([9; 16]), "anim/0");
     let controller = AssetRef::new(AssetId::from_bytes([8; 16]));
@@ -2382,9 +1993,9 @@ fn animator_controller_ops_events_and_queries() {
         playing: true,
         ..Animator::default()
     };
-    h.submit(
-        Lane::Simulation,
-        &set_component(rig, &ComponentValue::Animator(animator)),
+    assert_eq!(
+        h.set_component(rig, &ComponentValue::Animator(animator)),
+        Status::Ok
     );
     let (_, r) = h.step();
     assert_eq!(r.commands_rejected, 0, "{:?}", h.diagnostics());
@@ -2423,19 +2034,18 @@ fn animator_controller_ops_events_and_queries() {
         layer: -1,
         point: Vec3::ZERO,
     };
-    // Parameters of each type; a wrong type is refused.
-    let (s, r) = h.submit(
-        Lane::Simulation,
-        &batch![
-            (9, cmd(AnimateOp::SetFloat, 2.5, 0, "speed")),
-            (9, cmd(AnimateOp::SetInteger, 0.0, 7, "weapon")),
-            (9, cmd(AnimateOp::SetInteger, 0.0, 1, "speed")),
-        ],
+    assert_eq!(
+        h.edit(|e| {
+            e.animate(cmd(AnimateOp::SetFloat, 2.5, 0, "speed"))?;
+            e.animate(cmd(AnimateOp::SetInteger, 0.0, 7, "weapon"))
+        }),
+        Status::Ok
     );
-    assert_eq!((s, r.rejected), (Status::Ok, 0));
-    let (_, r) = h.step();
-    assert_eq!(r.commands_rejected, 1);
-    assert!(h.diagnostics()[0].message.contains("`speed` is a float"));
+    assert_eq!(
+        h.edit(|e| e.animate(cmd(AnimateOp::SetInteger, 0.0, 1, "speed"))),
+        Status::CommandsRejected
+    );
+    assert_eq!(h.step().0, Status::Ok);
     let (s, n, body, tail) = h.query(bridge::QUERY_ANIMATOR_PARAMETERS, rig);
     assert_eq!((s, n), (Status::Ok, 3));
     let size = AnimatorParameterRecord::SIZE;
@@ -2454,9 +2064,12 @@ fn animator_controller_ops_events_and_queries() {
     );
 
     // The trigger fires the jump; it is used up.
-    h.submit(
-        Lane::Simulation,
-        &batch![(9, cmd(AnimateOp::SetTrigger, 0.0, 0, "jump"))],
+    assert_eq!(
+        h.edit(|edit| {
+            edit.animate(cmd(AnimateOp::SetTrigger, 0.0, 0, "jump"))?;
+            Ok(())
+        }),
+        Status::Ok
     );
     h.step();
     assert_eq!(
@@ -2473,9 +2086,12 @@ fn animator_controller_ops_events_and_queries() {
     assert_eq!((l.length, l.in_transition), (0.5, false));
 
     // crossFadeState into Idle over 0.25 s: Unity's view mid-fade.
-    h.submit(
-        Lane::Simulation,
-        &batch![(9, cmd(AnimateOp::CrossFadeState, 0.0, 0, "Idle"))],
+    assert_eq!(
+        h.edit(|edit| {
+            edit.animate(cmd(AnimateOp::CrossFadeState, 0.0, 0, "Idle"))?;
+            Ok(())
+        }),
+        Status::Ok
     );
     h.step();
     assert_eq!(states(), [(12, "Idle".into(), "Jump".into())]);
@@ -2487,19 +2103,15 @@ fn animator_controller_ops_events_and_queries() {
     );
     // An unknown state names the states; a controller op on a clip-less,
     // controller-less animator names what is missing.
-    h.submit(
-        Lane::Simulation,
-        &batch![(9, cmd(AnimateOp::PlayState, 0.0, 0, "Fly"))],
+    assert_eq!(
+        h.edit(|e| e.animate(cmd(AnimateOp::PlayState, 0.0, 0, "Fly"))),
+        Status::CommandsRejected
     );
-    let (_, r) = h.step();
-    assert_eq!(r.commands_rejected, 1);
-    assert!(h.diagnostics()[0]
-        .message
-        .contains("the states: Idle, Jump"));
+    assert_eq!(h.step().0, Status::Ok);
     // Without a controller the queries answer nothing.
-    h.submit(
-        Lane::Simulation,
-        &set_component(rig, &ComponentValue::Animator(Animator::default())),
+    assert_eq!(
+        h.set_component(rig, &ComponentValue::Animator(Animator::default())),
+        Status::Ok
     );
     h.step();
     let (s, n, _, _) = h.query(bridge::QUERY_ANIMATOR_CONTROLLER, rig);
@@ -2560,24 +2172,16 @@ fn a_panic_poisons_the_world_and_keeps_its_message() {
 fn actual_default_worlds_runtimes_and_play_restarts_never_alias() {
     let first = Host::new();
     let second = Host::new();
-    for host in [&first, &second] {
-        host.submit(
-            Lane::Simulation,
-            &batch![(1, spawn(1, 0.0, None, "entity"))],
-        );
-        host.step();
-    }
-    let original = first.spawned()[0];
-    let other = second.spawned()[0];
+    let original = first.spawn_many(&[("entity", at(0.0), None)])[0];
+    let other = second.spawn_many(&[("entity", at(0.0), None)])[0];
     assert_ne!(original, other);
     assert_eq!(unsafe { fynkel_world_contains(second.w, original) }, 0);
     assert_eq!(unsafe { fynkel_world_contains(second.w, other) }, 1);
     assert_eq!(second.query(bridge::QUERY_TRANSFORM, original).1, 0);
-    second.submit(
-        Lane::Simulation,
-        &batch![(2, DestroyCommand { entity: original })],
-    );
-    assert_eq!(second.step().0, Status::CommandsRejected);
+    let mut edit = Edit::new(second.w);
+    assert_eq!(edit.try_destroy(original), Status::CommandsRejected);
+    assert_eq!(edit.finish(), Status::CommandsRejected);
+    assert_eq!(second.step().0, Status::Ok);
     assert!(!second.w.is_null());
     assert_eq!(unsafe { fynkel_world_contains(second.w, other) }, 1);
     drop(first);
@@ -2636,4 +2240,27 @@ fn canonical_clock_crosses_abi_without_host_reconstruction() {
     assert_eq!(p.real_elapsed, 2.5);
     assert_eq!(p.gameplay_elapsed, 0.25);
     assert_eq!(p.real_delta, 0.0);
+}
+
+#[test]
+fn scoped_component_ingress_cannot_publish_a_stale_object_reference() {
+    use fynkel_core::{ComponentValue, Follow};
+    let h = Host::new();
+    let entities = h.spawn_many(&[("owner", at(0.0), None), ("target", at(0.0), None)]);
+    let (owner, target) = (entities[0], entities[1]);
+    let mut edit = Edit::new(h.w);
+    edit.destroy(target);
+    edit.commit();
+    assert_eq!(
+        h.set_component(
+            owner,
+            &ComponentValue::Follow(Follow {
+                target: ObjectRef::to(target),
+                ..Default::default()
+            })
+        ),
+        Status::CommandsRejected
+    );
+    assert!(!unsafe { (*h.w).core().ecs().has::<Follow>(owner) });
+    assert_eq!(h.step().0, Status::Ok);
 }

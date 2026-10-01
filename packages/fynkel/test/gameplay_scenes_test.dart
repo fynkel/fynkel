@@ -11,10 +11,7 @@ void main() {
   late Directory cache;
   setUpAll(() {
     cache = Directory.systemTemp.createTempSync('fynkel-gameplay-scenes-');
-    cookProject(
-      Directory('../../crates/fynkel_document/fixtures/project').absolute.path,
-      cacheDir: cache.path,
-    );
+    cookProject(Directory('../../crates/fynkel_document/fixtures/project').absolute.path, cacheDir: cache.path);
     lib = NativeLibrary.open();
   });
   tearDownAll(() {
@@ -110,10 +107,7 @@ void main() {
 
   test('zone subscribers commit independently and a failed subscriber does not stop the next', () {
     final world = fresh();
-    world.instantiate(
-      fixture.coinPrefab,
-      transform: identityTransform.copyWith(position: const Vec3(0, 0, -2)),
-    );
+    world.instantiate(fixture.coinPrefab, transform: identityTransform.copyWith(position: const Vec3(0, 0, -2)));
     final player = world.find('Player')!;
     final before = player.name;
     var secondRan = false;
@@ -226,5 +220,12 @@ void main() {
     );
     expect(world.timeScale, 0.5);
     expect(world.persistentObjects, contains(root));
+    world.edit(() {
+      final pending = world.spawn(name: 'pending persistent');
+      world.dontDestroyOnLoad(pending);
+      expect(world.persistentObjects, contains(pending));
+      pending.destroy();
+      expect(world.persistentObjects, isNot(contains(pending)));
+    });
   });
 }

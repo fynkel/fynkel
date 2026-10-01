@@ -4,7 +4,7 @@
 // frame. Scenes come from the cooked cache through `loadProject`/`loadScene`.
 
 import 'dart:async' show Completer, Zone;
-import 'dart:convert' show jsonEncode;
+import 'dart:convert' show jsonDecode, jsonEncode;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -34,7 +34,7 @@ import 'transform_writer.dart';
 import 'wire/buffers.dart';
 import 'wire/support.dart' show WireRecord, WireStrings, writeVec3;
 
-export 'native/bridge.dart' show BridgeStats, CommandLane, FramePlan, StepResult;
+export 'native/bridge.dart' show BridgeStats, FramePlan, StepResult;
 
 part 'behaviour.dart';
 part 'gameplay.dart';
@@ -52,13 +52,8 @@ const Pose identityTransform = Pose(position: Vec3.zero, rotation: Quat.identity
 
 /// Runtime entity/component container over one native world.
 class World {
-  World._(
-    this._lib,
-    this._native, {
-    required this.ownsLibrary,
-    required this.fixedDt,
-    BehaviourRegistry? registry,
-  }) : registry = registry ?? BehaviourRegistry() {
+  World._(this._lib, this._native, {required this.ownsLibrary, required this.fixedDt, BehaviourRegistry? registry})
+    : registry = registry ?? BehaviourRegistry() {
     input = WorldInput(() => _native.inputView)..onUndeclared = _undeclaredAction;
     context = GameContext(time: _WorldTime(this), input: input);
     _behaviours = _BehaviourSystem(this);
@@ -79,11 +74,7 @@ class World {
     BehaviourRegistry? registry,
   }) {
     final lib = library ?? NativeLibrary.open();
-    final native = lib.createWorld(
-      fixedDt: fixedDt,
-      maxStepsPerFrame: maxStepsPerFrame,
-      maxFrameDt: maxFrameDt,
-    );
+    final native = lib.createWorld(fixedDt: fixedDt, maxStepsPerFrame: maxStepsPerFrame, maxFrameDt: maxFrameDt);
     return World._(
       lib,
       native,
@@ -231,13 +222,7 @@ class World {
     return _native;
   }
 
-  final CommandBatch _presentation = CommandBatch();
-
   final Map<EntityRef, GameObject> _byEntity = {};
-
-  /// What [dontDestroyOnLoad] kept, in marking order; the objects asked
-  /// for while pending, marked when the tick makes them.
-  final List<GameObject> _persistent = [];
 
   /// The project's `persistentObjects` the last [loadProject] made, by
   /// name (ADR-0039).
@@ -310,8 +295,7 @@ class World {
   void Function(BehaviourError error) onBehaviourError = reportBehaviourError;
 
   void _undeclaredAction(String action) {
-    final message =
-        "Input action '$action' is not declared in fynkel.project.json → inputActions; it reads as nothing";
+    final message = "Input action '$action' is not declared in fynkel.project.json → inputActions; it reads as nothing";
     if (EditorChannel.enabled) {
       EditorChannel.log(message, source: 'input', severity: 'warning', tick: tick);
     } else {
@@ -378,13 +362,11 @@ class World {
   /// APIs. Reads inside the synchronous callback see its writes. Surviving
   /// spawns resolve before this returns; an exception discards the edit.
   ///
-  /// May run in synchronous frame/lifecycle callbacks. Queued legacy simulation
-  /// work is adopted as a separate atomic commit before this callback; if that
-  /// handoff fails, the callback does not run and the queue remains native-owned.
-  /// A later callback failure does not undo previously adopted work. Presentation
-  /// work must be drained separately. Body, audio and animation requests publish
-  /// on commit and execute at the next eligible tick. Scene replacement, runtime resource mutation and
-  /// presentation writes remain guarded during edits.
+  /// May run in synchronous frame/lifecycle callbacks. Entry reconciles live
+  /// identities and names without committing work or consuming events.
+  /// Body, audio and animation requests publish on commit and execute at the
+  /// next eligible tick. Scene replacement, runtime resource mutation and
+  /// immediate effects remain guarded during edits.
   /// Arbitrary Dart variables/services are outside the rollback boundary.
   R edit<R>(R Function() callback) => _editGameplay(callback);
 
@@ -420,15 +402,11 @@ class World {
   /// A built-in shape (Unity's `GameObject.CreatePrimitive`, ADR-0026
   /// §4): [ObjectSpec.primitive] built under [parent] at [transform] —
   /// the shape's mesh, the default material and Unity's collider for it.
-  GameObject createPrimitive(
-    Primitive shape, {
-    String? name,
-    Pose transform = identityTransform,
-    GameObject? parent,
-  }) => build(
-    ObjectSpec.primitive(shape, name: name, transform: transform),
-    parent: parent,
-  );
+  GameObject createPrimitive(Primitive shape, {String? name, Pose transform = identityTransform, GameObject? parent}) =>
+      build(
+        ObjectSpec.primitive(shape, name: name, transform: transform),
+        parent: parent,
+      );
 
   // ------------------------------------------ runtime materials (ADR-0026 §4)
 
@@ -442,7 +420,6 @@ class World {
   /// [StateError] before a project or scene is loaded (the material lives
   /// in that asset store).
   MaterialAsset createMaterial([gen.PbrMaterial material = const gen.PbrMaterial()]) {
-    _rejectDuringEdit('createMaterial');
     final ref = _MadeMaterial(this, _newAssetId());
     setMaterial(ref, material);
     return ref;
@@ -467,32 +444,34 @@ class World {
     gen.AlphaMode alphaMode = gen.AlphaMode.opaque,
     double alphaCutoff = 0.5,
     bool doubleSided = false,
-  }) {
-    _rejectDuringEdit('createShaderMaterial');
-    final shaderRef = switch (shader) {
-      AssetRef r => r,
-      String path =>
-        assets.find(path) ?? (throw ArgumentError.value(path, 'shader', 'no such asset in the last cook')),
-      _ => throw ArgumentError.value(shader, 'shader', 'an AssetRef or a path under assets/'),
-    };
-    final ref = _MadeMaterial(this, _newAssetId());
-    final doc = <String, Object?>{
-      r'$schema': 'https://fynkel.dev/schemas/material.schema.json',
-      'formatVersion': 2,
-      'id': ref.asset,
-      'name': 'Made in code',
-      'shader': {'asset': shaderRef.asset},
-      'parameters': <String, Object?>{},
-      'textures': <String, Object?>{},
-      'alpha_mode': alphaMode.name,
-      'alpha_cutoff': alphaCutoff,
-      'double_sided': doubleSided,
-    };
-    values.forEach((name, value) => _putValue(doc, name, value));
-    _sendShaderMaterial(ref, doc, 'createShaderMaterial');
-    _shaderMaterials[ref.asset] = doc;
-    return ref;
-  }
+  }) => _withGameplay(
+    () => _gameplay!.guard(() {
+      final edit = _gameplay!;
+      final shaderRef = switch (shader) {
+        AssetRef r => r,
+        String path =>
+          assets.find(path) ?? (throw ArgumentError.value(path, 'shader', 'no such asset in the last cook')),
+        _ => throw ArgumentError.value(shader, 'shader', 'an AssetRef or a path under assets/'),
+      };
+      final ref = _MadeMaterial(this, _newAssetId());
+      final doc = <String, Object?>{
+        r'$schema': 'https://fynkel.dev/schemas/material.schema.json',
+        'formatVersion': 2,
+        'id': ref.asset,
+        'name': 'Made in code',
+        'shader': {'asset': shaderRef.asset},
+        'parameters': <String, Object?>{},
+        'textures': <String, Object?>{},
+        'alpha_mode': alphaMode.name,
+        'alpha_cutoff': alphaCutoff,
+        'double_sided': doubleSided,
+      };
+      values.forEach((name, value) => _putValue(doc, name, value));
+      _sendShaderMaterial(ref, doc, 'createShaderMaterial');
+      edit._shaderMaterials[ref.asset] = doc;
+      return ref;
+    }),
+  );
 
   /// Sets the property [name] of the shader material [ref] to [value]
   /// (Unity's `material.SetFloat` / `SetColor` / `SetTexture`, ADR-0031):
@@ -504,15 +483,20 @@ class World {
   /// shader's default back. A wrong name, type or range throws
   /// [ArgumentError] with the diagnostic, and the material keeps its
   /// values.
-  void setMaterialValue(AssetRef ref, String name, Object? value) {
-    _rejectDuringEdit('setMaterialValue');
-    final doc = _shaderMaterials[ref.asset] ?? _cookedShaderMaterial(ref);
-    final changed = _copyDoc(doc);
-    _putValue(changed, name, value);
-    _sendShaderMaterial(ref, changed, 'setMaterialValue');
-    _shaderMaterials[ref.asset] = changed;
-    (_codeValues[ref.asset] ??= {})[name] = value;
-  }
+  void setMaterialValue(AssetRef ref, String name, Object? value) => _withGameplay(
+    () => _gameplay!.guard(() {
+      final edit = _gameplay!;
+      final doc = _shaderMaterial(ref.asset) ?? _cookedShaderMaterial(ref);
+      final changed = _copyDoc(doc);
+      _putValue(changed, name, value);
+      _sendShaderMaterial(ref, changed, 'setMaterialValue');
+      edit._shaderMaterials[ref.asset] = changed;
+      edit._codeValues[ref.asset] = {
+        ...?_materialCodeValues(ref.asset),
+        name: value is List<num> ? List<num>.unmodifiable(value) : value,
+      };
+    }),
+  );
 
   /// An Inspector edit of the material [id] during Play, saved (as in
   /// Unity): when code changed it with [setMaterialValue], its values for
@@ -521,35 +505,48 @@ class World {
   /// code's. False when code has not touched [id] (the editor draws the
   /// edit over the cooked material itself), or the edit left `.shader`
   /// (a Lit material now: the code's copy is dropped).
-  bool applyMaterialEdit(String id, Map<String, Object?> fields) {
-    _rejectDuringEdit('applyMaterialEdit');
-    if (!_shaderMaterials.containsKey(id)) return false;
-    final ref = AssetRef(id);
-    if (fields['shader'] is! Map) {
-      _shaderMaterials.remove(id);
-      _codeValues.remove(id);
-      _sendShaderMaterial(ref, null, 'applyMaterialEdit');
-      return false;
-    }
-    final changed = _copyDoc(fields);
-    _codeValues[id]?.forEach((name, value) => _putValue(changed, name, value));
-    _sendShaderMaterial(ref, changed, 'applyMaterialEdit');
-    _shaderMaterials[id] = changed;
-    return true;
-  }
+  bool applyMaterialEdit(String id, Map<String, Object?> fields) => _withGameplay(
+    () => _gameplay!.guard(() {
+      final edit = _gameplay!;
+      if (_shaderMaterial(id) == null) return false;
+      final ref = AssetRef(id);
+      if (fields['shader'] is! Map) {
+        edit._shaderMaterials[id] = null;
+        edit._codeValues[id] = null;
+        _sendShaderMaterial(ref, null, 'applyMaterialEdit');
+        return false;
+      }
+      final changed = _copyDoc(fields);
+      _materialCodeValues(id)?.forEach((name, value) => _putValue(changed, name, value));
+      _sendShaderMaterial(ref, changed, 'applyMaterialEdit');
+      edit._shaderMaterials[id] = changed;
+      return true;
+    }),
+  );
 
   /// The value [setMaterialValue] or [createShaderMaterial] gave the property
   /// [name] of [ref] — a number, bool, list of numbers or [AssetRef] —
   /// or null when code did not set it (the material's own value holds).
   Object? materialValue(AssetRef ref, String name) {
-    final doc = _shaderMaterials[ref.asset];
+    final doc = _shaderMaterial(ref.asset);
     if (doc == null) return null;
     final texture = (doc['textures'] as Map)[name];
     if (texture is Map) {
       final t = (texture['texture'] as Map).cast<String, Object?>();
       return AssetRef(t['asset'] as String, sub: t['sub'] as String?);
     }
-    return (doc['parameters'] as Map)[name];
+    final value = (doc['parameters'] as Map)[name];
+    return value is List ? List<Object?>.unmodifiable(value) : value;
+  }
+
+  static T? _resourceView<T>(Map<String, T?>? staged, Map<String, T> committed, String id) =>
+      staged != null && staged.containsKey(id) ? staged[id] : committed[id];
+  Map<String, Object?>? _shaderMaterial(String id) => _resourceView(_gameplay?._shaderMaterials, _shaderMaterials, id);
+  Map<String, Object?>? _materialCodeValues(String id) => _resourceView(_gameplay?._codeValues, _codeValues, id);
+  void _checkRuntimeResource(AssetRef ref, String kind) {
+    if (ref.bytes == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
+    if (ref.sub?.isNotEmpty ?? false) throw ArgumentError.value(ref, 'ref', 'a runtime resource is a whole asset');
+    if (_cacheDir == null) throw StateError('$kind need a loaded project or scene — loadProject or loadScene first');
   }
 
   final Map<String, Map<String, Object?>> _shaderMaterials = {};
@@ -566,7 +563,9 @@ class World {
     if (_cacheDir == null) {
       throw StateError('materials need a loaded project (their asset store) — loadProject first');
     }
-    final (status, json) = _native.assetJson(id);
+    final (status, json) = _gameplay == null
+        ? _native.assetJson(id)
+        : (FynkelStatus.FYNKEL_STATUS_OK, _gameplay!.native.assetJson(ref.asset));
     if (status != FynkelStatus.FYNKEL_STATUS_OK) {
       throw ArgumentError.value(ref, 'ref', '${json['message'] ?? 'not in the cache'}');
     }
@@ -586,11 +585,12 @@ class World {
     return doc;
   }
 
-  static Map<String, Object?> _copyDoc(Map<String, Object?> doc) => {
-    ...doc,
-    'parameters': {...?(doc['parameters'] as Map?)?.cast<String, Object?>()},
-    'textures': {...?(doc['textures'] as Map?)?.cast<String, Object?>()},
-  };
+  static Map<String, Object?> _copyDoc(Map<String, Object?> doc) {
+    final copied = (jsonDecode(jsonEncode(doc)) as Map).cast<String, Object?>();
+    copied['parameters'] = {...?(copied['parameters'] as Map?)?.cast<String, Object?>()};
+    copied['textures'] = {...?(copied['textures'] as Map?)?.cast<String, Object?>()};
+    return copied;
+  }
 
   /// [value] as the material document holds the property [name].
   static void _putValue(Map<String, Object?> doc, String name, Object? value) {
@@ -616,7 +616,7 @@ class World {
       case Vec4 v:
         parameters[name] = [v.x, v.y, v.z, v.w];
       case List<num> l:
-        parameters[name] = l;
+        parameters[name] = List<num>.unmodifiable(l);
       default:
         throw ArgumentError.value(
           value,
@@ -627,25 +627,14 @@ class World {
   }
 
   void _sendShaderMaterial(AssetRef ref, Map<String, Object?>? doc, String call) {
-    final id = ref.bytes;
-    if (id == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
-    final (status, diagnostics) = _native.setShaderMaterial(id, doc == null ? null : jsonEncode(doc));
-    final errors = [
-      for (final d in diagnostics)
-        if (d['severity'] == 'error') d,
-    ];
-    String describe() => errors.map((d) => '${d['code']}: ${d['message']}').join('; ');
-    switch (status) {
-      case FynkelStatus.FYNKEL_STATUS_OK:
-        return;
-      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED when _cacheDir == null:
-        throw StateError('materials need a loaded project (their asset store) — loadProject first');
-      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
-      case FynkelStatus.FYNKEL_STATUS_INVALID_ARGUMENT:
-        throw ArgumentError('$call: ${describe()}');
-      default:
-        throw _native.failure(call, status);
+    _checkRuntimeResource(ref, 'materials');
+    final edit = _gameplay!;
+    try {
+      edit.native.setRuntimeShaderMaterial(ref.asset, doc == null ? null : jsonEncode(doc));
+    } on StateError catch (error) {
+      throw ArgumentError('$call: ${error.message}');
     }
+    edit._materials[ref.asset] = null;
   }
 
   /// A new random (v4) asset id: what a made material or mesh is named.
@@ -662,50 +651,28 @@ class World {
   /// Gives the material [ref] new values (Unity's `material.color = …`):
   /// one [createMaterial] made, or a cooked material, replaced for this
   /// run until [destroyMaterial]. Every renderer using it changes.
-  void setMaterial(AssetRef ref, gen.PbrMaterial material) {
-    _rejectDuringEdit('setMaterial');
-    _setMaterial(ref, material);
-    _runtimeMaterials[ref.asset] = material;
-  }
+  void setMaterial(AssetRef ref, gen.PbrMaterial material) => _setMaterial(ref, material);
 
   /// Removes the runtime material [ref]: a created one draws as missing
   /// again, a replaced cooked one goes back to its cooked values.
-  void destroyMaterial(AssetRef ref) {
-    _rejectDuringEdit('destroyMaterial');
-    _codeValues.remove(ref.asset);
-    if (_shaderMaterials.remove(ref.asset) != null) {
-      _sendShaderMaterial(ref, null, 'destroyMaterial');
-      return;
-    }
-    _setMaterial(ref, null);
-    _runtimeMaterials.remove(ref.asset);
-  }
+  void destroyMaterial(AssetRef ref) => _setMaterial(ref, null);
 
   /// The values [setMaterial] or [createMaterial] last gave [ref] (null
   /// for a material this world did not make or replace): the start of a
   /// change, `setMaterial(ref, runtimeMaterial(ref)!.copyWith(…))`.
-  gen.PbrMaterial? runtimeMaterial(AssetRef ref) => _runtimeMaterials[ref.asset];
+  gen.PbrMaterial? runtimeMaterial(AssetRef ref) => _resourceView(_gameplay?._materials, _runtimeMaterials, ref.asset);
   final Map<String, gen.PbrMaterial> _runtimeMaterials = {};
 
-  void _setMaterial(AssetRef ref, gen.PbrMaterial? material) {
-    final id = ref.bytes;
-    if (id == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
-    final status = _native.setMaterial(id, material);
-    switch (status) {
-      case FynkelStatus.FYNKEL_STATUS_OK:
-        return;
-      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
-        throw StateError(
-          'materials need a loaded project or scene (their asset store) — loadProject or loadScene first',
-        );
-      case FynkelStatus.FYNKEL_STATUS_INVALID_ARGUMENT:
-        throw FynkelBridgeError(
-          'setMaterial: the native library has another PbrMaterial layout (rebuild it)',
-        );
-      default:
-        throw _native.failure('setMaterial', status);
-    }
-  }
+  void _setMaterial(AssetRef ref, gen.PbrMaterial? material) => _withGameplay(
+    () => _gameplay!.guard(() {
+      final edit = _gameplay!;
+      _checkRuntimeResource(ref, 'materials');
+      edit.native.setRuntimeMaterial(ref.asset, material);
+      edit._materials[ref.asset] = material;
+      edit._shaderMaterials[ref.asset] = null;
+      edit._codeValues[ref.asset] = null;
+    }),
+  );
 
   // --------------------------------------------- runtime meshes (ADR-0026 §4)
 
@@ -716,7 +683,6 @@ class World {
   /// [setMesh]. Throws [StateError] before a project or scene is loaded
   /// (the mesh lives in that asset store).
   MeshAsset createMesh(MeshData mesh) {
-    _rejectDuringEdit('createMesh');
     final ref = _MadeMesh(this, _newAssetId());
     setMesh(ref, mesh);
     return ref;
@@ -724,45 +690,27 @@ class World {
 
   /// Gives the mesh [ref] (one [createMesh] made) new geometry: every
   /// renderer and mesh collider using it follows from the next frame.
-  void setMesh(AssetRef ref, MeshData mesh) {
-    _rejectDuringEdit('setMesh');
-    _setMesh(ref, mesh);
-    _runtimeMeshes[ref.asset] = mesh;
-  }
+  void setMesh(AssetRef ref, MeshData mesh) => _setMesh(ref, mesh);
 
   /// Removes the mesh [ref]: its renderers draw it as missing, and a
   /// collider still naming it reports `meshUnavailable` at the next step
   /// (remove the collider first).
-  void destroyMesh(AssetRef ref) {
-    _rejectDuringEdit('destroyMesh');
-    _setMesh(ref, null);
-    _runtimeMeshes.remove(ref.asset);
-  }
+  void destroyMesh(AssetRef ref) => _setMesh(ref, null);
 
   /// What [createMesh] or [setMesh] last gave [ref] (null for a mesh this
   /// world did not make): the start of a change,
   /// `setMesh(ref, runtimeMesh(ref)!.copyWith(positions: …))`.
-  MeshData? runtimeMesh(AssetRef ref) => _runtimeMeshes[ref.asset];
+  MeshData? runtimeMesh(AssetRef ref) => _resourceView(_gameplay?._meshes, _runtimeMeshes, ref.asset);
   final Map<String, MeshData> _runtimeMeshes = {};
 
-  void _setMesh(AssetRef ref, MeshData? mesh) {
-    final id = ref.bytes;
-    if (id == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
-    if (ref.sub?.isNotEmpty ?? false) {
-      throw ArgumentError.value(ref, 'ref', 'a made mesh is a whole asset, not a sub-asset of a model');
-    }
-    final status = _native.setMesh(id, mesh?.toPayload());
-    switch (status) {
-      case FynkelStatus.FYNKEL_STATUS_OK:
-        return;
-      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
-        throw StateError(
-          'meshes need a loaded project or scene (their asset store) — loadProject or loadScene first',
-        );
-      default:
-        throw _native.failure('setMesh', status);
-    }
-  }
+  void _setMesh(AssetRef ref, MeshData? mesh) => _withGameplay(
+    () => _gameplay!.guard(() {
+      final edit = _gameplay!;
+      _checkRuntimeResource(ref, 'meshes');
+      edit.native.setRuntimeMesh(ref.asset, mesh?.toPayload());
+      edit._meshes[ref.asset] = mesh;
+    }),
+  );
 
   // ---------------------------------------------- runtime clips (ADR-0033 § 2)
 
@@ -773,14 +721,14 @@ class World {
   /// [setClip]. Throws [StateError] before a project or scene is loaded
   /// (the clip lives in that asset store).
   AnimationClipAsset createClip(ClipData clip) {
-    _rejectDuringEdit('createClip');
     final ref = _MadeClip(this, _newAssetId());
     setClip(ref, clip);
     return ref;
   }
 
   /// Gives the clip [ref] (one [createClip] made) new keys: animators
-  /// playing it follow from the next tick.
+  /// playing it follow from the next tick. Inside an edit or callback, creation,
+  /// replacement and removal publish only on successful commit.
   void setClip(AssetRef ref, ClipData clip) => _setClip(ref, clip);
 
   /// Removes the clip [ref]; animators already playing it keep it.
@@ -788,32 +736,22 @@ class World {
 
   final Set<String> _runtimeClips = {};
 
-  void _setClip(AssetRef ref, ClipData? clip) {
-    _rejectDuringEdit('setClip');
-    clip == null ? _runtimeClips.remove(ref.asset) : _runtimeClips.add(ref.asset);
-    final id = ref.bytes;
-    if (id == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
-    if (ref.sub?.isNotEmpty ?? false) {
-      throw ArgumentError.value(ref, 'ref', 'a made clip is a whole asset, not a sub-asset of a model');
-    }
-    final status = _native.setClip(id, clip?.toPayload());
-    switch (status) {
-      case FynkelStatus.FYNKEL_STATUS_OK:
-        return;
-      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
-        throw StateError(
-          'clips need a loaded project or scene (their asset store) — loadProject or loadScene first',
-        );
-      case FynkelStatus.FYNKEL_STATUS_INVALID_ARGUMENT:
-        throw ArgumentError.value(
-          ref,
-          'clip',
-          'the engine refused it (keys out of order or past its length?)',
-        );
-      default:
-        throw _native.failure('setClip', status);
-    }
-  }
+  bool _hasRuntimeClip(String id) => _gameplay?._runtimeClips[id] ?? _runtimeClips.contains(id);
+
+  void _setClip(AssetRef ref, ClipData? clip) => _withGameplay(() {
+    final edit = _gameplay!;
+    edit.guard(() {
+      if (ref.bytes == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
+      if (ref.sub?.isNotEmpty ?? false) {
+        throw ArgumentError.value(ref, 'ref', 'a made clip is a whole asset, not a sub-asset of a model');
+      }
+      if (_cacheDir == null) {
+        throw StateError('clips need a loaded project or scene — loadProject or loadScene first');
+      }
+      edit.native.setRuntimeClip(ref.asset, clip?.toPayload());
+      edit._runtimeClips[ref.asset] = clip != null;
+    });
+  });
 
   /// The shared instance of the data asset [ref] (ADR-0027 §3):
   /// `world.data<Weapon>(Assets.data.sword)`. Made from the cooked
@@ -905,7 +843,6 @@ class World {
   FramePlan beginFrame(double dtSeconds) {
     _rejectDuringEdit('beginFrame');
     if (Gizmos.compiled) gizmos?.clear();
-    _presentation.clear();
     final plan = _native.beginFrame(dtSeconds, _timeScale);
     _frameCount = plan.frame;
     _frameDt = plan.gameplayDelta;
@@ -1002,16 +939,12 @@ class World {
     _toSubscribe.clear();
   }
 
-  /// Flushes presentation-lane writes (call after lateUpdate, before
-  /// extraction). [step] does not flush this lane.
-  void flushPresentation() => _flush(CommandLane.presentation, _presentation, 'presentation');
-
   /// The host loop (§5.1) for tests, headless runs and hosts that need no
   /// custom phases: begin the frame; per planned tick run every behaviour's
   /// `fixedUpdate` (and [fixedUpdate]) with the non-physics events drained
   /// since the last tick, `step`, drain the tick's events and run
   /// `afterPhysics` with its contacts for behaviours that opted in; then
-  /// `update`/`lateUpdate` (and [update]) and the presentation flush.
+  /// `update`/`lateUpdate` (and [update]).
   /// [fixedUpdate] runs before the behaviours, [update] after them. Every
   /// non-physics event reaches exactly one `fixedUpdate`. [input] is the
   /// frame's raw control events ([captureInput]): each tick's callbacks
@@ -1063,9 +996,6 @@ class World {
       _inUpdatePhase = false;
     }
     t._behaviours.stop();
-    t._presentation.start();
-    if (!isDisposed) _deferring(flushPresentation);
-    t._presentation.stop();
     t._end(plan.steps);
     _throwDeferred();
     return plan;
@@ -1088,7 +1018,6 @@ class World {
     _callbackEntryBlocked = false;
     _deferredErrors.clear();
     scenes._perform();
-    _presentation.clear();
     if (Gizmos.compiled) gizmos?.clear();
     t._native.start();
     captureInput(input);
@@ -1117,9 +1046,6 @@ class World {
       return plan;
     }
     _checkFatal(_native.snapInterpolation(), 'snapInterpolation');
-    t._presentation.start();
-    _deferring(flushPresentation);
-    t._presentation.stop();
     t._end(1);
     _throwDeferred();
     return plan;
@@ -1130,7 +1056,7 @@ class World {
   /// host's own error — held until the frame is done: thrown from inside
   /// a tick, one lost the rest of the frame — that tick's contacts and
   /// `afterPhysics`, the ticks after it, `update`, `lateUpdate` and the
-  /// presentation flush (foundation 1.5, 1.6). Unity logs and the frame
+  /// frame completion (foundation 1.5, 1.6). Unity logs and the frame
   /// goes on; here the frame goes on and then throws.
   final List<(Object, StackTrace)> _deferredErrors = [];
   bool _callbackEntryBlocked = false;
@@ -1303,20 +1229,6 @@ class World {
     return go;
   }
 
-  void _flush(CommandLane lane, CommandBatch batch, String context) {
-    _rejectDuringEdit('flush');
-    if (batch.isEmpty) return;
-    // finalize() first: appending the string tail may grow the buffer, and
-    // backingStore read before it would be the old, shorter one.
-    final length = batch.finalize();
-    final r = _native.submitBytes(lane, batch.backingStore, length);
-    batch.clear();
-    _checkFatal(r.status, context);
-    if (lane == CommandLane.presentation) {
-      _collectDiagnostics(context);
-    }
-  }
-
   void _checkFatal(FynkelStatus s, String op) {
     switch (s) {
       case FynkelStatus.FYNKEL_STATUS_OK:
@@ -1410,9 +1322,7 @@ class World {
     final b = _native.query(QueryKind.systems);
     return [
       for (var i = 0; i < b.recordCount; i++)
-        SystemTime.fromRecord(
-          gen.SystemTimeRecord.decode(b.records, i * gen.SystemTimeRecord.wireSize, b.tail),
-        ),
+        SystemTime.fromRecord(gen.SystemTimeRecord.decode(b.records, i * gen.SystemTimeRecord.wireSize, b.tail)),
     ];
   }
 
@@ -1728,8 +1638,7 @@ class World {
     _physicsQueries.clear();
     if (b.recordCount == 0) return const [];
     return [
-      for (final r in b.fixed(gen.PhysicsHitRecord.wireSize, gen.PhysicsHitRecord.decode))
-        PhysicsHit.fromRecord(r),
+      for (final r in b.fixed(gen.PhysicsHitRecord.wireSize, gen.PhysicsHitRecord.decode)) PhysicsHit.fromRecord(r),
     ];
   }
 
@@ -1742,8 +1651,8 @@ class World {
   /// ([cacheDir], default [cacheDirOf]). The runtime reads the cache only:
   /// `fynkel cook` (or `fynkel run`, `fynkel test`, which cook first) must
   /// have run for this build, or the load fails with `FYN-R0001`/`R0002`.
-  /// Entities exist immediately; components go through the command path
-  /// (rejections reach [onDiagnostics] on the next step). The scene's
+  /// Scene entities and validated components publish together; a rejected
+  /// activation preserves the previous scene and project-owned roots. The scene's
   /// assets stay resident in the world's store — a viewport rendering this
   /// world draws from it — until the world is disposed. Throws
   /// [FynkelLoadError] when the cache or the scene has errors. A project
@@ -1801,23 +1710,12 @@ class World {
       Component c => c.gameObject,
       _ => throw ArgumentError.value(target, 'target', 'a GameObject or a component'),
     };
-    final edit = _gameplay;
-    if (edit != null) {
-      edit.ref(go);
-      edit.afterCommit(() {
-        if (go.isAlive) dontDestroyOnLoad(go);
-      });
-      return;
-    }
-    _keep(go, go._requireResolved('dontDestroyOnLoad'));
-  }
-
-  void _keep(GameObject go, EntityRef entity) {
-    if (_native.dontDestroyOnLoad(entity) != FynkelStatus.FYNKEL_STATUS_OK) {
-      Debug.logWarning('dontDestroyOnLoad only works for root objects: "${go.name}" has a parent');
-      return;
-    }
-    if (!_persistent.contains(go)) _persistent.add(go);
+    _withGameplay(() {
+      final edit = _gameplay!;
+      if (!edit.native.persist(edit.ref(go))) {
+        Debug.logWarning('dontDestroyOnLoad only works for root objects: "${go.name}" has a parent');
+      }
+    });
   }
 
   /// The project's persistent object named [name] (ADR-0039, Godot's
@@ -1834,11 +1732,10 @@ class World {
 
   /// The roots [dontDestroyOnLoad] keeps, in the order they were marked:
   /// alive and still roots, the project's persistent objects among them.
-  List<GameObject> get persistentObjects {
-    _rejectDuringEdit('persistentObjects');
-    _persistent.removeWhere((go) => !go.isAlive || go.parent != null);
-    return List.unmodifiable(_persistent);
-  }
+  List<GameObject> get persistentObjects => _withGameplay(() {
+    final edit = _gameplay!;
+    return List.unmodifiable(edit.native.persistentRoots().map(edit.object));
+  });
 
   /// Unloads the loaded scene [sceneId] (M3-12): its entities that are
   /// still alive are destroyed (their handles go dead on the next drain,
@@ -1982,7 +1879,6 @@ class World {
       if (entity == null) continue;
       final go = attach(entity, name: p.name);
       _projectPersistent[p.name] = go;
-      if (!_persistent.contains(go)) _persistent.add(go);
       if (p.behaviours.isNotEmpty) {
         extra.addAll(_attachBehaviours(p.behaviours, p.path).$2);
       }
@@ -2028,8 +1924,7 @@ class World {
           LoadDiagnostic(
             code: 'FYN-B0001',
             severity: 'warning',
-            message:
-                'behaviour type ${b.type} is not registered; the component is loaded without a behaviour',
+            message: 'behaviour type ${b.type} is not registered; the component is loaded without a behaviour',
             document: document,
             pointer: b.pointer,
             suggestion: 'call registerBehaviours(world.registry) from the generated behaviours.g.dart',
@@ -2257,12 +2152,7 @@ class World {
   /// in [lastInstantiate] after commit.
   /// Outside edits the same transaction publishes before returning. Lifecycle
   /// callbacks run at the next normal boundary. Preparation errors throw [StateError].
-  GameObject instantiate(
-    Object prefab, {
-    Pose transform = identityTransform,
-    GameObject? parent,
-    String? name,
-  }) {
+  GameObject instantiate(Object prefab, {Pose transform = identityTransform, GameObject? parent, String? name}) {
     return _withGameplay(() => _gameplay!.instantiate(prefab, transform, parent, name));
   }
 
@@ -2312,7 +2202,10 @@ class World {
       return;
     }
     _rejectDuringEdit('dispose');
-    if (_native.isDisposed) return;
+    if (_native.isDisposed) {
+      _releaseResourceOwnership();
+      return;
+    }
     for (final go in _byEntity.values) {
       // Disposal owns this last readable value; it is never a live-state cache.
       go._retiredPose = go._lastPose;
@@ -2330,7 +2223,19 @@ class World {
     _behaviours._disposeRoutines();
     scenes._disposed();
     _native.dispose();
+    _releaseResourceOwnership();
     if (ownsLibrary) _lib.dispose();
+  }
+
+  // These describe resources owned by this world, not independently live assets.
+  // This also releases SDK metadata after a host disposed the native world first.
+  void _releaseResourceOwnership() {
+    _runtimeMaterials.clear();
+    _shaderMaterials.clear();
+    _codeValues.clear();
+    _runtimeMeshes.clear();
+    _runtimeClips.clear();
+    _data.byId.clear();
   }
 
   /// Whether [dispose] ran.
@@ -2383,7 +2288,7 @@ class AudioSystem {
   /// Plays [clip] once, fire and forget (`fynkel.cmd.PlaySound`): no
   /// object, no event, no handle; the sound is what the tick decided
   /// (simulation lane, applied at the next tick) — or, [presentation],
-  /// applied at once through the presentation lane, for UI sounds
+  /// applied at once through the immediate audio boundary, for UI sounds
   /// outside the ticks (a test replay does not carry those). A clip the
   /// world does not hold is `SOUND_UNAVAILABLE`; [volume] outside `0…1`
   /// or [pitch] outside `0.05…8` is `INVALID_PAYLOAD`. Under the voice
@@ -2402,8 +2307,13 @@ class AudioSystem {
     if (presentation) {
       _world._rejectDuringEdit('audio.play(presentation: true)');
       _world.modules.require(Module.audio, 'audio.play');
-      _world._presentation.playSound(clip, bus: bus, volume: volume, pitch: pitch, priority: priority);
-      _world.flushPresentation();
+      final status = _world._native.playSoundNow(
+        gen.PlaySoundCommandRecord(clip: clip, bus: bus, volume: volume, pitch: pitch, priority: priority),
+      );
+      _world._checkFatal(status, 'audio.play');
+      if (status == FynkelStatus.FYNKEL_STATUS_COMMANDS_REJECTED) {
+        _world._collectDiagnostics('audio.play');
+      }
       return;
     }
     _world._withGameplay(() {
@@ -2422,8 +2332,7 @@ class AudioSystem {
   /// one, joins it. Commit publishes audio configuration without a tick; the
   /// device consumes mixer commands asynchronously.
   /// [muted] is shared by all buses, so the last bus write wins for mute.
-  void setBus(gen.AudioBus bus, double volume, {bool muted = false}) =>
-      _busEdit(() => _stageBus(bus, volume, muted));
+  void setBus(gen.AudioBus bus, double volume, {bool muted = false}) => _busEdit(() => _stageBus(bus, volume, muted));
 
   void _stageBus(gen.AudioBus bus, double volume, bool muted) {
     _world.modules.require(Module.audio, 'audio.setBus');
@@ -2431,8 +2340,7 @@ class AudioSystem {
   }
 
   /// Logical bus gain, including writes in the current edit. Outside an edit,
-  /// opens the same adoption boundary as [World.edit], which may publish older
-  /// queued gameplay work. Reading does not advance simulation.
+  /// opens the same read-only lifecycle reconciliation as [World.edit]. Reading does not advance simulation.
   double busVolume(gen.AudioBus bus) => _busEdit(() {
     return _world._gameplay!.native.audioBus(bus).$1;
   });
@@ -2523,13 +2431,7 @@ class AnimationControl {
     double offset = 0,
   }) {
     if (target is String) {
-      _go._animate(
-        gen.AnimateOp.crossFadeState,
-        name: target,
-        seconds: seconds,
-        layer: layer ?? -1,
-        value: offset,
-      );
+      _go._animate(gen.AnimateOp.crossFadeState, name: target, seconds: seconds, layer: layer ?? -1, value: offset);
     } else if (target is AssetRef) {
       _noController('crossfade(clip, …)', 'crossfade(stateName, seconds)');
       _go._animate(gen.AnimateOp.crossfade, clip: target, seconds: seconds, speed: speed, looping: looping);
@@ -2557,27 +2459,12 @@ class AnimationControl {
   /// Requests commit through the gameplay journal and execute at the next
   /// tick. Invalid slots or an animator without a controller throw [StateError].
   /// Use [play] for a clip without a controller.
-  void playOneShot(
-    AssetRef motion, {
-    String slot = '',
-    double blendIn = 0.1,
-    double blendOut = 0.2,
-    double speed = 1,
-  }) {
+  void playOneShot(AssetRef motion, {String slot = '', double blendIn = 0.1, double blendOut = 0.2, double speed = 1}) {
     if (_go.world._gameplay == null) {
-      return _go.world.edit(
-        () => playOneShot(motion, slot: slot, blendIn: blendIn, blendOut: blendOut, speed: speed),
-      );
+      return _go.world.edit(() => playOneShot(motion, slot: slot, blendIn: blendIn, blendOut: blendOut, speed: speed));
     }
     _needsController('playOneShot');
-    _go._animate(
-      gen.AnimateOp.playOneShot,
-      clip: motion,
-      name: slot,
-      seconds: blendIn,
-      value: blendOut,
-      speed: speed,
-    );
+    _go._animate(gen.AnimateOp.playOneShot, clip: motion, name: slot, seconds: blendIn, value: blendOut, speed: speed);
   }
 
   /// Blends [slot]'s one-shot out over [blendOut] seconds.
@@ -2705,15 +2592,14 @@ class AnimationControl {
   void setTrigger(String name) => _parameterEdit(() => _go._animate(gen.AnimateOp.setTrigger, name: name));
 
   /// Clears a trigger nothing consumed.
-  void resetTrigger(String name) =>
-      _parameterEdit(() => _go._animate(gen.AnimateOp.resetTrigger, name: name));
+  void resetTrigger(String name) => _parameterEdit(() => _go._animate(gen.AnimateOp.resetTrigger, name: name));
 
   /// Reads the selected controller's native logical parameter value:
   /// registered defaults or completed values, followed by committed requests
   /// and the current edit's writes. No simulation tick or SDK value cache is
   /// involved. [parameters] separately reports completed playback values.
   ///
-  /// Outside an edit, getters open an edit and adopt earlier queued gameplay
+  /// Outside an edit, getters open an edit and reconcile live gameplay
   /// work first, like [World.edit]. This can resolve pending objects or publish
   /// queued writes, and invalid queued work can reject the read.
   double getFloat(String name) => (_read(name, gen.AnimatorParameterKind.float) as double?) ?? 0;
@@ -2792,11 +2678,7 @@ class AnimationControl {
     final parameter = edit.native.controllerParameter(edit.ref(_go), name);
     if (parameter == null) return null;
     if (!_fits(parameter.$1, kind)) {
-      throw ArgumentError.value(
-        name,
-        'name',
-        'parameter `$name` is a ${parameter.$1.name}, not a ${kind.name}',
-      );
+      throw ArgumentError.value(name, 'name', 'parameter `$name` is a ${parameter.$1.name}, not a ${kind.name}');
     }
     return parameter.$2;
   });
@@ -2853,10 +2735,7 @@ class GameObject extends FynkelObject {
   /// [ObjectSpec.object] before its spec is built (ADR-0036 §4): a script
   /// field or a component can hold it, and [World.build] makes it the
   /// built object. Anything else throws until then.
-  GameObject._placeholder(ObjectSpec this._spec)
-    : _world = null,
-      _initial = _spec.transform,
-      _name = _spec.name ?? '' {
+  GameObject._placeholder(ObjectSpec this._spec) : _world = null, _initial = _spec.transform, _name = _spec.name ?? '' {
     transform = Transform._(this);
     _alive = false;
   }
@@ -3054,20 +2933,15 @@ class GameObject extends FynkelObject {
   /// Outside an edit, publication completes before returning; creation callbacks
   /// still wait for the normal lifecycle boundary. Unregistered scripts are omitted with an
   /// `FYN-B0001` warning delivered only after a successful commit.
-  GameObject clone({GameObject? parent, Pose? transform, String? name}) => world._withGameplay(
-    () => world._gameplay!.clone(this, parent: parent, transform: transform, name: name),
-  );
+  GameObject clone({GameObject? parent, Pose? transform, String? name}) =>
+      world._withGameplay(() => world._gameplay!.clone(this, parent: parent, transform: transform, name: name));
 
   /// Reparents atomically, retaining world space when requested. Unrepresentable
   /// local transforms or invalid parent relationships roll back the edit.
   void setParent(GameObject? parent, {bool keepWorld = false}) => world._withGameplay(() {
     final edit = world._gameplay!;
     edit.guard(
-      () => edit.native.setParent(
-        edit.ref(this),
-        parent == null ? null : edit.ref(parent),
-        keepWorld: keepWorld,
-      ),
+      () => edit.native.setParent(edit.ref(this), parent == null ? null : edit.ref(parent), keepWorld: keepWorld),
     );
   });
 
@@ -3174,21 +3048,20 @@ class GameObject extends FynkelObject {
     return null;
   });
 
-  List<T> _inChildren<T extends Object>(bool includeInactive, {required bool first}) =>
-      world._withGameplay(() {
-        final out = <T>[];
-        final stack = <GameObject>[this];
-        while (stack.isNotEmpty) {
-          final go = stack.removeLast();
-          if (!includeInactive && !go._activeForFind) continue;
-          for (final v in go._allOwn<T>()) {
-            out.add(v);
-            if (first) return out;
-          }
-          stack.addAll(go.children.reversed);
-        }
-        return out;
-      });
+  List<T> _inChildren<T extends Object>(bool includeInactive, {required bool first}) => world._withGameplay(() {
+    final out = <T>[];
+    final stack = <GameObject>[this];
+    while (stack.isNotEmpty) {
+      final go = stack.removeLast();
+      if (!includeInactive && !go._activeForFind) continue;
+      for (final v in go._allOwn<T>()) {
+        out.add(v);
+        if (first) return out;
+      }
+      stack.addAll(go.children.reversed);
+    }
+    return out;
+  });
 
   /// The first logical behaviour or native component on this object.
   T? _own<T extends Object>() {
@@ -3301,8 +3174,8 @@ class GameObject extends FynkelObject {
   /// [set] for readability when the component is new.
   void add<T extends WireRecord>(T value) => set(value);
 
-  /// Writes component data immediately; a `Transform` instead sets a
-  /// presentation override through [setPresentationTransform].
+  /// Writes persistent component data through the shared transaction.
+  /// A `Transform` uses [setPresentationTransform] with the same commit boundary.
   void setPresentation<T extends WireRecord>(T value) => _setComponent(value, presentation: true);
 
   void _setComponent(WireRecord value, {required bool presentation}) {
@@ -3365,8 +3238,7 @@ class GameObject extends FynkelObject {
 
   /// Moves any body instantly (no interpolation, no contacts on the way);
   /// its velocity is kept. On a static body this is a transform write.
-  void teleport(Vec3 position, [Quat rotation = Quat.identity]) =>
-      _body(gen.BodyOp.teleport, position, rotation);
+  void teleport(Vec3 position, [Quat rotation = Quat.identity]) => _body(gen.BodyOp.teleport, position, rotation);
 
   /// Walks a `CharacterController` (M3-09) at [velocity] (metres per
   /// second, world space, the vertical part ignored) over the next tick;
@@ -3489,6 +3361,9 @@ class GameObject extends FynkelObject {
   }
 
   /// Persistent presentation placement through the logical transaction.
+  /// This changes gameplay data and survives later frames. There is no
+  /// transient render-only transform layer; use a separate visual child
+  /// for independently animated graphics.
   /// Dynamic bodies require an ordinary gameplay transform write.
   void setPresentationTransform(Pose pose) => world._withGameplay(() => _setPresentationInEdit(pose));
   void writePresentation(TransformWriter writer) => setPresentationTransform(writer.toTransform());
@@ -3581,8 +3456,7 @@ class Transform extends Component {
     localPosition = parent == null ? p : parent.inverseTransformPoint(p);
   });
 
-  T _editOperation<T>(T Function() operation) =>
-      _go.world._withGameplay(() => _go.world._gameplay!.guard(operation));
+  T _editOperation<T>(T Function() operation) => _go.world._withGameplay(() => _go.world._gameplay!.guard(operation));
 
   /// Authored world orientation, composed from local quaternions without
   /// scale. Under shear this is not a decomposition of the world matrix.
@@ -3656,8 +3530,7 @@ class Transform extends Component {
   });
 
   /// [lookAt] another object's world position.
-  void lookAtObject(GameObject target, {Vec3 worldUp = Vec3.up}) =>
-      lookAt(target.transform.position, worldUp: worldUp);
+  void lookAtObject(GameObject target, {Vec3 worldUp = Vec3.up}) => lookAt(target.transform.position, worldUp: worldUp);
 
   // ---- tweens (ADR-0026 §7, tween.dart)
 
@@ -3667,12 +3540,7 @@ class Transform extends Component {
   /// `stop()` it (the object stays where it got to). It ends early when
   /// the object is destroyed. It writes the transform every frame, so it
   /// is for objects physics does not move.
-  Coroutine moveTo(
-    Vec3 position,
-    double seconds, {
-    Ease ease = Ease.outQuad,
-    TimeClock clock = TimeClock.gameplay,
-  }) {
+  Coroutine moveTo(Vec3 position, double seconds, {Ease ease = Ease.outQuad, TimeClock clock = TimeClock.gameplay}) {
     final from = this.position;
     return _go.world._tweenOn(_go, seconds, ease, (t) => this.position = from.lerp(position, t), clock);
   }
@@ -3690,24 +3558,14 @@ class Transform extends Component {
 
   /// Turns the object to the world [rotation] along the shorter arc
   /// (DOTween's `DORotateQuaternion`); see [moveTo].
-  Coroutine rotateTo(
-    Quat rotation,
-    double seconds, {
-    Ease ease = Ease.outQuad,
-    TimeClock clock = TimeClock.gameplay,
-  }) {
+  Coroutine rotateTo(Quat rotation, double seconds, {Ease ease = Ease.outQuad, TimeClock clock = TimeClock.gameplay}) {
     final from = this.rotation;
     return _go.world._tweenOn(_go, seconds, ease, (t) => this.rotation = from.slerp(rotation, t), clock);
   }
 
   /// Scales the object to the local [scale] (DOTween's `DOScale`); see
   /// [moveTo].
-  Coroutine scaleTo(
-    Vec3 scale,
-    double seconds, {
-    Ease ease = Ease.outQuad,
-    TimeClock clock = TimeClock.gameplay,
-  }) {
+  Coroutine scaleTo(Vec3 scale, double seconds, {Ease ease = Ease.outQuad, TimeClock clock = TimeClock.gameplay}) {
     final from = localScale;
     return _go.world._tweenOn(_go, seconds, ease, (t) => localScale = from.lerp(scale, t), clock);
   }
@@ -3777,15 +3635,11 @@ class _WorldTime implements TimeService {
 class FrameTimes {
   int behavioursUs = 0, nativeUs = 0, presentationUs = 0, totalUs = 0, ticks = 0;
 
-  final Stopwatch _behaviours = Stopwatch(),
-      _native = Stopwatch(),
-      _presentation = Stopwatch(),
-      _total = Stopwatch();
+  final Stopwatch _behaviours = Stopwatch(), _native = Stopwatch(), _total = Stopwatch();
 
   void _begin() {
     _behaviours.reset();
     _native.reset();
-    _presentation.reset();
     _total
       ..reset()
       ..start();
@@ -3795,7 +3649,7 @@ class FrameTimes {
     _total.stop();
     behavioursUs = _behaviours.elapsedMicroseconds;
     nativeUs = _native.elapsedMicroseconds;
-    presentationUs = _presentation.elapsedMicroseconds;
+    presentationUs = 0; // No separately flushed presentation command phase.
     totalUs = _total.elapsedMicroseconds;
     ticks = steps;
   }

@@ -88,12 +88,6 @@ impl World {
         }
     }
 
-    /// `Command::Audio` at the tick boundary: edits the source and its
-    /// voice; the phase then reconciles the rest.
-    pub(super) fn apply_audio(&mut self, index: u32, entity: Entity, op: AudioOp) -> bool {
-        self.apply_audio_control(index, entity, op, true)
-    }
-
     /// Transport only: the gameplay journal already published configuration.
     pub(super) fn apply_audio_intent(&mut self, entity: Entity, op: AudioOp) -> bool {
         if !self.module_allows(
@@ -103,16 +97,10 @@ impl World {
         ) {
             return false;
         }
-        self.apply_audio_control(u32::MAX, entity, op, false)
+        self.apply_audio_control(u32::MAX, entity, op)
     }
 
-    fn apply_audio_control(
-        &mut self,
-        index: u32,
-        entity: Entity,
-        op: AudioOp,
-        write_source: bool,
-    ) -> bool {
+    fn apply_audio_control(&mut self, index: u32, entity: Entity, op: AudioOp) -> bool {
         let lane = Lane::Simulation;
         if !self.check_entity(index, lane, entity, "audio") {
             return false;
@@ -140,9 +128,6 @@ impl World {
         if !self.ecs.has::<AudioRun>(entity) {
             let _ = self.ecs.insert(entity, AudioRun::default());
         }
-        let Ok(mut source) = self.ecs.get_mut::<AudioSource>(entity) else {
-            return false;
-        };
         let Ok(mut run) = self.ecs.get_mut::<AudioRun>(entity) else {
             return false;
         };
@@ -154,18 +139,12 @@ impl World {
                     self.audio.stop(v);
                 }
                 run.paused = false;
-                if write_source {
-                    source.playing = true;
-                }
             }
             AudioOp::Stop => {
                 if let Some(v) = run.voice.take() {
                     self.audio.stop(v);
                 }
                 run.paused = false;
-                if write_source {
-                    source.playing = false;
-                }
             }
             AudioOp::Pause => {
                 run.paused = true;
@@ -180,14 +159,12 @@ impl World {
                 }
             }
             AudioOp::SetVolume(v) => {
-                source.volume = v;
                 if let Some(id) = run.voice {
                     self.audio.set_volume(id, v);
                     run.volume = v;
                 }
             }
             AudioOp::SetPitch(p) => {
-                source.pitch = p;
                 if let Some(id) = run.voice {
                     self.audio.set_pitch(id, p);
                     run.pitch = p;
@@ -198,6 +175,65 @@ impl World {
     }
 
     /// `Command::PlaySound` (either lane): a fire-and-forget voice.
+    pub(super) fn validate_sound_request(&self, params: &PlayParams) -> crate::EditResult<()> {
+        let owner = crate::GameplayEntity::Live(Entity::NULL);
+        if self.is_poisoned() {
+            return Err(crate::EditError::Poisoned);
+        }
+        let error = if !self.modules.audio {
+            Some("audio module is disabled".to_owned())
+        } else if params.looping {
+            Some("one-shot sounds cannot loop".to_owned())
+        } else {
+            params.validate().err()
+        };
+        match error {
+            Some(message) => Err(crate::EditError::InvalidEffect(owner, message)),
+            None => Ok(()),
+        }
+    }
+
+    /// A one-shot presentation effect. Does not consume committed simulation
+    /// effects, advance clocks or alter interpolation. Owned edits exclude this
+    /// boundary; validation and resource preflight precede any publication.
+    pub fn play_sound_now(
+        &mut self,
+        clip: AssetRef,
+        params: PlayParams,
+    ) -> crate::EditResult<bool> {
+        if self.is_poisoned() {
+            return Err(crate::EditError::Poisoned);
+        }
+        if let Err(error) = self.validate_sound_request(&params) {
+            return Ok(self.reject(
+                u32::MAX,
+                Lane::Presentation,
+                DiagnosticCode::INVALID_PAYLOAD,
+                Entity::NULL,
+                ComponentId::NONE,
+                error.to_string(),
+            ));
+        }
+        let resources = self
+            .command_resources
+            .as_ref()
+            .map(|source| source.prepare_sound(self, &clip));
+        if let Some(resources) = &resources {
+            if let Err(error) = resources.preflight(self) {
+                return Ok(self.reject(
+                    u32::MAX,
+                    Lane::Presentation,
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    Entity::NULL,
+                    ComponentId::NONE,
+                    error.to_string(),
+                ));
+            }
+        }
+        self.publish_command_resources(resources);
+        Ok(self.apply_play_sound(u32::MAX, Lane::Presentation, clip, params))
+    }
+
     pub(super) fn apply_play_sound(
         &mut self,
         index: u32,

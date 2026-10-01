@@ -62,7 +62,7 @@ pub(super) const TICK: [Stage; 16] = [
     // so an explicit `Move`/`Jump` from the game in the same tick wins.
     stage::<Characters>(),
     stage::<RecordPrevious>(),
-    stage::<Commands>(),
+    stage::<Effects>(),
     // Animators pose their subtrees first among the pre-tick systems
     // (M3-19): a mover or a body on a posed joint follows the pose.
     stage::<Animation>(),
@@ -150,72 +150,20 @@ impl System for RecordPrevious {
     }
 }
 
-/// Validates and applies C[n] at the tick boundary.
-struct Commands;
-impl System for Commands {
+/// Delivers committed effects at the tick boundary.
+struct Effects;
+impl System for Effects {
     const KIND: SystemKind = SystemKind::Commands;
     fn runs(_: &World) -> bool {
         true
     }
     fn run(w: &mut World, t: &mut TickRun) -> u32 {
-        let staged = std::mem::take(&mut w.lanes.staged);
-        w.lanes.spawned_this_tick.clear();
-        for (index, cmd, from_presentation) in staged {
-            let cmd = match cmd {
-                Ok(cmd) => cmd,
-                Err(r) => {
-                    w.reject(
-                        index,
-                        Lane::Simulation,
-                        r.code,
-                        Entity::NULL,
-                        ComponentId::NONE,
-                        r.message,
-                    );
-                    t.rejected += 1;
-                    continue;
-                }
-            };
-            let Some(cmd) = w.resolve_temps(index, cmd) else {
-                t.rejected += 1;
-                continue;
-            };
-            let target = cmd.target();
-            if w.apply_simulation(index, cmd, t.tick) {
-                if from_presentation {
-                    w.lanes.teleported.extend(target);
-                }
-                t.applied += 1;
-            } else {
-                t.rejected += 1;
-            }
-        }
-        // Separate from legacy state batches: a committed effect never blocks
-        // another gameplay edit, and no effect can replay an older data value.
+        // Only committed typed effects reach the tick; authored data is already published.
         for effect in std::mem::take(&mut w.gameplay_effects) {
-            use super::gameplay::CommittedEffect;
-            let applied = match effect {
-                CommittedEffect::Animation {
-                    entity,
-                    op,
-                    before,
-                    invalidated,
-                } => {
-                    if !w.ecs.contains(entity) {
-                        continue;
-                    }
-                    w.apply_animate_intent(entity, op, before, invalidated)
-                }
-                CommittedEffect::Command(command) => {
-                    if command.target().is_some_and(|e| !w.ecs.contains(e)) {
-                        continue;
-                    }
-                    match command {
-                        crate::Command::Audio { entity, op } => w.apply_audio_intent(entity, op),
-                        command => w.apply_simulation(u32::MAX, command, t.tick),
-                    }
-                }
-            };
+            if effect.target().is_some_and(|e| !w.ecs.contains(e)) {
+                continue;
+            }
+            let applied = w.deliver_committed_effect(u32::MAX, Lane::Simulation, effect);
             if applied {
                 t.applied += 1;
             } else {

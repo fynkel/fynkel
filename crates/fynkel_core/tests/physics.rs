@@ -12,30 +12,21 @@ fn world() -> World {
     World::new(WorldConfig::default())
 }
 
-fn spawn(w: &mut World, temp_id: u64, at: Vec3, components: Vec<ComponentValue>) -> Entity {
-    let mut cmds = vec![Command::Spawn {
-        temp_id,
-        transform: Transform::from_position(at),
-        parent: None,
-        name: None,
-    }];
-    w.submit(Lane::Simulation, std::mem::take(&mut cmds));
-    let r = w.step();
-    assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
-    let entity = w
-        .drain_events()
-        .into_iter()
-        .find_map(|e| match e.payload {
-            EventPayload::Spawned { temp_id: t, entity } if t == temp_id => Some(entity),
-            _ => None,
+fn spawn(w: &mut World, _fixture_id: u64, at: Vec3, components: Vec<ComponentValue>) -> Entity {
+    let commit = w
+        .edit_gameplay(|edit| edit.spawn("", Transform::from_position(at), None))
+        .unwrap();
+    let entity = commit.resolve(commit.value).unwrap();
+    assert_eq!(w.step().status, Status::Ok);
+    w.drain_events();
+    if !components.is_empty() {
+        w.edit_gameplay(|edit| {
+            for value in components {
+                edit.set_component(entity, value)?;
+            }
+            Ok(())
         })
         .unwrap();
-    let cmds: Vec<Command> = components
-        .into_iter()
-        .map(|value| Command::SetComponent { entity, value })
-        .collect();
-    if !cmds.is_empty() {
-        w.submit(Lane::Simulation, cmds);
     }
     entity
 }
@@ -103,24 +94,12 @@ fn a_dynamic_body_falls_is_owned_and_lands_once() {
         .iter()
         .any(|e| matches!(e.payload, EventPayload::CollisionEnter(_))));
 
-    // A presentation transform write on the owned body is rejected; the
-    // simulation lane teleports it.
-    let r = w.submit(
-        Lane::Presentation,
-        vec![Command::SetTransform {
-            entity: crate_,
-            transform: Transform::from_position(Vec3::new(0.0, 5.0, 0.0)),
-        }],
-    );
-    assert_eq!(r.rejected, 1);
-    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::PHYSICS_OWNED);
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetTransform {
-            entity: crate_,
-            transform: Transform::from_position(Vec3::new(0.0, 5.0, 0.0)),
-        }],
-    );
+    // A committed transform teleports a physics-owned body.
+    w.edit_gameplay(|edit| {
+        edit.set_transform(crate_, Transform::from_position(Vec3::new(0.0, 5.0, 0.0)))?;
+        Ok(())
+    })
+    .unwrap();
     let r = w.step();
     assert_eq!(r.rejected, 0, "{:?}", w.diagnostics());
     assert!((y(&w, crate_) - 5.0).abs() < 0.01, "{}", y(&w, crate_));
@@ -136,13 +115,11 @@ fn a_dynamic_body_falls_is_owned_and_lands_once() {
     }
     assert!(stays > 100, "{stays}");
     // Removing the body releases the transform.
-    w.submit(
-        Lane::Simulation,
-        vec![Command::RemoveComponent {
-            entity: crate_,
-            component: ComponentId::RIGID_BODY,
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.remove_component(crate_, ComponentId::RIGID_BODY)?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     assert!(!w.ecs().has::<PhysicsOwned>(crate_));
     assert_eq!(w.physics().body_state(crate_), None);
@@ -180,55 +157,34 @@ fn body_commands_move_bodies_and_are_checked() {
         ],
     );
     let plain = spawn(&mut w, 3, Vec3::ZERO, vec![]);
-    // Component writes and body commands in one batch: the body receives
-    // the command the same tick.
-    let r = w.submit(
-        Lane::Simulation,
-        vec![
-            Command::Body {
-                entity: ball,
-                op: BodyCommand::SetLinearVelocity(Vec3::X * 6.0),
+    // Failed effects abort the whole edit, including preceding valid effects.
+    for (entity, op) in [
+        (plain, BodyCommand::ApplyImpulse(Vec3::X)),
+        (platform, BodyCommand::ApplyForce(Vec3::X)),
+        (ball, BodyCommand::ApplyTorque(Vec3::NAN)),
+    ] {
+        assert!(w
+            .edit_gameplay(|edit| {
+                edit.body_effect(ball, BodyCommand::SetLinearVelocity(Vec3::X * 9.0))?;
+                edit.body_effect(entity, op)
+            })
+            .is_err());
+    }
+    assert_eq!(w.step().rejected, 0);
+    assert_eq!(w.physics().body_state(ball).unwrap().linear_velocity.x, 0.0);
+    w.edit_gameplay(|edit| {
+        edit.body_effect(ball, BodyCommand::SetLinearVelocity(Vec3::X * 6.0))?;
+        edit.body_effect(
+            platform,
+            BodyCommand::SetKinematicTarget {
+                position: Vec3::new(5.0, 1.0, 0.0),
+                rotation: Quat::IDENTITY,
             },
-            Command::Body {
-                entity: plain,
-                op: BodyCommand::ApplyImpulse(Vec3::X),
-            },
-            Command::Body {
-                entity: platform,
-                op: BodyCommand::ApplyForce(Vec3::X),
-            },
-            Command::Body {
-                entity: ball,
-                op: BodyCommand::ApplyTorque(Vec3::new(f32::NAN, 0.0, 0.0)),
-            },
-            Command::Body {
-                entity: platform,
-                op: BodyCommand::SetKinematicTarget {
-                    position: Vec3::new(5.0, 1.0, 0.0),
-                    rotation: Quat::IDENTITY,
-                },
-            },
-        ],
-    );
-    assert_eq!(r.accepted, 5, "checked at the tick");
+        )
+    })
+    .unwrap();
     let r = w.step();
-    assert_eq!((r.applied, r.rejected), (2, 3), "{:?}", w.diagnostics());
-    let d = w.diagnostics();
-    assert_eq!(
-        d.iter()
-            .map(|d| (d.command_index, d.code, d.component))
-            .collect::<Vec<_>>(),
-        vec![
-            (
-                1,
-                DiagnosticCode::MISSING_COMPONENT,
-                ComponentId::RIGID_BODY
-            ),
-            (2, DiagnosticCode::INVALID_PAYLOAD, ComponentId::RIGID_BODY),
-            (3, DiagnosticCode::INVALID_PAYLOAD, ComponentId::RIGID_BODY),
-        ]
-    );
-    assert!(d[1].message.contains("dynamic"));
+    assert_eq!((r.applied, r.rejected), (2, 0));
     let s = w.physics().body_state(ball).unwrap();
     assert!((s.linear_velocity.x - 6.0).abs() < 1e-4);
     assert_eq!(s.body_type, BodyType::Dynamic);
@@ -239,31 +195,18 @@ fn body_commands_move_bodies_and_are_checked() {
         "kinematic: gameplay-owned"
     );
 
-    // Body commands are simulation-only.
-    let r = w.submit(
-        Lane::Presentation,
-        vec![Command::Body {
-            entity: ball,
-            op: BodyCommand::ApplyImpulse(Vec3::X),
-        }],
-    );
-    assert_eq!(r.rejected, 1);
-    assert_eq!(
-        w.diagnostics().last().unwrap().code,
-        DiagnosticCode::WRONG_LANE
-    );
-
     // Teleport keeps the velocity and does not interpolate.
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Body {
-            entity: ball,
-            op: BodyCommand::Teleport {
+    w.edit_gameplay(|edit| {
+        edit.body_effect(
+            ball,
+            BodyCommand::Teleport {
                 position: Vec3::new(0.0, 10.0, 0.0),
                 rotation: Quat::IDENTITY,
             },
-        }],
-    );
+        )?;
+        Ok(())
+    })
+    .unwrap();
     w.begin_frame(1.0 / 60.0);
     w.step();
     let t = w.ecs().copy::<Transform>(ball).unwrap().position;
@@ -340,58 +283,47 @@ fn a_trigger_reaches_after_physics_exactly_once() {
 }
 
 #[test]
-fn invalid_component_values_are_rejected_at_the_tick() {
+fn invalid_component_values_are_rejected_before_commit() {
     let mut w = world();
     let e = spawn(&mut w, 1, Vec3::ZERO, vec![]);
-    w.submit(
-        Lane::Simulation,
-        vec![
-            Command::SetComponent {
-                entity: e,
-                value: ComponentValue::RigidBody(RigidBody {
-                    mass: 0.0,
-                    ..RigidBody::default()
-                }),
-            },
-            Command::SetComponent {
-                entity: e,
-                value: ComponentValue::Collider(Collider {
-                    shape: ColliderShape::Mesh,
-                    ..Collider::default()
-                }),
-            },
-            Command::SetComponent {
-                entity: e,
-                value: ComponentValue::Collider(Collider {
-                    restitution: 2.0,
-                    ..Collider::default()
-                }),
-            },
-        ],
-    );
-    let r = w.step();
-    assert_eq!(r.rejected, 3, "{:?}", w.diagnostics());
-    assert!(w
-        .diagnostics()
-        .iter()
-        .all(|d| d.code == DiagnosticCode::INVALID_PAYLOAD));
+    for value in [
+        ComponentValue::RigidBody(RigidBody {
+            mass: 0.0,
+            ..Default::default()
+        }),
+        ComponentValue::Collider(Collider {
+            shape: ColliderShape::Mesh,
+            ..Default::default()
+        }),
+        ComponentValue::Collider(Collider {
+            restitution: 2.0,
+            ..Default::default()
+        }),
+    ] {
+        assert!(matches!(
+            w.edit_gameplay(|edit| edit.set_component(e, value)),
+            Err(EditError::InvalidComponent { .. })
+        ));
+    }
+    assert_eq!(w.step().rejected, 0);
     assert!(!w.ecs().has::<RigidBody>(e));
     assert!(!w.ecs().has::<Collider>(e));
     // A mesh collider whose mesh is not registered: the component is
     // stored, the collider skipped with `MESH_UNAVAILABLE` (once).
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetComponent {
-            entity: e,
-            value: ComponentValue::Collider(Collider {
+    w.edit_gameplay(|edit| {
+        edit.set_component(
+            e,
+            ComponentValue::Collider(Collider {
                 shape: ColliderShape::Mesh,
                 mesh: Some(AssetRef::new(
                     "70d7ba8b-f7fb-4eba-920d-ec9e6b968330".parse().unwrap(),
                 )),
                 ..Collider::default()
             }),
-        }],
-    );
+        )?;
+        Ok(())
+    })
+    .unwrap();
     let r = w.step();
     assert_eq!(r.rejected, 0);
     assert_eq!(w.diagnostics().len(), 1);
@@ -403,18 +335,19 @@ fn invalid_component_values_are_rejected_at_the_tick() {
     assert_eq!(w.physics().stats().colliders, 0);
     // A collider naming a physics material nobody registered (ADR-0025):
     // it collides on its own friction and restitution, reported once.
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetComponent {
-            entity: e,
-            value: ComponentValue::Collider(Collider {
+    w.edit_gameplay(|edit| {
+        edit.set_component(
+            e,
+            ComponentValue::Collider(Collider {
                 material: Some(AssetRef::new(
                     "70d7ba8b-f7fb-4eba-920d-ec9e6b968331".parse().unwrap(),
                 )),
                 ..Collider::default()
             }),
-        }],
-    );
+        )?;
+        Ok(())
+    })
+    .unwrap();
     let r = w.step();
     assert_eq!(r.rejected, 0);
     assert_eq!(w.diagnostics().len(), 1, "{:?}", w.diagnostics());
@@ -471,19 +404,17 @@ fn the_step_is_deterministic_across_worlds() {
 
 fn named(
     w: &mut World,
-    temp_id: u64,
+    fixture_id: u64,
     name: &str,
     at: Vec3,
     components: Vec<ComponentValue>,
 ) -> Entity {
-    let e = spawn(w, temp_id, at, components);
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetName {
-            entity: e,
-            name: name.into(),
-        }],
-    );
+    let e = spawn(w, fixture_id, at, components);
+    w.edit_gameplay(|edit| {
+        edit.set_name(e, name)?;
+        Ok(())
+    })
+    .unwrap();
     e
 }
 
@@ -684,37 +615,43 @@ fn the_rig_pulls_in_before_a_wall_and_needs_a_named_target() {
     let look = w.ecs().copy::<Transform>(camera).unwrap().rotation * Vec3::NEG_Z;
     assert!(look.abs_diff_eq(-dir, 1e-4), "{look:?}");
     // The wall gone, the rig backs out to `distance`.
-    w.submit(Lane::Simulation, vec![Command::Destroy(wall)]);
+    w.edit_gameplay(|edit| {
+        edit.destroy(wall)?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     w.step();
     assert!(((pos(&w, camera) - pivot).length() - rig.distance).abs() < 1e-3);
     // No target: the rig stays where it is; the pitch is clamped when
     // written back.
     let parked = pos(&w, camera);
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetComponent {
-            entity: camera,
-            value: ComponentValue::ThirdPersonCamera(ThirdPersonCamera {
+    w.edit_gameplay(|edit| {
+        edit.set_component(
+            camera,
+            ComponentValue::ThirdPersonCamera(ThirdPersonCamera {
                 target: ObjectRef::NONE,
                 pitch: 3.0,
                 ..ThirdPersonCamera::default()
             }),
-        }],
-    );
+        )?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     assert_eq!(pos(&w, camera), parked);
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetComponent {
-            entity: camera,
-            value: ComponentValue::ThirdPersonCamera(ThirdPersonCamera {
+    w.edit_gameplay(|edit| {
+        edit.set_component(
+            camera,
+            ComponentValue::ThirdPersonCamera(ThirdPersonCamera {
                 target: ObjectRef::to(player),
                 pitch: 3.0,
                 ..ThirdPersonCamera::default()
             }),
-        }],
-    );
+        )?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     let rig = w.ecs().copy::<ThirdPersonCamera>(camera).unwrap();
     assert_eq!(rig.pitch, rig.max_pitch);
@@ -736,62 +673,23 @@ fn character_commands_and_components_are_checked() {
         ],
     );
     w.step();
-    let r = w.submit(
-        Lane::Simulation,
-        vec![
-            Command::Body {
-                entity: player,
-                op: BodyCommand::Move(Vec3::new(2.0, 0.0, 0.0)),
-            },
-            Command::Body {
-                entity: plain,
-                op: BodyCommand::Move(Vec3::X),
-            },
-            Command::Body {
-                entity: ball,
-                op: BodyCommand::Jump(1.0),
-            },
-            Command::Body {
-                entity: player,
-                op: BodyCommand::ApplyImpulse(Vec3::X),
-            },
-            Command::Body {
-                entity: player,
-                op: BodyCommand::Jump(f32::NAN),
-            },
-        ],
-    );
-    assert_eq!(r.accepted, 5);
+    for (entity, op) in [
+        (plain, BodyCommand::Move(Vec3::X)),
+        (ball, BodyCommand::Jump(1.0)),
+        (player, BodyCommand::ApplyImpulse(Vec3::X)),
+        (player, BodyCommand::Jump(f32::NAN)),
+    ] {
+        assert!(w
+            .edit_gameplay(|edit| {
+                edit.body_effect(player, BodyCommand::Move(Vec3::X * 9.0))?;
+                edit.body_effect(entity, op)
+            })
+            .is_err());
+    }
+    w.edit_gameplay(|edit| edit.body_effect(player, BodyCommand::Move(Vec3::X * 2.0)))
+        .unwrap();
     let r = w.step();
-    assert_eq!((r.applied, r.rejected), (1, 4), "{:?}", w.diagnostics());
-    let d = w.diagnostics();
-    assert_eq!(
-        d.iter()
-            .map(|d| (d.command_index, d.code, d.component))
-            .collect::<Vec<_>>(),
-        vec![
-            (
-                1,
-                DiagnosticCode::MISSING_COMPONENT,
-                ComponentId::CHARACTER_CONTROLLER
-            ),
-            (
-                2,
-                DiagnosticCode::MISSING_COMPONENT,
-                ComponentId::CHARACTER_CONTROLLER
-            ),
-            (
-                3,
-                DiagnosticCode::MISSING_COMPONENT,
-                ComponentId::RIGID_BODY
-            ),
-            (
-                4,
-                DiagnosticCode::INVALID_PAYLOAD,
-                ComponentId::CHARACTER_CONTROLLER
-            ),
-        ]
-    );
+    assert_eq!((r.applied, r.rejected), (1, 0));
     let s = w.physics().character_state(player).unwrap();
     assert!(
         s.velocity.abs_diff_eq(Vec3::new(2.0, 0.0, 0.0), 1e-4),
@@ -808,13 +706,11 @@ fn character_commands_and_components_are_checked() {
     // A RigidBody next to the controller is reported once (index
     // u32::MAX) and ignored; an invalid controller value is rejected at
     // the tick.
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetComponent {
-            entity: player,
-            value: ComponentValue::RigidBody(RigidBody::default()),
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_component(player, ComponentValue::RigidBody(RigidBody::default()))?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     let d = w.diagnostics();
     assert_eq!(d.len(), 1, "{d:?}");
@@ -829,33 +725,29 @@ fn character_commands_and_components_are_checked() {
     w.step();
     assert!(w.diagnostics().is_empty());
     assert!(w.physics().character_state(player).is_some());
-    let r = w.submit(
-        Lane::Simulation,
-        vec![Command::SetComponent {
-            entity: player,
-            value: ComponentValue::CharacterController(CharacterController {
+    let r = w.edit_gameplay(|edit| {
+        edit.set_component(
+            player,
+            ComponentValue::CharacterController(CharacterController {
                 height: 0.1,
                 ..CharacterController::default()
             }),
-        }],
-    );
-    assert_eq!(r.accepted, 1);
-    let r = w.step();
-    assert_eq!(r.rejected, 1);
-    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::INVALID_PAYLOAD);
-    assert_eq!(
-        w.diagnostics()[0].component,
-        ComponentId::CHARACTER_CONTROLLER
-    );
+        )?;
+        Ok(())
+    });
+    assert!(matches!(
+        r,
+        Err(fynkel_core::EditError::InvalidComponent { .. })
+    ));
+    assert_eq!(w.step().rejected, 0);
+    assert!(w.diagnostics().is_empty());
 
     // Removing the controller ends the character; the body takes over.
-    w.submit(
-        Lane::Simulation,
-        vec![Command::RemoveComponent {
-            entity: player,
-            component: ComponentId::CHARACTER_CONTROLLER,
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.remove_component(player, ComponentId::CHARACTER_CONTROLLER)?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     assert!(w.physics().character_state(player).is_none());
     assert!(w.ecs().has::<PhysicsOwned>(player));
@@ -869,17 +761,12 @@ fn character_commands_and_components_are_checked() {
 fn a_move_before_a_destroy_in_one_batch_is_dropped() {
     let (mut w, player, _camera) = playground();
     w.step();
-    let r = w.submit(
-        Lane::Simulation,
-        vec![
-            Command::Body {
-                entity: player,
-                op: BodyCommand::Move(Vec3::X),
-            },
-            Command::Destroy(player),
-        ],
-    );
-    assert_eq!(r.accepted, 2);
+    let r = w.edit_gameplay(|edit| {
+        edit.body_effect(player, BodyCommand::Move(Vec3::X))?;
+        edit.destroy(player)?;
+        Ok(())
+    });
+    assert!(r.is_ok());
     let r = w.step();
     assert_eq!(r.rejected, 0, "{:?}", w.diagnostics());
     assert!(w.diagnostics().is_empty());
@@ -973,13 +860,11 @@ fn changing_a_collider_keeps_the_body_moving_and_fires_nothing() {
             ComponentValue::Collider(ball_collider.clone()),
         ],
     );
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Body {
-            entity: ball,
-            op: BodyCommand::SetLinearVelocity(Vec3::X * 3.0),
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.body_effect(ball, BodyCommand::SetLinearVelocity(Vec3::X * 3.0))?;
+        Ok(())
+    })
+    .unwrap();
     for _ in 0..60 {
         w.step();
     }
@@ -1039,7 +924,7 @@ fn changing_a_collider_keeps_the_body_moving_and_fires_nothing() {
         } else {
             cmds
         };
-        w.submit(Lane::Simulation, cmds);
+        assert!(w.apply_gameplay_now(cmds).is_empty());
         let mut events = Vec::new();
         for _ in 0..10 {
             w.step();
@@ -1105,7 +990,7 @@ fn a_destroyed_or_deactivated_side_exits() {
     /// The trigger exits and the zone exits over the ticks after `cmd`.
     type Exits = (Vec<(Entity, Entity)>, Vec<(Entity, Entity, String)>);
     fn exits(w: &mut World, cmd: Command) -> Exits {
-        w.submit(Lane::Simulation, vec![cmd]);
+        assert!(w.apply_gameplay_now(vec![cmd]).is_empty());
         let (mut triggers, mut zones) = (Vec::new(), Vec::new());
         for _ in 0..3 {
             w.step();
@@ -1234,13 +1119,11 @@ fn a_character_reports_what_its_move_touches() {
     ) -> (Vec<(Entity, Option<Entity>, Vec3)>, u32) {
         let (mut hits, mut flags) = (Vec::new(), 0);
         for _ in 0..ticks {
-            w.submit(
-                Lane::Simulation,
-                vec![Command::Body {
-                    entity: player,
-                    op: BodyCommand::Move(v),
-                }],
-            );
+            w.edit_gameplay(|edit| {
+                edit.body_effect(player, BodyCommand::Move(v))?;
+                Ok(())
+            })
+            .unwrap();
             w.step();
             for e in w.after_physics_events() {
                 if let EventPayload::ControllerHit(c) = &e.payload {
@@ -1284,13 +1167,11 @@ fn a_character_reports_what_its_move_touches() {
     walk(&mut w, player, Vec3::X * 4.0, 25);
     let x = pos(&w, player).x;
     assert!(x.abs() < 0.6, "under the ceiling: {x}");
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Body {
-            entity: player,
-            op: BodyCommand::Jump(0.0),
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.body_effect(player, BodyCommand::Jump(0.0))?;
+        Ok(())
+    })
+    .unwrap();
     let (hits, f) = walk(&mut w, player, Vec3::ZERO, 30);
     assert!(
         hits.iter().any(|h| h.0 == ceiling && h.2.y > 0.9),
@@ -1326,21 +1207,17 @@ fn a_bodys_frozen_axes_stay_put() {
         body(c::FREEZE_POSITION_X | c::FREEZE_POSITION_Y | c::FREEZE_ROTATION),
     );
     w.step();
-    let push = |e| {
-        vec![
-            Command::Body {
-                entity: e,
-                op: BodyCommand::SetLinearVelocity(Vec3::new(2.0, 0.0, 3.0)),
-            },
-            Command::Body {
-                entity: e,
-                op: BodyCommand::ApplyTorqueImpulse(Vec3::new(0.3, 0.3, 0.3)),
-            },
-        ]
-    };
-    let mut cmds = push(free);
-    cmds.extend(push(frozen));
-    w.submit(Lane::Simulation, cmds);
+    w.edit_gameplay(|edit| {
+        for entity in [free, frozen] {
+            edit.body_effect(
+                entity,
+                BodyCommand::SetLinearVelocity(Vec3::new(2.0, 0.0, 3.0)),
+            )?;
+            edit.body_effect(entity, BodyCommand::ApplyTorqueImpulse(Vec3::splat(0.3)))?;
+        }
+        Ok(())
+    })
+    .unwrap();
     for _ in 0..30 {
         w.step();
     }
@@ -1437,13 +1314,11 @@ fn a_collision_carries_its_points_impulse_and_relative_velocity() {
     assert!(relative.xz().length() < 0.1, "{:?}", c.relative_velocity);
 
     // A trigger and an exit carry no points and no impulse.
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetTransform {
-            entity: crate_,
-            transform: Transform::from_position(Vec3::new(0.0, 5.0, 0.0)),
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_transform(crate_, Transform::from_position(Vec3::new(0.0, 5.0, 0.0)))?;
+        Ok(())
+    })
+    .unwrap();
     let mut exit = None;
     for _ in 0..3 {
         w.step();

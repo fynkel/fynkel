@@ -1,7 +1,7 @@
 # Generates lib/src/native/fynkel_bindings.g.dart from the hand-written C
 # header (ADR-0004). Run from packages/fynkel:  dart run ffigen
 name: FynkelNativeBindings
-description: Generated dart:ffi bindings for crates/fynkel_native/include/fynkel.h (ABI v3). Do not edit.
+description: Generated dart:ffi bindings for crates/fynkel_native/include/fynkel.h (ABI v4). Do not edit.
 output: lib/src/native/fynkel_bindings.g.dart
 headers:
   entry-points:

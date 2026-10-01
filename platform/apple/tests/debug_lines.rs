@@ -280,7 +280,6 @@ fn two_cubes() -> Extract {
         e.records.push(ExtractRecord {
             entity: Entity::new(fynkel_contracts::WorldId(1), bits as u32, 1),
             world: glam::Mat4::from_translation(glam::Vec3::new(x, 0.0, 0.0)),
-            overridden: false,
             layer_bit: 1,
         });
     }

@@ -13,35 +13,25 @@ fn world() -> World {
 
 fn spawn(
     w: &mut World,
-    temp_id: u64,
+    _fixture_id: u64,
     transform: Transform,
     components: Vec<ComponentValue>,
 ) -> Entity {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id,
-            transform,
-            parent: None,
-            name: None,
-        }],
-    );
-    w.step();
-    let entity = w
-        .drain_events()
-        .into_iter()
-        .find_map(|e| match e.payload {
-            EventPayload::Spawned { temp_id: t, entity } if t == temp_id => Some(entity),
-            _ => None,
+    let commit = w
+        .edit_gameplay(|edit| edit.spawn("", transform, None))
+        .unwrap();
+    let entity = commit.resolve(commit.value).unwrap();
+    assert_eq!(w.step().status, Status::Ok);
+    w.drain_events();
+    if !components.is_empty() {
+        w.edit_gameplay(|edit| {
+            for value in components {
+                edit.set_component(entity, value)?;
+            }
+            Ok(())
         })
         .unwrap();
-    let cmds: Vec<Command> = components
-        .into_iter()
-        .map(|value| Command::SetComponent { entity, value })
-        .collect();
-    if !cmds.is_empty() {
-        w.submit(Lane::Simulation, cmds);
-        w.step();
+        assert_eq!(w.step().status, Status::Ok);
         w.drain_events();
     }
     entity
@@ -191,24 +181,20 @@ fn manual_step_snap_displays_current_pose_and_preserves_interpolation_remainder(
         camera_world(&mut w, 0);
         let root = spawn(&mut w, 10, Transform::IDENTITY, vec![]);
         let child = spawn(&mut w, 11, Transform::from_position(Vec3::X), vec![]);
-        w.submit(
-            Lane::Simulation,
-            vec![Command::SetParent {
-                child,
-                parent: Some(root),
-                keep_world: false,
-            }],
-        );
+        w.edit_gameplay(|edit| {
+            edit.set_parent(child, Some(root.into()), false)?;
+            Ok(())
+        })
+        .unwrap();
         w.step();
         w.begin_frame(w.config().fixed_dt * fraction);
         let alpha = w.alpha();
-        w.submit(
-            Lane::Simulation,
-            vec![Command::SetTransform {
-                entity: root,
-                transform: Transform::from_position(Vec3::X * 2.0),
-            }],
-        );
+        w.prepare_gameplay_tick();
+        w.edit_gameplay(|edit| {
+            edit.set_transform(root, Transform::from_position(Vec3::X * 2.0))?;
+            Ok(())
+        })
+        .unwrap();
         w.step();
         w.snap_interpolation();
         assert_eq!(w.alpha(), alpha);
@@ -234,13 +220,12 @@ fn manual_step_snap_displays_current_pose_and_preserves_interpolation_remainder(
 
         // The next regular tick interpolates normally from the snapped pose.
         w.begin_frame(w.config().fixed_dt);
-        w.submit(
-            Lane::Simulation,
-            vec![Command::SetTransform {
-                entity: root,
-                transform: Transform::from_position(Vec3::X * 4.0),
-            }],
-        );
+        w.prepare_gameplay_tick();
+        w.edit_gameplay(|edit| {
+            edit.set_transform(root, Transform::from_position(Vec3::X * 4.0))?;
+            Ok(())
+        })
+        .unwrap();
         w.step();
         let ex = w.extract();
         let x = ex
@@ -263,13 +248,12 @@ fn a_dead_entity_is_missing_and_a_moving_one_is_interpolated() {
     let mut out = Vec::new();
     // Move it 2 m right over one tick; halfway through the next frame the
     // extract and the projection agree on the interpolated pose.
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetTransform {
-            entity: e,
-            transform: Transform::from_position(Vec3::new(2.0, 0.0, 0.0)),
-        }],
-    );
+    w.prepare_gameplay_tick();
+    w.edit_gameplay(|edit| {
+        edit.set_transform(e, Transform::from_position(Vec3::new(2.0, 0.0, 0.0)))?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     w.drain_events();
     let plan = w.begin_frame(w.config().fixed_dt * 0.5);
@@ -286,7 +270,11 @@ fn a_dead_entity_is_missing_and_a_moving_one_is_interpolated() {
         out[0].x
     );
 
-    w.submit(Lane::Simulation, vec![Command::Destroy(e)]);
+    w.edit_gameplay(|edit| {
+        edit.destroy(e)?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     w.drain_events();
     w.project(800, 600, &[anchor(e)], &mut out);

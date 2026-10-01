@@ -771,9 +771,8 @@ mod tests {
         assert_eq!(a.commands_rejected, 0);
         assert_eq!(a.diagnostics, 0);
         assert_eq!(a.missed_deadlines, 0);
-        // tick 0: hub spawn; tick 1: 8 satellite spawns + hub move;
-        // ticks 2..119: hub move + 8 satellite moves.
-        assert_eq!(a.commands_applied, 1 + (8 + 1) + 118 * 9);
+        // The demo uses synchronous transactions, not queued compatibility commands.
+        assert_eq!(a.commands_applied, 0);
 
         let c = run(&HeadlessConfig { seed: 7, ..cfg });
         assert_ne!(a.checksum, c.checksum);

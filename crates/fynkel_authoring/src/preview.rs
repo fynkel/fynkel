@@ -14,9 +14,10 @@
 //!   document (skins registered, the closure retained).
 //! - [`Preview::sync`] — the **incremental sync rule**: the world is
 //!   diffed against the description the document has *now* and only the
-//!   differences become commands (spawns, destroys, reparents, renames,
-//!   component sets and removes, sibling order), applied through the
-//!   world's own command path over as many steps as the hierarchy needs.
+//!   differences become an atomic edit (spawns, destroys, reparents, renames,
+//!   component sets and removes), applied through the
+//!   world's shared transaction path over as many steps as the hierarchy needs.
+//!   Sibling order is reconciled separately after the data edits.
 //!   Undo, redo, prefab overrides, duplicates and edits to a prefab open in
 //!   another tab all go through the same diff; nothing has a special case.
 //!   When a round makes no progress (the world rejected a command) the
@@ -35,12 +36,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use fynkel_assets::{Assets, MeshPayload, Residency};
+use fynkel_assets::{Assets, MeshPayload, PreparedGameplayResources, Residency};
 use fynkel_contracts::{AssetRef, Code, Diagnostic, Entity};
 use fynkel_core::components::{Camera, ComponentValue, MeshRenderer, Projection};
 use fynkel_core::{
-    projection_matrix, view_matrix, Command, EntityDescription, EventPayload, Lane, Name,
-    SceneDescription, World,
+    projection_matrix, view_matrix, ComponentId, EditResult, EntityDescription, GameplayEdit, Name,
+    PendingEntity, SceneDescription, World,
 };
 use fynkel_document::generated::encode_component;
 use fynkel_document::DocumentCodec;
@@ -49,6 +50,106 @@ use fynkel_scene::{self as scene, Transform};
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use serde_json::{json, Value};
 use uuid::Uuid;
+
+/// A document diff, applied synchronously in one shared world transaction.
+/// Authoring UUIDs identify new objects; no transport IDs or spawn events.
+#[derive(Debug)]
+enum PreviewChange {
+    Spawn {
+        id: Uuid,
+        transform: Transform,
+        parent: Option<Entity>,
+        name: String,
+    },
+    Destroy(Entity),
+    SetName {
+        entity: Entity,
+        name: String,
+    },
+    SetActive {
+        entity: Entity,
+        active: bool,
+    },
+    SetParent {
+        child: Entity,
+        parent: Option<Entity>,
+        keep_world: bool,
+    },
+    SetTransform {
+        entity: Entity,
+        transform: Transform,
+    },
+    SetComponent {
+        entity: Entity,
+        value: ComponentValue,
+    },
+    RemoveComponent {
+        entity: Entity,
+        component: ComponentId,
+    },
+}
+
+fn apply_changes(
+    world: &mut World,
+    assets: Option<&Assets>,
+    changes: Vec<PreviewChange>,
+) -> Result<Vec<(Uuid, Entity)>, Diagnostic> {
+    let mut resources = PreparedGameplayResources::default();
+    if let Some(assets) = assets {
+        for change in &changes {
+            if let PreviewChange::SetComponent { value, .. } = change {
+                resources.component(assets, world, value);
+            }
+        }
+    }
+    let commit = resources
+        .commit(world, |edit: &mut GameplayEdit<'_>| {
+            let mut spawned: Vec<(Uuid, PendingEntity)> = Vec::new();
+            for change in changes {
+                match change {
+                    PreviewChange::Spawn {
+                        id,
+                        transform,
+                        parent,
+                        name,
+                    } => {
+                        spawned.push((id, edit.spawn(name, transform, parent.map(Into::into))?));
+                    }
+                    PreviewChange::Destroy(entity) => edit.destroy(entity)?,
+                    PreviewChange::SetName { entity, name } => edit.set_name(entity, name)?,
+                    PreviewChange::SetActive { entity, active } => {
+                        edit.set_active(entity, active)?
+                    }
+                    PreviewChange::SetParent {
+                        child,
+                        parent,
+                        keep_world,
+                    } => edit.set_parent(child, parent.map(Into::into), keep_world)?,
+                    PreviewChange::SetTransform { entity, transform } => {
+                        edit.set_transform(entity, transform)?
+                    }
+                    PreviewChange::SetComponent { entity, value } => {
+                        edit.set_component(entity, value)?
+                    }
+                    PreviewChange::RemoveComponent { entity, component } => {
+                        edit.remove_component(entity, component)?
+                    }
+                }
+            }
+            EditResult::Ok(spawned)
+        })
+        .map_err(|error| {
+            Diagnostic::error(
+                Code::SESSION_INVALID_REQUEST,
+                format!("preview edit: {error}"),
+            )
+        })?;
+    Ok(commit
+        .value
+        .iter()
+        .filter_map(|(id, pending)| commit.resolve(*pending).map(|entity| (*id, entity)))
+        .collect())
+}
 
 /// Radius of the pick sphere and the icon cross of an entity that draws
 /// nothing (an empty, a light, a camera), metres.
@@ -264,6 +365,7 @@ pub struct Preview {
     /// The closure of the last description's asset references, kept
     /// resident while the preview lives.
     residency: Option<Residency>,
+    assets: Option<Assets>,
     /// Expanded entity → the document entity that anchors its prefab
     /// instance (outermost); see [`Preview::set_anchors`].
     anchors: HashMap<Uuid, Uuid>,
@@ -279,7 +381,7 @@ impl Preview {
     /// Loads `described` fresh into `world` (a replace load: whatever the
     /// world held goes). The document's structure was validated already;
     /// a load the world still refuses (a parent cycle the document's
-    /// baseline tolerates) is `FYN-R0008` and leaves an empty preview.
+    /// baseline tolerates) is `FYN-R0008` and preserves the prior world.
     pub fn load(
         document: Uuid,
         world: &mut World,
@@ -293,6 +395,7 @@ impl Preview {
             order: Vec::new(),
             described: HashMap::new(),
             residency: None,
+            assets: assets.cloned(),
             anchors: HashMap::new(),
             loads: 0,
             syncs: 0,
@@ -302,8 +405,8 @@ impl Preview {
         p
     }
 
-    /// The fallback and the user's "Reload": the world emptied and
-    /// `described` loaded fresh.
+    /// The fallback and the user's "Reload": atomically replaces the scene.
+    /// Failure preserves the previous world, identities and residency.
     pub fn reload(
         &mut self,
         world: &mut World,
@@ -312,14 +415,19 @@ impl Preview {
     ) {
         self.loads += 1;
         self.diagnostics.clear();
-        self.ids.clear();
-        self.by_entity.clear();
-        self.order.clear();
-        self.described.clear();
-        self.residency = None;
+        let resources = assets.map(|assets| {
+            let (plan, report) =
+                fynkel_assets::PreparedGameplayResources::for_scene(assets, world, described);
+            self.diagnostics.extend(report.diagnostics);
+            Box::new(plan) as Box<dyn fynkel_core::PreparedCommandResources>
+        });
         let before = world.diagnostics().len();
-        match world.load_scene(described) {
+        match world.load_scene_prepared(described, fynkel_core::LoadMode::Replace, resources) {
             Ok(loaded) => {
+                self.assets = assets.cloned();
+                self.ids.clear();
+                self.by_entity.clear();
+
                 for (id, e) in loaded.entities() {
                     let id = to_uuid(*id);
                     self.ids.insert(id, *e);
@@ -333,10 +441,9 @@ impl Preview {
                         format!("the scene cannot be loaded for preview: {e}"),
                     )
                     .with_id(described.id.to_string())
-                    .with_suggestion(
-                        "fix the document's hierarchy errors; the Scene view stays empty",
-                    ),
+                    .with_suggestion("fix the document errors; the previous preview is preserved"),
                 );
+                return;
             }
         }
         self.diagnostics
@@ -445,6 +552,7 @@ impl Preview {
         assets: Option<&Assets>,
         desired: &SceneDescription,
     ) -> SyncReport {
+        self.assets = assets.cloned();
         self.syncs += 1;
         let mut report = SyncReport::default();
         let before = world.diagnostics().len();
@@ -462,31 +570,37 @@ impl Preview {
                 break;
             }
             last_plan = Some(signature);
-            for c in &plan {
-                match c {
-                    Command::Spawn { .. } => report.spawned += 1,
-                    Command::Destroy(_) => report.destroyed += 1,
-                    _ => report.updated += 1,
-                }
-            }
-            world.submit(Lane::Simulation, plan);
-            world.step();
-            report.steps += 1;
-            for ev in world.drain_events() {
-                match ev.payload {
-                    EventPayload::Spawned { temp_id, entity } => {
-                        let id = to_uuid(desired.entities[temp_id as usize - 1].id);
+            let counts =
+                plan.iter().fold(
+                    (0, 0, 0),
+                    |(spawned, destroyed, updated), change| match change {
+                        PreviewChange::Spawn { .. } => (spawned + 1, destroyed, updated),
+                        PreviewChange::Destroy(_) => (spawned, destroyed + 1, updated),
+                        _ => (spawned, destroyed, updated + 1),
+                    },
+                );
+            match apply_changes(world, assets, plan) {
+                Ok(spawned) => {
+                    for (id, entity) in spawned {
                         self.ids.insert(id, entity);
                         self.by_entity.insert(entity, id);
                     }
-                    EventPayload::Destroyed { entity, .. } => {
-                        if let Some(id) = self.by_entity.remove(&entity) {
-                            self.ids.remove(&id);
-                        }
-                    }
-                    _ => {}
+                    report.spawned += counts.0;
+                    report.destroyed += counts.1;
+                    report.updated += counts.2;
+                }
+                Err(error) => {
+                    report.diagnostics.push(error);
+                    report.reloaded = true;
+                    break;
                 }
             }
+            world.step();
+            report.steps += 1;
+            // Identity follows committed liveness, without consuming the host's events.
+            self.by_entity
+                .retain(|entity, _| world.ecs().contains(*entity));
+            self.ids.retain(|_, entity| world.ecs().contains(*entity));
         }
         if !report.reloaded && !self.plan(world, desired).is_empty() {
             report.reloaded = true;
@@ -513,11 +627,11 @@ impl Preview {
     /// Everything that differs between the world and `desired` and can be
     /// commanded now (a spawn under a parent that does not exist yet
     /// waits for the next round).
-    fn plan(&self, world: &World, desired: &SceneDescription) -> Vec<Command> {
+    fn plan(&self, world: &World, desired: &SceneDescription) -> Vec<PreviewChange> {
         let ecs = world.ecs();
         let mut out = Vec::new();
         let wanted: HashSet<Uuid> = desired.entities.iter().map(|e| to_uuid(e.id)).collect();
-        for (i, d) in desired.entities.iter().enumerate() {
+        for d in &desired.entities {
             let id = to_uuid(d.id);
             let parent_entity = match d.parent {
                 None => Some(None),
@@ -534,11 +648,11 @@ impl Preview {
             match self.ids.get(&id) {
                 None => {
                     if let Some(parent) = parent_entity {
-                        out.push(Command::Spawn {
-                            temp_id: i as u64 + 1,
+                        out.push(PreviewChange::Spawn {
+                            id,
                             transform,
                             parent,
-                            name: Some(d.name.clone()),
+                            name: d.name.clone(),
                         });
                     }
                 }
@@ -548,13 +662,13 @@ impl Preview {
                     }
                     let name = ecs.copy::<Name>(e).map(|n| n.value).unwrap_or_default();
                     if name != d.name {
-                        out.push(Command::SetName {
+                        out.push(PreviewChange::SetName {
                             entity: e,
                             name: d.name.clone(),
                         });
                     }
                     if scene::is_active_self(ecs, e) != d.active {
-                        out.push(Command::SetActive {
+                        out.push(PreviewChange::SetActive {
                             entity: e,
                             active: d.active,
                         });
@@ -564,7 +678,7 @@ impl Preview {
                     let desired_parent = d.parent.map(to_uuid);
                     if current_parent != desired_parent {
                         if let Some(parent) = parent_entity {
-                            out.push(Command::SetParent {
+                            out.push(PreviewChange::SetParent {
                                 child: e,
                                 parent,
                                 keep_world: false,
@@ -572,7 +686,7 @@ impl Preview {
                         }
                     }
                     if ecs.copy::<Transform>(e).ok() != Some(transform) {
-                        out.push(Command::SetTransform {
+                        out.push(PreviewChange::SetTransform {
                             entity: e,
                             transform,
                         });
@@ -583,7 +697,7 @@ impl Preview {
                             continue;
                         }
                         if !have.iter().any(|h| h == c) {
-                            out.push(Command::SetComponent {
+                            out.push(PreviewChange::SetComponent {
                                 entity: e,
                                 value: c.clone(),
                             });
@@ -594,7 +708,7 @@ impl Preview {
                             continue;
                         }
                         if !d.components.iter().any(|c| c.id() == h.id()) {
-                            out.push(Command::RemoveComponent {
+                            out.push(PreviewChange::RemoveComponent {
                                 entity: e,
                                 component: h.id(),
                             });
@@ -623,7 +737,7 @@ impl Preview {
                 p = scene::parent_of(ecs, pe);
             }
             if !ancestor_gone {
-                out.push(Command::Destroy(e));
+                out.push(PreviewChange::Destroy(e));
             }
         }
         out
@@ -770,12 +884,12 @@ impl Preview {
             let Some(&e) = self.ids.get(id) else {
                 return Err(unknown_entity(*id));
             };
-            commands.push(Command::SetTransform {
+            commands.push(PreviewChange::SetTransform {
                 entity: e,
                 transform: *t,
             });
         }
-        world.submit(Lane::Simulation, commands);
+        apply_changes(world, self.assets.as_ref(), commands)?;
         world.step();
         world.drain_events();
         Ok(())
@@ -829,11 +943,11 @@ impl Preview {
                     .with_id(id.to_string()))
                 }
             };
-            commands.push(Command::SetComponent { entity: e, value });
+            commands.push(PreviewChange::SetComponent { entity: e, value });
         }
         let count = commands.len();
         if count > 0 {
-            world.submit(Lane::Simulation, commands);
+            apply_changes(world, self.assets.as_ref(), commands)?;
             world.step();
             world.drain_events();
         }
@@ -850,7 +964,7 @@ impl Preview {
             };
             for c in &d.components {
                 if !matches!(c, ComponentValue::Transform(_)) {
-                    commands.push(Command::SetComponent {
+                    commands.push(PreviewChange::SetComponent {
                         entity: e,
                         value: c.clone(),
                     });
@@ -858,7 +972,7 @@ impl Preview {
             }
         }
         if !commands.is_empty() {
-            world.submit(Lane::Simulation, commands);
+            apply_changes(world, self.assets.as_ref(), commands)?;
             world.step();
             world.drain_events();
         }

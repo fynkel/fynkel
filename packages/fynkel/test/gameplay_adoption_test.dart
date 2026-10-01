@@ -1,3 +1,4 @@
+import 'package:fynkel/src/native/bridge.dart' show NativeGameplayRef;
 import 'package:fynkel/fynkel.dart';
 import 'package:test/test.dart';
 
@@ -7,12 +8,20 @@ class _Created extends Behaviour {
   void onCreate() => creates++;
 }
 
+class _Retired extends Behaviour {
+  final calls = <String>[];
+  @override
+  void onDisable() => calls.add('disable');
+  @override
+  void onDestroy() => calls.add('destroy');
+}
+
 void main() {
   late World w;
   setUp(() => w = World.create());
   tearDown(() => w.dispose());
 
-  test('adoption resolves canonical handles, references and lifecycle without a tick', () {
+  test('transactions resolve canonical handles, references and lifecycle without a tick', () {
     final root = w.spawn(name: 'root');
     final child = w.spawn(name: 'child', parent: root)..set(Follow(target: root));
     final b = child.addBehaviour(_Created());
@@ -34,7 +43,7 @@ void main() {
     expect(b.creates, 1);
   });
 
-  test('callback abort does not undo the preceding adoption commit', () {
+  test('callback abort does not undo the preceding commit', () {
     final go = w.spawn(name: 'queued');
     expect(
       () => w.edit(() {
@@ -51,28 +60,35 @@ void main() {
     expect(w.objects.length, 1);
   });
 
-  test('failed adoption retains native queue ownership across retries', () {
-    w.throwOnDiagnostics = false;
-    final go = w.spawn(name: 'queued');
-    w.native.submit(
-      CommandLane.simulation,
-      (CommandBatch()..setTransformOf(go.entity, const Pose(position: Vec3(double.nan, 0, 0)))).encoded(),
+  test('native rename and destruction reconcile even when the following callback aborts', () {
+    final renamed = w.spawn(name: 'before');
+    final destroyed = w.spawn(name: 'removed');
+    final retired = destroyed.addBehaviour(_Retired());
+    w.frame(0);
+    w.native.editGameplay((edit) {
+      edit.setName(NativeGameplayRef.live(renamed.entity), 'native');
+      edit.destroy(NativeGameplayRef.live(destroyed.entity));
+    });
+    expect(
+      () => w.edit(() {
+        expect(renamed.name, 'native');
+        expect(destroyed.isAlive, isFalse);
+        throw StateError('abort');
+      }),
+      throwsStateError,
     );
-    var entered = false;
-    for (var i = 0; i < 2; i++) {
-      expect(() => w.edit(() => entered = true), throwsStateError);
-      expect(go.isPending, isFalse);
-    }
-    expect(entered, isFalse);
-    w.step();
-    w.drainEvents();
-    expect(go.isPending, isFalse);
-    expect(w.objects.length, 1);
-    w.edit(() => go.name = 'recovered');
-    expect(go.name, 'recovered');
+    expect(renamed.name, 'native');
+    expect(destroyed.isAlive, isFalse);
+    expect(w.tick, 0);
+    expect(w.drainEvents().whereType<EntityDestroyed>(), hasLength(1));
+    w.frame(0);
+    expect(w.objects, [renamed]);
+    expect(retired.calls, ['disable', 'destroy']);
+    w.frame(0);
+    expect(retired.calls, ['disable', 'destroy']);
   });
 
-  test('canceled pending spawns and adopted destruction retire handles once', () {
+  test('canceled pending spawns and committed destruction retire handles once', () {
     final survivor = w.edit(() => w.spawn(name: 'survivor'));
     final canceled = w.spawn(name: 'canceled');
     canceled.destroy();

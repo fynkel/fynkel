@@ -165,10 +165,7 @@ void main() {
     expect(target.name, 'contact');
   });
 
-  test('failed queue adoption is one host error and retries lifecycle and routines next frame', () {
-    world.throwOnDiagnostics = false;
-    final diagnostics = <FynkelDiagnostic>[];
-    world.onDiagnostics = diagnostics.addAll;
+  test('rejected edits do not consume lifecycle or coroutine callbacks', () {
     final calls = <String>[];
     script.create = () => calls.add('create');
     script.enable = () => calls.add('enable');
@@ -180,26 +177,21 @@ void main() {
     }
 
     final routine = script.startCoroutine(work());
-    target.name = 'queued';
-    world.native.submit(
-      CommandLane.simulation,
-      (CommandBatch()..setTransformOf(target.entity, const Pose(position: Vec3(double.nan, 0, 0)))).encoded(),
+    expect(
+      () => world.edit(() {
+        target.name = 'discard';
+        target.setLocalTransform(const Pose(position: Vec3(double.nan, 0, 0)));
+      }),
+      throwsStateError,
     );
-    expect(() => world.frame(1 / 60, update: () => calls.add('host')), throwsStateError);
-    expect(errors, isEmpty, reason: 'a pre-entry failure belongs to the host boundary');
-    expect(calls, isEmpty, reason: 'none of the skipped callbacks consumed lifecycle state');
+    expect(calls, isEmpty);
     expect(routine.isRunning, isTrue);
-    expect(diagnostics.single.code, DiagnosticCode.invalidPayload);
-    expect(target.name, 'queued', reason: 'the rejected adoption left older work for the normal tick');
-    world.frame(1 / 60);
+    world.frame(0);
     expect(calls, ['create', 'enable', 'start', 'update']);
-    expect(routine.isRunning, isTrue);
     world.frame(0);
     expect(calls, ['create', 'enable', 'start', 'update', 'update', 'routine']);
     expect(routine.isRunning, isFalse);
     expect(errors, isEmpty);
-    world.frame(1 / 60);
-    expect(calls.where((call) => call == 'create'), hasLength(1));
   });
 
   test('invoke callback failure rolls back without cancelling another invoke', () {

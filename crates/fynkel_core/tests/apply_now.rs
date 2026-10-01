@@ -1,4 +1,4 @@
-//! `World::apply_now` (ADR-0021 P7, live Play mode): the editor changes a
+//! `World::apply_gameplay_now` (ADR-0021 P7, live Play mode): the editor changes a
 //! running or paused game at the current tick — the change is there at
 //! once, nothing ticks, nothing is interpolated from the old value.
 
@@ -7,24 +7,17 @@ use fynkel_core::*;
 use fynkel_scene::WorldTransform;
 use glam::Vec3;
 
-fn spawn(w: &mut World, temp_id: u64, at: Vec3, parent: Option<Entity>) -> Entity {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id,
-            transform: Transform::from_position(at),
-            parent,
-            name: Some(format!("e{temp_id}")),
-        }],
-    );
-    assert_eq!(w.step().status, Status::Ok, "{:?}", w.diagnostics());
-    w.drain_events()
-        .into_iter()
-        .find_map(|e| match e.payload {
-            EventPayload::Spawned { temp_id: t, entity } if t == temp_id => Some(entity),
-            _ => None,
+fn spawn(w: &mut World, fixture_id: u64, at: Vec3, parent: Option<Entity>) -> Entity {
+    let commit = w
+        .edit_gameplay(|edit| {
+            edit.spawn(
+                format!("e{fixture_id}"),
+                Transform::from_position(at),
+                parent.map(Into::into),
+            )
         })
-        .unwrap()
+        .unwrap();
+    commit.resolve(commit.value).unwrap()
 }
 
 fn world_pos(w: &World, e: Entity) -> Vec3 {
@@ -42,7 +35,7 @@ fn a_live_edit_is_there_at_once_and_nothing_ticks() {
     let child = spawn(&mut w, 2, Vec3::new(0.0, 1.0, 0.0), Some(parent));
     let tick = w.tick();
 
-    let rejected = w.apply_now(vec![
+    let rejected = w.apply_gameplay_now(vec![
         Command::SetTransform {
             entity: parent,
             transform: Transform::from_position(Vec3::new(5.0, 0.0, 0.0)),
@@ -87,19 +80,17 @@ fn a_live_edit_is_there_at_once_and_nothing_ticks() {
 fn a_bad_live_edit_is_refused_and_changes_nothing() {
     let mut w = World::new(WorldConfig::default());
     let e = spawn(&mut w, 1, Vec3::ZERO, None);
-    let rejected = w.apply_now(vec![
-        Command::Spawn {
-            temp_id: 9,
-            transform: Transform::default(),
-            parent: None,
-            name: None,
+    let rejected = w.apply_gameplay_now(vec![
+        Command::SetName {
+            entity: e,
+            name: "discarded".into(),
         },
         Command::SetTransform {
             entity: e,
             transform: Transform::from_position(Vec3::new(f32::NAN, 0.0, 0.0)),
         },
     ]);
-    assert_eq!(rejected.len(), 2, "{rejected:?}");
+    assert_eq!(rejected.len(), 1, "the entire edit rejects: {rejected:?}");
     assert_eq!(world_pos(&w, e), Vec3::ZERO);
     assert_eq!(w.ecs().len(), 1, "nothing spawned");
 }
@@ -262,38 +253,26 @@ fn live_spawn_rejects_stale_references_without_publishing_hierarchy() {
 }
 
 #[test]
-fn live_spawn_does_not_adopt_or_discard_queued_simulation_work() {
+fn live_spawn_preserves_existing_committed_identity_without_a_tick() {
     let mut w = empty_loaded_world();
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id: 17,
-            transform: Transform::default(),
-            parent: None,
-            name: Some("queued".into()),
-        }],
-    );
-    assert!(matches!(
-        w.spawn_now(
+    let c = w
+        .edit_gameplay(|e| e.spawn("gameplay", Transform::default(), None))
+        .unwrap();
+    let existing = c.resolve(c.value).unwrap();
+    let tick = w.tick();
+    let (editor, diagnostics) = w
+        .spawn_now(
             "editor",
             Transform::default(),
             None,
             vec![],
-            Some((uuid(1), uuid(2)))
-        ),
-        Err(LoadError::LiveSpawnRejected(_))
-    ));
-    assert_eq!(w.live_entities(), 0);
-    assert!(w.loaded_scenes()[0].handle_of(uuid(2)).is_none());
-    w.adopt_gameplay_commands().unwrap();
-    assert_eq!(w.live_entities(), 1);
-    w.spawn_now(
-        "editor",
-        Transform::default(),
-        None,
-        vec![],
-        Some((uuid(1), uuid(2))),
-    )
-    .unwrap();
+            Some((uuid(1), uuid(2))),
+        )
+        .unwrap();
+    assert!(diagnostics.is_empty());
+    assert!(w.ecs().contains(existing));
+    assert_ne!(existing, editor);
     assert_eq!(w.live_entities(), 2);
+    assert_eq!(w.tick(), tick);
+    assert_eq!(w.loaded_scenes()[0].handle_of(uuid(2)), Some(editor));
 }

@@ -4,15 +4,13 @@
 //! the authority independently of every module handle.
 use std::{path::Path, ptr};
 
-use fynkel_contracts::{Entity, EventKind, Status};
-use fynkel_core::schema::{DestroyCommand, EventHeader, SpawnCommand, SpawnedEvent};
-use fynkel_native::{
-    buffer::{self, BufferKind, Writer},
-    *,
-};
+use fynkel_contracts::{Entity, Status};
+use fynkel_native::*;
 use fynkel_scene::Transform;
-use fynkel_wire::{get_u32, WireRecord};
 use libloading::Library;
+#[path = "support/edit.rs"]
+mod edit;
+use edit::{Api, Begin, Edit, End, Exchange};
 
 type CreateRuntime = unsafe extern "C" fn() -> *mut FynkelRuntime;
 type CreateWorld = unsafe extern "C" fn(
@@ -20,14 +18,22 @@ type CreateWorld = unsafe extern "C" fn(
     *const FynkelWorldDesc,
     *mut Status,
 ) -> *mut FynkelWorld;
-type Submit =
-    unsafe extern "C" fn(*mut FynkelWorld, u32, *const u8, u32, *mut FynkelSubmitResult) -> Status;
 type Step = unsafe extern "C" fn(*mut FynkelWorld, *mut FynkelStepResult) -> Status;
 
 struct Module(Library);
 impl Module {
     unsafe fn open(path: &Path) -> Self {
-        Self(Library::new(path).unwrap())
+        let library = Library::new(path).unwrap();
+        for retired in [
+            b"fynkel_world_submit_commands\0".as_slice(),
+            b"fynkel_world_gameplay_adopt\0".as_slice(),
+        ] {
+            assert!(
+                library.get::<unsafe extern "C" fn()>(retired).is_err(),
+                "retired compatibility symbol remains exported"
+            );
+        }
+        Self(library)
     }
     unsafe fn authority(&self) -> *const FynkelIdentityAuthority {
         self.0
@@ -51,19 +57,21 @@ impl Module {
             .unwrap()(world, entity)
             == 1
     }
-    unsafe fn submit(&self, world: *mut FynkelWorld, bytes: &[u8]) {
-        assert_eq!(
-            self.0
-                .get::<Submit>(b"fynkel_world_submit_commands\0")
-                .unwrap()(
-                world,
-                fynkel_core::Lane::Simulation as u32,
-                bytes.as_ptr(),
-                bytes.len() as u32,
-                &mut FynkelSubmitResult::default()
-            ),
-            Status::Ok
-        );
+    unsafe fn edit(&self, world: *mut FynkelWorld) -> Edit {
+        Edit::with_api(
+            world,
+            Api {
+                begin: *self
+                    .0
+                    .get::<Begin>(b"fynkel_world_gameplay_begin\0")
+                    .unwrap(),
+                exchange: *self
+                    .0
+                    .get::<Exchange>(b"fynkel_world_gameplay_exchange\0")
+                    .unwrap(),
+                end: *self.0.get::<End>(b"fynkel_world_gameplay_end\0").unwrap(),
+            },
+        )
     }
     unsafe fn step(&self, world: *mut FynkelWorld) -> Status {
         self.0.get::<Step>(b"fynkel_world_step\0").unwrap()(world, &mut FynkelStepResult::default())
@@ -82,30 +90,9 @@ impl Module {
         );
         assert_eq!(status, Status::Ok);
         assert!(!world.is_null());
-        let mut writer = Writer::begin(Vec::new(), BufferKind::Commands);
-        writer.command(
-            1,
-            &SpawnCommand {
-                temp_id: 1,
-                transform: Transform::IDENTITY,
-                parent: None,
-                name: "probe".into(),
-            },
-        );
-        self.submit(world, &writer.finish());
-        assert_eq!(self.step(world), Status::Ok);
-        let view = self
-            .0
-            .get::<unsafe extern "C" fn(*mut FynkelWorld) -> FynkelBufferView>(
-                b"fynkel_world_drain_events\0",
-            )
-            .unwrap()(world);
-        let bytes = std::slice::from_raw_parts(view.data, view.length as usize);
-        let (_, records, _) = buffer::validate(bytes, BufferKind::Events).unwrap();
-        assert_eq!(get_u32(records, 0), EventKind::SPAWNED.0);
-        let entity = SpawnedEvent::decode(&records[EventHeader::SIZE..], &[])
-            .unwrap()
-            .entity;
+        let mut edit = self.edit(world);
+        let pending = edit.spawn("probe", Transform::IDENTITY, None);
+        let entity = edit.commit().resolve(pending);
         (rt, world, entity)
     }
     unsafe fn destroy(&self, rt: *mut FynkelRuntime, world: *mut FynkelWorld) {
@@ -164,10 +151,10 @@ fn shared_host_authority_survives_independent_modules_and_replacement() {
         assert_eq!(e1.generation(), e2.generation());
         assert!(!second.contains(w2, e1));
         assert!(second.contains(w2, e2));
-        let mut destroy = Writer::begin(Vec::new(), BufferKind::Commands);
-        destroy.command(2, &DestroyCommand { entity: e1 });
-        second.submit(w2, &destroy.finish());
-        assert_eq!(second.step(w2), Status::CommandsRejected);
+        let mut edit = second.edit(w2);
+        assert_eq!(edit.try_destroy(e1), Status::CommandsRejected);
+        drop(edit);
+        assert_eq!(second.step(w2), Status::Ok);
         assert!(second.contains(w2, e2));
         // A truly independent image bootstraps another address and cannot
         // switch authorities after startup. This also verifies the copies

@@ -19,7 +19,7 @@ use fynkel_assets::{Assets, Residency};
 use fynkel_contracts::{AssetRef, Uuid};
 use fynkel_cooked::payload::{MeshPayload, Vertex};
 use fynkel_core::{
-    Command, ComponentValue, DirectionalLight, Entity, EntityDescription, Extract, MeshRenderer,
+    ComponentValue, DirectionalLight, Entity, EntityDescription, Extract, MeshRenderer,
     SceneDescription, Transform, World, WorldConfig,
 };
 use glam::{Mat4, Quat, Vec3};
@@ -394,21 +394,16 @@ pub fn stage_into(
         closure.extend(assets.closure(mesh.asset));
     }
     let residency = assets.retain(&closure);
-    let loaded = match world.load_scene(&description) {
-        Ok(l) => l,
-        Err(e) => return Err(Refusal::Failed(format!("{e:?}"))),
-    };
-    let mut diagnostics = Vec::new();
-    if matches!(subject, Subject::Hierarchy(_)) {
-        let (_, prefab_diags) = assets.register_prefabs(&description, world);
-        let (_, _, anim_diags) = assets.register_animation(&description, world);
-        diagnostics.extend(
-            prefab_diags
-                .iter()
-                .chain(&anim_diags)
-                .map(|d| d.to_string()),
-        );
-    }
+    let (resources, report) =
+        fynkel_assets::PreparedGameplayResources::for_scene(assets, world, &description);
+    let loaded = world
+        .load_scene_prepared(
+            &description,
+            fynkel_core::LoadMode::Replace,
+            Some(Box::new(resources)),
+        )
+        .map_err(|e| Refusal::Failed(format!("{e:?}")))?;
+    let diagnostics = report.diagnostics.iter().map(ToString::to_string).collect();
     // Spawn order is parents first: the first entity that is not the sun
     // is the subject's top.
     let root = loaded
@@ -448,11 +443,9 @@ pub fn sun_transform(toward: Vec3) -> Transform {
 }
 
 /// Turns the stage's `sun` to shine from `toward` (applied now).
-pub fn set_sun(world: &mut World, sun: Entity, toward: Vec3) {
-    world.apply_now(vec![Command::SetTransform {
-        entity: sun,
-        transform: sun_transform(toward),
-    }]);
+pub fn set_sun(world: &mut World, sun: Entity, toward: Vec3) -> fynkel_core::EditResult<()> {
+    world.edit_gameplay(|edit| edit.set_transform(sun, sun_transform(toward)))?;
+    Ok(())
 }
 
 /// Takes the components that are not the asset's own look out of a
@@ -647,6 +640,28 @@ mod tests {
         let toward = Vec3::new(0.3, 1.0, 0.2).normalize();
         let t = sun_transform(toward);
         assert!((t.rotation * Vec3::NEG_Z + toward).length() < 1e-5);
+    }
+
+    #[test]
+    fn sun_edit_publishes_without_a_tick_and_rejects_stale_identity() {
+        let mut world = World::new(Default::default());
+        let commit = world
+            .edit_gameplay(|edit| edit.spawn("sun", Transform::IDENTITY, None))
+            .unwrap();
+        let sun = commit.resolve(commit.value).unwrap();
+        let tick = world.tick();
+        let toward = Vec3::new(0.3, 1.0, 0.2);
+        set_sun(&mut world, sun, toward).unwrap();
+        let expected = sun_transform(toward);
+        assert_eq!(world.ecs().copy::<Transform>(sun).unwrap(), expected);
+        assert_eq!(world.tick(), tick);
+        world.edit_gameplay(|edit| edit.destroy(sun)).unwrap();
+        assert!(
+            matches!(set_sun(&mut world, sun, Vec3::X), Err(fynkel_core::EditError::StaleEntity(e)) if e == sun)
+        );
+        assert_eq!(world.tick(), tick);
+        assert_eq!(world.step().status, fynkel_contracts::Status::Ok);
+        assert_eq!(world.live_entities(), 0);
     }
 
     #[test]

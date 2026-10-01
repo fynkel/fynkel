@@ -2444,7 +2444,7 @@ fn khronos_rigs_assemble_into_a_rig_document() {
         "the survey (the first point) carries no markers"
     );
     {
-        use fynkel_core::{AnimateOp, Command, Lane};
+        use fynkel_core::AnimateOp;
         let cache = dir.join(".fynkel/cache");
         let config = fynkel_host_headless::HeadlessConfig {
             steps: 1,
@@ -2479,15 +2479,13 @@ fn khronos_rigs_assemble_into_a_rig_document() {
         let state = world.animator_state(character).unwrap();
         assert!((state.duration - survey.duration).abs() < 1e-5, "{state:?}");
         let animate = |w: &mut fynkel_core::World, ops: Vec<AnimateOp>| {
-            w.submit(
-                Lane::Simulation,
-                ops.into_iter()
-                    .map(|op| Command::Animate {
-                        entity: character,
-                        op,
-                    })
-                    .collect(),
-            );
+            w.edit_gameplay(|edit| {
+                for op in ops {
+                    edit.animate_control(character, op)?;
+                }
+                Ok(())
+            })
+            .unwrap();
             let r = w.step();
             assert_eq!(r.rejected, 0, "{:?}", w.diagnostics());
         };

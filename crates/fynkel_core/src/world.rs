@@ -1,4 +1,4 @@
-//! The runtime world: lifecycle, command lanes, `step()`, snapshots,
+//! The runtime world: lifecycle, gameplay transactions, `step()`, snapshots,
 //! events, diagnostics, render extraction.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -24,13 +24,12 @@ const SYSTEMS: [SystemKind; 15] = [
     SystemKind::Publish,
 ];
 
-use fynkel_audio::{AudioBus, PlayParams};
 use fynkel_contracts::{
     AssetRef, ComponentId, DiagnosticCode, Entity, Status, Tick, Uuid, WorldId, DEFAULT_FIXED_DT,
     DEFAULT_MAX_STEPS_PER_FRAME, MAX_FRAME_DT,
 };
 use fynkel_ecs::internal::Handle;
-use fynkel_ecs::{EcsError, World as Ecs};
+use fynkel_ecs::World as Ecs;
 pub use fynkel_physics::PhysicsOwned;
 use fynkel_physics::{
     BodyCommand, CharacterController, Physics, PhysicsEvent, QueryKind, QuerySpec, RejectionKind,
@@ -53,6 +52,7 @@ use crate::schema::{SystemKind, SystemTimeRecord};
 mod animation;
 mod audio;
 mod catalogue;
+pub mod command_resources;
 mod controller;
 pub mod gameplay;
 mod gameplay_live;
@@ -69,7 +69,7 @@ pub use projection::{
     PROJECTED_IN_FRONT, PROJECTED_MISSING, PROJECTED_NO_CAMERA, PROJECTED_OCCLUDED,
     PROJECTED_ON_SCREEN, PROJECTED_VISIBLE,
 };
-use state::{ActiveMarkers, AnimationState, EditState, Lanes, Scratch};
+use state::{ActiveMarkers, AnimationState, EditState, Scratch};
 
 #[derive(Clone, Debug)]
 pub struct WorldConfig {
@@ -77,7 +77,7 @@ pub struct WorldConfig {
     pub max_steps_per_frame: u32,
     pub max_frame_dt: f32,
     /// The editor's edit-preview world (ADR-0016, blueprint §19.2e): a
-    /// `step()` applies the staged commands, propagates transforms and
+    /// `step()` delivers committed effects, propagates transforms and
     /// publishes the snapshot — and runs **no** system (no characters,
     /// animation, catalogue movers, physics, camera rigs, followers,
     /// billboards, audio, input). Nothing moves unless a command moved
@@ -133,21 +133,6 @@ pub struct Diagnostic {
     pub message: String,
 }
 
-/// A command rejected before it reached the world (bridge decode failure).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Rejected {
-    pub code: DiagnosticCode,
-    pub message: String,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SubmitReport {
-    pub status: Status,
-    /// Simulation lane: staged. Presentation lane: applied.
-    pub accepted: u32,
-    pub rejected: u32,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StepReport {
     pub status: Status,
@@ -171,8 +156,6 @@ pub struct SnapshotRecord {
 pub struct ExtractRecord {
     pub entity: Entity,
     pub world: Mat4,
-    /// True when a presentation override replaced interpolation this frame.
-    pub overridden: bool,
     /// The bit of the entity's `fynkel.Layer` (ADR-0020; `1`, `default`,
     /// without one): a camera whose `culling_mask` lacks it neither draws
     /// the object nor lets it cast a shadow, and a point or spot light
@@ -276,11 +259,12 @@ pub struct Extract {
 }
 
 pub struct World {
+    command_resources: Option<Arc<dyn command_resources::CommandResourceSource>>,
     config: WorldConfig,
     clock: FrameClock,
     ecs: Ecs,
-    /// The command lanes' state between ticks.
-    lanes: Lanes,
+    /// Roots whose committed poses must reset interpolation history.
+    teleported: Vec<Entity>,
     /// The subtrees whose `Inactive` markers are stale.
     active: ActiveMarkers,
     events: EventQueue,
@@ -357,7 +341,7 @@ impl World {
             ecs: Ecs::try_new()?,
             config,
             clock,
-            lanes: Lanes::default(),
+            teleported: Vec::new(),
             active: ActiveMarkers::default(),
             events: EventQueue::default(),
             subscriptions: BTreeSet::new(),
@@ -387,6 +371,7 @@ impl World {
             scratch: Scratch::default(),
             next_gameplay_edit: 0,
             gameplay_effects: Vec::new(),
+            command_resources: None,
             gameplay_tick_prepared: false,
         })
     }
@@ -408,7 +393,7 @@ impl World {
     }
 
     /// Before a host's queries: the colliders made since the last step
-    /// (`instantiate`, a clone, `apply_now`) join the query tree, so a
+    /// (`instantiate`, a clone, `apply_gameplay_now`) join the query tree, so a
     /// query sees them at once, as Unity's (foundation 2.7). Nothing is
     /// simulated.
     pub fn refresh_physics(&mut self) {
@@ -546,13 +531,11 @@ impl World {
 
     // ----------------------------------------------------------------- frame
 
-    /// Starts a host frame: clears last frame's presentation overrides,
-    /// accumulates `dt`, records `MissedDeadline` when time is dropped.
+    /// Starts a host frame: accumulates `dt`, records `MissedDeadline` when time is dropped.
     pub fn begin_frame(&mut self, dt: impl Into<f64>) -> FramePlan {
         self.begin_frame_scaled(dt.into(), 1.0)
     }
     pub fn begin_frame_scaled(&mut self, dt: f64, time_scale: f64) -> FramePlan {
-        self.lanes.overrides.clear();
         let plan = self.clock.begin_frame_scaled(dt, time_scale);
         if plan.dropped_seconds > 0.0 {
             self.diagnostics.push(Diagnostic {
@@ -607,118 +590,6 @@ impl World {
 
     // -------------------------------------------------------------- commands
 
-    /// Submits a batch. Simulation commands are staged for the next tick and
-    /// only validated then; presentation commands are validated and applied
-    /// now. Rejections are in [`World::diagnostics`].
-    pub fn submit(&mut self, lane: Lane, commands: Vec<Command>) -> SubmitReport {
-        self.submit_indexed(
-            lane,
-            commands
-                .into_iter()
-                .enumerate()
-                .map(|(i, c)| (i as u32, Ok(c)))
-                .collect(),
-        )
-    }
-
-    /// [`World::submit`] with explicit batch indexes, for callers that
-    /// decode a batch and must keep diagnostics aligned with it. `Err`
-    /// entries are rejected (now for presentation, at the tick for
-    /// simulation) with the given code and message.
-    pub fn submit_indexed(
-        &mut self,
-        lane: Lane,
-        commands: Vec<(u32, Result<Command, Rejected>)>,
-    ) -> SubmitReport {
-        if self.poisoned {
-            return SubmitReport {
-                status: Status::Poisoned,
-                accepted: 0,
-                rejected: commands.len() as u32,
-            };
-        }
-        let mut accepted = 0;
-        let mut rejected = 0;
-        match lane {
-            Lane::Simulation => {
-                accepted = commands.len() as u32;
-                self.lanes
-                    .staged
-                    .extend(commands.into_iter().map(|(i, c)| (i, c, false)));
-            }
-            Lane::Presentation => {
-                for (i, cmd) in commands {
-                    let ok = match cmd {
-                        Ok(cmd) => self.apply_presentation(i, cmd),
-                        Err(r) => {
-                            self.reject(i, lane, r.code, Entity::NULL, ComponentId::NONE, r.message)
-                        }
-                    };
-                    if ok {
-                        accepted += 1;
-                    } else {
-                        rejected += 1;
-                    }
-                }
-            }
-        }
-        SubmitReport {
-            status: if rejected == 0 {
-                Status::Ok
-            } else {
-                Status::CommandsRejected
-            },
-            accepted,
-            rejected,
-        }
-    }
-
-    /// Applies `commands` now, at the current tick, without stepping: the
-    /// editor's live Play mode (ADR-0021 P7) changing a running — possibly
-    /// paused — game. Each command goes through the simulation lane's
-    /// checks, transforms are propagated, and what moved is not
-    /// interpolated from where it was. No system runs, the tick does not
-    /// advance, no event is emitted for the edit itself. `Spawn` is refused
-    /// (its temp id answers through a step's event; a live creation is
-    /// [`World::spawn_now`]). Returns the
-    /// rejections, which are also in [`World::diagnostics`].
-    pub fn apply_now(&mut self, commands: Vec<Command>) -> Vec<Diagnostic> {
-        if self.poisoned {
-            return Vec::new();
-        }
-        let first = self.diagnostics.len();
-        let tick = self.clock.tick();
-        let mut moved = Vec::new();
-        for (i, cmd) in commands.into_iter().enumerate() {
-            let index = i as u32;
-            if matches!(cmd, Command::Spawn { .. }) {
-                self.reject(
-                    index,
-                    Lane::Simulation,
-                    DiagnosticCode::INVALID_PAYLOAD,
-                    Entity::NULL,
-                    ComponentId::NONE,
-                    "apply_now does not spawn",
-                );
-                continue;
-            }
-            let target = cmd.target();
-            if self.apply_simulation(index, cmd, tick) {
-                moved.extend(target);
-            }
-        }
-        self.refresh_active();
-        scene::propagate(&mut self.ecs);
-        for e in moved {
-            if self.ecs.contains(e) {
-                self.lanes.overrides.remove(&e);
-                self.lanes.teleported.push(e);
-            }
-        }
-        self.apply_teleports();
-        self.diagnostics[first..].to_vec()
-    }
-
     fn reject(
         &mut self,
         index: u32,
@@ -754,16 +625,6 @@ impl World {
     }
 
     fn check_entity(&mut self, index: u32, lane: Lane, e: Entity, what: &str) -> bool {
-        if let Some(t) = e.temp_id() {
-            return self.reject(
-                index,
-                lane,
-                DiagnosticCode::INVALID_TEMP_ID,
-                e,
-                ComponentId::NONE,
-                format!("{what}: temp reference #{t} is only valid on the simulation lane"),
-            );
-        }
         if e.world() != self.ecs.id() {
             return self.reject(
                 index,
@@ -787,382 +648,6 @@ impl World {
         true
     }
 
-    fn apply_presentation(&mut self, index: u32, cmd: Command) -> bool {
-        let lane = Lane::Presentation;
-        if !self.module_allows(index, lane, &cmd) {
-            return false;
-        }
-        if !cmd.allowed_on_presentation() {
-            return self.reject(
-                index,
-                lane,
-                DiagnosticCode::WRONG_LANE,
-                cmd.target().unwrap_or(Entity::NULL),
-                ComponentId::NONE,
-                "structural/simulation command on the presentation lane",
-            );
-        }
-        match cmd {
-            Command::SetTransform { entity, transform } => {
-                if !self.check_entity(index, lane, entity, "set_transform") {
-                    return false;
-                }
-                if !transform.is_finite() {
-                    return self.reject(
-                        index,
-                        lane,
-                        DiagnosticCode::INVALID_PAYLOAD,
-                        entity,
-                        ComponentId::TRANSFORM,
-                        "transform is not finite",
-                    );
-                }
-                if self.ecs.has::<PhysicsOwned>(entity) {
-                    return self.reject(
-                        index,
-                        lane,
-                        DiagnosticCode::PHYSICS_OWNED,
-                        entity,
-                        ComponentId::TRANSFORM,
-                        "transform is physics-owned; use simulation commands",
-                    );
-                }
-                if !self.ecs.has::<Transform>(entity) {
-                    return self.reject(
-                        index,
-                        lane,
-                        DiagnosticCode::MISSING_COMPONENT,
-                        entity,
-                        ComponentId::TRANSFORM,
-                        "entity has no Transform",
-                    );
-                }
-                // Override this frame's extract and become authoritative at
-                // the next tick (ADR-0008).
-                self.lanes.overrides.insert(entity, transform);
-                self.lanes.staged.push((
-                    index,
-                    Ok(Command::SetTransform { entity, transform }),
-                    true,
-                ));
-                true
-            }
-            Command::SetName { entity, name } => {
-                if !self.check_entity(index, lane, entity, "set_name") {
-                    return false;
-                }
-                self.ecs.insert(entity, Name::new(name)).is_ok()
-            }
-            Command::SetComponent {
-                entity,
-                value: ComponentValue::Transform(transform),
-            } => self.apply_presentation(index, Command::SetTransform { entity, transform }),
-            // Plain-data writes (§5.1: light colour, visibility, camera
-            // parameters) apply immediately; nothing interpolates them.
-            Command::SetComponent { entity, value } => {
-                self.set_component(index, lane, entity, value)
-            }
-            Command::PlaySound {
-                clip,
-                bus,
-                volume,
-                pitch,
-                priority,
-            } => self.apply_play_sound(
-                index,
-                lane,
-                clip,
-                PlayParams {
-                    bus,
-                    volume,
-                    pitch,
-                    looping: false,
-                    priority,
-                },
-            ),
-            Command::AudioBus { bus, volume, muted } => {
-                self.apply_audio_bus(index, lane, bus, volume, muted)
-            }
-            _ => unreachable!("allowed_on_presentation"),
-        }
-    }
-
-    /// Replaces every temp reference (`Entity::temp`, M3-08b) in `cmd`
-    /// with the entity a spawn earlier in this tick produced; `None` (and a
-    /// diagnostic) when no applied spawn carried that temp id.
-    fn resolve_temps(&mut self, index: u32, mut cmd: Command) -> Option<Command> {
-        let mut failed = None;
-        let mut resolve = |e: &mut Entity| {
-            if let Some(t) = e.temp_id() {
-                match self.lanes.spawned_this_tick.get(&(t as u64)) {
-                    Some(real) => *e = *real,
-                    None => failed = Some(t),
-                }
-            }
-        };
-        match &mut cmd {
-            Command::Spawn { parent, .. } => {
-                if let Some(p) = parent {
-                    resolve(p);
-                }
-            }
-            Command::Destroy(e) => resolve(e),
-            Command::SetComponent { entity, value } => {
-                resolve(entity);
-                // An object reference to an object spawned earlier in the
-                // batch (ADR-0035).
-                value.for_each_object_ref(|_, _, r| resolve(&mut r.entity));
-            }
-            Command::SetTransform { entity, .. }
-            | Command::SetName { entity, .. }
-            | Command::SetActive { entity, .. }
-            | Command::RemoveComponent { entity, .. }
-            | Command::Body { entity, .. }
-            | Command::Animate { entity, .. }
-            | Command::Audio { entity, .. } => resolve(entity),
-            Command::SetParent { child, parent, .. } => {
-                resolve(child);
-                if let Some(p) = parent {
-                    resolve(p);
-                }
-            }
-            Command::PlaySound { .. } | Command::AudioBus { .. } => {}
-        }
-        match failed {
-            None => Some(cmd),
-            Some(t) => {
-                self.reject(
-                    index,
-                    Lane::Simulation,
-                    DiagnosticCode::INVALID_TEMP_ID,
-                    Entity::temp(t),
-                    ComponentId::NONE,
-                    format!("temp reference #{t}: no spawn of this tick, earlier in its batch, carries that temp id"),
-                );
-                None
-            }
-        }
-    }
-
-    pub(crate) fn apply_simulation(&mut self, index: u32, cmd: Command, tick: Tick) -> bool {
-        let lane = Lane::Simulation;
-        if !self.module_allows(index, lane, &cmd) {
-            return false;
-        }
-        match cmd {
-            Command::Spawn {
-                temp_id,
-                transform,
-                parent,
-                name,
-            } => {
-                if temp_id == 0 {
-                    return self.reject(
-                        index,
-                        lane,
-                        DiagnosticCode::INVALID_TEMP_ID,
-                        Entity::NULL,
-                        ComponentId::NONE,
-                        "spawn temp id must be non-zero",
-                    );
-                }
-                if !transform.is_finite() {
-                    return self.reject(
-                        index,
-                        lane,
-                        DiagnosticCode::INVALID_PAYLOAD,
-                        Entity::NULL,
-                        ComponentId::TRANSFORM,
-                        "transform is not finite",
-                    );
-                }
-                if let Some(p) = parent {
-                    if !self.check_entity(index, lane, p, "spawn parent") {
-                        return false;
-                    }
-                }
-                let e = match scene::spawn(&mut self.ecs, transform, parent) {
-                    Ok(e) => e,
-                    Err(err) => return self.reject_scene(index, lane, Entity::NULL, err),
-                };
-                if let Some(n) = name {
-                    let _ = self.ecs.insert(e, Name::new(n));
-                }
-                self.lanes.spawned_this_tick.insert(temp_id, e);
-                if parent.is_some() {
-                    self.active.roots.push(e);
-                }
-                self.events.push(Event {
-                    tick,
-                    payload: EventPayload::Spawned { temp_id, entity: e },
-                });
-                true
-            }
-            Command::Destroy(entity) => {
-                if !self.check_entity(index, lane, entity, "destroy") {
-                    return false;
-                }
-                match self.destroy_subtree(entity, tick) {
-                    Ok(_) => true,
-                    Err(err) => self.reject_scene(index, lane, entity, err),
-                }
-            }
-            Command::SetTransform { entity, transform } => {
-                if !self.check_entity(index, lane, entity, "set_transform") {
-                    return false;
-                }
-                if !transform.is_finite() {
-                    return self.reject(
-                        index,
-                        lane,
-                        DiagnosticCode::INVALID_PAYLOAD,
-                        entity,
-                        ComponentId::TRANSFORM,
-                        "transform is not finite",
-                    );
-                }
-                match scene::set_local(&self.ecs, entity, transform) {
-                    Ok(()) => true,
-                    Err(err) => self.reject_scene(index, lane, entity, err),
-                }
-            }
-            Command::SetParent {
-                child,
-                parent,
-                keep_world,
-            } => {
-                if !self.check_entity(index, lane, child, "set_parent child") {
-                    return false;
-                }
-                if let Some(p) = parent {
-                    if !self.check_entity(index, lane, p, "set_parent parent") {
-                        return false;
-                    }
-                }
-                let r = if keep_world {
-                    // Reads the poses as of the earlier commands in this
-                    // batch from the local transforms (foundation 3.3).
-                    scene::set_parent_keep_world(&mut self.ecs, child, parent)
-                } else {
-                    scene::set_parent_keep_local(&mut self.ecs, child, parent)
-                };
-                match r {
-                    Ok(()) => {
-                        self.active.roots.push(child);
-                        self.events.push(Event {
-                            tick,
-                            payload: EventPayload::ParentChanged { child, parent },
-                        });
-                        true
-                    }
-                    Err(err) => self.reject_scene(index, lane, child, err),
-                }
-            }
-            Command::SetName { entity, name } => {
-                if !self.check_entity(index, lane, entity, "set_name") {
-                    return false;
-                }
-                self.ecs.insert(entity, Name::new(name)).is_ok()
-            }
-            Command::SetActive { entity, active } => {
-                if !self.check_entity(index, lane, entity, "set_active") {
-                    return false;
-                }
-                match scene::set_active(&mut self.ecs, entity, active) {
-                    Ok(changed) => {
-                        if changed {
-                            self.active.roots.push(entity);
-                        }
-                        true
-                    }
-                    Err(err) => self.reject_scene(index, lane, entity, err),
-                }
-            }
-            Command::SetComponent {
-                entity,
-                value: ComponentValue::Transform(transform),
-            } => self.apply_simulation(index, Command::SetTransform { entity, transform }, tick),
-            Command::SetComponent { entity, value } => {
-                self.set_component(index, lane, entity, value)
-            }
-            Command::RemoveComponent { entity, component } => {
-                if !self.check_entity(index, lane, entity, "remove_component") {
-                    return false;
-                }
-                if matches!(
-                    component,
-                    ComponentId::TRANSFORM | ComponentId::HIERARCHY | ComponentId::NAME
-                ) {
-                    return self.reject(
-                        index,
-                        lane,
-                        DiagnosticCode::INVALID_PAYLOAD,
-                        entity,
-                        component,
-                        format!("{} cannot be removed", component.name().unwrap()),
-                    );
-                }
-                let Some(removed) = self.remove_component_data(entity, component) else {
-                    return self.reject(
-                        index,
-                        lane,
-                        DiagnosticCode::UNKNOWN_COMPONENT,
-                        entity,
-                        component,
-                        format!("unknown component id {}", component.0),
-                    );
-                };
-                if !removed {
-                    return self.reject(
-                        index,
-                        lane,
-                        DiagnosticCode::MISSING_COMPONENT,
-                        entity,
-                        component,
-                        format!("entity has no {}", component.name().unwrap()),
-                    );
-                }
-                true
-            }
-            Command::Body { entity, op } => {
-                if !self.check_entity(index, lane, entity, "body") {
-                    return false;
-                }
-                // Applied by the physics step, after this batch's component
-                // writes; a rejection there carries this index. A teleport
-                // is shown at its target, never interpolated towards it.
-                if matches!(op, BodyCommand::Teleport { .. }) {
-                    self.lanes.teleported.push(entity);
-                }
-                self.physics.queue(index, entity, op);
-                true
-            }
-            Command::Animate { entity, op } => self.apply_animate(index, entity, op),
-            Command::Audio { entity, op } => self.apply_audio(index, entity, op),
-            Command::PlaySound {
-                clip,
-                bus,
-                volume,
-                pitch,
-                priority,
-            } => self.apply_play_sound(
-                index,
-                lane,
-                clip,
-                PlayParams {
-                    bus,
-                    volume,
-                    pitch,
-                    looping: false,
-                    priority,
-                },
-            ),
-            Command::AudioBus { bus, volume, muted } => {
-                self.apply_audio_bus(index, lane, bus, volume, muted)
-            }
-        }
-    }
-
     fn validate_audio_bus(&self, volume: f32) -> Result<(), String> {
         if !self.modules.audio {
             return Err("audio module is disabled".into());
@@ -1173,30 +658,6 @@ impl World {
             ));
         }
         Ok(())
-    }
-
-    /// `Command::AudioBus` (either lane): a bus gain and the mute.
-    fn apply_audio_bus(
-        &mut self,
-        index: u32,
-        lane: Lane,
-        bus: AudioBus,
-        volume: f32,
-        muted: bool,
-    ) -> bool {
-        if let Err(message) = self.validate_audio_bus(volume) {
-            return self.reject(
-                index,
-                lane,
-                DiagnosticCode::INVALID_PAYLOAD,
-                Entity::NULL,
-                ComponentId::NONE,
-                message,
-            );
-        }
-        self.audio.set_bus(bus, volume);
-        self.audio.set_muted(muted);
-        true
     }
 
     /// Destroys `entity` and its subtree with the bookkeeping and the
@@ -1211,7 +672,6 @@ impl World {
         let count = gone.len();
         for e in gone {
             self.subscriptions.remove(&e);
-            self.lanes.overrides.remove(&e);
             self.events.push(Event {
                 tick,
                 payload: EventPayload::Destroyed { entity: e },
@@ -1251,77 +711,9 @@ impl World {
         ComponentValue::remove_from(&mut self.ecs, entity, component)
     }
 
-    /// Shared by both lanes and by `load_scene`: validates the value and
-    /// inserts (or replaces) the component. Not for `Transform`.
-    fn set_component(
-        &mut self,
-        index: u32,
-        lane: Lane,
-        entity: Entity,
-        value: ComponentValue,
-    ) -> bool {
-        if !self.check_entity(index, lane, entity, "set_component") {
-            return false;
-        }
-        if let Err(msg) = value.validate() {
-            return self.reject(
-                index,
-                lane,
-                DiagnosticCode::INVALID_PAYLOAD,
-                entity,
-                value.id(),
-                msg,
-            );
-        }
-        value.insert_into(&mut self.ecs, entity).is_ok()
-    }
-
-    fn reject_scene(&mut self, index: u32, lane: Lane, entity: Entity, err: SceneError) -> bool {
-        let (code, entity, component, msg) = match err {
-            SceneError::Cycle { child, parent } => (
-                DiagnosticCode::HIERARCHY_CYCLE,
-                child,
-                ComponentId::HIERARCHY,
-                format!("parent {parent:?} is {child:?} or a descendant of it"),
-            ),
-            SceneError::UnsupportedTransform(e) => (
-                DiagnosticCode::INVALID_PAYLOAD,
-                e,
-                ComponentId::TRANSFORM,
-                "operation requires an invertible transform and an exact local TRS (no shear)"
-                    .to_string(),
-            ),
-            SceneError::NotFinite(e) => (
-                DiagnosticCode::INVALID_PAYLOAD,
-                if e.is_null() { entity } else { e },
-                ComponentId::TRANSFORM,
-                "transform is not finite".to_string(),
-            ),
-            SceneError::Ecs(EcsError::StaleEntity(e)) => (
-                DiagnosticCode::STALE_ENTITY,
-                e,
-                ComponentId::NONE,
-                "stale or unknown entity".to_string(),
-            ),
-            SceneError::Ecs(EcsError::OutOfEntities) => (
-                DiagnosticCode::INVALID_PAYLOAD,
-                entity,
-                ComponentId::NONE,
-                "entity identity slots exhausted".to_string(),
-            ),
-            SceneError::Ecs(EcsError::MissingComponent(e)) => (
-                DiagnosticCode::MISSING_COMPONENT,
-                e,
-                ComponentId::TRANSFORM,
-                "entity has no Transform".to_string(),
-            ),
-        };
-        self.reject(index, lane, code, entity, component, msg)
-    }
-
     // ------------------------------------------------------------------ step
 
-    /// One fixed tick (§5.1). Applies staged simulation commands, runs the
+    /// One fixed tick (§5.1). Delivers committed effects, runs the
     /// native phases, propagates transforms, publishes S[n+1], the tick's
     /// events and the snapshot.
     pub fn step(&mut self) -> StepReport {
@@ -1400,25 +792,6 @@ impl World {
         self.active.roots = roots;
     }
 
-    /// Whether the derived `Inactive` markers are current.
-    pub(crate) fn active_markers_current(&self) -> bool {
-        !self.active.all && self.active.roots.is_empty()
-    }
-
-    /// Brings the markers up to date after a load spawned `roots`'
-    /// subtrees into a world whose markers were current: those subtrees
-    /// alone (foundation 3.1).
-    pub(crate) fn refresh_active_subtrees(&mut self, roots: &[Entity]) {
-        for &root in roots {
-            scene::refresh_active_subtree(&mut self.ecs, root);
-        }
-    }
-
-    /// Marks the markers stale (a load spawned under a parent).
-    pub(crate) fn mark_active_dirty(&mut self) {
-        self.active.all = true;
-    }
-
     /// Displays the completed simulation pose at any interpolation fraction.
     /// Hosts call this after a manual fixed sequence, before presentation.
     /// Leaves clocks and the accumulator unchanged; the next tick records a
@@ -1453,11 +826,10 @@ impl World {
         }
     }
 
-    /// A value already shown through a presentation override must not be
-    /// interpolated towards from S[n] once it becomes authoritative, or the
-    /// object would visibly snap back for one tick.
+    /// Committed teleports reset interpolation history throughout the subtree
+    /// so extraction cannot blend back toward an obsolete pose.
     fn apply_teleports(&mut self) {
-        let roots = std::mem::take(&mut self.lanes.teleported);
+        let roots = std::mem::take(&mut self.teleported);
         for root in roots {
             for e in scene::subtree(&self.ecs, root) {
                 let Ok(local) = self.ecs.copy::<Transform>(e) else {
@@ -1471,8 +843,7 @@ impl World {
         }
     }
 
-    /// Physics rejections become diagnostics: a command's carries its batch
-    /// index; a component the sync could not realise carries `u32::MAX`.
+    /// Physics rejections become runtime diagnostics with no transport index.
     fn physics_rejections(&mut self) -> u32 {
         let mut count = 0;
         for r in self.physics.take_rejections() {
@@ -1896,10 +1267,6 @@ impl World {
         self.subscriptions.len()
     }
 
-    pub fn staged_count(&self) -> usize {
-        self.lanes.staged.len()
-    }
-
     /// Coherent S[n+1] of subscribed entities, in handle order.
     pub fn snapshot(&self) -> &[SnapshotRecord] {
         &self.snapshot
@@ -1939,11 +1306,10 @@ impl World {
     // -------------------------------------------------------------- extract
 
     /// Render extraction: every spatial entity's world matrix interpolated
-    /// S[n]..S[n+1] by alpha, with presentation overrides applied (an
-    /// overridden entity and its descendants skip interpolation).
+    /// S[n]..S[n+1] by alpha. Persistent edits share the authoritative pose.
     pub fn extract(&self) -> Extract {
         let alpha = self.clock.alpha();
-        let mut memo: HashMap<Entity, (Mat4, bool)> = HashMap::new();
+        let mut memo: HashMap<Entity, Mat4> = HashMap::new();
         let mut out = Extract {
             tick: self.clock.tick(),
             alpha,
@@ -1965,12 +1331,11 @@ impl World {
                 // draw, light with or look through.
                 continue;
             }
-            let (world, overridden) = self.resolve_extract(e, alpha, &mut memo);
+            let world = self.resolve_extract(e, alpha, &mut memo);
             let record = out.records.len() as u32;
             out.records.push(ExtractRecord {
                 entity: e,
                 world,
-                overridden,
                 layer_bit: self.ecs.copy::<Layer>(e).map_or(1, |l| l.bit().max(1)),
             });
             if let Ok(m) = self.ecs.get::<MeshRenderer>(e) {
@@ -1982,7 +1347,7 @@ impl World {
                         let mut world_of = |j: Entity| {
                             self.ecs
                                 .has::<WorldTransform>(j)
-                                .then(|| self.resolve_extract(j, alpha, &mut memo).0)
+                                .then(|| self.resolve_extract(j, alpha, &mut memo))
                         };
                         World::skin_palette(world, &skin, &joints, &mut world_of, &mut out.joints);
                         ExtractSkin {
@@ -2068,25 +1433,13 @@ impl World {
         out
     }
 
-    fn resolve_extract(
-        &self,
-        e: Entity,
-        alpha: f32,
-        memo: &mut HashMap<Entity, (Mat4, bool)>,
-    ) -> (Mat4, bool) {
+    fn resolve_extract(&self, e: Entity, alpha: f32, memo: &mut HashMap<Entity, Mat4>) -> Mat4 {
         if let Some(r) = memo.get(&e) {
             return *r;
         }
         let parent = self.ecs.get::<Parent>(e).ok().map(|p| p.0);
         let parent_res = parent.map(|p| self.resolve_extract(p, alpha, memo));
-        let parent_overridden = parent_res.is_some_and(|r| r.1);
-        let result = if let Some(t) = self.lanes.overrides.get(&e) {
-            let pw = parent_res.map(|r| r.0).unwrap_or(Mat4::IDENTITY);
-            (pw * t.matrix(), true)
-        } else if parent_overridden {
-            let local = self.ecs.copy::<Transform>(e).unwrap_or_default();
-            (parent_res.unwrap().0 * local.matrix(), true)
-        } else {
+        let result = {
             let cur = self
                 .ecs
                 .get::<WorldTransform>(e)
@@ -2096,12 +1449,12 @@ impl World {
             match self.ecs.copy::<PrevTransform>(e) {
                 // Reparenting changes coordinate space: snap this entity to
                 // the current hierarchy rather than mixing unrelated locals.
-                Ok(prev) if prev.1 != parent => (cur, false),
+                Ok(prev) if prev.1 != parent => cur,
                 Ok(prev) => {
-                    let pw = parent_res.map_or(Mat4::IDENTITY, |r| r.0);
-                    (pw * lerp(prev.0, local, alpha).matrix(), false)
+                    let pw = parent_res.unwrap_or(Mat4::IDENTITY);
+                    pw * lerp(prev.0, local, alpha).matrix()
                 }
-                _ => (cur, false),
+                _ => cur,
             }
         };
         memo.insert(e, result);

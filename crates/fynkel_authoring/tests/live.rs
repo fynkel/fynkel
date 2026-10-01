@@ -88,15 +88,8 @@ fn entities_carry_authoring_ids_and_the_games_own_are_runtime() {
     };
     w.instantiate(&prefab, "Coin", Transform::default(), None)
         .unwrap();
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id: 1,
-            transform: Transform::default(),
-            parent: None,
-            name: Some("Bullet".into()),
-        }],
-    );
+    w.edit_gameplay(|edit| edit.spawn("Bullet", Transform::default(), None))
+        .unwrap();
     assert_eq!(w.step().status, Status::Ok);
 
     let table = call(&mut w, "entities", json!({}));
@@ -184,15 +177,8 @@ fn an_unchanged_table_is_not_sent_again() {
         assert_eq!(next["entities"].as_array().unwrap().len(), 4);
         last = next["revision"].as_str().unwrap().to_string();
     }
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id: 1,
-            transform: Transform::default(),
-            parent: None,
-            name: Some("Bullet".into()),
-        }],
-    );
+    w.edit_gameplay(|edit| edit.spawn("Bullet", Transform::default(), None))
+        .unwrap();
     assert_eq!(w.step().status, Status::Ok);
     let grown = call(&mut w, "entities", json!({ "since": last }));
     assert_eq!(grown["entities"].as_array().unwrap().len(), 5);
@@ -407,15 +393,14 @@ fn view_at(x: f32) -> Value {
 #[test]
 fn the_scene_view_picks_and_outlines_the_running_world() {
     let mut w = running();
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id: 1,
-            transform: Transform::from_position(Vec3::new(-5.0, 0.0, 0.0)),
-            parent: None,
-            name: Some("Bullet".into()),
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.spawn(
+            "Bullet",
+            Transform::from_position(Vec3::new(-5.0, 0.0, 0.0)),
+            None,
+        )
+    })
+    .unwrap();
     assert_eq!(w.step().status, Status::Ok);
 
     // No assets: every entity is an icon sphere at its origin.

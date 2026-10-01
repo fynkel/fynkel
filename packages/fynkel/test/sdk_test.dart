@@ -1,3 +1,4 @@
+import 'package:fynkel/src/native/bridge.dart' show NativeGameplayRef;
 // End-to-end SDK tests over the real native library (ABI v3): spawn /
 // write / read-your-writes / destroy, stale handles, diagnostics as
 // FynkelError, presentation lane, hierarchy, frame plan.
@@ -5,7 +6,6 @@
 import 'dart:io';
 
 import 'package:fynkel/fynkel.dart';
-import 'package:fynkel/generated/schema.g.dart' show DestroyCommand, DiagnosticRecord;
 import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
@@ -46,11 +46,7 @@ void main() {
     // Read-your-writes: overlay before the tick, snapshot after.
     go.transform.position = const Vec3(5, 0, 0);
     expect(go.transform.position, const Vec3(5, 0, 0));
-    expect(
-      go.worldTransform!.position,
-      const Vec3(5, 0, 0),
-      reason: 'world transform shares logical authority',
-    );
+    expect(go.worldTransform!.position, const Vec3(5, 0, 0), reason: 'world transform shares logical authority');
     w.frame(1 / 60);
     expect(go.transform.position, const Vec3(5, 0, 0));
     expect(go.worldTransform!.position, const Vec3(5, 0, 0));
@@ -75,15 +71,13 @@ void main() {
     }
     w.frame(1 / 60);
     expect(b.transform.position, const Vec3(9, 9, 9));
-    final seen = <FynkelDiagnostic>[];
-    w.onDiagnostics = seen.addAll;
-    w.native.submit(
-      CommandLane.simulation,
-      (CommandBatch()..setTransformOf(b.entity, const Pose(position: Vec3(double.nan, 0, 0)))).encoded(),
+    expect(
+      () => w.native.editGameplay(
+        (edit) => edit.set(NativeGameplayRef.live(b.entity), const Pose(position: Vec3(double.nan, 0, 0))),
+      ),
+      throwsStateError,
     );
     w.step();
-    expect(seen.single.code, DiagnosticCode.invalidPayload);
-    expect(seen.single.entity, b.entity);
     expect(b.transform.position, const Vec3(9, 9, 9));
   });
 
@@ -96,26 +90,10 @@ void main() {
     // A 120 Hz frame with no tick.
     final plan = w.beginFrame(1 / 240);
     expect(plan.steps, 0);
-    cam.setPresentationTransform(
-      const Pose(position: Vec3(0, 3, 0), rotation: Quat.identity, scale: Vec3.one),
-    );
+    cam.setPresentationTransform(const Pose(position: Vec3(0, 3, 0), rotation: Quat.identity, scale: Vec3.one));
     expect(cam.transform.position, const Vec3(0, 3, 0));
-    w.flushPresentation();
-    expect(w.stats().stagedCommands, 0);
     w.frame(1 / 60);
     expect(cam.worldTransform!.position, const Vec3(0, 3, 0));
-
-    // Structural command on the presentation lane is rejected immediately.
-    final r = w.native.submit(
-      CommandLane.presentation,
-      (CommandBatch()..destroy(DestroyCommand(entity: cam.entity))).encoded(),
-    );
-    expect(r.rejected, 1);
-    final d = w.native.diagnostics
-        .fixed(DiagnosticRecord.wireSize, DiagnosticRecord.decode)
-        .map(FynkelDiagnostic.fromRecord)
-        .toList();
-    expect(d.single.code, DiagnosticCode.wrongLane);
   });
 
   test('hierarchy: parent at spawn, reparent keep-world, subtree destroy', () {
@@ -181,7 +159,6 @@ void main() {
     final s = w.stats();
     expect(s.liveEntities, 10);
     expect(s.subscriptions, 10);
-    expect(s.submitCalls, 0, reason: 'ordinary SDK work uses gameplay exchanges');
     expect(s.stepCalls, 2);
     expect(s.dartCopies, greaterThan(0));
     expect(s.bytesIn, greaterThan(0));
@@ -233,23 +210,11 @@ void main() {
     // A prefab is not a scene; an id the cache lacks; not a UUID at all.
     expect(
       () => w.loadScene('c0000000-0000-4000-8000-000000000040', cacheDir: cache),
-      throwsA(
-        isA<FynkelLoadError>().having(
-          (e) => e.report.errors.map((d) => d.code),
-          'codes',
-          contains('FYN-R0006'),
-        ),
-      ),
+      throwsA(isA<FynkelLoadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-R0006'))),
     );
     expect(
       () => w.loadScene('c0000000-0000-4000-8000-0000000000ff'),
-      throwsA(
-        isA<FynkelLoadError>().having(
-          (e) => e.report.errors.map((d) => d.code),
-          'codes',
-          contains('FYN-R0003'),
-        ),
-      ),
+      throwsA(isA<FynkelLoadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-R0003'))),
     );
     expect(() => w.loadScene('robot'), throwsA(isA<FynkelBridgeError>()));
     expect(w.allEntities(), hasLength(6), reason: 'a failed load leaves the world alone');
@@ -257,13 +222,7 @@ void main() {
     // No cache: the runtime never falls back to the source tree.
     expect(
       () => w.loadProject(fixture, cacheDir: '$cache/nope'),
-      throwsA(
-        isA<FynkelLoadError>().having(
-          (e) => e.report.errors.map((d) => d.code),
-          'codes',
-          contains('FYN-R0001'),
-        ),
-      ),
+      throwsA(isA<FynkelLoadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-R0001'))),
     );
     expect(() => w.loadProject('/nonexistent'), throwsA(isA<FynkelLoadError>()));
     expect(w.isPoisoned, isFalse);
@@ -276,11 +235,7 @@ void main() {
     w.frame(1 / 60);
     expect(w.panicMessage, isNull);
 
-    final panic = isA<FynkelPanicError>().having(
-      (e) => e.panic,
-      'panic',
-      contains('fynkel_world_debug_panic'),
-    );
+    final panic = isA<FynkelPanicError>().having((e) => e.panic, 'panic', contains('fynkel_world_debug_panic'));
     expect(w.debugPanic, throwsA(panic));
     expect(w.isPoisoned, isTrue);
     expect(w.panicMessage, contains('fynkel_world_debug_panic'));

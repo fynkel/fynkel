@@ -124,6 +124,25 @@ void main() {
     return w;
   }
 
+  test('loaded data ownership ends with the world without destroying standalone data', () {
+    for (final nativeDisposal in [false, true]) {
+      final w = world()..loadProject(project);
+      final loaded = w.data<Weapon>(const AssetRef(sword));
+      final standalone = Weapon();
+      if (nativeDisposal) {
+        w.native.dispose();
+      } else {
+        w.dispose();
+      }
+      expect(loaded.isAlive, isFalse);
+      expect(loaded.upgrade!.isAlive, isFalse);
+      expect(standalone.isAlive, isTrue);
+      expect(() => w.data<Weapon>(const AssetRef(sword)), throwsStateError);
+      w.dispose();
+      expect(w.loadedData, isEmpty);
+    }
+  });
+
   test('a scene load sets data-typed fields to the shared instances', () {
     final w = world();
     final warnings = <LoadDiagnostic>[];
@@ -338,11 +357,7 @@ void main() {
   test('reentrant data factory rejects before publishing an incomplete instance', () {
     final w = world()..loadProject(project);
     w.registry.registerData(
-      DataType(
-        id: 'test.Weapon',
-        create: () => w.data<Weapon>(const AssetRef(sword)),
-        fields: weaponType.fields,
-      ),
+      DataType(id: 'test.Weapon', create: () => w.data<Weapon>(const AssetRef(sword)), fields: weaponType.fields),
       replace: true,
     );
     expect(() => w.edit(() => w.data<Weapon>(const AssetRef(sword))), throwsStateError);

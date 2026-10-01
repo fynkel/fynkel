@@ -72,7 +72,7 @@ fn every_component_is_set_read_back_and_removed() {
     assert_eq!(back, samples, "registry order, the values as set");
 
     for id in ComponentValue::IDS.iter().skip(1) {
-        let rejected = w.apply_now(vec![Command::RemoveComponent {
+        let rejected = w.apply_gameplay_now(vec![Command::RemoveComponent {
             entity: e,
             component: *id,
         }]);
@@ -83,7 +83,7 @@ fn every_component_is_set_read_back_and_removed() {
         vec![ComponentValue::Transform(Transform::default())],
         "only the Transform is left; it cannot be removed"
     );
-    let rejected = w.apply_now(vec![Command::RemoveComponent {
+    let rejected = w.apply_gameplay_now(vec![Command::RemoveComponent {
         entity: e,
         component: ComponentId::TRANSFORM,
     }]);

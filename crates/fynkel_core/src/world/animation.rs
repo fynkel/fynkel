@@ -587,12 +587,7 @@ impl World {
         self.anim.skins.keys()
     }
 
-    /// `Command::Animate` at the tick boundary: edits the animator and its
-    /// run state; the system samples the result this tick.
-    pub(super) fn apply_animate(&mut self, index: u32, entity: Entity, op: AnimateOp) -> bool {
-        self.apply_animate_control(index, entity, op, None)
-    }
-
+    /// Validate controller transport against its immutable definition.
     pub(super) fn validate_controller_transport(
         &self,
         controller_ref: &AssetRef,
@@ -646,7 +641,7 @@ impl World {
                 "animator controller changed before request execution",
             );
         }
-        self.apply_animate_control(u32::MAX, entity, op, Some(before))
+        self.apply_animate_control(u32::MAX, entity, op, before)
     }
 
     fn apply_animate_control(
@@ -654,7 +649,7 @@ impl World {
         index: u32,
         entity: Entity,
         op: AnimateOp,
-        before: Option<Animator>,
+        before: Animator,
     ) -> bool {
         let lane = Lane::Simulation;
         if !self.check_entity(index, lane, entity, "animate") {
@@ -669,20 +664,6 @@ impl World {
                 ComponentId::ANIMATOR,
                 "entity has no fynkel.Animator",
             );
-        }
-        let current = self.ecs.copy::<Animator>(entity).expect("checked animator");
-        if let Some(updated) = op.configuration(current) {
-            if let Err(message) = updated.validate() {
-                return self.reject(
-                    index,
-                    lane,
-                    DiagnosticCode::INVALID_PAYLOAD,
-                    entity,
-                    ComponentId::ANIMATOR,
-                    format!("animate: {message}"),
-                );
-            }
-            return self.publish_animation_configuration(entity, updated, index, lane);
         }
         let bad = |what: &str| format!("animate: {what}");
         if let Err(message) = op.validate_clip_transport() {
@@ -830,37 +811,19 @@ impl World {
             };
         }
         let committed = self.ecs.copy::<Animator>(entity).expect("checked animator");
-        let publish_configuration = before.is_none();
-        let target_clip = if publish_configuration {
-            None
-        } else {
-            Some(committed.clip.clone())
-        };
-        let mut animator = before.unwrap_or(committed);
+        let target_clip = committed.clip;
+        let animator = before;
         let Ok(mut run) = self.ecs.get_mut::<AnimatorRun>(entity) else {
             return false;
         };
         match op {
-            AnimateOp::Play {
-                clip,
-                looping,
-                speed,
-            } => {
-                animator.clip = clip;
-                animator.looping = looping;
-                animator.speed = speed;
-                animator.playing = true;
+            AnimateOp::Play { .. } => {
                 run.time = 0.0;
                 run.fresh = true;
                 run.seek = None;
                 run.fade = None;
             }
-            AnimateOp::Crossfade {
-                clip,
-                looping,
-                speed,
-                seconds,
-            } => {
+            AnimateOp::Crossfade { seconds, .. } => {
                 // The clip playing so far becomes the outgoing side, with
                 // the targets it had resolved; nothing to fade from when
                 // it never resolved (or the fade is instant).
@@ -873,7 +836,7 @@ impl World {
                 };
                 let resolved = seconds > 0.0
                     && run.resolved.as_ref() == Some(&animator.clip)
-                    && target_clip.as_ref().unwrap_or(&clip) != &animator.clip;
+                    && target_clip != animator.clip;
                 let outgoing = if !resolved {
                     None
                 } else if let Some(data) = self.anim.clips.get(&animator.clip) {
@@ -910,10 +873,6 @@ impl World {
                 } else {
                     None
                 };
-                animator.clip = clip;
-                animator.looping = looping;
-                animator.speed = speed;
-                animator.playing = true;
                 run.time = 0.0;
                 run.fresh = true;
                 run.seek = None;
@@ -921,7 +880,6 @@ impl World {
                 run.resolved = None;
             }
             AnimateOp::Stop => {
-                animator.playing = false;
                 run.time = 0.0;
                 run.fresh = false;
                 run.seek = None;
@@ -930,7 +888,9 @@ impl World {
             AnimateOp::Pause
             | AnimateOp::Resume
             | AnimateOp::SetSpeed(_)
-            | AnimateOp::SetWeight(_) => unreachable!("configuration handled above"),
+            | AnimateOp::SetWeight(_) => {
+                unreachable!("configuration publishes through the gameplay journal")
+            }
             AnimateOp::SetTime(t) => {
                 run.fresh = true;
                 run.seek = Some(t);
@@ -944,32 +904,7 @@ impl World {
             | AnimateOp::ClearIkTarget { .. } => {}
         }
         drop(run);
-        if publish_configuration {
-            return self.publish_animation_configuration(entity, animator, index, lane);
-        }
         true
-    }
-
-    fn publish_animation_configuration(
-        &mut self,
-        entity: Entity,
-        animator: Animator,
-        index: u32,
-        lane: Lane,
-    ) -> bool {
-        match self.edit_native_data_at_tick(self.tick(), |edit| {
-            edit.set_component(entity, ComponentValue::Animator(animator))
-        }) {
-            Ok(_) => true,
-            Err(error) => self.reject(
-                index,
-                lane,
-                DiagnosticCode::INVALID_PAYLOAD,
-                entity,
-                ComponentId::ANIMATOR,
-                format!("animation configuration: {error:?}"),
-            ),
-        }
     }
 
     /// Every `Animator` advances its clock and writes its clip's pose over

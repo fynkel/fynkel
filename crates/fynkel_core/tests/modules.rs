@@ -12,31 +12,23 @@ fn world(modules: Modules) -> World {
     w
 }
 
-fn spawn(w: &mut World, temp_id: u64, at: Vec3, components: Vec<ComponentValue>) -> Entity {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id,
-            transform: Transform::from_position(at),
-            parent: None,
-            name: None,
-        }],
-    );
-    w.step();
-    let entity = w
-        .drain_events()
-        .into_iter()
-        .find_map(|e| match e.payload {
-            EventPayload::Spawned { temp_id: t, entity } if t == temp_id => Some(entity),
-            _ => None,
+fn spawn(w: &mut World, _fixture_id: u64, at: Vec3, components: Vec<ComponentValue>) -> Entity {
+    let commit = w
+        .edit_gameplay(|edit| edit.spawn("", Transform::from_position(at), None))
+        .unwrap();
+    let entity = commit.resolve(commit.value).unwrap();
+    assert_eq!(w.step().status, Status::Ok);
+    w.drain_events();
+    if !components.is_empty() {
+        w.edit_gameplay(|edit| {
+            for value in components {
+                edit.set_component(entity, value)?;
+            }
+            Ok(())
         })
         .unwrap();
-    let cmds: Vec<Command> = components
-        .into_iter()
-        .map(|value| Command::SetComponent { entity, value })
-        .collect();
-    w.submit(Lane::Simulation, cmds);
-    w.step();
+        assert_eq!(w.step().status, Status::Ok);
+    }
     entity
 }
 
@@ -81,18 +73,11 @@ fn physics_off_leaves_a_body_in_place_and_rejects_body_commands() {
     }
     assert_eq!(y(&w, e), 3.0);
 
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Body {
-            entity: e,
-            op: BodyCommand::ApplyImpulse(Vec3::Y),
-        }],
-    );
-    w.step();
-    let d = w.diagnostics().last().unwrap();
-    assert_eq!(d.code, DiagnosticCode::MODULE_OFF);
-    assert!(d.message.contains("FYN-R0014"), "{}", d.message);
-    assert!(d.message.contains("physics"), "{}", d.message);
+    let error = w
+        .edit_gameplay(|edit| edit.body_effect(e, BodyCommand::ApplyImpulse(Vec3::Y)))
+        .unwrap_err();
+    assert!(error.to_string().contains("physics"));
+    assert_eq!(w.step().rejected, 0);
 }
 
 #[cfg(feature = "physics")]
@@ -107,23 +92,18 @@ fn the_same_body_falls_with_physics_on() {
 }
 
 #[test]
-fn audio_off_rejects_audio_commands_on_either_lane() {
+fn audio_off_rejects_audio_edits() {
     let mut w = world(Modules {
         audio: false,
         ..Modules::ALL
     });
-    let r = w.submit(
-        Lane::Presentation,
-        vec![Command::AudioBus {
-            bus: AudioBus::Music,
-            volume: 0.5,
-            muted: false,
-        }],
-    );
-    assert_eq!(r.rejected, 1);
-    let d = w.diagnostics().last().unwrap();
-    assert_eq!(d.code, DiagnosticCode::MODULE_OFF);
-    assert!(d.message.contains("audio"), "{}", d.message);
+    let r = w.edit_gameplay(|edit| {
+        edit.set_audio_bus(AudioBus::Music, 0.5, false)?;
+        Ok(())
+    });
+    let error = r.unwrap_err();
+    assert!(error.to_string().contains("audio"));
+    assert_eq!(w.step().rejected, 0);
 }
 
 #[test]
@@ -133,17 +113,11 @@ fn animation_off_rejects_animate_and_leaves_physics_running() {
         ..Modules::ALL
     });
     let e = spawn(&mut w, 1, Vec3::new(0.0, 3.0, 0.0), body());
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Animate {
-            entity: e,
-            op: AnimateOp::Stop,
-        }],
-    );
-    w.step();
-    let d = w.diagnostics().last().unwrap();
-    assert_eq!(d.code, DiagnosticCode::MODULE_OFF);
-    assert!(d.message.contains("animation"), "{}", d.message);
+    let error = w
+        .edit_gameplay(|edit| edit.animate_control(e, AnimateOp::Stop))
+        .unwrap_err();
+    assert!(error.to_string().contains("animation"));
+    assert_eq!(w.step().rejected, 0);
     #[cfg(feature = "physics")]
     {
         for _ in 0..30 {

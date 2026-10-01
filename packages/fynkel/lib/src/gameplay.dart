@@ -11,7 +11,7 @@ final class _GameplayCallbackEntrySkipped implements Exception {
 extension _WorldGameplay on World {
   _GameplayAdapter? get _gameplay {
     // A rejected async callback retains its expired scope. It must not resume
-    // through the legacy command queues after the synchronous edit has ended.
+    // through a fresh gameplay edit after the synchronous edit has ended.
     final scoped = Zone.current[_gameplayZoneKey] as _GameplayAdapter?;
     final edit = scoped ?? _activeGameplay;
     if (edit == null) return null;
@@ -29,11 +29,8 @@ extension _WorldGameplay on World {
     _gameplay?.reject('$operation is not supported inside World.edit');
   }
 
-  void _adoptLegacyGameplay() {
-    final (spawned, live) = _native.adoptGameplayCommands();
-    for (final entry in spawned.entries) {
-      if (!entry.value.isNull) _carry([EntitySpawned(tick, entry.key, entry.value)]);
-    }
+  void _reconcileGameplayState() {
+    final live = _native.gameplayState();
     for (final go in _byEntity.values.toList()) {
       final name = live[go._entity];
       if (name == null) {
@@ -65,8 +62,8 @@ extension _WorldGameplay on World {
       }, automatic: true);
     } catch (error, stack) {
       if (entered) rethrow;
-      // Queue adoption belongs to the frame boundary, not the script that
-      // happened to be next. Keep the queue for the normal simulation step.
+      // A failed entry belongs to the host boundary, not the next script.
+      // Skipped callbacks retain lifecycle state for a later successful entry.
       if (!_inFixedPhase && !_inUpdatePhase && !_callbackPreflight) rethrow;
       _callbackEntryBlocked = true;
       _deferredErrors.add((error, stack));
@@ -92,8 +89,7 @@ extension _WorldGameplay on World {
         current.explicitDepth--;
       }
     }
-    if (!_presentation.isEmpty) flushPresentation();
-    _adoptLegacyGameplay();
+    _reconcileGameplayState();
     _GameplayAdapter? adapter;
     var published = false;
     try {
@@ -155,12 +151,18 @@ class _GameplayAdapter {
   final NativeGameplayEdit native;
   final Map<NativeGameplayRef, GameObject> handles = {};
   final Map<GameObject, NativeGameplayRef> pending = {};
-  Set<NativeGameplayRef> _survivors = {};
-  final Map<GameObject, String> _names = {};
+  final Set<NativeGameplayRef> _removed = {};
+  final Map<GameObject, String?> _names = {};
   final Map<ObjectSpec, GameObject> _specObjects = Map.identity();
   NativeGameplayPrefab? _lastPrefab;
   List<Behaviour> _lastPrefabAttachments = [];
   final Map<String, DataAsset> _dataAssets = {};
+  final Map<String, bool> _runtimeClips = {};
+  final Map<String, gen.PbrMaterial?> _materials = {};
+  final Map<String, MeshData?> _meshes = {};
+  final Map<String, Map<String, Object?>?> _shaderMaterials = {};
+  final Map<String, Map<String, Object?>?> _codeValues = {};
+
   final Set<DataAsset> _createdData = Set.identity();
   final Set<String> _loadingData = {};
   // Scripts have one Dart owner: the behaviour scheduler. This journal holds
@@ -177,18 +179,14 @@ class _GameplayAdapter {
   int _preparedSequence = 0;
   bool closed = false, failed = false;
 
-  Iterable<Coroutine> routinesFor(Behaviour owner) =>
-      guard(() => _scheduled.where((c) => identical(c._owner, owner)));
+  Iterable<Coroutine> routinesFor(Behaviour owner) => guard(() => _scheduled.where((c) => identical(c._owner, owner)));
 
   bool routineStopped(Coroutine c) => guard(() => _stoppedRoutines.contains(c));
 
   Coroutine schedule(Coroutine c) => guard(() {
     if (c._owner case final owner?) {
       final go = _behaviourOwner(owner);
-      if (owner._destroyRequested ||
-          owner._destroyed ||
-          behaviourRemoved(owner) ||
-          !native.contains(ref(go))) {
+      if (owner._destroyRequested || owner._destroyed || behaviourRemoved(owner) || !native.contains(ref(go))) {
         reject('cannot schedule work on a removed behaviour');
       }
     }
@@ -255,11 +253,7 @@ class _GameplayAdapter {
   });
 
   GameObject spawn(Pose transform, GameObject? parent, String name, [GameObject? handle]) => guard(() {
-    final reference = native.spawn(
-      transform: transform,
-      parent: parent == null ? null : ref(parent),
-      name: name,
-    );
+    final reference = native.spawn(transform: transform, parent: parent == null ? null : ref(parent), name: name);
     final go = handle ?? GameObject._(world, transform, name);
     pending[go] = reference;
     handles[reference] = go;
@@ -355,68 +349,63 @@ class _GameplayAdapter {
     return root;
   });
 
-  GameObject instantiate(
-    Object prefab,
-    Pose transform,
-    GameObject? parent,
-    String? name, [
-    GameObject? handle,
-  ]) => guard(() {
-    final id = switch (prefab) {
-      AssetRef r when (r.sub ?? '').isEmpty || r.sub == World.importedPrefabSub => r.asset,
-      String s => s,
-      _ => throw ArgumentError.value(prefab, 'prefab', 'a prefab asset id or prefab AssetRef'),
-    };
-    final instance = native.instantiate(id, transform, parent == null ? null : ref(parent), name ?? '');
-    final objects = <String, GameObject>{};
-    for (final entry in instance.entities.entries) {
-      final go = entry.value == instance.root && handle != null
-          ? handle
-          : GameObject._(world, identityTransform, '');
-      pending[go] = entry.value;
-      handles[entry.value] = go;
-      objects[entry.key] = go;
-    }
-    final scripts = <String, Behaviour>{};
-    final authored = <(Map<String, Object?>, Behaviour)>[];
-    for (final raw in instance.metadata['behaviours'] as List) {
-      final data = (raw as Map).cast<String, Object?>();
-      final type = data['type'] as String;
-      final fields = (data['data'] as Map).cast<String, Object?>();
-      final descriptor = world.registry.lookup(type);
-      if (descriptor == null) reject('prefab behaviour type $type is not registered');
+  GameObject instantiate(Object prefab, Pose transform, GameObject? parent, String? name, [GameObject? handle]) =>
+      guard(() {
+        final id = switch (prefab) {
+          AssetRef r when (r.sub ?? '').isEmpty || r.sub == World.importedPrefabSub => r.asset,
+          String s => s,
+          _ => throw ArgumentError.value(prefab, 'prefab', 'a prefab asset id or prefab AssetRef'),
+        };
+        final instance = native.instantiate(id, transform, parent == null ? null : ref(parent), name ?? '');
+        final objects = <String, GameObject>{};
+        for (final entry in instance.entities.entries) {
+          final go = entry.value == instance.root && handle != null
+              ? handle
+              : GameObject._(world, identityTransform, '');
+          pending[go] = entry.value;
+          handles[entry.value] = go;
+          objects[entry.key] = go;
+        }
+        final scripts = <String, Behaviour>{};
+        final authored = <(Map<String, Object?>, Behaviour)>[];
+        for (final raw in instance.metadata['behaviours'] as List) {
+          final data = (raw as Map).cast<String, Object?>();
+          final type = data['type'] as String;
+          final fields = (data['data'] as Map).cast<String, Object?>();
+          final descriptor = world.registry.lookup(type);
+          if (descriptor == null) reject('prefab behaviour type $type is not registered');
 
-      final behaviour = world.registry.instantiate(type, fields: fields, version: data['version'] as int);
-      final component = data['component'] as String;
-      behaviour._authoredComponent = component;
-      attachBehaviour(objects[data['authoringId']]!, behaviour);
-      scripts[component] = behaviour;
-      authored.add((data, behaviour));
-    }
-    // These are newly constructed, unpublished instances. Field setters execute
-    // before commit; their failure discards ownership and all native changes.
-    // Arbitrary constructor/setter side effects remain outside rollback.
-    for (final (data, behaviour) in authored) {
-      final fields = data['data'] as Map;
-      for (final field in behaviour.behaviourType!.fields) {
-        if (field.holdsData && fields[field.name] != null) {
-          field.set(behaviour, resolveData(fields[field.name], field.dataType!));
+          final behaviour = world.registry.instantiate(type, fields: fields, version: data['version'] as int);
+          final component = data['component'] as String;
+          behaviour._authoredComponent = component;
+          attachBehaviour(objects[data['authoringId']]!, behaviour);
+          scripts[component] = behaviour;
+          authored.add((data, behaviour));
         }
-        if (!field.isReference || fields[field.name] == null) continue;
-        final value = fields[field.name];
-        if (value is! Map) reject('invalid authored reference ${field.name}');
-        final target = value['component'] == null ? objects[value['entity']] : scripts[value['component']];
-        if (target == null) reject('unresolved authored reference ${field.name}');
-        if (target is Behaviour && !identical(target.gameObject, objects[value['entity']])) {
-          reject('authored component reference belongs to another object');
+        // These are newly constructed, unpublished instances. Field setters execute
+        // before commit; their failure discards ownership and all native changes.
+        // Arbitrary constructor/setter side effects remain outside rollback.
+        for (final (data, behaviour) in authored) {
+          final fields = data['data'] as Map;
+          for (final field in behaviour.behaviourType!.fields) {
+            if (field.holdsData && fields[field.name] != null) {
+              field.set(behaviour, resolveData(fields[field.name], field.dataType!));
+            }
+            if (!field.isReference || fields[field.name] == null) continue;
+            final value = fields[field.name];
+            if (value is! Map) reject('invalid authored reference ${field.name}');
+            final target = value['component'] == null ? objects[value['entity']] : scripts[value['component']];
+            if (target == null) reject('unresolved authored reference ${field.name}');
+            if (target is Behaviour && !identical(target.gameObject, objects[value['entity']])) {
+              reject('authored component reference belongs to another object');
+            }
+            field.set(behaviour, target);
+          }
         }
-        field.set(behaviour, target);
-      }
-    }
-    _lastPrefab = instance;
-    _lastPrefabAttachments = authored.map((pair) => pair.$2).toList();
-    return handles[instance.root]!;
-  });
+        _lastPrefab = instance;
+        _lastPrefabAttachments = authored.map((pair) => pair.$2).toList();
+        return handles[instance.root]!;
+      });
 
   T data<T extends DataAsset>(AssetRef ref) => guard(() {
     final value = world._data.load(ref, []);
@@ -480,12 +469,7 @@ class _GameplayAdapter {
 
   Affine3 matrix(GameObject go) => guard(() {
     final m = native.worldMatrix(ref(go));
-    return Affine3(
-      Vec3(m[0], m[1], m[2]),
-      Vec3(m[4], m[5], m[6]),
-      Vec3(m[8], m[9], m[10]),
-      Vec3(m[12], m[13], m[14]),
-    );
+    return Affine3(Vec3(m[0], m[1], m[2]), Vec3(m[4], m[5], m[6]), Vec3(m[8], m[9], m[10]), Vec3(m[12], m[13], m[14]));
   });
 
   bool behaviourRemoved(Behaviour behaviour) =>
@@ -582,20 +566,19 @@ class _GameplayAdapter {
         orders[b] = b.order;
       }
     }
-    _survivors = native.entities().toSet();
-    for (final go in [...world._byEntity.values, ...pending.keys]) {
-      if (!go._alive && !pending.containsKey(go)) continue;
-      final reference = ref(go);
-      if (_survivors.contains(reference)) _names[go] = native.name(reference) ?? '';
+    for (final entry in native.identityChanges().entries) {
+      if (entry.value == null) _removed.add(entry.key);
+      final go = handles[entry.key] ?? (entry.key.live == null ? null : world._byEntity[entry.key.live]);
+      if (go != null) _names[go] = entry.value;
     }
     for (final c in _scheduled) {
       if (_stoppedRoutines.contains(c)) continue;
       final owner = c._owner;
-      if (owner != null && (behaviourRemoved(owner) || !_survivors.contains(ref(_behaviourOwner(owner))))) {
+      if (owner != null && (behaviourRemoved(owner) || _removed.contains(ref(_behaviourOwner(owner))))) {
         continue;
       }
       if (owner != null && !c._invoke && !native.active(ref(_behaviourOwner(owner))).$2) continue;
-      if (c._target case final target? when !_survivors.contains(ref(target))) continue;
+      if (c._target case final target? when _removed.contains(ref(target))) continue;
       _preparedRoutines.add(c);
     }
     _preparedSequence = world._behaviours._nextSequence;
@@ -606,7 +589,7 @@ class _GameplayAdapter {
         sequence[b] = b._sequence;
       }
       for (final entry in _attachments.entries) {
-        if (behaviourRemoved(entry.key) || !_survivors.contains(ref(entry.value))) continue;
+        if (behaviourRemoved(entry.key) || _removed.contains(ref(entry.value))) continue;
         final b = entry.key;
         sequence[b] = _preparedSequence++;
         orders[b] = _attachmentOrders[b]!;
@@ -621,6 +604,24 @@ class _GameplayAdapter {
   });
 
   void publish<R>(NativeGameplayCommit<R> commit) {
+    void publishMap<T>(Map<String, T?> staged, Map<String, T> committed) {
+      for (final entry in staged.entries) {
+        final value = entry.value;
+        if (value == null) {
+          committed.remove(entry.key);
+        } else {
+          committed[entry.key] = value;
+        }
+      }
+    }
+
+    publishMap(_materials, world._runtimeMaterials);
+    publishMap(_meshes, world._runtimeMeshes);
+    publishMap(_shaderMaterials, world._shaderMaterials);
+    publishMap(_codeValues, world._codeValues);
+    for (final entry in _runtimeClips.entries) {
+      entry.value ? world._runtimeClips.add(entry.key) : world._runtimeClips.remove(entry.key);
+    }
     if (_bindingsChanged) world.input.invalidate();
     // No callbacks, native calls, or user codecs after publication. The commit
     // report resolves identity; prepared metadata reconciles existing handles.
@@ -635,22 +636,20 @@ class _GameplayAdapter {
         world._byEntity[entity] = entry.key;
       }
     }
-    for (final go in world._byEntity.values.toList()) {
-      final name = _names[go];
+    for (final entry in _names.entries) {
+      final go = entry.key;
+      final name = entry.value;
       if (name == null) {
         go._alive = false;
         world._byEntity.remove(go._entity);
         world._behaviours.objectDied();
+        world._toSubscribe.remove(go._entity);
+        world._observed.remove(go);
+        go._observed = false;
       } else {
         go._name = name;
       }
     }
-    world._toSubscribe.removeWhere((entity) => !_survivors.contains(NativeGameplayRef.live(entity)));
-    world._observed.removeWhere((go) {
-      if (go._alive) return false;
-      go._observed = false;
-      return true;
-    });
     if (_attachments.isNotEmpty) {
       for (final (behaviour, go, sequence) in _preparedAttachments) {
         behaviour

@@ -1,16 +1,13 @@
 //! The M1 demo scene, driven the way gameplay drives the engine: through
-//! commands on the simulation lane, one batch per fixed tick, and through
-//! pulled events for the spawn hand-shake. Shared by the headless and the
+//! shared transactions, one edit per fixed tick. Shared by the headless and the
 //! standalone hosts; the Flutter host builds the same scene from Dart.
 //!
 //! Layout: a "hub" cube at the origin that tumbles, and `satellites`
 //! children parented to it, each on its own ring and with its own spin, so
 //! the frame exercises hierarchy propagation and extract interpolation.
 
-use fynkel_core::{Command, Entity, Event, EventPayload, Lane, Tick, Transform, World};
+use fynkel_core::{Entity, Event, EventPayload, Tick, Transform, World};
 use glam::{Quat, Vec3};
-
-const HUB_TEMP_ID: u64 = 1;
 
 #[derive(Clone, Copy, Debug)]
 struct Satellite {
@@ -26,8 +23,6 @@ struct Satellite {
 pub struct DemoScene {
     satellites: Vec<Satellite>,
     hub: Option<Entity>,
-    hub_requested: bool,
-    satellites_requested: bool,
     /// Simulation seconds elapsed at the last fixed update.
     time: f32,
     fixed_dt: f32,
@@ -54,8 +49,6 @@ impl DemoScene {
         Self {
             satellites,
             hub: None,
-            hub_requested: false,
-            satellites_requested: false,
             time: 0.0,
             fixed_dt: 0.0,
             passive: false,
@@ -89,68 +82,48 @@ impl DemoScene {
         self.hub.is_some() && self.satellites.iter().all(|s| s.entity.is_some())
     }
 
-    /// Feed the events the host pulled (`World::drain_events`) so spawn
-    /// hand-shakes resolve temp ids to handles.
+    /// Observe scene loading events pulled by the host.
     pub fn on_events(&mut self, events: &[Event]) {
         for ev in events {
             if matches!(ev.payload, EventPayload::SceneReady { .. }) {
                 self.scene_ready = true;
             }
-            if let EventPayload::Spawned { temp_id, entity } = ev.payload {
-                if temp_id == HUB_TEMP_ID {
-                    self.hub = Some(entity);
-                } else if let Some(s) = self.satellites.get_mut((temp_id - 2) as usize) {
-                    s.entity = Some(entity);
-                }
-            }
         }
     }
 
-    /// Gameplay for one fixed tick: stages the commands the next `step()`
-    /// applies. `tick` is the tick about to be simulated.
+    /// Commit gameplay for the tick about to be simulated. Handles resolve
+    /// at commit, independently of the host draining lifecycle events.
     pub fn fixed_update(&mut self, world: &mut World, tick: Tick) {
         if self.passive {
             return;
         }
         self.fixed_dt = world.config().fixed_dt;
         self.time = tick as f32 * self.fixed_dt;
-        let mut commands = Vec::with_capacity(self.satellites.len() + 1);
-
-        if !self.hub_requested {
-            self.hub_requested = true;
-            commands.push(Command::Spawn {
-                temp_id: HUB_TEMP_ID,
-                transform: Transform::IDENTITY,
-                parent: None,
-                name: Some("hub".into()),
-            });
-        } else if let Some(hub) = self.hub {
-            if !self.satellites_requested {
-                self.satellites_requested = true;
-                for (i, s) in self.satellites.iter().enumerate() {
-                    commands.push(Command::Spawn {
-                        temp_id: 2 + i as u64,
-                        transform: satellite_local(s, self.time),
-                        parent: Some(hub),
-                        name: None,
-                    });
-                }
+        world.prepare_gameplay_tick();
+        if let Some(hub) = self.hub {
+            let commit = world
+                .edit_gameplay(|edit| {
+                    let mut spawned = Vec::new();
+                    for (index, satellite) in self.satellites.iter().enumerate() {
+                        let transform = satellite_local(satellite, self.time);
+                        if let Some(entity) = satellite.entity {
+                            edit.set_transform(entity, transform)?;
+                        } else {
+                            spawned.push((index, edit.spawn("", transform, Some(hub.into()))?));
+                        }
+                    }
+                    edit.set_transform(hub, hub_local(self.time))?;
+                    Ok(spawned)
+                })
+                .expect("built-in demo edit must be valid");
+            for (index, pending) in &commit.value {
+                self.satellites[*index].entity = commit.resolve(*pending);
             }
-            commands.push(Command::SetTransform {
-                entity: hub,
-                transform: hub_local(self.time),
-            });
-            for s in &self.satellites {
-                if let Some(e) = s.entity {
-                    commands.push(Command::SetTransform {
-                        entity: e,
-                        transform: satellite_local(s, self.time),
-                    });
-                }
-            }
-        }
-        if !commands.is_empty() {
-            world.submit(Lane::Simulation, commands);
+        } else {
+            let commit = world
+                .edit_gameplay(|edit| edit.spawn("hub", Transform::IDENTITY, None))
+                .expect("built-in demo spawn must be valid");
+            self.hub = commit.resolve(commit.value);
         }
     }
 }
@@ -187,5 +160,70 @@ impl Lcg {
     /// Uniform in `[0, 1)`.
     fn unit(&mut self) -> f32 {
         (self.next() >> 40) as f32 / (1u64 << 24) as f32
+    }
+}
+
+#[cfg(test)]
+mod transaction_tests {
+    use super::*;
+    use fynkel_core::WorldConfig;
+
+    #[test]
+    fn demo_transactions_preserve_interpolation_through_catch_up_ticks() {
+        for hz in [30.0, 60.0, 120.0, 240.0] {
+            let dt = 1.0 / hz;
+            let mut world = World::new(WorldConfig {
+                fixed_dt: dt,
+                ..WorldConfig::default()
+            });
+            let mut demo = DemoScene::new(1, 123);
+            demo.fixed_update(&mut world, 0);
+            world.step();
+            world.begin_frame(dt * 0.25);
+            let plan = world.begin_frame(dt * 2.25);
+            assert_eq!(plan.steps, 2);
+            demo.fixed_update(&mut world, 1);
+            world.step();
+            demo.fixed_update(&mut world, 2);
+            world.step();
+            let previous = hub_local(dt);
+            let current = hub_local(dt * 2.0);
+            let expected = glam::Mat4::from_scale_rotation_translation(
+                current.scale,
+                previous.rotation.slerp(current.rotation, 0.5),
+                Vec3::ZERO,
+            );
+            let extract = world.extract();
+            let record = extract
+                .records
+                .iter()
+                .find(|r| Some(r.entity) == demo.hub())
+                .unwrap();
+            assert!(
+                record.world.abs_diff_eq(expected, 1e-5),
+                "interpolation snapped at {hz} Hz"
+            );
+        }
+    }
+
+    #[test]
+    fn demo_resolves_handles_without_event_delivery_or_queued_commands() {
+        let mut world = World::new(WorldConfig::default());
+        let mut demo = DemoScene::new(8, 123);
+        demo.fixed_update(&mut world, 0);
+        assert!(demo.hub().is_some());
+        assert_eq!(world.live_entities(), 1);
+        assert_eq!(world.step().applied, 0);
+        // Deliberately never deliver events to the driver.
+        demo.fixed_update(&mut world, 1);
+        assert!(demo.is_ready());
+        assert_eq!(world.live_entities(), demo.expected_entities());
+        assert_eq!(world.step().applied, 0);
+        for tick in 2..8 {
+            demo.fixed_update(&mut world, tick);
+            assert_eq!(world.step().applied, 0);
+        }
+        assert!(world.drain_events().is_empty());
+        assert!(world.diagnostics().is_empty());
     }
 }

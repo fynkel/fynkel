@@ -49,10 +49,10 @@ fn pending_objects_share_lookup_hierarchy_activity_and_geometry_then_resolve_on_
     assert!(w.ecs().has::<Inactive>(live));
     assert_eq!(w.tick(), tick);
     assert!(
-        !w.drain_events()
+        w.drain_events()
             .iter()
-            .any(|e| matches!(e.payload, EventPayload::Spawned { .. })),
-        "typed reports must not manufacture legacy temporary IDs"
+            .all(|e| matches!(e.payload, EventPayload::ParentChanged { .. })),
+        "only structural notifications, no identity handshake"
     );
     w.edit_gameplay(|edit| {
         assert_eq!(edit.find("renamed")?, Some(child.into()));
@@ -373,4 +373,60 @@ fn pending_descendant_moved_out_before_parent_cancellation_still_materializes() 
     assert_eq!(scene::current_world(w.ecs(), child).unwrap().w_axis.x, 12.0);
     assert_eq!(w.live_entities(), 1);
     assert!(w.drain_events().is_empty());
+}
+
+#[test]
+fn persistent_roots_share_pending_hierarchy_and_rollback() {
+    let mut w = world();
+    let existing = node(&mut w, "existing", None);
+    let failed: EditResult<_> = w.edit_gameplay(|edit| {
+        assert!(edit.dont_destroy_on_load(existing)?);
+        assert_eq!(edit.persistent_roots()?, vec![existing.into()]);
+        Err::<(), _>(EditError::Aborted)
+    });
+    assert!(failed.is_err());
+    assert!(w.persistent_roots().is_empty());
+    let commit = w
+        .edit_gameplay(|edit| {
+            let root = edit.spawn("pending", Transform::IDENTITY, None)?;
+            let child = edit.spawn("child", Transform::IDENTITY, Some(root.into()))?;
+            assert!(!edit.dont_destroy_on_load(child)?);
+            assert!(edit.dont_destroy_on_load(root)?);
+            assert_eq!(edit.persistent_roots()?, vec![root.into()]);
+            Ok(root)
+        })
+        .unwrap();
+    let root = commit.resolve(commit.value).unwrap();
+    assert_eq!(w.persistent_roots(), vec![root]);
+    w.edit_gameplay(|edit| {
+        edit.set_parent(root, Some(existing.into()), false)?;
+        assert!(edit.persistent_roots()?.is_empty());
+        Ok(())
+    })
+    .unwrap();
+    assert!(w.persistent_roots().is_empty());
+}
+
+#[test]
+fn identity_delta_contains_only_renamed_spawned_and_destroyed_objects() {
+    let mut w = world();
+    let parent = node(&mut w, "parent", None);
+    let child = node(&mut w, "child", Some(parent));
+    let kept = node(&mut w, "kept", None);
+    w.edit_gameplay(|edit| {
+        edit.set_transform(kept, at(9.0))?;
+        assert!(edit.identity_changes()?.is_empty());
+        edit.set_name(kept, "renamed")?;
+        let pending = edit.spawn("new", Transform::IDENTITY, None)?;
+        edit.destroy(parent)?;
+        let changes: std::collections::BTreeMap<_, _> =
+            edit.identity_changes()?.into_iter().collect();
+        assert_eq!(changes.len(), 4);
+        assert_eq!(changes[&kept.into()].as_deref(), Some("renamed"));
+        assert_eq!(changes[&pending.into()].as_deref(), Some("new"));
+        assert_eq!(changes[&parent.into()], None);
+        assert_eq!(changes[&child.into()], None);
+        Ok(())
+    })
+    .unwrap();
 }

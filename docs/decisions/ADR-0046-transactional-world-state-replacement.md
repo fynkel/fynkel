@@ -1,10 +1,12 @@
 # ADR-0046: Replace the gameplay state boundary with shared transactions
 
-**Status:** Accepted for implementation strategy and the pure-data contract below; production migration is not complete.  
+**Status:** Accepted. F2 migration and its unified gameplay-state contract are qualified; broader F3–F8 production foundation work remains open. See the [F2 gate](../foundation-f2-gate-report.md) and [ADR-0051](ADR-0051-f2-boundaries-and-presentation-policy.md).
 **Date:** 2026-09-30  
 **Authority:** User instruction to extend mixed-state prototypes, compare strategies and finalize decisions from the evidence.  
 **Related:** ADR-0042 through ADR-0045, ADR-0003/0004/0008/0012/0036; F0.3/F0.4, F1–F4, F7.  
 **Evidence:** [Mixed-state report](../design/foundation-state-comparison.md), [capture](../../benchmarks/foundation/results/2026-09-30-87e3dec8-state.json).
+
+**Current implementation (2026-10-02):** F2 is complete under ADR-0051. The dated migration/batch notes below preserve intermediate states and their evidence; their pending-work statements are superseded by the final gate report.
 
 ## Context
 
@@ -1251,3 +1253,330 @@ certification. See the roadmap's qualification capture for exact final evidence.
 
 
 SDK cache retirement is qualified by [the final capture](../../benchmarks/foundation/results/2026-10-01-87e3dec8-f2-legacy-cache-retirement.json): all 17 checks pass, including 579 SDK tests. The immediate-construction `creating` helper and its collection state are removed: standalone clone now defers lifecycle exactly like standalone spawn/build/instantiate. Public liveness and attach validation consult native membership; projected anchors use native batch validation to avoid a per-anchor lookup. Qualification retries and their reasons remain in the capture. F2 remains active for the boundaries listed above.
+
+### Raw native command mutation adapter (2026-10-01)
+
+Raw `World::submit` / C `fynkel_world_submit_commands` and `World::apply_now`
+retain their compatibility scheduling and per-command acceptance policy. Their
+simulation mutation switch is retired: each resolved command publishes through
+`GameplayEdit` using the same configuration, hierarchy, activity, reference and
+effect validation as SDK edits. Presentation name/component/bus writes use that
+adapter too. This is an adapter to the chosen authority, not a second component
+store. A raw batch is **not** an atomic `World.edit`: earlier accepted commands
+remain committed if a later command is rejected.
+
+Simulation commands still execute at the next Commands stage; temporary handles
+resolve in order and Spawned/ParentChanged/Destroyed events retain their tick.
+Duplicate spawn IDs within a tick now reject without allocating or replacing the
+first mapping. Immediate compatibility edits preserve future queued commands,
+including on failure/unwind. Native physics requests retain the originating
+command index through execution-time diagnostics. New stale/foreign component
+references and invalid zero-length rotations reject before publication. An
+already valid reference may subsequently lose its target; its subsystem's dead
+reference behavior remains unchanged.
+
+Committed effect storage now contains only typed body, audio, animation and
+one-shot requests. It cannot carry structural/configuration commands back into
+the legacy dispatcher. Playback delivery has no fallback configuration writer:
+the journal has already published that data, and a later edit must not be
+replaced by old gain/pitch or animator settings when a request executes. Raw
+playback commands deliver their newly committed intents at the compatibility
+boundary, retaining ordered play/pause behavior; they do not drain earlier SDK
+requests prematurely.
+
+The wire format, decoder, indexed queue, temp-ID translation and explicit queue
+adoption remain compatibility transport. Presentation transform overrides/replay
+remain until the separate visual-only policy is decided. Scene construction still
+owns its component insertion and forward-reference resolution. Native automatic
+asset registration at raw submission remains a resource-boundary migration item;
+this change does not claim transactional resource publication for raw callers.
+Removing the external command ABI itself would require migrating its remaining
+hosts/tests and changing the versioned contract. F2 remains active.
+
+### Raw command resource publication (2026-10-01)
+
+The eager native `register_animation_assets` submission pass is retired. Merely
+submitting simulation wire commands no longer registers clips, controllers,
+skins, sounds, collider meshes or physics materials. Native project loads,
+editor previews and asset stages install the cooked `Assets` source through one
+setter. Core sees only a host resource-preparation/publication contract, keeping
+the asset store and decoding implementation outside the core dependency graph.
+
+A raw command prepares its dependencies at execution. The owned plan reuses
+`PreparedGameplayResources`, including independent motion/controller preparation
+and shared prepared controller definitions for journal validation. Audio capacity
+is checked before data commit. Rejected data, effects or capacity checks drop the
+plan with no world registry changes. Successful data commit is followed by
+resource publication, then playback delivery; a one-shot sound can therefore
+use its newly registered clip at that same boundary. Publication invariant panics
+poison the world rather than claiming rollback after committed data.
+
+Explicit queue adoption prepares one union of resources for the entire adopted
+transaction. Duplicate sound keys count once and existing registrations consume
+no new slots. A failed adoption retains the original queue and publishes neither
+its data nor its resources. Independent raw command execution retains its
+per-command policy: a later rejected command does not roll back earlier accepted
+commands or their resources. Missing cooked dependencies retain the existing
+readiness diagnostics; preparation does not fabricate placeholder assets.
+
+Preparation is synchronous at execution/adoption and resolves against the asset
+source installed at that boundary. This retires an eager-registration side effect,
+not the F5 asynchronous readiness/budget work. The C ABI, compatibility queues and
+presentation transform policy remain separate F2 items. Whole-scene/resource
+replacement and performance qualification are not closed by this change.
+
+### Compatibility transport retirement: native producers (2026-10-01)
+
+Editor preview diffs, gizmo/Inspector preview writes, animation-stage controls,
+and the shared headless/standalone demo now call the gameplay journal directly.
+They no longer submit compatibility command batches. Preview diffs retain a
+private, synchronous document-change representation; it has authoring UUIDs,
+no wire IDs, no queue, and no independent mutation or validation implementation.
+Spawn mappings come from the successful commit's scoped pending handles. An
+unrelated compatibility `Spawned` event can no longer be interpreted as an index
+into the preview document.
+
+Each preview diff round or live edit batch is atomic. Rejection preserves its
+previous data and does not advance the preview clock. Successful diff counts
+are recorded after commit. The existing hierarchy-round/reload policy and
+separate sibling-order reconciliation remain; an entire multi-round sync is
+not claimed to be one transaction. A rejected round reports its error before
+falling back to reload. Animation stages retain the steps needed to sample
+controller/blend state after committed controls.
+
+Prepared native resources share the same preflight/stage/commit/publication
+contract as owned sessions. Preview edits prepare component dependencies from
+the current asset store; rejection drops them. A publication panic poisons the
+world. This prevents transport removal from silently removing asset preparation.
+The demo captures interpolation history before fixed gameplay edits and resolves
+its handles without waiting for events. Its queued-command count is now zero;
+that counter does not measure journal mutations.
+
+Keeping these callers on the queue would keep temporary-ID coordination alive
+inside the engine. Replacing their queue with another queue would preserve the
+same dependency. Direct journal calls remove it while retaining each consumer's
+explicit sampling boundary.
+
+This is the native-producer portion of transport retirement. The external raw
+C/Rust command ingress, SDK adoption/liveness boundary, SDK immediate-audio
+buffer, generated command transport and compatibility tests still exist. Their
+removal must preserve lifecycle reconciliation, effect timing and invalid-input
+coverage. F2 and full compatibility transport retirement remain open.
+
+### SDK transport retirement and ABI 4 (2026-10-01)
+
+The SDK no longer constructs or submits compatibility command batches. Its
+`CommandBatch`, `CommandLane`, `SubmitResult`, raw submit methods, presentation
+buffer and `flushPresentation` entry point are removed. Generated SDK bindings
+exclude the remaining native raw submission function/result/lane. Fixed wire
+records still used as typed journal/effect payloads are retained.
+
+Immediate one-shot audio uses `fynkel_world_audio_play`, a dedicated operation
+with one fixed sound record and its string tail, without a command envelope or
+queue. Core shares one-shot validation with `GameplayEdit::play_sound`, prepares
+sound dependencies through the installed asset source, preflights publication,
+and delivers only this immediate request. It cannot consume previously committed
+simulation effects, advance clocks or replay at the next tick. Invalid requests
+publish no resources or voices. Capacity rejection is reported as a diagnostic;
+publication panics retain the existing poison policy. Native owned sessions and
+SDK edits reject immediate playback stickily. Successful calls do not re-report
+old diagnostics from an earlier failed request.
+
+Callback entry uses `fynkel_world_gameplay_state`, a read-only identity/name
+snapshot. It reconciles handle liveness, names, subscriptions, observation and
+behaviour scheduling without adopting gameplay or consuming lifecycle events.
+Reconciliation describes already-committed native changes and survives failure
+of the following SDK edit. Native destruction is delivered to script cleanup
+once, even after that edit aborts. Full-world snapshot/enumeration cost remains
+an explicit performance-qualification item.
+
+The exported adoption operation is removed, so the runtime ABI advances from 3
+to 4. Runtime/schema constants, C header, generated Dart codecs/bindings and
+source/fixture locks move together. Old SDKs must rebuild against ABI 4; keeping
+the old adoption symbol would preserve the mutation-on-entry contract this
+change removes. Authoring ABI versioning is separate and unchanged.
+
+This closes the immediate-audio and callback-entry portions, and the SDK's raw
+transport surface. It does **not** close full native transport retirement:
+`fynkel_world_submit_commands`, core `submit`/`submit_indexed`, compatibility
+queues, temporary IDs and the internal adoption adapters used by legacy native
+clone/input entry points still exist. Their regression coverage must migrate
+before those remaining implementations are deleted. This work is tracked rather
+than hidden behind a renamed queue or a test-only imitation of the old runtime.
+
+### Native C transport retirement (2026-10-01)
+
+The runtime C boundary no longer exposes `fynkel_world_submit_commands` or a
+submission result/lane/kind. The native decoder, command buffer kind, batch
+writer and raw transport statistics are deleted, rather than retained behind
+FFI exclusions. Generated bindings come directly from the reduced header.
+Owned gameplay transactions are the C host's mutation boundary; immediate sound
+retains its dedicated operation. Runtime ABI 4 is the unreleased migration
+boundary for both this removal and the earlier SDK/adoption removal.
+
+Ten unused wire records (raw spawn/destroy/transform/parent/name/activity,
+component set/remove, command envelope and bus command) are removed. Shared
+component, query, event and typed body/audio/animation/sound payloads remain.
+The schema fingerprint is `0x8da8b43e4b1f1c3e`; generated codecs, current protocol
+fixtures and source/fixture locks move together. Historical fingerprinted
+fixtures remain historical evidence, not an accepted submission protocol.
+
+Native ABI, cooked-resource, leak and dynamic-library identity tests use the
+actual owned C protocol. Spawns resolve scoped handles from commit replies;
+there is no test-only command queue or synthetic spawn-event adapter. Tests
+retain subsystem queries, contacts, animation markers/controller behavior,
+audio lifecycle/device behavior, subscriptions, snapshots, malformed-input
+rollback and foreign/stale identity coverage. The dynamic-loader gate also
+asserts that both retired C transport symbols are absent.
+
+`World::adopt_gameplay_commands` and per-command `World::apply_now` are removed.
+Clone and input rebinding operate on committed state without adopting unrelated
+work or draining events. Atomic live editor batches prepare the dependency
+union, stage it through the journal, and publish only after successful commit.
+Preview sun edits use the same journal and propagate failures to authoring.
+
+This closes the **C/native bridge transport**, not all Rust compatibility
+retirement. Core `World::submit` / `submit_indexed`, the Rust compatibility
+adapter, staged queue, temporary-ID mapping and legacy presentation overrides
+still exist for Rust callers/tests. Their deletion and migration of the remaining
+Rust regressions remain required; the full F2 transport-retirement item stays
+open. No second native C mutation protocol remains.
+
+Qualification: all 17 checks pass, including 1070 workspace tests (8 ignored),
+570 SDK tests and the full native ABI/leak coverage. The separate independent
+library identity gate also passes and confirms retired symbols are absent.
+[Evidence](../../benchmarks/foundation/results/2026-10-01-5b66fb4f-f2-native-transport.json)
+archives commands, failed initial attempts, final results and 483 source hashes.
+
+
+### Rust compatibility transport retirement (2026-10-01)
+
+This slice completes the transport deletion left open above. Rust callers use
+`World::edit_gameplay` or the atomic live-data adapter; there is no
+`submit`, `submit_indexed`, raw adoption, per-command apply path, compatibility
+queue, temporary entity namespace or spawn acknowledgement event. Pending tokens
+remain scoped to a transaction, and only its successful commit resolves them.
+The old spawn event ID and temporary-ID/lane diagnostic IDs are reserved.
+
+Persistent presentation writes are ordinary committed data. The extraction
+override map, replay path and `ExtractRecord::overridden` bit are removed.
+Fixed-tick preparation captures history before gameplay; edits outside that
+prepared tick snap history to their committed values. Rendering, skin palettes
+and projection use the same extraction matrices.
+
+Typed committed effects remain intentional subsystem work. They deliver once at
+their existing phase, respect destruction/component lifetimes, and cannot replay
+old authored configuration. The profiler's stable `Commands` slot now measures
+this effect delivery only. Runtime diagnostics retain their phase field and use
+the no-transport-index sentinel; failed edits return typed errors immediately.
+
+The atomic live-data adapter prepares a dependency union and publishes resources
+only on successful commit. It has no second mutation authority or deferred
+submission state. Migration coverage checks rollback, stale/foreign references,
+scoped identities, persistent poses, explicit interpolation, subsystem delivery
+and resource rejection/retry through the real shared APIs. Native/Apple/render
+fixtures and host examples no longer depend on synthetic spawn events. Preview
+synchronization reconciles its identity maps against committed liveness instead
+of draining the host event queue; unrelated lifecycle events remain available
+exactly once.
+
+The unreleased runtime ABI remains 4; removing the spawn event changes the schema
+fingerprint to `0xbd96f0308508f61f`. Generated records, current fixtures and
+locks move together. Authoring ABI is unchanged. Historical evidence/fixtures
+remain historical. [Qualification evidence](../../benchmarks/foundation/results/2026-10-01-5b66fb4f-f2-rust-transport.json)
+records all 17 passing checks (1070 workspace tests, 8 ignored; 569 SDK tests),
+the separately passing dynamic-library identity/export gate, failed attempts and
+560 final source hashes. Scene/resource replacement,
+remaining editor entry points, visual-only policy and callback-scale/cache
+qualification still prevent an F2 completion claim.
+
+
+### Atomic scene activation and preview reload (2026-10-01)
+
+Scene construction, immediate prefab construction, scene replacement/unload and
+persistent-root destruction now use the shared gameplay journal. Invalid
+component payloads reject the complete operation; the previous partial-component
+acceptance policy is retired. Successful reports retain `rejected_components`
+as zero for compatibility. Authored references resolve after every pending node
+exists. Missing authored IDs retain the reported-null loading policy; explicit
+live references must pass final transaction validation, including references to
+objects a replacement would destroy.
+
+Replace activation stages removal and creation together. A rejected activation
+preserves entities, scene metadata, completed snapshots, clocks and events.
+Successful publication emits all destruction events, then unload summaries in
+reverse scene-load order, then SceneReady. Unload summaries keep their previous
+per-scene subtree counts. Persistent roots and their current descendants survive.
+Atomic replacement retains the old entities while preparing the new hierarchy and
+resources; this increases peak memory compared with unloading first. Membership
+and hierarchy scans remain subject to the later performance qualification.
+
+Native activation prepares the dependency union, including emitter prefabs,
+before opening the journal. Resource capacity preflight and staged controller
+definitions precede commit; registration consumes the owned plan only after
+success. Project gravity/modules, residency, input rebinding and loaded-asset
+ownership change only after successful activation. Missing dependencies retain
+the existing diagnostic policy; this is not the F5 readiness/streaming contract.
+
+Editor preview reload uses that same prepared boundary and only replaces its
+identity maps, remembered description and residency after success. Failure keeps
+the prior preview available for correction/retry.
+
+This slice does not make whole-project startup (including persistent-object
+setup) one transaction, nor allow synchronous scene loading inside callbacks.
+Scene requests remain commit-controlled scheduling operations. Runtime resource
+creation/replacement, remaining editor resource/data mutation entries and
+visual-only/cache/performance qualification remain open.
+
+[Qualification evidence](../../benchmarks/foundation/results/2026-10-01-5b66fb4f-f2-scene-activation.json)
+records all 17 passing checks: 1076 workspace tests (8 ignored), 128 stripped-core,
+21 stripped-native, 569 SDK, 16 authoring, 39 Flutter, 91 focused editor,
+21 stripped prepared-resource and 2 stripped mesh tests. Six added regressions
+cover rejection/retry, retiring references, prefab atomicity, prepared resources,
+capacity and preview identity recovery. The archive retains initial failures and
+560 final source hashes. ABI and schema fingerprint are unchanged.
+
+
+### Transactional runtime clips (2026-10-01)
+
+Runtime animation clip creation/replacement/removal now participates in the owned
+gameplay boundary through operation 28. Native sessions own validated decoded
+clips, coalesce writes by UUID and discard them on abort. Publication follows the
+successful gameplay/prepared-resource commit, before subsequent playback delivery.
+Standalone SDK calls open the same boundary. Native direct setters share validation
+and publication helpers and cannot mutate through an active owned edit.
+
+Made-clip liveness is a transaction-aware SDK membership view, not a clip-data
+copy: its committed set changes only after native success. This fixes rejected
+requests changing bookkeeping before native validation. Aborted creations remain
+dead; aborted replacement/removal preserves prior data and liveness. Create/remove
+within one edit does not publish a clip. Removal retains the existing playback
+copy, as before; resource-cache ownership/eviction remains later qualification.
+
+Regressions cover explicit/automatic abort, create-and-play at four frame rates,
+replacement and last-write behavior, removal with ongoing playback, canceled
+creation, and sticky malformed protocol/resource failures. ABI/schema unchanged.
+[Qualification evidence](../../benchmarks/foundation/results/2026-10-01-5b66fb4f-f2-runtime-clips.json)
+records all 17 passing checks: 1077 workspace tests (8 ignored), 128 stripped-core,
+22 stripped-native protocol, 575 SDK, 16 authoring, 39 Flutter, 91 focused editor,
+21 stripped prepared-resource and 2 stripped mesh tests. Failed attempts and 562
+final source hashes are retained. Materials, meshes, whole-project startup and
+editor data/resource mutations remain open; this slice does not complete F2.
+
+### F2 closing qualification (2026-10-02)
+
+Owned resource operations 29–31 add runtime PBR/shader materials and meshes with
+shared preparation/publication and coalesced per-ID intents. Shader document
+copies and read-only returned parameter lists prevent descriptor aliasing.
+Operations 32–34 supply identity deltas and transactional persistence. Callback
+commit no longer fetches each entity name; callback entry remains conservative.
+Required project startup retires old project roots in the scene transaction;
+optional persistent prefabs retain an explicit independent warning policy.
+
+ADR-0051 closes the presentation policy and catalogs intentionally separate host,
+device and arbitrary-Dart authoring boundaries. The gate report audits cache
+ownership/invalidation and records the callback workload. All 17 qualification
+checks and the additional dynamic-library identity/export gate pass. F4 owns
+complete revisions/incremental entry reconciliation; F3 owns custom component
+registration, bulk access and systems. No large-game performance certification is
+implied by F2 completion.

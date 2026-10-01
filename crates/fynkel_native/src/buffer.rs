@@ -1,4 +1,4 @@
-//! Buffer framing for ABI v3 (`include/fynkel.h`): a 24-byte header, a
+//! Buffer framing for ABI v4 (`include/fynkel.h`): a 24-byte header, a
 //! record area, then the string tail. Record bodies use the generated
 //! codecs in `fynkel_wire`.
 
@@ -11,7 +11,6 @@ pub const HEADER_SIZE: usize = 24;
 #[repr(u16)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BufferKind {
-    Commands = 1,
     Snapshot = 2,
     Events = 3,
     Diagnostics = 4,
@@ -122,45 +121,6 @@ impl Writer {
         let start = self.bytes.len();
         self.bytes.resize(start + T::SIZE, 0);
         v.encode(&mut self.bytes[start..], &mut self.strings);
-        self.count += 1;
-    }
-
-    /// Appends a command: `CommandHeader` + body, counted as one record.
-    pub fn command<T: WireRecord>(&mut self, kind: u32, body: &T) {
-        let start = self.bytes.len();
-        self.bytes.resize(
-            start + fynkel_core::schema::CommandHeader::SIZE + T::SIZE,
-            0,
-        );
-        fynkel_core::schema::CommandHeader {
-            kind,
-            size: T::SIZE as u32,
-        }
-        .encode(&mut self.bytes[start..], &mut self.strings);
-        body.encode(
-            &mut self.bytes[start + fynkel_core::schema::CommandHeader::SIZE..],
-            &mut self.strings,
-        );
-        self.count += 1;
-    }
-
-    /// Appends a command whose body is already encoded (a `SetComponent`:
-    /// header record + component bytes) with the strings it referenced.
-    pub fn raw_command(&mut self, kind: u32, body: &[u8], strings: StringTable) {
-        debug_assert!(
-            self.strings.as_bytes().is_empty(),
-            "raw_command: the batch's tail must be empty (one composite per batch)"
-        );
-        self.strings = strings;
-        let start = self.bytes.len();
-        self.bytes
-            .resize(start + fynkel_core::schema::CommandHeader::SIZE, 0);
-        fynkel_core::schema::CommandHeader {
-            kind,
-            size: body.len() as u32,
-        }
-        .encode(&mut self.bytes[start..], &mut StringTable::new());
-        self.bytes.extend_from_slice(body);
         self.count += 1;
     }
 

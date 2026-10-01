@@ -91,7 +91,7 @@ impl World {
     fn frame_camera(
         &self,
         alpha: f32,
-        memo: &mut HashMap<Entity, (Mat4, bool)>,
+        memo: &mut HashMap<Entity, Mat4>,
     ) -> Option<(Entity, Mat4, Camera)> {
         let mut best: Option<(Entity, Camera)> = None;
         for e in self.ecs.entities() {
@@ -109,7 +109,7 @@ impl World {
             }
         }
         let (e, c) = best?;
-        let (world, _) = self.resolve_extract(e, alpha, memo);
+        let world = self.resolve_extract(e, alpha, memo);
         Some((e, world, c))
     }
 
@@ -127,7 +127,7 @@ impl World {
     ) -> ProjectionInfo {
         out.clear();
         let alpha = self.clock.alpha();
-        let mut memo: HashMap<Entity, (Mat4, bool)> = HashMap::new();
+        let mut memo: HashMap<Entity, Mat4> = HashMap::new();
         let camera = self.frame_camera(alpha, &mut memo);
         let take = anchors.len().min(MAX_PROJECTION_ANCHORS);
         let dropped = (anchors.len() - take) as u32;
@@ -167,7 +167,7 @@ impl World {
                 out.push(rec);
                 continue;
             }
-            let (world, _) = self.resolve_extract(a.entity, alpha, &mut memo);
+            let world = self.resolve_extract(a.entity, alpha, &mut memo);
             let point = world.transform_point3(a.offset);
             // Depth along the view axis (the camera looks down -Z).
             rec.depth = -view.transform_point3(point).z;

@@ -71,55 +71,7 @@ void main() {
   });
 
   check('Transform', transform, Transform.wireSize, Transform.decode, (v, d, o, s) => v.encode(d, o, s));
-  check(
-    'Name',
-    const Name(value: 'héllo wörld'),
-    Name.wireSize,
-    Name.decode,
-    (v, d, o, s) => v.encode(d, o, s),
-  );
-  check(
-    'SpawnCommand',
-    SpawnCommand(tempId: 42, transform: transform, parent: entity(7, 3), name: 'player'),
-    SpawnCommand.wireSize,
-    SpawnCommand.decode,
-    (v, d, o, s) => v.encode(d, o, s),
-  );
-  check(
-    'DestroyCommand',
-    DestroyCommand(entity: entity(9, 1)),
-    DestroyCommand.wireSize,
-    DestroyCommand.decode,
-    (v, d, o, s) => v.encode(d, o, s),
-  );
-  check(
-    'SetTransformCommand',
-    SetTransformCommand(entity: entity(2, 2), transform: transform),
-    SetTransformCommand.wireSize,
-    SetTransformCommand.decode,
-    (v, d, o, s) => v.encode(d, o, s),
-  );
-  check(
-    'SetParentCommand',
-    SetParentCommand(child: entity(5, 1), parent: null, keepWorld: true),
-    SetParentCommand.wireSize,
-    SetParentCommand.decode,
-    (v, d, o, s) => v.encode(d, o, s),
-  );
-  check(
-    'SetNameCommand',
-    SetNameCommand(entity: entity(1, 1), name: ''),
-    SetNameCommand.wireSize,
-    SetNameCommand.decode,
-    (v, d, o, s) => v.encode(d, o, s),
-  );
-  check(
-    'SpawnedEvent',
-    SpawnedEvent(tempId: 42, entity: entity(11, 1)),
-    SpawnedEvent.wireSize,
-    SpawnedEvent.decode,
-    (v, d, o, s) => v.encode(d, o, s),
-  );
+  check('Name', const Name(value: 'héllo wörld'), Name.wireSize, Name.decode, (v, d, o, s) => v.encode(d, o, s));
   check(
     'DestroyedEvent',
     DestroyedEvent(entity: entity(11, 1)),
@@ -330,27 +282,6 @@ void main() {
     ),
     InputActionRecord.wireSize,
     InputActionRecord.decode,
-    (v, d, o, s) => v.encode(d, o, s),
-  );
-  check(
-    'CommandHeader',
-    const CommandHeader(kind: 1, size: 64),
-    CommandHeader.wireSize,
-    CommandHeader.decode,
-    (v, d, o, s) => v.encode(d, o, s),
-  );
-  check(
-    'SetComponentCommand',
-    SetComponentCommand(entity: entity(1, 1), component: 7),
-    SetComponentCommand.wireSize,
-    SetComponentCommand.decode,
-    (v, d, o, s) => v.encode(d, o, s),
-  );
-  check(
-    'RemoveComponentCommand',
-    RemoveComponentCommand(entity: entity(2, 1), component: 4),
-    RemoveComponentCommand.wireSize,
-    RemoveComponentCommand.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
   check(
@@ -806,13 +737,6 @@ void main() {
     (v, d, o, s) => v.encode(d, o, s),
   );
   check(
-    'AudioBusCommandRecord',
-    const AudioBusCommandRecord(bus: AudioBus.master, volume: 0.6, muted: true),
-    AudioBusCommandRecord.wireSize,
-    AudioBusCommandRecord.decode,
-    (v, d, o, s) => v.encode(d, o, s),
-  );
-  check(
     'PlaybackEndedEvent',
     PlaybackEndedEvent(entity: entity(4, 2), clip: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330')),
     PlaybackEndedEvent.wireSize,
@@ -878,11 +802,4 @@ void main() {
     (v, d, o, s) => v.encode(d, o, s),
   );
   // SetActive A2.
-  check(
-    'SetActiveCommand',
-    SetActiveCommand(entity: entity(4, 2), active: false),
-    SetActiveCommand.wireSize,
-    SetActiveCommand.decode,
-    (v, d, o, s) => v.encode(d, o, s),
-  );
 }

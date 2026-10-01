@@ -207,7 +207,108 @@ impl Assets {
     }
 }
 
+/// Resources prepared for scene activation; counts describe new registrations.
+#[derive(Default)]
+pub struct SceneResourceReport {
+    pub meshes: usize,
+    pub prefabs: usize,
+    pub clips: usize,
+    pub skins: usize,
+    pub sounds: usize,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
 impl PreparedGameplayResources {
+    /// Decodes the scene dependency union without changing the world. Unavailable
+    /// dependencies retain the loader's diagnostic policy; capacity is checked
+    /// again by the core activation transaction before publication.
+    pub fn for_scene(
+        assets: &Assets,
+        world: &World,
+        scene: &SceneDescription,
+    ) -> (Self, SceneResourceReport) {
+        let mut plan = Self::default();
+        let mut report = SceneResourceReport::default();
+        let mut pending = vec![scene.clone()];
+        while let Some(description) = pending.pop() {
+            for entity in &description.entities {
+                for value in &entity.components {
+                    let mut remaining = value.clone();
+                    if let ComponentValue::Animator(animator) = &mut remaining {
+                        // A missing inactive clip must not suppress a valid controller.
+                        if let Err(diagnostic) = plan.motion(assets, &animator.clip) {
+                            report.diagnostics.push(diagnostic);
+                        }
+                        animator.clip = AssetRef::default();
+                    }
+                    if let Err(diagnostic) = plan.component_value(assets, &remaining) {
+                        report.diagnostics.push(diagnostic);
+                    }
+                    if let ComponentValue::Emitter(emitter) = value {
+                        let id = emitter.prefab.asset;
+                        if !id.is_nil() && !world.has_prefab(id) && !plan.prefabs.contains_key(&id)
+                        {
+                            match assets.prefab(id) {
+                                Ok(prefab) => {
+                                    plan.prefabs.insert(id, prefab.description.clone());
+                                    pending.push(prefab.description);
+                                }
+                                Err(diagnostics) => report.diagnostics.extend(diagnostics),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        report.meshes = plan
+            .meshes
+            .keys()
+            .filter(|key| !world.physics().has_mesh(key))
+            .count();
+        report.prefabs = plan
+            .prefabs
+            .keys()
+            .filter(|id| !world.has_prefab(**id))
+            .count();
+        report.clips = plan.clips.keys().filter(|key| !world.has_clip(key)).count()
+            + plan
+                .blends
+                .keys()
+                .filter(|key| !world.has_blend(key))
+                .count();
+        report.skins = plan.skins.keys().filter(|key| !world.has_skin(key)).count();
+        report.sounds = plan
+            .sounds
+            .keys()
+            .filter(|key| !world.has_sound(key))
+            .count();
+        (plan, report)
+    }
+
+    /// Publishes a native edit and its decoded dependencies at one boundary.
+    /// Resource preparation happens before this call; rejection drops the plan.
+    pub fn commit<R>(
+        self,
+        world: &mut World,
+        edit: impl FnOnce(&mut fynkel_core::GameplayEdit<'_>) -> fynkel_core::EditResult<R>,
+    ) -> fynkel_core::EditResult<fynkel_core::EditCommit<R>> {
+        use fynkel_core::PreparedCommandResources;
+        self.preflight(world)?;
+        let commit = world.edit_gameplay(|access| {
+            self.stage(access)?;
+            edit(access)
+        })?;
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.publish_validated(world)
+        }))
+        .is_err()
+        {
+            world.poison();
+            return Err(fynkel_core::EditError::Poisoned);
+        }
+        Ok(commit)
+    }
+
     fn publish_validated(self, world: &mut World) {
         let r = self;
         for (key, mesh) in r.meshes {
@@ -265,12 +366,7 @@ impl PreparedGameplayResources {
         &self,
         session: &mut fynkel_core::GameplaySession,
     ) -> fynkel_core::EditResult<()> {
-        session.access(|edit| {
-            for (key, def) in &self.controllers {
-                edit.prepare_controller(key.clone(), def.clone())?;
-            }
-            Ok(())
-        })
+        session.access(|edit| fynkel_core::PreparedCommandResources::stage(self, edit))
     }
 
     /// Decode dependencies without mutating world registries. Missing assets keep
@@ -398,5 +494,69 @@ impl PreparedGameplayResources {
             _ => {}
         }
         Ok(())
+    }
+}
+
+impl fynkel_core::CommandResourceSource for Assets {
+    fn prepare_sound(
+        &self,
+        world: &World,
+        clip: &AssetRef,
+    ) -> Box<dyn fynkel_core::PreparedCommandResources> {
+        let mut resources = PreparedGameplayResources::default();
+        resources.sound_request(self, world, clip);
+        Box::new(resources)
+    }
+
+    fn prepare(
+        &self,
+        world: &World,
+        commands: &[&fynkel_core::Command],
+    ) -> Box<dyn fynkel_core::PreparedCommandResources> {
+        use fynkel_core::{AnimateOp, Command};
+        let mut resources = PreparedGameplayResources::default();
+        for command in commands {
+            match command {
+                Command::SetComponent { value, .. } => resources.component(self, world, value),
+                Command::Animate {
+                    op:
+                        AnimateOp::Play { clip, .. }
+                        | AnimateOp::Crossfade { clip, .. }
+                        | AnimateOp::PlayOneShot { motion: clip, .. },
+                    ..
+                } => resources.motion_request(self, world, clip),
+                Command::PlaySound { clip, .. } => resources.sound_request(self, world, clip),
+                _ => {}
+            }
+        }
+        Box::new(resources)
+    }
+}
+
+impl fynkel_core::PreparedCommandResources for PreparedGameplayResources {
+    fn preflight(&self, world: &World) -> fynkel_core::EditResult<()> {
+        let sounds = self
+            .sounds
+            .keys()
+            .filter(|key| !world.has_sound(key))
+            .count();
+        if sounds > fynkel_core::audio::MAX_CLIPS.saturating_sub(world.audio().clip_count()) {
+            return Err(fynkel_core::EditError::InvalidEffect(
+                fynkel_core::GameplayEntity::Live(fynkel_core::Entity::NULL),
+                "command resources exceed available audio clip slots".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn stage(&self, edit: &mut fynkel_core::GameplayEdit<'_>) -> fynkel_core::EditResult<()> {
+        for (key, def) in &self.controllers {
+            edit.prepare_controller(key.clone(), def.clone())?;
+        }
+        Ok(())
+    }
+
+    fn publish(self: Box<Self>, world: &mut World) {
+        (*self).publish_validated(world);
     }
 }

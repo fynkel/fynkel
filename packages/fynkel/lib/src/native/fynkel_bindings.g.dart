@@ -66,7 +66,7 @@ external void fynkel_world_destroy(ffi.Pointer<FynkelWorld> world);
 
 /// Starts a host frame: accepts real dt, samples scale, clamps gameplay once,
 /// advances absolute host timelines and decides the number of fixed ticks,
-/// clears last frame's presentation overrides (§5.1).
+/// advances the canonical frame clock.
 @ffi.Native<
   ffi.UnsignedInt Function(
     ffi.Pointer<FynkelWorld>,
@@ -91,37 +91,7 @@ FynkelStatus fynkel_world_begin_frame(
   _fynkel_world_begin_frame(world, dt_seconds, time_scale, out_plan),
 );
 
-/// Validates a command buffer. Simulation-lane commands are staged for the
-/// next step(); presentation-lane commands apply now. Returns PROTOCOL
-/// without applying anything if the buffer does not validate.
-@ffi.Native<
-  ffi.UnsignedInt Function(
-    ffi.Pointer<FynkelWorld>,
-    ffi.Uint32,
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Uint32,
-    ffi.Pointer<FynkelSubmitResult>,
-  )
->(symbol: 'fynkel_world_submit_commands')
-external int _fynkel_world_submit_commands(
-  ffi.Pointer<FynkelWorld> world,
-  int lane,
-  ffi.Pointer<ffi.Uint8> buffer,
-  int length,
-  ffi.Pointer<FynkelSubmitResult> out_result,
-);
-
-FynkelStatus fynkel_world_submit_commands(
-  ffi.Pointer<FynkelWorld> world,
-  int lane,
-  ffi.Pointer<ffi.Uint8> buffer,
-  int length,
-  ffi.Pointer<FynkelSubmitResult> out_result,
-) => FynkelStatus.fromValue(
-  _fynkel_world_submit_commands(world, lane, buffer, length, out_result),
-);
-
-/// One fixed tick: applies staged simulation commands, runs the native
+/// One fixed tick: delivers committed effects, runs the native
 /// phases, publishes the snapshot (subscribed entities only), events and
 /// diagnostics. Returns OK or COMMANDS_REJECTED on a normal step.
 @ffi.Native<
@@ -335,6 +305,27 @@ FynkelStatus fynkel_world_project(
     out_view,
   ),
 );
+
+/// Immediate one-shot: one 40-byte PlaySound record followed by its string tail.
+/// Not allowed inside a gameplay edit. Does not flush queued simulation effects.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+  )
+>(symbol: 'fynkel_world_audio_play')
+external int _fynkel_world_audio_play(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> buffer,
+  int length,
+);
+
+FynkelStatus fynkel_world_audio_play(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> buffer,
+  int length,
+) => FynkelStatus.fromValue(_fynkel_world_audio_play(world, buffer, length));
 
 /// Opens the default output device and moves the world's mixer into its
 /// callback: what a host that plays calls once after the world is created
@@ -949,25 +940,23 @@ external FynkelBufferView fynkel_world_load_report(
 /// Views expire at the next edit call. sequence is world-local and never reused.
 /// End(commit=0) aborts; end(commit=1) validates and atomically publishes.
 /// /
-/// /* Adopt queued simulation commands atomically without a tick. No active edit.
-/// Failure retains the native queue. Success: spawn count u32, (temp ID u64,
-/// entity) pairs, live count u32, (entity, name byte count u32, UTF-8 name) pairs.
-/// Canceled spawns have a null entity. Failure output is UTF-8 diagnostic text.
+/// /* Read-only lifecycle snapshot, outside edits: live count u32, followed by
+/// (entity, name byte count u32, UTF-8 name). Errors return UTF-8 text.
 @ffi.Native<
   ffi.UnsignedInt Function(
     ffi.Pointer<FynkelWorld>,
     ffi.Pointer<FynkelBufferView>,
   )
->(symbol: 'fynkel_world_gameplay_adopt')
-external int _fynkel_world_gameplay_adopt(
+>(symbol: 'fynkel_world_gameplay_state')
+external int _fynkel_world_gameplay_state(
   ffi.Pointer<FynkelWorld> world,
   ffi.Pointer<FynkelBufferView> out_view,
 );
 
-FynkelStatus fynkel_world_gameplay_adopt(
+FynkelStatus fynkel_world_gameplay_state(
   ffi.Pointer<FynkelWorld> world,
   ffi.Pointer<FynkelBufferView> out_view,
-) => FynkelStatus.fromValue(_fynkel_world_gameplay_adopt(world, out_view));
+) => FynkelStatus.fromValue(_fynkel_world_gameplay_state(world, out_view));
 
 /// Capture interpolation history before fixed callbacks; cancel an abandoned tick.
 @ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<FynkelWorld>)>(
@@ -1114,9 +1103,6 @@ enum FynkelStatus {
 }
 
 enum FynkelBufferKind {
-  /// CommandHeader + body per command (kind = FynkelCommandKind).
-  FYNKEL_BUFFER_COMMANDS(1),
-
   /// SnapshotTransformRecord per subscribed entity, handle order.
   FYNKEL_BUFFER_SNAPSHOT(2),
 
@@ -1148,7 +1134,6 @@ enum FynkelBufferKind {
   const FynkelBufferKind(this.value);
 
   static FynkelBufferKind fromValue(int value) => switch (value) {
-    1 => FYNKEL_BUFFER_COMMANDS,
     2 => FYNKEL_BUFFER_SNAPSHOT,
     3 => FYNKEL_BUFFER_EVENTS,
     4 => FYNKEL_BUFFER_DIAGNOSTICS,
@@ -1158,83 +1143,6 @@ enum FynkelBufferKind {
     8 => FYNKEL_BUFFER_PHYSICS_QUERIES,
     9 => FYNKEL_BUFFER_PROJECTION_ANCHORS,
     _ => throw ArgumentError('Unknown value for FynkelBufferKind: $value'),
-  };
-}
-
-/// Command lanes (blueprint §5.1, ADR-0008).
-enum FynkelCommandLane {
-  FYNKEL_LANE_SIMULATION(0),
-  FYNKEL_LANE_PRESENTATION(1);
-
-  final int value;
-  const FynkelCommandLane(this.value);
-
-  static FynkelCommandLane fromValue(int value) => switch (value) {
-    0 => FYNKEL_LANE_SIMULATION,
-    1 => FYNKEL_LANE_PRESENTATION,
-    _ => throw ArgumentError('Unknown value for FynkelCommandLane: $value'),
-  };
-}
-
-/// Ids are the schema ids (schemas/fynkel.schema.json); listed for C hosts.
-enum FynkelCommandKind {
-  FYNKEL_COMMAND_SPAWN(1),
-  FYNKEL_COMMAND_DESTROY(2),
-  FYNKEL_COMMAND_SET_TRANSFORM(3),
-  FYNKEL_COMMAND_SET_PARENT(4),
-  FYNKEL_COMMAND_SET_NAME(5),
-
-  /// body: SetComponentCommand { entity, component } then the component's
-  /// own record bytes (size covers both); strings in the batch tail.
-  FYNKEL_COMMAND_SET_COMPONENT(6),
-  FYNKEL_COMMAND_REMOVE_COMPONENT(7),
-
-  /// body: BodyCommandRecord { entity, op, vector, rotation }; simulation
-  /// lane only; applied by the tick's physics step (M3-08); ops `move` and
-  /// `jump` address a CharacterController (M3-09).
-  FYNKEL_COMMAND_BODY(8),
-
-  /// body: AnimateCommandRecord { entity, op, seconds, speed, looping,
-  /// clip }; addresses a fynkel.Animator (M3-19): play, crossfade, stop,
-  /// pause, resume, set_speed, set_time.
-  FYNKEL_COMMAND_ANIMATE(9),
-
-  /// body: AudioCommandRecord { entity, op, value }; addresses a
-  /// fynkel.AudioSource (M3-11): play, stop, pause, resume, set_volume,
-  /// set_pitch. Simulation lane only.
-  FYNKEL_COMMAND_AUDIO(10),
-
-  /// body: PlaySoundCommandRecord { clip, bus, volume, pitch, priority };
-  /// a fire-and-forget voice on no entity (M3-11). Either lane.
-  FYNKEL_COMMAND_PLAY_SOUND(11),
-
-  /// body: AudioBusCommandRecord { bus, volume, muted }; a bus gain and the
-  /// mute (M3-11). Either lane.
-  FYNKEL_COMMAND_AUDIO_BUS(12),
-
-  /// body: SetActiveCommandRecord { entity, active }; the entity's own
-  /// active flag — off takes its subtree out of the frame (SetActive).
-  /// Simulation lane only.
-  FYNKEL_COMMAND_SET_ACTIVE(13);
-
-  final int value;
-  const FynkelCommandKind(this.value);
-
-  static FynkelCommandKind fromValue(int value) => switch (value) {
-    1 => FYNKEL_COMMAND_SPAWN,
-    2 => FYNKEL_COMMAND_DESTROY,
-    3 => FYNKEL_COMMAND_SET_TRANSFORM,
-    4 => FYNKEL_COMMAND_SET_PARENT,
-    5 => FYNKEL_COMMAND_SET_NAME,
-    6 => FYNKEL_COMMAND_SET_COMPONENT,
-    7 => FYNKEL_COMMAND_REMOVE_COMPONENT,
-    8 => FYNKEL_COMMAND_BODY,
-    9 => FYNKEL_COMMAND_ANIMATE,
-    10 => FYNKEL_COMMAND_AUDIO,
-    11 => FYNKEL_COMMAND_PLAY_SOUND,
-    12 => FYNKEL_COMMAND_AUDIO_BUS,
-    13 => FYNKEL_COMMAND_SET_ACTIVE,
-    _ => throw ArgumentError('Unknown value for FynkelCommandKind: $value'),
   };
 }
 
@@ -1305,10 +1213,9 @@ enum FynkelComponent {
   };
 }
 
-/// Event kinds in fynkel_world_drain_events (the schema's `fynkel.ev.*`
-/// records; physics-lane kinds are 0x100..0x1ff).
+/// Event ids are the schema ids (schemas/fynkel.schema.json).
 enum FynkelEventKind {
-  FYNKEL_EVENT_SPAWNED(1),
+  /// 1 retired: temporary-ID spawn acknowledgements.
   FYNKEL_EVENT_DESTROYED(2),
   FYNKEL_EVENT_PARENT_CHANGED(3),
   FYNKEL_EVENT_MISSED_DEADLINE(4),
@@ -1351,7 +1258,6 @@ enum FynkelEventKind {
   const FynkelEventKind(this.value);
 
   static FynkelEventKind fromValue(int value) => switch (value) {
-    1 => FYNKEL_EVENT_SPAWNED,
     2 => FYNKEL_EVENT_DESTROYED,
     3 => FYNKEL_EVENT_PARENT_CHANGED,
     4 => FYNKEL_EVENT_MISSED_DEADLINE,
@@ -1552,16 +1458,6 @@ final class FynkelFramePlan extends ffi.Struct {
   external int frame;
 }
 
-final class FynkelSubmitResult extends ffi.Struct {
-  /// staged (simulation) or applied (presentation)
-  @ffi.Uint32()
-  external int accepted;
-
-  /// diagnostics describe each one
-  @ffi.Uint32()
-  external int rejected;
-}
-
 final class FynkelStepResult extends ffi.Struct {
   /// tick number after the step
   @ffi.Uint64()
@@ -1612,9 +1508,6 @@ final class FynkelWorldStats extends ffi.Struct {
   external int frame;
 
   @ffi.Uint64()
-  external int submit_calls;
-
-  @ffi.Uint64()
   external int step_calls;
 
   @ffi.Uint64()
@@ -1633,9 +1526,6 @@ final class FynkelWorldStats extends ffi.Struct {
 
   @ffi.Uint32()
   external int subscriptions;
-
-  @ffi.Uint32()
-  external int staged_commands;
 
   @ffi.Uint32()
   external int poisoned;
@@ -1758,7 +1648,7 @@ final class FynkelCloneDesc extends ffi.Struct {
   external ffi.Array<ffi.Float> scale;
 }
 
-const int FYNKEL_ABI_VERSION = 3;
+const int FYNKEL_ABI_VERSION = 4;
 
 const int FYNKEL_BUFFER_MAGIC = 1263425862;
 

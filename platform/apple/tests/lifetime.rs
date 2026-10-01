@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use fynkel_core::{Command, Lane, Transform, World, WorldConfig};
+use fynkel_core::{Transform, World, WorldConfig};
 use fynkel_platform_apple::{SyncMode, Viewport};
 
 fn resident_bytes() -> u64 {
@@ -38,15 +38,9 @@ fn cycle(world: &World) {
 #[test]
 fn viewport_lifetimes_do_not_grow_the_process() {
     let mut world = World::new(WorldConfig::default());
-    world.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id: 1,
-            transform: Transform::IDENTITY,
-            parent: None,
-            name: None,
-        }],
-    );
+    world
+        .edit_gameplay(|edit| edit.spawn("", Transform::IDENTITY, None))
+        .unwrap();
     world.begin_frame(1.0 / 60.0);
     world.step();
 

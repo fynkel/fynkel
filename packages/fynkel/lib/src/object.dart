@@ -230,7 +230,7 @@ final class _MadeMaterial extends MaterialAsset {
 
   @override
   bool get isAlive =>
-      _world._runtimeMaterials.containsKey(asset) || _world._shaderMaterials.containsKey(asset);
+      !_world.isDisposed && (_world.runtimeMaterial(this) != null || _world._shaderMaterial(asset) != null);
 
   @override
   void destroy() => _world.destroyMaterial(this);
@@ -242,7 +242,7 @@ final class _MadeMesh extends MeshAsset {
   final World _world;
 
   @override
-  bool get isAlive => _world._runtimeMeshes.containsKey(asset);
+  bool get isAlive => !_world.isDisposed && _world.runtimeMesh(this) != null;
 
   @override
   void destroy() => _world.destroyMesh(this);
@@ -254,7 +254,7 @@ final class _MadeClip extends AnimationClipAsset {
   final World _world;
 
   @override
-  bool get isAlive => _world._runtimeClips.contains(asset);
+  bool get isAlive => !_world.isDisposed && _world._hasRuntimeClip(asset);
 
   @override
   void destroy() => _world.destroyClip(this);

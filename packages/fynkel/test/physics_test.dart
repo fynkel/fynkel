@@ -171,7 +171,6 @@ void main() {
     final seen = <FynkelDiagnostic>[];
     w.onDiagnostics = seen.addAll;
     expect(() => crate.setPresentationPosition(5, 5, 5), throwsStateError);
-    w.flushPresentation();
     expect(seen, isEmpty);
     crate.setLocalPosition(2, 4, 0);
     w.frame(1 / 60);

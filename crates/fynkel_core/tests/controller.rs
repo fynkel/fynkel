@@ -22,39 +22,43 @@ fn world() -> World {
     World::new(WorldConfig::default())
 }
 
-fn spawn(w: &mut World, temp_id: u64, parent: Option<Entity>, name: &str) -> Entity {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id,
-            transform: Transform::from_position(Vec3::ZERO),
-            parent,
-            name: Some(name.to_owned()),
-        }],
-    );
-    let r = w.step();
-    assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
-    w.drain_events()
-        .into_iter()
-        .find_map(|e| match e.payload {
-            EventPayload::Spawned { temp_id: t, entity } if t == temp_id => Some(entity),
-            _ => None,
+fn spawn(w: &mut World, _fixture_id: u64, parent: Option<Entity>, name: &str) -> Entity {
+    let commit = w
+        .edit_gameplay(|edit| {
+            edit.spawn(
+                name.to_owned(),
+                Transform::from_position(Vec3::ZERO),
+                parent.map(Into::into),
+            )
         })
-        .unwrap()
+        .unwrap();
+    let entity = commit.resolve(commit.value).unwrap();
+    assert_eq!(w.step().status, Status::Ok);
+    w.drain_events();
+    entity
 }
 
 fn set(w: &mut World, entity: Entity, value: ComponentValue) {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetComponent { entity, value }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_component(entity, value)?;
+        Ok(())
+    })
+    .unwrap();
     let r = w.step();
     assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
 }
 
 fn animate(w: &mut World, entity: Entity, op: AnimateOp) -> StepReport {
-    w.submit(Lane::Simulation, vec![Command::Animate { entity, op }]);
+    w.edit_gameplay(|edit| {
+        edit.animate_control(entity, op)?;
+        Ok(())
+    })
+    .unwrap();
     w.step()
+}
+fn try_animate(w: &mut World, entity: Entity, op: AnimateOp) -> EditResult<StepReport> {
+    w.edit_gameplay(|edit| edit.animate_control(entity, op))?;
+    Ok(w.step())
 }
 
 fn param(name: &str, value: Value) -> AnimateOp {
@@ -350,10 +354,11 @@ fn a_controller_run_is_deterministic() {
                 _ => None,
             };
             if let Some(op) = op {
-                w.submit(
-                    Lane::Simulation,
-                    vec![Command::Animate { entity: root, op }],
-                );
+                w.edit_gameplay(|edit| {
+                    edit.animate_control(root, op)?;
+                    Ok(())
+                })
+                .unwrap();
             }
             w.step();
             let t = w.ecs().copy::<Transform>(arm).unwrap();
@@ -401,11 +406,8 @@ fn states_and_parameters_are_set_by_name_and_checked() {
     states(&mut w);
 
     let rejected = |w: &mut World, e: Entity, op: AnimateOp, says: &str| {
-        let r = animate(w, e, op);
-        assert_eq!(r.rejected, 1);
-        let d = &w.diagnostics()[0];
-        assert_eq!(d.code, DiagnosticCode::INVALID_PAYLOAD);
-        assert!(d.message.contains(says), "{:?} lacks {says:?}", d.message);
+        let error = try_animate(w, e, op).unwrap_err().to_string();
+        assert!(error.contains(says), "{error:?} lacks {says:?}");
     };
     // A clip animator has no states; a controlled one plays no clips.
     rejected(&mut w, bare, play_state("Jump", 0.0), "no controller");
@@ -417,7 +419,7 @@ fn states_and_parameters_are_set_by_name_and_checked() {
             looping: true,
             speed: 1.0,
         },
-        "runs a controller",
+        "clip controls require an animator without a controller",
     );
     // Names and types, the names there listed.
     rejected(
@@ -943,15 +945,14 @@ fn another_one_shot_blends_from_the_first() {
 fn a_one_shot_is_checked() {
     let mut w = world();
     let (root, _) = slotted(&mut w);
-    fn why(w: &World, r: StepReport) -> String {
-        assert_eq!(r.rejected, 1);
-        w.diagnostics()[0].message.clone()
+    fn why(_w: &World, r: EditResult<StepReport>) -> String {
+        r.unwrap_err().to_string()
     }
-    let r = animate(&mut w, root, one_shot("Arms", 0.1, 0.1));
+    let r = try_animate(&mut w, root, one_shot("Arms", 0.1, 0.1));
     assert!(why(&w, r).contains("no slot `Arms` (a slot is a layer: Base, UpperBody)"));
-    let r = animate(&mut w, root, one_shot("", -1.0, 0.1));
+    let r = try_animate(&mut w, root, one_shot("", -1.0, 0.1));
     assert!(why(&w, r).contains("blends must be finite"));
-    let r = animate(
+    let r = try_animate(
         &mut w,
         root,
         AnimateOp::PlayOneShot {
@@ -962,7 +963,11 @@ fn a_one_shot_is_checked() {
             speed: 1.0,
         },
     );
-    assert!(why(&w, r).contains("not a clip or blend space the world has"));
+    assert_eq!(r.unwrap().rejected, 1);
+    assert!(w.diagnostics()[0]
+        .message
+        .contains("not a clip or blend space the world has"));
+    assert_eq!(w.diagnostics()[0].command_index, u32::MAX);
     // Without a controller: play the clip instead.
     let lone = spawn(&mut w, 9, None, "Lone");
     set(
@@ -973,8 +978,8 @@ fn a_one_shot_is_checked() {
             ..Animator::default()
         }),
     );
-    let r = animate(&mut w, lone, one_shot("", 0.1, 0.1));
-    assert!(why(&w, r).contains("a one-shot plays in a controller's slot"));
+    let r = try_animate(&mut w, lone, one_shot("", 0.1, 0.1));
+    assert!(why(&w, r).contains("animator has no controller"));
 }
 
 /// ADR-0033 § 4: a crossfade that its transition lets the next state's

@@ -18,38 +18,38 @@ fn world() -> World {
     World::new(WorldConfig::default())
 }
 
-fn spawn(w: &mut World, temp_id: u64, at: Vec3, parent: Option<Entity>, name: &str) -> Entity {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id,
-            transform: Transform::from_position(at),
-            parent,
-            name: Some(name.to_owned()),
-        }],
-    );
-    let r = w.step();
-    assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
-    w.drain_events()
-        .into_iter()
-        .find_map(|e| match e.payload {
-            EventPayload::Spawned { temp_id: t, entity } if t == temp_id => Some(entity),
-            _ => None,
+fn spawn(w: &mut World, _fixture_id: u64, at: Vec3, parent: Option<Entity>, name: &str) -> Entity {
+    let commit = w
+        .edit_gameplay(|edit| {
+            edit.spawn(
+                name.to_owned(),
+                Transform::from_position(at),
+                parent.map(Into::into),
+            )
         })
-        .unwrap()
+        .unwrap();
+    let entity = commit.resolve(commit.value).unwrap();
+    assert_eq!(w.step().status, Status::Ok);
+    w.drain_events();
+    entity
 }
 
 fn set(w: &mut World, entity: Entity, value: ComponentValue) {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetComponent { entity, value }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_component(entity, value)?;
+        Ok(())
+    })
+    .unwrap();
     let r = w.step();
     assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
 }
 
 fn animate(w: &mut World, entity: Entity, op: AnimateOp) {
-    w.submit(Lane::Simulation, vec![Command::Animate { entity, op }]);
+    w.edit_gameplay(|edit| {
+        edit.animate_control(entity, op)?;
+        Ok(())
+    })
+    .unwrap();
     let r = w.step();
     assert_eq!(r.rejected, 0, "{:?}", w.diagnostics());
 }
@@ -272,25 +272,18 @@ fn two_bone_ik_reaches_a_target_from_code_and_lets_go() {
         "{}",
         at(&w, hand)
     );
-    // A goal the controller does not have is rejected.
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Animate {
-            entity: root,
-            op: AnimateOp::ClearIkTarget {
-                goal: "foot".into(),
-            },
-        }],
-    );
-    let r = w.step();
-    assert_eq!(r.rejected, 1);
-    assert!(
-        w.diagnostics()
-            .iter()
-            .any(|d| d.message.contains("no IK goal `foot`")),
-        "{:?}",
-        w.diagnostics()
-    );
+    let error = w
+        .edit_gameplay(|edit| {
+            edit.animate_control(
+                root,
+                AnimateOp::ClearIkTarget {
+                    goal: "foot".into(),
+                },
+            )
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("no IK goal `foot`"));
+    assert_eq!(w.step().rejected, 0);
 }
 
 #[test]

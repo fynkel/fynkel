@@ -21,39 +21,43 @@ fn world() -> World {
     World::new(WorldConfig::default())
 }
 
-fn spawn(w: &mut World, temp_id: u64, at: Vec3, parent: Option<Entity>, name: &str) -> Entity {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id,
-            transform: Transform::from_position(at),
-            parent,
-            name: Some(name.to_owned()),
-        }],
-    );
-    let r = w.step();
-    assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
-    w.drain_events()
-        .into_iter()
-        .find_map(|e| match e.payload {
-            EventPayload::Spawned { temp_id: t, entity } if t == temp_id => Some(entity),
-            _ => None,
+fn spawn(w: &mut World, _fixture_id: u64, at: Vec3, parent: Option<Entity>, name: &str) -> Entity {
+    let commit = w
+        .edit_gameplay(|edit| {
+            edit.spawn(
+                name.to_owned(),
+                Transform::from_position(at),
+                parent.map(Into::into),
+            )
         })
-        .unwrap()
+        .unwrap();
+    let entity = commit.resolve(commit.value).unwrap();
+    assert_eq!(w.step().status, Status::Ok);
+    w.drain_events();
+    entity
 }
 
 fn set(w: &mut World, entity: Entity, value: ComponentValue) {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetComponent { entity, value }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_component(entity, value)?;
+        Ok(())
+    })
+    .unwrap();
     let r = w.step();
     assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
 }
 
 fn animate(w: &mut World, entity: Entity, op: AnimateOp) -> StepReport {
-    w.submit(Lane::Simulation, vec![Command::Animate { entity, op }]);
+    w.edit_gameplay(|edit| {
+        edit.animate_control(entity, op)?;
+        Ok(())
+    })
+    .unwrap();
     w.step()
+}
+fn try_animate(w: &mut World, entity: Entity, op: AnimateOp) -> EditResult<StepReport> {
+    w.edit_gameplay(|edit| edit.animate_control(entity, op))?;
+    Ok(w.step())
 }
 
 fn local(w: &World, e: Entity) -> Transform {
@@ -259,15 +263,18 @@ fn playback_commands_edit_the_clock_and_are_validated() {
     set(&mut w, root, animator(clip_ref(1), true));
 
     // Rejections: no Animator, non-finite speed, negative time/fade.
-    let r = animate(&mut w, bare, AnimateOp::Pause);
-    assert_eq!(r.rejected, 1);
-    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::MISSING_COMPONENT);
-    let r = animate(&mut w, root, AnimateOp::SetSpeed(f32::NAN));
-    assert_eq!(r.rejected, 1);
-    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::INVALID_PAYLOAD);
-    let r = animate(&mut w, root, AnimateOp::SetTime(-1.0));
-    assert_eq!(r.rejected, 1);
-    let r = animate(
+    let r = try_animate(&mut w, bare, AnimateOp::Pause);
+    assert!(r.is_err());
+    assert!(matches!(r, Err(EditError::MissingComponent(..))));
+    let r = try_animate(&mut w, root, AnimateOp::SetSpeed(f32::NAN));
+    assert!(r.is_err());
+    assert!(matches!(
+        r,
+        Err(EditError::InvalidEffect(..) | EditError::InvalidComponent { .. })
+    ));
+    let r = try_animate(&mut w, root, AnimateOp::SetTime(-1.0));
+    assert!(r.is_err());
+    let r = try_animate(
         &mut w,
         root,
         AnimateOp::Crossfade {
@@ -277,8 +284,11 @@ fn playback_commands_edit_the_clock_and_are_validated() {
             seconds: -0.1,
         },
     );
-    assert_eq!(r.rejected, 1);
-    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::INVALID_PAYLOAD);
+    assert!(r.is_err());
+    assert!(matches!(
+        r,
+        Err(EditError::InvalidEffect(..) | EditError::InvalidComponent { .. })
+    ));
 
     // SetTime jumps (clamped to the duration), Pause holds, SetSpeed
     // scales, Stop rewinds to 0 and holds there.
@@ -432,13 +442,11 @@ fn a_missing_clip_is_reported_once_and_plays_once_registered() {
     // Renaming the target drops it from the pose; a new entity with the
     // name is picked up.
     set(&mut w, root, animator(clip_ref(7), true));
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetName {
-            entity: arm,
-            name: "leg".into(),
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_name(arm, "leg")?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     let frozen = local(&w, arm).position.y;
     let arm2 = spawn(&mut w, 3, Vec3::new(2.0, 0.0, 0.0), Some(root), "arm");
@@ -521,13 +529,11 @@ fn a_skin_resolves_its_joints_and_the_extract_carries_the_palette() {
         assert!(m.abs_diff_eq(Mat4::IDENTITY, 1e-5), "{m:?}");
     }
     // Move the head joint: its palette entry becomes the delta.
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetTransform {
-            entity: head,
-            transform: Transform::from_position(Vec3::new(0.0, 1.5, 0.0)),
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_transform(head, Transform::from_position(Vec3::new(0.0, 1.5, 0.0)))?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     w.step();
     let extract = w.extract();
@@ -540,8 +546,6 @@ fn a_skin_resolves_its_joints_and_the_extract_carries_the_palette() {
     // A destroyed skeleton (ADR-0035 §5): the mesh draws in its bind pose
     // (identity palette), no diagnostic — nothing searches for another.
     let pelvis = spawn(&mut w, 5, Vec3::ZERO, Some(root), "pelvis");
-    w.submit(Lane::Simulation, vec![Command::Destroy(pelvis)]);
-    w.step();
     set(
         &mut w,
         body,
@@ -550,6 +554,12 @@ fn a_skin_resolves_its_joints_and_the_extract_carries_the_palette() {
             skeleton: ObjectRef::to(pelvis),
         }),
     );
+    w.edit_gameplay(|edit| {
+        edit.destroy(pelvis)?;
+        Ok(())
+    })
+    .unwrap();
+    w.step();
     let extract = w.extract();
     assert!(extract.meshes[0].skin.is_some());
     for m in &extract.joints {
@@ -728,9 +738,12 @@ fn a_nested_animator_is_a_layer_at_its_weight_and_can_be_additive() {
     assert_eq!(r.rejected, 0);
     assert!((local(&w, arm).position.y - 10.0).abs() < 1e-5);
     assert_eq!(w.animator_state(arm).unwrap().weight, 1.0);
-    let r = animate(&mut w, arm, AnimateOp::SetWeight(1.5));
-    assert_eq!(r.rejected, 1);
-    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::INVALID_PAYLOAD);
+    let r = try_animate(&mut w, arm, AnimateOp::SetWeight(1.5));
+    assert!(r.is_err());
+    assert!(matches!(
+        r,
+        Err(EditError::InvalidEffect(..) | EditError::InvalidComponent { .. })
+    ));
     // Additive: the wave's delta (x, not its y = 5) over the base pose.
     set(
         &mut w,
@@ -760,7 +773,7 @@ fn a_nested_animator_is_a_layer_at_its_weight_and_can_be_additive() {
     );
     assert_eq!(r.rejected, 0);
     assert_eq!(w.animator_state(arm).unwrap().parameter, 3.5);
-    let r = animate(
+    let r = try_animate(
         &mut w,
         arm,
         AnimateOp::SetParameter {
@@ -768,7 +781,7 @@ fn a_nested_animator_is_a_layer_at_its_weight_and_can_be_additive() {
             value: 1.0,
         },
     );
-    assert_eq!(r.rejected, 1);
+    assert!(r.is_err());
 }
 
 /// "walk": the hips (under the rig) move z 0 → -2 (forward) over 1 s at
@@ -1152,7 +1165,7 @@ fn a_blend_space_waits_for_its_clips_and_a_bad_parameter_is_refused() {
     assert!(w.diagnostics().is_empty());
     assert!(local(&w, arm).position.y > 0.0, "playing now");
     // A parameter that is not finite, or has no name, is refused.
-    let r = animate(
+    let r = try_animate(
         &mut w,
         root,
         AnimateOp::SetParameter {
@@ -1160,9 +1173,12 @@ fn a_blend_space_waits_for_its_clips_and_a_bad_parameter_is_refused() {
             value: f32::NAN,
         },
     );
-    assert_eq!(r.rejected, 1, "{:?}", w.diagnostics());
-    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::INVALID_PAYLOAD);
-    let r = animate(
+    assert!(r.is_err());
+    assert!(matches!(
+        r,
+        Err(EditError::InvalidEffect(..) | EditError::InvalidComponent { .. })
+    ));
+    let r = try_animate(
         &mut w,
         root,
         AnimateOp::SetParameter {
@@ -1170,7 +1186,7 @@ fn a_blend_space_waits_for_its_clips_and_a_bad_parameter_is_refused() {
             value: 1.0,
         },
     );
-    assert_eq!(r.rejected, 1);
+    assert!(r.is_err());
     // A parameter of another name leaves the space where it is.
     let r = animate(
         &mut w,

@@ -76,6 +76,14 @@ impl Physics {
         false
     }
 
+    /// Publishes a prevalidated runtime replacement and invalidates built colliders.
+    pub fn replace_prepared_mesh(&mut self, key: &AssetRef, mesh: Option<crate::PreparedMesh>) {
+        self.meshes.remove(key);
+        if let Some(mesh) = mesh {
+            self.register_prepared_mesh(key.clone(), mesh);
+        }
+    }
+
     pub fn replace_mesh(
         &mut self,
         key: &AssetRef,

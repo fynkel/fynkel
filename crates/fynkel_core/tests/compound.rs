@@ -9,36 +9,25 @@ use glam::Vec3;
 
 fn spawn(
     w: &mut World,
-    temp_id: u64,
+    _fixture_id: u64,
     at: Vec3,
     parent: Option<Entity>,
     components: Vec<ComponentValue>,
 ) -> Entity {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id,
-            transform: Transform::from_position(at),
-            parent,
-            name: None,
-        }],
-    );
-    let r = w.step();
-    assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
-    let entity = w
-        .drain_events()
-        .into_iter()
-        .find_map(|e| match e.payload {
-            EventPayload::Spawned { temp_id: t, entity } if t == temp_id => Some(entity),
-            _ => None,
+    let commit = w
+        .edit_gameplay(|edit| edit.spawn("", Transform::from_position(at), parent.map(Into::into)))
+        .unwrap();
+    let entity = commit.resolve(commit.value).unwrap();
+    assert_eq!(w.step().status, Status::Ok);
+    w.drain_events();
+    if !components.is_empty() {
+        w.edit_gameplay(|edit| {
+            for value in components {
+                edit.set_component(entity, value)?;
+            }
+            Ok(())
         })
         .unwrap();
-    let cmds: Vec<Command> = components
-        .into_iter()
-        .map(|value| Command::SetComponent { entity, value })
-        .collect();
-    if !cmds.is_empty() {
-        w.submit(Lane::Simulation, cmds);
     }
     entity
 }
@@ -161,13 +150,11 @@ fn a_grandchild_joins_through_a_plain_child_and_a_moved_child_moves_its_shape() 
     // rises by 1 m.
     let mut t = w.ecs().copy::<Transform>(leg).unwrap();
     t.position.y = -1.5;
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetTransform {
-            entity: leg,
-            transform: t,
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_transform(leg, t)?;
+        Ok(())
+    })
+    .unwrap();
     run(&mut w, 240);
     let y = position(&w, body).y;
     assert!(
@@ -204,22 +191,18 @@ fn deactivating_a_joined_child_drops_its_shape_and_keeps_the_body_moving() {
         Some(body),
         vec![ComponentValue::Collider(Collider::default())],
     );
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Body {
-            entity: body,
-            op: BodyCommand::SetLinearVelocity(Vec3::X * 2.0),
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.body_effect(body, BodyCommand::SetLinearVelocity(Vec3::X * 2.0))?;
+        Ok(())
+    })
+    .unwrap();
     run(&mut w, 10);
     assert_eq!(w.physics().stats().colliders, 2);
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetActive {
-            entity: front,
-            active: false,
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_active(front, false)?;
+        Ok(())
+    })
+    .unwrap();
     run(&mut w, 10);
     assert_eq!(
         w.physics().stats().colliders,
@@ -322,13 +305,11 @@ fn removing_the_body_leaves_its_children_as_static_geometry() {
         vec![ComponentValue::Collider(Collider::default())],
     );
     run(&mut w, 5);
-    w.submit(
-        Lane::Simulation,
-        vec![Command::RemoveComponent {
-            entity: body,
-            component: ComponentId::RIGID_BODY,
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.remove_component(body, ComponentId::RIGID_BODY)?;
+        Ok(())
+    })
+    .unwrap();
     run(&mut w, 5);
     assert_eq!(w.physics().stats().bodies, 0);
     assert_eq!(

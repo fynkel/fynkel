@@ -869,10 +869,9 @@ fn dont_destroy_on_load_through_the_abi() {
         );
     }
     // Destroyed, nothing keeps it: the next replace load releases it.
-    unsafe { &mut *host.w }.core_mut().submit(
-        fynkel_core::Lane::Simulation,
-        vec![fynkel_core::Command::Destroy(root)],
-    );
+    let mut edit = edit::Edit::new(host.w);
+    edit.destroy(root);
+    edit.commit();
     assert_eq!(host.step(), Status::Ok);
     assert_eq!(host.load_scene(&cache, CATALOGUE), Status::Ok);
     assert_eq!(host.report()["persistent"], 0);
@@ -1842,6 +1841,15 @@ fn persistent_objects_are_made_once_by_load_project() {
     );
     assert!(unsafe { &*host.w }.core().ecs().contains(first));
 
+    // Failed project activation keeps the old scene, project roots and store.
+    let before_count = unsafe { &*host.w }.core().live_entities();
+    assert_eq!(
+        host.load_project(&root.join("missing-cache").display().to_string()),
+        Status::LoadFailed
+    );
+    assert_eq!(unsafe { &*host.w }.core().live_entities(), before_count);
+    assert!(unsafe { &*host.w }.core().is_persistent(first));
+
     // The next load_project makes them afresh: the old one goes.
     assert_eq!(host.load_project(&cache), Status::Ok);
     let r = host.report();
@@ -2011,44 +2019,39 @@ fn binding_warning_reports_and_accepted_overrides_match_after_a_later_load() {
 }
 
 #[test]
-fn binding_boundary_adopts_queued_spawns_once_and_failed_adoption_keeps_previous_overrides() {
+fn rebinding_observes_committed_state_and_does_not_consume_lifecycle_events() {
     let host = Host::new();
-    let cooked = Cooked::new("rebind-adoption");
+    let cooked = Cooked::new("rebind-journal");
     assert_eq!(host.load_project(&cooked.text()), Status::Ok);
     host.events();
-    unsafe { &mut *host.w }.core_mut().submit(
-        fynkel_core::Lane::Simulation,
-        vec![fynkel_core::Command::Spawn {
-            temp_id: 73,
-            transform: Transform::default(),
-            parent: None,
-            name: Some("adopted".into()),
-        }],
-    );
+    let core = unsafe { &mut *host.w }.core_mut();
+    let commit = core
+        .edit_gameplay(|edit| edit.spawn("committed", Transform::IDENTITY, None))
+        .unwrap();
+    let entity = commit.resolve(commit.value).unwrap();
+    core.edit_gameplay(|edit| edit.destroy(entity)).unwrap();
+    let tick = core.tick();
     assert_eq!(host.bind_actions(r#"{"jump":["keyboard:J"]}"#), Status::Ok);
+    assert_eq!(unsafe { &*host.w }.core().tick(), tick);
     assert_eq!(
         host.events()
             .iter()
-            .filter(|e| e.0 == EventKind::SPAWNED.0)
+            .filter(|event| event.0 == EventKind::DESTROYED.0)
             .count(),
         1
     );
-    host.step();
-    assert!(host.events().iter().all(|e| e.0 != EventKind::SPAWNED.0));
-    unsafe { &mut *host.w }.core_mut().submit(
-        fynkel_core::Lane::Simulation,
-        vec![fynkel_core::Command::Spawn {
-            temp_id: 74,
-            transform: Transform::from_position(Vec3::splat(f32::NAN)),
-            parent: None,
-            name: Some("invalid".into()),
-        }],
-    );
-    assert_eq!(
-        host.bind_actions(r#"{"jump":["keyboard:K"]}"#),
-        Status::LoadFailed
-    );
-    host.step(); // Original failed queue remains for its normal rejection path.
+    assert!(host.events().is_empty());
+    assert!(unsafe { &mut *host.w }
+        .core_mut()
+        .edit_gameplay(|edit| {
+            edit.spawn(
+                "discarded",
+                Transform::from_position(Vec3::splat(f32::NAN)),
+                None,
+            )
+        })
+        .is_err());
+    assert_eq!(host.bind_actions(r#"{"jump":["keyboard:K"]}"#), Status::Ok);
     assert_eq!(host.load_scene(&cooked.text(), MAIN_SCENE), Status::Ok);
     let report = host.report();
     let jump = report["input"]["actions"]
@@ -2057,5 +2060,124 @@ fn binding_boundary_adopts_queued_spawns_once_and_failed_adoption_keeps_previous
         .iter()
         .find(|a| a["name"] == "jump")
         .unwrap();
-    assert_eq!(jump["bindings"], serde_json::json!(["keyboard:J"]));
+    assert_eq!(jump["bindings"], serde_json::json!(["keyboard:K"]));
+}
+
+#[path = "support/edit.rs"]
+mod edit;
+
+#[test]
+fn asset_registration_waits_for_successful_transaction_commit() {
+    use edit::Edit;
+    use fynkel_core::{Animator, ComponentValue};
+    let cooked = Cooked::new("transaction-assets");
+    let host = Host::new();
+    assert_eq!(host.load_project(&cooked.text()), Status::Ok);
+    let clip = fynkel_contracts::AssetRef::with_sub(
+        "c0000000-0000-4000-8000-000000000005".parse().unwrap(),
+        "anim/wave",
+    );
+    let mut edit = Edit::new(host.w);
+    let owner = edit.spawn("owner", Default::default(), None);
+    let dead = edit.spawn("dead", Default::default(), None);
+    let commit = edit.commit();
+    let owner = commit.resolve(owner);
+    let dead = commit.resolve(dead);
+    let mut edit = Edit::new(host.w);
+    edit.destroy(dead);
+    edit.commit();
+    let value = ComponentValue::Animator(Animator {
+        clip: clip.clone(),
+        playing: false,
+        ..Default::default()
+    });
+    assert!(!unsafe { (*host.w).core().has_clip(&clip) });
+    let mut edit = Edit::new(host.w);
+    assert_eq!(edit.component(dead, &value), Err(Status::CommandsRejected));
+    assert_eq!(edit.finish(), Status::CommandsRejected);
+    assert!(!unsafe { (*host.w).core().has_clip(&clip) });
+    // Preparing a valid asset is still rolled back if a later operation fails.
+    let mut edit = Edit::new(host.w);
+    edit.component(owner, &value).unwrap();
+    assert_eq!(edit.try_destroy(dead), Status::CommandsRejected);
+    assert_eq!(edit.finish(), Status::CommandsRejected);
+    assert!(!unsafe { (*host.w).core().has_clip(&clip) });
+    assert!(!unsafe { (*host.w).core().ecs().has::<Animator>(owner) });
+    assert_eq!(host.step(), Status::Ok);
+    assert!(!unsafe { (*host.w).core().has_clip(&clip) });
+    let mut edit = Edit::new(host.w);
+    edit.component(owner, &value).unwrap();
+    edit.commit();
+    assert!(unsafe { (*host.w).core().has_clip(&clip) });
+    assert!(unsafe { (*host.w).core().ecs().has::<Animator>(owner) });
+}
+
+#[test]
+fn runtime_material_journal_publishes_once_and_preserves_store_on_abort() {
+    use fynkel_contracts::{AssetRef, Uuid};
+    use fynkel_core::material::PbrMaterial;
+    use fynkel_native::gameplay::{
+        fynkel_world_gameplay_begin, fynkel_world_gameplay_end, fynkel_world_gameplay_exchange,
+    };
+    let cooked = Cooked::new("journal-materials");
+    let host = Host::new();
+    assert_eq!(host.load_project(&cooked.text()), Status::Ok);
+    let assets = unsafe { &*host.w }.assets().unwrap().clone();
+    let key = AssetRef::new(Uuid(*b"journal-material"));
+    let old = PbrMaterial::default();
+    assets.set_runtime_material(&key, Some(old.clone()));
+    let revision = assets.live_edits();
+    for commit in [0, 1] {
+        let mut sequence = 0;
+        let mut out = FynkelBufferView {
+            data: ptr::null(),
+            length: 0,
+        };
+        assert_eq!(
+            unsafe { fynkel_world_gameplay_begin(host.w, &mut sequence) },
+            Status::Ok
+        );
+        for roughness in [0.25, 0.75] {
+            let material = PbrMaterial {
+                roughness,
+                ..old.clone()
+            };
+            let payload = fynkel_wire::material::encode_material(&material);
+            let id = key.asset.to_string();
+            let mut request = Vec::new();
+            for word in [1u32, 29, id.len() as u32] {
+                request.extend(word.to_le_bytes());
+            }
+            request.extend(id.as_bytes());
+            request.extend((payload.len() as u32).to_le_bytes());
+            request.extend(payload);
+            assert_eq!(
+                unsafe {
+                    fynkel_world_gameplay_exchange(
+                        host.w,
+                        sequence,
+                        request.as_ptr(),
+                        request.len() as u32,
+                        &mut out,
+                    )
+                },
+                Status::Ok
+            );
+            assert_eq!(
+                assets.material(&key).unwrap(),
+                old,
+                "staging does not mutate render store"
+            );
+            assert_eq!(assets.live_edits(), revision);
+        }
+        assert_eq!(
+            unsafe { fynkel_world_gameplay_end(host.w, sequence, commit, &mut out) },
+            Status::Ok
+        );
+        assert_eq!(assets.live_edits(), revision + commit as u64);
+        assert_eq!(
+            assets.material(&key).unwrap().roughness,
+            if commit == 0 { old.roughness } else { 0.75 }
+        );
+    }
 }

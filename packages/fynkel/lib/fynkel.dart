@@ -1,6 +1,6 @@
 /// Fynkel Engine — Dart gameplay API: `World`, `GameObject`, `Behaviour`
 /// with its lifecycle, `GameContext` services, typed events, diagnostics,
-/// and the ABI v3 bridge underneath.
+/// and the ABI v4 bridge underneath.
 library;
 
 export 'generated/schema.g.dart'
@@ -18,7 +18,6 @@ export 'generated/schema.g.dart'
         AnimatorStateExitedEvent,
         AnimatorStateRecord,
         AudioBus,
-        AudioBusCommandRecord,
         AudioCommandRecord,
         AudioListener,
         AudioOp,
@@ -90,14 +89,14 @@ export 'src/mesh_data.dart';
 export 'src/model.dart';
 export 'src/modules.dart';
 export 'src/pool.dart';
-export 'src/physics.dart' show BodyState, CharacterState, CollisionFlags, PhysicsHit, PhysicsSettings, RigidbodyConstraints;
+export 'src/physics.dart'
+    show BodyState, CharacterState, CollisionFlags, PhysicsHit, PhysicsSettings, RigidbodyConstraints;
 export 'src/systems.dart';
 export 'src/recording.dart';
 export 'src/settings.dart';
 export 'src/transform_writer.dart';
-export 'src/native/bridge.dart'
-    show BridgeStats, CommandLane, FramePlan, NativeLibrary, NativeWorld, QueryKind, StepResult, SubmitResult;
-export 'src/wire/buffers.dart' show CommandBatch, RecordBatch, WireBuffer;
+export 'src/native/bridge.dart' show BridgeStats, FramePlan, NativeLibrary, NativeWorld, QueryKind, StepResult;
+export 'src/wire/buffers.dart' show RecordBatch, WireBuffer;
 export 'src/wire/support.dart' show WireRecord;
 export 'src/world.dart' hide bindWrittenData, specOfObject, writingReferences;
 

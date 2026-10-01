@@ -1,4 +1,5 @@
-//! Commands are the only way gameplay mutates the world (§5.4).
+//! Typed data-change descriptions and subsystem operations. Gameplay mutations
+//! publish through `World::edit_gameplay`; these values are not a submission queue.
 
 use fynkel_audio::AudioBus;
 use fynkel_contracts::{AssetRef, ComponentId, Entity};
@@ -7,37 +8,18 @@ use fynkel_scene::Transform;
 
 use crate::components::ComponentValue;
 
-/// Which frame phase a command batch belongs to (ADR-0008).
+/// The phase responsible for a runtime diagnostic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum Lane {
-    /// Applied at the next fixed tick boundary.
+    /// Fixed simulation processing.
     Simulation = 0,
-    /// Applied before the current frame's extraction; transforms also become
-    /// the staged authoritative value for the next tick.
+    /// Immediate frame processing.
     Presentation = 1,
-}
-
-impl Lane {
-    pub fn from_u32(v: u32) -> Option<Lane> {
-        match v {
-            0 => Some(Lane::Simulation),
-            1 => Some(Lane::Presentation),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
-    /// `temp_id` (non-zero, unique within the batch) is echoed in the
-    /// `Spawned` event with the real handle.
-    Spawn {
-        temp_id: u64,
-        transform: Transform,
-        parent: Option<Entity>,
-        name: Option<String>,
-    },
     /// Destroys the entity and its subtree.
     Destroy(Entity),
     SetTransform {
@@ -55,8 +37,7 @@ pub enum Command {
     },
     /// Sets the entity's own active flag (Unity's `SetActive`): the
     /// subtree under an inactive entity is not drawn, simulated, animated
-    /// or heard; it keeps its components and transforms. Simulation lane
-    /// only.
+    /// or heard; it keeps its components and transforms.
     SetActive {
         entity: Entity,
         active: bool,
@@ -76,7 +57,7 @@ pub enum Command {
     /// Moves a `RigidBody` (M3-08): forces, impulses, velocities, a
     /// kinematic target or a teleport. Applied by the physics step of this
     /// tick, after the batch's component writes (a body set in the same
-    /// batch receives it). Simulation lane only.
+    /// transaction receives it).
     Body {
         entity: Entity,
         op: BodyCommand,
@@ -84,8 +65,7 @@ pub enum Command {
     /// Drives a `fynkel.Animator` (M3-19): play, crossfade, stop, pause,
     /// resume, re-speed or seek. Applied at the tick boundary in batch
     /// order (an animator set in the same batch receives it); the
-    /// animator system then samples the result this tick. Simulation lane
-    /// only; `MISSING_COMPONENT` without an animator.
+    /// animator system then samples the result this tick; `MISSING_COMPONENT` without an animator.
     Animate {
         entity: Entity,
         op: AnimateOp,
@@ -93,16 +73,14 @@ pub enum Command {
     /// Drives a `fynkel.AudioSource` (M3-11): play, stop, pause, resume,
     /// re-volume or re-pitch its voice. Applied at the tick boundary in
     /// batch order (a source set in the same batch receives it); the audio
-    /// system then reconciles the component this tick. Simulation lane
-    /// only; `MISSING_COMPONENT` without a source.
+    /// system then reconciles the component this tick; `MISSING_COMPONENT` without a source.
     Audio {
         entity: Entity,
         op: AudioOp,
     },
     /// Plays a clip once, on no entity (M3-11): a fire-and-forget sound
     /// with no `PLAYBACK_ENDED`. `SOUND_UNAVAILABLE` for a clip the world
-    /// has not been given; refused silently under the voice limit. Either
-    /// lane.
+    /// has not been given; refused silently under the voice limit.
     PlaySound {
         clip: AssetRef,
         bus: AudioBus,
@@ -111,8 +89,7 @@ pub enum Command {
         priority: i32,
     },
     /// Sets a bus gain and the mute (M3-11); `master` scales the other
-    /// two. What the `fynkel.Settings` volumes are applied through. Either
-    /// lane.
+    /// two. What the `fynkel.Settings` volumes are applied through.
     AudioBus {
         bus: AudioBus,
         volume: f32,
@@ -244,21 +221,8 @@ pub enum AnimateOp {
 }
 
 impl Command {
-    /// Presentation lane accepts plain-data writes only (§5.1 table).
-    pub fn allowed_on_presentation(&self) -> bool {
-        matches!(
-            self,
-            Command::SetTransform { .. }
-                | Command::SetName { .. }
-                | Command::SetComponent { .. }
-                | Command::PlaySound { .. }
-                | Command::AudioBus { .. }
-        )
-    }
-
     pub fn target(&self) -> Option<Entity> {
         match self {
-            Command::Spawn { .. } => None,
             Command::Destroy(e) => Some(*e),
             Command::SetTransform { entity, .. }
             | Command::SetName { entity, .. }

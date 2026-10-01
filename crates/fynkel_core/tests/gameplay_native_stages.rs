@@ -104,14 +104,13 @@ fn transform_validation_agrees_across_component_scene_and_gameplay_entries() {
     assert!(w
         .edit_gameplay(|edit| edit.set_transform(entity, invalid))
         .is_err());
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetTransform {
+    assert!(!w
+        .apply_gameplay_now(vec![Command::SetTransform {
             entity,
-            transform: invalid,
-        }],
-    );
-    assert_eq!(w.step().rejected, 1);
+            transform: invalid
+        }])
+        .is_empty());
+    assert_eq!(w.step().rejected, 0);
     assert_eq!(
         w.ecs().copy::<Transform>(entity).unwrap(),
         Transform::IDENTITY

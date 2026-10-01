@@ -87,7 +87,7 @@ impl ComponentId {
 pub struct EventKind(pub u32);
 
 impl EventKind {
-    pub const SPAWNED: EventKind = EventKind(1);
+    // 1 retired: temporary-ID spawn acknowledgements. Do not reuse.
     pub const DESTROYED: EventKind = EventKind(2);
     pub const PARENT_CHANGED: EventKind = EventKind(3);
     pub const MISSED_DEADLINE: EventKind = EventKind(4);

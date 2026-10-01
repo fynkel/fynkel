@@ -194,9 +194,9 @@ void main() {
     );
   });
 
-  test('the source-build lock pins ABI v3 without incompatible prebuilt artifacts', () {
+  test('the source-build lock pins ABI v4 without incompatible prebuilt artifacts', () {
     final lock = RuntimeLock.parse(File('fynkel.lock.json').readAsStringSync());
-    expect(lock.abiVersion, 3);
+    expect(lock.abiVersion, 4);
     expect(lock.store, isNull);
     expect(lock.artifacts, isEmpty);
   });

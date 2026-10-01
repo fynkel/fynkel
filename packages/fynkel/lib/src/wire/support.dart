@@ -11,7 +11,7 @@ import '../asset_ref.dart';
 
 /// Collects strings while encoding; the bytes form the buffer's string tail.
 /// Every generated record: fixed-size body written at [encode]'s offset,
-/// strings in the tail. Lets [CommandBatch] encode without a per-command
+/// strings in the tail. Lets typed record writers encode without a per-record
 /// closure (tear-off) allocation.
 abstract interface class WireRecord {
   void encode(ByteData d, int offset, WireStrings strings);

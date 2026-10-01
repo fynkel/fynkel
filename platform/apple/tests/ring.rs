@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use fynkel_core::{Command, Lane, Transform, World, WorldConfig};
+use fynkel_core::{Transform, World, WorldConfig};
 use fynkel_platform_apple::{IoSurfaceRing, SyncMode, Viewport};
 use fynkel_render::{clear_rgba8, ExtractRenderer};
 
@@ -14,15 +14,9 @@ fn clear_bgra() -> [u8; 4] {
 
 fn world_with_cube() -> World {
     let mut world = World::new(WorldConfig::default());
-    world.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id: 1,
-            transform: Transform::IDENTITY,
-            parent: None,
-            name: None,
-        }],
-    );
+    world
+        .edit_gameplay(|edit| edit.spawn("", Transform::IDENTITY, None))
+        .unwrap();
     world.begin_frame(1.0 / 60.0);
     world.step();
     world
@@ -183,15 +177,9 @@ fn viewport_renders_the_world_the_host_steps() {
     assert_eq!(vp.ring().acquire_presented(), 0);
     assert_eq!(vp.ring().read_pixel(0, 100, 100).unwrap(), clear_bgra());
 
-    world.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id: 1,
-            transform: Transform::IDENTITY,
-            parent: None,
-            name: None,
-        }],
-    );
+    world
+        .edit_gameplay(|edit| edit.spawn("", Transform::IDENTITY, None))
+        .unwrap();
     world.begin_frame(1.0 / 60.0);
     world.step();
     let slot = vp.render(&world.extract());

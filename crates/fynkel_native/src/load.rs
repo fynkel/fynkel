@@ -61,6 +61,7 @@ fn load_error_diagnostic(e: &LoadError) -> Diagnostic {
         LoadError::UnknownAnchorParent(_)
         | LoadError::AnchorTransform
         | LoadError::UnknownSource(_)
+        | LoadError::SceneRejected(_)
         | LoadError::CloneRejected(_)
         | LoadError::LiveSpawnRejected(_)
         | LoadError::NotARoot(_) => Code::IO,
@@ -184,7 +185,13 @@ fn scenes_json(w: &FynkelWorld) -> Vec<Value> {
 }
 
 /// Spawns the cooked scene, retains its closure and builds the report.
-fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: LoadMode) -> Outcome {
+fn instantiate(
+    w: &mut FynkelWorld,
+    assets: Assets,
+    scene: CookedScene,
+    mode: LoadMode,
+    retire: &[Entity],
+) -> Outcome {
     let cache = cache_json(&assets);
     // Physics (M3-08): the project's gravity, and every mesh collider's
     // mesh registered before the first step builds the colliders.
@@ -194,48 +201,51 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
         .project()
         .map(|p| p.layers_and_tags.clone())
         .unwrap_or_default();
-    let (physics, animation, audio) = {
-        let core = w.core_mut();
-        if let Some(p) = assets.project() {
-            core.physics_mut()
-                .set_gravity(fynkel_core::physics::Vec3::from(p.physics.gravity));
-            // The modules the project turned off (ADR-0029 §3).
-            core.set_modules(p.modules.modules);
-        }
-        let (meshes, mut diags) =
-            assets.register_mesh_colliders(&scene.description, core.physics_mut());
-        // The catalogue (M3-10): every prefab an emitter names.
-        let (prefabs, prefab_diags) = assets.register_prefabs(&scene.description, core);
-        diags.extend(prefab_diags);
-        // Animation (M3-19): every clip an animator plays and every skin.
-        let (clips, skins, anim_diags) = assets.register_animation(&scene.description, core);
-        diags.extend(anim_diags);
-        // Audio (M3-11): every sound a source names.
-        let (sounds, audio_diags) = assets.register_audio(&scene.description, core);
-        diags.extend(audio_diags);
-        let gravity = core.physics().gravity();
-        let stats = core.audio_stats();
-        (
-            json!({
-                "gravity": [gravity.x, gravity.y, gravity.z],
-                "meshColliders": meshes,
-                "prefabs": prefabs,
-                "diagnostics": diags.iter().map(diagnostic_json).collect::<Vec<_>>(),
-            }),
-            json!({ "clips": clips, "skins": skins }),
-            json!({
-                "sounds": sounds,
-                "clips": stats.clips,
-                "streams": stats.streams,
-                "device": stats.device,
-                "sampleRate": stats.sample_rate,
-                "channels": stats.channels,
-                "maxVoices": stats.max_voices,
-            }),
-        )
-    };
-    match w.core_mut().load_scene_with(&scene.description, mode) {
+    let (resources, prepared) =
+        fynkel_assets::PreparedGameplayResources::for_scene(&assets, w.core(), &scene.description);
+    match w.core_mut().load_scene_replacing(
+        &scene.description,
+        mode,
+        Some(Box::new(resources)),
+        retire,
+    ) {
         Ok(loaded) => {
+            let (physics, animation, audio) = {
+                let core = w.core_mut();
+                if let Some(p) = assets.project() {
+                    core.physics_mut()
+                        .set_gravity(fynkel_core::physics::Vec3::from(p.physics.gravity));
+                    // The modules the project turned off (ADR-0029 §3).
+                    core.set_modules(p.modules.modules);
+                }
+                let meshes = prepared.meshes;
+                let prefabs = prepared.prefabs;
+                let clips = prepared.clips;
+                let skins = prepared.skins;
+                let sounds = prepared.sounds;
+                let diags = prepared.diagnostics;
+                let gravity = core.physics().gravity();
+                let stats = core.audio_stats();
+                (
+                    json!({
+                        "gravity": [gravity.x, gravity.y, gravity.z],
+                        "meshColliders": meshes,
+                        "prefabs": prefabs,
+                        "diagnostics": diags.iter().map(diagnostic_json).collect::<Vec<_>>(),
+                    }),
+                    json!({ "clips": clips, "skins": skins }),
+                    json!({
+                        "sounds": sounds,
+                        "clips": stats.clips,
+                        "streams": stats.streams,
+                        "device": stats.device,
+                        "sampleRate": stats.sample_rate,
+                        "channels": stats.channels,
+                        "maxVoices": stats.max_voices,
+                    }),
+                )
+            };
+
             // A replace load emptied the world but for its persistent
             // objects (ADR-0037): only what they use stays resident.
             if mode == LoadMode::Replace {
@@ -412,23 +422,6 @@ fn bind_actions(w: &mut FynkelWorld, rebinds: BTreeMap<String, Vec<String>>) -> 
         Ok(specs) => specs,
         Err(error) => return failed(&[error], cache_json(&assets)),
     };
-    // Older queued gameplay work is a separate preceding commit, as for
-    // the legacy clone boundary. Retain its temp mappings for legacy callers.
-    let adopted = match w.core_mut().adopt_gameplay_commands() {
-        Ok(commit) => commit,
-        Err(error) => {
-            return failed(
-                &[Diagnostic::error(Code::IO, error.to_string())],
-                cache_json(&assets),
-            );
-        }
-    };
-    for &(temp_id, pending) in &adopted.value {
-        if let Some(entity) = adopted.resolve(pending) {
-            w.core_mut()
-                .push_event(fynkel_core::EventPayload::Spawned { temp_id, entity });
-        }
-    }
     let errors = match w.core_mut().edit_gameplay(|edit| edit.bind_input(&specs)) {
         Ok(commit) => commit.value,
         Err(error) => {
@@ -548,7 +541,13 @@ fn finish(w: &mut FynkelWorld, mut out: Outcome, started: std::time::Instant) ->
     out.status
 }
 
-fn load(w: &mut FynkelWorld, cache_dir: &Path, scene: Option<Uuid>, mode: LoadMode) -> Outcome {
+fn load(
+    w: &mut FynkelWorld,
+    cache_dir: &Path,
+    scene: Option<Uuid>,
+    mode: LoadMode,
+    retire: &[Entity],
+) -> Outcome {
     let assets = match open(w, cache_dir) {
         Ok(a) => a,
         Err(d) => return failed(&[d], Value::Null),
@@ -557,6 +556,16 @@ fn load(w: &mut FynkelWorld, cache_dir: &Path, scene: Option<Uuid>, mode: LoadMo
     // A project that names no startup scene opens with nothing loaded: a
     // game that builds its world from code (ADR-0026).
     if scene.is_none() && assets.project().is_some_and(|p| p.startup_scene.is_none()) {
+        if let Err(error) = w.core_mut().edit_gameplay(|edit| {
+            for &root in retire {
+                if edit.contains(root)? {
+                    edit.destroy(root)?;
+                }
+            }
+            Ok(())
+        }) {
+            return failed(&[Diagnostic::error(Code::IO, error.to_string())], cache);
+        }
         return open_project(w, assets, cache);
     }
     let scene_id_given = scene.is_some();
@@ -570,7 +579,7 @@ fn load(w: &mut FynkelWorld, cache_dir: &Path, scene: Option<Uuid>, mode: LoadMo
             // first draw (foundation 5.4), and queues it for the GPU
             // warm-up. The startup load stays lazy: Play starts fast.
             let preload = scene_id_given.then(|| (assets.clone(), scene.closure.clone()));
-            let mut out = instantiate(w, assets, scene, mode);
+            let mut out = instantiate(w, assets, scene, mode, retire);
             if let (Some((assets, closure)), Status::Ok) = (preload, out.status) {
                 assets.preload(&closure, &AtomicUsize::new(0), &AtomicBool::new(false));
                 if let Some(r) = out.report.as_object_mut() {
@@ -832,12 +841,12 @@ pub unsafe extern "C" fn fynkel_world_load_project(
     let dir = PathBuf::from(dir);
     guarded(world, move |w| {
         let started = std::time::Instant::now();
-        // The objects the last load_project made go first (ADR-0039).
-        for root in std::mem::take(&mut w.project_persistent) {
-            w.core_mut().destroy_persistent(root);
-        }
-        let mut out = load(w, &dir, None, LoadMode::Replace);
+        // Old project roots retire with startup activation, never before its
+        // validation. Optional persistent prefabs keep their warning policy.
+        let retire = w.project_persistent.clone();
+        let mut out = load(w, &dir, None, LoadMode::Replace, &retire);
         if out.status == Status::Ok {
+            w.project_persistent.clear();
             make_persistent_objects(w, &mut out);
         }
         finish(w, out, started)
@@ -937,7 +946,7 @@ pub unsafe extern "C" fn fynkel_world_load_scene(
     let dir = PathBuf::from(dir);
     guarded(world, move |w| {
         let started = std::time::Instant::now();
-        let out = load(w, &dir, Some(id), LoadMode::Replace);
+        let out = load(w, &dir, Some(id), LoadMode::Replace, &[]);
         finish(w, out, started)
     })
 }
@@ -976,7 +985,7 @@ pub unsafe extern "C" fn fynkel_world_load_scene_with(
     let dir = PathBuf::from(dir);
     guarded(world, move |w| {
         let started = std::time::Instant::now();
-        let out = load(w, &dir, Some(id), mode);
+        let out = load(w, &dir, Some(id), mode, &[]);
         finish(w, out, started)
     })
 }
@@ -1181,7 +1190,7 @@ pub unsafe extern "C" fn fynkel_world_load_activate(
         let assets = load.assets.clone();
         let out = match load.take() {
             Some(Ok((scene, token))) => {
-                let out = instantiate(w, assets, scene, mode);
+                let out = instantiate(w, assets, scene, mode, &[]);
                 // The scene's own token holds the closure now.
                 drop(token);
                 out

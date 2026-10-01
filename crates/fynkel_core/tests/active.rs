@@ -60,40 +60,37 @@ fn drawn_entities(w: &World) -> Vec<Entity> {
 }
 
 fn set_active(w: &mut World, entity: Entity, active: bool) {
-    let r = w.submit(
-        Lane::Simulation,
-        vec![Command::SetActive { entity, active }],
-    );
-    assert_eq!(r.rejected, 0);
+    let r = w.edit_gameplay(|edit| {
+        edit.set_active(entity, active)?;
+        Ok(())
+    });
+    assert!(r.is_ok());
     let r = w.step();
     assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
 }
 
-fn spawn(w: &mut World, temp_id: u64, parent: Option<Entity>) -> Entity {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id,
-            transform: Transform::from_position(Vec3::new(0.0, 3.0, 0.0)),
-            parent,
-            name: None,
-        }],
-    );
-    w.step();
-    w.drain_events()
-        .into_iter()
-        .find_map(|e| match e.payload {
-            EventPayload::Spawned { temp_id: t, entity } if t == temp_id => Some(entity),
-            _ => None,
+fn spawn(w: &mut World, _fixture_id: u64, parent: Option<Entity>) -> Entity {
+    let commit = w
+        .edit_gameplay(|edit| {
+            edit.spawn(
+                "",
+                Transform::from_position(Vec3::new(0.0, 3.0, 0.0)),
+                parent.map(Into::into),
+            )
         })
-        .unwrap()
+        .unwrap();
+    let entity = commit.resolve(commit.value).unwrap();
+    assert_eq!(w.step().status, Status::Ok);
+    w.drain_events();
+    entity
 }
 
 fn set(w: &mut World, entity: Entity, value: ComponentValue) {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetComponent { entity, value }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_component(entity, value)?;
+        Ok(())
+    })
+    .unwrap();
     let r = w.step();
     assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
 }
@@ -129,27 +126,21 @@ fn a_loaded_inactive_root_hides_its_subtree_until_activated() {
 
     // Setting the same value again is a no-op; a stale entity is rejected.
     set_active(&mut w, e(2), false);
-    w.submit(Lane::Simulation, vec![Command::Destroy(e(4))]);
+    w.edit_gameplay(|edit| {
+        edit.destroy(e(4))?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
-    let r = w.submit(
-        Lane::Simulation,
-        vec![Command::SetActive {
-            entity: e(4),
-            active: false,
-        }],
-    );
-    assert_eq!(r.rejected, 0, "checked at the tick");
-    let r = w.step();
-    assert_eq!(r.rejected, 1);
-    // The presentation lane does not take it.
-    let r = w.submit(
-        Lane::Presentation,
-        vec![Command::SetActive {
-            entity: e(1),
-            active: false,
-        }],
-    );
-    assert_eq!(r.rejected, 1);
+    let r = w.edit_gameplay(|edit| {
+        edit.set_active(e(4), false)?;
+        Ok(())
+    });
+    assert!(matches!(r, Err(EditError::StaleEntity(_))));
+    assert_eq!(w.step().rejected, 0);
+    w.edit_gameplay(|edit| edit.set_active(e(1), false))
+        .unwrap();
+    assert!(!is_active_self(w.ecs(), e(1)));
 }
 
 #[test]
@@ -161,24 +152,18 @@ fn spawning_or_reparenting_under_an_inactive_parent_deactivates() {
     assert!(!is_active_in_hierarchy(w.ecs(), child));
     let loose = spawn(&mut w, 3, None);
     assert!(is_active_in_hierarchy(w.ecs(), loose));
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetParent {
-            child: loose,
-            parent: Some(child),
-            keep_world: false,
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_parent(loose, Some(child.into()), false)?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     assert!(!is_active_in_hierarchy(w.ecs(), loose));
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetParent {
-            child: loose,
-            parent: None,
-            keep_world: false,
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_parent(loose, None, false)?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     assert!(is_active_in_hierarchy(w.ecs(), loose));
 
@@ -231,19 +216,12 @@ fn an_inactive_rotator_does_not_turn() {
 fn an_inactive_body_leaves_the_simulation_and_returns_at_rest() {
     let mut w = world();
     let e = spawn(&mut w, 1, None);
-    w.submit(
-        Lane::Simulation,
-        vec![
-            Command::SetComponent {
-                entity: e,
-                value: ComponentValue::RigidBody(RigidBody::default()),
-            },
-            Command::SetComponent {
-                entity: e,
-                value: ComponentValue::Collider(Collider::default()),
-            },
-        ],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_component(e, ComponentValue::RigidBody(RigidBody::default()))?;
+        edit.set_component(e, ComponentValue::Collider(Collider::default()))?;
+        Ok(())
+    })
+    .unwrap();
     for _ in 0..10 {
         w.step();
     }
@@ -253,13 +231,11 @@ fn an_inactive_body_leaves_the_simulation_and_returns_at_rest() {
     assert_eq!(w.physics().body_state(e), None, "out of the simulation");
     let held = y(&w);
     // A force on it is dropped, not rejected.
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Body {
-            entity: e,
-            op: BodyCommand::ApplyImpulse(Vec3::Y),
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.body_effect(e, BodyCommand::ApplyImpulse(Vec3::Y))?;
+        Ok(())
+    })
+    .unwrap();
     let r = w.step();
     assert_eq!(r.rejected, 0, "{:?}", w.diagnostics());
     for _ in 0..10 {
@@ -296,19 +272,12 @@ fn an_inactive_source_goes_quiet_and_a_looping_one_resumes() {
     set(&mut w, once, ComponentValue::AudioSource(source(false)));
     assert_eq!(w.audio().voice_count(), 2);
 
-    w.submit(
-        Lane::Simulation,
-        vec![
-            Command::SetActive {
-                entity: looping,
-                active: false,
-            },
-            Command::SetActive {
-                entity: once,
-                active: false,
-            },
-        ],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_active(looping, false)?;
+        edit.set_active(once, false)?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     assert_eq!(w.audio().voice_count(), 0);
     let playing = |w: &World, e| w.ecs().get::<AudioSource>(e).unwrap().playing;
@@ -332,35 +301,15 @@ fn one_batch_of_flag_and_parent_changes_settles_every_subtree() {
     let mid = spawn(&mut w, 2, Some(top));
     let leaf = spawn(&mut w, 3, Some(mid));
     let loose = spawn(&mut w, 4, None);
-    w.submit(
-        Lane::Simulation,
-        vec![
-            Command::SetParent {
-                child: loose,
-                parent: Some(leaf),
-                keep_world: true,
-            },
-            Command::SetActive {
-                entity: mid,
-                active: false,
-            },
-            Command::Spawn {
-                temp_id: 5,
-                transform: Transform::IDENTITY,
-                parent: Some(loose),
-                name: None,
-            },
-        ],
-    );
-    assert_eq!(w.step().status, Status::Ok, "{:?}", w.diagnostics());
-    let born = w
-        .drain_events()
-        .into_iter()
-        .find_map(|e| match e.payload {
-            EventPayload::Spawned { temp_id: 5, entity } => Some(entity),
-            _ => None,
+    let commit = w
+        .edit_gameplay(|edit| {
+            edit.set_parent(loose, Some(leaf.into()), true)?;
+            edit.set_active(mid, false)?;
+            edit.spawn("born", Transform::IDENTITY, Some(loose.into()))
         })
         .unwrap();
+    let born = commit.resolve(commit.value).unwrap();
+    assert_eq!(w.step().status, Status::Ok);
     assert!(is_active_in_hierarchy(w.ecs(), top));
     for e in [mid, leaf, loose, born] {
         assert!(!is_active_in_hierarchy(w.ecs(), e), "{e:?}");

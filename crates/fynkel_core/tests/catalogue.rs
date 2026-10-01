@@ -21,39 +21,33 @@ fn world() -> World {
 
 fn spawn(
     w: &mut World,
-    temp_id: u64,
+    _fixture_id: u64,
     at: Vec3,
     parent: Option<Entity>,
     name: Option<&str>,
     components: Vec<ComponentValue>,
 ) -> Entity {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id,
-            transform: Transform::from_position(at),
-            parent,
-            name: name.map(str::to_owned),
-        }],
-    );
-    let r = w.step();
-    assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
-    let entity = w
-        .drain_events()
-        .into_iter()
-        .find_map(|e| match e.payload {
-            EventPayload::Spawned { temp_id: t, entity } if t == temp_id => Some(entity),
-            _ => None,
+    let commit = w
+        .edit_gameplay(|edit| {
+            edit.spawn(
+                name.unwrap_or_default(),
+                Transform::from_position(at),
+                parent.map(Into::into),
+            )
         })
         .unwrap();
-    let cmds: Vec<Command> = components
-        .into_iter()
-        .map(|value| Command::SetComponent { entity, value })
-        .collect();
-    if !cmds.is_empty() {
-        w.submit(Lane::Simulation, cmds);
-        let r = w.step();
-        assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
+    let entity = commit.resolve(commit.value).unwrap();
+    assert_eq!(w.step().status, Status::Ok);
+    w.drain_events();
+    if !components.is_empty() {
+        w.edit_gameplay(|edit| {
+            for value in components {
+                edit.set_component(entity, value)?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(w.step().status, Status::Ok);
     }
     entity
 }
@@ -111,17 +105,18 @@ fn a_rotator_turns_locally_or_about_a_world_axis() {
     // A world-axis rotator under a tilted parent still turns about world Y.
     let parent = spawn(&mut w, 2, Vec3::new(3.0, 0.0, 0.0), None, None, vec![]);
     let tilt = Quat::from_axis_angle(Vec3::X, 0.7);
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetTransform {
-            entity: parent,
-            transform: Transform {
+    w.edit_gameplay(|edit| {
+        edit.set_transform(
+            parent,
+            Transform {
                 position: Vec3::new(3.0, 0.0, 0.0),
                 rotation: tilt,
                 scale: Vec3::ONE,
             },
-        }],
-    );
+        )?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     let child = spawn(
         &mut w,
@@ -181,13 +176,11 @@ fn an_oscillator_bobs_and_keeps_a_moved_rest_position() {
     // Gameplay moves the entity: the motion continues about the new rest.
     let mut moved = local(&w, bob);
     moved.position += Vec3::new(0.0, 10.0, 0.0);
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetTransform {
-            entity: bob,
-            transform: moved,
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_transform(bob, moved)?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     assert!((local(&w, bob).position.y - expect_y(16, 12.0)).abs() < 1e-4);
     for _ in 0..44 {
@@ -256,13 +249,11 @@ fn a_follower_snaps_smooths_and_looks_at_its_target() {
     );
     assert!(close(world_pose(&w, snap).0, Vec3::new(5.0, 2.0, 0.0)));
     // The target moves this tick; the follower sees the propagated pose.
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetTransform {
-            entity: target,
-            transform: Transform::from_position(Vec3::new(5.0, 0.0, 4.0)),
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_transform(target, Transform::from_position(Vec3::new(5.0, 0.0, 4.0)))?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     assert!(close(world_pose(&w, snap).0, Vec3::new(5.0, 2.0, 4.0)));
 
@@ -348,13 +339,14 @@ fn a_billboard_faces_the_active_camera() {
     );
     let facing = local(&w, sign).rotation * Vec3::Z;
     assert!(close(facing, Vec3::Z), "{facing:?}");
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetComponent {
-            entity: sign,
-            value: ComponentValue::LookAtCamera(LookAtCamera { lock_y: false }),
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_component(
+            sign,
+            ComponentValue::LookAtCamera(LookAtCamera { lock_y: false }),
+        )?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     let facing = local(&w, sign).rotation * Vec3::Z;
     assert!(
@@ -490,11 +482,10 @@ fn an_emitter_spawns_its_prefab_at_rate_with_lifetime_ceiling_and_velocity() {
     assert_eq!(entities, 1);
 
     // Disabled: nothing more, the survivors expire.
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetComponent {
-            entity: fountain,
-            value: ComponentValue::Emitter(Emitter {
+    w.edit_gameplay(|edit| {
+        edit.set_component(
+            fountain,
+            ComponentValue::Emitter(Emitter {
                 prefab: AssetRef::new(prefab_id),
                 rate: 30.0,
                 lifetime: DT * 10.0,
@@ -502,8 +493,10 @@ fn an_emitter_spawns_its_prefab_at_rate_with_lifetime_ceiling_and_velocity() {
                 velocity: Vec3::ZERO,
                 enabled: false,
             }),
-        }],
-    );
+        )?;
+        Ok(())
+    })
+    .unwrap();
     for _ in 0..12 {
         w.step();
     }
@@ -584,8 +577,8 @@ fn system_times_cover_every_slot_in_order() {
     assert!(step >= sum.saturating_sub(1), "step {step} >= parts {sum}");
     assert_eq!(
         time_of(&w, SystemKind::Commands).0,
-        1,
-        "one command applied"
+        0,
+        "data was committed before the tick; no effects to deliver"
     );
 }
 

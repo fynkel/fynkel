@@ -38,7 +38,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_ABI_VERSION 3u
+#define FYNKEL_ABI_VERSION 4u
 #define FYNKEL_BUFFER_MAGIC 0x4b4e5946u /* "FYNK" */
 #define FYNKEL_BUFFER_HEADER_SIZE 24u
 
@@ -74,8 +74,6 @@ typedef enum FynkelStatus {
 } FynkelStatus;
 
 typedef enum FynkelBufferKind {
-  /* CommandHeader + body per command (kind = FynkelCommandKind). */
-  FYNKEL_BUFFER_COMMANDS = 1,
   /* SnapshotTransformRecord per subscribed entity, handle order. */
   FYNKEL_BUFFER_SNAPSHOT = 2,
   /* EventHeader + body per event (kind = event kind). */
@@ -96,47 +94,6 @@ typedef enum FynkelBufferKind {
    * answered in a QUERY buffer of ProjectedPointRecords (M3-13). */
   FYNKEL_BUFFER_PROJECTION_ANCHORS = 9
 } FynkelBufferKind;
-
-/* Command lanes (blueprint §5.1, ADR-0008). */
-typedef enum FynkelCommandLane {
-  FYNKEL_LANE_SIMULATION = 0,
-  FYNKEL_LANE_PRESENTATION = 1
-} FynkelCommandLane;
-
-/* Ids are the schema ids (schemas/fynkel.schema.json); listed for C hosts. */
-typedef enum FynkelCommandKind {
-  FYNKEL_COMMAND_SPAWN = 1,
-  FYNKEL_COMMAND_DESTROY = 2,
-  FYNKEL_COMMAND_SET_TRANSFORM = 3,
-  FYNKEL_COMMAND_SET_PARENT = 4,
-  FYNKEL_COMMAND_SET_NAME = 5,
-  /* body: SetComponentCommand { entity, component } then the component's
-   * own record bytes (size covers both); strings in the batch tail. */
-  FYNKEL_COMMAND_SET_COMPONENT = 6,
-  FYNKEL_COMMAND_REMOVE_COMPONENT = 7,
-  /* body: BodyCommandRecord { entity, op, vector, rotation }; simulation
-   * lane only; applied by the tick's physics step (M3-08); ops `move` and
-   * `jump` address a CharacterController (M3-09). */
-  FYNKEL_COMMAND_BODY = 8,
-  /* body: AnimateCommandRecord { entity, op, seconds, speed, looping,
-   * clip }; addresses a fynkel.Animator (M3-19): play, crossfade, stop,
-   * pause, resume, set_speed, set_time. */
-  FYNKEL_COMMAND_ANIMATE = 9,
-  /* body: AudioCommandRecord { entity, op, value }; addresses a
-   * fynkel.AudioSource (M3-11): play, stop, pause, resume, set_volume,
-   * set_pitch. Simulation lane only. */
-  FYNKEL_COMMAND_AUDIO = 10,
-  /* body: PlaySoundCommandRecord { clip, bus, volume, pitch, priority };
-   * a fire-and-forget voice on no entity (M3-11). Either lane. */
-  FYNKEL_COMMAND_PLAY_SOUND = 11,
-  /* body: AudioBusCommandRecord { bus, volume, muted }; a bus gain and the
-   * mute (M3-11). Either lane. */
-  FYNKEL_COMMAND_AUDIO_BUS = 12,
-  /* body: SetActiveCommandRecord { entity, active }; the entity's own
-   * active flag — off takes its subtree out of the frame (SetActive).
-   * Simulation lane only. */
-  FYNKEL_COMMAND_SET_ACTIVE = 13
-} FynkelCommandKind;
 
 typedef enum FynkelComponent {
   FYNKEL_COMPONENT_TRANSFORM = 1,
@@ -170,10 +127,9 @@ typedef enum FynkelComponent {
   FYNKEL_COMPONENT_AUDIO_LISTENER = 24
 } FynkelComponent;
 
-/* Event kinds in fynkel_world_drain_events (the schema's `fynkel.ev.*`
- * records; physics-lane kinds are 0x100..0x1ff). */
+/* Event ids are the schema ids (schemas/fynkel.schema.json). */
 typedef enum FynkelEventKind {
-  FYNKEL_EVENT_SPAWNED = 1,
+  /* 1 retired: temporary-ID spawn acknowledgements. */
   FYNKEL_EVENT_DESTROYED = 2,
   FYNKEL_EVENT_PARENT_CHANGED = 3,
   FYNKEL_EVENT_MISSED_DEADLINE = 4,
@@ -296,11 +252,6 @@ typedef struct FynkelFramePlan {
   uint64_t frame;
 } FynkelFramePlan;
 
-typedef struct FynkelSubmitResult {
-  uint32_t accepted;                  /* staged (simulation) or applied (presentation) */
-  uint32_t rejected;                  /* diagnostics describe each one */
-} FynkelSubmitResult;
-
 typedef struct FynkelStepResult {
   uint64_t tick;                      /* tick number after the step */
   double simulation_elapsed;
@@ -322,14 +273,12 @@ typedef struct FynkelQueryDesc {
 typedef struct FynkelWorldStats {
   uint64_t tick;
   uint64_t frame;
-  uint64_t submit_calls;
   uint64_t step_calls;
   uint64_t query_calls;
   uint64_t bytes_in;                  /* command bytes received */
   uint64_t bytes_out;                 /* snapshot+event+diagnostic+query bytes produced */
   uint32_t live_entities;
   uint32_t subscriptions;
-  uint32_t staged_commands;
   uint32_t poisoned;
   /* Memory and the subscription budget (M3-16, blueprint §15.4 / C5). */
   uint64_t snapshot_bytes;            /* the last step's snapshot */
@@ -369,22 +318,13 @@ void fynkel_world_destroy(FynkelWorld* world);
 
 /* Starts a host frame: accepts real dt, samples scale, clamps gameplay once,
  * advances absolute host timelines and decides the number of fixed ticks,
- * clears last frame's presentation overrides (§5.1). */
+ * advances the canonical frame clock. */
 FynkelStatus fynkel_world_begin_frame(FynkelWorld* world,
                                       double dt_seconds,
                                       double time_scale,
                                       FynkelFramePlan* out_plan);
 
-/* Validates a command buffer. Simulation-lane commands are staged for the
- * next step(); presentation-lane commands apply now. Returns PROTOCOL
- * without applying anything if the buffer does not validate. */
-FynkelStatus fynkel_world_submit_commands(FynkelWorld* world,
-                                          uint32_t lane,
-                                          const uint8_t* buffer,
-                                          uint32_t length,
-                                          FynkelSubmitResult* out_result);
-
-/* One fixed tick: applies staged simulation commands, runs the native
+/* One fixed tick: delivers committed effects, runs the native
  * phases, publishes the snapshot (subscribed entities only), events and
  * diagnostics. Returns OK or COMMANDS_REJECTED on a normal step. */
 FynkelStatus fynkel_world_step(FynkelWorld* world, FynkelStepResult* out_result);
@@ -480,6 +420,10 @@ FynkelStatus fynkel_world_project(FynkelWorld* world,
                                   FynkelBufferView* out_view);
 
 /* ---- Audio (M3-11) ------------------------------------------------------ */
+
+/* Immediate one-shot: one 40-byte PlaySound record followed by its string tail.
+ * Not allowed inside a gameplay edit. Does not flush queued simulation effects. */
+FynkelStatus fynkel_world_audio_play(FynkelWorld* world, const uint8_t* buffer, uint32_t length);
 
 /* Opens the default output device and moves the world's mixer into its
  * callback: what a host that plays calls once after the world is created
@@ -771,11 +715,9 @@ FynkelBufferView fynkel_world_load_report(const FynkelWorld* world);
  * Views expire at the next edit call. sequence is world-local and never reused.
  * End(commit=0) aborts; end(commit=1) validates and atomically publishes.
  */
-/* Adopt queued simulation commands atomically without a tick. No active edit.
- * Failure retains the native queue. Success: spawn count u32, (temp ID u64,
- * entity) pairs, live count u32, (entity, name byte count u32, UTF-8 name) pairs.
- * Canceled spawns have a null entity. Failure output is UTF-8 diagnostic text. */
-FynkelStatus fynkel_world_gameplay_adopt(FynkelWorld* world, FynkelBufferView* out_view);
+/* Read-only lifecycle snapshot, outside edits: live count u32, followed by
+ * (entity, name byte count u32, UTF-8 name). Errors return UTF-8 text. */
+FynkelStatus fynkel_world_gameplay_state(FynkelWorld* world, FynkelBufferView* out_view);
 /* Capture interpolation history before fixed callbacks; cancel an abandoned tick. */
 FynkelStatus fynkel_world_gameplay_tick_prepare(FynkelWorld* world);
 FynkelStatus fynkel_world_gameplay_tick_cancel(FynkelWorld* world);

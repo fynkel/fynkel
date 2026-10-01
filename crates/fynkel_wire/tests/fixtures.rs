@@ -76,45 +76,6 @@ fn check<T: WireRecord + PartialEq + std::fmt::Debug>(name: &str, value: &T) {
 fn fixtures_match_generated_codecs() {
     check("Transform", &transform());
     check("Name", &Name::new("héllo wörld"));
-    check(
-        "SpawnCommand",
-        &SpawnCommand {
-            temp_id: 42,
-            transform: transform(),
-            parent: Some(e(7, 3)),
-            name: "player".into(),
-        },
-    );
-    check("DestroyCommand", &DestroyCommand { entity: e(9, 1) });
-    check(
-        "SetTransformCommand",
-        &SetTransformCommand {
-            entity: e(2, 2),
-            transform: transform(),
-        },
-    );
-    check(
-        "SetParentCommand",
-        &SetParentCommand {
-            child: e(5, 1),
-            parent: None,
-            keep_world: true,
-        },
-    );
-    check(
-        "SetNameCommand",
-        &SetNameCommand {
-            entity: e(1, 1),
-            name: "".into(),
-        },
-    );
-    check(
-        "SpawnedEvent",
-        &SpawnedEvent {
-            temp_id: 42,
-            entity: e(11, 1),
-        },
-    );
     check("DestroyedEvent", &DestroyedEvent { entity: e(11, 1) });
     check(
         "ParentChangedEvent",
@@ -290,21 +251,6 @@ fn fixtures_match_generated_codecs() {
             y: 0.0,
             frame_x: 1.0,
             frame_y: 0.0,
-        },
-    );
-    check("CommandHeader", &CommandHeader { kind: 1, size: 64 });
-    check(
-        "SetComponentCommand",
-        &SetComponentCommand {
-            entity: e(1, 1),
-            component: 7,
-        },
-    );
-    check(
-        "RemoveComponentCommand",
-        &RemoveComponentCommand {
-            entity: e(2, 1),
-            component: 4,
         },
     );
     check(
@@ -704,14 +650,6 @@ fn fixtures_match_generated_codecs() {
         },
     );
     check(
-        "AudioBusCommandRecord",
-        &AudioBusCommandRecord {
-            bus: AudioBus::Master,
-            volume: 0.6,
-            muted: true,
-        },
-    );
-    check(
         "PlaybackEndedEvent",
         &PlaybackEndedEvent {
             entity: e(4, 2),
@@ -768,13 +706,6 @@ fn fixtures_match_generated_codecs() {
         },
     );
     // SetActive A2.
-    check(
-        "SetActiveCommand",
-        &SetActiveCommand {
-            entity: e(4, 2),
-            active: false,
-        },
-    );
 }
 
 #[test]

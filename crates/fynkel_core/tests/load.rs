@@ -363,7 +363,7 @@ fn structural_errors_load_nothing() {
 }
 
 #[test]
-fn invalid_component_values_are_rejected_like_commands() {
+fn invalid_component_values_reject_the_entire_scene() {
     let mut w = World::new(WorldConfig::default());
     let mut s = scene();
     let cam = Camera {
@@ -371,94 +371,57 @@ fn invalid_component_values_are_rejected_like_commands() {
         ..Camera::default()
     };
     s.entities[0].components[1] = ComponentValue::Camera(cam);
-    let loaded = w.load_scene(&s).unwrap();
-    assert_eq!(loaded.rejected_components, 1);
-    let d = &w.diagnostics()[0];
-    assert_eq!(d.code, DiagnosticCode::INVALID_PAYLOAD);
-    assert_eq!(d.component, ComponentId::CAMERA);
-    assert_eq!(d.command_index, u32::MAX);
-    assert_eq!(d.entity, loaded.handle_of(id(2)).unwrap());
-    assert!(!w.ecs().has::<Camera>(d.entity));
-    assert_eq!(w.live_entities(), 4, "entities still exist");
+    assert!(matches!(w.load_scene(&s), Err(LoadError::SceneRejected(_))));
+    assert_eq!(w.live_entities(), 0);
+    assert!(w.loaded_scenes().is_empty());
+    assert!(w.drain_events().is_empty());
 }
 
 #[test]
-fn set_and_remove_component_commands() {
-    let mut w = World::new(WorldConfig::default());
+fn component_edits_validate_and_remove_atomically() {
+    let mut w = World::new(Default::default());
     let loaded = w.load_scene(&scene()).unwrap();
-    let e4 = loaded.handle_of(id(4)).unwrap();
+    let owner = loaded.handle_of(id(4)).unwrap();
     w.drain_events();
-    // Presentation lane: plain-data writes apply immediately.
+    let old = w.ecs().copy::<DirectionalLight>(owner).unwrap();
     let light = DirectionalLight {
         intensity: 5.0,
-        ..DirectionalLight::default()
+        ..Default::default()
     };
-    let r = w.submit(
-        Lane::Presentation,
-        vec![
-            Command::SetComponent {
-                entity: e4,
-                value: ComponentValue::DirectionalLight(light),
-            },
-            Command::RemoveComponent {
-                entity: e4,
-                component: ComponentId::CAMERA,
-            },
-        ],
-    );
-    assert_eq!((r.accepted, r.rejected), (1, 1));
-    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::WRONG_LANE);
-    assert_eq!(w.ecs().copy::<DirectionalLight>(e4).unwrap(), light);
-    // Simulation lane: Transform through SetComponent == SetTransform; remove
-    // a present and an absent component; protected components stay.
-    w.begin_frame(1.0 / 60.0);
-    w.submit(
-        Lane::Simulation,
-        vec![
-            Command::SetComponent {
-                entity: e4,
-                value: at(3.0),
-            },
-            Command::RemoveComponent {
-                entity: e4,
-                component: ComponentId::DIRECTIONAL_LIGHT,
-            },
-            Command::RemoveComponent {
-                entity: e4,
-                component: ComponentId::DIRECTIONAL_LIGHT,
-            },
-            Command::RemoveComponent {
-                entity: e4,
-                component: ComponentId::TRANSFORM,
-            },
-            Command::RemoveComponent {
-                entity: e4,
-                component: ComponentId(999),
-            },
-            Command::SetComponent {
-                entity: e4,
-                value: ComponentValue::PointLight(PointLight {
-                    range: -1.0,
-                    ..PointLight::default()
-                }),
-            },
-        ],
-    );
-    let r = w.step();
-    assert_eq!((r.applied, r.rejected), (2, 4), "{:?}", w.diagnostics());
-    let codes: Vec<DiagnosticCode> = w.diagnostics().iter().map(|d| d.code).collect();
-    assert_eq!(
-        codes,
-        vec![
-            DiagnosticCode::MISSING_COMPONENT,
-            DiagnosticCode::INVALID_PAYLOAD,
-            DiagnosticCode::UNKNOWN_COMPONENT,
-            DiagnosticCode::INVALID_PAYLOAD
-        ]
-    );
-    assert!(!w.ecs().has::<DirectionalLight>(e4));
-    assert!(!w.ecs().has::<PointLight>(e4));
-    assert_eq!(w.ecs().copy::<Transform>(e4).unwrap().position.x, 3.0);
+    assert!(w
+        .edit_gameplay(|e| {
+            e.set_component(owner, ComponentValue::DirectionalLight(light))?;
+            e.remove_component(owner, ComponentId::CAMERA)
+        })
+        .is_err());
+    assert_eq!(w.ecs().copy::<DirectionalLight>(owner).unwrap(), old);
+    w.edit_gameplay(|e| {
+        e.set_component(owner, at(3.0))?;
+        e.remove_component(owner, ComponentId::DIRECTIONAL_LIGHT)
+    })
+    .unwrap();
+    for component in [
+        ComponentId::DIRECTIONAL_LIGHT,
+        ComponentId::TRANSFORM,
+        ComponentId(999),
+    ] {
+        assert!(w
+            .edit_gameplay(|e| e.remove_component(owner, component))
+            .is_err());
+    }
+    assert!(w
+        .edit_gameplay(|e| e.set_component(
+            owner,
+            ComponentValue::PointLight(PointLight {
+                range: -1.0,
+                ..Default::default()
+            })
+        ))
+        .is_err());
+    assert!(!w.ecs().has::<DirectionalLight>(owner));
+    assert!(!w.ecs().has::<PointLight>(owner));
+    assert_eq!(w.ecs().copy::<Transform>(owner).unwrap().position.x, 3.0);
+    assert_eq!(w.step().rejected, 0);
 }
 
 #[test]
@@ -523,4 +486,132 @@ fn extract_resolves_renderable_components_against_records() {
     assert_eq!(ex.point_lights[0].record, record_of(3));
     // e3 is a child of e1 at x=10 with an identity local transform.
     assert!((ex.point_lights[0].position - Vec3::new(10.0, 0.0, 0.0)).length() < 1e-6);
+}
+
+#[test]
+fn rejected_scene_replacement_preserves_world_metadata_history_and_events() {
+    for mode in [LoadMode::Replace, LoadMode::Additive] {
+        let mut w = World::new(WorldConfig::default());
+        let old = w.load_scene(&scene()).unwrap();
+        let root = old.entities()[0].1;
+        w.subscribe(&[root], true);
+        w.step();
+        w.drain_events();
+        let snapshot = w.snapshot().to_vec();
+        let tick = w.tick();
+        let mut replacement = scene();
+        replacement.id = id(98);
+        replacement
+            .entities
+            .last_mut()
+            .unwrap()
+            .components
+            .push(ComponentValue::AudioSource(AudioSource {
+                volume: -1.0,
+                ..Default::default()
+            }));
+        assert!(matches!(
+            w.load_scene_with(&replacement, mode),
+            Err(LoadError::SceneRejected(_))
+        ));
+        assert_eq!(w.loaded_scenes(), std::slice::from_ref(&old));
+        assert_eq!(w.tick(), tick);
+        assert_eq!(w.snapshot(), snapshot);
+        assert!(w.ecs().contains(root));
+        assert!(w.drain_events().is_empty());
+        replacement.entities.last_mut().unwrap().components.pop();
+        let loaded = w.load_scene_with(&replacement, mode).unwrap();
+        assert_ne!(loaded.entities()[0].1, root);
+        assert_eq!(w.ecs().contains(root), mode == LoadMode::Additive);
+        assert_eq!(
+            w.drain_events()
+                .iter()
+                .filter(|e| matches!(
+                    e.payload, EventPayload::SceneReady { scene } if scene == replacement.id
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(w.step().rejected, 0);
+        assert!(w.drain_events().is_empty());
+    }
+}
+
+#[test]
+fn immediate_prefab_validation_is_atomic_and_retry_resolves_fresh_handles() {
+    let mut w = World::new(WorldConfig::default());
+    let mut prefab = scene();
+    // One valid root with a bad component is enough to exercise late rejection.
+    prefab.entities = vec![EntityDescription {
+        id: id(90),
+        name: "root".into(),
+        active: true,
+        parent: None,
+        children: vec![],
+        components: vec![ComponentValue::Camera(Camera {
+            near: 0.0,
+            ..Default::default()
+        })],
+    }];
+    assert!(w
+        .instantiate(&prefab, "", Transform::IDENTITY, None)
+        .is_err());
+    assert_eq!(w.live_entities(), 0);
+    assert!(w.drain_events().is_empty());
+    prefab.entities[0].components.clear();
+    let (root, loaded) = w
+        .instantiate(&prefab, "", Transform::IDENTITY, None)
+        .unwrap();
+    assert_eq!(loaded.handle_of(id(90)), Some(root));
+    assert_eq!(w.live_entities(), 1);
+}
+
+#[test]
+fn replacement_cannot_publish_a_reference_to_an_entity_it_retires() {
+    let mut w = World::new(WorldConfig::default());
+    let old = w.load_scene(&scene()).unwrap();
+    let target = old.entities()[0].1;
+    w.drain_events();
+    let mut next = scene();
+    next.id = id(97);
+    next.entities[0]
+        .components
+        .push(ComponentValue::Follow(Follow {
+            target: fynkel_contracts::ObjectRef::to(target),
+            ..Default::default()
+        }));
+    assert!(w.load_scene(&next).is_err());
+    assert_eq!(w.loaded_scenes(), std::slice::from_ref(&old));
+    assert!(w.ecs().contains(target));
+    assert!(w.drain_events().is_empty());
+    let added = w.load_scene_with(&next, LoadMode::Additive).unwrap();
+    assert_eq!(
+        w.ecs()
+            .copy::<Follow>(added.handle_of(next.entities[0].id).unwrap())
+            .unwrap()
+            .target
+            .entity,
+        target
+    );
+}
+
+#[test]
+fn project_replacement_retires_persistent_roots_only_with_successful_activation() {
+    let mut w = World::new(WorldConfig::default());
+    let old = w.load_scene(&scene()).unwrap();
+    let root = old.handle_of(id(1)).unwrap();
+    w.dont_destroy_on_load(root).unwrap();
+    let mut invalid = scene();
+    invalid.entities[0]
+        .components
+        .push(ComponentValue::Transform(Transform::IDENTITY));
+    assert!(w
+        .load_scene_replacing(&invalid, LoadMode::Replace, None, &[root])
+        .is_err());
+    assert!(w.ecs().contains(root));
+    assert_eq!(w.persistent_roots(), vec![root]);
+    w.load_scene_replacing(&scene(), LoadMode::Replace, None, &[root])
+        .unwrap();
+    assert!(!w.ecs().contains(root));
+    assert!(w.persistent_roots().is_empty());
 }

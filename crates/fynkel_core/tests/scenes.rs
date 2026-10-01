@@ -55,31 +55,21 @@ fn kinds(events: &[Event]) -> Vec<EventKind> {
     events.iter().map(|e| e.payload.kind()).collect()
 }
 
-fn spawn(w: &mut World, temp_id: u64, at: Vec3, components: Vec<ComponentValue>) -> Entity {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id,
-            transform: Transform::from_position(at),
-            parent: None,
-            name: None,
-        }],
-    );
-    w.step();
-    let entity = w
-        .drain_events()
-        .into_iter()
-        .find_map(|e| match e.payload {
-            EventPayload::Spawned { temp_id: t, entity } if t == temp_id => Some(entity),
-            _ => None,
+fn spawn(w: &mut World, _fixture_id: u64, at: Vec3, components: Vec<ComponentValue>) -> Entity {
+    let commit = w
+        .edit_gameplay(|edit| edit.spawn("", Transform::from_position(at), None))
+        .unwrap();
+    let entity = commit.resolve(commit.value).unwrap();
+    assert_eq!(w.step().status, Status::Ok);
+    w.drain_events();
+    if !components.is_empty() {
+        w.edit_gameplay(|edit| {
+            for value in components {
+                edit.set_component(entity, value)?;
+            }
+            Ok(())
         })
         .unwrap();
-    let cmds: Vec<Command> = components
-        .into_iter()
-        .map(|value| Command::SetComponent { entity, value })
-        .collect();
-    if !cmds.is_empty() {
-        w.submit(Lane::Simulation, cmds);
     }
     entity
 }
@@ -115,22 +105,21 @@ fn a_load_replaces_by_default_and_names_the_scene() {
     assert!(!w.ecs().contains(a.entities()[0].1));
     assert!(w.ecs().contains(b.entities()[0].1));
     let ev = w.drain_events();
-    // Three Destroyed for scene 1 (parent's subtree: parent + child, then
-    // the lone root), SceneUnloaded, one Destroyed for the extra, then the
-    // new scene's SceneReady.
+    // The atomic commit publishes all destruction events, then unload
+    // summaries and finally the new scene's readiness event.
     assert_eq!(
         kinds(&ev),
         vec![
             EventKind::DESTROYED,
             EventKind::DESTROYED,
             EventKind::DESTROYED,
-            EventKind::SCENE_UNLOADED,
             EventKind::DESTROYED,
+            EventKind::SCENE_UNLOADED,
             EventKind::SCENE_READY,
         ]
     );
     assert_eq!(
-        ev[3].payload,
+        ev[4].payload,
         EventPayload::SceneUnloaded {
             scene: id(1),
             entities: 3
@@ -187,7 +176,11 @@ fn unload_takes_the_scenes_live_entities_and_leaves_the_rest() {
     let extra = spawn(&mut w, 9, Vec3::ZERO, vec![]);
     // Gameplay destroyed one of scene 1's roots already (its child goes
     // with it).
-    w.submit(Lane::Simulation, vec![Command::Destroy(a.entities()[0].1)]);
+    w.edit_gameplay(|edit| {
+        edit.destroy(a.entities()[0].1)?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     w.drain_events();
     assert_eq!(w.live_entities(), 1 + 3 + 1);
@@ -243,15 +236,8 @@ fn dont_destroy_on_load_keeps_a_root_across_loads() {
     assert_eq!(w.persistent_roots(), vec![root, extra]);
 
     // A child made later under the persistent root goes with it.
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id: 8,
-            transform: Transform::default(),
-            parent: Some(root),
-            name: None,
-        }],
-    );
+    w.edit_gameplay(|edit| edit.spawn("", Transform::default(), Some(root.into())))
+        .unwrap();
     w.step();
     w.drain_events();
     assert_eq!(w.live_entities(), 5);
@@ -289,18 +275,19 @@ fn dont_destroy_on_load_keeps_a_root_across_loads() {
     assert!(w.ecs().contains(c_root) && w.ecs().contains(c.entities()[1].1));
 
     // Parented under a scene object, it belongs to that scene's root now.
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetParent {
-            child: extra,
-            parent: Some(b.entities()[0].1),
-            keep_world: false,
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_parent(extra, Some(b.entities()[0].1.into()), false)?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     assert!(!w.is_persistent(extra));
     // Destroyed, it is no longer listed.
-    w.submit(Lane::Simulation, vec![Command::Destroy(c_root)]);
+    w.edit_gameplay(|edit| {
+        edit.destroy(c_root)?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     assert_eq!(w.persistent_roots(), vec![root]);
 
@@ -313,6 +300,7 @@ fn dont_destroy_on_load_keeps_a_root_across_loads() {
     assert_eq!(w.live_entities(), 3 + 3);
 }
 
+#[cfg(feature = "physics")]
 #[test]
 fn a_trigger_zone_fires_its_named_event_and_once_removes_it() {
     let mut w = world();
@@ -445,18 +433,20 @@ fn a_trigger_zone_value_is_validated() {
     .is_err());
     assert!(TriggerZone::default().validate().is_ok());
     let mut w = world();
-    let e = spawn(
-        &mut w,
-        1,
-        Vec3::ZERO,
-        vec![ComponentValue::TriggerZone(TriggerZone {
-            event: String::new(),
-            once: false,
-        })],
-    );
-    w.step();
+    let e = spawn(&mut w, 1, Vec3::ZERO, vec![]);
+    assert!(matches!(
+        w.edit_gameplay(|edit| edit.set_component(
+            e,
+            ComponentValue::TriggerZone(TriggerZone {
+                event: String::new(),
+                once: false
+            })
+        )),
+        Err(EditError::InvalidComponent {
+            component: ComponentId::TRIGGER_ZONE,
+            ..
+        })
+    ));
     assert!(!w.ecs().has::<TriggerZone>(e));
-    assert_eq!(w.diagnostics().len(), 1);
-    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::INVALID_PAYLOAD);
-    assert_eq!(w.diagnostics()[0].component, ComponentId::TRIGGER_ZONE);
+    assert_eq!(w.step().rejected, 0);
 }

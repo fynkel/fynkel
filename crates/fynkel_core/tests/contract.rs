@@ -12,25 +12,11 @@ fn at(x: f32) -> Transform {
 }
 
 fn spawn_one(w: &mut World, x: f32) -> Entity {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id: 1,
-            transform: at(x),
-            parent: None,
-            name: None,
-        }],
-    );
-    let r = w.step();
-    assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
-    let ev = w.drain_events();
-    match ev.as_slice() {
-        [Event {
-            payload: EventPayload::Spawned { temp_id: 1, entity },
-            ..
-        }] => *entity,
-        other => panic!("{other:?}"),
-    }
+    let commit = w.edit_gameplay(|edit| edit.spawn("", at(x), None)).unwrap();
+    let entity = commit.resolve(commit.value).unwrap();
+    assert_eq!(w.step().status, Status::Ok);
+    w.drain_events();
+    entity
 }
 
 fn pos(m: Mat4) -> Vec3 {
@@ -38,82 +24,53 @@ fn pos(m: Mat4) -> Vec3 {
 }
 
 #[test]
-fn simulation_commands_apply_at_the_next_tick_only() {
+fn data_commits_publish_now_and_the_next_tick_only_samples_them() {
     let mut w = world();
     let e = spawn_one(&mut w, 0.0);
     w.subscribe(&[e], true);
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetTransform {
-            entity: e,
-            transform: at(5.0),
-        }],
-    );
-    // Not applied yet: storage and extract still at the origin.
-    assert_eq!(w.extract().records[0].world, Mat4::IDENTITY);
+    w.edit_gameplay(|edit| edit.set_transform(e, at(5.0)))
+        .unwrap();
+    assert_eq!(pos(w.extract().records[0].world).x, 5.0);
     let r = w.step();
-    assert_eq!((r.applied, r.rejected, r.snapshot_records), (1, 0, 1));
+    assert_eq!((r.applied, r.rejected, r.snapshot_records), (0, 0, 1));
     assert_eq!(w.snapshot()[0].local.position.x, 5.0);
     assert_eq!(w.snapshot()[0].world.position.x, 5.0);
 }
 
 #[test]
-fn spawn_maps_temp_ids_and_destroy_removes_subtree() {
+fn scoped_spawns_resolve_at_commit_and_destroy_removes_subtree() {
     let mut w = world();
     let root = spawn_one(&mut w, 0.0);
-    w.submit(
-        Lane::Simulation,
-        vec![
-            Command::Spawn {
-                temp_id: 7,
-                transform: at(1.0),
-                parent: Some(root),
-                name: Some("child".into()),
-            },
-            Command::Spawn {
-                temp_id: 8,
-                transform: at(2.0),
-                parent: None,
-                name: None,
-            },
-        ],
-    );
-    w.step();
-    let ev = w.drain_events();
-    assert_eq!(ev.len(), 2);
-    let child = match &ev[0].payload {
-        EventPayload::Spawned { temp_id: 7, entity } => *entity,
-        p => panic!("{p:?}"),
-    };
+    let c = w
+        .edit_gameplay(|e| {
+            let child = e.spawn("child", at(1.0), Some(root.into()))?;
+            e.spawn("other", at(2.0), None)?;
+            Ok(child)
+        })
+        .unwrap();
+    let child = c.resolve(c.value).unwrap();
+    assert!(w.drain_events().is_empty());
     assert_eq!(w.ecs().get::<Name>(child).unwrap().value, "child");
     assert_eq!(w.live_entities(), 3);
     w.subscribe(&[root, child], true);
-
-    w.submit(Lane::Simulation, vec![Command::Destroy(root)]);
+    w.edit_gameplay(|e| e.destroy(root)).unwrap();
     let r = w.step();
-    assert_eq!(r.live_entities, 1);
+    assert_eq!((r.live_entities, r.snapshot_records), (1, 0));
     assert_eq!(
-        r.snapshot_records, 0,
-        "subscriptions of destroyed entities drop"
-    );
-    let ev = w.drain_events();
-    assert_eq!(
-        ev.iter().map(|e| e.payload.clone()).collect::<Vec<_>>(),
+        w.drain_events()
+            .iter()
+            .map(|e| e.payload.clone())
+            .collect::<Vec<_>>(),
         vec![
             EventPayload::Destroyed { entity: root },
             EventPayload::Destroyed { entity: child }
         ]
     );
-    // Stale handle fails safely with a diagnostic.
-    w.submit(Lane::Simulation, vec![Command::Destroy(root)]);
-    let r = w.step();
-    assert_eq!(r.status, Status::CommandsRejected);
-    assert_eq!(r.rejected, 1);
-    let d = &w.diagnostics()[0];
-    assert_eq!(
-        (d.command_index, d.code, d.entity),
-        (0, DiagnosticCode::STALE_ENTITY, root)
+    assert!(
+        matches!(w.edit_gameplay(|e|e.destroy(root)),Err(EditError::StaleEntity(e)) if e==root)
     );
+    assert_eq!(w.step().rejected, 0);
+    assert!(w.drain_events().is_empty());
 }
 
 /// Foundation 3.10: a despawn queued on the ECS (`despawn_deferred`,
@@ -124,20 +81,12 @@ fn spawn_maps_temp_ids_and_destroy_removes_subtree() {
 fn a_deferred_despawn_takes_the_subtree_like_destroy() {
     let mut w = world();
     let root = spawn_one(&mut w, 0.0);
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id: 7,
-            transform: at(1.0),
-            parent: Some(root),
-            name: Some("child".into()),
-        }],
-    );
+    let c = w
+        .edit_gameplay(|e| e.spawn("child", at(1.0), Some(root.into())))
+        .unwrap();
+    let child = c.resolve(c.value).unwrap();
     w.step();
-    let child = match &w.drain_events()[0].payload {
-        EventPayload::Spawned { temp_id: 7, entity } => *entity,
-        p => panic!("{p:?}"),
-    };
+    w.drain_events();
     w.subscribe(&[root, child], true);
 
     w.ecs().despawn_deferred(root);
@@ -162,93 +111,52 @@ fn a_deferred_despawn_takes_the_subtree_like_destroy() {
 }
 
 #[test]
-fn presentation_lane_overrides_extract_and_stages_authoritative_value() {
+fn zero_tick_transform_commits_are_authoritative_and_never_replayed() {
     let mut w = world();
     let e = spawn_one(&mut w, 0.0);
-    // Frame with no tick: presentation write must still show in the extract.
-    let plan = w.begin_frame(0.001);
-    assert_eq!(plan.steps, 0);
-    let r = w.submit(
-        Lane::Presentation,
-        vec![Command::SetTransform {
-            entity: e,
-            transform: at(3.0),
-        }],
-    );
-    assert_eq!(r.status, Status::Ok);
-    let x = w.extract();
-    assert_eq!(pos(x.records[0].world).x, 3.0);
-    assert!(x.records[0].overridden);
-    // Storage untouched until the next tick...
-    assert_eq!(w.ecs().copy::<Transform>(e).unwrap().position.x, 0.0);
-    // ...next frame's tick makes it authoritative; no snap back.
-    let plan = w.begin_frame(1.0 / 60.0);
-    assert_eq!(plan.steps, 1);
-    w.step();
+    assert_eq!(w.begin_frame(0.001).steps, 0);
+    w.edit_gameplay(|edit| edit.set_transform(e, at(3.0)))
+        .unwrap();
     assert_eq!(w.ecs().copy::<Transform>(e).unwrap().position.x, 3.0);
-    let x = w.extract();
-    assert!(!x.records[0].overridden);
-    // Not interpolated from the old S[n]: the value was already shown.
-    assert_eq!(pos(x.records[0].world).x, 3.0);
-    let _ = w.begin_frame(1.0 / 120.0);
     assert_eq!(pos(w.extract().records[0].world).x, 3.0);
+    w.edit_gameplay(|edit| edit.set_transform(e, at(7.0)))
+        .unwrap();
+    w.begin_frame(1.0 / 60.0);
+    w.step();
+    assert_eq!(pos(w.extract().records[0].world).x, 7.0);
+    w.begin_frame(1.0 / 120.0);
+    assert_eq!(pos(w.extract().records[0].world).x, 7.0);
 }
 
 #[test]
-fn presentation_lane_rejects_structural_and_physics_owned() {
+fn invalid_pose_rolls_back_other_data_and_structure_in_the_same_edit() {
     let mut w = world();
-    let e = spawn_one(&mut w, 0.0);
-    w.ecs_mut().insert(e, PhysicsOwned).unwrap();
-    let r = w.submit(
-        Lane::Presentation,
-        vec![
-            Command::SetTransform {
-                entity: e,
-                transform: at(1.0),
-            },
-            Command::Destroy(e),
-            Command::SetName {
-                entity: e,
-                name: "ok".into(),
-            },
-        ],
-    );
-    assert_eq!(
-        (r.status, r.accepted, r.rejected),
-        (Status::CommandsRejected, 1, 2)
-    );
-    let codes: Vec<_> = w
-        .diagnostics()
-        .iter()
-        .map(|d| (d.command_index, d.code))
-        .collect();
-    assert_eq!(
-        codes,
-        vec![
-            (0, DiagnosticCode::PHYSICS_OWNED),
-            (1, DiagnosticCode::WRONG_LANE)
-        ]
-    );
-    assert!(w.diagnostics().iter().all(|d| d.lane == Lane::Presentation));
-    assert!(w.ecs().contains(e));
-    assert_eq!(
-        w.extract().records[0].world,
-        Mat4::IDENTITY,
-        "rejected override not applied"
-    );
+    let a = spawn_one(&mut w, 0.0);
+    let b = spawn_one(&mut w, 1.0);
+    assert!(w
+        .edit_gameplay(|e| {
+            e.destroy(b)?;
+            e.set_name(a, "changed")?;
+            e.set_transform(a, at(f32::NAN))
+        })
+        .is_err());
+    assert!(w.ecs().contains(b));
+    assert_eq!(w.ecs().copy::<Transform>(a).unwrap(), at(0.0));
+    assert!(w.ecs().get::<Name>(a).unwrap().value.is_empty());
+    assert!(w.drain_events().is_empty());
+    assert_eq!(w.step().rejected, 0);
 }
 
 #[test]
 fn extract_interpolates_between_ticks() {
     let mut w = world();
     let e = spawn_one(&mut w, 0.0);
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetTransform {
-            entity: e,
-            transform: at(10.0),
-        }],
-    );
+    w.prepare_gameplay_tick();
+    w.edit_gameplay(|edit| {
+        edit.set_transform(e, at(10.0))?;
+        Ok(())
+    })
+    .unwrap();
     // 60 Hz tick, then a half-step frame at 120 Hz presentation.
     let p = w.begin_frame(1.0 / 60.0);
     assert_eq!(p.steps, 1);
@@ -290,35 +198,24 @@ fn missed_deadline_is_bounded_and_diagnosed() {
 }
 
 #[test]
-fn hierarchy_commands_reparent_and_reject_cycles() {
+fn hierarchy_edits_reparent_and_reject_cycles_atomically() {
     let mut w = world();
     let a = spawn_one(&mut w, 1.0);
     let b = spawn_one(&mut w, 2.0);
-    w.submit(
-        Lane::Simulation,
-        vec![
-            Command::SetParent {
-                child: b,
-                parent: Some(a),
-                keep_world: true,
-            },
-            Command::SetParent {
-                child: a,
-                parent: Some(b),
-                keep_world: false,
-            },
-        ],
-    );
-    let r = w.step();
-    assert_eq!((r.applied, r.rejected), (1, 1));
-    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::HIERARCHY_CYCLE);
-    assert_eq!(w.diagnostics()[0].command_index, 1);
-    // keep_world: b still at x=2 in world space, local is x=1.
+    assert!(w
+        .edit_gameplay(|e| {
+            e.set_parent(b, Some(a.into()), true)?;
+            e.set_parent(a, Some(b.into()), false)
+        })
+        .is_err());
+    assert!(fynkel_scene::children_of(w.ecs(), a).is_empty());
+    assert!(w.drain_events().is_empty());
+    w.edit_gameplay(|e| e.set_parent(b, Some(a.into()), true))
+        .unwrap();
     assert_eq!(pos(w.extract().records[1].world).x, 2.0);
     assert!((w.ecs().copy::<Transform>(b).unwrap().position.x - 1.0).abs() < 1e-5);
-    let ev = w.drain_events();
     assert!(
-        matches!(ev[0].payload, EventPayload::ParentChanged { child, parent: Some(p) } if child == b && p == a)
+        matches!(w.drain_events()[0].payload,EventPayload::ParentChanged{child,parent:Some(p)} if child==b && p==a)
     );
 }
 
@@ -341,154 +238,78 @@ fn events_are_pull_only_and_drained_once() {
 fn wrong_world_and_poison() {
     let mut w = world();
     let e = spawn_one(&mut w, 0.0);
-    let foreign = Entity::new(
-        World::new(WorldConfig::default()).id(),
-        e.slot(),
-        e.generation(),
+    let foreign = Entity::new(world().id(), e.slot(), e.generation());
+    assert!(
+        matches!(w.edit_gameplay(|edit|edit.destroy(foreign)),Err(EditError::StaleEntity(x)) if x==foreign)
     );
-    w.submit(Lane::Simulation, vec![Command::Destroy(foreign)]);
-    let r = w.step();
-    assert_eq!(r.rejected, 1);
-    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::WRONG_WORLD);
-
+    assert_eq!(w.step().rejected, 0);
     w.poison();
     assert_eq!(w.step().status, Status::Poisoned);
     assert_eq!(
-        w.submit(Lane::Simulation, vec![Command::Destroy(e)]).status,
-        Status::Poisoned
+        w.edit_gameplay(|edit| edit.destroy(e)),
+        Err(EditError::Poisoned)
     );
     assert!(w.ecs().contains(e));
 }
 
 #[test]
-fn batch_of_ten_thousand_round_trips() {
+fn transaction_of_ten_thousand_round_trips() {
     let mut w = world();
-    let cmds: Vec<Command> = (1..=10_000)
-        .map(|i| Command::Spawn {
-            temp_id: i,
-            transform: at(i as f32),
-            parent: None,
-            name: None,
+    let c = w
+        .edit_gameplay(|edit| {
+            (1..=10_000)
+                .map(|i| edit.spawn("", at(i as f32), None))
+                .collect::<EditResult<Vec<_>>>()
         })
-        .collect();
-    w.submit(Lane::Simulation, cmds);
-    let r = w.step();
-    assert_eq!(
-        (r.applied, r.live_entities, r.event_records),
-        (10_000, 10_000, 10_000)
-    );
-    let ids: Vec<Entity> = w
-        .drain_events()
-        .into_iter()
-        .filter_map(|e| match e.payload {
-            EventPayload::Spawned { entity, .. } => Some(entity),
-            _ => None,
-        })
-        .collect();
+        .unwrap();
+    let ids: Vec<_> = c.value.iter().map(|p| c.resolve(*p).unwrap()).collect();
+    assert_eq!(w.live_entities(), 10_000);
+    assert!(w.drain_events().is_empty());
     w.subscribe(&ids, true);
-    w.submit(
-        Lane::Simulation,
-        ids.iter()
-            .map(|&e| Command::SetTransform {
-                entity: e,
-                transform: at(-1.0),
-            })
-            .collect(),
-    );
-    let r = w.step();
-    assert_eq!(r.snapshot_records, 10_000);
+    w.edit_gameplay(|edit| {
+        for &e in &ids {
+            edit.set_transform(e, at(-1.0))?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(w.step().snapshot_records, 10_000);
     assert!(w.snapshot().iter().all(|s| s.local.position.x == -1.0));
-    w.submit(
-        Lane::Simulation,
-        ids.iter().map(|&e| Command::Destroy(e)).collect(),
-    );
+    w.edit_gameplay(|edit| {
+        for &e in &ids {
+            edit.destroy(e)?;
+        }
+        Ok(())
+    })
+    .unwrap();
     assert_eq!(w.step().live_entities, 0);
-    assert_eq!(w.extract().records.len(), 0);
+    assert!(w.extract().records.is_empty());
 }
 
 #[test]
-fn temp_references_build_an_object_in_the_tick_of_its_spawn() {
-    // M3-08b: a command later in the tick may name an entity spawned
-    // earlier in it through `Entity::temp(temp_id)`.
+fn scoped_pending_references_build_an_object_and_expire_after_commit() {
     let mut w = world();
     let root = spawn_one(&mut w, 0.0);
-    w.submit(
-        Lane::Simulation,
-        vec![
-            Command::Spawn {
-                temp_id: 5,
-                transform: at(1.0),
-                parent: None,
-                name: None,
-            },
-            Command::SetName {
-                entity: Entity::temp(5),
-                name: "lamp".into(),
-            },
-            Command::SetComponent {
-                entity: Entity::temp(5),
-                value: ComponentValue::PointLight(PointLight::default()),
-            },
-            Command::SetParent {
-                child: Entity::temp(5),
-                parent: Some(root),
-                keep_world: false,
-            },
-            // A child under the same-tick parent, then moved.
-            Command::Spawn {
-                temp_id: 6,
-                transform: at(0.5),
-                parent: Some(Entity::temp(5)),
-                name: None,
-            },
-            Command::SetTransform {
-                entity: Entity::temp(6),
-                transform: at(0.25),
-            },
-            // Rejected: nothing spawned #9; the rest of the batch still applies.
-            Command::Destroy(Entity::temp(9)),
-        ],
-    );
-    let r = w.step();
-    assert_eq!(r.status, Status::CommandsRejected);
-    assert_eq!((r.applied, r.rejected), (6, 1));
-    let d = &w.diagnostics()[0];
-    assert_eq!(
-        (d.command_index, d.code, d.entity),
-        (6, DiagnosticCode::INVALID_TEMP_ID, Entity::temp(9))
-    );
-    let ev = w.drain_events();
-    let spawned = |t: u64| {
-        ev.iter()
-            .find_map(|e| match e.payload {
-                EventPayload::Spawned { temp_id, entity } if temp_id == t => Some(entity),
-                _ => None,
-            })
-            .unwrap()
-    };
-    let (lamp, bulb) = (spawned(5), spawned(6));
+    let c = w
+        .edit_gameplay(|edit| {
+            let lamp = edit.spawn("", at(1.0), None)?;
+            edit.set_name(lamp, "lamp")?;
+            edit.set_component(lamp, ComponentValue::PointLight(PointLight::default()))?;
+            edit.set_parent(lamp, Some(root.into()), false)?;
+            let bulb = edit.spawn("", at(0.5), Some(lamp.into()))?;
+            edit.set_transform(bulb, at(0.25))?;
+            Ok((lamp, bulb))
+        })
+        .unwrap();
+    let (lamp, bulb) = (c.resolve(c.value.0).unwrap(), c.resolve(c.value.1).unwrap());
     assert_eq!(w.ecs().get::<Name>(lamp).unwrap().value, "lamp");
-    assert!(w.ecs().get::<PointLight>(lamp).is_ok());
+    assert!(w.ecs().has::<PointLight>(lamp));
     assert_eq!(w.ecs().get::<fynkel_scene::Parent>(lamp).unwrap().0, root);
     assert_eq!(w.ecs().get::<fynkel_scene::Parent>(bulb).unwrap().0, lamp);
-    assert_eq!(w.ecs().get::<Transform>(bulb).unwrap().position.x, 0.25);
-
-    // The map is per tick: the same temp id is unknown next tick, and a
-    // temp reference is never accepted on the presentation lane.
-    w.submit(Lane::Simulation, vec![Command::Destroy(Entity::temp(5))]);
-    let r = w.step();
-    assert_eq!(r.rejected, 1);
-    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::INVALID_TEMP_ID);
-    let r = w.submit(
-        Lane::Presentation,
-        vec![Command::SetName {
-            entity: Entity::temp(5),
-            name: "x".into(),
-        }],
-    );
-    assert_eq!(r.rejected, 1);
-    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::INVALID_TEMP_ID);
+    assert_eq!(w.ecs().copy::<Transform>(bulb).unwrap().position.x, 0.25);
+    assert!(w.edit_gameplay(|edit| edit.destroy(c.value.0)).is_err());
     assert_eq!(w.live_entities(), 3);
+    assert_eq!(w.step().rejected, 0);
 }
 
 #[test]
@@ -542,13 +363,12 @@ fn interpolation_composes_local_poses_without_losing_hierarchy_shear() {
         position: Vec3::Y,
         ..Transform::IDENTITY
     };
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetTransform {
-            entity: child,
-            transform: after,
-        }],
-    );
+    w.prepare_gameplay_tick();
+    w.edit_gameplay(|edit| {
+        edit.set_transform(child, after)?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     for fraction in [0.0, 0.5, 0.999] {
         // Each frame contributes only the difference; no simulation tick.
@@ -591,13 +411,11 @@ fn interpolation_composes_local_poses_without_losing_hierarchy_shear() {
         scale: Vec3::new(5.0, 2.0, 1.0),
         ..Transform::IDENTITY
     };
-    w.submit(
-        Lane::Presentation,
-        vec![Command::SetTransform {
-            entity: root,
-            transform: override_root,
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_transform(root, override_root)?;
+        Ok(())
+    })
+    .unwrap();
     let extract = w.extract();
     let actual = extract
         .records

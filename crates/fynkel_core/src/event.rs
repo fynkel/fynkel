@@ -12,10 +12,6 @@ pub struct Event {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EventPayload {
-    Spawned {
-        temp_id: u64,
-        entity: Entity,
-    },
     Destroyed {
         entity: Entity,
     },
@@ -94,7 +90,6 @@ pub enum EventPayload {
 impl EventPayload {
     pub fn kind(&self) -> EventKind {
         match self {
-            EventPayload::Spawned { .. } => EventKind::SPAWNED,
             EventPayload::Destroyed { .. } => EventKind::DESTROYED,
             EventPayload::ParentChanged { .. } => EventKind::PARENT_CHANGED,
             EventPayload::MissedDeadline { .. } => EventKind::MISSED_DEADLINE,

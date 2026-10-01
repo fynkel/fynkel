@@ -1,34 +1,14 @@
 //! The world's subsystem states (foundation 6.1): what one part of the
 //! tick keeps between ticks, grouped so `World` reads as its parts.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use fynkel_contracts::Entity;
-use fynkel_scene::Transform;
 use glam::Mat4;
 
-use super::{animation, catalogue, controller, Rejected, RigPlacement};
+use super::{animation, catalogue, controller, RigPlacement};
 use crate::animation::Pose;
-use crate::command::Command;
 use crate::components::Camera;
-
-/// The command lanes between ticks.
-#[derive(Default)]
-pub(super) struct Lanes {
-    /// Simulation commands for the next tick with their batch index and
-    /// whether they were staged by the presentation lane. An `Err` is a
-    /// command the caller could not decode: it is reported as rejected at
-    /// the tick boundary so its diagnostic sits with the batch's others.
-    pub(super) staged: Vec<(u32, Result<Command, Rejected>, bool)>,
-    /// The tick's spawns by temp id, what a temp reference
-    /// (`Entity::temp`) in a later command of the same tick resolves to.
-    pub(super) spawned_this_tick: HashMap<u64, Entity>,
-    /// Entities whose next tick must not interpolate from S[n] (their
-    /// authoritative value came from a presentation override already shown).
-    pub(super) teleported: Vec<Entity>,
-    /// Presentation-lane transform overrides for the current frame.
-    pub(super) overrides: HashMap<Entity, Transform>,
-}
 
 /// The derived `Inactive` markers' staleness.
 #[derive(Default)]

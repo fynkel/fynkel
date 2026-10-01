@@ -100,6 +100,14 @@ Authoring UUID metadata is not part of the existing runtime wire representation.
 | 25 set audio bus | u32 bus (0 master, 1 music, 2 sfx), f32 gain, u32 global mute (0/1) | empty |
 | 26 read audio bus | u32 bus | f32 logical gain, u32 global mute (0/1) |
 | 27 bind actions | string JSON object mapping action names to string arrays | string JSON load report describing the staged table |
+| 28 runtime clip | string UUID, u32 payload length, ANIM payload bytes (zero length removes) | empty |
+| 29 runtime PBR material | string UUID, u32 payload length, MATL bytes (zero removes) | empty |
+| 30 runtime mesh | string UUID, u32 payload length, MESH bytes (zero removes) | empty |
+| 31 runtime shader material | string UUID, u32 payload length, UTF-8 material document (zero removes) | empty |
+| 32 identity delta | none | u32 count; repeated reference, u32 hasName, optional string name; absent name means removed |
+| 33 mark persistent root | owner reference | u32 accepted (non-root returns 0) |
+| 34 persistent roots | none | u32 count, repeated references including pending roots |
+
 
 Operation 19 shares the generated body-command layout and decoding with legacy
 commands. Its embedded entity must be nil; only the scoped owner names the target.
@@ -383,3 +391,162 @@ SDK `setBus` and `applySettings` join the active edit or open one. `applySetting
 Operation 27 compiles the project defaults plus the supplied override map through the same compiler as project loading and legacy rebinding. The journal stages only the compiled table; the last binding request wins. Commit publishes the table and native persistent override metadata together; abort preserves both. Invalid binding strings remain nonfatal report entries and are skipped, while malformed protocol JSON and a missing loaded project fail the edit stickily.
 
 `World.bindActions` joins the current edit or opens one. Its returned report describes the staged table, including typed `bindingErrors`. `WorldInput` remains a phase sample: rebinding does not refresh it in the middle of a callback, consume edges, reset held controls, or advance clocks. Successful publication invalidates metadata for the next normal input refresh. SettingsStore engine audio and input changes share one commit when called inside an edit or callback; standalone store application still invokes the two operations separately. Settings documents, disk writes and application listeners remain external side effects.
+
+## Raw command compatibility after mutation-path retirement
+
+The older command wire remains accepted. Its simulation and immediate data
+operations now adapt into the same native gameplay journal as owned sessions;
+they cannot bypass reference, component or transform validation. Raw commands
+keep their original indexes, tick scheduling and independent acceptance, rather
+than gaining whole-batch atomicity implicitly. Duplicate temporary spawn IDs in
+one tick reject without replacing the successful mapping. Presentation name,
+component and bus changes also use the shared journal; transform overrides remain
+the separate compatibility presentation policy.
+
+Subsystem effect delivery uses a typed committed-effect queue and cannot replay
+an old component value over a later edit. The old direct audio/configuration and
+animation fallback writers are removed. The transport ABI is still supported. Raw asset registration follows the
+prepared-resource boundary below; scene operations and the visual-only
+presentation policy remain explicit F2 work. See ADR-0046's raw native
+command mutation adapter decision for the exact retained boundaries.
+
+### Raw asset registration boundary
+
+Raw submission no longer eagerly populates world asset registries. When a command
+executes, its cooked dependencies prepare into the same owned resource plan used
+by gameplay sessions. Capacity and journal validation precede publication;
+resources publish after data commit and before playback delivery. Invalid or
+wrong-lane commands cannot register their dependencies. Explicit queue adoption
+uses a single deduplicated plan and preserves both queue and registries on failure.
+Native project/preview/stage asset-source installation uses the shared setter.
+Preparation remains synchronous; asynchronous loading and resource budgets belong
+to the readiness milestone. The remaining compatibility transport and presentation
+transform overrides have not been removed.
+
+### Native producer retirement (2026-10-01)
+
+Preview sync and live component/transform previews, animation-stage control, and
+the headless/standalone demo no longer submit command transport. Native spawn
+callers resolve scoped pending entities from successful commits instead of
+listening for wire temporary-ID events. Preview component dependencies use
+prepared resources with commit-controlled publication. Diff rounds and live
+preview batches reject atomically; preview sampling steps and animation-stage
+sampling steps remain explicit. The demo prepares interpolation history before
+its fixed edits.
+
+The wire ABI is unchanged by this slice. Remaining transport removal order:
+
+1. Replace immediate SDK sound transport with a typed immediate-effect boundary,
+   preserving validation, resource publication, once-only delivery and its
+   rejection inside an open gameplay edit.
+2. Replace SDK adoption with lifecycle reconciliation that does not mutate a
+   legacy queue; preserve callback-entry failures and stale-handle behavior.
+3. Remove external raw submission/adoption and queue/temporary-ID machinery with
+   the corresponding ABI/schema migration. Move relevant behavior regressions
+   to journal tests rather than deleting their coverage. Keep schema records
+   still used as journal payloads or snapshots.
+
+Sibling ordering, whole-scene/resource operations, and the visual-only
+presentation policy remain separately tracked F2 work.
+
+### SDK transport removal and ABI 4 (2026-10-01)
+
+Removal-order steps 1 and 2 above are implemented. Ordinary SDK entry now reads
+`fynkel_world_gameplay_state`: live count u32, then repeated entity/name-length/
+UTF-8-name entries. There are no temporary-ID resolutions in this response, no
+queue publication, no tick and no event drain. Entry rejection preserves pending
+script lifecycle state; reconciliation of committed native state survives a
+later callback abort.
+
+`fynkel_world_audio_play` accepts one 40-byte `PlaySoundCommandRecord` followed
+by its string tail. The record is a typed immediate-effect payload; there is no
+command header, batch or lane selector. It validates and prepares sound assets,
+publishes them only for an accepted request, and plays once without consuming
+simulation effects. Immediate playback is unavailable during an owned edit.
+
+The adoption C export is removed. This is runtime ABI 4; generated bindings,
+schema metadata and source-build locks must agree. SDK raw submit methods,
+command batch builder, lane/result exports and presentation flush are removed.
+Native raw submission is excluded from generated SDK bindings but still exists
+in C/Rust pending step 3. Command/effect schema records cannot all be removed:
+several remain payloads for the journal or immediate audio operation.
+
+### Native C transport removal (2026-10-01)
+
+The earlier notes about retaining/excluding C raw submission are superseded:
+`fynkel_world_submit_commands`, its decoder/batch writer, C command kind/lane,
+submission result and raw transport counters are deleted. C hosts use owned
+transactions and resolve pending identities from commit responses. Native clone
+and input binding no longer adopt a queue. Core adoption and `apply_now` are
+also deleted; atomic live editor batches publish prepared resources only after
+commit.
+
+Runtime ABI 4 now uses schema fingerprint `0x8da8b43e4b1f1c3e`. Ten raw-only
+records are removed from the registry/codecs; shared effect payloads, components,
+queries and events remain. Source locks and cross-language fixtures must match.
+The C ABI behavior tests and leak/independent-library identity gates exercise the
+owned protocol directly, including rollback, event retention and resource retry.
+
+The Rust-only compatibility submission/queue/temp-ID/presentation-override path
+is still present. Its removal is the remaining transport task; it must not be
+confused with the now-deleted C transport or marked complete by this slice.
+
+
+### Rust transport retirement (2026-10-01)
+
+The remaining Rust compatibility transport described above is deleted.
+`World::submit`/`submit_indexed`, compatibility adoption/queues, temporary
+entity IDs and the spawned-event handshake no longer exist. Callers resolve
+scoped pending tokens from successful transaction commits. Event ID 1 is reserved.
+
+Extraction no longer has presentation overrides or a replay channel. Persistent
+writes use the same journal, while fixed-tick preparation explicitly preserves
+interpolation history. Typed committed effects retain their once-only delivery
+at subsystem boundaries.
+
+Schema fingerprint `0xbd96f0308508f61f` removes the obsolete spawn event record;
+runtime ABI 4 and authoring ABI versioning are otherwise unchanged. Codecs,
+bindings, current fixtures and locks are regenerated together.
+[Qualification evidence](../../benchmarks/foundation/results/2026-10-01-5b66fb4f-f2-rust-transport.json)
+records all 17 passing checks plus the separate dynamic-library identity/export
+gate. This completes transport removal, not the remaining F2 work.
+
+
+### Runtime animation clip publication (2026-10-01)
+
+Operation 28 validates and owns decoded clip data within the native edit session.
+Repeated writes coalesce by asset UUID. Missing asset stores, malformed payloads,
+and protocol errors fail the edit stickily. Abort drops the resource intents;
+successful gameplay/resource commit publishes the final runtime-store changes
+and updates the core clip registry before the next animation phase.
+
+SDK creation, replacement and removal enter the shared edit, including ordinary
+standalone calls. Made-clip liveness reads staged intent and only updates its
+committed membership after native success. The direct C setter shares decoding
+and publication helpers and remains excluded during an owned session.
+No new C export or schema record is introduced. ABI/schema are unchanged.
+Removal retains the existing core playback copy; this is not a cache eviction
+or asset-readiness redesign.
+
+[Runtime clip qualification](../../benchmarks/foundation/results/2026-10-01-5b66fb4f-f2-runtime-clips.json)
+passes all 17 checks, including the owned-protocol truncation/missing-store test
+and six SDK clip transaction regressions.
+
+### F2 closing resource and identity operations (2026-10-02)
+
+Operations 29–31 share the owned edit's failure state, length bounds and exact
+consumption checks. PBR/shader writes coalesce in one per-UUID intent map. Mesh
+collision preparation happens before commit; publication invalidates built
+colliders without fallible recooking. Renderer-store revisions advance only at
+successful final publication, once per final resource intent. Direct native
+setters share validators/publishers and retain owned-session exclusion.
+
+Operation 32 returns journal identity changes without scanning the live world.
+SDK commit metadata uses these deltas; callback entry still uses the read-only
+full state snapshot. Delta preparation cannot drain lifecycle events. Operations
+33/34 make persistence part of the same logical hierarchy; abort discards marks,
+removed roots vanish and children are excluded. No new C export or schema record
+is introduced; runtime ABI 4 and schema fingerprint bd96f0308508f61f remain.
+
+[ADR-0051](../decisions/ADR-0051-f2-boundaries-and-presentation-policy.md) resolves
+presentation persistence and explicitly separate host/editor/device boundaries.

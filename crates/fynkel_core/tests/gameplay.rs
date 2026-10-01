@@ -167,7 +167,7 @@ fn foreign_stale_and_legacy_temporary_references_fail_the_whole_edit() {
     scene::despawn_subtree(w.ecs_mut(), dead).unwrap();
     let mut other = world();
     let foreign = node(&mut other, "foreign", None, 0.0);
-    for invalid in [dead, foreign, Entity::NULL, Entity::temp(1)] {
+    for invalid in [dead, foreign, Entity::NULL, Entity::from_bits(1u128 << 64)] {
         let result = w.edit_gameplay(|edit| {
             edit.set_name(local, "leaked")?;
             let _ = edit.set_active(invalid, false);
@@ -327,27 +327,20 @@ fn completed_snapshots_stay_at_their_tick_while_gameplay_and_extract_advance() {
 }
 
 #[test]
-fn queued_legacy_commands_and_poisoned_worlds_cannot_enter_the_boundary() {
+fn successive_commits_are_visible_and_poisoned_worlds_cannot_enter_the_boundary() {
     let mut w = world();
     let e = node(&mut w, "before", None, 0.0);
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetName {
-            entity: e,
-            name: "queued".into(),
-        }],
-    );
-    assert_eq!(
-        w.edit_gameplay::<()>(|_| panic!("callback must not run")),
-        Err(EditError::PendingCommands)
-    );
-    w.step();
+    w.edit_gameplay(|edit| {
+        edit.set_name(e, "queued")?;
+        Ok(())
+    })
+    .unwrap();
     w.edit_gameplay(|edit| {
         assert_eq!(edit.name(e)?.as_deref(), Some("queued"));
         Ok(())
     })
     .unwrap();
-    w.apply_now(vec![Command::SetName {
+    w.apply_gameplay_now(vec![Command::SetName {
         entity: e,
         name: "native writer".into(),
     }]);
@@ -383,188 +376,108 @@ fn missing_spatial_components_fail_atomically_without_creating_partial_hierarchy
 }
 
 #[test]
-fn legacy_adoption_resolves_spawns_and_component_references_without_a_tick() {
+fn scoped_spawn_commit_resolves_hierarchy_and_component_references_without_a_tick() {
     let mut w = world();
-    w.submit(
-        Lane::Simulation,
-        vec![
-            Command::Spawn {
-                temp_id: 1,
-                transform: at(3.0),
-                parent: None,
-                name: Some("root".into()),
-            },
-            Command::Spawn {
-                temp_id: 2,
-                transform: at(2.0),
-                parent: Some(Entity::temp(1)),
-                name: Some("child".into()),
-            },
-            Command::SetComponent {
-                entity: Entity::temp(2),
-                value: ComponentValue::Follow(Follow {
-                    target: fynkel_contracts::ObjectRef::to(Entity::temp(1)),
-                    ..Default::default()
-                }),
-            },
-            Command::SetName {
-                entity: Entity::temp(1),
-                name: "adopted".into(),
-            },
-        ],
-    );
     let tick = w.tick();
-    let commit = w.adopt_gameplay_commands().unwrap();
-    let root = commit.resolve(commit.value[0].1).unwrap();
-    let child = commit.resolve(commit.value[1].1).unwrap();
+    let commit = w
+        .edit_gameplay(|edit| {
+            let root = edit.spawn("root", at(3.0), None)?;
+            let child = edit.spawn("child", at(2.0), Some(root.into()))?;
+            edit.set_component(
+                child,
+                GameplayComponentValue::Follow(Follow::default().map_object_refs(|_| root.into())),
+            )?;
+            edit.set_name(root, "committed")?;
+            Ok((root, child))
+        })
+        .unwrap();
+    let root = commit.resolve(commit.value.0).unwrap();
+    let child = commit.resolve(commit.value.1).unwrap();
     assert_eq!(w.tick(), tick);
-    assert_eq!(w.ecs().get::<Name>(root).unwrap().value.as_str(), "adopted");
+    assert_eq!(w.ecs().get::<Name>(root).unwrap().value, "committed");
     assert_eq!(w.ecs().get::<Follow>(child).unwrap().target.entity, root);
-    w.edit_gameplay(|e| {
-        assert_eq!(e.parent(child)?, Some(root.into()));
-        Ok(())
-    })
-    .unwrap();
+    assert_eq!(scene::parent_of(w.ecs(), child), Some(root));
     w.step();
     assert_eq!(w.live_entities(), 2);
-    assert!(!w
-        .drain_events()
-        .iter()
-        .any(|e| matches!(e.payload, EventPayload::Spawned { .. })));
+    assert!(w.drain_events().is_empty());
 }
 
 #[test]
-fn failed_legacy_adoption_preserves_world_and_the_original_queue() {
+fn rejected_edits_leave_no_work_to_replay_and_do_not_block_retry() {
     let mut w = world();
     let root = node(&mut w, "original", None, 0.0);
-    w.submit(
-        Lane::Simulation,
-        vec![
-            Command::SetName {
-                entity: root,
-                name: "queued".into(),
-            },
-            Command::SetTransform {
-                entity: root,
-                transform: at(f32::NAN),
-            },
-        ],
-    );
-    assert!(matches!(
-        w.adopt_gameplay_commands(),
-        Err(EditError::LegacyCommand { index: 1, .. })
-    ));
-    assert_eq!(
-        w.ecs().get::<Name>(root).unwrap().value.as_str(),
-        "original"
-    );
-    assert!(matches!(
-        w.edit_gameplay(|_| Ok(())),
-        Err(EditError::PendingCommands)
-    ));
+    assert!(w
+        .edit_gameplay(|edit| {
+            edit.set_name(root, "discarded")?;
+            edit.set_transform(root, at(f32::NAN))
+        })
+        .is_err());
+    assert_eq!(w.ecs().get::<Name>(root).unwrap().value, "original");
+    w.edit_gameplay(|edit| edit.set_name(root, "retry"))
+        .unwrap();
     w.step();
-    assert_eq!(w.ecs().get::<Name>(root).unwrap().value.as_str(), "queued");
-    assert_eq!(w.diagnostics().len(), 1);
+    assert_eq!(w.ecs().get::<Name>(root).unwrap().value, "retry");
+    assert!(w.diagnostics().is_empty());
 }
 
 #[test]
-fn adoption_rejects_forward_and_duplicate_temp_ids_without_allocating() {
-    for commands in [
-        vec![
-            Command::SetName {
-                entity: Entity::temp(1),
-                name: "forward".into(),
-            },
-            Command::Spawn {
-                temp_id: 1,
-                transform: at(0.0),
-                parent: None,
-                name: None,
-            },
-        ],
-        vec![
-            Command::Spawn {
-                temp_id: 1,
-                transform: at(0.0),
-                parent: None,
-                name: None,
-            },
-            Command::Spawn {
-                temp_id: 1,
-                transform: at(0.0),
-                parent: None,
-                name: None,
-            },
-        ],
-    ] {
-        let mut w = world();
-        w.submit(Lane::Simulation, commands);
-        assert!(w.adopt_gameplay_commands().is_err());
-        assert_eq!(w.live_entities(), 0);
-        assert!(matches!(
-            w.edit_gameplay(|_| Ok(())),
-            Err(EditError::PendingCommands)
-        ));
-    }
-}
-
-#[test]
-fn adopted_spawn_then_destroy_never_allocates_a_live_identity() {
+fn scoped_pending_ids_are_unique_and_expire_after_abort() {
     let mut w = world();
-    w.submit(
-        Lane::Simulation,
-        vec![
-            Command::Spawn {
-                temp_id: 1,
-                transform: at(0.0),
-                parent: None,
-                name: None,
-            },
-            Command::Destroy(Entity::temp(1)),
-        ],
-    );
-    let commit = w.adopt_gameplay_commands().unwrap();
-    assert_eq!(commit.value.len(), 1);
-    assert_eq!(commit.resolve(commit.value[0].1), None);
+    let mut expired = None;
+    let result = w.edit_gameplay(|edit| {
+        let first = edit.spawn("first", at(0.0), None)?;
+        let second = edit.spawn("second", at(0.0), None)?;
+        assert_ne!(first, second);
+        expired = Some(first);
+        Err::<(), _>(EditError::Aborted)
+    });
+    assert!(result.is_err());
+    assert!(w
+        .edit_gameplay(|edit| edit.set_name(expired.unwrap(), "expired"))
+        .is_err());
     assert_eq!(w.live_entities(), 0);
+    w.edit_gameplay(|_| Ok(())).unwrap();
+}
+
+#[test]
+fn canceled_scoped_spawn_never_allocates_a_live_identity() {
+    let mut w = world();
+    let commit = w
+        .edit_gameplay(|edit| {
+            let pending = edit.spawn("canceled", at(0.0), None)?;
+            edit.destroy(pending)?;
+            Ok(pending)
+        })
+        .unwrap();
+    assert_eq!(commit.resolve(commit.value), None);
+    assert_eq!(w.live_entities(), 0);
+    assert!(w.drain_events().is_empty());
     w.edit_gameplay(|_| Ok(())).unwrap();
 }
 
 #[cfg(feature = "physics")]
 #[test]
-fn adopted_body_effect_executes_once_after_publication() {
+fn committed_body_effect_executes_once_after_publication() {
     let mut w = world();
-    w.submit(
-        Lane::Simulation,
-        vec![
-            Command::Spawn {
-                temp_id: 1,
-                transform: at(0.0),
-                parent: None,
-                name: None,
-            },
-            Command::SetComponent {
-                entity: Entity::temp(1),
-                value: ComponentValue::RigidBody(RigidBody {
+    let commit = w
+        .edit_gameplay(|edit| {
+            let pending = edit.spawn("body", at(0.0), None)?;
+            edit.set_component(
+                pending,
+                ComponentValue::RigidBody(RigidBody {
                     body_type: BodyType::Dynamic,
                     mass: 2.0,
                     gravity_scale: 0.0,
                     linear_damping: 0.0,
                     ..Default::default()
                 }),
-            },
-            Command::SetComponent {
-                entity: Entity::temp(1),
-                value: ComponentValue::Collider(Collider::default()),
-            },
-            Command::Body {
-                entity: Entity::temp(1),
-                op: BodyCommand::ApplyImpulse(Vec3::X * 4.0),
-            },
-        ],
-    );
-    let commit = w.adopt_gameplay_commands().unwrap();
-    let entity = commit.resolve(commit.value[0].1).unwrap();
+            )?;
+            edit.set_component(pending, ComponentValue::Collider(Collider::default()))?;
+            edit.body_effect(pending, BodyCommand::ApplyImpulse(Vec3::X * 4.0))?;
+            Ok(pending)
+        })
+        .unwrap();
+    let entity = commit.resolve(commit.value).unwrap();
     assert!(w.physics().body_state(entity).is_none());
     w.step();
     assert_eq!(
@@ -579,68 +492,41 @@ fn adopted_body_effect_executes_once_after_publication() {
 }
 
 #[test]
-fn adoption_preserves_decode_failures_and_invalid_commands_for_legacy_execution() {
+fn caught_invalid_transaction_request_is_sticky_without_deferred_diagnostics() {
     let mut w = world();
-    w.submit_indexed(
-        Lane::Simulation,
-        vec![(
-            7,
-            Err(Rejected {
-                code: fynkel_contracts::DiagnosticCode::INVALID_PAYLOAD,
-                message: "bad wire record".into(),
-            }),
-        )],
-    );
-    assert!(matches!(
-        w.adopt_gameplay_commands(),
-        Err(EditError::LegacyCommand { index: 7, .. })
-    ));
-    w.step();
-    assert_eq!(w.diagnostics()[0].command_index, 7);
-    w.submit(
-        Lane::Simulation,
-        vec![Command::AudioBus {
-            bus: fynkel_core::AudioBus::Master,
-            volume: 2.0,
-            muted: false,
-        }],
-    );
-    assert!(w.adopt_gameplay_commands().is_err());
-    assert!(matches!(
-        w.edit_gameplay(|_| Ok(())),
-        Err(EditError::PendingCommands)
-    ));
-    w.step();
+    assert!(w
+        .edit_gameplay(|edit| {
+            let pending = edit.spawn("discarded", at(0.0), None)?;
+            let _ = edit.set_transform(pending, at(f32::NAN));
+            Ok(())
+        })
+        .is_err());
+    assert_eq!(w.live_entities(), 0);
+    assert_eq!(w.step().rejected, 0);
+    assert!(w.diagnostics().is_empty());
 }
 
 #[test]
-fn adoption_final_validation_restores_the_whole_queue() {
+fn final_reference_validation_discards_all_changes_without_replay() {
     let mut w = world();
     let owner = node(&mut w, "owner", None, 0.0);
-    w.submit(
-        Lane::Simulation,
-        vec![
-            Command::Spawn {
-                temp_id: 1,
-                transform: at(0.0),
-                parent: None,
-                name: None,
-            },
-            Command::SetComponent {
-                entity: owner,
-                value: ComponentValue::Follow(Follow {
-                    target: fynkel_contracts::ObjectRef::to(Entity::temp(1)),
-                    ..Default::default()
-                }),
-            },
-            Command::Destroy(Entity::temp(1)),
-        ],
-    );
-    assert!(w.adopt_gameplay_commands().is_err());
+    assert!(w
+        .edit_gameplay(|edit| {
+            let target = edit.spawn("target", at(0.0), None)?;
+            edit.set_component(
+                owner,
+                GameplayComponentValue::Follow(
+                    Follow::default().map_object_refs(|_| target.into()),
+                ),
+            )?;
+            edit.destroy(target)?;
+            Ok(())
+        })
+        .is_err());
     assert_eq!(w.live_entities(), 1);
     assert!(!w.ecs().has::<Follow>(owner));
-    assert!(matches!(
-        w.edit_gameplay(|_| Ok(())),
-        Err(EditError::PendingCommands)
-    ));
+    w.edit_gameplay(|_| Ok(())).unwrap();
+    w.step();
+    assert_eq!(w.live_entities(), 1);
+    assert!(!w.ecs().has::<Follow>(owner));
 }

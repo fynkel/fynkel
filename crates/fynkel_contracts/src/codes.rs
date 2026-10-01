@@ -53,7 +53,7 @@ pub struct DiagnosticCode(pub u32);
 impl DiagnosticCode {
     pub const UNKNOWN_COMMAND: DiagnosticCode = DiagnosticCode(1);
     pub const STALE_ENTITY: DiagnosticCode = DiagnosticCode(2);
-    pub const INVALID_TEMP_ID: DiagnosticCode = DiagnosticCode(3);
+    // Code 3 is reserved (retired temporary entity IDs).
     pub const INVALID_PAYLOAD: DiagnosticCode = DiagnosticCode(4);
     pub const UNKNOWN_COMPONENT: DiagnosticCode = DiagnosticCode(5);
     pub const MISSING_COMPONENT: DiagnosticCode = DiagnosticCode(6);
@@ -64,9 +64,7 @@ impl DiagnosticCode {
     /// Time dropped after `max_steps_per_frame` catch-up ticks.
     pub const MISSED_DEADLINE: DiagnosticCode = DiagnosticCode(10);
     pub const DUPLICATE_COMPONENT: DiagnosticCode = DiagnosticCode(11);
-    /// A structural or simulation-only command was submitted on the
-    /// presentation lane.
-    pub const WRONG_LANE: DiagnosticCode = DiagnosticCode(12);
+    // Code 12 is reserved (retired command submission lanes).
     /// A `shape: mesh` collider whose mesh is not available for collision
     /// (not cooked, not registered, or over the triangle limit); the
     /// collider is skipped (M3-08).
@@ -116,7 +114,6 @@ impl DiagnosticCode {
         match self.0 {
             1 => "unknown_command",
             2 => "stale_entity",
-            3 => "invalid_temp_id",
             4 => "invalid_payload",
             5 => "unknown_component",
             6 => "missing_component",
@@ -125,7 +122,6 @@ impl DiagnosticCode {
             9 => "physics_owned",
             10 => "missed_deadline",
             11 => "duplicate_component",
-            12 => "wrong_lane",
             13 => "mesh_unavailable",
             14 => "prefab_unavailable",
             15 => "too_many_anchors",

@@ -7,14 +7,13 @@
 //! let plan = world.begin_frame(dt);          // accumulator, MissedDeadline
 //! for _ in 0..plan.steps {
 //!     let events = world.drain_events();     // pull-only, general + last tick's physics
-//!     // ... gameplay reads world.snapshot(), builds commands ...
-//!     world.submit(Lane::Simulation, cmds);  // staged for this tick
+//!     world.prepare_gameplay_tick();
+//!     world.edit_gameplay(|edit| { /* gameplay */ Ok(()) })?;
 //!     let report = world.step();             // §5.1 fixed tick
 //!     // ... afterPhysics reads world.after_physics_events() ...
 //! }
-//! // ... update/lateUpdate: presentation commands ...
-//! world.submit(Lane::Presentation, cmds);
-//! let extract = world.extract();             // interpolated by alpha + overrides
+//! world.edit_gameplay(|edit| { /* update/lateUpdate */ Ok(()) })?;
+//! let extract = world.extract();             // interpolated by alpha
 //! ```
 //!
 //! Everything Dart-facing is typed Rust here; the wire encoding lives in
@@ -78,8 +77,9 @@ pub use world::gameplay::{
 pub use world::{
     projection_matrix, view_matrix, Diagnostic, Extract, ExtractCamera, ExtractDirectionalLight,
     ExtractEnvironment, ExtractMesh, ExtractPointLight, ExtractRecord, ExtractSpotLight,
-    ExtractVolume, Name, PhysicsOwned, ProjectionInfo, Rejected, SnapshotRecord, StepReport,
-    SubmitReport, World, WorldConfig, MAX_PROJECTION_ANCHORS, PROJECTED_DROPPED,
-    PROJECTED_IN_FRONT, PROJECTED_MISSING, PROJECTED_NO_CAMERA, PROJECTED_OCCLUDED,
-    PROJECTED_ON_SCREEN, PROJECTED_VISIBLE,
+    ExtractVolume, Name, PhysicsOwned, ProjectionInfo, SnapshotRecord, StepReport, World,
+    WorldConfig, MAX_PROJECTION_ANCHORS, PROJECTED_DROPPED, PROJECTED_IN_FRONT, PROJECTED_MISSING,
+    PROJECTED_NO_CAMERA, PROJECTED_OCCLUDED, PROJECTED_ON_SCREEN, PROJECTED_VISIBLE,
 };
+
+pub use world::command_resources::{CommandResourceSource, PreparedCommandResources};

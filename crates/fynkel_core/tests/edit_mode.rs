@@ -25,38 +25,32 @@ fn edit_world() -> World {
 
 fn spawn(
     w: &mut World,
-    temp_id: u64,
+    fixture_id: u64,
     at: Vec3,
     parent: Option<Entity>,
     components: Vec<ComponentValue>,
 ) -> Entity {
-    w.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id,
-            transform: Transform::from_position(at),
-            parent,
-            name: Some(format!("e{temp_id}")),
-        }],
-    );
-    let r = w.step();
-    assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
-    let entity = w
-        .drain_events()
-        .into_iter()
-        .find_map(|e| match e.payload {
-            EventPayload::Spawned { temp_id: t, entity } if t == temp_id => Some(entity),
-            _ => None,
+    let commit = w
+        .edit_gameplay(|edit| {
+            edit.spawn(
+                format!("e{fixture_id}"),
+                Transform::from_position(at),
+                parent.map(Into::into),
+            )
         })
         .unwrap();
+    let entity = commit.resolve(commit.value).unwrap();
+    assert_eq!(w.step().status, Status::Ok);
+    w.drain_events();
     if !components.is_empty() {
-        let cmds = components
-            .into_iter()
-            .map(|value| Command::SetComponent { entity, value })
-            .collect();
-        w.submit(Lane::Simulation, cmds);
-        let r = w.step();
-        assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
+        w.edit_gameplay(|edit| {
+            for value in components {
+                edit.set_component(entity, value)?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(w.step().status, Status::Ok);
     }
     entity
 }
@@ -157,13 +151,11 @@ fn commands_propagation_and_snapshot_still_happen_and_never_interpolate() {
     let child = spawn(&mut w, 2, Vec3::new(0.0, 1.0, 0.0), Some(parent), vec![]);
     w.subscribe(&[child], true);
     // Move the parent: the child's world position follows in the same step.
-    w.submit(
-        Lane::Simulation,
-        vec![Command::SetTransform {
-            entity: parent,
-            transform: Transform::from_position(Vec3::new(5.0, 0.0, 0.0)),
-        }],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_transform(parent, Transform::from_position(Vec3::new(5.0, 0.0, 0.0)))?;
+        Ok(())
+    })
+    .unwrap();
     // A frame with dt 0 between the submit and the step: alpha stays 0 —
     // a game world would draw the previous transform; the edit world the
     // current one.
@@ -182,17 +174,12 @@ fn commands_propagation_and_snapshot_still_happen_and_never_interpolate() {
     assert_eq!(extract.alpha, 0.0);
 
     // Structure too: reparent and destroy apply at the step.
-    w.submit(
-        Lane::Simulation,
-        vec![
-            Command::SetParent {
-                child,
-                parent: None,
-                keep_world: true,
-            },
-            Command::Destroy(parent),
-        ],
-    );
+    w.edit_gameplay(|edit| {
+        edit.set_parent(child, None, true)?;
+        edit.destroy(parent)?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     assert!(!w.ecs().contains(parent));
     assert_eq!(world_pos(&w, child), Vec3::new(5.0, 1.0, 0.0));
@@ -274,7 +261,11 @@ fn the_editor_camera_replaces_the_scene_camera_and_hidden_entities_vanish() {
     assert_ne!(e.camera.as_ref().unwrap().record, u32::MAX);
     assert_eq!(e.meshes.len(), 1);
     // A dead entity is dropped from the set.
-    w.submit(Lane::Simulation, vec![Command::Destroy(light)]);
+    w.edit_gameplay(|edit| {
+        edit.destroy(light)?;
+        Ok(())
+    })
+    .unwrap();
     w.step();
     assert!(w.set_edit_hidden(&[light]));
     assert_eq!(w.edit_hidden().count(), 0);

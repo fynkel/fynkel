@@ -4,20 +4,20 @@
 //! `.scene.json` (built by `fynkel_document::runtime`); this module knows
 //! nothing about JSON. [`World::load_scene`] spawns the hierarchy in
 //! document order (roots in order, children in their listed order) and
-//! applies every other component through `Command::SetComponent`, so a
-//! value that the bridge would reject is rejected here too and shows up in
-//! `World::diagnostics()`. The returned [`LoadedScene`] maps authoring ids to
+//! stages component payloads in the shared transaction before publication.
+//! Loading owns forward-reference resolution; invalid payloads reject the load.
+//! The returned [`LoadedScene`] maps authoring ids to
 //! runtime handles both ways.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use fynkel_contracts::{ComponentId, Entity, ObjectRef, Uuid};
 use fynkel_scene::{self as scene, Transform};
 
-use crate::command::Command;
 use crate::components::ComponentValue;
 use crate::event::EventPayload;
 use crate::world::{Diagnostic, Name, World};
+use crate::{EditResult, GameplayComponentValue, GameplayEdit, GameplayObjectRef, PendingEntity};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct EntityDescription {
@@ -47,6 +47,8 @@ pub struct SceneDescription {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LoadError {
     Poisoned,
+    /// Shared transaction validation rejected the complete scene operation.
+    SceneRejected(String),
     DuplicateEntity(Uuid),
     UnknownParent {
         entity: Uuid,
@@ -82,7 +84,7 @@ pub enum LoadError {
     NotLoaded(Uuid),
     /// `clone_subtree`: the source is not a live entity of this world.
     UnknownSource(Entity),
-    /// The shared gameplay journal rejected a clone or preceding queue adoption.
+    /// The shared gameplay journal rejected a clone.
     CloneRejected(String),
     /// Atomic live creation failed before publishing the entity or scene identity.
     LiveSpawnRejected(String),
@@ -94,6 +96,7 @@ pub enum LoadError {
 impl core::fmt::Display for LoadError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            LoadError::SceneRejected(message) => write!(f, "scene transaction: {message}"),
             LoadError::Poisoned => write!(f, "world is poisoned"),
             LoadError::DuplicateEntity(id) => write!(f, "entity {id} appears twice"),
             LoadError::UnknownParent { entity, parent } => {
@@ -169,8 +172,7 @@ pub struct LoadedScene {
     order: Vec<(Uuid, Entity)>,
     by_id: HashMap<Uuid, Entity>,
     by_entity: HashMap<Entity, Uuid>,
-    /// Component values rejected by the command path (see the world's
-    /// diagnostics); the entities themselves exist.
+    /// Always zero: invalid component values reject the complete transaction.
     pub rejected_components: u32,
     /// Object references (ADR-0035) whose target is not in the load: they
     /// are None. For the load report.
@@ -238,10 +240,8 @@ impl World {
     /// Instantiates `scene` now, at the current tick boundary, in
     /// [`LoadMode::Replace`]: every loaded scene is unloaded and every
     /// other entity destroyed first. Emits `SceneReady { scene }`.
-    /// Structural errors load nothing (and unload nothing); component
-    /// values that fail the command path are counted in
-    /// `rejected_components` and reported in [`World::diagnostics`]
-    /// (command index `u32::MAX`).
+    /// Structure, components and live references validate in one transaction.
+    /// Rejection preserves the previous world and emits no lifecycle events.
     pub fn load_scene(&mut self, scene: &SceneDescription) -> Result<LoadedScene, LoadError> {
         self.load_scene_with(scene, LoadMode::Replace)
     }
@@ -254,23 +254,84 @@ impl World {
         scene: &SceneDescription,
         mode: LoadMode,
     ) -> Result<LoadedScene, LoadError> {
+        self.load_scene_prepared(scene, mode, None)
+    }
+
+    /// Publishes scene data and an optional owned resource plan at one boundary.
+    /// Preflight and staged controller definitions run before the shared journal
+    /// commits. Rejection leaves entities, scene metadata and registries intact.
+    pub fn load_scene_prepared(
+        &mut self,
+        scene: &SceneDescription,
+        mode: LoadMode,
+        resources: Option<Box<dyn crate::PreparedCommandResources>>,
+    ) -> Result<LoadedScene, LoadError> {
+        self.load_scene_replacing(scene, mode, resources, &[])
+    }
+
+    /// As scene activation, additionally retiring host-owned roots in the same
+    /// transaction. Used when replacing a project's persistent objects.
+    pub fn load_scene_replacing(
+        &mut self,
+        scene: &SceneDescription,
+        mode: LoadMode,
+        resources: Option<Box<dyn crate::PreparedCommandResources>>,
+        retire: &[Entity],
+    ) -> Result<LoadedScene, LoadError> {
         if self.is_poisoned() {
             return Err(LoadError::Poisoned);
         }
-        // The structure is checked before anything is taken down.
-        spawn_order(scene)?;
-        match mode {
-            LoadMode::Replace => {
-                self.unload_all();
+        let order = spawn_order(scene)?;
+        if mode == LoadMode::Additive && self.scenes.iter().any(|s| s.id == scene.id) {
+            return Err(LoadError::AlreadyLoaded(scene.id));
+        }
+        if let Some(resources) = &resources {
+            resources
+                .preflight(self)
+                .map_err(|e| LoadError::SceneRejected(e.to_string()))?;
+        }
+        let mut removed = HashSet::new();
+        let mut unloads = Vec::new();
+        if mode == LoadMode::Replace {
+            for old in self.scenes.iter().rev() {
+                let before = removed.len();
+                self.collect_scene_removals(old, &mut removed);
+                unloads.push((old.id, (removed.len() - before) as u32));
             }
-            LoadMode::Additive => {
-                if self.scenes.iter().any(|s| s.id == scene.id) {
-                    return Err(LoadError::AlreadyLoaded(scene.id));
+            for entity in self.ecs().entities() {
+                if !self.is_persistent(entity) {
+                    removed.insert(entity);
                 }
             }
         }
-        let tick = self.tick();
-        let loaded = self.load_under(scene, None, None, tick, true)?;
+        let commit = self
+            .edit_gameplay(|edit| {
+                if let Some(resources) = &resources {
+                    resources.stage(edit)?;
+                }
+                // The whole replacement is staged before anything is destroyed.
+                for &entity in &removed {
+                    if edit.contains(entity)? {
+                        edit.destroy(entity)?;
+                    }
+                }
+                for &entity in retire {
+                    if edit.contains(entity)? {
+                        edit.destroy(entity)?;
+                    }
+                }
+                stage_description(edit, scene, &order, None, None)
+            })
+            .map_err(|e| LoadError::SceneRejected(e.to_string()))?;
+        self.publish_command_resources(resources);
+        let loaded = resolve_description(scene, &commit);
+        if mode == LoadMode::Replace {
+            self.scenes.clear();
+            self.persistent = self.persistent_roots();
+            for (scene, entities) in unloads {
+                self.push_event(EventPayload::SceneUnloaded { scene, entities });
+            }
+        }
         self.scenes.push(loaded.clone());
         self.push_event(EventPayload::SceneReady { scene: scene.id });
         Ok(loaded)
@@ -284,25 +345,46 @@ impl World {
         if self.is_poisoned() {
             return Err(LoadError::Poisoned);
         }
-        let Some(i) = self.scenes.iter().position(|s| s.id == id) else {
-            return Err(LoadError::NotLoaded(id));
-        };
-        let scene = self.scenes.remove(i);
-        Ok(self.take_down(scene))
+        let i = self
+            .scenes
+            .iter()
+            .position(|s| s.id == id)
+            .ok_or(LoadError::NotLoaded(id))?;
+        let mut removed = HashSet::new();
+        self.collect_scene_removals(&self.scenes[i], &mut removed);
+        self.edit_gameplay(|edit| {
+            for &entity in &removed {
+                if edit.contains(entity)? {
+                    edit.destroy(entity)?;
+                }
+            }
+            Ok(())
+        })
+        .map_err(|e| LoadError::SceneRejected(e.to_string()))?;
+        let old = self.scenes.remove(i);
+        let entities = removed.len() as u32;
+        self.push_event(EventPayload::SceneUnloaded {
+            scene: id,
+            entities,
+        });
+        Ok(UnloadedScene {
+            id,
+            name: old.name,
+            entities,
+        })
     }
 
     /// Spawns one entity now, at the current tick, the way a scene load
     /// does — the editor's live Play mode (ADR-0021 P7) creating an object
     /// in a running, possibly paused, game: `name`, a local `transform`,
     /// last among `parent`'s children, then `components` through the
-    /// simulation lane's checks. No system runs and no event is emitted
+    /// shared journal's checks. No system runs and no event is emitted
     /// (a load emits none per entity either). With `authoring` =
     /// `(scene, id)` the entity joins the loaded scene `scene` under the
     /// authoring id `id`, as if that scene had spawned it. Returns the
     /// entity and an empty compatibility diagnostics list. Invalid components
     /// reject the entire creation through the gameplay journal, before publishing
-    /// an entity or scene identity. Queued simulation work is left untouched and
-    /// must be drained or explicitly adopted before this editor boundary.
+    /// an entity or scene identity.
     pub fn spawn_now(
         &mut self,
         name: &str,
@@ -380,13 +462,15 @@ impl World {
         if !self.ecs().contains(entity) {
             return Err(LoadError::UnknownSource(entity));
         }
-        if scene::parent_of(self.ecs(), entity).is_some() {
-            return Err(LoadError::NotARoot(entity));
+        let marked = self
+            .edit_gameplay(|edit| edit.dont_destroy_on_load(entity))
+            .map_err(|e| LoadError::SceneRejected(e.to_string()))?
+            .value;
+        if marked {
+            Ok(())
+        } else {
+            Err(LoadError::NotARoot(entity))
         }
-        if !self.persistent.contains(&entity) {
-            self.persistent.push(entity);
-        }
-        Ok(())
     }
 
     /// Whether `entity` is kept across loads: its root is a persistent
@@ -407,12 +491,15 @@ impl World {
     /// replaces the persistent objects the first one made). Returns how
     /// many entities went; 0 when it is gone already.
     pub fn destroy_persistent(&mut self, root: Entity) -> usize {
-        self.persistent.retain(|&e| e != root);
         if !self.ecs().contains(root) {
             return 0;
         }
-        let tick = self.tick();
-        self.destroy_subtree(root, tick).unwrap_or(0)
+        let count = scene::subtree(self.ecs(), root).len();
+        if self.edit_gameplay(|edit| edit.destroy(root)).is_err() {
+            return 0;
+        }
+        self.persistent.retain(|&e| e != root);
+        count
     }
 
     /// The persistent roots alive and still roots, in marking order.
@@ -426,45 +513,11 @@ impl World {
 
     /// A replace load: the loaded scenes (last first) and then every
     /// remaining entity but the persistent roots' subtrees (ADR-0037).
-    fn unload_all(&mut self) {
-        self.persistent = self.persistent_roots();
-        while let Some(scene) = self.scenes.pop() {
-            self.take_down(scene);
-        }
-        let tick = self.tick();
-        let roots: Vec<Entity> = self
-            .ecs()
-            .entities()
-            .filter(|&e| scene::parent_of(self.ecs(), e).is_none())
-            .filter(|e| !self.persistent.contains(e))
-            .collect();
-        for root in roots {
-            if self.ecs().contains(root) {
-                let _ = self.destroy_subtree(root, tick);
+    fn collect_scene_removals(&self, loaded: &LoadedScene, removed: &mut HashSet<Entity>) {
+        for &(_, entity) in loaded.entities() {
+            if self.ecs().contains(entity) && !self.is_persistent(entity) {
+                removed.extend(scene::subtree(self.ecs(), entity));
             }
-        }
-    }
-
-    fn take_down(&mut self, scene: LoadedScene) -> UnloadedScene {
-        let tick = self.tick();
-        let mut entities = 0u32;
-        // Parents before children in spawn order: a parent's subtree takes
-        // its children, which then read as gone.
-        for &(_, e) in scene.entities() {
-            if self.ecs().contains(e) && !self.is_persistent(e) {
-                if let Ok(n) = self.destroy_subtree(e, tick) {
-                    entities += n as u32;
-                }
-            }
-        }
-        self.push_event(EventPayload::SceneUnloaded {
-            scene: scene.id,
-            entities,
-        });
-        UnloadedScene {
-            id: scene.id,
-            name: scene.name,
-            entities,
         }
     }
 
@@ -473,7 +526,7 @@ impl World {
     /// `parent` with `transform` as its Transform and `name` as its name
     /// (the root's own when empty), its descendants under it — exactly
     /// the shape a scene instance expands to. Components go through the
-    /// command path as for a scene; no `SceneReady`. The root's handle
+    /// shared journal as for a scene; no `SceneReady`. The root's handle
     /// and the prefab's entities are returned; `parent` must be live.
     pub fn instantiate(
         &mut self,
@@ -482,8 +535,31 @@ impl World {
         transform: Transform,
         parent: Option<Entity>,
     ) -> Result<(Entity, LoadedScene), LoadError> {
-        let tick = self.tick();
-        self.instantiate_inner(prefab, name, transform, parent, tick, true)
+        if self.is_poisoned() {
+            return Err(LoadError::Poisoned);
+        }
+        if !transform.is_finite() {
+            return Err(LoadError::AnchorTransform);
+        }
+        if let Some(p) = parent {
+            if p.world() != self.id() || !self.ecs().contains(p) {
+                return Err(LoadError::UnknownAnchorParent(p));
+            }
+        }
+        // The structure is checked before anything is spawned.
+        spawn_order(prefab)?;
+        let mut roots = prefab.entities.iter().filter(|d| d.parent.is_none());
+        let (Some(root), None) = (roots.next(), roots.next()) else {
+            return Err(LoadError::NotOneRoot(prefab.id));
+        };
+        let root = root.id;
+        let placed = Placed {
+            root,
+            name,
+            transform,
+        };
+        let loaded = self.load_under(prefab, parent, Some(placed))?;
+        Ok((loaded.by_id[&root], loaded))
     }
 
     /// The live subtree under `root` as a one-root description (ADR-0026
@@ -549,8 +625,8 @@ impl World {
     /// A copy of the live subtree under `source` (see [`describe_subtree`](Self::describe_subtree)),
     /// its root named `name` (the source's when None) at `transform` under
     /// `parent`, as `instantiate` places a prefab. Uses the shared gameplay
-    /// journal; invalid configuration rejects the entire clone. Older queued
-    /// commands commit separately before cloning and survive a clone failure.
+    /// journal; invalid configuration rejects the entire clone. Earlier committed
+    /// edits survive a clone failure; cloning never publishes unrelated work.
     pub fn clone_subtree(
         &mut self,
         source: Entity,
@@ -570,19 +646,6 @@ impl World {
         if let Some(parent) = parent {
             if parent.world() != self.id() || !self.ecs().contains(parent) {
                 return Err(LoadError::UnknownAnchorParent(parent));
-            }
-        }
-        // As for SDK edits, older queued work is a separate preceding commit.
-        // Failed cloning cannot undo that work, and successful cloning observes it.
-        let adopted = self
-            .adopt_gameplay_commands()
-            .map_err(|error| LoadError::CloneRejected(error.to_string()))?;
-        // This legacy API has no adoption report, so deliver surviving temp
-        // mappings through the legacy event channel exactly once, even if the
-        // subsequent clone fails. Canceled spawns have no live mapping.
-        for &(temp_id, pending) in &adopted.value {
-            if let Some(entity) = adopted.resolve(pending) {
-                self.push_event(EventPayload::Spawned { temp_id, entity });
             }
         }
         // Keep this legacy report's breadth-first pair order; allocation and
@@ -626,166 +689,22 @@ impl World {
         })
     }
 
-    /// `instantiate` with the tick its component writes belong to and
-    /// whether to propagate afterwards (an `Emitter` inside `step` leaves
-    /// that to the tick's own propagate).
-    pub(crate) fn instantiate_inner(
-        &mut self,
-        prefab: &SceneDescription,
-        name: &str,
-        transform: Transform,
-        parent: Option<Entity>,
-        tick: u64,
-        propagate: bool,
-    ) -> Result<(Entity, LoadedScene), LoadError> {
-        if self.is_poisoned() {
-            return Err(LoadError::Poisoned);
-        }
-        if !transform.is_finite() {
-            return Err(LoadError::AnchorTransform);
-        }
-        if let Some(p) = parent {
-            if p.world() != self.id() || !self.ecs().contains(p) {
-                return Err(LoadError::UnknownAnchorParent(p));
-            }
-        }
-        // The structure is checked before anything is spawned.
-        spawn_order(prefab)?;
-        let mut roots = prefab.entities.iter().filter(|d| d.parent.is_none());
-        let (Some(root), None) = (roots.next(), roots.next()) else {
-            return Err(LoadError::NotOneRoot(prefab.id));
-        };
-        let root = root.id;
-        let placed = Placed {
-            root,
-            name,
-            transform,
-        };
-        let loaded = self.load_under(prefab, parent, Some(placed), tick, propagate)?;
-        Ok((loaded.by_id[&root], loaded))
-    }
-
     /// Spawns `scene`'s entities, its roots under `root_parent`, then their
-    /// components through the command path; propagates. `placed` gives
+    /// components through the shared journal; propagates. `placed` gives
     /// an instantiated prefab's root its place and name.
     fn load_under(
         &mut self,
         scene: &SceneDescription,
         root_parent: Option<Entity>,
         placed: Option<Placed<'_>>,
-        tick: u64,
-        propagate: bool,
     ) -> Result<LoadedScene, LoadError> {
-        if self.is_poisoned() {
-            return Err(LoadError::Poisoned);
-        }
         let order = spawn_order(scene)?;
-        let markers_current = self.active_markers_current();
-        let mut loaded = LoadedScene {
-            id: scene.id,
-            name: scene.name.clone(),
-            ..LoadedScene::default()
-        };
-        for &i in &order {
-            let d = &scene.entities[i];
-            let parent = d.parent.map(|p| loaded.by_id[&p]).or(root_parent);
-            let here = placed.as_ref().filter(|p| p.root == d.id);
-            let transform = match here {
-                Some(p) => p.transform,
-                None => d
-                    .components
-                    .iter()
-                    .find_map(|c| match c {
-                        ComponentValue::Transform(t) => Some(*t),
-                        _ => None,
-                    })
-                    .unwrap_or(Transform::IDENTITY),
-            };
-            let e = scene::spawn(self.ecs_mut(), transform, parent)
-                .map_err(|_| LoadError::Spawn(d.id))?;
-            let name = here
-                .map(|p| p.name)
-                .filter(|n| !n.is_empty())
-                .unwrap_or(&d.name);
-            if !name.is_empty() {
-                let _ = self.ecs_mut().insert(e, Name::new(name.to_string()));
-            }
-            if !d.active {
-                let _ = scene::set_active(self.ecs_mut(), e, false);
-                self.mark_active_dirty();
-            }
-            loaded.order.push((d.id, e));
-            loaded.by_id.insert(d.id, e);
-            loaded.by_entity.insert(e, d.id);
-        }
-        // Components after the whole hierarchy exists, through the command
-        // path (validation and diagnostics identical to the bridge).
-        for &i in &order {
-            let d = &scene.entities[i];
-            let e = loaded.by_id[&d.id];
-            for c in &d.components {
-                if matches!(c, ComponentValue::Transform(_)) {
-                    // The spawn transform; a non-finite one is rejected by
-                    // `spawn` itself, so re-applying would be redundant.
-                    continue;
-                }
-                let mut c = c.clone();
-                // Object references (ADR-0035) resolve once, here, against
-                // this load: a prefab's reach each instance's own copies.
-                c.for_each_object_ref(|component, field, r| {
-                    if r.id.is_nil() {
-                        return;
-                    }
-                    match loaded.by_id.get(&r.id) {
-                        Some(&target) => r.entity = target,
-                        None if r.entity.is_null() => {
-                            loaded.missing_references.push(MissingReference {
-                                entity: d.id,
-                                component,
-                                field,
-                                target: r.id,
-                            });
-                            *r = ObjectRef::NONE;
-                        }
-                        // A copy's reference to an object outside the
-                        // copied tree keeps pointing at it.
-                        None => r.id = Uuid::NIL,
-                    }
-                });
-                if !self.apply_loaded(e, c, tick) {
-                    loaded.rejected_components += 1;
-                }
-            }
-        }
-        // The new subtrees alone (foundation 3.1): their active markers
-        // from their parents' when every other marker was current, their
-        // world matrices from their parents' unless an ancestor is itself
-        // waiting for a propagate.
-        let roots: Vec<Entity> = scene
-            .entities
-            .iter()
-            .filter(|d| d.parent.is_none())
-            .map(|d| loaded.by_id[&d.id])
-            .collect();
-        if markers_current {
-            self.refresh_active_subtrees(&roots);
-        } else {
-            self.mark_active_dirty();
-            self.refresh_active();
-        }
-        if propagate {
-            for &root in &roots {
-                if scene::propagate_subtree(self.ecs_mut(), root).is_none() {
-                    scene::propagate(self.ecs_mut());
-                    break;
-                }
-            }
-        }
-        Ok(loaded)
-    }
-
-    fn apply_loaded(&mut self, entity: Entity, value: ComponentValue, tick: u64) -> bool {
-        self.apply_simulation(u32::MAX, Command::SetComponent { entity, value }, tick)
+        let commit = self
+            .edit_gameplay(|edit| {
+                stage_description(edit, scene, &order, root_parent, placed.as_ref())
+            })
+            .map_err(|e| LoadError::SceneRejected(e.to_string()))?;
+        Ok(resolve_description(scene, &commit))
     }
 }
 
@@ -871,4 +790,108 @@ pub(crate) fn spawn_order(scene: &SceneDescription) -> Result<Vec<usize>, LoadEr
         return Err(LoadError::Unreachable(scene.entities[lost].id));
     }
     Ok(order)
+}
+
+/// One construction path for scenes and the immediate prefab adapter. Missing
+/// authored targets retain the loader's reported-null policy; live targets use
+/// the same transaction validation as ordinary gameplay.
+struct StagedDescription {
+    entities: Vec<(Uuid, PendingEntity)>,
+    missing_references: Vec<MissingReference>,
+}
+
+fn stage_description(
+    edit: &mut GameplayEdit<'_>,
+    scene: &SceneDescription,
+    order: &[usize],
+    root_parent: Option<Entity>,
+    placed: Option<&Placed<'_>>,
+) -> EditResult<StagedDescription> {
+    let mut by_id = HashMap::new();
+    let mut entities = Vec::new();
+    let mut missing_references = Vec::new();
+    for &i in order {
+        let d = &scene.entities[i];
+        let here = placed.filter(|p| p.root == d.id);
+        let pose = here.map(|p| p.transform).unwrap_or_else(|| {
+            d.components
+                .iter()
+                .find_map(|c| {
+                    if let ComponentValue::Transform(t) = c {
+                        Some(*t)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(Transform::IDENTITY)
+        });
+        let parent = d
+            .parent
+            .map(|id| crate::GameplayEntity::Pending(by_id[&id]))
+            .or(root_parent.map(Into::into));
+        let name = here
+            .map(|p| p.name)
+            .filter(|n| !n.is_empty())
+            .unwrap_or(&d.name);
+        let entity = edit.spawn(name, pose, parent)?;
+        edit.set_active(entity, d.active)?;
+        by_id.insert(d.id, entity);
+        entities.push((d.id, entity));
+    }
+    for &i in order {
+        let d = &scene.entities[i];
+        for component in &d.components {
+            if matches!(component, ComponentValue::Transform(_)) {
+                continue;
+            }
+            let mut component = component.clone();
+            component.for_each_object_ref(|component, field, r| {
+                if !r.id.is_nil() && !by_id.contains_key(&r.id) {
+                    if r.entity.is_null() {
+                        missing_references.push(MissingReference {
+                            entity: d.id,
+                            component,
+                            field,
+                            target: r.id,
+                        });
+                        *r = ObjectRef::NONE;
+                    } else {
+                        r.id = Uuid::NIL;
+                    }
+                }
+            });
+            let value = GameplayComponentValue::from(component).map_object_refs(|r| match r {
+                GameplayObjectRef::Stored(r) if !r.id.is_nil() => {
+                    GameplayObjectRef::Pending(by_id[&r.id])
+                }
+                other => other,
+            });
+            edit.set_component(by_id[&d.id], value)?;
+        }
+    }
+    Ok(StagedDescription {
+        entities,
+        missing_references,
+    })
+}
+
+fn resolve_description(
+    scene: &SceneDescription,
+    commit: &crate::EditCommit<StagedDescription>,
+) -> LoadedScene {
+    let order: Vec<_> = commit
+        .value
+        .entities
+        .iter()
+        .map(|&(id, pending)| (id, commit.resolve(pending).expect("committed scene entity")))
+        .collect();
+    LoadedScene {
+        id: scene.id,
+        name: scene.name.clone(),
+        by_id: order.iter().copied().collect(),
+        by_entity: order.iter().map(|&(id, entity)| (entity, id)).collect(),
+        order,
+        rejected_components: 0,
+        missing_references: commit.value.missing_references.clone(),
+    }
 }

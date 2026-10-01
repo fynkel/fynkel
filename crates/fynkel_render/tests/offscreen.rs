@@ -1,22 +1,16 @@
 //! Renders a core world's extract offscreen and checks pixels: the renderer
 //! consumes `Extract` only, so this is the same path every host uses.
 
-use fynkel_core::{Command, Extract, Lane, World, WorldConfig};
+use fynkel_core::{Extract, World, WorldConfig};
 use fynkel_render::{clear_rgba8, headless_device, render_offscreen, ExtractRenderer};
 use fynkel_scene::Transform;
 use glam::Vec3;
 
 fn world_with_cube_at(position: Vec3) -> World {
     let mut world = World::new(WorldConfig::default());
-    world.submit(
-        Lane::Simulation,
-        vec![Command::Spawn {
-            temp_id: 1,
-            transform: Transform::from_position(position),
-            parent: None,
-            name: None,
-        }],
-    );
+    world
+        .edit_gameplay(|edit| edit.spawn("", Transform::from_position(position), None))
+        .unwrap();
     world.begin_frame(1.0 / 60.0);
     world.step();
     world
@@ -53,15 +47,18 @@ fn extract_renders_cubes_where_the_world_puts_them() {
 
     // Instance buffer growth: many cubes in one frame, no panic, count matches.
     let mut world = World::new(WorldConfig::default());
-    let spawns = (0..1000)
-        .map(|i| Command::Spawn {
-            temp_id: i + 1,
-            transform: Transform::from_position(Vec3::new((i % 40) as f32, 0.0, (i / 40) as f32)),
-            parent: None,
-            name: None,
+    world
+        .edit_gameplay(|edit| {
+            for i in 0..1000 {
+                edit.spawn(
+                    "",
+                    Transform::from_position(Vec3::new((i % 40) as f32, 0.0, (i / 40) as f32)),
+                    None,
+                )?;
+            }
+            Ok(())
         })
-        .collect();
-    world.submit(Lane::Simulation, spawns);
+        .unwrap();
     world.begin_frame(1.0 / 60.0);
     world.step();
     render_offscreen(&device, &queue, &mut renderer, &world.extract());
