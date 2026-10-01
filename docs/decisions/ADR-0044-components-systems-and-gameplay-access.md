@@ -1,6 +1,6 @@
 # ADR-0044: Components systems and gameplay access
 
-**Status:** Proposed for general registration, supported custom layouts and extension delivery; shared ownership/access direction is accepted in ADR-0046.
+**Status:** Shared ownership/access direction accepted in ADR-0046. Native scalar registration is implemented under [ADR-0052](ADR-0052-registered-component-values.md); runtime-defined layouts, general references, bulk access, scheduling and extension delivery remain open F3 work.
 **Date:** 2026-09-30  
 **Related:** ADR-0042, ADR-0043, ADR-0003, ADR-0011, ADR-0012, ADR-0018, ADR-0028, ADR-0029, ADR-0036; roadmap F3, F4, F7.
 

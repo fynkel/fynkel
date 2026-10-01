@@ -259,6 +259,7 @@ pub struct Extract {
 }
 
 pub struct World {
+    pub(crate) registered: crate::registry::ComponentRegistry,
     command_resources: Option<Arc<dyn command_resources::CommandResourceSource>>,
     config: WorldConfig,
     clock: FrameClock,
@@ -338,6 +339,7 @@ impl World {
         );
         let input = Input::with_tick_dt(config.fixed_dt);
         Ok(Self {
+            registered: Default::default(),
             ecs: Ecs::try_new()?,
             config,
             clock,

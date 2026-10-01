@@ -28,6 +28,7 @@ pub mod load;
 pub mod material;
 pub mod memory;
 pub mod modules;
+pub mod registry;
 pub mod schema;
 pub mod settings;
 pub mod volume;
@@ -83,3 +84,7 @@ pub use world::{
 };
 
 pub use world::command_resources::{CommandResourceSource, PreparedCommandResources};
+
+pub use registry::{
+    ComponentSchema, RegisteredComponent, RegisteredField, RegistryError, ScalarValue,
+};

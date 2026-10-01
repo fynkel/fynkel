@@ -347,6 +347,7 @@ pub enum EditError {
     /// The callback explicitly rejected its data edits.
     Aborted,
     InvalidEffect(GameplayEntity, String),
+    RegisteredComponent(crate::RegistryError),
 }
 
 impl std::fmt::Display for EditError {
@@ -360,6 +361,7 @@ pub type EditResult<T> = Result<T, EditError>;
 
 #[derive(Default)]
 struct Changes {
+    registered: BTreeMap<String, Option<crate::registry::PreparedRecord>>,
     name: Option<String>,
     transform: Option<Transform>,
     parent: Option<Option<GameplayEntity>>,
@@ -462,6 +464,117 @@ impl GameplayEdit<'_> {
         let first = self.journal.failed.borrow().clone().unwrap_or(error);
         self.journal.failed.replace(Some(first.clone()));
         Err(first)
+    }
+
+    /// Registered scalar values through the same journal as built-in data.
+    pub fn registered_values(
+        &self,
+        entity: impl Into<GameplayEntity>,
+        id: &str,
+    ) -> EditResult<Option<Vec<crate::ScalarValue>>> {
+        let entity = entity.into();
+        self.require(entity)?;
+        let registration = match self.world.registered.get(id) {
+            Ok(r) => r,
+            Err(error) => return self.fail(EditError::RegisteredComponent(error)),
+        };
+        if let Some(value) = self
+            .journal
+            .changes
+            .get(&entity)
+            .and_then(|c| c.registered.get(id))
+        {
+            return Ok(value.as_ref().map(|v| v.fields.clone()));
+        }
+        Ok(entity
+            .live()
+            .and_then(|e| registration.read(&self.world.ecs, e)))
+    }
+    pub fn set_registered_values(
+        &mut self,
+        entity: impl Into<GameplayEntity>,
+        id: &str,
+        fields: Vec<crate::ScalarValue>,
+    ) -> EditResult<()> {
+        let entity = entity.into();
+        self.require(entity)?;
+        let prepared = self
+            .world
+            .registered
+            .get(id)
+            .and_then(|r| r.prepare(fields));
+        let prepared = match prepared {
+            Ok(p) => p,
+            Err(error) => return self.fail(EditError::RegisteredComponent(error)),
+        };
+        self.journal
+            .changes
+            .entry(entity)
+            .or_default()
+            .registered
+            .insert(id.into(), Some(prepared));
+        Ok(())
+    }
+    pub fn registered<T: crate::RegisteredComponent>(
+        &self,
+        entity: impl Into<GameplayEntity>,
+    ) -> EditResult<Option<T>> {
+        self.check()?;
+        let registration = match self.world.registered.typed::<T>() {
+            Ok(r) => r,
+            Err(error) => return self.fail(EditError::RegisteredComponent(error)),
+        };
+        self.registered_values(entity, &registration.schema.id)?
+            .map(|v| {
+                T::decode(&v).or_else(|why| {
+                    self.fail(EditError::RegisteredComponent(
+                        crate::RegistryError::InvalidValue(why),
+                    ))
+                })
+            })
+            .transpose()
+    }
+    pub fn set_registered<T: crate::RegisteredComponent>(
+        &mut self,
+        entity: impl Into<GameplayEntity>,
+        value: T,
+    ) -> EditResult<()> {
+        self.check()?;
+        let id = match self.world.registered.typed::<T>() {
+            Ok(r) => r.schema.id.clone(),
+            Err(error) => return self.fail(EditError::RegisteredComponent(error)),
+        };
+        self.set_registered_values(entity, &id, value.encode())
+    }
+    pub fn add_registered_defaults(
+        &mut self,
+        entity: impl Into<GameplayEntity>,
+        id: &str,
+    ) -> EditResult<()> {
+        self.check()?;
+        let defaults = match self.world.registered.get(id) {
+            Ok(r) => r.schema.fields.iter().map(|f| f.default.clone()).collect(),
+            Err(error) => return self.fail(EditError::RegisteredComponent(error)),
+        };
+        self.set_registered_values(entity, id, defaults)
+    }
+    pub fn remove_registered(
+        &mut self,
+        entity: impl Into<GameplayEntity>,
+        id: &str,
+    ) -> EditResult<()> {
+        let entity = entity.into();
+        self.require(entity)?;
+        if let Err(error) = self.world.registered.get(id) {
+            return self.fail(EditError::RegisteredComponent(error));
+        }
+        self.journal
+            .changes
+            .entry(entity)
+            .or_default()
+            .registered
+            .insert(id.into(), None);
+        Ok(())
     }
 
     /// Marks a logical root for scene persistence. Non-roots are refused
@@ -1159,6 +1272,7 @@ impl GameplayEdit<'_> {
                 parent: Some(None),
                 active: Some(true),
                 components: BTreeMap::new(),
+                registered: BTreeMap::new(),
             },
         );
         self.set_parent(entity, parent, false)?;
@@ -1204,6 +1318,12 @@ impl GameplayEdit<'_> {
                     }
                 }
             }
+            let mut registered = Vec::new();
+            for schema in self.world.registered.schemas() {
+                if let Some(fields) = self.registered_values(entity, &schema.id)? {
+                    registered.push((schema.id.clone(), fields));
+                }
+            }
             frozen.push((
                 entity,
                 self.parent(entity)?,
@@ -1211,11 +1331,12 @@ impl GameplayEdit<'_> {
                 self.name(entity)?.unwrap_or_default(),
                 self.active_self(entity)?,
                 components,
+                registered,
             ));
         }
         let mut mapping = BTreeMap::new();
         let mut entities = Vec::with_capacity(frozen.len());
-        for (entity, old_parent, pose, label, active, _) in &frozen {
+        for (entity, old_parent, pose, label, active, _, _) in &frozen {
             let root = *entity == source;
             let owner = if root {
                 parent
@@ -1235,7 +1356,10 @@ impl GameplayEdit<'_> {
             mapping.insert(*entity, copy);
             entities.push((*entity, copy));
         }
-        for (entity, _, _, _, _, components) in frozen {
+        for (entity, _, _, _, _, components, registered) in frozen {
+            for (id, fields) in registered {
+                self.set_registered_values(mapping[&entity], &id, fields)?;
+            }
             for value in components {
                 let value = value.map_object_refs(|reference| {
                     reference
@@ -1931,6 +2055,24 @@ impl World {
         }
         if let Some(prepared) = input_bindings {
             self.input.publish_bindings(prepared);
+        }
+        // Codecs have already run during staging. Publication only moves
+        // prepared native values into the existing ECS, with no second store.
+        for (key, change) in changes {
+            if removed.contains(&key) {
+                continue;
+            }
+            let entity = resolve(key);
+            for (id, value) in change.registered {
+                match value {
+                    Some(value) => value.publish(&mut self.ecs, entity),
+                    None => self
+                        .registered
+                        .get(&id)
+                        .expect("validated registration")
+                        .remove(&mut self.ecs, entity),
+                }
+            }
         }
         Ok(spawned)
     }

@@ -36,7 +36,7 @@ Budget approximately **12–16 engineering weeks** for initial planning, subject
 | F0 | Baseline, executable contract prototype, resolved architecture choices | None | Active |
 | F1 | Safe identity, coherent clocks, exact transform operations | F0 correctness contracts accepted; broader F0 qualification continues | Done — F1.1–F1.4 evidence below |
 | F2 | One gameplay state contract and one mutation route | F1 | Done — [qualification](foundation-f2-gate-report.md), [ADR-0051](decisions/ADR-0051-f2-boundaries-and-presentation-policy.md) |
-| F3 | Registered components and systems with efficient gameplay access | F2 | Todo |
+| F3 | Registered components and systems with efficient gameplay access | F2 | Active — native registry/transaction slice; Dart, authored/editor and bulk/system integration remain open |
 | F4 | Clear subsystem ownership and incremental synchronization | F2 and F3 | Todo |
 | F5 | Predictable resource loading, activation, and residency | F1 and F4 | Todo |
 | F6 | Scalable render extraction, visibility, and lighting | F4 and F5 | Todo |
@@ -88,7 +88,7 @@ The final [F2 qualification](foundation-f2-gate-report.md) passes all 17 checks:
 
 | Task | Work and acceptance criteria | Notes |
 | --- | --- | --- |
-| F3.1 | Register custom component types with stable namespaced IDs, versioned schemas, ownership, defaults, references, and serialization rules. Distinguish runtime services and behaviour execution state from authored component data. Inspector, cloning, loading, and code creation use the registry. | Todo |
+| F3.1 | Register custom component types with stable namespaced IDs, versioned schemas, ownership, defaults, references, and serialization rules. Distinguish runtime services and behaviour execution state from authored component data. Inspector, cloning, loading, and code creation use the registry. | Active — native scalar schema registry, atomic typed/value access and logical clone implemented. Health is defined outside core. Runtime-defined Dart layouts, reference kinds, serialization/load and Inspector integration remain open; see ADR-0052. |
 | F3.2 | Build typed single-entity access and bulk queries over the same component storage. Define mutable borrow/view lifetimes and structural invalidation. Measure FFI calls, bytes copied, allocations, and full-frame cost; no mandatory per-entity native call in a bulk loop. | Todo |
 | F3.3 | Replace the fixed stage catalogue with registered systems: phases, before/after dependencies, read/write access declarations, structural command boundaries, and profiling names. Detect cycles and invalid dependencies. Start sequentially with reproducible tie-breaking. | Todo |
 | F3.4 | Adapt behaviours to the scheduler and world access rules. Preserve approachable local scripts, lifecycle order, exception reporting, coroutines, and contacts without separate state authority. Avoid dispatching unused callbacks where registration can determine phase participation. | Todo |
@@ -179,6 +179,11 @@ For a milestone exit, create `docs/gates/foundation-fN.md` with exact revision, 
 Keep the old path only as long as migration requires. Adapters forward to the canonical implementation; they must not maintain a second simulation. Choose incremental replacement or isolated rebuild in F0, then deliver complete vertical slices. Do not expand features to avoid finishing a difficult foundation milestone.
 
 ## Current implementation batch
+
+**F3 batch 1 started (2026-10-02), after F2 checkpoint `0e79ac30`.** [ADR-0052](decisions/ADR-0052-registered-component-values.md) records the native scalar component contract and its limits. Registration validates stable identity, schema/defaults and codec round trips. Registered native values live in the existing ECS, with changes prepared in the existing gameplay journal. Typed and schema-value reads agree; cloning includes logical registered values. The game-owned [Health example](../crates/fynkel_core/examples/registered_health.rs) requires no catalogue branch. This is a native-only foundation slice: Dart-defined layout/storage, generated ordinary access, serialization, Inspector, bulk queries and registered scheduling are not implemented by this batch. F3 remains active.
+
+F3 batch 1 qualification: 1,090 Rust workspace tests passed (8 ignored), 18 stripped-feature registry/clone tests and 586 SDK tests passed; example, Clippy, formatting and codegen checks passed. [Archived evidence](../benchmarks/foundation/results/2026-10-02-0e79ac30-f3-native-registry.json).
+
 
 **F2 is complete (2026-10-02).** The closing batch brings runtime materials and meshes into owned transactions, makes persistence transactional, preserves old project roots on rejected startup, and replaces commit-wide name reads with identity deltas. Shader/PBR descriptor invalidation and mutable shader-list aliasing are fixed. [ADR-0051](decisions/ADR-0051-f2-boundaries-and-presentation-policy.md) resolves presentation and intentionally separate operations. The [gate report](foundation-f2-gate-report.md) contains the visibility matrix, cache audit, passing checks and performance limits. Next is F3; no F2 implementation item remains open under that explicit contract. F4 retains incremental callback-entry synchronization and the associated performance target.
 
