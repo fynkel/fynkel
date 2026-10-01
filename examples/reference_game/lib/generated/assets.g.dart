@@ -3,7 +3,7 @@
 //
 // ignore_for_file: library_private_types_in_public_api
 
-import 'package:fynkel/fynkel.dart' show AnimationClipAsset, AnimatorControllerAsset, AssetRef, AudioClipAsset, MaterialAsset, MeshAsset, PrefabAsset, SceneAsset, SkinAsset, TextureAsset, VolumeProfileAsset;
+import 'package:fynkel/fynkel.dart' show AnimationClipAsset, AnimatorControllerAsset, AssetRef, AudioClipAsset, MaterialAsset, MeshAsset, PrefabAsset, RigAsset, SceneAsset, SkinAsset, TextureAsset, VolumeProfileAsset;
 
 /// Every asset under `assets/`, by folder and name: `Assets.audio.coin`,
 /// `Assets.prefabs.burst`, `Assets.models.kit.meshes.cube`. Each is the
@@ -84,6 +84,271 @@ final class _AssetsMaterials {
   MaterialAsset get wall => const MaterialAsset('0dccf1fe-4ee8-5fba-b86d-db3e09d42273', name: 'wall');
 }
 
+final class _AssetsModelsHeroFastRunClips {
+  const _AssetsModelsHeroFastRunClips();
+
+  /// `anim/mixamo.com`
+  AnimationClipAsset get mixamoCom => const AnimationClipAsset('477523b5-505f-4054-be79-3d1475c8760f', sub: 'anim/mixamo.com');
+}
+
+final class _AssetsModelsHeroFastRunMaterials {
+  const _AssetsModelsHeroFastRunMaterials();
+
+  /// `material/Beta_HighLimbsGeoSG3`
+  MaterialAsset get betaHighLimbsGeoSG3 => const MaterialAsset('477523b5-505f-4054-be79-3d1475c8760f', sub: 'material/Beta_HighLimbsGeoSG3');
+  /// `material/Beta_Joints_MAT1`
+  MaterialAsset get betaJointsMAT1 => const MaterialAsset('477523b5-505f-4054-be79-3d1475c8760f', sub: 'material/Beta_Joints_MAT1');
+}
+
+final class _AssetsModelsHeroFastRunMeshes {
+  const _AssetsModelsHeroFastRunMeshes();
+
+  /// `mesh/Beta_Joints`
+  MeshAsset get betaJoints => const MeshAsset('477523b5-505f-4054-be79-3d1475c8760f', sub: 'mesh/Beta_Joints');
+  /// `mesh/Beta_Surface`
+  MeshAsset get betaSurface => const MeshAsset('477523b5-505f-4054-be79-3d1475c8760f', sub: 'mesh/Beta_Surface');
+}
+
+final class _AssetsModelsHeroFastRunSkins {
+  const _AssetsModelsHeroFastRunSkins();
+
+  /// `skin/Skin Beta_Joints`
+  SkinAsset get skinBetaJoints => const SkinAsset('477523b5-505f-4054-be79-3d1475c8760f', sub: 'skin/Skin Beta_Joints');
+  /// `skin/Skin Beta_Surface`
+  SkinAsset get skinBetaSurface => const SkinAsset('477523b5-505f-4054-be79-3d1475c8760f', sub: 'skin/Skin Beta_Surface');
+}
+
+final class _AssetsModelsHeroFastRun {
+  const _AssetsModelsHeroFastRun();
+
+  /// The file itself.
+  AssetRef get asset => const AssetRef('477523b5-505f-4054-be79-3d1475c8760f');
+
+  /// Its hierarchy as a prefab (`world.instantiate`).
+  PrefabAsset get prefab => const PrefabAsset('477523b5-505f-4054-be79-3d1475c8760f', sub: 'prefab');
+
+  /// The `anim/…` parts.
+  _AssetsModelsHeroFastRunClips get clips => const _AssetsModelsHeroFastRunClips();
+
+  /// The `material/…` parts.
+  _AssetsModelsHeroFastRunMaterials get materials => const _AssetsModelsHeroFastRunMaterials();
+
+  /// The `mesh/…` parts.
+  _AssetsModelsHeroFastRunMeshes get meshes => const _AssetsModelsHeroFastRunMeshes();
+
+  /// The `skin/…` parts.
+  _AssetsModelsHeroFastRunSkins get skins => const _AssetsModelsHeroFastRunSkins();
+}
+
+final class _AssetsModelsHeroIdleClips {
+  const _AssetsModelsHeroIdleClips();
+
+  /// `anim/mixamo.com`
+  AnimationClipAsset get mixamoCom => const AnimationClipAsset('09a03101-3df3-4f6e-abd3-78f2eaa8e0d8', sub: 'anim/mixamo.com');
+}
+
+final class _AssetsModelsHeroIdleMaterials {
+  const _AssetsModelsHeroIdleMaterials();
+
+  /// `material/Beta_HighLimbsGeoSG3`
+  MaterialAsset get betaHighLimbsGeoSG3 => const MaterialAsset('09a03101-3df3-4f6e-abd3-78f2eaa8e0d8', sub: 'material/Beta_HighLimbsGeoSG3');
+  /// `material/Beta_Joints_MAT1`
+  MaterialAsset get betaJointsMAT1 => const MaterialAsset('09a03101-3df3-4f6e-abd3-78f2eaa8e0d8', sub: 'material/Beta_Joints_MAT1');
+}
+
+final class _AssetsModelsHeroIdleMeshes {
+  const _AssetsModelsHeroIdleMeshes();
+
+  /// `mesh/Beta_Joints`
+  MeshAsset get betaJoints => const MeshAsset('09a03101-3df3-4f6e-abd3-78f2eaa8e0d8', sub: 'mesh/Beta_Joints');
+  /// `mesh/Beta_Surface`
+  MeshAsset get betaSurface => const MeshAsset('09a03101-3df3-4f6e-abd3-78f2eaa8e0d8', sub: 'mesh/Beta_Surface');
+}
+
+final class _AssetsModelsHeroIdleSkins {
+  const _AssetsModelsHeroIdleSkins();
+
+  /// `skin/Skin Beta_Joints`
+  SkinAsset get skinBetaJoints => const SkinAsset('09a03101-3df3-4f6e-abd3-78f2eaa8e0d8', sub: 'skin/Skin Beta_Joints');
+  /// `skin/Skin Beta_Surface`
+  SkinAsset get skinBetaSurface => const SkinAsset('09a03101-3df3-4f6e-abd3-78f2eaa8e0d8', sub: 'skin/Skin Beta_Surface');
+}
+
+final class _AssetsModelsHeroIdle {
+  const _AssetsModelsHeroIdle();
+
+  /// The file itself.
+  AssetRef get asset => const AssetRef('09a03101-3df3-4f6e-abd3-78f2eaa8e0d8');
+
+  /// Its hierarchy as a prefab (`world.instantiate`).
+  PrefabAsset get prefab => const PrefabAsset('09a03101-3df3-4f6e-abd3-78f2eaa8e0d8', sub: 'prefab');
+
+  /// The `anim/…` parts.
+  _AssetsModelsHeroIdleClips get clips => const _AssetsModelsHeroIdleClips();
+
+  /// The `material/…` parts.
+  _AssetsModelsHeroIdleMaterials get materials => const _AssetsModelsHeroIdleMaterials();
+
+  /// The `mesh/…` parts.
+  _AssetsModelsHeroIdleMeshes get meshes => const _AssetsModelsHeroIdleMeshes();
+
+  /// The `skin/…` parts.
+  _AssetsModelsHeroIdleSkins get skins => const _AssetsModelsHeroIdleSkins();
+}
+
+final class _AssetsModelsHeroJumpingClips {
+  const _AssetsModelsHeroJumpingClips();
+
+  /// `anim/mixamo.com`
+  AnimationClipAsset get mixamoCom => const AnimationClipAsset('6732c0a8-1449-47f1-af1f-566b0724f845', sub: 'anim/mixamo.com');
+}
+
+final class _AssetsModelsHeroJumpingMaterials {
+  const _AssetsModelsHeroJumpingMaterials();
+
+  /// `material/Beta_HighLimbsGeoSG3`
+  MaterialAsset get betaHighLimbsGeoSG3 => const MaterialAsset('6732c0a8-1449-47f1-af1f-566b0724f845', sub: 'material/Beta_HighLimbsGeoSG3');
+  /// `material/Beta_Joints_MAT1`
+  MaterialAsset get betaJointsMAT1 => const MaterialAsset('6732c0a8-1449-47f1-af1f-566b0724f845', sub: 'material/Beta_Joints_MAT1');
+}
+
+final class _AssetsModelsHeroJumpingMeshes {
+  const _AssetsModelsHeroJumpingMeshes();
+
+  /// `mesh/Beta_Joints`
+  MeshAsset get betaJoints => const MeshAsset('6732c0a8-1449-47f1-af1f-566b0724f845', sub: 'mesh/Beta_Joints');
+  /// `mesh/Beta_Surface`
+  MeshAsset get betaSurface => const MeshAsset('6732c0a8-1449-47f1-af1f-566b0724f845', sub: 'mesh/Beta_Surface');
+}
+
+final class _AssetsModelsHeroJumpingSkins {
+  const _AssetsModelsHeroJumpingSkins();
+
+  /// `skin/Skin Beta_Joints`
+  SkinAsset get skinBetaJoints => const SkinAsset('6732c0a8-1449-47f1-af1f-566b0724f845', sub: 'skin/Skin Beta_Joints');
+  /// `skin/Skin Beta_Surface`
+  SkinAsset get skinBetaSurface => const SkinAsset('6732c0a8-1449-47f1-af1f-566b0724f845', sub: 'skin/Skin Beta_Surface');
+}
+
+final class _AssetsModelsHeroJumping {
+  const _AssetsModelsHeroJumping();
+
+  /// The file itself.
+  AssetRef get asset => const AssetRef('6732c0a8-1449-47f1-af1f-566b0724f845');
+
+  /// Its hierarchy as a prefab (`world.instantiate`).
+  PrefabAsset get prefab => const PrefabAsset('6732c0a8-1449-47f1-af1f-566b0724f845', sub: 'prefab');
+
+  /// The `anim/…` parts.
+  _AssetsModelsHeroJumpingClips get clips => const _AssetsModelsHeroJumpingClips();
+
+  /// The `material/…` parts.
+  _AssetsModelsHeroJumpingMaterials get materials => const _AssetsModelsHeroJumpingMaterials();
+
+  /// The `mesh/…` parts.
+  _AssetsModelsHeroJumpingMeshes get meshes => const _AssetsModelsHeroJumpingMeshes();
+
+  /// The `skin/…` parts.
+  _AssetsModelsHeroJumpingSkins get skins => const _AssetsModelsHeroJumpingSkins();
+}
+
+final class _AssetsModelsHeroWalkingClips {
+  const _AssetsModelsHeroWalkingClips();
+
+  /// `anim/mixamo.com`
+  AnimationClipAsset get mixamoCom => const AnimationClipAsset('489f3df5-a126-4fa0-9f40-8bb91d5fa943', sub: 'anim/mixamo.com');
+}
+
+final class _AssetsModelsHeroWalkingMaterials {
+  const _AssetsModelsHeroWalkingMaterials();
+
+  /// `material/Beta_HighLimbsGeoSG3`
+  MaterialAsset get betaHighLimbsGeoSG3 => const MaterialAsset('489f3df5-a126-4fa0-9f40-8bb91d5fa943', sub: 'material/Beta_HighLimbsGeoSG3');
+  /// `material/Beta_Joints_MAT1`
+  MaterialAsset get betaJointsMAT1 => const MaterialAsset('489f3df5-a126-4fa0-9f40-8bb91d5fa943', sub: 'material/Beta_Joints_MAT1');
+}
+
+final class _AssetsModelsHeroWalkingMeshes {
+  const _AssetsModelsHeroWalkingMeshes();
+
+  /// `mesh/Beta_Joints`
+  MeshAsset get betaJoints => const MeshAsset('489f3df5-a126-4fa0-9f40-8bb91d5fa943', sub: 'mesh/Beta_Joints');
+  /// `mesh/Beta_Surface`
+  MeshAsset get betaSurface => const MeshAsset('489f3df5-a126-4fa0-9f40-8bb91d5fa943', sub: 'mesh/Beta_Surface');
+}
+
+final class _AssetsModelsHeroWalkingSkins {
+  const _AssetsModelsHeroWalkingSkins();
+
+  /// `skin/Skin Beta_Joints`
+  SkinAsset get skinBetaJoints => const SkinAsset('489f3df5-a126-4fa0-9f40-8bb91d5fa943', sub: 'skin/Skin Beta_Joints');
+  /// `skin/Skin Beta_Surface`
+  SkinAsset get skinBetaSurface => const SkinAsset('489f3df5-a126-4fa0-9f40-8bb91d5fa943', sub: 'skin/Skin Beta_Surface');
+}
+
+final class _AssetsModelsHeroWalking {
+  const _AssetsModelsHeroWalking();
+
+  /// The file itself.
+  AssetRef get asset => const AssetRef('489f3df5-a126-4fa0-9f40-8bb91d5fa943');
+
+  /// Its hierarchy as a prefab (`world.instantiate`).
+  PrefabAsset get prefab => const PrefabAsset('489f3df5-a126-4fa0-9f40-8bb91d5fa943', sub: 'prefab');
+
+  /// The `anim/…` parts.
+  _AssetsModelsHeroWalkingClips get clips => const _AssetsModelsHeroWalkingClips();
+
+  /// The `material/…` parts.
+  _AssetsModelsHeroWalkingMaterials get materials => const _AssetsModelsHeroWalkingMaterials();
+
+  /// The `mesh/…` parts.
+  _AssetsModelsHeroWalkingMeshes get meshes => const _AssetsModelsHeroWalkingMeshes();
+
+  /// The `skin/…` parts.
+  _AssetsModelsHeroWalkingSkins get skins => const _AssetsModelsHeroWalkingSkins();
+}
+
+final class _AssetsModelsHeroHeroClips {
+  const _AssetsModelsHeroHeroClips();
+
+  /// `anim/idle`
+  AnimationClipAsset get idle => const AnimationClipAsset('e7702fac-454c-4059-975b-6d6fb0059928', sub: 'anim/idle');
+  /// `anim/jump`
+  AnimationClipAsset get jump => const AnimationClipAsset('e7702fac-454c-4059-975b-6d6fb0059928', sub: 'anim/jump');
+  /// `anim/run`
+  AnimationClipAsset get run => const AnimationClipAsset('e7702fac-454c-4059-975b-6d6fb0059928', sub: 'anim/run');
+  /// `anim/walk`
+  AnimationClipAsset get walk => const AnimationClipAsset('e7702fac-454c-4059-975b-6d6fb0059928', sub: 'anim/walk');
+}
+
+final class _AssetsModelsHeroHero {
+  const _AssetsModelsHeroHero();
+
+  /// The file itself.
+  RigAsset get asset => const RigAsset('e7702fac-454c-4059-975b-6d6fb0059928', name: 'hero');
+
+  /// Its hierarchy as a prefab (`world.instantiate`).
+  PrefabAsset get prefab => const PrefabAsset('e7702fac-454c-4059-975b-6d6fb0059928', sub: 'prefab');
+
+  /// The `anim/…` parts.
+  _AssetsModelsHeroHeroClips get clips => const _AssetsModelsHeroHeroClips();
+}
+
+final class _AssetsModelsHero {
+  const _AssetsModelsHero();
+
+  /// `models/hero/Fast Run.fbx` (fynkel.fbx) and its parts
+  _AssetsModelsHeroFastRun get fastRun => const _AssetsModelsHeroFastRun();
+  /// `models/hero/Idle.fbx` (fynkel.fbx) and its parts
+  _AssetsModelsHeroIdle get idle => const _AssetsModelsHeroIdle();
+  /// `models/hero/Jumping.fbx` (fynkel.fbx) and its parts
+  _AssetsModelsHeroJumping get jumping => const _AssetsModelsHeroJumping();
+  /// `models/hero/Walking.fbx` (fynkel.fbx) and its parts
+  _AssetsModelsHeroWalking get walking => const _AssetsModelsHeroWalking();
+  /// `models/hero/hero.rig.json` (rig) and its parts
+  _AssetsModelsHeroHero get hero => const _AssetsModelsHeroHero();
+}
+
 final class _AssetsModelsCharacterClips {
   const _AssetsModelsCharacterClips();
 
@@ -144,6 +409,66 @@ final class _AssetsModelsCharacter {
   _AssetsModelsCharacterSkins get skins => const _AssetsModelsCharacterSkins();
 }
 
+final class _AssetsModelsHeroGlbClips {
+  const _AssetsModelsHeroGlbClips();
+
+  /// `anim/idle`
+  AnimationClipAsset get idle => const AnimationClipAsset('249a132a-48cb-422b-902c-667d858036f0', sub: 'anim/idle');
+  /// `anim/jump`
+  AnimationClipAsset get jump => const AnimationClipAsset('249a132a-48cb-422b-902c-667d858036f0', sub: 'anim/jump');
+  /// `anim/run`
+  AnimationClipAsset get run => const AnimationClipAsset('249a132a-48cb-422b-902c-667d858036f0', sub: 'anim/run');
+  /// `anim/walk`
+  AnimationClipAsset get walk => const AnimationClipAsset('249a132a-48cb-422b-902c-667d858036f0', sub: 'anim/walk');
+}
+
+final class _AssetsModelsHeroGlbMaterials {
+  const _AssetsModelsHeroGlbMaterials();
+
+  /// `material/Beta_HighLimbsGeoSG3`
+  MaterialAsset get betaHighLimbsGeoSG3 => const MaterialAsset('249a132a-48cb-422b-902c-667d858036f0', sub: 'material/Beta_HighLimbsGeoSG3');
+  /// `material/Beta_Joints_MAT1`
+  MaterialAsset get betaJointsMAT1 => const MaterialAsset('249a132a-48cb-422b-902c-667d858036f0', sub: 'material/Beta_Joints_MAT1');
+}
+
+final class _AssetsModelsHeroGlbMeshes {
+  const _AssetsModelsHeroGlbMeshes();
+
+  /// `mesh/Beta_Joints`
+  MeshAsset get betaJoints => const MeshAsset('249a132a-48cb-422b-902c-667d858036f0', sub: 'mesh/Beta_Joints');
+  /// `mesh/Beta_Surface`
+  MeshAsset get betaSurface => const MeshAsset('249a132a-48cb-422b-902c-667d858036f0', sub: 'mesh/Beta_Surface');
+}
+
+final class _AssetsModelsHeroGlbSkins {
+  const _AssetsModelsHeroGlbSkins();
+
+  /// `skin/Hero`
+  SkinAsset get hero => const SkinAsset('249a132a-48cb-422b-902c-667d858036f0', sub: 'skin/Hero');
+}
+
+final class _AssetsModelsHeroGlb {
+  const _AssetsModelsHeroGlb();
+
+  /// The file itself.
+  AssetRef get asset => const AssetRef('249a132a-48cb-422b-902c-667d858036f0');
+
+  /// Its hierarchy as a prefab (`world.instantiate`).
+  PrefabAsset get prefab => const PrefabAsset('249a132a-48cb-422b-902c-667d858036f0', sub: 'prefab');
+
+  /// The `anim/…` parts.
+  _AssetsModelsHeroGlbClips get clips => const _AssetsModelsHeroGlbClips();
+
+  /// The `material/…` parts.
+  _AssetsModelsHeroGlbMaterials get materials => const _AssetsModelsHeroGlbMaterials();
+
+  /// The `mesh/…` parts.
+  _AssetsModelsHeroGlbMeshes get meshes => const _AssetsModelsHeroGlbMeshes();
+
+  /// The `skin/…` parts.
+  _AssetsModelsHeroGlbSkins get skins => const _AssetsModelsHeroGlbSkins();
+}
+
 final class _AssetsModelsKitMeshes {
   const _AssetsModelsKitMeshes();
 
@@ -179,8 +504,12 @@ final class _AssetsModelsKit {
 final class _AssetsModels {
   const _AssetsModels();
 
+  /// `hero/`
+  _AssetsModelsHero get hero => const _AssetsModelsHero();
   /// `models/character.glb` (fynkel.gltf) and its parts
   _AssetsModelsCharacter get character => const _AssetsModelsCharacter();
+  /// `models/hero.glb` (fynkel.gltf) and its parts
+  _AssetsModelsHeroGlb get heroGlb => const _AssetsModelsHeroGlb();
   /// `models/kit.glb` (fynkel.gltf) and its parts
   _AssetsModelsKit get kit => const _AssetsModelsKit();
   /// `models/player.blend.json` (blend)
@@ -202,6 +531,8 @@ final class _AssetsPrefabs {
   PrefabAsset get burst => const PrefabAsset('88641ff3-d525-5d0b-b21f-226ee8e246a8', name: 'burst');
   /// `prefabs/coin.prefab.json` (prefab)
   PrefabAsset get coin => const PrefabAsset('4f8e7eb0-6298-59ad-9ccb-639ade69c42f', name: 'coin');
+  /// `prefabs/hero.prefab.json` (prefab)
+  PrefabAsset get hero => const PrefabAsset('7a1b2c3d-0000-4000-8000-000000000e10', name: 'hero');
 }
 
 final class _AssetsScenes {
