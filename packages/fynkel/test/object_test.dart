@@ -108,32 +108,35 @@ void main() {
     expect(Health().isAlive, isFalse);
   });
 
-  test('a script field reads null once its object or script is destroyed, as Unity\'s == null (ADR-0036 §5)', () {
-    final w = fresh();
-    w.registry.register(hunterType);
-    final prey = w.spawn(name: 'Prey');
-    final health = w.spawn(name: 'Medic').addBehaviour(Health());
-    final home = w.spawn(name: 'Home');
-    // One built from the registry, one the game made itself.
-    final a = w.spawn(name: 'A').addBehaviourFromData('test.Hunter') as Hunter;
-    final b = w.spawn(name: 'B').addBehaviour(Hunter());
-    for (final h in [a, b]) {
-      h
-        ..prey = prey
-        ..health = health
-        ..home = home;
-    }
-    w.frame(1 / 60);
+  test(
+    'a script field reads null once its object or script is destroyed, as Unity\'s == null (ADR-0036 §5)',
+    () {
+      final w = fresh();
+      w.registry.register(hunterType);
+      final prey = w.spawn(name: 'Prey');
+      final health = w.spawn(name: 'Medic').addBehaviour(Health());
+      final home = w.spawn(name: 'Home');
+      // One built from the registry, one the game made itself.
+      final a = w.spawn(name: 'A').addBehaviourFromData('test.Hunter') as Hunter;
+      final b = w.spawn(name: 'B').addBehaviour(Hunter());
+      for (final h in [a, b]) {
+        h
+          ..prey = prey
+          ..health = health
+          ..home = home;
+      }
+      w.frame(1 / 60);
 
-    prey.destroy();
-    health.destroy();
-    w.frame(1 / 60);
-    for (final h in [a, b]) {
-      expect(h.prey, isNull);
-      expect(h.health, isNull);
-      expect(h.home, same(home), reason: 'a live reference is kept');
-    }
-  });
+      prey.destroy();
+      health.destroy();
+      w.frame(1 / 60);
+      for (final h in [a, b]) {
+        expect(h.prey, isNull);
+        expect(h.health, isNull);
+        expect(h.home, same(home), reason: 'a live reference is kept');
+      }
+    },
+  );
 
   test('a built-in component is a NativeComponent: a live handle on its object (ADR-0036 §2)', () {
     final w = fresh();

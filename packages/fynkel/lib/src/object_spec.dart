@@ -67,7 +67,11 @@ final class ObjectSpec {
     active: active,
     tags: tags,
     layer: layer,
-    components: [gen.MeshRenderer(mesh: shape.mesh, material: Primitive.defaultMaterial), shape.collider, ...components],
+    components: [
+      gen.MeshRenderer(mesh: shape.mesh, material: Primitive.defaultMaterial),
+      shape.collider,
+      ...components,
+    ],
     behaviours: behaviours,
     children: children,
   );
@@ -96,10 +100,23 @@ final class ObjectSpec {
   /// is built it is a stand-in only a script field or a component value
   /// (`Follow(target: hero.object)`) can hold, and [World.build] makes
   /// those the built object; once built, this is the object the latest
-  /// build made.
+  /// build made. Captured handles keep their identity across later builds; use
+  /// a fresh spec tree per copy when its internal references must follow the copy.
   GameObject get object {
-    final p = _objects[this] ??= GameObject._placeholder(this);
-    return p._built ?? p;
+    final edit = Zone.current[_gameplayZoneKey] as _GameplayAdapter?;
+    if (edit != null) {
+      edit.checkOpen();
+      final staged = edit._specObjects[this];
+      if (staged != null) return staged;
+    }
+    return _objects[this] ??= GameObject._placeholder(this);
+  }
+
+  // Only the first build consumes the placeholder. Existing references stay
+  // pinned to their object when this description is built again.
+  GameObject? get _unboundObject {
+    final handle = _objects[this] ??= GameObject._placeholder(this);
+    return handle._spec != null ? handle : null;
   }
 
   static final _objects = Expando<GameObject>('ObjectSpec.object');
@@ -125,8 +142,20 @@ enum Primitive {
   // A capsule collider for both, as Unity: radius 0.5, 2 m tall.
   capsule('Capsule', gen.Collider(shape: gen.ColliderShape.capsule, size: Vec3(0.5, 0.5, 0.5))),
   cylinder('Cylinder', gen.Collider(shape: gen.ColliderShape.capsule, size: Vec3(0.5, 0.5, 0.5))),
-  plane('Plane', gen.Collider(shape: gen.ColliderShape.mesh, mesh: AssetRef(Primitive.id, sub: 'mesh/Plane'))),
-  quad('Quad', gen.Collider(shape: gen.ColliderShape.mesh, mesh: AssetRef(Primitive.id, sub: 'mesh/Quad')));
+  plane(
+    'Plane',
+    gen.Collider(
+      shape: gen.ColliderShape.mesh,
+      mesh: AssetRef(Primitive.id, sub: 'mesh/Plane'),
+    ),
+  ),
+  quad(
+    'Quad',
+    gen.Collider(
+      shape: gen.ColliderShape.mesh,
+      mesh: AssetRef(Primitive.id, sub: 'mesh/Quad'),
+    ),
+  );
 
   const Primitive(this.label, this.collider);
 
@@ -158,8 +187,10 @@ extension on World {
       if (!specs.add(s)) twice.add(s);
       for (final b in s.behaviours) {
         if (b._system != null) {
-          throw StateError('$s: $b is already attached to ${b._gameObject} — build a spec with behaviours once, '
-              'or make it in a function that creates them');
+          throw StateError(
+            '$s: $b is already attached to ${b._gameObject} — build a spec with behaviours once, '
+            'or make it in a function that creates them',
+          );
         }
         if (!seen.add(b)) throw StateError('$s: $b appears twice in the spec');
       }
@@ -185,67 +216,30 @@ extension on World {
             case final GameObject g when g._spec != null:
               final target = g._spec;
               if (twice.contains(target)) {
-                throw StateError('$s: ${type!.id}.${f.name} references $target, which is twice in this build');
+                throw StateError(
+                  '$s: ${type!.id}.${f.name} references $target, which is twice in this build',
+                );
               }
-              if (!specs.contains(target) && g._built == null) {
-                throw StateError('$s: ${type!.id}.${f.name} references $target, which is not in this build '
-                    'and was never built');
+              if (!specs.contains(target) && !(_gameplay?._specObjects.containsKey(target) ?? false)) {
+                throw StateError(
+                  '$s: ${type!.id}.${f.name} references $target, which is not in this build '
+                  'and was never built',
+                );
               }
-            case final Behaviour r when r._system == null && !seen.contains(r):
-              throw StateError('$s: ${type!.id}.${f.name} holds $r, which is not in this build and not attached');
+            case final Behaviour r
+                when r._system == null &&
+                    !seen.contains(r) &&
+                    !(_gameplay?._attachments.containsKey(r) ?? false):
+              throw StateError(
+                '$s: ${type!.id}.${f.name} holds $r, which is not in this build and not attached',
+              );
           }
         }
       }
     }
   }
 
-  /// Spawns [spec]'s objects (depth first, into [made]) before anything
-  /// else, so every spec's object exists when references are set.
-  GameObject _spawnSpec(ObjectSpec spec, GameObject? parent, Pose transform, List<GameObject> made) {
-    final GameObject go;
-    if (spec.prefab case final prefab?) {
-      // The native instantiate needs a spawned parent; under one this build
-      // spawned, the instance is made at the root and moved under it (its
-      // transform stays local).
-      if (parent == null || !parent.isPending) {
-        go = instantiate(prefab, transform: transform, parent: parent, name: spec.name);
-      } else {
-        go = instantiate(prefab, transform: transform, name: spec.name)..setParent(parent);
-      }
-    } else {
-      go = spawn(name: spec.name ?? '', transform: transform, parent: parent);
-    }
-    ObjectSpec._objects[spec]?._built = go;
-    made.add(go);
-    for (final c in spec.children) {
-      _spawnSpec(c, go, c.transform, made);
-    }
-    return go;
-  }
-
-  /// Points every script field that holds a spec's object at the object
-  /// its build made.
-  void _resolveSpecReferences(ObjectSpec spec) {
-    for (final s in spec._all) {
-      for (final b in s.behaviours) {
-        final type = b._type ?? _registeredTypeOf(b);
-        for (final f in type?.fields ?? const <BehaviourField>[]) {
-          if (!f.isReference) continue;
-          if (f.target?.call(b) case final GameObject g when g._spec != null) f.set(b, g._built);
-        }
-      }
-    }
-  }
-
-  GameObject _buildSpec(ObjectSpec spec, GameObject? parent, Pose transform) {
-    final made = <GameObject>[];
-    final root = _spawnSpec(spec, parent, transform, made);
-    _resolveSpecReferences(spec);
-    _fillSpec(spec, made.iterator..moveNext());
-    return root;
-  }
-
-  /// Sets what [spec] puts on its objects, [made] at its object.
+  /// Fills a tree after all of its journal references have been allocated.
   void _fillSpec(ObjectSpec spec, Iterator<GameObject> made) {
     final go = made.current;
     for (final c in spec.components) {

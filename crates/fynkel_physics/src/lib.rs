@@ -61,6 +61,43 @@ pub use material::{CombineRule, PhysicsMaterial};
 /// limit of the bounded `mesh` shape; §9 "bounded MeshCollider support").
 pub const MAX_MESH_COLLIDER_TRIANGLES: usize = 32_768;
 
+/// Validated collision mesh data, prepared without changing a physics world.
+#[derive(Clone, Debug)]
+pub struct PreparedMesh {
+    vertices: Vec<Vec3>,
+    triangles: Vec<[u32; 3]>,
+}
+impl PreparedMesh {
+    pub fn new(positions: &[[f32; 3]], indices: &[u32]) -> Result<Self, String> {
+        let triangles = indices.len() / 3;
+        if triangles == 0 {
+            return Err("mesh has no triangles".into());
+        }
+        if triangles > MAX_MESH_COLLIDER_TRIANGLES {
+            return Err(format!("mesh has {triangles} triangles, more than the {MAX_MESH_COLLIDER_TRIANGLES} a mesh collider allows"));
+        }
+        if !indices.len().is_multiple_of(3) {
+            return Err("mesh has incomplete triangle indices".into());
+        }
+        if indices.iter().any(|&i| i as usize >= positions.len()) {
+            return Err("mesh index out of range".into());
+        }
+        if positions.iter().flatten().any(|v| !v.is_finite()) {
+            return Err("mesh has non-finite vertices".into());
+        }
+        Ok(Self {
+            vertices: positions.iter().copied().map(Vec3::from).collect(),
+            triangles: indices
+                .chunks_exact(3)
+                .map(|t| [t[0], t[1], t[2]])
+                .collect(),
+        })
+    }
+    pub fn triangle_count(&self) -> usize {
+        self.triangles.len()
+    }
+}
+
 /// Marker: the transform is written by physics; presentation-lane transform
 /// commands are rejected with `PHYSICS_OWNED` (ADR-0008). Carried by every
 /// entity with a dynamic `RigidBody`.
@@ -114,6 +151,55 @@ impl BodyCommand {
             }
             BodyCommand::Move(v) => v.is_finite(),
             BodyCommand::Jump(s) => s.is_finite(),
+        }
+    }
+
+    /// Shared configuration validation for transactional gameplay and execution.
+    /// Runtime readiness (for example an unsupported world transform) is checked
+    /// separately by the physics adapter after component synchronization.
+    pub fn validate_for(
+        &self,
+        body: Option<BodyType>,
+        character: bool,
+    ) -> Result<(), (RejectionKind, String)> {
+        let invalid = |kind, message: &str| Err((kind, message.to_owned()));
+        if !self.is_finite() {
+            return invalid(RejectionKind::NotFinite, "body command value is not finite");
+        }
+        if let Self::SetKinematicTarget { rotation, .. } | Self::Teleport { rotation, .. } = self {
+            let norm = rotation.length_squared();
+            if !norm.is_finite() || norm <= f32::MIN_POSITIVE {
+                return invalid(
+                    RejectionKind::NotFinite,
+                    "body rotation cannot be normalized",
+                );
+            }
+        }
+        if self.is_character() {
+            return if character {
+                Ok(())
+            } else {
+                invalid(
+                    RejectionKind::MissingCharacter,
+                    "entity has no CharacterController",
+                )
+            };
+        }
+        let Some(body) = body.filter(|_| !character) else {
+            return invalid(RejectionKind::MissingBody, "entity has no usable RigidBody");
+        };
+        match self {
+            Self::Teleport { .. } => Ok(()),
+            Self::SetKinematicTarget { .. } if body != BodyType::Kinematic => invalid(
+                RejectionKind::NotKinematic,
+                "setKinematicTarget needs a kinematic body",
+            ),
+            Self::SetKinematicTarget { .. } => Ok(()),
+            _ if body != BodyType::Dynamic => invalid(
+                RejectionKind::NotDynamic,
+                "body command needs a dynamic body",
+            ),
+            _ => Ok(()),
         }
     }
 
@@ -219,6 +305,8 @@ pub enum RejectionKind {
     NotKinematic,
     /// A vector or pose is not finite.
     NotFinite,
+    /// Physics cannot represent a singular or sheared world basis.
+    UnsupportedTransform,
     /// A mesh collider whose mesh is not registered (or too large).
     MeshUnavailable,
     /// A mesh collider on a body that is not static.

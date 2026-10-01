@@ -18,7 +18,7 @@
 //! | `INVALID_ARGUMENT` | NULL, non-UTF-8 or malformed input, no project, an unknown handle or query (`FYN-T0001..T0004`) |
 //! | `PANIC` / `POISONED` | a panic was caught (`FYN-T0005`); the session answers `POISONED` from then on — destroy it |
 //!
-//! Every ABI v1 rule holds: NULL-safe, `catch_unwind` around every call,
+//! Every ABI v3 rule holds: NULL-safe, `catch_unwind` around every call,
 //! the result view valid until the next call on the same session, not
 //! thread-safe.
 //!
@@ -58,7 +58,7 @@ pub use stage::{
 
 /// Version of `fynkel_authoring.h`. Bumped on any incompatible change;
 /// independent of `FYNKEL_ABI_VERSION`.
-pub const AUTHORING_ABI_VERSION: u32 = 4;
+pub const AUTHORING_ABI_VERSION: u32 = 5;
 
 /// One editor session: the open project, its documents, their edit-preview
 /// worlds, and the last result. Opaque to the host.
@@ -1071,11 +1071,11 @@ fn preview_call(
             // of the prefab instances they anchor, the hidden left out.
             let ids = ids_arg(args, "ids")?;
             let slot = s.slot(handle)?;
-            let entities: Vec<u64> = slot
+            let entities: Vec<String> = slot
                 .preview
                 .entities(slot.world.core(), &ids)
                 .iter()
-                .map(|e| e.to_bits())
+                .map(|e| e.to_hex())
                 .collect();
             Ok(json!({ "ok": true, "handle": handle, "entities": entities }))
         }

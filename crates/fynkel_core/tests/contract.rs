@@ -341,7 +341,11 @@ fn events_are_pull_only_and_drained_once() {
 fn wrong_world_and_poison() {
     let mut w = world();
     let e = spawn_one(&mut w, 0.0);
-    let foreign = Entity::new(WorldId(2), e.slot(), e.generation());
+    let foreign = Entity::new(
+        World::new(WorldConfig::default()).id(),
+        e.slot(),
+        e.generation(),
+    );
     w.submit(Lane::Simulation, vec![Command::Destroy(foreign)]);
     let r = w.step();
     assert_eq!(r.rejected, 1);
@@ -491,8 +495,8 @@ fn temp_references_build_an_object_in_the_tick_of_its_spawn() {
 fn the_extract_carries_the_worlds_time_between_ticks() {
     let mut w = world();
     assert_eq!(w.extract().time, 0.0);
-    // Two ticks and half of a third: the time is interpolated like the
-    // transforms (ADR-0031 `globals.time`).
+    // Shader time uses accepted gameplay time; transform interpolation
+    // remains independently based on completed simulation ticks.
     let plan = w.begin_frame(2.5 / 60.0);
     assert_eq!(plan.steps, 2);
     w.step();
@@ -501,4 +505,108 @@ fn the_extract_carries_the_worlds_time_between_ticks() {
     assert!((t - 2.5 / 60.0).abs() < 1e-5, "{t}");
     // No frame, no time: a paused world's time stands still.
     assert_eq!(w.extract().time, t);
+    let plan = w.begin_frame_scaled(2.0, 1.0);
+    assert!(plan.dropped_seconds > 0.0);
+    let accepted = t + 0.25;
+    assert!((w.extract().time - accepted).abs() < 1e-5);
+    for _ in 0..plan.steps {
+        w.step();
+    }
+    assert!((w.extract().time - accepted).abs() < 1e-5);
+    w.step(); // Editor Step advances simulation, not shader gameplay time.
+    assert!((w.extract().time - accepted).abs() < 1e-5);
+}
+
+#[test]
+fn interpolation_composes_local_poses_without_losing_hierarchy_shear() {
+    let mut w = world();
+    let root = fynkel_scene::spawn(
+        w.ecs_mut(),
+        Transform {
+            scale: Vec3::new(2.0, 1.0, 3.0),
+            ..Transform::IDENTITY
+        },
+        None,
+    )
+    .unwrap();
+    let before = Transform {
+        rotation: glam::Quat::from_rotation_z(0.3),
+        ..Transform::IDENTITY
+    };
+    let child = fynkel_scene::spawn(w.ecs_mut(), before, Some(root)).unwrap();
+    let leaf =
+        fynkel_scene::spawn(w.ecs_mut(), Transform::from_position(Vec3::X), Some(child)).unwrap();
+    w.step();
+    let after = Transform {
+        rotation: glam::Quat::from_rotation_z(1.1),
+        position: Vec3::Y,
+        ..Transform::IDENTITY
+    };
+    w.submit(
+        Lane::Simulation,
+        vec![Command::SetTransform {
+            entity: child,
+            transform: after,
+        }],
+    );
+    w.step();
+    for fraction in [0.0, 0.5, 0.999] {
+        // Each frame contributes only the difference; no simulation tick.
+        let delta = if fraction == 0.0 {
+            0.0
+        } else if fraction == 0.5 {
+            0.5
+        } else {
+            0.499
+        };
+        w.begin_frame(w.config().fixed_dt * delta);
+        let extract = w.extract();
+        let alpha = extract.alpha;
+        let local = Transform {
+            position: before.position.lerp(after.position, alpha),
+            rotation: before.rotation.slerp(after.rotation, alpha),
+            scale: Vec3::ONE,
+        };
+        let expected = Mat4::from_scale(Vec3::new(2.0, 1.0, 3.0)) * local.matrix();
+        let actual = extract
+            .records
+            .iter()
+            .find(|r| r.entity == child)
+            .unwrap()
+            .world;
+        assert!(
+            actual.abs_diff_eq(expected, 1e-5),
+            "alpha={alpha}: {actual:?}"
+        );
+        let leaf_world = extract
+            .records
+            .iter()
+            .find(|r| r.entity == leaf)
+            .unwrap()
+            .world;
+        assert!(leaf_world.abs_diff_eq(expected * Mat4::from_translation(Vec3::X), 1e-5));
+    }
+    // A presentation ancestor uses exact matrix composition for descendants.
+    let override_root = Transform {
+        scale: Vec3::new(5.0, 2.0, 1.0),
+        ..Transform::IDENTITY
+    };
+    w.submit(
+        Lane::Presentation,
+        vec![Command::SetTransform {
+            entity: root,
+            transform: override_root,
+        }],
+    );
+    let extract = w.extract();
+    let actual = extract
+        .records
+        .iter()
+        .find(|r| r.entity == leaf)
+        .unwrap()
+        .world;
+    assert!(actual.abs_diff_eq(
+        override_root.matrix() * after.matrix() * Mat4::from_translation(Vec3::X),
+        1e-5
+    ));
 }

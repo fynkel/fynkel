@@ -52,37 +52,43 @@ void registerBehaviours(BehaviourRegistry r) => r.register(spinnerType);
 
 /// A code prefab.
 ObjectSpec lamp(AssetRef brass) => ObjectSpec(
-      'Lamp',
-      transform: const Pose(position: Vec3(0, 2, 0)),
-      components: [const PointLight(range: 5), MeshRenderer(mesh: Primitive.cylinder.mesh, material: brass)],
-      children: [
-        ObjectSpec('Bulb', components: const [PointLight(range: 1)], behaviours: [Spinner()..speed = 2]),
-      ],
-    );
+  'Lamp',
+  transform: const Pose(position: Vec3(0, 2, 0)),
+  components: [
+    const PointLight(range: 5),
+    MeshRenderer(mesh: Primitive.cylinder.mesh, material: brass),
+  ],
+  children: [
+    ObjectSpec('Bulb', components: const [PointLight(range: 1)], behaviours: [Spinner()..speed = 2]),
+  ],
+);
 
 List<ObjectSpec> level(AssetRef lampRef, AssetRef robotRef) => [
-      const ObjectSpec('Floor', components: [Collider(size: Vec3(20, 0.5, 20), offset: Vec3(0, -0.5, 0))]),
-      for (var i = 0; i < 3; i++)
-        ObjectSpec(
-          'Crate',
-          transform: Pose(position: Vec3(i * 2.0, 1, 0)),
-          layer: 'props',
-          tags: const ['pickup'],
-          components: const [RigidBody(mass: 2), Collider()],
-        ),
-      ObjectSpec.primitive(Primitive.sphere, transform: const Pose(position: Vec3(0, 4, 0))),
-      ObjectSpec.prefab(
-        lampRef,
-        name: 'Red lamp',
-        transform: const Pose(position: Vec3(5, 3, 0)),
-        tags: const ['pickup'],
-        components: const [PointLight(range: 9), Rotator()],
-        behaviours: [Spinner()..speed = 4],
-        children: const [ObjectSpec('Shade')],
-      ),
-      ObjectSpec.prefab(robotRef, transform: const Pose(position: Vec3(-3, 0, 0))),
-      const ObjectSpec('Hidden', active: false, children: [ObjectSpec('Inside')]),
-    ];
+  const ObjectSpec(
+    'Floor',
+    components: [Collider(size: Vec3(20, 0.5, 20), offset: Vec3(0, -0.5, 0))],
+  ),
+  for (var i = 0; i < 3; i++)
+    ObjectSpec(
+      'Crate',
+      transform: Pose(position: Vec3(i * 2.0, 1, 0)),
+      layer: 'props',
+      tags: const ['pickup'],
+      components: const [RigidBody(mass: 2), Collider()],
+    ),
+  ObjectSpec.primitive(Primitive.sphere, transform: const Pose(position: Vec3(0, 4, 0))),
+  ObjectSpec.prefab(
+    lampRef,
+    name: 'Red lamp',
+    transform: const Pose(position: Vec3(5, 3, 0)),
+    tags: const ['pickup'],
+    components: const [PointLight(range: 9), Rotator()],
+    behaviours: [Spinner()..speed = 4],
+    children: const [ObjectSpec('Shade')],
+  ),
+  ObjectSpec.prefab(robotRef, transform: const Pose(position: Vec3(-3, 0, 0))),
+  const ObjectSpec('Hidden', active: false, children: [ObjectSpec('Inside')]),
+];
 
 void main() {
   final fixture = Directory('../../crates/fynkel_document/fixtures/project').absolute.path;
@@ -103,7 +109,9 @@ void main() {
     json['tags'] = ['pickup'];
     file.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(json));
     cookProject(project);
-    final meta = jsonDecode(File('$project/assets/models/robot.glb.meta.json').readAsStringSync()) as Map<String, Object?>;
+    final meta = jsonDecode(
+      File('$project/assets/models/robot.glb.meta.json').readAsStringSync(),
+    ) as Map<String, Object?>;
     robotRef = AssetRef(meta['id'] as String, sub: 'prefab');
     addTearDown(() => Directory(project).deleteSync(recursive: true));
   });
@@ -111,7 +119,10 @@ void main() {
   ProjectWriter writer() => ProjectWriter(project, registerBehaviours: registerBehaviours);
 
   (WrittenDocument, WrittenDocument) writeAll(ProjectWriter w) {
-    final brass = w.writeMaterial('materials/brass', const PbrMaterial(baseColor: Vec4(0.8, 0.6, 0.2, 1), metallic: 1, roughness: 0.3));
+    final brass = w.writeMaterial(
+      'materials/brass',
+      const PbrMaterial(baseColor: Vec4(0.8, 0.6, 0.2, 1), metallic: 1, roughness: 0.3),
+    );
     final prefab = w.writePrefab('prefabs/lamp', lamp(brass.ref));
     final scene = w.writeScene('scenes/code', SceneSpec('Code', level(prefab.ref, robotRef)));
     return (prefab, scene);
@@ -123,7 +134,8 @@ void main() {
   }
 
   World world() {
-    final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8)..registry.register(spinnerType);
+    final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8)
+      ..registry.register(spinnerType);
     addTearDown(w.dispose);
     w.onLoadDiagnostics = (d) => fail('load diagnostics: $d');
     w.loadProject(project);
@@ -138,8 +150,10 @@ void main() {
       final path = '$at/${o.name}';
       final types = [for (final c in o.components) c.runtimeType.toString()]..sort();
       final scripts = [for (final b in o.behaviours) '${b.runtimeType}(${(b as Spinner).speed})'];
-      out.add('$path ${o.activeSelf ? '' : '(off) '}$types $scripts ${o.localTransform.position} '
-          '${o.layer} ${o.tags}');
+      out.add(
+        '$path ${o.activeSelf ? '' : '(off) '}$types $scripts ${o.localTransform.position} '
+        '${o.layer} ${o.tags}',
+      );
       for (final c in o.children) {
         walk(c, path);
       }
@@ -152,7 +166,18 @@ void main() {
   }
 
   // Every root name the fixture scene and the level use.
-  const names = ['Floor', 'Crate', 'Sphere', 'Red lamp', 'Robot', 'Hidden', 'Camera', 'Sun', 'Crate A', 'Crate B'];
+  const names = [
+    'Floor',
+    'Crate',
+    'Sphere',
+    'Red lamp',
+    'Robot',
+    'Hidden',
+    'Camera',
+    'Sun',
+    'Crate A',
+    'Crate B',
+  ];
 
   test('a written scene validates, and loads into the world build makes', () {
     final (prefab, scene) = writeAll(writer());
@@ -201,35 +226,67 @@ void main() {
 
     final (_, again) = writeAll(writer());
     expect(again.kept, unorderedEquals(['Crate', 'Notes']));
-    final after = (jsonDecode(file.readAsStringSync()) as Map<String, Object?>)['entities'] as Map<String, Object?>;
+    final after =
+        (jsonDecode(file.readAsStringSync()) as Map<String, Object?>)['entities'] as Map<String, Object?>;
     expect(((after[floor] as Map)['children'] as List), [mine]);
     expect(after[root], isNotNull);
-    expect(after.values.where((e) => (e as Map)['name'] == 'Crate'), hasLength(4), reason: 'three of code, one of the editor');
+    expect(
+      after.values.where((e) => (e as Map)['name'] == 'Crate'),
+      hasLength(4),
+      reason: 'three of code, one of the editor',
+    );
     validate();
 
     // Code that no longer makes an object drops it; the editor's stay.
     writer().writeScene('scenes/code', const SceneSpec('Code', [ObjectSpec('Floor')]));
-    final fewer = (jsonDecode(file.readAsStringSync()) as Map<String, Object?>)['entities'] as Map<String, Object?>;
+    final fewer =
+        (jsonDecode(file.readAsStringSync()) as Map<String, Object?>)['entities'] as Map<String, Object?>;
     expect(fewer.values.map((e) => (e as Map)['name']), unorderedEquals(['Floor', 'Crate', 'Notes']));
   });
 
   test('mistakes throw before anything is written', () {
     final w = writer();
-    expect(() => ProjectWriter(project).writePrefab('prefabs/x', lamp(Primitive.defaultMaterial)), throwsArgumentError, reason: 'unregistered script');
-    expect(() => w.writeScene('scenes/x', const SceneSpec('X', [ObjectSpec('A', tags: ['nope'])])), throwsArgumentError);
-    expect(() => w.writeScene('scenes/x', const SceneSpec('X', [ObjectSpec('A', layer: 'nope')])), throwsArgumentError);
     expect(
-      () => w.writeScene('scenes/x', const SceneSpec('X', [ObjectSpec.prefab(AssetRef('00000000-0000-4000-8000-00000000abcd'))])),
+      () => ProjectWriter(project).writePrefab('prefabs/x', lamp(Primitive.defaultMaterial)),
+      throwsArgumentError,
+      reason: 'unregistered script',
+    );
+    expect(
+      () => w.writeScene(
+        'scenes/x',
+        const SceneSpec('X', [
+          ObjectSpec('A', tags: ['nope']),
+        ]),
+      ),
       throwsArgumentError,
     );
     expect(
-      () => w.writeScene('scenes/x', SceneSpec('X', [ObjectSpec('A', behaviours: [Spinner(), Spinner()])])),
+      () => w.writeScene('scenes/x', const SceneSpec('X', [ObjectSpec('A', layer: 'nope')])),
+      throwsArgumentError,
+    );
+    expect(
+      () => w.writeScene(
+        'scenes/x',
+        const SceneSpec('X', [ObjectSpec.prefab(AssetRef('00000000-0000-4000-8000-00000000abcd'))]),
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => w.writeScene(
+        'scenes/x',
+        SceneSpec('X', [
+          ObjectSpec('A', behaviours: [Spinner(), Spinner()]),
+        ]),
+      ),
       throwsArgumentError,
       reason: 'one script of a type per object in a document',
     );
     expect(File('$project/assets/scenes/x.scene.json').existsSync(), isFalse);
     Directory('$project/.fynkel').deleteSync(recursive: true);
-    expect(() => writer().writeScene('scenes/x', SceneSpec('X', [ObjectSpec.prefab(robotRef)])), throwsStateError,
-        reason: 'a model\'s prefab needs the cook');
+    expect(
+      () => writer().writeScene('scenes/x', SceneSpec('X', [ObjectSpec.prefab(robotRef)])),
+      throwsStateError,
+      reason: 'a model\'s prefab needs the cook',
+    );
   });
 }

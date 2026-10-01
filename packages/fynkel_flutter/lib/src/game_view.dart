@@ -198,7 +198,6 @@ class FynkelGameView extends StatefulWidget {
     this.overlay,
     this.pauseWhenHidden = true,
     this.audio = false,
-    this.maxFrameDt = 0.25,
     this.autofocus = true,
     this.focusNode,
     this.onKeyEvent,
@@ -262,8 +261,6 @@ class FynkelGameView extends StatefulWidget {
   /// `audio_device` diagnostic, not an error.
   final bool audio;
 
-  /// Clamp for one frame's dt (a debugger pause must not become a burst).
-  final double maxFrameDt;
   final bool autofocus;
   final FocusNode? focusNode;
 
@@ -522,7 +519,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   void _scheduleStep() {
     SchedulerBinding.instance.scheduleFrameCallback((_) {
       if (!mounted || !_hostPaused) return;
-      _frame(widget.world.fixedDt);
+      _frame(0, singleStep: true);
       if (_play?.takeStep() ?? false) _scheduleStep();
     });
     SchedulerBinding.instance.scheduleFrame();
@@ -589,9 +586,6 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     var dt = 0.0;
     if (_primed && _lastTick != null) {
       dt = (elapsed - _lastTick!).inMicroseconds / 1e6;
-      if (dt > widget.maxFrameDt) {
-        dt = widget.maxFrameDt;
-      }
       _intervalsMs.add(dt * 1000);
     }
     _lastTick = elapsed;
@@ -600,7 +594,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   }
 
   /// One frame of [dt] seconds: the world's frame, then the render.
-  void _frame(double dt) {
+  void _frame(double dt, {bool singleStep = false}) {
     if (_panic != null) return; // stopped for good (a Step, a resume)
     final world = widget.world;
     _frames++;
@@ -610,7 +604,9 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       ..start();
     final FramePlan plan;
     try {
-      plan = world.frame(dt, input: input.take(dt), fixedUpdate: widget.fixedUpdate);
+      plan = singleStep
+          ? world.stepFrame(input: input.take(0), fixedUpdate: widget.fixedUpdate)
+          : world.frame(dt, input: input.take(dt), fixedUpdate: widget.fixedUpdate);
     } on FynkelPanicError catch (e, stack) {
       sim.stop();
       _stopped(e, stack);

@@ -147,29 +147,35 @@ fn package_fynkel_ships_its_lock_in_the_project_shape() {
         "packages/fynkel/{LOCK_FILE} is stale; run with FYNKEL_UPDATE_FIXTURES=1"
     );
     assert!(lock.check(&expected_lock(), None).is_empty());
-    assert!(lock.runtime.store.as_deref().unwrap().contains("{version}"));
-    assert_eq!(
-        lock.runtime
-            .artifacts
-            .keys()
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
-        [
-            "ios-arm64",
-            "ios-simulator-arm64",
-            "ios-simulator-x64",
-            "macos-arm64",
-            "macos-x64"
-        ]
-    );
+    // ABI 2 has no published artifacts yet; this checkout builds from source.
+    assert!(lock.runtime.store.is_none());
+    assert!(lock.runtime.artifacts.is_empty());
 
-    // `fynkel project lock` keeps the store; the libraries only for the
-    // same runtime version.
-    let mut older = lock.clone();
-    older.runtime.version = "0.0.0".into();
-    let rewritten = expected_lock().keeping_store(&older);
-    assert_eq!(rewritten.runtime.store, lock.runtime.store);
-    assert!(rewritten.runtime.artifacts.is_empty());
+    // Retain published artifacts only for the exact runtime contract.
+    let mut published = lock.clone();
+    published.runtime.store = Some("https://example.com/runtime/{version}/".into());
+    published.runtime.artifacts.insert(
+        "macos-arm64".into(),
+        fynkel_document::project::LockArtifact {
+            file: "runtime.dylib".into(),
+            sha256: None,
+        },
+    );
+    assert_eq!(
+        expected_lock().keeping_store(&published).runtime.artifacts,
+        published.runtime.artifacts
+    );
+    for mismatch in 0..3 {
+        let mut older = published.clone();
+        match mismatch {
+            0 => older.runtime.version = "0.0.0".into(),
+            1 => older.runtime.abi_version = 1,
+            _ => older.schema_fingerprint = "0x0000000000000000".into(),
+        }
+        let rewritten = expected_lock().keeping_store(&older);
+        assert_eq!(rewritten.runtime.store, published.runtime.store);
+        assert!(rewritten.runtime.artifacts.is_empty());
+    }
     // A project's lock without a store stays without one.
     assert_eq!(
         expected_lock().keeping_store(&expected_lock()),

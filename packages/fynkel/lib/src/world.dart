@@ -1,5 +1,5 @@
 // The Dart gameplay API (design/dart-sdk.md §21.2, ADR-0008): World,
-// GameObject, TransformRef with a staged-write overlay, and (behaviour.dart)
+// GameObject and Transform handles over native logical data, and (behaviour.dart)
 // the Behaviour lifecycle the world drives at the §5.1 points of a host
 // frame. Scenes come from the cooked cache through `loadProject`/`loadScene`.
 
@@ -7,6 +7,8 @@ import 'dart:async' show Completer, Zone;
 import 'dart:convert' show jsonEncode;
 import 'dart:math' as math;
 import 'dart:typed_data';
+
+import 'entity_ref.dart';
 
 import '../generated/schema.g.dart' as gen;
 import '../math.dart';
@@ -35,6 +37,7 @@ import 'wire/support.dart' show WireRecord, WireStrings, writeVec3;
 export 'native/bridge.dart' show BridgeStats, CommandLane, FramePlan, StepResult;
 
 part 'behaviour.dart';
+part 'gameplay.dart';
 part 'data_asset.dart';
 part 'object.dart';
 part 'object_spec.dart';
@@ -49,8 +52,13 @@ const Pose identityTransform = Pose(position: Vec3.zero, rotation: Quat.identity
 
 /// Runtime entity/component container over one native world.
 class World {
-  World._(this._lib, this._native, {required this.ownsLibrary, required this.fixedDt, BehaviourRegistry? registry})
-      : registry = registry ?? BehaviourRegistry() {
+  World._(
+    this._lib,
+    this._native, {
+    required this.ownsLibrary,
+    required this.fixedDt,
+    BehaviourRegistry? registry,
+  }) : registry = registry ?? BehaviourRegistry() {
     input = WorldInput(() => _native.inputView)..onUndeclared = _undeclaredAction;
     context = GameContext(time: _WorldTime(this), input: input);
     _behaviours = _BehaviourSystem(this);
@@ -65,7 +73,6 @@ class World {
   /// Creates a world on a fresh [NativeLibrary] (or the given one).
   factory World.create({
     NativeLibrary? library,
-    int worldId = 0,
     double fixedDt = 0,
     int maxStepsPerFrame = 0,
     double maxFrameDt = 0,
@@ -73,9 +80,17 @@ class World {
   }) {
     final lib = library ?? NativeLibrary.open();
     final native = lib.createWorld(
-        worldId: worldId, fixedDt: fixedDt, maxStepsPerFrame: maxStepsPerFrame, maxFrameDt: maxFrameDt);
-    return World._(lib, native, ownsLibrary: library == null, fixedDt: fixedDt > 0 ? fixedDt : 1 / 60, registry: registry)
-      ..maxFrameDt = maxFrameDt > 0 && maxFrameDt.isFinite ? maxFrameDt : 0.25;
+      fixedDt: fixedDt,
+      maxStepsPerFrame: maxStepsPerFrame,
+      maxFrameDt: maxFrameDt,
+    );
+    return World._(
+      lib,
+      native,
+      ownsLibrary: library == null,
+      fixedDt: fixedDt > 0 ? fixedDt : 1 / 60,
+      registry: registry,
+    )..maxFrameDt = maxFrameDt > 0 && maxFrameDt.isFinite ? maxFrameDt : 0.25;
   }
 
   /// The most game time one host frame counts for (seconds; the native
@@ -109,7 +124,7 @@ class World {
 
   /// Named zone events (M3-12): `zones.on('collect', (e) { … })` runs
   /// right after the tick whose step produced the `ZoneEntered`.
-  final ZoneEvents zones = ZoneEvents();
+  late final ZoneEvents zones = ZoneEvents(this);
 
   /// Projected world anchors (M3-13, docs/hud.md): where entities land on
   /// the screen this frame, for labels drawn over the viewport. Register
@@ -134,6 +149,7 @@ class World {
   /// SettingsStore.defaultPath('My Game'), world: world))` is the usual
   /// startup line, after `loadProject`.
   void useSettings(SettingsStore store) {
+    _rejectDuringEdit('useSettings');
     context.settings = store;
     store.attach(this);
   }
@@ -164,20 +180,31 @@ class World {
   late final _BehaviourSystem _behaviours;
 
   /// Every attached behaviour, in callback order.
-  List<Behaviour> get behaviours => List.unmodifiable(_behaviours._all);
+  List<Behaviour> get behaviours =>
+      _gameplay?.allBehaviours() ?? List.unmodifiable(_behaviours._all.where((b) => !b._retired));
 
   /// Host frames begun and the last frame's dt, scaled and not (for
   /// [TimeService]).
   int _frameCount = 0;
   double _frameDt = 0, _unscaledDt = 0;
+  double _gameplayElapsed = 0, _realElapsed = 0;
+  int _pendingFrameSteps = 0;
 
   /// How fast game time runs (`Time.timeScale`, foundation 1.3): [beginFrame]
-  /// hands the clock `dt * timeScale`, so 0 runs no tick while `update`
+  /// supplies real dt and the requested scale to the native clock; 0 runs no tick while `update`
   /// still runs with a delta of 0.
-  double get timeScale => _timeScale;
+  double get timeScale => _gameplay?.timeScale ?? _timeScale;
   set timeScale(double value) {
-    if (!(value >= 0) || !value.isFinite) throw ArgumentError.value(value, 'timeScale', 'must be finite and >= 0');
-    _timeScale = value;
+    final edit = _gameplay;
+    if (!(value >= 0) || !value.isFinite) {
+      edit?.reject('timeScale must be finite and >= 0');
+      throw ArgumentError.value(value, 'timeScale', 'must be finite and >= 0');
+    }
+    if (edit != null) {
+      edit.timeScale = value;
+    } else {
+      _timeScale = value;
+    }
   }
 
   double _timeScale = 1;
@@ -199,37 +226,28 @@ class World {
   final bool ownsLibrary;
 
   /// Low-level access for hosts and tests.
-  NativeWorld get native => _native;
+  NativeWorld get native {
+    _rejectDuringEdit('native escape hatch');
+    return _native;
+  }
 
-  final CommandBatch _simulation = CommandBatch();
   final CommandBatch _presentation = CommandBatch();
 
-  /// Command index → GameObject for overlay clearing on rejection.
-  final _Targets _simulationTargets = _Targets();
-  final _Targets _presentationTargets = _Targets();
-
-  final Map<int, GameObject> _byEntity = {};
-  final Map<int, GameObject> _pendingByTempId = {};
+  final Map<EntityRef, GameObject> _byEntity = {};
 
   /// What [dontDestroyOnLoad] kept, in marking order; the objects asked
   /// for while pending, marked when the tick makes them.
   final List<GameObject> _persistent = [];
-  final Set<GameObject> _persistentPending = {};
 
   /// The project's `persistentObjects` the last [loadProject] made, by
   /// name (ADR-0039).
   final Map<String, GameObject> _projectPersistent = {};
 
-  /// Objects [GameObject.setParent] moved this tick, for
-  /// [GameObject.children]'s read-your-writes; cleared by the step.
-  final List<GameObject> _reparented = [];
-  int _nextTempId = 1;
-
   /// Last snapshot: entity → record (read in place, decoded on access).
   WireBuffer _snapshot = WireBuffer.empty;
-  final Map<int, int> _snapshotIndex = {};
+  final Map<EntityRef, int> _snapshotIndex = {};
 
-  final List<int> _toSubscribe = [];
+  final List<EntityRef> _toSubscribe = [];
 
   /// The objects whose transform rides the snapshot (foundation 4.4,
   /// ADR-0004: Dart receives only what it observes). An object joins on
@@ -241,9 +259,6 @@ class World {
   final Set<GameObject> _observed = {};
   static const _observeTicks = 60;
 
-  /// The objects with per-tick state for [step] to clear
-  /// ([GameObject._touch]).
-  final List<GameObject> _touched = [];
   int _steps = 0;
 
   /// [go]'s transform was read or written: it rides the snapshot from the
@@ -253,7 +268,11 @@ class World {
     if (go._observed) return;
     final e = go._entity;
     if (e == null || !go._alive) {
-      go._observeOnSpawn = true;
+      if (e == null && (_gameplay?.pending.containsKey(go) ?? false)) {
+        _gameplay?.afterCommit(() {
+          if (go._alive) _observe(go);
+        });
+      }
       return;
     }
     go._observed = true;
@@ -263,15 +282,19 @@ class World {
 
   /// Drops the objects not read for [_observeTicks] ticks.
   void _sweepObserved() {
-    final drop = <int>[];
+    final drop = <EntityRef>[];
     _observed.removeWhere((go) {
-      if (go._alive && (go._behaviours.isNotEmpty || _steps - go._readStep < _observeTicks)) return false;
+      if (go._alive && (go._behaviours.isNotEmpty || _steps - go._readStep < _observeTicks)) {
+        return false;
+      }
       go._observed = false;
       final e = go._entity;
       if (go._alive && e != null) drop.add(e);
       return true;
     });
-    if (drop.isNotEmpty) _checkFatal(_native.subscribeTransforms(drop, enable: false), 'unsubscribe');
+    if (drop.isNotEmpty) {
+      _checkFatal(_native.subscribeTransforms(drop, enable: false), 'unsubscribe');
+    }
   }
 
   /// Called with the diagnostics of each step/submit in release mode
@@ -287,7 +310,8 @@ class World {
   void Function(BehaviourError error) onBehaviourError = reportBehaviourError;
 
   void _undeclaredAction(String action) {
-    final message = "Input action '$action' is not declared in fynkel.project.json → inputActions; it reads as nothing";
+    final message =
+        "Input action '$action' is not declared in fynkel.project.json → inputActions; it reads as nothing";
     if (EditorChannel.enabled) {
       EditorChannel.log(message, source: 'input', severity: 'warning', tick: tick);
     } else {
@@ -345,48 +369,66 @@ class World {
   /// test what a game does when the engine stops: throws the
   /// [FynkelPanicError], and the world is poisoned for good.
   void debugPanic() => _native.debugPanic();
-  Iterable<GameObject> get objects => _byEntity.values;
+  Iterable<GameObject> get objects => _withGameplay(() => _gameplay!.objects());
+
+  _GameplayAdapter? _activeGameplay;
+  int _lifecycleDepth = 0;
+
+  /// Atomically edits built-in gameplay configuration through ordinary object
+  /// APIs. Reads inside the synchronous callback see its writes. Surviving
+  /// spawns resolve before this returns; an exception discards the edit.
+  ///
+  /// May run in synchronous frame/lifecycle callbacks. Queued legacy simulation
+  /// work is adopted as a separate atomic commit before this callback; if that
+  /// handoff fails, the callback does not run and the queue remains native-owned.
+  /// A later callback failure does not undo previously adopted work. Presentation
+  /// work must be drained separately. Body, audio and animation requests publish
+  /// on commit and execute at the next eligible tick. Scene replacement, runtime resource mutation and
+  /// presentation writes remain guarded during edits.
+  /// Arbitrary Dart variables/services are outside the rollback boundary.
+  R edit<R>(R Function() callback) => _editGameplay(callback);
 
   // ---------------------------------------------------------------- spawn
 
-  /// Queues a spawn for the next fixed tick. The returned handle is
-  /// [GameObject.isPending] until that tick resolves it. Simulation-lane
-  /// writes on a pending object (`add`, `set`, `remove`, `setLocal…`,
-  /// body commands, `setParent`, `destroy`, spawning a child under it) go
-  /// into the same batch as a *temp reference* the world resolves at the
-  /// tick, so an object is spawned and fully built in one `fixedUpdate`;
-  /// presentation-lane writes and native reads need the real handle and
-  /// wait for the tick. Reads return the initial transform and the writes
-  /// staged so far.
+  /// Creates an object through the gameplay transaction. Outside a callback or
+  /// [edit], publication completes before this returns. Inside a transaction,
+  /// the handle remains pending until that transaction commits and is usable
+  /// for component, hierarchy and effect requests within that scope.
   GameObject spawn({Pose transform = identityTransform, GameObject? parent, String name = ''}) {
-    if (_native.isDisposed) throw StateError('spawn: the world was disposed (World.dispose); it can no longer be used');
-    final tempId = _nextTempId++;
-    final go = GameObject._(this, tempId, transform, name).._spawnParent = parent;
-    _pendingByTempId[tempId] = go;
-    _simulation.spawn(
-      gen.SpawnCommand(tempId: tempId, transform: transform, parent: parent?._simulationEntity('spawn parent'), name: name),
-    );
-    _simulationTargets.add(go);
-    return go;
+    return _spawn(transform, parent, name);
   }
+
+  GameObject _spawn(Pose transform, GameObject? parent, String name, [GameObject? handle]) =>
+      _withGameplay(() => _gameplay!.spawn(transform, parent, name, handle));
 
   /// Builds [spec] and everything under it (ADR-0026 §2) and returns its
   /// root: under [parent], at [transform] (default: the spec's own).
-  /// New objects spawn as [spawn] does (pending until the next tick, usable
-  /// now); a prefab instance is made now as [instantiate] does. The whole
+  /// The tree and prefab resources publish together, as [spawn] does. The whole
   /// spec is checked first — a behaviour already attached or listed twice,
   /// an unknown tag or layer, a sub-asset that is not a prefab — so a
   /// mistake throws before anything exists.
+  /// Inside [edit], ordinary trees and primitives are transactional, including
+  /// forward component and script references. Each spec may be built once per edit.
+  /// The first successful build promotes its placeholder to the canonical handle
+  /// without rewriting script fields; cooked prefab nodes use prepared resources and
+  /// lifecycle callbacks wait for the next normal boundary. Spec object bindings
+  /// publish only on commit, so abort preserves the previous build's binding.
   GameObject build(ObjectSpec spec, {GameObject? parent, Pose? transform}) {
-    _checkSpec(spec);
-    return _buildSpec(spec, parent, transform ?? spec.transform);
+    return _withGameplay(() => _gameplay!.build(spec, parent, transform ?? spec.transform));
   }
 
   /// A built-in shape (Unity's `GameObject.CreatePrimitive`, ADR-0026
   /// §4): [ObjectSpec.primitive] built under [parent] at [transform] —
   /// the shape's mesh, the default material and Unity's collider for it.
-  GameObject createPrimitive(Primitive shape, {String? name, Pose transform = identityTransform, GameObject? parent}) =>
-      build(ObjectSpec.primitive(shape, name: name, transform: transform), parent: parent);
+  GameObject createPrimitive(
+    Primitive shape, {
+    String? name,
+    Pose transform = identityTransform,
+    GameObject? parent,
+  }) => build(
+    ObjectSpec.primitive(shape, name: name, transform: transform),
+    parent: parent,
+  );
 
   // ------------------------------------------ runtime materials (ADR-0026 §4)
 
@@ -400,6 +442,7 @@ class World {
   /// [StateError] before a project or scene is loaded (the material lives
   /// in that asset store).
   MaterialAsset createMaterial([gen.PbrMaterial material = const gen.PbrMaterial()]) {
+    _rejectDuringEdit('createMaterial');
     final ref = _MadeMaterial(this, _newAssetId());
     setMaterial(ref, material);
     return ref;
@@ -425,10 +468,11 @@ class World {
     double alphaCutoff = 0.5,
     bool doubleSided = false,
   }) {
+    _rejectDuringEdit('createShaderMaterial');
     final shaderRef = switch (shader) {
       AssetRef r => r,
-      String path => assets.find(path) ??
-          (throw ArgumentError.value(path, 'shader', 'no such asset in the last cook')),
+      String path =>
+        assets.find(path) ?? (throw ArgumentError.value(path, 'shader', 'no such asset in the last cook')),
       _ => throw ArgumentError.value(shader, 'shader', 'an AssetRef or a path under assets/'),
     };
     final ref = _MadeMaterial(this, _newAssetId());
@@ -461,6 +505,7 @@ class World {
   /// [ArgumentError] with the diagnostic, and the material keeps its
   /// values.
   void setMaterialValue(AssetRef ref, String name, Object? value) {
+    _rejectDuringEdit('setMaterialValue');
     final doc = _shaderMaterials[ref.asset] ?? _cookedShaderMaterial(ref);
     final changed = _copyDoc(doc);
     _putValue(changed, name, value);
@@ -477,6 +522,7 @@ class World {
   /// edit over the cooked material itself), or the edit left `.shader`
   /// (a Lit material now: the code's copy is dropped).
   bool applyMaterialEdit(String id, Map<String, Object?> fields) {
+    _rejectDuringEdit('applyMaterialEdit');
     if (!_shaderMaterials.containsKey(id)) return false;
     final ref = AssetRef(id);
     if (fields['shader'] is! Map) {
@@ -528,8 +574,11 @@ class World {
     if (json[r'$schema'] is! String ||
         !(json[r'$schema'] as String).endsWith('/material.schema.json') ||
         shader is! Map) {
-      throw ArgumentError.value(ref, 'ref',
-          '${json['name'] ?? ref.asset} is not a material of a .shader (a Lit material changes with setMaterial)');
+      throw ArgumentError.value(
+        ref,
+        'ref',
+        '${json['name'] ?? ref.asset} is not a material of a .shader (a Lit material changes with setMaterial)',
+      );
     }
     final doc = _copyDoc(json);
     doc['parameters'] ??= <String, Object?>{};
@@ -538,10 +587,10 @@ class World {
   }
 
   static Map<String, Object?> _copyDoc(Map<String, Object?> doc) => {
-        ...doc,
-        'parameters': {...?(doc['parameters'] as Map?)?.cast<String, Object?>()},
-        'textures': {...?(doc['textures'] as Map?)?.cast<String, Object?>()},
-      };
+    ...doc,
+    'parameters': {...?(doc['parameters'] as Map?)?.cast<String, Object?>()},
+    'textures': {...?(doc['textures'] as Map?)?.cast<String, Object?>()},
+  };
 
   /// [value] as the material document holds the property [name].
   static void _putValue(Map<String, Object?> doc, String name, Object? value) {
@@ -569,8 +618,11 @@ class World {
       case List<num> l:
         parameters[name] = l;
       default:
-        throw ArgumentError.value(value, name,
-            'a material value is a number, a bool, a Vec2/Vec3/Vec4, a list of numbers or an AssetRef (a texture)');
+        throw ArgumentError.value(
+          value,
+          name,
+          'a material value is a number, a bool, a Vec2/Vec3/Vec4, a list of numbers or an AssetRef (a texture)',
+        );
     }
   }
 
@@ -578,7 +630,10 @@ class World {
     final id = ref.bytes;
     if (id == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
     final (status, diagnostics) = _native.setShaderMaterial(id, doc == null ? null : jsonEncode(doc));
-    final errors = [for (final d in diagnostics) if (d['severity'] == 'error') d];
+    final errors = [
+      for (final d in diagnostics)
+        if (d['severity'] == 'error') d,
+    ];
     String describe() => errors.map((d) => '${d['code']}: ${d['message']}').join('; ');
     switch (status) {
       case FynkelStatus.FYNKEL_STATUS_OK:
@@ -608,6 +663,7 @@ class World {
   /// one [createMaterial] made, or a cooked material, replaced for this
   /// run until [destroyMaterial]. Every renderer using it changes.
   void setMaterial(AssetRef ref, gen.PbrMaterial material) {
+    _rejectDuringEdit('setMaterial');
     _setMaterial(ref, material);
     _runtimeMaterials[ref.asset] = material;
   }
@@ -615,6 +671,7 @@ class World {
   /// Removes the runtime material [ref]: a created one draws as missing
   /// again, a replaced cooked one goes back to its cooked values.
   void destroyMaterial(AssetRef ref) {
+    _rejectDuringEdit('destroyMaterial');
     _codeValues.remove(ref.asset);
     if (_shaderMaterials.remove(ref.asset) != null) {
       _sendShaderMaterial(ref, null, 'destroyMaterial');
@@ -638,9 +695,13 @@ class World {
       case FynkelStatus.FYNKEL_STATUS_OK:
         return;
       case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
-        throw StateError('materials need a loaded project or scene (their asset store) — loadProject or loadScene first');
+        throw StateError(
+          'materials need a loaded project or scene (their asset store) — loadProject or loadScene first',
+        );
       case FynkelStatus.FYNKEL_STATUS_INVALID_ARGUMENT:
-        throw FynkelBridgeError('setMaterial: the native library has another PbrMaterial layout (rebuild it)');
+        throw FynkelBridgeError(
+          'setMaterial: the native library has another PbrMaterial layout (rebuild it)',
+        );
       default:
         throw _native.failure('setMaterial', status);
     }
@@ -655,6 +716,7 @@ class World {
   /// [setMesh]. Throws [StateError] before a project or scene is loaded
   /// (the mesh lives in that asset store).
   MeshAsset createMesh(MeshData mesh) {
+    _rejectDuringEdit('createMesh');
     final ref = _MadeMesh(this, _newAssetId());
     setMesh(ref, mesh);
     return ref;
@@ -663,6 +725,7 @@ class World {
   /// Gives the mesh [ref] (one [createMesh] made) new geometry: every
   /// renderer and mesh collider using it follows from the next frame.
   void setMesh(AssetRef ref, MeshData mesh) {
+    _rejectDuringEdit('setMesh');
     _setMesh(ref, mesh);
     _runtimeMeshes[ref.asset] = mesh;
   }
@@ -671,6 +734,7 @@ class World {
   /// collider still naming it reports `meshUnavailable` at the next step
   /// (remove the collider first).
   void destroyMesh(AssetRef ref) {
+    _rejectDuringEdit('destroyMesh');
     _setMesh(ref, null);
     _runtimeMeshes.remove(ref.asset);
   }
@@ -684,13 +748,17 @@ class World {
   void _setMesh(AssetRef ref, MeshData? mesh) {
     final id = ref.bytes;
     if (id == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
-    if (ref.sub?.isNotEmpty ?? false) throw ArgumentError.value(ref, 'ref', 'a made mesh is a whole asset, not a sub-asset of a model');
+    if (ref.sub?.isNotEmpty ?? false) {
+      throw ArgumentError.value(ref, 'ref', 'a made mesh is a whole asset, not a sub-asset of a model');
+    }
     final status = _native.setMesh(id, mesh?.toPayload());
     switch (status) {
       case FynkelStatus.FYNKEL_STATUS_OK:
         return;
       case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
-        throw StateError('meshes need a loaded project or scene (their asset store) — loadProject or loadScene first');
+        throw StateError(
+          'meshes need a loaded project or scene (their asset store) — loadProject or loadScene first',
+        );
       default:
         throw _native.failure('setMesh', status);
     }
@@ -705,6 +773,7 @@ class World {
   /// [setClip]. Throws [StateError] before a project or scene is loaded
   /// (the clip lives in that asset store).
   AnimationClipAsset createClip(ClipData clip) {
+    _rejectDuringEdit('createClip');
     final ref = _MadeClip(this, _newAssetId());
     setClip(ref, clip);
     return ref;
@@ -720,18 +789,27 @@ class World {
   final Set<String> _runtimeClips = {};
 
   void _setClip(AssetRef ref, ClipData? clip) {
+    _rejectDuringEdit('setClip');
     clip == null ? _runtimeClips.remove(ref.asset) : _runtimeClips.add(ref.asset);
     final id = ref.bytes;
     if (id == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
-    if (ref.sub?.isNotEmpty ?? false) throw ArgumentError.value(ref, 'ref', 'a made clip is a whole asset, not a sub-asset of a model');
+    if (ref.sub?.isNotEmpty ?? false) {
+      throw ArgumentError.value(ref, 'ref', 'a made clip is a whole asset, not a sub-asset of a model');
+    }
     final status = _native.setClip(id, clip?.toPayload());
     switch (status) {
       case FynkelStatus.FYNKEL_STATUS_OK:
         return;
       case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
-        throw StateError('clips need a loaded project or scene (their asset store) — loadProject or loadScene first');
+        throw StateError(
+          'clips need a loaded project or scene (their asset store) — loadProject or loadScene first',
+        );
       case FynkelStatus.FYNKEL_STATUS_INVALID_ARGUMENT:
-        throw ArgumentError.value(ref, 'clip', 'the engine refused it (keys out of order or past its length?)');
+        throw ArgumentError.value(
+          ref,
+          'clip',
+          'the engine refused it (keys out of order or past its length?)',
+        );
       default:
         throw _native.failure('setClip', status);
     }
@@ -746,7 +824,13 @@ class World {
   /// asset the cache does not have or that is not a data asset or not a
   /// [T]; a [StateError] when no project is loaded or its type is not
   /// registered.
+  /// Inside [edit], new instances share a staged cache, published only on commit.
+  /// Abort invalidates those new instances; existing shared instances are reused.
+  /// Invalid nested references abort the edit instead of producing warnings.
+  /// Arbitrary writes to existing Dart data fields are outside rollback.
   T data<T extends DataAsset>(AssetRef ref) {
+    final edit = _gameplay;
+    if (edit != null) return edit.data<T>(ref);
     final warnings = <LoadDiagnostic>[];
     final DataAsset d;
     try {
@@ -754,12 +838,14 @@ class World {
     } finally {
       if (warnings.isNotEmpty) onLoadDiagnostics(warnings);
     }
-    if (d is! T) throw ArgumentError.value(ref, 'ref', 'a ${d.dataType?.id ?? d.runtimeType}, not a $T');
+    if (d is! T) {
+      throw ArgumentError.value(ref, 'ref', 'a ${d.dataType?.id ?? d.runtimeType}, not a $T');
+    }
     return d;
   }
 
   /// The data assets made so far (their shared instances), by asset id.
-  Map<String, DataAsset> get loadedData => Map.unmodifiable(_data.byId);
+  Map<String, DataAsset> get loadedData => Map.unmodifiable({..._data.byId, ...?_gameplay?._dataAssets});
 
   /// A data-typed field's JSON (`{"asset": id}`, a list of them, or null)
   /// as the shared instance(s) of the data type [typeId] — what a load sets
@@ -767,6 +853,8 @@ class World {
   /// with `FYN-B0004` through [onLoadDiagnostics]. For an editor setting a
   /// script's data-typed field during Play.
   Object? resolveData(Object? json, String typeId, {String where = 'the field'}) {
+    final edit = _gameplay;
+    if (edit != null) return edit.resolveData(json, typeId);
     final warnings = <LoadDiagnostic>[];
     try {
       return _data.resolve(json, typeId, warnings, where: where);
@@ -781,6 +869,7 @@ class World {
   /// it no longer names back to its default. False when the world has not
   /// made that asset (nothing uses it yet: the next use reads the cache).
   bool applyDataEdit(String id, Map<String, Object?> data) {
+    _rejectDuringEdit('applyDataEdit');
     final d = _data.byId[id];
     final type = d?.dataType;
     if (d == null || type == null) return false;
@@ -795,10 +884,18 @@ class World {
     }
     return true;
   }
+
   late final _DataAssets _data = _DataAssets(this);
 
   /// Looks a resolved object up by handle.
-  GameObject? byEntity(int entity) => _byEntity[entity];
+  GameObject? byEntity(EntityRef entity) {
+    if (entity.isNull) return null;
+    return _withGameplay(() {
+      final edit = _gameplay!;
+      final ref = NativeGameplayRef.live(entity);
+      return edit.native.contains(ref) ? edit.object(ref) : null;
+    });
+  }
 
   // ---------------------------------------------------------------- frame
 
@@ -806,15 +903,16 @@ class World {
   /// [timeScale] for the clock); run [step] `plan.steps` times, then
   /// presentation writes, then extract/render.
   FramePlan beginFrame(double dtSeconds) {
+    _rejectDuringEdit('beginFrame');
     if (Gizmos.compiled) gizmos?.clear();
     _presentation.clear();
-    _presentationTargets.clear();
-    _frameCount++;
-    _unscaledDt = dtSeconds;
-    final scaled = dtSeconds * _timeScale;
-    // The native clock clamps the same way (and counts a bad dt as 0).
-    _frameDt = scaled.isFinite && scaled > 0 ? math.min(scaled, maxFrameDt) : 0;
-    final plan = _native.beginFrame(scaled);
+    final plan = _native.beginFrame(dtSeconds, _timeScale);
+    _frameCount = plan.frame;
+    _frameDt = plan.gameplayDelta;
+    _unscaledDt = plan.realDelta;
+    _gameplayElapsed = plan.gameplayElapsed;
+    _realElapsed = plan.realElapsed;
+    _pendingFrameSteps = plan.steps;
     if (plan.missedDeadline) _collectDiagnostics('begin_frame');
     return plan;
   }
@@ -824,6 +922,7 @@ class World {
   /// `pressed`/`released` edges wait for the next tick. [frame] does this
   /// for its `input` argument; hosts with their own loop call it directly.
   void captureInput(List<InputEvent> events) {
+    _rejectDuringEdit('captureInput');
     input.capture(events);
     // A frame without events after a frame without events changes nothing
     // (no relative control to zero, no frame edge to clear): skip the call.
@@ -840,14 +939,15 @@ class World {
     _checkFatal(s, 'captureInput');
   }
 
-  /// One fixed tick: flushes staged simulation commands, steps the native
-  /// world, resolves spawns, refreshes the snapshot, reports diagnostics.
+  /// One fixed tick: executes committed effects and native systems, refreshes
+  /// the completed snapshot, and reports native diagnostics.
   StepResult step() {
-    _flush(CommandLane.simulation, _simulation, _simulationTargets, 'submit');
+    _rejectDuringEdit('step');
     // Read since the last drain: in this tick's snapshot already.
     _flushSubscriptions();
     final r = _native.step();
     _checkFatal(r.status, 'step');
+    if (_pendingFrameSteps > 0) _pendingFrameSteps--;
     if (++_steps % _observeTicks == 0) _sweepObserved();
     _snapshot = _native.snapshot;
     // entity → record index. Overwrite in place (no growth in steady state,
@@ -857,27 +957,15 @@ class World {
     final n = _snapshot.recordCount;
     if (_snapshotIndex.length != n) _snapshotIndex.clear();
     for (var i = 0; i < n; i++) {
-      _snapshotIndex[d.getUint64(i * gen.SnapshotTransformRecord.wireSize, Endian.little)] = i;
+      _snapshotIndex[readEntity(d, i * gen.SnapshotTransformRecord.wireSize)] = i;
     }
     if (_snapshotIndex.length != n) {
       // Same count, different members: rebuild once.
       _snapshotIndex.clear();
       for (var i = 0; i < n; i++) {
-        _snapshotIndex[d.getUint64(i * gen.SnapshotTransformRecord.wireSize, Endian.little)] = i;
+        _snapshotIndex[readEntity(d, i * gen.SnapshotTransformRecord.wireSize)] = i;
       }
     }
-    // Overlays are consumed by the tick they were staged for. Only the
-    // objects touched since the last step hold any (foundation 4.4); a
-    // pending one keeps its staged writes until its first snapshot and a
-    // dead one its last values, as before.
-    _touched.removeWhere((go) {
-      if (go._entity == null) return false;
-      go._touched = false;
-      if (go._alive) go._clearOverlay();
-      return true;
-    });
-    _reparented.clear();
-    _entityTableStale = true;
     _collectDiagnostics('step');
     return r;
   }
@@ -885,6 +973,7 @@ class World {
   /// Pull-only event drain; resolves spawn/destroy bookkeeping on the way
   /// and sends the transform subscriptions of handles attached since.
   List<EngineEvent> drainEvents() {
+    _rejectDuringEdit('drainEvents');
     final buffer = _native.drainEvents();
     if (buffer.recordCount == 0) {
       _flushSubscriptions();
@@ -893,20 +982,6 @@ class World {
     final events = decodeEvents(buffer).toList();
     for (final e in events) {
       switch (e) {
-        case EntitySpawned(:final tempId, :final entity):
-          final go = _pendingByTempId.remove(tempId);
-          if (go != null) {
-            go._entity = entity;
-            _byEntity[entity] = go;
-            if (go._observeOnSpawn) _observe(go);
-            if (_persistentPending.remove(go)) _keep(go, entity);
-            // The staged writes were applied with the spawn (a rejection
-            // cleared them at the step); they stay readable until the
-            // first snapshot, and the next read of a native component asks
-            // the world.
-            go._componentsQueried = false;
-            if (go._behaviours.isNotEmpty) _behaviours.objectChanged();
-          }
         case EntityDestroyed(:final entity):
           final go = _byEntity.remove(entity);
           if (go != null) {
@@ -929,7 +1004,7 @@ class World {
 
   /// Flushes presentation-lane writes (call after lateUpdate, before
   /// extraction). [step] does not flush this lane.
-  void flushPresentation() => _flush(CommandLane.presentation, _presentation, _presentationTargets, 'presentation');
+  void flushPresentation() => _flush(CommandLane.presentation, _presentation, 'presentation');
 
   /// The host loop (§5.1) for tests, headless runs and hosts that need no
   /// custom phases: begin the frame; per planned tick run every behaviour's
@@ -943,11 +1018,21 @@ class World {
   /// see the edges that tick consumes (a catch-up tick sees held state
   /// only), `afterPhysics` the same tick's, `update`/`lateUpdate` the
   /// frame's raw edges.
-  FramePlan frame(double dtSeconds,
-      {List<InputEvent> input = const [], void Function(int tick)? fixedUpdate, void Function()? update}) {
-    if (_native.isDisposed) throw StateError('frame: the world was disposed (World.dispose); it can no longer be used');
-    if (_native.isPoisoned) throw _native.failure('frame', FynkelStatus.FYNKEL_STATUS_POISONED);
+  FramePlan frame(
+    double dtSeconds, {
+    List<InputEvent> input = const [],
+    void Function(int tick)? fixedUpdate,
+    void Function()? update,
+  }) {
+    _rejectDuringEdit('frame');
+    if (_native.isDisposed) {
+      throw StateError('frame: the world was disposed (World.dispose); it can no longer be used');
+    }
+    if (_native.isPoisoned) {
+      throw _native.failure('frame', FynkelStatus.FYNKEL_STATUS_POISONED);
+    }
     final t = frameTimes.._begin();
+    _callbackEntryBlocked = false;
     _deferredErrors.clear(); // a frame that threw something else left them
     scenes._perform();
     t._native.start();
@@ -955,26 +1040,87 @@ class World {
     captureInput(input);
     _carry(drainEvents());
     t._native.stop();
+    final stepsBefore = _steps;
     _inFixedPhase = true;
     try {
       _ticks(plan, t, fixedUpdate);
     } finally {
       _inFixedPhase = false;
     }
+    if (isDisposed) {
+      _pendingFrameSteps = 0;
+      t._end(_steps - stepsBefore);
+      _throwDeferred();
+      return plan;
+    }
     this.input.refresh(frameEdges: true);
     t._behaviours.start();
     _inUpdatePhase = true;
     try {
       _behaviours.update(_frameDt);
-      if (update != null) _deferring(update);
+      if (!isDisposed && update != null) _deferring(() => _callbackGameplay(update));
     } finally {
       _inUpdatePhase = false;
     }
     t._behaviours.stop();
     t._presentation.start();
-    _deferring(flushPresentation);
+    if (!isDisposed) _deferring(flushPresentation);
     t._presentation.stop();
     t._end(plan.steps);
+    _throwDeferred();
+    return plan;
+  }
+
+  /// Runs one complete fixed sequence without advancing real/gameplay
+  /// clocks or variable callbacks. Used by editor Step even at timeScale 0.
+  FramePlan stepFrame({List<InputEvent> input = const [], void Function(int tick)? fixedUpdate}) {
+    _rejectDuringEdit('stepFrame');
+    if (_pendingFrameSteps != 0 || _inFixedPhase || _inUpdatePhase) {
+      throw StateError('stepFrame requires a completed frame boundary');
+    }
+    if (_native.isDisposed) {
+      throw StateError('stepFrame: the world was disposed');
+    }
+    if (_native.isPoisoned) {
+      throw _native.failure('stepFrame', FynkelStatus.FYNKEL_STATUS_POISONED);
+    }
+    final t = frameTimes.._begin();
+    _callbackEntryBlocked = false;
+    _deferredErrors.clear();
+    scenes._perform();
+    _presentation.clear();
+    if (Gizmos.compiled) gizmos?.clear();
+    t._native.start();
+    captureInput(input);
+    _carry(drainEvents());
+    t._native.stop();
+    final plan = FramePlan(
+      1,
+      0,
+      false,
+      alpha,
+      frame: _frameCount,
+      realElapsed: _realElapsed,
+      gameplayElapsed: _gameplayElapsed,
+    );
+    final stepsBefore = _steps;
+    _inFixedPhase = true;
+    try {
+      _ticks(plan, t, fixedUpdate);
+    } finally {
+      _inFixedPhase = false;
+    }
+    if (isDisposed) {
+      _pendingFrameSteps = 0;
+      t._end(_steps - stepsBefore);
+      _throwDeferred();
+      return plan;
+    }
+    _checkFatal(_native.snapInterpolation(), 'snapInterpolation');
+    t._presentation.start();
+    _deferring(flushPresentation);
+    t._presentation.stop();
+    t._end(1);
     _throwDeferred();
     return plan;
   }
@@ -987,11 +1133,14 @@ class World {
   /// presentation flush (foundation 1.5, 1.6). Unity logs and the frame
   /// goes on; here the frame goes on and then throws.
   final List<(Object, StackTrace)> _deferredErrors = [];
+  bool _callbackEntryBlocked = false;
+  bool _callbackPreflight = false;
 
   void _deferring(void Function() f) {
     try {
       f();
     } catch (e, st) {
+      if (e is _GameplayCallbackEntrySkipped) return;
       _deferredErrors.add((e, st));
     }
   }
@@ -1000,6 +1149,7 @@ class World {
   /// (every diagnostic, the first one's context and stack); otherwise the
   /// first error, with the others printed so none is lost silently.
   void _throwDeferred() {
+    _callbackEntryBlocked = false;
     if (_deferredErrors.isEmpty) return;
     final errors = List.of(_deferredErrors);
     _deferredErrors.clear();
@@ -1016,22 +1166,36 @@ class World {
 
   /// [frame]'s fixed phase: `plan.steps` ticks.
   void _ticks(FramePlan plan, FrameTimes t, void Function(int tick)? fixedUpdate) {
-    for (var i = 0; i < plan.steps; i++) {
-      input.refresh();
-      t._behaviours.start();
-      if (fixedUpdate != null) _deferring(() => fixedUpdate(tick));
-      _behaviours.fixedUpdate(tick, _takeCarried());
-      t._behaviours.stop();
-      final stepped = tick;
-      t._native.start();
-      _deferring(step);
-      final events = drainEvents();
-      t._native.stop();
-      t._behaviours.start();
-      _behaviours.afterPhysics(stepped, _contacts(events), _zoneEvents(events), _animationEvents(events),
-          _markerEvents(events), _playbackEvents(events), _stateEvents(events));
-      t._behaviours.stop();
-      _carry(events);
+    for (var i = 0; i < plan.steps && !isDisposed; i++) {
+      _checkFatal(_native.prepareGameplayTick(), 'prepareGameplayTick');
+      try {
+        input.refresh();
+        t._behaviours.start();
+        if (fixedUpdate != null) _deferring(() => _callbackGameplay(() => fixedUpdate(tick)));
+        if (!isDisposed) _behaviours.fixedUpdate(tick, _takeCarried());
+        t._behaviours.stop();
+        if (isDisposed) return;
+        final stepped = tick;
+        t._native.start();
+        _deferring(step);
+        final events = drainEvents();
+        t._native.stop();
+        t._behaviours.start();
+        _behaviours.afterPhysics(
+          stepped,
+          _contacts(events),
+          _zoneEvents(events),
+          _animationEvents(events),
+          _markerEvents(events),
+          _playbackEvents(events),
+          _stateEvents(events),
+        );
+        t._behaviours.stop();
+        if (isDisposed) return;
+        _carry(events);
+      } finally {
+        if (!isDisposed) _checkFatal(_native.cancelGameplayTick(), 'cancelGameplayTick');
+      }
     }
   }
 
@@ -1049,6 +1213,7 @@ class World {
   /// budget is measured against.
   int get snapshotBudget => _snapshotBudget;
   set snapshotBudget(int bytes) {
+    _rejectDuringEdit('snapshotBudget');
     if (bytes < 0) throw ArgumentError.value(bytes, 'bytes', 'must be >= 0');
     _snapshotBudget = bytes;
     _native.setSnapshotBudget(bytes);
@@ -1074,48 +1239,72 @@ class World {
 
   static List<Contact> _contacts(List<EngineEvent> events) {
     if (events.isEmpty) return const [];
-    return [for (final e in events) if (e is Contact) e];
+    return [
+      for (final e in events)
+        if (e is Contact) e,
+    ];
   }
 
   static List<ZoneEvent> _zoneEvents(List<EngineEvent> events) {
     if (events.isEmpty) return const [];
-    return [for (final e in events) if (e is ZoneEvent) e];
+    return [
+      for (final e in events)
+        if (e is ZoneEvent) e,
+    ];
   }
 
   static List<AnimationEnded> _animationEvents(List<EngineEvent> events) {
     if (events.isEmpty) return const [];
-    return [for (final e in events) if (e is AnimationEnded) e];
+    return [
+      for (final e in events)
+        if (e is AnimationEnded) e,
+    ];
   }
 
   static List<AnimationMarker> _markerEvents(List<EngineEvent> events) {
     if (events.isEmpty) return const [];
-    return [for (final e in events) if (e is AnimationMarker) e];
+    return [
+      for (final e in events)
+        if (e is AnimationMarker) e,
+    ];
   }
 
   static List<AnimatorStateEvent> _stateEvents(List<EngineEvent> events) {
     if (events.isEmpty) return const [];
-    return [for (final e in events) if (e is AnimatorStateEvent) e];
+    return [
+      for (final e in events)
+        if (e is AnimatorStateEvent) e,
+    ];
   }
 
   static List<PlaybackEnded> _playbackEvents(List<EngineEvent> events) {
     if (events.isEmpty) return const [];
-    return [for (final e in events) if (e is PlaybackEnded) e];
+    return [
+      for (final e in events)
+        if (e is PlaybackEnded) e,
+    ];
   }
 
   /// A handle for an entity that already exists (loaded from a scene, or
   /// found by a query); the same handle comes back for the same entity.
   /// Its transform rides the snapshot once it is read (the first read
   /// asks the world).
-  GameObject attach(int entity, {String name = '', Pose initial = identityTransform}) {
+  GameObject attach(EntityRef entity, {String name = '', Pose initial = identityTransform}) {
+    final edit = _gameplay;
+    if (edit != null) return edit.object(NativeGameplayRef.live(entity));
+    if (!_native.contains(entity)) {
+      throw StateError('attach: foreign, stale or invalid entity $entity');
+    }
     final existing = _byEntity[entity];
     if (existing != null) return existing;
-    final go = GameObject._(this, 0, initial, name.isEmpty ? (nameOfEntity(entity) ?? '') : name);
+    final go = GameObject._(this, initial, name.isEmpty ? (nameOfEntity(entity) ?? '') : name);
     go._entity = entity;
     _byEntity[entity] = go;
     return go;
   }
 
-  void _flush(CommandLane lane, CommandBatch batch, _Targets targets, String context) {
+  void _flush(CommandLane lane, CommandBatch batch, String context) {
+    _rejectDuringEdit('flush');
     if (batch.isEmpty) return;
     // finalize() first: appending the string tail may grow the buffer, and
     // backingStore read before it would be the old, shorter one.
@@ -1124,10 +1313,8 @@ class World {
     batch.clear();
     _checkFatal(r.status, context);
     if (lane == CommandLane.presentation) {
-      targets.clear();
       _collectDiagnostics(context);
     }
-    // Simulation-lane targets stay until the step reports on them.
   }
 
   void _checkFatal(FynkelStatus s, String op) {
@@ -1147,15 +1334,6 @@ class World {
         .fixed(gen.DiagnosticRecord.wireSize, gen.DiagnosticRecord.decode)
         .map(FynkelDiagnostic.fromRecord)
         .toList(growable: false);
-    // A rejected command clears its target's overlay (§5.4).
-    final targets = context == 'step' ? _simulationTargets : _presentationTargets;
-    for (final d in list) {
-      if (d.isCommandRejection && d.commandIndex < targets.length) {
-        targets[d.commandIndex]?._clearOverlay();
-      }
-      if (d.entity != 0) _byEntity[d.entity]?._clearOverlay();
-    }
-    if (context == 'step') _simulationTargets.clear();
     if (EditorChannel.enabled) _reportToEditor(list, context);
     if (throwOnDiagnostics && list.any((d) => !d.isInformational)) {
       throw FynkelError(list, context: context);
@@ -1176,7 +1354,7 @@ class World {
         message: d.message,
         tick: tick,
         source: context,
-        entity: d.entity == 0 ? null : d.entity,
+        entity: d.entity.isNull ? null : d.entity,
         id: authored,
         document: authored == null ? null : _authoredDocument,
       );
@@ -1186,48 +1364,43 @@ class World {
   /// The id an editor shows for the entity with runtime handle [handle]
   /// (its live table's), when one is attached: what a script's object
   /// field reads back as ([referenceJson]). Null otherwise.
-  String? Function(int handle)? liveIdOf;
+  String? Function(EntityRef handle)? liveIdOf;
 
   /// Authoring ids of the entities the last loads spawned with a behaviour
   /// (the only runtime → authored mapping the SDK has), and the scene
   /// document they came from. Filled only while the editor channel is on.
-  final Map<int, String> _authoredEntities = {};
+  final Map<EntityRef, String> _authoredEntities = {};
   String? _authoredDocument;
 
   // ---------------------------------------------------------------- reads
 
-  /// Seeds [w] with the entity's last-snapshot local transform straight
-  /// from the record bytes (no value objects); false when not subscribed.
-  bool _seedLocal(int entity, TransformWriter w) {
-    final i = _snapshotIndex[entity];
-    if (i == null) return false;
-    w.decode(_snapshot.records, i * gen.SnapshotTransformRecord.wireSize + 8);
-    return true;
-  }
-
-  gen.SnapshotTransformRecord? _snapshotOf(int entity) {
+  gen.SnapshotTransformRecord? _snapshotOf(EntityRef entity) {
     final i = _snapshotIndex[entity];
     if (i == null) return null;
-    return gen.SnapshotTransformRecord.decode(_snapshot.records, i * gen.SnapshotTransformRecord.wireSize, _snapshot.tail);
+    return gen.SnapshotTransformRecord.decode(
+      _snapshot.records,
+      i * gen.SnapshotTransformRecord.wireSize,
+      _snapshot.tail,
+    );
   }
 
   /// Explicit queries (one FFI call each; not for hot paths).
-  List<int> childrenOf(GameObject go) => _native.query(QueryKind.children, entity: go._requireResolved('children')).u64s();
+  List<EntityRef> childrenOf(GameObject go) => _withGameplay(() => go.childEntities);
+  EntityRef? parentOf(GameObject go) => _withGameplay(() => go.parentEntity);
+  String? nameOf(GameObject go) => _withGameplay(() {
+    final edit = _gameplay!;
+    return edit.native.name(edit.ref(go));
+  });
 
-  int? parentOf(GameObject go) {
-    final p = _native.query(QueryKind.parent, entity: go._requireResolved('parent')).u64s();
-    return p.isEmpty || p[0] == 0 ? null : p[0];
-  }
-
-  String? nameOf(GameObject go) => nameOfEntity(go._requireResolved('name'));
-
-  String? nameOfEntity(int entity) {
+  String? nameOfEntity(EntityRef entity) {
+    final edit = _gameplay;
+    if (edit != null) return edit.guard(() => edit.native.name(NativeGameplayRef.live(entity)));
     final b = _native.query(QueryKind.name, entity: entity);
     if (b.recordCount == 0) return null;
     return gen.Name.decode(b.records, 0, b.tail).value;
   }
 
-  List<int> allEntities() => _native.query(QueryKind.allEntities).u64s();
+  List<EntityRef> allEntities() => _native.query(QueryKind.allEntities).entities();
 
   /// The last step's per-system wall time (`FYNKEL_QUERY_SYSTEMS`, M3-10):
   /// one [SystemTime] per [gen.SystemKind] in tick order, `step` first —
@@ -1237,65 +1410,36 @@ class World {
     final b = _native.query(QueryKind.systems);
     return [
       for (var i = 0; i < b.recordCount; i++)
-        SystemTime.fromRecord(gen.SystemTimeRecord.decode(b.records, i * gen.SystemTimeRecord.wireSize, b.tail)),
+        SystemTime.fromRecord(
+          gen.SystemTimeRecord.decode(b.records, i * gen.SystemTimeRecord.wireSize, b.tail),
+        ),
     ];
   }
 
   // ---------------------------------------------------------------- find (M3-08b)
 
-  /// Every live entity with its parent and name as the last step left
-  /// them (`FYNKEL_QUERY_ENTITIES`), fetched once per tick on the first
-  /// [find]; objects spawned this tick are not in it yet.
-  /// The per-tick entity table (names, parents, children), decoded from
-  /// the `entities` query. A step marks it stale rather than dropping it:
-  /// the next lookup re-runs the query (in place, no copy) and re-decodes
-  /// only when the bytes differ from the table's own retained copy —
-  /// every spawn, despawn, rename and reparent, native or Dart, shows up
-  /// there, and a `find` in a `fixedUpdate` costs no allocation while the
-  /// world's structure stands still (M3, the allocation gap).
-  _EntityTable get _entities {
-    final t = _entityTable;
-    if (t != null && !_entityTableStale) return t;
-    _entityTableStale = false;
-    final b = _native.query(QueryKind.entities);
-    if (t != null && t.sameBytes(b)) return t;
-    return _entityTable = _EntityTable.decode(b);
-  }
+  /// Finds the first currently visible object with [name], in entity order.
+  GameObject? find(String name) => _withGameplay(() {
+    final edit = _gameplay!;
+    final ref = edit.native.find(name);
+    return ref == null ? null : edit.object(ref);
+  });
 
-  _EntityTable? _entityTable;
-  bool _entityTableStale = false;
+  /// Every currently visible object named [name], in entity order.
+  List<GameObject> findAll(String name) =>
+      _withGameplay(() => _gameplay!.objects().where((go) => go.name == name).toList());
 
-  /// The first entity named [name] in the world (scene order), as a
-  /// [GameObject] — an existing handle when there is one, else one
-  /// attached now ([attach]). Null when no entity carries the name. Reads
-  /// the world as the last tick left it: an object spawned or renamed
-  /// this tick is found from the next one. One query per tick, then a map
-  /// lookup — fine in `start`, not meant for every `fixedUpdate` of a
-  /// thousand behaviours (keep the handle).
-  GameObject? find(String name) {
-    final e = _entities.firstNamed(name);
-    return e == null ? null : attach(e, name: name);
-  }
+  /// The first currently visible object carrying the project tag [tag].
+  GameObject? findWithTag(String tag) => _withGameplay(() {
+    final bit = _tagBit(tag);
+    return _gameplay!.objects().where((go) => go._tagBitsNow & bit != 0).firstOrNull;
+  });
 
-  /// Every entity named [name], scene order (see [find]).
-  List<GameObject> findAll(String name) => [for (final e in _entities.allNamed(name)) attach(e, name: name)];
-
-  /// The first entity carrying the project tag [tag] (entity order), as a
-  /// [GameObject] (see [find]: the world as the last tick left it, from the
-  /// same per-tick table, so no extra query). Null when none has it;
-  /// throws on a tag the project does not declare (ADR-0020).
-  GameObject? findWithTag(String tag) {
-    final t = _entities;
-    final e = t.firstTagged(_tagBit(tag));
-    return e == null ? null : attach(e, name: t.nameOf(e) ?? '');
-  }
-
-  /// Every entity carrying the project tag [tag], entity order (see
-  /// [findWithTag]).
-  List<GameObject> findAllWithTag(String tag) {
-    final t = _entities;
-    return [for (final e in t.allTagged(_tagBit(tag))) attach(e, name: t.nameOf(e) ?? '')];
-  }
+  /// Every currently visible object carrying the project tag [tag].
+  List<GameObject> findAllWithTag(String tag) => _withGameplay(() {
+    final bit = _tagBit(tag);
+    return _gameplay!.objects().where((go) => go._tagBitsNow & bit != 0).toList();
+  });
 
   /// The first [T] in the world (Unity's `FindObjectOfType`): a behaviour
   /// type in callback order, or a native component type (`Camera`) in
@@ -1322,9 +1466,11 @@ class World {
   List<T> _findOfType<T extends Object>(bool includeInactive, {required bool first}) {
     if (_isBehaviourType<T>()) {
       final out = <T>[];
-      for (final b in _behaviours._all) {
-        final go = b._gameObject;
-        if (b is! T || b._destroyed || b._destroyRequested || go == null || !go._alive) continue;
+      for (final b in (_gameplay == null ? _behaviours._all : behaviours)) {
+        final go = b.gameObject;
+        if (b is! T || b._destroyed || b._destroyRequested || b._retired || !go.isAlive) {
+          continue;
+        }
         if (!includeInactive && !go._activeForFind) continue;
         out.add(b as T);
         if (first) break;
@@ -1338,28 +1484,10 @@ class World {
   /// Objects with native component [id]: the world's entities in order
   /// (an entity no handle names yet is asked directly, without attaching
   /// it unless it matches), then this tick's pending spawns.
-  List<GameObject> _objectsWith(int id, bool includeInactive, {required bool first}) {
-    final out = <GameObject>[];
-    final t = _entities;
-    for (final e in t.all) {
-      final known = _byEntity[e];
-      if (known != null) {
-        if (!known._alive || (!includeInactive && !known._activeForFind) || known._lookup(id) == null) continue;
-        out.add(known);
-      } else {
-        if (!includeInactive && !t.activeInHierarchy(e)) continue;
-        if (_decodeComponent(_native.query(QueryKind.components, entity: e), id) == null) continue;
-        out.add(attach(e));
-      }
-      if (first) return out;
-    }
-    for (final go in _pendingByTempId.values) {
-      if (!go._alive || (!includeInactive && !go._activeForFind) || go._lookup(id) == null) continue;
-      out.add(go);
-      if (first) return out;
-    }
-    return out;
-  }
+  List<GameObject> _objectsWith(int id, bool includeInactive, {required bool first}) => _withGameplay(() {
+    final result = _gameplay!.objects(components: [id], includeInactive: includeInactive);
+    return first ? result.take(1).toList() : result;
+  });
 
   /// Whether [T] is a [Behaviour] type (else it must be a native
   /// component type).
@@ -1368,7 +1496,10 @@ class World {
   /// The bit of the project tag [tag]; throws naming the project's list.
   int _tagBit(String tag) {
     final bits = layersAndTags.tagBits([tag]);
-    if (bits == null) throw ArgumentError('unknown tag "$tag"; the project declares ${layersAndTags.tags}');
+    if (bits == null) {
+      _gameplay?.reject('unknown tag "$tag"');
+      throw ArgumentError('unknown tag "$tag"; the project declares ${layersAndTags.tags}');
+    }
     return bits;
   }
 
@@ -1376,22 +1507,24 @@ class World {
   /// list.
   int _layerIndex(String layer) {
     final i = layersAndTags.layer(layer);
-    if (i == null) throw ArgumentError('unknown layer "$layer"; the project declares ${layersAndTags.layers}');
+    if (i == null) {
+      _gameplay?.reject('unknown layer "$layer"');
+      throw ArgumentError('unknown layer "$layer"; the project declares ${layersAndTags.layers}');
+    }
     return i;
   }
 
-  /// The entities under [parent] (direct children in scene order), from
-  /// the per-tick table rather than a query per node.
-  List<int> _childrenFromTable(int parent) => _entities.childrenOf(parent);
-  String? _nameFromTable(int entity) => _entities.nameOf(entity);
-
-  /// Every native component of [entity] as the last step left it (one
-  /// query; `Transform`, `Name` and the renderable components in id order,
-  /// decoded through [gen.componentCodecs]). [GameObject.get] is the
-  /// read-your-writes view over this.
-  List<WireRecord> componentsOf(int entity) {
+  /// Every native component of [entity], in component id order. Outside an
+  /// edit this explicitly queries committed native data; inside an edit it
+  /// reads that edit's logical data. A destroyed entity returns an empty list.
+  List<WireRecord> componentsOf(EntityRef entity) {
+    final edit = _gameplay;
+    if (edit != null) {
+      final ref = NativeGameplayRef.live(entity);
+      return edit.native.contains(ref) ? edit.object(ref).components : [];
+    }
     final out = <WireRecord>[];
-    _decodeComponents(_native.query(QueryKind.components, entity: entity), (_, v) => out.add(v));
+    _decodeComponents(_native.query(QueryKind.components, entity: entity), (_, value) => out.add(value));
     return out;
   }
 
@@ -1420,55 +1553,11 @@ class World {
       final size = d.getUint32(off + 4, Endian.little);
       off += gen.ComponentHeader.wireSize;
       final codec = gen.componentCodecs[id];
-      if (codec != null && codec.wireSize <= size) sink(id, codec.decode(d, off, b.tail));
-      off += size;
-    }
-  }
-
-  /// The ids present in a `FYNKEL_QUERY_COMPONENTS` response as a bitmask
-  /// (ids below 63; a larger id sets bit 63, which [GameObject._lookup]
-  /// treats as present). Headers only, nothing decoded.
-  int _componentMask(WireBuffer b) {
-    final d = b.records;
-    var off = 0;
-    var mask = 0;
-    for (var i = 0; i < b.recordCount; i++) {
-      final id = d.getUint32(off, Endian.little);
-      final size = d.getUint32(off + 4, Endian.little);
-      off += gen.ComponentHeader.wireSize + size;
-      mask |= 1 << (id < 63 ? id : 63);
-    }
-    return mask;
-  }
-
-  /// Decodes only component [wantId] from a `FYNKEL_QUERY_COMPONENTS`
-  /// response (null when absent or unknown to this build), so a typed
-  /// read in a `fixedUpdate` allocates that one record, not every
-  /// component the object has.
-  WireRecord? _decodeComponent(WireBuffer b, int wantId) {
-    final outer = _decoding;
-    _decoding = this;
-    try {
-      return _decodeComponentIn(b, wantId);
-    } finally {
-      _decoding = outer;
-    }
-  }
-
-  WireRecord? _decodeComponentIn(WireBuffer b, int wantId) {
-    final d = b.records;
-    var off = 0;
-    for (var i = 0; i < b.recordCount; i++) {
-      final id = d.getUint32(off, Endian.little);
-      final size = d.getUint32(off + 4, Endian.little);
-      off += gen.ComponentHeader.wireSize;
-      if (id == wantId) {
-        final codec = gen.componentCodecs[id];
-        return codec != null && codec.wireSize <= size ? codec.decode(d, off, b.tail) : null;
+      if (codec != null && codec.wireSize <= size) {
+        sink(id, codec.decode(d, off, b.tail));
       }
       off += size;
     }
-    return null;
   }
 
   // ---------------------------------------------------------------- physics (M3-08)
@@ -1478,7 +1567,9 @@ class World {
   /// declare.
   int layerMask(Iterable<String> names) {
     final m = layersAndTags.mask(names);
-    if (m == null) throw ArgumentError('unknown layer in $names; the project declares ${layersAndTags.layers}');
+    if (m == null) {
+      throw ArgumentError('unknown layer in $names; the project declares ${layersAndTags.layers}');
+    }
     return m;
   }
 
@@ -1486,89 +1577,131 @@ class World {
   /// world as the last step left it, plus the colliders made since
   /// (`instantiate`, `clone`), as Unity's are at once (foundation 2.7; one
   /// FFI call each; batch with [physicsQuery] when asking many at once).
+  /// Inside [World.edit], reads the committed physics scene as it stood on entry;
+  /// staged moves, collider edits, spawns and removals do not change those hits.
+  /// The query does not refresh physics during an edit. Outside edits, the usual
+  /// lazy refresh of committed colliders still applies.
   /// As in Unity, triggers are hit unless [hitSensors] is false, and a ray
   /// or cast does not detect a collider it starts in (foundation 2.8).
-  PhysicsHit? raycast(Vec3 origin, Vec3 direction,
-          {double maxDistance = 1000, int mask = 0xffffffff, GameObject? exclude, bool hitSensors = true}) =>
-      raycastAll(origin, direction, maxDistance: maxDistance, mask: mask, exclude: exclude, hitSensors: hitSensors, maxHits: 1)
-          .firstOrNull;
+  PhysicsHit? raycast(
+    Vec3 origin,
+    Vec3 direction, {
+    double maxDistance = 1000,
+    int mask = 0xffffffff,
+    GameObject? exclude,
+    bool hitSensors = true,
+  }) => raycastAll(
+    origin,
+    direction,
+    maxDistance: maxDistance,
+    mask: mask,
+    exclude: exclude,
+    hitSensors: hitSensors,
+    maxHits: 1,
+  ).firstOrNull;
 
   /// Every collider along a ray, nearest first, at most [maxHits].
-  List<PhysicsHit> raycastAll(Vec3 origin, Vec3 direction,
-      {double maxDistance = 1000, int mask = 0xffffffff, GameObject? exclude, bool hitSensors = true, int maxHits = 16}) {
+  List<PhysicsHit> raycastAll(
+    Vec3 origin,
+    Vec3 direction, {
+    double maxDistance = 1000,
+    int mask = 0xffffffff,
+    GameObject? exclude,
+    bool hitSensors = true,
+    int maxHits = 16,
+  }) => _readSimulation(() {
     modules.require(Module.physics, 'raycast');
     _physicsQueries.clear();
-    _physicsQueries.add(gen.PhysicsQueryRecord(
-      id: _nextQueryId++,
-      kind: gen.PhysicsQueryKind.raycast,
-      shape: gen.ColliderShape.box,
-      size: Vec3.zero,
-      origin: origin,
-      rotation: Quat.identity,
-      direction: direction,
-      maxDistance: maxDistance,
-      mask: mask,
-      exclude: exclude?._entity,
-      maxHits: maxHits,
-      hitSensors: hitSensors,
-    ));
+    _physicsQueries.add(
+      gen.PhysicsQueryRecord(
+        id: _nextQueryId++,
+        kind: gen.PhysicsQueryKind.raycast,
+        shape: gen.ColliderShape.box,
+        size: Vec3.zero,
+        origin: origin,
+        rotation: Quat.identity,
+        direction: direction,
+        maxDistance: maxDistance,
+        mask: mask,
+        exclude: _physicsExclude(exclude),
+        maxHits: maxHits,
+        hitSensors: hitSensors,
+      ),
+    );
     return _runPhysicsQueries();
-  }
+  });
 
   /// Sweeps a `box`/`sphere`/`capsule` of [size] (as `Collider.size`
   /// defines it) from [origin] along [direction]: the first collider it
   /// would touch, or null.
-  PhysicsHit? shapeCast(gen.ColliderShape shape, Vec3 size, Vec3 origin, Vec3 direction,
-      {Quat rotation = Quat.identity,
-      double maxDistance = 1000,
-      int mask = 0xffffffff,
-      GameObject? exclude,
-      bool hitSensors = true}) {
+  PhysicsHit? shapeCast(
+    gen.ColliderShape shape,
+    Vec3 size,
+    Vec3 origin,
+    Vec3 direction, {
+    Quat rotation = Quat.identity,
+    double maxDistance = 1000,
+    int mask = 0xffffffff,
+    GameObject? exclude,
+    bool hitSensors = true,
+  }) => _readSimulation(() {
     modules.require(Module.physics, 'shapeCast');
     _physicsQueries.clear();
-    _physicsQueries.add(gen.PhysicsQueryRecord(
-      id: _nextQueryId++,
-      kind: gen.PhysicsQueryKind.shapeCast,
-      shape: shape,
-      size: size,
-      origin: origin,
-      rotation: rotation,
-      direction: direction,
-      maxDistance: maxDistance,
-      mask: mask,
-      exclude: exclude?._entity,
-      maxHits: 1,
-      hitSensors: hitSensors,
-    ));
+    _physicsQueries.add(
+      gen.PhysicsQueryRecord(
+        id: _nextQueryId++,
+        kind: gen.PhysicsQueryKind.shapeCast,
+        shape: shape,
+        size: size,
+        origin: origin,
+        rotation: rotation,
+        direction: direction,
+        maxDistance: maxDistance,
+        mask: mask,
+        exclude: _physicsExclude(exclude),
+        maxHits: 1,
+        hitSensors: hitSensors,
+      ),
+    );
     return _runPhysicsQueries().firstOrNull;
-  }
+  });
 
   /// Every collider intersecting a `box`/`sphere`/`capsule` of [size] at
   /// [origin] (distance 0, normal zero).
-  List<PhysicsHit> overlap(gen.ColliderShape shape, Vec3 size, Vec3 origin,
-      {Quat rotation = Quat.identity, int mask = 0xffffffff, GameObject? exclude, bool hitSensors = true, int maxHits = 16}) {
+  List<PhysicsHit> overlap(
+    gen.ColliderShape shape,
+    Vec3 size,
+    Vec3 origin, {
+    Quat rotation = Quat.identity,
+    int mask = 0xffffffff,
+    GameObject? exclude,
+    bool hitSensors = true,
+    int maxHits = 16,
+  }) => _readSimulation(() {
     modules.require(Module.physics, 'overlap');
     _physicsQueries.clear();
-    _physicsQueries.add(gen.PhysicsQueryRecord(
-      id: _nextQueryId++,
-      kind: gen.PhysicsQueryKind.overlap,
-      shape: shape,
-      size: size,
-      origin: origin,
-      rotation: rotation,
-      direction: Vec3.zero,
-      maxDistance: 0,
-      mask: mask,
-      exclude: exclude?._entity,
-      maxHits: maxHits,
-      hitSensors: hitSensors,
-    ));
+    _physicsQueries.add(
+      gen.PhysicsQueryRecord(
+        id: _nextQueryId++,
+        kind: gen.PhysicsQueryKind.overlap,
+        shape: shape,
+        size: size,
+        origin: origin,
+        rotation: rotation,
+        direction: Vec3.zero,
+        maxDistance: 0,
+        mask: mask,
+        exclude: _physicsExclude(exclude),
+        maxHits: maxHits,
+        hitSensors: hitSensors,
+      ),
+    );
     return _runPhysicsQueries();
-  }
+  });
 
   /// Several queries in one FFI call: the hits of every record, in query
   /// order (`PhysicsHitRecord.query` echoes each record's `id`).
-  List<gen.PhysicsHitRecord> physicsQuery(List<gen.PhysicsQueryRecord> queries) {
+  List<gen.PhysicsHitRecord> physicsQuery(List<gen.PhysicsQueryRecord> queries) => _readSimulation(() {
     modules.require(Module.physics, 'physicsQuery');
     _physicsQueries.clear();
     queries.forEach(_physicsQueries.add);
@@ -1576,6 +1709,17 @@ class World {
     final b = _native.physicsQuery(_physicsQueries.backingStore, length);
     _physicsQueries.clear();
     return b.fixed(gen.PhysicsHitRecord.wireSize, gen.PhysicsHitRecord.decode).toList(growable: false);
+  });
+
+  T _readSimulation<T>(T Function() read) {
+    final edit = _gameplay;
+    return edit == null ? read() : edit.guard(read);
+  }
+
+  EntityRef? _physicsExclude(GameObject? object) {
+    if (object == null) return null;
+    final edit = _gameplay;
+    return edit == null ? object._entity : edit.ref(object).live;
   }
 
   List<PhysicsHit> _runPhysicsQueries() {
@@ -1584,7 +1728,8 @@ class World {
     _physicsQueries.clear();
     if (b.recordCount == 0) return const [];
     return [
-      for (final r in b.fixed(gen.PhysicsHitRecord.wireSize, gen.PhysicsHitRecord.decode)) PhysicsHit.fromRecord(r),
+      for (final r in b.fixed(gen.PhysicsHitRecord.wireSize, gen.PhysicsHitRecord.decode))
+        PhysicsHit.fromRecord(r),
     ];
   }
 
@@ -1607,6 +1752,7 @@ class World {
   /// world left as it is ([LoadReport.sceneId] null): a game that builds
   /// its world from code (ADR-0026).
   LoadReport loadProject(String dir, {String? cacheDir}) {
+    _rejectDuringEdit('loadProject');
     final cache = cacheDir ?? cacheDirOf(dir);
     final report = _load(_native.loadProject(cache), 'loadProject').withProjectDir(dir);
     _cacheDir = cache;
@@ -1626,6 +1772,7 @@ class World {
   /// dead then. Throws [FynkelLoadError] when the scene is not in the
   /// cache (`FYN-R0003`) or does not load; [StateError] without a cache.
   LoadReport loadScene(Object sceneId, {String? cacheDir, LoadMode mode = LoadMode.replace}) {
+    _rejectDuringEdit('loadScene');
     final id = _assetId(sceneId, 'sceneId');
     final cache = cacheDir ?? _cacheDir;
     if (cache == null) {
@@ -1654,16 +1801,18 @@ class World {
       Component c => c.gameObject,
       _ => throw ArgumentError.value(target, 'target', 'a GameObject or a component'),
     };
-    final e = go._entity;
-    if (e == null) {
-      if (!go.isAlive) throw StateError('dontDestroyOnLoad: "${go.name}" was destroyed');
-      _persistentPending.add(go);
+    final edit = _gameplay;
+    if (edit != null) {
+      edit.ref(go);
+      edit.afterCommit(() {
+        if (go.isAlive) dontDestroyOnLoad(go);
+      });
       return;
     }
     _keep(go, go._requireResolved('dontDestroyOnLoad'));
   }
 
-  void _keep(GameObject go, int entity) {
+  void _keep(GameObject go, EntityRef entity) {
     if (_native.dontDestroyOnLoad(entity) != FynkelStatus.FYNKEL_STATUS_OK) {
       Debug.logWarning('dontDestroyOnLoad only works for root objects: "${go.name}" has a parent');
       return;
@@ -1686,6 +1835,7 @@ class World {
   /// The roots [dontDestroyOnLoad] keeps, in the order they were marked:
   /// alive and still roots, the project's persistent objects among them.
   List<GameObject> get persistentObjects {
+    _rejectDuringEdit('persistentObjects');
     _persistent.removeWhere((go) => !go.isAlive || go.parent != null);
     return List.unmodifiable(_persistent);
   }
@@ -1697,12 +1847,12 @@ class World {
   /// objects — are not the scene's and stay. Throws [FynkelUnloadError]
   /// when the world does not hold the scene (`FYN-R0010`).
   UnloadReport unloadScene(Object sceneId) {
+    _rejectDuringEdit('unloadScene');
     final id = _assetId(sceneId, 'sceneId');
     final (status, json) = _native.unloadScene(id);
     final report = UnloadReport.fromJson(json);
     switch (status) {
       case FynkelStatus.FYNKEL_STATUS_OK:
-        _entityTable = null;
         _loadedScenes = report.scenes;
         scenes._unloaded(report);
         return report;
@@ -1718,23 +1868,26 @@ class World {
   List<LoadedScene> get loadedScenes => _loadedScenes;
   List<LoadedScene> _loadedScenes = const [];
 
-  /// Lays the user's [rebinds] (`action → bindings`, the grammar of
-  /// [docs/input.md]) over the project's actions (M3-12): an empty map
-  /// restores the project's. They stay over every later load. An action
-  /// the project lacks binds nothing; a bad binding is a `bindingErrors`
-  /// entry on the report, never fatal. The report's [LoadReport.inputActions]
-  /// show what is bound (`rebound` per action). Throws [FynkelLoadError]
-  /// before a project is loaded.
+  /// Stages user bindings (`action → bindings`) over the loaded project's
+  /// actions. An empty map restores project defaults. The returned report
+  /// describes this request's staged configuration; commit publishes it and
+  /// abort discards it. Outside a callback or [World.edit], opens an edit.
+  ///
+  /// Unknown actions bind nothing and invalid binding syntax appears in
+  /// [LoadReport.bindingErrors] without rejecting the edit. A missing project
+  /// throws [StateError] and rejects the current edit. Input reads keep their
+  /// existing phase sample until the next normal input refresh.
   LoadReport bindActions(Map<String, List<String>> rebinds) {
-    final json = jsonEncode(rebinds);
-    return _load(_native.bindActions(json), 'bindActions');
+    final edit = _gameplay;
+    if (edit != null) return edit.bindActions(rebinds);
+    return this.edit(() => _gameplay!.bindActions(rebinds));
   }
 
   static String _assetId(Object id, String what) => switch (id) {
-        AssetRef r => r.asset,
-        String s => s,
-        _ => throw ArgumentError.value(id, what, 'an asset id (UUID text) or an AssetRef'),
-      };
+    AssetRef r => r.asset,
+    String s => s,
+    _ => throw ArgumentError.value(id, what, 'an asset id (UUID text) or an AssetRef'),
+  };
 
   LoadReport _load((FynkelStatus, Map<String, Object?>) r, String op) {
     final (status, json) = r;
@@ -1742,7 +1895,6 @@ class World {
     switch (status) {
       case FynkelStatus.FYNKEL_STATUS_OK:
         input.invalidate();
-        _entityTable = null;
         if (op == 'loadProject') {
           physics = report.physics;
           layersAndTags = report.layersAndTags;
@@ -1752,7 +1904,9 @@ class World {
         if (report.modules case final m?) modules = m;
         report = _attachAuthoredBehaviours(report);
         if (EditorChannel.enabled) _loadedForEditor(report, op);
-        if (report.warnings.isNotEmpty) onLoadDiagnostics(report.warnings.toList(growable: false));
+        if (report.warnings.isNotEmpty) {
+          onLoadDiagnostics(report.warnings.toList(growable: false));
+        }
         return report;
       case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
         if (EditorChannel.enabled) _loadedForEditor(report, op);
@@ -1784,26 +1938,36 @@ class World {
       );
     }
     if (!report.ok) {
-      EditorChannel.state('loadFailed', tick: tick, fields: {'op': op, 'scene': report.sceneName, 'document': document});
+      EditorChannel.state(
+        'loadFailed',
+        tick: tick,
+        fields: {'op': op, 'scene': report.sceneName, 'document': document},
+      );
       return;
     }
     if (op == 'bindActions') return;
     if (report.behaviours.isNotEmpty) {
       _authoredDocument = document;
       for (final b in report.behaviours) {
-        if (b.authoringId.isNotEmpty) _authoredEntities[b.entity] = b.authoringId;
+        if (b.authoringId.isNotEmpty) {
+          _authoredEntities[b.entity] = b.authoringId;
+        }
       }
     }
-    EditorChannel.state('loaded', tick: tick, fields: {
-      'op': op,
-      'scene': report.sceneName,
-      'sceneId': report.sceneId,
-      'document': document,
-      'entities': report.entityCount,
-      'assets': report.assetCount,
-      'behaviours': report.behavioursAttached,
-      'loadMs': report.loadMs,
-    });
+    EditorChannel.state(
+      'loaded',
+      tick: tick,
+      fields: {
+        'op': op,
+        'scene': report.sceneName,
+        'sceneId': report.sceneId,
+        'document': document,
+        'entities': report.entityCount,
+        'assets': report.assetCount,
+        'behaviours': report.behavioursAttached,
+        'loadMs': report.loadMs,
+      },
+    );
   }
 
   /// The project's persistent objects a [loadProject] made (ADR-0039):
@@ -1819,7 +1983,9 @@ class World {
       final go = attach(entity, name: p.name);
       _projectPersistent[p.name] = go;
       if (!_persistent.contains(go)) _persistent.add(go);
-      if (p.behaviours.isNotEmpty) extra.addAll(_attachBehaviours(p.behaviours, p.path).$2);
+      if (p.behaviours.isNotEmpty) {
+        extra.addAll(_attachBehaviours(p.behaviours, p.path).$2);
+      }
     }
     return extra.isEmpty ? report : report.withBehaviours(attached: 0, extra: extra);
   }
@@ -1845,7 +2011,11 @@ class World {
   /// (deleted, a component removed) or of another type leaves the field
   /// null, with `FYN-B0003`. [scene]: a scene load, whose authoring ids
   /// are the objects' live ids ([GameObject.authoringId]).
-  (int, List<LoadDiagnostic>) _attachBehaviours(List<AuthoredBehaviour> behaviours, String? document, {bool scene = false}) {
+  (int, List<LoadDiagnostic>) _attachBehaviours(
+    List<AuthoredBehaviour> behaviours,
+    String? document, {
+    bool scene = false,
+  }) {
     final extra = <LoadDiagnostic>[];
     var attached = 0;
     final byComponent = <String, Behaviour>{};
@@ -1854,14 +2024,17 @@ class World {
     for (final b in behaviours) {
       final type = registry.lookup(b.type);
       if (type == null) {
-        extra.add(LoadDiagnostic(
-          code: 'FYN-B0001',
-          severity: 'warning',
-          message: 'behaviour type ${b.type} is not registered; the component is loaded without a behaviour',
-          document: document,
-          pointer: b.pointer,
-          suggestion: 'call registerBehaviours(world.registry) from the generated behaviours.g.dart',
-        ));
+        extra.add(
+          LoadDiagnostic(
+            code: 'FYN-B0001',
+            severity: 'warning',
+            message:
+                'behaviour type ${b.type} is not registered; the component is loaded without a behaviour',
+            document: document,
+            pointer: b.pointer,
+            suggestion: 'call registerBehaviours(world.registry) from the generated behaviours.g.dart',
+          ),
+        );
         continue;
       }
       try {
@@ -1870,18 +2043,24 @@ class World {
         final behaviour = go.addBehaviourFromData(b.type, fields: b.data, version: b.version)
           .._authoredComponent = b.component.isEmpty ? null : b.component;
         if (b.component.isNotEmpty) byComponent[b.component] = behaviour;
-        if (type.fields.any((f) => f.isReference && b.data[f.name] != null)) withReferences.add((b, behaviour));
-        if (type.fields.any((f) => f.holdsData && b.data[f.name] != null)) withData.add((b, behaviour));
+        if (type.fields.any((f) => f.isReference && b.data[f.name] != null)) {
+          withReferences.add((b, behaviour));
+        }
+        if (type.fields.any((f) => f.holdsData && b.data[f.name] != null)) {
+          withData.add((b, behaviour));
+        }
         attached++;
       } on BehaviourDataError catch (e) {
-        extra.add(LoadDiagnostic(
-          code: 'FYN-B0002',
-          severity: 'warning',
-          message: '${b.type}${e.field == null ? '' : '.${e.field}'}: ${e.message}',
-          document: document,
-          pointer: b.pointer == null ? null : '${b.pointer}/data${e.field == null ? '' : '/${e.field}'}',
-          suggestion: 'fix the component data or regenerate behaviours.g.dart (`fynkel codegen --project`)',
-        ));
+        extra.add(
+          LoadDiagnostic(
+            code: 'FYN-B0002',
+            severity: 'warning',
+            message: '${b.type}${e.field == null ? '' : '.${e.field}'}: ${e.message}',
+            document: document,
+            pointer: b.pointer == null ? null : '${b.pointer}/data${e.field == null ? '' : '/${e.field}'}',
+            suggestion: 'fix the component data or regenerate behaviours.g.dart (`fynkel codegen --project`)',
+          ),
+        );
       }
     }
     for (final (b, behaviour) in withReferences) {
@@ -1892,7 +2071,8 @@ class World {
         final target = _resolveReference(value, b.references, byComponent, scene: scene);
         String? problem;
         if (target == null) {
-          problem = 'references ${value is Map && value['component'] != null ? 'a script' : 'an object'} that is not in the scene';
+          problem =
+              'references ${value is Map && value['component'] != null ? 'a script' : 'an object'} that is not in the scene';
         } else {
           try {
             f.set(behaviour, target);
@@ -1900,18 +2080,20 @@ class World {
             problem = f.type == 'component' && target is GameObject
                 ? 'references "${target.name}", which has no ${f.component}'
                 : 'references a ${target is Behaviour ? target.behaviourType?.id ?? target.runtimeType : 'GameObject'}, '
-                    'which does not fit the field';
+                      'which does not fit the field';
           }
         }
         if (problem != null) {
-          extra.add(LoadDiagnostic(
-            code: 'FYN-B0003',
-            severity: 'warning',
-            message: '${b.type}.${f.name} $problem; it is None',
-            document: document,
-            pointer: b.pointer == null ? null : '${b.pointer}/data/${f.name}',
-            suggestion: 'pick the object again in the Inspector',
-          ));
+          extra.add(
+            LoadDiagnostic(
+              code: 'FYN-B0003',
+              severity: 'warning',
+              message: '${b.type}.${f.name} $problem; it is None',
+              document: document,
+              pointer: b.pointer == null ? null : '${b.pointer}/data/${f.name}',
+              suggestion: 'pick the object again in the Inspector',
+            ),
+          );
         }
       }
     }
@@ -1919,8 +2101,14 @@ class World {
     for (final (b, behaviour) in withData) {
       for (final f in behaviour.behaviourType!.fields) {
         if (!f.holdsData) continue;
-        final value = _data.resolve(b.data[f.name], f.dataType!, extra,
-            where: '${b.type}.${f.name}', document: document, pointer: b.pointer == null ? null : '${b.pointer}/data/${f.name}');
+        final value = _data.resolve(
+          b.data[f.name],
+          f.dataType!,
+          extra,
+          where: '${b.type}.${f.name}',
+          document: document,
+          pointer: b.pointer == null ? null : '${b.pointer}/data/${f.name}',
+        );
         if (value != null) f.set(behaviour, value);
       }
     }
@@ -1931,7 +2119,7 @@ class World {
   /// when it is not there).
   Object? _resolveReference(
     Object? value,
-    Map<String, int> handles,
+    Map<String, EntityRef> handles,
     Map<String, Behaviour> byComponent, {
     required bool scene,
   }) {
@@ -1953,65 +2141,78 @@ class World {
   /// fields onto the object's copy, then the references re-pointed into
   /// the copied tree.
   void _copyBehaviours(Map<GameObject, GameObject> copies) {
+    final edit = _gameplay!;
     final warnings = <LoadDiagnostic>[];
     final made = Map<Behaviour, Behaviour>.identity();
+    // Freeze membership and enabled state before any user factory runs. Field
+    // accessors still execute in this edit and may have ordinary Dart effects.
+    final sources = {
+      for (final original in copies.keys)
+        original: [
+          for (final b in edit.behavioursOf(original))
+            if (!b._destroyRequested && !b._destroyed) (b, edit.behaviourEnabled(b)),
+        ],
+    };
     for (final MapEntry(key: original, value: copy) in copies.entries) {
-      for (final b in original._behaviours) {
+      for (final (b, enabled) in sources[original]!) {
         if (b._destroyRequested || b._destroyed) continue;
         final type = b._type ?? _registeredTypeOf(b);
         if (type == null) {
-          warnings.add(LoadDiagnostic(
-            code: 'FYN-B0001',
-            severity: 'warning',
-            message: '${b.runtimeType} on "${original.name}" is not a registered behaviour; the copy has no ${b.runtimeType}',
-            suggestion: 'annotate it with @FynkelBehaviour and call registerBehaviours(world.registry) from the generated behaviours.g.dart',
-          ));
+          warnings.add(
+            LoadDiagnostic(
+              code: 'FYN-B0001',
+              severity: 'warning',
+              message:
+                  '${b.runtimeType} on "${original.name}" is not a registered behaviour; the copy has no ${b.runtimeType}',
+              suggestion: 'annotate it with @FynkelBehaviour and call registerBehaviours(world.registry) from the generated behaviours.g.dart',
+            ),
+          );
           continue;
         }
         final c = type.create().._type = type;
-        for (final f in type.fields) {
-          if (f.isReference) continue;
-          try {
-            // A data asset is shared, not copied.
-            f.set(c, f.holdsData ? f.target!(b) : f.get(b));
-          } on Object catch (e) {
-            warnings.add(LoadDiagnostic(
-              code: 'FYN-B0002',
-              severity: 'warning',
-              message: '${type.id}.${f.name} on "${original.name}" was not copied: $e',
-            ));
-          }
+        for (final field in type.fields) {
+          if (field.isReference) continue;
+          // Field failures poison the entire clone, rather than publishing a
+          // partly initialized script. Data assets retain their shared identity.
+          field.set(c, field.holdsData ? field.target!(b) : field.get(b));
         }
-        c._enabled = b._enabled;
-        made[b] = copy.addBehaviour(c);
+        c._enabled = enabled;
+        edit.attachBehaviour(copy, c);
+        made[b] = c;
       }
     }
     for (final MapEntry(key: b, value: c) in made.entries) {
-      for (final f in c._type!.fields) {
-        if (!f.isReference) continue;
-        final read = f.target;
+      for (final field in c._type!.fields) {
+        if (!field.isReference) continue;
+        final read = field.target;
         if (read == null) {
-          if (f.get(b) != null) {
-            warnings.add(LoadDiagnostic(
-              code: 'FYN-B0003',
-              severity: 'warning',
-              message: '${c._type!.id}.${f.name} was not copied: its behaviours.g.dart predates GameObject.clone; it is None',
-              suggestion: 'regenerate behaviours.g.dart (`fynkel codegen --project`)',
-            ));
+          if (field.get(b) != null) {
+            edit.reject('${c._type!.id}.${field.name} requires regenerated reference accessors for clone');
           }
           continue;
         }
-        final target = switch (read(b)) {
-          final GameObject g => copies[g] ?? g,
-          final Behaviour t => made[t] ?? t,
-          // The copy's own component, found through the copied object.
-          final NativeComponent n => copies[n.gameObject] ?? n,
-          final other => other,
-        };
-        f.set(c, target);
+        final original = read(b);
+        final Object? target;
+        switch (original) {
+          case GameObject g:
+            target = edit.native.contains(edit.ref(g)) ? copies[g] ?? g : null;
+          case Behaviour script:
+            final owner = edit._behaviourOwner(script);
+            target = edit.behaviourRemoved(script) || !edit.native.contains(edit.ref(owner))
+                ? null
+                : copies.containsKey(owner)
+                ? made[script]
+                : script;
+          case NativeComponent component:
+            final owner = component.gameObject;
+            target = edit.native.contains(edit.ref(owner)) ? copies[owner] ?? component : null;
+          default:
+            target = original;
+        }
+        field.set(c, target);
       }
     }
-    if (warnings.isNotEmpty) onLoadDiagnostics(warnings);
+    if (warnings.isNotEmpty) edit.afterCommit(() => onLoadDiagnostics(warnings));
   }
 
   /// The registered type of a script the game constructed itself (its
@@ -2046,69 +2247,43 @@ class World {
   /// default), at [transform] under [parent], with the prefab's other
   /// entities under it — the shape a scene instance expands to — and the
   /// prefab's authored behaviours attached from [registry]. Returns the
-  /// root, already resolved (no tick needed); the prefab's
-  /// components apply through the command path like a scene's, so a
-  /// rejected value is a diagnostic on the next step. [lastInstantiate]
-  /// has the report. Throws [FynkelInstantiateError] when the prefab is
-  /// not in the loaded cache, does not decode (recook) or [parent] is not
-  /// spawned yet; throws [StateError] before any project is loaded.
-  /// The prefab's behaviours run `onCreate`/`onEnable` before it returns,
-  /// as Unity's `Instantiate` runs `Awake`/`OnEnable` (foundation 1.7).
+  /// root, already resolved outside an edit (no tick needed). Invalid values
+  /// reject the transaction; [lastInstantiate] has the committed report.
+  /// Missing prefabs, invalid data or a missing project throw [StateError].
+  /// Inside [edit], objects/resources and authored script attachments commit
+  /// together; callbacks wait for the next lifecycle boundary. Invalid authored
+  /// fields/types/references abort the edit.
+  /// Shared data assets use the edit's staged cache. Diagnostics are available
+  /// in [lastInstantiate] after commit.
+  /// Outside edits the same transaction publishes before returning. Lifecycle
+  /// callbacks run at the next normal boundary. Preparation errors throw [StateError].
   GameObject instantiate(
     Object prefab, {
     Pose transform = identityTransform,
     GameObject? parent,
     String? name,
-  }) =>
-      _behaviours.creating(() => _instantiate(prefab, transform, parent, name));
-
-  GameObject _instantiate(Object prefab, Pose transform, GameObject? parent, String? name) {
-    final id = switch (prefab) {
-      AssetRef r when (r.sub ?? '').isEmpty || r.sub == importedPrefabSub => r.asset,
-      AssetRef r => throw ArgumentError.value(
-          prefab, 'prefab', 'sub "${r.sub}" is not a prefab (a prefab document has none; an imported model\'s is "$importedPrefabSub")'),
-      String s => s,
-      _ => throw ArgumentError.value(prefab, 'prefab', 'a prefab asset id (UUID text) or an AssetRef'),
-    };
-    final parentEntity = parent?._requireResolved('instantiate parent') ?? 0;
-    final (status, json) = _native.instantiate(
-      id,
-      name ?? '',
-      parentEntity,
-      [transform.position.x, transform.position.y, transform.position.z],
-      [transform.rotation.x, transform.rotation.y, transform.rotation.z, transform.rotation.w],
-      [transform.scale.x, transform.scale.y, transform.scale.z],
-    );
-    var report = InstantiateReport.fromJson(json);
-    switch (status) {
-      case FynkelStatus.FYNKEL_STATUS_OK:
-        break;
-      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
-        throw FynkelInstantiateError(report);
-      default:
-        throw _native.failure('instantiate', status);
-    }
-    _entityTable = null;
-    final root = attach(report.root, name: report.name, initial: transform);
-    if (report.behaviours.isNotEmpty) {
-      final (attached, extra) = _attachBehaviours(report.behaviours, report.prefabPath);
-      report = report.withBehaviours(attached: attached, extra: extra);
-    }
-    lastInstantiate = report;
-    if (report.warnings.isNotEmpty) onLoadDiagnostics(report.warnings.toList(growable: false));
-    return root;
+  }) {
+    return _withGameplay(() => _gameplay!.instantiate(prefab, transform, parent, name));
   }
 
   /// Runs [onValue] every frame with a value going from [from] to [to]
   /// over [seconds] of game time, eased by [ease] (DOTween's `DOTween.To`):
   /// numbers, `Vec2`/`Vec3`/`Vec4` (colours too) in a straight line,
-  /// `Quat`s along the shorter arc. The first call is now, with [from]; the
+  /// `Quat`s along the shorter arc. The first call is at the next scheduler
+  /// boundary, with [from]; the
   /// last, with [to], is the frame the time is up. Returns the running
   /// tween (yield it, `await` its `done`, or `stop()` it); it belongs to
   /// the world — [Behaviour.tween] is the one that stops with its script.
-  Coroutine tween<T extends Object>(T from, T to, double seconds, void Function(T value) onValue,
-          {Ease ease = Ease.outQuad}) =>
-      _tweenOn(null, seconds, ease, _between(from, to, onValue));
+  /// Inside [edit], starting is deferred until a scheduler phase after commit;
+  /// abort never calls [onValue]. Duration starts when the tween first executes.
+  Coroutine tween<T extends Object>(
+    T from,
+    T to,
+    double seconds,
+    void Function(T value) onValue, {
+    Ease ease = Ease.outQuad,
+    TimeClock clock = TimeClock.gameplay,
+  }) => _tweenOn(null, seconds, ease, _between(from, to, onValue), clock);
 
   /// The report of the last [instantiate] (null before any).
   InstantiateReport? lastInstantiate;
@@ -2131,16 +2306,29 @@ class World {
   /// keeping their last pose to read; every later call on the world
   /// throws a [StateError] (foundation 4.2). Twice is fine.
   void dispose() {
+    final edit = _gameplay;
+    if (edit != null && edit.automatic && edit.explicitDepth == 0) {
+      edit.afterCommit(dispose);
+      return;
+    }
+    _rejectDuringEdit('dispose');
     if (_native.isDisposed) return;
-    for (final go in [..._byEntity.values, ..._pendingByTempId.values]) {
-      // Read from the snapshot while it is still there, then never again.
-      go._overlay = go._lastPose;
+    for (final go in _byEntity.values) {
+      // Disposal owns this last readable value; it is never a live-state cache.
+      go._retiredPose = go._lastPose;
+      if (!_native.isPoisoned && go._entity != null && _native.contains(go._entity!)) {
+        final b = _native.query(QueryKind.transform, entity: go._entity!);
+        if (b.recordCount != 0) {
+          go._retiredPose = gen.SnapshotTransformRecord.decode(b.records, 0, b.tail).local;
+        }
+      }
       go._alive = false;
     }
     _byEntity.clear();
-    _pendingByTempId.clear();
     _snapshot = WireBuffer.empty;
     _snapshotIndex.clear();
+    _behaviours._disposeRoutines();
+    scenes._disposed();
     _native.dispose();
     if (ownsLibrary) _lib.dispose();
   }
@@ -2167,6 +2355,7 @@ class AudioSystem {
   /// `FynkelGameView(audio: true)` calls it after the load; a test never
   /// does.
   bool open() {
+    _world._rejectDuringEdit('audio.open');
     if (_open) return true;
     _open = _world._native.audioOpen();
     if (!_open) _world._collectDiagnostics('audio');
@@ -2178,6 +2367,7 @@ class AudioSystem {
 
   /// Closes the device (the voices continue on the null backend).
   void close() {
+    _world._rejectDuringEdit('audio.close');
     if (!_open) return;
     _world._native.audioClose();
     _open = false;
@@ -2185,7 +2375,10 @@ class AudioSystem {
 
   /// Pauses (or resumes) the device: the host's lifecycle calls it when
   /// the app leaves the foreground. A no-op without a device.
-  void suspend(bool suspended) => _world._native.audioSuspend(suspended);
+  void suspend(bool suspended) {
+    _world._rejectDuringEdit('audio.suspend');
+    _world._native.audioSuspend(suspended);
+  }
 
   /// Plays [clip] once, fire and forget (`fynkel.cmd.PlaySound`): no
   /// object, no event, no handle; the sound is what the tick decided
@@ -2195,50 +2388,77 @@ class AudioSystem {
   /// world does not hold is `SOUND_UNAVAILABLE`; [volume] outside `0…1`
   /// or [pitch] outside `0.05…8` is `INVALID_PAYLOAD`. Under the voice
   /// limit the sound steals a voice of a lower or equal [priority] or is
-  /// not heard (`stats.refused`).
-  void play(AssetRef clip,
-      {gen.AudioBus bus = gen.AudioBus.sfx,
-      double volume = 1,
-      double pitch = 1,
-      int priority = 0,
-      bool presentation = false}) {
-    _world.modules.require(Module.audio, 'audio.play');
+  /// not heard (`stats.refused`). Inside [World.edit], simulation playback is
+  /// staged until commit and executes once at the next tick; abort discards it.
+  /// Immediate presentation playback is not supported inside an edit.
+  void play(
+    AssetRef clip, {
+    gen.AudioBus bus = gen.AudioBus.sfx,
+    double volume = 1,
+    double pitch = 1,
+    int priority = 0,
+    bool presentation = false,
+  }) {
     if (presentation) {
+      _world._rejectDuringEdit('audio.play(presentation: true)');
+      _world.modules.require(Module.audio, 'audio.play');
       _world._presentation.playSound(clip, bus: bus, volume: volume, pitch: pitch, priority: priority);
-      _world._presentationTargets.add(null);
       _world.flushPresentation();
       return;
     }
-    _world._simulation.playSound(clip, bus: bus, volume: volume, pitch: pitch, priority: priority);
-    _world._simulationTargets.add(null);
+    _world._withGameplay(() {
+      _world.modules.require(Module.audio, 'audio.play');
+      final edit = _world._gameplay!;
+      edit.guard(
+        () => edit.native.playSound(
+          gen.PlaySoundCommandRecord(clip: clip, bus: bus, volume: volume, pitch: pitch, priority: priority),
+        ),
+      );
+    });
   }
 
-  /// Sets a bus gain (`0…1`) and the mute switch at once
-  /// (`fynkel.cmd.AudioBus` on the presentation lane). The `master` bus
-  /// scales every other one; [muted] silences everything and is the same
-  /// switch for every bus.
-  void setBus(gen.AudioBus bus, double volume, {bool muted = false}) {
-    _world.modules.require(Module.audio, 'audio.setBus');
-    _stageBus(bus, volume, muted);
-    _world.flushPresentation();
-  }
+  /// Sets a bus gain (`0…1`) and the global mute switch in one gameplay
+  /// transaction. Outside a callback or [World.edit], opens an edit; inside
+  /// one, joins it. Commit publishes audio configuration without a tick; the
+  /// device consumes mixer commands asynchronously.
+  /// [muted] is shared by all buses, so the last bus write wins for mute.
+  void setBus(gen.AudioBus bus, double volume, {bool muted = false}) =>
+      _busEdit(() => _stageBus(bus, volume, muted));
 
   void _stageBus(gen.AudioBus bus, double volume, bool muted) {
-    _world._presentation.audioBus(bus, volume, muted: muted);
-    _world._presentationTargets.add(null);
+    _world.modules.require(Module.audio, 'audio.setBus');
+    _world._gameplay!.native.setAudioBus(bus, volume, muted: muted);
   }
 
-  /// Applies a settings document's gains and mute switch to the buses,
-  /// at once (`SettingsStore.attach` does it on every change).
+  /// Logical bus gain, including writes in the current edit. Outside an edit,
+  /// opens the same adoption boundary as [World.edit], which may publish older
+  /// queued gameplay work. Reading does not advance simulation.
+  double busVolume(gen.AudioBus bus) => _busEdit(() {
+    return _world._gameplay!.native.audioBus(bus).$1;
+  });
+
+  /// The logical global mute switch shared by all buses.
+  bool get muted => _busEdit(() {
+    return _world._gameplay!.native.audioBus(gen.AudioBus.master).$2;
+  });
+
+  R _busEdit<R>(R Function() operation) {
+    final edit = _world._gameplay;
+    return edit == null ? _world.edit(operation) : edit.guard(operation);
+  }
+
+  /// Applies all three settings gains and global mute atomically. A bad gain
+  /// rejects the whole edit, including earlier bus writes. [SettingsDocument]
+  /// is immutable; no user settings object is modified by the mixer.
   ///
-  /// A no-op when the project turns the audio module off: the settings
-  /// keep their volumes, nothing hears them.
+  /// A no-op when the project turns audio off: settings retain their values.
   void applySettings(SettingsDocument settings) {
     if (!_world.modules.audio) return;
-    _stageBus(gen.AudioBus.master, settings.masterVolume, settings.muted);
-    _stageBus(gen.AudioBus.music, settings.musicVolume, settings.muted);
-    _stageBus(gen.AudioBus.sfx, settings.sfxVolume, settings.muted);
-    _world.flushPresentation();
+    _busEdit(() {
+      _stageBus(gen.AudioBus.master, settings.masterVolume, settings.muted);
+      _stageBus(gen.AudioBus.music, settings.musicVolume, settings.muted);
+      _stageBus(gen.AudioBus.sfx, settings.sfxVolume, settings.muted);
+    });
   }
 
   /// The engine's counters now (`FYNKEL_QUERY_AUDIO_STATS`).
@@ -2250,7 +2470,10 @@ class AudioSystem {
 
 /// Stable handle to an entity. Owns no native memory.
 /// Playback of one object's `fynkel.Animator` ([GameObject.animation]).
-/// Every method is a command for the next tick; [state] reads the last.
+/// Outside edits, methods submit commands for the next tick. Inside [World.edit],
+/// clip controls change logical configuration and stage runtime playback until
+/// commit and the next tick. Controller-specific operations remain guarded.
+/// See [state] for committed playback reads.
 class AnimationControl {
   AnimationControl._(this._go);
   final GameObject _go;
@@ -2279,6 +2502,7 @@ class AnimationControl {
       _noController('play(clip)', 'play(stateName)');
       _go._animate(gen.AnimateOp.play, clip: target, speed: speed, looping: looping);
     } else {
+      _go.world._gameplay?.reject('animation target must be a state name or clip');
       throw ArgumentError.value(target, 'target', 'a state name (String) or a clip (AssetRef)');
     }
   }
@@ -2290,14 +2514,27 @@ class AnimationControl {
   /// A `String` is a state of the animator's controller (Unity's
   /// `CrossFade(stateName, seconds)`), started at [offset] in [layer];
   /// an [AssetRef] a clip, for an animator without one (see [play]).
-  void crossfade(Object target, double seconds,
-      {bool looping = true, double speed = 1, int? layer, double offset = 0}) {
+  void crossfade(
+    Object target,
+    double seconds, {
+    bool looping = true,
+    double speed = 1,
+    int? layer,
+    double offset = 0,
+  }) {
     if (target is String) {
-      _go._animate(gen.AnimateOp.crossFadeState, name: target, seconds: seconds, layer: layer ?? -1, value: offset);
+      _go._animate(
+        gen.AnimateOp.crossFadeState,
+        name: target,
+        seconds: seconds,
+        layer: layer ?? -1,
+        value: offset,
+      );
     } else if (target is AssetRef) {
       _noController('crossfade(clip, …)', 'crossfade(stateName, seconds)');
       _go._animate(gen.AnimateOp.crossfade, clip: target, seconds: seconds, speed: speed, looping: looping);
     } else {
+      _go.world._gameplay?.reject('animation target must be a state name or clip');
       throw ArgumentError.value(target, 'target', 'a state name (String) or a clip (AssetRef)');
     }
   }
@@ -2317,27 +2554,46 @@ class AnimationControl {
   /// markers arrive as usual and [Behaviour.onAnimationEnded] fires at
   /// its end (not after [stopOneShot]).
   ///
-  /// An unknown slot is an `invalidPayload` diagnostic that lists the
-  /// slots. Throws a [StateError] on an animator without a controller:
-  /// [play] the clip there.
-  void playOneShot(AssetRef motion, {String slot = '', double blendIn = 0.1, double blendOut = 0.2, double speed = 1}) {
+  /// Requests commit through the gameplay journal and execute at the next
+  /// tick. Invalid slots or an animator without a controller throw [StateError].
+  /// Use [play] for a clip without a controller.
+  void playOneShot(
+    AssetRef motion, {
+    String slot = '',
+    double blendIn = 0.1,
+    double blendOut = 0.2,
+    double speed = 1,
+  }) {
+    if (_go.world._gameplay == null) {
+      return _go.world.edit(
+        () => playOneShot(motion, slot: slot, blendIn: blendIn, blendOut: blendOut, speed: speed),
+      );
+    }
     _needsController('playOneShot');
-    _go._animate(gen.AnimateOp.playOneShot, clip: motion, name: slot, seconds: blendIn, value: blendOut, speed: speed);
-    (_oneShots ??= {})[slot] = true;
+    _go._animate(
+      gen.AnimateOp.playOneShot,
+      clip: motion,
+      name: slot,
+      seconds: blendIn,
+      value: blendOut,
+      speed: speed,
+    );
   }
 
   /// Blends [slot]'s one-shot out over [blendOut] seconds.
   void stopOneShot({String slot = '', double blendOut = 0.2}) {
+    if (_go.world._gameplay == null) {
+      return _go.world.edit(() => stopOneShot(slot: slot, blendOut: blendOut));
+    }
     _needsController('stopOneShot');
     _go._animate(gen.AnimateOp.stopOneShot, name: slot, value: blendOut);
-    (_oneShots ??= {})[slot] = false;
   }
 
-  /// Whether a one-shot plays in [slot] (one blending out after
-  /// [stopOneShot] does not count): what this tick asked, else the last
-  /// tick's.
+  /// Whether the completed tick reports a one-shot in [slot]. Play/stop
+  /// requests do not change this result until a tick executes them. An empty
+  /// slot and the base layer's name report the same state. A one-shot blending
+  /// out after [stopOneShot] has executed does not count.
   bool isPlayingOneShot({String slot = ''}) {
-    if (_oneShots?[slot] case final asked?) return asked;
     final all = layers;
     final info = slot.isEmpty ? all.firstOrNull : all.where((l) => l.slot == slot).firstOrNull;
     return info?.oneShot != null;
@@ -2356,6 +2612,7 @@ class AnimationControl {
   void setIKTarget(String goal, Vec3 position, {double weight = 1}) {
     _needsController('setIKTarget', what: 'IK goals live in a controller');
     if (!(weight >= 0 && weight <= 1)) {
+      _go.world._gameplay?.reject('IK weight must be within [0, 1]');
       throw ArgumentError.value(weight, 'weight', 'within [0, 1]');
     }
     _go._animate(gen.AnimateOp.setIkTarget, name: goal, point: position, value: weight);
@@ -2370,17 +2627,22 @@ class AnimationControl {
 
   void _needsController(String call, {String? what}) {
     if (!_controlled) {
-      throw StateError('animation.$call: ${_go.name} has no Animator Controller; '
-          "${what ?? "a one-shot plays in a controller's slot (play the clip instead)"}");
+      _go.world._gameplay?.reject('animation.$call requires an Animator Controller');
+      throw StateError(
+        'animation.$call: ${_go.name} has no Animator Controller; '
+        "${what ?? "a one-shot plays in a controller's slot (play the clip instead)"}",
+      );
     }
   }
 
-  /// Holds the current time; [resume] continues from it.
+  /// Holds the current time; [resume] continues from it. Inside [World.edit],
+  /// these change logical `Animator.playing` immediately and publish on commit.
   void pause() => _go._animate(gen.AnimateOp.pause);
   void resume() => _go._animate(gen.AnimateOp.resume);
 
   /// Playback rate from the next tick; negative plays backwards, 0 holds.
   /// With a controller, it scales every state (Unity's `animator.speed`).
+  /// Inside [World.edit], configuration reads see the new speed immediately.
   set speed(double value) => _go._animate(gen.AnimateOp.setSpeed, speed: value);
 
   /// Seeks to [seconds] into the clip (clamped to its length); the pose
@@ -2407,8 +2669,10 @@ class AnimationControl {
     _go._animate(gen.AnimateOp.setParameter, name: name, value: value);
   }
 
-  /// The animator's playback after the last tick (`FYNKEL_QUERY_ANIMATOR`);
-  /// `null` without an `Animator` or before the object spawned.
+  /// Committed animator configuration plus completed playback time, fade and
+  /// root-motion results (`FYNKEL_QUERY_ANIMATOR`). During [World.edit], this
+  /// excludes staged configuration; use `get<Animator>()` for logical values.
+  /// `null` without a committed `Animator` or before the object spawned.
   AnimatorState? get state {
     final e = _go._entity;
     if (e == null || !_go._alive) return null;
@@ -2422,56 +2686,48 @@ class AnimationControl {
 
   // ------------------------------------ the Animator Controller (ADR-0032)
 
-  /// Sets a float parameter of the animator's controller (Unity's
-  /// `SetFloat`) for the next tick. A wrong name or type throws an
-  /// [ArgumentError] that lists the parameters; an animator without a
-  /// controller a [StateError].
-  void setFloat(String name, double value) {
-    _check(name, gen.AnimatorParameterKind.float, 'setFloat');
-    _go._animate(gen.AnimateOp.setFloat, name: name, value: value);
-    (_pending ??= {})[name] = value;
-  }
+  /// Sets a typed controller parameter in the native gameplay journal.
+  /// Outside a callback or [World.edit], this opens an edit; inside one it
+  /// joins that scope. Validation failures abort the edit. Playback consumes
+  /// committed requests at the next animation tick.
+  void setFloat(String name, double value) =>
+      _parameterEdit(() => _go._animate(gen.AnimateOp.setFloat, name: name, value: value));
 
   /// Sets an int parameter (Unity's `SetInteger`).
-  void setInteger(String name, int value) {
-    _check(name, gen.AnimatorParameterKind.int, 'setInteger');
-    _go._animate(gen.AnimateOp.setInteger, name: name, integer: value);
-    (_pending ??= {})[name] = value;
+  void setInteger(String name, int value) =>
+      _parameterEdit(() => _go._animate(gen.AnimateOp.setInteger, name: name, integer: value));
+
+  /// Sets a bool parameter or trigger value (Unity's `SetBool`).
+  void setBool(String name, bool value) =>
+      _parameterEdit(() => _go._animate(gen.AnimateOp.setBool, name: name, value: value ? 1 : 0));
+
+  /// Sets a trigger: it stays set until a transition tests and consumes it.
+  void setTrigger(String name) => _parameterEdit(() => _go._animate(gen.AnimateOp.setTrigger, name: name));
+
+  /// Clears a trigger nothing consumed.
+  void resetTrigger(String name) =>
+      _parameterEdit(() => _go._animate(gen.AnimateOp.resetTrigger, name: name));
+
+  /// Reads the selected controller's native logical parameter value:
+  /// registered defaults or completed values, followed by committed requests
+  /// and the current edit's writes. No simulation tick or SDK value cache is
+  /// involved. [parameters] separately reports completed playback values.
+  ///
+  /// Outside an edit, getters open an edit and adopt earlier queued gameplay
+  /// work first, like [World.edit]. This can resolve pending objects or publish
+  /// queued writes, and invalid queued work can reject the read.
+  double getFloat(String name) => (_read(name, gen.AnimatorParameterKind.float) as double?) ?? 0;
+
+  /// Reads a logical int parameter.
+  int getInteger(String name) => (_read(name, gen.AnimatorParameterKind.int) as int?) ?? 0;
+
+  /// Reads a logical bool parameter or trigger value.
+  bool getBool(String name) => (_read(name, gen.AnimatorParameterKind.bool) as bool?) ?? false;
+
+  R _parameterEdit<R>(R Function() operation) {
+    final edit = _go.world._gameplay;
+    return edit == null ? _go.world.edit(operation) : edit.guard(operation);
   }
-
-  /// Sets a bool parameter (Unity's `SetBool`).
-  void setBool(String name, bool value) {
-    _check(name, gen.AnimatorParameterKind.bool, 'setBool');
-    _go._animate(gen.AnimateOp.setBool, name: name, value: value ? 1 : 0);
-    (_pending ??= {})[name] = value;
-  }
-
-  /// Sets a trigger (Unity's `SetTrigger`): it stays set until a
-  /// transition that tests it fires, which clears it.
-  void setTrigger(String name) {
-    _check(name, gen.AnimatorParameterKind.trigger, 'setTrigger');
-    _go._animate(gen.AnimateOp.setTrigger, name: name);
-    (_pending ??= {})[name] = true;
-  }
-
-  /// Clears a trigger nothing used (Unity's `ResetTrigger`).
-  void resetTrigger(String name) {
-    _check(name, gen.AnimatorParameterKind.trigger, 'resetTrigger');
-    _go._animate(gen.AnimateOp.resetTrigger, name: name);
-    (_pending ??= {})[name] = false;
-  }
-
-  /// A float parameter: what this tick set, else the last tick's value
-  /// (Unity's `GetFloat`). A wrong name or type throws an
-  /// [ArgumentError]; a controller not running yet (before the first
-  /// tick) reads 0.
-  double getFloat(String name) => (_read(name, gen.AnimatorParameterKind.float, 'getFloat') as double?) ?? 0;
-
-  /// An int parameter (Unity's `GetInteger`).
-  int getInteger(String name) => (_read(name, gen.AnimatorParameterKind.int, 'getInteger') as int?) ?? 0;
-
-  /// A bool parameter, or whether a trigger is set (Unity's `GetBool`).
-  bool getBool(String name) => (_read(name, gen.AnimatorParameterKind.bool, 'getBool') as bool?) ?? false;
 
   /// The controller's parameters after the last tick
   /// (`FYNKEL_QUERY_ANIMATOR_PARAMETERS`); empty without a running
@@ -2483,7 +2739,8 @@ class AnimationControl {
     return [
       for (var i = 0; i < b.recordCount; i++)
         AnimatorParameter.fromRecord(
-            gen.AnimatorParameterRecord.decode(b.records, i * gen.AnimatorParameterRecord.wireSize, b.tail)),
+          gen.AnimatorParameterRecord.decode(b.records, i * gen.AnimatorParameterRecord.wireSize, b.tail),
+        ),
     ];
   }
 
@@ -2497,7 +2754,8 @@ class AnimationControl {
     return [
       for (var i = 0; i < b.recordCount; i++)
         AnimatorStateInfo.fromRecord(
-            gen.AnimatorLayerStateRecord.decode(b.records, i * gen.AnimatorLayerStateRecord.wireSize, b.tail)),
+          gen.AnimatorLayerStateRecord.decode(b.records, i * gen.AnimatorLayerStateRecord.wireSize, b.tail),
+        ),
     ];
   }
 
@@ -2510,82 +2768,45 @@ class AnimationControl {
     return layer >= 0 && layer < all.length ? all[layer] : null;
   }
 
-  /// Values set since the last step (read-your-writes for the getters);
-  /// cleared with the object's overlay after every step.
-  Map<String, Object>? _pending;
-
-  /// One-shots played (true) or stopped (false) since the last step, by
-  /// slot.
-  Map<String, bool>? _oneShots;
-
-  /// The controller's parameters as last read, for the setters' checks;
-  /// read again on a miss (the animator may name another controller).
-  List<AnimatorParameter>? _known;
-
   bool get _controlled => _go.get<gen.Animator>()?.controller != null;
 
   void _noController(String call, String instead) {
     if (_controlled) {
-      throw StateError('animation.$call: ${_go.name} runs an Animator Controller, which owns what plays; '
-          'use animation.$instead');
+      _go.world._gameplay?.reject('animation.$call requires an animator without a controller');
+      throw StateError(
+        'animation.$call: ${_go.name} runs an Animator Controller, which owns what plays; '
+        'use animation.$instead',
+      );
     }
   }
 
   static bool _fits(gen.AnimatorParameterKind have, gen.AnimatorParameterKind want) => switch (want) {
-        gen.AnimatorParameterKind.float => have == gen.AnimatorParameterKind.float,
-        gen.AnimatorParameterKind.int => have == gen.AnimatorParameterKind.int,
-        // A bool value fits a bool and a trigger, as in the engine.
-        _ => have == gen.AnimatorParameterKind.bool || have == gen.AnimatorParameterKind.trigger,
-      };
+    gen.AnimatorParameterKind.float => have == gen.AnimatorParameterKind.float,
+    gen.AnimatorParameterKind.int => have == gen.AnimatorParameterKind.int,
+    // A bool value fits a bool and a trigger, as in the engine.
+    _ => have == gen.AnimatorParameterKind.bool || have == gen.AnimatorParameterKind.trigger,
+  };
 
-  /// The parameter [name], checked against [kind]; null while the
-  /// controller has not run a tick (the engine checks the command then).
-  AnimatorParameter? _check(String name, gen.AnimatorParameterKind kind, String call) {
-    if (_go.get<gen.Animator>() != null && !_controlled) {
-      throw StateError('animation.$call: ${_go.name} has no Animator Controller '
-          '(set Animator.controller, or play clips with play(clip))');
-    }
-    AnimatorParameter? find() {
-      for (final p in _known ?? const <AnimatorParameter>[]) {
-        if (p.name == name) return p;
-      }
-      return null;
-    }
-
-    var p = find();
-    if (p == null || !_fits(p.kind, kind)) {
-      final fresh = parameters;
-      _known = fresh.isEmpty ? null : fresh;
-      if (fresh.isEmpty) return null;
-      p = find();
-    }
-    if (p == null) {
+  Object? _read(String name, gen.AnimatorParameterKind kind) => _parameterEdit(() {
+    final edit = _go.world._gameplay!;
+    final parameter = edit.native.controllerParameter(edit.ref(_go), name);
+    if (parameter == null) return null;
+    if (!_fits(parameter.$1, kind)) {
       throw ArgumentError.value(
-          name, 'name', 'no parameter `$name` (the parameters: ${[for (final k in _known!) k.name].join(', ')})');
+        name,
+        'name',
+        'parameter `$name` is a ${parameter.$1.name}, not a ${kind.name}',
+      );
     }
-    if (!_fits(p.kind, kind)) {
-      throw ArgumentError.value(name, 'name', 'parameter `$name` is a ${p.kind.name}, not a ${kind.name}');
-    }
-    return p;
-  }
-
-  Object? _read(String name, gen.AnimatorParameterKind kind, String call) {
-    final p = _check(name, kind, call);
-    final pending = _pending?[name];
-    if (pending != null) return pending;
-    if (p == null) return null;
-    // The value after the last tick (the cached list may be older).
-    for (final q in parameters) {
-      if (q.name == name) return q.value;
-    }
-    return null;
-  }
+    return parameter.$2;
+  });
 }
 
 /// Playback of one object's `fynkel.AudioSource` ([GameObject.audio],
-/// M3-11). Every method is a command for the next tick (simulation
-/// lane; `MISSING_COMPONENT` on an object without a source); [state]
-/// reads the last tick's.
+/// M3-11). Outside edits, methods submit commands for the next tick. Inside
+/// [World.edit], gain, pitch and playing configuration change immediately in
+/// the logical view; playback changes only after commit at the next audio tick.
+/// [state] reports the actual voice, with source configuration when no voice exists.
 class AudioControl {
   AudioControl._(this._go);
   final GameObject _go;
@@ -2625,7 +2846,7 @@ class AudioControl {
 }
 
 class GameObject extends FynkelObject {
-  GameObject._(World this._world, this._tempId, this._initial, this._name) : _spec = null {
+  GameObject._(World this._world, this._initial, this._name) : _spec = null {
     transform = Transform._(this);
   }
 
@@ -2633,35 +2854,48 @@ class GameObject extends FynkelObject {
   /// field or a component can hold it, and [World.build] makes it the
   /// built object. Anything else throws until then.
   GameObject._placeholder(ObjectSpec this._spec)
-      : _world = null,
-        _tempId = 0,
-        _initial = _spec.transform,
-        _name = _spec.name ?? '' {
+    : _world = null,
+      _initial = _spec.transform,
+      _name = _spec.name ?? '' {
     transform = Transform._(this);
     _alive = false;
   }
 
   /// The world the object is in.
-  World get world => _world ?? _notBuilt();
-  final World? _world;
+  World get world => _world ?? _gameplay?.world ?? _notBuilt();
+  World? _world;
+
+  // An unbuilt spec handle has no committed world. Its identity belongs only
+  // to the synchronous edit until publication promotes it to a normal object.
+  _GameplayAdapter? get _gameplay {
+    if (_world != null) return _world!._gameplay;
+    final edit = Zone.current[_gameplayZoneKey] as _GameplayAdapter?;
+    if (edit == null) return null;
+    edit.checkOpen();
+    return edit.pending.containsKey(this) ? edit : null;
+  }
 
   Never _notBuilt() =>
       throw StateError('the object of $_spec is not built yet: world.build the spec, then use spec.object');
 
-  /// The spec whose [ObjectSpec.object] this stands for until it is
-  /// built, and what its latest build made.
-  final ObjectSpec? _spec;
-  GameObject? _built;
-  final int _tempId;
+  /// The declaration this handle belongs to until its first successful build.
+  ObjectSpec? _spec;
   final Pose _initial;
   String _name;
 
-  /// The object's name: what it was spawned or found with, and what it
-  /// was renamed to through this handle since. Setting it renames the
-  /// entity (a `fynkel.Name` write for the next tick, read-your-writes
-  /// like [set]).
+  /// The current logical name. Setting it uses the same transaction as [set].
+  /// Retired objects retain their last committed name for diagnostics.
   @override
-  String get name => _name;
+  String get name {
+    final current = _gameplay;
+    if (current != null) return current.native.name(current.ref(this)) ?? '';
+    if (_spec != null || !_alive || world.isDisposed) return _name;
+    return world._withGameplay(() {
+      final edit = world._gameplay!;
+      return edit.native.name(edit.ref(this)) ?? '';
+    });
+  }
+
   set name(String value) => set(gen.Name(value: value));
 
   /// The id the scene document gives this object, when a scene load
@@ -2670,141 +2904,64 @@ class GameObject extends FynkelObject {
   /// instance.
   String? get authoringId => _authoringId;
   String? _authoringId;
-  int? _entity;
+  EntityRef? _entity;
   bool _alive = true;
 
-  /// Staged local transform not yet acknowledged by a snapshot (§5.4):
-  /// scalars in [_staged] (valid while [_stagedValid]), materialised into
-  /// [_overlay] only when read. Writes never allocate; a read after a
-  /// scalar write allocates one `Transform` until the next write.
-  Pose? _overlay;
-  TransformWriter? _staged;
-  bool _stagedValid = false;
+  // Disposal-only fallback, never live gameplay state.
+  Pose? _retiredPose;
 
   /// Snapshot membership (foundation 4.4, [World._observe]).
   bool _observed = false;
-  bool _observeOnSpawn = false;
   int _readStep = 0;
 
-  /// The world's transform record, asked once per tick while the object
-  /// is not in the snapshot yet.
-  gen.SnapshotTransformRecord? _asked;
-  int _askedStep = -1;
-
-  /// This tick's snapshot record, null while the object is not in it
-  /// (marks the object read).
-  gen.SnapshotTransformRecord? _snapshotRecord() {
-    world._observe(this);
-    return world._snapshotOf(_entity ?? -1);
-  }
-
-  /// This tick's transform record: the snapshot's, else the world's.
-  gen.SnapshotTransformRecord? _record() {
-    final r = _snapshotRecord();
-    if (r != null) return r;
-    final e = _entity;
-    if (e == null || !_alive) return null;
-    if (_askedStep != world._steps) {
-      final b = world._native.query(QueryKind.transform, entity: e);
-      _asked = b.recordCount == 0 ? null : gen.SnapshotTransformRecord.decode(b.records, 0, b.tail);
-      _askedStep = world._steps;
-    }
-    return _asked;
-  }
-
-  /// Native components as read this tick (one query per object per tick,
-  /// on the first read) merged with this tick's staged writes — `null` is a
-  /// staged removal. Cleared with the transform overlay after every step
-  /// and on a rejection, so the next read sees what the world applied
-  /// (§5.4: reads are the snapshot or the staged state, never a mirror).
-  Map<int, WireRecord?>? _components;
-  bool _componentsQueried = false;
-
-  /// The tick's `QUERY_COMPONENTS` response, copied into a buffer this
-  /// object keeps (reallocated only when its length changes), and the ids
-  /// it holds as a bitmask ([World._componentMask]): the one query per
-  /// object per tick is made on the first typed read, and every read
-  /// decodes just the component it asks for from the copy — an object
-  /// with six components read for one of them allocates one record, not
-  /// six (M3, the allocation gap).
-  Uint8List? _componentBytes;
-  WireBuffer? _componentView;
-  int _presentMask = 0;
-
-  /// Whether this object holds per-tick state (a staged write, this
-  /// tick's component reads) that the next [World.step] clears: only the
-  /// objects touched since are visited (foundation 4.4), not all of them.
-  bool _touched = false;
-
-  void _touch() {
-    if (_touched) return;
-    _touched = true;
-    world._touched.add(this);
-  }
-
-  void _clearOverlay() {
-    _requestedActive = null;
-    _stagedParent = null;
-    _overlay = null;
-    _stagedValid = false;
-    _components?.clear();
-    _componentsQueried = false;
-    _presentMask = 0;
-    _animation?._pending?.clear();
-    _animation?._oneShots?.clear();
-  }
-
-  /// The staged writer, seeded from the current local value when nothing is
-  /// staged yet, so partial writes (position only) keep the rest.
-  TransformWriter _stage() {
-    world._observe(this);
-    _touch();
-    final w = _staged ??= TransformWriter();
-    if (!_stagedValid) {
-      final o = _overlay;
-      if (o != null) {
-        w.set(o);
-      } else if (!world._seedLocal(_entity ?? -1, w)) {
-        w.set(_queriedTransform() ?? _initial);
-      }
-      _stagedValid = true;
-    }
-    _overlay = null;
-    return w;
-  }
+  TransformWriter _stage() => TransformWriter.of(localTransform);
 
   late final Transform transform;
 
   final List<Behaviour> _behaviours = [];
 
   /// The behaviours attached to this object, in attach order.
-  List<Behaviour> get behaviours => List.unmodifiable(_behaviours);
+  List<Behaviour> get behaviours =>
+      world._gameplay?.behavioursOf(this) ?? List.unmodifiable(_behaviours.where((b) => !b._retired));
 
   /// Attaches [behaviour]; its `onCreate`/`onEnable` run at the next safe
   /// boundary (once the object is spawned). Returns it for chaining.
-  T addBehaviour<T extends Behaviour>(T behaviour) {
-    world._behaviours.attach(this, behaviour);
+  T addBehaviour<T extends Behaviour>(T behaviour) => world._withGameplay(() {
+    world._gameplay!.attachBehaviour(this, behaviour);
     return behaviour;
-  }
+  });
 
   /// Builds a behaviour of the registered type [typeId] from authored
-  /// [fields] (see [BehaviourRegistry.instantiate]) and attaches it.
+  /// [fields] (see [BehaviourRegistry.instantiate]) and attaches it atomically.
   Behaviour addBehaviourFromData(String typeId, {Map<String, Object?> fields = const {}, int? version}) =>
-      addBehaviour(world.registry.instantiate(typeId, fields: fields, version: version));
+      world._withGameplay(
+        () => world._gameplay!.guard(
+          () => addBehaviour(world.registry.instantiate(typeId, fields: fields, version: version)),
+        ),
+      );
 
   /// The first attached behaviour of type [T].
   T? behaviour<T extends Behaviour>() {
-    for (final b in _behaviours) {
-      if (b is T) return b;
+    for (final b in behaviours) {
+      if (b is T && !b._retired) return b;
     }
     return null;
   }
 
-  Iterable<T> behavioursOf<T extends Behaviour>() => _behaviours.whereType<T>();
+  Iterable<T> behavioursOf<T extends Behaviour>() => behaviours.where((b) => !b._retired).whereType<T>();
 
   bool get isPending => _entity == null;
   @override
-  bool get isAlive => _alive;
+  bool get isAlive {
+    final edit = _gameplay;
+    if (edit == null) {
+      if (!_alive || _world == null || world.isDisposed) return false;
+      final entity = _entity;
+      return entity != null && world._native.contains(entity);
+    }
+    if (!_alive && !edit.pending.containsKey(this)) return false;
+    return edit.guard(() => edit.native.contains(edit.ref(this)));
+  }
 
   /// The first component of type [T] on this object (Unity's
   /// `GetComponent<T>()`): the [transform] when [T] is `Transform` (or
@@ -2813,13 +2970,15 @@ class GameObject extends FynkelObject {
   T? getComponent<T extends Component>() {
     final t = transform;
     if (t is T) return t as T;
-    for (final b in _behaviours) {
-      if (b is T) return b as T;
+    for (final b in behaviours) {
+      if (b is T && !b._retired) return b as T;
     }
     // A script type never matches a built-in component.
     if (<T>[] is List<Behaviour>) return null;
     for (final codec in gen.componentCodecs.values) {
-      if (codec.id == gen.Transform.componentId || codec.id == gen.Name.componentId) continue;
+      if (codec.id == gen.Transform.componentId || codec.id == gen.Name.componentId) {
+        continue;
+      }
       if (_lookup(codec.id) == null) continue;
       final handle = codec.withType(<X extends WireRecord>() => _handle<X>(codec.id));
       if (handle is T) return handle as T;
@@ -2835,6 +2994,7 @@ class GameObject extends FynkelObject {
     final codec = _codecOf(T);
     if (codec.id == gen.Transform.componentId || codec.id == gen.Name.componentId) {
       final use = codec.id == gen.Name.componentId ? 'name' : 'transform';
+      world._gameplay?.reject('${codec.name} is not a component handle: use $use');
       throw ArgumentError('${codec.name} is not a component handle: use $use');
     }
     return _lookup(codec.id) == null ? null : _handle<T>(codec.id);
@@ -2845,234 +3005,151 @@ class GameObject extends FynkelObject {
   Map<int, NativeComponent>? _handles;
 
   /// Runtime handle; throws while pending.
-  int get entity => _requireResolved('entity');
+  EntityRef get entity => _requireResolved('entity');
 
-  int _requireResolved(String what) {
+  EntityRef _requireResolved(String what) {
+    final edit = world._gameplay;
+    if (edit != null) {
+      return edit.guard(() {
+        if (what != 'entity') edit.reject('$what is not supported inside World.edit');
+        final reference = edit.ref(this);
+        if (!edit.native.contains(reference)) edit.reject('object was destroyed');
+        return reference.live ?? edit.reject('entity is not published until World.edit commits');
+      });
+    }
     final e = _entity;
-    if (e == null) throw StateError('GameObject "$name" (temp #$_tempId) is not spawned yet; $what needs the next tick');
-    if (!_alive) throw StateError('GameObject "$name" (0x${e.toRadixString(16)}) was destroyed');
+    if (e == null) {
+      throw StateError('GameObject "$_name" is pending; $what needs the edit to commit');
+    }
+    if (!_alive) {
+      throw StateError('GameObject "$name" (0x${e.toString()}) was destroyed');
+    }
     return e;
   }
 
-  /// The handle a simulation-lane command names: the real one, or — while
-  /// the spawn is still in this tick's batch — the temp reference the
-  /// world resolves at the tick (`Entity::temp`: world 0, generation 0,
-  /// slot = temp id). Throws once destroyed.
-  int _simulationEntity(String what) {
-    if (_spec != null) {
-      // A component value built with a spec's object (`Follow(target:
-      // hero.object)`) names what the build made.
-      return (_built ?? _notBuilt())._simulationEntity(what);
-    }
-    final e = _entity;
-    if (e != null) return _requireResolved(what);
-    if (!_alive) throw StateError('GameObject "$name" (temp #$_tempId) was destroyed');
-    return _tempId;
-  }
-
-  /// Queues destruction of this object and its subtree for the next tick.
+  /// Destroys this object and its subtree on transaction commit. Lifecycle
+  /// callbacks run at the next safe boundary.
   @override
-  void destroy() {
-    final e = _simulationEntity('destroy');
-    world._simulation.destroy(gen.DestroyCommand(entity: e));
-    world._simulationTargets.add(this);
-  }
+  void destroy() => world._withGameplay(() {
+    final edit = world._gameplay!;
+    edit.guard(() => edit.native.destroy(edit.ref(this)));
+  });
 
-  /// A copy of this object and everything under it, made **now** (Unity's
-  /// `Instantiate(gameObject)`, ADR-0026 §4): names, own active flags,
-  /// child order, tags, layer and native components as the world holds
-  /// them, and every script copied through its registered fields
-  /// (`@FynkelBehaviour`). A script's GameObject or script reference to
-  /// something inside the copied tree points at the copy; one outside it
-  /// is kept. Without [parent] the copy is a root placed where this object
-  /// is in the world; under [parent] it keeps this object's local
-  /// transform (Unity's `Instantiate(obj, parent)`). [transform] (local
-  /// to [parent]) and [name] replace those; the name stays this object's
-  /// by default. Returns the copy's root, already spawned.
+  /// Copies this object's logical subtree, native components and registered
+  /// script fields through the gameplay transaction. Internal object and script
+  /// references point into the copy; external references and data assets stay
+  /// shared. Runtime playback, physics state and script fields not registered
+  /// with [BehaviourType] are not copied.
   ///
-  /// This object must be spawned (not pending). Component writes queued
-  /// this frame reach the world at the tick, so the copy has the values
-  /// before them — except this object's own [localTransform], which the
-  /// default placement reads. A script whose type is not registered is
-  /// left out, with an `FYN-B0001` warning through
-  /// [World.onLoadDiagnostics]. The copied scripts run `onCreate`/`onEnable`
-  /// before it returns, as Unity's `Instantiate` (foundation 1.7).
-  GameObject clone({GameObject? parent, Pose? transform, String? name}) =>
-      world._behaviours.creating(() => _clone(parent, transform, name));
+  /// Without [parent], the root uses this object's logical world pose; with a
+  /// parent it keeps the source local pose. [transform] and [name] override
+  /// those defaults. Pending sources and staged edits participate in the copy.
+  /// An unrepresentable world pose, an expired or foreign object reference,
+  /// or a failing field copy aborts the edit. Script membership and enabled
+  /// state are captured before factories run; field accessors run within the
+  /// edit. Their ordinary Dart side effects cannot be rolled back.
+  ///
+  /// Inside gameplay callbacks or [World.edit], the result stays pending until
+  /// commit and creation callbacks wait for the next lifecycle boundary.
+  /// Outside an edit, publication completes before returning; creation callbacks
+  /// still wait for the normal lifecycle boundary. Unregistered scripts are omitted with an
+  /// `FYN-B0001` warning delivered only after a successful commit.
+  GameObject clone({GameObject? parent, Pose? transform, String? name}) => world._withGameplay(
+    () => world._gameplay!.clone(this, parent: parent, transform: transform, name: name),
+  );
 
-  GameObject _clone(GameObject? parent, Pose? transform, String? name) {
-    final source = _requireResolved('clone');
-    final parentEntity = parent?._requireResolved('clone parent') ?? 0;
-    final at = transform ?? (parent != null || this.parent == null ? localTransform : worldTransform ?? localTransform);
-    final (status, json) = world._native.clone(
-      source,
-      name ?? '',
-      parentEntity,
-      [at.position.x, at.position.y, at.position.z],
-      [at.rotation.x, at.rotation.y, at.rotation.z, at.rotation.w],
-      [at.scale.x, at.scale.y, at.scale.z],
+  /// Reparents atomically, retaining world space when requested. Unrepresentable
+  /// local transforms or invalid parent relationships roll back the edit.
+  void setParent(GameObject? parent, {bool keepWorld = false}) => world._withGameplay(() {
+    final edit = world._gameplay!;
+    edit.guard(
+      () => edit.native.setParent(
+        edit.ref(this),
+        parent == null ? null : edit.ref(parent),
+        keepWorld: keepWorld,
+      ),
     );
-    switch (status) {
-      case FynkelStatus.FYNKEL_STATUS_OK:
-        break;
-      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
-        final diagnostics = [for (final d in (json['diagnostics'] as List? ?? const [])) LoadDiagnostic.fromJson(d as Map<String, Object?>)];
-        throw ArgumentError('clone of $this: ${diagnostics.map((d) => d.message).join('; ')}');
-      default:
-        throw world._native.failure('clone', status);
-    }
-    world._entityTable = null;
-    final report = json['clone'] as Map<String, Object?>;
-    final copies = <GameObject, GameObject>{};
-    final rootEntity = report['root'] as int;
-    final root = world.attach(rootEntity, name: name ?? this.name, initial: at);
-    for (final pair in report['entities'] as List) {
-      final [s as int, c as int] = pair as List;
-      final original = world.byEntity(s);
-      if (original == null) continue; // no script on it and nothing names it
-      copies[original] = c == rootEntity ? root : world.attach(c, name: original.name);
-    }
-    world._copyBehaviours(copies);
-    return root;
-  }
+  });
 
-  void setParent(GameObject? parent, {bool keepWorld = false}) {
-    final e = _simulationEntity('setParent');
-    world._simulation.setParent(
-      gen.SetParentCommand(child: e, parent: parent?._simulationEntity('setParent'), keepWorld: keepWorld),
-    );
-    world._simulationTargets.add(this);
-    _touch();
-    _stagedParent = (parent,);
-    world._reparented.add(this);
-  }
-
-  /// The parent as a [setParent] this tick left it.
-  (GameObject?,)? _stagedParent;
-  GameObject? _spawnParent;
-
-  /// The parent object, read-your-writes: [setParent] this tick, else the
-  /// spawn's parent while pending, else the world's entity table.
   GameObject? get _parentObject {
-    final staged = _stagedParent;
-    if (staged != null) return staged.$1;
-    final e = _entity;
-    if (e == null) return _spawnParent;
-    if (!_alive) return null;
-    final p = world._entities.parentOf(e);
-    return p == null ? null : world.attach(p);
+    if (!_alive && world._gameplay == null) return null;
+    return world._withGameplay(() {
+      final edit = world._gameplay!;
+      return edit.guard(() {
+        final parent = edit.native.parent(edit.ref(this));
+        return parent == null ? null : edit.object(parent);
+      });
+    });
   }
 
-  /// The parent object (Unity's `transform.parent`), or null at the root.
-  /// Read-your-writes like [name]: a [setParent] this tick, else the
-  /// parent a pending spawn was given, else the world's.
+  /// Current logical parent, including changes in the active edit.
   GameObject? get parent => _parentObject;
 
-  /// The children in sibling order (Unity's `transform` children), with
-  /// this tick's writes applied: a child moved away by [setParent] is
-  /// gone, one spawned under this object or moved to it is last. A
-  /// pending object's children are the ones spawned or moved under it.
-  List<GameObject> get children {
-    final out = <GameObject>[];
-    final seen = <GameObject>{};
-    void take(GameObject go) {
-      if (go._alive && identical(go._parentObject, this) && seen.add(go)) out.add(go);
-    }
+  /// Current logical children in sibling order.
+  List<GameObject> get children => world._withGameplay(() {
+    final edit = world._gameplay!;
+    return edit.guard(() => edit.native.children(edit.ref(this)).map(edit.object).toList());
+  });
 
-    final e = _entity;
-    if (e != null && _alive) {
-      for (final c in world.childrenOf(this)) {
-        take(world.attach(c));
-      }
-    }
-    for (final go in world._pendingByTempId.values) {
-      take(go);
-    }
-    for (final go in world._reparented) {
-      take(go);
-    }
-    return out;
-  }
+  EntityRef? get parentEntity => parent?.entity;
+  List<EntityRef> get childEntities => children.map((child) => child.entity).toList();
 
-  /// The parent's runtime handle as the world holds it now (no staged
-  /// writes); throws while pending. See [parent].
-  int? get parentEntity => world.parentOf(this);
-
-  /// The children's runtime handles as the world holds them now (no
-  /// staged writes); throws while pending. See [children].
-  List<int> get childEntities => world.childrenOf(this);
-
-  /// This object's own active flag (Unity's `activeSelf`): what the scene
-  /// authored, or what [setActive] asked for — read-your-writes, like
-  /// [name]. An inactive parent does not change it; see
-  /// [activeInHierarchy].
+  /// This object's own flag; inactive parents do not change it.
   bool get activeSelf {
-    final r = _requestedActive;
-    if (r != null) return r;
-    final e = _entity;
-    if (e == null || !_alive) return true;
-    return world._entities.activeSelf(e);
+    if (!_alive && world._gameplay == null) return false;
+    return world._withGameplay(() {
+      final edit = world._gameplay!;
+      return edit.guard(() => edit.native.active(edit.ref(this)).$1);
+    });
   }
 
-  bool? _requestedActive;
-
-  /// Whether the object is live in the world: it and every ancestor
-  /// active, as the last tick left it (a [setActive] shows here after the
-  /// next tick). False while pending and once destroyed. An object that is
-  /// not active in the hierarchy is not drawn, simulated or heard, and its
-  /// behaviours are disabled.
+  /// Current logical activity including every ancestor's flag.
   bool get activeInHierarchy {
-    final e = _entity;
-    if (e == null || !_alive) return false;
-    return world._entities.activeInHierarchy(e);
+    if (!_alive && world._gameplay == null) return false;
+    return world._withGameplay(() {
+      final edit = world._gameplay!;
+      return edit.guard(() => edit.native.active(edit.ref(this)).$2);
+    });
   }
 
-  /// Switches this object — and with it its subtree — on or off at the
-  /// next tick (`fynkel.cmd.SetActive`, docs/design/set-active.md). The
-  /// children keep their own flags: reactivating the parent brings back
-  /// exactly the ones that were active. Its behaviours get `onDisable` /
-  /// `onEnable` once the tick applies it.
-  void setActive(bool active) {
-    final e = _simulationEntity('setActive');
-    world._simulation.setActive(gen.SetActiveCommand(entity: e, active: active));
-    world._simulationTargets.add(this);
-    _touch();
-    _requestedActive = active;
-  }
+  /// Publishes activity atomically. Behaviour callbacks follow at the next
+  /// lifecycle boundary; children retain their own flags.
+  void setActive(bool active) => world._withGameplay(() {
+    final edit = world._gameplay!;
+    edit.guard(() => edit.native.setActive(edit.ref(this), active));
+  });
 
   /// The direct child named [name] (scene order), or null; a `/` walks
   /// down: `findChild('Arm/Hand')` is the `Hand` under the `Arm` under
   /// this object. Reads the hierarchy as the last tick left it (see
   /// [World.find]); the result is an attached [GameObject].
-  GameObject? findChild(String path) {
-    var at = _requireResolved('findChild');
-    for (final segment in path.split('/')) {
-      if (segment.isEmpty) continue;
-      int? next;
-      for (final c in world._childrenFromTable(at)) {
-        if (world._nameFromTable(c) == segment) {
-          next = c;
-          break;
-        }
+  GameObject? findChild(String path) => world._withGameplay(() {
+    final edit = world._gameplay!;
+    return edit.guard(() {
+      var at = this;
+      for (final segment in path.split('/').where((s) => s.isNotEmpty)) {
+        final child = at.children.where((go) => go.name == segment).firstOrNull;
+        if (child == null) return null;
+        at = child;
       }
-      if (next == null) return null;
-      at = next;
-    }
-    return at == _entity ? this : world.attach(at);
-  }
+      return at;
+    });
+  });
 
   /// The first descendant named [name], depth first in scene order (a
   /// child before its siblings' subtrees), or null. See [findChild].
-  GameObject? findDescendant(String name) {
-    final root = _requireResolved('findDescendant');
-    final stack = <int>[...world._childrenFromTable(root).reversed];
-    while (stack.isNotEmpty) {
-      final e = stack.removeLast();
-      if (world._nameFromTable(e) == name) return world.attach(e, name: name);
-      stack.addAll(world._childrenFromTable(e).reversed);
-    }
-    return null;
-  }
+  GameObject? findDescendant(String name) => world._withGameplay(() {
+    final edit = world._gameplay!;
+    return edit.guard(() {
+      final stack = [...children.reversed];
+      while (stack.isNotEmpty) {
+        final go = stack.removeLast();
+        if (go.name == name) return go;
+        stack.addAll(go.children.reversed);
+      }
+      return null;
+    });
+  });
 
   /// The first [T] on this object or below it, depth first in sibling
   /// order (Unity's `GetComponentInChildren`, which also looks at the
@@ -3088,39 +3165,36 @@ class GameObject extends FynkelObject {
 
   /// The first [T] on this object or an ancestor, nearest first (Unity's
   /// `GetComponentInParent`); see [getInChildren].
-  T? getInParent<T extends Object>({bool includeInactive = false}) {
+  T? getInParent<T extends Object>({bool includeInactive = false}) => world._withGameplay(() {
     for (GameObject? go = this; go != null; go = go._parentObject) {
       if (!includeInactive && !go._activeForFind) continue;
       final v = go._own<T>();
       if (v != null) return v;
     }
     return null;
-  }
+  });
 
-  List<T> _inChildren<T extends Object>(bool includeInactive, {required bool first}) {
-    final out = <T>[];
-    final stack = <GameObject>[this];
-    while (stack.isNotEmpty) {
-      final go = stack.removeLast();
-      if (!includeInactive && !go._activeForFind) continue;
-      for (final v in go._allOwn<T>()) {
-        out.add(v);
-        if (first) return out;
-      }
-      stack.addAll(go.children.reversed);
-    }
-    return out;
-  }
+  List<T> _inChildren<T extends Object>(bool includeInactive, {required bool first}) =>
+      world._withGameplay(() {
+        final out = <T>[];
+        final stack = <GameObject>[this];
+        while (stack.isNotEmpty) {
+          final go = stack.removeLast();
+          if (!includeInactive && !go._activeForFind) continue;
+          for (final v in go._allOwn<T>()) {
+            out.add(v);
+            if (first) return out;
+          }
+          stack.addAll(go.children.reversed);
+        }
+        return out;
+      });
 
-  /// The first [T] on this object alone: a behaviour not destroyed yet —
-  /// one whose `destroy()` was called is still found until the boundary
-  /// that destroys it, as Unity's lookups find a component until the end
-  /// of the frame of its `Destroy` ([behaviour] agrees; foundation 1.9) —
-  /// or the native component's value.
+  /// The first logical behaviour or native component on this object.
   T? _own<T extends Object>() {
     if (World._isBehaviourType<T>()) {
-      for (final b in _behaviours) {
-        if (b is T && !b._destroyed) return b as T;
+      for (final b in behaviours) {
+        if (b is T && !b._destroyed && !b._retired) return b as T;
       }
       return null;
     }
@@ -3130,8 +3204,8 @@ class GameObject extends FynkelObject {
 
   Iterable<T> _allOwn<T extends Object>() sync* {
     if (World._isBehaviourType<T>()) {
-      for (final b in _behaviours) {
-        if (b is T && !b._destroyed) yield b as T;
+      for (final b in behaviours) {
+        if (b is T && !b._destroyed && !b._retired) yield b as T;
       }
       return;
     }
@@ -3142,17 +3216,13 @@ class GameObject extends FynkelObject {
   /// Active for the find helpers: its own flag as staged this tick, and
   /// its ancestors' as the last tick left them (a pending spawn counts as
   /// active until the tick says otherwise).
-  bool get _activeForFind {
-    if (!_alive || !activeSelf) return false;
-    final e = _entity;
-    return e == null || world._entities.activeInHierarchy(e);
-  }
+  bool get _activeForFind => isAlive && activeInHierarchy;
 
   // ------------------------------------------------ layer and tags (ADR-0020)
 
   /// The object's layer, one of the project's `layers` (`default` without
   /// a `fynkel.Layer`). Read-your-writes like [get]. Setting it is a
-  /// `fynkel.Layer` write for the next tick — its colliders change
+  /// `fynkel.Layer` write published with the transaction — its colliders change
   /// collision groups in that tick; an unknown name throws.
   String get layer {
     final i = get<gen.Layer>()?.layer ?? 0;
@@ -3178,14 +3248,14 @@ class GameObject extends FynkelObject {
   /// not declare.
   bool hasTag(String tag) => _tagBitsNow & world._tagBit(tag) != 0;
 
-  /// Gives the object [tag] at the next tick (readable now); nothing when
+  /// Gives the object [tag] through the gameplay transaction; nothing when
   /// it has it already. Throws on a tag the project does not declare.
   void addTag(String tag) {
     final bits = _tagBitsNow, bit = world._tagBit(tag);
     if (bits & bit == 0) set(gen.Tags(bits: bits | bit));
   }
 
-  /// Takes [tag] from the object at the next tick (readable now); nothing
+  /// Takes [tag] from the object through the gameplay transaction; nothing
   /// when it lacks it. Throws on a tag the project does not declare.
   void removeTag(String tag) {
     final bits = _tagBitsNow, bit = world._tagBit(tag);
@@ -3198,161 +3268,78 @@ class GameObject extends FynkelObject {
 
   static gen.ComponentCodec _codecOf(Type t) {
     final id = gen.componentIds[t];
-    if (id == null) throw ArgumentError('$t is not a native component (componentIds lists them)');
+    if (id == null) {
+      (Zone.current[_gameplayZoneKey] as _GameplayAdapter?)?.reject('$t is not a native component');
+      throw ArgumentError('$t is not a native component (componentIds lists them)');
+    }
     return gen.componentCodecs[id]!;
   }
 
-  /// The native component of type [T] (`MeshRenderer`, `PointLight`,
-  /// `Camera`, …, `Transform`, `Name`), or null when the object has none.
-  /// Read-your-writes: a value [set] this tick reads back before the tick
-  /// applies it; otherwise the value the last step left, fetched with one
-  /// query per object per tick. Not for a hot loop over thousands of
-  /// objects — that is what snapshots are for.
-  T? get<T extends WireRecord>() {
-    if (T == Pose) return localTransform as T;
-    return _lookup(_codecOf(T).id) as T?;
-  }
+  /// The native component of type [T], including staged writes in the
+  /// current gameplay transaction. Outside a transaction this reads native
+  /// authority immediately.
+  T? get<T extends WireRecord>() => world._withGameplay(() => world._gameplay!.get<T>(this));
 
-  bool has<T extends WireRecord>() => T == Pose || _lookup(_codecOf(T).id) != null;
+  bool has<T extends WireRecord>() => get<T>() != null;
 
-  /// Every native component this object has, id order (`Transform` first,
-  /// as [localTransform]), staged writes included.
-  List<WireRecord> get components {
-    _decodeAllComponents();
-    _touch();
-    final c = _components ??= {};
-    final ids = c.keys.where((id) => c[id] != null).toList()..sort();
-    return [for (final id in ids) id == gen.Transform.componentId ? localTransform : c[id]!];
-  }
+  /// Every native component in id order, including staged writes.
+  List<WireRecord> get components => world._withGameplay(() {
+    final edit = world._gameplay!;
+    final ids = gen.componentCodecs.keys.toList()..sort();
+    return [
+      for (final id in ids) ...[edit.lookup(this, id)].whereType<WireRecord>(),
+    ];
+  });
 
-  /// The component [id] as this tick sees it: a staged write, else the
-  /// world's value decoded from the tick's one query (see
-  /// [_componentBytes]); an id the object lacks is answered from the mask.
-  WireRecord? _lookup(int id) {
-    _touch();
-    final c = _components ??= {};
-    if (c.containsKey(id)) return c[id];
-    _queryComponents();
-    final view = _componentView;
-    if (view == null || (_presentMask & (1 << (id < 63 ? id : 63))) == 0) return null;
-    final value = world._decodeComponent(view, id);
-    if (value != null) c[id] = value;
-    return value;
-  }
+  WireRecord? _lookup(int id) => world._withGameplay(() => world._gameplay!.lookup(this, id));
 
-  /// The tick's query, once: the response copied into [_componentBytes]
-  /// and its mask read. Nothing on an object the world does not have.
-  void _queryComponents() {
-    if (_componentsQueried) return;
-    _touch();
-    _componentsQueried = true;
-    _presentMask = 0;
-    final e = _entity;
-    if (e == null || !_alive) {
-      _componentView = null;
-      return;
-    }
-    final b = world._native.query(QueryKind.components, entity: e);
-    final n = b.bytes.length;
-    var buf = _componentBytes;
-    var view = _componentView;
-    if (buf == null || view == null || buf.length != n) {
-      buf = _componentBytes = Uint8List(n);
-      buf.setAll(0, b.bytes);
-      view = _componentView = WireBuffer(buf);
-    } else {
-      buf.setAll(0, b.bytes);
-      view.reparse();
-    }
-    _touch();
-    _presentMask = world._componentMask(view);
-  }
-
-  /// Every component from the tick's query into the cache (staged writes
-  /// win), for [components].
-  void _decodeAllComponents() {
-    _queryComponents();
-    final view = _componentView;
-    if (view == null) return;
-    _touch();
-    final c = _components ??= {};
-    world._decodeComponents(view, (id, v) {
-      if (!c.containsKey(id)) c[id] = v;
-    });
-  }
-
-  /// Simulation-lane write: inserts or replaces the component at the next
-  /// tick, readable now through [get]. A `Transform` is [setLocalTransform],
-  /// a `Name` renames. On an object not spawned yet the write goes into
-  /// the spawn's own batch (a temp reference), so `spawn` then `add` in
-  /// one `fixedUpdate` is one tick. A value the world rejects (a negative
-  /// light range, a removed `Transform`) is a diagnostic on the next step
-  /// and the read falls back to what the world has.
+  /// Inserts or replaces a component through the gameplay transaction.
+  /// Outside a callback this publishes immediately. Invalid writes throw;
+  /// inside a callback they abort its transaction.
   void set<T extends WireRecord>(T value) => _setComponent(value, presentation: false);
 
   /// [set] for readability when the component is new.
   void add<T extends WireRecord>(T value) => set(value);
 
-  /// Presentation-lane write (lateUpdate): plain data applies immediately
-  /// and stays; a `Transform` is [setPresentationTransform].
+  /// Writes component data immediately; a `Transform` instead sets a
+  /// presentation override through [setPresentationTransform].
   void setPresentation<T extends WireRecord>(T value) => _setComponent(value, presentation: true);
 
   void _setComponent(WireRecord value, {required bool presentation}) {
-    if (value is Pose) {
-      presentation ? setPresentationTransform(value) : setLocalTransform(value);
+    if (presentation && value is Pose) {
+      setPresentationTransform(value);
       return;
     }
-    final codec = _codecOf(value.runtimeType);
-    final e = presentation ? _requireResolved('setPresentation') : _simulationEntity('set');
-    _touch();
-    (_components ??= {})[codec.id] = value;
-    final batch = presentation ? world._presentation : world._simulation;
-    if (value is gen.Name) {
-      _name = value.value;
-      batch.setName(gen.SetNameCommand(entity: e, name: value.value));
-    } else {
-      batch.setComponent(e, codec, value);
-    }
-    (presentation ? world._presentationTargets : world._simulationTargets).add(this);
+    world._withGameplay(() => world._gameplay!.set(this, value));
   }
 
-  /// Removes the component of type [T] at the next tick ([has] reads false
-  /// now). `Transform` and `Name` cannot be removed.
-  void remove<T extends WireRecord>() {
-    final codec = _codecOf(T);
-    if (codec.id == gen.Transform.componentId || codec.id == gen.Name.componentId) {
-      throw ArgumentError('${codec.name} cannot be removed');
-    }
-    final e = _simulationEntity('remove');
-    (_components ??= {})[codec.id] = null;
-    world._simulation.removeComponent(e, codec.id);
-    world._simulationTargets.add(this);
-  }
+  /// Removes the component through the current gameplay transaction, or
+  /// publishes immediately outside one. `Transform` and `Name` are required.
+  void remove<T extends WireRecord>() => world._withGameplay(
+    () => world._gameplay!.guard(() => world._gameplay!.native.remove<T>(world._gameplay!.ref(this))),
+  );
 
   // ------------------------------------------------ rigid body (M3-08)
 
   /// The body's motion as the last step left it, or null without a
   /// `RigidBody` (one query; not for a hot loop).
-  BodyState? bodyState() {
+  BodyState? bodyState() => world._readSimulation(() {
     final e = _entity;
     if (e == null || !_alive) return null;
     final b = world._native.query(QueryKind.body, entity: e);
     if (b.recordCount == 0) return null;
     return BodyState.fromRecord(gen.BodyStateRecord.decode(b.records, 0, b.tail));
-  }
+  });
 
-  /// A body command for the next tick (simulation lane): rejected there
-  /// with a diagnostic when the object has no `RigidBody`, the body type
-  /// does not take it (forces need `dynamic`, a kinematic target needs
-  /// `kinematic`) or a value is not finite. Allowed on a pending object
-  /// whose body was `add`ed in the same batch: the tick creates the body,
-  /// then applies the command.
-  void _body(gen.BodyOp op, Vec3 v, [Quat q = Quat.identity]) {
-    world.modules.require(Module.physics, 'body command ${op.name}');
-    final e = _simulationEntity('body command');
-    world._simulation.body(e, op, v.x, v.y, v.z, q.x, q.y, q.z, q.w);
-    world._simulationTargets.add(this);
-  }
+  /// Validates a body request against logical configuration and commits it
+  /// for the next simulation tick. Outside an edit, opens an implicit edit;
+  /// inside one, joins it. Invalid requests throw immediately and abort the
+  /// enclosing edit. Completed physics results change only during simulation.
+  void _body(gen.BodyOp op, Vec3 v, [Quat q = Quat.identity]) => world._withGameplay(() {
+    world.modules.require(Module.physics, 'body command');
+    final edit = world._gameplay!;
+    edit.guard(() => edit.native.bodyEffect(edit.ref(this), op, v, q));
+  });
 
   /// Newtons, world space, applied over the next tick (dynamic bodies).
   void applyForce(Vec3 force) => _body(gen.BodyOp.applyForce, force);
@@ -3378,13 +3365,16 @@ class GameObject extends FynkelObject {
 
   /// Moves any body instantly (no interpolation, no contacts on the way);
   /// its velocity is kept. On a static body this is a transform write.
-  void teleport(Vec3 position, [Quat rotation = Quat.identity]) => _body(gen.BodyOp.teleport, position, rotation);
+  void teleport(Vec3 position, [Quat rotation = Quat.identity]) =>
+      _body(gen.BodyOp.teleport, position, rotation);
 
   /// Walks a `CharacterController` (M3-09) at [velocity] (metres per
   /// second, world space, the vertical part ignored) over the next tick;
-  /// no `move` in a tick is standing still. Rejected at the tick on an
+  /// no `move` in a tick is standing still. Rejected immediately on an
   /// object without a controller. A controller with `moveAction` set is
-  /// walked by the runtime already; a `move` in the same tick wins.
+  /// walked by the runtime already; a `move` in the same tick wins. A newly
+  /// created controller first places its capsule in physics; explicit move/jump
+  /// requests survive that setup tick and run when it is ready.
   void move(Vec3 velocity) => _body(gen.BodyOp.move, velocity);
 
   /// Starts a jump at [speed] metres per second upward (the controller's
@@ -3394,207 +3384,124 @@ class GameObject extends FynkelObject {
 
   /// The character's state after the last tick (`FYNKEL_QUERY_CHARACTER`);
   /// `null` without a `CharacterController` or before it spawned.
-  CharacterState? characterState() {
+  CharacterState? characterState() => world._readSimulation(() {
     final e = _entity;
     if (e == null || !_alive) return null;
     final b = world._native.query(QueryKind.character, entity: e);
     if (b.recordCount == 0) return null;
     return CharacterState.fromRecord(gen.CharacterStateRecord.decode(b.records, 0, b.tail));
-  }
+  });
 
   // ------------------------------------------------- animation (M3-19)
 
-  /// The object's `fynkel.Animator` (M3-19): `animation.play(clip)`,
-  /// `crossfade`, `stop`, `pause`, `resume`, `speed`, `time` are commands
-  /// for the next tick (simulation lane; rejected there with
-  /// `MISSING_COMPONENT` on an object without an animator), `state` the
-  /// last tick's playback. Allowed on a pending object whose animator was
-  /// `add`ed in the same batch.
+  /// Animation requests validate through the gameplay transaction and execute
+  /// at the next simulation tick. [AnimationControl.state] reports completed
+  /// playback. A missing animator rejects immediately, including outside edits.
   AnimationControl get animation => _animation ??= AnimationControl._(this);
   AnimationControl? _animation;
 
-  void _animate(gen.AnimateOp op,
-      {AssetRef clip = AssetRef.none,
-      double seconds = 0,
-      double speed = 1,
-      bool looping = true,
-      double value = 0,
-      String name = '',
-      int integer = 0,
-      int layer = -1,
-      Vec3 point = Vec3.zero}) {
-    _touch();
-    world.modules.require(Module.animation, 'animation command ${op.name}');
-    final e = _simulationEntity('animation command');
-    world._simulation.animate(e, op,
-        clip: clip,
-        seconds: seconds,
-        speed: speed,
-        looping: looping,
-        value: value,
-        name: name,
-        integer: integer,
-        layer: layer,
-        point: point);
-    world._simulationTargets.add(this);
+  void _animate(
+    gen.AnimateOp op, {
+    AssetRef clip = AssetRef.none,
+    double seconds = 0,
+    double speed = 1,
+    bool looping = true,
+    double value = 0,
+    String name = '',
+    int integer = 0,
+    int layer = -1,
+    Vec3 point = Vec3.zero,
+  }) {
+    world._withGameplay(() {
+      world.modules.require(Module.animation, 'animation control');
+      final edit = world._gameplay!;
+      edit.guard(
+        () => edit.native.animateControl(
+          edit.ref(this),
+          gen.AnimateCommandRecord(
+            entity: EntityRef.nil,
+            op: op,
+            seconds: seconds,
+            speed: speed,
+            looping: looping,
+            clip: clip,
+            value: value,
+            name: name,
+            integer: integer,
+            layer: layer,
+            point: point,
+          ),
+        ),
+      );
+    });
   }
 
   // ------------------------------------------------- audio (M3-11)
 
-  /// The object's `fynkel.AudioSource` (M3-11): `audio.play()`, `stop`,
-  /// `pause`, `resume`, `volume`, `pitch` are commands for the next tick
-  /// (simulation lane; rejected there with `MISSING_COMPONENT` on an
-  /// object without a source), `state` the last tick's playback. Allowed
-  /// on a pending object whose source was `add`ed in the same batch.
+  /// Audio requests validate through the gameplay transaction and execute at
+  /// the next simulation tick. [AudioControl.state] reports completed playback.
+  /// A missing source rejects immediately, including outside edits.
   AudioControl get audio => _audioControl ??= AudioControl._(this);
   AudioControl? _audioControl;
 
-  void _audio(gen.AudioOp op, {double value = 0}) {
-    world.modules.require(Module.audio, 'audio command ${op.name}');
-    final e = _simulationEntity('audio command');
-    world._simulation.audio(e, op, value: value);
-    world._simulationTargets.add(this);
-  }
+  void _audio(gen.AudioOp op, {double value = 0}) => world._withGameplay(() {
+    world.modules.require(Module.audio, 'audio control');
+    final edit = world._gameplay!;
+    edit.guard(() => edit.native.audioControl(edit.ref(this), op, value));
+  });
 
-  /// Current local transform: staged overlay, else the last snapshot,
-  /// else (an object not in the snapshot yet: never read, or not for a
-  /// while — foundation 4.4) the world's value, asked once per tick, else
-  /// the spawn value.
+  /// Current logical local pose, including writes in the active edit.
   Pose get localTransform {
-    final o = _overlay;
-    if (o != null) return o;
-    if (_stagedValid) return _overlay = _staged!.toTransform();
-    return _snapshotRecord()?.local ?? _queriedTransform() ?? _initial;
+    if (world.isDisposed) return _retiredPose ?? _initial;
+    return world._withGameplay(() {
+      final pose = world._gameplay!.get<Pose>(this)!;
+      world._observe(this);
+      return pose;
+    });
   }
 
-  /// [localTransform] from what Dart holds, never asking the world (it
-  /// may be poisoned): for [World.dispose].
-  Pose get _lastPose =>
-      _overlay ??
-      (_stagedValid ? _staged!.toTransform() : null) ??
-      world._snapshotOf(_entity ?? -1)?.local ??
-      (_components?[gen.Transform.componentId] as Pose?) ??
-      _asked?.local ??
-      _initial;
+  /// Safe fallback for disposal when native state cannot be queried.
+  Pose get _lastPose => _retiredPose ?? world._snapshotOf(_entity ?? EntityRef.nil)?.local ?? _initial;
 
-  /// The world's own local transform while the object is not in the
-  /// snapshot: one component query per object per tick, shared with
-  /// [get].
-  Pose? _queriedTransform() {
-    if (_entity == null || !_alive) return null;
-    return _lookup(gen.Transform.componentId) as Pose?;
-  }
+  /// Current logical world pose; null for a destroyed object.
+  Pose? get worldTransform => !_alive ? null : world._withGameplay(() => transform.world);
 
-  /// World-space transform after the last tick, from the snapshot or asked
-  /// as [localTransform] is (no overlay: it depends on the parent chain and
-  /// is only known after a tick). Null for a pending or dead object.
-  Pose? get worldTransform => _record()?.world;
+  void setLocalTransform(Pose pose) => world._withGameplay(() => world._gameplay!.set(this, pose));
+  void writeLocal(TransformWriter writer) => setLocalTransform(writer.toTransform());
 
-  /// Whether a transform write goes to the presentation lane (ADR-0008
-  /// amendment, foundation 1.2): during [World.frame]'s `update` and
-  /// `lateUpdate`, on a resolved object that is not a dynamic body — it
-  /// shows this frame and the next tick takes it. A dynamic body's write
-  /// stays a teleport at the next tick; everywhere else writes are
-  /// simulation commands.
-  bool _presentsWrite() {
-    if (!world._inUpdatePhase || _entity == null || !_alive) return false;
-    final body = _lookup(gen.RigidBody.componentId);
-    return body is! gen.RigidBody || body.bodyType != gen.BodyType.dynamic;
-  }
-
-  /// Local transform write, readable now: applied at the next tick — or,
-  /// in `update`/`lateUpdate`, shown this frame as well ([_presentsWrite]).
-  void setLocalTransform(Pose t) {
-    if (_presentsWrite()) return setPresentationTransform(t);
-    final e = _simulationEntity('setLocalTransform');
-    _touch();
-    _overlay = t;
-    _stagedValid = false;
-    world._simulation.setTransformOf(e, t);
-    world._simulationTargets.add(this);
-  }
-
-  /// [setLocalTransform] from a reusable writer (allocation-free, C1).
-  void writeLocal(TransformWriter w) {
-    if (_presentsWrite()) return writePresentation(w);
-    final e = _simulationEntity('writeLocal');
-    _stage().copyFrom(w);
-    world._simulation.setTransformFrom(e, w);
-    world._simulationTargets.add(this);
-  }
-
-  /// Allocation-free partial writes; unspecified parts keep their current
-  /// (staged or last-snapshot) value.
-  void setLocalPosition(double x, double y, double z) => _submitLocal(_stage().setPosition(x, y, z));
-  void setLocalRotation(double x, double y, double z, double w) => _submitLocal(_stage().setRotation(x, y, z, w));
+  /// Partial writes preserve the current logical values of other fields.
+  void setLocalPosition(double x, double y, double z) =>
+      world._withGameplay(() => _submitLocal(_stage().setPosition(x, y, z)));
+  void setLocalRotation(double x, double y, double z, double w) =>
+      world._withGameplay(() => _submitLocal(_stage().setRotation(x, y, z, w)));
   void setLocalRotationAxisAngle(double ax, double ay, double az, double radians) =>
-      _submitLocal(_stage().setRotationAxisAngle(ax, ay, az, radians));
-  void setLocalScale(double x, double y, double z) => _submitLocal(_stage().setScale(x, y, z));
+      world._withGameplay(() => _submitLocal(_stage().setRotationAxisAngle(ax, ay, az, radians)));
+  void setLocalScale(double x, double y, double z) =>
+      world._withGameplay(() => _submitLocal(_stage().setScale(x, y, z)));
+  void _submitLocal(TransformWriter writer) => setLocalTransform(writer.toTransform());
 
-  void _submitLocal(TransformWriter w) {
-    if (_presentsWrite()) return _submitPresentation(w);
-    final e = _simulationEntity('setLocal');
-    world._simulation.setTransformFrom(e, w);
-    world._simulationTargets.add(this);
+  void _setPresentationInEdit(Pose pose) {
+    final edit = world._gameplay!;
+    if (edit.get<gen.RigidBody>(this)?.bodyType == gen.BodyType.dynamic) {
+      edit.reject('presentation transform is physics-owned; use a gameplay transform write');
+    }
+    edit.set(this, pose);
   }
 
-  /// Presentation-lane write (lateUpdate/camera): shown this frame, staged
-  /// as authoritative for the next tick. Rejected for physics-owned objects.
-  void setPresentationTransform(Pose t) {
-    final e = _requireResolved('setPresentationTransform');
-    _touch();
-    _overlay = t;
-    _stagedValid = false;
-    world._presentation.setTransformOf(e, t);
-    world._presentationTargets.add(this);
-  }
-
-  /// Presentation-lane write from a reusable writer (allocation-free, C1).
-  void writePresentation(TransformWriter w) {
-    final e = _requireResolved('writePresentation');
-    _stage().copyFrom(w);
-    world._presentation.setTransformFrom(e, w);
-    world._presentationTargets.add(this);
-  }
-
-  void setPresentationPosition(double x, double y, double z) => _submitPresentation(_stage().setPosition(x, y, z));
+  /// Persistent presentation placement through the logical transaction.
+  /// Dynamic bodies require an ordinary gameplay transform write.
+  void setPresentationTransform(Pose pose) => world._withGameplay(() => _setPresentationInEdit(pose));
+  void writePresentation(TransformWriter writer) => setPresentationTransform(writer.toTransform());
+  void setPresentationPosition(double x, double y, double z) =>
+      world._withGameplay(() => _submitPresentation(_stage().setPosition(x, y, z)));
   void setPresentationRotation(double x, double y, double z, double w) =>
-      _submitPresentation(_stage().setRotation(x, y, z, w));
-
-  void _submitPresentation(TransformWriter w) {
-    final e = _requireResolved('setPresentation');
-    world._presentation.setTransformFrom(e, w);
-    world._presentationTargets.add(this);
-  }
+      world._withGameplay(() => _submitPresentation(_stage().setRotation(x, y, z, w)));
+  void _submitPresentation(TransformWriter writer) => setPresentationTransform(writer.toTransform());
 
   @override
   String toString() => _spec != null
       ? 'GameObject($name, the object of $_spec)'
-      : 'GameObject($name, ${_entity == null ? 'pending #$_tempId' : '0x${_entity!.toRadixString(16)}'})';
-}
-
-/// The objects a command batch targets, by command index (for rejection
-/// diagnostics). A growable `List` releases its backing store on `clear()`
-/// and regrows every tick; this keeps its capacity (zero steady-state
-/// allocation, M1 gate).
-class _Targets {
-  List<GameObject?> _items = List.filled(64, null);
-  int _count = 0;
-
-  int get length => _count;
-  GameObject? operator [](int i) => _items[i];
-
-  void add(GameObject? go) {
-    if (_count == _items.length) {
-      _items = List.filled(_items.length * 2, null)..setRange(0, _count, _items);
-    }
-    _items[_count++] = go;
-  }
-
-  void clear() {
-    _items.fillRange(0, _count, null);
-    _count = 0;
-  }
+      : 'GameObject($name, ${_entity == null ? 'pending' : '0x${_entity!.toString()}'})';
 }
 
 /// Property-style access with read-your-writes semantics.
@@ -3605,13 +3512,9 @@ enum Space { self, world }
 /// An object's transform the way a Unity script reads it (docs/scripting.md
 /// § The transform): [position] and [rotation] are in the **world**,
 /// [localPosition], [localRotation] and [localScale] relative to the
-/// parent — the same for a root object. Reads include this tick's writes
-/// (the object's and its ancestors'), from the parent chain as the last
-/// tick left it or as [GameObject.setParent] / `spawn(parent:)` set it
-/// this tick; each ancestor is one component query per tick at most.
-/// Writes go to the local transform, as
-/// [GameObject.setLocalTransform] does: shown this frame from `update` and
-/// `lateUpdate`, at the next tick from `fixedUpdate` (ADR-0008 amendment).
+/// parent — the same for a root object. Reads use the current logical hierarchy,
+/// including staged ancestor writes. Mutations join the active gameplay
+/// transaction or open one that commits before the call returns.
 class Transform extends Component {
   Transform._(this._go);
   final GameObject _go;
@@ -3627,7 +3530,10 @@ class Transform extends Component {
 
   /// Refused, as in Unity: destroy the [gameObject] instead.
   @override
-  void destroy() => throw UnsupportedError('a transform cannot be destroyed; destroy its GameObject ("$name")');
+  void destroy() {
+    _go.world._rejectDuringEdit('destroy Transform');
+    throw UnsupportedError('a transform cannot be destroyed; destroy its GameObject ("$name")');
+  }
 
   /// The local transform, whole.
   Pose get value => _go.localTransform;
@@ -3637,50 +3543,64 @@ class Transform extends Component {
   Transform? get parent => _go._parentObject?.transform;
 
   Vec3 get localPosition => value.position;
-  set localPosition(Vec3 p) => value = Pose(position: p, rotation: value.rotation, scale: value.scale);
+  set localPosition(Vec3 p) =>
+      _editOperation(() => value = Pose(position: p, rotation: value.rotation, scale: value.scale));
 
   Quat get localRotation => value.rotation;
-  set localRotation(Quat q) => value = Pose(position: value.position, rotation: q, scale: value.scale);
+  set localRotation(Quat q) =>
+      _editOperation(() => value = Pose(position: value.position, rotation: q, scale: value.scale));
 
   Vec3 get localScale => value.scale;
-  set localScale(Vec3 s) => value = Pose(position: value.position, rotation: value.rotation, scale: s);
+  set localScale(Vec3 s) =>
+      _editOperation(() => value = Pose(position: value.position, rotation: value.rotation, scale: s));
 
   /// [localScale] (kept from before world positions: Unity has no
   /// settable world scale either — [lossyScale] reads it).
   Vec3 get scale => localScale;
   set scale(Vec3 s) => localScale = s;
 
-  /// The whole world pose: the parent's composed with the local one
-  /// (scale per axis, so a rotated child of a non-uniformly scaled parent
-  /// is approximated, as Unity's [lossyScale] is).
-  Pose get world {
-    final local = value;
-    final p = parent;
-    if (p == null) return local;
-    final pw = p.world;
-    return Pose(
-      position: pw.position + pw.rotation.rotate(pw.scale.scaled(local.position)),
-      rotation: pw.rotation * local.rotation,
-      scale: pw.scale.scaled(local.scale),
-    );
-  }
+  /// Exact local-to-world affine matrix, including staged ancestor edits.
+  Affine3 get localToWorldMatrix => _go.world._withGameplay(() {
+    final matrix = _go.world._gameplay!.matrix(_go);
+    _go.world._observe(_go);
+    return matrix;
+  });
+
+  /// Exact inverse; throws [StateError] for a singular transform.
+  Affine3 get worldToLocalMatrix => localToWorldMatrix.inverse;
+
+  /// Convenient world pose. Position is exact; rotation follows authored
+  /// quaternion composition and scale contains basis lengths. A TRS pose
+  /// cannot reproduce hierarchy shear; use [localToWorldMatrix] for geometry.
+  Pose get world => _editOperation(() => Pose(position: position, rotation: rotation, scale: lossyScale));
 
   /// World position.
-  Vec3 get position => world.position;
-  set position(Vec3 p) {
+  Vec3 get position => localToWorldMatrix.translation;
+  set position(Vec3 p) => _editOperation(() {
     final parent = this.parent;
     localPosition = parent == null ? p : parent.inverseTransformPoint(p);
-  }
+  });
 
-  /// World rotation.
-  Quat get rotation => world.rotation;
-  set rotation(Quat q) {
+  T _editOperation<T>(T Function() operation) =>
+      _go.world._withGameplay(() => _go.world._gameplay!.guard(operation));
+
+  /// Authored world orientation, composed from local quaternions without
+  /// scale. Under shear this is not a decomposition of the world matrix.
+  Quat get rotation => _editOperation(() {
+    var result = localRotation;
+    for (var p = parent; p != null; p = p.parent) {
+      result = p.localRotation * result;
+    }
+    return result;
+  });
+
+  set rotation(Quat q) => _editOperation(() {
     final parent = this.parent;
     localRotation = parent == null ? q : parent.rotation.inverse * q;
-  }
+  });
 
   /// World scale, read only.
-  Vec3 get lossyScale => world.scale;
+  Vec3 get lossyScale => localToWorldMatrix.lossyScale;
 
   /// [rotation] as Euler degrees ([Quat.euler]), what the Inspector shows
   /// for a root object; [localEulerAngles] for the local one.
@@ -3700,24 +3620,24 @@ class Transform extends Component {
 
   /// Moves by [translation]: along the object's own axes ([Space.self],
   /// Unity's default; its scale does not count) or the world's.
-  void translate(Vec3 translation, {Space relativeTo = Space.self}) {
+  void translate(Vec3 translation, {Space relativeTo = Space.self}) => _editOperation(() {
     position += relativeTo == Space.self ? rotation.rotate(translation) : translation;
-  }
+  });
 
   /// Turns by Euler [degrees] ([Quat.euler]) about the object's own axes
   /// ([Space.self], Unity's default) or the world's.
-  void rotate(Vec3 degrees, {Space relativeTo = Space.self}) {
+  void rotate(Vec3 degrees, {Space relativeTo = Space.self}) => _editOperation(() {
     final turn = Quat.euler(degrees);
     if (relativeTo == Space.self) {
       localRotation = localRotation * turn;
     } else {
       rotation = turn * rotation;
     }
-  }
+  });
 
   /// Turns by [degrees] about the world [axis] through [point], moving
   /// the object around it.
-  void rotateAround(Vec3 point, Vec3 axis, double degrees) {
+  void rotateAround(Vec3 point, Vec3 axis, double degrees) => _editOperation(() {
     final turn = Quat.axisAngle(axis.normalized, degrees * math.pi / 180);
     final w = world;
     value = Pose(
@@ -3725,15 +3645,15 @@ class Transform extends Component {
       rotation: _localRotation(turn * w.rotation),
       scale: localScale,
     );
-  }
+  });
 
   /// Turns the object so its forward points at [target] (a world point)
   /// with its up as near [worldUp] as it can be.
-  void lookAt(Vec3 target, {Vec3 worldUp = Vec3.up}) {
+  void lookAt(Vec3 target, {Vec3 worldUp = Vec3.up}) => _editOperation(() {
     final d = target - position;
     if (d.lengthSquared < 1e-12) return;
     rotation = Quat.lookRotation(d, worldUp);
-  }
+  });
 
   /// [lookAt] another object's world position.
   void lookAtObject(GameObject target, {Vec3 worldUp = Vec3.up}) =>
@@ -3747,43 +3667,62 @@ class Transform extends Component {
   /// `stop()` it (the object stays where it got to). It ends early when
   /// the object is destroyed. It writes the transform every frame, so it
   /// is for objects physics does not move.
-  Coroutine moveTo(Vec3 position, double seconds, {Ease ease = Ease.outQuad}) {
+  Coroutine moveTo(
+    Vec3 position,
+    double seconds, {
+    Ease ease = Ease.outQuad,
+    TimeClock clock = TimeClock.gameplay,
+  }) {
     final from = this.position;
-    return _go.world._tweenOn(_go, seconds, ease, (t) => this.position = from.lerp(position, t));
+    return _go.world._tweenOn(_go, seconds, ease, (t) => this.position = from.lerp(position, t), clock);
   }
 
   /// [moveTo] in the parent's space (DOTween's `DOLocalMove`).
-  Coroutine moveLocalTo(Vec3 position, double seconds, {Ease ease = Ease.outQuad}) {
+  Coroutine moveLocalTo(
+    Vec3 position,
+    double seconds, {
+    Ease ease = Ease.outQuad,
+    TimeClock clock = TimeClock.gameplay,
+  }) {
     final from = localPosition;
-    return _go.world._tweenOn(_go, seconds, ease, (t) => localPosition = from.lerp(position, t));
+    return _go.world._tweenOn(_go, seconds, ease, (t) => localPosition = from.lerp(position, t), clock);
   }
 
   /// Turns the object to the world [rotation] along the shorter arc
   /// (DOTween's `DORotateQuaternion`); see [moveTo].
-  Coroutine rotateTo(Quat rotation, double seconds, {Ease ease = Ease.outQuad}) {
+  Coroutine rotateTo(
+    Quat rotation,
+    double seconds, {
+    Ease ease = Ease.outQuad,
+    TimeClock clock = TimeClock.gameplay,
+  }) {
     final from = this.rotation;
-    return _go.world._tweenOn(_go, seconds, ease, (t) => this.rotation = from.slerp(rotation, t));
+    return _go.world._tweenOn(_go, seconds, ease, (t) => this.rotation = from.slerp(rotation, t), clock);
   }
 
   /// Scales the object to the local [scale] (DOTween's `DOScale`); see
   /// [moveTo].
-  Coroutine scaleTo(Vec3 scale, double seconds, {Ease ease = Ease.outQuad}) {
+  Coroutine scaleTo(
+    Vec3 scale,
+    double seconds, {
+    Ease ease = Ease.outQuad,
+    TimeClock clock = TimeClock.gameplay,
+  }) {
     final from = localScale;
-    return _go.world._tweenOn(_go, seconds, ease, (t) => localScale = from.lerp(scale, t));
+    return _go.world._tweenOn(_go, seconds, ease, (t) => localScale = from.lerp(scale, t), clock);
   }
 
-  /// A point in this object's space, in the world.
-  Vec3 transformPoint(Vec3 p) {
-    final w = world;
-    return w.position + w.rotation.rotate(w.scale.scaled(p));
-  }
+  /// A point in this object's space, in the world, including scale and shear.
+  Vec3 transformPoint(Vec3 p) => localToWorldMatrix.transformPoint(p);
 
-  /// A world point, in this object's space.
-  Vec3 inverseTransformPoint(Vec3 p) {
-    final w = world;
-    final q = w.rotation.inverse.rotate(p - w.position);
-    return Vec3(_div(q.x, w.scale.x), _div(q.y, w.scale.y), _div(q.z, w.scale.z));
-  }
+  /// A world point in local space; throws for singular transforms.
+  Vec3 inverseTransformPoint(Vec3 p) => worldToLocalMatrix.transformPoint(p);
+
+  /// A displacement in world space, including scale and shear, without translation.
+  Vec3 transformVector(Vec3 v) => localToWorldMatrix.transformVector(v);
+
+  /// A world displacement in local space; throws for singular transforms.
+  Vec3 inverseTransformVector(Vec3 v) => worldToLocalMatrix.transformVector(v);
 
   /// A direction in this object's space, in the world (rotation only).
   Vec3 transformDirection(Vec3 d) => rotation.rotate(d);
@@ -3796,8 +3735,6 @@ class Transform extends Component {
     final parent = this.parent;
     return parent == null ? q : parent.rotation.inverse * q;
   }
-
-  static double _div(double a, double b) => b == 0 ? 0 : a / b;
 }
 
 /// The world's clock as a [TimeService].
@@ -3817,129 +3754,16 @@ class _WorldTime implements TimeService {
   double get fixedDelta => world.fixedDt;
   @override
   int get tick => world.tick;
-  // Game time, one clock (foundation 1.4): in the fixed phase the tick's
-  // (Unity's fixedTime), elsewhere the ticks plus the clock's remainder
-  // (Unity's time) — so it moves by `delta` every frame, also on a frame
-  // that runs no tick.
   @override
-  double get elapsed => world._inFixedPhase ? world.tick * world.fixedDt : (world.tick + world.alpha) * world.fixedDt;
+  double get elapsed => world._gameplayElapsed;
+  @override
+  double get realElapsed => world._realElapsed;
+  @override
+  double get simulationElapsed => world._native.simulationElapsed;
   @override
   int get frame => world._frameCount;
   @override
   double get alpha => world.alpha;
-}
-
-/// The world's entities, parents, names and tags as one query (M3-08b,
-/// ADR-0020); built lazily per tick by [World.find] and friends.
-class _EntityTable {
-  _EntityTable._(
-      this._parents, this._names, this._byName, this._children, this._tagged, this._tagBits, this._inactive, this._raw,
-      this.all);
-
-  factory _EntityTable.decode(WireBuffer b) {
-    final parents = <int, int>{};
-    final names = <int, String>{};
-    final byName = <String, List<int>>{};
-    final children = <int, List<int>>{};
-    final tagged = <int>[];
-    final tagBits = <int>[];
-    final inactive = <int>{};
-    final all = <int>[];
-    final size = gen.EntityInfoRecord.wireSize;
-    for (var i = 0; i < b.recordCount; i++) {
-      final r = gen.EntityInfoRecord.decode(b.records, i * size, b.tail);
-      all.add(r.entity);
-      if (r.parent != 0) {
-        parents[r.entity] = r.parent;
-        (children[r.parent] ??= []).add(r.entity);
-      }
-      if (r.name.isNotEmpty) {
-        names[r.entity] = r.name;
-        (byName[r.name] ??= []).add(r.entity);
-      }
-      if (r.tags != 0) {
-        tagged.add(r.entity);
-        tagBits.add(r.tags);
-      }
-      if (!r.active) inactive.add(r.entity);
-    }
-    return _EntityTable._(parents, names, byName, children, tagged, tagBits, inactive, Uint8List.fromList(b.bytes), all);
-  }
-
-  final Map<int, int> _parents;
-  final Map<int, String> _names;
-
-  /// Every entity, in the order the world lists them.
-  final List<int> all;
-  final Map<String, List<int>> _byName;
-  final Map<int, List<int>> _children;
-
-  /// The entities with at least one tag, entity order, and their bits.
-  final List<int> _tagged;
-  final List<int> _tagBits;
-
-  /// The entities whose own flag is off (`activeSelf` false).
-  final Set<int> _inactive;
-
-  /// The query bytes this table was decoded from.
-  final Uint8List _raw;
-  late final ByteData _rawData = ByteData.sublistView(_raw);
-
-  /// Whether [b] holds the same records and tail as this table's source
-  /// (the header's request id is skipped), eight bytes at a time; no
-  /// allocation.
-  bool sameBytes(WireBuffer b) {
-    final a = _raw;
-    final n = b.bytes.length;
-    if (n != a.length) return false;
-    final x = _rawData, y = b.data;
-    var i = bufferHeaderSize;
-    for (; i + 8 <= n; i += 8) {
-      if (x.getUint64(i, Endian.little) != y.getUint64(i, Endian.little)) return false;
-    }
-    for (; i < n; i++) {
-      if (a[i] != b.bytes[i]) return false;
-    }
-    return true;
-  }
-
-  int? firstNamed(String name) => _byName[name]?.first;
-  List<int> allNamed(String name) => _byName[name] ?? const [];
-  String? nameOf(int entity) => _names[entity];
-  int? parentOf(int entity) => _parents[entity];
-  List<int> childrenOf(int parent) => _children[parent] ?? const [];
-
-  bool activeSelf(int entity) => !_inactive.contains(entity);
-
-  /// [entity] and every ancestor active; no walk while nothing is inactive.
-  bool activeInHierarchy(int entity) {
-    if (_inactive.isEmpty) return true;
-    for (int? e = entity; e != null; e = _parents[e]) {
-      if (_inactive.contains(e)) return false;
-    }
-    return true;
-  }
-
-  /// The number of ancestors of [entity].
-  int depthOf(int entity) {
-    var d = 0;
-    for (var e = _parents[entity]; e != null; e = _parents[e]) {
-      d++;
-    }
-    return d;
-  }
-
-  int? firstTagged(int bit) {
-    for (var i = 0; i < _tagged.length; i++) {
-      if (_tagBits[i] & bit != 0) return _tagged[i];
-    }
-    return null;
-  }
-
-  List<int> allTagged(int bit) => [
-        for (var i = 0; i < _tagged.length; i++)
-          if (_tagBits[i] & bit != 0) _tagged[i],
-      ];
 }
 
 /// Where one [World.frame] spent its time (M3-16, blueprint §15.4), in
@@ -3953,7 +3777,10 @@ class _EntityTable {
 class FrameTimes {
   int behavioursUs = 0, nativeUs = 0, presentationUs = 0, totalUs = 0, ticks = 0;
 
-  final Stopwatch _behaviours = Stopwatch(), _native = Stopwatch(), _presentation = Stopwatch(), _total = Stopwatch();
+  final Stopwatch _behaviours = Stopwatch(),
+      _native = Stopwatch(),
+      _presentation = Stopwatch(),
+      _total = Stopwatch();
 
   void _begin() {
     _behaviours.reset();
@@ -3979,15 +3806,15 @@ class FrameTimes {
 }
 
 /// Generated codecs (ADR-0035): an object reference field on the wire —
-/// the object's handle, or the temp reference of one spawned this tick,
-/// which the world resolves at the tick. `0` is None.
-int objectRefBits(GameObject? go) => go == null ? 0 : go._simulationEntity('an object reference');
+/// a published object's handle. Pending references use the gameplay journal's
+/// scoped reference codec and cannot escape into the legacy wire format. `0` is None.
+EntityRef objectRefBits(GameObject? go) => go == null ? EntityRef.nil : go.entity;
 
 /// Generated codecs (ADR-0035): the object a handle names, in the world
 /// decoding the component. The native side reads a destroyed target as
 /// `0`, so a reference to one is null, as in Unity.
-GameObject? objectRefOf(int bits) {
-  if (bits == 0) return null;
+GameObject? objectRefOf(EntityRef bits) {
+  if (bits.isNull) return null;
   final w = World._decoding;
   if (w == null) return null;
   return w.byEntity(bits) ?? w.attach(bits);

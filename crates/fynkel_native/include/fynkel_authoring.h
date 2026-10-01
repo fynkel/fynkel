@@ -63,7 +63,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_AUTHORING_ABI_VERSION 4u
+#define FYNKEL_AUTHORING_ABI_VERSION 5u
 
 typedef struct FynkelAuthoringSession FynkelAuthoringSession;
 /* The edit-preview world's type is fynkel.h's FynkelWorld. */

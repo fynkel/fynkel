@@ -2368,3 +2368,9 @@ pub fn clip_from_payload(name: String, payload: AnimationPayload) -> Option<Clip
             .collect(),
     })
 }
+
+mod prepared;
+pub use prepared::{
+    PreparedGameplayResources, PreparedPrefab, PreparedPrefabError, PreparedSessionResult,
+    PublishedPrefab,
+};

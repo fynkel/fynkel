@@ -5,8 +5,7 @@ use fynkel_core::input::{ActionState, Control, Device, InputEvent, Phase};
 use fynkel_core::physics::{Hit, QueryKind, QuerySpec};
 use fynkel_core::schema::*;
 use fynkel_core::{
-    AnimateOp as CoreAnimateOp, AudioOp as CoreAudioOp, BodyCommand, Command, Diagnostic, Event,
-    EventPayload, ProjectionInfo, Rejected, SnapshotRecord, World,
+    Command, Diagnostic, Event, EventPayload, ProjectionInfo, Rejected, SnapshotRecord, World,
 };
 use fynkel_scene::Transform;
 use fynkel_wire::{decode_component_value, get_u32, WireRecord};
@@ -123,25 +122,7 @@ fn decode_command(kind: u32, body: &[u8], tail: &[u8]) -> Result<Command, Diagno
             }
             CommandKind::Body => {
                 let c = BodyCommandRecord::decode(body, tail).map_err(bad)?;
-                let (v, r) = (c.vector, c.rotation);
-                let op = match c.op {
-                    BodyOp::ApplyForce => BodyCommand::ApplyForce(v),
-                    BodyOp::ApplyImpulse => BodyCommand::ApplyImpulse(v),
-                    BodyOp::ApplyTorque => BodyCommand::ApplyTorque(v),
-                    BodyOp::ApplyTorqueImpulse => BodyCommand::ApplyTorqueImpulse(v),
-                    BodyOp::SetLinearVelocity => BodyCommand::SetLinearVelocity(v),
-                    BodyOp::SetAngularVelocity => BodyCommand::SetAngularVelocity(v),
-                    BodyOp::SetKinematicTarget => BodyCommand::SetKinematicTarget {
-                        position: v,
-                        rotation: r,
-                    },
-                    BodyOp::Teleport => BodyCommand::Teleport {
-                        position: v,
-                        rotation: r,
-                    },
-                    BodyOp::Move => BodyCommand::Move(v),
-                    BodyOp::Jump => BodyCommand::Jump(v.y),
-                };
+                let op = c.operation();
                 Command::Body {
                     entity: c.entity,
                     op,
@@ -149,89 +130,13 @@ fn decode_command(kind: u32, body: &[u8], tail: &[u8]) -> Result<Command, Diagno
             }
             CommandKind::Animate => {
                 let c = AnimateCommandRecord::decode(body, tail).map_err(bad)?;
-                let op = match c.op {
-                    AnimateOp::Play => CoreAnimateOp::Play {
-                        clip: c.clip,
-                        looping: c.looping,
-                        speed: c.speed,
-                    },
-                    AnimateOp::Crossfade => CoreAnimateOp::Crossfade {
-                        clip: c.clip,
-                        looping: c.looping,
-                        speed: c.speed,
-                        seconds: c.seconds,
-                    },
-                    AnimateOp::Stop => CoreAnimateOp::Stop,
-                    AnimateOp::Pause => CoreAnimateOp::Pause,
-                    AnimateOp::Resume => CoreAnimateOp::Resume,
-                    AnimateOp::SetSpeed => CoreAnimateOp::SetSpeed(c.speed),
-                    AnimateOp::SetTime => CoreAnimateOp::SetTime(c.seconds),
-                    AnimateOp::SetWeight => CoreAnimateOp::SetWeight(c.value),
-                    AnimateOp::SetParameter => CoreAnimateOp::SetParameter {
-                        name: c.name,
-                        value: c.value,
-                    },
-                    AnimateOp::SetFloat
-                    | AnimateOp::SetInteger
-                    | AnimateOp::SetBool
-                    | AnimateOp::SetTrigger
-                    | AnimateOp::ResetTrigger => {
-                        use fynkel_core::animation::controller::Value;
-                        let value = match c.op {
-                            AnimateOp::SetFloat => Value::Float(c.value),
-                            AnimateOp::SetInteger => Value::Int(c.integer),
-                            AnimateOp::SetBool => Value::Bool(c.value != 0.0),
-                            AnimateOp::SetTrigger => Value::Bool(true),
-                            _ => Value::Bool(false),
-                        };
-                        CoreAnimateOp::SetControllerParameter {
-                            name: c.name,
-                            value,
-                        }
-                    }
-                    AnimateOp::PlayState | AnimateOp::CrossFadeState => CoreAnimateOp::PlayState {
-                        state: c.name,
-                        layer: u32::try_from(c.layer).ok(),
-                        seconds: if c.op == AnimateOp::CrossFadeState {
-                            c.seconds
-                        } else {
-                            0.0
-                        },
-                        offset: c.value,
-                    },
-                    AnimateOp::PlayOneShot => CoreAnimateOp::PlayOneShot {
-                        motion: c.clip,
-                        slot: c.name,
-                        blend_in: c.seconds,
-                        blend_out: c.value,
-                        speed: c.speed,
-                    },
-                    AnimateOp::StopOneShot => CoreAnimateOp::StopOneShot {
-                        slot: c.name,
-                        blend_out: c.value,
-                    },
-                    AnimateOp::SetIkTarget => CoreAnimateOp::SetIkTarget {
-                        goal: c.name,
-                        position: c.point,
-                        weight: c.value,
-                    },
-                    AnimateOp::ClearIkTarget => CoreAnimateOp::ClearIkTarget { goal: c.name },
-                };
-                Command::Animate {
-                    entity: c.entity,
-                    op,
-                }
+                let entity = c.entity;
+                let op = c.operation();
+                Command::Animate { entity, op }
             }
             CommandKind::Audio => {
                 let c = AudioCommandRecord::decode(body, tail).map_err(bad)?;
-                let op = match c.op {
-                    AudioOp::Play => CoreAudioOp::Play,
-                    AudioOp::Stop => CoreAudioOp::Stop,
-                    AudioOp::Pause => CoreAudioOp::Pause,
-                    AudioOp::Resume => CoreAudioOp::Resume,
-                    AudioOp::SetVolume => CoreAudioOp::SetVolume(c.value),
-                    AudioOp::SetPitch => CoreAudioOp::SetPitch(c.value),
-                };
+                let op = c.operation();
                 Command::Audio {
                     entity: c.entity,
                     op,

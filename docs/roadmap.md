@@ -1,5 +1,7 @@
 # Roadmap (from 2026-09-23)
 
+**Current priority from 2026-09-30:** the [ECS centered foundation roadmap](foundation-roadmap.md) is the active work order and sole progress tracker for the new foundation program. It takes precedence over the remaining feature order below until its release gate. [ADR-0042](decisions/ADR-0042-ecs-centered-foundation-program.md) records the accepted direction; detailed replacement contracts begin as proposals. The phases below preserve earlier completion history and the product backlog, not a competing foundation checklist.
+
 **Status:** Agreed with the user on 2026-09-23 ("ok let's start this"),
 after a full review of the foundation. It orders the work from here to
 1.0 and names what comes after. `status.md` §6 stays the running log of

@@ -74,7 +74,10 @@ void main() {
     final ball = w.build(
       ObjectSpec.primitive(
         Primitive.sphere,
-        components: [MeshRenderer(mesh: Primitive.sphere.mesh, material: red), const RigidBody(mass: 2)],
+        components: [
+          MeshRenderer(mesh: Primitive.sphere.mesh, material: red),
+          const RigidBody(mass: 2),
+        ],
       ),
     );
     w.frame(1 / 60);

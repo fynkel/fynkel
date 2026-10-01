@@ -796,12 +796,18 @@ final s = animation.stateOf(layer: 0);     // GetCurrentAnimatorStateInfo
 s?.name; s?.normalizedTime; s?.isInTransition; s?.next;
 ```
 
-- The setters are commands for the next tick. The getters read what
-  this tick set, else the last tick's value.
-- A wrong parameter name or type throws an `ArgumentError` that lists
-  the parameters. Before the controller's first tick the SDK does not
-  know them yet, so the engine checks the command instead (an
-  `invalidPayload` diagnostic).
+- Typed parameter setters publish through the native gameplay transaction;
+  playback consumes them at the next animation tick. Typed getters read the
+  selected controller's registered defaults/completed values plus committed
+  requests and this edit's writes, both inside and outside callbacks.
+- Wrong names or types reject the transaction through native validation;
+  no SDK parameter cache waits for the first tick. Outside an existing edit,
+  typed access opens one and adopts older queued work first. This can resolve
+  pending objects or reject invalid older commands, without advancing time.
+- One-shot play/stop use the same transaction boundary. `isPlayingOneShot`
+  reports completed playback, so a play request remains false until a tick
+  runs it, and a stop request does not change that query until consumed.
+  `parameters`, `layers` and `stateOf` are completed simulation queries.
 - `play` and `crossfade` take a state name (`String`, with `layer` and
   `offset`) or a clip (`AssetRef`, with `looping` and `speed`). The clip
   calls (`play(clip)`, `crossfade(clip, …)`, `time =`, `setParameter`)

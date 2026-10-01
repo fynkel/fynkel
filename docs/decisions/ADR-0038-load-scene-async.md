@@ -6,6 +6,8 @@
 
 ## Context
 
+**Amendment 2026-09-30:** [ADR-0047](ADR-0047-identity-clocks-frame-order-and-readiness.md) selects successful required CPU/simulation preparation as readiness, distinct terminal failure/cancellation, per-device GPU readiness, and retention transfer for the replacement implementation. It supersedes the completion-based `isReady` and deferred dependency-error policy below. Shipping loader migration remains F5/F6; this record describes the existing API until then.
+
 In Unity, `SceneManager.LoadSceneAsync(name, mode)` returns an
 `AsyncOperation`. The scene's files are read and its assets loaded on
 background threads while the game keeps running, for example to show a

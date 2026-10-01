@@ -211,8 +211,9 @@ void onPlaybackEnded(PlaybackEnded e) { … }   // the source's non-looping clip
 // The world:
 world.audio.play(clip, bus: AudioBus.sfx, volume: 0.8, pitch: 1.1, priority: 2);   // one-shot, at the next tick
 world.audio.play(click, presentation: true);   // now — a menu sound outside the tick
-world.audio.setBus(AudioBus.music, 0.4, muted: false);    // at once (presentation lane)
-world.audio.applySettings(settings);           // master/music/sfx volumes + mute from a SettingsDocument
+world.audio.setBus(AudioBus.music, 0.4, muted: false);    // publishes at transaction commit, no tick
+world.audio.applySettings(settings);           // all gains + global mute in one transaction
+world.audio.busVolume(AudioBus.music); world.audio.muted; // logical configuration
 world.audio.stats;                             // AudioStats: device, voices, started, stolen, refused, ended, clips, streams, starved, …
 world.audio.open();                            // what FynkelGameView(audio: true) does; false + `audio_device` diagnostic without one
 world.audio.suspend(true); world.audio.close();
@@ -222,12 +223,19 @@ gameObject.set(gameObject.get<AudioSource>()!.copyWith(looping: true));
 gameObject.add(const AudioSource(clip: hum, bus: AudioBus.music, looping: true, playing: true));
 ```
 
-`AudioSystem.play` and `setBus` on the presentation lane flush at once
-(the presentation batch is cleared at every `beginFrame`, so a command
-staged outside a frame would otherwise be dropped). `SettingsStore.apply`
-calls `applySettings` before it rebinds input, so the saved
-`master_volume`/`music_volume`/`sfx_volume`/`muted` reach the buses at
-launch and after every change. `LoadReport.audio` has `sounds` (registered
+Presentation `AudioSystem.play` flushes at once outside gameplay edits.
+`setBus` and `applySettings` use the native gameplay transaction: successful
+commit publishes configuration without a tick, and failure rolls it back.
+Mute is global; the last bus write sets it. Device delivery remains asynchronous.
+`busVolume` and `muted` read current logical configuration, including staged
+writes. Standalone calls enter the usual preceding-queue adoption boundary.
+
+`SettingsStore.apply` calls `applySettings` before input rebinding. Store document
+changes and saved files are external state and are not undone by gameplay
+rollback. Audio and input changes share one commit when store application runs
+inside a callback or `World.edit`; standalone store application performs them
+separately. Audio-only `applySettings`
+is supported inside callbacks and remains a no-op when audio is disabled. `LoadReport.audio` has `sounds` (registered
 from the scene), `clips` (registered in all), `streams` (of those, the
 streamed), `device`, `sampleRate`, `channels`, `maxVoices`.
 `DiagnosticCode.soundUnavailable` / `audioDevice`.

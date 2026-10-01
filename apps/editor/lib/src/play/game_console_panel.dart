@@ -347,7 +347,7 @@ class _GameConsoleViewState extends State<GameConsoleView> {
             SelectableText(r.text, style: theme.textTheme.bodyMedium),
             if (r.entity != null && r.id == null)
               Text(
-                'entity 0x${r.entity!.toRadixString(16)} — the game named no authored entity for it',
+                'entity 0x${r.entity!.toString()} — the game named no authored entity for it',
                 style: theme.textTheme.bodySmall,
               ),
             if (r.id != null) SelectableText('id ${r.id}', style: mono),

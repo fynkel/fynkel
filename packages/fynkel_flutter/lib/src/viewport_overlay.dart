@@ -1,3 +1,4 @@
+import 'package:fynkel/fynkel.dart' show EntityRef;
 // The overlay a viewport draws over the next render (viewport ABI v6,
 // ADR-0019): anti-aliased lines with a width, filled triangles and the
 // analytic ground grid, drawn after post — never exposed or tone mapped —
@@ -32,7 +33,7 @@ class OverlayGrid {
 /// [width] in physical (target) pixels.
 class OverlayOutline {
   const OverlayOutline(this.selected, this.children, this.selectedColor, this.childrenColor, this.width);
-  final List<int> selected, children;
+  final List<EntityRef> selected, children;
   final List<double> selectedColor, childrenColor;
   final double width;
 
@@ -142,8 +143,8 @@ class ViewportOverlay {
   /// `LiveWorld.handles`); one in both lists is selected. Replaces an
   /// earlier outline; empty lists draw none.
   void outline(
-    List<int> selected,
-    List<int> children, {
+    List<EntityRef> selected,
+    List<EntityRef> children, {
     List<double> selectedColor = const [1, 0.4, 0, 1],
     List<double> childrenColor = const [0.37, 0.47, 0.61, 1],
     double width = 2,

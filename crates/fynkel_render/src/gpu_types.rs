@@ -151,6 +151,7 @@ pub(crate) struct GpuMesh {
     pub(crate) skin_buffer: Option<wgpu::Buffer>,
     /// The cooked bounds as a sphere, in mesh space (culling).
     pub(crate) bounds: Sphere,
+    pub(crate) skin_bounds: Option<crate::culling::SkinBounds>,
 }
 
 /// A texture ready for sampling.
@@ -198,6 +199,8 @@ pub(crate) struct LoadedMaterial {
     /// A shader asset's material whose shader is missing or does not
     /// compile: drawn unlit magenta, like Unity's pink.
     pub(crate) broken: bool,
+    /// No declared displacement envelope exists for custom vertex hooks.
+    pub(crate) deforms: bool,
 }
 
 /// One draw: a mesh, a material, a contiguous range of instances.

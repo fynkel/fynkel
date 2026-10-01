@@ -715,7 +715,8 @@ pub fn run_retaining(
 }
 
 /// FNV-1a 64 over the extract's world matrices (f32 bit patterns) in
-/// extract order. Bit-exact, so any nondeterminism shows up.
+/// extract order. World namespace is intentionally excluded: two independent
+/// runs have distinct identities but must produce equal simulation checksums.
 pub fn checksum(extract: &Extract) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let mut feed = |bytes: &[u8]| {
@@ -726,7 +727,8 @@ pub fn checksum(extract: &Extract) -> u64 {
     };
     feed(&extract.tick.to_le_bytes());
     for r in &extract.records {
-        feed(&r.entity.to_bits().to_le_bytes());
+        feed(&r.entity.slot().to_le_bytes());
+        feed(&r.entity.generation().to_le_bytes());
         for v in r.world.to_cols_array() {
             feed(&v.to_bits().to_le_bytes());
         }
@@ -1229,7 +1231,18 @@ mod replay_tests {
             ..cfg.clone()
         });
         assert_ne!(airborne.0.checksum, report.checksum);
-        let mid = airborne.1.physics().character_state(player).unwrap();
+        assert!(airborne.1.physics().character_state(player).is_none());
+        let airborne_player = airborne
+            .2
+            .as_ref()
+            .unwrap()
+            .handle_of("c0000000-0000-4000-8000-0000000001e1".parse().unwrap())
+            .unwrap();
+        let mid = airborne
+            .1
+            .physics()
+            .character_state(airborne_player)
+            .unwrap();
         assert!(!mid.grounded && mid.velocity.y != 0.0, "{mid:?}");
     }
 

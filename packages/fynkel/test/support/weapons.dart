@@ -63,15 +63,15 @@ final wielderType = BehaviourType(
 
 const assetRef = r'https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef';
 Map<String, Object?> dataRef(bool nullable) => {
-      if (nullable)
-        'anyOf': [
-          {r'$ref': assetRef},
-          {'type': 'null'},
-        ]
-      else
-        r'$ref': assetRef,
-      'x-fynkel': {'type': 'data', if (nullable) 'nullable': true, 'data': 'test.Weapon'},
-    };
+  if (nullable)
+    'anyOf': [
+      {r'$ref': assetRef},
+      {'type': 'null'},
+    ]
+  else
+    r'$ref': assetRef,
+  'x-fynkel': {'type': 'data', if (nullable) 'nullable': true, 'data': 'test.Weapon'},
+};
 
 /// Writes both types' schemas into [project]'s `schemas/`.
 void writeWeaponSchemas(String project) {

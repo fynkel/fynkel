@@ -49,8 +49,8 @@ abstract class DataAsset extends Asset {
   @override
   String get name => _name ?? runtimeType.toString();
 
-  /// True unless code destroyed an instance it made; a loaded one lives
-  /// for the world's life.
+  /// True unless destroyed in code or newly loaded by an aborted edit.
+  /// A successfully published loaded instance lives for the world's life.
   @override
   bool get isAlive => !_destroyed;
 
@@ -58,6 +58,11 @@ abstract class DataAsset extends Asset {
   /// (Unity refuses to destroy an asset from a script).
   @override
   void destroy() {
+    final edit = Zone.current[_gameplayZoneKey] as _GameplayAdapter?;
+    if (edit != null) {
+      edit.checkOpen();
+      edit.reject('data asset destruction is not supported inside World.edit');
+    }
     if (_asset != null) throw UnsupportedError('$name is a project asset; it cannot be destroyed at runtime');
     _destroyed = true;
   }
@@ -170,7 +175,27 @@ final class _DataAssets {
   /// first use. Its data-typed fields are resolved the same way; one that
   /// names a missing asset stays null with `FYN-B0004` in [warnings].
   DataAsset load(AssetRef ref, List<LoadDiagnostic> warnings) {
-    final known = byId[ref.asset];
+    final edit = world._gameplay;
+    if (edit == null) return _load(ref, warnings, null);
+    return edit.guard(() {
+      if (byId.containsKey(ref.asset) || edit._dataAssets.containsKey(ref.asset)) {
+        return _load(ref, warnings, edit);
+      }
+      if (!edit._loadingData.add(ref.asset)) edit.reject('reentrant data factory for ${ref.asset}');
+      try {
+        return _load(ref, warnings, edit);
+      } finally {
+        edit._loadingData.remove(ref.asset);
+      }
+    });
+  }
+
+  DataAsset _load(AssetRef ref, List<LoadDiagnostic> warnings, _GameplayAdapter? edit) {
+    // Validate aliases even when an instance is already cached.
+    if (edit != null && (ref.bytes == null || (ref.sub?.isNotEmpty ?? false))) {
+      throw ArgumentError.value(ref, 'ref', 'a whole data asset UUID is required');
+    }
+    final known = byId[ref.asset] ?? edit?._dataAssets[ref.asset];
     if (known != null) return known;
     final id = ref.bytes;
     if (id == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
@@ -180,7 +205,9 @@ final class _DataAssets {
     if (world._cacheDir == null) {
       throw StateError('no project is loaded: call loadProject before reading data assets');
     }
-    final (status, json) = world._native.assetJson(id);
+    final (status, json) = edit == null
+        ? world._native.assetJson(id)
+        : (FynkelStatus.FYNKEL_STATUS_OK, edit.native.assetJson(ref.asset));
     if (status == FynkelStatus.FYNKEL_STATUS_LOAD_FAILED) {
       throw ArgumentError.value(ref, 'ref', '${json['message'] ?? 'not in the cache'}');
     }
@@ -192,19 +219,27 @@ final class _DataAssets {
     final typeId = json['type'] as String;
     final type = world.registry.lookupData(typeId);
     if (type == null) {
-      throw StateError('data type $typeId (${json['name']}) is not registered: '
-          'call registerBehaviours(world.registry) from the generated behaviours.g.dart');
+      throw StateError(
+        'data type $typeId (${json['name']}) is not registered: '
+        'call registerBehaviours(world.registry) from the generated behaviours.g.dart',
+      );
     }
     final data = (json['data'] as Map? ?? const {}).cast<String, Object?>();
     final d = world.registry.instantiateData(typeId, fields: data, version: json['version'] as int?)
       .._asset = AssetRef(ref.asset)
       .._name = json['name'] as String?;
     // Kept before its fields resolve: a cycle shares the instance.
-    byId[ref.asset] = d;
+    (edit?._dataAssets ?? byId)[ref.asset] = d;
     for (final f in type.fields) {
       if (!f.holdsData) continue;
-      final value = resolve(data[f.name], f.dataType!, warnings,
-          where: '$typeId.${f.name}', document: json['name'] as String?, pointer: '/data/${f.name}');
+      final value = resolve(
+        data[f.name],
+        f.dataType!,
+        warnings,
+        where: '$typeId.${f.name}',
+        document: json['name'] as String?,
+        pointer: '/data/${f.name}',
+      );
       if (value != null) f.set(d, value);
     }
     return d;
@@ -221,6 +256,8 @@ final class _DataAssets {
     String? document,
     String? pointer,
   }) {
+    final edit = world._gameplay;
+    if (edit != null) return edit.resolveData(value, typeId);
     DataAsset? one(Object? v, String? at) {
       if (v is! Map || v['asset'] is! String) return null;
       final ref = AssetRef(v['asset'] as String);
@@ -235,21 +272,21 @@ final class _DataAssets {
       } on StateError catch (e) {
         problem = 'names ${ref.asset}: ${e.message}';
       }
-      warnings.add(LoadDiagnostic(
-        code: 'FYN-B0004',
-        severity: 'warning',
-        message: '$where $problem; it is None',
-        document: document,
-        pointer: at,
-        suggestion: 'pick a $typeId data asset in the Inspector',
-      ));
+      warnings.add(
+        LoadDiagnostic(
+          code: 'FYN-B0004',
+          severity: 'warning',
+          message: '$where $problem; it is None',
+          document: document,
+          pointer: at,
+          suggestion: 'pick a $typeId data asset in the Inspector',
+        ),
+      );
       return null;
     }
 
     if (value is List) {
-      return [
-        for (var i = 0; i < value.length; i++) ?one(value[i], pointer == null ? null : '$pointer/$i'),
-      ];
+      return [for (var i = 0; i < value.length; i++) ?one(value[i], pointer == null ? null : '$pointer/$i')];
     }
     return one(value, pointer);
   }

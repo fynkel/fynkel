@@ -13,7 +13,7 @@ use fynkel_native::*;
 #[test]
 fn reading_input_and_events_borrows_the_world_once() {
     let rt = fynkel_runtime_create();
-    let w = unsafe { fynkel_world_create(rt, ptr::null()) };
+    let w = unsafe { fynkel_world_create(rt, ptr::null(), std::ptr::null_mut()) };
     assert!(!w.is_null());
     unsafe {
         let view = fynkel_world_input_view(w);
@@ -23,7 +23,7 @@ fn reading_input_and_events_borrows_the_world_once() {
         // The per-frame calls around them, once each.
         let mut plan = FynkelFramePlan::default();
         assert_eq!(
-            fynkel_world_begin_frame(w, 1.0 / 60.0, &mut plan),
+            fynkel_world_begin_frame(w, 1.0 / 60.0, 1.0, &mut plan),
             Status::Ok
         );
         for _ in 0..plan.steps {

@@ -1,5 +1,5 @@
 name: fynkel
-description: "Fynkel Engine - Flutter-independent Dart gameplay API over the native runtime (ABI v1), with the native-assets build hook that provides the runtime (ADR-0015)."
+description: "Fynkel Engine - Flutter-independent Dart gameplay API over the native runtime (ABI v3), with the native-assets build hook that provides the runtime (ADR-0015)."
 version: 0.0.1
 publish_to: none
 

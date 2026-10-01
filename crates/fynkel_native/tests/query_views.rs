@@ -4,6 +4,7 @@
 //! shared one buffer: a `components` query rewrote the `entities` view
 //! the host was still walking — or freed it when the buffer grew.
 
+use fynkel_contracts::Entity;
 use std::ptr;
 
 use fynkel_contracts::Status;
@@ -23,7 +24,7 @@ unsafe fn query(w: *mut FynkelWorld, kind: u32, request_id: u32) -> FynkelBuffer
     let desc = FynkelQueryDesc {
         kind,
         request_id,
-        entity: 0,
+        entity: Entity::NULL,
     };
     let mut v = FynkelBufferView {
         data: ptr::null(),
@@ -36,7 +37,7 @@ unsafe fn query(w: *mut FynkelWorld, kind: u32, request_id: u32) -> FynkelBuffer
 #[test]
 fn a_held_view_survives_a_query_of_another_kind() {
     let rt = fynkel_runtime_create();
-    let w = unsafe { fynkel_world_create(rt, ptr::null()) };
+    let w = unsafe { fynkel_world_create(rt, ptr::null(), std::ptr::null_mut()) };
     unsafe {
         let entities = query(w, QUERY_ALL_ENTITIES, 1);
         let kept = bytes(&entities).to_vec();

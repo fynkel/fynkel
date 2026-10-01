@@ -34,7 +34,12 @@ enum SceneState {
 /// Named zone events (M3-12): callbacks by the `fynkel.TriggerZone`'s
 /// event name, run right after the tick whose step produced them (the
 /// same point as the contact callbacks), with the world's context current.
+/// A world's subscribers each receive an independent gameplay edit. Failure
+/// rolls back that subscriber's writes; later subscribers still run.
 class ZoneEvents {
+  ZoneEvents([this._world]);
+
+  final World? _world;
   final Map<String, List<void Function(ZoneEntered)>> _enter = {};
   final Map<String, List<void Function(ZoneExited)>> _exit = {};
 
@@ -61,14 +66,24 @@ class ZoneEvents {
         final cbs = _enter[z.event];
         if (cbs != null) {
           for (final cb in cbs.toList(growable: false)) {
-            cb(z);
+            final world = _world;
+            if (world == null) {
+              cb(z);
+            } else {
+              world._deferring(() => world._callbackGameplay(() => cb(z)));
+            }
           }
         }
       case ZoneExited():
         final cbs = _exit[z.event];
         if (cbs != null) {
           for (final cb in cbs.toList(growable: false)) {
-            cb(z);
+            final world = _world;
+            if (world == null) {
+              cb(z);
+            } else {
+              world._deferring(() => world._callbackGameplay(() => cb(z)));
+            }
           }
         }
     }
@@ -116,6 +131,8 @@ class SceneManager {
     return world.loadedScenes.any((s) => s.id == id);
   }
 
+  /// Observes scene-boundary state changes synchronously. These notifications
+  /// are not gameplay callbacks and do not open an automatic edit.
   void addListener(void Function(SceneState state) listener) => _listeners.add(listener);
   void removeListener(void Function(SceneState state) listener) => _listeners.remove(listener);
 
@@ -129,6 +146,7 @@ class SceneManager {
   /// Loads [sceneId] now ([World.loadScene]); a replace load makes it
   /// [current]. Not from inside a behaviour callback — use [transition].
   LoadReport load(Object sceneId, {LoadMode mode = LoadMode.replace, String? cacheDir}) {
+    world._rejectDuringEdit('scene operation');
     try {
       return world.loadScene(sceneId, mode: mode, cacheDir: cacheDir);
     } on FynkelLoadError catch (e) {
@@ -147,26 +165,53 @@ class SceneManager {
   /// completes when the load ran (with its report, or the
   /// [FynkelLoadError]). A second request before the frame replaces the
   /// first (its future completes with the same outcome).
+  /// Inside gameplay edits and callbacks the request becomes pending only
+  /// after commit. Aborting the edit completes its future with [StateError]
+  /// and leaves previously pending transitions untouched.
   Future<LoadReport> transition(Object to, {LoadMode mode = LoadMode.replace}) {
+    final edit = world._gameplay;
+    if (edit != null) {
+      return edit.guard(() {
+        final id = World._assetId(to, 'to');
+        final request = Completer<LoadReport>()..future.ignore();
+        edit.afterCommit(() {
+          try {
+            request.complete(transition(id, mode: mode));
+          } catch (error, stack) {
+            request.completeError(error, stack);
+          }
+        });
+        edit.onAbort(() {
+          if (!request.isCompleted) request.completeError(StateError('scene transition edit aborted'));
+        });
+        return request.future;
+      });
+    }
+    if (world.isDisposed) throw StateError('scene transition: world is disposed');
     _pendingId = World._assetId(to, 'to');
     _pendingMode = mode;
-    final c = Completer<LoadReport>();
+    final c = Completer<LoadReport>()..future.ignore();
     _pendingCompleters.add(c);
     _set(SceneState.pending);
     return c.future;
   }
 
   /// Drops a pending [transition] (its futures complete with a
-  /// [StateError]).
+  /// [StateError]). During an edit cancellation takes effect only on commit.
   void cancel() {
+    final edit = world._gameplay;
+    if (edit != null) {
+      edit.afterCommit(cancel);
+      return;
+    }
     if (_pendingId == null) return;
     _pendingId = null;
     final waiting = _pendingCompleters.toList(growable: false);
     _pendingCompleters.clear();
-    _set(_resting);
     for (final c in waiting) {
       c.completeError(StateError('scene transition cancelled'));
     }
+    _set(_resting);
   }
 
   /// Starts loading [sceneId] in the background (Unity's
@@ -185,6 +230,7 @@ class SceneManager {
   /// [FynkelLoadError], [error] has it). Throws [FynkelLoadError] at once
   /// when the cache does not open; [StateError] without a cache.
   SceneLoad loadAsync(Object sceneId, {LoadMode mode = LoadMode.replace, String? cacheDir}) {
+    world._rejectDuringEdit('scene operation');
     final id = World._assetId(sceneId, 'sceneId');
     final cache = cacheDir ?? world._cacheDir;
     if (cache == null) {
@@ -215,10 +261,24 @@ class SceneManager {
   SceneState get _resting => _pendingId != null
       ? SceneState.pending
       : _loads.isNotEmpty
-          ? SceneState.loading
-          : _current == null && world.loadedScenes.isEmpty
-              ? SceneState.empty
-              : SceneState.ready;
+      ? SceneState.loading
+      : _current == null && world.loadedScenes.isEmpty
+      ? SceneState.empty
+      : SceneState.ready;
+
+  /// Settles boundary requests before the native world is released.
+  void _disposed() {
+    final waiting = _pendingCompleters.toList(growable: false);
+    _pendingCompleters.clear();
+    _pendingId = null;
+    for (final request in waiting) {
+      if (!request.isCompleted) request.completeError(StateError('scene transition: world disposed'));
+    }
+    for (final load in _loads) {
+      if (!load._done.isCompleted) load._done.completeError(StateError('scene load: world disposed'));
+    }
+    _loads.clear();
+  }
 
   /// Called by [World.frame] before the frame begins: the pending
   /// [transition], then the [loadAsync]s ready to activate.
@@ -244,11 +304,15 @@ class SceneManager {
       for (final c in waiting) {
         c.complete(report);
       }
-    } on FynkelLoadError catch (e, st) {
-      error = e;
-      _set(SceneState.failed);
+    } catch (e, st) {
       for (final c in waiting) {
         c.completeError(e, st);
+      }
+      if (e is FynkelLoadError) {
+        error = e;
+        _set(SceneState.failed);
+      } else {
+        Error.throwWithStackTrace(e, st);
       }
     }
   }
@@ -335,13 +399,19 @@ class SceneLoad {
   }
 
   /// Drops the load if it has not activated: its work stops, [done]
-  /// completes with a [StateError]. Unity cannot do this.
+  /// completes with a [StateError]. During an edit cancellation takes effect
+  /// only on commit. Unity cannot do this.
   void cancel() {
+    final edit = _manager.world._gameplay;
+    if (edit != null) {
+      edit.afterCommit(cancel);
+      return;
+    }
     if (isDone) return;
     _manager.world._native.loadCancel(_ticket);
     _manager._loads.remove(this);
-    _manager._set(_manager._resting);
     _done.completeError(StateError('scene load cancelled: $sceneId'));
+    _manager._set(_manager._resting);
   }
 
   void _activate() {
@@ -352,10 +422,14 @@ class SceneLoad {
       world._cacheDir = _cache;
       _manager._loaded(report, mode);
       _done.complete(report);
-    } on FynkelLoadError catch (e, st) {
-      _manager.error = e;
-      _manager._set(_manager._loads.isEmpty ? SceneState.failed : SceneState.loading);
+    } catch (e, st) {
       _done.completeError(e, st);
+      if (e is FynkelLoadError) {
+        _manager.error = e;
+        _manager._set(_manager._loads.isEmpty ? SceneState.failed : SceneState.loading);
+      } else {
+        Error.throwWithStackTrace(e, st);
+      }
     }
   }
 }

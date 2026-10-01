@@ -52,13 +52,14 @@ external move — the sync treats it as a teleport, `docs/physics.md`).
 `Follow` and `LookAtCamera` run *after* physics and after the
 `ThirdPersonCamera` rig, on the poses the tick ends with: a light
 following a falling crate sits where the crate landed, a billboard faces
-where the camera rig put the camera. Both write world poses through
-`set_world_pose` (a child of a moving parent stays consistent) and
+where the camera rig put the camera. Both prepare parent-first world-pose batches through the shared scene
+conversion and publish them through the native data journal, then
 trigger one more propagate only when something changed.
 
-Each pass is one or two archetype queries and no per-entity allocation;
-the runtime state a pass needs lives in companion components that are
-never authored or on the wire: `Oscillation { elapsed, offset }` on every
+Native passes collect output before publication. The shared journal and pose
+preparation allocate transient staging data; large-population allocation and
+latency qualification remains open. The runtime state a pass needs lives in
+companion components that are never authored or on the wire: `Oscillation { elapsed, offset }` on every
 `Oscillate`, `EmitterRun { accumulator, alive, reported }` on every
 `Emitter` (attached on the first tick the component is seen, detached
 with it).
@@ -94,6 +95,8 @@ with it).
   way `Command::Destroy` sends it — subscriptions dropped, overrides
   cleared, one `Destroyed` event per entity, so Dart's `onDestroy` runs
   and `isAlive` flips. Setting it again from Dart restarts the clock.
+  The native pass commits countdowns and removals through one gameplay journal;
+  invalid data rejects the whole pass without partial countdown or deletion.
 - **Emitter** carries the fractional instance across ticks (`rate`
   10/s at 60 Hz emits every sixth tick, never two at once until the
   rate exceeds the tick rate). An instance is what `World::instantiate`
@@ -109,7 +112,13 @@ with it).
   scene's asset closure. A prefab that is not registered emits nothing
   and reports `PREFAB_UNAVAILABLE` (14, `prefab_unavailable`) once per
   emitter — a diagnostic on the step, not a rejection; registering it
-  later lets the emitter run.
+  later lets the emitter run. Each emitter's burst uses the shared prefab
+  transaction: invalid component/reference/launch data rejects all instances in
+  that burst, with a diagnostic. Other emitters still run. Only committed roots
+  enter `max_alive`; failed attempts consume their scheduled emission slots,
+  preventing a catch-up backlog. Launch effects publish only after successful
+  entity commit and reach this tick's physics exactly once. With physics disabled,
+  body configuration is retained and runtime launches are skipped.
 
 ## Per-system time
 
@@ -160,3 +169,25 @@ Splines/paths, tweens with easing, particle emitters with per-particle
 simulation (an `Emitter` instance is a full entity), `Follow` with
 rotation smoothing or dead zones, `LookAtCamera` axis choice. Each is a
 component in this catalogue when a game needs it, not a `Behaviour`.
+
+
+## Native system publication (F2)
+
+Rotators, oscillators, followers, billboards and camera rigs now publish validated
+batches instead of mutating authored state during iteration. A failed pass leaves
+its authored output unchanged and reports a diagnostic. Oscillator elapsed time
+and offset commit with its pose; removing the component retires that runtime state.
+Camera yaw/pitch and pose share one commit. A one-shot trigger's named entry event
+is published only when removing its TriggerZone succeeds; raw contact events still
+report the physics step that occurred.
+
+Animation and IK prepare authored output before publication. Physics uses the
+shared scene pose validator and an atomic pose batch. Audio publishes its resulting
+playing flags through the native data journal. Their clocks, solver state, voices,
+contacts and playback events remain owned by their subsystems; rejecting an output
+batch does not rewind completed simulation or playback. Transform propagation and
+interpolation history retain their declared stages, including catch-up ticks.
+
+Legacy command ingress, scene/resource operations and old external overlays are
+separate remaining F2 work. The native system boundary does not imply that a whole
+engine tick is one rollbackable transaction.

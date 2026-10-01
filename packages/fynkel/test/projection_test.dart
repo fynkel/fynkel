@@ -47,6 +47,43 @@ void main() {
     return ((p.x / halfW * 0.5 + 0.5) * width, (0.5 - (p.y - camY) / halfH * 0.5) * height);
   }
 
+  test('manual Step projects the completed hierarchy and preserves clocks and normal interpolation', () {
+    for (final fraction in [0.0, 0.5]) {
+      final w = loaded();
+      final root = w.spawn();
+      final child = w.spawn(
+        parent: root,
+        transform: const Pose(position: Vec3(1, 0, 0)),
+      );
+      w.frame(1 / 60);
+      w.frame(fraction / 60);
+      w.timeScale = 0;
+      final time = w.context.time;
+      final game = time.elapsed, real = time.realElapsed, simulation = time.simulationElapsed;
+      final frame = time.frame, tick = w.tick, alpha = w.alpha;
+      final anchor = w.projection.add(child);
+      w.projection.setViewport(800, 600);
+      for (final x in [2.0, 4.0]) {
+        w.stepFrame(fixedUpdate: (_) => root.transform.localPosition = Vec3(x, 0, 0));
+        w.projection.update();
+        final (px, py) = expected(Vec3(x + 1, 0, 0), 800, 600);
+        expect(anchor.x, closeTo(px, 0.01));
+        expect(anchor.y, closeTo(py, 0.01));
+        expect(time.elapsed, game);
+        expect(time.realElapsed, real);
+        expect(time.frame, frame);
+        expect(w.alpha, alpha);
+      }
+      expect(w.tick, tick + 2);
+      expect(time.simulationElapsed - simulation, closeTo(2 / 60, 1e-6));
+      w.timeScale = 1;
+      w.frame(1 / 60, fixedUpdate: (_) => root.transform.localPosition = const Vec3(6, 0, 0));
+      w.projection.update();
+      final (px, _) = expected(Vec3(5 + 2 * fraction, 0, 0), 800, 600);
+      expect(anchor.x, closeTo(px, 0.01), reason: 'regular frames resume interpolation');
+    }
+  });
+
   test('an anchor follows its object through the frame camera', () {
     final w = loaded();
     final crate = w.find('Crate A')!;
@@ -81,7 +118,11 @@ void main() {
     crate.setLocalPosition(3, 1, 0);
     w.frame(1 / 60);
     w.projection.update();
-    expect(anchor.x, closeTo(x, 0.01), reason: 'the tick before the move is what this frame shows');
+    expect(
+      anchor.x,
+      closeTo(expected(const Vec3(3, 1, 0), 800, 600).$1, 0.01),
+      reason: 'standalone edits commit before the frame',
+    );
     w.frame(1 / 60);
     w.projection.update();
     final (mx, my) = expected(const Vec3(3, 1, 0), 800, 600);
@@ -145,11 +186,11 @@ void main() {
     final w = loaded();
     final pending = w.spawn(name: 'Later');
     final anchor = w.projection.add(pending);
-    expect(anchor.missing, isTrue, reason: 'not spawned yet');
+    expect(anchor.missing, isFalse, reason: 'ordinary spawn is committed');
     w.projection.setViewport(800, 600);
     expect(w.projection.update(), 1);
-    expect(anchor.missing, isTrue);
-    expect(anchor.visible, isFalse);
+    expect(anchor.missing, isFalse);
+    expect(anchor.visible, isTrue);
     w.frame(1 / 60);
     w.projection.update();
     expect(anchor.missing, isFalse);
@@ -166,7 +207,7 @@ void main() {
     expect(anchor.isAttached, isFalse);
     // A bare entity handle works too; a bogus one is missing.
     final byHandle = w.projection.add(w.find('Crate A')!.entity);
-    final bogus = w.projection.add(0x7fff0000ffff);
+    final bogus = w.projection.add(const EntityRef(0x7fff, 0xffff, 1));
     w.projection.update();
     expect(byHandle.visible, isTrue);
     expect(bogus.missing, isTrue);
@@ -222,7 +263,7 @@ void main() {
     crate.setLocalPosition(2.5, 0, 0);
     w.frame(1 / 60);
     expect(w.projection.update(), 1);
-    expect(runs, 1, reason: 'the frame interpolates from the tick before the move: still');
+    expect(runs, 2, reason: 'standalone edits publish before the frame');
     w.frame(1 / 60);
     expect(w.projection.update(), 1);
     expect(a.x, isNot(closeTo(x, 0.01)));

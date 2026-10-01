@@ -6,6 +6,8 @@
 
 ## Context
 
+**Review from 2026-09-30:** [ADR-0046](ADR-0046-transactional-world-state-replacement.md) and [ADR-0047](ADR-0047-identity-clocks-frame-order-and-readiness.md) accept replacement visibility, explicit presentation, clock and frame contracts. They supersede those design portions for the replacement implementation. The [F1.2 clock migration](../design/foundation-clock-migration.md) now implements the replacement timing contract in the live runtime. The remaining frame/visibility portions describe prior behavior until F2 migration; main-isolate execution and once-per-tick input-edge consumption remain selected.
+
 Given ADR-0007, the remaining questions are which isolate runs gameplay, how time is stepped, how events reach Dart, and what a read after a write returns.
 
 ## Decision
@@ -42,4 +44,3 @@ M1 has one thread of control and no locks. Dart allocation/GC per frame becomes 
 4. A character controller or kinematic body written in `update` is a presentation command too: it shows that frame and teleports at the next tick (Unity's CharacterController has the same rule: a transform write teleports it; `move` is the way to walk it).
 
 **Consequences.** Moving things in `update` works as in Unity, at any display rate. `fixedUpdate` stays right for anything physics or input-edge driven and for anything a headless replay must reproduce (presentation writes do not change the simulation until the next tick takes them). The examples keep their `fixedUpdate` movers; the docs stop recommending it for plain movement. Test: `packages/fynkel/test/update_writes_test.dart` (a write in `update` shows in the same frame's projection on a frame with no tick; a dynamic body's teleports at the tick; `fixedUpdate` writes unchanged).
-

@@ -54,8 +54,10 @@ class Landing extends Behaviour {
   @override
   void onCollisionEnter(Contact contact) {
     final me = gameObject.entity;
-    log.add('${world.byEntity(contact.other(me))?.name} body=${world.byEntity(contact.bodyOf(me) ?? 0)?.name} '
-        'n=${contact.normalFor(me).y.toStringAsFixed(1)}');
+    log.add(
+      '${world.byEntity(contact.other(me))?.name} body=${world.byEntity(contact.bodyOf(me) ?? EntityRef.nil)?.name} '
+      'n=${contact.normalFor(me).y.toStringAsFixed(1)}',
+    );
   }
 }
 
@@ -69,9 +71,11 @@ class Thud extends Behaviour {
 class Sensor extends Behaviour {
   final List<String> log = [];
   @override
-  void onTriggerEnter(Contact contact) => log.add('in ${world.byEntity(contact.other(gameObject.entity))?.name}');
+  void onTriggerEnter(Contact contact) =>
+      log.add('in ${world.byEntity(contact.other(gameObject.entity))?.name}');
   @override
-  void onTriggerExit(Contact contact) => log.add('out ${world.byEntity(contact.other(gameObject.entity))?.name}');
+  void onTriggerExit(Contact contact) =>
+      log.add('out ${world.byEntity(contact.other(gameObject.entity))?.name}');
 }
 
 void main() {
@@ -166,9 +170,9 @@ void main() {
     w.throwOnDiagnostics = false;
     final seen = <FynkelDiagnostic>[];
     w.onDiagnostics = seen.addAll;
-    crate.setPresentationPosition(5, 5, 5);
+    expect(() => crate.setPresentationPosition(5, 5, 5), throwsStateError);
     w.flushPresentation();
-    expect(seen.map((d) => d.code), [DiagnosticCode.physicsOwned]);
+    expect(seen, isEmpty);
     crate.setLocalPosition(2, 4, 0);
     w.frame(1 / 60);
     expect(crate.localTransform.position.x, closeTo(2, 1e-3));
@@ -194,44 +198,49 @@ void main() {
     }
     expect(cart.localTransform.position.y, closeTo(1.5, 0.05), reason: "the wheel's box holds the cart up");
     expect(onWheel.log, ['floor body=cart n=-1.0']);
-    expect(onCart.log, ['floor body=cart n=-1.0'], reason: "the body's object hears its child's contact, once");
+    expect(onCart.log, [
+      'floor body=cart n=-1.0',
+    ], reason: "the body's object hears its child's contact, once");
   });
 
-  test("a collision carries its points, impulse and the impact's relative velocity, as Unity (foundation 2.9)", () {
-    final w = fresh();
-    floor(w);
-    final crate =
-        w.spawn(
-            transform: identityTransform.copyWith(position: const Vec3(0, 3, 0)),
-            name: 'crate',
-          )
-          ..add(dynamicBody)
-          ..add(unitBox);
-    final b = crate.addBehaviour(Thud());
-    for (var i = 0; i < 120 && b.landing == null; i++) {
-      w.frame(1 / 60);
-    }
-    final c = b.landing!;
-    final me = crate.entity;
-    // A face on the floor: four corners, the deepest first.
-    expect(c.contactCount, 4, reason: '$c');
-    expect(c.getContact(0).point, c.point);
-    for (final p in c.contacts) {
-      expect(p.point.y, closeTo(0, 0.1));
-      expect(p.point.x.abs(), closeTo(0.5, 0.05));
-      expect(p.point.z.abs(), closeTo(0.5, 0.05));
-      expect(p.normal, c.normal);
-      expect(p.impulse, greaterThanOrEqualTo(0));
-    }
-    // The floor pushed the crate up; the floor came up at it at about
-    // √(2·g·2.5) ≈ 7 m/s — the speed of the impact, not after it.
-    expect(c.impulseFor(me).y, greaterThan(0.1));
-    expect(c.impulseFor(me).length, closeTo(c.contacts.fold<double>(0, (s, p) => s + p.impulse), 1e-3));
-    expect(c.relativeVelocityFor(me).y, greaterThan(5));
-    final floorSide = c.other(me);
-    expect(c.relativeVelocityFor(floorSide).y, lessThan(-5));
-    expect(c.impulseFor(floorSide).y, lessThan(-0.1));
-  });
+  test(
+    "a collision carries its points, impulse and the impact's relative velocity, as Unity (foundation 2.9)",
+    () {
+      final w = fresh();
+      floor(w);
+      final crate =
+          w.spawn(
+              transform: identityTransform.copyWith(position: const Vec3(0, 3, 0)),
+              name: 'crate',
+            )
+            ..add(dynamicBody)
+            ..add(unitBox);
+      final b = crate.addBehaviour(Thud());
+      for (var i = 0; i < 120 && b.landing == null; i++) {
+        w.frame(1 / 60);
+      }
+      final c = b.landing!;
+      final me = crate.entity;
+      // A face on the floor: four corners, the deepest first.
+      expect(c.contactCount, 4, reason: '$c');
+      expect(c.getContact(0).point, c.point);
+      for (final p in c.contacts) {
+        expect(p.point.y, closeTo(0, 0.1));
+        expect(p.point.x.abs(), closeTo(0.5, 0.05));
+        expect(p.point.z.abs(), closeTo(0.5, 0.05));
+        expect(p.normal, c.normal);
+        expect(p.impulse, greaterThanOrEqualTo(0));
+      }
+      // The floor pushed the crate up; the floor came up at it at about
+      // √(2·g·2.5) ≈ 7 m/s — the speed of the impact, not after it.
+      expect(c.impulseFor(me).y, greaterThan(0.1));
+      expect(c.impulseFor(me).length, closeTo(c.contacts.fold<double>(0, (s, p) => s + p.impulse), 1e-3));
+      expect(c.relativeVelocityFor(me).y, greaterThan(5));
+      final floorSide = c.other(me);
+      expect(c.relativeVelocityFor(floorSide).y, lessThan(-5));
+      expect(c.impulseFor(floorSide).y, lessThan(-0.1));
+    },
+  );
 
   test('body commands: impulse, velocity, teleport; rejections name the reason', () {
     final w = fresh();
@@ -250,7 +259,11 @@ void main() {
     w.frame(1 / 60); // spawns, components and bodies in one tick (M3-08b)
     crate.applyImpulse(const Vec3(4, 0, 0));
     w.frame(1 / 60);
-    expect(crate.bodyState()!.linearVelocity.x, closeTo(1.9, 0.1), reason: 'j = m·Δv, minus friction over one tick');
+    expect(
+      crate.bodyState()!.linearVelocity.x,
+      closeTo(1.9, 0.1),
+      reason: 'j = m·Δv, minus friction over one tick',
+    );
     crate.setLinearVelocity(const Vec3(0, 0, -1));
     crate.setAngularVelocity(Vec3.zero); // the push also tipped it
     w.frame(1 / 60);
@@ -265,27 +278,22 @@ void main() {
     w.throwOnDiagnostics = false;
     final seen = <FynkelDiagnostic>[];
     w.onDiagnostics = seen.addAll;
-    wall.applyForce(Vec3.up); // no body
-    crate.setKinematicTarget(Vec3.zero); // not kinematic
-    crate.applyForce(const Vec3(double.nan, 0, 0)); // not finite
+    expect(() => wall.applyForce(Vec3.up), throwsStateError);
+    expect(() => crate.setKinematicTarget(Vec3.zero), throwsStateError);
+    expect(() => crate.applyForce(const Vec3(double.nan, 0, 0)), throwsStateError);
     w.frame(1 / 60);
-    expect(seen.map((d) => d.code), [
-      DiagnosticCode.missingComponent,
-      DiagnosticCode.invalidPayload,
-      DiagnosticCode.invalidPayload,
-    ]);
-    expect(seen.map((d) => d.component), [RigidBody.componentId, RigidBody.componentId, RigidBody.componentId]);
-    expect(seen[1].message, contains('kinematic'));
+    expect(seen, isEmpty, reason: 'invalid requests reject at their transaction boundary');
   });
 
   test("a body's frozen axes stay put, as Unity's constraints (foundation 2.5)", () {
     final w = fresh();
-    GameObject crate(String name, double x, int constraints) => w.spawn(
-        name: name,
-        transform: identityTransform.copyWith(position: Vec3(x, 3, 0)),
-      )
-      ..add(dynamicBody.copyWith(constraints: constraints))
-      ..add(unitBox);
+    GameObject crate(String name, double x, int constraints) =>
+        w.spawn(
+            name: name,
+            transform: identityTransform.copyWith(position: Vec3(x, 3, 0)),
+          )
+          ..add(dynamicBody.copyWith(constraints: constraints))
+          ..add(unitBox);
     final free = crate('free', 0, RigidbodyConstraints.none);
     final held = crate('held', 5, RigidbodyConstraints.freezePositionY | RigidbodyConstraints.freezeRotation);
     w.frame(1 / 60);
@@ -299,7 +307,10 @@ void main() {
     expect(held.localTransform.position.y, closeTo(3, 1e-4));
     expect(free.bodyState()!.angularVelocity.length, greaterThan(0.1));
     expect(held.bodyState()!.angularVelocity, Vec3.zero);
-    expect(held.get<RigidBody>()!.constraints, RigidbodyConstraints.freezePositionY | RigidbodyConstraints.freezeRotation);
+    expect(
+      held.get<RigidBody>()!.constraints,
+      RigidbodyConstraints.freezePositionY | RigidbodyConstraints.freezeRotation,
+    );
   });
 
   test('a sensor reports triggers once per entry and exit', () {
@@ -406,19 +417,20 @@ void main() {
       transform: identityTransform.copyWith(position: const Vec3(0, 2, 0)),
       name: 'zone',
     )..add(unitBox.copyWith(isSensor: true));
-    w.spawn(
-      transform: identityTransform.copyWith(position: const Vec3(5, 0.5, 0)),
-      name: 'crate',
-    ).add(unitBox);
+    w
+        .spawn(
+          transform: identityTransform.copyWith(position: const Vec3(5, 0.5, 0)),
+          name: 'crate',
+        )
+        .add(unitBox);
     w.frame(1 / 60);
     w.frame(1 / 60);
     const down = Vec3(0, -1, 0);
     expect(w.raycast(const Vec3(0, 5, 0), down)?.entity, zone.entity, reason: "Unity's queriesHitTriggers");
     expect(w.raycast(const Vec3(0, 5, 0), down, hitSensors: false)?.entity, f.entity);
-    expect(
-      w.overlap(ColliderShape.sphere, const Vec3(0.1, 0, 0), const Vec3(0, 2, 0)).map((h) => h.entity),
-      [zone.entity],
-    );
+    expect(w.overlap(ColliderShape.sphere, const Vec3(0.1, 0, 0), const Vec3(0, 2, 0)).map((h) => h.entity), [
+      zone.entity,
+    ]);
     // From inside the crate: the crate is skipped, the floor below is hit.
     final inside = w.raycast(const Vec3(5, 0.5, 0), down);
     expect(inside?.entity, f.entity, reason: 'a ray does not detect a collider it starts in');
@@ -453,7 +465,11 @@ void main() {
     expect(all.map((h) => h.entity), [crate.entity, f.entity]);
     expect(w.raycast(const Vec3(0, 5, 0), const Vec3(0, -1, 0), exclude: crate)!.entity, f.entity);
     expect(w.raycast(const Vec3(0, 5, 0), const Vec3(0, -1, 0), maxDistance: 1), isNull);
-    expect(w.raycast(const Vec3(0, 5, 0), const Vec3(0, -1, 0), mask: 2), isNull, reason: 'nothing on layer 1');
+    expect(
+      w.raycast(const Vec3(0, 5, 0), const Vec3(0, -1, 0), mask: 2),
+      isNull,
+      reason: 'nothing on layer 1',
+    );
 
     final sweep = w.shapeCast(
       ColliderShape.sphere,
@@ -506,7 +522,10 @@ void main() {
     }
     expect(crate.localTransform.position.y, closeTo(0.5, 0.05));
     expect(crate.get<Layer>()!.layer, 1);
-    expect(w.raycast(const Vec3(-2, 5, 0), const Vec3(0, -1, 0), mask: w.layerMask(['props']))!.entity, crate.entity);
+    expect(
+      w.raycast(const Vec3(-2, 5, 0), const Vec3(0, -1, 0), mask: w.layerMask(['props']))!.entity,
+      crate.entity,
+    );
     expect(
       w.raycast(const Vec3(-2, 5, 0), const Vec3(0, -1, 0), mask: w.layerMask(['default']))!.entity,
       isNot(crate.entity),
@@ -519,7 +538,7 @@ void main() {
       ..add(dynamicBody.copyWith(gravityScale: 0))
       ..add(unitBox.copyWith(shape: ColliderShape.sphere))
       ..setLinearVelocity(const Vec3(0, 0, 6));
-    expect(go.isPending, isTrue);
+    expect(go.isPending, isFalse);
     w.frame(1 / 60); // creates the body and applies the velocity in that tick
     expect(go.isPending, isFalse);
     expect(go.bodyState()!.linearVelocity.z, closeTo(6, 1e-4));

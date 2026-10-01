@@ -82,6 +82,10 @@ pub enum LoadError {
     NotLoaded(Uuid),
     /// `clone_subtree`: the source is not a live entity of this world.
     UnknownSource(Entity),
+    /// The shared gameplay journal rejected a clone or preceding queue adoption.
+    CloneRejected(String),
+    /// Atomic live creation failed before publishing the entity or scene identity.
+    LiveSpawnRejected(String),
     /// `dont_destroy_on_load`: the entity has a parent; only a root can be
     /// kept across loads (ADR-0037, Unity's rule).
     NotARoot(Entity),
@@ -127,6 +131,8 @@ impl core::fmt::Display for LoadError {
             LoadError::UnknownSource(e) => {
                 write!(f, "clone: source {e} is not a live entity of this world")
             }
+            LoadError::CloneRejected(message) => write!(f, "clone: {message}"),
+            LoadError::LiveSpawnRejected(message) => write!(f, "live spawn: {message}"),
             LoadError::NotARoot(e) => write!(
                 f,
                 "dont_destroy_on_load: {e} has a parent; only a root object can be kept across loads"
@@ -143,7 +149,7 @@ pub struct Cloned {
     pub root: Entity,
     /// Every (source, copy) pair, breadth first, the root first.
     pub pairs: Vec<(Entity, Entity)>,
-    /// Component values the command path rejected.
+    /// Always zero: the shared journal rejects an invalid clone atomically.
     pub rejected_components: u32,
 }
 
@@ -293,8 +299,10 @@ impl World {
     /// (a load emits none per entity either). With `authoring` =
     /// `(scene, id)` the entity joins the loaded scene `scene` under the
     /// authoring id `id`, as if that scene had spawned it. Returns the
-    /// entity and its rejected components (also in
-    /// [`World::diagnostics`]); a component that fails leaves the entity.
+    /// entity and an empty compatibility diagnostics list. Invalid components
+    /// reject the entire creation through the gameplay journal, before publishing
+    /// an entity or scene identity. Queued simulation work is left untouched and
+    /// must be drained or explicitly adopted before this editor boundary.
     pub fn spawn_now(
         &mut self,
         name: &str,
@@ -328,31 +336,26 @@ impl World {
         if !transform.is_finite() {
             return Err(LoadError::AnchorTransform);
         }
-        let e = scene::spawn(self.ecs_mut(), transform, parent)
-            .map_err(|_| LoadError::Spawn(authoring.map(|a| a.1).unwrap_or(Uuid::NIL)))?;
-        if !name.is_empty() {
-            let _ = self.ecs_mut().insert(e, Name::new(name.to_owned()));
-        }
+        let commit = self
+            .edit_gameplay(|edit| {
+                let pending = edit.spawn(name, transform, parent.map(Into::into))?;
+                for component in components {
+                    // The explicit transform argument owns the initial pose.
+                    if !matches!(component, ComponentValue::Transform(_)) {
+                        edit.set_component(pending, component)?;
+                    }
+                }
+                Ok(pending)
+            })
+            .map_err(|error| LoadError::LiveSpawnRejected(error.to_string()))?;
+        let e = commit.resolve(commit.value).expect("committed live spawn");
         if let Some((i, id)) = scene_index {
             let s = &mut self.scenes[i];
             s.order.push((id, e));
             s.by_id.insert(id, e);
             s.by_entity.insert(e, id);
         }
-        let first = self.diagnostics().len();
-        let tick = self.tick();
-        for c in components {
-            if matches!(c, ComponentValue::Transform(_)) {
-                continue;
-            }
-            self.apply_loaded(e, c, tick);
-        }
-        if parent.is_some() {
-            self.mark_active_dirty();
-            self.refresh_active();
-        }
-        scene::propagate(self.ecs_mut());
-        Ok((e, self.diagnostics()[first..].to_vec()))
+        Ok((e, Vec::new()))
     }
 
     /// Every loaded scene, in load order.
@@ -545,7 +548,9 @@ impl World {
 
     /// A copy of the live subtree under `source` (see [`describe_subtree`](Self::describe_subtree)),
     /// its root named `name` (the source's when None) at `transform` under
-    /// `parent`, as `instantiate` places a prefab.
+    /// `parent`, as `instantiate` places a prefab. Uses the shared gameplay
+    /// journal; invalid configuration rejects the entire clone. Older queued
+    /// commands commit separately before cloning and survive a clone failure.
     pub fn clone_subtree(
         &mut self,
         source: Entity,
@@ -553,20 +558,71 @@ impl World {
         transform: Transform,
         parent: Option<Entity>,
     ) -> Result<Cloned, LoadError> {
-        let Some((description, sources)) = self.describe_subtree(source) else {
+        if self.is_poisoned() {
+            return Err(LoadError::Poisoned);
+        }
+        if source.world() != self.id() || !self.ecs().contains(source) {
             return Err(LoadError::UnknownSource(source));
-        };
-        let name = name.unwrap_or(&description.entities[0].name).to_owned();
-        let (root, loaded) = self.instantiate(&description, &name, transform, parent)?;
+        }
+        if !transform.is_finite() {
+            return Err(LoadError::AnchorTransform);
+        }
+        if let Some(parent) = parent {
+            if parent.world() != self.id() || !self.ecs().contains(parent) {
+                return Err(LoadError::UnknownAnchorParent(parent));
+            }
+        }
+        // As for SDK edits, older queued work is a separate preceding commit.
+        // Failed cloning cannot undo that work, and successful cloning observes it.
+        let adopted = self
+            .adopt_gameplay_commands()
+            .map_err(|error| LoadError::CloneRejected(error.to_string()))?;
+        // This legacy API has no adoption report, so deliver surviving temp
+        // mappings through the legacy event channel exactly once, even if the
+        // subsequent clone fails. Canceled spawns have no live mapping.
+        for &(temp_id, pending) in &adopted.value {
+            if let Some(entity) = adopted.resolve(pending) {
+                self.push_event(EventPayload::Spawned { temp_id, entity });
+            }
+        }
+        // Keep this legacy report's breadth-first pair order; allocation and
+        // all cloning semantics belong to the shared gameplay journal.
+        let mut sources = vec![source];
+        let mut cursor = 0;
+        while cursor < sources.len() {
+            sources.extend(scene::children_of(self.ecs(), sources[cursor]));
+            cursor += 1;
+        }
+        let commit = self
+            .edit_gameplay(|edit| {
+                edit.clone_tree(
+                    source.into(),
+                    parent.map(Into::into),
+                    Some(transform),
+                    name.map(str::to_owned),
+                )
+            })
+            .map_err(|error| LoadError::CloneRejected(error.to_string()))?;
+        let root = commit
+            .resolve(commit.value.root)
+            .expect("committed clone root");
         let pairs = sources
-            .iter()
-            .enumerate()
-            .map(|(i, &s)| (s, loaded.by_id[&synthetic_id(i + 1)]))
+            .into_iter()
+            .map(|source| {
+                let pending = commit
+                    .value
+                    .handle_of(source.into())
+                    .expect("cloned source");
+                (
+                    source,
+                    commit.resolve(pending).expect("committed clone member"),
+                )
+            })
             .collect();
         Ok(Cloned {
             root,
             pairs,
-            rejected_components: loaded.rejected_components,
+            rejected_components: 0,
         })
     }
 
@@ -739,7 +795,7 @@ fn synthetic_id(n: usize) -> Uuid {
 }
 
 /// Validates the structure and returns indexes in spawn order.
-fn spawn_order(scene: &SceneDescription) -> Result<Vec<usize>, LoadError> {
+pub(crate) fn spawn_order(scene: &SceneDescription) -> Result<Vec<usize>, LoadError> {
     let mut index: HashMap<Uuid, usize> = HashMap::with_capacity(scene.entities.len());
     for (i, d) in scene.entities.iter().enumerate() {
         if index.insert(d.id, i).is_some() {

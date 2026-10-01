@@ -2,6 +2,8 @@
 
 import 'dart:typed_data';
 
+import 'entity_ref.dart';
+
 import '../generated/schema.g.dart' as gen;
 import '../math.dart';
 import 'asset_ref.dart';
@@ -16,18 +18,19 @@ sealed class EngineEvent {
 
 class EntitySpawned extends EngineEvent {
   const EntitySpawned(super.tickLo, this.tempId, this.entity);
-  final int tempId, entity;
+  final int tempId;
+  final EntityRef entity;
 }
 
 class EntityDestroyed extends EngineEvent {
   const EntityDestroyed(super.tickLo, this.entity);
-  final int entity;
+  final EntityRef entity;
 }
 
 class ParentChanged extends EngineEvent {
   const ParentChanged(super.tickLo, this.child, this.parent);
-  final int child;
-  final int? parent;
+  final EntityRef child;
+  final EntityRef? parent;
 }
 
 class MissedDeadline extends EngineEvent {
@@ -56,7 +59,7 @@ class SceneUnloaded extends EngineEvent {
 /// `onZoneEnter`/`onZoneExit`, gameplay in `world.zones`.
 sealed class ZoneEvent extends EngineEvent {
   const ZoneEvent(super.tickLo, this.zone, this.other, this.event);
-  final int zone, other;
+  final EntityRef zone, other;
   final String event;
 }
 
@@ -64,14 +67,14 @@ class ZoneEntered extends ZoneEvent {
   const ZoneEntered(super.tickLo, super.zone, super.other, super.event);
 
   @override
-  String toString() => 'ZoneEntered($event zone=${zone.toRadixString(16)} other=${other.toRadixString(16)})';
+  String toString() => 'ZoneEntered($event zone=${zone.toString()} other=${other.toString()})';
 }
 
 class ZoneExited extends ZoneEvent {
   const ZoneExited(super.tickLo, super.zone, super.other, super.event);
 
   @override
-  String toString() => 'ZoneExited($event zone=${zone.toRadixString(16)} other=${other.toRadixString(16)})';
+  String toString() => 'ZoneExited($event zone=${zone.toString()} other=${other.toString()})';
 }
 
 /// A `fynkel.Animator`'s non-looping clip reached its end (M3-19):
@@ -79,11 +82,11 @@ class ZoneExited extends ZoneEvent {
 /// play; behaviours see it in `onAnimationEnded`.
 class AnimationEnded extends EngineEvent {
   const AnimationEnded(super.tickLo, this.entity, this.clip);
-  final int entity;
+  final EntityRef entity;
   final AssetRef clip;
 
   @override
-  String toString() => 'AnimationEnded(${entity.toRadixString(16)} $clip)';
+  String toString() => 'AnimationEnded(${entity.toString()} $clip)';
 }
 
 /// A `fynkel.AudioSource`'s non-looping clip reached its end (M3-11):
@@ -92,11 +95,11 @@ class AnimationEnded extends EngineEvent {
 /// behaviours see it in `onPlaybackEnded`.
 class PlaybackEnded extends EngineEvent {
   const PlaybackEnded(super.tickLo, this.entity, this.clip);
-  final int entity;
+  final EntityRef entity;
   final AssetRef clip;
 
   @override
-  String toString() => 'PlaybackEnded(${entity.toRadixString(16)} $clip)';
+  String toString() => 'PlaybackEnded(${entity.toString()} $clip)';
 }
 
 /// A `fynkel.Animator`'s clip crossed a marker (M3-19c): [entity] is the
@@ -105,12 +108,12 @@ class PlaybackEnded extends EngineEvent {
 /// see it in `onAnimationMarker`.
 class AnimationMarker extends EngineEvent {
   const AnimationMarker(super.tickLo, this.entity, this.clip, this.name);
-  final int entity;
+  final EntityRef entity;
   final AssetRef clip;
   final String name;
 
   @override
-  String toString() => 'AnimationMarker(${entity.toRadixString(16)} $clip "$name")';
+  String toString() => 'AnimationMarker(${entity.toString()} $clip "$name")';
 }
 
 /// A layer of a `fynkel.Animator`'s controller entered or left a state
@@ -118,7 +121,7 @@ class AnimationMarker extends EngineEvent {
 /// [state] the state's name.
 sealed class AnimatorStateEvent extends EngineEvent {
   const AnimatorStateEvent(super.tickLo, this.entity, this.layer, this.state);
-  final int entity;
+  final EntityRef entity;
   final int layer;
   final String state;
 }
@@ -132,7 +135,7 @@ class AnimatorStateEntered extends AnimatorStateEvent {
   final String from;
 
   @override
-  String toString() => 'AnimatorStateEntered(${entity.toRadixString(16)} $layer: $from → $state)';
+  String toString() => 'AnimatorStateEntered(${entity.toString()} $layer: $from → $state)';
 }
 
 /// A state stopped playing: at the end of the crossfade out of it, or at
@@ -142,7 +145,7 @@ class AnimatorStateExited extends AnimatorStateEvent {
   const AnimatorStateExited(super.tickLo, super.entity, super.layer, super.state);
 
   @override
-  String toString() => 'AnimatorStateExited(${entity.toRadixString(16)} $layer: $state)';
+  String toString() => 'AnimatorStateExited(${entity.toString()} $layer: $state)';
 }
 
 /// In wire order: kind `0x100 + index` (`triggerStay` is 0x105, foundation 2.3).
@@ -210,7 +213,7 @@ class Contact extends EngineEvent {
 
   /// The colliders' entities (Unity's `Collision.collider`): for a collider
   /// on a child of a Rigidbody, the child.
-  final int a, b;
+  final EntityRef a, b;
   final Vec3 point;
   final Vec3 normal;
   final Vec3 impulse;
@@ -220,7 +223,7 @@ class Contact extends EngineEvent {
   /// The entity whose `RigidBody` each collider belongs to (Unity's
   /// `Collision.rigidbody`): the collider's own, or its parent's when it
   /// joined it (ADR-0034); null for static geometry and characters.
-  final int? bodyA, bodyB;
+  final EntityRef? bodyA, bodyB;
 
   /// Unity's `Collision.contactCount`.
   int get contactCount => contacts.length;
@@ -229,31 +232,31 @@ class Contact extends EngineEvent {
   ContactPoint getContact(int index) => contacts[index];
 
   /// The impulse the side [entity] (a collider or its body) received.
-  Vec3 impulseFor(int entity) => _isA(entity) ? impulse : -impulse;
+  Vec3 impulseFor(EntityRef entity) => _isA(entity) ? impulse : -impulse;
 
   /// The other side's velocity minus [entity]'s (Unity's
   /// `Collision.relativeVelocity` as that side hears it).
-  Vec3 relativeVelocityFor(int entity) => _isA(entity) ? relativeVelocity : -relativeVelocity;
+  Vec3 relativeVelocityFor(EntityRef entity) => _isA(entity) ? relativeVelocity : -relativeVelocity;
 
   bool get isTrigger =>
       kind == ContactKind.triggerEnter || kind == ContactKind.triggerExit || kind == ContactKind.triggerStay;
 
   /// Whether [entity] is a side of this contact: a collider or its body.
-  bool involves(int entity) => entity == a || entity == b || entity == bodyA || entity == bodyB;
+  bool involves(EntityRef entity) => entity == a || entity == b || entity == bodyA || entity == bodyB;
 
   /// The body of the side [entity] is on (a collider or a body), null for
   /// static geometry.
-  int? bodyOf(int entity) => _isA(entity) ? bodyA : bodyB;
+  EntityRef? bodyOf(EntityRef entity) => _isA(entity) ? bodyA : bodyB;
 
   /// The other side's collider seen from [entity] — a collider of this
   /// contact or a body one belongs to.
-  int other(int entity) => _isA(entity) ? b : a;
+  EntityRef other(EntityRef entity) => _isA(entity) ? b : a;
 
   /// [normal] as seen from [entity] (a collider or its body): pointing away
   /// from it.
-  Vec3 normalFor(int entity) => _isA(entity) ? normal : Vec3(-normal.x, -normal.y, -normal.z);
+  Vec3 normalFor(EntityRef entity) => _isA(entity) ? normal : Vec3(-normal.x, -normal.y, -normal.z);
 
-  bool _isA(int entity) {
+  bool _isA(EntityRef entity) {
     if (entity == a || entity == bodyA) return true;
     if (entity == b || entity == bodyB) return false;
     throw ArgumentError.value(entity, 'entity', 'not a side of this contact');
@@ -261,7 +264,7 @@ class Contact extends EngineEvent {
 
   @override
   String toString() =>
-      'Contact($kind ${a.toRadixString(16)}↔${b.toRadixString(16)} at $point n=$normal j=$impulse '
+      'Contact($kind ${a.toString()}↔${b.toString()} at $point n=$normal j=$impulse '
       'v=$relativeVelocity points=$contactCount)';
 }
 

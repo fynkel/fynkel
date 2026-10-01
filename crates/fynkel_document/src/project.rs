@@ -1113,12 +1113,15 @@ impl Lock {
     }
 
     /// This lock with `old`'s release store kept: the store always, the
-    /// prebuilt libraries only while the runtime version is the same (their
+    /// prebuilt libraries only while runtime version, ABI and schema match (their
     /// checksums are that version's). `fynkel project lock` rewrites the
     /// versions and leaves where the runtime comes from alone.
     pub fn keeping_store(mut self, old: &Lock) -> Lock {
         self.runtime.store = old.runtime.store.clone();
-        if old.runtime.version == self.runtime.version {
+        if old.runtime.version == self.runtime.version
+            && old.runtime.abi_version == self.runtime.abi_version
+            && old.schema_fingerprint == self.schema_fingerprint
+        {
             self.runtime.artifacts = old.runtime.artifacts.clone();
         }
         self

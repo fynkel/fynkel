@@ -72,7 +72,7 @@ String nameOf(DocumentHandle doc, String id) => entity(doc, id)['name'] as Strin
 void main() {
   test('the loaded runtime speaks authoring ABI v3', () {
     expect(AuthoringSession.loadedAbiVersion, authoringAbiVersion);
-    expect(authoringAbiVersion, 4);
+    expect(authoringAbiVersion, 5);
   });
 
   test('a complete edit session on the main scene', () {

@@ -60,7 +60,9 @@ class BadWriter extends Behaviour {
   @override
   void fixedUpdate(FixedUpdateContext context) {
     if (fixed++ == 0) {
-      gameObject.setLocalTransform(const Pose(position: Vec3(double.nan, 0, 0), rotation: Quat.identity, scale: Vec3.one));
+      gameObject.setLocalTransform(
+        const Pose(position: Vec3(double.nan, 0, 0), rotation: Quat.identity, scale: Vec3.one),
+      );
     }
   }
 
@@ -122,7 +124,7 @@ void main() {
     expect(errors.where((e) => e.callback == 'onCreate'), hasLength(1));
     expect(errors.where((e) => e.callback == 'start'), hasLength(1));
     expect(create.updates, counter.updates, reason: 'enabled and updating, as in Unity');
-    expect(start.updates, counter.updates - 1, reason: 'the frame whose start threw skips its update');
+    expect(start.updates, counter.updates, reason: 'start fails in the fixed phase; update still runs');
     expect(counter.updates, greaterThanOrEqualTo(2));
   });
 
@@ -148,33 +150,36 @@ void main() {
     addTearDown(w.dispose);
     w.spawn(name: 'Hero').addBehaviour(Thrower());
     final seen = <Object>[];
-    runZonedGuarded(() => w..frame(1 / 60)..frame(1 / 60), (e, _) => seen.add(e));
+    runZonedGuarded(
+      () => w
+        ..frame(1 / 60)
+        ..frame(1 / 60),
+      (e, _) => seen.add(e),
+    );
     expect(seen.whereType<StateError>().map((e) => e.message), containsAll(['no fixed', 'no ground']));
   });
 
-  test('a rejected command in debug finishes the frame, then throws (foundation 1.5)', () {
-    // ADR-0014: debug builds throw FynkelError. Thrown from inside the
-    // tick, it lost the rest of the frame: that tick's afterPhysics and
-    // contacts, the next tick, update, lateUpdate and the presentation
-    // flush. Unity logs the error and the frame goes on.
+  test('a rejected callback write rolls back and reports a behaviour error while the frame continues', () {
     final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8)..throwOnDiagnostics = true;
     addTearDown(w.dispose);
+    final errors = <BehaviourError>[];
+    w.onBehaviourError = errors.add;
     final bad = w.spawn(name: 'Bad').addBehaviour(BadWriter());
     w.frame(1 / 60); // resolves; the behaviour starts in update
     final updates = bad.updates, after = bad.after;
 
-    expect(
-      () => w.frame(1 / 30), // two ticks
-      throwsA(isA<FynkelError>().having((e) => e.diagnostics.single.code, 'code', DiagnosticCode.invalidPayload)),
-    );
-    expect(bad.fixed, 2, reason: 'the second tick still ran');
+    w.frame(1 / 30); // two ticks
+    expect(errors.single.callback, 'fixedUpdate');
+    expect(errors.single.error, isA<StateError>());
+    expect(bad.gameObject.localTransform.position, Vec3.zero);
+    expect(bad.fixed, 3, reason: 'the second tick still ran');
     expect(bad.after, after + 2, reason: "both ticks' afterPhysics ran");
     expect(bad.updates, updates + 1, reason: 'update ran');
     expect(bad.lates, updates + 1, reason: 'lateUpdate ran');
 
     // The next frame is an ordinary one.
     w.frame(1 / 60);
-    expect(bad.fixed, 3);
+    expect(bad.fixed, 4);
   });
 
   test("a host callback that throws finishes the frame, then throws (foundation 1.6)", () {
@@ -186,9 +191,12 @@ void main() {
 
     var hostTicks = 0;
     expect(
-      () => w.frame(1 / 30, fixedUpdate: (_) {
-        if (hostTicks++ == 0) throw StateError('host tick');
-      }),
+      () => w.frame(
+        1 / 30,
+        fixedUpdate: (_) {
+          if (hostTicks++ == 0) throw StateError('host tick');
+        },
+      ),
       throwsA(isA<StateError>().having((e) => e.message, 'message', 'host tick')),
     );
     expect(hostTicks, 2, reason: 'the second tick still ran');

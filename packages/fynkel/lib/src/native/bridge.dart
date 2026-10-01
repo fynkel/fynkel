@@ -1,4 +1,4 @@
-// Thin typed layer over the ffigen bindings (ABI v1). One FFI call per
+// Thin typed layer over the ffigen bindings (ABI v3). One FFI call per
 // operation family (blueprint §5.3); buffers in and out, no per-property
 // calls. The gameplay API in lib/src/world.dart builds on this.
 
@@ -6,15 +6,21 @@ import 'dart:convert';
 import 'dart:ffi';
 import 'dart:typed_data';
 
+import '../entity_ref.dart';
+import '../../math.dart' show Vec3, Quat;
+import '../world.dart' show GameObject;
+
 import 'package:ffi/ffi.dart';
 
 import '../../generated/schema.g.dart' as gen;
 import '../wire/buffers.dart';
-import '../wire/support.dart' show WireStrings;
+import '../wire/support.dart' show WireStrings, WireRecord;
 import '../diagnostics.dart' show FynkelBridgeError, FynkelPanicError;
 import 'fynkel_bindings.g.dart';
 
 export 'fynkel_bindings.g.dart' show FynkelStatus;
+
+part 'gameplay.dart';
 
 enum CommandLane { simulation, presentation }
 
@@ -33,18 +39,36 @@ enum QueryKind {
   audio,
   audioStats,
   animatorController,
-  animatorParameters
+  animatorParameters,
 }
 
 class FramePlan {
-  const FramePlan(this.steps, this.droppedSeconds, this.clamped, this.alpha);
+  const FramePlan(
+    this.steps,
+    this.droppedSeconds,
+    this.clamped,
+    this.alpha, {
+    this.realDelta = 0,
+    this.gameplayDelta = 0,
+    this.realElapsed = 0,
+    this.gameplayElapsed = 0,
+    this.clampedSeconds = 0,
+    this.frame = 0,
+  });
+  final double realDelta,
+      gameplayDelta,
+      realElapsed,
+      gameplayElapsed,
+      clampedSeconds;
+  final int frame;
   final int steps;
   final double droppedSeconds;
   final bool clamped;
   final double alpha;
   bool get missedDeadline => droppedSeconds > 0;
   @override
-  String toString() => 'FramePlan(steps: $steps, dropped: $droppedSeconds, clamped: $clamped, alpha: $alpha)';
+  String toString() =>
+      'FramePlan(steps: $steps, dropped: $droppedSeconds, clamped: $clamped, alpha: $alpha)';
 }
 
 class SubmitResult {
@@ -54,10 +78,26 @@ class SubmitResult {
 }
 
 class StepResult {
-  const StepResult(this.status, this.tick, this.applied, this.rejected, this.snapshotRecords, this.eventRecords,
-      this.diagnosticRecords, this.liveEntities);
+  const StepResult(
+    this.status,
+    this.tick,
+    this.applied,
+    this.rejected,
+    this.snapshotRecords,
+    this.eventRecords,
+    this.diagnosticRecords,
+    this.liveEntities, {
+    this.simulationElapsed = 0,
+  });
+  final double simulationElapsed;
   final FynkelStatus status;
-  final int tick, applied, rejected, snapshotRecords, eventRecords, diagnosticRecords, liveEntities;
+  final int tick,
+      applied,
+      rejected,
+      snapshotRecords,
+      eventRecords,
+      diagnosticRecords,
+      liveEntities;
   @override
   String toString() =>
       'StepResult($status tick=$tick applied=$applied rejected=$rejected snapshot=$snapshotRecords events=$eventRecords diag=$diagnosticRecords live=$liveEntities)';
@@ -117,20 +157,43 @@ class NativeLibrary {
 
   final Pointer<FynkelRuntime> _runtime;
 
+  /// Process-lifetime authority token for native embedding hosts. Retain it
+  /// outside replaceable engine modules; pass it to each replacement before
+  /// that module creates any world, runtime or authoring session. Never persist
+  /// its address or send it to another process. It has no dispose operation.
+  static Pointer<Void> get identityAuthority =>
+      fynkel_identity_authority().cast<Void>();
+
   /// Verifies ABI version and schema fingerprint and creates the runtime.
   ///
   /// The native code is the `package:fynkel/fynkel_native` code asset that
   /// `hook/build.dart` provides (ADR-0015); the bindings are `@Native` and
   /// the Dart/Flutter toolchain resolves them, so there is no library path.
-  static NativeLibrary open() {
+  /// An embedding host supplies its retained authority before first use of
+  /// a replacement code asset; the usual single-module host omits it.
+  static NativeLibrary open({Pointer<Void>? identityAuthority}) {
     final v = fynkel_abi_version();
     if (v != gen.abiVersion) {
-      throw StateError('fynkel_native speaks ABI $v, this SDK speaks ${gen.abiVersion}');
+      throw StateError(
+        'fynkel_native speaks ABI $v, this SDK speaks ${gen.abiVersion}',
+      );
     }
     final fp = fynkel_schema_fingerprint();
     if (fp != gen.schemaFingerprint) {
-      throw StateError('schema fingerprint mismatch: library ${_hex(fp)} vs SDK ${_hex(gen.schemaFingerprint)}; '
-          'rerun `fynkel codegen` and rebuild');
+      throw StateError(
+        'schema fingerprint mismatch: library ${_hex(fp)} vs SDK ${_hex(gen.schemaFingerprint)}; '
+        'rerun `fynkel codegen` and rebuild',
+      );
+    }
+    if (identityAuthority != null) {
+      final status = fynkel_identity_attach(
+        identityAuthority.cast<FynkelIdentityAuthority>(),
+      );
+      if (status != FynkelStatus.FYNKEL_STATUS_OK) {
+        throw StateError(
+          'Identity authority attachment failed; initialize replacement modules before use',
+        );
+      }
     }
     final rt = fynkel_runtime_create();
     if (rt == nullptr) throw StateError('fynkel_runtime_create failed');
@@ -141,22 +204,24 @@ class NativeLibrary {
       '0x${(v >>> 32).toRadixString(16).padLeft(8, '0')}${v.toUnsigned(32).toRadixString(16).padLeft(8, '0')}';
 
   NativeWorld createWorld({
-    int worldId = 0,
     double fixedDt = 0,
     int maxStepsPerFrame = 0,
     double maxFrameDt = 0,
   }) {
     final desc = calloc<FynkelWorldDesc>();
+    final status = calloc<UnsignedInt>();
     try {
-      desc.ref.world_id = worldId;
       desc.ref.fixed_dt_seconds = fixedDt;
       desc.ref.max_steps_per_frame = maxStepsPerFrame;
       desc.ref.max_frame_dt_seconds = maxFrameDt;
-      final w = fynkel_world_create(_runtime, desc);
-      if (w == nullptr) throw StateError('fynkel_world_create failed');
+      final w = fynkel_world_create(_runtime, desc, status);
+      if (w == nullptr) {
+        throw StateError('fynkel_world_create failed: status ${status.value}');
+      }
       return NativeWorld._(w);
     } finally {
       calloc.free(desc);
+      calloc.free(status);
     }
   }
 
@@ -170,13 +235,13 @@ class _ViewCache {
 
 class NativeWorld {
   NativeWorld._(this._ptr)
-      : _plan = calloc<FynkelFramePlan>(),
-        _submit = calloc<FynkelSubmitResult>(),
-        _step = calloc<FynkelStepResult>(),
-        _query = calloc<FynkelQueryDesc>(),
-        _view = calloc<FynkelBufferView>(),
-        _stats = calloc<FynkelWorldStats>(),
-        _projection = calloc<FynkelProjectionInfo>();
+    : _plan = calloc<FynkelFramePlan>(),
+      _submit = calloc<FynkelSubmitResult>(),
+      _step = calloc<FynkelStepResult>(),
+      _query = calloc<FynkelQueryDesc>(),
+      _view = calloc<FynkelBufferView>(),
+      _stats = calloc<FynkelWorldStats>(),
+      _projection = calloc<FynkelProjectionInfo>();
 
   Pointer<FynkelWorld> _ptr;
 
@@ -189,7 +254,11 @@ class NativeWorld {
   }
 
   void _requireLive() {
-    if (_ptr == nullptr) throw StateError('the world was disposed (World.dispose); it can no longer be used');
+    if (_ptr == nullptr) {
+      throw StateError(
+        'the world was disposed (World.dispose); it can no longer be used',
+      );
+    }
   }
 
   bool get isDisposed => _ptr == nullptr;
@@ -235,9 +304,10 @@ class NativeWorld {
   /// the panic's message when the world is poisoned, a
   /// [FynkelBridgeError] otherwise.
   FynkelBridgeError failure(String op, FynkelStatus s) =>
-      s == FynkelStatus.FYNKEL_STATUS_POISONED || s == FynkelStatus.FYNKEL_STATUS_PANIC
-          ? FynkelPanicError(op, panicMessage ?? '(no message)')
-          : FynkelBridgeError('$op: $s');
+      s == FynkelStatus.FYNKEL_STATUS_POISONED ||
+          s == FynkelStatus.FYNKEL_STATUS_PANIC
+      ? FynkelPanicError(op, panicMessage ?? '(no message)')
+      : FynkelBridgeError('$op: $s');
 
   int get tick {
     ffiCalls++;
@@ -249,12 +319,28 @@ class NativeWorld {
     return fynkel_world_alpha(_w);
   }
 
-  FramePlan beginFrame(double dtSeconds) {
+  double get simulationElapsed {
     ffiCalls++;
-    final s = fynkel_world_begin_frame(_w, dtSeconds, _plan);
+    return fynkel_world_simulation_elapsed(_w);
+  }
+
+  FramePlan beginFrame(double dtSeconds, double timeScale) {
+    ffiCalls++;
+    final s = fynkel_world_begin_frame(_w, dtSeconds, timeScale, _plan);
     _check(s, 'begin_frame');
     final p = _plan.ref;
-    return FramePlan(p.steps, p.dropped_seconds, p.clamped != 0, p.alpha);
+    return FramePlan(
+      p.steps,
+      p.dropped_seconds,
+      p.clamped != 0,
+      p.alpha,
+      realDelta: p.real_delta,
+      gameplayDelta: p.gameplay_delta,
+      realElapsed: p.real_elapsed,
+      gameplayElapsed: p.gameplay_elapsed,
+      clampedSeconds: p.clamped_seconds,
+      frame: p.frame,
+    );
   }
 
   /// Copies the first [length] bytes of [bytes] into the reused native
@@ -273,14 +359,111 @@ class NativeWorld {
     dartBytesCopied += length;
   }
 
-  SubmitResult submit(CommandLane lane, Uint8List bytes) => submitBytes(lane, bytes, bytes.length);
+  FynkelStatus prepareGameplayTick() {
+    _requireLive();
+    ffiCalls++;
+    return fynkel_world_gameplay_tick_prepare(_w);
+  }
+
+  FynkelStatus cancelGameplayTick() {
+    _requireLive();
+    ffiCalls++;
+    return fynkel_world_gameplay_tick_cancel(_w);
+  }
+
+  /// Transfers the already submitted legacy queue to the native gameplay journal.
+  /// A rejection leaves that queue intact for retry or ordinary stepping.
+  (Map<int, EntityRef>, Map<EntityRef, String>) adoptGameplayCommands() {
+    _requireLive();
+    final status = fynkel_world_gameplay_adopt(_w, _view);
+    ffiCalls++;
+    final bytes = Uint8List.fromList(
+      _view.ref.data.asTypedList(_view.ref.length),
+    );
+    if (status != FynkelStatus.FYNKEL_STATUS_OK) {
+      throw StateError(utf8.decode(bytes));
+    }
+    final reader = _GameplayReader(bytes);
+    final spawned = <int, EntityRef>{};
+    final count = reader.u32();
+    for (var i = 0; i < count; i++) {
+      final id = reader.u64();
+      spawned[id] = reader.entity();
+    }
+    final live = <EntityRef, String>{};
+    final size = reader.u32();
+    for (var i = 0; i < size; i++) {
+      final entity = reader.entity();
+      live[entity] = reader.string();
+    }
+    return (spawned, live);
+  }
+
+  /// Internal F2 migration boundary. The callback is synchronous and atomic.
+  /// Ordinary World/GameObject callback routing is migrated separately.
+  NativeGameplayCommit<R> editGameplay<R>(
+    R Function(NativeGameplayEdit edit) callback,
+  ) {
+    _requireLive();
+    final sequence = calloc<Uint64>();
+    final status = fynkel_world_gameplay_begin(_w, sequence);
+    final token = sequence.value;
+    calloc.free(sequence);
+    ffiCalls++;
+    if (status != FynkelStatus.FYNKEL_STATUS_OK) {
+      throw failure('gameplay begin', status);
+    }
+    final edit = NativeGameplayEdit._(this, token);
+    var ended = false;
+    try {
+      final value = callback(edit);
+      if (value is Future) {
+        // An invalid async callback may resume later; the closed edit rejects it.
+        value.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+        throw StateError('gameplay edits must be synchronous');
+      }
+      if (edit._failed) throw StateError('gameplay edit previously failed');
+      final result = fynkel_world_gameplay_end(_w, token, 1, _view);
+      ffiCalls++;
+      ended = true;
+      final bytes = Uint8List.fromList(
+        _view.ref.data.asTypedList(_view.ref.length),
+      );
+      if (result != FynkelStatus.FYNKEL_STATUS_OK) {
+        throw StateError(utf8.decode(bytes));
+      }
+      final reader = _GameplayReader(bytes);
+      final resolved = <int, EntityRef>{};
+      final count = reader.u32();
+      for (var i = 0; i < count; i++) {
+        final index = reader.u32();
+        resolved[index] = reader.entity();
+      }
+      return NativeGameplayCommit._(value, edit, resolved);
+    } finally {
+      edit._closed = true;
+      if (!ended && !isDisposed) {
+        fynkel_world_gameplay_end(_w, token, 0, _view);
+        ffiCalls++;
+      }
+    }
+  }
+
+  SubmitResult submit(CommandLane lane, Uint8List bytes) =>
+      submitBytes(lane, bytes, bytes.length);
 
   /// Submits the first [length] bytes of [bytes]: one memcpy into reused
   /// native scratch, one FFI call, no Dart allocation besides the result.
   SubmitResult submitBytes(CommandLane lane, Uint8List bytes, int length) {
     _toScratch(bytes, length);
     ffiCalls++;
-    final s = fynkel_world_submit_commands(_w, lane.index, _scratch, length, _submit);
+    final s = fynkel_world_submit_commands(
+      _w,
+      lane.index,
+      _scratch,
+      length,
+      _submit,
+    );
     return SubmitResult(s, _submit.ref.accepted, _submit.ref.rejected);
   }
 
@@ -300,21 +483,46 @@ class NativeWorld {
     return _wrap(fynkel_world_input_view(_w), _inputView);
   }
 
+  FynkelStatus snapInterpolation() {
+    ffiCalls++;
+    return fynkel_world_snap_interpolation(_w);
+  }
+
   StepResult step() {
     ffiCalls++;
     final s = fynkel_world_step(_w, _step);
     final r = _step.ref;
-    return StepResult(s, r.tick, r.commands_applied, r.commands_rejected, r.snapshot_records, r.event_records,
-        r.diagnostic_records, r.live_entities);
+    return StepResult(
+      s,
+      r.tick,
+      r.commands_applied,
+      r.commands_rejected,
+      r.snapshot_records,
+      r.event_records,
+      r.diagnostic_records,
+      r.live_entities,
+      simulationElapsed: r.simulation_elapsed,
+    );
   }
 
-  FynkelStatus subscribeTransforms(List<int> entities, {bool enable = true}) {
+  FynkelStatus subscribeTransforms(
+    List<EntityRef> entities, {
+    bool enable = true,
+  }) {
     if (entities.isEmpty) return FynkelStatus.FYNKEL_STATUS_OK;
-    final p = calloc<Uint64>(entities.length);
+    final p = calloc<FynkelEntity>(entities.length);
     try {
-      p.asTypedList(entities.length).setAll(0, entities);
+      for (var i = 0; i < entities.length; i++) {
+        _writeNativeEntity(p[i], entities[i]);
+      }
       ffiCalls++;
-      return fynkel_world_subscribe(_w, gen.Transform.componentId, p, entities.length, enable ? 1 : 0);
+      return fynkel_world_subscribe(
+        _w,
+        gen.Transform.componentId,
+        p,
+        entities.length,
+        enable ? 1 : 0,
+      );
     } finally {
       calloc.free(p);
     }
@@ -338,7 +546,9 @@ class NativeWorld {
     if (v.length == 0) return WireBuffer.empty;
     final address = v.data.address;
     final cached = cache.buffer;
-    if (cached != null && cache.address == address && cache.length == v.length) {
+    if (cached != null &&
+        cache.address == address &&
+        cache.length == v.length) {
       cached.reparse();
       return cached;
     }
@@ -369,17 +579,24 @@ class NativeWorld {
     return _wrap(fynkel_world_after_physics_events(_w), _afterPhysicsView);
   }
 
+  bool contains(EntityRef entity) {
+    _requireLive();
+    _writeNativeEntity(_query.ref.entity, entity);
+    ffiCalls++;
+    return fynkel_world_contains(_w, _query.ref.entity) != 0;
+  }
+
   int _requestId = 0;
 
   /// Explicit query; the view is valid until the next mutating call or the
   /// next query of the same [kind] (each kind has its own native buffer).
   /// Before foundation 4.9 all kinds shared one, and a `components` query
   /// freed an `entities` view still being walked.
-  WireBuffer query(QueryKind kind, {int entity = 0}) {
+  WireBuffer query(QueryKind kind, {EntityRef entity = EntityRef.nil}) {
     _requireLive(); // before the write into the scratch
     _query.ref.kind = kind.index + 1;
     _query.ref.request_id = ++_requestId;
-    _query.ref.entity = entity;
+    _writeNativeEntity(_query.ref.entity, entity);
     ffiCalls++;
     final s = fynkel_world_query(_w, _query, _view);
     _check(s, 'query');
@@ -406,13 +623,31 @@ class NativeWorld {
   /// `ProjectedPointRecord`s in a query buffer read in place, valid until
   /// the next projection or mutating call, with the camera entity (0 = none)
   /// and the projected/dropped counts.
-  (WireBuffer, int camera, int projected, int dropped) project(Uint8List bytes, int length, int width, int height) {
+  (WireBuffer, EntityRef camera, int projected, int dropped) project(
+    Uint8List bytes,
+    int length,
+    int width,
+    int height,
+  ) {
     _copyToScratch(bytes, length);
     ffiCalls++;
-    final s = fynkel_world_project(_w, width, height, _scratch, length, _projection, _view);
+    final s = fynkel_world_project(
+      _w,
+      width,
+      height,
+      _scratch,
+      length,
+      _projection,
+      _view,
+    );
     _check(s, 'project');
     final info = _projection.ref;
-    return (_wrap(_view.ref, _projectionView), info.camera, info.projected, info.dropped);
+    return (
+      _wrap(_view.ref, _projectionView),
+      _readNativeEntity(info.camera),
+      info.projected,
+      info.dropped,
+    );
   }
 
   void _copyToScratch(Uint8List bytes, int length) {
@@ -422,29 +657,49 @@ class NativeWorld {
   /// `fynkel_world_load_project`: the startup scene of the cooked cache at
   /// [cacheDir]; the status and the JSON report (decoded) of that call.
   (FynkelStatus, Map<String, Object?>) loadProject(String cacheDir) =>
-      _withUtf8(cacheDir, (c, cl) => _load(() => fynkel_world_load_project(_w, c, cl)));
+      _withUtf8(
+        cacheDir,
+        (c, cl) => _load(() => fynkel_world_load_project(_w, c, cl)),
+      );
 
   /// `fynkel_world_load_scene`: the cooked scene [sceneId] (UUID text) from
   /// the cache at [cacheDir].
-  (FynkelStatus, Map<String, Object?>) loadScene(String cacheDir, String sceneId) => _withUtf8(
-        cacheDir,
-        (c, cl) => _withUtf8(sceneId, (s, sl) => _load(() => fynkel_world_load_scene(_w, c, cl, s, sl))),
-      );
+  (FynkelStatus, Map<String, Object?>) loadScene(
+    String cacheDir,
+    String sceneId,
+  ) => _withUtf8(
+    cacheDir,
+    (c, cl) => _withUtf8(
+      sceneId,
+      (s, sl) => _load(() => fynkel_world_load_scene(_w, c, cl, s, sl)),
+    ),
+  );
 
   /// `FYNKEL_LOAD_ADDITIVE`: the [loadSceneWith] flag that keeps the world.
   static const int loadAdditive = FYNKEL_LOAD_ADDITIVE;
 
   /// `fynkel_world_load_scene_with` (M3-12): [loadScene] with [flags] —
   /// 0 replaces what the world holds, [loadAdditive] keeps it.
-  (FynkelStatus, Map<String, Object?>) loadSceneWith(String cacheDir, String sceneId, int flags) => _withUtf8(
-        cacheDir,
-        (c, cl) => _withUtf8(sceneId, (s, sl) => _load(() => fynkel_world_load_scene_with(_w, c, cl, s, sl, flags))),
-      );
+  (FynkelStatus, Map<String, Object?>) loadSceneWith(
+    String cacheDir,
+    String sceneId,
+    int flags,
+  ) => _withUtf8(
+    cacheDir,
+    (c, cl) => _withUtf8(
+      sceneId,
+      (s, sl) =>
+          _load(() => fynkel_world_load_scene_with(_w, c, cl, s, sl, flags)),
+    ),
+  );
 
   /// `fynkel_world_load_scene_async` (ADR-0038): starts loading [sceneId]
   /// from [cacheDir] in the background; the ticket (0 when the status is
   /// not OK) and, on `LOAD_FAILED`, the report.
-  (FynkelStatus, int, Map<String, Object?>) loadSceneAsync(String cacheDir, String sceneId) {
+  (FynkelStatus, int, Map<String, Object?>) loadSceneAsync(
+    String cacheDir,
+    String sceneId,
+  ) {
     final ticket = calloc<Uint32>();
     try {
       final (s, report) = _withUtf8(
@@ -452,7 +707,9 @@ class NativeWorld {
         (c, cl) => _withUtf8(sceneId, (i, il) {
           ffiCalls++;
           final s = fynkel_world_load_scene_async(_w, c, cl, i, il, ticket);
-          return s == FynkelStatus.FYNKEL_STATUS_LOAD_FAILED ? _load(() => s) : (s, const <String, Object?>{});
+          return s == FynkelStatus.FYNKEL_STATUS_LOAD_FAILED
+              ? _load(() => s)
+              : (s, const <String, Object?>{});
         }),
       );
       return (s, s == FynkelStatus.FYNKEL_STATUS_OK ? ticket.value : 0, report);
@@ -469,7 +726,10 @@ class NativeWorld {
     final progress = calloc<Float>();
     try {
       ffiCalls++;
-      if (fynkel_world_load_progress(_w, ticket, state, progress) != FynkelStatus.FYNKEL_STATUS_OK) return null;
+      if (fynkel_world_load_progress(_w, ticket, state, progress) !=
+          FynkelStatus.FYNKEL_STATUS_OK) {
+        return null;
+      }
       return (state.value, progress.value);
     } finally {
       calloc.free(state);
@@ -493,18 +753,31 @@ class NativeWorld {
   }
 
   /// `fynkel_world_unload_scene` (M3-12): the loaded scene [sceneId] goes.
-  (FynkelStatus, Map<String, Object?>) unloadScene(String sceneId) =>
-      _withUtf8(sceneId, (s, sl) => _load(() => fynkel_world_unload_scene(_w, s, sl)));
+  (FynkelStatus, Map<String, Object?>) unloadScene(String sceneId) => _withUtf8(
+    sceneId,
+    (s, sl) => _load(() => fynkel_world_unload_scene(_w, s, sl)),
+  );
 
   /// `fynkel_world_dont_destroy_on_load` (ADR-0037): keeps the root
   /// [entity] and its subtree across loads; `INVALID_ARGUMENT` for one not
   /// live or with a parent.
-  FynkelStatus dontDestroyOnLoad(int entity) => fynkel_world_dont_destroy_on_load(_w, entity);
+  FynkelStatus dontDestroyOnLoad(EntityRef entity) {
+    final value = calloc<FynkelEntity>();
+    try {
+      _writeNativeEntity(value.ref, entity);
+      return fynkel_world_dont_destroy_on_load(_w, value.ref);
+    } finally {
+      calloc.free(value);
+    }
+  }
 
   /// `fynkel_world_bind_actions` (M3-12): [rebindsJson] is the JSON object
   /// `{ action: [bindings] }` laid over the project's actions.
   (FynkelStatus, Map<String, Object?>) bindActions(String rebindsJson) =>
-      _withUtf8(rebindsJson, (s, sl) => _load(() => fynkel_world_bind_actions(_w, s, sl)));
+      _withUtf8(
+        rebindsJson,
+        (s, sl) => _load(() => fynkel_world_bind_actions(_w, s, sl)),
+      );
 
   /// `fynkel_world_instantiate`: the cooked prefab [prefabId] (UUID text)
   /// with its root named [name] (empty: the prefab's) at the given local
@@ -513,61 +786,62 @@ class NativeWorld {
   (FynkelStatus, Map<String, Object?>) instantiate(
     String prefabId,
     String name,
-    int parent,
+    EntityRef parent,
     List<double> position,
     List<double> rotation,
     List<double> scale,
-  ) =>
-      _withUtf8(prefabId, (p, pl) => _withUtf8(name, (n, nl) {
-            final d = calloc<FynkelInstantiateDesc>();
-            try {
-              d.ref.prefab_id_utf8 = p;
-              d.ref.prefab_id_len = pl;
-              d.ref.name_utf8 = n;
-              d.ref.name_len = nl;
-              d.ref.parent = parent;
-              for (var i = 0; i < 3; i++) {
-                d.ref.position[i] = position[i];
-                d.ref.scale[i] = scale[i];
-              }
-              for (var i = 0; i < 4; i++) {
-                d.ref.rotation[i] = rotation[i];
-              }
-              return _load(() => fynkel_world_instantiate(_w, d));
-            } finally {
-              calloc.free(d);
-            }
-          }));
+  ) => _withUtf8(
+    prefabId,
+    (p, pl) => _withUtf8(name, (n, nl) {
+      final d = calloc<FynkelInstantiateDesc>();
+      try {
+        d.ref.prefab_id_utf8 = p;
+        d.ref.prefab_id_len = pl;
+        d.ref.name_utf8 = n;
+        d.ref.name_len = nl;
+        _writeNativeEntity(d.ref.parent, parent);
+        for (var i = 0; i < 3; i++) {
+          d.ref.position[i] = position[i];
+          d.ref.scale[i] = scale[i];
+        }
+        for (var i = 0; i < 4; i++) {
+          d.ref.rotation[i] = rotation[i];
+        }
+        return _load(() => fynkel_world_instantiate(_w, d));
+      } finally {
+        calloc.free(d);
+      }
+    }),
+  );
 
   /// `fynkel_world_clone` (ADR-0026 §4): a copy of the live subtree
   /// under [source]; the report's `clone` has the pairs.
   (FynkelStatus, Map<String, Object?>) clone(
-    int source,
+    EntityRef source,
     String name,
-    int parent,
+    EntityRef parent,
     List<double> position,
     List<double> rotation,
     List<double> scale,
-  ) =>
-      _withUtf8(name, (n, nl) {
-        final d = calloc<FynkelCloneDesc>();
-        try {
-          d.ref.source = source;
-          d.ref.name_utf8 = n;
-          d.ref.name_len = nl;
-          d.ref.parent = parent;
-          for (var i = 0; i < 3; i++) {
-            d.ref.position[i] = position[i];
-            d.ref.scale[i] = scale[i];
-          }
-          for (var i = 0; i < 4; i++) {
-            d.ref.rotation[i] = rotation[i];
-          }
-          return _load(() => fynkel_world_clone(_w, d));
-        } finally {
-          calloc.free(d);
-        }
-      });
+  ) => _withUtf8(name, (n, nl) {
+    final d = calloc<FynkelCloneDesc>();
+    try {
+      _writeNativeEntity(d.ref.source, source);
+      d.ref.name_utf8 = n;
+      d.ref.name_len = nl;
+      _writeNativeEntity(d.ref.parent, parent);
+      for (var i = 0; i < 3; i++) {
+        d.ref.position[i] = position[i];
+        d.ref.scale[i] = scale[i];
+      }
+      for (var i = 0; i < 4; i++) {
+        d.ref.rotation[i] = rotation[i];
+      }
+      return _load(() => fynkel_world_clone(_w, d));
+    } finally {
+      calloc.free(d);
+    }
+  });
 
   /// `fynkel_world_set_material` (ADR-0026 §4): [material] drawn as the
   /// runtime material [id] (16 UUID bytes); null removes it.
@@ -576,7 +850,9 @@ class NativeWorld {
     final idp = calloc<Uint8>(16);
     try {
       idp.asTypedList(16).setAll(0, id);
-      if (material == null) return fynkel_world_set_material(_w, idp, nullptr, 0);
+      if (material == null) {
+        return fynkel_world_set_material(_w, idp, nullptr, 0);
+      }
       final payload = materialPayload(material);
       final p = calloc<Uint8>(payload.length);
       try {
@@ -594,7 +870,10 @@ class NativeWorld {
   /// [json] (its `shader` a `.shader` asset's id) checked against its
   /// shader and drawn as the runtime material [id] (16 UUID bytes); null
   /// removes it. The diagnostics come back with the status, warnings too.
-  (FynkelStatus, List<Map<String, Object?>>) setShaderMaterial(Uint8List id, String? json) {
+  (FynkelStatus, List<Map<String, Object?>>) setShaderMaterial(
+    Uint8List id,
+    String? json,
+  ) {
     ffiCalls++;
     final idp = calloc<Uint8>(16);
     final out = calloc<FynkelBufferView>();
@@ -613,7 +892,9 @@ class NativeWorld {
       if (v.length == 0) return (s, const []);
       dartCopies++;
       dartBytesCopied += v.length;
-      final list = jsonDecode(utf8.decode(v.data.asTypedList(v.length))) as List<Object?>;
+      final list = jsonDecode(
+        utf8.decode(v.data.asTypedList(v.length)),
+      ) as List<Object?>;
       return (s, [for (final d in list) (d as Map).cast<String, Object?>()]);
     } finally {
       calloc.free(idp);
@@ -677,7 +958,11 @@ class NativeWorld {
       if (v.length == 0) return (s, const {});
       dartCopies++;
       dartBytesCopied += v.length;
-      return (s, jsonDecode(utf8.decode(v.data.asTypedList(v.length))) as Map<String, Object?>);
+      return (
+        s,
+        jsonDecode(utf8.decode(v.data.asTypedList(v.length)))
+            as Map<String, Object?>,
+      );
     } finally {
       calloc.free(idp);
       calloc.free(out);
@@ -720,7 +1005,9 @@ class NativeWorld {
     if (v.length == 0) return (s, const {});
     dartCopies++;
     dartBytesCopied += v.length;
-    final report = jsonDecode(utf8.decode(v.data.asTypedList(v.length))) as Map<String, Object?>;
+    final report = jsonDecode(
+      utf8.decode(v.data.asTypedList(v.length)),
+    ) as Map<String, Object?>;
     return (s, report);
   }
 
@@ -785,7 +1072,9 @@ class NativeWorld {
   }
 
   void _check(FynkelStatus s, String op) {
-    if (s != FynkelStatus.FYNKEL_STATUS_OK) throw failure('fynkel_world_$op', s);
+    if (s != FynkelStatus.FYNKEL_STATUS_OK) {
+      throw failure('fynkel_world_$op', s);
+    }
   }
 
   void dispose() {
@@ -805,3 +1094,12 @@ class NativeWorld {
     _scratchView = Uint8List(0);
   }
 }
+
+void _writeNativeEntity(FynkelEntity native, EntityRef value) {
+  native.world = value.world;
+  native.slot = value.slot;
+  native.generation = value.generation;
+}
+
+EntityRef _readNativeEntity(FynkelEntity value) =>
+    EntityRef(value.world, value.slot, value.generation);

@@ -152,8 +152,11 @@ fn json_type(ty: &FieldType) -> Value {
         FieldType::F32 => json!({"type": "number"}),
         FieldType::U32 => json!({"type": "integer", "minimum": 0, "maximum": u32::MAX}),
         FieldType::I32 => json!({"type": "integer", "minimum": i32::MIN, "maximum": i32::MAX}),
-        FieldType::U64 | FieldType::Entity => json!({"type": "integer", "minimum": 0}),
-        FieldType::OptionalEntity => json!({"type": ["integer", "null"], "minimum": 0}),
+        FieldType::U64 => json!({"type": "integer", "minimum": 0}),
+        FieldType::Entity => json!({"type": "string", "pattern": "^[0-9a-fA-F]{32}$"}),
+        FieldType::OptionalEntity => {
+            json!({"type": ["string", "null"], "pattern": "^[0-9a-fA-F]{32}$"})
+        }
         // ADR-0035: what a script's `GameObject?` field stores.
         FieldType::ObjectRef => json!({
             "type": ["object", "null"],
@@ -591,8 +594,9 @@ fn camel(s: &str) -> String {
 fn dart_type(ty: &FieldType) -> String {
     match ty {
         FieldType::F32 => "double".into(),
-        FieldType::U32 | FieldType::I32 | FieldType::U64 | FieldType::Entity => "int".into(),
-        FieldType::OptionalEntity => "int?".into(),
+        FieldType::U32 | FieldType::I32 | FieldType::U64 => "int".into(),
+        FieldType::Entity => "EntityRef".into(),
+        FieldType::OptionalEntity => "EntityRef?".into(),
         FieldType::ObjectRef => "GameObject?".into(),
         FieldType::Bool => "bool".into(),
         FieldType::Vec3 => "Vec3".into(),
@@ -724,6 +728,7 @@ fn dart(fp: u64) -> String {
     let _ = writeln!(o);
     let _ = writeln!(o, "import '../math.dart';");
     let _ = writeln!(o, "import '../src/asset_ref.dart';");
+    let _ = writeln!(o, "import '../src/entity_ref.dart';");
     let _ = writeln!(o, "import '../src/wire/support.dart';");
     let _ = writeln!(
         o,
@@ -866,14 +871,15 @@ fn dart(fp: u64) -> String {
                 FieldType::F32 => format!("d.setFloat32(offset + {off}, {v}, Endian.little);"),
                 FieldType::U32 => format!("d.setUint32(offset + {off}, {v}, Endian.little);"),
                 FieldType::I32 => format!("d.setInt32(offset + {off}, {v}, Endian.little);"),
-                FieldType::U64 | FieldType::Entity => {
+                FieldType::U64 => {
                     format!("d.setUint64(offset + {off}, {v}, Endian.little);")
                 }
+                FieldType::Entity => format!("writeEntity(d, offset + {off}, {v});"),
                 FieldType::OptionalEntity => {
-                    format!("d.setUint64(offset + {off}, {v} ?? 0, Endian.little);")
+                    format!("writeEntity(d, offset + {off}, {v} ?? EntityRef.nil);")
                 }
                 FieldType::ObjectRef => {
-                    format!("d.setUint64(offset + {off}, objectRefBits({v}), Endian.little);")
+                    format!("writeEntity(d, offset + {off}, objectRefBits({v}));")
                 }
                 FieldType::Bool => format!("d.setUint8(offset + {off}, {v} ? 1 : 0);"),
                 FieldType::Vec3 => format!("writeVec3(d, offset + {off}, {v});"),
@@ -912,14 +918,15 @@ fn dart(fp: u64) -> String {
                     FieldType::F32 => format!("d.getFloat32(offset + {off}, Endian.little)"),
                     FieldType::U32 => format!("d.getUint32(offset + {off}, Endian.little)"),
                     FieldType::I32 => format!("d.getInt32(offset + {off}, Endian.little)"),
-                    FieldType::U64 | FieldType::Entity => {
+                    FieldType::U64 => {
                         format!("d.getUint64(offset + {off}, Endian.little)")
                     }
+                    FieldType::Entity => format!("readEntity(d, offset + {off})"),
                     FieldType::OptionalEntity => {
-                        format!("optionalEntity(d.getUint64(offset + {off}, Endian.little))")
+                        format!("optionalEntity(readEntity(d, offset + {off}))")
                     }
                     FieldType::ObjectRef => {
-                        format!("objectRefOf(d.getUint64(offset + {off}, Endian.little))")
+                        format!("objectRefOf(readEntity(d, offset + {off}))")
                     }
                     FieldType::Bool => format!("d.getUint8(offset + {off}) != 0"),
                     FieldType::Vec3 => format!("readVec3(d, offset + {off})"),
@@ -944,6 +951,25 @@ fn dart(fp: u64) -> String {
             let _ = writeln!(o, "    );");
         }
         let _ = writeln!(o, "  }}");
+        // Reference traversal is generated from the same catalogue as the
+        // scalar codec. Transactions can replace every reference (including
+        // null) without interpreting field names or using copyWith's keep-null
+        // semantics. There is no ambient decoding context in this path.
+        if s.kind == SchemaKind::Component && s.fields.iter().any(|f| f.ty == FieldType::ObjectRef)
+        {
+            let _ = writeln!(o);
+            let _ = writeln!(o, "  static {name} _mapObjectReferences({name} value, GameObject? Function(GameObject?) map) => {name}(");
+            for f in s.fields {
+                let v = camel(f.name);
+                let expr = if f.ty == FieldType::ObjectRef {
+                    format!("map(value.{v})")
+                } else {
+                    format!("value.{v}")
+                };
+                let _ = writeln!(o, "    {v}: {expr},");
+            }
+            let _ = writeln!(o, "  );");
+        }
         // copyWith (components: `set(get<MeshRenderer>()!.copyWith(visible: false))`;
         // document records: `setMaterial(ref, m.copyWith(roughness: 1))`);
         // an optional field passed as null keeps its value.
@@ -1070,7 +1096,7 @@ fn dart(fp: u64) -> String {
     let _ = writeln!(o, "class ComponentCodec<T extends WireRecord> {{");
     let _ = writeln!(
         o,
-        "  const ComponentCodec(this.id, this.name, this.type, this.wireSize, this.decode);"
+        "  const ComponentCodec(this.id, this.name, this.type, this.wireSize, this.decode, [this._mapObjectReferences]);"
     );
     let _ = writeln!(o);
     let _ = writeln!(o, "  /// `ComponentId`.");
@@ -1078,6 +1104,24 @@ fn dart(fp: u64) -> String {
     let _ = writeln!(o, "  final String name;");
     let _ = writeln!(o, "  final Type type;");
     let _ = writeln!(o, "  final int wireSize;");
+    let _ = writeln!(
+        o,
+        "  final T Function(T, GameObject? Function(GameObject?))? _mapObjectReferences;"
+    );
+    let _ = writeln!(
+        o,
+        "  /// Visits all object references, including null, in schema field order."
+    );
+    let _ = writeln!(
+        o,
+        "  /// Scalar fields are preserved; components without references are unchanged."
+    );
+    let _ = writeln!(
+        o,
+        "  T mapObjectReferences(T value, GameObject? Function(GameObject?) map) =>"
+    );
+    let _ = writeln!(o, "      _mapObjectReferences?.call(value, map) ?? value;");
+
     let _ = writeln!(
         o,
         "  final T Function(ByteData d, int offset, Uint8List tail) decode;"
@@ -1101,10 +1145,15 @@ fn dart(fp: u64) -> String {
     let _ = writeln!(o, "const Map<int, ComponentCodec> componentCodecs = {{");
     for s in &components {
         let name = rust_ident(s);
+        let references = if s.fields.iter().any(|f| f.ty == FieldType::ObjectRef) {
+            format!(", {name}._mapObjectReferences")
+        } else {
+            String::new()
+        };
         let _ = writeln!(
             o,
-            "  {0}: ComponentCodec<{2}>({0}, '{1}', {2}, {2}.wireSize, {2}.decode),",
-            s.id, s.name, name
+            "  {0}: ComponentCodec<{2}>({0}, '{1}', {2}, {2}.wireSize, {2}.decode{3}),",
+            s.id, s.name, name, references
         );
     }
     let _ = writeln!(o, "}};");

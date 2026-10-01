@@ -11,10 +11,12 @@ void main() {
     const steps = 600;
     final w = World.create()..throwOnDiagnostics = true;
     addTearDown(w.dispose);
-    final objects = [for (var i = 0; i < n; i++) w.spawn(name: 'e$i')];
-    for (final o in objects) {
-      o.localTransform; // read: it rides the snapshot (foundation 4.4)
-    }
+    final objects = w.edit(() => [for (var i = 0; i < n; i++) w.spawn(name: 'e$i')]);
+    w.edit(() {
+      for (final o in objects) {
+        o.localTransform;
+      }
+    });
     w.frame(1 / 60);
     w.frame(1 / 60);
     expect(w.stats().subscriptions, n);
@@ -26,9 +28,11 @@ void main() {
       w.beginFrame(1 / 60);
       w.drainEvents();
       sw.start();
-      for (var i = 0; i < n; i++) {
-        objects[i].transform.position = Vec3(t.toDouble(), i.toDouble(), 0);
-      }
+      w.edit(() {
+        for (var i = 0; i < n; i++) {
+          objects[i].transform.position = Vec3(t.toDouble(), i.toDouble(), 0);
+        }
+      });
       // step() flushes the batch (encode+submit) then steps; split the two
       // by timing the flush explicitly.
       final before = sw.elapsedMicroseconds;
@@ -42,9 +46,11 @@ void main() {
       stepUs += after - before;
       sw.reset();
       sw.start();
-      for (var i = 0; i < n; i++) {
-        checksum += objects[i].worldTransform!.position.x;
-      }
+      w.edit(() {
+        for (var i = 0; i < n; i++) {
+          checksum += objects[i].worldTransform!.position.x;
+        }
+      });
       sw.stop();
       readUs += sw.elapsedMicroseconds;
       sw.reset();

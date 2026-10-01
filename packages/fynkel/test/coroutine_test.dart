@@ -41,7 +41,7 @@ void main() {
     return (w, go);
   }
 
-  test('a coroutine runs to its first yield at once, then after update, one step a frame', () {
+  test('a coroutine starts after commit at the scheduler, one step a frame', () {
     final host = Host();
     final (w, _) = withHost(host);
     Iterable<Object?> steps() sync* {
@@ -54,12 +54,22 @@ void main() {
 
     host.log.clear();
     final c = host.startCoroutine(steps());
-    expect(host.log, ['step 1'], reason: 'up to the first yield, now');
+    expect(host.log, isEmpty, reason: 'scheduling never executes user code');
     expect(c.isRunning, isTrue);
     w.frame(1 / 20);
     w.frame(1 / 20);
-    expect(host.log, ['step 1', 'update 2', 'step 2', 'late 2', 'update 3', 'step 3', 'late 3'],
-        reason: 'between update and lateUpdate, as in Unity');
+    w.frame(1 / 20);
+    expect(host.log, [
+      'update 2',
+      'step 1',
+      'late 2',
+      'update 3',
+      'step 2',
+      'late 3',
+      'update 4',
+      'step 3',
+      'late 4',
+    ], reason: 'between update and lateUpdate');
     expect(c.isRunning, isFalse);
   });
 
@@ -97,7 +107,7 @@ void main() {
     for (var i = 0; i < 6; i++) {
       w.frame(1 / 20);
     }
-    expect(at, {'seconds': 5}, reason: 'started at frame 1; 0.2 s later is frame 5');
+    expect(at, {'seconds': 6}, reason: 'first execution at frame 2; 0.2 s later is frame 6');
     open = true;
     w.frame(1 / 20);
     expect(at['until'], 8);
@@ -108,12 +118,14 @@ void main() {
     for (var i = 0; i < 6; i++) {
       w.frame(1 / 20);
     }
-    expect(at['other'], 15, reason: '0.3 s after frame 9');
+    expect(at['other'], isNull, reason: 'the child starts after the scheduling callback commits');
     w.frame(1 / 20);
-    expect(at['after other'], 16, reason: 'the frame after the other one ended');
+    expect(at['other'], 16, reason: '0.3 s after its first execution at frame 10');
+    w.frame(1 / 20);
+    expect(at['after other'], 17, reason: 'the frame after the other one ended');
     open = false;
     w.frame(1 / 20);
-    expect(at['while'], 17);
+    expect(at['while'], 18);
     expect(c.isRunning, isFalse);
   });
 
@@ -128,8 +140,9 @@ void main() {
       }
     }
 
-    final start = w.tick;
     host.startCoroutine(fixed());
+    w.frame(0); // Acquire the iterator at the variable scheduler boundary.
+    final start = w.tick;
     w.frame(3 / 20); // three ticks in one frame
     expect(ticks, [start + 1, start + 2, start + 3]);
   });
@@ -157,53 +170,61 @@ void main() {
     expect(calls, hasLength(n));
   });
 
-  test('stopped by stopAllCoroutines, by leaving the active hierarchy and by destruction; a throw stops only it', () {
-    final host = Host();
-    final (w, go) = withHost(host);
-    var ticks = 0;
-    Iterable<Object?> forever() sync* {
-      while (true) {
-        ticks++;
-        yield null;
+  test(
+    'stopped by stopAllCoroutines, by leaving the active hierarchy and by destruction; a throw stops only it',
+    () {
+      final host = Host();
+      final (w, go) = withHost(host);
+      var ticks = 0;
+      Iterable<Object?> forever() sync* {
+        while (true) {
+          ticks++;
+          yield null;
+        }
       }
-    }
 
-    final a = host.startCoroutine(forever());
-    host.enabled = false;
-    w.frame(1 / 20);
-    expect(a.isRunning, isTrue, reason: 'a disabled behaviour keeps its coroutines');
-    host.enabled = true;
-    go.setActive(false);
-    w.frame(1 / 20);
-    w.frame(1 / 20);
-    expect(a.isRunning, isFalse, reason: 'an inactive object stops them');
-    go.setActive(true);
-    w.frame(1 / 20);
+      final a = host.startCoroutine(forever());
+      host.enabled = false;
+      w.frame(1 / 20);
+      expect(a.isRunning, isTrue, reason: 'a disabled behaviour keeps its coroutines');
+      host.enabled = true;
+      go.setActive(false);
+      w.frame(1 / 20);
+      w.frame(1 / 20);
+      expect(a.isRunning, isFalse, reason: 'an inactive object stops them');
+      go.setActive(true);
+      w.frame(1 / 20);
 
-    final b = host.startCoroutine(forever());
-    final kept = host.invoke(() {}, 100);
-    host.stopAllCoroutines();
-    expect((b.isRunning, kept.isRunning), (false, true), reason: 'invokes are not coroutines');
+      final b = host.startCoroutine(forever());
+      final kept = host.invoke(() {}, 100);
+      host.stopAllCoroutines();
+      expect((b.isRunning, kept.isRunning), (false, true), reason: 'invokes are not coroutines');
 
-    final errors = <BehaviourError>[];
-    w.onBehaviourError = errors.add;
-    Iterable<Object?> broken() sync* {
-      yield null;
-      throw StateError('broken');
-    }
+      final errors = <BehaviourError>[];
+      w.onBehaviourError = errors.add;
+      Iterable<Object?> broken() sync* {
+        yield null;
+        throw StateError('broken');
+      }
 
-    final c = host.startCoroutine(broken()), d = host.startCoroutine(forever());
-    final before = ticks;
-    w.frame(1 / 20);
-    expect(c.isRunning, isFalse);
-    expect(errors.single.callback, 'coroutine');
-    expect(errors.single.message, contains('broken'));
-    expect(d.isRunning, isTrue);
-    expect(ticks, before + 1, reason: 'the others went on');
+      final c = host.startCoroutine(broken()), d = host.startCoroutine(forever());
+      w.frame(1 / 20); // First execution yields; it cannot throw until resumed.
+      final before = ticks;
+      w.frame(1 / 20);
+      expect(c.isRunning, isFalse);
+      expect(errors.single.callback, 'coroutine');
+      expect(errors.single.message, contains('broken'));
+      expect(d.isRunning, isTrue);
+      expect(ticks, before + 1, reason: 'the others went on');
 
-    host.destroy();
-    w.frame(1 / 20);
-    expect((d.isRunning, kept.isRunning), (false, false), reason: 'destroying the behaviour stops everything');
-    expect(() => host.startCoroutine(forever()), throwsStateError);
-  });
+      host.destroy();
+      w.frame(1 / 20);
+      expect(
+        (d.isRunning, kept.isRunning),
+        (false, false),
+        reason: 'destroying the behaviour stops everything',
+      );
+      expect(() => host.startCoroutine(forever()), throwsStateError);
+    },
+  );
 }

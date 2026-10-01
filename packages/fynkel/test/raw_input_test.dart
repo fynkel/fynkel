@@ -16,7 +16,8 @@ import 'package:test/test.dart';
 class KeyReader extends Behaviour {
   final List<String> log = [];
 
-  String _f() => '${Input.getKey('F') ? 'H' : '-'}${Input.getKeyDown('F') ? 'D' : '-'}${Input.getKeyUp('F') ? 'U' : '-'}'
+  String _f() =>
+      '${Input.getKey('F') ? 'H' : '-'}${Input.getKeyDown('F') ? 'D' : '-'}${Input.getKeyUp('F') ? 'U' : '-'}'
       '${Input.getMouseButtonDown(0) ? ' click' : ''}';
 
   @override
@@ -53,7 +54,10 @@ void main() {
 
   test('a key no action binds: held, down once across catch-up ticks, the frame in update', () {
     final (w, r) = loaded();
-    w.frame(0.05, input: const [InputEvent.down(InputDevice.keyboard, 'F'), InputEvent.down(InputDevice.mouse, 'left')]);
+    w.frame(
+      0.05,
+      input: const [InputEvent.down(InputDevice.keyboard, 'F'), InputEvent.down(InputDevice.mouse, 'left')],
+    );
     expect(r.log, ['fixed HD- click', 'fixed H--', 'fixed H--', 'update HD- click']);
     r.log.clear();
 
@@ -93,9 +97,9 @@ void main() {
     expect(w.input.held('jupm'), isFalse);
     expect(w.input.pressed('jupm'), isFalse);
     expect(w.input.held('jump'), isFalse, reason: 'declared: no warning');
-    final warnings = [
-      for (final l in lines) jsonDecode(l) as Map<String, Object?>,
-    ].where((r) => r['source'] == 'input').toList();
+    final warnings = [for (final l in lines) jsonDecode(l) as Map<String, Object?>]
+        .where((r) => r['source'] == 'input')
+        .toList();
     expect(warnings, hasLength(1));
     expect(warnings.single['severity'], 'warning');
     expect(warnings.single['message'], contains("'jupm' is not declared"));
@@ -107,12 +111,18 @@ void main() {
     input.pressKey('Space');
     input.pressKey('mouse:right');
     context.run(() {
-      expect((Input.getKey('Space'), Input.getKeyDown('Space'), Input.getMouseButtonDown(1)), (true, true, true));
+      expect(
+        (Input.getKey('Space'), Input.getKeyDown('Space'), Input.getMouseButtonDown(1)),
+        (true, true, true),
+      );
     });
     input.endTick();
     input.releaseKey('Space');
     context.run(() {
-      expect((Input.getKey('Space'), Input.getKeyDown('Space'), Input.getKeyUp('Space')), (false, false, true));
+      expect(
+        (Input.getKey('Space'), Input.getKeyDown('Space'), Input.getKeyUp('Space')),
+        (false, false, true),
+      );
       expect(Input.anyKey, isTrue, reason: 'the right button is still down');
     });
   });

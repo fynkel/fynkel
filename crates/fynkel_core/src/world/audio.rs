@@ -9,11 +9,10 @@
 //! the gain over everything. Deterministic: the device only renders what
 //! this phase decided (`fynkel_audio`).
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use fynkel_audio::{
-    AudioClip, AudioListener, AudioSource, PlayError, PlayParams, VoiceId, MAX_PITCH, MIN_PITCH,
-};
+use fynkel_audio::{AudioClip, AudioListener, AudioSource, PlayError, PlayParams, VoiceId};
 use fynkel_contracts::{AssetRef, ComponentId, DiagnosticCode, Entity, Tick};
 use fynkel_ecs::internal::{hecs, Handle};
 
@@ -27,6 +26,8 @@ use crate::schema::{AudioStateRecord, AudioStatsRecord};
 pub struct AudioRun {
     /// The voice playing for this source.
     pub voice: Option<VoiceId>,
+    /// Requested pause, including a voice that will start in this audio phase.
+    pub paused: bool,
     /// What the voice was last given, to send only changes.
     pub clip: AssetRef,
     pub volume: f32,
@@ -90,6 +91,28 @@ impl World {
     /// `Command::Audio` at the tick boundary: edits the source and its
     /// voice; the phase then reconciles the rest.
     pub(super) fn apply_audio(&mut self, index: u32, entity: Entity, op: AudioOp) -> bool {
+        self.apply_audio_control(index, entity, op, true)
+    }
+
+    /// Transport only: the gameplay journal already published configuration.
+    pub(super) fn apply_audio_intent(&mut self, entity: Entity, op: AudioOp) -> bool {
+        if !self.module_allows(
+            u32::MAX,
+            Lane::Simulation,
+            &crate::Command::Audio { entity, op },
+        ) {
+            return false;
+        }
+        self.apply_audio_control(u32::MAX, entity, op, false)
+    }
+
+    fn apply_audio_control(
+        &mut self,
+        index: u32,
+        entity: Entity,
+        op: AudioOp,
+        write_source: bool,
+    ) -> bool {
         let lane = Lane::Simulation;
         if !self.check_entity(index, lane, entity, "audio") {
             return false;
@@ -104,28 +127,15 @@ impl World {
                 "entity has no fynkel.AudioSource",
             );
         }
-        match op {
-            AudioOp::SetVolume(v) if !v.is_finite() || !(0.0..=1.0).contains(&v) => {
-                return self.reject(
-                    index,
-                    lane,
-                    DiagnosticCode::INVALID_PAYLOAD,
-                    entity,
-                    ComponentId::AUDIO_SOURCE,
-                    format!("audio: volume must be within [0, 1], got {v}"),
-                );
-            }
-            AudioOp::SetPitch(p) if !p.is_finite() || !(MIN_PITCH..=MAX_PITCH).contains(&p) => {
-                return self.reject(
-                    index,
-                    lane,
-                    DiagnosticCode::INVALID_PAYLOAD,
-                    entity,
-                    ComponentId::AUDIO_SOURCE,
-                    format!("audio: pitch must be within [{MIN_PITCH}, {MAX_PITCH}], got {p}"),
-                );
-            }
-            _ => {}
+        if let Err(message) = op.validate() {
+            return self.reject(
+                index,
+                lane,
+                DiagnosticCode::INVALID_PAYLOAD,
+                entity,
+                ComponentId::AUDIO_SOURCE,
+                message,
+            );
         }
         if !self.ecs.has::<AudioRun>(entity) {
             let _ = self.ecs.insert(entity, AudioRun::default());
@@ -143,20 +153,28 @@ impl World {
                 if let Some(v) = run.voice.take() {
                     self.audio.stop(v);
                 }
-                source.playing = true;
+                run.paused = false;
+                if write_source {
+                    source.playing = true;
+                }
             }
             AudioOp::Stop => {
                 if let Some(v) = run.voice.take() {
                     self.audio.stop(v);
                 }
-                source.playing = false;
+                run.paused = false;
+                if write_source {
+                    source.playing = false;
+                }
             }
             AudioOp::Pause => {
+                run.paused = true;
                 if let Some(v) = run.voice {
                     self.audio.pause(v);
                 }
             }
             AudioOp::Resume => {
+                run.paused = false;
                 if let Some(v) = run.voice {
                     self.audio.resume(v);
                 }
@@ -187,30 +205,14 @@ impl World {
         clip: AssetRef,
         params: PlayParams,
     ) -> bool {
-        if !params.volume.is_finite() || !(0.0..=1.0).contains(&params.volume) {
+        if let Err(message) = params.validate() {
             return self.reject(
                 index,
                 lane,
                 DiagnosticCode::INVALID_PAYLOAD,
                 Entity::NULL,
                 ComponentId::NONE,
-                format!(
-                    "playSound: volume must be within [0, 1], got {}",
-                    params.volume
-                ),
-            );
-        }
-        if !params.pitch.is_finite() || !(MIN_PITCH..=MAX_PITCH).contains(&params.pitch) {
-            return self.reject(
-                index,
-                lane,
-                DiagnosticCode::INVALID_PAYLOAD,
-                Entity::NULL,
-                ComponentId::NONE,
-                format!(
-                    "playSound: pitch must be within [{MIN_PITCH}, {MAX_PITCH}], got {}",
-                    params.pitch
-                ),
+                message,
             );
         }
         match self.audio.play(None, &clip, params) {
@@ -231,10 +233,15 @@ impl World {
         }
     }
 
-    /// The audio phase; returns the number of sources.
+    /// The audio phase; returns the number of sources. Voice clocks, device
+    /// commands and completion events belong to the audio backend and are not
+    /// rollbackable gameplay data. Source playing flags publish as one validated
+    /// batch after reconciliation; an invalid internal source rejects that data
+    /// batch with a diagnostic without pretending the backend did not advance.
     pub(super) fn run_audio(&mut self, tick: Tick) -> u32 {
         let dt = self.config.fixed_dt;
         let mut count = 0;
+        let mut playing = BTreeMap::<Entity, bool>::new();
         let mut work: Vec<Reconcile> = Vec::new();
         let mut listener: Option<(Entity, f32)> = None;
 
@@ -268,7 +275,7 @@ impl World {
             for (handle, source, run, inactive) in h
                 .query::<(
                     &Handle,
-                    &mut AudioSource,
+                    &AudioSource,
                     Option<&mut AudioRun>,
                     hecs::Satisfies<&fynkel_scene::Inactive>,
                 )>()
@@ -276,6 +283,7 @@ impl World {
             {
                 count += 1;
                 let entity = handle.0;
+                let mut source = source.clone();
                 if inactive {
                     // Not active in the hierarchy: silent. A looping
                     // source wants to play again when it comes back; a
@@ -290,7 +298,7 @@ impl World {
                                 set_pitch: None,
                                 set_looping: None,
                             });
-                            source.playing = source.looping;
+                            playing.insert(entity, source.looping);
                         }
                     }
                     continue;
@@ -309,12 +317,16 @@ impl World {
                     });
                     continue;
                 };
+                if !source.playing {
+                    run.paused = false;
+                }
                 // A voice the engine stole (or that ended: handled below,
                 // but the order within a tick makes both harmless).
                 if let Some(v) = run.voice {
                     if !self.audio.is_playing(v) {
                         run.voice = None;
                         source.playing = false;
+                        playing.insert(entity, false);
                     }
                 }
                 let mut r = Reconcile {
@@ -385,7 +397,7 @@ impl World {
                 let _ = self.ecs.insert(r.entity, AudioRun::default());
             }
             if r.start {
-                self.start_source(r.entity);
+                self.start_source(r.entity, &mut playing);
             }
         }
 
@@ -393,11 +405,11 @@ impl World {
         // more, this tick (a stolen voice raises no event).
         if self.audio.stats().stolen > stolen_before {
             let h = self.ecs.hecs();
-            for (source, run) in h.query::<(&mut AudioSource, &mut AudioRun)>().iter() {
+            for (handle, _, run) in h.query::<(&Handle, &AudioSource, &mut AudioRun)>().iter() {
                 if let Some(v) = run.voice {
                     if !self.audio.is_playing(v) {
                         run.voice = None;
-                        source.playing = false;
+                        playing.insert(handle.0, false);
                     }
                 }
             }
@@ -409,9 +421,7 @@ impl World {
             let Some(entity) = ended.source else {
                 continue;
             };
-            if let Ok(mut source) = self.ecs.get_mut::<AudioSource>(entity) {
-                source.playing = false;
-            }
+            playing.insert(entity, false);
             if let Ok(mut run) = self.ecs.get_mut::<AudioRun>(entity) {
                 if run.voice == Some(ended.voice) {
                     run.voice = None;
@@ -425,13 +435,36 @@ impl World {
                 },
             });
         }
+        if !playing.is_empty() {
+            let result = self.edit_native_data_at_tick(tick, |edit| {
+                for (entity, playing) in playing {
+                    if let Some(crate::GameplayComponentValue::AudioSource(mut source)) =
+                        edit.component(entity, ComponentId::AUDIO_SOURCE)?
+                    {
+                        source.playing = playing;
+                        edit.set_component(entity, crate::ComponentValue::AudioSource(source))?;
+                    }
+                }
+                Ok(())
+            });
+            if let Err(error) = result {
+                self.reject(
+                    u32::MAX,
+                    Lane::Simulation,
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    Entity::NULL,
+                    ComponentId::AUDIO_SOURCE,
+                    format!("audio output: {error}"),
+                );
+            }
+        }
         count
     }
 
     /// Starts the source's clip for the entity; `SOUND_UNAVAILABLE` once
     /// per clip when the world was never given it (the source stays
     /// `playing` so a later registration starts it).
-    fn start_source(&mut self, entity: Entity) {
+    fn start_source(&mut self, entity: Entity, playing: &mut BTreeMap<Entity, bool>) {
         let Ok(source) = self.ecs.copy::<AudioSource>(entity) else {
             return;
         };
@@ -445,6 +478,9 @@ impl World {
         match self.audio.play(Some(entity), &source.clip, params) {
             Ok(v) => {
                 if let Ok(mut run) = self.ecs.get_mut::<AudioRun>(entity) {
+                    if run.paused {
+                        self.audio.pause(v);
+                    }
                     run.voice = Some(v);
                     run.clip = source.clip.clone();
                     run.volume = source.volume;
@@ -456,9 +492,7 @@ impl World {
             Err(PlayError::Refused) => {
                 // Not heard this time; `playing` clears so the game can
                 // ask again.
-                if let Ok(mut s) = self.ecs.get_mut::<AudioSource>(entity) {
-                    s.playing = false;
-                }
+                playing.insert(entity, false);
             }
             Err(PlayError::UnknownClip) => {
                 let Ok(mut run) = self.ecs.get_mut::<AudioRun>(entity) else {
@@ -505,12 +539,12 @@ impl World {
                 playing: true,
                 paused: v.paused,
                 time: v.time,
-                duration,
-                volume: source.volume,
-                pitch: source.pitch,
-                looping: source.looping,
-                clip: source.clip.clone(),
-                bus: source.bus,
+                duration: v.duration,
+                volume: v.volume,
+                pitch: v.pitch,
+                looping: v.looping,
+                clip: v.clip.clone(),
+                bus: v.bus,
                 voice: v.id.packed(),
             },
             None => AudioStateRecord {

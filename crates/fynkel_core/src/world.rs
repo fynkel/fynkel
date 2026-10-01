@@ -54,6 +54,8 @@ mod animation;
 mod audio;
 mod catalogue;
 mod controller;
+pub mod gameplay;
+mod gameplay_live;
 mod ik;
 pub use animation::{AnimatorRun, Fade, SkinRun};
 pub use audio::AudioRun;
@@ -71,7 +73,6 @@ use state::{ActiveMarkers, AnimationState, EditState, Lanes, Scratch};
 
 #[derive(Clone, Debug)]
 pub struct WorldConfig {
-    pub id: WorldId,
     pub fixed_dt: f32,
     pub max_steps_per_frame: u32,
     pub max_frame_dt: f32,
@@ -92,7 +93,6 @@ pub struct WorldConfig {
 impl Default for WorldConfig {
     fn default() -> Self {
         Self {
-            id: WorldId(1),
             fixed_dt: DEFAULT_FIXED_DT as f32,
             max_steps_per_frame: DEFAULT_MAX_STEPS_PER_FRAME,
             max_frame_dt: MAX_FRAME_DT as f32,
@@ -117,10 +117,9 @@ impl Name {
     }
 }
 
-/// World matrix at the start of the last tick (S[n]) for interpolation;
-/// decomposed only when the extract interpolates (foundation 3.3).
+/// Previous local pose and parent for hierarchy-preserving interpolation.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct PrevWorld(Mat4);
+struct PrevTransform(Transform, Option<Entity>);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Diagnostic {
@@ -259,9 +258,9 @@ pub struct ExtractVolume {
 pub struct Extract {
     pub tick: Tick,
     pub alpha: f32,
-    /// Simulated seconds at this extract, interpolated between ticks
-    /// (`tick * fixed_dt` + `alpha * fixed_dt`): a paused world's time
-    /// stands still. Shaders read it as `globals.time` (ADR-0031).
+    /// Accepted gameplay elapsed, independent of simulation catch-up drops
+    /// and transform interpolation. Frozen by gameplay pause and editor Step.
+    /// Shaders read it as `globals.time` (ADR-0031, ADR-0047).
     pub time: f32,
     pub records: Vec<ExtractRecord>,
     pub meshes: Vec<ExtractMesh>,
@@ -321,6 +320,11 @@ pub struct World {
     zone_names: BTreeMap<(Entity, Entity), String>,
     /// Scratch of the native systems, kept for its capacity.
     scratch: Scratch,
+    /// Never reused: scopes pending gameplay references and frozen queries.
+    next_gameplay_edit: u64,
+    /// Committed one-shot intents, consumed once at the next fixed tick.
+    gameplay_effects: Vec<gameplay::CommittedEffect>,
+    gameplay_tick_prepared: bool,
 }
 
 fn micros(since: Instant) -> u64 {
@@ -339,14 +343,18 @@ struct RigPlacement {
 
 impl World {
     pub fn new(config: WorldConfig) -> Self {
+        Self::try_new(config).expect("world identity exhausted")
+    }
+
+    pub fn try_new(config: WorldConfig) -> Result<Self, fynkel_contracts::IdentityExhausted> {
         let clock = FrameClock::new(
             config.fixed_dt,
             config.max_steps_per_frame,
             config.max_frame_dt,
         );
         let input = Input::with_tick_dt(config.fixed_dt);
-        Self {
-            ecs: Ecs::new(config.id),
+        Ok(Self {
+            ecs: Ecs::try_new()?,
             config,
             clock,
             lanes: Lanes::default(),
@@ -377,7 +385,10 @@ impl World {
                 .collect(),
             zone_names: BTreeMap::new(),
             scratch: Scratch::default(),
-        }
+            next_gameplay_edit: 0,
+            gameplay_effects: Vec::new(),
+            gameplay_tick_prepared: false,
+        })
     }
 
     /// The last step's wall time per phase (`SystemKind` order, M3-10):
@@ -502,7 +513,7 @@ impl World {
         self.edit.hidden.iter().copied()
     }
     pub fn id(&self) -> WorldId {
-        self.config.id
+        self.ecs.id()
     }
     pub fn clock(&self) -> &FrameClock {
         &self.clock
@@ -537,9 +548,12 @@ impl World {
 
     /// Starts a host frame: clears last frame's presentation overrides,
     /// accumulates `dt`, records `MissedDeadline` when time is dropped.
-    pub fn begin_frame(&mut self, dt: f32) -> FramePlan {
+    pub fn begin_frame(&mut self, dt: impl Into<f64>) -> FramePlan {
+        self.begin_frame_scaled(dt.into(), 1.0)
+    }
+    pub fn begin_frame_scaled(&mut self, dt: f64, time_scale: f64) -> FramePlan {
         self.lanes.overrides.clear();
-        let plan = self.clock.begin_frame(dt);
+        let plan = self.clock.begin_frame_scaled(dt, time_scale);
         if plan.dropped_seconds > 0.0 {
             self.diagnostics.push(Diagnostic {
                 command_index: u32::MAX,
@@ -750,7 +764,7 @@ impl World {
                 format!("{what}: temp reference #{t} is only valid on the simulation lane"),
             );
         }
-        if e.world() != self.config.id {
+        if e.world() != self.ecs.id() {
             return self.reject(
                 index,
                 lane,
@@ -1088,12 +1102,7 @@ impl World {
                         format!("{} cannot be removed", component.name().unwrap()),
                     );
                 }
-                if component == ComponentId::AUDIO_SOURCE {
-                    // The voice stops at the phase (its source is gone).
-                    let _ = self.ecs.remove::<AudioRun>(entity);
-                }
-                let Some(removed) = ComponentValue::remove_from(&mut self.ecs, entity, component)
-                else {
+                let Some(removed) = self.remove_component_data(entity, component) else {
                     return self.reject(
                         index,
                         lane,
@@ -1154,6 +1163,18 @@ impl World {
         }
     }
 
+    fn validate_audio_bus(&self, volume: f32) -> Result<(), String> {
+        if !self.modules.audio {
+            return Err("audio module is disabled".into());
+        }
+        if !volume.is_finite() || !(0.0..=1.0).contains(&volume) {
+            return Err(format!(
+                "audioBus: volume must be within [0, 1], got {volume}"
+            ));
+        }
+        Ok(())
+    }
+
     /// `Command::AudioBus` (either lane): a bus gain and the mute.
     fn apply_audio_bus(
         &mut self,
@@ -1163,14 +1184,14 @@ impl World {
         volume: f32,
         muted: bool,
     ) -> bool {
-        if !volume.is_finite() || !(0.0..=1.0).contains(&volume) {
+        if let Err(message) = self.validate_audio_bus(volume) {
             return self.reject(
                 index,
                 lane,
                 DiagnosticCode::INVALID_PAYLOAD,
                 Entity::NULL,
                 ComponentId::NONE,
-                format!("audioBus: volume must be within [0, 1], got {volume}"),
+                message,
             );
         }
         self.audio.set_bus(bus, volume);
@@ -1197,6 +1218,37 @@ impl World {
             });
         }
         Ok(count)
+    }
+
+    /// Data removal bookkeeping shared with the gameplay transaction boundary.
+    /// Subsystem effects reconcile in their existing phases, not during staging.
+    fn remove_component_data(&mut self, entity: Entity, component: ComponentId) -> Option<bool> {
+        if component == ComponentId::AUDIO_SOURCE {
+            // The voice stops at the phase (its source is gone).
+            let _ = self.ecs.remove::<AudioRun>(entity);
+        }
+        if component == ComponentId::OSCILLATE {
+            // A later add starts a fresh motion clock/rest offset. A coalesced
+            // remove/re-add within one edit remains the same final component.
+            let _ = self.ecs.remove::<catalogue::Oscillation>(entity);
+        }
+        if component == ComponentId::ANIMATOR {
+            // A subsequent add is a new playback instance, even before a tick.
+            let _ = self.ecs.remove::<AnimatorRun>(entity);
+            for effect in &mut self.gameplay_effects {
+                if let gameplay::CommittedEffect::Animation {
+                    entity: owner,
+                    invalidated,
+                    ..
+                } = effect
+                {
+                    if *owner == entity {
+                        *invalidated = true;
+                    }
+                }
+            }
+        }
+        ComponentValue::remove_from(&mut self.ecs, entity, component)
     }
 
     /// Shared by both lanes and by `load_scene`: validates the value and
@@ -1232,6 +1284,13 @@ impl World {
                 ComponentId::HIERARCHY,
                 format!("parent {parent:?} is {child:?} or a descendant of it"),
             ),
+            SceneError::UnsupportedTransform(e) => (
+                DiagnosticCode::INVALID_PAYLOAD,
+                e,
+                ComponentId::TRANSFORM,
+                "operation requires an invertible transform and an exact local TRS (no shear)"
+                    .to_string(),
+            ),
             SceneError::NotFinite(e) => (
                 DiagnosticCode::INVALID_PAYLOAD,
                 if e.is_null() { entity } else { e },
@@ -1243,6 +1302,12 @@ impl World {
                 e,
                 ComponentId::NONE,
                 "stale or unknown entity".to_string(),
+            ),
+            SceneError::Ecs(EcsError::OutOfEntities) => (
+                DiagnosticCode::INVALID_PAYLOAD,
+                entity,
+                ComponentId::NONE,
+                "entity identity slots exhausted".to_string(),
             ),
             SceneError::Ecs(EcsError::MissingComponent(e)) => (
                 DiagnosticCode::MISSING_COMPONENT,
@@ -1354,10 +1419,37 @@ impl World {
         self.active.all = true;
     }
 
+    /// Displays the completed simulation pose at any interpolation fraction.
+    /// Hosts call this after a manual fixed sequence, before presentation.
+    /// Leaves clocks and the accumulator unchanged; the next tick records a
+    /// fresh interpolation interval normally.
+    pub fn snap_interpolation(&mut self) {
+        self.record_prev_world();
+    }
+
+    /// Captures the interpolation source before host fixed callbacks publish
+    /// gameplay edits. The next step consumes this boundary exactly once.
+    pub fn prepare_gameplay_tick(&mut self) {
+        if !self.gameplay_tick_prepared {
+            self.record_prev_world();
+            self.gameplay_tick_prepared = true;
+        }
+    }
+
+    /// Abandons a prepared host tick without undoing already committed edits.
+    /// Their current values remain visible, as for ordinary explicit edits.
+    pub fn cancel_gameplay_tick(&mut self) {
+        if std::mem::take(&mut self.gameplay_tick_prepared) {
+            self.record_prev_world();
+        }
+    }
+
     fn record_prev_world(&mut self) {
         let h = self.ecs.hecs_mut();
-        for (wt, prev) in h.query_mut::<(&WorldTransform, &mut PrevWorld)>() {
-            prev.0 = wt.matrix;
+        for (local, parent, prev) in
+            h.query_mut::<(&Transform, Option<&Parent>, &mut PrevTransform)>()
+        {
+            *prev = PrevTransform(*local, parent.map(|p| p.0));
         }
     }
 
@@ -1368,11 +1460,12 @@ impl World {
         let roots = std::mem::take(&mut self.lanes.teleported);
         for root in roots {
             for e in scene::subtree(&self.ecs, root) {
-                let Ok(wt) = self.ecs.copy::<WorldTransform>(e) else {
+                let Ok(local) = self.ecs.copy::<Transform>(e) else {
                     continue;
                 };
-                if let Ok(mut prev) = self.ecs.get_mut::<PrevWorld>(e) {
-                    prev.0 = wt.matrix;
+                let parent = scene::parent_of(&self.ecs, e);
+                if let Ok(mut prev) = self.ecs.get_mut::<PrevTransform>(e) {
+                    *prev = PrevTransform(local, parent);
                 }
             }
         }
@@ -1395,6 +1488,9 @@ impl World {
                 | RejectionKind::NotKinematic
                 | RejectionKind::NotFinite => {
                     (DiagnosticCode::INVALID_PAYLOAD, ComponentId::RIGID_BODY)
+                }
+                RejectionKind::UnsupportedTransform => {
+                    (DiagnosticCode::INVALID_PAYLOAD, ComponentId::TRANSFORM)
                 }
                 RejectionKind::MeshOnMovingBody => {
                     (DiagnosticCode::INVALID_PAYLOAD, ComponentId::COLLIDER)
@@ -1489,6 +1585,26 @@ impl World {
             }
         }
         for (entity, cmd) in cmds.drain(..) {
+            let rigid = self
+                .ecs
+                .copy::<crate::RigidBody>(entity)
+                .ok()
+                .map(|body| body.body_type);
+            if let Err((_, message)) =
+                cmd.validate_for(rigid, self.ecs.has::<CharacterController>(entity))
+            {
+                self.reject(
+                    u32::MAX,
+                    Lane::Simulation,
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    entity,
+                    ComponentId::CHARACTER_CONTROLLER,
+                    format!("character input: {message}"),
+                );
+                continue;
+            }
+            // Preserve pre-command driver order; the same typed validator is
+            // used by gameplay effects and rechecked by the physics runtime.
             self.physics.queue(u32::MAX, entity, cmd);
         }
         self.scratch.driver = cmds;
@@ -1501,10 +1617,11 @@ impl World {
     /// from the pivot meets, never under `min_distance`) and looks at it;
     /// yaw/pitch are written back. Returns the rig count and whether any
     /// moved.
-    fn place_camera_rigs(&mut self) -> (u32, bool) {
+    fn place_camera_rigs(&mut self, tick: Tick) -> (u32, bool) {
         let mut placements = std::mem::take(&mut self.scratch.rigs);
         placements.clear();
         let dt = self.config.fixed_dt;
+        let mut invalid = None;
         {
             let h = self.ecs.hecs();
             for (handle, rig) in h
@@ -1513,6 +1630,14 @@ impl World {
                 .iter()
             {
                 let entity = handle.0;
+                if let Err(message) = rig.validate() {
+                    invalid = Some(gameplay::EditError::InvalidComponent {
+                        entity: entity.into(),
+                        component: ComponentId::THIRD_PERSON_CAMERA,
+                        message,
+                    });
+                    break;
+                }
                 let Some(target) = self.live(rig.target) else {
                     continue;
                 };
@@ -1571,15 +1696,56 @@ impl World {
                 });
             }
         }
-        let moved = !placements.is_empty();
         let rigs = placements.len() as u32;
-        for p in placements.drain(..) {
-            if let Ok(mut rig) = self.ecs.get_mut::<ThirdPersonCamera>(p.rig) {
-                rig.yaw = p.yaw;
-                rig.pitch = p.pitch;
+        let result = if let Some(error) = invalid {
+            Err(error)
+        } else if placements.is_empty() {
+            Ok(false)
+        } else {
+            let desired: Vec<_> = placements
+                .iter()
+                .map(|p| (p.rig, p.position, p.rotation))
+                .collect();
+            scene::prepare_world_poses(&self.ecs, &desired)
+                .map_err(|error| {
+                    gameplay::EditError::InvalidEffect(Entity::NULL.into(), format!("{error:?}"))
+                })
+                .and_then(|poses| {
+                    self.edit_native_data_at_tick(tick, |edit| {
+                        for p in &placements {
+                            let Some(gameplay::GameplayComponentValue::ThirdPersonCamera(mut rig)) =
+                                edit.component(p.rig, ComponentId::THIRD_PERSON_CAMERA)?
+                            else {
+                                return Err(gameplay::EditError::MissingComponent(
+                                    p.rig.into(),
+                                    ComponentId::THIRD_PERSON_CAMERA,
+                                ));
+                            };
+                            rig.yaw = p.yaw;
+                            rig.pitch = p.pitch;
+                            edit.set_component(
+                                p.rig,
+                                gameplay::GameplayComponentValue::ThirdPersonCamera(rig),
+                            )?;
+                        }
+                        let mut moved = false;
+                        for &(entity, pose) in &poses {
+                            moved |= edit.local_transform(entity)? != pose;
+                            edit.set_transform(entity, pose)?;
+                        }
+                        Ok(moved)
+                    })
+                    .map(|commit| commit.value)
+                })
+        };
+        let moved = match result {
+            Ok(moved) => moved,
+            Err(error) => {
+                self.native_pose_rejection(ComponentId::THIRD_PERSON_CAMERA, "camera rigs", error);
+                false
             }
-            let _ = scene::set_world_pose(&self.ecs, p.rig, p.position, p.rotation);
-        }
+        };
+        placements.clear();
         self.scratch.rigs = placements;
         (rigs, moved)
     }
@@ -1591,6 +1757,7 @@ impl World {
         // zone's named event on the general lane (M3-12); `once` zones are
         // removed after their entry, collected while the events are read.
         let mut fired: Vec<Entity> = Vec::new();
+        let mut emitted = Vec::new();
         for e in self.physics.events() {
             let payload = match *e {
                 PhysicsEvent::CollisionEnter(c) => EventPayload::CollisionEnter(c),
@@ -1601,7 +1768,7 @@ impl World {
                 PhysicsEvent::TriggerStay(c) => EventPayload::TriggerStay(c),
                 PhysicsEvent::ControllerHit(c) => EventPayload::ControllerHit(c),
             };
-            self.events.push(Event { tick, payload });
+            emitted.push(Event { tick, payload });
             let (entered, c) = match *e {
                 PhysicsEvent::TriggerEnter(c) => (true, c),
                 PhysicsEvent::TriggerExit(c) => (false, c),
@@ -1628,14 +1795,38 @@ impl World {
                 } else {
                     EventPayload::ZoneExited { zone, other, event }
                 };
-                self.events.push(Event { tick, payload });
+                emitted.push(Event { tick, payload });
                 if entered && once {
                     fired.push(zone);
                 }
             }
         }
-        for zone in fired {
-            let _ = self.ecs.remove::<TriggerZone>(zone);
+        if !fired.is_empty() {
+            let result = self.edit_native_data_at_tick(tick, |edit| {
+                for &zone in &fired {
+                    edit.remove_component(zone, ComponentId::TRIGGER_ZONE)?;
+                }
+                Ok(())
+            });
+            if let Err(error) = result {
+                // Contact events describe completed solver work. A one-shot
+                // named event is published only when its consumption commits.
+                emitted.retain(|event| {
+                    !matches!(&event.payload,
+                    EventPayload::ZoneEntered { zone, .. } if fired.contains(zone))
+                });
+                self.reject(
+                    u32::MAX,
+                    Lane::Simulation,
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    Entity::NULL,
+                    ComponentId::TRIGGER_ZONE,
+                    format!("trigger zone output: {error}"),
+                );
+            }
+        }
+        for event in emitted {
+            self.events.push(event);
         }
     }
 
@@ -1643,19 +1834,24 @@ impl World {
         let mut fresh = Vec::new();
         {
             let h = self.ecs.hecs();
-            for (e, wt) in h
+            for (e, _wt, local, parent) in h
                 .query::<fynkel_ecs::internal::hecs::Without<
-                    (fynkel_ecs::internal::hecs::Entity, &WorldTransform),
-                    &PrevWorld,
+                    (
+                        fynkel_ecs::internal::hecs::Entity,
+                        &WorldTransform,
+                        &Transform,
+                        Option<&Parent>,
+                    ),
+                    &PrevTransform,
                 >>()
                 .iter()
             {
-                fresh.push((e, wt.matrix));
+                fresh.push((e, PrevTransform(*local, parent.map(|p| p.0))));
             }
         }
         let h = self.ecs.hecs_mut();
         for (e, t) in fresh {
-            let _ = h.insert_one(e, PrevWorld(t));
+            let _ = h.insert_one(e, t);
         }
     }
 
@@ -1751,7 +1947,7 @@ impl World {
         let mut out = Extract {
             tick: self.clock.tick(),
             alpha,
-            time: (self.clock.elapsed() + alpha as f64 * self.clock.fixed_dt() as f64) as f32,
+            time: self.clock.gameplay_elapsed() as f32,
             records: Vec::with_capacity(self.ecs.len() as usize),
             ..Extract::default()
         };
@@ -1896,17 +2092,15 @@ impl World {
                 .get::<WorldTransform>(e)
                 .map(|w| w.matrix)
                 .unwrap_or(Mat4::IDENTITY);
-            match self.ecs.copy::<PrevWorld>(e) {
-                // Moved during the tick: interpolated.
-                Ok(prev) if prev.0 != cur => (
-                    lerp(
-                        Transform::from_matrix(prev.0),
-                        Transform::from_matrix(cur),
-                        alpha,
-                    )
-                    .matrix(),
-                    false,
-                ),
+            let local = self.ecs.copy::<Transform>(e).unwrap_or_default();
+            match self.ecs.copy::<PrevTransform>(e) {
+                // Reparenting changes coordinate space: snap this entity to
+                // the current hierarchy rather than mixing unrelated locals.
+                Ok(prev) if prev.1 != parent => (cur, false),
+                Ok(prev) => {
+                    let pw = parent_res.map_or(Mat4::IDENTITY, |r| r.0);
+                    (pw * lerp(prev.0, local, alpha).matrix(), false)
+                }
                 _ => (cur, false),
             }
         };
@@ -1931,5 +2125,83 @@ fn lerp(a: Transform, b: Transform, t: f32) -> Transform {
         position: a.position.lerp(b.position, t),
         rotation: a.rotation.slerp(b.rotation, t),
         scale: a.scale.lerp(b.scale, t),
+    }
+}
+
+#[cfg(all(test, feature = "physics"))]
+mod native_zone_tests {
+    use super::*;
+    use crate::Collider;
+
+    fn overlapping_zone() -> (World, Entity) {
+        let mut world = World::new(WorldConfig::default());
+        let zone = scene::spawn(&mut world.ecs, Transform::IDENTITY, None).unwrap();
+        world
+            .ecs
+            .insert(
+                zone,
+                Collider {
+                    is_sensor: true,
+                    ..Collider::default()
+                },
+            )
+            .unwrap();
+        world
+            .ecs
+            .insert(
+                zone,
+                TriggerZone {
+                    event: "once".into(),
+                    once: true,
+                },
+            )
+            .unwrap();
+        let other = scene::spawn(&mut world.ecs, Transform::IDENTITY, None).unwrap();
+        world.ecs.insert(other, Collider::default()).unwrap();
+        world
+            .ecs
+            .insert(other, crate::RigidBody::default())
+            .unwrap();
+        (world, zone)
+    }
+
+    #[test]
+    fn native_once_zone_consumption_publishes_before_its_named_event() {
+        let (mut world, zone) = overlapping_zone();
+        world.step();
+        assert!(!world.ecs.has::<TriggerZone>(zone));
+        let events = world.drain_events();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event.payload,
+            EventPayload::ZoneEntered { zone: entered, .. } if entered == zone))
+                .count(),
+            1
+        );
+        world.step();
+        assert!(!world
+            .drain_events()
+            .iter()
+            .any(|event| matches!(event.payload, EventPayload::ZoneEntered { .. })));
+    }
+
+    #[test]
+    fn rejected_once_zone_consumption_preserves_configuration_and_contact_events() {
+        let (mut world, zone) = overlapping_zone();
+        world.next_gameplay_edit = u64::MAX;
+        world.step();
+        assert!(world.ecs.has::<TriggerZone>(zone));
+        let events = world.drain_events();
+        assert!(events
+            .iter()
+            .any(|event| matches!(event.payload, EventPayload::TriggerEnter(_))));
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event.payload, EventPayload::ZoneEntered { .. })));
+        assert!(world
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("trigger zone output")));
     }
 }

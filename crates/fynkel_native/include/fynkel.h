@@ -38,7 +38,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_ABI_VERSION 1u
+#define FYNKEL_ABI_VERSION 3u
 #define FYNKEL_BUFFER_MAGIC 0x4b4e5946u /* "FYNK" */
 #define FYNKEL_BUFFER_HEADER_SIZE 24u
 
@@ -47,7 +47,11 @@ typedef struct FynkelWorld FynkelWorld;
 
 /* Entity handle: world id (8) | generation (24, never 0) | slot (32).
  * 0 is never valid. */
-typedef uint64_t FynkelEntity;
+typedef struct FynkelEntity {
+  uint64_t world;
+  uint32_t slot;
+  uint32_t generation;
+} FynkelEntity;
 
 typedef enum FynkelStatus {
   FYNKEL_STATUS_OK = 0,
@@ -205,13 +209,13 @@ typedef enum FynkelEventKind {
 typedef enum FynkelQueryKind {
   /* entity -> one SnapshotTransformRecord (0 records if unknown). */
   FYNKEL_QUERY_TRANSFORM = 1,
-  /* entity -> u64 handles of its children, deterministic order. */
+  /* entity -> FynkelEntity handles of its children, deterministic order. */
   FYNKEL_QUERY_CHILDREN = 2,
-  /* entity -> one u64: parent handle or 0. */
+  /* entity -> one FynkelEntity: parent handle or all zero. */
   FYNKEL_QUERY_PARENT = 3,
   /* entity -> one Name record (0 records if none). */
   FYNKEL_QUERY_NAME = 4,
-  /* (no entity) -> u64 handles of every live entity, slot order. */
+  /* (no entity) -> FynkelEntity handles of every live entity, slot order. */
   FYNKEL_QUERY_ALL_ENTITIES = 5,
   /* entity -> one framed record per native component it has, id order:
    * a ComponentHeader { component, size } then the component's body
@@ -270,9 +274,9 @@ typedef struct FynkelBufferView {
   uint32_t length;
 } FynkelBufferView;
 
+
+
 typedef struct FynkelWorldDesc {
-  uint8_t world_id;                   /* 1..255; 0 = default (1) */
-  uint8_t reserved[3];
   float fixed_dt_seconds;             /* 0 = default 1/60 */
   uint32_t max_steps_per_frame;       /* 0 = default 4 */
   float max_frame_dt_seconds;         /* 0 = default 0.25 */
@@ -282,8 +286,14 @@ typedef struct FynkelWorldDesc {
 typedef struct FynkelFramePlan {
   uint32_t steps;                     /* fixed ticks to run this frame */
   float dropped_seconds;              /* > 0: MissedDeadline recorded */
-  uint32_t clamped;                   /* frame dt exceeded max_frame_dt */
+  uint32_t clamped;                   /* scaled dt exceeded max_frame_dt */
   float alpha;                        /* interpolation factor after the steps */
+  double real_delta;
+  double gameplay_delta;
+  double real_elapsed;
+  double gameplay_elapsed;
+  double clamped_seconds;             /* excluded by gameplay clamp, not catch-up */
+  uint64_t frame;
 } FynkelFramePlan;
 
 typedef struct FynkelSubmitResult {
@@ -293,6 +303,7 @@ typedef struct FynkelSubmitResult {
 
 typedef struct FynkelStepResult {
   uint64_t tick;                      /* tick number after the step */
+  double simulation_elapsed;
   uint32_t commands_applied;
   uint32_t commands_rejected;
   uint32_t snapshot_records;
@@ -337,16 +348,31 @@ uint32_t fynkel_abi_version(void);
  * codecs carry the one they were generated from. */
 uint64_t fynkel_schema_fingerprint(void);
 
+/* Identity authority ABI 1: opaque process-lifetime storage, never freed.
+ * Bootstrap once in the primary module. The host retains the pointer across
+ * engine unload/replacement and attaches it to every additional engine module
+ * BEFORE runtime, authoring or world creation. Attach is idempotent for the
+ * same authority; changing a selected authority returns INVALID_ARGUMENT.
+ * Never serialize the pointer or share it between processes. */
+typedef struct FynkelIdentityAuthority FynkelIdentityAuthority;
+const FynkelIdentityAuthority* fynkel_identity_authority(void);
+FynkelStatus fynkel_identity_attach(const FynkelIdentityAuthority* authority);
+
 FynkelRuntime* fynkel_runtime_create(void);
 void fynkel_runtime_destroy(FynkelRuntime* runtime);
 
-FynkelWorld* fynkel_world_create(FynkelRuntime* runtime, const FynkelWorldDesc* desc);
+int32_t fynkel_world_contains(const FynkelWorld* world, FynkelEntity entity);
+double fynkel_world_simulation_elapsed(const FynkelWorld* world);
+
+FynkelWorld* fynkel_world_create(FynkelRuntime* runtime, const FynkelWorldDesc* desc, FynkelStatus* out_status);
 void fynkel_world_destroy(FynkelWorld* world);
 
-/* Starts a host frame: accumulates dt, decides the number of fixed ticks,
+/* Starts a host frame: accepts real dt, samples scale, clamps gameplay once,
+ * advances absolute host timelines and decides the number of fixed ticks,
  * clears last frame's presentation overrides (§5.1). */
 FynkelStatus fynkel_world_begin_frame(FynkelWorld* world,
-                                      float dt_seconds,
+                                      double dt_seconds,
+                                      double time_scale,
                                       FynkelFramePlan* out_plan);
 
 /* Validates a command buffer. Simulation-lane commands are staged for the
@@ -362,6 +388,11 @@ FynkelStatus fynkel_world_submit_commands(FynkelWorld* world,
  * phases, publishes the snapshot (subscribed entities only), events and
  * diagnostics. Returns OK or COMMANDS_REJECTED on a normal step. */
 FynkelStatus fynkel_world_step(FynkelWorld* world, FynkelStepResult* out_result);
+
+/* After a completed manual fixed sequence, display its current pose without
+ * interpolation lag. Does not advance clocks or change the accumulator.
+ * Call before presentation; normal interpolation resumes on the next tick. */
+FynkelStatus fynkel_world_snap_interpolation(FynkelWorld* world);
 
 /* Subscribe/unsubscribe `count` entities' `component` for snapshots.
  * Only FYNKEL_COMPONENT_TRANSFORM is subscribable in M1. */
@@ -428,7 +459,7 @@ FynkelStatus fynkel_world_physics_query(FynkelWorld* world,
 #define FYNKEL_PROJECTED_DROPPED 32u   /* beyond FYNKEL_MAX_PROJECTION_ANCHORS */
 
 typedef struct FynkelProjectionInfo {
-  uint64_t camera;    /* the entity rendered from; 0 = no camera */
+  FynkelEntity camera;    /* the entity rendered from; 0 = no camera */
   uint32_t projected; /* anchors projected */
   uint32_t dropped;   /* anchors beyond the bound */
 } FynkelProjectionInfo;
@@ -547,7 +578,7 @@ FynkelStatus fynkel_world_unload_scene(FynkelWorld* world,
  * the survivors ("persistent"). FYNKEL_STATUS_INVALID_ARGUMENT for an
  * entity that is not live or has a parent. */
 FynkelStatus fynkel_world_dont_destroy_on_load(FynkelWorld* world,
-                                               uint64_t entity);
+                                               FynkelEntity entity);
 /* Loading a scene in the background (ADR-0038). _async starts reading
  * the cooked scene `scene_id_utf8` from `cache_utf8` and making every
  * asset it uses resident on a background thread while the world runs on;
@@ -597,7 +628,7 @@ FynkelStatus fynkel_world_bind_actions(FynkelWorld* world,
  * the last successful load opened (FYNKEL_STATUS_LOAD_FAILED before any);
  * its closure is retained with the scene's. Components go through the
  * command path; the root and the entities are in the report:
- * {"ok", "instance": {"prefab", "name", "path", "root": u64,
+ * {"ok", "instance": {"prefab", "name", "path", "root": hex128 string,
  * "entities": n, "rejectedComponents", "assets", "behaviours": [...]},
  * "diagnostics": [...]}. FYNKEL_STATUS_LOAD_FAILED when the prefab is not
  * in the cache, does not decode (recook) or `parent` is not live (the
@@ -622,7 +653,7 @@ FynkelStatus fynkel_world_instantiate(FynkelWorld* world,
  * source's name) with the given local transform under `parent` (0 = a
  * root); the others keep their local transforms. Components go through
  * the command path, as an instantiated prefab's. No project needed. The
- * report: {"ok", "clone": {"source": u64, "root": u64, "entities":
+ * report: {"ok", "clone": {"source": hex128 string, "root": hex128 string, "entities":
  * [[source, copy], ...] (breadth first, the root first),
  * "rejectedComponents"}, "diagnostics": [...]}. FYNKEL_STATUS_LOAD_FAILED
  * when `source` or `parent` is not live or the transform is not finite
@@ -731,6 +762,28 @@ FynkelStatus fynkel_world_asset_json(FynkelWorld* world,
  * "diagnostics": [{"code", "severity", "message", "document"?,
  * "pointer"?, ...}]}. Valid until the next such call. */
 FynkelBufferView fynkel_world_load_report(const FynkelWorld* world);
+
+/* F2 synchronous owned gameplay edit sessions, protocol version 1.
+ * begin locks ordinary mutating/query calls until end. Such calls reject and
+ * fail the edit. Snapshot/clock reads retain committed values. Destroy aborts.
+ * Exchange framing: docs/design/foundation-gameplay-wire.md.
+ * Errors return UTF-8 text; success returns operation-specific bytes.
+ * Views expire at the next edit call. sequence is world-local and never reused.
+ * End(commit=0) aborts; end(commit=1) validates and atomically publishes.
+ */
+/* Adopt queued simulation commands atomically without a tick. No active edit.
+ * Failure retains the native queue. Success: spawn count u32, (temp ID u64,
+ * entity) pairs, live count u32, (entity, name byte count u32, UTF-8 name) pairs.
+ * Canceled spawns have a null entity. Failure output is UTF-8 diagnostic text. */
+FynkelStatus fynkel_world_gameplay_adopt(FynkelWorld* world, FynkelBufferView* out_view);
+/* Capture interpolation history before fixed callbacks; cancel an abandoned tick. */
+FynkelStatus fynkel_world_gameplay_tick_prepare(FynkelWorld* world);
+FynkelStatus fynkel_world_gameplay_tick_cancel(FynkelWorld* world);
+FynkelStatus fynkel_world_gameplay_begin(FynkelWorld* world, uint64_t* out_sequence);
+FynkelStatus fynkel_world_gameplay_exchange(FynkelWorld* world, uint64_t sequence,
+    const uint8_t* data, uint32_t len, FynkelBufferView* out_view);
+FynkelStatus fynkel_world_gameplay_end(FynkelWorld* world, uint64_t sequence,
+    uint32_t commit, FynkelBufferView* out_view);
 
 #ifdef __cplusplus
 }

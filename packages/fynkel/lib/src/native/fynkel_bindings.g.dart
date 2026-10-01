@@ -19,47 +19,76 @@ external int fynkel_abi_version();
 @ffi.Native<ffi.Uint64 Function()>()
 external int fynkel_schema_fingerprint();
 
+@ffi.Native<ffi.Pointer<FynkelIdentityAuthority> Function()>()
+external ffi.Pointer<FynkelIdentityAuthority> fynkel_identity_authority();
+
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<FynkelIdentityAuthority>)>(
+  symbol: 'fynkel_identity_attach',
+)
+external int _fynkel_identity_attach(
+  ffi.Pointer<FynkelIdentityAuthority> authority,
+);
+
+FynkelStatus fynkel_identity_attach(
+  ffi.Pointer<FynkelIdentityAuthority> authority,
+) => FynkelStatus.fromValue(_fynkel_identity_attach(authority));
+
 @ffi.Native<ffi.Pointer<FynkelRuntime> Function()>()
 external ffi.Pointer<FynkelRuntime> fynkel_runtime_create();
 
 @ffi.Native<ffi.Void Function(ffi.Pointer<FynkelRuntime>)>()
 external void fynkel_runtime_destroy(ffi.Pointer<FynkelRuntime> runtime);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FynkelWorld>, FynkelEntity)>()
+external int fynkel_world_contains(
+  ffi.Pointer<FynkelWorld> world,
+  FynkelEntity entity,
+);
+
+@ffi.Native<ffi.Double Function(ffi.Pointer<FynkelWorld>)>()
+external double fynkel_world_simulation_elapsed(ffi.Pointer<FynkelWorld> world);
+
 @ffi.Native<
   ffi.Pointer<FynkelWorld> Function(
     ffi.Pointer<FynkelRuntime>,
     ffi.Pointer<FynkelWorldDesc>,
+    ffi.Pointer<ffi.UnsignedInt>,
   )
 >()
 external ffi.Pointer<FynkelWorld> fynkel_world_create(
   ffi.Pointer<FynkelRuntime> runtime,
   ffi.Pointer<FynkelWorldDesc> desc,
+  ffi.Pointer<ffi.UnsignedInt> out_status,
 );
 
 @ffi.Native<ffi.Void Function(ffi.Pointer<FynkelWorld>)>()
 external void fynkel_world_destroy(ffi.Pointer<FynkelWorld> world);
 
-/// Starts a host frame: accumulates dt, decides the number of fixed ticks,
+/// Starts a host frame: accepts real dt, samples scale, clamps gameplay once,
+/// advances absolute host timelines and decides the number of fixed ticks,
 /// clears last frame's presentation overrides (§5.1).
 @ffi.Native<
   ffi.UnsignedInt Function(
     ffi.Pointer<FynkelWorld>,
-    ffi.Float,
+    ffi.Double,
+    ffi.Double,
     ffi.Pointer<FynkelFramePlan>,
   )
 >(symbol: 'fynkel_world_begin_frame')
 external int _fynkel_world_begin_frame(
   ffi.Pointer<FynkelWorld> world,
   double dt_seconds,
+  double time_scale,
   ffi.Pointer<FynkelFramePlan> out_plan,
 );
 
 FynkelStatus fynkel_world_begin_frame(
   ffi.Pointer<FynkelWorld> world,
   double dt_seconds,
+  double time_scale,
   ffi.Pointer<FynkelFramePlan> out_plan,
 ) => FynkelStatus.fromValue(
-  _fynkel_world_begin_frame(world, dt_seconds, out_plan),
+  _fynkel_world_begin_frame(world, dt_seconds, time_scale, out_plan),
 );
 
 /// Validates a command buffer. Simulation-lane commands are staged for the
@@ -110,6 +139,17 @@ FynkelStatus fynkel_world_step(
   ffi.Pointer<FynkelWorld> world,
   ffi.Pointer<FynkelStepResult> out_result,
 ) => FynkelStatus.fromValue(_fynkel_world_step(world, out_result));
+
+/// After a completed manual fixed sequence, display its current pose without
+/// interpolation lag. Does not advance clocks or change the accumulator.
+/// Call before presentation; normal interpolation resumes on the next tick.
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<FynkelWorld>)>(
+  symbol: 'fynkel_world_snap_interpolation',
+)
+external int _fynkel_world_snap_interpolation(ffi.Pointer<FynkelWorld> world);
+
+FynkelStatus fynkel_world_snap_interpolation(ffi.Pointer<FynkelWorld> world) =>
+    FynkelStatus.fromValue(_fynkel_world_snap_interpolation(world));
 
 /// Subscribe/unsubscribe `count` entities' `component` for snapshots.
 /// Only FYNKEL_COMPONENT_TRANSFORM is subscribable in M1.
@@ -198,7 +238,8 @@ external FynkelBufferView fynkel_world_after_physics_events(
 );
 
 /// Explicit query; the response is valid until the next mutating call or
-/// the next query.
+/// the next query of the same kind (each kind answers into its own buffer,
+/// so views of different kinds can be held together).
 @ffi.Native<
   ffi.UnsignedInt Function(
     ffi.Pointer<FynkelWorld>,
@@ -220,7 +261,8 @@ FynkelStatus fynkel_world_query(
 
 /// Spatial queries (M3-08): `buffer` is a PHYSICS_QUERIES buffer; the
 /// response (a QUERY buffer of PhysicsHitRecords, query order, nearest
-/// first within a query) is valid until the next query or mutating call.
+/// first within a query) is valid until the next physics query or
+/// mutating call.
 /// A framing error is FYNKEL_STATUS_PROTOCOL with an empty view.
 @ffi.Native<
   ffi.UnsignedInt Function(
@@ -251,7 +293,7 @@ FynkelStatus fynkel_world_physics_query(
 /// the response is a QUERY buffer of one ProjectedPointRecord per anchor
 /// in request order (x/y in that viewport's pixels, origin top-left, y
 /// down; depth metres along the view axis; flags above), valid until the
-/// next query or mutating call. out_info/out_view may be NULL. A framing
+/// next projection or mutating call. out_info/out_view may be NULL. A framing
 /// error is FYNKEL_STATUS_PROTOCOL with an empty view.
 @ffi.Native<
   ffi.UnsignedInt Function(
@@ -542,17 +584,17 @@ FynkelStatus fynkel_world_unload_scene(
 /// go with it; given a parent it stops being kept. The load report counts
 /// the survivors ("persistent"). FYNKEL_STATUS_INVALID_ARGUMENT for an
 /// entity that is not live or has a parent.
-@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<FynkelWorld>, ffi.Uint64)>(
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<FynkelWorld>, FynkelEntity)>(
   symbol: 'fynkel_world_dont_destroy_on_load',
 )
 external int _fynkel_world_dont_destroy_on_load(
   ffi.Pointer<FynkelWorld> world,
-  int entity,
+  FynkelEntity entity,
 );
 
 FynkelStatus fynkel_world_dont_destroy_on_load(
   ffi.Pointer<FynkelWorld> world,
-  int entity,
+  FynkelEntity entity,
 ) => FynkelStatus.fromValue(_fynkel_world_dont_destroy_on_load(world, entity));
 
 @ffi.Native<
@@ -899,14 +941,135 @@ external FynkelBufferView fynkel_world_load_report(
   ffi.Pointer<FynkelWorld> world,
 );
 
+/// F2 synchronous owned gameplay edit sessions, protocol version 1.
+/// begin locks ordinary mutating/query calls until end. Such calls reject and
+/// fail the edit. Snapshot/clock reads retain committed values. Destroy aborts.
+/// Exchange framing: docs/design/foundation-gameplay-wire.md.
+/// Errors return UTF-8 text; success returns operation-specific bytes.
+/// Views expire at the next edit call. sequence is world-local and never reused.
+/// End(commit=0) aborts; end(commit=1) validates and atomically publishes.
+/// /
+/// /* Adopt queued simulation commands atomically without a tick. No active edit.
+/// Failure retains the native queue. Success: spawn count u32, (temp ID u64,
+/// entity) pairs, live count u32, (entity, name byte count u32, UTF-8 name) pairs.
+/// Canceled spawns have a null entity. Failure output is UTF-8 diagnostic text.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<FynkelBufferView>,
+  )
+>(symbol: 'fynkel_world_gameplay_adopt')
+external int _fynkel_world_gameplay_adopt(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<FynkelBufferView> out_view,
+);
+
+FynkelStatus fynkel_world_gameplay_adopt(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<FynkelBufferView> out_view,
+) => FynkelStatus.fromValue(_fynkel_world_gameplay_adopt(world, out_view));
+
+/// Capture interpolation history before fixed callbacks; cancel an abandoned tick.
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<FynkelWorld>)>(
+  symbol: 'fynkel_world_gameplay_tick_prepare',
+)
+external int _fynkel_world_gameplay_tick_prepare(
+  ffi.Pointer<FynkelWorld> world,
+);
+
+FynkelStatus fynkel_world_gameplay_tick_prepare(
+  ffi.Pointer<FynkelWorld> world,
+) => FynkelStatus.fromValue(_fynkel_world_gameplay_tick_prepare(world));
+
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<FynkelWorld>)>(
+  symbol: 'fynkel_world_gameplay_tick_cancel',
+)
+external int _fynkel_world_gameplay_tick_cancel(ffi.Pointer<FynkelWorld> world);
+
+FynkelStatus fynkel_world_gameplay_tick_cancel(
+  ffi.Pointer<FynkelWorld> world,
+) => FynkelStatus.fromValue(_fynkel_world_gameplay_tick_cancel(world));
+
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<FynkelWorld>, ffi.Pointer<ffi.Uint64>)
+>(symbol: 'fynkel_world_gameplay_begin')
+external int _fynkel_world_gameplay_begin(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint64> out_sequence,
+);
+
+FynkelStatus fynkel_world_gameplay_begin(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint64> out_sequence,
+) => FynkelStatus.fromValue(_fynkel_world_gameplay_begin(world, out_sequence));
+
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Uint64,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+    ffi.Pointer<FynkelBufferView>,
+  )
+>(symbol: 'fynkel_world_gameplay_exchange')
+external int _fynkel_world_gameplay_exchange(
+  ffi.Pointer<FynkelWorld> world,
+  int sequence,
+  ffi.Pointer<ffi.Uint8> data,
+  int len,
+  ffi.Pointer<FynkelBufferView> out_view,
+);
+
+FynkelStatus fynkel_world_gameplay_exchange(
+  ffi.Pointer<FynkelWorld> world,
+  int sequence,
+  ffi.Pointer<ffi.Uint8> data,
+  int len,
+  ffi.Pointer<FynkelBufferView> out_view,
+) => FynkelStatus.fromValue(
+  _fynkel_world_gameplay_exchange(world, sequence, data, len, out_view),
+);
+
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Uint64,
+    ffi.Uint32,
+    ffi.Pointer<FynkelBufferView>,
+  )
+>(symbol: 'fynkel_world_gameplay_end')
+external int _fynkel_world_gameplay_end(
+  ffi.Pointer<FynkelWorld> world,
+  int sequence,
+  int commit,
+  ffi.Pointer<FynkelBufferView> out_view,
+);
+
+FynkelStatus fynkel_world_gameplay_end(
+  ffi.Pointer<FynkelWorld> world,
+  int sequence,
+  int commit,
+  ffi.Pointer<FynkelBufferView> out_view,
+) => FynkelStatus.fromValue(
+  _fynkel_world_gameplay_end(world, sequence, commit, out_view),
+);
+
 final class FynkelRuntime extends ffi.Opaque {}
 
 final class FynkelWorld extends ffi.Opaque {}
 
 /// Entity handle: world id (8) | generation (24, never 0) | slot (32).
 /// 0 is never valid.
-typedef FynkelEntity = ffi.Uint64;
-typedef DartFynkelEntity = int;
+final class FynkelEntity extends ffi.Struct {
+  @ffi.Uint64()
+  external int world;
+
+  @ffi.Uint32()
+  external int slot;
+
+  @ffi.Uint32()
+  external int generation;
+}
 
 enum FynkelStatus {
   FYNKEL_STATUS_OK(0),
@@ -1214,16 +1377,16 @@ enum FynkelQueryKind {
   /// entity -> one SnapshotTransformRecord (0 records if unknown).
   FYNKEL_QUERY_TRANSFORM(1),
 
-  /// entity -> u64 handles of its children, deterministic order.
+  /// entity -> FynkelEntity handles of its children, deterministic order.
   FYNKEL_QUERY_CHILDREN(2),
 
-  /// entity -> one u64: parent handle or 0.
+  /// entity -> one FynkelEntity: parent handle or all zero.
   FYNKEL_QUERY_PARENT(3),
 
   /// entity -> one Name record (0 records if none).
   FYNKEL_QUERY_NAME(4),
 
-  /// (no entity) -> u64 handles of every live entity, slot order.
+  /// (no entity) -> FynkelEntity handles of every live entity, slot order.
   FYNKEL_QUERY_ALL_ENTITIES(5),
 
   /// entity -> one framed record per native component it has, id order:
@@ -1335,13 +1498,6 @@ final class FynkelBufferView extends ffi.Struct {
 }
 
 final class FynkelWorldDesc extends ffi.Struct {
-  /// 1..255; 0 = default (1)
-  @ffi.Uint8()
-  external int world_id;
-
-  @ffi.Array.multi([3])
-  external ffi.Array<ffi.Uint8> reserved;
-
   /// 0 = default 1/60
   @ffi.Float()
   external double fixed_dt_seconds;
@@ -1368,13 +1524,32 @@ final class FynkelFramePlan extends ffi.Struct {
   @ffi.Float()
   external double dropped_seconds;
 
-  /// frame dt exceeded max_frame_dt
+  /// scaled dt exceeded max_frame_dt
   @ffi.Uint32()
   external int clamped;
 
   /// interpolation factor after the steps
   @ffi.Float()
   external double alpha;
+
+  @ffi.Double()
+  external double real_delta;
+
+  @ffi.Double()
+  external double gameplay_delta;
+
+  @ffi.Double()
+  external double real_elapsed;
+
+  @ffi.Double()
+  external double gameplay_elapsed;
+
+  /// excluded by gameplay clamp, not catch-up
+  @ffi.Double()
+  external double clamped_seconds;
+
+  @ffi.Uint64()
+  external int frame;
 }
 
 final class FynkelSubmitResult extends ffi.Struct {
@@ -1391,6 +1566,9 @@ final class FynkelStepResult extends ffi.Struct {
   /// tick number after the step
   @ffi.Uint64()
   external int tick;
+
+  @ffi.Double()
+  external double simulation_elapsed;
 
   @ffi.Uint32()
   external int commands_applied;
@@ -1422,8 +1600,7 @@ final class FynkelQueryDesc extends ffi.Struct {
   external int request_id;
 
   /// subject, per kind
-  @FynkelEntity()
-  external int entity;
+  external FynkelEntity entity;
 }
 
 /// Bridge statistics since world creation (blueprint §5.7, M1 gate).
@@ -1491,10 +1668,11 @@ final class FynkelWorldStats extends ffi.Struct {
   external int residency_bytes;
 }
 
+final class FynkelIdentityAuthority extends ffi.Opaque {}
+
 final class FynkelProjectionInfo extends ffi.Struct {
   /// the entity rendered from; 0 = no camera
-  @ffi.Uint64()
-  external int camera;
+  external FynkelEntity camera;
 
   /// anchors projected
   @ffi.Uint32()
@@ -1513,7 +1691,7 @@ final class FynkelProjectionInfo extends ffi.Struct {
 /// the last successful load opened (FYNKEL_STATUS_LOAD_FAILED before any);
 /// its closure is retained with the scene's. Components go through the
 /// command path; the root and the entities are in the report:
-/// {"ok", "instance": {"prefab", "name", "path", "root": u64,
+/// {"ok", "instance": {"prefab", "name", "path", "root": hex128 string,
 /// "entities": n, "rejectedComponents", "assets", "behaviours": [...]},
 /// "diagnostics": [...]}. FYNKEL_STATUS_LOAD_FAILED when the prefab is not
 /// in the cache, does not decode (recook) or `parent` is not live (the
@@ -1531,8 +1709,7 @@ final class FynkelInstantiateDesc extends ffi.Struct {
   external int name_len;
 
   /// 0: a root
-  @FynkelEntity()
-  external int parent;
+  external FynkelEntity parent;
 
   @ffi.Array.multi([3])
   external ffi.Array<ffi.Float> position;
@@ -1553,14 +1730,13 @@ final class FynkelInstantiateDesc extends ffi.Struct {
 /// source's name) with the given local transform under `parent` (0 = a
 /// root); the others keep their local transforms. Components go through
 /// the command path, as an instantiated prefab's. No project needed. The
-/// report: {"ok", "clone": {"source": u64, "root": u64, "entities":
+/// report: {"ok", "clone": {"source": hex128 string, "root": hex128 string, "entities":
 /// [[source, copy], ...] (breadth first, the root first),
 /// "rejectedComponents"}, "diagnostics": [...]}. FYNKEL_STATUS_LOAD_FAILED
 /// when `source` or `parent` is not live or the transform is not finite
 /// (the world is unchanged).
 final class FynkelCloneDesc extends ffi.Struct {
-  @FynkelEntity()
-  external int source;
+  external FynkelEntity source;
 
   /// NULL with name_len 0 for none
   external ffi.Pointer<ffi.Uint8> name_utf8;
@@ -1569,8 +1745,7 @@ final class FynkelCloneDesc extends ffi.Struct {
   external int name_len;
 
   /// 0: a root
-  @FynkelEntity()
-  external int parent;
+  external FynkelEntity parent;
 
   @ffi.Array.multi([3])
   external ffi.Array<ffi.Float> position;
@@ -1583,7 +1758,7 @@ final class FynkelCloneDesc extends ffi.Struct {
   external ffi.Array<ffi.Float> scale;
 }
 
-const int FYNKEL_ABI_VERSION = 1;
+const int FYNKEL_ABI_VERSION = 3;
 
 const int FYNKEL_BUFFER_MAGIC = 1263425862;
 

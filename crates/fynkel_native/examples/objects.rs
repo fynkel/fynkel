@@ -43,7 +43,7 @@ fn main() {
     let cache = cache.display().to_string();
 
     let rt = fynkel_runtime_create();
-    let w = unsafe { fynkel_world_create(rt, ptr::null()) };
+    let w = unsafe { fynkel_world_create(rt, ptr::null(), std::ptr::null_mut()) };
     assert!(!w.is_null());
     let status = unsafe { fynkel_world_load_project(w, cache.as_ptr(), cache.len() as u32) };
     assert_eq!(status, Status::Ok);
@@ -280,7 +280,7 @@ fn instantiate(w: *mut FynkelWorld, position: [f32; 3]) -> Entity {
         prefab_id_len: ENEMY.len() as u32,
         name_utf8: ptr::null(),
         name_len: 0,
-        parent: 0,
+        parent: Entity::NULL,
         position,
         rotation: [0.0, 0.0, 0.0, 1.0],
         scale: [1.0, 1.0, 1.0],
@@ -289,7 +289,7 @@ fn instantiate(w: *mut FynkelWorld, position: [f32; 3]) -> Entity {
     let v = unsafe { fynkel_world_load_report(w) };
     let bytes = unsafe { std::slice::from_raw_parts(v.data, v.length as usize) };
     let report: serde_json::Value = serde_json::from_slice(bytes).unwrap();
-    Entity::from_bits(report["instance"]["root"].as_u64().unwrap())
+    Entity::from_hex(report["instance"]["root"].as_str().unwrap()).unwrap()
 }
 
 /// The live Rust heap in KiB (`FynkelWorldStats::native_bytes`, the

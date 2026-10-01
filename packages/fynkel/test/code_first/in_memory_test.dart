@@ -39,10 +39,10 @@ void main() {
     expect(transform['type'], 'fynkel.Transform');
     expect((transform['data']! as Map)['position'], [0.0, 1.0, 0.0]);
     final light = entities[roots.last]! as Map<String, Object?>;
-    expect([for (final c in (light['components']! as Map).values) (c as Map)['type']], [
-      'fynkel.Transform',
-      'fynkel.PointLight',
-    ]);
+    expect(
+      [for (final c in (light['components']! as Map).values) (c as Map)['type']],
+      ['fynkel.Transform', 'fynkel.PointLight'],
+    );
     // Nothing was written.
     expect(File('$fixture/assets/Ring.scene.json').existsSync(), isFalse);
   });

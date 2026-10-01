@@ -63,7 +63,13 @@ void main() {
     expect(w.assets.pathOf(const AssetRef('00000000-0000-4000-8000-00000000abcd')), isNull);
     expect(
       () => w.assets.find('rigs/column'),
-      throwsA(isA<StateError>().having((e) => e.message, 'message', allOf(contains('column.rig.json'), contains('column.blend.json')))),
+      throwsA(
+        isA<StateError>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('column.rig.json'), contains('column.blend.json')),
+        ),
+      ),
     );
   });
 

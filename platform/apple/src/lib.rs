@@ -378,7 +378,7 @@ fn panic_text(payload: Box<dyn std::any::Any + Send>) -> String {
 /// inside a call breaks the viewport instead of aborting the process —
 /// `FYNKEL_APPLE_RENDER_BROKEN`, `fynkel_apple_viewport_error`,
 /// `fynkel_apple_viewport_debug_panic`, foundation 4.3).
-pub const APPLE_ABI_VERSION: u32 = 11;
+pub const APPLE_ABI_VERSION: u32 = 12;
 
 /// Bit 0 of an extra world's flags (`fynkel_apple_viewport_extra_worlds`):
 /// drawn greyed.
@@ -853,9 +853,9 @@ pub unsafe extern "C" fn fynkel_apple_viewport_overlay(
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_apple_viewport_outline(
     vp: *mut Viewport,
-    selected: *const u64,
+    selected: *const fynkel_contracts::Entity,
     selected_count: u32,
-    children: *const u64,
+    children: *const fynkel_contracts::Entity,
     children_count: u32,
     style: *const f32,
 ) -> i32 {
@@ -877,15 +877,13 @@ pub unsafe extern "C" fn fynkel_apple_viewport_outline(
                 width: f[8],
             }
         };
-        let entities = |bits: *const u64, count: u32| -> Vec<fynkel_contracts::Entity> {
-            if count == 0 {
-                return Vec::new();
-            }
-            std::slice::from_raw_parts(bits, count as usize)
-                .iter()
-                .map(|b| fynkel_contracts::Entity::from_bits(*b))
-                .collect()
-        };
+        let entities =
+            |bits: *const fynkel_contracts::Entity, count: u32| -> Vec<fynkel_contracts::Entity> {
+                if count == 0 {
+                    return Vec::new();
+                }
+                std::slice::from_raw_parts(bits, count as usize).to_vec()
+            };
         let (selected, children) = (
             entities(selected, selected_count),
             entities(children, children_count),

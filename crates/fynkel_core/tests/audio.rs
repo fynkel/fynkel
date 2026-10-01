@@ -509,3 +509,117 @@ fn a_changed_clip_restarts_and_the_scene_load_registers_nothing_by_itself() {
     assert_eq!(w.audio_stats().started, 2);
     assert!(w.has_sound(&a) && !w.has_sound(&clip_ref(3)));
 }
+
+#[test]
+fn play_then_pause_in_one_legacy_batch_holds_the_new_voice() {
+    let mut w = world();
+    let clip = clip_ref(1);
+    w.register_sound(clip.clone(), one_second()).unwrap();
+    let e = spawn(&mut w, 1, "Speaker");
+    set(
+        &mut w,
+        e,
+        ComponentValue::AudioSource(source(clip, false, false)),
+    );
+    w.submit(
+        Lane::Simulation,
+        vec![
+            Command::Audio {
+                entity: e,
+                op: AudioOp::Play,
+            },
+            Command::Audio {
+                entity: e,
+                op: AudioOp::Pause,
+            },
+        ],
+    );
+    w.step();
+    let state = w.audio_state(e).unwrap();
+    assert!(state.playing && state.paused);
+    assert_eq!(state.time, 0.0);
+    w.submit(
+        Lane::Simulation,
+        vec![Command::Audio {
+            entity: e,
+            op: AudioOp::Play,
+        }],
+    );
+    w.step();
+    assert!(!w.audio_state(e).unwrap().paused);
+    assert!(w.audio_state(e).unwrap().time > 0.0);
+}
+
+#[test]
+fn native_audio_playing_outputs_validate_as_one_batch_without_rolling_back_mixer_progress() {
+    let mut w = world();
+    let clip = clip_ref(1);
+    w.register_sound(clip.clone(), one_second()).unwrap();
+    let a = spawn(&mut w, 1, "a");
+    let b = spawn(&mut w, 2, "b");
+    set(
+        &mut w,
+        a,
+        ComponentValue::AudioSource(source(clip.clone(), true, false)),
+    );
+    set(
+        &mut w,
+        b,
+        ComponentValue::AudioSource(source(clip, true, false)),
+    );
+    assert_eq!(w.audio().voice_count(), 2);
+    w.edit_gameplay(|edit| {
+        edit.set_active(a, false)?;
+        edit.set_active(b, false)
+    })
+    .unwrap();
+    // Model an invalid internal producer bypassing the public validator.
+    w.ecs().get_mut::<AudioSource>(b).unwrap().volume = f32::NAN;
+    w.step();
+    assert!(w
+        .diagnostics()
+        .iter()
+        .any(|d| d.message.contains("audio output")));
+    assert!(
+        source_of(&w, a).playing,
+        "another source cannot partially publish before a rejected output"
+    );
+    assert!(source_of(&w, b).playing);
+    assert_eq!(
+        w.audio().voice_count(),
+        0,
+        "mixer reconciliation is not a rollbackable simulation copy"
+    );
+}
+
+#[test]
+fn native_audio_end_is_immediately_visible_through_the_gameplay_journal() {
+    let mut w = world();
+    let clip = clip_ref(1);
+    w.register_sound(
+        clip.clone(),
+        AudioClip::new(NULL_SAMPLE_RATE, 1, vec![0.5]).unwrap(),
+    )
+    .unwrap();
+    let owner = w
+        .edit_gameplay(|edit| {
+            let owner = edit.spawn("short", Transform::default(), None)?;
+            edit.set_component(
+                owner,
+                ComponentValue::AudioSource(source(clip.clone(), true, false)),
+            )?;
+            Ok(owner)
+        })
+        .unwrap();
+    let owner = owner.resolve(owner.value).unwrap();
+    w.step();
+    w.edit_gameplay(|edit| {
+        match edit.component(owner, ComponentId::AUDIO_SOURCE)? {
+            Some(GameplayComponentValue::AudioSource(source)) => assert!(!source.playing),
+            _ => panic!("missing source"),
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(ended_events(&mut w), vec![(owner, clip)]);
+}

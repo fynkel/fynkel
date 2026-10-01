@@ -19,6 +19,8 @@
 //! links stay right; a system that writes `Transform` directly must call
 //! [`mark_dirty`].
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use fynkel_contracts::Entity;
 use fynkel_ecs::internal::hecs;
 use fynkel_ecs::{EcsError, EntityBuilder, World};
@@ -57,10 +59,17 @@ impl Transform {
         }
     }
 
+    /// Shared validity contract for authoritative local transforms.
+    pub fn is_valid(&self) -> bool {
+        self.is_finite() && (self.rotation.length_squared() - 1.0).abs() <= 0.001
+    }
+
     pub fn matrix(&self) -> Mat4 {
         Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.position)
     }
 
+    /// Approximate decomposition: a TRS cannot retain shear. Geometry must
+    /// keep the matrix. Use `try_from_matrix` before storing a derived local.
     pub fn from_matrix(m: Mat4) -> Self {
         let (scale, rotation, position) = m.to_scale_rotation_translation();
         Self {
@@ -68,6 +77,30 @@ impl Transform {
             rotation,
             scale,
         }
+    }
+
+    /// Checked conversion for operations that promise to preserve geometry.
+    /// Reflections are assigned to X; singular bases and shear are rejected.
+    pub fn try_from_matrix(m: Mat4) -> Option<Self> {
+        if !m.is_finite() {
+            return None;
+        }
+        let x = m.x_axis.truncate();
+        let y = m.y_axis.truncate();
+        let z = m.z_axis.truncate();
+        let lengths = Vec3::new(x.length(), y.length(), z.length());
+        if lengths.min_element() == 0.0 || !lengths.is_finite() {
+            return None;
+        }
+        let a = x / lengths.x;
+        let b = y / lengths.y;
+        let c = z / lengths.z;
+        if a.dot(b).abs() > 1e-4 || a.dot(c).abs() > 1e-4 || b.dot(c).abs() > 1e-4 {
+            return None;
+        }
+        let mut result = Self::from_matrix(m);
+        result.rotation = result.rotation.normalize();
+        result.is_finite().then_some(result)
     }
 
     pub fn is_finite(&self) -> bool {
@@ -177,6 +210,8 @@ pub enum SceneError {
         parent: Entity,
     },
     NotFinite(Entity),
+    /// A required inverse or exact local TRS cannot represent this transform.
+    UnsupportedTransform(Entity),
 }
 
 impl From<EcsError> for SceneError {
@@ -199,7 +234,10 @@ pub fn spawn(world: &mut World, transform: Transform, parent: Option<Entity>) ->
     if !transform.is_finite() {
         return Err(SceneError::NotFinite(Entity::NULL));
     }
-    let e = world.spawn(spatial(transform));
+    if !transform.is_valid() {
+        return Err(SceneError::UnsupportedTransform(Entity::NULL));
+    }
+    let e = world.try_spawn(spatial(transform))?;
     if let Some(p) = parent {
         if let Err(err) = set_parent_keep_local(world, e, Some(p)) {
             let _ = world.despawn(e);
@@ -245,38 +283,123 @@ pub fn set_local(world: &World, entity: Entity, transform: Transform) -> Result<
     if !transform.is_finite() {
         return Err(SceneError::NotFinite(entity));
     }
+    if !transform.is_valid() {
+        return Err(SceneError::UnsupportedTransform(entity));
+    }
     *world.get_mut::<Transform>(entity)? = transform;
     mark_dirty(world, entity)?;
     Ok(())
 }
 
-/// Sets the local transform so the entity's world pose is `position` /
-/// `rotation` (its local scale kept), relative to the parent's cached world
-/// matrix — what physics and native movers write. A pose equal to the
-/// current one leaves the subtree clean.
-pub fn set_world_pose(world: &World, entity: Entity, position: Vec3, rotation: Quat) -> Result<()> {
-    let current = world.copy::<Transform>(entity)?;
-    let parent = world.get::<Parent>(entity).ok().map(|p| p.0);
-    let local = match parent.and_then(|p| world.copy::<WorldTransform>(p).ok()) {
-        Some(pw) => {
-            let m = pw.matrix.inverse() * Mat4::from_rotation_translation(rotation, position);
-            let t = Transform::from_matrix(m);
-            Transform {
-                position: t.position,
-                rotation: t.rotation.normalize(),
-                scale: current.scale,
-            }
+/// Publishes a local-pose batch only after every target and transform validates.
+/// Runtime solvers keep their own state; their ECS pose output uses this shared
+/// boundary. No transform or dirty flag changes when validation fails.
+pub fn set_local_batch(world: &World, poses: &[(Entity, Transform)]) -> Result<()> {
+    for &(entity, transform) in poses {
+        world.get::<Transform>(entity)?;
+        world.get::<WorldTransform>(entity)?;
+        if !transform.is_finite() {
+            return Err(SceneError::NotFinite(entity));
         }
-        None => Transform {
-            position,
-            rotation,
-            scale: current.scale,
-        },
-    };
-    if local != current {
-        set_local(world, entity, local)?;
+        if !transform.is_valid() {
+            return Err(SceneError::UnsupportedTransform(entity));
+        }
+    }
+    for &(entity, transform) in poses {
+        if world.copy::<Transform>(entity)? != transform {
+            set_local(world, entity, transform)?;
+        }
     }
     Ok(())
+}
+
+/// Prepares world-pose results as local transforms without publishing anything.
+/// Parents precede children regardless of input order; conversions see all
+/// previously prepared ancestors. Local scale is preserved. Duplicate targets
+/// use their last requested pose, and invalid batches have no side effects.
+pub fn prepare_world_poses(
+    world: &World,
+    poses: &[(Entity, Vec3, Quat)],
+) -> Result<Vec<(Entity, Transform)>> {
+    let requested: BTreeMap<_, _> = poses.iter().map(|&(e, p, r)| (e, (p, r))).collect();
+    let mut ordered = Vec::with_capacity(requested.len());
+    for &entity in requested.keys() {
+        world.get::<Transform>(entity)?;
+        world.get::<WorldTransform>(entity)?;
+        let mut depth = 0usize;
+        let mut ancestors = BTreeSet::from([entity]);
+        let mut parent = parent_of(world, entity);
+        while let Some(p) = parent {
+            if !ancestors.insert(p) {
+                return Err(SceneError::Cycle {
+                    child: entity,
+                    parent: p,
+                });
+            }
+            world.get::<Transform>(p)?;
+            depth += 1;
+            parent = parent_of(world, p);
+        }
+        ordered.push((depth, entity));
+    }
+    ordered.sort_unstable();
+    let mut prepared = BTreeMap::<Entity, Transform>::new();
+    let mut output = Vec::with_capacity(ordered.len());
+    for (_, entity) in ordered {
+        let (position, rotation) = requested[&entity];
+        let current = world.copy::<Transform>(entity)?;
+        let mut parent_matrix = Mat4::IDENTITY;
+        let mut parent_rotation = Quat::IDENTITY;
+        let mut parent = parent_of(world, entity);
+        while let Some(p) = parent {
+            let local = match prepared.get(&p) {
+                Some(local) => *local,
+                None => world.copy::<Transform>(p)?,
+            };
+            if !local.is_valid() {
+                return Err(SceneError::UnsupportedTransform(p));
+            }
+            parent_matrix = local.matrix() * parent_matrix;
+            parent_rotation = local.rotation * parent_rotation;
+            parent = parent_of(world, p);
+        }
+        let inverse =
+            inverse_affine(parent_matrix).ok_or(SceneError::UnsupportedTransform(entity))?;
+        let local = Transform {
+            position: inverse.transform_point3(position),
+            rotation: parent_rotation.inverse() * rotation,
+            scale: current.scale,
+        };
+        if !local.is_finite() {
+            return Err(SceneError::NotFinite(entity));
+        }
+        if !local.is_valid() {
+            return Err(SceneError::UnsupportedTransform(entity));
+        }
+        prepared.insert(entity, local);
+        output.push((entity, local));
+    }
+    Ok(output)
+}
+
+/// Authored world orientation, composed without scale or shear, matching
+/// gameplay Transform.rotation. This is not a decomposition of world_matrix.
+pub fn world_rotation(world: &World, entity: Entity) -> Result<Quat> {
+    let mut result = local(world, entity)?.rotation;
+    let mut parent = parent_of(world, entity);
+    while let Some(p) = parent {
+        result = local(world, p)?.rotation * result;
+        parent = parent_of(world, p);
+    }
+    Ok(result)
+}
+
+/// Writes exact world position and authored world orientation, keeping local
+/// scale. Reads current ancestors, including edits awaiting propagation.
+/// A singular parent is rejected before mutation.
+pub fn set_world_pose(world: &World, entity: Entity, position: Vec3, rotation: Quat) -> Result<()> {
+    let poses = prepare_world_poses(world, &[(entity, position, rotation)])?;
+    set_local_batch(world, &poses)
 }
 
 /// Marks an entity (and, at propagation time, its descendants) as needing a
@@ -342,9 +465,27 @@ pub fn set_parent_keep_world(
         Some(p) => current_world(world, p)?,
         None => Mat4::IDENTITY,
     };
+    if parent_of(world, child) == parent {
+        return Ok(());
+    }
+    let inverse = inverse_affine(parent_world).ok_or(SceneError::UnsupportedTransform(child))?;
+    let local = Transform::try_from_matrix(inverse * child_world)
+        .ok_or(SceneError::UnsupportedTransform(child))?;
+    // Validate before changing links: rejected keep-world operations are atomic.
     set_parent_keep_local(world, child, parent)?;
-    let local = Transform::from_matrix(parent_world.inverse() * child_world);
     set_local(world, child, local)
+}
+
+/// Inverts a finite affine basis unless its relative determinant is at most
+/// 1e-8. A failed inverse must not silently manufacture coordinates.
+pub fn inverse_affine(m: Mat4) -> Option<Mat4> {
+    let size =
+        m.x_axis.truncate().length() * m.y_axis.truncate().length() * m.z_axis.truncate().length();
+    if !m.is_finite() || !size.is_finite() || size == 0.0 || m.determinant().abs() / size <= 1e-8 {
+        return None;
+    }
+    let inverse = m.inverse();
+    inverse.is_finite().then_some(inverse)
 }
 
 /// The entity's world matrix as of now: the cached one when it and every

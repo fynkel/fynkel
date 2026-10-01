@@ -25,12 +25,16 @@ class ProjectionView {
 
   final World _world;
   final List<ScreenAnchor> _anchors = [];
-  final RecordBatch _batch = RecordBatch(BufferKind.projectionAnchors, gen.ProjectionAnchorRecord.wireSize, 64 * 32);
+  final RecordBatch _batch = RecordBatch(
+    BufferKind.projectionAnchors,
+    gen.ProjectionAnchorRecord.wireSize,
+    64 * 32,
+  );
   final _AnchorRecord _record = _AnchorRecord();
   final List<void Function()> _listeners = [];
   double _width = 0;
   double _height = 0;
-  int? _camera;
+  EntityRef? _camera;
   int _version = 0;
   bool _overflowReported = false;
 
@@ -52,7 +56,7 @@ class ProjectionView {
 
   /// The camera entity the last [update] projected from (null: the world
   /// has no enabled camera and nothing is placed).
-  int? get camera => _camera;
+  EntityRef? get camera => _camera;
 
   /// Bumped by every [update]; a cheap "did anything change" for a painter.
   int get version => _version;
@@ -112,10 +116,12 @@ class ProjectionView {
       if (a._dropped || a._fresh) dropped = true;
       a._dropped = false;
       a._fresh = false;
-      _batch.add(_record
-        ..entity = a._entityOrZero()
-        ..offset = a.offset
-        ..mask = a.occlusionMask);
+      _batch.add(
+        _record
+          ..entity = a._entityOrZero()
+          ..offset = a.offset
+          ..mask = a.occlusionMask,
+      );
     }
     for (var i = take; i < n; i++) {
       final a = _anchors[i];
@@ -132,7 +138,7 @@ class ProjectionView {
       _height.round().clamp(1, 1 << 20),
     );
     _batch.clear();
-    _camera = camera == 0 ? null : camera;
+    _camera = camera.isNull ? null : camera;
     // Read in place (no record objects) and notice whether anything moved:
     // a listener is a Flutter layer's repaint, which an idle frame with a
     // still camera and still targets should not cost.
@@ -142,11 +148,13 @@ class ProjectionView {
     for (var i = 0; i < rows; i++) {
       final o = i * gen.ProjectedPointRecord.wireSize;
       final a = _anchors[i];
-      final x = d.getFloat32(o + 8, Endian.little);
-      final y = d.getFloat32(o + 12, Endian.little);
-      final depth = d.getFloat32(o + 16, Endian.little);
-      final flags = d.getUint32(o + 20, Endian.little);
-      if (x != a._x || y != a._y || depth != a._depth || flags != a._flags) changed = true;
+      final x = d.getFloat32(o + 16, Endian.little);
+      final y = d.getFloat32(o + 20, Endian.little);
+      final depth = d.getFloat32(o + 24, Endian.little);
+      final flags = d.getUint32(o + 28, Endian.little);
+      if (x != a._x || y != a._y || depth != a._depth || flags != a._flags) {
+        changed = true;
+      }
       a._x = x;
       a._y = y;
       a._depth = depth;
@@ -160,7 +168,7 @@ class ProjectionView {
             commandIndex: 0xffffffff,
             code: DiagnosticCode.tooManyAnchors,
             rawCode: DiagnosticCode.tooManyAnchors.value,
-            entity: 0,
+            entity: EntityRef.nil,
             component: 0,
             lane: 1,
             message:
@@ -245,10 +253,13 @@ class ScreenAnchor {
   /// The raw `PROJECTED_*` bits of the last update.
   int get flags => _flags;
 
-  int _entityOrZero() {
+  EntityRef _entityOrZero() {
     final t = target;
-    if (t is GameObject) return t.isPending || !t.isAlive ? 0 : t.entity;
-    if (t is int) return t;
+    if (t is GameObject) {
+      // The native batch validates liveness; avoid one FFI lookup per anchor.
+      return t.isPending || !t._alive ? EntityRef.nil : t.entity;
+    }
+    if (t is EntityRef) return t;
     throw ArgumentError.value(t, 'target', 'expected a GameObject or an entity handle');
   }
 
@@ -266,14 +277,14 @@ class ScreenAnchor {
 /// is immutable; one of these per view keeps [ProjectionView.update]
 /// free of allocation).
 class _AnchorRecord implements WireRecord {
-  int entity = 0;
+  EntityRef entity = EntityRef.nil;
   Vec3 offset = Vec3.zero;
   int mask = 0;
 
   @override
   void encode(ByteData d, int offset, WireStrings strings) {
-    d.setUint64(offset + 0, entity, Endian.little);
-    writeVec3(d, offset + 8, this.offset);
-    d.setUint32(offset + 20, mask, Endian.little);
+    writeEntity(d, offset, entity);
+    writeVec3(d, offset + 16, this.offset);
+    d.setUint32(offset + 28, mask, Endian.little);
   }
 }

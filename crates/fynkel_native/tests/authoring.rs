@@ -150,7 +150,7 @@ fn codes(v: &Value) -> Vec<&str> {
 #[test]
 fn version_and_null_safety() {
     assert_eq!(fynkel_authoring_abi_version(), AUTHORING_ABI_VERSION);
-    assert_eq!(AUTHORING_ABI_VERSION, 4);
+    assert_eq!(AUTHORING_ABI_VERSION, 5);
     unsafe {
         assert_eq!(fynkel_authoring_result(ptr::null()).length, 0);
         assert_eq!(fynkel_authoring_is_poisoned(ptr::null()), 0);
@@ -941,7 +941,10 @@ fn the_edit_preview_world_crosses_the_edge() {
         json!([MAIN_ROBOT, MAIN_SUN, "c0000000-0000-4000-8000-0000000000ff"]),
     );
     assert_eq!(both.len(), 2, "{both:?}");
-    assert!(both.iter().all(|b| b.as_u64().is_some_and(|b| b != 0)));
+    assert!(both.iter().all(|b| b
+        .as_str()
+        .and_then(fynkel_contracts::Entity::from_hex)
+        .is_some_and(|e| !e.is_null())));
     assert_ne!(both[0], both[1]);
     assert_eq!(
         host.preview_call(scene, "hidden", &json!({ "ids": [MAIN_ROBOT] })),

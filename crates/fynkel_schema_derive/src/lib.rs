@@ -377,7 +377,17 @@ fn expand(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let mut field_tokens = Vec::new();
     for f in fields {
         let name = f.ident.as_ref().unwrap().to_string();
-        let ty = field_type(&f.ty)?;
+        // Schema describes the default (stored/wire) instantiation. Scoped
+        // reference types can reuse the data structure without gaining a schema.
+        let default_ty = input.generics.type_params().find_map(|param| {
+            if let syn::Type::Path(path) = &f.ty {
+                if path.path.is_ident(&param.ident) {
+                    return param.default.as_ref();
+                }
+            }
+            None
+        });
+        let ty = field_type(default_ty.unwrap_or(&f.ty))?;
         let doc = doc_of(&f.attrs);
         let hints = hints_of(&f.attrs)?;
         field_tokens.push(quote! {

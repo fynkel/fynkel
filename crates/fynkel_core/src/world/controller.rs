@@ -1105,29 +1105,10 @@ pub(super) fn state(
 impl ControllerPlay {
     /// An IK goal by name (ADR-0033 § 5).
     pub fn ik_index(&self, goal: &str) -> Result<usize, String> {
-        self.def.ik_index(goal).ok_or_else(|| {
-            let names: Vec<&str> = self.def.ik.iter().map(|g| g.name.as_str()).collect();
-            if names.is_empty() {
-                format!("no IK goal `{goal}` (the controller has none)")
-            } else {
-                format!("no IK goal `{goal}` (the goals: {})", names.join(", "))
-            }
-        })
+        ik_index(&self.def, goal)
     }
-
-    /// The layer a slot names: a layer's name; empty is the base layer.
     pub fn slot_index(&self, slot: &str) -> Result<usize, String> {
-        if slot.is_empty() {
-            return Ok(0);
-        }
-        self.def
-            .layers
-            .iter()
-            .position(|l| l.name == slot)
-            .ok_or_else(|| {
-                let names: Vec<&str> = self.def.layers.iter().map(|l| l.name.as_str()).collect();
-                format!("no slot `{slot}` (a slot is a layer: {})", names.join(", "))
-            })
+        slot_index(&self.def, slot)
     }
 
     /// Plays `motion` once in layer `l`'s slot; the one playing there
@@ -1170,5 +1151,72 @@ impl ControllerPlay {
         self.motions[l][s]
             .as_ref()
             .map_or(0.0, |m| m.length(&self.run))
+    }
+}
+
+pub(super) fn ik_index(def: &ControllerDef, goal: &str) -> Result<usize, String> {
+    def.ik_index(goal).ok_or_else(|| {
+        let names: Vec<&str> = def.ik.iter().map(|g| g.name.as_str()).collect();
+        if names.is_empty() {
+            format!("no IK goal `{goal}` (the controller has none)")
+        } else {
+            format!("no IK goal `{goal}` (the goals: {})", names.join(", "))
+        }
+    })
+}
+pub(super) fn slot_index(def: &ControllerDef, slot: &str) -> Result<usize, String> {
+    if slot.is_empty() && !def.layers.is_empty() {
+        return Ok(0);
+    }
+    def.layers
+        .iter()
+        .position(|l| l.name == slot)
+        .ok_or_else(|| {
+            let names: Vec<&str> = def.layers.iter().map(|l| l.name.as_str()).collect();
+            format!("no slot `{slot}` (a slot is a layer: {})", names.join(", "))
+        })
+}
+pub(super) fn state_index(
+    def: &ControllerDef,
+    state: &str,
+    layer: Option<u32>,
+) -> Result<(usize, usize), String> {
+    let found = match layer {
+        Some(l) => def
+            .layers
+            .get(l as usize)
+            .and_then(|ly| ly.state_index(state).map(|s| (l as usize, s))),
+        None => def.find_state(state),
+    };
+    found.ok_or_else(|| {
+        let names: Vec<&str> = def
+            .layers
+            .iter()
+            .flat_map(|l| l.states.iter().map(|s| s.name.as_str()))
+            .collect();
+        format!(
+            "no state `{state}`{} (the states: {})",
+            layer.map(|l| format!(" in layer {l}")).unwrap_or_default(),
+            names.join(", ")
+        )
+    })
+}
+pub(super) fn validate_transport(def: &ControllerDef, op: &crate::AnimateOp) -> Result<(), String> {
+    match op {
+        crate::AnimateOp::SetControllerParameter { name, value } => {
+            crate::animation::controller::ControllerRun::validate_value(def, name, *value)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        }
+        crate::AnimateOp::PlayState { state, layer, .. } => {
+            state_index(def, state, *layer).map(|_| ())
+        }
+        crate::AnimateOp::PlayOneShot { slot, .. } | crate::AnimateOp::StopOneShot { slot, .. } => {
+            slot_index(def, slot).map(|_| ())
+        }
+        crate::AnimateOp::SetIkTarget { goal, .. } | crate::AnimateOp::ClearIkTarget { goal } => {
+            ik_index(def, goal).map(|_| ())
+        }
+        _ => Ok(()),
     }
 }

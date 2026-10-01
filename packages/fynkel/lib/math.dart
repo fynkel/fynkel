@@ -2,9 +2,7 @@
 /// metres, radians (Euler angles alone are degrees, as the Inspector shows
 /// them); quaternions are `[x, y, z, w]`, matching `glam`.
 ///
-/// M1 provides `Vec3` and `Quat` (what the wire records need), M3 `Vec4`
-/// (material colours) and `Vec2` (input axes); `Mat4` and `Transform3`
-/// follow with the gameplay API.
+/// `Affine3` preserves scale and shear through spatial hierarchies.
 library;
 
 import 'dart:math' as math;
@@ -208,11 +206,11 @@ class Quat {
 
   /// Hamilton product: `this * o` applies `o` first, then `this`.
   Quat operator *(Quat o) => Quat(
-        w * o.x + x * o.w + y * o.z - z * o.y,
-        w * o.y - x * o.z + y * o.w + z * o.x,
-        w * o.z + x * o.y - y * o.x + z * o.w,
-        w * o.w - x * o.x - y * o.y - z * o.z,
-      );
+    w * o.x + x * o.w + y * o.z - z * o.y,
+    w * o.y - x * o.z + y * o.w + z * o.x,
+    w * o.z + x * o.y - y * o.x + z * o.w,
+    w * o.w - x * o.x - y * o.y - z * o.z,
+  );
 
   Quat get conjugate => Quat(-x, -y, -z, w);
 
@@ -259,4 +257,60 @@ class Quat {
   int get hashCode => Object.hash(x, y, z, w);
   @override
   String toString() => 'Quat($x, $y, $z, $w)';
+}
+
+/// Immutable affine matrix, stored as three basis columns and a translation.
+/// Composition `a * b` applies `b` first. Unlike a TRS pose, this retains shear.
+class Affine3 {
+  const Affine3(this.x, this.y, this.z, this.translation);
+  static const identity = Affine3(Vec3.right, Vec3.up, Vec3(0, 0, 1), Vec3.zero);
+  final Vec3 x, y, z, translation;
+
+  factory Affine3.trs(Vec3 position, Quat rotation, Vec3 scale) => Affine3(
+    rotation.rotate(Vec3(scale.x, 0, 0)),
+    rotation.rotate(Vec3(0, scale.y, 0)),
+    rotation.rotate(Vec3(0, 0, scale.z)),
+    position,
+  );
+
+  Vec3 transformVector(Vec3 v) => x * v.x + y * v.y + z * v.z;
+  Vec3 transformPoint(Vec3 p) => translation + transformVector(p);
+  Affine3 operator *(Affine3 other) => Affine3(
+    transformVector(other.x),
+    transformVector(other.y),
+    transformVector(other.z),
+    transformPoint(other.translation),
+  );
+  double get determinant => x.dot(y.cross(z));
+  bool get isFinite => x.isFinite && y.isFinite && z.isFinite && translation.isFinite;
+
+  /// Basis lengths; reflections are assigned to X. Shear is not represented.
+  Vec3 get lossyScale => Vec3(x.length * (determinant < 0 ? -1 : 1), y.length, z.length);
+
+  /// Throws for singular or numerically degenerate bases (relative determinant
+  /// at most 1e-8), rather than inventing a point on a collapsed axis.
+  Affine3 get inverse {
+    final size = x.length * y.length * z.length;
+    final det = determinant;
+    if (!isFinite || !size.isFinite || size == 0 || det.abs() / size <= 1e-8) {
+      throw StateError('Cannot invert a singular transform');
+    }
+    final a = y.cross(z) / det, b = z.cross(x) / det, c = x.cross(y) / det;
+    final linear = Affine3(Vec3(a.x, b.x, c.x), Vec3(a.y, b.y, c.y), Vec3(a.z, b.z, c.z), Vec3.zero);
+    return Affine3(linear.x, linear.y, linear.z, -linear.transformVector(translation));
+  }
+
+  /// Exact TRS conversion, within 1e-4 relative basis tolerance.
+  /// Throws if shear or a collapsed axis prevents a stable TRS representation.
+  (Vec3, Quat, Vec3) get trs {
+    final s = lossyScale;
+    if (!isFinite || s.x == 0 || s.y == 0 || s.z == 0) {
+      throw StateError('Transform has no stable TRS representation');
+    }
+    final a = x / s.x, b = y / s.y, c = z / s.z;
+    if (a.dot(b).abs() > 1e-4 || a.dot(c).abs() > 1e-4 || b.dot(c).abs() > 1e-4) {
+      throw StateError('Transform contains shear and cannot be stored as a local TRS pose');
+    }
+    return (translation, Quat.lookRotation(-c, b).normalized, s);
+  }
 }

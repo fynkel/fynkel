@@ -158,7 +158,7 @@
     "kind": "component",
     "id": 13,
     "rust": "fynkel_core::components::ThirdPersonCamera",
-    "wireSize": 64,
+    "wireSize": 72,
     "authored": true
   }
 }

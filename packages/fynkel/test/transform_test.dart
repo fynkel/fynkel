@@ -18,15 +18,22 @@ void main() {
   group('math', () {
     test('Euler degrees round-trip and turn as the Inspector does (X, then Y, then Z)', () {
       for (final e in const [Vec3(10, 20, 30), Vec3(350, 5, 270), Vec3(0, 90, 0), Vec3(45, 0, 180)]) {
-        expect(Quat.euler(Quat.euler(e).eulerAngles).rotate(const Vec3(0.3, 0.5, 0.7)),
-            near(Quat.euler(e).rotate(const Vec3(0.3, 0.5, 0.7))),
-            reason: '$e');
+        expect(
+          Quat.euler(Quat.euler(e).eulerAngles).rotate(const Vec3(0.3, 0.5, 0.7)),
+          near(Quat.euler(e).rotate(const Vec3(0.3, 0.5, 0.7))),
+          reason: '$e',
+        );
       }
       expect(Quat.euler(const Vec3(10, 20, 30)).eulerAngles, near(const Vec3(10, 20, 30)));
-      expect(Quat.euler(const Vec3(-10, 0, 0)).eulerAngles, near(const Vec3(350, 0, 0)), reason: 'within [0, 360)');
+      expect(
+        Quat.euler(const Vec3(-10, 0, 0)).eulerAngles,
+        near(const Vec3(350, 0, 0)),
+        reason: 'within [0, 360)',
+      );
       expect(Quat.euler(const Vec3(0, 90, 0)).rotate(Vec3.forward), near(const Vec3(-1, 0, 0)));
       // The Inspector's order: qz * qy * qx.
-      final byAxis = Quat.axisAngle(const Vec3(0, 0, 1), 0.5) *
+      final byAxis =
+          Quat.axisAngle(const Vec3(0, 0, 1), 0.5) *
           Quat.axisAngle(const Vec3(0, 1, 0), 0.25) *
           Quat.axisAngle(const Vec3(1, 0, 0), 0.125);
       final q = Quat.euler(Vec3(0.125, 0.25, 0.5) * (180 / 3.141592653589793));
@@ -48,7 +55,11 @@ void main() {
     final w = world();
     addTearDown(w.dispose);
     final parent = w.spawn(
-      transform: Pose(position: const Vec3(10, 0, 0), rotation: Quat.euler(const Vec3(0, 90, 0)), scale: const Vec3.all(2)),
+      transform: Pose(
+        position: const Vec3(10, 0, 0),
+        rotation: Quat.euler(const Vec3(0, 90, 0)),
+        scale: const Vec3.all(2),
+      ),
       name: 'parent',
     );
     final child = w.spawn(
@@ -88,6 +99,75 @@ void main() {
     child.setParent(null);
     expect(t.parent, isNull);
     expect(t.position, t.localPosition);
+  });
+
+  test('affine hierarchy retains shear through staged edits and native ticks', () {
+    final w = world();
+    addTearDown(w.dispose);
+    final root = w.spawn(
+      transform: const Pose(position: Vec3(3, 2, 1), rotation: Quat.identity, scale: Vec3(2, 1, -3)),
+    );
+    final branch = w.spawn(
+      parent: root,
+      transform: Pose(position: Vec3.zero, rotation: Quat.euler(const Vec3(0, 0, 45)), scale: Vec3.one),
+    );
+    final leaf = w.spawn(
+      parent: branch,
+      transform: const Pose(position: Vec3(1, 0, 0), rotation: Quat.identity, scale: Vec3.one),
+    );
+    final expected =
+        const Vec3(3, 2, 1) +
+        const Vec3(2, 1, -3).scaled(Quat.euler(const Vec3(0, 0, 45)).rotate(Vec3.right));
+    expect(leaf.transform.position, near(expected));
+    const point = Vec3(2, -4, 3);
+    expect(branch.transform.inverseTransformPoint(branch.transform.transformPoint(point)), near(point));
+    expect(branch.transform.inverseTransformVector(branch.transform.transformVector(point)), near(point));
+    expect(branch.transform.transformDirection(point).length, closeTo(point.length, 1e-5));
+    expect(branch.transform.lossyScale.y, closeTo(1.58113883, 1e-5));
+    w.frame(1 / 60);
+    expect(leaf.worldTransform!.position, near(expected));
+    root.transform.localScale = const Vec3(5, 2, 1);
+    branch.transform.localPosition = const Vec3(2, 1, 0);
+    final staged = leaf.transform.position;
+    leaf.transform.position = const Vec3(9, -3, 2);
+    expect(leaf.transform.position, near(const Vec3(9, -3, 2)));
+    expect(staged, isNot(near(expected)));
+    w.frame(1 / 60);
+    expect(leaf.worldTransform!.position, near(const Vec3(9, -3, 2)));
+  });
+
+  test('keep-world reparents preserve geometry or reject before staging', () {
+    final w = world();
+    addTearDown(w.dispose);
+    final root = w.spawn(
+      transform: const Pose(position: Vec3(3, 0, 0), rotation: Quat.identity, scale: Vec3.all(2)),
+    );
+    final child = w.spawn(
+      transform: Pose(
+        position: Vec3(1, 2, 3),
+        rotation: Quat.euler(const Vec3(10, 20, 30)),
+        scale: Vec3(1, 2, -1),
+      ),
+    );
+    final before = child.transform.transformPoint(Vec3.one);
+    child.setParent(root, keepWorld: true);
+    expect(child.transform.transformPoint(Vec3.one), near(before));
+    w.frame(1 / 60);
+    expect(child.transform.transformPoint(Vec3.one), near(before));
+    root.transform.localScale = const Vec3(2, 1, 1);
+    expect(() => child.setParent(null, keepWorld: true), throwsStateError);
+    expect(child.parent, root);
+    final singular = w.spawn(
+      transform: const Pose(position: Vec3.zero, rotation: Quat.identity, scale: Vec3(0, 1, 1)),
+    );
+    expect(() => child.setParent(singular, keepWorld: true), throwsStateError);
+    expect(() => singular.transform.inverseTransformPoint(Vec3.one), throwsStateError);
+    expect(singular.transform.transformPoint(Vec3.one), const Vec3(0, 1, 1));
+    expect(() => root.setParent(child), throwsStateError);
+    expect(root.parent, isNull);
+    // Rejected operations did not enqueue hierarchy edits.
+    w.frame(1 / 60);
+    expect(child.parent, root);
   });
 
   test('translate, rotate, rotateAround, lookAt and the axes', () {

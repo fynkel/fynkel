@@ -931,6 +931,7 @@ dependencies = [
  "fynkel_scene",
  "fynkel_schema_derive",
  "glam 0.33.7",
+ "serde_json",
 ]
 
 [[package]]
@@ -1034,6 +1035,7 @@ dependencies = [
  "fynkel_shader",
  "fynkel_wire",
  "glam 0.33.7",
+ "libloading",
  "log",
  "serde_json",
  "uuid",

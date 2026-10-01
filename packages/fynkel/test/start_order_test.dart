@@ -59,7 +59,7 @@ void main() {
     go.addBehaviour(Early(late));
     go.addBehaviour(late);
     calls.clear();
-    w.frame(1 / 60); // the tick resolves the object; update starts the scripts
+    w.frame(0); // no fixed phase: the update boundary starts the scripts
     expect(calls, ['early start', 'late start', 'early update: late started true', 'late update']);
   });
 

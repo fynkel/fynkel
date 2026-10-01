@@ -6,6 +6,8 @@
 
 ## Context
 
+**Direction amended 2026-09-30 by [ADR-0042](ADR-0042-ecs-centered-foundation-program.md):** behaviours remain convenient local logic, but custom bulk systems and a native extension route are now foundation work rather than a permanent core-feature-request limitation. The decision below records the original scope and existing implementation. [ADR-0044](ADR-0044-components-systems-and-gameplay-access.md) proposes the replacement component/access/scheduler details.
+
 The performance ambition is thousands of rendered objects. Per-object Dart callbacks do not scale to thousands per frame regardless of ECS speed (managed-language cost, bridge encode/decode, GC), the same wall Unity's MonoBehaviour and Godot's GDScript hit. Users must not need to write Rust.
 
 ## Decision

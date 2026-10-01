@@ -43,7 +43,7 @@
     "kind": "component",
     "id": 22,
     "rust": "fynkel_core::components::Skin",
-    "wireSize": 32,
+    "wireSize": 40,
     "authored": true
   }
 }

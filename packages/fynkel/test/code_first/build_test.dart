@@ -58,8 +58,15 @@ void main() {
 
   test('a code prefab, built three times, gives three crates that fall onto the floor', () {
     final w = fresh();
-    w.build(const ObjectSpec('Floor', components: [Collider(size: Vec3(20, 0.5, 20), offset: Vec3(0, -0.5, 0))]));
-    final crates = [for (var i = 0; i < 3; i++) w.build(crate('Crate $i', Vec3(i * 2.0, 2 + i.toDouble(), 0)))];
+    w.build(
+      const ObjectSpec(
+        'Floor',
+        components: [Collider(size: Vec3(20, 0.5, 20), offset: Vec3(0, -0.5, 0))],
+      ),
+    );
+    final crates = [
+      for (var i = 0; i < 3; i++) w.build(crate('Crate $i', Vec3(i * 2.0, 2 + i.toDouble(), 0))),
+    ];
     expect(crates.map((c) => c.name), ['Crate 0', 'Crate 1', 'Crate 2']);
     expect(crates[2].behaviour<Spinner>()!.speed, 4, reason: 'the instance the spec held');
     tick(w, 240);
@@ -82,7 +89,9 @@ void main() {
             'Turret',
             transform: const Pose(position: Vec3(0, 1, 0)),
             behaviours: [spinner],
-            children: const [ObjectSpec('Barrel', layer: 'props', tags: ['enemy'])],
+            children: const [
+              ObjectSpec('Barrel', layer: 'props', tags: ['enemy']),
+            ],
           ),
         ],
       ),
@@ -92,7 +101,11 @@ void main() {
     expect(root.children.map((c) => c.name), ['Hull', 'Turret']);
     expect(root.getInChildren<Spinner>(), spinner);
     expect(root.getInChildren<PointLight>()!.range, 3);
-    expect(root.localTransform.position, const Vec3(5, 0, 0), reason: 'build(transform:) replaces the spec\'s');
+    expect(
+      root.localTransform.position,
+      const Vec3(5, 0, 0),
+      reason: 'build(transform:) replaces the spec\'s',
+    );
 
     tick(w);
     final barrel = w.find('Barrel')!;
@@ -108,7 +121,15 @@ void main() {
   test('an inactive spec builds switched off, its subtree with it', () {
     final w = fresh();
     final spinner = Spinner();
-    w.build(ObjectSpec('Off', active: false, children: [ObjectSpec('Child', behaviours: [spinner])]));
+    w.build(
+      ObjectSpec(
+        'Off',
+        active: false,
+        children: [
+          ObjectSpec('Child', behaviours: [spinner]),
+        ],
+      ),
+    );
     tick(w, 2);
     expect(w.find('Off')!.activeSelf, isFalse);
     expect(w.find('Child')!.activeInHierarchy, isFalse);
@@ -117,55 +138,93 @@ void main() {
     expect(w.findObjectsOfType<Spinner>(includeInactive: true), [spinner]);
   });
 
-  test('prefab instances: overrides on the root, extra children, and under an object built in the same call', () {
-    final w = fresh(project: true);
-    final coinRef = w.assets.find('prefabs/coin')!;
-    final row = w.build(
-      ObjectSpec(
-        'Coins',
-        children: [
-          for (var i = 0; i < 3; i++)
-            ObjectSpec.prefab(
-              coinRef,
-              name: 'Coin $i',
-              transform: Pose(position: Vec3(i.toDouble(), 0, 0)),
-              tags: const ['pickup'],
-              components: const [PointLight(range: 2)],
-              children: const [ObjectSpec('Glow')],
-            ),
-        ],
-      ),
-    );
-    expect(row.children.map((c) => c.name), ['Coin 0', 'Coin 1', 'Coin 2'], reason: 'the prefabs moved under the new row');
-    tick(w);
-    final coin = w.find('Coin 2')!;
-    expect(coin.parent, row);
-    expect(coin.localTransform.position, const Vec3(2, 0, 0), reason: 'local to the row');
-    expect(coin.get<TriggerZone>(), isNotNull, reason: 'the prefab\'s own components');
-    expect(coin.get<PointLight>()!.range, 2, reason: 'the spec\'s added on top');
-    expect(coin.hasTag('pickup'), isTrue);
-    expect(coin.children.map((c) => c.name), ['Glow']);
-    expect(w.findObjectsWith<TriggerZone>(), hasLength(3));
+  test(
+    'prefab instances: overrides on the root, extra children, and under an object built in the same call',
+    () {
+      final w = fresh(project: true);
+      final coinRef = w.assets.find('prefabs/coin')!;
+      final row = w.build(
+        ObjectSpec(
+          'Coins',
+          children: [
+            for (var i = 0; i < 3; i++)
+              ObjectSpec.prefab(
+                coinRef,
+                name: 'Coin $i',
+                transform: Pose(position: Vec3(i.toDouble(), 0, 0)),
+                tags: const ['pickup'],
+                components: const [PointLight(range: 2)],
+                children: [ObjectSpec('Glow')],
+              ),
+          ],
+        ),
+      );
+      expect(row.children.map((c) => c.name), [
+        'Coin 0',
+        'Coin 1',
+        'Coin 2',
+      ], reason: 'the prefabs moved under the new row');
+      tick(w);
+      final coin = w.find('Coin 2')!;
+      expect(coin.parent, row);
+      expect(coin.localTransform.position, const Vec3(2, 0, 0), reason: 'local to the row');
+      expect(coin.get<TriggerZone>(), isNotNull, reason: 'the prefab\'s own components');
+      expect(coin.get<PointLight>()!.range, 2, reason: 'the spec\'s added on top');
+      expect(coin.hasTag('pickup'), isTrue);
+      expect(coin.children.map((c) => c.name), ['Glow']);
+      expect(w.findObjectsWith<TriggerZone>(), hasLength(3));
 
-    // A prefab spec at the top, under a spawned parent.
-    final top = w.build(ObjectSpec.prefab(coinRef), parent: row);
-    expect(top.name, 'Coin', reason: 'the prefab\'s name when the spec gives none');
-    expect(top.parent, row);
-  });
+      // A prefab spec at the top, under a spawned parent.
+      final top = w.build(ObjectSpec.prefab(coinRef), parent: row);
+      expect(top.name, 'Coin', reason: 'the prefab\'s name when the spec gives none');
+      expect(top.parent, row);
+    },
+  );
 
   test('a mistake throws before anything is built', () {
     final w = fresh();
     final used = Spinner();
     w.spawn(name: 'holder').addBehaviour(used);
     expect(
-      () => w.build(ObjectSpec('A', children: [ObjectSpec('B', behaviours: [used])])),
+      () => w.build(
+        ObjectSpec(
+          'A',
+          children: [
+            ObjectSpec('B', behaviours: [used]),
+          ],
+        ),
+      ),
       throwsA(isA<StateError>().having((e) => e.message, 'message', contains('already attached'))),
     );
     final twice = Spinner();
-    expect(() => w.build(ObjectSpec('A', behaviours: [twice], children: [ObjectSpec('B', behaviours: [twice])])), throwsStateError);
-    expect(() => w.build(const ObjectSpec('A', children: [ObjectSpec('B', tags: ['nope'])])), throwsArgumentError);
-    expect(() => w.build(const ObjectSpec('A', layer: 'nope')), throwsArgumentError);
-    expect(() => w.build(ObjectSpec.prefab(const AssetRef('c0000000-0000-4000-8000-000000000042', sub: 'mesh/0'))), throwsArgumentError);
+    expect(
+      () => w.build(
+        ObjectSpec(
+          'A',
+          behaviours: [twice],
+          children: [
+            ObjectSpec('B', behaviours: [twice]),
+          ],
+        ),
+      ),
+      throwsStateError,
+    );
+    expect(
+      () => w.build(
+        const ObjectSpec(
+          'A',
+          children: [
+            ObjectSpec('B', tags: ['nope']),
+          ],
+        ),
+      ),
+      throwsStateError,
+    );
+    expect(() => w.build(const ObjectSpec('A', layer: 'nope')), throwsStateError);
+    expect(
+      () => w.build(ObjectSpec.prefab(const AssetRef('c0000000-0000-4000-8000-000000000042', sub: 'mesh/0'))),
+      throwsArgumentError,
+    );
     tick(w);
     expect(w.find('A'), isNull);
     expect(w.find('B'), isNull);
@@ -184,7 +243,9 @@ void main() {
   test('a frame whose names grow the command buffer as it is sent', () {
     final w = fresh();
     for (var n = 1; n <= 64; n++) {
-      final burst = w.build(ObjectSpec('Burst $n', children: [for (var i = 0; i < n; i++) ObjectSpec('Spark $i of burst $n')]));
+      final burst = w.build(
+        ObjectSpec('Burst $n', children: [for (var i = 0; i < n; i++) ObjectSpec('Spark $i of burst $n')]),
+      );
       tick(w);
       expect(burst.children, hasLength(n));
       burst.destroy();

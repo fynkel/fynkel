@@ -1217,3 +1217,262 @@ fn an_edit_world_poses_its_animators_only_when_asked() {
     // A game world ignores the switch.
     assert!(!world().set_edit_animation(true));
 }
+
+fn transport_fixture() -> (World, Entity, Entity) {
+    let mut w = world();
+    w.register_clip(clip_ref(1), rise());
+    w.register_clip(clip_ref(2), turn());
+    let root = spawn(&mut w, 1, Vec3::ZERO, None, "animator");
+    let arm = spawn(&mut w, 2, Vec3::ZERO, Some(root), "arm");
+    set(
+        &mut w,
+        root,
+        ComponentValue::Animator(Animator {
+            clip: clip_ref(1),
+            playing: true,
+            ..Animator::default()
+        }),
+    );
+    for _ in 0..10 {
+        w.step();
+    }
+    (w, root, arm)
+}
+
+#[test]
+fn transactional_crossfade_matches_legacy_outgoing_pose_and_runs_once() {
+    let (mut w, e, arm) = transport_fixture();
+    let (mut legacy, le, la) = transport_fixture();
+    let op = AnimateOp::Crossfade {
+        clip: clip_ref(2),
+        looping: true,
+        speed: 1.0,
+        seconds: 0.5,
+    };
+    let before = local(&w, arm);
+    let time = w.animator_state(e).unwrap().time;
+    w.edit_gameplay(|edit| edit.animate_control(e, op.clone()))
+        .unwrap();
+    assert_eq!(w.animator_state(e).unwrap().time, time);
+    assert_eq!(local(&w, arm), before);
+    animate(&mut legacy, le, op);
+    w.step();
+    assert_eq!(local(&w, arm), local(&legacy, la));
+    assert!(w.animator_state(e).unwrap().fade_remaining > 0.0);
+    for _ in 0..5 {
+        w.step();
+        legacy.step();
+    }
+    assert_eq!(local(&w, arm), local(&legacy, la));
+    assert_eq!(
+        w.animator_state(e).unwrap().fade_remaining,
+        legacy.animator_state(le).unwrap().fade_remaining
+    );
+}
+
+#[test]
+fn animation_transport_keeps_later_configuration_and_orders_seek_stop_play() {
+    let (mut w, e, _) = transport_fixture();
+    w.edit_gameplay(|edit| {
+        edit.animate_control(
+            e,
+            AnimateOp::Play {
+                clip: clip_ref(2),
+                looping: true,
+                speed: 1.0,
+            },
+        )?;
+        edit.animate_control(e, AnimateOp::SetTime(0.4))?;
+        edit.animate_control(
+            e,
+            AnimateOp::SetParameter {
+                name: "move".into(),
+                value: 0.75,
+            },
+        )
+    })
+    .unwrap();
+    w.edit_gameplay(|edit| {
+        edit.set_component(
+            e,
+            ComponentValue::Animator(Animator {
+                clip: clip_ref(1),
+                playing: false,
+                speed: 3.0,
+                weight: 0.25,
+                ..Animator::default()
+            }),
+        )
+    })
+    .unwrap();
+    w.step();
+    let s = w.animator_state(e).unwrap();
+    assert_eq!(s.clip, clip_ref(1));
+    assert!(!s.playing);
+    assert_eq!(s.speed, 3.0);
+    assert_eq!(s.weight, 0.25);
+    assert_eq!(s.parameter, 0.75);
+    assert!((s.time - 0.4).abs() < 1e-5);
+    w.edit_gameplay(|edit| {
+        edit.animate_control(e, AnimateOp::SetTime(0.8))?;
+        edit.animate_control(e, AnimateOp::Stop)
+    })
+    .unwrap();
+    w.step();
+    assert_eq!(w.animator_state(e).unwrap().time, 0.0);
+}
+
+#[test]
+fn animation_abort_invalid_fade_and_final_removal_preserve_runtime_and_data() {
+    let (mut w, e, arm) = transport_fixture();
+    let before = w.ecs().copy::<Animator>(e).unwrap();
+    let pose = local(&w, arm);
+    let time = w.animator_state(e).unwrap().time;
+    for variant in 0..4 {
+        assert!(w
+            .edit_gameplay(|edit| {
+                edit.animate_control(
+                    e,
+                    AnimateOp::Play {
+                        clip: clip_ref(2),
+                        looping: false,
+                        speed: 2.0,
+                    },
+                )?;
+                match variant {
+                    0 => return Err(EditError::Aborted),
+                    1 => edit.remove_component(e, ComponentId::ANIMATOR)?,
+                    2 => {
+                        let _ = edit.animate_control(
+                            e,
+                            AnimateOp::Crossfade {
+                                clip: clip_ref(1),
+                                looping: true,
+                                speed: 1.0,
+                                seconds: -1.0,
+                            },
+                        );
+                    }
+                    _ => edit.set_component(
+                        e,
+                        ComponentValue::Animator(Animator {
+                            controller: Some(clip_ref(9)),
+                            ..Animator::default()
+                        }),
+                    )?,
+                }
+                Ok(())
+            })
+            .is_err());
+        assert_eq!(w.ecs().copy::<Animator>(e).unwrap(), before);
+        assert_eq!(w.animator_state(e).unwrap().time, time);
+        assert_eq!(local(&w, arm), pose);
+    }
+    w.step();
+    assert!(w.animator_state(e).unwrap().time > time);
+    assert_eq!(w.animator_state(e).unwrap().clip, clip_ref(1));
+}
+
+#[test]
+fn animation_destruction_cancels_and_later_removal_rejects_once() {
+    let (mut w, e, _) = transport_fixture();
+    w.edit_gameplay(|edit| {
+        edit.animate_control(e, AnimateOp::Stop)?;
+        edit.destroy(e)
+    })
+    .unwrap();
+    w.step();
+    assert!(w.diagnostics().is_empty());
+    let (mut w, e, _) = transport_fixture();
+    w.edit_gameplay(|edit| edit.animate_control(e, AnimateOp::SetTime(0.5)))
+        .unwrap();
+    w.edit_gameplay(|edit| edit.remove_component(e, ComponentId::ANIMATOR))
+        .unwrap();
+    w.step();
+    assert_eq!(w.diagnostics().len(), 1);
+    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::MISSING_COMPONENT);
+    w.step();
+    assert!(w.diagnostics().is_empty());
+}
+
+#[test]
+fn invalidated_animation_intent_is_cancelled_if_its_entity_is_destroyed() {
+    let (mut w, e, _) = transport_fixture();
+    w.edit_gameplay(|edit| edit.animate_control(e, AnimateOp::SetTime(0.5)))
+        .unwrap();
+    w.edit_gameplay(|edit| edit.remove_component(e, ComponentId::ANIMATOR))
+        .unwrap();
+    w.edit_gameplay(|edit| edit.destroy(e)).unwrap();
+    w.step();
+    assert!(w.diagnostics().is_empty());
+}
+
+#[test]
+fn invalid_derived_pose_rolls_back_every_target_and_animator_completion() {
+    let mut w = world();
+    let root = spawn(&mut w, 100, Vec3::ZERO, None, "Rig");
+    let good = spawn(&mut w, 101, Vec3::ZERO, Some(root), "good");
+    let huge = spawn(
+        &mut w,
+        102,
+        Vec3::new(f32::MAX, 0.0, 0.0),
+        Some(root),
+        "huge",
+    );
+    let clip = Clip {
+        name: "overflow additive output".into(),
+        duration: DT,
+        markers: Vec::new(),
+        channels: [("good", 1.0), ("huge", f32::MAX)]
+            .into_iter()
+            .map(|(target, x)| Channel {
+                target: target.into(),
+                property: Property::Translation,
+                interpolation: Interpolation::Linear,
+                times: vec![0.0, DT],
+                values: vec![0.0, 0.0, 0.0, x, 0.0, 0.0],
+            })
+            .collect(),
+    };
+    w.register_clip(clip_ref(90), clip);
+    set(
+        &mut w,
+        root,
+        ComponentValue::Animator(Animator {
+            clip: clip_ref(90),
+            additive: true,
+            looping: false,
+            ..Animator::default()
+        }),
+    );
+    let before_good = local(&w, good);
+    let before_huge = local(&w, huge);
+    w.step();
+    assert_eq!(
+        local(&w, good),
+        before_good,
+        "valid sibling output must not publish alone"
+    );
+    assert_eq!(local(&w, huge), before_huge);
+    assert!(
+        w.ecs().get::<Animator>(root).unwrap().playing,
+        "completion configuration belongs to the same rejected pose batch"
+    );
+    assert!(
+        w.animator_state(root).unwrap().time >= DT,
+        "runtime clock remains the animation system's responsibility"
+    );
+    assert!(w
+        .diagnostics()
+        .iter()
+        .any(|d| d.code == DiagnosticCode::INVALID_PAYLOAD
+            && d.entity == root
+            && d.message.contains("animation pose")));
+    assert!(
+        w.drain_events().iter().any(|event| matches!(
+            &event.payload, EventPayload::AnimationEnded { entity, clip }
+                if *entity == root && *clip == clip_ref(90)
+        )),
+        "playback events report runtime completion, not acceptance of the authored pose"
+    );
+}

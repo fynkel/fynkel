@@ -10,7 +10,7 @@
 //!   (`encode_component`/`decode_component`), so the Inspector shows a
 //!   running entity exactly as it shows a scene's.
 //! - A write applies at once, at the current tick, without stepping
-//!   ([`World::apply_now`]): it shows while the game is paused, runs no
+//!   ([`World::apply_gameplay_now`]): it shows while the game is paused, runs no
 //!   system and is gone on Stop with the world. Nothing here touches a
 //!   document.
 //!
@@ -142,11 +142,11 @@ pub fn call_with(
             // What the renderer's selection outline takes: the live
             // handles' bits, the gone and the hidden left out.
             let hidden: Vec<Entity> = world.edit_hidden().collect();
-            let mut out: Vec<u64> = Vec::new();
+            let mut out: Vec<String> = Vec::new();
             for id in ids_arg(args)? {
                 if let Some(e) = resolve(world, &id).filter(|e| !hidden.contains(e)) {
-                    if !out.contains(&e.to_bits()) {
-                        out.push(e.to_bits());
+                    if !out.contains(&e.to_hex()) {
+                        out.push(e.to_hex());
                     }
                 }
             }
@@ -249,7 +249,7 @@ pub fn call_with(
             Ok(write(world, vec![Command::Destroy(e)]))
         }
         "spawn" => {
-            // A new entity at once ([`World::spawn_now`]): `name`,
+            // An atomic new entity through the gameplay journal (`World::spawn_now`): `name`,
             // `parent` (null: a root) at `index` (last when absent), the
             // native `components` as `[{type, data}]` (a Transform among
             // them is its local transform). With an `id` it joins a loaded
@@ -345,14 +345,14 @@ pub fn call_with(
 pub fn id_of(world: &World, entity: Entity) -> String {
     match world.scene_of(entity).and_then(|s| s.id_of(entity)) {
         Some(id) => id.to_string(),
-        None => format!("{RUNTIME_PREFIX}{}", entity.to_bits()),
+        None => format!("{RUNTIME_PREFIX}{}", entity.to_hex()),
     }
 }
 
 /// The live entity `id` names, if it is alive.
 pub fn resolve(world: &World, id: &str) -> Option<Entity> {
     let e = if let Some(bits) = id.strip_prefix(RUNTIME_PREFIX) {
-        Entity::from_bits(bits.parse().ok()?)
+        Entity::from_hex(bits)?
     } else {
         let id = fynkel_contracts::Uuid(*Uuid::parse_str(id).ok()?.as_bytes());
         world.loaded_scenes().iter().find_map(|s| s.handle_of(id))?
@@ -436,7 +436,7 @@ fn entities(world: &World, since: Option<&str>) -> Value {
         };
         (
             &row.id,
-            row.entity.to_bits(),
+            row.entity,
             &row.name,
             &row.parent,
             row.layer,
@@ -464,7 +464,7 @@ fn entities(world: &World, since: Option<&str>) -> Value {
         .map(|r| {
             json!({
                 "id": r.id,
-                "entity": r.entity.to_bits(),
+                "entity": r.entity.to_hex(),
                 "name": r.name,
                 "parent": r.parent,
                 "activeSelf": r.active_self,
@@ -497,7 +497,7 @@ fn entity(world: &World, e: Entity) -> Value {
         .unwrap_or_default();
     json!({
         "id": id_of(world, e),
-        "entity": e.to_bits(),
+        "entity": e.to_hex(),
         "name": ecs.copy::<Name>(e).map(|n| n.value).unwrap_or_default(),
         "parent": scene::parent_of(ecs, e).map(|p| id_of(world, p)),
         "activeSelf": scene::is_active_self(ecs, e),
@@ -532,7 +532,7 @@ fn pick(world: &World, assets: Option<&Assets>, ray: &Ray) -> Value {
         .map(|(e, distance, point, mesh)| {
             json!({
                 "id": id_of(world, e),
-                "entity": e.to_bits(),
+                "entity": e.to_hex(),
                 "distance": distance,
                 "point": point.to_array(),
                 "mesh": mesh,
@@ -546,7 +546,7 @@ fn pick(world: &World, assets: Option<&Assets>, ray: &Ray) -> Value {
 }
 
 fn write(world: &mut World, commands: Vec<Command>) -> Value {
-    rejections(&world.apply_now(commands))
+    rejections(&world.apply_gameplay_now(commands))
 }
 
 fn rejections(rejected: &[fynkel_core::Diagnostic]) -> Value {

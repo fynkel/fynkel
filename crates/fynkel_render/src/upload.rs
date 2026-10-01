@@ -44,6 +44,7 @@ pub(crate) fn upload_mesh(
         index_count: indices.len() as u32,
         skin_buffer,
         bounds,
+        skin_bounds: crate::culling::SkinBounds::new(vertices, skin),
     }
 }
 

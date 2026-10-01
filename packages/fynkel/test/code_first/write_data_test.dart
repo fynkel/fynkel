@@ -63,18 +63,23 @@ void main() {
     final scene = w.writeScene(
       'scenes/arena',
       SceneSpec('Arena', [
-        ObjectSpec('Knight', behaviours: [
-          Wielder()
-            ..weapon = sword
-            ..spares = [great, sword],
-        ]),
+        ObjectSpec(
+          'Knight',
+          behaviours: [
+            Wielder()
+              ..weapon = sword
+              ..spares = [great, sword],
+          ],
+        ),
       ]),
     );
 
     final r = runFynkel(['validate', '--project', project, '--json']);
     expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
     cookProject(project);
-    final world = World.create(library: lib)..registry.registerData(weaponType)..registry.register(wielderType);
+    final world = World.create(library: lib)
+      ..registry.registerData(weaponType)
+      ..registry.register(wielderType);
     addTearDown(world.dispose);
     world.loadProject(project);
     world.onLoadDiagnostics = (d) => fail('load diagnostics: $d');
@@ -86,7 +91,9 @@ void main() {
     expect(knight.spares.map((x) => x.damage), [8, 3]);
 
     // Written again: the same ids and bytes; unchanged, the file untouched.
-    final before = [for (final f in ['sword', 'great']) File('$project/assets/data/$f.data.json').readAsStringSync()];
+    final before = [
+      for (final f in ['sword', 'great']) File('$project/assets/data/$f.data.json').readAsStringSync(),
+    ];
     final again = writer();
     final sword2 = Weapon()..damage = 3;
     final great2 = Weapon()..damage = 8;
@@ -95,18 +102,43 @@ void main() {
     expect(again.writeData('data/great', great2..upgrade = sword2, name: 'Great Sword').changed, isFalse);
     again.writeData('data/sword', sword2..upgrade = great2);
     expect(again.writeData('data/sword', sword2).changed, isFalse);
-    expect([for (final f in ['sword', 'great']) File('$project/assets/data/$f.data.json').readAsStringSync()], before);
+    expect([
+      for (final f in ['sword', 'great']) File('$project/assets/data/$f.data.json').readAsStringSync(),
+    ], before);
   });
 
   test('an instance never written, or of no registered type, is refused', () {
     final w = writer();
     final loose = Weapon()..damage = 2;
-    expect(() => w.writeScene('scenes/x', SceneSpec('X', [ObjectSpec('A', behaviours: [Wielder()..weapon = loose])])),
-        throwsArgumentError);
-    expect(() => w.writeScene('scenes/x', SceneSpec('X', [ObjectSpec('A', behaviours: [Wielder()..spares = [loose]])])),
-        throwsArgumentError);
+    expect(
+      () => w.writeScene(
+        'scenes/x',
+        SceneSpec('X', [
+          ObjectSpec('A', behaviours: [Wielder()..weapon = loose]),
+        ]),
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => w.writeScene(
+        'scenes/x',
+        SceneSpec('X', [
+          ObjectSpec(
+            'A',
+            behaviours: [
+              Wielder()..spares = [loose],
+            ],
+          ),
+        ]),
+      ),
+      throwsArgumentError,
+    );
     expect(() => w.writeData('data/y', Weapon()..upgrade = loose), throwsArgumentError);
-    expect(() => ProjectWriter(project).writeData('data/z', Weapon()), throwsArgumentError, reason: 'not registered');
+    expect(
+      () => ProjectWriter(project).writeData('data/z', Weapon()),
+      throwsArgumentError,
+      reason: 'not registered',
+    );
     expect(File('$project/assets/scenes/x.scene.json').existsSync(), isFalse);
     expect(Directory('$project/assets/data').existsSync(), isFalse);
   });

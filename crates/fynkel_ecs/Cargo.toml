@@ -9,3 +9,7 @@ license.workspace = true
 [dependencies]
 fynkel_contracts.workspace = true
 hecs.workspace = true
+
+[[example]]
+name = "foundation_bridge"
+crate-type = ["cdylib"]

@@ -143,7 +143,9 @@ impl System for RecordPrevious {
         true
     }
     fn run(w: &mut World, _: &mut TickRun) -> u32 {
-        w.record_prev_world();
+        if !std::mem::take(&mut w.gameplay_tick_prepared) {
+            w.record_prev_world();
+        }
         0
     }
 }
@@ -188,6 +190,38 @@ impl System for Commands {
                 t.rejected += 1;
             }
         }
+        // Separate from legacy state batches: a committed effect never blocks
+        // another gameplay edit, and no effect can replay an older data value.
+        for effect in std::mem::take(&mut w.gameplay_effects) {
+            use super::gameplay::CommittedEffect;
+            let applied = match effect {
+                CommittedEffect::Animation {
+                    entity,
+                    op,
+                    before,
+                    invalidated,
+                } => {
+                    if !w.ecs.contains(entity) {
+                        continue;
+                    }
+                    w.apply_animate_intent(entity, op, before, invalidated)
+                }
+                CommittedEffect::Command(command) => {
+                    if command.target().is_some_and(|e| !w.ecs.contains(e)) {
+                        continue;
+                    }
+                    match command {
+                        crate::Command::Audio { entity, op } => w.apply_audio_intent(entity, op),
+                        command => w.apply_simulation(u32::MAX, command, t.tick),
+                    }
+                }
+            };
+            if applied {
+                t.applied += 1;
+            } else {
+                t.rejected += 1;
+            }
+        }
         w.refresh_active();
         t.applied
     }
@@ -210,8 +244,8 @@ impl System for Rotators {
     fn runs(w: &World) -> bool {
         !w.edit()
     }
-    fn run(w: &mut World, _: &mut TickRun) -> u32 {
-        w.run_rotators()
+    fn run(w: &mut World, t: &mut TickRun) -> u32 {
+        w.run_rotators(t.tick)
     }
 }
 
@@ -221,8 +255,8 @@ impl System for Oscillators {
     fn runs(w: &World) -> bool {
         !w.edit()
     }
-    fn run(w: &mut World, _: &mut TickRun) -> u32 {
-        w.run_oscillators()
+    fn run(w: &mut World, t: &mut TickRun) -> u32 {
+        w.run_oscillators(t.tick)
     }
 }
 
@@ -274,7 +308,7 @@ impl System for PhysicsStep {
 /// despawn goes as `Command::Destroy` does — the subtree, the bookkeeping
 /// and the `Destroyed` events (foundation 3.10); one already gone with its
 /// parent (or twice in the queue) is skipped. New entities start with
-/// PrevWorld == current so they do not interpolate from the origin.
+/// PrevTransform == current so they do not interpolate from the origin.
 struct Propagate;
 impl System for Propagate {
     const KIND: SystemKind = SystemKind::Transforms;
@@ -282,9 +316,29 @@ impl System for Propagate {
         true
     }
     fn run(w: &mut World, t: &mut TickRun) -> u32 {
-        for e in w.ecs.take_deferred() {
-            if w.ecs.contains(e) {
-                let _ = w.destroy_subtree(e, t.tick);
+        let pending = w.ecs.take_deferred();
+        if !pending.is_empty() {
+            let result = w.edit_native_data_at_tick(t.tick, |edit| {
+                for &entity in &pending {
+                    if edit.contains(entity)? {
+                        edit.destroy(entity)?;
+                    }
+                }
+                Ok(())
+            });
+            if let Err(error) = result {
+                for entity in pending {
+                    w.ecs.despawn_deferred(entity);
+                }
+                w.reject(
+                    u32::MAX,
+                    Lane::Simulation,
+                    fynkel_contracts::DiagnosticCode::INVALID_PAYLOAD,
+                    Entity::NULL,
+                    ComponentId::NONE,
+                    format!("deferred destruction: {error}"),
+                );
+                t.rejected += 1;
             }
         }
         t.propagated += scene::propagate(&mut w.ecs) as u32;
@@ -299,7 +353,7 @@ impl System for CameraRigs {
         !w.edit()
     }
     fn run(w: &mut World, t: &mut TickRun) -> u32 {
-        let (rigs, moved) = w.place_camera_rigs();
+        let (rigs, moved) = w.place_camera_rigs(t.tick);
         t.moved |= moved;
         rigs
     }
@@ -327,7 +381,7 @@ impl System for Followers {
         !w.edit()
     }
     fn run(w: &mut World, t: &mut TickRun) -> u32 {
-        let (n, moved) = w.run_followers();
+        let (n, moved) = w.run_followers(t.tick);
         t.moved |= moved;
         n
     }
@@ -340,7 +394,7 @@ impl System for Billboards {
         !w.edit()
     }
     fn run(w: &mut World, t: &mut TickRun) -> u32 {
-        let (n, moved) = w.run_billboards();
+        let (n, moved) = w.run_billboards(t.tick);
         t.moved |= moved;
         n
     }
@@ -388,6 +442,53 @@ impl System for Audio {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_deferred_destruction_preserves_queue_and_retries_without_duplicate_events() {
+        let mut w = World::new(crate::WorldConfig::default());
+        let commit = w
+            .edit_gameplay(|edit| {
+                let root = edit.spawn("root", scene::Transform::IDENTITY, None)?;
+                let child = edit.spawn("child", scene::Transform::IDENTITY, Some(root.into()))?;
+                Ok((root, child))
+            })
+            .unwrap();
+        let root = commit.resolve(commit.value.0).unwrap();
+        let child = commit.resolve(commit.value.1).unwrap();
+        w.ecs.despawn_deferred(child);
+        w.ecs.despawn_deferred(root);
+        w.ecs.despawn_deferred(child);
+        let sequence = w.next_gameplay_edit;
+        w.next_gameplay_edit = u64::MAX;
+        let failed = w.step();
+        assert_eq!(w.live_entities(), 2);
+        assert_eq!(failed.rejected, 1);
+        assert!(w.drain_events().is_empty());
+        assert!(w
+            .diagnostics()
+            .iter()
+            .any(|d| d.message.contains("deferred destruction")));
+        w.next_gameplay_edit = sequence;
+        let committed = w.step();
+        let events = w.drain_events();
+        let mut destroyed: Vec<_> = events
+            .into_iter()
+            .filter_map(|event| match event.payload {
+                crate::EventPayload::Destroyed { entity } => {
+                    assert_eq!(event.tick, committed.tick);
+                    Some(entity)
+                }
+                _ => None,
+            })
+            .collect();
+        destroyed.sort_unstable();
+        let mut expected = vec![root, child];
+        expected.sort_unstable();
+        assert_eq!(destroyed, expected);
+        assert_eq!(w.live_entities(), 0);
+        w.step();
+        assert!(w.drain_events().is_empty());
+    }
 
     #[test]
     fn the_tick_runs_every_system_once_in_the_declared_order() {

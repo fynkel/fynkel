@@ -19,9 +19,17 @@ void main() {
     expect(m, isA<Asset>());
     expect(m, isA<AssetRef>());
     expect((m.name, m.ref, m.isAlive), ('gold', const AssetRef(gold), true));
-    expect(m == const AssetRef(gold) && const AssetRef(gold) == m, isTrue, reason: 'the same asset either way');
+    expect(
+      m == const AssetRef(gold) && const AssetRef(gold) == m,
+      isTrue,
+      reason: 'the same asset either way',
+    );
     expect(m.kind, 'material');
-    expect(() => m.destroy(), throwsUnsupportedError, reason: 'a project asset cannot be destroyed from a script');
+    expect(
+      () => m.destroy(),
+      throwsUnsupportedError,
+      reason: 'a project asset cannot be destroyed from a script',
+    );
 
     const cube = MeshAsset(kit, sub: 'mesh/cube');
     expect((cube.name, cube.kind), ('cube', 'mesh'));
@@ -40,7 +48,19 @@ void main() {
         const PhysicsMaterialAsset(kit),
         const RigAsset(kit),
       ].map((a) => a.kind),
-      ['texture', 'prefab', 'scene', 'audio', 'clip', 'skin', 'shader', 'controller', 'volume', 'physics_material', 'rig'],
+      [
+        'texture',
+        'prefab',
+        'scene',
+        'audio',
+        'clip',
+        'skin',
+        'shader',
+        'controller',
+        'volume',
+        'physics_material',
+        'rig',
+      ],
     );
   });
 
@@ -59,15 +79,16 @@ void main() {
     });
 
     test('a made material, mesh and clip are typed, alive until destroyed', () {
-      final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8)..loadProject(fixture, cacheDir: cache);
+      final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8)
+        ..loadProject(fixture, cacheDir: cache);
       addTearDown(w.dispose);
       final MaterialAsset red = w.createMaterial(const PbrMaterial(baseColor: Vec4(1, 0, 0, 1)));
-      final MeshAsset tri = w.createMesh(MeshData(
-        positions: const [Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 1, 0)],
-        triangles: const [0, 1, 2],
-      ));
-      final AnimationClipAsset clip =
-          w.createClip((ClipBuilder(length: 1)..position('Box', {0: Vec3.zero, 1: Vec3.one})).build());
+      final MeshAsset tri = w.createMesh(
+        MeshData(positions: const [Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 1, 0)], triangles: const [0, 1, 2]),
+      );
+      final AnimationClipAsset clip = w.createClip(
+        (ClipBuilder(length: 1)..position('Box', {0: Vec3.zero, 1: Vec3.one})).build(),
+      );
       for (final a in <Asset>[red, tri, clip]) {
         expect(a.isAlive, isTrue);
         a.destroy();

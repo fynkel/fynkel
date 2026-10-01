@@ -28,7 +28,7 @@ fn error(vp: *const fynkel_platform_apple::Viewport) -> String {
 #[test]
 fn a_panic_breaks_the_viewport_not_the_process() {
     let rt = fynkel_runtime_create();
-    let world = unsafe { fynkel_world_create(rt, ptr::null()) };
+    let world = unsafe { fynkel_world_create(rt, ptr::null(), std::ptr::null_mut()) };
     let vp = fynkel_apple_viewport_create(32, 32, 3, 1);
     assert!(!vp.is_null());
     unsafe {

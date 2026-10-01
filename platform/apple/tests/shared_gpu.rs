@@ -37,7 +37,7 @@ use glam::{Mat4, Vec3};
 
 fn record(slot: u32, world: Mat4) -> ExtractRecord {
     ExtractRecord {
-        entity: Entity::from_bits(slot as u64 + 1),
+        entity: Entity::from_bits(slot as u128 + 1),
         world,
         overridden: false,
         layer_bit: 1,

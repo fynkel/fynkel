@@ -1,3 +1,4 @@
+import 'package:fynkel/fynkel.dart' show EntityRef;
 // Live Play mode L2 (ADR-0021 P7): the running game as a document — the
 // scene's ids and component ids, what the game made under `runtime:` ids,
 // only what changed reported on a refresh — and the Hierarchy and the
@@ -33,7 +34,7 @@ import 'support/fakes.dart';
 final class FakeLive extends LiveBackend {
   final rows = <LiveEntity>[];
   final native = <String, List<({String type, Map<String, Object?> data})>>{};
-  final scripts = <int, List<LiveBehaviour>>{};
+  final scripts = <EntityRef, List<LiveBehaviour>>{};
   int entityReads = 0;
 
   /// What [setAsset] drew: `kind:id` → fields.
@@ -50,14 +51,14 @@ final class FakeLive extends LiveBackend {
     String id,
     String name, {
     String? parent,
-    int? handle,
+    EntityRef? handle,
     List<String> types = const ['fynkel.Transform'],
     bool persistent = false,
   }) {
     rows.add(
       LiveEntity(
         id: id,
-        handle: handle ?? rows.length + 1,
+        handle: handle ?? EntityRef(1, rows.length + 1, 1),
         name: name,
         parent: parent,
         spawned: id.startsWith('runtime:'),
@@ -121,7 +122,7 @@ final class FakeLive extends LiveBackend {
   }
 
   @override
-  List<LiveBehaviour> behaviours(int handle) => scripts[handle] ?? const [];
+  List<LiveBehaviour> behaviours(EntityRef handle) => scripts[handle] ?? const [];
 
   /// Every write, as `kind id` (L3).
   final writes = <String>[];
@@ -174,7 +175,7 @@ final class FakeLive extends LiveBackend {
   }
 
   @override
-  List<String> addBehaviour(int handle, String type, {int? version, Map<String, Object?> data = const {}}) {
+  List<String> addBehaviour(EntityRef handle, String type, {int? version, Map<String, Object?> data = const {}}) {
     writes.add('addBehaviour $handle $type');
     final fields = {...data};
     (scripts[handle] ??= []).add(LiveBehaviour(type: type, data: fields, instance: fields));
@@ -230,10 +231,10 @@ FakeDocument scene() => FakeDocument(
 FakeLive running() {
   final spinner = <String, Object?>{'speed': 2.5};
   return FakeLive()
-    ..add('robot', 'Robot', handle: 7, types: ['fynkel.Transform', 'fynkel.PointLight'])
+    ..add('robot', 'Robot', handle: const EntityRef(1, 7, 1), types: ['fynkel.Transform', 'fynkel.PointLight'])
     ..add('floor', 'Floor')
-    ..add('runtime:99', 'Bullet', handle: 99)
-    ..scripts[7] = [LiveBehaviour(type: 'game.Spinner', data: spinner, authoredComponentId: 'spin', instance: spinner)];
+    ..add('runtime:99', 'Bullet', handle: const EntityRef(1, 99, 1))
+    ..scripts[const EntityRef(1, 7, 1)] = [LiveBehaviour(type: 'game.Spinner', data: spinner, authoredComponentId: 'spin', instance: spinner)];
 }
 
 /// A game that shows a (real, empty) world the way `FynkelGameView` does:
@@ -326,7 +327,7 @@ void main() {
         'data': {'speed': 1},
       }),
     ]);
-    expect(live.writes.sublist(live.writes.length - 2), ['set floor', 'addBehaviour 2 game.Spinner']);
+    expect(live.writes.sublist(live.writes.length - 2), ['set floor', 'addBehaviour 00000001000000020000000000000001 game.Spinner']);
     expect(components('floor').keys, containsAll(['floor/fynkel.PointLight', 'floor/game.Spinner']));
     doc.apply([Command.removeComponent('robot', 'light'), Command.removeComponent('robot', 'spin')]);
     expect(live.writes.sublist(live.writes.length - 2), ['remove robot', 'removeBehaviour']);
@@ -553,7 +554,7 @@ void main() {
     expect(told, 0, reason: 'nothing moved');
 
     live.rename('robot', 'Hero');
-    live.add('runtime:100', 'Coin', handle: 100);
+    live.add('runtime:100', 'Coin', handle: const EntityRef(1, 100, 1));
     doc.refresh();
     expect(told, 1);
     expect(doc.lastEdit!.affectedIds, unorderedEquals(['robot', 'runtime:100']));
@@ -678,7 +679,7 @@ void main() {
     final inspector = InspectorModel(tabs: tabs, project: project);
     addTearDown(inspector.dispose);
     tabs.openDocument('main');
-    final live = FakeLive()..add('i1:mesh', 'Mesh', handle: 5, types: ['fynkel.Transform', 'fynkel.Light']);
+    final live = FakeLive()..add('i1:mesh', 'Mesh', handle: const EntityRef(1, 5, 1), types: ['fynkel.Transform', 'fynkel.Light']);
     live.write('set', {
       'id': 'i1:mesh',
       'type': 'fynkel.Light',
@@ -797,7 +798,7 @@ void main() {
     expect(tabs.live!.selection, isEmpty);
     live.rows.clear();
     live
-      ..add('robot', 'Robot', handle: 7)
+      ..add('robot', 'Robot', handle: const EntityRef(1, 7, 1))
       ..add('floor', 'Floor');
     play.document!.refresh();
     expect(tabs.live!.selection, {'robot'}, reason: 'carried once the robot is there');
@@ -955,8 +956,8 @@ void main() {
     addTearDown(hierarchy.dispose);
     tabs.openDocument('main');
     final live = running()
-      ..add('runtime:50', 'Music', handle: 50, persistent: true)
-      ..add('runtime:51', 'Track', handle: 51, parent: 'runtime:50');
+      ..add('runtime:50', 'Music', handle: const EntityRef(1, 50, 1), persistent: true)
+      ..add('runtime:51', 'Track', handle: const EntityRef(1, 51, 1), parent: 'runtime:50');
     final play = LivePlay(tabs: tabs, backend: (_) => live);
     addTearDown(play.dispose);
     final world = fynkel.World.create();

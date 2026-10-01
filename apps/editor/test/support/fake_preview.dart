@@ -1,3 +1,4 @@
+import 'package:fynkel/fynkel.dart' show EntityRef;
 // An in-memory edit-preview world for the Scene view tests: every entity
 // with a Transform is a unit cube at its world matrix (what the real
 // preview draws for an entity without a mesh), lights and cameras carry an
@@ -323,13 +324,13 @@ final class FakePreviewBackend implements PreviewBackend {
 
   /// A handle per drawn id: its place in the document plus one.
   @override
-  List<int> entities(Iterable<String> ids) {
+  List<EntityRef> entities(Iterable<String> ids) {
     _check('entities');
     final order = document.entitiesView.keys.toList();
     final drawn = _visible.toSet();
     return {
       for (final id in ids)
-        if (drawn.contains(id)) order.indexOf(id) + 1,
+        if (drawn.contains(id)) EntityRef(1, order.indexOf(id) + 1, 1),
     }.toList();
   }
 

@@ -40,10 +40,18 @@ void main() {
     final w = fresh()..loadProject(fixture, cacheDir: cache);
     final mesh = w.createMesh(ground(1));
     expect(mesh.asset[14], '4', reason: 'a v4 UUID');
-    final terrain = w.build(ObjectSpec('Terrain', components: [
-      MeshRenderer(mesh: mesh, material: w.createMaterial(const PbrMaterial(baseColor: Vec4(0.3, 0.6, 0.2, 1)))),
-      Collider(shape: ColliderShape.mesh, mesh: mesh),
-    ]));
+    final terrain = w.build(
+      ObjectSpec(
+        'Terrain',
+        components: [
+          MeshRenderer(
+            mesh: mesh,
+            material: w.createMaterial(const PbrMaterial(baseColor: Vec4(0.3, 0.6, 0.2, 1))),
+          ),
+          Collider(shape: ColliderShape.mesh, mesh: mesh),
+        ],
+      ),
+    );
     w.frame(1 / 60);
     expect(terrain.get<MeshRenderer>()!.mesh, mesh);
 
@@ -67,7 +75,12 @@ void main() {
     // Removed under a collider still naming it: nothing to stand on, and
     // the collider says why, as for any mesh that is not there.
     final again = w.createMesh(ground(0));
-    final floor = w.build(ObjectSpec('Floor', components: [Collider(shape: ColliderShape.mesh, mesh: again)]));
+    final floor = w.build(
+      ObjectSpec(
+        'Floor',
+        components: [Collider(shape: ColliderShape.mesh, mesh: again)],
+      ),
+    );
     w.frame(1 / 60);
     expect(w.raycast(const Vec3(2, 10, 0), const Vec3(0, -1, 0))?.entity, floor.entity);
     w.destroyMesh(again);
@@ -87,7 +100,10 @@ void main() {
       expect((t.x, t.y, t.z), (1.0, 0.0, 0.0), reason: 'along +u, which runs along +x');
       expect(t.w.abs(), 1);
     }
-    final noUv = MeshData(positions: const [Vec3.zero, Vec3(1, 0, 0), Vec3(0, 1, 0)], triangles: const [0, 1, 2]);
+    final noUv = MeshData(
+      positions: const [Vec3.zero, Vec3(1, 0, 0), Vec3(0, 1, 0)],
+      triangles: const [0, 1, 2],
+    );
     expect(noUv.resolvedNormals(), everyElement(const Vec3(0, 0, 1)), reason: 'counter-clockwise from +z');
     expect(noUv.resolvedTangents(noUv.resolvedNormals()), everyElement(const Vec4(0, 0, 0, 0)));
 
@@ -95,7 +111,11 @@ void main() {
     final bytes = ByteData.sublistView(noUv.toPayload());
     expect(bytes.lengthInBytes, 32 + 3 * 72 + 3 * 4);
     expect((bytes.getUint32(0, Endian.little), bytes.getUint32(4, Endian.little)), (3, 3));
-    expect(bytes.getFloat32(32 + 72 + 56, Endian.little), 1, reason: "the second vertex's colour defaults to white");
+    expect(
+      bytes.getFloat32(32 + 72 + 56, Endian.little),
+      1,
+      reason: "the second vertex's colour defaults to white",
+    );
   });
 
   test('what cannot be a mesh throws', () {
@@ -103,13 +123,24 @@ void main() {
     expect(() => MeshData(positions: tri, triangles: const []), throwsArgumentError);
     expect(() => MeshData(positions: tri, triangles: const [0, 1]), throwsArgumentError);
     expect(() => MeshData(positions: tri, triangles: const [0, 1, 3]), throwsArgumentError);
-    expect(() => MeshData(positions: tri, triangles: const [0, 1, 2], uvs: const [Vec2.zero]), throwsArgumentError);
-    expect(() => MeshData(positions: const [Vec3(double.nan, 0, 0), Vec3.one, Vec3.zero], triangles: const [0, 1, 2]),
-        throwsArgumentError);
+    expect(
+      () => MeshData(positions: tri, triangles: const [0, 1, 2], uvs: const [Vec2.zero]),
+      throwsArgumentError,
+    );
+    expect(
+      () => MeshData(
+        positions: const [Vec3(double.nan, 0, 0), Vec3.one, Vec3.zero],
+        triangles: const [0, 1, 2],
+      ),
+      throwsArgumentError,
+    );
     expect(() => MeshData.grid(xSegments: 0), throwsArgumentError);
 
     final w = fresh();
-    expect(() => w.createMesh(MeshData(positions: tri, triangles: const [0, 1, 2])), throwsStateError,
-        reason: 'no asset store before a load');
+    expect(
+      () => w.createMesh(MeshData(positions: tri, triangles: const [0, 1, 2])),
+      throwsStateError,
+      reason: 'no asset store before a load',
+    );
   });
 }

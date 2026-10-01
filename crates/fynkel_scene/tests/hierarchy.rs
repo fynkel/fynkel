@@ -1,4 +1,3 @@
-use fynkel_contracts::WorldId;
 use fynkel_ecs::World;
 use fynkel_scene::*;
 use glam::{Mat4, Quat, Vec3};
@@ -9,7 +8,7 @@ fn approx(a: Mat4, b: Mat4) -> bool {
 
 #[test]
 fn propagation_and_dirty_subtrees() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let root = spawn(
         &mut w,
         Transform::from_position(Vec3::new(1.0, 0.0, 0.0)),
@@ -72,7 +71,7 @@ fn propagation_and_dirty_subtrees() {
 
 #[test]
 fn cycle_rejection() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let a = spawn(&mut w, Transform::IDENTITY, None).unwrap();
     let b = spawn(&mut w, Transform::IDENTITY, Some(a)).unwrap();
     let c = spawn(&mut w, Transform::IDENTITY, Some(b)).unwrap();
@@ -116,7 +115,7 @@ fn cycle_rejection() {
 
 #[test]
 fn reparent_keep_world_and_keep_local() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let a = spawn(
         &mut w,
         Transform::from_position(Vec3::new(10.0, 0.0, 0.0)),
@@ -170,7 +169,7 @@ fn reparent_keep_world_and_keep_local() {
 
 #[test]
 fn deterministic_child_order_and_sibling_index() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let p = spawn(&mut w, Transform::IDENTITY, None).unwrap();
     let kids: Vec<_> = (0..5)
         .map(|_| spawn(&mut w, Transform::IDENTITY, Some(p)).unwrap())
@@ -192,7 +191,7 @@ fn deterministic_child_order_and_sibling_index() {
 
 #[test]
 fn destroy_subtree_and_unlink() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let root = spawn(&mut w, Transform::IDENTITY, None).unwrap();
     let a = spawn(&mut w, Transform::IDENTITY, Some(root)).unwrap();
     let b = spawn(&mut w, Transform::IDENTITY, Some(root)).unwrap();
@@ -216,7 +215,7 @@ fn destroy_subtree_and_unlink() {
 fn keep_world_reparent_uses_the_current_poses() {
     // Foundation 3.3: a keep-world reparent reads the poses from the
     // local transforms, so a batch of them needs no whole-world pass.
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let a = spawn(
         &mut w,
         Transform::from_position(Vec3::new(10.0, 0.0, 0.0)),
@@ -242,7 +241,7 @@ fn keep_world_reparent_uses_the_current_poses() {
 
 #[test]
 fn a_dirty_node_under_a_dirty_ancestor_is_recomputed_once() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let root = spawn(&mut w, Transform::default(), None).unwrap();
     let mid = spawn(&mut w, Transform::default(), Some(root)).unwrap();
     let leaf = spawn(&mut w, Transform::default(), Some(mid)).unwrap();
@@ -256,4 +255,96 @@ fn a_dirty_node_under_a_dirty_ancestor_is_recomputed_once() {
     let p = world_matrix(&w, leaf).unwrap().transform_point3(Vec3::ZERO);
     assert!(p.abs_diff_eq(Vec3::new(1.0, 0.0, 1.0), 1e-4), "{p}");
     assert_eq!(propagate(&mut w), 0);
+}
+
+#[test]
+fn keep_world_rejects_shear_and_singular_parent_without_changing_links() {
+    let mut w = World::new();
+    let scaled = spawn(
+        &mut w,
+        Transform {
+            scale: Vec3::new(2.0, 1.0, 1.0),
+            ..Transform::IDENTITY
+        },
+        None,
+    )
+    .unwrap();
+    let child = spawn(
+        &mut w,
+        Transform {
+            rotation: glam::Quat::from_rotation_z(0.7),
+            ..Transform::IDENTITY
+        },
+        Some(scaled),
+    )
+    .unwrap();
+    let before = local(&w, child).unwrap();
+    assert!(matches!(
+        set_parent_keep_world(&mut w, child, None),
+        Err(SceneError::UnsupportedTransform(_))
+    ));
+    assert_eq!(parent_of(&w, child), Some(scaled));
+    assert_eq!(local(&w, child).unwrap(), before);
+    let singular = spawn(
+        &mut w,
+        Transform {
+            scale: Vec3::new(0.0, 1.0, 1.0),
+            ..Transform::IDENTITY
+        },
+        None,
+    )
+    .unwrap();
+    assert!(matches!(
+        set_parent_keep_world(&mut w, child, Some(singular)),
+        Err(SceneError::UnsupportedTransform(_))
+    ));
+    assert_eq!(parent_of(&w, child), Some(scaled));
+}
+
+#[test]
+fn world_pose_uses_current_affine_ancestors_and_authored_orientation() {
+    let mut w = World::new();
+    let root = spawn(
+        &mut w,
+        Transform {
+            scale: Vec3::new(2.0, 1.0, 3.0),
+            ..Transform::IDENTITY
+        },
+        None,
+    )
+    .unwrap();
+    let branch = spawn(
+        &mut w,
+        Transform {
+            rotation: Quat::from_rotation_z(0.7),
+            ..Transform::IDENTITY
+        },
+        Some(root),
+    )
+    .unwrap();
+    let leaf = spawn(&mut w, Transform::IDENTITY, Some(branch)).unwrap();
+    let target = Vec3::new(7.0, 4.0, 2.0);
+    set_world_pose(&w, leaf, target, Quat::IDENTITY).unwrap();
+    assert!(current_world(&w, leaf)
+        .unwrap()
+        .transform_point3(Vec3::ZERO)
+        .abs_diff_eq(target, 1e-5));
+    assert!(world_rotation(&w, leaf)
+        .unwrap()
+        .abs_diff_eq(Quat::IDENTITY, 1e-5));
+    let before = local(&w, leaf).unwrap();
+    set_local(
+        &w,
+        root,
+        Transform {
+            scale: Vec3::new(0.0, 1.0, 1.0),
+            ..Transform::IDENTITY
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        set_world_pose(&w, leaf, target, Quat::IDENTITY),
+        Err(SceneError::UnsupportedTransform(_))
+    ));
+    assert_eq!(local(&w, leaf).unwrap(), before);
 }

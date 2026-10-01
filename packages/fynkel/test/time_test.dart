@@ -78,7 +78,8 @@ void main() {
   setUpAll(() => lib = NativeLibrary.open());
   tearDownAll(() => lib.dispose());
 
-  World world() => World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8)..throwOnDiagnostics = true;
+  World world() =>
+      World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8)..throwOnDiagnostics = true;
 
   test('Time.delta is the fixed step in the fixed phase and the frame dt in update', () {
     final w = world();
@@ -122,48 +123,51 @@ void main() {
     }
   });
 
-  test('Time.timeScale slows the ticks and scales update; 0 pauses them and update still runs (foundation 1.3)', () {
-    final w = world();
-    addTearDown(w.dispose);
-    final menu = w.spawn(name: 'menu').addBehaviour(PauseMenu());
-    final mover = w.spawn(name: 'mover').addBehaviour(Mover());
-    w.frame(1 / 60);
-    expect(w.context.run(() => Time.timeScale), 1);
-
-    // Half speed: 60 frames of a second make 30 ticks, and 1.5 m.
-    w.context.run(() => Time.timeScale = 0.5);
-    var ticks = 0;
-    final start = mover.x;
-    menu.deltas.clear();
-    for (var i = 0; i < 60; i++) {
-      ticks += w.frame(1 / 60).steps;
-    }
-    expect(ticks, closeTo(30, 1));
-    expect(mover.x - start, closeTo(1.5, 3 / 60 + 1e-9));
-    expect(menu.deltas.last.$1, closeTo(1 / 120, 1e-9), reason: 'Time.delta in update is scaled');
-    expect(menu.deltas.last.$2, closeTo(1 / 60, 1e-9), reason: 'Time.unscaledDelta is the frame');
-
-    // The pause action: timeScale 0 — no tick, update runs with delta 0.
-    w.context.run(() => Time.timeScale = 1);
-    menu.toggle = true;
-    w.frame(1 / 60);
-    final fixed = menu.fixed, updates = menu.updates, tick = w.tick;
-    for (var i = 0; i < 30; i++) {
+  test(
+    'Time.timeScale slows the ticks and scales update; 0 pauses them and update still runs (foundation 1.3)',
+    () {
+      final w = world();
+      addTearDown(w.dispose);
+      final menu = w.spawn(name: 'menu').addBehaviour(PauseMenu());
+      final mover = w.spawn(name: 'mover').addBehaviour(Mover());
       w.frame(1 / 60);
-    }
-    expect(w.tick, tick, reason: 'no tick while paused');
-    expect(menu.fixed, fixed);
-    expect(menu.updates, updates + 30, reason: 'update runs while paused');
-    expect(menu.deltas.last, (0.0, 1 / 60));
+      expect(w.context.run(() => Time.timeScale), 1);
 
-    // …so the same action resumes.
-    menu.toggle = true;
-    w.frame(1 / 60);
-    w.frame(1 / 60);
-    expect(w.tick, greaterThan(tick));
+      // Half speed: 60 frames of a second make 30 ticks, and 1.5 m.
+      w.context.run(() => Time.timeScale = 0.5);
+      var ticks = 0;
+      final start = mover.x;
+      menu.deltas.clear();
+      for (var i = 0; i < 60; i++) {
+        ticks += w.frame(1 / 60).steps;
+      }
+      expect(ticks, closeTo(30, 1));
+      expect(mover.x - start, closeTo(1.5, 3 / 60 + 1e-9));
+      expect(menu.deltas.last.$1, closeTo(1 / 120, 1e-9), reason: 'Time.delta in update is scaled');
+      expect(menu.deltas.last.$2, closeTo(1 / 60, 1e-9), reason: 'Time.unscaledDelta is the frame');
 
-    expect(() => w.context.run(() => Time.timeScale = -1), throwsArgumentError);
-  });
+      // The pause action: timeScale 0 — no tick, update runs with delta 0.
+      w.context.run(() => Time.timeScale = 1);
+      menu.toggle = true;
+      w.frame(1 / 60);
+      final fixed = menu.fixed, updates = menu.updates, tick = w.tick;
+      for (var i = 0; i < 30; i++) {
+        w.frame(1 / 60);
+      }
+      expect(w.tick, tick, reason: 'no tick while paused');
+      expect(menu.fixed, fixed);
+      expect(menu.updates, updates + 30, reason: 'update runs while paused');
+      expect(menu.deltas.last, (0.0, 1 / 60));
+
+      // …so the same action resumes.
+      menu.toggle = true;
+      w.frame(1 / 60);
+      w.frame(1 / 60);
+      expect(w.tick, greaterThan(tick));
+
+      expect(() => w.context.run(() => Time.timeScale = -1), throwsArgumentError);
+    },
+  );
 
   test('one clock: Time.elapsed in update moves every frame, and a long frame counts as the clamp (foundation 1.4)', () {
     final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 30)..throwOnDiagnostics = true;
@@ -179,8 +183,11 @@ void main() {
       w.frame(1 / 240);
     }
     for (var i = 1; i < probe.seen.length; i++) {
-      expect(probe.seen[i].$1 - probe.seen[i - 1].$1, closeTo(probe.seen[i].$2, 1e-6),
-          reason: 'frame $i: elapsed moved by the delta');
+      expect(
+        probe.seen[i].$1 - probe.seen[i - 1].$1,
+        closeTo(probe.seen[i].$2, 1e-6),
+        reason: 'frame $i: elapsed moved by the delta',
+      );
     }
 
     // A two-second hitch (a breakpoint, a load): the clock takes 0.25 s
@@ -199,4 +206,3 @@ void main() {
     expect(probe.waitEnded! - probe.waitStarted!, closeTo(1, 1 / 60 + 1e-6));
   });
 }
-

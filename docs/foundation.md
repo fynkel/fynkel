@@ -1,5 +1,7 @@
 # Foundation pass
 
+**Follow-up from 2026-09-30:** the [foundation roadmap](foundation-roadmap.md) tracks the new architecture program. This file retains the September 27 audit and its fix evidence. Previously completed fixes are not evidence that the new ECS/state contracts are implemented; carry new findings and any reopened work into the new task ledger rather than duplicating status here.
+
 Making what Fynkel already has solid before anything new is built on it.
 Started 2026-09-27 at the user's request ("now it is time for us to make
 everything of what we have solid and scalable and extendable so we can

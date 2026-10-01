@@ -9,10 +9,11 @@ import 'dart:ffi';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
+import 'package:fynkel/fynkel.dart' show EntityRef, FynkelEntity;
 
 import 'percentiles.dart';
 
-const viewportAbiVersion = 11;
+const viewportAbiVersion = 12;
 
 /// `fynkel_apple_viewport_render` result when the world pointer is null or
 /// the world is poisoned.
@@ -263,15 +264,15 @@ external int _overlay(
   int triangleCount,
   Pointer<Float> grid,
 );
-@Native<Int32 Function(Pointer<Void>, Pointer<Uint64>, Uint32, Pointer<Uint64>, Uint32, Pointer<Float>)>(
+@Native<Int32 Function(Pointer<Void>, Pointer<FynkelEntity>, Uint32, Pointer<FynkelEntity>, Uint32, Pointer<Float>)>(
   symbol: 'fynkel_apple_viewport_outline',
   assetId: _asset,
 )
 external int _outline(
   Pointer<Void> vp,
-  Pointer<Uint64> selected,
+  Pointer<FynkelEntity> selected,
   int selectedCount,
-  Pointer<Uint64> children,
+  Pointer<FynkelEntity> children,
   int childrenCount,
   Pointer<Float> style,
 );
@@ -473,14 +474,16 @@ class ViewportNative {
   /// [selected] and [children] entity handles, [style] the nine floats of
   /// `OverlayOutline.packStyle`. Returns the entities queued, or -1 for a
   /// non-finite style. Every render empties it.
-  int outline(Pointer<Void> vp, List<int> selected, List<int> children, Float32List style) {
+  int outline(Pointer<Void> vp, List<EntityRef> selected, List<EntityRef> children, Float32List style) {
     final ns = selected.length, nc = children.length;
-    final ids = calloc<Uint64>(ns + nc == 0 ? 1 : ns + nc);
+    final ids = calloc<FynkelEntity>(ns + nc == 0 ? 1 : ns + nc);
     final s = calloc<Float>(9);
     try {
-      ids.asTypedList(ns + nc)
-        ..setAll(0, selected)
-        ..setAll(ns, children);
+      final values = [...selected, ...children];
+      for (var i = 0; i < values.length; i++) {
+        ids[i].world = values[i].world; ids[i].slot = values[i].slot;
+        ids[i].generation = values[i].generation;
+      }
       s.asTypedList(9).setAll(0, style);
       return _outline(vp, ns == 0 ? nullptr : ids, ns, nc == 0 ? nullptr : ids + ns, nc, s);
     } finally {

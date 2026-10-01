@@ -217,10 +217,9 @@ pub fn object_ref_field(m: &[Member], name: &str) -> Result<ObjectRef, FieldErro
         }
         let text = str_field(inner, "entity")?;
         if let Some(bits) = text.strip_prefix("runtime:") {
-            let bits: u64 = bits
-                .parse()
-                .map_err(|_| FieldError::new("/entity", "expected runtime:<handle>"))?;
-            return Ok(ObjectRef::to(Entity::from_bits(bits)));
+            let entity = Entity::from_hex(bits)
+                .ok_or_else(|| FieldError::new("/entity", "expected runtime:<32 hex digits>"))?;
+            return Ok(ObjectRef::to(entity));
         }
         let id: Uuid = text
             .parse()
@@ -341,7 +340,7 @@ pub fn object_ref_node(r: ObjectRef) -> Node {
     let text = if !r.id.is_nil() {
         r.id.to_string()
     } else if !r.entity.is_null() {
-        format!("runtime:{}", r.entity.to_bits())
+        format!("runtime:{}", r.entity.to_hex())
     } else {
         return Node::synthetic(Value::Null);
     };

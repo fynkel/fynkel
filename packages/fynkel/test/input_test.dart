@@ -103,7 +103,10 @@ void main() {
     // 50 ms: three ticks. Space and W went down during the frame.
     final plan = w.frame(
       0.05,
-      input: const [InputEvent.down(InputDevice.keyboard, 'Space'), InputEvent.down(InputDevice.keyboard, 'W')],
+      input: const [
+        InputEvent.down(InputDevice.keyboard, 'Space'),
+        InputEvent.down(InputDevice.keyboard, 'W'),
+      ],
     );
     expect(plan.steps, 3);
     expect(r.log, [
@@ -150,7 +153,9 @@ void main() {
     go.addBehaviour(
       _Looker((phase, scale) {
         final v = Input.action2D('look');
-        looks.add('$phase (${(v.x * scale).toStringAsFixed(1)}, ${(v.y * scale).toStringAsFixed(1)}) ${Input.held('look') ? 'H' : '-'}');
+        looks.add(
+          '$phase (${(v.x * scale).toStringAsFixed(1)}, ${(v.y * scale).toStringAsFixed(1)}) ${Input.held('look') ? 'H' : '-'}',
+        );
       }),
     );
     w.frame(1 / 60);
@@ -167,7 +172,12 @@ void main() {
       ],
     );
     expect(plan.steps, 3);
-    expect(looks, ['fixed (7.0, -0.5) H', 'fixed (0.0, 0.0) -', 'fixed (0.0, 0.0) -', 'update (7.0, -0.5) H']);
+    expect(looks, [
+      'fixed (7.0, -0.5) H',
+      'fixed (0.0, 0.0) -',
+      'fixed (0.0, 0.0) -',
+      'update (7.0, -0.5) H',
+    ]);
     expect(w.input.action2D('look').x, closeTo(7.0, 1e-3), reason: 'the frame view is the motion itself');
     looks.clear();
 

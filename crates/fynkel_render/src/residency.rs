@@ -427,6 +427,7 @@ impl ExtractRenderer {
             material: PbrMaterial::default(),
             casts: true,
             broken: false,
+            deforms: false,
         };
         if r.is_nil() {
             return plain;
@@ -443,6 +444,10 @@ impl ExtractRenderer {
                     key: Some(r.clone()),
                     material: m.material.clone(),
                     casts: self.casts(m.shader),
+                    deforms: m
+                        .shader
+                        .and_then(|id| self.surface(id))
+                        .is_some_and(|s| s.shader.has_vertex()),
                     broken: false,
                 },
                 None => plain,
@@ -465,6 +470,10 @@ impl ExtractRenderer {
                         key: Some(r.clone()),
                         material: gpu.material.clone(),
                         casts: self.casts(gpu.shader),
+                        deforms: gpu
+                            .shader
+                            .and_then(|id| self.surface(id))
+                            .is_some_and(|s| s.shader.has_vertex()),
                         broken: false,
                     };
                     self.materials.insert(r.clone(), Some(gpu));
@@ -533,6 +542,7 @@ impl ExtractRenderer {
                 material: g.material.clone(),
                 casts: true,
                 broken: false,
+                deforms: false,
             },
             None => plain,
         };

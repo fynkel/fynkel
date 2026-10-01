@@ -114,9 +114,9 @@ fn entities_carry_authoring_ids_and_the_games_own_are_runtime() {
         rows[2]["types"],
         json!(["fynkel.Transform", "fynkel.Camera"])
     );
-    let e2 = rows[2]["entity"].as_u64().unwrap();
+    let e2 = rows[2]["entity"].as_str().unwrap();
     assert_eq!(
-        live::id_of(&w, Entity::from_bits(e2)),
+        live::id_of(&w, Entity::from_hex(e2).unwrap()),
         uid(2),
         "the handle is the entity's"
     );
@@ -491,11 +491,11 @@ fn the_scene_view_picks_and_outlines_the_running_world() {
         "handles",
         json!({ "ids": [uid(4), bullet, uid(77)] }),
     );
-    let bits: Vec<u64> = handles["entities"]
+    let bits: Vec<String> = handles["entities"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|b| b.as_u64().unwrap())
+        .map(|b| b.as_str().unwrap().to_string())
         .collect();
     assert_eq!(bits.len(), 2, "{handles}");
     assert_eq!(
@@ -504,7 +504,7 @@ fn the_scene_view_picks_and_outlines_the_running_world() {
     );
     assert_eq!(
         bits[0],
-        live::resolve(&w, &uid(4)).unwrap().to_bits(),
+        live::resolve(&w, &uid(4)).unwrap().to_hex(),
         "{handles}"
     );
     // Icons: the camera's frustum and the light's range, for everyone.

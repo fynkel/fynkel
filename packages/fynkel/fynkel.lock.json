@@ -3,35 +3,12 @@
   "formatVersion": 1,
   "runtime": {
     "version": "0.0.1",
-    "abiVersion": 1,
-    "store": "https://github.com/mooumari/fynkel/releases/download/runtime-v{version}/",
-    "artifacts": {
-      "ios-arm64": {
-        "file": "libfynkel_platform_apple-ios-arm64.dylib",
-        "sha256": null
-      },
-      "ios-simulator-arm64": {
-        "file": "libfynkel_platform_apple-ios-simulator-arm64.dylib",
-        "sha256": null
-      },
-      "ios-simulator-x64": {
-        "file": "libfynkel_platform_apple-ios-simulator-x64.dylib",
-        "sha256": null
-      },
-      "macos-arm64": {
-        "file": "libfynkel_platform_apple-macos-arm64.dylib",
-        "sha256": null
-      },
-      "macos-x64": {
-        "file": "libfynkel_platform_apple-macos-x64.dylib",
-        "sha256": null
-      }
-    }
+    "abiVersion": 3
   },
   "tools": {
     "version": "0.0.1"
   },
-  "schemaFingerprint": "0xe918a4acac42ad74",
+  "schemaFingerprint": "0x52ca2a9cfe616eff",
   "documents": {
     "blend": 1,
     "controller": 1,

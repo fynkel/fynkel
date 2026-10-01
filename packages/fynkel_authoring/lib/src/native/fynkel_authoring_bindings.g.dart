@@ -963,6 +963,6 @@ final class FynkelBufferView extends ffi.Struct {
 
 final class FynkelAuthoringSession extends ffi.Opaque {}
 
-const int FYNKEL_AUTHORING_ABI_VERSION = 4;
+const int FYNKEL_AUTHORING_ABI_VERSION = 5;
 
 const int FYNKEL_PREVIEW_OPEN_NO_COOK = 1;

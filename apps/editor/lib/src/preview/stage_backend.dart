@@ -1,5 +1,5 @@
 // The seam between the Inspector's 3D previews and the native preview
-// stages (authoring ABI v4, ADR-0030 §3): the session's `PreviewStage`
+// stages (authoring ABI v5, ADR-0030 §3): the session's `PreviewStage`
 // behind an interface, so widget tests can stand a fake in.
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 

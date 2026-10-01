@@ -11,6 +11,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fynkel/fynkel.dart' show EntityRef;
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/console/console_panel.dart';
@@ -70,7 +71,7 @@ void main() {
   group('GameRecord', () {
     test('a record is found behind a `flutter run` prefix; anything else is output', () {
       final r = GameRecord.parse(
-        'flutter: ${record({'fynkel': 'diagnostic', 'seq': 12, 'code': 'staleEntity', 'severity': 'error', 'message': 'the entity is gone', 'tick': 84, 'source': 'step', 'document': 'assets/scenes/playground.scene.json', 'pointer': '/entities/player', 'id': 'player', 'entity': 0x2a, 'suggestion': 'check the behaviour\'s handle'})}',
+        'flutter: ${record({'fynkel': 'diagnostic', 'seq': 12, 'code': 'staleEntity', 'severity': 'error', 'message': 'the entity is gone', 'tick': 84, 'source': 'step', 'document': 'assets/scenes/playground.scene.json', 'pointer': '/entities/player', 'id': 'player', 'entity': '000000010000002a0000000000000001', 'suggestion': 'check the behaviour\'s handle'})}',
       );
       expect(r.kind, GameRecordKind.diagnostic);
       expect(r.severity, Severity.error);
@@ -79,7 +80,7 @@ void main() {
       expect(r.code, 'staleEntity');
       expect(r.source, 'step');
       expect(r.id, 'player');
-      expect(r.entity, 42);
+      expect(r.entity, const EntityRef(1, 42, 1));
       expect(r.hasTarget, isTrue);
       expect(r.location(relative: (p) => p.split('/').last), 'playground.scene.json  /entities/player');
       expect(r.location(), 'assets/scenes/playground.scene.json  /entities/player');

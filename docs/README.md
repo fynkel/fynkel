@@ -3,10 +3,20 @@
 | Document | Role |
 | --- | --- |
 | [`status.md`](status.md) | **Start here.** What exists, what is proven end to end, what is not, known compromises, how "green" is verified. Rewritten at every gate. |
-| [`roadmap.md`](roadmap.md) | The agreed order from here to 1.0 and after (Phase 1 foundation fixes → M4 → extensibility → rendering → M5 → M6). |
-| [`foundation.md`](foundation.md) | The foundation pass (from 2026-09-27): the audit's findings per area, each confirmed by a failing test, then fixed. The current focus. |
+| [`foundation-roadmap.md`](foundation-roadmap.md) | **Current work.** The September 30 foundation program: ECS and unified gameplay state, nine milestones, task status, acceptance criteria, and evidence gates. |
+| [`foundation-baseline.md`](foundation-baseline.md) | September 30 F0 baseline commands, reproduced defects, existing failures and verification limits. |
+| [`design/foundation-ownership.md`](design/foundation-ownership.md) | Code-based state owners, mutation routes, frame order, dependencies and finding-to-experiment map. |
+| [`design/foundation-prototype.md`](design/foundation-prototype.md) | Experimental shared object/system access, contract tests and Dart/native storage/crossing evidence; unresolved F0 gate work. |
+| [`design/foundation-state-comparison.md`](design/foundation-state-comparison.md) | Mixed built-in/custom transaction contracts, adapter/shared-kernel comparison, frame/allocation/bridge captures and the ADR-0046 decision. |
+| [`design/foundation-identity-migration.md`](design/foundation-identity-migration.md) | Live 128-bit identity migration, ABI changes, actual-world regressions, measurements and remaining authority/qualification work. |
+| [`design/foundation-identity-authority.md`](design/foundation-identity-authority.md) | Process-lifetime host authority and independent-library/replacement qualification. |
+| [`design/foundation-clock-migration.md`](design/foundation-clock-migration.md) | Canonical native clocks, timed gameplay, editor Step, host acceptance, ABI 3 and qualification evidence. |
+| [`design/foundation-transform-migration.md`](design/foundation-transform-migration.md) | Exact affine operations, reparenting, interpolation, physics constraints and F1.3 qualification. |
+| [`design/foundation-bounds-migration.md`](design/foundation-bounds-migration.md) | Conservative affine and animated bounds, camera/shadow regressions and update cost. |
+| [`roadmap.md`](roadmap.md) | Product roadmap and prior completion history; the foundation program precedes the remaining feature work. |
+| [`foundation.md`](foundation.md) | The September 27 audit, fix history, and regression evidence. New architecture work is tracked in `foundation-roadmap.md`. |
 | [`blueprint.md`](blueprint.md) | The development blueprint (v0.4). Architecture, contracts, milestones M0–M7, backlog. |
-| [`decisions/`](decisions/) | Architecture Decision Records. **Binding**; they override the blueprint where they conflict. |
+| [`decisions/`](decisions/) | Architecture Decision Records. **Accepted** decisions override the blueprint where they conflict; proposed records are designs awaiting resolution. |
 | [`design/dart-sdk.md`](design/dart-sdk.md) | Dart SDK and standard component spec. Living draft, revisited at M1. |
 | [`design/editor-ux.md`](design/editor-ux.md) | Editor UX spec. Living draft, revisited at M4. |
 | [`ideas.md`](ideas.md) | Post-1.0 ideas (plugins, roadmap). Non-binding. |
@@ -45,7 +55,7 @@
 | 0008 | Dart execution model (main isolate, sync step, timestep, events) | Accepted |
 | 0009 | 1.0 platform intent: macOS + iOS | Accepted |
 | 0010 | Reference game tiers | Accepted |
-| 0011 | Scale rule: Dart for the few, native components for the many | Accepted |
+| 0011 | Scale rule: Dart for the few, native components for the many | Accepted; direction amended by 0042 |
 | 0012 | Codegen and component schema source of truth | Accepted |
 | 0013 | Dart math types | Accepted |
 | 0014 | Error reporting across the ABI | Accepted |
@@ -57,6 +67,36 @@
 | 0020 | Tags and layers | Accepted |
 | 0021 | Play in the editor | Accepted |
 | 0022 | Prefabs: one root, the instance is the root | Accepted |
+| 0023 | [Built-in primitives and GameObject presets](decisions/ADR-0023-built-in-primitives-and-gameobject-presets.md) | Accepted |
+| 0024 | [Raw keys beside actions](decisions/ADR-0024-raw-keys-beside-actions.md) | Accepted |
+| 0025 | [Physics materials](decisions/ADR-0025-physics-materials.md) | Accepted |
+| 0026 | [Building a game from code](decisions/ADR-0026-code-first-building.md) | Accepted |
+| 0027 | [Data assets](decisions/ADR-0027-data-assets.md) | Accepted |
+| 0028 | [Editor extensions](decisions/ADR-0028-editor-extensions.md) | Accepted |
+| 0029 | [Package architecture](decisions/ADR-0029-package-architecture.md) | Accepted |
+| 0030 | [Inspector previews](decisions/ADR-0030-inspector-previews.md) | Accepted |
+| 0031 | [Shader assets](decisions/ADR-0031-shader-assets.md) | Accepted |
+| 0032 | [Animator Controller](decisions/ADR-0032-animator-controller.md) | Accepted |
+| 0033 | [Animation v2](decisions/ADR-0033-animation-v2.md) | Accepted |
+| 0034 | [Compound colliders](decisions/ADR-0034-compound-colliders.md) | Accepted |
+| 0035 | [Object references](decisions/ADR-0035-object-references.md) | Accepted |
+| 0036 | [Object interface](decisions/ADR-0036-everything-is-an-object.md) | Accepted; state/access review in 0043 and 0044 |
+| 0037 | [Objects surviving scene changes](decisions/ADR-0037-dont-destroy-on-load.md) | Accepted |
+| 0038 | [Background scene loading](decisions/ADR-0038-load-scene-async.md) | Accepted; readiness amendment in 0047 |
+| 0039 | [Persistent objects](decisions/ADR-0039-persistent-objects.md) | Accepted |
+| 0040 | [Background cook](decisions/ADR-0040-background-cook.md) | Accepted |
+| 0041 | [Runtime trusts the cook](decisions/ADR-0041-runtime-trusts-the-cook.md) | Accepted |
+| 0042 | [ECS centered foundation program](decisions/ADR-0042-ecs-centered-foundation-program.md) | Accepted direction; amends 0011 policy |
+| 0043 | [Unified world state and frame contract](decisions/ADR-0043-unified-world-state-and-frame-contract.md) | Accepted through 0046/0047; migration pending |
+| 0044 | [Components systems and gameplay access](decisions/ADR-0044-components-systems-and-gameplay-access.md) | Proposed; F0 prototype required |
+| 0045 | [Asset readiness and render resources](decisions/ADR-0045-asset-readiness-and-render-resources.md) | Readiness accepted through 0047; budgets/render design remain F5/F6 |
+| 0046 | [Transactional world state replacement](decisions/ADR-0046-transactional-world-state-replacement.md) | Accepted strategy and pure-data contract; migration pending |
+| 0047 | [Identity clocks frame order and readiness](decisions/ADR-0047-identity-clocks-frame-order-and-readiness.md) | Accepted contracts; migration pending |
+| 0048 | [Exact affine transform contract](decisions/ADR-0048-affine-transform-contract.md) | Accepted; live migration |
+| 0049 | [Conservative render bounds](decisions/ADR-0049-conservative-render-bounds.md) | Accepted; live migration |
+| 0050 | [Process-lifetime identity authority](decisions/ADR-0050-process-lifetime-identity-authority.md) | Accepted; live migration |
+
+ADR-0042 defines the foundation direction. ADR-0046 accepts the replacement strategy and pure-data contract; ADR-0047 resolves identity, clocks, frame order and readiness. Proposed portions describe remaining work; shipping migration remains tracked in the foundation roadmap.
 
 ## Still open
 

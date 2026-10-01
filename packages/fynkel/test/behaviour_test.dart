@@ -9,6 +9,7 @@ import 'dart:math' as math;
 
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/testing.dart';
+import 'package:fynkel/generated/schema.g.dart' show SpawnCommand;
 import 'package:test/test.dart';
 
 /// Records every callback with the tick it ran at.
@@ -100,7 +101,7 @@ void main() {
     w.frame(1 / 60);
     // The spawn resolves at the tick; the frame's update phase is the first
     // safe boundary after that.
-    expect(log, ['onCreate', 'onEnable', 'start', 'update', 'lateUpdate']);
+    expect(log, ['onCreate', 'onEnable', 'start', 'fixedUpdate@0', 'update', 'lateUpdate']);
     expect(b.isCreated && b.isActive && b.hasStarted, isTrue);
 
     log.clear();
@@ -172,7 +173,7 @@ void main() {
 
     a.destroy();
     expect(a.isDestroyed, isFalse);
-    expect(go.behaviours, [a, b], reason: 'still attached until the boundary');
+    expect(go.behaviours, [b], reason: 'membership commits now; callbacks wait for the boundary');
     w.frame(1 / 60);
     expect(log.where((l) => l.startsWith('a:')), ['a:onDisable', 'a:onDestroy']);
     expect(a.isDestroyed, isTrue);
@@ -182,9 +183,8 @@ void main() {
     log.clear();
     go.destroy();
     w.frame(1 / 60);
-    // The entity dies at the tick; the update phase is the boundary where b
-    // is disabled and destroyed — after its last fixedUpdate for that tick.
-    expect(log, ['b:fixedUpdate@3', 'b:onDisable', 'b:onDestroy']);
+    // Adoption publishes the queued destruction before lifecycle dispatch.
+    expect(log, ['b:onDisable', 'b:onDestroy']);
     expect(go.isAlive, isFalse);
     expect(go.behaviours, isEmpty);
     expect(() => go.addBehaviour(Recorder(log)), throwsStateError);
@@ -198,8 +198,6 @@ void main() {
     final go = w.spawn();
     late Behaviour self;
     self = go.addBehaviour(_OnFixed(log, (b) => b.destroy()));
-    w.frame(1 / 60);
-    log.clear();
     w.frame(1 / 60);
     expect(log, ['fixedUpdate', 'onDisable', 'onDestroy'], reason: 'no update/lateUpdate after destroy()');
     expect(self.isDestroyed, isTrue);
@@ -216,9 +214,15 @@ void main() {
     zed.addBehaviour(Recorder(log, tag: 'third:'));
     alpha.addBehaviour(Recorder(log, tag: 'first:', priority: -1));
     w.frame(1 / 60);
+    log.clear();
     w.frame(1 / 60);
     final fixed = log.where((l) => l.contains('fixedUpdate')).toList();
-    expect(fixed, ['first:fixedUpdate@1', 'second:fixedUpdate@1', 'third:fixedUpdate@1', 'late:fixedUpdate@1']);
+    expect(fixed, [
+      'first:fixedUpdate@1',
+      'second:fixedUpdate@1',
+      'third:fixedUpdate@1',
+      'late:fixedUpdate@1',
+    ]);
     expect(w.behaviours.map((b) => (b as Recorder).tag), ['first:', 'second:', 'third:', 'late:']);
 
     // Attaching from inside a callback: created at the next boundary, so it
@@ -263,15 +267,20 @@ void main() {
     final seen = <List<EngineEvent>>[];
     final go = w.spawn();
     go.addBehaviour(_OnFixed(<String>[], (b) {}, onEvents: seen.add));
-    w.frame(1 / 60); // spawn resolves at this tick; no fixedUpdate yet
-    final other = w.spawn();
-    w.frame(1 / 60); // fixedUpdate@1 sees the first spawn; the second spawns
-    w.frame(1 / 60); // fixedUpdate@2 sees the second spawn
-    w.frame(1 / 60); // nothing
-    expect(seen.map((l) => l.whereType<EntitySpawned>().map((e) => e.entity).toList()), [
-      [go.entity],
-      [other.entity],
+    w.frame(0);
+    for (var temp = 1; temp <= 2; temp++) {
+      w.native.submit(
+        CommandLane.simulation,
+        (CommandBatch()..spawn(SpawnCommand(tempId: temp, transform: identityTransform, name: 'raw$temp')))
+            .encoded(),
+      );
+      w.frame(1 / 60);
+    }
+    w.frame(1 / 60);
+    expect(seen.map((events) => events.whereType<EntitySpawned>().map((e) => e.tempId).toList()), [
       <int>[],
+      [1],
+      [2],
     ]);
   });
 
@@ -295,6 +304,7 @@ void main() {
     w.frame(1 / 60);
     w.frame(1 / 30);
     expect(seen, [
+      'tick=0 fixed=0.0167 delta=0.0167 frame=1',
       'tick=1 fixed=0.0167 delta=0.0167 frame=2',
       'tick=2 fixed=0.0167 delta=0.0167 frame=2',
     ], reason: 'a 1/30 s frame runs two ticks; in fixedUpdate Time.delta is the fixed step (Unity)');
@@ -326,47 +336,54 @@ void main() {
     });
   });
 
-  test('registry: a behaviour built from authored data, with its fields set; bad data is a BehaviourDataError', () {
-    final registry = BehaviourRegistry()..register(spinnerType);
-    expect(() => registry.register(spinnerType), throwsArgumentError);
-    registry.register(spinnerType, replace: true);
-    expect(registry.types.map((t) => t.id), ['game.Spinner']);
-    expect(registry.lookup('game.Spinner')!.field('speed')!.defaultValue, 1.0);
+  test(
+    'registry: a behaviour built from authored data, with its fields set; bad data is a BehaviourDataError',
+    () {
+      final registry = BehaviourRegistry()..register(spinnerType);
+      expect(() => registry.register(spinnerType), throwsArgumentError);
+      registry.register(spinnerType, replace: true);
+      expect(registry.types.map((t) => t.id), ['game.Spinner']);
+      expect(registry.lookup('game.Spinner')!.field('speed')!.defaultValue, 1.0);
 
-    final w = world(registry: registry);
-    addTearDown(w.dispose);
-    final go = w.spawn();
-    final s = go.addBehaviourFromData('game.Spinner', fields: {'speed': 2.5}) as Spinner;
-    expect(s.speed, 2.5);
-    expect(go.behaviour<Spinner>(), same(s));
-    expect(spinnerType.field('speed')!.get(s), 2.5);
-    expect(s.behaviourType, same(spinnerType), reason: 'the editor reads its fields through it (ADR-0021 P7)');
-    expect(s.authoredComponentId, isNull, reason: 'no document authored it');
-    expect(Spinner().behaviourType, isNull, reason: 'constructed by the game');
-    expect((go.addBehaviourFromData('game.Spinner') as Spinner).speed, 1.0, reason: 'defaults kept');
+      final w = world(registry: registry);
+      addTearDown(w.dispose);
+      final go = w.spawn();
+      final s = go.addBehaviourFromData('game.Spinner', fields: {'speed': 2.5}) as Spinner;
+      expect(s.speed, 2.5);
+      expect(go.behaviour<Spinner>(), same(s));
+      expect(spinnerType.field('speed')!.get(s), 2.5);
+      expect(
+        s.behaviourType,
+        same(spinnerType),
+        reason: 'the editor reads its fields through it (ADR-0021 P7)',
+      );
+      expect(s.authoredComponentId, isNull, reason: 'no document authored it');
+      expect(Spinner().behaviourType, isNull, reason: 'constructed by the game');
+      expect((go.addBehaviourFromData('game.Spinner') as Spinner).speed, 1.0, reason: 'defaults kept');
 
-    expect(
-      () => go.addBehaviourFromData('game.Missing'),
-      throwsA(isA<BehaviourDataError>().having((e) => e.typeId, 'typeId', 'game.Missing')),
-    );
-    expect(
-      () => go.addBehaviourFromData('game.Spinner', fields: {'spedd': 1}),
-      throwsA(isA<BehaviourDataError>().having((e) => e.field, 'field', 'spedd')),
-    );
-    expect(
-      () => go.addBehaviourFromData('game.Spinner', fields: {'speed': 'fast'}),
-      throwsA(isA<BehaviourDataError>().having((e) => e.field, 'field', 'speed')),
-    );
-    expect(() => go.addBehaviourFromData('game.Spinner', version: 2), throwsA(isA<BehaviourDataError>()));
-    expect(go.behaviours, hasLength(2), reason: 'nothing was attached by the failures');
-  });
+      expect(
+        () => go.addBehaviourFromData('game.Missing'),
+        throwsA(isA<BehaviourDataError>().having((e) => e.typeId, 'typeId', 'game.Missing')),
+      );
+      expect(
+        () => go.addBehaviourFromData('game.Spinner', fields: {'spedd': 1}),
+        throwsA(isA<BehaviourDataError>().having((e) => e.field, 'field', 'spedd')),
+      );
+      expect(
+        () => go.addBehaviourFromData('game.Spinner', fields: {'speed': 'fast'}),
+        throwsA(isA<BehaviourDataError>().having((e) => e.field, 'field', 'speed')),
+      );
+      expect(() => go.addBehaviourFromData('game.Spinner', version: 2), throwsA(isA<BehaviourDataError>()));
+      expect(go.behaviours, hasLength(2), reason: 'nothing was attached by the failures');
+    },
+  );
 
   test('a Spinner really rotates its entity, at the fixed rate', () {
     final w = world();
     addTearDown(w.dispose);
     final go = w.spawn();
     final s = go.addBehaviour(Spinner()..speed = math.pi); // half a turn per second
-    for (var i = 0; i < 31; i++) {
+    for (var i = 0; i < 30; i++) {
       w.frame(1 / 60);
     }
     // 30 fixedUpdates (the first frame only spawned): 30/60 s → 90°.
@@ -415,9 +432,7 @@ void main() {
     final w = world(registry: BehaviourRegistry()..register(type));
     addTearDown(w.dispose);
     w.loadProject(fixture, cacheDir: cache);
-    final spinners = [
-      for (final e in w.allEntities()) ...w.attach(e).behavioursOf<Spinner>(),
-    ];
+    final spinners = [for (final e in w.allEntities()) ...w.attach(e).behavioursOf<Spinner>()];
     expect(spinners, hasLength(1), reason: "the Robot's game.Spinner");
     expect(spinners.single.behaviourType, same(type));
     expect(spinners.single.authoredComponentId, 'c0000000-0000-4000-8000-0000000000c2');

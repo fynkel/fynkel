@@ -3,7 +3,7 @@ name = "fynkel_native"
 version = "0.0.1"
 edition = "2021"
 license = "UNLICENSED"
-description = "Fynkel C ABI v1 — the native host boundary over fynkel_core (blueprint §5.3, ADR-0004/0014)"
+description = "Fynkel C ABI v3 — the native host boundary over fynkel_core (blueprint §5.3, ADR-0004/0014)"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -27,7 +27,7 @@ animation = ["fynkel_core/animation"]
 
 [dependencies]
 fynkel_authoring = { workspace = true, optional = true }
-# The Inspector's preview stages (authoring ABI v4, ADR-0030).
+# The Inspector's preview stages (authoring ABI v5, ADR-0030).
 fynkel_preview = { workspace = true, optional = true }
 # Entity ids of the edit-preview world's calls (authoring ABI v3).
 uuid = { workspace = true, optional = true }
@@ -44,4 +44,5 @@ serde_json.workspace = true
 glam.workspace = true
 
 [dev-dependencies]
+libloading = "0.8.9"
 fynkel_import.workspace = true

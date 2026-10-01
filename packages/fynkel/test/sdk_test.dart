@@ -1,4 +1,4 @@
-// End-to-end SDK tests over the real native library (ABI v1): spawn /
+// End-to-end SDK tests over the real native library (ABI v3): spawn /
 // write / read-your-writes / destroy, stale handles, diagnostics as
 // FynkelError, presentation lane, hierarchy, frame plan.
 
@@ -16,22 +16,16 @@ void main() {
 
   World world() => World.create(library: lib)..throwOnDiagnostics = true;
 
-  test('spawn resolves on the next tick; reads follow writes', () {
+  test('spawn and data edits publish before returning; pending identities stay inside edits', () {
     final w = world();
     addTearDown(w.dispose);
     final go = w.spawn(
       transform: const Pose(position: Vec3(1, 2, 3), rotation: Quat.identity, scale: Vec3.one),
       name: 'player',
     );
-    expect(go.isPending, isTrue);
+    expect(go.isPending, isFalse);
     expect(go.transform.position, const Vec3(1, 2, 3), reason: 'initial value readable while pending');
-    expect(
-      () => go.setPresentationPosition(0, 0, 0),
-      throwsStateError,
-      reason: 'the presentation lane needs the handle',
-    );
-    // A simulation write while pending rides in the spawn's batch as a
-    // temp reference (M3-08b) and lands in the spawn's tick.
+    go.setPresentationPosition(0, 0, 0);
     go.transform.position = const Vec3(1, 2, 3.5);
     expect(go.transform.position, const Vec3(1, 2, 3.5), reason: 'read-your-writes while pending');
 
@@ -40,7 +34,11 @@ void main() {
     expect(go.isPending, isFalse);
     expect(w.nameOf(go), 'player');
     expect(go.transform.position, const Vec3(1, 2, 3.5));
-    expect(go.worldTransform!.position, const Vec3(1, 2, 3.5), reason: 'asked from the world until its first snapshot (foundation 4.4)');
+    expect(
+      go.worldTransform!.position,
+      const Vec3(1, 2, 3.5),
+      reason: 'asked from the world until its first snapshot (foundation 4.4)',
+    );
 
     w.frame(1 / 60);
     expect(go.worldTransform!.position, const Vec3(1, 2, 3.5));
@@ -48,51 +46,45 @@ void main() {
     // Read-your-writes: overlay before the tick, snapshot after.
     go.transform.position = const Vec3(5, 0, 0);
     expect(go.transform.position, const Vec3(5, 0, 0));
-    expect(go.worldTransform!.position, const Vec3(1, 2, 3.5), reason: 'world transform is snapshot-only');
+    expect(
+      go.worldTransform!.position,
+      const Vec3(5, 0, 0),
+      reason: 'world transform shares logical authority',
+    );
     w.frame(1 / 60);
     expect(go.transform.position, const Vec3(5, 0, 0));
     expect(go.worldTransform!.position, const Vec3(5, 0, 0));
 
     go.destroy();
-    expect(go.isAlive, isTrue, reason: 'until the tick');
+    expect(go.isAlive, isFalse, reason: 'destroy commits before returning');
     w.frame(1 / 60);
     expect(go.isAlive, isFalse);
     expect(() => go.transform.position = Vec3.zero, throwsStateError);
     expect(w.allEntities(), isEmpty);
   });
 
-  test('rejected command clears the overlay and throws FynkelError in debug', () {
+  test('invalid ordinary writes reject synchronously and never replace committed data', () {
     final w = world();
     addTearDown(w.dispose);
-    final a = w.spawn();
-    w.frame(1 / 60);
-    // Destroy a via a second handle path: stale handle after destruction.
-    a.destroy();
-    w.frame(1 / 60);
-    // Submit a raw stale command through the native layer to reach the
-    // world's rejection path with a live GameObject target too.
     final b = w.spawn();
-    w.frame(1 / 60);
     b.transform.position = const Vec3(9, 9, 9);
-    // NaN transform is rejected at the tick with INVALID_PAYLOAD.
-    b.setLocalTransform(const Pose(position: Vec3(double.nan, 0, 0), rotation: Quat.identity, scale: Vec3.one));
-    expect(b.transform.position.x.isNaN, isTrue, reason: 'overlay shows the staged value');
-    expect(
-      () => w.frame(1 / 60),
-      throwsA(isA<FynkelError>().having((e) => e.diagnostics.single.code, 'code', DiagnosticCode.invalidPayload)),
-    );
-    expect(b.transform.position, const Vec3(9, 9, 9), reason: 'overlay cleared; earlier applied value from snapshot');
-
-    // Release-mode path: logged, not thrown.
-    w.throwOnDiagnostics = false;
+    for (final invalid in [double.nan, double.infinity]) {
+      expect(() => b.setLocalPosition(invalid, 0, 0), throwsStateError);
+      expect(b.transform.position, const Vec3(9, 9, 9));
+      w.throwOnDiagnostics = false;
+    }
+    w.frame(1 / 60);
+    expect(b.transform.position, const Vec3(9, 9, 9));
     final seen = <FynkelDiagnostic>[];
     w.onDiagnostics = seen.addAll;
-    b.setLocalTransform(
-      const Pose(position: Vec3(double.infinity, 0, 0), rotation: Quat.identity, scale: Vec3.one),
+    w.native.submit(
+      CommandLane.simulation,
+      (CommandBatch()..setTransformOf(b.entity, const Pose(position: Vec3(double.nan, 0, 0)))).encoded(),
     );
-    w.frame(1 / 60);
+    w.step();
     expect(seen.single.code, DiagnosticCode.invalidPayload);
     expect(seen.single.entity, b.entity);
+    expect(b.transform.position, const Vec3(9, 9, 9));
   });
 
   test('presentation lane: visible now, authoritative next tick, rejected for physics-owned', () {
@@ -104,10 +96,12 @@ void main() {
     // A 120 Hz frame with no tick.
     final plan = w.beginFrame(1 / 240);
     expect(plan.steps, 0);
-    cam.setPresentationTransform(const Pose(position: Vec3(0, 3, 0), rotation: Quat.identity, scale: Vec3.one));
+    cam.setPresentationTransform(
+      const Pose(position: Vec3(0, 3, 0), rotation: Quat.identity, scale: Vec3.one),
+    );
     expect(cam.transform.position, const Vec3(0, 3, 0));
     w.flushPresentation();
-    expect(w.stats().stagedCommands, 1);
+    expect(w.stats().stagedCommands, 0);
     w.frame(1 / 60);
     expect(cam.worldTransform!.position, const Vec3(0, 3, 0));
 
@@ -187,9 +181,9 @@ void main() {
     final s = w.stats();
     expect(s.liveEntities, 10);
     expect(s.subscriptions, 10);
-    expect(s.submitCalls, 1, reason: 'ten spawns, one batch');
+    expect(s.submitCalls, 0, reason: 'ordinary SDK work uses gameplay exchanges');
     expect(s.stepCalls, 2);
-    expect(s.dartCopies, 1);
+    expect(s.dartCopies, greaterThan(0));
     expect(s.bytesIn, greaterThan(0));
     expect(s.bytesOut, greaterThan(0));
     expect(s.ffiCalls, greaterThan(0));
@@ -214,7 +208,11 @@ void main() {
     expect(r.startupScene, r.sceneId);
     expect(r.scenePath, 'scenes/main.scene.json');
     expect(r.sceneKey, hasLength(64));
-    expect(r.entityCount, 6, reason: 'the crate prefab was expanded by the cook (Crate A is its root); Floor and Crate B are physics-only');
+    expect(
+      r.entityCount,
+      6,
+      reason: 'the crate prefab was expanded by the cook (Crate A is its root); Floor and Crate B are physics-only',
+    );
     expect(r.rejectedComponents, 0);
     expect(r.assetCount, 8, reason: "the Robot's tone (M3-11) too");
     expect(r.residency.retained, 8);
@@ -235,11 +233,23 @@ void main() {
     // A prefab is not a scene; an id the cache lacks; not a UUID at all.
     expect(
       () => w.loadScene('c0000000-0000-4000-8000-000000000040', cacheDir: cache),
-      throwsA(isA<FynkelLoadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-R0006'))),
+      throwsA(
+        isA<FynkelLoadError>().having(
+          (e) => e.report.errors.map((d) => d.code),
+          'codes',
+          contains('FYN-R0006'),
+        ),
+      ),
     );
     expect(
       () => w.loadScene('c0000000-0000-4000-8000-0000000000ff'),
-      throwsA(isA<FynkelLoadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-R0003'))),
+      throwsA(
+        isA<FynkelLoadError>().having(
+          (e) => e.report.errors.map((d) => d.code),
+          'codes',
+          contains('FYN-R0003'),
+        ),
+      ),
     );
     expect(() => w.loadScene('robot'), throwsA(isA<FynkelBridgeError>()));
     expect(w.allEntities(), hasLength(6), reason: 'a failed load leaves the world alone');
@@ -247,7 +257,13 @@ void main() {
     // No cache: the runtime never falls back to the source tree.
     expect(
       () => w.loadProject(fixture, cacheDir: '$cache/nope'),
-      throwsA(isA<FynkelLoadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-R0001'))),
+      throwsA(
+        isA<FynkelLoadError>().having(
+          (e) => e.report.errors.map((d) => d.code),
+          'codes',
+          contains('FYN-R0001'),
+        ),
+      ),
     );
     expect(() => w.loadProject('/nonexistent'), throwsA(isA<FynkelLoadError>()));
     expect(w.isPoisoned, isFalse);
@@ -260,7 +276,11 @@ void main() {
     w.frame(1 / 60);
     expect(w.panicMessage, isNull);
 
-    final panic = isA<FynkelPanicError>().having((e) => e.panic, 'panic', contains('fynkel_world_debug_panic'));
+    final panic = isA<FynkelPanicError>().having(
+      (e) => e.panic,
+      'panic',
+      contains('fynkel_world_debug_panic'),
+    );
     expect(w.debugPanic, throwsA(panic));
     expect(w.isPoisoned, isTrue);
     expect(w.panicMessage, contains('fynkel_world_debug_panic'));
@@ -272,7 +292,10 @@ void main() {
 
   test('after dispose the objects are dead, keep their last pose, and every call throws, never touching freed memory (foundation 4.2)', () {
     final w = World.create(library: lib);
-    final go = w.spawn(name: 'Box', transform: identityTransform.copyWith(position: const Vec3(1, 2, 3)));
+    final go = w.spawn(
+      name: 'Box',
+      transform: identityTransform.copyWith(position: const Vec3(1, 2, 3)),
+    );
     w.frame(1 / 60);
     go.transform.position = const Vec3(4, 5, 6);
     w.frame(1 / 60);
@@ -296,10 +319,17 @@ void main() {
   test('the snapshot carries only the objects Dart reads; a handle alone costs nothing (foundation 4.4)', () {
     final w = World.create(library: lib);
     addTearDown(w.dispose);
-    final parent = w.spawn(name: 'Parent', transform: identityTransform.copyWith(position: const Vec3(10, 0, 0)));
+    final parent = w.spawn(
+      name: 'Parent',
+      transform: identityTransform.copyWith(position: const Vec3(10, 0, 0)),
+    );
     final all = [
       for (var i = 0; i < 50; i++)
-        w.spawn(name: 'o$i', parent: parent, transform: identityTransform.copyWith(position: Vec3(i.toDouble(), 0, 0))),
+        w.spawn(
+          name: 'o$i',
+          parent: parent,
+          transform: identityTransform.copyWith(position: Vec3(i.toDouble(), 0, 0)),
+        ),
     ];
     w.frame(1 / 60);
     w.frame(1 / 60);
@@ -314,7 +344,7 @@ void main() {
     expect(o7.localTransform.position, const Vec3(7, 0, 0));
     expect(o7.worldTransform!.position, const Vec3(17, 0, 0));
     w.frame(1 / 60);
-    expect(w.native.snapshot.recordCount, 1);
+    expect(w.native.snapshot.recordCount, 2);
     expect(o7.transform.position, const Vec3(17, 0, 0), reason: 'the parent is read too');
     w.frame(1 / 60);
     expect(w.native.snapshot.recordCount, 2);

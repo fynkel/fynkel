@@ -185,6 +185,32 @@ pub struct BodyCommandRecord {
     pub rotation: Quat,
 }
 
+impl BodyCommandRecord {
+    /// One decoding rule shared by legacy command batches and gameplay sessions.
+    pub fn operation(&self) -> crate::BodyCommand {
+        use crate::BodyCommand;
+        let (v, r) = (self.vector, self.rotation);
+        match self.op {
+            BodyOp::ApplyForce => BodyCommand::ApplyForce(v),
+            BodyOp::ApplyImpulse => BodyCommand::ApplyImpulse(v),
+            BodyOp::ApplyTorque => BodyCommand::ApplyTorque(v),
+            BodyOp::ApplyTorqueImpulse => BodyCommand::ApplyTorqueImpulse(v),
+            BodyOp::SetLinearVelocity => BodyCommand::SetLinearVelocity(v),
+            BodyOp::SetAngularVelocity => BodyCommand::SetAngularVelocity(v),
+            BodyOp::SetKinematicTarget => BodyCommand::SetKinematicTarget {
+                position: v,
+                rotation: r,
+            },
+            BodyOp::Teleport => BodyCommand::Teleport {
+                position: v,
+                rotation: r,
+            },
+            BodyOp::Move => BodyCommand::Move(v),
+            BodyOp::Jump => BodyCommand::Jump(v.y),
+        }
+    }
+}
+
 /// What a `fynkel.cmd.Animate` does (`fynkel_core::command::AnimateOp`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Schema)]
 #[schema(name = "fynkel.AnimateOp")]
@@ -305,6 +331,93 @@ pub struct AudioCommandRecord {
     pub op: AudioOp,
     /// The volume for `setVolume`, the pitch for `setPitch`.
     pub value: f32,
+}
+
+impl AnimateCommandRecord {
+    pub fn operation(self) -> crate::AnimateOp {
+        let c = self;
+        match c.op {
+            AnimateOp::Play => crate::AnimateOp::Play {
+                clip: c.clip,
+                looping: c.looping,
+                speed: c.speed,
+            },
+            AnimateOp::Crossfade => crate::AnimateOp::Crossfade {
+                clip: c.clip,
+                looping: c.looping,
+                speed: c.speed,
+                seconds: c.seconds,
+            },
+            AnimateOp::Stop => crate::AnimateOp::Stop,
+            AnimateOp::Pause => crate::AnimateOp::Pause,
+            AnimateOp::Resume => crate::AnimateOp::Resume,
+            AnimateOp::SetSpeed => crate::AnimateOp::SetSpeed(c.speed),
+            AnimateOp::SetTime => crate::AnimateOp::SetTime(c.seconds),
+            AnimateOp::SetWeight => crate::AnimateOp::SetWeight(c.value),
+            AnimateOp::SetParameter => crate::AnimateOp::SetParameter {
+                name: c.name,
+                value: c.value,
+            },
+            AnimateOp::SetFloat
+            | AnimateOp::SetInteger
+            | AnimateOp::SetBool
+            | AnimateOp::SetTrigger
+            | AnimateOp::ResetTrigger => {
+                use crate::animation::controller::Value;
+                let value = match c.op {
+                    AnimateOp::SetFloat => Value::Float(c.value),
+                    AnimateOp::SetInteger => Value::Int(c.integer),
+                    AnimateOp::SetBool => Value::Bool(c.value != 0.0),
+                    AnimateOp::SetTrigger => Value::Bool(true),
+                    _ => Value::Bool(false),
+                };
+                crate::AnimateOp::SetControllerParameter {
+                    name: c.name,
+                    value,
+                }
+            }
+            AnimateOp::PlayState | AnimateOp::CrossFadeState => crate::AnimateOp::PlayState {
+                state: c.name,
+                layer: u32::try_from(c.layer).ok(),
+                seconds: if c.op == AnimateOp::CrossFadeState {
+                    c.seconds
+                } else {
+                    0.0
+                },
+                offset: c.value,
+            },
+            AnimateOp::PlayOneShot => crate::AnimateOp::PlayOneShot {
+                motion: c.clip,
+                slot: c.name,
+                blend_in: c.seconds,
+                blend_out: c.value,
+                speed: c.speed,
+            },
+            AnimateOp::StopOneShot => crate::AnimateOp::StopOneShot {
+                slot: c.name,
+                blend_out: c.value,
+            },
+            AnimateOp::SetIkTarget => crate::AnimateOp::SetIkTarget {
+                goal: c.name,
+                position: c.point,
+                weight: c.value,
+            },
+            AnimateOp::ClearIkTarget => crate::AnimateOp::ClearIkTarget { goal: c.name },
+        }
+    }
+}
+
+impl AudioCommandRecord {
+    pub fn operation(&self) -> crate::AudioOp {
+        match self.op {
+            AudioOp::Play => crate::AudioOp::Play,
+            AudioOp::Stop => crate::AudioOp::Stop,
+            AudioOp::Pause => crate::AudioOp::Pause,
+            AudioOp::Resume => crate::AudioOp::Resume,
+            AudioOp::SetVolume => crate::AudioOp::SetVolume(self.value),
+            AudioOp::SetPitch => crate::AudioOp::SetPitch(self.value),
+        }
+    }
 }
 
 /// Plays a clip once on no entity (M3-11; either lane): a fire-and-forget
@@ -1043,72 +1156,54 @@ mod tests {
     #[test]
     fn nested_and_string_layouts() {
         let s = &SpawnCommand::SCHEMA;
-        // temp_id u64 @0, transform 40 @8, parent u64 @48, name (u32,u32) @56
-        assert_eq!(s.offsets(), vec![0, 8, 48, 56]);
-        assert_eq!(s.wire_size(), 64);
+        assert_eq!(s.offsets(), vec![0, 8, 48, 64]);
+        assert_eq!(s.wire_size(), 72);
         assert!(s.has_strings());
-        // M3-12: the scene's AssetRef (16 id bytes + a str slot).
         assert_eq!(SceneReadyEvent::SCHEMA.wire_size(), 24);
         assert_eq!(SceneUnloadedEvent::SCHEMA.wire_size(), 32);
-        assert_eq!(ZoneEvent::SCHEMA.wire_size(), 24);
+        assert_eq!(ZoneEvent::SCHEMA.wire_size(), 40);
         assert_eq!(TriggerZone::SCHEMA.wire_size(), 16);
-        assert_eq!(SnapshotTransformRecord::SCHEMA.wire_size(), 88);
-        // M3-08: entity @0, op @8, vector @12, rotation @24 → 40.
-        assert_eq!(BodyCommandRecord::SCHEMA.offsets(), vec![0, 8, 12, 24]);
-        assert_eq!(BodyCommandRecord::SCHEMA.wire_size(), 40);
-        assert_eq!(ContactEvent::SCHEMA.wire_size(), 216);
-        assert_eq!(PhysicsQueryRecord::SCHEMA.wire_size(), 88);
-        assert_eq!(PhysicsHitRecord::SCHEMA.wire_size(), 48);
-        assert_eq!(BodyStateRecord::SCHEMA.wire_size(), 40);
-        // M3-09: entity @0, grounded @8, sliding @9, velocity @12,
-        // collision_flags @24 (foundation 2.4) → 32 (aligned to 8).
+        assert_eq!(SnapshotTransformRecord::SCHEMA.wire_size(), 96);
+        assert_eq!(BodyCommandRecord::SCHEMA.offsets(), vec![0, 16, 20, 32]);
+        assert_eq!(BodyCommandRecord::SCHEMA.wire_size(), 48);
+        assert_eq!(ContactEvent::SCHEMA.wire_size(), 248);
+        assert_eq!(PhysicsQueryRecord::SCHEMA.wire_size(), 96);
+        assert_eq!(PhysicsHitRecord::SCHEMA.wire_size(), 56);
+        assert_eq!(BodyStateRecord::SCHEMA.wire_size(), 48);
         assert_eq!(
             CharacterStateRecord::SCHEMA.offsets(),
-            vec![0, 8, 9, 12, 24]
+            vec![0, 16, 17, 20, 32]
         );
-        assert_eq!(CharacterStateRecord::SCHEMA.wire_size(), 32);
-        assert_eq!(ThirdPersonCamera::SCHEMA.wire_size(), 64);
-        // M3-10: axis 12 @0, speed @12, space u32 @16 → 24 (padded).
+        assert_eq!(CharacterStateRecord::SCHEMA.wire_size(), 40);
+        assert_eq!(ThirdPersonCamera::SCHEMA.wire_size(), 72);
         assert_eq!(Rotator::SCHEMA.offsets(), vec![0, 12, 16]);
         assert_eq!(Rotator::SCHEMA.wire_size(), 24);
         assert_eq!(Oscillate::SCHEMA.wire_size(), 32);
-        // target (u32,u32) @0, offset @8, smoothing @20, look_at @24 → 32.
-        assert_eq!(Follow::SCHEMA.offsets(), vec![0, 8, 20, 24]);
-        assert_eq!(Follow::SCHEMA.wire_size(), 32);
+        assert_eq!(Follow::SCHEMA.offsets(), vec![0, 16, 28, 32]);
+        assert_eq!(Follow::SCHEMA.wire_size(), 40);
         assert_eq!(LookAtCamera::SCHEMA.wire_size(), 8);
         assert_eq!(LifetimeDespawn::SCHEMA.wire_size(), 8);
-        // prefab 24 @0, rate @24, lifetime @28, max_alive @32, velocity
-        // @36, enabled @48 → 56.
         assert_eq!(Emitter::SCHEMA.offsets(), vec![0, 24, 28, 32, 36, 48]);
         assert_eq!(Emitter::SCHEMA.wire_size(), 56);
         assert_eq!(SystemTimeRecord::SCHEMA.wire_size(), 16);
-        // M3-19: clip 24 @0, speed @24, looping @28, playing @29; M3-19c:
-        // weight @32, additive @36, root_motion @37; ADR-0032: controller
-        // (an optional ref) @40.
         assert_eq!(
             Animator::SCHEMA.offsets(),
             vec![0, 24, 28, 29, 32, 36, 37, 40]
         );
         assert_eq!(Animator::SCHEMA.wire_size(), 64);
-        assert_eq!(Skin::SCHEMA.wire_size(), 32);
-        // entity @0, op @8, seconds @12, speed @16, looping @20, clip @24,
-        // value @48, name @52, integer @60, layer @64, point @68 → 80.
+        assert_eq!(Skin::SCHEMA.wire_size(), 40);
         assert_eq!(
             AnimateCommandRecord::SCHEMA.offsets(),
-            vec![0, 8, 12, 16, 20, 24, 48, 52, 60, 64, 68]
+            vec![0, 16, 20, 24, 28, 32, 56, 60, 68, 72, 76]
         );
-        assert_eq!(AnimateCommandRecord::SCHEMA.wire_size(), 80);
-        assert_eq!(AnimationEndedEvent::SCHEMA.wire_size(), 32);
-        // entity @0, clip @8, name @32 → 40.
-        assert_eq!(AnimationMarkerEvent::SCHEMA.wire_size(), 40);
-        // entity @0, time @8, duration @12, speed @16, fade @20, playing
-        // @24, looping @25, clip @32, weight @56, parameter @60, root_delta
-        // @64, root_yaw @76 → 80.
+        assert_eq!(AnimateCommandRecord::SCHEMA.wire_size(), 88);
+        assert_eq!(AnimationEndedEvent::SCHEMA.wire_size(), 40);
+        assert_eq!(AnimationMarkerEvent::SCHEMA.wire_size(), 48);
         assert_eq!(
             AnimatorStateRecord::SCHEMA.offsets(),
-            vec![0, 8, 12, 16, 20, 24, 25, 32, 56, 60, 64, 76]
+            vec![0, 16, 20, 24, 28, 32, 33, 40, 64, 68, 72, 84]
         );
-        assert_eq!(AnimatorStateRecord::SCHEMA.wire_size(), 80);
+        assert_eq!(AnimatorStateRecord::SCHEMA.wire_size(), 88);
     }
 
     #[test]

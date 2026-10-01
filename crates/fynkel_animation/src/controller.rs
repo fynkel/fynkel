@@ -576,6 +576,17 @@ impl ControllerRun {
         name: &str,
         value: Value,
     ) -> Result<(), ParameterError> {
+        let i = Self::validate_value(def, name, value)?;
+        self.values[i] = value;
+        Ok(())
+    }
+
+    /// Validates a parameter request without mutating runtime state.
+    pub fn validate_value(
+        def: &ControllerDef,
+        name: &str,
+        value: Value,
+    ) -> Result<usize, ParameterError> {
         let i = Self::index(def, name)?;
         let kind = def.parameters[i].kind;
         let finite = !matches!(value, Value::Float(v) if !v.is_finite());
@@ -585,8 +596,7 @@ impl ControllerRun {
                 kind,
             });
         }
-        self.values[i] = value;
-        Ok(())
+        Ok(i)
     }
 
     /// A parameter by name, and its kind.

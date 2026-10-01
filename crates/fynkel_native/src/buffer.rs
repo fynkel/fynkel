@@ -1,4 +1,4 @@
-//! Buffer framing for ABI v1 (`include/fynkel.h`): a 24-byte header, a
+//! Buffer framing for ABI v3 (`include/fynkel.h`): a 24-byte header, a
 //! record area, then the string tail. Record bodies use the generated
 //! codecs in `fynkel_wire`.
 

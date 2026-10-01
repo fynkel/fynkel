@@ -16,8 +16,8 @@ use fynkel_platform_apple::{
 
 #[test]
 fn debug_lines_draw_on_the_next_render_only() {
-    assert_eq!(fynkel_apple_abi_version(), 11);
-    assert_eq!(APPLE_ABI_VERSION, 11);
+    assert_eq!(fynkel_apple_abi_version(), 12);
+    assert_eq!(APPLE_ABI_VERSION, 12);
 
     let mut world = World::new(WorldConfig::default());
     world.begin_frame(1.0 / 60.0);
@@ -278,7 +278,7 @@ fn two_cubes() -> Extract {
     let mut e = Extract::default();
     for (bits, x) in [(1u64, -0.7f32), (2, 0.7)] {
         e.records.push(ExtractRecord {
-            entity: Entity::from_bits(bits),
+            entity: Entity::new(fynkel_contracts::WorldId(1), bits as u32, 1),
             world: glam::Mat4::from_translation(glam::Vec3::new(x, 0.0, 0.0)),
             overridden: false,
             layer_bit: 1,
@@ -292,7 +292,13 @@ fn the_outline_draws_on_the_next_render_only_and_equals_offscreen() {
     let extract = two_cubes();
     let (w, h) = (64u32, 48u32);
     let mut vp = Viewport::new(w, h, 2, SyncMode::MetalCompletion).expect("viewport");
-    let (selected, children) = ([1u64], [2u64, 1]);
+    let (selected, children) = (
+        [Entity::new(fynkel_contracts::WorldId(1), 1, 1)],
+        [
+            Entity::new(fynkel_contracts::WorldId(1), 2, 1),
+            Entity::new(fynkel_contracts::WorldId(1), 1, 1),
+        ],
+    );
     // Selected red, children green, three pixels.
     #[rustfmt::skip]
     let style: [f32; 9] = [1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 3.0];
@@ -317,8 +323,11 @@ fn the_outline_draws_on_the_next_render_only_and_equals_offscreen() {
     let mut renderer =
         fynkel_render::ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, w, h);
     renderer.overlay().outline(
-        &[Entity::from_bits(1)],
-        &[Entity::from_bits(2), Entity::from_bits(1)],
+        &[Entity::new(fynkel_contracts::WorldId(1), 1, 1)],
+        &[
+            Entity::new(fynkel_contracts::WorldId(1), 2, 1),
+            Entity::new(fynkel_contracts::WorldId(1), 1, 1),
+        ],
         fynkel_render::OutlineStyle {
             selected: [1.0, 0.0, 0.0, 1.0],
             children: [0.0, 1.0, 0.0, 1.0],

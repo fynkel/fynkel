@@ -157,9 +157,19 @@ void main() {
 
   test('placement: where the source is in the world, or its local pose under a parent', () {
     final w = fresh();
-    final holder = w.spawn(name: 'Holder', transform: const Pose(position: Vec3(0, 10, 0)));
-    final gun = w.spawn(name: 'Gun', parent: holder, transform: const Pose(position: Vec3(1, 0, 0)));
-    final rack = w.spawn(name: 'Rack', transform: const Pose(position: Vec3(-5, 0, 0)));
+    final holder = w.spawn(
+      name: 'Holder',
+      transform: const Pose(position: Vec3(0, 10, 0)),
+    );
+    final gun = w.spawn(
+      name: 'Gun',
+      parent: holder,
+      transform: const Pose(position: Vec3(1, 0, 0)),
+    );
+    final rack = w.spawn(
+      name: 'Rack',
+      transform: const Pose(position: Vec3(-5, 0, 0)),
+    );
     tick(w, 2); // world poses come from the tick's snapshot
 
     final loose = gun.clone();
@@ -176,8 +186,19 @@ void main() {
 
   test('a physics object copied falls like the original', () {
     final w = fresh();
-    w.build(const ObjectSpec('Floor', components: [Collider(size: Vec3(20, 0.5, 20), offset: Vec3(0, -0.5, 0))]));
-    final crate = w.build(const ObjectSpec('Crate', transform: Pose(position: Vec3(0, 3, 0)), components: [RigidBody(), Collider()]));
+    w.build(
+      const ObjectSpec(
+        'Floor',
+        components: [Collider(size: Vec3(20, 0.5, 20), offset: Vec3(0, -0.5, 0))],
+      ),
+    );
+    final crate = w.build(
+      const ObjectSpec(
+        'Crate',
+        transform: Pose(position: Vec3(0, 3, 0)),
+        components: [RigidBody(), Collider()],
+      ),
+    );
     tick(w);
     final second = crate.clone(transform: const Pose(position: Vec3(3, 6, 0)));
     tick(w, 240);
@@ -195,16 +216,16 @@ void main() {
     tick(w);
   });
 
-  test('an unregistered script is left out with a warning; a pending object cannot be copied', () {
+  test('an unregistered script is left out with a warning; queued source is adopted before cloning', () {
     final w = fresh();
     final warnings = <LoadDiagnostic>[];
     w.onLoadDiagnostics = warnings.addAll;
     final o = w.spawn(name: 'Thing')
       ..addBehaviour(Loose())
       ..addBehaviour(Spinner()..speed = 7);
-    expect(() => o.clone(), throwsStateError, reason: 'not spawned until the tick');
-    tick(w);
+    expect(o.isPending, isFalse);
     final copy = o.clone();
+    expect(o.isPending, isFalse, reason: 'the queued source is adopted before the clone transaction');
     expect(copy.behaviour<Loose>(), isNull);
     expect(copy.behaviour<Spinner>()!.speed, 7, reason: 'a script the game constructed, found by its class');
     expect(warnings.single.code, 'FYN-B0001');

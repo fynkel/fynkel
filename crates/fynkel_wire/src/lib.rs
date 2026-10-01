@@ -137,16 +137,16 @@ pub fn put_vec4(b: &mut [u8], off: usize, v: Vec4) {
 }
 #[inline]
 pub fn put_entity(b: &mut [u8], off: usize, v: Entity) {
-    put_u64(b, off, v.to_bits());
+    b[off..off + 16].copy_from_slice(&v.to_bits().to_le_bytes());
 }
 #[inline]
 pub fn put_opt_entity(b: &mut [u8], off: usize, v: Option<Entity>) {
-    put_u64(b, off, v.map(Entity::to_bits).unwrap_or(0));
+    put_entity(b, off, v.unwrap_or(Entity::NULL));
 }
 /// The handle alone: an authoring id never crosses the wire (ADR-0035).
 #[inline]
 pub fn put_object_ref(b: &mut [u8], off: usize, v: ObjectRef) {
-    put_u64(b, off, v.entity.to_bits());
+    put_entity(b, off, v.entity);
 }
 #[inline]
 pub fn put_str(b: &mut [u8], off: usize, v: &str, strings: &mut StringTable) {
@@ -225,18 +225,18 @@ pub fn get_vec4(b: &[u8], off: usize) -> Vec4 {
 }
 #[inline]
 pub fn get_entity(b: &[u8], off: usize) -> Entity {
-    Entity::from_bits(get_u64(b, off))
+    Entity::from_bits(u128::from_le_bytes(b[off..off + 16].try_into().unwrap()))
 }
 #[inline]
 pub fn get_object_ref(b: &[u8], off: usize) -> ObjectRef {
-    ObjectRef::to(Entity::from_bits(get_u64(b, off)))
+    ObjectRef::to(Entity::from_bits(u128::from_le_bytes(
+        b[off..off + 16].try_into().unwrap(),
+    )))
 }
 #[inline]
 pub fn get_opt_entity(b: &[u8], off: usize) -> Option<Entity> {
-    match get_u64(b, off) {
-        0 => None,
-        bits => Some(Entity::from_bits(bits)),
-    }
+    let entity = get_entity(b, off);
+    (!entity.is_null()).then_some(entity)
 }
 #[inline]
 pub fn get_asset_ref(b: &[u8], off: usize, tail: &[u8]) -> Result<AssetRef, WireError> {

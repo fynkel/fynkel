@@ -1,5 +1,9 @@
 # Engine status — 2026-09-25 (M4 gate: GO; M3: GO with two named exceptions; §6)
 
+**Current work from 2026-09-30:** the [foundation roadmap](foundation-roadmap.md) is the active implementation tracker. [ADR-0042](decisions/ADR-0042-ecs-centered-foundation-program.md) accepts an ECS centered direction with coherent gameplay state. The [F1 qualification evidence](design/foundation-identity-authority.md) now covers identity, clocks, affine transforms and conservative bounds; the foundation roadmap owns current milestone status. Existing gate results below describe their recorded revisions; they do not certify proposed replacement contracts.
+
+[ADR-0046](decisions/ADR-0046-transactional-world-state-replacement.md) now accepts the focused state-boundary replacement strategy and pure-data transaction contract from [mixed-state prototype evidence](design/foundation-state-comparison.md). The shipping API has not been migrated; baseline gaps and remaining frame/resource/extension decisions are still tracked in the foundation roadmap.
+
 The one-page, plain-words answer to "what do we have, is it solid, what is
 missing". Rewritten at every milestone gate and updated whenever a row below
 changes. Numbers come from the gate reports (`m0-architecture-report.md`,

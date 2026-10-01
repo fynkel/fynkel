@@ -180,3 +180,120 @@ fn a_live_spawn_is_there_at_once_and_joins_the_scene_under_its_id() {
     assert!(w.scene_of(runtime).is_none());
     assert_eq!(w.ecs().len(), 3);
 }
+
+fn empty_loaded_world() -> World {
+    let mut world = World::new(WorldConfig::default());
+    world
+        .load_scene(&SceneDescription {
+            id: uuid(1),
+            name: "Main".into(),
+            entities: vec![],
+        })
+        .unwrap();
+    world.drain_events();
+    world
+}
+
+#[test]
+fn live_spawn_component_failure_preserves_scene_identity_and_can_retry() {
+    let mut w = empty_loaded_world();
+    let tick = w.tick();
+    let bad = ComponentValue::PointLight(PointLight {
+        intensity: f32::NAN,
+        ..PointLight::default()
+    });
+    let error = w
+        .spawn_now(
+            "partial",
+            Transform::default(),
+            None,
+            vec![ComponentValue::Rotator(Rotator::default()), bad],
+            Some((uuid(1), uuid(2))),
+        )
+        .unwrap_err();
+    assert!(matches!(error, LoadError::LiveSpawnRejected(_)));
+    assert_eq!(w.live_entities(), 0);
+    assert!(w.loaded_scenes()[0].handle_of(uuid(2)).is_none());
+    assert!(w.drain_events().is_empty());
+    assert_eq!(w.tick(), tick);
+    let (e, rejected) = w
+        .spawn_now(
+            "retry",
+            Transform::default(),
+            None,
+            vec![],
+            Some((uuid(1), uuid(2))),
+        )
+        .unwrap();
+    assert!(rejected.is_empty());
+    assert_eq!(w.loaded_scenes()[0].handle_of(uuid(2)), Some(e));
+    w.unload_scene(uuid(1)).unwrap();
+    assert!(!w.ecs().contains(e));
+}
+
+#[test]
+fn live_spawn_rejects_stale_references_without_publishing_hierarchy() {
+    let mut w = empty_loaded_world();
+    let (parent, _) = w
+        .spawn_now("parent", Transform::default(), None, vec![], None)
+        .unwrap();
+    let (stale, _) = w
+        .spawn_now("stale", Transform::default(), None, vec![], None)
+        .unwrap();
+    w.edit_gameplay(|edit| edit.destroy(stale)).unwrap();
+    w.drain_events();
+    let error = w
+        .spawn_now(
+            "invalid follower",
+            Transform::default(),
+            Some(parent),
+            vec![ComponentValue::Follow(Follow {
+                target: fynkel_contracts::ObjectRef::to(stale),
+                ..Follow::default()
+            })],
+            Some((uuid(1), uuid(2))),
+        )
+        .unwrap_err();
+    assert!(matches!(error, LoadError::LiveSpawnRejected(_)));
+    assert_eq!(w.live_entities(), 1);
+    assert_eq!(fynkel_scene::children_of(w.ecs(), parent).len(), 0);
+    assert!(w.loaded_scenes()[0].handle_of(uuid(2)).is_none());
+    assert!(w.drain_events().is_empty());
+}
+
+#[test]
+fn live_spawn_does_not_adopt_or_discard_queued_simulation_work() {
+    let mut w = empty_loaded_world();
+    w.submit(
+        Lane::Simulation,
+        vec![Command::Spawn {
+            temp_id: 17,
+            transform: Transform::default(),
+            parent: None,
+            name: Some("queued".into()),
+        }],
+    );
+    assert!(matches!(
+        w.spawn_now(
+            "editor",
+            Transform::default(),
+            None,
+            vec![],
+            Some((uuid(1), uuid(2)))
+        ),
+        Err(LoadError::LiveSpawnRejected(_))
+    ));
+    assert_eq!(w.live_entities(), 0);
+    assert!(w.loaded_scenes()[0].handle_of(uuid(2)).is_none());
+    w.adopt_gameplay_commands().unwrap();
+    assert_eq!(w.live_entities(), 1);
+    w.spawn_now(
+        "editor",
+        Transform::default(),
+        None,
+        vec![],
+        Some((uuid(1), uuid(2))),
+    )
+    .unwrap();
+    assert_eq!(w.live_entities(), 2);
+}

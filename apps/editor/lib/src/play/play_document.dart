@@ -1,3 +1,4 @@
+import 'package:fynkel/fynkel.dart' show EntityRef;
 // Live Play mode (ADR-0021 P7, docs/design/live-play-mode.md): the running
 // game's world as an `EditorDocument`, so the Hierarchy and the Inspector
 // show it with the panels, rows, cards and field widgets they use for a
@@ -65,7 +66,7 @@ abstract class LiveBackend {
   LiveEntityState entity(String id);
 
   /// The script components on the entity with runtime [handle].
-  List<LiveBehaviour> behaviours(int handle);
+  List<LiveBehaviour> behaviours(EntityRef handle);
 
   /// The world for the Scene view to draw and pick in (L5); null when
   /// there is none.
@@ -77,7 +78,7 @@ abstract class LiveBackend {
 
   List<String> setBehaviourField(Object instance, String field, Object? value) => throw _notWritable('setField');
 
-  List<String> addBehaviour(int handle, String type, {int? version, Map<String, Object?> data = const {}}) =>
+  List<String> addBehaviour(EntityRef handle, String type, {int? version, Map<String, Object?> data = const {}}) =>
       throw _notWritable('addComponent');
 
   List<String> removeBehaviour(Object instance) => throw _notWritable('removeComponent');
@@ -138,7 +139,7 @@ final class WorldLiveBackend extends LiveBackend {
 
   /// The live ids by handle, from the last table read: what a script's
   /// object field shows (`{entity: id}`) for the object it holds.
-  final Map<int, String> _ids = {};
+  final Map<EntityRef, String> _ids = {};
 
   List<LiveEntity> _keep(List<LiveEntity> rows) {
     _ids
@@ -153,7 +154,7 @@ final class WorldLiveBackend extends LiveBackend {
     if (value is! Map) return null;
     final entity = value['entity'];
     if (entity is! String) return null;
-    final int handle;
+    final EntityRef handle;
     try {
       handle = live.entity(entity).handle;
     } on AuthoringException {
@@ -176,7 +177,7 @@ final class WorldLiveBackend extends LiveBackend {
   final Set<fynkel.Behaviour> _removed = Set.identity();
 
   @override
-  List<LiveBehaviour> behaviours(int handle) => [
+  List<LiveBehaviour> behaviours(EntityRef handle) => [
     for (final b in world.behaviours)
       if (!b.isDestroyed && !_removed.contains(b) && !b.gameObject.isPending && b.gameObject.entity == handle)
         if (b.behaviourType case final type?)
@@ -248,7 +249,7 @@ final class WorldLiveBackend extends LiveBackend {
   }
 
   @override
-  List<String> addBehaviour(int handle, String type, {int? version, Map<String, Object?> data = const {}}) {
+  List<String> addBehaviour(EntityRef handle, String type, {int? version, Map<String, Object?> data = const {}}) {
     // An entity no script has touched yet gets its handle now.
     final go = world.byEntity(handle) ?? world.attach(handle);
     try {

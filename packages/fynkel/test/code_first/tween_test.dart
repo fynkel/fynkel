@@ -53,11 +53,15 @@ void main() {
 
   test('moveTo: halfway at half time, there at the end, then done', () async {
     final w = fresh();
-    final box = w.spawn(name: 'Box', transform: const Pose(position: Vec3(0, 0, 0)));
+    final box = w.spawn(
+      name: 'Box',
+      transform: const Pose(position: Vec3(0, 0, 0)),
+    );
     frames(w, 1);
     final move = box.transform.moveTo(const Vec3(10, 0, 0), 1, ease: Ease.linear);
     var finished = false;
     move.done.then((_) => finished = true);
+    w.frame(0);
     frames(w, 30);
     near(box.transform.position, const Vec3(5, 0, 0));
     expect(move.isRunning, isTrue);
@@ -72,12 +76,16 @@ void main() {
 
   test('moveTo is in the world under a parent; moveLocalTo, rotateTo and scaleTo', () {
     final w = fresh();
-    final parent = w.spawn(name: 'Parent', transform: const Pose(position: Vec3(0, 5, 0)));
+    final parent = w.spawn(
+      name: 'Parent',
+      transform: const Pose(position: Vec3(0, 5, 0)),
+    );
     final child = w.spawn(name: 'Child', parent: parent);
     frames(w, 2);
     child.transform.moveTo(const Vec3(0, 5, 4), 0.5);
     child.transform.rotateTo(Quat.euler(const Vec3(0, 90, 0)), 1, ease: Ease.linear);
     child.transform.scaleTo(const Vec3(3, 3, 3), 0.5, ease: Ease.inOutCubic);
+    w.frame(0);
     frames(w, 30);
     near(child.transform.localPosition, const Vec3(0, 0, 4));
     near(child.transform.localScale, const Vec3(3, 3, 3));
@@ -95,14 +103,14 @@ void main() {
     final w = fresh();
     final seq = Sequence();
     w.spawn(name: 'Seq').addBehaviour(seq);
-    frames(w, 1 + 30 + 1);
+    frames(w, 1 + 1 + 1 + 30 + 1); // start, routine, tween, duration, parent resume
     expect(seq.log, ['moved at 2.0']);
-    frames(w, 16);
+    frames(w, 17); // newly scheduled tween starts on the next pass
     expect(seq.log, ['moved at 2.0', 'scaled to 2.0']);
 
     final fader = Fader();
     final lamp = w.spawn(name: 'Lamp')..addBehaviour(fader);
-    frames(w, 15); // started in the first frame's update, a frame's time in by its end
+    frames(w, 17); // creation schedules; next frame starts; 15 frames advance
     expect(fader.intensity, closeTo(2, 1e-6));
     lamp.setActive(false);
     frames(w, 30);
@@ -116,6 +124,7 @@ void main() {
     frames(w, 1);
     final move = a.transform.moveTo(const Vec3(6, 0, 0), 1, ease: Ease.linear);
     final other = b.transform.moveTo(const Vec3(6, 0, 0), 1);
+    w.frame(0);
     frames(w, 20);
     move.stop();
     b.destroy();
@@ -130,6 +139,8 @@ void main() {
     w.tween(0.0, 1.0, 1, seen.add, ease: Ease.linear);
     w.tween(0, 10, 1, seen.add, ease: Ease.linear);
     w.tween(const Vec4(0, 0, 0, 1), const Vec4(1, 0.5, 0, 1), 1, seen.add, ease: Ease.linear);
+    expect(seen, isEmpty);
+    w.frame(0);
     expect(seen, [0.0, 0, const Vec4(0, 0, 0, 1)], reason: 'the first value now');
     seen.clear();
     frames(w, 30);
@@ -143,6 +154,8 @@ void main() {
     expect(() => w.tween(0.0, 1.0, double.nan, (_) {}), throwsArgumentError);
     final zero = <double>[];
     w.tween(3.0, 4.0, 0, zero.add);
+    expect(zero, isEmpty);
+    w.frame(0);
     expect(zero, [4.0], reason: 'no time: the end at once');
   });
 

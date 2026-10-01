@@ -156,26 +156,30 @@ enum GizmoSpace {
 /// [color] is `0xAARRGGBB` (the editor's gizmo colour when null).
 class Gizmo {
   const Gizmo.radius({this.color, this.when = GizmoWhen.selected, this.space = GizmoSpace.local})
-      : shape = 'radius',
-        angle = null;
+    : shape = 'radius',
+      angle = null;
   const Gizmo.box({this.color, this.when = GizmoWhen.selected, this.space = GizmoSpace.local})
-      : shape = 'box',
-        angle = null;
+    : shape = 'box',
+      angle = null;
   const Gizmo.point({this.color, this.when = GizmoWhen.selected, this.space = GizmoSpace.local})
-      : shape = 'point',
-        angle = null;
+    : shape = 'point',
+      angle = null;
   const Gizmo.direction({this.color, this.when = GizmoWhen.selected, this.space = GizmoSpace.local})
-      : shape = 'direction',
-        angle = null;
-  const Gizmo.cone({required String this.angle, this.color, this.when = GizmoWhen.selected, this.space = GizmoSpace.local})
-      : shape = 'cone';
+    : shape = 'direction',
+      angle = null;
+  const Gizmo.cone({
+    required String this.angle,
+    this.color,
+    this.when = GizmoWhen.selected,
+    this.space = GizmoSpace.local,
+  }) : shape = 'cone';
   const Gizmo.lineTo({this.color, this.when = GizmoWhen.selected})
-      : shape = 'lineTo',
-        space = GizmoSpace.world,
-        angle = null;
+    : shape = 'lineTo',
+      space = GizmoSpace.world,
+      angle = null;
   const Gizmo.path({this.color, this.when = GizmoWhen.selected, this.space = GizmoSpace.local})
-      : shape = 'path',
-        angle = null;
+    : shape = 'path',
+      angle = null;
 
   /// `radius`, `box`, `point`, `direction`, `cone`, `lineTo` or `path`.
   final String shape;
@@ -189,7 +193,12 @@ class Gizmo {
 
 /// What a fixed tick hands to [Behaviour.fixedUpdate].
 class FixedUpdateContext {
-  const FixedUpdateContext({required this.tick, required this.dt, required this.events, required this.context});
+  const FixedUpdateContext({
+    required this.tick,
+    required this.dt,
+    required this.events,
+    required this.context,
+  });
 
   /// The tick about to be stepped (this callback's commands apply to it).
   final int tick;
@@ -247,6 +256,10 @@ abstract class Behaviour extends Component {
   bool _startThrew = false;
   bool _destroyRequested = false;
   bool _destroyed = false;
+  // Logical removal published by World.edit; the scheduler retains the binding
+  // until it has delivered cleanup callbacks. Legacy requests keep their existing
+  // deferred lookup semantics until callback routing is migrated.
+  bool _retired = false;
   BehaviourType? _type;
   String? _authoredComponent;
 
@@ -261,10 +274,19 @@ abstract class Behaviour extends Component {
   /// behaviour was loaded from; null when no document authored it.
   String? get authoredComponentId => _authoredComponent;
 
+  _GameplayAdapter? get _attachmentScope {
+    final edit = Zone.current[_gameplayZoneKey] as _GameplayAdapter?;
+    if (edit == null || !edit._attachments.containsKey(this)) return null;
+    edit.checkOpen();
+    return edit;
+  }
+
+  _GameplayAdapter? get _lifecycleEdit => _attachmentScope ?? _system?.world._gameplay;
+
   /// The object this behaviour is attached to; throws before attachment.
   @override
   GameObject get gameObject {
-    final go = _gameObject;
+    final go = _attachmentScope?._attachments[this] ?? _gameObject;
     if (go == null) throw StateError('$runtimeType is not attached to a GameObject yet');
     return go;
   }
@@ -279,7 +301,11 @@ abstract class Behaviour extends Component {
 
   /// Attached, not destroyed, and its object alive.
   @override
-  bool get isAlive => !_destroyed && (_gameObject?._alive ?? false);
+  bool get isAlive {
+    final edit = _lifecycleEdit;
+    final go = edit?._attachments[this] ?? _gameObject;
+    return !_destroyed && !(edit?.behaviourRemoved(this) ?? _retired) && (go?.isAlive ?? false);
+  }
 
   /// The object's native components (M3-07a): `get<MeshRenderer>()`,
   /// `set(light.copyWith(intensity: 0))`, `has<Camera>()`,
@@ -313,8 +339,14 @@ abstract class Behaviour extends Component {
   /// Desired state. Setting it queues `onEnable`/`onDisable` for the next
   /// safe boundary; [isActive] says what the driver has applied (enabled
   /// and the object active in the hierarchy).
-  bool get enabled => _enabled;
+  bool get enabled => _lifecycleEdit?.behaviourEnabled(this) ?? _enabled;
   set enabled(bool value) {
+    final edit = _lifecycleEdit;
+    if (edit != null) return edit.setBehaviourEnabled(this, value);
+    if (_system case final system?) {
+      return system.world._withGameplay(() => system.world._gameplay!.setBehaviourEnabled(this, value));
+    }
+    if (_retired) throw StateError('cannot change enabled on a removed behaviour');
     if (_enabled == value) return;
     _enabled = value;
     _system?._dirty = true;
@@ -340,13 +372,16 @@ abstract class Behaviour extends Component {
   /// Opt in to [afterPhysics].
   bool get wantsAfterPhysics => false;
 
-  /// Removes this behaviour from its object at the next safe boundary
-  /// (`onDisable` if active, then `onDestroy`). The object stays.
+  /// In [World.edit], removes this behaviour from gameplay lookups immediately;
+  /// commit schedules `onDisable` (if active) and `onDestroy` at the next safe
+  /// boundary. Outside an edit, an implicit edit commits removal immediately.
+  /// The object stays. [isDestroyed] records completed lifecycle destruction.
   @override
   void destroy() {
+    final edit = _lifecycleEdit;
+    if (edit != null) return edit.destroyBehaviour(this);
     if (_destroyRequested || _system == null) return;
-    _destroyRequested = true;
-    _system!._dirty = true;
+    _system!.world._withGameplay(() => _system!.world._gameplay!.destroyBehaviour(this));
   }
 
   /// Another behaviour on the same object (one whose `destroy()` was called
@@ -355,15 +390,18 @@ abstract class Behaviour extends Component {
 
   // ---- coroutines and Invoke (Unity's, docs/unity-parity.md § Tier 2)
 
-  /// Runs [routine] — a `sync*` generator — now, up to its first `yield`,
-  /// then resumes it once per frame after every `update` (Unity's
-  /// `StartCoroutine`). What it yields says when it goes on: `null` (the
+  /// Schedules [routine] — a `sync*` generator — for the next variable
+  /// scheduler phase after commit, then resumes it once per frame after
+  /// every `update`. What it yields says when it goes on: `null` (the
   /// next frame), [WaitForSeconds], [WaitUntil], [WaitWhile],
   /// [WaitForFixedUpdate], another [Coroutine] (until that one ends) or a
   /// nested generator (run in place). It stops at its end, at [Coroutine.stop] /
   /// [stopCoroutine] / [stopAllCoroutines], when this behaviour is
   /// destroyed or its object leaves the active hierarchy, or when it
-  /// throws (reported like a callback, [World.onBehaviourError]).
+  /// throws (reported like a callback, [World.onBehaviourError]). Iterator
+  /// acquisition and execution always wait until commit and a later frame's
+  /// variable scheduler phase.
+  /// Abort never runs the routine; the wait clock starts at first execution.
   ///
   /// ```dart
   /// Iterable<Object?> blink() sync* {
@@ -375,7 +413,7 @@ abstract class Behaviour extends Component {
   ///   }
   /// }
   /// ```
-  Coroutine startCoroutine(Iterable<Object?> routine) => _schedule(Coroutine._(this, routine.iterator, false));
+  Coroutine startCoroutine(Iterable<Object?> routine) => _schedule(Coroutine._(this, routine, false));
 
   /// [World.tween] as one of this script's coroutines: it stops with
   /// them (when the script is destroyed or its object leaves the active
@@ -384,13 +422,25 @@ abstract class Behaviour extends Component {
   /// ```dart
   /// tween(0.0, 8.0, 0.5, (v) => set(light.copyWith(intensity: v)), ease: Ease.outCubic);
   /// ```
-  Coroutine tween<T extends Object>(T from, T to, double seconds, void Function(T value) onValue,
-      {Ease ease = Ease.outQuad}) {
+  Coroutine tween<T extends Object>(
+    T from,
+    T to,
+    double seconds,
+    void Function(T value) onValue, {
+    Ease ease = Ease.outQuad,
+    TimeClock clock = TimeClock.gameplay,
+  }) {
     _checkSeconds(seconds);
     final apply = _between(from, to, onValue);
-    final system = _system;
-    if (system == null) throw StateError('$runtimeType: a tween needs an attached behaviour');
-    return _schedule(Coroutine._(this, _tweenRoutine(system, seconds, ease, apply).iterator, false));
+    final system = _lifecycleEdit?.world._behaviours ?? _system;
+    if (system == null) {
+      (Zone.current[_gameplayZoneKey] as _GameplayAdapter?)?.reject('a tween needs an attached behaviour');
+      throw StateError('$runtimeType: a tween needs an attached behaviour');
+    }
+    return _schedule(
+      Coroutine._(this, _tweenRoutine(system, seconds, ease, apply, clock), false)
+        .._initialWait = clock == TimeClock.simulation ? const WaitForFixedUpdate() : null,
+    );
   }
 
   /// Stops [coroutine] (it does nothing more).
@@ -398,58 +448,75 @@ abstract class Behaviour extends Component {
 
   /// Stops every coroutine this behaviour started ([invoke]s stay).
   void stopAllCoroutines() {
-    for (final c in _routines) {
-      if (!c._invoke) c.stop();
-    }
+    final system = _lifecycleEdit?.world._behaviours ?? _system;
+    if (system == null) return;
+    system.world._withGameplay(() {
+      for (final c in _logicalRoutines) {
+        if (!c._invoke) c.stop();
+      }
+    });
   }
 
   /// Calls [f] once, [seconds] of game time from now (Unity's `Invoke`;
   /// `0` is the next frame). It still runs while this behaviour is
   /// disabled, as Unity's does, and not after it is destroyed.
-  Coroutine invoke(void Function() f, double seconds) => invokeRepeating(f, seconds, 0);
+  Coroutine invoke(void Function() f, double seconds, {TimeClock clock = TimeClock.gameplay}) =>
+      invokeRepeating(f, seconds, 0, clock: clock);
 
   /// Calls [f] after [delay] seconds, then every [rate] seconds (`0`: once).
-  Coroutine invokeRepeating(void Function() f, double delay, double rate) {
+  Coroutine invokeRepeating(
+    void Function() f,
+    double delay,
+    double rate, {
+    TimeClock clock = TimeClock.gameplay,
+  }) {
+    _checkSeconds(delay);
+    _checkSeconds(rate);
     Iterable<Object?> calls() sync* {
-      yield WaitForSeconds(delay);
       f();
       while (rate > 0) {
-        yield WaitForSeconds(rate);
+        yield WaitForSeconds(rate, clock: clock);
         f();
       }
     }
 
-    return _schedule(Coroutine._(this, calls().iterator, true));
+    return _schedule(Coroutine._(this, calls(), true).._initialWait = WaitForSeconds(delay, clock: clock));
   }
 
   /// Cancels [which], or every pending [invoke] of this behaviour.
   void cancelInvoke([Coroutine? which]) {
     if (which != null) return which.stop();
-    for (final c in _routines) {
-      if (c._invoke) c.stop();
-    }
+    final system = _lifecycleEdit?.world._behaviours ?? _system;
+    if (system == null) return;
+    system.world._withGameplay(() {
+      for (final c in _logicalRoutines) {
+        if (c._invoke) c.stop();
+      }
+    });
   }
 
   /// Whether an [invoke] of this behaviour is pending.
-  bool get isInvoking => _routines.any((c) => c._invoke && c.isRunning);
+  bool get isInvoking => _logicalRoutines.any((c) => c._invoke && c.isRunning);
 
   final List<Coroutine> _routines = [];
+  Iterable<Coroutine> get _logicalRoutines {
+    final edit = _lifecycleEdit;
+    return edit == null ? _routines : [..._routines, ...edit.routinesFor(this)];
+  }
 
   Coroutine _schedule(Coroutine c) {
+    final edit = _lifecycleEdit ?? Zone.current[_gameplayZoneKey] as _GameplayAdapter?;
+    if (edit != null) return edit.schedule(c);
     final system = _system;
-    if (system == null || _destroyRequested) {
+    if (system == null || _destroyRequested || !_gameObject!._alive || system.world.isDisposed) {
       throw StateError('$runtimeType: a coroutine needs an attached behaviour that is not destroyed');
     }
-    _routines.add(c);
-    system._routines.add(c);
-    // Run up to the first yield now, as Unity does.
-    system._advance(c);
-    return c;
+    return system.world._withGameplay(() => system.world._gameplay!.schedule(c));
   }
 
   void _stopRoutines({required bool invokes}) {
     for (final c in _routines) {
-      if (invokes || !c._invoke) c.stop();
+      if (invokes || !c._invoke) c._done = true;
     }
   }
 
@@ -663,7 +730,8 @@ ObjectSpec? specOfObject(GameObject go) => go._spec;
 NativeComponent<T>? nativeComponentOf<T extends WireRecord>(Object? value) => switch (value) {
   null => null,
   final NativeComponent<T> c => c,
-  final GameObject go => go.component<T>() ?? (throw ArgumentError('"${go.name}" has no ${componentSchemaName(T)}')),
+  final GameObject go =>
+    go.component<T>() ?? (throw ArgumentError('"${go.name}" has no ${componentSchemaName(T)}')),
   _ => throw ArgumentError.value(value, 'value', 'not a GameObject or a NativeComponent<$T>'),
 };
 
@@ -749,7 +817,15 @@ class BehaviourRegistry {
     if (version != null && version > type.version) {
       throw DataAssetError(id, 'authored version $version is newer than the registered ${type.version}');
     }
-    final d = type.create().._dataType = type;
+    final d = type.create();
+    final edit = Zone.current[_gameplayZoneKey] as _GameplayAdapter?;
+    if (edit != null) {
+      edit.checkOpen();
+      if (d._asset != null || d._destroyed || !edit._createdData.add(d)) {
+        edit.reject('data factory must return a fresh unbound instance');
+      }
+    }
+    d._dataType = type;
     for (final entry in fields.entries) {
       final f = type.field(entry.key);
       if (f == null) throw DataAssetError(id, 'unknown field', field: entry.key);
@@ -759,7 +835,11 @@ class BehaviourRegistry {
       } on DataAssetError {
         rethrow;
       } catch (e) {
-        throw DataAssetError(id, 'cannot set from ${entry.value.runtimeType} (${entry.value}): $e', field: entry.key);
+        throw DataAssetError(
+          id,
+          'cannot set from ${entry.value.runtimeType} (${entry.value}): $e',
+          field: entry.key,
+        );
       }
     }
     return d;
@@ -789,7 +869,15 @@ class BehaviourRegistry {
     if (version != null && version > type.version) {
       throw BehaviourDataError(id, 'authored version $version is newer than the registered ${type.version}');
     }
-    final b = type.create().._type = type;
+    final b = type.create();
+    final edit = Zone.current[_gameplayZoneKey] as _GameplayAdapter?;
+    if (edit != null) {
+      edit.checkOpen();
+      if (b._system != null || edit._attachments.containsKey(b)) {
+        edit.reject('behaviour factory returned an already attached instance');
+      }
+    }
+    b._type = type;
     for (final entry in fields.entries) {
       final f = type.field(entry.key);
       if (f == null) throw BehaviourDataError(id, 'unknown field', field: entry.key);
@@ -802,7 +890,11 @@ class BehaviourRegistry {
       } on BehaviourDataError {
         rethrow;
       } catch (e) {
-        throw BehaviourDataError(id, 'cannot set from ${entry.value.runtimeType} (${entry.value}): $e', field: entry.key);
+        throw BehaviourDataError(
+          id,
+          'cannot set from ${entry.value.runtimeType} (${entry.value}): $e',
+          field: entry.key,
+        );
       }
     }
     return b;
@@ -811,7 +903,10 @@ class BehaviourRegistry {
 
 /// A running [Behaviour.startCoroutine] or [Behaviour.invoke].
 final class Coroutine {
-  Coroutine._(this._owner, Iterator<Object?> routine, this._invoke, [this._target]) : _stack = [routine];
+  Coroutine._(this._owner, this._routine, this._invoke, [this._target]);
+  Iterable<Object?>? _routine;
+  _BehaviourSystem? _system;
+  Object? _initialWait;
 
   /// The behaviour that started it; null for a tween started on an object
   /// or on the world.
@@ -819,7 +914,7 @@ final class Coroutine {
 
   /// The object a tween moves: it ends when that object is destroyed.
   final GameObject? _target;
-  final List<Iterator<Object?>> _stack;
+  final List<Iterator<Object?>> _stack = [];
   final bool _invoke;
   bool _done = false;
 
@@ -828,22 +923,49 @@ final class Coroutine {
   int _frame = 0, _tick = 0;
   double _until = 0;
 
-  /// False once it ended, was stopped, or threw.
-  bool get isRunning => !_done;
+  /// False once it ended, was stopped, threw, or its scheduling edit aborted.
+  /// Inside an edit this includes staged cancellation.
+  bool get isRunning {
+    final edit = _system?.world._gameplay;
+    return !_done && !(edit?.routineStopped(this) ?? false);
+  }
 
-  /// Stops it: it does nothing more.
-  void stop() => _done = true;
+  /// Stops it: it does nothing more. Inside [World.edit], cancellation is
+  /// visible immediately in that edit and applied only if the edit commits.
+  void stop() {
+    final edit = _system?.world._gameplay;
+    if (edit != null) return edit.stopRoutine(this);
+    if (_system case final system?) {
+      return system.world._withGameplay(() => system.world._gameplay!.stopRoutine(this));
+    }
+    _done = true;
+  }
 
   /// Completes once it ended, was stopped, or threw (at the end of that
   /// frame's pass) — `await tween.done` in async code; a coroutine yields
   /// the [Coroutine] itself instead.
-  Future<void> get done => (_completer ??= Completer<void>()).future;
+  Future<void> get done {
+    final completer = _completer ??= Completer<void>();
+    if (_completed && !completer.isCompleted) completer.complete();
+    return completer.future;
+  }
+
+  bool _completed = false;
+  void _finish() {
+    _done = true;
+    _completed = true;
+    _routine = null;
+    _stack.clear();
+    if (_completer case final c? when !c.isCompleted) c.complete();
+  }
+
   Completer<void>? _completer;
 }
 
 /// `yield WaitForSeconds(s)`: go on once [seconds] of game time passed.
 final class WaitForSeconds {
-  const WaitForSeconds(this.seconds);
+  const WaitForSeconds(this.seconds, {this.clock = TimeClock.gameplay});
+  final TimeClock clock;
   final double seconds;
 }
 
@@ -867,8 +989,14 @@ final class WaitForFixedUpdate {
 
 /// A behaviour callback that threw ([World.onBehaviourError]).
 class BehaviourError {
-  BehaviourError(this.behaviour, this.callback, this.error, this.stack, {required this.tick, GameObject? gameObject})
-      : _object = gameObject;
+  BehaviourError(
+    this.behaviour,
+    this.callback,
+    this.error,
+    this.stack, {
+    required this.tick,
+    GameObject? gameObject,
+  }) : _object = gameObject;
 
   final GameObject? _object;
 
@@ -907,8 +1035,7 @@ class _BehaviourSystem {
   /// Every running coroutine and invoke, in start order.
   final List<Coroutine> _routines = [];
 
-  /// Game time as the coroutines see it: the sum of the frames' `dt`.
-  double _clock = 0;
+  double _seconds(TimeClock clock) => world.context.time.seconds(clock);
 
   /// Scratch copy for the callback loops (callbacks may attach/destroy);
   /// kept between phases so a steady frame allocates nothing.
@@ -922,6 +1049,7 @@ class _BehaviourSystem {
   int get count => _all.length;
 
   void attach(GameObject go, Behaviour b) {
+    world._rejectDuringEdit('behaviour attach');
     if (b._system != null) throw StateError('$b is already attached');
     if (!go._alive) throw StateError('cannot attach $b: $go was destroyed');
     b
@@ -946,46 +1074,6 @@ class _BehaviourSystem {
     }
     _all.insert(lo, b);
     _dirty = true;
-    _collecting?.add(b);
-  }
-
-  /// The behaviours attached during [creating]'s build (null outside one).
-  List<Behaviour>? _collecting;
-
-  /// Runs [build] — an `instantiate` or a `clone` — then, as Unity's
-  /// `Instantiate` does, `onCreate` and `onEnable` of the behaviours it
-  /// attached, before returning (docs/foundation.md 1.7): parents first,
-  /// then callback order; only those whose object is active in the
-  /// hierarchy (the others are created when it first is, by [settle]).
-  /// `start` still runs before the first gameplay callback.
-  T creating<T>(T Function() build) {
-    final outer = _collecting;
-    final attached = _collecting = [];
-    final T result;
-    try {
-      result = build();
-    } finally {
-      _collecting = outer;
-    }
-    outer?.addAll(attached);
-    final ready = [
-      for (final b in attached)
-        if (!b._created && !b._destroyRequested && !b._gameObject!.isPending && b._gameObject!.activeInHierarchy) b
-    ];
-    if (ready.isEmpty) return result;
-    if (ready.length > 1) ready.sort(_byDepth);
-    world.context.run(() {
-      for (final b in ready) {
-        if (b._created || b._destroyRequested) continue;
-        b._created = true;
-        _call(b, 'onCreate', b.onCreate);
-        if (b._enabled && !b._active && !b._destroyRequested) {
-          b._active = true;
-          _call(b, 'onEnable', b.onEnable);
-        }
-      }
-    });
-    return result;
   }
 
   /// Applies pending lifecycle transitions. Called at the start of every
@@ -996,21 +1084,33 @@ class _BehaviourSystem {
   /// first, then `onCreate`/`onEnable` parents first, each group in
   /// callback order within a depth. `onCreate` waits until the object is
   /// spawned and first active in the hierarchy.
-  void settle() {
-    // Activity changes show in the world's entity table: a new table (a
-    // tick changed the structure, a load, a live edit) is a settle.
-    if (_all.isNotEmpty) {
-      final t = world._entities;
-      if (!identical(t, _table)) {
-        _table = t;
-        _dirty = true;
-      }
+  bool _entryReady({bool force = false}) {
+    if (world._callbackEntryBlocked || world.isDisposed) return false;
+    if (!force && !_all.any((b) => b._created)) return true;
+    world._callbackPreflight = true;
+    try {
+      world._callbackGameplay(() {});
+      return true;
+    } on _GameplayCallbackEntrySkipped {
+      return false;
+    } finally {
+      world._callbackPreflight = false;
     }
+  }
+
+  void settle() {
+    if (world._callbackEntryBlocked || world.isDisposed) return;
+    if (_all.any((b) => !b._gameObject!.isPending) && !_entryReady(force: true)) return;
     if (!_dirty) return;
     _dirty = false;
     final n = _all.length;
     _copyScratch();
     for (var i = 0; i < n; i++) {
+      if (!_entryReady()) {
+        _dirty = true;
+        _scratch.fillRange(0, n, null);
+        return;
+      }
       final b = _scratch[i]!;
       final go = b._gameObject!;
       final gone = !go._alive;
@@ -1018,6 +1118,7 @@ class _BehaviourSystem {
         if (b._active) {
           b._active = false;
           _call(b, 'onDisable', b.onDisable);
+          if (world.isDisposed) return;
         }
         b._destroyed = true;
         b._destroyRequested = true;
@@ -1034,6 +1135,9 @@ class _BehaviourSystem {
         continue;
       }
       final live = go.activeInHierarchy;
+      // A disabled script still owns routines; hierarchy deactivation cancels
+      // them even when there is no active-to-inactive lifecycle transition.
+      if (!live) b._stopRoutines(invokes: false);
       if (!b._created) {
         if (live) _enabling.add(b);
       } else if ((b._enabled && live) != b._active) {
@@ -1048,26 +1152,37 @@ class _BehaviourSystem {
     if (_disabling.isNotEmpty) {
       if (_disabling.length > 1) _disabling.sort(_childrenFirst);
       for (final b in _disabling) {
+        if (!_entryReady()) {
+          _dirty = true;
+          return;
+        }
         if (!b._active || b._destroyed) continue;
         b._active = false;
         // Unity: an object leaving the active hierarchy stops its
         // coroutines; a disabled behaviour keeps them.
         if (!b._gameObject!.activeInHierarchy) b._stopRoutines(invokes: false);
         _call(b, 'onDisable', b.onDisable);
+        if (world.isDisposed) return;
       }
       _disabling.clear();
     }
     if (_enabling.isNotEmpty) {
       if (_enabling.length > 1) _enabling.sort(_byDepth);
       for (final b in _enabling) {
+        if (!_entryReady()) {
+          _dirty = true;
+          return;
+        }
         if (b._destroyed) continue;
         if (!b._created) {
           b._created = true;
           _call(b, 'onCreate', b.onCreate);
+          if (world.isDisposed) return;
         }
         if (b._enabled && !b._active && !b._destroyRequested) {
           b._active = true;
           _call(b, 'onEnable', b.onEnable);
+          if (world.isDisposed) return;
         }
       }
       _enabling.clear();
@@ -1077,7 +1192,6 @@ class _BehaviourSystem {
   }
 
   /// The entity table the last settle saw.
-  Object? _table;
 
   /// Set when an object or a script died since the last settle: the
   /// settle then clears the script fields that point at it.
@@ -1115,7 +1229,10 @@ class _BehaviourSystem {
   List<BehaviourField> _referenceFieldsOf(Behaviour b) {
     final type = b._type ?? world._registeredTypeOf(b);
     if (type == null) return const [];
-    return [for (final f in type.fields) if (f.isReference && f.target != null) f];
+    return [
+      for (final f in type.fields)
+        if (f.isReference && f.target != null) f,
+    ];
   }
 
   /// This settle's transitions (kept between settles: no allocation).
@@ -1136,8 +1253,18 @@ class _BehaviourSystem {
   }
 
   int _depth(Behaviour b) {
-    final e = b._gameObject!._entity;
-    return e == null ? 0 : world._entities.depthOf(e);
+    final go = b._gameObject!;
+    if (!go._alive || go._entity == null) return 0;
+    return world._withGameplay(() {
+      final edit = world._gameplay!;
+      var depth = 0;
+      var parent = edit.native.parent(edit.ref(go));
+      while (parent != null) {
+        depth++;
+        parent = edit.native.parent(parent);
+      }
+      return depth;
+    });
   }
 
   void _copyScratch() {
@@ -1148,25 +1275,32 @@ class _BehaviourSystem {
   /// One fixed tick's callbacks, right before `step()`.
   void fixedUpdate(int tick, List<EngineEvent> events) {
     settle();
+    if (world.isDisposed) return;
     final ctx = FixedUpdateContext(tick: tick, dt: world.fixedDt, events: events, context: world.context);
     _startPending(ctx.context);
-    _run(ctx.context, 'fixedUpdate', (b) {
-      if (_startIfNeeded(b)) b.fixedUpdate(ctx);
-    });
+    if (world.isDisposed) return;
+    _run(ctx.context, 'fixedUpdate', (b) => b.fixedUpdate(ctx));
   }
 
   /// Right after `step()`: the behaviours of the objects the tick made are
   /// created, then the contact callbacks of the objects involved (in
   /// contact order, side `a` then `b`), then `afterPhysics` for the
   /// behaviours that opted in.
-  void afterPhysics(int tick, List<Contact> contacts, List<ZoneEvent> zones, List<AnimationEnded> animations,
-      List<AnimationMarker> markers, List<PlaybackEnded> playback,
-      [List<AnimatorStateEvent> states = const []]) {
+  void afterPhysics(
+    int tick,
+    List<Contact> contacts,
+    List<ZoneEvent> zones,
+    List<AnimationEnded> animations,
+    List<AnimationMarker> markers,
+    List<PlaybackEnded> playback, [
+    List<AnimatorStateEvent> states = const [],
+  ]) {
     // Objects the tick made are created (onCreate/onEnable) before its
     // events reach anyone, so a pair made overlapping gets its enter on
     // both sides, as Unity's Awake runs before the next physics step
     // (foundation 2.13).
     settle();
+    if (world.isDisposed) return;
     if (contacts.isNotEmpty) _dispatchContacts(contacts);
     if (zones.isNotEmpty) _dispatchZones(zones);
     if (animations.isNotEmpty) _dispatchAnimations(animations);
@@ -1218,7 +1352,7 @@ class _BehaviourSystem {
         for (final b in go._behaviours.toList(growable: false)) {
           if (!b._active || b._destroyRequested) continue;
           try {
-            b.onAnimationEnded(e);
+            world._callbackGameplay(() => b.onAnimationEnded(e));
           } catch (err, st) {
             _threw(b, 'onAnimationEnded', err, st);
           }
@@ -1237,12 +1371,14 @@ class _BehaviourSystem {
           if (!b._active || b._destroyRequested) continue;
           final entered = s is AnimatorStateEntered;
           try {
-            switch (s) {
-              case AnimatorStateEntered():
-                b.onAnimatorStateEntered(s);
-              case AnimatorStateExited():
-                b.onAnimatorStateExited(s);
-            }
+            world._callbackGameplay(() {
+              switch (s) {
+                case AnimatorStateEntered():
+                  b.onAnimatorStateEntered(s);
+                case AnimatorStateExited():
+                  b.onAnimatorStateExited(s);
+              }
+            });
           } catch (err, st) {
             _threw(b, entered ? 'onAnimatorStateEntered' : 'onAnimatorStateExited', err, st);
           }
@@ -1260,7 +1396,7 @@ class _BehaviourSystem {
         for (final b in go._behaviours.toList(growable: false)) {
           if (!b._active || b._destroyRequested) continue;
           try {
-            b.onAnimationMarker(m);
+            world._callbackGameplay(() => b.onAnimationMarker(m));
           } catch (err, st) {
             _threw(b, 'onAnimationMarker', err, st);
           }
@@ -1278,7 +1414,7 @@ class _BehaviourSystem {
         for (final b in go._behaviours.toList(growable: false)) {
           if (!b._active || b._destroyRequested) continue;
           try {
-            b.onPlaybackEnded(e);
+            world._callbackGameplay(() => b.onPlaybackEnded(e));
           } catch (err, st) {
             _threw(b, 'onPlaybackEnded', err, st);
           }
@@ -1292,12 +1428,14 @@ class _BehaviourSystem {
     for (final b in go._behaviours.toList(growable: false)) {
       if (!b._active || b._destroyRequested) continue;
       try {
-        switch (z) {
-          case ZoneEntered():
-            b.onZoneEnter(z);
-          case ZoneExited():
-            b.onZoneExit(z);
-        }
+        world._callbackGameplay(() {
+          switch (z) {
+            case ZoneEntered():
+              b.onZoneEnter(z);
+            case ZoneExited():
+              b.onZoneExit(z);
+          }
+        });
       } catch (e, st) {
         _threw(b, z is ZoneEntered ? 'onZoneEnter' : 'onZoneExit', e, st);
       }
@@ -1310,22 +1448,24 @@ class _BehaviourSystem {
     for (final b in go._behaviours.toList(growable: false)) {
       if (!b._active || b._destroyRequested) continue;
       try {
-        switch (c.kind) {
-          case ContactKind.collisionEnter:
-            b.onCollisionEnter(c);
-          case ContactKind.collisionStay:
-            b.onCollisionStay(c);
-          case ContactKind.collisionExit:
-            b.onCollisionExit(c);
-          case ContactKind.triggerEnter:
-            b.onTriggerEnter(c);
-          case ContactKind.triggerExit:
-            b.onTriggerExit(c);
-          case ContactKind.triggerStay:
-            b.onTriggerStay(c);
-          case ContactKind.controllerHit:
-            b.onControllerColliderHit(c);
-        }
+        world._callbackGameplay(() {
+          switch (c.kind) {
+            case ContactKind.collisionEnter:
+              b.onCollisionEnter(c);
+            case ContactKind.collisionStay:
+              b.onCollisionStay(c);
+            case ContactKind.collisionExit:
+              b.onCollisionExit(c);
+            case ContactKind.triggerEnter:
+              b.onTriggerEnter(c);
+            case ContactKind.triggerExit:
+              b.onTriggerExit(c);
+            case ContactKind.triggerStay:
+              b.onTriggerStay(c);
+            case ContactKind.controllerHit:
+              b.onControllerColliderHit(c);
+          }
+        });
       } catch (e, st) {
         _threw(b, 'on${c.kind.name[0].toUpperCase()}${c.kind.name.substring(1)}', e, st);
       }
@@ -1335,12 +1475,11 @@ class _BehaviourSystem {
   /// Once per host frame: every `update`, then every `lateUpdate`.
   void update(double dt) {
     settle();
+    if (world.isDisposed) return;
     final ctx = UpdateContext(dt: dt, alpha: world.alpha, tick: world.tick, context: world.context);
     _startPending(ctx.context);
-    _run(ctx.context, 'update', (b) {
-      if (_startIfNeeded(b)) b.update(ctx);
-    });
-    _clock += dt;
+    if (world.isDisposed) return;
+    _run(ctx.context, 'update', (b) => b.update(ctx));
     if (_routines.isNotEmpty) ctx.context.run(() => _resume(fixed: false));
     _run(ctx.context, 'lateUpdate', (b) => b.lateUpdate(ctx));
   }
@@ -1349,69 +1488,116 @@ class _BehaviourSystem {
   /// [WaitForFixedUpdate] after the frame's `update`s, those after a
   /// tick's `afterPhysics`. Ones started during the pass wait for the next.
   void _resume({required bool fixed}) {
+    if (world.isDisposed) return;
     final n = _routines.length;
-    for (var i = 0; i < n; i++) {
+    for (var i = 0; i < n && i < _routines.length; i++) {
+      if (world.isDisposed) return;
       final c = _routines[i];
       if (c._target case final t? when !t.isAlive) c._done = true;
-      if (c._done || (c._wait is WaitForFixedUpdate) != fixed || !_ready(c)) continue;
-      _advance(c);
+      if (c._done || _fixedWait(c._wait) != fixed) continue;
+      try {
+        if (_ready(c)) _advance(c);
+      } catch (e, st) {
+        _routineThrew(c, e, st);
+      }
     }
     _routines.removeWhere((c) {
       if (!c._done) return false;
       c._owner?._routines.remove(c);
-      c._completer?.complete();
+      c._finish();
       return true;
     });
   }
 
+  bool _fixedWait(Object? wait) =>
+      wait is WaitForFixedUpdate || (wait is WaitForSeconds && wait.clock == TimeClock.simulation);
+
   bool _ready(Coroutine c) {
     final w = c._wait;
     if (w is WaitForFixedUpdate) return world.tick > c._tick;
+    if (w is WaitForSeconds && w.clock == TimeClock.simulation) {
+      return world.tick > c._tick && _seconds(w.clock) + 1e-6 >= c._until;
+    }
     if (world._frameCount <= c._frame) return false;
     return switch (w) {
       // A microsecond's slack: frame times summed in floating point.
-      WaitForSeconds() => _clock + 1e-6 >= c._until,
-      WaitUntil(:final condition) => condition(),
-      WaitWhile(:final condition) => !condition(),
+      WaitForSeconds(:final clock) => _seconds(clock) + 1e-6 >= c._until,
+      WaitUntil(:final condition) => world._callbackGameplay(condition),
+      WaitWhile(:final condition) => !world._callbackGameplay(condition),
       Coroutine() => !w.isRunning,
       _ => true,
     };
   }
 
   /// Starts a coroutine no behaviour owns (a tween on an object or on the
-  /// world): up to its first yield now, as [Behaviour.startCoroutine].
+  /// world): at the next scheduler boundary, as [Behaviour.startCoroutine].
   Coroutine _start(Coroutine c) {
-    _routines.add(c);
-    _advance(c);
-    return c;
+    return world._withGameplay(() => world._gameplay!.schedule(c));
+  }
+
+  void _disposeRoutines() {
+    for (final c in _routines) {
+      c._owner?._routines.remove(c);
+      c._finish();
+    }
+    _routines.clear();
+  }
+
+  // Engine-only bookkeeping: safe while staging, with no iterator or callback.
+  void _arm(Coroutine c, Object? wait) {
+    c._wait = wait;
+    c._frame = world._frameCount;
+    c._tick = world.tick;
+    if (wait is WaitForSeconds) {
+      _checkSeconds(wait.seconds);
+      c._until = _seconds(wait.clock) + wait.seconds;
+    }
   }
 
   /// Runs [c] to its next yield (nested generators in place).
   void _advance(Coroutine c) {
+    if (!c.isRunning) return;
     try {
-      while (!c._done) {
-        final top = c._stack.last;
-        if (!top.moveNext()) {
-          c._stack.removeLast();
-          if (c._stack.isEmpty) c._done = true;
-          continue;
+      world._callbackGameplay(() {
+        if (c._routine case final routine?) {
+          c._routine = null;
+          final iterator = routine.iterator;
+          if (!c.isRunning) return;
+          c._stack.add(iterator);
         }
-        final v = top.current;
-        if (v is Iterable<Object?>) {
-          c._stack.add(v.iterator);
-          continue;
+        while (c.isRunning) {
+          final top = c._stack.last;
+          final more = top.moveNext();
+          if (!c.isRunning) return;
+          if (!more) {
+            c._stack.removeLast();
+            if (c._stack.isEmpty) c._done = true;
+            continue;
+          }
+          final v = top.current;
+          if (!c.isRunning) return;
+          if (v is Iterable<Object?>) {
+            final iterator = v.iterator;
+            if (!c.isRunning) return;
+            c._stack.add(iterator);
+            continue;
+          }
+          _arm(c, v);
+          return;
         }
-        c._wait = v;
-        c._frame = world._frameCount;
-        c._tick = world.tick;
-        if (v is WaitForSeconds) c._until = _clock + v.seconds;
-        return;
-      }
+      });
     } catch (e, st) {
-      c._done = true;
-      final callback = c._invoke ? 'invoke' : (c._owner == null ? 'tween' : 'coroutine');
-      world.onBehaviourError(BehaviourError(c._owner, callback, e, st, tick: world.tick, gameObject: c._target));
+      _routineThrew(c, e, st);
     }
+  }
+
+  void _routineThrew(Coroutine c, Object e, StackTrace st) {
+    if (e is _GameplayCallbackEntrySkipped) return;
+    c._done = true;
+    final callback = c._invoke ? 'invoke' : (c._owner == null ? 'tween' : 'coroutine');
+    world.onBehaviourError(
+      BehaviourError(c._owner, callback, e, st, tick: world.tick, gameObject: c._target),
+    );
   }
 
   /// Runs `start` the first time; false when it threw (reported, and the
@@ -1432,6 +1618,7 @@ class _BehaviourSystem {
   /// as in Unity, a script early in the order sees the `start` of one after
   /// it. Nothing to do (and no allocation) when all have started.
   void _startPending(GameContext context) {
+    if (!_entryReady()) return;
     var pending = false;
     for (final b in _all) {
       if (!b._started && b._active && !b._destroyRequested) {
@@ -1441,25 +1628,29 @@ class _BehaviourSystem {
     }
     if (!pending) return;
     _run(context, 'start', (b) {
-      if (b._started) return;
+      if (b._started || !_entryReady()) return;
       b._started = true;
       b._startThrew = !_call(b, 'start', b.start);
-    });
+    }, transactional: false);
   }
 
   /// Calls [f], one of [b]'s callbacks; a throw goes to
   /// [World.onBehaviourError] and the caller carries on. False when it threw.
   bool _call(Behaviour b, String callback, void Function() f) {
+    world._lifecycleDepth++;
     try {
-      f();
+      world._callbackGameplay(f);
       return true;
     } catch (e, st) {
       _threw(b, callback, e, st);
       return false;
+    } finally {
+      world._lifecycleDepth--;
     }
   }
 
   void _threw(Behaviour b, String callback, Object e, StackTrace st) {
+    if (e is _GameplayCallbackEntrySkipped) return;
     world.onBehaviourError(BehaviourError(b, callback, e, st, tick: world.tick));
   }
 
@@ -1467,16 +1658,23 @@ class _BehaviourSystem {
   /// current. Behaviours attached, disabled or destroyed during the pass are
   /// skipped for the rest of it (their transition applies at the next
   /// boundary).
-  void _run(GameContext context, String callback, void Function(Behaviour) f) {
+  void _run(GameContext context, String callback, void Function(Behaviour) f, {bool transactional = true}) {
     final n = _all.length;
-    if (n == 0) return;
+    if (n == 0 || world._callbackEntryBlocked || world.isDisposed) return;
     _copyScratch();
     context.run(() {
       for (var i = 0; i < n; i++) {
+        if (world.isDisposed || world._callbackEntryBlocked) break;
         final b = _scratch[i]!;
         if (!b._active || b._destroyRequested || !b._gameObject!._alive) continue;
+        // A start failure must abort its own scope before it is reported.
+        if ((callback == 'fixedUpdate' || callback == 'update') && !_startIfNeeded(b)) continue;
         try {
-          f(b);
+          if (transactional) {
+            world._callbackGameplay(() => f(b));
+          } else {
+            f(b);
+          }
         } catch (e, st) {
           _threw(b, callback, e, st);
         }

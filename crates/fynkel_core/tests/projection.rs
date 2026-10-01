@@ -185,6 +185,77 @@ fn the_camera_is_the_one_the_frame_renders_from() {
 }
 
 #[test]
+fn manual_step_snap_displays_current_pose_and_preserves_interpolation_remainder() {
+    for fraction in [0.0, 0.5] {
+        let mut w = world();
+        camera_world(&mut w, 0);
+        let root = spawn(&mut w, 10, Transform::IDENTITY, vec![]);
+        let child = spawn(&mut w, 11, Transform::from_position(Vec3::X), vec![]);
+        w.submit(
+            Lane::Simulation,
+            vec![Command::SetParent {
+                child,
+                parent: Some(root),
+                keep_world: false,
+            }],
+        );
+        w.step();
+        w.begin_frame(w.config().fixed_dt * fraction);
+        let alpha = w.alpha();
+        w.submit(
+            Lane::Simulation,
+            vec![Command::SetTransform {
+                entity: root,
+                transform: Transform::from_position(Vec3::X * 2.0),
+            }],
+        );
+        w.step();
+        w.snap_interpolation();
+        assert_eq!(w.alpha(), alpha);
+        let ex = w.extract();
+        for (entity, x) in [(root, 2.0), (child, 3.0)] {
+            assert!(
+                (ex.records
+                    .iter()
+                    .find(|r| r.entity == entity)
+                    .unwrap()
+                    .world
+                    .w_axis
+                    .x
+                    - x)
+                    .abs()
+                    < 1e-5
+            );
+        }
+        let mut projected = Vec::new();
+        w.project(800, 600, &[anchor(child)], &mut projected);
+        let expected_x = 400.0 + 3.0 / (5.0 * 30f32.to_radians().tan() * 800.0 / 600.0) * 400.0;
+        assert!((projected[0].x - expected_x).abs() < 1e-2);
+
+        // The next regular tick interpolates normally from the snapped pose.
+        w.begin_frame(w.config().fixed_dt);
+        w.submit(
+            Lane::Simulation,
+            vec![Command::SetTransform {
+                entity: root,
+                transform: Transform::from_position(Vec3::X * 4.0),
+            }],
+        );
+        w.step();
+        let ex = w.extract();
+        let x = ex
+            .records
+            .iter()
+            .find(|r| r.entity == root)
+            .unwrap()
+            .world
+            .w_axis
+            .x;
+        assert!((x - (2.0 + 2.0 * fraction)).abs() < 1e-5);
+    }
+}
+
+#[test]
 fn a_dead_entity_is_missing_and_a_moving_one_is_interpolated() {
     let mut w = world();
     camera_world(&mut w, 0);
@@ -317,4 +388,53 @@ fn the_view_is_bounded_to_sixty_four_anchors() {
     let info = w.project(800, 600, &anchors[..64], &mut out);
     assert_eq!((info.projected, info.dropped), (64, 0));
     assert!(w.diagnostics().is_empty());
+}
+
+#[test]
+fn sheared_anchor_projection_uses_the_same_affine_matrix_as_rendering() {
+    let mut w = world();
+    camera_world(&mut w, 0);
+    let root = fynkel_scene::spawn(
+        w.ecs_mut(),
+        Transform {
+            scale: Vec3::new(2.0, 1.0, 1.0),
+            ..Transform::IDENTITY
+        },
+        None,
+    )
+    .unwrap();
+    let child = fynkel_scene::spawn(
+        w.ecs_mut(),
+        Transform {
+            rotation: Quat::from_rotation_z(0.7),
+            ..Transform::IDENTITY
+        },
+        Some(root),
+    )
+    .unwrap();
+    w.step();
+    let offset = Vec3::new(0.5, 0.25, 0.0);
+    let extract = w.extract();
+    let matrix = extract
+        .records
+        .iter()
+        .find(|r| r.entity == child)
+        .unwrap()
+        .world;
+    let point = matrix.transform_point3(offset);
+    let mut out = Vec::new();
+    w.project(
+        800,
+        600,
+        &[ProjectionAnchorRecord {
+            entity: child,
+            offset,
+            mask: 0,
+        }],
+        &mut out,
+    );
+    let expected_x = 400.0 + point.x / (5.0 * 30f32.to_radians().tan() * 800.0 / 600.0) * 400.0;
+    let expected_y = 300.0 - point.y / (5.0 * 30f32.to_radians().tan()) * 300.0;
+    assert!((out[0].x - expected_x).abs() < 1e-3);
+    assert!((out[0].y - expected_y).abs() < 1e-3);
 }

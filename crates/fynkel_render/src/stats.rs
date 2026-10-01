@@ -24,6 +24,10 @@ pub struct FrameStats {
     /// the joint matrices uploaded for them this frame.
     pub skinned: u32,
     pub joints: u32,
+    /// Joint influence spheres evaluated for animated culling this frame.
+    pub bounds_joints: u32,
+    /// Draw candidates kept because no valid finite deformation bound exists.
+    pub bounds_unbounded: u32,
     /// `blend` instances drawn back-to-front (one draw each).
     pub transparent: u32,
     /// Instances drawn into the shadow map (0 when no shadow was drawn).

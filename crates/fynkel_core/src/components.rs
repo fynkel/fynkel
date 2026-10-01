@@ -494,10 +494,10 @@ mod tests {
 /// target leaves the entity where it is.
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "component", id = 13, name = "fynkel.ThirdPersonCamera")]
-pub struct ThirdPersonCamera {
+pub struct ThirdPersonCamera<R = ObjectRef> {
     /// The followed object; None follows nothing.
     #[fynkel(order = 0, gizmo(shape = "lineTo"))]
-    pub target: ObjectRef,
+    pub target: R,
     /// Offset from the target's world position the rig looks at and
     /// orbits, metres.
     #[fynkel(unit = "m", order = 1)]
@@ -532,6 +532,26 @@ pub struct ThirdPersonCamera {
     pub mask: u32,
 }
 
+impl<R> ThirdPersonCamera<R> {
+    /// Converts object references without duplicating component configuration.
+    pub fn map_object_refs<T>(self, mut map: impl FnMut(R) -> T) -> ThirdPersonCamera<T> {
+        ThirdPersonCamera {
+            target: map(self.target),
+            pivot: self.pivot,
+            distance: self.distance,
+            min_distance: self.min_distance,
+            yaw: self.yaw,
+            pitch: self.pitch,
+            min_pitch: self.min_pitch,
+            max_pitch: self.max_pitch,
+            look_action: self.look_action,
+            sensitivity: self.sensitivity,
+            collision_radius: self.collision_radius,
+            mask: self.mask,
+        }
+    }
+}
+
 impl Default for ThirdPersonCamera {
     fn default() -> Self {
         Self {
@@ -551,7 +571,7 @@ impl Default for ThirdPersonCamera {
     }
 }
 
-impl ThirdPersonCamera {
+impl<R> ThirdPersonCamera<R> {
     /// Value rules the schema cannot express (the `INVALID_PAYLOAD` text).
     pub fn validate(&self) -> Result<(), String> {
         if !self.pivot.is_finite() {
@@ -710,10 +730,10 @@ impl Oscillate {
 /// follows with `ThirdPersonCamera` instead.
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "component", id = 16, name = "fynkel.Follow")]
-pub struct Follow {
+pub struct Follow<R = ObjectRef> {
     /// The followed object; None follows nothing.
     #[fynkel(order = 0, gizmo(shape = "lineTo"))]
-    pub target: ObjectRef,
+    pub target: R,
     /// Metres from the target's world position, world axes.
     #[fynkel(unit = "m", order = 1)]
     pub offset: Vec3,
@@ -723,6 +743,18 @@ pub struct Follow {
     /// Also turn the entity's -Z towards the target's position.
     #[fynkel(order = 3)]
     pub look_at: bool,
+}
+
+impl<R> Follow<R> {
+    /// Converts object references without duplicating component configuration.
+    pub fn map_object_refs<T>(self, mut map: impl FnMut(R) -> T) -> Follow<T> {
+        Follow {
+            target: map(self.target),
+            offset: self.offset,
+            smoothing: self.smoothing,
+            look_at: self.look_at,
+        }
+    }
 }
 
 impl Default for Follow {
@@ -736,7 +768,7 @@ impl Default for Follow {
     }
 }
 
-impl Follow {
+impl<R> Follow<R> {
     pub fn validate(&self) -> Result<(), String> {
         if !self.offset.is_finite() {
             return Err("offset must be finite".into());
@@ -982,13 +1014,23 @@ impl Animator {
 /// (`World::register_skin`; loaders do, `SKIN_UNAVAILABLE` once otherwise).
 #[derive(Clone, Debug, Default, PartialEq, Schema)]
 #[schema(kind = "component", id = 22, name = "fynkel.Skin")]
-pub struct Skin {
+pub struct Skin<R = ObjectRef> {
     /// The skin sub-asset.
     #[fynkel(kind = "asset(skin)", order = 0)]
     pub skin: AssetRef,
     /// The skeleton root object; None for the mesh's tree root.
     #[fynkel(order = 1)]
-    pub skeleton: ObjectRef,
+    pub skeleton: R,
+}
+
+impl<R> Skin<R> {
+    /// Converts object references without duplicating component configuration.
+    pub fn map_object_refs<T>(self, mut map: impl FnMut(R) -> T) -> Skin<T> {
+        Skin {
+            skin: self.skin,
+            skeleton: map(self.skeleton),
+        }
+    }
 }
 
 fn finite_axis(what: &str, v: Vec3) -> Result<(), String> {
@@ -1104,6 +1146,28 @@ macro_rules! component_value {
                 }
             }
 
+            /// Reference-field metadata from the same catalogue as storage.
+            pub fn object_ref_fields(id: ComponentId) -> Option<&'static [&'static str]> {
+                match id {
+                    $(ComponentId::$id => Some(&[$(stringify!($field)),*]),)*
+                    _ => None,
+                }
+            }
+
+            pub(crate) fn read_from(ecs: &fynkel_ecs::World, entity: fynkel_contracts::Entity, id: ComponentId) -> Option<Self> {
+                match id {
+                    $(ComponentId::$id => ecs.get::<$ty>(entity).ok().map(|v| Self::$variant((*v).clone())),)*
+                    _ => None,
+                }
+            }
+
+            pub(crate) fn contains_in(ecs: &fynkel_ecs::World, entity: fynkel_contracts::Entity, id: ComponentId) -> bool {
+                match id {
+                    $(ComponentId::$id => ecs.has::<$ty>(entity),)*
+                    _ => false,
+                }
+            }
+
             /// Inserts (or replaces) the component on `entity`, unchecked.
             pub(crate) fn insert_into(
                 self,
@@ -1173,6 +1237,9 @@ impl ComponentValue {
             ComponentValue::Transform(t) => {
                 if !t.is_finite() {
                     return Err("transform is not finite".into());
+                }
+                if !t.is_valid() {
+                    return Err("transform rotation must be a unit quaternion".into());
                 }
             }
             ComponentValue::MeshRenderer(_) => {}

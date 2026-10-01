@@ -58,7 +58,7 @@ fn renderer(device: &wgpu::Device) -> ExtractRenderer {
 
 fn record(slot: u32, world: Mat4) -> ExtractRecord {
     ExtractRecord {
-        entity: Entity::from_bits(slot as u64 + 1),
+        entity: Entity::new(fynkel_contracts::WorldId(1), slot + 1, 1),
         world,
         overridden: false,
         layer_bit: 1,
@@ -1486,6 +1486,37 @@ fn volumes_shape_the_ambient_occlusion_where_the_camera_stands() {
 }
 
 #[test]
+fn sheared_geometry_at_the_camera_edge_survives_culling() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut r = renderer(&device);
+    let mut e = cube_scene(
+        Vec3::new(0.0, 0.0, 5.0),
+        Camera {
+            projection: Projection::Orthographic,
+            ortho_height: 2.0,
+            ..Camera::default()
+        },
+    );
+    // Cube extent on X is sqrt(2), greater than the old sphere's 1.3693.
+    // Its centre is outside by 1.39: a visible sliver used to be dropped.
+    e.records[1].world = Mat4::from_translation(Vec3::new(2.39, 0.0, 0.0))
+        * Mat4::from_scale(Vec3::new(2.0, 1.0, 1.0))
+        * Mat4::from_rotation_z(std::f32::consts::FRAC_PI_4);
+    e.records[0].layer_bit = 0;
+    let culled = render_offscreen(&device, &queue, &mut r, &e);
+    assert_eq!(r.stats().instances, 1);
+    r.frustum_culling = false;
+    let all = render_offscreen(&device, &queue, &mut r, &e);
+    assert!(culled == all, "shear culling changed the image");
+    assert!(
+        culled.iter().any(|p| !is_background(*p)),
+        "visible edge must draw pixels"
+    );
+}
+
+#[test]
 fn culling_drops_what_is_off_screen_without_changing_the_picture() {
     let Some((device, queue)) = device() else {
         return;
@@ -2499,7 +2530,7 @@ fn deep_inside(cover: &[bool], r: i32) -> Vec<usize> {
 }
 
 /// The placeholder cube at the origin in `cube_scene` (record 1).
-const CUBE: Entity = Entity::from_bits(2);
+const CUBE: Entity = Entity::new(fynkel_contracts::WorldId(1), 2, 1);
 
 #[test]
 fn a_selected_cube_is_ringed_just_outside_its_silhouette_and_untouched_inside() {
@@ -2591,7 +2622,7 @@ fn children_are_ringed_in_their_own_colour_and_selected_wins() {
     e.records[1].world = Mat4::from_translation(Vec3::new(-0.5, 0.0, 0.0));
     e.records
         .push(record(2, Mat4::from_translation(Vec3::new(0.5, 0.0, 0.0))));
-    let (a, b) = (CUBE, Entity::from_bits(3));
+    let (a, b) = (CUBE, Entity::new(fynkel_contracts::WorldId(1), 3, 1));
     let style = OutlineStyle::default();
     let (orange, blue) = (srgb8(style.selected), srgb8(style.children));
     let plain = render_offscreen(&device, &queue, &mut r, &e);
@@ -2723,7 +2754,7 @@ fn without_an_outline_nothing_changes() {
     assert_eq!(render_offscreen(&device, &queue, &mut r, &e), baseline);
     // Nothing named, an entity the extract lacks, one on a layer the
     // camera leaves out: no outline, the same pixels.
-    let absent = Entity::from_bits(99);
+    let absent = Entity::new(fynkel_contracts::WorldId(1), 99, 1);
     r.overlay().outline(&[], &[], OutlineStyle::default());
     assert_eq!(render_offscreen(&device, &queue, &mut r, &e), baseline);
     assert_eq!(r.stats().outlined, 0);
@@ -3240,11 +3271,24 @@ fn a_shaders_vertex_moves_with_the_worlds_time_and_shadows_off_does_not_cast() {
     // Lit by the sun, and `shadows off`: no caster.
     assert!(drawn_mean(&still).0 > 10.0);
     assert_eq!(r.stats().shadow_casters, 0);
+    assert_eq!(r.stats().bounds_unbounded, 1);
     extract.time = 1.0;
     let (moved, _) = render_lab(&device, &queue, &assets, &extract);
     dump(&moved, "shader-wave");
     let (a, b) = (centroid(&still), centroid(&moved));
     assert!(b > a + 5.0, "half a unit to the right: {a} → {b}");
+
+    // An undeclared vertex displacement can bring an off-screen bind mesh
+    // back into view. Such a shader must fail open for spatial culling.
+    for mesh in &extract.meshes {
+        extract.records[mesh.record as usize].world *= Mat4::from_translation(Vec3::X * 100.0);
+    }
+    extract.time = -200.0; // default shift=.5: cancels the model translation
+    let (displaced, mut r) = render_lab(&device, &queue, &assets, &extract);
+    assert_eq!(r.stats().bounds_unbounded, 1);
+    assert!(displaced.iter().filter(|p| !is_background(**p)).count() > 500);
+    r.frustum_culling = false;
+    assert!(displaced == render_offscreen(&device, &queue, &mut r, &extract));
 
     // The same shader with shadows on casts.
     std::fs::write(

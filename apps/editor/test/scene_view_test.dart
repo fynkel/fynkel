@@ -1,3 +1,4 @@
+import 'package:fynkel/fynkel.dart' show EntityRef;
 // The Scene view over the fake preview backend (blueprint item 6): the
 // preview per tab, picking (click, cycling, marquee), the gizmo drag as
 // exactly one transaction with the world back to the document, the
@@ -1328,7 +1329,7 @@ final class _SceneLive extends LiveBackend {
     for (final e in scene.entitiesView.entries)
       LiveEntity(
         id: e.key,
-        handle: e.key.hashCode,
+        handle: EntityRef(1, e.key.hashCode.toUnsigned(32), 1),
         name: '${e.value['name']}',
         parent: e.value['parent'] as String?,
         spawned: false,
@@ -1344,7 +1345,7 @@ final class _SceneLive extends LiveBackend {
   @override
   LiveEntityState entity(String id) => LiveEntityState(
     id: id,
-    handle: id.hashCode,
+    handle: EntityRef(1, id.hashCode.toUnsigned(32), 1),
     name: id,
     parent: null,
     world: const {},
@@ -1356,7 +1357,7 @@ final class _SceneLive extends LiveBackend {
   );
 
   @override
-  List<LiveBehaviour> behaviours(int handle) => const [];
+  List<LiveBehaviour> behaviours(EntityRef handle) => const [];
 
   @override
   PreviewBackend openPreview() => world;

@@ -53,7 +53,15 @@ void main() {
             transform: const Pose(position: Vec3(3, 0, 0), rotation: Quat.identity, scale: Vec3.one),
           )
           ..add(const Rotator(axis: Vec3(0, 1, 0), speed: 2, space: MotionSpace.local))
-          ..add(const Oscillate(axis: Vec3(0, 1, 0), amplitude: 0.5, frequency: 1, phase: 0, space: MotionSpace.world))
+          ..add(
+            const Oscillate(
+              axis: Vec3(0, 1, 0),
+              amplitude: 0.5,
+              frequency: 1,
+              phase: 0,
+              space: MotionSpace.world,
+            ),
+          )
           ..add(const LookAtCamera(lockY: true))
           ..add(const LifetimeDespawn(seconds: 0.5));
     tick(w, 2);
@@ -86,7 +94,10 @@ void main() {
     // stays where it is, even with another "Hero" in the world.
     final at = lamp.worldTransform!.position;
     hero.destroy();
-    w.spawn(name: 'Hero', transform: const Pose(position: Vec3(5, 0, 0), rotation: Quat.identity, scale: Vec3.one));
+    w.spawn(
+      name: 'Hero',
+      transform: const Pose(position: Vec3(5, 0, 0), rotation: Quat.identity, scale: Vec3.one),
+    );
     tick(w, 2);
     expect(lamp.get<Follow>()!.target, isNull);
     expect(lamp.worldTransform!.position.x, closeTo(at.x, 1e-6));

@@ -10,8 +10,10 @@ import 'asset_ref.dart';
 
 export '../generated/schema.g.dart' show AudioBus, AudioListener, AudioOp, AudioSource;
 
-/// A source's playback as the last tick left it (`GameObject.audio.state`,
-/// `FYNKEL_QUERY_AUDIO`).
+/// A source's actual voice (`GameObject.audio.state`, `FYNKEL_QUERY_AUDIO`).
+/// While a voice exists, its configuration and playback position are reported;
+/// committed source edits take effect at the next audio tick. Without a voice,
+/// configuration fields describe the source and playback fields are stopped.
 class AudioState {
   const AudioState({
     required this.clip,

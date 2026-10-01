@@ -22,8 +22,10 @@ class Bumper extends Behaviour {
   void onControllerColliderHit(Contact hit) {
     expect(hit.a, gameObject.entity);
     final n = hit.normalFor(hit.b);
-    hits.add('${world.byEntity(hit.b)?.name} body=${world.byEntity(hit.bodyB ?? 0)?.name} '
-        'n=(${n.x.toStringAsFixed(0)},${n.y.toStringAsFixed(0)})');
+    hits.add(
+      '${world.byEntity(hit.b)?.name} body=${world.byEntity(hit.bodyB ?? EntityRef.nil)?.name} '
+      'n=(${n.x.toStringAsFixed(0)},${n.y.toStringAsFixed(0)})',
+    );
   }
 
   @override
@@ -106,7 +108,11 @@ void main() {
   test('the recorded walk lands the Player on the Platform and the rig follows', () {
     final (w, player, camera) = loaded();
     expect(player.get<CharacterController>()!.moveAction, 'move');
-    expect(camera.get<ThirdPersonCamera>()!.target, same(player), reason: 'the reference resolved at load (ADR-0035)');
+    expect(
+      camera.get<ThirdPersonCamera>()!.target,
+      same(player),
+      reason: 'the reference resolved at load (ADR-0035)',
+    );
     final recording = loadInputRecording('$fixture/test/platform.input.json');
     var airborne = 0;
     recording.replay(
@@ -184,20 +190,11 @@ void main() {
     w.throwOnDiagnostics = false;
     final seen = <FynkelDiagnostic>[];
     w.onDiagnostics = seen.addAll;
-    ground.move(Vec3.up); // no controller
-    hero.applyImpulse(Vec3.up); // a character takes no body command
-    hero.move(const Vec3(double.nan, 0, 0)); // not finite
+    expect(() => ground.move(Vec3.up), throwsStateError);
+    expect(() => hero.applyImpulse(Vec3.up), throwsStateError);
+    expect(() => hero.move(const Vec3(double.nan, 0, 0)), throwsStateError);
     w.frame(1 / 60);
-    expect(seen.map((d) => d.code), [
-      DiagnosticCode.missingComponent,
-      DiagnosticCode.missingComponent,
-      DiagnosticCode.invalidPayload,
-    ]);
-    expect(seen.map((d) => d.component), [
-      CharacterController.componentId,
-      RigidBody.componentId,
-      CharacterController.componentId,
-    ]);
+    expect(seen, isEmpty);
     seen.clear();
     // A RigidBody next to the controller is reported once and ignored.
     hero.add(
@@ -212,7 +209,9 @@ void main() {
     );
     w.frame(1 / 60);
     w.frame(1 / 60);
-    expect(seen.map((d) => (d.code, d.component)), [(DiagnosticCode.invalidPayload, CharacterController.componentId)]);
+    expect(seen.map((d) => (d.code, d.component)), [
+      (DiagnosticCode.invalidPayload, CharacterController.componentId),
+    ]);
     expect(hero.characterState(), isNotNull);
     // Removing the controller ends the character; the body takes over.
     hero.remove<CharacterController>();
@@ -234,7 +233,10 @@ void main() {
     // Turn the rig a quarter turn to the left over a second, then walk
     // "forward": the player goes where the camera looks.
     for (var i = 0; i < 60; i++) {
-      w.frame(1 / 60, input: const [InputEvent.axis(InputDevice.gamepad, 'rightStick', -math.pi / 2 / 2.5, 0)]);
+      w.frame(
+        1 / 60,
+        input: const [InputEvent.axis(InputDevice.gamepad, 'rightStick', -math.pi / 2 / 2.5, 0)],
+      );
     }
     final yaw = camera.get<ThirdPersonCamera>()!.yaw;
     expect(yaw, closeTo(math.pi / 2, 1e-3));
@@ -277,51 +279,62 @@ void main() {
     expect(pc.jumpsLeft, 2, reason: 'refilled on the ground');
   });
 
-  test("a character's move reports what it touches, walls and kinematic blocks too, as Unity (foundation 2.4)", () {
-    final w = fresh();
-    floor(w);
-    const slab = Collider(
-      shape: ColliderShape.box,
-      size: Vec3(0.25, 1, 3),
-      offset: Vec3.zero,
-      friction: 0.5,
-      restitution: 0,
-      isSensor: false,
-      mask: 0xffffffff,
-    );
-    final wall = w.spawn(name: 'wall', transform: identityTransform.copyWith(position: const Vec3(2, 1, 0)))..add(slab);
-    final struck = wall.addBehaviour(Struck());
-    w.spawn(name: 'block', transform: identityTransform.copyWith(position: const Vec3(-2, 1, 0)))
-      ..add(const RigidBody(
-        bodyType: BodyType.kinematic,
-        mass: 1,
-        linearDamping: 0,
-        angularDamping: 0,
-        gravityScale: 1,
-        ccd: false,
-      ))
-      ..add(slab);
-    final hero = w.spawn(name: 'hero')..add(bare);
-    final bumper = hero.addBehaviour(Bumper());
-    for (var i = 0; i < 10; i++) {
-      w.frame(1 / 60);
-    }
-    expect(bumper.hits.toSet(), {'floor body=null n=(0,1)'});
-    expect(hero.characterState()!.collisionFlags, CollisionFlags.below);
-    bumper.hits.clear();
-    for (var i = 0; i < 40; i++) {
-      hero.move(const Vec3(4, 0, 0));
-      w.frame(1 / 60);
-    }
-    expect(bumper.hits, contains('wall body=null n=(-1,0)'));
-    expect(hero.characterState()!.collisionFlags, CollisionFlags.below | CollisionFlags.sides);
-    expect(struck.hits, 0, reason: "the character's object alone");
-    bumper.hits.clear();
-    for (var i = 0; i < 80; i++) {
-      hero.move(const Vec3(-4, 0, 0));
-      w.frame(1 / 60);
-    }
-    expect(bumper.hits, contains('block body=block n=(1,0)'));
-    expect(bumper.hits, isNot(contains('collision')), reason: 'no contact events for a character');
-  });
+  test(
+    "a character's move reports what it touches, walls and kinematic blocks too, as Unity (foundation 2.4)",
+    () {
+      final w = fresh();
+      floor(w);
+      const slab = Collider(
+        shape: ColliderShape.box,
+        size: Vec3(0.25, 1, 3),
+        offset: Vec3.zero,
+        friction: 0.5,
+        restitution: 0,
+        isSensor: false,
+        mask: 0xffffffff,
+      );
+      final wall = w.spawn(
+        name: 'wall',
+        transform: identityTransform.copyWith(position: const Vec3(2, 1, 0)),
+      )..add(slab);
+      final struck = wall.addBehaviour(Struck());
+      w.spawn(
+          name: 'block',
+          transform: identityTransform.copyWith(position: const Vec3(-2, 1, 0)),
+        )
+        ..add(
+          const RigidBody(
+            bodyType: BodyType.kinematic,
+            mass: 1,
+            linearDamping: 0,
+            angularDamping: 0,
+            gravityScale: 1,
+            ccd: false,
+          ),
+        )
+        ..add(slab);
+      final hero = w.spawn(name: 'hero')..add(bare);
+      final bumper = hero.addBehaviour(Bumper());
+      for (var i = 0; i < 10; i++) {
+        w.frame(1 / 60);
+      }
+      expect(bumper.hits.toSet(), {'floor body=null n=(0,1)'});
+      expect(hero.characterState()!.collisionFlags, CollisionFlags.below);
+      bumper.hits.clear();
+      for (var i = 0; i < 40; i++) {
+        hero.move(const Vec3(4, 0, 0));
+        w.frame(1 / 60);
+      }
+      expect(bumper.hits, contains('wall body=null n=(-1,0)'));
+      expect(hero.characterState()!.collisionFlags, CollisionFlags.below | CollisionFlags.sides);
+      expect(struck.hits, 0, reason: "the character's object alone");
+      bumper.hits.clear();
+      for (var i = 0; i < 80; i++) {
+        hero.move(const Vec3(-4, 0, 0));
+        w.frame(1 / 60);
+      }
+      expect(bumper.hits, contains('block body=block n=(1,0)'));
+      expect(bumper.hits, isNot(contains('collision')), reason: 'no contact events for a character');
+    },
+  );
 }

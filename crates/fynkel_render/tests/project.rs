@@ -540,3 +540,78 @@ fn the_renderer_warms_what_a_background_load_made_resident() {
     assert_eq!(renderer.asset_errors(), &[] as &[String]);
     assert_eq!(renderer.stats().gpu_bytes, bytes, "already on the GPU");
 }
+
+/// The bind mesh can be far outside both clip volumes while its posed vertices
+/// remain visible. Culling and shadow fitting must use the actual palette.
+#[test]
+fn animated_bounds_keep_displaced_skins_and_extra_worlds_visible() {
+    use glam::{Mat4, Vec3};
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let project = TempProject::new("rig-bounds");
+    let assets = Assets::open(&project.cook()).unwrap();
+    let cooked = assets
+        .scene("c0000000-0000-4000-8000-000000000034".parse().unwrap())
+        .unwrap();
+    let mut world = World::new(WorldConfig::default());
+    world.load_scene(&cooked.description).unwrap();
+    assets.register_animation(&cooked.description, &mut world);
+    let _residency = assets.retain(&cooked.closure);
+    world.step();
+    let mut extract = world.extract();
+    for light in &mut extract.directional_lights {
+        light.light.cast_shadows = true;
+    }
+    // A model/palette pair that leaves vertices at their original positions,
+    // although its bind-space bound is 100 metres off-screen.
+    for mesh in &extract.meshes {
+        if let Some(skin) = mesh.skin {
+            extract.records[mesh.record as usize].world *= Mat4::from_translation(Vec3::X * 100.0);
+            for joint in &mut extract.joints
+                [skin.first_joint as usize..(skin.first_joint + skin.joint_count) as usize]
+            {
+                *joint = Mat4::from_translation(Vec3::X * -100.0) * *joint;
+            }
+        }
+    }
+    let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 320, 240);
+    renderer.placeholders = false;
+    renderer.set_assets(Some(assets));
+    let culled = render_offscreen(&device, &queue, &mut renderer, &extract);
+    let stats = renderer.stats();
+    assert_eq!(stats.skinned, 2);
+    assert!(stats.shadow_casters >= 2, "{stats:?}");
+    assert_eq!(
+        stats.bounds_unbounded, 0,
+        "valid palettes must produce finite bounds"
+    );
+    assert!(stats.bounds_joints > 0);
+    assert!(culled.iter().filter(|p| !is_background(**p)).count() > 500);
+    renderer.frustum_culling = false;
+    let all = render_offscreen(&device, &queue, &mut renderer, &extract);
+    assert!(
+        culled == all,
+        "camera or shadow culling changed the posed image"
+    );
+    // Extra-world placement and its independent palette range participate too.
+    let mut main = extract.clone();
+    main.meshes.clear();
+    main.joints.clear();
+    let extra = ExtraWorld {
+        extract: extract.clone(),
+        transform: Mat4::from_translation(Vec3::new(0.1, 0.0, 0.0)),
+        gray: false,
+    };
+    renderer.push_extra_world(extra.clone());
+    renderer.frustum_culling = true;
+    let extra_culled = render_offscreen(&device, &queue, &mut renderer, &main);
+    assert_eq!(renderer.stats().skinned, 2);
+    assert_eq!(renderer.stats().bounds_unbounded, 0);
+    renderer.frustum_culling = false;
+    renderer.push_extra_world(extra);
+    assert!(
+        extra_culled == render_offscreen(&device, &queue, &mut renderer, &main),
+        "extra-world culling changed the image"
+    );
+}

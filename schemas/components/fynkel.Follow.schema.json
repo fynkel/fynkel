@@ -69,7 +69,7 @@
     "kind": "component",
     "id": 16,
     "rust": "fynkel_core::components::Follow",
-    "wireSize": 32,
+    "wireSize": 40,
     "authored": true
   }
 }

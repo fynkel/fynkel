@@ -46,7 +46,14 @@ void main() {
 
     final floor = w.createPrimitive(Primitive.plane);
     final coin = w.instantiate(w.assets.find('prefabs/coin')!, name: 'Coin');
-    final crate = w.build(const ObjectSpec('Crate', layer: 'props', transform: Pose(position: Vec3(3, 2, 0)), components: [RigidBody(), Collider()]));
+    final crate = w.build(
+      const ObjectSpec(
+        'Crate',
+        layer: 'props',
+        transform: Pose(position: Vec3(3, 2, 0)),
+        components: [RigidBody(), Collider()],
+      ),
+    );
     final diagnostics = <FynkelDiagnostic>[];
     w.onDiagnostics = diagnostics.addAll;
     w.audio.play(w.assets.find('audio/tone.wav')!);

@@ -1,3 +1,4 @@
+import 'package:fynkel/fynkel.dart' show EntityRef;
 // The Scene view on the running game (ADR-0021 P7 L5): the game's world
 // as a `PreviewBackend`, so the Scene view draws it, picks in it and
 // outlines its selection with the code it uses for a scene's edit
@@ -68,7 +69,7 @@ final class LivePreview implements PreviewBackend {
     double? iconsAspect,
   }) => live.lines(outline: outline, outlineColor: outlineColor, outlineBoxes: outlineBoxes, iconsAspect: iconsAspect);
   @override
-  List<int> entities(Iterable<String> ids) => live.handles(ids);
+  List<EntityRef> entities(Iterable<String> ids) => live.handles(ids);
   @override
   Map<String, List<double>> worldMatrices(Iterable<String> ids) => live.worldMatrices(ids);
 

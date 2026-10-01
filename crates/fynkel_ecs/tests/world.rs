@@ -14,7 +14,7 @@ struct Vel(f32, f32);
 
 #[test]
 fn spawn_get_update_despawn() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let e = w.spawn(EntityBuilder::new().with(Pos(1.0, 2.0)));
     assert!(w.contains(e));
     assert_eq!(*w.get::<Pos>(e).unwrap(), Pos(1.0, 2.0));
@@ -32,7 +32,7 @@ fn spawn_get_update_despawn() {
 
 #[test]
 fn stale_handles_fail_and_slot_reuse_does_not_alias() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let a = w.spawn(EntityBuilder::new().with(Pos(0.0, 0.0)));
     w.despawn(a).unwrap();
     let b = w.spawn(EntityBuilder::new().with(Pos(9.0, 9.0)));
@@ -44,13 +44,13 @@ fn stale_handles_fail_and_slot_reuse_does_not_alias() {
     assert_eq!(*w.get::<Pos>(b).unwrap(), Pos(9.0, 9.0));
     assert!(!w.contains(Entity::NULL));
     // Wrong world.
-    let other = Entity::new(WorldId(2), b.slot(), b.generation());
+    let other = Entity::new(WorldId(w.id().0 + 1), b.slot(), b.generation());
     assert!(!w.contains(other));
 }
 
 #[test]
 fn deferred_despawn_during_iteration() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let es: Vec<Entity> = (0..10)
         .map(|i| w.spawn(EntityBuilder::new().with(Pos(i as f32, 0.0))))
         .collect();
@@ -69,7 +69,7 @@ fn deferred_despawn_during_iteration() {
 
 #[test]
 fn churn_and_mapping_integrity() {
-    let mut w = World::new(WorldId(7));
+    let mut w = World::new();
     let mut live = Vec::new();
     for round in 0..50u32 {
         for i in 0..100 {
@@ -83,7 +83,7 @@ fn churn_and_mapping_integrity() {
     for e in w.entities() {
         let raw = w.raw(e).unwrap();
         assert_eq!(w.handle_of(raw), Some(e));
-        assert_eq!(e.world(), WorldId(7));
+        assert_eq!(e.world(), w.id());
     }
     assert_eq!(w.len(), 50 * 50);
 }
@@ -98,7 +98,7 @@ fn teardown_drops_every_component() {
     }
     let drops = Arc::new(AtomicUsize::new(0));
     {
-        let mut w = World::new(WorldId(1));
+        let mut w = World::new();
         for _ in 0..1000 {
             w.spawn(EntityBuilder::new().with(Counted(drops.clone())));
         }
@@ -116,7 +116,7 @@ fn teardown_drops_every_component() {
 
 #[test]
 fn large_spawn_despawn_batches() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let es: Vec<Entity> = (0..100_000).map(|_| w.spawn_empty()).collect();
     assert_eq!(w.len(), 100_000);
     for e in &es {

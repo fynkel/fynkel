@@ -40,14 +40,14 @@ void main() {
     final parent = w.spawn(name: 'parent');
     final child = w.spawn(name: 'child', parent: parent);
     expect(parent.activeSelf, isTrue);
-    expect(parent.activeInHierarchy, isFalse, reason: 'pending');
+    expect(parent.activeInHierarchy, isTrue, reason: 'ordinary spawn is committed');
     w.step();
     w.drainEvents();
     expect(parent.activeInHierarchy && child.activeInHierarchy, isTrue);
 
     parent.setActive(false);
     expect(parent.activeSelf, isFalse, reason: 'read-your-writes');
-    expect(parent.activeInHierarchy, isTrue, reason: 'not applied yet');
+    expect(parent.activeInHierarchy, isFalse, reason: 'activity commits immediately');
     w.step();
     expect(parent.activeSelf, isFalse, reason: 'now from the world');
     expect(parent.activeInHierarchy, isFalse);
@@ -69,20 +69,34 @@ void main() {
     child.addBehaviour(Recorder(log, 'child'));
     parent.addBehaviour(Recorder(log, 'parent'));
     w.frame(1 / 60);
-    expect(log, ['parent.onCreate', 'parent.onEnable', 'child.onCreate', 'child.onEnable', 'child.start', 'parent.start']);
+    expect(log, [
+      'parent.onCreate',
+      'parent.onEnable',
+      'child.onCreate',
+      'child.onEnable',
+      'child.start',
+      'parent.start',
+      'child.fixedUpdate',
+      'parent.fixedUpdate',
+    ]);
 
     log.clear();
     parent.setActive(false);
     w.frame(1 / 60);
-    // The fixed tick that applies it still runs both, then they stop.
-    expect(log, ['child.fixedUpdate', 'parent.fixedUpdate', 'child.onDisable', 'parent.onDisable']);
+    // Queue adoption applies activity before lifecycle and phase dispatch.
+    expect(log, ['child.onDisable', 'parent.onDisable']);
     log.clear();
     w.frame(1 / 60);
     expect(log, isEmpty, reason: 'nothing runs while inactive');
 
     parent.setActive(true);
     w.frame(1 / 60);
-    expect(log, ['parent.onEnable', 'child.onEnable'], reason: 'no second onCreate or start');
+    expect(log, [
+      'parent.onEnable',
+      'child.onEnable',
+      'child.fixedUpdate',
+      'parent.fixedUpdate',
+    ], reason: 'no second onCreate or start');
   });
 
   test('onCreate waits until the object is first active; never created, never destroyed', () {
@@ -103,7 +117,7 @@ void main() {
     never.destroy();
     w.frame(1 / 60);
     w.frame(1 / 60);
-    expect(log, ['late.onCreate', 'late.onEnable', 'late.start', 'late.fixedUpdate']);
+    expect(log, ['late.onCreate', 'late.onEnable', 'late.start', 'late.fixedUpdate', 'late.fixedUpdate']);
     expect(b.isCreated && b.isActive, isTrue);
   });
 

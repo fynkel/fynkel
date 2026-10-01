@@ -1,6 +1,7 @@
 // Error reporting across the ABI (ADR-0014): status codes + structured
 // diagnostic records. Debug builds throw FynkelError; release builds log.
 
+import 'entity_ref.dart';
 import '../generated/schema.g.dart' as gen;
 import 'animation.dart';
 import 'audio.dart';
@@ -60,20 +61,20 @@ class FynkelDiagnostic {
   });
 
   factory FynkelDiagnostic.fromRecord(gen.DiagnosticRecord r) => FynkelDiagnostic(
-        commandIndex: r.commandIndex,
-        code: DiagnosticCode.fromValue(r.code),
-        rawCode: r.code,
-        entity: r.entity,
-        component: r.component,
-        lane: r.lane,
-        message: r.message,
-      );
+    commandIndex: r.commandIndex,
+    code: DiagnosticCode.fromValue(r.code),
+    rawCode: r.code,
+    entity: r.entity,
+    component: r.component,
+    lane: r.lane,
+    message: r.message,
+  );
 
   /// Index in the submitted batch; `0xffffffff` when not tied to a command.
   final int commandIndex;
   final DiagnosticCode code;
   final int rawCode;
-  final int entity;
+  final EntityRef entity;
   final int component;
   final int lane;
   final String message;
@@ -88,7 +89,7 @@ class FynkelDiagnostic {
 
   @override
   String toString() =>
-      'FynkelDiagnostic(#${isCommandRejection ? commandIndex : '-'} ${code.name} entity=0x${entity.toRadixString(16)} lane=$lane "$message")';
+      'FynkelDiagnostic(#${isCommandRejection ? commandIndex : '-'} ${code.name} entity=0x${entity.toString()} lane=$lane "$message")';
 }
 
 /// Thrown in debug mode after a step/submit that produced diagnostics.
@@ -144,15 +145,15 @@ class LoadDiagnostic {
   });
 
   factory LoadDiagnostic.fromJson(Map<String, Object?> j) => LoadDiagnostic(
-        code: j['code'] as String? ?? '',
-        severity: j['severity'] as String? ?? 'error',
-        message: j['message'] as String? ?? '',
-        document: j['document'] as String?,
-        pointer: j['pointer'] as String?,
-        line: (j['line'] as num?)?.toInt(),
-        column: (j['column'] as num?)?.toInt(),
-        suggestion: j['suggestion'] as String?,
-      );
+    code: j['code'] as String? ?? '',
+    severity: j['severity'] as String? ?? 'error',
+    message: j['message'] as String? ?? '',
+    document: j['document'] as String?,
+    pointer: j['pointer'] as String?,
+    line: (j['line'] as num?)?.toInt(),
+    column: (j['column'] as num?)?.toInt(),
+    suggestion: j['suggestion'] as String?,
+  );
 
   final String code;
   final String severity;
@@ -190,19 +191,19 @@ class ProjectPersistentObject {
   });
 
   factory ProjectPersistentObject.fromJson(Map<String, Object?> j) => ProjectPersistentObject(
-        name: j['name'] as String? ?? '',
-        prefab: j['prefab'] as String? ?? '',
-        entity: (j['entity'] as num?)?.toInt(),
-        path: j['path'] as String?,
-        behaviours: [
-          for (final b in (j['behaviours'] as List?) ?? const [])
-            AuthoredBehaviour.fromJson((b as Map).cast<String, Object?>()),
-        ],
-      );
+    name: j['name'] as String? ?? '',
+    prefab: j['prefab'] as String? ?? '',
+    entity: j['entity'] == null ? null : EntityRef.fromJson(j['entity']),
+    path: j['path'] as String?,
+    behaviours: [
+      for (final b in (j['behaviours'] as List?) ?? const [])
+        AuthoredBehaviour.fromJson((b as Map).cast<String, Object?>()),
+    ],
+  );
 
   final String name;
   final String prefab;
-  final int? entity;
+  final EntityRef? entity;
 
   /// The prefab's authoring path, for messages.
   final String? path;
@@ -227,21 +228,22 @@ class AuthoredBehaviour {
   });
 
   factory AuthoredBehaviour.fromJson(Map<String, Object?> j) => AuthoredBehaviour(
-        entity: (j['entity'] as num).toInt(),
-        authoringId: j['authoringId'] as String? ?? '',
-        component: j['component'] as String? ?? '',
-        type: j['type'] as String? ?? '',
-        version: (j['version'] as num?)?.toInt() ?? 1,
-        known: j['known'] == true,
-        data: (j['data'] as Map?)?.cast<String, Object?>() ?? const {},
-        references: {
-          for (final e in ((j['references'] as Map?) ?? const {}).entries) e.key as String: (e.value as num).toInt(),
-        },
-        pointer: j['pointer'] as String?,
-      );
+    entity: EntityRef.fromJson(j['entity']),
+    authoringId: j['authoringId'] as String? ?? '',
+    component: j['component'] as String? ?? '',
+    type: j['type'] as String? ?? '',
+    version: (j['version'] as num?)?.toInt() ?? 1,
+    known: j['known'] == true,
+    data: (j['data'] as Map?)?.cast<String, Object?>() ?? const {},
+    references: {
+      for (final e in ((j['references'] as Map?) ?? const {}).entries)
+        e.key as String: EntityRef.fromJson(e.value),
+    },
+    pointer: j['pointer'] as String?,
+  );
 
   /// The spawned entity's handle (what [World.attach] takes).
-  final int entity;
+  final EntityRef entity;
 
   /// The entity's and the component's authoring ids.
   final String authoringId;
@@ -260,8 +262,24 @@ class AuthoredBehaviour {
 
   /// The spawned handles of the objects [data]'s GameObject and script
   /// fields reference (`{"entity": id}`), by authoring id, in this load.
-  final Map<String, int> references;
+  final Map<String, EntityRef> references;
   final String? pointer;
+}
+
+/// A binding the compiler skipped while retaining the other valid bindings.
+/// These are nonfatal input configuration errors, separate from load diagnostics.
+final class InputBindingError {
+  const InputBindingError({required this.action, required this.binding, required this.message});
+
+  factory InputBindingError.fromJson(Map<String, Object?> json) => InputBindingError(
+    action: json['action'] as String,
+    binding: json['binding'] as String,
+    message: json['message'] as String,
+  );
+
+  final String action;
+  final String binding;
+  final String message;
 }
 
 /// One `inputActions` entry of the loaded project as the world bound it
@@ -271,11 +289,11 @@ class BoundAction {
   const BoundAction({required this.name, required this.type, required this.bindings, this.rebound = false});
 
   factory BoundAction.fromJson(Map<String, Object?> j) => BoundAction(
-        name: j['name'] as String? ?? '',
-        type: j['type'] as String? ?? 'button',
-        bindings: [for (final b in (j['bindings'] as List?) ?? const []) b as String],
-        rebound: j['rebound'] == true,
-      );
+    name: j['name'] as String? ?? '',
+    type: j['type'] as String? ?? 'button',
+    bindings: [for (final b in (j['bindings'] as List?) ?? const []) b as String],
+    rebound: j['rebound'] == true,
+  );
 
   final String name;
 
@@ -288,9 +306,8 @@ class BoundAction {
   final bool rebound;
 
   /// The `touch:overlay/<control>` control names this action binds.
-  Iterable<String> get overlayControls => bindings
-      .where((b) => b.startsWith('touch:overlay/'))
-      .map((b) => b.substring('touch:overlay/'.length));
+  Iterable<String> get overlayControls =>
+      bindings.where((b) => b.startsWith('touch:overlay/')).map((b) => b.substring('touch:overlay/'.length));
 }
 
 /// One scene the world holds (`LoadReport.scenes`, M3-12): its asset id,
@@ -299,10 +316,10 @@ class LoadedScene {
   const LoadedScene({required this.id, required this.name, required this.entityCount});
 
   factory LoadedScene.fromJson(Map<String, Object?> j) => LoadedScene(
-        id: j['id'] as String? ?? '',
-        name: j['name'] as String? ?? '',
-        entityCount: (j['entities'] as num?)?.toInt() ?? 0,
-      );
+    id: j['id'] as String? ?? '',
+    name: j['name'] as String? ?? '',
+    entityCount: (j['entities'] as num?)?.toInt() ?? 0,
+  );
 
   final String id;
   final String name;
@@ -331,13 +348,15 @@ class UnloadReport {
     return UnloadReport(
       ok: j['ok'] == true,
       diagnostics: [
-        for (final d in (j['diagnostics'] as List?) ?? const []) LoadDiagnostic.fromJson(d as Map<String, Object?>),
+        for (final d in (j['diagnostics'] as List?) ?? const [])
+          LoadDiagnostic.fromJson(d as Map<String, Object?>),
       ],
       sceneId: gone?['id'] as String?,
       sceneName: gone?['name'] as String?,
       entityCount: (gone?['entities'] as num?)?.toInt() ?? 0,
       scenes: [
-        for (final s in (j['scenes'] as List?) ?? const []) LoadedScene.fromJson((s as Map).cast<String, Object?>()),
+        for (final s in (j['scenes'] as List?) ?? const [])
+          LoadedScene.fromJson((s as Map).cast<String, Object?>()),
       ],
       residency: residency == null ? const ResidencyStats() : ResidencyStats.fromJson(residency),
     );
@@ -367,7 +386,7 @@ class InstantiateReport {
     this.prefabId,
     this.prefabPath,
     this.name = '',
-    this.root = 0,
+    this.root = EntityRef.nil,
     this.entityCount = 0,
     this.rejectedComponents = 0,
     this.assetCount = 0,
@@ -382,12 +401,13 @@ class InstantiateReport {
     return InstantiateReport(
       ok: j['ok'] == true,
       diagnostics: [
-        for (final d in (j['diagnostics'] as List?) ?? const []) LoadDiagnostic.fromJson(d as Map<String, Object?>),
+        for (final d in (j['diagnostics'] as List?) ?? const [])
+          LoadDiagnostic.fromJson(d as Map<String, Object?>),
       ],
       prefabId: inst?['prefab'] as String?,
       prefabPath: inst?['path'] as String?,
       name: inst?['name'] as String? ?? '',
-      root: (inst?['root'] as num?)?.toInt() ?? 0,
+      root: inst?['root'] == null ? EntityRef.nil : EntityRef.fromJson(inst!['root']),
       entityCount: (inst?['entities'] as num?)?.toInt() ?? 0,
       rejectedComponents: (inst?['rejectedComponents'] as num?)?.toInt() ?? 0,
       assetCount: (inst?['assets'] as num?)?.toInt() ?? 0,
@@ -408,7 +428,7 @@ class InstantiateReport {
   final String name;
 
   /// The prefab root's entity handle.
-  final int root;
+  final EntityRef root;
 
   /// The prefab's entities spawned, its root included.
   final int entityCount;
@@ -420,7 +440,8 @@ class InstantiateReport {
 
   Iterable<LoadDiagnostic> get warnings => diagnostics.where((d) => d.severity == 'warning');
 
-  InstantiateReport withBehaviours({required int attached, required List<LoadDiagnostic> extra}) => InstantiateReport(
+  InstantiateReport withBehaviours({required int attached, required List<LoadDiagnostic> extra}) =>
+      InstantiateReport(
         ok: ok,
         diagnostics: [...diagnostics, ...extra],
         prefabId: prefabId,
@@ -457,6 +478,7 @@ class LoadReport {
     this.startupScene,
     this.residency = const ResidencyStats(),
     this.inputActions = const [],
+    this.bindingErrors = const [],
     this.physics = const PhysicsSettings(),
     this.layersAndTags = const LayersAndTags(),
     this.animation = const AnimationAssets(),
@@ -480,7 +502,8 @@ class LoadReport {
     return LoadReport(
       ok: j['ok'] == true,
       diagnostics: [
-        for (final d in (j['diagnostics'] as List?) ?? const []) LoadDiagnostic.fromJson(d as Map<String, Object?>),
+        for (final d in (j['diagnostics'] as List?) ?? const [])
+          LoadDiagnostic.fromJson(d as Map<String, Object?>),
       ],
       sceneId: scene?['id'] as String?,
       sceneName: scene?['name'] as String?,
@@ -499,15 +522,21 @@ class LoadReport {
       startupScene: cache?['startupScene'] as String?,
       residency: residency == null ? const ResidencyStats() : ResidencyStats.fromJson(residency),
       inputActions: [
-        for (final a in (input?['actions'] as List?) ?? const []) BoundAction.fromJson((a as Map).cast<String, Object?>()),
+        for (final a in (input?['actions'] as List?) ?? const [])
+          BoundAction.fromJson((a as Map).cast<String, Object?>()),
       ],
+      bindingErrors: List.unmodifiable([
+        for (final error in (input?['bindingErrors'] as List?) ?? const [])
+          InputBindingError.fromJson((error as Map).cast<String, Object?>()),
+      ]),
       physics: physics == null ? const PhysicsSettings() : PhysicsSettings.fromJson(physics),
       layersAndTags: LayersAndTags.fromJson(j),
       animation: animation == null ? const AnimationAssets() : AnimationAssets.fromJson(animation),
       audio: audio == null ? const AudioAssets() : AudioAssets.fromJson(audio),
       mode: j['mode'] as String?,
       scenes: [
-        for (final s in (j['scenes'] as List?) ?? const []) LoadedScene.fromJson((s as Map).cast<String, Object?>()),
+        for (final s in (j['scenes'] as List?) ?? const [])
+          LoadedScene.fromJson((s as Map).cast<String, Object?>()),
       ],
       loadMs: ((j['timing'] as Map?)?['ms'] as num?)?.toDouble() ?? 0,
       modules: j['modules'] is Map ? Modules.fromJson((j['modules'] as Map).cast<String, Object?>()) : null,
@@ -586,6 +615,9 @@ class LoadReport {
   /// empty for a `loadScene` of a cache without a project).
   final List<BoundAction> inputActions;
 
+  /// Invalid bindings skipped by input compilation; valid bindings still apply.
+  final List<InputBindingError> bindingErrors;
+
   /// The project's physics settings as applied (gravity, mesh colliders
   /// registered); defaults for a `loadScene`.
   final PhysicsSettings physics;
@@ -610,7 +642,8 @@ class LoadReport {
   Iterable<LoadDiagnostic> get errors => diagnostics.where((d) => d.isError);
   Iterable<LoadDiagnostic> get warnings => diagnostics.where((d) => !d.isError);
 
-  LoadReport _copy({int? behavioursAttached, List<LoadDiagnostic>? diagnostics, String? projectDir}) => LoadReport(
+  LoadReport _copy({int? behavioursAttached, List<LoadDiagnostic>? diagnostics, String? projectDir}) =>
+      LoadReport(
         ok: ok,
         diagnostics: diagnostics ?? this.diagnostics,
         sceneId: sceneId,
@@ -629,6 +662,7 @@ class LoadReport {
         startupScene: startupScene,
         residency: residency,
         inputActions: inputActions,
+        bindingErrors: bindingErrors,
         physics: physics,
         layersAndTags: layersAndTags,
         animation: animation,
@@ -644,9 +678,9 @@ class LoadReport {
   /// This report after the SDK attached [attached] behaviours and found
   /// [extra] problems doing so.
   LoadReport withBehaviours({required int attached, required List<LoadDiagnostic> extra}) => _copy(
-        behavioursAttached: attached,
-        diagnostics: extra.isEmpty ? diagnostics : [...diagnostics, ...extra],
-      );
+    behavioursAttached: attached,
+    diagnostics: extra.isEmpty ? diagnostics : [...diagnostics, ...extra],
+  );
 
   /// This report with the project directory it was loaded for.
   LoadReport withProjectDir(String dir) => _copy(projectDir: dir);
@@ -654,15 +688,21 @@ class LoadReport {
 
 /// What the world's asset store holds (`LoadReport.residency`).
 class ResidencyStats {
-  const ResidencyStats({this.retained = 0, this.meshes = 0, this.textures = 0, this.materials = 0, this.bytes = 0});
+  const ResidencyStats({
+    this.retained = 0,
+    this.meshes = 0,
+    this.textures = 0,
+    this.materials = 0,
+    this.bytes = 0,
+  });
 
   factory ResidencyStats.fromJson(Map<String, Object?> j) => ResidencyStats(
-        retained: (j['retained'] as num?)?.toInt() ?? 0,
-        meshes: (j['meshes'] as num?)?.toInt() ?? 0,
-        textures: (j['textures'] as num?)?.toInt() ?? 0,
-        materials: (j['materials'] as num?)?.toInt() ?? 0,
-        bytes: (j['bytes'] as num?)?.toInt() ?? 0,
-      );
+    retained: (j['retained'] as num?)?.toInt() ?? 0,
+    meshes: (j['meshes'] as num?)?.toInt() ?? 0,
+    textures: (j['textures'] as num?)?.toInt() ?? 0,
+    materials: (j['materials'] as num?)?.toInt() ?? 0,
+    bytes: (j['bytes'] as num?)?.toInt() ?? 0,
+  );
 
   /// Assets some loaded scene retains.
   final int retained;
@@ -677,7 +717,8 @@ class ResidencyStats {
   final int bytes;
 
   @override
-  String toString() => 'residency(retained $retained, $meshes meshes, $textures textures, $materials materials, $bytes bytes)';
+  String toString() =>
+      'residency(retained $retained, $meshes meshes, $textures textures, $materials materials, $bytes bytes)';
 }
 
 /// A scene or project failed to load; [report] says why.

@@ -44,11 +44,11 @@ pub enum FieldType {
     Quat,
     /// Four `f32`, `[x, y, z, w]` — a colour with alpha or any 4-vector.
     Vec4,
-    /// `Entity` handle, `u64`.
+    /// `Entity` reference: world u64, slot u32, generation u32.
     Entity,
-    /// `Option<Entity>`, `u64` with `0` = none.
+    /// `Option<Entity>`, 16 zero bytes = none.
     OptionalEntity,
-    /// [`crate::ObjectRef`] (ADR-0035): `u64` handle on the wire, `0` =
+    /// [`crate::ObjectRef`] (ADR-0035): 128-bit reference on the wire, zero =
     /// none; JSON: `{ "entity": uuid }` or `null`.
     ObjectRef,
     /// `(offset: u32, len: u32)` into the buffer tail, UTF-8.
@@ -100,10 +100,8 @@ impl FieldType {
     pub const fn wire_size(&self) -> usize {
         match self {
             FieldType::F32 | FieldType::U32 | FieldType::I32 => 4,
-            FieldType::U64
-            | FieldType::Entity
-            | FieldType::OptionalEntity
-            | FieldType::ObjectRef => 8,
+            FieldType::U64 => 8,
+            FieldType::Entity | FieldType::OptionalEntity | FieldType::ObjectRef => 16,
             FieldType::Bool => 1,
             FieldType::Vec3 => 12,
             FieldType::Quat | FieldType::Vec4 => 16,
@@ -267,7 +265,7 @@ impl SchemaField for crate::ObjectRef {
 /// FNV-1a 64 over the canonical text of every schema, in registry order,
 /// prefixed by the wire-layout rule version.
 pub fn fingerprint(schemas: &[&RecordSchema]) -> u64 {
-    const LAYOUT_RULE: &str = "fynkel-wire-1";
+    const LAYOUT_RULE: &str = "fynkel-wire-3-entity128";
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let mut feed = |bytes: &[u8]| {
         for b in bytes {
@@ -351,8 +349,8 @@ mod tests {
     fn layout_follows_natural_alignment() {
         assert_eq!(INNER.offsets(), vec![0, 4]);
         assert_eq!(INNER.wire_size(), 16);
-        assert_eq!(OUTER.offsets(), vec![0, 8, 16, 32]);
-        assert_eq!(OUTER.wire_size(), 40);
+        assert_eq!(OUTER.offsets(), vec![0, 8, 24, 40]);
+        assert_eq!(OUTER.wire_size(), 48);
         assert!(OUTER.has_strings());
         assert_eq!(
             OUTER.canonical(),

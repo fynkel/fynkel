@@ -1,8 +1,10 @@
-// Buffer framing for ABI v1 (crates/fynkel_native/include/fynkel.h):
+// Buffer framing for ABI v3 (crates/fynkel_native/include/fynkel.h):
 // 24-byte header, record area, string tail. Record bodies use the
 // generated codecs (lib/generated/schema.g.dart).
 
 import 'dart:typed_data';
+
+import '../entity_ref.dart';
 
 import '../../generated/schema.g.dart';
 import '../../math.dart' show Vec3;
@@ -98,8 +100,8 @@ class WireBuffer {
     }
   }
 
-  /// Raw `u64` records (handle lists from queries).
-  List<int> u64s() => [for (var i = 0; i < recordCount; i++) records.getUint64(i * 8, Endian.little)];
+  /// Raw 16-byte entity records (handle lists from queries).
+  List<EntityRef> entities() => [for (var i = 0; i < recordCount; i++) readEntity(records, i * 16)];
 }
 
 /// Reusable command batch. Zero allocations in steady state: the backing
@@ -168,17 +170,17 @@ class CommandBatch {
   /// The hot path (one per moving object per tick) without the command
   /// record: entity, then the transform, as `SetTransformCommand.encode`
   /// lays them out.
-  void setTransformOf(int entity, Transform t) {
+  void setTransformOf(EntityRef entity, Transform t) {
     final o = _begin(SetTransformCommand.commandKind, SetTransformCommand.wireSize);
-    _bytes.setUint64(o, entity, Endian.little);
-    t.encode(_bytes, o + 8, _strings);
+    writeEntity(_bytes, o, entity);
+    t.encode(_bytes, o + 16, _strings);
   }
 
   /// Same command from a reusable writer: no value objects at all.
-  void setTransformFrom(int entity, TransformWriter w) {
+  void setTransformFrom(EntityRef entity, TransformWriter w) {
     final o = _begin(SetTransformCommand.commandKind, SetTransformCommand.wireSize);
-    _bytes.setUint64(o, entity, Endian.little);
-    w.encode(_bytes, o + 8);
+    writeEntity(_bytes, o, entity);
+    w.encode(_bytes, o + 16);
   }
 
   void setParent(SetParentCommand c) => command(SetParentCommand.commandKind, SetParentCommand.wireSize, c);
@@ -188,33 +190,33 @@ class CommandBatch {
   /// Inserts or replaces a native component (M3-07a): the
   /// `SetComponentCommand` header then the component's own bytes, one
   /// command; [codec] is the component's entry in `componentCodecs`.
-  void setComponent(int entity, ComponentCodec codec, WireRecord value) {
+  void setComponent(EntityRef entity, ComponentCodec codec, WireRecord value) {
     final o = _begin(SetComponentCommand.commandKind, SetComponentCommand.wireSize + codec.wireSize);
-    _bytes.setUint64(o, entity, Endian.little);
-    _bytes.setUint32(o + 8, codec.id, Endian.little);
+    writeEntity(_bytes, o, entity);
+    _bytes.setUint32(o + 16, codec.id, Endian.little);
     value.encode(_bytes, o + SetComponentCommand.wireSize, _strings);
   }
 
   /// A body command (M3-08, kind 8): [op] with its vector and, for
   /// `setKinematicTarget`/`teleport`, the rotation. Allocation-free.
-  void body(int entity, BodyOp op, double x, double y, double z,
+  void body(EntityRef entity, BodyOp op, double x, double y, double z,
       [double qx = 0, double qy = 0, double qz = 0, double qw = 1]) {
     final o = _begin(BodyCommandRecord.commandKind, BodyCommandRecord.wireSize);
-    _bytes.setUint64(o, entity, Endian.little);
-    _bytes.setUint32(o + 8, op.index, Endian.little);
-    _bytes.setFloat32(o + 12, x, Endian.little);
-    _bytes.setFloat32(o + 16, y, Endian.little);
-    _bytes.setFloat32(o + 20, z, Endian.little);
-    _bytes.setFloat32(o + 24, qx, Endian.little);
-    _bytes.setFloat32(o + 28, qy, Endian.little);
-    _bytes.setFloat32(o + 32, qz, Endian.little);
-    _bytes.setFloat32(o + 36, qw, Endian.little);
+    writeEntity(_bytes, o, entity);
+    _bytes.setUint32(o + 16, op.index, Endian.little);
+    _bytes.setFloat32(o + 20, x, Endian.little);
+    _bytes.setFloat32(o + 24, y, Endian.little);
+    _bytes.setFloat32(o + 28, z, Endian.little);
+    _bytes.setFloat32(o + 32, qx, Endian.little);
+    _bytes.setFloat32(o + 36, qy, Endian.little);
+    _bytes.setFloat32(o + 40, qz, Endian.little);
+    _bytes.setFloat32(o + 44, qw, Endian.little);
   }
 
   /// An animator command (M3-19, kind 9): [op] with the fields it reads —
   /// `play`/`crossfade` the clip, `looping` and `speed` (and the fade
   /// [seconds] for a crossfade); `setSpeed` [speed]; `setTime` [seconds].
-  void animate(int entity, AnimateOp op,
+  void animate(EntityRef entity, AnimateOp op,
       {AssetRef clip = AssetRef.none,
       double seconds = 0,
       double speed = 1,
@@ -242,7 +244,7 @@ class CommandBatch {
 
   /// An audio source command (M3-11, kind 10): [op] on [entity]'s
   /// `fynkel.AudioSource`; `setVolume`/`setPitch` read [value].
-  void audio(int entity, AudioOp op, {double value = 0}) {
+  void audio(EntityRef entity, AudioOp op, {double value = 0}) {
     final o = _begin(AudioCommandRecord.commandKind, AudioCommandRecord.wireSize);
     AudioCommandRecord(entity: entity, op: op, value: value).encode(_bytes, o, _strings);
   }
@@ -261,10 +263,10 @@ class CommandBatch {
     AudioBusCommandRecord(bus: bus, volume: volume, muted: muted).encode(_bytes, o, _strings);
   }
 
-  void removeComponent(int entity, int componentId) {
+  void removeComponent(EntityRef entity, int componentId) {
     final o = _begin(RemoveComponentCommand.commandKind, RemoveComponentCommand.wireSize);
-    _bytes.setUint64(o, entity, Endian.little);
-    _bytes.setUint32(o + 8, componentId, Endian.little);
+    writeEntity(_bytes, o, entity);
+    _bytes.setUint32(o + 16, componentId, Endian.little);
   }
 
   /// Finalizes header and tail; returns a view (valid until [clear]).

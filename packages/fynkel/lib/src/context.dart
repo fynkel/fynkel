@@ -11,6 +11,9 @@ import 'editor_channel.dart';
 import 'input.dart';
 import 'settings.dart';
 
+/// Explicit timeline for deadlines and tweens.
+enum TimeClock { gameplay, real, simulation }
+
 /// Frame and fixed-step timing.
 abstract interface class TimeService {
   /// Seconds per call of the callback that reads it: [fixedDelta] in the
@@ -27,7 +30,7 @@ abstract interface class TimeService {
   /// 0.5 half speed, 0 paused — no fixed tick runs and [delta] is 0 in
   /// `update`, which still runs, so the game can read the input that
   /// resumes it. [fixedDelta] does not change: the ticks come less often.
-  /// Must be >= 0.
+  /// Must be finite and >= 0; sampled at frame begin.
   double get timeScale;
   set timeScale(double value);
 
@@ -37,17 +40,29 @@ abstract interface class TimeService {
   /// Fixed ticks completed so far.
   int get tick;
 
-  /// Game seconds (Unity's `Time.time`): `tick * fixedDelta` in the fixed
-  /// phase; elsewhere that plus the part of a tick the clock holds, so it
-  /// moves by [delta] every frame. Scaled by [timeScale], clamped per frame
-  /// as the ticks are.
+  /// Accepted scaled/clamped gameplay seconds, identical in every phase.
   double get elapsed;
+
+  /// Accepted real host seconds, independent of gameplay scaling/clamping.
+  double get realElapsed;
+
+  /// Completed fixed ticks times fixed delta; Step advances only this clock.
+  double get simulationElapsed;
 
   /// Host frames begun so far.
   int get frame;
 
   /// Interpolation factor between the last two ticks (`0..1`).
   double get alpha;
+}
+
+/// Reads elapsed seconds from an explicit timeline.
+extension TimeClockReading on TimeService {
+  double seconds(TimeClock clock) => switch (clock) {
+    TimeClock.gameplay => elapsed,
+    TimeClock.real => realElapsed,
+    TimeClock.simulation => simulationElapsed,
+  };
 }
 
 /// Logs, markers and counters. The seed has logs.
@@ -71,10 +86,13 @@ class PrintDiagnostics implements DiagnosticsService {
 /// [GameContext.current]; a world makes its context current around every
 /// behaviour callback ([run]).
 class GameContext {
-  GameContext(
-      {required this.time, this.diagnostics = const PrintDiagnostics(), InputService? input, SettingsService? settings})
-      : input = input ?? NoInput(),
-        settings = settings ?? SettingsStore();
+  GameContext({
+    required this.time,
+    this.diagnostics = const PrintDiagnostics(),
+    InputService? input,
+    SettingsService? settings,
+  }) : input = input ?? NoInput(),
+       settings = settings ?? SettingsStore();
 
   final TimeService time;
   final DiagnosticsService diagnostics;
@@ -95,7 +113,9 @@ class GameContext {
   /// The installed service of type [T]; throws when none was installed.
   T service<T extends Object>() {
     final s = _services[T];
-    if (s == null) throw StateError('no $T service is installed in this GameContext');
+    if (s == null) {
+      throw StateError('no $T service is installed in this GameContext');
+    }
     return s as T;
   }
 
@@ -115,8 +135,10 @@ class GameContext {
   static GameContext require([String what = 'this call']) {
     final c = current;
     if (c == null) {
-      throw StateError('$what needs a current GameContext: it runs inside a behaviour callback, '
-          'or wrap it in GameContext.run(context, () { ... })');
+      throw StateError(
+        '$what needs a current GameContext: it runs inside a behaviour callback, '
+        'or wrap it in GameContext.run(context, () { ... })',
+      );
     }
     return c;
   }
@@ -145,7 +167,9 @@ class GameContext {
     if (identical(current, _zone)) return current;
     if (!identical(current, _zoneParent)) {
       _zoneParent = current;
-      _zone = current.fork(specification: const ZoneSpecification(print: _print));
+      _zone = current.fork(
+        specification: const ZoneSpecification(print: _print),
+      );
     }
     return _zone!;
   }
@@ -164,22 +188,36 @@ class GameContext {
 
 /// A clock a test drives by hand.
 class TestTime implements TimeService {
-  TestTime(
-      {this.delta = 1 / 60,
-      double? unscaledDelta,
-      this.timeScale = 1,
-      this.fixedDelta = 1 / 60,
-      this.tick = 0,
-      this.frame = 0,
-      this.alpha = 0})
-      : unscaledDelta = unscaledDelta ?? delta;
+  TestTime({
+    this.delta = 1 / 60,
+    double? unscaledDelta,
+    double timeScale = 1,
+    this.fixedDelta = 1 / 60,
+    this.tick = 0,
+    this.frame = 0,
+    this.alpha = 0,
+    double? elapsed,
+    this.realElapsed = 0,
+  }) : elapsed = elapsed ?? tick * fixedDelta,
+       unscaledDelta = unscaledDelta ?? delta {
+    this.timeScale = timeScale;
+  }
 
   @override
   double delta;
   @override
   double unscaledDelta;
   @override
-  double timeScale;
+  double get timeScale => _timeScale;
+  @override
+  set timeScale(double value) {
+    if (!value.isFinite || value < 0) {
+      throw ArgumentError.value(value, 'timeScale');
+    }
+    _timeScale = value;
+  }
+
+  double _timeScale = 1;
   @override
   double fixedDelta;
   @override
@@ -190,7 +228,27 @@ class TestTime implements TimeService {
   double alpha;
 
   @override
-  double get elapsed => tick * fixedDelta;
+  double elapsed;
+  @override
+  double realElapsed;
+  @override
+  double get simulationElapsed => tick * fixedDelta;
+
+  /// Drive a host frame explicitly; fixed ticks are advanced separately.
+  void advanceFrame(double dt, {double maxGameDelta = 0.25}) {
+    if (!timeScale.isFinite || timeScale < 0) {
+      throw ArgumentError.value(timeScale, 'timeScale');
+    }
+    if (!maxGameDelta.isFinite || maxGameDelta <= 0) {
+      throw ArgumentError.value(maxGameDelta, 'maxGameDelta');
+    }
+    unscaledDelta = dt.isFinite && dt > 0 ? dt : 0;
+    final scaled = unscaledDelta * timeScale;
+    delta = scaled < maxGameDelta ? scaled : maxGameDelta;
+    realElapsed += unscaledDelta;
+    elapsed += delta;
+    frame++;
+  }
 
   /// Advances one fixed tick.
   void advanceTick() => tick += 1;
@@ -201,23 +259,35 @@ class RecordingDiagnostics implements DiagnosticsService {
   final List<String> lines = [];
 
   @override
-  void log(String message, {String source = 'game'}) => lines.add('[$source] $message');
+  void log(String message, {String source = 'game'}) =>
+      lines.add('[$source] $message');
 }
 
 /// A context for tests: a hand-driven clock and recorded logs, plus whatever
 /// services the test installs.
 class TestGameContext extends GameContext {
-  factory TestGameContext({TestTime? time, RecordingDiagnostics? diagnostics, TestInput? input}) =>
-      TestGameContext._(time ?? TestTime(), diagnostics ?? RecordingDiagnostics(), input ?? TestInput());
+  factory TestGameContext({
+    TestTime? time,
+    RecordingDiagnostics? diagnostics,
+    TestInput? input,
+  }) => TestGameContext._(
+    time ?? TestTime(),
+    diagnostics ?? RecordingDiagnostics(),
+    input ?? TestInput(),
+  );
 
-  TestGameContext._(TestTime time, RecordingDiagnostics diagnostics, TestInput input)
-      : super(time: time, diagnostics: diagnostics, input: input);
+  TestGameContext._(
+    TestTime time,
+    RecordingDiagnostics diagnostics,
+    TestInput input,
+  ) : super(time: time, diagnostics: diagnostics, input: input);
 
   @override
   TestTime get time => super.time as TestTime;
 
   @override
-  RecordingDiagnostics get diagnostics => super.diagnostics as RecordingDiagnostics;
+  RecordingDiagnostics get diagnostics =>
+      super.diagnostics as RecordingDiagnostics;
 
   /// The hand-driven actions (`press`, `release`, `setAxis`, `endTick`).
   @override
@@ -227,12 +297,20 @@ class TestGameContext extends GameContext {
 /// Static facade over the current context's [TimeService].
 abstract final class Time {
   static double get delta => GameContext.require('Time.delta').time.delta;
-  static double get unscaledDelta => GameContext.require('Time.unscaledDelta').time.unscaledDelta;
-  static double get timeScale => GameContext.require('Time.timeScale').time.timeScale;
-  static set timeScale(double value) => GameContext.require('Time.timeScale').time.timeScale = value;
-  static double get fixedDelta => GameContext.require('Time.fixedDelta').time.fixedDelta;
+  static double get unscaledDelta =>
+      GameContext.require('Time.unscaledDelta').time.unscaledDelta;
+  static double get timeScale =>
+      GameContext.require('Time.timeScale').time.timeScale;
+  static set timeScale(double value) =>
+      GameContext.require('Time.timeScale').time.timeScale = value;
+  static double get fixedDelta =>
+      GameContext.require('Time.fixedDelta').time.fixedDelta;
   static int get tick => GameContext.require('Time.tick').time.tick;
   static double get elapsed => GameContext.require('Time.elapsed').time.elapsed;
+  static double get realElapsed =>
+      GameContext.require('Time.realElapsed').time.realElapsed;
+  static double get simulationElapsed =>
+      GameContext.require('Time.simulationElapsed').time.simulationElapsed;
   static int get frame => GameContext.require('Time.frame').time.frame;
   static double get alpha => GameContext.require('Time.alpha').time.alpha;
 }
@@ -264,17 +342,27 @@ abstract final class Diagnostics {
 /// to the current context's [DiagnosticsService] (`print` by default; a
 /// test's [RecordingDiagnostics]), prefixed by its level.
 abstract final class Debug {
-  static void log(Object? message) => _send('info', '$message', StackTrace.current);
-  static void logWarning(Object? message) => _send('warning', '$message', StackTrace.current);
-  static void logError(Object? message) => _send('error', '$message', StackTrace.current);
+  static void log(Object? message) =>
+      _send('info', '$message', StackTrace.current);
+  static void logWarning(Object? message) =>
+      _send('warning', '$message', StackTrace.current);
+  static void logError(Object? message) =>
+      _send('error', '$message', StackTrace.current);
 
   /// An error you caught, with its own stack (the red row of an exception).
   static void logException(Object error, [StackTrace? stack]) {
     final context = GameContext.current;
     if (EditorChannel.enabled) {
-      EditorChannel.error('$error', stack: (stack ?? StackTrace.current).toString(), tick: context?.time.tick);
+      EditorChannel.error(
+        '$error',
+        stack: (stack ?? StackTrace.current).toString(),
+        tick: context?.time.tick,
+      );
     }
-    (context?.diagnostics ?? const PrintDiagnostics()).log('error: $error', source: 'game');
+    (context?.diagnostics ?? const PrintDiagnostics()).log(
+      'error: $error',
+      source: 'game',
+    );
   }
 
   static void _send(String severity, String message, StackTrace stack) {
@@ -288,7 +376,9 @@ abstract final class Debug {
         'stack': stack.toString(),
       });
     }
-    (context?.diagnostics ?? const PrintDiagnostics())
-        .log(severity == 'info' ? message : '$severity: $message', source: 'game');
+    (context?.diagnostics ?? const PrintDiagnostics()).log(
+      severity == 'info' ? message : '$severity: $message',
+      source: 'game',
+    );
   }
 }

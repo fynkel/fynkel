@@ -1,7 +1,6 @@
 //! The rest of the hierarchy API (foundation 6.5): world poses, the active
 //! flags, subtree-only refreshes, layers and tags, and the refusals.
 
-use fynkel_contracts::WorldId;
 use fynkel_ecs::World;
 use fynkel_scene::*;
 use glam::{Mat4, Quat, Vec3};
@@ -16,7 +15,7 @@ fn at(x: f32, y: f32, z: f32) -> Transform {
 
 #[test]
 fn set_world_pose_under_a_moved_turned_scaled_parent_lands_where_asked() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let parent = spawn(
         &mut w,
         Transform {
@@ -66,7 +65,7 @@ fn set_world_pose_under_a_moved_turned_scaled_parent_lands_where_asked() {
 
 #[test]
 fn a_parent_switched_off_switches_off_its_subtree_and_back() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let root = spawn(&mut w, at(0.0, 0.0, 0.0), None).unwrap();
     let mid = spawn(&mut w, at(0.0, 0.0, 0.0), Some(root)).unwrap();
     let leaf = spawn(&mut w, at(0.0, 0.0, 0.0), Some(mid)).unwrap();
@@ -100,7 +99,7 @@ fn a_parent_switched_off_switches_off_its_subtree_and_back() {
 
 #[test]
 fn a_subtree_spawned_under_an_inactive_parent_is_inactive_from_the_subtree_refresh() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let root = spawn(&mut w, at(0.0, 0.0, 0.0), None).unwrap();
     set_active(&mut w, root, false).unwrap();
     refresh_active(&mut w);
@@ -114,7 +113,7 @@ fn a_subtree_spawned_under_an_inactive_parent_is_inactive_from_the_subtree_refre
 
 #[test]
 fn propagate_subtree_computes_a_new_subtree_alone_and_refuses_under_a_dirty_ancestor() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let root = spawn(&mut w, at(10.0, 0.0, 0.0), None).unwrap();
     let other = spawn(&mut w, at(0.0, 0.0, 0.0), None).unwrap();
     propagate(&mut w);
@@ -142,7 +141,7 @@ fn propagate_subtree_computes_a_new_subtree_alone_and_refuses_under_a_dirty_ance
 
 #[test]
 fn current_world_reads_through_dirty_ancestors_without_a_propagate() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let root = spawn(&mut w, at(1.0, 0.0, 0.0), None).unwrap();
     let child = spawn(&mut w, at(0.0, 2.0, 0.0), Some(root)).unwrap();
     propagate(&mut w);
@@ -177,7 +176,7 @@ fn transforms_round_trip_through_a_matrix_and_refuse_non_finite_values() {
     assert!(back.scale.abs_diff_eq(t.scale, 1e-5));
     assert_eq!(Transform::default(), Transform::IDENTITY);
 
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let bad = at(f32::NAN, 0.0, 0.0);
     assert!(!bad.is_finite());
     assert!(matches!(
@@ -194,7 +193,7 @@ fn transforms_round_trip_through_a_matrix_and_refuse_non_finite_values() {
 
 #[test]
 fn spawn_under_a_gone_parent_fails_and_leaves_nothing_behind() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let gone = spawn(&mut w, at(0.0, 0.0, 0.0), None).unwrap();
     despawn_subtree(&mut w, gone).unwrap();
     let before = w.len();
@@ -207,7 +206,7 @@ fn spawn_under_a_gone_parent_fails_and_leaves_nothing_behind() {
 
 #[test]
 fn a_root_has_no_sibling_order_and_an_index_past_the_end_is_the_end() {
-    let mut w = World::new(WorldId(1));
+    let mut w = World::new();
     let root = spawn(&mut w, at(0.0, 0.0, 0.0), None).unwrap();
     let a = spawn(&mut w, at(0.0, 0.0, 0.0), Some(root)).unwrap();
     let b = spawn(&mut w, at(0.0, 0.0, 0.0), Some(root)).unwrap();

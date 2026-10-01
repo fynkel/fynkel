@@ -1,13 +1,4 @@
-// Unity's `Instantiate` runs the copy's `Awake` and `OnEnable` before it
-// returns (docs/foundation.md 1.7), so the usual
-//
-//     var enemy = Instantiate(prefab).GetComponent<Enemy>();
-//     enemy.Init(target);   // Awake already ran; Init's values stay
-//
-// works: onCreate cannot overwrite what the caller set right after.
-// `start` still waits for the behaviour's first gameplay callback. Over the
-// real native library (`GameObject.clone`; `World.instantiate` attaches the
-// same way).
+// Clone and instantiate publish data first; lifecycle uses the next normal boundary.
 
 import 'package:fynkel/fynkel.dart';
 import 'package:test/test.dart';
@@ -84,40 +75,47 @@ void main() {
     return w;
   }
 
-  test('a clone made in update is created and enabled before clone returns; start waits (foundation 1.7)', () {
+  test('clone in an automatic callback publishes before its deferred creation callbacks', () {
     final w = fresh();
-    final template = w.spawn(name: 'Template');
-    template.addBehaviour(Enemy()..label = 'root');
-    final child = w.spawn(name: 'Child', parent: template);
-    child.addBehaviour(Enemy()..label = 'child');
-    final off = w.spawn(name: 'Off', parent: template)..setActive(false);
-    off.addBehaviour(Enemy()..label = 'off');
+    final errors = <BehaviourError>[];
+    w.onBehaviourError = errors.add;
+    final template = w.spawn(name: 'Template')..addBehaviour(Enemy()..label = 'root');
     final spawner = w.spawn(name: 'Spawner').addBehaviour(Spawner(template));
-    w.frame(1 / 60); // resolves the objects
-    w.frame(1 / 60); // and starts them
-
+    w.frame(1 / 60);
+    calls.clear();
     spawner.armed = true;
     w.frame(1 / 60);
-    expect(spawner.duringClone, ['root onCreate', 'root onEnable', 'child onCreate', 'child onEnable'],
-        reason: 'parents first; the inactive child is not created, as in Unity');
-    final copy = spawner.made!.behaviour<Enemy>()!;
-    expect(copy.hp, 3, reason: "onCreate ran before the caller's write, so the write stays");
-    expect(copy.started, isFalse, reason: 'no start in the frame it was made');
-
-    calls.clear();
+    expect(errors, isEmpty);
+    expect(spawner.duringClone, isEmpty, reason: 'no lifecycle code before the creating transaction commits');
+    final copy = spawner.made!;
+    expect(w.find('Copy'), same(copy));
+    expect(copy.behaviour<Enemy>()!.hp, 3, reason: 'onCreate has not run yet');
+    expect(copy.behaviour<Enemy>()!.isCreated, isFalse);
     w.frame(1 / 60);
-    expect(copy.started, isTrue);
-    expect(calls.where((c) => c.endsWith('onCreate')), isEmpty, reason: 'created once');
-    expect(copy.hp, 3);
+    expect(copy.behaviour<Enemy>()!.isCreated, isTrue);
+    expect(copy.behaviour<Enemy>()!.hp, 10, reason: 'onCreate runs at the later lifecycle boundary');
+    expect(calls.where((call) => call == 'root onCreate'), hasLength(1));
   });
 
-  test('a clone made outside a frame is created before clone returns too', () {
+  test('a clone made outside a frame defers creation like a callback clone', () {
     final w = fresh();
     final template = w.spawn(name: 'Template')..addBehaviour(Enemy()..label = 'root');
+    final child = w.spawn(name: 'Child', parent: template)..addBehaviour(Enemy()..label = 'child');
+    final off = w.spawn(name: 'Off', parent: template)..setActive(false);
+    off.addBehaviour(Enemy()..label = 'off');
     w.frame(1 / 60);
+    expect(child.behaviour<Enemy>()!.started, isTrue);
     calls.clear();
     final copy = template.clone();
-    expect(calls, ['root onCreate', 'root onEnable']);
-    expect(copy.behaviour<Enemy>()!.hp, 10);
+    expect(calls, isEmpty);
+    expect(copy.behaviour<Enemy>()!.started, isFalse);
+    copy.behaviour<Enemy>()!.hp = 3;
+    w.frame(1 / 60);
+    expect(copy.behaviour<Enemy>()!.started, isTrue);
+    expect(
+      copy.behaviour<Enemy>()!.hp,
+      10,
+      reason: 'onCreate runs at the same deferred boundary as callback clones',
+    );
   });
 }

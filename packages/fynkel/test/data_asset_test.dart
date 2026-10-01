@@ -32,14 +32,14 @@ void main() {
   }
 
   Map<String, Object?> weapon(String id, String name, Map<String, Object?> data) => {
-        r'$schema': 'https://fynkel.dev/schemas/data.schema.json',
-        'formatVersion': 1,
-        'id': id,
-        'name': name,
-        'type': 'test.Weapon',
-        'version': 1,
-        'data': data,
-      };
+    r'$schema': 'https://fynkel.dev/schemas/data.schema.json',
+    'formatVersion': 1,
+    'id': id,
+    'name': name,
+    'type': 'test.Weapon',
+    'version': 1,
+    'data': data,
+  };
 
   setUpAll(() {
     lib = NativeLibrary.open();
@@ -49,14 +49,20 @@ void main() {
     if (stale.existsSync()) stale.deleteSync(recursive: true);
     writeWeaponSchemas(project);
     // The sword upgrades to the great sword, which upgrades back: a cycle.
-    write('assets/data/sword.data.json', weapon(sword, 'Sword', {
-      'damage': 3,
-      'upgrade': {'asset': great},
-    }));
-    write('assets/data/great.data.json', weapon(great, 'Great Sword', {
-      'damage': 8,
-      'upgrade': {'asset': sword},
-    }));
+    write(
+      'assets/data/sword.data.json',
+      weapon(sword, 'Sword', {
+        'damage': 3,
+        'upgrade': {'asset': great},
+      }),
+    );
+    write(
+      'assets/data/great.data.json',
+      weapon(great, 'Great Sword', {
+        'damage': 8,
+        'upgrade': {'asset': sword},
+      }),
+    );
     write('assets/data/axe.data.json', weapon(axe, 'Axe', {}));
     write('assets/scenes/arena.scene.json', {
       r'$schema': 'https://fynkel.dev/schemas/scene.schema.json',
@@ -93,6 +99,11 @@ void main() {
         },
       },
     });
+    final prefab = jsonDecode(File('$project/assets/scenes/arena.scene.json').readAsStringSync()) as Map;
+    prefab[r'$schema'] = 'https://fynkel.dev/schemas/prefab.schema.json';
+    prefab['id'] = 'd0000000-0000-4000-8000-000000000001';
+    prefab['root'] = 'c0000000-0000-4000-8000-000000000d20';
+    write('assets/prefabs/knight.prefab.json', prefab);
     final r = runFynkel(['validate', '--project', project, '--json']);
     final errors = [
       for (final d in (jsonDecode(r.stdout as String) as Map)['diagnostics'] as List)
@@ -148,7 +159,12 @@ void main() {
     expect(w.applyDataEdit(sword, {'damage': 5}), isTrue);
     expect(s.damage, 5);
     expect(s.upgrade, isNull, reason: 'no longer named: back to its default');
-    expect(w.applyDataEdit(sword, {'upgrade': {'asset': axe}}), isTrue);
+    expect(
+      w.applyDataEdit(sword, {
+        'upgrade': {'asset': axe},
+      }),
+      isTrue,
+    );
     expect(s.damage, 1, reason: 'the class default');
     expect(s.upgrade, same(w.data<Weapon>(const AssetRef(axe))));
     expect(w.applyDataEdit(great, const {}), isTrue);
@@ -183,8 +199,11 @@ void main() {
     made.destroy();
     expect(made.isAlive, isFalse);
     expect(() => w.data<Weapon>(const AssetRef('c0000000-0000-4000-8000-0000000000ff')), throwsArgumentError);
-    expect(() => w.data<Weapon>(const AssetRef('c0000000-0000-4000-8000-000000000020')), throwsArgumentError,
-        reason: 'a material, not a data asset');
+    expect(
+      () => w.data<Weapon>(const AssetRef('c0000000-0000-4000-8000-000000000020')),
+      throwsArgumentError,
+      reason: 'a material, not a data asset',
+    );
     expect(() => w.data<Weapon>(const AssetRef(sword, sub: 'x')), throwsArgumentError);
   });
 
@@ -201,5 +220,156 @@ void main() {
     expect(warnings.first.message, contains('test.Wielder.weapon'));
     expect(warnings.first.message, contains('not registered'));
     expect(warnings.first.pointer, endsWith('/data/weapon'));
+  });
+  test('edit shares staged cyclic assets and publishes their cache once', () {
+    final w = world()..loadProject(project);
+    final s = w.edit(() {
+      final s = w.data<Weapon>(const AssetRef(sword));
+      expect(s.upgrade!.upgrade, same(s));
+      expect(w.data<Weapon>(const AssetRef(sword)), same(s));
+      expect(w.loadedData[sword], same(s));
+      return s;
+    });
+    expect(w.loadedData[sword], same(s));
+    expect(w.data<Weapon>(const AssetRef(great)), same(s.upgrade));
+  });
+
+  test('abort discards new cache entries and invalidates escaped new assets', () {
+    final w = world()..loadProject(project);
+    final existing = w.data<Weapon>(const AssetRef(axe))..damage = 77;
+    late Weapon escaped;
+    expect(
+      () => w.edit(() {
+        escaped = w.data<Weapon>(const AssetRef(sword));
+        expect(w.data<Weapon>(const AssetRef(axe)), same(existing));
+        throw StateError('abort');
+      }),
+      throwsStateError,
+    );
+    expect(w.loadedData.keys, [axe]);
+    expect(existing.damage, 77);
+    expect(existing.isAlive, isTrue);
+    expect(escaped.isAlive, isFalse);
+    expect(escaped.upgrade!.isAlive, isFalse);
+    final retry = w.edit(() => w.data<Weapon>(const AssetRef(sword)));
+    expect(retry, isNot(same(escaped)));
+    expect(retry.isAlive, isTrue);
+  });
+
+  test('caught malformed or mistyped data references poison the complete edit', () {
+    final w = world()..loadProject(project);
+    for (final operation in <void Function()>[
+      () => w.resolveData({'asset': sword}, 'wrong.Type'),
+      () => w.resolveData({'asset': sword, 'sub': 'bad'}, 'test.Weapon'),
+      () => w.resolveData(42, 'test.Weapon'),
+      () => w.data<Weapon>(const AssetRef('c0000000-0000-4000-8000-000000000020')),
+    ]) {
+      expect(
+        () => w.edit(() {
+          w.spawn(name: 'discard-data');
+          try {
+            operation();
+          } catch (_) {}
+        }),
+        throwsStateError,
+      );
+      expect(w.find('discard-data'), isNull);
+      expect(w.loadedData, isEmpty);
+    }
+  });
+
+  test('prefab data fields and lists share the same staged cache as world.data', () {
+    final w = world()..loadProject(project);
+    final root = w.edit(() {
+      final root = w.instantiate('d0000000-0000-4000-8000-000000000001');
+      final b = root.behaviour<Wielder>()!;
+      expect(b.weapon, same(w.data<Weapon>(const AssetRef(sword))));
+      expect(b.spares[1], same(b.weapon));
+      expect(b.weapon!.upgrade!.upgrade, same(b.weapon));
+      return root;
+    });
+    expect(root.behaviour<Wielder>()!.weapon, same(w.loadedData[sword]));
+    expect(w.loadedData.keys, unorderedEquals([sword, great, axe]));
+  });
+
+  test('final native validation rolls back prefab data and attachments', () {
+    final w = world()..loadProject(project);
+    expect(
+      () => w.edit(() {
+        final root = w.instantiate('d0000000-0000-4000-8000-000000000001', name: 'discard-knight');
+        final target = w.spawn();
+        root.set(Follow(target: target));
+        target.destroy();
+      }),
+      throwsStateError,
+    );
+    expect(w.loadedData, isEmpty);
+    expect(w.find('discard-knight'), isNull);
+  });
+
+  test('data factory cannot overwrite a bound shared instance', () {
+    final w = world()..loadProject(project);
+    final existing = w.data<Weapon>(const AssetRef(axe))..damage = 77;
+    w.registry.registerData(
+      DataType(id: 'test.Weapon', create: () => existing, fields: weaponType.fields),
+      replace: true,
+    );
+    expect(() => w.edit(() => w.data<Weapon>(const AssetRef(sword))), throwsStateError);
+    expect(existing.damage, 77);
+    expect(existing.asset, const AssetRef(axe));
+    expect(existing.isAlive, isTrue);
+    expect(w.loadedData.keys, [axe]);
+  });
+
+  test('cached assets reject sub-asset aliases inside edits', () {
+    final w = world()..loadProject(project);
+    final existing = w.data<Weapon>(const AssetRef(axe));
+    expect(
+      () => w.edit(() {
+        try {
+          w.data<Weapon>(const AssetRef(axe, sub: 'bad'));
+        } catch (_) {}
+      }),
+      throwsStateError,
+    );
+    expect(w.loadedData[axe], same(existing));
+  });
+
+  test('reentrant data factory rejects before publishing an incomplete instance', () {
+    final w = world()..loadProject(project);
+    w.registry.registerData(
+      DataType(
+        id: 'test.Weapon',
+        create: () => w.data<Weapon>(const AssetRef(sword)),
+        fields: weaponType.fields,
+      ),
+      replace: true,
+    );
+    expect(() => w.edit(() => w.data<Weapon>(const AssetRef(sword))), throwsStateError);
+    expect(w.loadedData, isEmpty);
+  });
+  test('data destruction and editor field mutation remain guarded inside edits', () {
+    final w = world()..loadProject(project);
+    final code = Weapon();
+    final loaded = w.data<Weapon>(const AssetRef(axe));
+    for (final operation in <void Function()>[
+      code.destroy,
+      () {
+        w.applyDataEdit(axe, {'damage': 55});
+      },
+    ]) {
+      expect(
+        () => w.edit(() {
+          w.spawn(name: 'discard-data-mutation');
+          try {
+            operation();
+          } catch (_) {}
+        }),
+        throwsStateError,
+      );
+      expect(w.find('discard-data-mutation'), isNull);
+      expect(code.isAlive, isTrue);
+      expect(loaded.damage, 1);
+    }
   });
 }

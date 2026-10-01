@@ -40,10 +40,11 @@ void main() {
     w.frame(1 / 60);
     w.frame(1 / 60);
 
-    final logs = [
-      for (final l in lines) jsonDecode(l) as Map<String, Object?>,
-    ].where((r) => r['fynkel'] == 'log').toList();
-    String? severityOf(String message) => logs.firstWhere((r) => r['message'] == message)['severity'] as String?;
+    final logs = [for (final l in lines) jsonDecode(l) as Map<String, Object?>]
+        .where((r) => r['fynkel'] == 'log')
+        .toList();
+    String? severityOf(String message) =>
+        logs.firstWhere((r) => r['message'] == message)['severity'] as String?;
     expect(severityOf('hello'), 'info');
     expect(severityOf('careful'), 'warning');
     expect(severityOf('broken'), 'error');
@@ -52,7 +53,11 @@ void main() {
     final caught = logs.firstWhere((r) => r['message'] == 'Bad state: caught');
     expect((caught['source'], caught['severity']), ('exception', 'error'));
     for (final r in [...logs.where((r) => r['source'] == 'game'), printed, caught]) {
-      expect(r['stack'], contains('debug_log_test.dart'), reason: '${r['message']}: the caller is in the stack');
+      expect(
+        r['stack'],
+        contains('debug_log_test.dart'),
+        reason: '${r['message']}: the caller is in the stack',
+      );
       expect(r['tick'], isNotNull);
     }
     // The warning's first frame of this file is Talker.update's line.
@@ -68,11 +73,7 @@ void main() {
       Debug.logWarning('careful');
       Debug.logError('broken');
     });
-    expect(context.diagnostics.lines, [
-      '[game] plain',
-      '[game] warning: careful',
-      '[game] error: broken',
-    ]);
+    expect(context.diagnostics.lines, ['[game] plain', '[game] warning: careful', '[game] error: broken']);
     // Outside any context it still works (Unity's Debug.Log works anywhere).
     Debug.log('outside');
   });

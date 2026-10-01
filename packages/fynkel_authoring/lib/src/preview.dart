@@ -158,8 +158,8 @@ final class ScenePreview {
   /// prefab instance's id, of every entity it spawned — what
   /// `ViewportOverlay.outline` takes. An id the world lacks, and an entity
   /// hidden in the editor, has none; each handle comes once.
-  List<int> entities(Iterable<String> ids) =>
-      [for (final e in _call('entities', {'ids': ids.toList()})['entities'] as List? ?? const []) (e as num).toInt()];
+  List<EntityRef> entities(Iterable<String> ids) =>
+      [for (final e in _call('entities', {'ids': ids.toList()})['entities'] as List? ?? const []) EntityRef.fromJson(e)];
 
   /// The world matrices of [ids] now (16 numbers column-major each);
   /// throws (`invalidArgument`, FYN-T0003) for an id the world lacks.

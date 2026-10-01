@@ -1,3 +1,4 @@
+import 'package:fynkel/fynkel.dart' show EntityRef;
 // One open document as the editor sees it: the authoring `Editor` behind a
 // handle — state, the entity tree, one transaction per gesture, undo/redo,
 // save, reload. `SessionDocument` is the real one over `DocumentHandle`;
@@ -131,7 +132,7 @@ abstract class PreviewBackend {
 
   /// The renderer's handles of [ids] (with a prefab instance's spawned
   /// entities) for the selection outline (`ViewportOverlay.outline`).
-  List<int> entities(Iterable<String> ids);
+  List<EntityRef> entities(Iterable<String> ids);
   Map<String, List<double>> worldMatrices(Iterable<String> ids);
   void setTransforms(Iterable<PreviewTransform> transforms);
   void restoreTransforms(Iterable<String> ids);
@@ -250,7 +251,7 @@ final class SessionPreview implements PreviewBackend {
     iconsAspect: iconsAspect,
   );
   @override
-  List<int> entities(Iterable<String> ids) => preview.entities(ids);
+  List<EntityRef> entities(Iterable<String> ids) => preview.entities(ids);
   @override
   Map<String, List<double>> worldMatrices(Iterable<String> ids) => preview.worldMatrices(ids);
   @override

@@ -22,10 +22,12 @@
 
 #![cfg_attr(not(feature = "animation"), allow(dead_code, unused_imports))]
 
+use std::collections::HashMap;
+
 use fynkel_contracts::{ComponentId, DiagnosticCode, Entity};
 use fynkel_ecs::World as Ecs;
 use fynkel_physics::{CharacterController, ColliderShape, Hit, QueryKind, QuerySpec};
-use fynkel_scene::{self as scene, Parent, Transform};
+use fynkel_scene::{Parent, Transform};
 use glam::{Mat4, Quat, Vec3};
 
 use super::animation::{find_named, AnimatorRun};
@@ -97,79 +99,94 @@ fn object(ecs: &Ecs, animator: Entity, slot: &mut Option<Entity>, name: &str) ->
     *slot
 }
 
-/// `e`'s world matrix from the local transforms now (this tick's pose;
-/// the cached world matrices are last tick's).
-fn world(ecs: &Ecs, e: Entity) -> Mat4 {
-    let local = |e: Entity| {
-        ecs.copy::<Transform>(e)
-            .map_or(Mat4::IDENTITY, |t| t.matrix())
-    };
-    let mut m = local(e);
-    let mut at = e;
-    while let Ok(p) = ecs.get::<Parent>(at) {
-        at = p.0;
-        m = local(at) * m;
-    }
-    m
-}
-
-fn position(ecs: &Ecs, e: Entity) -> Vec3 {
-    world(ecs, e).w_axis.truncate()
-}
-
-fn rotation(ecs: &Ecs, e: Entity) -> Quat {
-    world(ecs, e).to_scale_rotation_translation().1
-}
-
-fn parent_world(ecs: &Ecs, e: Entity) -> Mat4 {
-    ecs.get::<Parent>(e)
-        .map(|p| p.0)
-        .map_or(Mat4::IDENTITY, |p| world(ecs, p))
-}
-
 /// Writes what IK moves, remembering each node's transform before.
 struct Writer<'a> {
     ecs: &'a Ecs,
     touched: &'a mut Vec<(Entity, Transform, Transform)>,
+    staged: HashMap<Entity, Transform>,
+    failure: Option<String>,
 }
 
 impl Writer<'_> {
+    fn local(&self, entity: Entity) -> Option<Transform> {
+        self.staged
+            .get(&entity)
+            .copied()
+            .or_else(|| self.ecs.copy::<Transform>(entity).ok())
+    }
+
+    fn world(&self, entity: Entity) -> Mat4 {
+        let mut matrix = self.local(entity).map_or(Mat4::IDENTITY, |t| t.matrix());
+        let mut at = entity;
+        while let Ok(parent) = self.ecs.get::<Parent>(at) {
+            at = parent.0;
+            matrix = self.local(at).map_or(Mat4::IDENTITY, |t| t.matrix()) * matrix;
+        }
+        matrix
+    }
+
+    fn position(&self, entity: Entity) -> Vec3 {
+        self.world(entity).w_axis.truncate()
+    }
+
+    fn rotation(&self, entity: Entity) -> Quat {
+        let mut rotation = self.local(entity).map_or(Quat::IDENTITY, |t| t.rotation);
+        let mut at = entity;
+        while let Ok(parent) = self.ecs.get::<Parent>(at) {
+            at = parent.0;
+            rotation = self.local(at).map_or(Quat::IDENTITY, |t| t.rotation) * rotation;
+        }
+        rotation
+    }
+
+    fn parent_rotation(&self, entity: Entity) -> Quat {
+        self.ecs
+            .get::<Parent>(entity)
+            .map_or(Quat::IDENTITY, |p| self.rotation(p.0))
+    }
+
+    fn parent_world(&self, entity: Entity) -> Mat4 {
+        self.ecs
+            .get::<Parent>(entity)
+            .map_or(Mat4::IDENTITY, |p| self.world(p.0))
+    }
+
     fn set(&mut self, e: Entity, next: Transform) {
-        let Ok(now) = self.ecs.copy::<Transform>(e) else {
+        let Some(now) = self.local(e) else {
             return;
         };
         if !self.touched.iter().any(|(t, _, _)| *t == e) {
             self.touched.push((e, now, now));
         }
-        let _ = scene::set_local(self.ecs, e, next);
+        self.staged.insert(e, next);
     }
 
     /// Turns `e` by `q` in world space.
     fn rotate(&mut self, e: Entity, q: Quat) {
-        let Ok(mut t) = self.ecs.copy::<Transform>(e) else {
+        let Some(mut t) = self.local(e) else {
             return;
         };
-        let parent = parent_world(self.ecs, e).to_scale_rotation_translation().1;
+        let parent = self.parent_rotation(e);
         t.rotation = (parent.inverse() * q * parent * t.rotation).normalize();
         self.set(e, t);
     }
 
     /// Sets `e`'s world rotation.
     fn set_rotation(&mut self, e: Entity, r: Quat) {
-        let Ok(mut t) = self.ecs.copy::<Transform>(e) else {
+        let Some(mut t) = self.local(e) else {
             return;
         };
-        let parent = parent_world(self.ecs, e).to_scale_rotation_translation().1;
+        let parent = self.parent_rotation(e);
         t.rotation = (parent.inverse() * r).normalize();
         self.set(e, t);
     }
 
     /// Moves `e` by `d` in world space.
     fn translate(&mut self, e: Entity, d: Vec3) {
-        let Ok(mut t) = self.ecs.copy::<Transform>(e) else {
+        let Some(mut t) = self.local(e) else {
             return;
         };
-        t.position += parent_world(self.ecs, e).inverse().transform_vector3(d);
+        t.position += self.parent_world(e).inverse().transform_vector3(d);
         self.set(e, t);
     }
 }
@@ -185,21 +202,23 @@ fn two_bone(
     pole: Option<Vec3>,
     weight: f32,
 ) {
-    let ecs = w.ecs;
-    let (a, b, c) = (
-        position(ecs, root),
-        position(ecs, middle),
-        position(ecs, tip),
-    );
+    let (a, b, c) = (w.position(root), w.position(middle), w.position(tip));
     let (lab, lbc) = ((b - a).length(), (c - b).length());
     let to = target - a;
+    if !lab.is_finite() || !lbc.is_finite() || !to.length().is_finite() {
+        w.failure = Some("two-bone solve produced non-finite distances".into());
+        return;
+    }
     if lab < 1e-5 || lbc < 1e-5 || to.length() < 1e-5 {
         return;
     }
     let dir = to.normalize();
-    let dist = to
-        .length()
-        .clamp((lab - lbc).abs() + 1e-4, lab + lbc - 1e-4);
+    let (minimum, maximum) = ((lab - lbc).abs() + 1e-4, lab + lbc - 1e-4);
+    if minimum > maximum {
+        w.failure = Some("two-bone solve has no stable reachable interval".into());
+        return;
+    }
+    let dist = to.length().clamp(minimum, maximum);
     // The bend's side: the pole's, else the middle's now.
     let off_line = |v: Vec3| v - dir * v.dot(dir);
     let mut side = off_line(pole.map_or(b - a, |p| p - a));
@@ -262,7 +281,38 @@ impl World {
             (play.def.clone(), std::mem::take(&mut play.ik), weights)
         };
         let mut problems = Vec::new();
-        self.solve(entity, &def, &mut ik, &weights, dt, &mut problems);
+        let previous_touched = ik.touched.clone();
+        let (transforms, failure) = self.solve(entity, &def, &mut ik, &weights, dt, &mut problems);
+        if let Some(message) = failure {
+            ik.touched = previous_touched;
+            self.reject(
+                u32::MAX,
+                Lane::Simulation,
+                DiagnosticCode::INVALID_PAYLOAD,
+                entity,
+                ComponentId::ANIMATOR,
+                format!("IK pose: {message}"),
+            );
+        } else if !transforms.is_empty() {
+            if let Err(error) = self.edit_native_data_at_tick(self.tick(), |edit| {
+                for (target, transform) in transforms {
+                    edit.set_transform(target, transform)?;
+                }
+                Ok(())
+            }) {
+                // Solver caches/easing progressed, but the old published pose
+                // remains authoritative for next tick's restoration.
+                ik.touched = previous_touched;
+                self.reject(
+                    u32::MAX,
+                    Lane::Simulation,
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    entity,
+                    ComponentId::ANIMATOR,
+                    format!("IK pose: {error:?}"),
+                );
+            }
+        }
         if let Ok(mut run) = self.ecs.get_mut::<AnimatorRun>(entity) {
             if let Some(play) = run.controller.as_mut() {
                 play.ik = ik;
@@ -288,12 +338,13 @@ impl World {
         weights: &[f32],
         dt: f32,
         problems: &mut Vec<String>,
-    ) {
+    ) -> (Vec<(Entity, Transform)>, Option<String>) {
         let ecs = &self.ecs;
         // Last tick's writes that no layer posed again are taken back,
         // property by property: a clip keying a node's position alone (a
         // breathing spine) rewrites it every tick but keeps the rotation
         // IK gave it, which must not be turned again on top.
+        let mut staged = HashMap::new();
         for (e, before, after) in ik.touched.drain(..) {
             let Ok(mut now) = ecs.copy::<Transform>(e) else {
                 continue;
@@ -309,13 +360,15 @@ impl World {
                 now.scale = before.scale;
             }
             if now != kept {
-                let _ = scene::set_local(ecs, e, now);
+                staged.insert(e, now);
             }
         }
         let mut touched = std::mem::take(&mut ik.touched);
         let mut w = Writer {
             ecs,
             touched: &mut touched,
+            staged,
+            failure: None,
         };
         let ease = 1.0 - (-EASE * dt).exp();
         for (i, goal) in def.ik.iter().enumerate() {
@@ -336,7 +389,7 @@ impl World {
                 }
                 None => goal.target.as_deref().and_then(|name| {
                     let e = object(ecs, animator, &mut slots[11], name)?;
-                    Some(position(ecs, e))
+                    Some(w.position(e))
                 }),
             };
             let missing = |name: &str| format!("no node `{name}` under the animator");
@@ -378,7 +431,7 @@ impl World {
                     let pole = pole
                         .as_deref()
                         .and_then(|n| object(ecs, animator, &mut slots[3], n))
-                        .map(|e| position(ecs, e));
+                        .map(|e| w.position(e));
                     two_bone(&mut w, r, m, t, target, pole, weight);
                 }
                 IkKind::LookAt {
@@ -404,10 +457,10 @@ impl World {
                         continue;
                     }
                     let up = Vec3::Y;
-                    let forward = rotation(ecs, animator) * Vec3::NEG_Z;
+                    let forward = w.rotation(animator) * Vec3::NEG_Z;
                     let mut want = (0.0, 0.0);
                     if let (Some(target), true) = (target, weight > 0.0) {
-                        let d = target - position(ecs, h);
+                        let d = target - w.position(h);
                         let flat = |v: Vec3| (v - up * v.dot(up)).normalize_or_zero();
                         let (f, g) = (flat(forward), flat(d));
                         if d.length_squared() > 1e-8 && f != Vec3::ZERO {
@@ -481,12 +534,12 @@ impl World {
                         continue;
                     };
                     let up = Vec3::Y;
-                    let ground = position(ecs, animator).y;
+                    let ground = w.position(animator).y;
                     let skip = body_of(ecs, animator);
                     let mut hits: Vec<Hit> = Vec::new();
                     let mut lifts = [0.0f32; 2];
                     let mut normals = [up; 2];
-                    let feet = [l.2, r.2].map(|f| position(ecs, f));
+                    let feet = [l.2, r.2].map(|f| w.position(f));
                     for (k, p) in feet.iter().enumerate() {
                         hits.clear();
                         self.physics.query(
@@ -526,7 +579,7 @@ impl World {
                         .zip(feet)
                         .zip([(lift_l, normals[0]), (lift_r, normals[1])])
                     {
-                        let keep = rotation(ecs, leg.2);
+                        let keep = w.rotation(leg.2);
                         two_bone(&mut w, leg.0, leg.1, leg.2, p + up * lift, None, 1.0);
                         let tilt = Quat::from_rotation_arc(up, normal);
                         let (axis, angle) = tilt.to_axis_angle();
@@ -537,11 +590,16 @@ impl World {
             }
         }
         // What IK wrote, to take back next tick if no layer poses it.
+        let failure = w.failure;
+        let staged = w.staged;
         for (e, _, after) in touched.iter_mut() {
-            if let Ok(now) = ecs.copy::<Transform>(*e) {
-                *after = now;
+            if let Some(now) = staged.get(e) {
+                *after = *now;
             }
         }
         ik.touched = touched;
+        let mut transforms: Vec<_> = staged.into_iter().collect();
+        transforms.sort_unstable_by_key(|(entity, _)| *entity);
+        (transforms, failure)
     }
 }

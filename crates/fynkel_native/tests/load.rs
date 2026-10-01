@@ -58,7 +58,7 @@ struct Host {
 impl Host {
     fn new() -> Self {
         let rt = fynkel_runtime_create();
-        let w = unsafe { fynkel_world_create(rt, ptr::null()) };
+        let w = unsafe { fynkel_world_create(rt, ptr::null(), std::ptr::null_mut()) };
         assert!(!w.is_null());
         Self { rt, w }
     }
@@ -198,7 +198,9 @@ fn project_and_scene_load_through_the_abi() {
     assert_eq!(b["data"]["speed"], 2.5);
     assert_eq!(b["authoringId"], "c0000000-0000-4000-8000-0000000000e1");
     assert_eq!(b["component"], "c0000000-0000-4000-8000-0000000000c2");
-    assert!(b["entity"].as_u64().unwrap() != 0);
+    assert!(!Entity::from_hex(b["entity"].as_str().unwrap())
+        .unwrap()
+        .is_null());
 
     // The same scene by id: `load_scene` replaces (M3-12) — the first
     // instance is unloaded, the world holds one Main again, residency
@@ -348,7 +350,7 @@ fn prefabs_instantiate_through_the_abi() {
     let host = Host::new();
     const CRATE: &str = "c0000000-0000-4000-8000-000000000040";
 
-    let desc = |id: &str, name: &str, parent: u64| FynkelInstantiateDesc {
+    let desc = |id: &str, name: &str, parent: Entity| FynkelInstantiateDesc {
         prefab_id_utf8: id.as_ptr(),
         prefab_id_len: id.len() as u32,
         name_utf8: name.as_ptr(),
@@ -361,7 +363,7 @@ fn prefabs_instantiate_through_the_abi() {
 
     // Before any project: refused, reported, nothing spawned.
     assert_eq!(
-        unsafe { fynkel_world_instantiate(host.w, &desc(CRATE, "", 0)) },
+        unsafe { fynkel_world_instantiate(host.w, &desc(CRATE, "", Entity::NULL)) },
         Status::LoadFailed
     );
     assert_eq!(host.report()["diagnostics"][0]["code"], "FYN-R0001");
@@ -373,7 +375,7 @@ fn prefabs_instantiate_through_the_abi() {
 
     // The prefab's name by default, at the transform, a root.
     assert_eq!(
-        unsafe { fynkel_world_instantiate(host.w, &desc(CRATE, "", 0)) },
+        unsafe { fynkel_world_instantiate(host.w, &desc(CRATE, "", Entity::NULL)) },
         Status::Ok
     );
     let r = host.report();
@@ -390,7 +392,7 @@ fn prefabs_instantiate_through_the_abi() {
     assert_eq!(i["rejectedComponents"], 0);
     assert_eq!(i["behaviours"].as_array().unwrap().len(), 0);
     assert_eq!(host.live(), 7);
-    let root = Entity::from_bits(i["root"].as_u64().unwrap());
+    let root = Entity::from_hex(i["root"].as_str().unwrap()).unwrap();
     assert_eq!(
         r["residency"]["retained"].as_u64().unwrap(),
         retained,
@@ -411,12 +413,12 @@ fn prefabs_instantiate_through_the_abi() {
 
     // Named and parented under the first instance.
     assert_eq!(
-        unsafe { fynkel_world_instantiate(host.w, &desc(CRATE, "Cargo", root.to_bits())) },
+        unsafe { fynkel_world_instantiate(host.w, &desc(CRATE, "Cargo", root)) },
         Status::Ok
     );
     let r = host.report();
     assert_eq!(r["instance"]["name"], "Cargo");
-    let second = Entity::from_bits(r["instance"]["root"].as_u64().unwrap());
+    let second = Entity::from_hex(r["instance"]["root"].as_str().unwrap()).unwrap();
     {
         let ecs = unsafe { &*host.w }.core().ecs();
         assert_eq!(ecs.copy::<Name>(second).unwrap().value, "Cargo");
@@ -430,7 +432,7 @@ fn prefabs_instantiate_through_the_abi() {
     std::fs::rename(cooked.dir.join("objects"), cooked.dir.join("objects-gone")).unwrap();
     for _ in 0..3 {
         assert_eq!(
-            unsafe { fynkel_world_instantiate(host.w, &desc(CRATE, "", 0)) },
+            unsafe { fynkel_world_instantiate(host.w, &desc(CRATE, "", Entity::NULL)) },
             Status::Ok,
             "{:#}",
             host.report()
@@ -442,13 +444,16 @@ fn prefabs_instantiate_through_the_abi() {
 
     // Not a prefab, unknown, a dead parent, malformed input.
     assert_eq!(
-        unsafe { fynkel_world_instantiate(host.w, &desc(MAIN_SCENE, "", 0)) },
+        unsafe { fynkel_world_instantiate(host.w, &desc(MAIN_SCENE, "", Entity::NULL)) },
         Status::LoadFailed
     );
     assert_eq!(host.report()["diagnostics"][0]["code"], "FYN-R0006");
     assert_eq!(
         unsafe {
-            fynkel_world_instantiate(host.w, &desc("c0000000-0000-4000-8000-0000000000ff", "", 0))
+            fynkel_world_instantiate(
+                host.w,
+                &desc("c0000000-0000-4000-8000-0000000000ff", "", Entity::NULL),
+            )
         },
         Status::LoadFailed
     );
@@ -457,18 +462,14 @@ fn prefabs_instantiate_through_the_abi() {
         unsafe {
             fynkel_world_instantiate(
                 host.w,
-                &desc(
-                    CRATE,
-                    "",
-                    Entity::from_bits(0x0000_0001_0000_ffff).to_bits(),
-                ),
+                &desc(CRATE, "", Entity::from_bits(0x0000_0001_0000_ffff)),
             )
         },
         Status::LoadFailed
     );
     assert_eq!(host.report()["ok"], false);
     assert_eq!(
-        unsafe { fynkel_world_instantiate(host.w, &desc("crate", "", 0)) },
+        unsafe { fynkel_world_instantiate(host.w, &desc("crate", "", Entity::NULL)) },
         Status::InvalidArgument
     );
     assert_eq!(
@@ -542,7 +543,7 @@ fn input_binds_on_load_captures_and_views_through_the_abi() {
     // A 50 ms frame: three ticks. Space and W go down.
     let mut plan = FynkelFramePlan::default();
     assert_eq!(
-        unsafe { fynkel_world_begin_frame(host.w, 0.05, &mut plan) },
+        unsafe { fynkel_world_begin_frame(host.w, 0.05, 1.0, &mut plan) },
         Status::Ok
     );
     assert_eq!(plan.steps, 3);
@@ -567,7 +568,7 @@ fn input_binds_on_load_captures_and_views_through_the_abi() {
 
     // Next frame: release. A gamepad stick as well (device 2, axis phase).
     assert_eq!(
-        unsafe { fynkel_world_begin_frame(host.w, 1.0 / 60.0, &mut plan) },
+        unsafe { fynkel_world_begin_frame(host.w, 1.0 / 60.0, 1.0, &mut plan) },
         Status::Ok
     );
     let stick = InputEventRecord {
@@ -675,7 +676,7 @@ fn scenes_stack_unload_replace_and_zones_fire_through_the_abi() {
         prefab_id_len: COIN.len() as u32,
         name_utf8: ptr::null(),
         name_len: 0,
-        parent: 0,
+        parent: Entity::NULL,
         position: [0.0, 0.0, 0.0],
         rotation: [0.0, 0.0, 0.0, 1.0],
         scale: [1.0, 1.0, 1.0],
@@ -818,7 +819,7 @@ fn dont_destroy_on_load_through_the_abi() {
         prefab_id_len: CRATE.len() as u32,
         name_utf8: ptr::null(),
         name_len: 0,
-        parent: 0,
+        parent: Entity::NULL,
         position: [0.0, 0.0, 0.0],
         rotation: [0.0, 0.0, 0.0, 1.0],
         scale: [1.0, 1.0, 1.0],
@@ -827,7 +828,7 @@ fn dont_destroy_on_load_through_the_abi() {
         unsafe { fynkel_world_instantiate(host.w, &desc) },
         Status::Ok
     );
-    let root = host.report()["instance"]["root"].as_u64().unwrap();
+    let root = Entity::from_hex(host.report()["instance"]["root"].as_str().unwrap()).unwrap();
     let under = FynkelInstantiateDesc {
         parent: root,
         ..desc
@@ -836,13 +837,13 @@ fn dont_destroy_on_load_through_the_abi() {
         unsafe { fynkel_world_instantiate(host.w, &under) },
         Status::Ok
     );
-    let child = host.report()["instance"]["root"].as_u64().unwrap();
+    let child = Entity::from_hex(host.report()["instance"]["root"].as_str().unwrap()).unwrap();
     assert_eq!(
         unsafe { fynkel_world_dont_destroy_on_load(host.w, child) },
         Status::InvalidArgument
     );
     assert_eq!(
-        unsafe { fynkel_world_dont_destroy_on_load(host.w, 0) },
+        unsafe { fynkel_world_dont_destroy_on_load(host.w, Entity::NULL) },
         Status::InvalidArgument
     );
     assert_eq!(
@@ -855,11 +856,8 @@ fn dont_destroy_on_load_through_the_abi() {
     assert_eq!(r["ok"], true, "{r:#}");
     assert_eq!(r["persistent"], 1);
     let w = unsafe { &*host.w };
-    assert!(w.core().ecs().contains(Entity::from_bits(root)));
-    assert!(
-        w.core().ecs().contains(Entity::from_bits(child)),
-        "with its subtree"
-    );
+    assert!(w.core().ecs().contains(root));
+    assert!(w.core().ecs().contains(child), "with its subtree");
     let assets = w.assets().unwrap();
     for id in [
         "c0000000-0000-4000-8000-000000000001",
@@ -873,7 +871,7 @@ fn dont_destroy_on_load_through_the_abi() {
     // Destroyed, nothing keeps it: the next replace load releases it.
     unsafe { &mut *host.w }.core_mut().submit(
         fynkel_core::Lane::Simulation,
-        vec![fynkel_core::Command::Destroy(Entity::from_bits(root))],
+        vec![fynkel_core::Command::Destroy(root)],
     );
     assert_eq!(host.step(), Status::Ok);
     assert_eq!(host.load_scene(&cache, CATALOGUE), Status::Ok);
@@ -1177,7 +1175,7 @@ fn variants_and_nested_instances_cook_and_instantiate() {
             prefab_id_len: id.len() as u32,
             name_utf8: ptr::null(),
             name_len: 0,
-            parent: 0,
+            parent: Entity::NULL,
             position: [0.0; 3],
             rotation: [0.0, 0.0, 0.0, 1.0],
             scale: [1.0; 3],
@@ -1189,7 +1187,7 @@ fn variants_and_nested_instances_cook_and_instantiate() {
         let r = host.report();
         assert_eq!(r["ok"], true, "{r:#}");
         (
-            Entity::from_bits(r["instance"]["root"].as_u64().unwrap()),
+            Entity::from_hex(r["instance"]["root"].as_str().unwrap()).unwrap(),
             r["instance"]["entities"].as_u64().unwrap(),
         )
     };
@@ -1517,8 +1515,8 @@ fn clone_through_the_abi() {
         w.ecs_mut().insert(root, Name::new("Ship")).unwrap();
         (root, child)
     };
-    let desc = |source: Entity, name: &str, parent: u64| FynkelCloneDesc {
-        source: source.to_bits(),
+    let desc = |source: Entity, name: &str, parent: Entity| FynkelCloneDesc {
+        source,
         name_utf8: name.as_ptr(),
         name_len: name.len() as u32,
         parent,
@@ -1527,34 +1525,34 @@ fn clone_through_the_abi() {
         scale: [1.0; 3],
     };
     assert_eq!(
-        unsafe { fynkel_world_clone(host.w, &desc(root, "", 0)) },
+        unsafe { fynkel_world_clone(host.w, &desc(root, "", Entity::NULL)) },
         Status::Ok
     );
     let r = host.report();
     assert_eq!(r["ok"], true, "{r:#}");
     let c = &r["clone"];
-    let copy = Entity::from_bits(c["root"].as_u64().unwrap());
-    assert_eq!(c["entities"][0][0], root.to_bits());
-    assert_eq!(c["entities"][0][1], copy.to_bits());
-    assert_eq!(c["entities"][1][0], child.to_bits());
+    let copy = Entity::from_hex(c["root"].as_str().unwrap()).unwrap();
+    assert_eq!(c["entities"][0][0], root.to_hex());
+    assert_eq!(c["entities"][0][1], copy.to_hex());
+    assert_eq!(c["entities"][1][0], child.to_hex());
     assert_eq!(host.live(), 4);
     {
         let ecs = unsafe { &*host.w }.core().ecs();
         assert_eq!(ecs.copy::<Name>(copy).unwrap().value, "Ship");
         assert_eq!(ecs.copy::<Transform>(copy).unwrap().position.y, 3.0);
-        let copied_child = Entity::from_bits(c["entities"][1][1].as_u64().unwrap());
+        let copied_child = Entity::from_hex(c["entities"][1][1].as_str().unwrap()).unwrap();
         assert_eq!(scene::children_of(ecs, copy), vec![copied_child]);
     }
 
     assert_eq!(
-        unsafe { fynkel_world_clone(host.w, &desc(child, "Wing", copy.to_bits())) },
+        unsafe { fynkel_world_clone(host.w, &desc(child, "Wing", copy)) },
         Status::Ok
     );
     assert_eq!(host.live(), 5);
 
     let stale = Entity::new(copy.world(), 7, 60_000);
     assert_eq!(
-        unsafe { fynkel_world_clone(host.w, &desc(stale, "", 0)) },
+        unsafe { fynkel_world_clone(host.w, &desc(stale, "", Entity::NULL)) },
         Status::LoadFailed
     );
     assert_eq!(host.report()["ok"], false);
@@ -1823,13 +1821,13 @@ fn persistent_objects_are_made_once_by_load_project() {
     assert_eq!(made[0]["name"], "GameManager");
     assert_eq!(made[0]["prefab"], CRATE);
     assert!(made[0]["behaviours"].is_array());
-    let first = made[0]["entity"].as_u64().unwrap();
+    let first = Entity::from_hex(made[0]["entity"].as_str().unwrap()).unwrap();
     let w = unsafe { &*host.w };
-    assert!(w.core().is_persistent(Entity::from_bits(first)));
+    assert!(w.core().is_persistent(first));
     assert_eq!(
         w.core()
             .ecs()
-            .get::<Name>(Entity::from_bits(first))
+            .get::<Name>(first)
             .map(|n| n.value.clone())
             .ok(),
         Some("GameManager".to_string())
@@ -1842,21 +1840,15 @@ fn persistent_objects_are_made_once_by_load_project() {
         host.report()["persistentObjects"].is_null(),
         "only load_project makes them"
     );
-    assert!(unsafe { &*host.w }
-        .core()
-        .ecs()
-        .contains(Entity::from_bits(first)));
+    assert!(unsafe { &*host.w }.core().ecs().contains(first));
 
     // The next load_project makes them afresh: the old one goes.
     assert_eq!(host.load_project(&cache), Status::Ok);
     let r = host.report();
     assert_eq!(r["persistent"], 1, "{r:#}");
-    let second = r["persistentObjects"][0]["entity"].as_u64().unwrap();
+    let second = Entity::from_hex(r["persistentObjects"][0]["entity"].as_str().unwrap()).unwrap();
     assert_ne!(second, first);
-    assert!(!unsafe { &*host.w }
-        .core()
-        .ecs()
-        .contains(Entity::from_bits(first)));
+    assert!(!unsafe { &*host.w }.core().ecs().contains(first));
 
     // A prefab the cache does not have: reported, the game still starts.
     let index = cache_dir.join("index.json");
@@ -1970,4 +1962,100 @@ fn missing_references_cook_and_load_as_none() {
     assert_eq!(host.report()["ok"], true, "{:#}", host.report());
     drop(host);
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn failed_rebinding_before_project_load_does_not_persist_overrides() {
+    let host = Host::new();
+    assert_eq!(
+        host.bind_actions(r#"{"jump":["keyboard:J"]}"#),
+        Status::LoadFailed
+    );
+    let cooked = Cooked::new("rebind-no-project-rollback");
+    assert_eq!(host.load_project(&cooked.text()), Status::Ok);
+    let report = host.report();
+    let jump = report["input"]["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["name"] == "jump")
+        .unwrap();
+    assert_eq!(jump["rebound"], false);
+    assert_eq!(jump["bindings"].as_array().unwrap().len(), 3);
+}
+
+#[test]
+fn binding_warning_reports_and_accepted_overrides_match_after_a_later_load() {
+    let host = Host::new();
+    let cooked = Cooked::new("rebind-shared-preparation");
+    assert_eq!(host.load_project(&cooked.text()), Status::Ok);
+    assert_eq!(
+        host.bind_actions(r#"{"jump":["keyboard:J","not-a-binding"],"unknown":["keyboard:K"]}"#),
+        Status::Ok
+    );
+    let input = host.report()["input"].clone();
+    assert_eq!(input["bindingErrors"].as_array().unwrap().len(), 1);
+    assert_eq!(input["bindingErrors"][0]["action"], "jump");
+    assert_eq!(input["bindingErrors"][0]["binding"], "not-a-binding");
+    assert!(input["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|a| a["name"] != "unknown"));
+    assert_eq!(host.load_scene(&cooked.text(), MAIN_SCENE), Status::Ok);
+    assert_eq!(
+        host.report()["input"],
+        input,
+        "load and explicit rebinding use the same preparation and grammar"
+    );
+}
+
+#[test]
+fn binding_boundary_adopts_queued_spawns_once_and_failed_adoption_keeps_previous_overrides() {
+    let host = Host::new();
+    let cooked = Cooked::new("rebind-adoption");
+    assert_eq!(host.load_project(&cooked.text()), Status::Ok);
+    host.events();
+    unsafe { &mut *host.w }.core_mut().submit(
+        fynkel_core::Lane::Simulation,
+        vec![fynkel_core::Command::Spawn {
+            temp_id: 73,
+            transform: Transform::default(),
+            parent: None,
+            name: Some("adopted".into()),
+        }],
+    );
+    assert_eq!(host.bind_actions(r#"{"jump":["keyboard:J"]}"#), Status::Ok);
+    assert_eq!(
+        host.events()
+            .iter()
+            .filter(|e| e.0 == EventKind::SPAWNED.0)
+            .count(),
+        1
+    );
+    host.step();
+    assert!(host.events().iter().all(|e| e.0 != EventKind::SPAWNED.0));
+    unsafe { &mut *host.w }.core_mut().submit(
+        fynkel_core::Lane::Simulation,
+        vec![fynkel_core::Command::Spawn {
+            temp_id: 74,
+            transform: Transform::from_position(Vec3::splat(f32::NAN)),
+            parent: None,
+            name: Some("invalid".into()),
+        }],
+    );
+    assert_eq!(
+        host.bind_actions(r#"{"jump":["keyboard:K"]}"#),
+        Status::LoadFailed
+    );
+    host.step(); // Original failed queue remains for its normal rejection path.
+    assert_eq!(host.load_scene(&cooked.text(), MAIN_SCENE), Status::Ok);
+    let report = host.report();
+    let jump = report["input"]["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["name"] == "jump")
+        .unwrap();
+    assert_eq!(jump["bindings"], serde_json::json!(["keyboard:J"]));
 }

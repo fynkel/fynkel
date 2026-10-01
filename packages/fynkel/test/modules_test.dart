@@ -30,8 +30,13 @@ void main() {
     return w;
   }
 
-  Matcher namesModule(String module) =>
-      throwsA(isA<StateError>().having((e) => e.message, 'message', allOf(contains('$module module'), contains('modules.$module'))));
+  Matcher namesModule(String module) => throwsA(
+    isA<StateError>().having(
+      (e) => e.message,
+      'message',
+      allOf(contains('$module module'), contains('modules.$module')),
+    ),
+  );
 
   test('every module is on before a load and for a project that keeps them', () {
     final w = fresh();
@@ -61,11 +66,15 @@ void main() {
     final o = w.spawn(name: 'o');
     expect(() => w.raycast(Vec3.zero, const Vec3(0, -1, 0)), namesModule('physics'));
     expect(() => w.overlap(ColliderShape.sphere, const Vec3(1, 1, 1), Vec3.zero), namesModule('physics'));
-    expect(() => w.shapeCast(ColliderShape.sphere, const Vec3(1, 1, 1), Vec3.zero, Vec3.zero), namesModule('physics'));
+    expect(
+      () => w.shapeCast(ColliderShape.sphere, const Vec3(1, 1, 1), Vec3.zero, Vec3.zero),
+      namesModule('physics'),
+    );
     expect(() => w.physicsQuery(const []), namesModule('physics'));
     expect(() => o.applyImpulse(const Vec3(0, 1, 0)), namesModule('physics'));
     expect(() => o.move(const Vec3(1, 0, 0)), namesModule('physics'));
     // The other modules still answer.
+    o.set(const AudioSource());
     o.audio.stop();
   });
 
@@ -83,6 +92,7 @@ void main() {
     final o = w.spawn(name: 'o');
     expect(() => o.animation.stop(), namesModule('animation'));
     expect(() => o.animation.crossfade(AssetRef.none, 0.2), namesModule('animation'));
+    o.set(const RigidBody());
     o.applyImpulse(const Vec3(0, 1, 0));
   });
 }

@@ -599,3 +599,167 @@ fn a_node_whose_position_breathes_keeps_its_look_at_turn_bounded() {
     steps(&mut w, 120);
     assert!(turn(&w) < 0.2, "{}°", turn(&w));
 }
+
+#[test]
+fn transactional_ik_targets_commit_at_tick_and_abort_preserves_the_target() {
+    let mut w = world();
+    let (root, [_, _, hand]) = arm(&mut w, vec![reach(None)]);
+    let initial = at(&w, hand);
+    let target = Vec3::new(2.0, 1.0, 0.5);
+    w.edit_gameplay(|edit| {
+        edit.animate_control(
+            root,
+            AnimateOp::SetIkTarget {
+                goal: "hand".into(),
+                position: target,
+                weight: 1.0,
+            },
+        )
+    })
+    .unwrap();
+    assert_eq!(at(&w, hand), initial);
+    steps(&mut w, 2);
+    assert!(at(&w, hand).distance(target) < 1e-3);
+    let result: Result<EditCommit<()>, _> = w.edit_gameplay(|edit| {
+        edit.animate_control(
+            root,
+            AnimateOp::ClearIkTarget {
+                goal: "hand".into(),
+            },
+        )?;
+        Err(EditError::Aborted)
+    });
+    assert!(result.is_err());
+    w.step();
+    assert!(at(&w, hand).distance(target) < 1e-3);
+    w.edit_gameplay(|edit| {
+        edit.animate_control(
+            root,
+            AnimateOp::ClearIkTarget {
+                goal: "hand".into(),
+            },
+        )
+    })
+    .unwrap();
+    steps(&mut w, 2);
+    assert!(at(&w, hand).distance(initial) < 1e-3);
+}
+
+#[test]
+fn invalid_ik_goal_output_rolls_back_other_goals_in_the_same_pose() {
+    let mut w = world();
+    let look = IkDef {
+        name: "head".into(),
+        kind: IkKind::TwoBone {
+            root: None,
+            middle: None,
+            tip: "Head".into(),
+            pole: None,
+        },
+        weight: IkWeight::Value(1.0),
+        target: None,
+    };
+    let (root, [upper, lower, _]) = arm(&mut w, vec![reach(None), look]);
+    let collapsed = spawn(&mut w, 5, Vec3::ZERO, Some(root), "Collapsed");
+    let head = spawn(
+        &mut w,
+        6,
+        Vec3::new(f32::MAX, 0.0, 0.0),
+        Some(collapsed),
+        "Head",
+    );
+
+    let before_upper = w.ecs().copy::<Transform>(upper).unwrap();
+    let before_lower = w.ecs().copy::<Transform>(lower).unwrap();
+    let before_head = w.ecs().copy::<Transform>(head).unwrap();
+    w.edit_gameplay(|edit| {
+        for goal in ["hand", "head"] {
+            edit.animate_control(
+                root,
+                AnimateOp::SetIkTarget {
+                    goal: goal.into(),
+                    position: Vec3::new(2.0, 1.0, 0.5),
+                    weight: 1.0,
+                },
+            )?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    w.step();
+    assert_eq!(w.ecs().copy::<Transform>(upper).unwrap(), before_upper);
+    assert_eq!(w.ecs().copy::<Transform>(lower).unwrap(), before_lower);
+    assert_eq!(w.ecs().copy::<Transform>(head).unwrap(), before_head);
+    assert!(w.diagnostics().iter().any(|d| d.entity == root
+        && d.code == DiagnosticCode::INVALID_PAYLOAD
+        && d.message.contains("IK pose")));
+}
+
+#[test]
+fn look_at_uses_authored_orientation_under_reflected_nonuniform_scale() {
+    fn solve(scale: Vec3) -> (glam::Quat, Vec3) {
+        let mut w = world();
+        let root = spawn(&mut w, 1, Vec3::ZERO, None, "Rig");
+        let head = spawn(&mut w, 2, Vec3::ZERO, Some(root), "Head");
+        set(
+            &mut w,
+            root,
+            ComponentValue::Transform(Transform {
+                rotation: glam::Quat::from_rotation_y(0.2),
+                scale,
+                ..Transform::default()
+            }),
+        );
+        let head_scale = Vec3::new(0.7, 1.1, 0.9);
+        set(
+            &mut w,
+            head,
+            ComponentValue::Transform(Transform {
+                scale: head_scale,
+                ..Transform::default()
+            }),
+        );
+        run(
+            &mut w,
+            root,
+            ControllerDef {
+                name: "Look".into(),
+                parameters: vec![],
+                layers: vec![layer("Base Layer", None, vec![])],
+                ik: vec![IkDef {
+                    name: "look".into(),
+                    kind: IkKind::LookAt {
+                        head: "Head".into(),
+                        spine: vec![],
+                        limit: 1.0,
+                        body: 0.0,
+                    },
+                    weight: IkWeight::Value(1.0),
+                    target: None,
+                }],
+            },
+        );
+        animate(
+            &mut w,
+            root,
+            AnimateOp::SetIkTarget {
+                goal: "look".into(),
+                position: Vec3::new(2.0, 1.0, -5.0),
+                weight: 1.0,
+            },
+        );
+        steps(&mut w, 120);
+        assert!(w.diagnostics().is_empty(), "{:?}", w.diagnostics());
+        (
+            scene::world_rotation(w.ecs(), head).unwrap(),
+            w.ecs().copy::<Transform>(head).unwrap().scale,
+        )
+    }
+    let (plain, scale) = solve(Vec3::ONE);
+    let (reflected, reflected_scale) = solve(Vec3::new(-2.0, 3.0, 0.5));
+    assert!(
+        plain.dot(reflected).abs() > 0.99999,
+        "authored orientation must not depend on scale decomposition"
+    );
+    assert_eq!(reflected_scale, scale);
+}

@@ -81,6 +81,7 @@ pub(super) struct Scratch {
     pub(super) driver: Vec<(Entity, fynkel_physics::BodyCommand)>,
     pub(super) hits: Vec<fynkel_physics::Hit>,
     pub(super) entities: Vec<Entity>,
+    pub(super) lifetimes: Vec<(Entity, crate::LifetimeDespawn)>,
     pub(super) emissions: Vec<catalogue::Emission>,
     pub(super) placements: Vec<catalogue::Placement>,
 }

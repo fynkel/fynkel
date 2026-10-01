@@ -10,7 +10,7 @@
 //! inside the runtime crates; hosts, the ABI and documents never do
 //! (`tests/contract.rs` enforces the first half mechanically).
 
-use fynkel_contracts::{Entity, WorldId};
+use fynkel_contracts::{allocate_world_id, Entity, IdentityExhausted, WorldId};
 
 pub mod internal {
     //! Engine-internal access to the underlying `hecs` world for systems
@@ -49,6 +49,7 @@ impl<T: Send + Sync + 'static> Component for T {}
 pub enum EcsError {
     /// Handle is NULL, from another world, or its generation is stale.
     StaleEntity(Entity),
+    OutOfEntities,
     /// `get`/`remove` of a component the entity does not have.
     MissingComponent(Entity),
 }
@@ -119,16 +120,20 @@ pub struct World {
 }
 
 impl World {
-    pub fn new(id: WorldId) -> Self {
-        assert!(id != WorldId::NONE, "WorldId(0) is reserved");
-        Self {
+    pub fn new() -> Self {
+        Self::try_new().expect("world identity exhausted")
+    }
+
+    pub fn try_new() -> core::result::Result<Self, IdentityExhausted> {
+        let id = allocate_world_id()?;
+        Ok(Self {
             id,
             inner: hecs::World::new(),
             slots: Vec::new(),
             free: Vec::new(),
             live: 0,
             deferred_despawn: std::sync::Mutex::new(Vec::new()),
-        }
+        })
     }
 
     pub fn id(&self) -> WorldId {
@@ -161,15 +166,23 @@ impl World {
         self.resolve(entity).is_some()
     }
 
-    pub fn spawn(&mut self, mut builder: EntityBuilder) -> Entity {
+    pub fn spawn(&mut self, builder: EntityBuilder) -> Entity {
+        self.try_spawn(builder).expect("entity slots exhausted")
+    }
+
+    pub fn try_spawn(&mut self, mut builder: EntityBuilder) -> Result<Entity> {
+        if self.live == u32::MAX {
+            return Err(EcsError::OutOfEntities);
+        }
         let slot_index = match self.free.pop() {
             Some(i) => i,
             None => {
+                let index = u32::try_from(self.slots.len()).map_err(|_| EcsError::OutOfEntities)?;
                 self.slots.push(Slot {
                     generation: 1,
                     raw: None,
                 });
-                (self.slots.len() - 1) as u32
+                index
             }
         };
         let slot = &mut self.slots[slot_index as usize];
@@ -178,7 +191,7 @@ impl World {
         let raw = self.inner.spawn(builder.inner.build());
         slot.raw = Some(raw);
         self.live += 1;
-        entity
+        Ok(entity)
     }
 
     pub fn spawn_empty(&mut self) -> Entity {
@@ -194,8 +207,10 @@ impl World {
             .expect("slot mapping and hecs disagree");
         let slot = &mut self.slots[entity.slot() as usize];
         slot.raw = None;
-        slot.generation = Entity::next_generation(slot.generation);
-        self.free.push(entity.slot());
+        if let Some(next) = Entity::next_generation(slot.generation) {
+            slot.generation = next;
+            self.free.push(entity.slot());
+        }
         self.live -= 1;
         Ok(())
     }
@@ -288,5 +303,41 @@ impl World {
 impl Drop for World {
     fn drop(&mut self) {
         // hecs drops component storage; nothing else is owned.
+    }
+}
+
+impl Default for World {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    #[test]
+    fn maximum_generation_retires_actual_ecs_slot() {
+        let mut world = World::new();
+        let first = world.spawn_empty();
+        world.slots[first.slot() as usize].generation = u32::MAX;
+        let last = Entity::new(world.id(), first.slot(), u32::MAX);
+        assert!(world.contains(last));
+        world.despawn(last).unwrap();
+        assert!(world.free.is_empty());
+        let next = world.spawn_empty();
+        assert_ne!(last.slot(), next.slot());
+        assert!(!world.contains(first));
+        assert!(!world.contains(last));
+    }
+    #[test]
+    fn slot_exhaustion_does_not_mutate_storage() {
+        let mut world = World::new();
+        world.live = u32::MAX;
+        assert_eq!(
+            world.try_spawn(EntityBuilder::new()),
+            Err(EcsError::OutOfEntities)
+        );
+        assert!(world.slots.is_empty());
+        assert!(world.inner.is_empty());
     }
 }

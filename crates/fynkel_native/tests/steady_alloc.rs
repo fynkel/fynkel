@@ -14,7 +14,7 @@ use fynkel_native::*;
 #[test]
 fn input_and_events_read_without_allocating() {
     let rt = fynkel_runtime_create();
-    let w = unsafe { fynkel_world_create(rt, ptr::null()) };
+    let w = unsafe { fynkel_world_create(rt, ptr::null(), std::ptr::null_mut()) };
     let spec = |name: &str, kind, bindings: &[&str]| ActionSpec {
         name: name.into(),
         kind,

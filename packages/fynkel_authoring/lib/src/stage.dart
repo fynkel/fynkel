@@ -1,4 +1,4 @@
-// The Inspector's preview stages (authoring ABI v4, ADR-0030 §3): one
+// The Inspector's preview stages (authoring ABI v5, ADR-0030 §3): one
 // asset alone in a small edit-mode world — a prefab or a model's
 // hierarchy, a mesh with its material, a material on a shape — lit by the
 // stage's own sun and framed the way the Project's tiles show it. The

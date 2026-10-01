@@ -12,6 +12,7 @@ use fynkel_core::animation::controller::{
 };
 use fynkel_core::animation::{Channel, Clip, Interpolation, Property};
 use fynkel_core::components::ComponentValue;
+use fynkel_core::world::AnimatorRun;
 use fynkel_core::*;
 use glam::Vec3;
 
@@ -356,11 +357,26 @@ fn a_controller_run_is_deterministic() {
             }
             w.step();
             let t = w.ecs().copy::<Transform>(arm).unwrap();
+            // Runs have distinct world namespaces. Validate the live identity
+            // before normalizing only this comparison's diagnostic records.
+            let state = w
+                .animator_controller_state(root)
+                .map(|(mut layers, mut parameters)| {
+                    for row in &mut layers {
+                        assert_eq!(row.entity, root);
+                        row.entity = Entity::NULL;
+                    }
+                    for row in &mut parameters {
+                        assert_eq!(row.entity, root);
+                        row.entity = Entity::NULL;
+                    }
+                    (layers, parameters)
+                });
             log.push(format!(
                 "{:?} {:?} {:?}",
                 t.position.to_array().map(f32::to_bits),
                 states(&mut w),
-                w.animator_controller_state(root)
+                state
             ));
         }
         log
@@ -1025,4 +1041,460 @@ fn an_interruption_fades_from_the_pose_it_held() {
     let weight = 3.0 * DEFAULT_FIXED_DT as f32 / 0.5;
     let want = held + (20.0 - held) * weight;
     assert!((n - want).abs() < 1e-3, "{n} vs {want}");
+}
+
+fn transaction_controller() -> (World, Entity, Entity) {
+    let mut w = world();
+    let (root, arm) = rig(&mut w);
+    set(&mut w, root, controlled(controller_ref(1)));
+    w.drain_events();
+    (w, root, arm)
+}
+
+#[test]
+fn transactional_state_transition_matches_legacy_and_is_not_replayed() {
+    let (mut w, root, arm) = transaction_controller();
+    let (mut legacy, other, other_arm) = transaction_controller();
+    let time = base(&w, root).normalized_time;
+    w.edit_gameplay(|edit| edit.animate_control(root, play_state("Jump", 0.2)))
+        .unwrap();
+    assert_eq!(base(&w, root).normalized_time, time);
+    assert!(states(&mut w).is_empty());
+    animate(&mut legacy, other, play_state("Jump", 0.2));
+    w.step();
+    assert_eq!(states(&mut w), states(&mut legacy));
+    for _ in 0..8 {
+        w.step();
+        legacy.step();
+    }
+    assert_eq!(y(&w, arm), y(&legacy, other_arm));
+    assert_eq!(
+        base(&w, root).transition_progress,
+        base(&legacy, other).transition_progress
+    );
+    assert_eq!(states(&mut w), states(&mut legacy));
+}
+
+#[test]
+fn controller_validation_and_abort_preserve_data_and_runtime() {
+    let (mut w, root, _) = transaction_controller();
+    let time = base(&w, root).normalized_time;
+    for invalid in [
+        play_state("missing", 0.0),
+        play_state("Jump", -1.0),
+        AnimateOp::PlayOneShot {
+            motion: clip_ref(2),
+            slot: "missing".into(),
+            blend_in: 0.0,
+            blend_out: 0.0,
+            speed: 1.0,
+        },
+        AnimateOp::SetIkTarget {
+            goal: "missing".into(),
+            position: Vec3::ZERO,
+            weight: 1.0,
+        },
+        AnimateOp::ClearIkTarget {
+            goal: "missing".into(),
+        },
+        param("weapon", Value::Float(4.0)),
+    ] {
+        assert!(w
+            .edit_gameplay(|edit| {
+                edit.set_name(root, "discard")?;
+                edit.animate_control(root, play_state("Jump", 0.0))?;
+                let _ = edit.animate_control(root, invalid);
+                Ok(())
+            })
+            .is_err());
+        assert_eq!(base(&w, root).normalized_time, time);
+        assert_eq!(w.ecs().get::<Name>(root).unwrap().value.as_str(), "Rig");
+    }
+    let result: Result<EditCommit<()>, _> = w.edit_gameplay(|edit| {
+        edit.animate_control(root, play_state("Jump", 0.0))?;
+        Err(EditError::Aborted)
+    });
+    assert!(result.is_err());
+    w.step();
+    assert_eq!(base(&w, root).state, "Locomotion");
+}
+
+#[test]
+fn controller_requests_bind_the_selected_controller_at_commit_and_execution() {
+    let (mut w, root, _) = transaction_controller();
+    w.register_controller(controller_ref(2), player()).unwrap();
+    assert!(w
+        .edit_gameplay(|edit| {
+            edit.animate_control(root, play_state("Jump", 0.0))?;
+            edit.set_component(root, controlled(controller_ref(2)))
+        })
+        .is_err());
+    w.edit_gameplay(|edit| edit.animate_control(root, play_state("Jump", 0.0)))
+        .unwrap();
+    w.edit_gameplay(|edit| edit.set_component(root, controlled(controller_ref(2))))
+        .unwrap();
+    w.step();
+    assert_eq!(w.diagnostics().len(), 1);
+    assert!(w.diagnostics()[0].message.contains("controller changed"));
+    assert_eq!(base(&w, root).state, "Locomotion");
+    w.step();
+    assert!(w.diagnostics().is_empty());
+}
+
+#[test]
+fn transactional_one_shot_start_stop_is_ordered_and_abort_does_not_stop_playback() {
+    let (mut w, root, _) = transaction_controller();
+    let play = AnimateOp::PlayOneShot {
+        motion: clip_ref(2),
+        slot: "".into(),
+        blend_in: 0.0,
+        blend_out: 0.0,
+        speed: 1.0,
+    };
+    w.edit_gameplay(|edit| edit.animate_control(root, play.clone()))
+        .unwrap();
+    assert!(base(&w, root).one_shot.is_nil());
+    w.step();
+    assert_eq!(base(&w, root).one_shot, clip_ref(2));
+    let stop = AnimateOp::StopOneShot {
+        slot: "".into(),
+        blend_out: 0.0,
+    };
+    let result: Result<EditCommit<()>, _> = w.edit_gameplay(|edit| {
+        edit.animate_control(root, stop.clone())?;
+        Err(EditError::Aborted)
+    });
+    assert!(result.is_err());
+    w.step();
+    assert_eq!(base(&w, root).one_shot, clip_ref(2));
+    w.edit_gameplay(|edit| {
+        edit.animate_control(root, stop.clone())?;
+        edit.animate_control(root, play)?;
+        edit.animate_control(root, stop)
+    })
+    .unwrap();
+    w.step();
+    assert!(base(&w, root).one_shot.is_nil());
+}
+
+#[test]
+fn controller_resources_may_be_registered_after_request_commit_before_execution() {
+    let mut w = world();
+    let c = w
+        .edit_gameplay(|edit| {
+            let root = edit.spawn("pending", Transform::default(), None)?;
+            edit.set_component(root, controlled(controller_ref(1)))?;
+            edit.animate_control(root, play_state("Jump", 0.0))?;
+            Ok(root)
+        })
+        .unwrap();
+    w.register_controller(controller_ref(1), player()).unwrap();
+    let root = c.resolve(c.value).unwrap();
+    w.step();
+    assert_eq!(base(&w, root).state, "Jump");
+}
+
+#[test]
+fn transactional_parameters_read_native_intents_and_preserve_completed_values() {
+    let (mut w, root, _) = transaction_controller();
+    w.edit_gameplay(|e| {
+        assert_eq!(
+            e.controller_parameter(root, "weapon")?,
+            Some((ParameterKind::Int, Value::Int(0)))
+        );
+        e.animate_control(root, param("weapon", Value::Int(i32::MIN)))?;
+        assert_eq!(
+            e.controller_parameter(root, "weapon")?,
+            Some((ParameterKind::Int, Value::Int(i32::MIN)))
+        );
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        w.animator_controller_state(root)
+            .unwrap()
+            .1
+            .iter()
+            .find(|p| p.name == "weapon")
+            .unwrap()
+            .integer,
+        0
+    );
+    w.edit_gameplay(|e| {
+        assert_eq!(
+            e.controller_parameter(root, "weapon")?,
+            Some((ParameterKind::Int, Value::Int(i32::MIN)))
+        );
+        e.animate_control(root, param("weapon", Value::Int(i32::MAX)))?;
+        Ok(())
+    })
+    .unwrap();
+    w.step();
+    assert_eq!(
+        w.animator_controller_state(root)
+            .unwrap()
+            .1
+            .iter()
+            .find(|p| p.name == "weapon")
+            .unwrap()
+            .integer,
+        i32::MAX
+    );
+}
+
+#[test]
+fn parameter_failures_and_abort_leave_no_requests_or_data() {
+    let (mut w, root, _) = transaction_controller();
+    for invalid in [
+        param("missing", Value::Bool(true)),
+        param("weapon", Value::Float(1.0)),
+        param("weapon", Value::Float(f32::NAN)),
+    ] {
+        assert!(w
+            .edit_gameplay(|e| {
+                e.set_name(root, "discard")?;
+                e.animate_control(root, param("weapon", Value::Int(42)))?;
+                let _ = e.animate_control(root, invalid);
+                Ok(())
+            })
+            .is_err());
+    }
+    assert!(w
+        .edit_gameplay(|e| {
+            e.animate_control(root, param("jump", Value::Bool(true)))?;
+            Err::<(), _>(EditError::Aborted)
+        })
+        .is_err());
+    w.step();
+    assert_eq!(base(&w, root).state, "Locomotion");
+    assert_eq!(w.ecs().get::<Name>(root).unwrap().value.as_str(), "Rig");
+    assert_eq!(
+        w.animator_controller_state(root)
+            .unwrap()
+            .1
+            .iter()
+            .find(|p| p.name == "weapon")
+            .unwrap()
+            .integer,
+        0
+    );
+}
+
+#[test]
+fn transaction_trigger_is_consumed_once_and_reset_order_is_preserved() {
+    let (mut w, root, _) = transaction_controller();
+    w.edit_gameplay(|e| {
+        e.animate_control(root, param("jump", Value::Bool(true)))?;
+        e.animate_control(root, param("jump", Value::Bool(false)))?;
+        assert_eq!(
+            e.controller_parameter(root, "jump")?,
+            Some((ParameterKind::Trigger, Value::Bool(false)))
+        );
+        Ok(())
+    })
+    .unwrap();
+    w.step();
+    assert_eq!(base(&w, root).state, "Locomotion");
+    w.edit_gameplay(|e| e.animate_control(root, param("jump", Value::Bool(true))))
+        .unwrap();
+    w.step();
+    w.edit_gameplay(|e| {
+        assert_eq!(
+            e.controller_parameter(root, "jump")?,
+            Some((ParameterKind::Trigger, Value::Bool(false)))
+        );
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn pending_parameter_reads_track_unregistered_types_and_controller_identity() {
+    let mut w = world();
+    let created = w
+        .edit_gameplay(|e| {
+            let p = e.spawn("pending", Transform::default(), None)?;
+            e.set_component(
+                p,
+                GameplayComponentValue::Animator(Animator {
+                    controller: Some(controller_ref(1)),
+                    ..Default::default()
+                }),
+            )?;
+            assert_eq!(e.controller_parameter(p, "weapon")?, None);
+            e.animate_control(p, param("weapon", Value::Float(2.0)))?;
+            e.animate_control(p, param("weapon", Value::Int(7)))?;
+            assert_eq!(
+                e.controller_parameter(p, "weapon")?,
+                Some((ParameterKind::Int, Value::Int(7)))
+            );
+            Ok(p)
+        })
+        .unwrap();
+    let root = created.resolve(created.value).unwrap();
+    w.register_controller(controller_ref(1), player()).unwrap();
+    w.register_controller(controller_ref(2), player()).unwrap();
+    w.edit_gameplay(|e| {
+        e.set_component(
+            root,
+            GameplayComponentValue::Animator(Animator {
+                controller: Some(controller_ref(2)),
+                ..Default::default()
+            }),
+        )?;
+        assert_eq!(
+            e.controller_parameter(root, "weapon")?,
+            Some((ParameterKind::Int, Value::Int(0)))
+        );
+        Ok(())
+    })
+    .unwrap();
+    w.step();
+    assert_eq!(
+        w.animator_controller_state(root)
+            .unwrap()
+            .1
+            .iter()
+            .find(|p| p.name == "weapon")
+            .unwrap()
+            .integer,
+        0
+    );
+}
+
+#[test]
+fn committed_animator_removal_retires_runtime_and_old_intents_but_keeps_fresh_requests() {
+    let (mut w, root, _) = transaction_controller();
+    let config = w.ecs().copy::<Animator>(root).unwrap();
+    w.edit_gameplay(|edit| edit.animate_control(root, param("weapon", Value::Int(7))))
+        .unwrap();
+    w.step();
+    let other = w
+        .edit_gameplay(|edit| {
+            let other = edit.spawn("other", Transform::default(), None)?;
+            edit.set_component(other, ComponentValue::Animator(config.clone()))?;
+            edit.animate_control(other, param("weapon", Value::Int(33)))?;
+            edit.animate_control(root, param("weapon", Value::Int(9)))?;
+            Ok(other)
+        })
+        .unwrap();
+    let other = other.resolve(other.value).unwrap();
+    w.edit_gameplay(|edit| edit.remove_component(root, ComponentId::ANIMATOR))
+        .unwrap();
+    assert!(w.animator_controller_state(root).is_none());
+    assert!(!w.ecs().has::<AnimatorRun>(root));
+    w.edit_gameplay(|edit| {
+        edit.set_component(root, ComponentValue::Animator(config.clone()))?;
+        assert_eq!(
+            edit.controller_parameter(root, "weapon")?,
+            Some((ParameterKind::Int, Value::Int(0)))
+        );
+        edit.animate_control(root, param("weapon", Value::Int(4)))?;
+        assert_eq!(
+            edit.controller_parameter(root, "weapon")?,
+            Some((ParameterKind::Int, Value::Int(4)))
+        );
+        assert_eq!(
+            edit.controller_parameter(other, "weapon")?,
+            Some((ParameterKind::Int, Value::Int(33)))
+        );
+        Ok(())
+    })
+    .unwrap();
+    w.step();
+    assert_eq!(w.diagnostics().len(), 1, "{:?}", w.diagnostics());
+    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::MISSING_COMPONENT);
+    w.edit_gameplay(|edit| {
+        assert_eq!(
+            edit.controller_parameter(root, "weapon")?,
+            Some((ParameterKind::Int, Value::Int(4)))
+        );
+        assert_eq!(
+            edit.controller_parameter(other, "weapon")?,
+            Some((ParameterKind::Int, Value::Int(33)))
+        );
+        Ok(())
+    })
+    .unwrap();
+    w.step();
+    assert!(w.diagnostics().is_empty());
+}
+
+#[test]
+fn aborted_animator_removal_preserves_completed_runtime_and_queued_intents() {
+    let (mut w, root, _) = transaction_controller();
+    w.edit_gameplay(|edit| edit.animate_control(root, param("weapon", Value::Int(7))))
+        .unwrap();
+    w.step();
+    w.edit_gameplay(|edit| edit.animate_control(root, param("weapon", Value::Int(9))))
+        .unwrap();
+    assert!(w
+        .edit_gameplay(|edit| {
+            edit.remove_component(root, ComponentId::ANIMATOR)?;
+            Err::<(), _>(EditError::Aborted)
+        })
+        .is_err());
+    assert!(w.ecs().has::<AnimatorRun>(root));
+    assert_eq!(
+        w.animator_controller_state(root)
+            .unwrap()
+            .1
+            .iter()
+            .find(|p| p.name == "weapon")
+            .unwrap()
+            .integer,
+        7
+    );
+    w.edit_gameplay(|edit| {
+        assert_eq!(
+            edit.controller_parameter(root, "weapon")?,
+            Some((ParameterKind::Int, Value::Int(9)))
+        );
+        Ok(())
+    })
+    .unwrap();
+    w.step();
+    assert!(w.diagnostics().is_empty());
+    assert_eq!(
+        w.animator_controller_state(root)
+            .unwrap()
+            .1
+            .iter()
+            .find(|p| p.name == "weapon")
+            .unwrap()
+            .integer,
+        9
+    );
+}
+
+#[test]
+fn same_edit_animator_remove_and_readd_coalesces_without_retiring_runtime() {
+    let (mut w, root, _) = transaction_controller();
+    let config = w.ecs().copy::<Animator>(root).unwrap();
+    w.edit_gameplay(|edit| edit.animate_control(root, param("weapon", Value::Int(7))))
+        .unwrap();
+    w.step();
+    w.edit_gameplay(|edit| {
+        edit.remove_component(root, ComponentId::ANIMATOR)?;
+        edit.set_component(root, ComponentValue::Animator(config))?;
+        assert_eq!(
+            edit.controller_parameter(root, "weapon")?,
+            Some((ParameterKind::Int, Value::Int(7)))
+        );
+        edit.animate_control(root, param("weapon", Value::Int(9)))
+    })
+    .unwrap();
+    assert!(w.ecs().has::<AnimatorRun>(root));
+    w.step();
+    assert!(w.diagnostics().is_empty());
+    assert_eq!(
+        w.animator_controller_state(root)
+            .unwrap()
+            .1
+            .iter()
+            .find(|p| p.name == "weapon")
+            .unwrap()
+            .integer,
+        9
+    );
 }

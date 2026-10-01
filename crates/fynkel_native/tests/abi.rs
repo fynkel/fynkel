@@ -9,7 +9,7 @@ use fynkel_core::Lane;
 use fynkel_native::buffer::{self, BufferKind, Writer};
 use fynkel_native::*;
 use fynkel_scene::Transform;
-use fynkel_wire::{get_u32, get_u64, WireRecord};
+use fynkel_wire::{get_entity, get_u32, WireRecord};
 use glam::Vec3;
 
 struct Host {
@@ -20,7 +20,7 @@ struct Host {
 impl Host {
     fn new() -> Self {
         let rt = fynkel_runtime_create();
-        let w = unsafe { fynkel_world_create(rt, ptr::null()) };
+        let w = unsafe { fynkel_world_create(rt, ptr::null(), std::ptr::null_mut()) };
         assert!(!w.is_null());
         Self { rt, w }
     }
@@ -117,7 +117,7 @@ impl Host {
         let desc = FynkelQueryDesc {
             kind,
             request_id: 77,
-            entity: entity.to_bits(),
+            entity,
         };
         let mut v = FynkelBufferView {
             data: ptr::null(),
@@ -167,7 +167,7 @@ fn spawn(temp_id: u64, x: f32, parent: Option<Entity>, name: &str) -> SpawnComma
 
 #[test]
 fn version_and_fingerprint() {
-    assert_eq!(fynkel_abi_version(), 1);
+    assert_eq!(fynkel_abi_version(), 3);
     assert_eq!(
         fynkel_schema_fingerprint(),
         fynkel_core::schema::schema_fingerprint()
@@ -198,7 +198,7 @@ fn spawn_set_destroy_round_trip_with_diagnostics() {
     let (a, b) = (spawned[0].entity, spawned[1].entity);
     assert!(h.events().is_empty(), "drained");
 
-    let handles = [a.to_bits(), b.to_bits()];
+    let handles = [a, b];
     assert_eq!(
         unsafe { fynkel_world_subscribe(h.w, 1, handles.as_ptr(), 2, 1) },
         Status::Ok
@@ -285,7 +285,7 @@ fn presentation_lane_and_frame_plan() {
 
     let mut plan = FynkelFramePlan::default();
     assert_eq!(
-        unsafe { fynkel_world_begin_frame(h.w, 0.001, &mut plan) },
+        unsafe { fynkel_world_begin_frame(h.w, 0.001, 1.0, &mut plan) },
         Status::Ok
     );
     assert_eq!(plan.steps, 0);
@@ -359,11 +359,11 @@ fn hierarchy_queries() {
 
     let (s, n, body, _) = h.query(bridge::QUERY_CHILDREN, root);
     assert_eq!((s, n), (Status::Ok, 2));
-    assert_eq!(get_u64(&body, 0), c1.to_bits());
-    assert_eq!(get_u64(&body, 8), c2.to_bits());
+    assert_eq!(get_entity(&body, 0), c1);
+    assert_eq!(get_entity(&body, 16), c2);
     let (_, n, body, _) = h.query(bridge::QUERY_PARENT, c1);
     assert_eq!(n, 1);
-    assert_eq!(get_u64(&body, 0), root.to_bits());
+    assert_eq!(get_entity(&body, 0), root);
     let (_, n, body, _) = h.query(bridge::QUERY_TRANSFORM, c2);
     assert_eq!(n, 1);
     let t = SnapshotTransformRecord::decode(&body, &[]).unwrap();
@@ -660,13 +660,17 @@ fn protocol_errors_apply_nothing() {
 #[test]
 fn null_safety_and_panic_boundary() {
     unsafe {
-        assert!(fynkel_world_create(ptr::null_mut(), ptr::null()).is_null());
+        assert_eq!(
+            fynkel_world_snap_interpolation(ptr::null_mut()),
+            Status::InvalidArgument
+        );
+        assert!(fynkel_world_create(ptr::null_mut(), ptr::null(), std::ptr::null_mut()).is_null());
         assert_eq!(
             fynkel_world_step(ptr::null_mut(), ptr::null_mut()),
             Status::InvalidArgument
         );
         assert_eq!(
-            fynkel_world_begin_frame(ptr::null_mut(), 0.0, ptr::null_mut()),
+            fynkel_world_begin_frame(ptr::null_mut(), 0.0, 1.0, ptr::null_mut()),
             Status::InvalidArgument
         );
         assert_eq!(fynkel_world_snapshot(ptr::null()).length, 0);
@@ -684,6 +688,10 @@ fn null_safety_and_panic_boundary() {
     assert_eq!(unsafe { fynkel_world_is_poisoned(h.w) }, 1);
     assert_eq!(h.step().0, Status::Poisoned);
     assert_eq!(
+        unsafe { fynkel_world_snap_interpolation(h.w) },
+        Status::Poisoned
+    );
+    assert_eq!(
         h.submit(Lane::Simulation, &buffer::empty(BufferKind::Commands))
             .0,
         Status::Poisoned
@@ -694,22 +702,20 @@ fn null_safety_and_panic_boundary() {
 fn world_desc_and_entity_world_id() {
     let rt = fynkel_runtime_create();
     let desc = FynkelWorldDesc {
-        world_id: 7,
-        reserved: [0; 3],
         fixed_dt_seconds: 0.5,
         max_steps_per_frame: 1,
         max_frame_dt_seconds: 0.0,
         flags: 0,
     };
-    let w = unsafe { fynkel_world_create(rt, &desc) };
+    let w = unsafe { fynkel_world_create(rt, &desc, std::ptr::null_mut()) };
     let h = Host { rt, w };
     h.submit(Lane::Simulation, &batch![(1, spawn(1, 0.0, None, ""))]);
     h.step();
-    assert_eq!(h.spawned()[0].world(), WorldId(7));
+    assert_ne!(h.spawned()[0].world(), WorldId::NONE);
     let mut plan = FynkelFramePlan::default();
-    unsafe { fynkel_world_begin_frame(h.w, 2.0, &mut plan) };
+    unsafe { fynkel_world_begin_frame(h.w, 2.0, 1.0, &mut plan) };
     assert_eq!(plan.steps, 0, "2 s clamped to 0.25 < fixed_dt 0.5");
-    unsafe { fynkel_world_begin_frame(h.w, 0.3, &mut plan) };
+    unsafe { fynkel_world_begin_frame(h.w, 0.3, 1.0, &mut plan) };
     assert_eq!(plan.steps, 1);
 }
 
@@ -1241,7 +1247,7 @@ fn catalogue_components_and_the_systems_query() {
     // They moved at the tick without a command: the lamp is 2 m over the
     // hero, the spinner turned.
     let snapshot = |e: Entity| {
-        let handles = [e.to_bits()];
+        let handles = [e];
         let s = unsafe { fynkel_world_subscribe(h.w, 1, handles.as_ptr(), 1, 1) };
         assert_eq!(s, Status::Ok);
         h.step();
@@ -1360,7 +1366,10 @@ fn projection_of_world_anchors() {
     // No camera yet: flagged, nothing placed.
     let (s, info, points) = project(&anchors_buffer(&[(cube, Vec3::ZERO, 0)]), 800, 600);
     assert_eq!(s, Status::Ok);
-    assert_eq!((info.camera, info.projected, info.dropped), (0, 1, 0));
+    assert_eq!(
+        (info.camera, info.projected, info.dropped),
+        (Entity::NULL, 1, 0)
+    );
     assert_eq!(points[0].flags, PROJECTED_NO_CAMERA);
 
     h.submit(
@@ -1404,7 +1413,7 @@ fn projection_of_world_anchors() {
         600,
     );
     assert_eq!(s, Status::Ok);
-    assert_eq!(info.camera, camera.to_bits());
+    assert_eq!(info.camera, camera);
     assert_eq!((info.projected, info.dropped), (4, 0));
     assert_eq!(points.len(), 4);
     let c = &points[0];
@@ -2189,7 +2198,7 @@ fn memory_stats_and_the_snapshot_budget() {
     h.step();
     let entities = h.spawned();
     assert_eq!(entities.len(), 8);
-    let handles: Vec<u64> = entities.iter().map(|e| e.to_bits()).collect();
+    let handles = entities.clone();
 
     let mut stats = FynkelWorldStats::default();
     assert_eq!(unsafe { fynkel_world_stats(h.w, &mut stats) }, Status::Ok);
@@ -2507,7 +2516,7 @@ fn animator_controller_ops_events_and_queries() {
 #[test]
 fn a_panic_poisons_the_world_and_keeps_its_message() {
     let rt = fynkel_runtime_create();
-    let w = unsafe { fynkel_world_create(rt, std::ptr::null()) };
+    let w = unsafe { fynkel_world_create(rt, std::ptr::null(), std::ptr::null_mut()) };
     let message = |w| {
         let v = unsafe { fynkel_world_panic_message(w) };
         if v.length == 0 {
@@ -2529,7 +2538,7 @@ fn a_panic_poisons_the_world_and_keeps_its_message() {
 
     let mut plan = FynkelFramePlan::default();
     assert_eq!(
-        unsafe { fynkel_world_begin_frame(w, 1.0 / 60.0, &mut plan) },
+        unsafe { fynkel_world_begin_frame(w, 1.0 / 60.0, 1.0, &mut plan) },
         Status::Poisoned
     );
     assert_eq!(
@@ -2545,4 +2554,86 @@ fn a_panic_poisons_the_world_and_keeps_its_message() {
         fynkel_world_destroy(w);
         fynkel_runtime_destroy(rt);
     }
+}
+
+#[test]
+fn actual_default_worlds_runtimes_and_play_restarts_never_alias() {
+    let first = Host::new();
+    let second = Host::new();
+    for host in [&first, &second] {
+        host.submit(
+            Lane::Simulation,
+            &batch![(1, spawn(1, 0.0, None, "entity"))],
+        );
+        host.step();
+    }
+    let original = first.spawned()[0];
+    let other = second.spawned()[0];
+    assert_ne!(original, other);
+    assert_eq!(unsafe { fynkel_world_contains(second.w, original) }, 0);
+    assert_eq!(unsafe { fynkel_world_contains(second.w, other) }, 1);
+    assert_eq!(second.query(bridge::QUERY_TRANSFORM, original).1, 0);
+    second.submit(
+        Lane::Simulation,
+        &batch![(2, DestroyCommand { entity: original })],
+    );
+    assert_eq!(second.step().0, Status::CommandsRejected);
+    assert!(!second.w.is_null());
+    assert_eq!(unsafe { fynkel_world_contains(second.w, other) }, 1);
+    drop(first);
+    for _ in 0..300 {
+        let restarted = Host::new();
+        assert_eq!(unsafe { fynkel_world_contains(restarted.w, original) }, 0);
+        assert_ne!(unsafe { &*restarted.w }.core().id(), original.world());
+    }
+    let mut status = Status::InvalidArgument;
+    let runtime = fynkel_runtime_create();
+    let world = unsafe { fynkel_world_create(runtime, std::ptr::null(), &mut status) };
+    assert_eq!(status, Status::Ok);
+    unsafe {
+        fynkel_world_destroy(world);
+        fynkel_runtime_destroy(runtime);
+    }
+}
+
+#[test]
+fn canonical_clock_crosses_abi_without_host_reconstruction() {
+    let h = Host::new();
+    let mut p = FynkelFramePlan::default();
+    assert_eq!(
+        unsafe { fynkel_world_begin_frame(h.w, 2.0, 2.0, &mut p) },
+        Status::Ok
+    );
+    assert_eq!(p.real_delta, 2.0);
+    assert_eq!(p.gameplay_delta, 0.25);
+    assert_eq!(p.real_elapsed, 2.0);
+    assert_eq!(p.gameplay_elapsed, 0.25);
+    assert_eq!(p.clamped_seconds, 3.75);
+    assert_eq!(p.frame, 1);
+    assert!(p.dropped_seconds > 0.0);
+    let mut simulation = 0.0;
+    for _ in 0..p.steps {
+        simulation = h.step().1.simulation_elapsed;
+    }
+    assert!(simulation < p.gameplay_elapsed);
+    assert_eq!(
+        unsafe { fynkel_world_begin_frame(h.w, 0.5, 0.0, &mut p) },
+        Status::Ok
+    );
+    assert_eq!(p.steps, 0);
+    assert_eq!(p.gameplay_elapsed, 0.25);
+    assert_eq!(p.real_elapsed, 2.5);
+    let after_step = h.step().1.simulation_elapsed;
+    assert!(after_step > simulation);
+    assert_eq!(
+        unsafe { fynkel_world_begin_frame(h.w, 0.0, -1.0, &mut p) },
+        Status::InvalidArgument
+    );
+    assert_eq!(
+        unsafe { fynkel_world_begin_frame(h.w, f64::NAN, 1.0, &mut p) },
+        Status::Ok
+    );
+    assert_eq!(p.real_elapsed, 2.5);
+    assert_eq!(p.gameplay_elapsed, 0.25);
+    assert_eq!(p.real_delta, 0.0);
 }

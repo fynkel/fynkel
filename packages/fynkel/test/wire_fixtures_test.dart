@@ -8,6 +8,7 @@ import 'dart:typed_data';
 
 import 'package:fynkel/generated/schema.g.dart';
 import 'package:fynkel/math.dart';
+import 'package:fynkel/src/entity_ref.dart';
 import 'package:fynkel/src/asset_ref.dart';
 import 'package:fynkel/src/wire/support.dart';
 import 'package:test/test.dart' hide Tags;
@@ -26,7 +27,7 @@ Directory fixtureDir() {
 }
 
 /// world 1, slot, generation — mirrors fynkel_contracts::Entity::new.
-int entity(int slot, int gen) => (1 << 56) | (gen << 32) | slot;
+EntityRef entity(int slot, int gen) => EntityRef(1, slot, gen);
 
 const transform = Transform(
   position: Vec3(1.5, -2.0, 3.25),
@@ -70,7 +71,13 @@ void main() {
   });
 
   check('Transform', transform, Transform.wireSize, Transform.decode, (v, d, o, s) => v.encode(d, o, s));
-  check('Name', const Name(value: 'héllo wörld'), Name.wireSize, Name.decode, (v, d, o, s) => v.encode(d, o, s));
+  check(
+    'Name',
+    const Name(value: 'héllo wörld'),
+    Name.wireSize,
+    Name.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
   check(
     'SpawnCommand',
     SpawnCommand(tempId: 42, transform: transform, parent: entity(7, 3), name: 'player'),
@@ -152,8 +159,18 @@ void main() {
       bodyA: entity(4, 1),
       relativeVelocity: const Vec3(0, 7, 0.5),
       contactCount: 2,
-      contact0: const ContactPointRecord(point: Vec3(0.5, 1.0, -0.25), normal: Vec3(0, 1, 0), separation: -0.01, impulse: 2),
-      contact1: const ContactPointRecord(point: Vec3(-0.5, 1.0, 0.25), normal: Vec3(0, 1, 0), separation: 0, impulse: 1.5),
+      contact0: const ContactPointRecord(
+        point: Vec3(0.5, 1.0, -0.25),
+        normal: Vec3(0, 1, 0),
+        separation: -0.01,
+        impulse: 2,
+      ),
+      contact1: const ContactPointRecord(
+        point: Vec3(-0.5, 1.0, 0.25),
+        normal: Vec3(0, 1, 0),
+        separation: 0,
+        impulse: 1.5,
+      ),
       contact2: const ContactPointRecord(point: Vec3.zero, normal: Vec3.zero, separation: 0, impulse: 0),
       contact3: const ContactPointRecord(point: Vec3.zero, normal: Vec3.zero, separation: 0, impulse: 0),
     ),
@@ -229,7 +246,13 @@ void main() {
   check(
     'SpotLight',
     const SpotLight(
-        color: Vec3(1.0, 0.9, 0.8), intensity: 1500.0, range: 15.0, innerAngle: 0.4, outerAngle: 0.6, cullingMask: 0xfffffffe),
+      color: Vec3(1.0, 0.9, 0.8),
+      intensity: 1500.0,
+      range: 15.0,
+      innerAngle: 0.4,
+      outerAngle: 0.6,
+      cullingMask: 0xfffffffe,
+    ),
     SpotLight.wireSize,
     SpotLight.decode,
     (v, d, o, s) => v.encode(d, o, s),
@@ -478,7 +501,12 @@ void main() {
   check(
     'CharacterStateRecord',
     CharacterStateRecord(
-        entity: entity(5, 1), grounded: true, sliding: false, velocity: const Vec3(0, 0, -4), collisionFlags: 5),
+      entity: entity(5, 1),
+      grounded: true,
+      sliding: false,
+      velocity: const Vec3(0, 0, -4),
+      collisionFlags: 5,
+    ),
     CharacterStateRecord.wireSize,
     CharacterStateRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
@@ -543,7 +571,14 @@ void main() {
   );
   check(
     'EntityInfoRecord',
-    EntityInfoRecord(entity: entity(4, 2), parent: entity(1, 1), name: 'Lamp', layer: 2, tags: 0x80000005, active: false),
+    EntityInfoRecord(
+      entity: entity(4, 2),
+      parent: entity(1, 1),
+      name: 'Lamp',
+      layer: 2,
+      tags: 0x80000005,
+      active: false,
+    ),
     EntityInfoRecord.wireSize,
     EntityInfoRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
@@ -611,9 +646,7 @@ void main() {
   );
   check(
     'Skin',
-    Skin(
-      skin: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'skin/0'),
-    ),
+    Skin(skin: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'skin/0')),
     Skin.wireSize,
     Skin.decode,
     (v, d, o, s) => v.encode(d, o, s),

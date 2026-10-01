@@ -1,3 +1,4 @@
+import 'package:fynkel/fynkel.dart' show EntityRef;
 // The Scene view's model (blueprint §19.2e item 6): one edit-preview world
 // per open scene or prefab tab, the editor camera over it, picking, the
 // gizmos and the editor-only hidden/locked flags. The picture is the
@@ -129,7 +130,7 @@ final class SceneTab {
 
   /// The selection outline's handles (selected, children) and what they
   /// were read for; null after a sync respawned the world.
-  ({String key, List<int> selected, List<int> children})? outline;
+  ({String key, List<EntityRef> selected, List<EntityRef> children})? outline;
 
   /// The hidden set applied while this world is drawn around a prefab
   /// (Prefab mode in context), null when it is its own.
@@ -1293,7 +1294,7 @@ final class SceneViewModel extends ChangeNotifier {
   /// orange, what is under them (their children, an instance's parts) in
   /// blue. Read from the world once per document revision, selection and
   /// visibility (every frame in Play, where the world changes by itself).
-  ({List<int> selected, List<int> children}) _outlineHandles(SceneTab t, List<String> ids, Set<String> hidden) {
+  ({List<EntityRef> selected, List<EntityRef> children}) _outlineHandles(SceneTab t, List<String> ids, Set<String> hidden) {
     final tree = t.tab.tree;
     final chosen = ids.toSet();
     final under = <String>[];
@@ -1311,7 +1312,7 @@ final class SceneViewModel extends ChangeNotifier {
     final cached = t.outline;
     if (!live && cached != null && cached.key == key) return (selected: cached.selected, children: cached.children);
     final p = t.preview!;
-    final children = under.isEmpty ? const <int>[] : p.entities(under);
+    final children = under.isEmpty ? const <EntityRef>[] : p.entities(under);
     final skip = children.toSet();
     final selected = [
       for (final h in p.entities(ids))

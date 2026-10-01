@@ -54,6 +54,27 @@ pub struct PlayParams {
     pub priority: i32,
 }
 
+impl PlayParams {
+    /// Shared validation for gameplay intents and legacy command execution.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.volume.is_finite() || !(0.0..=1.0).contains(&self.volume) {
+            return Err(format!(
+                "playSound: volume must be within [0, 1], got {}",
+                self.volume
+            ));
+        }
+        if !self.pitch.is_finite() || !(crate::MIN_PITCH..=crate::MAX_PITCH).contains(&self.pitch) {
+            return Err(format!(
+                "playSound: pitch must be within [{}, {}], got {}",
+                crate::MIN_PITCH,
+                crate::MAX_PITCH,
+                self.pitch
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl Default for PlayParams {
     fn default() -> Self {
         Self {

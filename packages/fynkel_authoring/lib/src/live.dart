@@ -26,7 +26,7 @@ final class LiveEntity {
 
   factory LiveEntity.fromJson(Map<String, Object?> j) => LiveEntity(
         id: j['id'] as String,
-        handle: (j['entity'] as num?)?.toInt() ?? 0,
+        handle: j['entity'] == null ? EntityRef.nil : EntityRef.fromJson(j['entity']),
         name: j['name'] as String? ?? '',
         parent: j['parent'] as String?,
         spawned: j['spawned'] == true,
@@ -44,7 +44,7 @@ final class LiveEntity {
   final String id;
 
   /// The runtime entity handle (what package:fynkel's `GameObject.entity` is).
-  final int handle;
+  final EntityRef handle;
   final String name;
   final String? parent;
 
@@ -81,7 +81,7 @@ final class LiveEntityState {
 
   factory LiveEntityState.fromJson(Map<String, Object?> j) => LiveEntityState(
         id: j['id'] as String,
-        handle: (j['entity'] as num?)?.toInt() ?? 0,
+        handle: j['entity'] == null ? EntityRef.nil : EntityRef.fromJson(j['entity']),
         name: j['name'] as String? ?? '',
         parent: j['parent'] as String?,
         world: _mapOf(j['world']),
@@ -94,7 +94,7 @@ final class LiveEntityState {
       );
 
   final String id;
-  final int handle;
+  final EntityRef handle;
   final String name;
   final String? parent;
   final Map<String, Object?> world;
@@ -246,8 +246,8 @@ final class LiveWorld {
   /// and not hidden in the editor, each once — what
   /// `ViewportOverlay.outline` takes. (Named `handles` because [entities]
   /// is the world's entity table.)
-  List<int> handles(Iterable<String> ids) =>
-      [for (final e in call('handles', {'ids': ids.toList()})['entities'] as List? ?? const []) (e as num).toInt()];
+  List<EntityRef> handles(Iterable<String> ids) =>
+      [for (final e in call('handles', {'ids': ids.toList()})['entities'] as List? ?? const []) EntityRef.fromJson(e)];
 
   /// The world matrices (16 floats, column-major) of the [ids] still
   /// alive.

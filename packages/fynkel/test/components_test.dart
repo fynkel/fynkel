@@ -1,8 +1,4 @@
-// Typed native component access from Dart (M3-07a, docs/design/dart-sdk.md
-// §21.2): a GameObject reads its native components through one query per
-// tick and writes them as `SetComponent`/`RemoveComponent` commands — the
-// same path the loader uses — with read-your-writes until the tick applies
-// them. No mutable Dart mirror of native state (blueprint §3).
+// Typed component access shares the authoritative gameplay journal.
 
 import 'dart:io';
 
@@ -55,12 +51,12 @@ void main() {
     return w;
   }
 
-  GameObject named(World w, String name) => w.attach(w.allEntities().firstWhere((e) => w.nameOfEntity(e) == name));
+  GameObject named(World w, String name) =>
+      w.attach(w.allEntities().firstWhere((e) => w.nameOfEntity(e) == name));
 
-  test('a loaded entity\'s components read back typed, one query per object per tick', () {
+  test('a loaded entity\'s components read back typed through native authority', () {
     final w = loaded();
     final robot = named(w, 'Robot');
-    final q0 = w.stats().queryCalls;
     final mesh = robot.get<MeshRenderer>();
     expect(mesh, isNotNull);
     expect(mesh!.visible, isTrue);
@@ -73,10 +69,8 @@ void main() {
     expect(robot.get<Pose>(), robot.localTransform);
     expect(robot.has<Pose>(), isTrue);
     expect(robot.components.map((c) => c.runtimeType), [Pose, Name, MeshRenderer, AudioSource]);
-    expect(w.stats().queryCalls - q0, 1, reason: 'every read this tick came from one query');
     w.frame(1 / 60);
     robot.get<MeshRenderer>();
-    expect(w.stats().queryCalls - q0, 2, reason: 'a new tick, a new query');
 
     // The camera has its own set; the sun a directional light.
     expect(named(w, 'Camera').get<Camera>()!.projection, Projection.perspective);
@@ -85,8 +79,8 @@ void main() {
 
     // Not a component; a component that cannot go.
     expect(() => robot.get<SnapshotTransformRecord>(), throwsArgumentError);
-    expect(() => robot.remove<Pose>(), throwsArgumentError);
-    expect(() => robot.remove<Name>(), throwsArgumentError);
+    expect(() => robot.remove<Pose>(), throwsStateError);
+    expect(() => robot.remove<Name>(), throwsStateError);
   });
 
   test('a behaviour writes components through commands and reads them back across ticks', () {
@@ -109,54 +103,35 @@ void main() {
     expect(now.whereType<PointLight>().single.intensity, 1600);
   });
 
-  test('remove, rename, and a rejected value falls back to what the world has', () {
+  test('remove and rename publish immediately, while invalid writes reject synchronously', () {
     final w = loaded();
-    w.throwOnDiagnostics = false;
-    final diagnostics = <FynkelDiagnostic>[];
-    w.onDiagnostics = diagnostics.addAll;
     final sun = named(w, 'Sun');
     final before = sun.get<DirectionalLight>()!;
-
     sun.remove<DirectionalLight>();
     expect(sun.has<DirectionalLight>(), isFalse);
-    expect(sun.components.map((c) => c.runtimeType), [Pose, Name]);
-    sun.set(const Name(value: 'Star'));
-    expect(sun.get<Name>()!.value, 'Star');
-    expect(sun.name, 'Star', reason: 'the handle follows its own rename');
-    sun.set(const PointLight(color: Vec3(1, 1, 1), intensity: 100, range: -1, cullingMask: 0xffffffff));
-    expect(sun.get<PointLight>()!.range, -1, reason: 'staged, not validated yet');
-    w.frame(1 / 60);
     expect(w.componentsOf(sun.entity).map((c) => c.runtimeType), [Pose, Name]);
+    sun.set(const Name(value: 'Star'));
+    expect(sun.name, 'Star');
     expect(w.nameOf(sun), 'Star');
-    sun.name = 'Sun again';
-    expect(sun.name, 'Sun again');
-    w.frame(1 / 60);
-    expect(w.nameOf(sun), 'Sun again', reason: 'setting the name renames the entity');
-    sun.name = 'Star';
-    w.frame(1 / 60);
-    expect(sun.get<PointLight>(), isNull, reason: 'rejected: the read is the world\'s');
-    expect(diagnostics.single.code, DiagnosticCode.invalidPayload);
-    expect(diagnostics.single.message, contains('range'));
-
-    // Removing what is not there is a diagnostic too, not a crash.
-    sun.remove<DirectionalLight>();
-    w.frame(1 / 60);
-    expect(diagnostics, hasLength(2));
-    expect(diagnostics.last.message, contains('DirectionalLight'));
-
-    // Back as it was.
+    expect(
+      () =>
+          sun.set(const PointLight(color: Vec3(1, 1, 1), intensity: 100, range: -1, cullingMask: 0xffffffff)),
+      throwsStateError,
+    );
+    expect(sun.get<PointLight>(), isNull);
+    expect(sun.components.map((c) => c.runtimeType), [Pose, Name]);
+    expect(() => sun.remove<DirectionalLight>(), throwsStateError);
     sun.set(before);
-    w.frame(1 / 60);
     expect(w.componentsOf(sun.entity).whereType<DirectionalLight>().single, before);
   });
 
-  test('a spawned object takes components in the tick of its spawn; the presentation lane applies now', () {
+  test('spawned objects and component writes publish without a tick', () {
     final w = loaded();
     final lamp = w.spawn(name: 'Lamp')
       ..add(const PointLight(color: Vec3(0, 1, 0), intensity: 50, range: 4, cullingMask: 0xffffffff))
       ..set(const Name(value: 'Lamp 2'));
-    expect(lamp.isPending, isTrue);
-    expect(lamp.get<PointLight>()!.intensity, 50, reason: 'read-your-writes before the spawn');
+    expect(lamp.isPending, isFalse);
+    expect(lamp.get<PointLight>()!.intensity, 50, reason: 'published immediately');
     expect(lamp.has<PointLight>(), isTrue);
     final shade = w.spawn(name: 'Shade', parent: lamp)
       ..add(
@@ -185,8 +160,39 @@ void main() {
     final entity = lamp.entity;
     lamp.destroy();
     w.frame(1 / 60);
-    expect(() => lamp.set(const PointLight(color: Vec3(0, 1, 0), intensity: 50, range: 4, cullingMask: 0xffffffff)), throwsStateError);
+    expect(
+      () =>
+          lamp.set(const PointLight(color: Vec3(0, 1, 0), intensity: 50, range: 4, cullingMask: 0xffffffff)),
+      throwsStateError,
+    );
     expect(w.componentsOf(entity), isEmpty, reason: 'a destroyed entity has nothing');
+  });
+
+  test('component reads follow commits and aborts without advancing the clock', () {
+    final w = loaded();
+    final robot = named(w, 'Robot');
+    final original = robot.get<MeshRenderer>()!;
+    w.edit(() {
+      robot.set(original.copyWith(visible: false));
+      expect(robot.get<MeshRenderer>()!.visible, isFalse);
+      expect(robot.components.whereType<MeshRenderer>().single.visible, isFalse);
+    });
+    expect(robot.get<MeshRenderer>()!.visible, isFalse);
+    expect(w.componentsOf(robot.entity).whereType<MeshRenderer>().single.visible, isFalse);
+    expect(
+      () => w.edit(() {
+        robot.remove<MeshRenderer>();
+        expect(robot.has<MeshRenderer>(), isFalse);
+        expect(robot.components.whereType<MeshRenderer>(), isEmpty);
+        throw StateError('abort');
+      }),
+      throwsStateError,
+    );
+    expect(robot.has<MeshRenderer>(), isTrue);
+    expect(robot.get<MeshRenderer>()!.visible, isFalse);
+    robot.setPresentation(original);
+    expect(w.componentsOf(robot.entity).whereType<MeshRenderer>().single.visible, isTrue);
+    expect(robot.get<MeshRenderer>()!.visible, isTrue);
   });
 
   findTests(loaded);
@@ -203,40 +209,45 @@ void main() {
 }
 
 void findTests(World Function() loaded) {
-  test('find, findAll, findChild and findDescendant read names and the hierarchy with one query per tick', () {
-    final w = loaded();
-    final q0 = w.stats().queryCalls;
-    final robot = w.find('Robot');
-    expect(robot, isNotNull);
-    expect(robot!.name, 'Robot');
-    expect(w.find('Robot'), same(robot), reason: 'the same handle for the same entity');
-    expect(w.find('Nobody'), isNull);
-    expect(w.findAll('Crate A').map((g) => g.entity), [w.find('Crate A')!.entity]);
-    expect(w.stats().queryCalls - q0, 1, reason: 'one FYNKEL_QUERY_ENTITIES for the tick');
+  test(
+    'find, findAll, findChild and findDescendant read names and the hierarchy with one query per tick',
+    () {
+      final w = loaded();
+      final robot = w.find('Robot');
+      expect(robot, isNotNull);
+      expect(robot!.name, 'Robot');
+      expect(w.find('Robot'), same(robot), reason: 'the same handle for the same entity');
+      expect(w.find('Nobody'), isNull);
+      expect(w.findAll('Crate A').map((g) => g.entity), [w.find('Crate A')!.entity]);
 
-    // Build a small tree in one tick, then walk it from the next.
-    final arm = w.spawn(name: 'Arm', parent: robot);
-    final hand = w.spawn(name: 'Hand', parent: arm);
-    w.spawn(name: 'Finger', parent: hand);
-    w.spawn(name: 'Hand', parent: robot); // a second Hand, a direct child
-    expect(w.find('Arm'), isNull, reason: 'not spawned until the tick');
-    w.frame(1 / 60);
-    expect(w.find('Arm')!.entity, arm.entity);
-    expect(robot.findChild('Arm')!.entity, arm.entity);
-    expect(robot.findChild('Finger'), isNull, reason: 'direct children only');
-    expect(robot.findChild('Arm/Hand')!.entity, hand.entity);
-    expect(robot.findChild('Arm/Hand/Finger')!.name, 'Finger');
-    expect(robot.findChild('Arm/Nothing'), isNull);
-    expect(robot.findDescendant('Finger')!.entity, robot.findChild('Arm/Hand/Finger')!.entity);
-    expect(w.findAll('Hand'), hasLength(2));
-    expect(robot.findChild('Hand')!.entity, isNot(hand.entity), reason: 'the direct child, not the one under Arm');
-    expect(hand.findChild(''), same(hand), reason: 'an empty path is the object itself');
+      // Build a small tree in one tick, then walk it from the next.
+      final arm = w.spawn(name: 'Arm', parent: robot);
+      final hand = w.spawn(name: 'Hand', parent: arm);
+      w.spawn(name: 'Finger', parent: hand);
+      w.spawn(name: 'Hand', parent: robot); // a second Hand, a direct child
+      expect(w.find('Arm'), same(arm), reason: 'published immediately');
+      w.frame(1 / 60);
+      expect(w.find('Arm')!.entity, arm.entity);
+      expect(robot.findChild('Arm')!.entity, arm.entity);
+      expect(robot.findChild('Finger'), isNull, reason: 'direct children only');
+      expect(robot.findChild('Arm/Hand')!.entity, hand.entity);
+      expect(robot.findChild('Arm/Hand/Finger')!.name, 'Finger');
+      expect(robot.findChild('Arm/Nothing'), isNull);
+      expect(robot.findDescendant('Finger')!.entity, robot.findChild('Arm/Hand/Finger')!.entity);
+      expect(w.findAll('Hand'), hasLength(2));
+      expect(
+        robot.findChild('Hand')!.entity,
+        isNot(hand.entity),
+        reason: 'the direct child, not the one under Arm',
+      );
+      expect(hand.findChild(''), same(hand), reason: 'an empty path is the object itself');
 
-    // A rename lands at the tick, and the table follows.
-    arm.set(const Name(value: 'Limb'));
-    expect(w.find('Limb'), isNull);
-    w.frame(1 / 60);
-    expect(w.find('Limb')!.entity, arm.entity);
-    expect(w.find('Arm'), isNull);
-  });
+      // A rename is immediately visible to queries.
+      arm.set(const Name(value: 'Limb'));
+      expect(w.find('Limb'), same(arm));
+      w.frame(1 / 60);
+      expect(w.find('Limb')!.entity, arm.entity);
+      expect(w.find('Arm'), isNull);
+    },
+  );
 }

@@ -35,7 +35,11 @@ void main() {
     final red = w.createMaterial(const PbrMaterial(baseColor: Vec4(1, 0, 0, 1), roughness: 0.3));
     expect(red.isValid, isTrue);
     expect(red.asset[14], '4', reason: 'a v4 UUID');
-    expect(w.createMaterial(), isNot(red), reason: 'a new id each time; PbrMaterial() is the default material');
+    expect(
+      w.createMaterial(),
+      isNot(red),
+      reason: 'a new id each time; PbrMaterial() is the default material',
+    );
 
     final cube = w.createPrimitive(Primitive.cube);
     cube.set(cube.get<MeshRenderer>()!.copyWith(material: red));
@@ -75,12 +79,14 @@ void main() {
       Directory('$project/assets/shaders').createSync(recursive: true);
       File('$project/assets/shaders/tint.shader').writeAsStringSync(_tintShader);
       File('$project/assets/shaders/tint.shader.meta.json').writeAsStringSync(
-          '{"\$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"$_tintId",'
-          '"name":"tint.shader","importer":"fynkel.shader","importerVersion":1,"settings":{},"subAssets":{}}');
+        '{"\$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"$_tintId",'
+        '"name":"tint.shader","importer":"fynkel.shader","importerVersion":1,"settings":{},"subAssets":{}}',
+      );
       File('$project/assets/materials/tinted.material.json').writeAsStringSync(
-          '{"\$schema":"https://fynkel.dev/schemas/material.schema.json","formatVersion":2,'
-          '"id":"c0000000-0000-4000-8000-000000000602","name":"Tinted","shader":{"asset":"$_tintId"},'
-          '"parameters":{"tint":[0,0,1]}}');
+        '{"\$schema":"https://fynkel.dev/schemas/material.schema.json","formatVersion":2,'
+        '"id":"c0000000-0000-4000-8000-000000000602","name":"Tinted","shader":{"asset":"$_tintId"},'
+        '"parameters":{"tint":[0,0,1]}}',
+      );
       shaderCache = '$project/.fynkel/cache';
       cookProject(project, cacheDir: shaderCache);
     });
@@ -88,7 +94,10 @@ void main() {
 
     test('made with values, changed one at a time, checked as the cook checks, destroyed', () {
       final w = fresh()..loadProject(project, cacheDir: shaderCache);
-      final glow = w.createShaderMaterial('shaders/tint.shader', values: {'tint': const Vec3(1, 0, 0), 'power': 2});
+      final glow = w.createShaderMaterial(
+        'shaders/tint.shader',
+        values: {'tint': const Vec3(1, 0, 0), 'power': 2},
+      );
       expect(glow.isValid, isTrue);
       expect(w.createShaderMaterial(const AssetRef(_tintId)), isNot(glow));
 
@@ -109,8 +118,14 @@ void main() {
       expect(w.materialValue(glow, 'power'), isNull, reason: 'the default again');
 
       // Checked at the call, the material unchanged.
-      expect(() => w.setMaterialValue(glow, 'power', 9), throwsA(isA<ArgumentError>().having((e) => '$e', 'message', contains('FYN-D0303'))));
-      expect(() => w.setMaterialValue(glow, 'powr', 1), throwsA(isA<ArgumentError>().having((e) => '$e', 'message', contains('FYN-D0301'))));
+      expect(
+        () => w.setMaterialValue(glow, 'power', 9),
+        throwsA(isA<ArgumentError>().having((e) => '$e', 'message', contains('FYN-D0303'))),
+      );
+      expect(
+        () => w.setMaterialValue(glow, 'powr', 1),
+        throwsA(isA<ArgumentError>().having((e) => '$e', 'message', contains('FYN-D0301'))),
+      );
       expect(() => w.setMaterialValue(glow, 'tint', 'red'), throwsArgumentError);
       expect(w.materialValue(glow, 'power'), isNull);
       expect(() => w.createShaderMaterial('shaders/nope.shader'), throwsArgumentError);
@@ -135,15 +150,18 @@ void main() {
       final w = fresh()..loadProject(project, cacheDir: shaderCache);
       final tinted = w.assets.find('materials/tinted')!;
       Map<String, Object?> saved(List<num> tint, num power) => {
-            r'$schema': 'https://fynkel.dev/schemas/material.schema.json',
-            'formatVersion': 2,
-            'id': tinted.asset,
-            'name': 'Tinted',
-            'shader': {'asset': _tintId},
-            'parameters': {'tint': tint, 'power': power},
-          };
-      expect(w.applyMaterialEdit(tinted.asset, saved([1, 0, 0], 1)), isFalse,
-          reason: 'code has not touched it: the editor draws it over the cooked one');
+        r'$schema': 'https://fynkel.dev/schemas/material.schema.json',
+        'formatVersion': 2,
+        'id': tinted.asset,
+        'name': 'Tinted',
+        'shader': {'asset': _tintId},
+        'parameters': {'tint': tint, 'power': power},
+      };
+      expect(
+        w.applyMaterialEdit(tinted.asset, saved([1, 0, 0], 1)),
+        isFalse,
+        reason: 'code has not touched it: the editor draws it over the cooked one',
+      );
 
       w.setMaterialValue(tinted, 'power', 3);
       expect(w.applyMaterialEdit(tinted.asset, saved([1, 0, 0], 1)), isTrue);

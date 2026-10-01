@@ -40,7 +40,7 @@ fn drawn(vp: &mut Viewport, world: *const FynkelWorld) -> usize {
 #[test]
 fn a_viewport_looks_through_its_own_camera_and_the_world_keeps_its() {
     let rt = fynkel_runtime_create();
-    let world = unsafe { fynkel_world_create(rt, ptr::null()) };
+    let world = unsafe { fynkel_world_create(rt, ptr::null(), std::ptr::null_mut()) };
     assert!(!world.is_null());
     let mut vp = Viewport::new(W, H, 3, SyncMode::MetalCompletion).expect("viewport");
 

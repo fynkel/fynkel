@@ -116,7 +116,9 @@ void main() {
     test('off by default; on, a behaviour\'s gizmos are the frame\'s, cleared at the next', () {
       final w = World.create(library: lib)..throwOnDiagnostics = true;
       addTearDown(w.dispose);
-      final go = w.spawn(transform: const Pose(position: Vec3(0, 1, 0), rotation: Quat.identity, scale: Vec3.one));
+      final go = w.spawn(
+        transform: const Pose(position: Vec3(0, 1, 0), rotation: Quat.identity, scale: Vec3.one),
+      );
       go.addBehaviour(Marker());
       w.frame(1 / 60);
       expect(w.gizmos, isNull);

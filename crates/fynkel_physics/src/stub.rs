@@ -13,7 +13,7 @@ use fynkel_ecs::World as Ecs;
 
 use crate::{
     BodyCommand, BodyState, CharacterState, Hit, PhysicsEvent, PhysicsMaterial, PhysicsStats,
-    QuerySpec, Rejection, Vec3, MAX_MESH_COLLIDER_TRIANGLES,
+    QuerySpec, Rejection, Vec3,
 };
 
 pub struct Physics {
@@ -55,21 +55,16 @@ impl Physics {
         positions: &[[f32; 3]],
         indices: &[u32],
     ) -> Result<usize, String> {
-        let triangles = indices.len() / 3;
-        if triangles == 0 {
-            return Err("mesh has no triangles".into());
-        }
-        if triangles > MAX_MESH_COLLIDER_TRIANGLES {
-            return Err(format!(
-                "mesh has {triangles} triangles, more than the {MAX_MESH_COLLIDER_TRIANGLES} a mesh collider allows"
-            ));
-        }
-        let n = positions.len() as u32;
-        if indices.iter().any(|i| *i >= n) {
-            return Err("mesh index out of range".into());
-        }
+        let mesh = crate::PreparedMesh::new(positions, indices)?;
+        Ok(self.register_prepared_mesh(key, mesh))
+    }
+
+    /// Publishes already validated collision data without a fallible decode step.
+    pub fn register_prepared_mesh(&mut self, key: AssetRef, mesh: crate::PreparedMesh) -> usize {
+        let triangles = mesh.triangle_count();
+        let _ = &mesh.vertices;
         self.meshes.insert(key, triangles);
-        Ok(triangles)
+        triangles
     }
 
     pub fn has_mesh(&self, key: &AssetRef) -> bool {

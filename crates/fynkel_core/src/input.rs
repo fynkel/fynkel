@@ -652,6 +652,35 @@ struct Action {
     bindings: Vec<Binding>,
 }
 
+/// A compiled replacement action table with no ownership of raw input state.
+/// Preparation has no effect until the plan is published into an input source.
+pub struct PreparedInputBindings {
+    actions: Vec<Action>,
+}
+
+impl PreparedInputBindings {
+    /// Compiles using the same grammar and report-and-skip policy as `Input::bind`.
+    pub fn prepare(specs: &[ActionSpec]) -> (Self, Vec<(String, String, BindingError)>) {
+        let mut errors = Vec::new();
+        let mut actions = Vec::with_capacity(specs.len());
+        for spec in specs {
+            let mut bindings = Vec::new();
+            for b in &spec.bindings {
+                match parse_binding(spec.kind, b) {
+                    Ok(binding) => bindings.push(binding),
+                    Err(e) => errors.push((spec.name.clone(), b.clone(), e)),
+                }
+            }
+            actions.push(Action {
+                name: spec.name.clone(),
+                kind: spec.kind,
+                bindings,
+            });
+        }
+        (Self { actions }, errors)
+    }
+}
+
 /// The binding table and raw control state of one world.
 pub struct Input {
     actions: Vec<Action>,
@@ -682,26 +711,18 @@ impl Input {
         }
     }
 
-    /// Compiles the actions; a binding that does not parse is skipped and
-    /// returned (`fynkel validate` reports them before a project runs).
+    /// Compiles and publishes a replacement action table. Invalid bindings
+    /// are reported and skipped; raw controls and pending edges are preserved.
     pub fn bind(&mut self, specs: &[ActionSpec]) -> Vec<(String, String, BindingError)> {
-        let mut errors = Vec::new();
-        self.actions.clear();
-        for spec in specs {
-            let mut bindings = Vec::new();
-            for b in &spec.bindings {
-                match parse_binding(spec.kind, b) {
-                    Ok(binding) => bindings.push(binding),
-                    Err(e) => errors.push((spec.name.clone(), b.clone(), e)),
-                }
-            }
-            self.actions.push(Action {
-                name: spec.name.clone(),
-                kind: spec.kind,
-                bindings,
-            });
-        }
+        let (prepared, errors) = PreparedInputBindings::prepare(specs);
+        self.publish_bindings(prepared);
         errors
+    }
+
+    /// Publishes only compiled bindings, preserving captured controls, edge
+    /// state, capture counters, and the fixed-tick duration.
+    pub fn publish_bindings(&mut self, prepared: PreparedInputBindings) {
+        self.actions = prepared.actions;
     }
 
     pub fn action_count(&self) -> usize {

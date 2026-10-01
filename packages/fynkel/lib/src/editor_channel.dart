@@ -22,6 +22,7 @@
 // runtime diagnostic exactly like an authoring one and can open the
 // document it names. The channel is one-directional (game → editor): the
 // editor's Stop is a signal to the process, never a line on stdin.
+import 'entity_ref.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -92,7 +93,7 @@ abstract final class EditorChannel {
     int? line,
     int? column,
     String? suggestion,
-    int? entity,
+    EntityRef? entity,
     List<Map<String, Object?>>? related,
   }) =>
       send('diagnostic', {

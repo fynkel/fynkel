@@ -12,8 +12,9 @@ import 'package:test/test.dart';
 
 const playground = 'c0000000-0000-4000-8000-000000000031';
 
-List<Map<String, Object?>> records(List<String> lines) =>
-    [for (final l in lines) jsonDecode(l) as Map<String, Object?>];
+List<Map<String, Object?>> records(List<String> lines) => [
+  for (final l in lines) jsonDecode(l) as Map<String, Object?>,
+];
 
 void main() {
   final fixture = Directory('../../crates/fynkel_document/fixtures/project').absolute.path;
@@ -101,7 +102,11 @@ void main() {
   });
 
   test('an uncaught error is an error log record with its stack', () {
-    EditorChannel.error('Bad state: no player', stack: '#0      Player.update (package:game/game/player.dart:42:7)', tick: 3);
+    EditorChannel.error(
+      'Bad state: no player',
+      stack: '#0      Player.update (package:game/game/player.dart:42:7)',
+      tick: 3,
+    );
     final r = records(lines).single;
     expect(r['fynkel'], 'log');
     expect(r['source'], 'exception');

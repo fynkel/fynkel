@@ -95,7 +95,7 @@ struct World {
 impl World {
     fn new() -> Self {
         let rt = fynkel_runtime_create();
-        let w = unsafe { fynkel_world_create(rt, ptr::null()) };
+        let w = unsafe { fynkel_world_create(rt, ptr::null(), std::ptr::null_mut()) };
         assert!(!w.is_null());
         World { rt, w }
     }
@@ -104,7 +104,7 @@ impl World {
         let started = Instant::now();
         let mut plan = FynkelFramePlan::default();
         assert_eq!(
-            unsafe { fynkel_world_begin_frame(self.w, 1.0 / 60.0, &mut plan) },
+            unsafe { fynkel_world_begin_frame(self.w, 1.0 / 60.0, 1.0, &mut plan) },
             Status::Ok
         );
         for _ in 0..plan.steps {

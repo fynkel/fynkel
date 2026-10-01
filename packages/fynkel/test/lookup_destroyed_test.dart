@@ -1,14 +1,14 @@
-// What the component lookups return around `destroy()` (docs/foundation.md
-// 1.9). Unity's rule: `Destroy(component)` takes effect at the end of the
-// frame, so until then `GetComponent`, `GetComponentInChildren` and
-// `GetComponentInParent` still return it; after it, none does. Here the
-// destroy takes effect at the next lifecycle boundary, and every lookup
-// agrees on it.
+// Transactional removal is immediately absent from gameplay lookups; lifecycle
+// cleanup waits for its safe boundary. Retired scripts receive no later callbacks.
 
 import 'package:fynkel/fynkel.dart';
 import 'package:test/test.dart';
 
-class Health extends Behaviour {}
+class Health extends Behaviour {
+  int lates = 0;
+  @override
+  void lateUpdate(UpdateContext context) => lates++;
+}
 
 /// Destroys the child's Health in its update, then looks it up every way.
 class Killer extends Behaviour {
@@ -34,7 +34,7 @@ void main() {
   setUpAll(() => lib = NativeLibrary.open());
   tearDownAll(() => lib.dispose());
 
-  test('a destroy-requested behaviour is found by every lookup until the boundary, by none after (foundation 1.9)', () {
+  test('transactional destruction hides a behaviour immediately and suppresses later callbacks', () {
     final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8)..throwOnDiagnostics = true;
     addTearDown(w.dispose);
     final parent = w.spawn(name: 'Parent');
@@ -44,16 +44,18 @@ void main() {
     w.frame(1 / 60);
     w.frame(1 / 60);
 
+    final lates = health.lates;
     killer.armed = true;
     w.frame(1 / 60);
     expect(killer.seen, {
-      'behaviour': health,
-      'getInChildren': health,
-      'getAllInChildren': 1,
-      'getInParent': health,
-    }, reason: 'the same frame: Destroy has not taken effect (Unity)');
+      'behaviour': null,
+      'getInChildren': null,
+      'getAllInChildren': 0,
+      'getInParent': null,
+    }, reason: 'all lookup paths use the staged removal');
 
     w.frame(1 / 60);
+    expect(health.lates, lates, reason: 'no later callback after committed removal');
     expect(health.isDestroyed, isTrue);
     expect(child.behaviour<Health>(), isNull);
     expect(parent.getInChildren<Health>(), isNull);

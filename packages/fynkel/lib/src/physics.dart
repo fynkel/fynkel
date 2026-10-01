@@ -5,6 +5,7 @@
 // attached through `GameObject.add`/`set`; forces and queries go through
 // `GameObject` and `World`.
 
+import 'entity_ref.dart';
 import '../generated/schema.g.dart' as gen;
 import '../math.dart';
 
@@ -129,7 +130,7 @@ class PhysicsHit {
       PhysicsHit(entity: r.entity, point: r.point, normal: r.normal, distance: r.distance);
 
   /// The entity whose collider was hit.
-  final int entity;
+  final EntityRef entity;
 
   /// World-space hit point (for an overlap: the collider's origin).
   final Vec3 point;
@@ -141,5 +142,5 @@ class PhysicsHit {
   final double distance;
 
   @override
-  String toString() => 'PhysicsHit(0x${entity.toRadixString(16)} at $point n=$normal d=$distance)';
+  String toString() => 'PhysicsHit(0x${entity.toString()} at $point n=$normal d=$distance)';
 }

@@ -1,4 +1,4 @@
-/* Fynkel macOS viewport ABI v10 (platform/apple). Pairs with fynkel.h: the
+/* Fynkel macOS viewport ABI v12 (platform/apple). Pairs with fynkel.h: the
  * same dylib exports both. See platform/apple/README.md for the contract.
  * v3 added the M3-16 instrumentation fields of FynkelAppleViewportStats; v4
  * fynkel_apple_viewport_debug_lines and fynkel_apple_viewport_read_frame (the
@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_APPLE_ABI_VERSION 11
+#define FYNKEL_APPLE_ABI_VERSION 12
 
 typedef struct FynkelAppleViewport FynkelAppleViewport;
 
@@ -187,8 +187,8 @@ int32_t fynkel_apple_viewport_overlay(FynkelAppleViewport *vp,
  * call replaces an earlier one. Returns the entities queued, -1 for a NULL
  * viewport, a NULL list with a count or a non-finite style. */
 int32_t fynkel_apple_viewport_outline(FynkelAppleViewport *vp,
-                                      const uint64_t *selected, uint32_t selected_count,
-                                      const uint64_t *children, uint32_t children_count,
+                                      const FynkelEntity *selected, uint32_t selected_count,
+                                      const FynkelEntity *children, uint32_t children_count,
                                       const float *style);
 /* Bit 0 of an extra world's flags: draw it greyed (Unity's Prefab Mode
  * context in "Gray").  */

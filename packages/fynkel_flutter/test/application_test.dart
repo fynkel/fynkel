@@ -67,6 +67,9 @@ void main() {
     play.paused = true;
     await tester.pump();
     final pausedAt = world.tick;
+    final gameplayAtPause = world.context.time.elapsed;
+    final realAtPause = world.context.time.realElapsed;
+    final simulationAtPause = world.context.time.simulationElapsed;
     expect(view.currentState!.hostPaused, isTrue);
     expect(view.currentState!.paused, isTrue);
     expect(world.audio.stats.suspended, opened, reason: 'Pause silences the game');
@@ -76,6 +79,9 @@ void main() {
     play.step();
     await frames(2);
     expect(world.tick, pausedAt + 1, reason: 'one Step is one fixed step');
+    expect(world.context.time.elapsed, gameplayAtPause);
+    expect(world.context.time.realElapsed, realAtPause);
+    expect(world.context.time.simulationElapsed, greaterThan(simulationAtPause));
     play
       ..step()
       ..step();
@@ -96,6 +102,15 @@ void main() {
     await frames(6);
     expect(world.tick, greaterThan(pausedAt + 3));
     expect(world.audio.stats.suspended, isFalse);
+    // Host hitches reach the canonical clock unchanged. Scaling/clamping
+    // are applied once in the world; real elapsed keeps the whole hitch.
+    final realBeforeHitch = world.context.time.realElapsed;
+    final gameBeforeHitch = world.context.time.elapsed;
+    world.timeScale = 2;
+    await tester.pump(const Duration(seconds: 2));
+    expect(world.context.time.realElapsed - realBeforeHitch, closeTo(2, 1e-6));
+    expect(world.context.time.elapsed - gameBeforeHitch, closeTo(0.25, 1e-6));
+    world.timeScale = 1;
     // Step means nothing while running.
     play.step();
     expect(play.pendingSteps, 0);

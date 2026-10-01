@@ -63,18 +63,28 @@ void main() {
   test('a script field holds a spec\'s object before the build and the built object after', () {
     final w = fresh();
     final gate = Gate();
-    final door = ObjectSpec('Door', transform: const Pose(position: Vec3(0, 0, 5)), behaviours: [gate]);
+    final door = ObjectSpec(
+      'Door',
+      transform: const Pose(position: Vec3(0, 0, 5)),
+      behaviours: [gate],
+    );
     // The switch comes first: its field names an object not spawned yet.
     final pad = Switch()
       ..door = door.object
       ..gate = gate;
-    final level = ObjectSpec('Level', children: [ObjectSpec('Switch', behaviours: [pad]), door]);
+    final level = ObjectSpec(
+      'Level',
+      children: [
+        ObjectSpec('Switch', behaviours: [pad]),
+        door,
+      ],
+    );
     expect(pad.door!.isAlive, isFalse, reason: 'a stand-in until it is built');
     expect(() => pad.door!.transform.position, throwsStateError);
 
     w.build(level);
     final built = door.object;
-    expect(built.isPending && built.isAlive, isTrue, reason: 'the object this build spawned');
+    expect(!built.isPending && built.isAlive, isTrue, reason: 'the object this build spawned');
     expect(pad.door, same(built));
     expect(pad.gate, same(gate));
     expect(gate.gameObject, same(built));
@@ -85,10 +95,15 @@ void main() {
   test('a component value names a spec\'s object: Follow(target: hero.object)', () {
     final w = fresh();
     final hero = ObjectSpec('Hero', transform: const Pose(position: Vec3(3, 0, 0)));
-    final root = w.build(ObjectSpec('Level', children: [
-      ObjectSpec('Camera', components: [Follow(target: hero.object)]),
-      hero,
-    ]));
+    final root = w.build(
+      ObjectSpec(
+        'Level',
+        children: [
+          ObjectSpec('Camera', components: [Follow(target: hero.object)]),
+          hero,
+        ],
+      ),
+    );
     w
       ..frame(1 / 60)
       ..frame(1 / 60);
@@ -96,30 +111,36 @@ void main() {
     expect(camera.get<Follow>()!.target, same(root.findChild('Hero')));
   });
 
-  test('a spec built before resolves; one never built, or built twice, is an error before anything spawns', () {
-    final w = fresh();
-    final door = ObjectSpec('Door', behaviours: [Gate()]);
-    final pad = Switch()..door = door.object;
-    final built = w.build(door);
-    w.build(ObjectSpec('Switch', behaviours: [pad]));
-    expect(pad.door, same(built));
+  test(
+    'a spec built before resolves; one never built, or built twice, is an error before anything spawns',
+    () {
+      final w = fresh();
+      final door = ObjectSpec('Door', behaviours: [Gate()]);
+      final pad = Switch()..door = door.object;
+      final built = w.build(door);
+      w.build(ObjectSpec('Switch', behaviours: [pad]));
+      expect(pad.door, same(built));
 
-    const lone = ObjectSpec('Lone');
-    final orphan = Switch()..door = lone.object;
-    expect(() => w.build(ObjectSpec('Switch 2', behaviours: [orphan])), throwsStateError);
-    const twin = ObjectSpec('Twin');
-    final both = Switch()..door = twin.object;
-    expect(
-      () => w.build(ObjectSpec('Pair', behaviours: [both], children: const [twin, twin])),
-      throwsStateError,
-      reason: 'a const spec listed twice builds two objects: which one?',
-    );
-    final loose = Switch()..gate = Gate();
-    expect(() => w.build(ObjectSpec('Switch 3', behaviours: [loose])), throwsStateError,
-        reason: 'the gate is on no object');
-    w.frame(1 / 60);
-    expect(w.find('Switch 2') ?? w.find('Pair') ?? w.find('Switch 3'), isNull);
-  });
+      const lone = ObjectSpec('Lone');
+      final orphan = Switch()..door = lone.object;
+      expect(() => w.build(ObjectSpec('Switch 2', behaviours: [orphan])), throwsStateError);
+      const twin = ObjectSpec('Twin');
+      final both = Switch()..door = twin.object;
+      expect(
+        () => w.build(ObjectSpec('Pair', behaviours: [both], children: const [twin, twin])),
+        throwsStateError,
+        reason: 'a const spec listed twice builds two objects: which one?',
+      );
+      final loose = Switch()..gate = Gate();
+      expect(
+        () => w.build(ObjectSpec('Switch 3', behaviours: [loose])),
+        throwsStateError,
+        reason: 'the gate is on no object',
+      );
+      w.frame(1 / 60);
+      expect(w.find('Switch 2') ?? w.find('Pair') ?? w.find('Switch 3'), isNull);
+    },
+  );
 
   test('the writer writes a spec\'s id for each reference, forward ones too', () {
     final writer = ProjectWriter(
@@ -130,22 +151,25 @@ void main() {
     final door = ObjectSpec('Door', behaviours: [gate]);
     final hero = ObjectSpec('Hero');
     final (:entities, :roots) = writer.entitiesOf([
-      ObjectSpec('Switch', behaviours: [
-        Switch()
-          ..door = door.object
-          ..gate = gate,
-      ]),
+      ObjectSpec(
+        'Switch',
+        behaviours: [
+          Switch()
+            ..door = door.object
+            ..gate = gate,
+        ],
+      ),
       ObjectSpec('Camera', components: [Follow(target: hero.object)]),
       door,
       hero,
     ]);
     final [switchId, cameraId, doorId, heroId] = roots;
-    Map<String, Object?> data(String entity, String type) => ((entities[entity]! as Map)['components']! as Map)
-        .values
-        .cast<Map<String, Object?>>()
-        .firstWhere((c) => c['type'] == type)['data']! as Map<String, Object?>;
-    final doorScript = ((entities[doorId]! as Map)['components']! as Map)
-        .entries
+    Map<String, Object?> data(String entity, String type) =>
+        ((entities[entity]! as Map)['components']! as Map).values.cast<Map<String, Object?>>().firstWhere(
+              (c) => c['type'] == type,
+            )['data']!
+            as Map<String, Object?>;
+    final doorScript = ((entities[doorId]! as Map)['components']! as Map).entries
         .firstWhere((e) => (e.value as Map)['type'] == 'test.Gate')
         .key;
     expect(data(switchId, 'test.Switch'), {

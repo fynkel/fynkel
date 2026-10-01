@@ -77,13 +77,13 @@ void main() {
 
   test('instantiate fails for an unknown prefab, a pending parent and before a project is loaded', () {
     final w = loaded();
-    expect(() => w.instantiate('c0000000-0000-4000-8000-0000000000ff'), throwsA(isA<FynkelInstantiateError>()));
+    expect(() => w.instantiate('c0000000-0000-4000-8000-0000000000ff'), throwsStateError);
     final pending = w.spawn(name: 'Pending');
-    expect(() => w.instantiate(cratePrefab, parent: pending), throwsStateError);
+    expect(w.instantiate(cratePrefab, parent: pending).parent, same(pending));
     expect(() => w.instantiate(42), throwsArgumentError);
 
     final fresh = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 4);
     addTearDown(fresh.dispose);
-    expect(() => fresh.instantiate(cratePrefab), throwsA(isA<FynkelInstantiateError>()));
+    expect(() => fresh.instantiate(cratePrefab), throwsStateError);
   });
 }

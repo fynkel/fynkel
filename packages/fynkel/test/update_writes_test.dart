@@ -49,6 +49,19 @@ void main() {
     return w;
   }
 
+  double completedX(World w, GameObject object) {
+    final snapshot = w.native.snapshot;
+    for (var i = 0; i < snapshot.recordCount; i++) {
+      final record = SnapshotTransformRecord.decode(
+        snapshot.records,
+        i * SnapshotTransformRecord.wireSize,
+        snapshot.tail,
+      );
+      if (record.entity == object.entity) return record.world.position.x;
+    }
+    throw StateError('Object missing from completed snapshot');
+  }
+
   /// Screen x of a world point for the fixture camera in 800 × 600.
   double screenX(Vec3 p) {
     final halfH = (6.0 - p.z) * math.tan(0.5);
@@ -69,14 +82,18 @@ void main() {
     for (var i = 0; i < 6; i++) {
       final plan = w.frame(1 / 240); // most of these run no tick
       w.projection.update();
-      expect(anchor.x, closeTo(screenX(Vec3(mover.x, 0.5, 0)), 0.01),
-          reason: 'frame $i (${plan.steps} ticks): the frame draws the x update wrote');
+      expect(
+        anchor.x,
+        closeTo(screenX(Vec3(mover.x, 0.5, 0)), 0.01),
+        reason: 'frame $i (${plan.steps} ticks): the frame draws the x update wrote',
+      );
       expect(crate.transform.position.x, mover.x, reason: 'and reads return it');
     }
 
-    // The next tick takes the written value as authoritative.
+    // Logical state includes this update; the completed snapshot remains at the tick.
     w.frame(1 / 60);
-    expect(crate.worldTransform!.position.x, closeTo(mover.x - 1, 1e-6), reason: 'the tick ran before this update');
+    expect(crate.worldTransform!.position.x, closeTo(mover.x, 1e-6));
+    expect(completedX(w, crate), closeTo(mover.x - 1, 1e-6), reason: 'the tick ran before this update');
   });
 
   test("a dynamic body's update write teleports it at the next tick", () {
@@ -86,6 +103,12 @@ void main() {
     for (var i = 0; i < 3; i++) {
       w.frame(1 / 60);
     }
-    expect(body.worldTransform!.position.x, closeTo(12, 1e-3), reason: 'written x 11 and 12; the tick took 12');
+    expect(
+      body.worldTransform!.position.x,
+      closeTo(13, 1e-3),
+      reason: 'logical gameplay includes the latest update',
+    );
+    expect(completedX(w, body), closeTo(12, 1e-3), reason: 'physics completed before the latest update');
+    expect(body.bodyState(), isNotNull);
   });
 }

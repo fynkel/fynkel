@@ -18,7 +18,7 @@ use crate::{
     BodyCommand, BodyState, BodyType, CharacterController, CharacterState, Collider, ColliderShape,
     CombineRule, Contact, ContactPoint, Hit, PhysicsEvent, PhysicsMaterial, PhysicsOwned,
     PhysicsStats, Quat, QueryKind, QuerySpec, Rejection, RejectionKind, RigidBody, Vec3,
-    MAX_CONTACT_POINTS, MAX_MESH_COLLIDER_TRIANGLES,
+    MAX_CONTACT_POINTS,
 };
 
 /// How far below a character's skin the ground may be for it to count as
@@ -232,6 +232,7 @@ pub struct Physics {
     /// velocity added to the character's `Move` at the step.
     root_motion: Vec<(Entity, Vec3)>,
     rejections: Vec<Rejection>,
+    unsupported_transforms: HashSet<Entity>,
     events: Vec<PhysicsEvent>,
     /// Touching pairs `(a, b)` with `a < b`: sensor pair or not.
     touching: BTreeMap<(Entity, Entity), bool>,
@@ -243,6 +244,7 @@ pub struct Physics {
     /// Entities whose transform the last step wrote (`record` refreshes
     /// their `last_world`).
     scratch_written: Vec<Entity>,
+    scratch_poses: Vec<(Entity, Vec3, Quat)>,
     forced: Vec<RigidBodyHandle>,
     /// Colliders a sync made or moved since the last step: the broad phase
     /// learns of them at the step, or at [`Physics::refresh`] for queries.
@@ -269,6 +271,7 @@ impl Physics {
             pending: Vec::new(),
             root_motion: Vec::new(),
             rejections: Vec::new(),
+            unsupported_transforms: HashSet::new(),
             events: Vec::new(),
             touching: BTreeMap::new(),
             scratch_entities: Vec::new(),
@@ -276,6 +279,7 @@ impl Physics {
             scratch_nested: Vec::new(),
             scratch_gone: Vec::new(),
             scratch_written: Vec::new(),
+            scratch_poses: Vec::new(),
             forced: Vec::new(),
             unplaced: Vec::new(),
             stats: PhysicsStats::default(),
@@ -294,33 +298,22 @@ impl Physics {
     }
 
     /// Makes a cooked mesh available to `shape: mesh` colliders. Fails
-    /// above [`MAX_MESH_COLLIDER_TRIANGLES`] or on an index out of range.
+    /// above [`crate::MAX_MESH_COLLIDER_TRIANGLES`] or on an index out of range.
     pub fn register_mesh(
         &mut self,
         key: AssetRef,
         positions: &[[f32; 3]],
         indices: &[u32],
     ) -> Result<usize, String> {
-        let triangles = indices.len() / 3;
-        if triangles == 0 {
-            return Err("mesh has no triangles".into());
-        }
-        if triangles > MAX_MESH_COLLIDER_TRIANGLES {
-            return Err(format!(
-                "mesh has {triangles} triangles, more than the {MAX_MESH_COLLIDER_TRIANGLES} a mesh collider allows"
-            ));
-        }
-        let n = positions.len() as u32;
-        let mut tris = Vec::with_capacity(triangles);
-        for t in indices.chunks_exact(3) {
-            if t.iter().any(|i| *i >= n) {
-                return Err("mesh index out of range".into());
-            }
-            tris.push([t[0], t[1], t[2]]);
-        }
-        let verts = positions.iter().map(|p| Vec3::from(*p)).collect();
-        self.meshes.insert(key, (verts, tris));
-        Ok(triangles)
+        let mesh = crate::PreparedMesh::new(positions, indices)?;
+        Ok(self.register_prepared_mesh(key, mesh))
+    }
+
+    /// Publishes already validated collision data without a fallible decode step.
+    pub fn register_prepared_mesh(&mut self, key: AssetRef, mesh: crate::PreparedMesh) -> usize {
+        let triangles = mesh.triangle_count();
+        self.meshes.insert(key, (mesh.vertices, mesh.triangles));
+        triangles
     }
 
     pub fn has_mesh(&self, key: &AssetRef) -> bool {
@@ -538,11 +531,7 @@ impl Physics {
         // The step's broad-phase update places them.
         self.unplaced.clear();
         self.apply_pending(ecs);
-        for (entity, v) in self.root_motion.drain(..) {
-            if let Some(run) = self.characters.get_mut(&entity) {
-                run.pending_move = Some(run.pending_move.unwrap_or(Vec3::ZERO) + v);
-            }
-        }
+        self.apply_root_motion();
         if self.entries.is_empty() {
             self.pending.clear();
             self.stats = PhysicsStats::default();
@@ -618,6 +607,7 @@ impl Physics {
     }
 
     fn sync(&mut self, ecs: &mut Ecs) {
+        let mut unsupported = HashSet::new();
         // Every entity with a physics component, in handle order. The
         // scratch vectors keep their capacity: with thousands of static
         // colliders this runs every tick and must not allocate.
@@ -653,6 +643,26 @@ impl Physics {
                     continue;
                 }
                 let entity = handle.0;
+                // last_world also contains physics writeback: equality is not
+                // proof that this matrix passed transform validation.
+                let moving =
+                    character.is_some() || rigid.is_some_and(|r| r.body_type != BodyType::Static);
+                if Transform::try_from_matrix(wt.matrix).is_none()
+                    || (moving && !supports_motion_parent(ecs, parent.map(|p| p.0)))
+                {
+                    unsupported.insert(entity);
+                    if !self.unsupported_transforms.contains(&entity) {
+                        self.rejections.push(Rejection {
+                            index: u32::MAX,
+                            entity,
+                            kind: RejectionKind::UnsupportedTransform,
+                            message: "physics requires a non-singular world TRS; moving bodies require positive uniform scale on every ancestor".into(),
+                        });
+                    }
+                    // Leaving candidates removes any previously valid body
+                    // and collider, instead of retaining stale geometry.
+                    continue;
+                }
                 candidates.push(entity);
                 // A lone collider under a parent may belong to an
                 // ancestor's body (ADR-0034): decided once the bodies are
@@ -682,6 +692,7 @@ impl Physics {
                 }
             }
         }
+        self.unsupported_transforms = unsupported;
         candidates.sort_unstable();
         changed.sort_unstable();
         nested.sort_unstable();
@@ -919,7 +930,7 @@ impl Physics {
             return;
         }
         let p = pose(position, rotation);
-        let user = entity.to_bits() as u128;
+        let user = entity.to_bits();
         let body = rigid.map(|r| {
             let (t, rot) = freedoms(r.constraints);
             let mut b = RigidBodyBuilder::new(body_type(r.body_type))
@@ -1080,7 +1091,7 @@ impl Physics {
                     .active_collision_types(types)
                     .density(0.0)
                     .position(place)
-                    .user_data(entity.to_bits() as u128);
+                    .user_data(entity.to_bits());
                 let h = self.world.insert_collider(builder, parent);
                 self.entries.get_mut(&entity).unwrap().collider = Some(h);
                 h
@@ -1145,7 +1156,7 @@ impl Physics {
         world: Mat4,
     ) {
         let p = pose(position, rotation);
-        let user = entity.to_bits() as u128;
+        let user = entity.to_bits();
         let body = self.world.insert_body(
             RigidBodyBuilder::kinematic_position_based()
                 .pose(p)
@@ -1320,11 +1331,11 @@ impl Physics {
                 // move, and nothing wrong with the order.
                 continue;
             }
-            if !cmd.is_finite() {
-                self.rejections.push(reject(
-                    RejectionKind::NotFinite,
-                    "body command value is not finite".into(),
-                ));
+            let body = ecs.get::<RigidBody>(entity).ok().map(|b| b.body_type);
+            if let Err((kind, message)) =
+                cmd.validate_for(body, ecs.has::<CharacterController>(entity))
+            {
+                self.rejections.push(reject(kind, message));
                 continue;
             }
             if cmd.is_character() {
@@ -1361,84 +1372,73 @@ impl Physics {
                 continue;
             };
             let body = &mut self.world.bodies[h];
-            let needs_dynamic = |kind: &str| {
-                if rigid.body_type != BodyType::Dynamic {
-                    Some(reject(
-                        RejectionKind::NotDynamic,
-                        format!("{kind} needs a dynamic body"),
-                    ))
-                } else {
-                    None
+            match cmd {
+                BodyCommand::ApplyForce(v) => {
+                    body.add_force(v, true);
+                    self.forced.push(h);
                 }
-            };
-            let err =
-                match cmd {
-                    BodyCommand::ApplyForce(v) => needs_dynamic("applyForce").or_else(|| {
-                        body.add_force(v, true);
-                        self.forced.push(h);
-                        None
-                    }),
-                    BodyCommand::ApplyImpulse(v) => needs_dynamic("applyImpulse").or_else(|| {
-                        body.apply_impulse(v, true);
-                        None
-                    }),
-                    BodyCommand::ApplyTorque(v) => needs_dynamic("applyTorque").or_else(|| {
-                        body.add_torque(v, true);
-                        self.forced.push(h);
-                        None
-                    }),
-                    BodyCommand::ApplyTorqueImpulse(v) => needs_dynamic("applyTorqueImpulse")
-                        .or_else(|| {
-                            body.apply_torque_impulse(v, true);
-                            None
-                        }),
-                    BodyCommand::SetLinearVelocity(v) => needs_dynamic("setLinearVelocity")
-                        .or_else(|| {
-                            body.set_linvel(masked(v, body.locked_axes(), false), true);
-                            None
-                        }),
-                    BodyCommand::SetAngularVelocity(v) => needs_dynamic("setAngularVelocity")
-                        .or_else(|| {
-                            body.set_angvel(masked(v, body.locked_axes(), true), true);
-                            None
-                        }),
-                    BodyCommand::SetKinematicTarget { position, rotation } => {
-                        if rigid.body_type != BodyType::Kinematic {
-                            Some(reject(
-                                RejectionKind::NotKinematic,
-                                "setKinematicTarget needs a kinematic body".into(),
-                            ))
-                        } else {
-                            body.set_next_kinematic_position(pose(position, rotation.normalize()));
-                            None
+                BodyCommand::ApplyImpulse(v) => body.apply_impulse(v, true),
+                BodyCommand::ApplyTorque(v) => {
+                    body.add_torque(v, true);
+                    self.forced.push(h);
+                }
+                BodyCommand::ApplyTorqueImpulse(v) => body.apply_torque_impulse(v, true),
+                BodyCommand::SetLinearVelocity(v) => {
+                    body.set_linvel(masked(v, body.locked_axes(), false), true)
+                }
+                BodyCommand::SetAngularVelocity(v) => {
+                    body.set_angvel(masked(v, body.locked_axes(), true), true)
+                }
+                BodyCommand::SetKinematicTarget { position, rotation } => {
+                    body.set_next_kinematic_position(pose(position, rotation.normalize()));
+                }
+                BodyCommand::Teleport { position, rotation } => {
+                    let p = pose(position, rotation.normalize());
+                    body.set_position(p, true);
+                    if rigid.body_type == BodyType::Kinematic {
+                        body.set_next_kinematic_position(p);
+                    }
+                    // Static bodies are not written back: move the entity now.
+                    if rigid.body_type == BodyType::Static {
+                        if let Err(error) = write_pose(ecs, entity, position, rotation.normalize())
+                        {
+                            self.rejections.push(reject(
+                                RejectionKind::UnsupportedTransform,
+                                format!("physics pose publication: {error:?}"),
+                            ));
+                        }
+                        if let Ok(wt) = ecs.get::<WorldTransform>(entity) {
+                            entry.last_world = wt.matrix;
                         }
                     }
-                    BodyCommand::Teleport { position, rotation } => {
-                        let p = pose(position, rotation.normalize());
-                        body.set_position(p, true);
-                        if rigid.body_type == BodyType::Kinematic {
-                            body.set_next_kinematic_position(p);
-                        }
-                        // Static bodies are not written back: move the entity now.
-                        if rigid.body_type == BodyType::Static {
-                            write_pose(ecs, entity, position, rotation.normalize());
-                            if let Ok(wt) = ecs.get::<WorldTransform>(entity) {
-                                entry.last_world = wt.matrix;
-                            }
-                        }
-                        None
-                    }
-                    // Routed to the character above.
-                    BodyCommand::Move(_) | BodyCommand::Jump(_) => None,
-                };
-            if let Some(r) = err {
-                self.rejections.push(r);
+                }
+                // Routed to the character above.
+                BodyCommand::Move(_) | BodyCommand::Jump(_) => unreachable!(),
+            }
+        }
+    }
+
+    fn apply_root_motion(&mut self) {
+        for (entity, v) in self.root_motion.drain(..) {
+            if let Some(run) = self.characters.get_mut(&entity) {
+                let combined = run.pending_move.unwrap_or(Vec3::ZERO) + v;
+                if let Err((kind, message)) = BodyCommand::Move(combined).validate_for(None, true) {
+                    self.rejections.push(Rejection {
+                        index: u32::MAX,
+                        entity,
+                        kind,
+                        message: format!("root motion: {message}"),
+                    });
+                } else {
+                    run.pending_move = Some(combined);
+                }
             }
         }
     }
 
     fn write_back(&mut self, ecs: &mut Ecs) {
         self.scratch_written.clear();
+        self.scratch_poses.clear();
         for (entity, entry) in &mut self.entries {
             let Some(h) = entry.body else {
                 continue;
@@ -1456,8 +1456,28 @@ impl Physics {
                 }
             }
             let p = body.position();
-            write_pose(ecs, *entity, p.translation, p.rotation);
-            self.scratch_written.push(*entity);
+            self.scratch_poses
+                .push((*entity, p.translation, p.rotation));
+        }
+        let published = scene::prepare_world_poses(ecs, &self.scratch_poses)
+            .and_then(|poses| scene::set_local_batch(ecs, &poses));
+        match published {
+            Ok(()) => self
+                .scratch_written
+                .extend(self.scratch_poses.iter().map(|p| p.0)),
+            Err(error) => {
+                let entity = self
+                    .scratch_poses
+                    .first()
+                    .map(|p| p.0)
+                    .unwrap_or(Entity::NULL);
+                self.rejections.push(Rejection {
+                    index: u32::MAX,
+                    entity,
+                    kind: RejectionKind::UnsupportedTransform,
+                    message: format!("physics pose batch rejected: {error:?}"),
+                });
+            }
         }
     }
 
@@ -1481,12 +1501,15 @@ impl Physics {
             else {
                 continue;
             };
-            let wanted_move = run.pending_move.take();
-            let jump = run.pending_jump.take();
             if run.fresh {
+                // The initial broad-phase placement takes this tick. Preserve
+                // explicit intent until the first tick that can execute it;
+                // later move/jump requests still replace the pending values.
                 run.fresh = false;
                 continue;
             }
+            let wanted_move = run.pending_move.take();
+            let jump = run.pending_jump.take();
             let flying = spec.gravity_scale == 0.0;
             let mut planar = wanted_move.unwrap_or(Vec3::ZERO);
             if !flying {
@@ -1828,7 +1851,7 @@ impl Physics {
             self.world
                 .colliders
                 .get(h)
-                .map(|c| Entity::from_bits(c.user_data as u64))
+                .map(|c| Entity::from_bits(c.user_data))
         };
         if !q.origin.is_finite() {
             return;
@@ -2165,17 +2188,36 @@ fn set_owned(ecs: &mut Ecs, entity: Entity, owned: bool) {
 }
 
 /// Writes a world pose as the entity's local transform (scale kept).
-fn write_pose(ecs: &mut Ecs, entity: Entity, position: Vec3, rotation: Quat) {
-    let _ = scene::set_world_pose(ecs, entity, position, rotation);
+// A currently orthogonal world basis can become sheared as soon as a body
+// rotates under nonuniform scale. Reject that hierarchy before simulation.
+fn supports_motion_parent(ecs: &Ecs, mut parent: Option<Entity>) -> bool {
+    while let Some(entity) = parent {
+        let Ok(local) = ecs.get::<Transform>(entity) else {
+            return false;
+        };
+        let scale = local.scale;
+        if !scale.is_finite()
+            || scale.min_element() <= 0.0
+            || scale.max_element() - scale.min_element() > 1e-5 * scale.max_element()
+        {
+            return false;
+        }
+        parent = scene::parent_of(ecs, entity);
+    }
+    true
+}
+
+fn write_pose(ecs: &mut Ecs, entity: Entity, position: Vec3, rotation: Quat) -> scene::Result<()> {
+    let poses = scene::prepare_world_poses(ecs, &[(entity, position, rotation)])?;
+    scene::set_local_batch(ecs, &poses)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fynkel_contracts::WorldId;
 
     pub(crate) fn world() -> Ecs {
-        Ecs::new(WorldId(1))
+        Ecs::new()
     }
 
     pub(crate) fn spawn(
@@ -2199,6 +2241,219 @@ mod tests {
         p.step(ecs, 1.0 / 60.0, watched);
         scene::propagate(ecs);
         p.record(ecs);
+    }
+
+    #[test]
+    fn moving_bodies_reject_unsafe_ancestors_before_rotation_and_recover() {
+        for body_type in [BodyType::Dynamic, BodyType::Kinematic] {
+            for scale in [Vec3::new(2.0, 1.0, 1.0), Vec3::splat(-1.0)] {
+                let mut ecs = world();
+                let mut p = Physics::new();
+                p.set_gravity(Vec3::ZERO);
+                let root = scene::spawn(
+                    &mut ecs,
+                    Transform {
+                        scale,
+                        ..Transform::IDENTITY
+                    },
+                    None,
+                )
+                .unwrap();
+                let middle = scene::spawn(&mut ecs, Transform::IDENTITY, Some(root)).unwrap();
+                let body = scene::spawn(&mut ecs, Transform::IDENTITY, Some(middle)).unwrap();
+                ecs.insert(
+                    body,
+                    RigidBody {
+                        body_type,
+                        ..RigidBody::default()
+                    },
+                )
+                .unwrap();
+                ecs.insert(body, Collider::default()).unwrap();
+                let watched = BTreeSet::new();
+                tick(&mut p, &mut ecs, &watched);
+                assert_eq!(p.stats().bodies, 0, "{body_type:?}, {scale:?}");
+                assert_eq!(p.stats().colliders, 0);
+                let rejected = p.take_rejections();
+                assert_eq!(rejected.len(), 1);
+                assert_eq!(rejected[0].kind, RejectionKind::UnsupportedTransform);
+                tick(&mut p, &mut ecs, &watched);
+                assert!(
+                    p.take_rejections().is_empty(),
+                    "report once while unsupported"
+                );
+
+                scene::set_local(
+                    &ecs,
+                    root,
+                    Transform {
+                        scale: Vec3::splat(2.0),
+                        ..Transform::IDENTITY
+                    },
+                )
+                .unwrap();
+                tick(&mut p, &mut ecs, &watched);
+                assert_eq!(p.stats().bodies, 1);
+                assert_eq!(p.stats().colliders, 1);
+                let rotation = Quat::from_rotation_z(0.7);
+                let command = if body_type == BodyType::Dynamic {
+                    BodyCommand::SetAngularVelocity(Vec3::new(0.0, 0.0, 3.0))
+                } else {
+                    BodyCommand::SetKinematicTarget {
+                        position: Vec3::ZERO,
+                        rotation,
+                    }
+                };
+                p.queue(0, body, command);
+                for _ in 0..3 {
+                    tick(&mut p, &mut ecs, &watched);
+                    assert!(Transform::try_from_matrix(
+                        ecs.get::<WorldTransform>(body).unwrap().matrix
+                    )
+                    .is_some());
+                    assert!(p.take_rejections().is_empty());
+                    assert_eq!(p.stats().bodies, 1);
+                }
+                scene::set_local(
+                    &ecs,
+                    root,
+                    Transform {
+                        scale,
+                        ..Transform::IDENTITY
+                    },
+                )
+                .unwrap();
+                tick(&mut p, &mut ecs, &watched);
+                assert_eq!(p.stats().bodies, 0, "an existing body must also be removed");
+                assert_eq!(
+                    p.take_rejections()[0].kind,
+                    RejectionKind::UnsupportedTransform
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unsafe_parent_scale_rejects_characters_but_allows_static_trs_colliders() {
+        let mut ecs = world();
+        let mut p = Physics::new();
+        let root = scene::spawn(
+            &mut ecs,
+            Transform {
+                scale: Vec3::new(2.0, 1.0, 1.0),
+                ..Transform::IDENTITY
+            },
+            None,
+        )
+        .unwrap();
+        let character = scene::spawn(&mut ecs, Transform::IDENTITY, Some(root)).unwrap();
+        ecs.insert(character, CharacterController::default())
+            .unwrap();
+        let fixed = scene::spawn(
+            &mut ecs,
+            Transform::from_position(Vec3::X * 10.0),
+            Some(root),
+        )
+        .unwrap();
+        ecs.insert(
+            fixed,
+            RigidBody {
+                body_type: BodyType::Static,
+                ..RigidBody::default()
+            },
+        )
+        .unwrap();
+        ecs.insert(fixed, Collider::default()).unwrap();
+        tick(&mut p, &mut ecs, &BTreeSet::new());
+        assert!(!p.entries.contains_key(&character));
+        assert!(p.entries.contains_key(&fixed));
+        let rejected = p.take_rejections();
+        assert_eq!(rejected.len(), 1);
+        assert_eq!(rejected[0].entity, character);
+        assert_eq!(rejected[0].kind, RejectionKind::UnsupportedTransform);
+        scene::set_local(&ecs, root, Transform::IDENTITY).unwrap();
+        tick(&mut p, &mut ecs, &BTreeSet::new());
+        assert!(p.entries.contains_key(&character));
+        assert!(p.take_rejections().is_empty());
+    }
+
+    #[test]
+    fn recording_a_matrix_does_not_certify_it_as_valid() {
+        let mut ecs = world();
+        let mut p = Physics::new();
+        let body = spawn(
+            &mut ecs,
+            Vec3::ZERO,
+            Some(RigidBody::default()),
+            Some(Collider::default()),
+        );
+        scene::propagate(&mut ecs);
+        p.step(&mut ecs, 1.0 / 60.0, &BTreeSet::new());
+        scene::propagate(&mut ecs);
+        // Model an unsupported post-physics result entering the writeback
+        // cache. The next sync must validate it even though it is unchanged.
+        ecs.get_mut::<WorldTransform>(body).unwrap().matrix.y_axis.x = 0.5;
+        p.record(&ecs);
+        p.refresh(&mut ecs);
+        assert!(p.entries.is_empty());
+        assert_eq!(
+            p.take_rejections()[0].kind,
+            RejectionKind::UnsupportedTransform
+        );
+    }
+
+    #[test]
+    fn unsupported_affine_colliders_are_removed_reported_once_and_can_recover() {
+        let mut ecs = world();
+        let mut physics = Physics::new();
+        let root = scene::spawn(&mut ecs, Transform::IDENTITY, None).unwrap();
+        let child = scene::spawn(
+            &mut ecs,
+            Transform {
+                rotation: Quat::from_rotation_z(0.7),
+                ..Transform::IDENTITY
+            },
+            Some(root),
+        )
+        .unwrap();
+        ecs.insert(child, Collider::default()).unwrap();
+        let watched = BTreeSet::new();
+        tick(&mut physics, &mut ecs, &watched);
+        assert_eq!(physics.world.colliders.len(), 1);
+        scene::set_local(
+            &ecs,
+            root,
+            Transform {
+                scale: Vec3::new(2.0, 1.0, 1.0),
+                ..Transform::IDENTITY
+            },
+        )
+        .unwrap();
+        tick(&mut physics, &mut ecs, &watched);
+        assert_eq!(physics.world.colliders.len(), 0);
+        let rejected = physics.take_rejections();
+        assert_eq!(rejected.len(), 1);
+        assert_eq!(rejected[0].kind, RejectionKind::UnsupportedTransform);
+        tick(&mut physics, &mut ecs, &watched);
+        assert!(physics.take_rejections().is_empty());
+        scene::set_local(&ecs, root, Transform::IDENTITY).unwrap();
+        tick(&mut physics, &mut ecs, &watched);
+        assert_eq!(physics.world.colliders.len(), 1);
+        scene::set_local(
+            &ecs,
+            root,
+            Transform {
+                scale: Vec3::new(0.0, 1.0, 1.0),
+                ..Transform::IDENTITY
+            },
+        )
+        .unwrap();
+        tick(&mut physics, &mut ecs, &watched);
+        assert_eq!(physics.world.colliders.len(), 0);
+        assert_eq!(
+            physics.take_rejections()[0].kind,
+            RejectionKind::UnsupportedTransform
+        );
     }
 
     #[test]
@@ -2649,7 +2904,7 @@ mod tests {
             2
         );
         assert!(p.register_mesh(key.clone(), &quad, &[0, 9, 1]).is_err());
-        let big: Vec<u32> = (0..(MAX_MESH_COLLIDER_TRIANGLES as u32 + 1) * 3)
+        let big: Vec<u32> = (0..(crate::MAX_MESH_COLLIDER_TRIANGLES as u32 + 1) * 3)
             .map(|i| i % 4)
             .collect();
         assert!(p.register_mesh(key.clone(), &quad, &big).is_err());
@@ -3224,5 +3479,43 @@ mod tests {
         assert!(p.register_material(material_key(3), mat(0.5, 2.0)).is_err());
         assert!(!p.has_material(&material_key(3)));
         assert_eq!(p.material_count(), 1);
+    }
+
+    #[test]
+    fn invalid_solver_pose_rejects_the_entire_ecs_writeback_batch() {
+        let mut ecs = world();
+        let a = spawn(&mut ecs, Vec3::ZERO, Some(RigidBody::default()), None);
+        let b = spawn(&mut ecs, Vec3::X, Some(RigidBody::default()), None);
+        scene::propagate(&mut ecs);
+        let mut physics = Physics::new();
+        physics.sync(&mut ecs);
+        for (entity, x) in [(a, 7.0), (b, f32::NAN)] {
+            let handle = physics.entries[&entity].body.unwrap();
+            physics.world.bodies[handle]
+                .set_position(pose(Vec3::new(x, 0.0, 0.0), Quat::IDENTITY), true);
+        }
+        physics.write_back(&mut ecs);
+        assert_eq!(ecs.copy::<Transform>(a).unwrap().position, Vec3::ZERO);
+        assert_eq!(ecs.copy::<Transform>(b).unwrap().position, Vec3::X);
+        assert!(physics.scratch_written.is_empty());
+        assert_eq!(physics.take_rejections().len(), 1);
+    }
+
+    #[test]
+    fn root_motion_accumulation_rejects_overflow_without_replacing_valid_intent() {
+        let mut ecs = world();
+        let entity = spawn(&mut ecs, Vec3::ZERO, None, None);
+        ecs.insert(entity, CharacterController::default()).unwrap();
+        scene::propagate(&mut ecs);
+        let mut physics = Physics::new();
+        physics.sync(&mut ecs);
+        let velocity = Vec3::new(f32::MAX, 0.0, 0.0);
+        physics.characters.get_mut(&entity).unwrap().pending_move = Some(velocity);
+        physics.add_root_motion(entity, velocity);
+        physics.apply_root_motion();
+        assert_eq!(physics.characters[&entity].pending_move, Some(velocity));
+        let errors = physics.take_rejections();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].kind, RejectionKind::NotFinite);
     }
 }

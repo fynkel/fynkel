@@ -1,7 +1,7 @@
 # package:fynkel
 
 Flutter-independent Dart gameplay API over the Fynkel native runtime
-(ABI v1, `crates/fynkel_native`). See `docs/design/dart-sdk.md`.
+(ABI v3, `crates/fynkel_native`). See `docs/design/dart-sdk.md`.
 
 ## Native runtime (ADR-0015)
 

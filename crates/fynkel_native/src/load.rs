@@ -7,6 +7,7 @@
 //! unloaded, every other entity destroyed, every residency token
 //! dropped); `FYNKEL_LOAD_ADDITIVE` keeps the world.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -60,6 +61,8 @@ fn load_error_diagnostic(e: &LoadError) -> Diagnostic {
         LoadError::UnknownAnchorParent(_)
         | LoadError::AnchorTransform
         | LoadError::UnknownSource(_)
+        | LoadError::CloneRejected(_)
+        | LoadError::LiveSpawnRejected(_)
         | LoadError::NotARoot(_) => Code::IO,
         LoadError::NotOneRoot(_) => Code::RUNTIME_SCENE_INVALID,
         LoadError::AlreadyLoaded(_) => Code::RUNTIME_SCENE_ALREADY_LOADED,
@@ -98,23 +101,42 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// The world's binding table from the project's actions with the user's
-/// rebinds over them (M3-12), as the report's `input` entry.
-fn bind_project_input(w: &mut FynkelWorld, assets: &Assets) -> Value {
-    let Some(p) = assets.project() else {
-        return Value::Null;
+/// Prepares project action specifications without mutating the world or its
+/// persisted user overrides. Unknown action names in rebinds remain harmless.
+#[allow(clippy::result_large_err)]
+pub(crate) fn prepare_project_input(
+    assets: &Assets,
+    rebinds: &BTreeMap<String, Vec<String>>,
+) -> Result<Vec<fynkel_core::ActionSpec>, Diagnostic> {
+    let Some(project) = assets.project() else {
+        return Err(missing_input_project());
     };
-    let mut specs = p.input_actions.clone();
+    let mut specs = project.input_actions.clone();
     for spec in &mut specs {
-        if let Some(b) = w.rebinds.get(&spec.name) {
-            spec.bindings = b.clone();
+        if let Some(bindings) = rebinds.get(&spec.name) {
+            spec.bindings = bindings.clone();
         }
     }
-    let errors = w.core_mut().bind_input(&specs);
+    Ok(specs)
+}
+
+pub(crate) fn missing_input_project() -> Diagnostic {
+    Diagnostic::error(
+        Code::RUNTIME_CACHE_UNREADABLE,
+        "bind_actions: no cooked project is loaded in this world",
+    )
+    .with_suggestion("load the project (fynkel_world_load_project) first")
+}
+
+pub(crate) fn project_input_json(
+    specs: &[fynkel_core::ActionSpec],
+    rebinds: &BTreeMap<String, Vec<String>>,
+    errors: &[(String, String, fynkel_core::input::BindingError)],
+) -> Value {
     json!({
         "actions": specs.iter().map(|a| json!({
             "name": a.name, "type": a.kind.name(), "bindings": a.bindings,
-            "rebound": w.rebinds.contains_key(&a.name),
+            "rebound": rebinds.contains_key(&a.name),
         })).collect::<Vec<_>>(),
         "bindingErrors": errors.iter().map(|(action, binding, e)| json!({
             "action": action, "binding": binding, "message": e.to_string(),
@@ -122,7 +144,27 @@ fn bind_project_input(w: &mut FynkelWorld, assets: &Assets) -> Value {
     })
 }
 
-fn residency_json(assets: &Assets) -> Value {
+pub(crate) fn binding_report(assets: &Assets, input: Value) -> Value {
+    json!({
+        "ok": true,
+        "scene": Value::Null,
+        "cache": cache_json(assets),
+        "diagnostics": [],
+        "input": input,
+    })
+}
+
+/// Load-time application shares preparation and reporting with the gameplay
+/// journal, while remaining part of the explicit scene-load boundary.
+fn bind_project_input(w: &mut FynkelWorld, assets: &Assets) -> Value {
+    let Ok(specs) = prepare_project_input(assets, &w.rebinds) else {
+        return Value::Null;
+    };
+    let errors = w.core_mut().bind_input(&specs);
+    project_input_json(&specs, &w.rebinds, &errors)
+}
+
+pub(crate) fn residency_json(assets: &Assets) -> Value {
     let stats = assets.stats();
     json!({
         "retained": stats.retained,
@@ -362,31 +404,46 @@ fn unload(w: &mut FynkelWorld, id: Uuid) -> Outcome {
 
 /// Replaces the user's rebinds and rebinds the world's actions from the
 /// loaded project with them (M3-12).
-fn bind_actions(
-    w: &mut FynkelWorld,
-    rebinds: std::collections::BTreeMap<String, Vec<String>>,
-) -> Outcome {
-    w.rebinds = rebinds;
+fn bind_actions(w: &mut FynkelWorld, rebinds: BTreeMap<String, Vec<String>>) -> Outcome {
     let Some(assets) = w.assets.clone() else {
-        return failed(
-            &[Diagnostic::error(
-                fynkel_contracts::Code::RUNTIME_CACHE_UNREADABLE,
-                "bind_actions: no cooked project is loaded in this world",
-            )
-            .with_suggestion("load the project (fynkel_world_load_project) first")],
-            Value::Null,
-        );
+        return failed(&[missing_input_project()], Value::Null);
     };
-    let input = bind_project_input(w, &assets);
+    let specs = match prepare_project_input(&assets, &rebinds) {
+        Ok(specs) => specs,
+        Err(error) => return failed(&[error], cache_json(&assets)),
+    };
+    // Older queued gameplay work is a separate preceding commit, as for
+    // the legacy clone boundary. Retain its temp mappings for legacy callers.
+    let adopted = match w.core_mut().adopt_gameplay_commands() {
+        Ok(commit) => commit,
+        Err(error) => {
+            return failed(
+                &[Diagnostic::error(Code::IO, error.to_string())],
+                cache_json(&assets),
+            );
+        }
+    };
+    for &(temp_id, pending) in &adopted.value {
+        if let Some(entity) = adopted.resolve(pending) {
+            w.core_mut()
+                .push_event(fynkel_core::EventPayload::Spawned { temp_id, entity });
+        }
+    }
+    let errors = match w.core_mut().edit_gameplay(|edit| edit.bind_input(&specs)) {
+        Ok(commit) => commit.value,
+        Err(error) => {
+            return failed(
+                &[Diagnostic::error(Code::IO, error.to_string())],
+                cache_json(&assets),
+            );
+        }
+    };
+    let input = project_input_json(&specs, &rebinds, &errors);
+    // Persistence belongs to successful publication, never failed preparation.
+    w.rebinds = rebinds;
     Outcome {
         status: Status::Ok,
-        report: json!({
-            "ok": true,
-            "scene": Value::Null,
-            "cache": cache_json(&assets),
-            "diagnostics": [],
-            "input": input,
-        }),
+        report: binding_report(&assets, input),
     }
 }
 
@@ -401,7 +458,7 @@ fn references(data: &Value, loaded: &LoadedScene) -> serde_json::Map<String, Val
             Value::Object(m) => {
                 if let Some(Value::String(id)) = m.get("entity") {
                     if let Some(e) = id.parse::<Uuid>().ok().and_then(|u| loaded.handle_of(u)) {
-                        out.insert(id.clone(), json!(e.to_bits()));
+                        out.insert(id.clone(), json!(e.to_hex()));
                     }
                 }
                 for item in m.values() {
@@ -454,7 +511,7 @@ fn scene_json(loaded: &LoadedScene, scene: &CookedScene) -> Value {
         .filter_map(|b| {
             let entity = loaded.handle_of(b.entity)?;
             Some(json!({
-                "entity": entity.to_bits(),
+                "entity": entity.to_hex(),
                 "authoringId": b.entity.to_string(),
                 "component": b.component.to_string(),
                 "type": b.type_id,
@@ -606,7 +663,7 @@ fn instantiate_prefab(
                 .filter_map(|b| {
                     let entity = instance.handle_of(b.entity)?;
                     Some(json!({
-                        "entity": entity.to_bits(),
+                        "entity": entity.to_hex(),
                         "authoringId": b.entity.to_string(),
                         "component": b.component.to_string(),
                         "type": b.type_id,
@@ -631,7 +688,7 @@ fn instantiate_prefab(
                         "prefab": prefab.id.to_string(),
                         "name": name,
                         "path": prefab.path,
-                        "root": root.to_bits(),
+                        "root": root.to_hex(),
                         "entities": instance.entities().len(),
                         "rejectedComponents": instance.rejected_components,
                         "assets": prefab.closure.len(),
@@ -692,7 +749,7 @@ pub unsafe extern "C" fn fynkel_world_instantiate(
         rotation: Quat::from_array(d.rotation),
         scale: Vec3::from_array(d.scale),
     };
-    let parent = (d.parent != 0).then(|| Entity::from_bits(d.parent));
+    let parent = (!d.parent.is_null()).then_some(d.parent);
     guarded(world, move |w| {
         let started = std::time::Instant::now();
         let out = instantiate_prefab(w, id, name.as_deref(), transform, parent);
@@ -727,8 +784,8 @@ pub unsafe extern "C" fn fynkel_world_clone(
         rotation: Quat::from_array(d.rotation),
         scale: Vec3::from_array(d.scale),
     };
-    let source = Entity::from_bits(d.source);
-    let parent = (d.parent != 0).then(|| Entity::from_bits(d.parent));
+    let source = d.source;
+    let parent = (!d.parent.is_null()).then_some(d.parent);
     guarded(world, move |w| {
         let started = std::time::Instant::now();
         let out = match w
@@ -741,11 +798,11 @@ pub unsafe extern "C" fn fynkel_world_clone(
                     "ok": true,
                     "scene": Value::Null,
                     "clone": {
-                        "source": source.to_bits(),
-                        "root": c.root.to_bits(),
+                        "source": source.to_hex(),
+                        "root": c.root.to_hex(),
                         "entities": c.pairs
                             .iter()
-                            .map(|(s, c)| [s.to_bits(), c.to_bits()])
+                            .map(|(s, c)| [s.to_hex(), c.to_hex()])
                             .collect::<Vec<_>>(),
                         "rejectedComponents": c.rejected_components,
                     },
@@ -809,10 +866,13 @@ fn make_persistent_objects(w: &mut FynkelWorld, out: &mut Outcome) {
     for (name, prefab) in list {
         let o = instantiate_prefab(w, prefab, Some(&name), Transform::IDENTITY, None);
         let instance = &o.report["instance"];
-        let root = instance["root"].as_u64().filter(|_| o.status == Status::Ok);
+        let root = instance["root"]
+            .as_str()
+            .and_then(Entity::from_hex)
+            .filter(|_| o.status == Status::Ok);
         match root {
             Some(root) => {
-                let e = Entity::from_bits(root);
+                let e = root;
                 // A fresh root, so this cannot be refused.
                 let _ = w.core_mut().dont_destroy_on_load(e);
                 w.project_persistent.push(e);
@@ -835,7 +895,7 @@ fn make_persistent_objects(w: &mut FynkelWorld, out: &mut Outcome) {
         made.push(json!({
             "name": name,
             "prefab": prefab.to_string(),
-            "entity": root,
+            "entity": root.map(Entity::to_hex),
             "path": instance["path"],
             "behaviours": instance.get("behaviours").cloned().unwrap_or_else(|| json!([])),
         }));
@@ -1183,13 +1243,11 @@ pub unsafe extern "C" fn fynkel_world_unload_scene(
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_world_dont_destroy_on_load(
     world: *mut FynkelWorld,
-    entity: u64,
+    entity: Entity,
 ) -> Status {
-    guarded(world, |w| {
-        match w.core_mut().dont_destroy_on_load(Entity::from_bits(entity)) {
-            Ok(()) => Status::Ok,
-            Err(_) => Status::InvalidArgument,
-        }
+    guarded(world, |w| match w.core_mut().dont_destroy_on_load(entity) {
+        Ok(()) => Status::Ok,
+        Err(_) => Status::InvalidArgument,
     })
 }
 

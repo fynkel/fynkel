@@ -19,7 +19,10 @@ pub mod uuid;
 pub use asset::{AssetId, AssetRef};
 pub use codes::{DiagnosticCode, Status};
 pub use diagnostic::{has_errors, Code, Diagnostic, Severity};
-pub use handle::{Entity, WorldId};
+pub use handle::{
+    allocate_world_id, attach_identity_authority, identity_authority, AuthorityMismatch, Entity,
+    IdentityAuthority, IdentityExhausted, WorldId,
+};
 pub use ids::{ComponentId, EventKind};
 pub use object::ObjectRef;
 pub use schema::{
@@ -29,7 +32,7 @@ pub use schema::{
 pub use uuid::Uuid;
 
 /// Bumped when the C ABI (function signatures, buffer headers) changes.
-pub const ABI_VERSION: u16 = 1;
+pub const ABI_VERSION: u16 = 3;
 
 /// Fixed simulation step default (blueprint §5.1): 60 Hz.
 pub const DEFAULT_FIXED_DT: f64 = 1.0 / 60.0;

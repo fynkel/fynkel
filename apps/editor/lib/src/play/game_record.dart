@@ -6,6 +6,7 @@
 // record is found anywhere in the line, not only at its start.
 import 'dart:convert';
 
+import 'package:fynkel/fynkel.dart' show EntityRef;
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import 'dart_stack.dart';
@@ -91,7 +92,7 @@ final class GameRecord {
 
   /// The runtime entity handle a step diagnostic named (never an authoring
   /// id — [id] is that, when the game knew one).
-  final int? entity;
+  final EntityRef? entity;
 
   /// `state` records only.
   final String? state;
@@ -128,7 +129,7 @@ final class GameRecord {
     if (pointer != null && pointer!.isNotEmpty) return doc.isEmpty ? pointer! : '$doc  $pointer';
     if (doc.isNotEmpty) return doc;
     if (id != null) return id!;
-    if (entity != null) return 'entity 0x${entity!.toRadixString(16)}';
+    if (entity != null) return 'entity 0x${entity!.toString()}';
     return '';
   }
 
@@ -200,7 +201,7 @@ final class GameRecord {
       line: (j['line'] as num?)?.toInt(),
       column: (j['column'] as num?)?.toInt(),
       suggestion: j['suggestion'] as String?,
-      entity: (j['entity'] as num?)?.toInt(),
+      entity: j['entity'] == null ? null : EntityRef.fromJson(j['entity']),
       state: j['state'] as String?,
       stats: kind == GameRecordKind.stats ? j : null,
       related: [

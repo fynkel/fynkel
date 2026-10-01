@@ -138,6 +138,27 @@ pub enum AudioOp {
     SetPitch(f32),
 }
 
+impl AudioOp {
+    pub fn validate(self) -> Result<(), String> {
+        match self {
+            Self::SetVolume(v) if !v.is_finite() || !(0.0..=1.0).contains(&v) => {
+                Err(format!("audio: volume must be within [0, 1], got {v}"))
+            }
+            Self::SetPitch(p)
+                if !p.is_finite()
+                    || !(fynkel_audio::MIN_PITCH..=fynkel_audio::MAX_PITCH).contains(&p) =>
+            {
+                Err(format!(
+                    "audio: pitch must be within [{}, {}], got {p}",
+                    fynkel_audio::MIN_PITCH,
+                    fynkel_audio::MAX_PITCH
+                ))
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
 /// What `Command::Animate` does to an animator.
 #[derive(Clone, Debug, PartialEq)]
 pub enum AnimateOp {
@@ -249,6 +270,136 @@ impl Command {
             | Command::Audio { entity, .. } => Some(*entity),
             Command::SetParent { child, .. } => Some(*child),
             Command::PlaySound { .. } | Command::AudioBus { .. } => None,
+        }
+    }
+}
+
+impl AnimateOp {
+    /// Operations that only change animator configuration, without touching playback state.
+    pub(crate) fn configuration(&self, mut animator: crate::Animator) -> Option<crate::Animator> {
+        match self {
+            Self::Pause => animator.playing = false,
+            Self::Resume => animator.playing = true,
+            Self::SetSpeed(speed) => animator.speed = *speed,
+            Self::SetWeight(weight) => animator.weight = *weight,
+            _ => return None,
+        }
+        Some(animator)
+    }
+}
+
+impl AnimateOp {
+    pub(crate) fn clip_transport(&self) -> bool {
+        matches!(
+            self,
+            Self::Play { .. }
+                | Self::Crossfade { .. }
+                | Self::Stop
+                | Self::SetTime(_)
+                | Self::SetParameter { .. }
+        )
+    }
+    pub(crate) fn requires_uncontrolled(&self) -> bool {
+        matches!(
+            self,
+            Self::Play { .. }
+                | Self::Crossfade { .. }
+                | Self::SetTime(_)
+                | Self::SetParameter { .. }
+        )
+    }
+    pub(crate) fn validate_clip_transport(&self) -> Result<(), String> {
+        match self {
+            Self::Play { speed, .. } | Self::Crossfade { speed, .. } if !speed.is_finite() => {
+                Err("speed must be finite".into())
+            }
+            Self::Crossfade { seconds, .. } if !seconds.is_finite() || *seconds < 0.0 => {
+                Err("crossfade seconds must be finite and >= 0".into())
+            }
+            Self::SetTime(t) if !t.is_finite() || *t < 0.0 => {
+                Err("time must be finite and >= 0".into())
+            }
+            Self::SetParameter { name, value } if name.is_empty() || !value.is_finite() => {
+                Err("parameter needs a name and a finite value".into())
+            }
+            _ => Ok(()),
+        }
+    }
+    pub(crate) fn clip_configuration(&self, mut animator: crate::Animator) -> crate::Animator {
+        match self {
+            Self::Play {
+                clip,
+                speed,
+                looping,
+            }
+            | Self::Crossfade {
+                clip,
+                speed,
+                looping,
+                ..
+            } => {
+                animator.clip = clip.clone();
+                animator.speed = *speed;
+                animator.looping = *looping;
+                animator.playing = true;
+            }
+            Self::Stop => animator.playing = false,
+            _ => {}
+        }
+        animator
+    }
+}
+
+impl AnimateOp {
+    pub(crate) fn controller_transport(&self) -> bool {
+        matches!(
+            self,
+            Self::SetControllerParameter { .. }
+                | Self::PlayState { .. }
+                | Self::PlayOneShot { .. }
+                | Self::StopOneShot { .. }
+                | Self::SetIkTarget { .. }
+                | Self::ClearIkTarget { .. }
+        )
+    }
+    pub(crate) fn validate_controller_transport(&self) -> Result<(), String> {
+        match self {
+            Self::SetControllerParameter {
+                value: crate::animation::controller::Value::Float(v),
+                ..
+            } if !v.is_finite() => Err("controller float must be finite".into()),
+            Self::PlayState {
+                seconds, offset, ..
+            } if !seconds.is_finite()
+                || *seconds < 0.0
+                || !offset.is_finite()
+                || !(0.0..=1.0).contains(offset) =>
+            {
+                Err("crossfade seconds must be finite and >= 0, the offset within [0, 1]".into())
+            }
+            Self::PlayOneShot {
+                blend_in,
+                blend_out,
+                speed,
+                ..
+            } if !blend_in.is_finite()
+                || *blend_in < 0.0
+                || !blend_out.is_finite()
+                || *blend_out < 0.0
+                || !speed.is_finite()
+                || *speed <= 0.0 =>
+            {
+                Err("a one-shot's blends must be finite and >= 0, its speed finite and > 0".into())
+            }
+            Self::StopOneShot { blend_out, .. } if !blend_out.is_finite() || *blend_out < 0.0 => {
+                Err("the blend out must be finite and >= 0".into())
+            }
+            Self::SetIkTarget {
+                position, weight, ..
+            } if !position.is_finite() || !(0.0..=1.0).contains(weight) => {
+                Err("an IK target must be finite, its weight within [0, 1]".into())
+            }
+            _ => Ok(()),
         }
     }
 }

@@ -29,8 +29,13 @@ void main() {
 
   test('cargo arguments carry exactly the requested features', () {
     // A game: no feature, so the runtime has no editor code.
-    expect(cargoBuildArgs('fynkel_platform_apple'),
-        ['build', '--release', '-p', 'fynkel_platform_apple', '--no-default-features']);
+    expect(cargoBuildArgs('fynkel_platform_apple'), [
+      'build',
+      '--release',
+      '-p',
+      'fynkel_platform_apple',
+      '--no-default-features',
+    ]);
     // The editor: the authoring ABI, plus a cross-compile target.
     expect(cargoBuildArgs('fynkel_native', targetTriple: 'aarch64-apple-ios', features: ['authoring']), [
       'build',
@@ -51,9 +56,24 @@ void main() {
     expect(moduleFeaturesFor(null), moduleFeatures);
     expect(moduleFeaturesFor({'name': 'x'}), moduleFeatures);
     // Off without strip: off in behaviour only, the code stays.
-    expect(moduleFeaturesFor({'modules': {'animation': false}}), moduleFeatures);
-    expect(moduleFeaturesFor({'modules': {'animation': false, 'audio': false, 'strip': true}}), ['physics']);
-    expect(moduleFeaturesFor({'modules': {'strip': true}}), moduleFeatures);
+    expect(
+      moduleFeaturesFor({
+        'modules': {'animation': false},
+      }),
+      moduleFeatures,
+    );
+    expect(
+      moduleFeaturesFor({
+        'modules': {'animation': false, 'audio': false, 'strip': true},
+      }),
+      ['physics'],
+    );
+    expect(
+      moduleFeaturesFor({
+        'modules': {'strip': true},
+      }),
+      moduleFeatures,
+    );
     // A game's runtime: the modules as features, no editor code.
     expect(cargoBuildArgs('fynkel_platform_apple', features: moduleFeaturesFor(null)), [
       'build',
@@ -84,7 +104,10 @@ void main() {
 }''');
     expect(lock.runtimeVersion, '1.2.3');
     expect(lock.artifacts['macos-arm64']!.sha256, 'a' * 64);
-    expect(lock.artifactUrl('macos-arm64'), Uri.parse('https://example.test/dl/v1.2.3/lib-macos-arm64.dylib'));
+    expect(
+      lock.artifactUrl('macos-arm64'),
+      Uri.parse('https://example.test/dl/v1.2.3/lib-macos-arm64.dylib'),
+    );
     expect(lock.artifacts['ios-arm64']!.isPublished, isFalse);
     expect(lock.artifactUrl('ios-arm64'), isNull);
     expect(lock.artifactUrl('windows-x64'), isNull);
@@ -101,26 +124,54 @@ void main() {
     final plain = RuntimeLock.parse('{"runtime": {"version": "1.2.3", "abiVersion": 1}}');
     expect(plain.store, isNull);
     expect(plain.artifacts, isEmpty);
-    expect(package.under(plain).artifactUrl('macos-arm64'), Uri.parse('https://example.test/v1.2.3/lib.dylib'));
+    expect(
+      package.under(plain).artifactUrl('macos-arm64'),
+      Uri.parse('https://example.test/v1.2.3/lib.dylib'),
+    );
     expect(package.under(null), same(package));
     // A mirror: the project's store, the package's libraries.
-    const mirror = RuntimeLock(runtimeVersion: '1.2.3', abiVersion: 1, store: 'file:///store/runtime/{version}/');
-    expect(package.under(mirror).artifactUrl('macos-arm64'), Uri.parse('file:///store/runtime/1.2.3/lib.dylib'));
+    const mirror = RuntimeLock(
+      runtimeVersion: '1.2.3',
+      abiVersion: 1,
+      store: 'file:///store/runtime/{version}/',
+    );
+    expect(
+      package.under(mirror).artifactUrl('macos-arm64'),
+      Uri.parse('file:///store/runtime/1.2.3/lib.dylib'),
+    );
     // Another runtime or ABI: refused, naming both versions.
     expect(
       () => package.under(const RuntimeLock(runtimeVersion: '1.2.2', abiVersion: 1)),
-      throwsA(isA<FormatException>().having((e) => e.message, 'message', allOf(contains('1.2.2'), contains('1.2.3')))),
+      throwsA(
+        isA<FormatException>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('1.2.2'), contains('1.2.3')),
+        ),
+      ),
     );
-    expect(() => package.under(const RuntimeLock(runtimeVersion: '1.2.3', abiVersion: 2)), throwsFormatException);
+    expect(
+      () => package.under(const RuntimeLock(runtimeVersion: '1.2.3', abiVersion: 2)),
+      throwsFormatException,
+    );
     // Without a store nothing downloads.
-    expect(const RuntimeLock(runtimeVersion: '1', abiVersion: 1, artifacts: {'k': LockArtifact(file: 'f', sha256: 'ab')})
-        .artifactUrl('k'), isNull);
+    expect(
+      const RuntimeLock(
+        runtimeVersion: '1',
+        abiVersion: 1,
+        artifacts: {'k': LockArtifact(file: 'f', sha256: 'ab')},
+      ).artifactUrl('k'),
+      isNull,
+    );
   });
 
   test('lock file rejects malformed entries', () {
     expect(() => RuntimeLock.parse('[]'), throwsFormatException);
     expect(() => RuntimeLock.parse('{"runtime": {"version": "", "abiVersion": 1}}'), throwsFormatException);
-    expect(() => RuntimeLock.parse('{"runtime": {"version": "1", "abiVersion": 1, "store": ""}}'), throwsFormatException);
+    expect(
+      () => RuntimeLock.parse('{"runtime": {"version": "1", "abiVersion": 1, "store": ""}}'),
+      throwsFormatException,
+    );
     expect(
       () => RuntimeLock.parse(
         '{"runtime": {"version": "1", "abiVersion": 1, "store": "x", '
@@ -136,15 +187,17 @@ void main() {
     );
     // The old snake_case hook lock is gone (ADR-0029 §4, one lock shape).
     expect(
-      () => RuntimeLock.parse('{"runtime_version": "1", "abi_version": 1, "release_base_url": "", "artifacts": {}}'),
+      () => RuntimeLock.parse(
+        '{"runtime_version": "1", "abi_version": 1, "release_base_url": "", "artifacts": {}}',
+      ),
       throwsFormatException,
     );
   });
 
-  test('the shipped lock file is valid and pins ABI v1', () {
+  test('the source-build lock pins ABI v3 without incompatible prebuilt artifacts', () {
     final lock = RuntimeLock.parse(File('fynkel.lock.json').readAsStringSync());
-    expect(lock.abiVersion, 1);
-    expect(lock.store, contains('{version}'));
-    expect(lock.artifacts.keys, containsAll(['macos-arm64', 'macos-x64', 'ios-arm64', 'ios-simulator-arm64']));
+    expect(lock.abiVersion, 3);
+    expect(lock.store, isNull);
+    expect(lock.artifacts, isEmpty);
   });
 }

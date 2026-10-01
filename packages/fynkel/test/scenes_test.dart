@@ -38,7 +38,7 @@ class Collector extends Behaviour {
     if (collected > 0 && !asked) {
       asked = true;
       world.scenes.transition(results);
-      expect(world.scenes.state, SceneState.pending);
+      expect(world.scenes.state, SceneState.ready, reason: 'request publishes after callback commit');
     }
   }
 }
@@ -95,131 +95,147 @@ void main() {
     return w;
   }
 
-  test('the gate: Playground, a collected coin, a transition to Results, settings saved and reloaded', () async {
-    final w = fresh();
-    final states = <SceneState>[];
-    w.scenes.addListener(states.add);
-    expect(w.scenes.state, SceneState.empty);
+  test(
+    'the gate: Playground, a collected coin, a transition to Results, settings saved and reloaded',
+    () async {
+      final w = fresh();
+      final states = <SceneState>[];
+      w.scenes.addListener(states.add);
+      expect(w.scenes.state, SceneState.empty);
 
-    final report = w.loadScene(playground, cacheDir: cache);
-    expect(report.mode, 'replace');
-    expect(report.scenes.map((s) => s.name), ['Playground']);
-    expect(w.loadedScenes.single.entityCount, 5);
-    expect(w.scenes.current, playground);
-    expect(w.scenes.state, SceneState.ready);
-    expect(w.scenes.isLoaded(playground), isTrue);
-    expect(w.cacheDir, cache);
-    final ready = w.drainEvents().whereType<SceneReady>().single;
-    expect(ready.scene, playground, reason: 'SceneReady names its scene (M3-12)');
+      final report = w.loadScene(playground, cacheDir: cache);
+      expect(report.mode, 'replace');
+      expect(report.scenes.map((s) => s.name), ['Playground']);
+      expect(w.loadedScenes.single.entityCount, 5);
+      expect(w.scenes.current, playground);
+      expect(w.scenes.state, SceneState.ready);
+      expect(w.scenes.isLoaded(playground), isTrue);
+      expect(w.cacheDir, cache);
+      final ready = w.drainEvents().whereType<SceneReady>().single;
+      expect(ready.scene, playground, reason: 'SceneReady names its scene (M3-12)');
 
-    // A coin from the cooked prefab, in the Player's path (W walks −z at
-    // 4 m/s: the coin at z −2 — its 0.5 m sensor meets the 0.4 m capsule
-    // after ~1.1 m — is reached at ~0.3 s, before the jump at 20 frames).
-    final coin = w.instantiate(coinPrefab, transform: identityTransform.copyWith(position: const Vec3(0, 0, -2)));
-    final zone = coin; // the coin's root holds the zone (ADR-0022)
-    expect(zone.get<TriggerZone>(), const TriggerZone(event: 'collect', once: true));
-    expect(zone.get<Collider>()!.isSensor, isTrue);
-    expect(w.allEntities(), hasLength(6));
+      // A coin from the cooked prefab, in the Player's path (W walks −z at
+      // 4 m/s: the coin at z −2 — its 0.5 m sensor meets the 0.4 m capsule
+      // after ~1.1 m — is reached at ~0.3 s, before the jump at 20 frames).
+      final coin = w.instantiate(
+        coinPrefab,
+        transform: identityTransform.copyWith(position: const Vec3(0, 0, -2)),
+      );
+      final zone = coin; // the coin's root holds the zone (ADR-0022)
+      expect(zone.get<TriggerZone>(), const TriggerZone(event: 'collect', once: true));
+      expect(zone.get<Collider>()!.isSensor, isTrue);
+      expect(w.allEntities(), hasLength(6));
 
-    final player = w.find('Player')!;
-    final playerEntity = player.entity;
-    final zoneEntity = zone.entity;
-    final collector = Collector();
-    player.addBehaviour(collector);
-    final hub = <ZoneEntered>[];
-    w.zones.on('collect', hub.add);
-    final exits = <ZoneExited>[];
-    w.zones.onExit('collect', exits.add);
-    final carried = <EngineEvent>[];
+      final player = w.find('Player')!;
+      final playerEntity = player.entity;
+      final zoneEntity = zone.entity;
+      final collector = Collector();
+      player.addBehaviour(collector);
+      final hub = <ZoneEntered>[];
+      w.zones.on('collect', hub.add);
+      final exits = <ZoneExited>[];
+      w.zones.onExit('collect', exits.add);
+      final carried = <EngineEvent>[];
 
-    final recording = loadInputRecording('$fixture/test/platform.input.json');
-    var framesToResults = -1;
-    var frame = 0;
-    recording.replay(
-      w,
-      fixedUpdate: (_) {
-        frame++;
-        if (framesToResults < 0 && w.scenes.current == results) framesToResults = frame;
-      },
-      update: () {
+      final recording = loadInputRecording('$fixture/test/platform.input.json');
+      var framesToResults = -1;
+      var frame = 0;
+      for (final recorded in recording.frames) {
+        w.frame(
+          recorded.dt,
+          input: recorded.events,
+          fixedUpdate: (_) {
+            frame++;
+            if (framesToResults < 0 && w.scenes.current == results) framesToResults = frame;
+          },
+        );
         carried.addAll(w.drainEvents());
-      },
-    );
+      }
 
-    // The zone fired once, to the behaviour on the Player, to the hub,
-    // with the zone's name; `once` means no exit even though the coin
-    // was destroyed right away.
-    expect(collector.seen, hasLength(1));
-    final e = collector.seen.single;
-    expect(e, isA<ZoneEntered>());
-    expect(e.event, 'collect');
-    expect(e.other, playerEntity);
-    expect(e.zone, zoneEntity);
-    expect(hub.single, same(e));
-    expect(exits, isEmpty);
-    expect(collector.collected, 1);
-    expect(coin.isAlive, isFalse, reason: 'destroyed by the callback');
+      // The zone fired once, to the behaviour on the Player, to the hub,
+      // with the zone's name; `once` means no exit even though the coin
+      // was destroyed right away.
+      expect(collector.seen, hasLength(1));
+      final e = collector.seen.single;
+      expect(e, isA<ZoneEntered>());
+      expect(e.event, 'collect');
+      expect(e.other, playerEntity);
+      expect(e.zone, zoneEntity);
+      expect(hub.single, same(e));
+      expect(exits, isEmpty);
+      expect(collector.collected, 1);
+      expect(coin.isAlive, isFalse, reason: 'destroyed by the callback');
 
-    // The transition ran at the start of the frame after the request:
-    // Playground went (its 5 entities), Results is in, the Player's
-    // handle is dead and its behaviour destroyed.
-    expect(framesToResults, inInclusiveRange(10, 30), reason: 'collected at ~0.3 s, the load one frame later');
-    expect(w.scenes.current, results);
-    expect(w.scenes.state, SceneState.ready);
-    expect(w.scenes.lastReport!.sceneName, 'Results');
-    expect(w.loadedScenes.map((s) => s.name), ['Results']);
-    expect(states, [SceneState.ready, SceneState.pending, SceneState.ready]);
-    expect(player.isAlive, isFalse);
-    expect(collector.isDestroyed, isTrue);
-    expect(w.behaviours, isEmpty);
-    expect(w.find('Player'), isNull);
-    expect(w.find('Trophy'), isNotNull);
-    expect(w.allEntities(), hasLength(3));
-    expect(
-      carried.whereType<SceneUnloaded>(),
-      isEmpty,
-      reason: 'the frame drained the transition\'s events into the next fixedUpdate (pull-only, ADR-0008)',
-    );
+      // The transition ran at the start of the frame after the request:
+      // Playground went (its 5 entities), Results is in, the Player's
+      // handle is dead and its behaviour destroyed.
+      expect(
+        framesToResults,
+        inInclusiveRange(10, 30),
+        reason: 'collected at ~0.3 s, the load one frame later',
+      );
+      expect(w.scenes.current, results);
+      expect(w.scenes.state, SceneState.ready);
+      expect(w.scenes.lastReport!.sceneName, 'Results');
+      expect(w.loadedScenes.map((s) => s.name), ['Results']);
+      expect(states, [SceneState.ready, SceneState.pending, SceneState.ready]);
+      expect(player.isAlive, isFalse);
+      expect(collector.isDestroyed, isTrue);
+      expect(w.behaviours, isEmpty);
+      expect(w.find('Player'), isNull);
+      expect(w.find('Trophy'), isNotNull);
+      expect(w.allEntities(), hasLength(3));
+      expect(
+        carried.whereType<SceneUnloaded>(),
+        isEmpty,
+        reason: 'the frame drained the transition\'s events into the next fixedUpdate (pull-only, ADR-0008)',
+      );
 
-    // Settings: the defaults on a first open (no file), a change is on
-    // disk at once and its rebinds sit over the project's actions; a
-    // fresh store reads the same document back.
-    final dir = Directory.systemTemp.createTempSync('fynkel-settings-');
-    addTearDown(() => dir.deleteSync(recursive: true));
-    final path = '${dir.path}/settings.json';
-    final store = SettingsStore.open(path, world: w);
-    w.useSettings(store);
-    expect(store.current, SettingsDocument.defaults);
-    expect(File(path).existsSync(), isFalse);
-    expect(w.context.settings, same(store));
-    final changed = <SettingsDocument>[];
-    store.addListener(changed.add);
-    store.edit((s) => s.copyWith(musicVolume: 0.5, muted: true, quality: 'high').rebind('jump', ['keyboard:J']));
-    expect(changed, hasLength(1));
-    expect(File(path).existsSync(), isTrue);
-    expect(File(path).readAsStringSync(), contains('"music_volume": 0.5'));
-    expect(File('$path.tmp').existsSync(), isFalse);
+      // Settings: the defaults on a first open (no file), a change is on
+      // disk at once and its rebinds sit over the project's actions; a
+      // fresh store reads the same document back.
+      final dir = Directory.systemTemp.createTempSync('fynkel-settings-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final path = '${dir.path}/settings.json';
+      final store = SettingsStore.open(path, world: w);
+      w.useSettings(store);
+      expect(store.current, SettingsDocument.defaults);
+      expect(File(path).existsSync(), isFalse);
+      expect(w.context.settings, same(store));
+      final changed = <SettingsDocument>[];
+      store.addListener(changed.add);
+      store.edit(
+        (s) => s.copyWith(musicVolume: 0.5, muted: true, quality: 'high').rebind('jump', ['keyboard:J']),
+      );
+      expect(changed, hasLength(1));
+      expect(File(path).existsSync(), isTrue);
+      expect(File(path).readAsStringSync(), contains('"music_volume": 0.5'));
+      expect(File('$path.tmp').existsSync(), isFalse);
 
-    final again = SettingsStore.open(path);
-    expect(again.current, store.current);
-    expect(again.current.rebinds, {
-      'jump': ['keyboard:J'],
-    });
-    expect(again.current.quality, 'high');
-    expect(again.lastError, isNull);
+      final again = SettingsStore.open(path);
+      expect(again.current, store.current);
+      expect(again.current.rebinds, {
+        'jump': ['keyboard:J'],
+      });
+      expect(again.current.quality, 'high');
+      expect(again.lastError, isNull);
 
-    // The world's actions: `jump` is the user's, the rest the project's,
-    // and the rebinds survive the next load.
-    final bound = w.loadScene(playground, mode: LoadMode.additive);
-    final jump = bound.inputActions.singleWhere((a) => a.name == 'jump');
-    expect(jump.rebound, isTrue);
-    expect(jump.bindings, ['keyboard:J']);
-    expect(bound.inputActions.singleWhere((a) => a.name == 'move').rebound, isFalse);
-    // Back to the project's bindings.
-    store.edit((s) => s.rebind('jump', const []));
-    expect(store.current.rebinds, isEmpty);
-    expect(w.bindActions(const {}).inputActions.singleWhere((a) => a.name == 'jump').bindings, hasLength(3));
-  });
+      // The world's actions: `jump` is the user's, the rest the project's,
+      // and the rebinds survive the next load.
+      final bound = w.loadScene(playground, mode: LoadMode.additive);
+      final jump = bound.inputActions.singleWhere((a) => a.name == 'jump');
+      expect(jump.rebound, isTrue);
+      expect(jump.bindings, ['keyboard:J']);
+      expect(bound.inputActions.singleWhere((a) => a.name == 'move').rebound, isFalse);
+      // Back to the project's bindings.
+      store.edit((s) => s.rebind('jump', const []));
+      expect(store.current.rebinds, isEmpty);
+      expect(
+        w.bindActions(const {}).inputActions.singleWhere((a) => a.name == 'jump').bindings,
+        hasLength(3),
+      );
+    },
+  );
 
   test('additive loads stack, unload takes one scene and leaves runtime spawns, errors are reported', () {
     final w = fresh();
@@ -231,7 +247,13 @@ void main() {
     expect(w.scenes.current, playground, reason: 'an additive load does not change the current scene');
     expect(
       () => w.loadScene(results, mode: LoadMode.additive),
-      throwsA(isA<FynkelLoadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-R0011'))),
+      throwsA(
+        isA<FynkelLoadError>().having(
+          (e) => e.report.errors.map((d) => d.code),
+          'codes',
+          contains('FYN-R0011'),
+        ),
+      ),
     );
     expect(w.allEntities(), hasLength(8), reason: 'a refused load leaves the world alone');
 
@@ -254,7 +276,11 @@ void main() {
     expect(
       () => w.unloadScene(playground),
       throwsA(
-        isA<FynkelUnloadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-R0010')),
+        isA<FynkelUnloadError>().having(
+          (e) => e.report.errors.map((d) => d.code),
+          'codes',
+          contains('FYN-R0010'),
+        ),
       ),
     );
     expect(() => w.unloadScene('nope'), throwsA(isA<FynkelBridgeError>()));
@@ -264,7 +290,7 @@ void main() {
     // SCENE_UNLOADED (Results, 3), SCENE_READY (Playground).
     w.loadScene(playground);
     expect(w.allEntities(), hasLength(5));
-    expect(crate.isAlive, isTrue, reason: 'until the next drain');
+    expect(crate.isAlive, isFalse, reason: 'liveness follows native state before the event drain');
     final replaced = w.drainEvents();
     expect(crate.isAlive, isFalse);
     expect(replaced.whereType<EntityDestroyed>().length, 4);
@@ -302,7 +328,7 @@ void main() {
     final bare = fresh();
     expect(() => bare.loadScene(playground), throwsStateError);
     expect(() => bare.unloadScene(playground), throwsA(isA<FynkelUnloadError>()));
-    expect(() => bare.bindActions(const {}), throwsA(isA<FynkelLoadError>()));
+    expect(() => bare.bindActions(const {}), throwsStateError);
   });
 
   test('dontDestroyOnLoad keeps roots with their children and scripts across a replace load (ADR-0037)', () {
@@ -345,72 +371,89 @@ void main() {
     expect(w.findAll('Player'), hasLength(1), reason: "Playground's own, new");
   });
 
-  test('persistentObjects: made once by loadProject, scripts first, found by name, kept across loads (ADR-0039)', () {
-    const managerId = 'c0000000-0000-4000-8000-0000000000e0';
-    final root = Directory.systemTemp.createTempSync('fynkel-autoload-');
-    addTearDown(() => root.deleteSync(recursive: true));
-    final dir = '${root.path}/project';
-    _copyDir(Directory(fixture), Directory(dir));
-    // A prefab with a script, and the project listing it.
-    final crate = jsonDecode(File('$dir/assets/prefabs/crate.prefab.json').readAsStringSync()) as Map<String, Object?>;
-    crate['id'] = managerId;
-    crate['name'] = 'Manager';
-    final entity = (crate['entities'] as Map).values.single as Map;
-    (entity['components'] as Map)['c0000000-0000-4000-8000-0000000000e1'] = {
-      'type': 'game.Spinner',
-      'version': 1,
-      'data': {'speed': 1.0, 'axis': [0, 1, 0]},
-    };
-    File('$dir/assets/prefabs/manager.prefab.json').writeAsStringSync(jsonEncode(crate));
-    final projectFile = File('$dir/fynkel.project.json');
-    final project = jsonDecode(projectFile.readAsStringSync()) as Map<String, Object?>;
-    project['persistentObjects'] = [
-      {'name': 'GameManager', 'prefab': {'asset': managerId}},
-    ];
-    projectFile.writeAsStringSync(jsonEncode(project));
-    final c = '${root.path}/cache';
-    cookProject(dir, cacheDir: c);
+  test(
+    'persistentObjects: made once by loadProject, scripts first, found by name, kept across loads (ADR-0039)',
+    () {
+      const managerId = 'c0000000-0000-4000-8000-0000000000e0';
+      final root = Directory.systemTemp.createTempSync('fynkel-autoload-');
+      addTearDown(() => root.deleteSync(recursive: true));
+      final dir = '${root.path}/project';
+      _copyDir(Directory(fixture), Directory(dir));
+      // A prefab with a script, and the project listing it.
+      final crate = jsonDecode(
+        File('$dir/assets/prefabs/crate.prefab.json').readAsStringSync(),
+      ) as Map<String, Object?>;
+      crate['id'] = managerId;
+      crate['name'] = 'Manager';
+      final entity = (crate['entities'] as Map).values.single as Map;
+      (entity['components'] as Map)['c0000000-0000-4000-8000-0000000000e1'] = {
+        'type': 'game.Spinner',
+        'version': 1,
+        'data': {
+          'speed': 1.0,
+          'axis': [0, 1, 0],
+        },
+      };
+      File('$dir/assets/prefabs/manager.prefab.json').writeAsStringSync(jsonEncode(crate));
+      final projectFile = File('$dir/fynkel.project.json');
+      final project = jsonDecode(projectFile.readAsStringSync()) as Map<String, Object?>;
+      project['persistentObjects'] = [
+        {
+          'name': 'GameManager',
+          'prefab': {'asset': managerId},
+        },
+      ];
+      projectFile.writeAsStringSync(jsonEncode(project));
+      final c = '${root.path}/cache';
+      cookProject(dir, cacheDir: c);
 
-    final log = <String>[];
-    final registry = BehaviourRegistry()
-      ..register(BehaviourType(id: 'game.Spinner', create: () => OrderLog(log), fields: [
-        BehaviourField(name: 'speed', type: 'number', get: (_) => null, set: (_, _) {}),
-        BehaviourField(name: 'axis', type: 'vec3', get: (_) => null, set: (_, _) {}),
-      ]));
-    final w = World.create(library: lib, registry: registry, fixedDt: 1 / 60, maxStepsPerFrame: 8);
-    w.onLoadDiagnostics = (_) {};
-    addTearDown(w.dispose);
+      final log = <String>[];
+      final registry = BehaviourRegistry()
+        ..register(
+          BehaviourType(
+            id: 'game.Spinner',
+            create: () => OrderLog(log),
+            fields: [
+              BehaviourField(name: 'speed', type: 'number', get: (_) => null, set: (_, _) {}),
+              BehaviourField(name: 'axis', type: 'vec3', get: (_) => null, set: (_, _) {}),
+            ],
+          ),
+        );
+      final w = World.create(library: lib, registry: registry, fixedDt: 1 / 60, maxStepsPerFrame: 8);
+      w.onLoadDiagnostics = (_) {};
+      addTearDown(w.dispose);
 
-    final report = w.loadProject(dir, cacheDir: c);
-    expect(report.persistentObjects.map((p) => p.name), ['GameManager']);
-    final manager = w.persistentObject('GameManager')!;
-    expect(manager.name, 'GameManager');
-    expect(w.persistentObject('Nobody'), isNull);
-    expect(w.persistentObjects, [manager]);
-    w.frame(1 / 60);
-    expect(log.first, 'GameManager', reason: 'its scripts are created before the scene\'s');
-    expect(log.length, greaterThan(1), reason: 'the startup scene has a Spinner too');
+      final report = w.loadProject(dir, cacheDir: c);
+      expect(report.persistentObjects.map((p) => p.name), ['GameManager']);
+      final manager = w.persistentObject('GameManager')!;
+      expect(manager.name, 'GameManager');
+      expect(w.persistentObject('Nobody'), isNull);
+      expect(w.persistentObjects, [manager]);
+      w.frame(1 / 60);
+      expect(log.first, 'GameManager', reason: 'its scripts are created before the scene\'s');
+      expect(log.length, greaterThan(1), reason: 'the startup scene has a Spinner too');
 
-    // A scene load keeps it and makes no second one.
-    w.loadScene(playground);
-    w.frame(1 / 60);
-    expect(manager.isAlive, isTrue);
-    expect(w.findAll('GameManager'), [manager]);
-    expect(w.persistentObject('GameManager'), same(manager));
+      // A scene load keeps it and makes no second one.
+      w.loadScene(playground);
+      w.frame(1 / 60);
+      expect(manager.isAlive, isTrue);
+      expect(w.findAll('GameManager'), [manager]);
+      expect(w.persistentObject('GameManager'), same(manager));
 
-    // Destroyed, it stays gone until the next loadProject.
-    manager.destroy();
-    w.frame(1 / 60);
-    expect(w.persistentObject('GameManager'), isNull);
-    w.loadScene(playground);
-    w.frame(1 / 60);
-    expect(w.persistentObject('GameManager'), isNull);
-    w.loadProject(dir, cacheDir: c);
-    w.frame(1 / 60);
-    final again = w.persistentObject('GameManager')!;
-    expect(again, isNot(same(manager)));
-    expect(w.findAll('GameManager'), [again]);
-  });
+      // Destroyed, it stays gone until the next loadProject.
+      manager.destroy();
+      w.frame(1 / 60);
+      expect(w.persistentObject('GameManager'), isNull);
+      w.loadScene(playground);
+      w.frame(1 / 60);
+      expect(w.persistentObject('GameManager'), isNull);
+      w.loadProject(dir, cacheDir: c);
+      w.frame(1 / 60);
+      final again = w.persistentObject('GameManager')!;
+      expect(again, isNot(same(manager)));
+      expect(w.findAll('GameManager'), [again]);
+    },
+  );
 
   test('loadAsync loads in the background, activates at a frame start in request order (ADR-0038)', () async {
     final w = fresh();
@@ -484,7 +527,10 @@ void main() {
     expect(doc.sfxVolume, 0.25);
     expect(doc.masterVolume, 1);
     expect(doc.rebinds, isEmpty);
-    expect(doc.record, const Settings(masterVolume: 1, musicVolume: 1, sfxVolume: 0.25, muted: false, quality: ''));
+    expect(
+      doc.record,
+      const Settings(masterVolume: 1, musicVolume: 1, sfxVolume: 0.25, muted: false, quality: ''),
+    );
     expect(SettingsDocument.fromJson(doc.toJson()), doc);
     expect(doc.toJson().keys, [
       'fynkel',
@@ -497,7 +543,10 @@ void main() {
       'input',
     ]);
     expect(() => SettingsDocument.fromJson({'fynkel': 'scene', 'formatVersion': 1}), throwsFormatException);
-    expect(() => SettingsDocument.fromJson({'fynkel': 'settings', 'formatVersion': 2}), throwsFormatException);
+    expect(
+      () => SettingsDocument.fromJson({'fynkel': 'settings', 'formatVersion': 2}),
+      throwsFormatException,
+    );
     expect(
       () => SettingsDocument.fromJson({'fynkel': 'settings', 'formatVersion': 1, 'muted': 'yes'}),
       throwsFormatException,
@@ -542,7 +591,10 @@ void main() {
     expect(broken.load(), isFalse);
     expect(broken.current, doc, reason: 'unchanged by a failed load');
 
-    expect(SettingsStore.defaultPath('My Game', environment: {'HOME': '/Users/me'}), endsWith('My Game/settings.json'));
+    expect(
+      SettingsStore.defaultPath('My Game', environment: {'HOME': '/Users/me'}),
+      endsWith('My Game/settings.json'),
+    );
   });
 }
 

@@ -230,9 +230,11 @@ abstract interface class SettingsService {
 /// on every [update] through a temporary file (a crash keeps the old
 /// one). Attached to a [World] ([attach], or `World.useSettings`) it
 /// lays the rebinds over the project's actions on attach and after every
-/// update; the audio gains and the quality profile are values a host
-/// reads from [current] (there is no audio engine yet; a Flutter host
-/// picks the render quality profile).
+/// update and applies audio gains through the world transaction boundary.
+/// A Flutter host selects render quality from [current]. Store changes and
+/// file writes are external state: a failed gameplay callback rolls back
+/// engine audio and input changes, not this document or its saved file. Project input
+/// rebinding joins the enclosing gameplay edit when one is active.
 class SettingsStore implements SettingsService {
   SettingsStore({this.path, SettingsDocument initial = SettingsDocument.defaults, World? world})
       : _current = initial {
@@ -357,7 +359,10 @@ class SettingsStore implements SettingsService {
   }
 
   /// Lays [current]'s rebinds over the attached world's actions (nothing
-  /// without a world or before its project is loaded).
+  /// without a world or before its project is loaded). Audio and input changes
+  /// share one transaction when called from a gameplay callback or [World.edit].
+  /// Standalone calls publish each operation separately. The store's document,
+  /// file and arbitrary listener side effects are outside gameplay rollback.
   void apply() {
     final w = _world;
     if (w == null) return;

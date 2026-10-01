@@ -311,6 +311,7 @@ impl ExtractRenderer {
         };
         let cube_bounds = self.cube.bounds;
         let mut caster_bounds: Option<Sphere> = None;
+        let mut unbounded_caster = false;
         // The selection outline (ADR-0019, `outline.rs`): the mask value
         // of each outlined entity — a child 0.5, selected 1, selected
         // winning when an entity is both.
@@ -351,91 +352,113 @@ impl ExtractRenderer {
                     stats.layer_hidden += 1;
                     continue;
                 }
-                let (key, double_sided, mut instance, casts, blend, bounds) =
-                    match mesh_of_record.get(&(ri as u32)) {
-                        Some(&mi) => {
-                            let m = &source.meshes[mi];
-                            let have_mesh = self.mesh(device, &m.mesh);
-                            let loaded = self.material(device, queue, &m.material);
-                            let material = &loaded.material;
-                            if have_mesh {
-                                stats.meshes += 1;
-                                let blend = material.alpha_mode == AlphaMode::Blend;
-                                let gpu = self.meshes.get(&m.mesh).and_then(Option::as_ref);
-                                let bounds = gpu.map_or(cube_bounds, |g| g.bounds);
-                                // Skinned when the mesh carries weights and
-                                // the extract a palette for this instance; a
-                                // skinned mesh without a `Skin` draws as
-                                // cooked (its bind pose).
-                                let palette = m
-                                    .skin
-                                    .filter(|_| gpu.is_some_and(|g| g.skin_buffer.is_some()));
-                                let mut instance = instance_for(material, world, m.receive_shadows);
-                                if loaded.broken {
-                                    instance.tint = MISSING_TINT;
-                                    instance.flags[1] = 1.0;
-                                }
-                                if let Some(p) = palette {
-                                    instance.emissive[3] = (joint_base + p.first_joint) as f32;
-                                }
-                                (
-                                    BatchKey {
-                                        mesh: Some(m.mesh.clone()),
-                                        material: loaded.key.clone(),
-                                        skinned: palette.is_some(),
-                                    },
-                                    material.double_sided,
-                                    instance,
-                                    m.cast_shadows && loaded.casts && !blend,
-                                    blend,
-                                    bounds,
-                                )
+                let (key, double_sided, mut instance, casts, blend, sphere) = match mesh_of_record
+                    .get(&(ri as u32))
+                {
+                    Some(&mi) => {
+                        let m = &source.meshes[mi];
+                        let have_mesh = self.mesh(device, &m.mesh);
+                        let loaded = self.material(device, queue, &m.material);
+                        let material = &loaded.material;
+                        if have_mesh {
+                            stats.meshes += 1;
+                            let blend = material.alpha_mode == AlphaMode::Blend;
+                            let gpu = self.meshes.get(&m.mesh).and_then(Option::as_ref);
+                            let bounds = gpu.map_or(cube_bounds, |g| g.bounds);
+                            // Skinned when the mesh carries weights and
+                            // the extract a palette for this instance; a
+                            // skinned mesh without a `Skin` draws as
+                            // cooked (its bind pose).
+                            let palette = m
+                                .skin
+                                .filter(|_| gpu.is_some_and(|g| g.skin_buffer.is_some()));
+                            let sphere = if loaded.deforms {
+                                Sphere::UNBOUNDED
                             } else {
-                                stats.missing += 1;
-                                (
-                                    cube_key(),
-                                    false,
-                                    Instance {
-                                        model: world.to_cols_array_2d(),
-                                        tint: MISSING_TINT,
-                                        emissive: [0.0; 4],
-                                        params: [0.0, 1.0, 1.0, 1.0],
-                                        flags: [NO_CUTOFF, 1.0, 0.0, 0.0],
-                                    },
-                                    m.cast_shadows,
-                                    false,
-                                    cube_bounds,
-                                )
+                                match palette {
+                                    Some(p) => {
+                                        let start = p.first_joint as usize;
+                                        let end = start.checked_add(p.joint_count as usize);
+                                        let joints =
+                                            end.and_then(|end| source.joints.get(start..end));
+                                        match (gpu.and_then(|g| g.skin_bounds.as_ref()), joints) {
+                                            (Some(bounds), Some(joints)) => {
+                                                stats.bounds_joints += bounds.joint_count();
+                                                bounds.posed(&world, joints)
+                                            }
+                                            _ => Sphere::UNBOUNDED,
+                                        }
+                                    }
+                                    None => bounds.transformed(&world),
+                                }
+                            };
+                            let mut instance = instance_for(material, world, m.receive_shadows);
+                            if loaded.broken {
+                                instance.tint = MISSING_TINT;
+                                instance.flags[1] = 1.0;
                             }
-                        }
-                        None => {
-                            if !self.placeholders {
-                                continue;
+                            if let Some(p) = palette {
+                                instance.emissive[3] = (joint_base + p.first_joint) as f32;
                             }
-                            stats.placeholders += 1;
+                            (
+                                BatchKey {
+                                    mesh: Some(m.mesh.clone()),
+                                    material: loaded.key.clone(),
+                                    skinned: palette.is_some(),
+                                },
+                                material.double_sided,
+                                instance,
+                                m.cast_shadows && loaded.casts && !blend,
+                                blend,
+                                sphere,
+                            )
+                        } else {
+                            stats.missing += 1;
                             (
                                 cube_key(),
                                 false,
                                 Instance {
                                     model: world.to_cols_array_2d(),
-                                    tint: tint_for(r.entity.slot()),
+                                    tint: MISSING_TINT,
                                     emissive: [0.0; 4],
                                     params: [0.0, 1.0, 1.0, 1.0],
-                                    flags: [NO_CUTOFF, 0.0, 0.0, 1.0],
+                                    flags: [NO_CUTOFF, 1.0, 0.0, 0.0],
                                 },
-                                true,
+                                m.cast_shadows,
                                 false,
-                                cube_bounds,
+                                cube_bounds.transformed(&world),
                             )
                         }
-                    };
+                    }
+                    None => {
+                        if !self.placeholders {
+                            continue;
+                        }
+                        stats.placeholders += 1;
+                        (
+                            cube_key(),
+                            false,
+                            Instance {
+                                model: world.to_cols_array_2d(),
+                                tint: tint_for(r.entity.slot()),
+                                emissive: [0.0; 4],
+                                params: [0.0, 1.0, 1.0, 1.0],
+                                flags: [NO_CUTOFF, 0.0, 0.0, 1.0],
+                            },
+                            true,
+                            false,
+                            cube_bounds.transformed(&world),
+                        )
+                    }
+                };
                 if gray {
                     instance.flags[3] += GRAY_FLAG;
                 }
-                // Culling: the mesh's bounding sphere in world space against
+                stats.bounds_unbounded += u32::from(!sphere.is_finite());
+                // Culling: the posed bounding sphere in world space against
                 // the camera frustum and, for casters, the sun's box. A
                 // caster outside the view still shadows what is in it.
-                let sphere = bounds.transformed(&world);
+
                 // Whether this caster reaches the shadowed range at all,
                 // tested against the loose fit whether or not culling is on:
                 // what casts decides how tight the cascades are (R1), and
@@ -445,6 +468,7 @@ impl ExtractRenderer {
                         .as_ref()
                         .is_some_and(|f| f.intersects(&sphere));
                 if reaches_shadow {
+                    unbounded_caster |= !sphere.is_finite();
                     // A subset of the loose fit, so the cascades can only
                     // shrink against it, never grow.
                     caster_bounds = Some(match caster_bounds {
@@ -708,7 +732,11 @@ impl ExtractRenderer {
                 sun_dir,
                 &shape,
                 self.shadow_map.cascade_side(),
-                caster_bounds,
+                if unbounded_caster {
+                    None
+                } else {
+                    caster_bounds
+                },
             );
             shadow = [
                 1.0,

@@ -3,6 +3,8 @@
 
 import 'dart:convert';
 import 'dart:typed_data';
+import '../entity_ref.dart';
+export '../entity_ref.dart' show writeEntity, readEntity;
 
 import '../../math.dart';
 import '../asset_ref.dart';
@@ -93,7 +95,7 @@ Quat readQuat(ByteData d, int o) => Quat(
     );
 
 /// `0` on the wire means "no entity".
-int? optionalEntity(int bits) => bits == 0 ? null : bits;
+EntityRef? optionalEntity(EntityRef entity) => entity.isNull ? null : entity;
 
 /// `AssetRef` on the wire: 16 id bytes, then `sub` as a wire string (empty =
 /// none). Throws [FormatException] when the id text is not canonical.

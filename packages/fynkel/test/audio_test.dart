@@ -54,6 +54,170 @@ void main() {
     return w;
   }
 
+  test('gameplay sound intents commit once at the next tick and abort atomically', () {
+    final w = fresh();
+    expect(w.loadProject(fixture, cacheDir: cache).ok, isTrue);
+    w.frame(1 / 60); // Reconcile the fixture's initially playing source.
+    final started = w.audio.stats.started;
+    w.edit(() => w.audio.play(tone));
+    w.edit(() => w.audio.play(tone, bus: AudioBus.music, priority: 7));
+    expect(w.audio.stats.started, started);
+    w.frame(0);
+    expect(w.audio.stats.started, started);
+    w.frame(1 / 60);
+    expect(w.audio.stats.started, started + 2);
+    w.frame(1 / 60);
+    expect(w.audio.stats.started, started + 2);
+    expect(
+      () => w.edit(() {
+        w.audio.play(tone);
+        throw StateError('abort');
+      }),
+      throwsStateError,
+    );
+    w.frame(1 / 60);
+    expect(w.audio.stats.started, started + 2);
+  });
+
+  test('caught invalid gameplay sounds fail the entire edit', () {
+    final w = fresh();
+    expect(w.loadProject(fixture, cacheDir: cache).ok, isTrue);
+    w.frame(1 / 60); // Reconcile the fixture's initially playing source.
+    final started = w.audio.stats.started;
+    for (final invalid in <void Function()>[
+      () => w.audio.play(tone, volume: double.nan),
+      () => w.audio.play(tone, pitch: 0),
+      () => w.audio.play(tone, priority: 2147483648),
+      () => w.audio.play(const AssetRef('invalid')),
+      () => w.audio.play(tone, presentation: true),
+    ]) {
+      expect(
+        () => w.edit(() {
+          w.spawn(name: 'discard');
+          w.audio.play(tone);
+          try {
+            invalid();
+          } catch (_) {}
+        }),
+        throwsStateError,
+      );
+      expect(w.find('discard'), isNull);
+    }
+    w.frame(1 / 60);
+    expect(w.audio.stats.started, started);
+  });
+
+  test('pending source controls expose configuration before playback and preserve pause ordering', () {
+    final w = fresh();
+    expect(w.loadProject(fixture, cacheDir: cache).ok, isTrue);
+    w.frame(1 / 60);
+    final started = w.audio.stats.started;
+    final go = w.edit(() {
+      final go = w.spawn(name: 'transaction speaker')..set(const AudioSource(clip: tone));
+      go.audio.play();
+      go.audio.pause();
+      go.audio.volume = 0.25;
+      expect(go.get<AudioSource>()!.playing, isTrue);
+      expect(go.get<AudioSource>()!.volume, 0.25);
+      expect(go.audio.state, isNull);
+      expect(w.audio.stats.started, started);
+      return go;
+    });
+    expect(go.get<AudioSource>()!.playing, isTrue);
+    expect(w.audio.stats.started, started);
+    w.frame(1 / 60);
+    expect(go.audio.state!.paused, isTrue);
+    expect(go.audio.state!.time, 0);
+    expect(go.audio.state!.volume, 0.25);
+    w.edit(() {
+      go.audio.resume();
+      go.audio.pitch = 2;
+      expect(go.get<AudioSource>()!.pitch, 2);
+      expect(go.audio.state!.pitch, 1);
+    });
+    expect(go.audio.state!.pitch, 1);
+    w.frame(1 / 60);
+    expect(go.audio.state!.paused, isFalse);
+    expect(go.audio.state!.pitch, 2);
+    expect(w.audio.stats.started, started + 1);
+    w.edit(go.audio.stop);
+    expect(go.get<AudioSource>()!.playing, isFalse);
+    expect(go.audio.isPlaying, isTrue);
+    w.frame(1 / 60);
+    expect(go.audio.isPlaying, isFalse);
+  });
+
+  test('source controls cannot replay old data over later component writes', () {
+    final w = fresh();
+    expect(w.loadProject(fixture, cacheDir: cache).ok, isTrue);
+    final go = w.edit(() {
+      final go = w.spawn()..set(const AudioSource(clip: tone));
+      go.audio.play();
+      return go;
+    });
+    w.edit(() => go.set(const AudioSource(clip: tone, playing: false, volume: 0.75)));
+    w.frame(1 / 60);
+    expect(go.audio.isPlaying, isFalse);
+    w.edit(() {
+      go.audio.play();
+      go.audio.stop();
+      go.set(const AudioSource(clip: tone, playing: true, volume: 0.5));
+    });
+    w.frame(1 / 60);
+    expect(go.audio.isPlaying, isTrue);
+    expect(go.audio.state!.volume, 0.5);
+  });
+
+  test('source abort and caught invalid controls roll back data and transport', () {
+    final w = fresh();
+    expect(w.loadProject(fixture, cacheDir: cache).ok, isTrue);
+    final go = w.edit(() => w.spawn(name: 'speaker')..set(const AudioSource(clip: tone)));
+    for (final invalid in <void Function()>[
+      () => throw StateError('abort'),
+      () => go.audio.volume = double.nan,
+      () => go.audio.pitch = 0,
+      () => go.remove<AudioSource>(),
+    ]) {
+      expect(
+        () => w.edit(() {
+          go.name = 'discard';
+          go.audio.play();
+          try {
+            invalid();
+          } catch (e) {
+            if (e is StateError && e.message == 'abort') rethrow;
+          }
+        }),
+        throwsStateError,
+      );
+      expect(go.name, 'speaker');
+      expect(go.get<AudioSource>()!.playing, isFalse);
+      w.frame(1 / 60);
+      expect(go.audio.isPlaying, isFalse);
+    }
+  });
+
+  test('source playback starts once across render rates', () {
+    for (final hz in [30, 60, 120, 240]) {
+      final w = fresh();
+      expect(w.loadProject(fixture, cacheDir: cache).ok, isTrue);
+      w.frame(1 / 60);
+      final started = w.audio.stats.started;
+      final go = w.edit(() {
+        final go = w.spawn()..set(const AudioSource(clip: tone));
+        go.audio.play();
+        go.audio.pause();
+        return go;
+      });
+      for (var i = 0; i < hz ~/ 4; i++) {
+        w.frame(1 / hz);
+      }
+      expect(go.audio.state!.paused, isTrue, reason: '$hz Hz');
+      expect(go.audio.state!.time, 0, reason: '$hz Hz');
+      expect(w.audio.stats.started, started + 1, reason: '$hz Hz');
+    }
+  });
+
   test('the Main scene registers the tone, the Robot plays it from the load and it ends', () {
     final w = fresh();
     final report = w.loadProject(fixture, cacheDir: cache);
@@ -68,7 +232,10 @@ void main() {
     final robot = w.find('Robot')!;
     final camera = w.find('Camera')!;
     final source = robot.get<AudioSource>()!;
-    expect((source.clip, source.bus, source.looping, source.playing, source.priority), (tone, AudioBus.sfx, false, true, 0));
+    expect(
+      (source.clip, source.bus, source.looping, source.playing, source.priority),
+      (tone, AudioBus.sfx, false, true, 0),
+    );
     expect(source.volume, closeTo(0.8, 1e-6));
     expect(camera.get<AudioListener>(), const AudioListener(volume: 1));
     final listener = robot.addBehaviour(Listener());
@@ -100,7 +267,17 @@ void main() {
     final robot = w.find('Robot')!;
     // A looping source of our own beside the scene's.
     final loop = w.spawn(name: 'Loop')
-      ..add(const AudioSource(clip: tone, bus: AudioBus.music, volume: 0.5, pitch: 1, looping: true, playing: false, priority: 2));
+      ..add(
+        const AudioSource(
+          clip: tone,
+          bus: AudioBus.music,
+          volume: 0.5,
+          pitch: 1,
+          looping: true,
+          playing: false,
+          priority: 2,
+        ),
+      );
     w.frame(1 / 60);
     expect(loop.audio.state!.playing, isFalse);
     expect(loop.audio.state!.duration, greaterThan(0));
@@ -180,18 +357,20 @@ void main() {
 
     // The settings document drives the buses at once; a mute is one
     // switch for every bus.
-    final store = SettingsStore(initial: const SettingsDocument(masterVolume: 0.5, musicVolume: 0.2, sfxVolume: 0.9, muted: true));
+    final store = SettingsStore(
+      initial: const SettingsDocument(masterVolume: 0.5, musicVolume: 0.2, sfxVolume: 0.9, muted: true),
+    );
     w.useSettings(store);
     store.edit((s) => s.copyWith(muted: false, sfxVolume: 0.4));
     w.audio.setBus(AudioBus.music, 0.3);
-    // The engine's bus gains are not queried back (they are the settings);
-    // what matters is that nothing was rejected.
+    expect(w.audio.busVolume(AudioBus.music), closeTo(0.3, 1e-6));
+    expect(w.audio.muted, isFalse);
     w.audio.play(tone);
     w.frame(1 / 60);
     expect(w.audio.stats.started - after.started, 1);
   });
 
-  test('a missing source, a bad value, an unknown clip and a stolen voice are diagnostics, not exceptions', () {
+  test('invalid requests reject immediately while unavailable playback assets report at simulation', () {
     final w = fresh();
     w.loadProject(fixture, cacheDir: cache);
     w.throwOnDiagnostics = false;
@@ -199,30 +378,32 @@ void main() {
     w.onDiagnostics = seen.addAll;
     final camera = w.find('Camera')!;
     final robot = w.find('Robot')!;
-    camera.audio.play(); // no source
-    robot.audio.volume = 1.5;
-    robot.audio.pitch = 0;
-    w.audio.play(tone, volume: -1);
+    expect(() => w.audio.setBus(AudioBus.master, 2), throwsStateError);
+    expect(w.audio.busVolume(AudioBus.master), 1);
+    expect(() => camera.audio.play(), throwsStateError);
+    expect(() => robot.audio.volume = 1.5, throwsStateError);
+    expect(() => robot.audio.pitch = 0, throwsStateError);
+    expect(() => w.audio.play(tone, volume: -1), throwsStateError);
     w.audio.play(unknownClip);
-    w.audio.setBus(AudioBus.master, 2); // presentation lane: at once
-    expect(seen.map((d) => d.code), [DiagnosticCode.invalidPayload]);
-    seen.clear();
+    expect(seen, isEmpty);
     w.frame(1 / 60);
-    expect(seen.map((d) => d.code), [
-      DiagnosticCode.missingComponent,
-      DiagnosticCode.invalidPayload,
-      DiagnosticCode.invalidPayload,
-      DiagnosticCode.invalidPayload,
-      DiagnosticCode.soundUnavailable,
-    ]);
-    expect(seen[0].entity, camera.entity);
-    expect(seen[0].component, AudioSource.componentId);
+    expect(seen.map((d) => d.code), [DiagnosticCode.soundUnavailable]);
     seen.clear();
 
     // A source whose clip the world does not hold: reported once against
     // the entity, the source keeps wanting to play.
     final ghost = w.spawn(name: 'Ghost')
-      ..add(const AudioSource(clip: unknownClip, bus: AudioBus.sfx, volume: 1, pitch: 1, looping: false, playing: true, priority: 0));
+      ..add(
+        const AudioSource(
+          clip: unknownClip,
+          bus: AudioBus.sfx,
+          volume: 1,
+          pitch: 1,
+          looping: false,
+          playing: true,
+          priority: 0,
+        ),
+      );
     w.frame(1 / 60);
     w.frame(1 / 60);
     expect(seen.map((d) => d.code), [DiagnosticCode.soundUnavailable]);
@@ -235,15 +416,44 @@ void main() {
     // the oldest and a lower one is refused (its playing clears).
     final voices = [
       for (var i = 0; i < 32; i++)
-        w.spawn(name: 'v$i')
-          ..add(const AudioSource(clip: tone, bus: AudioBus.sfx, volume: 1, pitch: 1, looping: true, playing: true, priority: 0)),
+        w.spawn(name: 'v$i')..add(
+          const AudioSource(
+            clip: tone,
+            bus: AudioBus.sfx,
+            volume: 1,
+            pitch: 1,
+            looping: true,
+            playing: true,
+            priority: 0,
+          ),
+        ),
     ];
     w.frame(1 / 60);
     expect(w.audio.stats.voices, 32);
     final thief = w.spawn(name: 'thief')
-      ..add(const AudioSource(clip: tone, bus: AudioBus.sfx, volume: 1, pitch: 1, looping: true, playing: true, priority: 5));
+      ..add(
+        const AudioSource(
+          clip: tone,
+          bus: AudioBus.sfx,
+          volume: 1,
+          pitch: 1,
+          looping: true,
+          playing: true,
+          priority: 5,
+        ),
+      );
     final meek = w.spawn(name: 'meek')
-      ..add(const AudioSource(clip: tone, bus: AudioBus.sfx, volume: 1, pitch: 1, looping: true, playing: true, priority: -1));
+      ..add(
+        const AudioSource(
+          clip: tone,
+          bus: AudioBus.sfx,
+          volume: 1,
+          pitch: 1,
+          looping: true,
+          playing: true,
+          priority: -1,
+        ),
+      );
     w.frame(1 / 60);
     expect(thief.audio.isPlaying, isTrue);
     expect(meek.audio.isPlaying, isFalse);

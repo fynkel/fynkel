@@ -62,12 +62,19 @@ pub use fynkel_physics::{
     ColliderShape, Contact, ContactPoint, Physics, PhysicsEvent, RigidBody,
 };
 pub use fynkel_scene::{Layer, Tags, Transform};
-pub use input::{ActionKind, ActionSpec, ActionState, Device, Input, InputEvent, Phase};
+pub use input::{
+    ActionKind, ActionSpec, ActionState, Device, Input, InputEvent, Phase, PreparedInputBindings,
+};
 pub use load::{
     Cloned, EntityDescription, LoadError, LoadMode, LoadedScene, SceneDescription, UnloadedScene,
 };
 pub use modules::{Module, Modules};
 pub use settings::Settings;
+pub use world::gameplay::{
+    EditCommit, EditError, EditResult, GameplayClone, GameplayComponentValue, GameplayEdit,
+    GameplayEntity, GameplayObjectRef, GameplayPrefab, GameplayQuery, GameplaySession,
+    PendingEntity,
+};
 pub use world::{
     projection_matrix, view_matrix, Diagnostic, Extract, ExtractCamera, ExtractDirectionalLight,
     ExtractEnvironment, ExtractMesh, ExtractPointLight, ExtractRecord, ExtractSpotLight,

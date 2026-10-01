@@ -27,7 +27,7 @@ const TICKS: usize = 30;
 /// move everything every tick, queries, destroy half, teardown.
 fn cycle() {
     let rt = fynkel_runtime_create();
-    let w = unsafe { fynkel_world_create(rt, ptr::null()) };
+    let w = unsafe { fynkel_world_create(rt, ptr::null(), std::ptr::null_mut()) };
     assert!(!w.is_null());
 
     let mut writer = Writer::begin(Vec::new(), BufferKind::Commands);
@@ -60,7 +60,7 @@ fn cycle() {
     step(w);
     let entities = spawned(w);
     assert_eq!(entities.len(), ENTITIES as usize);
-    let bits: Vec<u64> = entities.iter().map(|e| e.to_bits()).collect();
+    let bits = entities.clone();
     unsafe { fynkel_world_subscribe(w, 1, bits.as_ptr(), bits.len() as u32, 1) };
 
     for t in 0..TICKS {
@@ -88,7 +88,7 @@ fn cycle() {
     let q = FynkelQueryDesc {
         kind: 2, // children
         request_id: 1,
-        entity: hub.to_bits(),
+        entity: hub,
     };
     unsafe { fynkel_world_query(w, &q, &mut out) };
     assert!(out.length > 0);

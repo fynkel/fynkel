@@ -1,6 +1,6 @@
 //! `fynkel_native` — the C ABI (`include/fynkel.h`) over `fynkel_core`.
 //!
-//! ABI v1 (blueprint §5.3, ADR-0004, ADR-0014). Every exported function:
+//! ABI v3 (blueprint §5.3, ADR-0004, ADR-0014). Every exported function:
 //! * accepts NULL and returns an error status instead of crashing;
 //! * runs inside `catch_unwind`; a panic poisons the world and returns
 //!   `FYNKEL_STATUS_PANIC`;
@@ -15,11 +15,12 @@
 pub mod authoring;
 pub mod bridge;
 pub mod buffer;
+pub mod gameplay;
 pub mod load;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use fynkel_contracts::{ComponentId, Entity, Status, WorldId, ABI_VERSION};
+use fynkel_contracts::{ComponentId, Entity, Status, ABI_VERSION};
 use fynkel_core::{Lane, World, WorldConfig};
 
 use buffer::BufferKind;
@@ -36,7 +37,10 @@ pub struct FynkelRuntime {
 }
 
 pub struct FynkelWorld {
-    inner: World,
+    inner: gameplay::WorldSlot,
+    gameplay_allowed: bool,
+    gameplay_pending: Vec<fynkel_core::PendingEntity>,
+    gameplay_reply: Vec<u8>,
     snapshot_buf: Vec<u8>,
     events_buf: Vec<u8>,
     after_physics_buf: Vec<u8>,
@@ -136,8 +140,6 @@ impl FynkelBufferView {
 
 #[repr(C)]
 pub struct FynkelWorldDesc {
-    pub world_id: u8,
-    pub reserved: [u8; 3],
     pub fixed_dt_seconds: f32,
     pub max_steps_per_frame: u32,
     pub max_frame_dt_seconds: f32,
@@ -151,6 +153,12 @@ pub struct FynkelFramePlan {
     pub dropped_seconds: f32,
     pub clamped: u32,
     pub alpha: f32,
+    pub real_delta: f64,
+    pub gameplay_delta: f64,
+    pub real_elapsed: f64,
+    pub gameplay_elapsed: f64,
+    pub clamped_seconds: f64,
+    pub frame: u64,
 }
 
 #[repr(C)]
@@ -164,6 +172,7 @@ pub struct FynkelSubmitResult {
 #[derive(Default)]
 pub struct FynkelStepResult {
     pub tick: u64,
+    pub simulation_elapsed: f64,
     pub commands_applied: u32,
     pub commands_rejected: u32,
     pub snapshot_records: u32,
@@ -178,7 +187,7 @@ pub struct FynkelInstantiateDesc {
     pub prefab_id_len: u32,
     pub name_utf8: *const u8,
     pub name_len: u32,
-    pub parent: u64,
+    pub parent: Entity,
     pub position: [f32; 3],
     pub rotation: [f32; 4],
     pub scale: [f32; 3],
@@ -186,10 +195,10 @@ pub struct FynkelInstantiateDesc {
 
 #[repr(C)]
 pub struct FynkelCloneDesc {
-    pub source: u64,
+    pub source: Entity,
     pub name_utf8: *const u8,
     pub name_len: u32,
-    pub parent: u64,
+    pub parent: Entity,
     pub position: [f32; 3],
     pub rotation: [f32; 4],
     pub scale: [f32; 3],
@@ -199,7 +208,7 @@ pub struct FynkelCloneDesc {
 pub struct FynkelQueryDesc {
     pub kind: u32,
     pub request_id: u32,
-    pub entity: u64,
+    pub entity: Entity,
 }
 
 #[repr(C)]
@@ -235,6 +244,9 @@ fn guarded(world: *mut FynkelWorld, f: impl FnOnce(&mut FynkelWorld) -> Status) 
     let Some(w) = (unsafe { world.as_mut() }) else {
         return Status::InvalidArgument;
     };
+    if w.inner.reject_during_edit() {
+        return Status::CommandsRejected;
+    }
     if w.inner.is_poisoned() {
         return Status::Poisoned;
     }
@@ -256,8 +268,17 @@ fn guarded(world: *mut FynkelWorld, f: impl FnOnce(&mut FynkelWorld) -> Status) 
 
 impl FynkelWorld {
     fn new(config: WorldConfig) -> Self {
+        let mut world = Self::with_core(World::new(config));
+        world.gameplay_allowed = false; // Authoring owns preview/stage worlds.
+        world
+    }
+
+    fn with_core(inner: World) -> Self {
         Self {
-            inner: World::new(config),
+            inner: gameplay::WorldSlot::new(inner),
+            gameplay_allowed: true,
+            gameplay_pending: Vec::new(),
+            gameplay_reply: Vec::new(),
             snapshot_buf: buffer::empty(BufferKind::Snapshot),
             events_buf: buffer::empty(BufferKind::Events),
             after_physics_buf: buffer::empty(BufferKind::Events),
@@ -411,8 +432,37 @@ pub extern "C" fn fynkel_schema_fingerprint() -> u64 {
     fynkel_wire::SCHEMA_FINGERPRINT
 }
 
+/// Opaque process-lifetime identity storage, independent of engine code.
+pub type FynkelIdentityAuthority = fynkel_contracts::IdentityAuthority;
+
+/// Bootstraps or reads this module's authority. The host must retain this
+/// pointer across replacement and attach it to other modules before use.
+/// Intentionally no destroy function: outstanding references can outlive worlds.
+#[no_mangle]
+pub extern "C" fn fynkel_identity_authority() -> *const FynkelIdentityAuthority {
+    fynkel_contracts::identity_authority()
+}
+
+/// # Safety
+/// Non-null `authority` must be a process-lifetime authority returned by a
+/// compatible Fynkel module in this process. Never serialize this pointer.
+/// Call before any other module operation; reattaching the same pointer is OK.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_identity_attach(
+    authority: *const FynkelIdentityAuthority,
+) -> Status {
+    let Some(authority) = authority.as_ref() else {
+        return Status::InvalidArgument;
+    };
+    match fynkel_contracts::attach_identity_authority(authority) {
+        Ok(()) => Status::Ok,
+        Err(_) => Status::InvalidArgument,
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn fynkel_runtime_create() -> *mut FynkelRuntime {
+    let _ = fynkel_contracts::identity_authority();
     Box::into_raw(Box::new(FynkelRuntime { worlds_created: 0 }))
 }
 
@@ -427,19 +477,21 @@ pub unsafe extern "C" fn fynkel_runtime_destroy(runtime: *mut FynkelRuntime) {
 
 /// # Safety
 /// `runtime` must be live; `desc` may be NULL (defaults).
+/// Non-null `desc` must be readable and `out_status` must be writable.
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_world_create(
     runtime: *mut FynkelRuntime,
     desc: *const FynkelWorldDesc,
+    out_status: *mut Status,
 ) -> *mut FynkelWorld {
+    if let Some(status) = out_status.as_mut() {
+        *status = Status::InvalidArgument;
+    }
     let Some(rt) = runtime.as_mut() else {
         return std::ptr::null_mut();
     };
     let mut config = WorldConfig::default();
     if let Some(d) = desc.as_ref() {
-        if d.world_id != 0 {
-            config.id = WorldId(d.world_id);
-        }
         if d.fixed_dt_seconds > 0.0 && d.fixed_dt_seconds.is_finite() {
             config.fixed_dt = d.fixed_dt_seconds;
         }
@@ -450,12 +502,24 @@ pub unsafe extern "C" fn fynkel_world_create(
             config.max_frame_dt = d.max_frame_dt_seconds;
         }
     }
-    match catch_unwind(|| FynkelWorld::new(config)) {
-        Ok(w) => {
+    match catch_unwind(|| World::try_new(config).map(FynkelWorld::with_core)) {
+        Ok(Ok(w)) => {
+            if let Some(status) = out_status.as_mut() {
+                *status = Status::Ok;
+            }
             rt.worlds_created += 1;
             Box::into_raw(Box::new(w))
         }
-        Err(_) => std::ptr::null_mut(),
+        outcome => {
+            if let Some(status) = out_status.as_mut() {
+                *status = if outcome.is_err() {
+                    Status::Panic
+                } else {
+                    Status::OutOfResources
+                };
+            }
+            std::ptr::null_mut()
+        }
     }
 }
 
@@ -474,11 +538,15 @@ pub unsafe extern "C" fn fynkel_world_destroy(world: *mut FynkelWorld) {
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_world_begin_frame(
     world: *mut FynkelWorld,
-    dt_seconds: f32,
+    dt_seconds: f64,
+    time_scale: f64,
     out_plan: *mut FynkelFramePlan,
 ) -> Status {
+    if !time_scale.is_finite() || time_scale < 0.0 {
+        return Status::InvalidArgument;
+    }
     guarded(world, |w| {
-        let plan = w.inner.begin_frame(dt_seconds);
+        let plan = w.inner.begin_frame_scaled(dt_seconds, time_scale);
         if plan.dropped_seconds > 0.0 {
             w.rebuild_diagnostics();
         }
@@ -488,8 +556,24 @@ pub unsafe extern "C" fn fynkel_world_begin_frame(
                 dropped_seconds: plan.dropped_seconds,
                 clamped: plan.clamped as u32,
                 alpha: w.inner.alpha(),
+                real_delta: plan.real_delta,
+                gameplay_delta: plan.gameplay_delta,
+                real_elapsed: w.inner.clock().real_elapsed(),
+                gameplay_elapsed: w.inner.clock().gameplay_elapsed(),
+                clamped_seconds: plan.clamped_seconds,
+                frame: w.inner.clock().frame(),
             };
         }
+        Status::Ok
+    })
+}
+
+/// # Safety
+/// `world` must be live and exclusively accessible for the call.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_snap_interpolation(world: *mut FynkelWorld) -> Status {
+    guarded(world, |w| {
+        w.inner.snap_interpolation();
         Status::Ok
     })
 }
@@ -852,6 +936,7 @@ pub unsafe extern "C" fn fynkel_world_step(
         if let Some(out) = out_result.as_mut() {
             *out = FynkelStepResult {
                 tick: r.tick,
+                simulation_elapsed: w.inner.clock().elapsed(),
                 commands_applied: r.applied,
                 commands_rejected: r.rejected,
                 snapshot_records: r.snapshot_records,
@@ -950,11 +1035,15 @@ pub unsafe extern "C" fn fynkel_world_physics_query(
     } else {
         std::slice::from_raw_parts(buffer, length as usize)
     };
-    let status = guarded(world, |w| {
+    let status = gameplay::boundary(world, |w| {
         w.stats.query_calls += 1;
         w.stats.bytes_in += bytes.len() as u64;
         let buf = std::mem::take(&mut w.query_bufs[PHYSICS_LANE]);
-        w.inner.refresh_physics();
+        // During an owned edit, query the committed physics scene without
+        // synchronizing staged data or mutably borrowing the owned core world.
+        if !w.inner.is_editing() {
+            w.inner.refresh_physics();
+        }
         match bridge::physics_queries(&w.inner, bytes, buf) {
             Ok(b) => {
                 w.query_bufs[PHYSICS_LANE] = b;
@@ -962,6 +1051,7 @@ pub unsafe extern "C" fn fynkel_world_physics_query(
                 Status::Ok
             }
             Err(e) => {
+                w.inner.reject_during_edit();
                 log::warn!("fynkel_world_physics_query: protocol error {e:?}");
                 w.query_bufs[PHYSICS_LANE] = buffer::empty(BufferKind::Query);
                 Status::Protocol
@@ -983,7 +1073,7 @@ pub unsafe extern "C" fn fynkel_world_physics_query(
 pub struct FynkelProjectionInfo {
     /// The camera entity the frame is rendered from; 0 when the world has
     /// no enabled camera (every point is then `PROJECTED_NO_CAMERA`).
-    pub camera: u64,
+    pub camera: Entity,
     /// Anchors projected (at most `FYNKEL_MAX_PROJECTION_ANCHORS`).
     pub projected: u32,
     /// Anchors beyond that bound (`PROJECTED_DROPPED`).
@@ -1046,7 +1136,7 @@ pub unsafe extern "C" fn fynkel_world_project(
                     w.rebuild_diagnostics();
                 }
                 info = FynkelProjectionInfo {
-                    camera: i.camera.map(|e| e.to_bits()).unwrap_or(0),
+                    camera: i.camera.unwrap_or(Entity::NULL),
                     projected: i.projected,
                     dropped: i.dropped,
                 };
@@ -1128,7 +1218,7 @@ pub unsafe extern "C" fn fynkel_world_audio_close(world: *mut FynkelWorld) -> St
 pub unsafe extern "C" fn fynkel_world_subscribe(
     world: *mut FynkelWorld,
     component: u32,
-    entities: *const u64,
+    entities: *const Entity,
     count: u32,
     enable: i32,
 ) -> Status {
@@ -1141,10 +1231,7 @@ pub unsafe extern "C" fn fynkel_world_subscribe(
     let handles: Vec<Entity> = if count == 0 {
         Vec::new()
     } else {
-        std::slice::from_raw_parts(entities, count as usize)
-            .iter()
-            .map(|&bits| Entity::from_bits(bits))
-            .collect()
+        std::slice::from_raw_parts(entities, count as usize).to_vec()
     };
     guarded(world, |w| {
         w.inner.subscribe(&handles, enable != 0);
@@ -1218,7 +1305,7 @@ pub unsafe extern "C" fn fynkel_world_query(
     let Some(d) = desc.as_ref() else {
         return Status::InvalidArgument;
     };
-    let (kind, request_id, entity) = (d.kind, d.request_id, Entity::from_bits(d.entity));
+    let (kind, request_id, entity) = (d.kind, d.request_id, d.entity);
     if !(1..=bridge::QUERY_KINDS).contains(&kind) {
         if let Some(out) = out_view.as_mut() {
             *out = FynkelBufferView::empty();
@@ -1226,7 +1313,19 @@ pub unsafe extern "C" fn fynkel_world_query(
         return Status::InvalidArgument;
     }
     let lane = (kind - 1) as usize;
-    let status = guarded(world, |w| {
+    // These queries only mutate bridge-owned output buffers/counters. The
+    // owned-session boundary exposes immutable committed state, never the journal.
+    let read_committed = matches!(
+        kind,
+        bridge::QUERY_BODY
+            | bridge::QUERY_CHARACTER
+            | bridge::QUERY_AUDIO
+            | bridge::QUERY_AUDIO_STATS
+            | bridge::QUERY_ANIMATOR
+            | bridge::QUERY_ANIMATOR_CONTROLLER
+            | bridge::QUERY_ANIMATOR_PARAMETERS
+    );
+    let query = |w: &mut FynkelWorld| {
         w.stats.query_calls += 1;
         let buf = std::mem::take(&mut w.query_bufs[lane]);
         match bridge::query(&w.inner, kind, request_id, entity, buf) {
@@ -1240,7 +1339,12 @@ pub unsafe extern "C" fn fynkel_world_query(
                 Status::InvalidArgument
             }
         }
-    });
+    };
+    let status = if read_committed {
+        gameplay::boundary(world, query)
+    } else {
+        guarded(world, query)
+    };
     if let Some(out) = out_view.as_mut() {
         *out = match (status, world.as_ref()) {
             (Status::Ok, Some(w)) => FynkelBufferView::of(&w.query_bufs[lane]),
@@ -1351,4 +1455,26 @@ pub unsafe extern "C" fn fynkel_world_debug_panic(world: *mut FynkelWorld) -> St
     guarded(world, |_| {
         panic!("fynkel_world_debug_panic: a panic asked for by the host")
     })
+}
+
+/// Whether a full reference is live in this world. Never accepts temporary
+/// command targets; a foreign world/generation returns zero.
+/// # Safety
+/// `world` is NULL or a live world pointer.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_contains(world: *const FynkelWorld, entity: Entity) -> i32 {
+    world
+        .as_ref()
+        .is_some_and(|w| !w.inner.is_poisoned() && w.inner.ecs().contains(entity)) as i32
+}
+
+/// Completed simulation seconds, independent of gameplay/host time.
+/// # Safety
+/// Non-null `world` must be a live world allocation.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_simulation_elapsed(world: *const FynkelWorld) -> f64 {
+    world
+        .as_ref()
+        .map(|w| w.inner.clock().elapsed())
+        .unwrap_or(0.0)
 }

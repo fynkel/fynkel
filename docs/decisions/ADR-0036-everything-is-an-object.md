@@ -6,6 +6,8 @@
 
 ## Context
 
+**Review from 2026-09-30:** [ADR-0042](ADR-0042-ecs-centered-foundation-program.md) retains approachable object references as facades over entity/component state. [ADR-0043](ADR-0043-unified-world-state-and-frame-contract.md) and [ADR-0044](ADR-0044-components-systems-and-gameplay-access.md) propose the shared state and access contracts. Existing APIs below remain current until that migration; the object facade must not create a competing storage authority.
+
 In Unity almost everything a game works with is a `UnityEngine.Object`:
 a `GameObject`, every component (`Transform`, `Rigidbody`, a
 `MonoBehaviour`), and every asset (`Material`, `Mesh`, `AudioClip`, a

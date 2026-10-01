@@ -295,3 +295,10 @@ after L3 tune it live, after L4 keep what works.
    dirty during Play.
 3. **Order**: L1–L4 first, the Scene view on the running world (L5)
    last. Changed after L2 (same day): L5 next, then L3, then L4.
+
+
+## F2 live creation boundary (2026-10-01)
+
+Live `spawn` now creates the entity through the native gameplay journal. Component validation and object-reference validation finish before the entity or its scene authoring identity publishes. A rejected component rejects the entire creation; it no longer leaves a partially configured object behind. The authoring ID remains available for a corrected retry. Success still appears immediately without advancing simulation, preserves parent ordering, and participates in scene unloading.
+
+As with other live data edits, queued simulation work must be drained or explicitly adopted by the host first. A rejected editor request leaves that queue untouched. Script attachment and resource operations remain separate boundaries; this change does not make an entire multi-call editor action atomic.

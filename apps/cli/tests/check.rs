@@ -1361,7 +1361,10 @@ fn validate_project_describe_lock_and_schema_commands_fix_their_exit_codes() {
     let lock = std::fs::read_to_string(&lock_path).unwrap();
     std::fs::write(
         &lock_path,
-        lock.replace("\"abiVersion\": 1", "\"abiVersion\": 99"),
+        lock.replace(
+            &format!("\"abiVersion\": {}", fynkel_contracts::ABI_VERSION),
+            "\"abiVersion\": 99",
+        ),
     )
     .unwrap();
     let project_path = broken.join("fynkel.project.json");

@@ -26,3 +26,10 @@ fynkel_physics.workspace = true
 fynkel_audio.workspace = true
 fynkel_animation.workspace = true
 glam.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[[example]]
+name = "foundation_state"
+crate-type = ["cdylib"]

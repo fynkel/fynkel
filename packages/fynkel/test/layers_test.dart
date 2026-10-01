@@ -1,6 +1,6 @@
 // Tags and layers from Dart (ADR-0020): an object's layer and tags are the
 // `fynkel.Layer`/`fynkel.Tags` components, read and written by name through
-// the project's lists; tag lookups use the per-tick entity table.
+// the project's lists; tag lookups share the gameplay journal.
 
 import 'package:fynkel/fynkel.dart';
 import 'package:test/test.dart' hide Tags;
@@ -37,7 +37,7 @@ void main() {
       ..layer = 'props'
       ..addTag('pickup')
       ..addTag('enemy');
-    expect(go.isPending, isTrue);
+    expect(go.isPending, isFalse);
     expect(go.layer, 'props');
     expect(go.tags, {'pickup', 'enemy'});
     w.frame(1 / 60);
@@ -54,14 +54,14 @@ void main() {
     expect(go.layer, 'default');
   });
 
-  test('findWithTag and findAllWithTag read the world as the last tick left it', () {
+  test('findWithTag and findAllWithTag read committed configuration immediately', () {
     final w = fresh();
     final a = w.spawn(name: 'A')..addTag('pickup');
     w.spawn(name: 'B');
     final c = w.spawn(name: 'C')
       ..addTag('player')
       ..addTag('pickup');
-    expect(w.findWithTag('pickup'), isNull, reason: 'spawned this tick');
+    expect(w.findWithTag('pickup'), same(a), reason: 'spawn publishes immediately');
     w.frame(1 / 60);
     expect(w.findWithTag('pickup'), same(a));
     expect(w.findAllWithTag('pickup'), [same(a), same(c)]);
@@ -80,15 +80,19 @@ void main() {
     final go = w.spawn(name: 'x');
     expect(
       () => go.layer = 'water',
-      throwsA(isA<ArgumentError>().having((e) => '${e.message}', 'message', contains('[default, ground, props]'))),
+      throwsA(
+        isA<ArgumentError>().having((e) => '${e.message}', 'message', contains('[default, ground, props]')),
+      ),
     );
     expect(
       () => go.addTag('boss'),
-      throwsA(isA<ArgumentError>().having((e) => '${e.message}', 'message', contains('[player, pickup, enemy]'))),
+      throwsA(
+        isA<ArgumentError>().having((e) => '${e.message}', 'message', contains('[player, pickup, enemy]')),
+      ),
     );
     expect(() => go.hasTag('boss'), throwsArgumentError);
-    expect(() => w.findWithTag('boss'), throwsArgumentError);
-    expect(() => w.findAllWithTag('boss'), throwsArgumentError);
+    expect(() => w.findWithTag('boss'), throwsStateError);
+    expect(() => w.findAllWithTag('boss'), throwsStateError);
   });
 
   test('changing the layer at run time moves the colliders to the new group', () {
@@ -107,7 +111,7 @@ void main() {
       )
       ..layer = 'ground';
     w.frame(1 / 60);
-    int? hit(String layer) =>
+    EntityRef? hit(String layer) =>
         w.raycast(const Vec3(0, 5, 0), const Vec3(0, -1, 0), mask: w.layerMask([layer]))?.entity;
     expect(hit('ground'), box.entity);
     expect(hit('props'), isNull);

@@ -54,7 +54,7 @@ pairs (Xbox, PlayStation, MFi) maps to them.
 The user's **rebinds** (M3-12, [scenes.md](scenes.md) § Settings) sit
 over the project's bindings per action: `settings.json` → `input.rebinds`
 `{ "<action>": ["<binding>", …] }` in the same grammar, applied by the
-`SettingsStore` through `World.bindActions` (`fynkel_world_bind_actions`)
+`SettingsStore` through `World.bindActions` (the native gameplay journal)
 now and after every load; `LoadReport.inputActions[i].rebound` says which
 actions are the user's. An action the project lacks binds nothing; a bad
 binding is a `bindingErrors` entry, never fatal.
@@ -265,3 +265,10 @@ edges, the stick's vectors, pointer capture through the mocked channel, a
 pause resetting), the overlay hidden on macOS and built from bound actions.
 The starter app on the iOS simulator: the stick walks the cube and the
 button jumps it (M3-07 verification note in `status.md`).
+
+
+## Transactional rebinding
+
+`World.bindActions` joins the current callback or `World.edit`, or opens an edit when called alone. Audio settings, input bindings and entity changes in the same edit commit or roll back together. A missing loaded project throws a sticky `StateError`; invalid binding strings are skipped and exposed as `LoadReport.bindingErrors`. The returned report describes the staged configuration, and the last rebinding call in an edit wins.
+
+Input values remain the sample captured for the current phase. New bindings take effect on the next normal input refresh after commit, preserving held keys, button edges, raw controls and clocks. Aborted overrides cannot reappear during a later scene load. SettingsStore document changes and saved files remain outside engine rollback.
