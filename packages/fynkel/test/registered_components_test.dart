@@ -24,6 +24,28 @@ void main() {
     w.registerComponent(health);
   });
   tearDown(() => w.dispose());
+  test('caught addData default decoding failure rejects the entire edit', () {
+    final invalid = ComponentType<int>(
+      id: 'game.InvalidDefaults',
+      fields: const [
+        ComponentField('value', ComponentFieldKind.integer, 'invalid'),
+      ],
+      encode: (value) => [value],
+      decode: (fields) => fields.single as int,
+    );
+    final player = w.spawn(name: 'original');
+    expect(
+      () => w.edit(() {
+        player.name = 'discard';
+        try {
+          player.addData(invalid);
+        } catch (_) {}
+      }),
+      throwsStateError,
+    );
+    expect(player.name, 'original');
+    expect(w.registeredComponentTypes.any((t) => t.id == invalid.id), isFalse);
+  });
   test(
     'read-only bulk returns an owned snapshot with one native population call',
     () {

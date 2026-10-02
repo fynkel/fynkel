@@ -122,6 +122,19 @@ class BehaviourBuilder implements Builder {
   }
 }
 
+/// Dart lookup precedence: own declarations, rightmost mixin first, then the
+/// superclass. Mixin `on` constraints are not implementations and are not walked.
+Iterable<InterfaceElement> _fieldOwners(InterfaceElement element) sync* {
+  yield element;
+  for (final mixin in element.mixins.reversed) {
+    yield* _fieldOwners(mixin.element);
+  }
+  final parent = element.supertype?.element;
+  if (parent != null && !parent.library.isDartCore) {
+    yield* _fieldOwners(parent);
+  }
+}
+
 Future<BehaviourClass> _readClass(
   Resolver resolver,
   LibraryElement library,
@@ -200,14 +213,9 @@ Future<BehaviourClass> _readClass(
     );
   }
 
-  // Own fields first, then inherited ones up to (not including) the base.
   final fields = <ExposedField>[];
   final seen = <String>{};
-  for (
-    InterfaceElement? cls = element;
-    cls != null && !base.isExactly(cls);
-    cls = cls.supertype?.element
-  ) {
+  for (final cls in _fieldOwners(element).takeWhile((cls) => !base.isExactly(cls))) {
     for (final f in cls.fields) {
       final annotation = _exposeAnnotation.firstAnnotationOf(f);
       if (annotation == null) {
@@ -622,11 +630,7 @@ Future<RecordClass> _readRecord(
   final inner = {...records, key};
   final fields = <ExposedField>[];
   final seen = <String>{};
-  for (
-    InterfaceElement? cls = element;
-    cls != null && !cls.library.isDartCore;
-    cls = cls.supertype?.element
-  ) {
+  for (final cls in _fieldOwners(element)) {
     for (final f in cls.fields) {
       final annotation = _exposeAnnotation.firstAnnotationOf(f);
       final fieldName = f.name ?? '';

@@ -1279,7 +1279,7 @@ class _BehaviourSystem {
   }
 
   /// One fixed tick's callbacks, right before `step()`.
-  void fixedUpdate(int tick, List<EngineEvent> events) => world._runPhase(GameplayPhase.fixedUpdate, () => _fixedUpdate(tick, events));
+  void fixedUpdate(int tick, List<EngineEvent> events) => world._runPhase(GameplayPhase.fixedUpdate, tick, () => _fixedUpdate(tick, events));
   void _fixedUpdate(int tick, List<EngineEvent> events) {
     settle();
     if (world.isDisposed) return;
@@ -1302,7 +1302,7 @@ class _BehaviourSystem {
     List<PlaybackEnded> playback, [
     List<AnimatorStateEvent> states = const [],
   ]) {
-    world._runPhase(GameplayPhase.afterPhysics, () {
+    world._runPhase(GameplayPhase.afterPhysics, tick, () {
       // Objects the tick made are created (onCreate/onEnable) before its
       // events reach anyone, so a pair made overlapping gets its enter on
       // both sides, as Unity's Awake runs before the next physics step
@@ -1484,7 +1484,7 @@ class _BehaviourSystem {
   /// Once per host frame: every `update`, then every `lateUpdate`.
   void update(double dt) {
     final ctx = UpdateContext(dt: dt, alpha: world.alpha, tick: world.tick, context: world.context);
-    world._runPhase(GameplayPhase.update, () {
+    world._runPhase(GameplayPhase.update, ctx.tick, () {
       settle();
       if (world.isDisposed) return;
       _startPending(ctx.context);
@@ -1492,7 +1492,7 @@ class _BehaviourSystem {
       _run(ctx.context, 'update', (b) => b.update(ctx));
       if (_routines.isNotEmpty) ctx.context.run(() => _resume(fixed: false));
     });
-    if (!world.isDisposed) world._runPhase(GameplayPhase.lateUpdate, () => _run(ctx.context, 'lateUpdate', (b) => b.lateUpdate(ctx)));
+    if (!world.isDisposed) world._runPhase(GameplayPhase.lateUpdate, ctx.tick, () => _run(ctx.context, 'lateUpdate', (b) => b.lateUpdate(ctx)));
   }
 
   /// Resumes the coroutines whose wait is over: every kind but

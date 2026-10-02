@@ -8,6 +8,27 @@ import 'package:registered_gameplay/generated/behaviours.g.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'generated fields follow class, rightmost mixin and superclass precedence',
+    () {
+      expect(gameHealthType.fields.map((f) => f.name), [
+        'hp',
+        'invulnerable',
+        'target',
+      ]);
+      expect(gameHealthType.fields.map((f) => f.defaultValue), [
+        100.0,
+        false,
+        null,
+      ]);
+      final world = World.create();
+      addTearDown(world.dispose);
+      registerComponents(world);
+      final owner = world.spawn()..addData(gameHealthType);
+      expect(owner.readData(gameHealthType)!.hp, 100);
+      expect(owner.readData(gameHealthType)!.invulnerable, isFalse);
+    },
+  );
   test('generated component object access and bulk system share storage', () {
     final world = World.create();
     addTearDown(world.dispose);

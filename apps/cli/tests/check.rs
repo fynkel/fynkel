@@ -62,6 +62,20 @@ fn behaviour_generator_output_is_up_to_date() {
     assert!(example
         .join("schemas/behaviours/game.Spinner.schema.json")
         .is_file());
+
+    // This fixture exercises registered component fields inherited through
+    // multiple mixins, overrides and a superclass, including object references.
+    let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
+        .args(["codegen", "--check", "--project-only", "--project"])
+        .arg(root.join("examples/registered_gameplay"))
+        .output()
+        .expect("check registered component fixture");
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// The fixture project validates its `game.Spinner` data against the very

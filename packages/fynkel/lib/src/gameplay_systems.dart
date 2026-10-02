@@ -8,6 +8,10 @@ class GameplaySystemContext {
   const GameplaySystemContext(this.world, this.phase, this.tick, this.dt);
   final World world;
   final GameplayPhase phase;
+
+  /// The host phase's tick label, shared with its behaviour callbacks. Fixed
+  /// and afterPhysics label the same zero-based simulation interval; variable
+  /// phases report the completed tick count at phase entry.
   final int tick;
   final double dt;
 }
@@ -143,7 +147,11 @@ extension RegisteredGameplaySystems on World {
     return result;
   }
 
-  void _runPhase(GameplayPhase phase, void Function() behaviours) {
+  void _runPhase(
+    GameplayPhase phase,
+    int phaseTick,
+    void Function() behaviours,
+  ) {
     if (_systemOrder.isEmpty) {
       behaviours();
       return;
@@ -169,7 +177,7 @@ extension RegisteredGameplaySystems on World {
                 GameplaySystemContext(
                   this,
                   phase,
-                  phase == GameplayPhase.fixedUpdate ? tick + 1 : tick,
+                  phaseTick,
                   phase.index < 2 ? fixedDt : _frameDt,
                 ),
               ),

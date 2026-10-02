@@ -98,6 +98,8 @@ The final [F2 qualification](foundation-f2-gate-report.md) passes all 17 checks:
 
 **F3 completion (2026-10-02):** [ADR-0053](decisions/ADR-0053-registered-gameplay-and-extension-contract.md), [gate report](foundation-f3-gate-report.md), and [archived qualification](../benchmarks/foundation/results/2026-10-02-2311b783-f3-completion.json). All 20 qualification commands pass: 1,106 Rust tests (8 ignored), 27 stripped core, 24 stripped native, 600 SDK, 14 generator, 2 generated gameplay integration, 16 authoring, 39 Flutter and 71 focused editor tests, plus the separately enabled dynamic-library gate. The mixed Health/Damage/Door example and optional external native package satisfy the exit gate. Runtime ABI is 5; the built-in schema fingerprint is unchanged. Measured owned-buffer costs remain explicit: the final 10,000-entity AOT frame is 16.887 ms p50 before rendered-game work, with earlier samples slower.
 
+**F3 review fixes (2026-10-02):** exposed mixin fields, host phase tick agreement, and `addData` failure rollback are corrected with permanent regressions. [Affected qualification](../benchmarks/foundation/results/2026-10-02-407a45b7-f3-review-fixes.json) passes all 12 commands, including 601 SDK tests and the expanded generated-fixture freshness gate. See the [F3 report](foundation-f3-gate-report.md) for the defects and exact checks. These review findings are closed; F4 remains the next milestone.
+
 ## F4 Ownership revisions and synchronization
 
 | Task | Work and acceptance criteria | Notes |

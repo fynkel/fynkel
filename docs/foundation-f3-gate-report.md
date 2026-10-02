@@ -28,6 +28,16 @@ See ADR-0053 for the complete contract. The deliberate constraints are:
 
 These are explicit API contracts, not fallback compatibility paths. There is no second authoritative Dart component store. F7 retains broader package/tooling adoption; F4 retains synchronization work; F8 retains production qualification.
 
+## Review corrections (2026-10-02)
+
+The follow-up source review found three defects in the original checkpoint despite its passing checks. They are now fixed, with permanent regressions demonstrated failing before the fixes:
+
+- Exposed mixin fields were omitted. Shared field discovery now visits class declarations, rightmost mixins and then the superclass. Health's fixture covers multiple mixins, default/override precedence and an inherited object reference. Its existing scene/prefab and live-data tests exercise the generated codec; the CLI freshness gate now includes this fixture.
+- Host systems used a different tick than behaviours, including afterPhysics. The scheduler now receives the captured phase tick explicitly from the behaviour phase driver. A replacement regression compares systems before/after behaviours across every host phase, including zero- and multi-tick frames. Native completion counters are unchanged; ADR-0053 specifies the host interval labels.
+- `addData` decoded defaults outside the transaction guard. Registration validation and decoding now run inside the guard, so catching a rejected operation cannot publish earlier staged writes. The permanent regression verifies the prior name survives a caught invalid-default/declaration error.
+
+[Review-fix evidence](../benchmarks/foundation/results/2026-10-02-407a45b7-f3-review-fixes.json): **12/12 affected qualification commands pass** — 601 SDK, 14 generator, 3 registered-gameplay, 8 existing generated-example, 26 CLI, 28 core, 39 Flutter and 71 editor tests. SDK/generator analysis, formatting and CLI Clippy with warnings denied pass. Runtime ABI and generated schemas are unchanged. The initial qualification and performance measurements below remain historical evidence; this batch did not rerun the full workspace or performance benchmarks.
+
 ## Qualification
 
 [Archived evidence](../benchmarks/foundation/results/2026-10-02-2311b783-f3-completion.json) records commands, results, retry history, log hashes, source hashes and raw measurements.

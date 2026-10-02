@@ -2,14 +2,32 @@ import 'package:fynkel/fynkel.dart';
 
 import 'generated/behaviours.g.dart';
 
-@FynkelComponent(id: 'game.Health')
-class Health {
+class HealthBase {
+  @Expose()
+  double hp = 1;
+}
+
+mixin OlderHealthDefaults {
+  @Expose()
+  double hp = 50;
+}
+
+mixin HealthDefaults {
   @Expose()
   double hp = 100;
   @Expose()
-  bool invulnerable = false;
+  bool invulnerable = true;
   @Expose()
   GameObject? target;
+}
+
+// Class fields win over mixins; the rightmost mixin wins over earlier mixins
+// and the superclass. Exposed mixin references must serialize too.
+@FynkelComponent(id: 'game.Health')
+class Health extends HealthBase with OlderHealthDefaults, HealthDefaults {
+  @override
+  @Expose()
+  bool invulnerable = false;
 }
 
 // Effective callback discovery includes mixins, not just methods on the class.

@@ -11,6 +11,24 @@ class Recorder extends Behaviour {
   }
 }
 
+class PhaseRecorder extends Behaviour {
+  PhaseRecorder(this.ticks);
+  final Map<GameplayPhase, List<int>> ticks;
+  @override
+  bool get wantsAfterPhysics => true;
+  @override
+  void fixedUpdate(FixedUpdateContext c) =>
+      ticks[GameplayPhase.fixedUpdate]!.add(c.tick);
+  @override
+  void afterPhysics(AfterPhysicsContext c) =>
+      ticks[GameplayPhase.afterPhysics]!.add(c.tick);
+  @override
+  void update(UpdateContext c) => ticks[GameplayPhase.update]!.add(c.tick);
+  @override
+  void lateUpdate(UpdateContext c) =>
+      ticks[GameplayPhase.lateUpdate]!.add(c.tick);
+}
+
 void main() {
   late World w;
   setUp(() => w = World.create());
@@ -70,22 +88,37 @@ void main() {
     expect(log, ['behaviour']);
     expect(constructions, 0);
   });
-  test(
-    'registered fixed system receives the same upcoming tick as behaviours',
-    () {
-      final ticks = <int>[];
-      w.registerSystems([
+  test('systems and behaviours share phase ticks across zero and multiple tick frames', () {
+    final scripts = {for (final p in GameplayPhase.values) p: <int>[]};
+    final before = {for (final p in GameplayPhase.values) p: <int>[]};
+    final after = {for (final p in GameplayPhase.values) p: <int>[]};
+    w.spawn().addBehaviour(PhaseRecorder(scripts));
+    w.registerSystems([
+      for (final p in GameplayPhase.values) ...[
         GameplaySystem(
-          id: 'game.Tick',
-          phase: GameplayPhase.fixedUpdate,
-          run: (context) => ticks.add(context.tick),
+          id: 'game.Before${p.name}',
+          phase: p,
+          before: ['fynkel.behaviours.${p.name}'],
+          run: (c) => before[p]!.add(c.tick),
         ),
-      ]);
-      w.frame(w.fixedDt);
-      w.frame(w.fixedDt);
-      expect(ticks, [1, 2]);
-    },
-  );
+        GameplaySystem(
+          id: 'game.After${p.name}',
+          phase: p,
+          after: ['fynkel.behaviours.${p.name}'],
+          run: (c) => after[p]!.add(c.tick),
+        ),
+      ],
+    ]);
+    w.frame(0);
+    w.frame(w.fixedDt * 2);
+    w.frame(w.fixedDt);
+    expect(scripts[GameplayPhase.fixedUpdate], [0, 1, 2]);
+    expect(scripts[GameplayPhase.afterPhysics], [0, 1, 2]);
+    expect(scripts[GameplayPhase.update], [0, 2, 3]);
+    expect(scripts[GameplayPhase.lateUpdate], [0, 2, 3]);
+    expect(before, scripts);
+    expect(after, scripts);
+  });
   test(
     'registered systems order around behaviour phase and rollback a failure',
     () {

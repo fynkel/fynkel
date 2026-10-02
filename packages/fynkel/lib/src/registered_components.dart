@@ -191,10 +191,13 @@ extension GameObjectData on GameObject {
       world._encodeComponent(type, value, edit),
     );
   });
-  void addData<T>(ComponentType<T> type) => writeData(
-    type,
-    type.decode(List.unmodifiable(type.fields.map((f) => f.defaultValue))),
-  );
+  void addData<T>(ComponentType<T> type) => world._withGameplay(() {
+    world._requireComponentType(type);
+    writeData(
+      type,
+      type.decode(List.unmodifiable(type.fields.map((f) => f.defaultValue))),
+    );
+  });
   void removeData<T>(ComponentType<T> type) => world._withGameplay(() {
     world._requireComponentType(type);
     final edit = world._gameplay!;
