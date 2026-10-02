@@ -591,7 +591,7 @@ pub fn is_active_in_hierarchy(world: &World, entity: Entity) -> bool {
 /// no marker anywhere) costs two archetype checks.
 pub fn refresh_active(world: &mut World) -> usize {
     let (any_self, any_derived) = {
-        let h = world.hecs();
+        let h = &*world;
         (
             h.query::<&InactiveSelf>().iter().next().is_some(),
             h.query::<&Inactive>().iter().next().is_some(),
@@ -600,35 +600,35 @@ pub fn refresh_active(world: &mut World) -> usize {
     if !any_self && !any_derived {
         return 0;
     }
-    let mut changes: Vec<(hecs::Entity, bool)> = Vec::new();
+    let mut changes: Vec<(Entity, bool)> = Vec::new();
     {
-        let h = world.hecs();
-        let mut stack: Vec<(hecs::Entity, bool)> = h
-            .query::<hecs::Without<hecs::Entity, &Parent>>()
+        let h = &*world;
+        let mut stack: Vec<(Entity, bool)> = h
+            .query::<hecs::Without<&fynkel_ecs::internal::Handle, &Parent>>()
             .iter()
-            .map(|e| (e, false))
+            .map(|e| (e.0, false))
             .collect();
-        while let Some((raw, parent_inactive)) = stack.pop() {
-            let inactive = parent_inactive || h.satisfies::<&InactiveSelf>(raw);
-            let marked = h.satisfies::<&Inactive>(raw);
+        while let Some((entity, parent_inactive)) = stack.pop() {
+            let inactive = parent_inactive || h.has::<InactiveSelf>(entity);
+            let marked = h.has::<Inactive>(entity);
             if inactive != marked {
-                changes.push((raw, inactive));
+                changes.push((entity, inactive));
             }
-            if let Ok(children) = h.get::<&Children>(raw) {
+            if let Ok(children) = h.get::<Children>(entity) {
                 for &c in children.0.iter() {
-                    if let Some(craw) = world.raw(c) {
-                        stack.push((craw, inactive));
+                    if world.contains(c) {
+                        stack.push((c, inactive));
                     }
                 }
             }
         }
     }
-    let h = world.hecs_mut();
-    for &(raw, inactive) in &changes {
+    let h = &mut *world;
+    for &(entity, inactive) in &changes {
         if inactive {
-            let _ = h.insert_one(raw, Inactive);
+            let _ = h.insert(entity, Inactive);
         } else {
-            let _ = h.remove_one::<Inactive>(raw);
+            let _ = h.remove::<Inactive>(entity);
         }
     }
     changes.len()
@@ -639,33 +639,34 @@ pub fn refresh_active(world: &mut World) -> usize {
 /// (foundation 3.1). Returns how many entities changed state.
 pub fn refresh_active_subtree(world: &mut World, root: Entity) -> usize {
     let parent_inactive = parent_of(world, root).is_some_and(|p| world.has::<Inactive>(p));
-    let Some(raw) = world.raw(root) else {
+    if !world.contains(root) {
         return 0;
-    };
-    let mut changes: Vec<(hecs::Entity, bool)> = Vec::new();
+    }
+    let entity = root;
+    let mut changes: Vec<(Entity, bool)> = Vec::new();
     {
-        let h = world.hecs();
-        let mut stack = vec![(raw, parent_inactive)];
-        while let Some((raw, parent_inactive)) = stack.pop() {
-            let inactive = parent_inactive || h.satisfies::<&InactiveSelf>(raw);
-            if inactive != h.satisfies::<&Inactive>(raw) {
-                changes.push((raw, inactive));
+        let h = &*world;
+        let mut stack = vec![(entity, parent_inactive)];
+        while let Some((entity, parent_inactive)) = stack.pop() {
+            let inactive = parent_inactive || h.has::<InactiveSelf>(entity);
+            if inactive != h.has::<Inactive>(entity) {
+                changes.push((entity, inactive));
             }
-            if let Ok(children) = h.get::<&Children>(raw) {
+            if let Ok(children) = h.get::<Children>(entity) {
                 for &c in children.0.iter() {
-                    if let Some(craw) = world.raw(c) {
-                        stack.push((craw, inactive));
+                    if world.contains(c) {
+                        stack.push((c, inactive));
                     }
                 }
             }
         }
     }
-    let h = world.hecs_mut();
-    for &(raw, inactive) in &changes {
+    let h = &mut *world;
+    for &(entity, inactive) in &changes {
         if inactive {
-            let _ = h.insert_one(raw, Inactive);
+            let _ = h.insert(entity, Inactive);
         } else {
-            let _ = h.remove_one::<Inactive>(raw);
+            let _ = h.remove::<Inactive>(entity);
         }
     }
     changes.len()
@@ -691,15 +692,18 @@ pub fn propagate_subtree(world: &mut World, root: Entity) -> Option<usize> {
         }
         up = parent_of(world, p);
     }
-    let raw = world.raw(root)?;
+    if !world.contains(root) {
+        return None;
+    }
+    let entity = root;
     let mut count = 0;
-    let mut stack = vec![(raw, parent_matrix)];
-    while let Some((raw, parent_matrix)) = stack.pop() {
-        let h = world.hecs();
-        let Ok(local) = h.get::<&Transform>(raw).map(|t| t.matrix()) else {
+    let mut stack = vec![(entity, parent_matrix)];
+    while let Some((entity, parent_matrix)) = stack.pop() {
+        let h = &*world;
+        let Ok(local) = h.get::<Transform>(entity).map(|t| t.matrix()) else {
             continue;
         };
-        let Ok(mut wt) = h.get::<&mut WorldTransform>(raw) else {
+        let Ok(mut wt) = h.get_mut::<WorldTransform>(entity) else {
             continue;
         };
         let m = parent_matrix * local;
@@ -707,10 +711,10 @@ pub fn propagate_subtree(world: &mut World, root: Entity) -> Option<usize> {
         wt.dirty = false;
         drop(wt);
         count += 1;
-        if let Ok(children) = h.get::<&Children>(raw) {
+        if let Ok(children) = h.get::<Children>(entity) {
             for &c in children.0.iter().rev() {
-                if let Some(craw) = world.raw(c) {
-                    stack.push((craw, m));
+                if world.contains(c) {
+                    stack.push((c, m));
                 }
             }
         }
@@ -723,20 +727,24 @@ pub fn propagate_subtree(world: &mut World, root: Entity) -> Option<usize> {
 /// pass over the dirty flags; each subtree under a dirty node is walked
 /// once, from its topmost dirty ancestor (foundation 3.3).
 pub fn propagate(world: &mut World) -> usize {
-    let dirty: Vec<(hecs::Entity, Option<Entity>)> = world
-        .hecs()
-        .query::<(hecs::Entity, &Transform, &WorldTransform, Option<&Parent>)>()
+    let dirty: Vec<(Entity, Option<Entity>)> = world
+        .query::<(
+            &fynkel_ecs::internal::Handle,
+            &Transform,
+            &WorldTransform,
+            Option<&Parent>,
+        )>()
         .iter()
         .filter(|(_, _, wt, _)| wt.dirty)
-        .map(|(e, _, _, p)| (e, p.map(|p| p.0)))
+        .map(|(e, _, _, p)| (e.0, p.map(|p| p.0)))
         .collect();
     if dirty.is_empty() {
         return 0;
     }
     // The tops: dirty nodes with no dirty ancestor, found before any flag
     // is cleared. The parent of a top is clean, so its matrix is current.
-    let mut tops: Vec<(hecs::Entity, Mat4)> = Vec::new();
-    'next: for (raw, parent) in dirty {
+    let mut tops: Vec<(Entity, Mat4)> = Vec::new();
+    'next: for (entity, parent) in dirty {
         let mut parent_matrix = Mat4::IDENTITY;
         let mut first = true;
         let mut up = parent;
@@ -755,16 +763,16 @@ pub fn propagate(world: &mut World) -> usize {
             }
             up = parent_of(world, p);
         }
-        tops.push((raw, parent_matrix));
+        tops.push((entity, parent_matrix));
     }
     let mut count = 0;
     let mut stack = tops;
-    while let Some((raw, parent_matrix)) = stack.pop() {
-        let h = world.hecs();
-        let Ok(local) = h.get::<&Transform>(raw).map(|t| t.matrix()) else {
+    while let Some((entity, parent_matrix)) = stack.pop() {
+        let h = &*world;
+        let Ok(local) = h.get::<Transform>(entity).map(|t| t.matrix()) else {
             continue;
         };
-        let Ok(mut wt) = h.get::<&mut WorldTransform>(raw) else {
+        let Ok(mut wt) = h.get_mut::<WorldTransform>(entity) else {
             continue;
         };
         let m = parent_matrix * local;
@@ -772,10 +780,10 @@ pub fn propagate(world: &mut World) -> usize {
         wt.dirty = false;
         drop(wt);
         count += 1;
-        if let Ok(children) = h.get::<&Children>(raw) {
+        if let Ok(children) = h.get::<Children>(entity) {
             for &c in children.0.iter().rev() {
-                if let Some(craw) = world.raw(c) {
-                    stack.push((craw, m));
+                if world.contains(c) {
+                    stack.push((c, m));
                 }
             }
         }

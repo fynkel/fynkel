@@ -487,7 +487,7 @@ impl Physics {
         if !self.entries.is_empty() || !self.pending.is_empty() {
             return true;
         }
-        let h = ecs.hecs();
+        let h = ecs;
         h.query::<&RigidBody>().iter().next().is_some()
             || h.query::<&Collider>().iter().next().is_some()
             || h.query::<&CharacterController>().iter().next().is_some()
@@ -636,7 +636,7 @@ impl Physics {
             // of them differ from their entry (new, a component changed,
             // the world matrix moved by gameplay). A resting or static
             // collider costs a few comparisons here and nothing below.
-            let h = ecs.hecs();
+            let h = &*ecs;
             for (handle, wt, rigid, shape, character, layer, parent) in h
                 .query::<(
                     &Handle,

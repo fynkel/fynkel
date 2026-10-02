@@ -10,7 +10,7 @@ struct Health {
 }
 
 fn poison(world: &mut World) {
-    for health in world.hecs_mut().query_mut::<&mut Health>() {
+    for health in world.query_mut::<&mut Health>() {
         health.hp = (health.hp - health.poison_per_second / 60.0).max(0.0);
         assert!(health.hp.is_finite() && health.poison_per_second >= 0.0);
     }
@@ -31,7 +31,7 @@ fn main() {
     for _ in 0..20 {
         poison(&mut world);
     }
-    for health in world.hecs_mut().query_mut::<&mut Health>() {
+    for health in world.query_mut::<&mut Health>() {
         health.hp = 100.0;
     }
     let mut samples = Vec::with_capacity(rounds);
@@ -41,7 +41,6 @@ fn main() {
         samples.push(start.elapsed().as_micros());
     }
     let checksum: f64 = world
-        .hecs()
         .query::<&Health>()
         .iter()
         .map(|health| health.hp)

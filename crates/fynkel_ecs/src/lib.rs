@@ -15,14 +15,45 @@ use fynkel_contracts::{allocate_world_id, Entity, IdentityExhausted, WorldId};
 pub mod internal {
     //! Engine-internal access to the underlying `hecs` world for systems
     //! (queries, iteration). Not part of any public contract.
+    //! Raw storage references are deliberately unavailable:
+    //!
+    //! ```compile_fail
+    //! let mut world = fynkel_ecs::World::new();
+    //! world.hecs_mut().clear();
+    //! ```
+    //! ```compile_fail
+    //! let world = fynkel_ecs::World::new();
+    //! world.hecs().query::<&mut i32>();
+    //! ```
     pub use hecs;
 
     impl super::World {
-        pub fn hecs(&self) -> &hecs::World {
-            &self.inner
+        /// Shared queries cannot produce mutable component references.
+        ///
+        /// ```compile_fail
+        /// let world = fynkel_ecs::World::new();
+        /// let _ = world.query::<&mut i32>();
+        /// ```
+        pub fn query<Q: hecs::Query + hecs::QueryShared>(&self) -> hecs::QueryBorrow<'_, Q> {
+            self.inner.query::<Q>()
         }
-        pub fn hecs_mut(&mut self) -> &mut hecs::World {
-            &mut self.inner
+
+        /// A bulk write lease.
+        ///
+        /// ```compile_fail
+        /// let mut world = fynkel_ecs::World::new();
+        /// let mut query = world.query_mut::<&mut i32>();
+        /// let value = query.into_iter().next().unwrap();
+        /// let stamp = world.change_stamp();
+        /// *value += 1;
+        /// ```
+        ///
+        /// Conservatively invalidates component values even
+        /// if the query is empty. Exclusive access prevents observing a change
+        /// stamp until every reference yielded by the query has expired.
+        pub fn query_mut<Q: hecs::Query>(&mut self) -> hecs::QueryMut<'_, Q> {
+            self.changes.get_mut().unwrap().advance(false, false);
+            self.inner.query_mut::<Q>()
         }
         /// Fynkel handle of a raw `hecs` entity (every spawned entity carries one).
         pub fn handle_of(&self, raw: hecs::Entity) -> Option<super::Entity> {
@@ -67,9 +98,11 @@ impl<T: Component> core::ops::Deref for Ref<'_, T> {
     }
 }
 
-/// Exclusive borrow of a component.
+/// Exclusive borrow of a component. Acquiring it invalidates value stamps;
+/// no settled stamp is available until all such guards have dropped.
 pub struct RefMut<'a, T: Component> {
     inner: hecs::RefMut<'a, T>,
+    changes: &'a std::sync::Mutex<Changes>,
 }
 impl<T: Component> core::ops::Deref for RefMut<'_, T> {
     type Target = T;
@@ -80,6 +113,66 @@ impl<T: Component> core::ops::Deref for RefMut<'_, T> {
 impl<T: Component> core::ops::DerefMut for RefMut<'_, T> {
     fn deref_mut(&mut self) -> &mut T {
         &mut self.inner
+    }
+}
+
+impl<T: Component> Drop for RefMut<'_, T> {
+    fn drop(&mut self) {
+        self.changes.lock().unwrap().writers -= 1;
+    }
+}
+
+/// Opaque, world-specific stamp of settled ECS storage. Compare for equality;
+/// for a snapshot built through shared access, compare stamps before and after
+/// its reads and publish only if both are present and equal. A stamp is not a
+/// lock: it cannot make subsequent concurrent reads atomic.
+///
+/// Counters represent possible writes, not a count of changed entities.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChangeStamp {
+    world: WorldId,
+    entities: u64,
+    structure: u64,
+    values: u64,
+}
+
+impl ChangeStamp {
+    /// Same entity membership (including generations).
+    pub fn same_entities(self, other: Self) -> bool {
+        self.world == other.world && self.entities == other.entities
+    }
+
+    /// Same entity membership and component presence.
+    pub fn same_structure(self, other: Self) -> bool {
+        self.same_entities(other) && self.structure == other.structure
+    }
+}
+
+#[derive(Default)]
+struct Changes {
+    entities: u64,
+    structure: u64,
+    values: u64,
+    writers: usize,
+}
+
+impl Changes {
+    fn advance(&mut self, entities: bool, structure: bool) {
+        // Exhaustion fails before granting a write, never silently aliases an
+        // old stamp. No component write is granted after exhaustion.
+        self.values = self.values.checked_add(1).expect("ECS revision exhausted");
+        if structure {
+            self.structure = self
+                .structure
+                .checked_add(1)
+                .expect("ECS revision exhausted");
+        }
+        if entities {
+            self.entities = self
+                .entities
+                .checked_add(1)
+                .expect("ECS revision exhausted");
+        }
     }
 }
 
@@ -111,6 +204,7 @@ struct Slot {
 
 pub struct World {
     id: WorldId,
+    changes: std::sync::Mutex<Changes>,
     inner: hecs::World,
     slots: Vec<Slot>,
     free: Vec<u32>,
@@ -128,6 +222,7 @@ impl World {
         let id = allocate_world_id()?;
         Ok(Self {
             id,
+            changes: std::sync::Mutex::new(Changes::default()),
             inner: hecs::World::new(),
             slots: Vec::new(),
             free: Vec::new(),
@@ -138,6 +233,20 @@ impl World {
 
     pub fn id(&self) -> WorldId {
         self.id
+    }
+
+    /// Returns no stamp while a shared-access mutable component guard exists.
+    /// Cache users must then defer reuse/rebuilding until writes are settled.
+    /// Interior mutation through a component's own atomics/locks is outside
+    /// storage tracking; such state needs its own publication contract.
+    pub fn change_stamp(&self) -> Option<ChangeStamp> {
+        let changes = self.changes.lock().unwrap();
+        (changes.writers == 0).then_some(ChangeStamp {
+            world: self.id,
+            entities: changes.entities,
+            structure: changes.structure,
+            values: changes.values,
+        })
     }
 
     pub fn len(&self) -> u32 {
@@ -187,6 +296,7 @@ impl World {
         };
         let slot = &mut self.slots[slot_index as usize];
         let entity = Entity::new(self.id, slot_index, slot.generation);
+        self.changes.get_mut().unwrap().advance(true, true);
         builder.inner.add(Handle(entity));
         let raw = self.inner.spawn(builder.inner.build());
         slot.raw = Some(raw);
@@ -202,6 +312,7 @@ impl World {
     /// from inside iteration.
     pub fn despawn(&mut self, entity: Entity) -> Result<()> {
         let raw = self.require(entity)?;
+        self.changes.get_mut().unwrap().advance(true, true);
         self.inner
             .despawn(raw)
             .expect("slot mapping and hecs disagree");
@@ -244,12 +355,18 @@ impl World {
 
     pub fn insert<T: Component>(&mut self, entity: Entity, component: T) -> Result<()> {
         let raw = self.require(entity)?;
+        let structural = !self.inner.satisfies::<&T>(raw);
+        self.changes.get_mut().unwrap().advance(false, structural);
         self.inner.insert_one(raw, component).expect("live entity");
         Ok(())
     }
 
     pub fn remove<T: Component>(&mut self, entity: Entity) -> Result<T> {
         let raw = self.require(entity)?;
+        if !self.inner.satisfies::<&T>(raw) {
+            return Err(EcsError::MissingComponent(entity));
+        }
+        self.changes.get_mut().unwrap().advance(false, true);
         self.inner
             .remove_one::<T>(raw)
             .map_err(|_| EcsError::MissingComponent(entity))
@@ -272,7 +389,18 @@ impl World {
         let raw = self.require(entity)?;
         self.inner
             .get::<&mut T>(raw)
-            .map(|inner| RefMut { inner })
+            .map(|inner| {
+                let mut changes = self.changes.lock().unwrap();
+                changes.advance(false, false);
+                changes.writers = changes
+                    .writers
+                    .checked_add(1)
+                    .expect("ECS writers exhausted");
+                RefMut {
+                    inner,
+                    changes: &self.changes,
+                }
+            })
             .map_err(|_| EcsError::MissingComponent(entity))
     }
 
@@ -315,6 +443,18 @@ impl Default for World {
 #[cfg(test)]
 mod identity_tests {
     use super::*;
+    #[test]
+    fn revision_exhaustion_fails_closed_before_writing() {
+        let mut world = World::new();
+        let e = world.spawn(EntityBuilder::new().with(1_i32));
+        world.changes.get_mut().unwrap().values = u64::MAX;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            world.get_mut::<i32>(e).unwrap();
+        }));
+        assert!(result.is_err());
+        assert_eq!(world.copy::<i32>(e).unwrap(), 1);
+        assert!(world.changes.is_poisoned());
+    }
     #[test]
     fn maximum_generation_retires_actual_ecs_slot() {
         let mut world = World::new();

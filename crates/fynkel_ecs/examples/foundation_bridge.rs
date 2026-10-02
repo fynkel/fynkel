@@ -79,7 +79,7 @@ pub unsafe extern "C" fn foundation_snapshot(
         std::ptr::null_mut(),
         |kernel| {
             kernel.snapshot.clear();
-            for (handle, health) in kernel.world.hecs().query::<(&Handle, &Health)>().iter() {
+            for (handle, health) in kernel.world.query::<(&Handle, &Health)>().iter() {
                 kernel.snapshot.push(Row {
                     entity: handle.0,
                     hp: health.hp,
@@ -116,7 +116,7 @@ pub unsafe extern "C" fn foundation_commit(pointer: *mut std::ffi::c_void, token
         let valid = kernel
             .snapshot
             .iter()
-            .zip(kernel.world.hecs().query::<(&Handle, &Health)>().iter())
+            .zip(kernel.world.query::<(&Handle, &Health)>().iter())
             .all(|(row, (handle, _))| {
                 row.entity == handle.0
                     && row.hp.is_finite()

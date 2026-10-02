@@ -100,7 +100,6 @@ impl World {
         let mut updates = Vec::new();
         for (handle, rot, original, parent) in self
             .ecs
-            .hecs()
             .query::<(&Handle, &Rotator, &Transform, Option<&Parent>)>()
             .without::<&scene::Inactive>()
             .iter()
@@ -154,7 +153,6 @@ impl World {
         let mut updates = Vec::new();
         for (handle, osc, state, original, parent) in self
             .ecs
-            .hecs()
             .query::<(
                 &Handle,
                 &Oscillate,
@@ -239,7 +237,6 @@ impl World {
         lifetimes.clear();
         for (handle, life) in self
             .ecs
-            .hecs()
             .query::<(&Handle, &LifetimeDespawn)>()
             .without::<&scene::Inactive>()
             .iter()
@@ -303,12 +300,15 @@ impl World {
         emissions.clear();
         let mut count = 0;
         {
-            let h = self.ecs.hecs();
-            for (handle, em, run, wt) in h
-                .query::<(&Handle, &Emitter, &mut EmitterRun, &WorldTransform)>()
+            let h = &self.ecs;
+            for (handle, em, wt) in h
+                .query::<(&Handle, &Emitter, &WorldTransform)>()
                 .without::<&scene::Inactive>()
                 .iter()
             {
+                let Ok(mut run) = self.ecs.get_mut::<EmitterRun>(handle.0) else {
+                    continue;
+                };
                 count += 1;
                 if !em.enabled || em.rate <= 0.0 {
                     continue;
@@ -445,7 +445,7 @@ impl World {
         let mut count = 0;
         let mut invalid = None;
         {
-            let h = self.ecs.hecs();
+            let h = &self.ecs;
             for (handle, follow, wt) in h
                 .query::<(&Handle, &Follow, &WorldTransform)>()
                 .without::<&scene::Inactive>()
@@ -508,7 +508,7 @@ impl World {
         placements.clear();
         let mut count = 0;
         {
-            let h = self.ecs.hecs();
+            let h = &self.ecs;
             for (handle, look, wt) in h
                 .query::<(&Handle, &LookAtCamera, &WorldTransform)>()
                 .without::<&scene::Inactive>()
@@ -538,7 +538,7 @@ impl World {
     /// The world position of the active camera: the `Camera` with the
     /// highest priority, the lowest entity on a tie.
     fn active_camera_position(&self) -> Option<Vec3> {
-        let h = self.ecs.hecs();
+        let h = &self.ecs;
         let mut best: Option<(i32, Entity, Vec3)> = None;
         for (handle, cam, wt) in h
             .query::<(&Handle, &Camera, &WorldTransform)>()
@@ -614,7 +614,7 @@ impl World {
         let mut pending = std::mem::take(&mut self.scratch.entities);
         pending.clear();
         {
-            let h = self.ecs.hecs();
+            let h = &self.ecs;
             pending.extend(
                 h.query::<hecs::Without<&Handle, &S>>()
                     .with::<&C>()
@@ -626,7 +626,7 @@ impl World {
             let _ = self.ecs.insert(e, S::default());
         }
         {
-            let h = self.ecs.hecs();
+            let h = &self.ecs;
             pending.extend(
                 h.query::<hecs::Without<&Handle, &C>>()
                     .with::<&S>()

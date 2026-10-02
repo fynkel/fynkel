@@ -90,8 +90,7 @@ fn object(ecs: &Ecs, animator: Entity, slot: &mut Option<Entity>, name: &str) ->
         }
     }
     *slot = find_named(ecs, animator, name).or_else(|| {
-        ecs.hecs()
-            .query::<(&fynkel_ecs::internal::Handle, &Name)>()
+        ecs.query::<(&fynkel_ecs::internal::Handle, &Name)>()
             .iter()
             .find(|(_, n)| n.value == name)
             .map(|(h, _)| h.0)

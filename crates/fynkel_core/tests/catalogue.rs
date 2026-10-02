@@ -416,7 +416,6 @@ fn prefab(id: Uuid, dynamic: bool) -> SceneDescription {
 fn named(w: &World, name: &str) -> Vec<Entity> {
     let mut found: Vec<Entity> = w
         .ecs()
-        .hecs()
         .query::<(&fynkel_ecs::internal::Handle, &Name)>()
         .iter()
         .filter(|(_, n)| n.value == name)

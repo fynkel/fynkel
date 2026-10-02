@@ -520,8 +520,9 @@ impl World {
     pub fn live_entities(&self) -> u32 {
         self.ecs.len()
     }
-    /// Direct storage access for native systems and hosts; gameplay goes
-    /// through commands.
+    /// Tracked storage access for native systems and hosts; gameplay writes
+    /// use the shared transaction API. ECS stamps cover storage changes, not
+    /// scene/physics service invariants.
     pub fn ecs(&self) -> &Ecs {
         &self.ecs
     }
@@ -826,7 +827,7 @@ impl World {
     }
 
     fn record_prev_world(&mut self) {
-        let h = self.ecs.hecs_mut();
+        let h = &mut self.ecs;
         for (local, parent, prev) in
             h.query_mut::<(&Transform, Option<&Parent>, &mut PrevTransform)>()
         {
@@ -918,7 +919,7 @@ impl World {
         cmds.clear();
         let mut driven = 0;
         {
-            let h = self.ecs.hecs();
+            let h = &self.ecs;
             for (handle, c) in h
                 .query::<(&Handle, &CharacterController)>()
                 .without::<&scene::Inactive>()
@@ -1002,7 +1003,7 @@ impl World {
         let dt = self.config.fixed_dt;
         let mut invalid = None;
         {
-            let h = self.ecs.hecs();
+            let h = &self.ecs;
             for (handle, rig) in h
                 .query::<(&Handle, &ThirdPersonCamera)>()
                 .without::<&scene::Inactive>()
@@ -1212,25 +1213,20 @@ impl World {
     fn seed_prev_world(&mut self) {
         let mut fresh = Vec::new();
         {
-            let h = self.ecs.hecs();
+            let h = &self.ecs;
             for (e, _wt, local, parent) in h
                 .query::<fynkel_ecs::internal::hecs::Without<
-                    (
-                        fynkel_ecs::internal::hecs::Entity,
-                        &WorldTransform,
-                        &Transform,
-                        Option<&Parent>,
-                    ),
+                    (&Handle, &WorldTransform, &Transform, Option<&Parent>),
                     &PrevTransform,
                 >>()
                 .iter()
             {
-                fresh.push((e, PrevTransform(*local, parent.map(|p| p.0))));
+                fresh.push((e.0, PrevTransform(*local, parent.map(|p| p.0))));
             }
         }
-        let h = self.ecs.hecs_mut();
+        let h = &mut self.ecs;
         for (e, t) in fresh {
-            let _ = h.insert_one(e, t);
+            let _ = h.insert(e, t);
         }
     }
 

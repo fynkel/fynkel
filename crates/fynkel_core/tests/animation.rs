@@ -924,7 +924,6 @@ fn root_motion_walks_a_character_controller() {
     spawn(&mut w, 9, Vec3::new(0.0, -0.5, 0.0), None, "Floor");
     let floor = w
         .ecs()
-        .hecs()
         .query::<(&fynkel_ecs::internal::Handle, &Name)>()
         .iter()
         .find(|(_, n)| n.value == "Floor")

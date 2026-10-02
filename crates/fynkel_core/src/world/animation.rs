@@ -933,7 +933,6 @@ impl World {
         animators.clear();
         animators.extend(
             self.ecs
-                .hecs()
                 .query::<&Handle>()
                 .with::<&Animator>()
                 .without::<&scene::Inactive>()
@@ -1542,7 +1541,6 @@ impl World {
         skinned.clear();
         skinned.extend(
             self.ecs
-                .hecs()
                 .query::<&Handle>()
                 .with::<&SkinComponent>()
                 .without::<&scene::Inactive>()

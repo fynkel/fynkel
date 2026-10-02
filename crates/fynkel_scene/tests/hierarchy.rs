@@ -348,3 +348,42 @@ fn world_pose_uses_current_affine_ancestors_and_authored_orientation() {
     ));
     assert_eq!(local(&w, leaf).unwrap(), before);
 }
+
+#[test]
+fn derived_scene_writes_participate_in_ecs_change_tracking() {
+    let mut world = World::new();
+    let root = spawn(&mut world, Transform::default(), None).unwrap();
+    let child = spawn(&mut world, Transform::default(), Some(root)).unwrap();
+    let before = world.change_stamp().unwrap();
+    assert_eq!(propagate(&mut world), 2);
+    let propagated = world.change_stamp().unwrap();
+    assert_ne!(before, propagated);
+    assert!(before.same_structure(propagated));
+    assert_eq!(propagate(&mut world), 0);
+    assert_eq!(world.change_stamp(), Some(propagated));
+
+    world.insert(root, InactiveSelf).unwrap();
+    let flagged = world.change_stamp().unwrap();
+    assert_eq!(refresh_active(&mut world), 2);
+    let inactive = world.change_stamp().unwrap();
+    assert!(flagged.same_entities(inactive));
+    assert!(!flagged.same_structure(inactive));
+    assert!(world.has::<Inactive>(child));
+    assert_eq!(refresh_active(&mut world), 0);
+    assert_eq!(world.change_stamp(), Some(inactive));
+
+    world.remove::<InactiveSelf>(root).unwrap();
+    let unflagged = world.change_stamp().unwrap();
+    assert_eq!(refresh_active_subtree(&mut world, root), 2);
+    assert!(!unflagged.same_structure(world.change_stamp().unwrap()));
+    set_local(&world, root, Transform::from_position(Vec3::X)).unwrap();
+    let moved = world.change_stamp().unwrap();
+    assert_eq!(propagate_subtree(&mut world, root), Some(2));
+    let settled = world.change_stamp().unwrap();
+    assert_ne!(moved, settled);
+    assert!(moved.same_structure(settled));
+    assert!(approx(
+        world_matrix(&world, child).unwrap(),
+        Mat4::from_translation(Vec3::X)
+    ));
+}

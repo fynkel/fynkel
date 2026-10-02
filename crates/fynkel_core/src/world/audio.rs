@@ -294,7 +294,7 @@ impl World {
         }
 
         {
-            let h = self.ecs.hecs();
+            let h = &mut self.ecs;
             for (handle, l) in h
                 .query::<(&Handle, &AudioListener)>()
                 .without::<&fynkel_scene::Inactive>()
@@ -308,15 +308,12 @@ impl World {
                     listener = Some((handle.0, l.volume));
                 }
             }
-            for (handle, source, run, inactive) in h
-                .query::<(
-                    &Handle,
-                    &AudioSource,
-                    Option<&mut AudioRun>,
-                    hecs::Satisfies<&fynkel_scene::Inactive>,
-                )>()
-                .iter()
-            {
+            for (handle, source, run, inactive) in h.query_mut::<(
+                &Handle,
+                &AudioSource,
+                Option<&mut AudioRun>,
+                hecs::Satisfies<&fynkel_scene::Inactive>,
+            )>() {
                 count += 1;
                 let entity = handle.0;
                 let mut source = source.clone();
@@ -440,8 +437,8 @@ impl World {
         // A voice the starts above stole: its source is not playing any
         // more, this tick (a stolen voice raises no event).
         if self.audio.stats().stolen > stolen_before {
-            let h = self.ecs.hecs();
-            for (handle, _, run) in h.query::<(&Handle, &AudioSource, &mut AudioRun)>().iter() {
+            let h = &mut self.ecs;
+            for (handle, _, run) in h.query_mut::<(&Handle, &AudioSource, &mut AudioRun)>() {
                 if let Some(v) = run.voice {
                     if !self.audio.is_playing(v) {
                         run.voice = None;
