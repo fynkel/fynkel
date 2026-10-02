@@ -394,7 +394,7 @@ fn one(d: Diagnostic) -> Vec<Diagnostic> {
 /// The world and its store, borrowed apart (the preview writes the one
 /// and reads the other).
 fn parts(w: &mut FynkelWorld) -> (&mut fynkel_core::World, Option<&Assets>) {
-    (&mut w.inner, w.assets.as_ref())
+    (&mut w.inner, w.services.assets.as_ref())
 }
 
 /// [`Preview::sync`] over a [`FynkelWorld`].
@@ -1528,7 +1528,12 @@ pub unsafe extern "C" fn fynkel_world_live_call(
     let status = crate::guarded(world, |w| {
         w.stats.query_calls += 1;
         let (value, status) = match parsed.and_then(|(kind, args)| {
-            fynkel_authoring::live::call_with(&mut w.inner, w.assets.as_ref(), &kind, &args)
+            fynkel_authoring::live::call_with(
+                &mut w.inner,
+                w.services.assets.as_ref(),
+                &kind,
+                &args,
+            )
         }) {
             Ok(mut v) => {
                 let refused = v.get("ok") == Some(&Value::Bool(false));

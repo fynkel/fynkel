@@ -26,22 +26,17 @@ enum BufferKind {
 
 int bufferKindValue(BufferKind k) => k.index + 1;
 
-/// Read-only view over one native output buffer. Valid until the next
-/// mutating call on the world; decode or copy before then.
+/// Immutable owned publication. Safe across native growth, mutation, poisoning
+/// and disposal; no pointer into native storage is retained.
 class WireBuffer {
-  WireBuffer(this.bytes) {
+  WireBuffer(Uint8List source) : bytes = Uint8List.fromList(source).asUnmodifiableView() {
     if (bytes.length < bufferHeaderSize) {
       throw FormatException('buffer shorter than its header (${bytes.length} bytes)');
     }
-    reparse();
+    _parse();
   }
 
-  /// Re-reads the header (and re-slices records/tail when the layout moved)
-  /// after the native side rewrote the same memory. The bridge keeps one
-  /// [WireBuffer] per output family and reparses it while the view's
-  /// address and length are unchanged, so a steady-state frame allocates
-  /// no views (M1 gate).
-  void reparse() {
+  void _parse() {
     final d = data;
     if (d.getUint32(0, Endian.little) != bufferMagic) throw const FormatException('bad buffer magic');
     final version = d.getUint16(4, Endian.little);
@@ -57,11 +52,9 @@ class WireBuffer {
       throw FormatException('bad records_end $end');
     }
     requestId = d.getUint32(20, Endian.little);
-    if (end != recordsEnd) {
-      recordsEnd = end;
-      records = ByteData.sublistView(bytes, bufferHeaderSize, end);
-      tail = Uint8List.sublistView(bytes, end);
-    }
+    recordsEnd = end;
+    records = ByteData.sublistView(bytes, bufferHeaderSize, end).asUnmodifiableView();
+    tail = Uint8List.sublistView(bytes, end).asUnmodifiableView();
   }
 
   static final WireBuffer empty = WireBuffer(_emptyBytes());
@@ -79,14 +72,14 @@ class WireBuffer {
   final Uint8List bytes;
 
   /// The whole buffer, header included, as one [ByteData] made once.
-  late final ByteData data = ByteData.sublistView(bytes);
+  late final ByteData data = ByteData.sublistView(bytes).asUnmodifiableView();
 
-  int kind = 0;
-  int recordCount = 0;
-  int recordsEnd = -1;
-  int requestId = 0;
-  late ByteData records;
-  late Uint8List tail;
+  late final int kind;
+  late final int recordCount;
+  late final int recordsEnd;
+  late final int requestId;
+  late final ByteData records;
+  late final Uint8List tail;
 
   int get byteLength => bytes.length;
 

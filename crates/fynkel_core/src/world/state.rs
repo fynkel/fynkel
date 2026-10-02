@@ -10,18 +10,6 @@ use super::{animation, catalogue, controller, RigPlacement};
 use crate::animation::Pose;
 use crate::components::Camera;
 
-/// The derived `Inactive` markers' staleness.
-#[derive(Default)]
-pub(super) struct ActiveMarkers {
-    /// The subtrees whose markers a spawn, reparent or active flag made
-    /// stale since the last refresh: each is refreshed alone (foundation
-    /// 3.4).
-    pub(super) roots: Vec<Entity>,
-    /// Every marker may be stale (a load): the next refresh walks the
-    /// whole hierarchy.
-    pub(super) all: bool,
-}
-
 /// What animators play (M3-19) and their scratch.
 #[derive(Default)]
 #[cfg_attr(not(feature = "animation"), allow(dead_code))]
@@ -64,4 +52,63 @@ pub(super) struct Scratch {
     pub(super) lifetimes: Vec<(Entity, crate::LifetimeDespawn)>,
     pub(super) emissions: Vec<catalogue::Emission>,
     pub(super) placements: Vec<catalogue::Placement>,
+}
+
+/// Membership is derived from ECS deltas; published Extract values remain owned.
+#[derive(Default)]
+pub(super) struct RenderMembership {
+    cursor: Option<fynkel_ecs::ChangeCursor>,
+    pub(super) entities: std::collections::BTreeSet<Entity>,
+    pub(super) examined: usize,
+}
+impl RenderMembership {
+    pub(super) fn refresh(&mut self, ecs: &fynkel_ecs::World) {
+        use std::any::TypeId;
+        let changes = ecs
+            .changes_since(
+                self.cursor,
+                &[
+                    TypeId::of::<fynkel_scene::WorldTransform>(),
+                    TypeId::of::<fynkel_scene::Inactive>(),
+                ],
+                false,
+            )
+            .expect("settled render storage");
+        let candidates = if changes.reset {
+            self.entities.clear();
+            ecs.entities().collect()
+        } else {
+            changes.entities
+        };
+        self.examined = candidates.len();
+        for e in candidates {
+            if ecs.has::<fynkel_scene::WorldTransform>(e) && !ecs.has::<fynkel_scene::Inactive>(e) {
+                self.entities.insert(e);
+            } else {
+                self.entities.remove(&e);
+            }
+        }
+        self.cursor = Some(changes.cursor);
+    }
+}
+
+/// The sole authority for gameplay component storage and transaction epochs.
+/// No scene, bridge or resource owner keeps a second component store.
+pub(crate) struct GameplayState {
+    pub(crate) ecs: fynkel_ecs::World,
+    pub(crate) registered: crate::registry::ComponentRegistry,
+    pub(crate) next_gameplay_edit: u64,
+    pub(super) gameplay_effects: Vec<super::gameplay::CommittedEffect>,
+    pub(crate) gameplay_tick_prepared: bool,
+}
+impl GameplayState {
+    pub(crate) fn new(ecs: fynkel_ecs::World) -> Self {
+        Self {
+            ecs,
+            registered: Default::default(),
+            next_gameplay_edit: 0,
+            gameplay_effects: Vec::new(),
+            gameplay_tick_prepared: false,
+        }
+    }
 }

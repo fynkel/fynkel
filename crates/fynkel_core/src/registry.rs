@@ -75,6 +75,9 @@ pub trait RegisteredComponent: Send + Sync + 'static + Sized {
 /// Runtime-defined data is an ECS component, destroyed with its owner. It is
 /// never mirrored in a Dart entity store. Keys refer to immutable world schemas.
 #[derive(Default)]
+pub(crate) struct DynamicPresence;
+
+#[derive(Default)]
 struct DynamicComponents(BTreeMap<String, Vec<ScalarValue>>);
 
 type BoxedValue = Box<dyn Any + Send + Sync>;
@@ -105,10 +108,15 @@ impl PreparedRecord {
                 ecs.insert(entity, DynamicComponents::default())
                     .expect("validated owner");
             }
-            ecs.get_mut::<DynamicComponents>(entity)
+            let added = ecs
+                .get_mut::<DynamicComponents>(entity)
                 .expect("dynamic storage")
                 .0
-                .insert(id, self.fields);
+                .insert(id, self.fields)
+                .is_none();
+            if added {
+                ecs.insert(entity, DynamicPresence).expect("dynamic owner");
+            }
         }
     }
 }
@@ -157,8 +165,14 @@ impl Registration {
     pub fn remove(&self, ecs: &mut Ecs, entity: Entity) {
         if let Some(remove) = self.remove {
             remove(ecs, entity);
-        } else if let Ok(mut values) = ecs.get_mut::<DynamicComponents>(entity) {
-            values.0.remove(&self.schema.id);
+        } else {
+            let removed = ecs
+                .get_mut::<DynamicComponents>(entity)
+                .ok()
+                .is_some_and(|mut values| values.0.remove(&self.schema.id).is_some());
+            if removed {
+                ecs.insert(entity, DynamicPresence).expect("dynamic owner");
+            }
         }
     }
 }
@@ -301,6 +315,7 @@ impl World {
             return Err(RegistryError::InvalidValue("stale registered owner".into()));
         }
         Ok(self
+            .gameplay
             .registered
             .get(id)?
             .read(self.ecs(), entity)
@@ -324,7 +339,7 @@ impl World {
         if self.is_poisoned() {
             return Err(RegistryError::InvalidSchema("poisoned world".into()));
         }
-        self.registered.register_dynamic(schema)
+        self.gameplay.registered.register_dynamic(schema)
     }
 
     /// Registration is a host setup operation, outside an owned gameplay edit.
@@ -337,10 +352,10 @@ impl World {
         if self.is_poisoned() {
             return Err(RegistryError::InvalidSchema("poisoned world".into()));
         }
-        self.registered.register::<T>(schema)
+        self.gameplay.registered.register::<T>(schema)
     }
     pub fn registered_schemas(&self) -> impl Iterator<Item = &ComponentSchema> {
-        self.registered.schemas()
+        self.gameplay.registered.schemas()
     }
 }
 

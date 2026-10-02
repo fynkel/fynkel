@@ -10,7 +10,6 @@
 use std::time::Instant;
 
 use fynkel_contracts::{ComponentId, Entity, Tick};
-use fynkel_scene as scene;
 
 use super::{micros, World};
 use crate::command::Lane;
@@ -265,7 +264,7 @@ impl World {
             for name in system.spec.reads.iter().chain(&system.spec.writes) {
                 if name != "*"
                     && !crate::schema::ALL.iter().any(|s| s.name == name)
-                    && !self.registered.schemas().any(|s| s.id == *name)
+                    && !self.gameplay.registered.schemas().any(|s| s.id == *name)
                 {
                     return Err(E::UnknownComponent(system.spec.id.clone(), name.clone()));
                 }
@@ -350,7 +349,7 @@ impl System for RecordPrevious {
         true
     }
     fn run(w: &mut World, _: &mut TickRun) -> u32 {
-        if !std::mem::take(&mut w.gameplay_tick_prepared) {
+        if !std::mem::take(&mut w.gameplay.gameplay_tick_prepared) {
             w.record_prev_world();
         }
         0
@@ -366,8 +365,8 @@ impl System for Effects {
     }
     fn run(w: &mut World, t: &mut TickRun) -> u32 {
         // Only committed typed effects reach the tick; authored data is already published.
-        for effect in std::mem::take(&mut w.gameplay_effects) {
-            if effect.target().is_some_and(|e| !w.ecs.contains(e)) {
+        for effect in std::mem::take(&mut w.gameplay.gameplay_effects) {
+            if effect.target().is_some_and(|e| !w.gameplay.ecs.contains(e)) {
                 continue;
             }
             let applied = w.deliver_committed_effect(u32::MAX, Lane::Simulation, effect);
@@ -443,12 +442,15 @@ struct PhysicsStep;
 impl System for PhysicsStep {
     const KIND: SystemKind = SystemKind::Physics;
     fn runs(w: &World) -> bool {
-        !w.edit() && w.modules.physics && w.physics.has_work(&w.ecs)
+        !w.edit() && w.modules.physics && w.physics.has_work(&w.gameplay.ecs)
     }
     fn run(w: &mut World, t: &mut TickRun) -> u32 {
-        t.propagated += scene::propagate(&mut w.ecs) as u32;
-        w.physics
-            .step(&mut w.ecs, w.config.fixed_dt, &w.subscriptions);
+        t.propagated += w.propagate() as u32;
+        w.physics.step(
+            &mut w.gameplay.ecs,
+            w.config.fixed_dt,
+            &w.publication.subscriptions,
+        );
         // A body command counted as applied above may fail here.
         let failed = w.physics_rejections();
         t.rejected += failed;
@@ -471,7 +473,7 @@ impl System for Propagate {
         true
     }
     fn run(w: &mut World, t: &mut TickRun) -> u32 {
-        let pending = w.ecs.take_deferred();
+        let pending = w.gameplay.ecs.take_deferred();
         if !pending.is_empty() {
             let result = w.edit_native_data_at_tick(t.tick, |edit| {
                 for &entity in &pending {
@@ -483,7 +485,7 @@ impl System for Propagate {
             });
             if let Err(error) = result {
                 for entity in pending {
-                    w.ecs.despawn_deferred(entity);
+                    w.gameplay.ecs.despawn_deferred(entity);
                 }
                 w.reject(
                     u32::MAX,
@@ -496,7 +498,7 @@ impl System for Propagate {
                 t.rejected += 1;
             }
         }
-        t.propagated += scene::propagate(&mut w.ecs) as u32;
+        t.propagated += w.propagate() as u32;
         0
     }
 }
@@ -523,7 +525,7 @@ impl System for SettleRigs {
     }
     fn run(w: &mut World, t: &mut TickRun) -> u32 {
         if std::mem::take(&mut t.moved) {
-            t.propagated += scene::propagate(&mut w.ecs) as u32;
+            t.propagated += w.propagate() as u32;
         }
         0
     }
@@ -565,10 +567,10 @@ impl System for Settle {
     }
     fn run(w: &mut World, t: &mut TickRun) -> u32 {
         if std::mem::take(&mut t.moved) {
-            t.propagated += scene::propagate(&mut w.ecs) as u32;
+            t.propagated += w.propagate() as u32;
         }
         if w.modules.physics {
-            w.physics.record(&w.ecs);
+            w.physics.record(&w.gameplay.ecs);
         }
         w.seed_prev_world();
         w.apply_teleports();
@@ -603,18 +605,22 @@ mod tests {
         let mut w = World::new(crate::WorldConfig::default());
         let commit = w
             .edit_gameplay(|edit| {
-                let root = edit.spawn("root", scene::Transform::IDENTITY, None)?;
-                let child = edit.spawn("child", scene::Transform::IDENTITY, Some(root.into()))?;
+                let root = edit.spawn("root", fynkel_scene::Transform::IDENTITY, None)?;
+                let child = edit.spawn(
+                    "child",
+                    fynkel_scene::Transform::IDENTITY,
+                    Some(root.into()),
+                )?;
                 Ok((root, child))
             })
             .unwrap();
         let root = commit.resolve(commit.value.0).unwrap();
         let child = commit.resolve(commit.value.1).unwrap();
-        w.ecs.despawn_deferred(child);
-        w.ecs.despawn_deferred(root);
-        w.ecs.despawn_deferred(child);
-        let sequence = w.next_gameplay_edit;
-        w.next_gameplay_edit = u64::MAX;
+        w.gameplay.ecs.despawn_deferred(child);
+        w.gameplay.ecs.despawn_deferred(root);
+        w.gameplay.ecs.despawn_deferred(child);
+        let sequence = w.gameplay.next_gameplay_edit;
+        w.gameplay.next_gameplay_edit = u64::MAX;
         let failed = w.step();
         assert_eq!(w.live_entities(), 2);
         assert_eq!(failed.rejected, 1);
@@ -623,7 +629,7 @@ mod tests {
             .diagnostics()
             .iter()
             .any(|d| d.message.contains("deferred destruction")));
-        w.next_gameplay_edit = sequence;
+        w.gameplay.next_gameplay_edit = sequence;
         let committed = w.step();
         let events = w.drain_events();
         let mut destroyed: Vec<_> = events

@@ -162,7 +162,13 @@ pub fn call_with(
             }
             Ok(json!({ "matrices": matrices }))
         }
-        "entities" => Ok(entities(world, args.get("since").and_then(Value::as_str))),
+        "entities" => Ok(
+            if args.get("deltas").and_then(Value::as_bool) == Some(true) {
+                entities_delta(world, args.get("since").and_then(Value::as_str))
+            } else {
+                entities(world, args.get("since").and_then(Value::as_str))
+            },
+        ),
         "entity" => {
             let e = entity_arg(world, args)?;
             Ok(entity(world, e))
@@ -391,127 +397,119 @@ pub fn resolve(world: &World, id: &str) -> Option<Entity> {
 /// document order, then the rest by handle, then the persistent roots
 /// (ADR-0037, `persistent: true`); children in sibling order.
 ///
-/// The answer carries a `revision` of the table (a hash of every row, this
-/// process only). Given `since` equal to it, the rows are left out
-/// (`"unchanged": true`): an editor polling a world where nothing was
-/// spawned, destroyed, renamed, re-parented or (de)activated pays for the walk, not for
-/// the JSON.
+/// Stable revision check precedes traversal/encoding; ordinary value changes
+/// leave this table unchanged.
 fn entities(world: &World, since: Option<&str>) -> Value {
-    use std::hash::{Hash, Hasher};
-
-    let ecs = world.ecs();
-    // The persistent roots (ADR-0037) last, as Unity's DontDestroyOnLoad
-    // scene is.
+    let revision = format!("{}:{}", world.id().0, world.entity_table_revision());
+    if since == Some(revision.as_str()) {
+        return json!({ "tick": world.tick(), "revision": revision, "unchanged": true });
+    }
     let persistent = world.persistent_roots();
-    let mut roots: Vec<Entity> = Vec::new();
+    let rows: Vec<_> = ordered_entities(world)
+        .into_iter()
+        .map(|e| entity_row(world, e, &persistent))
+        .collect();
+    json!({ "tick": world.tick(), "revision": revision, "entities": rows })
+}
+
+fn ordered_entities(world: &World) -> Vec<Entity> {
+    let ecs = world.ecs();
+    let persistent = world.persistent_roots();
+    let mut seen: std::collections::HashSet<Entity> = persistent.iter().copied().collect();
+    let mut roots = Vec::new();
     for s in world.loaded_scenes() {
         for &(_, e) in s.entities() {
-            if ecs.contains(e)
-                && scene::parent_of(ecs, e).is_none()
-                && !roots.contains(&e)
-                && !persistent.contains(&e)
-            {
+            if ecs.contains(e) && scene::parent_of(ecs, e).is_none() && seen.insert(e) {
                 roots.push(e);
             }
         }
     }
-    let mut rest: Vec<Entity> = ecs
+    let mut rest: Vec<_> = ecs
         .entities()
-        .filter(|e| {
-            scene::parent_of(ecs, *e).is_none() && !roots.contains(e) && !persistent.contains(e)
-        })
+        .filter(|e| scene::parent_of(ecs, *e).is_none() && seen.insert(*e))
         .collect();
-    rest.sort();
+    rest.sort_unstable();
     roots.extend(rest);
-    roots.extend(persistent.iter().copied());
+    roots.extend(persistent);
+    let mut stack: Vec<_> = roots.into_iter().rev().collect();
+    let mut out = Vec::new();
+    while let Some(e) = stack.pop() {
+        out.push(e);
+        stack.extend(scene::children_of(ecs, e).into_iter().rev());
+    }
+    out
+}
 
-    struct Row {
-        id: String,
-        entity: Entity,
-        name: String,
-        parent: Option<String>,
-        active_self: bool,
-        active: bool,
-        layer: u32,
-        tags: Option<Tags>,
-        children: usize,
-        types: Vec<String>,
-        persistent: bool,
-    }
-    let mut rows = Vec::new();
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    let mut stack: Vec<(Entity, Option<String>)> =
-        roots.into_iter().rev().map(|e| (e, None)).collect();
-    while let Some((e, parent)) = stack.pop() {
-        let id = id_of(world, e);
-        let children = scene::children_of(ecs, e);
-        let row = Row {
-            entity: e,
-            name: ecs.copy::<Name>(e).map(|n| n.value).unwrap_or_default(),
-            parent,
-            active_self: scene::is_active_self(ecs, e),
-            active: scene::is_active_in_hierarchy(ecs, e),
-            layer: ecs.copy::<Layer>(e).map(|l| l.layer).unwrap_or(0),
-            tags: ecs.copy::<Tags>(e).ok(),
-            children: children.len(),
-            types: ComponentValue::all_of(world, e)
-                .iter()
-                .filter_map(|c| c.id().name().map(str::to_string))
-                .chain(
-                    world
-                        .registered_schemas()
-                        .filter(|s| world.registered_values(e, &s.id).ok().flatten().is_some())
-                        .map(|s| s.id.clone()),
-                )
-                .collect(),
-            persistent: persistent.contains(&e),
-            id,
-        };
-        (
-            &row.id,
-            row.entity,
-            &row.name,
-            &row.parent,
-            row.layer,
-            (row.active_self, row.active),
+fn entity_row(world: &World, e: Entity, persistent: &[Entity]) -> Value {
+    let ecs = world.ecs();
+    let id = id_of(world, e);
+    let types: Vec<_> = ComponentValue::all_of(world, e)
+        .iter()
+        .filter_map(|c| c.id().name().map(str::to_string))
+        .chain(
+            world
+                .registered_schemas()
+                .filter(|s| world.registered_values(e, &s.id).ok().flatten().is_some())
+                .map(|s| s.id.clone()),
         )
-            .hash(&mut hasher);
-        (
-            row.tags.map(|t| t.bits),
-            row.children,
-            &row.types,
-            row.persistent,
-        )
-            .hash(&mut hasher);
-        for c in children.into_iter().rev() {
-            stack.push((c, Some(row.id.clone())));
-        }
-        rows.push(row);
+        .collect();
+    json!({
+        "id": id, "entity": e.to_hex(),
+        "name": ecs.copy::<Name>(e).map(|n| n.value).unwrap_or_default(),
+        "parent": scene::parent_of(ecs, e).map(|p| id_of(world, p)),
+        "activeSelf": scene::is_active_self(ecs, e), "activeInHierarchy": scene::is_active_in_hierarchy(ecs, e),
+        "spawned": id.starts_with(RUNTIME_PREFIX), "layer": ecs.copy::<Layer>(e).map_or(0, |l| l.layer),
+        "tags": ecs.copy::<Tags>(e).ok().map(|t| t.to_node().to_serde()),
+        "children": scene::children_of(ecs, e).len(), "types": types, "persistent": persistent.contains(&e),
+    })
+}
+
+fn entities_delta(world: &World, since: Option<&str>) -> Value {
+    let metadata = format!(
+        "{}:{}:{}",
+        world.id().0,
+        world.scene_metadata_revision(),
+        world.registered_schemas().count()
+    );
+    let token = since
+        .and_then(|s| s.rsplit_once('/'))
+        .filter(|(m, _)| *m == metadata)
+        .and_then(|(_, token)| token.parse::<u64>().ok())
+        .unwrap_or(0);
+    let changes = world
+        .entity_table_changes_since(token)
+        .expect("settled live table");
+    let revision = format!("{metadata}/{}", changes.cursor.token());
+    if changes.reset {
+        let mut full = entities(world, None);
+        full["revision"] = json!(revision);
+        return full;
     }
-    let revision = format!("{:016x}", hasher.finish());
-    if since == Some(revision.as_str()) {
+    if changes.entities.is_empty() {
         return json!({ "tick": world.tick(), "revision": revision, "unchanged": true });
     }
-    let out: Vec<Value> = rows
-        .into_iter()
-        .map(|r| {
-            json!({
-                "id": r.id,
-                "entity": r.entity.to_hex(),
-                "name": r.name,
-                "parent": r.parent,
-                "activeSelf": r.active_self,
-                "activeInHierarchy": r.active,
-                "spawned": r.id.starts_with(RUNTIME_PREFIX),
-                "layer": r.layer,
-                "tags": r.tags.map(|t| t.to_node().to_serde()).unwrap_or(Value::Null),
-                "children": r.children,
-                "types": r.types,
-                "persistent": r.persistent,
-            })
-        })
-        .collect();
-    json!({ "tick": world.tick(), "revision": revision, "entities": out })
+    let persistent = world.persistent_roots();
+    let mut rows = Vec::new();
+    let mut removed = Vec::new();
+    for e in changes.entities {
+        if world.ecs().contains(e) {
+            rows.push(entity_row(world, e, &persistent));
+        } else {
+            removed.push(e.to_hex());
+        }
+    }
+    let order_changes = world
+        .hierarchy_changes_since(token)
+        .expect("settled live table");
+    let mut result =
+        json!({ "tick": world.tick(), "revision": revision, "changes": rows, "removed": removed });
+    if order_changes.reset || !order_changes.entities.is_empty() {
+        result["order"] = json!(ordered_entities(world)
+            .into_iter()
+            .map(|e| e.to_hex())
+            .collect::<Vec<_>>());
+    }
+    result
 }
 
 /// One entity as the Inspector reads it: name, parent, active flags, local and world

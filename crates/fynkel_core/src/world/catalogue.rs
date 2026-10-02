@@ -99,6 +99,7 @@ impl World {
         let dt = self.config.fixed_dt;
         let mut updates = Vec::new();
         for (handle, rot, original, parent) in self
+            .gameplay
             .ecs
             .query::<(&Handle, &Rotator, &Transform, Option<&Parent>)>()
             .without::<&scene::Inactive>()
@@ -111,7 +112,7 @@ impl World {
                     MotionSpace::Local => pose.rotation * Quat::from_axis_angle(axis, angle),
                     MotionSpace::World => {
                         let axis = parent
-                            .and_then(|p| self.ecs.copy::<WorldTransform>(p.0).ok())
+                            .and_then(|p| self.gameplay.ecs.copy::<WorldTransform>(p.0).ok())
                             .map(|w| rotation_of(&w.matrix).inverse() * axis)
                             .unwrap_or(axis);
                         Quat::from_axis_angle(axis, angle) * pose.rotation
@@ -152,6 +153,7 @@ impl World {
         let dt = self.config.fixed_dt;
         let mut updates = Vec::new();
         for (handle, osc, state, original, parent) in self
+            .gameplay
             .ecs
             .query::<(
                 &Handle,
@@ -170,7 +172,7 @@ impl World {
                 let axis = match osc.space {
                     MotionSpace::Local => pose.rotation * axis,
                     MotionSpace::World => parent
-                        .and_then(|p| self.ecs.copy::<WorldTransform>(p.0).ok())
+                        .and_then(|p| self.gameplay.ecs.copy::<WorldTransform>(p.0).ok())
                         .map(|w| rotation_of(&w.matrix).inverse() * axis)
                         .unwrap_or(axis),
                 };
@@ -203,7 +205,8 @@ impl World {
             Ok(_) => {
                 self.attach_state::<Oscillate, Oscillation>();
                 for (entity, _, _, state) in updates {
-                    self.ecs
+                    self.gameplay
+                        .ecs
                         .insert(entity, state)
                         .expect("validated oscillator");
                 }
@@ -219,7 +222,7 @@ impl World {
         stage: &str,
         error: super::gameplay::EditError,
     ) {
-        self.diagnostics.push(Diagnostic {
+        self.publication.diagnostics.push(Diagnostic {
             command_index: u32::MAX,
             lane: Lane::Simulation,
             code: DiagnosticCode::INVALID_PAYLOAD,
@@ -236,6 +239,7 @@ impl World {
         let mut lifetimes = std::mem::take(&mut self.scratch.lifetimes);
         lifetimes.clear();
         for (handle, life) in self
+            .gameplay
             .ecs
             .query::<(&Handle, &LifetimeDespawn)>()
             .without::<&scene::Inactive>()
@@ -272,7 +276,7 @@ impl World {
                 Ok(())
             });
             if let Err(error) = result {
-                self.diagnostics.push(Diagnostic {
+                self.publication.diagnostics.push(Diagnostic {
                     command_index: u32::MAX,
                     lane: Lane::Simulation,
                     code: DiagnosticCode::INVALID_PAYLOAD,
@@ -300,20 +304,20 @@ impl World {
         emissions.clear();
         let mut count = 0;
         {
-            let h = &self.ecs;
+            let h = &self.gameplay.ecs;
             for (handle, em, wt) in h
                 .query::<(&Handle, &Emitter, &WorldTransform)>()
                 .without::<&scene::Inactive>()
                 .iter()
             {
-                let Ok(mut run) = self.ecs.get_mut::<EmitterRun>(handle.0) else {
+                let Ok(mut run) = self.gameplay.ecs.get_mut::<EmitterRun>(handle.0) else {
                     continue;
                 };
                 count += 1;
                 if !em.enabled || em.rate <= 0.0 {
                     continue;
                 }
-                run.alive.retain(|e| self.ecs.contains(*e));
+                run.alive.retain(|e| self.gameplay.ecs.contains(*e));
                 run.accumulator += em.rate * dt;
                 let mut n = run.accumulator.floor();
                 run.accumulator -= n;
@@ -339,15 +343,16 @@ impl World {
         for e in emissions.drain(..) {
             let Some(prefab) = self.prefabs.get(&e.prefab).cloned() else {
                 let reported = self
+                    .gameplay
                     .ecs
                     .get::<EmitterRun>(e.emitter)
                     .map(|r| r.reported)
                     .unwrap_or(true);
                 if !reported {
-                    if let Ok(mut run) = self.ecs.get_mut::<EmitterRun>(e.emitter) {
+                    if let Ok(mut run) = self.gameplay.ecs.get_mut::<EmitterRun>(e.emitter) {
                         run.reported = true;
                     }
-                    self.diagnostics.push(Diagnostic {
+                    self.publication.diagnostics.push(Diagnostic {
                         command_index: u32::MAX,
                         lane: Lane::Simulation,
                         code: DiagnosticCode::PREFAB_UNAVAILABLE,
@@ -412,7 +417,7 @@ impl World {
             });
             match result {
                 Ok(commit) => {
-                    if let Ok(mut run) = self.ecs.get_mut::<EmitterRun>(e.emitter) {
+                    if let Ok(mut run) = self.gameplay.ecs.get_mut::<EmitterRun>(e.emitter) {
                         run.alive.extend(
                             commit
                                 .value
@@ -421,7 +426,7 @@ impl World {
                         );
                     }
                 }
-                Err(error) => self.diagnostics.push(Diagnostic {
+                Err(error) => self.publication.diagnostics.push(Diagnostic {
                     command_index: u32::MAX,
                     lane: Lane::Simulation,
                     code: DiagnosticCode::INVALID_PAYLOAD,
@@ -445,7 +450,7 @@ impl World {
         let mut count = 0;
         let mut invalid = None;
         {
-            let h = &self.ecs;
+            let h = &self.gameplay.ecs;
             for (handle, follow, wt) in h
                 .query::<(&Handle, &Follow, &WorldTransform)>()
                 .without::<&scene::Inactive>()
@@ -464,7 +469,7 @@ impl World {
                 let Some(target) = self.live(follow.target) else {
                     continue;
                 };
-                let Ok(target_world) = self.ecs.get::<WorldTransform>(target) else {
+                let Ok(target_world) = self.gameplay.ecs.get::<WorldTransform>(target) else {
                     continue;
                 };
                 let target_pos = target_world.matrix.w_axis.truncate();
@@ -508,7 +513,7 @@ impl World {
         placements.clear();
         let mut count = 0;
         {
-            let h = &self.ecs;
+            let h = &self.gameplay.ecs;
             for (handle, look, wt) in h
                 .query::<(&Handle, &LookAtCamera, &WorldTransform)>()
                 .without::<&scene::Inactive>()
@@ -538,7 +543,7 @@ impl World {
     /// The world position of the active camera: the `Camera` with the
     /// highest priority, the lowest entity on a tie.
     fn active_camera_position(&self) -> Option<Vec3> {
-        let h = &self.ecs;
+        let h = &self.gameplay.ecs;
         let mut best: Option<(i32, Entity, Vec3)> = None;
         for (handle, cam, wt) in h
             .query::<(&Handle, &Camera, &WorldTransform)>()
@@ -571,7 +576,7 @@ impl World {
             .iter()
             .map(|p| (p.entity, p.position, p.rotation))
             .collect();
-        let poses = match scene::prepare_world_poses(&self.ecs, &desired) {
+        let poses = match scene::prepare_world_poses(&self.gameplay.ecs, &desired) {
             Ok(poses) => poses,
             Err(error) => {
                 self.native_pose_rejection(
@@ -605,7 +610,7 @@ impl World {
     /// The object a reference names while it lives (ADR-0035): a
     /// destroyed target is missing, never replaced by a search.
     pub(super) fn live(&self, r: ObjectRef) -> Option<Entity> {
-        r.get().filter(|e| self.ecs.contains(*e))
+        r.get().filter(|e| self.gameplay.ecs.contains(*e))
     }
 
     /// Gives every entity with a `C` a default `S` (its runtime state) and
@@ -614,7 +619,7 @@ impl World {
         let mut pending = std::mem::take(&mut self.scratch.entities);
         pending.clear();
         {
-            let h = &self.ecs;
+            let h = &self.gameplay.ecs;
             pending.extend(
                 h.query::<hecs::Without<&Handle, &S>>()
                     .with::<&C>()
@@ -623,10 +628,10 @@ impl World {
             );
         }
         for e in pending.drain(..) {
-            let _ = self.ecs.insert(e, S::default());
+            let _ = self.gameplay.ecs.insert(e, S::default());
         }
         {
-            let h = &self.ecs;
+            let h = &self.gameplay.ecs;
             pending.extend(
                 h.query::<hecs::Without<&Handle, &C>>()
                     .with::<&S>()
@@ -635,7 +640,7 @@ impl World {
             );
         }
         for e in pending.drain(..) {
-            let _ = self.ecs.remove::<S>(e);
+            let _ = self.gameplay.ecs.remove::<S>(e);
         }
         self.scratch.entities = pending;
     }

@@ -47,6 +47,9 @@ void main() {
     expect(live.rename(robot, 'Hero'), isEmpty);
     expect(live.entity(sun).component('fynkel.DirectionalLight')!['intensity'], 9.5);
     expect(live.entity(robot).name, 'Hero');
+    expect(robotRow.name, 'Robot', reason: 'previous publication remains immutable');
+    expect(() => all.clear(), throwsUnsupportedError);
+    expect(() => robotRow.types.clear(), throwsUnsupportedError);
     expect(live.changedEntities()!.firstWhere((e) => e.id == robot).name, 'Hero');
     expect(live.tick, tick + 1, reason: 'a live edit runs no tick');
 
@@ -66,8 +69,10 @@ void main() {
     );
     expect(live.reparent(sun, robot, index: 0), isEmpty);
     expect(live.entity(sun).parent, robot);
+    final moved = live.changedEntities()!;
+    expect(moved.indexWhere((e) => e.id == sun), moved.indexWhere((e) => e.id == robot) + 1);
     expect(live.destroy(robot), isEmpty);
-    expect(live.entities().where((e) => e.id == robot || e.id == sun), isEmpty, reason: 'the subtree went');
+    expect(live.changedEntities()!.where((e) => e.id == robot || e.id == sun), isEmpty, reason: 'the subtree went through deltas');
 
     const made = '0b1c2d3e-4f50-4617-8293-a4b5c6d7e8f9';
     final lamp = live.spawn(

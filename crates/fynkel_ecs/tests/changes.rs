@@ -212,3 +212,95 @@ fn bulk_component_stamps_follow_write_borrows_including_optional_queries() {
     assert_ne!(world.component_stamp::<i32>(), Some(number));
     assert_eq!(world.component_stamp::<bool>(), flag);
 }
+
+#[test]
+fn journal_consumers_are_independent_sparse_and_generation_safe() {
+    use std::any::TypeId;
+    let mut w = World::new();
+    let a = w.spawn(EntityBuilder::new().with(1_i32));
+    let cursor = w.change_cursor();
+    w.insert(a, true).unwrap();
+    let unrelated = w
+        .changes_since(cursor, &[TypeId::of::<i32>()], false)
+        .unwrap();
+    assert!(!unrelated.reset);
+    assert!(unrelated.entities.is_empty());
+    *w.get_mut::<i32>(a).unwrap() = 2;
+    for _ in 0..2 {
+        let changes = w
+            .changes_since(cursor, &[TypeId::of::<i32>()], false)
+            .unwrap();
+        assert_eq!(changes.entities, vec![a]);
+        assert!(!changes.reset);
+    }
+    w.despawn(a).unwrap();
+    let b = w.spawn_empty();
+    assert_eq!(a.slot(), b.slot());
+    let delta = w.changes_since(cursor, &[], false).unwrap();
+    assert_eq!(delta.entities, vec![a, b]);
+    let cursor = Some(delta.cursor);
+    assert!(w
+        .changes_since(cursor, &[], true)
+        .unwrap()
+        .entities
+        .is_empty());
+}
+
+#[test]
+fn journal_explicitly_resets_on_overflow_bulk_writes_and_foreign_cursors() {
+    use std::any::TypeId;
+    let mut w = World::new();
+    let e = w.spawn(EntityBuilder::new().with(0_i32));
+    let cursor = w.change_cursor();
+    for i in 0..17000 {
+        w.insert(e, i).unwrap();
+    }
+    assert!(
+        w.changes_since(cursor, &[TypeId::of::<i32>()], false)
+            .unwrap()
+            .reset
+    );
+    let cursor = w.change_cursor();
+    for x in w.query_mut::<&mut i32>() {
+        *x = 7;
+    }
+    assert!(
+        w.changes_since(cursor, &[TypeId::of::<i32>()], false)
+            .unwrap()
+            .reset
+    );
+    assert!(
+        !w.changes_since(cursor, &[TypeId::of::<bool>()], false)
+            .unwrap()
+            .reset
+    );
+    assert!(
+        w.changes_since(World::new().change_cursor(), &[], false)
+            .unwrap()
+            .reset
+    );
+    let guard = w.get_mut::<i32>(e).unwrap();
+    assert!(w.changes_since(cursor, &[], false).is_none());
+    drop(guard);
+}
+
+#[test]
+fn dense_unrelated_writes_do_not_force_clean_consumers_to_reset() {
+    use std::any::TypeId;
+    let mut w = World::new();
+    let e = w.spawn(EntityBuilder::new().with(0_i32).with(false));
+    let cursor = w.change_cursor();
+    for i in 0..18000 {
+        w.insert(e, i).unwrap();
+    }
+    let flag = w
+        .changes_since(cursor, &[TypeId::of::<bool>()], true)
+        .unwrap();
+    assert!(!flag.reset);
+    assert!(flag.entities.is_empty());
+    assert!(
+        w.changes_since(cursor, &[TypeId::of::<i32>()], false)
+            .unwrap()
+            .reset
+    );
+}

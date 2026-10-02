@@ -258,7 +258,7 @@ impl World {
     /// Solves `entity`'s IK goals over the pose its layers wrote.
     pub(super) fn run_ik(&mut self, entity: Entity, dt: f32) {
         let (def, mut ik, weights) = {
-            let Ok(mut run) = self.ecs.get_mut::<AnimatorRun>(entity) else {
+            let Ok(mut run) = self.gameplay.ecs.get_mut::<AnimatorRun>(entity) else {
                 return;
             };
             let Some(play) = run.controller.as_mut() else {
@@ -312,13 +312,13 @@ impl World {
                 );
             }
         }
-        if let Ok(mut run) = self.ecs.get_mut::<AnimatorRun>(entity) {
+        if let Ok(mut run) = self.gameplay.ecs.get_mut::<AnimatorRun>(entity) {
             if let Some(play) = run.controller.as_mut() {
                 play.ik = ik;
             }
         }
         for message in problems {
-            self.diagnostics.push(Diagnostic {
+            self.publication.diagnostics.push(Diagnostic {
                 command_index: u32::MAX,
                 lane: Lane::Simulation,
                 code: DiagnosticCode::IK_UNAVAILABLE,
@@ -338,7 +338,7 @@ impl World {
         dt: f32,
         problems: &mut Vec<String>,
     ) -> (Vec<(Entity, Transform)>, Option<String>) {
-        let ecs = &self.ecs;
+        let ecs = &self.gameplay.ecs;
         // Last tick's writes that no layer posed again are taken back,
         // property by property: a clip keying a node's position alone (a
         // breathing spine) rewrites it every tick but keeps the rotation

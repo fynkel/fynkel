@@ -100,7 +100,12 @@ impl World {
                     component,
                     message,
                 );
-                vec![self.diagnostics.last().expect("just rejected").clone()]
+                vec![self
+                    .publication
+                    .diagnostics
+                    .last()
+                    .expect("just rejected")
+                    .clone()]
             }
         }
     }

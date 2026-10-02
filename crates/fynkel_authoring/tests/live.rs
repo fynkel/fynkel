@@ -613,3 +613,64 @@ fn registered_live_inspector_reads_writes_versions_and_atomic_creation() {
     live::call(&mut w, "remove", &json!({"id":owner,"type":"game.Health"})).unwrap();
     assert!(w.registered_values(e, "game.Health").unwrap().is_none());
 }
+
+#[test]
+fn delta_consumers_track_sparse_changes_order_and_reset_independently() {
+    let mut w = running();
+    let first = call(&mut w, "entities", json!({"deltas":true}));
+    let cursor = first["revision"].clone();
+    call(&mut w, "rename", json!({"id":uid(4),"name":"Changed"}));
+    let renamed = call(&mut w, "entities", json!({"deltas":true,"since":cursor}));
+    assert_eq!(renamed["changes"].as_array().unwrap().len(), 1);
+    assert_eq!(renamed["changes"][0]["name"], "Changed");
+    assert!(renamed.get("order").is_none());
+    let second = call(&mut w, "entities", json!({"deltas":true,"since":cursor}));
+    assert_eq!(
+        renamed, second,
+        "reading one consumer must not drain another"
+    );
+    call(
+        &mut w,
+        "parent",
+        json!({"id":uid(4),"parent":uid(1),"index":0}),
+    );
+    let moved = call(
+        &mut w,
+        "entities",
+        json!({"deltas":true,"since":renamed["revision"]}),
+    );
+    assert_eq!(moved["order"].as_array().unwrap().len(), 4);
+    let handle = moved["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == uid(4))
+        .unwrap()["entity"]
+        .clone();
+    call(&mut w, "setActive", json!({"id":uid(1),"active":false}));
+    let inactive = call(
+        &mut w,
+        "entities",
+        json!({"deltas":true,"since":moved["revision"]}),
+    );
+    assert!(inactive["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|r| r["activeInHierarchy"] == false));
+    call(&mut w, "destroy", json!({"id":uid(4)}));
+    let removed = call(
+        &mut w,
+        "entities",
+        json!({"deltas":true,"since":inactive["revision"]}),
+    );
+    assert!(removed["removed"].as_array().unwrap().contains(&handle));
+    assert_eq!(removed["order"].as_array().unwrap().len(), 3);
+    let mut other = running();
+    let reset = call(
+        &mut other,
+        "entities",
+        json!({"deltas":true,"since":removed["revision"]}),
+    );
+    assert_eq!(reset["entities"].as_array().unwrap().len(), 4);
+}

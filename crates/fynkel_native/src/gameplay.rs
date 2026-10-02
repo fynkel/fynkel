@@ -265,6 +265,78 @@ pub unsafe extern "C" fn fynkel_world_gameplay_state_since(
     gameplay_state(world, Some(since), out)
 }
 
+/// Bounded-journal identity delta. Zero requests initial state. Success: cursor
+/// u64, mode u32 (0 unchanged, 1 reset, 2 delta), then count u32 and rows
+/// (entity, alive u32, name length u32 + UTF-8 when alive) for modes 1/2.
+/// # Safety
+/// World live or NULL; out writable or NULL. Cursor is local to this world.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_gameplay_state_delta(
+    world: *mut FynkelWorld,
+    since: u64,
+    out: *mut FynkelBufferView,
+) -> Status {
+    if let Some(view) = out.as_mut() {
+        *view = FynkelBufferView::empty();
+    }
+    let status = boundary(world, |w| {
+        if out.is_null() {
+            return reject(w, Status::InvalidArgument, "missing state output");
+        }
+        if !w.gameplay_allowed {
+            return reject(w, Status::Unsupported, "gameplay state unavailable");
+        }
+        if w.inner.is_editing() {
+            return reject(
+                w,
+                Status::CommandsRejected,
+                "state reconciliation inside an edit",
+            );
+        }
+        let Some(changes) = w.inner.identity_changes_since(since) else {
+            return reject(w, Status::CommandsRejected, "unsettled native write");
+        };
+        let mut reply = std::mem::take(&mut w.gameplay_reply);
+        reply.clear();
+        reply.extend(changes.cursor.token().to_le_bytes());
+        let mode = if changes.reset {
+            1
+        } else if changes.entities.is_empty() {
+            0
+        } else {
+            2
+        };
+        put32(&mut reply, mode);
+        if mode != 0 {
+            let entities = if changes.reset {
+                w.inner.ecs().entities().collect()
+            } else {
+                changes.entities
+            };
+            put32(&mut reply, entities.len() as u32);
+            for e in entities {
+                entity(&mut reply, e);
+                let alive = w.inner.ecs().contains(e);
+                put32(&mut reply, u32::from(alive));
+                if alive {
+                    if let Ok(name) = w.inner.ecs().get::<fynkel_core::Name>(e) {
+                        put32(&mut reply, name.value.len() as u32);
+                        reply.extend(name.value.as_bytes());
+                    } else {
+                        put32(&mut reply, 0);
+                    }
+                }
+            }
+        }
+        w.gameplay_reply = reply;
+        Status::Ok
+    });
+    if let (Some(w), Some(view)) = (world.as_ref(), out.as_mut()) {
+        *view = FynkelBufferView::of(&w.gameplay_reply);
+    }
+    status
+}
+
 unsafe fn gameplay_state(
     world: *mut FynkelWorld,
     since: Option<u64>,
@@ -372,7 +444,7 @@ pub unsafe extern "C" fn fynkel_world_gameplay_exchange(
             if let Err(error) = w.inner.session.as_mut().unwrap().access(|_| Ok(())) {
                 return reject(w, Status::CommandsRejected, error);
             }
-            let Some(assets) = &w.assets else {
+            let Some(assets) = &w.services.assets else {
                 return reject(w, Status::CommandsRejected, "no cooked project is loaded");
             };
             return match assets.document_json(id) {
@@ -389,7 +461,7 @@ pub unsafe extern "C" fn fynkel_world_gameplay_exchange(
             if let Err(error) = w.inner.session.as_mut().unwrap().access(|_| Ok(())) {
                 return reject(w, Status::CommandsRejected, error);
             }
-            let Some(assets) = &w.assets else {
+            let Some(assets) = &w.services.assets else {
                 return reject(
                     w,
                     Status::CommandsRejected,
@@ -442,7 +514,7 @@ pub unsafe extern "C" fn fynkel_world_gameplay_exchange(
             if let Err(error) = w.inner.session.as_mut().unwrap().access(|_| Ok(())) {
                 return reject(w, Status::CommandsRejected, error);
             }
-            if w.assets.is_none() {
+            if w.services.assets.is_none() {
                 return reject(
                     w,
                     Status::CommandsRejected,
@@ -495,7 +567,7 @@ pub unsafe extern "C" fn fynkel_world_gameplay_exchange(
             };
         }
         if let Request::RegisteredApply(token, values) = request {
-            let Some(batch) = w.inner.batches.get(token as usize).cloned() else {
+            let Some(batch) = w.inner.batches.get(token as usize) else {
                 return reject(w, Status::CommandsRejected, "unknown bulk view");
             };
             return match w
@@ -503,7 +575,7 @@ pub unsafe extern "C" fn fynkel_world_gameplay_exchange(
                 .session
                 .as_mut()
                 .unwrap()
-                .access(|edit| edit.apply_registered_batch(&batch, values))
+                .access(|edit| edit.apply_registered_batch(batch, values))
             {
                 Ok(()) => {
                     w.gameplay_reply.clear();
@@ -518,7 +590,7 @@ pub unsafe extern "C" fn fynkel_world_gameplay_exchange(
         if let Request::Instantiate(id, transform, parent, name) = request {
             return instantiate(w, id, transform, parent, name, sequence);
         }
-        if let Some(assets) = &w.assets {
+        if let Some(assets) = &w.services.assets {
             let slot = &mut w.inner;
             let session = slot.session.as_mut().unwrap();
             let core = session.committed();
@@ -616,7 +688,7 @@ pub unsafe extern "C" fn fynkel_world_gameplay_end(
                     publish_runtime_clip(w, fynkel_contracts::AssetRef::new(id), clip);
                 }
                 if let Some(bindings) = bindings {
-                    w.rebinds = bindings.rebinds;
+                    w.services.rebinds = bindings.rebinds;
                     w.load_report = bindings.report;
                 }
                 w.inner.published.extend(published);
@@ -653,7 +725,7 @@ fn bind_actions(w: &mut FynkelWorld, rebinds: BTreeMap<String, Vec<String>>) -> 
     if let Err(error) = w.inner.session.as_mut().unwrap().access(|_| Ok(())) {
         return reject(w, Status::CommandsRejected, error);
     }
-    let Some(assets) = w.assets.clone() else {
+    let Some(assets) = w.services.assets.clone() else {
         return reject(w, Status::CommandsRejected, "no cooked project is loaded");
     };
     let specs = match crate::load::prepare_project_input(&assets, &rebinds) {
@@ -687,7 +759,7 @@ fn instantiate(
     name: String,
     sequence: u64,
 ) -> Status {
-    let Some(assets) = w.assets.clone() else {
+    let Some(assets) = w.services.assets.clone() else {
         return reject(w, Status::CommandsRejected, "no cooked project is loaded");
     };
     let prepared = match assets.prepare_prefab(id) {
@@ -1415,7 +1487,7 @@ pub(crate) fn publish_runtime_material(
     key: fynkel_contracts::AssetRef,
     material: RuntimeMaterial,
 ) {
-    let assets = w.assets.as_ref().expect("prepared asset store");
+    let assets = w.services.assets.as_ref().expect("prepared asset store");
     match material {
         RuntimeMaterial::Pbr(m) => assets.set_runtime_material(&key, m),
         RuntimeMaterial::Shader(m) => assets.set_runtime_custom_material(&key, m),
@@ -1462,7 +1534,8 @@ pub(crate) fn publish_runtime_mesh(
     w.core_mut()
         .physics_mut()
         .replace_prepared_mesh(&key, mesh.collision);
-    w.assets
+    w.services
+        .assets
         .as_ref()
         .expect("prepared asset store")
         .set_runtime_mesh(&key, mesh.mesh);
@@ -1490,6 +1563,7 @@ pub(crate) fn publish_runtime_clip(
     clip: Option<fynkel_core::animation::Clip>,
 ) {
     world
+        .services
         .assets
         .as_ref()
         .expect("validated clip asset store")
@@ -1678,7 +1752,7 @@ mod tests {
                 assert_eq!(exchange(w, sequence, &request), expected);
                 assert_ne!(end(w, sequence, 1), Status::Ok);
                 assert_eq!((*w).inner.live_entities(), 0);
-                assert!((*w).rebinds.is_empty());
+                assert!((*w).services.rebinds.is_empty());
                 assert!(!(*w).inner.is_poisoned());
             }
             fynkel_world_destroy(w);
@@ -2117,40 +2191,30 @@ mod tests {
     #[test]
     fn conditional_snapshot_rejects_invalid_boundaries_without_accepting_cursor() {
         unsafe {
-            let w = fixture();
-            let mut out = FynkelBufferView::empty();
-            assert_eq!(
-                fynkel_world_gameplay_state_since(w, 0, std::ptr::null_mut()),
-                Status::InvalidArgument
-            );
-            assert_eq!(
-                fynkel_world_gameplay_state_since(std::ptr::null_mut(), 0, &mut out),
-                Status::InvalidArgument
-            );
-            (*w).gameplay_allowed = false;
-            assert_eq!(
-                fynkel_world_gameplay_state_since(w, 0, &mut out),
-                Status::Unsupported
-            );
-            (*w).gameplay_allowed = true;
-            let seq = begin(w);
-            assert_eq!(exchange(w, seq, &spawn_request()), Status::Ok);
-            assert_eq!(
-                fynkel_world_gameplay_state_since(w, 0, &mut out),
-                Status::CommandsRejected
-            );
-            assert_eq!(end(w, seq, 1), Status::CommandsRejected);
-            assert_eq!((*w).inner.live_entities(), 0);
-            assert_eq!(
-                fynkel_world_gameplay_state_since(w, 0, &mut out),
-                Status::Ok
-            );
-            (*w).inner.poison();
-            assert_eq!(
-                fynkel_world_gameplay_state_since(w, 0, &mut out),
-                Status::Poisoned
-            );
-            fynkel_world_destroy(w);
+            for read in [
+                fynkel_world_gameplay_state_since,
+                fynkel_world_gameplay_state_delta,
+            ] {
+                let w = fixture();
+                let mut out = FynkelBufferView::empty();
+                assert_eq!(read(w, 0, std::ptr::null_mut()), Status::InvalidArgument);
+                assert_eq!(
+                    read(std::ptr::null_mut(), 0, &mut out),
+                    Status::InvalidArgument
+                );
+                (*w).gameplay_allowed = false;
+                assert_eq!(read(w, 0, &mut out), Status::Unsupported);
+                (*w).gameplay_allowed = true;
+                let seq = begin(w);
+                assert_eq!(exchange(w, seq, &spawn_request()), Status::Ok);
+                assert_eq!(read(w, 0, &mut out), Status::CommandsRejected);
+                assert_eq!(end(w, seq, 1), Status::CommandsRejected);
+                assert_eq!((*w).inner.live_entities(), 0);
+                assert_eq!(read(w, 0, &mut out), Status::Ok);
+                (*w).inner.poison();
+                assert_eq!(read(w, 0, &mut out), Status::Poisoned);
+                fynkel_world_destroy(w);
+            }
         }
     }
 

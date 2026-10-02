@@ -1,0 +1,662 @@
+{
+  "date": "2026-10-02",
+  "base_commit": "9b7caf3ce279b6103ab8b3ed84c843b885915434",
+  "milestone": "F4 completion",
+  "status": "F4.1-F4.4 complete",
+  "platform": "macOS-26.5.1-arm64-arm-64bit",
+  "environment": {
+    "PATH_prefix": "/Users/oumari/Documents/flutter/flutter/bin",
+    "FYNKEL_CLI": "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel"
+  },
+  "commands": [
+    {
+      "cwd": ".",
+      "command": "cargo test --release --workspace --locked",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/rust-qualified.log",
+      "log_sha256": "31fd5a235087d59feb2683ca73f915f4341a76d516a7835c8208a2e32693dff3",
+      "tests": {
+        "passed": 1135,
+        "failed": 0,
+        "ignored": 8
+      }
+    },
+    {
+      "cwd": ".",
+      "command": "cargo test --release -p fynkel_native --test f4_cache --locked",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/native-cache.log",
+      "log_sha256": "2cac9f2de11415edb2f0f0b0b45b183dc88262b93f0ef440d779ed5307c00cdc",
+      "tests": {
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "cwd": ".",
+      "command": "cargo test --release -p fynkel_core --no-default-features --lib --test f4_synchronization --locked",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/stripped-core-final.log",
+      "log_sha256": "9b63d490401bef618fa869d5cb5862436850939ad0b302e1aaeb1af92983fda8",
+      "tests": {
+        "passed": 48,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "cwd": ".",
+      "command": "cargo test --release -p fynkel_native --no-default-features --lib --locked",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/stripped-native-final.log",
+      "log_sha256": "11aec90ea85fc62c65f89a0e1bb00793f3b472174c793c5408ab696da1c49594",
+      "tests": {
+        "passed": 26,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "cwd": "packages/fynkel",
+      "command": "dart test",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/sdk-final.log",
+      "log_sha256": "06231f3a2f66d93635b0606126cd6b2f6dbbd7dd8cd551c35fcab9537a7c2a76",
+      "tests": {
+        "passed": 606,
+        "failed": 0
+      }
+    },
+    {
+      "cwd": "packages/fynkel",
+      "command": "dart test test/f4_publication_test.dart test/data_asset_test.dart",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/publication-qualified.log",
+      "log_sha256": "51e789c187b2957378b32a042b3cad13cffb75d831cd968184cb63024b18f51e",
+      "tests": {
+        "passed": 17,
+        "failed": 0
+      }
+    },
+    {
+      "cwd": "packages/fynkel_authoring",
+      "command": "dart test",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/authoring-final.log",
+      "log_sha256": "06fa666b629ff5be261105cd49e3609b1de11aa4c7808f54777af4a320d95aeb",
+      "tests": {
+        "passed": 16,
+        "failed": 0
+      }
+    },
+    {
+      "cwd": "packages/fynkel_flutter",
+      "command": "flutter test",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/flutter-final.log",
+      "log_sha256": "27f1190d6314d79e2858476af4297a4927c9f1b11c850b30c3c4c298b1af8753",
+      "tests": {
+        "passed": 39,
+        "failed": 0
+      }
+    },
+    {
+      "cwd": "apps/editor",
+      "command": "flutter test test/hierarchy_test.dart test/component_handles_test.dart test/play_test.dart test/play_document_test.dart test/inspector_test.dart test/extension_play_test.dart test/data_spec_test.dart",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/editor-final.log",
+      "log_sha256": "ec6bc840c090fce07af7f54387a20ff088ff95a2a782a61400154229abdac252",
+      "tests": {
+        "passed": 105,
+        "failed": 0
+      }
+    },
+    {
+      "cwd": ".",
+      "command": "cargo test --release -p fynkel_native --test identity_libraries --locked -- --ignored",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/library-identity.log",
+      "log_sha256": "b9f61821e31bd0f103ec11ac4812a7853efbcb645b1415a6b26e39a103e5b175",
+      "tests": {
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "cwd": ".",
+      "command": "cargo clippy --release --workspace --all-targets --locked -- -D warnings",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/clippy-qualified.log",
+      "log_sha256": "1ca22a8252492a2f0d41bdd20464bca678d5216aeb2a09411010f894e1c9d064"
+    },
+    {
+      "cwd": ".",
+      "command": "cargo fmt --all --check",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/format-qualified.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "cwd": ".",
+      "command": "git diff --check",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/diff-qualified.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "cwd": ".",
+      "command": "sh tools/check_runtime_deps.sh",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/dependencies.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "cwd": "packages/fynkel",
+      "command": "dart run ffigen --config ffigen.yaml",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/ffigen-final.log",
+      "log_sha256": "0d823d5f0cad10d08f8dbf4784d92651e756deb9aec8220e07649a6e66c5d39c"
+    },
+    {
+      "cwd": "packages/fynkel",
+      "command": "dart analyze",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/sdk-analyze-qualified.log",
+      "log_sha256": "e8706fb8d2ecc4b5742145ee57677a0e063a51b4e1a3be2c412b3f57681e0080"
+    },
+    {
+      "cwd": "packages/fynkel_authoring",
+      "command": "dart analyze",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/authoring-analyze-final.log",
+      "log_sha256": "f194629658c72972e53c08cfcf71f96a9e7dfc5115d48d9ae291f22084955b24"
+    },
+    {
+      "cwd": "packages/fynkel_flutter",
+      "command": "flutter analyze --no-pub",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/flutter-analyze.log",
+      "log_sha256": "9a7e85bbba2e09a02cca77f5552f843692a6e5cd02ae40ac420ac48be816f9b0"
+    },
+    {
+      "cwd": "apps/editor",
+      "command": "flutter analyze --no-pub",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-completion/editor-analyze.log",
+      "log_sha256": "b4ef18cfac54b42e6f7438bdc5173e35a5ff85ff05c847c2e8ff1684d856241c"
+    }
+  ],
+  "measurements": {
+    "synchronization": [
+      {
+        "workload": "static_scene_physics",
+        "entities": 1000,
+        "p50_ns": 417,
+        "p95_ns": 458,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "sparse_scene_physics",
+        "entities": 1000,
+        "p50_ns": 2333,
+        "p95_ns": 2583,
+        "candidates_per_sample": 2.0,
+        "allocation_calls_per_sample": 8.02,
+        "requested_bytes_per_sample": 6350.72
+      },
+      {
+        "workload": "unchanged_table_revision",
+        "entities": 1000,
+        "p50_ns": 292,
+        "p95_ns": 375,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "full_extract_static",
+        "entities": 1000,
+        "p50_ns": 144084,
+        "p95_ns": 162792,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 11.0,
+        "requested_bytes_per_sample": 427532.0
+      },
+      {
+        "workload": "churn_scene_physics",
+        "entities": 1000,
+        "p50_ns": 2125,
+        "p95_ns": 3750,
+        "candidates_per_sample": 4.0,
+        "allocation_calls_per_sample": 21.17,
+        "requested_bytes_per_sample": 2799.84
+      },
+      {
+        "workload": "reference_full_scene_scan",
+        "entities": 1000,
+        "p50_ns": 583,
+        "p95_ns": 625,
+        "candidates_per_sample": 1000.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "sleeping_scene_physics",
+        "entities": 1000,
+        "p50_ns": 167,
+        "p95_ns": 209,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "sleeping_full_tick",
+        "entities": 1000,
+        "p50_ns": 4000,
+        "p95_ns": 4042,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 1.0,
+        "requested_bytes_per_sample": 64.0
+      },
+      {
+        "workload": "static_scene_physics",
+        "entities": 10000,
+        "p50_ns": 166,
+        "p95_ns": 167,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "sparse_scene_physics",
+        "entities": 10000,
+        "p50_ns": 875,
+        "p95_ns": 1000,
+        "candidates_per_sample": 2.0,
+        "allocation_calls_per_sample": 8.0,
+        "requested_bytes_per_sample": 944.0
+      },
+      {
+        "workload": "unchanged_table_revision",
+        "entities": 10000,
+        "p50_ns": 125,
+        "p95_ns": 125,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "full_extract_static",
+        "entities": 10000,
+        "p50_ns": 1415042,
+        "p95_ns": 1575750,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 14.0,
+        "requested_bytes_per_sample": 3613988.0
+      },
+      {
+        "workload": "churn_scene_physics",
+        "entities": 10000,
+        "p50_ns": 2209,
+        "p95_ns": 3667,
+        "candidates_per_sample": 4.0,
+        "allocation_calls_per_sample": 21.16,
+        "requested_bytes_per_sample": 2636.0
+      },
+      {
+        "workload": "reference_full_scene_scan",
+        "entities": 10000,
+        "p50_ns": 6542,
+        "p95_ns": 6792,
+        "candidates_per_sample": 10000.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "sleeping_scene_physics",
+        "entities": 10000,
+        "p50_ns": 166,
+        "p95_ns": 167,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "sleeping_full_tick",
+        "entities": 10000,
+        "p50_ns": 21375,
+        "p95_ns": 30084,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 1.0,
+        "requested_bytes_per_sample": 64.0
+      }
+    ],
+    "bulk_native": [
+      {
+        "entities": 1,
+        "native_tick_p50_us": 5,
+        "native_tick_p95_us": 6,
+        "native_allocation_calls_per_tick": 9.016666666666667,
+        "native_bytes_requested_per_tick": 3482.133333333333
+      },
+      {
+        "entities": 1000,
+        "native_tick_p50_us": 275,
+        "native_tick_p95_us": 404,
+        "native_allocation_calls_per_tick": 4187,
+        "native_bytes_requested_per_tick": 834956
+      },
+      {
+        "entities": 10000,
+        "native_tick_p50_us": 3145,
+        "native_tick_p95_us": 5329,
+        "native_allocation_calls_per_tick": 41694,
+        "native_bytes_requested_per_tick": 9424556
+      }
+    ],
+    "bulk_jit": {
+      "mode": "jit",
+      "samples": [
+        {
+          "entities": 1,
+          "schema_registration_us": 5326,
+          "bulk_p50_us": 35,
+          "bulk_p95_us": 52,
+          "create_us": 15482,
+          "full_frame_p50_us": 121,
+          "full_frame_p95_us": 264,
+          "ffi_calls_per_frame": 21.0,
+          "bulk_ffi_calls": 2,
+          "bulk_buffer_copies": 4,
+          "bulk_bytes_copied": 128,
+          "vm_counted_objects_per_frame": 34479.0,
+          "vm_counted_allocation_bytes_per_frame": 2913256.0
+        },
+        {
+          "entities": 1000,
+          "schema_registration_us": 55,
+          "bulk_p50_us": 1122,
+          "bulk_p95_us": 1245,
+          "create_us": 23089,
+          "full_frame_p50_us": 1279,
+          "full_frame_p95_us": 1398,
+          "ffi_calls_per_frame": 21.0,
+          "bulk_ffi_calls": 2,
+          "bulk_buffer_copies": 4,
+          "bulk_bytes_copied": 80048,
+          "vm_counted_objects_per_frame": 63530.6,
+          "vm_counted_allocation_bytes_per_frame": 4444331.2
+        },
+        {
+          "entities": 10000,
+          "schema_registration_us": 66,
+          "bulk_p50_us": 13917,
+          "bulk_p95_us": 18333,
+          "create_us": 114380,
+          "full_frame_p50_us": 15938,
+          "full_frame_p95_us": 20580,
+          "ffi_calls_per_frame": 21.0,
+          "bulk_ffi_calls": 2,
+          "bulk_buffer_copies": 4,
+          "bulk_bytes_copied": 800048,
+          "vm_counted_objects_per_frame": 179417.5,
+          "vm_counted_allocation_bytes_per_frame": 10182083.2
+        }
+      ],
+      "allocation_scope": "VM allocation counters include service overhead and may undercount optimized allocations; not a zero-allocation claim. Native heap allocations are not counted.",
+      "timing_scope": "Whole World.frame including F4 identity reconciliation, native tick and publication; 40 warmup + 60 measured frames."
+    },
+    "bulk_aot": {
+      "mode": "aot",
+      "samples": [
+        {
+          "entities": 1,
+          "schema_registration_us": 415,
+          "bulk_p50_us": 8,
+          "bulk_p95_us": 13,
+          "create_us": 952,
+          "full_frame_p50_us": 37,
+          "full_frame_p95_us": 63,
+          "ffi_calls_per_frame": 21.0,
+          "bulk_ffi_calls": 2,
+          "bulk_buffer_copies": 4,
+          "bulk_bytes_copied": 128,
+          "vm_counted_objects_per_frame": null,
+          "vm_counted_allocation_bytes_per_frame": null
+        },
+        {
+          "entities": 1000,
+          "schema_registration_us": 7,
+          "bulk_p50_us": 1130,
+          "bulk_p95_us": 1470,
+          "create_us": 5220,
+          "full_frame_p50_us": 1260,
+          "full_frame_p95_us": 1780,
+          "ffi_calls_per_frame": 21.0,
+          "bulk_ffi_calls": 2,
+          "bulk_buffer_copies": 4,
+          "bulk_bytes_copied": 80048,
+          "vm_counted_objects_per_frame": null,
+          "vm_counted_allocation_bytes_per_frame": null
+        },
+        {
+          "entities": 10000,
+          "schema_registration_us": 5,
+          "bulk_p50_us": 15884,
+          "bulk_p95_us": 28067,
+          "create_us": 82755,
+          "full_frame_p50_us": 17878,
+          "full_frame_p95_us": 32435,
+          "ffi_calls_per_frame": 21.0,
+          "bulk_ffi_calls": 2,
+          "bulk_buffer_copies": 4,
+          "bulk_bytes_copied": 800048,
+          "vm_counted_objects_per_frame": null,
+          "vm_counted_allocation_bytes_per_frame": null
+        }
+      ],
+      "allocation_scope": "VM allocation counters include service overhead and may undercount optimized allocations; not a zero-allocation claim. Native heap allocations are not counted.",
+      "timing_scope": "Whole World.frame including F4 identity reconciliation, native tick and publication; 40 warmup + 60 measured frames."
+    },
+    "callbacks": {
+      "workload": "shipping SDK explicit callback-equivalent edits, transform writes, Dart JIT",
+      "results": [
+        {
+          "entities": 128,
+          "callbacksPerSample": 1,
+          "warmupSamples": 5,
+          "measuredSamples": 10,
+          "p50Us": 101,
+          "p95Us": 132,
+          "ffiCallsPerSample": 8,
+          "identitySnapshotsPerSample": 0,
+          "identityBytesPerSample": 12,
+          "limitation": "This workload measures transform-only callback edits; sparse renames and destruction are qualified separately."
+        },
+        {
+          "entities": 128,
+          "callbacksPerSample": 32,
+          "warmupSamples": 5,
+          "measuredSamples": 10,
+          "p50Us": 1753,
+          "p95Us": 2234,
+          "ffiCallsPerSample": 256,
+          "identitySnapshotsPerSample": 0,
+          "identityBytesPerSample": 384,
+          "limitation": "This workload measures transform-only callback edits; sparse renames and destruction are qualified separately."
+        },
+        {
+          "entities": 2048,
+          "callbacksPerSample": 1,
+          "warmupSamples": 5,
+          "measuredSamples": 10,
+          "p50Us": 29,
+          "p95Us": 66,
+          "ffiCallsPerSample": 8,
+          "identitySnapshotsPerSample": 0,
+          "identityBytesPerSample": 12,
+          "limitation": "This workload measures transform-only callback edits; sparse renames and destruction are qualified separately."
+        },
+        {
+          "entities": 2048,
+          "callbacksPerSample": 32,
+          "warmupSamples": 5,
+          "measuredSamples": 10,
+          "p50Us": 769,
+          "p95Us": 1302,
+          "ffiCallsPerSample": 256,
+          "identitySnapshotsPerSample": 0,
+          "identityBytesPerSample": 384,
+          "limitation": "This workload measures transform-only callback edits; sparse renames and destruction are qualified separately."
+        }
+      ]
+    }
+  },
+  "measurement_limits": [
+    "Native synchronization: 20 warmups and 100 samples. Native bulk: 40 warmups and 60 samples. Allocator requests are traffic, not live bytes.",
+    "JIT VM counters include service work and may omit optimized allocations. AOT allocation counters unavailable.",
+    "Dense SDK allocations and AOT time did not show an improvement over historical F3 samples. Output ownership adds deliberate copies; no zero-allocation or large-game frame-budget claim.",
+    "Earlier attempts and all raw benchmark logs are retained by path/hash. No claim that all ignored/manual/platform or stripped integration tests ran."
+  ],
+  "retry_history": [
+    "Initial physics active-body-only writeback missed newly inserted bodies; pending first-writeback membership fixed it (invalid_solver_pose regression).",
+    "Initial SDK publication regression incorrectly expected debugPanic not to throw; corrected to expect FynkelBridgeError while retaining old buffers.",
+    "Test invocation mistakes: one Dart invocation from the repository root; Flutter fixture invocation omitted FYNKEL_CLI and found an old installed cooker; editor invocation named absent live_play_test.dart. Correct package cwd, checkout CLI and real Play tests pass.",
+    "New physics benchmark needed required-features=[physics] to avoid compiling it in a stripped build; fixed.",
+    "Unrestricted stripped-native integration build encounters existing optional uuid dependency in tests/load.rs; stripped unit/protocol gate passes. All stripped integration fixtures are not claimed qualified.",
+    "First final workspace retry failed existing document-validation timing threshold (245.3 ms); isolated retry and complete workspace retry pass.",
+    "ffigen requires --config ffigen.yaml; no-config attempt rejected. Correct generation passes. Final analysis fixes unnecessary import and null-aware-element lint.",
+    "Intermediate ownership migration compile errors (scene alias, dangling doc comments, IK Writer mechanical field replacement, private effect field visibility) corrected before qualification; developer logs remain under /tmp/f4-*."
+  ],
+  "logs": {
+    "target/foundation-baseline/f4-completion/aot-build.log": "92f15887212882d64b470c5de613939593d0389bb11e1084f4f93ed9ec889ebc",
+    "target/foundation-baseline/f4-completion/authoring-analyze-final.log": "f194629658c72972e53c08cfcf71f96a9e7dfc5115d48d9ae291f22084955b24",
+    "target/foundation-baseline/f4-completion/authoring-analyze.log": "5ff59e97100d25283923dad9f5c3fca8fe3004e0e106b353aedb36cf8edb2eee",
+    "target/foundation-baseline/f4-completion/authoring-final.log": "06fa666b629ff5be261105cd49e3609b1de11aa4c7808f54777af4a320d95aeb",
+    "target/foundation-baseline/f4-completion/authoring.log": "cee9b471685e02f9c9a654cbc0228fbf6fa7ad4b1a57bfec00000f9cb2743dfc",
+    "target/foundation-baseline/f4-completion/bulk-aot.jsonl": "7695c2ac1648cb920294f12e764da371656301071e49b0e0de72b0090235555a",
+    "target/foundation-baseline/f4-completion/bulk-native-build.log": "57a49bf1e94c6c30400ac8d456335e4e759dea66b4b0f71356cdd7c69eafd9be",
+    "target/foundation-baseline/f4-completion/bulk-native-final-build.log": "291cfec8bac9e54d0e4943bb68ebbd957fa37f0f7f5447868e5227e8ebc5ee48",
+    "target/foundation-baseline/f4-completion/bulk-native-final.jsonl": "48eccc779082cc99865fa0e94ee0c5e49dac34bc546c88362f9e4c97b527686a",
+    "target/foundation-baseline/f4-completion/bulk-native-qualified-build.log": "88dc74504eed82e7b9cc266cbc3c2691a9f385772cb8c932b2ee687e345fd01c",
+    "target/foundation-baseline/f4-completion/bulk-native-qualified.jsonl": "2fe56516176f6768f1a2b3a04ac0b7f291bc9f6995be0db105ef63c3c0236bbc",
+    "target/foundation-baseline/f4-completion/bulk-native.jsonl": "dbd6710577ae1419cf2b6c01193e2ca32b7455a86268d6def97c0ffa7420cb38",
+    "target/foundation-baseline/f4-completion/bulk-sdk-qualified.log": "a489e10a1e51330d4898606f92f7c8e11864624742dd58624ef259b973d882bd",
+    "target/foundation-baseline/f4-completion/bulk-sdk.log": "543e3ccb81cf33dfb864b38014ddce45b925c79baf43e9174305d2994652eda9",
+    "target/foundation-baseline/f4-completion/callbacks-qualified.log": "1b36441ecbf1f19d9bc1799baa2b636ffa2d3c5ad8baa547f90f661979492532",
+    "target/foundation-baseline/f4-completion/callbacks.log": "38830281877c3d8181b8026ac62cce4fb4b00e44936e979dbefe548be3ee5679",
+    "target/foundation-baseline/f4-completion/clippy-final.log": "c55adf6315ae148900d7936798a8ec64a2dc358bb16415a019c08c09665572e8",
+    "target/foundation-baseline/f4-completion/clippy-qualified.log": "1ca22a8252492a2f0d41bdd20464bca678d5216aeb2a09411010f894e1c9d064",
+    "target/foundation-baseline/f4-completion/clippy.log": "520d7484770011d34a19a21484516d8aede702f02e21120e6df7a82559ce8cc4",
+    "target/foundation-baseline/f4-completion/core-dependencies.log": "75def631ddb76908bb112d8a025fb98e090ed460211cad4a256b75fc95c0f5b2",
+    "target/foundation-baseline/f4-completion/core-flat-journal.log": "d19d1329a7c33c9b0932d7264aea57c40d6da9b2962091e736503b96ccb9a1a1",
+    "target/foundation-baseline/f4-completion/core-regressions-final.log": "3928b037087b65e0ca14a445d99569afc3e2efa5a9e7f900eacfb26e827bbbf6",
+    "target/foundation-baseline/f4-completion/core-regressions.log": "ddb6f13d4072f69e127db2b4aec3476317ab6c172c341f7c7daa116a556d9ca0",
+    "target/foundation-baseline/f4-completion/dependencies.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "target/foundation-baseline/f4-completion/development-f4-analyze.log": "e8706fb8d2ecc4b5742145ee57677a0e063a51b4e1a3be2c412b3f57681e0080",
+    "target/foundation-baseline/f4-completion/development-f4-check.log": "789a0ce71d026de017184b36686cad086fc00971ba4e756602bfa155fdda329d",
+    "target/foundation-baseline/f4-completion/development-f4-check2.log": "256920d31a6e3c8c7b7c6e25b6976dd361363b398cfdd33869c4affe88178eb2",
+    "target/foundation-baseline/f4-completion/development-f4-ecs.log": "7755cc4fd04905a1faa0161a0322036ba8affc36da1dbaa73a7151621dd9abe6",
+    "target/foundation-baseline/f4-completion/development-f4-ffigen.log": "0d823d5f0cad10d08f8dbf4784d92651e756deb9aec8220e07649a6e66c5d39c",
+    "target/foundation-baseline/f4-completion/development-f4-focused.log": "a6570e38b4d553cf061fa49f9b95d626cc5c40ddec041ed6b58cfb17562a93a4",
+    "target/foundation-baseline/f4-completion/development-f4-live.log": "3d4a4fa48ab3f43313a95c0f2439178b864b4b2690db3c5f4ae8438b2b71b0e3",
+    "target/foundation-baseline/f4-completion/development-f4-native.log": "c643da9e6fd86650cd92f96d1e5bfc2267e2c7c3a9d7d2c05a1a256589ecaa48",
+    "target/foundation-baseline/f4-completion/development-f4-owners.log": "7b50d98447450e49b05635115e7e632bff0e0f4b098edc8e955dee7b52775b9e",
+    "target/foundation-baseline/f4-completion/development-f4-owners2.log": "802a6695ede81e4776652f31999056d740c4e1adf8c0d7bfb237157b7ed9100e",
+    "target/foundation-baseline/f4-completion/development-f4-owners3.log": "f11fc337fe6c63a07eaf700dc7803751ca643467a78a776f30b43b68dd6a8448",
+    "target/foundation-baseline/f4-completion/development-f4-physics.log": "f3b24b1ba41cff219be6d5d6d538d31bebe11b4991870188a7170b0f5709da35",
+    "target/foundation-baseline/f4-completion/development-f4-scene.log": "e76ac6f3c4233857c4f87b3b7b5fc6cd3cc51bfad712fb3a2bd681e1dbe9a485",
+    "target/foundation-baseline/f4-completion/development-f4-sdk-focused.log": "41c31d55ebacc94995353cee0d1e5c873c2bcd28c56c43caccd82fb1d8073e8a",
+    "target/foundation-baseline/f4-completion/development-f4-tables.log": "95a27be092afd8ea001beeb2ec568d6c0b2569f96b38f43ce81e3fbabe0f08f6",
+    "target/foundation-baseline/f4-completion/development-f4-tables2.log": "9c42ca8f663c25b8ccbdf620858cf179fc5207810aef85bf879eb5fd5d374e65",
+    "target/foundation-baseline/f4-completion/diff-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "target/foundation-baseline/f4-completion/diff-qualified.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "target/foundation-baseline/f4-completion/document-timing-retry.log": "e4ca86582184c94fcb604e85d57a7fb3f055ad6db9a7c4dc2c3adcfdb68f953b",
+    "target/foundation-baseline/f4-completion/editor-analyze.log": "b4ef18cfac54b42e6f7438bdc5173e35a5ff85ff05c847c2e8ff1684d856241c",
+    "target/foundation-baseline/f4-completion/editor-final.log": "ec6bc840c090fce07af7f54387a20ff088ff95a2a782a61400154229abdac252",
+    "target/foundation-baseline/f4-completion/editor.log": "edaabea4b102c30221f63b6bb14fd041dceb7dd7c9fd289f0310dfa07bf60f29",
+    "target/foundation-baseline/f4-completion/ffigen-final.log": "0d823d5f0cad10d08f8dbf4784d92651e756deb9aec8220e07649a6e66c5d39c",
+    "target/foundation-baseline/f4-completion/ffigen.log": "6dec50870b410b50f375553d3d85d8951aa72b130df60bdd6efb5fd5311a81b8",
+    "target/foundation-baseline/f4-completion/flutter-analyze.log": "9a7e85bbba2e09a02cca77f5552f843692a6e5cd02ae40ac420ac48be816f9b0",
+    "target/foundation-baseline/f4-completion/flutter-final.log": "27f1190d6314d79e2858476af4297a4927c9f1b11c850b30c3c4c298b1af8753",
+    "target/foundation-baseline/f4-completion/flutter.log": "8bad1e3424c17ca8b85c5fd366824e0eada208a1b7c39deeb0b4a679369507e6",
+    "target/foundation-baseline/f4-completion/format-qualified.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "target/foundation-baseline/f4-completion/format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "target/foundation-baseline/f4-completion/library-identity.log": "b9f61821e31bd0f103ec11ac4812a7853efbcb645b1415a6b26e39a103e5b175",
+    "target/foundation-baseline/f4-completion/live-regressions.log": "2e6646a23cb97a53c0f9d6a199446cca0953493e57750ce9cd469dbbb221097a",
+    "target/foundation-baseline/f4-completion/native-cache.log": "2cac9f2de11415edb2f0f0b0b45b183dc88262b93f0ef440d779ed5307c00cdc",
+    "target/foundation-baseline/f4-completion/publication-qualified.log": "51e789c187b2957378b32a042b3cad13cffb75d831cd968184cb63024b18f51e",
+    "target/foundation-baseline/f4-completion/runtime-dependencies.log": "115bd1a7b6cb8db53567dcd991ebe5a4aff2d41f8d81efea2e4e7dfa98ebbd5a",
+    "target/foundation-baseline/f4-completion/rust-final.log": "785b600b1754b4d97e6bb1aa59c277790f734cc077e179cab9769b9d4e9c0b74",
+    "target/foundation-baseline/f4-completion/rust-qualified.log": "31fd5a235087d59feb2683ca73f915f4341a76d516a7835c8208a2e32693dff3",
+    "target/foundation-baseline/f4-completion/rust.log": "ac6dc7e9dec215d4bb699eff61c1be8f7a72b6b63ec39a971522ac7eddf2fcb3",
+    "target/foundation-baseline/f4-completion/sdk-analyze-final.log": "cc7c9fc5136e2347c8ebd02fe51dcac5ff4e2918e5083451a14bd26a1aafe8fc",
+    "target/foundation-baseline/f4-completion/sdk-analyze-qualified.log": "e8706fb8d2ecc4b5742145ee57677a0e063a51b4e1a3be2c412b3f57681e0080",
+    "target/foundation-baseline/f4-completion/sdk-analyze.log": "cc7c9fc5136e2347c8ebd02fe51dcac5ff4e2918e5083451a14bd26a1aafe8fc",
+    "target/foundation-baseline/f4-completion/sdk-final.log": "06231f3a2f66d93635b0606126cd6b2f6dbbd7dd8cd551c35fcab9537a7c2a76",
+    "target/foundation-baseline/f4-completion/sdk.log": "5eb81940027d865a66a3417a505ee3b6c076cc840b8644e41fe424570b4f68b7",
+    "target/foundation-baseline/f4-completion/stripped-core-final.log": "9b63d490401bef618fa869d5cb5862436850939ad0b302e1aaeb1af92983fda8",
+    "target/foundation-baseline/f4-completion/stripped-core.log": "32e12c304f71084ee6d78390cf125f85bf0af6cf5051845e1098dd6721998ba4",
+    "target/foundation-baseline/f4-completion/stripped-native-final.log": "11aec90ea85fc62c65f89a0e1bb00793f3b472174c793c5408ab696da1c49594",
+    "target/foundation-baseline/f4-completion/stripped-native.log": "dd667bc293db7070929f3948d3f8a116ffcb9b5278a3c310142340f47c0817ef",
+    "target/foundation-baseline/f4-completion/sync-bench-build.log": "cfc618eb9c950f74b104d0d1e2f1d600ab1eb332d2d1538a9a1061ca1ccb4fe3",
+    "target/foundation-baseline/f4-completion/sync-bench-final-build.log": "c3c9401d9e4d4bcf43d3d9f86f31b963887b12c046d9651d3116053b8ce4619b",
+    "target/foundation-baseline/f4-completion/sync-bench-final.jsonl": "ca0e1e7118580e976199c3e6aa1cc0628c3cfb49f37814ad84871d428e4ce1dd",
+    "target/foundation-baseline/f4-completion/sync-bench-qualified-build.log": "cb01791751f2f5f265f795705a1686228ddd138c2f041aebfa8faa4cc2f491cf",
+    "target/foundation-baseline/f4-completion/sync-bench-qualified.jsonl": "30b607a0827509ad89b4bd4d9cab9036bef10b0b724b7b67a678c21d0278cf49",
+    "target/foundation-baseline/f4-completion/sync-bench.jsonl": "c57f1d38941d7a8b48057224b3b731a08d16c054974904a609ae762b98d8a4bf"
+  },
+  "source_sha256": {
+    "crates/fynkel_authoring/src/live.rs": "4eb275b89339d2e9420dd22b159829b6655f9ce322535ab6226566211601ebde",
+    "crates/fynkel_authoring/tests/live.rs": "106f0a0f25193e33e056e3b2ed56ccdc0c30f631c708261afe728e913416c0fd",
+    "crates/fynkel_core/Cargo.toml": "8a56114e11506209d948ca271ad88c738590311a59a984681652434aaee30b0b",
+    "crates/fynkel_core/examples/f4_sync_bench.rs": "783ce287c1faf3891a942f63594b18ab52fc31df0c4a9124ffb98a850b62325e",
+    "crates/fynkel_core/src/extensions.rs": "da5bc13da52cc6d54df030cfb12bf2821cd6db0e4ba18e7f605b58df630fef9d",
+    "crates/fynkel_core/src/lib.rs": "2e126d02fb14ac9f778b68fcc4b27b6e82e45e1ef12ebf66ea5f4d73b91284ec",
+    "crates/fynkel_core/src/lifecycle.rs": "5346af40da67a5ff97f10a84922d8d3feee799d8659def2de11bd8531b32202e",
+    "crates/fynkel_core/src/load.rs": "2c57b864f34fab8bc9d28e6de27bae1e75fb4b74f84a0e97a2543340d6867541",
+    "crates/fynkel_core/src/registry.rs": "953f85196c8c9a9c44fa50960a58c9f6bf9d86815491c260c9114e4ef13b95b9",
+    "crates/fynkel_core/src/world.rs": "6be14b28f2c384c6071fb6b3bf5c464fc2c01246bb21951b29d8a285e1d77ebb",
+    "crates/fynkel_core/src/world/animation.rs": "9e8f71dfd2a6f72898a6305a84d5640e7a2361cd9af40a21cf176f9affffcf76",
+    "crates/fynkel_core/src/world/audio.rs": "a9fc2d81b0cbe3f0a94f44b50bd23bee53388a9c3b233297b0819d26978e32b4",
+    "crates/fynkel_core/src/world/catalogue.rs": "82f31962155e10a73c744d5ed7e2898ddfe6054c798a0a8e8ffb8e0e6f401c5d",
+    "crates/fynkel_core/src/world/gameplay.rs": "0b95efece4acba8bed474dd75c7d2cc5ed05be4a94c50905fba08066d9d06a46",
+    "crates/fynkel_core/src/world/gameplay_live.rs": "9f798ec846ff944da39b129000cca5db9502562752a462bf4d262ce30b15683e",
+    "crates/fynkel_core/src/world/ik.rs": "cdeb0dabdb6b1bd08cbc407277768fdb9545ed3260afb6f562c3c98a4ef08fb1",
+    "crates/fynkel_core/src/world/projection.rs": "bfb974599bd00f2183a3c6ffca1ffe036b1da4869734c9c5f897f4183dc7b004",
+    "crates/fynkel_core/src/world/state.rs": "f337582a7c830a68fe5ff92cc0c71be8730fa5966190bf5d96ace4e48fc032a3",
+    "crates/fynkel_core/src/world/synchronization.rs": "3983e6b420923e27e7e19a1318778903c34f6d2b6c55410cfb3f056e2ce8bfdf",
+    "crates/fynkel_core/src/world/systems.rs": "6b05cabbc87de0183dcb257a8486b69034b8c3d9f7ebd591ab8c3fa7563d3fd4",
+    "crates/fynkel_core/tests/f4_synchronization.rs": "3c0fc8e4c31e98dd76dc4613a7a487afb51ec642ba72b54dd18faa0747b81c46",
+    "crates/fynkel_ecs/src/lib.rs": "a94123d4b362137a941ebd005bf6654e3112fee8e22e72eba9a009b3fb4db8c3",
+    "crates/fynkel_ecs/tests/changes.rs": "10f87b05ecb495c4ff0aa9f41abdccbcdadf6942c96568108e1d326727cf380f",
+    "crates/fynkel_native/include/fynkel.h": "266ce6a409399d16d5464b9bc0c015bcddb6de6422e56fd3633126d11915cb4b",
+    "crates/fynkel_native/src/authoring.rs": "860661ebb7dce7b62382b25c557735ddabe2a87002940a1cffd6eff2e84eecbd",
+    "crates/fynkel_native/src/gameplay.rs": "0f0220310c64ef1b9efeea5f9fdd851d2358f0b1e6561483e237ee28eef10183",
+    "crates/fynkel_native/src/lib.rs": "73abac07b383b2cb9cd007533c5a67dca9457e8f29037c0fb0c44662cc398da3",
+    "crates/fynkel_native/src/load.rs": "f5cba02f58988dcd2d348bf1b0e52f1737864c69a66bafc5fdbdae328b3e779e",
+    "crates/fynkel_native/src/resources.rs": "7f19bc344ef27d2b22a9d666e80ac0f9e04529bee3bcd6c08ad5ecc72bc2491c",
+    "crates/fynkel_native/tests/f4_cache.rs": "d7f47d500526da312196d2b374b3c0d4701194b100834356c74bba143561448b",
+    "crates/fynkel_physics/src/sim.rs": "a8d69446d6c172c333fa55147e04f16a2ffe839c14da0dca420fc5150d89b2b0",
+    "crates/fynkel_scene/src/lib.rs": "8673547788bdb6ac6d60dc0b4115ee211b027ff46727ed1972cd0d234bf788a8",
+    "crates/fynkel_scene/src/sync.rs": "e704705a52f30088fe70a626b4d1bee2efca3e07cde604e6fac64c92871f2bc3",
+    "docs/README.md": "146348f51bbbf0ddc54c467ff6993325885fa4f25d19966ab341505dc4343c2e",
+    "docs/decisions/ADR-0054-ecs-change-tracking-boundary.md": "feda626de55b23ecb6e75290d9502f9017c09801f2613142fe06dbf4eb3100b7",
+    "docs/decisions/ADR-0055-incremental-synchronization-and-publication.md": "b3540383113bd449c5120ff63b6a27282319e58f1898579ca58639849c355194",
+    "docs/foundation-f4-gate-report.md": "3953e9e43ba03b337d8a6c113cf4732ed34825a6bbdafb3e602530a926976a19",
+    "docs/foundation-roadmap.md": "9b6022f67108b8a6be426a047986dc774a8303f3c68de96473f24fff11407243",
+    "packages/fynkel/lib/src/gameplay.dart": "f8b76ece70aed92bccc1690d2b37d9206d9f4b3f67b36fc8d8909866043194d7",
+    "packages/fynkel/lib/src/native/bridge.dart": "daeef181bf7721faa709d2b802cdbb3df7dbfeddeed17f7f9c6c002ae63f3148",
+    "packages/fynkel/lib/src/native/fynkel_bindings.g.dart": "946d73b10af8fa0c45b11dd149c2791e501539e1e98a0722b992555c302ae3aa",
+    "packages/fynkel/lib/src/wire/buffers.dart": "d1c75d12b57ea9fd1ddca0701ec3a96c7763dd080540ac33097fb31de2c845e0",
+    "packages/fynkel/test/data_asset_test.dart": "bb93bd4eb9016ac07a916c6a02625d5e683c191d967be8527a9fc8b258818d1d",
+    "packages/fynkel/test/f4_publication_test.dart": "5b48b6f1d241e4431234c3ed824b4992d04e90917702a672d99d964ae43a9ff1",
+    "packages/fynkel/tool/foundation_callbacks.dart": "6917ecbc8395abecec57e9582c64dc0835245dcf1d3c47a697b5a8f9840a2fe0",
+    "packages/fynkel_authoring/lib/src/live.dart": "ce1dbe758e4413eebf961ab145b58a687df570cd0d09a231acfe1f3ab992250c",
+    "packages/fynkel_authoring/test/live_test.dart": "b55b048505b9f44d9a8622fb10d812338dd286a0b4c0b58792e44b6723749af0"
+  }
+}

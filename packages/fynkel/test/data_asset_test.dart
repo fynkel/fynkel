@@ -143,6 +143,17 @@ void main() {
     }
   });
 
+  test('published entity bytes survive scene replacement and old handles retire', () {
+    final w = world()..loadProject(project);
+    final before = w.native.query(QueryKind.allEntities);
+    final handles = before.entities();
+    final bytes = before.bytes.toList();
+    w.loadScene(arena);
+    expect(before.bytes, bytes);
+    expect(before.entities(), handles);
+    for (final e in handles) { expect(w.native.contains(e), isFalse); }
+  });
+
   test('a scene load sets data-typed fields to the shared instances', () {
     final w = world();
     final warnings = <LoadDiagnostic>[];

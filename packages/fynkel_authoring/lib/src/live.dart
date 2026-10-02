@@ -32,7 +32,7 @@ final class LiveEntity {
         spawned: j['spawned'] == true,
         layer: (j['layer'] as num?)?.toInt() ?? 0,
         childCount: (j['children'] as num?)?.toInt() ?? 0,
-        types: [for (final t in j['types'] as List? ?? const []) t as String],
+        types: List.unmodifiable([for (final t in j['types'] as List? ?? const []) t as String]),
         activeSelf: j['activeSelf'] != false,
         activeInHierarchy: j['activeInHierarchy'] != false,
         persistent: j['persistent'] == true,
@@ -113,7 +113,7 @@ final class LiveEntityState {
   }
 }
 
-/// A running world by its native `FynkelWorld*` address. Holds nothing:
+/// A running world by its native `FynkelWorld*` address and a derived table cache:
 /// the world belongs to the game, so drop this with it (a call on a
 /// destroyed world is undefined — the play scope says when it goes).
 final class LiveWorld {
@@ -126,12 +126,13 @@ final class LiveWorld {
   /// The running world's tick at the last [entities] read.
   int tick = 0;
 
-  /// The table's revision at the last [entities] or [changedEntities]
-  /// read (a hash of every row; it changes when an entity is spawned,
-  /// destroyed, renamed, re-parented, re-layered, re-tagged or switched
-  /// on or off or gains or loses a native component — not when a value
-  /// moves).
-  String? revision;
+  /// Consumer cursor from the last successful table read. It may advance
+  /// through unrelated value writes even when [changedEntities] returns null.
+  /// Keep it with this world's private row cache; it is not a content hash.
+  String? _revision;
+  String? get revision => _revision;
+  Map<EntityRef, LiveEntity> _entityRows = {};
+  List<EntityRef> _entityOrder = [];
 
   /// Every entity, parents before children: the loaded scenes' roots in
   /// document order, then what the game made; children in sibling order.
@@ -142,11 +143,23 @@ final class LiveWorld {
   List<LiveEntity>? changedEntities() => _entities(revision);
 
   List<LiveEntity>? _entities(String? since) {
-    final r = call('entities', {'since': ?since});
+    final r = call('entities', {'since': ?since, 'deltas': true});
     tick = (r['tick'] as num?)?.toInt() ?? tick;
-    revision = r['revision'] as String?;
+    _revision = r['revision'] as String?;
     if (r['unchanged'] == true) return null;
-    return [for (final e in r['entities'] as List? ?? const []) LiveEntity.fromJson(_mapOf(e))];
+    if (r.containsKey('entities')) {
+      final rows = [for (final e in r['entities'] as List) LiveEntity.fromJson(_mapOf(e))];
+      _entityRows = {for (final e in rows) e.handle: e};
+      _entityOrder = [for (final e in rows) e.handle];
+    } else {
+      for (final e in r['removed'] as List? ?? const []) { _entityRows.remove(EntityRef.fromJson(e)); }
+      for (final e in r['changes'] as List? ?? const []) {
+        final row = LiveEntity.fromJson(_mapOf(e));
+        _entityRows[row.handle] = row;
+      }
+      if (r['order'] case final List order) { _entityOrder = [for (final e in order) EntityRef.fromJson(e)]; }
+    }
+    return List.unmodifiable([for (final e in _entityOrder) ?_entityRows[e]]);
   }
 
   /// [id]'s name, parent, world pose and native components; throws an

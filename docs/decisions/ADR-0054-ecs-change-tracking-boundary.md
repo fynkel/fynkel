@@ -1,6 +1,6 @@
 # ADR-0054: ECS change tracking boundary
 
-Status: Accepted (F4 mutation tracking and conditional identity synchronization)
+Status: Accepted (F4 mutation tracking and conditional identity synchronization). The completed delta/publication contract is specified by [ADR-0055](ADR-0055-incremental-synchronization-and-publication.md); statements below about remaining F4 work describe the earlier slices.
 
 ## Problem
 

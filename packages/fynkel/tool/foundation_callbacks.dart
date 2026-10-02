@@ -47,7 +47,7 @@ void main() {
           'ffiCallsPerSample': calls ~/ 10,
           'identitySnapshotsPerSample': snapshots ~/ 10,
           'identityBytesPerSample': stateBytes ~/ 10,
-          'limitation': 'Identity/name changes still request a full snapshot; this workload measures transform-only callback edits, not sparse renames or structural churn.',
+          'limitation': 'This workload measures transform-only callback edits; sparse renames and destruction are qualified separately.',
         });
       } finally {
         world.dispose();

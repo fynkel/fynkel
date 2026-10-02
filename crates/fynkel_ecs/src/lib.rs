@@ -58,6 +58,7 @@ pub mod internal {
             Q::Fetch::for_each_borrow(|ty, unique| {
                 if unique {
                     changes.components.insert(ty, changes.values);
+                    changes.record(None, Some(ty), false);
                 }
             });
             self.inner.query_mut::<Q>()
@@ -165,6 +166,38 @@ pub struct ComponentStamp {
     values: u64,
 }
 
+/// Consumer-owned position in a bounded world-local mutation journal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChangeCursor {
+    world: WorldId,
+    revision: u64,
+}
+impl ChangeCursor {
+    /// World-local wire token; zero requests initial state.
+    pub fn token(self) -> u64 {
+        self.revision
+            .checked_add(1)
+            .expect("change cursor exhausted")
+    }
+}
+
+/// Owned affected identities. Reset requires rebuilding from current storage;
+/// otherwise entities includes removed identities and is sorted/deduplicated.
+#[derive(Debug)]
+pub struct ChangeSet {
+    pub cursor: ChangeCursor,
+    pub reset: bool,
+    pub entities: Vec<Entity>,
+}
+
+const CHANGE_HISTORY: usize = 16384;
+struct Change {
+    revision: u64,
+    entity: Option<Entity>,
+    component: Option<std::any::TypeId>,
+    structural: bool,
+}
+
 #[derive(Default)]
 struct Changes {
     entities: u64,
@@ -172,20 +205,43 @@ struct Changes {
     values: u64,
     writers: usize,
     components: std::collections::HashMap<std::any::TypeId, u64>,
+    history: std::collections::VecDeque<Change>,
+    history_floor: u64,
+    entities_at: u64,
+    structure_at: u64,
 }
 
 impl Changes {
+    fn record(
+        &mut self,
+        entity: Option<Entity>,
+        component: Option<std::any::TypeId>,
+        structural: bool,
+    ) {
+        if self.history.len() == CHANGE_HISTORY {
+            self.history_floor = self.history.pop_front().unwrap().revision;
+        }
+        self.history.push_back(Change {
+            revision: self.values,
+            entity,
+            component,
+            structural,
+        });
+    }
+
     fn advance(&mut self, entities: bool, structure: bool) {
         // Exhaustion fails before granting a write, never silently aliases an
         // old stamp. No component write is granted after exhaustion.
         self.values = self.values.checked_add(1).expect("ECS revision exhausted");
         if structure {
+            self.structure_at = self.values;
             self.structure = self
                 .structure
                 .checked_add(1)
                 .expect("ECS revision exhausted");
         }
         if entities {
+            self.entities_at = self.values;
             self.entities = self
                 .entities
                 .checked_add(1)
@@ -281,6 +337,91 @@ impl World {
         })
     }
 
+    /// Current settled journal position. Same writer-lifetime rule as stamps.
+    pub fn change_cursor(&self) -> Option<ChangeCursor> {
+        let changes = self.changes.lock().unwrap();
+        (changes.writers == 0).then_some(ChangeCursor {
+            world: self.id,
+            revision: changes.values,
+        })
+    }
+
+    /// Decode a token only for this world. Callers must keep tokens with their
+    /// originating world; in-process consumers should retain ChangeCursor.
+    pub fn cursor_from_token(&self, token: u64) -> Option<ChangeCursor> {
+        token.checked_sub(1).map(|revision| ChangeCursor {
+            world: self.id,
+            revision,
+        })
+    }
+
+    /// Changes since a consumer's cursor. Entity creation/destruction always
+    /// participates. `all_structure` also includes any component add/remove.
+    /// Bulk writes invalidate their declared component domains; overflow,
+    /// foreign/future cursors and initial reads explicitly request a reset.
+    /// Runtime cost is proportional to retained changes since the cursor.
+    pub fn changes_since(
+        &self,
+        cursor: Option<ChangeCursor>,
+        components: &[std::any::TypeId],
+        all_structure: bool,
+    ) -> Option<ChangeSet> {
+        let changes = self.changes.lock().unwrap();
+        if changes.writers != 0 {
+            return None;
+        }
+        let current = ChangeCursor {
+            world: self.id,
+            revision: changes.values,
+        };
+        let mut result = ChangeSet {
+            cursor: current,
+            reset: false,
+            entities: Vec::new(),
+        };
+        let Some(cursor) = cursor.filter(|c| c.world == self.id && c.revision <= changes.values)
+        else {
+            result.reset = true;
+            return Some(result);
+        };
+        let relevant = changes.entities_at > cursor.revision
+            || (all_structure && changes.structure_at > cursor.revision)
+            || components.iter().any(|ty| {
+                changes
+                    .components
+                    .get(ty)
+                    .is_some_and(|revision| *revision > cursor.revision)
+            });
+        // Unrelated dense gameplay traffic must not evict a clean consumer.
+        // Domain revisions establish unchanged state even beyond retained history.
+        if !relevant {
+            return Some(result);
+        }
+        if cursor.revision < changes.history_floor {
+            result.reset = true;
+            return Some(result);
+        }
+        let first = changes
+            .history
+            .partition_point(|c| c.revision <= cursor.revision);
+        for change in changes.history.iter().skip(first) {
+            if change.component.is_none()
+                || (all_structure && change.structural)
+                || change.component.is_some_and(|ty| components.contains(&ty))
+            {
+                let Some(entity) = change.entity else {
+                    result.reset = true;
+                    result.entities.clear();
+                    return Some(result);
+                };
+                result.entities.push(entity);
+            }
+        }
+        result.entities.sort_unstable();
+        result.entities.dedup();
+        Some(result)
+    }
+
     pub fn len(&self) -> u32 {
         self.live
     }
@@ -328,7 +469,9 @@ impl World {
         };
         let slot = &mut self.slots[slot_index as usize];
         let entity = Entity::new(self.id, slot_index, slot.generation);
-        self.changes.get_mut().unwrap().advance(true, true);
+        let changes = self.changes.get_mut().unwrap();
+        changes.advance(true, true);
+        changes.record(Some(entity), None, true);
         builder.inner.add(Handle(entity));
         let raw = self.inner.spawn(builder.inner.build());
         slot.raw = Some(raw);
@@ -344,7 +487,9 @@ impl World {
     /// from inside iteration.
     pub fn despawn(&mut self, entity: Entity) -> Result<()> {
         let raw = self.require(entity)?;
-        self.changes.get_mut().unwrap().advance(true, true);
+        let changes = self.changes.get_mut().unwrap();
+        changes.advance(true, true);
+        changes.record(Some(entity), None, true);
         self.inner
             .despawn(raw)
             .expect("slot mapping and hecs disagree");
@@ -393,6 +538,7 @@ impl World {
         changes
             .components
             .insert(std::any::TypeId::of::<T>(), changes.values);
+        changes.record(Some(entity), Some(std::any::TypeId::of::<T>()), structural);
         self.inner.insert_one(raw, component).expect("live entity");
         Ok(())
     }
@@ -407,6 +553,7 @@ impl World {
         changes
             .components
             .insert(std::any::TypeId::of::<T>(), changes.values);
+        changes.record(Some(entity), Some(std::any::TypeId::of::<T>()), true);
         self.inner
             .remove_one::<T>(raw)
             .map_err(|_| EcsError::MissingComponent(entity))
@@ -436,6 +583,7 @@ impl World {
                 changes
                     .components
                     .insert(std::any::TypeId::of::<T>(), revision);
+                changes.record(Some(entity), Some(std::any::TypeId::of::<T>()), false);
                 changes.writers = changes
                     .writers
                     .checked_add(1)

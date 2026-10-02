@@ -498,7 +498,7 @@ impl World {
         if data.duration <= 0.0 {
             return None;
         }
-        let root = BlendSlot::resolve(&self.ecs, animator, clip.clone(), data).root?;
+        let root = BlendSlot::resolve(&self.gameplay.ecs, animator, clip.clone(), data).root?;
         Some((root.lap / data.duration, root.lap_yaw / data.duration))
     }
 
@@ -558,8 +558,8 @@ impl World {
         Vec<crate::schema::AnimatorLayerStateRecord>,
         Vec<crate::schema::AnimatorParameterRecord>,
     )> {
-        let animator = self.ecs.get::<Animator>(entity).ok()?;
-        let run = self.ecs.get::<AnimatorRun>(entity).ok()?;
+        let animator = self.gameplay.ecs.get::<Animator>(entity).ok()?;
+        let run = self.gameplay.ecs.get::<AnimatorRun>(entity).ok()?;
         let play = run.controller.as_ref()?;
         (animator.controller.as_ref() == Some(&play.controller))
             .then(|| controller::state(entity, play))
@@ -628,6 +628,7 @@ impl World {
         }
         if op.controller_transport()
             && self
+                .gameplay
                 .ecs
                 .get::<Animator>(entity)
                 .is_ok_and(|a| a.controller != before.controller)
@@ -655,7 +656,7 @@ impl World {
         if !self.check_entity(index, lane, entity, "animate") {
             return false;
         }
-        if !self.ecs.has::<Animator>(entity) {
+        if !self.gameplay.ecs.has::<Animator>(entity) {
             return self.reject(
                 index,
                 lane,
@@ -707,6 +708,7 @@ impl World {
         // ADR-0032: a controller owns what plays; the clip ops are for an
         // animator without one, the state and parameter ops for one with.
         let controlled = self
+            .gameplay
             .ecs
             .get::<Animator>(entity)
             .ok()
@@ -732,8 +734,8 @@ impl World {
                 bad("the animator runs a controller: play its states by name and set its parameters (setFloat, setInteger, setBool, setTrigger)"),
             );
         }
-        if !self.ecs.has::<AnimatorRun>(entity) {
-            let _ = self.ecs.insert(entity, AnimatorRun::default());
+        if !self.gameplay.ecs.has::<AnimatorRun>(entity) {
+            let _ = self.gameplay.ecs.insert(entity, AnimatorRun::default());
         }
         if controller_op {
             let Some(c) = controlled else {
@@ -751,7 +753,7 @@ impl World {
                 );
             };
             let result = {
-                let Ok(mut run) = self.ecs.get_mut::<AnimatorRun>(entity) else {
+                let Ok(mut run) = self.gameplay.ecs.get_mut::<AnimatorRun>(entity) else {
                     return false;
                 };
                 match controller::play_for(&self.anim.controllers, &c, &mut run.controller) {
@@ -810,10 +812,14 @@ impl World {
                 ),
             };
         }
-        let committed = self.ecs.copy::<Animator>(entity).expect("checked animator");
+        let committed = self
+            .gameplay
+            .ecs
+            .copy::<Animator>(entity)
+            .expect("checked animator");
         let target_clip = committed.clip;
         let animator = before;
-        let Ok(mut run) = self.ecs.get_mut::<AnimatorRun>(entity) else {
+        let Ok(mut run) = self.gameplay.ecs.get_mut::<AnimatorRun>(entity) else {
             return false;
         };
         match op {
@@ -932,12 +938,13 @@ impl World {
         let mut animators = std::mem::take(&mut self.anim.order);
         animators.clear();
         animators.extend(
-            self.ecs
+            self.gameplay
+                .ecs
                 .query::<&Handle>()
                 .with::<&Animator>()
                 .without::<&scene::Inactive>()
                 .iter()
-                .map(|h| (depth_of(&self.ecs, h.0), h.0)),
+                .map(|h| (depth_of(&self.gameplay.ecs, h.0), h.0)),
         );
         animators.sort_unstable();
         let mut pose = std::mem::take(&mut self.anim.pose);
@@ -947,11 +954,11 @@ impl World {
         let mut transforms = Vec::new();
         for &(_, entity) in &animators {
             count += 1;
-            let Ok(mut animator) = self.ecs.copy::<Animator>(entity) else {
+            let Ok(mut animator) = self.gameplay.ecs.copy::<Animator>(entity) else {
                 continue;
             };
             let previous_animator = animator.clone();
-            let Ok(mut run) = self.ecs.get_mut::<AnimatorRun>(entity) else {
+            let Ok(mut run) = self.gameplay.ecs.get_mut::<AnimatorRun>(entity) else {
                 continue;
             };
             let mut out = AnimatorTick {
@@ -974,7 +981,7 @@ impl World {
                 match controller::play_for(&self.anim.controllers, c, &mut run.controller) {
                     Ok(play) => {
                         let tables = controller::Tables {
-                            ecs: &self.ecs,
+                            ecs: &self.gameplay.ecs,
                             clips: &self.anim.clips,
                             blends: &self.anim.blends,
                         };
@@ -1038,18 +1045,19 @@ impl World {
                     let names: Vec<&str> =
                         clip.channels.iter().map(|c| c.target.as_str()).collect();
                     if run.resolved.as_ref() != Some(&clip_ref)
-                        || !targets_valid(&self.ecs, &run.targets, &names)
+                        || !targets_valid(&self.gameplay.ecs, &run.targets, &names)
                     {
                         switched(&mut run);
                         run.blend.clear();
-                        run.targets = resolve_names(&self.ecs, entity, &names);
+                        run.targets = resolve_names(&self.gameplay.ecs, entity, &names);
                         run.resolved = Some(clip_ref.clone());
                         let targets = std::mem::take(&mut run.targets);
                         let mut reference = std::mem::take(&mut run.reference);
                         reference.clear();
                         clip.sample(0.0, &targets, &mut reference);
                         run.reference = reference;
-                        run.root = RootChannels::resolve(&self.ecs, entity, clip, &targets);
+                        run.root =
+                            RootChannels::resolve(&self.gameplay.ecs, entity, clip, &targets);
                         run.targets = targets;
                     }
                     duration = clip.duration.max(0.0);
@@ -1061,7 +1069,7 @@ impl World {
                     // like a missing clip and the space waits for it.
                     if run.resolved.as_ref() != Some(&clip_ref)
                         || run.blend.len() != space.points.len()
-                        || run.blend.iter().any(|s| !s.valid(&self.ecs))
+                        || run.blend.iter().any(|s| !s.valid(&self.gameplay.ecs))
                     {
                         switched(&mut run);
                         let mut slots = Vec::with_capacity(space.points.len());
@@ -1069,7 +1077,7 @@ impl World {
                         for p in &space.points {
                             match self.anim.clips.get(&p.clip) {
                                 Some(c) => slots.push(BlendSlot::resolve(
-                                    &self.ecs,
+                                    &self.gameplay.ecs,
                                     entity,
                                     p.clip.clone(),
                                     c,
@@ -1177,7 +1185,13 @@ impl World {
                                 pin_root(&mut pose, clip, root, run.time);
                                 if advanced {
                                     if let Some((delta, axis, yaw)) = root_delta(
-                                        &self.ecs, entity, clip, root, prev, next_raw, looping,
+                                        &self.gameplay.ecs,
+                                        entity,
+                                        clip,
+                                        root,
+                                        prev,
+                                        next_raw,
+                                        looping,
                                     ) {
                                         run.root_delta = delta;
                                         run.root_yaw = yaw;
@@ -1257,7 +1271,7 @@ impl World {
                                     let s = &run.blend[k];
                                     s.root.as_ref().and_then(|root| {
                                         root_delta(
-                                            &self.ecs,
+                                            &self.gameplay.ecs,
                                             entity,
                                             &s.clip,
                                             root,
@@ -1325,7 +1339,7 @@ impl World {
                 // transforms hold now (the base pose of this tick).
                 fade_pose.clear();
                 fade_pose.add_delta(&pose, &run.reference, weight, &mut |e| {
-                    self.ecs.copy::<Transform>(e).ok()
+                    self.gameplay.ecs.copy::<Transform>(e).ok()
                 });
                 std::mem::swap(&mut pose, &mut fade_pose);
             }
@@ -1333,7 +1347,7 @@ impl World {
             transforms.clear();
             if weight > 0.0 {
                 for entry in &pose.entries {
-                    let Ok(current) = self.ecs.copy::<Transform>(entry.entity) else {
+                    let Ok(current) = self.gameplay.ecs.copy::<Transform>(entry.entity) else {
                         continue;
                     };
                     let target = entry.apply_to(current);
@@ -1397,7 +1411,7 @@ impl World {
 
         for t in ticks.drain(..) {
             if let Some(clip) = t.unavailable {
-                self.diagnostics.push(Diagnostic {
+                self.publication.diagnostics.push(Diagnostic {
                     command_index: u32::MAX,
                     lane: Lane::Simulation,
                     code: DiagnosticCode::CLIP_UNAVAILABLE,
@@ -1405,8 +1419,7 @@ impl World {
                     component: ComponentId::ANIMATOR,
                     message: format!(
                         "animator: {what} {clip} is not registered with the world (not in the loaded scene's closure?)",
-                        what = if self
-                            .ecs
+                        what = if self.gameplay.ecs
                             .get::<Animator>(t.entity)
                             .is_ok_and(|a| a.controller.as_ref() == Some(&clip))
                         {
@@ -1418,7 +1431,7 @@ impl World {
                 });
             }
             for (clip, name) in t.markers {
-                self.events.push(Event {
+                self.publication.events.push(Event {
                     tick,
                     payload: EventPayload::AnimationMarker {
                         entity: t.entity,
@@ -1428,7 +1441,7 @@ impl World {
                 });
             }
             for (layer, entered, state, from) in t.states {
-                self.events.push(Event {
+                self.publication.events.push(Event {
                     tick,
                     payload: if entered {
                         EventPayload::AnimatorStateEntered {
@@ -1447,7 +1460,7 @@ impl World {
                 });
             }
             for clip in t.one_shots_ended {
-                self.events.push(Event {
+                self.publication.events.push(Event {
                     tick,
                     payload: EventPayload::AnimationEnded {
                         entity: t.entity,
@@ -1456,7 +1469,7 @@ impl World {
                 });
             }
             if let Some(clip) = t.ended {
-                self.events.push(Event {
+                self.publication.events.push(Event {
                     tick,
                     payload: EventPayload::AnimationEnded {
                         entity: t.entity,
@@ -1480,15 +1493,16 @@ impl World {
     /// reported, not applied), else the entity's local transform moves
     /// and turns by it.
     fn apply_root_motion(&mut self, entity: Entity, delta: Vec3, axis: Vec3, yaw: f32, dt: f32) {
-        if self.ecs.has::<CharacterController>(entity) {
+        if self.gameplay.ecs.has::<CharacterController>(entity) {
             if dt <= 0.0 {
                 return;
             }
             let parent_rotation = self
+                .gameplay
                 .ecs
                 .get::<Parent>(entity)
                 .ok()
-                .and_then(|p| scene::world_rotation(&self.ecs, p.0).ok())
+                .and_then(|p| scene::world_rotation(&self.gameplay.ecs, p.0).ok())
                 .unwrap_or(Quat::IDENTITY);
             let velocity = parent_rotation * delta / dt;
             if !velocity.is_finite() {
@@ -1505,7 +1519,7 @@ impl World {
             self.physics.add_root_motion(entity, velocity);
             return;
         }
-        let Ok(current) = self.ecs.copy::<Transform>(entity) else {
+        let Ok(current) = self.gameplay.ecs.copy::<Transform>(entity) else {
             return;
         };
         let rotation = if yaw != 0.0 && axis != Vec3::ZERO {
@@ -1540,7 +1554,8 @@ impl World {
         let mut skinned = std::mem::take(&mut self.scratch.entities);
         skinned.clear();
         skinned.extend(
-            self.ecs
+            self.gameplay
+                .ecs
                 .query::<&Handle>()
                 .with::<&SkinComponent>()
                 .without::<&scene::Inactive>()
@@ -1552,10 +1567,10 @@ impl World {
         let mut count = 0;
         for &entity in &skinned {
             count += 1;
-            let Ok(component) = self.ecs.get::<SkinComponent>(entity) else {
+            let Ok(component) = self.gameplay.ecs.get::<SkinComponent>(entity) else {
                 continue;
             };
-            let Ok(mut run) = self.ecs.get_mut::<SkinRun>(entity) else {
+            let Ok(mut run) = self.gameplay.ecs.get_mut::<SkinRun>(entity) else {
                 continue;
             };
             let skin_ref = component.skin.clone();
@@ -1572,18 +1587,18 @@ impl World {
             // The skeleton root is the referenced object (ADR-0035), the
             // tree root when None; a destroyed one leaves the bind pose.
             let expected = match component.skeleton.get() {
-                None => Some(tree_root(&self.ecs, entity)),
-                Some(r) => self.ecs.has::<Transform>(r).then_some(r),
+                None => Some(tree_root(&self.gameplay.ecs, entity)),
+                Some(r) => self.gameplay.ecs.has::<Transform>(r).then_some(r),
             };
             let root_ok = run.root.is_some() && run.root == expected;
             if run.resolved.as_ref() != Some(&skin_ref)
                 || !root_ok
-                || !targets_valid(&self.ecs, &run.joints, &names)
+                || !targets_valid(&self.gameplay.ecs, &run.joints, &names)
             {
                 let root = expected;
                 run.root = root;
                 run.joints = match root {
-                    Some(r) => resolve_names(&self.ecs, r, &names),
+                    Some(r) => resolve_names(&self.gameplay.ecs, r, &names),
                     None => vec![None; names.len()],
                 };
                 run.resolved = Some(skin_ref);
@@ -1591,7 +1606,7 @@ impl World {
         }
         self.scratch.entities = skinned;
         for (entity, skin) in unavailable {
-            self.diagnostics.push(Diagnostic {
+            self.publication.diagnostics.push(Diagnostic {
                 command_index: u32::MAX,
                 lane: Lane::Simulation,
                 code: DiagnosticCode::SKIN_UNAVAILABLE,
@@ -1608,8 +1623,8 @@ impl World {
     /// The joints a skinned mesh entity resolved (`None` without a
     /// registered skin): the skin and one entity per joint.
     pub(super) fn skin_joints(&self, entity: Entity) -> Option<(Arc<Skin>, Vec<Option<Entity>>)> {
-        let component = self.ecs.get::<SkinComponent>(entity).ok()?;
-        let run = self.ecs.get::<SkinRun>(entity).ok()?;
+        let component = self.gameplay.ecs.get::<SkinComponent>(entity).ok()?;
+        let run = self.gameplay.ecs.get::<SkinRun>(entity).ok()?;
         if run.resolved.as_ref() != Some(&component.skin) {
             return None;
         }
@@ -1620,10 +1635,10 @@ impl World {
     /// `FYNKEL_QUERY_ANIMATOR`: the animator's playback state, `None`
     /// without an `Animator`.
     pub fn animator_state(&self, entity: Entity) -> Option<AnimatorStateRecord> {
-        let animator = self.ecs.get::<Animator>(entity).ok()?;
+        let animator = self.gameplay.ecs.get::<Animator>(entity).ok()?;
         let blend = self.anim.blends.get(&animator.clip);
         let (time, fade_remaining, parameter, root_delta, root_yaw, blend_duration) =
-            match self.ecs.get::<AnimatorRun>(entity) {
+            match self.gameplay.ecs.get::<AnimatorRun>(entity) {
                 Ok(run) => (
                     run.time,
                     run.fade

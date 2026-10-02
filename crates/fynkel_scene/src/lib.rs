@@ -19,6 +19,9 @@
 //! links stay right; a system that writes `Transform` directly must call
 //! [`mark_dirty`].
 
+mod sync;
+pub use sync::SceneSync;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use fynkel_contracts::Entity;
@@ -738,6 +741,10 @@ pub fn propagate(world: &mut World) -> usize {
         .filter(|(_, _, wt, _)| wt.dirty)
         .map(|(e, _, _, p)| (e.0, p.map(|p| p.0)))
         .collect();
+    propagate_dirty(world, dirty)
+}
+
+fn propagate_dirty(world: &mut World, dirty: Vec<(Entity, Option<Entity>)>) -> usize {
     if dirty.is_empty() {
         return 0;
     }

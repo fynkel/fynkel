@@ -1008,6 +1008,32 @@ FynkelStatus fynkel_world_gameplay_state_since(
   _fynkel_world_gameplay_state_since(world, since, out_view),
 );
 
+/// Bounded-journal identity changes. Cursor local to world, zero initializes.
+/// Reply: cursor u64, mode u32 (0 unchanged, 1 reset, 2 delta). Modes 1/2:
+/// count u32; rows (entity, alive u32, and length u32 + UTF-8 name if alive).
+/// A reset replaces all cached identities; delta rows upsert or retire them.
+/// Output expires at the next gameplay API call on the same world.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Uint64,
+    ffi.Pointer<FynkelBufferView>,
+  )
+>(symbol: 'fynkel_world_gameplay_state_delta')
+external int _fynkel_world_gameplay_state_delta(
+  ffi.Pointer<FynkelWorld> world,
+  int since,
+  ffi.Pointer<FynkelBufferView> out_view,
+);
+
+FynkelStatus fynkel_world_gameplay_state_delta(
+  ffi.Pointer<FynkelWorld> world,
+  int since,
+  ffi.Pointer<FynkelBufferView> out_view,
+) => FynkelStatus.fromValue(
+  _fynkel_world_gameplay_state_delta(world, since, out_view),
+);
+
 /// Capture interpolation history before fixed callbacks; cancel an abandoned tick.
 @ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<FynkelWorld>)>(
   symbol: 'fynkel_world_gameplay_tick_prepare',

@@ -110,7 +110,7 @@ impl World {
         }
         let mut registrar = ExtensionRegistrar {
             namespace: manifest.id.clone(),
-            registry: self.registered.clone(),
+            registry: self.gameplay.registered.clone(),
             systems: vec![],
             failed: None,
         };
@@ -125,9 +125,9 @@ impl World {
                 }
             }
         }
-        let before = std::mem::replace(&mut self.registered, registrar.registry);
+        let before = std::mem::replace(&mut self.gameplay.registered, registrar.registry);
         if let Err(e) = self.register_systems(registrar.systems) {
-            self.registered = before;
+            self.gameplay.registered = before;
             return Err(ExtensionError::Schedule(e));
         }
         self.extensions.insert(manifest.id, manifest.version);

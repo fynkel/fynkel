@@ -87,7 +87,7 @@ fn cache_json(assets: &Assets) -> Value {
 // A `Diagnostic` is the error type on purpose (failure path only).
 #[allow(clippy::result_large_err)]
 fn open(w: &mut FynkelWorld, cache_dir: &Path) -> Result<Assets, Diagnostic> {
-    if let Some(a) = &w.assets {
+    if let Some(a) = &w.services.assets {
         if same_dir(&a.root(), cache_dir) {
             return Ok(a.clone());
         }
@@ -158,11 +158,11 @@ pub(crate) fn binding_report(assets: &Assets, input: Value) -> Value {
 /// Load-time application shares preparation and reporting with the gameplay
 /// journal, while remaining part of the explicit scene-load boundary.
 fn bind_project_input(w: &mut FynkelWorld, assets: &Assets) -> Value {
-    let Ok(specs) = prepare_project_input(assets, &w.rebinds) else {
+    let Ok(specs) = prepare_project_input(assets, &w.services.rebinds) else {
         return Value::Null;
     };
     let errors = w.core_mut().bind_input(&specs);
-    project_input_json(&specs, &w.rebinds, &errors)
+    project_input_json(&specs, &w.services.rebinds, &errors)
 }
 
 pub(crate) fn residency_json(assets: &Assets) -> Value {
@@ -250,12 +250,12 @@ fn instantiate(
             // objects (ADR-0037): only what they use stays resident.
             if mode == LoadMode::Replace {
                 let kept = persistent_residency(w, &assets);
-                w.residency.clear();
-                w.prefabs.clear();
-                w.residency.extend(kept);
+                w.services.residency.clear();
+                w.services.prefabs.clear();
+                w.services.residency.extend(kept);
             }
             let residency = assets.retain(&scene.closure);
-            w.residency.push((Some(loaded.id), residency));
+            w.services.residency.push((Some(loaded.id), residency));
             let input = bind_project_input(w, &assets);
             let residency = residency_json(&assets);
             w.set_assets(assets);
@@ -380,17 +380,27 @@ fn modules_json(m: fynkel_core::Modules) -> Value {
 /// Unloads a loaded scene (M3-12): its entities go, its residency token
 /// with them.
 fn unload(w: &mut FynkelWorld, id: Uuid) -> Outcome {
-    let cache = w.assets.as_ref().map(cache_json).unwrap_or(Value::Null);
+    let cache = w
+        .services
+        .assets
+        .as_ref()
+        .map(cache_json)
+        .unwrap_or(Value::Null);
     match w.core_mut().unload_scene(id) {
         Ok(gone) => {
             // The persistent objects the scene gave up keep what they use.
-            if let Some(assets) = w.assets.clone() {
+            if let Some(assets) = w.services.assets.clone() {
                 let kept = persistent_residency(w, &assets);
-                w.residency.retain(|(scene, _)| scene.is_some());
-                w.residency.extend(kept);
+                w.services.residency.retain(|(scene, _)| scene.is_some());
+                w.services.residency.extend(kept);
             }
-            w.residency.retain(|(scene, _)| *scene != Some(id));
-            let residency = w.assets.as_ref().map(residency_json).unwrap_or(Value::Null);
+            w.services.residency.retain(|(scene, _)| *scene != Some(id));
+            let residency = w
+                .services
+                .assets
+                .as_ref()
+                .map(residency_json)
+                .unwrap_or(Value::Null);
             Outcome {
                 status: Status::Ok,
                 report: json!({
@@ -415,7 +425,7 @@ fn unload(w: &mut FynkelWorld, id: Uuid) -> Outcome {
 /// Replaces the user's rebinds and rebinds the world's actions from the
 /// loaded project with them (M3-12).
 fn bind_actions(w: &mut FynkelWorld, rebinds: BTreeMap<String, Vec<String>>) -> Outcome {
-    let Some(assets) = w.assets.clone() else {
+    let Some(assets) = w.services.assets.clone() else {
         return failed(&[missing_input_project()], Value::Null);
     };
     let specs = match prepare_project_input(&assets, &rebinds) {
@@ -433,7 +443,7 @@ fn bind_actions(w: &mut FynkelWorld, rebinds: BTreeMap<String, Vec<String>>) -> 
     };
     let input = project_input_json(&specs, &rebinds, &errors);
     // Persistence belongs to successful publication, never failed preparation.
-    w.rebinds = rebinds;
+    w.services.rebinds = rebinds;
     Outcome {
         status: Status::Ok,
         report: binding_report(&assets, input),
@@ -610,7 +620,7 @@ fn loaded_prefab(
     assets: &Assets,
     id: Uuid,
 ) -> Result<Arc<LoadedPrefab>, Vec<Diagnostic>> {
-    if let Some(p) = w.prefabs.get(&id) {
+    if let Some(p) = w.services.prefabs.get(&id) {
         return Ok(p.clone());
     }
     let prefab = assets.prefab(id)?;
@@ -630,7 +640,7 @@ fn loaded_prefab(
         diagnostics,
         _residency: residency,
     });
-    w.prefabs.insert(id, loaded.clone());
+    w.services.prefabs.insert(id, loaded.clone());
     Ok(loaded)
 }
 
@@ -643,7 +653,7 @@ fn instantiate_prefab(
     transform: Transform,
     parent: Option<Entity>,
 ) -> Outcome {
-    let Some(assets) = w.assets.clone() else {
+    let Some(assets) = w.services.assets.clone() else {
         return failed(
             &[Diagnostic::error(
                 fynkel_contracts::Code::RUNTIME_CACHE_UNREADABLE,
@@ -843,10 +853,10 @@ pub unsafe extern "C" fn fynkel_world_load_project(
         let started = std::time::Instant::now();
         // Old project roots retire with startup activation, never before its
         // validation. Optional persistent prefabs keep their warning policy.
-        let retire = w.project_persistent.clone();
+        let retire = w.services.project_persistent.clone();
         let mut out = load(w, &dir, None, LoadMode::Replace, &retire);
         if out.status == Status::Ok {
-            w.project_persistent.clear();
+            w.services.project_persistent.clear();
             make_persistent_objects(w, &mut out);
         }
         finish(w, out, started)
@@ -862,6 +872,7 @@ pub unsafe extern "C" fn fynkel_world_load_project(
 /// that object.
 fn make_persistent_objects(w: &mut FynkelWorld, out: &mut Outcome) {
     let list = w
+        .services
         .assets
         .as_ref()
         .and_then(|a| a.project())
@@ -884,7 +895,7 @@ fn make_persistent_objects(w: &mut FynkelWorld, out: &mut Outcome) {
                 let e = root;
                 // A fresh root, so this cannot be refused.
                 let _ = w.core_mut().dont_destroy_on_load(e);
-                w.project_persistent.push(e);
+                w.services.project_persistent.push(e);
             }
             None => diagnostics.push(diagnostic_json(&Diagnostic::warning(
                 Code::PERSISTENT_OBJECT,
@@ -1118,9 +1129,11 @@ pub unsafe extern "C" fn fynkel_world_load_scene_async(
             Ok(a) => a,
             Err(d) => return finish(w, failed(&[d], Value::Null), std::time::Instant::now()),
         };
-        w.next_ticket = w.next_ticket.checked_add(1).unwrap_or(1);
-        let ticket = w.next_ticket;
-        w.loads.insert(ticket, PendingLoad::start(assets, id));
+        w.services.next_ticket = w.services.next_ticket.checked_add(1).unwrap_or(1);
+        let ticket = w.services.next_ticket;
+        w.services
+            .loads
+            .insert(ticket, PendingLoad::start(assets, id));
         // SAFETY: checked non-null above; the caller promises it writable.
         unsafe { *out_ticket = ticket };
         Status::Ok
@@ -1145,7 +1158,7 @@ pub unsafe extern "C" fn fynkel_world_load_progress(
         return Status::InvalidArgument;
     }
     guarded(world, |w| {
-        let Some(load) = w.loads.get(&ticket) else {
+        let Some(load) = w.services.loads.get(&ticket) else {
             return Status::InvalidArgument;
         };
         let (state, progress) = load.progress();
@@ -1179,13 +1192,13 @@ pub unsafe extern "C" fn fynkel_world_load_activate(
         _ => return Status::InvalidArgument,
     };
     guarded(world, move |w| {
-        let Some(load) = w.loads.get(&ticket) else {
+        let Some(load) = w.services.loads.get(&ticket) else {
             return Status::InvalidArgument;
         };
         if load.progress().0 == FYNKEL_LOAD_LOADING {
             return Status::InvalidArgument;
         }
-        let load = w.loads.remove(&ticket).expect("looked up above");
+        let load = w.services.loads.remove(&ticket).expect("looked up above");
         let started = std::time::Instant::now();
         let assets = load.assets.clone();
         let out = match load.take() {
@@ -1210,7 +1223,7 @@ pub unsafe extern "C" fn fynkel_world_load_activate(
 /// `world` is a live world.
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_world_load_cancel(world: *mut FynkelWorld, ticket: u32) -> Status {
-    guarded(world, |w| match w.loads.remove(&ticket) {
+    guarded(world, |w| match w.services.loads.remove(&ticket) {
         Some(_) => Status::Ok,
         None => Status::InvalidArgument,
     })

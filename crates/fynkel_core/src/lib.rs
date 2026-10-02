@@ -100,3 +100,5 @@ pub use scheduler::{
 pub use extensions::{
     ExtensionError, ExtensionManifest, ExtensionRegistrar, NativeExtension, EXTENSION_API_VERSION,
 };
+
+mod lifecycle;

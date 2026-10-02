@@ -30,30 +30,33 @@ extension _WorldGameplay on World {
   }
 
   void _reconcileGameplayState() {
-    final state = _native.gameplayStateSince(_gameplayStateRevision);
-    final live = state.live;
-    if (live == null) {
-      // Activity and behaviour execution have separate invalidation rules.
-      _behaviours.objectChanged();
-      return;
-    }
-    for (final go in _byEntity.values.toList()) {
-      final name = live[go._entity];
+    final state = _native.gameplayStateDelta(_gameplayStateRevision);
+    final changed = state.changes;
+    // Reset only when this reader is new or older than retained history.
+    final affected = state.reset
+        ? _byEntity.keys.toList()
+        : changed.keys;
+    for (final entity in affected) {
+      final go = _byEntity[entity];
+      final name = changed[entity];
       if (name == null) {
-        go._alive = false;
-        _byEntity.remove(go._entity);
-        _behaviours.objectDied();
-      } else {
+        if (go != null) {
+          go._alive = false;
+          go._observed = false;
+          _byEntity.remove(entity);
+          _observed.remove(go);
+          _behaviours.objectDied();
+        }
+        _toSubscribe.remove(entity);
+      } else if (go != null) {
         go._name = name;
       }
     }
-    _toSubscribe.removeWhere((entity) => !live.containsKey(entity));
-    _observed.removeWhere((go) {
-      if (go._alive) return false;
-      go._observed = false;
-      return true;
-    });
+    if (state.reset) {
+      _toSubscribe.removeWhere((entity) => !changed.containsKey(entity));
+    }
     _gameplayStateRevision = state.revision;
+    // Activity and behaviour execution have separate invalidation rules.
     _behaviours.objectChanged();
   }
 

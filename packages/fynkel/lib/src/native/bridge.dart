@@ -123,8 +123,8 @@ class BridgeStats {
   /// Every FFI call made through this bridge (all families).
   final int ffiCalls;
 
-  /// Dart→native memcpys of command bytes, and their total size. Output
-  /// buffers are read in place (zero copies).
+  /// Explicit bridge copies and their total size, including immutable owned
+  /// output publications.
   final int dartCopies, dartBytesCopied;
 
   @override
@@ -195,11 +195,6 @@ class NativeLibrary {
   }
 
   void dispose() => fynkel_runtime_destroy(_runtime);
-}
-
-class _ViewCache {
-  WireBuffer? buffer;
-  int address = 0, length = 0;
 }
 
 class NativeWorld {
@@ -397,6 +392,28 @@ class NativeWorld {
     return (revision: revision, live: live);
   }
 
+  /// Sparse identity changes; reset replaces the consumer's membership.
+  ({int revision, bool reset, Map<EntityRef, String?> changes}) gameplayStateDelta(int since) {
+    _requireLive();
+    final status = fynkel_world_gameplay_state_delta(_w, since, _view);
+    ffiCalls++;
+    final bytes = _view.ref.data.asTypedList(_view.ref.length);
+    if (status != FynkelStatus.FYNKEL_STATUS_OK) throw StateError(utf8.decode(bytes));
+    gameplayStateBytes += bytes.length;
+    final reader = _GameplayReader(bytes);
+    final revision = reader.u64();
+    final mode = reader.u32();
+    if (mode == 0) return (revision: revision, reset: false, changes: const {});
+    if (mode == 1) gameplayStateSnapshots++;
+    final changes = <EntityRef, String?>{};
+    final count = reader.u32();
+    for (var i = 0; i < count; i++) {
+      final entity = reader.entity();
+      changes[entity] = reader.u32() == 0 ? null : reader.string();
+    }
+    return (revision: revision, reset: mode == 1, changes: changes);
+  }
+
   FynkelStatus playSoundNow(gen.PlaySoundCommandRecord sound) {
     _requireLive();
     if (sound.priority < -2147483648 || sound.priority > 2147483647) {
@@ -466,10 +483,10 @@ class NativeWorld {
   }
 
   /// The bound actions as the next tick (and this frame) sees them: one
-  /// `InputActionRecord` per action in declaration order, read in place.
+  /// Owned `InputActionRecord` publication in declaration order.
   WireBuffer get inputView {
     ffiCalls++;
-    return _wrap(fynkel_world_input_view(_w), _inputView);
+    return _wrap(fynkel_world_input_view(_w));
   }
 
   FynkelStatus snapInterpolation() {
@@ -508,53 +525,35 @@ class NativeWorld {
     }
   }
 
-  // One cached view per output family: the native side reuses its buffers,
-  // so in steady state the address and length repeat and the WireBuffer is
-  // reparsed instead of re-created (no allocation).
-  final _snapshotView = _ViewCache();
-  final _diagnosticsView = _ViewCache();
-  final _eventsView = _ViewCache();
-  final _afterPhysicsView = _ViewCache();
-  // Queries: one cache per kind, so an `entities` query and the
-  // `components` queries a tick makes do not evict each other's view.
-  final _queryViews = [for (final _ in QueryKind.values) _ViewCache()];
-  final _inputView = _ViewCache();
-  final _physicsView = _ViewCache();
-  final _projectionView = _ViewCache();
-
-  WireBuffer _wrap(FynkelBufferView v, _ViewCache cache) {
+  // Published buffers own immutable Dart memory. No native allocation or
+  // mutable reusable wrapper can escape a call's lifetime.
+  WireBuffer _wrap(FynkelBufferView v) {
     if (v.length == 0) return WireBuffer.empty;
-    final address = v.data.address;
-    final cached = cache.buffer;
-    if (cached != null && cache.address == address && cache.length == v.length) {
-      cached.reparse();
-      return cached;
-    }
-    cache.address = address;
-    cache.length = v.length;
-    return cache.buffer = WireBuffer(v.data.asTypedList(v.length));
+    dartCopies++;
+    dartBytesCopied += v.length;
+    return WireBuffer(v.data.asTypedList(v.length));
   }
 
-  /// Subscribed transforms after the last step (read in place, no copy).
+  /// Immutable owned subscribed transforms from the last completed step.
   WireBuffer get snapshot {
     ffiCalls++;
-    return _wrap(fynkel_world_snapshot(_w), _snapshotView);
+    return _wrap(fynkel_world_snapshot(_w));
   }
 
   WireBuffer get diagnostics {
     ffiCalls++;
-    return _wrap(fynkel_world_diagnostics(_w), _diagnosticsView);
+    return _wrap(fynkel_world_diagnostics(_w));
   }
 
   /// Pull-only: moves pending events into the returned view.
   WireBuffer drainEvents() {
     ffiCalls++;
-    return _wrap(fynkel_world_drain_events(_w), _eventsView);
+    return _wrap(fynkel_world_drain_events(_w));
   }
 
   WireBuffer get afterPhysicsEvents {
     ffiCalls++;
-    return _wrap(fynkel_world_after_physics_events(_w), _afterPhysicsView);
+    return _wrap(fynkel_world_after_physics_events(_w));
   }
 
   bool contains(EntityRef entity) {
@@ -566,10 +565,8 @@ class NativeWorld {
 
   int _requestId = 0;
 
-  /// Explicit query; the view is valid until the next mutating call or the
-  /// next query of the same [kind] (each kind has its own native buffer).
-  /// Before foundation 4.9 all kinds shared one, and a `components` query
-  /// freed an `entities` view still being walked.
+  /// Explicit query returning an owned immutable snapshot, safe across later
+  /// queries, mutation and disposal.
   WireBuffer query(QueryKind kind, {EntityRef entity = EntityRef.nil}) {
     _requireLive(); // before the write into the scratch
     _query.ref.kind = kind.index + 1;
@@ -578,28 +575,27 @@ class NativeWorld {
     ffiCalls++;
     final s = fynkel_world_query(_w, _query, _view);
     _check(s, 'query');
-    final b = _wrap(_view.ref, _queryViews[kind.index]);
+    final b = _wrap(_view.ref);
     assert(b.requestId == _requestId);
     return b;
   }
 
   /// Answers a `PhysicsQueries` buffer (the first [length] bytes of
   /// [bytes], M3-08): one memcpy into the reused scratch, one FFI call; the
-  /// hits come back as `PhysicsHitRecord`s in a query buffer read in
-  /// place, valid until the next physics query or mutating call.
+  /// hits come back as `PhysicsHitRecord`s in an immutable owned buffer.
   WireBuffer physicsQuery(Uint8List bytes, int length) {
     _toScratch(bytes, length);
     ffiCalls++;
     final s = fynkel_world_physics_query(_w, _scratch, length, _view);
     _check(s, 'physics_query');
-    return _wrap(_view.ref, _physicsView);
+    return _wrap(_view.ref);
   }
 
   /// Projects a `ProjectionAnchors` buffer (the first [length] bytes of
   /// [bytes], M3-13) into a [width] × [height] viewport: one memcpy into
   /// the reused scratch, one FFI call; the points come back as
-  /// `ProjectedPointRecord`s in a query buffer read in place, valid until
-  /// the next projection or mutating call, with the camera entity (0 = none)
+  /// `ProjectedPointRecord`s in an immutable owned buffer, with the camera
+  /// entity (0 = none)
   /// and the projected/dropped counts.
   (WireBuffer, EntityRef camera, int projected, int dropped) project(
     Uint8List bytes,
@@ -612,7 +608,7 @@ class NativeWorld {
     final s = fynkel_world_project(_w, width, height, _scratch, length, _projection, _view);
     _check(s, 'project');
     final info = _projection.ref;
-    return (_wrap(_view.ref, _projectionView), _readNativeEntity(info.camera), info.projected, info.dropped);
+    return (_wrap(_view.ref), _readNativeEntity(info.camera), info.projected, info.dropped);
   }
 
   void _copyToScratch(Uint8List bytes, int length) {

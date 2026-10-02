@@ -359,9 +359,41 @@ impl std::error::Error for EditError {}
 
 pub type EditResult<T> = Result<T, EditError>;
 
+/// A transaction usually changes one registered component per entity. A sorted
+/// flat map avoids allocating a multi-entry tree node for every owned row while
+/// retaining deterministic publication order and replacement semantics.
+#[derive(Default)]
+struct RegisteredChanges(Vec<(String, Option<crate::registry::PreparedRecord>)>);
+impl RegisteredChanges {
+    fn get(&self, id: &str) -> Option<&Option<crate::registry::PreparedRecord>> {
+        self.0
+            .binary_search_by(|(key, _)| key.as_str().cmp(id))
+            .ok()
+            .map(|i| &self.0[i].1)
+    }
+    fn insert(&mut self, id: String, value: Option<crate::registry::PreparedRecord>) {
+        match self.0.binary_search_by(|(key, _)| key.cmp(&id)) {
+            Ok(i) => self.0[i].1 = value,
+            Err(i) => {
+                if self.0.capacity() == 0 {
+                    self.0.reserve_exact(1);
+                }
+                self.0.insert(i, (id, value));
+            }
+        }
+    }
+}
+impl IntoIterator for RegisteredChanges {
+    type Item = (String, Option<crate::registry::PreparedRecord>);
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 #[derive(Default)]
 struct Changes {
-    registered: BTreeMap<String, Option<crate::registry::PreparedRecord>>,
+    registered: RegisteredChanges,
     name: Option<String>,
     transform: Option<Transform>,
     parent: Option<Option<GameplayEntity>>,
@@ -493,7 +525,7 @@ impl GameplayEdit<'_> {
         resolve: impl Fn(fynkel_contracts::Uuid) -> Option<GameplayEntity>,
     ) -> EditResult<()> {
         self.check()?;
-        let schema = match self.world.registered.get(&component.id) {
+        let schema = match self.world.gameplay.registered.get(&component.id) {
             Ok(r) => &r.schema,
             Err(e) => return self.fail(EditError::RegisteredComponent(e)),
         };
@@ -549,7 +581,7 @@ impl GameplayEdit<'_> {
 
     pub fn query_registered(&self, id: &str) -> EditResult<RegisteredBatch> {
         self.check()?;
-        if let Err(error) = self.world.registered.get(id) {
+        if let Err(error) = self.world.gameplay.registered.get(id) {
             return self.fail(EditError::RegisteredComponent(error));
         }
         let mut rows = Vec::new();
@@ -605,7 +637,7 @@ impl GameplayEdit<'_> {
     ) -> EditResult<Option<Vec<crate::ScalarValue>>> {
         let entity = entity.into();
         self.require(entity)?;
-        let registration = match self.world.registered.get(id) {
+        let registration = match self.world.gameplay.registered.get(id) {
             Ok(r) => r,
             Err(error) => return self.fail(EditError::RegisteredComponent(error)),
         };
@@ -619,14 +651,15 @@ impl GameplayEdit<'_> {
         } else {
             entity
                 .live()
-                .and_then(|e| registration.read(&self.world.ecs, e))
+                .and_then(|e| registration.read(&self.world.gameplay.ecs, e))
         };
         Ok(fields.map(|mut fields| {
             for value in &mut fields {
                 if let crate::ScalarValue::Object(target) = value {
                     if target.is_some_and(|r| {
                         self.journal.removed.contains(&r)
-                            || r.live().is_some_and(|e| !self.world.ecs.contains(e))
+                            || r.live()
+                                .is_some_and(|e| !self.world.gameplay.ecs.contains(e))
                     }) {
                         *target = None;
                     }
@@ -651,6 +684,7 @@ impl GameplayEdit<'_> {
         }
         let prepared = self
             .world
+            .gameplay
             .registered
             .get(id)
             .and_then(|r| r.prepare(fields));
@@ -676,7 +710,7 @@ impl GameplayEdit<'_> {
         entity: impl Into<GameplayEntity>,
     ) -> EditResult<Option<T>> {
         self.check()?;
-        let registration = match self.world.registered.typed::<T>() {
+        let registration = match self.world.gameplay.registered.typed::<T>() {
             Ok(r) => r,
             Err(error) => return self.fail(EditError::RegisteredComponent(error)),
         };
@@ -696,7 +730,7 @@ impl GameplayEdit<'_> {
         value: T,
     ) -> EditResult<()> {
         self.check()?;
-        let id = match self.world.registered.typed::<T>() {
+        let id = match self.world.gameplay.registered.typed::<T>() {
             Ok(r) => r.schema.id.clone(),
             Err(error) => return self.fail(EditError::RegisteredComponent(error)),
         };
@@ -708,7 +742,7 @@ impl GameplayEdit<'_> {
         id: &str,
     ) -> EditResult<()> {
         self.check()?;
-        let defaults = match self.world.registered.get(id) {
+        let defaults = match self.world.gameplay.registered.get(id) {
             Ok(r) => r.schema.fields.iter().map(|f| f.default.clone()).collect(),
             Err(error) => return self.fail(EditError::RegisteredComponent(error)),
         };
@@ -721,7 +755,7 @@ impl GameplayEdit<'_> {
     ) -> EditResult<()> {
         let entity = entity.into();
         self.require(entity)?;
-        if let Err(error) = self.world.registered.get(id) {
+        if let Err(error) = self.world.gameplay.registered.get(id) {
             return self.fail(EditError::RegisteredComponent(error));
         }
         self.journal.registered_revision = self
@@ -756,7 +790,8 @@ impl GameplayEdit<'_> {
         let mut roots = Vec::new();
         for entity in self
             .world
-            .persistent
+            .lifecycle
+            .persistent()
             .iter()
             .copied()
             .map(GameplayEntity::Live)
@@ -795,7 +830,7 @@ impl GameplayEdit<'_> {
         self.check()?;
         let entity = entity.into();
         let exists = match entity {
-            GameplayEntity::Live(e) => self.world.ecs.contains(e),
+            GameplayEntity::Live(e) => self.world.gameplay.ecs.contains(e),
             GameplayEntity::Pending(p) => {
                 if (p.world, p.transaction) != self.journal.scope
                     || !self.journal.changes.contains_key(&entity)
@@ -825,7 +860,7 @@ impl GameplayEdit<'_> {
         self.local_transform(entity)?;
         if entity
             .live()
-            .is_some_and(|e| !self.world.ecs.has::<WorldTransform>(e))
+            .is_some_and(|e| !self.world.gameplay.ecs.has::<WorldTransform>(e))
         {
             return self.fail(EditError::MissingTransform(entity));
         }
@@ -838,6 +873,7 @@ impl GameplayEdit<'_> {
         self.check()?;
         let mut entities: Vec<_> = self
             .world
+            .gameplay
             .ecs
             .entities()
             .map(GameplayEntity::Live)
@@ -948,7 +984,7 @@ impl GameplayEdit<'_> {
         }
         Ok(entity
             .live()
-            .and_then(|e| ComponentValue::read_from(&self.world.ecs, e, component))
+            .and_then(|e| ComponentValue::read_from(&self.world.gameplay.ecs, e, component))
             .map(Into::into))
     }
 
@@ -979,7 +1015,7 @@ impl GameplayEdit<'_> {
         }
         Ok(entity
             .live()
-            .is_some_and(|e| ComponentValue::contains_in(&self.world.ecs, e, component)))
+            .is_some_and(|e| ComponentValue::contains_in(&self.world.gameplay.ecs, e, component)))
     }
 
     /// Configuration data only: asset readiness and subsystem effects reconcile
@@ -1240,7 +1276,7 @@ impl GameplayEdit<'_> {
             let p = &def.parameters[i];
             result = Some((p.kind, p.default));
             if let GameplayEntity::Live(e) = entity {
-                if let Ok(run) = self.world.ecs.get::<super::AnimatorRun>(e) {
+                if let Ok(run) = self.world.gameplay.ecs.get::<super::AnimatorRun>(e) {
                     if let Some(play) = &run.controller {
                         if &play.controller == selected {
                             result = play.run.get(&play.def, name).ok();
@@ -1266,7 +1302,7 @@ impl GameplayEdit<'_> {
             }
         };
         if let GameplayEntity::Live(e) = entity {
-            for effect in &self.world.gameplay_effects {
+            for effect in &self.world.gameplay.gameplay_effects {
                 if let CommittedEffect::Animation {
                     entity: owner,
                     op,
@@ -1433,7 +1469,7 @@ impl GameplayEdit<'_> {
                 parent: Some(None),
                 active: Some(true),
                 components: BTreeMap::new(),
-                registered: BTreeMap::new(),
+                registered: RegisteredChanges::default(),
             },
         );
         self.set_parent(entity, parent, false)?;
@@ -1480,7 +1516,7 @@ impl GameplayEdit<'_> {
                 }
             }
             let mut registered = Vec::new();
-            for schema in self.world.registered.schemas() {
+            for schema in self.world.gameplay.registered.schemas() {
                 if let Some(fields) = self.registered_values(entity, &schema.id)? {
                     registered.push((schema.id.clone(), fields));
                 }
@@ -1672,9 +1708,14 @@ impl GameplayEdit<'_> {
             .get(&entity)
             .and_then(|c| c.name.clone())
             .or_else(|| {
-                entity
-                    .live()
-                    .and_then(|e| self.world.ecs.get::<Name>(e).ok().map(|n| n.value.clone()))
+                entity.live().and_then(|e| {
+                    self.world
+                        .gameplay
+                        .ecs
+                        .get::<Name>(e)
+                        .ok()
+                        .map(|n| n.value.clone())
+                })
             }))
     }
 
@@ -1696,7 +1737,7 @@ impl GameplayEdit<'_> {
         }
         match entity
             .live()
-            .and_then(|e| self.world.ecs.copy::<Transform>(e).ok())
+            .and_then(|e| self.world.gameplay.ecs.copy::<Transform>(e).ok())
         {
             Some(transform) => Ok(transform),
             None => self.fail(EditError::MissingTransform(entity)),
@@ -1714,7 +1755,7 @@ impl GameplayEdit<'_> {
             .unwrap_or_else(|| {
                 entity
                     .live()
-                    .and_then(|e| scene::parent_of(&self.world.ecs, e))
+                    .and_then(|e| scene::parent_of(&self.world.gameplay.ecs, e))
                     .map(GameplayEntity::Live)
             }))
     }
@@ -1726,7 +1767,7 @@ impl GameplayEdit<'_> {
         let mut children = Vec::new();
         for child in entity
             .live()
-            .map(|e| scene::children_of(&self.world.ecs, e))
+            .map(|e| scene::children_of(&self.world.gameplay.ecs, e))
             .unwrap_or_default()
         {
             let child = GameplayEntity::Live(child);
@@ -1779,7 +1820,7 @@ impl GameplayEdit<'_> {
             .unwrap_or_else(|| {
                 entity
                     .live()
-                    .is_none_or(|e| !self.world.ecs.has::<InactiveSelf>(e))
+                    .is_none_or(|e| !self.world.gameplay.ecs.has::<InactiveSelf>(e))
             }))
     }
 
@@ -2002,14 +2043,15 @@ impl World {
         if self.poisoned {
             return Err(EditError::Poisoned);
         }
-        self.next_gameplay_edit = self
+        self.gameplay.next_gameplay_edit = self
+            .gameplay
             .next_gameplay_edit
             .checked_add(1)
             .ok_or(EditError::IdentityExhausted)?;
         let journal = GameplayJournal {
             publication_tick: self.clock.tick(),
             native_phase: false,
-            scope: (self.id(), self.next_gameplay_edit),
+            scope: (self.id(), self.gameplay.next_gameplay_edit),
             persistent: Vec::new(),
             next_pending: 1,
             changes: BTreeMap::new(),
@@ -2059,13 +2101,18 @@ impl World {
                 continue;
             }
             if let GameplayEntity::Pending(pending) = key {
-                match scene::spawn(&mut self.ecs, change.transform.expect("pending pose"), None) {
+                match scene::spawn(
+                    &mut self.gameplay.ecs,
+                    change.transform.expect("pending pose"),
+                    None,
+                ) {
                     Ok(entity) => {
                         spawned.insert(pending, entity);
                     }
                     Err(scene::SceneError::Ecs(EcsError::OutOfEntities)) => {
                         for &e in spawned.values() {
-                            scene::despawn_subtree(&mut self.ecs, e).expect("unpublished root");
+                            scene::despawn_subtree(&mut self.gameplay.ecs, e)
+                                .expect("unpublished root");
                         }
                         return Err(EditError::OutOfEntities);
                     }
@@ -2083,17 +2130,20 @@ impl World {
             .filter_map(|key| {
                 let parent = changes[&key].parent?.map(&resolve);
                 let entity = resolve(key);
-                (scene::parent_of(&self.ecs, entity) != parent).then_some((key, entity, parent))
+                (scene::parent_of(&self.gameplay.ecs, entity) != parent)
+                    .then_some((key, entity, parent))
             })
             .collect();
         // Detach surviving moved entities before removing old ancestors. Detach
         // retired entities too, so physical old edges cannot delete a survivor
         // or cause duplicate destruction when logical and old hierarchies differ.
         for &(_, entity, _) in &parents {
-            scene::set_parent_keep_local(&mut self.ecs, entity, None).expect("validated detach");
+            scene::set_parent_keep_local(&mut self.gameplay.ecs, entity, None)
+                .expect("validated detach");
         }
         for entity in removed.iter().filter_map(|e| e.live()) {
-            scene::set_parent_keep_local(&mut self.ecs, entity, None).expect("retired detach");
+            scene::set_parent_keep_local(&mut self.gameplay.ecs, entity, None)
+                .expect("retired detach");
         }
         for entity in removed.iter().filter_map(|e| e.live()) {
             self.destroy_subtree(entity, publication_tick)
@@ -2105,16 +2155,18 @@ impl World {
             }
             let entity = resolve(key);
             if let Some(name) = &change.name {
-                self.ecs
+                self.gameplay
+                    .ecs
                     .insert(entity, Name::new(name.clone()))
                     .expect("validated entity");
             }
             if let Some(transform) = change.transform {
-                scene::set_local(&self.ecs, entity, transform).expect("validated transform");
+                scene::set_local(&self.gameplay.ecs, entity, transform)
+                    .expect("validated transform");
             }
             if let Some(active) = change.active {
-                scene::set_active(&mut self.ecs, entity, active).expect("validated activity");
-                self.active.roots.push(entity);
+                scene::set_active(&mut self.gameplay.ecs, entity, active)
+                    .expect("validated activity");
             }
             for (&component, value) in &change.components {
                 match value {
@@ -2126,13 +2178,13 @@ impl World {
                                 fynkel_contracts::ObjectRef::to(spawned[&p])
                             }
                         })
-                        .insert_into(&mut self.ecs, entity)
+                        .insert_into(&mut self.gameplay.ecs, entity)
                         .expect("validated component"),
                     None => {
                         // Adding then removing in one journal is a no-op on
                         // storage; removal bookkeeping remains shared with the
                         // legacy data path and only runs at successful commit.
-                        if ComponentValue::contains_in(&self.ecs, entity, component) {
+                        if ComponentValue::contains_in(&self.gameplay.ecs, entity, component) {
                             assert_eq!(self.remove_component_data(entity, component), Some(true));
                         }
                     }
@@ -2140,20 +2192,19 @@ impl World {
             }
         }
         for &(_, entity, parent) in &parents {
-            scene::set_parent_keep_local(&mut self.ecs, entity, parent)
+            scene::set_parent_keep_local(&mut self.gameplay.ecs, entity, parent)
                 .expect("validated hierarchy");
-            self.active.roots.push(entity);
         }
         self.refresh_active();
         // Native systems retain their declared propagation stages. Callback
         // publication settles immediately for reads between ticks.
         if !native_phase {
-            scene::propagate(&mut self.ecs);
+            self.propagate();
         }
         for (&key, change) in &changes {
             if !removed.contains(&key) && (change.transform.is_some() || change.parent.is_some()) {
                 let entity = resolve(key);
-                if !native_phase && !self.gameplay_tick_prepared {
+                if !native_phase && !self.gameplay.gameplay_tick_prepared {
                     self.teleported.push(entity);
                 }
             }
@@ -2165,7 +2216,7 @@ impl World {
         // Only surviving live entities publish final reparent events.
         for (key, child, parent) in parents {
             if matches!(key, GameplayEntity::Live(_)) {
-                self.events.push(Event {
+                self.publication.events.push(Event {
                     tick: publication_tick,
                     payload: EventPayload::ParentChanged { child, parent },
                 });
@@ -2174,10 +2225,10 @@ impl World {
         for key in persistent {
             if !removed.contains(&key) {
                 let entity = resolve(key);
-                if scene::parent_of(&self.ecs, entity).is_none()
-                    && !self.persistent.contains(&entity)
+                if scene::parent_of(&self.gameplay.ecs, entity).is_none()
+                    && !self.lifecycle.persistent().contains(&entity)
                 {
-                    self.persistent.push(entity);
+                    self.lifecycle.persistent_mut().push(entity);
                 }
             }
         }
@@ -2194,29 +2245,33 @@ impl World {
                         }
                         self.physics.queue(u32::MAX, entity, op);
                     } else {
-                        self.gameplay_effects
+                        self.gameplay
+                            .gameplay_effects
                             .push(CommittedEffect::Body { entity, op });
                     }
                 }
                 GameplayEffect::Body(..) => {}
                 GameplayEffect::Audio(entity, op) if !removed.contains(&entity) => {
-                    self.gameplay_effects.push(CommittedEffect::Audio {
+                    self.gameplay.gameplay_effects.push(CommittedEffect::Audio {
                         entity: resolve(entity),
                         op,
                     });
                 }
                 GameplayEffect::Audio(..) => {}
                 GameplayEffect::Animation(entity, op, before) if !removed.contains(&entity) => {
-                    self.gameplay_effects.push(CommittedEffect::Animation {
-                        entity: resolve(entity),
-                        op,
-                        before,
-                        invalidated: false,
-                    });
+                    self.gameplay
+                        .gameplay_effects
+                        .push(CommittedEffect::Animation {
+                            entity: resolve(entity),
+                            op,
+                            before,
+                            invalidated: false,
+                        });
                 }
                 GameplayEffect::Animation(..) => {}
                 GameplayEffect::Sound(clip, params) => {
-                    self.gameplay_effects
+                    self.gameplay
+                        .gameplay_effects
                         .push(CommittedEffect::Sound { clip, params });
                 }
             }
@@ -2241,7 +2296,7 @@ impl World {
             let entity = resolve(key);
             for (id, value) in change.registered {
                 match value {
-                    Some(value) => value.publish(&mut self.ecs, entity, id, |target| {
+                    Some(value) => value.publish(&mut self.gameplay.ecs, entity, id, |target| {
                         if removed.contains(&target) {
                             None
                         } else {
@@ -2249,10 +2304,11 @@ impl World {
                         }
                     }),
                     None => self
+                        .gameplay
                         .registered
                         .get(&id)
                         .expect("validated registration")
-                        .remove(&mut self.ecs, entity),
+                        .remove(&mut self.gameplay.ecs, entity),
                 }
             }
         }
@@ -2283,8 +2339,11 @@ mod tests {
             edit.body_effect(entity, crate::BodyCommand::SetLinearVelocity(glam::Vec3::X))
         });
         assert!(matches!(result, Err(EditError::InvalidEffect(..))));
-        assert_eq!(world.ecs.copy::<Name>(entity).unwrap().value, "body");
-        assert!(world.gameplay_effects.is_empty());
+        assert_eq!(
+            world.gameplay.ecs.copy::<Name>(entity).unwrap().value,
+            "body"
+        );
+        assert!(world.gameplay.gameplay_effects.is_empty());
         world.step();
         assert_eq!(
             world
@@ -2300,13 +2359,13 @@ mod tests {
     #[test]
     fn transaction_identity_exhaustion_is_permanent_and_does_not_run_callbacks() {
         let mut w = World::new(WorldConfig::default());
-        w.next_gameplay_edit = u64::MAX;
+        w.gameplay.next_gameplay_edit = u64::MAX;
         for _ in 0..2 {
             assert_eq!(
                 w.edit_gameplay::<()>(|_| panic!("exhausted callback")),
                 Err(EditError::IdentityExhausted)
             );
-            assert_eq!(w.next_gameplay_edit, u64::MAX);
+            assert_eq!(w.gameplay.next_gameplay_edit, u64::MAX);
         }
         assert!(!w.is_poisoned());
     }

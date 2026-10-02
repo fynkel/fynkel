@@ -75,7 +75,7 @@ impl World {
         match self.audio.open_device() {
             Ok(_) => true,
             Err(msg) => {
-                self.diagnostics.push(Diagnostic {
+                self.publication.diagnostics.push(Diagnostic {
                     command_index: u32::MAX,
                     lane: Lane::Simulation,
                     code: DiagnosticCode::AUDIO_DEVICE,
@@ -105,7 +105,7 @@ impl World {
         if !self.check_entity(index, lane, entity, "audio") {
             return false;
         }
-        if !self.ecs.has::<AudioSource>(entity) {
+        if !self.gameplay.ecs.has::<AudioSource>(entity) {
             return self.reject(
                 index,
                 lane,
@@ -125,10 +125,10 @@ impl World {
                 message,
             );
         }
-        if !self.ecs.has::<AudioRun>(entity) {
-            let _ = self.ecs.insert(entity, AudioRun::default());
+        if !self.gameplay.ecs.has::<AudioRun>(entity) {
+            let _ = self.gameplay.ecs.insert(entity, AudioRun::default());
         }
-        let Ok(mut run) = self.ecs.get_mut::<AudioRun>(entity) else {
+        let Ok(mut run) = self.gameplay.ecs.get_mut::<AudioRun>(entity) else {
             return false;
         };
         match op {
@@ -285,7 +285,7 @@ impl World {
         // destroyed) stop.
         let mut orphans: Vec<VoiceId> = Vec::new();
         for (voice, source) in self.audio.voice_sources() {
-            if !self.ecs.has::<AudioSource>(source) {
+            if !self.gameplay.ecs.has::<AudioSource>(source) {
                 orphans.push(voice);
             }
         }
@@ -294,7 +294,7 @@ impl World {
         }
 
         {
-            let h = &mut self.ecs;
+            let h = &mut self.gameplay.ecs;
             for (handle, l) in h
                 .query::<(&Handle, &AudioListener)>()
                 .without::<&fynkel_scene::Inactive>()
@@ -426,8 +426,8 @@ impl World {
             if let Some((v, l)) = r.set_looping {
                 self.audio.set_looping(v, l);
             }
-            if !self.ecs.has::<AudioRun>(r.entity) {
-                let _ = self.ecs.insert(r.entity, AudioRun::default());
+            if !self.gameplay.ecs.has::<AudioRun>(r.entity) {
+                let _ = self.gameplay.ecs.insert(r.entity, AudioRun::default());
             }
             if r.start {
                 self.start_source(r.entity, &mut playing);
@@ -437,7 +437,7 @@ impl World {
         // A voice the starts above stole: its source is not playing any
         // more, this tick (a stolen voice raises no event).
         if self.audio.stats().stolen > stolen_before {
-            let h = &mut self.ecs;
+            let h = &mut self.gameplay.ecs;
             for (handle, _, run) in h.query_mut::<(&Handle, &AudioSource, &mut AudioRun)>() {
                 if let Some(v) = run.voice {
                     if !self.audio.is_playing(v) {
@@ -455,12 +455,12 @@ impl World {
                 continue;
             };
             playing.insert(entity, false);
-            if let Ok(mut run) = self.ecs.get_mut::<AudioRun>(entity) {
+            if let Ok(mut run) = self.gameplay.ecs.get_mut::<AudioRun>(entity) {
                 if run.voice == Some(ended.voice) {
                     run.voice = None;
                 }
             }
-            self.events.push(Event {
+            self.publication.events.push(Event {
                 tick,
                 payload: EventPayload::PlaybackEnded {
                     entity,
@@ -498,7 +498,7 @@ impl World {
     /// per clip when the world was never given it (the source stays
     /// `playing` so a later registration starts it).
     fn start_source(&mut self, entity: Entity, playing: &mut BTreeMap<Entity, bool>) {
-        let Ok(source) = self.ecs.copy::<AudioSource>(entity) else {
+        let Ok(source) = self.gameplay.ecs.copy::<AudioSource>(entity) else {
             return;
         };
         let params = PlayParams {
@@ -510,7 +510,7 @@ impl World {
         };
         match self.audio.play(Some(entity), &source.clip, params) {
             Ok(v) => {
-                if let Ok(mut run) = self.ecs.get_mut::<AudioRun>(entity) {
+                if let Ok(mut run) = self.gameplay.ecs.get_mut::<AudioRun>(entity) {
                     if run.paused {
                         self.audio.pause(v);
                     }
@@ -528,7 +528,7 @@ impl World {
                 playing.insert(entity, false);
             }
             Err(PlayError::UnknownClip) => {
-                let Ok(mut run) = self.ecs.get_mut::<AudioRun>(entity) else {
+                let Ok(mut run) = self.gameplay.ecs.get_mut::<AudioRun>(entity) else {
                     return;
                 };
                 if run.reported.as_ref() == Some(&source.clip) {
@@ -536,7 +536,7 @@ impl World {
                 }
                 run.reported = Some(source.clip.clone());
                 drop(run);
-                self.diagnostics.push(Diagnostic {
+                self.publication.diagnostics.push(Diagnostic {
                     command_index: u32::MAX,
                     lane: Lane::Simulation,
                     code: DiagnosticCode::SOUND_UNAVAILABLE,
@@ -554,8 +554,9 @@ impl World {
     /// `FYNKEL_QUERY_AUDIO`: the source's playback state, `None` without
     /// an `AudioSource`.
     pub fn audio_state(&self, entity: Entity) -> Option<AudioStateRecord> {
-        let source = self.ecs.get::<AudioSource>(entity).ok()?;
+        let source = self.gameplay.ecs.get::<AudioSource>(entity).ok()?;
         let voice = self
+            .gameplay
             .ecs
             .get::<AudioRun>(entity)
             .ok()

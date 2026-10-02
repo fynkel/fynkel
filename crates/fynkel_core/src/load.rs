@@ -283,7 +283,7 @@ impl World {
             return Err(LoadError::Poisoned);
         }
         let order = spawn_order(scene)?;
-        if mode == LoadMode::Additive && self.scenes.iter().any(|s| s.id == scene.id) {
+        if mode == LoadMode::Additive && self.lifecycle.scenes().iter().any(|s| s.id == scene.id) {
             return Err(LoadError::AlreadyLoaded(scene.id));
         }
         if let Some(resources) = &resources {
@@ -294,7 +294,7 @@ impl World {
         let mut removed = HashSet::new();
         let mut unloads = Vec::new();
         if mode == LoadMode::Replace {
-            for old in self.scenes.iter().rev() {
+            for old in self.lifecycle.scenes().iter().rev() {
                 let before = removed.len();
                 self.collect_scene_removals(old, &mut removed);
                 unloads.push((old.id, (removed.len() - before) as u32));
@@ -327,13 +327,13 @@ impl World {
         self.publish_command_resources(resources);
         let loaded = resolve_description(scene, &commit);
         if mode == LoadMode::Replace {
-            self.scenes.clear();
-            self.persistent = self.persistent_roots();
+            self.lifecycle.scenes_mut().clear();
+            *self.lifecycle.persistent_mut() = self.persistent_roots();
             for (scene, entities) in unloads {
                 self.push_event(EventPayload::SceneUnloaded { scene, entities });
             }
         }
-        self.scenes.push(loaded.clone());
+        self.lifecycle.scenes_mut().push(loaded.clone());
         self.push_event(EventPayload::SceneReady { scene: scene.id });
         Ok(loaded)
     }
@@ -347,12 +347,13 @@ impl World {
             return Err(LoadError::Poisoned);
         }
         let i = self
-            .scenes
+            .lifecycle
+            .scenes()
             .iter()
             .position(|s| s.id == id)
             .ok_or(LoadError::NotLoaded(id))?;
         let mut removed = HashSet::new();
-        self.collect_scene_removals(&self.scenes[i], &mut removed);
+        self.collect_scene_removals(&self.lifecycle.scenes()[i], &mut removed);
         self.edit_gameplay(|edit| {
             for &entity in &removed {
                 if edit.contains(entity)? {
@@ -362,7 +363,7 @@ impl World {
             Ok(())
         })
         .map_err(|e| LoadError::SceneRejected(e.to_string()))?;
-        let old = self.scenes.remove(i);
+        let old = self.lifecycle.scenes_mut().remove(i);
         let entities = removed.len() as u32;
         self.push_event(EventPayload::SceneUnloaded {
             scene: id,
@@ -414,11 +415,17 @@ impl World {
             None => None,
             Some((scene, id)) => {
                 let i = self
-                    .scenes
+                    .lifecycle
+                    .scenes()
                     .iter()
                     .position(|s| s.id == scene)
                     .ok_or(LoadError::NotLoaded(scene))?;
-                if self.scenes.iter().any(|s| s.by_id.contains_key(&id)) {
+                if self
+                    .lifecycle
+                    .scenes()
+                    .iter()
+                    .any(|s| s.by_id.contains_key(&id))
+                {
                     return Err(LoadError::DuplicateEntity(id));
                 }
                 Some((i, id))
@@ -449,7 +456,7 @@ impl World {
             .map_err(|error| LoadError::LiveSpawnRejected(error.to_string()))?;
         let e = commit.resolve(commit.value).expect("committed live spawn");
         if let Some((i, id)) = scene_index {
-            let s = &mut self.scenes[i];
+            let s = &mut self.lifecycle.scenes_mut()[i];
             s.order.push((id, e));
             s.by_id.insert(id, e);
             s.by_entity.insert(e, id);
@@ -459,13 +466,16 @@ impl World {
 
     /// Every loaded scene, in load order.
     pub fn loaded_scenes(&self) -> &[LoadedScene] {
-        &self.scenes
+        self.lifecycle.scenes()
     }
 
     /// The loaded scene `entity` was spawned by, if any (an entity
     /// instantiated or spawned at runtime belongs to none).
     pub fn scene_of(&self, entity: Entity) -> Option<&LoadedScene> {
-        self.scenes.iter().find(|s| s.id_of(entity).is_some())
+        self.lifecycle
+            .scenes()
+            .iter()
+            .find(|s| s.id_of(entity).is_some())
     }
 
     /// Keeps the root `entity` and its subtree across loads (ADR-0037,
@@ -493,14 +503,14 @@ impl World {
     /// Whether `entity` is kept across loads: its root is a persistent
     /// root still without a parent.
     pub fn is_persistent(&self, entity: Entity) -> bool {
-        if self.persistent.is_empty() || !self.ecs().contains(entity) {
+        if self.lifecycle.persistent().is_empty() || !self.ecs().contains(entity) {
             return false;
         }
         let mut at = entity;
         while let Some(p) = scene::parent_of(self.ecs(), at) {
             at = p;
         }
-        self.persistent.contains(&at)
+        self.lifecycle.persistent().contains(&at)
     }
 
     /// Stops keeping `root` and destroys it with its subtree now, with
@@ -515,13 +525,14 @@ impl World {
         if self.edit_gameplay(|edit| edit.destroy(root)).is_err() {
             return 0;
         }
-        self.persistent.retain(|&e| e != root);
+        self.lifecycle.persistent_mut().retain(|&e| e != root);
         count
     }
 
     /// The persistent roots alive and still roots, in marking order.
     pub fn persistent_roots(&self) -> Vec<Entity> {
-        self.persistent
+        self.lifecycle
+            .persistent()
             .iter()
             .copied()
             .filter(|&e| self.ecs().contains(e) && scene::parent_of(self.ecs(), e).is_none())
@@ -627,10 +638,12 @@ impl World {
             .collect();
         for (d, (entity, _)) in described.iter_mut().zip(&entities) {
             d.registered = self
+                .gameplay
                 .registered
                 .schemas()
                 .filter_map(|schema| {
                     let values = self
+                        .gameplay
                         .registered
                         .get(&schema.id)
                         .ok()?

@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Mutex;
 
 use fynkel_contracts::{AssetRef, Entity};
-use fynkel_ecs::internal::Handle;
 use fynkel_ecs::World as Ecs;
 use fynkel_scene::{self as scene, Layer, Parent, Transform, WorldTransform};
 use glam::Mat4;
@@ -237,7 +236,10 @@ pub struct Physics {
     /// Touching pairs `(a, b)` with `a < b`: sensor pair or not.
     touching: BTreeMap<(Entity, Entity), bool>,
     /// Sync scratch, kept for its capacity.
-    scratch_entities: Vec<Entity>,
+    sync_cursor: Option<fynkel_ecs::ChangeCursor>,
+    invalidated: BTreeSet<Entity>,
+    sync_candidates: usize,
+    writeback_pending: BTreeSet<Entity>,
     scratch_changed: Vec<Entity>,
     scratch_nested: Vec<Entity>,
     scratch_gone: Vec<Entity>,
@@ -274,7 +276,10 @@ impl Physics {
             unsupported_transforms: HashSet::new(),
             events: Vec::new(),
             touching: BTreeMap::new(),
-            scratch_entities: Vec::new(),
+            sync_cursor: None,
+            invalidated: BTreeSet::new(),
+            sync_candidates: 0,
+            writeback_pending: BTreeSet::new(),
             scratch_changed: Vec::new(),
             scratch_nested: Vec::new(),
             scratch_gone: Vec::new(),
@@ -337,9 +342,10 @@ impl Physics {
     /// Publishes a prevalidated runtime replacement and invalidates built colliders.
     pub fn replace_prepared_mesh(&mut self, key: &AssetRef, mesh: Option<crate::PreparedMesh>) {
         self.meshes.remove(key);
-        for e in self.entries.values_mut() {
+        for (&entity, e) in &mut self.entries {
             if Self::built_from(e, key) {
                 e.stale = true;
+                self.invalidated.insert(entity);
             }
         }
         if let Some(mesh) = mesh {
@@ -361,9 +367,10 @@ impl Physics {
         mesh: Option<(&[[f32; 3]], &[u32])>,
     ) -> Result<(), String> {
         self.meshes.remove(key);
-        for e in self.entries.values_mut() {
+        for (&entity, e) in &mut self.entries {
             if Self::built_from(e, key) {
                 e.stale = true;
+                self.invalidated.insert(entity);
             }
         }
         match mesh {
@@ -619,114 +626,137 @@ impl Physics {
         }
     }
 
+    /// Number of candidate identities inspected by the last sync, for qualification.
+    pub fn sync_candidates(&self) -> usize {
+        self.sync_candidates
+    }
+
     fn sync(&mut self, ecs: &mut Ecs) {
-        let mut unsupported = HashSet::new();
-        // Every entity with a physics component, in handle order. The
-        // scratch vectors keep their capacity: with thousands of static
-        // colliders this runs every tick and must not allocate.
-        let mut candidates = std::mem::take(&mut self.scratch_entities);
+        use std::any::TypeId;
+        let changes = ecs
+            .changes_since(
+                self.sync_cursor,
+                &[
+                    TypeId::of::<WorldTransform>(),
+                    TypeId::of::<RigidBody>(),
+                    TypeId::of::<Collider>(),
+                    TypeId::of::<CharacterController>(),
+                    TypeId::of::<Layer>(),
+                    TypeId::of::<Parent>(),
+                    TypeId::of::<scene::Children>(),
+                    TypeId::of::<scene::Inactive>(),
+                ],
+                false,
+            )
+            .expect("settled physics storage");
+        let mut affected: BTreeSet<Entity> = if changes.reset {
+            ecs.entities().chain(self.entries.keys().copied()).collect()
+        } else {
+            changes.entities.into_iter().collect()
+        };
+        affected.append(&mut self.invalidated);
+        // An ancestor's body/component or hierarchy change can change the home
+        // of a nested collider even when its own component did not change.
+        let roots: Vec<_> = affected
+            .iter()
+            .copied()
+            .filter(|&e| {
+                let mut up = scene::parent_of(ecs, e);
+                while let Some(p) = up {
+                    if affected.contains(&p) {
+                        return false;
+                    }
+                    up = scene::parent_of(ecs, p);
+                }
+                true
+            })
+            .collect();
+        for root in roots {
+            affected.extend(scene::subtree(ecs, root));
+        }
+        self.sync_candidates = affected.len();
         let mut changed = std::mem::take(&mut self.scratch_changed);
         let mut nested = std::mem::take(&mut self.scratch_nested);
-        candidates.clear();
+        let mut gone = std::mem::take(&mut self.scratch_gone);
         changed.clear();
         nested.clear();
-        {
-            // One pass over the archetypes: every active entity with a
-            // physics component and a world transform, and — the fast path — which
-            // of them differ from their entry (new, a component changed,
-            // the world matrix moved by gameplay). A resting or static
-            // collider costs a few comparisons here and nothing below.
-            let h = &*ecs;
-            for (handle, wt, rigid, shape, character, layer, parent) in h
-                .query::<(
-                    &Handle,
-                    &WorldTransform,
-                    Option<&RigidBody>,
-                    Option<&Collider>,
-                    Option<&CharacterController>,
-                    Option<&Layer>,
-                    Option<&Parent>,
-                )>()
-                // Not active in the hierarchy: out of the simulation (the
-                // entry goes, and comes back at rest when reactivated).
-                .without::<&fynkel_scene::Inactive>()
-                .iter()
+        gone.clear();
+        for entity in affected {
+            let rigid_guard = ecs.get::<RigidBody>(entity).ok();
+            let shape_guard = ecs.get::<Collider>(entity).ok();
+            let character_guard = ecs.get::<CharacterController>(entity).ok();
+            let layer_guard = ecs.get::<Layer>(entity).ok();
+            let parent_guard = ecs.get::<Parent>(entity).ok();
+            let (rigid, shape, character, layer, parent) = (
+                rigid_guard.as_deref(),
+                shape_guard.as_deref(),
+                character_guard.as_deref(),
+                layer_guard.as_deref(),
+                parent_guard.as_deref(),
+            );
+            let wt = ecs.get::<WorldTransform>(entity).ok();
+            if wt.is_none()
+                || ecs.has::<scene::Inactive>(entity)
+                || (rigid.is_none() && shape.is_none() && character.is_none())
             {
-                if rigid.is_none() && shape.is_none() && character.is_none() {
-                    continue;
-                }
-                let entity = handle.0;
-                // last_world also contains physics writeback: equality is not
-                // proof that this matrix passed transform validation.
-                let moving =
-                    character.is_some() || rigid.is_some_and(|r| r.body_type != BodyType::Static);
-                if Transform::try_from_matrix(wt.matrix).is_none()
-                    || (moving && !supports_motion_parent(ecs, parent.map(|p| p.0)))
-                {
-                    unsupported.insert(entity);
-                    if !self.unsupported_transforms.contains(&entity) {
-                        self.rejections.push(Rejection {
+                gone.push(entity);
+                self.unsupported_transforms.remove(&entity);
+                continue;
+            }
+            let wt = wt.unwrap();
+            let was_unsupported = self.unsupported_transforms.contains(&entity);
+            // last_world also contains physics writeback: equality is not
+            // proof that this matrix passed transform validation.
+            let moving =
+                character.is_some() || rigid.is_some_and(|r| r.body_type != BodyType::Static);
+            if Transform::try_from_matrix(wt.matrix).is_none()
+                || (moving && !supports_motion_parent(ecs, parent.map(|p| p.0)))
+            {
+                self.unsupported_transforms.insert(entity);
+                if !was_unsupported {
+                    self.rejections.push(Rejection {
                             index: u32::MAX,
                             entity,
                             kind: RejectionKind::UnsupportedTransform,
                             message: "physics requires a non-singular world TRS; moving bodies require positive uniform scale on every ancestor".into(),
                         });
-                    }
-                    // Leaving candidates removes any previously valid body
-                    // and collider, instead of retaining stale geometry.
-                    continue;
                 }
-                candidates.push(entity);
-                // A lone collider under a parent may belong to an
-                // ancestor's body (ADR-0034): decided once the bodies are
-                // synced.
-                if rigid.is_none() && character.is_none() && parent.is_some() {
-                    nested.push(entity);
-                    continue;
-                }
-                let same = self.entries.get(&entity).is_some_and(|entry| {
-                    entry.joined.is_none()
-                        && entry.rigid.is_some() == rigid.is_some()
-                        && entry.shape.is_some() == shape.is_some()
-                        && entry.character.is_some() == character.is_some()
-                        && entry.shape.as_ref().zip(shape).is_none_or(|(a, b)| a == b)
-                        && entry
-                            .character
-                            .as_ref()
-                            .zip(character)
-                            .is_none_or(|(a, b)| a == b)
-                        && entry.rigid == rigid.copied()
-                        && entry.layer == layer.copied().unwrap_or_default().bit()
-                        && entry.last_world == wt.matrix
-                        && !entry.stale
-                });
-                if !same {
-                    changed.push(entity);
-                }
+                // Leaving candidates removes any previously valid body
+                // and collider, instead of retaining stale geometry.
+                gone.push(entity);
+                continue;
             }
-        }
-        self.unsupported_transforms = unsupported;
-        candidates.sort_unstable();
-        changed.sort_unstable();
-        nested.sort_unstable();
-        // Entries whose entity lost its components or was destroyed.
-        let mut gone = std::mem::take(&mut self.scratch_gone);
-        gone.clear();
-        if self.entries.len() != candidates.len()
-            || self.entries.keys().zip(&candidates).any(|(a, b)| a != b)
-        {
-            gone.extend(
-                self.entries
-                    .keys()
-                    .filter(|e| candidates.binary_search(e).is_err() || !ecs.contains(**e))
-                    .copied(),
-            );
+            self.unsupported_transforms.remove(&entity);
+            // A lone collider under a parent may belong to an
+            // ancestor's body (ADR-0034): decided once the bodies are
+            // synced.
+            if rigid.is_none() && character.is_none() && parent.is_some() {
+                nested.push(entity);
+                continue;
+            }
+            let same = self.entries.get(&entity).is_some_and(|entry| {
+                entry.joined.is_none()
+                    && entry.rigid.is_some() == rigid.is_some()
+                    && entry.shape.is_some() == shape.is_some()
+                    && entry.character.is_some() == character.is_some()
+                    && entry.shape.as_ref().zip(shape).is_none_or(|(a, b)| a == b)
+                    && entry
+                        .character
+                        .as_ref()
+                        .zip(character)
+                        .is_none_or(|(a, b)| a == b)
+                    && entry.rigid == rigid.copied()
+                    && entry.layer == layer.copied().unwrap_or_default().bit()
+                    && entry.last_world == wt.matrix
+                    && !entry.stale
+            });
+            if !same {
+                changed.push(entity);
+            }
         }
         for e in gone.drain(..) {
             self.remove_entry(ecs, e);
         }
-        // The bodies and the colliders that stand alone first, then the
-        // nested colliders, which may join a body synced just above.
         for &entity in &changed {
             self.update_entry(ecs, entity, None);
         }
@@ -738,10 +768,10 @@ impl Physics {
                 self.update_entry(ecs, entity, join);
             }
         }
-        self.scratch_entities = candidates;
         self.scratch_changed = changed;
         self.scratch_nested = nested;
         self.scratch_gone = gone;
+        self.sync_cursor = ecs.change_cursor();
     }
 
     /// Whether a nested collider's entry still matches its entity: joined
@@ -960,6 +990,7 @@ impl Physics {
             }
             self.world.insert_body(b)
         });
+        self.writeback_pending.insert(entity);
         self.entries.insert(
             entity,
             Entry {
@@ -1231,6 +1262,7 @@ impl Physics {
             },
         );
         set_owned(ecs, entity, false);
+        self.writeback_pending.insert(entity);
         self.entries.insert(
             entity,
             Entry {
@@ -1293,6 +1325,7 @@ impl Physics {
     }
 
     fn remove_entry(&mut self, ecs: &mut Ecs, entity: Entity) {
+        self.writeback_pending.remove(&entity);
         let Some(entry) = self.entries.remove(&entity) else {
             return;
         };
@@ -1308,6 +1341,7 @@ impl Physics {
                     if let Some(j) = self.entries.get_mut(&e) {
                         j.collider = None;
                         j.stale = true;
+                        self.invalidated.insert(e);
                     }
                     self.retired.push(h);
                 }
@@ -1452,25 +1486,28 @@ impl Physics {
     fn write_back(&mut self, ecs: &mut Ecs) {
         self.scratch_written.clear();
         self.scratch_poses.clear();
-        for (entity, entry) in &mut self.entries {
-            let Some(h) = entry.body else {
+        let mut candidates = std::mem::take(&mut self.writeback_pending);
+        candidates.extend(
+            self.world
+                .active_bodies()
+                .map(|(_, body)| Entity::from_bits(body.user_data)),
+        );
+        for entity in candidates {
+            let Some(entry) = self.entries.get(&entity) else {
                 continue;
             };
+            let Some(h) = entry.body else { continue };
             let body = &self.world.bodies[h];
-            if entry.character.is_none() {
-                let Some(rigid) = entry.rigid else {
-                    continue;
-                };
-                if rigid.body_type == BodyType::Static {
-                    continue;
-                }
-                if rigid.body_type == BodyType::Dynamic && body.is_sleeping() {
-                    continue;
-                }
+            if entry.character.is_none()
+                && entry.rigid.is_none_or(|r| {
+                    r.body_type == BodyType::Static
+                        || (r.body_type == BodyType::Dynamic && body.is_sleeping())
+                })
+            {
+                continue;
             }
             let p = body.position();
-            self.scratch_poses
-                .push((*entity, p.translation, p.rotation));
+            self.scratch_poses.push((entity, p.translation, p.rotation));
         }
         let published = scene::prepare_world_poses(ecs, &self.scratch_poses)
             .and_then(|poses| scene::set_local_batch(ecs, &poses));

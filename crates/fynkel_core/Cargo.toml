@@ -33,3 +33,7 @@ serde_json.workspace = true
 [[example]]
 name = "foundation_state"
 crate-type = ["cdylib"]
+
+[[example]]
+name = "f4_sync_bench"
+required-features = ["physics"]

@@ -94,11 +94,11 @@ impl World {
         memo: &mut HashMap<Entity, Mat4>,
     ) -> Option<(Entity, Mat4, Camera)> {
         let mut best: Option<(Entity, Camera)> = None;
-        for e in self.ecs.entities() {
-            if !self.ecs.has::<super::WorldTransform>(e) {
+        for e in self.gameplay.ecs.entities() {
+            if !self.gameplay.ecs.has::<super::WorldTransform>(e) {
                 continue;
             }
-            if let Ok(c) = self.ecs.copy::<Camera>(e) {
+            if let Ok(c) = self.gameplay.ecs.copy::<Camera>(e) {
                 let better = match &best {
                     Some((_, cur)) => c.priority > cur.priority,
                     None => true,
@@ -162,7 +162,9 @@ impl World {
                 out.push(rec);
                 continue;
             };
-            if !self.ecs.contains(a.entity) || !self.ecs.has::<super::WorldTransform>(a.entity) {
+            if !self.gameplay.ecs.contains(a.entity)
+                || !self.gameplay.ecs.has::<super::WorldTransform>(a.entity)
+            {
                 rec.flags = PROJECTED_MISSING;
                 out.push(rec);
                 continue;
@@ -211,7 +213,7 @@ impl World {
             out.push(rec);
         }
         if dropped > 0 {
-            self.diagnostics.push(Diagnostic {
+            self.publication.diagnostics.push(Diagnostic {
                 command_index: u32::MAX,
                 lane: Lane::Presentation,
                 code: DiagnosticCode::TOO_MANY_ANCHORS,

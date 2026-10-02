@@ -1,5 +1,5 @@
 /*
- * Fynkel native ABI — version 1 (M1).
+ * Fynkel native ABI — version 5.
  *
  * This header is the contract. Dart bindings are generated from it with
  * ffigen (ADR-0004); Rust implements it in crates/fynkel_native over
@@ -25,7 +25,10 @@
  * - Rust panics never cross this boundary: they become
  *   FYNKEL_STATUS_PANIC and poison the world (ADR-0014).
  * - Not thread-safe: a world must be driven from one thread at a time
- *   (ADR-0008).
+ *   (ADR-0008). Native borrowed views must be copied before retention or
+ *   transfer to another thread. A serialized world-ownership handoff must
+ *   have no outstanding view users or active transaction. The Dart SDK
+ *   copies published buffers into immutable owned storage (ADR-0055).
  * - The engine creates no threads and owns no loop (ADR-0007): the host
  *   calls begin_frame, then step() as many times as the plan says.
  */
@@ -725,6 +728,12 @@ FynkelStatus fynkel_world_gameplay_state(FynkelWorld* world, FynkelBufferView* o
  * state payload only when changed. Reading does not consume other cursors.
  * Same restrictions and view lifetime as gameplay_state. Additive ABI v5 API. */
 FynkelStatus fynkel_world_gameplay_state_since(FynkelWorld* world, uint64_t since, FynkelBufferView* out_view);
+/* Bounded-journal identity changes. Cursor local to world, zero initializes.
+ * Reply: cursor u64, mode u32 (0 unchanged, 1 reset, 2 delta). Modes 1/2:
+ * count u32; rows (entity, alive u32, and length u32 + UTF-8 name if alive).
+ * A reset replaces all cached identities; delta rows upsert or retire them.
+ * Output expires at the next gameplay API call on the same world. */
+FynkelStatus fynkel_world_gameplay_state_delta(FynkelWorld* world, uint64_t since, FynkelBufferView* out_view);
 /* Capture interpolation history before fixed callbacks; cancel an abandoned tick. */
 FynkelStatus fynkel_world_gameplay_tick_prepare(FynkelWorld* world);
 FynkelStatus fynkel_world_gameplay_tick_cancel(FynkelWorld* world);

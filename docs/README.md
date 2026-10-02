@@ -95,6 +95,11 @@
 | 0048 | [Exact affine transform contract](decisions/ADR-0048-affine-transform-contract.md) | Accepted; live migration |
 | 0049 | [Conservative render bounds](decisions/ADR-0049-conservative-render-bounds.md) | Accepted; live migration |
 | 0050 | [Process-lifetime identity authority](decisions/ADR-0050-process-lifetime-identity-authority.md) | Accepted; live migration |
+| 0051 | [F2 boundaries and presentation policy](decisions/ADR-0051-f2-boundaries-and-presentation-policy.md) | Accepted |
+| 0052 | [Registered component values](decisions/ADR-0052-registered-component-values.md) | Accepted |
+| 0053 | [Registered gameplay and extensions](decisions/ADR-0053-registered-gameplay-and-extension-contract.md) | Accepted |
+| 0054 | [ECS change tracking](decisions/ADR-0054-ecs-change-tracking-boundary.md) | Accepted |
+| 0055 | [Incremental synchronization and publication](decisions/ADR-0055-incremental-synchronization-and-publication.md) | Accepted |
 
 ADR-0042 defines the foundation direction. ADR-0046 accepts the replacement strategy and pure-data contract; ADR-0047 resolves identity, clocks, frame order and readiness. Proposed portions describe remaining work; shipping migration remains tracked in the foundation roadmap.
 

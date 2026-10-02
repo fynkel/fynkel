@@ -17,6 +17,7 @@ pub mod bridge;
 pub mod buffer;
 pub mod gameplay;
 pub mod load;
+mod resources;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -50,6 +51,7 @@ pub struct FynkelWorld {
     /// own kind or a mutating call, so views of different kinds can be
     /// held together.
     query_bufs: Vec<Vec<u8>>,
+    entity_table_revision: Option<u64>,
     input_buf: Vec<u8>,
     /// Reused every frame so reading input and events allocates nothing
     /// once warm (foundation 4.8).
@@ -62,29 +64,7 @@ pub struct FynkelWorld {
     load_report: Vec<u8>,
     /// What the last `fynkel_world_asset_json` answered (ADR-0027 §6).
     asset_json: Vec<u8>,
-    /// The cache the last load opened (a renderer drawing this world adopts
-    /// it, so both see one residency store).
-    assets: Option<fynkel_assets::Assets>,
-    /// One token per loaded scene (keyed by its id): the closure stays
-    /// resident until the scene is unloaded, a replace load empties the
-    /// world, or the world is destroyed (M3-12).
-    residency: Vec<(Option<fynkel_contracts::Uuid>, fynkel_assets::Residency)>,
-    /// The prefabs this world instantiated, kept in memory after the first
-    /// (Unity's `Instantiate` is an in-memory copy, foundation 3.1): read
-    /// once, their meshes, nested prefabs, clips and sounds registered
-    /// once, their closure held resident by one token each. Emptied by a
-    /// replace load and when the world's store changes.
-    prefabs: std::collections::HashMap<fynkel_contracts::Uuid, std::sync::Arc<load::LoadedPrefab>>,
-    /// The roots the last `load_project` made from the project's
-    /// `persistentObjects` (ADR-0039); the next one destroys them first.
-    project_persistent: Vec<Entity>,
-    /// The background loads not activated yet, by ticket (ADR-0038);
-    /// dropping one stops its thread at the next asset.
-    loads: std::collections::HashMap<u32, load::PendingLoad>,
-    next_ticket: u32,
-    /// Action → bindings the user chose over the project's
-    /// (`fynkel_world_bind_actions`, M3-12), re-applied after every load.
-    rebinds: std::collections::BTreeMap<String, Vec<String>>,
+    services: resources::ResourceServices,
     /// The message of the panic that poisoned the world (foundation 4.1),
     /// for the host to report once.
     panic: Option<String>,
@@ -257,6 +237,7 @@ fn guarded(world: *mut FynkelWorld, f: impl FnOnce(&mut FynkelWorld) -> Status) 
 }
 
 impl FynkelWorld {
+    #[cfg(feature = "authoring")]
     fn new(config: WorldConfig) -> Self {
         let mut world = Self::with_core(World::new(config));
         world.gameplay_allowed = false; // Authoring owns preview/stage worlds.
@@ -275,6 +256,7 @@ impl FynkelWorld {
             events_buf: buffer::empty(BufferKind::Events),
             after_physics_buf: buffer::empty(BufferKind::Events),
             diagnostics_buf: buffer::empty(BufferKind::Diagnostics),
+            entity_table_revision: None,
             query_bufs: (0..QUERY_LANES)
                 .map(|_| buffer::empty(BufferKind::Query))
                 .collect(),
@@ -285,13 +267,7 @@ impl FynkelWorld {
             strings: Vec::new(),
             load_report: Vec::new(),
             asset_json: Vec::new(),
-            assets: None,
-            residency: Vec::new(),
-            prefabs: std::collections::HashMap::new(),
-            project_persistent: Vec::new(),
-            loads: std::collections::HashMap::new(),
-            next_ticket: 0,
-            rebinds: std::collections::BTreeMap::new(),
+            services: Default::default(),
             panic: None,
             anchors: Vec::new(),
             points: Vec::new(),
@@ -302,15 +278,9 @@ impl FynkelWorld {
     /// Makes `assets` the world's store; a different store than before
     /// drops the prefabs kept in memory (they came from the old one).
     fn set_assets(&mut self, assets: fynkel_assets::Assets) {
-        if let Some(old) = &self.assets {
-            assets.adopt_runtime_assets(old);
-            if !old.same_store(&assets) {
-                self.prefabs.clear();
-            }
-        }
         self.inner
             .set_command_resource_source(Some(std::sync::Arc::new(assets.clone())));
-        self.assets = Some(assets);
+        self.services.adopt(assets);
     }
 
     pub fn core(&self) -> &World {
@@ -322,7 +292,7 @@ impl FynkelWorld {
 
     /// The residency store of the last successful load, if any.
     pub fn assets(&self) -> Option<&fynkel_assets::Assets> {
-        self.assets.as_ref()
+        self.services.assets.as_ref()
     }
 
     /// The subscription budget diagnostic (C5): `SNAPSHOT_BUDGET` once
@@ -538,7 +508,7 @@ pub unsafe extern "C" fn fynkel_world_set_material(
         return Status::InvalidArgument;
     };
     guarded(world, move |w| {
-        if w.assets.is_none() {
+        if w.services.assets.is_none() {
             return Status::LoadFailed;
         }
         gameplay::publish_runtime_material(w, key, gameplay::RuntimeMaterial::Pbr(material));
@@ -569,7 +539,7 @@ pub unsafe extern "C" fn fynkel_world_set_shader_material(
         (json_len != 0).then(|| std::slice::from_raw_parts(json, json_len as usize).to_vec());
     *out = FynkelBufferView::empty();
     guarded(world, move |w| {
-        let (status, diagnostics) = match &w.assets {
+        let (status, diagnostics) = match &w.services.assets {
             None => (
                 Status::LoadFailed,
                 vec![fynkel_contracts::Diagnostic::error(
@@ -692,7 +662,7 @@ pub unsafe extern "C" fn fynkel_world_set_mesh(
         return Status::InvalidArgument;
     };
     guarded(world, move |w| {
-        if w.assets.is_none() {
+        if w.services.assets.is_none() {
             return Status::LoadFailed;
         }
         gameplay::publish_runtime_mesh(w, key, mesh);
@@ -727,7 +697,7 @@ pub unsafe extern "C" fn fynkel_world_set_clip(
         return Status::InvalidArgument;
     };
     guarded(world, move |w| {
-        if w.assets.is_none() {
+        if w.services.assets.is_none() {
             return Status::LoadFailed;
         }
         gameplay::publish_runtime_clip(w, key, clip);
@@ -754,7 +724,7 @@ pub unsafe extern "C" fn fynkel_world_asset_json(
     let id = fynkel_contracts::Uuid(bytes);
     *out = FynkelBufferView::empty();
     guarded(world, move |w| {
-        let (status, text) = match &w.assets {
+        let (status, text) = match &w.services.assets {
             None => (
                 Status::LoadFailed,
                 fynkel_document::diagnostic_json(&fynkel_contracts::Diagnostic::error(
@@ -1234,6 +1204,15 @@ pub unsafe extern "C" fn fynkel_world_query(
     );
     let query = |w: &mut FynkelWorld| {
         w.stats.query_calls += 1;
+        if kind == bridge::QUERY_ENTITIES {
+            let revision = w.inner.entity_table_revision();
+            if w.entity_table_revision == Some(revision) {
+                w.query_bufs[lane][20..24].copy_from_slice(&request_id.to_le_bytes());
+                w.stats.bytes_out += w.query_bufs[lane].len() as u64;
+                return Status::Ok;
+            }
+            w.entity_table_revision = Some(revision);
+        }
         let buf = std::mem::take(&mut w.query_bufs[lane]);
         match bridge::query(&w.inner, kind, request_id, entity, buf) {
             Some(b) => {
@@ -1287,7 +1266,12 @@ pub unsafe extern "C" fn fynkel_world_stats(
         reserved: 0,
         native_bytes: fynkel_core::memory::heap_bytes(),
         resident_bytes: fynkel_core::memory::resident_bytes(),
-        residency_bytes: w.assets.as_ref().map(|a| a.stats().bytes).unwrap_or(0),
+        residency_bytes: w
+            .services
+            .assets
+            .as_ref()
+            .map(|a| a.stats().bytes)
+            .unwrap_or(0),
     };
     Status::Ok
 }
