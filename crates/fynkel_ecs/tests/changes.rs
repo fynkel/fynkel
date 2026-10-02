@@ -157,3 +157,58 @@ fn writes_on_another_thread_cannot_publish_a_settled_stamp_early() {
     assert_ne!(before, world.change_stamp().unwrap());
     assert_eq!(world.copy::<i32>(entity).unwrap(), 7);
 }
+
+#[test]
+fn component_stamps_cover_typed_writes_without_unrelated_invalidation() {
+    let mut world = World::new();
+    let entity = world.spawn(EntityBuilder::new().with(1_i32).with(false));
+    let number = world.component_stamp::<i32>().unwrap();
+    let flag = world.component_stamp::<bool>().unwrap();
+    assert_ne!(number, flag);
+    *world.get_mut::<bool>(entity).unwrap() = true;
+    assert_eq!(world.component_stamp::<i32>(), Some(number));
+    assert_ne!(world.component_stamp::<bool>(), Some(flag));
+    world.insert(entity, 2_i32).unwrap();
+    let replaced = world.component_stamp::<i32>().unwrap();
+    assert_ne!(number, replaced);
+    world.remove::<i32>(entity).unwrap();
+    let removed = world.component_stamp::<i32>().unwrap();
+    assert_ne!(replaced, removed);
+    world.insert(entity, 3_i32).unwrap();
+    let inserted = world.component_stamp::<i32>().unwrap();
+    assert_ne!(removed, inserted);
+    let guard = world.get_mut::<i32>(entity).unwrap();
+    assert_eq!(world.component_stamp::<i32>(), None);
+    drop(guard);
+    assert_ne!(world.component_stamp::<i32>(), Some(inserted));
+    let settled = world.component_stamp::<i32>().unwrap();
+    let new = world.spawn_empty();
+    assert_ne!(world.component_stamp::<i32>(), Some(settled));
+    let spawned = world.component_stamp::<i32>().unwrap();
+    world.despawn(new).unwrap();
+    assert_ne!(world.component_stamp::<i32>(), Some(spawned));
+}
+
+#[test]
+fn bulk_component_stamps_follow_write_borrows_including_optional_queries() {
+    use fynkel_ecs::internal::hecs;
+    let mut world = World::new();
+    world.spawn(EntityBuilder::new().with(1_i32).with(false));
+    let number = world.component_stamp::<i32>().unwrap();
+    let flag = world.component_stamp::<bool>().unwrap();
+    for (_, value) in world.query_mut::<(&i32, Option<&mut bool>)>() {
+        *value.unwrap() = true;
+    }
+    assert_eq!(world.component_stamp::<i32>(), Some(number));
+    assert_ne!(world.component_stamp::<bool>(), Some(flag));
+    let flag = world.component_stamp::<bool>();
+    // A mutable type mentioned only as a membership filter is not borrowed.
+    for _ in world.query_mut::<hecs::With<&i32, &mut bool>>() {}
+    assert_eq!(world.component_stamp::<i32>(), Some(number));
+    assert_eq!(world.component_stamp::<bool>(), flag);
+    for value in world.query_mut::<hecs::Without<&mut i32, &String>>() {
+        *value = 9;
+    }
+    assert_ne!(world.component_stamp::<i32>(), Some(number));
+    assert_eq!(world.component_stamp::<bool>(), flag);
+}

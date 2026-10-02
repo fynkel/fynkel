@@ -983,6 +983,31 @@ FynkelStatus fynkel_world_gameplay_state(
   ffi.Pointer<FynkelBufferView> out_view,
 ) => FynkelStatus.fromValue(_fynkel_world_gameplay_state(world, out_view));
 
+/// Conditional snapshot. Cursor is local to this world and consumer; zero forces
+/// full state. Success: revision u64, changed u32 (0/1), followed by the gameplay
+/// state payload only when changed. Reading does not consume other cursors.
+/// Same restrictions and view lifetime as gameplay_state. Additive ABI v5 API.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Uint64,
+    ffi.Pointer<FynkelBufferView>,
+  )
+>(symbol: 'fynkel_world_gameplay_state_since')
+external int _fynkel_world_gameplay_state_since(
+  ffi.Pointer<FynkelWorld> world,
+  int since,
+  ffi.Pointer<FynkelBufferView> out_view,
+);
+
+FynkelStatus fynkel_world_gameplay_state_since(
+  ffi.Pointer<FynkelWorld> world,
+  int since,
+  ffi.Pointer<FynkelBufferView> out_view,
+) => FynkelStatus.fromValue(
+  _fynkel_world_gameplay_state_since(world, since, out_view),
+);
+
 /// Capture interpolation history before fixed callbacks; cancel an abandoned tick.
 @ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<FynkelWorld>)>(
   symbol: 'fynkel_world_gameplay_tick_prepare',

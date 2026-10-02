@@ -52,7 +52,14 @@ pub mod internal {
         /// if the query is empty. Exclusive access prevents observing a change
         /// stamp until every reference yielded by the query has expired.
         pub fn query_mut<Q: hecs::Query>(&mut self) -> hecs::QueryMut<'_, Q> {
-            self.changes.get_mut().unwrap().advance(false, false);
+            use hecs::Fetch;
+            let changes = self.changes.get_mut().unwrap();
+            changes.advance(false, false);
+            Q::Fetch::for_each_borrow(|ty, unique| {
+                if unique {
+                    changes.components.insert(ty, changes.values);
+                }
+            });
             self.inner.query_mut::<Q>()
         }
         /// Fynkel handle of a raw `hecs` entity (every spawned entity carries one).
@@ -148,12 +155,23 @@ impl ChangeStamp {
     }
 }
 
+/// Settled entity membership and one component type's possible writes.
+/// Subject to the same publication and interior-mutation rules as ChangeStamp.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ComponentStamp {
+    world: WorldId,
+    component: std::any::TypeId,
+    entities: u64,
+    values: u64,
+}
+
 #[derive(Default)]
 struct Changes {
     entities: u64,
     structure: u64,
     values: u64,
     writers: usize,
+    components: std::collections::HashMap<std::any::TypeId, u64>,
 }
 
 impl Changes {
@@ -246,6 +264,20 @@ impl World {
             entities: changes.entities,
             structure: changes.structure,
             values: changes.values,
+        })
+    }
+
+    /// Tracks entity membership plus writes/presence changes of T, including
+    /// optional and filtered bulk query writes. Unrelated writes do not
+    /// invalidate this stamp. No stamp is returned during outstanding guards.
+    pub fn component_stamp<T: Component>(&self) -> Option<ComponentStamp> {
+        let changes = self.changes.lock().unwrap();
+        let component = std::any::TypeId::of::<T>();
+        (changes.writers == 0).then_some(ComponentStamp {
+            world: self.id,
+            component,
+            entities: changes.entities,
+            values: changes.components.get(&component).copied().unwrap_or(0),
         })
     }
 
@@ -356,7 +388,11 @@ impl World {
     pub fn insert<T: Component>(&mut self, entity: Entity, component: T) -> Result<()> {
         let raw = self.require(entity)?;
         let structural = !self.inner.satisfies::<&T>(raw);
-        self.changes.get_mut().unwrap().advance(false, structural);
+        let changes = self.changes.get_mut().unwrap();
+        changes.advance(false, structural);
+        changes
+            .components
+            .insert(std::any::TypeId::of::<T>(), changes.values);
         self.inner.insert_one(raw, component).expect("live entity");
         Ok(())
     }
@@ -366,7 +402,11 @@ impl World {
         if !self.inner.satisfies::<&T>(raw) {
             return Err(EcsError::MissingComponent(entity));
         }
-        self.changes.get_mut().unwrap().advance(false, true);
+        let changes = self.changes.get_mut().unwrap();
+        changes.advance(false, true);
+        changes
+            .components
+            .insert(std::any::TypeId::of::<T>(), changes.values);
         self.inner
             .remove_one::<T>(raw)
             .map_err(|_| EcsError::MissingComponent(entity))
@@ -392,6 +432,10 @@ impl World {
             .map(|inner| {
                 let mut changes = self.changes.lock().unwrap();
                 changes.advance(false, false);
+                let revision = changes.values;
+                changes
+                    .components
+                    .insert(std::any::TypeId::of::<T>(), revision);
                 changes.writers = changes
                     .writers
                     .checked_add(1)

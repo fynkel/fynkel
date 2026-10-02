@@ -1,0 +1,256 @@
+{
+  "date": "2026-10-02",
+  "base_commit": "3f0d3872b3823747c5c9350fce225c0704ca7086",
+  "milestone": "F4 component stamps and conditional identity synchronization",
+  "status": "slice qualified; F4 remains in progress",
+  "platform": "macOS-26.5.1-arm64-arm-64bit",
+  "commands": [
+    {
+      "cwd": "packages/fynkel",
+      "command": [
+        "dart",
+        "run",
+        "ffigen",
+        "--config",
+        "ffigen.yaml"
+      ],
+      "exit_code": 0,
+      "log": "target/foundation-baseline/f4-identity-sync/ffigen.log",
+      "log_sha256": "0d823d5f0cad10d08f8dbf4784d92651e756deb9aec8220e07649a6e66c5d39c"
+    },
+    {
+      "cwd": ".",
+      "command": [
+        "cargo",
+        "test",
+        "--release",
+        "-p",
+        "fynkel_ecs",
+        "-p",
+        "fynkel_core",
+        "-p",
+        "fynkel_native",
+        "--locked"
+      ],
+      "exit_code": 0,
+      "log": "target/foundation-baseline/f4-identity-sync/rust.log",
+      "log_sha256": "4e4063f32e8519524feedc07039fa28c3f01e73964399ca6ed8611fb512df427",
+      "tests": {
+        "passed": 471,
+        "failed": 0,
+        "ignored": 1
+      }
+    },
+    {
+      "cwd": "packages/fynkel",
+      "command": [
+        "dart",
+        "test"
+      ],
+      "exit_code": 0,
+      "log": "target/foundation-baseline/f4-identity-sync/sdk.log",
+      "log_sha256": "e0ac09dff401a00048d83b754b4f89f9ee31f415f95ff850fcf602b460bb790a",
+      "tests": {
+        "passed": 603,
+        "failed": 0
+      },
+      "runtime": "workspace-built fynkel_platform_apple release, animation/audio/physics"
+    },
+    {
+      "cwd": ".",
+      "command": [
+        "cargo",
+        "clippy",
+        "--release",
+        "-p",
+        "fynkel_ecs",
+        "-p",
+        "fynkel_core",
+        "-p",
+        "fynkel_native",
+        "--all-targets",
+        "--locked",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "log": "target/foundation-baseline/f4-identity-sync/clippy.log",
+      "log_sha256": "468fdac638d5236cc88b334268a830883b4af03c155c65af58afb7f15f044a8d"
+    },
+    {
+      "cwd": "packages/fynkel",
+      "command": [
+        "dart",
+        "analyze"
+      ],
+      "exit_code": 0,
+      "log": "target/foundation-baseline/f4-identity-sync/analyze.log",
+      "log_sha256": "e8706fb8d2ecc4b5742145ee57677a0e063a51b4e1a3be2c412b3f57681e0080"
+    },
+    {
+      "cwd": ".",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "exit_code": 0,
+      "log": "target/foundation-baseline/f4-identity-sync/fmt.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "cwd": ".",
+      "command": [
+        "cargo",
+        "test",
+        "--release",
+        "-p",
+        "fynkel_core",
+        "-p",
+        "fynkel_native",
+        "--no-default-features",
+        "--lib",
+        "--locked"
+      ],
+      "exit_code": 0,
+      "log": "target/foundation-baseline/f4-identity-sync/stripped.log",
+      "log_sha256": "f2eac71e3662e0d55741f2d6a04c981dc60d02899848aab8ee67e17c3f594acf",
+      "tests": {
+        "passed": 72,
+        "failed": 0,
+        "ignored": 0
+      }
+    }
+  ],
+  "callback_benchmark": {
+    "before": {
+      "cwd": "packages/fynkel",
+      "command": [
+        "dart",
+        "run",
+        "tool/foundation_callbacks.dart"
+      ],
+      "exit_code": 0,
+      "log": "target/foundation-baseline/f4-identity-sync/before.log",
+      "log_sha256": "780f44295b655c849aae01853f83898c7aba733a7985ce0a31f0af4aef357279",
+      "result": {
+        "workload": "shipping SDK explicit callback-equivalent edits, transform writes, Dart JIT",
+        "results": [
+          {
+            "entities": 128,
+            "callbacksPerSample": 1,
+            "warmupSamples": 5,
+            "measuredSamples": 10,
+            "p50Us": 272,
+            "p95Us": 417,
+            "ffiCallsPerSample": 8,
+            "limitation": "Entry reconciliation scans all live identities. F4 revision tracking remains required for sparse large worlds."
+          },
+          {
+            "entities": 128,
+            "callbacksPerSample": 32,
+            "warmupSamples": 5,
+            "measuredSamples": 10,
+            "p50Us": 2615,
+            "p95Us": 3439,
+            "ffiCallsPerSample": 256,
+            "limitation": "Entry reconciliation scans all live identities. F4 revision tracking remains required for sparse large worlds."
+          },
+          {
+            "entities": 2048,
+            "callbacksPerSample": 1,
+            "warmupSamples": 5,
+            "measuredSamples": 10,
+            "p50Us": 342,
+            "p95Us": 494,
+            "ffiCallsPerSample": 8,
+            "limitation": "Entry reconciliation scans all live identities. F4 revision tracking remains required for sparse large worlds."
+          },
+          {
+            "entities": 2048,
+            "callbacksPerSample": 32,
+            "warmupSamples": 5,
+            "measuredSamples": 10,
+            "p50Us": 10468,
+            "p95Us": 10693,
+            "ffiCallsPerSample": 256,
+            "limitation": "Entry reconciliation scans all live identities. F4 revision tracking remains required for sparse large worlds."
+          }
+        ]
+      }
+    },
+    "after": {
+      "cwd": "packages/fynkel",
+      "command": [
+        "dart",
+        "run",
+        "tool/foundation_callbacks.dart"
+      ],
+      "exit_code": 0,
+      "log": "target/foundation-baseline/f4-identity-sync/after.log",
+      "log_sha256": "e33d8d3acd5f75e5beb55cd76121ca407a60da3954273c53dc0aaea97777d4d2",
+      "result": {
+        "workload": "shipping SDK explicit callback-equivalent edits, transform writes, Dart JIT",
+        "results": [
+          {
+            "entities": 128,
+            "callbacksPerSample": 1,
+            "warmupSamples": 5,
+            "measuredSamples": 10,
+            "p50Us": 98,
+            "p95Us": 127,
+            "ffiCallsPerSample": 8,
+            "identitySnapshotsPerSample": 0,
+            "identityBytesPerSample": 12,
+            "limitation": "Identity/name changes still request a full snapshot; this workload measures transform-only callback edits, not sparse renames or structural churn."
+          },
+          {
+            "entities": 128,
+            "callbacksPerSample": 32,
+            "warmupSamples": 5,
+            "measuredSamples": 10,
+            "p50Us": 1561,
+            "p95Us": 2279,
+            "ffiCallsPerSample": 256,
+            "identitySnapshotsPerSample": 0,
+            "identityBytesPerSample": 384,
+            "limitation": "Identity/name changes still request a full snapshot; this workload measures transform-only callback edits, not sparse renames or structural churn."
+          },
+          {
+            "entities": 2048,
+            "callbacksPerSample": 1,
+            "warmupSamples": 5,
+            "measuredSamples": 10,
+            "p50Us": 24,
+            "p95Us": 25,
+            "ffiCallsPerSample": 8,
+            "identitySnapshotsPerSample": 0,
+            "identityBytesPerSample": 12,
+            "limitation": "Identity/name changes still request a full snapshot; this workload measures transform-only callback edits, not sparse renames or structural churn."
+          },
+          {
+            "entities": 2048,
+            "callbacksPerSample": 32,
+            "warmupSamples": 5,
+            "measuredSamples": 10,
+            "p50Us": 711,
+            "p95Us": 1283,
+            "ffiCallsPerSample": 256,
+            "identitySnapshotsPerSample": 0,
+            "identityBytesPerSample": 384,
+            "limitation": "Identity/name changes still request a full snapshot; this workload measures transform-only callback edits, not sparse renames or structural churn."
+          }
+        ]
+      }
+    }
+  },
+  "limitations": [
+    "Before is base commit; after is this working change, same machine and JIT workload. Benchmark order and short sampling affect timings; no whole-game speedup claimed.",
+    "Entity/name changes still rebuild full identity state. Sparse deltas and entity-table publication remain pending.",
+    "Unchanged reconciliation skips scans and map decoding, but retains behaviour dirtiness notifications.",
+    "Conditional C API is additive to ABI v5; new SDK builds require a runtime exporting the new symbol.",
+    "One existing dynamic-library Rust test is ignored by the standard suite; no dynamic-library gate claimed."
+  ]
+}

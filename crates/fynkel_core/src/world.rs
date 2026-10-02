@@ -267,6 +267,8 @@ pub struct World {
     pub(crate) config: WorldConfig,
     clock: FrameClock,
     ecs: Ecs,
+    identity_stamp: Option<fynkel_ecs::ComponentStamp>,
+    identity_revision: u64,
     /// Roots whose committed poses must reset interpolation history.
     teleported: Vec<Entity>,
     /// The subtrees whose `Inactive` markers are stale.
@@ -349,6 +351,8 @@ impl World {
             ecs: Ecs::try_new()?,
             config,
             clock,
+            identity_stamp: None,
+            identity_revision: 0,
             teleported: Vec::new(),
             active: ActiveMarkers::default(),
             events: EventQueue::default(),
@@ -528,6 +532,21 @@ impl World {
     }
     pub fn ecs_mut(&mut self) -> &mut Ecs {
         &mut self.ecs
+    }
+
+    /// World-local cursor for committed identity/name reconciliation. Zero is
+    /// reserved for a consumer's initial snapshot. None means a native write
+    /// guard is still outstanding; consumers must not publish a cache then.
+    pub fn identity_revision(&mut self) -> Option<u64> {
+        let stamp = self.ecs.component_stamp::<Name>()?;
+        if self.identity_stamp != Some(stamp) {
+            self.identity_revision = self
+                .identity_revision
+                .checked_add(1)
+                .expect("identity revision exhausted");
+            self.identity_stamp = Some(stamp);
+        }
+        Some(self.identity_revision)
     }
 
     pub fn is_poisoned(&self) -> bool {

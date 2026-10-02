@@ -720,6 +720,11 @@ FynkelBufferView fynkel_world_load_report(const FynkelWorld* world);
 /* Register a runtime component schema; outside edits, versioned scalar payload. */
 FynkelStatus fynkel_world_component_register(FynkelWorld* world, const uint8_t* data, uint32_t length, FynkelBufferView* out_view);
 FynkelStatus fynkel_world_gameplay_state(FynkelWorld* world, FynkelBufferView* out_view);
+/* Conditional snapshot. Cursor is local to this world and consumer; zero forces
+ * full state. Success: revision u64, changed u32 (0/1), followed by the gameplay
+ * state payload only when changed. Reading does not consume other cursors.
+ * Same restrictions and view lifetime as gameplay_state. Additive ABI v5 API. */
+FynkelStatus fynkel_world_gameplay_state_since(FynkelWorld* world, uint64_t since, FynkelBufferView* out_view);
 /* Capture interpolation history before fixed callbacks; cancel an abandoned tick. */
 FynkelStatus fynkel_world_gameplay_tick_prepare(FynkelWorld* world);
 FynkelStatus fynkel_world_gameplay_tick_cancel(FynkelWorld* world);

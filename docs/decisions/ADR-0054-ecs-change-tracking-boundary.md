@@ -1,6 +1,6 @@
 # ADR-0054: ECS change tracking boundary
 
-Status: Accepted (first F4 implementation slice)
+Status: Accepted (F4 mutation tracking and conditional identity synchronization)
 
 ## Problem
 
@@ -22,6 +22,18 @@ The component trait still accepts arbitrary `Send + Sync` Rust types. Mutation t
 
 This establishes the mutation boundary, not the full F4 optimization. There are no compatibility raw-world getters. Read queries stay read-only by construction; mutable bulk iteration and individually guarded writes cover the migrated native callers. Guard bookkeeping uses a mutex because shared component access can cross threads. Its cost must be included in later performance qualification.
 
-The counters are global, not per-component or per-entity deltas. They cannot yet make sparse component changes cheap, distinguish hierarchy/transform/name changes, or remove the host callback reconciliation and entity-table scans. F4 still needs domain-specific deltas, explicit subsystem ownership, cache consumers, dirty roots/membership, snapshot publication/lifetime work and measured performance gates. Do not mark those complete based on this slice.
+Global counters are supplemented by component-specific stamps. There are still no per-entity deltas: a relevant change invalidates the whole domain. Unchanged callback identity reconciliation now skips its scan, but sparse renames/structural churn still rebuild full identity snapshots, and entity-table synchronization remains unchanged. F4 still needs domain-specific deltas, explicit subsystem ownership, cache consumers, dirty roots/membership, snapshot publication/lifetime work and measured performance gates. Do not mark those complete based on this slice.
 
 Permanent tests cover membership/value distinctions, all facade write routes, no-op and rejected access, multiple outstanding guards, unwinding, cross-thread guards, slot reuse, world identity and counter exhaustion. Compile-fail tests enforce read-only queries and the bulk write lifetime boundary. Existing scene, physics and core suites qualify caller migration.
+
+## Component stamps and identity synchronization (second F4 slice)
+
+`component_stamp<T>` combines the world identity, component type, entity membership revision and that type's last possible write revision. Typed insert/remove/write guards advance the affected type. Bulk queries enumerate their declared borrow types through the hecs adapter and advance only unique (mutable) borrows. Optional mutable components participate; types used only as membership filters do not. The adapter remains inside `fynkel_ecs::internal`, with regression coverage for these query forms. Reads and unrelated component writes leave a settled component stamp unchanged. Any outstanding shared-access write guard still prevents obtaining a settled stamp, conservatively including unrelated guards.
+
+Core owns a world-local identity/name cursor derived from the Name stamp. Zero is reserved for a consumer's first read. ECS spawn/despawn changes membership even for unnamed entities; direct Name replacement/removal, guarded writes and bulk writes all invalidate the cursor. Changes aborted by a gameplay transaction never reach these storage revisions.
+
+The additive C ABI v5 function `fynkel_world_gameplay_state_since` takes that consumer's last cursor. A successful response begins with little-endian revision u64 and changed u32. An unchanged response ends there (12 bytes); a changed response appends the existing full identity/name snapshot. The existing full-snapshot API and conditional API use one implementation. SDKs using the new symbol require the corresponding runtime build; existing full-snapshot callers and wire formats remain compatible. C callers must keep each cursor with its originating world, use zero for an initial/forced read, and consume or copy the borrowed response before the next gameplay API call on that world.
+
+Each SDK World owns its cursor independently of other native consumers. It advances only after successful reconciliation, which precedes the next gameplay edit; an abort of that later edit does not undo already observed native changes. Unchanged responses skip native entity traversal/name encoding and Dart map decoding/object reconciliation. Behaviour dirtiness notifications still run because activity and execution state have separate invalidation rules. Native state reads still reject active sessions, unsupported authoring worlds and poisoned worlds; they do not step simulation or drain events.
+
+The SDK exposes successful snapshot and response-byte counters beside its existing bridge counters. The callback benchmark records those counters as well as latency. This qualifies the unchanged-state fast path only, not sparse identity deltas, full entity-table publication, rendering or whole-game performance.

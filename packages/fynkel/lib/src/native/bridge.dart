@@ -244,6 +244,10 @@ class NativeWorld {
 
   int ffiCalls = 0, dartCopies = 0, dartBytesCopied = 0;
 
+  /// Successful identity snapshots decoded and identity response bytes read.
+  /// Conditional unchanged responses count bytes but do not count a snapshot.
+  int gameplayStateSnapshots = 0, gameplayStateBytes = 0;
+
   /// Raw `FynkelWorld*` for platform viewports that render this world's
   /// extract (e.g. `fynkel_apple_viewport_render`). Valid until [dispose].
   int get handleAddress => _w.address;
@@ -357,7 +361,9 @@ class NativeWorld {
     if (status != FynkelStatus.FYNKEL_STATUS_OK) {
       throw StateError(utf8.decode(bytes));
     }
+    gameplayStateBytes += bytes.length;
     final reader = _GameplayReader(bytes);
+    gameplayStateSnapshots++;
     final live = <EntityRef, String>{};
     final size = reader.u32();
     for (var i = 0; i < size; i++) {
@@ -365,6 +371,30 @@ class NativeWorld {
       live[entity] = reader.string();
     }
     return live;
+  }
+
+  /// A world-local consumer cursor. Null state means identities/names are
+  /// unchanged; the caller must retain its existing state. Zero forces a read.
+  ({int revision, Map<EntityRef, String>? live}) gameplayStateSince(int since) {
+    _requireLive();
+    final status = fynkel_world_gameplay_state_since(_w, since, _view);
+    ffiCalls++;
+    final bytes = _view.ref.data.asTypedList(_view.ref.length);
+    if (status != FynkelStatus.FYNKEL_STATUS_OK) {
+      throw StateError(utf8.decode(bytes));
+    }
+    gameplayStateBytes += bytes.length;
+    final reader = _GameplayReader(bytes);
+    final revision = reader.u64();
+    if (reader.u32() == 0) return (revision: revision, live: null);
+    gameplayStateSnapshots++;
+    final live = <EntityRef, String>{};
+    final size = reader.u32();
+    for (var i = 0; i < size; i++) {
+      final entity = reader.entity();
+      live[entity] = reader.string();
+    }
+    return (revision: revision, live: live);
   }
 
   FynkelStatus playSoundNow(gen.PlaySoundCommandRecord sound) {

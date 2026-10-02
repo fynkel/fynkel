@@ -30,7 +30,13 @@ extension _WorldGameplay on World {
   }
 
   void _reconcileGameplayState() {
-    final live = _native.gameplayState();
+    final state = _native.gameplayStateSince(_gameplayStateRevision);
+    final live = state.live;
+    if (live == null) {
+      // Activity and behaviour execution have separate invalidation rules.
+      _behaviours.objectChanged();
+      return;
+    }
     for (final go in _byEntity.values.toList()) {
       final name = live[go._entity];
       if (name == null) {
@@ -47,6 +53,7 @@ extension _WorldGameplay on World {
       go._observed = false;
       return true;
     });
+    _gameplayStateRevision = state.revision;
     _behaviours.objectChanged();
   }
 

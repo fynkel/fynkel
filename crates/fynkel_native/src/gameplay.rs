@@ -248,6 +248,28 @@ pub unsafe extern "C" fn fynkel_world_gameplay_state(
     world: *mut FynkelWorld,
     out: *mut FynkelBufferView,
 ) -> Status {
+    gameplay_state(world, None, out)
+}
+
+/// Conditional identity/name snapshot, using a world-local consumer cursor.
+/// Success: u64 revision, u32 changed (0 or 1), then the full snapshot if changed.
+/// Zero always requests a full snapshot. Other reads do not consume this cursor.
+/// # Safety
+/// World must be live or NULL; out must be writable or NULL. Cursor belongs to world.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_gameplay_state_since(
+    world: *mut FynkelWorld,
+    since: u64,
+    out: *mut FynkelBufferView,
+) -> Status {
+    gameplay_state(world, Some(since), out)
+}
+
+unsafe fn gameplay_state(
+    world: *mut FynkelWorld,
+    since: Option<u64>,
+    out: *mut FynkelBufferView,
+) -> Status {
     if let Some(view) = out.as_mut() {
         *view = FynkelBufferView::empty();
     }
@@ -265,7 +287,23 @@ pub unsafe extern "C" fn fynkel_world_gameplay_state(
                 "state reconciliation inside an edit",
             );
         }
-        let mut reply = Vec::new();
+        let mut reply = std::mem::take(&mut w.gameplay_reply);
+        reply.clear();
+        if let Some(since) = since {
+            let Some(revision) = w.inner.identity_revision() else {
+                return reject(
+                    w,
+                    Status::CommandsRejected,
+                    "unsettled native component write",
+                );
+            };
+            reply.extend(revision.to_le_bytes());
+            put32(&mut reply, u32::from(since != revision));
+            if since == revision {
+                w.gameplay_reply = reply;
+                return Status::Ok;
+            }
+        }
         put32(&mut reply, w.inner.live_entities());
         for e in w.inner.ecs().entities() {
             entity(&mut reply, e);
@@ -2016,6 +2054,102 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event.payload,
                 fynkel_core::EventPayload::Destroyed { entity, .. } if entity == kept)));
+            fynkel_world_destroy(w);
+        }
+    }
+
+    #[test]
+    fn conditional_identity_snapshots_are_consumer_local_and_cover_native_changes() {
+        unsafe {
+            let w = fixture();
+            let commit = (*w)
+                .inner
+                .edit_gameplay(|edit| edit.spawn("first", Transform::IDENTITY, None))
+                .unwrap();
+            let e = commit.resolve(commit.value).unwrap();
+            let mut out = FynkelBufferView::empty();
+            let read = move |since| {
+                assert_eq!(
+                    fynkel_world_gameplay_state_since(w, since, &mut FynkelBufferView::empty()),
+                    Status::Ok
+                );
+                let bytes = &(*w).gameplay_reply;
+                (
+                    u64::from_le_bytes(bytes[..8].try_into().unwrap()),
+                    u32::from_le_bytes(bytes[8..12].try_into().unwrap()),
+                    bytes.len(),
+                )
+            };
+            let (first, changed, len) = read(0);
+            assert_eq!(changed, 1);
+            assert!(len > 12);
+            assert_eq!(read(first), (first, 0, 12));
+            (*w).inner.ecs().get_mut::<Transform>(e).unwrap().position.x = 4.;
+            assert_eq!(read(first), (first, 0, 12));
+            // A full read or a second consumer cannot consume the first cursor.
+            assert_eq!(fynkel_world_gameplay_state(w, &mut out), Status::Ok);
+            assert_eq!(read(0).1, 1);
+            assert_eq!(read(first), (first, 0, 12));
+            (*w).inner
+                .ecs()
+                .get_mut::<fynkel_core::Name>(e)
+                .unwrap()
+                .value = "renamed".into();
+            let (renamed, changed, _) = read(first);
+            assert_eq!(changed, 1);
+            assert_ne!(renamed, first);
+            let bytes = &(*w).gameplay_reply;
+            assert_eq!(&bytes[36..], b"renamed");
+            assert_eq!(read(first).1, 1);
+            assert_eq!(read(renamed), (renamed, 0, 12));
+            (*w).inner.ecs_mut().remove::<fynkel_core::Name>(e).unwrap();
+            let (unnamed, changed, len) = read(renamed);
+            assert_eq!((changed, len), (1, 36));
+            (*w).inner.edit_gameplay(|edit| edit.destroy(e)).unwrap();
+            let (destroyed, changed, len) = read(unnamed);
+            assert_eq!((changed, len), (1, 16));
+            assert_eq!(read(destroyed), (destroyed, 0, 12));
+            assert_eq!((*w).inner.tick(), 0);
+            fynkel_world_destroy(w);
+        }
+    }
+
+    #[test]
+    fn conditional_snapshot_rejects_invalid_boundaries_without_accepting_cursor() {
+        unsafe {
+            let w = fixture();
+            let mut out = FynkelBufferView::empty();
+            assert_eq!(
+                fynkel_world_gameplay_state_since(w, 0, std::ptr::null_mut()),
+                Status::InvalidArgument
+            );
+            assert_eq!(
+                fynkel_world_gameplay_state_since(std::ptr::null_mut(), 0, &mut out),
+                Status::InvalidArgument
+            );
+            (*w).gameplay_allowed = false;
+            assert_eq!(
+                fynkel_world_gameplay_state_since(w, 0, &mut out),
+                Status::Unsupported
+            );
+            (*w).gameplay_allowed = true;
+            let seq = begin(w);
+            assert_eq!(exchange(w, seq, &spawn_request()), Status::Ok);
+            assert_eq!(
+                fynkel_world_gameplay_state_since(w, 0, &mut out),
+                Status::CommandsRejected
+            );
+            assert_eq!(end(w, seq, 1), Status::CommandsRejected);
+            assert_eq!((*w).inner.live_entities(), 0);
+            assert_eq!(
+                fynkel_world_gameplay_state_since(w, 0, &mut out),
+                Status::Ok
+            );
+            (*w).inner.poison();
+            assert_eq!(
+                fynkel_world_gameplay_state_since(w, 0, &mut out),
+                Status::Poisoned
+            );
             fynkel_world_destroy(w);
         }
     }

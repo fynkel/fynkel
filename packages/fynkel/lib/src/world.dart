@@ -365,6 +365,7 @@ class World {
   Iterable<GameObject> get objects => _withGameplay(() => _gameplay!.objects());
 
   _GameplayAdapter? _activeGameplay;
+  int _gameplayStateRevision = 0;
   int _lifecycleDepth = 0;
 
   /// Atomically edits built-in gameplay configuration through ordinary object

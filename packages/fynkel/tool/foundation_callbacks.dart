@@ -14,9 +14,11 @@ void main() {
         final objects = world.edit(() => List.generate(count, (i) => world.spawn(name: 'object-$i')));
         final native = world.native;
         final samples = <int>[];
-        var calls = 0;
+        var calls = 0, snapshots = 0, stateBytes = 0;
         for (var round = 0; round < 15; round++) {
           final before = native.ffiCalls;
+          final snapshotsBefore = native.gameplayStateSnapshots;
+          final bytesBefore = native.gameplayStateBytes;
           final watch = Stopwatch()..start();
           for (var callback = 0; callback < callbacks; callback++) {
             world.edit(() {
@@ -27,6 +29,8 @@ void main() {
           if (round >= 5) {
             samples.add(watch.elapsedMicroseconds);
             calls += native.ffiCalls - before;
+            snapshots += native.gameplayStateSnapshots - snapshotsBefore;
+            stateBytes += native.gameplayStateBytes - bytesBefore;
           }
         }
         for (final object in objects.take(callbacks)) {
@@ -41,7 +45,9 @@ void main() {
           'p50Us': samples[5],
           'p95Us': samples[9],
           'ffiCallsPerSample': calls ~/ 10,
-          'limitation': 'Entry reconciliation scans all live identities. F4 revision tracking remains required for sparse large worlds.',
+          'identitySnapshotsPerSample': snapshots ~/ 10,
+          'identityBytesPerSample': stateBytes ~/ 10,
+          'limitation': 'Identity/name changes still request a full snapshot; this workload measures transform-only callback edits, not sparse renames or structural churn.',
         });
       } finally {
         world.dispose();

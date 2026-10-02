@@ -88,6 +88,49 @@ void main() {
     expect(retired.calls, ['disable', 'destroy']);
   });
 
+  test('unchanged names skip snapshots while native activity still settles', () {
+    final go = w.spawn(name: 'stable');
+    final behaviour = go.addBehaviour(_Retired());
+    w.frame(0);
+    w.edit(() {}); // Catch up the SDK cursor after the spawn.
+    final snapshots = w.native.gameplayStateSnapshots;
+    final bytes = w.native.gameplayStateBytes;
+    for (var i = 0; i < 32; i++) {
+      w.edit(() => go.transform.position = Vec3(i.toDouble(), 0, 0));
+    }
+    expect(w.native.gameplayStateSnapshots, snapshots);
+    expect(w.native.gameplayStateBytes - bytes, 32 * 12);
+    w.frame(1 / 60);
+    expect(w.native.gameplayStateSnapshots, snapshots);
+    w.native.editGameplay((edit) => edit.setActive(NativeGameplayRef.live(go.entity), false));
+    w.frame(0);
+    expect(behaviour.calls, ['disable']);
+    expect(w.native.gameplayStateSnapshots, snapshots);
+  });
+
+  test('independent state readers cannot consume SDK rename or destruction changes', () {
+    final go = w.spawn(name: 'before');
+    w.edit(() {});
+    final observer = w.native.gameplayStateSince(0);
+    expect(observer.live![go.entity], 'before');
+    expect(w.native.gameplayStateSince(observer.revision).live, isNull);
+    w.native.editGameplay((edit) => edit.setName(NativeGameplayRef.live(go.entity), 'after'));
+    final renamed = w.native.gameplayStateSince(observer.revision);
+    expect(renamed.live![go.entity], 'after');
+    expect(w.native.gameplayState()[go.entity], 'after');
+    expect(() => w.edit(() {
+      expect(go.name, 'after');
+      throw StateError('callback abort');
+    }), throwsStateError);
+    final snapshots = w.native.gameplayStateSnapshots;
+    w.edit(() => expect(go.name, 'after'));
+    expect(w.native.gameplayStateSnapshots, snapshots);
+    w.native.editGameplay((edit) => edit.destroy(NativeGameplayRef.live(go.entity)));
+    expect(w.native.gameplayStateSince(renamed.revision).live, isEmpty);
+    w.edit(() => expect(go.isAlive, isFalse));
+    expect(w.objects, isEmpty);
+  });
+
   test('canceled pending spawns and committed destruction retire handles once', () {
     final survivor = w.edit(() => w.spawn(name: 'survivor'));
     final canceled = w.spawn(name: 'canceled');
