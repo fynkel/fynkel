@@ -2,6 +2,19 @@
 
 **Date:** 2026-10-02. **Status:** complete under [ADR-0055](decisions/ADR-0055-incremental-synchronization-and-publication.md). This closes F4.1–F4.4; F0 performance targets and F5–F8 remain separate gates.
 
+## Follow-up source review (2026-10-02)
+
+The completion review found two missing invalidation cases despite the original passing qualification. Both are corrected, with regressions demonstrated failing before the fixes:
+
+- Native ECS destruction left dead entries in the snapshot subscription set. `Publication` now consumes its own entity-membership cursor and retires exact dead generations at publication; history loss triggers a liveness rebuild of the subscription set. Ordinary gameplay destruction remains eager. Retained immutable snapshots are unchanged. Coverage includes slot reuse and 17,000 spawn/despawn cycles overflowing history.
+- Collision-mesh registration could leave an unavailable collider permanently missing, or retain an older mesh after the same key was registered again. Registration and replacement now share the physics owner's invalidation operation. The regression covers missing-to-ready data, prepared re-registration, changed geometry, and a subsequent clean synchronization pass. Invalid replacements retain their documented removal/error behavior.
+
+A separate deterministic comparison exercises 96 entities through 600 local-pose, activity and reparenting edits plus history overflow; incremental matrices and activity match the full-rebuild reference after every round. This supplements, rather than replaces, the sparse-cost gates.
+
+[Review evidence](../benchmarks/foundation/results/2026-10-02-08be4916-f4-review.json) records **507 affected Rust tests** (one existing library-identity ignore), **50 stripped-core tests**, **606 SDK tests**, the **8-test final synchronization suite**, affected Clippy with warnings denied, formatting and the rerun synchronization benchmark. The final focused suite overlaps the larger suites; these counts must not be added as distinct tests. Static/sleeping synchronization still visits zero candidates and allocates nothing; one sparse edit visits one candidate per scene/physics consumer. No SDK API, wire format or generated binding changed in this correction.
+
+The two findings are closed. No additional unfinished F4 acceptance item was found in the reviewed mutation, ownership, invalidation and publication boundaries. This is scoped qualification, not a claim that every engine bug is known or that later performance/platform gates have been passed.
+
 ## Delivered and qualified
 
 | Item | Result | Permanent coverage |

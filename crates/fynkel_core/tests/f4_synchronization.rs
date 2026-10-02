@@ -189,3 +189,87 @@ fn sleeping_bodies_stay_clean_and_churn_retires_exact_generations() {
     w.step();
     assert_eq!(w.physics().stats().colliders, 128);
 }
+
+#[test]
+fn native_destruction_retires_snapshot_subscriptions() {
+    let mut w = World::new(Default::default());
+    let old = scene::spawn(w.ecs_mut(), Transform::IDENTITY, None).unwrap();
+    w.subscribe(&[old], true);
+    w.step();
+    let (_, retained) = w.published_snapshot();
+    w.ecs_mut().despawn(old).unwrap();
+    let replacement = scene::spawn(w.ecs_mut(), Transform::IDENTITY, None).unwrap();
+    w.subscribe(&[replacement], true);
+    w.step();
+    assert_eq!(w.subscriptions().collect::<Vec<_>>(), vec![replacement]);
+    assert_eq!(w.subscription_count(), 1);
+    assert_eq!(retained[0].entity, old);
+    // The reset path must retire tombstones even after history overflow.
+    w.ecs_mut().despawn(replacement).unwrap();
+    for _ in 0..17000 {
+        let e = w.ecs_mut().spawn_empty();
+        w.ecs_mut().despawn(e).unwrap();
+    }
+    w.step();
+    assert_eq!(w.subscription_count(), 0);
+    assert!(w.snapshot().is_empty());
+}
+
+#[test]
+fn incremental_scene_matches_reference_through_mixed_edits_and_overflow() {
+    let mut worlds = [fynkel_ecs::World::new(), fynkel_ecs::World::new()];
+    let mut ids = [Vec::new(), Vec::new()];
+    for lane in 0..2 {
+        for i in 0..96 {
+            let parent = (i > 0).then(|| ids[lane][(i - 1) / 2]);
+            ids[lane].push(scene::spawn(&mut worlds[lane], Transform::IDENTITY, parent).unwrap());
+        }
+    }
+    let mut sync = SceneSync::default();
+    let mut seed = 12345u64;
+    for round in 0..600 {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let i = ((seed >> 32) as usize % 95) + 1;
+        for lane in 0..2 {
+            let e = ids[lane][i];
+            match round % 3 {
+                0 => {
+                    worlds[lane].get_mut::<Transform>(e).unwrap().position.x = round as f32;
+                    if lane == 1 {
+                        scene::mark_dirty(&worlds[lane], e).unwrap();
+                    }
+                }
+                1 => {
+                    scene::set_active(&mut worlds[lane], e, round % 2 == 0).unwrap();
+                }
+                _ => {
+                    scene::set_parent_keep_local(&mut worlds[lane], e, Some(ids[lane][i / 3]))
+                        .unwrap();
+                }
+            }
+            if round == 300 {
+                for _ in 0..17000 {
+                    worlds[lane].get_mut::<Transform>(e).unwrap().position.y += 1.;
+                }
+                if lane == 1 {
+                    scene::mark_dirty(&worlds[lane], e).unwrap();
+                }
+            }
+        }
+        sync.refresh_active(&mut worlds[0]);
+        sync.propagate(&mut worlds[0]);
+        scene::refresh_active(&mut worlds[1]);
+        scene::propagate(&mut worlds[1]);
+        for (i, (&actual, &expected)) in ids[0].iter().zip(&ids[1]).enumerate() {
+            assert_eq!(
+                scene::world_matrix(&worlds[0], actual),
+                scene::world_matrix(&worlds[1], expected),
+                "round {round}, entity {i}"
+            );
+            assert_eq!(
+                scene::is_active_in_hierarchy(&worlds[0], actual),
+                scene::is_active_in_hierarchy(&worlds[1], expected)
+            );
+        }
+    }
+}

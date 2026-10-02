@@ -1,0 +1,263 @@
+{
+  "date": "2026-10-02",
+  "base_commit": "08be491699ad2a3553b71e4e9db2e8ca1f129641",
+  "scope": "F4 source review and invalidation corrections",
+  "findings": [
+    "Publication membership was not retired for direct native ECS destruction. Fixed using independent membership deltas and reset liveness reconciliation.",
+    "Mesh registration did not invalidate existing/unavailable collider realizations. Fixed by sharing invalidation between registration and replacement."
+  ],
+  "regression_proof": {
+    "subscriptions": "subscriptions-red.log fails on stale generation remaining subscribed",
+    "mesh": "mesh-red.log fails because late registration leaves collider unavailable"
+  },
+  "qualification": [
+    {
+      "cwd": ".",
+      "command": "cargo test --release -p fynkel_core -p fynkel_scene -p fynkel_physics -p fynkel_native --locked",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-review/rust.log",
+      "sha256": "424565cf078dd804753cc762a95fa08f263f29fba9eaa0e82cabbaf1a29f27eb",
+      "tests": {
+        "passed": 507,
+        "failed": 0,
+        "ignored": 1
+      }
+    },
+    {
+      "cwd": ".",
+      "command": "cargo test --release -p fynkel_core --no-default-features --lib --test f4_synchronization --locked",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-review/stripped.log",
+      "sha256": "61b1631d4d967b4374a8955f74c5f561c9133081e51ee78713efc4c2c5e20c35",
+      "tests": {
+        "passed": 50,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "cwd": ".",
+      "command": "cargo test --release -p fynkel_core --test f4_synchronization --locked",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-review/scene-reference-final.log",
+      "sha256": "9a0ed6f6ea0f8d5c74da6b30e53b9445bdf737c781213b425f2a0aeab2a657dd",
+      "tests": {
+        "passed": 8,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "cwd": "packages/fynkel",
+      "command": "dart test",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-review/sdk.log",
+      "sha256": "819e84e2858af3335a1befb954511917391fae31847998069aa804c82a40a7da",
+      "tests": {
+        "passed": 606,
+        "failed": 0
+      }
+    },
+    {
+      "cwd": ".",
+      "command": "cargo clippy --release -p fynkel_core -p fynkel_physics -p fynkel_native --all-targets --locked -- -D warnings",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-review/clippy-final.log",
+      "sha256": "78628b78adb790877d357cb6684ac62f12d9feeff7576ed7b04d571d9e6a23a2"
+    },
+    {
+      "cwd": ".",
+      "command": "cargo fmt --all --check",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-review/format.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "cwd": ".",
+      "command": "git diff --check",
+      "result": "pass",
+      "log": "target/foundation-baseline/f4-review/diff-check.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "additional_coverage": "600 deterministic mixed hierarchy/activity/local-pose edits over 96 entities, plus relevant history overflow, compared with full scene refresh/propagation.",
+  "benchmarks": {
+    "command": "cargo run --release -p fynkel_core --example f4_sync_bench --locked",
+    "samples": [
+      {
+        "workload": "static_scene_physics",
+        "entities": 1000,
+        "p50_ns": 166,
+        "p95_ns": 167,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "sparse_scene_physics",
+        "entities": 1000,
+        "p50_ns": 875,
+        "p95_ns": 959,
+        "candidates_per_sample": 2.0,
+        "allocation_calls_per_sample": 8.02,
+        "requested_bytes_per_sample": 6350.72
+      },
+      {
+        "workload": "unchanged_table_revision",
+        "entities": 1000,
+        "p50_ns": 125,
+        "p95_ns": 125,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "full_extract_static",
+        "entities": 1000,
+        "p50_ns": 142209,
+        "p95_ns": 153084,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 11.0,
+        "requested_bytes_per_sample": 427532.0
+      },
+      {
+        "workload": "churn_scene_physics",
+        "entities": 1000,
+        "p50_ns": 2042,
+        "p95_ns": 2750,
+        "candidates_per_sample": 4.0,
+        "allocation_calls_per_sample": 21.17,
+        "requested_bytes_per_sample": 2799.84
+      },
+      {
+        "workload": "reference_full_scene_scan",
+        "entities": 1000,
+        "p50_ns": 583,
+        "p95_ns": 584,
+        "candidates_per_sample": 1000.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "sleeping_scene_physics",
+        "entities": 1000,
+        "p50_ns": 166,
+        "p95_ns": 167,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "sleeping_full_tick",
+        "entities": 1000,
+        "p50_ns": 4041,
+        "p95_ns": 4167,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 1.0,
+        "requested_bytes_per_sample": 64.0
+      },
+      {
+        "workload": "static_scene_physics",
+        "entities": 10000,
+        "p50_ns": 166,
+        "p95_ns": 208,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "sparse_scene_physics",
+        "entities": 10000,
+        "p50_ns": 875,
+        "p95_ns": 1083,
+        "candidates_per_sample": 2.0,
+        "allocation_calls_per_sample": 8.0,
+        "requested_bytes_per_sample": 944.0
+      },
+      {
+        "workload": "unchanged_table_revision",
+        "entities": 10000,
+        "p50_ns": 125,
+        "p95_ns": 125,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "full_extract_static",
+        "entities": 10000,
+        "p50_ns": 1377166,
+        "p95_ns": 1419125,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 14.0,
+        "requested_bytes_per_sample": 3613988.0
+      },
+      {
+        "workload": "churn_scene_physics",
+        "entities": 10000,
+        "p50_ns": 2250,
+        "p95_ns": 3042,
+        "candidates_per_sample": 4.0,
+        "allocation_calls_per_sample": 21.16,
+        "requested_bytes_per_sample": 2636.0
+      },
+      {
+        "workload": "reference_full_scene_scan",
+        "entities": 10000,
+        "p50_ns": 6208,
+        "p95_ns": 6333,
+        "candidates_per_sample": 10000.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "sleeping_scene_physics",
+        "entities": 10000,
+        "p50_ns": 166,
+        "p95_ns": 167,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 0.0,
+        "requested_bytes_per_sample": 0.0
+      },
+      {
+        "workload": "sleeping_full_tick",
+        "entities": 10000,
+        "p50_ns": 21084,
+        "p95_ns": 21292,
+        "candidates_per_sample": 0.0,
+        "allocation_calls_per_sample": 1.0,
+        "requested_bytes_per_sample": 64.0
+      }
+    ]
+  },
+  "limits": [
+    "Focused suite overlaps package suite; counts are not distinct totals.",
+    "One existing native dynamic-library identity test remains ignored in the ordinary affected run; it was enabled separately for F4 completion.",
+    "No full workspace, editor, Flutter or dense SDK performance rerun is claimed for these Rust-only corrections.",
+    "Initial new reference test emitted unused-result warnings, then a needless-range-loop Clippy finding; corrected with checked results and zipped iteration. Final focused tests and Clippy pass."
+  ],
+  "logs": {
+    "target/foundation-baseline/f4-review/mesh-red.log": "0ebeec3ffb90264080384b0d5979fcdc480a15217f1d04b85f518da1eadc1d42",
+    "target/foundation-baseline/f4-review/scene-reference-final.log": "9a0ed6f6ea0f8d5c74da6b30e53b9445bdf737c781213b425f2a0aeab2a657dd",
+    "target/foundation-baseline/f4-review/subscriptions-red.log": "eb558bfef0af80345bd25f6ee9c5df8c807ed13c9a219f21e64ec120ac7f582e",
+    "target/foundation-baseline/f4-review/stripped.log": "61b1631d4d967b4374a8955f74c5f561c9133081e51ee78713efc4c2c5e20c35",
+    "target/foundation-baseline/f4-review/format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "target/foundation-baseline/f4-review/clippy-final.log": "78628b78adb790877d357cb6684ac62f12d9feeff7576ed7b04d571d9e6a23a2",
+    "target/foundation-baseline/f4-review/sync-bench.jsonl": "e6f14e3a0c27a79061f8b93b10f5a628c0dfd29596212e0e31ffe1266a9cb4f9",
+    "target/foundation-baseline/f4-review/scene-reference.log": "fe5748810329a60cfcd24197e2f86174d766567360d727ecc4d4e2c34f1ab076",
+    "target/foundation-baseline/f4-review/clippy.log": "dfb81e295b2ae428d2c994f007d33708e02e51ef14aeff3ad892fd5ee09429e8",
+    "target/foundation-baseline/f4-review/diff-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "target/foundation-baseline/f4-review/rust.log": "424565cf078dd804753cc762a95fa08f263f29fba9eaa0e82cabbaf1a29f27eb",
+    "target/foundation-baseline/f4-review/sdk.log": "819e84e2858af3335a1befb954511917391fae31847998069aa804c82a40a7da",
+    "target/foundation-baseline/f4-review/sync-bench-build.log": "0e0719ad44042010f6f734ae43667bac6e3520cb3b6df8399d3e33c234d02be6"
+  },
+  "source_sha256": {
+    "crates/fynkel_core/src/world.rs": "9dd9a7df57bbd919d9025a5d206f25ef7ce90b626348efc303dcb4ae2e248317",
+    "crates/fynkel_core/src/world/synchronization.rs": "038e88fe2ff10fcc1a9cd62ab5733eb27ea651aca93462fcd9213f37dc7f3db9",
+    "crates/fynkel_core/tests/f4_synchronization.rs": "abfd16ac29c1389389f40f893708cc6f594139c40a2e29475eeb5b544dee2c5b",
+    "crates/fynkel_physics/src/sim.rs": "f8daf5f9cf535d81b17356edf96b5d8756d19b766ac7ff616adc851ff3bc3db5",
+    "docs/decisions/ADR-0055-incremental-synchronization-and-publication.md": "44281a4320d2222e4a995f4ec2479ba843756f046d9637d1de6474074a11dd9d",
+    "docs/foundation-f4-gate-report.md": "9af7e81c042ed8bc12167dabba37346e92c1348950826e4bc80f7dc509b37c34",
+    "docs/foundation-roadmap.md": "f2fa3a9283d4a2be09ea02f3f23da233e2bac8a459e1c022bcbf48ab2b4636cd"
+  }
+}

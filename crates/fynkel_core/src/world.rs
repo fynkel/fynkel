@@ -1253,6 +1253,7 @@ impl World {
 
     /// Subscribes (or unsubscribes) entities for the transform snapshot.
     /// Unknown/stale handles are ignored; destroyed entities drop out.
+    /// Direct native ECS destruction is reconciled at the next publication.
     pub fn subscribe(&mut self, entities: &[Entity], enable: bool) {
         for &e in entities {
             if enable {

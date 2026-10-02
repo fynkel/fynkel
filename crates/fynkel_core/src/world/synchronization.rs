@@ -78,12 +78,28 @@ pub(super) struct Publication {
     pub(super) snapshot: Arc<[SnapshotRecord]>,
     pub(super) tick: Tick,
     pub(super) subscriptions: BTreeSet<Entity>,
+    membership_cursor: Option<fynkel_ecs::ChangeCursor>,
     pub(super) events: EventQueue,
     pub(super) diagnostics: Vec<Diagnostic>,
     pub(super) last_events: u32,
 }
 impl Publication {
     pub(super) fn publish(&mut self, ecs: &Ecs, tick: Tick) {
+        // Native ECS destruction also retires publications. Transactions may
+        // remove subscriptions eagerly, but are not the only supported writer.
+        let changes = ecs
+            .changes_since(self.membership_cursor, &[], false)
+            .expect("settled publication storage");
+        if changes.reset {
+            self.subscriptions.retain(|e| ecs.contains(*e));
+        } else {
+            for e in changes.entities {
+                if !ecs.contains(e) {
+                    self.subscriptions.remove(&e);
+                }
+            }
+        }
+        self.membership_cursor = Some(changes.cursor);
         if self.subscriptions.is_empty() {
             if !self.snapshot.is_empty() {
                 self.snapshot = Arc::default();

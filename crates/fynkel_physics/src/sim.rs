@@ -317,6 +317,7 @@ impl Physics {
     /// Publishes already validated collision data without a fallible decode step.
     pub fn register_prepared_mesh(&mut self, key: AssetRef, mesh: crate::PreparedMesh) -> usize {
         let triangles = mesh.triangle_count();
+        self.invalidate_mesh_users(&key);
         self.meshes.insert(key, (mesh.vertices, mesh.triangles));
         triangles
     }
@@ -339,17 +340,22 @@ impl Physics {
             .is_some_and(|c| c.shape == ColliderShape::Mesh && c.mesh.as_ref() == Some(key))
     }
 
-    /// Publishes a prevalidated runtime replacement and invalidates built colliders.
-    pub fn replace_prepared_mesh(&mut self, key: &AssetRef, mesh: Option<crate::PreparedMesh>) {
-        self.meshes.remove(key);
+    fn invalidate_mesh_users(&mut self, key: &AssetRef) {
         for (&entity, e) in &mut self.entries {
             if Self::built_from(e, key) {
                 e.stale = true;
                 self.invalidated.insert(entity);
             }
         }
+    }
+
+    /// Publishes a prevalidated runtime replacement and invalidates built colliders.
+    pub fn replace_prepared_mesh(&mut self, key: &AssetRef, mesh: Option<crate::PreparedMesh>) {
         if let Some(mesh) = mesh {
             self.register_prepared_mesh(key.clone(), mesh);
+        } else {
+            self.invalidate_mesh_users(key);
+            self.meshes.remove(key);
         }
     }
 
@@ -366,18 +372,18 @@ impl Physics {
         key: &AssetRef,
         mesh: Option<(&[[f32; 3]], &[u32])>,
     ) -> Result<(), String> {
-        self.meshes.remove(key);
-        for (&entity, e) in &mut self.entries {
-            if Self::built_from(e, key) {
-                e.stale = true;
-                self.invalidated.insert(entity);
+        match mesh
+            .map(|(positions, indices)| crate::PreparedMesh::new(positions, indices))
+            .transpose()
+        {
+            Ok(prepared) => {
+                self.replace_prepared_mesh(key, prepared);
+                Ok(())
             }
-        }
-        match mesh {
-            Some((positions, indices)) => self
-                .register_mesh(key.clone(), positions, indices)
-                .map(|_| ()),
-            None => Ok(()),
+            Err(error) => {
+                self.replace_prepared_mesh(key, None);
+                Err(error)
+            }
         }
     }
 
@@ -3082,6 +3088,42 @@ mod tests {
             .take_rejections()
             .iter()
             .any(|r| r.kind == RejectionKind::MeshUnavailable));
+    }
+
+    #[test]
+    fn mesh_registration_invalidates_existing_and_unavailable_colliders() {
+        let mut ecs = world();
+        let mut p = Physics::new();
+        let key = AssetRef::new("5c4e3f2a-1b0d-4c9e-8a7b-6f5e4d3c2b1a".parse().unwrap());
+        let e = spawn(
+            &mut ecs,
+            Vec3::ZERO,
+            None,
+            Some(Collider {
+                shape: ColliderShape::Mesh,
+                mesh: Some(key.clone()),
+                ..Default::default()
+            }),
+        );
+        p.refresh(&mut ecs);
+        assert!(p.entries[&e].collider.is_none());
+        let quad = |y| [[-5., y, -5.], [5., y, -5.], [5., y, 5.], [-5., y, 5.]];
+        let tris = [0, 2, 1, 0, 3, 2];
+        p.register_mesh(key.clone(), &quad(0.), &tris).unwrap();
+        p.refresh(&mut ecs);
+        let h = p.entries[&e]
+            .collider
+            .expect("late registration must retry unavailable collider");
+        assert_eq!(p.world.colliders[h].compute_aabb().center().y, 0.);
+        p.register_prepared_mesh(
+            key.clone(),
+            crate::PreparedMesh::new(&quad(-3.), &tris).unwrap(),
+        );
+        p.refresh(&mut ecs);
+        let h = p.entries[&e].collider.unwrap();
+        assert_eq!(p.world.colliders[h].compute_aabb().center().y, -3.);
+        p.refresh(&mut ecs);
+        assert_eq!(p.sync_candidates(), 0);
     }
 
     #[test]

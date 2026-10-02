@@ -35,3 +35,7 @@ A live world is still driven sequentially. Do not concurrently call into it, tra
 ## Allocation choices
 
 Registered bulk application borrows its validated native batch token instead of cloning the owned population. Each entity's staged registered writes use a compact sorted map, preserving deterministic order, replacement and all-or-nothing validation while avoiding an oversized tree node for a common one-component edit. Owned rows and transaction lifetime checks remain. Wire ownership intentionally adds copies for safety; dense queries and render extraction still allocate. The F4 gate report records both the savings and remaining costs; no zero-allocation frame or 60 Hz large-game budget is claimed.
+
+## Invalidation completeness amendment
+
+Snapshot publication consumes entity-membership deltas independently of gameplay transaction bookkeeping. Direct native destruction retires subscriptions at the next publication; reset rebuilds subscription liveness and never alters previously retained snapshot allocations. Physics mesh registration, prepared registration and replacement share invalidation of built or currently unavailable mesh users. Publishing service data must not rely on an unrelated later ECS write to make its consumers retry.
