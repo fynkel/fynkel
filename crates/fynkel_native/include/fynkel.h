@@ -38,7 +38,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_ABI_VERSION 4u
+#define FYNKEL_ABI_VERSION 5u
 #define FYNKEL_BUFFER_MAGIC 0x4b4e5946u /* "FYNK" */
 #define FYNKEL_BUFFER_HEADER_SIZE 24u
 
@@ -717,6 +717,8 @@ FynkelBufferView fynkel_world_load_report(const FynkelWorld* world);
  */
 /* Read-only lifecycle snapshot, outside edits: live count u32, followed by
  * (entity, name byte count u32, UTF-8 name). Errors return UTF-8 text. */
+/* Register a runtime component schema; outside edits, versioned scalar payload. */
+FynkelStatus fynkel_world_component_register(FynkelWorld* world, const uint8_t* data, uint32_t length, FynkelBufferView* out_view);
 FynkelStatus fynkel_world_gameplay_state(FynkelWorld* world, FynkelBufferView* out_view);
 /* Capture interpolation history before fixed callbacks; cancel an abandoned tick. */
 FynkelStatus fynkel_world_gameplay_tick_prepare(FynkelWorld* world);

@@ -941,7 +941,32 @@ external FynkelBufferView fynkel_world_load_report(
 /// End(commit=0) aborts; end(commit=1) validates and atomically publishes.
 /// /
 /// /* Read-only lifecycle snapshot, outside edits: live count u32, followed by
-/// (entity, name byte count u32, UTF-8 name). Errors return UTF-8 text.
+/// (entity, name byte count u32, UTF-8 name). Errors return UTF-8 text. */
+/// /* Register a runtime component schema; outside edits, versioned scalar payload.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+    ffi.Pointer<FynkelBufferView>,
+  )
+>(symbol: 'fynkel_world_component_register')
+external int _fynkel_world_component_register(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> data,
+  int length,
+  ffi.Pointer<FynkelBufferView> out_view,
+);
+
+FynkelStatus fynkel_world_component_register(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> data,
+  int length,
+  ffi.Pointer<FynkelBufferView> out_view,
+) => FynkelStatus.fromValue(
+  _fynkel_world_component_register(world, data, length, out_view),
+);
+
 @ffi.Native<
   ffi.UnsignedInt Function(
     ffi.Pointer<FynkelWorld>,
@@ -1648,7 +1673,7 @@ final class FynkelCloneDesc extends ffi.Struct {
   external ffi.Array<ffi.Float> scale;
 }
 
-const int FYNKEL_ABI_VERSION = 4;
+const int FYNKEL_ABI_VERSION = 5;
 
 const int FYNKEL_BUFFER_MAGIC = 1263425862;
 

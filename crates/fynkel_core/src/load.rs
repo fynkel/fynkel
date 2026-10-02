@@ -32,6 +32,7 @@ pub struct EntityDescription {
     /// At most one value per component type; a missing `Transform` means
     /// identity.
     pub components: Vec<ComponentValue>,
+    pub registered: Vec<crate::RegisteredDescription>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -393,9 +394,22 @@ impl World {
         components: Vec<ComponentValue>,
         authoring: Option<(Uuid, Uuid)>,
     ) -> Result<(Entity, Vec<Diagnostic>), LoadError> {
+        self.spawn_now_registered(name, transform, parent, components, Vec::new(), authoring)
+    }
+
+    pub fn spawn_now_registered(
+        &mut self,
+        name: &str,
+        transform: Transform,
+        parent: Option<Entity>,
+        components: Vec<ComponentValue>,
+        registered: Vec<crate::RegisteredDescription>,
+        authoring: Option<(Uuid, Uuid)>,
+    ) -> Result<(Entity, Vec<Diagnostic>), LoadError> {
         if self.is_poisoned() {
             return Err(LoadError::Poisoned);
         }
+        validate_registered_descriptions(&registered)?;
         let scene_index = match authoring {
             None => None,
             Some((scene, id)) => {
@@ -426,6 +440,9 @@ impl World {
                     if !matches!(component, ComponentValue::Transform(_)) {
                         edit.set_component(pending, component)?;
                     }
+                }
+                for component in &registered {
+                    edit.set_registered_authored(pending.into(), component, |_| None)?;
                 }
                 Ok(pending)
             })
@@ -587,6 +604,7 @@ impl World {
                 }
             }
             described.push(EntityDescription {
+                registered: Vec::new(),
                 id,
                 name: ecs
                     .get::<Name>(e)
@@ -607,7 +625,45 @@ impl World {
             .enumerate()
             .map(|(i, &(e, _))| (e, synthetic_id(i + 1)))
             .collect();
-        for d in &mut described {
+        for (d, (entity, _)) in described.iter_mut().zip(&entities) {
+            d.registered = self
+                .registered
+                .schemas()
+                .filter_map(|schema| {
+                    let values = self
+                        .registered
+                        .get(&schema.id)
+                        .ok()?
+                        .read(self.ecs(), *entity)?;
+                    Some(crate::RegisteredDescription {
+                        id: schema.id.clone(),
+                        version: schema.version,
+                        fields: schema
+                            .fields
+                            .iter()
+                            .zip(values)
+                            .map(|(field, value)| {
+                                let value = match value {
+                                    crate::ScalarValue::Object(target) => {
+                                        crate::AuthoredRegisteredValue::Object(ObjectRef {
+                                            id: target
+                                                .and_then(|t| t.live())
+                                                .and_then(|e| inside.get(&e).copied())
+                                                .unwrap_or(Uuid::NIL),
+                                            entity: target
+                                                .and_then(|t| t.live())
+                                                .filter(|e| self.ecs().contains(*e))
+                                                .unwrap_or(Entity::NULL),
+                                        })
+                                    }
+                                    other => crate::AuthoredRegisteredValue::Scalar(other),
+                                };
+                                (field.name.clone(), value)
+                            })
+                            .collect(),
+                    })
+                })
+                .collect();
             for c in &mut d.components {
                 c.for_each_object_ref(|_, _, r| {
                     r.id = inside.get(&r.entity).copied().unwrap_or(Uuid::NIL);
@@ -714,9 +770,25 @@ fn synthetic_id(n: usize) -> Uuid {
 }
 
 /// Validates the structure and returns indexes in spawn order.
+fn validate_registered_descriptions(
+    values: &[crate::RegisteredDescription],
+) -> Result<(), LoadError> {
+    let mut seen = std::collections::HashSet::new();
+    for value in values {
+        if !seen.insert(&value.id) {
+            return Err(LoadError::SceneRejected(format!(
+                "registered component {} appears twice",
+                value.id
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn spawn_order(scene: &SceneDescription) -> Result<Vec<usize>, LoadError> {
     let mut index: HashMap<Uuid, usize> = HashMap::with_capacity(scene.entities.len());
     for (i, d) in scene.entities.iter().enumerate() {
+        validate_registered_descriptions(&d.registered)?;
         if index.insert(d.id, i).is_some() {
             return Err(LoadError::DuplicateEntity(d.id));
         }
@@ -867,6 +939,11 @@ fn stage_description(
                 other => other,
             });
             edit.set_component(by_id[&d.id], value)?;
+        }
+        for component in &d.registered {
+            edit.set_registered_authored(by_id[&d.id].into(), component, |id| {
+                by_id.get(&id).copied().map(Into::into)
+            })?;
         }
     }
     Ok(StagedDescription {

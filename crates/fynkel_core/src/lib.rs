@@ -23,12 +23,14 @@ pub mod clock;
 pub mod command;
 pub mod components;
 pub mod event;
+pub mod extensions;
 pub mod input;
 pub mod load;
 pub mod material;
 pub mod memory;
 pub mod modules;
 pub mod registry;
+pub mod scheduler;
 pub mod schema;
 pub mod settings;
 pub mod volume;
@@ -73,7 +75,7 @@ pub use settings::Settings;
 pub use world::gameplay::{
     EditCommit, EditError, EditResult, GameplayClone, GameplayComponentValue, GameplayEdit,
     GameplayEntity, GameplayObjectRef, GameplayPrefab, GameplayQuery, GameplaySession,
-    PendingEntity,
+    PendingEntity, RegisteredBatch,
 };
 pub use world::{
     projection_matrix, view_matrix, Diagnostic, Extract, ExtractCamera, ExtractDirectionalLight,
@@ -86,5 +88,15 @@ pub use world::{
 pub use world::command_resources::{CommandResourceSource, PreparedCommandResources};
 
 pub use registry::{
-    ComponentSchema, RegisteredComponent, RegisteredField, RegistryError, ScalarValue,
+    AuthoredRegisteredValue, ComponentSchema, RegisteredComponent, RegisteredDescription,
+    RegisteredField, RegistryError, ScalarValue,
+};
+
+pub use scheduler::{
+    RegisteredSystem, RegisteredSystemTime, ScheduleError, SystemCallback, SystemContext,
+    SystemPhase, SystemSpec,
+};
+
+pub use extensions::{
+    ExtensionError, ExtensionManifest, ExtensionRegistrar, NativeExtension, EXTENSION_API_VERSION,
 };

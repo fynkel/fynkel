@@ -9,14 +9,22 @@ import 'package:spinner_game/spinner.dart' as _lib1;
 import 'package:spinner_game/weapon.dart' as _lib2;
 
 /// `game.Blinker` v2 → [_lib1.Blinker].
-BehaviourType get gameBlinkerType =>
-    BehaviourType(id: 'game.Blinker', version: 2, create: _lib1.Blinker.new, fields: const []);
+BehaviourType get gameBlinkerType => BehaviourType(
+  id: 'game.Blinker',
+  version: 2,
+  create: _lib1.Blinker.new,
+  dartType: _lib1.Blinker,
+  callbacks: const {'fixedUpdate'},
+  fields: const [],
+);
 
 /// `game.Chime` v1 → [_lib1.Chime].
 BehaviourType get gameChimeType => BehaviourType(
   id: 'game.Chime',
   version: 1,
   create: _lib1.Chime.new,
+  dartType: _lib1.Chime,
+  callbacks: const {'fixedUpdate'},
   fields: [
     BehaviourField(
       name: 'delays',
@@ -51,6 +59,8 @@ BehaviourType get gamePatrolType => BehaviourType(
   id: 'game.Patrol',
   version: 1,
   create: _lib1.Patrol.new,
+  dartType: _lib1.Patrol,
+  callbacks: const {'fixedUpdate'},
   fields: [
     BehaviourField(
       name: 'reach',
@@ -89,6 +99,8 @@ BehaviourType get gameSpawnerType => BehaviourType(
   id: 'game.Spawner',
   version: 1,
   create: _lib0.Spawner.new,
+  dartType: _lib0.Spawner,
+  callbacks: const {},
   fields: [
     BehaviourField(
       name: 'boss',
@@ -111,6 +123,8 @@ BehaviourType get gameSpinnerType => BehaviourType(
   id: 'game.Spinner',
   version: 1,
   create: _lib1.Spinner.new,
+  dartType: _lib1.Spinner,
+  callbacks: const {'fixedUpdate'},
   fields: [
     BehaviourField(
       name: 'axis',
@@ -197,6 +211,8 @@ BehaviourType get gameWielderType => BehaviourType(
   id: 'game.Wielder',
   version: 1,
   create: _lib2.Wielder.new,
+  dartType: _lib2.Wielder,
+  callbacks: const {},
   fields: [
     BehaviourField(
       name: 'spares',

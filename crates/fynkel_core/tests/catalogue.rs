@@ -402,6 +402,7 @@ fn prefab(id: Uuid, dynamic: bool) -> SceneDescription {
         id,
         name: "Spark".into(),
         entities: vec![EntityDescription {
+            registered: Vec::new(),
             id: Uuid::from_bytes(0x77u128.to_be_bytes()),
             name: "Ember".into(),
             active: true,
@@ -599,6 +600,7 @@ fn each_instance_follows_its_own_head() {
         name: "Enemy".into(),
         entities: vec![
             EntityDescription {
+                registered: Vec::new(),
                 id: doc_id(1),
                 name: "Enemy".into(),
                 active: true,
@@ -607,6 +609,7 @@ fn each_instance_follows_its_own_head() {
                 components: vec![ComponentValue::Transform(Transform::IDENTITY)],
             },
             EntityDescription {
+                registered: Vec::new(),
                 id: doc_id(2),
                 name: "Head".into(),
                 active: true,
@@ -617,6 +620,7 @@ fn each_instance_follows_its_own_head() {
                 ))],
             },
             EntityDescription {
+                registered: Vec::new(),
                 id: doc_id(3),
                 name: "Marker".into(),
                 active: true,
@@ -666,6 +670,7 @@ fn a_reference_to_an_object_outside_the_load_is_none_and_reported() {
         id: doc_id(100),
         name: "Marker".into(),
         entities: vec![EntityDescription {
+            registered: Vec::new(),
             id: doc_id(1),
             name: "Marker".into(),
             active: true,

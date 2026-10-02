@@ -437,7 +437,27 @@ struct GameplayJournal {
     input_bindings: Option<PreparedInputBindings>,
     prepared_controllers: super::controller::ControllerTable,
     component_revisions: BTreeMap<(GameplayEntity, ComponentId), u64>,
+    registered_revision: u64,
     failed: RefCell<Option<EditError>>,
+}
+
+/// An owned, immutable population snapshot. It contains no borrowed native memory.
+/// Applying it requires the same edit and unchanged registered data/membership.
+#[derive(Clone, Debug)]
+pub struct RegisteredBatch {
+    scope: (WorldId, u64),
+    stamp: (u64, u32, usize),
+    id: String,
+    rows: Vec<(GameplayEntity, Vec<crate::ScalarValue>)>,
+}
+
+impl RegisteredBatch {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+    pub fn rows(&self) -> &[(GameplayEntity, Vec<crate::ScalarValue>)] {
+        &self.rows
+    }
 }
 
 impl GameplayEdit<'_> {
@@ -466,6 +486,117 @@ impl GameplayEdit<'_> {
         Err(first)
     }
 
+    pub fn set_registered_authored(
+        &mut self,
+        owner: GameplayEntity,
+        component: &crate::RegisteredDescription,
+        resolve: impl Fn(fynkel_contracts::Uuid) -> Option<GameplayEntity>,
+    ) -> EditResult<()> {
+        self.check()?;
+        let schema = match self.world.registered.get(&component.id) {
+            Ok(r) => &r.schema,
+            Err(e) => return self.fail(EditError::RegisteredComponent(e)),
+        };
+        if component.version != schema.version
+            || component
+                .fields
+                .keys()
+                .any(|name| !schema.fields.iter().any(|f| f.name == *name))
+        {
+            return self.fail(EditError::RegisteredComponent(
+                crate::RegistryError::InvalidValue(format!(
+                    "{}: schema version or field mismatch; explicit migration required",
+                    component.id
+                )),
+            ));
+        }
+        let mut values = Vec::new();
+        for field in &schema.fields {
+            let value = match component.fields.get(&field.name) {
+                None => field.default.clone(),
+                Some(crate::AuthoredRegisteredValue::Scalar(value)) => {
+                    match (value, &field.default) {
+                        (crate::ScalarValue::Int(n), crate::ScalarValue::Float(_)) => {
+                            crate::ScalarValue::Float(*n as f64)
+                        }
+                        _ => value.clone(),
+                    }
+                }
+                Some(crate::AuthoredRegisteredValue::Object(reference)) => {
+                    let target = if !reference.id.is_nil() {
+                        match resolve(reference.id) {
+                            Some(e) => Some(e),
+                            None => {
+                                return self.fail(EditError::RegisteredComponent(
+                                    crate::RegistryError::InvalidValue(
+                                        "unresolved authored component reference".into(),
+                                    ),
+                                ))
+                            }
+                        }
+                    } else if !reference.entity.is_null() {
+                        Some(reference.entity.into())
+                    } else {
+                        None
+                    };
+                    crate::ScalarValue::Object(target)
+                }
+            };
+            values.push(value);
+        }
+        self.set_registered_values(owner, &component.id, values)
+    }
+
+    pub fn query_registered(&self, id: &str) -> EditResult<RegisteredBatch> {
+        self.check()?;
+        if let Err(error) = self.world.registered.get(id) {
+            return self.fail(EditError::RegisteredComponent(error));
+        }
+        let mut rows = Vec::new();
+        for entity in self.entities()? {
+            if let Some(fields) = self.registered_values(entity, id)? {
+                rows.push((entity, fields));
+            }
+        }
+        Ok(RegisteredBatch {
+            scope: self.journal.scope,
+            stamp: (
+                self.journal.registered_revision,
+                self.journal.next_pending,
+                self.journal.removed.len(),
+            ),
+            id: id.into(),
+            rows,
+        })
+    }
+    /// A frozen population cannot be silently applied over intervening writes,
+    /// membership changes, another world or a later transaction. Every row is
+    /// validated before publication; one bad row rejects the entire edit.
+    pub fn apply_registered_batch(
+        &mut self,
+        batch: &RegisteredBatch,
+        values: Vec<Vec<crate::ScalarValue>>,
+    ) -> EditResult<()> {
+        self.check()?;
+        if batch.scope != self.journal.scope
+            || batch.stamp
+                != (
+                    self.journal.registered_revision,
+                    self.journal.next_pending,
+                    self.journal.removed.len(),
+                )
+            || values.len() != batch.rows.len()
+        {
+            return self.fail(EditError::RegisteredComponent(
+                crate::RegistryError::InvalidValue("expired or mismatched bulk view".into()),
+            ));
+        }
+        for ((owner, _), value) in batch.rows.iter().zip(values) {
+            self.set_registered_values(*owner, &batch.id, value)?;
+        }
+        Ok(())
+    }
+
     /// Registered scalar values through the same journal as built-in data.
     pub fn registered_values(
         &self,
@@ -478,18 +609,33 @@ impl GameplayEdit<'_> {
             Ok(r) => r,
             Err(error) => return self.fail(EditError::RegisteredComponent(error)),
         };
-        if let Some(value) = self
+        let fields = if let Some(value) = self
             .journal
             .changes
             .get(&entity)
             .and_then(|c| c.registered.get(id))
         {
-            return Ok(value.as_ref().map(|v| v.fields.clone()));
-        }
-        Ok(entity
-            .live()
-            .and_then(|e| registration.read(&self.world.ecs, e)))
+            value.as_ref().map(|v| v.fields.clone())
+        } else {
+            entity
+                .live()
+                .and_then(|e| registration.read(&self.world.ecs, e))
+        };
+        Ok(fields.map(|mut fields| {
+            for value in &mut fields {
+                if let crate::ScalarValue::Object(target) = value {
+                    if target.is_some_and(|r| {
+                        self.journal.removed.contains(&r)
+                            || r.live().is_some_and(|e| !self.world.ecs.contains(e))
+                    }) {
+                        *target = None;
+                    }
+                }
+            }
+            fields
+        }))
     }
+
     pub fn set_registered_values(
         &mut self,
         entity: impl Into<GameplayEntity>,
@@ -498,6 +644,11 @@ impl GameplayEdit<'_> {
     ) -> EditResult<()> {
         let entity = entity.into();
         self.require(entity)?;
+        for field in &fields {
+            if let crate::ScalarValue::Object(Some(target)) = field {
+                self.require(*target)?;
+            }
+        }
         let prepared = self
             .world
             .registered
@@ -507,6 +658,11 @@ impl GameplayEdit<'_> {
             Ok(p) => p,
             Err(error) => return self.fail(EditError::RegisteredComponent(error)),
         };
+        self.journal.registered_revision = self
+            .journal
+            .registered_revision
+            .checked_add(1)
+            .ok_or(EditError::IdentityExhausted)?;
         self.journal
             .changes
             .entry(entity)
@@ -568,6 +724,11 @@ impl GameplayEdit<'_> {
         if let Err(error) = self.world.registered.get(id) {
             return self.fail(EditError::RegisteredComponent(error));
         }
+        self.journal.registered_revision = self
+            .journal
+            .registered_revision
+            .checked_add(1)
+            .ok_or(EditError::IdentityExhausted)?;
         self.journal
             .changes
             .entry(entity)
@@ -1357,7 +1518,14 @@ impl GameplayEdit<'_> {
             entities.push((*entity, copy));
         }
         for (entity, _, _, _, _, components, registered) in frozen {
-            for (id, fields) in registered {
+            for (id, mut fields) in registered {
+                for value in &mut fields {
+                    if let crate::ScalarValue::Object(Some(target)) = value {
+                        if let Some(copy) = mapping.get(target) {
+                            *target = (*copy).into();
+                        }
+                    }
+                }
                 self.set_registered_values(mapping[&entity], &id, fields)?;
             }
             for value in components {
@@ -1464,6 +1632,13 @@ impl GameplayEdit<'_> {
                     return self.fail(EditError::UnresolvedObjectReference(id));
                 }
                 self.set_component(by_id[&d.id], value)?;
+            }
+        }
+        for d in &prefab.entities {
+            for component in &d.registered {
+                self.set_registered_authored(by_id[&d.id].into(), component, |id| {
+                    by_id.get(&id).copied().map(Into::into)
+                })?;
             }
         }
         Ok(GameplayPrefab {
@@ -1845,6 +2020,7 @@ impl World {
             removed: BTreeSet::new(),
             prepared_controllers: Default::default(),
             component_revisions: BTreeMap::new(),
+            registered_revision: 0,
             failed: RefCell::new(None),
         };
         Ok(journal)
@@ -2065,7 +2241,13 @@ impl World {
             let entity = resolve(key);
             for (id, value) in change.registered {
                 match value {
-                    Some(value) => value.publish(&mut self.ecs, entity),
+                    Some(value) => value.publish(&mut self.ecs, entity, id, |target| {
+                        if removed.contains(&target) {
+                            None
+                        } else {
+                            Some(resolve(target))
+                        }
+                    }),
                     None => self
                         .registered
                         .get(&id)

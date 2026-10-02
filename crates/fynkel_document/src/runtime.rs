@@ -46,6 +46,7 @@ pub struct AuthoredBehaviour {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DescribedScene {
     pub description: SceneDescription,
+    pub registered_schemas: Vec<fynkel_core::ComponentSchema>,
     /// Document order (entity, then component order).
     pub behaviours: Vec<AuthoredBehaviour>,
     pub diagnostics: Vec<Diagnostic>,
@@ -66,20 +67,60 @@ fn to_uuid(u: &uuid::Uuid) -> Uuid {
 /// `schemas` says which non-native types are behaviours.
 #[cfg(feature = "validate")]
 pub fn describe(scene: &Scene, schemas: &SchemaSet) -> DescribedScene {
-    describe_with(scene, |type_id| schemas.behaviour(type_id).is_some())
+    let mut described = describe_registered(
+        scene,
+        |type_id| schemas.behaviour(type_id).is_some(),
+        |type_id| {
+            schemas
+                .component(type_id)
+                .is_some_and(|s| s.numeric_id == 0)
+        },
+    );
+    match schemas.registered_schemas() {
+        Ok(schemas) => described.registered_schemas = schemas,
+        Err(message) => described.diagnostics.push(Diagnostic::new(
+            Code::SCENE_COMPONENT_DATA,
+            Severity::Error,
+            message,
+        )),
+    }
+    described
 }
 
 /// [`describe`] with the behaviour types given as a test: a cooked load
 /// (ADR-0041) answers from the cook's `behaviourTypes` and builds no
 /// schema set.
 pub fn describe_with(scene: &Scene, is_behaviour: impl Fn(&str) -> bool) -> DescribedScene {
+    describe_registered(scene, is_behaviour, |_| false)
+}
+
+pub fn describe_registered(
+    scene: &Scene,
+    is_behaviour: impl Fn(&str) -> bool,
+    is_registered: impl Fn(&str) -> bool,
+) -> DescribedScene {
     let mut diagnostics = Vec::new();
     let mut behaviours = Vec::new();
     let doc = scene.document.path.as_deref();
     let mut entities = Vec::with_capacity(scene.entities.len());
     for e in &scene.entities {
         let mut components = Vec::with_capacity(e.components.len());
+        let mut registered = Vec::new();
         for c in &e.components {
+            if is_registered(&c.type_id) {
+                match registered_description(&c.type_id, c.version, &c.data.to_serde()) {
+                    Ok(value) => registered.push(value),
+                    Err(message) => diagnostics.push(diag(
+                        Code::SCENE_COMPONENT_DATA,
+                        Severity::Error,
+                        message,
+                        doc,
+                        &format!("{}/data", c.pointer),
+                        scene,
+                    )),
+                }
+                continue;
+            }
             match decode_component(&c.type_id, &c.data) {
                 None => {
                     let known = is_behaviour(&c.type_id);
@@ -118,6 +159,7 @@ pub fn describe_with(scene: &Scene, is_behaviour: impl Fn(&str) -> bool) -> Desc
             }
         }
         entities.push(EntityDescription {
+            registered,
             id: to_uuid(&e.id),
             name: e.name.clone(),
             active: e.active,
@@ -127,6 +169,7 @@ pub fn describe_with(scene: &Scene, is_behaviour: impl Fn(&str) -> bool) -> Desc
         });
     }
     DescribedScene {
+        registered_schemas: Vec::new(),
         description: SceneDescription {
             id: to_uuid(&scene.document.envelope.id),
             name: scene.document.envelope.name.clone(),
@@ -135,6 +178,63 @@ pub fn describe_with(scene: &Scene, is_behaviour: impl Fn(&str) -> bool) -> Desc
         behaviours,
         diagnostics,
     }
+}
+
+/// Decode authored custom data without executing game code. Defaults, version
+/// compatibility and field kinds are checked against the world's registry at
+/// activation; authoring retains the original JSON, including unknown types.
+pub fn registered_description(
+    id: &str,
+    version: u32,
+    data: &serde_json::Value,
+) -> Result<fynkel_core::RegisteredDescription, String> {
+    use fynkel_core::{AuthoredRegisteredValue as A, ScalarValue as V};
+    let object = data.as_object().ok_or("component data must be an object")?;
+    let mut fields = std::collections::BTreeMap::new();
+    for (name, value) in object {
+        let value = match value {
+            serde_json::Value::Null => A::Object(fynkel_contracts::ObjectRef::NONE),
+            serde_json::Value::Bool(v) => A::Scalar(V::Bool(*v)),
+            serde_json::Value::Number(v) => A::Scalar(if let Some(i) = v.as_i64() {
+                V::Int(i)
+            } else {
+                V::Float(v.as_f64().ok_or("invalid number")?)
+            }),
+            serde_json::Value::String(v) => A::Scalar(V::Text(v.clone())),
+            serde_json::Value::Object(v) if v.len() == 1 && v.contains_key("entity") => {
+                A::Object(fynkel_contracts::ObjectRef {
+                    id: v["entity"]
+                        .as_str()
+                        .ok_or("invalid object reference")?
+                        .parse()
+                        .map_err(|_| "invalid object UUID")?,
+                    entity: fynkel_contracts::Entity::NULL,
+                })
+            }
+            serde_json::Value::Object(v)
+                if v.contains_key("asset") && v.keys().all(|k| k == "asset" || k == "sub") =>
+            {
+                A::Scalar(V::Asset(fynkel_core::AssetRef::with_sub(
+                    v["asset"]
+                        .as_str()
+                        .ok_or("invalid asset reference")?
+                        .parse()
+                        .map_err(|_| "invalid asset UUID")?,
+                    v.get("sub")
+                        .map(|v| v.as_str().ok_or("invalid asset sub-id"))
+                        .transpose()?
+                        .unwrap_or(""),
+                )))
+            }
+            _ => return Err(format!("{id}.{name}: unsupported registered value layout")),
+        };
+        fields.insert(name.clone(), value);
+    }
+    Ok(fynkel_core::RegisteredDescription {
+        id: id.into(),
+        version,
+        fields,
+    })
 }
 
 fn diag(
@@ -173,4 +273,54 @@ pub const PROJECT_SCHEMAS_DIR: &str = "schemas";
 #[cfg(feature = "validate")]
 pub fn project_schemas(dir: &Path, project: &Project) -> Result<SchemaSet, Diagnostic> {
     project.schemas(&SchemaSet::embedded(), dir)
+}
+
+/// The generated registry metadata is shared by document validation and editor
+/// preview registration. Runtime games register the matching typed declaration.
+pub fn registered_schema(
+    value: &serde_json::Value,
+) -> Result<fynkel_core::ComponentSchema, String> {
+    use fynkel_core::{RegisteredField, ScalarValue as V};
+    let id = value["id"]
+        .as_str()
+        .ok_or("registration requires id")?
+        .to_string();
+    let version = value["version"]
+        .as_u64()
+        .and_then(|v| u32::try_from(v).ok())
+        .filter(|v| *v > 0)
+        .ok_or("registration requires positive version")?;
+    let mut fields = Vec::new();
+    for field in value["fields"]
+        .as_array()
+        .ok_or("registration requires fields")?
+    {
+        let name = field["name"]
+            .as_str()
+            .ok_or("field requires name")?
+            .to_string();
+        let v = &field["default"];
+        let default = match field["kind"].as_str() {
+            Some("number") => V::Float(v.as_f64().ok_or("number requires default")?),
+            Some("integer") => V::Int(v.as_i64().ok_or("integer requires default")?),
+            Some("boolean") => V::Bool(v.as_bool().ok_or("boolean requires default")?),
+            Some("string") => V::Text(v.as_str().ok_or("string requires default")?.into()),
+            Some("gameObject") if v.is_null() => V::Object(None),
+            Some("assetRef") => V::Asset(fynkel_core::AssetRef::with_sub(
+                v["asset"]
+                    .as_str()
+                    .ok_or("asset requires default")?
+                    .parse()
+                    .map_err(|_| "invalid asset UUID")?,
+                v.get("sub").and_then(|v| v.as_str()).unwrap_or(""),
+            )),
+            _ => return Err(format!("{id}.{name}: unsupported field or default")),
+        };
+        fields.push(RegisteredField { name, default });
+    }
+    Ok(fynkel_core::ComponentSchema {
+        id,
+        version,
+        fields,
+    })
 }

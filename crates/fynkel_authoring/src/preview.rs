@@ -55,6 +55,14 @@ use uuid::Uuid;
 /// Authoring UUIDs identify new objects; no transport IDs or spawn events.
 #[derive(Debug)]
 enum PreviewChange {
+    SetRegistered {
+        entity: Entity,
+        value: fynkel_core::RegisteredDescription,
+    },
+    RemoveRegistered {
+        entity: Entity,
+        id: String,
+    },
     Spawn {
         id: Uuid,
         transform: Transform,
@@ -107,6 +115,12 @@ fn apply_changes(
             let mut spawned: Vec<(Uuid, PendingEntity)> = Vec::new();
             for change in changes {
                 match change {
+                    PreviewChange::SetRegistered { entity, value } => {
+                        edit.set_registered_authored(entity.into(), &value, |_| None)?
+                    }
+                    PreviewChange::RemoveRegistered { entity, id } => {
+                        edit.remove_registered(entity, &id)?
+                    }
                     PreviewChange::Spawn {
                         id,
                         transform,
@@ -691,6 +705,92 @@ impl Preview {
                             transform,
                         });
                     }
+                    for c in &d.registered {
+                        let mut c = c.clone();
+                        let mut resolved = true;
+                        for field in c.fields.values_mut() {
+                            if let fynkel_core::AuthoredRegisteredValue::Object(r) = field {
+                                if !r.id.is_nil() {
+                                    if let Some(target) = self.ids.get(&to_uuid(r.id)) {
+                                        r.entity = *target;
+                                        r.id = fynkel_contracts::Uuid::NIL;
+                                    } else {
+                                        resolved = false;
+                                    }
+                                }
+                            }
+                        }
+                        if !resolved {
+                            // A target about to spawn is resolved next round. A
+                            // target absent from the desired scene must reject,
+                            // never silently preserve the previous value.
+                            if c.fields.values().any(|v| {
+                                matches!(v,
+                                fynkel_core::AuthoredRegisteredValue::Object(r)
+                                    if !r.id.is_nil() && !wanted.contains(&to_uuid(r.id)))
+                            }) {
+                                out.push(PreviewChange::SetRegistered {
+                                    entity: e,
+                                    value: c,
+                                });
+                            }
+                            continue;
+                        }
+                        let expected = world
+                            .registered_schemas()
+                            .find(|s| {
+                                s.id == c.id
+                                    && s.version == c.version
+                                    && c.fields
+                                        .keys()
+                                        .all(|name| s.fields.iter().any(|f| f.name == *name))
+                            })
+                            .map(|schema| {
+                                schema
+                                    .fields
+                                    .iter()
+                                    .map(|f| {
+                                        use fynkel_core::{
+                                            AuthoredRegisteredValue as A, ScalarValue as V,
+                                        };
+                                        match c.fields.get(&f.name) {
+                                            None => f.default.clone(),
+                                            Some(A::Scalar(V::Int(v)))
+                                                if matches!(f.default, V::Float(_)) =>
+                                            {
+                                                V::Float(*v as f64)
+                                            }
+                                            Some(A::Scalar(v)) => v.clone(),
+                                            Some(A::Object(r)) => V::Object(
+                                                (!r.entity.is_null()).then_some(r.entity.into()),
+                                            ),
+                                        }
+                                    })
+                                    .collect::<Vec<_>>()
+                            });
+                        if expected.is_none()
+                            || world.registered_values(e, &c.id).ok().flatten() != expected
+                        {
+                            out.push(PreviewChange::SetRegistered {
+                                entity: e,
+                                value: c,
+                            });
+                        }
+                    }
+                    for schema in world.registered_schemas() {
+                        if !d.registered.iter().any(|c| c.id == schema.id)
+                            && world
+                                .registered_values(e, &schema.id)
+                                .ok()
+                                .flatten()
+                                .is_some()
+                        {
+                            out.push(PreviewChange::RemoveRegistered {
+                                entity: e,
+                                id: schema.id.clone(),
+                            });
+                        }
+                    }
                     let have = ComponentValue::all_of(world, e);
                     for c in &d.components {
                         if matches!(c, ComponentValue::Transform(_)) {
@@ -933,7 +1033,19 @@ impl Preview {
             };
             let node = fynkel_document::Node::from_serde(data);
             let value = match fynkel_document::generated::decode_component(type_id, &node) {
-                None => continue,
+                None => {
+                    if let Some(schema) = world.registered_schemas().find(|s| s.id == *type_id) {
+                        let mut value = fynkel_document::runtime::registered_description(
+                            type_id,
+                            schema.version,
+                            data,
+                        )
+                        .map_err(|e| Diagnostic::error(Code::SESSION_INVALID_REQUEST, e))?;
+                        self.resolve_registered(&mut value)?;
+                        commands.push(PreviewChange::SetRegistered { entity: e, value });
+                    }
+                    continue;
+                }
                 Some(Ok(v)) => v,
                 Some(Err(err)) => {
                     return Err(Diagnostic::error(
@@ -954,6 +1066,24 @@ impl Preview {
         Ok(count)
     }
 
+    fn resolve_registered(
+        &self,
+        value: &mut fynkel_core::RegisteredDescription,
+    ) -> Result<(), Diagnostic> {
+        for field in value.fields.values_mut() {
+            if let fynkel_core::AuthoredRegisteredValue::Object(r) = field {
+                if !r.id.is_nil() {
+                    r.entity = *self
+                        .ids
+                        .get(&to_uuid(r.id))
+                        .ok_or_else(|| unknown_entity(to_uuid(r.id)))?;
+                    r.id = fynkel_contracts::Uuid::NIL;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// The components of `ids` back to the document's (a cancelled live
     /// edit): every described component but the Transform set again.
     pub fn restore_components(&self, world: &mut World, ids: &[Uuid]) -> Result<(), Diagnostic> {
@@ -962,6 +1092,11 @@ impl Preview {
             let (Some(d), Some(&e)) = (self.described.get(id), self.ids.get(id)) else {
                 return Err(unknown_entity(*id));
             };
+            for value in &d.registered {
+                let mut value = value.clone();
+                self.resolve_registered(&mut value)?;
+                commands.push(PreviewChange::SetRegistered { entity: e, value });
+            }
             for c in &d.components {
                 if !matches!(c, ComponentValue::Transform(_)) {
                     commands.push(PreviewChange::SetComponent {

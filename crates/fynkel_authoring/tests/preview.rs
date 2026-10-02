@@ -1083,3 +1083,97 @@ fn failed_preview_reload_keeps_identity_mapping_and_previous_description() {
     assert!(preview.diagnostics.is_empty(), "{:?}", preview.diagnostics);
     assert_ne!(preview.entity(id), Some(entity));
 }
+
+#[test]
+fn registered_component_schema_inspector_transaction_preview_and_undo_share_values() {
+    let copy = Copy::new("registered");
+    let dir = copy.dir.join("schemas/registered");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("game.Health.schema.json"),
+        include_str!(
+            "../../../examples/registered_gameplay/schemas/registered/game.Health.schema.json"
+        ),
+    )
+    .unwrap();
+    let (mut session, assets) = open(&copy);
+    let h = session.open_document(MAIN).unwrap();
+    let component = "a1000000-0000-4000-8000-000000000001";
+    apply(
+        &mut session,
+        h,
+        json!([{"command":"addComponent","entity":ROBOT,"component":{"id":component,"type":"game.Health","version":1,"data":{"hp":70}}}]),
+    );
+    let described = session.describe(h).unwrap();
+    assert!(!described.has_errors(), "{:?}", described.diagnostics);
+    let mut w = edit_world();
+    for schema in described.registered_schemas {
+        w.register_dynamic_component(schema).unwrap();
+    }
+    let mut preview = Preview::load(Uuid::nil(), &mut w, Some(&assets), &described.description);
+    assert!(preview.diagnostics.is_empty(), "{:?}", preview.diagnostics);
+    let owner = preview.entity(ROBOT.parse().unwrap()).unwrap();
+    assert_eq!(
+        w.registered_values(owner, "game.Health").unwrap().unwrap()[0],
+        fynkel_core::ScalarValue::Float(70.)
+    );
+    apply(
+        &mut session,
+        h,
+        json!([{"command":"setField","entity":ROBOT,"component":component,"field":"hp","value":25}]),
+    );
+    let report = preview.sync(&mut w, Some(&assets), &describe(&session, h));
+    assert!(!report.reloaded, "{:?}", report.diagnostics);
+    assert_eq!(
+        w.registered_values(owner, "game.Health").unwrap().unwrap()[0],
+        fynkel_core::ScalarValue::Float(25.)
+    );
+    session.undo(h).unwrap();
+    preview.sync(&mut w, Some(&assets), &describe(&session, h));
+    assert_eq!(
+        w.registered_values(owner, "game.Health").unwrap().unwrap()[0],
+        fynkel_core::ScalarValue::Float(70.)
+    );
+    preview
+        .set_components(
+            &mut w,
+            &[(
+                ROBOT.parse().unwrap(),
+                "game.Health".into(),
+                json!({"hp":5}),
+            )],
+        )
+        .unwrap();
+    assert_eq!(
+        w.registered_values(owner, "game.Health").unwrap().unwrap()[0],
+        fynkel_core::ScalarValue::Float(5.)
+    );
+    preview
+        .restore_components(&mut w, &[ROBOT.parse().unwrap()])
+        .unwrap();
+    assert_eq!(
+        w.registered_values(owner, "game.Health").unwrap().unwrap()[0],
+        fynkel_core::ScalarValue::Float(70.)
+    );
+    let stable = describe(&session, h);
+    for version in [1, 2] {
+        let mut invalid = stable.clone();
+        let data = invalid
+            .entities
+            .iter_mut()
+            .find_map(|e| e.registered.first_mut())
+            .unwrap();
+        data.version = version;
+        data.fields.insert(
+            "unknown".into(),
+            fynkel_core::AuthoredRegisteredValue::Scalar(fynkel_core::ScalarValue::Bool(true)),
+        );
+        let report = preview.sync(&mut w, Some(&assets), &invalid);
+        assert!(!report.diagnostics.is_empty());
+        assert_eq!(preview.entity(ROBOT.parse().unwrap()), Some(owner));
+        assert_eq!(
+            w.registered_values(owner, "game.Health").unwrap().unwrap()[0],
+            fynkel_core::ScalarValue::Float(70.)
+        );
+    }
+}

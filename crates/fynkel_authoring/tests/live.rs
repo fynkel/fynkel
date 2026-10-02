@@ -24,6 +24,7 @@ fn entity(
     components: Vec<ComponentValue>,
 ) -> EntityDescription {
     EntityDescription {
+        registered: Vec::new(),
         id: id(n),
         name: format!("e{n}"),
         active: true,
@@ -560,4 +561,55 @@ fn bad_calls_are_refused() {
             .contains("Camera"),
         "{r}"
     );
+}
+
+#[test]
+fn registered_live_inspector_reads_writes_versions_and_atomic_creation() {
+    let schema: Value = serde_json::from_str(include_str!(
+        "../../../examples/registered_gameplay/schemas/registered/game.Health.schema.json"
+    ))
+    .unwrap();
+    let mut w = World::new(Default::default());
+    w.register_dynamic_component(
+        fynkel_document::runtime::registered_schema(&schema["x-fynkel"]["registration"]).unwrap(),
+    )
+    .unwrap();
+    let created=live::call(&mut w,"spawn",&json!({"name":"health","components":[{"type":"game.Health","version":1,"data":{"hp":40}}]})).unwrap();
+    let owner = created["id"].as_str().unwrap();
+    let data = live::call(&mut w, "entity", &json!({"id":owner})).unwrap();
+    let health = data["components"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["type"] == "game.Health")
+        .unwrap();
+    assert_eq!(health["version"], 1);
+    assert_eq!(health["data"]["hp"], 40.0);
+    live::call(
+        &mut w,
+        "set",
+        &json!({"id":owner,"type":"game.Health","data":{"hp":20,"target":{"entity":owner}}}),
+    )
+    .unwrap();
+    let e = live::resolve(&w, owner).unwrap();
+    assert_eq!(
+        w.registered_values(e, "game.Health").unwrap().unwrap()[0],
+        ScalarValue::Float(20.)
+    );
+    assert!(live::call(
+        &mut w,
+        "set",
+        &json!({"id":owner,"type":"game.Health","version":2,"data":{"hp":10}})
+    )
+    .is_err());
+    let count = w.live_entities();
+    assert!(live::call(
+        &mut w,
+        "spawn",
+        &json!({"name":"discard","components":[{"type":"game.Health","data":{"hp":"bad"}}]})
+    )
+    .is_err());
+    assert_eq!(w.live_entities(), count);
+    live::call(&mut w, "remove", &json!({"id":owner,"type":"game.Health"})).unwrap();
+    assert!(w.registered_values(e, "game.Health").unwrap().is_none());
 }

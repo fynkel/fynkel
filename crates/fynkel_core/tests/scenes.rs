@@ -15,6 +15,7 @@ fn id(n: u8) -> Uuid {
 
 fn entity(n: u8, parent: Option<u8>, children: &[u8], at: Vec3) -> EntityDescription {
     EntityDescription {
+        registered: Vec::new(),
         id: id(n),
         name: format!("e{n}"),
         active: true,

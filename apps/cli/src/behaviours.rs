@@ -25,6 +25,7 @@ pub const DART_OUT: &str = "lib/generated/behaviours.g.dart";
 pub const JSON_OUT: &str = "lib/generated/behaviours.g.json";
 pub const SCHEMAS_DIR: &str = "schemas/behaviours";
 pub const DATA_SCHEMAS_DIR: &str = "schemas/data";
+pub const COMPONENT_SCHEMAS_DIR: &str = "schemas/registered";
 
 pub enum Outcome {
     /// Files written or refreshed (count) for `types` behaviour types and
@@ -33,10 +34,12 @@ pub enum Outcome {
         files: usize,
         types: usize,
         data: usize,
+        components: usize,
     },
     UpToDate {
         types: usize,
         data: usize,
+        components: usize,
     },
     Drift(Vec<PathBuf>),
 }
@@ -138,7 +141,7 @@ fn generate(
     let metadata: Value = serde_json::from_str(&json_text)
         .map_err(|e| format!("{}: not JSON: {e}", json_out.display()))?;
     let schemas = split_schemas(&metadata)?;
-    let (types, data) = counts(&schemas);
+    let (types, data, components) = counts(&schemas);
 
     let mut drift = Vec::new();
     let mut written = 0usize;
@@ -158,18 +161,27 @@ fn generate(
     if check {
         // `run` puts the committed generated files back: a check never mutates.
         return Ok(if drift.is_empty() {
-            Outcome::UpToDate { types, data }
+            Outcome::UpToDate {
+                types,
+                data,
+                components,
+            }
         } else {
             Outcome::Drift(drift)
         });
     }
     Ok(if written == 0 {
-        Outcome::UpToDate { types, data }
+        Outcome::UpToDate {
+            types,
+            data,
+            components,
+        }
     } else {
         Outcome::Written {
             files: written,
             types,
             data,
+            components,
         }
     })
 }
@@ -459,21 +471,31 @@ fn kill_tree(child: &mut std::process::Child) {
 }
 
 /// (behaviour types, data types) among the split schemas.
-fn counts(schemas: &BTreeMap<PathBuf, String>) -> (usize, usize) {
+fn counts(schemas: &BTreeMap<PathBuf, String>) -> (usize, usize, usize) {
     let data = schemas
         .keys()
         .filter(|k| k.starts_with(DATA_SCHEMAS_DIR))
         .count();
-    (schemas.len() - data, data)
+    {
+        let components = schemas
+            .keys()
+            .filter(|k| k.starts_with(COMPONENT_SCHEMAS_DIR))
+            .count();
+        (schemas.len() - data - components, data, components)
+    }
 }
 
 /// `N behaviour types`, and `, M data type(s)` when there are any.
-pub fn describe_counts(types: usize, data: usize) -> String {
-    match data {
+pub fn describe_counts(types: usize, data: usize, components: usize) -> String {
+    let mut result = match data {
         0 => format!("{types} behaviour types"),
         1 => format!("{types} behaviour types, 1 data type"),
         n => format!("{types} behaviour types, {n} data types"),
+    };
+    if components > 0 {
+        result.push_str(&format!(", {components} registered component types"));
     }
+    result
 }
 
 /// Writes (unless `check`) the split schemas into `schemas/behaviours/`
@@ -486,7 +508,7 @@ fn sync_schemas(
     drift: &mut Vec<PathBuf>,
 ) -> Result<usize, String> {
     let mut written = 0;
-    for dir in [SCHEMAS_DIR, DATA_SCHEMAS_DIR] {
+    for dir in [SCHEMAS_DIR, DATA_SCHEMAS_DIR, COMPONENT_SCHEMAS_DIR] {
         let abs = project.join(dir);
         if !abs.is_dir() {
             continue;
@@ -529,7 +551,14 @@ pub fn split_schemas(metadata: &Value) -> Result<BTreeMap<PathBuf, String>, Stri
         .ok_or("behaviours.g.json has no `behaviours` array")?;
     let data = metadata.get("dataTypes").and_then(|d| d.as_array());
     let mut out = BTreeMap::new();
-    for (dir, list) in [(SCHEMAS_DIR, Some(list)), (DATA_SCHEMAS_DIR, data)] {
+    for (dir, list) in [
+        (SCHEMAS_DIR, Some(list)),
+        (DATA_SCHEMAS_DIR, data),
+        (
+            COMPONENT_SCHEMAS_DIR,
+            metadata.get("componentTypes").and_then(|c| c.as_array()),
+        ),
+    ] {
         for b in list.into_iter().flatten() {
             let id = b
                 .get("id")

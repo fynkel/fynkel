@@ -1,6 +1,6 @@
 //! `fynkel_native` — the C ABI (`include/fynkel.h`) over `fynkel_core`.
 //!
-//! ABI v4 (blueprint §5.3, ADR-0004, ADR-0014). Every exported function:
+//! ABI v5 (blueprint §5.3, ADR-0004, ADR-0014). Every exported function:
 //! * accepts NULL and returns an error status instead of crashing;
 //! * runs inside `catch_unwind`; a panic poisons the world and returns
 //!   `FYNKEL_STATUS_PANIC`;
@@ -263,7 +263,9 @@ impl FynkelWorld {
         world
     }
 
-    fn with_core(inner: World) -> Self {
+    /// Wraps a host-configured world, including statically installed native extensions.
+    /// Call before exposing the world through the runtime ABI.
+    pub fn with_core(inner: World) -> Self {
         Self {
             inner: gameplay::WorldSlot::new(inner),
             gameplay_allowed: true,

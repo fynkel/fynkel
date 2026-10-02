@@ -12,6 +12,8 @@ BehaviourType get gameMoverType => BehaviourType(
   id: 'game.Mover',
   version: 1,
   create: _lib0.Mover.new,
+  dartType: _lib0.Mover,
+  callbacks: const {'fixedUpdate', 'update'},
   fields: [
     BehaviourField(
       name: 'jumpHeight',
@@ -49,6 +51,8 @@ BehaviourType get gameSpinnerType => BehaviourType(
   id: 'game.Spinner',
   version: 1,
   create: _lib1.Spinner.new,
+  dartType: _lib1.Spinner,
+  callbacks: const {'fixedUpdate'},
   fields: [
     BehaviourField(
       name: 'axis',

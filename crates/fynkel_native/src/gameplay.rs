@@ -17,6 +17,7 @@ struct PendingBindings {
 
 pub(crate) struct WorldSlot {
     world: Option<World>,
+    batches: Vec<fynkel_core::RegisteredBatch>,
     session: Option<GameplaySession>,
     prepared: Vec<fynkel_assets::PreparedPrefab>,
     resources: fynkel_assets::PreparedGameplayResources,
@@ -30,6 +31,7 @@ impl WorldSlot {
     pub fn new(world: World) -> Self {
         Self {
             world: Some(world),
+            batches: Vec::new(),
             session: None,
             prepared: Vec::new(),
             resources: Default::default(),
@@ -52,6 +54,7 @@ impl WorldSlot {
         }
     }
     fn abort(&mut self) {
+        self.batches.clear();
         self.prepared.clear();
         self.resources = Default::default();
         self.pending_bindings = None;
@@ -154,6 +157,7 @@ pub unsafe extern "C" fn fynkel_world_gameplay_begin(
             Ok(session) => {
                 *out = session.sequence();
                 w.inner.session = Some(session);
+                w.inner.batches.clear();
                 w.gameplay_pending.clear();
                 w.gameplay_reply.clear();
                 Status::Ok
@@ -166,6 +170,75 @@ pub unsafe extern "C" fn fynkel_world_gameplay_begin(
         }
     })
 }
+/// Register a runtime-defined schema outside a gameplay edit. Encoding is the
+/// versioned gameplay scalar protocol; identity/layout conflicts are rejected.
+/// # Safety
+/// World must be live or null; input readable for length, output writable or null.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_component_register(
+    world: *mut FynkelWorld,
+    data: *const u8,
+    length: u32,
+    out: *mut FynkelBufferView,
+) -> Status {
+    if let Some(out) = out.as_mut() {
+        *out = FynkelBufferView::empty();
+    }
+    let status = boundary(world, |w| {
+        if data.is_null() || out.is_null() || length == 0 {
+            return reject(w, Status::InvalidArgument, "invalid registration buffer");
+        }
+        if w.inner.reject_during_edit() {
+            return reject(w, Status::CommandsRejected, "registration during edit");
+        }
+        let mut reader = Reader {
+            bytes: std::slice::from_raw_parts(data, length as usize),
+            at: 0,
+            sequence: 0,
+            world: w.inner.id().0,
+            pending: &[],
+        };
+        let schema = (|| -> Result<_, &'static str> {
+            if reader.u32()? != 1 {
+                return Err("unsupported schema encoding");
+            }
+            let id = reader.string()?;
+            let version = reader.u32()?;
+            let count = reader.u32()?;
+            let mut fields = Vec::new();
+            for _ in 0..count {
+                fields.push(fynkel_core::RegisteredField {
+                    name: reader.string()?,
+                    default: reader.scalar()?,
+                });
+            }
+            if reader.at != reader.bytes.len() {
+                return Err("trailing registration data");
+            }
+            Ok(fynkel_core::ComponentSchema {
+                id,
+                version,
+                fields,
+            })
+        })();
+        let schema = match schema {
+            Ok(s) => s,
+            Err(e) => return reject(w, Status::InvalidArgument, e),
+        };
+        match w.inner.register_dynamic_component(schema) {
+            Ok(()) => {
+                w.gameplay_reply.clear();
+                Status::Ok
+            }
+            Err(e) => reject(w, Status::CommandsRejected, e),
+        }
+    });
+    if let (Some(w), Some(out)) = (world.as_mut(), out.as_mut()) {
+        *out = FynkelBufferView::of(&w.gameplay_reply);
+    }
+    status
+}
+
 /// Read-only live identity/name snapshot for SDK lifecycle reconciliation.
 /// Success: u32 live count and (entity, u32 name length, UTF-8 name) pairs.
 /// # Safety
@@ -347,6 +420,60 @@ pub unsafe extern "C" fn fynkel_world_gameplay_exchange(
             w.gameplay_reply.clear();
             return Status::Ok;
         }
+        if let Request::RegisteredQuery(id) = &request {
+            let result = w
+                .inner
+                .session
+                .as_mut()
+                .unwrap()
+                .access(|edit| edit.query_registered(id));
+            return match result {
+                Ok(batch) => {
+                    let token = w.inner.batches.len() as u32;
+                    let mut reply = Vec::new();
+                    put32(&mut reply, token);
+                    put32(&mut reply, batch.rows().len() as u32);
+                    for (owner, fields) in batch.rows() {
+                        reference(
+                            &mut reply,
+                            Some(*owner),
+                            sequence,
+                            w.inner.id().0,
+                            &mut w.gameplay_pending,
+                        );
+                        encode_scalars(
+                            &mut reply,
+                            fields,
+                            sequence,
+                            w.inner.id().0,
+                            &mut w.gameplay_pending,
+                        );
+                    }
+                    w.inner.batches.push(batch);
+                    w.gameplay_reply = reply;
+                    Status::Ok
+                }
+                Err(e) => reject(w, Status::CommandsRejected, e),
+            };
+        }
+        if let Request::RegisteredApply(token, values) = request {
+            let Some(batch) = w.inner.batches.get(token as usize).cloned() else {
+                return reject(w, Status::CommandsRejected, "unknown bulk view");
+            };
+            return match w
+                .inner
+                .session
+                .as_mut()
+                .unwrap()
+                .access(|edit| edit.apply_registered_batch(&batch, values))
+            {
+                Ok(()) => {
+                    w.gameplay_reply.clear();
+                    Status::Ok
+                }
+                Err(e) => reject(w, Status::CommandsRejected, e),
+            };
+        }
         if let Request::BindActions(rebinds) = request {
             return bind_actions(w, rebinds);
         }
@@ -420,6 +547,7 @@ pub unsafe extern "C" fn fynkel_world_gameplay_end(
             return reject(w, Status::CommandsRejected, "expired edit sequence");
         }
         w.gameplay_reply.clear();
+        w.inner.batches.clear();
         let session = w.inner.session.take().unwrap();
         let bindings = w.inner.pending_bindings.take();
         let clips = std::mem::take(&mut w.inner.clips);
@@ -605,6 +733,33 @@ impl Reader<'_> {
     fn string(&mut self) -> Result<String, &'static str> {
         let n = self.u32()? as usize;
         String::from_utf8(self.take(n)?.to_vec()).map_err(|_| "invalid UTF-8")
+    }
+    fn scalar(&mut self) -> Result<fynkel_core::ScalarValue, &'static str> {
+        use fynkel_core::ScalarValue as V;
+        Ok(match self.u32()? {
+            0 => V::Float(f64::from_bits(self.u64()?)),
+            1 => V::Int(self.u64()? as i64),
+            2 => V::Bool(match self.u32()? {
+                0 => false,
+                1 => true,
+                _ => return Err("invalid bool"),
+            }),
+            3 => V::Text(self.string()?),
+            4 => V::Object(self.reference()?),
+            5 => V::Asset(fynkel_core::AssetRef::with_sub(
+                self.string()?.parse().map_err(|_| "invalid asset UUID")?,
+                self.string()?,
+            )),
+            _ => return Err("invalid scalar kind"),
+        })
+    }
+    fn scalars(&mut self) -> Result<Vec<fynkel_core::ScalarValue>, &'static str> {
+        let count = self.u32()?;
+        let mut values = Vec::new();
+        for _ in 0..count {
+            values.push(self.scalar()?);
+        }
+        Ok(values)
     }
     fn reference(&mut self) -> Result<Option<GameplayEntity>, &'static str> {
         let kind = self.u32()?;
@@ -820,11 +975,29 @@ impl Reader<'_> {
                 }
                 Request::AnimateControl(owner, record.operation())
             }
+            35 => Request::RegisteredGet(self.owner()?, self.string()?),
+            36 => Request::RegisteredSet(self.owner()?, self.string()?, self.scalars()?),
+            37 => Request::RegisteredRemove(self.owner()?, self.string()?),
+            38 => Request::RegisteredQuery(self.string()?),
+            39 => {
+                let token = self.u32()?;
+                let count = self.u32()?;
+                let mut rows = Vec::new();
+                for _ in 0..count {
+                    rows.push(self.scalars()?);
+                }
+                Request::RegisteredApply(token, rows)
+            }
             _ => return Err("unknown operation"),
         })
     }
 }
 enum Request {
+    RegisteredGet(GameplayEntity, String),
+    RegisteredSet(GameplayEntity, String, Vec<fynkel_core::ScalarValue>),
+    RegisteredRemove(GameplayEntity, String),
+    RegisteredQuery(String),
+    RegisteredApply(u32, Vec<Vec<fynkel_core::ScalarValue>>),
     IdentityChanges,
     Persist(GameplayEntity),
     PersistentRoots,
@@ -869,6 +1042,7 @@ enum Request {
     Sound(fynkel_core::schema::PlaySoundCommandRecord),
 }
 enum Answer {
+    Registered(Option<Vec<fynkel_core::ScalarValue>>),
     IdentityChanges(Vec<(GameplayEntity, Option<String>)>),
     Clone(fynkel_core::GameplayClone),
     Empty,
@@ -881,6 +1055,16 @@ enum Answer {
 impl Request {
     fn apply(self, e: &mut GameplayEdit<'_>) -> Result<Answer, EditError> {
         Ok(match self {
+            Self::RegisteredGet(owner, id) => Answer::Registered(e.registered_values(owner, &id)?),
+            Self::RegisteredSet(owner, id, fields) => {
+                e.set_registered_values(owner, &id, fields)?;
+                Answer::Empty
+            }
+            Self::RegisteredRemove(owner, id) => {
+                e.remove_registered(owner, &id)?;
+                Answer::Empty
+            }
+            Self::RegisteredQuery(_) | Self::RegisteredApply(..) => return Err(EditError::Aborted),
             Self::IdentityChanges => Answer::IdentityChanges(e.identity_changes()?),
             Self::Persist(owner) => Answer::Words(vec![e.dont_destroy_on_load(owner)? as u32]),
             Self::PersistentRoots => Answer::Refs(e.persistent_roots()?),
@@ -1037,10 +1221,59 @@ fn reference(
         }
     }
 }
+fn encode_scalars(
+    b: &mut Vec<u8>,
+    fields: &[fynkel_core::ScalarValue],
+    seq: u64,
+    world: u64,
+    pending: &mut Vec<PendingEntity>,
+) {
+    use fynkel_core::ScalarValue as V;
+    put32(b, fields.len() as u32);
+    for field in fields {
+        match field {
+            V::Float(v) => {
+                put32(b, 0);
+                put64(b, v.to_bits());
+            }
+            V::Int(v) => {
+                put32(b, 1);
+                put64(b, *v as u64);
+            }
+            V::Bool(v) => {
+                put32(b, 2);
+                put32(b, *v as u32);
+            }
+            V::Text(v) => {
+                put32(b, 3);
+                put32(b, v.len() as u32);
+                b.extend(v.as_bytes());
+            }
+            V::Object(v) => {
+                put32(b, 4);
+                reference(b, *v, seq, world, pending);
+            }
+            V::Asset(v) => {
+                put32(b, 5);
+                let id = v.asset.to_string();
+                put32(b, id.len() as u32);
+                b.extend(id.as_bytes());
+                put32(b, v.sub.len() as u32);
+                b.extend(v.sub.as_bytes());
+            }
+        }
+    }
+}
 impl Answer {
     fn encode(self, seq: u64, world: u64, pending: &mut Vec<PendingEntity>) -> Vec<u8> {
         let mut b = Vec::new();
         match self {
+            Self::Registered(fields) => {
+                put32(&mut b, fields.is_some() as u32);
+                if let Some(fields) = fields {
+                    encode_scalars(&mut b, &fields, seq, world, pending);
+                }
+            }
             Self::IdentityChanges(changes) => {
                 put32(&mut b, changes.len() as u32);
                 for (owner, name) in changes {
@@ -1268,6 +1501,89 @@ mod tests {
             .into_iter()
             .flat_map(u32::to_le_bytes)
             .collect()
+    }
+
+    fn component_registration() -> Vec<u8> {
+        let mut b = Vec::new();
+        put32(&mut b, 1);
+        let text = "game.Health";
+        put32(&mut b, text.len() as u32);
+        b.extend(text.as_bytes());
+        put32(&mut b, 1);
+        put32(&mut b, 1);
+        put32(&mut b, 2);
+        b.extend(b"hp");
+        put32(&mut b, 0); // float
+        b.extend(100.0f64.to_le_bytes());
+        b
+    }
+    unsafe fn register(w: *mut FynkelWorld, bytes: &[u8]) -> Status {
+        let mut out = FynkelBufferView::empty();
+        fynkel_world_component_register(w, bytes.as_ptr(), bytes.len() as u32, &mut out)
+    }
+    #[test]
+    fn registered_schema_protocol_rejects_truncation_trailing_data_and_active_edits() {
+        unsafe {
+            let w = fixture();
+            let valid = component_registration();
+            let mut cases: Vec<_> = (0..valid.len()).map(|n| valid[..n].to_vec()).collect();
+            let mut trailing = valid.clone();
+            trailing.push(0);
+            cases.push(trailing);
+            let mut unknown_kind = valid.clone();
+            let tag = unknown_kind.len() - 12;
+            unknown_kind[tag..tag + 4].copy_from_slice(&99u32.to_le_bytes());
+            cases.push(unknown_kind);
+            for bytes in cases {
+                assert_ne!(register(w, &bytes), Status::Ok);
+                assert_eq!((*w).inner.registered_schemas().count(), 0);
+                assert!(!(*w).inner.is_poisoned());
+            }
+            let seq = begin(w);
+            assert_eq!(exchange(w, seq, &spawn_request()), Status::Ok);
+            assert_eq!(register(w, &valid), Status::CommandsRejected);
+            assert_eq!(end(w, seq, 1), Status::CommandsRejected);
+            assert_eq!((*w).inner.live_entities(), 0);
+            assert_eq!(register(w, &valid), Status::Ok);
+            assert_eq!((*w).inner.registered_schemas().count(), 1);
+            fynkel_world_destroy(w);
+        }
+    }
+    #[test]
+    fn registered_bulk_tokens_expire_and_malformed_rows_roll_back_the_whole_edit() {
+        unsafe {
+            let w = fixture();
+            assert_eq!(register(w, &component_registration()), Status::Ok);
+            let mut query = vec![];
+            put32(&mut query, 1);
+            put32(&mut query, 38);
+            put32(&mut query, 11);
+            query.extend(b"game.Health");
+            let apply: Vec<_> = [1u32, 39, 0, 0]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect();
+            let seq = begin(w);
+            assert_eq!(exchange(w, seq, &query), Status::Ok);
+            assert_eq!(exchange(w, seq, &apply), Status::Ok);
+            assert_eq!(end(w, seq, 1), Status::Ok);
+            for bytes in
+                std::iter::once(apply.clone()).chain((0..apply.len()).map(|n| apply[..n].to_vec()))
+            {
+                let seq = begin(w);
+                assert_eq!(exchange(w, seq, &spawn_request()), Status::Ok);
+                assert_ne!(exchange(w, seq, &bytes), Status::Ok);
+                assert_eq!(end(w, seq, 1), Status::CommandsRejected);
+                assert_eq!((*w).inner.live_entities(), 0);
+            }
+            let seq = begin(w);
+            assert_eq!(exchange(w, seq, &query), Status::Ok);
+            assert_eq!(exchange(w, seq, &spawn_request()), Status::Ok);
+            assert_eq!(exchange(w, seq, &apply), Status::CommandsRejected);
+            assert_eq!(end(w, seq, 1), Status::CommandsRejected);
+            assert_eq!((*w).inner.live_entities(), 0);
+            fynkel_world_destroy(w);
+        }
     }
 
     #[test]

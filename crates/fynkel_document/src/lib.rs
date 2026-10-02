@@ -742,3 +742,5 @@ pub fn diagnostic_json(d: &Diagnostic) -> serde_json::Value {
     }
     serde_json::Value::Object(m)
 }
+
+pub use runtime::describe_registered;

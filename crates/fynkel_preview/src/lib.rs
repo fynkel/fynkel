@@ -269,6 +269,7 @@ pub fn single(mesh: AssetRef, material: AssetRef) -> SceneDescription {
         id: STAGE_SCENE,
         name: "Preview".to_string(),
         entities: vec![EntityDescription {
+            registered: Vec::new(),
             id: STAGE_ENTITY,
             name: "Preview".to_string(),
             active: true,
@@ -374,6 +375,7 @@ pub fn stage_into(
     if let Some(dir) = sun {
         strip_description(&mut description);
         description.entities.push(EntityDescription {
+            registered: Vec::new(),
             id: STAGE_SUN,
             name: "Preview Sun".to_string(),
             active: true,

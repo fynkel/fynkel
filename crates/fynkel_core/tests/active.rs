@@ -24,6 +24,7 @@ fn world() -> World {
 
 fn drawn(n: u8, parent: Option<u8>, children: &[u8], active: bool) -> EntityDescription {
     EntityDescription {
+        registered: Vec::new(),
         id: id(n),
         name: format!("e{n}"),
         active,

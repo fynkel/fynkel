@@ -13,6 +13,7 @@ const spinner = BehaviourClass(
   className: 'Spinner',
   libraryUri: 'package:demo/spinner.dart',
   doc: 'Rotates its object.',
+  callbacks: {'update'},
   fields: [
     ExposedField(name: 'speed', kind: FieldKind.number, defaultValue: 1.0, hasDefault: true, min: 0, step: 0.1),
     ExposedField(name: 'axis', kind: FieldKind.vec3, defaultValue: [0.0, 1.0, 0.0], hasDefault: true),
@@ -33,6 +34,30 @@ const blinker = BehaviourClass(
 );
 
 void main() {
+  test('component output uses registered data codecs and shared schema metadata', () {
+    const component = BehaviourClass(
+      id: 'game.Health', version: 2, className: 'Health',
+      libraryUri: 'package:demo/health.dart', isComponent: true,
+      fields: [
+        ExposedField(name: 'hp', kind: FieldKind.number, defaultValue: 100.0, hasDefault: true),
+        ExposedField(name: 'target', kind: FieldKind.gameObject, nullable: true),
+      ],
+    );
+    final source = emitDart('demo', [component]);
+    expect(source, contains('ComponentType<_lib0.Health>'));
+    expect(source, contains('void registerComponents(World world)'));
+    expect(source, contains('world.registerComponent(gameHealthType)'));
+    expect(source, contains('ComponentFieldKind.object'));
+    expect(source, contains("ComponentField('hp', ComponentFieldKind.number, 100.0)"));
+    expect(source, isNot(contains('_lib0.Health().hp')));
+    final metadata = schemaFor(component)['x-fynkel'] as Map;
+    expect(metadata['kind'], 'component');
+    expect(metadata['version'], 2);
+    expect(metadata['registration'], isNotNull);
+    final behaviour = emitDart('demo', [spinner]);
+    expect(behaviour, contains('dartType: _lib0.Spinner'));
+    expect(behaviour, contains('callbacks: const {'));
+  });
   test('identifiers derive from the type id', () {
     expect(identifierFor('game.Spinner'), 'gameSpinnerType');
     expect(identifierFor('my_game.ui.HealthBar'), 'myGameUiHealthBarType');

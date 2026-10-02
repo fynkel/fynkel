@@ -106,6 +106,7 @@ fn a_live_spawn_is_there_at_once_and_joins_the_scene_under_its_id() {
         id: uuid(1),
         name: "Main".into(),
         entities: vec![EntityDescription {
+            registered: Vec::new(),
             id: uuid(2),
             name: "Root".into(),
             active: true,

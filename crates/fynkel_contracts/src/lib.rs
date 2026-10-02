@@ -32,7 +32,7 @@ pub use schema::{
 pub use uuid::Uuid;
 
 /// Bumped when the C ABI (function signatures, buffer headers) changes.
-pub const ABI_VERSION: u16 = 4;
+pub const ABI_VERSION: u16 = 5;
 
 /// Fixed simulation step default (blueprint §5.1): 60 Hz.
 pub const DEFAULT_FIXED_DT: f64 = 1.0 / 60.0;

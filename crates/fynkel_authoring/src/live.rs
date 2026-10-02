@@ -173,6 +173,17 @@ pub fn call_with(
             let data = args
                 .get("data")
                 .ok_or_else(|| vec![invalid("set: `data` is required")])?;
+            if let Some(value) = registered_from_live(
+                world,
+                type_id,
+                data,
+                args.get("version").and_then(Value::as_u64),
+            )? {
+                world
+                    .edit_gameplay(|edit| edit.set_registered_authored(e.into(), &value, |_| None))
+                    .map_err(|e| vec![invalid(e.to_string())])?;
+                return Ok(json!({"ok":true}));
+            }
             let value = match decode_component(type_id, &Node::from_serde(data)) {
                 None => {
                     return Err(vec![invalid(format!(
@@ -195,6 +206,12 @@ pub fn call_with(
         "remove" => {
             let e = entity_arg(world, args)?;
             let type_id = str_arg(args, "type")?;
+            if world.registered_schemas().any(|s| s.id == type_id) {
+                world
+                    .edit_gameplay(|edit| edit.remove_registered(e, type_id))
+                    .map_err(|e| vec![invalid(e.to_string())])?;
+                return Ok(json!({"ok":true}));
+            }
             let component = component_id(type_id).ok_or_else(|| {
                 vec![invalid(format!(
                     "remove: {type_id} is not a native component"
@@ -260,6 +277,7 @@ pub fn call_with(
             let index = index_arg(args)?;
             let mut transform = Transform::IDENTITY;
             let mut components = Vec::new();
+            let mut registered = Vec::new();
             for c in args
                 .get("components")
                 .and_then(Value::as_array)
@@ -268,6 +286,15 @@ pub fn call_with(
             {
                 let type_id = str_arg(c, "type")?;
                 let data = c.get("data").cloned().unwrap_or_else(|| json!({}));
+                if let Some(value) = registered_from_live(
+                    world,
+                    type_id,
+                    &data,
+                    c.get("version").and_then(Value::as_u64),
+                )? {
+                    registered.push(value);
+                    continue;
+                }
                 match decode_component(type_id, &Node::from_serde(&data)) {
                     None => {
                         return Err(vec![invalid(format!(
@@ -302,7 +329,7 @@ pub fn call_with(
                 Some(_) => return Err(vec![invalid("`id` must be a UUID string")]),
             };
             let (e, rejected) = world
-                .spawn_now(name, transform, parent, components, authoring)
+                .spawn_now_registered(name, transform, parent, components, registered, authoring)
                 .map_err(|e| vec![invalid(format!("spawn: {e}"))])?;
             if let Some(i) = index {
                 let _ = scene::set_sibling_index(world.ecs_mut(), e, i);
@@ -408,7 +435,7 @@ fn entities(world: &World, since: Option<&str>) -> Value {
         layer: u32,
         tags: Option<Tags>,
         children: usize,
-        types: Vec<&'static str>,
+        types: Vec<String>,
         persistent: bool,
     }
     let mut rows = Vec::new();
@@ -429,7 +456,13 @@ fn entities(world: &World, since: Option<&str>) -> Value {
             children: children.len(),
             types: ComponentValue::all_of(world, e)
                 .iter()
-                .filter_map(|c| c.id().name())
+                .filter_map(|c| c.id().name().map(str::to_string))
+                .chain(
+                    world
+                        .registered_schemas()
+                        .filter(|s| world.registered_values(e, &s.id).ok().flatten().is_some())
+                        .map(|s| s.id.clone()),
+                )
                 .collect(),
             persistent: persistent.contains(&e),
             id,
@@ -485,13 +518,44 @@ fn entities(world: &World, since: Option<&str>) -> Value {
 /// transforms, every native component as the document would store it.
 fn entity(world: &World, e: Entity) -> Value {
     let ecs = world.ecs();
-    let components: Vec<Value> = ComponentValue::all_of(world, e)
+    let mut components: Vec<Value> = ComponentValue::all_of(world, e)
         .iter()
         .map(|c| {
             let (type_id, data) = encode_component(c);
             json!({ "type": type_id, "data": data.to_serde() })
         })
         .collect();
+    for schema in world.registered_schemas() {
+        if let Ok(Some(fields)) = world.registered_values(e, &schema.id) {
+            let data: serde_json::Map<String, Value> = schema
+                .fields
+                .iter()
+                .zip(fields)
+                .map(|(field, value)| {
+                    use fynkel_core::ScalarValue as V;
+                    let value = match value {
+                        V::Float(v) => json!(v),
+                        V::Int(v) => json!(v),
+                        V::Bool(v) => json!(v),
+                        V::Text(v) => json!(v),
+                        V::Asset(v) => {
+                            if v.sub.is_empty() {
+                                json!({"asset":v.asset.to_string()})
+                            } else {
+                                json!({"asset":v.asset.to_string(),"sub":v.sub})
+                            }
+                        }
+                        V::Object(v) => v
+                            .and_then(|t| t.live())
+                            .map(|target| json!({"entity":id_of(world,target)}))
+                            .unwrap_or(Value::Null),
+                    };
+                    (field.name.clone(), value)
+                })
+                .collect();
+            components.push(json!({"type":schema.id,"version":schema.version,"data":data}));
+        }
+    }
     let world_t = scene::world_matrix(ecs, e)
         .map(Transform::from_matrix)
         .unwrap_or_default();
@@ -543,6 +607,49 @@ fn pick(world: &World, assets: Option<&Assets>, ray: &Ray) -> Value {
         "ray": { "origin": ray.origin.to_array(), "dir": ray.dir.to_array() },
         "hits": hits,
     })
+}
+
+fn registered_from_live(
+    world: &World,
+    type_id: &str,
+    data: &Value,
+    version: Option<u64>,
+) -> Result<Option<fynkel_core::RegisteredDescription>, Vec<Diagnostic>> {
+    let Some(schema) = world.registered_schemas().find(|s| s.id == type_id) else {
+        return Ok(None);
+    };
+    if version.is_some_and(|v| v != u64::from(schema.version)) {
+        return Err(vec![invalid("registered component version mismatch")]);
+    }
+    let mut data = data.clone();
+    let mut refs = Vec::new();
+    for field in &schema.fields {
+        if matches!(field.default, fynkel_core::ScalarValue::Object(_)) {
+            if let Some(id) = data
+                .get(&field.name)
+                .and_then(|v| v.get("entity"))
+                .and_then(Value::as_str)
+            {
+                let target = resolve(world, id)
+                    .ok_or_else(|| vec![invalid(format!("unresolved component reference {id}"))])?;
+                refs.push((field.name.clone(), target));
+                data[&field.name] = Value::Null;
+            }
+        }
+    }
+    let mut value =
+        fynkel_document::runtime::registered_description(type_id, schema.version, &data)
+            .map_err(|e| vec![invalid(e)])?;
+    for (name, target) in refs {
+        value.fields.insert(
+            name,
+            fynkel_core::AuthoredRegisteredValue::Object(fynkel_contracts::ObjectRef {
+                id: fynkel_contracts::Uuid::NIL,
+                entity: target,
+            }),
+        );
+    }
+    Ok(Some(value))
 }
 
 fn write(world: &mut World, commands: Vec<Command>) -> Value {

@@ -61,7 +61,17 @@ enum FieldKind {
   record('record');
 
   /// The kinds a [list] may hold.
-  static const listItems = [number, integer, boolean, string, quat, assetRef, enumeration, data, record];
+  static const listItems = [
+    number,
+    integer,
+    boolean,
+    string,
+    quat,
+    assetRef,
+    enumeration,
+    data,
+    record,
+  ];
 
   const FieldKind(this.typeName);
 
@@ -70,27 +80,32 @@ enum FieldKind {
 
   /// The Dart type the kind maps from (as written in the source).
   String get dartType => switch (this) {
-        FieldKind.number => 'double',
-        FieldKind.integer => 'int',
-        FieldKind.boolean => 'bool',
-        FieldKind.string => 'String',
-        FieldKind.vec3 => 'Vec3',
-        FieldKind.quat => 'Quat',
-        FieldKind.assetRef => 'AssetRef (or a typed asset: MaterialAsset, MeshAsset, …)',
-        FieldKind.vec3List => 'List<Vec3>',
-        FieldKind.enumeration => 'an enum',
-        FieldKind.gameObject => 'GameObject?',
-        FieldKind.behaviour => 'a @FynkelBehaviour class (nullable)',
-        FieldKind.component => 'NativeComponent<T>? (T a built-in component: RigidBody, PointLight, …)',
-        FieldKind.list =>
-          'List<T> (T one of double, int, bool, String, Quat, AssetRef or a typed asset, an enum, a data class, '
-              'a record class)',
-        FieldKind.data => 'a @FynkelDataAsset class (nullable)',
-        FieldKind.record => 'a @FynkelRecord class',
-      };
+    FieldKind.number => 'double',
+    FieldKind.integer => 'int',
+    FieldKind.boolean => 'bool',
+    FieldKind.string => 'String',
+    FieldKind.vec3 => 'Vec3',
+    FieldKind.quat => 'Quat',
+    FieldKind.assetRef =>
+      'AssetRef (or a typed asset: MaterialAsset, MeshAsset, …)',
+    FieldKind.vec3List => 'List<Vec3>',
+    FieldKind.enumeration => 'an enum',
+    FieldKind.gameObject => 'GameObject?',
+    FieldKind.behaviour => 'a @FynkelBehaviour class (nullable)',
+    FieldKind.component =>
+      'NativeComponent<T>? (T a built-in component: RigidBody, PointLight, …)',
+    FieldKind.list =>
+      'List<T> (T one of double, int, bool, String, Quat, AssetRef or a typed asset, an enum, a data class, '
+          'a record class)',
+    FieldKind.data => 'a @FynkelDataAsset class (nullable)',
+    FieldKind.record => 'a @FynkelRecord class',
+  };
 
   /// A reference to an object of the scene, resolved at load.
-  bool get isReference => this == FieldKind.gameObject || this == FieldKind.behaviour || this == FieldKind.component;
+  bool get isReference =>
+      this == FieldKind.gameObject ||
+      this == FieldKind.behaviour ||
+      this == FieldKind.component;
 
   static FieldKind? fromDartType(String name) {
     for (final k in values) {
@@ -216,50 +231,63 @@ class ExposedField {
 
   /// A list's own hints: the item's go on its `items`.
   Map<String, Object?> get _listHints => {
-        for (final e in _hints.entries)
-          if (!const {'min', 'max', 'step', 'unit', 'kind', 'drawer'}.contains(e.key)) e.key: e.value,
-        'items': item!.typeName,
-      };
+    for (final e in _hints.entries)
+      if (!const {
+        'min',
+        'max',
+        'step',
+        'unit',
+        'kind',
+        'drawer',
+      }.contains(e.key))
+        e.key: e.value,
+    'items': item!.typeName,
+  };
 
   /// An item's hints, for a list's `items` schema.
   Map<String, Object?> get itemHints => {
-        if (min != null) 'min': min,
-        if (max != null) 'max': max,
-        if (step != null) 'step': step,
-        if (unit != null) 'unit': unit,
-        if (displayKind != null) 'kind': displayKind,
-        if (dataId != null) 'data': dataId,
-        if (record != null) 'record': record!.className,
-        if (drawer != null) 'drawer': drawer,
-      };
+    if (min != null) 'min': min,
+    if (max != null) 'max': max,
+    if (step != null) 'step': step,
+    if (unit != null) 'unit': unit,
+    if (displayKind != null) 'kind': displayKind,
+    if (dataId != null) 'data': dataId,
+    if (record != null) 'record': record!.className,
+    if (drawer != null) 'drawer': drawer,
+  };
 
   Map<String, Object?> get _hints => {
-        if (label != null) 'label': label,
-        if (tooltip != null) 'tooltip': tooltip,
-        if (min != null) 'min': min,
-        if (max != null) 'max': max,
-        if (step != null) 'step': step,
-        if (group != null) 'group': group,
-        if (order != null) 'order': order,
-        if (header != null) 'header': header,
-        if (unit != null) 'unit': unit,
-        if (displayKind != null) 'kind': displayKind,
-        if (readOnly) 'readOnly': true,
-        if (hidden) 'hidden': true,
-        if (showIf != null) 'showIf': showIf,
-        if (drawer != null) 'drawer': drawer,
-        if (gizmo != null) 'gizmo': gizmo!.json,
-        if (behaviourId != null) 'behaviour': behaviourId,
-        if (componentName != null) 'component': componentName,
-        if (dataId != null) 'data': dataId,
-        if (record != null && item == null) 'record': record!.className,
-      };
+    if (label != null) 'label': label,
+    if (tooltip != null) 'tooltip': tooltip,
+    if (min != null) 'min': min,
+    if (max != null) 'max': max,
+    if (step != null) 'step': step,
+    if (group != null) 'group': group,
+    if (order != null) 'order': order,
+    if (header != null) 'header': header,
+    if (unit != null) 'unit': unit,
+    if (displayKind != null) 'kind': displayKind,
+    if (readOnly) 'readOnly': true,
+    if (hidden) 'hidden': true,
+    if (showIf != null) 'showIf': showIf,
+    if (drawer != null) 'drawer': drawer,
+    if (gizmo != null) 'gizmo': gizmo!.json,
+    if (behaviourId != null) 'behaviour': behaviourId,
+    if (componentName != null) 'component': componentName,
+    if (dataId != null) 'data': dataId,
+    if (record != null && item == null) 'record': record!.className,
+  };
 }
 
 /// A `@FynkelRecord` class (ADR-0027 §5): a nested value with `@Expose`
 /// fields and no identity, stored as a JSON object of them.
 class RecordClass {
-  const RecordClass({required this.className, required this.libraryUri, required this.fields, this.doc});
+  const RecordClass({
+    required this.className,
+    required this.libraryUri,
+    required this.fields,
+    this.doc,
+  });
 
   final String className;
 
@@ -282,9 +310,23 @@ class RecordClass {
 /// A field's `@Gizmo`: the shape, and the options that differ from the
 /// defaults (`when: selected`, `space: local`, the editor's colour).
 class GizmoSpec {
-  const GizmoSpec({required this.shape, this.color, this.when = 'selected', this.space = 'local', this.angle});
+  const GizmoSpec({
+    required this.shape,
+    this.color,
+    this.when = 'selected',
+    this.space = 'local',
+    this.angle,
+  });
 
-  static const shapes = ['radius', 'box', 'point', 'direction', 'cone', 'lineTo', 'path'];
+  static const shapes = [
+    'radius',
+    'box',
+    'point',
+    'direction',
+    'cone',
+    'lineTo',
+    'path',
+  ];
 
   final String shape;
 
@@ -297,17 +339,21 @@ class GizmoSpec {
   final String? angle;
 
   Map<String, Object?> get json => {
-        'shape': shape,
-        if (angle != null) 'angle': angle,
-        if (color != null) 'color': color,
-        if (when != 'selected') 'when': when,
-        if (space != 'local' && shape != 'lineTo') 'space': space,
-      };
+    'shape': shape,
+    if (angle != null) 'angle': angle,
+    if (color != null) 'color': color,
+    if (when != 'selected') 'when': when,
+    if (space != 'local' && shape != 'lineTo') 'space': space,
+  };
 }
 
 /// Checks a `@Gizmo` against its field and the class's other fields;
 /// returns the problem, or null when it fits.
-String? gizmoProblem(GizmoSpec g, ExposedField field, List<ExposedField> siblings) {
+String? gizmoProblem(
+  GizmoSpec g,
+  ExposedField field,
+  List<ExposedField> siblings,
+) {
   final t = field.kind;
   final fits = switch (g.shape) {
     'radius' => t == FieldKind.number || t == FieldKind.integer,
@@ -381,19 +427,33 @@ const assetClasses = {
 String? exposeKindProblem(String kind, FieldKind type) {
   final asset = RegExp(r'^asset\(([a-z_]+)\)$').firstMatch(kind);
   if (asset != null) {
-    if (type != FieldKind.assetRef) return "kind '$kind' needs an AssetRef field";
+    if (type != FieldKind.assetRef) {
+      return "kind '$kind' needs an AssetRef field";
+    }
     if (!exposeAssetKinds.contains(asset.group(1))) {
       return "unknown asset kind '${asset.group(1)}'; one of ${exposeAssetKinds.join(', ')}";
     }
     return null;
   }
   return switch (kind) {
-    'color' => type == FieldKind.vec3 ? null : "kind 'color' needs a Vec3 field (linear RGB)",
-    'multiline' => type == FieldKind.string ? null : "kind 'multiline' needs a String field",
-    'angle' => type == FieldKind.number ? null : "kind 'angle' needs a double field (radians)",
-    'slider' => type == FieldKind.number || type == FieldKind.integer ? null : "kind 'slider' needs a double or int field",
-    'layerMask' => type == FieldKind.integer ? null : "kind 'layerMask' needs an int field",
-    _ => "unknown kind '$kind'; one of color, asset(<kind>), multiline, angle, slider, layerMask",
+    'color' =>
+      type == FieldKind.vec3
+          ? null
+          : "kind 'color' needs a Vec3 field (linear RGB)",
+    'multiline' =>
+      type == FieldKind.string ? null : "kind 'multiline' needs a String field",
+    'angle' =>
+      type == FieldKind.number
+          ? null
+          : "kind 'angle' needs a double field (radians)",
+    'slider' =>
+      type == FieldKind.number || type == FieldKind.integer
+          ? null
+          : "kind 'slider' needs a double or int field",
+    'layerMask' =>
+      type == FieldKind.integer ? null : "kind 'layerMask' needs an int field",
+    _ =>
+      "unknown kind '$kind'; one of color, asset(<kind>), multiline, angle, slider, layerMask",
   };
 }
 
@@ -410,6 +470,8 @@ class BehaviourClass {
     this.icon,
     this.category,
     this.isData = false,
+    this.isComponent = false,
+    this.callbacks,
     this.menu,
   });
 
@@ -431,6 +493,8 @@ class BehaviourClass {
 
   /// A data type: a [DataAsset] subclass, its schema in `schemas/data/`.
   final bool isData;
+  final bool isComponent;
+  final Set<String>? callbacks;
 
   /// `@FynkelDataAsset(menu:)`: the Create menu path (`Game/Weapon`).
   final String? menu;

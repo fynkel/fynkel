@@ -18,6 +18,7 @@ fn prefab() -> SceneDescription {
         // Deliberately not in hierarchy order.
         entities: vec![
             EntityDescription {
+                registered: Vec::new(),
                 id: id(2),
                 name: "child".into(),
                 active: true,
@@ -32,6 +33,7 @@ fn prefab() -> SceneDescription {
                 ],
             },
             EntityDescription {
+                registered: Vec::new(),
                 id: id(1),
                 name: "root".into(),
                 active: false,

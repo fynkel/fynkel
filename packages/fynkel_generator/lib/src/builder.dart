@@ -19,13 +19,38 @@ import 'model.dart';
 const String dartOutput = 'lib/generated/behaviours.g.dart';
 const String jsonOutput = 'lib/generated/behaviours.g.json';
 
-const _behaviourAnnotation = TypeChecker.typeNamedLiterally('FynkelBehaviour', inPackage: 'fynkel');
-const _exposeAnnotation = TypeChecker.typeNamedLiterally('Expose', inPackage: 'fynkel');
-const _gizmoAnnotation = TypeChecker.typeNamedLiterally('Gizmo', inPackage: 'fynkel');
-const _behaviourBase = TypeChecker.typeNamedLiterally('Behaviour', inPackage: 'fynkel');
-const _dataAnnotation = TypeChecker.typeNamedLiterally('FynkelDataAsset', inPackage: 'fynkel');
-const _dataBase = TypeChecker.typeNamedLiterally('DataAsset', inPackage: 'fynkel');
-const _recordAnnotation = TypeChecker.typeNamedLiterally('FynkelRecord', inPackage: 'fynkel');
+const _behaviourAnnotation = TypeChecker.typeNamedLiterally(
+  'FynkelBehaviour',
+  inPackage: 'fynkel',
+);
+const _exposeAnnotation = TypeChecker.typeNamedLiterally(
+  'Expose',
+  inPackage: 'fynkel',
+);
+const _gizmoAnnotation = TypeChecker.typeNamedLiterally(
+  'Gizmo',
+  inPackage: 'fynkel',
+);
+const _behaviourBase = TypeChecker.typeNamedLiterally(
+  'Behaviour',
+  inPackage: 'fynkel',
+);
+const _dataAnnotation = TypeChecker.typeNamedLiterally(
+  'FynkelDataAsset',
+  inPackage: 'fynkel',
+);
+const _dataBase = TypeChecker.typeNamedLiterally(
+  'DataAsset',
+  inPackage: 'fynkel',
+);
+const _componentAnnotation = TypeChecker.typeNamedLiterally(
+  'FynkelComponent',
+  inPackage: 'fynkel',
+);
+const _recordAnnotation = TypeChecker.typeNamedLiterally(
+  'FynkelRecord',
+  inPackage: 'fynkel',
+);
 
 /// Aggregates the package's `@FynkelBehaviour` classes into
 /// `lib/generated/behaviours.g.dart` and `.g.json`. Runs once per package
@@ -37,8 +62,8 @@ class BehaviourBuilder implements Builder {
 
   @override
   Map<String, List<String>> get buildExtensions => const {
-        r'$lib$': ['generated/behaviours.g.dart', 'generated/behaviours.g.json'],
-      };
+    r'$lib$': ['generated/behaviours.g.dart', 'generated/behaviours.g.json'],
+  };
 
   @override
   Future<void> build(BuildStep buildStep) async {
@@ -60,15 +85,26 @@ class BehaviourBuilder implements Builder {
     final inputs = await buildStep.findAssets(Glob('lib/**.dart')).toList();
     inputs.sort((a, b) => a.path.compareTo(b.path));
     for (final id in inputs) {
-      if (id.path.startsWith('lib/generated/') || id.path.endsWith('.g.dart')) continue;
+      if (id.path.startsWith('lib/generated/') || id.path.endsWith('.g.dart')) {
+        continue;
+      }
       if (!await resolver.isLibrary(id)) continue;
       final library = await resolver.libraryFor(id);
       final reader = LibraryReader(library);
-      for (final (annotated, data) in [
-        for (final a in reader.annotatedWith(_behaviourAnnotation)) (a, false),
-        for (final a in reader.annotatedWith(_dataAnnotation)) (a, true),
+      for (final (annotated, data, component) in [
+        for (final a in reader.annotatedWith(_behaviourAnnotation))
+          (a, false, false),
+        for (final a in reader.annotatedWith(_dataAnnotation)) (a, true, false),
+        for (final a in reader.annotatedWith(_componentAnnotation))
+          (a, false, true),
       ]) {
-        final c = await _readClass(resolver, library, annotated, data: data);
+        final c = await _readClass(
+          resolver,
+          library,
+          annotated,
+          data: data,
+          component: component,
+        );
         final previous = byId[c.id];
         if (previous != null) {
           throw BehaviourGenerationError(
@@ -91,16 +127,25 @@ Future<BehaviourClass> _readClass(
   LibraryElement library,
   AnnotatedElement annotated, {
   required bool data,
+  bool component = false,
 }) async {
   final element = annotated.element;
   final libraryUri = library.uri.toString();
   final name = element.name ?? '<unnamed>';
-  final what = data ? '@FynkelDataAsset' : '@FynkelBehaviour';
+  final what = component
+      ? '@FynkelComponent'
+      : data
+      ? '@FynkelDataAsset'
+      : '@FynkelBehaviour';
   final base = data ? _dataBase : _behaviourBase;
   if (element is! ClassElement) {
-    throw BehaviourGenerationError('$what applies to classes only', library: libraryUri, member: name);
+    throw BehaviourGenerationError(
+      '$what applies to classes only',
+      library: libraryUri,
+      member: name,
+    );
   }
-  if (!base.isAssignableFrom(element)) {
+  if (!component && !base.isAssignableFrom(element)) {
     throw BehaviourGenerationError(
       '$what class must extend ${data ? 'DataAsset' : 'Behaviour'}',
       library: libraryUri,
@@ -108,7 +153,11 @@ Future<BehaviourClass> _readClass(
     );
   }
   if (element.isAbstract) {
-    throw BehaviourGenerationError('$what class must be concrete', library: libraryUri, member: name);
+    throw BehaviourGenerationError(
+      '$what class must be concrete',
+      library: libraryUri,
+      member: name,
+    );
   }
   if (element.isPrivate) {
     throw BehaviourGenerationError(
@@ -126,7 +175,9 @@ Future<BehaviourClass> _readClass(
     );
   }
   final id = annotated.annotation.peek('id')?.stringValue;
-  if (id == null || !RegExp(r'^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)+$').hasMatch(id)) {
+  if (id == null ||
+      !RegExp(r'^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)+$')
+          .hasMatch(id)) {
     throw BehaviourGenerationError(
       'id must be a namespaced type id such as "${data ? 'game.Weapon' : 'game.Spinner'}" (got ${id == null ? 'none' : '"$id"'})',
       library: libraryUri,
@@ -134,28 +185,52 @@ Future<BehaviourClass> _readClass(
     );
   }
   if (id.startsWith('fynkel.')) {
-    throw BehaviourGenerationError('the "fynkel." namespace is reserved for the engine', library: libraryUri, member: name);
+    throw BehaviourGenerationError(
+      'the "fynkel." namespace is reserved for the engine',
+      library: libraryUri,
+      member: name,
+    );
   }
   final version = annotated.annotation.peek('version')?.intValue ?? 1;
   if (version < 1) {
-    throw BehaviourGenerationError('version must be >= 1', library: libraryUri, member: name);
+    throw BehaviourGenerationError(
+      'version must be >= 1',
+      library: libraryUri,
+      member: name,
+    );
   }
 
   // Own fields first, then inherited ones up to (not including) the base.
   final fields = <ExposedField>[];
   final seen = <String>{};
-  for (InterfaceElement? cls = element; cls != null && !base.isExactly(cls); cls = cls.supertype?.element) {
+  for (
+    InterfaceElement? cls = element;
+    cls != null && !base.isExactly(cls);
+    cls = cls.supertype?.element
+  ) {
     for (final f in cls.fields) {
       final annotation = _exposeAnnotation.firstAnnotationOf(f);
       if (annotation == null) {
         if (_gizmoAnnotation.hasAnnotationOf(f)) {
-          throw BehaviourGenerationError('@Gizmo needs @Expose on the same field', library: libraryUri, member: '$name.${f.name}');
+          throw BehaviourGenerationError(
+            '@Gizmo needs @Expose on the same field',
+            library: libraryUri,
+            member: '$name.${f.name}',
+          );
         }
         continue;
       }
       final fieldName = f.name ?? '';
       if (!seen.add(fieldName)) continue;
-      final field = await _readField(resolver, f, ConstantReader(annotation), libraryUri, '$name.$fieldName', const {});
+      final field = await _readField(
+        resolver,
+        f,
+        ConstantReader(annotation),
+        libraryUri,
+        '$name.$fieldName',
+        const {},
+        registered: component,
+      );
       if (data && field.kind.isReference) {
         throw BehaviourGenerationError(
           '@Expose ${f.type.getDisplayString()} on a data asset: an asset cannot point into a scene '
@@ -165,8 +240,29 @@ Future<BehaviourClass> _readClass(
         );
       }
       if (data && field.gizmo != null) {
-        throw BehaviourGenerationError('@Gizmo on a data asset: it has no place in the scene',
-            library: libraryUri, member: '$name.$fieldName');
+        throw BehaviourGenerationError(
+          '@Gizmo on a data asset: it has no place in the scene',
+          library: libraryUri,
+          member: '$name.$fieldName',
+        );
+      }
+      if (component &&
+          (!const {
+                FieldKind.number,
+                FieldKind.integer,
+                FieldKind.boolean,
+                FieldKind.string,
+                FieldKind.gameObject,
+                FieldKind.assetRef,
+              }.contains(field.kind) ||
+              (field.nullable && field.kind != FieldKind.gameObject) ||
+              (!field.nullable && field.kind == FieldKind.gameObject) ||
+              field.assetClass != null)) {
+        throw BehaviourGenerationError(
+          'registered components support non-null scalar/AssetRef data and nullable GameObject references; typed asset wrappers are not supported',
+          library: libraryUri,
+          member: '$name.$fieldName',
+        );
       }
       fields.add(field);
     }
@@ -176,7 +272,13 @@ Future<BehaviourClass> _readClass(
     final gizmo = f.gizmo;
     if (gizmo == null) continue;
     final problem = gizmoProblem(gizmo, f, fields);
-    if (problem != null) throw BehaviourGenerationError(problem, library: libraryUri, member: '$name.${f.name}');
+    if (problem != null) {
+      throw BehaviourGenerationError(
+        problem,
+        library: libraryUri,
+        member: '$name.${f.name}',
+      );
+    }
   }
   _checkShowIf(fields, libraryUri, name);
   final description = annotated.annotation.peek('description')?.stringValue;
@@ -190,6 +292,14 @@ Future<BehaviourClass> _readClass(
     icon: annotated.annotation.peek('icon')?.stringValue,
     category: data ? null : annotated.annotation.peek('category')?.stringValue,
     isData: data,
+    isComponent: component,
+    callbacks: data || component
+        ? null
+        : {
+            for (final name in const ['fixedUpdate', 'afterPhysics', 'update', 'lateUpdate'])
+              if (element.lookUpMethod(name: name, library: element.library) case final method?)
+                if (!_behaviourBase.isExactly(method.enclosingElement!)) name,
+          },
     menu: data ? annotated.annotation.peek('menu')?.stringValue : null,
   );
 }
@@ -200,14 +310,23 @@ Future<ExposedField> _readField(
   ConstantReader expose,
   String libraryUri,
   String member,
-  Set<String> records,
-) async {
+  Set<String> records, {
+  bool registered = false,
+}) async {
   final fieldName = f.name ?? '';
   if (f.isStatic) {
-    throw BehaviourGenerationError('@Expose field must be an instance field', library: libraryUri, member: member);
+    throw BehaviourGenerationError(
+      '@Expose field must be an instance field',
+      library: libraryUri,
+      member: member,
+    );
   }
   if (f.isPrivate) {
-    throw BehaviourGenerationError('@Expose field must be public', library: libraryUri, member: member);
+    throw BehaviourGenerationError(
+      '@Expose field must be public',
+      library: libraryUri,
+      member: member,
+    );
   }
   if (f.isFinal || f.isConst || f.setter == null) {
     throw BehaviourGenerationError(
@@ -227,14 +346,17 @@ Future<ExposedField> _readField(
   }
   final nullable = type.nullabilitySuffix == NullabilitySuffix.question;
   // A list's item: what it holds decides the rest (an enum's values).
-  final itemType = kind == FieldKind.list ? (type as InterfaceType).typeArguments.single : null;
+  final itemType = kind == FieldKind.list
+      ? (type as InterfaceType).typeArguments.single
+      : null;
   final item = itemType == null ? null : _kindOf(itemType);
   final described = itemType ?? type;
   final describedKind = item ?? kind;
   // An enum's values, a referenced script's class and type id.
   String? typeLibrary, typeName, behaviourId;
   var enumValues = const <String>[];
-  if (describedKind == FieldKind.enumeration || describedKind == FieldKind.behaviour) {
+  if (describedKind == FieldKind.enumeration ||
+      describedKind == FieldKind.behaviour) {
     final element = (described as InterfaceType).element;
     typeLibrary = element.library.uri.toString();
     typeName = element.name;
@@ -245,7 +367,9 @@ Future<ExposedField> _readField(
         member: member,
       );
     }
-    if (element is EnumElement) enumValues = [for (final c in element.constants) c.name ?? ''];
+    if (element is EnumElement) {
+      enumValues = [for (final c in element.constants) c.name ?? ''];
+    }
   }
   if ((kind.isReference || kind == FieldKind.data) && !nullable) {
     throw BehaviourGenerationError(
@@ -259,7 +383,9 @@ Future<ExposedField> _readField(
   if (describedKind == FieldKind.data) {
     final element = (described as InterfaceType).element;
     final annotation = _dataAnnotation.firstAnnotationOfExact(element);
-    dataId = annotation == null ? null : ConstantReader(annotation).peek('id')?.stringValue;
+    dataId = annotation == null
+        ? null
+        : ConstantReader(annotation).peek('id')?.stringValue;
     typeLibrary = element.library.uri.toString();
     typeName = element.name;
     if (dataId == null) {
@@ -287,14 +413,21 @@ Future<ExposedField> _readField(
         member: member,
       );
     }
-    record = await _readRecord(resolver, (described as InterfaceType).element as ClassElement, member, records);
+    record = await _readRecord(
+      resolver,
+      (described as InterfaceType).element as ClassElement,
+      member,
+      records,
+    );
     typeLibrary = record.libraryUri;
     typeName = record.className;
   }
   if (kind == FieldKind.behaviour) {
     final element = (type as InterfaceType).element;
     final annotation = _behaviourAnnotation.firstAnnotationOfExact(element);
-    behaviourId = annotation == null ? null : ConstantReader(annotation).peek('id')?.stringValue;
+    behaviourId = annotation == null
+        ? null
+        : ConstantReader(annotation).peek('id')?.stringValue;
     if (behaviourId == null) {
       throw BehaviourGenerationError(
         '@Expose ${type.getDisplayString()} field: $typeName is not a @FynkelBehaviour class '
@@ -312,9 +445,16 @@ Future<ExposedField> _readField(
     final element = arg is InterfaceType ? arg.element : null;
     componentClass = element?.name;
     final lib = element?.library.uri;
-    final generated = lib != null && lib.isScheme('package') && lib.pathSegments.first == 'fynkel';
-    componentName =
-        element is ClassElement ? element.getField('schemaName')?.computeConstantValue()?.toStringValue() : null;
+    final generated =
+        lib != null &&
+        lib.isScheme('package') &&
+        lib.pathSegments.first == 'fynkel';
+    componentName = element is ClassElement
+        ? element
+              .getField('schemaName')
+              ?.computeConstantValue()
+              ?.toStringValue()
+        : null;
     if (!generated || componentName == null) {
       throw BehaviourGenerationError(
         '@Expose ${type.getDisplayString()} field: NativeComponent holds a built-in component '
@@ -341,7 +481,8 @@ Future<ExposedField> _readField(
   if (init == null) {
     final owner = f.enclosingElement;
     final ctor = owner is ClassElement ? owner.unnamedConstructor : null;
-    for (final p in ctor?.formalParameters ?? const <FormalParameterElement>[]) {
+    for (final p
+        in ctor?.formalParameters ?? const <FormalParameterElement>[]) {
       if (p is! FieldFormalParameterElement || p.name != fieldName) continue;
       final param = await resolver.astNodeFor(p.firstFragment);
       if (param is FormalParameter) init = param.defaultClause?.value;
@@ -355,9 +496,17 @@ Future<ExposedField> _readField(
     }
   }
   if (hasDefault && defaultValue == null && !nullable) hasDefault = false;
+  if (registered && !hasDefault && !(nullable && kind == FieldKind.gameObject && init == null && !f.isLate)) {
+    throw BehaviourGenerationError(
+      'registered component defaults must be literal data shared by runtime and editor schemas',
+      library: libraryUri, member: member,
+    );
+  }
   var hintKind = expose.peek('kind')?.stringValue;
   // A typed asset (`MaterialAsset?`) implies its `asset(<kind>)`.
-  final assetClass = describedKind == FieldKind.assetRef ? (described as InterfaceType).element.name : null;
+  final assetClass = describedKind == FieldKind.assetRef
+      ? (described as InterfaceType).element.name
+      : null;
   final implied = assetClasses[assetClass];
   if (implied != null) {
     if (hintKind != null && hintKind != 'asset($implied)') {
@@ -371,7 +520,13 @@ Future<ExposedField> _readField(
   }
   if (hintKind != null) {
     final problem = exposeKindProblem(hintKind, describedKind);
-    if (problem != null) throw BehaviourGenerationError('@Expose: $problem', library: libraryUri, member: member);
+    if (problem != null) {
+      throw BehaviourGenerationError(
+        '@Expose: $problem',
+        library: libraryUri,
+        member: member,
+      );
+    }
   }
   final order = expose.peek('order');
   final gizmoAnnotation = _gizmoAnnotation.firstAnnotationOf(f);
@@ -380,7 +535,9 @@ Future<ExposedField> _readField(
     final g = ConstantReader(gizmoAnnotation);
     String option(String name, List<String> values, String fallback) {
       final v = g.peek(name);
-      final index = v == null || v.isNull ? null : v.objectValue.getField('index')?.toIntValue();
+      final index = v == null || v.isNull
+          ? null
+          : v.objectValue.getField('index')?.toIntValue();
       return index == null ? fallback : values[index];
     }
 
@@ -431,17 +588,28 @@ Future<ExposedField> _readField(
 /// A `@FynkelRecord` class a field holds, its fields read as a type's
 /// are; [records] the record classes already being read (a record cannot
 /// hold itself, even through a list: its schema would never end).
-Future<RecordClass> _readRecord(Resolver resolver, ClassElement element, String member, Set<String> records) async {
+Future<RecordClass> _readRecord(
+  Resolver resolver,
+  ClassElement element,
+  String member,
+  Set<String> records,
+) async {
   final libraryUri = element.library.uri.toString();
   final name = element.name ?? '<unnamed>';
   final key = '$libraryUri#$name';
   if (records.contains(key)) {
-    throw BehaviourGenerationError('record $name holds itself: a record is a value, it cannot contain one of its own',
-        library: libraryUri, member: member);
+    throw BehaviourGenerationError(
+      'record $name holds itself: a record is a value, it cannot contain one of its own',
+      library: libraryUri,
+      member: member,
+    );
   }
   if (element.isAbstract || element.isPrivate) {
-    throw BehaviourGenerationError('@FynkelRecord class $name must be public and concrete (the generated file constructs it)',
-        library: libraryUri, member: name);
+    throw BehaviourGenerationError(
+      '@FynkelRecord class $name must be public and concrete (the generated file constructs it)',
+      library: libraryUri,
+      member: name,
+    );
   }
   final ctor = element.unnamedConstructor;
   if (ctor == null || ctor.formalParameters.any((p) => p.isRequired)) {
@@ -454,18 +622,33 @@ Future<RecordClass> _readRecord(Resolver resolver, ClassElement element, String 
   final inner = {...records, key};
   final fields = <ExposedField>[];
   final seen = <String>{};
-  for (InterfaceElement? cls = element; cls != null && !cls.library.isDartCore; cls = cls.supertype?.element) {
+  for (
+    InterfaceElement? cls = element;
+    cls != null && !cls.library.isDartCore;
+    cls = cls.supertype?.element
+  ) {
     for (final f in cls.fields) {
       final annotation = _exposeAnnotation.firstAnnotationOf(f);
       final fieldName = f.name ?? '';
       if (annotation == null) {
         if (_gizmoAnnotation.hasAnnotationOf(f)) {
-          throw BehaviourGenerationError('@Gizmo needs @Expose on the same field', library: libraryUri, member: '$name.$fieldName');
+          throw BehaviourGenerationError(
+            '@Gizmo needs @Expose on the same field',
+            library: libraryUri,
+            member: '$name.$fieldName',
+          );
         }
         continue;
       }
       if (!seen.add(fieldName)) continue;
-      final field = await _readField(resolver, f, ConstantReader(annotation), libraryUri, '$name.$fieldName', inner);
+      final field = await _readField(
+        resolver,
+        f,
+        ConstantReader(annotation),
+        libraryUri,
+        '$name.$fieldName',
+        inner,
+      );
       if (field.kind.isReference || field.dataId != null) {
         throw BehaviourGenerationError(
           '@Expose ${f.type.getDisplayString()} on a record: a record holds values only '
@@ -475,15 +658,23 @@ Future<RecordClass> _readRecord(Resolver resolver, ClassElement element, String 
         );
       }
       if (field.gizmo != null) {
-        throw BehaviourGenerationError('@Gizmo on a record field: a gizmo draws a field of the script itself',
-            library: libraryUri, member: '$name.$fieldName');
+        throw BehaviourGenerationError(
+          '@Gizmo on a record field: a gizmo draws a field of the script itself',
+          library: libraryUri,
+          member: '$name.$fieldName',
+        );
       }
       fields.add(field);
     }
   }
   fields.sort((a, b) => a.name.compareTo(b.name));
   _checkShowIf(fields, libraryUri, name);
-  return RecordClass(className: name, libraryUri: libraryUri, fields: fields, doc: _doc(element.documentationComment));
+  return RecordClass(
+    className: name,
+    libraryUri: libraryUri,
+    fields: fields,
+    doc: _doc(element.documentationComment),
+  );
 }
 
 /// Every `showIf` names a sibling `bool` field; every `drawer` is one
@@ -491,7 +682,8 @@ Future<RecordClass> _readRecord(Resolver resolver, ClassElement element, String 
 void _checkShowIf(List<ExposedField> fields, String libraryUri, String name) {
   for (final f in fields) {
     final drawer = f.drawer;
-    if (drawer != null && !RegExp(r'^[A-Za-z_][A-Za-z0-9_.]*$').hasMatch(drawer)) {
+    if (drawer != null &&
+        !RegExp(r'^[A-Za-z_][A-Za-z0-9_.]*$').hasMatch(drawer)) {
       throw BehaviourGenerationError(
         "drawer '$drawer' must be one word (letters, digits, '_' and '.')",
         library: libraryUri,
@@ -505,7 +697,9 @@ void _checkShowIf(List<ExposedField> fields, String libraryUri, String name) {
     for (final o in fields) {
       if (o.name == target) sibling = o;
     }
-    if (sibling == null || sibling.kind != FieldKind.boolean || sibling.name == f.name) {
+    if (sibling == null ||
+        sibling.kind != FieldKind.boolean ||
+        sibling.name == f.name) {
       throw BehaviourGenerationError(
         "showIf '$showIf' must name another @Expose bool field of the class",
         library: libraryUri,
@@ -528,13 +722,20 @@ FieldKind? _kindOf(DartType type) {
   final name = element.name;
   if (name == null) return null;
   if (element is EnumElement) return FieldKind.enumeration;
-  if (element is ClassElement && _behaviourBase.isAssignableFrom(element) && !_behaviourBase.isExactly(element)) {
+  if (element is ClassElement &&
+      _behaviourBase.isAssignableFrom(element) &&
+      !_behaviourBase.isExactly(element)) {
     return FieldKind.behaviour;
   }
-  if (element is ClassElement && _dataBase.isAssignableFrom(element) && !_dataBase.isExactly(element)) {
+  if (element is ClassElement &&
+      _dataBase.isAssignableFrom(element) &&
+      !_dataBase.isExactly(element)) {
     return FieldKind.data;
   }
-  if (element is ClassElement && _recordAnnotation.hasAnnotationOfExact(element)) return FieldKind.record;
+  if (element is ClassElement &&
+      _recordAnnotation.hasAnnotationOfExact(element)) {
+    return FieldKind.record;
+  }
   final lib = element.library.uri;
   if (lib.isScheme('dart') && lib.path == 'core' && name != 'List') {
     return switch (name) {
@@ -574,9 +775,16 @@ class _Literal {
   final Object? value;
 }
 
-_Literal? _literal(Expression e, FieldKind kind, {FieldKind? item, String? record}) {
+_Literal? _literal(
+  Expression e,
+  FieldKind kind, {
+  FieldKind? item,
+  String? record,
+}) {
   if (e is NullLiteral) return const _Literal(null);
-  if (e is ParenthesizedExpression) return _literal(e.expression, kind, item: item, record: record);
+  if (e is ParenthesizedExpression) {
+    return _literal(e.expression, kind, item: item, record: record);
+  }
   switch (kind) {
     case FieldKind.number:
       final n = _number(e);
@@ -617,12 +825,20 @@ _Literal? _literal(Expression e, FieldKind kind, {FieldKind? item, String? recor
     case FieldKind.record:
       // `Wave()` (`const`/`new` too): the class's own defaults, `{}`.
       final (type, arguments) = switch (e) {
-        InstanceCreationExpression(:final constructorName, :final argumentList) when constructorName.name == null =>
+        InstanceCreationExpression(:final constructorName, :final argumentList)
+            when constructorName.name == null =>
           (constructorName.type.name.lexeme, argumentList),
-        MethodInvocation(target: null, :final methodName, :final argumentList) => (methodName.name, argumentList),
+        MethodInvocation(
+          target: null,
+          :final methodName,
+          :final argumentList,
+        ) =>
+          (methodName.name, argumentList),
         _ => (null, null),
       };
-      return type == record && arguments!.arguments.isEmpty ? const _Literal(<String, Object?>{}) : null;
+      return type == record && arguments!.arguments.isEmpty
+          ? const _Literal(<String, Object?>{})
+          : null;
     case FieldKind.list:
       if (e is! ListLiteral || item == null) return null;
       final items = <Object?>[];
@@ -657,7 +873,12 @@ num? _number(Expression e) {
 }
 
 /// `Vec3(x, y, z)`, `Vec3.all(v)`, `Vec3.up`, … (and the `Quat` forms).
-_Literal? _vector(Expression e, String type, int arity, Map<String, List<double>> constants) {
+_Literal? _vector(
+  Expression e,
+  String type,
+  int arity,
+  Map<String, List<double>> constants,
+) {
   if (e is PrefixedIdentifier && e.prefix.name == type) {
     final c = constants[e.identifier.name];
     return c == null ? null : _Literal(c);
@@ -665,12 +886,17 @@ _Literal? _vector(Expression e, String type, int arity, Map<String, List<double>
   // Unresolved, `Vec3(1, 2, 3)` without `const`/`new` parses as a call.
   String? ctor;
   ArgumentList? arguments;
-  if (e is InstanceCreationExpression && e.constructorName.type.name.lexeme == type) {
+  if (e is InstanceCreationExpression &&
+      e.constructorName.type.name.lexeme == type) {
     ctor = e.constructorName.name?.name;
     arguments = e.argumentList;
-  } else if (e is MethodInvocation && e.target == null && e.methodName.name == type) {
+  } else if (e is MethodInvocation &&
+      e.target == null &&
+      e.methodName.name == type) {
     arguments = e.argumentList;
-  } else if (e is MethodInvocation && e.target is SimpleIdentifier && (e.target as SimpleIdentifier).name == type) {
+  } else if (e is MethodInvocation &&
+      e.target is SimpleIdentifier &&
+      (e.target as SimpleIdentifier).name == type) {
     ctor = e.methodName.name;
     arguments = e.argumentList;
   }
@@ -682,7 +908,9 @@ _Literal? _vector(Expression e, String type, int arity, Map<String, List<double>
       if (n == null) return null;
       args.add(n);
     }
-    if (ctor == null && args.length == arity) return _Literal([for (final a in args) a.toDouble()]);
+    if (ctor == null && args.length == arity) {
+      return _Literal([for (final a in args) a.toDouble()]);
+    }
     if (ctor == 'all' && args.length == 1 && type == 'Vec3') {
       return _Literal(List<double>.filled(arity, args[0].toDouble()));
     }
@@ -693,7 +921,9 @@ _Literal? _vector(Expression e, String type, int arity, Map<String, List<double>
 /// `AssetRef('uuid')`, `AssetRef('uuid', sub: 'mesh/0')`, `AssetRef.none`,
 /// and a typed asset's `MaterialAsset('uuid', name: 'gold')`.
 _Literal? _assetRef(Expression e) {
-  if (e is PrefixedIdentifier && e.prefix.name == 'AssetRef' && e.identifier.name == 'none') {
+  if (e is PrefixedIdentifier &&
+      e.prefix.name == 'AssetRef' &&
+      e.identifier.name == 'none') {
     return const _Literal({'asset': '00000000-0000-0000-0000-000000000000'});
   }
   if (e is InstanceCreationExpression &&

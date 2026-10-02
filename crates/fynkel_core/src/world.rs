@@ -259,9 +259,12 @@ pub struct Extract {
 }
 
 pub struct World {
+    pub(crate) extensions: std::collections::BTreeMap<String, u32>,
+    schedule: Vec<systems::ScheduledStage>,
+    registered_system_times: Vec<crate::RegisteredSystemTime>,
     pub(crate) registered: crate::registry::ComponentRegistry,
     command_resources: Option<Arc<dyn command_resources::CommandResourceSource>>,
-    config: WorldConfig,
+    pub(crate) config: WorldConfig,
     clock: FrameClock,
     ecs: Ecs,
     /// Roots whose committed poses must reset interpolation history.
@@ -340,6 +343,9 @@ impl World {
         let input = Input::with_tick_dt(config.fixed_dt);
         Ok(Self {
             registered: Default::default(),
+            extensions: Default::default(),
+            schedule: systems::builtin_schedule(),
+            registered_system_times: Vec::new(),
             ecs: Ecs::try_new()?,
             config,
             clock,
@@ -736,7 +742,7 @@ impl World {
         self.events.begin_tick();
         let next_tick = self.clock.tick() + 1;
         let edit = self.config.edit_mode;
-        // The native systems in their declared order (`systems::TICK`).
+        // The native systems in their declared order (the compiled registered schedule).
         let run = self.run_tick(next_tick);
         let (applied, rejected) = (run.applied, run.rejected);
 

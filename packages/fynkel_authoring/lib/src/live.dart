@@ -75,6 +75,7 @@ final class LiveEntityState {
     required this.parent,
     required this.world,
     required this.components,
+    this.componentVersions = const {},
     this.activeSelf = true,
     this.activeInHierarchy = true,
   });
@@ -87,6 +88,7 @@ final class LiveEntityState {
         world: _mapOf(j['world']),
         activeSelf: j['activeSelf'] != false,
         activeInHierarchy: j['activeInHierarchy'] != false,
+        componentVersions: {for (final c in j['components'] as List? ?? const []) _mapOf(c)['type'] as String: _mapOf(c)['version'] as int? ?? 1},
         components: [
           for (final c in j['components'] as List? ?? const [])
             (type: _mapOf(c)['type'] as String, data: _mapOf(_mapOf(c)['data'])),
@@ -99,6 +101,7 @@ final class LiveEntityState {
   final String? parent;
   final Map<String, Object?> world;
   final List<({String type, Map<String, Object?> data})> components;
+  final Map<String,int> componentVersions;
   final bool activeSelf;
   final bool activeInHierarchy;
 

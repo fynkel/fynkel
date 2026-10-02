@@ -1,5 +1,5 @@
 //! The tick's native systems (§5.1) and the one place their order is
-//! declared (foundation 6.1). `World::step` runs [`TICK`] front to back;
+//! declared (foundation 6.1). `World::step` runs the registered schedule front to back;
 //! each system says when it runs and reports its entity count, and the
 //! step times it under its [`SystemKind`].
 //!
@@ -40,6 +40,7 @@ pub(super) trait System {
 }
 
 /// A [`System`] as the tick's table holds it.
+#[derive(Clone, Copy)]
 pub(super) struct Stage {
     pub(super) kind: SystemKind,
     runs: fn(&World) -> bool,
@@ -54,42 +55,63 @@ const fn stage<S: System>() -> Stage {
     }
 }
 
-/// The tick, in order. `Step` and `Publish` are the step's own frame
-/// around it.
-pub(super) const TICK: [Stage; 16] = [
-    // Native pre-tick systems read the tick's input first (the characters'
-    // action driver, M3-09): its commands are queued ahead of the batch's,
-    // so an explicit `Move`/`Jump` from the game in the same tick wins.
-    stage::<Characters>(),
-    stage::<RecordPrevious>(),
-    stage::<Effects>(),
-    // Animators pose their subtrees first among the pre-tick systems
-    // (M3-19): a mover or a body on a posed joint follows the pose.
-    stage::<Animation>(),
-    // The catalogue's pre-tick movers (§3.5, M3-10): they see the batch's
-    // writes and physics sees theirs.
-    stage::<Rotators>(),
-    stage::<Oscillators>(),
-    stage::<Lifetimes>(),
-    stage::<Emitters>(),
-    stage::<PhysicsStep>(),
-    stage::<Propagate>(),
-    // Camera rigs follow the tick's final poses (a rig's own subtree is
-    // the only thing left dirty, so the settle after it is cheap).
-    stage::<CameraRigs>(),
-    stage::<SettleRigs>(),
-    // Followers and billboards read the propagated poses, the camera's
-    // included (M3-10).
-    stage::<Followers>(),
-    stage::<Billboards>(),
-    stage::<Settle>(),
-    // After the destroys of the tick, so a dead source's voice stops this
-    // tick.
-    stage::<Audio>(),
-];
+#[derive(Clone)]
+pub(super) enum Runner {
+    Builtin(Stage),
+    Custom(crate::SystemCallback),
+}
+#[derive(Clone)]
+pub(super) struct ScheduledStage {
+    pub spec: crate::SystemSpec,
+    pub runner: Runner,
+}
+
+pub(super) fn builtin_schedule() -> Vec<ScheduledStage> {
+    use crate::SystemPhase::*;
+    let builtins = [
+        ("characters", Input, stage::<Characters>()),
+        ("previous", Input, stage::<RecordPrevious>()),
+        ("effects", Input, stage::<Effects>()),
+        ("animation", Simulation, stage::<Animation>()),
+        ("rotators", Simulation, stage::<Rotators>()),
+        ("oscillators", Simulation, stage::<Oscillators>()),
+        ("lifetimes", Simulation, stage::<Lifetimes>()),
+        ("emitters", Simulation, stage::<Emitters>()),
+        ("physics", Physics, stage::<PhysicsStep>()),
+        ("propagate", PostPhysics, stage::<Propagate>()),
+        ("camera_rigs", PostPhysics, stage::<CameraRigs>()),
+        ("settle_rigs", PostPhysics, stage::<SettleRigs>()),
+        ("followers", PostPhysics, stage::<Followers>()),
+        ("billboards", PostPhysics, stage::<Billboards>()),
+        ("settle", PostPhysics, stage::<Settle>()),
+        ("audio", Audio, stage::<self::Audio>()),
+    ];
+    let mut previous = None;
+    builtins
+        .into_iter()
+        .map(|(id, phase, stage)| {
+            let mut spec = crate::SystemSpec::new(format!("fynkel.{id}"), phase);
+            spec.after = previous.take().into_iter().collect();
+            previous = Some(spec.id.clone());
+            spec.reads.push("*".into());
+            spec.writes.push("*".into());
+            spec.structural = true;
+            spec.requires = match id {
+                "characters" | "physics" => vec![crate::Module::Physics],
+                "animation" => vec![crate::Module::Animation],
+                "audio" => vec![crate::Module::Audio],
+                _ => vec![],
+            };
+            ScheduledStage {
+                spec,
+                runner: Runner::Builtin(stage),
+            }
+        })
+        .collect()
+}
 
 impl World {
-    /// Runs [`TICK`] for tick `tick`; what it applied and rejected.
+    /// Runs the registered schedule for tick `tick`; what it applied and rejected.
     pub(super) fn run_tick(&mut self, tick: Tick) -> TickRun {
         let mut t = TickRun {
             tick,
@@ -99,21 +121,206 @@ impl World {
             transforms_us: 0,
             moved: false,
         };
-        for stage in &TICK {
+        // Owned schedule descriptors contain only immutable metadata and function
+        // pointers. Temporarily move the list to avoid aliasing the world during callbacks.
+        let schedule = std::mem::take(&mut self.schedule);
+        let mut fatal_panic = None;
+        if self.registered_system_times.len() != schedule.len()
+            || self
+                .registered_system_times
+                .iter()
+                .zip(&schedule)
+                .any(|(time, stage)| time.id != stage.spec.id)
+        {
+            self.registered_system_times = schedule
+                .iter()
+                .map(|stage| crate::RegisteredSystemTime {
+                    id: stage.spec.id.clone(),
+                    micros: 0,
+                    entities: 0,
+                    rejected: false,
+                })
+                .collect();
+        }
+        for (index, stage) in schedule.iter().enumerate() {
             let t0 = Instant::now();
-            let n = if (stage.runs)(self) {
-                (stage.run)(self, &mut t)
-            } else {
-                0
+            let mut rejected = false;
+            let n = match stage.runner {
+                Runner::Builtin(builtin) => {
+                    let n = if (builtin.runs)(self) {
+                        (builtin.run)(self, &mut t)
+                    } else {
+                        0
+                    };
+                    if builtin.kind == SystemKind::Transforms {
+                        t.transforms_us += micros(t0);
+                        self.set_time(SystemKind::Transforms, t.propagated, t.transforms_us);
+                    } else {
+                        self.set_time(builtin.kind, n, micros(t0));
+                    }
+                    n
+                }
+                Runner::Custom(run) => {
+                    if self.edit() {
+                        0
+                    } else if let Some(module) =
+                        stage.spec.requires.iter().find(|&&m| !self.modules.has(m))
+                    {
+                        rejected = true;
+                        t.rejected += 1;
+                        self.reject(
+                            u32::MAX,
+                            Lane::Simulation,
+                            fynkel_contracts::DiagnosticCode::MODULE_OFF,
+                            Entity::NULL,
+                            ComponentId::NONE,
+                            format!("{} requires {}", stage.spec.id, module.key()),
+                        );
+                        0
+                    } else {
+                        let context = crate::SystemContext {
+                            tick,
+                            delta_seconds: self.config.fixed_dt,
+                        };
+                        // A system failure rejects only this system's edit. Other systems
+                        // run in declared order; they never observe partial component data.
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            self.edit_native_data_at_tick(tick, |edit| run(edit, context))
+                        }));
+                        match result {
+                            Ok(Ok(commit)) => {
+                                t.moved = true;
+                                commit.value
+                            }
+                            failure => {
+                                rejected = true;
+                                t.rejected += 1;
+                                let why = match failure {
+                                    Ok(Err(e)) => e.to_string(),
+                                    Err(panic) => {
+                                        if self.is_poisoned() {
+                                            fatal_panic = Some(panic);
+                                        }
+                                        "callback panicked".into()
+                                    }
+                                    Ok(Ok(_)) => unreachable!(),
+                                };
+                                self.reject(
+                                    u32::MAX,
+                                    Lane::Simulation,
+                                    fynkel_contracts::DiagnosticCode::INVALID_PAYLOAD,
+                                    Entity::NULL,
+                                    ComponentId::NONE,
+                                    format!("{}: {why}", stage.spec.id),
+                                );
+                                0
+                            }
+                        }
+                    }
+                }
             };
-            if stage.kind == SystemKind::Transforms {
-                t.transforms_us += micros(t0);
-                self.set_time(SystemKind::Transforms, t.propagated, t.transforms_us);
-            } else {
-                self.set_time(stage.kind, n, micros(t0));
+            let time = &mut self.registered_system_times[index];
+            time.micros = micros(t0);
+            time.entities = n;
+            time.rejected = rejected;
+            if self.is_poisoned() {
+                break;
             }
         }
+        self.schedule = schedule;
+        if let Some(panic) = fatal_panic {
+            std::panic::resume_unwind(panic);
+        }
         t
+    }
+
+    /// Install a complete batch atomically, allowing forward dependencies within
+    /// that batch. Existing systems cannot be silently replaced.
+    pub fn register_systems(
+        &mut self,
+        systems: Vec<crate::RegisteredSystem>,
+    ) -> Result<(), crate::ScheduleError> {
+        use crate::ScheduleError as E;
+        if self.is_poisoned() {
+            return Err(E::Poisoned);
+        }
+        let mut candidate = self.schedule.clone();
+        for mut system in systems {
+            if system.spec.id.starts_with("fynkel.") {
+                return Err(E::ReservedIdentity(system.spec.id));
+            }
+            match system.spec.phase {
+                crate::SystemPhase::Simulation => {}
+                crate::SystemPhase::PostPhysics => {
+                    system.spec.after.push("fynkel.propagate".into());
+                    system.spec.before.push("fynkel.settle".into());
+                }
+                _ => return Err(E::UnsupportedPhase(system.spec.id)),
+            }
+            for &module in &system.spec.requires {
+                if !self.modules.has(module) {
+                    return Err(E::MissingModule(system.spec.id.clone(), module));
+                }
+            }
+            for name in system.spec.reads.iter().chain(&system.spec.writes) {
+                if name != "*"
+                    && !crate::schema::ALL.iter().any(|s| s.name == name)
+                    && !self.registered.schemas().any(|s| s.id == *name)
+                {
+                    return Err(E::UnknownComponent(system.spec.id.clone(), name.clone()));
+                }
+            }
+            candidate.push(ScheduledStage {
+                spec: system.spec,
+                runner: Runner::Custom(system.run),
+            });
+        }
+        // Explicit dependencies on optional systems require their modules.
+        // Built-in ordering barriers still exist when their implementation is off.
+        loop {
+            let mut changed = false;
+            for i in 0..candidate.len() {
+                if !matches!(candidate[i].runner, Runner::Custom(_)) {
+                    continue;
+                }
+                let dependencies: Vec<_> = candidate[i]
+                    .spec
+                    .before
+                    .iter()
+                    .chain(&candidate[i].spec.after)
+                    .cloned()
+                    .collect();
+                for dependency in dependencies {
+                    let required = candidate
+                        .iter()
+                        .find(|s| s.spec.id == dependency)
+                        .map(|s| s.spec.requires.clone())
+                        .unwrap_or_default();
+                    for module in required {
+                        if !self.modules.has(module) {
+                            return Err(E::MissingModule(candidate[i].spec.id.clone(), module));
+                        }
+                        if !candidate[i].spec.requires.contains(&module) {
+                            candidate[i].spec.requires.push(module);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        let specs: Vec<_> = candidate.iter().map(|s| s.spec.clone()).collect();
+        let order = crate::scheduler::compile_schedule(&specs)?;
+        self.schedule = order.into_iter().map(|i| candidate[i].clone()).collect();
+        Ok(())
+    }
+    pub fn registered_systems(&self) -> impl Iterator<Item = &crate::SystemSpec> {
+        self.schedule.iter().map(|s| &s.spec)
+    }
+    pub fn registered_system_times(&self) -> &[crate::RegisteredSystemTime] {
+        &self.registered_system_times
     }
 
     fn edit(&self) -> bool {
@@ -441,7 +648,13 @@ mod tests {
     #[test]
     fn the_tick_runs_every_system_once_in_the_declared_order() {
         use SystemKind::*;
-        let kinds: Vec<SystemKind> = TICK.iter().map(|s| s.kind).collect();
+        let kinds: Vec<SystemKind> = builtin_schedule()
+            .iter()
+            .filter_map(|s| match s.runner {
+                Runner::Builtin(b) => Some(b.kind),
+                _ => None,
+            })
+            .collect();
         assert_eq!(
             kinds,
             [
@@ -477,9 +690,12 @@ mod tests {
             ..Default::default()
         });
         let running = |w: &World| -> Vec<SystemKind> {
-            TICK.iter()
-                .filter(|s| (s.runs)(w))
-                .map(|s| s.kind)
+            builtin_schedule()
+                .into_iter()
+                .filter_map(|s| match s.runner {
+                    Runner::Builtin(b) if (b.runs)(w) => Some(b.kind),
+                    _ => None,
+                })
                 .collect()
         };
         use SystemKind::*;

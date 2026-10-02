@@ -964,6 +964,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fynkel_example_native_combat"
+version = "0.0.1"
+dependencies = [
+ "fynkel_contracts",
+ "fynkel_core",
+]
+
+[[package]]
 name = "fynkel_host_headless"
 version = "0.0.1"
 dependencies = [

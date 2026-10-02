@@ -14,7 +14,7 @@ import '../src/world.dart' show GameObject, objectRefBits, objectRefOf, referenc
 /// Fingerprint of the schemas these codecs implement; must equal the
 /// native library's `fynkel_schema_fingerprint()`.
 const int schemaFingerprint = 0xbd96f0308508f61f;
-const int abiVersion = 4;
+const int abiVersion = 5;
 
 /// Camera projection model.
 ///

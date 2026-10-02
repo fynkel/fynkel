@@ -3,7 +3,7 @@ name = "fynkel_native"
 version = "0.0.1"
 edition = "2021"
 license = "UNLICENSED"
-description = "Fynkel C ABI v4 — the native host boundary over fynkel_core (blueprint §5.3, ADR-0004/0014)"
+description = "Fynkel C ABI v5 — the native host boundary over fynkel_core (blueprint §5.3, ADR-0004/0014)"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

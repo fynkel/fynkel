@@ -1,6 +1,6 @@
 /// Fynkel Engine — Dart gameplay API: `World`, `GameObject`, `Behaviour`
 /// with its lifecycle, `GameContext` services, typed events, diagnostics,
-/// and the ABI v4 bridge underneath.
+/// and the ABI v5 bridge underneath.
 library;
 
 export 'generated/schema.g.dart'

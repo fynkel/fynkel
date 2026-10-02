@@ -1908,6 +1908,7 @@ fn scene_chunk(
             "instances": instances,
             "expanded": true,
             "behaviourTypes": behaviour_types.iter().map(|(t, v)| json!({ "type": t, "version": v })).collect::<Vec<_>>(),
+            "registeredTypes": described.description.entities.iter().flat_map(|e| e.registered.iter().map(|c| c.id.clone())).collect::<std::collections::BTreeSet<_>>(),
         }),
         payload: text.into_bytes(),
     })
@@ -2174,6 +2175,7 @@ fn prefab_chunk(
             "instances": instances,
             "expanded": true,
             "behaviourTypes": behaviour_types.iter().map(|(t, v)| json!({ "type": t, "version": v })).collect::<Vec<_>>(),
+            "registeredTypes": described.description.entities.iter().flat_map(|e| e.registered.iter().map(|c| c.id.clone())).collect::<std::collections::BTreeSet<_>>(),
         }),
         payload: text.into_bytes(),
     })

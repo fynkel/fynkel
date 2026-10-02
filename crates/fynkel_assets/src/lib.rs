@@ -58,7 +58,7 @@ pub use fynkel_document::project::{
     LayersAndTags, ModuleSettings, PhysicsSettings, Quality, QualityProfile,
 };
 pub use fynkel_document::AuthoredBehaviour;
-use fynkel_document::{describe_with, Document, DocumentKind, Scene};
+use fynkel_document::{describe_registered, Document, DocumentKind, Scene};
 use fynkel_wire::material::decode_material;
 
 /// The sub-asset a cooked source's node hierarchy is stored under (the
@@ -365,6 +365,14 @@ struct ObjectMeta {
 
 /// The behaviour types the cook declared for a scene or prefab
 /// (`behaviourTypes`): what `describe_with` counts as known.
+fn registered_types(meta: &ObjectMeta) -> HashSet<String> {
+    meta.scene_info
+        .iter()
+        .flat_map(|info| info["registeredTypes"].as_array().into_iter().flatten())
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect()
+}
+
 fn behaviour_types(meta: &ObjectMeta) -> HashSet<String> {
     meta.scene_info
         .iter()
@@ -1734,7 +1742,12 @@ impl Assets {
         // The cook checked the document (ADR-0041); the load only decodes.
         let scene = Scene::from_document(doc);
         let mut diagnostics = scene.read_diagnostics().to_vec();
-        let described = describe_with(&scene, |t| behaviours.contains(t));
+        let registered = registered_types(&meta);
+        let described = describe_registered(
+            &scene,
+            |t| behaviours.contains(t),
+            |t| registered.contains(t),
+        );
         diagnostics.extend(described.diagnostics);
         if fynkel_contracts::has_errors(&diagnostics) {
             diagnostics.insert(0, self.scene_invalid(&entry));
@@ -1892,7 +1905,12 @@ impl Assets {
         if prefab.has_instances() {
             diagnostics.push(self.scene_invalid(&entry));
         }
-        let described = describe_with(&prefab.scene(), |t| behaviours.contains(t));
+        let registered = registered_types(&meta);
+        let described = describe_registered(
+            &prefab.scene(),
+            |t| behaviours.contains(t),
+            |t| registered.contains(t),
+        );
         diagnostics.extend(described.diagnostics);
         if fynkel_contracts::has_errors(&diagnostics) {
             diagnostics.insert(0, self.scene_invalid(&entry));

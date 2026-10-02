@@ -65,6 +65,25 @@ class NativeGameplayClone {
   final Map<NativeGameplayRef, NativeGameplayRef> entities;
 }
 
+class NativeRegisteredValue {
+  const NativeRegisteredValue(this.kind, this.value);
+  final int kind;
+  final Object? value;
+}
+
+class NativeRegisteredField {
+  const NativeRegisteredField(this.name, this.defaultValue);
+  final String name;
+  final NativeRegisteredValue defaultValue;
+}
+
+class NativeRegisteredBatch {
+  NativeRegisteredBatch._(this._edit, this._token, this.rows);
+  final NativeGameplayEdit _edit;
+  final int _token;
+  final List<(NativeGameplayRef, List<NativeRegisteredValue>)> rows;
+}
+
 class NativeGameplayEdit {
   NativeGameplayEdit._(this._native, this._sequence);
   final NativeWorld _native;
@@ -81,6 +100,67 @@ class NativeGameplayEdit {
       rethrow;
     }
   }
+
+  List<NativeRegisteredValue>? registeredGet(
+    NativeGameplayRef owner,
+    String id,
+  ) => _guard(() {
+    final r = _send(
+      _GameplayWriter(35)
+        ..reference(owner)
+        ..string(id),
+    );
+    return r.u32() == 0 ? null : r.scalars();
+  });
+  void registeredSet(
+    NativeGameplayRef owner,
+    String id,
+    List<NativeRegisteredValue> values,
+  ) => _guard(() {
+    _send(
+      _GameplayWriter(36)
+        ..reference(owner)
+        ..string(id)
+        ..scalars(values),
+    );
+  });
+  void registeredRemove(NativeGameplayRef owner, String id) => _guard(() {
+    _send(
+      _GameplayWriter(37)
+        ..reference(owner)
+        ..string(id),
+    );
+  });
+  NativeRegisteredBatch registeredQuery(String id) => _guard(() {
+    final r = _send(_GameplayWriter(38)..string(id));
+    final token = r.u32(), count = r.u32();
+    return NativeRegisteredBatch._(
+      this,
+      token,
+      List.unmodifiable(
+        List.generate(
+          count,
+          (_) =>
+              (_ref(r)!, List<NativeRegisteredValue>.unmodifiable(r.scalars())),
+        ),
+      ),
+    );
+  });
+  void registeredApply(
+    NativeRegisteredBatch batch,
+    List<List<NativeRegisteredValue>> rows,
+  ) => _guard(() {
+    if (!identical(batch._edit, this)) {
+      throw StateError('bulk view belongs to another edit');
+    }
+    final w = _GameplayWriter(39)
+      ..u32(batch._token)
+      ..u32(rows.length);
+    for (final row in rows) {
+      w.scalars(row);
+    }
+    _send(w);
+  });
 
   bool persist(NativeGameplayRef owner) => _guard(() {
     final writer = _GameplayWriter(33)..reference(owner);
@@ -147,6 +227,8 @@ class NativeGameplayEdit {
     final result = Uint8List.fromList(
       _native._view.ref.data.asTypedList(_native._view.ref.length),
     );
+    _native.dartCopies++;
+    _native.dartBytesCopied += result.length;
     if (status != FynkelStatus.FYNKEL_STATUS_OK) {
       throw StateError(utf8.decode(result));
     }
@@ -518,6 +600,43 @@ class _GameplayWriter {
     bytes.add(b);
   }
 
+  void scalar(NativeRegisteredValue v) {
+    u32(v.kind);
+    switch (v.kind) {
+      case 0:
+        final value = v.value as double;
+        if (!value.isFinite) {
+          throw ArgumentError('component float must be finite');
+        }
+        bytes.add(
+          (ByteData(
+            8,
+          )..setFloat64(0, value, Endian.little)).buffer.asUint8List(),
+        );
+      case 1:
+        u64(v.value as int);
+      case 2:
+        u32((v.value as bool) ? 1 : 0);
+      case 3:
+        string(v.value as String);
+      case 5:
+        final asset = v.value as AssetRef;
+        string(asset.asset);
+        string(asset.sub ?? '');
+      case 4:
+        reference(v.value as NativeGameplayRef?);
+      default:
+        throw ArgumentError('invalid component field kind');
+    }
+  }
+
+  void scalars(List<NativeRegisteredValue> values) {
+    u32(values.length);
+    for (final v in values) {
+      scalar(v);
+    }
+  }
+
   void reference(NativeGameplayRef? r) {
     if (r == null) {
       bytes.add(Uint8List(32));
@@ -569,6 +688,34 @@ class _GameplayReader {
     offset += n;
     return b;
   }
+
+  NativeRegisteredValue scalar() {
+    final kind = u32();
+    final Object? value;
+    switch (kind) {
+      case 0:
+        value = data.getFloat64(offset, Endian.little);
+        offset += 8;
+      case 1:
+        value = data.getInt64(offset, Endian.little);
+        offset += 8;
+      case 2:
+        value = u32() != 0;
+      case 3:
+        value = string();
+      case 5:
+        final asset = string(), sub = string();
+        value = AssetRef(asset, sub: sub.isEmpty ? null : sub);
+      case 4:
+        value = reference();
+      default:
+        throw FormatException('invalid component scalar kind');
+    }
+    return NativeRegisteredValue(kind, value);
+  }
+
+  List<NativeRegisteredValue> scalars() =>
+      List.generate(u32(), (_) => scalar());
 
   String string() => utf8.decode(take(u32()));
   EntityRef entity() => EntityRef(u64(), u32(), u32());

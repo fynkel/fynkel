@@ -1,7 +1,8 @@
-// Thin typed layer over the ffigen bindings (ABI v4). One FFI call per
+// Thin typed layer over the ffigen bindings (ABI v5). One FFI call per
 // operation family (blueprint §5.3); buffers in and out, no per-property
 // calls. The gameplay API in lib/src/world.dart builds on this.
 
+import '../asset_ref.dart';
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:typed_data';
@@ -332,6 +333,19 @@ class NativeWorld {
     _requireLive();
     ffiCalls++;
     return fynkel_world_gameplay_tick_cancel(_w);
+  }
+
+  void registerComponent(String id, int version, List<NativeRegisteredField> fields) {
+    _requireLive();
+    final w = _GameplayWriter(0);
+    w.bytes.clear();
+    w.u32(1); w.string(id); w.u32(version); w.u32(fields.length);
+    for (final f in fields) { w.string(f.name); w.scalar(f.defaultValue); }
+    final bytes = w.bytes.takeBytes();
+    _toScratch(bytes, bytes.length);
+    ffiCalls++;
+    final status = fynkel_world_component_register(_w, _scratch, bytes.length, _view);
+    if (status != FynkelStatus.FYNKEL_STATUS_OK) { throw StateError(utf8.decode(_view.ref.data.asTypedList(_view.ref.length))); }
   }
 
   /// Read-only identity/name snapshot; never commits gameplay or drains events.

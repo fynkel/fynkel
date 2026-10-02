@@ -605,7 +605,7 @@ final class PlayDocument extends EditorDocument {
 
   /// Whether [type] is one of the world's own components (the rest are
   /// scripts).
-  bool _isNative(String type) => type.startsWith('fynkel.');
+  bool _isNative(String type) => type.startsWith('fynkel.') || (backend is WorldLiveBackend && (backend as WorldLiveBackend).world.registeredComponentTypes.any((t)=>t.id==type));
 
   AuthoringException _gone(Object? id) => AuthoringException('play', AuthoringStatus.invalidArgument, [
     Diagnostic(code: 'FYN-E0007', severity: Severity.error, message: '$id is not in the running game'),
@@ -816,7 +816,7 @@ final class PlayDocument extends EditorDocument {
     final refs = <String, _ComponentRef>{};
     for (final c in state.components) {
       final cid = ids.forType(c.type);
-      components[cid] = {'type': c.type, 'version': 1, 'data': c.data};
+      components[cid] = {'type': c.type, 'version': state.componentVersions[c.type] ?? 1, 'data': c.data};
       refs[cid] = _ComponentRef(c.type, c.data);
     }
     for (final b in backend.behaviours(row.handle)) {

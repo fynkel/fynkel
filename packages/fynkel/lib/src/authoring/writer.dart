@@ -469,6 +469,10 @@ final class _Document {
       // The generated `toJson` of every component record.
       values[type] = (1, (c as dynamic).toJson() as Map<String, Object?>);
     }
+    for (final component in spec.data) {
+      if (values.containsKey(component.type.id)) throw ArgumentError('duplicate component ${component.type.id}');
+      values[component.type.id] = (component.type.version, component.toJson());
+    }
     if (spec.layer case final layer?) {
       final i = writer.layersAndTags.layer(layer);
       if (i == null) throw ArgumentError('$spec: unknown layer "$layer"; the project declares ${writer.layersAndTags.layers}');

@@ -746,12 +746,15 @@ String componentSchemaName(Type t) {
 /// [BehaviourRegistry.instantiate] uses to build one from scene data
 /// without reflection.
 class BehaviourType {
-  const BehaviourType({required this.id, required this.create, this.version = 1, this.fields = const []});
+  const BehaviourType({required this.id, required this.create, this.version = 1, this.fields = const [], this.callbacks, this.dartType});
 
   final String id;
   final int version;
   final Behaviour Function() create;
   final List<BehaviourField> fields;
+  /// Null means manually registered: conservatively dispatch every phase.
+  final Set<String>? callbacks;
+  final Type? dartType;
 
   BehaviourField? field(String name) {
     for (final f in fields) {
@@ -778,6 +781,8 @@ class BehaviourDataError extends Error {
 /// [register] for every `@FynkelBehaviour` class); nothing is discovered at
 /// runtime.
 class BehaviourRegistry {
+  int _revision = 0;
+  int get revision => _revision;
   final Map<String, BehaviourType> _types = {};
   final Map<String, DataType> _dataTypes = {};
 
@@ -852,6 +857,7 @@ class BehaviourRegistry {
       throw ArgumentError.value(type.id, 'type', 'a behaviour type with this id is already registered');
     }
     _types[type.id] = type;
+    _revision++;
   }
 
   void registerAll(Iterable<BehaviourType> types) => types.forEach(register);
@@ -1212,9 +1218,9 @@ class _BehaviourSystem {
   /// GameObject or script field whose target died reads null from now
   /// on. Visits only the scripts whose class has reference fields.
   void _clearDeadReferences() {
-    if (_referenceFieldsCount != world.registry.types.length) {
+    if (_referenceFieldsCount != world.registry.revision) {
       _referenceFields.clear();
-      _referenceFieldsCount = world.registry.types.length;
+      _referenceFieldsCount = world.registry.revision;
     }
     for (final b in _all) {
       if (b._destroyed) continue;
@@ -1227,7 +1233,7 @@ class _BehaviourSystem {
   }
 
   List<BehaviourField> _referenceFieldsOf(Behaviour b) {
-    final type = b._type ?? world._registeredTypeOf(b);
+    final type = b._type == null ? world._registeredTypeOf(b) : world.registry.lookup(b._type!.id) ?? b._type;
     if (type == null) return const [];
     return [
       for (final f in type.fields)
@@ -1273,7 +1279,8 @@ class _BehaviourSystem {
   }
 
   /// One fixed tick's callbacks, right before `step()`.
-  void fixedUpdate(int tick, List<EngineEvent> events) {
+  void fixedUpdate(int tick, List<EngineEvent> events) => world._runPhase(GameplayPhase.fixedUpdate, () => _fixedUpdate(tick, events));
+  void _fixedUpdate(int tick, List<EngineEvent> events) {
     settle();
     if (world.isDisposed) return;
     final ctx = FixedUpdateContext(tick: tick, dt: world.fixedDt, events: events, context: world.context);
@@ -1295,23 +1302,25 @@ class _BehaviourSystem {
     List<PlaybackEnded> playback, [
     List<AnimatorStateEvent> states = const [],
   ]) {
-    // Objects the tick made are created (onCreate/onEnable) before its
-    // events reach anyone, so a pair made overlapping gets its enter on
-    // both sides, as Unity's Awake runs before the next physics step
-    // (foundation 2.13).
-    settle();
-    if (world.isDisposed) return;
-    if (contacts.isNotEmpty) _dispatchContacts(contacts);
-    if (zones.isNotEmpty) _dispatchZones(zones);
-    if (animations.isNotEmpty) _dispatchAnimations(animations);
-    if (states.isNotEmpty) _dispatchStates(states);
-    if (markers.isNotEmpty) _dispatchMarkers(markers);
-    if (playback.isNotEmpty) _dispatchPlayback(playback);
-    final ctx = AfterPhysicsContext(tick: tick, contacts: contacts, context: world.context);
-    _run(ctx.context, 'afterPhysics', (b) {
-      if (b.wantsAfterPhysics) b.afterPhysics(ctx);
+    world._runPhase(GameplayPhase.afterPhysics, () {
+      // Objects the tick made are created (onCreate/onEnable) before its
+      // events reach anyone, so a pair made overlapping gets its enter on
+      // both sides, as Unity's Awake runs before the next physics step
+      // (foundation 2.13).
+      settle();
+      if (world.isDisposed) return;
+      if (contacts.isNotEmpty) _dispatchContacts(contacts);
+      if (zones.isNotEmpty) _dispatchZones(zones);
+      if (animations.isNotEmpty) _dispatchAnimations(animations);
+      if (states.isNotEmpty) _dispatchStates(states);
+      if (markers.isNotEmpty) _dispatchMarkers(markers);
+      if (playback.isNotEmpty) _dispatchPlayback(playback);
+      final ctx = AfterPhysicsContext(tick: tick, contacts: contacts, context: world.context);
+      _run(ctx.context, 'afterPhysics', (b) {
+        if (b.wantsAfterPhysics) b.afterPhysics(ctx);
+      });
+      if (_routines.isNotEmpty) ctx.context.run(() => _resume(fixed: true));
     });
-    if (_routines.isNotEmpty) ctx.context.run(() => _resume(fixed: true));
   }
 
   void _dispatchContacts(List<Contact> contacts) {
@@ -1474,14 +1483,16 @@ class _BehaviourSystem {
 
   /// Once per host frame: every `update`, then every `lateUpdate`.
   void update(double dt) {
-    settle();
-    if (world.isDisposed) return;
     final ctx = UpdateContext(dt: dt, alpha: world.alpha, tick: world.tick, context: world.context);
-    _startPending(ctx.context);
-    if (world.isDisposed) return;
-    _run(ctx.context, 'update', (b) => b.update(ctx));
-    if (_routines.isNotEmpty) ctx.context.run(() => _resume(fixed: false));
-    _run(ctx.context, 'lateUpdate', (b) => b.lateUpdate(ctx));
+    world._runPhase(GameplayPhase.update, () {
+      settle();
+      if (world.isDisposed) return;
+      _startPending(ctx.context);
+      if (world.isDisposed) return;
+      _run(ctx.context, 'update', (b) => b.update(ctx));
+      if (_routines.isNotEmpty) ctx.context.run(() => _resume(fixed: false));
+    });
+    if (!world.isDisposed) world._runPhase(GameplayPhase.lateUpdate, () => _run(ctx.context, 'lateUpdate', (b) => b.lateUpdate(ctx)));
   }
 
   /// Resumes the coroutines whose wait is over: every kind but
@@ -1667,6 +1678,9 @@ class _BehaviourSystem {
         if (world.isDisposed || world._callbackEntryBlocked) break;
         final b = _scratch[i]!;
         if (!b._active || b._destroyRequested || !b._gameObject!._alive) continue;
+        final participation = (b._type == null ? world._registeredTypeOf(b) : world.registry.lookup(b._type!.id) ?? b._type)?.callbacks;
+        if (participation != null && !participation.contains(callback)) continue;
+        if (callback == 'afterPhysics' && !b.wantsAfterPhysics) continue;
         // A start failure must abort its own scope before it is reported.
         if ((callback == 'fixedUpdate' || callback == 'update') && !_startIfNeeded(b)) continue;
         try {

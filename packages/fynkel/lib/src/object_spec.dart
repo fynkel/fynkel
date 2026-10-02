@@ -24,6 +24,7 @@ final class ObjectSpec {
     this.tags = const [],
     this.layer,
     this.components = const [],
+    this.data = const [],
     this.behaviours = const [],
     this.children = const [],
   }) : prefab = null;
@@ -42,6 +43,7 @@ final class ObjectSpec {
     this.tags = const [],
     this.layer,
     this.components = const [],
+    this.data = const [],
     this.behaviours = const [],
     this.children = const [],
   });
@@ -59,6 +61,7 @@ final class ObjectSpec {
     Iterable<String> tags = const [],
     String? layer,
     List<WireRecord> components = const [],
+    List<ComponentData<dynamic>> data = const [],
     List<Behaviour> behaviours = const [],
     List<ObjectSpec> children = const [],
   }) => ObjectSpec(
@@ -72,6 +75,7 @@ final class ObjectSpec {
       shape.collider,
       ...components,
     ],
+    data: data,
     behaviours: behaviours,
     children: children,
   );
@@ -88,6 +92,7 @@ final class ObjectSpec {
   final Iterable<String> tags;
   final String? layer;
   final List<WireRecord> components;
+  final List<ComponentData<dynamic>> data;
 
   /// Attached as they are: a behaviour instance belongs to one object, so a
   /// spec with behaviours builds once — make it in a function to build it
@@ -208,6 +213,11 @@ extension on World {
     // What the scripts reference: a spec's object in this build (once) or
     // built before, a script in this build or attached already.
     for (final s in specs) {
+      for (final data in s.data) {
+        for (final target in data.type.encode(data.value).whereType<GameObject>()) {
+          if (target._spec != null && twice.contains(target._spec)) throw StateError('ambiguous component reference: spec occurs twice');
+        }
+      }
       for (final b in s.behaviours) {
         final type = b._type ?? _registeredTypeOf(b);
         for (final f in type?.fields ?? const <BehaviourField>[]) {
@@ -245,6 +255,7 @@ extension on World {
     for (final c in spec.components) {
       go.set(c);
     }
+    for (final data in spec.data) { data.apply(go); }
     if (spec.layer != null) go.layer = spec.layer!;
     for (final t in spec.tags) {
       go.addTag(t);

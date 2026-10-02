@@ -405,6 +405,18 @@ impl SchemaSet {
         out
     }
 
+    /// Editor-only registration metadata. No game constructor or native extension
+    /// executes while describing/inspecting authored data.
+    pub fn registered_schemas(&self) -> Result<Vec<fynkel_core::ComponentSchema>, String> {
+        let mut schemas = Vec::new();
+        for (_, source) in &self.sources {
+            if let Some(registration) = source.get("x-fynkel").and_then(|m| m.get("registration")) {
+                schemas.push(crate::runtime::registered_schema(registration)?);
+            }
+        }
+        Ok(schemas)
+    }
+
     /// Known component type (from the loaded component schemas).
     pub fn component(&self, type_id: &str) -> Option<&ComponentInfo> {
         self.components.get(type_id)

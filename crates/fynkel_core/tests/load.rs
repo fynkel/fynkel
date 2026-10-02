@@ -19,6 +19,7 @@ fn entity(
     components: Vec<ComponentValue>,
 ) -> EntityDescription {
     EntityDescription {
+        registered: Vec::new(),
         id: id(n),
         name: format!("e{n}"),
         active: true,
@@ -543,6 +544,7 @@ fn immediate_prefab_validation_is_atomic_and_retry_resolves_fresh_handles() {
     let mut prefab = scene();
     // One valid root with a bad component is enough to exercise late rejection.
     prefab.entities = vec![EntityDescription {
+        registered: Vec::new(),
         id: id(90),
         name: "root".into(),
         active: true,

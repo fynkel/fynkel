@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-02
 
-**Status:** Accepted for the implemented native scalar-value slice. Runtime-defined Dart layouts, host encoding, references, authored migration and bulk views remain open F3 decisions/implementation.
+**Status:** Accepted historical first slice; extended by [ADR-0053](ADR-0053-registered-gameplay-and-extension-contract.md), which resolves the later F3 integration decisions. The remaining text describes the initial checkpoint, not the final F3 feature set.
 
 **Related:** ADR-0044, ADR-0046, ADR-0051; foundation F3.1–F3.5.
 

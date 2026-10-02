@@ -1,0 +1,10 @@
+[package]
+name = "fynkel_example_native_combat"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+[dependencies]
+fynkel_core.workspace = true
+fynkel_contracts.workspace = true

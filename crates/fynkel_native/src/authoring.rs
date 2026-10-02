@@ -208,6 +208,17 @@ impl FynkelAuthoringSession {
             let mut entry = json!({ "handle": *h });
             match self.inner.describe_with_anchors(*h) {
                 Ok((described, anchors)) => {
+                    let registration = described.registered_schemas.iter().try_for_each(|schema| {
+                        slot.world
+                            .core_mut()
+                            .register_dynamic_component(schema.clone())
+                    });
+                    if let Err(error) = registration {
+                        entry["diagnostics"] =
+                            diags(&invalid(format!("component registration: {error}")));
+                        previews.push(entry);
+                        continue;
+                    }
                     slot.preview.reload(
                         slot.world.core_mut(),
                         Some(assets),
@@ -827,6 +838,12 @@ pub unsafe extern "C" fn fynkel_authoring_preview_open_with(
         if let Some(assets) = &assets {
             world.set_assets(assets.clone());
         }
+        for schema in &described.registered_schemas {
+            world
+                .core_mut()
+                .register_dynamic_component(schema.clone())
+                .map_err(|e| invalid(format!("component registration: {e}")))?;
+        }
         let mut preview = Preview::load(
             document,
             world.core_mut(),
@@ -1226,6 +1243,12 @@ fn preview_call(
         "resync" => {
             let (described, anchors) = s.inner.describe_with_anchors(handle).map_err(one)?;
             let slot = s.slot(handle)?;
+            for schema in &described.registered_schemas {
+                slot.world
+                    .core_mut()
+                    .register_dynamic_component(schema.clone())
+                    .map_err(|e| invalid(format!("component registration: {e}")))?;
+            }
             let mut report = slot
                 .preview
                 .sync_world(&mut slot.world, &described.description)
@@ -1239,6 +1262,12 @@ fn preview_call(
         "reload" => {
             let (described, anchors) = s.inner.describe_with_anchors(handle).map_err(one)?;
             let slot = s.slot(handle)?;
+            for schema in &described.registered_schemas {
+                slot.world
+                    .core_mut()
+                    .register_dynamic_component(schema.clone())
+                    .map_err(|e| invalid(format!("component registration: {e}")))?;
+            }
             let (world, assets) = parts(&mut slot.world);
             slot.preview.reload(world, assets, &described.description);
             slot.preview.set_anchors(anchors);

@@ -23,6 +23,7 @@ members = [
     "hosts/headless",
     "hosts/standalone",
     "apps/cli",
+    "examples/native_combat",
 ]
 
 [workspace.package]

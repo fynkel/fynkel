@@ -1,4 +1,4 @@
-// Buffer framing for ABI v4 (crates/fynkel_native/include/fynkel.h):
+// Buffer framing for ABI v5 (crates/fynkel_native/include/fynkel.h):
 // 24-byte header, record area, string tail. Record bodies use the
 // generated codecs (lib/generated/schema.g.dart).
 

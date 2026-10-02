@@ -118,15 +118,24 @@ fn codegen_json_project(
             let dir_text = dir.display().to_string();
             let command = format!("fynkel codegen --project {dir_text}");
             match behaviours::run(dir, check) {
-                Ok(behaviours::Outcome::Written { files, types, data }) => (
+                Ok(behaviours::Outcome::Written {
+                    files,
+                    types,
+                    data,
+                    components,
+                }) => (
                     Some(
-                        json!({ "dir": dir_text, "status": "written", "files": files, "types": types, "dataTypes": data }),
+                        json!({ "dir": dir_text, "status": "written", "files": files, "types": types, "dataTypes": data, "componentTypes": components }),
                     ),
                     ExitCode::SUCCESS,
                 ),
-                Ok(behaviours::Outcome::UpToDate { types, data }) => (
+                Ok(behaviours::Outcome::UpToDate {
+                    types,
+                    data,
+                    components,
+                }) => (
                     Some(
-                        json!({ "dir": dir_text, "status": "upToDate", "types": types, "dataTypes": data }),
+                        json!({ "dir": dir_text, "status": "upToDate", "types": types, "dataTypes": data, "componentTypes": components }),
                     ),
                     ExitCode::SUCCESS,
                 ),
@@ -373,19 +382,28 @@ fn main() -> ExitCode {
                 return native;
             };
             let behaviours = match behaviours::run(&project, check) {
-                Ok(behaviours::Outcome::Written { files, types, data }) => {
+                Ok(behaviours::Outcome::Written {
+                    files,
+                    types,
+                    data,
+                    components,
+                }) => {
                     println!(
                         "fynkel codegen --project {}: wrote {files} files for {}",
                         project.display(),
-                        behaviours::describe_counts(types, data)
+                        behaviours::describe_counts(types, data, components)
                     );
                     ExitCode::SUCCESS
                 }
-                Ok(behaviours::Outcome::UpToDate { types, data }) => {
+                Ok(behaviours::Outcome::UpToDate {
+                    types,
+                    data,
+                    components,
+                }) => {
                     println!(
                         "fynkel codegen --project {}: up to date ({})",
                         project.display(),
-                        behaviours::describe_counts(types, data)
+                        behaviours::describe_counts(types, data, components)
                     );
                     ExitCode::SUCCESS
                 }

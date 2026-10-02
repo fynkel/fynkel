@@ -22,6 +22,7 @@ fn prefab(bad: bool, dynamic: bool) -> SceneDescription {
         name: "Burst".into(),
         entities: vec![
             EntityDescription {
+                registered: Vec::new(),
                 id: uid(2),
                 name: "Root".into(),
                 active: true,
@@ -30,6 +31,7 @@ fn prefab(bad: bool, dynamic: bool) -> SceneDescription {
                 components: vec![],
             },
             EntityDescription {
+                registered: Vec::new(),
                 id: uid(3),
                 name: "Child".into(),
                 active: true,

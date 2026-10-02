@@ -150,7 +150,7 @@ fn at(x: f32) -> Transform {
 
 #[test]
 fn version_and_fingerprint() {
-    assert_eq!(fynkel_abi_version(), 4);
+    assert_eq!(fynkel_abi_version(), 5);
     assert_eq!(
         fynkel_schema_fingerprint(),
         fynkel_core::schema::schema_fingerprint()

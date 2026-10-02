@@ -491,6 +491,27 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  test('registered data uses the live component route and retains its schema version', () {
+    final world = fynkel.World.create();
+    addTearDown(world.dispose);
+    final health = fynkel.ComponentType<double>(id: 'game.Health', version: 3,
+      fields: const [fynkel.ComponentField('hp', fynkel.ComponentFieldKind.number, 100.0)],
+      encode: (v) => [v], decode: (v) => v.single as double);
+    world.registerComponent(health);
+    final player = world.spawn(name: 'Player')..writeData(health, 70.0);
+    final backend = WorldLiveBackend(world);
+    final doc = PlayDocument(backend: backend, interval: const Duration(days: 1));
+    addTearDown(doc.dispose);
+    final id = doc.roots().single;
+    final components = doc.entities([id]).entities[id]!['components'] as Map;
+    final entry = components.entries.singleWhere((e) => (e.value as Map)['type'] == health.id);
+    expect((entry.value as Map)['version'], 3);
+    expect(doc.apply([Command.setField(id, entry.key as String, '/hp', 25)]).ok, isTrue);
+    expect(player.readData(health), 25);
+    expect(doc.apply([Command.removeComponent(id, entry.key as String)]).ok, isTrue);
+    expect(player.readData(health), isNull);
+  });
+
   test('a real running world takes a field, and a gizmo drag moves it and puts it back (L3)', () {
     final world = fynkel.World.create();
     addTearDown(world.dispose);

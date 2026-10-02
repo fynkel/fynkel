@@ -38,6 +38,8 @@ export 'native/bridge.dart' show BridgeStats, FramePlan, StepResult;
 
 part 'behaviour.dart';
 part 'gameplay.dart';
+part 'registered_components.dart';
+part 'gameplay_systems.dart';
 part 'data_asset.dart';
 part 'object.dart';
 part 'object_spec.dart';
@@ -52,6 +54,13 @@ const Pose identityTransform = Pose(position: Vec3.zero, rotation: Quat.identity
 
 /// Runtime entity/component container over one native world.
 class World {
+  List<GameplaySystem> _systems = const [];
+  List<String> _systemOrder = const [];
+  bool _runningSystems = false;
+  final Map<String, GameplaySystemTime> _systemTimes = {};
+  final List<GameplaySystemFailure> _systemFailures = [];
+
+  final Map<String, ComponentType<dynamic>> _componentTypes = {};
   World._(this._lib, this._native, {required this.ownsLibrary, required this.fixedDt, BehaviourRegistry? registry})
     : registry = registry ?? BehaviourRegistry() {
     input = WorldInput(() => _native.inputView)..onUndeclared = _undeclaredAction;
@@ -2115,9 +2124,9 @@ class World {
   /// makes the same class.
   BehaviourType? _registeredTypeOf(Behaviour b) {
     var byClass = _typesByClass;
-    if (byClass == null || _typesByClassCount != registry.types.length) {
-      byClass = _typesByClass = {for (final t in registry.types) t.create().runtimeType: t};
-      _typesByClassCount = registry.types.length;
+    if (byClass == null || _typesByClassCount != registry.revision) {
+      byClass = _typesByClass = {for (final t in registry.types) (t.dartType ?? t.create().runtimeType): t};
+      _typesByClassCount = registry.revision;
     }
     return byClass[b.runtimeType];
   }

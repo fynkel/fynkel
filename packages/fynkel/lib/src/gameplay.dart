@@ -237,8 +237,8 @@ class _GameplayAdapter {
     return NativeGameplayRef.live(entity);
   });
 
-  GameObject object(NativeGameplayRef reference) => guard(() {
-    if (!native.contains(reference)) reject('cannot attach a dead object');
+  GameObject object(NativeGameplayRef reference, {bool validatedPopulation = false}) => guard(() {
+    if (!validatedPopulation && !native.contains(reference)) reject('cannot attach a dead object');
     final known = handles[reference];
     if (known != null) return known;
     final live = reference.live;
