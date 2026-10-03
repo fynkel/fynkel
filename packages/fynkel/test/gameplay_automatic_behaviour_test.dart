@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:test/test.dart';
 
 class _CallbackScript extends Behaviour {

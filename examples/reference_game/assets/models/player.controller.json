@@ -286,16 +286,16 @@
     },
     {
       "name": "UpperBody",
-      "root": "spine"
+      "root": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/3"
     }
   ],
   "ik": [
     {
       "name": "look",
       "type": "lookAt",
-      "head": "head",
+      "head": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/4",
       "spine": [
-        "spine"
+        "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/3"
       ],
       "limit": 60,
       "body": 0.3
@@ -304,9 +304,9 @@
       "name": "feet",
       "type": "footPlacement",
       "weight": "feet",
-      "hips": "hips",
-      "left": "foot_l",
-      "right": "foot_r",
+      "hips": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/2",
+      "left": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/13",
+      "right": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/14",
       "reach": 0.5
     }
   ],

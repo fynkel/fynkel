@@ -37,3 +37,8 @@ the runtime, `apps/cli` and `apps/editor`, `packages/` the Dart SDK,
 `hosts/` the standalone and Flutter hosts, `platform/apple` the viewport,
 `examples/` the showcase and the reference game, `benchmarks/` the
 captures and their results.
+
+For the current foundation API, start with [One gameplay workflow](docs/gameplay.md):
+ordinary gameplay imports, reusable recipes, atomic construction, code/editor
+ownership, and project migration. F7 decisions are recorded in
+[ADR-0058](docs/decisions/ADR-0058-unified-gameplay-workflow.md).

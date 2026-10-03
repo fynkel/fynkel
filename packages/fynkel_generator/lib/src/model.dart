@@ -203,7 +203,7 @@ class ExposedField {
   final String? behaviourId;
 
   /// A [FieldKind.component] field's component: its Dart class
-  /// (`RigidBody`, exported by `package:fynkel/fynkel.dart`) and schema
+  /// (`RigidBody`, exported by `package:fynkel/gameplay.dart`) and schema
   /// name (`fynkel.RigidBody`).
   final String? componentClass;
   final String? componentName;

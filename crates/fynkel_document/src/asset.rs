@@ -721,6 +721,9 @@ impl AssetDatabase {
     /// document its own; a source without a sidecar is reported.
     #[cfg(feature = "validate")]
     fn scan_file(&mut self, path: &Path, schemas: &SchemaSet, diags: &mut Vec<Diagnostic>) {
+        if is_migration_backup(path) {
+            return;
+        }
         let root = self.root.clone();
         let root = root.as_path();
         let shown = path.display().to_string();
@@ -1091,6 +1094,13 @@ fn as_asset_ref(members: &[Member]) -> Option<AssetRef> {
     Some(AssetRef { asset: asset?, sub })
 }
 
+// The official migrator preserves originals beside their documents. They
+// must not become new assets or produce missing-sidecar errors on reload.
+fn is_migration_backup(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e == "bak")
+        && DocumentKind::from_path(&path.with_extension("")).is_some()
+}
+
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let path = entry?.path();
@@ -1103,7 +1113,7 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
         }
         if path.is_dir() {
             collect(&path, out)?;
-        } else if path.is_file() {
+        } else if path.is_file() && !is_migration_backup(&path) {
             out.push(path);
         }
     }

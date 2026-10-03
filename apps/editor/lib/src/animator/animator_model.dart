@@ -10,7 +10,7 @@
 import 'dart:ui' show Offset;
 
 import 'package:flutter/foundation.dart';
-import 'package:fynkel/fynkel.dart' as fynkel;
+import 'package:fynkel/gameplay.dart' as fynkel;
 
 import '../hierarchy/hierarchy_tree.dart';
 import '../inspector/asset_edits.dart';
@@ -73,21 +73,23 @@ final class GameObjectLive implements AnimatorLive {
 /// A node of the followed object (ADR-0033 § 5): what a layer's mask
 /// ticks and an IK goal names.
 final class AnimatorNode {
-  const AnimatorNode(this.name, this.depth, this.names);
+  const AnimatorNode(this.name, this.binding, this.depth, this.bindings);
 
   final String name;
+  final String binding;
 
   /// 0 for the object itself.
   final int depth;
 
-  /// Its name and its parents' up to the object's — what
+  /// Its binding and its parents’ bindings up to the object’s — what
   /// [ControllerEdits.maskedIn] reads.
-  final List<String> names;
+  final List<String> bindings;
 }
 
 /// The names under [nodes]' node [i] (the ones after it that are deeper).
-List<String> namesUnder(List<AnimatorNode> nodes, int i) => [
-  for (var k = i + 1; k < nodes.length && nodes[k].depth > nodes[i].depth; k++) nodes[k].name,
+List<String> bindingsUnder(List<AnimatorNode> nodes, int i) => [
+  for (var k = i + 1; k < nodes.length && nodes[k].depth > nodes[i].depth; k++)
+    if (nodes[k].binding.isNotEmpty) nodes[k].binding,
 ];
 
 final class AnimatorModel extends ChangeNotifier {
@@ -130,10 +132,10 @@ final class AnimatorModel extends ChangeNotifier {
     void walk(String id, int depth, List<String> above) {
       final n = tree[id];
       if (n == null || out.length >= 4000 || depth > 48) return;
-      final names = [n.name, ...above];
-      out.add(AnimatorNode(n.name, depth, names));
+      final bindings = [if (n.animationBinding.isNotEmpty) n.animationBinding, ...above];
+      out.add(AnimatorNode(n.name, n.animationBinding, depth, bindings));
       for (final c in tree.childrenOf(id)) {
-        walk(c, depth + 1, names);
+        walk(c, depth + 1, bindings);
       }
     }
 
@@ -181,6 +183,7 @@ final class AnimatorModel extends ChangeNotifier {
     _linkFrom = null;
     notifyListeners();
   }
+
   String? get selectedState => _state;
   int? get selectedTransition => _transition;
 

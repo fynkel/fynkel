@@ -1,5 +1,5 @@
 // F0 experiment only. No exports from the shipping gameplay API.
-import 'package:fynkel/fynkel.dart' as engine;
+import 'package:fynkel/advanced.dart' as engine;
 
 enum FieldKind { number, boolean }
 

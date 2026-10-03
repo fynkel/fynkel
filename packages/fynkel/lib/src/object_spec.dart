@@ -7,6 +7,45 @@
 
 part of 'world.dart';
 
+/// A reusable factory for fresh object descriptions and behaviour instances.
+///
+/// Call [create] for each use, then pass its result to `world.build` or the
+/// authoring writer. Internal references must be assembled inside the factory:
+/// each invocation gets its own placeholders. Captured live objects deliberately
+/// remain external references. Reusing a spec node or script is rejected before
+/// a description can be built or written.
+final class ObjectRecipe {
+  ObjectRecipe(this._factory);
+
+  final ObjectSpec Function() _factory;
+  static final Expando<bool> _issued = Expando<bool>('ObjectRecipe issued objects');
+
+  ObjectSpec create() {
+    final root = _factory();
+    final nodes = Set<Object>.identity();
+    void visit(ObjectSpec spec) {
+      final previous = ObjectSpec._objects[spec];
+      if (!nodes.add(spec) || _issued[spec] == true || (previous != null && previous._spec == null)) {
+        throw StateError('ObjectRecipe must create fresh, non-cyclic ObjectSpec nodes on every call.');
+      }
+      for (final behaviour in spec.behaviours) {
+        if (!nodes.add(behaviour) || _issued[behaviour] == true || behaviour._system != null) {
+          throw StateError('ObjectRecipe must create a fresh Behaviour for each object and call.');
+        }
+      }
+      for (final child in spec.children) {
+        visit(child);
+      }
+    }
+
+    visit(root);
+    for (final node in nodes) {
+      _issued[node] = true;
+    }
+    return root;
+  }
+}
+
 /// One object and everything under it, to [World.build].
 final class ObjectSpec {
   /// A new object named [name] (Unity's `new GameObject(name)`):
@@ -184,11 +223,11 @@ enum Primitive {
 extension on World {
   /// Checks the whole tree before anything spawns, so a mistake leaves no
   /// half-built object behind.
-  void _checkSpec(ObjectSpec spec) {
+  void _checkSpecs(Iterable<ObjectSpec> roots) {
     final seen = Set<Behaviour>.identity();
     final specs = Set<ObjectSpec>.identity();
     final twice = Set<ObjectSpec>.identity();
-    for (final s in spec._all) {
+    for (final s in roots.expand((root) => root._all)) {
       if (!specs.add(s)) twice.add(s);
       for (final b in s.behaviours) {
         if (b._system != null) {
@@ -215,7 +254,9 @@ extension on World {
     for (final s in specs) {
       for (final data in s.data) {
         for (final target in data.type.encode(data.value).whereType<GameObject>()) {
-          if (target._spec != null && twice.contains(target._spec)) throw StateError('ambiguous component reference: spec occurs twice');
+          if (target._spec != null && twice.contains(target._spec)) {
+            throw StateError('ambiguous component reference: spec occurs twice');
+          }
         }
       }
       for (final b in s.behaviours) {
@@ -226,9 +267,7 @@ extension on World {
             case final GameObject g when g._spec != null:
               final target = g._spec;
               if (twice.contains(target)) {
-                throw StateError(
-                  '$s: ${type!.id}.${f.name} references $target, which is twice in this build',
-                );
+                throw StateError('$s: ${type!.id}.${f.name} references $target, which is twice in this build');
               }
               if (!specs.contains(target) && !(_gameplay?._specObjects.containsKey(target) ?? false)) {
                 throw StateError(
@@ -237,12 +276,8 @@ extension on World {
                 );
               }
             case final Behaviour r
-                when r._system == null &&
-                    !seen.contains(r) &&
-                    !(_gameplay?._attachments.containsKey(r) ?? false):
-              throw StateError(
-                '$s: ${type!.id}.${f.name} holds $r, which is not in this build and not attached',
-              );
+                when r._system == null && !seen.contains(r) && !(_gameplay?._attachments.containsKey(r) ?? false):
+              throw StateError('$s: ${type!.id}.${f.name} holds $r, which is not in this build and not attached');
           }
         }
       }
@@ -255,7 +290,9 @@ extension on World {
     for (final c in spec.components) {
       go.set(c);
     }
-    for (final data in spec.data) { data.apply(go); }
+    for (final data in spec.data) {
+      data.apply(go);
+    }
     if (spec.layer != null) go.layer = spec.layer!;
     for (final t in spec.tags) {
       go.addTag(t);

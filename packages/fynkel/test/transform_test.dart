@@ -3,7 +3,7 @@
 // / rotateAround / lookAt, the axes and Euler degrees — over the real
 // native library.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:test/test.dart';
 
 Matcher near(Vec3 v) => predicate<Vec3>((a) => (a - v).length < 1e-4, 'within 1e-4 of $v');

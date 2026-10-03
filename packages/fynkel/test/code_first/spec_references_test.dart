@@ -6,7 +6,7 @@
 import 'dart:io';
 
 import 'package:fynkel/authoring.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:test/test.dart';
 
 class Gate extends Behaviour {}

@@ -14,3 +14,11 @@ The example orders Damage before the fixed behaviour phase. Door's callback is i
 Generated defaults are literal data shared by runtime and editor schemas. Supported component fields: finite `double`, `int`, `bool`, `String`, `AssetRef`, and nullable `GameObject`. Collections, nested records, typed asset wrappers and marker layouts are rejected. Schemas are immutable within a world. A version/layout change requires explicitly migrated authored data and a recreated world; a same-schema generated codec can be registered again.
 
 Systems declare phases, dependencies and access. They run sequentially, with lexical ordering for otherwise equal nodes and one transaction per callback. Access/structural declarations are descriptive audit metadata, not permission enforcement or a promise of safe parallelism. Failures are available through `world.drainSystemFailures()`. Native tick phases sit between host fixedUpdate and afterPhysics; dependency edges cannot jump between the two schedules.
+
+The F8 save/load reference is `lib/save_game.dart`. `saveCombat` writes a
+versioned JSON string for selected Health objects keyed by game-owned IDs;
+`restoreCombat` validates the complete input, creates fresh objects and restores
+references in one edit. Register the combat schemas first. The application owns
+disk I/O and replacing the old session. This intentionally saves selected game
+data, not the engine's complete execution state. See ADR-0059 and
+`test/save_game_test.dart` for the persistence contract and failure cases.

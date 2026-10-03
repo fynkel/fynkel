@@ -1,5 +1,5 @@
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart' show BehaviourRegistry;
+import 'package:fynkel/gameplay.dart' show BehaviourRegistry;
 import 'package:fynkel_flutter/fynkel_flutter.dart' show FynkelLaunch;
 
 /// A game compiled into this editor build (ADR-0021): its package, its

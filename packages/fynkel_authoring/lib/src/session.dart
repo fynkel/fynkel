@@ -13,7 +13,7 @@ import 'dart:ffi';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
-import 'package:fynkel/fynkel.dart' show EntityRef;
+import 'package:fynkel/gameplay.dart' show EntityRef;
 
 import 'diagnostic.dart';
 import 'models.dart';

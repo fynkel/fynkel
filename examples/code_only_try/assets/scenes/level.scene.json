@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 5,
+  "formatVersion": 7,
   "id": "9f5c3884-502a-5d03-9eae-81593ede92a9",
   "name": "Level",
   "entities": {
@@ -138,7 +138,9 @@
           "type": "fynkel.ThirdPersonCamera",
           "version": 1,
           "data": {
-            "target": "Player",
+            "target": {
+              "entity": "87192e82-9b90-575c-8439-3aec3ae1e2c1"
+            },
             "pivot": [
               0.0,
               1.5,
@@ -1220,7 +1222,9 @@
           "version": 1,
           "data": {
             "prompt": "E — open the gate",
-            "target": "Gate"
+            "target": {
+              "entity": "120268c5-6161-5815-9726-2ad13661a988"
+            }
           }
         }
       }

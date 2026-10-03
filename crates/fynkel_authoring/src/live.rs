@@ -39,10 +39,11 @@ use crate::preview::{self, Line, Ray, View};
 /// The prefix of the id of an entity no loaded scene spawned.
 pub const RUNTIME_PREFIX: &str = "runtime:";
 
-pub const KINDS: [&str; 16] = [
+pub const KINDS: [&str; 17] = [
     "entities",
     "entity",
     "set",
+    "setComponents",
     "remove",
     "rename",
     "setActive",
@@ -173,41 +174,13 @@ pub fn call_with(
             let e = entity_arg(world, args)?;
             Ok(entity(world, e))
         }
-        "set" => {
-            let e = entity_arg(world, args)?;
-            let type_id = str_arg(args, "type")?;
-            let data = args
-                .get("data")
-                .ok_or_else(|| vec![invalid("set: `data` is required")])?;
-            if let Some(value) = registered_from_live(
-                world,
-                type_id,
-                data,
-                args.get("version").and_then(Value::as_u64),
-            )? {
-                world
-                    .edit_gameplay(|edit| edit.set_registered_authored(e.into(), &value, |_| None))
-                    .map_err(|e| vec![invalid(e.to_string())])?;
-                return Ok(json!({"ok":true}));
-            }
-            let value = match decode_component(type_id, &Node::from_serde(data)) {
-                None => {
-                    return Err(vec![invalid(format!(
-                        "set: {type_id} is not a native component"
-                    ))])
-                }
-                Some(Err(e)) => {
-                    return Err(vec![invalid(format!(
-                        "set: {type_id}{}: {}",
-                        e.pointer, e.message
-                    ))])
-                }
-                Some(Ok(v)) => v,
-            };
-            Ok(write(
-                world,
-                vec![Command::SetComponent { entity: e, value }],
-            ))
+        "set" => set_components(world, std::slice::from_ref(args)),
+        "setComponents" => {
+            let values = args
+                .get("components")
+                .and_then(Value::as_array)
+                .ok_or_else(|| vec![invalid("setComponents: components must be an array")])?;
+            set_components(world, values)
         }
         "remove" => {
             let e = entity_arg(world, args)?;
@@ -605,6 +578,37 @@ fn pick(world: &World, assets: Option<&Assets>, ray: &Ray) -> Value {
         "ray": { "origin": ray.origin.to_array(), "dir": ray.dir.to_array() },
         "hits": hits,
     })
+}
+
+fn set_components(world: &mut World, replacements: &[Value]) -> Result<Value, Vec<Diagnostic>> {
+    let mut values = Vec::new();
+    let mut registered = Vec::new();
+    for args in replacements {
+        let entity = entity_arg(world, args)?;
+        let type_id = str_arg(args, "type")?;
+        let data = args
+            .get("data")
+            .ok_or_else(|| vec![invalid("set: data is required")])?;
+        if let Some(value) = registered_from_live(
+            world,
+            type_id,
+            data,
+            args.get("version").and_then(Value::as_u64),
+        )? {
+            registered.push((entity, value));
+        } else {
+            let value = decode_component(type_id, &Node::from_serde(data))
+                .ok_or_else(|| vec![invalid(format!("set: {type_id} is not a native component"))])?
+                .map_err(|e| {
+                    vec![invalid(format!(
+                        "set: {type_id}{}: {}",
+                        e.pointer, e.message
+                    ))]
+                })?;
+            values.push((entity, value));
+        }
+    }
+    Ok(rejections(&world.set_live_components(values, registered)))
 }
 
 fn registered_from_live(

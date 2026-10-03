@@ -1,6 +1,6 @@
 # ADR-0046: Replace the gameplay state boundary with shared transactions
 
-**Status:** Accepted. F2 migration and its unified gameplay-state contract are qualified; broader F3–F8 production foundation work remains open. See the [F2 gate](../foundation-f2-gate-report.md) and [ADR-0051](ADR-0051-f2-boundaries-and-presentation-policy.md).
+**Status:** Accepted and implemented. F2–F7 migration is qualified; F8 performs production qualification with explicit platform and performance limits. See the F2 gate and ADR-0051.
 **Date:** 2026-09-30  
 **Authority:** User instruction to extend mixed-state prototypes, compare strategies and finalize decisions from the evidence.  
 **Related:** ADR-0042 through ADR-0045, ADR-0003/0004/0008/0012/0036; F0.3/F0.4, F1–F4, F7.  

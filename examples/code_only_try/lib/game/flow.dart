@@ -2,7 +2,7 @@
 // are made (lib/game/game.dart): tool/scenes.dart compiles the behaviours
 // without the scene constants it is about to write.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 import 'game_state.dart';
 
@@ -15,7 +15,7 @@ const playerTag = 'player';
 const pickupTag = 'pickup';
 
 /// Whether [entity] (a zone event's `other`) is the player.
-bool isPlayer(World world, int entity) => world.findWithTag(playerTag)?.entity == entity;
+bool isPlayer(World world, EntityRef entity) => world.findWithTag(playerTag)?.entity == entity;
 
 /// Moves the game between its places; installed in the world's context so
 /// behaviours can end or restart the run (`context.service<Flow>()`).

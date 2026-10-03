@@ -3,7 +3,7 @@
 //
 // ignore_for_file: type=lint, unused_element
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:registered_gameplay/combat.dart' as _lib0;
 
 /// `game.Door` v1 → [_lib0.Door].

@@ -8,7 +8,7 @@
 import 'dart:io';
 
 import 'package:fynkel/authoring.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:pickups/generated/behaviours.g.dart';
 import 'package:pickups/pickups.dart';
 

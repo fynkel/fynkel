@@ -6,7 +6,7 @@
 
 ## Context
 
-**Review from 2026-09-30:** [ADR-0046](ADR-0046-transactional-world-state-replacement.md) and [ADR-0047](ADR-0047-identity-clocks-frame-order-and-readiness.md) accept replacement visibility, explicit presentation, clock and frame contracts. They supersede those design portions for the replacement implementation. The [F1.2 clock migration](../design/foundation-clock-migration.md) now implements the replacement timing contract in the live runtime. The remaining frame/visibility portions describe prior behavior until F2 migration; main-isolate execution and once-per-tick input-edge consumption remain selected.
+**Implementation update (2026-10-03):** ADR-0046/0047/0051 replace the visibility, clock and frame contracts below. F1/F2 migration is complete: update/lateUpdate writes persist through the shared gameplay transaction, with no separate presentation-transform authority. Main-isolate execution and once-per-tick input edges remain selected. The old command-class discussion is historical.
 
 Given ADR-0007, the remaining questions are which isolate runs gameplay, how time is stepped, how events reach Dart, and what a read after a write returns.
 

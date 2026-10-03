@@ -5,7 +5,7 @@ import 'package:fynkel/src/native/bridge.dart' show NativeGameplayRef;
 
 import 'dart:io';
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
@@ -193,7 +193,12 @@ void main() {
     expect(r.rejectedComponents, 0);
     expect(r.assetCount, 8, reason: "the Robot's tone (M3-11) too");
     expect(r.residency.retained, 8);
-    expect(r.residency.meshes, 0, reason: 'payloads load on first draw');
+    expect(r.residency.meshes, greaterThan(0), reason: 'required CPU payloads are ready before activation');
+    expect(r.readiness.cpu, 'ready');
+    expect(r.readiness.simulation, 'ready');
+    expect(r.readiness.gpu, 'deferred');
+    expect(r.readiness.required, ['cpu', 'simulation']);
+    expect(r.residency.bytes, lessThanOrEqualTo(r.residency.cacheBudgetBytes));
     expect(w.allEntities(), hasLength(6));
     w.frame(1 / 60);
 

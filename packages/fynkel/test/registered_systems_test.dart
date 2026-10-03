@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:test/test.dart';
 
 class Recorder extends Behaviour {
@@ -17,16 +17,20 @@ class PhaseRecorder extends Behaviour {
   @override
   bool get wantsAfterPhysics => true;
   @override
-  void fixedUpdate(FixedUpdateContext c) =>
-      ticks[GameplayPhase.fixedUpdate]!.add(c.tick);
+  void fixedUpdate(FixedUpdateContext c) => ticks[GameplayPhase.fixedUpdate]!.add(c.tick);
   @override
-  void afterPhysics(AfterPhysicsContext c) =>
-      ticks[GameplayPhase.afterPhysics]!.add(c.tick);
+  void afterPhysics(AfterPhysicsContext c) => ticks[GameplayPhase.afterPhysics]!.add(c.tick);
   @override
   void update(UpdateContext c) => ticks[GameplayPhase.update]!.add(c.tick);
   @override
-  void lateUpdate(UpdateContext c) =>
-      ticks[GameplayPhase.lateUpdate]!.add(c.tick);
+  void lateUpdate(UpdateContext c) => ticks[GameplayPhase.lateUpdate]!.add(c.tick);
+}
+
+class StartOnly extends Behaviour {
+  StartOnly(this.log);
+  final List<String> log;
+  @override
+  void start() => log.add('start');
 }
 
 void main() {
@@ -36,13 +40,7 @@ void main() {
   test('same-count metadata replacement refreshes dead reference fields on existing behaviours', () {
     final target = w.spawn();
     final b = Recorder([])..target = target;
-    w.registry.register(
-      BehaviourType(
-        id: 'game.Recorder',
-        dartType: Recorder,
-        create: () => Recorder([]),
-      ),
-    );
+    w.registry.register(BehaviourType(id: 'game.Recorder', dartType: Recorder, create: () => Recorder([])));
     w.spawn().addBehaviour(b);
     w.frame(0);
     w.registry.register(
@@ -119,101 +117,84 @@ void main() {
     expect(before, scripts);
     expect(after, scripts);
   });
-  test(
-    'registered systems order around behaviour phase and rollback a failure',
-    () {
-      final log = <String>[];
-      final p = w.spawn(name: 'player');
-      p.addBehaviour(Recorder(log));
-      w.registerSystems([
-        GameplaySystem(
-          id: 'game.After',
-          phase: GameplayPhase.fixedUpdate,
-          after: ['fynkel.behaviours.fixedUpdate'],
-          run: (_) {
-            expect(p.name, 'player');
-            log.add('after');
-          },
-        ),
-        GameplaySystem(
-          id: 'game.Before',
-          phase: GameplayPhase.fixedUpdate,
-          before: ['fynkel.behaviours.fixedUpdate'],
-          run: (_) {
-            log.add('before');
-            p.name = 'discard';
-            throw StateError('reject');
-          },
-        ),
-      ]);
-      w.frame(w.fixedDt);
-      expect(log, ['before', 'behaviour', 'after']);
-      expect(p.name, 'player');
-      expect(w.drainSystemFailures().single.id, 'game.Before');
-      expect(w.gameplaySystemTimes.length, 2);
-    },
-  );
-  test(
-    'missing dependency cycle and cross-phase reversal preserve schedule',
-    () {
-      var calls = 0;
-      w.registerSystems([
-        GameplaySystem(
-          id: 'game.Valid',
-          phase: GameplayPhase.update,
-          run: (_) => calls++,
-        ),
-      ]);
-      expect(
-        () => w.registerSystems([
-          GameplaySystem(
-            id: 'game.Missing',
-            phase: GameplayPhase.update,
-            after: ['game.No'],
-            run: (_) {},
-          ),
-        ]),
-        throwsStateError,
-      );
-      expect(
-        () => w.registerSystems([
-          GameplaySystem(
-            id: 'game.X',
-            phase: GameplayPhase.update,
-            after: ['game.Y'],
-            run: (_) {},
-          ),
-          GameplaySystem(
-            id: 'game.Y',
-            phase: GameplayPhase.update,
-            after: ['game.X'],
-            run: (_) {},
-          ),
-        ]),
-        throwsStateError,
-      );
-      expect(
-        () => w.registerSystems([
-          GameplaySystem(
-            id: 'game.Reversed',
-            phase: GameplayPhase.fixedUpdate,
-            after: ['game.Valid'],
-            run: (_) {},
-          ),
-        ]),
-        throwsStateError,
-      );
-      w.frame(0);
-      expect(calls, 1);
-    },
-  );
-  test('generated participation avoids a known-unused callback but manual registration stays conservative', () {
+  test('registered systems order around behaviour phase and rollback a failure', () {
+    final log = <String>[];
+    final p = w.spawn(name: 'player');
+    p.addBehaviour(Recorder(log));
+    w.registerSystems([
+      GameplaySystem(
+        id: 'game.After',
+        phase: GameplayPhase.fixedUpdate,
+        after: ['fynkel.behaviours.fixedUpdate'],
+        run: (_) {
+          expect(p.name, 'player');
+          log.add('after');
+        },
+      ),
+      GameplaySystem(
+        id: 'game.Before',
+        phase: GameplayPhase.fixedUpdate,
+        before: ['fynkel.behaviours.fixedUpdate'],
+        run: (_) {
+          log.add('before');
+          p.name = 'discard';
+          throw StateError('reject');
+        },
+      ),
+    ]);
+    w.frame(w.fixedDt);
+    expect(log, ['before', 'behaviour', 'after']);
+    expect(p.name, 'player');
+    expect(w.drainSystemFailures().single.id, 'game.Before');
+    expect(w.gameplaySystemTimes.length, 2);
+  });
+  test('missing dependency cycle and cross-phase reversal preserve schedule', () {
+    var calls = 0;
+    w.registerSystems([GameplaySystem(id: 'game.Valid', phase: GameplayPhase.update, run: (_) => calls++)]);
+    expect(
+      () => w.registerSystems([
+        GameplaySystem(id: 'game.Missing', phase: GameplayPhase.update, after: ['game.No'], run: (_) {}),
+      ]),
+      throwsStateError,
+    );
+    expect(
+      () => w.registerSystems([
+        GameplaySystem(id: 'game.X', phase: GameplayPhase.update, after: ['game.Y'], run: (_) {}),
+        GameplaySystem(id: 'game.Y', phase: GameplayPhase.update, after: ['game.X'], run: (_) {}),
+      ]),
+      throwsStateError,
+    );
+    expect(
+      () => w.registerSystems([
+        GameplaySystem(id: 'game.Reversed', phase: GameplayPhase.fixedUpdate, after: ['game.Valid'], run: (_) {}),
+      ]),
+      throwsStateError,
+    );
+    w.frame(0);
+    expect(calls, 1);
+  });
+  test('empty periodic participation still starts an active event-only behaviour exactly once', () {
     final log = <String>[];
     final type = BehaviourType(
-      id: 'game.Recorder',
-      create: () => Recorder(log),
+      id: 'game.StartOnly',
+      dartType: StartOnly,
+      create: () => StartOnly(log),
       callbacks: const {},
     );
+    w.registry.register(type);
+    final object = w.spawn();
+    object.addBehaviourFromData(type.id);
+    w.frame(w.fixedDt);
+    expect(log, ['start']);
+    object.setActive(false);
+    w.frame(w.fixedDt);
+    object.setActive(true);
+    w.frame(w.fixedDt);
+    expect(log, ['start']);
+  });
+  test('generated participation avoids a known-unused callback but manual registration stays conservative', () {
+    final log = <String>[];
+    final type = BehaviourType(id: 'game.Recorder', create: () => Recorder(log), callbacks: const {});
     w.registry.register(type);
     w.spawn().addBehaviourFromData(type.id);
     w.frame(w.fixedDt);

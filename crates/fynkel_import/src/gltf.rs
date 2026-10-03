@@ -45,8 +45,7 @@ use fynkel_cooked::payload::{
 
 use crate::graph::{
     check_channel, file_stem, image_ref, material_header, num, nums, prefab_document, shown_file,
-    sniff_mime, split_dual_use_images, AnimatedNames, MeshSubs, Produced, Report, SourceGraph,
-    SourceNode,
+    sniff_mime, split_dual_use_images, MeshSubs, Produced, Report, SourceGraph, SourceNode,
 };
 use crate::intermediate::{
     AnimationData, ColorSpace, ImageData, MaterialData, MeshData, SkinData, Vertex,
@@ -60,7 +59,7 @@ pub const IMPORTER: &str = fynkel_document::asset::GLTF_IMPORTER;
 /// materials in the model's hierarchy (`graph::remap_materials`). 8: the
 /// hierarchy has one root (ADR-0022; a new root named after the file over
 /// several top-level nodes).
-pub const IMPORTER_VERSION: u32 = 8;
+pub const IMPORTER_VERSION: u32 = 9;
 
 /// Extensions the importer understands when a file *requires* them.
 const SUPPORTED_REQUIRED: &[&str] = &["KHR_materials_emissive_strength"];
@@ -84,6 +83,7 @@ impl Settings {
 }
 
 struct Ctx<'a> {
+    asset_id: uuid::Uuid,
     path: &'a Path,
     report: Report,
     limits: &'a Limits,
@@ -199,6 +199,7 @@ fn percent_decode(s: &str) -> String {
 
 pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
     let mut ctx = Ctx {
+        asset_id: meta.id(),
         path,
         report: Report::new(path),
         limits,
@@ -812,15 +813,6 @@ fn import_skins(
         let mut joints = Vec::with_capacity(joint_nodes.len());
         for (j, node) in joint_nodes.iter().enumerate() {
             let joint_name = node_name(node);
-            if let Some(dup) = joints.iter().position(|x: &SkinJoint| x.name == joint_name) {
-                ctx.error(
-                    Code::IMPORT_INVALID_DATA,
-                    format!(
-                        "{sub_id} ({name}): joints {dup} and {j} are both named {joint_name:?}; joint names must be unique within a skin (animation targets resolve by name)"
-                    ),
-                );
-                return Err(());
-            }
             let parent = parent_of[node.index()]
                 .and_then(|p| joint_nodes.iter().position(|n| n.index() == p))
                 .map(|p| p as u32);
@@ -831,6 +823,7 @@ fn import_skins(
             }
             joints.push(SkinJoint {
                 name: joint_name,
+                binding: crate::graph::binding_key(ctx.asset_id, node.index()),
                 parent,
                 inverse_bind: ibm,
                 rest_translation: t,
@@ -842,7 +835,10 @@ fn import_skins(
             sub_id,
             name,
             payload: SkinPayload {
-                skeleton: skin.skeleton().map(|n| node_name(&n)).unwrap_or_default(),
+                skeleton: skin
+                    .skeleton()
+                    .map(|n| crate::graph::binding_key(ctx.asset_id, n.index()))
+                    .unwrap_or_default(),
                 joints,
             },
         });
@@ -916,7 +912,6 @@ fn import_animations(
 ) -> Result<Vec<AnimationData>, ()> {
     // Animated node names must be unique for the channels to land where
     // the author meant; say so once per name.
-    let mut animated = AnimatedNames::default();
     let mut animations = Vec::new();
     for animation in doc.animations() {
         let sub_id = format!("anim/{}", animation.index());
@@ -975,7 +970,8 @@ fn import_animations(
                 }
             };
             let channel = AnimationChannel {
-                target: node_name(&node),
+                target: crate::graph::binding_key(ctx.asset_id, node.index()),
+                target_name: node_name(&node),
                 property,
                 interpolation,
                 times,
@@ -983,7 +979,6 @@ fn import_animations(
             };
             check_channel(&mut ctx.report, &sub_id, &name, c, &channel)?;
             duration = duration.max(*channel.times.last().unwrap());
-            animated.note(&mut ctx.report, node.index(), &channel.target);
             channels.push(channel);
         }
         let markers = read_markers(ctx, &sub_id, &name, animation.extras(), duration)?;

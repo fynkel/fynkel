@@ -610,6 +610,39 @@ fn registered_live_inspector_reads_writes_versions_and_atomic_creation() {
     )
     .is_err());
     assert_eq!(w.live_entities(), count);
+    // Both decoding failures and final gameplay validation roll back the batch.
+    for bad in [
+        json!({"id":owner,"type":"game.Health","data":{"hp":"bad"}}),
+        json!({"id":owner,"type":"fynkel.PointLight","data":{"color":[1,1,1],"intensity":1,"range":-1,"culling_mask":4294967295u32}}),
+    ] {
+        let result = live::call(
+            &mut w,
+            "setComponents",
+            &json!({"components":[
+                {"id":owner,"type":"game.Health","data":{"hp":7}}, bad
+            ]}),
+        );
+        assert!(result.is_err() || result.unwrap()["ok"] == false);
+        assert_eq!(
+            w.registered_values(e, "game.Health").unwrap().unwrap()[0],
+            ScalarValue::Float(20.)
+        );
+        assert!(!w.ecs().has::<PointLight>(e));
+    }
+    live::call(
+        &mut w,
+        "setComponents",
+        &json!({"components":[
+            {"id":owner,"type":"game.Health","data":{"hp":9}},
+            {"id":owner,"type":"fynkel.PointLight","data":{"color":[1,1,1],"intensity":1,"range":4,"culling_mask":4294967295u32}}
+        ]}),
+    )
+    .unwrap();
+    assert_eq!(
+        w.registered_values(e, "game.Health").unwrap().unwrap()[0],
+        ScalarValue::Float(9.)
+    );
+    assert_eq!(w.ecs().get::<PointLight>(e).unwrap().range, 4.);
     live::call(&mut w, "remove", &json!({"id":owner,"type":"game.Health"})).unwrap();
     assert!(w.registered_values(e, "game.Health").unwrap().is_none());
 }

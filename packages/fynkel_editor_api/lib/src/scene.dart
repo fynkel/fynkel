@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart' show AssetRef;
+import 'package:fynkel/gameplay.dart' show AssetRef;
 
 /// A scene or prefab open in the editor, as it was when read.
 abstract interface class EditorScene {

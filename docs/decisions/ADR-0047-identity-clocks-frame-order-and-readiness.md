@@ -1,6 +1,6 @@
 # ADR-0047: Identity, clocks, frame order and readiness
 
-**Status:** Accepted contracts for implementation; live clocks and identity/host authority verified.  
+**Status:** Accepted and implemented across F1/F2/F5/F6. The corresponding gate reports supersede prospective integration notes below.
 **Date:** 2026-09-30  
 **Authority:** User authorization to resolve the remaining foundation contracts with executable checks.  
 **Related:** ADR-0043, ADR-0045, ADR-0046; roadmap F0.4, F1.1/F1.2, F2.3, F5/F6.  

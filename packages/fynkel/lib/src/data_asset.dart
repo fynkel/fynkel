@@ -143,7 +143,7 @@ Map<String, Object?>? dataJson(DataAsset? instance) {
 
 /// Binds [instance] to the asset `ProjectWriter.writeData` wrote it to,
 /// so a document written afterwards names that asset. For
-/// `package:fynkel/authoring.dart` only; `package:fynkel/fynkel.dart`
+/// `package:fynkel/authoring.dart` only; `package:fynkel/gameplay.dart`
 /// hides it.
 void bindWrittenData(DataAsset instance, AssetRef ref, DataType type) => instance
   .._asset = ref

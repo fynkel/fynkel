@@ -34,6 +34,8 @@ pub(crate) struct GpuTimer {
     pub(crate) slots: Vec<TimestampSlot>,
     pub(crate) next: usize,
     pub(crate) untimed: u32,
+    trace_screen_space: bool,
+    traced_frames: u64,
 }
 
 impl GpuTimer {
@@ -74,6 +76,8 @@ impl GpuTimer {
             slots,
             next: 0,
             untimed: 0,
+            trace_screen_space: std::env::var_os("FYNKEL_TRACE_SCREEN_SPACE").is_some(),
+            traced_frames: 0,
         }
     }
 
@@ -178,6 +182,18 @@ impl GpuTimer {
                     } else {
                         0
                     };
+                    if slot.ao && self.trace_screen_space {
+                        self.traced_frames += 1;
+                        if self.traced_frames.is_multiple_of(8) {
+                            eprintln!(
+                                "screen_space_us depth={} estimate={} blur={} total={}",
+                                span(8, 10),
+                                span(11, 12),
+                                span(13, 9),
+                                ao
+                            );
+                        }
+                    }
                     let scene = span(2, 3);
                     let post = span(4, 5) + if slot.present { span(6, 7) } else { 0 };
                     // A tile-based GPU starts a pass's vertex stage before

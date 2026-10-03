@@ -24,11 +24,16 @@ fn world() -> World {
 fn spawn(w: &mut World, _fixture_id: u64, at: Vec3, parent: Option<Entity>, name: &str) -> Entity {
     let commit = w
         .edit_gameplay(|edit| {
-            edit.spawn(
+            let entity = edit.spawn(
                 name.to_owned(),
                 Transform::from_position(at),
                 parent.map(Into::into),
-            )
+            )?;
+            edit.set_component(
+                entity,
+                ComponentValue::AnimationBinding(AnimationBinding { key: name.into() }),
+            )?;
+            Ok(entity)
         })
         .unwrap();
     let entity = commit.resolve(commit.value).unwrap();
@@ -439,22 +444,23 @@ fn a_missing_clip_is_reported_once_and_plays_once_registered() {
         w.step();
     }
     assert!(w.diagnostics().is_empty());
-    // Renaming the target drops it from the pose; a new entity with the
-    // name is picked up.
+    // Renaming changes display data only. A duplicate binding is explicitly
+    // ambiguous, and removing it restores the original target.
     set(&mut w, root, animator(clip_ref(7), true));
-    w.edit_gameplay(|edit| {
-        edit.set_name(arm, "leg")?;
-        Ok(())
-    })
-    .unwrap();
+    w.edit_gameplay(|edit| edit.set_name(arm, "leg")).unwrap();
+    let before = local(&w, arm).position.y;
     w.step();
-    let frozen = local(&w, arm).position.y;
+    assert!(local(&w, arm).position.y > before);
     let arm2 = spawn(&mut w, 3, Vec3::new(2.0, 0.0, 0.0), Some(root), "arm");
+    let frozen = local(&w, arm).position.y;
     for _ in 0..5 {
         w.step();
     }
     assert_eq!(local(&w, arm).position.y, frozen);
-    assert!(local(&w, arm2).position.y > 0.0);
+    assert_eq!(local(&w, arm2).position.y, 0.0);
+    w.edit_gameplay(|edit| edit.destroy(arm2)).unwrap();
+    w.step();
+    assert!(local(&w, arm).position.y > frozen);
 }
 
 #[test]
@@ -465,12 +471,14 @@ fn a_skin_resolves_its_joints_and_the_extract_carries_the_palette() {
         skeleton: "hips".into(),
         joints: vec![
             Joint {
+                binding: "hips".into(),
                 name: "hips".into(),
                 parent: None,
                 inverse_bind: Mat4::IDENTITY,
                 rest: Transform::IDENTITY,
             },
             Joint {
+                binding: "head".into(),
                 name: "head".into(),
                 parent: Some(0),
                 inverse_bind: Mat4::from_translation(Vec3::new(0.0, -1.0, 0.0)),
@@ -1489,5 +1497,80 @@ fn invalid_derived_pose_rolls_back_every_target_and_animator_completion() {
                 if *entity == root && *clip == clip_ref(90)
         )),
         "playback events report runtime completion, not acceptance of the authored pose"
+    );
+}
+
+#[test]
+fn binding_keys_survive_display_renames_and_clones_and_reject_missing_or_reparented_targets() {
+    let mut w = world();
+    let root = spawn(&mut w, 1, Vec3::ZERO, None, "Rig");
+    let a = spawn(&mut w, 2, Vec3::ZERO, Some(root), "same name");
+    let b = spawn(&mut w, 3, Vec3::ZERO, Some(root), "same name");
+    for (entity, key) in [(a, "left"), (b, "right")] {
+        set(
+            &mut w,
+            entity,
+            ComponentValue::AnimationBinding(AnimationBinding { key: key.into() }),
+        );
+    }
+    let key = clip_ref(501);
+    let mut clip = rise();
+    clip.channels = [("left", 1.0), ("right", 2.0), ("absent", 3.0)]
+        .into_iter()
+        .map(|(target, y)| Channel {
+            target: target.into(),
+            property: Property::Translation,
+            interpolation: Interpolation::Linear,
+            times: vec![0.0, 1.0],
+            values: vec![0.0, y, 0.0, 0.0, y, 0.0],
+        })
+        .collect();
+    w.register_clip(key.clone(), clip);
+    set(&mut w, root, animator(key, true));
+    assert_eq!(local(&w, a).position.y, 1.0);
+    assert_eq!(local(&w, b).position.y, 2.0);
+    assert!(w
+        .diagnostics()
+        .iter()
+        .any(|d| d.code == DiagnosticCode::ANIMATION_BINDING_UNAVAILABLE
+            && d.message.contains("absent")));
+    w.step();
+    assert!(w.diagnostics().is_empty(), "reported once while unchanged");
+    w.edit_gameplay(|edit| edit.set_name(a, "renamed freely"))
+        .unwrap();
+    w.step();
+    assert_eq!(local(&w, a).position.y, 1.0);
+    assert!(w.diagnostics().is_empty());
+    w.edit_gameplay(|edit| edit.set_parent(a, None, false))
+        .unwrap();
+    w.step();
+    assert!(w
+        .diagnostics()
+        .iter()
+        .any(|d| d.code == DiagnosticCode::ANIMATION_BINDING_UNAVAILABLE
+            && d.message.contains("left")));
+    // Bringing the stable target back restores it without changing the clip.
+    w.edit_gameplay(|edit| edit.set_parent(a, Some(root.into()), false))
+        .unwrap();
+    w.step();
+    assert_eq!(local(&w, a).position.y, 1.0);
+    let cloned = w
+        .clone_subtree(root, None, Transform::default(), None)
+        .unwrap();
+    w.step();
+    assert!(cloned.pairs.len() >= 3);
+    let keys: Vec<_> = w
+        .ecs()
+        .query::<&AnimationBinding>()
+        .iter()
+        .map(|b| b.key.clone())
+        .collect();
+    assert_eq!(keys.iter().filter(|k| *k == "left").count(), 2);
+    assert!(
+        !w.diagnostics()
+            .iter()
+            .any(|d| d.message.contains("left") || d.message.contains("right")),
+        "scoped per instance: {:?}",
+        w.diagnostics()
     );
 }

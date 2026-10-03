@@ -206,12 +206,14 @@ impl<R> EditCommit<R> {
 
 /// Owns the world while a host performs several synchronous bridge exchanges.
 /// No mutable world access is available until finish/abort returns ownership.
+/// The allocation stays fixed across bridge exchanges; ownership transfers move
+/// a pointer, not the world's subsystem storage, on each callback boundary.
 pub struct GameplaySession {
-    world: World,
+    world: Box<World>,
     journal: Option<GameplayJournal>,
 }
 impl GameplaySession {
-    pub fn begin(mut world: World) -> Result<Self, Box<(World, EditError)>> {
+    pub fn begin(mut world: Box<World>) -> Result<Self, Box<(Box<World>, EditError)>> {
         match world.begin_gameplay_journal() {
             Ok(journal) => Ok(Self {
                 world,
@@ -254,10 +256,10 @@ impl GameplaySession {
             Err(panic) => resume_unwind(panic),
         }
     }
-    pub fn abort(self) -> World {
+    pub fn abort(self) -> Box<World> {
         self.world
     }
-    pub fn finish(mut self) -> (World, EditResult<EditCommit<()>>) {
+    pub fn finish(mut self) -> (Box<World>, EditResult<EditCommit<()>>) {
         // Ownership must return to the host even if validation itself panics.
         let validation = match catch_unwind(AssertUnwindSafe(|| {
             self.access(|edit| edit.validate_final_references())
@@ -2387,9 +2389,53 @@ mod tests {
         assert_eq!(w.live_entities(), 1);
     }
     #[test]
+    fn owned_session_keeps_world_allocation_across_every_exit_path() {
+        let mut world = Box::new(World::new(WorldConfig::default()));
+        let address = (&*world) as *const World;
+        for _ in 0..100 {
+            let mut session = GameplaySession::begin(world).unwrap_or_else(|_| panic!("begin"));
+            assert_eq!(session.committed() as *const World, address);
+            session
+                .access(|edit| edit.spawn("kept", Transform::IDENTITY, None))
+                .unwrap();
+            let (returned, result) = session.finish();
+            result.unwrap();
+            world = returned;
+            assert_eq!((&*world) as *const World, address);
+        }
+        let mut session = GameplaySession::begin(world).unwrap_or_else(|_| panic!("begin"));
+        session
+            .access(|edit| edit.spawn("discarded", Transform::IDENTITY, None))
+            .unwrap();
+        world = session.abort();
+        assert_eq!((&*world) as *const World, address);
+        assert_eq!(world.live_entities(), 100);
+
+        let mut session = GameplaySession::begin(world).unwrap_or_else(|_| panic!("begin"));
+        let failed: EditResult<()> = session.access(|_| Err(EditError::Aborted));
+        assert_eq!(failed, Err(EditError::Aborted));
+        let (returned, result) = session.finish();
+        assert_eq!(result, Err(EditError::Aborted));
+        world = returned;
+        assert_eq!((&*world) as *const World, address);
+
+        let mut session = GameplaySession::begin(world).unwrap_or_else(|_| panic!("begin"));
+        session.journal = None; // injected final-validation invariant panic
+        let (returned, result) = session.finish();
+        assert_eq!(result, Err(EditError::Poisoned));
+        assert_eq!((&*returned) as *const World, address);
+        let failure = match GameplaySession::begin(returned) {
+            Ok(_) => panic!("poisoned world accepted"),
+            Err(failure) => failure,
+        };
+        assert_eq!(failure.1, EditError::Poisoned);
+        assert_eq!((&*failure.0) as *const World, address);
+    }
+
+    #[test]
     fn owned_session_restores_journal_after_callback_panic_and_aborts() {
         let world = World::new(WorldConfig::default());
-        let mut session = GameplaySession::begin(world).unwrap_or_else(|_| panic!("begin"));
+        let mut session = GameplaySession::begin(world.into()).unwrap_or_else(|_| panic!("begin"));
         let result = catch_unwind(AssertUnwindSafe(|| {
             let _: EditResult<()> = session.access(|edit| {
                 edit.spawn("discarded", Transform::default(), None)?;
@@ -2407,7 +2453,7 @@ mod tests {
     fn owned_session_shares_one_journal_across_exchanges_and_returns_world_on_abort() {
         let world = World::new(WorldConfig::default());
         let id = world.id();
-        let mut session = GameplaySession::begin(world).unwrap_or_else(|_| panic!("begin"));
+        let mut session = GameplaySession::begin(world.into()).unwrap_or_else(|_| panic!("begin"));
         let pending = session
             .access(|edit| edit.spawn("pending", Transform::default(), None))
             .unwrap();
@@ -2437,7 +2483,7 @@ mod tests {
     fn owned_session_returns_poisoned_world_even_when_final_validation_panics() {
         let world = World::new(WorldConfig::default());
         let id = world.id();
-        let mut session = GameplaySession::begin(world).unwrap_or_else(|_| panic!("begin"));
+        let mut session = GameplaySession::begin(world.into()).unwrap_or_else(|_| panic!("begin"));
         // Force an internal invariant failure at the final validation boundary.
         session.journal = None;
         let (world, result) = session.finish();

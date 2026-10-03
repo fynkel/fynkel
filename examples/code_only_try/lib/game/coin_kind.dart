@@ -6,7 +6,7 @@
 // one; built live, the coins hold the same instances made in code. Every
 // coin of a kind shares its one instance.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 import '../generated/assets.g.dart';
 
@@ -70,15 +70,15 @@ class Sparks {
 /// The game's kinds of coin, made once per world.
 class CoinKinds {
   CoinKinds()
-      : coin = CoinKind(sound: Assets.audio.coin),
-        big = CoinKind(
-          value: 5,
-          color: const Vec3(1, 0.42, 0.12),
-          size: 1.6,
-          sound: Assets.audio.coin,
-          pitch: 0.7,
-          sparks: Sparks(count: 12, size: 0.24, seconds: 1.6),
-        );
+    : coin = CoinKind(sound: Assets.audio.coin),
+      big = CoinKind(
+        value: 5,
+        color: const Vec3(1, 0.42, 0.12),
+        size: 1.6,
+        sound: Assets.audio.coin,
+        pitch: 0.7,
+        sparks: Sparks(count: 12, size: 0.24, seconds: 1.6),
+      );
 
   /// The level's coins.
   final CoinKind coin;

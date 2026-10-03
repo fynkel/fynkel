@@ -31,7 +31,7 @@ use fynkel_physics::CharacterController;
 use fynkel_scene::{self as scene, Children, Parent, Transform};
 use glam::{Mat4, Quat, Vec3};
 
-use super::{controller, Diagnostic, Name, World};
+use super::{controller, Diagnostic, World};
 use crate::animation::{BlendSpace, Clip, Pose, Property, Skin};
 use crate::command::{AnimateOp, Lane};
 use crate::components::{Animator, ComponentValue, Skin as SkinComponent};
@@ -117,6 +117,17 @@ pub struct BlendSlot {
 }
 
 impl BlendSlot {
+    pub(super) fn collect_missing_bindings(&self, out: &mut Vec<(AssetRef, String)>) {
+        out.extend(
+            self.clip
+                .channels
+                .iter()
+                .zip(&self.targets)
+                .filter(|(_, target)| target.is_none())
+                .map(|(channel, _)| (self.clip_ref.clone(), channel.target.clone())),
+        );
+    }
+
     pub(super) fn resolve(
         ecs: &Ecs,
         animator: Entity,
@@ -124,7 +135,7 @@ impl BlendSlot {
         clip: &Arc<Clip>,
     ) -> BlendSlot {
         let names: Vec<&str> = clip.channels.iter().map(|c| c.target.as_str()).collect();
-        let targets = resolve_names(ecs, animator, &names);
+        let targets = resolve_bindings(ecs, animator, &names);
         let root = RootChannels::resolve(ecs, animator, clip, &targets);
         BlendSlot {
             clip_ref,
@@ -375,36 +386,25 @@ pub struct SkinRun {
     pub reported: Option<AssetRef>,
 }
 
-/// The first entity in depth-first order under `root` (itself included)
-/// named `name`.
-pub(super) fn find_named(ecs: &Ecs, root: Entity, name: &str) -> Option<Entity> {
-    let mut stack = vec![root];
-    while let Some(e) = stack.pop() {
-        if ecs.get::<Name>(e).is_ok_and(|n| n.value == name) {
-            return Some(e);
-        }
-        if let Ok(children) = ecs.get::<Children>(e) {
-            stack.extend(children.0.iter().rev().copied());
-        }
-    }
-    None
+/// Resolve one stable key, rejecting duplicate keys within the subtree.
+pub(super) fn find_binding(ecs: &Ecs, root: Entity, key: &str) -> Option<Entity> {
+    resolve_bindings(ecs, root, &[key])[0]
 }
 
-/// Every name under `root` (itself included) resolved in one walk: the
-/// first entity in depth-first order per name.
-fn resolve_names(ecs: &Ecs, root: Entity, names: &[&str]) -> Vec<Option<Entity>> {
-    let mut out = vec![None; names.len()];
-    let mut left = names.len();
+fn resolve_bindings(ecs: &Ecs, root: Entity, keys: &[&str]) -> Vec<Option<Entity>> {
+    let mut out = vec![None; keys.len()];
+    let mut ambiguous = vec![false; keys.len()];
     let mut stack = vec![root];
     while let Some(e) = stack.pop() {
-        if left == 0 {
-            break;
-        }
-        if let Ok(n) = ecs.get::<Name>(e) {
-            for (i, name) in names.iter().enumerate() {
-                if out[i].is_none() && n.value == *name {
-                    out[i] = Some(e);
-                    left -= 1;
+        if let Ok(binding) = ecs.get::<crate::AnimationBinding>(e) {
+            for (i, key) in keys.iter().enumerate() {
+                if !key.is_empty() && binding.key == *key {
+                    if out[i].is_some() || ambiguous[i] {
+                        out[i] = None;
+                        ambiguous[i] = true;
+                    } else {
+                        out[i] = Some(e);
+                    }
                 }
             }
         }
@@ -415,14 +415,13 @@ fn resolve_names(ecs: &Ecs, root: Entity, names: &[&str]) -> Vec<Option<Entity>>
     out
 }
 
-/// Whether every resolved target still lives under its name.
-/// Every target still lives under its name; a channel that resolved to
-/// nothing is looked up again (a node spawned later is picked up).
-fn targets_valid(ecs: &Ecs, targets: &[Option<Entity>], names: &[&str]) -> bool {
-    targets.len() == names.len()
-        && targets.iter().zip(names).all(|(t, name)| match t {
-            Some(e) => ecs.get::<Name>(*e).is_ok_and(|n| n.value == *name),
-            None => false,
+fn targets_valid(ecs: &Ecs, targets: &[Option<Entity>], keys: &[&str]) -> bool {
+    targets.len() == keys.len()
+        && targets.iter().zip(keys).all(|(target, key)| match target {
+            Some(entity) => ecs
+                .get::<crate::AnimationBinding>(*entity)
+                .is_ok_and(|binding| binding.key == *key),
+            None => true, // binding/hierarchy edits invalidate all cached resolutions
         })
 }
 
@@ -930,6 +929,7 @@ impl World {
     pub(super) fn run_animation(&mut self, tick: Tick) -> u32 {
         self.attach_state::<Animator, AnimatorRun>();
         self.attach_state::<SkinComponent, SkinRun>();
+        self.refresh_animation_bindings();
         let dt = self.config.fixed_dt;
         let mut ticks = std::mem::take(&mut self.anim.animators);
         ticks.clear();
@@ -1049,7 +1049,7 @@ impl World {
                     {
                         switched(&mut run);
                         run.blend.clear();
-                        run.targets = resolve_names(&self.gameplay.ecs, entity, &names);
+                        run.targets = resolve_bindings(&self.gameplay.ecs, entity, &names);
                         run.resolved = Some(clip_ref.clone());
                         let targets = std::mem::take(&mut run.targets);
                         let mut reference = std::mem::take(&mut run.reference);
@@ -1484,6 +1484,7 @@ impl World {
         self.anim.animators = ticks;
 
         count += self.run_skins();
+        self.report_animation_bindings();
         count
     }
 
@@ -1548,6 +1549,129 @@ impl World {
         }
     }
 
+    fn report_animation_bindings(&mut self) {
+        let mut missing = std::collections::HashSet::new();
+        for (handle, run) in self.gameplay.ecs.query::<(&Handle, &AnimatorRun)>().iter() {
+            let mut failures = Vec::new();
+            if let Some(key) = &run.resolved {
+                if let Some(clip) = self.anim.clips.get(key) {
+                    failures.extend(
+                        clip.channels
+                            .iter()
+                            .zip(&run.targets)
+                            .filter(|(_, target)| target.is_none())
+                            .map(|(channel, _)| (key.clone(), channel.target.clone())),
+                    );
+                }
+            }
+            if let Some(fade) = &run.fade {
+                failures.extend(
+                    fade.clip
+                        .channels
+                        .iter()
+                        .zip(&fade.targets)
+                        .filter(|(_, target)| target.is_none())
+                        .map(|(channel, _)| (fade.clip_ref.clone(), channel.target.clone())),
+                );
+            }
+            for slot in &run.blend {
+                slot.collect_missing_bindings(&mut failures);
+            }
+            if let Some(controller) = &run.controller {
+                controller.collect_missing_bindings(&mut failures);
+            }
+            for (asset, key) in failures {
+                missing.insert((handle.0, ComponentId::ANIMATOR, asset, key));
+            }
+        }
+        for (handle, run) in self.gameplay.ecs.query::<(&Handle, &SkinRun)>().iter() {
+            if let Some(asset) = &run.resolved {
+                if let Some(skin) = self.anim.skins.get(asset) {
+                    for (joint, target) in skin.joints.iter().zip(&run.joints) {
+                        if target.is_none() {
+                            missing.insert((
+                                handle.0,
+                                ComponentId::SKIN,
+                                asset.clone(),
+                                joint.binding.clone(),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        let mut fresh: Vec<_> = missing
+            .difference(&self.anim.binding_reports)
+            .cloned()
+            .collect();
+        fresh.sort_by(|a, b| {
+            (a.0, a.1, &a.2.asset, &a.2.sub, &a.3).cmp(&(b.0, b.1, &b.2.asset, &b.2.sub, &b.3))
+        });
+        for (entity, component, asset, key) in fresh {
+            self.publication.diagnostics.push(Diagnostic {
+                command_index: u32::MAX, lane: Lane::Simulation,
+                code: DiagnosticCode::ANIMATION_BINDING_UNAVAILABLE, entity, component,
+                message: format!("asset {asset}: animation binding {key:?} is missing or ambiguous in this instance; target remains unanimated"),
+            });
+        }
+        self.anim.binding_reports = missing;
+    }
+
+    fn refresh_animation_bindings(&mut self) {
+        let Some(changes) = self.ecs().changes_since(
+            self.anim.binding_cursor,
+            &[
+                std::any::TypeId::of::<crate::AnimationBinding>(),
+                std::any::TypeId::of::<Parent>(),
+                std::any::TypeId::of::<Children>(),
+            ],
+            false,
+        ) else {
+            return;
+        };
+        self.anim.binding_cursor = Some(changes.cursor);
+        if !changes.reset && changes.entities.is_empty() {
+            return;
+        }
+        let mut entities: Vec<_> = self
+            .ecs()
+            .query::<&Handle>()
+            .with::<&AnimatorRun>()
+            .iter()
+            .map(|h| h.0)
+            .collect();
+        entities.extend(
+            self.ecs()
+                .query::<&Handle>()
+                .with::<&SkinRun>()
+                .iter()
+                .map(|h| h.0),
+        );
+        entities.sort_unstable();
+        entities.dedup();
+        for entity in entities {
+            if let Ok(mut run) = self.gameplay.ecs.get_mut::<AnimatorRun>(entity) {
+                run.targets.clear();
+                run.blend.clear();
+                if let Some(fade) = &mut run.fade {
+                    let keys: Vec<_> = fade
+                        .clip
+                        .channels
+                        .iter()
+                        .map(|c| c.target.as_str())
+                        .collect();
+                    fade.targets = resolve_bindings(&self.gameplay.ecs, entity, &keys);
+                }
+                if let Some(controller) = &mut run.controller {
+                    controller.invalidate_bindings();
+                }
+            }
+            if let Ok(mut run) = self.gameplay.ecs.get_mut::<SkinRun>(entity) {
+                run.resolved = None;
+            }
+        }
+    }
+
     /// Every `Skin` component's joints resolved to entities under its
     /// skeleton root, cached while they hold.
     fn run_skins(&mut self) -> u32 {
@@ -1583,7 +1707,7 @@ impl World {
                 run.joints.clear();
                 continue;
             };
-            let names: Vec<&str> = skin.joints.iter().map(|j| j.name.as_str()).collect();
+            let names: Vec<&str> = skin.joints.iter().map(|j| j.binding.as_str()).collect();
             // The skeleton root is the referenced object (ADR-0035), the
             // tree root when None; a destroyed one leaves the bind pose.
             let expected = match component.skeleton.get() {
@@ -1598,7 +1722,7 @@ impl World {
                 let root = expected;
                 run.root = root;
                 run.joints = match root {
-                    Some(r) => resolve_names(&self.gameplay.ecs, r, &names),
+                    Some(r) => resolve_bindings(&self.gameplay.ecs, r, &names),
                     None => vec![None; names.len()],
                 };
                 run.resolved = Some(skin_ref);

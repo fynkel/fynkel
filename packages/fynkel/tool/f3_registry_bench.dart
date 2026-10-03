@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:developer' as dev;
 import 'dart:isolate' as iso;
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:vm_service/vm_service.dart';
 import 'package:vm_service/vm_service_io.dart';
 
@@ -31,7 +31,7 @@ Future<void> main(List<String> args) async {
     }
   }
   final results = <Map<String, Object?>>[];
-  for (final count in [1, 1000, 10000]) {
+  for (final count in [1, 1000, 10000, 50000]) {
     final w = World.create();
     final native = w.native;
     final schemaWatch = Stopwatch()..start();
@@ -94,6 +94,7 @@ Future<void> main(List<String> args) async {
         countedBytes = countedBytes! + (m.accumulatedSize ?? 0);
       }
     }
+    final rawSamples = List<int>.of(samples);
     samples.sort();
     bulkSamples.sort();
     if (bulkCalls != 2) {
@@ -109,6 +110,8 @@ Future<void> main(List<String> args) async {
       'create_us': registration.elapsedMicroseconds,
       'full_frame_p50_us': samples[30],
       'full_frame_p95_us': samples[57],
+      'full_frame_p99_us': samples[59],
+      'samples_us': rawSamples,
       'ffi_calls_per_frame': callsPerFrame,
       'bulk_ffi_calls': bulkCalls,
       'bulk_buffer_copies': bulkCopies,

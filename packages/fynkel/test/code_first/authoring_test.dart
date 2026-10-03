@@ -9,7 +9,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:fynkel/authoring.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
@@ -109,9 +109,8 @@ void main() {
     json['tags'] = ['pickup'];
     file.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(json));
     cookProject(project);
-    final meta = jsonDecode(
-      File('$project/assets/models/robot.glb.meta.json').readAsStringSync(),
-    ) as Map<String, Object?>;
+    final meta =
+        jsonDecode(File('$project/assets/models/robot.glb.meta.json').readAsStringSync()) as Map<String, Object?>;
     robotRef = AssetRef(meta['id'] as String, sub: 'prefab');
     addTearDown(() => Directory(project).deleteSync(recursive: true));
   });
@@ -134,8 +133,7 @@ void main() {
   }
 
   World world() {
-    final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8)
-      ..registry.register(spinnerType);
+    final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8)..registry.register(spinnerType);
     addTearDown(w.dispose);
     w.onLoadDiagnostics = (d) => fail('load diagnostics: $d');
     w.loadProject(project);
@@ -166,18 +164,42 @@ void main() {
   }
 
   // Every root name the fixture scene and the level use.
-  const names = [
-    'Floor',
-    'Crate',
-    'Sphere',
-    'Red lamp',
-    'Robot',
-    'Hidden',
-    'Camera',
-    'Sun',
-    'Crate A',
-    'Crate B',
-  ];
+  const names = ['Floor', 'Crate', 'Sphere', 'Red lamp', 'Robot', 'Hidden', 'Camera', 'Sun', 'Crate A', 'Crate B'];
+
+  test('one recipe agrees across build, clone, prefab instances and scene loading', () {
+    final recipe = ObjectRecipe(() {
+      final target = ObjectSpec('Target', transform: const Pose(position: Vec3(2, 0, 0)));
+      return ObjectSpec(
+        'Recipe',
+        children: [
+          ObjectSpec(
+            'Follower',
+            components: [Follow(target: target.object)],
+            behaviours: [Spinner()..speed = 3],
+          ),
+          target,
+        ],
+      );
+    });
+    final w = writer();
+    final prefab = w.writePrefab('prefabs/recipe', recipe.create());
+    final scene = w.writeScene('scenes/recipe', SceneSpec('Recipe', [recipe.create()]));
+    validate();
+    cookProject(project);
+    final live = world();
+    final built = live.build(recipe.create());
+    final cloned = built.clone();
+    final first = live.instantiate(prefab.ref);
+    final second = live.instantiate(prefab.ref);
+    final loaded = world()..loadScene(scene.ref.asset);
+    for (final root in [built, cloned, first, second, loaded.find('Recipe')!]) {
+      final follower = root.findChild('Follower')!;
+      expect(follower.get<Follow>()!.target, same(root.findChild('Target')));
+      expect(follower.behaviour<Spinner>()!.speed, 3);
+    }
+    first.findChild('Follower')!.behaviour<Spinner>()!.speed = 8;
+    expect(second.findChild('Follower')!.behaviour<Spinner>()!.speed, 3);
+  });
 
   test('a written scene validates, and loads into the world build makes', () {
     final (prefab, scene) = writeAll(writer());
@@ -226,8 +248,7 @@ void main() {
 
     final (_, again) = writeAll(writer());
     expect(again.kept, unorderedEquals(['Crate', 'Notes']));
-    final after =
-        (jsonDecode(file.readAsStringSync()) as Map<String, Object?>)['entities'] as Map<String, Object?>;
+    final after = (jsonDecode(file.readAsStringSync()) as Map<String, Object?>)['entities'] as Map<String, Object?>;
     expect(((after[floor] as Map)['children'] as List), [mine]);
     expect(after[root], isNotNull);
     expect(
@@ -239,8 +260,7 @@ void main() {
 
     // Code that no longer makes an object drops it; the editor's stay.
     writer().writeScene('scenes/code', const SceneSpec('Code', [ObjectSpec('Floor')]));
-    final fewer =
-        (jsonDecode(file.readAsStringSync()) as Map<String, Object?>)['entities'] as Map<String, Object?>;
+    final fewer = (jsonDecode(file.readAsStringSync()) as Map<String, Object?>)['entities'] as Map<String, Object?>;
     expect(fewer.values.map((e) => (e as Map)['name']), unorderedEquals(['Floor', 'Crate', 'Notes']));
   });
 
@@ -260,10 +280,7 @@ void main() {
       ),
       throwsArgumentError,
     );
-    expect(
-      () => w.writeScene('scenes/x', const SceneSpec('X', [ObjectSpec('A', layer: 'nope')])),
-      throwsArgumentError,
-    );
+    expect(() => w.writeScene('scenes/x', const SceneSpec('X', [ObjectSpec('A', layer: 'nope')])), throwsArgumentError);
     expect(
       () => w.writeScene(
         'scenes/x',

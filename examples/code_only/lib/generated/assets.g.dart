@@ -3,7 +3,7 @@
 //
 // ignore_for_file: library_private_types_in_public_api
 
-import 'package:fynkel/fynkel.dart' show AssetRef, AudioClipAsset, MaterialAsset, PrefabAsset, SceneAsset, TextureAsset;
+import 'package:fynkel/gameplay.dart' show AssetRef, AudioClipAsset, MaterialAsset, PrefabAsset, SceneAsset, TextureAsset;
 
 /// Every asset under `assets/`, by folder and name: `Assets.audio.coin`,
 /// `Assets.prefabs.burst`, `Assets.models.kit.meshes.cube`. Each is the

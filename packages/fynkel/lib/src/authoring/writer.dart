@@ -9,7 +9,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
-import '../../fynkel.dart';
+import '../../advanced.dart';
 import '../../generated/schema.g.dart' as gen;
 import '../wire/support.dart' show docAssetRef, docQuat, docVec3, docVec4;
 import '../world.dart' show bindWrittenData, specOfObject, writingReferences;

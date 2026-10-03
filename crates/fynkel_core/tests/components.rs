@@ -47,6 +47,7 @@ fn samples() -> Vec<ComponentValue> {
         ComponentValue::Volume(Default::default()),
         ComponentValue::Layer(Default::default()),
         ComponentValue::Tags(Default::default()),
+        ComponentValue::AnimationBinding(Default::default()),
     ]
 }
 

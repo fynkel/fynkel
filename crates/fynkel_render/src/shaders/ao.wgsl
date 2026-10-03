@@ -13,9 +13,8 @@
 // Group 0 is the frame uniform alone — not the mesh pass's group 0, whose
 // last binding is the texture this pass writes.
 
-// `DEPTH_TEXTURE` is replaced with the multisampled type when the scene
-// passes are multisampled; `textureLoad`'s last argument is then the
-// sample index instead of the mip level, and 0 is right either way.
+// MSAA sample zero is copied once into R32Float; single-sample scenes
+// read their depth texture directly. Both paths preserve the same depth.
 @group(1) @binding(0) var depth_tex: DEPTH_TEXTURE;
 // The SSAO estimate, read by `fs_blur` (`fs_main` never reads it: the
 // pass writes the other half of the pair).
@@ -51,7 +50,7 @@ fn vs_main(@builtin(vertex_index) id: u32) -> AoOut {
 }
 
 fn depth_at(c: vec2<i32>) -> f32 {
-    return textureLoad(depth_tex, c, 0);
+    return DEPTH_LOAD;
 }
 
 /// The world point a pixel's depth stands for.

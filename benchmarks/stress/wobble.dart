@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 /// Bobs its object up and down and spins it, writing the transform every
 /// tick — the stress scene's "ticking Dart behaviour" (blueprint §15.3):

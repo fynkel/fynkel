@@ -32,11 +32,18 @@ String ikTypeLabel(String type) => switch (type) {
 /// A node the character has for [wanted] (`RightHand` →
 /// `mixamorig:RightHand`), else [wanted] itself.
 String nodeLike(List<AnimatorNode> nodes, String wanted) {
-  final names = nodes.map((n) => n.name);
-  return names.where((n) => n == wanted).firstOrNull ??
-      names.where((n) => n.endsWith(':$wanted') || n.endsWith('_$wanted')).firstOrNull ??
-      names.where((n) => n.toLowerCase().endsWith(wanted.toLowerCase())).firstOrNull ??
-      wanted;
+  final matches = nodes
+      .where(
+        (n) =>
+            n.binding.isNotEmpty &&
+            (n.name == wanted ||
+                n.name.endsWith(':$wanted') ||
+                n.name.endsWith('_$wanted') ||
+                n.name.toLowerCase().endsWith(wanted.toLowerCase())),
+      )
+      .toList();
+  // Only an unambiguous suggestion may select a binding automatically.
+  return matches.length == 1 ? matches.single.binding : wanted;
 }
 
 /// The IK tab: the controller's goals.
@@ -100,7 +107,10 @@ class IkList extends StatelessWidget {
               : ListenableBuilder(
                   listenable: model.nodesChanged ?? const _Never(),
                   builder: (context, _) {
-                    final nodes = [for (final n in model.nodes) n.name];
+                    final nodes = [
+                      for (final n in model.nodes)
+                        if (n.binding.isNotEmpty) n,
+                    ];
                     return ListView(
                       key: const Key('animator.ik'),
                       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -133,7 +143,7 @@ class _Goal extends StatelessWidget {
   final ControllerEdits controller;
   final int index;
   final Map<String, Object?> goal;
-  final List<String> nodes;
+  final List<AnimatorNode> nodes;
 
   @override
   Widget build(BuildContext context) {
@@ -191,9 +201,9 @@ class _Goal extends StatelessWidget {
             itemBuilder: (_) => [
               for (final n in nodes)
                 PopupMenuItem(
-                  value: n,
+                  value: n.binding,
                   height: 26,
-                  child: Text(n, style: small),
+                  child: Text('${n.name} (${n.binding})', style: small),
                 ),
             ],
           ),
@@ -486,11 +496,12 @@ class MaskEditor extends StatelessWidget {
     AnimatorNode n,
     bool enabled,
   ) {
-    final on = ControllerEdits.maskedIn(mask, n.names);
+    enabled = enabled && n.binding.isNotEmpty;
+    final on = ControllerEdits.maskedIn(mask, n.bindings);
     final small = Theme.of(context).textTheme.bodySmall;
-    final named = mask.any((e) => e['node'] == n.name);
+    final named = mask.any((e) => e['node'] == n.binding);
     void toggle({bool alone = false}) =>
-        c.setMasked(layer, n.name, !on, alone: alone, under: alone ? const [] : namesUnder(nodes, i));
+        c.setMasked(layer, n.binding, !on, alone: alone, under: alone ? const [] : bindingsUnder(nodes, i));
     return GestureDetector(
       onSecondaryTapUp: !enabled
           ? null
@@ -511,7 +522,7 @@ class MaskEditor extends StatelessWidget {
               if (choice == 'alone') toggle(alone: true);
             },
       child: InkWell(
-        key: Key('animator.mask.node.${n.name}'),
+        key: Key('animator.mask.node.${n.binding}'),
         onTap: enabled ? toggle : null,
         child: Padding(
           padding: EdgeInsets.only(left: 8.0 + 14 * n.depth, right: 8),
@@ -521,7 +532,7 @@ class MaskEditor extends StatelessWidget {
                 width: 22,
                 height: 22,
                 child: Checkbox(
-                  key: Key('animator.mask.node.${n.name}.check'),
+                  key: Key('animator.mask.node.${n.binding}.check'),
                   value: on,
                   visualDensity: VisualDensity.compact,
                   onChanged: enabled ? (_) => toggle() : null,

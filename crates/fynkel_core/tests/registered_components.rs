@@ -167,7 +167,7 @@ fn schema_defaults_and_dynamic_field_layout_are_validated_before_staging() {
 fn owned_sessions_and_destroyed_pending_records_do_not_publish_early() {
     let mut w = world();
     let p = player(&mut w);
-    let mut session = GameplaySession::begin(w).unwrap_or_else(|_| panic!("begin"));
+    let mut session = GameplaySession::begin(w.into()).unwrap_or_else(|_| panic!("begin"));
     session
         .access(|e| {
             e.set_registered(

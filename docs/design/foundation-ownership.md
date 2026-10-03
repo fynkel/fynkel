@@ -2,7 +2,35 @@
 
 Code inspection and diagnostic baseline, September 30, 2026. This is evidence for [F0](../foundation-roadmap.md), not an adopted replacement architecture. Status lives only in the roadmap. The runtime inspected is revision `87e3dec8afa33c2c439c6fe848a7f0599cc512aa` with the working-tree changes recorded in the [baseline report](../foundation-baseline.md).
 
-## Current owners and mutation routes
+## Current ownership reconciliation (F8, 2026-10-03)
+
+The tables below retain the original findings, not present-tense defects. The
+replacement owners and verification are:
+
+| Domain | Current authority | Evidence |
+| --- | --- | --- |
+| Identity, clocks, affine transforms and bounds | Engine world identities; named real/scaled/simulation clocks; scene affine matrices; conservative bounds | F1 gate and permanent identity/clock/geometry regressions |
+| Gameplay values, hierarchy, liveness and effects | `world/gameplay.rs` transaction journal; SDK `src/gameplay.dart` adapter; effects published at their declared boundary | F2 gate; current workspace/SDK suites |
+| Custom components and systems | Registered schemas and ECS storage; owned query batches; compiled sequential system graph | F3 gate; generated combat slice; F8 native/JIT/AOT population measurements |
+| Native subsystem state and outputs | Tracked native mutations, subsystem-owned execution state, incremental synchronization; owned external query results | F4 gate; native scale/static/sparse/churn/sleeping measurements. Trusted Rust `ecs_mut` remains an integration surface, not the ordinary gameplay API. |
+| Asset activation, bindings and residency | Prepared resources, revision-aware bounded loading/upload, stable AnimationBinding keys | F5 gate and regression suites; F8 cold activation and 50 unload cycles |
+| Rendering | Owned extracted snapshots, maintained membership, conservative visibility, spatial light selection and explicit GPU lifetime | F6 gate; F8 extraction/light/transparency captures and physical-device smoke |
+| Code/editor/API | `gameplay.dart` and the inclusive `advanced.dart`; recipes and forest creation use the same transaction; authoring documents keep their own revision/undo authority | F7 gate and follow-up review; F8 removes the old umbrella and checks all maintained examples/generators |
+| Persistence and release scope | Versioned game-owned saves with saved IDs remapped to new runtime identities; no general execution-snapshot claim | ADR-0059, combat save regressions and F8 qualification |
+
+Original reproduced correctness findings now have permanent F1–F7 regression
+coverage. Original performance hypotheses now have named F4/F6/F8 workloads;
+50,000 fully rewritten registered rows remain an explicit performance limit,
+not a passing 60Hz target. Physical iOS smoke and local macOS export are separate
+from the unavailable second-Mac check. See the F8 gate for current results and
+limitations; do not treat the historical table below as a release verdict.
+
+The native host now transfers a stable `Box<World>` across owned edit sessions
+([ADR-0060](../decisions/ADR-0060-stable-world-ownership-in-bridge-transactions.md)).
+This removes repeated movement of subsystem storage while retaining one exclusive
+owner and the existing transaction boundaries.
+
+## September 30 owners and mutation routes (historical)
 
 | Domain | Current owner and source | Mutation and derived state | Foundation implication |
 | --- | --- | --- | --- |
@@ -49,7 +77,7 @@ Dependency direction to retain: contracts/wire and ECS/scene underpin core; core
 | Hidden dependency failures and draw-time loads, F5.1–F5.3 | Asset preload; renderer prepare/upload/residency | Code evidence: discarded load results; asset-sized warm operations and first-use fallback. Inject missing/corrupt dependencies and capture cold/warm frame cost and memory pressure. |
 | Name-based animation binding, F5.4 | Core animation | Code evidence: first matching name; test duplicate names, rename and reimport before selecting stable imported/authored IDs. |
 | Light selection and GPU lifetimes, F6.2–F6.4 | Renderer lights/culling/targets/passes; Apple viewport ring | Code evidence: 64-light pool/eight per object, per-object assignment. Measure dense-light scenes, boundary culling, resize/reload and preparation/GPU cost. Do not infer scale from larger constants. |
-| Low-level exports and one-use descriptions, F7.1–F7.2 | [barrel](../../packages/fynkel/lib/fynkel.dart), [ObjectSpec](../../packages/fynkel/lib/src/object_spec.dart) | Code evidence: bridge APIs share gameplay barrel; descriptions can retain behaviour instances. Test building the same description twice and separate advanced API deliberately. |
+| Low-level exports and one-use descriptions, F7.1–F7.2 | [barrel](../../packages/fynkel/lib/gameplay.dart), [ObjectSpec](../../packages/fynkel/lib/src/object_spec.dart) | Code evidence: bridge APIs share gameplay barrel; descriptions can retain behaviour instances. Test building the same description twice and separate advanced API deliberately. |
 | Schema drift across examples/workflows, F7.3–F7.4 | Editor project tests and reference assets | **Baseline failure:** reference hero prefab format5 against current7, plus empty-string skeleton references. Record before migrating; preserve authored content. |
 | Save/replay and shipping claims, F8 | [recording](../../packages/fynkel/lib/src/recording.dart), host manifests | Code evidence: input recording is not a complete gameplay-state checkpoint or rollback proof; Apple host is the concrete implementation. Define persistence separately and qualify physical-device shipping paths. |
 

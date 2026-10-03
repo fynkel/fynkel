@@ -14,6 +14,8 @@ use crate::components::Camera;
 #[derive(Default)]
 #[cfg_attr(not(feature = "animation"), allow(dead_code))]
 pub(super) struct AnimationState {
+    pub(super) binding_reports: HashSet<(Entity, crate::ComponentId, crate::AssetRef, String)>,
+    pub(super) binding_cursor: Option<fynkel_ecs::ChangeCursor>,
     /// Clips `Animator`s may play and skins `Skin`s deform with.
     pub(super) clips: animation::ClipTable,
     /// Blend spaces an `Animator` may play in a clip's place (M3-19c).
@@ -60,6 +62,8 @@ pub(super) struct RenderMembership {
     cursor: Option<fynkel_ecs::ChangeCursor>,
     pub(super) entities: std::collections::BTreeSet<Entity>,
     pub(super) examined: usize,
+    pub(super) renderable: std::collections::BTreeSet<Entity>,
+    pub(super) memo: std::collections::HashMap<Entity, glam::Mat4>,
 }
 impl RenderMembership {
     pub(super) fn refresh(&mut self, ecs: &fynkel_ecs::World) {
@@ -70,12 +74,20 @@ impl RenderMembership {
                 &[
                     TypeId::of::<fynkel_scene::WorldTransform>(),
                     TypeId::of::<fynkel_scene::Inactive>(),
+                    TypeId::of::<crate::MeshRenderer>(),
+                    TypeId::of::<crate::Camera>(),
+                    TypeId::of::<crate::DirectionalLight>(),
+                    TypeId::of::<crate::PointLight>(),
+                    TypeId::of::<crate::SpotLight>(),
+                    TypeId::of::<crate::Environment>(),
+                    TypeId::of::<crate::Volume>(),
                 ],
                 false,
             )
             .expect("settled render storage");
         let candidates = if changes.reset {
             self.entities.clear();
+            self.renderable.clear();
             ecs.entities().collect()
         } else {
             changes.entities
@@ -84,8 +96,21 @@ impl RenderMembership {
         for e in candidates {
             if ecs.has::<fynkel_scene::WorldTransform>(e) && !ecs.has::<fynkel_scene::Inactive>(e) {
                 self.entities.insert(e);
+                if ecs.has::<crate::MeshRenderer>(e)
+                    || ecs.has::<crate::Camera>(e)
+                    || ecs.has::<crate::DirectionalLight>(e)
+                    || ecs.has::<crate::PointLight>(e)
+                    || ecs.has::<crate::SpotLight>(e)
+                    || ecs.has::<crate::Environment>(e)
+                    || ecs.has::<crate::Volume>(e)
+                {
+                    self.renderable.insert(e);
+                } else {
+                    self.renderable.remove(&e);
+                }
             } else {
                 self.entities.remove(&e);
+                self.renderable.remove(&e);
             }
         }
         self.cursor = Some(changes.cursor);

@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:fynkel/fynkel.dart' as engine;
+import 'package:fynkel/advanced.dart' as engine;
 
 import 'slice.dart';
 import 'world.dart';

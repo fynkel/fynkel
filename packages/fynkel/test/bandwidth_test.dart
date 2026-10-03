@@ -2,7 +2,7 @@
 // SetTransform each per tick; measures encode+submit, step, and snapshot
 // read on the SDK path. benchmarks/m0/capture.py parses the `[bench]` line.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:test/test.dart';
 
 void main() {

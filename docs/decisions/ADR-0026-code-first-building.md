@@ -46,7 +46,7 @@ code and editor build the same things.
    `fynkel` CLI.
 
 2. **One description, two outputs.** A new `ObjectSpec` (library
-   `package:fynkel/fynkel.dart`) describes an object tree: name,
+   `package:fynkel/gameplay.dart`) describes an object tree: name,
    transform, active, tags, layer, native components, behaviours (as
    instances), children, and prefab instances with overrides.
    - `world.build(spec, {parent, transform})` spawns it live and returns

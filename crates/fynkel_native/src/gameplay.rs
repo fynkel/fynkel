@@ -16,7 +16,7 @@ struct PendingBindings {
 }
 
 pub(crate) struct WorldSlot {
-    world: Option<World>,
+    world: Option<Box<World>>,
     batches: Vec<fynkel_core::RegisteredBatch>,
     session: Option<GameplaySession>,
     prepared: Vec<fynkel_assets::PreparedPrefab>,
@@ -28,9 +28,13 @@ pub(crate) struct WorldSlot {
     clips: BTreeMap<fynkel_contracts::Uuid, Option<fynkel_core::animation::Clip>>,
 }
 impl WorldSlot {
+    pub(crate) fn release_published_resources(&mut self) {
+        self.published.clear();
+    }
+
     pub fn new(world: World) -> Self {
         Self {
-            world: Some(world),
+            world: Some(Box::new(world)),
             batches: Vec::new(),
             session: None,
             prepared: Vec::new(),
@@ -70,7 +74,7 @@ impl Deref for WorldSlot {
     type Target = World;
     fn deref(&self) -> &World {
         self.world
-            .as_ref()
+            .as_deref()
             .unwrap_or_else(|| self.session.as_ref().expect("owned world").committed())
     }
 }
@@ -265,7 +269,7 @@ pub unsafe extern "C" fn fynkel_world_gameplay_state_since(
     gameplay_state(world, Some(since), out)
 }
 
-/// Bounded-journal identity delta. Zero requests initial state. Success: cursor
+/// Bounded-journal callback identity/activity delta. Zero requests initial state. Success: cursor
 /// u64, mode u32 (0 unchanged, 1 reset, 2 delta), then count u32 and rows
 /// (entity, alive u32, name length u32 + UTF-8 when alive) for modes 1/2.
 /// # Safety
@@ -293,7 +297,7 @@ pub unsafe extern "C" fn fynkel_world_gameplay_state_delta(
                 "state reconciliation inside an edit",
             );
         }
-        let Some(changes) = w.inner.identity_changes_since(since) else {
+        let Some(changes) = w.inner.callback_changes_since(since) else {
             return reject(w, Status::CommandsRejected, "unsettled native write");
         };
         let mut reply = std::mem::take(&mut w.gameplay_reply);
@@ -662,13 +666,54 @@ pub unsafe extern "C" fn fynkel_world_gameplay_end(
         let bindings = w.inner.pending_bindings.take();
         let clips = std::mem::take(&mut w.inner.clips);
         let materials = std::mem::take(&mut w.inner.materials);
-        let meshes = std::mem::take(&mut w.inner.meshes);
+        let mut meshes = std::mem::take(&mut w.inner.meshes);
         if commit == 0 {
             w.inner.world = Some(session.abort());
             w.inner.prepared.clear();
             w.inner.resources = Default::default();
             return Status::Ok;
         }
+        let mut updates = Vec::new();
+        for (id, material) in materials {
+            let key = fynkel_contracts::AssetRef::new(id);
+            updates.push(match material {
+                RuntimeMaterial::Pbr(v) => fynkel_assets::RuntimeAssetUpdate::Material(key, v),
+                RuntimeMaterial::Shader(v) => {
+                    fynkel_assets::RuntimeAssetUpdate::CustomMaterial(key, v)
+                }
+            });
+        }
+        for (id, mesh) in &mut meshes {
+            updates.push(fynkel_assets::RuntimeAssetUpdate::Mesh(
+                fynkel_contracts::AssetRef::new(*id),
+                mesh.mesh.take(),
+            ));
+        }
+        for (id, clip) in &clips {
+            updates.push(fynkel_assets::RuntimeAssetUpdate::Clip(
+                fynkel_contracts::AssetRef::new(*id),
+                clip.clone(),
+            ));
+        }
+        let runtime = if updates.is_empty() {
+            None
+        } else {
+            match w
+                .services
+                .assets
+                .as_ref()
+                .expect("validated runtime store")
+                .prepare_runtime(updates)
+            {
+                Ok(plan) => Some(plan),
+                Err(error) => {
+                    w.inner.world = Some(session.abort());
+                    w.inner.prepared.clear();
+                    w.inner.resources = Default::default();
+                    return reject(w, Status::CommandsRejected, error.to_string());
+                }
+            }
+        };
         let plans = std::mem::take(&mut w.inner.prepared);
         let (core, result) = fynkel_assets::PreparedPrefab::finish_session_with_resources(
             plans,
@@ -678,20 +723,28 @@ pub unsafe extern "C" fn fynkel_world_gameplay_end(
         w.inner.world = Some(core);
         match result {
             Ok((report, published)) => {
-                for (id, material) in materials {
-                    publish_runtime_material(w, fynkel_contracts::AssetRef::new(id), material);
+                if let Some(runtime) = runtime {
+                    runtime.publish();
                 }
                 for (id, mesh) in meshes {
-                    publish_runtime_mesh(w, fynkel_contracts::AssetRef::new(id), mesh);
+                    w.core_mut().physics_mut().replace_prepared_mesh(
+                        &fynkel_contracts::AssetRef::new(id),
+                        mesh.collision,
+                    );
                 }
                 for (id, clip) in clips {
-                    publish_runtime_clip(w, fynkel_contracts::AssetRef::new(id), clip);
+                    if let Some(clip) = clip {
+                        let key = fynkel_contracts::AssetRef::new(id);
+                        w.services.managed_runtime_clips.insert(key.clone());
+                        w.core_mut().register_clip(key, clip);
+                    }
                 }
                 if let Some(bindings) = bindings {
                     w.services.rebinds = bindings.rebinds;
                     w.load_report = bindings.report;
                 }
                 w.inner.published.extend(published);
+                crate::resources::synchronize(w);
                 let resolved: Vec<_> = w
                     .gameplay_pending
                     .iter()
@@ -1482,11 +1535,13 @@ pub(crate) fn decode_runtime_material(
     }
     Ok(Some(m))
 }
+// Preserve the structured asset diagnostic at this cold publication boundary.
+#[allow(clippy::result_large_err)]
 pub(crate) fn publish_runtime_material(
     w: &mut FynkelWorld,
     key: fynkel_contracts::AssetRef,
     material: RuntimeMaterial,
-) {
+) -> Result<(), fynkel_contracts::Diagnostic> {
     let assets = w.services.assets.as_ref().expect("prepared asset store");
     match material {
         RuntimeMaterial::Pbr(m) => assets.set_runtime_material(&key, m),
@@ -1526,19 +1581,22 @@ pub(crate) fn decode_runtime_mesh(payload: &[u8]) -> Result<RuntimeMesh, &'stati
         collision,
     })
 }
+// Preserve the structured asset diagnostic at this cold publication boundary.
+#[allow(clippy::result_large_err)]
 pub(crate) fn publish_runtime_mesh(
     w: &mut FynkelWorld,
     key: fynkel_contracts::AssetRef,
     mesh: RuntimeMesh,
-) {
-    w.core_mut()
-        .physics_mut()
-        .replace_prepared_mesh(&key, mesh.collision);
+) -> Result<(), fynkel_contracts::Diagnostic> {
     w.services
         .assets
         .as_ref()
         .expect("prepared asset store")
-        .set_runtime_mesh(&key, mesh.mesh);
+        .set_runtime_mesh(&key, mesh.mesh)?;
+    w.core_mut()
+        .physics_mut()
+        .replace_prepared_mesh(&key, mesh.collision);
+    Ok(())
 }
 
 pub(crate) fn decode_runtime_clip(
@@ -1557,22 +1615,25 @@ pub(crate) fn decode_runtime_clip(
 }
 
 /// Only validated clips and a stable asset store may reach publication.
+// Preserve the structured asset diagnostic at this cold publication boundary.
+#[allow(clippy::result_large_err)]
 pub(crate) fn publish_runtime_clip(
     world: &mut FynkelWorld,
     key: fynkel_contracts::AssetRef,
     clip: Option<fynkel_core::animation::Clip>,
-) {
+) -> Result<(), fynkel_contracts::Diagnostic> {
     world
         .services
         .assets
         .as_ref()
         .expect("validated clip asset store")
-        .set_runtime_clip(&key, clip.clone())
-        .expect("validated runtime clip");
+        .set_runtime_clip(&key, clip.clone())?;
     // Removal preserves already-playing clips, as the direct API has always done.
     if let Some(clip) = clip {
+        world.services.managed_runtime_clips.insert(key.clone());
         world.core_mut().register_clip(key, clip);
     }
+    Ok(())
 }
 
 #[cfg(test)]

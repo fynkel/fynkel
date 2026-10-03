@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart' show World;
+import 'package:fynkel/gameplay.dart' show World;
 
 /// The game running in the editor's Play (ADR-0028 §4): what a tool reads
 /// and changes while it plays — Unity's editor code on the play-mode

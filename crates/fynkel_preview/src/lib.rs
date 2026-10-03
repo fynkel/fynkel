@@ -205,20 +205,22 @@ pub fn default_material(assets: &Assets, mesh: &AssetRef) -> AssetRef {
 /// is, or — when the cache has no primitives — a stand-in UV sphere of
 /// the Sphere's size made resident in the store (never written to the
 /// cache).
-pub fn shape_mesh(assets: &Assets, shape: &Shape) -> AssetRef {
+pub fn shape_mesh(assets: &Assets, shape: &Shape) -> Result<AssetRef, Refusal> {
     if let Shape::Mesh(mesh) = shape {
-        return mesh.clone();
+        return Ok(mesh.clone());
     }
     let sub = shape.primitive().unwrap_or("mesh/Sphere");
     let primitive = AssetRef::with_sub(PRIMITIVES_ID, sub);
     if assets.entry(PRIMITIVES_ID).is_some() && assets.mesh(&primitive).is_ok() {
-        return primitive;
+        return Ok(primitive);
     }
     let stand_in = AssetRef::with_sub(STAND_IN_SPHERE, "mesh/Sphere");
     if assets.mesh(&stand_in).is_err() {
-        assets.insert_mesh(&stand_in, uv_sphere(0.5, 32, 16));
+        assets
+            .insert_mesh(&stand_in, uv_sphere(0.5, 32, 16))
+            .map_err(|d| Refusal::Failed(d.message))?;
     }
-    stand_in
+    Ok(stand_in)
 }
 
 /// A UV sphere of `radius` with `segments` around and `rings` from pole
@@ -346,7 +348,7 @@ pub fn description(assets: &Assets, subject: &Subject) -> Result<SceneDescriptio
             if let Err(d) = assets.material(material) {
                 return Err(Refusal::Failed(d.message));
             }
-            let mesh = shape_mesh(assets, shape);
+            let mesh = shape_mesh(assets, shape)?;
             if let Err(d) = assets.mesh(&mesh) {
                 return Err(Refusal::Failed(d.message));
             }

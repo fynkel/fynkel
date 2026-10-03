@@ -1,11 +1,19 @@
 import 'package:fynkel/src/native/bridge.dart' show NativeGameplayRef;
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:test/test.dart';
 
 class _Created extends Behaviour {
   int creates = 0;
   @override
   void onCreate() => creates++;
+}
+
+class _Activity extends Behaviour {
+  final calls = <String>[];
+  @override
+  void onEnable() => calls.add('enable');
+  @override
+  void onDisable() => calls.add('disable');
 }
 
 class _Retired extends Behaviour {
@@ -88,6 +96,30 @@ void main() {
     expect(retired.calls, ['disable', 'destroy']);
   });
 
+  test('unchanged lifecycle has bounded bridge work with hundreds of disabled scripts', () {
+    int calls(int count) {
+      final world = World.create();
+      try {
+        world.edit(() {
+          for (var i = 0; i < count; i++) {
+            world.spawn(name: 'idle$i').addBehaviour(_Retired()).enabled = false;
+          }
+        });
+        world.frame(0);
+        world.frame(0);
+        final before = world.native.ffiCalls;
+        world.frame(0);
+        return world.native.ffiCalls - before;
+      } finally {
+        world.dispose();
+      }
+    }
+
+    final small = calls(30);
+    final large = calls(300);
+    expect(large, lessThanOrEqualTo(small + 10), reason: 'unchanged activity must not query every script');
+  });
+
   test('unchanged names skip snapshots while native activity still settles', () {
     final go = w.spawn(name: 'stable');
     final behaviour = go.addBehaviour(_Retired());
@@ -108,6 +140,25 @@ void main() {
     expect(w.native.gameplayStateSnapshots, snapshots);
   });
 
+  test('native reparent and parent activity settle child callbacks exactly once', () {
+    final parent = w.spawn(name: 'parent');
+    final child = w.spawn(name: 'child');
+    final behaviour = child.addBehaviour(_Activity());
+    w.frame(0);
+    expect(behaviour.calls, ['enable']);
+    w.native.editGameplay((edit) {
+      edit.setActive(NativeGameplayRef.live(parent.entity), false);
+      edit.setParent(NativeGameplayRef.live(child.entity), NativeGameplayRef.live(parent.entity));
+    });
+    w.frame(0);
+    w.frame(0);
+    expect(behaviour.calls, ['enable', 'disable']);
+    w.native.editGameplay((edit) => edit.setActive(NativeGameplayRef.live(parent.entity), true));
+    w.frame(0);
+    w.frame(0);
+    expect(behaviour.calls, ['enable', 'disable', 'enable']);
+  });
+
   test('independent state readers cannot consume SDK rename or destruction changes', () {
     final go = w.spawn(name: 'before');
     w.edit(() {});
@@ -118,10 +169,13 @@ void main() {
     final renamed = w.native.gameplayStateSince(observer.revision);
     expect(renamed.live![go.entity], 'after');
     expect(w.native.gameplayState()[go.entity], 'after');
-    expect(() => w.edit(() {
-      expect(go.name, 'after');
-      throw StateError('callback abort');
-    }), throwsStateError);
+    expect(
+      () => w.edit(() {
+        expect(go.name, 'after');
+        throw StateError('callback abort');
+      }),
+      throwsStateError,
+    );
     final snapshots = w.native.gameplayStateSnapshots;
     w.edit(() => expect(go.name, 'after'));
     expect(w.native.gameplayStateSnapshots, snapshots);

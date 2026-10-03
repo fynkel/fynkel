@@ -1,4 +1,5 @@
-import 'package:fynkel/fynkel.dart' show EntityRef;
+import 'package:fynkel/gameplay.dart' show EntityRef;
+
 // Live Play mode (ADR-0021 P7, docs/design/live-play-mode.md): the running
 // game's world as an `EditorDocument`, so the Hierarchy and the Inspector
 // show it with the panels, rows, cards and field widgets they use for a
@@ -24,7 +25,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:fynkel/fynkel.dart' as fynkel;
+import 'package:fynkel/gameplay.dart' as fynkel;
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import '../documents/editor_document.dart';
@@ -75,6 +76,10 @@ abstract class LiveBackend {
   /// A native write: `set`, `remove`, `rename`, `setActive`, `parent` or `destroy` with
   /// [LiveWorld]'s arguments.
   List<String> write(String kind, Map<String, Object?> args) => throw _notWritable(kind);
+
+  /// Replace component data atomically, or refuse before making any changes.
+  /// Backends must never emulate this operation with independent writes.
+  List<String> setComponents(List<Map<String, Object?>> components) => throw _notWritable('setComponents');
 
   List<String> setBehaviourField(Object instance, String field, Object? value) => throw _notWritable('setField');
 
@@ -206,6 +211,9 @@ final class WorldLiveBackend extends LiveBackend {
       _ => throw ArgumentError.value(kind, 'kind'),
     };
   }
+
+  @override
+  List<String> setComponents(List<Map<String, Object?>> components) => live.setComponents(components);
 
   /// A rename reaches the scripts' handle too (`GameObject.name`).
   List<String> _rename(String id, String name) {
@@ -401,12 +409,62 @@ final class PlayDocument extends EditorDocument {
     'readOnly': readOnly,
   });
 
-  /// Applies [commands] to the running world, in order, each at once
-  /// (L3). The first refusal stops the rest; what went before it stays —
-  /// the world has no undo — and is shown.
+  /// Component-data field batches use one atomic gameplay transaction.
+  /// Structural/script commands retain the explicit independent-command policy:
+  /// the first refusal stops later commands and completed earlier commands stay.
+  /// Arbitrary Dart setters are not represented as rollback-safe component data.
+  /// A stale base revision is rejected before either kind of work begins.
   @override
   Applied apply(List<Map<String, Object?>> commands, {String? baseRevision}) {
     if (_closed) return _rejection('The game stopped.');
+    if (baseRevision != null && baseRevision != revision) {
+      return _rejection('The live document changed; refresh before editing.');
+    }
+    if (commands.isNotEmpty &&
+        commands.every((c) => const ['setField', 'unsetField', 'assignAsset'].contains(c['command']))) {
+      try {
+        final staged = <(String, String), Map<String, Object?>>{};
+        final replacements = <Map<String, Object?>>[];
+        final touched = <String>{};
+        var allData = true;
+        for (final c in commands) {
+          final id = c['entity'] as String;
+          final ref = _component(id, c['component']);
+          if (ref.instance != null) {
+            allData = false;
+            break;
+          }
+          final field = c['field'] as String;
+          final key = (id, ref.type);
+          final previous = staged[key]?['data'] as Map<String, Object?>? ?? ref.data;
+          final value = switch (c['command']) {
+            'assignAsset' => c['asset'],
+            'unsetField' => ref.defaultOf(field),
+            _ => c['value'],
+          };
+          final replacement = <String, Object?>{
+            'id': id,
+            'type': ref.type,
+            'data': _written(previous, field, value, unset: c['command'] == 'unsetField'),
+          };
+          staged[key] = replacement;
+          replacements.add(replacement);
+          touched.add(id);
+        }
+        if (allData) {
+          final refused = backend.setComponents(replacements);
+          if (refused.isNotEmpty) return _rejection(refused.join('; '));
+          _afterWrite(touched);
+          return Applied.fromJson({'ok': true, 'revision': revision, 'mutations': []});
+        }
+      } on AuthoringException catch (e) {
+        return _rejection(e.diagnostics.map((d) => d.message).join('; '));
+      } on FormatException catch (e) {
+        return _rejection(e.message);
+      } on RangeError catch (e) {
+        return _rejection('$e');
+      }
+    }
     final touched = <String>{};
     final mutations = <Map<String, Object?>>[];
     String? refused;
@@ -605,7 +663,10 @@ final class PlayDocument extends EditorDocument {
 
   /// Whether [type] is one of the world's own components (the rest are
   /// scripts).
-  bool _isNative(String type) => type.startsWith('fynkel.') || (backend is WorldLiveBackend && (backend as WorldLiveBackend).world.registeredComponentTypes.any((t)=>t.id==type));
+  bool _isNative(String type) =>
+      type.startsWith('fynkel.') ||
+      (backend is WorldLiveBackend &&
+          (backend as WorldLiveBackend).world.registeredComponentTypes.any((t) => t.id == type));
 
   AuthoringException _gone(Object? id) => AuthoringException('play', AuthoringStatus.invalidArgument, [
     Diagnostic(code: 'FYN-E0007', severity: Severity.error, message: '$id is not in the running game'),

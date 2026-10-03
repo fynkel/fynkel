@@ -37,7 +37,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fynkel/fynkel.dart' show FramePlan, FynkelLoadError, SettingsStore, SystemKind, SystemTime, Vec2, Vec3;
+import 'package:fynkel/gameplay.dart' show FramePlan, FynkelLoadError, SettingsStore, SystemKind, SystemTime, Vec2, Vec3;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'fynkel_game.dart';
@@ -273,7 +273,7 @@ class Hud extends StatelessWidget {
       'assets     ${game.report.assetCount} retained from ${game.report.cacheDir}',
       'quality    ${viewport.quality ?? 'medium (project default)'}  [Q cycles]',
       if (s != null) ...[
-        'fps        ${s.fps.toStringAsFixed(0)}  frame ${s.tickInterval.p50.toStringAsFixed(2)} ms '
+        'loop       ${s.fps.toStringAsFixed(0)}/s  scene ${s.textureAcquisitionFps?.toStringAsFixed(0) ?? '-'} new/s  frame ${s.tickInterval.p50.toStringAsFixed(2)} ms '
             '(p99 ${s.tickInterval.p99.toStringAsFixed(2)})  render ${s.renderCall.p50.toStringAsFixed(2)} ms',
         'simulate   ${s.simulate.p50.toStringAsFixed(2)} ms (p99 ${s.simulate.p99.toStringAsFixed(2)})  '
             'viewport ${s.physicalWidth}x${s.physicalHeight}  ${s.fixedTicks} ticks/s  '

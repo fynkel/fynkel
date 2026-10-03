@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 /// What the HUD shows of the game, as observable fields (blueprint §10,
 /// ADR-0008, docs/hud.md): behaviours write them from `update`, the

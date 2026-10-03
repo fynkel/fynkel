@@ -1,6 +1,8 @@
+import 'support/animation_bindings.dart';
+
 import 'dart:io';
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
@@ -53,6 +55,7 @@ void main() {
     expect(states.log, events);
     final pending = w.edit(() {
       final go = w.spawn()..set(const Animator(controller: fixture.controller));
+      addRigTargets(w, go);
       go.animation.play('Jump', offset: 0.25);
       expect(go.animation.layers, isEmpty);
       return go;
@@ -192,6 +195,7 @@ void main() {
     final (w, _, _) = fresh();
     final go = w.edit(() {
       final go = w.spawn()..set(const Animator(controller: fixture.controller));
+      addRigTargets(w, go);
       expect(go.animation.getFloat('speed'), 1);
       go.animation.setFloat('speed', 3);
       expect(go.animation.getFloat('speed'), 3);

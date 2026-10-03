@@ -27,7 +27,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fynkel/fynkel.dart' show FynkelLoadError, Vec3;
+import 'package:fynkel/gameplay.dart' show FynkelLoadError, Vec3;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'fynkel_game.dart';

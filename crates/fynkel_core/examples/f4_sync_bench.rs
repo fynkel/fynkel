@@ -41,14 +41,15 @@ fn measure(label: &str, count: usize, mut run: impl FnMut(usize) -> usize) {
     }
     let calls = (ALLOCS.load(Relaxed) - a) as f64 / 100.;
     let bytes = (BYTES.load(Relaxed) - b) as f64 / 100.;
+    let raw_samples = ns.clone();
     ns.sort_unstable();
     println!(
         "{}",
-        serde_json::json!({"workload":label,"entities":count,"p50_ns":ns[50],"p95_ns":ns[95],"candidates_per_sample":candidates as f64/100.,"allocation_calls_per_sample":calls,"requested_bytes_per_sample":bytes})
+        serde_json::json!({"workload":label,"entities":count,"p50_ns":ns[50],"p95_ns":ns[95],"p99_ns":ns[99],"samples_ns":raw_samples,"candidates_per_sample":candidates as f64/100.,"allocation_calls_per_sample":calls,"requested_bytes_per_sample":bytes})
     );
 }
 fn main() {
-    for n in [1000, 10000] {
+    for n in [1000, 10000, 50000] {
         let mut w = World::new(Default::default());
         let mut ids = Vec::new();
         for i in 0..n {

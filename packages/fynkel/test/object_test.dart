@@ -3,7 +3,7 @@
 // base — a name, `isAlive`, `destroy()` — and `getComponent<T>` finds
 // any component kind.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:test/test.dart';
 
 class Health extends Behaviour {}

@@ -1,6 +1,8 @@
+import 'support/animation_bindings.dart';
+
 import 'dart:io';
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
@@ -32,6 +34,7 @@ void main() {
     final w = fresh();
     final go = w.edit(() {
       final go = w.spawn()..set(const Animator());
+      addRigTargets(w, go);
       go.animation.pause();
       go.animation.speed = -2;
       go.animation.weight = 0.5;
@@ -117,6 +120,7 @@ void main() {
     final w = fresh(load: true);
     final go = w.edit(() {
       final go = w.spawn()..set(const Animator());
+      addRigTargets(w, go);
       go.animation.play(wave, speed: 2);
       go.animation.time = 0.4;
       go.animation.setParameter('move', 0.75);

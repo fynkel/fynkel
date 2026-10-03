@@ -191,3 +191,28 @@ fn viewport_renders_the_world_the_host_steps() {
         clear_bgra()
     );
 }
+
+#[test]
+fn device_loss_is_reported_before_preparation_and_a_new_device_can_draw_the_snapshot() {
+    use fynkel_platform_apple::{DeviceChoice, Gpu};
+    let gpu = Gpu::get(DeviceChoice::Own).unwrap();
+    let mut viewport = Viewport::with_gpu(gpu.clone(), 64, 64, 2, SyncMode::Blocking).unwrap();
+    let snapshot = world_with_cube().extract();
+    assert!(viewport.render(&snapshot) >= 0);
+    gpu.device().destroy();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !gpu.is_lost() {
+        let _ = gpu.device().poll(wgpu::PollType::Poll);
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    assert_eq!(viewport.render(&snapshot), -5);
+    assert!(viewport.resize(100, 100).is_err());
+    assert!(
+        viewport.error().is_none(),
+        "device loss is not a poisoned renderer panic"
+    );
+    let replacement = Gpu::get(DeviceChoice::Own).unwrap();
+    let mut fresh = Viewport::with_gpu(replacement, 64, 64, 2, SyncMode::Blocking).unwrap();
+    assert!(fresh.render(&snapshot) >= 0);
+}

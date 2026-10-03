@@ -19,7 +19,7 @@ import 'package:code_only/game/player.dart';
 import 'package:code_only/game/switch.dart';
 import 'package:code_only/generated/assets.g.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:fynkel/testing.dart';
 import 'package:pickups/generated/assets.g.dart' as pickups;
 import 'package:pickups/pickups.dart' show Pickup;

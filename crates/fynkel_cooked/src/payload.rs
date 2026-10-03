@@ -298,6 +298,7 @@ fn read_f32s<const N: usize>(bytes: &[u8], at: &mut usize) -> Option<[f32; N]> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SkinJoint {
     pub name: String,
+    pub binding: String,
     /// Index into the joint list, `None` for a joint whose parent is not
     /// a joint of this skin.
     pub parent: Option<u32>,
@@ -319,12 +320,16 @@ pub struct SkinPayload {
     pub joints: Vec<SkinJoint>,
 }
 
+pub const ANIMATION_BINDING_VERSION: u32 = 0x32444e42; // BND2; old payloads require recooking.
+
 pub fn encode_skin(skin: &SkinPayload) -> Vec<u8> {
     let mut out = Vec::new();
+    out.extend_from_slice(&ANIMATION_BINDING_VERSION.to_le_bytes());
     out.extend_from_slice(&(skin.joints.len() as u32).to_le_bytes());
     write_str(&mut out, &skin.skeleton);
     for j in &skin.joints {
         write_str(&mut out, &j.name);
+        write_str(&mut out, &j.binding);
         out.extend_from_slice(&j.parent.unwrap_or(u32::MAX).to_le_bytes());
         for f in j
             .inverse_bind
@@ -341,6 +346,9 @@ pub fn encode_skin(skin: &SkinPayload) -> Vec<u8> {
 
 pub fn decode_skin(bytes: &[u8]) -> Option<SkinPayload> {
     let mut at = 0usize;
+    if read_u32(bytes, &mut at)? != ANIMATION_BINDING_VERSION {
+        return None;
+    }
     let count = read_u32(bytes, &mut at)? as usize;
     let skeleton = read_str(bytes, &mut at)?;
     // A joint is at least 4 + 4 + 26 × 4 bytes; refuse counts the bytes
@@ -351,6 +359,7 @@ pub fn decode_skin(bytes: &[u8]) -> Option<SkinPayload> {
     let mut joints = Vec::with_capacity(count);
     for _ in 0..count {
         let name = read_str(bytes, &mut at)?;
+        let binding = read_str(bytes, &mut at)?;
         let parent = read_u32(bytes, &mut at)?;
         let parent = if parent == u32::MAX {
             None
@@ -361,6 +370,7 @@ pub fn decode_skin(bytes: &[u8]) -> Option<SkinPayload> {
         };
         joints.push(SkinJoint {
             name,
+            binding,
             parent,
             inverse_bind: read_f32s::<16>(bytes, &mut at)?,
             rest_translation: read_f32s::<3>(bytes, &mut at)?,
@@ -385,6 +395,8 @@ pub const ANIM_INTERPOLATION_CUBIC_SPLINE: u32 = 2;
 /// named node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnimationChannel {
+    /// Display name for authoring-time rig mapping; never runtime identity.
+    pub target_name: String,
     /// The node's name (the runtime finds the entity by name under the
     /// animator).
     pub target: String,
@@ -440,10 +452,12 @@ pub struct AnimationPayload {
 
 pub fn encode_animation(anim: &AnimationPayload) -> Vec<u8> {
     let mut out = Vec::new();
+    out.extend_from_slice(&ANIMATION_BINDING_VERSION.to_le_bytes());
     out.extend_from_slice(&(anim.channels.len() as u32).to_le_bytes());
     out.extend_from_slice(&anim.duration.to_le_bytes());
     for c in &anim.channels {
         write_str(&mut out, &c.target);
+        write_str(&mut out, &c.target_name);
         out.extend_from_slice(&c.property.to_le_bytes());
         out.extend_from_slice(&c.interpolation.to_le_bytes());
         out.extend_from_slice(&(c.times.len() as u32).to_le_bytes());
@@ -466,6 +480,9 @@ pub fn encode_animation(anim: &AnimationPayload) -> Vec<u8> {
 
 pub fn decode_animation(bytes: &[u8]) -> Option<AnimationPayload> {
     let mut at = 0usize;
+    if read_u32(bytes, &mut at)? != ANIMATION_BINDING_VERSION {
+        return None;
+    }
     let count = read_u32(bytes, &mut at)? as usize;
     let duration = read_f32(bytes, &mut at)?;
     if !duration.is_finite() || duration < 0.0 || count.checked_mul(20)? > bytes.len() {
@@ -474,6 +491,7 @@ pub fn decode_animation(bytes: &[u8]) -> Option<AnimationPayload> {
     let mut channels = Vec::with_capacity(count);
     for _ in 0..count {
         let target = read_str(bytes, &mut at)?;
+        let target_name = read_str(bytes, &mut at)?;
         let property = read_u32(bytes, &mut at)?;
         let interpolation = read_u32(bytes, &mut at)?;
         if property > ANIM_PROPERTY_SCALE || interpolation > ANIM_INTERPOLATION_CUBIC_SPLINE {
@@ -482,6 +500,7 @@ pub fn decode_animation(bytes: &[u8]) -> Option<AnimationPayload> {
         let keys = read_u32(bytes, &mut at)? as usize;
         let mut channel = AnimationChannel {
             target,
+            target_name,
             property,
             interpolation,
             times: Vec::new(),
@@ -1163,6 +1182,7 @@ mod tests {
             skeleton: "Armature".into(),
             joints: vec![
                 SkinJoint {
+                    binding: "Root".into(),
                     name: "Root".into(),
                     parent: None,
                     inverse_bind: [1.0; 16],
@@ -1171,6 +1191,7 @@ mod tests {
                     rest_scale: [1.0; 3],
                 },
                 SkinJoint {
+                    binding: "Tip".into(),
                     name: "Tip".into(),
                     parent: Some(0),
                     inverse_bind: [0.5; 16],
@@ -1182,6 +1203,10 @@ mod tests {
         };
         let bytes = encode_skin(&skin);
         assert_eq!(decode_skin(&bytes).unwrap(), skin);
+        assert!(
+            decode_skin(&bytes[4..]).is_none(),
+            "legacy name-bound skins require recook"
+        );
         assert!(decode_skin(&bytes[..bytes.len() - 1]).is_none());
         let mut bad = skin.clone();
         bad.joints[1].parent = Some(7);
@@ -1191,6 +1216,7 @@ mod tests {
             duration: 1.0,
             channels: vec![
                 AnimationChannel {
+                    target_name: String::new(),
                     target: "Tip".into(),
                     property: ANIM_PROPERTY_ROTATION,
                     interpolation: ANIM_INTERPOLATION_LINEAR,
@@ -1198,6 +1224,7 @@ mod tests {
                     values: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.7, 0.0, 0.7],
                 },
                 AnimationChannel {
+                    target_name: String::new(),
                     target: "Root".into(),
                     property: ANIM_PROPERTY_TRANSLATION,
                     interpolation: ANIM_INTERPOLATION_CUBIC_SPLINE,
@@ -1209,6 +1236,10 @@ mod tests {
         };
         let bytes = encode_animation(&anim);
         assert_eq!(decode_animation(&bytes).unwrap(), anim);
+        assert!(
+            decode_animation(&bytes[4..]).is_none(),
+            "legacy name-bound clips require recook"
+        );
         assert!(decode_animation(&bytes[..bytes.len() - 4]).is_none());
         let mut bad = anim.clone();
         bad.channels[0].times = vec![1.0, 0.0];

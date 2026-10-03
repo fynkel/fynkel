@@ -4,7 +4,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 
 class _WaitProbe extends Behaviour {
   double? startedAt, resumedAt;

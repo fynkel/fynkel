@@ -21,11 +21,11 @@ the character controller or the transform.
 
 | Piece | Where | What |
 | --- | --- | --- |
-| the clip core | `crates/fynkel_animation` (its own crate since ADR-0029; `fynkel_core::animation` re-exports it) | `Clip` = channels keying one property of one **named** node, with its `markers`; `Clip::sample(time)` → `Pose`; `Pose::blend`, `Pose::add_delta`; `BlendSpace` = points `(at, clip)` along a `parameter` (`segment(value)` → the two neighbours and the fraction); `Skin` = named joints with inverse bind matrices |
+| the clip core | `crates/fynkel_animation` (its own crate since ADR-0029; `fynkel_core::animation` re-exports it) | `Clip` = channels keying one property of one **bound** node, with its `markers`; `Clip::sample(time)` → `Pose`; `Pose::blend`, `Pose::add_delta`; `BlendSpace` = points `(at, clip)` along a `parameter` (`segment(value)` → the two neighbours and the fraction); `Skin` = binding-keyed joints with inverse bind matrices |
 | the systems | `crates/fynkel_core/src/world/animation.rs` | `run_animation` in the pre-tick slot: every `fynkel.Animator`'s clock, clip or blend space, crossfade, markers, root motion and pose write (ancestors first, so a child animator is a layer); every `fynkel.Skin`'s joint lookup; `skin_palette` for the extract |
 | the components | `fynkel.Animator` (id 21), `fynkel.Skin` (22) | ordinary native components (`docs/codegen.md`): authored, validated, generated into every codec, reachable from Dart on the M3-07a path |
 | the blend document | `<name>.blend.json` — `schemas/blend.schema.json`, `crates/fynkel_document/src/blend.rs`, `DocumentKind::Blend` (`docs/documents.md` § Blend spaces) | `{ parameter, points: [{ at, clip }], sync: "phase" }`; validated (`FYN-D0600`–`D0602`), cooked as a JSON document chunk depending on its clips' carriers, registered by the asset store with its clips (`Assets::blend`, `register_clip`) |
-| the import | `crates/fynkel_import/src/gltf.rs` (importer version 7), `fbx.rs`, the rig document (`docs/documents.md`) | glTF skins → `skin/<name>`, animations → `anim/<name>` (with their `extras.markers`), `JOINTS_0`/`WEIGHTS_0` → a skinned `mesh/<n>`; the prefab gets the `fynkel.Skin`; a rig's `markers` join its clips at cook |
+| the import | `crates/fynkel_import/src/gltf.rs` (importer version 9), `fbx.rs`, the rig document (`docs/documents.md`) | glTF skins → `skin/<name>`, animations → `anim/<name>` (with their `extras.markers`), `JOINTS_0`/`WEIGHTS_0` → a skinned `mesh/<n>`; the prefab gets the `fynkel.Skin`; a rig's `markers` join its clips at cook |
 | the cache | `crates/fynkel_cooked/src/payload.rs` | `SKIN` and `ANIM` chunks (an `ANIM` carries its markers after the channels); a skinned `MESH` carries a trailing `SkinWeight` section |
 | the renderer | `crates/fynkel_render` (`docs/renderer.md`) | the skinned vertex path: a joint palette storage buffer and `vs_skinned` in five pipeline variants |
 | the wire | `fynkel.cmd.Animate` (kind 9), `fynkel.ev.AnimationEnded` (9), `fynkel.ev.AnimationMarker` (10), `fynkel.rec.AnimatorState`, `FYNKEL_QUERY_ANIMATOR` (11) | play/crossfade/stop/pause/resume/speed/time/weight/parameter; the one-shot's end; a marker crossed; the state read-back |
@@ -64,7 +64,7 @@ contract is the same in every build.
 ## The clip core
 
 A **clip** is a set of channels. Each channel keys one property —
-translation, rotation or scale — of one node **named** under the entity
+translation, rotation or scale — of one node **bound** under the entity
 that plays the clip, with step, linear or cubic-spline interpolation
 (glTF's three), and the clip has a duration. Sampling a clip at a time
 gives a **pose**: per target entity, the properties the clip sets and
@@ -73,17 +73,23 @@ Poses **blend** — a lerp for translation and scale, a slerp for rotation,
 per entry — which is all a crossfade needs, and all a state machine or a
 timeline will need.
 
-Targets resolve by **name**, not entity id, because a prefab instance
-gets fresh ids: what the importer wrote into a clip stays valid for
-every instance. The search is a depth-first walk of the animator's
-subtree, first match wins, so a name must be unique under its animator
-(the importer warns on duplicates across a file); the resolved targets
-are cached on the animator and re-resolved only when the clip changes or
-a cached entity dies or is renamed.
+Targets resolve by **AnimationBinding.key**, unique within the animator's
+subtree. Imported nodes use `<asset UUID>/node/<source index>`; authored
+nodes may use a persistent UUID or another explicit stable key. Prefab
+instances keep these keys and resolve within their own hierarchy. Display
+names remain useful for search and do not participate in playback binding.
+Ambiguous or missing keys produce `ANIMATION_BINDING_UNAVAILABLE`; there is
+no first-name-match fallback. Binding and hierarchy edits invalidate the
+resolved caches.
+
+F5 changes the cooked payload format: rebuild the engine/SDK together,
+run `fynkel project lock`, then `fynkel cook --force`. See
+[ADR-0056](decisions/ADR-0056-asset-readiness-residency-and-bindings.md)
+for authored rig/controller migration and source-index reorder limits.
 
 A **skin** is what a rigged mesh adds: an ordered joint list — each a
-node name, its parent within the skin, its inverse bind matrix and its
-rest pose — and the name of the skeleton root. The joints themselves are
+binding key and display name, its parent within the skin, its inverse bind matrix and its
+rest pose — and the binding key of the skeleton root. The joints themselves are
 ordinary entities with ordinary transforms: the same clip core drives
 them, a behaviour reads or overrides one by name (`findChild('head')`),
 a collider or a light can hang off one, and the renderer reads their
@@ -94,8 +100,9 @@ interpolated world matrices like any other entity's. At most
 
 | Component | id | Fields | Rule |
 | --- | --- | --- | --- |
-| `fynkel.Animator` | 21 | `clip` (an `anim/<name>` asset ref, or a blend document's id with no sub — § Blend spaces; nil plays nothing), `speed` (finite; negative plays backwards), `looping`, `playing`, `weight` (0…1, default 1), `additive` (default false), `root_motion` (default false) | plays `clip` over the named nodes under this entity; a second animator on a descendant is a layer over its ancestors' pose (§ Layers); `speed` non-finite or `weight` outside 0…1 is `INVALID_PAYLOAD` (`FYN-H0008` at `fynkel validate`) |
-| `fynkel.Skin` | 22 | `skin` (a `skin/<name>` asset ref), `skeleton` (the joint root object, a reference — Unity's `rootBone`, ADR-0035; None: the tree's root) | next to the `fynkel.MeshRenderer` of a skinned mesh: the joints are found by name under `skeleton` |
+| `fynkel.AnimationBinding` | 28 | `key` (stable string; empty is unbound) | animation identity, independent of `Name`; unique in the animator/skeleton scope |
+| `fynkel.Animator` | 21 | `clip` (an `anim/<name>` asset ref, or a blend document's id with no sub — § Blend spaces; nil plays nothing), `speed` (finite; negative plays backwards), `looping`, `playing`, `weight` (0…1, default 1), `additive` (default false), `root_motion` (default false) | plays `clip` over the bound nodes under this entity; a second animator on a descendant is a layer over its ancestors' pose (§ Layers); `speed` non-finite or `weight` outside 0…1 is `INVALID_PAYLOAD` (`FYN-H0008` at `fynkel validate`) |
+| `fynkel.Skin` | 22 | `skin` (a `skin/<name>` asset ref), `skeleton` (the joint root object, a reference — Unity's `rootBone`, ADR-0035; None: the tree's root) | next to the `fynkel.MeshRenderer` of a skinned mesh: the joints are found by binding key under `skeleton` |
 
 Both are ordinary native components: authored in a scene or prefab,
 validated, listed in `fynkel.project.json` → `components`, `get<Animator>()`
@@ -666,28 +673,28 @@ keeps what a rigged source carries:
   bytes are unchanged and a loader tells the two apart by length
   (`MeshPayload::is_skinned`); a joint index past the skin is `A0104`.
 - every glTF skin becomes `skin/<name>` (`SkinData`, cooked as a `SKIN`
-  chunk): the joints in the skin's order, each by node name with its
+  chunk): the joints in the skin's order, each by binding key and display name with its
   parent when the parent is a joint of the same skin, its inverse bind
   matrix and its rest pose (the node's TRS), and the skeleton root's
-  name (the skin's `skeleton` node, else empty). Two joints of one skin
-  sharing a name is an import error (`A0104`; targets resolve by name),
+  binding key (the skin's `skeleton` node, else empty). Duplicate display
+  names are supported because their source indices differ;
   more than `max_joints` = 256 is `A0101`.
 - every glTF animation becomes `anim/<name>` (`AnimationData`, cooked as an
   `ANIM` chunk): its translation/rotation/scale channels targeting nodes
-  by name, step/linear/cubic-spline as authored (a cubic spline keeps its
+  by binding key, step/linear/cubic-spline as authored (a cubic spline keeps its
   in-tangent, value, out-tangent triples), and the duration (the last
   key time over all channels). Morph-weight channels are skipped with a
-  warning, like morph targets; a channel whose node name is not unique
-  in the file is warned about (`A0105`). The animation's `extras.markers`
+  warning, like morph targets. Duplicate node display names do not make
+  channel binding ambiguous. The animation's `extras.markers`
   become the clip's markers (§ Markers; a malformed entry is `A0104`).
 - the prefab puts a **`fynkel.Skin`** next to the `fynkel.MeshRenderer`
   of a node that has a skin (`skin/<name>`, `skeleton` = a reference to the root node's entity);
   a skin on a node without a skinned mesh, or a skinned mesh on a node
   without a skin, is a warning and the mesh draws in its bind pose.
 
-Node names are the contract, as above: the prefab's entities are named
-after their nodes (an unnamed node gets `node<i>`), so an instantiated
-prefab resolves its own clips.
+The prefab, skin and clips share the source-index binding keys. Names are
+display/search metadata. Reordering source node indices requires recooking
+them together and reviewing external controller roots, masks and IK keys.
 
 Skins and animations entered the intermediate at `FYNI` version 4
 (`skins` and `animations` next to `meshes`, the animations with their

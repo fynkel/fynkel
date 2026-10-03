@@ -1,4 +1,4 @@
-/* Fynkel macOS viewport ABI v12 (platform/apple). Pairs with fynkel.h: the
+/* Fynkel macOS viewport ABI v14 (platform/apple). Pairs with fynkel.h: the
  * same dylib exports both. See platform/apple/README.md for the contract.
  * v3 added the M3-16 instrumentation fields of FynkelAppleViewportStats; v4
  * fynkel_apple_viewport_debug_lines and fynkel_apple_viewport_read_frame (the
@@ -20,9 +20,12 @@
 extern "C" {
 #endif
 
-#define FYNKEL_APPLE_ABI_VERSION 12
+#define FYNKEL_APPLE_ABI_VERSION 14
 
 typedef struct FynkelAppleViewport FynkelAppleViewport;
+/* ABI 14: default 1024/8, maximum 16384/8. Invalid limits leave settings
+ * unchanged; zero on success, -1 on refusal. */
+int32_t fynkel_apple_viewport_set_light_budget(FynkelAppleViewport *vp, uint32_t pool, uint32_t per_object);
 
 /* Slot completion signalling; 2 (Metal completion handler) is production. */
 enum FynkelAppleSyncMode {
@@ -36,6 +39,9 @@ enum FynkelAppleSyncMode {
 #define FYNKEL_APPLE_RENDER_DROPPED (-1)
 #define FYNKEL_APPLE_RENDER_NO_WORLD (-2)
 #define FYNKEL_APPLE_RENDER_BROKEN (-3)
+#define FYNKEL_APPLE_RENDER_ASSETS_UNAVAILABLE (-4)
+/* Device lost: unregister the texture and recreate the viewport. */
+#define FYNKEL_APPLE_RENDER_DEVICE_LOST (-5)
 
 typedef struct FynkelAppleCamera {
   float eye[3];
@@ -110,6 +116,12 @@ int32_t fynkel_apple_viewport_resize(FynkelAppleViewport *vp, uint32_t width, ui
 uint32_t fynkel_apple_viewport_buffer_count(const FynkelAppleViewport *vp);
 const void *fynkel_apple_viewport_iosurface(const FynkelAppleViewport *vp, uint32_t index);
 int32_t fynkel_apple_viewport_render(FynkelAppleViewport *vp, const FynkelWorld *world);
+/* Explicit export/loading boundary. Waits up to timeout_ms, then renders;
+ * -4 = asset failure or timeout. Ordinary render never waits for preparation. */
+int32_t fynkel_apple_viewport_render_ready(FynkelAppleViewport *vp, const FynkelWorld *world, uint32_t timeout_ms);
+/* Last frame still needs asset preparation/upload; terminal errors are not pending. */
+uint32_t fynkel_apple_viewport_assets_pending(const FynkelAppleViewport *vp);
+
 void fynkel_apple_viewport_set_camera(FynkelAppleViewport *vp, const FynkelAppleCamera *camera);
 
 /* A viewport's own camera: the scene Camera component's projection. */

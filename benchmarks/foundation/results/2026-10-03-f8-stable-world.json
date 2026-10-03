@@ -1,0 +1,4662 @@
+{
+  "schemaVersion": 1,
+  "status": "measured-improvement-not-qualified",
+  "sustainedQualification": false,
+  "change": "Stable Box<World> allocation across owned native bridge transaction entry, commit, abort and failure.",
+  "scope": "Mac AOT single fixed tick, same dense-5000 project, 40 warmup and 120 samples per variant; sequential before/after without compilation. Device installation/capture concurrent on phone.",
+  "phoneAfter": {
+    "device": "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+    "bundle": "com.fynkel.qualification.mobileDense5000",
+    "app": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-app-500/build/ios/iphoneos/Runner.app",
+    "status": "diagnostic-complete",
+    "sustainedQualification": false,
+    "commands": [
+      {
+        "argv": [
+          "xcrun",
+          "devicectl",
+          "device",
+          "install",
+          "app",
+          "--device",
+          "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+          "target/f8-mobile-app-500/build/ios/iphoneos/Runner.app"
+        ],
+        "exitCode": 0,
+        "stdout": "03:01:21  Acquired tunnel connection to device.\n03:01:21  Enabling developer disk image services.\n03:01:21  Acquired usage assertion.\nApp installed:\n\u2022 bundleID: com.fynkel.qualification.mobileDense5000\n\u2022 installationURL: file:///private/var/containers/Bundle/Application/6B2F3E2A-BDD0-4AB3-955E-82C4484ABFFB/Runner.app/\n\u2022 launchServicesIdentifier: unknown\n\u2022 databaseUUID: 3CA3D25C-7ED7-4480-97BA-F3545CDF9E74\n\u2022 databaseSequenceNumber: 7460\n\u2022 options: \n",
+        "stderr": ""
+      },
+      {
+        "argv": [
+          "xcrun",
+          "devicectl",
+          "device",
+          "process",
+          "launch",
+          "--device",
+          "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+          "--terminate-existing",
+          "--json-output",
+          "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-stable-world/launch.json",
+          "com.fynkel.qualification.mobileDense5000"
+        ],
+        "exitCode": 0,
+        "stdout": "03:01:23  Acquired tunnel connection to device.\n03:01:23  Enabling developer disk image services.\n03:01:23  Acquired usage assertion.\nLaunched application with com.fynkel.qualification.mobileDense5000 bundle identifier.\n",
+        "stderr": ""
+      },
+      {
+        "argv": [
+          "xcrun",
+          "devicectl",
+          "device",
+          "process",
+          "terminate",
+          "--device",
+          "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+          "--pid",
+          "488"
+        ],
+        "exitCode": 0,
+        "stdout": "03:01:35  Acquired tunnel connection to device.\n03:01:36  Enabling developer disk image services.\n03:01:36  Acquired usage assertion.\nSent signal to terminate process sent to pid 488\n",
+        "stderr": ""
+      },
+      {
+        "argv": [
+          "xcrun",
+          "devicectl",
+          "device",
+          "copy",
+          "from",
+          "--device",
+          "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+          "--domain-type",
+          "appDataContainer",
+          "--domain-identifier",
+          "com.fynkel.qualification.mobileDense5000",
+          "--source",
+          "Documents/mobile-capture.jsonl",
+          "--destination",
+          "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-stable-world/mobile-capture.jsonl"
+        ],
+        "exitCode": 0,
+        "stdout": "03:01:36  Acquired tunnel connection to device.\n03:01:36  Enabling developer disk image services.\n03:01:36  Acquired usage assertion.\nFile received from Device\n/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-stable-world/mobile-capture.jsonl\n",
+        "stderr": ""
+      }
+    ],
+    "executableSha256": "19b4b219298a6393cad7eface7698757286a18f0a66bbc07f310a16030aa0ebc",
+    "pid": 488,
+    "terminatedExactPid": 488,
+    "records": [
+      {
+        "time": "2026-10-03T01:01:23.233555Z",
+        "elapsedMs": 0,
+        "event": "start",
+        "quality": "medium",
+        "limitSeconds": 8,
+        "sustainedQualification": false
+      },
+      {
+        "time": "2026-10-03T01:01:24.437680Z",
+        "elapsedMs": 982,
+        "event": "stats",
+        "windowSeconds": 1.017336,
+        "loopFps": 19.659188311433,
+        "acquiredFps": 15.727350649146398,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=20 ticks=56 missed=0 dropped=0 entities=8848 interval=49.332/64.300/67.970 simulate=42.314/54.494/54.516 render=6.046/20.602/20.791 behaviours=15.414/19.807/21.248 native=26.492/32.977/34.551 work=48.360/75.096/75.307 build=60.605/60.605/60.605 raster=7.214/7.214/7.214 snapshot=28920 snapshot_peak=28920 mem_native=40471022 mem_resident=280969216 mem_assets=86205 instances=1732 draws=16 culled=4278 shadow=3776/60 rendered=20 acquired=16 repeated=0 present_lag=1/1/1 acquire_wait=3.385/3.408/3.417 extract=2.938/3.120/6.470 prepare=2.692/4.390/14.653 encode=0.031/0.047/0.063 cpu=0.469/3.581/9.924 gpu_complete=19.470/34.599/69.079 gpu_frame=18.849/19.317/61.796 gpu_shadow=0.515/1.081/3.979 gpu_ao=11.290/12.845/23.654 gpu_scene=16.193/17.501/17.538 gpu_post=17.952/18.668/18.677 gpu_n=17 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=17 texture_new=17 texture_empty=0 texture_ready=19 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:01:25.475405Z",
+        "elapsedMs": 2020,
+        "event": "stats",
+        "windowSeconds": 1.037722,
+        "loopFps": 17.345686031519037,
+        "acquiredFps": 17.345686031519037,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=18 ticks=62 missed=0 dropped=0 entities=8858 interval=58.973/64.859/66.777 simulate=47.670/57.084/57.122 render=6.071/6.213/6.281 behaviours=17.293/20.004/20.027 native=30.282/36.946/36.961 work=53.741/63.297/63.403 build=43.987/51.530/53.347 raster=3.526/5.067/5.275 snapshot=28920 snapshot_peak=28920 mem_native=42829415 mem_resident=281083904 mem_assets=86205 instances=1763 draws=16 culled=4257 shadow=3843/60 rendered=18 acquired=18 repeated=0 present_lag=1/1/1 acquire_wait=3.386/3.403/3.403 extract=2.958/3.047/3.105 prepare=2.706/2.743/2.747 encode=0.031/0.032/0.032 cpu=0.438/0.457/0.461 gpu_complete=18.309/26.969/27.128 gpu_frame=17.766/18.604/26.567 gpu_shadow=0.521/0.550/2.254 gpu_ao=10.897/11.741/19.250 gpu_scene=15.942/16.878/23.355 gpu_post=17.178/18.016/24.052 gpu_n=18 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=18 texture_new=18 texture_empty=0 texture_ready=18 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:01:26.448899Z",
+        "elapsedMs": 2994,
+        "event": "stats",
+        "windowSeconds": 0.973476,
+        "loopFps": 17.463193751052927,
+        "acquiredFps": 17.463193751052927,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=17 ticks=58 missed=0 dropped=0 entities=8868 interval=57.450/63.525/64.111 simulate=45.845/56.245/57.546 render=6.003/6.252/6.292 behaviours=16.621/19.935/21.088 native=29.121/36.256/36.323 work=51.848/62.497/63.838 build=54.393/63.240/63.291 raster=3.512/3.597/3.639 snapshot=28920 snapshot_peak=28920 mem_native=42940243 mem_resident=275955712 mem_assets=86205 instances=1797 draws=16 culled=4233 shadow=3911/60 rendered=17 acquired=17 repeated=0 present_lag=1/1/1 acquire_wait=3.388/3.417/3.435 extract=2.953/3.095/3.108 prepare=2.703/2.798/2.809 encode=0.030/0.035/0.041 cpu=0.433/0.447/0.450 gpu_complete=17.979/26.138/26.989 gpu_frame=17.101/26.445/26.448 gpu_shadow=0.533/2.263/2.270 gpu_ao=10.882/19.140/19.155 gpu_scene=15.317/23.231/23.250 gpu_post=16.496/23.894/23.923 gpu_n=17 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=17 texture_new=17 texture_empty=0 texture_ready=17 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:01:27.477619Z",
+        "elapsedMs": 4022,
+        "event": "stats",
+        "windowSeconds": 1.0287,
+        "loopFps": 16.525712063769806,
+        "acquiredFps": 16.525712063769806,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=17 ticks=62 missed=0 dropped=0 entities=8878 interval=61.294/65.095/65.972 simulate=49.309/57.415/58.033 render=6.139/6.518/6.540 behaviours=18.502/20.866/21.091 native=30.444/36.353/36.805 work=55.448/63.933/64.573 build=54.905/63.881/64.246 raster=3.508/3.568/3.569 snapshot=28920 snapshot_peak=28920 mem_native=43022629 mem_resident=275447808 mem_assets=86205 instances=1856 draws=16 culled=4184 shadow=3989/60 rendered=17 acquired=17 repeated=0 present_lag=1/1/1 acquire_wait=3.387/3.404/3.413 extract=2.990/3.195/3.198 prepare=2.749/2.951/3.048 encode=0.029/0.031/0.031 cpu=0.436/0.448/0.454 gpu_complete=17.695/26.276/27.053 gpu_frame=17.147/18.471/26.508 gpu_shadow=0.533/0.565/2.294 gpu_ao=10.941/11.713/19.178 gpu_scene=15.393/16.737/23.242 gpu_post=16.546/17.868/23.907 gpu_n=17 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=17 texture_new=17 texture_empty=0 texture_ready=17 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:01:28.451501Z",
+        "elapsedMs": 4996,
+        "event": "stats",
+        "windowSeconds": 0.973867,
+        "loopFps": 14.375679635925644,
+        "acquiredFps": 14.375679635925644,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=14 ticks=55 missed=3 dropped=0 entities=8878 interval=71.069/85.306/85.808 simulate=63.397/66.173/66.635 render=6.113/6.499/6.699 behaviours=21.740/23.105/23.278 native=41.523/43.055/43.542 work=69.510/72.672/73.334 build=55.235/70.888/72.491 raster=3.552/3.658/3.675 snapshot=28920 snapshot_peak=28920 mem_native=43034814 mem_resident=275972096 mem_assets=86205 instances=1922 draws=16 culled=4118 shadow=4042/60 rendered=14 acquired=14 repeated=0 present_lag=1/1/1 acquire_wait=3.395/3.423/3.424 extract=3.156/3.308/3.351 prepare=2.475/3.026/3.056 encode=0.030/0.032/0.033 cpu=0.449/0.460/0.479 gpu_complete=26.816/27.821/27.824 gpu_frame=25.727/27.270/27.273 gpu_shadow=2.298/2.330/2.330 gpu_ao=18.360/19.221/19.256 gpu_scene=22.424/23.964/23.972 gpu_post=23.073/24.627/24.632 gpu_n=14 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=14 texture_new=14 texture_empty=0 texture_ready=14 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:01:29.434323Z",
+        "elapsedMs": 5979,
+        "event": "stats",
+        "windowSeconds": 0.982804,
+        "loopFps": 14.244956267984257,
+        "acquiredFps": 14.244956267984257,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=14 ticks=55 missed=4 dropped=0 entities=8879 interval=71.430/76.984/81.697 simulate=64.495/67.615/68.838 render=6.163/6.386/6.766 behaviours=22.002/23.424/23.919 native=42.078/44.220/44.750 work=70.658/74.001/75.604 build=70.691/73.891/75.252 raster=3.563/3.646/3.655 snapshot=28920 snapshot_peak=28920 mem_native=43041708 mem_resident=275447808 mem_assets=86205 instances=1988 draws=16 culled=4053 shadow=4090/60 rendered=14 acquired=14 repeated=0 present_lag=1/1/1 acquire_wait=3.387/3.402/3.404 extract=3.154/3.285/3.287 prepare=2.588/2.840/3.074 encode=0.029/0.031/0.032 cpu=0.440/0.470/0.473 gpu_complete=18.615/27.033/27.851 gpu_frame=25.654/27.251/27.300 gpu_shadow=2.275/2.330/2.330 gpu_ao=18.295/19.058/19.107 gpu_scene=22.350/23.943/24.005 gpu_post=22.982/24.591/24.640 gpu_n=14 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=14 texture_new=14 texture_empty=0 texture_ready=14 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:01:30.439850Z",
+        "elapsedMs": 6985,
+        "event": "stats",
+        "windowSeconds": 1.005508,
+        "loopFps": 13.923310406282196,
+        "acquiredFps": 13.923310406282196,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=14 ticks=56 missed=4 dropped=0 entities=8878 interval=72.973/76.718/77.015 simulate=59.820/67.226/68.354 render=6.777/6.927/7.007 behaviours=21.432/23.441/23.481 native=38.347/43.615/44.728 work=66.597/74.153/75.361 build=66.115/73.245/74.383 raster=3.509/3.635/3.648 snapshot=28920 snapshot_peak=28920 mem_native=43039378 mem_resident=275808256 mem_assets=86205 instances=2087 draws=16 culled=3953 shadow=4132/60 rendered=14 acquired=14 repeated=0 present_lag=1/1/1 acquire_wait=3.387/3.416/3.425 extract=3.228/3.311/3.321 prepare=3.073/3.220/3.242 encode=0.031/0.033/0.034 cpu=0.451/0.471/0.474 gpu_complete=18.716/26.805/27.007 gpu_frame=18.132/26.297/26.465 gpu_shadow=0.577/2.365/2.366 gpu_ao=11.881/18.882/19.065 gpu_scene=16.326/22.923/23.130 gpu_post=17.460/23.531/23.767 gpu_n=14 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=13 texture_new=13 texture_empty=0 texture_ready=14 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:01:31.439028Z",
+        "elapsedMs": 7984,
+        "event": "stats",
+        "windowSeconds": 0.999154,
+        "loopFps": 14.011854028508118,
+        "acquiredFps": 14.011854028508118,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=14 ticks=56 missed=4 dropped=0 entities=8878 interval=72.058/75.677/82.623 simulate=60.335/68.369/68.774 render=6.482/6.874/7.194 behaviours=22.183/23.792/24.031 native=38.777/44.764/44.823 work=66.817/75.243/75.968 build=67.240/74.384/74.573 raster=3.505/3.571/3.595 snapshot=28920 snapshot_peak=28920 mem_native=43064804 mem_resident=275578880 mem_assets=86205 instances=2198 draws=16 culled=3842 shadow=4174/60 rendered=14 acquired=14 repeated=0 present_lag=1/1/1 acquire_wait=3.382/3.389/3.403 extract=3.170/3.238/3.399 prepare=2.898/3.197/3.308 encode=0.030/0.032/0.033 cpu=0.450/0.483/0.483 gpu_complete=26.359/27.260/27.282 gpu_frame=25.843/26.676/26.717 gpu_shadow=2.332/2.384/2.403 gpu_ao=18.449/19.261/19.290 gpu_scene=22.470/23.276/23.318 gpu_post=23.048/23.862/23.863 gpu_n=14 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=15 texture_new=15 texture_empty=0 texture_ready=14 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:01:31.511810Z",
+        "elapsedMs": 8057,
+        "event": "stop",
+        "reason": "deadline"
+      }
+    ]
+  },
+  "phoneBeforeEvidence": "2026-10-03-f8-cpu-isolation.json",
+  "validation": {
+    "coreNativeAssetsExistingSuite": {
+      "passed": 506,
+      "failed": 0,
+      "ignored": 3
+    },
+    "ownershipTestsIncludingNewAllocationRegression": {
+      "passed": 4,
+      "failed": 0
+    },
+    "affectedDartTests": 45,
+    "clippy": "passed all targets -D warnings",
+    "iosReleaseBuild": "passed"
+  },
+  "limitations": [
+    "Eight-second diagnostic only; acquisition rate is not physical scanout timing.",
+    "Faster simulation advances further during the phone wall-time window; single-fixed-tick Mac comparison controls tick sequence.",
+    "Native physics and GPU costs remain; sustained 60/120 Hz is not qualified."
+  ],
+  "sourceHashes": {
+    "crates/fynkel_core/src/world/gameplay.rs": "24ea34c68b03bcfb2ea75b7ff64d9c067318e09e25c2e59136ca1bca4c31c3e9",
+    "crates/fynkel_assets/src/prepared.rs": "15ea88d5ff16be085de3c40b1469543cfa9904ebffa61a9827e5e1b01a5ba9ef",
+    "crates/fynkel_native/src/gameplay.rs": "54271f5c4f3587ca8c836a2d6437bd6c9f7766f190133f6982f0c9a58745ed46",
+    "crates/fynkel_native/src/resources.rs": "1d07c060002084a92770d2692a8e5351391ce264b130599ddcd710359f022598",
+    "target/f8-mobile-app-500/tool/cpu.dart": "0049d9f3b5de0efab46e926a9172948f90290492986ae02f326edd383a756d51",
+    "target/f8-mobile-app-500/lib/main.dart": "f8e37ef85034a2e9aef441d1b00d4c5bc1d92d4d996af1f605978122df17ff72"
+  },
+  "logs": {
+    "target/foundation-baseline/f8/stable-world/f8-stable-world-before.jsonl": "f8680e02103bf3e7141c823803a044d6151eae8272e58a3b32066eda7a1661f5",
+    "target/foundation-baseline/f8/stable-world/f8-stable-world-after.jsonl": "a71debb0d61da1ebb4799a2ef923233d476757a5f072b1b21d7bb48d3d544145",
+    "target/foundation-baseline/f8/stable-world/f8-stable-world-tests.log": "a16f08ecb1fd5c838c5a12a5060a62fc9e79f4b198458c4fabd0fb1199990100",
+    "target/foundation-baseline/f8/stable-world/f8-stable-world-ownership-tests.log": "d48058fca04a625f667a01acb23c4e2b7690a4543ab804ff8705ea6c610cc5bc",
+    "target/foundation-baseline/f8/stable-world/f8-stable-world-clippy-final.log": "9135c4de215f3f3ba48e957732c2a7981e180ee4d2957133375292eb5cddd41a",
+    "target/foundation-baseline/f8/stable-world/f8-stable-world-sdk-tests.log": "c2b3ee09f994b25149e4c7679cdbabba5f60ca730996f94292c6f6ddf767d698",
+    "target/foundation-baseline/f8/stable-world/f8-stable-world-ios-build.log": "8ace5b230ad74bf302576a8db95cc4fbf05ee0d33c95ce8f7ef2ed12fd428e42"
+  },
+  "before": [
+    {
+      "enabledWobbles": 0,
+      "authoredWobbles": 300,
+      "entities": 8865,
+      "samples": [
+        {
+          "totalUs": 13024,
+          "behavioursUs": 5114,
+          "nativeUs": 7870,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20930,
+          "behavioursUs": 6100,
+          "nativeUs": 14787,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13780,
+          "behavioursUs": 4910,
+          "nativeUs": 8828,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13838,
+          "behavioursUs": 5360,
+          "nativeUs": 8434,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13237,
+          "behavioursUs": 4929,
+          "nativeUs": 8266,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13432,
+          "behavioursUs": 4942,
+          "nativeUs": 8450,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13654,
+          "behavioursUs": 5241,
+          "nativeUs": 8370,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20852,
+          "behavioursUs": 6549,
+          "nativeUs": 14264,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13561,
+          "behavioursUs": 4822,
+          "nativeUs": 8701,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12955,
+          "behavioursUs": 4814,
+          "nativeUs": 8103,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13043,
+          "behavioursUs": 4897,
+          "nativeUs": 8105,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13268,
+          "behavioursUs": 4948,
+          "nativeUs": 8280,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13092,
+          "behavioursUs": 4849,
+          "nativeUs": 8204,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20486,
+          "behavioursUs": 5992,
+          "nativeUs": 14455,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14114,
+          "behavioursUs": 4792,
+          "nativeUs": 9282,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13188,
+          "behavioursUs": 4822,
+          "nativeUs": 8327,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13202,
+          "behavioursUs": 4820,
+          "nativeUs": 8343,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13271,
+          "behavioursUs": 4864,
+          "nativeUs": 8368,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13802,
+          "behavioursUs": 5115,
+          "nativeUs": 8647,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20530,
+          "behavioursUs": 5982,
+          "nativeUs": 14509,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14011,
+          "behavioursUs": 4871,
+          "nativeUs": 9099,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13534,
+          "behavioursUs": 4953,
+          "nativeUs": 8541,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13498,
+          "behavioursUs": 4766,
+          "nativeUs": 8693,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13571,
+          "behavioursUs": 4833,
+          "nativeUs": 8695,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14184,
+          "behavioursUs": 5124,
+          "nativeUs": 9017,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21851,
+          "behavioursUs": 6353,
+          "nativeUs": 15454,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14624,
+          "behavioursUs": 4908,
+          "nativeUs": 9673,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14099,
+          "behavioursUs": 4981,
+          "nativeUs": 9074,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14397,
+          "behavioursUs": 5281,
+          "nativeUs": 9072,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13958,
+          "behavioursUs": 4934,
+          "nativeUs": 8981,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13950,
+          "behavioursUs": 4902,
+          "nativeUs": 9005,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21515,
+          "behavioursUs": 6178,
+          "nativeUs": 15295,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14633,
+          "behavioursUs": 5152,
+          "nativeUs": 9440,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13661,
+          "behavioursUs": 4921,
+          "nativeUs": 8699,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14776,
+          "behavioursUs": 5068,
+          "nativeUs": 9660,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14303,
+          "behavioursUs": 5044,
+          "nativeUs": 9214,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14226,
+          "behavioursUs": 5263,
+          "nativeUs": 8918,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21864,
+          "behavioursUs": 6097,
+          "nativeUs": 15725,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14431,
+          "behavioursUs": 4915,
+          "nativeUs": 9474,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13828,
+          "behavioursUs": 5039,
+          "nativeUs": 8744,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13650,
+          "behavioursUs": 4902,
+          "nativeUs": 8707,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13538,
+          "behavioursUs": 4949,
+          "nativeUs": 8548,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13568,
+          "behavioursUs": 4973,
+          "nativeUs": 8555,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21209,
+          "behavioursUs": 6299,
+          "nativeUs": 14870,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14168,
+          "behavioursUs": 4867,
+          "nativeUs": 9261,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13635,
+          "behavioursUs": 4984,
+          "nativeUs": 8606,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14141,
+          "behavioursUs": 5189,
+          "nativeUs": 8904,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13726,
+          "behavioursUs": 4865,
+          "nativeUs": 8821,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13945,
+          "behavioursUs": 4900,
+          "nativeUs": 9001,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21364,
+          "behavioursUs": 6127,
+          "nativeUs": 15189,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14605,
+          "behavioursUs": 5203,
+          "nativeUs": 9359,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13710,
+          "behavioursUs": 4960,
+          "nativeUs": 8709,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13668,
+          "behavioursUs": 4936,
+          "nativeUs": 8691,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13761,
+          "behavioursUs": 5201,
+          "nativeUs": 8519,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13453,
+          "behavioursUs": 4872,
+          "nativeUs": 8541,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21185,
+          "behavioursUs": 6048,
+          "nativeUs": 15095,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14175,
+          "behavioursUs": 4919,
+          "nativeUs": 9215,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13872,
+          "behavioursUs": 5202,
+          "nativeUs": 8627,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13835,
+          "behavioursUs": 5187,
+          "nativeUs": 8607,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13490,
+          "behavioursUs": 4920,
+          "nativeUs": 8530,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13531,
+          "behavioursUs": 4992,
+          "nativeUs": 8499,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21409,
+          "behavioursUs": 6381,
+          "nativeUs": 14987,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14155,
+          "behavioursUs": 4897,
+          "nativeUs": 9217,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13580,
+          "behavioursUs": 4913,
+          "nativeUs": 8626,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13794,
+          "behavioursUs": 5191,
+          "nativeUs": 8559,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13624,
+          "behavioursUs": 4974,
+          "nativeUs": 8608,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13465,
+          "behavioursUs": 4901,
+          "nativeUs": 8524,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21121,
+          "behavioursUs": 6092,
+          "nativeUs": 14985,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14719,
+          "behavioursUs": 5275,
+          "nativeUs": 9400,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16435,
+          "behavioursUs": 4942,
+          "nativeUs": 11450,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15332,
+          "behavioursUs": 5302,
+          "nativeUs": 9970,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14425,
+          "behavioursUs": 5215,
+          "nativeUs": 9165,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13475,
+          "behavioursUs": 4887,
+          "nativeUs": 8537,
+          "ticks": 1
+        },
+        {
+          "totalUs": 22237,
+          "behavioursUs": 6823,
+          "nativeUs": 15364,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14889,
+          "behavioursUs": 5107,
+          "nativeUs": 9737,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14243,
+          "behavioursUs": 5198,
+          "nativeUs": 9004,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13526,
+          "behavioursUs": 4921,
+          "nativeUs": 8562,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13888,
+          "behavioursUs": 4974,
+          "nativeUs": 8870,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13373,
+          "behavioursUs": 4940,
+          "nativeUs": 8390,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21383,
+          "behavioursUs": 6440,
+          "nativeUs": 14900,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14690,
+          "behavioursUs": 5116,
+          "nativeUs": 9530,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13636,
+          "behavioursUs": 4945,
+          "nativeUs": 8651,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13766,
+          "behavioursUs": 5124,
+          "nativeUs": 8601,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13751,
+          "behavioursUs": 5016,
+          "nativeUs": 8691,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13643,
+          "behavioursUs": 5034,
+          "nativeUs": 8567,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20708,
+          "behavioursUs": 6058,
+          "nativeUs": 14608,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14406,
+          "behavioursUs": 5143,
+          "nativeUs": 9222,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13333,
+          "behavioursUs": 4845,
+          "nativeUs": 8445,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13156,
+          "behavioursUs": 4827,
+          "nativeUs": 8282,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13511,
+          "behavioursUs": 5168,
+          "nativeUs": 8302,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13714,
+          "behavioursUs": 5051,
+          "nativeUs": 8622,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21200,
+          "behavioursUs": 6142,
+          "nativeUs": 15016,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14570,
+          "behavioursUs": 4948,
+          "nativeUs": 9580,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13607,
+          "behavioursUs": 5136,
+          "nativeUs": 8431,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13753,
+          "behavioursUs": 4990,
+          "nativeUs": 8722,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13806,
+          "behavioursUs": 5057,
+          "nativeUs": 8708,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13679,
+          "behavioursUs": 4995,
+          "nativeUs": 8642,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21811,
+          "behavioursUs": 6660,
+          "nativeUs": 15109,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14387,
+          "behavioursUs": 4991,
+          "nativeUs": 9350,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13836,
+          "behavioursUs": 5075,
+          "nativeUs": 8716,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14709,
+          "behavioursUs": 5292,
+          "nativeUs": 9375,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13765,
+          "behavioursUs": 4931,
+          "nativeUs": 8790,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13485,
+          "behavioursUs": 5083,
+          "nativeUs": 8360,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21420,
+          "behavioursUs": 6109,
+          "nativeUs": 15264,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14202,
+          "behavioursUs": 5107,
+          "nativeUs": 9052,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13358,
+          "behavioursUs": 4849,
+          "nativeUs": 8465,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14430,
+          "behavioursUs": 5339,
+          "nativeUs": 9044,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13929,
+          "behavioursUs": 5268,
+          "nativeUs": 8619,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13564,
+          "behavioursUs": 5142,
+          "nativeUs": 8382,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20772,
+          "behavioursUs": 5985,
+          "nativeUs": 14745,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13904,
+          "behavioursUs": 4880,
+          "nativeUs": 8981,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13799,
+          "behavioursUs": 5220,
+          "nativeUs": 8538,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13262,
+          "behavioursUs": 4829,
+          "nativeUs": 8391,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13710,
+          "behavioursUs": 5081,
+          "nativeUs": 8583,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14536,
+          "behavioursUs": 5050,
+          "nativeUs": 9440,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21547,
+          "behavioursUs": 6327,
+          "nativeUs": 15176,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14386,
+          "behavioursUs": 5002,
+          "nativeUs": 9341,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13814,
+          "behavioursUs": 5020,
+          "nativeUs": 8752,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13650,
+          "behavioursUs": 5030,
+          "nativeUs": 8579,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13735,
+          "behavioursUs": 5008,
+          "nativeUs": 8685,
+          "ticks": 1
+        }
+      ],
+      "scope": "Mac CPU single fixed tick; no rendering; 40 warmup and 120 measured ticks"
+    },
+    {
+      "enabledWobbles": 30,
+      "authoredWobbles": 300,
+      "entities": 8865,
+      "samples": [
+        {
+          "totalUs": 13530,
+          "behavioursUs": 5247,
+          "nativeUs": 8241,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21606,
+          "behavioursUs": 6671,
+          "nativeUs": 14893,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14010,
+          "behavioursUs": 5239,
+          "nativeUs": 8729,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14080,
+          "behavioursUs": 5380,
+          "nativeUs": 8658,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13371,
+          "behavioursUs": 5273,
+          "nativeUs": 8057,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13491,
+          "behavioursUs": 5379,
+          "nativeUs": 8074,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13372,
+          "behavioursUs": 5149,
+          "nativeUs": 8181,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20729,
+          "behavioursUs": 6296,
+          "nativeUs": 14392,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14048,
+          "behavioursUs": 5310,
+          "nativeUs": 8700,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13241,
+          "behavioursUs": 5119,
+          "nativeUs": 8083,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13827,
+          "behavioursUs": 5208,
+          "nativeUs": 8578,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13805,
+          "behavioursUs": 5459,
+          "nativeUs": 8303,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13470,
+          "behavioursUs": 5111,
+          "nativeUs": 8320,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21062,
+          "behavioursUs": 6401,
+          "nativeUs": 14620,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14200,
+          "behavioursUs": 5130,
+          "nativeUs": 9031,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13824,
+          "behavioursUs": 5320,
+          "nativeUs": 8458,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13583,
+          "behavioursUs": 5097,
+          "nativeUs": 8445,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13619,
+          "behavioursUs": 5120,
+          "nativeUs": 8460,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13834,
+          "behavioursUs": 5344,
+          "nativeUs": 8451,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21074,
+          "behavioursUs": 6281,
+          "nativeUs": 14750,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14317,
+          "behavioursUs": 5080,
+          "nativeUs": 9198,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13842,
+          "behavioursUs": 5261,
+          "nativeUs": 8542,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13779,
+          "behavioursUs": 5048,
+          "nativeUs": 8692,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13838,
+          "behavioursUs": 5109,
+          "nativeUs": 8690,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13938,
+          "behavioursUs": 5181,
+          "nativeUs": 8718,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21517,
+          "behavioursUs": 6495,
+          "nativeUs": 14983,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14320,
+          "behavioursUs": 5054,
+          "nativeUs": 9228,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13757,
+          "behavioursUs": 5136,
+          "nativeUs": 8583,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13903,
+          "behavioursUs": 5275,
+          "nativeUs": 8588,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13753,
+          "behavioursUs": 5062,
+          "nativeUs": 8652,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13838,
+          "behavioursUs": 5177,
+          "nativeUs": 8621,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23016,
+          "behavioursUs": 7449,
+          "nativeUs": 15523,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14975,
+          "behavioursUs": 5388,
+          "nativeUs": 9541,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13896,
+          "behavioursUs": 5204,
+          "nativeUs": 8652,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13700,
+          "behavioursUs": 5159,
+          "nativeUs": 8502,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13899,
+          "behavioursUs": 5306,
+          "nativeUs": 8552,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14063,
+          "behavioursUs": 5246,
+          "nativeUs": 8772,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21254,
+          "behavioursUs": 6341,
+          "nativeUs": 14874,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14550,
+          "behavioursUs": 5416,
+          "nativeUs": 9096,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13662,
+          "behavioursUs": 5089,
+          "nativeUs": 8535,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13585,
+          "behavioursUs": 5133,
+          "nativeUs": 8415,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13819,
+          "behavioursUs": 5339,
+          "nativeUs": 8441,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13534,
+          "behavioursUs": 5025,
+          "nativeUs": 8471,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20945,
+          "behavioursUs": 6264,
+          "nativeUs": 14642,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14185,
+          "behavioursUs": 5138,
+          "nativeUs": 9009,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13720,
+          "behavioursUs": 5267,
+          "nativeUs": 8413,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13666,
+          "behavioursUs": 5094,
+          "nativeUs": 8533,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13560,
+          "behavioursUs": 5060,
+          "nativeUs": 8462,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13813,
+          "behavioursUs": 5333,
+          "nativeUs": 8442,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21009,
+          "behavioursUs": 6239,
+          "nativeUs": 14732,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14164,
+          "behavioursUs": 5111,
+          "nativeUs": 9014,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13669,
+          "behavioursUs": 5250,
+          "nativeUs": 8379,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14431,
+          "behavioursUs": 5149,
+          "nativeUs": 9232,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14913,
+          "behavioursUs": 5171,
+          "nativeUs": 9701,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13778,
+          "behavioursUs": 5105,
+          "nativeUs": 8629,
+          "ticks": 1
+        },
+        {
+          "totalUs": 22060,
+          "behavioursUs": 7054,
+          "nativeUs": 14964,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14400,
+          "behavioursUs": 5068,
+          "nativeUs": 9293,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13675,
+          "behavioursUs": 5233,
+          "nativeUs": 8404,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14118,
+          "behavioursUs": 5580,
+          "nativeUs": 8497,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13552,
+          "behavioursUs": 5116,
+          "nativeUs": 8397,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13500,
+          "behavioursUs": 5061,
+          "nativeUs": 8401,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21296,
+          "behavioursUs": 6546,
+          "nativeUs": 14709,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14178,
+          "behavioursUs": 5107,
+          "nativeUs": 9030,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13695,
+          "behavioursUs": 5217,
+          "nativeUs": 8439,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13775,
+          "behavioursUs": 5266,
+          "nativeUs": 8468,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14339,
+          "behavioursUs": 5409,
+          "nativeUs": 8889,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13700,
+          "behavioursUs": 5157,
+          "nativeUs": 8502,
+          "ticks": 1
+        },
+        {
+          "totalUs": 22489,
+          "behavioursUs": 6542,
+          "nativeUs": 15901,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16803,
+          "behavioursUs": 6329,
+          "nativeUs": 10420,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14881,
+          "behavioursUs": 5378,
+          "nativeUs": 9458,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14637,
+          "behavioursUs": 5402,
+          "nativeUs": 9190,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15686,
+          "behavioursUs": 5623,
+          "nativeUs": 10003,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16012,
+          "behavioursUs": 5999,
+          "nativeUs": 9963,
+          "ticks": 1
+        },
+        {
+          "totalUs": 22581,
+          "behavioursUs": 6329,
+          "nativeUs": 16203,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14792,
+          "behavioursUs": 5416,
+          "nativeUs": 9322,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14073,
+          "behavioursUs": 5454,
+          "nativeUs": 8575,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15237,
+          "behavioursUs": 5514,
+          "nativeUs": 9662,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14756,
+          "behavioursUs": 5324,
+          "nativeUs": 9389,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14448,
+          "behavioursUs": 5405,
+          "nativeUs": 8998,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21764,
+          "behavioursUs": 6454,
+          "nativeUs": 15267,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14644,
+          "behavioursUs": 5289,
+          "nativeUs": 9313,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14165,
+          "behavioursUs": 5704,
+          "nativeUs": 8421,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13603,
+          "behavioursUs": 5115,
+          "nativeUs": 8449,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13621,
+          "behavioursUs": 5244,
+          "nativeUs": 8338,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13471,
+          "behavioursUs": 5144,
+          "nativeUs": 8289,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21351,
+          "behavioursUs": 6546,
+          "nativeUs": 14765,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14035,
+          "behavioursUs": 5073,
+          "nativeUs": 8919,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13637,
+          "behavioursUs": 5181,
+          "nativeUs": 8417,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13980,
+          "behavioursUs": 5282,
+          "nativeUs": 8659,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13466,
+          "behavioursUs": 5120,
+          "nativeUs": 8308,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13651,
+          "behavioursUs": 5130,
+          "nativeUs": 8480,
+          "ticks": 1
+        },
+        {
+          "totalUs": 22196,
+          "behavioursUs": 7321,
+          "nativeUs": 14830,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14127,
+          "behavioursUs": 5109,
+          "nativeUs": 8975,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13532,
+          "behavioursUs": 5110,
+          "nativeUs": 8381,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13466,
+          "behavioursUs": 5110,
+          "nativeUs": 8318,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13707,
+          "behavioursUs": 5262,
+          "nativeUs": 8407,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13696,
+          "behavioursUs": 5144,
+          "nativeUs": 8509,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21835,
+          "behavioursUs": 6429,
+          "nativeUs": 15360,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16752,
+          "behavioursUs": 5792,
+          "nativeUs": 10916,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13682,
+          "behavioursUs": 5123,
+          "nativeUs": 8519,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13615,
+          "behavioursUs": 5231,
+          "nativeUs": 8346,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13409,
+          "behavioursUs": 5156,
+          "nativeUs": 8208,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15948,
+          "behavioursUs": 5878,
+          "nativeUs": 10019,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21281,
+          "behavioursUs": 6339,
+          "nativeUs": 14898,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14371,
+          "behavioursUs": 5189,
+          "nativeUs": 9144,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13722,
+          "behavioursUs": 5342,
+          "nativeUs": 8341,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13473,
+          "behavioursUs": 5080,
+          "nativeUs": 8353,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13368,
+          "behavioursUs": 5063,
+          "nativeUs": 8262,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13645,
+          "behavioursUs": 5341,
+          "nativeUs": 8262,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20921,
+          "behavioursUs": 6254,
+          "nativeUs": 14627,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14165,
+          "behavioursUs": 5117,
+          "nativeUs": 9004,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13569,
+          "behavioursUs": 5126,
+          "nativeUs": 8400,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13559,
+          "behavioursUs": 5272,
+          "nativeUs": 8249,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13846,
+          "behavioursUs": 5385,
+          "nativeUs": 8422,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13434,
+          "behavioursUs": 5170,
+          "nativeUs": 8226,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21621,
+          "behavioursUs": 6906,
+          "nativeUs": 14675,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14101,
+          "behavioursUs": 5106,
+          "nativeUs": 8956,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13545,
+          "behavioursUs": 5137,
+          "nativeUs": 8369,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13739,
+          "behavioursUs": 5380,
+          "nativeUs": 8320,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13476,
+          "behavioursUs": 5056,
+          "nativeUs": 8382,
+          "ticks": 1
+        }
+      ],
+      "scope": "Mac CPU single fixed tick; no rendering; 40 warmup and 120 measured ticks"
+    },
+    {
+      "enabledWobbles": 300,
+      "authoredWobbles": 300,
+      "entities": 8865,
+      "samples": [
+        {
+          "totalUs": 15800,
+          "behavioursUs": 7710,
+          "nativeUs": 8050,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23294,
+          "behavioursUs": 9080,
+          "nativeUs": 14172,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16354,
+          "behavioursUs": 7737,
+          "nativeUs": 8573,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16071,
+          "behavioursUs": 7906,
+          "nativeUs": 8126,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15752,
+          "behavioursUs": 7702,
+          "nativeUs": 8011,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16436,
+          "behavioursUs": 8212,
+          "nativeUs": 8180,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15739,
+          "behavioursUs": 7651,
+          "nativeUs": 8048,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23116,
+          "behavioursUs": 8852,
+          "nativeUs": 14226,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16344,
+          "behavioursUs": 7614,
+          "nativeUs": 8691,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15973,
+          "behavioursUs": 7762,
+          "nativeUs": 8172,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15814,
+          "behavioursUs": 7628,
+          "nativeUs": 8147,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16173,
+          "behavioursUs": 7920,
+          "nativeUs": 8213,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15934,
+          "behavioursUs": 7637,
+          "nativeUs": 8258,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23579,
+          "behavioursUs": 9002,
+          "nativeUs": 14538,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16700,
+          "behavioursUs": 7710,
+          "nativeUs": 8950,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16486,
+          "behavioursUs": 8004,
+          "nativeUs": 8438,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16481,
+          "behavioursUs": 7754,
+          "nativeUs": 8685,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16424,
+          "behavioursUs": 7743,
+          "nativeUs": 8640,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16244,
+          "behavioursUs": 7755,
+          "nativeUs": 8448,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23641,
+          "behavioursUs": 8861,
+          "nativeUs": 14739,
+          "ticks": 1
+        },
+        {
+          "totalUs": 17012,
+          "behavioursUs": 7794,
+          "nativeUs": 9178,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16363,
+          "behavioursUs": 7723,
+          "nativeUs": 8600,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16768,
+          "behavioursUs": 8093,
+          "nativeUs": 8632,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16409,
+          "behavioursUs": 7691,
+          "nativeUs": 8678,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16661,
+          "behavioursUs": 7811,
+          "nativeUs": 8809,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23928,
+          "behavioursUs": 8883,
+          "nativeUs": 14995,
+          "ticks": 1
+        },
+        {
+          "totalUs": 17620,
+          "behavioursUs": 7994,
+          "nativeUs": 9584,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16867,
+          "behavioursUs": 7855,
+          "nativeUs": 8970,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16621,
+          "behavioursUs": 7889,
+          "nativeUs": 8692,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16426,
+          "behavioursUs": 7738,
+          "nativeUs": 8646,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16643,
+          "behavioursUs": 7821,
+          "nativeUs": 8780,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23740,
+          "behavioursUs": 8898,
+          "nativeUs": 14802,
+          "ticks": 1
+        },
+        {
+          "totalUs": 17042,
+          "behavioursUs": 7871,
+          "nativeUs": 9132,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16168,
+          "behavioursUs": 7663,
+          "nativeUs": 8466,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16515,
+          "behavioursUs": 7964,
+          "nativeUs": 8511,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16412,
+          "behavioursUs": 7735,
+          "nativeUs": 8639,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16241,
+          "behavioursUs": 7736,
+          "nativeUs": 8466,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23652,
+          "behavioursUs": 8917,
+          "nativeUs": 14696,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16908,
+          "behavioursUs": 7690,
+          "nativeUs": 9179,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16304,
+          "behavioursUs": 7758,
+          "nativeUs": 8500,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16192,
+          "behavioursUs": 7718,
+          "nativeUs": 8433,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16754,
+          "behavioursUs": 8209,
+          "nativeUs": 8506,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16200,
+          "behavioursUs": 7668,
+          "nativeUs": 8492,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23812,
+          "behavioursUs": 8962,
+          "nativeUs": 14809,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18171,
+          "behavioursUs": 8108,
+          "nativeUs": 10014,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18407,
+          "behavioursUs": 8465,
+          "nativeUs": 9892,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16980,
+          "behavioursUs": 8176,
+          "nativeUs": 8763,
+          "ticks": 1
+        },
+        {
+          "totalUs": 17105,
+          "behavioursUs": 7969,
+          "nativeUs": 9092,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16222,
+          "behavioursUs": 7648,
+          "nativeUs": 8532,
+          "ticks": 1
+        },
+        {
+          "totalUs": 24045,
+          "behavioursUs": 9048,
+          "nativeUs": 14954,
+          "ticks": 1
+        },
+        {
+          "totalUs": 17989,
+          "behavioursUs": 8011,
+          "nativeUs": 9935,
+          "ticks": 1
+        },
+        {
+          "totalUs": 17196,
+          "behavioursUs": 8151,
+          "nativeUs": 9001,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16714,
+          "behavioursUs": 7838,
+          "nativeUs": 8834,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16440,
+          "behavioursUs": 7805,
+          "nativeUs": 8587,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18995,
+          "behavioursUs": 8560,
+          "nativeUs": 10387,
+          "ticks": 1
+        },
+        {
+          "totalUs": 24832,
+          "behavioursUs": 9308,
+          "nativeUs": 15481,
+          "ticks": 1
+        },
+        {
+          "totalUs": 17251,
+          "behavioursUs": 7904,
+          "nativeUs": 9306,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16229,
+          "behavioursUs": 7718,
+          "nativeUs": 8468,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16684,
+          "behavioursUs": 8093,
+          "nativeUs": 8551,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16247,
+          "behavioursUs": 7748,
+          "nativeUs": 8459,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16272,
+          "behavioursUs": 7723,
+          "nativeUs": 8509,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23623,
+          "behavioursUs": 8903,
+          "nativeUs": 14680,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16926,
+          "behavioursUs": 7774,
+          "nativeUs": 9112,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16140,
+          "behavioursUs": 7602,
+          "nativeUs": 8499,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16728,
+          "behavioursUs": 7934,
+          "nativeUs": 8753,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16144,
+          "behavioursUs": 7627,
+          "nativeUs": 8478,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16173,
+          "behavioursUs": 7717,
+          "nativeUs": 8413,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23527,
+          "behavioursUs": 8814,
+          "nativeUs": 14671,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16908,
+          "behavioursUs": 7827,
+          "nativeUs": 9039,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16054,
+          "behavioursUs": 7634,
+          "nativeUs": 8380,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16107,
+          "behavioursUs": 7675,
+          "nativeUs": 8392,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16311,
+          "behavioursUs": 7843,
+          "nativeUs": 8425,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16910,
+          "behavioursUs": 7912,
+          "nativeUs": 8955,
+          "ticks": 1
+        },
+        {
+          "totalUs": 25192,
+          "behavioursUs": 9756,
+          "nativeUs": 15394,
+          "ticks": 1
+        },
+        {
+          "totalUs": 17813,
+          "behavioursUs": 7888,
+          "nativeUs": 9878,
+          "ticks": 1
+        },
+        {
+          "totalUs": 17584,
+          "behavioursUs": 8650,
+          "nativeUs": 8890,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16625,
+          "behavioursUs": 8163,
+          "nativeUs": 8419,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16459,
+          "behavioursUs": 8006,
+          "nativeUs": 8413,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16087,
+          "behavioursUs": 7694,
+          "nativeUs": 8353,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23609,
+          "behavioursUs": 8902,
+          "nativeUs": 14667,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16805,
+          "behavioursUs": 7621,
+          "nativeUs": 9141,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16085,
+          "behavioursUs": 7734,
+          "nativeUs": 8311,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16068,
+          "behavioursUs": 7698,
+          "nativeUs": 8330,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16356,
+          "behavioursUs": 7919,
+          "nativeUs": 8397,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16164,
+          "behavioursUs": 7738,
+          "nativeUs": 8387,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23723,
+          "behavioursUs": 9020,
+          "nativeUs": 14655,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16665,
+          "behavioursUs": 7704,
+          "nativeUs": 8921,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16414,
+          "behavioursUs": 7941,
+          "nativeUs": 8433,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16016,
+          "behavioursUs": 7583,
+          "nativeUs": 8395,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16003,
+          "behavioursUs": 7667,
+          "nativeUs": 8296,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16137,
+          "behavioursUs": 7671,
+          "nativeUs": 8427,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23412,
+          "behavioursUs": 8845,
+          "nativeUs": 14525,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16879,
+          "behavioursUs": 7829,
+          "nativeUs": 9011,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15991,
+          "behavioursUs": 7647,
+          "nativeUs": 8305,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16378,
+          "behavioursUs": 8032,
+          "nativeUs": 8305,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16061,
+          "behavioursUs": 7640,
+          "nativeUs": 8382,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16036,
+          "behavioursUs": 7704,
+          "nativeUs": 8294,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23663,
+          "behavioursUs": 8843,
+          "nativeUs": 14780,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16643,
+          "behavioursUs": 7759,
+          "nativeUs": 8843,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16230,
+          "behavioursUs": 7680,
+          "nativeUs": 8509,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18717,
+          "behavioursUs": 9301,
+          "nativeUs": 9371,
+          "ticks": 1
+        },
+        {
+          "totalUs": 17918,
+          "behavioursUs": 8314,
+          "nativeUs": 9537,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18296,
+          "behavioursUs": 8332,
+          "nativeUs": 9879,
+          "ticks": 1
+        },
+        {
+          "totalUs": 25065,
+          "behavioursUs": 9583,
+          "nativeUs": 15434,
+          "ticks": 1
+        },
+        {
+          "totalUs": 17177,
+          "behavioursUs": 7854,
+          "nativeUs": 9278,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16033,
+          "behavioursUs": 7645,
+          "nativeUs": 8346,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16357,
+          "behavioursUs": 7773,
+          "nativeUs": 8543,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16124,
+          "behavioursUs": 7835,
+          "nativeUs": 8248,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16069,
+          "behavioursUs": 7653,
+          "nativeUs": 8377,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23409,
+          "behavioursUs": 8838,
+          "nativeUs": 14532,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16642,
+          "behavioursUs": 7694,
+          "nativeUs": 8908,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16208,
+          "behavioursUs": 7797,
+          "nativeUs": 8373,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16216,
+          "behavioursUs": 7687,
+          "nativeUs": 8489,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16487,
+          "behavioursUs": 8120,
+          "nativeUs": 8328,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16048,
+          "behavioursUs": 7671,
+          "nativeUs": 8338,
+          "ticks": 1
+        },
+        {
+          "totalUs": 23467,
+          "behavioursUs": 8873,
+          "nativeUs": 14555,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16521,
+          "behavioursUs": 7608,
+          "nativeUs": 8873,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16372,
+          "behavioursUs": 7833,
+          "nativeUs": 8498,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16029,
+          "behavioursUs": 7638,
+          "nativeUs": 8352,
+          "ticks": 1
+        },
+        {
+          "totalUs": 16348,
+          "behavioursUs": 7880,
+          "nativeUs": 8430,
+          "ticks": 1
+        }
+      ],
+      "scope": "Mac CPU single fixed tick; no rendering; 40 warmup and 120 measured ticks"
+    }
+  ],
+  "beforeMediansUs": [
+    {
+      "enabledWobbles": 0,
+      "totalUs": 13835.5,
+      "behavioursUs": 5032.0,
+      "nativeUs": 8748.0
+    },
+    {
+      "enabledWobbles": 30,
+      "totalUs": 13897.5,
+      "behavioursUs": 5248.5,
+      "nativeUs": 8625.0
+    },
+    {
+      "enabledWobbles": 300,
+      "totalUs": 16486.5,
+      "behavioursUs": 7828.0,
+      "nativeUs": 8635.5
+    }
+  ],
+  "beforeBundleHashes": {
+    "target/f8-cpu-after/bundle/bin/cpu": "5e79b391d33588706ea970c42447bb6b4222a22743f055868a21d0c0b9fd0f08",
+    "target/f8-cpu-after/bundle/lib/objective_c.dylib": "e7eef37c588628ee65e1cc38aeaaf7e9b21595249ccc1d7b522d5835d85b2e3d",
+    "target/f8-cpu-after/bundle/lib/libfynkel_platform_apple.dylib": "609b6c96a55e6a37f76b0a1c945ece11a7dff1a27a461fb5d0196e378f2c76fa"
+  },
+  "after": [
+    {
+      "enabledWobbles": 0,
+      "authoredWobbles": 300,
+      "entities": 8865,
+      "samples": [
+        {
+          "totalUs": 10812,
+          "behavioursUs": 2870,
+          "nativeUs": 7901,
+          "ticks": 1
+        },
+        {
+          "totalUs": 17900,
+          "behavioursUs": 3752,
+          "nativeUs": 14108,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11293,
+          "behavioursUs": 2706,
+          "nativeUs": 8547,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10827,
+          "behavioursUs": 2839,
+          "nativeUs": 7950,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10524,
+          "behavioursUs": 2629,
+          "nativeUs": 7858,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10623,
+          "behavioursUs": 2613,
+          "nativeUs": 7967,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10747,
+          "behavioursUs": 2671,
+          "nativeUs": 8036,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18159,
+          "behavioursUs": 4001,
+          "nativeUs": 14119,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11243,
+          "behavioursUs": 2599,
+          "nativeUs": 8605,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10730,
+          "behavioursUs": 2625,
+          "nativeUs": 8067,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10737,
+          "behavioursUs": 2642,
+          "nativeUs": 8058,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10963,
+          "behavioursUs": 2761,
+          "nativeUs": 8164,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10823,
+          "behavioursUs": 2592,
+          "nativeUs": 8193,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18406,
+          "behavioursUs": 3945,
+          "nativeUs": 14422,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11954,
+          "behavioursUs": 2657,
+          "nativeUs": 9257,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11822,
+          "behavioursUs": 2706,
+          "nativeUs": 9073,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11546,
+          "behavioursUs": 2762,
+          "nativeUs": 8736,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11505,
+          "behavioursUs": 2736,
+          "nativeUs": 8724,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11508,
+          "behavioursUs": 2975,
+          "nativeUs": 8493,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18505,
+          "behavioursUs": 3757,
+          "nativeUs": 14708,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11853,
+          "behavioursUs": 2665,
+          "nativeUs": 9150,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11389,
+          "behavioursUs": 2838,
+          "nativeUs": 8513,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11303,
+          "behavioursUs": 2631,
+          "nativeUs": 8634,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11334,
+          "behavioursUs": 2661,
+          "nativeUs": 8631,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11390,
+          "behavioursUs": 2710,
+          "nativeUs": 8634,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18939,
+          "behavioursUs": 4035,
+          "nativeUs": 14863,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12176,
+          "behavioursUs": 2664,
+          "nativeUs": 9471,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11384,
+          "behavioursUs": 2659,
+          "nativeUs": 8687,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11584,
+          "behavioursUs": 2908,
+          "nativeUs": 8638,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11128,
+          "behavioursUs": 2596,
+          "nativeUs": 8495,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11153,
+          "behavioursUs": 2614,
+          "nativeUs": 8501,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18500,
+          "behavioursUs": 3791,
+          "nativeUs": 14671,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11963,
+          "behavioursUs": 2832,
+          "nativeUs": 9092,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11207,
+          "behavioursUs": 2607,
+          "nativeUs": 8561,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11073,
+          "behavioursUs": 2598,
+          "nativeUs": 8437,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11200,
+          "behavioursUs": 2652,
+          "nativeUs": 8509,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11626,
+          "behavioursUs": 2918,
+          "nativeUs": 8667,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18896,
+          "behavioursUs": 3852,
+          "nativeUs": 15003,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12049,
+          "behavioursUs": 2694,
+          "nativeUs": 9314,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11566,
+          "behavioursUs": 2812,
+          "nativeUs": 8715,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11247,
+          "behavioursUs": 2641,
+          "nativeUs": 8567,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11405,
+          "behavioursUs": 2686,
+          "nativeUs": 8679,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11311,
+          "behavioursUs": 2710,
+          "nativeUs": 8561,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18998,
+          "behavioursUs": 4078,
+          "nativeUs": 14879,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11901,
+          "behavioursUs": 2673,
+          "nativeUs": 9187,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11051,
+          "behavioursUs": 2644,
+          "nativeUs": 8367,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11224,
+          "behavioursUs": 2837,
+          "nativeUs": 8348,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11056,
+          "behavioursUs": 2618,
+          "nativeUs": 8400,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11116,
+          "behavioursUs": 2662,
+          "nativeUs": 8415,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18367,
+          "behavioursUs": 3823,
+          "nativeUs": 14504,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11864,
+          "behavioursUs": 2901,
+          "nativeUs": 8925,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10987,
+          "behavioursUs": 2612,
+          "nativeUs": 8337,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11175,
+          "behavioursUs": 2640,
+          "nativeUs": 8496,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11260,
+          "behavioursUs": 2904,
+          "nativeUs": 8319,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10911,
+          "behavioursUs": 2627,
+          "nativeUs": 8248,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18650,
+          "behavioursUs": 3953,
+          "nativeUs": 14652,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12165,
+          "behavioursUs": 2723,
+          "nativeUs": 9401,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11423,
+          "behavioursUs": 2881,
+          "nativeUs": 8503,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11034,
+          "behavioursUs": 2623,
+          "nativeUs": 8372,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11057,
+          "behavioursUs": 2695,
+          "nativeUs": 8324,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11193,
+          "behavioursUs": 2665,
+          "nativeUs": 8488,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18713,
+          "behavioursUs": 4021,
+          "nativeUs": 14654,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11680,
+          "behavioursUs": 2657,
+          "nativeUs": 8985,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11059,
+          "behavioursUs": 2645,
+          "nativeUs": 8377,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11291,
+          "behavioursUs": 2783,
+          "nativeUs": 8469,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10958,
+          "behavioursUs": 2638,
+          "nativeUs": 8283,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10975,
+          "behavioursUs": 2652,
+          "nativeUs": 8285,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18492,
+          "behavioursUs": 3891,
+          "nativeUs": 14560,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12449,
+          "behavioursUs": 2934,
+          "nativeUs": 9474,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11218,
+          "behavioursUs": 2620,
+          "nativeUs": 8557,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10989,
+          "behavioursUs": 2623,
+          "nativeUs": 8327,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11226,
+          "behavioursUs": 2857,
+          "nativeUs": 8330,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10967,
+          "behavioursUs": 2631,
+          "nativeUs": 8297,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18467,
+          "behavioursUs": 3791,
+          "nativeUs": 14634,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11556,
+          "behavioursUs": 2652,
+          "nativeUs": 8863,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11256,
+          "behavioursUs": 2872,
+          "nativeUs": 8345,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10963,
+          "behavioursUs": 2605,
+          "nativeUs": 8320,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10920,
+          "behavioursUs": 2627,
+          "nativeUs": 8254,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10921,
+          "behavioursUs": 2646,
+          "nativeUs": 8238,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18472,
+          "behavioursUs": 3977,
+          "nativeUs": 14457,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11555,
+          "behavioursUs": 2644,
+          "nativeUs": 8872,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10936,
+          "behavioursUs": 2642,
+          "nativeUs": 8256,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11008,
+          "behavioursUs": 2782,
+          "nativeUs": 8189,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10975,
+          "behavioursUs": 2672,
+          "nativeUs": 8263,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10944,
+          "behavioursUs": 2639,
+          "nativeUs": 8266,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18290,
+          "behavioursUs": 3847,
+          "nativeUs": 14404,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11752,
+          "behavioursUs": 2882,
+          "nativeUs": 8832,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11042,
+          "behavioursUs": 2648,
+          "nativeUs": 8355,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10877,
+          "behavioursUs": 2620,
+          "nativeUs": 8219,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11114,
+          "behavioursUs": 2880,
+          "nativeUs": 8196,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10815,
+          "behavioursUs": 2630,
+          "nativeUs": 8148,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18311,
+          "behavioursUs": 3740,
+          "nativeUs": 14532,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11481,
+          "behavioursUs": 2642,
+          "nativeUs": 8802,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11132,
+          "behavioursUs": 2851,
+          "nativeUs": 8244,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11092,
+          "behavioursUs": 2653,
+          "nativeUs": 8400,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11535,
+          "behavioursUs": 2693,
+          "nativeUs": 8800,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11420,
+          "behavioursUs": 2853,
+          "nativeUs": 8525,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18982,
+          "behavioursUs": 4057,
+          "nativeUs": 14883,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11689,
+          "behavioursUs": 2645,
+          "nativeUs": 9004,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10926,
+          "behavioursUs": 2647,
+          "nativeUs": 8241,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11135,
+          "behavioursUs": 2861,
+          "nativeUs": 8236,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10795,
+          "behavioursUs": 2605,
+          "nativeUs": 8152,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10909,
+          "behavioursUs": 2671,
+          "nativeUs": 8201,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18326,
+          "behavioursUs": 3772,
+          "nativeUs": 14514,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12238,
+          "behavioursUs": 2841,
+          "nativeUs": 9357,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10932,
+          "behavioursUs": 2654,
+          "nativeUs": 8237,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10980,
+          "behavioursUs": 2677,
+          "nativeUs": 8263,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11515,
+          "behavioursUs": 2888,
+          "nativeUs": 8587,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11126,
+          "behavioursUs": 2739,
+          "nativeUs": 8346,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18365,
+          "behavioursUs": 3808,
+          "nativeUs": 14518,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11528,
+          "behavioursUs": 2652,
+          "nativeUs": 8838,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11149,
+          "behavioursUs": 2878,
+          "nativeUs": 8233,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10872,
+          "behavioursUs": 2632,
+          "nativeUs": 8202,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11223,
+          "behavioursUs": 2690,
+          "nativeUs": 8492,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11429,
+          "behavioursUs": 2739,
+          "nativeUs": 8649,
+          "ticks": 1
+        },
+        {
+          "totalUs": 19146,
+          "behavioursUs": 4001,
+          "nativeUs": 15103,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11784,
+          "behavioursUs": 2673,
+          "nativeUs": 9071,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11185,
+          "behavioursUs": 2766,
+          "nativeUs": 8380,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11242,
+          "behavioursUs": 2878,
+          "nativeUs": 8324,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11695,
+          "behavioursUs": 2803,
+          "nativeUs": 8850,
+          "ticks": 1
+        }
+      ],
+      "scope": "Mac CPU single fixed tick; no rendering; 40 warmup and 120 measured ticks"
+    },
+    {
+      "enabledWobbles": 30,
+      "authoredWobbles": 300,
+      "entities": 8865,
+      "samples": [
+        {
+          "totalUs": 10717,
+          "behavioursUs": 2887,
+          "nativeUs": 7793,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18400,
+          "behavioursUs": 4309,
+          "nativeUs": 14052,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11276,
+          "behavioursUs": 2792,
+          "nativeUs": 8445,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11044,
+          "behavioursUs": 2883,
+          "nativeUs": 8121,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11513,
+          "behavioursUs": 2926,
+          "nativeUs": 8546,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11651,
+          "behavioursUs": 3080,
+          "nativeUs": 8528,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11226,
+          "behavioursUs": 2886,
+          "nativeUs": 8299,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18422,
+          "behavioursUs": 4078,
+          "nativeUs": 14302,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11885,
+          "behavioursUs": 3107,
+          "nativeUs": 8739,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11005,
+          "behavioursUs": 2858,
+          "nativeUs": 8109,
+          "ticks": 1
+        },
+        {
+          "totalUs": 10989,
+          "behavioursUs": 2913,
+          "nativeUs": 8037,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11263,
+          "behavioursUs": 3086,
+          "nativeUs": 8139,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11140,
+          "behavioursUs": 2865,
+          "nativeUs": 8236,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18480,
+          "behavioursUs": 3991,
+          "nativeUs": 14450,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11747,
+          "behavioursUs": 2876,
+          "nativeUs": 8832,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11312,
+          "behavioursUs": 2973,
+          "nativeUs": 8298,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11577,
+          "behavioursUs": 2892,
+          "nativeUs": 8642,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11219,
+          "behavioursUs": 2843,
+          "nativeUs": 8339,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11433,
+          "behavioursUs": 3112,
+          "nativeUs": 8284,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18664,
+          "behavioursUs": 4010,
+          "nativeUs": 14615,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11943,
+          "behavioursUs": 2823,
+          "nativeUs": 9082,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11485,
+          "behavioursUs": 2998,
+          "nativeUs": 8448,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11471,
+          "behavioursUs": 2802,
+          "nativeUs": 8628,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11605,
+          "behavioursUs": 2896,
+          "nativeUs": 8671,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11509,
+          "behavioursUs": 2836,
+          "nativeUs": 8634,
+          "ticks": 1
+        },
+        {
+          "totalUs": 19023,
+          "behavioursUs": 4181,
+          "nativeUs": 14803,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12082,
+          "behavioursUs": 2853,
+          "nativeUs": 9191,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11507,
+          "behavioursUs": 2853,
+          "nativeUs": 8616,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11596,
+          "behavioursUs": 2998,
+          "nativeUs": 8560,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11458,
+          "behavioursUs": 2855,
+          "nativeUs": 8564,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11548,
+          "behavioursUs": 2846,
+          "nativeUs": 8663,
+          "ticks": 1
+        },
+        {
+          "totalUs": 19698,
+          "behavioursUs": 4987,
+          "nativeUs": 14669,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12082,
+          "behavioursUs": 3024,
+          "nativeUs": 9018,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11281,
+          "behavioursUs": 2843,
+          "nativeUs": 8398,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11711,
+          "behavioursUs": 2890,
+          "nativeUs": 8780,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11495,
+          "behavioursUs": 2972,
+          "nativeUs": 8485,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11240,
+          "behavioursUs": 2810,
+          "nativeUs": 8392,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18710,
+          "behavioursUs": 3979,
+          "nativeUs": 14691,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12047,
+          "behavioursUs": 2973,
+          "nativeUs": 9035,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11338,
+          "behavioursUs": 2843,
+          "nativeUs": 8457,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11294,
+          "behavioursUs": 2844,
+          "nativeUs": 8410,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11420,
+          "behavioursUs": 3032,
+          "nativeUs": 8349,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11248,
+          "behavioursUs": 2805,
+          "nativeUs": 8404,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18616,
+          "behavioursUs": 4022,
+          "nativeUs": 14553,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12416,
+          "behavioursUs": 2973,
+          "nativeUs": 9397,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11555,
+          "behavioursUs": 2988,
+          "nativeUs": 8528,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11364,
+          "behavioursUs": 2862,
+          "nativeUs": 8464,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11421,
+          "behavioursUs": 2860,
+          "nativeUs": 8522,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11482,
+          "behavioursUs": 3034,
+          "nativeUs": 8405,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18610,
+          "behavioursUs": 3960,
+          "nativeUs": 14610,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11876,
+          "behavioursUs": 2836,
+          "nativeUs": 9002,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11374,
+          "behavioursUs": 2967,
+          "nativeUs": 8369,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11285,
+          "behavioursUs": 2840,
+          "nativeUs": 8408,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11203,
+          "behavioursUs": 2868,
+          "nativeUs": 8297,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11171,
+          "behavioursUs": 2821,
+          "nativeUs": 8312,
+          "ticks": 1
+        },
+        {
+          "totalUs": 19233,
+          "behavioursUs": 4581,
+          "nativeUs": 14613,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11828,
+          "behavioursUs": 2831,
+          "nativeUs": 8958,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11531,
+          "behavioursUs": 2927,
+          "nativeUs": 8559,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11756,
+          "behavioursUs": 3018,
+          "nativeUs": 8698,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11368,
+          "behavioursUs": 2857,
+          "nativeUs": 8471,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11313,
+          "behavioursUs": 2834,
+          "nativeUs": 8441,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18887,
+          "behavioursUs": 4285,
+          "nativeUs": 14563,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11805,
+          "behavioursUs": 2816,
+          "nativeUs": 8951,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11256,
+          "behavioursUs": 2855,
+          "nativeUs": 8364,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11314,
+          "behavioursUs": 2938,
+          "nativeUs": 8338,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11360,
+          "behavioursUs": 3014,
+          "nativeUs": 8309,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11108,
+          "behavioursUs": 2810,
+          "nativeUs": 8260,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18504,
+          "behavioursUs": 3994,
+          "nativeUs": 14466,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12141,
+          "behavioursUs": 3199,
+          "nativeUs": 8902,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11157,
+          "behavioursUs": 2795,
+          "nativeUs": 8324,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11209,
+          "behavioursUs": 2861,
+          "nativeUs": 8309,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11319,
+          "behavioursUs": 2986,
+          "nativeUs": 8295,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11145,
+          "behavioursUs": 2893,
+          "nativeUs": 8215,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18534,
+          "behavioursUs": 4030,
+          "nativeUs": 14465,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11683,
+          "behavioursUs": 2826,
+          "nativeUs": 8819,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11251,
+          "behavioursUs": 2946,
+          "nativeUs": 8268,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11107,
+          "behavioursUs": 2855,
+          "nativeUs": 8215,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11070,
+          "behavioursUs": 2835,
+          "nativeUs": 8197,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11312,
+          "behavioursUs": 3044,
+          "nativeUs": 8230,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18621,
+          "behavioursUs": 4048,
+          "nativeUs": 14533,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11773,
+          "behavioursUs": 2818,
+          "nativeUs": 8914,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11293,
+          "behavioursUs": 2969,
+          "nativeUs": 8284,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11733,
+          "behavioursUs": 3015,
+          "nativeUs": 8678,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11927,
+          "behavioursUs": 2891,
+          "nativeUs": 8995,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11840,
+          "behavioursUs": 2915,
+          "nativeUs": 8883,
+          "ticks": 1
+        },
+        {
+          "totalUs": 19247,
+          "behavioursUs": 4216,
+          "nativeUs": 14987,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11836,
+          "behavioursUs": 2818,
+          "nativeUs": 8972,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11331,
+          "behavioursUs": 2838,
+          "nativeUs": 8452,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11347,
+          "behavioursUs": 2984,
+          "nativeUs": 8324,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11146,
+          "behavioursUs": 2790,
+          "nativeUs": 8317,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11164,
+          "behavioursUs": 2851,
+          "nativeUs": 8275,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20096,
+          "behavioursUs": 5604,
+          "nativeUs": 14452,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11769,
+          "behavioursUs": 2835,
+          "nativeUs": 8894,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11300,
+          "behavioursUs": 2911,
+          "nativeUs": 8346,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11530,
+          "behavioursUs": 3023,
+          "nativeUs": 8463,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11542,
+          "behavioursUs": 2928,
+          "nativeUs": 8572,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11178,
+          "behavioursUs": 2831,
+          "nativeUs": 8309,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18455,
+          "behavioursUs": 3964,
+          "nativeUs": 14453,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11790,
+          "behavioursUs": 2979,
+          "nativeUs": 8773,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11172,
+          "behavioursUs": 2848,
+          "nativeUs": 8285,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11129,
+          "behavioursUs": 2841,
+          "nativeUs": 8249,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11333,
+          "behavioursUs": 2842,
+          "nativeUs": 8448,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11285,
+          "behavioursUs": 3035,
+          "nativeUs": 8210,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18685,
+          "behavioursUs": 3971,
+          "nativeUs": 14673,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11860,
+          "behavioursUs": 2890,
+          "nativeUs": 8931,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11381,
+          "behavioursUs": 2993,
+          "nativeUs": 8350,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11219,
+          "behavioursUs": 2867,
+          "nativeUs": 8312,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11215,
+          "behavioursUs": 2852,
+          "nativeUs": 8324,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11468,
+          "behavioursUs": 3056,
+          "nativeUs": 8371,
+          "ticks": 1
+        },
+        {
+          "totalUs": 18656,
+          "behavioursUs": 3999,
+          "nativeUs": 14617,
+          "ticks": 1
+        },
+        {
+          "totalUs": 11873,
+          "behavioursUs": 2857,
+          "nativeUs": 8977,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12202,
+          "behavioursUs": 2945,
+          "nativeUs": 9215,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12404,
+          "behavioursUs": 3129,
+          "nativeUs": 9231,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12317,
+          "behavioursUs": 2908,
+          "nativeUs": 9365,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12227,
+          "behavioursUs": 3144,
+          "nativeUs": 9031,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20461,
+          "behavioursUs": 4684,
+          "nativeUs": 15729,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12729,
+          "behavioursUs": 3101,
+          "nativeUs": 9576,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12080,
+          "behavioursUs": 3016,
+          "nativeUs": 9021,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12837,
+          "behavioursUs": 3526,
+          "nativeUs": 9259,
+          "ticks": 1
+        },
+        {
+          "totalUs": 12272,
+          "behavioursUs": 3035,
+          "nativeUs": 9191,
+          "ticks": 1
+        }
+      ],
+      "scope": "Mac CPU single fixed tick; no rendering; 40 warmup and 120 measured ticks"
+    },
+    {
+      "enabledWobbles": 300,
+      "authoredWobbles": 300,
+      "entities": 8865,
+      "samples": [
+        {
+          "totalUs": 13445,
+          "behavioursUs": 4790,
+          "nativeUs": 8604,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20733,
+          "behavioursUs": 6003,
+          "nativeUs": 14687,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13548,
+          "behavioursUs": 4727,
+          "nativeUs": 8778,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13143,
+          "behavioursUs": 4942,
+          "nativeUs": 8136,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13321,
+          "behavioursUs": 4750,
+          "nativeUs": 8527,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14256,
+          "behavioursUs": 5352,
+          "nativeUs": 8858,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13827,
+          "behavioursUs": 5042,
+          "nativeUs": 8736,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21754,
+          "behavioursUs": 6195,
+          "nativeUs": 15513,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14507,
+          "behavioursUs": 4934,
+          "nativeUs": 9526,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14151,
+          "behavioursUs": 5175,
+          "nativeUs": 8920,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13756,
+          "behavioursUs": 4821,
+          "nativeUs": 8885,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14440,
+          "behavioursUs": 5298,
+          "nativeUs": 9095,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14140,
+          "behavioursUs": 4895,
+          "nativeUs": 9198,
+          "ticks": 1
+        },
+        {
+          "totalUs": 22744,
+          "behavioursUs": 6765,
+          "nativeUs": 15931,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14906,
+          "behavioursUs": 4825,
+          "nativeUs": 10037,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14639,
+          "behavioursUs": 5187,
+          "nativeUs": 9406,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14275,
+          "behavioursUs": 4888,
+          "nativeUs": 9341,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14109,
+          "behavioursUs": 4820,
+          "nativeUs": 9245,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14537,
+          "behavioursUs": 5106,
+          "nativeUs": 9388,
+          "ticks": 1
+        },
+        {
+          "totalUs": 22349,
+          "behavioursUs": 6386,
+          "nativeUs": 15917,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15121,
+          "behavioursUs": 5142,
+          "nativeUs": 9928,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14248,
+          "behavioursUs": 5076,
+          "nativeUs": 9127,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14240,
+          "behavioursUs": 5204,
+          "nativeUs": 8992,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13947,
+          "behavioursUs": 4669,
+          "nativeUs": 9234,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13873,
+          "behavioursUs": 4752,
+          "nativeUs": 9078,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21132,
+          "behavioursUs": 5900,
+          "nativeUs": 15188,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14609,
+          "behavioursUs": 4871,
+          "nativeUs": 9689,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15157,
+          "behavioursUs": 4823,
+          "nativeUs": 10287,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14245,
+          "behavioursUs": 5037,
+          "nativeUs": 9166,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13757,
+          "behavioursUs": 4848,
+          "nativeUs": 8866,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13811,
+          "behavioursUs": 4871,
+          "nativeUs": 8898,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21352,
+          "behavioursUs": 5968,
+          "nativeUs": 15343,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14453,
+          "behavioursUs": 4916,
+          "nativeUs": 9493,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13482,
+          "behavioursUs": 4725,
+          "nativeUs": 8714,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13718,
+          "behavioursUs": 4958,
+          "nativeUs": 8718,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13495,
+          "behavioursUs": 4714,
+          "nativeUs": 8740,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13361,
+          "behavioursUs": 4707,
+          "nativeUs": 8613,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21098,
+          "behavioursUs": 5999,
+          "nativeUs": 15057,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14167,
+          "behavioursUs": 4752,
+          "nativeUs": 9374,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13678,
+          "behavioursUs": 4821,
+          "nativeUs": 8816,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13420,
+          "behavioursUs": 4787,
+          "nativeUs": 8593,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13790,
+          "behavioursUs": 5202,
+          "nativeUs": 8549,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13374,
+          "behavioursUs": 4755,
+          "nativeUs": 8579,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21101,
+          "behavioursUs": 5948,
+          "nativeUs": 15112,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14079,
+          "behavioursUs": 4693,
+          "nativeUs": 9340,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13484,
+          "behavioursUs": 4852,
+          "nativeUs": 8587,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13375,
+          "behavioursUs": 4720,
+          "nativeUs": 8611,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13692,
+          "behavioursUs": 4844,
+          "nativeUs": 8806,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13452,
+          "behavioursUs": 4706,
+          "nativeUs": 8702,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21392,
+          "behavioursUs": 6167,
+          "nativeUs": 15177,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14297,
+          "behavioursUs": 4851,
+          "nativeUs": 9403,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13975,
+          "behavioursUs": 4894,
+          "nativeUs": 9039,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13845,
+          "behavioursUs": 4605,
+          "nativeUs": 9197,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13422,
+          "behavioursUs": 4689,
+          "nativeUs": 8692,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13316,
+          "behavioursUs": 4795,
+          "nativeUs": 8480,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20696,
+          "behavioursUs": 5775,
+          "nativeUs": 14877,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13931,
+          "behavioursUs": 4876,
+          "nativeUs": 9015,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15514,
+          "behavioursUs": 5004,
+          "nativeUs": 10465,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15347,
+          "behavioursUs": 5820,
+          "nativeUs": 9478,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15211,
+          "behavioursUs": 5515,
+          "nativeUs": 9647,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13849,
+          "behavioursUs": 4880,
+          "nativeUs": 8924,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21122,
+          "behavioursUs": 5967,
+          "nativeUs": 15107,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14295,
+          "behavioursUs": 4815,
+          "nativeUs": 9432,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13356,
+          "behavioursUs": 4686,
+          "nativeUs": 8628,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13354,
+          "behavioursUs": 4880,
+          "nativeUs": 8433,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13723,
+          "behavioursUs": 4693,
+          "nativeUs": 8978,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15644,
+          "behavioursUs": 5431,
+          "nativeUs": 10158,
+          "ticks": 1
+        },
+        {
+          "totalUs": 21633,
+          "behavioursUs": 6052,
+          "nativeUs": 15532,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14357,
+          "behavioursUs": 4857,
+          "nativeUs": 9460,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13255,
+          "behavioursUs": 4728,
+          "nativeUs": 8485,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13225,
+          "behavioursUs": 4707,
+          "nativeUs": 8478,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14016,
+          "behavioursUs": 5094,
+          "nativeUs": 8880,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13561,
+          "behavioursUs": 4630,
+          "nativeUs": 8891,
+          "ticks": 1
+        },
+        {
+          "totalUs": 22386,
+          "behavioursUs": 6581,
+          "nativeUs": 15751,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14212,
+          "behavioursUs": 4778,
+          "nativeUs": 9388,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13645,
+          "behavioursUs": 4936,
+          "nativeUs": 8667,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13825,
+          "behavioursUs": 4807,
+          "nativeUs": 8976,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13909,
+          "behavioursUs": 5282,
+          "nativeUs": 8582,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13145,
+          "behavioursUs": 4669,
+          "nativeUs": 8436,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20612,
+          "behavioursUs": 5886,
+          "nativeUs": 14686,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13688,
+          "behavioursUs": 4641,
+          "nativeUs": 9007,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13275,
+          "behavioursUs": 4738,
+          "nativeUs": 8495,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13167,
+          "behavioursUs": 4743,
+          "nativeUs": 8382,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13282,
+          "behavioursUs": 4878,
+          "nativeUs": 8360,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13434,
+          "behavioursUs": 4791,
+          "nativeUs": 8597,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20810,
+          "behavioursUs": 6015,
+          "nativeUs": 14754,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14036,
+          "behavioursUs": 4653,
+          "nativeUs": 9335,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13578,
+          "behavioursUs": 4963,
+          "nativeUs": 8568,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13107,
+          "behavioursUs": 4667,
+          "nativeUs": 8399,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13056,
+          "behavioursUs": 4680,
+          "nativeUs": 8336,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13083,
+          "behavioursUs": 4760,
+          "nativeUs": 8284,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20782,
+          "behavioursUs": 5962,
+          "nativeUs": 14777,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14533,
+          "behavioursUs": 4991,
+          "nativeUs": 9495,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13430,
+          "behavioursUs": 4760,
+          "nativeUs": 8628,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14106,
+          "behavioursUs": 5254,
+          "nativeUs": 8810,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13675,
+          "behavioursUs": 4871,
+          "nativeUs": 8755,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13690,
+          "behavioursUs": 4856,
+          "nativeUs": 8784,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20979,
+          "behavioursUs": 5960,
+          "nativeUs": 14976,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14040,
+          "behavioursUs": 4904,
+          "nativeUs": 9094,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13241,
+          "behavioursUs": 4729,
+          "nativeUs": 8472,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13601,
+          "behavioursUs": 5079,
+          "nativeUs": 8470,
+          "ticks": 1
+        },
+        {
+          "totalUs": 15210,
+          "behavioursUs": 5309,
+          "nativeUs": 9858,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13556,
+          "behavioursUs": 4854,
+          "nativeUs": 8659,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20947,
+          "behavioursUs": 5930,
+          "nativeUs": 14976,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14262,
+          "behavioursUs": 4884,
+          "nativeUs": 9336,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13288,
+          "behavioursUs": 4736,
+          "nativeUs": 8511,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13333,
+          "behavioursUs": 4766,
+          "nativeUs": 8526,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13273,
+          "behavioursUs": 4859,
+          "nativeUs": 8373,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13208,
+          "behavioursUs": 4725,
+          "nativeUs": 8440,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20601,
+          "behavioursUs": 5908,
+          "nativeUs": 14653,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13848,
+          "behavioursUs": 4746,
+          "nativeUs": 9061,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13586,
+          "behavioursUs": 4860,
+          "nativeUs": 8685,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13243,
+          "behavioursUs": 4712,
+          "nativeUs": 8491,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14040,
+          "behavioursUs": 5571,
+          "nativeUs": 8429,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13166,
+          "behavioursUs": 4751,
+          "nativeUs": 8375,
+          "ticks": 1
+        },
+        {
+          "totalUs": 20868,
+          "behavioursUs": 6088,
+          "nativeUs": 14739,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14110,
+          "behavioursUs": 4722,
+          "nativeUs": 9344,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14605,
+          "behavioursUs": 5014,
+          "nativeUs": 9537,
+          "ticks": 1
+        },
+        {
+          "totalUs": 14412,
+          "behavioursUs": 5327,
+          "nativeUs": 9038,
+          "ticks": 1
+        },
+        {
+          "totalUs": 13748,
+          "behavioursUs": 5057,
+          "nativeUs": 8647,
+          "ticks": 1
+        }
+      ],
+      "scope": "Mac CPU single fixed tick; no rendering; 40 warmup and 120 measured ticks"
+    }
+  ],
+  "afterMediansUs": [
+    {
+      "enabledWobbles": 0,
+      "totalUs": 11275.5,
+      "behavioursUs": 2693.5,
+      "nativeUs": 8519.0
+    },
+    {
+      "enabledWobbles": 30,
+      "totalUs": 11521.5,
+      "behavioursUs": 2920.5,
+      "nativeUs": 8559.5
+    },
+    {
+      "enabledWobbles": 300,
+      "totalUs": 13939.0,
+      "behavioursUs": 4873.5,
+      "nativeUs": 8985.0
+    }
+  ],
+  "afterBundleHashes": {
+    "target/f8-cpu-stable-world/bundle/bin/cpu": "b1662dbd5ac0efc2448bb0091401de2a35d7d4b80990cc6c175a3e49b3fbc388",
+    "target/f8-cpu-stable-world/bundle/lib/objective_c.dylib": "e7eef37c588628ee65e1cc38aeaaf7e9b21595249ccc1d7b522d5835d85b2e3d",
+    "target/f8-cpu-stable-world/bundle/lib/libfynkel_platform_apple.dylib": "9d6f3c478ac9b909dbf1b0f510120d51c163941f45f66d0c7c410800723c9726"
+  },
+  "phoneFrameworkSha256": "9b3939d39a1ed43e4dc220e52468f2df30abe184c1f5818e55d82ec6d58467a1"
+}

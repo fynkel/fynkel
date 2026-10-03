@@ -3,7 +3,7 @@
 //
 // ignore_for_file: type=lint, unused_element
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:code_only/game/coin_kind.dart' as _lib0;
 import 'package:code_only/game/collectible.dart' as _lib1;
 import 'package:code_only/game/gate.dart' as _lib2;
@@ -69,6 +69,8 @@ BehaviourType get gameCollectibleType => BehaviourType(
   id: 'game.Collectible',
   version: 1,
   create: _lib1.Collectible.new,
+  dartType: _lib1.Collectible,
+  callbacks: const {},
   fields: [
     BehaviourField(
       name: 'kind',
@@ -86,6 +88,8 @@ BehaviourType get gameGateType => BehaviourType(
   id: 'game.Gate',
   version: 1,
   create: _lib2.Gate.new,
+  dartType: _lib2.Gate,
+  callbacks: const {},
   fields: [
     BehaviourField(
       name: 'rise',
@@ -113,6 +117,8 @@ BehaviourType get gamePlayerType => BehaviourType(
   id: 'game.Player',
   version: 1,
   create: _lib3.Player.new,
+  dartType: _lib3.Player,
+  callbacks: const {'fixedUpdate'},
   fields: [
     BehaviourField(
       name: 'cameraName',
@@ -155,6 +161,8 @@ BehaviourType get gameSwitchType => BehaviourType(
   id: 'game.Switch',
   version: 1,
   create: _lib4.Switch.new,
+  dartType: _lib4.Switch,
+  callbacks: const {'fixedUpdate'},
   fields: [
     BehaviourField(
       name: 'gate',

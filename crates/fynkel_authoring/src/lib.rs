@@ -1049,6 +1049,9 @@ pub fn component_default(type_id: &str) -> Option<Node> {
             <::fynkel_core::components::TriggerZone as Default>::default().to_node()
         }
         "fynkel.Animator" => <::fynkel_core::components::Animator as Default>::default().to_node(),
+        "fynkel.AnimationBinding" => {
+            <::fynkel_core::AnimationBinding as Default>::default().to_node()
+        }
         "fynkel.Skin" => <::fynkel_core::components::Skin as Default>::default().to_node(),
         "fynkel.AudioSource" => {
             <::fynkel_audio::components::AudioSource as Default>::default().to_node()

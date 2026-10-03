@@ -1,5 +1,7 @@
 # F0 baseline: September 30, 2026
 
+**F8 reconciliation (2026-10-03):** This document preserves the original diagnostic baseline. F1–F7 gate reports record the replacements; the [F8 gate](foundation-f8-gate-report.md) records current release/AOT, scale, asset-lifetime and platform qualification. Statements below about unimplemented replacements describe the September 30 revision.
+
 This is a partial baseline, **not the F0 exit gate**. Runtime behavior has not been changed. [The roadmap](foundation-roadmap.md) remains the task ledger; [the ownership inventory](design/foundation-ownership.md) maps findings to code and outstanding experiments.
 
 ## Reproduce

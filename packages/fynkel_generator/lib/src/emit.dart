@@ -121,7 +121,7 @@ String emitDart(String package, List<BehaviourClass> classes) {
   o.writeln('//');
   o.writeln('// ignore_for_file: type=lint, unused_element');
   o.writeln();
-  o.writeln("import 'package:fynkel/fynkel.dart';");
+  o.writeln("import 'package:fynkel/gameplay.dart';");
   for (final lib in libraries) {
     o.writeln("import '$lib' as ${prefix[lib]};");
   }

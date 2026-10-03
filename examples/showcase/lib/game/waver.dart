@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 import '../generated/animators.g.dart';
 
@@ -23,18 +23,23 @@ class Waver extends Behaviour {
 
   /// The right arm raised sideways, the forearm waving twice, lowered
   /// again: 1 s, with a `hello` marker at the top.
-  static ClipData waveClip() {
+  static ClipData waveClip({required String upperArm, required String forearm}) {
     Quat z(double degrees) => Quat.euler(Vec3(0, 0, degrees));
     return (ClipBuilder()
-          ..rotation('upperarm_r', {0: z(-4), 0.25: z(-150), 0.75: z(-150), 1: z(-4)})
-          ..rotation('forearm_r', {0: z(0), 0.25: z(25), 0.4: z(-25), 0.55: z(25), 0.75: z(0)})
+          ..rotation(upperArm, {0: z(-4), 0.25: z(-150), 0.75: z(-150), 1: z(-4)})
+          ..rotation(forearm, {0: z(0), 0.25: z(25), 0.4: z(-25), 0.55: z(25), 0.75: z(0)})
           ..marker(0.25, 'hello'))
         .build();
   }
 
   @override
   void start() {
-    clip = world.createClip(waveClip());
+    clip = world.createClip(
+      waveClip(
+        upperArm: gameObject.findDescendant('upperarm_r')!.get<AnimationBinding>()!.key,
+        forearm: gameObject.findDescendant('forearm_r')!.get<AnimationBinding>()!.key,
+      ),
+    );
     _wait = every;
   }
 

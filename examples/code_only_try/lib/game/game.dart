@@ -13,7 +13,8 @@
 // Menu → Level → Results → Menu or Level again. `GameState.screen` follows
 // the places, so the app's overlay switches on it.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
+import 'package:fynkel/advanced.dart' show NativeLibrary;
 import 'package:pickups/pickups.dart' show PickupSink;
 
 import '../generated/assets.g.dart';
@@ -54,15 +55,20 @@ class LiveFlow extends Flow {
     _built
       ..clear()
       ..addAll(
-        switch (screen) {
+        world.buildAll(switch (screen) {
           Screen.menu => menu(look),
           Screen.playing => level(
+            look,
+            kinds,
+            coinAt: (name, at, kind) => coin(
               look,
-              kinds,
-              coinAt: (name, at, kind) => coin(look, kind, name: name, transform: Transform(position: at)),
+              kind,
+              name: name,
+              transform: Pose(position: at),
             ),
+          ),
           Screen.results => results(look),
-        }.map(world.build),
+        }),
       );
     state.screen.value = screen;
   }

@@ -5,7 +5,7 @@
 import 'dart:io';
 
 import 'package:fynkel/authoring.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:test/test.dart';
 
 import '../support/weapons.dart';

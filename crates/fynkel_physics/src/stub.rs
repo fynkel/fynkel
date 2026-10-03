@@ -29,6 +29,12 @@ impl Default for Physics {
 }
 
 impl Physics {
+    /// Remove CPU source data after its owning references have been released.
+    pub fn retain_resources(&mut self, mut keep: impl FnMut(&AssetRef) -> bool) {
+        self.meshes.retain(|r, _| keep(r));
+        self.materials.retain(|r, _| keep(r));
+    }
+
     pub fn new() -> Self {
         Self {
             gravity: Vec3::new(0.0, -9.81, 0.0),

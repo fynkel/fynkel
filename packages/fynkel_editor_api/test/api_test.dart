@@ -3,7 +3,7 @@
 // editor implements the interfaces; its tests cover them.
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart' show AssetRef;
+import 'package:fynkel/gameplay.dart' show AssetRef;
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 
 /// The example in `fynkel_editor_api.dart`'s library comment, as written.

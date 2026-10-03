@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart' show EntityRef;
+import 'package:fynkel/gameplay.dart' show EntityRef;
 // An in-memory edit-preview world for the Scene view tests: every entity
 // with a Transform is a unit cube at its world matrix (what the real
 // preview draws for an entity without a mesh), lights and cameras carry an

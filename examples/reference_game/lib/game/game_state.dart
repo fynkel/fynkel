@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 /// Which of the game's scenes is up (M3-15): the Menu, the Playground or
 /// the Results. `Game` sets it from the scene manager as each load lands;

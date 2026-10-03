@@ -62,6 +62,8 @@ pub use audio::AudioRun;
 pub use catalogue::{EmitterRun, Oscillation};
 pub use controller::ControllerPlay;
 mod projection;
+mod resources;
+pub use resources::TransientAnimationStamp;
 mod state;
 mod synchronization;
 mod systems;
@@ -1315,18 +1317,40 @@ impl World {
     /// Render extraction: every spatial entity's world matrix interpolated
     /// S[n]..S[n+1] by alpha. Persistent edits share the authoritative pose.
     pub fn extract(&self) -> Extract {
+        let mut out = Extract::default();
+        self.extract_into(&mut out, true);
+        out
+    }
+
+    /// Fill an owned snapshot, retaining its buffers for the next frame.
+    /// `placeholders` includes empty spatial objects for editor/debug drawing.
+    /// Otherwise only render component owners are published; ancestors and
+    /// skin joints are resolved as dependencies without extra draw records.
+    /// The exclusive output borrow prevents mutation while a renderer reads it.
+    pub fn extract_into(&self, out: &mut Extract, placeholders: bool) {
         let mut membership = self.render_membership.lock().unwrap();
         membership.refresh(&self.gameplay.ecs);
         let alpha = self.clock.alpha();
-        let mut memo: HashMap<Entity, Mat4> = HashMap::new();
-        let mut out = Extract {
-            tick: self.clock.tick(),
-            alpha,
-            time: self.clock.gameplay_elapsed() as f32,
-            records: Vec::with_capacity(membership.entities.len()),
-            ..Extract::default()
+        let mut memo = std::mem::take(&mut membership.memo);
+        memo.clear();
+        out.tick = self.clock.tick();
+        out.alpha = alpha;
+        out.time = self.clock.gameplay_elapsed() as f32;
+        out.records.clear();
+        out.meshes.clear();
+        out.joints.clear();
+        out.directional_lights.clear();
+        out.point_lights.clear();
+        out.spot_lights.clear();
+        out.volumes.clear();
+        out.camera = None;
+        out.environment = None;
+        let entities = if placeholders {
+            &membership.entities
+        } else {
+            &membership.renderable
         };
-        for &e in &membership.entities {
+        for &e in entities {
             if !self.gameplay.ecs.has::<WorldTransform>(e) {
                 continue;
             }
@@ -1443,7 +1467,7 @@ impl World {
                 });
             }
         }
-        out
+        membership.memo = memo;
     }
 
     fn resolve_extract(&self, e: Entity, alpha: f32, memo: &mut HashMap<Entity, Mat4>) -> Mat4 {

@@ -18,7 +18,7 @@ import 'dart:io';
 import 'dart:isolate' as iso;
 import 'dart:math' as math;
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:vm_service/vm_service.dart';
 import 'package:vm_service/vm_service_io.dart';
 

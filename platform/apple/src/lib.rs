@@ -33,6 +33,7 @@ pub use ring::{DeviceChoice, Gpu, IoSurfaceRing, RingStats, SyncMode, TEXTURE_FO
 pub struct Viewport {
     ring: IoSurfaceRing,
     renderer: ExtractRenderer,
+    extract: Extract,
     /// This viewport's own camera, drawn instead of the world's (the
     /// editor's Scene view on a running game, ADR-0021 P7 L5).
     view: Option<(glam::Mat4, SceneCamera)>,
@@ -70,6 +71,7 @@ impl Viewport {
         Self {
             ring,
             renderer,
+            extract: Extract::default(),
             view: None,
             broken: OnceLock::new(),
         }
@@ -112,6 +114,9 @@ impl Viewport {
     }
 
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+        if self.ring.gpu().is_lost() {
+            return Err("GPU device lost; recreate the viewport".into());
+        }
         self.ring.resize(width, height)?;
         self.renderer.resize(self.ring.device(), width, height);
         Ok(())
@@ -125,11 +130,19 @@ impl Viewport {
     }
 
     pub fn render_timed(&mut self, extract: &Extract, extract_us: u32) -> i32 {
+        if self.ring.gpu().is_lost() {
+            return -5;
+        }
         let Viewport { ring, renderer, .. } = self;
         let timed_before = renderer.stats().gpu_timed;
         let t0 = std::time::Instant::now();
         renderer.prepare(ring.device(), ring.queue(), extract);
         let prepare_us = t0.elapsed().as_micros() as u32;
+        self.draw_prepared(extract_us, prepare_us, timed_before)
+    }
+
+    fn draw_prepared(&mut self, extract_us: u32, prepare_us: u32, timed_before: u32) -> i32 {
+        let Viewport { ring, renderer, .. } = self;
         let slot = ring.render_with(|device, _queue, view| {
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("fynkel viewport frame"),
@@ -378,7 +391,7 @@ fn panic_text(payload: Box<dyn std::any::Any + Send>) -> String {
 /// inside a call breaks the viewport instead of aborting the process —
 /// `FYNKEL_APPLE_RENDER_BROKEN`, `fynkel_apple_viewport_error`,
 /// `fynkel_apple_viewport_debug_panic`, foundation 4.3).
-pub const APPLE_ABI_VERSION: u32 = 12;
+pub const APPLE_ABI_VERSION: u32 = 14;
 
 /// Bit 0 of an extra world's flags (`fynkel_apple_viewport_extra_worlds`):
 /// drawn greyed.
@@ -488,7 +501,39 @@ pub unsafe extern "C" fn fynkel_apple_viewport_render(
     vp: *mut Viewport,
     world: *const FynkelWorld,
 ) -> i32 {
+    render_world(vp, world, None)
+}
+
+/// Export/loading boundary: waits for GPU assets before occupying a ring slot.
+/// Returns -4 when required assets fail or the timeout expires.
+/// # Safety
+/// Same ownership and thread requirements as `fynkel_apple_viewport_render`.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_render_ready(
+    vp: *mut Viewport,
+    world: *const FynkelWorld,
+    timeout_ms: u32,
+) -> i32 {
+    render_world(vp, world, Some(Duration::from_millis(timeout_ms as u64)))
+}
+
+/// Whether the last frame has pending asset work; errors are terminal.
+/// # Safety
+/// `vp` is live or NULL; host thread only.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_assets_pending(vp: *const Viewport) -> u32 {
+    guard(vp, |v| u32::from(v.renderer.assets_pending())).unwrap_or(0)
+}
+
+unsafe fn render_world(
+    vp: *mut Viewport,
+    world: *const FynkelWorld,
+    wait: Option<Duration>,
+) -> i32 {
     guard_mut(vp, |v| {
+        if v.ring.gpu().is_lost() {
+            return -5;
+        }
         let Some(w) = world.as_ref() else {
             return FYNKEL_APPLE_RENDER_NO_WORLD;
         };
@@ -502,7 +547,8 @@ pub unsafe extern "C" fn fynkel_apple_viewport_render(
             v.renderer.set_assets(Some(assets.clone()));
         }
         let t0 = std::time::Instant::now();
-        let mut extract = w.core().extract();
+        let mut extract = std::mem::take(&mut v.extract);
+        w.core().extract_into(&mut extract, v.renderer.placeholders);
         if let Some((world, camera)) = v.view {
             extract.camera = Some(ExtractCamera {
                 record: u32::MAX,
@@ -511,7 +557,23 @@ pub unsafe extern "C" fn fynkel_apple_viewport_render(
             });
         }
         let extract_us = t0.elapsed().as_micros() as u32;
-        v.render_timed(&extract, extract_us)
+        if let Some(timeout) = wait {
+            let timed_before = v.renderer.stats().gpu_timed;
+            let start = std::time::Instant::now();
+            if let Err(error) =
+                v.renderer
+                    .prepare_ready(v.ring.device(), v.ring.queue(), &extract, timeout)
+            {
+                log::warn!("viewport capture unavailable: {error}");
+                v.extract = extract;
+                return -4;
+            }
+            v.extract = extract;
+            return v.draw_prepared(extract_us, start.elapsed().as_micros() as u32, timed_before);
+        }
+        let result = v.render_timed(&extract, extract_us);
+        v.extract = extract;
+        result
     })
     .unwrap_or_else(|| broken_or(vp, -1))
 }
@@ -1151,6 +1213,27 @@ pub unsafe extern "C" fn fynkel_apple_viewport_error(
 pub unsafe extern "C" fn fynkel_apple_viewport_debug_panic(vp: *mut Viewport) -> i32 {
     guard_mut(vp, |_| -> i32 {
         panic!("fynkel_apple_viewport_debug_panic: a panic on purpose")
+    })
+    .unwrap_or(-1)
+}
+
+/// Sets an explicit supported local-light budget. Returns zero on success.
+/// # Safety
+/// `vp` is a live viewport or NULL; host thread only.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_set_light_budget(
+    vp: *mut Viewport,
+    pool: u32,
+    per_object: u32,
+) -> i32 {
+    guard_mut(vp, |v| {
+        match v.renderer.set_light_budget(fynkel_render::LightBudget {
+            pool: pool as usize,
+            per_object: per_object as usize,
+        }) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
     })
     .unwrap_or(-1)
 }

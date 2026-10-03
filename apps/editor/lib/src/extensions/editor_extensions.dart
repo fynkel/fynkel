@@ -5,7 +5,7 @@
 // hot reload, so a save in `lib/editor/` shows at once.
 import 'package:flutter/widgets.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart' show Diagnostic, Severity;
-import 'package:fynkel/fynkel.dart' show BehaviourRegistry, DataAsset;
+import 'package:fynkel/gameplay.dart' show BehaviourRegistry, DataAsset;
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 
 import '../commands/commands.dart';

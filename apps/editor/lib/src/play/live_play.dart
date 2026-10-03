@@ -6,7 +6,7 @@
 // its world shows up (the reference game's Menu → Playground) gets the
 // selection when those entities appear, unless something else was
 // selected first.
-import 'package:fynkel/fynkel.dart' as fynkel;
+import 'package:fynkel/gameplay.dart' as fynkel;
 import 'package:fynkel_authoring/fynkel_authoring.dart' show AuthoringException;
 
 import '../documents/document_tabs.dart';

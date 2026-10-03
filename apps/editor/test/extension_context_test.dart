@@ -3,7 +3,7 @@
 // undo step through the tab, prefab overrides where the object comes from
 // a prefab, nothing written when one change is refused.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart'
+import 'package:fynkel/gameplay.dart'
     show AssetRef, BehaviourRegistry, DataAsset, DataField, DataType, ObjectSpec, Pose, Vec3;
 import 'package:fynkel_authoring/fynkel_authoring.dart' show Severity;
 import 'package:fynkel_editor/src/documents/document_tabs.dart';

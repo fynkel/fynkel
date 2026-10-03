@@ -4,10 +4,12 @@
 // this also exercises create → register → resize/rebind → detach ordering.
 
 import 'dart:typed_data';
+import 'dart:async';
 
 import 'package:flutter/services.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 void main() {
@@ -15,9 +17,13 @@ void main() {
   const channel = MethodChannel('fynkel_flutter/viewport');
   final calls = <MethodCall>[];
   var nextId = 7;
+  var refuseUnregister = false;
+  Object? thermalState;
 
   setUp(() {
     calls.clear();
+    thermalState = null;
+    refuseUnregister = false;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       final args = (call.arguments as Map?)?.cast<String, Object?>() ?? {};
@@ -33,8 +39,16 @@ void main() {
           expect((args['iosurfaces'] as List), isNotEmpty);
           return null;
         case 'stats':
-          return {'copyCalls': 3, 'copyWithNewFrame': 2, 'copyNoFrame': 1, 'frameReadySignals': 2, 'rebinds': 0};
+          return {
+            'copyCalls': 3,
+            'copyWithNewFrame': 2,
+            'copyNoFrame': 1,
+            'frameReadySignals': 2,
+            'rebinds': 0,
+            'thermalState': thermalState,
+          };
         case 'unregisterTexture':
+          if (refuseUnregister) throw PlatformException(code: 'busy');
           return null;
       }
       throw MissingPluginException(call.method);
@@ -52,7 +66,7 @@ void main() {
   }
 
   test('abi version matches the native library', () {
-    expect(viewportAbiVersion, 12);
+    expect(viewportAbiVersion, 14);
   });
 
   test('create, render, resize, stats, detach', () async {
@@ -111,7 +125,8 @@ void main() {
     // the rest; part of isEmpty, gone with clear; a non-finite width is
     // refused (the Rust test `debug_lines.rs` checks the picture against
     // the offscreen renderer's).
-    final ringed = ViewportOverlay()..outline([const EntityRef(1, 1, 1)], [const EntityRef(1, 2, 1), const EntityRef(1, 3, 1)]);
+    final ringed = ViewportOverlay()
+      ..outline([const EntityRef(1, 1, 1)], [const EntityRef(1, 2, 1), const EntityRef(1, 3, 1)]);
     expect(ringed.isEmpty, isFalse);
     expect(ringed.selectionOutline!.packStyle(), [1, 0.4, 0, 1, 0.37, 0.47, 0.61, 1, 2].map((x) => closeTo(x, 1e-6)));
     expect(controller.overlay(ringed), 3);
@@ -237,6 +252,18 @@ void main() {
     expect(stats.shadowDraws, 0);
     final platform = await controller.platformStats();
     expect(platform!.copyCalls, 3);
+    expect(platform.thermalState, ViewportThermalState.unknown);
+    for (final entry in <Object, ViewportThermalState>{
+      0: ViewportThermalState.nominal,
+      1: ViewportThermalState.fair,
+      2: ViewportThermalState.serious,
+      3: ViewportThermalState.critical,
+      99: ViewportThermalState.unknown,
+      'nominal': ViewportThermalState.unknown,
+    }.entries) {
+      thermalState = entry.key;
+      expect((await controller.platformStats())!.thermalState, entry.value);
+    }
 
     await controller.detach();
     expect(controller.state, ViewportState.detached);
@@ -264,6 +291,133 @@ void main() {
     await settle();
     expect(controller.textureId, isNull);
     expect(calls.map((c) => c.method), ['registerTexture', 'unregisterTexture']);
+  });
+
+  test('detach waits for delayed registration and prevents reattachment', () async {
+    final registration = Completer<int>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (call.method == 'registerTexture') return registration.future;
+      return null;
+    });
+    final controller = FynkelViewportController();
+    addTearDown(controller.dispose);
+    controller.requestSize(16, 16);
+    var detached = false;
+    final closing = controller.detach().then((_) => detached = true);
+    await settle();
+    expect(detached, false, reason: 'the presenter still owns an in-flight registration');
+    controller.requestSize(32, 32);
+    registration.complete(91);
+    await closing;
+    await settle();
+    expect(controller.state, ViewportState.detached);
+    expect(controller.textureId, isNull);
+    expect(calls.map((c) => c.method), ['registerTexture', 'unregisterTexture']);
+    expect((calls.last.arguments as Map)['textureId'], 91);
+  });
+
+  test('dispose during delayed registration releases the texture and cannot recreate', () async {
+    final registration = Completer<int>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (call.method == 'registerTexture') return registration.future;
+      return null;
+    });
+    final controller = FynkelViewportController();
+    controller.requestSize(16, 16);
+    controller.dispose();
+    await settle();
+    registration.complete(92);
+    await controller.detach();
+    controller.requestSize(32, 32);
+    await settle();
+    expect(controller.state, ViewportState.detached);
+    expect(controller.textureId, isNull);
+    expect(calls.map((c) => c.method), ['registerTexture', 'unregisterTexture']);
+  });
+
+  test('failed rebind stops rendering and can recover', () async {
+    final controller = FynkelViewportController();
+    addTearDown(controller.dispose);
+    controller.requestSize(16, 16);
+    await settle();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (call.method == 'rebindTexture') throw PlatformException(code: 'rebind');
+      if (call.method == 'registerTexture') return nextId++;
+      return null;
+    });
+    controller.requestSize(32, 32);
+    await settle();
+    expect(controller.state, ViewportState.failed);
+    expect(controller.error, isA<PlatformException>());
+    expect(controller.renderHandle(0), isNull);
+    await controller.recover();
+    expect(controller.state, ViewportState.attached);
+    expect(controller.error, isNull);
+    expect((controller.physicalWidth, controller.physicalHeight), (32, 32));
+  });
+
+  test('detach waits for delayed surface rebind before unregistering', () async {
+    final controller = FynkelViewportController();
+    addTearDown(controller.dispose);
+    controller.requestSize(16, 16);
+    await settle();
+    final rebind = Completer<void>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (call.method == 'rebindTexture') await rebind.future;
+      return null;
+    });
+    controller.requestSize(32, 32);
+    await settle();
+    var detached = false;
+    final closing = controller.detach().then((_) => detached = true);
+    await settle();
+    expect(detached, false);
+    expect(calls.where((c) => c.method == 'unregisterTexture'), isEmpty);
+    rebind.complete();
+    await closing;
+    expect(controller.state, ViewportState.detached);
+    expect(controller.textureId, isNull);
+    expect(calls.map((c) => c.method), ['registerTexture', 'rebindTexture', 'unregisterTexture']);
+  });
+
+  test('detach guards against synchronous recreation from a listener', () async {
+    final controller = FynkelViewportController();
+    addTearDown(controller.dispose);
+    controller.requestSize(16, 16);
+    await settle();
+    controller.addListener(() {
+      if (controller.state == ViewportState.detached) controller.requestSize(32, 32);
+    });
+    await controller.detach();
+    await settle();
+    expect(controller.state, ViewportState.detached);
+    expect(controller.textureId, isNull);
+    expect(calls.map((c) => c.method), ['registerTexture', 'unregisterTexture']);
+  });
+
+  test('registration without a texture id is a recoverable failure', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+      channel,
+      (_) async => null,
+    );
+    final controller = FynkelViewportController();
+    addTearDown(controller.dispose);
+    controller.requestSize(16, 16);
+    await settle();
+    expect(controller.state, ViewportState.failed);
+    expect(controller.textureId, isNull);
+    expect(controller.error, isA<StateError>());
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'registerTexture') return nextId++;
+      return null;
+    });
+    await controller.recover();
+    expect(controller.state, ViewportState.attached);
+    expect(controller.textureId, isNotNull);
   });
 
   test('a failed registration leaves the controller failed with the error', () async {
@@ -316,6 +470,85 @@ void main() {
     await settle();
     expect(controller.state, ViewportState.attached);
     expect(controller.render(world), greaterThanOrEqualTo(0));
+  });
+
+  test('recovery unregisters before recreation and preserves host settings', () async {
+    final controller = FynkelViewportController(bufferCount: 2, placeholders: false);
+    addTearDown(controller.dispose);
+    controller.setLightBudget(pool: 512, perObject: 4);
+    expect(() => controller.setLightBudget(pool: 20000, perObject: 8), throwsArgumentError);
+    controller.requestSize(32, 24);
+    await settle();
+    final world = World.create();
+    addTearDown(world.dispose);
+    world.frame(1 / 60);
+    controller.debugPanic();
+    expect(controller.render(world), renderBroken);
+    await controller.recover();
+    expect(controller.state, ViewportState.attached, reason: '${controller.error}');
+    expect(controller.error, isNull);
+    expect(controller.placeholders, false);
+    expect((controller.lightPool, controller.lightsPerObject), (512, 4));
+    expect((controller.physicalWidth, controller.physicalHeight), (32, 24));
+    expect(calls.map((c) => c.method), ['registerTexture', 'unregisterTexture', 'registerTexture']);
+    expect(controller.render(world), greaterThanOrEqualTo(0));
+  });
+
+  test('recovery retains ownership when texture unregister fails', () async {
+    final controller = FynkelViewportController();
+    addTearDown(controller.dispose);
+    controller.requestSize(32, 24);
+    await settle();
+    final world = World.create();
+    addTearDown(world.dispose);
+    controller.debugPanic();
+    expect(controller.render(world), renderBroken);
+    final oldTexture = controller.textureId;
+    refuseUnregister = true;
+    await controller.recover();
+    expect(controller.state, ViewportState.failed);
+    expect(controller.textureId, oldTexture);
+    expect(calls.where((c) => c.method == 'registerTexture').length, 1);
+    refuseUnregister = false;
+    await controller.recover();
+    expect(controller.state, ViewportState.attached);
+    expect(controller.textureId, isNot(oldTexture));
+    expect(controller.render(world), greaterThanOrEqualTo(0));
+    expect(calls.map((c) => c.method), [
+      'registerTexture',
+      'unregisterTexture',
+      'unregisterTexture',
+      'registerTexture',
+    ]);
+  });
+
+  testWidgets('failed texture shows retry and resumes rendering', (tester) async {
+    final controller = FynkelViewportController();
+    final world = World.create();
+    addTearDown(world.dispose);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SizedBox(width: 32, height: 24, child: FynkelViewport(controller: controller)),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(controller.isAttached, true);
+    world.frame(1 / 60);
+    controller.debugPanic();
+    expect(controller.render(world), renderBroken);
+    expect(controller.textureId, isNotNull);
+    await tester.pump();
+    expect(find.byType(Texture), findsNothing);
+    await tester.tap(find.text('Retry viewport'));
+    await tester.pump();
+    await tester.pump();
+    expect(controller.state, ViewportState.attached, reason: '${controller.error}');
+    expect(find.byType(Texture), findsOneWidget);
+    expect(controller.render(world), greaterThanOrEqualTo(0));
+    await tester.pumpWidget(const SizedBox());
+    await controller.detach();
   });
 
   test('percentiles', () {

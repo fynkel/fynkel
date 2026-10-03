@@ -1,4 +1,5 @@
-import 'package:fynkel/fynkel.dart' show EntityRef;
+import 'package:fynkel/gameplay.dart' show EntityRef;
+
 // The Scene view's model (blueprint §19.2e item 6): one edit-preview world
 // per open scene or prefab tab, the editor camera over it, picking, the
 // gizmos and the editor-only hidden/locked flags. The picture is the
@@ -1076,7 +1077,10 @@ final class SceneViewModel extends ChangeNotifier {
   /// The pixels of a fresh frame of the focused tab (RGBA8, the viewport's
   /// physical size), or null when nothing renders.
   Uint8List? captureFrame() {
-    final slot = renderFrame();
+    final slot = renderFrame(waitForAssets: true);
+    if (slot == renderAssetsUnavailable) {
+      notice = 'No frame to save: required assets failed or did not become ready before the deadline';
+    }
     if (slot == null || slot < 0) return null;
     return controller.readFrame(slot);
   }
@@ -1097,9 +1101,10 @@ final class SceneViewModel extends ChangeNotifier {
     final w = controller.physicalWidth, h = controller.physicalHeight;
     final path = await choose('${t.tab.fileStem}-${w}x$h.png');
     if (path == null || _disposed) return null;
+    final previousNotice = notice;
     final pixels = captureFrame();
     if (pixels == null) {
-      notice = 'No frame to save: the viewport dropped the frame';
+      if (notice == previousNotice) notice = 'No frame to save: the viewport dropped the frame';
       notifyListeners();
       return null;
     }
@@ -1147,7 +1152,7 @@ final class SceneViewModel extends ChangeNotifier {
   /// (grid, axes, outlines, icons), then the frame. Returns the ring slot
   /// (see `FynkelViewportController.renderHandle`), null when nothing
   /// could be drawn.
-  int? renderFrame() {
+  int? renderFrame({bool waitForAssets = false}) {
     final t = current;
     if (t == null || !t.hasPreview) return null;
     _follow(t);
@@ -1182,7 +1187,7 @@ final class SceneViewModel extends ChangeNotifier {
       }
       _applyHidden(t);
       controller.overlay(overlay(t));
-      final slot = controller.renderHandle(p.worldAddress);
+      final slot = controller.renderHandle(p.worldAddress, waitForAssets: waitForAssets);
       // A resize in flight refuses the frame (the ring is being rebuilt).
       // The editor draws on demand, so without asking again this frame
       // would simply be lost and the panel would sit on a stale — or
@@ -1195,7 +1200,7 @@ final class SceneViewModel extends ChangeNotifier {
       t.frames++;
       lastFrameMs = DateTime.now().difference(started).inMicroseconds / 1000;
       // The game moves on its own: draw it again next frame.
-      if (live) requestFrame();
+      if (live || controller.assetsPending) requestFrame();
       return slot;
     } on AuthoringException catch (e) {
       notice = 'Preview: $e';
@@ -1294,7 +1299,11 @@ final class SceneViewModel extends ChangeNotifier {
   /// orange, what is under them (their children, an instance's parts) in
   /// blue. Read from the world once per document revision, selection and
   /// visibility (every frame in Play, where the world changes by itself).
-  ({List<EntityRef> selected, List<EntityRef> children}) _outlineHandles(SceneTab t, List<String> ids, Set<String> hidden) {
+  ({List<EntityRef> selected, List<EntityRef> children}) _outlineHandles(
+    SceneTab t,
+    List<String> ids,
+    Set<String> hidden,
+  ) {
     final tree = t.tab.tree;
     final chosen = ids.toSet();
     final under = <String>[];
@@ -1349,7 +1358,9 @@ final class SceneViewModel extends ChangeNotifier {
     for (final node in t.tab.tree.nodes.values) {
       if (hidden.contains(node.id)) continue;
       final selected = selection.contains(node.id);
-      if (node.componentTypes.any((type) => declaredGizmos(type) != null && (selected || declaredGizmos(type)!.anyAlways))) {
+      if (node.componentTypes.any(
+        (type) => declaredGizmos(type) != null && (selected || declaredGizmos(type)!.anyAlways),
+      )) {
         wanted.add(node.id);
       }
     }
@@ -1400,7 +1411,10 @@ final class SceneViewModel extends ChangeNotifier {
         if (item.data[f.name] case {'entity': final String id}) targets.add(id);
       }
     }
-    final matrices = t.preview!.worldMatrices([...{for (final i in items) i.id}, ...targets]);
+    final matrices = t.preview!.worldMatrices([
+      ...{for (final i in items) i.id},
+      ...targets,
+    ]);
     final selection = t.tab.selection.toSet();
     final d = drag;
     final width = GizmoTokens.lineWidth * pixelRatio;
@@ -1529,7 +1543,9 @@ final class SceneViewModel extends ChangeNotifier {
     final lead = targets.first;
     final world = t.preview!.worldMatrices([lead])[lead];
     if (world == null) return null;
-    final pivot = pivotMode == PivotMode.center ? selectionCenter(targets) ?? matTranslation(world) : matTranslation(world);
+    final pivot = pivotMode == PivotMode.center
+        ? selectionCenter(targets) ?? matTranslation(world)
+        : matTranslation(world);
     final local = space == GizmoSpace.local || tool.alwaysLocal;
     final axes = local ? matAxes(world) : GizmoFrame.worldAxes;
     return GizmoFrame(
@@ -1568,9 +1584,7 @@ final class SceneViewModel extends ChangeNotifier {
         final a = [d[i], d[i + 1], d[i + 2]], b = [d[i + 3], d[i + 4], d[i + 5]];
         final half = vScale(vSub(b, a), 0.5);
         // The marker: an iconRadius arm through the origin, world-aligned.
-        if (origin != null &&
-            vDistance(vAdd(a, half), origin) < 1e-4 &&
-            (vLength(half) - iconRadius).abs() < 1e-4) {
+        if (origin != null && vDistance(vAdd(a, half), origin) < 1e-4 && (vLength(half) - iconRadius).abs() < 1e-4) {
           final arm = transformDirection(m!, half);
           add(vAdd(origin, arm));
           add(vSub(origin, arm));
@@ -1759,10 +1773,7 @@ final class SceneViewModel extends ChangeNotifier {
       // rotation moved there); Center: the group about the gizmo.
       final origin = matTranslation(target.startWorld);
       final about = ownPivot && edit.channel == TransformChannel.rotate
-          ? matMul(
-              _translationMatrix(origin),
-              matMul(_linearOf(delta), _translationMatrix(vScale(origin, -1))),
-            )
+          ? matMul(_translationMatrix(origin), matMul(_linearOf(delta), _translationMatrix(vScale(origin, -1))))
           : delta;
       final newWorld = matMul(about, target.startWorld);
       final local = Trs.fromMatrix(matMul(matInverseAffine(target.parentWorld), newWorld));
@@ -2272,7 +2283,11 @@ final class SceneViewModel extends ChangeNotifier {
       hasView &&
       (d.kind == 'material' || d.kind == 'script'
           ? hierarchy.canEdit
-          : hierarchy.canDropAsset(d.toRef(), d.kind, DropTarget(parent: null, index: hierarchy.tree?.roots.length ?? 0)));
+          : hierarchy.canDropAsset(
+              d.toRef(),
+              d.kind,
+              DropTarget(parent: null, index: hierarchy.tree?.roots.length ?? 0),
+            ));
 
   // ── Material drop (Unity parity, Tier 2) ─────────────────────────────
 
@@ -2307,9 +2322,14 @@ final class SceneViewModel extends ChangeNotifier {
     materialHover = target;
     final data = target == null ? null : hierarchy.meshRendererOf(target);
     if (target != null && data != null) {
-      previewComponents(t.tab, _meshRenderer, {
-        target: {...data, 'material': d!.toRef()},
-      }, [target]);
+      previewComponents(
+        t.tab,
+        _meshRenderer,
+        {
+          target: {...data, 'material': d!.toRef()},
+        },
+        [target],
+      );
     }
     _repaint();
   }

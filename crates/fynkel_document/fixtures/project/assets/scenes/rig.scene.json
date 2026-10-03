@@ -136,6 +136,13 @@
             "additive": false,
             "root_motion": false
           }
+        },
+        "70d5991b-b3fd-590d-aa3c-45b7d0010eaa": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "c0000000-0000-4000-8000-000000000005/node/0"
+          }
         }
       }
     },
@@ -194,6 +201,13 @@
               "entity": "c0000000-0000-4000-8000-0000000004e4"
             }
           }
+        },
+        "ed576d05-ec0e-5a85-a9d3-72ca4892353f": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "c0000000-0000-4000-8000-000000000005/node/1"
+          }
         }
       }
     },
@@ -224,6 +238,13 @@
               1,
               1
             ]
+          }
+        },
+        "fdde866d-fb95-5dd1-9aba-d7199f4d2cd8": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "c0000000-0000-4000-8000-000000000005/node/2"
           }
         }
       }
@@ -256,6 +277,13 @@
               1
             ]
           }
+        },
+        "291c537e-bf14-5867-bc70-806dacf1bfdd": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "c0000000-0000-4000-8000-000000000005/node/3"
+          }
         }
       }
     },
@@ -284,6 +312,13 @@
               1,
               1
             ]
+          }
+        },
+        "71120443-96e3-5f2d-bced-d466ccf89cf8": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "c0000000-0000-4000-8000-000000000005/node/4"
           }
         }
       }
@@ -345,6 +380,13 @@
             "weight": 1.0,
             "additive": false,
             "root_motion": false
+          }
+        },
+        "f78ac90b-efc7-5b9f-99a3-25548ace8b6e": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "c0000000-0000-4000-8000-000000000005/node/5"
           }
         }
       }

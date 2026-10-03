@@ -32,6 +32,10 @@ impl Default for Audio {
 }
 
 impl Audio {
+    pub fn retain_clips(&mut self, mut keep: impl FnMut(&AssetRef) -> bool) {
+        self.clips.retain(|r, _| keep(r));
+    }
+
     pub fn new() -> Audio {
         Audio {
             clips: HashMap::new(),
@@ -136,6 +140,10 @@ impl Audio {
 
     pub fn voices(&self) -> Vec<VoiceState> {
         Vec::new()
+    }
+
+    pub fn active_clips(&self) -> impl Iterator<Item = &AssetRef> {
+        std::iter::empty()
     }
 
     pub fn voice_count(&self) -> usize {

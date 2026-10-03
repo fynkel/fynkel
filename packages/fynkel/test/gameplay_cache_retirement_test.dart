@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:fynkel/src/native/bridge.dart' show NativeGameplayRef;
 import 'package:test/test.dart';
 

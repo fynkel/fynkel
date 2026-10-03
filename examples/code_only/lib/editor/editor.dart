@@ -6,7 +6,7 @@
 import 'dart:math' show cos, pi, pow, sin;
 
 import 'package:flutter/material.dart' hide Transform;
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 
 import 'package:fynkel_flutter/fynkel_flutter.dart' show ModelBuilder;

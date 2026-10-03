@@ -9,11 +9,11 @@ import 'dart:ffi';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
-import 'package:fynkel/fynkel.dart' show EntityRef, FynkelEntity;
+import 'package:fynkel/advanced.dart' show EntityRef, FynkelEntity;
 
 import 'percentiles.dart';
 
-const viewportAbiVersion = 12;
+const viewportAbiVersion = 14;
 
 /// `fynkel_apple_viewport_render` result when the world pointer is null or
 /// the world is poisoned.
@@ -23,6 +23,12 @@ const renderNoWorld = -2;
 /// panic inside one of its calls (viewport ABI 11). Every call fails from
 /// then on; `ViewportNative.error` says why.
 const renderBroken = -3;
+
+/// Capture/loading failed to reach GPU readiness before its deadline.
+const renderAssetsUnavailable = -4;
+
+/// Device loss requires a new viewport and texture registration.
+const renderDeviceLost = -5;
 
 final class ViewportStats extends Struct {
   @Uint64()
@@ -211,6 +217,15 @@ external int _bufferCount(Pointer<Void> vp);
 external Pointer<Void> _iosurface(Pointer<Void> vp, int index);
 @Native<Int32 Function(Pointer<Void>, Pointer<Void>)>(symbol: 'fynkel_apple_viewport_render', assetId: _asset)
 external int _render(Pointer<Void> vp, Pointer<Void> world);
+
+@Native<Int32 Function(Pointer<Void>, Pointer<Void>, Uint32)>(
+  symbol: 'fynkel_apple_viewport_render_ready',
+  assetId: _asset,
+)
+external int _renderReady(Pointer<Void> vp, Pointer<Void> world, int timeoutMs);
+@Native<Uint32 Function(Pointer<Void>)>(symbol: 'fynkel_apple_viewport_assets_pending', assetId: _asset)
+external int _assetsPending(Pointer<Void> vp);
+
 @Native<Void Function(Pointer<Void>, Pointer<ViewportCamera>)>(
   symbol: 'fynkel_apple_viewport_set_camera',
   assetId: _asset,
@@ -247,6 +262,12 @@ external void _setPlaceholders(Pointer<Void> vp, int enabled);
   assetId: _asset,
 )
 external int _setQuality(Pointer<Void> vp, Pointer<Uint8> name, int len);
+@Native<Int32 Function(Pointer<Void>, Uint32, Uint32)>(
+  symbol: 'fynkel_apple_viewport_set_light_budget',
+  assetId: _asset,
+)
+external int _setLightBudget(Pointer<Void> vp, int pool, int perObject);
+
 @Native<Int32 Function(Pointer<Void>, Pointer<Float>, Uint32)>(
   symbol: 'fynkel_apple_viewport_debug_lines',
   assetId: _asset,
@@ -345,7 +366,10 @@ class ViewportNative {
 
   /// Renders the world's current extract. Returns the slot index, -1 if the
   /// frame was dropped (ring full), [renderNoWorld] or [renderBroken].
-  int render(Pointer<Void> vp, int worldHandleAddress) => _render(vp, Pointer.fromAddress(worldHandleAddress));
+  int render(Pointer<Void> vp, int worldHandleAddress, {bool waitForAssets = false}) => waitForAssets
+      ? _renderReady(vp, Pointer.fromAddress(worldHandleAddress), 10000)
+      : _render(vp, Pointer.fromAddress(worldHandleAddress));
+  bool assetsPending(Pointer<Void> vp) => _assetsPending(vp) != 0;
 
   void setCamera(
     Pointer<Void> vp, {
@@ -481,7 +505,8 @@ class ViewportNative {
     try {
       final values = [...selected, ...children];
       for (var i = 0; i < values.length; i++) {
-        ids[i].world = values[i].world; ids[i].slot = values[i].slot;
+        ids[i].world = values[i].world;
+        ids[i].slot = values[i].slot;
         ids[i].generation = values[i].generation;
       }
       s.asTypedList(9).setAll(0, style);
@@ -538,8 +563,12 @@ class ViewportNative {
   /// Selects the project's quality profile by name (null: the project's
   /// default). False when the store being drawn from has profiles and none
   /// has that name.
+  bool setLightBudget(Pointer<Void> vp, int pool, int perObject) => _setLightBudget(vp, pool, perObject) == 0;
+
   bool setQuality(Pointer<Void> vp, String? profile) {
-    if (profile == null || profile.isEmpty) return _setQuality(vp, nullptr, 0) == 0;
+    if (profile == null || profile.isEmpty) {
+      return _setQuality(vp, nullptr, 0) == 0;
+    }
     final bytes = utf8.encode(profile);
     final p = calloc<Uint8>(bytes.length + 1);
     try {
@@ -605,11 +634,26 @@ class ViewportNative {
         encode: MsPercentiles(s.encodeP50Us / 1000, s.encodeP95Us / 1000, s.encodeP99Us / 1000, s.framesRendered),
         gpuTimestamps: s.gpuTimestamps != 0,
         gpuFramesUntimed: s.gpuFramesUntimed,
-        gpuShadow: MsPercentiles(s.gpuShadowP50Us / 1000, s.gpuShadowP95Us / 1000, s.gpuShadowP99Us / 1000, s.gpuFramesTimed),
+        gpuShadow: MsPercentiles(
+          s.gpuShadowP50Us / 1000,
+          s.gpuShadowP95Us / 1000,
+          s.gpuShadowP99Us / 1000,
+          s.gpuFramesTimed,
+        ),
         gpuAo: MsPercentiles(s.gpuAoP50Us / 1000, s.gpuAoP95Us / 1000, s.gpuAoP99Us / 1000, s.gpuFramesTimed),
-        gpuScene: MsPercentiles(s.gpuSceneP50Us / 1000, s.gpuSceneP95Us / 1000, s.gpuSceneP99Us / 1000, s.gpuFramesTimed),
+        gpuScene: MsPercentiles(
+          s.gpuSceneP50Us / 1000,
+          s.gpuSceneP95Us / 1000,
+          s.gpuSceneP99Us / 1000,
+          s.gpuFramesTimed,
+        ),
         gpuPost: MsPercentiles(s.gpuPostP50Us / 1000, s.gpuPostP95Us / 1000, s.gpuPostP99Us / 1000, s.gpuFramesTimed),
-        gpuFrame: MsPercentiles(s.gpuFrameP50Us / 1000, s.gpuFrameP95Us / 1000, s.gpuFrameP99Us / 1000, s.gpuFramesTimed),
+        gpuFrame: MsPercentiles(
+          s.gpuFrameP50Us / 1000,
+          s.gpuFrameP95Us / 1000,
+          s.gpuFrameP99Us / 1000,
+          s.gpuFramesTimed,
+        ),
         gpuBytes: s.gpuBytes,
       );
     } finally {

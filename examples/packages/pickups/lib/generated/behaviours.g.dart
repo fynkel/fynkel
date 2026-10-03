@@ -3,7 +3,7 @@
 //
 // ignore_for_file: type=lint, unused_element
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:pickups/src/pickup.dart' as _lib0;
 import 'package:pickups/src/pickup_kind.dart' as _lib1;
 
@@ -12,6 +12,8 @@ BehaviourType get pickupsPickupType => BehaviourType(
   id: 'pickups.Pickup',
   version: 1,
   create: _lib0.Pickup.new,
+  dartType: _lib0.Pickup,
+  callbacks: const {},
   fields: [
     BehaviourField(
       name: 'kind',

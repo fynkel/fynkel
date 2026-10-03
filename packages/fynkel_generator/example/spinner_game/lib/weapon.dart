@@ -5,7 +5,7 @@
 /// and its schema to `schemas/data/game.Weapon.schema.json`.
 library;
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 /// What a weapon does.
 @FynkelDataAsset(id: 'game.Weapon', menu: 'Game/Weapon', icon: 'swords')

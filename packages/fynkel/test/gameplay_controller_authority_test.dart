@@ -1,7 +1,9 @@
+import 'support/animation_bindings.dart';
+
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
@@ -24,7 +26,9 @@ void main() {
       data['id'] = id;
       data['parameters'][0]['type'] = kind;
       data['parameters'][0]['default'] = value;
-      if (kind == 'int') data['layers'][0]['states'][0].remove('speedParameter');
+      if (kind == 'int') {
+        data['layers'][0]['states'][0].remove('speedParameter');
+      }
       File('${project.path}/assets/rigs/$kind.controller.json').writeAsStringSync(jsonEncode(data));
     }
     cache = '${temp.path}/cache';
@@ -61,9 +65,8 @@ void main() {
     late GameObject rejected;
     expect(
       () => world.edit(() {
-        rejected = world.spawn(
-          name: 'discarded-controller',
-        )..set(const Animator(controller: alternate, clip: AssetRef('c0000000-0000-4000-8000-0000000000ff')));
+        rejected = world.spawn(name: 'discarded-controller')
+          ..set(const Animator(controller: alternate, clip: AssetRef('c0000000-0000-4000-8000-0000000000ff')));
         expect(rejected.animation.getFloat('speed'), 7);
         rejected.animation.setFloat('speed', 9);
         expect(rejected.animation.getFloat('speed'), 9);
@@ -75,6 +78,7 @@ void main() {
     expect(world.find('discarded-controller'), isNull);
     final committed = world.edit(() {
       final go = world.spawn()..set(const Animator(controller: alternate));
+      addRigTargets(world, go);
       expect(go.animation.getFloat('speed'), 7);
       go.animation.setFloat('speed', 8);
       return go;

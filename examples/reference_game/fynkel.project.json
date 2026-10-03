@@ -207,6 +207,10 @@
       "kind": "behaviour",
       "version": 1,
       "description": "SomethingFun2 (lib/game/something_fun2.dart)."
+    },
+    "fynkel.AnimationBinding": {
+      "kind": "native",
+      "version": 1
     }
   },
   "targets": {

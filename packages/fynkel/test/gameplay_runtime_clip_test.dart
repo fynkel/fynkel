@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
@@ -31,7 +31,7 @@ void main() {
 
   (GameObject, GameObject) rig(World world) => world.edit(() {
     final root = world.spawn(name: 'runtime rig')..set(const Animator(playing: false));
-    return (root, world.spawn(name: 'joint', parent: root));
+    return (root, world.spawn(name: 'joint', parent: root)..set(const AnimationBinding(key: 'joint')));
   });
 
   test('aborted clip creation rolls back liveness and entity data', () {

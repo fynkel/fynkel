@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 /// A slab that slides up by [rise] over [seconds] once [open] is called
 /// (by the [Switch]). It is static geometry — a `fynkel.Collider` without

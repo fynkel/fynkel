@@ -1,7 +1,7 @@
 // Executable F0 contract experiments; no assertion requires an old defect.
 import 'dart:convert';
 
-import 'package:fynkel/fynkel.dart' as engine;
+import 'package:fynkel/advanced.dart' as engine;
 import 'package:test/test.dart';
 
 import '../tool/foundation_prototype/slice.dart';

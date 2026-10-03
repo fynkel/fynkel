@@ -9,7 +9,7 @@
 
 import 'dart:math' as math;
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:pickups/generated/assets.g.dart' as pickups;
 
 import '../generated/assets.g.dart';

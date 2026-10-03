@@ -9,6 +9,8 @@ what is done; this file is the order. The order puts the fixes that grow
 more expensive with every imported asset and every line of game code
 ahead of new features.
 
+**Current next step (2026-10-03):** F8 local implementation/qualification is recorded in the [release gate](foundation-f8-gate-report.md). Second-Mac execution remains open, public publication still requires ADR-0005, and the measured 50k full-rewrite workload is not a 60Hz promise. Keep those limits explicit before moving to the feature backlog below.
+
 ## Phase 0 — Live Play mode (done)
 
 ADR-0021 P7: L1–L5 plus create/duplicate while playing and whole-object

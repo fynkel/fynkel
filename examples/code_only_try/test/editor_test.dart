@@ -8,7 +8,7 @@ import 'package:code_only/generated/behaviours.g.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/authoring.dart' show ProjectWriter;
-import 'package:fynkel/fynkel.dart' show Vec3;
+import 'package:fynkel/gameplay.dart' show Vec3;
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 
 typedef InspectorBuilder = Widget Function(BuildContext context, InspectorContext inspector);

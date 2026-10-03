@@ -143,6 +143,10 @@
       "kind": "behaviour",
       "version": 1,
       "description": "Rotates its object; a Dart Behaviour (M2-15)."
+    },
+    "fynkel.AnimationBinding": {
+      "kind": "native",
+      "version": 1
     }
   },
   "targets": {

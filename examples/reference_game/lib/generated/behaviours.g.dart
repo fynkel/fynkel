@@ -3,7 +3,7 @@
 //
 // ignore_for_file: type=lint, unused_element
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:reference_game/game/collectible.dart' as _lib0;
 import 'package:reference_game/game/gate.dart' as _lib1;
 import 'package:reference_game/game/player.dart' as _lib2;
@@ -15,6 +15,8 @@ BehaviourType get gameCollectibleType => BehaviourType(
   id: 'game.Collectible',
   version: 1,
   create: _lib0.Collectible.new,
+  dartType: _lib0.Collectible,
+  callbacks: const {},
   fields: [
     BehaviourField(
       name: 'pickup',
@@ -39,6 +41,8 @@ BehaviourType get gameGateType => BehaviourType(
   id: 'game.Gate',
   version: 1,
   create: _lib1.Gate.new,
+  dartType: _lib1.Gate,
+  callbacks: const {'fixedUpdate'},
   fields: [
     BehaviourField(
       name: 'rise',
@@ -66,6 +70,8 @@ BehaviourType get gamePlayerType => BehaviourType(
   id: 'game.Player',
   version: 1,
   create: _lib2.Player.new,
+  dartType: _lib2.Player,
+  callbacks: const {'fixedUpdate'},
   fields: [
     BehaviourField(
       name: 'cameraName',
@@ -155,6 +161,8 @@ BehaviourType get gameSomethingFun2Type => BehaviourType(
   id: 'game.SomethingFun2',
   version: 1,
   create: _lib3.SomethingFun2.new,
+  dartType: _lib3.SomethingFun2,
+  callbacks: const {'fixedUpdate', 'update'},
   fields: [
     BehaviourField(
       name: 'speed',
@@ -194,6 +202,8 @@ BehaviourType get gameSwitchType => BehaviourType(
   id: 'game.Switch',
   version: 1,
   create: _lib4.Switch.new,
+  dartType: _lib4.Switch,
+  callbacks: const {'fixedUpdate'},
   fields: [
     BehaviourField(
       name: 'gate',

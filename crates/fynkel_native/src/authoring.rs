@@ -58,7 +58,7 @@ pub use stage::{
 
 /// Version of `fynkel_authoring.h`. Bumped on any incompatible change;
 /// independent of `FYNKEL_ABI_VERSION`.
-pub const AUTHORING_ABI_VERSION: u32 = 5;
+pub const AUTHORING_ABI_VERSION: u32 = 6;
 
 /// One editor session: the open project, its documents, their edit-preview
 /// worlds, and the last result. Opaque to the host.
@@ -192,6 +192,9 @@ impl FynkelAuthoringSession {
             ))
         })?;
         let assets = Assets::open(&project.cache_dir()).map_err(one)?;
+        for slot in self.previews.values() {
+            slot.world.prepare_asset_store(&assets).map_err(one)?;
+        }
         self.assets = Some(assets.clone());
         for slot in self.previews.values_mut() {
             slot.world.set_assets(assets.clone());

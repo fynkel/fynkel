@@ -5,7 +5,7 @@
 
 import 'dart:math' as math;
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 class _Satellite {
   _Satellite(this.radius, this.phase, this.angularSpeed, this.spinSpeed, this.height, this.scale);

@@ -3,7 +3,7 @@
 // excludes rendering, assets, physics and behavioural scheduler dispatch.
 import 'dart:convert';
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 void main() {
   final results = <Map<String, Object>>[];

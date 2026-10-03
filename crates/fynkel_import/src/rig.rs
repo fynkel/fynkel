@@ -14,7 +14,7 @@
 //! nodes) are dropped with `A0105`. A clip left with no channel is
 //! `A0106` too.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use fynkel_contracts::{Code, Diagnostic};
@@ -27,6 +27,8 @@ use crate::intermediate::Intermediate;
 /// What a skeleton file offers as animation targets.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SkeletonNames {
+    /// Unique display-name to compiled binding key. None means ambiguous.
+    pub bindings: BTreeMap<String, Option<String>>,
     /// Every joint of every skin.
     pub joints: BTreeSet<String>,
     /// Every entity of the hierarchy (joints included).
@@ -34,15 +36,48 @@ pub struct SkeletonNames {
 }
 
 impl SkeletonNames {
+    fn bind(&mut self, name: &str, key: &str) {
+        self.bindings
+            .entry(name.into())
+            .and_modify(|old| {
+                if old.as_deref() != Some(key) {
+                    *old = None;
+                }
+            })
+            .or_insert_with(|| Some(key.into()));
+    }
+    fn prefab_bindings(&mut self, prefab: &Value) {
+        if let Some(entities) = prefab["entities"].as_object() {
+            for entity in entities.values() {
+                let Some(name) = entity["name"].as_str() else {
+                    continue;
+                };
+                if let Some(components) = entity["components"].as_object() {
+                    for component in components.values() {
+                        if component["type"] == "fynkel.AnimationBinding" {
+                            if let Some(key) = component["data"]["key"].as_str() {
+                                self.bind(name, key);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub fn from_intermediate(im: &Intermediate) -> SkeletonNames {
         let mut names = SkeletonNames::default();
         for skin in &im.skins {
+            for joint in &skin.payload.joints {
+                names.bind(&joint.name, &joint.binding);
+            }
             names
                 .joints
                 .extend(skin.payload.joints.iter().map(|j| j.name.clone()));
         }
         if let Some(prefab) = &im.prefab {
             names.nodes.extend(prefab_entity_names(prefab));
+            names.prefab_bindings(prefab);
         }
         names
     }
@@ -105,16 +140,34 @@ pub fn retarget(
     let mut kept = Vec::new();
     let mut dropped = BTreeSet::new();
     let mut missing = BTreeSet::new();
+    let mut source_keys: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
     for c in &clip.channels {
-        if skeleton.contains(&c.target) {
-            kept.push(c.clone());
-        } else if clip_joints.is_none_or(|j| j.contains(&c.target)) {
-            missing.insert(c.target.clone());
+        source_keys
+            .entry(&c.target_name)
+            .or_default()
+            .insert(&c.target);
+    }
+    let mut ambiguous = BTreeSet::new();
+    for c in &clip.channels {
+        if source_keys[&c.target_name.as_str()].len() > 1
+            || matches!(skeleton.bindings.get(&c.target_name), Some(None))
+        {
+            ambiguous.insert(c.target_name.clone());
+        } else if let Some(Some(key)) = skeleton.bindings.get(&c.target_name) {
+            let mut channel = c.clone();
+            channel.target.clone_from(key);
+            kept.push(channel);
+        } else if clip_joints.is_none_or(|j| j.contains(&c.target_name)) {
+            missing.insert(c.target_name.clone());
         } else {
-            dropped.insert(c.target.clone());
+            dropped.insert(c.target_name.clone());
         }
     }
     let mut diagnostics = Vec::new();
+    for name in ambiguous {
+        diagnostics.push(Diagnostic::error(Code::RIG_BONE_MISMATCH,
+            format!("clip {clip_name:?}: rig mapping for {name:?} is ambiguous; give the source and destination bones unique authoring names before retargeting")));
+    }
     if let Some(first) = missing.iter().next() {
         let more = missing.len() - 1;
         diagnostics.push(
@@ -217,7 +270,10 @@ pub mod cooked {
         for (i, _) in opened.indices(&kind(KIND_SKIN)) {
             let bytes = opened.read(i)?;
             let skin = decode_skin(&bytes).ok_or("a SKIN chunk does not decode")?;
-            names.joints.extend(skin.joints.into_iter().map(|j| j.name));
+            for joint in skin.joints {
+                names.bind(&joint.name, &joint.binding);
+                names.joints.insert(joint.name);
+            }
         }
         for (i, c) in opened.indices(&kind(KIND_JSON)) {
             if c["sub"] != "prefab" {
@@ -226,6 +282,7 @@ pub mod cooked {
             let bytes = opened.read(i)?;
             let prefab: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
             names.nodes.extend(prefab_entity_names(&prefab));
+            names.prefab_bindings(&prefab);
         }
         Ok(names)
     }
@@ -290,6 +347,7 @@ mod tests {
     fn channel(target: &str) -> AnimationChannel {
         AnimationChannel {
             target: target.to_string(),
+            target_name: target.to_string(),
             property: ANIM_PROPERTY_ROTATION,
             interpolation: ANIM_INTERPOLATION_LINEAR,
             times: vec![0.0, 1.0],
@@ -299,9 +357,40 @@ mod tests {
 
     fn skeleton(joints: &[&str], nodes: &[&str]) -> SkeletonNames {
         SkeletonNames {
+            bindings: joints
+                .iter()
+                .chain(nodes)
+                .map(|key| (key.to_string(), Some(key.to_string())))
+                .collect(),
             joints: joints.iter().map(|s| s.to_string()).collect(),
             nodes: nodes.iter().map(|s| s.to_string()).collect(),
         }
+    }
+
+    #[test]
+    fn remapping_writes_destination_keys_and_refuses_ambiguous_names() {
+        let mut clip = AnimationPayload {
+            duration: 1.0,
+            channels: vec![channel("hips")],
+            markers: Vec::new(),
+        };
+        clip.channels[0].target = "source/node/7".into();
+        let mut sk = skeleton(&["hips"], &["hips"]);
+        sk.bindings
+            .insert("hips".into(), Some("destination/node/19".into()));
+        let (mapped, errors) = retarget("walk", &clip, Some(&sk.joints), &sk);
+        assert!(errors.is_empty());
+        assert_eq!(mapped.payload.channels[0].target, "destination/node/19");
+        sk.bindings.insert("hips".into(), None);
+        let (_, errors) = retarget("walk", &clip, Some(&sk.joints), &sk);
+        assert!(errors.iter().any(|d| d.is_error()));
+        sk.bindings
+            .insert("hips".into(), Some("destination/node/19".into()));
+        let mut duplicate = clip.channels[0].clone();
+        duplicate.target = "source/node/8".into();
+        clip.channels.push(duplicate);
+        let (_, errors) = retarget("walk", &clip, Some(&sk.joints), &sk);
+        assert!(errors.iter().any(|d| d.is_error()));
     }
 
     #[test]

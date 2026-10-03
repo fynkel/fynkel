@@ -3,7 +3,7 @@
 //
 // ignore_for_file: library_private_types_in_public_api
 
-import 'package:fynkel/fynkel.dart' show AssetRef;
+import 'package:fynkel/gameplay.dart' show AssetRef, AudioClipAsset, MaterialAsset, PrefabAsset, SceneAsset, TextureAsset;
 
 /// Every asset under `assets/`, by folder and name: `Assets.audio.coin`,
 /// `Assets.prefabs.burst`, `Assets.models.kit.meshes.cube`. Each is the
@@ -28,15 +28,15 @@ final class _AssetsAudio {
   const _AssetsAudio();
 
   /// `audio/click.ogg` (fynkel.audio)
-  AssetRef get click => const AssetRef('ab314839-fe97-4f0b-a009-e4d8370c0059');
+  AudioClipAsset get click => const AudioClipAsset('ab314839-fe97-4f0b-a009-e4d8370c0059', name: 'click');
   /// `audio/coin.ogg` (fynkel.audio)
-  AssetRef get coin => const AssetRef('46690333-e5ce-46aa-84a2-58216253ccc1');
+  AudioClipAsset get coin => const AudioClipAsset('46690333-e5ce-46aa-84a2-58216253ccc1', name: 'coin');
   /// `audio/hit.ogg` (fynkel.audio)
-  AssetRef get hit => const AssetRef('1e071bfd-1128-45ad-92fc-d60e86f916c2');
+  AudioClipAsset get hit => const AudioClipAsset('1e071bfd-1128-45ad-92fc-d60e86f916c2', name: 'hit');
   /// `audio/jump.ogg` (fynkel.audio)
-  AssetRef get jump => const AssetRef('8015150b-767d-48f9-8f8f-f0856b9ec79f');
+  AudioClipAsset get jump => const AudioClipAsset('8015150b-767d-48f9-8f8f-f0856b9ec79f', name: 'jump');
   /// `audio/win.ogg` (fynkel.audio)
-  AssetRef get win => const AssetRef('4ffad449-e658-44d1-810d-433921385bf7');
+  AudioClipAsset get win => const AudioClipAsset('4ffad449-e658-44d1-810d-433921385bf7', name: 'win');
 }
 
 final class _AssetsData {
@@ -52,48 +52,48 @@ final class _AssetsMaterials {
   const _AssetsMaterials();
 
   /// `materials/floor.material.json` (material)
-  AssetRef get floor => const AssetRef('fc6b4840-b70f-5b4b-846d-fcda21287498');
+  MaterialAsset get floor => const MaterialAsset('fc6b4840-b70f-5b4b-846d-fcda21287498', name: 'floor');
   /// `materials/gate.material.json` (material)
-  AssetRef get gate => const AssetRef('98374c4e-cfe7-5285-9cc4-09d614962d98');
+  MaterialAsset get gate => const MaterialAsset('98374c4e-cfe7-5285-9cc4-09d614962d98', name: 'gate');
   /// `materials/gold.material.json` (material)
-  AssetRef get gold => const AssetRef('1a765874-6dba-512c-84ec-74c6ac87d1b6');
+  MaterialAsset get gold => const MaterialAsset('1a765874-6dba-512c-84ec-74c6ac87d1b6', name: 'gold');
   /// `materials/hazard.material.json` (material)
-  AssetRef get hazard => const AssetRef('9ace0e10-47c8-5c9f-b48d-715f2224c7e5');
+  MaterialAsset get hazard => const MaterialAsset('9ace0e10-47c8-5c9f-b48d-715f2224c7e5', name: 'hazard');
   /// `materials/pillar.material.json` (material)
-  AssetRef get pillar => const AssetRef('579b9d4c-df7d-5134-af4e-312898eeef9b');
+  MaterialAsset get pillar => const MaterialAsset('579b9d4c-df7d-5134-af4e-312898eeef9b', name: 'pillar');
   /// `materials/player.material.json` (material)
-  AssetRef get player => const AssetRef('726fa746-775a-54a6-a804-94314900237f');
+  MaterialAsset get player => const MaterialAsset('726fa746-775a-54a6-a804-94314900237f', name: 'player');
   /// `materials/switch.material.json` (material)
-  AssetRef get switch$ => const AssetRef('697ced50-8994-551d-9c3f-3bfb57f85bf0');
+  MaterialAsset get switch$ => const MaterialAsset('697ced50-8994-551d-9c3f-3bfb57f85bf0', name: 'switch');
   /// `materials/visor.material.json` (material)
-  AssetRef get visor => const AssetRef('f03d1a4c-9f6b-5cbc-80b4-606b62ff0410');
+  MaterialAsset get visor => const MaterialAsset('f03d1a4c-9f6b-5cbc-80b4-606b62ff0410', name: 'visor');
   /// `materials/wall.material.json` (material)
-  AssetRef get wall => const AssetRef('dc2edd62-1818-5edb-b3f1-b423d667f2dd');
+  MaterialAsset get wall => const MaterialAsset('dc2edd62-1818-5edb-b3f1-b423d667f2dd', name: 'wall');
 }
 
 final class _AssetsPrefabs {
   const _AssetsPrefabs();
 
   /// `prefabs/big_coin.prefab.json` (prefab)
-  AssetRef get bigCoin => const AssetRef('d2749035-0813-5383-abbc-8649390c8b8c');
+  PrefabAsset get bigCoin => const PrefabAsset('d2749035-0813-5383-abbc-8649390c8b8c', name: 'big_coin');
   /// `prefabs/coin.prefab.json` (prefab)
-  AssetRef get coin => const AssetRef('becedaed-a5e2-54b0-b85f-00eda8cb729c');
+  PrefabAsset get coin => const PrefabAsset('becedaed-a5e2-54b0-b85f-00eda8cb729c', name: 'coin');
 }
 
 final class _AssetsScenes {
   const _AssetsScenes();
 
   /// `scenes/level.scene.json` (scene)
-  AssetRef get level => const AssetRef('9f5c3884-502a-5d03-9eae-81593ede92a9');
+  SceneAsset get level => const SceneAsset('9f5c3884-502a-5d03-9eae-81593ede92a9', name: 'level');
   /// `scenes/menu.scene.json` (scene)
-  AssetRef get menu => const AssetRef('b137049d-19e3-50cf-90f1-5a3ebbab8a26');
+  SceneAsset get menu => const SceneAsset('b137049d-19e3-50cf-90f1-5a3ebbab8a26', name: 'menu');
   /// `scenes/results.scene.json` (scene)
-  AssetRef get results => const AssetRef('e73c5b02-1c9e-5ecf-ab32-18b22828993d');
+  SceneAsset get results => const SceneAsset('e73c5b02-1c9e-5ecf-ab32-18b22828993d', name: 'results');
 }
 
 final class _AssetsTextures {
   const _AssetsTextures();
 
   /// `textures/sky.hdr` (fynkel.image)
-  AssetRef get sky => const AssetRef('193cf336-13f4-415b-a4b4-1c38ba3b91d0');
+  TextureAsset get sky => const TextureAsset('193cf336-13f4-415b-a4b4-1c38ba3b91d0', name: 'sky');
 }

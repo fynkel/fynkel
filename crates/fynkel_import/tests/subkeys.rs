@@ -337,3 +337,70 @@ fn fbx_parts_are_keyed_by_name() {
         "{keys:?}"
     );
 }
+
+fn assert_bindings_match_authored_nodes(imported: &Imported) {
+    let im = imported.intermediate.as_ref().unwrap();
+    let prefab = im.prefab.as_ref().unwrap();
+    let mut bound = BTreeMap::new();
+    for entity in prefab["entities"].as_object().unwrap().values() {
+        for component in entity["components"].as_object().unwrap().values() {
+            if component["type"] == "fynkel.AnimationBinding" {
+                let key = component["data"]["key"].as_str().unwrap();
+                assert!(bound
+                    .insert(key, entity["name"].as_str().unwrap())
+                    .is_none());
+            }
+        }
+    }
+    for clip in &im.animations {
+        for channel in &clip.payload.channels {
+            assert_eq!(
+                bound.get(channel.target.as_str()).copied(),
+                Some(channel.target_name.as_str())
+            );
+        }
+    }
+    for skin in &im.skins {
+        for joint in &skin.payload.joints {
+            assert_eq!(
+                bound.get(joint.binding.as_str()).copied(),
+                Some(joint.name.as_str())
+            );
+        }
+        if !skin.payload.skeleton.is_empty() {
+            assert!(bound.contains_key(skin.payload.skeleton.as_str()));
+        }
+    }
+}
+
+#[test]
+fn recooked_bindings_follow_source_indices_through_reordering_and_duplicate_display_names() {
+    let (pa, pb) = glb_pair("rig.glb");
+    let (a, b) = import_pair(&pa, &pb, true);
+    assert_bindings_match_authored_nodes(&a);
+    assert_bindings_match_authored_nodes(&b);
+    let bytes = std::fs::read(&pa).unwrap();
+    let renamed = rewrite_glb(&bytes, |json| {
+        for node in json["nodes"].as_array_mut().unwrap() {
+            node["name"] = Value::String("same display name".into());
+        }
+    });
+    std::fs::write(&pa, renamed).unwrap();
+    let renamed = ok(import(&pa, &meta(&pa, true), &Limits::default()));
+    assert_bindings_match_authored_nodes(&renamed);
+    let targets = |r: &Imported| {
+        r.intermediate
+            .as_ref()
+            .unwrap()
+            .animations
+            .iter()
+            .flat_map(|a| &a.payload.channels)
+            .map(|c| c.target.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        targets(&a),
+        targets(&renamed),
+        "display-name changes preserve binding keys"
+    );
+}

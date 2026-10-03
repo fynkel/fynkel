@@ -3,7 +3,7 @@
 // routines, Invoke / InvokeRepeating / CancelInvoke, and when they stop —
 // over the real native library.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:test/test.dart';
 
 /// Runs whatever the test hands it and counts frames through `update`.

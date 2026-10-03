@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 /// What SomethingFun2 does (the Inspector shows this comment).
 @FynkelBehaviour(id: 'game.SomethingFun2')

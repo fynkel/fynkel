@@ -63,7 +63,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_AUTHORING_ABI_VERSION 5u
+#define FYNKEL_AUTHORING_ABI_VERSION 6u
 
 typedef struct FynkelAuthoringSession FynkelAuthoringSession;
 /* The edit-preview world's type is fynkel.h's FynkelWorld. */
@@ -551,8 +551,12 @@ FynkelStatus fynkel_authoring_stage_call(FynkelAuthoringSession* session,
  *   what the game spawned or instantiated (`spawned` true);
  * - "entity" { id } -> { id, entity, name, parent, world, components: [{ type,
  *   data }] }, every native component as the scene document stores it;
- * - "set" { id, type, data } replaces or adds a native component from its
- *   document JSON; "remove" { id, type }; "rename" { id, name };
+ * - "setComponents" { components: [{ id, type, data, version? }] } atomically
+ *   replaces built-in and registered component data (authoring ABI 6).
+ *   Decoding, required-resource preparation and gameplay validation complete
+ *   before publication. A rejected batch publishes none of its changes.
+ * - "set" { id, type, data } is the single-component form of setComponents;
+ *   "remove" { id, type }; "rename" { id, name };
  *   "parent" { id, parent: id | null, index? } moves it (its local
  *   transform kept; `index` among the new siblings, last when absent);
  *   "destroy" { id } destroys it and its subtree; "spawn" { name?, parent?:

@@ -74,6 +74,12 @@ fn check<T: WireRecord + PartialEq + std::fmt::Debug>(name: &str, value: &T) {
 
 #[test]
 fn fixtures_match_generated_codecs() {
+    check(
+        "AnimationBinding",
+        &fynkel_core::AnimationBinding {
+            key: "rig/node/7".into(),
+        },
+    );
     check("Transform", &transform());
     check("Name", &Name::new("héllo wörld"));
     check("DestroyedEvent", &DestroyedEvent { entity: e(11, 1) });

@@ -212,7 +212,7 @@ pub struct MaskEntry {
     pub subtree: bool,
 }
 
-/// Whether a layer with `mask` poses a node, given the names from the
+/// Whether a layer with `mask` poses a node, given the binding keys from the
 /// node up to the animator (the node's own first): the nearest entry
 /// decides (the node's own, else a subtree entry of the nearest ancestor
 /// that has one; the last in the list if two name the same node); with
@@ -240,7 +240,7 @@ pub enum IkWeight {
     Parameter(usize),
 }
 
-/// What an IK goal moves (ADR-0033 § 5). Node names resolve under the
+/// What an IK goal moves (ADR-0033 § 5). Node binding keys resolve under the
 /// animator.
 #[derive(Clone, Debug, PartialEq)]
 pub enum IkKind {

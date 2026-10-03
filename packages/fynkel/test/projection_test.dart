@@ -6,7 +6,7 @@
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
@@ -81,6 +81,36 @@ void main() {
       w.projection.update();
       final (px, _) = expected(Vec3(5 + 2 * fraction, 0, 0), 800, 600);
       expect(anchor.x, closeTo(px, 0.01), reason: 'regular frames resume interpolation');
+    }
+  });
+
+  test('120 Hz presentation interpolates 60 Hz kinematic movement on every frame', () {
+    final w = loaded();
+    final cube = w.spawn(transform: const Pose(position: Vec3(0, 0, 0)));
+    cube.set(const RigidBody(bodyType: BodyType.kinematic));
+    cube.set(const Collider());
+    w.frame(1 / 60);
+    final anchor = w.projection.add(cube);
+    w.projection.setViewport(800, 600);
+    var elapsed = 0.0;
+    var angle = 0.0;
+    // Quantized host timestamps and separate Spinner/Mover commits.
+    for (var frame = 0; frame < 240; frame++) {
+      final dt = (frame % 3 == 0 ? 8334 : 8333) / 1e6;
+      elapsed += dt;
+      w.frame(
+        dt,
+        fixedUpdate: (_) {
+          angle += 1.5 * w.fixedDt;
+          cube.transform.rotation = Quat.axisAngle(Vec3.up, angle);
+          cube.transform.position = cube.transform.position + Vec3(2 * w.fixedDt, 0, 0);
+        },
+      );
+      w.projection.update();
+      final x = 2.0 * math.max(0.0, elapsed - w.fixedDt);
+      final (px, py) = expected(Vec3(x, 0, 0), 800, 600);
+      expect(anchor.x, closeTo(px, 0.02), reason: 'frame $frame, alpha ${w.alpha}');
+      expect(anchor.y, closeTo(py, 0.02));
     }
   });
 

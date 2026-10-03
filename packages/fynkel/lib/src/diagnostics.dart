@@ -38,7 +38,8 @@ enum DiagnosticCode {
   audioDevice(19),
   snapshotBudget(20),
   moduleOff(21),
-  ikUnavailable(22);
+  ikUnavailable(22),
+  animationBindingUnavailable(23);
 
   const DiagnosticCode(this.value);
   final int value;
@@ -451,6 +452,24 @@ class InstantiateReport {
 }
 
 /// What [World.loadScene] / [World.loadProject] produced.
+/// Readiness is stage-specific; scene activation currently requires CPU and simulation.
+class AssetReadiness {
+  const AssetReadiness({
+    this.cpu = 'unknown',
+    this.simulation = 'unknown',
+    this.gpu = 'unknown',
+    this.required = const [],
+  });
+  factory AssetReadiness.fromJson(Map<String, Object?> j) => AssetReadiness(
+    cpu: j['cpu'] as String? ?? 'unknown',
+    simulation: j['simulation'] as String? ?? 'unknown',
+    gpu: j['gpu'] as String? ?? 'unknown',
+    required: List.unmodifiable((j['required'] as List? ?? const []).cast<String>()),
+  );
+  final String cpu, simulation, gpu;
+  final List<String> required;
+}
+
 class LoadReport {
   const LoadReport({
     required this.ok,
@@ -469,6 +488,7 @@ class LoadReport {
     this.cacheDir,
     this.cacheProfile,
     this.startupScene,
+    this.readiness = const AssetReadiness(),
     this.residency = const ResidencyStats(),
     this.inputActions = const [],
     this.bindingErrors = const [],
@@ -494,6 +514,7 @@ class LoadReport {
     final audio = j['audio'] as Map<String, Object?>?;
     return LoadReport(
       ok: j['ok'] == true,
+      readiness: AssetReadiness.fromJson((j['readiness'] as Map?)?.cast<String, Object?>() ?? const {}),
       diagnostics: [
         for (final d in (j['diagnostics'] as List?) ?? const []) LoadDiagnostic.fromJson(d as Map<String, Object?>),
       ],
@@ -599,6 +620,8 @@ class LoadReport {
   /// The startup scene id the cache's index names.
   final String? startupScene;
 
+  final AssetReadiness readiness;
+
   /// The world's asset store after the load.
   final ResidencyStats residency;
 
@@ -635,6 +658,7 @@ class LoadReport {
 
   LoadReport _copy({int? behavioursAttached, List<LoadDiagnostic>? diagnostics, String? projectDir}) => LoadReport(
     ok: ok,
+    readiness: readiness,
     diagnostics: diagnostics ?? this.diagnostics,
     sceneId: sceneId,
     sceneName: sceneName,
@@ -676,7 +700,16 @@ class LoadReport {
 
 /// What the world's asset store holds (`LoadReport.residency`).
 class ResidencyStats {
-  const ResidencyStats({this.retained = 0, this.meshes = 0, this.textures = 0, this.materials = 0, this.bytes = 0});
+  const ResidencyStats({
+    this.retained = 0,
+    this.meshes = 0,
+    this.textures = 0,
+    this.materials = 0,
+    this.bytes = 0,
+    this.cacheBudgetBytes = 0,
+    this.runtimeBytes = 0,
+    this.runtimeBudgetBytes = 0,
+  });
 
   factory ResidencyStats.fromJson(Map<String, Object?> j) => ResidencyStats(
     retained: (j['retained'] as num?)?.toInt() ?? 0,
@@ -684,18 +717,22 @@ class ResidencyStats {
     textures: (j['textures'] as num?)?.toInt() ?? 0,
     materials: (j['materials'] as num?)?.toInt() ?? 0,
     bytes: (j['bytes'] as num?)?.toInt() ?? 0,
+    cacheBudgetBytes: (j['cacheBudgetBytes'] as num?)?.toInt() ?? 0,
+    runtimeBytes: (j['runtimeBytes'] as num?)?.toInt() ?? 0,
+    runtimeBudgetBytes: (j['runtimeBudgetBytes'] as num?)?.toInt() ?? 0,
   );
 
-  /// Assets some loaded scene retains.
+  final int cacheBudgetBytes, runtimeBytes, runtimeBudgetBytes;
+
+  /// Assets retained by scenes, live objects, preparation or rendering.
   final int retained;
 
-  /// Payloads resident right now (loaded on first use, so 0 right after
-  /// a load and before a frame is drawn).
+  /// CPU payloads resident right now; scene requirements decode before activation.
   final int meshes;
   final int textures;
   final int materials;
 
-  /// CPU bytes of the resident mesh and texture payloads.
+  /// Accounted decoded cache bytes; allocator overhead and external owners excluded.
   final int bytes;
 
   @override

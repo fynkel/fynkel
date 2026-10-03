@@ -13,7 +13,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart' show World;
+import 'package:fynkel/gameplay.dart' show World;
 
 /// Where the game starts: given by its `main` in a build, by the editor's
 /// Play inside the editor.

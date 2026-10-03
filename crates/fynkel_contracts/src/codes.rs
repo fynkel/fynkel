@@ -109,6 +109,7 @@ impl DiagnosticCode {
     /// not under the animator, or foot placement with the physics module
     /// off. Reported once per goal; the goal is skipped.
     pub const IK_UNAVAILABLE: DiagnosticCode = DiagnosticCode(22);
+    pub const ANIMATION_BINDING_UNAVAILABLE: DiagnosticCode = DiagnosticCode(23);
 
     pub const fn name(self) -> &'static str {
         match self.0 {
@@ -132,6 +133,7 @@ impl DiagnosticCode {
             20 => "snapshot_budget",
             21 => "module_off",
             22 => "ik_unavailable",
+            23 => "animation_binding_unavailable",
             _ => "unknown",
         }
     }

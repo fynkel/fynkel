@@ -6,7 +6,7 @@
 // one; built live, the coins hold the same instances made in code. Every
 // coin of a kind shares its one instance.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 import '../generated/assets.g.dart';
 

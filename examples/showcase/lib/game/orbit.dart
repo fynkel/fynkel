@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 /// Circles its object around [target] at [radius] and [height], looking at
 /// the target — the showcase camera. Runs in `fixedUpdate` so a headless

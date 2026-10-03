@@ -21,12 +21,11 @@ struct VsOut {
     @location(9) uv1: vec2<f32>,
 };
 
-// Every instance's light list (E1 light culling): the pool indices that
-// reach it, one per byte — the first four in `x`, the next four in `y` —
-// and how many in `z`. An instance's own slot is `flags.z`; there is no
-// room for this among the vertex attributes (the pipeline's sixteen are
-// all taken), and the stage reads it once per vertex.
+// Each instance owns three vec4<u32> records: eight full-width light indices,
+// then count plus padding. The vertex forwards the offset and count; fragment
+// shading reads only that object's bounded list from storage.
 @group(2) @binding(1) var<storage, read> instance_lights: array<vec4<u32>>;
+@group(2) @binding(2) var<storage, read> local_lights: array<Light>;
 
 @vertex
 fn vs_main(in: VsIn) -> VsOut {
@@ -58,6 +57,7 @@ fn fynkel_place(in: VsIn, model: mat4x4<f32>) -> VsOut {
     out.emissive = in.emissive;
     out.params = in.params;
     out.flags = in.flags;
-    out.lights = instance_lights[u32(in.flags.z)];
+    let list_offset = u32(in.flags.z) * 3u;
+    out.lights = vec4<u32>(list_offset, 0u, instance_lights[list_offset + 2u].x, 0u);
     return out;
 }

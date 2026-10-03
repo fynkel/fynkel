@@ -181,7 +181,7 @@ fn render(controllers: &[Controller]) -> String {
     let _ = writeln!(o);
     let _ = writeln!(
         o,
-        "import 'package:fynkel/fynkel.dart' show AnimationControl, AssetRef;"
+        "import 'package:fynkel/gameplay.dart' show AnimationControl, AssetRef;"
     );
     for c in controllers {
         o.push('\n');

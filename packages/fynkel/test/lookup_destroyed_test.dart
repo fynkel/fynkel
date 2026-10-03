@@ -1,7 +1,7 @@
 // Transactional removal is immediately absent from gameplay lookups; lifecycle
 // cleanup waits for its safe boundary. Retired scripts receive no later callbacks.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:test/test.dart';
 
 class Health extends Behaviour {

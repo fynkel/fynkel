@@ -7,7 +7,7 @@
 
 import 'dart:io';
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
@@ -75,11 +75,7 @@ void main() {
     final report = w.loadScene(rigScene, cacheDir: cache);
     expect(report.ok, isTrue);
     expect(report.sceneName, 'Rig');
-    expect(
-      report.entityCount,
-      14,
-      reason: 'the authored rig and, since M3-19a, its import instanced beside it',
-    );
+    expect(report.entityCount, 14, reason: 'the authored rig and, since M3-19a, its import instanced beside it');
     expect(
       (report.animation.clips, report.animation.skins),
       (3, 1),
@@ -95,15 +91,7 @@ void main() {
     final prop = rig.findChild('Prop')!;
     expect(
       rig.get<Animator>(),
-      const Animator(
-        clip: wave,
-        speed: 1,
-        looping: true,
-        playing: true,
-        weight: 1,
-        additive: false,
-        rootMotion: false,
-      ),
+      const Animator(clip: wave, speed: 1, looping: true, playing: true, weight: 1, additive: false, rootMotion: false),
     );
     expect(
       body.get<Skin>(),
@@ -153,11 +141,7 @@ void main() {
     expect(events, hasLength(1));
     expect(events.single.entity, prop.entity);
     expect(events.single.clip, bob);
-    expect(
-      events.single.tickLo,
-      closeTo(121.5, 1),
-      reason: 'the tick that passed 2 s (the first tick samples 0)',
-    );
+    expect(events.single.tickLo, closeTo(121.5, 1), reason: 'the tick that passed 2 s (the first tick samples 0)');
     final propState = prop.animation.state!;
     expect(propState.playing, isFalse);
     expect(propState.time, closeTo(2, 1e-4));
@@ -211,15 +195,7 @@ void main() {
     // it — half a second in the statue waves like the scene's rig.
     expect(statue.animation.state, isNull);
     statue.add(
-      const Animator(
-        clip: wave,
-        speed: 1,
-        looping: true,
-        playing: true,
-        weight: 1,
-        additive: false,
-        rootMotion: false,
-      ),
+      const Animator(clip: wave, speed: 1, looping: true, playing: true, weight: 1, additive: false, rootMotion: false),
     );
     for (var i = 0; i < 31; i++) {
       w.frame(1 / 60);
@@ -238,8 +214,7 @@ void main() {
     // texture has no hierarchy (FynkelInstantiateError).
     expect(() => w.instantiate(const AssetRef(rigAsset, sub: 'mesh/Body')), throwsArgumentError);
     expect(
-      () =>
-          w.instantiate(const AssetRef('c0000000-0000-4000-8000-000000000010', sub: World.importedPrefabSub)),
+      () => w.instantiate(const AssetRef('c0000000-0000-4000-8000-000000000010', sub: World.importedPrefabSub)),
       throwsStateError,
     );
   });
@@ -378,17 +353,10 @@ void main() {
     // A second rig-less object: the clip resolves its targets under the
     // animator by name, so a child named "Prop" is what "bob" moves.
     final host = w.spawn(name: 'host');
-    final target = w.spawn(name: 'Prop', parent: host);
+    final target = w.spawn(name: 'Prop', parent: host)
+      ..set(const AnimationBinding(key: 'c0000000-0000-4000-8000-000000000005/node/5'));
     host.add(
-      const Animator(
-        clip: bob,
-        speed: 2,
-        looping: true,
-        playing: true,
-        weight: 1,
-        additive: false,
-        rootMotion: false,
-      ),
+      const Animator(clip: bob, speed: 2, looping: true, playing: true, weight: 1, additive: false, rootMotion: false),
     );
     w.frame(1 / 60);
     expect(host.animation.state!.clip, bob);
@@ -428,75 +396,64 @@ void main() {
     expect(w.byEntity(target.entity)!.animation.state, isNull, reason: 'no animator');
   });
 
-  test(
-    'markers reach onAnimationMarker across loops and backwards; weight and parameter read back (M3-19c)',
-    () {
-      final w = fresh();
-      w.loadProject(fixture, cacheDir: cache);
+  test('markers reach onAnimationMarker across loops and backwards; weight and parameter read back (M3-19c)', () {
+    final w = fresh();
+    w.loadProject(fixture, cacheDir: cache);
+    w.frame(1 / 60);
+    // The Column rig's `wave` carries `peak` at 0.25 s and `trough` at
+    // 0.75 s (rigs/column.rig.json `markers`); the clip is 1 s long.
+    const wave = AssetRef(columnRig, sub: 'anim/wave');
+    final statue = w.instantiate(const AssetRef(columnRig, sub: World.importedPrefabSub), name: 'Column');
+    final stepper = statue.addBehaviour(Stepper());
+    statue.add(
+      const Animator(clip: wave, speed: 1, looping: true, playing: true, weight: 1, additive: false, rootMotion: false),
+    );
+    for (var i = 0; i < 61; i++) {
       w.frame(1 / 60);
-      // The Column rig's `wave` carries `peak` at 0.25 s and `trough` at
-      // 0.75 s (rigs/column.rig.json `markers`); the clip is 1 s long.
-      const wave = AssetRef(columnRig, sub: 'anim/wave');
-      final statue = w.instantiate(const AssetRef(columnRig, sub: World.importedPrefabSub), name: 'Column');
-      final stepper = statue.addBehaviour(Stepper());
-      statue.add(
-        const Animator(
-          clip: wave,
-          speed: 1,
-          looping: true,
-          playing: true,
-          weight: 1,
-          additive: false,
-          rootMotion: false,
-        ),
-      );
-      for (var i = 0; i < 61; i++) {
-        w.frame(1 / 60);
-      }
-      expect(statue.animation.state!.time, closeTo(1, 1e-4));
-      expect(stepper.markers, ['peak', 'trough']);
-      for (var i = 0; i < 30; i++) {
-        w.frame(1 / 60);
-      }
-      expect(stepper.markers, ['peak', 'trough', 'peak'], reason: 'the second lap crossed peak');
-      statue.animation.speed = -1;
-      for (var i = 0; i < 30; i++) {
-        w.frame(1 / 60);
-      }
-      expect(stepper.markers, ['peak', 'trough', 'peak', 'peak'], reason: 'crossed again on the way back');
-      expect(w.drainEvents().whereType<AnimationMarker>(), isEmpty, reason: 'delivered with the tick');
-
-      // Weight and a named parameter are commands like the others and read
-      // back in the state; out of range is a rejection.
-      final state = statue.animation.state!;
-      expect((state.weight, state.parameter, state.rootDelta, state.rootYaw), (1.0, 0.0, Vec3.zero, 0.0));
-      statue.animation.weight = 0.5;
-      statue.animation.setParameter('speed', 4);
+    }
+    expect(statue.animation.state!.time, closeTo(1, 1e-4));
+    expect(stepper.markers, ['peak', 'trough']);
+    for (var i = 0; i < 30; i++) {
       w.frame(1 / 60);
-      expect(statue.animation.state!.weight, 0.5);
-      expect(statue.animation.state!.parameter, 4);
-      w.throwOnDiagnostics = false;
-      final seen = <FynkelDiagnostic>[];
-      w.onDiagnostics = seen.addAll;
-      expect(() => statue.animation.weight = 2, throwsStateError);
-      expect(() => statue.animation.setParameter('', 1), throwsStateError);
-      w.step(); // legacy runtime validation; automatic callbacks reject queue adoption
-      w.drainEvents();
-      expect(seen, isEmpty);
-      expect(statue.animation.state!.weight, 0.5);
+    }
+    expect(stepper.markers, ['peak', 'trough', 'peak'], reason: 'the second lap crossed peak');
+    statue.animation.speed = -1;
+    for (var i = 0; i < 30; i++) {
+      w.frame(1 / 60);
+    }
+    expect(stepper.markers, ['peak', 'trough', 'peak', 'peak'], reason: 'crossed again on the way back');
+    expect(w.drainEvents().whereType<AnimationMarker>(), isEmpty, reason: 'delivered with the tick');
 
-      // Root motion opted in on a clip that only bobs vertically: nothing
-      // planar to take out, the hips still rise.
-      statue.set(statue.get<Animator>()!.copyWith(rootMotion: true, speed: 1, weight: 1));
-      statue.animation.time = 0;
-      for (var i = 0; i < 31; i++) {
-        w.frame(1 / 60);
-      }
-      expect(statue.animation.state!.rootDelta, Vec3.zero);
-      expect(statue.animation.state!.rootYaw, 0);
-      expect(statue.findChild('hips')!.localTransform.position.y, closeTo(0.125, 1e-3));
-    },
-  );
+    // Weight and a named parameter are commands like the others and read
+    // back in the state; out of range is a rejection.
+    final state = statue.animation.state!;
+    expect((state.weight, state.parameter, state.rootDelta, state.rootYaw), (1.0, 0.0, Vec3.zero, 0.0));
+    statue.animation.weight = 0.5;
+    statue.animation.setParameter('speed', 4);
+    w.frame(1 / 60);
+    expect(statue.animation.state!.weight, 0.5);
+    expect(statue.animation.state!.parameter, 4);
+    w.throwOnDiagnostics = false;
+    final seen = <FynkelDiagnostic>[];
+    w.onDiagnostics = seen.addAll;
+    expect(() => statue.animation.weight = 2, throwsStateError);
+    expect(() => statue.animation.setParameter('', 1), throwsStateError);
+    w.step(); // legacy runtime validation; automatic callbacks reject queue adoption
+    w.drainEvents();
+    expect(seen, isEmpty);
+    expect(statue.animation.state!.weight, 0.5);
+
+    // Root motion opted in on a clip that only bobs vertically: nothing
+    // planar to take out, the hips still rise.
+    statue.set(statue.get<Animator>()!.copyWith(rootMotion: true, speed: 1, weight: 1));
+    statue.animation.time = 0;
+    for (var i = 0; i < 31; i++) {
+      w.frame(1 / 60);
+    }
+    expect(statue.animation.state!.rootDelta, Vec3.zero);
+    expect(statue.animation.state!.rootYaw, 0);
+    expect(statue.findChild('hips')!.localTransform.position.y, closeTo(0.125, 1e-3));
+  });
 
   test('a blend space plays like a clip: its parameter mixes the points phase-synced (M3-19c)', () {
     final w = fresh();

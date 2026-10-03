@@ -1,6 +1,6 @@
 import 'dart:math' show cos, pi, sin;
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 import '../generated/assets.g.dart';
 import 'coin_kind.dart';
@@ -42,13 +42,15 @@ class Collectible extends Behaviour {
 
   AssetRef _material(CoinKind k) {
     final c = k.color;
-    final ref = world.createMaterial(PbrMaterial(
-      baseColor: Vec4(c.x, c.y, c.z, 1),
-      metallic: 0.4,
-      roughness: 0.35,
-      emissive: c,
-      emissiveStrength: 0.35,
-    ));
+    final ref = world.createMaterial(
+      PbrMaterial(
+        baseColor: Vec4(c.x, c.y, c.z, 1),
+        metallic: 0.4,
+        roughness: 0.35,
+        emissive: c,
+        emissiveStrength: 0.35,
+      ),
+    );
     _materials[k] = (c, ref);
     return ref;
   }

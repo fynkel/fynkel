@@ -13,10 +13,13 @@ impl ExtractRenderer {
                 return;
             }
         }
+        self.edit_epoch_seen = assets.as_ref().map(Assets::edit_epoch).unwrap_or(0);
         self.evictions_seen = assets.as_ref().map(Assets::evictions).unwrap_or(0);
         self.live_edits_seen = assets.as_ref().map(Assets::live_edits).unwrap_or(0);
         self.mesh_edits_seen = assets.as_ref().map(Assets::mesh_edits).unwrap_or(0);
         self.material_edits_seen = assets.as_ref().map(Assets::material_edits).unwrap_or(0);
+        self.asset_leases.clear();
+        self.asset_roots.clear();
         self.assets = assets;
         self.clear_assets();
     }
@@ -25,16 +28,72 @@ impl ExtractRenderer {
         self.assets.as_ref()
     }
 
+    /// Retain the resources reachable from this frame, including extra worlds.
+    /// Acquire before release so shared dependencies never lose their owner.
+    pub(crate) fn retain_extract_assets(&mut self, extract: &Extract, extras: &[ExtraWorld]) {
+        let Some(assets) = &self.assets else { return };
+        let mut ids = std::mem::take(&mut self.asset_roots_scratch);
+        ids.clear();
+        for view in std::iter::once(extract).chain(extras.iter().map(|e| &e.extract)) {
+            for mesh in &view.meshes {
+                ids.extend([mesh.mesh.asset, mesh.material.asset]);
+            }
+        }
+        ids.extend(
+            extract
+                .environment
+                .iter()
+                .filter_map(|e| e.environment.sky.as_ref())
+                .map(|r| r.asset),
+        );
+        ids.extend(extract.volumes.iter().map(|v| v.volume.profile.asset));
+        ids.retain(|id| !id.is_nil());
+        let revision = (assets.live_edits(), assets.material_edits());
+        if ids == self.asset_roots && revision == self.asset_dependency_revision {
+            self.asset_roots_scratch = ids;
+            return;
+        }
+        std::mem::swap(&mut self.asset_roots, &mut ids);
+        self.asset_roots_scratch = ids;
+        self.asset_dependency_revision = revision;
+        let ids: HashSet<_> = self
+            .asset_roots
+            .iter()
+            .flat_map(|id| assets.closure(*id))
+            .collect();
+        for &id in &ids {
+            self.asset_leases
+                .entry(id)
+                .or_insert_with(|| assets.retain(&[id]));
+        }
+        self.asset_leases.retain(|id, _| ids.contains(id));
+    }
+
     /// Drops the GPU copies of assets the store evicted since the last
     /// frame (a scene unload released them); nothing to do otherwise.
     pub(crate) fn reconcile_evictions(&mut self, queue: &wgpu::Queue) {
-        let Some(assets) = &self.assets else { return };
+        let Some(assets) = self.assets.clone() else {
+            return;
+        };
+        if self.edit_epoch_seen != assets.edit_epoch() {
+            self.edit_epoch_seen = assets.edit_epoch();
+            self.clear_assets();
+        }
         // A material or volume profile edited in place (the editor's
         // Inspector): every bind group is rebuilt and every profile re-read
         // from the store on its next use.
         let edits = assets.live_edits();
         if edits != self.live_edits_seen {
             self.live_edits_seen = edits;
+            for r in self
+                .materials
+                .keys()
+                .chain(self.broken_materials.iter())
+                .chain(self.volume_profiles.keys())
+            {
+                self.asset_failures.remove(r);
+            }
+            self.refresh_asset_errors();
             self.materials.clear();
             self.broken_materials.clear();
             self.volume_profiles.clear();
@@ -45,6 +104,8 @@ impl ExtractRenderer {
         if mesh_edits != self.mesh_edits_seen {
             for r in assets.meshes_changed_since(self.mesh_edits_seen) {
                 self.meshes.remove(&r);
+                self.asset_failures.remove(&r);
+                self.refresh_asset_errors();
             }
             self.mesh_edits_seen = mesh_edits;
         }
@@ -54,10 +115,20 @@ impl ExtractRenderer {
         let material_edits = assets.material_edits();
         if material_edits != self.material_edits_seen {
             for r in assets.materials_changed_since(self.material_edits_seen) {
-                let now = assets.custom_material(&r).ok().flatten();
+                self.asset_failures.remove(&r);
+                self.refresh_asset_errors();
+                let now = assets
+                    .poll_custom_material(&r)
+                    .and_then(Result::ok)
+                    .flatten();
                 let rewritten = match (self.materials.get(&r), &now) {
                     (Some(Some(gpu)), Some(now)) => match (&gpu.custom, &gpu.block) {
-                        (Some(was), Some(block)) if same_but_values(was, now) => {
+                        (Some(was), Some(block))
+                            if same_but_values(was, now)
+                                && self
+                                    .upload_usage
+                                    .admit(self.upload_budget, now.block.len() as u64) =>
+                        {
                             queue.write_buffer(block, 0, &now.block);
                             true
                         }
@@ -106,7 +177,21 @@ impl ExtractRenderer {
                 self.ibl_dirty = true;
             }
         }
-        self.asset_errors.clear();
+        self.asset_failures.retain(|r, _| a.is_resident(r.asset));
+        self.refresh_asset_errors();
+    }
+
+    fn record_asset_error(&mut self, r: &AssetRef, message: String) {
+        let errors = self.asset_failures.entry(r.clone()).or_default();
+        if !errors.contains(&message) {
+            errors.push(message);
+            self.refresh_asset_errors();
+        }
+    }
+
+    fn refresh_asset_errors(&mut self) {
+        self.asset_errors = self.asset_failures.values().flatten().cloned().collect();
+        self.asset_errors.sort();
     }
 
     /// Forgets every loaded asset and error; the next `prepare` reloads
@@ -121,6 +206,7 @@ impl ExtractRenderer {
         self.volume_profiles.clear();
         self.sky_bind_group = None;
         self.ibl_dirty |= self.ibl.take().is_some();
+        self.asset_failures.clear();
         self.asset_errors.clear();
     }
 
@@ -131,6 +217,86 @@ impl ExtractRenderer {
     }
 
     // ----------------------------------------------------------- prepare
+
+    /// Rejects shrinking below currently resident payloads. Call clear_assets
+    /// explicitly to release them before choosing a smaller device budget.
+    pub fn set_gpu_asset_budget(&mut self, bytes: u64) -> Result<(), String> {
+        if self.asset_gpu_bytes() > bytes {
+            return Err(
+                "GPU budget is below resident payloads; clear assets before shrinking".into(),
+            );
+        }
+        self.gpu_asset_budget_bytes = bytes;
+        Ok(())
+    }
+    pub fn gpu_asset_budget(&self) -> u64 {
+        self.gpu_asset_budget_bytes
+    }
+
+    fn asset_gpu_bytes(&self) -> u64 {
+        self.meshes
+            .values()
+            .flatten()
+            .map(|m| {
+                m.vertex_buffer.size()
+                    + m.index_buffer.size()
+                    + m.skin_buffer.as_ref().map_or(0, wgpu::Buffer::size)
+            })
+            .sum::<u64>()
+            + self
+                .textures
+                .values()
+                .flatten()
+                .map(|t| t.bytes)
+                .sum::<u64>()
+            + self
+                .materials
+                .values()
+                .flatten()
+                .filter_map(|m| m.block.as_ref())
+                .map(wgpu::Buffer::size)
+                .sum::<u64>()
+            + self.ibl.as_ref().map_or(0, |(_, i)| i.bytes())
+    }
+
+    pub(crate) fn admit_asset_bytes(&mut self, r: &AssetRef, bytes: u64) -> Result<bool, ()> {
+        if bytes > self.upload_budget.bytes_per_frame {
+            self.record_asset_error(r, format!("asset {r}: upload needs {bytes} bytes, exceeding the per-frame limit {}; increase the budget or recook a smaller resource", self.upload_budget.bytes_per_frame));
+            return Err(());
+        }
+        if bytes
+            > self
+                .gpu_asset_budget_bytes
+                .saturating_sub(self.asset_gpu_bytes())
+        {
+            // Drop resources owned only by preload/other scenes before refusing
+            // a visible resource. Bind groups go too, releasing texture handles.
+            self.materials
+                .retain(|key, _| self.asset_leases.contains_key(&key.asset));
+            self.meshes
+                .retain(|key, _| self.asset_leases.contains_key(&key.asset));
+            self.textures
+                .retain(|key, _| self.asset_leases.contains_key(&key.asset));
+            self.retain_used_surfaces();
+            if bytes
+                > self
+                    .gpu_asset_budget_bytes
+                    .saturating_sub(self.asset_gpu_bytes())
+            {
+                self.record_asset_error(
+                    r,
+                    format!(
+                        "asset {r}: GPU residency budget exhausted ({} bytes)",
+                        self.gpu_asset_budget_bytes
+                    ),
+                );
+                return Err(());
+            }
+        }
+        let admitted = self.upload_usage.admit(self.upload_budget, bytes);
+        self.frame_assets_deferred |= !admitted;
+        Ok(admitted)
+    }
 
     /// The GPU memory estimate (`FrameStats::gpu_bytes`): what this
     /// renderer created and still holds. Driver-side copies, pipeline
@@ -158,6 +324,8 @@ impl ExtractRenderer {
             + self.shadow_map.bytes()
             + self.instance_buffer.size()
             + self.joint_buffer.size()
+            + self.light_list_buffer.size()
+            + self.local_light_buffer.size()
             + self.overlay_pass.bytes()
             + self.outline_pass.bytes()
             + self.outline_buffer.size()
@@ -247,22 +415,39 @@ impl ExtractRenderer {
         let budget = std::time::Duration::from_micros(self.warm_budget_us as u64);
         let started = std::time::Instant::now();
         let mut warmed = 0;
-        while started.elapsed() < budget {
+        let attempts = self.assets.as_ref().map_or(0, Assets::warm_count);
+        for _ in 0..attempts {
+            if started.elapsed() >= budget
+                || self.upload_usage.operations >= self.upload_budget.operations_per_frame
+            {
+                break;
+            }
             let Some(next) = self.assets.as_ref().and_then(|a| a.next_warm()) else {
                 break;
             };
-            match next {
+            match &next {
                 Warm::Mesh(r) => {
-                    self.mesh(device, &r);
+                    self.mesh(device, r);
                 }
                 Warm::Texture(r) => {
-                    self.texture(device, queue, &r);
+                    self.texture(device, queue, r);
                 }
                 Warm::Material(r) => {
-                    self.material(device, queue, &r);
+                    self.material(device, queue, r);
                 }
             }
-            warmed += 1;
+            let complete = match &next {
+                Warm::Mesh(r) => self.meshes.contains_key(r),
+                Warm::Texture(r) => self.textures.contains_key(r),
+                Warm::Material(r) => {
+                    self.materials.contains_key(r) || self.broken_materials.contains(r)
+                }
+            };
+            if complete {
+                warmed += 1;
+            } else if let Some(assets) = &self.assets {
+                assets.defer_warm(next);
+            }
         }
         warmed
     }
@@ -272,22 +457,38 @@ impl ExtractRenderer {
         if let Some(m) = self.meshes.get(r) {
             return m.is_some();
         }
-        let loaded = match self.assets.as_ref().map(|a| a.mesh(r)) {
-            Some(Ok(payload)) => Some(upload_mesh(
-                device,
-                &format!("fynkel mesh {r}"),
-                &payload.vertices,
-                &payload.indices,
-                &payload.skin,
-                Sphere::from_bounds(payload.bounds_min, payload.bounds_max),
-            )),
-            Some(Err(e)) => {
-                self.asset_errors.push(format!("mesh {r}: {}", e.message));
+        let loaded = match self.assets.as_ref().map(|a| a.poll_mesh(r)) {
+            Some(Some(Ok(payload))) => {
+                let bytes = (payload.vertices.len() * Vertex::STRIDE
+                    + payload.indices.len() * 4
+                    + payload.skin.len() * SkinWeight::STRIDE) as u64;
+                match self.admit_asset_bytes(r, bytes) {
+                    Ok(true) => {}
+                    Ok(false) => return false,
+                    Err(()) => {
+                        self.meshes.insert(r.clone(), None);
+                        return false;
+                    }
+                }
+                Some(upload_mesh(
+                    device,
+                    &format!("fynkel mesh {r}"),
+                    &payload.vertices,
+                    &payload.indices,
+                    &payload.skin,
+                    Sphere::from_bounds(payload.bounds_min, payload.bounds_max),
+                ))
+            }
+            Some(Some(Err(e))) => {
+                self.record_asset_error(r, format!("mesh {r}: {}", e.message));
                 None
             }
+            Some(None) => {
+                self.frame_assets_deferred = true;
+                return false;
+            }
             None => {
-                self.asset_errors
-                    .push(format!("mesh {r}: no asset source (set_assets)"));
+                self.record_asset_error(r, format!("mesh {r}: no asset source (set_assets)"));
                 None
             }
         };
@@ -305,8 +506,16 @@ impl ExtractRenderer {
         if let Some(t) = self.textures.get(r) {
             return t.is_some();
         }
-        let loaded = match self.assets.as_ref().map(|a| a.texture(r)) {
-            Some(Ok(payload)) => {
+        let loaded = match self.assets.as_ref().map(|a| a.poll_texture(r)) {
+            Some(Some(Ok(payload))) => {
+                match self.admit_asset_bytes(r, payload.texels.len() as u64) {
+                    Ok(true) => {}
+                    Ok(false) => return false,
+                    Err(()) => {
+                        self.textures.insert(r.clone(), None);
+                        return false;
+                    }
+                }
                 let format = match payload.format {
                     TEXTURE_FORMAT_RGBA8_SRGB => wgpu::TextureFormat::Rgba8UnormSrgb,
                     TEXTURE_FORMAT_RGBA16F_LINEAR => wgpu::TextureFormat::Rgba16Float,
@@ -325,12 +534,18 @@ impl ExtractRenderer {
                     &format!("fynkel texture {r}"),
                 ))
             }
-            Some(Err(e)) => {
-                self.asset_errors
-                    .push(format!("texture {r}: {}", e.message));
+            Some(Some(Err(e))) => {
+                self.record_asset_error(r, format!("texture {r}: {}", e.message));
                 None
             }
-            None => None,
+            Some(None) => {
+                self.frame_assets_deferred = true;
+                return false;
+            }
+            None => {
+                self.record_asset_error(r, format!("texture {r}: no asset source (set_assets)"));
+                None
+            }
         };
         let ok = loaded.is_some();
         self.textures.insert(r.clone(), loaded);
@@ -376,14 +591,23 @@ impl ExtractRenderer {
         if let Some(p) = self.volume_profiles.get(r) {
             return *p;
         }
-        let loaded = match self.assets.as_ref().map(|a| a.volume_profile(r)) {
-            Some(Ok(p)) => Some(p),
-            Some(Err(e)) => {
-                self.asset_errors
-                    .push(format!("volume profile {r}: {}", e.message));
+        let loaded = match self.assets.as_ref().map(|a| a.poll_volume_profile(r)) {
+            Some(Some(Ok(p))) => Some(p),
+            Some(Some(Err(e))) => {
+                self.record_asset_error(r, format!("volume profile {r}: {}", e.message));
                 None
             }
-            None => None,
+            Some(None) => {
+                self.frame_assets_deferred = true;
+                return None;
+            }
+            None => {
+                self.record_asset_error(
+                    r,
+                    format!("volume profile {r}: no asset source (set_assets)"),
+                );
+                None
+            }
         };
         self.volume_profiles.insert(r.clone(), loaded);
         loaded
@@ -397,14 +621,23 @@ impl ExtractRenderer {
             return e.is_some();
         }
 
-        let loaded = match self.assets.as_ref().map(|a| a.environment(r)) {
-            Some(Ok(e)) => e,
-            Some(Err(e)) => {
-                self.asset_errors
-                    .push(format!("environment {r}: {}", e.message));
+        let loaded = match self.assets.as_ref().map(|a| a.poll_environment(r)) {
+            Some(Some(Ok(e))) => e,
+            Some(Some(Err(e))) => {
+                self.record_asset_error(r, format!("environment {r}: {}", e.message));
                 None
             }
-            None => None,
+            Some(None) => {
+                self.frame_assets_deferred = true;
+                return false;
+            }
+            None => {
+                self.record_asset_error(
+                    r,
+                    format!("environment {r}: no asset source (set_assets)"),
+                );
+                None
+            }
         };
         let ok = loaded.is_some();
         self.environments.insert(r.clone(), loaded);
@@ -453,17 +686,76 @@ impl ExtractRenderer {
                 None => plain,
             };
         }
-        let custom = match self.assets.as_ref().map(|a| a.custom_material(r)) {
-            Some(Ok(c)) => c,
-            Some(Err(e)) => {
-                self.asset_errors
-                    .push(format!("material {r}: {}", e.message));
+        let custom = match self.assets.as_ref().map(|a| a.poll_custom_material(r)) {
+            Some(Some(Ok(c))) => c,
+            Some(Some(Err(e))) => {
+                self.record_asset_error(r, format!("material {r}: {}", e.message));
                 self.materials.insert(r.clone(), None);
+                return plain;
+            }
+            Some(None) => {
+                self.frame_assets_deferred = true;
                 return plain;
             }
             None => None,
         };
         if let Some(c) = custom {
+            let shader = Uuid::from_bytes(c.shader);
+            if !self.surfaces.contains_key(&shader) {
+                match self
+                    .assets
+                    .as_ref()
+                    .and_then(|a| a.poll_shader_source(shader))
+                {
+                    None => {
+                        self.frame_assets_deferred = true;
+                        return plain;
+                    }
+                    Some(Err(e)) => {
+                        self.record_asset_error(
+                            &AssetRef::new(shader),
+                            format!("shader {shader}: {}", e.message),
+                        );
+                        self.broken_materials.insert(r.clone());
+                        return LoadedMaterial {
+                            broken: true,
+                            ..plain
+                        };
+                    }
+                    Some(Ok(_)) => {}
+                }
+                if !self.upload_usage.admit(self.upload_budget, 0) {
+                    self.frame_assets_deferred = true;
+                    return plain;
+                }
+                let built = self.surface_shader(device, shader);
+                self.surfaces.insert(shader, built);
+            }
+            let mut pending = false;
+            for slot in &c.slots {
+                if let Some((id, sub)) = &slot.texture {
+                    let texture = AssetRef {
+                        asset: Uuid::from_bytes(*id),
+                        sub: sub.clone(),
+                    };
+                    self.texture(device, queue, &texture);
+                    pending |= !self.textures.contains_key(&texture);
+                }
+            }
+            if pending {
+                return plain;
+            }
+            match self.admit_asset_bytes(r, c.block.len() as u64) {
+                Ok(true) => {}
+                Ok(false) => return plain,
+                Err(()) => {
+                    self.broken_materials.insert(r.clone());
+                    return LoadedMaterial {
+                        broken: true,
+                        ..plain
+                    };
+                }
+            }
             return match self.custom_material(device, queue, r, &c) {
                 Some(gpu) => {
                     let out = LoadedMaterial {
@@ -488,15 +780,37 @@ impl ExtractRenderer {
                 }
             };
         }
-        let loaded = match self.assets.as_ref().map(|a| a.material(r)) {
-            Some(Ok(m)) => Some(m),
-            Some(Err(e)) => {
-                self.asset_errors
-                    .push(format!("material {r}: {}", e.message));
+        let loaded = match self.assets.as_ref().map(|a| a.poll_material(r)) {
+            Some(Some(Ok(m))) => Some(m),
+            Some(Some(Err(e))) => {
+                self.record_asset_error(r, format!("material {r}: {}", e.message));
                 None
             }
-            None => None,
+            Some(None) => {
+                self.frame_assets_deferred = true;
+                return plain;
+            }
+            None => {
+                self.record_asset_error(r, format!("material {r}: no asset source (set_assets)"));
+                None
+            }
         };
+        if let Some(material) = &loaded {
+            let mut pending = false;
+            for (_, _, texture) in material.textures() {
+                if let Some(texture) = texture {
+                    self.texture(device, queue, texture);
+                    pending |= !self.textures.contains_key(texture);
+                }
+            }
+            if pending {
+                return plain;
+            }
+        }
+        if loaded.is_some() && !self.upload_usage.admit(self.upload_budget, 0) {
+            self.frame_assets_deferred = true;
+            return plain;
+        }
         let gpu = loaded.map(|material| {
             let slots = [
                 &material.base_color_texture,
@@ -601,9 +915,10 @@ impl ExtractRenderer {
             )
         };
         if c.block.len() != size || c.slots.len() != count {
-            self.asset_errors.push(format!(
-                "material {r}: cooked for another version of its shader (recook)"
-            ));
+            self.record_asset_error(
+                r,
+                format!("material {r}: cooked for another version of its shader (recook)"),
+            );
             return None;
         }
         let mut textures = Vec::new();
@@ -692,11 +1007,10 @@ impl ExtractRenderer {
         device: &wgpu::Device,
         id: Uuid,
     ) -> Option<SurfaceShader> {
-        let text = match self.assets.as_ref()?.shader_source(id) {
+        let text = match self.assets.as_ref()?.poll_shader_source(id)? {
             Ok(t) => t,
             Err(e) => {
-                self.asset_errors
-                    .push(format!("shader {id}: {}", e.message));
+                self.record_asset_error(&AssetRef::new(id), format!("shader {id}: {}", e.message));
                 return None;
             }
         };
@@ -704,7 +1018,7 @@ impl ExtractRenderer {
             Ok(s) => s,
             Err(d) => {
                 let why = d.first().map_or("does not read", |d| d.message.as_str());
-                self.asset_errors.push(format!("shader {id}: {why}"));
+                self.record_asset_error(&AssetRef::new(id), format!("shader {id}: {why}"));
                 return None;
             }
         };
@@ -717,7 +1031,7 @@ impl ExtractRenderer {
         match SurfaceShader::new(device, &ctx, shader) {
             Ok(s) => Some(s),
             Err(e) => {
-                self.asset_errors.push(format!("shader {id}: {e}"));
+                self.record_asset_error(&AssetRef::new(id), format!("shader {id}: {e}"));
                 None
             }
         }
@@ -733,5 +1047,85 @@ impl ExtractRenderer {
             1
         };
         [slot.filter, slot.mipmaps as u32, slot.wrap, anisotropy]
+    }
+}
+
+#[cfg(test)]
+mod frame_readiness_tests {
+    use super::*;
+    #[test]
+    fn a_later_cache_hit_cannot_mark_an_earlier_fallback_frame_ready() {
+        let Some((device, queue)) = crate::headless_device() else {
+            return;
+        };
+        let cache =
+            std::env::temp_dir().join(format!("fynkel-f6-frame-readiness-{}", std::process::id()));
+        let project = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fynkel_document/fixtures/project");
+        let report =
+            fynkel_import::cook_project(&project, Some(&cache), &Default::default()).unwrap();
+        assert!(!report.has_errors());
+        let assets = Assets::open(&cache).unwrap();
+        let key = AssetRef::with_sub(
+            "c0000000-0000-4000-8000-000000000001".parse().unwrap(),
+            "mesh/Cube",
+        );
+        let _lease = assets.retain(&[key.asset]);
+        let (entered, ready) = std::sync::mpsc::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        assets
+            .schedule_preparation(fynkel_assets::PreparationPriority::Visible, move || {
+                entered.send(()).unwrap();
+                blocked
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap();
+            })
+            .unwrap();
+        ready
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 32, 32);
+        renderer.set_assets(Some(assets.clone()));
+        assert!(
+            !renderer.mesh(&device, &key),
+            "the first object prepares a fallback"
+        );
+        release.send(()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while assets.poll_mesh(&key).is_none() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(
+            renderer.mesh(&device, &key),
+            "a later object can upload the completed mesh"
+        );
+        let mut frame = Extract::default();
+        frame.records.push(fynkel_core::ExtractRecord {
+            entity: fynkel_contracts::Entity::new(fynkel_contracts::WorldId(1), 1, 1),
+            world: Mat4::IDENTITY,
+            layer_bit: 1,
+        });
+        frame.meshes.push(fynkel_core::ExtractMesh {
+            record: 0,
+            mesh: key,
+            material: AssetRef::default(),
+            cast_shadows: true,
+            receive_shadows: true,
+            skin: None,
+        });
+        assert!(
+            renderer.assets_settled(&frame, &[]),
+            "the shared GPU cache is ready"
+        );
+        assert!(
+            !renderer.assets_ready(&frame),
+            "the already-prepared fallback is not ready"
+        );
+        renderer
+            .prepare_ready(&device, &queue, &frame, std::time::Duration::from_secs(5))
+            .unwrap();
+        assert!(renderer.assets_ready(&frame));
+        std::fs::remove_dir_all(cache).unwrap();
     }
 }

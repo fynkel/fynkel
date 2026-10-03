@@ -3,7 +3,7 @@
 //
 // ignore_for_file: type=lint
 
-import 'package:fynkel/fynkel.dart' show BehaviourRegistry;
+import 'package:fynkel/gameplay.dart' show BehaviourRegistry;
 import 'package:pickups/generated/behaviours.g.dart' as _pickups;
 import 'behaviours.g.dart' as _game;
 

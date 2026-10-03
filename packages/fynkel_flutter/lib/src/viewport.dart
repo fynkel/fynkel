@@ -156,6 +156,26 @@ class _FynkelViewportState extends State<FynkelViewport> {
               listenable: widget.controller,
               builder: (context, _) {
                 final id = widget.controller.textureId;
+                if (widget.controller.state == ViewportState.failed) {
+                  return ColoredBox(
+                    color: Theme.of(context).scaffoldBackgroundColor,
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Viewport failed: ${widget.controller.error}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          TextButton(
+                            onPressed: () => unawaited(widget.controller.recover()),
+                            child: const Text('Retry viewport'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
                 if (id == null) {
                   final err = widget.controller.error;
                   return widget.placeholder ??

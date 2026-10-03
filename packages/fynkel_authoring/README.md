@@ -84,3 +84,8 @@ dart pub get && dart analyze --fatal-infos && dart test   # Flutter's dart
 private copy of `crates/fynkel_document/fixtures/project`: every command,
 undo back to the original bytes, save, the stale-revision conflict, a
 material's `base_color`, `duplicateObject` of the rig.
+
+Authoring ABI 6 adds `LiveWorld.setComponents` for atomic built-in and registered
+component replacements in Play. Single `set` uses the same implementation.
+This is separate from arbitrary Dart behaviour setters and structural live
+commands, whose independent-command policy is explicit in ADR-0051/0058.

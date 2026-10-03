@@ -3,7 +3,7 @@
 // in callback order still sees the `start` of one that comes after it —
 // the usual "Start finds the other script, Update uses what it set up".
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:test/test.dart';
 
 final List<String> calls = [];

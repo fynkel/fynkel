@@ -2,9 +2,7 @@
 // map (docs/renderer.md §"Uniform layout"). Concatenated in front of
 // mesh.wgsl, sky.wgsl, debug.wgsl and post.wgsl.
 
-// The frame's light pool and what one object may take from it
-// (fynkel_render::LIGHT_POOL / MAX_LIGHTS).
-const LIGHT_POOL: u32 = 64u;
+// Per-object shading budget. The frame light pool is a separate storage buffer.
 const MAX_LIGHTS: u32 = 8u;
 const LIGHT_POINT: f32 = 0.0;
 const LIGHT_SPOT: f32 = 1.0;
@@ -97,7 +95,6 @@ struct Frame {
     time: vec4<f32>,
     // The frame's lights. A mesh reads only the ones its instance lists
     // (E1 light culling); the index is a byte of `Instance.lights`.
-    lights: array<Light, LIGHT_POOL>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;

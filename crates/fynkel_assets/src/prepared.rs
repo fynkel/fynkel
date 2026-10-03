@@ -105,7 +105,7 @@ impl PreparedPrefab {
     pub fn finish_session(
         plans: Vec<Self>,
         session: fynkel_core::GameplaySession,
-    ) -> (World, PreparedSessionResult) {
+    ) -> (Box<World>, PreparedSessionResult) {
         Self::finish_session_with_resources(plans, PreparedGameplayResources::default(), session)
     }
 
@@ -113,7 +113,7 @@ impl PreparedPrefab {
         plans: Vec<Self>,
         resources: PreparedGameplayResources,
         session: fynkel_core::GameplaySession,
-    ) -> (World, PreparedSessionResult) {
+    ) -> (Box<World>, PreparedSessionResult) {
         let world = session.committed();
         let sounds: HashSet<_> = plans
             .iter()
@@ -227,39 +227,7 @@ impl PreparedGameplayResources {
         world: &World,
         scene: &SceneDescription,
     ) -> (Self, SceneResourceReport) {
-        let mut plan = Self::default();
-        let mut report = SceneResourceReport::default();
-        let mut pending = vec![scene.clone()];
-        while let Some(description) = pending.pop() {
-            for entity in &description.entities {
-                for value in &entity.components {
-                    let mut remaining = value.clone();
-                    if let ComponentValue::Animator(animator) = &mut remaining {
-                        // A missing inactive clip must not suppress a valid controller.
-                        if let Err(diagnostic) = plan.motion(assets, &animator.clip) {
-                            report.diagnostics.push(diagnostic);
-                        }
-                        animator.clip = AssetRef::default();
-                    }
-                    if let Err(diagnostic) = plan.component_value(assets, &remaining) {
-                        report.diagnostics.push(diagnostic);
-                    }
-                    if let ComponentValue::Emitter(emitter) = value {
-                        let id = emitter.prefab.asset;
-                        if !id.is_nil() && !world.has_prefab(id) && !plan.prefabs.contains_key(&id)
-                        {
-                            match assets.prefab(id) {
-                                Ok(prefab) => {
-                                    plan.prefabs.insert(id, prefab.description.clone());
-                                    pending.push(prefab.description);
-                                }
-                                Err(diagnostics) => report.diagnostics.extend(diagnostics),
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let (plan, mut report) = Self::prepare_scene(assets, scene);
         report.meshes = plan
             .meshes
             .keys()
@@ -282,6 +250,49 @@ impl PreparedGameplayResources {
             .keys()
             .filter(|key| !world.has_sound(key))
             .count();
+        (plan, report)
+    }
+
+    /// World-independent decode/validation for a background load. Publication
+    /// capacity is checked separately against the destination world at activation.
+    pub fn prepare_scene(assets: &Assets, scene: &SceneDescription) -> (Self, SceneResourceReport) {
+        let mut plan = Self::default();
+        let mut report = SceneResourceReport::default();
+        let mut pending = vec![scene.clone()];
+        while let Some(description) = pending.pop() {
+            for entity in &description.entities {
+                for value in &entity.components {
+                    let mut remaining = value.clone();
+                    if let ComponentValue::Animator(animator) = &mut remaining {
+                        // A missing inactive clip must not suppress a valid controller.
+                        if let Err(diagnostic) = plan.motion(assets, &animator.clip) {
+                            report.diagnostics.push(diagnostic);
+                        }
+                        animator.clip = AssetRef::default();
+                    }
+                    if let Err(diagnostic) = plan.component_value(assets, &remaining) {
+                        report.diagnostics.push(diagnostic);
+                    }
+                    if let ComponentValue::Emitter(emitter) = value {
+                        let id = emitter.prefab.asset;
+                        if !id.is_nil() && !plan.prefabs.contains_key(&id) {
+                            match assets.prefab(id) {
+                                Ok(prefab) => {
+                                    plan.prefabs.insert(id, prefab.description.clone());
+                                    pending.push(prefab.description);
+                                }
+                                Err(diagnostics) => report.diagnostics.extend(diagnostics),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        report.meshes = plan.meshes.len();
+        report.prefabs = plan.prefabs.len();
+        report.clips = plan.clips.len() + plan.blends.len();
+        report.skins = plan.skins.len();
+        report.sounds = plan.sounds.len();
         (plan, report)
     }
 

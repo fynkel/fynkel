@@ -181,6 +181,19 @@ pub(crate) struct ComponentRegistry {
     entries: BTreeMap<String, Registration>,
 }
 impl ComponentRegistry {
+    pub(crate) fn asset_domains(&self) -> Vec<TypeId> {
+        self.entries
+            .values()
+            .filter(|r| {
+                r.schema
+                    .fields
+                    .iter()
+                    .any(|f| matches!(f.default, ScalarValue::Asset(_)))
+            })
+            .map(|r| r.native_type.unwrap_or(TypeId::of::<DynamicComponents>()))
+            .collect()
+    }
+
     pub fn get(&self, id: &str) -> Result<&Registration, RegistryError> {
         self.entries
             .get(id)

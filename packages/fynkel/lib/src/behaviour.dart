@@ -193,12 +193,7 @@ class Gizmo {
 
 /// What a fixed tick hands to [Behaviour.fixedUpdate].
 class FixedUpdateContext {
-  const FixedUpdateContext({
-    required this.tick,
-    required this.dt,
-    required this.events,
-    required this.context,
-  });
+  const FixedUpdateContext({required this.tick, required this.dt, required this.events, required this.context});
 
   /// The tick about to be stepped (this callback's commands apply to it).
   final int tick;
@@ -464,12 +459,7 @@ abstract class Behaviour extends Component {
       invokeRepeating(f, seconds, 0, clock: clock);
 
   /// Calls [f] after [delay] seconds, then every [rate] seconds (`0`: once).
-  Coroutine invokeRepeating(
-    void Function() f,
-    double delay,
-    double rate, {
-    TimeClock clock = TimeClock.gameplay,
-  }) {
+  Coroutine invokeRepeating(void Function() f, double delay, double rate, {TimeClock clock = TimeClock.gameplay}) {
     _checkSeconds(delay);
     _checkSeconds(rate);
     Iterable<Object?> calls() sync* {
@@ -730,8 +720,7 @@ ObjectSpec? specOfObject(GameObject go) => go._spec;
 NativeComponent<T>? nativeComponentOf<T extends WireRecord>(Object? value) => switch (value) {
   null => null,
   final NativeComponent<T> c => c,
-  final GameObject go =>
-    go.component<T>() ?? (throw ArgumentError('"${go.name}" has no ${componentSchemaName(T)}')),
+  final GameObject go => go.component<T>() ?? (throw ArgumentError('"${go.name}" has no ${componentSchemaName(T)}')),
   _ => throw ArgumentError.value(value, 'value', 'not a GameObject or a NativeComponent<$T>'),
 };
 
@@ -746,12 +735,20 @@ String componentSchemaName(Type t) {
 /// [BehaviourRegistry.instantiate] uses to build one from scene data
 /// without reflection.
 class BehaviourType {
-  const BehaviourType({required this.id, required this.create, this.version = 1, this.fields = const [], this.callbacks, this.dartType});
+  const BehaviourType({
+    required this.id,
+    required this.create,
+    this.version = 1,
+    this.fields = const [],
+    this.callbacks,
+    this.dartType,
+  });
 
   final String id;
   final int version;
   final Behaviour Function() create;
   final List<BehaviourField> fields;
+
   /// Null means manually registered: conservatively dispatch every phase.
   final Set<String>? callbacks;
   final Type? dartType;
@@ -840,11 +837,7 @@ class BehaviourRegistry {
       } on DataAssetError {
         rethrow;
       } catch (e) {
-        throw DataAssetError(
-          id,
-          'cannot set from ${entry.value.runtimeType} (${entry.value}): $e',
-          field: entry.key,
-        );
+        throw DataAssetError(id, 'cannot set from ${entry.value.runtimeType} (${entry.value}): $e', field: entry.key);
       }
     }
     return d;
@@ -995,14 +988,8 @@ final class WaitForFixedUpdate {
 
 /// A behaviour callback that threw ([World.onBehaviourError]).
 class BehaviourError {
-  BehaviourError(
-    this.behaviour,
-    this.callback,
-    this.error,
-    this.stack, {
-    required this.tick,
-    GameObject? gameObject,
-  }) : _object = gameObject;
+  BehaviourError(this.behaviour, this.callback, this.error, this.stack, {required this.tick, GameObject? gameObject})
+    : _object = gameObject;
 
   final GameObject? _object;
 
@@ -1279,7 +1266,8 @@ class _BehaviourSystem {
   }
 
   /// One fixed tick's callbacks, right before `step()`.
-  void fixedUpdate(int tick, List<EngineEvent> events) => world._runPhase(GameplayPhase.fixedUpdate, tick, () => _fixedUpdate(tick, events));
+  void fixedUpdate(int tick, List<EngineEvent> events) =>
+      world._runPhase(GameplayPhase.fixedUpdate, tick, () => _fixedUpdate(tick, events));
   void _fixedUpdate(int tick, List<EngineEvent> events) {
     settle();
     if (world.isDisposed) return;
@@ -1492,7 +1480,13 @@ class _BehaviourSystem {
       _run(ctx.context, 'update', (b) => b.update(ctx));
       if (_routines.isNotEmpty) ctx.context.run(() => _resume(fixed: false));
     });
-    if (!world.isDisposed) world._runPhase(GameplayPhase.lateUpdate, ctx.tick, () => _run(ctx.context, 'lateUpdate', (b) => b.lateUpdate(ctx)));
+    if (!world.isDisposed) {
+      world._runPhase(
+        GameplayPhase.lateUpdate,
+        ctx.tick,
+        () => _run(ctx.context, 'lateUpdate', (b) => b.lateUpdate(ctx)),
+      );
+    }
   }
 
   /// Resumes the coroutines whose wait is over: every kind but
@@ -1606,9 +1600,7 @@ class _BehaviourSystem {
     if (e is _GameplayCallbackEntrySkipped) return;
     c._done = true;
     final callback = c._invoke ? 'invoke' : (c._owner == null ? 'tween' : 'coroutine');
-    world.onBehaviourError(
-      BehaviourError(c._owner, callback, e, st, tick: world.tick, gameObject: c._target),
-    );
+    world.onBehaviourError(BehaviourError(c._owner, callback, e, st, tick: world.tick, gameObject: c._target));
   }
 
   /// Runs `start` the first time; false when it threw (reported, and the
@@ -1678,8 +1670,10 @@ class _BehaviourSystem {
         if (world.isDisposed || world._callbackEntryBlocked) break;
         final b = _scratch[i]!;
         if (!b._active || b._destroyRequested || !b._gameObject!._alive) continue;
-        final participation = (b._type == null ? world._registeredTypeOf(b) : world.registry.lookup(b._type!.id) ?? b._type)?.callbacks;
-        if (participation != null && !participation.contains(callback)) continue;
+        final participation =
+            (b._type == null ? world._registeredTypeOf(b) : world.registry.lookup(b._type!.id) ?? b._type)?.callbacks;
+        // Generated participation describes periodic callbacks, not lifecycle.
+        if (callback != 'start' && participation != null && !participation.contains(callback)) continue;
         if (callback == 'afterPhysics' && !b.wantsAfterPhysics) continue;
         // A start failure must abort its own scope before it is reported.
         if ((callback == 'fixedUpdate' || callback == 'update') && !_startIfNeeded(b)) continue;

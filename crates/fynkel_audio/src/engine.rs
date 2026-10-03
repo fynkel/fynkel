@@ -84,6 +84,21 @@ impl Default for Audio {
 }
 
 impl Audio {
+    /// Resource pressure must not interrupt an already-playing one-shot.
+    pub fn retain_clips(&mut self, mut keep: impl FnMut(&AssetRef) -> bool) {
+        let gone: Vec<_> = self
+            .clips
+            .iter()
+            .filter_map(|(r, e)| {
+                (!keep(r) && !self.voices.iter().flatten().any(|v| v.clip_slot == e.slot))
+                    .then_some(r.clone())
+            })
+            .collect();
+        for r in gone {
+            self.unregister_clip(&r);
+        }
+    }
+
     /// An engine on the null backend: the mixer lives here and renders
     /// when a test or the headless host asks (`render`).
     pub fn new() -> Audio {
@@ -485,6 +500,11 @@ impl Audio {
                 })
             })
             .collect()
+    }
+
+    /// Resources owned by active voices, without allocating query records.
+    pub fn active_clips(&self) -> impl Iterator<Item = &AssetRef> {
+        self.voices.iter().flatten().map(|v| &v.clip)
     }
 
     pub fn voice_count(&self) -> usize {

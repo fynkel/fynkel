@@ -333,7 +333,7 @@ fn prefabs_describe_from_their_chunk() {
     let bob = assets
         .clip(&AssetRef::with_sub(id(COLUMN), "anim/bob"))
         .unwrap();
-    assert_eq!(bob.channels[0].target, "Prop");
+    assert_eq!(bob.channels[0].target, format!("{RIG}/node/5"));
     let d = assets
         .clip(&AssetRef::with_sub(id(COLUMN), "anim/0"))
         .unwrap_err();
@@ -482,7 +482,7 @@ fn an_inserted_mesh_is_served_until_cleared() {
         indices: vec![0, 1, 2],
         skin: Vec::new(),
     };
-    assets.insert_mesh(&r, v);
+    assets.insert_mesh(&r, v).unwrap();
     let m = assets.mesh(&r).unwrap_or_else(|d| panic!("{d}"));
     assert_eq!((m.vertices.len(), m.indices.len()), (3, 3));
     assert_eq!(m.bounds_max, [1.0; 3]);
@@ -727,7 +727,7 @@ fn preload_loads_a_closure_and_lists_it_for_the_gpu() {
     let closure = assets.closure(id(MAIN));
     let token = assets.retain(&closure);
     let (done, stop) = (AtomicUsize::new(0), AtomicBool::new(false));
-    assets.preload(&closure, &done, &stop);
+    assets.preload(&closure, &done, &stop).unwrap();
     assert_eq!(done.into_inner(), closure.len());
     let stats = assets.stats();
     assert!(stats.meshes > 0 && stats.textures > 0 && stats.materials > 0);
@@ -745,9 +745,322 @@ fn preload_loads_a_closure_and_lists_it_for_the_gpu() {
     // it: nothing to warm.
     let stop = AtomicBool::new(true);
     let done = AtomicUsize::new(0);
-    assets.preload(&closure, &done, &stop);
+    assert!(assets.preload(&closure, &done, &stop).is_err());
     assert_eq!(done.into_inner(), 0);
-    assets.preload(&closure, &AtomicUsize::new(0), &AtomicBool::new(false));
+    assets
+        .preload(&closure, &AtomicUsize::new(0), &AtomicBool::new(false))
+        .unwrap();
     drop(token);
     assert_eq!(assets.next_warm(), None, "evicted, so skipped");
+}
+
+#[test]
+fn draw_requests_are_nonblocking_deduplicated_and_do_not_resurrect_released_assets() {
+    use fynkel_assets::PreparationPriority;
+    use std::sync::mpsc;
+    use std::time::Duration;
+    let cooked = Cooked::new("f5-poll");
+    let assets = Assets::open(&cooked.0).unwrap();
+    let texture = AssetRef::new(id(SWATCH));
+    let lease = assets.retain(&[texture.asset]);
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    assets
+        .schedule_preparation(PreparationPriority::Visible, move || {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        })
+        .unwrap();
+    entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    for _ in 0..1000 {
+        assert!(assets.poll_texture(&texture).is_none());
+    }
+    // Only one texture job was admitted: 62 free slots remain, alongside
+    // the blocked worker and its one queued request.
+    for _ in 0..62 {
+        assets
+            .schedule_preparation(PreparationPriority::Prefetch, || {})
+            .unwrap();
+    }
+    assert_eq!(
+        assets.schedule_preparation(PreparationPriority::Prefetch, || {}),
+        Err(fynkel_assets::PreparationError::Busy)
+    );
+    drop(lease);
+    release_tx.send(()).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while assets.is_resident(texture.asset) {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    assert_eq!(assets.stats().textures, 0);
+    assert!(assets.next_warm().is_none());
+    let _lease = assets.retain(&[texture.asset]);
+    loop {
+        if let Some(result) = assets.poll_texture(&texture) {
+            assert!(result.is_ok());
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    assert_eq!(assets.stats().textures, 1);
+}
+
+#[test]
+fn cache_pressure_evicts_unowned_data_and_refuses_to_discard_pinned_resources() {
+    let cooked = Cooked::new("f5-budget");
+    let assets = Assets::open(&cooked.0).unwrap();
+    let swatch = AssetRef::new(id(SWATCH));
+    let normal = AssetRef::new(id(RUSTED_NORMAL));
+    assets.texture(&swatch).unwrap();
+    let cost = assets.stats().bytes;
+    assert!(cost > 0);
+    assets.set_cache_budget(cost).unwrap(); // unowned data is reclaimed
+    assert_eq!(assets.stats().textures, 0);
+    let lease = assets.retain(&[swatch.asset]);
+    assets.texture(&swatch).unwrap();
+    let error = assets.texture(&normal).unwrap_err();
+    assert!(error.message.contains("budget"));
+    assert!(error.to_string().contains(&normal.asset.to_string()));
+    assert_eq!(assets.stats().textures, 1);
+    assert_eq!(assets.stats().bytes, cost);
+    assert!(assets.set_cache_budget(0).is_err());
+    assert_eq!(assets.cache_budget(), cost);
+    drop(lease);
+    assert_eq!(assets.stats().bytes, 0);
+    assets.set_cache_budget(1024 * 1024).unwrap();
+    assets.texture(&normal).unwrap();
+    assert_eq!(assets.stats().textures, 1);
+    assets.clear();
+    assert_eq!(assets.stats().bytes, 0);
+}
+
+#[test]
+fn runtime_budget_reservations_abort_replace_and_publish_without_partial_changes() {
+    use fynkel_assets::{PbrMaterial, RuntimeAssetUpdate};
+    let cooked = Cooked::new("f5-runtime-budget");
+    let assets = Assets::open(&cooked.0).unwrap();
+    let key = AssetRef::new(Uuid(*b"runtime-budget-1"));
+    let other = AssetRef::new(Uuid(*b"runtime-budget-2"));
+    assets
+        .set_runtime_material(&key, Some(PbrMaterial::default()))
+        .unwrap();
+    let cost = assets.runtime_bytes();
+    assets.set_runtime_budget(cost).unwrap();
+    assert!(assets
+        .set_runtime_material(&other, Some(PbrMaterial::default()))
+        .is_err());
+    assert_eq!(assets.runtime_bytes(), cost);
+    let plan = assets
+        .prepare_runtime(vec![
+            RuntimeAssetUpdate::Material(key.clone(), None),
+            RuntimeAssetUpdate::Material(other.clone(), Some(PbrMaterial::default())),
+        ])
+        .unwrap();
+    assert!(
+        assets.set_runtime_material(&key, None).is_err(),
+        "reservation excludes competing publication"
+    );
+    assert!(
+        assets.material(&key).is_ok(),
+        "reservation does not publish early"
+    );
+    drop(plan);
+    assert!(assets.material(&key).is_ok());
+    assets
+        .prepare_runtime(vec![
+            RuntimeAssetUpdate::Material(key.clone(), None),
+            RuntimeAssetUpdate::Material(other.clone(), Some(PbrMaterial::default())),
+        ])
+        .unwrap()
+        .publish();
+    assert!(assets.material(&key).is_err());
+    assert!(assets.material(&other).is_ok());
+    assert_eq!(assets.runtime_bytes(), cost);
+    assets.clear();
+    assert_eq!(
+        assets.runtime_bytes(),
+        cost,
+        "explicitly owned runtime data survives cooked-cache pressure"
+    );
+    assets.set_runtime_material(&other, None).unwrap();
+    assert_eq!(assets.runtime_bytes(), 0);
+    assets.set_runtime_budget(0).unwrap();
+    assert!(assets
+        .override_material(&key, PbrMaterial::default())
+        .is_ok());
+    assets.clear();
+    assets.set_cache_budget(0).unwrap();
+    assert!(assets
+        .override_material(&key, PbrMaterial::default())
+        .is_err());
+}
+
+#[test]
+fn clearing_a_queued_request_cannot_resurrect_its_payload_or_poison_the_retry() {
+    use fynkel_assets::PreparationPriority;
+    use std::sync::mpsc;
+    use std::time::Duration;
+    let cooked = Cooked::new("f5-clear-generation");
+    let assets = Assets::open(&cooked.0).unwrap();
+    let key = AssetRef::new(id(SWATCH));
+    let _owner = assets.retain(&[key.asset]);
+    let (entered, ready) = mpsc::channel();
+    let (release, blocked) = mpsc::channel();
+    assets
+        .schedule_preparation(PreparationPriority::Visible, move || {
+            entered.send(()).unwrap();
+            blocked.recv().unwrap();
+        })
+        .unwrap();
+    ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(assets.poll_texture(&key).is_none());
+    assets.clear();
+    let (drained, done) = mpsc::channel();
+    assets
+        .schedule_preparation(PreparationPriority::Prefetch, move || {
+            drained.send(()).unwrap();
+        })
+        .unwrap();
+    release.send(()).unwrap();
+    done.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(assets.stats().textures, 0);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(result) = assets.poll_texture(&key) {
+            result.unwrap();
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    assert_eq!(assets.stats().textures, 1);
+}
+
+#[test]
+fn runtime_store_transfer_is_budgeted_and_reserved_publication_is_exclusive() {
+    use fynkel_assets::{PbrMaterial, RuntimeAssetUpdate};
+    let cooked = Cooked::new("f5-transfer-budget");
+    let source = Assets::open(&cooked.0).unwrap();
+    let destination = Assets::open(&cooked.0).unwrap();
+    let a = AssetRef::new(Uuid(*b"transfer-mat-001"));
+    let b = AssetRef::new(Uuid(*b"transfer-mat-002"));
+    source
+        .set_runtime_material(&a, Some(PbrMaterial::default()))
+        .unwrap();
+    let cost = source.runtime_bytes();
+    source.set_runtime_budget(cost).unwrap();
+    destination
+        .set_runtime_material(&b, Some(PbrMaterial::default()))
+        .unwrap();
+    assert!(destination.adopt_runtime_assets(&source).is_err());
+    assert_eq!(destination.runtime_bytes(), cost);
+    assert!(destination.material(&a).is_err());
+    destination.set_runtime_material(&b, None).unwrap();
+    let reserved = destination
+        .prepare_runtime(vec![RuntimeAssetUpdate::Material(
+            b.clone(),
+            Some(PbrMaterial::default()),
+        )])
+        .unwrap();
+    assert!(destination.adopt_runtime_assets(&source).is_err());
+    drop(reserved);
+    destination.adopt_runtime_assets(&source).unwrap();
+    assert_eq!(destination.runtime_bytes(), cost);
+    assert_eq!(destination.runtime_budget(), cost);
+    assert!(destination.material(&a).is_ok());
+}
+
+#[test]
+fn restoring_material_releases_its_charge_and_change_history_resets_consumers() {
+    use fynkel_assets::PbrMaterial;
+    let cooked = Cooked::new("f5-history-budget");
+    let assets = Assets::open(&cooked.0).unwrap();
+    let key = AssetRef::new(Uuid(*b"history-mat-0001"));
+    let baseline = assets.stats().bytes;
+    assets
+        .override_material(&key, PbrMaterial::default())
+        .unwrap();
+    assert!(assets.stats().bytes > baseline);
+    assets.restore_material(&key);
+    assert_eq!(assets.stats().bytes, baseline);
+    let epoch = assets.edit_epoch();
+    for i in 0..4100u32 {
+        let mut bytes = *b"history-mat-0001";
+        bytes[12..].copy_from_slice(&i.to_le_bytes());
+        assets.restore_material(&AssetRef::new(Uuid(bytes)));
+    }
+    assert!(
+        assets.edit_epoch() > epoch,
+        "bounded history publishes a consumer reset"
+    );
+    assert!(assets.materials_changed_since(0).len() < 4096);
+    assert_eq!(assets.stats().bytes, baseline);
+}
+
+#[test]
+fn material_representation_replacement_reuses_budget_and_refusal_preserves_old_payload() {
+    use fynkel_assets::{CustomMaterialPayload, PbrMaterial};
+    let cooked = Cooked::new("f5-material-representation");
+    let assets = Assets::open(&cooked.0).unwrap();
+    let key = AssetRef::new(Uuid(*b"material-budget1"));
+    let _pin = assets.retain(&[key.asset]);
+    let custom = |len| CustomMaterialPayload {
+        shader: [0; 16],
+        alpha_mode: 0,
+        alpha_cutoff: 0.5,
+        double_sided: false,
+        block: vec![0; len],
+        slots: vec![],
+    };
+    assets
+        .override_material(&key, PbrMaterial::default())
+        .unwrap();
+    let pbr_bytes = assets.stats().bytes;
+    assets.override_custom_material(&key, custom(16)).unwrap();
+    let custom_bytes = assets.stats().bytes;
+    assets
+        .set_cache_budget(pbr_bytes.max(custom_bytes))
+        .unwrap();
+    for _ in 0..4 {
+        assets
+            .override_material(&key, PbrMaterial::default())
+            .unwrap();
+        assert_eq!(assets.stats().bytes, pbr_bytes);
+        assert!(assets.override_custom_material(&key, custom(4096)).is_err());
+        assert_eq!(assets.stats().bytes, pbr_bytes);
+        assert_eq!(assets.material(&key).unwrap(), PbrMaterial::default());
+        assets.override_custom_material(&key, custom(16)).unwrap();
+        assert_eq!(assets.stats().bytes, custom_bytes);
+    }
+    assets.restore_material(&key);
+    assert_eq!(assets.stats().bytes, 0);
+}
+
+#[test]
+fn runtime_mesh_replacement_releases_the_cooked_cache_charge() {
+    let cooked = Cooked::new("f5-runtime-mesh-charge");
+    let assets = Assets::open(&cooked.0).unwrap();
+    let mesh = assets
+        .mesh(&AssetRef::with_sub(id(ROBOT), "mesh/Cube"))
+        .unwrap();
+    assets.clear();
+    let key = AssetRef::new(Uuid(*b"mesh-cache-test1"));
+    let _lease = assets.retain(&[key.asset]);
+    assets.insert_mesh(&key, (*mesh).clone()).unwrap();
+    assert!(assets.stats().bytes > 0);
+    assets
+        .set_runtime_mesh(&key, Some((*mesh).clone()))
+        .unwrap();
+    assert_eq!(
+        assets.stats().bytes,
+        0,
+        "discarded cooked mesh must release its charge"
+    );
+    assert!(assets.runtime_bytes() > 0);
+    assets.set_cache_budget(0).unwrap();
+    assert!(assets.mesh(&key).is_ok());
+    assets.set_runtime_mesh(&key, None).unwrap();
+    assert_eq!(assets.runtime_bytes(), 0);
 }

@@ -11,7 +11,7 @@
 // stay out of it ([KeyboardOwner]); ⌘-shortcuts (⌘P, ⌘S) still work.
 
 import 'package:flutter/material.dart';
-import 'package:fynkel/fynkel.dart' show EditorChannel;
+import 'package:fynkel/gameplay.dart' show EditorChannel;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import '../commands/commands.dart' show KeyboardOwner;

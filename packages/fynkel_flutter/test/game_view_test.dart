@@ -5,7 +5,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 void main() {
@@ -105,6 +105,8 @@ void main() {
     expect(s.viewport!.gpuFrame.count, lessThanOrEqualTo(s.viewport!.framesRendered));
     // The capture line: every key once, the timers as p50/p95/p99, the
     // viewport's counts, no Dart heap (the test runner has no probe).
+    expect(s.windowSeconds, greaterThan(0));
+    expect(s.textureAcquisitionFps, s.viewport!.framesPresented / s.windowSeconds);
     final line = s.summary();
     final keys = line.split(' ').map((kv) => kv.split('=').first).toList();
     expect(keys.toSet().length, keys.length);
@@ -113,6 +115,12 @@ void main() {
     expect(line, contains('work=${s.totalWork.p50.toStringAsFixed(3)}/'));
     expect(line, contains('instances=${s.viewport!.instances} '));
     expect(line, contains('mem_gpu=${s.viewport!.gpuBytes}'));
+    expect(line, contains('acquired=${s.viewport!.framesPresented} '));
+    expect(line, contains('repeated=${s.viewport!.presentsWithoutNewFrame} '));
+    expect(line, contains('present_lag=${s.viewport!.presentLagP50}/'));
+    expect(line, contains('texture_copies=1 '));
+    expect(line, contains('texture_new=0 '));
+    expect(line, contains('thermal=unknown'));
     expect(line, isNot(contains('heap=')));
 
     await tester.pumpWidget(const SizedBox());
@@ -120,7 +128,9 @@ void main() {
     expect(controller.state, ViewportState.detached);
   });
 
-  testWidgets('an engine panic is reported once, the frames stop and the view says why (foundation 4.1)', (tester) async {
+  testWidgets('an engine panic is reported once, the frames stop and the view says why (foundation 4.1)', (
+    tester,
+  ) async {
     final world = World.create();
     addTearDown(world.dispose);
     final controller = FynkelViewportController(placeholders: false);
@@ -137,7 +147,12 @@ void main() {
         home: SizedBox(
           width: 100,
           height: 50,
-          child: FynkelGameView(key: view, world: world, controller: controller, onFrame: (dt, plan) => frames.add(plan)),
+          child: FynkelGameView(
+            key: view,
+            world: world,
+            controller: controller,
+            onFrame: (dt, plan) => frames.add(plan),
+          ),
         ),
       ),
     );
@@ -180,7 +195,9 @@ void main() {
     expect(world.audio.isOpen, isFalse);
 
     await tester.pumpWidget(
-      MaterialApp(home: FynkelGameView(world: world, controller: controller, audio: true)),
+      MaterialApp(
+        home: FynkelGameView(world: world, controller: controller, audio: true),
+      ),
     );
     await tester.pump();
     // A machine with an output device opens it; one without reports
@@ -269,7 +286,9 @@ void main() {
     expect(find.textContaining('Viewport failed'), findsOneWidget);
   });
 
-  testWidgets('a focused HUD button does not take the game\'s keys; a text field does (foundation 4.7)', (tester) async {
+  testWidgets('a focused HUD button does not take the game\'s keys; a text field does (foundation 4.7)', (
+    tester,
+  ) async {
     final world = World.create();
     addTearDown(world.dispose);
     final controller = FynkelViewportController(placeholders: false);
@@ -358,12 +377,12 @@ void main() {
     world.spawn().addBehaviour(_Sphere());
     final key = GlobalKey<FynkelGameViewState>();
     Widget view(bool? gizmos) => MaterialApp(
-          home: SizedBox(
-            width: 100,
-            height: 50,
-            child: FynkelGameView(key: key, world: world, controller: controller, gizmos: gizmos),
-          ),
-        );
+      home: SizedBox(
+        width: 100,
+        height: 50,
+        child: FynkelGameView(key: key, world: world, controller: controller, gizmos: gizmos),
+      ),
+    );
     await tester.pumpWidget(view(null));
     await tester.pump();
     await tester.pump();

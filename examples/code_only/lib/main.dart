@@ -17,7 +17,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:fynkel/fynkel.dart' show FramePlan, FynkelLoadError, SettingsStore;
+import 'package:fynkel/gameplay.dart' show FramePlan, FynkelLoadError, SettingsStore;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'fynkel_game.dart';

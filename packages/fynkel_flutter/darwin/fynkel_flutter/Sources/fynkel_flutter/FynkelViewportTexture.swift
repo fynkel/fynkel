@@ -34,11 +34,11 @@ final class FynkelViewportTexture: NSObject, FlutterTexture {
   weak var registry: FlutterTextureRegistry?
 
   /// Counters for the stats overlay / benchmark capture.
-  var copyCalls = 0
-  var copyWithNewFrame = 0
-  var frameReadySignals = 0
-  var copyNoFrame = 0
-  var rebinds = 0
+  private var copyCalls = 0
+  private var copyWithNewFrame = 0
+  private var frameReadySignals = 0
+  private var copyNoFrame = 0
+  private var rebinds = 0
 
   init?(ctx: UnsafeMutableRawPointer, acquire: AcquireFn, iosurfaces: [UnsafeMutableRawPointer]) {
     self.ctx = ctx
@@ -88,7 +88,9 @@ final class FynkelViewportTexture: NSObject, FlutterTexture {
 
   /// Called from Rust (possibly from a Metal completion thread) when a frame's GPU work finished.
   func onFrameReady() {
+    lock.lock()
     frameReadySignals += 1
+    lock.unlock()
     // FlutterEngineMarkExternalTextureFrameAvailable is documented as thread-safe.
     registry?.textureFrameAvailable(textureId)
   }
@@ -107,6 +109,22 @@ final class FynkelViewportTexture: NSObject, FlutterTexture {
     if index != lastIndex { copyWithNewFrame += 1 }
     lastIndex = index
     return Unmanaged.passRetained(pixelBuffers[Int(index)])
+  }
+
+  /// Read and reset under the same lock as raster/completion-thread writes.
+  func takeStats() -> [String: Int] {
+    lock.lock(); defer { lock.unlock() }
+    let result = [
+      "copyCalls": copyCalls,
+      "copyWithNewFrame": copyWithNewFrame,
+      "frameReadySignals": frameReadySignals,
+      "copyNoFrame": copyNoFrame,
+      "rebinds": rebinds,
+      "thermalState": ProcessInfo.processInfo.thermalState.rawValue,
+    ]
+    copyCalls = 0; copyWithNewFrame = 0; frameReadySignals = 0
+    copyNoFrame = 0; rebinds = 0
+    return result
   }
 
   func onTextureUnregistered(_ texture: FlutterTexture) {}

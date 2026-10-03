@@ -41,6 +41,7 @@ pub(crate) struct Pipelines {
     /// Screen-space ambient occlusion and its blur.
     pub(crate) ao: wgpu::RenderPipeline,
     pub(crate) ao_blur: wgpu::RenderPipeline,
+    pub(crate) ao_depth_resolve: wgpu::RenderPipeline,
     /// Bloom (R3b): the bright-pass into the chain's first level, the
     /// downsample between levels, and the upsample blended back over the
     /// finer level by `scatter` (the blend constant).
@@ -97,10 +98,10 @@ impl Pipelines {
     }
 
     pub(crate) const fn count() -> usize {
-        // The twenty-six below plus the overlay's grid, lines and
+        // The twenty-seven below plus the overlay's grid, lines and
         // triangles (`overlay::OverlayPass`, ADR-0019) and the selection
         // outline's composite (`outline::OutlinePass`).
-        30
+        31
     }
 }
 
@@ -127,9 +128,10 @@ pub(crate) struct AttachmentLayouts<'a> {
     pub(crate) post: &'a wgpu::BindGroupLayout,
     pub(crate) ao: &'a wgpu::BindGroupLayout,
     pub(crate) bloom: &'a wgpu::BindGroupLayout,
+    pub(crate) ao_depth_resolve: &'a wgpu::RenderPipeline,
 }
 
-/// Twenty-six of the pipeline variants (`docs/renderer.md`) for one sample
+/// Twenty-seven of the pipeline variants (`docs/renderer.md`) for one sample
 /// count — the overlay's three (grid, lines, triangles) live with its pass
 /// in `overlay.rs`, the outline's composite in `outline.rs`: mesh (cull
 /// back), mesh double-sided (cull none), transparent (blend, cull back),
@@ -137,7 +139,7 @@ pub(crate) struct AttachmentLayouts<'a> {
 /// third vertex buffer of joint weights and the palette storage buffer at
 /// group 2), sky, shadow, shadow skinned, the four camera depth prepass
 /// twins, the four outline mask twins (one sample whatever the scene's),
-/// SSAO, the AO blur, bloom's three, post, present. Nothing else is ever created; a quality switch to
+/// SSAO, the AO blur, the sample-zero depth copy, bloom's three, post, present. Nothing else is ever created; a quality switch to
 /// another sample count rebuilds this set.
 /// The mesh stages' vertex buffers: slot 0 the cooked 72-byte vertex,
 /// slot 1 the [`Instance`], and for the skinned stages slot 2 the cooked
@@ -252,19 +254,27 @@ pub(crate) fn create_pipelines(
         label: Some("fynkel shadow shader"),
         source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shadow.wgsl").into()),
     });
-    // The AO passes read the scene depth as it is stored: multisampled
-    // with the colour, or plain at one sample. `textureLoad`'s last
-    // argument is the sample index or the mip level; 0 is right for both.
+    // AO reads sample zero copied from MSAA depth into R32Float once,
+    // or the original single-sample depth texture directly.
     let ao_shader = module(
         "fynkel ao shader",
-        &include_str!("shaders/ao.wgsl").replace(
-            "DEPTH_TEXTURE",
-            if sample_count > 1 {
-                "texture_depth_multisampled_2d"
-            } else {
-                "texture_depth_2d"
-            },
-        ),
+        &include_str!("shaders/ao.wgsl")
+            .replace(
+                "DEPTH_TEXTURE",
+                if sample_count > 1 {
+                    "texture_2d<f32>"
+                } else {
+                    "texture_depth_2d"
+                },
+            )
+            .replace(
+                "DEPTH_LOAD",
+                if sample_count > 1 {
+                    "textureLoad(depth_tex, c, 0).x"
+                } else {
+                    "textureLoad(depth_tex, c, 0)"
+                },
+            ),
     );
 
     // Group 2 (the joint palettes) is part of every mesh layout so the
@@ -697,6 +707,7 @@ pub(crate) fn create_pipelines(
         ),
         ao: ao_pipeline("fynkel ao pipeline", "fs_main"),
         ao_blur: ao_pipeline("fynkel ao blur pipeline", "fs_blur"),
+        ao_depth_resolve: create_ao_depth_resolve(device),
         bloom_prefilter: bloom_pipeline(
             "fynkel bloom prefilter pipeline",
             "fs_prefilter",
@@ -712,5 +723,212 @@ pub(crate) fn create_pipelines(
         present,
         sample_count,
         encode_srgb: !format.is_srgb(),
+    }
+}
+
+/// Copy sample zero once, preserving the existing AO depth-sample policy.
+/// Repeated screen-space reads then use compact R32Float rather than repeatedly reading MSAA depth.
+fn create_ao_depth_resolve(device: &wgpu::Device) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("fynkel AO depth resolve"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("shaders/ao_depth.wgsl").into()),
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("fynkel AO depth resolve"),
+        layout: None,
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: wgpu::TextureFormat::R32Float,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: Default::default(),
+        depth_stencil: None,
+        multisample: Default::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+#[cfg(test)]
+mod depth_resolve_tests {
+    use super::*;
+
+    #[test]
+    fn ao_depth_copy_preserves_sample_zero_at_odd_and_single_pixel_sizes() {
+        let Some((device, queue)) = headless_device() else {
+            return;
+        };
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("distinct depth per sample"),
+            source: wgpu::ShaderSource::Wgsl(r#"
+                @vertex fn vs_main(@builtin(vertex_index) id: u32) -> @builtin(position) vec4<f32> {
+                    let uv = vec2<f32>(f32((id << 1u) & 2u), f32(id & 2u));
+                    return vec4<f32>(uv * 2.0 - 1.0, 0.0, 1.0);
+                }
+                @fragment fn fs_main(@builtin(position) p: vec4<f32>, @builtin(sample_index) sample: u32) -> @builtin(frag_depth) f32 {
+                    return 0.1 + 0.1 * f32(sample) + floor(p.x) * 0.001 + floor(p.y) * 0.01;
+                }
+            "#.into()),
+        });
+        let write = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: None,
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[],
+            }),
+            primitive: Default::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 4,
+                ..Default::default()
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+        let resolve = create_ao_depth_resolve(&device);
+        for (width, height) in [(1, 1), (5, 3)] {
+            let extent = wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            };
+            let texture = |format, sample_count, usage| {
+                device.create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    size: extent,
+                    mip_level_count: 1,
+                    sample_count,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage,
+                    view_formats: &[],
+                })
+            };
+            let depth = texture(
+                DEPTH_FORMAT,
+                4,
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            );
+            let output = texture(
+                wgpu::TextureFormat::R32Float,
+                1,
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            );
+            let depth_view = depth.create_view(&Default::default());
+            let output_view = output.create_view(&Default::default());
+            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &resolve.get_bind_group_layout(0),
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&depth_view),
+                }],
+            });
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: u64::from(height) * 256,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            let mut encoder = device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    ..Default::default()
+                });
+                pass.set_pipeline(&write);
+                pass.draw(0..3, 0..1);
+            }
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &output_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+                pass.set_pipeline(&resolve);
+                pass.set_bind_group(0, &group, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &output,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(256),
+                        rows_per_image: Some(height),
+                    },
+                },
+                extent,
+            );
+            queue.submit([encoder.finish()]);
+            let (tx, rx) = std::sync::mpsc::channel();
+            buffer
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |result| {
+                    tx.send(result).unwrap();
+                });
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            rx.recv().unwrap().unwrap();
+            let data = buffer.slice(..).get_mapped_range().unwrap();
+            for y in 0..height {
+                for x in 0..width {
+                    let offset = (y * 256 + x * 4) as usize;
+                    let actual = f32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
+                    let expected = 0.1 + x as f32 * 0.001 + y as f32 * 0.01;
+                    assert!(
+                        (actual - expected).abs() < 1e-6,
+                        "{width}x{height} ({x},{y}): {actual} vs {expected}"
+                    );
+                }
+            }
+            drop(data);
+            buffer.unmap();
+        }
     }
 }

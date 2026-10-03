@@ -17,10 +17,12 @@ impl ExtractRenderer {
         queue: &wgpu::Queue,
         extract: &Extract,
     ) -> u32 {
+        self.upload_usage = streaming::UploadUsage::default();
         let prepare_start = std::time::Instant::now();
         // Consumed by this frame; handed back empty at the end to keep
         // the queue's capacity.
         let mut extras = std::mem::take(&mut self.extra_worlds);
+        self.retain_extract_assets(extract, &extras);
         self.reconcile_evictions(queue);
         self.resolve_quality(device);
         self.ensure_fallbacks(device, queue);
@@ -46,6 +48,9 @@ impl ExtractRenderer {
             ..FrameStats::default()
         };
         stats.warmed = self.warm_up(device, queue);
+        // Readiness describes the instances assembled below, not merely the
+        // cache by the time a later object has finished preparing.
+        self.frame_assets_deferred = false;
 
         // Camera.
         let aspect = self.width as f32 / self.height as f32;
@@ -184,10 +189,20 @@ impl ExtractRenderer {
         // constant ambient stays.
         let want_ibl = sky.as_ref().filter(|r| self.environment(r));
         if self.ibl.as_ref().map(|(r, _)| r) != want_ibl {
-            self.ibl = want_ibl.cloned().map(|r| {
+            // Retire the old environment before charging its replacement.
+            self.ibl = None;
+            self.rebuild_frame_bind_group(device);
+            self.ibl = want_ibl.cloned().and_then(|r| {
                 let env = self.environments[&r].clone().expect("loaded above");
-                let ibl = Ibl::upload(device, queue, &env, &r);
-                (r, ibl)
+                let bytes = ((env.irradiance.len() + env.specular.len()) * 2) as u64;
+                match self.admit_asset_bytes(&r, bytes) {
+                    Ok(true) => Some((r.clone(), Ibl::upload(device, queue, &env, &r))),
+                    Ok(false) => None,
+                    Err(()) => {
+                        self.environments.insert(r, None);
+                        None
+                    }
+                }
             });
             self.ibl_dirty = true;
         }
@@ -214,12 +229,16 @@ impl ExtractRenderer {
         // An extra world's are placed by its transform first.
         let light_sources = std::iter::once((extract, None))
             .chain(extras.iter().map(|x| (&x.extract, Some(&x.transform))));
-        let mut lights: Vec<(f32, GpuLight, u32)> = Vec::with_capacity(
-            light_sources
-                .clone()
-                .map(|(e, _)| e.point_lights.len() + e.spot_lights.len())
-                .sum(),
-        );
+        let LightFrameScratch {
+            mut lights,
+            mut packed,
+            mut masks,
+            mut bounds,
+        } = std::mem::take(&mut self.light_frame);
+        lights.clear();
+        packed.clear();
+        masks.clear();
+        bounds.clear();
         for (source, transform) in light_sources {
             for l in &source.point_lights {
                 let (position, _, range) =
@@ -267,32 +286,47 @@ impl ExtractRenderer {
             .then(|| shadow::fit(sun_dir, &shape.shadow_corners(), self.shadow_map.resolution));
         let camera_frustum = Frustum::from_view_proj(&view_proj);
         let light_frustum = fit.as_ref().map(|f| Frustum::from_view_proj(&f.view_proj));
+        self.prepare_visibility(
+            extract,
+            &extras,
+            &camera_frustum,
+            light_frustum.as_ref(),
+            &mut stats,
+        );
 
         // The frame's light pool (E1). A light whose range sphere misses
         // the camera frustum reaches nothing that is shaded, so it never
         // enters the pool — exact, not an approximation, and it is why
         // `frustum_culling` does not gate this. The nearest to the camera
         // fill the pool when more than `LIGHT_POOL` still reach the view.
-        lights.retain(|(_, l, _)| {
-            camera_frustum.intersects(&Sphere {
-                center: Vec3::new(l.position[0], l.position[1], l.position[2]),
-                radius: l.position[3],
-            })
-        });
-        lights.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let n_lights = lights.len().min(LIGHT_POOL);
-        let mut packed = [GpuLight::default(); LIGHT_POOL];
-        let mut light_masks = [u32::MAX; LIGHT_POOL];
-        for (i, (_, l, mask)) in lights.iter().take(LIGHT_POOL).enumerate() {
-            packed[i] = *l;
-            light_masks[i] = *mask;
-        }
         // The layers the frame's camera draws; the host's own camera (no
         // scene camera) and the editor's draw every layer.
         let camera_mask = extract
             .camera
             .as_ref()
             .map_or(u32::MAX, |c| c.camera.culling_mask);
+        lights.retain(|(_, l, mask)| {
+            if mask & camera_mask == 0 {
+                return false;
+            }
+            camera_frustum.intersects(&Sphere {
+                center: Vec3::new(l.position[0], l.position[1], l.position[2]),
+                radius: l.position[3],
+            })
+        });
+        lights.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let n_lights = lights.len().min(self.light_budget.pool);
+        packed.resize(n_lights, GpuLight::default());
+        masks.resize(n_lights, u32::MAX);
+        for (i, (_, l, mask)) in lights.iter().take(self.light_budget.pool).enumerate() {
+            packed[i] = *l;
+            masks[i] = *mask;
+        }
+        bounds.extend(packed.iter().map(|l| Sphere {
+            center: Vec3::new(l.position[0], l.position[1], l.position[2]),
+            radius: l.position[3],
+        }));
+        self.light_index.update(&bounds);
         stats.lights = n_lights as u32;
         stats.lights_dropped = (lights.len() - n_lights) as u32;
 
@@ -301,7 +335,7 @@ impl ExtractRenderer {
         // Each instance is tagged with where it is drawn — see the batch
         // layout below.
         let mut grouped: Vec<(bool, Vec<Grouped>)> = Vec::new();
-        let mut blended: Vec<(f32, BatchKey, bool, Instance, [u32; 4])> = Vec::new();
+        let mut blended: Vec<(f32, BatchKey, bool, Instance, [u32; 12])> = Vec::new();
         self.batch_index.clear();
         let mut mesh_of_record: HashMap<u32, usize> = HashMap::with_capacity(extract.meshes.len());
         let cube_key = || BatchKey {
@@ -336,6 +370,7 @@ impl ExtractRenderer {
                 .map(|x| (&x.extract, Some(x.transform), x.gray)),
         );
         let mut joint_base = 0u32;
+        let mut visibility_base = 0usize;
         for (si, (source, transform, gray)) in sources.enumerate() {
             let main = si == 0;
             mesh_of_record.clear();
@@ -350,6 +385,26 @@ impl ExtractRenderer {
                 if r.layer_bit & camera_mask == 0 {
                     // Not this camera's layers: no draw, no shadow, no light list.
                     stats.layer_hidden += 1;
+                    continue;
+                }
+                if self.frustum_culling
+                    && !self.camera_visible[visibility_base + ri]
+                    && !self.shadow_visible[visibility_base + ri]
+                {
+                    if let Some(&mi) = mesh_of_record.get(&(ri as u32)) {
+                        if self
+                            .meshes
+                            .get(&source.meshes[mi].mesh)
+                            .is_some_and(Option::is_some)
+                        {
+                            stats.meshes += 1;
+                        }
+                    } else if !self.placeholders {
+                        continue;
+                    } else {
+                        stats.placeholders += 1;
+                    }
+                    stats.culled += 1;
                     continue;
                 }
                 let (key, double_sided, mut instance, casts, blend, sphere) = match mesh_of_record
@@ -372,7 +427,10 @@ impl ExtractRenderer {
                             let palette = m
                                 .skin
                                 .filter(|_| gpu.is_some_and(|g| g.skin_buffer.is_some()));
-                            let sphere = if loaded.deforms {
+                            let cached_bound = self.visibility_bounds[visibility_base + ri];
+                            let sphere = if cached_bound.is_finite() {
+                                cached_bound
+                            } else if loaded.deforms {
                                 Sphere::UNBOUNDED
                             } else {
                                 match palette {
@@ -463,10 +521,15 @@ impl ExtractRenderer {
                 // tested against the loose fit whether or not culling is on:
                 // what casts decides how tight the cascades are (R1), and
                 // culling must not change the picture.
+                let known_bound = self.visibility_bounds[visibility_base + ri].is_finite();
                 let reaches_shadow = casts
-                    && light_frustum
-                        .as_ref()
-                        .is_some_and(|f| f.intersects(&sphere));
+                    && if known_bound {
+                        self.shadow_visible[visibility_base + ri]
+                    } else {
+                        light_frustum
+                            .as_ref()
+                            .is_some_and(|f| f.intersects(&sphere))
+                    };
                 if reaches_shadow {
                     unbounded_caster |= !sphere.is_finite();
                     // A subset of the loose fit, so the cascades can only
@@ -477,7 +540,14 @@ impl ExtractRenderer {
                     });
                 }
                 let (in_view, casts) = if self.frustum_culling {
-                    (camera_frustum.intersects(&sphere), reaches_shadow)
+                    (
+                        if known_bound {
+                            self.camera_visible[visibility_base + ri]
+                        } else {
+                            camera_frustum.intersects(&sphere)
+                        },
+                        reaches_shadow,
+                    )
                 } else {
                     (true, casts && fit.is_some())
                 };
@@ -508,14 +578,19 @@ impl ExtractRenderer {
                 // reach its bounds, the strongest first. Only what is shaded
                 // needs one — a shadow-only instance is never lit, and an
                 // unlit material ignores every light.
-                let mut light_list = [0u32; 4];
+                let mut light_list = [0u32; 12];
                 if in_view && n_lights > 0 && instance.flags[1] < 0.5 {
+                    self.light_index
+                        .overlaps(&sphere, &mut self.light_candidates);
+                    stats.light_candidates += self.light_candidates.len() as u32;
                     let (list, count, overflow) = assign_lights(
                         &packed[..n_lights],
-                        &light_masks[..n_lights],
+                        &masks[..n_lights],
                         r.layer_bit,
                         &sphere,
                         &mut self.light_scratch,
+                        self.light_budget.per_object,
+                        &self.light_candidates,
                     );
                     light_list = list;
                     stats.lights_max_per_object = stats.lights_max_per_object.max(count as u32);
@@ -552,6 +627,7 @@ impl ExtractRenderer {
                 ));
             }
             joint_base += source.joints.len() as u32;
+            visibility_base += source.records.len();
         }
 
         // Batch layout: [shadow only][both][scene only], so the shadow
@@ -560,6 +636,14 @@ impl ExtractRenderer {
         // Either storage buffer of group 2 outgrowing its capacity means
         // one new bind group for both.
         let mut rebind_group_2 = false;
+        if n_lights > self.local_light_capacity {
+            self.local_light_capacity = n_lights.next_power_of_two();
+            self.local_light_buffer = create_local_light_buffer(device, self.local_light_capacity);
+            rebind_group_2 = true;
+        }
+        if n_lights > 0 {
+            queue.write_buffer(&self.local_light_buffer, 0, bytemuck::cast_slice(&packed));
+        }
         self.instances.clear();
         self.light_lists.clear();
         self.batches.clear();
@@ -667,6 +751,7 @@ impl ExtractRenderer {
                 &self.skin_layout,
                 &self.joint_buffer,
                 &self.light_list_buffer,
+                &self.local_light_buffer,
             );
         }
         if stats.skinned > 0 && n_joints > 0 {
@@ -852,7 +937,6 @@ impl ExtractRenderer {
                 self.ao_active as u32,
             ],
             time: frame_time,
-            lights: packed,
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&u));
         self.last_time = Some(extract.time);
@@ -879,10 +963,20 @@ impl ExtractRenderer {
         stats.grid = counts.grid;
 
         stats.extra_worlds = extras.len() as u32;
+        self.assets_pending = self.frame_assets_deferred || !self.assets_settled(extract, &extras);
         extras.clear();
         self.extra_worlds = extras;
+        self.light_frame = LightFrameScratch {
+            lights,
+            packed,
+            masks,
+            bounds,
+        };
         stats.gpu_bytes = self.gpu_bytes();
         stats.prepare_us = prepare_start.elapsed().as_micros() as u32;
+        stats.asset_upload_bytes = self.upload_usage.bytes;
+        stats.asset_upload_operations = self.upload_usage.operations;
+        stats.asset_upload_deferred = self.upload_usage.deferred;
         self.stats = stats;
         stats.instances
     }

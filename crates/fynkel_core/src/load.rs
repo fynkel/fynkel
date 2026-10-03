@@ -563,6 +563,18 @@ impl World {
         transform: Transform,
         parent: Option<Entity>,
     ) -> Result<(Entity, LoadedScene), LoadError> {
+        self.instantiate_prepared(prefab, name, transform, parent, None)
+    }
+
+    /// Atomically publishes prefab entities and an already decoded resource plan.
+    pub fn instantiate_prepared(
+        &mut self,
+        prefab: &SceneDescription,
+        name: &str,
+        transform: Transform,
+        parent: Option<Entity>,
+        resources: Option<Box<dyn crate::PreparedCommandResources>>,
+    ) -> Result<(Entity, LoadedScene), LoadError> {
         if self.is_poisoned() {
             return Err(LoadError::Poisoned);
         }
@@ -586,7 +598,7 @@ impl World {
             name,
             transform,
         };
-        let loaded = self.load_under(prefab, parent, Some(placed))?;
+        let loaded = self.load_under(prefab, parent, Some(placed), resources)?;
         Ok((loaded.by_id[&root], loaded))
     }
 
@@ -766,13 +778,23 @@ impl World {
         scene: &SceneDescription,
         root_parent: Option<Entity>,
         placed: Option<Placed<'_>>,
+        resources: Option<Box<dyn crate::PreparedCommandResources>>,
     ) -> Result<LoadedScene, LoadError> {
         let order = spawn_order(scene)?;
+        if let Some(resources) = &resources {
+            resources
+                .preflight(self)
+                .map_err(|e| LoadError::SceneRejected(e.to_string()))?;
+        }
         let commit = self
             .edit_gameplay(|edit| {
+                if let Some(resources) = &resources {
+                    resources.stage(edit)?;
+                }
                 stage_description(edit, scene, &order, root_parent, placed.as_ref())
             })
             .map_err(|e| LoadError::SceneRejected(e.to_string()))?;
+        self.publish_command_resources(resources);
         Ok(resolve_description(scene, &commit))
     }
 }

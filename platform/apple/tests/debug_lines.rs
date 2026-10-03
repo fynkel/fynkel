@@ -16,8 +16,8 @@ use fynkel_platform_apple::{
 
 #[test]
 fn debug_lines_draw_on_the_next_render_only() {
-    assert_eq!(fynkel_apple_abi_version(), 12);
-    assert_eq!(APPLE_ABI_VERSION, 12);
+    assert_eq!(fynkel_apple_abi_version(), 14);
+    assert_eq!(APPLE_ABI_VERSION, 14);
 
     let mut world = World::new(WorldConfig::default());
     world.begin_frame(1.0 / 60.0);

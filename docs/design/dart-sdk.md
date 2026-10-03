@@ -1,4 +1,4 @@
-> **Living design draft** — extracted from blueprint v0.3 §21. Revisit at the end of M1 once the command/snapshot overlay is real. Where this conflicts with an ADR, the ADR wins. Known v0.4 impacts: the tick order is §5.1 of the blueprint; `Input`/`Time` facades resolve via `GameContext`; math types per ADR-0013; the native component catalogue per ADR-0011 belongs in §21.4; HUD state via Dart observable models per ADR-0008.
+> **Historical SDK design (M1–M2).** The command/snapshot and presentation-write proposals below are superseded by ADR-0046/0051/0053/0058/0059 and the implemented F1–F8 contracts. Use [the current gameplay guide](../gameplay.md) for APIs and [the foundation roadmap](../foundation-roadmap.md) for status. This document preserves design history, not a second supported implementation.
 
 ## 21. Fynkel Dart SDK and standard component specification
 

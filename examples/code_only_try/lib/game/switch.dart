@@ -1,17 +1,17 @@
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 import 'flow.dart';
 import 'game_state.dart';
 import 'gate.dart';
 
 /// A floor pad: while the player stands in its `switch` zone the HUD shows
-/// [prompt], and the `interact` press opens the [Gate] named [target].
+/// [prompt], and the `interact` press opens the [Gate] on [target].
 @FynkelBehaviour(id: 'game.Switch')
 class Switch extends Behaviour {
   /// The object carrying the `game.Gate` to open.
-  @Expose(kind: 'entity')
+  @Expose()
   @Gizmo.lineTo()
-  String target = 'Gate';
+  GameObject? target;
 
   /// The HUD's prompt while the player stands here.
   @Expose()
@@ -39,7 +39,7 @@ class Switch extends Behaviour {
   @override
   void fixedUpdate(FixedUpdateContext context) {
     if (!occupied || used || !Input.pressed('interact')) return;
-    final gate = world.find(target)?.behaviour<Gate>();
+    final gate = target?.behaviour<Gate>();
     if (gate == null) return;
     gate.open();
     used = true;

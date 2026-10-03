@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use fynkel_assets::{Assets, CookedPrefab, CookedScene};
+use fynkel_assets::{Assets, CookedScene};
 use fynkel_contracts::{Code, Diagnostic, Entity, Status, Uuid};
 use fynkel_core::{LoadError, LoadMode, LoadedScene, Transform};
 use fynkel_document::diagnostic_json;
@@ -173,6 +173,9 @@ pub(crate) fn residency_json(assets: &Assets) -> Value {
         "textures": stats.textures,
         "materials": stats.materials,
         "bytes": stats.bytes,
+        "cacheBudgetBytes": assets.cache_budget(),
+        "runtimeBytes": assets.runtime_bytes(),
+        "runtimeBudgetBytes": assets.runtime_budget(),
     })
 }
 
@@ -191,8 +194,15 @@ fn instantiate(
     scene: CookedScene,
     mode: LoadMode,
     retire: &[Entity],
+    prepared_resources: Option<(
+        fynkel_assets::PreparedGameplayResources,
+        fynkel_assets::SceneResourceReport,
+    )>,
 ) -> Outcome {
     let cache = cache_json(&assets);
+    if let Err(d) = w.prepare_asset_store(&assets) {
+        return failed(&[d], cache);
+    }
     // Physics (M3-08): the project's gravity, and every mesh collider's
     // mesh registered before the first step builds the colliders.
     // The project's layers and tags (ADR-0020): what `GameObject.layer`
@@ -201,8 +211,12 @@ fn instantiate(
         .project()
         .map(|p| p.layers_and_tags.clone())
         .unwrap_or_default();
-    let (resources, prepared) =
-        fynkel_assets::PreparedGameplayResources::for_scene(&assets, w.core(), &scene.description);
+    let (resources, prepared) = prepared_resources.unwrap_or_else(|| {
+        fynkel_assets::PreparedGameplayResources::for_scene(&assets, w.core(), &scene.description)
+    });
+    if !prepared.diagnostics.is_empty() {
+        return failed(&prepared.diagnostics, cache);
+    }
     match w.core_mut().load_scene_replacing(
         &scene.description,
         mode,
@@ -251,7 +265,6 @@ fn instantiate(
             if mode == LoadMode::Replace {
                 let kept = persistent_residency(w, &assets);
                 w.services.residency.clear();
-                w.services.prefabs.clear();
                 w.services.residency.extend(kept);
             }
             let residency = assets.retain(&scene.closure);
@@ -267,6 +280,7 @@ fn instantiate(
                         LoadMode::Replace => "replace",
                         LoadMode::Additive => "additive",
                     },
+                    "readiness": { "cpu": "ready", "simulation": "ready", "gpu": "deferred", "required": ["cpu", "simulation"] },
                     "scene": scene_json(&loaded, &scene),
                     "scenes": scenes_json(w),
                     "persistent": w.core().persistent_roots().len(),
@@ -332,6 +346,9 @@ fn persistent_residency(
 /// assets (for `instantiate`, audio and materials by id), the world left
 /// as it is; `scene` is null.
 fn open_project(w: &mut FynkelWorld, assets: Assets, cache: Value) -> Outcome {
+    if let Err(d) = w.prepare_asset_store(&assets) {
+        return failed(&[d], cache);
+    }
     let layers_and_tags = assets
         .project()
         .map(|p| p.layers_and_tags.clone())
@@ -541,6 +558,12 @@ fn scene_json(loaded: &LoadedScene, scene: &CookedScene) -> Value {
 /// Writes the report with the call's wall time (`timing.ms`, M3-16: the
 /// load/startup time of blueprint §15.4) and refreshes the diagnostics.
 fn finish(w: &mut FynkelWorld, mut out: Outcome, started: std::time::Instant) -> Status {
+    if out.status == Status::Ok {
+        crate::resources::synchronize(w);
+        if let Some(assets) = &w.services.assets {
+            out.report["residency"] = residency_json(assets);
+        }
+    }
     if let Some(o) = out.report.as_object_mut() {
         let ms = started.elapsed().as_secs_f64() * 1e3;
         o.insert("timing".into(), json!({ "ms": (ms * 1e3).round() / 1e3 }));
@@ -578,74 +601,31 @@ fn load(
         }
         return open_project(w, assets, cache);
     }
-    let scene_id_given = scene.is_some();
     let id = match scene.map(Ok).unwrap_or_else(|| assets.startup_scene()) {
         Ok(id) => id,
         Err(d) => return failed(&[d], cache),
     };
     match assets.scene(id) {
         Ok(scene) => {
-            // A scene loaded by id decodes what it uses now, not at its
-            // first draw (foundation 5.4), and queues it for the GPU
-            // warm-up. The startup load stays lazy: Play starts fast.
-            let preload = scene_id_given.then(|| (assets.clone(), scene.closure.clone()));
-            let mut out = instantiate(w, assets, scene, mode, retire);
-            if let (Some((assets, closure)), Status::Ok) = (preload, out.status) {
-                assets.preload(&closure, &AtomicUsize::new(0), &AtomicBool::new(false));
-                if let Some(r) = out.report.as_object_mut() {
-                    r.insert("residency".into(), residency_json(&assets));
-                }
+            // Retain before preparation, including failure: releasing the lease
+            // retires the partial cache rather than leaking a failed scene load.
+            let token = assets.retain(&scene.closure);
+            if let Err(errors) = assets.preload(
+                &scene.closure,
+                &AtomicUsize::new(0),
+                &AtomicBool::new(false),
+            ) {
+                return failed(&errors, cache);
             }
+            let out = instantiate(w, assets, scene, mode, retire, None);
+            drop(token);
             out
         }
         Err(diags) => failed(&diags, cache),
     }
 }
 
-/// A prefab as the world keeps it after its first instantiate
-/// (foundation 3.1): the cooked document, what registering its assets
-/// reported, and the token keeping its closure resident.
-pub struct LoadedPrefab {
-    prefab: CookedPrefab,
-    mesh_colliders: usize,
-    nested: usize,
-    diagnostics: Vec<Diagnostic>,
-    _residency: fynkel_assets::Residency,
-}
-
-/// The prefab `id` from the world's memory, or read from the store and
-/// registered the first time.
-fn loaded_prefab(
-    w: &mut FynkelWorld,
-    assets: &Assets,
-    id: Uuid,
-) -> Result<Arc<LoadedPrefab>, Vec<Diagnostic>> {
-    if let Some(p) = w.services.prefabs.get(&id) {
-        return Ok(p.clone());
-    }
-    let prefab = assets.prefab(id)?;
-    let (mesh_colliders, mut diagnostics) =
-        assets.register_mesh_colliders(&prefab.description, w.core_mut().physics_mut());
-    let (nested, prefab_diags) = assets.register_prefabs(&prefab.description, w.core_mut());
-    diagnostics.extend(prefab_diags);
-    let (_, _, anim_diags) = assets.register_animation(&prefab.description, w.core_mut());
-    diagnostics.extend(anim_diags);
-    let (_, audio_diags) = assets.register_audio(&prefab.description, w.core_mut());
-    diagnostics.extend(audio_diags);
-    let residency = assets.retain(&prefab.closure);
-    let loaded = Arc::new(LoadedPrefab {
-        prefab,
-        mesh_colliders,
-        nested,
-        diagnostics,
-        _residency: residency,
-    });
-    w.services.prefabs.insert(id, loaded.clone());
-    Ok(loaded)
-}
-
-/// Instantiates a cooked prefab from the world's store (M3-08b); from
-/// memory after the first time (foundation 3.1).
+/// Instantiates a prefab with resources prepared before any world mutation.
 fn instantiate_prefab(
     w: &mut FynkelWorld,
     id: Uuid,
@@ -664,17 +644,31 @@ fn instantiate_prefab(
         );
     };
     let cache = cache_json(&assets);
-    let loaded = match loaded_prefab(w, &assets, id) {
-        Ok(p) => p,
+    let closure = assets.closure(id);
+    let lease = assets.retain(&closure);
+    let prefab = match assets.prefab(id) {
+        Ok(prefab) => prefab,
         Err(diags) => return failed(&diags, cache),
     };
-    let prefab = &loaded.prefab;
+    if let Err(diags) = assets.preload(&closure, &AtomicUsize::new(0), &AtomicBool::new(false)) {
+        return failed(&diags, cache);
+    }
+    let (resources, report) =
+        fynkel_assets::PreparedGameplayResources::for_scene(&assets, w.core(), &prefab.description);
+    if !report.diagnostics.is_empty() {
+        return failed(&report.diagnostics, cache);
+    }
     let name = name.unwrap_or(&prefab.name);
-    match w
-        .core_mut()
-        .instantiate(&prefab.description, name, transform, parent)
-    {
+    match w.core_mut().instantiate_prepared(
+        &prefab.description,
+        name,
+        transform,
+        parent,
+        Some(Box::new(resources)),
+    ) {
         Ok((root, instance)) => {
+            crate::resources::synchronize(w);
+            drop(lease);
             let stats = assets.stats();
             let behaviours: Vec<Value> = prefab
                 .behaviours
@@ -696,7 +690,6 @@ fn instantiate_prefab(
                 .collect();
             let mut diagnostics: Vec<Value> =
                 prefab.diagnostics.iter().map(diagnostic_json).collect();
-            diagnostics.extend(loaded.diagnostics.iter().map(diagnostic_json));
             diagnostics.extend(missing_references(&instance, &prefab.path));
             Outcome {
                 status: Status::Ok,
@@ -711,8 +704,8 @@ fn instantiate_prefab(
                         "entities": instance.entities().len(),
                         "rejectedComponents": instance.rejected_components,
                         "assets": prefab.closure.len(),
-                        "meshColliders": loaded.mesh_colliders,
-                        "prefabs": loaded.nested,
+                        "meshColliders": report.meshes,
+                        "prefabs": report.prefabs,
                         "behaviours": behaviours,
                     },
                     "cache": cache,
@@ -1013,7 +1006,15 @@ pub const FYNKEL_LOAD_FAILED: u32 = 2;
 
 /// What the background thread of a load hands over: the decoded scene
 /// and the token holding its closure resident, or why it failed.
-type Prepared = Result<(CookedScene, fynkel_assets::Residency), Vec<Diagnostic>>;
+type Prepared = Result<
+    (
+        CookedScene,
+        fynkel_assets::Residency,
+        fynkel_assets::PreparedGameplayResources,
+        fynkel_assets::SceneResourceReport,
+    ),
+    Vec<Diagnostic>,
+>;
 
 /// A scene load running on a background thread (ADR-0038 §2): the thread
 /// holds a clone of the store, never the world. Dropped (cancelled, or
@@ -1047,14 +1048,38 @@ impl PendingLoad {
             load.stop.clone(),
             load.result.clone(),
         );
-        let spawned = std::thread::Builder::new()
-            .name("fynkel-load".into())
-            .spawn(move || {
-                let prepared = assets.scene(id).map(|scene| {
-                    let token = assets.retain(&scene.closure);
-                    total.store(scene.closure.len(), Ordering::Relaxed);
-                    assets.preload(&scene.closure, &done, &stop);
-                    (scene, token)
+        let scheduler = assets.clone();
+        let spawned =
+            scheduler.schedule_preparation(fynkel_assets::PreparationPriority::Scene, move || {
+                let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    if stop.load(Ordering::Relaxed) {
+                        return Err(vec![Diagnostic::error(
+                            Code::IO,
+                            "asset preparation cancelled",
+                        )
+                        .with_id(id.to_string())]);
+                    }
+                    assets.scene(id).and_then(|scene| {
+                        let token = assets.retain(&scene.closure);
+                        total.store(scene.closure.len(), Ordering::Relaxed);
+                        assets.preload(&scene.closure, &done, &stop)?;
+                        let (resources, report) =
+                            fynkel_assets::PreparedGameplayResources::prepare_scene(
+                                &assets,
+                                &scene.description,
+                            );
+                        if !report.diagnostics.is_empty() {
+                            return Err(report.diagnostics);
+                        }
+                        Ok((scene, token, resources, report))
+                    })
+                }))
+                .unwrap_or_else(|_| {
+                    Err(vec![Diagnostic::error(
+                        Code::IO,
+                        "asset preparation panicked",
+                    )
+                    .with_id(id.to_string())])
                 });
                 *result.lock().unwrap_or_else(|p| p.into_inner()) = Some(prepared);
             });
@@ -1062,7 +1087,7 @@ impl PendingLoad {
             *load.result.lock().unwrap_or_else(|p| p.into_inner()) =
                 Some(Err(vec![Diagnostic::error(
                     Code::IO,
-                    format!("no load thread: {e}"),
+                    format!("asset preparation refused: {e}"),
                 )]));
         }
         load
@@ -1129,8 +1154,20 @@ pub unsafe extern "C" fn fynkel_world_load_scene_async(
             Ok(a) => a,
             Err(d) => return finish(w, failed(&[d], Value::Null), std::time::Instant::now()),
         };
-        w.services.next_ticket = w.services.next_ticket.checked_add(1).unwrap_or(1);
-        let ticket = w.services.next_ticket;
+        let Some(ticket) = w.services.next_ticket.checked_add(1) else {
+            return finish(
+                w,
+                failed(
+                    &[Diagnostic::error(
+                        Code::IO,
+                        "scene load ticket space exhausted",
+                    )],
+                    Value::Null,
+                ),
+                std::time::Instant::now(),
+            );
+        };
+        w.services.next_ticket = ticket;
         w.services
             .loads
             .insert(ticket, PendingLoad::start(assets, id));
@@ -1202,8 +1239,8 @@ pub unsafe extern "C" fn fynkel_world_load_activate(
         let started = std::time::Instant::now();
         let assets = load.assets.clone();
         let out = match load.take() {
-            Some(Ok((scene, token))) => {
-                let out = instantiate(w, assets, scene, mode, &[]);
+            Some(Ok((scene, token, resources, report))) => {
+                let out = instantiate(w, assets, scene, mode, &[], Some((resources, report)));
                 // The scene's own token holds the closure now.
                 drop(token);
                 out

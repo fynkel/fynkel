@@ -2201,7 +2201,13 @@ fn khronos_rigs_assemble_into_a_rig_document() {
     assert_eq!(v["id"], rig_id.as_str());
     assert_eq!(v["skeleton"]["joints"].as_array().unwrap().len(), 24);
     assert_eq!(v["skeleton"]["entities"], 27);
-    assert_eq!(v["skeleton"]["roots"], serde_json::json!(["_rootJoint"]));
+    assert_eq!(
+        v["skeleton"]["roots"],
+        serde_json::json!([format!(
+            "{}/node/2",
+            doc["skeleton"]["asset"].as_str().unwrap()
+        )])
+    );
     assert_eq!(v["clips"][1]["name"], "walk");
     assert_eq!(v["clips"][1]["sub"], "anim/walk");
     assert_eq!(v["clips"][1]["matched"], v["clips"][1]["channels"]);
@@ -2211,7 +2217,10 @@ fn khronos_rigs_assemble_into_a_rig_document() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("fox (assets/models/fox.rig.json)"), "{text}");
     assert!(
-        text.contains("24 joint(s) (root _rootJoint), 27 entities"),
+        text.contains(&format!(
+            "24 joint(s) (root {}), 27 entities",
+            v["skeleton"]["roots"][0].as_str().unwrap()
+        )),
         "{text}"
     );
     assert!(text.contains("clips (3)"), "{text}");

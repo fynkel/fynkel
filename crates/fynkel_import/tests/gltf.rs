@@ -288,7 +288,7 @@ fn robot_prefab_mirrors_the_node_hierarchy_and_validates() {
     assert_eq!(body["children"], serde_json::json!([node(2)]));
     let body_components: Vec<&serde_json::Value> =
         body["components"].as_object().unwrap().values().collect();
-    assert_eq!(body_components.len(), 2);
+    assert_eq!(body_components.len(), 3);
     assert_eq!(
         body_components[0]["data"]["scale"],
         serde_json::json!([1.0, 2.0, 1.0])
@@ -318,7 +318,7 @@ fn robot_prefab_mirrors_the_node_hierarchy_and_validates() {
     // Antenna uses a matrix in the file and carries a two-primitive mesh:
     // its renderers live on two child entities, the second without a material.
     let antenna = &entities[&node(3)];
-    assert_eq!(antenna["components"].as_object().unwrap().len(), 1);
+    assert_eq!(antenna["components"].as_object().unwrap().len(), 2);
     let antenna_transform = antenna["components"]
         .as_object()
         .unwrap()
@@ -641,7 +641,7 @@ fn rig_imports_skin_weights_skins_and_animations() {
     let skin = &i.skins[0];
     assert_eq!(skin.sub_id, "skin/Skin");
     assert_eq!(skin.name, "Skin");
-    assert_eq!(skin.payload.skeleton, "hips");
+    assert_eq!(skin.payload.skeleton, skin.payload.joints[0].binding);
     let names: Vec<&str> = skin
         .payload
         .joints
@@ -664,17 +664,20 @@ fn rig_imports_skin_weights_skins_and_animations() {
     assert_eq!(wave.payload.duration, 1.0);
     assert_eq!(wave.payload.channels.len(), 3);
     let spine = &wave.payload.channels[0];
-    assert_eq!(spine.target, "spine");
+    assert_eq!(spine.target_name, "spine");
+    assert_eq!(spine.target, skin.payload.joints[1].binding);
     assert_eq!(spine.property, ANIM_PROPERTY_ROTATION);
     assert_eq!(spine.interpolation, ANIM_INTERPOLATION_LINEAR);
     assert_eq!(spine.times, [0.0, 0.5, 1.0]);
     assert_eq!(spine.values.len(), 12);
     assert!((spine.values[6] - (std::f32::consts::FRAC_PI_8).sin()).abs() < 1e-6);
     let head = &wave.payload.channels[1];
-    assert_eq!(head.target, "head");
+    assert_eq!(head.target_name, "head");
+    assert_eq!(head.target, skin.payload.joints[2].binding);
     assert_eq!(head.interpolation, ANIM_INTERPOLATION_STEP);
     let hips = &wave.payload.channels[2];
-    assert_eq!(hips.target, "hips");
+    assert_eq!(hips.target_name, "hips");
+    assert_eq!(hips.target, skin.payload.joints[0].binding);
     assert_eq!(hips.property, ANIM_PROPERTY_TRANSLATION);
     assert_eq!(hips.interpolation, ANIM_INTERPOLATION_CUBIC_SPLINE);
     assert_eq!(hips.values.len(), 2 * 3 * 3);
@@ -682,7 +685,7 @@ fn rig_imports_skin_weights_skins_and_animations() {
     let bob = &i.animations[1];
     assert_eq!(bob.name, "bob");
     assert_eq!(bob.payload.duration, 2.0);
-    assert_eq!(bob.payload.channels[0].target, "Prop");
+    assert_eq!(bob.payload.channels[0].target_name, "Prop");
 
     // Sub-assets and derived ids.
     let subs: Vec<&str> = i.sub_assets.iter().map(|(k, _)| k.as_str()).collect();
@@ -716,7 +719,7 @@ fn rig_imports_skin_weights_skins_and_animations() {
     let body = &entities[&node(1)];
     let components: Vec<&serde_json::Value> =
         body["components"].as_object().unwrap().values().collect();
-    assert_eq!(components.len(), 3);
+    assert_eq!(components.len(), 4);
     assert_eq!(components[1]["type"], "fynkel.MeshRenderer");
     assert_eq!(components[2]["type"], "fynkel.Skin");
     assert_eq!(components[2]["data"]["skin"]["asset"], RIG_ID);
@@ -736,7 +739,7 @@ fn rig_imports_skin_weights_skins_and_animations() {
         .unwrap()
         .contains_key(&derive_sub_id(asset, "node/Rig/Body/skin").to_string()));
     let prop = &entities[&node(5)];
-    assert_eq!(prop["components"].as_object().unwrap().len(), 2);
+    assert_eq!(prop["components"].as_object().unwrap().len(), 3);
     let names: Vec<&str> = entities
         .values()
         .map(|e| e["name"].as_str().unwrap())
@@ -756,11 +759,14 @@ fn rig_imports_skin_weights_skins_and_animations() {
 }
 
 #[test]
-fn duplicate_joint_names_in_a_skin_are_an_error() {
+fn duplicate_joint_names_keep_distinct_bindings() {
     let (r, _) = import_fixture("rig_dupe_joints.glb");
-    assert_eq!(codes(&r), [Code::IMPORT_INVALID_DATA]);
-    assert!(r.diagnostics[0].message.contains("\"spine\""));
-    assert!(r.intermediate.is_none());
+    assert!(codes(&r).is_empty(), "{:?}", r.diagnostics);
+    let im = r.intermediate.unwrap();
+    let joints = &im.skins[0].payload.joints;
+    let bindings: std::collections::HashSet<_> = joints.iter().map(|j| &j.binding).collect();
+    assert_eq!(bindings.len(), joints.len());
+    assert!(joints.iter().filter(|j| j.name == "spine").count() > 1);
 }
 
 #[test]

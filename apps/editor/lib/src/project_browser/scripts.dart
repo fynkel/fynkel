@@ -95,7 +95,7 @@ String behaviourNamespace(Map<String, Object?>? metadata) {
 /// stays one line.
 String behaviourSource(String id, String className) =>
     '''
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 /// What $className does (the Inspector shows this comment).
 @FynkelBehaviour(id: '$id')

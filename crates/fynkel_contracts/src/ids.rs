@@ -45,6 +45,7 @@ impl ComponentId {
     /// `layers`, a bit set over its `tags`.
     pub const LAYER: ComponentId = ComponentId(26);
     pub const TAGS: ComponentId = ComponentId(27);
+    pub const ANIMATION_BINDING: ComponentId = ComponentId(28);
 
     pub const fn name(self) -> Option<&'static str> {
         match self.0 {
@@ -75,6 +76,7 @@ impl ComponentId {
             25 => Some("fynkel.Volume"),
             26 => Some("fynkel.Layer"),
             27 => Some("fynkel.Tags"),
+            28 => Some("fynkel.AnimationBinding"),
             _ => None,
         }
     }

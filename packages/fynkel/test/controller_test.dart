@@ -7,7 +7,7 @@
 
 import 'dart:io';
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
@@ -280,7 +280,7 @@ void main() {
     final hips = rig.findChild('hips')!;
     final lift = w.createClip(
       (ClipBuilder()
-            ..position('hips', {0: const Vec3(0, 3, 0), 1: const Vec3(0, 3, 0)})
+            ..position(hips.get<AnimationBinding>()!.key, {0: const Vec3(0, 3, 0), 1: const Vec3(0, 3, 0)})
             ..marker(0.5, 'top'))
           .build(),
     );
@@ -299,7 +299,8 @@ void main() {
     // Changed: the next play reads the new keys.
     w.setClip(
       lift,
-      (ClipBuilder()..position('hips', {0: const Vec3(0, 5, 0), 1: const Vec3(0, 5, 0)})).build(),
+      (ClipBuilder()..position(hips.get<AnimationBinding>()!.key, {0: const Vec3(0, 5, 0), 1: const Vec3(0, 5, 0)}))
+          .build(),
     );
     rig.animation.playOneShot(lift, blendIn: 0.05);
     ticks(w, 20);
@@ -313,15 +314,10 @@ void main() {
       throwsArgumentError,
     );
     expect(() => ClipBuilder()..marker(0.5, ''), throwsArgumentError);
+    expect(() => (ClipBuilder()..scale('hips', {0: const Vec3(double.nan, 1, 1)})).build(), throwsArgumentError);
     expect(
-      () => (ClipBuilder()..scale('hips', {0: const Vec3(double.nan, 1, 1)})).build(),
-      throwsArgumentError,
-    );
-    expect(
-      () => w.setClip(
-        const AssetRef(rigAsset, sub: 'anim/wave'),
-        (ClipBuilder()..scale('hips', {0: Vec3.one})).build(),
-      ),
+      () =>
+          w.setClip(const AssetRef(rigAsset, sub: 'anim/wave'), (ClipBuilder()..scale('hips', {0: Vec3.one})).build()),
       throwsArgumentError,
     );
 
@@ -369,16 +365,12 @@ void main() {
     expect(rig.animation.state!.clip, const AssetRef(rigAsset, sub: 'anim/bob'));
     expect(
       () => rig.animation.playOneShot(const AssetRef(rigAsset, sub: 'anim/bob')),
-      throwsA(
-        isA<StateError>().having((e) => e.message, 'message', contains('requires an Animator Controller')),
-      ),
+      throwsA(isA<StateError>().having((e) => e.message, 'message', contains('requires an Animator Controller'))),
     );
     expect(rig.animation.isPlayingOneShot(), isFalse);
     expect(
       () => rig.animation.setIKTarget('hand', Vec3.zero),
-      throwsA(
-        isA<StateError>().having((e) => e.message, 'message', contains('IK goals live in a controller')),
-      ),
+      throwsA(isA<StateError>().having((e) => e.message, 'message', contains('IK goals live in a controller'))),
     );
   });
 }

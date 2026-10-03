@@ -1,6 +1,6 @@
 # ADR-0045: Asset readiness and render resources
 
-**Status:** Accepted readiness/ownership contract through ADR-0047; detailed scheduling, budgets and render design remain proposed for F5/F6. Shipping migration pending.  
+**Status:** Accepted and implemented through ADR-0047/0056/0057. F5/F6 gates qualify readiness, scheduling, budgets, bindings, residency and rendering; the proposal text below records the original direction.
 **Date:** 2026-09-30  
 **Related:** ADR-0042, ADR-0006, ADR-0012, ADR-0029, ADR-0030, ADR-0032, ADR-0033, ADR-0038, ADR-0040, ADR-0041; roadmap F5, F6.
 

@@ -93,7 +93,13 @@ pub fn render_offscreen(
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
-    renderer.prepare(device, queue, extract);
+    if let Err(error) =
+        renderer.prepare_ready(device, queue, extract, std::time::Duration::from_secs(30))
+    {
+        if renderer.asset_errors.is_empty() {
+            renderer.asset_errors.push(error);
+        }
+    }
     let mut encoder = device.create_command_encoder(&Default::default());
     renderer.draw(&mut encoder, &view);
     encoder.copy_texture_to_buffer(

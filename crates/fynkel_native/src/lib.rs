@@ -277,6 +277,17 @@ impl FynkelWorld {
 
     /// Makes `assets` the world's store; a different store than before
     /// drops the prefabs kept in memory (they came from the old one).
+    /// Fallible ownership transfer before scene/editor data publication.
+    #[allow(clippy::result_large_err)]
+    fn prepare_asset_store(
+        &self,
+        assets: &fynkel_assets::Assets,
+    ) -> Result<(), fynkel_contracts::Diagnostic> {
+        if let Some(old) = &self.services.assets {
+            assets.adopt_runtime_assets(old)?;
+        }
+        Ok(())
+    }
     fn set_assets(&mut self, assets: fynkel_assets::Assets) {
         self.inner
             .set_command_resource_source(Some(std::sync::Arc::new(assets.clone())));
@@ -511,8 +522,13 @@ pub unsafe extern "C" fn fynkel_world_set_material(
         if w.services.assets.is_none() {
             return Status::LoadFailed;
         }
-        gameplay::publish_runtime_material(w, key, gameplay::RuntimeMaterial::Pbr(material));
-        Status::Ok
+        match gameplay::publish_runtime_material(w, key, gameplay::RuntimeMaterial::Pbr(material)) {
+            Ok(()) => Status::Ok,
+            Err(error) => {
+                w.load_report = serde_json::to_vec(&serde_json::json!({"ok": false, "diagnostics": [fynkel_document::diagnostic_json(&error)]})).unwrap_or_default();
+                Status::LoadFailed
+            }
+        }
     })
 }
 
@@ -548,10 +564,10 @@ pub unsafe extern "C" fn fynkel_world_set_shader_material(
                 )],
             ),
             Some(assets) => match text {
-                None => {
-                    assets.set_runtime_custom_material(&key, None);
-                    (Status::Ok, Vec::new())
-                }
+                None => match assets.set_runtime_custom_material(&key, None) {
+                    Ok(()) => (Status::Ok, Vec::new()),
+                    Err(d) => (Status::LoadFailed, vec![d]),
+                },
                 Some(text) => shader_material(assets, &key, &text),
             },
         };
@@ -582,7 +598,9 @@ fn shader_material(
 ) -> (Status, Vec<fynkel_contracts::Diagnostic>) {
     let (status, diagnostics, payload) = prepare_shader_material(assets, text);
     if status == Status::Ok {
-        assets.set_runtime_custom_material(key, payload);
+        if let Err(d) = assets.set_runtime_custom_material(key, payload) {
+            return (Status::LoadFailed, vec![d]);
+        }
     }
     (status, diagnostics)
 }
@@ -665,8 +683,13 @@ pub unsafe extern "C" fn fynkel_world_set_mesh(
         if w.services.assets.is_none() {
             return Status::LoadFailed;
         }
-        gameplay::publish_runtime_mesh(w, key, mesh);
-        Status::Ok
+        match gameplay::publish_runtime_mesh(w, key, mesh) {
+            Ok(()) => Status::Ok,
+            Err(error) => {
+                w.load_report = serde_json::to_vec(&serde_json::json!({"ok": false, "diagnostics": [fynkel_document::diagnostic_json(&error)]})).unwrap_or_default();
+                Status::LoadFailed
+            }
+        }
     })
 }
 
@@ -700,8 +723,13 @@ pub unsafe extern "C" fn fynkel_world_set_clip(
         if w.services.assets.is_none() {
             return Status::LoadFailed;
         }
-        gameplay::publish_runtime_clip(w, key, clip);
-        Status::Ok
+        match gameplay::publish_runtime_clip(w, key, clip) {
+            Ok(()) => Status::Ok,
+            Err(error) => {
+                w.load_report = serde_json::to_vec(&serde_json::json!({"ok": false, "diagnostics": [fynkel_document::diagnostic_json(&error)]})).unwrap_or_default();
+                Status::LoadFailed
+            }
+        }
     })
 }
 
@@ -757,6 +785,7 @@ pub unsafe extern "C" fn fynkel_world_step(
     guarded(world, |w| {
         w.stats.step_calls += 1;
         let r = w.inner.step();
+        resources::synchronize(w);
         let buf = std::mem::take(&mut w.snapshot_buf);
         w.snapshot_buf = bridge::encode_snapshot(buf, w.inner.snapshot());
         let snapshot_bytes = w.snapshot_buf.len() as u64;

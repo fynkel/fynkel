@@ -6,7 +6,7 @@ import 'dart:math' show pow;
 
 import 'package:flutter/material.dart' hide Transform;
 import 'package:flutter/widgets.dart' as widgets show Transform;
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 
 import '../generated/assets.g.dart';

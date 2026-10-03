@@ -5,7 +5,7 @@
 // taken, off when given back, destroyed past the cap. Over the real
 // native library.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:test/test.dart';
 
 class Bullet extends Behaviour {

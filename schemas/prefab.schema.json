@@ -390,6 +390,22 @@
           "if": {
             "properties": {
               "type": {
+                "const": "fynkel.AnimationBinding"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "https://fynkel.dev/schemas/components/fynkel.AnimationBinding.schema.json"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
                 "const": "fynkel.AudioSource"
               }
             }

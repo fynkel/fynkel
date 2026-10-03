@@ -2,7 +2,7 @@
 // `fynkel.Layer`/`fynkel.Tags` components, read and written by name through
 // the project's lists; tag lookups share the gameplay journal.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:test/test.dart' hide Tags;
 
 void main() {

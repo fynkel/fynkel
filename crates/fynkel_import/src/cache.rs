@@ -35,7 +35,7 @@ use uuid::Uuid;
 /// `fynkel.RigidBody` carries `constraints`).
 /// 11: ADR-0035 (scenes and prefabs are `formatVersion` 7, object
 /// references).
-pub const CACHE_VERSION: u32 = 11;
+pub const CACHE_VERSION: u32 = 12;
 
 /// A BLAKE3 hash, shown as 64 hex characters.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

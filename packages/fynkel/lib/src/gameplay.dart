@@ -33,9 +33,7 @@ extension _WorldGameplay on World {
     final state = _native.gameplayStateDelta(_gameplayStateRevision);
     final changed = state.changes;
     // Reset only when this reader is new or older than retained history.
-    final affected = state.reset
-        ? _byEntity.keys.toList()
-        : changed.keys;
+    final affected = state.reset ? _byEntity.keys.toList() : changed.keys;
     for (final entity in affected) {
       final go = _byEntity[entity];
       final name = changed[entity];
@@ -56,8 +54,9 @@ extension _WorldGameplay on World {
       _toSubscribe.removeWhere((entity) => !changed.containsKey(entity));
     }
     _gameplayStateRevision = state.revision;
-    // Activity and behaviour execution have separate invalidation rules.
-    _behaviours.objectChanged();
+    // Native deltas include hierarchy/activity mutations, not just names.
+    // Empty/pose-only transactions must not restart a full lifecycle scan.
+    if (state.reset || changed.isNotEmpty) _behaviours.objectChanged();
   }
 
   R _callbackGameplay<R>(R Function() callback) {
@@ -302,7 +301,10 @@ class _GameplayAdapter {
     return handles[result.root]!;
   });
 
-  GameObject build(ObjectSpec spec, GameObject? parent, Pose transform) => guard(() {
+  GameObject build(ObjectSpec spec, GameObject? parent, Pose transform) =>
+      buildAll([spec], parent, transform: transform).single;
+
+  List<GameObject> buildAll(List<ObjectSpec> specs, GameObject? parent, {Pose? transform}) => guard(() {
     // Validate topology without recursively traversing an unchecked user list.
     // A spec has one identity in an edit, including across separate build calls.
     final seen = Set<ObjectSpec>.identity();
@@ -316,8 +318,10 @@ class _GameplayAdapter {
       }
     }
 
-    check(spec);
-    world._checkSpec(spec);
+    for (final spec in specs) {
+      check(spec);
+    }
+    world._checkSpecs(specs);
     final made = <GameObject>[];
     GameObject spawnTree(ObjectSpec node, GameObject? owner, Pose pose) {
       final handle = node._unboundObject;
@@ -332,9 +336,14 @@ class _GameplayAdapter {
       return go;
     }
 
-    final root = spawnTree(spec, parent, transform);
-    // All targets exist before the generated component codecs resolve references.
-    world._fillSpec(spec, made.iterator..moveNext());
+    final roots = [for (final spec in specs) spawnTree(spec, parent, transform ?? spec.transform)];
+    // Allocate the entire forest before resolving references, including references
+    // between top-level objects. This is the same path as a single-tree build.
+    final iterator = made.iterator;
+    for (final spec in specs) {
+      iterator.moveNext();
+      world._fillSpec(spec, iterator);
+    }
     // References already hold canonical handles. Validate ownership without
     // invoking setters on caller-owned script instances.
     for (final node in seen) {
@@ -356,7 +365,7 @@ class _GameplayAdapter {
         }
       }
     }
-    return root;
+    return roots;
   });
 
   GameObject instantiate(Object prefab, Pose transform, GameObject? parent, String? name, [GameObject? handle]) =>
@@ -730,7 +739,11 @@ class _GameplayAdapter {
     }
     if (timeScale case final scale?) world._timeScale = scale;
     world._data.byId.addAll(_dataAssets);
-    world._behaviours.objectChanged();
+    // Native identity/activity changes are reconciled at the next entry.
+    // These Dart-owned membership changes need their own invalidation.
+    if (_attachments.isNotEmpty || _enabledChanges.isNotEmpty || _behaviourRemovals.isNotEmpty) {
+      world._behaviours.objectChanged();
+    }
   }
 
   void abort() {

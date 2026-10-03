@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart' show EntityRef;
+import 'package:fynkel/gameplay.dart' show EntityRef;
 // The Scene view on the running game (ADR-0021 P7 L5): the game's world
 // as a `PreviewBackend`, so the Scene view draws it, picks in it and
 // outlines its selection with the code it uses for a scene's edit

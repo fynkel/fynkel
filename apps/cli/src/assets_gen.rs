@@ -149,7 +149,7 @@ fn render(entries: &[AssetEntry], persistent: &[(String, String)]) -> String {
     let names: Vec<&str> = used.into_iter().collect();
     let _ = writeln!(
         o,
-        "import 'package:fynkel/fynkel.dart' show {};",
+        "import 'package:fynkel/gameplay.dart' show {};",
         names.join(", ")
     );
     let _ = writeln!(o);

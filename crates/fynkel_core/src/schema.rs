@@ -17,9 +17,9 @@ use fynkel_schema_derive::Schema;
 use glam::{Quat, Vec3};
 
 use crate::components::{
-    Animator, Camera, DirectionalLight, Emitter, Environment, Follow, LifetimeDespawn,
-    LookAtCamera, MeshRenderer, Oscillate, PointLight, Rotator, Skin, SpotLight, ThirdPersonCamera,
-    TriggerZone, Volume,
+    AnimationBinding, Animator, Camera, DirectionalLight, Emitter, Environment, Follow,
+    LifetimeDespawn, LookAtCamera, MeshRenderer, Oscillate, PointLight, Rotator, Skin, SpotLight,
+    ThirdPersonCamera, TriggerZone, Volume,
 };
 use crate::material::PbrMaterial;
 use crate::settings::Settings;
@@ -953,6 +953,7 @@ pub const ALL: &[&RecordSchema] = &[
     &ProjectedPointRecord::SCHEMA,
     &Animator::SCHEMA,
     &Skin::SCHEMA,
+    &AnimationBinding::SCHEMA,
     &AnimateCommandRecord::SCHEMA,
     &AnimationEndedEvent::SCHEMA,
     &AnimatorStateRecord::SCHEMA,

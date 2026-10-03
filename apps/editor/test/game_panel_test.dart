@@ -9,7 +9,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart' show EditorChannel;
+import 'package:fynkel/gameplay.dart' show EditorChannel;
 import 'package:fynkel_authoring/fynkel_authoring.dart' show Command;
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/commands/commands.dart';

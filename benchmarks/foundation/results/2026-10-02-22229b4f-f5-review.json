@@ -1,0 +1,818 @@
+{
+  "date": "2026-10-02",
+  "base_commit": "22229b4f1967f4d07a8f0ed968ba64d7342648d5",
+  "state": "Uncommitted F5 implementation plus follow-up review fixes; source hashes identify reviewed content.",
+  "machine": {
+    "cpu": "Apple M3 Max",
+    "os": "macOS 26.5.1 (25F80)",
+    "arch": "arm64",
+    "rustc": "rustc 1.93.0 (254b59607 2026-01-19)",
+    "gpu": "Metal / Apple M3 Max",
+    "concurrency": "Some builds/tests overlapped on the same machine; timings are observational."
+  },
+  "reviewed_areas": [
+    "native scene/prefab preparation and atomic publication",
+    "CPU cache and runtime reservation accounting",
+    "request deduplication, generation invalidation and queue refusal",
+    "renderer upload admission, error lifetime and required GPU readiness",
+    "resource ownership and unloading",
+    "animation binding resolution, hierarchy invalidation and rig remapping",
+    "editor capture through rebuilt native libraries"
+  ],
+  "fixes": [
+    "Discarded cooked mesh charge retired during runtime replacement.",
+    "Asset-attributed renderer failures survive unrelated eviction/edit; readiness filters to required view dependencies.",
+    "Missing asset source produces explicit texture/material/volume/environment failure.",
+    "Stale admission refusal cannot mutate a new generation; eviction invalidates the previous residency lifetime."
+  ],
+  "qualification": [
+    {
+      "command": "cargo test --release --locked --workspace",
+      "result": "passed",
+      "scope": "Passing broad run before the last readiness filtering and eviction-generation edits; final affected suites below qualify those edits.",
+      "log": {
+        "path": "target/foundation-baseline/f5-review/f5-review-workspace-final.log",
+        "sha256": "6742308abfa275f68ef426fc3fa891930dd7d64f7013f581a18e394b9eaab564"
+      },
+      "counts": {
+        "passed": 1162,
+        "failed": 0,
+        "ignored": 10
+      }
+    },
+    {
+      "command": "cargo test --release --locked -p fynkel_assets -p fynkel_render",
+      "result": "passed",
+      "scope": "Final asset/render sources.",
+      "log": {
+        "path": "target/foundation-baseline/f5-review/f5-review-final-assets-render-2.log",
+        "sha256": "0edb3ac8f68a34bc12ff1cfd4f7cf8b4f58ef49e3b9bfeb1cabb4557afcdd68d"
+      },
+      "counts": {
+        "passed": 130,
+        "failed": 0,
+        "ignored": 2
+      }
+    },
+    {
+      "command": "cargo test --release --locked -p fynkel_native -p fynkel_platform_apple -- --test-threads=1",
+      "result": "passed",
+      "scope": "Final sources; isolated GPU timing tests, unchanged assertions.",
+      "log": {
+        "path": "target/foundation-baseline/f5-review/f5-review-qualified-native-apple.log",
+        "sha256": "e4a7537065ae68222928d8ae227c1a7665320da88289c7d9dc12326bd3c7cecf"
+      },
+      "counts": {
+        "passed": 106,
+        "failed": 0,
+        "ignored": 4
+      }
+    },
+    {
+      "command": "cargo clippy --release --locked --workspace --all-targets -- -D warnings",
+      "result": "passed",
+      "scope": "Final sources.",
+      "log": {
+        "path": "target/foundation-baseline/f5-review/f5-review-qualified-clippy.log",
+        "sha256": "6a241d3934cc175011030f740cd442801b30c70d22fa2319e9d2020c1f61f0bd"
+      }
+    },
+    {
+      "command": "cargo build --release --locked -p fynkel_platform_apple -p fynkel_native",
+      "result": "passed",
+      "scope": "Libraries rebuilt for editor verification.",
+      "log": {
+        "path": "target/foundation-baseline/f5-review/f5-review-qualified-build.log",
+        "sha256": "4366ebd115916e8c5b9cd0320c369cbb3c35ea18f2bb6429f26eb34b468e2fd6"
+      }
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "result": "passed",
+      "scope": "Final sources.",
+      "log": {
+        "path": "target/foundation-baseline/f5-review/f5-review-qualified-fmt.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "command": "flutter test test/scene_session_test.dart",
+      "result": "passed",
+      "scope": "apps/editor; 7 passed, real Apple M3 Max Metal captures against rebuilt libraries.",
+      "log": {
+        "path": "target/foundation-baseline/f5-review/f5-review-editor-capture.log",
+        "sha256": "167ad43a323c7de040415ec06f47d708e3529dc480861d60c8c61ba57cb1f9b2"
+      }
+    },
+    {
+      "command": "FYNKEL_F5_BENCH_OUT=/tmp/f5-review-streaming.json cargo test --release --locked -p fynkel_render --test project asset_streaming_qualification -- --ignored --nocapture",
+      "result": "passed",
+      "scope": "12 cold/unload cycles, 2880 warm frames, counted upload limits.",
+      "log": {
+        "path": "target/foundation-baseline/f5-review/f5-review-streaming.log",
+        "sha256": "10e5c2a09bb0deb2975e0b85a6d739cc3ea376346e441573c4cbe86e946abbed"
+      },
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "command": "FYNKEL_F5_ACTIVATION_OUT=/tmp/f5-review-activation.json cargo test --release --locked -p fynkel_native --test load asset_activation_qualification -- --ignored --nocapture",
+      "result": "passed",
+      "scope": "24 asynchronous additive activation/unload cycles.",
+      "log": {
+        "path": "target/foundation-baseline/f5-review/f5-review-activation.log",
+        "sha256": "75e7fa37c56405de956cf69729e764fcbc5cf1dcae1c360e00908714d0c6434c"
+      },
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      }
+    }
+  ],
+  "measurement_render": {
+    "workload": "fixture Main, 6 entities, 12 independent engine-cache cold loads, 240 warm simulation/prepare frames per cycle; source files removed; OS file cache uncontrolled; release Metal 64x64",
+    "draw_prepare_cold": {
+      "samples": 72,
+      "p50_us": 74.792,
+      "p95_us": 170.917,
+      "p99_us": 180.542,
+      "max_us": 15351.916000000001
+    },
+    "draw_prepare_warm": {
+      "samples": 2880,
+      "p50_us": 22.125,
+      "p95_us": 34.583,
+      "p99_us": 52.625,
+      "max_us": 123.833
+    },
+    "simulation_step": {
+      "samples": 2952,
+      "p50_us": 2.75,
+      "p95_us": 6.666,
+      "p99_us": 22.125,
+      "max_us": 112.125
+    },
+    "cpu_cache_high_water_bytes": 10666,
+    "gpu_estimate_high_water_bytes": 4513460,
+    "max_asset_upload_bytes_per_frame": 1872,
+    "upload_operations_limit": 2,
+    "cycles": [
+      {
+        "cycle": 0,
+        "cold_frames": 6,
+        "loading_ms": 22.211125000000003,
+        "post_unload_cpu_bytes": 0,
+        "post_unload_gpu_bytes": 4508800
+      },
+      {
+        "cycle": 1,
+        "cold_frames": 6,
+        "loading_ms": 6.975958,
+        "post_unload_cpu_bytes": 0,
+        "post_unload_gpu_bytes": 4508800
+      },
+      {
+        "cycle": 2,
+        "cold_frames": 6,
+        "loading_ms": 7.055750000000001,
+        "post_unload_cpu_bytes": 0,
+        "post_unload_gpu_bytes": 4508800
+      },
+      {
+        "cycle": 3,
+        "cold_frames": 6,
+        "loading_ms": 7.094792,
+        "post_unload_cpu_bytes": 0,
+        "post_unload_gpu_bytes": 4508800
+      },
+      {
+        "cycle": 4,
+        "cold_frames": 6,
+        "loading_ms": 6.951792,
+        "post_unload_cpu_bytes": 0,
+        "post_unload_gpu_bytes": 4508800
+      },
+      {
+        "cycle": 5,
+        "cold_frames": 6,
+        "loading_ms": 6.908625,
+        "post_unload_cpu_bytes": 0,
+        "post_unload_gpu_bytes": 4508800
+      },
+      {
+        "cycle": 6,
+        "cold_frames": 6,
+        "loading_ms": 6.871,
+        "post_unload_cpu_bytes": 0,
+        "post_unload_gpu_bytes": 4508800
+      },
+      {
+        "cycle": 7,
+        "cold_frames": 6,
+        "loading_ms": 7.064084,
+        "post_unload_cpu_bytes": 0,
+        "post_unload_gpu_bytes": 4508800
+      },
+      {
+        "cycle": 8,
+        "cold_frames": 6,
+        "loading_ms": 6.832166,
+        "post_unload_cpu_bytes": 0,
+        "post_unload_gpu_bytes": 4508800
+      },
+      {
+        "cycle": 9,
+        "cold_frames": 6,
+        "loading_ms": 6.91,
+        "post_unload_cpu_bytes": 0,
+        "post_unload_gpu_bytes": 4508800
+      },
+      {
+        "cycle": 10,
+        "cold_frames": 6,
+        "loading_ms": 6.836917,
+        "post_unload_cpu_bytes": 0,
+        "post_unload_gpu_bytes": 4508800
+      },
+      {
+        "cycle": 11,
+        "cold_frames": 6,
+        "loading_ms": 6.924333000000001,
+        "post_unload_cpu_bytes": 0,
+        "post_unload_gpu_bytes": 4508800
+      }
+    ],
+    "limits": "GPU estimate includes fixed frame resources but excludes driver/pipeline allocations. CPU accounting excludes externally held payload copies and allocator overhead. Timing is observational, not a production frame-time guarantee."
+  },
+  "measurement_activation": {
+    "workload": "24 fresh hosts running fixture Main (6 entities), asynchronously prepare and atomically activate additive Playground (5 entities), then unload both. Cache-only runtime. 1 ms progress polling; OS cache uncontrolled. Not a production latency guarantee.",
+    "runs": [
+      {
+        "cycle": 0,
+        "preparation_wall_us": 501.16600000000005,
+        "activation_us": 88.25,
+        "simulation_steps_us": [
+          461.584
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 1,
+        "preparation_wall_us": 1410.875,
+        "activation_us": 73.0,
+        "simulation_steps_us": [
+          61.375,
+          43.458999999999996
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 2,
+        "preparation_wall_us": 1361.375,
+        "activation_us": 50.125,
+        "simulation_steps_us": [
+          41.25,
+          20.709
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 3,
+        "preparation_wall_us": 1342.7910000000002,
+        "activation_us": 50.5,
+        "simulation_steps_us": [
+          28.917,
+          20.5
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 4,
+        "preparation_wall_us": 1362.959,
+        "activation_us": 68.334,
+        "simulation_steps_us": [
+          31.667,
+          35.458
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 5,
+        "preparation_wall_us": 1345.542,
+        "activation_us": 48.083,
+        "simulation_steps_us": [
+          36.5,
+          18.541
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 6,
+        "preparation_wall_us": 1329.292,
+        "activation_us": 41.583,
+        "simulation_steps_us": [
+          29.375,
+          15.5
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 7,
+        "preparation_wall_us": 1321.667,
+        "activation_us": 40.0,
+        "simulation_steps_us": [
+          28.916,
+          14.584
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 8,
+        "preparation_wall_us": 1320.0410000000002,
+        "activation_us": 46.75,
+        "simulation_steps_us": [
+          27.291999999999998,
+          14.167
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 9,
+        "preparation_wall_us": 1316.583,
+        "activation_us": 38.292,
+        "simulation_steps_us": [
+          26.375,
+          14.167
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 10,
+        "preparation_wall_us": 1314.2920000000001,
+        "activation_us": 38.833,
+        "simulation_steps_us": [
+          26.208000000000002,
+          13.875
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 11,
+        "preparation_wall_us": 1314.625,
+        "activation_us": 39.583,
+        "simulation_steps_us": [
+          25.875,
+          13.792
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 12,
+        "preparation_wall_us": 1314.416,
+        "activation_us": 38.75,
+        "simulation_steps_us": [
+          25.916999999999998,
+          13.875
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 13,
+        "preparation_wall_us": 1318.333,
+        "activation_us": 38.583,
+        "simulation_steps_us": [
+          26.125,
+          13.875
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 14,
+        "preparation_wall_us": 1323.1670000000001,
+        "activation_us": 45.917,
+        "simulation_steps_us": [
+          22.625,
+          21.625
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 15,
+        "preparation_wall_us": 1339.375,
+        "activation_us": 56.25,
+        "simulation_steps_us": [
+          30.208,
+          22.0
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 16,
+        "preparation_wall_us": 1376.792,
+        "activation_us": 54.333000000000006,
+        "simulation_steps_us": [
+          58.667,
+          25.083000000000002
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 17,
+        "preparation_wall_us": 1340.709,
+        "activation_us": 45.333,
+        "simulation_steps_us": [
+          33.667,
+          21.542
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 18,
+        "preparation_wall_us": 1322.417,
+        "activation_us": 41.5,
+        "simulation_steps_us": [
+          30.458,
+          15.957999999999998
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 19,
+        "preparation_wall_us": 1318.834,
+        "activation_us": 43.166,
+        "simulation_steps_us": [
+          25.041999999999998,
+          17.291999999999998
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 20,
+        "preparation_wall_us": 1347.7910000000002,
+        "activation_us": 42.375,
+        "simulation_steps_us": [
+          30.292,
+          15.042
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 21,
+        "preparation_wall_us": 1318.917,
+        "activation_us": 38.625,
+        "simulation_steps_us": [
+          26.0,
+          13.708
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 22,
+        "preparation_wall_us": 1315.0,
+        "activation_us": 38.125,
+        "simulation_steps_us": [
+          25.541,
+          13.665999999999999
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      },
+      {
+        "cycle": 23,
+        "preparation_wall_us": 1315.458,
+        "activation_us": 37.958,
+        "simulation_steps_us": [
+          25.584,
+          13.5
+        ],
+        "cpu_cache_peak_bytes": 22499,
+        "post_unload_cpu_cache_bytes": 0
+      }
+    ]
+  },
+  "retry_history": [
+    "Mesh accounting and unrelated-eviction readiness regressions failed before fixes (red logs archived).",
+    "One attempted package list named fynkel_apple instead of fynkel_platform_apple; no tests ran in that invocation.",
+    "New explicit missing-material diagnostic required the no-source regression to assert one mesh plus one material error instead of one total error.",
+    "Clippy requested struct initialization in a new test; corrected.",
+    "Initial workspace run failed pre-existing document timing assertion under concurrent work; later broad run passed unchanged.",
+    "Later full run hit presenter_wait_yields_lag_zero at 4240 us against 4000 us; final native/Apple suites passed serially without changing assertions."
+  ],
+  "limits": [
+    "Fixture measurements are not large-game or production frame-time qualification.",
+    "Decoded-cache/runtime-owned/GPU-asset budgets exclude external payload copies, container/allocator overhead, immutable cache index and GPU driver/pipeline allocations.",
+    "Atomic activation is capacity-bounded, not time-sliced. One worker, cooperative cancellation, indivisible decode/upload operations; time budgets are soft.",
+    "Source-index keys require coherent recook and review/regeneration of external authored bindings after source node-table reordering.",
+    "examples/code_only_try has pre-existing old document/SDK APIs; its exploratory loop failed. No F5 modifications retained there. Migration explicitly remains F7.4.",
+    "Ignored optional platform/manual/hero tests are not claimed passed."
+  ],
+  "source_sha256": {
+    "apps/cli/tests/check.rs": "91ea56e38e448efd2d1212e6b5e31ad40e0b1c6596e355f2c101a3fef0757726",
+    "apps/editor/lib/src/animator/animator_ik.dart": "faa903455364e396708afdf5a5b2f6493367ee571caf2d55d75181bfdb6439de",
+    "apps/editor/lib/src/animator/animator_model.dart": "1485f4a3bcf3e2c445ad36fd41dad2de1f3bf1cf69bf18b55855e5790c98b87e",
+    "apps/editor/lib/src/animator/animator_panel.dart": "461d3437ef3f95d41ad0e67bc6e11bbd67ffc5258d386792a26c3541b64c42e7",
+    "apps/editor/lib/src/hierarchy/hierarchy_tree.dart": "3000a5b731d42b53ea13f17531cb75dc69bf766590e26b0ad53afa02a584bf2c",
+    "apps/editor/lib/src/scene_view/scene_view_model.dart": "0cc21b2969afde41b2c433e1f4e62954d78d2a8db8571485d8f6e762fdf59e66",
+    "apps/editor/test/parity/animator_parity_test.dart": "42fb28c2f1be826a7e52bef30642fffa494b43e1c2344b3160bc7969b9bf0226",
+    "crates/fynkel_animation/src/controller.rs": "28b0f81833b992a0e936552449fbc2272993b0496d33670b60bc9a32d2d8130e",
+    "crates/fynkel_animation/src/lib.rs": "1db8553c47206ca4610666c3e1b3e742baa21bfb7b135fef513564bafb765248",
+    "crates/fynkel_assets/src/budget.rs": "e3f71411ee0cf2f9937f33778bb832622372c97fc07027c8df20dbe89673a8bf",
+    "crates/fynkel_assets/src/lib.rs": "18063bfef63136c574254dd1a5b5d5a89b35be0deb2cc7f56d361eb2d38bda4f",
+    "crates/fynkel_assets/src/poll.rs": "c42f7bb53c116ba5aa1ed15752df364e88eda6f2541d5209b08223416798559e",
+    "crates/fynkel_assets/src/prepared.rs": "fa9b4d514d437833754cede7b789fa4ad2e3d98877568be71a3f9aa88bc032de",
+    "crates/fynkel_assets/src/queue.rs": "b3dbe97200df65017e7a3f11cdbc6ffa006303e3bd023455903f0ab1ad19ab70",
+    "crates/fynkel_assets/src/runtime.rs": "5b8f156c8b5f1f31469cfbbd42cfa125eb9a2390172e53fd34889753d7066567",
+    "crates/fynkel_assets/tests/store.rs": "24e46202b368ea456f95a80631ee083b64ae4a1e03a487949080ac3bff8aab04",
+    "crates/fynkel_audio/src/engine.rs": "3d6356be583c760414e5a3f4e32dd208229e994cfb762bad6adf39e5578514f0",
+    "crates/fynkel_audio/src/stub.rs": "0d3a89284be797ce3a6b17cc581c432d3675bab5ee036a62c635727a5e1b16ea",
+    "crates/fynkel_authoring/src/lib.rs": "e41eaf9f25da9d2b5b3117b241ed5c0e9605934592ff5ebd2f990ceca2373841",
+    "crates/fynkel_authoring/src/preview.rs": "8e7b983a59dd965293e92f7cd12cd9a6866099f1faba7a4b034a08835efb3bab",
+    "crates/fynkel_contracts/src/codes.rs": "71af86600e56442c210e9cf906db27dc3dbd4c34ce9fffba5c3e109696a37b61",
+    "crates/fynkel_contracts/src/ids.rs": "e34b9cfce59d0dff801151ece1ffe0a1eff636461e97640af96e10896eac6264",
+    "crates/fynkel_cooked/src/payload.rs": "5290d492bb7c19fe04963b120c7878fe561cf12e1383f8bc52118a96c3f649c7",
+    "crates/fynkel_core/src/components.rs": "bac3d7d553c367ebe93a658fc9c1f57606a4b41aa61ae6d61b46bc7c3d58886d",
+    "crates/fynkel_core/src/lib.rs": "a5b251fad55a2bb178d7bf60ca5964652b63274f94c30633c9ff2b41acf6444e",
+    "crates/fynkel_core/src/load.rs": "2bf8b10735c44a902499cb465918bf4452ed05cc8f605661dfe6ac461818e9fc",
+    "crates/fynkel_core/src/registry.rs": "f62afa2c817cf98114090baaccd0266bfe15324d52c48df526bf47f8d2264b99",
+    "crates/fynkel_core/src/schema.rs": "1c0cc1e496c22e9c08df4d8935ccae2f2429dadfa9a06318d2f16a1ca9207710",
+    "crates/fynkel_core/src/world.rs": "512a3d41c18ca8bc475cabc5b768075e67757ecd659443e40ac194d3b702b492",
+    "crates/fynkel_core/src/world/animation.rs": "0879c290dedae1f3f190bdafff326631d5420519e25bd41b906564512fd9051b",
+    "crates/fynkel_core/src/world/controller.rs": "31d17bbcc4cc611e80a4a895bac1bcc2a785489eb70d25e60ba529a2a527048e",
+    "crates/fynkel_core/src/world/ik.rs": "cee4f0b6d5c0bf9330044058cfbe9e94f0936714c5c5508d0cb94c799057bd6f",
+    "crates/fynkel_core/src/world/resources.rs": "c3e9117629446b5a6d7ff02f5e940de5b27cd42bb9f24b223889535bff167fc1",
+    "crates/fynkel_core/src/world/state.rs": "53b8fc639b79f8d4f72b835f734b6b9a3b98d017c4376048def0e0ab176f61ab",
+    "crates/fynkel_core/tests/animation.rs": "7250bf327b1c4c9e85773d882c3ac4fa56b7c9e4dca5b380e194538e3b67753e",
+    "crates/fynkel_core/tests/components.rs": "7b62b575e1eaf5e6c5ac8526ec99f0494408fa46a4f49356faee71498f02f30c",
+    "crates/fynkel_core/tests/controller.rs": "eb67f58a179ca40f7b1b48f6da1942e21734c42fa07de12cb386a95b001fe169",
+    "crates/fynkel_core/tests/ik.rs": "d255b6177043c52f0dee9df5bbc3dbddc010b22b8788d804ad441b61a71f66fa",
+    "crates/fynkel_document/fixtures/project/assets/scenes/rig.scene.json": "54a604d7095dddce6fb8e5bd674f06491435dfcc10f0678d6e4e2ae96ec8cbc4",
+    "crates/fynkel_document/fixtures/project/fynkel.lock.json": "3624fb6f25ba38dba02a153006837f7b916565f6e965abd7df5e1403a9bbb59d",
+    "crates/fynkel_document/fixtures/project/fynkel.project.json": "ad8fb22e1772d684a4f78cfa20b315ba4115a3f80f89b8f58a8d76776911f064",
+    "crates/fynkel_document/src/generated.rs": "c565a7b84b51b50e1da73475adb7804ac3af8e4f7e586fd732bf43595fd3f8d8",
+    "crates/fynkel_document/tests/project.rs": "b4b318d9cf4b61f6e55157724a8cd90680b82bb07569ab1a14cc459768f4bc9d",
+    "crates/fynkel_document/tests/runtime.rs": "ffe1e4f8682c9f6dba81a62cdf9703a408a745f502c0c8873197db6bfd2232d0",
+    "crates/fynkel_import/fixtures/audio/tone.expected.fyni": "2bc404c257f88655001b638c20cc470f9e003b3326d2b715b51e1091a588f477",
+    "crates/fynkel_import/fixtures/robot.expected.fyni": "387e914fb35effa3b4ebc4302a6c5b9b30ed5c86e20255fc5ea32b321347434e",
+    "crates/fynkel_import/fixtures/textures/sky.expected.fyni": "d78c77bbc0ff31ea730a0c82425f6cdee74d39ab2abefd05772c8f13e091ef7f",
+    "crates/fynkel_import/fixtures/textures/swatch.expected.fyni": "e96f329813939931647579756fadcf505eaecdc7118965cf49c22984c379483d",
+    "crates/fynkel_import/src/cache.rs": "81a0e6d3ff3bf6a2ad4320d2e9d63523f95c5532ee6d7e28aa2986fa67b474fc",
+    "crates/fynkel_import/src/fbx.rs": "f7d270119a2d787e1d969a61d19a36d97bb1569a1cdf95aa78b170358cb0fe35",
+    "crates/fynkel_import/src/gltf.rs": "63a7cdf93bbed1719e97ac9f2f4e439486c17042253fd9db667fc6b86fc59922",
+    "crates/fynkel_import/src/graph.rs": "9483f99a6d3c0a47085a4bab0c2803e4d7b9c783719d663629ad9514cd255140",
+    "crates/fynkel_import/src/intermediate.rs": "e292c8bf4950a2cf0ac49dfdc3cf5e20e2ee54d2b0cd0c4108dd6bd78ffb396e",
+    "crates/fynkel_import/src/rig.rs": "b90c9facbf801dc889132db656374c40749d32ac2cd9bc32bae1121c10f76391",
+    "crates/fynkel_import/tests/cook.rs": "4a3271f08a04d9b59df3d11e91a95b5b169c89559567fd49d05c4e44c988991d",
+    "crates/fynkel_import/tests/fbx.rs": "26d7a01eab91bb7379c81fb0c7391db124686f9e39e83e53032574191a18be62",
+    "crates/fynkel_import/tests/gltf.rs": "d9a7dfea7945ab0fe2b10738be27914811c681112d62cd83f348e68e4a223aba",
+    "crates/fynkel_import/tests/subkeys.rs": "650f28ccfeec2936020c3c1f86a8bb10567b4c44ba769dce4b59bfe45fea8368",
+    "crates/fynkel_native/include/fynkel.h": "49226fbd429221f3bb968fed6eeac6f5b648b190f6b2d0cdc00b3110d6f06f51",
+    "crates/fynkel_native/src/authoring.rs": "b533e47682b5ad99063da7aee0a0f8de928f833b83c044c1dfa24bfc79371986",
+    "crates/fynkel_native/src/authoring/stage.rs": "b537ce21f4b5e5df9d9cc66fa2d32185fd4b5df4470b8c85fa4b6f75968b8f15",
+    "crates/fynkel_native/src/gameplay.rs": "ca0d946d458326024b6cc865746499e044da4c7a564b01d6c4f7633aae28c66d",
+    "crates/fynkel_native/src/lib.rs": "80d43d9f40f1f321f47cff2e48ee61acfa903dd5450f68fdac1f5536762002f5",
+    "crates/fynkel_native/src/load.rs": "d8404d3c6137891a73d367dff03b165af7b9aedd93db04be927d3c8359b32534",
+    "crates/fynkel_native/src/resources.rs": "2e15566ce3ac3c0e54617e2ddcf7ef7cc1f410869039cef0678ffff04c0eebb1",
+    "crates/fynkel_native/tests/abi.rs": "486bb8844de44160970f02f58ede9405553d78ebc4533798a89215b286ea6f2c",
+    "crates/fynkel_native/tests/load.rs": "3669fd2d73a1b397a3a273f5594b5212350933faa11a881b854be33e7106b835",
+    "crates/fynkel_physics/src/sim.rs": "204e49fc196267c2067cd812c02f2c025950b44451b3a9f32a6e90485e40f9ea",
+    "crates/fynkel_physics/src/stub.rs": "98b31f0203124133d643097c2643d48533f04161d55449ade376af35286d2c60",
+    "crates/fynkel_preview/src/lib.rs": "dd655d49d194faf9a6a0a46481765d73e5803c8344e853b7b0452666c6f2fcb0",
+    "crates/fynkel_render/src/headless.rs": "00332897c83fe999e553047e4cbb5662c7c39b7c24995d540ced88f55d6f194a",
+    "crates/fynkel_render/src/lib.rs": "d41f6535ca8ec0bad6673c31a237d75cc5cf92129b788740450c10ad77b45dce",
+    "crates/fynkel_render/src/prepare.rs": "c18624ba69e5b4163a7763084fa09139963a6f70390f0025591c51eaf0f6821f",
+    "crates/fynkel_render/src/residency.rs": "94a5f0f9b419c9fcfb27be94f6984914342a77eaec4849a6d00a489363c1e3ca",
+    "crates/fynkel_render/src/stats.rs": "098e9d6e026b46ac0704b7191e13cd3405e8ce4732990925449f89576906f354",
+    "crates/fynkel_render/src/streaming.rs": "66e13292b83ccfe86c10b83095603f2ff1ade03f299985538bad7abc323d9cf9",
+    "crates/fynkel_render/tests/project.rs": "6c59319352b30ecb3a36c0a3e5ac9101f998bf799ba55e13128323ac1a077fe6",
+    "crates/fynkel_render/tests/shading.rs": "0569b0d894641c6c45f2c93eaa729201b46e81c6995aab6e1d9d08811549e0e8",
+    "crates/fynkel_wire/src/generated.rs": "79f059e24e7aebf931bf8048673e1d183776c7252c2391c2ede84a426cc09eac",
+    "crates/fynkel_wire/tests/fixtures.rs": "97748c516d2c88cf412fc9dcf4b0f23f8ede846903190bac8ba9c53838dbc5e2",
+    "docs/animation.md": "f2d12b6c67689813c62a3770b079c38d29980fa95a004c6d4741a56607cd3991",
+    "docs/decisions/ADR-0053-registered-gameplay-and-extension-contract.md": "cbe394a3f124e8e3b71eec5f7cda13161a2dd21ae7e9c8d4cf4302514dc1d029",
+    "docs/decisions/ADR-0056-asset-readiness-residency-and-bindings.md": "2093f3bef1add1e6a32ee64928dbdef722bb70aea7f5bcd653e6d75c656de29d",
+    "docs/foundation-f5-gate-report.md": "75a15b3bb00fb8c31763de457d118a2992f332f5c320b06eca0a1dc74cbd8cb6",
+    "docs/foundation-roadmap.md": "031141b2c483f2be825ec33a5eb0ed7e92dcda1df45e91b27e0adb7ad43a392e",
+    "examples/code_only/fynkel.lock.json": "3624fb6f25ba38dba02a153006837f7b916565f6e965abd7df5e1403a9bbb59d",
+    "examples/code_only/lib/game/flow.dart": "59519bcfd9bcfba87efeda63c5ecc6d1b9c078b17256052a6a92321c81858cef",
+    "examples/code_only/lib/generated/behaviours.g.dart": "8394bbb2e85d32fc81e3a7f17f5c488ed50077e23a33ff16939e930dce9a1e44",
+    "examples/reference_game/assets/models/player.controller.json": "92323975edfce4c0b07e7a9569faff9bc11ab502c5275856f29c2d024e45c973",
+    "examples/reference_game/assets/prefabs/Player.prefab.json": "3d56e1777294b18e7351828e40f91158a2a7b07c0c391bd6caf2777d1d5a2c35",
+    "examples/reference_game/fynkel.lock.json": "3624fb6f25ba38dba02a153006837f7b916565f6e965abd7df5e1403a9bbb59d",
+    "examples/reference_game/fynkel.project.json": "c5bbefd02f243ba4190672c8b5b27930508c6432c084a561c84a601fee12a140",
+    "examples/reference_game/lib/game/game.dart": "e0e330045bf4cb48401394eda3a4921c0d0017f7e22eb13c3cc3b80de42b3b6a",
+    "examples/reference_game/lib/generated/behaviours.g.dart": "f64e764e5abbcea83057946ec54c021581b4be636442bbb01e75144af4cb868d",
+    "examples/reference_game/test/game_test.dart": "56c5b76accb4c5487af348332c55b75aa722c6f78788c12e4cb8232967157bec",
+    "examples/reference_game/tools/playground.py": "cf016a6fff1695ffd17002a5ce33cecab5d38c6f0e257fa37b426dce77b43aa5",
+    "examples/showcase/assets/models/runner.controller.json": "79b8d040030a8588a426b3fd3b110b4fb1735561be1fd132d371b019af7084e3",
+    "examples/showcase/fynkel.lock.json": "3624fb6f25ba38dba02a153006837f7b916565f6e965abd7df5e1403a9bbb59d",
+    "examples/showcase/lib/game/waver.dart": "0267d9de494f1195725e967701bdadd9c1fdc5e0bfed8e23a300f7ce6a7f5ca1",
+    "examples/showcase/lib/generated/behaviours.g.dart": "2c521976c2ce069443e8715e7046928daee443e98c1f3d30865bab0f450d1f2d",
+    "packages/fynkel/fynkel.lock.json": "3624fb6f25ba38dba02a153006837f7b916565f6e965abd7df5e1403a9bbb59d",
+    "packages/fynkel/lib/fynkel.dart": "44caf902f55cb2a2bfee3b38eada3acec1791244062c399f2585fedf97f38ef3",
+    "packages/fynkel/lib/generated/schema.g.dart": "7a21c01e55091cfe95d71bdd3e3c552f22cb03fa4f59a83b837da2cb57e4a65c",
+    "packages/fynkel/lib/src/behaviour.dart": "aacda80149fa3d268d04c1d8e3397bffca2a6010e33821762f1fd69e7d162c4f",
+    "packages/fynkel/lib/src/clip_data.dart": "d2c6138ecd022225eeaf5f4930912dd968825d2e619c13cc791fa6a8be1c3126",
+    "packages/fynkel/lib/src/diagnostics.dart": "f987e669feaf18f800d708de41ef46a51de2748c0cf012418055b1e45c5165b0",
+    "packages/fynkel/test/animation_test.dart": "29a6856a4dba841a15d3c13097c93541bc4bba7bc0d1ebb61957cf5b45d9cc5a",
+    "packages/fynkel/test/controller_test.dart": "84eb151264c2ebc4911dd8f4a2f6e15a253284b2f9cc1ae39ce1f7b7c5f0bc1d",
+    "packages/fynkel/test/gameplay_animation_test.dart": "4e3f8b4f00ee28a53c6e98f1462d0ba14999b3672b3b1d1416b80e7d321766a8",
+    "packages/fynkel/test/gameplay_controller_authority_test.dart": "f051ddc4bdc96e72f13e844246a80fd1182afbf38eb7dabc42f8cd19ec5c74c6",
+    "packages/fynkel/test/gameplay_controller_test.dart": "b2e1f7a8e9aee923acdac0a75f24522148ca9b1f60c515dbb47d337dad275ac2",
+    "packages/fynkel/test/gameplay_runtime_clip_test.dart": "8b68a9f4eabdd6adfb0b13e01a47ee3027fbf302bf5d6383207dd3d8f6edce39",
+    "packages/fynkel/test/registered_systems_test.dart": "f54c2d9cab7c8cbb7912331b5ecfcfc3a330555f00776fc66dffee26629ca7c3",
+    "packages/fynkel/test/sdk_test.dart": "b9046bfffc52ad4d79b3ac1a81540e1dd11f52051e1cd91c93e88894ae05f05c",
+    "packages/fynkel/test/support/animation_bindings.dart": "7087897274ffd57696ee71d0d4af2995a52ebd91a078861a32d8f4c15da180fc",
+    "packages/fynkel/test/wire_fixtures_test.dart": "67ef9891b5df1b710d46d84ae286591b654fa29b3af2c181dab5658dfe72c61c",
+    "packages/fynkel_flutter/lib/src/viewport_controller.dart": "d5e826dba77b01898f47e401cfc325beb2ef38e2361da46d4f434fc236a7f12e",
+    "packages/fynkel_flutter/lib/src/viewport_native.dart": "4cf8cd4f0897584e026f45c087ee114b8ccaf77ce379ea554ad94368d212daa5",
+    "packages/fynkel_flutter/test/viewport_controller_test.dart": "05bae5e59fe515efc4f47fe2dc2affe9da279568be0c42f0958d36a175218fdb",
+    "platform/apple/include/fynkel_apple.h": "0744cbbb067f24d52931538139aefb2d732c46afcb728d333aa90f16408c5b3c",
+    "platform/apple/src/lib.rs": "dcc1a6e4a1c40f6dff63778777f7a058af78c7bb8373d6c183f5105cba082362",
+    "platform/apple/tests/debug_lines.rs": "117601459f2878e8a81a2150d300bd89c3aa4b2283647c786b305f47751a9a16",
+    "platform/apple/tests/extra_worlds.rs": "4ebc3ba028b943adc223a0912232c74121c8cf79feca6390c2f368ee2f782c9c",
+    "schemas/components/fynkel.AnimationBinding.schema.json": "a4bdfcbb92bfa6e1c1c90f0fa279428fcf9cc6c651ce04f3f38dbd7851e2e97c",
+    "schemas/fynkel.schema.json": "bc6a1bf5129d14a3138fd5a9f358312df05a1d6f30d1d3958e226b41066dd1f5",
+    "schemas/prefab.schema.json": "53a220534680cd8e183edcfcbfbd25c4a1f06563e7c76dc805a8c56fb37b0e99",
+    "schemas/scene.schema.json": "a0103213230047a62d3bc9a52ef9ef0ae4df7b549832db00f2188c9f627bc2d6",
+    "tests/fixtures/wire/65d9f39b4aa79409/AnimateCommandRecord.bin": "f4caabfd698df045fa2338bcebb2e4403e7500d52668c57d47fa9dfe8b4db48f",
+    "tests/fixtures/wire/65d9f39b4aa79409/AnimationBinding.bin": "1b45c817ce4da4e28f2d05c03b3d927806eafa6251915003428aa3f3d063554d",
+    "tests/fixtures/wire/65d9f39b4aa79409/AnimationEndedEvent.bin": "69dc799ab8c5cf4a658fde0920588ade54fbd5efaa00bcf16fd150bd3d061d44",
+    "tests/fixtures/wire/65d9f39b4aa79409/AnimationMarkerEvent.bin": "47d82713d019deb2bf032c5969ee66796fa7bbdf94e9a7b382150822581d1a97",
+    "tests/fixtures/wire/65d9f39b4aa79409/Animator.bin": "ecdfa8b08a4cfeb3270565ecd0b322348c522de2552e15630cb99aec29a2a55b",
+    "tests/fixtures/wire/65d9f39b4aa79409/AnimatorLayerStateRecord.bin": "5f959d93a9e6ac989fa961baa462aed90e251fb000a5358e44bde6b26bd8e708",
+    "tests/fixtures/wire/65d9f39b4aa79409/AnimatorParameterRecord.bin": "8d284e7ba656aa4c7dcd9ab01a0d012f75dfc8e2f1d67ece2606f3d3a6168c42",
+    "tests/fixtures/wire/65d9f39b4aa79409/AnimatorStateEnteredEvent.bin": "3bf1a486ca4cd1299f5bc388fe49d0346cb0c5d7db4bf71d226f53c156b20153",
+    "tests/fixtures/wire/65d9f39b4aa79409/AnimatorStateExitedEvent.bin": "e39cf257c4c2cc03f9fb4652587fbe47728b9369d1b0c84d1e1b02f933cb16a7",
+    "tests/fixtures/wire/65d9f39b4aa79409/AnimatorStateRecord.bin": "2f739ac354953b099f6b847fafdc1030c8d9b37f78c20afa386a977aa401e770",
+    "tests/fixtures/wire/65d9f39b4aa79409/AudioCommandRecord.bin": "fafc8eb135b001092d8eb4e297c324f3326d2193d35487005eb63ed2dc1af675",
+    "tests/fixtures/wire/65d9f39b4aa79409/AudioListener.bin": "1e4d7397988873a1a14b3c6bd7613c85853d5fed2f8ccf3e2748ae068bd0b664",
+    "tests/fixtures/wire/65d9f39b4aa79409/AudioSource.bin": "916dc10769cdc1bd12d39d71480cadc8643509607150bb3d89b4376602d36e5c",
+    "tests/fixtures/wire/65d9f39b4aa79409/AudioStateRecord.bin": "4ed3acfacb7c45b8500c8150649bb127895de136879332973d60bd58aa6784eb",
+    "tests/fixtures/wire/65d9f39b4aa79409/AudioStatsRecord.bin": "fbfbaef1b74a47115f0385ba86172171aa4c796af752ad78e2f8ddf15aee1434",
+    "tests/fixtures/wire/65d9f39b4aa79409/BodyCommandRecord.bin": "8334877a58ae09c1057359ef814f9e0e6a0ba24e1de1f6ac2fd016f57e3c7395",
+    "tests/fixtures/wire/65d9f39b4aa79409/BodyStateRecord.bin": "146b3ca5d5e246de0da71c0e20c941bddbf2cfdf0c65a8ff6207d2960d1b42e2",
+    "tests/fixtures/wire/65d9f39b4aa79409/Camera.bin": "f21c0c7cecdb9082a7570bfb7cdc02dfa6d7101f50a3649738c484fd319876e3",
+    "tests/fixtures/wire/65d9f39b4aa79409/CharacterController.bin": "cb7d7d0bd178a1f1a97c6f2f88e57fc328b2133f679eb0b6291898590a853558",
+    "tests/fixtures/wire/65d9f39b4aa79409/CharacterStateRecord.bin": "beef819f444b242878cc85f0464089f7d4c428e15bfaa045eeebbf7376de493d",
+    "tests/fixtures/wire/65d9f39b4aa79409/Collider.bin": "0b38f683d110601779c3a413ebbbfe337c729007015c55b9cb7f37b26234b945",
+    "tests/fixtures/wire/65d9f39b4aa79409/ComponentHeader.bin": "eaa73a4478f931465567c5accc82cfec620f12ca62d31828c26598deb3c7a12f",
+    "tests/fixtures/wire/65d9f39b4aa79409/ContactEvent.bin": "0f4735a89ccefc010b331a88ddcb5d4b5e1339511d9ff812ddad38a3ab7b0da2",
+    "tests/fixtures/wire/65d9f39b4aa79409/DestroyedEvent.bin": "59e5713142362f3fd15d9016a78bc284e88455df6e69cad4c5da579b030508fc",
+    "tests/fixtures/wire/65d9f39b4aa79409/DiagnosticRecord.bin": "1c017bceea9a35ec9f3ba04fad72fa0d2f944dda8f86bad3a1bc79f7bc6c9cdd",
+    "tests/fixtures/wire/65d9f39b4aa79409/DirectionalLight.bin": "1cd1cddf204b7ee36ae724d812e7a4af4f6425977f0b273f6cc05228ff43f8c7",
+    "tests/fixtures/wire/65d9f39b4aa79409/Emitter.bin": "8514cf5dc89f30a1eebe870ac4af2333fa965068dc1fdab69bb12952fbd571c1",
+    "tests/fixtures/wire/65d9f39b4aa79409/EntityInfoRecord.bin": "ba48e8c0701d0ce01826f8b83e6f42cf2c653ba0ee91738106dccd0f3e18f582",
+    "tests/fixtures/wire/65d9f39b4aa79409/Environment.bin": "ed0dce24645e96ddc41a55ca68a1d450248692f79b9ffd8b60d19231b90c05f8",
+    "tests/fixtures/wire/65d9f39b4aa79409/EventHeader.bin": "9d386678199ed7bf3be1528600e8ced6d6f32afe6291c494880bc8152aefbf6a",
+    "tests/fixtures/wire/65d9f39b4aa79409/Follow.bin": "cfdf2944ad7ef64e258ac5867f5bab50ecda7825f217ecd1d5caea1cbd0e1ba3",
+    "tests/fixtures/wire/65d9f39b4aa79409/InputActionRecord.bin": "c954a25b4defd0a15d9205dc637a0b927a54fccccda295c49cd52a8ba37d4929",
+    "tests/fixtures/wire/65d9f39b4aa79409/InputEventRecord.bin": "243e9e866fc514014ed090e199bba91535be3beaf6eacac04e11900c451eea15",
+    "tests/fixtures/wire/65d9f39b4aa79409/Layer.bin": "fafdd44c03daf5f7ecfa57113ebd319de6fb8f84fa0b7b0c5ac60d09f811fb71",
+    "tests/fixtures/wire/65d9f39b4aa79409/LifetimeDespawn.bin": "7c9e3d852d5324635f03c1b88e020748a60172984ada4f80f331e22fed687122",
+    "tests/fixtures/wire/65d9f39b4aa79409/LookAtCamera.bin": "958f8e67d123a4fd3942a588a4447f781501af6120487ff147b2cef0e5076421",
+    "tests/fixtures/wire/65d9f39b4aa79409/MeshRenderer.bin": "3f3ff72f1fe98e4e7720fc94f59ea01c88e3fa32b3c11badfcf5ff1ba7320847",
+    "tests/fixtures/wire/65d9f39b4aa79409/MissedDeadlineEvent.bin": "276adc28f1266a489e82f93e743eb99bb38e47bef7200bf968195091117cc5e4",
+    "tests/fixtures/wire/65d9f39b4aa79409/Name.bin": "344dbcd50d282f8b345ee9672df20f1c24bf140342c5168bac489c190b30ecfa",
+    "tests/fixtures/wire/65d9f39b4aa79409/Oscillate.bin": "65dcb3934231ab326a9f17ef439f47317dd6660e4780d9d800c532199372b94e",
+    "tests/fixtures/wire/65d9f39b4aa79409/ParentChangedEvent.bin": "7c2f40cd0639bc949486c5a171347fe1d535061a708db0806e845e1673f98d61",
+    "tests/fixtures/wire/65d9f39b4aa79409/PbrMaterial.bin": "e3268937ea13a3d1b20bdf44ed6b31c873e17c91a76a24bb54b776566ac064d9",
+    "tests/fixtures/wire/65d9f39b4aa79409/PhysicsHitRecord.bin": "9fee9cf5e9b1bc2695ea4e951304a827c50253cfd765635be94bfbef984a323f",
+    "tests/fixtures/wire/65d9f39b4aa79409/PhysicsQueryRecord.bin": "15640604927bcec17214826e7c17f26d07e450ab06b92b8400cd46f68ddf1608",
+    "tests/fixtures/wire/65d9f39b4aa79409/PlaySoundCommandRecord.bin": "17fa875551a05768f758587b58e847a8a22bfdad31bc2d386d38ffabda910b13",
+    "tests/fixtures/wire/65d9f39b4aa79409/PlaybackEndedEvent.bin": "397bcfe4f267ba027372f08a909152d1e716776eb67b3d773925c5d80c32e37c",
+    "tests/fixtures/wire/65d9f39b4aa79409/PointLight.bin": "f50bf9e97b9c3327e6644a906ab5ce1c1998342744efd8072e623bccd79d7cf9",
+    "tests/fixtures/wire/65d9f39b4aa79409/ProjectedPointRecord.bin": "28525aaa69468463a00712bdb694a2c91a11da07e7efef4e17c5118e9902c8fc",
+    "tests/fixtures/wire/65d9f39b4aa79409/ProjectionAnchorRecord.bin": "5a686e023aa9bc91f5eea1546a67964e3cc0ff0531b463709377e23102bd4125",
+    "tests/fixtures/wire/65d9f39b4aa79409/RigidBody.bin": "52b74f3d5adbef3b2385adaf72f78d396f54000f465aa21bb5e76f427fd4d3b3",
+    "tests/fixtures/wire/65d9f39b4aa79409/Rotator.bin": "9b73cc97d1ff07f018a9a059f3c6bef1b9a6705ed1d23c8d500f9bc01ed39e1f",
+    "tests/fixtures/wire/65d9f39b4aa79409/SceneReadyEvent.bin": "5729030be7341de3619c69cc7fd0b954ecefd31a08187a0466c98e858f36c850",
+    "tests/fixtures/wire/65d9f39b4aa79409/SceneUnloadedEvent.bin": "88253f7e5caebae57edf0f8781e39d6eb152a63f347230a29c2851a48f887202",
+    "tests/fixtures/wire/65d9f39b4aa79409/Settings.bin": "2f54afcfff74076f2599bfcfcbf610e49ecd5db60d0cbefe1a3968cea40557af",
+    "tests/fixtures/wire/65d9f39b4aa79409/Skin.bin": "7d560698de0e23c9bcdc27a27b616c72d36a55d343d81b388207a99e0243087a",
+    "tests/fixtures/wire/65d9f39b4aa79409/SnapshotTransformRecord.bin": "45503c93d13e6e6b18a8f2f52694c447d43740c2bff5178bb396c4440d509314",
+    "tests/fixtures/wire/65d9f39b4aa79409/SpotLight.bin": "c58c8f184254df0069dad7b7977aa56261d9329b642277b966c62bd903ba4a56",
+    "tests/fixtures/wire/65d9f39b4aa79409/SystemTimeRecord.bin": "0c019c2b1228aabd87f6539e615d9d40c164f8c874c73eaafacf388c75063e49",
+    "tests/fixtures/wire/65d9f39b4aa79409/Tags.bin": "571e0e2e2e9b12e7c38701d78c69e032b323819635b6187e8b7702dd410d32a6",
+    "tests/fixtures/wire/65d9f39b4aa79409/ThirdPersonCamera.bin": "0900faba9a9d4072cc62f75dcd672538f37c274406b094f98ff0406d58330281",
+    "tests/fixtures/wire/65d9f39b4aa79409/Transform.bin": "37a5907e9ca17c33e7c093b546020ec74d0045f14badae311747c8f971dca095",
+    "tests/fixtures/wire/65d9f39b4aa79409/TriggerZone.bin": "2ed6409479fa175a0d7c3691f3a1ed6ac8af09108b3928ed0c4f5575d405266c",
+    "tests/fixtures/wire/65d9f39b4aa79409/Volume.bin": "f6dc878734f461f5905885639836622bdf18967927f658437ba37f173140c99d",
+    "tests/fixtures/wire/65d9f39b4aa79409/ZoneEvent.bin": "9373770453a8ac38ca38e2d224877f596767b07b9678a5365af1da5970d634b8"
+  },
+  "archived_logs": {
+    "f5-review-activation.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-activation.log",
+      "sha256": "75e7fa37c56405de956cf69729e764fcbc5cf1dcae1c360e00908714d0c6434c"
+    },
+    "f5-review-build-final.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-build-final.log",
+      "sha256": "62d592f627346e4e90cf0b3c3808c73f54a133b3dc51f9f56f1a75c033ec398a"
+    },
+    "f5-review-build.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-build.log",
+      "sha256": "70c607bc6152a3b918a964046214ce1b1e8bcadc76c4aa684446f76180cb74bd"
+    },
+    "f5-review-clippy-final.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-clippy-final.log",
+      "sha256": "6b19ff801a233830920e587129a21a741ce2935e8b1e3eab639e0decceafcd54"
+    },
+    "f5-review-clippy.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-clippy.log",
+      "sha256": "e907959cfd427df583e44763b2c814bed323ad3d6f06695b921f96ae7aa8dd2c"
+    },
+    "f5-review-editor-capture.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-editor-capture.log",
+      "sha256": "167ad43a323c7de040415ec06f47d708e3529dc480861d60c8c61ba57cb1f9b2"
+    },
+    "f5-review-final-assets-render-2.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-final-assets-render-2.log",
+      "sha256": "0edb3ac8f68a34bc12ff1cfd4f7cf8b4f58ef49e3b9bfeb1cabb4557afcdd68d"
+    },
+    "f5-review-final-assets-render.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-final-assets-render.log",
+      "sha256": "45edaad2b3c8dfbba7a4a37aa74ad31131db027df048977cc40c18f9d419f134"
+    },
+    "f5-review-final-targeted.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-final-targeted.log",
+      "sha256": "e72d0e816e31b2d9348b832bf2eb4d2fb87082249dc37af52bf8f096e693d9f3"
+    },
+    "f5-review-fmt.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-fmt.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "f5-review-mesh-red.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-mesh-red.log",
+      "sha256": "1620e39aa50770d367d64e9230c6316cba4fe08f6d44129bacbefc19521ee45e"
+    },
+    "f5-review-qualified-build.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-qualified-build.log",
+      "sha256": "4366ebd115916e8c5b9cd0320c369cbb3c35ea18f2bb6429f26eb34b468e2fd6"
+    },
+    "f5-review-qualified-clippy.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-qualified-clippy.log",
+      "sha256": "6a241d3934cc175011030f740cd442801b30c70d22fa2319e9d2020c1f61f0bd"
+    },
+    "f5-review-qualified-fmt.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-qualified-fmt.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "f5-review-qualified-native-apple.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-qualified-native-apple.log",
+      "sha256": "e4a7537065ae68222928d8ae227c1a7665320da88289c7d9dc12326bd3c7cecf"
+    },
+    "f5-review-qualified-workspace.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-qualified-workspace.log",
+      "sha256": "4e3e93471db9769c3fbbd31f2c33b2de6045c296b6ee6e90dc69112d7f978d8e"
+    },
+    "f5-review-readiness-red.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-readiness-red.log",
+      "sha256": "0a48b9918c2303afb0c1cf110f4e9c41d93334acae24b72d4abb33e9995116df"
+    },
+    "f5-review-streaming.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-streaming.log",
+      "sha256": "10e5c2a09bb0deb2975e0b85a6d739cc3ea376346e441573c4cbe86e946abbed"
+    },
+    "f5-review-suites.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-suites.log",
+      "sha256": "3c7e74c024b439f167fa1f91fd634a31a9f0922d78aeb3d5f9f2f45447131f8b"
+    },
+    "f5-review-targeted.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-targeted.log",
+      "sha256": "7c676c8471d94cf58fee55c423fc3e98e5f4f9014262cc2e93cb7d9570d7e7d5"
+    },
+    "f5-review-workspace-final.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-workspace-final.log",
+      "sha256": "6742308abfa275f68ef426fc3fa891930dd7d64f7013f581a18e394b9eaab564"
+    },
+    "f5-review-workspace.log": {
+      "path": "target/foundation-baseline/f5-review/f5-review-workspace.log",
+      "sha256": "e231098f9ef66fc450fd51c5a38e854d14bff8b43f7e6dcdb8ce3130e02a181a"
+    }
+  }
+}

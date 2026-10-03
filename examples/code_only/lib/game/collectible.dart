@@ -1,6 +1,6 @@
 import 'dart:math' show cos, pi, sin;
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 import '../generated/assets.g.dart';
 import 'coin_kind.dart';

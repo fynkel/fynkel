@@ -253,30 +253,10 @@ pub(crate) fn check_channel(
     Ok(())
 }
 
-/// Says once per name when two different nodes share a name and both
-/// are animated: only one entity named that way will be driven.
-#[derive(Default)]
-pub(crate) struct AnimatedNames {
-    animated: Vec<(usize, String)>,
-    warned: Vec<String>,
-}
-
-impl AnimatedNames {
-    pub fn note(&mut self, report: &mut Report, node: usize, name: &str) {
-        match self.animated.iter().find(|(_, n)| n == name) {
-            Some((other, _)) if *other != node && !self.warned.iter().any(|w| w == name) => {
-                self.warned.push(name.to_string());
-                report.warn(
-                    Code::IMPORT_SKIPPED,
-                    format!(
-                        "nodes {other} and {node} are both named {name:?} and both animated; only one entity named that way will be driven"
-                    ),
-                );
-            }
-            Some(_) => {}
-            None => self.animated.push((node, name.to_string())),
-        }
-    }
+/// Stable within this imported source's node table. A recook rewrites the
+/// hierarchy and its clips/skins together when source indices change.
+pub(crate) fn binding_key(asset: uuid::Uuid, node: usize) -> String {
+    format!("{asset}/node/{node}")
 }
 
 /// A source node as the prefab needs it. `index` is the file's index for
@@ -361,7 +341,7 @@ pub(crate) fn prefab_document(
         let node = graph
             .nodes
             .iter()
-            .find(|n| !name.is_empty() && n.name == name)?;
+            .find(|n| !name.is_empty() && binding_key(asset, n.index) == name)?;
         let id = if by_name {
             derive_sub_id(asset, &paths[node.index])
         } else {
@@ -487,6 +467,13 @@ pub(crate) fn prefab_document(
         for c in &node.children {
             children.push(entity_id(graph.nodes[*c].index));
         }
+        components.push((
+            derive(node.index, "/animation_binding"),
+            serde_json::json!({
+                "type": "fynkel.AnimationBinding", "version": 1,
+                "data": { "key": binding_key(asset, node.index) }
+            }),
+        ));
         entities.push((
             id.clone(),
             entity_value(&node.name, parent.as_deref(), children, components),

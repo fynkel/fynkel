@@ -25,11 +25,16 @@ fn world() -> World {
 fn spawn(w: &mut World, _fixture_id: u64, parent: Option<Entity>, name: &str) -> Entity {
     let commit = w
         .edit_gameplay(|edit| {
-            edit.spawn(
+            let entity = edit.spawn(
                 name.to_owned(),
                 Transform::from_position(Vec3::ZERO),
                 parent.map(Into::into),
-            )
+            )?;
+            edit.set_component(
+                entity,
+                ComponentValue::AnimationBinding(AnimationBinding { key: name.into() }),
+            )?;
+            Ok(entity)
         })
         .unwrap();
     let entity = commit.resolve(commit.value).unwrap();
@@ -1377,6 +1382,11 @@ fn committed_animator_removal_retires_runtime_and_old_intents_but_keeps_fresh_re
     let other = w
         .edit_gameplay(|edit| {
             let other = edit.spawn("other", Transform::default(), None)?;
+            let arm = edit.spawn("arm", Transform::default(), Some(other.into()))?;
+            edit.set_component(
+                arm,
+                ComponentValue::AnimationBinding(AnimationBinding { key: "arm".into() }),
+            )?;
             edit.set_component(other, ComponentValue::Animator(config.clone()))?;
             edit.animate_control(other, param("weapon", Value::Int(33)))?;
             edit.animate_control(root, param("weapon", Value::Int(9)))?;
@@ -1501,5 +1511,57 @@ fn same_edit_animator_remove_and_readd_coalesces_without_retiring_runtime() {
             .unwrap()
             .integer,
         9
+    );
+}
+
+#[test]
+fn controller_layer_binding_failures_recover_and_revalidate_after_key_changes() {
+    let mut w = world();
+    let root = spawn(&mut w, 1, None, "Rig");
+    let arm = spawn(&mut w, 2, Some(root), "display arm");
+    let mut scoped = layer("Scoped", vec![state("Idle", None, true)], vec![]);
+    scoped.root = Some("rig/arm".into());
+    let def = ControllerDef {
+        name: "Bindings".into(),
+        parameters: vec![],
+        layers: vec![scoped],
+        ik: vec![],
+    };
+    w.register_controller(controller_ref(90), def).unwrap();
+    set(&mut w, root, controlled(controller_ref(90)));
+    assert!(
+        w.diagnostics()
+            .iter()
+            .any(|d| d.code == DiagnosticCode::ANIMATION_BINDING_UNAVAILABLE
+                && d.message.contains("rig/arm")),
+        "{:?}",
+        w.diagnostics()
+    );
+    w.step();
+    assert!(
+        w.diagnostics().is_empty(),
+        "unchanged failure is reported once"
+    );
+    set(
+        &mut w,
+        arm,
+        ComponentValue::AnimationBinding(AnimationBinding {
+            key: "rig/arm".into(),
+        }),
+    );
+    assert!(w.diagnostics().is_empty(), "{:?}", w.diagnostics());
+    set(
+        &mut w,
+        arm,
+        ComponentValue::AnimationBinding(AnimationBinding {
+            key: "different/key".into(),
+        }),
+    );
+    assert!(
+        w.diagnostics()
+            .iter()
+            .any(|d| d.code == DiagnosticCode::ANIMATION_BINDING_UNAVAILABLE),
+        "{:?}",
+        w.diagnostics()
     );
 }

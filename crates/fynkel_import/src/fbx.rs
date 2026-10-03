@@ -48,8 +48,7 @@ use serde_json::{json, Value};
 
 use crate::graph::{
     check_channel, file_stem, image_ref, material_header, num, nums, prefab_document, shown_file,
-    sniff_mime, split_dual_use_images, AnimatedNames, MeshSubs, Produced, Report, SourceGraph,
-    SourceNode,
+    sniff_mime, split_dual_use_images, MeshSubs, Produced, Report, SourceGraph, SourceNode,
 };
 use crate::intermediate::{
     AnimationData, ColorSpace, ImageData, MaterialData, MeshData, SkinData, Vertex,
@@ -63,9 +62,10 @@ pub const IMPORTER: &str = fynkel_document::asset::FBX_IMPORTER;
 /// materials in the model's hierarchy (`graph::remap_materials`). 4: the
 /// hierarchy has one root (ADR-0022; a new root named after the file over
 /// several top-level nodes).
-pub const IMPORTER_VERSION: u32 = 4;
+pub const IMPORTER_VERSION: u32 = 5;
 
 struct Ctx<'a> {
+    asset_id: uuid::Uuid,
     path: &'a Path,
     report: Report,
     limits: &'a Limits,
@@ -107,6 +107,7 @@ fn load_opts() -> ufbx::LoadOpts<'static> {
 
 pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
     let mut ctx = Ctx {
+        asset_id: meta.id(),
         path,
         report: Report::new(path),
         limits,
@@ -634,17 +635,8 @@ fn import_skins(ctx: &mut Ctx, scene: &ufbx::Scene) -> Result<Vec<SkinData>, ()>
             })
             .collect::<Result<_, ()>>()?;
         let mut joints: Vec<SkinJoint> = Vec::with_capacity(bones.len());
-        for (j, (cluster, bone)) in skin.clusters.iter().zip(&bones).enumerate() {
+        for (cluster, bone) in skin.clusters.iter().zip(&bones) {
             let joint_name = node_name(bone);
-            if let Some(dup) = joints.iter().position(|x| x.name == joint_name) {
-                ctx.error(
-                    Code::IMPORT_INVALID_DATA,
-                    format!(
-                        "{sub_id} ({name}): joints {dup} and {j} are both named {joint_name:?}; joint names must be unique within a skin (animation targets resolve by name)"
-                    ),
-                );
-                return Err(());
-            }
             let parent = bone.parent.as_ref().and_then(|p| {
                 bones
                     .iter()
@@ -654,6 +646,7 @@ fn import_skins(ctx: &mut Ctx, scene: &ufbx::Scene) -> Result<Vec<SkinData>, ()>
             let t = &bone.local_transform;
             joints.push(SkinJoint {
                 name: joint_name,
+                binding: crate::graph::binding_key(ctx.asset_id, bone.element.typed_id as usize),
                 parent,
                 inverse_bind: mat4(&cluster.geometry_to_bone),
                 rest_translation: v3(t.translation),
@@ -663,7 +656,7 @@ fn import_skins(ctx: &mut Ctx, scene: &ufbx::Scene) -> Result<Vec<SkinData>, ()>
         }
         let mut roots = joints.iter().filter(|j| j.parent.is_none());
         let skeleton = match (roots.next(), roots.next()) {
-            (Some(root), None) => root.name.clone(),
+            (Some(root), None) => root.binding.clone(),
             _ => String::new(),
         };
         skins.push(SkinData {
@@ -695,7 +688,6 @@ fn import_animations(ctx: &mut Ctx, scene: &ufbx::Scene) -> Result<Vec<Animation
         key_reduction_rotation: true,
         ..Default::default()
     };
-    let mut animated = AnimatedNames::default();
     let mut animations = Vec::new();
     for stack in scene.anim_stacks.iter() {
         let stack_name = &*stack.element.name;
@@ -734,7 +726,8 @@ fn import_animations(ctx: &mut Ctx, scene: &ufbx::Scene) -> Result<Vec<Animation
                     return Ok(());
                 }
                 let channel = AnimationChannel {
-                    target: target_name.clone(),
+                    target: crate::graph::binding_key(ctx.asset_id, node.typed_id as usize),
+                    target_name: target_name.clone(),
                     property,
                     interpolation: ANIM_INTERPOLATION_LINEAR,
                     times,
@@ -772,7 +765,6 @@ fn import_animations(ctx: &mut Ctx, scene: &ufbx::Scene) -> Result<Vec<Animation
                 node.scale_keys.iter().map(|k| k.time as f32).collect(),
                 node.scale_keys.iter().flat_map(|k| v3(k.value)).collect(),
             )?;
-            animated.note(&mut ctx.report, node.typed_id as usize, &target_name);
         }
         if channels.is_empty() {
             continue;

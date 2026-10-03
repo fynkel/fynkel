@@ -19,7 +19,7 @@ import 'package:code_only/game/player.dart';
 import 'package:code_only/game/switch.dart';
 import 'package:code_only/generated/assets.g.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:fynkel/testing.dart';
 import 'package:pickups/generated/assets.g.dart' as pickups;
 import 'package:pickups/pickups.dart' show Pickup;
@@ -132,7 +132,7 @@ void main() {
         final player = game.world.findWithTag(playerTag)!;
         expect(player.behaviour<Player>(), isNotNull);
         expect(player.layer, 'player');
-        expect(game.world.findObjectOfType<Switch>()!.target, 'Gate');
+        expect(game.world.findObjectOfType<Switch>()!.target, same(game.world.find('Gate')));
         expect(game.world.find('Gate')!.behaviour<Gate>(), isNotNull);
         expect(game.world.find('Sweeper')!.get<Oscillate>()!.amplitude, 1.5);
         expect(game.world.find('Coin 3')!.localTransform.position, coinSpots[2]);

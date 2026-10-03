@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart' show EntityRef;
+import 'package:fynkel/gameplay.dart' show EntityRef;
 // The Scene view over the fake preview backend (blueprint item 6): the
 // preview per tab, picking (click, cycling, marquee), the gizmo drag as
 // exactly one transaction with the world back to the document, the

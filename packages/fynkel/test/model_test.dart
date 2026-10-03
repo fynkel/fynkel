@@ -2,7 +2,7 @@
 // `GameModel`'s `ModelValue` fields notify on change only, so a HUD bound
 // to them rebuilds when the game changed what it shows and never per frame.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:test/test.dart';
 
 class HudModel extends GameModel {

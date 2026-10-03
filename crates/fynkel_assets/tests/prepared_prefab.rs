@@ -305,7 +305,8 @@ fn owned_session_preflights_union_of_sound_keys_not_sum_of_plans() {
     let b = assets
         .prepare_prefab(id(PREFAB))
         .unwrap_or_else(|d| panic!("{d:?}"));
-    let mut session = fynkel_core::GameplaySession::begin(w).unwrap_or_else(|_| panic!("begin"));
+    let mut session =
+        fynkel_core::GameplaySession::begin(w.into()).unwrap_or_else(|_| panic!("begin"));
     let instance = session
         .access(|edit| {
             edit.instantiate(
@@ -340,7 +341,8 @@ fn owned_session_capacity_rejection_aborts_entities_and_resources() {
     let p = assets
         .prepare_prefab(id(PREFAB))
         .unwrap_or_else(|d| panic!("{d:?}"));
-    let mut session = fynkel_core::GameplaySession::begin(w).unwrap_or_else(|_| panic!("begin"));
+    let mut session =
+        fynkel_core::GameplaySession::begin(w.into()).unwrap_or_else(|_| panic!("begin"));
     session
         .access(|edit| {
             edit.instantiate(
@@ -380,7 +382,7 @@ fn component_resource_plan_publishes_only_with_successful_session() {
     let resources = prepare(&original);
     untouched(&original);
     let mut session =
-        fynkel_core::GameplaySession::begin(original).unwrap_or_else(|_| panic!("begin"));
+        fynkel_core::GameplaySession::begin(original.into()).unwrap_or_else(|_| panic!("begin"));
     session
         .access(|edit| {
             edit.spawn("discarded", fynkel_core::Transform::default(), None)?;

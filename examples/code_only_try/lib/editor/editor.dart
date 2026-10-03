@@ -6,7 +6,7 @@
 import 'dart:math' show cos, pi, pow, sin;
 
 import 'package:flutter/material.dart' hide Transform;
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 
 import 'package:fynkel_flutter/fynkel_flutter.dart' show ModelBuilder;
@@ -24,7 +24,9 @@ void registerEditor(EditorExtensions editor) {
     description: 'Logs what each kind of coin is worth, as the game makes them.',
     run: (context) {
       final kinds = CoinKinds();
-      context.log('A coin is worth ${kinds.coin.value}, the big coin ${kinds.big.value} (${kinds.big.size}× the size).');
+      context.log(
+        'A coin is worth ${kinds.coin.value}, the big coin ${kinds.big.value} (${kinds.big.size}× the size).',
+      );
     },
   );
 
@@ -56,7 +58,11 @@ void registerEditor(EditorExtensions editor) {
       final result = context.edit(
         'Add Coin',
         (edit) => edit.add(
-          ObjectSpec.prefab(Assets.prefabs.coin, name: 'Coin', transform: const Transform(position: Vec3(0, 0.5, 0))),
+          ObjectSpec.prefab(
+            Assets.prefabs.coin,
+            name: 'Coin',
+            transform: const Pose(position: Vec3(0, 0.5, 0)),
+          ),
           parent: parent,
         ),
       );
@@ -122,11 +128,7 @@ void registerEditor(EditorExtensions editor) {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         field.row(
-          SparksPreview(
-            count: field.valueOf('count'),
-            size: field.valueOf('size'),
-            seconds: field.valueOf('seconds'),
-          ),
+          SparksPreview(count: field.valueOf('count'), size: field.valueOf('size'), seconds: field.valueOf('seconds')),
         ),
         for (final f in field.fields) field.field(f),
       ],
@@ -312,10 +314,7 @@ class _LevelToolsState extends State<LevelTools> {
       children: [
         // During Play the running game's tools come first: the window is
         // often a short dock tab.
-        if (widget.editor.play case final play?) ...[
-          PlayTools(play: play),
-          const Divider(height: 32),
-        ],
+        if (widget.editor.play case final play?) ...[PlayTools(play: play), const Divider(height: 32)],
         Text('Ring of $_count coins'),
         Slider(
           value: _count.toDouble(),
@@ -398,16 +397,14 @@ class PlayTools extends StatelessWidget {
 /// coin prefab) [radius] metres around its centre.
 abstract final class LevelToolsRing {
   static ObjectSpec of(int count, double radius) => ObjectSpec(
-        'Coin Ring',
-        children: [
-          for (var i = 0; i < count; i++)
-            ObjectSpec.prefab(
-              Assets.prefabs.coin,
-              name: 'Coin ${i + 1}',
-              transform: Transform(
-                position: Vec3(radius * cos(2 * pi * i / count), 0.5, radius * sin(2 * pi * i / count)),
-              ),
-            ),
-        ],
-      );
+    'Coin Ring',
+    children: [
+      for (var i = 0; i < count; i++)
+        ObjectSpec.prefab(
+          Assets.prefabs.coin,
+          name: 'Coin ${i + 1}',
+          transform: Pose(position: Vec3(radius * cos(2 * pi * i / count), 0.5, radius * sin(2 * pi * i / count))),
+        ),
+    ],
+  );
 }

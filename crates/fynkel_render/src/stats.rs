@@ -3,11 +3,18 @@
 /// Counts from the last `prepare`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FrameStats {
+    pub asset_upload_bytes: u64,
+    pub asset_upload_operations: u32,
+    pub asset_upload_deferred: u32,
     /// Instances drawn in the scene passes (inside the camera frustum).
     pub instances: u32,
     /// Instances outside the camera frustum, not drawn in the scene (they
     /// may still cast into the shadow map).
     pub culled: u32,
+    /// Sphere hierarchy nodes tested by camera and shadow queries.
+    pub visibility_nodes: u32,
+    /// Spatial light candidates examined across shaded objects this frame.
+    pub light_candidates: u32,
     /// Records the scene camera's `culling_mask` leaves out (ADR-0020):
     /// neither drawn nor casting a shadow.
     pub layer_hidden: u32,

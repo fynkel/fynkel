@@ -3,7 +3,7 @@
 // (tool/assets.dart writes it); a game makes its own with Create ▸
 // Pickups ▸ Pickup Kind.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 /// What a pickup gives and how it looks and sounds.
 @FynkelDataAsset(id: 'pickups.PickupKind', menu: 'Pickups/Pickup Kind', icon: 'diamond')

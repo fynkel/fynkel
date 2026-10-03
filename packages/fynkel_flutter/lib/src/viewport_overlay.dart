@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart' show EntityRef;
+import 'package:fynkel/gameplay.dart' show EntityRef;
 // The overlay a viewport draws over the next render (viewport ABI v6,
 // ADR-0019): anti-aliased lines with a width, filled triangles and the
 // analytic ground grid, drawn after post — never exposed or tone mapped —

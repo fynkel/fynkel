@@ -164,23 +164,27 @@ fn fixture_project_renders_its_cooked_meshes_from_the_scene_camera() {
     // The camera at (0, 2, 6) looks down -Z; the top-left corner is sky.
     assert!(is_background(px[(2 * w + 2) as usize]));
 
-    // The store holds what the frame needed; releasing the scene's
-    // residency evicts it, and the renderer drops its GPU copies on the
-    // next frame (then reloads what the extract still references).
+    // A render extract owns the resources it references even after its
+    // scene unloads (editor previews and persistent/runtime objects).
     let before = assets.stats();
     assert_eq!(
         (before.meshes, before.textures, before.materials),
-        (1, 3, 1),
-        "swatch, normal and metallic-roughness maps"
+        (1, 3, 1)
     );
-    assert_eq!(before.retained, 8);
     drop(residency);
+    let px2 = render_offscreen(&device, &queue, &mut renderer, &extract);
+    assert_eq!(px2, px, "the live extract keeps its resources");
+    assert_eq!(assets.stats().meshes, 1);
+    render_offscreen(
+        &device,
+        &queue,
+        &mut renderer,
+        &fynkel_core::Extract::default(),
+    );
     let after = assets.stats();
     assert_eq!((after.meshes, after.textures, after.materials), (0, 0, 0));
     assert_eq!(after.retained, 0);
-    assert_eq!(after.evictions, before.evictions + 1, "one eviction event");
-    let px2 = render_offscreen(&device, &queue, &mut renderer, &extract);
-    assert_eq!(px2, px, "reloaded from the cache: the same image");
+    assert!(after.evictions > before.evictions);
 
     // Gate: the source tree is gone; the cache alone renders the same
     // image through a fresh store.
@@ -201,10 +205,29 @@ fn fixture_project_renders_its_cooked_meshes_from_the_scene_camera() {
     assert_eq!(renderer.stats().missing, 2);
     assert_eq!(
         renderer.asset_errors().len(),
-        1,
-        "the shared mesh is tried once"
+        2,
+        "the shared mesh and material each report their unavailable source once"
     );
-    assert!(renderer.asset_errors()[0].contains("set_assets"));
+    assert_eq!(
+        renderer
+            .asset_errors()
+            .iter()
+            .filter(|e| e.starts_with("mesh "))
+            .count(),
+        1
+    );
+    assert_eq!(
+        renderer
+            .asset_errors()
+            .iter()
+            .filter(|e| e.starts_with("material "))
+            .count(),
+        1
+    );
+    assert!(renderer
+        .asset_errors()
+        .iter()
+        .all(|e| e.contains("set_assets")));
     let magenta = px
         .iter()
         .filter(|p| !is_background(**p) && p[0] > 100 && p[2] > 100 && p[1] < 60)
@@ -235,7 +258,9 @@ fn runtime_meshes_draw_and_change() {
     // same picture.
     let cooked = (*assets.mesh(&extract.meshes[0].mesh).unwrap()).clone();
     let made = fynkel_contracts::AssetRef::new(fynkel_contracts::Uuid(*b"runtime-mesh-002"));
-    assets.set_runtime_mesh(&made, Some(cooked.clone()));
+    assets
+        .set_runtime_mesh(&made, Some(cooked.clone()))
+        .unwrap();
     for m in &mut extract.meshes {
         m.mesh = made.clone();
     }
@@ -248,7 +273,7 @@ fn runtime_meshes_draw_and_change() {
     for v in &mut small.vertices {
         v.position = v.position.map(|x| x * 0.1);
     }
-    assets.set_runtime_mesh(&made, Some(small));
+    assets.set_runtime_mesh(&made, Some(small)).unwrap();
     let px = render_offscreen(&device, &queue, &mut renderer, &extract);
     assert!(
         drawn(&px) * 20 < drawn(&cooked_px),
@@ -258,7 +283,7 @@ fn runtime_meshes_draw_and_change() {
     );
 
     // Removed: both draw as missing.
-    assets.set_runtime_mesh(&made, None);
+    assets.set_runtime_mesh(&made, None).unwrap();
     render_offscreen(&device, &queue, &mut renderer, &extract);
     assert_eq!(renderer.stats().missing, 2);
 }
@@ -516,7 +541,9 @@ fn the_renderer_warms_what_a_background_load_made_resident() {
     let id = assets.startup_scene().unwrap();
     let closure = assets.scene(id).unwrap().closure;
     let _token = assets.retain(&closure);
-    assets.preload(&closure, &AtomicUsize::new(0), &AtomicBool::new(false));
+    assets
+        .preload(&closure, &AtomicUsize::new(0), &AtomicBool::new(false))
+        .unwrap();
 
     // A zero budget warms nothing; the default does, while drawing none
     // of it.
@@ -614,4 +641,318 @@ fn animated_bounds_keep_displaced_skins_and_extra_worlds_visible() {
         extra_culled == render_offscreen(&device, &queue, &mut renderer, &main),
         "extra-world culling changed the image"
     );
+}
+
+#[test]
+fn cold_draws_defer_cpu_work_and_share_upload_limits_with_visible_resources() {
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let project = TempProject::new("f5-streaming");
+    let assets = Assets::open(&project.cook()).unwrap();
+    let (_world, extract, _lease) = load_startup(&assets);
+    let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 64, 64);
+    renderer.set_assets(Some(assets.clone()));
+    renderer.upload_budget.operations_per_frame = 1;
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    assets
+        .schedule_preparation(fynkel_assets::PreparationPriority::Visible, move || {
+            entered_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        })
+        .unwrap();
+    entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    renderer.prepare(&device, &queue, &extract);
+    assert_eq!(
+        assets.stats().meshes,
+        0,
+        "draw must not decode on the caller"
+    );
+    assert_eq!(renderer.stats().asset_upload_operations, 0);
+    assert!(
+        renderer.assets_pending(),
+        "idle hosts must request another frame"
+    );
+    release_tx.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut uploads = 0;
+    loop {
+        renderer.prepare(&device, &queue, &extract);
+        let stats = renderer.stats();
+        assert!(stats.asset_upload_operations <= 1);
+        assert!(stats.asset_upload_bytes <= renderer.upload_budget.bytes_per_frame);
+        uploads += stats.asset_upload_operations;
+        if uploads >= 5 {
+            break;
+        } // mesh, three maps, material
+        assert!(Instant::now() < deadline, "{:?}", renderer.asset_errors());
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    renderer.prepare(&device, &queue, &extract);
+    assert_eq!(renderer.stats().asset_upload_operations, 0, "warm frame");
+    assert!(
+        renderer.asset_errors().is_empty(),
+        "{:?}",
+        renderer.asset_errors()
+    );
+}
+
+#[test]
+fn insufficient_gpu_budget_is_an_explicit_fallback_and_can_be_retried() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let project = TempProject::new("f5-gpu-budget");
+    let assets = Assets::open(&project.cook()).unwrap();
+    let (_world, extract, _lease) = load_startup(&assets);
+    let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 64, 64);
+    renderer.set_assets(Some(assets));
+    renderer.set_gpu_asset_budget(0).unwrap();
+    renderer
+        .prepare_ready(&device, &queue, &extract, std::time::Duration::from_secs(5))
+        .unwrap_err();
+    assert!(renderer
+        .asset_errors()
+        .iter()
+        .any(|e| e.contains("GPU residency budget")));
+    assert!(renderer.stats().missing > 0);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while renderer.assets_pending() {
+        renderer.prepare(&device, &queue, &extract);
+        assert!(
+            std::time::Instant::now() < deadline,
+            "terminal failures must eventually settle"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    renderer.set_gpu_asset_budget(1024 * 1024).unwrap();
+    renderer.clear_assets();
+    renderer
+        .prepare_ready(&device, &queue, &extract, std::time::Duration::from_secs(5))
+        .unwrap();
+    assert!(
+        renderer.asset_errors().is_empty(),
+        "{:?}",
+        renderer.asset_errors()
+    );
+    assert_eq!(renderer.stats().missing, 0);
+    assert!(!renderer.assets_pending());
+    assert!(
+        renderer.set_gpu_asset_budget(0).is_err(),
+        "shrinking below live GPU ownership must fail"
+    );
+}
+
+/// Reproducible qualification workload, not a timing assertion in ordinary CI.
+#[test]
+#[ignore = "explicit GPU asset-streaming qualification workload"]
+fn asset_streaming_qualification() {
+    use std::time::{Duration, Instant};
+    let (device, queue) = headless_device().expect("GPU adapter required for qualification");
+    let project = TempProject::new("f5-streaming-bench");
+    let cache = project.cook();
+    project.remove_sources();
+    let mut cold = Vec::new();
+    let mut warm = Vec::new();
+    let mut simulation = Vec::new();
+    let mut cycles = Vec::new();
+    let mut high_cpu = 0;
+    let mut high_gpu = 0;
+    let mut max_upload = 0;
+    for cycle in 0..12 {
+        let assets = Assets::open(&cache).unwrap();
+        let (mut world, _, lease) = load_startup(&assets);
+        let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 64, 64);
+        renderer.upload_budget.operations_per_frame = 2;
+        renderer.set_assets(Some(assets.clone()));
+        let loading = Instant::now();
+        let deadline = loading + Duration::from_secs(10);
+        let mut frames = 0;
+        loop {
+            let start = Instant::now();
+            world.begin_frame(1.0 / 60.0);
+            world.step();
+            simulation.push(start.elapsed().as_secs_f64() * 1e6);
+            let extract = world.extract();
+            let start = Instant::now();
+            renderer.prepare(&device, &queue, &extract);
+            cold.push(start.elapsed().as_secs_f64() * 1e6);
+            frames += 1;
+            high_cpu = high_cpu.max(assets.stats().bytes);
+            high_gpu = high_gpu.max(renderer.stats().gpu_bytes);
+            max_upload = max_upload.max(renderer.stats().asset_upload_bytes);
+            assert!(renderer.stats().asset_upload_operations <= 2);
+            assert!(renderer.stats().asset_upload_bytes <= renderer.upload_budget.bytes_per_frame);
+            assert!(
+                renderer.asset_errors().is_empty(),
+                "{:?}",
+                renderer.asset_errors()
+            );
+            if renderer.assets_ready(&extract) && renderer.stats().asset_upload_operations == 0 {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let loading_ms = loading.elapsed().as_secs_f64() * 1e3;
+        for _ in 0..240 {
+            world.begin_frame(1.0 / 60.0);
+            let start = Instant::now();
+            world.step();
+            simulation.push(start.elapsed().as_secs_f64() * 1e6);
+            let extract = world.extract();
+            let start = Instant::now();
+            renderer.prepare(&device, &queue, &extract);
+            warm.push(start.elapsed().as_secs_f64() * 1e6);
+            assert_eq!(renderer.stats().asset_upload_operations, 0);
+        }
+        world.unload_scene(assets.startup_scene().unwrap()).unwrap();
+        world.step();
+        drop(lease);
+        renderer.prepare(&device, &queue, &world.extract());
+        assert_eq!(assets.stats().retained, 0);
+        assert_eq!(assets.stats().bytes, 0);
+        cycles.push(serde_json::json!({"cycle":cycle,"cold_frames":frames,"loading_ms":loading_ms,"post_unload_cpu_bytes":assets.stats().bytes,"post_unload_gpu_bytes":renderer.stats().gpu_bytes}));
+    }
+    fn summary(v: &mut [f64]) -> serde_json::Value {
+        v.sort_by(f64::total_cmp);
+        serde_json::json!({"samples":v.len(),"p50_us":v[v.len()/2],"p95_us":v[(v.len()-1)*95/100],"p99_us":v[(v.len()-1)*99/100],"max_us":v.last()})
+    }
+    let result = serde_json::json!({
+        "workload":"fixture Main, 6 entities, 12 independent engine-cache cold loads, 240 warm simulation/prepare frames per cycle; source files removed; OS file cache uncontrolled; release Metal 64x64",
+        "draw_prepare_cold":summary(&mut cold),"draw_prepare_warm":summary(&mut warm),"simulation_step":summary(&mut simulation),
+        "cpu_cache_high_water_bytes":high_cpu,"gpu_estimate_high_water_bytes":high_gpu,"max_asset_upload_bytes_per_frame":max_upload,"upload_operations_limit":2,"cycles":cycles,
+        "limits":"GPU estimate includes fixed frame resources but excludes driver/pipeline allocations. CPU accounting excludes externally held payload copies and allocator overhead. Timing is observational, not a production frame-time guarantee."
+    });
+    if let Ok(path) = std::env::var("FYNKEL_F5_BENCH_OUT") {
+        std::fs::write(path, serde_json::to_vec_pretty(&result).unwrap()).unwrap();
+    }
+    println!("{result}");
+}
+
+#[test]
+fn idle_readiness_finishes_healthy_assets_after_failure_and_ignores_inactive_inputs() {
+    use std::time::{Duration, Instant};
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let project = TempProject::new("f5-partial-readiness");
+    let assets = Assets::open(&project.cook()).unwrap();
+    let (_world, mut extract, _lease) = load_startup(&assets);
+    let missing = fynkel_contracts::AssetRef::new(fynkel_contracts::Uuid(*b"missing-gpu-test"));
+    extract.environment = Some(fynkel_core::ExtractEnvironment {
+        record: 0,
+        environment: fynkel_core::Environment {
+            sky: Some(missing.clone()),
+            ..Default::default()
+        },
+    });
+    let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 64, 64);
+    renderer.set_assets(Some(assets.clone()));
+    renderer.upload_budget.operations_per_frame = 0;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while renderer.asset_errors().is_empty() {
+        renderer.prepare(&device, &queue, &extract);
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        renderer.assets_pending(),
+        "a bad sky must not strand the healthy meshes"
+    );
+    renderer.upload_budget.operations_per_frame = 16;
+    while renderer.assets_pending() {
+        renderer.prepare(&device, &queue, &extract);
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(renderer.stats().meshes > 0);
+    assert!(
+        !renderer.assets_ready(&extract),
+        "a terminal fallback is not successful readiness"
+    );
+
+    assets
+        .set_runtime_material(
+            &fynkel_contracts::AssetRef::new(fynkel_contracts::Uuid(*b"unrelated-mat-01")),
+            Some(fynkel_assets::PbrMaterial::default()),
+        )
+        .unwrap();
+    renderer.prepare(&device, &queue, &extract);
+    assert!(
+        !renderer.assets_ready(&extract),
+        "an unrelated live edit cannot hide the sky failure"
+    );
+
+    // Unloading an unrelated asset must not erase the still-live sky failure.
+    let unrelated = fynkel_contracts::Uuid(*b"unrelated-asset1");
+    drop(assets.retain(&[unrelated]));
+    renderer.prepare(&device, &queue, &extract);
+    assert!(!renderer.assets_ready(&extract));
+    assert!(!renderer.asset_errors().is_empty());
+    assert!(renderer
+        .prepare_ready(&device, &queue, &extract, Duration::from_secs(5))
+        .is_err());
+    // Another owner may retain the failed asset, but it is no longer required
+    // by this view once its sky is removed.
+    let _other_owner = assets.retain(&[missing.asset]);
+    // Removing the actual failed reference must allow readiness to recover.
+    extract.environment = None;
+    renderer
+        .prepare_ready(&device, &queue, &extract, Duration::from_secs(5))
+        .unwrap();
+    assert!(renderer.assets_ready(&extract));
+
+    let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 64, 64);
+    renderer.set_assets(Some(assets));
+    extract.environment = None;
+    extract.camera.as_mut().unwrap().camera.culling_mask = 1;
+    let record = extract.meshes[0].record as usize;
+    extract.records[record].layer_bit = 2;
+    extract.meshes[0].mesh = missing.clone();
+    extract.volumes.push(fynkel_core::ExtractVolume {
+        record: 0,
+        world: glam::Mat4::IDENTITY,
+        volume: fynkel_core::Volume {
+            profile: missing,
+            weight: 0.0,
+            ..Default::default()
+        },
+    });
+    renderer
+        .prepare_ready(&device, &queue, &extract, Duration::from_secs(5))
+        .unwrap();
+    assert!(renderer.assets_ready(&extract));
+    assert!(
+        !renderer.assets_pending(),
+        "hidden layers and zero-weight volumes need no work"
+    );
+}
+
+#[test]
+fn explicit_sky_without_an_asset_store_is_not_gpu_ready() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let extract = fynkel_core::Extract {
+        environment: Some(fynkel_core::ExtractEnvironment {
+            record: 0,
+            environment: fynkel_core::Environment {
+                sky: Some(fynkel_contracts::AssetRef::new(fynkel_contracts::Uuid(
+                    *b"missing-gpu-test",
+                ))),
+                ..Default::default()
+            },
+        }),
+        ..Default::default()
+    };
+    let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 64, 64);
+    let error = renderer
+        .prepare_ready(&device, &queue, &extract, std::time::Duration::from_secs(1))
+        .unwrap_err();
+    assert!(error.contains("no asset source"));
+    assert!(!renderer.assets_ready(&extract));
 }

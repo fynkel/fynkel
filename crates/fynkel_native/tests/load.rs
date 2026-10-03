@@ -183,7 +183,10 @@ fn project_and_scene_load_through_the_abi() {
     // the Robot's tone (M3-11).
     assert_eq!(r["scene"]["assets"], 8);
     assert_eq!(r["residency"]["retained"], 8);
-    assert_eq!(r["residency"]["meshes"], 0, "nothing loaded until drawn");
+    assert!(
+        r["residency"]["meshes"].as_u64().unwrap() > 0,
+        "CPU dependencies prepared before activation"
+    );
     assert_eq!(host.live(), 6);
     // The Robot's `game.Spinner` is a Dart behaviour: known through the
     // cook's record of the project's registry, so no warning, and handed
@@ -238,11 +241,8 @@ fn load_scene_decodes_what_the_scene_uses_before_it_returns() {
     let cache = cooked.text();
     let host = Host::new();
     assert_eq!(host.load_project(&cache), Status::Ok);
-    assert_eq!(
-        host.report()["residency"]["meshes"],
-        0,
-        "the startup load stays lazy"
-    );
+    assert!(host.report()["residency"]["meshes"].as_u64().unwrap() > 0);
+    assert_eq!(host.report()["readiness"]["gpu"], "deferred");
 
     assert_eq!(host.load_scene(&cache, MAIN_SCENE), Status::Ok);
     let r = host.report();
@@ -1430,6 +1430,7 @@ fn runtime_clips_through_the_abi() {
         encode_animation(&AnimationPayload {
             duration: 1.0,
             channels: vec![AnimationChannel {
+                target_name: String::new(),
                 target: "Arm".into(),
                 property,
                 interpolation: 1, // linear
@@ -1493,6 +1494,11 @@ fn runtime_clips_through_the_abi() {
     assert_eq!(set(&[]), Status::Ok);
     assert!(store().clip(&made).is_err());
     assert!(!store().is_runtime_clip(&made));
+    assert_eq!(host.step(), Status::Ok);
+    assert!(
+        !unsafe { &*host.w }.core().has_clip(&made),
+        "unowned removed runtime clips retire from the simulation registry"
+    );
     assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
 }
 
@@ -2125,7 +2131,9 @@ fn runtime_material_journal_publishes_once_and_preserves_store_on_abort() {
     let assets = unsafe { &*host.w }.assets().unwrap().clone();
     let key = AssetRef::new(Uuid(*b"journal-material"));
     let old = PbrMaterial::default();
-    assets.set_runtime_material(&key, Some(old.clone()));
+    assets
+        .set_runtime_material(&key, Some(old.clone()))
+        .unwrap();
     let revision = assets.live_edits();
     for commit in [0, 1] {
         let mut sequence = 0;
@@ -2180,4 +2188,192 @@ fn runtime_material_journal_publishes_once_and_preserves_store_on_abort() {
             if commit == 0 { old.roughness } else { 0.75 }
         );
     }
+}
+
+#[test]
+fn required_dependency_failures_never_become_ready_or_replace_the_live_world() {
+    let good = Cooked::new("f5-good");
+    let dependency: fynkel_contracts::Uuid =
+        "c0000000-0000-4000-8000-000000000002".parse().unwrap();
+    for missing in [true, false] {
+        let bad = Cooked::new(if missing { "f5-missing" } else { "f5-corrupt" });
+        let assets = fynkel_assets::Assets::open(&bad.dir).unwrap();
+        let object = assets.entry(dependency).unwrap().file.unwrap();
+        drop(assets);
+        if missing {
+            std::fs::remove_file(object).unwrap();
+        } else {
+            std::fs::write(object, b"broken cooked texture").unwrap();
+        }
+        let host = Host::new();
+        assert_eq!(host.load_project(&good.text()), Status::Ok);
+        let before = host.live();
+        assert_eq!(host.load_scene(&bad.text(), MAIN_SCENE), Status::LoadFailed);
+        assert_eq!(host.live(), before);
+        assert!(
+            host.report()["diagnostics"]
+                .to_string()
+                .contains(&dependency.to_string()),
+            "{}",
+            host.report()
+        );
+        let (status, ticket) = load_async(&host, &bad.text(), MAIN_SCENE);
+        assert_eq!(status, Status::Ok);
+        assert_eq!(wait_ready(&host, ticket).0, FYNKEL_LOAD_FAILED);
+        assert_eq!(
+            unsafe { fynkel_world_load_activate(host.w, ticket, 0) },
+            Status::LoadFailed
+        );
+        assert_eq!(host.live(), before);
+        assert!(
+            host.report()["diagnostics"]
+                .to_string()
+                .contains(&dependency.to_string()),
+            "{}",
+            host.report()
+        );
+        assert_eq!(host.step(), Status::Ok);
+    }
+}
+
+#[test]
+fn repeated_scene_unloads_release_cache_and_simulation_registrations() {
+    let cooked = Cooked::new("f5-unload-baseline");
+    let host = Host::new();
+    for _ in 0..12 {
+        assert_eq!(host.load_scene(&cooked.text(), MAIN_SCENE), Status::Ok);
+        assert!(unsafe { &*host.w }.core().audio().clip_count() > 0);
+        assert_eq!(host.unload_scene(MAIN_SCENE), Status::Ok);
+        assert_eq!(host.step(), Status::Ok);
+        let world = unsafe { &*host.w };
+        assert_eq!(world.core().live_entities(), 0);
+        assert_eq!(world.core().registered_clips().count(), 0);
+        assert_eq!(world.core().registered_skins().count(), 0);
+        assert_eq!(world.core().registered_controllers().count(), 0);
+        assert_eq!(world.core().registered_blends().count(), 0);
+        assert_eq!(world.core().physics().mesh_count(), 0);
+        assert_eq!(world.core().physics().material_count(), 0);
+        assert_eq!(world.core().audio().clip_count(), 0);
+        let stats = world.assets().unwrap().stats();
+        assert_eq!(stats.retained, 0);
+        assert_eq!(stats.bytes, 0);
+    }
+}
+
+#[test]
+fn runtime_budget_failure_rolls_back_the_gameplay_edit_and_resource_publication() {
+    use edit::Edit;
+    use fynkel_contracts::{AssetRef, Uuid};
+    let cooked = Cooked::new("f5-runtime-atomic");
+    let host = Host::new();
+    assert_eq!(host.load_project(&cooked.text()), Status::Ok);
+    let assets = unsafe { &*host.w }.assets().unwrap().clone();
+    assets.set_runtime_budget(0).unwrap();
+    let before = host.live();
+    let key = AssetRef::new(Uuid(*b"budget-rejected!"));
+    let data =
+        fynkel_wire::material::encode_material(&fynkel_core::material::PbrMaterial::default());
+    let id = key.asset.to_string();
+    let mut payload = (id.len() as u32).to_le_bytes().to_vec();
+    payload.extend(id.as_bytes());
+    payload.extend((data.len() as u32).to_le_bytes());
+    payload.extend(data);
+    let mut edit = Edit::new(host.w);
+    edit.spawn("must not publish", Default::default(), None);
+    edit.operation(29, &payload).unwrap();
+    assert_eq!(edit.finish(), Status::CommandsRejected);
+    assert_eq!(host.live(), before);
+    assert_eq!(assets.runtime_bytes(), 0);
+    assert!(assets.material(&key).is_err());
+    assert_eq!(host.step(), Status::Ok);
+    assets.set_runtime_budget(1024).unwrap();
+    let mut edit = Edit::new(host.w);
+    edit.operation(29, &payload).unwrap();
+    edit.commit();
+    assert!(assets.material(&key).is_ok());
+}
+
+#[test]
+fn a_queued_sound_owns_its_registration_between_commit_and_the_first_tick() {
+    use edit::Edit;
+    let cooked = Cooked::new("f5-queued-sound-owner");
+    let host = Host::new();
+    assert_eq!(host.load_project(&cooked.text()), Status::Ok);
+    assert_eq!(host.unload_scene(MAIN_SCENE), Status::Ok);
+    let clip =
+        fynkel_contracts::AssetRef::new("c0000000-0000-4000-8000-000000000006".parse().unwrap());
+    let record = fynkel_core::schema::PlaySoundCommandRecord {
+        clip: clip.clone(),
+        bus: fynkel_core::AudioBus::Sfx,
+        volume: 1.0,
+        pitch: 1.0,
+        priority: 0,
+    };
+    let mut strings = fynkel_wire::StringTable::new();
+    let mut payload = record.to_vec(&mut strings);
+    payload.extend((strings.as_bytes().len() as u32).to_le_bytes());
+    payload.extend(strings.as_bytes());
+    let mut edit = Edit::new(host.w);
+    edit.operation(20, &payload).unwrap();
+    edit.commit();
+    assert!(unsafe { &*host.w }.core().has_sound(&clip));
+    // A second boundary must not retire the queued request either.
+    Edit::new(host.w).commit();
+    assert_eq!(host.step(), Status::Ok);
+    assert_eq!(unsafe { &*host.w }.core().audio_stats().started, 1);
+    assert_eq!(host.step(), Status::Ok);
+    assert_eq!(unsafe { &*host.w }.core().audio_stats().started, 1);
+}
+
+#[test]
+#[ignore = "manual F5 activation timing qualification"]
+fn asset_activation_qualification() {
+    use std::time::{Duration, Instant};
+    let cooked = Cooked::new("f5-activation-bench");
+    let cache = cooked.text();
+    let mut runs = Vec::new();
+    for cycle in 0..24 {
+        let host = Host::new();
+        assert_eq!(host.load_project(&cache), Status::Ok);
+        let started = Instant::now();
+        let (status, ticket) = load_async(&host, &cache, PLAYGROUND);
+        assert_eq!(status, Status::Ok);
+        let mut ticks = Vec::new();
+        loop {
+            let step = Instant::now();
+            assert_eq!(host.step(), Status::Ok);
+            ticks.push(step.elapsed().as_secs_f64() * 1e6);
+            let (mut state, mut progress) = (0, 0.0);
+            assert_eq!(
+                unsafe { fynkel_world_load_progress(host.w, ticket, &mut state, &mut progress) },
+                Status::Ok
+            );
+            if state == FYNKEL_LOAD_READY {
+                break;
+            }
+            assert_eq!(state, FYNKEL_LOAD_LOADING);
+            assert!(started.elapsed() < Duration::from_secs(10));
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let preparation_us = started.elapsed().as_secs_f64() * 1e6;
+        let activation = Instant::now();
+        assert_eq!(
+            unsafe { fynkel_world_load_activate(host.w, ticket, FYNKEL_LOAD_ADDITIVE) },
+            Status::Ok
+        );
+        let activation_us = activation.elapsed().as_secs_f64() * 1e6;
+        assert_eq!(host.report()["readiness"]["cpu"], "ready");
+        let peak = unsafe { &*host.w }.assets().unwrap().stats().bytes;
+        assert_eq!(host.unload_scene(PLAYGROUND), Status::Ok);
+        assert_eq!(host.unload_scene(MAIN_SCENE), Status::Ok);
+        assert_eq!(host.step(), Status::Ok);
+        assert_eq!(host.live(), 0);
+        assert_eq!(unsafe { &*host.w }.assets().unwrap().stats().bytes, 0);
+        runs.push(serde_json::json!({"cycle":cycle,"preparation_wall_us":preparation_us,"activation_us":activation_us,"simulation_steps_us":ticks,"cpu_cache_peak_bytes":peak,"post_unload_cpu_cache_bytes":0}));
+    }
+    let result = serde_json::json!({"workload":"24 fresh hosts running fixture Main (6 entities), asynchronously prepare and atomically activate additive Playground (5 entities), then unload both. Cache-only runtime. 1 ms progress polling; OS cache uncontrolled. Not a production latency guarantee.","runs":runs});
+    if let Ok(path) = std::env::var("FYNKEL_F5_ACTIVATION_OUT") {
+        std::fs::write(path, serde_json::to_vec_pretty(&result).unwrap()).unwrap();
+    }
+    println!("{result}");
 }

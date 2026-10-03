@@ -2,7 +2,7 @@
 // the colour and matrix scopes, off unless the world turns them on, and
 // the world clearing them every frame.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:test/test.dart';
 
 /// Draws a sphere around itself every update.

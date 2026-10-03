@@ -5,6 +5,62 @@ use super::World;
 use crate::{Command, ComponentId, Diagnostic, DiagnosticCode, Entity, Lane};
 
 impl World {
+    /// Atomic editor component replacements, including registered authored data.
+    /// Resource preparation and publication follow the ordinary gameplay journal.
+    pub fn set_live_components(
+        &mut self,
+        values: Vec<(Entity, crate::ComponentValue)>,
+        registered: Vec<(Entity, crate::RegisteredDescription)>,
+    ) -> Vec<Diagnostic> {
+        match self.try_set_live_components(values, registered) {
+            Ok(()) => Vec::new(),
+            Err(error) => {
+                self.reject(
+                    u32::MAX,
+                    Lane::Simulation,
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    Entity::NULL,
+                    ComponentId::NONE,
+                    error.to_string(),
+                );
+                vec![self
+                    .publication
+                    .diagnostics
+                    .last()
+                    .expect("just rejected")
+                    .clone()]
+            }
+        }
+    }
+
+    fn try_set_live_components(
+        &mut self,
+        values: Vec<(Entity, crate::ComponentValue)>,
+        registered: Vec<(Entity, crate::RegisteredDescription)>,
+    ) -> Result<(), EditError> {
+        let commands: Vec<_> = values
+            .into_iter()
+            .map(|(entity, value)| Command::SetComponent { entity, value })
+            .collect();
+        let resources = self.prepare_command_resources(&commands.iter().collect::<Vec<_>>())?;
+        self.edit_gameplay(|edit| {
+            if let Some(resources) = &resources {
+                resources.stage(edit)?;
+            }
+            for command in &commands {
+                if let Command::SetComponent { entity, value } = command {
+                    edit.set_component(*entity, value.clone())?;
+                }
+            }
+            for (entity, value) in &registered {
+                edit.set_registered_authored((*entity).into(), value, |_| None)?;
+            }
+            Ok(())
+        })?;
+        self.publish_command_resources(resources);
+        Ok(())
+    }
+
     /// Applies one atomic batch of live editor data changes without advancing time.
     /// Validation and reference checks are identical to gameplay edits. Failed
     /// batches publish nothing. Successful poses are visible even

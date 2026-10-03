@@ -187,6 +187,15 @@ impl Frustum {
         Frustum { planes }
     }
 
+    /// Whether the complete finite sphere lies inside all six planes.
+    pub(crate) fn contains(&self, s: &Sphere) -> bool {
+        s.is_finite()
+            && self
+                .planes
+                .iter()
+                .all(|p| p.dot(s.center.extend(1.0)) >= s.radius)
+    }
+
     /// Whether any part of the sphere may be inside.
     pub fn intersects(&self, s: &Sphere) -> bool {
         if !s.is_finite() {

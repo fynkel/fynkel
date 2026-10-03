@@ -1,3 +1,4 @@
+import 'package:fynkel/advanced.dart' show NativeLibrary;
 // Fynkel Reference Game: the game behind the app and the tests.
 //
 // One `World` on the native runtime, the project's startup scene (the
@@ -14,7 +15,7 @@
 // `GameState.screen` follows the loads, so the app's overlay (the title,
 // the HUD, the results) switches on it without asking the engine.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 import '../generated/assets.g.dart';
 import '../generated/packages.g.dart';
@@ -53,7 +54,7 @@ const pickupTag = 'pickup';
 /// tagged [playerTag], as the last tick left the world. The zones' masks
 /// already admit only the `player` layer; the tag says which object on it
 /// is the one that plays.
-bool isPlayer(World world, int entity) => world.findWithTag(playerTag)?.entity == entity;
+bool isPlayer(World world, EntityRef entity) => world.findWithTag(playerTag)?.entity == entity;
 
 class Game {
   Game._(this.world, this.report) {

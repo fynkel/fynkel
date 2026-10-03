@@ -2,7 +2,7 @@
 
 **Started:** 2026-09-30  
 **Direction:** Accepted by the user in the foundation and ECS discussion.  
-**Implementation:** F1, F2 and F3 complete and qualified; F0 broader performance qualification and F4–F8 remain open. [F3 gate report](foundation-f3-gate-report.md) records registered gameplay, scheduling, editor/native extension integration and measured limits.
+**Implementation:** F0–F7 complete for their recorded qualification scopes. F8 implementation and local qualification are recorded in the [F8 gate](foundation-f8-gate-report.md); second-Mac execution remains unverified and measured iPhone GPU throughput and reported heat require resolution, so F8 is not marked fully complete.
 **Decision:** [ADR-0042](decisions/ADR-0042-ecs-centered-foundation-program.md)
 
 This is the active roadmap and progress tracker for rebuilding Fynkel's foundations before expanding the product. The objective is one coherent gameplay model, an accessible object interface over an extensible ECS, and measurable runtime and tooling performance. Keep the Rust runtime, `hecs` facade, cooker, generated contracts, and transactional authoring where they satisfy the new contracts. Rebuild layers that do not. A complete rewrite is an option to evaluate, not a prerequisite.
@@ -25,7 +25,7 @@ Use the task IDs below in implementation PRs and gate reports. The tables are th
 | Done | Acceptance criteria and evidence linked |
 | Deferred | Record explicit decision, destination milestone, and reason |
 
-Tasks begin **Todo**, with owner unassigned and evidence absent. When work starts, add owner, state, and evidence in the Notes column. Evidence must identify a commit or PR and relevant test, benchmark, or gate result. In-progress working-tree evidence must say so explicitly. Reopen a task when its contract regresses. Current progress is **1 of 9 milestones complete**; do not present documentation creation as runtime progress.
+Tasks begin **Todo**, with owner unassigned and evidence absent. When work starts, add owner, state, and evidence in the Notes column. Evidence must identify a commit or PR and relevant test, benchmark, or gate result. In-progress working-tree evidence must say so explicitly. Reopen a task when its contract regresses. Current progress is **8 of 9 milestones complete**; do not present documentation creation as runtime progress.
 
 ## Milestones and sequence
 
@@ -33,15 +33,15 @@ Budget approximately **12–16 engineering weeks** for initial planning, subject
 
 | Milestone | Outcome | Depends on | State |
 | --- | --- | --- | --- |
-| F0 | Baseline, executable contract prototype, resolved architecture choices | None | Active |
+| F0 | Baseline, executable contract prototype, resolved architecture choices | None | Done — reconciled baseline, implementation evidence and F8 workload captures |
 | F1 | Safe identity, coherent clocks, exact transform operations | F0 correctness contracts accepted; broader F0 qualification continues | Done — F1.1–F1.4 evidence below |
 | F2 | One gameplay state contract and one mutation route | F1 | Done — [qualification](foundation-f2-gate-report.md), [ADR-0051](decisions/ADR-0051-f2-boundaries-and-presentation-policy.md) |
 | F3 | Registered components and systems with efficient gameplay access | F2 | Complete — registered data, owned bulk access, sequential systems, authored/editor integration and native package route; see F3 gate report |
-| F4 | Clear subsystem ownership and incremental synchronization | F2 and F3 | Todo |
-| F5 | Predictable resource loading, activation, and residency | F1 and F4 | Todo |
-| F6 | Scalable render extraction, visibility, and lighting | F4 and F5 | Todo |
-| F7 | Editor, code creation, packages, and examples use the same model | F3 through F6 | Todo |
-| F8 | Production qualification and foundation release gate | F7 | Todo |
+| F4 | Clear subsystem ownership and incremental synchronization | F2 and F3 | Done — ADR-0055 and F4 gate report |
+| F5 | Predictable resource loading, activation, and residency | F1 and F4 | Done — ADR-0056 and F5 gate report |
+| F6 | Scalable render extraction, visibility, and lighting | F4 and F5 | Done — ADR-0057 and F6 gate report |
+| F7 | Editor, code creation, packages, and examples use the same model | F3 through F6 | Done — [F7 gate report](foundation-f7-gate-report.md), ADR-0058 |
+| F8 | Production qualification and foundation release gate | F7 | Active — local checks captured; second-Mac execution unverified and iPhone GPU throughput/heat issue open (F8.3) |
 
 Independent implementation can overlap once its contracts and prerequisites are settled. Keep one integrated vertical slice runnable throughout. Broad rendering features, new platforms, and the Game UI designer wait behind this program; the older roadmap retains that backlog.
 
@@ -51,10 +51,10 @@ Produce a reproducible baseline and a small gameplay slice before replacing stor
 
 | Task | Work and acceptance criteria | Notes |
 | --- | --- | --- |
-| F0.1 | Inventory component ownership, mutable state, frame phases, caches, bridge views, module dependencies, and public entry points. Map each September 30 finding to current source and a reproduction or benchmark. Distinguish defects, intended behavior, and unmeasured cost. | Active — Codex, `main` working tree against `87e3dec8`; [ownership inventory](design/foundation-ownership.md) and [baseline](foundation-baseline.md). Three defects reproduced; other experiments outstanding. |
-| F0.2 | Establish reproducible Rust, Dart, generator, editor, stripped-runtime, and host baselines. Record existing failures separately from changes introduced by this program. Capture release/profile performance with workload, hardware, revision, and commands. | Active — Codex, `main` working tree against `87e3dec8`; [baseline](foundation-baseline.md), capture runner, diagnostic, release headless observations at 25/1,001/10,001 entities. Native correctness qualification is now recorded in F1 captures; broader release/profile captures remain outstanding. |
-| F0.3 | Prototype coherent gameplay reads, stable entity references, one custom data component, one behaviour, one bulk system, and inspector/serialization access. Compare an incremental replacement with a focused rebuild for complexity and bridge cost. Choose an implementation strategy in the gate. | Active — Codex, `main` working tree against `87e3dec8`; [initial prototype](design/foundation-prototype.md), [mixed state comparison](design/foundation-state-comparison.md), native tests plus two Dart strategy contract runs, native sparse/dense allocation/frame captures and JIT crossing captures. [ADR-0046](decisions/ADR-0046-transactional-world-state-replacement.md) chooses the replacement state boundary. Actual editor/animation integration, general schema/reference serialization and AOT qualification remain outstanding; F0 gate not passed. |
-| F0.4 | Resolve ADR-0043 through ADR-0045 enough to implement: phase commits and conflict rules; custom component storage and access; system registration; asset readiness. Record exact deferred questions with the milestone that must decide them. | Active — Codex, `main` working tree against `87e3dec8`; ADR-0046 selects shared callback transactions; ADR-0047 resolves identity/clock/frame/readiness with [13 executable checks](design/foundation-contract-checks.md). General component registry/delivery and effect/lifecycle qualifications remain at F3/F2.2; F0 integration/baseline gate remains open. |
+| F0.1 | Inventory component ownership, mutable state, frame phases, caches, bridge views, module dependencies, and public entry points. Map each September 30 finding to current source and a reproduction or benchmark. Distinguish defects, intended behavior, and unmeasured cost. | Done — current [ownership reconciliation](design/foundation-ownership.md) maps the historical findings to implemented owners, permanent regressions and measured limits; F8 records remaining platform constraints. |
+| F0.2 | Establish reproducible Rust, Dart, generator, editor, stripped-runtime, and host baselines. Record existing failures separately from changes introduced by this program. Capture release/profile performance with workload, hardware, revision, and commands. | Done — [F8 qualification](foundation-f8-gate-report.md): current native/stripped, SDK, editor, generator, host, JIT/AOT, GPU, 50k-population and 10k-asset captures. Failures and retries retained separately. |
+| F0.3 | Prototype coherent gameplay reads, stable entity references, one custom data component, one behaviour, one bulk system, and inspector/serialization access. Compare an incremental replacement with a focused rebuild for complexity and bridge cost. Choose an implementation strategy in the gate. | Done — the selected prototype became the F2/F3 shared-state implementation; registered combat, editor/serialization integration, recipes and release/AOT qualification are exercised by F3/F7/F8 evidence. |
+| F0.4 | Resolve ADR-0043 through ADR-0045 enough to implement: phase commits and conflict rules; custom component storage and access; system registration; asset readiness. Record exact deferred questions with the milestone that must decide them. | Done — ADR-0046/0047/0051–0059 resolve state, frames, registry, systems, subsystem ownership, resources, rendering, workflow and persistence scope. Second-machine qualification is an explicit F8.3 obligation. |
 
 **Exit gate:** an executable slice proves the chosen contract, baseline evidence is available, and detailed decisions are accepted for their next implementation milestones. No claim of full-engine scale is made from the slice.
 
@@ -123,43 +123,63 @@ The final [F2 qualification](foundation-f2-gate-report.md) passes all 17 checks:
 
 | Task | Work and acceptance criteria | Notes |
 | --- | --- | --- |
-| F5.1 | Explicit load states and dependency failure propagation. Scene activation declares required CPU, simulation, and GPU readiness separately. Test missing/corrupt dependencies, cancellation, replacement, and diagnostic attribution. Preserve cache-only runtime loading. | Todo |
-| F5.2 | Schedule bounded preparation and upload work, with request deduplication and priorities. Define fallback policy and prevent unbounded synchronous disk/decode work in normal draw preparation. Measure cold and warm loading while a game runs. | Todo |
-| F5.3 | CPU/GPU residency budgets and ownership below scene granularity where needed. Test additive scenes, persistent objects, runtime assets, prefab caches, unloading, reload, and pressure eviction. Live references either retain resources or receive an explicit unavailable state. | Todo |
-| F5.4 | Stable animation and skeleton binding by imported indices or authored IDs; names remain display/search data. Test duplicate names, renaming, source reordering, reimport, rig remapping, and missing targets. Supply migration or an explicit recook requirement. | Todo |
+| F5.1 | Explicit load states and dependency failure propagation. Scene activation declares required CPU, simulation, and GPU readiness separately. Test missing/corrupt dependencies, cancellation, replacement, and diagnostic attribution. Preserve cache-only runtime loading. | Done — strict cooked dependency preparation, separate readiness stages and atomic activation; missing/corrupt/cancel/replace coverage preserves the live world. |
+| F5.2 | Schedule bounded preparation and upload work, with request deduplication and priorities. Define fallback policy and prevent unbounded synchronous disk/decode work in normal draw preparation. Measure cold and warm loading while a game runs. | Done — bounded priority worker, deduplicated nonblocking draw requests and shared upload admission; cold/warm and async activation measurements archived. Export readiness is explicit. |
+| F5.3 | CPU/GPU residency budgets and ownership below scene granularity where needed. Test additive scenes, persistent objects, runtime assets, prefab caches, unloading, reload, and pressure eviction. Live references either retain resources or receive an explicit unavailable state. | Done — separate CPU/runtime/GPU budgets, transactional runtime admission and entity/effect ownership; repeated unload returns cache and simulation registrations to baseline. |
+| F5.4 | Stable animation and skeleton binding by imported indices or authored IDs; names remain display/search data. Test duplicate names, renaming, source reordering, reimport, rig remapping, and missing targets. Supply migration or an explicit recook requirement. | Done — AnimationBinding keys across clips, skins, controller roots/masks and IK, including editor picks. Imported-index/authored-key contract and recook migration are explicit. |
 
 **Exit gate:** Ready cannot conceal a failed required dependency. Activation and warming respect defined budgets, and load/unload cycles return to a bounded memory baseline.
+
+**F5 completed (2026-10-02):** [ADR-0056](decisions/ADR-0056-asset-readiness-residency-and-bindings.md) and the [gate report](foundation-f5-gate-report.md) close F5.1–F5.4. [Qualification and measurements](../benchmarks/foundation/results/2026-10-02-22229b4f-f5-completion.json) retain successful checks, retries and precise accounting/time limits. The reference game, Showcase and code-only game pass their complete workflows. Cooked payloads require recooking; imported source-index reorder requires reviewing external authored bindings. F6 is next.
+
 
 ## F6 Rendering at scale
 
 | Task | Work and acceptance criteria | Notes |
 | --- | --- | --- |
-| F6.1 | Query maintained render membership and reuse extraction buffers. Publish immutable frame data containing only needed render state; retain required skin/light/camera dependencies. Measure static, sparse-change, and dense-change scenes. | Todo |
-| F6.2 | Add a spatial visibility strategy and animated bounds policy justified by measurements. Keep frustum/shadow correctness tests. Record decisions for occlusion and LOD, implementing them only if required by the qualification workload. | Todo |
-| F6.3 | Evaluate the current 64-light pool/eight-light-per-object limits against dense scenes. Choose a supported budgeted or clustered/tiled path, test selection stability and layer masks, and expose useful limits and diagnostics. Simply raising constants is not a scalability result. | Todo |
-| F6.4 | Define render pass/resource lifetimes, invalidation, device loss/recreation, and quality changes. Decide whether a render graph is justified; use a recorded simpler design if it is sufficient. Evaluate CPU/GPU overlap only after snapshot lifetimes are safe. | Todo |
+| F6.1 | Query maintained render membership and reuse extraction buffers. Publish immutable frame data containing only needed render state; retain required skin/light/camera dependencies. Measure static, sparse-change, and dense-change scenes. | Done — qualified in the F6 gate report |
+| F6.2 | Add a spatial visibility strategy and animated bounds policy justified by measurements. Keep frustum/shadow correctness tests. Record decisions for occlusion and LOD, implementing them only if required by the qualification workload. | Done — qualified in the F6 gate report |
+| F6.3 | Evaluate the current 64-light pool/eight-light-per-object limits against dense scenes. Choose a supported budgeted or clustered/tiled path, test selection stability and layer masks, and expose useful limits and diagnostics. Simply raising constants is not a scalability result. | Done — qualified in the F6 gate report |
+| F6.4 | Define render pass/resource lifetimes, invalidation, device loss/recreation, and quality changes. Decide whether a render graph is justified; use a recorded simpler design if it is sufficient. Evaluate CPU/GPU overlap only after snapshot lifetimes are safe. | Done — qualified in the F6 gate report |
 
 **Exit gate:** extraction, preparation, encoding, GPU time, and resource memory are measured separately on the agreed workloads. Correctness survives culling, lighting changes, reload, and resizing.
+
+**F6 completed (2026-10-02):** [ADR-0057](decisions/ADR-0057-render-extraction-visibility-and-resource-lifetimes.md), the [gate report](foundation-f6-gate-report.md), and [qualification evidence](../benchmarks/foundation/results/2026-10-02-22229b4f-f6-completion.json) close F6.1–F6.4. Rendering uses maintained membership, reusable owned snapshots, conservative spatial visibility, storage-backed spatial forward lighting, and explicit resource/device recovery. Viewport ABI is now 14. The supported lighting contract remains eight contributions per object; occlusion, automatic LOD, clustered lighting and an additional render thread are explicit measured design decisions, not unfinished F6 implementations. F7 is next.
 
 ## F7 One workflow across code and editor
 
 | Task | Work and acceptance criteria | Notes |
 | --- | --- | --- |
-| F7.1 | Publish a small ordinary gameplay API and a separate advanced/native surface. Prefer typed entity/component references and generated accessors where helpful. Document one component/mutation model without teaching bridge mechanics to beginners. | Todo |
-| F7.2 | Make code-authored descriptions safely reusable with fresh execution instances and explicit reference resolution. Decide factories versus immutable descriptions. Test building the same recipe twice, prefab instantiation, clone, and scene round trips. | Todo |
-| F7.3 | Integrate schemas, inspector edits, transactions/undo, paused Step, Apply to Scene, hot reload/restart, packages, generators, and CLI into the new contract. Test custom components and failure recovery. Preserve authoring revisions and game/editor build separation. | Todo |
-| F7.4 | Migrate examples, fixtures, starter templates, extension samples, and related docs. Each retained API is canonical or a deprecated forwarding adapter with a removal milestone. Bump ABI/schema/document versions where required; preserve unknown authored data and provide actionable migration errors. | Todo |
+| F7.1 | Publish a small ordinary gameplay API and a separate advanced/native surface. Prefer typed entity/component references and generated accessors where helpful. Document one component/mutation model without teaching bridge mechanics to beginners. | Done — Codex, working tree against `22229b4f`; Ordinary gameplay and advanced integration imports; same state authority; guide and ADR-0058. [Evidence](foundation-f7-gate-report.md). |
+| F7.2 | Make code-authored descriptions safely reusable with fresh execution instances and explicit reference resolution. Decide factories versus immutable descriptions. Test building the same recipe twice, prefab instantiation, clone, and scene round trips. | Done — Codex, working tree against `22229b4f`; Fresh recipe factories, unified forest build, reference/clone/prefab/scene regressions. [Evidence](foundation-f7-gate-report.md). |
+| F7.3 | Integrate schemas, inspector edits, transactions/undo, paused Step, Apply to Scene, hot reload/restart, packages, generators, and CLI into the new contract. Test custom components and failure recovery. Preserve authoring revisions and game/editor build separation. | Done — Codex, working tree against `22229b4f`; Atomic live component batches and stale-revision refusal; editor, authoring, generator and dependency checks pass. [Evidence](foundation-f7-gate-report.md). |
+| F7.4 | Migrate examples, fixtures, starter templates, extension samples, and related docs. Each retained API is canonical or a deprecated forwarding adapter with a removal milestone. Bump ABI/schema/document versions where required; preserve unknown authored data and provide actionable migration errors. | Done — Codex, working tree against `22229b4f`; Tracked samples, starter and extension sources migrated; authoring ABI 6; preserved migration backups and unknown-data coverage. [Evidence](foundation-f7-gate-report.md). |
 
 **Exit gate:** a fresh project and the reference slice work through both code and editor. User-authored content is migrated deliberately; willingness to rebuild does not authorize silently deleting it. No two supported paths disagree on state visibility.
 
+**F7 completed (2026-10-03):** [ADR-0058](decisions/ADR-0058-unified-gameplay-workflow.md), the [gate report](foundation-f7-gate-report.md), and [qualification evidence](../benchmarks/foundation/results/2026-10-03-22229b4f-f7-completion.json) close F7.1–F7.4. F8 is next.
+
 ## F8 Production qualification
+
+**Expanded mobile performance priority (2026-10-03):** qualify dense scenes as
+well as the starter scene. The [mobile workload ladder](../benchmarks/mobile/README.md)
+now covers 500/2,000/5,000 native movers plus physics, Dart behaviours, animation
+and lights. Mac preflight and short 500/5,000-mover iPhone captures are complete; the largest
+currently delivers about 17–29 new textures/s in a short capture, declining toward
+17/s at the end, after eliminating repeated animation-ownership scans, inline
+world moves and unnecessary lifecycle invalidation (initial capture: 8–9/s).
+[Latest evidence](../benchmarks/foundation/results/2026-10-03-f8-lifecycle-invalidation.json)
+still exposes substantial native simulation and GPU cost. Further physical-device scaling, heavier geometry,
+material diversity/transparency, explicit mobile quality tiers and sustained
+60/120 Hz measurements remain open. Eight-second diagnostic captures do not
+close this work or prove thermal stability.
 
 | Task | Work and acceptance criteria | Notes |
 | --- | --- | --- |
-| F8.1 | Run the workload matrix below, automate regression checks, and publish a foundation gate report with revision, machine, build modes, captures, correctness results, and unresolved limitations. | Todo |
-| F8.2 | Decide the supported runtime-state persistence contract. Prove save/load of registered gameplay data and reference restoration in the slice, or record its explicit release destination. Assess replay/checksums and rollback/networking separately; do not claim deterministic rollback from fixed ticks or input recording alone. | Todo |
-| F8.3 | Verify supported macOS/iOS release paths on a second machine and physical device, including local package consumption, export, input, lifecycle, and resource recovery. Portable compile checks remain separate from runtime support. Choose future platform scope explicitly. | Todo |
-| F8.4 | Close architecture drift: update decision statuses, retirement notes, API docs, codegen checks, package/native compatibility, known issues, and the main roadmap's next phase. Reconcile public-readiness/license work with ADR-0005 before a public release. | Todo |
+| F8.1 | Run the workload matrix below, automate regression checks, and publish a foundation gate report with revision, machine, build modes, captures, correctness results, and unresolved limitations. | Done — [qualification report](foundation-f8-gate-report.md), repeatable runner, 50k/10k-asset workload captures, CI regression baseline and failure-preserving evidence. No arbitrary-scene frame-rate guarantee. |
+| F8.2 | Decide the supported runtime-state persistence contract. Prove save/load of registered gameplay data and reference restoration in the slice, or record its explicit release destination. Assess replay/checksums and rollback/networking separately; do not claim deterministic rollback from fixed ticks or input recording alone. | Done — [ADR-0059](decisions/ADR-0059-foundation-release-and-persistence.md): versioned game-owned save data with atomic reference restoration, demonstrated by the combat slice and six passing tests; full execution snapshots/network rollback are explicitly outside the foundation release contract. |
+| F8.3 | Verify supported macOS/iOS release paths on a second machine and physical device, including local package consumption, export, input, lifecycle, and resource recovery. Portable compile checks remain separate from runtime support. Choose future platform scope explicitly. | Blocked in part — local macOS exports and physical iPhone build/install/launch are verified; user confirmed host animation/input/orientation/background/resume/relaunch and fresh exported game assets, joystick, jump and relaunch. The user also reported uneven cube movement despite the 120 FPS HUD; GPU throughput and reported excessive heat remain unqualified pending a measured rendering fix (see [device observations](foundation-f8-device-observations.md)). A second Mac is unavailable (user confirmed); that execution check remains unverified and is not replaced with another local run. See the gate for exact build/observation scope. |
+| F8.4 | Close architecture drift: update decision statuses, retirement notes, API docs, codegen checks, package/native compatibility, known issues, and the main roadmap's next phase. Reconcile public-readiness/license work with ADR-0005 before a public release. | Done — old SDK umbrella removed, generators/templates/examples migrated, decision status and ownership history reconciled, compatibility and symbol isolation checked. ADR-0005 remains open and prevents public publication until the owner selects licensing. |
 
 **Exit gate:** every foundation milestone has evidence, or an explicit scoped deferral with consequences for product claims. Ordinary gameplay remains quick to write; large workloads have measured limits. Declare Ready, Ready with named exceptions, or Not ready. Unresolved identity, state correctness, or required dependency failures prevent Ready.
 
@@ -190,9 +210,9 @@ For a milestone exit, create `docs/gates/foundation-fN.md` with exact revision, 
 
 Keep the old path only as long as migration requires. Adapters forward to the canonical implementation; they must not maintain a second simulation. Choose incremental replacement or isolated rebuild in F0, then deliver complete vertical slices. Do not expand features to avoid finishing a difficult foundation milestone.
 
-## Current implementation batch
+## Historical F3 implementation batches (completed; retained evidence)
 
-**F3 batch 1 started (2026-10-02), after F2 checkpoint `0e79ac30`.** [ADR-0052](decisions/ADR-0052-registered-component-values.md) records the native scalar component contract and its limits. Registration validates stable identity, schema/defaults and codec round trips. Registered native values live in the existing ECS, with changes prepared in the existing gameplay journal. Typed and schema-value reads agree; cloning includes logical registered values. The game-owned [Health example](../crates/fynkel_core/examples/registered_health.rs) requires no catalogue branch. This is a native-only foundation slice: Dart-defined layout/storage, generated ordinary access, serialization, Inspector, bulk queries and registered scheduling are not implemented by this batch. F3 remains active.
+**F3 batch 1 started (2026-10-02), after F2 checkpoint `0e79ac30`.** [ADR-0052](decisions/ADR-0052-registered-component-values.md) records the native scalar component contract and its limits. Registration validates stable identity, schema/defaults and codec round trips. Registered native values live in the existing ECS, with changes prepared in the existing gameplay journal. Typed and schema-value reads agree; cloning includes logical registered values. The game-owned [Health example](../crates/fynkel_core/examples/registered_health.rs) requires no catalogue branch. This is a native-only foundation slice: Dart-defined layout/storage, generated ordinary access, serialization, Inspector, bulk queries and registered scheduling are not implemented by this batch. F3 was active at this historical checkpoint; its completed gate is recorded above.
 
 F3 batch 1 qualification: 1,090 Rust workspace tests passed (8 ignored), 18 stripped-feature registry/clone tests and 586 SDK tests passed; example, Clippy, formatting and codegen checks passed. [Archived evidence](../benchmarks/foundation/results/2026-10-02-0e79ac30-f3-native-registry.json).
 

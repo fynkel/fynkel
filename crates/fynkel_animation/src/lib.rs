@@ -54,10 +54,10 @@ pub enum Interpolation {
     CubicSpline,
 }
 
-/// One keyed property of one named node.
+/// One keyed property of one node identified by its animation binding.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Channel {
-    /// The node's name; resolved to an entity under the animator.
+    /// Stable animation binding key; resolved uniquely under the animator.
     pub target: String,
     pub property: Property,
     pub interpolation: Interpolation,
@@ -77,6 +77,9 @@ impl Channel {
     }
 
     fn validate(&self, what: &str) -> Result<(), String> {
+        if self.target.is_empty() {
+            return Err(format!("{what}: empty animation binding key"));
+        }
         if self.times.is_empty() {
             return Err(format!("{what}: no keys"));
         }
@@ -205,7 +208,7 @@ pub struct Marker {
     pub name: String,
 }
 
-/// A clip: keyed channels over named nodes and the clip's length.
+/// A clip: keyed channels over stable node bindings and the clip's length.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Clip {
     pub name: String,
@@ -561,6 +564,8 @@ fn mix<T: Copy>(a: Option<T>, b: Option<T>, _w: f32, f: impl Fn(T, T) -> T) -> O
 /// One joint of a skin.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Joint {
+    /// Stable binding key, independent of the display name.
+    pub binding: String,
     /// The node's name; resolved to an entity under the skeleton root.
     pub name: String,
     /// Index of the parent joint within the skin, when it is one.
@@ -608,10 +613,12 @@ impl Skin {
             if !joint.inverse_bind.is_finite() || !joint.rest.is_finite() {
                 return Err(format!("joint {j} ({}): non-finite matrix", joint.name));
             }
-            if self.joints[..j].iter().any(|o| o.name == joint.name) {
+            if joint.binding.is_empty()
+                || self.joints[..j].iter().any(|o| o.binding == joint.binding)
+            {
                 return Err(format!(
-                    "joint {j}: the name {:?} is used twice",
-                    joint.name
+                    "joint {j}: binding {:?} is empty or used twice",
+                    joint.binding
                 ));
             }
         }
@@ -816,6 +823,7 @@ mod tests {
     #[test]
     fn skins_validate_parents_and_names() {
         let joint = |name: &str, parent: Option<u32>| Joint {
+            binding: name.into(),
             name: name.into(),
             parent,
             inverse_bind: Mat4::IDENTITY,

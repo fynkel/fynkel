@@ -38,8 +38,8 @@ fn schemas() -> SchemaSet {
 }
 
 const IMPORTERS: &[(&str, u32)] = &[
-    ("fynkel.fbx", 4),
-    ("fynkel.gltf", 8),
+    ("fynkel.fbx", 5),
+    ("fynkel.gltf", 9),
     ("fynkel.image", 1),
     ("fynkel.audio", 2),
     ("fynkel.file", 1),
@@ -47,9 +47,9 @@ const IMPORTERS: &[(&str, u32)] = &[
 ];
 
 /// What `fynkel_import::expected_lock()` produces; mirrored here because
-/// this crate cannot depend on the importers (cache version 11, container 1).
+/// this crate cannot depend on the importers (cache version 12, container 1).
 fn expected_lock() -> Lock {
-    Lock::expected(IMPORTERS, 11, 1)
+    Lock::expected(IMPORTERS, 12, 1)
 }
 
 /// A temporary copy of the fixture project, removed on drop.
@@ -219,7 +219,7 @@ fn the_fixture_project_reads_and_validates_clean() {
         .unwrap();
     assert_eq!((medium.shadow_resolution, medium.msaa), (1024, 4));
     assert!(medium.shadows, "shadows default to on");
-    assert_eq!(project.components.as_ref().unwrap().len(), 24);
+    assert_eq!(project.components.as_ref().unwrap().len(), 25);
     assert_eq!(project.physics.gravity, [0.0, -9.81, 0.0]);
     let lt = &project.layers_and_tags;
     assert_eq!(lt.layers, ["default", "props"]);
@@ -277,7 +277,7 @@ fn describe_json_lists_everything() {
     assert_eq!(v["assetCount"], 17);
     assert_eq!(v["inputActions"].as_array().unwrap().len(), 4);
     assert_eq!(v["quality"]["default"], "medium");
-    assert_eq!(v["components"].as_array().unwrap().len(), 24);
+    assert_eq!(v["components"].as_array().unwrap().len(), 25);
     assert_eq!(v["layers"], serde_json::json!(["default", "props"]));
     assert_eq!(v["tags"], serde_json::json!([]));
     assert_eq!(v["targets"].as_array().unwrap().len(), 3);

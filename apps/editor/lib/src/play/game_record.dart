@@ -6,7 +6,7 @@
 // record is found anywhere in the line, not only at its start.
 import 'dart:convert';
 
-import 'package:fynkel/fynkel.dart' show EntityRef;
+import 'package:fynkel/gameplay.dart' show EntityRef;
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import 'dart_stack.dart';

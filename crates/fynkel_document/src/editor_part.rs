@@ -216,7 +216,7 @@ mod tests {
                 "import 'package:fynkel_editor_api/fynkel_editor_api.dart';\nimport 'tools.dart';\nimport '../game/coin.dart';\n",
             ),
             ("lib/editor/tools.dart", "import 'package:my_game/editor/editor.dart';\n"),
-            ("lib/game/coin.dart", "import 'package:fynkel/fynkel.dart';\nimport 'package:my_game/game/state.dart';\n"),
+            ("lib/game/coin.dart", "import 'package:fynkel/gameplay.dart';\nimport 'package:my_game/game/state.dart';\n"),
             ("lib/editorial.dart", "import 'package:my_game/editorial/x.dart';\n"),
             ("test/editor_test.dart", "import 'package:my_game/editor/editor.dart';\n"),
         ]);

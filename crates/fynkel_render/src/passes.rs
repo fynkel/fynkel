@@ -94,6 +94,22 @@ impl ExtractRenderer {
             .and_then(|t| t.writes_part(pair, begin, end))
     }
 
+    /// Individual screen-space passes share the existing stage endpoints
+    /// (8/9), with additional samples for depth/estimate/blur attribution.
+    fn screen_space_timestamps(
+        &self,
+        begin: u32,
+        end: u32,
+    ) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
+        self.gpu_timer
+            .as_ref()
+            .map(|timer| wgpu::RenderPassTimestampWrites {
+                query_set: &timer.query_sets[timer.writing],
+                beginning_of_pass_write_index: Some(begin),
+                end_of_pass_write_index: Some(end),
+            })
+    }
+
     /// Depth only, from the sun, every caster inside its box (each
     /// batch's shadow range).
     pub(crate) fn shadow_pass(&self, encoder: &mut wgpu::CommandEncoder) {
@@ -171,7 +187,7 @@ impl ExtractRenderer {
     pub(crate) fn depth_prepass(&self, encoder: &mut wgpu::CommandEncoder) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("fynkel depth prepass"),
-            timestamp_writes: self.timestamps_part(AO_PAIR, true, false),
+            timestamp_writes: self.screen_space_timestamps(8, 10),
             color_attachments: &[],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.attachments.depth_view,
@@ -257,20 +273,38 @@ impl ExtractRenderer {
         let Some(ao) = self.attachments.ao.as_ref() else {
             return;
         };
+        if let Some((view, group)) = &ao.resolved_depth {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("fynkel AO depth resolve"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.pipelines.ao_depth_resolve);
+            pass.set_bind_group(0, group, &[]);
+            pass.draw(0..3, 0..1);
+        }
         for (label, target, pipeline, bind_group, timestamps) in [
             (
                 "fynkel ao",
                 &ao.view,
                 &self.pipelines.ao,
                 &ao.ao_bind_group,
-                None,
+                self.screen_space_timestamps(11, 12),
             ),
             (
                 "fynkel ao blur",
                 &ao.blur_view,
                 &self.pipelines.ao_blur,
                 &ao.blur_bind_group,
-                self.timestamps_part(AO_PAIR, false, true),
+                self.screen_space_timestamps(13, 9),
             ),
         ] {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

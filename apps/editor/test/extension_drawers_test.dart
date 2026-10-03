@@ -9,7 +9,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart' show Severity;
-import 'package:fynkel/fynkel.dart' show BehaviourRegistry, DataAsset, DataType;
+import 'package:fynkel/gameplay.dart' show BehaviourRegistry, DataAsset, DataType;
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/extensions/editor_extensions.dart';
 import 'package:fynkel_editor/src/play/editor_game.dart';

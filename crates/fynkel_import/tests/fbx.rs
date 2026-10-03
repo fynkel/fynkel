@@ -111,7 +111,7 @@ fn channel<'a>(
         .payload
         .channels
         .iter()
-        .find(|c| c.target == target && c.property == property)
+        .find(|c| c.target_name == target && c.property == property)
         .unwrap_or_else(|| panic!("{clip}: no {property} channel for {target}"))
 }
 
@@ -123,7 +123,7 @@ fn the_new_extension_maps_to_the_importer() {
     );
     assert!(fynkel_import::IMPORTERS
         .iter()
-        .any(|(name, version)| *name == "fynkel.fbx" && *version == 4));
+        .any(|(name, version)| *name == "fynkel.fbx" && *version == 5));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn rig_fbx_matches_the_gltf_rig() {
     );
     let i = r.intermediate.as_ref().unwrap();
     assert_eq!(i.importer, "fynkel.fbx");
-    assert_eq!(i.importer_version, 4);
+    assert_eq!(i.importer_version, 5);
     assert_eq!(i.source, "rig.fbx");
     let (g, _) = import_fixture("rig.glb");
     let g = g.intermediate.unwrap();
@@ -202,7 +202,7 @@ fn rig_fbx_matches_the_gltf_rig() {
     let skin = &i.skins[0];
     let gskin = &g.skins[0];
     assert_eq!(skin.sub_id, "skin/Rig");
-    assert_eq!(skin.payload.skeleton, "hips");
+    assert_eq!(skin.payload.skeleton, skin.payload.joints[0].binding);
     let names: Vec<&str> = skin
         .payload
         .joints
@@ -333,7 +333,7 @@ fn rig_fbx_matches_the_gltf_rig() {
     let body = entities.values().find(|e| e["name"] == "Body").unwrap();
     let components: Vec<&serde_json::Value> =
         body["components"].as_object().unwrap().values().collect();
-    assert_eq!(components.len(), 3);
+    assert_eq!(components.len(), 4);
     assert_eq!(components[1]["type"], "fynkel.MeshRenderer");
     assert_eq!(components[1]["data"]["mesh"]["sub"], "mesh/Body");
     assert_eq!(components[2]["type"], "fynkel.Skin");
@@ -353,7 +353,7 @@ fn rig_fbx_matches_the_gltf_rig() {
         serde_json::json!({ "entity": hips })
     );
     let prop = entities.values().find(|e| e["name"] == "Prop").unwrap();
-    assert_eq!(prop["components"].as_object().unwrap().len(), 2);
+    assert_eq!(prop["components"].as_object().unwrap().len(), 3);
     let spine = entities.values().find(|e| e["name"] == "spine").unwrap();
     let t = &spine["components"]
         .as_object()

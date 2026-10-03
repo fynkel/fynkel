@@ -141,7 +141,7 @@ fn owned_session_queries_stay_committed_until_binding_publication_and_abort_is_i
     world.bind_input(&[button("original", "keyboard:Space")]);
     world.capture_input(&[InputEvent::down(Device::Keyboard, "Space")]);
     let counters = world.input().counters();
-    let mut session = GameplaySession::begin(world).unwrap_or_else(|_| panic!("begin"));
+    let mut session = GameplaySession::begin(world.into()).unwrap_or_else(|_| panic!("begin"));
     session
         .access(|edit| edit.bind_input(&[button("aborted", "keyboard:A")]))
         .unwrap();

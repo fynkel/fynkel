@@ -5,7 +5,7 @@
 // the frame's. So `x += v * Time.delta` moves the same distance per second
 // at 30, 60 or 120 frames a second, whichever callback it is in.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:test/test.dart';
 
 /// Records `Time.delta` in every callback it gets.

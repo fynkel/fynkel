@@ -43,3 +43,13 @@ Behaviours keep their existing lifecycle, contact and coroutine implementation u
 Extension API 1 is a build-time Rust source API. A game host links a crate, uses the host's pinned engine revision/lock/toolchain, and installs its manifest/component/system declarations before gameplay. Runtime ABI is 5; generated C/Dart bindings and runtime locks change together. The existing built-in schema fingerprint does not change. Version checks do not imply stable Rust binary layout. Dynamic loading and automatic SDK package linking are not this route.
 
 Installation validates namespace, API/ABI and required modules. Registration has no mutable world handle. A failed component or schedule batch leaves no partial installation; manifest requirements also apply to its systems. Editor worlds reject installation before calling package code. The external `examples/native_combat` crate and headless host exercise the route with core default features disabled. Ordinary Dart games need no Rust.
+
+## Lifecycle participation correction (F5 qualification)
+
+Generated callback metadata covers only periodic dispatch (`fixedUpdate`,
+`afterPhysics`, `update`, `lateUpdate`). It must never suppress `start` or
+other lifecycle notifications. An event-only behaviour with an empty
+periodic set still starts exactly once when active. The SDK regression
+`empty periodic participation still starts an active event-only behaviour
+exactly once` preserves this boundary; the reference and code-only games
+exercise it through their collectible behaviours.

@@ -16,11 +16,11 @@ enum ClipInterpolation {
   step,
 }
 
-/// One keyed property of one named node under the animator.
+/// One keyed property of one bound node under the animator.
 class ClipChannel {
   const ClipChannel._(this.target, this.property, this.interpolation, this.times, this.values);
 
-  /// The node's name, found under the entity that plays the clip.
+  /// The node's AnimationBinding key, unique under the entity playing the clip.
   final String target;
 
   /// 0 position, 1 rotation, 2 scale (the `ANIM` payload's numbers).
@@ -69,10 +69,12 @@ class ClipData {
       out.add(List.filled((4 - bytes.length % 4) % 4, 0));
     }
 
+    u32(0x32444e42); // BND2: stable animation bindings.
     u32(channels.length);
     f32(length);
     for (final c in channels) {
       str(c.target);
+      str(''); // Runtime clips need no display-name retargeting metadata.
       u32(c.property);
       u32(c.interpolation == ClipInterpolation.step ? 0 : 1);
       u32(c.times.length);
@@ -105,7 +107,7 @@ class ClipData {
 /// rig.animation.playOneShot(wave, slot: 'UpperBody');
 /// ```
 ///
-/// Keys are `{seconds: value}`; each node's name is looked up under the
+/// Keys are `{seconds: value}`; each node's AnimationBinding key is resolved under the
 /// entity that plays the clip. The clip is as long as its last key unless
 /// [length] says otherwise.
 class ClipBuilder {
@@ -131,21 +133,38 @@ class ClipBuilder {
 
   /// A named time: `AnimationMarker` fires as the clip passes it.
   void marker(double seconds, String name) {
-    if (!seconds.isFinite || seconds < 0) throw ArgumentError.value(seconds, 'seconds', 'must be finite and >= 0');
-    if (name.isEmpty) throw ArgumentError.value(name, 'name', 'must not be empty');
+    if (!seconds.isFinite || seconds < 0) {
+      throw ArgumentError.value(seconds, 'seconds', 'must be finite and >= 0');
+    }
+    if (name.isEmpty) {
+      throw ArgumentError.value(name, 'name', 'must not be empty');
+    }
     _markers.add((seconds, name));
   }
 
-  void _add<T>(String target, int property, ClipInterpolation interpolation, Map<double, T> keys,
-      List<double> Function(T) floats) {
-    if (target.isEmpty) throw ArgumentError.value(target, 'target', "must name a node");
-    if (keys.isEmpty) throw ArgumentError.value(keys, 'keys', 'needs at least one key');
+  void _add<T>(
+    String target,
+    int property,
+    ClipInterpolation interpolation,
+    Map<double, T> keys,
+    List<double> Function(T) floats,
+  ) {
+    if (target.isEmpty) {
+      throw ArgumentError.value(target, 'target', "must specify an AnimationBinding key");
+    }
+    if (keys.isEmpty) {
+      throw ArgumentError.value(keys, 'keys', 'needs at least one key');
+    }
     final times = keys.keys.toList()..sort();
     final values = <double>[];
     for (final t in times) {
-      if (!t.isFinite || t < 0) throw ArgumentError.value(t, 'keys', 'key times must be finite and >= 0');
+      if (!t.isFinite || t < 0) {
+        throw ArgumentError.value(t, 'keys', 'key times must be finite and >= 0');
+      }
       final v = floats(keys[t] as T);
-      if (!v.every((x) => x.isFinite)) throw ArgumentError.value(keys[t], 'keys', 'at $t: not finite');
+      if (!v.every((x) => x.isFinite)) {
+        throw ArgumentError.value(keys[t], 'keys', 'at $t: not finite');
+      }
       values.addAll(v);
     }
     _channels.add(ClipChannel._(target, property, interpolation, List.unmodifiable(times), List.unmodifiable(values)));
@@ -154,7 +173,9 @@ class ClipBuilder {
   /// The clip. Throws [ArgumentError] when [length] is shorter than a key
   /// or a marker, or nothing was keyed.
   ClipData build() {
-    if (_channels.isEmpty) throw StateError('ClipBuilder.build: key at least one property');
+    if (_channels.isEmpty) {
+      throw StateError('ClipBuilder.build: key at least one property');
+    }
     var last = 0.0;
     for (final c in _channels) {
       if (c.times.last > last) last = c.times.last;
@@ -167,7 +188,9 @@ class ClipBuilder {
       throw ArgumentError.value(length, 'length', 'shorter than the last key or marker ($last s)');
     }
     for (final (t, name) in _markers) {
-      if (t > len) throw ArgumentError.value(t, 'marker $name', 'past the clip\'s length ($len s)');
+      if (t > len) {
+        throw ArgumentError.value(t, 'marker $name', 'past the clip\'s length ($len s)');
+      }
     }
     final markers = [..._markers]..sort((a, b) => a.$1.compareTo(b.$1));
     return ClipData._(len, List.unmodifiable(_channels), List.unmodifiable(markers));

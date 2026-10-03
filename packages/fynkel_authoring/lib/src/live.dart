@@ -25,18 +25,18 @@ final class LiveEntity {
   });
 
   factory LiveEntity.fromJson(Map<String, Object?> j) => LiveEntity(
-        id: j['id'] as String,
-        handle: j['entity'] == null ? EntityRef.nil : EntityRef.fromJson(j['entity']),
-        name: j['name'] as String? ?? '',
-        parent: j['parent'] as String?,
-        spawned: j['spawned'] == true,
-        layer: (j['layer'] as num?)?.toInt() ?? 0,
-        childCount: (j['children'] as num?)?.toInt() ?? 0,
-        types: List.unmodifiable([for (final t in j['types'] as List? ?? const []) t as String]),
-        activeSelf: j['activeSelf'] != false,
-        activeInHierarchy: j['activeInHierarchy'] != false,
-        persistent: j['persistent'] == true,
-      );
+    id: j['id'] as String,
+    handle: j['entity'] == null ? EntityRef.nil : EntityRef.fromJson(j['entity']),
+    name: j['name'] as String? ?? '',
+    parent: j['parent'] as String?,
+    spawned: j['spawned'] == true,
+    layer: (j['layer'] as num?)?.toInt() ?? 0,
+    childCount: (j['children'] as num?)?.toInt() ?? 0,
+    types: List.unmodifiable([for (final t in j['types'] as List? ?? const []) t as String]),
+    activeSelf: j['activeSelf'] != false,
+    activeInHierarchy: j['activeInHierarchy'] != false,
+    persistent: j['persistent'] == true,
+  );
 
   /// The authoring id when a loaded scene spawned it (a prefab instance's
   /// children carry the ids the cook derived), `runtime:<handle>` when the
@@ -81,19 +81,22 @@ final class LiveEntityState {
   });
 
   factory LiveEntityState.fromJson(Map<String, Object?> j) => LiveEntityState(
-        id: j['id'] as String,
-        handle: j['entity'] == null ? EntityRef.nil : EntityRef.fromJson(j['entity']),
-        name: j['name'] as String? ?? '',
-        parent: j['parent'] as String?,
-        world: _mapOf(j['world']),
-        activeSelf: j['activeSelf'] != false,
-        activeInHierarchy: j['activeInHierarchy'] != false,
-        componentVersions: {for (final c in j['components'] as List? ?? const []) _mapOf(c)['type'] as String: _mapOf(c)['version'] as int? ?? 1},
-        components: [
-          for (final c in j['components'] as List? ?? const [])
-            (type: _mapOf(c)['type'] as String, data: _mapOf(_mapOf(c)['data'])),
-        ],
-      );
+    id: j['id'] as String,
+    handle: j['entity'] == null ? EntityRef.nil : EntityRef.fromJson(j['entity']),
+    name: j['name'] as String? ?? '',
+    parent: j['parent'] as String?,
+    world: _mapOf(j['world']),
+    activeSelf: j['activeSelf'] != false,
+    activeInHierarchy: j['activeInHierarchy'] != false,
+    componentVersions: {
+      for (final c in j['components'] as List? ?? const [])
+        _mapOf(c)['type'] as String: _mapOf(c)['version'] as int? ?? 1,
+    },
+    components: [
+      for (final c in j['components'] as List? ?? const [])
+        (type: _mapOf(c)['type'] as String, data: _mapOf(_mapOf(c)['data'])),
+    ],
+  );
 
   final String id;
   final EntityRef handle;
@@ -101,7 +104,7 @@ final class LiveEntityState {
   final String? parent;
   final Map<String, Object?> world;
   final List<({String type, Map<String, Object?> data})> components;
-  final Map<String,int> componentVersions;
+  final Map<String, int> componentVersions;
   final bool activeSelf;
   final bool activeInHierarchy;
 
@@ -152,12 +155,16 @@ final class LiveWorld {
       _entityRows = {for (final e in rows) e.handle: e};
       _entityOrder = [for (final e in rows) e.handle];
     } else {
-      for (final e in r['removed'] as List? ?? const []) { _entityRows.remove(EntityRef.fromJson(e)); }
+      for (final e in r['removed'] as List? ?? const []) {
+        _entityRows.remove(EntityRef.fromJson(e));
+      }
       for (final e in r['changes'] as List? ?? const []) {
         final row = LiveEntity.fromJson(_mapOf(e));
         _entityRows[row.handle] = row;
       }
-      if (r['order'] case final List order) { _entityOrder = [for (final e in order) EntityRef.fromJson(e)]; }
+      if (r['order'] case final List order) {
+        _entityOrder = [for (final e in order) EntityRef.fromJson(e)];
+      }
     }
     return List.unmodifiable([for (final e in _entityOrder) ?_entityRows[e]]);
   }
@@ -170,6 +177,11 @@ final class LiveWorld {
   /// refusals come back as messages; empty when it applied.
   List<String> set(String id, String type, Map<String, Object?> data) =>
       _write('set', {'id': id, 'type': type, 'data': data});
+
+  /// Atomically replaces built-in and registered component data. Each item is
+  /// `{id, type, data, version?}`; a refusal publishes none of the replacements.
+  List<String> setComponents(List<Map<String, Object?>> components) =>
+      _write('setComponents', {'components': components});
 
   List<String> remove(String id, String type) => _write('remove', {'id': id, 'type': type});
 
@@ -233,8 +245,11 @@ final class LiveWorld {
       PreviewPick.fromJson(call('pick', {'view': camera.viewJson(aspect), 'ndc': ndc}));
 
   /// Every entity along the ray from [origin] in [dir] (world space).
-  PreviewPick pickRay(List<double> origin, List<double> dir) =>
-      PreviewPick.fromJson(call('pick', {'ray': {'origin': origin, 'dir': dir}}));
+  PreviewPick pickRay(List<double> origin, List<double> dir) => PreviewPick.fromJson(
+    call('pick', {
+      'ray': {'origin': origin, 'dir': dir},
+    }),
+  );
 
   /// The entities whose projected bounds overlap the NDC rectangle [min]…
   /// [max].
@@ -251,26 +266,28 @@ final class LiveWorld {
     List<double>? outlineColor,
     bool outlineBoxes = true,
     double? iconsAspect,
-  }) =>
-      PreviewLines.fromJson(call('lines', {
-        if (outline.isNotEmpty)
-          'outline': {'ids': outline.toList(), 'color': ?outlineColor, if (!outlineBoxes) 'boxes': false},
-        if (iconsAspect != null) 'icons': {'aspect': iconsAspect},
-      }));
+  }) => PreviewLines.fromJson(
+    call('lines', {
+      if (outline.isNotEmpty)
+        'outline': {'ids': outline.toList(), 'color': ?outlineColor, if (!outlineBoxes) 'boxes': false},
+      if (iconsAspect != null) 'icons': {'aspect': iconsAspect},
+    }),
+  );
 
   /// The renderer's handles (`Entity::to_bits`) of the [ids] still alive
   /// and not hidden in the editor, each once — what
   /// `ViewportOverlay.outline` takes. (Named `handles` because [entities]
   /// is the world's entity table.)
-  List<EntityRef> handles(Iterable<String> ids) =>
-      [for (final e in call('handles', {'ids': ids.toList()})['entities'] as List? ?? const []) EntityRef.fromJson(e)];
+  List<EntityRef> handles(Iterable<String> ids) => [
+    for (final e in call('handles', {'ids': ids.toList()})['entities'] as List? ?? const []) EntityRef.fromJson(e),
+  ];
 
   /// The world matrices (16 floats, column-major) of the [ids] still
   /// alive.
   Map<String, List<double>> worldMatrices(Iterable<String> ids) => {
-        for (final e in _mapOf(call('worldMatrix', {'ids': ids.toList()})['matrices']).entries)
-          e.key: [for (final x in e.value as List? ?? const []) (x as num).toDouble()],
-      };
+    for (final e in _mapOf(call('worldMatrix', {'ids': ids.toList()})['matrices']).entries)
+      e.key: [for (final x in e.value as List? ?? const []) (x as num).toDouble()],
+  };
 
   List<String> _write(String kind, Map<String, Object?> args) {
     final r = _live(kind, args, rejectedIsResult: true);
@@ -290,8 +307,16 @@ final class LiveWorld {
       buf.asTypedList(kindBytes.length).setAll(0, kindBytes);
       final argPtr = buf + kindBytes.length;
       argPtr.asTypedList(argBytes.length).setAll(0, argBytes);
-      final status = AuthoringStatus._of(n.fynkel_world_live_call(
-          Pointer<n.FynkelWorld>.fromAddress(worldAddress), buf, kindBytes.length, argPtr, argBytes.length, view));
+      final status = AuthoringStatus._of(
+        n.fynkel_world_live_call(
+          Pointer<n.FynkelWorld>.fromAddress(worldAddress),
+          buf,
+          kindBytes.length,
+          argPtr,
+          argBytes.length,
+          view,
+        ),
+      );
       final v = view.ref;
       final result = v.length == 0
           ? const <String, Object?>{}

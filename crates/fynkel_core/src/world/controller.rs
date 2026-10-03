@@ -31,9 +31,9 @@ use fynkel_scene::{Parent, Transform};
 use glam::Vec3;
 
 use super::animation::{
-    find_named, pin_root, root_delta, AnimatorTick, BlendSlot, BlendTable, ClipTable,
+    find_binding, pin_root, root_delta, AnimatorTick, BlendSlot, BlendTable, ClipTable,
 };
-use super::Name;
+
 use crate::animation::blend_tree::{direct_weights, weights, TreeDef, TreeKind};
 use crate::animation::controller::{
     masked_in, Blending, ControllerDef, ControllerRun, MotionDef, ParameterKind, StateEvent, Value,
@@ -60,6 +60,7 @@ pub struct ControllerPlay {
     /// layer over a node the layers below do not pose starts from (its
     /// transform now would be last tick's pose, compounding).
     rest: HashMap<Entity, Transform>,
+    binding_validation: Option<Vec<String>>,
     /// Scratch kept for its capacity: each state's length this tick
     /// (flattened, `offsets[layer] + state`), the layers' clocks before
     /// the step, the incoming side of a crossfade.
@@ -153,6 +154,50 @@ impl OneShot {
 }
 
 impl ControllerPlay {
+    pub(super) fn collect_missing_bindings(&self, out: &mut Vec<(AssetRef, String)>) {
+        out.extend(
+            self.binding_validation
+                .iter()
+                .flatten()
+                .map(|key| (self.controller.clone(), key.clone())),
+        );
+        for motion in self.motions.iter().flatten().flatten() {
+            for slot in &motion.slots {
+                slot.collect_missing_bindings(out);
+            }
+        }
+        for shot in self
+            .slots
+            .iter()
+            .flat_map(|s| s.current.iter().chain(s.fading.iter()))
+        {
+            if let Some(motion) = &shot.resolved {
+                for slot in &motion.slots {
+                    slot.collect_missing_bindings(out);
+                }
+            }
+        }
+    }
+
+    pub(super) fn invalidate_bindings(&mut self) {
+        self.binding_validation = None;
+        for layer in &mut self.motions {
+            layer.fill(None);
+        }
+        for slot in &mut self.slots {
+            for shot in slot.current.iter_mut().chain(slot.fading.iter_mut()) {
+                shot.resolved = None;
+            }
+        }
+        for mask in &mut self.masks {
+            mask.clear();
+        }
+        self.ik.invalidate_bindings();
+        for pose in self.shown.iter_mut().chain(self.frozen.iter_mut()) {
+            pose.clear();
+        }
+    }
+
     pub fn new(controller: AssetRef, def: Arc<ControllerDef>) -> ControllerPlay {
         let mut offsets = Vec::with_capacity(def.layers.len());
         let mut n = 0;
@@ -169,6 +214,7 @@ impl ControllerPlay {
                 .map(|l| vec![None; l.states.len()])
                 .collect(),
             rest: HashMap::new(),
+            binding_validation: None,
             lengths: vec![0.0; n],
             offsets,
             before: Vec::with_capacity(def.layers.len()),
@@ -376,7 +422,7 @@ fn resolve(
     };
     let root = match &def.layers[layer].root {
         None => entity,
-        Some(name) => match find_named(t.ecs, entity, name) {
+        Some(name) => match find_binding(t.ecs, entity, name) {
             Some(e) => e,
             None => return,
         },
@@ -422,7 +468,7 @@ fn resolve_shot(
     shot.resolved = None;
     let root = match &def.layers[layer].root {
         None => entity,
-        Some(name) => match find_named(t.ecs, entity, name) {
+        Some(name) => match find_binding(t.ecs, entity, name) {
             Some(e) => e,
             None => return,
         },
@@ -579,6 +625,30 @@ pub(super) fn tick(
     layer_pose: &mut Pose,
     out: &mut AnimatorTick,
 ) {
+    if play.binding_validation.is_none() {
+        let missing = play
+            .def
+            .layers
+            .iter()
+            .flat_map(|layer| layer.root.iter().chain(layer.mask.iter().map(|m| &m.node)))
+            .filter(|key| find_binding(t.ecs, entity, key).is_none())
+            .cloned()
+            .collect();
+        play.binding_validation = Some(missing);
+        play.rest.retain(|node, _| {
+            let mut at = *node;
+            while t.ecs.contains(at) {
+                if at == entity {
+                    return true;
+                }
+                match t.ecs.get::<Parent>(at) {
+                    Ok(p) => at = p.0,
+                    Err(_) => break,
+                }
+            }
+            false
+        });
+    }
     let def = play.def.clone();
     play.before.clear();
     play.before.extend(play.run.layers.iter().map(|l| Before {
@@ -907,8 +977,8 @@ fn mask_pose(
             let mut names = Vec::new();
             let mut at = e.entity;
             loop {
-                if let Ok(n) = t.ecs.get::<Name>(at) {
-                    names.push(n.value.clone());
+                if let Ok(n) = t.ecs.get::<crate::AnimationBinding>(at) {
+                    names.push(n.key.clone());
                 }
                 if at == entity {
                     break;

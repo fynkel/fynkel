@@ -187,7 +187,7 @@ final class Editor {
 void writeDemoScripts(Directory dir) {
   File('${dir.path}/lib/game/player.dart')
     ..createSync(recursive: true)
-    ..writeAsStringSync('''import 'package:fynkel/fynkel.dart';
+    ..writeAsStringSync('''import 'package:fynkel/gameplay.dart';
 
 /// The player: runs at [speed] and picks up coins.
 class Player extends Behaviour {

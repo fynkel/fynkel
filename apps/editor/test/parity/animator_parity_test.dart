@@ -12,7 +12,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart' as fynkel;
+import 'package:fynkel/gameplay.dart' as fynkel;
+import 'package:fynkel_authoring/fynkel_authoring.dart' show Command;
 import 'package:fynkel_editor/src/animator/animator_model.dart';
 import 'package:fynkel_editor/src/hierarchy/presets.dart';
 import 'package:fynkel_editor/src/shell/editor_selection.dart';
@@ -522,85 +523,101 @@ void main() {
     expect(model.controller!.makeTransition(0, 'Air', 'New State'), 0);
     expect((base()['transitions'] as List).single, {'from': 'Air', 'to': 'New State', 'duration': 0.25});
   });
-  testWidgets('masks and IK (ADR-0033 § 5): the IK tab, a layer\'s Mask ticked on the object\'s nodes, one undo step each', (
-    tester,
-  ) async {
-    final e = await Editor.open(
-      tester,
-      prepare: (dir) => File('${dir.path}/$controllerPath').writeAsStringSync(
-        jsonEncode({
-          r'$schema': 'https://fynkel.dev/schemas/controller.schema.json',
-          'formatVersion': 1,
-          'id': controllerId,
-          'name': 'Rig',
-          'parameters': [
-            {'name': 'aim', 'type': 'float'},
-          ],
-          'layers': [
-            {'name': 'Base Layer'},
-            {'name': 'Arms'},
-          ],
-        }),
-      ),
-    );
-    Map<String, Object?> saved() =>
-        jsonDecode(File('${e.dir.path}/$controllerPath').readAsStringSync()) as Map<String, Object?>;
-    List<Object?>? mask() => ((saved()['layers'] as List)[1] as Map)['mask'] as List?;
-    final h = e.shell.hierarchy!;
-    expect(h.createPreset(GameObjectPreset.cube, parent: robot), isTrue);
-    expect(h.assignController({'asset': controllerId}, robot), isTrue);
-    await settleCooks(tester);
-    await e.click(e.row('Robot'));
-    e.shell.workspace!.show(PanelRegistry.animation);
-    await settleCooks(tester);
-    final model = e.shell.animator!;
-    expect(model.object, robot);
-    expect(model.nodes.map((n) => n.name), ['Robot', 'Cube']);
-    final doc = e.shell.assetEdits!.document(controllerId)!;
-    final history = doc.history;
+  testWidgets(
+    'masks and IK (ADR-0033 § 5): the IK tab, a layer\'s Mask ticked on the object\'s nodes, one undo step each',
+    (tester) async {
+      final e = await Editor.open(
+        tester,
+        prepare: (dir) => File('${dir.path}/$controllerPath').writeAsStringSync(
+          jsonEncode({
+            r'$schema': 'https://fynkel.dev/schemas/controller.schema.json',
+            'formatVersion': 1,
+            'id': controllerId,
+            'name': 'Rig',
+            'parameters': [
+              {'name': 'aim', 'type': 'float'},
+            ],
+            'layers': [
+              {'name': 'Base Layer'},
+              {'name': 'Arms'},
+            ],
+          }),
+        ),
+      );
+      Map<String, Object?> saved() =>
+          jsonDecode(File('${e.dir.path}/$controllerPath').readAsStringSync()) as Map<String, Object?>;
+      List<Object?>? mask() => ((saved()['layers'] as List)[1] as Map)['mask'] as List?;
+      final h = e.shell.hierarchy!;
+      expect(h.createPreset(GameObjectPreset.cube, parent: robot), isTrue);
+      final scene = e.shell.tabs!.focused!.document;
+      final entities = scene.root()['entities'] as Map;
+      final cube = entities.entries.firstWhere((entry) => (entry.value as Map)['name'] == 'Cube').key as String;
+      expect(
+        scene.apply([
+          for (final (id, key) in [(robot, 'rig/root'), (cube, 'rig/child')])
+            Command.addComponent(id, {
+              'type': 'fynkel.AnimationBinding',
+              'version': 1,
+              'data': {'key': key},
+            }),
+        ]).ok,
+        isTrue,
+      );
 
-    // The IK tab beside Parameters: + ▸ Look At.
-    await e.click(find.byKey(const Key('animator.tab.ik')));
-    expect(find.byKey(const Key('animator.ik.empty')), findsOneWidget);
-    await e.click(find.byKey(const Key('animator.addIk')));
-    await e.click(find.byKey(const Key('animator.addIk.lookAt')));
-    expect(saved()['ik'], [
-      {'name': 'look', 'type': 'lookAt', 'head': 'Head'},
-    ]);
-    expect(find.byKey(const Key('animator.ik.0.head')), findsOneWidget);
-    expect(doc.history, history + 1);
+      expect(h.assignController({'asset': controllerId}, robot), isTrue);
+      await settleCooks(tester);
+      await e.click(e.row('Robot'));
+      e.shell.workspace!.show(PanelRegistry.animation);
+      await settleCooks(tester);
+      final model = e.shell.animator!;
+      expect(model.object, robot);
+      expect(model.nodes.map((n) => n.name), ['Robot', 'Cube']);
+      final doc = e.shell.assetEdits!.document(controllerId)!;
+      final history = doc.history;
 
-    // Its weight from a float parameter; a rename follows, a delete drops it.
-    final c = model.controller!;
-    expect(c.setIkField(0, 'weight', 'aim'), isTrue);
-    expect(c.renameParameter('aim', 'aiming'), isTrue);
-    expect((saved()['ik'] as List).single, containsPair('weight', 'aiming'));
-    expect(c.deleteParameter('aiming'), isTrue);
-    expect((saved()['ik'] as List).single, isNot(contains('weight')));
+      // The IK tab beside Parameters: + ▸ Look At.
+      await e.click(find.byKey(const Key('animator.tab.ik')));
+      expect(find.byKey(const Key('animator.ik.empty')), findsOneWidget);
+      await e.click(find.byKey(const Key('animator.addIk')));
+      await e.click(find.byKey(const Key('animator.addIk.lookAt')));
+      expect(saved()['ik'], [
+        {'name': 'look', 'type': 'lookAt', 'head': 'Head'},
+      ]);
+      expect(find.byKey(const Key('animator.ik.0.head')), findsOneWidget);
+      expect(doc.history, history + 1);
 
-    // The Arms layer's Mask: the object's nodes, ticked; Clear, the whole character.
-    await e.click(find.byKey(const Key('animator.layer.1')));
-    expect(find.textContaining('Mask: Whole character'), findsOneWidget);
-    await e.click(find.byKey(const Key('animator.layer.mask')));
-    expect(find.byKey(const Key('animator.mask')), findsOneWidget);
-    expect(tester.widget<Checkbox>(find.byKey(const Key('animator.mask.node.Robot.check'))).value, isTrue);
-    final before = doc.history;
-    await e.click(find.byKey(const Key('animator.mask.node.Cube')));
-    expect(mask(), [
-      {'node': 'Cube', 'include': false},
-    ]);
-    await e.click(find.byKey(const Key('animator.mask.node.Robot')));
-    expect(mask(), [
-      {'node': 'Robot', 'include': false},
-    ], reason: 'a tick says it for what is under the node too');
-    expect(tester.widget<Checkbox>(find.byKey(const Key('animator.mask.node.Cube.check'))).value, isFalse);
-    expect(find.byKey(const Key('animator.mask.entry.0')), findsOneWidget);
-    expect(doc.history, before + 2);
-    await e.click(find.byKey(const Key('animator.mask.clear')));
-    expect(mask(), isNull);
-    await e.click(find.byKey(const Key('animator.mask.close')));
-    expect(find.byKey(const Key('animator.mask')), findsNothing);
-  });
+      // Its weight from a float parameter; a rename follows, a delete drops it.
+      final c = model.controller!;
+      expect(c.setIkField(0, 'weight', 'aim'), isTrue);
+      expect(c.renameParameter('aim', 'aiming'), isTrue);
+      expect((saved()['ik'] as List).single, containsPair('weight', 'aiming'));
+      expect(c.deleteParameter('aiming'), isTrue);
+      expect((saved()['ik'] as List).single, isNot(contains('weight')));
+
+      // The Arms layer's Mask: the object's nodes, ticked; Clear, the whole character.
+      await e.click(find.byKey(const Key('animator.layer.1')));
+      expect(find.textContaining('Mask: Whole character'), findsOneWidget);
+      await e.click(find.byKey(const Key('animator.layer.mask')));
+      expect(find.byKey(const Key('animator.mask')), findsOneWidget);
+      expect(tester.widget<Checkbox>(find.byKey(const Key('animator.mask.node.rig/root.check'))).value, isTrue);
+      final before = doc.history;
+      await e.click(find.byKey(const Key('animator.mask.node.rig/child')));
+      expect(mask(), [
+        {'node': 'rig/child', 'include': false},
+      ]);
+      await e.click(find.byKey(const Key('animator.mask.node.rig/root')));
+      expect(mask(), [
+        {'node': 'rig/root', 'include': false},
+      ], reason: 'a tick says it for what is under the node too');
+      expect(tester.widget<Checkbox>(find.byKey(const Key('animator.mask.node.rig/child.check'))).value, isFalse);
+      expect(find.byKey(const Key('animator.mask.entry.0')), findsOneWidget);
+      expect(doc.history, before + 2);
+      await e.click(find.byKey(const Key('animator.mask.clear')));
+      expect(mask(), isNull);
+      await e.click(find.byKey(const Key('animator.mask.close')));
+      expect(find.byKey(const Key('animator.mask')), findsNothing);
+    },
+  );
 }
 
 final class _FakeLive implements AnimatorLive {

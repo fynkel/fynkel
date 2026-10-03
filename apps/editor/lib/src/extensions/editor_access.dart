@@ -8,7 +8,7 @@ import 'dart:async' show scheduleMicrotask;
 
 import 'package:flutter/foundation.dart' show Listenable;
 import 'package:fynkel/authoring.dart' show ProjectWriter;
-import 'package:fynkel/fynkel.dart' show AssetRef, BehaviourRegistry, DataAsset, ObjectSpec, World;
+import 'package:fynkel/gameplay.dart' show AssetRef, BehaviourRegistry, DataAsset, ObjectSpec, World;
 import 'package:fynkel_authoring/fynkel_authoring.dart' show AuthoringException, Command;
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 

@@ -22,6 +22,13 @@
 // As in `fynkel_document`: a `Diagnostic` is the error type on purpose.
 #![allow(clippy::result_large_err)]
 
+mod budget;
+mod poll;
+mod queue;
+mod runtime;
+pub use queue::{PreparationError, PreparationPriority};
+pub use runtime::{PreparedRuntimeAssets, RuntimeAssetUpdate};
+
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -382,6 +389,14 @@ fn behaviour_types(meta: &ObjectMeta) -> HashSet<String> {
 }
 
 struct Store {
+    runtime_budget_bytes: u64,
+    runtime_reserved: bool,
+    edit_epoch: u64,
+    cache_generation: u64,
+    asset_generations: HashMap<Uuid, u64>,
+    cache_budget_bytes: u64,
+    cache_costs: HashMap<(AssetRef, [u8; 4]), u64>,
+    requests: HashMap<(poll::ResourceKind, AssetRef), poll::RequestState>,
     index: CacheIndex,
     metas: HashMap<Uuid, Arc<ObjectMeta>>,
     /// Prefab documents read and described ([`Assets::prefab`]), kept
@@ -464,7 +479,7 @@ pub struct ResidencyStats {
     pub meshes: usize,
     pub textures: usize,
     pub materials: usize,
-    /// CPU bytes of the resident mesh and texture payloads.
+    /// Accounted decoded cooked payload bytes (excludes external/runtime owners).
     pub bytes: u64,
     /// Evictions since the store opened.
     pub evictions: u64,
@@ -474,6 +489,7 @@ pub struct ResidencyStats {
 #[derive(Clone)]
 pub struct Assets {
     inner: Arc<Mutex<Store>>,
+    preparation: queue::PreparationQueue,
 }
 
 impl std::fmt::Debug for Assets {
@@ -503,7 +519,24 @@ fn object_error(e: &IndexEntry, what: impl std::fmt::Display) -> Diagnostic {
 }
 
 impl Store {
+    fn compact_changes(&mut self) {
+        if self
+            .material_changes
+            .len()
+            .max(self.mesh_changes.len())
+            .max(self.asset_generations.len())
+            >= 4096
+        {
+            self.material_changes.clear();
+            self.mesh_changes.clear();
+            self.asset_generations.clear();
+            self.requests.clear();
+            self.cache_generation += 1;
+            self.edit_epoch += 1;
+        }
+    }
     fn note_material_change(&mut self, r: &AssetRef) {
+        self.compact_changes();
         self.material_edits += 1;
         let at = self.material_edits;
         self.material_changes.insert(r.clone(), at);
@@ -511,6 +544,16 @@ impl Store {
 }
 
 impl Assets {
+    /// Admission is bounded to 64 jobs per store and execution to one worker.
+    /// The caller must publish failure/cancellation, including caught panics.
+    pub fn schedule_preparation(
+        &self,
+        priority: PreparationPriority,
+        run: impl FnOnce() + Send + 'static,
+    ) -> Result<(), PreparationError> {
+        self.preparation.submit(priority, run)
+    }
+
     /// Opens the cache (see [`CacheIndex::open`]); nothing is loaded yet.
     pub fn open(cache_dir: &Path) -> Result<Assets, Diagnostic> {
         Ok(Assets::from_index(CacheIndex::open(cache_dir)?))
@@ -518,7 +561,16 @@ impl Assets {
 
     pub fn from_index(index: CacheIndex) -> Assets {
         Assets {
+            preparation: queue::PreparationQueue::new(),
             inner: Arc::new(Mutex::new(Store {
+                runtime_budget_bytes: 512 * 1024 * 1024,
+                runtime_reserved: false,
+                edit_epoch: 0,
+                cache_generation: 0,
+                asset_generations: HashMap::new(),
+                cache_budget_bytes: 512 * 1024 * 1024,
+                cache_costs: HashMap::new(),
+                requests: HashMap::new(),
                 index,
                 metas: HashMap::new(),
                 meshes: HashMap::new(),
@@ -582,7 +634,37 @@ impl Assets {
     }
 
     pub fn closure(&self, id: Uuid) -> Vec<Uuid> {
-        self.lock().index.closure(id)
+        let s = self.lock();
+        let mut seen = HashSet::new();
+        let mut stack = vec![id];
+        while let Some(id) = stack.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            if let Some(e) = s.index.get(id) {
+                stack.extend(e.dependencies.iter().copied());
+            }
+            for (r, m) in &s.runtime_materials {
+                if r.asset == id {
+                    stack.extend(
+                        m.textures()
+                            .into_iter()
+                            .filter_map(|(_, _, t)| t.map(|t| t.asset)),
+                    );
+                }
+            }
+            for (r, m) in &s.runtime_custom_materials {
+                if r.asset == id {
+                    stack.push(Uuid::from_bytes(m.shader));
+                    stack.extend(m.slots.iter().filter_map(|slot| {
+                        slot.texture.as_ref().map(|(id, _)| Uuid::from_bytes(*id))
+                    }));
+                }
+            }
+        }
+        let mut ids: Vec<_> = seen.into_iter().collect();
+        ids.sort();
+        ids
     }
 
     pub fn is_resident(&self, id: Uuid) -> bool {
@@ -598,6 +680,11 @@ impl Assets {
     /// Bumps on every material or volume profile override or restore; a
     /// renderer compares it to rebuild its materials and re-read its
     /// profiles.
+    /// Change history is bounded; consumers reset cached derived resources when this changes.
+    pub fn edit_epoch(&self) -> u64 {
+        self.lock().edit_epoch
+    }
+
     pub fn live_edits(&self) -> u64 {
         self.lock().live_edits
     }
@@ -607,14 +694,22 @@ impl Assets {
     /// by every renderer on this store from its next frame.
     ///
     /// [`restore_material`]: Assets::restore_material
-    pub fn override_material(&self, r: &AssetRef, m: PbrMaterial) {
+    pub fn override_material(&self, r: &AssetRef, m: PbrMaterial) -> Result<(), Diagnostic> {
         let mut s = self.lock();
+        s.admit_replacement(
+            r,
+            KIND_MATERIAL,
+            KIND_CUSTOM_MATERIAL,
+            budget::material_bytes(&m),
+        )?;
+        s.invalidate_asset(r);
         s.materials.insert(r.clone(), Arc::new(m));
         // A shader asset's material switched to the built-in.
         if let Some(Some(_)) = s.custom_materials.insert(r.clone(), None) {
             s.note_material_change(r);
         }
         s.live_edits += 1;
+        Ok(())
     }
 
     /// `m` in place of the cooked material `r` until [`restore_material`]
@@ -626,46 +721,23 @@ impl Assets {
     /// [`restore_material`]: Assets::restore_material
     /// [`override_material`]: Assets::override_material
     /// [`materials_changed_since`]: Assets::materials_changed_since
-    pub fn override_custom_material(&self, r: &AssetRef, m: CustomMaterialPayload) {
+    pub fn override_custom_material(
+        &self,
+        r: &AssetRef,
+        m: CustomMaterialPayload,
+    ) -> Result<(), Diagnostic> {
         let mut s = self.lock();
+        s.admit_replacement(
+            r,
+            KIND_CUSTOM_MATERIAL,
+            KIND_MATERIAL,
+            budget::custom_bytes(&m),
+        )?;
+        s.invalidate_asset(r);
         s.materials.remove(r);
         s.custom_materials.insert(r.clone(), Some(Arc::new(m)));
         s.note_material_change(r);
-    }
-
-    /// `m` as the runtime material `r` (`world.createMaterial`, ADR-0026
-    /// §4), or `None` to remove it: drawn by every renderer on this store
-    /// like a cooked one, kept across clears and evictions.
-    pub fn set_runtime_material(&self, r: &AssetRef, m: Option<PbrMaterial>) {
-        let mut s = self.lock();
-        match m {
-            Some(m) => s.runtime_materials.insert(r.clone(), Arc::new(m)),
-            None => s.runtime_materials.remove(r),
-        };
-        if s.runtime_custom_materials.remove(r).is_some() {
-            s.note_material_change(r);
-        }
-        s.live_edits += 1;
-    }
-
-    /// `m` as the runtime shader asset material `r`
-    /// (`world.createShaderMaterial`, ADR-0031), or `None` to remove
-    /// it: drawn by every renderer on this store like a cooked one, kept
-    /// across clears and evictions. A renderer sees the change through
-    /// [`materials_changed_since`] — for new values alone, it rewrites the
-    /// material's uniform and nothing else.
-    ///
-    /// [`materials_changed_since`]: Assets::materials_changed_since
-    pub fn set_runtime_custom_material(&self, r: &AssetRef, m: Option<CustomMaterialPayload>) {
-        let mut s = self.lock();
-        match m {
-            Some(m) => s.runtime_custom_materials.insert(r.clone(), Arc::new(m)),
-            None => s.runtime_custom_materials.remove(r),
-        };
-        if s.runtime_materials.remove(r).is_some() {
-            s.live_edits += 1;
-        }
-        s.note_material_change(r);
+        Ok(())
     }
 
     /// Bumps on every [`set_runtime_custom_material`] and every live edit
@@ -691,69 +763,51 @@ impl Assets {
 
     /// The runtime materials and meshes of `from` (the store a load to
     /// another cache replaces), so what the game made outlives the switch.
-    pub fn adopt_runtime_assets(&self, from: &Assets) {
+    pub fn adopt_runtime_assets(&self, from: &Assets) -> Result<(), Diagnostic> {
         if Arc::ptr_eq(&self.inner, &from.inner) {
-            return;
+            return Ok(());
         }
-        let (materials, custom, meshes, clips) = {
+        let (materials, custom, meshes, clips, costs, budget) = {
             let f = from.lock();
             (
                 f.runtime_materials.clone(),
                 f.runtime_custom_materials.clone(),
                 f.runtime_meshes.clone(),
                 f.runtime_clips.clone(),
+                f.runtime_costs(),
+                f.runtime_budget_bytes,
             )
         };
         let mut s = self.lock();
-        s.runtime_clips.extend(clips);
-        s.runtime_materials.extend(materials);
+        let mut merged = s.runtime_costs();
+        merged.extend(costs);
+        if s.runtime_reserved || merged.values().sum::<u64>() > budget {
+            return Err(Diagnostic::error(Code::IO, "runtime ownership transfer exceeds the source budget or conflicts with reserved publication"));
+        }
+        s.runtime_budget_bytes = budget;
+        for (r, clip) in clips {
+            s.invalidate_asset(&r);
+            s.runtime_clips.insert(r, clip);
+        }
+        for (r, material) in materials {
+            s.invalidate_asset(&r);
+            s.runtime_custom_materials.remove(&r);
+            s.runtime_materials.insert(r, material);
+        }
         s.live_edits += 1;
         for (r, m) in custom {
+            s.invalidate_asset(&r);
+            s.runtime_materials.remove(&r);
             s.note_material_change(&r);
             s.runtime_custom_materials.insert(r, m);
         }
         for (r, m) in meshes {
+            s.invalidate_asset(&r);
             s.mesh_edits += 1;
             let at = s.mesh_edits;
             s.mesh_changes.insert(r.clone(), at);
             s.runtime_meshes.insert(r, m);
         }
-    }
-
-    /// `m` as the runtime mesh `r` (`world.createMesh`, ADR-0026 §4), or
-    /// `None` to remove it: drawn by every renderer on this store like a
-    /// cooked mesh, kept across clears and evictions. `m`'s bounds are
-    /// recomputed from its positions.
-    pub fn set_runtime_mesh(&self, r: &AssetRef, m: Option<MeshPayload>) {
-        let mut s = self.lock();
-        match m {
-            Some(mut m) => {
-                let (min, max) = bounds_of(&m.vertices);
-                m.bounds_min = min;
-                m.bounds_max = max;
-                s.runtime_meshes.insert(r.clone(), Arc::new(m))
-            }
-            None => s.runtime_meshes.remove(r),
-        };
-        s.meshes.remove(r);
-        s.mesh_edits += 1;
-        let at = s.mesh_edits;
-        s.mesh_changes.insert(r.clone(), at);
-    }
-
-    /// `c` as the runtime clip `r` (`world.createClip`, ADR-0033 § 2), or
-    /// `None` to remove it: read by [`clip`](Self::clip) before the cooked
-    /// ones, kept across clears and evictions. Validated first (the reason
-    /// is the error; the store is unchanged then).
-    pub fn set_runtime_clip(&self, r: &AssetRef, c: Option<Clip>) -> Result<(), String> {
-        if let Some(c) = &c {
-            c.validate()?;
-        }
-        let mut s = self.lock();
-        match c {
-            Some(c) => s.runtime_clips.insert(r.clone(), Arc::new(c)),
-            None => s.runtime_clips.remove(r),
-        };
         Ok(())
     }
 
@@ -791,7 +845,10 @@ impl Assets {
     /// The cooked material `r` again (read on its next use).
     pub fn restore_material(&self, r: &AssetRef) {
         let mut s = self.lock();
+        s.invalidate_asset(r);
         s.materials.remove(r);
+        s.cache_costs.remove(&(r.clone(), KIND_MATERIAL));
+        s.cache_costs.remove(&(r.clone(), KIND_CUSTOM_MATERIAL));
         if s.custom_materials.remove(r).is_some() {
             s.note_material_change(r);
         }
@@ -803,16 +860,21 @@ impl Assets {
     ///
     /// [`restore_volume`]: Assets::restore_volume
     /// [`override_material`]: Assets::override_material
-    pub fn override_volume(&self, r: &AssetRef, p: VolumeProfile) {
+    pub fn override_volume(&self, r: &AssetRef, p: VolumeProfile) -> Result<(), Diagnostic> {
         let mut s = self.lock();
+        s.admit_cache(r, KIND_JSON, std::mem::size_of_val(&p) as u64)?;
+        s.invalidate_asset(r);
         s.volumes.insert(r.clone(), p);
         s.live_edits += 1;
+        Ok(())
     }
 
     /// The cooked volume profile `r` again (read on its next use).
     pub fn restore_volume(&self, r: &AssetRef) {
         let mut s = self.lock();
+        s.invalidate_asset(r);
         s.volumes.remove(r);
+        s.cache_costs.remove(&(r.clone(), KIND_JSON));
         s.live_edits += 1;
     }
 
@@ -823,23 +885,7 @@ impl Assets {
             meshes: s.meshes.len(),
             textures: s.textures.len(),
             materials: s.materials.len(),
-            bytes: s
-                .meshes
-                .values()
-                .map(|m| {
-                    (m.vertices.len() * std::mem::size_of::<fynkel_cooked::payload::Vertex>()
-                        + m.indices.len() * 4) as u64
-                })
-                .sum::<u64>()
-                + s.textures
-                    .values()
-                    .map(|t| t.texels.len() as u64)
-                    .sum::<u64>()
-                + s.environments
-                    .values()
-                    .flatten()
-                    .map(|e| (e.specular.len() + e.irradiance.len()) as u64 * 2)
-                    .sum::<u64>(),
+            bytes: s.cache_bytes(),
             evictions: s.evictions,
         }
     }
@@ -1184,17 +1230,19 @@ impl Assets {
     /// validated. The cook checked the document against the schema and
     /// the database, so this only reads it.
     pub fn controller(&self, r: &AssetRef) -> Result<Arc<ControllerDef>, Diagnostic> {
+        let generation = self.lock().generation(r.asset);
         if let Some(c) = self.lock().controllers.get(r) {
             return Ok(c.clone());
         }
         let (entry, meta) = {
-            let mut s = self.lock();
+            let s = self.lock();
             let entry = s
                 .index
                 .object(r.asset)
                 .map_err(|d| d.with_pointer(r.sub.clone()))?
                 .clone();
-            let meta = s.meta(&entry)?;
+            drop(s);
+            let meta = self.meta(&entry)?;
             (entry, meta)
         };
         if entry.kind != "document/controller" || !r.sub.is_empty() {
@@ -1219,7 +1267,10 @@ impl Assets {
             d
         })?;
         let def = Arc::new(def);
-        self.lock().controllers.insert(r.clone(), def.clone());
+        let mut s = self.lock();
+        s.check_generation(r.asset, generation)?;
+        s.admit_cache(r, KIND_JSON, budget::controller_bytes(&def))?;
+        s.controllers.insert(r.clone(), def.clone());
         Ok(def)
     }
 
@@ -1279,27 +1330,19 @@ impl Assets {
             return;
         }
         let gone: HashSet<Uuid> = gone.into_iter().collect();
-        s.meshes.retain(|r, _| !gone.contains(&r.asset));
-        s.textures.retain(|r, _| !gone.contains(&r.asset));
-        s.environments.retain(|r, _| !gone.contains(&r.asset));
-        s.materials.retain(|r, _| !gone.contains(&r.asset));
-        s.custom_materials.retain(|r, _| !gone.contains(&r.asset));
-        s.shaders.retain(|id, _| !gone.contains(id));
-        s.clips.retain(|r, _| !gone.contains(&r.asset));
-        s.blends.retain(|r, _| !gone.contains(&r.asset));
-        s.controllers.retain(|r, _| !gone.contains(&r.asset));
-        s.volumes.retain(|r, _| !gone.contains(&r.asset));
-        s.physics_materials.retain(|r, _| !gone.contains(&r.asset));
-        s.skins.retain(|r, _| !gone.contains(&r.asset));
-        s.sounds.retain(|r, _| !gone.contains(&r.asset));
-        s.metas.retain(|id, _| !gone.contains(id));
-        s.prefab_docs.retain(|id, _| !gone.contains(id));
-        s.evictions += 1;
+        s.evict_ids(&gone);
     }
 
     /// Drops every resident payload (counts stay; payloads reload on use).
     pub fn clear(&self) {
         let mut s = self.lock();
+        s.cache_generation += 1;
+        s.asset_generations.clear();
+        s.cache_costs.clear();
+        s.requests.clear();
+        s.warm.clear();
+        s.prefab_docs.clear();
+        s.sounds.clear();
         s.meshes.clear();
         s.textures.clear();
         s.environments.clear();
@@ -1324,11 +1367,16 @@ impl Assets {
     /// or when a release evicts `r`'s id.
     ///
     /// [`clear`]: Assets::clear
-    pub fn insert_mesh(&self, r: &AssetRef, m: MeshPayload) {
-        self.lock().meshes.insert(r.clone(), Arc::new(m));
+    pub fn insert_mesh(&self, r: &AssetRef, m: MeshPayload) -> Result<(), Diagnostic> {
+        let mut s = self.lock();
+        s.admit_cache(r, KIND_MESH, budget::mesh_bytes(&m))?;
+        s.invalidate_asset(r);
+        s.meshes.insert(r.clone(), Arc::new(m));
+        Ok(())
     }
 
     pub fn mesh(&self, r: &AssetRef) -> Result<Arc<MeshPayload>, Diagnostic> {
+        let generation = self.lock().generation(r.asset);
         {
             let s = self.lock();
             if let Some(m) = s.runtime_meshes.get(r).or_else(|| s.meshes.get(r)) {
@@ -1338,18 +1386,29 @@ impl Assets {
         let bytes = self.chunk(r, KIND_MESH)?;
         let payload = decode_mesh(&bytes).ok_or_else(|| self.malformed(r, "MESH"))?;
         let payload = Arc::new(payload);
-        self.lock().meshes.insert(r.clone(), payload.clone());
+        let mut s = self.lock();
+        s.check_generation(r.asset, generation)?;
+        s.admit_cache(r, KIND_MESH, budget::mesh_bytes(&payload))?;
+        s.meshes.insert(r.clone(), payload.clone());
         Ok(payload)
     }
 
     pub fn texture(&self, r: &AssetRef) -> Result<Arc<TexturePayload>, Diagnostic> {
+        let generation = self.lock().generation(r.asset);
         if let Some(t) = self.lock().textures.get(r) {
             return Ok(t.clone());
         }
         let bytes = self.chunk(r, KIND_TEXTURE)?;
         let payload = decode_texture(&bytes).ok_or_else(|| self.malformed(r, "TEXR"))?;
         let payload = Arc::new(payload);
-        self.lock().textures.insert(r.clone(), payload.clone());
+        let mut s = self.lock();
+        s.check_generation(r.asset, generation)?;
+        s.admit_cache(
+            r,
+            KIND_TEXTURE,
+            (std::mem::size_of_val(&*payload) + payload.texels.capacity()) as u64,
+        )?;
+        s.textures.insert(r.clone(), payload.clone());
         Ok(payload)
     }
 
@@ -1358,6 +1417,7 @@ impl Assets {
     /// — the constant ambient stays), an error only when the object cannot
     /// be read.
     pub fn environment(&self, r: &AssetRef) -> Result<Option<Arc<EnvironmentPayload>>, Diagnostic> {
+        let generation = self.lock().generation(r.asset);
         if let Some(e) = self.lock().environments.get(r) {
             return Ok(e.clone());
         }
@@ -1368,13 +1428,24 @@ impl Assets {
         } else {
             None
         };
-        self.lock().environments.insert(r.clone(), payload.clone());
+        let mut s = self.lock();
+        s.check_generation(r.asset, generation)?;
+        s.admit_cache(
+            r,
+            KIND_ENVIRONMENT,
+            payload.as_ref().map_or(0, |p| {
+                (std::mem::size_of_val(&**p)
+                    + (p.specular.capacity() + p.irradiance.capacity()) * 2) as u64
+            }),
+        )?;
+        s.environments.insert(r.clone(), payload.clone());
         Ok(payload)
     }
 
     /// The cooked `PbrMaterial`. A custom-shader material has no `MATL`
     /// chunk (`FYN-R0006`).
     pub fn material(&self, r: &AssetRef) -> Result<PbrMaterial, Diagnostic> {
+        let generation = self.lock().generation(r.asset);
         {
             let s = self.lock();
             if let Some(m) = s.runtime_materials.get(r).or_else(|| s.materials.get(r)) {
@@ -1383,7 +1454,19 @@ impl Assets {
         }
         let bytes = self.chunk(r, KIND_MATERIAL)?;
         let m = decode_material(&bytes).ok_or_else(|| self.malformed(r, "MATL"))?;
-        self.lock().materials.insert(r.clone(), Arc::new(m.clone()));
+        let mut s = self.lock();
+        s.check_generation(r.asset, generation)?;
+        s.admit_cache(
+            r,
+            KIND_MATERIAL,
+            (std::mem::size_of_val(&m)
+                + m.textures()
+                    .iter()
+                    .filter_map(|(_, _, r)| *r)
+                    .map(|r| r.sub.capacity())
+                    .sum::<usize>()) as u64,
+        )?;
+        s.materials.insert(r.clone(), Arc::new(m.clone()));
         Ok(m)
     }
 
@@ -1395,6 +1478,7 @@ impl Assets {
         &self,
         r: &AssetRef,
     ) -> Result<Option<Arc<CustomMaterialPayload>>, Diagnostic> {
+        let generation = self.lock().generation(r.asset);
         {
             let s = self.lock();
             if let Some(m) = s.runtime_custom_materials.get(r) {
@@ -1415,15 +1499,31 @@ impl Assets {
         } else {
             None
         };
-        self.lock()
-            .custom_materials
-            .insert(r.clone(), payload.clone());
+        let mut s = self.lock();
+        s.check_generation(r.asset, generation)?;
+        s.admit_cache(
+            r,
+            KIND_CUSTOM_MATERIAL,
+            payload.as_ref().map_or(0, |m| {
+                (std::mem::size_of_val(&**m)
+                    + m.block.capacity()
+                    + m.slots.capacity()
+                        * std::mem::size_of::<fynkel_cooked::payload::MaterialSlot>()
+                    + m.slots
+                        .iter()
+                        .filter_map(|s| s.texture.as_ref())
+                        .map(|(_, s)| s.capacity())
+                        .sum::<usize>()) as u64
+            }),
+        )?;
+        s.custom_materials.insert(r.clone(), payload.clone());
         Ok(payload)
     }
 
     /// A shader asset's text as the cook checked it (ADR-0031, `SHDR`):
     /// the header and the WGSL, for `fynkel_shader::parse`.
     pub fn shader_source(&self, id: Uuid) -> Result<Arc<str>, Diagnostic> {
+        let generation = self.lock().generation(id);
         if let Some(t) = self.lock().shaders.get(&id) {
             return Ok(t.clone());
         }
@@ -1435,7 +1535,10 @@ impl Assets {
         let text: Arc<str> = String::from_utf8(bytes)
             .map_err(|_| self.malformed(&r, "SHDR"))?
             .into();
-        self.lock().shaders.insert(id, text.clone());
+        let mut s = self.lock();
+        s.check_generation(id, generation)?;
+        s.admit_cache(&r, KIND_SHADER, text.len() as u64)?;
+        s.shaders.insert(id, text.clone());
         Ok(text)
     }
 
@@ -1444,6 +1547,7 @@ impl Assets {
     /// the sidecar marked `stream: true`, the `STRM` chunk's encoded
     /// source, decoded by the engine as it plays.
     pub fn sound(&self, r: &AssetRef) -> Result<Arc<AudioClip>, Diagnostic> {
+        let generation = self.lock().generation(r.asset);
         if let Some(c) = self.lock().sounds.get(r) {
             return Ok(c.clone());
         }
@@ -1458,20 +1562,33 @@ impl Assets {
             AudioClip::new(payload.sample_rate, payload.channels, payload.samples)
                 .map_err(|msg| self.malformed(r, "CLIP").with_suggestion(msg))?
         };
-        self.lock().sounds.insert(r.clone(), clip.clone());
+        let mut s = self.lock();
+        s.check_generation(r.asset, generation)?;
+        s.admit_cache(
+            r,
+            KIND_CLIP,
+            (std::mem::size_of_val(&*clip)
+                + clip.samples.capacity() * 4
+                + clip
+                    .stream
+                    .as_ref()
+                    .map_or(0, |(s, _)| s.bytes.len() + s.codec.capacity())) as u64,
+        )?;
+        s.sounds.insert(r.clone(), clip.clone());
         Ok(clip)
     }
 
     /// Whether the object has a chunk of `kind` for `r`'s sub-asset
     /// (`Err` when the object itself is missing or unreadable).
     fn has_chunk(&self, r: &AssetRef, kind: [u8; 4]) -> Result<bool, Diagnostic> {
-        let mut s = self.lock();
+        let s = self.lock();
         let entry = s
             .index
             .object(r.asset)
             .map_err(|d| d.with_pointer(r.sub.clone()))?
             .clone();
-        let meta = s.meta(&entry)?;
+        drop(s);
+        let meta = self.meta(&entry)?;
         Ok(meta
             .chunks
             .iter()
@@ -1481,6 +1598,7 @@ impl Assets {
     /// The cooked animation clip (an `ANIM` chunk, `anim/<a>`) as the
     /// core's `Clip`, validated (M3-19).
     pub fn clip(&self, r: &AssetRef) -> Result<Arc<Clip>, Diagnostic> {
+        let generation = self.lock().generation(r.asset);
         {
             let s = self.lock();
             if let Some(c) = s.runtime_clips.get(r).or_else(|| s.clips.get(r)) {
@@ -1497,7 +1615,10 @@ impl Assets {
             d
         })?;
         let clip = Arc::new(clip);
-        self.lock().clips.insert(r.clone(), clip.clone());
+        let mut s = self.lock();
+        s.check_generation(r.asset, generation)?;
+        s.admit_cache(r, KIND_ANIMATION, budget::clip_bytes(&clip))?;
+        s.clips.insert(r.clone(), clip.clone());
         Ok(clip)
     }
 
@@ -1505,17 +1626,19 @@ impl Assets {
     /// core's `BlendSpace`, validated. The cook checked the document
     /// against the schema and the database, so this only reads it.
     pub fn blend(&self, r: &AssetRef) -> Result<Arc<BlendSpace>, Diagnostic> {
+        let generation = self.lock().generation(r.asset);
         if let Some(b) = self.lock().blends.get(r) {
             return Ok(b.clone());
         }
         let (entry, meta) = {
-            let mut s = self.lock();
+            let s = self.lock();
             let entry = s
                 .index
                 .object(r.asset)
                 .map_err(|d| d.with_pointer(r.sub.clone()))?
                 .clone();
-            let meta = s.meta(&entry)?;
+            drop(s);
+            let meta = self.meta(&entry)?;
             (entry, meta)
         };
         if entry.kind != "document/blend" || !r.sub.is_empty() {
@@ -1552,7 +1675,22 @@ impl Assets {
             d
         })?;
         let space = Arc::new(space);
-        self.lock().blends.insert(r.clone(), space.clone());
+        let mut s = self.lock();
+        s.check_generation(r.asset, generation)?;
+        s.admit_cache(
+            r,
+            KIND_JSON,
+            (std::mem::size_of_val(&*space)
+                + space.name.capacity()
+                + space.parameter.capacity()
+                + space.points.capacity() * std::mem::size_of::<BlendPoint>()
+                + space
+                    .points
+                    .iter()
+                    .map(|p| p.clip.sub.capacity())
+                    .sum::<usize>()) as u64,
+        )?;
+        s.blends.insert(r.clone(), space.clone());
         Ok(space)
     }
 
@@ -1560,17 +1698,19 @@ impl Assets {
     /// core's `VolumeProfile`. The cook checked the document against the
     /// schema, so this only reads it.
     pub fn volume_profile(&self, r: &AssetRef) -> Result<VolumeProfile, Diagnostic> {
+        let generation = self.lock().generation(r.asset);
         if let Some(v) = self.lock().volumes.get(r) {
             return Ok(*v);
         }
         let (entry, meta) = {
-            let mut s = self.lock();
+            let s = self.lock();
             let entry = s
                 .index
                 .object(r.asset)
                 .map_err(|d| d.with_pointer(r.sub.clone()))?
                 .clone();
-            let meta = s.meta(&entry)?;
+            drop(s);
+            let meta = self.meta(&entry)?;
             (entry, meta)
         };
         if entry.kind != "document/volume" || !r.sub.is_empty() {
@@ -1594,7 +1734,10 @@ impl Assets {
             return Err(m);
         }
         let profile = volume.profile;
-        self.lock().volumes.insert(r.clone(), profile);
+        let mut s = self.lock();
+        s.check_generation(r.asset, generation)?;
+        s.admit_cache(r, KIND_JSON, std::mem::size_of_val(&profile) as u64)?;
+        s.volumes.insert(r.clone(), profile);
         Ok(profile)
     }
 
@@ -1602,17 +1745,19 @@ impl Assets {
     /// as physics' `PhysicsMaterial`. The cook checked the document
     /// against the schema, so this only reads it.
     pub fn physics_material(&self, r: &AssetRef) -> Result<PhysicsMaterial, Diagnostic> {
+        let generation = self.lock().generation(r.asset);
         if let Some(m) = self.lock().physics_materials.get(r) {
             return Ok(*m);
         }
         let (entry, meta) = {
-            let mut s = self.lock();
+            let s = self.lock();
             let entry = s
                 .index
                 .object(r.asset)
                 .map_err(|d| d.with_pointer(r.sub.clone()))?
                 .clone();
-            let meta = s.meta(&entry)?;
+            drop(s);
+            let meta = self.meta(&entry)?;
             (entry, meta)
         };
         if entry.kind != "document/physics_material" || !r.sub.is_empty() {
@@ -1636,7 +1781,10 @@ impl Assets {
             return Err(m);
         }
         let material = view.material;
-        self.lock().physics_materials.insert(r.clone(), material);
+        let mut s = self.lock();
+        s.check_generation(r.asset, generation)?;
+        s.admit_cache(r, KIND_JSON, std::mem::size_of_val(&material) as u64)?;
+        s.physics_materials.insert(r.clone(), material);
         Ok(material)
     }
 
@@ -1649,9 +1797,10 @@ impl Assets {
         id: fynkel_contracts::Uuid,
     ) -> Result<(String, String), Diagnostic> {
         let (entry, meta) = {
-            let mut s = self.lock();
+            let s = self.lock();
             let entry = s.index.object(id)?.clone();
-            let meta = s.meta(&entry)?;
+            drop(s);
+            let meta = self.meta(&entry)?;
             (entry, meta)
         };
         let Some(kind) = entry.kind.strip_prefix("document/") else {
@@ -1672,6 +1821,7 @@ impl Assets {
     /// The cooked skin (a `SKIN` chunk, `skin/<s>`) as the core's `Skin`,
     /// validated (M3-19).
     pub fn skin(&self, r: &AssetRef) -> Result<Arc<Skin>, Diagnostic> {
+        let generation = self.lock().generation(r.asset);
         if let Some(k) = self.lock().skins.get(r) {
             return Ok(k.clone());
         }
@@ -1683,6 +1833,7 @@ impl Assets {
                 .joints
                 .into_iter()
                 .map(|j| Joint {
+                    binding: j.binding,
                     name: j.name,
                     parent: j.parent,
                     inverse_bind: glam::Mat4::from_cols_array(&j.inverse_bind),
@@ -1700,7 +1851,21 @@ impl Assets {
             d
         })?;
         let skin = Arc::new(skin);
-        self.lock().skins.insert(r.clone(), skin.clone());
+        let mut s = self.lock();
+        s.check_generation(r.asset, generation)?;
+        s.admit_cache(
+            r,
+            KIND_SKIN,
+            (std::mem::size_of_val(&*skin)
+                + skin.skeleton.capacity()
+                + skin.joints.capacity() * std::mem::size_of::<Joint>()
+                + skin
+                    .joints
+                    .iter()
+                    .map(|j| j.name.capacity() + j.binding.capacity())
+                    .sum::<usize>()) as u64,
+        )?;
+        s.skins.insert(r.clone(), skin.clone());
         Ok(skin)
     }
 
@@ -1712,9 +1877,10 @@ impl Assets {
     /// describe (a cache from another build: recook).
     pub fn scene(&self, id: Uuid) -> Result<CookedScene, Vec<Diagnostic>> {
         let (entry, meta) = {
-            let mut s = self.lock();
+            let s = self.lock();
             let entry = s.index.object(id).map_err(|d| vec![d])?.clone();
-            let meta = s.meta(&entry).map_err(|d| vec![d])?;
+            drop(s);
+            let meta = self.meta(&entry).map_err(|d| vec![d])?;
             (entry, meta)
         };
         if entry.kind != "document/scene" {
@@ -1776,76 +1942,127 @@ impl Assets {
         if let Some(p) = self.lock().prefab_docs.get(&id) {
             return Ok((**p).clone());
         }
+        let generation = self.lock().generation(id);
         let prefab = self.read_prefab(id)?;
-        if self.is_resident(id) {
-            self.lock().prefab_docs.insert(id, Arc::new(prefab.clone()));
+        let mut s = self.lock();
+        s.check_generation(id, generation).map_err(|d| vec![d])?;
+        if s.counts.contains_key(&id) {
+            s.admit_cache(&AssetRef::new(id), *b"PREF", budget::prefab_bytes(&prefab))
+                .map_err(|d| vec![d])?;
+            s.prefab_docs.insert(id, Arc::new(prefab.clone()));
         }
         Ok(prefab)
     }
 
-    /// Reads every payload of `ids` into memory — meshes, textures,
-    /// materials, environments, clips, sounds, skins, prefab documents —
-    /// so a load prepared on a background thread (ADR-0038) finds them all
-    /// at activation, and the renderer at its first draw. Call it with
-    /// the ids retained ([`retain`](Assets::retain)): what nothing retains
-    /// may be evicted again. `done` counts the ids finished (a load's
-    /// progress); `stop` ends it early. A payload that fails is left for
-    /// the activation to report.
+    /// Decodes the complete retained dependency closure. Any missing/corrupt
+    /// dependency or cancellation rejects readiness; failures are never deferred
+    /// to activation or a first draw. GPU upload remains a separate stage.
     pub fn preload(
         &self,
         ids: &[Uuid],
         done: &std::sync::atomic::AtomicUsize,
         stop: &std::sync::atomic::AtomicBool,
-    ) {
+    ) -> Result<(), Vec<Diagnostic>> {
         use std::sync::atomic::Ordering;
+        let mut failures = Vec::new();
         for &id in ids {
             if stop.load(Ordering::Relaxed) {
-                return;
+                return Err(vec![Diagnostic::error(
+                    Code::IO,
+                    "asset preparation cancelled",
+                )
+                .with_id(id.to_string())]);
             }
-            let chunks = {
-                let mut s = self.lock();
-                let entry = s.index.object(id).ok().cloned();
-                entry.and_then(|e| {
-                    let prefab = e.kind == "document/prefab";
-                    s.meta(&e).ok().map(|m| (m, prefab))
-                })
-            };
-            if let Some((meta, prefab)) = chunks {
-                if prefab {
-                    let _ = self.prefab(id);
-                }
-                for (kind, sub, _) in &meta.chunks {
-                    let r = AssetRef {
-                        asset: id,
-                        sub: sub.clone(),
-                    };
-                    let warm = match *kind {
-                        KIND_MESH => self.mesh(&r).ok().map(|_| Warm::Mesh(r.clone())),
-                        KIND_TEXTURE => self.texture(&r).ok().map(|_| Warm::Texture(r.clone())),
-                        KIND_MATERIAL => self.material(&r).ok().map(|_| Warm::Material(r.clone())),
-                        _ => None,
-                    };
-                    if let Some(w) = warm {
-                        self.lock().warm.push_back(w);
-                        continue;
-                    }
-                    let _ = match *kind {
-                        KIND_ENVIRONMENT => self.environment(&r).map(|_| ()),
-                        KIND_CUSTOM_MATERIAL => self.custom_material(&r).map(|_| ()),
-                        KIND_ANIMATION => self.clip(&r).map(|_| ()),
-                        KIND_CLIP => self.sound(&r).map(|_| ()),
-                        KIND_SKIN => self.skin(&r).map(|_| ()),
+            let entry = self.lock().index.object(id).cloned();
+            let object = entry.and_then(|entry| self.meta(&entry).map(|meta| (entry, meta)));
+            match object {
+                Err(error) => failures.push(error),
+                Ok((entry, meta)) => {
+                    let r = AssetRef::new(id);
+                    let document = match entry.kind.as_str() {
+                        "document/prefab" => self.prefab(id).map(|_| ()),
+                        "document/blend" => self.blend(&r).map(|_| ()).map_err(|e| vec![e]),
+                        "document/controller" => {
+                            self.controller(&r).map(|_| ()).map_err(|e| vec![e])
+                        }
+                        "document/volume" => {
+                            self.volume_profile(&r).map(|_| ()).map_err(|e| vec![e])
+                        }
+                        "document/physics_material" => {
+                            self.physics_material(&r).map(|_| ()).map_err(|e| vec![e])
+                        }
                         _ => Ok(()),
                     };
+                    if let Err(errors) = document {
+                        failures.extend(errors);
+                    }
+                    for (kind, sub, _) in &meta.chunks {
+                        if stop.load(Ordering::Relaxed) {
+                            return Err(vec![Diagnostic::error(
+                                Code::IO,
+                                "asset preparation cancelled",
+                            )
+                            .with_id(id.to_string())]);
+                        }
+                        let r = AssetRef {
+                            asset: id,
+                            sub: sub.clone(),
+                        };
+                        let decoded = match *kind {
+                            KIND_MESH => self.mesh(&r).map(|_| Some(Warm::Mesh(r.clone()))),
+                            KIND_TEXTURE => {
+                                self.texture(&r).map(|_| Some(Warm::Texture(r.clone())))
+                            }
+                            KIND_MATERIAL => self
+                                .custom_material(&r)
+                                .and_then(|_| self.material(&r))
+                                .map(|_| Some(Warm::Material(r.clone()))),
+                            KIND_ENVIRONMENT => self.environment(&r).map(|_| None),
+                            KIND_CUSTOM_MATERIAL => self
+                                .custom_material(&r)
+                                .map(|_| Some(Warm::Material(r.clone()))),
+                            KIND_ANIMATION => self.clip(&r).map(|_| None),
+                            KIND_CLIP | KIND_STREAM => self.sound(&r).map(|_| None),
+                            KIND_SKIN => self.skin(&r).map(|_| None),
+                            KIND_SHADER => self.shader_source(id).map(|_| None),
+                            _ => Ok(None),
+                        };
+                        match decoded {
+                            Ok(Some(warm)) => {
+                                let mut s = self.lock();
+                                if !s.warm.contains(&warm) {
+                                    s.warm.push_back(warm);
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(error) => failures.push(error),
+                        }
+                    }
                 }
             }
             done.fetch_add(1, Ordering::Relaxed);
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures)
         }
     }
 
     /// The next payload a background load made resident for the GPU
     /// (ADR-0038 §5), oldest first; one evicted since (a cancelled load)
     /// is skipped. A renderer calls it within a per-frame budget.
+    pub fn warm_count(&self) -> usize {
+        self.lock().warm.len()
+    }
+
+    pub fn defer_warm(&self, item: Warm) {
+        let mut s = self.lock();
+        if s.counts.get(&item.asset().asset).copied().unwrap_or(0) > 0 && !s.warm.contains(&item) {
+            s.warm.push_back(item);
+        }
+    }
+
     pub fn next_warm(&self) -> Option<Warm> {
         let mut s = self.lock();
         while let Some(w) = s.warm.pop_front() {
@@ -1858,9 +2075,10 @@ impl Assets {
 
     fn read_prefab(&self, id: Uuid) -> Result<CookedPrefab, Vec<Diagnostic>> {
         let (entry, meta) = {
-            let mut s = self.lock();
+            let s = self.lock();
             let entry = s.index.object(id).map_err(|d| vec![d])?.clone();
-            let meta = s.meta(&entry).map_err(|d| vec![d])?;
+            drop(s);
+            let meta = self.meta(&entry).map_err(|d| vec![d])?;
             (entry, meta)
         };
         // A prefab document, or an imported source whose cooked object
@@ -1966,13 +2184,14 @@ impl Assets {
     /// The payload of the chunk of `kind` whose `sub` is the reference's.
     fn chunk(&self, r: &AssetRef, kind: [u8; 4]) -> Result<Vec<u8>, Diagnostic> {
         let (entry, meta) = {
-            let mut s = self.lock();
+            let s = self.lock();
             let entry = s
                 .index
                 .object(r.asset)
                 .map_err(|d| d.with_pointer(r.sub.clone()))?
                 .clone();
-            let meta = s.meta(&entry)?;
+            drop(s);
+            let meta = self.meta(&entry)?;
             (entry, meta)
         };
         self.read_chunk(&entry, &meta, kind, &r.sub)
@@ -2008,10 +2227,11 @@ impl Assets {
     }
 }
 
-impl Store {
-    /// The object's chunk table (cached per asset while resident).
-    fn meta(&mut self, entry: &IndexEntry) -> Result<Arc<ObjectMeta>, Diagnostic> {
-        if let Some(m) = self.metas.get(&entry.id) {
+impl Assets {
+    /// File I/O and decoding never run while holding the shared store lock.
+    fn meta(&self, entry: &IndexEntry) -> Result<Arc<ObjectMeta>, Diagnostic> {
+        let generation = self.lock().generation(entry.id);
+        if let Some(m) = self.lock().metas.get(&entry.id) {
             return Ok(m.clone());
         }
         let file = entry.file.clone().expect("object() checked the file");
@@ -2047,7 +2267,15 @@ impl Store {
             chunks,
             scene_info,
         });
-        self.metas.insert(entry.id, m.clone());
+        let cost = std::mem::size_of_val(&*m)
+            + m.file.as_os_str().len()
+            + m.chunks.capacity() * std::mem::size_of::<([u8; 4], String, usize)>()
+            + m.chunks.iter().map(|(_, s, _)| s.capacity()).sum::<usize>()
+            + m.scene_info.as_ref().map_or(0, budget::json_bytes);
+        let mut s = self.lock();
+        s.check_generation(entry.id, generation)?;
+        s.admit_cache(&AssetRef::new(entry.id), *b"META", cost as u64)?;
+        s.metas.insert(entry.id, m.clone());
         Ok(m)
     }
 }

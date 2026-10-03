@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart' show AssetRef, DataAsset;
+import 'package:fynkel/gameplay.dart' show AssetRef, DataAsset;
 
 /// The project's assets (Unity's `AssetDatabase`), as they are when asked.
 abstract interface class EditorAssets {

@@ -30,8 +30,8 @@ use fynkel_physics::{CharacterController, ColliderShape, Hit, QueryKind, QuerySp
 use fynkel_scene::{Parent, Transform};
 use glam::{Mat4, Quat, Vec3};
 
-use super::animation::{find_named, AnimatorRun};
-use super::{Diagnostic, Name, World};
+use super::animation::{find_binding, AnimatorRun};
+use super::{Diagnostic, World};
 use crate::animation::controller::{ControllerDef, IkKind, IkWeight};
 use crate::command::Lane;
 
@@ -58,6 +58,13 @@ pub struct IkRun {
 }
 
 impl IkRun {
+    pub(super) fn invalidate_bindings(&mut self) {
+        for nodes in &mut self.nodes {
+            nodes.fill(None);
+        }
+        self.reported.fill(false);
+    }
+
     pub fn new(goals: usize) -> IkRun {
         IkRun {
             targets: vec![None; goals],
@@ -73,11 +80,14 @@ impl IkRun {
 /// the name.
 fn node(ecs: &Ecs, under: Entity, slot: &mut Option<Entity>, name: &str) -> Option<Entity> {
     if let Some(e) = *slot {
-        if ecs.get::<Name>(e).is_ok_and(|n| n.value == name) {
+        if ecs
+            .get::<crate::AnimationBinding>(e)
+            .is_ok_and(|n| n.key == name)
+        {
             return Some(e);
         }
     }
-    *slot = find_named(ecs, under, name);
+    *slot = find_binding(ecs, under, name);
     *slot
 }
 
@@ -85,15 +95,21 @@ fn node(ecs: &Ecs, under: Entity, slot: &mut Option<Entity>, name: &str) -> Opti
 /// the world.
 fn object(ecs: &Ecs, animator: Entity, slot: &mut Option<Entity>, name: &str) -> Option<Entity> {
     if let Some(e) = *slot {
-        if ecs.get::<Name>(e).is_ok_and(|n| n.value == name) {
+        if ecs
+            .get::<crate::AnimationBinding>(e)
+            .is_ok_and(|n| n.key == name)
+        {
             return Some(e);
         }
     }
-    *slot = find_named(ecs, animator, name).or_else(|| {
-        ecs.query::<(&fynkel_ecs::internal::Handle, &Name)>()
+    *slot = find_binding(ecs, animator, name).or_else(|| {
+        let mut query = ecs.query::<(&fynkel_ecs::internal::Handle, &crate::AnimationBinding)>();
+        let mut matching = query
             .iter()
-            .find(|(_, n)| n.value == name)
-            .map(|(h, _)| h.0)
+            .filter(|(_, binding)| binding.key == name)
+            .map(|(h, _)| h.0);
+        let first = matching.next()?;
+        matching.next().is_none().then_some(first)
     });
     *slot
 }

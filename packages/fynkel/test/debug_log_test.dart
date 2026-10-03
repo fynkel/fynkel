@@ -6,7 +6,7 @@
 
 import 'dart:convert';
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:test/test.dart';
 
 class Talker extends Behaviour {

@@ -121,7 +121,7 @@ typedef enum FynkelComponent {
   FYNKEL_COMPONENT_EMITTER = 19,
   /* A sensor collider that names an event for Dart (M3-12). */
   FYNKEL_COMPONENT_TRIGGER_ZONE = 20,
-  /* Animation (M3-19): a clip player over the named nodes below it, and
+  /* Animation (M3-19): a clip player over the bound nodes below it, and
    * the skin a skinned mesh deforms with. */
   FYNKEL_COMPONENT_ANIMATOR = 21,
   FYNKEL_COMPONENT_SKIN = 22,
@@ -728,7 +728,8 @@ FynkelStatus fynkel_world_gameplay_state(FynkelWorld* world, FynkelBufferView* o
  * state payload only when changed. Reading does not consume other cursors.
  * Same restrictions and view lifetime as gameplay_state. Additive ABI v5 API. */
 FynkelStatus fynkel_world_gameplay_state_since(FynkelWorld* world, uint64_t since, FynkelBufferView* out_view);
-/* Bounded-journal identity changes. Cursor local to world, zero initializes.
+/* Bounded-journal callback identity/activity changes. Zero initializes.
+ * Cursor is local to world. Activity-only rows include the unchanged name.
  * Reply: cursor u64, mode u32 (0 unchanged, 1 reset, 2 delta). Modes 1/2:
  * count u32; rows (entity, alive u32, and length u32 + UTF-8 name if alive).
  * A reset replaces all cached identities; delta rows upsert or retire them.

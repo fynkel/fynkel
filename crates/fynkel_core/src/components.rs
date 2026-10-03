@@ -10,6 +10,15 @@ use fynkel_contracts::{AssetRef, ComponentId, ObjectRef};
 use fynkel_schema_derive::Schema;
 use glam::Vec3;
 
+/// Stable target identity within an animator/skeleton subtree. Display names
+/// may change freely. Imported nodes use cook-authored keys; runtime games
+/// assign their own keys explicitly. Duplicate keys are ambiguous, never first-wins.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Schema)]
+#[schema(kind = "component", id = 28, name = "fynkel.AnimationBinding")]
+pub struct AnimationBinding {
+    pub key: String,
+}
+
 /// Camera projection model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Schema)]
 #[schema(name = "fynkel.Projection")]
@@ -1092,6 +1101,7 @@ macro_rules! builtin_components {
             /// The object's layer and tags (ADR-0020).
             Layer($crate::Layer) = LAYER [];
             Tags($crate::Tags) = TAGS [];
+            AnimationBinding($crate::AnimationBinding) = ANIMATION_BINDING [];
         }
     };
 }
@@ -1328,6 +1338,7 @@ impl ComponentValue {
             ComponentValue::Volume(c) => c.validate()?,
             ComponentValue::Layer(c) => c.validate()?,
             ComponentValue::Tags(_) => {}
+            ComponentValue::AnimationBinding(_) => {}
         }
         Ok(())
     }

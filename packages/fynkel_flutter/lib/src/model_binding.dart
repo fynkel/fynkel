@@ -7,7 +7,7 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 /// Makes a [GameModel] available to the widgets below it:
 /// `ModelBinding.of<HudModel>(context)`.

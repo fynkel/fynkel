@@ -8,7 +8,7 @@
   "tools": {
     "version": "0.0.1"
   },
-  "schemaFingerprint": "0xbd96f0308508f61f",
+  "schemaFingerprint": "0x65d9f39b4aa79409",
   "documents": {
     "blend": 1,
     "controller": 1,
@@ -25,14 +25,14 @@
   },
   "importers": {
     "fynkel.audio": 2,
-    "fynkel.fbx": 4,
+    "fynkel.fbx": 5,
     "fynkel.file": 1,
-    "fynkel.gltf": 8,
+    "fynkel.gltf": 9,
     "fynkel.image": 1,
     "fynkel.shader": 1
   },
   "cache": {
-    "version": 11,
+    "version": 12,
     "container": 1
   }
 }

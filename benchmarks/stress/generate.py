@@ -185,7 +185,7 @@ def layer(index):
 def rigid_body(mass):
     return {"type": "fynkel.RigidBody", "version": 1, "data": {
         "body_type": "dynamic", "mass": round(mass, 3), "linear_damping": 0.0, "angular_damping": 0.05,
-        "gravity_scale": 1.0, "ccd": False}}
+        "gravity_scale": 1.0, "ccd": False, "constraints": 0}}
 
 
 def rotator(speed):
@@ -280,7 +280,7 @@ def project_doc():
               "fynkel.PointLight", "fynkel.SpotLight", "fynkel.Environment", "fynkel.RigidBody", "fynkel.Collider",
               "fynkel.CharacterController", "fynkel.ThirdPersonCamera", "fynkel.Rotator", "fynkel.Oscillate",
               "fynkel.Follow", "fynkel.LookAtCamera", "fynkel.LifetimeDespawn", "fynkel.Emitter",
-              "fynkel.TriggerZone", "fynkel.Animator", "fynkel.Skin", "fynkel.Volume"]
+              "fynkel.TriggerZone", "fynkel.Animator", "fynkel.Skin", "fynkel.AnimationBinding", "fynkel.Volume"]
     return {
         "$schema": "https://fynkel.dev/schemas/project.schema.json", "formatVersion": 2,
         "id": str(PROJECT_ID), "name": "Fynkel Stress", "startupScene": {"asset": str(SCENE_ID)},
@@ -402,9 +402,13 @@ def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, mover
                      {"type": "fynkel.Skin", "version": 1, "data": {"skin": {"asset": CHARACTER, "sub": "skin/Skeleton"}, "skeleton": {"entity": uid(f"entity/Rig {n:03}/hips")}}}],
             key=f"Rig {n:03}/Body", parent=rig)
         joints = {}
-        for name, parent, local, _, _ in SKELETON:
+        for joint_index, (name, parent, local, _, _) in enumerate(SKELETON):
             wave = [animator({"asset": CHARACTER, "sub": "anim/wave"}, speed=rng.uniform(0.8, 1.25), additive=True)] if name == "spine" and n % 4 == 0 else []
-            joints[name] = add(name, [transform(local)] + wave, key=f"Rig {n:03}/{name}", parent=joints[parent] if parent else rig)
+            # The fixture GLB authors root=0, body=1, joints=2 onwards.
+            # F5 resolves stable imported keys, never mutable display names.
+            binding = {"type": "fynkel.AnimationBinding", "version": 1,
+                       "data": {"key": f"{CHARACTER}/node/{joint_index + 2}"}}
+            joints[name] = add(name, [transform(local), binding] + wave, key=f"Rig {n:03}/{name}", parent=joints[parent] if parent else rig)
     # The many-lights variant (E1 light culling): lamps on their own
     # jittered grid over the field, drawn from a second stream so the
     # objects above are placed exactly as they are without them. Three in

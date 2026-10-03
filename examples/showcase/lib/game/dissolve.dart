@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 /// Burns its object away and back again: sets the `amount` of its
 /// material — a material of `shaders/dissolve.shader` — every frame, as

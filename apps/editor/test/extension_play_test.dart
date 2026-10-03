@@ -3,7 +3,7 @@
 // Stop; stopped, it has none. A window follows Play starting and ending.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart' as fynkel;
+import 'package:fynkel/gameplay.dart' as fynkel;
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/extensions/editor_extensions.dart';
 import 'package:fynkel_editor/src/play/editor_game.dart';

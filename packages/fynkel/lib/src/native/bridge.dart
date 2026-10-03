@@ -3,6 +3,7 @@
 // calls. The gameplay API in lib/src/world.dart builds on this.
 
 import '../asset_ref.dart';
+
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:typed_data';
@@ -338,13 +339,21 @@ class NativeWorld {
     _requireLive();
     final w = _GameplayWriter(0);
     w.bytes.clear();
-    w.u32(1); w.string(id); w.u32(version); w.u32(fields.length);
-    for (final f in fields) { w.string(f.name); w.scalar(f.defaultValue); }
+    w.u32(1);
+    w.string(id);
+    w.u32(version);
+    w.u32(fields.length);
+    for (final f in fields) {
+      w.string(f.name);
+      w.scalar(f.defaultValue);
+    }
     final bytes = w.bytes.takeBytes();
     _toScratch(bytes, bytes.length);
     ffiCalls++;
     final status = fynkel_world_component_register(_w, _scratch, bytes.length, _view);
-    if (status != FynkelStatus.FYNKEL_STATUS_OK) { throw StateError(utf8.decode(_view.ref.data.asTypedList(_view.ref.length))); }
+    if (status != FynkelStatus.FYNKEL_STATUS_OK) {
+      throw StateError(utf8.decode(_view.ref.data.asTypedList(_view.ref.length)));
+    }
   }
 
   /// Read-only identity/name snapshot; never commits gameplay or drains events.
@@ -392,7 +401,8 @@ class NativeWorld {
     return (revision: revision, live: live);
   }
 
-  /// Sparse identity changes; reset replaces the consumer's membership.
+  /// Sparse callback identity/activity changes; reset replaces membership.
+  /// Activity-only rows carry the unchanged name and invalidate lifecycle checks.
   ({int revision, bool reset, Map<EntityRef, String?> changes}) gameplayStateDelta(int since) {
     _requireLive();
     final status = fynkel_world_gameplay_state_delta(_w, since, _view);

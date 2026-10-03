@@ -3,7 +3,7 @@
 //
 // ignore_for_file: type=lint, unused_element
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:spinner_game/spawner.dart' as _lib0;
 import 'package:spinner_game/spinner.dart' as _lib1;
 import 'package:spinner_game/weapon.dart' as _lib2;

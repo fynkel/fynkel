@@ -583,7 +583,7 @@ fn orthographic_camera_has_no_perspective() {
 
 #[test]
 fn a_fixed_set_of_pipelines() {
-    assert_eq!(PIPELINE_VARIANTS, 30);
+    assert_eq!(PIPELINE_VARIANTS, 31);
 }
 
 // ------------------------------------------------------------ materials
@@ -766,10 +766,10 @@ impl Lab {
         }
         for (i, cube) in cubes.iter().enumerate() {
             entities.insert(
-                format!("c0000000-0000-4000-8000-0000000000f{i:x}"),
+                format!("c0000000-0000-4000-8000-{:012x}", 0xf000_0000_0000_u64 + i as u64),
                 json!({ "name": format!("Cube {i}"), "parent": null, "children": [], "components": {
-                    format!("c0000000-0000-4000-8000-0000000000d{i:x}"): transform(cube.position, Quat::IDENTITY, cube.scale),
-                    format!("c0000000-0000-4000-8000-0000000000b{i:x}"): { "type": "fynkel.MeshRenderer", "version": 1, "data": {
+                    format!("c0000000-0000-4000-8000-{:012x}", 0xd000_0000_0000_u64 + i as u64): transform(cube.position, Quat::IDENTITY, cube.scale),
+                    format!("c0000000-0000-4000-8000-{:012x}", 0xb000_0000_0000_u64 + i as u64): { "type": "fynkel.MeshRenderer", "version": 1, "data": {
                         "mesh": { "asset": ROBOT_MESH, "sub": "mesh/Cube" },
                         "material": { "asset": cube.material.to_string() },
                         "cast_shadows": cube.cast_shadows, "receive_shadows": cube.receive_shadows, "visible": true } } } }),
@@ -3518,20 +3518,24 @@ fn a_shader_materials_values_change_at_runtime_through_its_uniform() {
     for (i, v) in [1.0f32, 0.0, 0.0].into_iter().enumerate() {
         red.block[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
     }
-    assets.set_runtime_custom_material(&r_m, Some(red.clone()));
+    assets
+        .set_runtime_custom_material(&r_m, Some(red.clone()))
+        .unwrap();
     let px = render_offscreen(&device, &queue, &mut r, &extract);
     assert!(near(center(&px), [255, 0, 0]), "{:?}", center(&px));
 
     // A texture bound at runtime rebuilds the material.
     let mut textured = red;
     textured.slots[0].texture = Some((SWATCH.parse::<Uuid>().unwrap().0, String::new()));
-    assets.set_runtime_custom_material(&r_m, Some(textured));
+    assets
+        .set_runtime_custom_material(&r_m, Some(textured))
+        .unwrap();
     let px = render_offscreen(&device, &queue, &mut r, &extract);
     let coloured = px.iter().filter(|p| p[1] > 60 || p[2] > 60).count();
     assert!(coloured > 500, "the swatch adds to red on {coloured} px");
 
     // Removed: the cooked values again.
-    assets.set_runtime_custom_material(&r_m, None);
+    assets.set_runtime_custom_material(&r_m, None).unwrap();
     let px = render_offscreen(&device, &queue, &mut r, &extract);
     assert!(near(center(&px), cooked), "{:?}", center(&px));
     assert_eq!(r.asset_errors(), &[] as &[String]);
@@ -3558,7 +3562,7 @@ fn the_inspectors_live_edit_of_a_shader_material_draws_and_restores() {
     for (i, v) in [0.0f32, 1.0, 0.0].into_iter().enumerate() {
         green.block[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
     }
-    assets.override_custom_material(&r_m, green);
+    assets.override_custom_material(&r_m, green).unwrap();
     let px = render_offscreen(&device, &queue, &mut r, &extract);
     assert!(near(center(&px), [0, 255, 0]), "{:?}", center(&px));
 
@@ -3567,7 +3571,7 @@ fn the_inspectors_live_edit_of_a_shader_material_draws_and_restores() {
         base_color: glam::Vec4::new(1.0, 0.0, 0.0, 1.0),
         ..Default::default()
     };
-    assets.override_material(&r_m, pbr);
+    assets.override_material(&r_m, pbr).unwrap();
     let px = render_offscreen(&device, &queue, &mut r, &extract);
     let c = center(&px);
     assert!(c[0] > 60 && c[1] < 30 && c[2] < 30, "{c:?}");
@@ -3577,4 +3581,87 @@ fn the_inspectors_live_edit_of_a_shader_material_draws_and_restores() {
     let px = render_offscreen(&device, &queue, &mut r, &extract);
     assert!(near(center(&px), cooked), "{:?}", center(&px));
     assert_eq!(r.asset_errors(), &[] as &[String]);
+}
+
+#[test]
+#[ignore = "manual F8 transparency and upload qualification"]
+fn foundation_transparency_qualification() {
+    let (device, queue) = headless_device().expect("qualification requires a GPU");
+    let mut lab = Lab::new("f8-transparency");
+    let glass = lab.material(json!({
+        "base_color": [0.3, 0.6, 0.9, 0.25], "alpha_mode": "blend", "roughness": 0.5
+    }));
+    let cubes: Vec<_> = (0..1000)
+        .map(|i| {
+            (
+                Vec3::new(
+                    (i % 10) as f32 * 0.3 - 1.5,
+                    ((i / 10) % 10) as f32 * 0.3 - 1.5,
+                    -(i / 100) as f32 * 0.3,
+                ),
+                glass,
+            )
+        })
+        .collect();
+    let (assets, extract) = lab.extract(Vec3::new(0.0, 0.0, 8.0), &cubes, true);
+    let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 1280, 720);
+    renderer.placeholders = false;
+    renderer.set_quality(Quality {
+        msaa: 1,
+        shadows: false,
+        ambient_occlusion: false,
+        ..Default::default()
+    });
+    renderer.set_assets(Some(assets));
+    let mut samples = Vec::new();
+    for frame in 0..45 {
+        let start = std::time::Instant::now();
+        render_offscreen(&device, &queue, &mut renderer, &extract);
+        let s = renderer.stats();
+        assert!(renderer.asset_errors().is_empty());
+        assert_eq!(s.transparent, 1000);
+        samples.push(json!({
+            "frame":frame,"warmup":frame<5,"total_with_readback_us":start.elapsed().as_micros(),
+            "prepare_us":s.prepare_us,"encode_us":s.encode_us,"gpu_us":s.gpu_frame_us,
+            "gpu_timed":s.gpu_timed,"gpu_bytes":s.gpu_bytes,
+            "upload_bytes":s.asset_upload_bytes,"upload_operations":s.asset_upload_operations
+        }));
+    }
+    assert!(renderer.stats().gpu_timed > 0, "missing GPU measurements");
+    println!(
+        "{}",
+        json!({"transparency":samples,"objects":1000,"resolution":[1280,720],
+        "scope":"overlapping transparent cubes, cold first frame and 5 warmup/40 measured frames; total includes synchronous readback"})
+    );
+}
+
+#[test]
+#[ignore = "manual phone-resolution screen-space GPU qualification"]
+fn foundation_screen_space_qualification() {
+    let (device, queue) = headless_device().expect("qualification requires a GPU");
+    let lab = Lab::new("f8-screen-space");
+    let volume = lab.volume(1, json!({"ambientOcclusion":{"intensity":1.0}}));
+    let (assets, _) = lab.extract(Vec3::new(0.0, 0.3, 3.0), &[], false);
+    let mut extract = ao_corner_scene();
+    extract.volumes = vec![global_volume(&volume, 0)];
+    let mut r = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 1320, 2868);
+    r.set_assets(Some(assets));
+    r.camera.eye = Vec3::new(4.0, 2.5, 6.0);
+    r.camera.target = Vec3::new(0.5, 0.3, 0.0);
+    let mut samples = Vec::new();
+    for frame in 0..45 {
+        render_offscreen(&device, &queue, &mut r, &extract);
+        let s = r.stats();
+        assert!(s.ambient_occlusion);
+        samples.push(
+            json!({"frame":frame,"warmup":frame<5,"gpu_us":s.gpu_frame_us,
+            "ao_us":s.gpu_ao_us,"gpu_timed":s.gpu_timed,"gpu_bytes":s.gpu_bytes}),
+        );
+    }
+    assert!(r.stats().gpu_timed > 0);
+    println!(
+        "{}",
+        json!({"screen_space":samples,"resolution":[1320,2868],
+        "scope":"AO corner, default quality, 5 warmup/40 measured; GPU timings exclude CPU readback"})
+    );
 }

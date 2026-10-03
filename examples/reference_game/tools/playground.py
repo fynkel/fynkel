@@ -426,7 +426,7 @@ def player_controller():
         ]
         # The wave's slot (ADR-0033 § 2): a layer with no states over the
         # upper body; game.Player plays the wave there as a one-shot.
-        + ([{"name": "UpperBody"} | ({} if HERO else {"root": "spine"})] if WAVE else []),
+        + ([{"name": "UpperBody"} | ({} if HERO else {"root": f"{CHARACTER}/node/3"})] if WAVE else []),
         "editor": {"Base Layer": {"Locomotion": [0, 0], "Jump": [260, 0], "Aim": [130, 160], "#entry": [-220, 0], "#any": [-220, 120]}},
     }
 
@@ -654,8 +654,8 @@ def playground():
             parent=player,
         )
         joints = {}
-        for name, parent, local, _, _ in SKELETON:
-            joints[name] = s.add(name, [transform(local)], parent=joints[parent] if parent else player)
+        for index, (name, parent, local, _, _) in enumerate(SKELETON, 2):
+            joints[name] = s.add(name, [transform(local), ("fynkel.AnimationBinding", {"key": f"{CHARACTER}/node/{index}"})], parent=joints[parent] if parent else player)
         s.add("Visor", [transform((0, 0.13, -0.13), scale=(0.2, 0.07, 0.06)), mesh_renderer("cube", "gate", cast=False)], parent=joints["head"])
 
     # The rig's own pose at yaw 0, pitch 0.35, distance 6 from the pivot

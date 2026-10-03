@@ -3,7 +3,7 @@
 // Inspector's Add Component writes (the Rust `Default`), so a script names
 // only what it changes — `RigidBody()`, `RigidBody(mass: 5)`.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:test/test.dart';
 
 void main() {

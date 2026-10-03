@@ -6,7 +6,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart' show Severity;
 import 'package:fynkel_editor/src/play/game_console.dart';
 import 'package:fynkel_editor/src/play/play_session.dart';

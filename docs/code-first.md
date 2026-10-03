@@ -1,5 +1,11 @@
 # Code first
 
+The current F7 contract is described in [One gameplay workflow](gameplay.md).
+Use ObjectRecipe factories for reusable descriptions with internal references;
+its fresh ObjectSpec output works with both World.build and ProjectWriter.
+The historical tier notes below describe the API's development.
+
+
 What a Unity user does from C# with no editor open, what Fynkel does
 from Dart today, and the order the gaps are closed in. Started
 2026-09-25 after the user said working fully from code is "the most

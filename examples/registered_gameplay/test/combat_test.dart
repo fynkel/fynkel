@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:fynkel/authoring.dart';
 import 'package:fynkel/testing.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:registered_gameplay/combat.dart';
 import 'package:registered_gameplay/generated/behaviours.g.dart';
 import 'package:test/test.dart';

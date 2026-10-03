@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart' show ObjectSpec;
+import 'package:fynkel/gameplay.dart' show ObjectSpec;
 
 import 'scene.dart';
 

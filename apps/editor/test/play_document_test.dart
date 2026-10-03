@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart' show EntityRef;
+import 'package:fynkel/gameplay.dart' show EntityRef;
 // Live Play mode L2 (ADR-0021 P7): the running game as a document — the
 // scene's ids and component ids, what the game made under `runtime:` ids,
 // only what changed reported on a refresh — and the Hierarchy and the
@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart' show kSecondaryButton;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart' as fynkel;
+import 'package:fynkel/gameplay.dart' as fynkel;
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/documents/document_tabs.dart';
@@ -36,6 +36,23 @@ final class FakeLive extends LiveBackend {
   final native = <String, List<({String type, Map<String, Object?> data})>>{};
   final scripts = <EntityRef, List<LiveBehaviour>>{};
   int entityReads = 0;
+
+  bool atomicComponents = true;
+
+  @override
+  List<String> setComponents(List<Map<String, Object?>> components) {
+    if (!atomicComponents) return super.setComponents(components);
+    // Preflight the fake's complete failure model before publishing any write.
+    if (refuse.isNotEmpty) return refuse;
+    for (final c in components) {
+      if (!native.containsKey(c['id'])) return ['missing entity'];
+      if (c['type'] is! String || c['data'] is! Map<String, Object?>) return ['invalid component'];
+    }
+    for (final c in components) {
+      write('set', c);
+    }
+    return const [];
+  }
 
   /// What [setAsset] drew: `kind:id` → fields.
   final assets = <String, Map<String, Object?>>{};
@@ -234,7 +251,9 @@ FakeLive running() {
     ..add('robot', 'Robot', handle: const EntityRef(1, 7, 1), types: ['fynkel.Transform', 'fynkel.PointLight'])
     ..add('floor', 'Floor')
     ..add('runtime:99', 'Bullet', handle: const EntityRef(1, 99, 1))
-    ..scripts[const EntityRef(1, 7, 1)] = [LiveBehaviour(type: 'game.Spinner', data: spinner, authoredComponentId: 'spin', instance: spinner)];
+    ..scripts[const EntityRef(1, 7, 1)] = [
+      LiveBehaviour(type: 'game.Spinner', data: spinner, authoredComponentId: 'spin', instance: spinner),
+    ];
 }
 
 /// A game that shows a (real, empty) world the way `FynkelGameView` does:
@@ -327,7 +346,10 @@ void main() {
         'data': {'speed': 1},
       }),
     ]);
-    expect(live.writes.sublist(live.writes.length - 2), ['set floor', 'addBehaviour 00000001000000020000000000000001 game.Spinner']);
+    expect(live.writes.sublist(live.writes.length - 2), [
+      'set floor',
+      'addBehaviour 00000001000000020000000000000001 game.Spinner',
+    ]);
     expect(components('floor').keys, containsAll(['floor/fynkel.PointLight', 'floor/game.Spinner']));
     doc.apply([Command.removeComponent('robot', 'light'), Command.removeComponent('robot', 'spin')]);
     expect(live.writes.sublist(live.writes.length - 2), ['remove robot', 'removeBehaviour']);
@@ -491,12 +513,61 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  test('a backend without atomic component writes refuses the batch without a sequential fallback', () {
+    final live = running()..atomicComponents = false;
+    final doc = PlayDocument(backend: live, scene: scene(), interval: const Duration(days: 1));
+    addTearDown(doc.dispose);
+    final revision = doc.revision;
+    final result = doc.apply([
+      Command.setField('robot', 't', '/position/0', 3),
+      Command.setField('robot', 't', '/position/1', 4),
+    ]);
+    expect(result.ok, isFalse);
+    expect(live.writes, isEmpty);
+    expect(live.entity('robot').components.first.data['position'], [0, 0, 0]);
+    expect(doc.revision, revision);
+  });
+
+  test('component batches compose field edits and do not hide an invalid intermediate value', () {
+    final world = fynkel.World.create();
+    addTearDown(world.dispose);
+    world.spawn(name: 'Box');
+    final backend = WorldLiveBackend(world);
+    final doc = PlayDocument(backend: backend, interval: const Duration(days: 1));
+    addTearDown(doc.dispose);
+    final id = doc.roots().single;
+    final transform = (doc.entities([id]).entities[id]!['components'] as Map).keys.single as String;
+    Object? position() => backend.live.entity(id).component('fynkel.Transform')!['position'];
+    expect(
+      doc.apply([
+        Command.setField(id, transform, '/position/0', 3),
+        Command.setField(id, transform, '/position/1', 4),
+      ]).ok,
+      isTrue,
+    );
+    expect(position(), [3, 4, 0]);
+    final revision = doc.revision;
+    expect(
+      doc.apply([
+        Command.setField(id, transform, '/position/0', 'invalid'),
+        Command.setField(id, transform, '/position/0', 5),
+      ]).ok,
+      isFalse,
+    );
+    expect(position(), [3, 4, 0]);
+    expect(doc.revision, revision);
+  });
+
   test('registered data uses the live component route and retains its schema version', () {
     final world = fynkel.World.create();
     addTearDown(world.dispose);
-    final health = fynkel.ComponentType<double>(id: 'game.Health', version: 3,
+    final health = fynkel.ComponentType<double>(
+      id: 'game.Health',
+      version: 3,
       fields: const [fynkel.ComponentField('hp', fynkel.ComponentFieldKind.number, 100.0)],
-      encode: (v) => [v], decode: (v) => v.single as double);
+      encode: (v) => [v],
+      decode: (v) => v.single as double,
+    );
     world.registerComponent(health);
     final player = world.spawn(name: 'Player')..writeData(health, 70.0);
     final backend = WorldLiveBackend(world);
@@ -506,6 +577,17 @@ void main() {
     final components = doc.entities([id]).entities[id]!['components'] as Map;
     final entry = components.entries.singleWhere((e) => (e.value as Map)['type'] == health.id);
     expect((entry.value as Map)['version'], 3);
+    final beforeRevision = doc.revision;
+    expect(doc.apply([Command.setField(id, entry.key as String, '/hp', 1)], baseRevision: 'stale').ok, isFalse);
+    expect(player.readData(health), 70);
+
+    final rejected = doc.apply([
+      Command.setField(id, entry.key as String, '/hp', 25),
+      Command.setField(id, entry.key as String, '/hp', 'invalid number'),
+    ]);
+    expect(rejected.ok, isFalse);
+    expect(player.readData(health), 70, reason: 'a failed editor batch must not publish earlier component writes');
+    expect(doc.revision, beforeRevision);
     expect(doc.apply([Command.setField(id, entry.key as String, '/hp', 25)]).ok, isTrue);
     expect(player.readData(health), 25);
     expect(doc.apply([Command.removeComponent(id, entry.key as String)]).ok, isTrue);
@@ -700,7 +782,8 @@ void main() {
     final inspector = InspectorModel(tabs: tabs, project: project);
     addTearDown(inspector.dispose);
     tabs.openDocument('main');
-    final live = FakeLive()..add('i1:mesh', 'Mesh', handle: const EntityRef(1, 5, 1), types: ['fynkel.Transform', 'fynkel.Light']);
+    final live = FakeLive()
+      ..add('i1:mesh', 'Mesh', handle: const EntityRef(1, 5, 1), types: ['fynkel.Transform', 'fynkel.Light']);
     live.write('set', {
       'id': 'i1:mesh',
       'type': 'fynkel.Light',

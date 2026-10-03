@@ -5,7 +5,7 @@
 
 import 'dart:io';
 
-import 'package:fynkel/fynkel.dart' as fynkel;
+import 'package:fynkel/gameplay.dart' as fynkel;
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:test/test.dart';
 

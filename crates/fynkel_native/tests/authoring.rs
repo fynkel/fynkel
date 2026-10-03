@@ -150,7 +150,7 @@ fn codes(v: &Value) -> Vec<&str> {
 #[test]
 fn version_and_null_safety() {
     assert_eq!(fynkel_authoring_abi_version(), AUTHORING_ABI_VERSION);
-    assert_eq!(AUTHORING_ABI_VERSION, 5);
+    assert_eq!(AUTHORING_ABI_VERSION, 6);
     unsafe {
         assert_eq!(fynkel_authoring_result(ptr::null()).length, 0);
         assert_eq!(fynkel_authoring_is_poisoned(ptr::null()), 0);

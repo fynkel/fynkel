@@ -423,3 +423,22 @@ fn update_re_reads_only_the_named_files_and_agrees_with_a_full_scan() {
     assert_eq!(db.len(), 4);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn migration_backups_are_preserved_but_not_indexed_as_assets() {
+    let dir = valid_tree("migration-backups");
+    let backup = dir.join("scenes/main.scene.json.bak");
+    std::fs::copy(dir.join("scenes/main.scene.json"), &backup).unwrap();
+    let original = std::fs::read(&backup).unwrap();
+    let (mut db, diagnostics) = AssetDatabase::scan(&dir, &schemas());
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(db
+        .update(std::slice::from_ref(&backup), &schemas())
+        .is_empty());
+    assert_eq!(std::fs::read(&backup).unwrap(), original);
+    // A genuinely unknown source still receives the normal diagnostic.
+    let unknown = dir.join("unknown.bak");
+    std::fs::write(&unknown, b"user content").unwrap();
+    assert!(!db.update(&[unknown], &schemas()).is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
+}

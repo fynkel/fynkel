@@ -46,6 +46,7 @@ struct Gpu {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     renderer: ExtractRenderer,
+    lost: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Gpu {
@@ -80,6 +81,12 @@ impl Gpu {
         }))
         .expect("request device");
 
+        let lost = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = lost.clone();
+        device.set_device_lost_callback(move |reason, message| {
+            log::error!("GPU device lost ({reason:?}): {message}");
+            flag.store(true, std::sync::atomic::Ordering::Release);
+        });
         let size = window.inner_size();
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
@@ -110,10 +117,22 @@ impl Gpu {
             queue,
             config,
             renderer,
+            lost,
         }
     }
 
+    fn recover_device(&mut self) {
+        if !self.lost.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
+        let mut fresh = Self::new(self.window.clone(), None);
+        self.renderer.recreate(&fresh.device, fresh.config.format);
+        std::mem::swap(&mut self.renderer, &mut fresh.renderer);
+        *self = fresh;
+    }
+
     fn resize(&mut self, width: u32, height: u32) {
+        self.recover_device();
         if width == 0 || height == 0 {
             return;
         }
@@ -126,6 +145,7 @@ impl Gpu {
     /// Returns `None` when the surface needs reconfiguring; otherwise the
     /// (acquire wait, cpu encode+submit) durations for this frame.
     fn render(&mut self, extract: &fynkel_core::Extract) -> Option<FrameTiming> {
+        self.recover_device();
         use wgpu::CurrentSurfaceTexture as C;
         let t_acquire = Instant::now();
         let frame = match self.surface.get_current_texture() {
@@ -172,6 +192,7 @@ struct App {
     last_frame: Option<Instant>,
     stats: FrameStats,
     world: World,
+    extract: fynkel_core::Extract,
     /// The demo scene's gameplay; `None` when a cooked project is loaded.
     scene: Option<DemoScene>,
     /// The cooked project to load on resume (`--cache`).
@@ -193,6 +214,7 @@ impl App {
             last_frame: None,
             stats: FrameStats::default(),
             world: World::new(WorldConfig::default()),
+            extract: Default::default(),
             scene: project.is_none().then(|| DemoScene::new(satellites, seed)),
             project,
             residency: None,
@@ -276,7 +298,7 @@ impl App {
 
     /// One host frame of simulation (ADR-0008 order): begin_frame → per
     /// planned tick {pull events, gameplay, step} → extract.
-    fn simulate(&mut self, dt: f32) -> fynkel_core::Extract {
+    fn simulate(&mut self, dt: f32) {
         let plan = self.world.begin_frame(dt);
         if plan.dropped_seconds > 0.0 {
             log::warn!("missed deadline: dropped {:.3}s", plan.dropped_seconds);
@@ -294,7 +316,8 @@ impl App {
         if let Some(scene) = self.scene.as_mut() {
             scene.on_events(&events);
         }
-        self.world.extract()
+        let placeholders = self.gpu.as_ref().is_none_or(|g| g.renderer.placeholders);
+        self.world.extract_into(&mut self.extract, placeholders);
     }
 }
 
@@ -381,10 +404,10 @@ impl ApplicationHandler for App {
                     .map(|t| now.duration_since(t).as_secs_f32())
                     .unwrap_or(0.0);
                 self.last_frame = Some(now);
-                let extract = self.simulate(dt);
+                self.simulate(dt);
                 let simulate = now.elapsed();
                 let gpu = self.gpu.as_mut().unwrap();
-                match gpu.render(&extract) {
+                match gpu.render(&self.extract) {
                     Some(t) => self.stats.record(FrameTiming { simulate, ..t }),
                     None => {
                         let size = gpu.window.inner_size();

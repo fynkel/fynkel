@@ -4,7 +4,7 @@
 /// the Inspector as foldouts.
 library;
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 /// Where a wave's enemies appear around the spawner.
 @FynkelRecord()

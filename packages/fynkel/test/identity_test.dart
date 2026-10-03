@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:fynkel/src/entity_ref.dart' show readEntity, writeEntity;
 import 'package:test/test.dart';
 

@@ -1,0 +1,1258 @@
+{
+  "schemaVersion": 1,
+  "deviceQualification": "not-run",
+  "description": "Mac headless preflight only; not mobile FPS evidence",
+  "workloads": [
+    {
+      "schemaVersion": 1,
+      "workload": "dense-500",
+      "seed": 1,
+      "populations": {
+        "static": 500,
+        "bodies": 50,
+        "behaviours": 30,
+        "rigs": 20,
+        "lights": 8
+      },
+      "app": false,
+      "dartBehavioursExecute": false,
+      "status": "preflight-complete",
+      "deviceQualification": "not-run",
+      "resolution": [
+        1320,
+        2868
+      ],
+      "quality": "medium",
+      "commands": [
+        {
+          "stage": "generate",
+          "argv": [
+            "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3",
+            "/Users/oumari/Desktop/Code/fynkelengine/benchmarks/stress/generate.py",
+            "--out",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2",
+            "--seed",
+            "1",
+            "--static",
+            "500",
+            "--bodies",
+            "50",
+            "--behaviours",
+            "30",
+            "--rigs",
+            "20",
+            "--lights",
+            "8"
+          ],
+          "exitCode": 0,
+          "stdout": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2: 895 entities (500 native movers, 50 bodies, 30 behaviours, 20 animated rigs, 8 lamps), 8 materials, 16 distinct (mesh, material) pairs\n",
+          "stderr": ""
+        },
+        {
+          "stage": "lock",
+          "argv": [
+            "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel",
+            "project",
+            "lock",
+            "--project",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2"
+          ],
+          "exitCode": 0,
+          "stdout": "",
+          "stderr": "fynkel project lock: /Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2/fynkel.lock.json already matches this build\n"
+        },
+        {
+          "stage": "validate",
+          "argv": [
+            "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel",
+            "validate",
+            "--project",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2",
+            "--json"
+          ],
+          "exitCode": 0,
+          "stdout": "{\"ok\":true,\"diagnostics\":[],\"project\":{\"id\":\"5b6a1c2e-0000-4000-8000-00000000c0de\",\"name\":\"Fynkel Stress\",\"path\":\"/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2/fynkel.project.json\"},\"lock\":{\"$schema\":\"https://fynkel.dev/schemas/lock.schema.json\",\"formatVersion\":1,\"runtime\":{\"version\":\"0.0.1\",\"abiVersion\":5},\"tools\":{\"version\":\"0.0.1\"},\"schemaFingerprint\":\"0x65d9f39b4aa79409\",\"documents\":{\"blend\":1,\"controller\":1,\"data\":1,\"material\":2,\"meta\":2,\"physics_material\":1,\"prefab\":7,\"project\":2,\"rig\":1,\"scene\":7,\"shader\":1,\"volume\":1},\"importers\":{\"fynkel.audio\":2,\"fynkel.fbx\":5,\"fynkel.file\":1,\"fynkel.gltf\":9,\"fynkel.image\":1,\"fynkel.shader\":1},\"cache\":{\"version\":12,\"container\":1}},\"documents\":12,\"sources\":3,\"references\":1254,\"errors\":0,\"warnings\":0}\n",
+          "stderr": ""
+        },
+        {
+          "stage": "cook",
+          "argv": [
+            "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel",
+            "cook",
+            "--project",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2"
+          ],
+          "exitCode": 0,
+          "stdout": "cooked  Fynkel/Primitives.glb (fynkel.gltf) 66aa05df0bc5 141664 B\ncooked  materials/behaviour.material.json (document/material) 4fdc8d6a81f2 1184 B\ncooked  materials/body.material.json (document/material) 9eb8da06f616 1168 B\ncooked  materials/brick.material.json (document/material) 0414cfe1b945 1168 B\ncooked  materials/concrete.material.json (document/material) bf211d5eda3e 1184 B\ncooked  materials/floor.material.json (document/material) 82891e22f7b8 1168 B\ncooked  materials/moss.material.json (document/material) ba79fcf5168d 1192 B\ncooked  materials/rig.material.json (document/material) 136047909f17 1152 B\ncooked  materials/steel.material.json (document/material) f5d1c709168e 1168 B\ncooked  models/character.glb (fynkel.gltf) b27095763296 59656 B\ncooked  models/cube.glb (fynkel.gltf) 49fde6b4ecdd 4736 B\ncooked  models/locomotion.blend.json (document/blend) 6fd10927fd66 1272 B\ncooked  models/robot.glb (fynkel.gltf) 355392001dca 14360 B\ncooked  prefabs/spark.prefab.json (document/prefab) b55ce3014793 3144 B\ncooked  scenes/stress.scene.json (document/scene) 8c8abda482be 1438816 B\ncooked  volumes/look.volume.json (document/volume) add783b0230f 1024 B\nprofile dev: 16 cooked, 0 cached, 0 failed\n",
+          "stderr": "warning[FYN-A0105] /Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2/assets/models/robot.glb: texture 0: sampler nearest wrap S=clamp T=repeat is not kept; materials sample linear/repeat (sampler settings belong to the texture's sidecar)\nwarning[FYN-A0105] /Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2/assets/models/robot.glb: material/0 (Painted): metallic_roughness_texture uses TEXCOORD_1; the PBR material samples set 0\nfynkel cook: 16 asset(s) \u2192 /Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2/.fynkel/cache (16 cooked, 0 cached, 0 failed)\n"
+        },
+        {
+          "stage": "render",
+          "argv": [
+            "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel",
+            "render",
+            "--project",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2",
+            "--no-cook",
+            "--json",
+            "--quality",
+            "medium",
+            "--size",
+            "1320x2868",
+            "--out",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2/preflight.png"
+          ],
+          "exitCode": 0,
+          "stdout": "{\"ok\":true,\"out\":\"/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2/preflight.png\",\"size\":[1320,2868],\"project\":\"Fynkel Stress\",\"scene\":{\"id\":\"5b6a1c2e-0000-4000-8000-0000000005ce\",\"name\":\"Stress\",\"key\":\"8c8abda482be4e5f5af98b3482f0f95668d474f0238d86a93fd78cd1cb24bdf8\",\"entities\":895,\"rejectedComponents\":0},\"cache\":\"/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2/.fynkel/cache\",\"steps\":1,\"instances\":176,\"culled\":425,\"layerHidden\":0,\"draws\":16,\"skinned\":7,\"joints\":260,\"shadowDraws\":60,\"meshes\":601,\"placeholders\":0,\"missing\":0,\"batches\":16,\"sceneCamera\":true,\"sceneLight\":true,\"lights\":5,\"lightsDropped\":0,\"lightsMaxPerObject\":5,\"lightsOverflow\":0,\"sky\":false,\"ibl\":false,\"ev100\":11.965784072875977,\"transparent\":0,\"shadowCasters\":379,\"shadowMap\":2048,\"shadowCascades\":4,\"ambientOcclusion\":true,\"bloom\":true,\"contactShadows\":true,\"grading\":true,\"volumes\":1,\"post\":{\"aoRadius\":0.8999999761581421,\"aoIntensity\":1.600000023841858,\"bloomIntensity\":1.0,\"bloomThreshold\":0.699999988079071,\"bloomScatter\":0.699999988079071,\"bloomTint\":[1.0,1.0,1.0],\"contactIntensity\":1.0,\"contactLength\":0.30000001192092896,\"contactThickness\":0.05000000074505806,\"contactDistance\":50.0,\"grading\":{\"tonemapper\":\"aces\",\"postExposure\":0.0,\"temperature\":20.0,\"tint\":0.0,\"contrast\":15.0,\"saturation\":5.0,\"hueShift\":0.0,\"colorFilter\":[1.0,1.0,1.0],\"lift\":[0.0,0.0,0.0],\"gamma\":[1.0,1.0,1.0],\"gain\":[1.0,1.0,1.0]}},\"quality\":{\"profile\":\"medium\",\"shadows\":true,\"shadowResolution\":2048,\"ambientOcclusion\":true,\"bloom\":true,\"contactShadows\":true,\"msaa\":4,\"renderScale\":1.0,\"anisotropy\":8,\"renderSize\":[1320,2868]},\"assetErrors\":[],\"diagnostics\":{\"ok\":true,\"diagnostics\":[]}}\n",
+          "stderr": ""
+        },
+        {
+          "stage": "simulation",
+          "argv": [
+            "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel",
+            "test",
+            "--headless",
+            "--project",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2",
+            "--no-cook",
+            "--steps",
+            "120",
+            "--json"
+          ],
+          "exitCode": 0,
+          "stdout": "{\n  \"steps\": 120,\n  \"frames\": 120,\n  \"tick\": 120,\n  \"live_entities\": 915,\n  \"commands_applied\": 0,\n  \"commands_rejected\": 0,\n  \"events\": 148,\n  \"diagnostics\": 0,\n  \"missed_deadlines\": 0,\n  \"dropped_seconds\": 0.0,\n  \"extract_records\": 915,\n  \"checksum\": \"baff9a091f27ca37\",\n  \"step_time\": {\n    \"p50_us\": 725,\n    \"p95_us\": 837,\n    \"max_us\": 1629\n  },\n  \"extract_time\": {\n    \"p50_us\": 318,\n    \"p95_us\": 341,\n    \"max_us\": 451\n  },\n  \"frame_time\": {\n    \"p50_us\": 1048,\n    \"p95_us\": 1206,\n    \"max_us\": 2031\n  },\n  \"total_ms\": 144.20746,\n  \"scene_ready\": true,\n  \"scene\": {\n    \"cache\": \"/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2/.fynkel/cache\",\n    \"path\": \"scenes/stress.scene.json\",\n    \"loaded\": true,\n    \"id\": \"5b6a1c2e-0000-4000-8000-0000000005ce\",\n    \"name\": \"Stress\",\n    \"key\": \"8c8abda482be4e5f5af98b3482f0f95668d474f0238d86a93fd78cd1cb24bdf8\",\n    \"entities\": 895,\n    \"rejected_components\": 0,\n    \"retained\": 15,\n    \"prefabs\": 1,\n    \"document_diagnostics\": []\n  },\n  \"input\": null,\n  \"physics\": {\n    \"bodies\": 70,\n    \"colliders\": 571,\n    \"mesh_colliders\": 0,\n    \"characters\": 0,\n    \"collision_enter\": 70,\n    \"collision_stay\": 0,\n    \"collision_exit\": 0,\n    \"trigger_enter\": 0,\n    \"trigger_exit\": 0,\n    \"diagnostics\": 0\n  },\n  \"animation\": {\n    \"entities\": 45,\n    \"clips\": 4,\n    \"skins\": 1,\n    \"skinned_meshes\": 20,\n    \"joints\": 260,\n    \"ended\": 0,\n    \"markers\": 77,\n    \"diagnostics\": 0\n  },\n  \"audio\": null,\n  \"systems\": [\n    {\n      \"system\": \"step\",\n      \"entities\": 915,\n      \"total_us\": 89606,\n      \"max_us\": 1628,\n      \"mean_us\": 746.7167\n    },\n    {\n      \"system\": \"commands\",\n      \"entities\": 0,\n      \"total_us\": 0,\n      \"max_us\": 0,\n      \"mean_us\": 0.0\n    },\n    {\n      \"system\": \"characters\",\n      \"entities\": 0,\n      \"total_us\": 12,\n      \"max_us\": 10,\n      \"mean_us\": 0.1\n    },\n    {\n      \"system\": \"animation\",\n      \"entities\": 45,\n      \"total_us\": 8539,\n      \"max_us\": 170,\n      \"mean_us\": 71.15833\n    },\n    {\n      \"system\": \"rotator\",\n      \"entities\": 168,\n      \"total_us\": 3948,\n      \"max_us\": 52,\n      \"mean_us\": 32.9\n    },\n    {\n      \"system\": \"oscillate\",\n      \"entities\": 168,\n      \"total_us\": 5113,\n      \"max_us\": 94,\n      \"mean_us\": 42.608334\n    },\n    {\n      \"system\": \"lifetimeDespawn\",\n      \"entities\": 19,\n      \"total_us\": 256,\n      \"max_us\": 12,\n      \"mean_us\": 2.1333334\n    },\n    {\n      \"system\": \"emitter\",\n      \"entities\": 1,\n      \"total_us\": 162,\n      \"max_us\": 26,\n      \"mean_us\": 1.35\n    },\n    {\n      \"system\": \"physics\",\n      \"entities\": 641,\n      \"total_us\": 58126,\n      \"max_us\": 945,\n      \"mean_us\": 484.38333\n    },\n    {\n      \"system\": \"cameraRigs\",\n      \"entities\": 0,\n      \"total_us\": 4,\n      \"max_us\": 1,\n      \"mean_us\": 0.033333335\n    },\n    {\n      \"system\": \"follow\",\n      \"entities\": 1,\n      \"total_us\": 45,\n      \"max_us\": 8,\n      \"mean_us\": 0.375\n    },\n    {\n      \"system\": \"lookAtCamera\",\n      \"entities\": 164,\n      \"total_us\": 7613,\n      \"max_us\": 105,\n      \"mean_us\": 63.441666\n    },\n    {\n      \"system\": \"transforms\",\n      \"entities\": 740,\n      \"total_us\": 4952,\n      \"max_us\": 265,\n      \"mean_us\": 41.266666\n    },\n    {\n      \"system\": \"audio\",\n      \"entities\": 0,\n      \"total_us\": 7,\n      \"max_us\": 4,\n      \"mean_us\": 0.058333334\n    },\n    {\n      \"system\": \"publish\",\n      \"entities\": 0,\n      \"total_us\": 61,\n      \"max_us\": 4,\n      \"mean_us\": 0.5083333\n    }\n  ],\n  \"memory\": {\n    \"native_bytes\": 5883324,\n    \"native_peak_bytes\": 10752409,\n    \"resident_bytes\": 31883264,\n    \"residency_bytes\": 16654\n  }\n}\n",
+          "stderr": ""
+        }
+      ],
+      "render": {
+        "ok": true,
+        "out": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2/preflight.png",
+        "size": [
+          1320,
+          2868
+        ],
+        "project": "Fynkel Stress",
+        "scene": {
+          "id": "5b6a1c2e-0000-4000-8000-0000000005ce",
+          "name": "Stress",
+          "key": "8c8abda482be4e5f5af98b3482f0f95668d474f0238d86a93fd78cd1cb24bdf8",
+          "entities": 895,
+          "rejectedComponents": 0
+        },
+        "cache": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2/.fynkel/cache",
+        "steps": 1,
+        "instances": 176,
+        "culled": 425,
+        "layerHidden": 0,
+        "draws": 16,
+        "skinned": 7,
+        "joints": 260,
+        "shadowDraws": 60,
+        "meshes": 601,
+        "placeholders": 0,
+        "missing": 0,
+        "batches": 16,
+        "sceneCamera": true,
+        "sceneLight": true,
+        "lights": 5,
+        "lightsDropped": 0,
+        "lightsMaxPerObject": 5,
+        "lightsOverflow": 0,
+        "sky": false,
+        "ibl": false,
+        "ev100": 11.965784072875977,
+        "transparent": 0,
+        "shadowCasters": 379,
+        "shadowMap": 2048,
+        "shadowCascades": 4,
+        "ambientOcclusion": true,
+        "bloom": true,
+        "contactShadows": true,
+        "grading": true,
+        "volumes": 1,
+        "post": {
+          "aoRadius": 0.8999999761581421,
+          "aoIntensity": 1.600000023841858,
+          "bloomIntensity": 1.0,
+          "bloomThreshold": 0.699999988079071,
+          "bloomScatter": 0.699999988079071,
+          "bloomTint": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "contactIntensity": 1.0,
+          "contactLength": 0.30000001192092896,
+          "contactThickness": 0.05000000074505806,
+          "contactDistance": 50.0,
+          "grading": {
+            "tonemapper": "aces",
+            "postExposure": 0.0,
+            "temperature": 20.0,
+            "tint": 0.0,
+            "contrast": 15.0,
+            "saturation": 5.0,
+            "hueShift": 0.0,
+            "colorFilter": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "lift": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gamma": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "gain": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "quality": {
+          "profile": "medium",
+          "shadows": true,
+          "shadowResolution": 2048,
+          "ambientOcclusion": true,
+          "bloom": true,
+          "contactShadows": true,
+          "msaa": 4,
+          "renderScale": 1.0,
+          "anisotropy": 8,
+          "renderSize": [
+            1320,
+            2868
+          ]
+        },
+        "assetErrors": [],
+        "diagnostics": {
+          "ok": true,
+          "diagnostics": []
+        }
+      },
+      "simulation": {
+        "steps": 120,
+        "frames": 120,
+        "tick": 120,
+        "live_entities": 915,
+        "commands_applied": 0,
+        "commands_rejected": 0,
+        "events": 148,
+        "diagnostics": 0,
+        "missed_deadlines": 0,
+        "dropped_seconds": 0.0,
+        "extract_records": 915,
+        "checksum": "baff9a091f27ca37",
+        "step_time": {
+          "p50_us": 725,
+          "p95_us": 837,
+          "max_us": 1629
+        },
+        "extract_time": {
+          "p50_us": 318,
+          "p95_us": 341,
+          "max_us": 451
+        },
+        "frame_time": {
+          "p50_us": 1048,
+          "p95_us": 1206,
+          "max_us": 2031
+        },
+        "total_ms": 144.20746,
+        "scene_ready": true,
+        "scene": {
+          "cache": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-500-v2/.fynkel/cache",
+          "path": "scenes/stress.scene.json",
+          "loaded": true,
+          "id": "5b6a1c2e-0000-4000-8000-0000000005ce",
+          "name": "Stress",
+          "key": "8c8abda482be4e5f5af98b3482f0f95668d474f0238d86a93fd78cd1cb24bdf8",
+          "entities": 895,
+          "rejected_components": 0,
+          "retained": 15,
+          "prefabs": 1,
+          "document_diagnostics": []
+        },
+        "input": null,
+        "physics": {
+          "bodies": 70,
+          "colliders": 571,
+          "mesh_colliders": 0,
+          "characters": 0,
+          "collision_enter": 70,
+          "collision_stay": 0,
+          "collision_exit": 0,
+          "trigger_enter": 0,
+          "trigger_exit": 0,
+          "diagnostics": 0
+        },
+        "animation": {
+          "entities": 45,
+          "clips": 4,
+          "skins": 1,
+          "skinned_meshes": 20,
+          "joints": 260,
+          "ended": 0,
+          "markers": 77,
+          "diagnostics": 0
+        },
+        "audio": null,
+        "systems": [
+          {
+            "system": "step",
+            "entities": 915,
+            "total_us": 89606,
+            "max_us": 1628,
+            "mean_us": 746.7167
+          },
+          {
+            "system": "commands",
+            "entities": 0,
+            "total_us": 0,
+            "max_us": 0,
+            "mean_us": 0.0
+          },
+          {
+            "system": "characters",
+            "entities": 0,
+            "total_us": 12,
+            "max_us": 10,
+            "mean_us": 0.1
+          },
+          {
+            "system": "animation",
+            "entities": 45,
+            "total_us": 8539,
+            "max_us": 170,
+            "mean_us": 71.15833
+          },
+          {
+            "system": "rotator",
+            "entities": 168,
+            "total_us": 3948,
+            "max_us": 52,
+            "mean_us": 32.9
+          },
+          {
+            "system": "oscillate",
+            "entities": 168,
+            "total_us": 5113,
+            "max_us": 94,
+            "mean_us": 42.608334
+          },
+          {
+            "system": "lifetimeDespawn",
+            "entities": 19,
+            "total_us": 256,
+            "max_us": 12,
+            "mean_us": 2.1333334
+          },
+          {
+            "system": "emitter",
+            "entities": 1,
+            "total_us": 162,
+            "max_us": 26,
+            "mean_us": 1.35
+          },
+          {
+            "system": "physics",
+            "entities": 641,
+            "total_us": 58126,
+            "max_us": 945,
+            "mean_us": 484.38333
+          },
+          {
+            "system": "cameraRigs",
+            "entities": 0,
+            "total_us": 4,
+            "max_us": 1,
+            "mean_us": 0.033333335
+          },
+          {
+            "system": "follow",
+            "entities": 1,
+            "total_us": 45,
+            "max_us": 8,
+            "mean_us": 0.375
+          },
+          {
+            "system": "lookAtCamera",
+            "entities": 164,
+            "total_us": 7613,
+            "max_us": 105,
+            "mean_us": 63.441666
+          },
+          {
+            "system": "transforms",
+            "entities": 740,
+            "total_us": 4952,
+            "max_us": 265,
+            "mean_us": 41.266666
+          },
+          {
+            "system": "audio",
+            "entities": 0,
+            "total_us": 7,
+            "max_us": 4,
+            "mean_us": 0.058333334
+          },
+          {
+            "system": "publish",
+            "entities": 0,
+            "total_us": 61,
+            "max_us": 4,
+            "mean_us": 0.5083333
+          }
+        ],
+        "memory": {
+          "native_bytes": 5883324,
+          "native_peak_bytes": 10752409,
+          "resident_bytes": 31883264,
+          "residency_bytes": 16654
+        }
+      },
+      "sceneSha256": "7b8dd6be58fd45e6ea86a16a5285955fa6c010c35ca0cbf53be95892977f1eba",
+      "generatorSha256": "8b63fdf1340d3b35542d2deed702e6043bcb628bb717eda38238c9cd7bb19113"
+    },
+    {
+      "schemaVersion": 1,
+      "workload": "dense-2000",
+      "seed": 1,
+      "populations": {
+        "static": 2000,
+        "bodies": 150,
+        "behaviours": 100,
+        "rigs": 60,
+        "lights": 16
+      },
+      "app": false,
+      "dartBehavioursExecute": false,
+      "status": "preflight-complete",
+      "deviceQualification": "not-run",
+      "resolution": [
+        1320,
+        2868
+      ],
+      "quality": "medium",
+      "commands": [
+        {
+          "stage": "generate",
+          "argv": [
+            "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3",
+            "/Users/oumari/Desktop/Code/fynkelengine/benchmarks/stress/generate.py",
+            "--out",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000",
+            "--seed",
+            "1",
+            "--static",
+            "2000",
+            "--bodies",
+            "150",
+            "--behaviours",
+            "100",
+            "--rigs",
+            "60",
+            "--lights",
+            "16"
+          ],
+          "exitCode": 0,
+          "stdout": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000: 3173 entities (2000 native movers, 150 bodies, 100 behaviours, 60 animated rigs, 16 lamps), 8 materials, 16 distinct (mesh, material) pairs\n",
+          "stderr": ""
+        },
+        {
+          "stage": "lock",
+          "argv": [
+            "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel",
+            "project",
+            "lock",
+            "--project",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000"
+          ],
+          "exitCode": 0,
+          "stdout": "",
+          "stderr": "fynkel project lock: /Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000/fynkel.lock.json already matches this build\n"
+        },
+        {
+          "stage": "validate",
+          "argv": [
+            "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel",
+            "validate",
+            "--project",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000",
+            "--json"
+          ],
+          "exitCode": 0,
+          "stdout": "{\"ok\":true,\"diagnostics\":[],\"project\":{\"id\":\"5b6a1c2e-0000-4000-8000-00000000c0de\",\"name\":\"Fynkel Stress\",\"path\":\"/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000/fynkel.project.json\"},\"lock\":{\"$schema\":\"https://fynkel.dev/schemas/lock.schema.json\",\"formatVersion\":1,\"runtime\":{\"version\":\"0.0.1\",\"abiVersion\":5},\"tools\":{\"version\":\"0.0.1\"},\"schemaFingerprint\":\"0x65d9f39b4aa79409\",\"documents\":{\"blend\":1,\"controller\":1,\"data\":1,\"material\":2,\"meta\":2,\"physics_material\":1,\"prefab\":7,\"project\":2,\"rig\":1,\"scene\":7,\"shader\":1,\"volume\":1},\"importers\":{\"fynkel.audio\":2,\"fynkel.fbx\":5,\"fynkel.file\":1,\"fynkel.gltf\":9,\"fynkel.image\":1,\"fynkel.shader\":1},\"cache\":{\"version\":12,\"container\":1}},\"documents\":12,\"sources\":3,\"references\":4764,\"errors\":0,\"warnings\":0}\n",
+          "stderr": ""
+        },
+        {
+          "stage": "cook",
+          "argv": [
+            "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel",
+            "cook",
+            "--project",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000"
+          ],
+          "exitCode": 0,
+          "stdout": "cooked  Fynkel/Primitives.glb (fynkel.gltf) 66aa05df0bc5 141664 B\ncooked  materials/behaviour.material.json (document/material) 4fdc8d6a81f2 1184 B\ncooked  materials/body.material.json (document/material) 9eb8da06f616 1168 B\ncooked  materials/brick.material.json (document/material) 0414cfe1b945 1168 B\ncooked  materials/concrete.material.json (document/material) bf211d5eda3e 1184 B\ncooked  materials/floor.material.json (document/material) 82891e22f7b8 1168 B\ncooked  materials/moss.material.json (document/material) ba79fcf5168d 1192 B\ncooked  materials/rig.material.json (document/material) 136047909f17 1152 B\ncooked  materials/steel.material.json (document/material) f5d1c709168e 1168 B\ncooked  models/character.glb (fynkel.gltf) b27095763296 59656 B\ncooked  models/cube.glb (fynkel.gltf) 49fde6b4ecdd 4736 B\ncooked  models/locomotion.blend.json (document/blend) 6fd10927fd66 1272 B\ncooked  models/robot.glb (fynkel.gltf) 355392001dca 14360 B\ncooked  prefabs/spark.prefab.json (document/prefab) b55ce3014793 3144 B\ncooked  scenes/stress.scene.json (document/scene) ee8865d84e36 5284464 B\ncooked  volumes/look.volume.json (document/volume) add783b0230f 1024 B\nprofile dev: 16 cooked, 0 cached, 0 failed\n",
+          "stderr": "warning[FYN-A0105] /Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000/assets/models/robot.glb: texture 0: sampler nearest wrap S=clamp T=repeat is not kept; materials sample linear/repeat (sampler settings belong to the texture's sidecar)\nwarning[FYN-A0105] /Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000/assets/models/robot.glb: material/0 (Painted): metallic_roughness_texture uses TEXCOORD_1; the PBR material samples set 0\nfynkel cook: 16 asset(s) \u2192 /Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000/.fynkel/cache (16 cooked, 0 cached, 0 failed)\n"
+        },
+        {
+          "stage": "render",
+          "argv": [
+            "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel",
+            "render",
+            "--project",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000",
+            "--no-cook",
+            "--json",
+            "--quality",
+            "medium",
+            "--size",
+            "1320x2868",
+            "--out",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000/preflight.png"
+          ],
+          "exitCode": 0,
+          "stdout": "{\"ok\":true,\"out\":\"/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000/preflight.png\",\"size\":[1320,2868],\"project\":\"Fynkel Stress\",\"scene\":{\"id\":\"5b6a1c2e-0000-4000-8000-0000000005ce\",\"name\":\"Stress\",\"key\":\"ee8865d84e36ec8014f0f56ec2c7ad39b024a18d8d9e857ce16a8aa48454435c\",\"entities\":3173,\"rejectedComponents\":0},\"cache\":\"/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000/.fynkel/cache\",\"steps\":1,\"instances\":671,\"culled\":1640,\"layerHidden\":0,\"draws\":16,\"skinned\":17,\"joints\":780,\"shadowDraws\":60,\"meshes\":2311,\"placeholders\":0,\"missing\":0,\"batches\":16,\"sceneCamera\":true,\"sceneLight\":true,\"lights\":8,\"lightsDropped\":0,\"lightsMaxPerObject\":8,\"lightsOverflow\":0,\"sky\":false,\"ibl\":false,\"ev100\":11.965784072875977,\"transparent\":0,\"shadowCasters\":1434,\"shadowMap\":2048,\"shadowCascades\":4,\"ambientOcclusion\":true,\"bloom\":true,\"contactShadows\":true,\"grading\":true,\"volumes\":1,\"post\":{\"aoRadius\":0.8999999761581421,\"aoIntensity\":1.600000023841858,\"bloomIntensity\":1.0,\"bloomThreshold\":0.699999988079071,\"bloomScatter\":0.699999988079071,\"bloomTint\":[1.0,1.0,1.0],\"contactIntensity\":1.0,\"contactLength\":0.30000001192092896,\"contactThickness\":0.05000000074505806,\"contactDistance\":50.0,\"grading\":{\"tonemapper\":\"aces\",\"postExposure\":0.0,\"temperature\":20.0,\"tint\":0.0,\"contrast\":15.0,\"saturation\":5.0,\"hueShift\":0.0,\"colorFilter\":[1.0,1.0,1.0],\"lift\":[0.0,0.0,0.0],\"gamma\":[1.0,1.0,1.0],\"gain\":[1.0,1.0,1.0]}},\"quality\":{\"profile\":\"medium\",\"shadows\":true,\"shadowResolution\":2048,\"ambientOcclusion\":true,\"bloom\":true,\"contactShadows\":true,\"msaa\":4,\"renderScale\":1.0,\"anisotropy\":8,\"renderSize\":[1320,2868]},\"assetErrors\":[],\"diagnostics\":{\"ok\":true,\"diagnostics\":[]}}\n",
+          "stderr": ""
+        },
+        {
+          "stage": "simulation",
+          "argv": [
+            "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel",
+            "test",
+            "--headless",
+            "--project",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000",
+            "--no-cook",
+            "--steps",
+            "120",
+            "--json"
+          ],
+          "exitCode": 0,
+          "stdout": "{\n  \"steps\": 120,\n  \"frames\": 120,\n  \"tick\": 120,\n  \"live_entities\": 3193,\n  \"commands_applied\": 0,\n  \"commands_rejected\": 0,\n  \"events\": 398,\n  \"diagnostics\": 0,\n  \"missed_deadlines\": 0,\n  \"dropped_seconds\": 0.0,\n  \"extract_records\": 3193,\n  \"checksum\": \"33c25e6b41266aa7\",\n  \"step_time\": {\n    \"p50_us\": 2941,\n    \"p95_us\": 3217,\n    \"max_us\": 5576\n  },\n  \"extract_time\": {\n    \"p50_us\": 1271,\n    \"p95_us\": 1321,\n    \"max_us\": 1633\n  },\n  \"frame_time\": {\n    \"p50_us\": 4213,\n    \"p95_us\": 4495,\n    \"max_us\": 6963\n  },\n  \"total_ms\": 565.2726,\n  \"scene_ready\": true,\n  \"scene\": {\n    \"cache\": \"/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000/.fynkel/cache\",\n    \"path\": \"scenes/stress.scene.json\",\n    \"loaded\": true,\n    \"id\": \"5b6a1c2e-0000-4000-8000-0000000005ce\",\n    \"name\": \"Stress\",\n    \"key\": \"ee8865d84e36ec8014f0f56ec2c7ad39b024a18d8d9e857ce16a8aa48454435c\",\n    \"entities\": 3173,\n    \"rejected_components\": 0,\n    \"retained\": 15,\n    \"prefabs\": 1,\n    \"document_diagnostics\": []\n  },\n  \"input\": null,\n  \"physics\": {\n    \"bodies\": 170,\n    \"colliders\": 2171,\n    \"mesh_colliders\": 0,\n    \"characters\": 0,\n    \"collision_enter\": 174,\n    \"collision_stay\": 0,\n    \"collision_exit\": 4,\n    \"trigger_enter\": 0,\n    \"trigger_exit\": 0,\n    \"diagnostics\": 0\n  },\n  \"animation\": {\n    \"entities\": 135,\n    \"clips\": 4,\n    \"skins\": 1,\n    \"skinned_meshes\": 60,\n    \"joints\": 780,\n    \"ended\": 0,\n    \"markers\": 219,\n    \"diagnostics\": 0\n  },\n  \"audio\": null,\n  \"systems\": [\n    {\n      \"system\": \"step\",\n      \"entities\": 3193,\n      \"total_us\": 356464,\n      \"max_us\": 5576,\n      \"mean_us\": 2970.5334\n    },\n    {\n      \"system\": \"commands\",\n      \"entities\": 0,\n      \"total_us\": 0,\n      \"max_us\": 0,\n      \"mean_us\": 0.0\n    },\n    {\n      \"system\": \"characters\",\n      \"entities\": 0,\n      \"total_us\": 8,\n      \"max_us\": 5,\n      \"mean_us\": 0.06666667\n    },\n    {\n      \"system\": \"animation\",\n      \"entities\": 135,\n      \"total_us\": 26285,\n      \"max_us\": 454,\n      \"mean_us\": 219.04167\n    },\n    {\n      \"system\": \"rotator\",\n      \"entities\": 668,\n      \"total_us\": 18945,\n      \"max_us\": 191,\n      \"mean_us\": 157.875\n    },\n    {\n      \"system\": \"oscillate\",\n      \"entities\": 668,\n      \"total_us\": 23510,\n      \"max_us\": 310,\n      \"mean_us\": 195.91667\n    },\n    {\n      \"system\": \"lifetimeDespawn\",\n      \"entities\": 19,\n      \"total_us\": 414,\n      \"max_us\": 14,\n      \"mean_us\": 3.45\n    },\n    {\n      \"system\": \"emitter\",\n      \"entities\": 1,\n      \"total_us\": 353,\n      \"max_us\": 25,\n      \"mean_us\": 2.9416666\n    },\n    {\n      \"system\": \"physics\",\n      \"entities\": 2341,\n      \"total_us\": 225531,\n      \"max_us\": 3406,\n      \"mean_us\": 1879.425\n    },\n    {\n      \"system\": \"cameraRigs\",\n      \"entities\": 0,\n      \"total_us\": 5,\n      \"max_us\": 1,\n      \"mean_us\": 0.041666668\n    },\n    {\n      \"system\": \"follow\",\n      \"entities\": 1,\n      \"total_us\": 211,\n      \"max_us\": 7,\n      \"mean_us\": 1.7583333\n    },\n    {\n      \"system\": \"lookAtCamera\",\n      \"entities\": 664,\n      \"total_us\": 42056,\n      \"max_us\": 450,\n      \"mean_us\": 350.46667\n    },\n    {\n      \"system\": \"transforms\",\n      \"entities\": 2669,\n      \"total_us\": 17942,\n      \"max_us\": 871,\n      \"mean_us\": 149.51666\n    },\n    {\n      \"system\": \"audio\",\n      \"entities\": 0,\n      \"total_us\": 61,\n      \"max_us\": 32,\n      \"mean_us\": 0.5083333\n    },\n    {\n      \"system\": \"publish\",\n      \"entities\": 0,\n      \"total_us\": 286,\n      \"max_us\": 30,\n      \"mean_us\": 2.3833334\n    }\n  ],\n  \"memory\": {\n    \"native_bytes\": 14987262,\n    \"native_peak_bytes\": 39301329,\n    \"resident_bytes\": 78479360,\n    \"residency_bytes\": 16646\n  }\n}\n",
+          "stderr": ""
+        }
+      ],
+      "render": {
+        "ok": true,
+        "out": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000/preflight.png",
+        "size": [
+          1320,
+          2868
+        ],
+        "project": "Fynkel Stress",
+        "scene": {
+          "id": "5b6a1c2e-0000-4000-8000-0000000005ce",
+          "name": "Stress",
+          "key": "ee8865d84e36ec8014f0f56ec2c7ad39b024a18d8d9e857ce16a8aa48454435c",
+          "entities": 3173,
+          "rejectedComponents": 0
+        },
+        "cache": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000/.fynkel/cache",
+        "steps": 1,
+        "instances": 671,
+        "culled": 1640,
+        "layerHidden": 0,
+        "draws": 16,
+        "skinned": 17,
+        "joints": 780,
+        "shadowDraws": 60,
+        "meshes": 2311,
+        "placeholders": 0,
+        "missing": 0,
+        "batches": 16,
+        "sceneCamera": true,
+        "sceneLight": true,
+        "lights": 8,
+        "lightsDropped": 0,
+        "lightsMaxPerObject": 8,
+        "lightsOverflow": 0,
+        "sky": false,
+        "ibl": false,
+        "ev100": 11.965784072875977,
+        "transparent": 0,
+        "shadowCasters": 1434,
+        "shadowMap": 2048,
+        "shadowCascades": 4,
+        "ambientOcclusion": true,
+        "bloom": true,
+        "contactShadows": true,
+        "grading": true,
+        "volumes": 1,
+        "post": {
+          "aoRadius": 0.8999999761581421,
+          "aoIntensity": 1.600000023841858,
+          "bloomIntensity": 1.0,
+          "bloomThreshold": 0.699999988079071,
+          "bloomScatter": 0.699999988079071,
+          "bloomTint": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "contactIntensity": 1.0,
+          "contactLength": 0.30000001192092896,
+          "contactThickness": 0.05000000074505806,
+          "contactDistance": 50.0,
+          "grading": {
+            "tonemapper": "aces",
+            "postExposure": 0.0,
+            "temperature": 20.0,
+            "tint": 0.0,
+            "contrast": 15.0,
+            "saturation": 5.0,
+            "hueShift": 0.0,
+            "colorFilter": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "lift": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gamma": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "gain": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "quality": {
+          "profile": "medium",
+          "shadows": true,
+          "shadowResolution": 2048,
+          "ambientOcclusion": true,
+          "bloom": true,
+          "contactShadows": true,
+          "msaa": 4,
+          "renderScale": 1.0,
+          "anisotropy": 8,
+          "renderSize": [
+            1320,
+            2868
+          ]
+        },
+        "assetErrors": [],
+        "diagnostics": {
+          "ok": true,
+          "diagnostics": []
+        }
+      },
+      "simulation": {
+        "steps": 120,
+        "frames": 120,
+        "tick": 120,
+        "live_entities": 3193,
+        "commands_applied": 0,
+        "commands_rejected": 0,
+        "events": 398,
+        "diagnostics": 0,
+        "missed_deadlines": 0,
+        "dropped_seconds": 0.0,
+        "extract_records": 3193,
+        "checksum": "33c25e6b41266aa7",
+        "step_time": {
+          "p50_us": 2941,
+          "p95_us": 3217,
+          "max_us": 5576
+        },
+        "extract_time": {
+          "p50_us": 1271,
+          "p95_us": 1321,
+          "max_us": 1633
+        },
+        "frame_time": {
+          "p50_us": 4213,
+          "p95_us": 4495,
+          "max_us": 6963
+        },
+        "total_ms": 565.2726,
+        "scene_ready": true,
+        "scene": {
+          "cache": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-2000/.fynkel/cache",
+          "path": "scenes/stress.scene.json",
+          "loaded": true,
+          "id": "5b6a1c2e-0000-4000-8000-0000000005ce",
+          "name": "Stress",
+          "key": "ee8865d84e36ec8014f0f56ec2c7ad39b024a18d8d9e857ce16a8aa48454435c",
+          "entities": 3173,
+          "rejected_components": 0,
+          "retained": 15,
+          "prefabs": 1,
+          "document_diagnostics": []
+        },
+        "input": null,
+        "physics": {
+          "bodies": 170,
+          "colliders": 2171,
+          "mesh_colliders": 0,
+          "characters": 0,
+          "collision_enter": 174,
+          "collision_stay": 0,
+          "collision_exit": 4,
+          "trigger_enter": 0,
+          "trigger_exit": 0,
+          "diagnostics": 0
+        },
+        "animation": {
+          "entities": 135,
+          "clips": 4,
+          "skins": 1,
+          "skinned_meshes": 60,
+          "joints": 780,
+          "ended": 0,
+          "markers": 219,
+          "diagnostics": 0
+        },
+        "audio": null,
+        "systems": [
+          {
+            "system": "step",
+            "entities": 3193,
+            "total_us": 356464,
+            "max_us": 5576,
+            "mean_us": 2970.5334
+          },
+          {
+            "system": "commands",
+            "entities": 0,
+            "total_us": 0,
+            "max_us": 0,
+            "mean_us": 0.0
+          },
+          {
+            "system": "characters",
+            "entities": 0,
+            "total_us": 8,
+            "max_us": 5,
+            "mean_us": 0.06666667
+          },
+          {
+            "system": "animation",
+            "entities": 135,
+            "total_us": 26285,
+            "max_us": 454,
+            "mean_us": 219.04167
+          },
+          {
+            "system": "rotator",
+            "entities": 668,
+            "total_us": 18945,
+            "max_us": 191,
+            "mean_us": 157.875
+          },
+          {
+            "system": "oscillate",
+            "entities": 668,
+            "total_us": 23510,
+            "max_us": 310,
+            "mean_us": 195.91667
+          },
+          {
+            "system": "lifetimeDespawn",
+            "entities": 19,
+            "total_us": 414,
+            "max_us": 14,
+            "mean_us": 3.45
+          },
+          {
+            "system": "emitter",
+            "entities": 1,
+            "total_us": 353,
+            "max_us": 25,
+            "mean_us": 2.9416666
+          },
+          {
+            "system": "physics",
+            "entities": 2341,
+            "total_us": 225531,
+            "max_us": 3406,
+            "mean_us": 1879.425
+          },
+          {
+            "system": "cameraRigs",
+            "entities": 0,
+            "total_us": 5,
+            "max_us": 1,
+            "mean_us": 0.041666668
+          },
+          {
+            "system": "follow",
+            "entities": 1,
+            "total_us": 211,
+            "max_us": 7,
+            "mean_us": 1.7583333
+          },
+          {
+            "system": "lookAtCamera",
+            "entities": 664,
+            "total_us": 42056,
+            "max_us": 450,
+            "mean_us": 350.46667
+          },
+          {
+            "system": "transforms",
+            "entities": 2669,
+            "total_us": 17942,
+            "max_us": 871,
+            "mean_us": 149.51666
+          },
+          {
+            "system": "audio",
+            "entities": 0,
+            "total_us": 61,
+            "max_us": 32,
+            "mean_us": 0.5083333
+          },
+          {
+            "system": "publish",
+            "entities": 0,
+            "total_us": 286,
+            "max_us": 30,
+            "mean_us": 2.3833334
+          }
+        ],
+        "memory": {
+          "native_bytes": 14987262,
+          "native_peak_bytes": 39301329,
+          "resident_bytes": 78479360,
+          "residency_bytes": 16646
+        }
+      },
+      "sceneSha256": "136a26d58dee9aa031ea5ce3e148c83838d93d46190d0fd294e5d1c2972a45d9",
+      "generatorSha256": "8b63fdf1340d3b35542d2deed702e6043bcb628bb717eda38238c9cd7bb19113"
+    },
+    {
+      "schemaVersion": 1,
+      "workload": "dense-5000",
+      "seed": 1,
+      "populations": {
+        "static": 5000,
+        "bodies": 500,
+        "behaviours": 300,
+        "rigs": 200,
+        "lights": 32
+      },
+      "app": false,
+      "dartBehavioursExecute": false,
+      "status": "preflight-complete",
+      "deviceQualification": "not-run",
+      "resolution": [
+        1320,
+        2868
+      ],
+      "quality": "medium",
+      "commands": [
+        {
+          "stage": "generate",
+          "argv": [
+            "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3",
+            "/Users/oumari/Desktop/Code/fynkelengine/benchmarks/stress/generate.py",
+            "--out",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000",
+            "--seed",
+            "1",
+            "--static",
+            "5000",
+            "--bodies",
+            "500",
+            "--behaviours",
+            "300",
+            "--rigs",
+            "200",
+            "--lights",
+            "32"
+          ],
+          "exitCode": 0,
+          "stdout": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000: 8839 entities (5000 native movers, 500 bodies, 300 behaviours, 200 animated rigs, 32 lamps), 8 materials, 16 distinct (mesh, material) pairs\n",
+          "stderr": ""
+        },
+        {
+          "stage": "lock",
+          "argv": [
+            "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel",
+            "project",
+            "lock",
+            "--project",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000"
+          ],
+          "exitCode": 0,
+          "stdout": "",
+          "stderr": "fynkel project lock: /Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000/fynkel.lock.json already matches this build\n"
+        },
+        {
+          "stage": "validate",
+          "argv": [
+            "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel",
+            "validate",
+            "--project",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000",
+            "--json"
+          ],
+          "exitCode": 0,
+          "stdout": "{\"ok\":true,\"diagnostics\":[],\"project\":{\"id\":\"5b6a1c2e-0000-4000-8000-00000000c0de\",\"name\":\"Fynkel Stress\",\"path\":\"/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000/fynkel.project.json\"},\"lock\":{\"$schema\":\"https://fynkel.dev/schemas/lock.schema.json\",\"formatVersion\":1,\"runtime\":{\"version\":\"0.0.1\",\"abiVersion\":5},\"tools\":{\"version\":\"0.0.1\"},\"schemaFingerprint\":\"0x65d9f39b4aa79409\",\"documents\":{\"blend\":1,\"controller\":1,\"data\":1,\"material\":2,\"meta\":2,\"physics_material\":1,\"prefab\":7,\"project\":2,\"rig\":1,\"scene\":7,\"shader\":1,\"volume\":1},\"importers\":{\"fynkel.audio\":2,\"fynkel.fbx\":5,\"fynkel.file\":1,\"fynkel.gltf\":9,\"fynkel.image\":1,\"fynkel.shader\":1},\"cache\":{\"version\":12,\"container\":1}},\"documents\":12,\"sources\":3,\"references\":12459,\"errors\":0,\"warnings\":0}\n",
+          "stderr": ""
+        },
+        {
+          "stage": "cook",
+          "argv": [
+            "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel",
+            "cook",
+            "--project",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000"
+          ],
+          "exitCode": 0,
+          "stdout": "cooked  Fynkel/Primitives.glb (fynkel.gltf) 66aa05df0bc5 141664 B\ncooked  materials/behaviour.material.json (document/material) 4fdc8d6a81f2 1184 B\ncooked  materials/body.material.json (document/material) 9eb8da06f616 1168 B\ncooked  materials/brick.material.json (document/material) 0414cfe1b945 1168 B\ncooked  materials/concrete.material.json (document/material) bf211d5eda3e 1184 B\ncooked  materials/floor.material.json (document/material) 82891e22f7b8 1168 B\ncooked  materials/moss.material.json (document/material) ba79fcf5168d 1192 B\ncooked  materials/rig.material.json (document/material) 136047909f17 1152 B\ncooked  materials/steel.material.json (document/material) f5d1c709168e 1168 B\ncooked  models/character.glb (fynkel.gltf) b27095763296 59656 B\ncooked  models/cube.glb (fynkel.gltf) 49fde6b4ecdd 4736 B\ncooked  models/locomotion.blend.json (document/blend) 6fd10927fd66 1272 B\ncooked  models/robot.glb (fynkel.gltf) 355392001dca 14360 B\ncooked  prefabs/spark.prefab.json (document/prefab) b55ce3014793 3144 B\ncooked  scenes/stress.scene.json (document/scene) 554ececf47a8 14255352 B\ncooked  volumes/look.volume.json (document/volume) add783b0230f 1024 B\nprofile dev: 16 cooked, 0 cached, 0 failed\n",
+          "stderr": "warning[FYN-A0105] /Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000/assets/models/robot.glb: texture 0: sampler nearest wrap S=clamp T=repeat is not kept; materials sample linear/repeat (sampler settings belong to the texture's sidecar)\nwarning[FYN-A0105] /Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000/assets/models/robot.glb: material/0 (Painted): metallic_roughness_texture uses TEXCOORD_1; the PBR material samples set 0\nfynkel cook: 16 asset(s) \u2192 /Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000/.fynkel/cache (16 cooked, 0 cached, 0 failed)\n"
+        },
+        {
+          "stage": "render",
+          "argv": [
+            "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel",
+            "render",
+            "--project",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000",
+            "--no-cook",
+            "--json",
+            "--quality",
+            "medium",
+            "--size",
+            "1320x2868",
+            "--out",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000/preflight.png"
+          ],
+          "exitCode": 0,
+          "stdout": "{\"ok\":true,\"out\":\"/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000/preflight.png\",\"size\":[1320,2868],\"project\":\"Fynkel Stress\",\"scene\":{\"id\":\"5b6a1c2e-0000-4000-8000-0000000005ce\",\"name\":\"Stress\",\"key\":\"554ececf47a8ce8b80e4d130446c89ab692094a59aba2d245840ff540b129256\",\"entities\":8839,\"rejectedComponents\":0},\"cache\":\"/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000/.fynkel/cache\",\"steps\":1,\"instances\":1716,\"culled\":4285,\"layerHidden\":0,\"draws\":16,\"skinned\":47,\"joints\":2600,\"shadowDraws\":60,\"meshes\":6001,\"placeholders\":0,\"missing\":0,\"batches\":16,\"sceneCamera\":true,\"sceneLight\":true,\"lights\":14,\"lightsDropped\":0,\"lightsMaxPerObject\":8,\"lightsOverflow\":1,\"sky\":false,\"ibl\":false,\"ev100\":11.965784072875977,\"transparent\":0,\"shadowCasters\":3731,\"shadowMap\":2048,\"shadowCascades\":4,\"ambientOcclusion\":true,\"bloom\":true,\"contactShadows\":true,\"grading\":true,\"volumes\":1,\"post\":{\"aoRadius\":0.8999999761581421,\"aoIntensity\":1.600000023841858,\"bloomIntensity\":1.0,\"bloomThreshold\":0.699999988079071,\"bloomScatter\":0.699999988079071,\"bloomTint\":[1.0,1.0,1.0],\"contactIntensity\":1.0,\"contactLength\":0.30000001192092896,\"contactThickness\":0.05000000074505806,\"contactDistance\":50.0,\"grading\":{\"tonemapper\":\"aces\",\"postExposure\":0.0,\"temperature\":20.0,\"tint\":0.0,\"contrast\":15.0,\"saturation\":5.0,\"hueShift\":0.0,\"colorFilter\":[1.0,1.0,1.0],\"lift\":[0.0,0.0,0.0],\"gamma\":[1.0,1.0,1.0],\"gain\":[1.0,1.0,1.0]}},\"quality\":{\"profile\":\"medium\",\"shadows\":true,\"shadowResolution\":2048,\"ambientOcclusion\":true,\"bloom\":true,\"contactShadows\":true,\"msaa\":4,\"renderScale\":1.0,\"anisotropy\":8,\"renderSize\":[1320,2868]},\"assetErrors\":[],\"diagnostics\":{\"ok\":true,\"diagnostics\":[]}}\n",
+          "stderr": ""
+        },
+        {
+          "stage": "simulation",
+          "argv": [
+            "/Users/oumari/Desktop/Code/fynkelengine/target/release/fynkel",
+            "test",
+            "--headless",
+            "--project",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000",
+            "--no-cook",
+            "--steps",
+            "120",
+            "--json"
+          ],
+          "exitCode": 0,
+          "stdout": "{\n  \"steps\": 120,\n  \"frames\": 120,\n  \"tick\": 120,\n  \"live_entities\": 8859,\n  \"commands_applied\": 0,\n  \"commands_rejected\": 0,\n  \"events\": 3156,\n  \"diagnostics\": 0,\n  \"missed_deadlines\": 0,\n  \"dropped_seconds\": 0.0,\n  \"extract_records\": 8859,\n  \"checksum\": \"9f28f97df6063f27\",\n  \"step_time\": {\n    \"p50_us\": 8766,\n    \"p95_us\": 9715,\n    \"max_us\": 14726\n  },\n  \"extract_time\": {\n    \"p50_us\": 3647,\n    \"p95_us\": 3980,\n    \"max_us\": 5760\n  },\n  \"frame_time\": {\n    \"p50_us\": 12484,\n    \"p95_us\": 13459,\n    \"max_us\": 18569\n  },\n  \"total_ms\": 1654.4878,\n  \"scene_ready\": true,\n  \"scene\": {\n    \"cache\": \"/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000/.fynkel/cache\",\n    \"path\": \"scenes/stress.scene.json\",\n    \"loaded\": true,\n    \"id\": \"5b6a1c2e-0000-4000-8000-0000000005ce\",\n    \"name\": \"Stress\",\n    \"key\": \"554ececf47a8ce8b80e4d130446c89ab692094a59aba2d245840ff540b129256\",\n    \"entities\": 8839,\n    \"rejected_components\": 0,\n    \"retained\": 15,\n    \"prefabs\": 1,\n    \"document_diagnostics\": []\n  },\n  \"input\": null,\n  \"physics\": {\n    \"bodies\": 520,\n    \"colliders\": 5521,\n    \"mesh_colliders\": 0,\n    \"characters\": 0,\n    \"collision_enter\": 1604,\n    \"collision_stay\": 0,\n    \"collision_exit\": 830,\n    \"trigger_enter\": 0,\n    \"trigger_exit\": 0,\n    \"diagnostics\": 0\n  },\n  \"animation\": {\n    \"entities\": 450,\n    \"clips\": 4,\n    \"skins\": 1,\n    \"skinned_meshes\": 200,\n    \"joints\": 2600,\n    \"ended\": 0,\n    \"markers\": 721,\n    \"diagnostics\": 0\n  },\n  \"audio\": null,\n  \"systems\": [\n    {\n      \"system\": \"step\",\n      \"entities\": 8859,\n      \"total_us\": 1052648,\n      \"max_us\": 14726,\n      \"mean_us\": 8772.066\n    },\n    {\n      \"system\": \"commands\",\n      \"entities\": 0,\n      \"total_us\": 16,\n      \"max_us\": 5,\n      \"mean_us\": 0.13333334\n    },\n    {\n      \"system\": \"characters\",\n      \"entities\": 0,\n      \"total_us\": 30,\n      \"max_us\": 8,\n      \"mean_us\": 0.25\n    },\n    {\n      \"system\": \"animation\",\n      \"entities\": 450,\n      \"total_us\": 87578,\n      \"max_us\": 1481,\n      \"mean_us\": 729.81665\n    },\n    {\n      \"system\": \"rotator\",\n      \"entities\": 1668,\n      \"total_us\": 50804,\n      \"max_us\": 540,\n      \"mean_us\": 423.36667\n    },\n    {\n      \"system\": \"oscillate\",\n      \"entities\": 1668,\n      \"total_us\": 61337,\n      \"max_us\": 778,\n      \"mean_us\": 511.14166\n    },\n    {\n      \"system\": \"lifetimeDespawn\",\n      \"entities\": 19,\n      \"total_us\": 789,\n      \"max_us\": 12,\n      \"mean_us\": 6.575\n    },\n    {\n      \"system\": \"emitter\",\n      \"entities\": 1,\n      \"total_us\": 563,\n      \"max_us\": 33,\n      \"mean_us\": 4.6916666\n    },\n    {\n      \"system\": \"physics\",\n      \"entities\": 6041,\n      \"total_us\": 693534,\n      \"max_us\": 9782,\n      \"mean_us\": 5779.45\n    },\n    {\n      \"system\": \"cameraRigs\",\n      \"entities\": 0,\n      \"total_us\": 42,\n      \"max_us\": 2,\n      \"mean_us\": 0.35\n    },\n    {\n      \"system\": \"follow\",\n      \"entities\": 1,\n      \"total_us\": 611,\n      \"max_us\": 11,\n      \"mean_us\": 5.0916667\n    },\n    {\n      \"system\": \"lookAtCamera\",\n      \"entities\": 1664,\n      \"total_us\": 103359,\n      \"max_us\": 1076,\n      \"mean_us\": 861.325\n    },\n    {\n      \"system\": \"transforms\",\n      \"entities\": 7560,\n      \"total_us\": 52670,\n      \"max_us\": 2121,\n      \"mean_us\": 438.91666\n    },\n    {\n      \"system\": \"audio\",\n      \"entities\": 0,\n      \"total_us\": 184,\n      \"max_us\": 5,\n      \"mean_us\": 1.5333333\n    },\n    {\n      \"system\": \"publish\",\n      \"entities\": 0,\n      \"total_us\": 66,\n      \"max_us\": 6,\n      \"mean_us\": 0.55\n    }\n  ],\n  \"memory\": {\n    \"native_bytes\": 38969412,\n    \"native_peak_bytes\": 107839370,\n    \"resident_bytes\": 176144384,\n    \"residency_bytes\": 16646\n  }\n}\n",
+          "stderr": ""
+        }
+      ],
+      "render": {
+        "ok": true,
+        "out": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000/preflight.png",
+        "size": [
+          1320,
+          2868
+        ],
+        "project": "Fynkel Stress",
+        "scene": {
+          "id": "5b6a1c2e-0000-4000-8000-0000000005ce",
+          "name": "Stress",
+          "key": "554ececf47a8ce8b80e4d130446c89ab692094a59aba2d245840ff540b129256",
+          "entities": 8839,
+          "rejectedComponents": 0
+        },
+        "cache": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000/.fynkel/cache",
+        "steps": 1,
+        "instances": 1716,
+        "culled": 4285,
+        "layerHidden": 0,
+        "draws": 16,
+        "skinned": 47,
+        "joints": 2600,
+        "shadowDraws": 60,
+        "meshes": 6001,
+        "placeholders": 0,
+        "missing": 0,
+        "batches": 16,
+        "sceneCamera": true,
+        "sceneLight": true,
+        "lights": 14,
+        "lightsDropped": 0,
+        "lightsMaxPerObject": 8,
+        "lightsOverflow": 1,
+        "sky": false,
+        "ibl": false,
+        "ev100": 11.965784072875977,
+        "transparent": 0,
+        "shadowCasters": 3731,
+        "shadowMap": 2048,
+        "shadowCascades": 4,
+        "ambientOcclusion": true,
+        "bloom": true,
+        "contactShadows": true,
+        "grading": true,
+        "volumes": 1,
+        "post": {
+          "aoRadius": 0.8999999761581421,
+          "aoIntensity": 1.600000023841858,
+          "bloomIntensity": 1.0,
+          "bloomThreshold": 0.699999988079071,
+          "bloomScatter": 0.699999988079071,
+          "bloomTint": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "contactIntensity": 1.0,
+          "contactLength": 0.30000001192092896,
+          "contactThickness": 0.05000000074505806,
+          "contactDistance": 50.0,
+          "grading": {
+            "tonemapper": "aces",
+            "postExposure": 0.0,
+            "temperature": 20.0,
+            "tint": 0.0,
+            "contrast": 15.0,
+            "saturation": 5.0,
+            "hueShift": 0.0,
+            "colorFilter": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "lift": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gamma": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "gain": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "quality": {
+          "profile": "medium",
+          "shadows": true,
+          "shadowResolution": 2048,
+          "ambientOcclusion": true,
+          "bloom": true,
+          "contactShadows": true,
+          "msaa": 4,
+          "renderScale": 1.0,
+          "anisotropy": 8,
+          "renderSize": [
+            1320,
+            2868
+          ]
+        },
+        "assetErrors": [],
+        "diagnostics": {
+          "ok": true,
+          "diagnostics": []
+        }
+      },
+      "simulation": {
+        "steps": 120,
+        "frames": 120,
+        "tick": 120,
+        "live_entities": 8859,
+        "commands_applied": 0,
+        "commands_rejected": 0,
+        "events": 3156,
+        "diagnostics": 0,
+        "missed_deadlines": 0,
+        "dropped_seconds": 0.0,
+        "extract_records": 8859,
+        "checksum": "9f28f97df6063f27",
+        "step_time": {
+          "p50_us": 8766,
+          "p95_us": 9715,
+          "max_us": 14726
+        },
+        "extract_time": {
+          "p50_us": 3647,
+          "p95_us": 3980,
+          "max_us": 5760
+        },
+        "frame_time": {
+          "p50_us": 12484,
+          "p95_us": 13459,
+          "max_us": 18569
+        },
+        "total_ms": 1654.4878,
+        "scene_ready": true,
+        "scene": {
+          "cache": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-dense-5000/.fynkel/cache",
+          "path": "scenes/stress.scene.json",
+          "loaded": true,
+          "id": "5b6a1c2e-0000-4000-8000-0000000005ce",
+          "name": "Stress",
+          "key": "554ececf47a8ce8b80e4d130446c89ab692094a59aba2d245840ff540b129256",
+          "entities": 8839,
+          "rejected_components": 0,
+          "retained": 15,
+          "prefabs": 1,
+          "document_diagnostics": []
+        },
+        "input": null,
+        "physics": {
+          "bodies": 520,
+          "colliders": 5521,
+          "mesh_colliders": 0,
+          "characters": 0,
+          "collision_enter": 1604,
+          "collision_stay": 0,
+          "collision_exit": 830,
+          "trigger_enter": 0,
+          "trigger_exit": 0,
+          "diagnostics": 0
+        },
+        "animation": {
+          "entities": 450,
+          "clips": 4,
+          "skins": 1,
+          "skinned_meshes": 200,
+          "joints": 2600,
+          "ended": 0,
+          "markers": 721,
+          "diagnostics": 0
+        },
+        "audio": null,
+        "systems": [
+          {
+            "system": "step",
+            "entities": 8859,
+            "total_us": 1052648,
+            "max_us": 14726,
+            "mean_us": 8772.066
+          },
+          {
+            "system": "commands",
+            "entities": 0,
+            "total_us": 16,
+            "max_us": 5,
+            "mean_us": 0.13333334
+          },
+          {
+            "system": "characters",
+            "entities": 0,
+            "total_us": 30,
+            "max_us": 8,
+            "mean_us": 0.25
+          },
+          {
+            "system": "animation",
+            "entities": 450,
+            "total_us": 87578,
+            "max_us": 1481,
+            "mean_us": 729.81665
+          },
+          {
+            "system": "rotator",
+            "entities": 1668,
+            "total_us": 50804,
+            "max_us": 540,
+            "mean_us": 423.36667
+          },
+          {
+            "system": "oscillate",
+            "entities": 1668,
+            "total_us": 61337,
+            "max_us": 778,
+            "mean_us": 511.14166
+          },
+          {
+            "system": "lifetimeDespawn",
+            "entities": 19,
+            "total_us": 789,
+            "max_us": 12,
+            "mean_us": 6.575
+          },
+          {
+            "system": "emitter",
+            "entities": 1,
+            "total_us": 563,
+            "max_us": 33,
+            "mean_us": 4.6916666
+          },
+          {
+            "system": "physics",
+            "entities": 6041,
+            "total_us": 693534,
+            "max_us": 9782,
+            "mean_us": 5779.45
+          },
+          {
+            "system": "cameraRigs",
+            "entities": 0,
+            "total_us": 42,
+            "max_us": 2,
+            "mean_us": 0.35
+          },
+          {
+            "system": "follow",
+            "entities": 1,
+            "total_us": 611,
+            "max_us": 11,
+            "mean_us": 5.0916667
+          },
+          {
+            "system": "lookAtCamera",
+            "entities": 1664,
+            "total_us": 103359,
+            "max_us": 1076,
+            "mean_us": 861.325
+          },
+          {
+            "system": "transforms",
+            "entities": 7560,
+            "total_us": 52670,
+            "max_us": 2121,
+            "mean_us": 438.91666
+          },
+          {
+            "system": "audio",
+            "entities": 0,
+            "total_us": 184,
+            "max_us": 5,
+            "mean_us": 1.5333333
+          },
+          {
+            "system": "publish",
+            "entities": 0,
+            "total_us": 66,
+            "max_us": 6,
+            "mean_us": 0.55
+          }
+        ],
+        "memory": {
+          "native_bytes": 38969412,
+          "native_peak_bytes": 107839370,
+          "resident_bytes": 176144384,
+          "residency_bytes": 16646
+        }
+      },
+      "sceneSha256": "bb84149f0caa63215d0d290a5c0e230e19924c129159481a81384d40337d34ed",
+      "generatorSha256": "8b63fdf1340d3b35542d2deed702e6043bcb628bb717eda38238c9cd7bb19113"
+    }
+  ]
+}

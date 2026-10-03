@@ -1140,7 +1140,7 @@ impl Preview {
         assets.override_material(
             &AssetRef::new(fynkel_contracts::Uuid(*material.as_bytes())),
             m,
-        );
+        )?;
         Ok(())
     }
 
@@ -1191,7 +1191,7 @@ impl Preview {
         assets.override_volume(
             &AssetRef::new(fynkel_contracts::Uuid(*volume.as_bytes())),
             v.profile,
-        );
+        )?;
         Ok(())
     }
 
@@ -2004,6 +2004,6 @@ fn set_shader_material(assets: &Assets, material: Uuid, data: &Value) -> Result<
     assets.override_custom_material(
         &AssetRef::new(fynkel_contracts::Uuid(*material.as_bytes())),
         payload,
-    );
+    )?;
     Ok(())
 }

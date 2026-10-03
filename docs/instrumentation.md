@@ -388,3 +388,36 @@ window, the first the stale `14 phases` count (audio made it 15).
   with the scavenges it forced, then a quiet window under a megabyte
   (the plain runner has no service: the probe is null and the test
   returns).
+
+### Game-loop rate versus texture delivery
+
+`FynkelFrameStats.fps` counts game-loop callbacks over `windowSeconds`; it is
+not proof of physical display FPS. `textureAcquisitionFps` reports distinct
+textures acquired by the compositor per second (null without a timed native
+snapshot). The starter HUD labels these separately. Physical scanout timing
+is outside this measurement.
+
+Capture lines also expose `acquired`, `repeated`, `present_lag` (p50/p95/max),
+`acquire_wait` (p50/p95/max in milliseconds), and the Swift `texture_copies`,
+`texture_new`, `texture_empty`, and `texture_ready` counters. Native and method
+channel snapshots are adjacent observations, not an atomic cross-thread sample;
+small differences at a reporting boundary are expected. Sustained divergence
+between loop and acquisition rates is a rendering/delivery problem even when
+simulation timing is low. Swift counters use a lock for updates and read/reset.
+
+
+`FYNKEL_TRACE_SCREEN_SPACE=1` enables a native stderr trace every eighth
+completed screen-space sample: depth, estimate, blur and total spans in
+microseconds. These pass spans can overlap on tile-based GPUs; do not add them
+or subtract them as if each were an exclusive shader execution time. Use
+whole-frame comparisons with controlled settings to establish performance.
+Tracing is off by default and does not change the viewport ABI.
+
+### Device thermal pressure
+
+`ViewportPlatformStats.thermalState` reports the Apple process thermal state at
+sampling time: nominal, fair, serious, critical, or unknown (older/unsupported
+hosts). `FynkelFrameStats.summary()` includes `thermal=<state>`. This is device-wide
+pressure, not a temperature sensor or proof of engine-induced throttling. The
+[mobile benchmark harness](../benchmarks/mobile/README.md) records it and stops
+short diagnostic runs at serious/critical pressure.

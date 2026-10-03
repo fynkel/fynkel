@@ -42,7 +42,7 @@ fn damage(e: &mut GameplayEdit<'_>, _: SystemContext) -> EditResult<u32> {
     Ok(batch.rows().len() as u32)
 }
 fn main() {
-    for count in [1, 1000, 10000] {
+    for count in [1, 1000, 10000, 50000] {
         let mut w = World::new(Default::default());
         w.register_dynamic_component(ComponentSchema {
             id: "bench.Health".into(),
@@ -84,7 +84,17 @@ fn main() {
         }
         let calls = (ALLOCS.load(Relaxed) - calls) as f64 / 60.;
         let bytes = (BYTES.load(Relaxed) - bytes) as f64 / 60.;
+        let raw_samples = samples.clone();
         samples.sort_unstable();
-        println!("{{\"entities\":{count},\"native_tick_p50_us\":{},\"native_tick_p95_us\":{},\"native_allocation_calls_per_tick\":{calls},\"native_bytes_requested_per_tick\":{bytes}}}", samples[30], samples[57]);
+        println!(
+            "{}",
+            serde_json::json!({
+                "entities": count, "native_tick_p50_us": samples[30],
+                "native_tick_p95_us": samples[57], "native_tick_p99_us": samples[59],
+                "native_allocation_calls_per_tick": calls,
+                "native_bytes_requested_per_tick": bytes, "samples_us": raw_samples,
+                "warmup_ticks": 40
+            })
+        );
     }
 }

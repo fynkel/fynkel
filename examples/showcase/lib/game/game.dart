@@ -1,3 +1,4 @@
+import 'package:fynkel/advanced.dart' show NativeLibrary;
 // Fynkel Showcase: the game behind the app and the tests.
 //
 // One `World` on the native runtime, the project's startup scene loaded
@@ -9,7 +10,7 @@
 // (lib/main.dart, or a test) owns the loop and calls [frame] once per frame
 // (ADR-0007/0008).
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 import '../generated/behaviours.g.dart';
 

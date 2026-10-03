@@ -10,7 +10,7 @@
 import 'dart:ui';
 
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 abstract final class ChannelErrorReporting {
   static bool _installed = false;

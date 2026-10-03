@@ -1305,11 +1305,8 @@ fn a_rig_document_cooks_its_skeleton_and_clips() {
     assert_eq!(prefab["roots"], source_prefab["roots"]);
     // The FBX's bob moves the glTF hierarchy's Prop node.
     let bob = fynkel_cooked::payload::decode_animation(&f.read(4, 1 << 20).unwrap()).unwrap();
-    assert!(bob
-        .channels
-        .iter()
-        .any(|c| c.target == "Prop"
-            && c.property == fynkel_cooked::payload::ANIM_PROPERTY_TRANSLATION));
+    assert!(bob.channels.iter().any(|c| c.target_name == "Prop"
+        && c.property == fynkel_cooked::payload::ANIM_PROPERTY_TRANSLATION));
     assert!((bob.duration - 2.0).abs() < 1e-3);
 
     // Cached; a clip file's sidecar edit recooks it and the rig, not the

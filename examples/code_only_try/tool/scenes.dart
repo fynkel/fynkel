@@ -15,11 +15,13 @@ import 'package:code_only/game/coin_kind.dart';
 import 'package:code_only/game/level.dart';
 import 'package:code_only/generated/packages.g.dart';
 import 'package:fynkel/authoring.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 void main(List<String> args) {
   for (final d in writeScenes(args.isEmpty ? Directory.current.path : args.first)) {
-    stdout.writeln('${d.changed ? 'wrote' : 'same '} assets/${d.path}${d.kept.isEmpty ? '' : ' (kept ${d.kept.join(', ')})'}');
+    stdout.writeln(
+      '${d.changed ? 'wrote' : 'same '} assets/${d.path}${d.kept.isEmpty ? '' : ' (kept ${d.kept.join(', ')})'}',
+    );
   }
 }
 
@@ -53,7 +55,11 @@ List<WrittenDocument> writeScenes(String projectDir) {
         level(
           look,
           kinds,
-          coinAt: (name, at, kind) => ObjectSpec.prefab(prefabs[kind]!, name: name, transform: Transform(position: at)),
+          coinAt: (name, at, kind) => ObjectSpec.prefab(
+            prefabs[kind]!,
+            name: name,
+            transform: Pose(position: at),
+          ),
         ),
       ),
     ),

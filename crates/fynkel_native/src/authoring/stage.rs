@@ -160,6 +160,9 @@ impl StageSlot {
     /// what is drawn. The camera the host steers starts from the framing;
     /// the sun keeps the direction it was turned to.
     fn load(&mut self, assets: &Assets) -> Outcome {
+        self.world
+            .prepare_asset_store(assets)
+            .map_err(|d| vec![d])?;
         self.world.set_assets(assets.clone());
         let first = self.framing.is_none();
         let stood = fynkel_preview::stage_into(

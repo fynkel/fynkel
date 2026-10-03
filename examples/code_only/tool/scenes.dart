@@ -15,7 +15,7 @@ import 'package:code_only/game/coin_kind.dart';
 import 'package:code_only/game/level.dart';
 import 'package:code_only/generated/packages.g.dart';
 import 'package:fynkel/authoring.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 void main(List<String> args) {
   for (final d in writeScenes(args.isEmpty ? Directory.current.path : args.first)) {

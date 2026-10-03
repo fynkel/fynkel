@@ -1181,6 +1181,14 @@ fn animation_commands_events_and_query() {
     h.step();
     let arm = spawned[0];
 
+    assert_eq!(
+        h.set_component(
+            arm,
+            &ComponentValue::AnimationBinding(fynkel_core::AnimationBinding { key: "arm".into() })
+        ),
+        Status::Ok
+    );
+
     // The clip a loaded project would have registered from its cache.
     let clip = AssetRef::with_sub(AssetId::from_bytes([9; 16]), "anim/0");
     unsafe {
@@ -1531,8 +1539,11 @@ fn animation_commands_events_and_query() {
     );
     let (_, n, body, tail) = h.query(bridge::QUERY_COMPONENTS, arm);
     let mut at = 0;
-    for _ in 0..n - 1 {
+    for _ in 0..n {
         let hd = ComponentHeader::decode(&body[at..], &tail).unwrap();
+        if hd.component == 22 {
+            break;
+        }
         at += ComponentHeader::SIZE + hd.size as usize;
     }
     let hd = ComponentHeader::decode(&body[at..], &tail).unwrap();

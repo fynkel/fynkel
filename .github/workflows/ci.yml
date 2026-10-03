@@ -61,6 +61,16 @@ jobs:
           cargo clippy -p fynkel_document --no-default-features -- -D warnings
       - name: codegen --check
         run: cargo run -p fynkel_cli -- codegen --check
+      - name: foundation qualification runner regression tests
+        run: python3 -m unittest discover -s tools/tests
+      - name: foundation native scale regression gate
+        run: python3 tools/foundation_release.py --suite native-scale --baseline benchmarks/foundation/budgets/mac-m3max-native.json
+      - name: preserve foundation qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-native-scale
+          path: target/foundation-release/
       # A game's runtime carries no editor code (blueprint §19.2e item 1):
       # built without the `authoring` feature — what package:fynkel's hook
       # does for an app that does not ask for it — the dylibs export no

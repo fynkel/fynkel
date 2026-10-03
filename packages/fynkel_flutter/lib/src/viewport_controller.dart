@@ -13,12 +13,19 @@ import 'dart:ffi';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 import 'viewport_native.dart';
 import 'viewport_overlay.dart';
 
-export 'viewport_native.dart' show ViewportStatsSnapshot, renderBroken, renderNoWorld, viewportAbiVersion;
+export 'viewport_native.dart'
+    show
+        ViewportStatsSnapshot,
+        renderBroken,
+        renderNoWorld,
+        renderAssetsUnavailable,
+        renderDeviceLost,
+        viewportAbiVersion;
 
 /// How the renderer learns that a frame's GPU work is complete.
 enum ViewportSyncMode {
@@ -77,6 +84,18 @@ class ViewportView {
   final int cullingMask;
 }
 
+/// Operating-system thermal pressure, not a temperature measurement.
+/// Unknown includes older hosts which do not report thermal state.
+enum ViewportThermalState { unknown, nominal, fair, serious, critical }
+
+ViewportThermalState _thermalState(Object? value) => switch (value) {
+  0 => ViewportThermalState.nominal,
+  1 => ViewportThermalState.fair,
+  2 => ViewportThermalState.serious,
+  3 => ViewportThermalState.critical,
+  _ => ViewportThermalState.unknown,
+};
+
 /// Counters Swift keeps per texture (`copyPixelBuffer` traffic), reset on read.
 class ViewportPlatformStats {
   const ViewportPlatformStats({
@@ -85,8 +104,12 @@ class ViewportPlatformStats {
     this.copyNoFrame = 0,
     this.frameReadySignals = 0,
     this.rebinds = 0,
+    this.thermalState = ViewportThermalState.unknown,
   });
   final int copyCalls, copyWithNewFrame, copyNoFrame, frameReadySignals, rebinds;
+
+  /// Current device-wide pressure at sampling time (not reset with counters).
+  final ViewportThermalState thermalState;
 }
 
 /// The state of a [FynkelViewportController].
@@ -139,6 +162,8 @@ class FynkelViewportController extends ChangeNotifier {
   ViewportView? _view;
   bool _viewOk = true;
   Future<void>? _detaching;
+  Future<void>? _creating;
+  Future<void>? _resizing;
 
   ViewportState get state => _state;
   bool get isAttached => _state == ViewportState.attached || _state == ViewportState.resizing;
@@ -152,6 +177,24 @@ class FynkelViewportController extends ChangeNotifier {
   /// Ring size in physical pixels.
   int get physicalWidth => _width;
   int get physicalHeight => _height;
+
+  int _lightPool = 1024;
+  int _lightsPerObject = 8;
+  int get lightPool => _lightPool;
+  int get lightsPerObject => _lightsPerObject;
+
+  /// Sets the supported spatial forward-lighting budget. Overflow counters
+  /// remain visible in frame stats. Invalid settings leave the old budget intact.
+  void setLightBudget({required int pool, required int perObject}) {
+    if (pool < 0 || pool > 16384 || perObject < 0 || perObject > 8 || perObject > pool) {
+      throw ArgumentError('Lighting supports 0..16384 frame lights and 0..8 per object; perObject must fit pool.');
+    }
+    if (_viewport != nullptr && !_native!.setLightBudget(_viewport, pool, perObject)) {
+      throw StateError('Native viewport refused the lighting budget.');
+    }
+    _lightPool = pool;
+    _lightsPerObject = perObject;
+  }
 
   /// Whether entities without a `MeshRenderer` draw as placeholder cubes.
   bool get placeholders => _placeholders;
@@ -247,7 +290,7 @@ class FynkelViewportController extends ChangeNotifier {
   /// texture; later calls are coalesced resizes (stop rendering → Rust
   /// rebuilds the ring → Swift re-wraps the surfaces → resume).
   void requestSize(int width, int height) {
-    if (width <= 0 || height <= 0 || _detaching != null) return;
+    if (_disposed || width <= 0 || height <= 0 || _detaching != null) return;
     switch (_state) {
       case ViewportState.detached:
         unawaited(_create(width, height));
@@ -267,7 +310,11 @@ class FynkelViewportController extends ChangeNotifier {
     }
   }
 
-  Future<void> _create(int width, int height) async {
+  Future<void> _create(int width, int height) {
+    return _creating ??= _createNative(width, height).whenComplete(() => _creating = null);
+  }
+
+  Future<void> _createNative(int width, int height) async {
     _state = ViewportState.creating;
     _width = width;
     _height = height;
@@ -280,6 +327,9 @@ class FynkelViewportController extends ChangeNotifier {
       _viewport = vp;
       native.setAcquireWaitUs(vp, acquireWaitUs);
       native.setPlaceholders(vp, _placeholders);
+      if (!native.setLightBudget(vp, _lightPool, _lightsPerObject)) {
+        throw StateError('Native viewport refused the lighting budget.');
+      }
       if (_assetCache != null) {
         _assetCacheOk = native.setAssetCache(vp, _assetCache);
       }
@@ -297,17 +347,11 @@ class FynkelViewportController extends ChangeNotifier {
         'setCallbackFn': native.setCallbackFnAddress,
         'iosurfaces': native.iosurfaceAddresses(vp),
       });
-      if (_detaching != null) {
-        // Detached while the channel call was in flight: finish the teardown
-        // the detach could not do yet.
-        if (id != null) {
-          await _channel.invokeMethod('unregisterTexture', {'textureId': id});
-        }
-        native.destroy(vp);
-        _viewport = nullptr;
-        return;
-      }
+      if (id == null) throw StateError('Texture registration returned no texture id.');
       _textureId = id;
+      // Teardown waits for this registration before unregistering/freeing.
+      // Do not publish an attachment after detach/dispose has started.
+      if (_state != ViewportState.creating || _disposed) return;
       _state = ViewportState.attached;
       _notify();
       if (_pendingSize != null) {
@@ -324,16 +368,21 @@ class FynkelViewportController extends ChangeNotifier {
     }
   }
 
-  Future<void> _drainResizes() async {
+  Future<void> _drainResizes() {
+    return _resizing ??= _resizeNative().whenComplete(() => _resizing = null);
+  }
+
+  Future<void> _resizeNative() async {
     _state = ViewportState.resizing;
+    (int, int)? attempted;
     try {
       while (_pendingSize != null && _detaching == null) {
         final (w, h) = _pendingSize!;
+        attempted = (w, h);
         _pendingSize = null;
         if (w == _width && h == _height) continue;
         if (!_native!.resize(_viewport, w, h)) {
-          debugPrint('[fynkel_flutter] viewport resize to ${w}x$h failed');
-          continue;
+          throw StateError(_native!.error(_viewport) ?? 'Viewport resize to ${w}x$h failed; retry the viewport.');
         }
         await _channel.invokeMethod('rebindTexture', {
           'textureId': _textureId,
@@ -342,6 +391,12 @@ class FynkelViewportController extends ChangeNotifier {
         _width = w;
         _height = h;
         _resizes++;
+      }
+    } catch (error) {
+      _error = error;
+      if (_state == ViewportState.resizing) {
+        _pendingSize ??= attempted;
+        _state = ViewportState.failed;
       }
     } finally {
       if (_state == ViewportState.resizing) {
@@ -370,16 +425,44 @@ class FynkelViewportController extends ChangeNotifier {
   /// (`ScenePreview.worldAddress`, authoring ABI v3), which no Dart [World]
   /// wraps because nothing steps it from Dart. 0 renders nothing
   /// ([renderNoWorld]).
-  int? renderHandle(int worldAddress) {
+  /// Export-only option: waits up to ten seconds for GPU readiness; -4 on failure.
+  int? renderHandle(int worldAddress, {bool waitForAssets = false}) {
     if (_state != ViewportState.attached) return null;
-    final slot = _native!.render(_viewport, worldAddress);
-    if (slot == renderBroken) {
-      _error = ViewportBrokenError(_native!.error(_viewport) ?? 'no message');
+    final slot = _native!.render(_viewport, worldAddress, waitForAssets: waitForAssets);
+    if (slot == renderBroken || slot == renderDeviceLost) {
+      _error = slot == renderDeviceLost
+          ? StateError('GPU device lost. Recover the viewport to create a new device and texture.')
+          : ViewportBrokenError(_native!.error(_viewport) ?? 'no message');
       _state = ViewportState.failed;
       _notify();
     }
     return slot;
   }
+
+  /// Recreate a failed viewport after device loss or a renderer failure.
+  /// Unregisters the old texture before freeing native resources. Camera,
+  /// view, quality, cache and placeholder settings are reapplied; the world
+  /// remains owned by its host and is never recreated here.
+  Future<void> recover() async {
+    if (_disposed || _state != ViewportState.failed) return;
+    final width = _pendingSize?.$1 ?? _width;
+    final height = _pendingSize?.$2 ?? _height;
+    try {
+      await detach();
+    } catch (error) {
+      _pendingSize = (width, height);
+      _error = error;
+      _state = ViewportState.failed;
+      _notify();
+      return;
+    }
+    if (_disposed) return;
+    _error = null;
+    await _create(width, height);
+  }
+
+  /// Whether another frame is needed to finish loading visible assets.
+  bool get assetsPending => _state == ViewportState.attached && _native!.assetsPending(_viewport);
 
   /// Panics inside the native viewport, on purpose: the next [render]
   /// finds it broken. For tests of a host's failure path.
@@ -456,6 +539,7 @@ class FynkelViewportController extends ChangeNotifier {
       copyNoFrame: m['copyNoFrame'] as int? ?? 0,
       frameReadySignals: m['frameReadySignals'] as int? ?? 0,
       rebinds: m['rebinds'] as int? ?? 0,
+      thermalState: _thermalState(m['thermalState']),
     );
   }
 
@@ -467,17 +551,34 @@ class FynkelViewportController extends ChangeNotifier {
   /// unregisters the texture (the raster thread will not call into Rust
   /// afterwards); 4. free the viewport.
   Future<void> detach() {
-    return _detaching ??= _detach().whenComplete(() => _detaching = null);
+    final pending = _detaching;
+    if (pending != null) return pending;
+    // Publish the guard before notifying listeners: a listener may request
+    // another size synchronously when it observes the detached state.
+    final completion = Completer<void>();
+    _detaching = completion.future;
+    unawaited(
+      _detach().then(
+        (_) {
+          _detaching = null;
+          completion.complete();
+        },
+        onError: (Object error, StackTrace stack) {
+          _detaching = null;
+          completion.completeError(error, stack);
+        },
+      ),
+    );
+    return completion.future;
   }
 
   Future<void> _detach() async {
-    if (_state == ViewportState.creating) {
-      // `_create` finishes the job when its channel call returns.
-      _state = ViewportState.detached;
-      _textureId = null;
-      _notify();
-      return;
-    }
+    _state = ViewportState.detached;
+    _notify();
+    // Registration/rebinding can still hand surfaces to the presenter.
+    // Finish those operations before unregistering and freeing the ring.
+    await _creating;
+    await _resizing;
     _state = ViewportState.detached;
     _pendingSize = null;
     final id = _textureId;
@@ -485,11 +586,21 @@ class FynkelViewportController extends ChangeNotifier {
     _notify();
     if (_viewport != nullptr) {
       final vp = _viewport;
-      _viewport = nullptr;
       _native!.clearFrameReadyCallback(vp);
       if (id != null) {
-        await _channel.invokeMethod('unregisterTexture', {'textureId': id});
+        try {
+          await _channel.invokeMethod('unregisterTexture', {'textureId': id});
+        } catch (error) {
+          // The raster thread may still use this ring. Retain its ownership
+          // and texture identity so recovery can retry the ordered teardown.
+          _textureId = id;
+          _error = error;
+          _state = ViewportState.failed;
+          _notify();
+          rethrow;
+        }
       }
+      _viewport = nullptr;
       _native!.destroy(vp);
     }
   }

@@ -1,7 +1,7 @@
 # ADR-0004: Dart/Rust command-snapshot protocol and wire format
 
-**Status:** Accepted  
-**Date:** 2026-09-19  
+**Status:** Historical transport design, superseded for gameplay submission by ADR-0046/0051. F2 removed the raw command submission/adoption transport. Binary schemas and typed query/result codecs remain; current mutation uses the shared gameplay journal.
+**Date:** 2026-09-19
 **Related:** `docs/blueprint.md`
 
 ## Context

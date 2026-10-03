@@ -1,6 +1,6 @@
 // Clone and instantiate publish data first; lifecycle uses the next normal boundary.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:test/test.dart';
 
 final List<String> calls = [];

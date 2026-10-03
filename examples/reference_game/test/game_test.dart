@@ -12,7 +12,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:fynkel/testing.dart';
 import 'package:reference_game/game/collectible.dart';
 import 'package:reference_game/game/game.dart';
@@ -208,9 +208,9 @@ void main() {
         expect(me.findChild('hips/spine/head/Visor'), isNotNull, reason: 'the visor rides the head joint');
         expect(
           game.scenes.lastReport!.animation.clips,
-          8,
+          11,
           reason: 'the Animator Controller (its blend space, the jump and the Aim tree\'s six strafe clips count once '
-              'each; its idle, walk and run came with the blend space); the wave registers when it plays',
+              'each, including idle, walk and run prepared with the blend space); the wave registers when it plays',
         );
       }
       List<Quat> pose() => [for (final j in joints) j.localTransform.rotation];

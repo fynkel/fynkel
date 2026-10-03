@@ -34,9 +34,9 @@
 //!   surface where a texture or material is;
 //! * the [`DebugDraw`] lines a host queued (AABBs, axes) on top.
 //!
-//! Allocation policy: the instance buffer grows geometrically and is
-//! reused; a frame with no growth and no new assets allocates nothing on
-//! the CPU side beyond the batch table. Pipelines are a fixed set created
+//! Allocation policy: instance, light and joint GPU buffers grow geometrically;
+//! extraction and lighting scratch capacities are reused. Batch assembly and
+//! asset-reference copies may still allocate on the CPU. Pipelines are a fixed set created
 //! up front (rebuilt only when a quality switch changes the sample
 //! count); bind groups are cached per material and per texture.
 
@@ -72,7 +72,11 @@ mod prepare;
 pub mod quality;
 mod residency;
 pub mod shadow;
+mod spatial;
 mod stats;
+mod streaming;
+mod visibility;
+pub use streaming::UploadBudget;
 mod surface;
 mod targets;
 mod upload;
@@ -80,6 +84,7 @@ mod upload;
 use gpu_timer::*;
 use gpu_types::*;
 use ibl::*;
+pub use lights::LightBudget;
 use lights::*;
 use passes::*;
 use pipelines::*;
@@ -119,11 +124,14 @@ pub const BLOOM_LEVELS: u32 = 6;
 /// budget. The strongest at the object's bounds win (E1 light culling).
 pub const MAX_LIGHTS: usize = 8;
 
-/// Point + spot lights one frame can carry. Lights whose range misses the
+/// Default frame light budget (configurable through `set_light_budget`).
+/// Lights whose range misses the
 /// camera frustum never enter it (that cannot change the picture: only
 /// what is inside the frustum is shaded); when more than this reach the
 /// view, the nearest to the camera win and the rest are counted dropped.
-pub const LIGHT_POOL: usize = 64;
+pub const LIGHT_POOL: usize = 1024;
+/// Maximum explicit frame budget (one MiB of local-light storage).
+pub const MAX_LIGHT_POOL: usize = 16_384;
 
 /// Background colour: the bytes written to the target where nothing was
 /// drawn (no tone mapping or encoding applies). Shared with the
@@ -197,8 +205,9 @@ const SHADOW_UNIFORM_STRIDE: u64 = 256;
 /// The sun's shadow, the scene, post (+ present) and the ambient
 /// occlusion stage: begin/end query pairs (`GpuTimer`). The AO pair is
 /// split across three passes — its begin is the depth prepass's, its end
-/// the blur's — so the stage is one span.
-const TIMESTAMP_QUERIES: u32 = 10;
+/// the blur's — so the stage is one span. Four additional queries
+/// identify the internal depth/estimate/blur boundaries for opt-in tracing.
+const TIMESTAMP_QUERIES: u32 = 14;
 /// The query pair the ambient-occlusion stage writes (after the four the
 /// original pass chain uses: shadow 0, scene 1, post 2, presentation 3).
 const AO_PAIR: u32 = 4;
@@ -247,10 +256,16 @@ pub struct ExtractRenderer {
     transparent: Vec<TransparentDraw>,
     batch_index: HashMap<BatchKey, usize>,
     /// Reused by `assign_lights`: (illuminance at the bounds, pool index).
-    light_scratch: Vec<(f32, u8)>,
+    light_scratch: Vec<(f32, u32)>,
+    light_budget: LightBudget,
+    light_frame: LightFrameScratch,
+    local_light_buffer: wgpu::Buffer,
+    local_light_capacity: usize,
+    light_index: spatial::SpatialIndex,
+    light_candidates: Vec<usize>,
     /// One light list per instance, in the instance buffer's order — the
     /// storage array the mesh stages index with `Instance.flags[2]`.
-    light_lists: Vec<[u32; 4]>,
+    light_lists: Vec<[u32; 12]>,
     light_list_buffer: wgpu::Buffer,
     light_list_capacity: u32,
     debug: DebugDraw,
@@ -304,7 +319,12 @@ pub struct ExtractRenderer {
     quality_override: Option<Quality>,
     unknown_profile: Option<String>,
     assets: Option<Assets>,
+    asset_leases: HashMap<Uuid, fynkel_assets::Residency>,
+    asset_roots: HashSet<Uuid>,
+    asset_roots_scratch: HashSet<Uuid>,
+    asset_dependency_revision: (u64, u64),
     /// `Assets::evictions` when the GPU caches were last reconciled.
+    edit_epoch_seen: u64,
     evictions_seen: u64,
     live_edits_seen: u64,
     mesh_edits_seen: u64,
@@ -327,6 +347,12 @@ pub struct ExtractRenderer {
     /// Volume profiles (R3a; `None`: it could not be read).
     volume_profiles: HashMap<AssetRef, Option<VolumeProfile>>,
     asset_errors: Vec<String>,
+    frame_assets_deferred: bool,
+    visibility_index: spatial::SpatialIndex,
+    visibility_bounds: Vec<Sphere>,
+    camera_visible: Vec<bool>,
+    shadow_visible: Vec<bool>,
+    asset_failures: HashMap<AssetRef, Vec<String>>,
     stats: FrameStats,
     /// Pass timestamps when the device supports them (M3-16).
     gpu_timer: Option<GpuTimer>,
@@ -348,6 +374,12 @@ pub struct ExtractRenderer {
     /// load made resident (ADR-0038 §5), in microseconds; 0 turns the
     /// warm-up off. Default 2000.
     pub warm_budget_us: u32,
+    pub upload_budget: UploadBudget,
+    /// Asset buffers/textures only; render targets and driver pipeline memory
+    /// are reported separately by `gpu_bytes`. Refused assets use fallbacks.
+    gpu_asset_budget_bytes: u64,
+    assets_pending: bool,
+    upload_usage: streaming::UploadUsage,
     /// Test every instance's bounding sphere against the camera frustum
     /// (and the sun's box) before uploading it; off, everything is drawn.
     /// On by default; off only to prove the picture does not change.
@@ -485,7 +517,7 @@ impl ExtractRenderer {
         // joint palettes (M3-19) and its light lists (E1).
         let storage_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
             binding,
-            visibility: wgpu::ShaderStages::VERTEX,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Storage { read_only: true },
                 has_dynamic_offset: false,
@@ -495,14 +527,21 @@ impl ExtractRenderer {
         };
         let skin_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fynkel skin bgl"),
-            entries: &[storage_entry(0), storage_entry(1)],
+            entries: &[storage_entry(0), storage_entry(1), storage_entry(2)],
         });
         let joint_capacity = 64;
         let joint_buffer = create_joint_buffer(device, joint_capacity);
         let light_list_capacity = 256;
         let light_list_buffer = create_light_list_buffer(device, light_list_capacity);
-        let joint_bind_group =
-            create_joint_bind_group(device, &skin_layout, &joint_buffer, &light_list_buffer);
+        let local_light_capacity = LIGHT_POOL;
+        let local_light_buffer = create_local_light_buffer(device, local_light_capacity);
+        let joint_bind_group = create_joint_bind_group(
+            device,
+            &skin_layout,
+            &joint_buffer,
+            &light_list_buffer,
+            &local_light_buffer,
+        );
         let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("fynkel shadow bg"),
             layout: &shadow_layout,
@@ -628,6 +667,7 @@ impl ExtractRenderer {
                 post: &post_layout,
                 ao: &ao_layout,
                 bloom: &bloom_layout,
+                ao_depth_resolve: &pipelines.ao_depth_resolve,
             },
             &present_sampler,
             &post_buffer,
@@ -694,6 +734,12 @@ impl ExtractRenderer {
             transparent: Vec::new(),
             batch_index: HashMap::new(),
             light_scratch: Vec::with_capacity(LIGHT_POOL),
+            light_budget: LightBudget::default(),
+            light_frame: Default::default(),
+            local_light_buffer,
+            local_light_capacity,
+            light_index: Default::default(),
+            light_candidates: Vec::new(),
             light_lists: Vec::new(),
             light_list_buffer,
             light_list_capacity,
@@ -728,6 +774,11 @@ impl ExtractRenderer {
             quality_override: None,
             unknown_profile: None,
             assets: None,
+            asset_leases: HashMap::new(),
+            asset_roots: HashSet::new(),
+            asset_roots_scratch: HashSet::new(),
+            asset_dependency_revision: (0, 0),
+            edit_epoch_seen: 0,
             evictions_seen: 0,
             live_edits_seen: 0,
             mesh_edits_seen: 0,
@@ -741,6 +792,12 @@ impl ExtractRenderer {
             surface_samplers: HashMap::new(),
             volume_profiles: HashMap::new(),
             asset_errors: Vec::new(),
+            frame_assets_deferred: false,
+            visibility_index: spatial::SpatialIndex::default(),
+            visibility_bounds: Vec::new(),
+            camera_visible: Vec::new(),
+            shadow_visible: Vec::new(),
+            asset_failures: HashMap::new(),
             stats: FrameStats::default(),
             gpu_timer: device
                 .features()
@@ -753,11 +810,40 @@ impl ExtractRenderer {
             light_dir: Vec3::new(0.4, 1.0, 0.6).normalize(),
             placeholders: true,
             warm_budget_us: 2000,
+            upload_budget: UploadBudget::default(),
+            gpu_asset_budget_bytes: 512 * 1024 * 1024,
+            assets_pending: false,
+            upload_usage: streaming::UploadUsage::default(),
             frustum_culling: true,
         }
     }
 
+    /// Rebuild every GPU-owned resource on a replacement device. Logical
+    /// settings and asset ownership survive; no old device handle is reused.
+    /// The host must also recreate its surface/targets and submit no more
+    /// commands to the old device. Queued overlay/extra-world work is retained.
+    pub fn recreate(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) {
+        let mut fresh = Self::new(device, format, self.width, self.height);
+        fresh.camera = self.camera;
+        fresh.placeholders = self.placeholders;
+        fresh.frustum_culling = self.frustum_culling;
+        fresh.warm_budget_us = self.warm_budget_us;
+        fresh.upload_budget = self.upload_budget;
+        fresh.light_budget = self.light_budget;
+        fresh.gpu_asset_budget_bytes = self.gpu_asset_budget_bytes;
+        fresh.requested_profile = self.requested_profile.clone();
+        fresh.quality_override = self.quality_override;
+        fresh.set_assets(self.assets.clone());
+        fresh.overlay = std::mem::take(&mut self.overlay);
+        fresh.debug = std::mem::take(&mut self.debug);
+        fresh.extra_worlds = std::mem::take(&mut self.extra_worlds);
+        *self = fresh;
+    }
+
     pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
+        if self.size() == (width.max(1), height.max(1)) {
+            return;
+        }
         self.width = width.max(1);
         self.height = height.max(1);
         self.rebuild_attachments(device);
@@ -775,6 +861,7 @@ impl ExtractRenderer {
                 post: &self.post_layout,
                 ao: &self.ao_layout,
                 bloom: &self.bloom_layout,
+                ao_depth_resolve: &self.pipelines.ao_depth_resolve,
             },
             &self.present_sampler,
             &self.post_buffer,
@@ -790,6 +877,28 @@ impl ExtractRenderer {
     /// Number of instances the last `prepare` queued.
     pub fn instance_count(&self) -> u32 {
         self.stats.instances
+    }
+
+    pub fn set_light_budget(&mut self, budget: LightBudget) -> Result<(), String> {
+        self.light_budget = budget.validate()?;
+        Ok(())
+    }
+    pub fn light_budget(&self) -> LightBudget {
+        self.light_budget
+    }
+    /// Actionable diagnostics when a scene exceeds the supported forward path.
+    pub fn lighting_diagnostics(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if self.stats.lights_dropped > 0 {
+            out.push(format!("{} visible local lights exceed the frame budget of {}; reduce simultaneous light overlap or split camera layers",self.stats.lights_dropped,self.light_budget.pool));
+        }
+        if self.stats.lights_overflow > 0 {
+            out.push(format!(
+                "{} objects exceed the per-object budget of {}; weakest contributions were omitted",
+                self.stats.lights_overflow, self.light_budget.per_object
+            ));
+        }
+        out
     }
 
     pub fn stats(&self) -> FrameStats {

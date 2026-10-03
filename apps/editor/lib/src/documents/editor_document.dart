@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart' show EntityRef;
+import 'package:fynkel/gameplay.dart' show EntityRef;
 // One open document as the editor sees it: the authoring `Editor` behind a
 // handle — state, the entity tree, one transaction per gesture, undo/redo,
 // save, reload. `SessionDocument` is the real one over `DocumentHandle`;

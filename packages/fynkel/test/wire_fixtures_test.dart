@@ -70,6 +70,13 @@ void main() {
     expect(fixtureDir().existsSync(), isTrue, reason: fixtureDir().path);
   });
 
+  check(
+    'AnimationBinding',
+    const AnimationBinding(key: 'rig/node/7'),
+    AnimationBinding.wireSize,
+    AnimationBinding.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
   check('Transform', transform, Transform.wireSize, Transform.decode, (v, d, o, s) => v.encode(d, o, s));
   check('Name', const Name(value: 'héllo wörld'), Name.wireSize, Name.decode, (v, d, o, s) => v.encode(d, o, s));
   check(

@@ -7,7 +7,7 @@
 // painted and not hit-testable.
 
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 /// A widget pinned to a point of the 3D scene inside a [ProjectionLayer].
 ///

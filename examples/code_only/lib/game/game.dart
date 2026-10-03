@@ -1,3 +1,4 @@
+import 'package:fynkel/advanced.dart' show NativeLibrary;
 // Fynkel Code Only: the game behind the app and the tests — a small level
 // in the Playground's style made from Dart alone (ADR-0026). The project
 // names no startup scene: `loadProject` opens it empty, and the game puts
@@ -15,7 +16,7 @@
 // Menu → Level → Results → Menu or Level again. `GameState.screen` follows
 // the places, so the app's overlay switches on it.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:pickups/pickups.dart' show PickupSink;
 
 import '../generated/assets.g.dart';

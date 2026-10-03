@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:pickups/pickups.dart' show Pickup, PickupKind, PickupSink;
 
 /// Which screen is up: the Menu, the level or the Results. The app's

@@ -62,7 +62,7 @@ fn render(packages: &[String], game: bool) -> String {
          //\n\
          // ignore_for_file: type=lint\n\
          \n\
-         import 'package:fynkel/fynkel.dart' show BehaviourRegistry;\n\
+         import 'package:fynkel/gameplay.dart' show BehaviourRegistry;\n\
          {imports}\
          \n\
          /// Registers {which} behaviours and data types.\n\

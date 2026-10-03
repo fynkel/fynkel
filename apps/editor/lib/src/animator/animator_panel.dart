@@ -18,7 +18,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter/services.dart';
-import 'package:fynkel/fynkel.dart' as fynkel;
+import 'package:fynkel/gameplay.dart' as fynkel;
 
 import '../inspector/asset_edits.dart' show unset;
 import '../inspector/field_widgets.dart';
@@ -547,10 +547,7 @@ class _AnimatorPanelState extends State<AnimatorPanel> with SingleTickerProvider
               onTap: i == names.length - 1 ? null : () => model.openMachine(i),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                child: Text(
-                  name,
-                  style: small?.copyWith(color: i == names.length - 1 ? t.text : t.accent),
-                ),
+                child: Text(name, style: small?.copyWith(color: i == names.length - 1 ? t.text : t.accent)),
               ),
             ),
           ],
@@ -1144,7 +1141,11 @@ class _SlotRow extends StatelessWidget {
             child: Text('Slot', style: small?.copyWith(color: t.textSecondary)),
           ),
           const SizedBox(width: 6),
-          Text(name, key: const Key('animator.slot.name'), style: small?.copyWith(color: t.text)),
+          Text(
+            name,
+            key: const Key('animator.slot.name'),
+            style: small?.copyWith(color: t.text),
+          ),
           const SizedBox(width: 12),
           if (shot != null) ...[
             Icon(FIcons.playArrow, size: 11, color: t.accent),
@@ -1172,7 +1173,10 @@ class _SlotRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 6),
-            Text('${(info!.oneShotTime.clamp(0.0, 1.0) * 100).round()}%', style: small?.copyWith(color: t.textSecondary)),
+            Text(
+              '${(info!.oneShotTime.clamp(0.0, 1.0) * 100).round()}%',
+              style: small?.copyWith(color: t.textSecondary),
+            ),
           ] else
             Flexible(
               child: Text(
@@ -1240,7 +1244,10 @@ class _LayerSettings extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          Text('Root', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: t.textSecondary)),
+          Tooltip(
+            message: 'Animation binding key (empty: whole character)',
+            child: Text('Root', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: t.textSecondary)),
+          ),
           const SizedBox(width: 6),
           SizedBox(
             width: 160,

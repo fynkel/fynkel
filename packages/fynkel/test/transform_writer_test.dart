@@ -2,7 +2,7 @@
 // same wire bytes and read-your-writes results as the value API.
 import 'dart:typed_data';
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:fynkel/src/wire/support.dart' show WireStrings;
 import 'package:test/test.dart';
 

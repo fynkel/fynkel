@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:fynkel/src/native/bridge.dart' show QueryKind, NativeGameplayRef;
 import 'package:test/test.dart';
 

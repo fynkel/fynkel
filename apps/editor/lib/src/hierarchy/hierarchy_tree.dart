@@ -25,6 +25,9 @@ final class HierarchyNode {
 
   final String id;
   String name = '';
+
+  /// Animation identity, independent of the display name. Empty means unbound.
+  String animationBinding = '';
   String? parent;
   List<String> children = const [];
   List<String> componentTypes = const [];
@@ -95,6 +98,7 @@ final class HierarchyNode {
     final types = <String>[];
     final ids = <(String, String)>[];
     final refs = <String>{};
+    animationBinding = '';
     transformId = null;
     transform = null;
     final components = e['components'];
@@ -106,6 +110,9 @@ final class HierarchyNode {
         types.add(type);
         ids.add((entry.key as String, type));
         _collectRefs(c['data'], refs);
+        if (type == 'fynkel.AnimationBinding' && c['data'] is Map) {
+          animationBinding = (c['data'] as Map)['key'] as String? ?? '';
+        }
         if (type == 'fynkel.Transform' && transformId == null) {
           transformId = entry.key as String;
           final data = c['data'];
@@ -139,6 +146,7 @@ final class HierarchyNode {
   /// children stay the instance's own.
   void readRoot(ExpandedEntity e) {
     rootLocal = e.local;
+    animationBinding = '';
     transformId = null;
     transformLocal = null;
     transform = null;
@@ -150,6 +158,9 @@ final class HierarchyNode {
       types.add(c.type);
       ids.add((c.id, c.type));
       _collectRefs(c.data, refs);
+      if (c.type == 'fynkel.AnimationBinding') {
+        animationBinding = c.data['key'] as String? ?? '';
+      }
       overridden += c.overridden.length;
       if (c.type == 'fynkel.Transform' && transformId == null) {
         transformId = c.id;
@@ -168,6 +179,7 @@ final class HierarchyNode {
   void clearRoot() {
     if (rootLocal == null) return;
     rootLocal = null;
+    animationBinding = '';
     transformId = null;
     transformLocal = null;
     transform = null;
@@ -191,6 +203,7 @@ final class HierarchyNode {
     this.anchor = anchor;
     local = e.local;
     added = e.added;
+    animationBinding = '';
     transformId = null;
     transformLocal = null;
     transform = null;
@@ -202,6 +215,9 @@ final class HierarchyNode {
       types.add(c.type);
       ids.add((c.id, c.type));
       _collectRefs(c.data, refs);
+      if (c.type == 'fynkel.AnimationBinding') {
+        animationBinding = c.data['key'] as String? ?? '';
+      }
       overridden += c.overridden.length;
       if (c.type == 'fynkel.Transform' && transformId == null) {
         transformId = c.id;

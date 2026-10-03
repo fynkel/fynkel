@@ -9,10 +9,19 @@ pub(super) struct TableRevision {
     revision: u64,
 }
 impl World {
-    pub fn identity_changes_since(&self, token: u64) -> Option<fynkel_ecs::ChangeSet> {
+    /// Callback reconciliation includes hierarchy activity as well as identity.
+    /// Pose-only writes do not require rechecking every behaviour's lifecycle.
+    pub fn callback_changes_since(&self, token: u64) -> Option<fynkel_ecs::ChangeSet> {
+        use std::any::TypeId;
         self.gameplay.ecs.changes_since(
             self.gameplay.ecs.cursor_from_token(token),
-            &[std::any::TypeId::of::<Name>()],
+            &[
+                TypeId::of::<Name>(),
+                TypeId::of::<scene::Parent>(),
+                TypeId::of::<scene::Children>(),
+                TypeId::of::<scene::InactiveSelf>(),
+                TypeId::of::<scene::Inactive>(),
+            ],
             false,
         )
     }

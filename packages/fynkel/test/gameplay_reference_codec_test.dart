@@ -1,4 +1,4 @@
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:fynkel/src/native/bridge.dart';
 import 'package:fynkel/generated/schema.g.dart' as gen;
 import 'package:test/test.dart';

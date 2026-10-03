@@ -1,6 +1,6 @@
 import 'dart:math' show cos, sin;
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 import 'game.dart';
 import 'game_state.dart';

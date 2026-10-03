@@ -8,7 +8,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:fynkel/testing.dart';
 import 'package:reference_game/game/game.dart';
 import 'package:reference_game/game/player.dart';

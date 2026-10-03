@@ -4,6 +4,23 @@ Instructions for tools and AI agents working in this Fynkel project. Humans
 are welcome too. Everything below is checkable by a machine: run the commands,
 read the JSON, trust the exit codes.
 
+## Foundation gameplay contract (F7)
+
+Use `package:fynkel/gameplay.dart` for gameplay and add `advanced.dart` only
+for host/native integration. F8 removes the old `fynkel.dart` umbrella; regenerate bindings after
+migrating imports. Ordinary object/component/name/hierarchy
+reads see current transaction writes. Invalid edits roll back atomically;
+completed physics queries and render snapshots keep their named phase meaning.
+There is no separate presentation-transform write authority. Use `Pose` for
+transform values, `EntityRef` for identities and typed object references for
+Follow, ThirdPersonCamera and Skin; names are display/search data. Animation
+uses stable AnimationBinding keys, not bone display names.
+
+Reusable trees use `ObjectRecipe(() => freshTree).create()` for each build or
+writer call. Allocate nodes and behaviour instances inside the factory; internal
+references must target nodes from that call. The same descriptions work through
+World.build and the authoring writer. See the engine's docs/gameplay.md.
+
 ## What this project is
 
 A Flutter application whose 3D world is run by the Fynkel Engine: a Rust
@@ -107,9 +124,9 @@ Component types:
 - `fynkel.RigidBody` — `body_type` `static` | `dynamic` | `kinematic`, `mass` (kg, dynamic), `linear_damping`, `angular_damping`, `gravity_scale`, `ccd`. Physics owns a dynamic body's transform; a kinematic one follows the transform your behaviour writes (the Gate's slab is static geometry moved the same way) and pushes dynamic bodies.
 - `fynkel.Collider` — `shape` `box` (`size` = half extents) | `sphere` (`size[0]` = radius) | `capsule` | `mesh` (`mesh` sub-asset, static only), `offset`, `friction`, `restitution`, `is_sensor` (trigger events, no forces), `mask` (the layers it collides with: bits of the project's `layers`; the collider's own layer is its object's `fynkel.Layer`). Alone it is static geometry (the starter's Floor); with a `RigidBody` it is that body's shape. Scaled by the entity's scale.
 - `fynkel.CharacterController` — a kinematic capsule walked by gameplay (no `RigidBody`/`Collider` next to it: `FYN-H0006`): `radius`, `height`, `center` (the origin is at the feet by default), `skin_width`, `max_slope` (radians; steeper slides), `max_step_height`, `snap_to_ground`, `gravity_scale`, `mass` (what it pushes dynamic bodies with), `speed`, `jump_speed`, `turn_speed` (faces its motion), `move_action`/`jump_action` (named: the runtime walks it from those actions in the frame of the `ThirdPersonCamera` that targets it, jumping on the press while grounded; empty: your behaviour sends `move(v)`/`jump()`), `mask` (its layer is its object's).
-- `fynkel.ThirdPersonCamera` — on the camera entity: `target` (the followed entity's name), `pivot` (offset from the target's origin), `distance`, `min_distance`, `yaw`/`pitch` (radians, written back each tick), `min_pitch`/`max_pitch`, `look_action` (axis2d turning it at `sensitivity` rad/s per unit), `collision_radius` (a sphere cast from the pivot pulls the camera in before walls; 0 disables), `mask`. Placed after the tick's transforms; its own `Transform` is overwritten.
+- `fynkel.ThirdPersonCamera` — on the camera entity: `target` (an object reference `{ "entity": id }`), `pivot` (offset from the target's origin), `distance`, `min_distance`, `yaw`/`pitch` (radians, written back each tick), `min_pitch`/`max_pitch`, `look_action` (axis2d turning it at `sensitivity` rad/s per unit), `collision_radius` (a sphere cast from the pivot pulls the camera in before walls; 0 disables), `mask`. Placed after the tick's transforms; its own `Transform` is overwritten.
 - `fynkel.Rotator` / `fynkel.Oscillate` / `fynkel.Follow` / `fynkel.LookAtCamera` / `fynkel.LifetimeDespawn` / `fynkel.Emitter` — the native catalogue (below): motion, following, billboards, timed despawn and spawning at a rate with no Dart code.
-- `fynkel.Animator` — `clip: { asset, sub: "anim/<name>" }` (or `{ asset: <blend document> }`), `speed`, `looping`, `playing`, `weight`, `additive`, `root_motion`: plays the clip (or blend space) over the named entities under this one; on a descendant of another animator it is a layer (see "Animation"). `fynkel.Skin` — next to a skinned `MeshRenderer`: `skin: { asset, sub: "skin/<name>" }`, `skeleton` (the name of the joint root entity, found under the tree's root; empty: the root itself).
+- `fynkel.Animator` — `clip: { asset, sub: "anim/<name>" }` (or `{ asset: <blend document> }`), `speed`, `looping`, `playing`, `weight`, `additive`, `root_motion`: plays the clip (or blend space) over the named entities under this one; on a descendant of another animator it is a layer (see "Animation"). `fynkel.Skin` — next to a skinned `MeshRenderer`: `skin: { asset, sub: "skin/<name>" }`, `skeleton` (a typed object reference to the joint root).
 - `game.*` — this project's behaviours (Dart classes in `lib/game/`); `data` holds the `@Expose` fields, validated by `schemas/behaviours/<id>.schema.json`.
 
 Exact fields and defaults: `fynkel schema describe fynkel.Camera --json` for
@@ -192,11 +209,10 @@ world.spawn(name: 'Twin', transform: t)..add(mesh)..add(light);   // lands in th
 ```
 
 - `get`/`has`/`set`/`remove` on `Behaviour` forward to `gameObject`; on any
-  `GameObject` there is also `add` (= `set`), `setPresentation` (the
-  presentation lane: applies at once, for `lateUpdate`) and `components`.
-- Reads are the value the last tick left (one query per object per tick)
-  merged with what you set this tick. A value the world rejects (a negative
-  light range) is a diagnostic on the next tick and the read falls back.
+  `GameObject` there is also `add` (= `set`), `setPresentation` (a compatibility forwarding method using the same transaction) and `components`.
+- Reads use the shared gameplay view, including current edits. Invalid writes
+  reject the transaction; they do not wait for a future tick to report failure.
+
 - Not for a loop over thousands of objects every tick; a behaviour on its
   own object is the intended use.
 
@@ -344,7 +360,7 @@ behaviour like any native component); nothing to write or register.
 
 - `fynkel.Rotator` — turns the local rotation `speed` rad/s about `axis` in `space` `local` (the entity's own axes) or `world`.
 - `fynkel.Oscillate` — moves along `axis` by `amplitude · sin(2π · frequency · t + phase)`; it adds the *change* in offset each tick, so a transform you write from gameplay shifts the rest position instead of fighting the motion.
-- `fynkel.Follow` — places the entity at the world position of the entity named `target` plus `offset` (snapped when `smoothing` is 0, else eased at `smoothing`/s); `look_at` turns its −Z at the target. Runs after physics on the tick's final poses, like the camera rig.
+- `fynkel.Follow` — places the entity at the world position of the object referenced by `target` plus `offset` (snapped when `smoothing` is 0, else eased at `smoothing`/s); `look_at` turns its −Z at the target. Runs after physics on the tick's final poses, like the camera rig.
 - `fynkel.LookAtCamera` — turns the entity's +Z at the active camera (highest `priority`); `lock_y` keeps it upright (a billboard). After physics.
 - `fynkel.LifetimeDespawn` — destroys the entity and its subtree `seconds` after the component appeared (`onDestroy` runs as for `destroy()`).
 - `fynkel.Emitter` — instantiates `prefab` `rate` times per second at the emitter's world pose (unparented, an anchor named after the prefab), each with a `LifetimeDespawn` of `lifetime` (0 keeps them) and its dynamic bodies launched at `velocity`; `max_alive` caps the live ones (0 = unlimited); `enabled` pauses it. A prefab the scene does not reference loads nothing and reports `prefab_unavailable` once.
@@ -357,7 +373,7 @@ Values the runtime would reject are `FYN-H0008` at `fynkel validate`
 ## Finding objects, spawning, prefabs
 
 ```dart
-final player = world.find('Player');                // by name, as the last tick left it
+final player = world.find('Player');                // by name, including current transaction writes
 final hand = player?.findChild('Arm/Hand');         // a path of direct children; findDescendant(name) searches deep
 for (final coin in world.findAll('Coin')) { … }     // every entity with that name
 final coin = world.findWithTag('pickup');           // by a project tag; findAllWithTag for every one
@@ -369,9 +385,8 @@ final turret = world.instantiate(turretPrefab, transform: t, name: 'Turret');
 turret.findChild('Barrel');                          // the prefab's entities are its children
 ```
 
-- `find`/`findAll`/`findChild`/`findDescendant`/`findWithTag`/
-  `findAllWithTag` read one entity table per tick; a rename, reparent or
-  tag change staged this tick shows up next tick.
+- Object lookup and hierarchy reads include changes in the current transaction.
+
 - Tags and the layer speak the project's names (`tags`, `layers` in
   `fynkel.project.json`): `go.tags` (a copy), `go.hasTag('pickup')`,
   `go.addTag('pickup')`, `go.removeTag('pickup')`, `go.layer` (`default`
@@ -459,8 +474,8 @@ world.unloadScene(hudScene);                        // only that scene's entitie
 world.loadedScenes; world.scenes.current; world.scenes.state; // empty | pending | ready | failed
 ```
 
-- `loadScene(id)` (the default `LoadMode.replace`) unloads **everything**
-  first — every loaded scene, every `spawn`/`instantiate` — so nothing
+- `loadScene(id)` (the default `LoadMode.replace`) prepares required resources
+  before atomically replacing the current scene — every loaded scene, every `spawn`/`instantiate` — so nothing
   survives a level change; `additive` keeps the world and refuses an id
   that is loaded already (`FYN-R0011`). Handles of destroyed objects go
   dead on the next frame; a behaviour on one gets `onDestroy`.

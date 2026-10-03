@@ -21,11 +21,16 @@ fn world() -> World {
 fn spawn(w: &mut World, _fixture_id: u64, at: Vec3, parent: Option<Entity>, name: &str) -> Entity {
     let commit = w
         .edit_gameplay(|edit| {
-            edit.spawn(
+            let entity = edit.spawn(
                 name.to_owned(),
                 Transform::from_position(at),
                 parent.map(Into::into),
-            )
+            )?;
+            edit.set_component(
+                entity,
+                ComponentValue::AnimationBinding(AnimationBinding { key: name.into() }),
+            )?;
+            Ok(entity)
         })
         .unwrap();
     let entity = commit.resolve(commit.value).unwrap();

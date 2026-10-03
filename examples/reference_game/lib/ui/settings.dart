@@ -12,7 +12,7 @@
 // ([onRebind]).
 
 import 'package:flutter/material.dart';
-import 'package:fynkel/fynkel.dart' show SettingsDocument;
+import 'package:fynkel/gameplay.dart' show SettingsDocument;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import '../game/game.dart';

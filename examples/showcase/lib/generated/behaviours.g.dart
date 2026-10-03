@@ -3,7 +3,7 @@
 //
 // ignore_for_file: type=lint, unused_element
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 import 'package:showcase/game/dissolve.dart' as _lib0;
 import 'package:showcase/game/orbit.dart' as _lib1;
 import 'package:showcase/game/spinner.dart' as _lib2;
@@ -14,6 +14,8 @@ BehaviourType get gameDissolveType => BehaviourType(
   id: 'game.Dissolve',
   version: 1,
   create: _lib0.Dissolve.new,
+  dartType: _lib0.Dissolve,
+  callbacks: const {'update'},
   fields: [
     BehaviourField(
       name: 'hold',
@@ -43,6 +45,8 @@ BehaviourType get gameOrbitType => BehaviourType(
   id: 'game.Orbit',
   version: 1,
   create: _lib1.Orbit.new,
+  dartType: _lib1.Orbit,
+  callbacks: const {'fixedUpdate'},
   fields: [
     BehaviourField(
       name: 'height',
@@ -97,6 +101,8 @@ BehaviourType get gameSpinnerType => BehaviourType(
   id: 'game.Spinner',
   version: 1,
   create: _lib2.Spinner.new,
+  dartType: _lib2.Spinner,
+  callbacks: const {'fixedUpdate'},
   fields: [
     BehaviourField(
       name: 'axis',
@@ -123,6 +129,8 @@ BehaviourType get gameWaverType => BehaviourType(
   id: 'game.Waver',
   version: 1,
   create: _lib3.Waver.new,
+  dartType: _lib3.Waver,
+  callbacks: const {'fixedUpdate'},
   fields: [
     BehaviourField(
       name: 'every',

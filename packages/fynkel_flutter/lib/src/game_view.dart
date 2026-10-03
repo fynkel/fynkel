@@ -9,7 +9,7 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/gameplay.dart';
 
 import 'application.dart';
 import 'error_report.dart';
@@ -27,6 +27,7 @@ class FynkelFrameStats {
   const FynkelFrameStats({
     required this.frames,
     required this.fps,
+    this.windowSeconds = 0,
     required this.tickInterval,
     required this.simulate,
     required this.renderCall,
@@ -48,11 +49,18 @@ class FynkelFrameStats {
     this.dartHeap,
   });
 
-  /// Ticker callbacks (frames simulated and rendered) this window, and
-  /// that count over the window's wall time — the rate the game runs at,
-  /// which is the display's refresh rate when nothing is missed.
+  /// Game-loop callbacks this window and their rate over wall time.
+  /// This is not the rate of distinct textures acquired by the compositor
+  /// or proof of evenly spaced frames on the display.
   final int frames;
   final double fps;
+
+  /// Wall time covered by this report. Zero for legacy/manual snapshots.
+  final double windowSeconds;
+
+  /// New textures acquired by the compositor per second, not display scanouts.
+  double? get textureAcquisitionFps =>
+      windowSeconds > 0 && viewport != null ? viewport!.framesPresented / windowSeconds : null;
 
   /// Time between consecutive Ticker callbacks.
   final MsPercentiles tickInterval;
@@ -137,6 +145,10 @@ class FynkelFrameStats {
         'culled=${v.culled}',
         'shadow=${v.shadowCasters}/${v.shadowDraws}',
         'rendered=${v.framesRendered}',
+        'acquired=${v.framesPresented}',
+        'repeated=${v.presentsWithoutNewFrame}',
+        'present_lag=${v.presentLagP50}/${v.presentLagP95}/${v.presentLagMax}',
+        'acquire_wait=${v.acquireWaitP50Ms.toStringAsFixed(3)}/${v.acquireWaitP95Ms.toStringAsFixed(3)}/${v.acquireWaitMaxMs.toStringAsFixed(3)}',
         'extract=${pct(v.extract)}',
         'prepare=${pct(v.prepare)}',
         'encode=${pct(v.encode)}',
@@ -151,6 +163,13 @@ class FynkelFrameStats {
         'gpu_untimed=${v.gpuFramesUntimed}',
         'gpu_timestamps=${v.gpuTimestamps}',
         'mem_gpu=${v.gpuBytes}',
+      ],
+      if (platform case final p?) ...[
+        'texture_copies=${p.copyCalls}',
+        'texture_new=${p.copyWithNewFrame}',
+        'texture_empty=${p.copyNoFrame}',
+        'texture_ready=${p.frameReadySignals}',
+        'thermal=${p.thermalState.name}',
       ],
       if (h != null) ...[
         'heap=${h.heapUsage}',
@@ -351,7 +370,11 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
 
   /// Around the overlay: never focused itself, it sees the keys a focused
   /// HUD widget lets through (foundation 4.7).
-  final FocusNode _overlayFocus = FocusNode(debugLabel: 'FynkelGameView overlay', canRequestFocus: false, skipTraversal: true);
+  final FocusNode _overlayFocus = FocusNode(
+    debugLabel: 'FynkelGameView overlay',
+    canRequestFocus: false,
+    skipTraversal: true,
+  );
 
   bool _viewportFocused = false;
 
@@ -377,7 +400,8 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   /// Whether the focused widget is a text field (it keeps the keys).
   bool _typing() => FocusManager.instance.primaryFocus?.context?.findAncestorWidgetOfExactType<EditableText>() != null;
 
-  KeyEventResult _onOverlayKey(FocusNode node, KeyEvent event) => _typing() ? KeyEventResult.ignored : _onKey(node, event);
+  KeyEventResult _onOverlayKey(FocusNode node, KeyEvent event) =>
+      _typing() ? KeyEventResult.ignored : _onKey(node, event);
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     final user = widget.onKeyEvent?.call(node, event);
@@ -460,8 +484,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   }
 
   /// Whether this view draws gizmos ([FynkelGameView.gizmos]).
-  bool get gizmosOn =>
-      Gizmos.compiled && (widget.gizmos ?? Platform.environment['FYNKEL_GIZMOS'] == '1');
+  bool get gizmosOn => Gizmos.compiled && (widget.gizmos ?? Platform.environment['FYNKEL_GIZMOS'] == '1');
 
   void _applyGizmos() => widget.world.showGizmos = gizmosOn;
 
@@ -635,12 +658,14 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   /// why over the last picture.
   void _stopped(FynkelPanicError error, StackTrace stack) {
     _ticker.stop();
-    FlutterError.reportError(FlutterErrorDetails(
-      exception: error,
-      stack: stack,
-      library: 'fynkel_flutter',
-      context: ErrorDescription('while running the game; the engine stopped the world'),
-    ));
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stack,
+        library: 'fynkel_flutter',
+        context: ErrorDescription('while running the game; the engine stopped the world'),
+      ),
+    );
     if (mounted) setState(() => _panic = error);
   }
 
@@ -657,9 +682,11 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     final gizmos = world.gizmos;
     if (gizmos != null && !gizmos.isEmpty) {
       // One point wide, faded behind geometry: the editor's gizmo lines.
-      gizmoLinesQueued = c.overlay(_gizmoOverlay
-        ..clear()
-        ..segments(gizmos.lines, width: _pixelRatio));
+      gizmoLinesQueued = c.overlay(
+        _gizmoOverlay
+          ..clear()
+          ..segments(gizmos.lines, width: _pixelRatio),
+      );
     }
     final sw = _renderWatch
       ..reset()
@@ -676,11 +703,13 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     if (slot == renderBroken) {
       // Once: the controller is failed now and renders no more; the
       // viewport widget shows the message.
-      FlutterError.reportError(FlutterErrorDetails(
-        exception: c.error!,
-        library: 'fynkel_flutter',
-        context: ErrorDescription('while drawing the game; the viewport stopped'),
-      ));
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: c.error!,
+          library: 'fynkel_flutter',
+          context: ErrorDescription('while drawing the game; the viewport stopped'),
+        ),
+      );
     }
   }
 
@@ -694,6 +723,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     final stats = FynkelFrameStats(
       frames: _frames,
       fps: seconds > 0 ? _frames / seconds : 0,
+      windowSeconds: seconds,
       tickInterval: MsPercentiles.of(_intervalsMs),
       simulate: MsPercentiles.of(_simMs),
       renderCall: MsPercentiles.of(_renderCallMs),
@@ -739,9 +769,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       placeholder: widget.placeholder,
     );
     final hud = widget.overlay;
-    final overlay = hud == null
-        ? null
-        : Focus(focusNode: _overlayFocus, onKeyEvent: _onOverlayKey, child: hud);
+    final overlay = hud == null ? null : Focus(focusNode: _overlayFocus, onKeyEvent: _onOverlayKey, child: hud);
     final panic = _panic;
     if (panic != null) {
       return Stack(fit: StackFit.expand, children: [viewport, _Stopped(panic)]);
@@ -760,17 +788,17 @@ class _Stopped extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ColoredBox(
-        color: const Color(0xCC000000),
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              'The game stopped: the engine panicked.\n${error.panic}',
-              textAlign: TextAlign.center,
-              textDirection: TextDirection.ltr,
-              style: const TextStyle(color: Color(0xFFFFFFFF), fontSize: 14),
-            ),
-          ),
+    color: const Color(0xCC000000),
+    child: Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(
+          'The game stopped: the engine panicked.\n${error.panic}',
+          textAlign: TextAlign.center,
+          textDirection: TextDirection.ltr,
+          style: const TextStyle(color: Color(0xFFFFFFFF), fontSize: 14),
         ),
-      );
+      ),
+    ),
+  );
 }

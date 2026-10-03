@@ -738,7 +738,7 @@ void main() {
       // With the source on disk, the IDE opens at the class.
       Directory('${r.project.dir}/lib').createSync(recursive: true);
       File('${r.project.dir}/lib/spinner.dart').writeAsStringSync(
-        "import 'package:fynkel/fynkel.dart';\n\n/// Rotates.\n@Behaviour('game.Spinner')\nfinal class Spinner extends FynkelBehaviour {}\n",
+        "import 'package:fynkel/gameplay.dart';\n\n/// Rotates.\n@Behaviour('game.Spinner')\nfinal class Spinner extends FynkelBehaviour {}\n",
       );
       expect(await r.model.openScript(spinner), isNull);
       expect(opened.last, '${r.project.dir}/lib/spinner.dart@5');

@@ -4,7 +4,7 @@
 // onDisable children first and onEnable parents first, onCreate deferred
 // until the object is first active, and no onDestroy without an onCreate.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:test/test.dart';
 
 class Recorder extends Behaviour {

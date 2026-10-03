@@ -16,5 +16,5 @@
 /// ```
 library;
 
-export 'fynkel.dart' show ObjectSpec, Primitive;
+export 'gameplay.dart' show ObjectSpec, Primitive;
 export 'src/authoring/writer.dart' show ProjectWriter, SceneSpec, WrittenDocument;

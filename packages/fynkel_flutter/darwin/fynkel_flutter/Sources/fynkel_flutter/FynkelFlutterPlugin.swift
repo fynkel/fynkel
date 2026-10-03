@@ -90,15 +90,7 @@ public class FynkelFlutterPlugin: NSObject, FlutterPlugin {
 
     case "stats":
       guard let tex = texture(args) else { result(nil); return }
-      result([
-        "copyCalls": tex.copyCalls,
-        "copyWithNewFrame": tex.copyWithNewFrame,
-        "frameReadySignals": tex.frameReadySignals,
-        "copyNoFrame": tex.copyNoFrame,
-        "rebinds": tex.rebinds,
-      ])
-      tex.copyCalls = 0; tex.copyWithNewFrame = 0; tex.frameReadySignals = 0
-      tex.copyNoFrame = 0; tex.rebinds = 0
+      result(tex.takeStats())
 
     case "unregisterTexture":
       if let tex = texture(args) {

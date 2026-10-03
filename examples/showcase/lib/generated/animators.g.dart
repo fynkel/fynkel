@@ -3,7 +3,7 @@
 //
 // ignore_for_file: type=lint
 
-import 'package:fynkel/fynkel.dart' show AnimationControl, AssetRef;
+import 'package:fynkel/gameplay.dart' show AnimationControl, AssetRef;
 
 /// The states of `models/runner.controller.json`'s base layer (`Base Layer`).
 enum RunnerState {

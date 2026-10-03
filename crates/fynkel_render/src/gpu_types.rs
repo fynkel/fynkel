@@ -51,7 +51,6 @@ pub(crate) struct FrameUniforms {
     /// x: the world's time (s); y: seconds since the previous frame's;
     /// zw: the internal target's size in pixels (ADR-0031 `globals`).
     pub(crate) time: [f32; 4],
-    pub(crate) lights: [GpuLight; LIGHT_POOL],
 }
 
 /// The frame's colour grading as the post pass reads it (R3c,
@@ -256,4 +255,28 @@ pub(crate) struct TransparentDraw {
     pub(crate) key: BatchKey,
     pub(crate) double_sided: bool,
     pub(crate) index: u32,
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    #[test]
+    fn frame_and_light_storage_match_the_shader_struct_layouts() {
+        let shader =
+            wgpu::naga::front::wgsl::parse_str(include_str!("shaders/frame.wgsl")).unwrap();
+        for (name, bytes) in [
+            ("Frame", std::mem::size_of::<FrameUniforms>()),
+            ("Light", std::mem::size_of::<GpuLight>()),
+        ] {
+            let (_, ty) = shader
+                .types
+                .iter()
+                .find(|(_, ty)| ty.name.as_deref() == Some(name))
+                .unwrap();
+            let wgpu::naga::TypeInner::Struct { span, .. } = ty.inner else {
+                panic!("expected struct")
+            };
+            assert_eq!(span as usize, bytes, "{name} CPU/GPU layout mismatch");
+        }
+    }
 }

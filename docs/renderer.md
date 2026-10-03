@@ -57,7 +57,7 @@ without an `Environment` component uses `Environment::default()` (white
 
 ## Passes
 
-The chain is `shadow → depth prepass → ambient occlusion → AO blur →
+The chain is `shadow → depth prepass → MSAA depth copy (when needed) → ambient occlusion → AO blur →
 opaque → transparent → bloom → post → presentation → overlay`, every pass with
 fixed inputs and outputs; the opaque and transparent stages share one
 render pass because they share the attachments. The three passes before
@@ -206,9 +206,13 @@ shadow and the scene:
    culled differently would write a *nearer* depth than the scene pass
    computes and reject nearly every fragment — which is exactly what a
    single no-culling prepass did before this was fixed.
-2. **The SSAO pass** reads that depth (`texture_depth_multisampled_2d`
-   at MSAA, sample 0 — AO is low-frequency, per-sample occlusion buys
-   nothing) and writes the red byte of an `Rg8Unorm` pixel (the green is
+2. **The SSAO pass** reads sample zero of that depth. With MSAA, a
+   fullscreen copy first writes exactly sample zero into `R32Float`; the
+   estimate and blur reuse this compact texture instead of repeatedly reading
+   multisampled depth. Without MSAA they read the original depth directly.
+   The copy adds four bytes per internal pixel while this stage is allocated;
+   it preserves the existing sampling policy and scene antialiasing. The pass
+   writes the red byte of an `Rg8Unorm` pixel (the green is
    the contact shadows', § Contact shadows). Per pixel: the world
    point from `inv_view_proj`, the normal from the four neighbouring
    depths (the nearer neighbour on each axis, so a silhouette does not
@@ -829,42 +833,13 @@ added: the shader mixes between the two terms with `frame.sky.z`.
 
 ## Lights per object (E1)
 
-A frame has a **pool** of up to `LIGHT_POOL = 64` point + spot lights, and
-each object is shaded by the `MAX_LIGHTS = 8` of them that reach it — the
-blueprint's Tier-1 budget, now spent per object instead of per frame.
+F6 uses spatial forward lighting ([ADR-0057](decisions/ADR-0057-render-extraction-visibility-and-resource-lifetimes.md)). The default frame budget is `LIGHT_POOL = 1024`, configurable up to `MAX_LIGHT_POOL = 16384`; an object shades at most `MAX_LIGHTS = 8` local lights. `LightBudget` rejects unsupported values without changing the previous budget. Flutter hosts expose the same setting through `FynkelViewportController.setLightBudget`.
 
-Two passes, both on the CPU in `prepare`:
+The frame's lights live in a growable GPU storage buffer, separate from the frame uniform. Full-width indices replace the old byte packing. Camera-masked lights and influence spheres outside the frustum do not consume the pool. If the explicit frame budget is exceeded, camera distance determines admission, with stable source order breaking ties.
 
-1. **Into the pool.** A light whose range sphere misses the camera
-   frustum is left out: only what is inside the frustum is shaded, so
-   this cannot change the picture (it is exact, not conservative, which
-   is why the `frustum_culling` switch does not gate it). If more than
-   `LIGHT_POOL` still reach the view, the nearest to the camera win and
-   `FrameStats::lights_dropped` counts the rest.
-2. **Onto the object.** Each instance's world bounding sphere — the one
-   frustum culling already computes — is tested against every light in
-   the pool: those whose range reaches it are scored by the shader's own
-   windowed inverse square at the nearest point of the bounds, times the
-   light's brightest channel. The strongest `MAX_LIGHTS` win; the list is
-   the pool indices, one per byte. Shadow-only instances and unlit
-   materials get no list — neither is shaded by a punctual light. A light
-   whose `culling_mask` lacks the object's layer bit is skipped here
-   (ADR-0020), so the mask costs nothing on the GPU.
+A persistent sphere hierarchy finds each object's candidate lights. Candidates are filtered by the object's layer and scored using the shader's windowed inverse-square contribution at the nearest point of its bound. The strongest supported number are selected, with index order breaking equal-score ties. Shadow-only and unlit objects need no light list. This is a bounded forward path, not tiled/clustered shading; per-object overflow is deliberate and observable.
 
-`FrameStats`: `lights` (the pool), `lights_dropped`, `lights_max_per_object`
-and `lights_overflow` (instances that had more than eight on them);
-`fynkel render --json` prints all four (`lights`, `lightsDropped`,
-`lightsMaxPerObject`, `lightsOverflow`). No clustering and no compute
-pass: the assignment is a loop over the pool per instance, which is why
-the pool is bounded.
-
-That loop is what the stress scene's many-lights variant measures
-(`generate.py --lights`, below): 5 571 instances against a full pool of
-64 cost **+0.45 ms of `prepare`** (2.10 ms p95 against 1.64 ms for the
-same frame with one light), and that is the ceiling — the pool is capped,
-so authoring more lights only grows the frustum pass over them, which
-runs once a frame. A cluster grid buys nothing at this budget; it becomes
-the answer when the *pool* has to grow, not when the scene does.
+`FrameStats` reports `lights`, `lights_dropped`, `lights_max_per_object`, `lights_overflow`, and the CPU's `light_candidates`. The existing native/Flutter light counters remain available; Rust's `lighting_diagnostics()` explains over-budget cases. The F6 gate report records 10,000-object and 1,024-light measurements. The E1 measurements later in this document describe the historical 64-light implementation, not the current limit.
 
 One sun (the first `DirectionalLight`), the only light that casts a
 shadow, and it is not part of any of this — every object sees it (its
@@ -887,7 +862,7 @@ loop, so no mask applies to them.
 
 ## Uniform layout
 
-`Frame` (bind group 0, 4 944 bytes, `shaders/frame.wgsl`): `view_proj`,
+`Frame` (bind group 0, 864 bytes, `shaders/frame.wgsl`): `view_proj`,
 `inv_view_proj` (the sky's ray reconstruction), `cascades` (four
 `Cascade { view_proj, rect, params }`: world → that cascade's shadow
 clip, its quadrant in atlas uv, and its normal offset in metres),
@@ -904,10 +879,12 @@ intensity — 0 when the stage did not run), `bloom_tint` (rgb), `grade`
 (§ Colour grading: `params` — `x` contrast exponent, `y` 1 when the grade
 runs, `z` tone mapper 0 ACES / 1 neutral / 2 none —, `pre` and `post`
 three column vectors each, `lift`, `inv_gamma`, `gain`), `counts` (`x` lights,
-`y` sky drawn, `z` encode sRGB, `w` the screen-space stage ran), then `lights: array<Light, LIGHT_POOL>`
-(64) —
-`position` (`w` range), `color` (rgb × cd, `w` 0 point / 1 spot),
-`direction` (`w` cos outer), `params` (`x` cos inner). Bind group 0 also
+`y` sky drawn, `z` encode sRGB, `w` the screen-space stage ran), then `time`
+(world time, frame delta, internal width and height). Local lights are separate
+64-byte storage records at group 2, binding 2: `position` (`w` range),
+`color` (rgb × cd, `w` 0 point / 1 spot), `direction` (`w` cos outer),
+`params` (`x` cos inner). A regression compares Rust and WGSL struct sizes.
+Bind group 0 also
 holds the shadow map (`texture_depth_2d`, binding 1 — a 1×1 map when
 shadows are off), its comparison sampler (binding 2), the environment's
 cube sampler (3), irradiance cube (4), prefiltered specular cube (5) and
@@ -927,13 +904,13 @@ shader read — the CPU picks the pipeline from it — and the pipeline's
 sixteen vertex attributes (0–5 vertex, 6–13 instance, 14–15 skin weights)
 are all taken, so the list itself lives in a storage buffer.
 
-Bind group 2 (`skin_layout`, vertex stage, part of the mesh and shadow
-pipeline layouts and always bound): two read-only storage buffers —
-binding 0 `array<mat4x4<f32>>`, the frame's joint palettes (§ Skinning; 64
-matrices before the first growth, `next_power_of_two` beyond), and
-binding 1 `array<vec4<u32>>`, one light list per instance in the instance
-buffer's order (§ Lights per object; 256 before the first growth). Either
-outgrowing its capacity rebuilds the one bind group.
+Bind group 2 (`skin_layout`, vertex/fragment visibility) holds three read-only
+storage buffers: joint palettes at binding 0; instance light lists at binding 1;
+and the frame's local lights at binding 2. A light list occupies three vec4<u32>
+records (48 bytes): eight full-width indices, followed by count and padding.
+The vertex stage forwards the list offset/count; the fragment reads the selected
+lights. Buffers grow geometrically and rebuild their shared bind group together.
+Their allocated capacities are included in GPU memory accounting.
 
 ### Skinning (M3-19, [animation.md](animation.md))
 
@@ -987,7 +964,7 @@ full table.
 
 ## Pipelines and caches — the variant cap
 
-Exactly **thirty** built-in render pipelines exist, all created in `new`
+Exactly **thirty-one** built-in render pipelines exist, all created in `new`
 (`PIPELINE_VARIANTS`) and rebuilt as a set only when the sample count
 changes; nothing is compiled at draw time. Each shader asset in use adds
 its own eighteen, built when its first material loads (§ Shader
@@ -1023,7 +1000,8 @@ vertex entry, which wgpu cannot make data, so it doubles the mesh and
 shadow rows — the 9 of M3-05 became 14, and R2's depth prepass (which
 must cull exactly as the opaque pass does) plus the two AO passes made
 20, and R3b's three bloom passes 23 (the overlay's three making 25, and
-the selection outline's four mask twins and its composite 30 — the mask
+the selection outline's four mask twins and its composite 30, and the MSAA
+sample-zero depth copy 31 — the mask
 must cull and cut exactly as the scene does, so it is the mesh rows
 again with one more fragment entry), still all created up front and never at draw time; nothing else about a skinned draw (material, lights,
 shadow, blend) differs, and `Pipelines::opaque(skinned, double_sided)` /
@@ -1217,3 +1195,35 @@ rate. On macOS from the bundle: 4 600–4 700 instances in view, 15
 draws, 120 fps with `render()` 2.7 ms. The bare project stays what CI
 and `capture.py` measure; the ids and the field are identical, the app's
 scene differs by that one component.
+
+
+## F6 extraction, spatial visibility, and recovery
+
+`World::extract_into` fills a caller-owned snapshot and reuses its vectors. The
+placeholder option includes empty spatial records for editor/debug drawing;
+without it, maintained render membership selects component owners. Ancestors
+and skin joints remain transform dependencies without becoming draw records.
+`extract()` is the allocating convenience wrapper over the same implementation.
+Apple and standalone frame loops retain output buffers between frames.
+
+A persistent sphere BVH refits changed leaves/ancestors for sparse motion,
+bottom-up for dense motion, and rebuilds after membership changes or doubled
+hierarchy cost. Fully contained nodes accept their leaves without individual
+plane tests. Camera and shadow queries are independent: off-camera casters remain.
+Animated meshes use conservative posed joint-influence bounds; invalid bounds,
+unprepared resources and custom vertex displacement remain unbounded. Cached
+bounds are invalidated with their geometry/material caches.
+
+Normal preparation stays nonblocking. Export readiness additionally requires
+that no earlier object in the prepared frame used a pending fallback, even if a
+later object found that resource ready. The regression controls worker completion
+between those two reads.
+
+Renderer resources belong to their device. `ExtractRenderer::recreate` rebuilds
+all GPU objects for a replacement device/target format while preserving logical
+settings and the asset store. Apple viewport ABI 14 reports device loss as `-5`
+before preparation. Flutter `recover()` unregisters the old texture before freeing
+native resources, then creates and registers a fresh viewport with saved settings.
+Standalone detects loss and rebuilds its device, surface and renderer. Existing
+frame completion generations and retained IOSurfaces protect old in-flight work.
+See ADR-0057 for pass lifetimes, queue ordering, and the render-graph decision.

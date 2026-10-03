@@ -39,9 +39,10 @@ pub mod world;
 pub use clock::{FrameClock, FramePlan};
 pub use command::{AnimateOp, AudioOp, Command, Lane};
 pub use components::{
-    Animator, Camera, ComponentValue, DirectionalLight, Emitter, Environment, ExposureMode, Follow,
-    LifetimeDespawn, LookAtCamera, MeshRenderer, MotionSpace, Oscillate, PointLight, Projection,
-    Rotator, Skin, SpotLight, ThirdPersonCamera, TriggerZone, Volume, VolumeShape,
+    AnimationBinding, Animator, Camera, ComponentValue, DirectionalLight, Emitter, Environment,
+    ExposureMode, Follow, LifetimeDespawn, LookAtCamera, MeshRenderer, MotionSpace, Oscillate,
+    PointLight, Projection, Rotator, Skin, SpotLight, ThirdPersonCamera, TriggerZone, Volume,
+    VolumeShape,
 };
 pub use event::{Event, EventPayload};
 /// The clip core (`fynkel_animation`, the animation module of ADR-0029);

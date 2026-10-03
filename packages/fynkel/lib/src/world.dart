@@ -215,10 +215,8 @@ class World {
   /// `fixedDeltaTime` inside FixedUpdate.
   bool _inFixedPhase = false;
 
-  /// True while [frame] runs `update`, its coroutines, `lateUpdate` and the
-  /// host's `update` callback: a `transform` write there is a
-  /// presentation command, shown this frame (ADR-0008 amendment,
-  /// foundation 1.2) — [GameObject._presentsWrite].
+  /// True during update/lateUpdate callback dispatch. Writes still use the
+  /// shared gameplay transaction; this flag does not select another state store.
   bool _inUpdatePhase = false;
 
   final NativeLibrary _lib;
@@ -408,6 +406,11 @@ class World {
   GameObject build(ObjectSpec spec, {GameObject? parent, Pose? transform}) {
     return _withGameplay(() => _gameplay!.build(spec, parent, transform ?? spec.transform));
   }
+
+  /// Builds a forest atomically, resolving references between its roots before
+  /// component values and behaviours are attached. No hidden parent is created.
+  List<GameObject> buildAll(Iterable<ObjectSpec> specs, {GameObject? parent}) =>
+      _withGameplay(() => _gameplay!.buildAll(List<ObjectSpec>.of(specs), parent));
 
   /// A built-in shape (Unity's `GameObject.CreatePrimitive`, ADR-0026
   /// §4): [ObjectSpec.primitive] built under [parent] at [transform] —

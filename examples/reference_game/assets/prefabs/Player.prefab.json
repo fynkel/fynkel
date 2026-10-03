@@ -172,6 +172,13 @@
               "entity": "6185ea96-bbe9-572f-a526-4eacab5f0312"
             }
           }
+        },
+        "c4658070-4945-5f9c-b36d-019577ca3388": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/1"
+          }
         }
       }
     },
@@ -204,6 +211,13 @@
               1.0,
               1.0
             ]
+          }
+        },
+        "3067ec6f-7490-5c6d-8ede-91615c1da9bb": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/2"
           }
         }
       }
@@ -238,6 +252,13 @@
               1.0
             ]
           }
+        },
+        "1abb40a1-afea-5feb-adf4-518a51895faf": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/3"
+          }
         }
       }
     },
@@ -268,6 +289,13 @@
               1.0,
               1.0
             ]
+          }
+        },
+        "0c3fcf47-2e3c-51a1-a305-573e9e026fdf": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/4"
           }
         }
       }
@@ -345,6 +373,13 @@
               1.0
             ]
           }
+        },
+        "ff7012d8-b806-5b02-b6b0-be70a9f7c325": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/5"
+          }
         }
       }
     },
@@ -373,6 +408,13 @@
               1.0,
               1.0
             ]
+          }
+        },
+        "8cff05a8-f469-5f48-9355-ec94d9b35da7": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/6"
           }
         }
       }
@@ -405,6 +447,13 @@
               1.0
             ]
           }
+        },
+        "505b4bb5-7286-5a0d-9326-fb83edaeabf8": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/7"
+          }
         }
       }
     },
@@ -433,6 +482,13 @@
               1.0,
               1.0
             ]
+          }
+        },
+        "76d0181c-a01b-5fc9-be8f-1e73138133e4": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/8"
           }
         }
       }
@@ -465,6 +521,13 @@
               1.0
             ]
           }
+        },
+        "a47c2094-eb60-5362-ae9f-bf69bc3b3873": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/9"
+          }
         }
       }
     },
@@ -495,6 +558,13 @@
               1.0,
               1.0
             ]
+          }
+        },
+        "b3dd0e0a-0f97-5e49-bbac-1f8f8f69faab": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/10"
           }
         }
       }
@@ -527,6 +597,13 @@
               1.0
             ]
           }
+        },
+        "81ea047b-71aa-5621-a098-de9e26fbd695": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/11"
+          }
         }
       }
     },
@@ -558,6 +635,13 @@
               1.0
             ]
           }
+        },
+        "195a06c8-0c79-5e3b-a4a8-26ce3511f992": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/12"
+          }
         }
       }
     },
@@ -587,6 +671,13 @@
               1.0
             ]
           }
+        },
+        "4f403502-5ba8-5929-be14-c4176976c4c3": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/13"
+          }
         }
       }
     },
@@ -615,6 +706,13 @@
               1.0,
               1.0
             ]
+          }
+        },
+        "8b45d231-2c40-5b44-aa78-e661211c342a": {
+          "type": "fynkel.AnimationBinding",
+          "version": 1,
+          "data": {
+            "key": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6/node/14"
           }
         }
       }

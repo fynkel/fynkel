@@ -205,11 +205,11 @@ fn light_surface(in: VsOut, front_facing: bool, s: LitSurface) -> vec3<f32> {
         radiance += visibility * shade(n, v, frame.sun_dir.xyz, frame.sun_color.rgb, diffuse, f0, a2);
     }
     // Only the lights this object was given (E1 light culling): its list
-    // is the pool indices packed a byte each, strongest first.
+    // contains full-width storage indices, strongest contributions first.
     let n_lights = min(in.lights.z, MAX_LIGHTS);
     for (var i = 0u; i < n_lights; i++) {
-        let word = select(in.lights.y, in.lights.x, i < 4u);
-        let light = frame.lights[(word >> ((i & 3u) * 8u)) & 0xffu];
+        let index = instance_lights[in.lights.x + i / 4u][i % 4u];
+        let light = local_lights[index];
         let le = punctual(light, in.world_pos);
         radiance += shade(n, v, le.xyz, light.color.rgb * le.w, diffuse, f0, a2);
     }

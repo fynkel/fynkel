@@ -1,6 +1,6 @@
 // Authored data uses one current logical view; simulation result APIs remain tick-bound.
 
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/advanced.dart';
 import 'package:test/test.dart';
 
 void main() {
