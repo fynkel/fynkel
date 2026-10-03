@@ -96,3 +96,10 @@ renderer or variable-step catch-up. This is a CPU diagnostic, not a device FPS
 gate. An optional second argument sets the sample count and runs only the
 300-behaviour variant for a sampling profiler. Disabling behaviours here isolates
 cost; it is never a production optimization or full-workload qualification.
+
+Add `--systems` to collect existing per-system native timings after each measured
+tick (for example `cpu /absolute/project 300 --systems`). This readback is outside
+the tick timer but adds work between samples; compare equally instrumented runs.
+`step` is the whole native step and overlaps the other phase timings, so do not
+sum it with them. Preserve the baseline bundle and reverse comparison order to
+check drift; do not compile concurrently with controlled measurements.

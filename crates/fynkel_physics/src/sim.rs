@@ -59,6 +59,19 @@ struct Entry {
     stale: bool,
 }
 
+/// Validated ECS inputs gathered once before mutating the physics world.
+/// Bodies are applied before nested colliders; only physics ownership markers
+/// change in ECS between collection and application.
+struct SyncEntry {
+    entity: Entity,
+    world: Mat4,
+    transform: Transform,
+    rigid: Option<RigidBody>,
+    shape: Option<Collider>,
+    character: Option<CharacterController>,
+    layer: u32,
+}
+
 /// What the sync found on an entity for a new entry.
 struct NewEntry {
     rigid: Option<RigidBody>,
@@ -240,8 +253,8 @@ pub struct Physics {
     invalidated: BTreeSet<Entity>,
     sync_candidates: usize,
     writeback_pending: BTreeSet<Entity>,
-    scratch_changed: Vec<Entity>,
-    scratch_nested: Vec<Entity>,
+    scratch_changed: Vec<SyncEntry>,
+    scratch_nested: Vec<SyncEntry>,
     scratch_gone: Vec<Entity>,
     /// Entities whose transform the last step wrote (`record` refreshes
     /// their `last_world`).
@@ -721,8 +734,8 @@ impl Physics {
             // proof that this matrix passed transform validation.
             let moving =
                 character.is_some() || rigid.is_some_and(|r| r.body_type != BodyType::Static);
-            if Transform::try_from_matrix(wt.matrix).is_none()
-                || (moving && !supports_motion_parent(ecs, parent.map(|p| p.0)))
+            let transform = Transform::try_from_matrix(wt.matrix);
+            if transform.is_none() || (moving && !supports_motion_parent(ecs, parent.map(|p| p.0)))
             {
                 self.unsupported_transforms.insert(entity);
                 if !was_unsupported {
@@ -743,7 +756,15 @@ impl Physics {
             // ancestor's body (ADR-0034): decided once the bodies are
             // synced.
             if rigid.is_none() && character.is_none() && parent.is_some() {
-                nested.push(entity);
+                nested.push(SyncEntry {
+                    entity,
+                    world: wt.matrix,
+                    transform: transform.unwrap(),
+                    rigid: rigid.copied(),
+                    shape: shape.cloned(),
+                    character: character.cloned(),
+                    layer: layer.copied().unwrap_or_default().bit(),
+                });
                 continue;
             }
             let same = self.entries.get(&entity).is_some_and(|entry| {
@@ -763,21 +784,30 @@ impl Physics {
                     && !entry.stale
             });
             if !same {
-                changed.push(entity);
+                changed.push(SyncEntry {
+                    entity,
+                    world: wt.matrix,
+                    transform: transform.unwrap(),
+                    rigid: rigid.copied(),
+                    shape: shape.cloned(),
+                    character: character.cloned(),
+                    layer: layer.copied().unwrap_or_default().bit(),
+                });
             }
         }
         for e in gone.drain(..) {
             self.remove_entry(ecs, e);
         }
-        for &entity in &changed {
-            self.update_entry(ecs, entity, None);
+        for input in changed.drain(..) {
+            self.update_entry(ecs, input, None);
         }
-        for &entity in &nested {
+        for input in nested.drain(..) {
+            let entity = input.entity;
             let join = home_of(ecs, entity)
                 .filter(|b| self.entries.get(b).is_some_and(|e| e.body.is_some()))
                 .map(|b| (b, relative(ecs, entity, b)));
             if !self.unchanged(ecs, entity, join) {
-                self.update_entry(ecs, entity, join);
+                self.update_entry(ecs, input, join);
             }
         }
         self.scratch_changed = changed;
@@ -831,18 +861,21 @@ impl Physics {
     /// body keeps its velocity and a pair that still touches fires nothing
     /// (foundation 2.2). `join` is the body a nested collider joins and its
     /// place relative to it.
-    fn update_entry(&mut self, ecs: &mut Ecs, entity: Entity, join: Option<(Entity, Mat4)>) {
-        let Ok(world) = ecs.get::<WorldTransform>(entity).map(|w| w.matrix) else {
-            return;
-        };
-        let rigid = ecs.copy::<RigidBody>(entity).ok();
-        let shape = ecs.get::<Collider>(entity).ok().map(|s| s.clone());
-        let character = ecs
-            .get::<CharacterController>(entity)
-            .ok()
-            .map(|c| c.clone());
-        let layer = ecs.copy::<Layer>(entity).unwrap_or_default().bit();
-        let (position, rotation, scale) = pose_of(&world);
+    fn update_entry(&mut self, ecs: &mut Ecs, input: SyncEntry, join: Option<(Entity, Mat4)>) {
+        let SyncEntry {
+            entity,
+            world,
+            transform,
+            rigid,
+            shape,
+            character,
+            layer,
+        } = input;
+        let Transform {
+            position,
+            rotation,
+            scale,
+        } = transform;
         let joined = join.and_then(|(b, _)| Some((b, self.body_type_of(b)?)));
         let rel = join.map_or(Mat4::IDENTITY, |(_, rel)| rel);
         let recreate = match self.entries.get(&entity) {
@@ -3577,6 +3610,61 @@ mod tests {
         assert!(p.register_material(material_key(3), mat(0.5, 2.0)).is_err());
         assert!(!p.has_material(&material_key(3)));
         assert_eq!(p.material_count(), 1);
+    }
+
+    #[test]
+    fn gathered_child_inputs_follow_same_sync_body_creation_and_removal() {
+        let mut ecs = world();
+        // Allocate the child first: synchronization cannot depend on entity order.
+        let child = spawn(&mut ecs, Vec3::X, None, Some(Collider::default()));
+        let parent = spawn(&mut ecs, Vec3::ZERO, None, None);
+        scene::set_parent_keep_local(&mut ecs, child, Some(parent)).unwrap();
+        let mut physics = Physics::new();
+        let watched = BTreeSet::new();
+        tick(&mut physics, &mut ecs, &watched);
+        for attached in [true, false, true] {
+            if attached {
+                ecs.insert(
+                    parent,
+                    RigidBody {
+                        body_type: BodyType::Static,
+                        ..RigidBody::default()
+                    },
+                )
+                .unwrap();
+            } else {
+                ecs.remove::<RigidBody>(parent).unwrap();
+            }
+            scene::set_local(
+                &ecs,
+                parent,
+                Transform {
+                    position: Vec3::new(10.0, 0.0, 0.0),
+                    rotation: Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+                    scale: Vec3::splat(2.0),
+                },
+            )
+            .unwrap();
+            scene::set_local(
+                &ecs,
+                child,
+                Transform::from_position(Vec3::new(2.0, 0.0, 0.0)),
+            )
+            .unwrap();
+            ecs.insert(
+                child,
+                Collider {
+                    offset: Vec3::X,
+                    ..Collider::default()
+                },
+            )
+            .unwrap();
+            tick(&mut physics, &mut ecs, &watched);
+            let collider = &physics.world.colliders[physics.entries[&child].collider.unwrap()];
+            assert_eq!(collider.parent().is_some(), attached);
+            assert!((collider.position().translation - Vec3::new(10.0, 6.0, 0.0)).length() < 1e-4);
+            assert!(physics.take_rejections().is_empty());
+        }
     }
 
     #[test]

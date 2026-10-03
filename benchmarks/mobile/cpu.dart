@@ -6,9 +6,11 @@ import 'package:fynkel_stress/game/game.dart';
 import 'package:fynkel_stress/game/wobble.dart';
 
 void main(List<String> args) {
-  final project = args.first;
-  final sampleCount = args.length > 1 ? int.parse(args[1]) : 120;
-  for (final enabled in (args.length > 1 ? [300] : [0, 30, 300])) {
+  final captureSystems = args.contains('--systems');
+  final positional = args.where((arg) => arg != '--systems').toList();
+  final project = positional.first;
+  final sampleCount = positional.length > 1 ? int.parse(positional[1]) : 120;
+  for (final enabled in (positional.length > 1 ? [300] : [0, 30, 300])) {
     final game = Game.load(project);
     try {
       final scripts = game.world.behaviours.whereType<Wobble>().toList();
@@ -26,6 +28,11 @@ void main(List<String> args) {
             'behavioursUs': times.behavioursUs,
             'nativeUs': times.nativeUs,
             'ticks': times.ticks,
+            if (captureSystems)
+              'systems': [
+                for (final time in game.world.systemTimes())
+                  {'system': time.system.name, 'micros': time.micros, 'entities': time.entities},
+              ],
           });
         }
       }
@@ -35,6 +42,7 @@ void main(List<String> args) {
           'authoredWobbles': scripts.length,
           'entities': game.world.stats().liveEntities,
           'samples': samples,
+          'systemTimingReadback': captureSystems,
           'warmupTicks': 40,
           'measuredTicks': sampleCount,
           'scope': 'Mac CPU single fixed tick; no rendering; fresh world per variant',

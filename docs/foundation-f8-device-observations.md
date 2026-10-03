@@ -319,3 +319,29 @@ GPU screen-space optimization. F8 remains open, including sustained performance
 and the unavailable second-Mac qualification.
 
 [Raw samples, failed/successful device attempts, hashes and validation](../benchmarks/foundation/results/2026-10-03-f8-lifecycle-invalidation.json).
+
+## Physics synchronization inputs — Mac only (2026-10-03)
+
+Optional per-system CPU probe readback identifies physics at 5.78 ms of an 8.42 ms
+native tick (120 measured ticks). Sampling also shows substantial ECS-to-physics
+synchronization work. Synchronization now carries its already-read components and
+validated transform into application instead of reading and decomposing them
+again. Bodies still apply before nested colliders. This increases retained scratch
+buffer memory with the affected population; collision rules, solver settings and
+simulation frequency are unchanged.
+
+Controlled 300-tick AOT runs, 40 warmup ticks, all 300 behaviours, no compilation,
+in before/after/after/before order yielded native medians 8.697 / 8.267 / 8.365 /
+8.972 ms. This supports approximately 5–7% less native work in this workload.
+An initial exploratory comparison overlapped compilation and was inconclusive;
+all runs are retained. No new phone measurement is claimed.
+
+The core/physics release suites passed 401 tests (zero failed, one ignored), then
+the added child-collider regression passed separately. It covers parent-body
+creation/removal independent of entity order while changing transform and collider
+offset in the same synchronization. Release all-target Clippy with warnings denied
+and analysis of the generated Dart probe passed. The earlier debug test compile
+was cancelled; it is not counted as a passing check.
+
+[Raw timings, source/binary hashes and archived sampler](../benchmarks/foundation/results/2026-10-03-f8-physics-inputs.json).
+F8 stays open; device validation, remaining native costs and GPU effects remain.
