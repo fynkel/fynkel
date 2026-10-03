@@ -205,9 +205,9 @@ const SHADOW_UNIFORM_STRIDE: u64 = 256;
 /// The sun's shadow, the scene, post (+ present) and the ambient
 /// occlusion stage: begin/end query pairs (`GpuTimer`). The AO pair is
 /// split across three passes — its begin is the depth prepass's, its end
-/// the blur's — so the stage is one span. Four additional queries
-/// identify the internal depth/estimate/blur boundaries for opt-in tracing.
-const TIMESTAMP_QUERIES: u32 = 14;
+/// the blur's — so the stage is one span. Six additional queries
+/// identify depth/resolve/estimate/blur boundaries for opt-in tracing.
+const TIMESTAMP_QUERIES: u32 = 16;
 /// The query pair the ambient-occlusion stage writes (after the four the
 /// original pass chain uses: shadow 0, scene 1, post 2, presentation 3).
 const AO_PAIR: u32 = 4;
@@ -668,6 +668,7 @@ impl ExtractRenderer {
                 ao: &ao_layout,
                 bloom: &bloom_layout,
                 ao_depth_resolve: &pipelines.ao_depth_resolve,
+                ao_blur: &pipelines.ao_blur,
             },
             &present_sampler,
             &post_buffer,
@@ -862,6 +863,7 @@ impl ExtractRenderer {
                 ao: &self.ao_layout,
                 bloom: &self.bloom_layout,
                 ao_depth_resolve: &self.pipelines.ao_depth_resolve,
+                ao_blur: &self.pipelines.ao_blur,
             },
             &self.present_sampler,
             &self.post_buffer,
@@ -1120,3 +1122,6 @@ impl ExtractRenderer {
 
 /// The number of render pipelines a renderer ever creates.
 pub const PIPELINE_VARIANTS: usize = Pipelines::count();
+
+#[cfg(test)]
+mod ao_blur_tests;

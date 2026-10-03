@@ -1,0 +1,1069 @@
+{
+  "schemaVersion": 1,
+  "status": "experiment-rejected-no-device-gain",
+  "sustainedQualification": false,
+  "change": "Tested squared radial-distance bounds for the existing bilateral AO blur; reverted after device comparison showed no benefit. Prior measured AO-kernel optimization remains.",
+  "validation": {
+    "rendererTests": {
+      "passed": 96,
+      "failed": 0,
+      "ignored": 5
+    },
+    "pixelImages": 63,
+    "pixelComparison": "All captured RGB image bytes identical",
+    "clippy": "renderer release all-targets warnings denied passed",
+    "iosReleaseBuilds": "baseline and candidate passed"
+  },
+  "pixelComparison": [
+    {
+      "image": "contact-plain.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "outline-wide.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "flat.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "culling.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "debug-line.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "msaa1.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "grading-lift.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "emissive.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "volume-wide.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "cascades.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "scale-0.5.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "outline-scale-2.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "layer-camera-mask.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "spot.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "msaa4.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "overlay-grid.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "outline-msaa1.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "overlay-thick.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "layer-light-mask.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "bloom-wide.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "masked.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "scale-0.75.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "contact.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "point.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "volume-off.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "extra-world-shadow.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "ibl-red.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shader-shadow-0.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "debug-aabb.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "scale-2.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "ambient.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "ortho.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shader-shadow-1.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "outline-occluded.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "outline-msaa4.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shader-flat.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "ibl.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "ao-off.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "extra-world-grey.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "sky.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shader-pbr.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "bloom.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "opaque.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "grading-neutral.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "casters-with.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "grading-warm.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "blend.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shader-texture.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shader-wave.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "overlay-occluded.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "outline-scale-0.5.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "grading-grey.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "per-object-lights.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "overlay-triangle.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "maps.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "grading-plain.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "ao.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "ibl-green.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "extra-world.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shader-missing.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "outline-blend.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shadow.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "casters-without.ppm",
+      "maxChannelDelta": 0,
+      "changedChannels": 0,
+      "meanChannelDelta": 0.0
+    }
+  ],
+  "binaryHashes": {
+    "baseline": {
+      "Frameworks/objective_c.framework/objective_c": "d0b41c3b216ad376aac0c1722cb0619a475f74613ba3dcf55e676a7ccd699cbc",
+      "Frameworks/Flutter.framework/Flutter": "a6c25f147240104557e79af6c867f0bcab63c9399e3d1683c659ff297d071745",
+      "Frameworks/App.framework/App": "b76f5a10a802cc8b505f983ec42ea8bf5f0666cf047c376d7682cdee6beacc30",
+      "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "e55fb10e501693ef5446c99daccf30f6065be1461d5921b733f923aa08248942"
+    },
+    "candidate": {
+      "Frameworks/objective_c.framework/objective_c": "39238e505a32ef0bbf03c3a0d7d0360f0b08647079181fe8d9e01898b5d60b66",
+      "Frameworks/Flutter.framework/Flutter": "61c55f081c36607235710d8bd65ff92c09de15910db15a8e0ce21bf7067be17a",
+      "Frameworks/App.framework/App": "7e7263958c7f85a3c966309ec95c87f138b3c0e24a0bb4b9151f68148ea9a32f",
+      "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "9e418a23952402c550b870b90bf22c4477c2d870ace8bf728f9a53301da591c7"
+    }
+  },
+  "deviceRuns": {
+    "baseline": {
+      "device": "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+      "bundle": "com.fynkel.qualification.mobileDense5000",
+      "app": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-blur-baseline.app",
+      "status": "failed",
+      "sustainedQualification": false,
+      "commands": [
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "install",
+            "app",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "target/f8-blur-baseline.app"
+          ],
+          "exitCode": 0,
+          "stdout": "03:50:27  Acquired tunnel connection to device.\n03:50:27  Enabling developer disk image services.\n03:50:27  Acquired usage assertion.\nApp installed:\n\u2022 bundleID: com.fynkel.qualification.mobileDense5000\n\u2022 installationURL: file:///private/var/containers/Bundle/Application/2F041B7D-5414-4752-8B6E-7A7261B173C3/f8-blur-baseline.app/\n\u2022 launchServicesIdentifier: unknown\n\u2022 databaseUUID: 3CA3D25C-7ED7-4480-97BA-F3545CDF9E74\n\u2022 databaseSequenceNumber: 7532\n\u2022 options: \n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "process",
+            "launch",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "--terminate-existing",
+            "--json-output",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-blur-baseline/launch.json",
+            "com.fynkel.qualification.mobileDense5000"
+          ],
+          "exitCode": 1,
+          "stdout": "03:50:28  Acquired tunnel connection to device.\n03:50:28  Enabling developer disk image services.\n03:50:29  Acquired usage assertion.\n",
+          "stderr": "ERROR: The application failed to launch. (com.apple.dt.CoreDeviceError error 10002 (0x2712))\n       BundleIdentifier = com.fynkel.qualification.mobileDense5000\n       ----------------------------------------\n           The request to open \"com.fynkel.qualification.mobileDense5000\" failed. (FBSOpenApplicationServiceErrorDomain error 1 (0x01))\n           BSErrorCodeDescription = RequestDenied\n           FBSOpenApplicationRequestID = 0x6a7a\n           NSLocalizedFailureReason = The request was denied by service delegate (SBMainWorkspace) for reason: Locked (\"Unable to launch com.fynkel.qualification.mobileDense5000 because the device was not, or could not be, unlocked\").\n       ----------------------------------------\n               The operation couldn\u2019t be completed. Unable to launch com.fynkel.qualification.mobileDense5000 because the device was not, or could not be, unlocked. (FBSOpenApplicationErrorDomain error 7 (0x07))\n               BSErrorCodeDescription = Locked\n               NSLocalizedFailureReason = Unable to launch com.fynkel.qualification.mobileDense5000 because the device was not, or could not be, unlocked.\n"
+        }
+      ],
+      "executableSha256": "d59b43fc35baf9428ec3905f382003a8b0d5b73a4ceb06316b6ab682a6c3b5b0",
+      "error": "Command '['xcrun', 'devicectl', 'device', 'process', 'launch', '--device', '0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D', '--terminate-existing', '--json-output', '/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-blur-baseline/launch.json', 'com.fynkel.qualification.mobileDense5000']' returned non-zero exit status 1."
+    },
+    "squared": {
+      "device": "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+      "bundle": "com.fynkel.qualification.mobileDense5000",
+      "app": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-app-500/build/ios/iphoneos/Runner.app",
+      "status": "failed",
+      "sustainedQualification": false,
+      "commands": [
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "install",
+            "app",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "target/f8-mobile-app-500/build/ios/iphoneos/Runner.app"
+          ],
+          "exitCode": 0,
+          "stdout": "03:50:52  Acquired tunnel connection to device.\n03:50:52  Enabling developer disk image services.\n03:50:52  Acquired usage assertion.\nApp installed:\n\u2022 bundleID: com.fynkel.qualification.mobileDense5000\n\u2022 installationURL: file:///private/var/containers/Bundle/Application/541DC37E-00D6-4917-8BFF-D5718C14662A/Runner.app/\n\u2022 launchServicesIdentifier: unknown\n\u2022 databaseUUID: 3CA3D25C-7ED7-4480-97BA-F3545CDF9E74\n\u2022 databaseSequenceNumber: 7540\n\u2022 options: \n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "process",
+            "launch",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "--terminate-existing",
+            "--json-output",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-blur-squared/launch.json",
+            "com.fynkel.qualification.mobileDense5000"
+          ],
+          "exitCode": 1,
+          "stdout": "03:50:54  Acquired tunnel connection to device.\n03:50:54  Enabling developer disk image services.\n03:50:54  Acquired usage assertion.\n",
+          "stderr": "ERROR: The application failed to launch. (com.apple.dt.CoreDeviceError error 10002 (0x2712))\n       BundleIdentifier = com.fynkel.qualification.mobileDense5000\n       ----------------------------------------\n           The request to open \"com.fynkel.qualification.mobileDense5000\" failed. (FBSOpenApplicationServiceErrorDomain error 1 (0x01))\n           BSErrorCodeDescription = RequestDenied\n           FBSOpenApplicationRequestID = 0x26c2\n           NSLocalizedFailureReason = The request was denied by service delegate (SBMainWorkspace) for reason: Locked (\"Unable to launch com.fynkel.qualification.mobileDense5000 because the device was not, or could not be, unlocked\").\n       ----------------------------------------\n               The operation couldn\u2019t be completed. Unable to launch com.fynkel.qualification.mobileDense5000 because the device was not, or could not be, unlocked. (FBSOpenApplicationErrorDomain error 7 (0x07))\n               NSLocalizedFailureReason = Unable to launch com.fynkel.qualification.mobileDense5000 because the device was not, or could not be, unlocked.\n               BSErrorCodeDescription = Locked\n"
+        }
+      ],
+      "executableSha256": "f1c9f1edc85d043df005e46cf41ecf10b08ab8719f5e9d8a77a9a84ef94a4288",
+      "error": "Command '['xcrun', 'devicectl', 'device', 'process', 'launch', '--device', '0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D', '--terminate-existing', '--json-output', '/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-blur-squared/launch.json', 'com.fynkel.qualification.mobileDense5000']' returned non-zero exit status 1."
+    },
+    "baseline-unlocked": {
+      "device": "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+      "bundle": "com.fynkel.qualification.mobileDense5000",
+      "app": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-blur-baseline.app",
+      "status": "diagnostic-complete",
+      "sustainedQualification": false,
+      "commands": [
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "install",
+            "app",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "target/f8-blur-baseline.app"
+          ],
+          "exitCode": 0,
+          "stdout": "03:52:02  Acquired tunnel connection to device.\n03:52:02  Enabling developer disk image services.\n03:52:02  Acquired usage assertion.\nApp installed:\n\u2022 bundleID: com.fynkel.qualification.mobileDense5000\n\u2022 installationURL: file:///private/var/containers/Bundle/Application/DA921CA7-CDC0-4CA1-878D-CACBEB553CF2/f8-blur-baseline.app/\n\u2022 launchServicesIdentifier: unknown\n\u2022 databaseUUID: 3CA3D25C-7ED7-4480-97BA-F3545CDF9E74\n\u2022 databaseSequenceNumber: 7548\n\u2022 options: \n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "process",
+            "launch",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "--terminate-existing",
+            "--json-output",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-blur-baseline-unlocked/launch.json",
+            "com.fynkel.qualification.mobileDense5000"
+          ],
+          "exitCode": 0,
+          "stdout": "03:52:04  Acquired tunnel connection to device.\n03:52:04  Enabling developer disk image services.\n03:52:04  Acquired usage assertion.\nLaunched application with com.fynkel.qualification.mobileDense5000 bundle identifier.\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "process",
+            "terminate",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "--pid",
+            "739"
+          ],
+          "exitCode": 0,
+          "stdout": "03:52:17  Acquired tunnel connection to device.\n03:52:17  Enabling developer disk image services.\n03:52:17  Acquired usage assertion.\nSent signal to terminate process sent to pid 739\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "copy",
+            "from",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "--domain-type",
+            "appDataContainer",
+            "--domain-identifier",
+            "com.fynkel.qualification.mobileDense5000",
+            "--source",
+            "Documents/mobile-capture.jsonl",
+            "--destination",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-blur-baseline-unlocked/mobile-capture.jsonl"
+          ],
+          "exitCode": 0,
+          "stdout": "03:52:17  Acquired tunnel connection to device.\n03:52:17  Enabling developer disk image services.\n03:52:17  Acquired usage assertion.\nFile received from Device\n/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-blur-baseline-unlocked/mobile-capture.jsonl\n",
+          "stderr": ""
+        }
+      ],
+      "executableSha256": "d59b43fc35baf9428ec3905f382003a8b0d5b73a4ceb06316b6ab682a6c3b5b0",
+      "pid": 739,
+      "terminatedExactPid": 739,
+      "records": [
+        {
+          "time": "2026-10-03T01:52:04.612078Z",
+          "elapsedMs": 0,
+          "event": "start",
+          "quality": "medium",
+          "limitSeconds": 8,
+          "sustainedQualification": false,
+          "cpuReadback": false,
+          "acquireWaitUs": 3000
+        },
+        {
+          "time": "2026-10-03T01:52:06.895197Z",
+          "elapsedMs": 0,
+          "event": "stats",
+          "windowSeconds": 2.100806,
+          "loopFps": 0.0,
+          "acquiredFps": null,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "unknown",
+          "summary": "frames=0 ticks=0 missed=0 dropped=0 entities=8839 interval=0.000/0.000/0.000 simulate=0.000/0.000/0.000 render=0.000/0.000/0.000 behaviours=0.000/0.000/0.000 native=0.000/0.000/0.000 work=0.000/0.000/0.000 build=0.000/0.000/0.000 raster=0.000/0.000/0.000 snapshot=24 snapshot_peak=0 mem_native=12986418 mem_resident=217088000 mem_assets=86205"
+        },
+        {
+          "time": "2026-10-03T01:52:07.810333Z",
+          "elapsedMs": 903,
+          "event": "stats",
+          "windowSeconds": 0.915265,
+          "loopFps": 39.332870807908094,
+          "acquiredFps": 29.49965310593107,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=36 ticks=53 missed=0 dropped=5 entities=8847 interval=25.054/48.776/58.482 simulate=17.687/28.664/50.776 render=5.612/6.402/28.627 behaviours=4.067/6.560/11.173 native=12.676/22.548/45.139 work=23.299/35.066/79.403 build=39.362/39.362/39.362 raster=22.240/22.240/22.240 snapshot=28920 snapshot_peak=28920 mem_native=43259561 mem_resident=279789568 mem_assets=86205 instances=1736 draws=16 culled=4273 shadow=3774/60 rendered=31 acquired=27 repeated=2 present_lag=1/1/1 acquire_wait=3.385/3.403/3.406 extract=2.978/3.102/3.113 prepare=2.229/2.680/16.899 encode=0.028/0.031/2.470 cpu=0.417/1.432/9.157 gpu_complete=18.820/21.088/58.213 gpu_frame=17.762/19.312/44.156 gpu_shadow=0.517/1.153/1.271 gpu_ao=10.761/12.431/14.659 gpu_scene=15.439/16.776/16.888 gpu_post=17.155/18.242/18.734 gpu_n=28 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=29 texture_new=27 texture_empty=1 texture_ready=29 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:08.800258Z",
+          "elapsedMs": 1893,
+          "event": "stats",
+          "windowSeconds": 0.989884,
+          "loopFps": 32.32702013569267,
+          "acquiredFps": 30.306581377211877,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=32 ticks=59 missed=0 dropped=1 entities=8857 interval=31.333/41.670/41.684 simulate=20.399/29.509/31.208 render=5.838/6.485/6.633 behaviours=4.216/7.038/10.064 native=16.143/22.128/22.440 work=26.237/35.994/37.841 build=24.217/34.289/57.222 raster=3.494/3.617/5.623 snapshot=28920 snapshot_peak=28920 mem_native=45960640 mem_resident=283967488 mem_assets=86205 instances=1761 draws=16 culled=4258 shadow=3844/60 rendered=31 acquired=30 repeated=0 present_lag=1/1/1 acquire_wait=3.391/3.406/3.413 extract=3.055/3.209/3.254 prepare=2.335/2.855/2.951 encode=0.028/0.029/0.038 cpu=0.416/0.441/0.467 gpu_complete=17.590/18.441/19.969 gpu_frame=17.048/17.860/17.982 gpu_shadow=0.519/0.559/0.560 gpu_ao=10.791/11.606/11.646 gpu_scene=15.307/16.098/16.116 gpu_post=16.447/17.260/17.405 gpu_n=31 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=31 texture_new=31 texture_empty=0 texture_ready=32 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:09.816243Z",
+          "elapsedMs": 2909,
+          "event": "stats",
+          "windowSeconds": 1.015942,
+          "loopFps": 29.52924477972168,
+          "acquiredFps": 29.52924477972168,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=30 ticks=61 missed=0 dropped=0 entities=8867 interval=33.333/41.703/48.751 simulate=21.060/30.676/30.775 render=6.027/6.648/6.734 behaviours=4.265/7.609/7.664 native=16.237/23.266/24.448 work=27.087/37.324/37.509 build=26.286/36.844/37.162 raster=3.533/3.568/3.570 snapshot=28920 snapshot_peak=28920 mem_native=46087289 mem_resident=281509888 mem_assets=86205 instances=1787 draws=16 culled=4242 shadow=3907/60 rendered=30 acquired=30 repeated=0 present_lag=1/1/1 acquire_wait=3.391/3.406/3.413 extract=3.123/3.270/3.281 prepare=2.436/2.949/3.051 encode=0.028/0.030/0.038 cpu=0.425/0.450/0.460 gpu_complete=17.685/18.445/19.018 gpu_frame=17.097/17.911/18.469 gpu_shadow=0.527/0.567/0.568 gpu_ao=10.840/11.670/11.689 gpu_scene=15.331/16.150/16.175 gpu_post=16.488/17.312/17.861 gpu_n=30 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=30 texture_new=30 texture_empty=0 texture_ready=30 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:10.818047Z",
+          "elapsedMs": 3911,
+          "event": "stats",
+          "windowSeconds": 1.001764,
+          "loopFps": 26.95245586784911,
+          "acquiredFps": 26.95245586784911,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=27 ticks=60 missed=0 dropped=0 entities=8877 interval=36.968/45.523/46.612 simulate=28.789/30.587/31.114 render=6.310/6.823/6.906 behaviours=6.292/7.640/7.945 native=21.729/24.043/24.739 work=35.099/37.410/38.020 build=27.105/37.436/37.653 raster=3.524/3.570/3.570 snapshot=28920 snapshot_peak=28920 mem_native=46174699 mem_resident=281853952 mem_assets=86205 instances=1849 draws=16 culled=4190 shadow=3988/60 rendered=27 acquired=27 repeated=0 present_lag=1/1/1 acquire_wait=3.392/3.408/3.411 extract=3.191/3.384/3.464 prepare=2.544/3.143/3.378 encode=0.030/0.033/0.038 cpu=0.448/0.466/0.480 gpu_complete=17.687/18.477/19.257 gpu_frame=17.111/17.913/18.693 gpu_shadow=0.538/0.579/0.581 gpu_ao=10.844/11.554/11.699 gpu_scene=15.325/16.077/16.172 gpu_post=16.493/17.304/18.072 gpu_n=27 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=27 texture_new=27 texture_empty=0 texture_ready=27 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:11.813992Z",
+          "elapsedMs": 4907,
+          "event": "stats",
+          "windowSeconds": 0.995912,
+          "loopFps": 21.086200387182803,
+          "acquiredFps": 21.086200387182803,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=21 ticks=58 missed=0 dropped=0 entities=8878 interval=47.343/51.863/62.313 simulate=40.061/42.445/43.178 render=6.810/7.235/7.237 behaviours=9.297/10.339/10.612 native=30.672/32.211/33.072 work=46.871/49.680/50.415 build=35.326/37.517/38.479 raster=3.527/3.561/3.569 snapshot=28920 snapshot_peak=28920 mem_native=46186640 mem_resident=282525696 mem_assets=86205 instances=1919 draws=16 culled=4121 shadow=4039/60 rendered=21 acquired=21 repeated=0 present_lag=1/1/1 acquire_wait=3.388/3.403/3.410 extract=3.365/3.539/3.543 prepare=3.004/3.254/3.362 encode=0.030/0.034/0.034 cpu=0.448/0.477/0.484 gpu_complete=18.299/18.587/19.152 gpu_frame=17.193/18.013/18.559 gpu_shadow=0.546/0.580/0.581 gpu_ao=10.835/11.492/11.695 gpu_scene=15.338/16.078/16.124 gpu_post=16.561/17.382/17.924 gpu_n=21 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=21 texture_new=21 texture_empty=0 texture_ready=21 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:12.816292Z",
+          "elapsedMs": 5909,
+          "event": "stats",
+          "windowSeconds": 1.002269,
+          "loopFps": 18.956986597410474,
+          "acquiredFps": 18.956986597410474,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=19 ticks=60 missed=0 dropped=0 entities=8878 interval=50.368/59.789/80.883 simulate=41.754/52.042/60.494 render=6.908/7.297/7.431 behaviours=9.610/13.386/14.339 native=32.394/40.121/45.996 work=48.662/59.339/67.925 build=47.626/58.522/67.069 raster=3.497/3.565/3.686 snapshot=28920 snapshot_peak=28920 mem_native=46187695 mem_resident=283312128 mem_assets=86205 instances=1989 draws=16 culled=4051 shadow=4089/60 rendered=19 acquired=19 repeated=0 present_lag=1/1/1 acquire_wait=3.385/3.399/3.403 extract=3.358/3.521/3.540 prepare=3.133/3.305/3.443 encode=0.030/0.032/0.032 cpu=0.443/0.468/0.473 gpu_complete=18.381/18.580/27.495 gpu_frame=17.809/17.999/26.930 gpu_shadow=0.548/0.592/2.317 gpu_ao=10.816/11.674/19.513 gpu_scene=16.044/16.202/23.620 gpu_post=17.164/17.318/24.273 gpu_n=19 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=19 texture_new=19 texture_empty=0 texture_ready=19 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:13.814973Z",
+          "elapsedMs": 6908,
+          "event": "stats",
+          "windowSeconds": 0.998641,
+          "loopFps": 15.020412740914903,
+          "acquiredFps": 15.020412740914903,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=15 ticks=59 missed=0 dropped=0 entities=8878 interval=66.703/78.656/81.668 simulate=52.480/63.025/64.746 render=6.612/7.291/7.308 behaviours=12.358/15.796/15.910 native=40.311/47.265/48.706 work=59.092/70.316/72.054 build=48.832/67.235/68.295 raster=3.497/3.565/3.661 snapshot=28920 snapshot_peak=28920 mem_native=46199275 mem_resident=283623424 mem_assets=86205 instances=2102 draws=16 culled=3938 shadow=4140/60 rendered=15 acquired=15 repeated=0 present_lag=1/1/1 acquire_wait=3.391/3.404/3.422 extract=3.391/3.554/3.561 prepare=2.727/3.282/3.295 encode=0.031/0.033/0.036 cpu=0.470/0.493/0.505 gpu_complete=18.342/26.658/27.299 gpu_frame=17.776/26.113/26.793 gpu_shadow=0.576/2.356/2.388 gpu_ao=10.894/18.673/19.363 gpu_scene=16.006/22.732/23.443 gpu_post=17.128/23.339/24.054 gpu_n=15 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=15 texture_new=15 texture_empty=0 texture_ready=15 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:14.852423Z",
+          "elapsedMs": 7945,
+          "event": "stats",
+          "windowSeconds": 1.037421,
+          "loopFps": 17.350718753524365,
+          "acquiredFps": 17.350718753524365,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=18 ticks=62 missed=1 dropped=0 entities=8878 interval=58.872/69.920/82.540 simulate=51.183/54.753/62.727 render=6.578/7.200/7.506 behaviours=12.252/13.342/14.725 native=38.698/41.797/47.861 work=57.761/61.953/70.233 build=59.016/69.422/71.396 raster=3.525/3.560/3.646 snapshot=28920 snapshot_peak=28920 mem_native=46223560 mem_resident=283410432 mem_assets=86205 instances=2221 draws=16 culled=3819 shadow=4181/60 rendered=18 acquired=18 repeated=0 present_lag=1/1/1 acquire_wait=3.388/3.402/3.403 extract=3.376/3.517/3.547 prepare=2.748/3.368/3.454 encode=0.031/0.042/0.043 cpu=0.464/0.490/0.502 gpu_complete=18.511/26.769/27.465 gpu_frame=17.920/25.466/26.220 gpu_shadow=0.561/2.333/2.395 gpu_ao=10.985/17.992/18.057 gpu_scene=16.095/22.115/22.830 gpu_post=17.240/22.737/23.370 gpu_n=18 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=18 texture_new=18 texture_empty=0 texture_ready=18 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:14.932429Z",
+          "elapsedMs": 8025,
+          "event": "stop",
+          "reason": "deadline"
+        }
+      ]
+    },
+    "squared-unlocked": {
+      "device": "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+      "bundle": "com.fynkel.qualification.mobileDense5000",
+      "app": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-app-500/build/ios/iphoneos/Runner.app",
+      "status": "diagnostic-complete",
+      "sustainedQualification": false,
+      "commands": [
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "install",
+            "app",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "target/f8-mobile-app-500/build/ios/iphoneos/Runner.app"
+          ],
+          "exitCode": 0,
+          "stdout": "03:52:29  Acquired tunnel connection to device.\n03:52:29  Enabling developer disk image services.\n03:52:29  Acquired usage assertion.\nApp installed:\n\u2022 bundleID: com.fynkel.qualification.mobileDense5000\n\u2022 installationURL: file:///private/var/containers/Bundle/Application/533E940E-80B9-4D8A-82F7-8B7A180492C8/Runner.app/\n\u2022 launchServicesIdentifier: unknown\n\u2022 databaseUUID: 3CA3D25C-7ED7-4480-97BA-F3545CDF9E74\n\u2022 databaseSequenceNumber: 7556\n\u2022 options: \n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "process",
+            "launch",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "--terminate-existing",
+            "--json-output",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-blur-squared-unlocked/launch.json",
+            "com.fynkel.qualification.mobileDense5000"
+          ],
+          "exitCode": 0,
+          "stdout": "03:52:30  Acquired tunnel connection to device.\n03:52:30  Enabling developer disk image services.\n03:52:30  Acquired usage assertion.\nLaunched application with com.fynkel.qualification.mobileDense5000 bundle identifier.\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "process",
+            "terminate",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "--pid",
+            "745"
+          ],
+          "exitCode": 0,
+          "stdout": "03:52:43  Acquired tunnel connection to device.\n03:52:43  Enabling developer disk image services.\n03:52:43  Acquired usage assertion.\nSent signal to terminate process sent to pid 745\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "copy",
+            "from",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "--domain-type",
+            "appDataContainer",
+            "--domain-identifier",
+            "com.fynkel.qualification.mobileDense5000",
+            "--source",
+            "Documents/mobile-capture.jsonl",
+            "--destination",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-blur-squared-unlocked/mobile-capture.jsonl"
+          ],
+          "exitCode": 0,
+          "stdout": "03:52:43  Acquired tunnel connection to device.\n03:52:43  Enabling developer disk image services.\n03:52:43  Acquired usage assertion.\nFile received from Device\n/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-blur-squared-unlocked/mobile-capture.jsonl\n",
+          "stderr": ""
+        }
+      ],
+      "executableSha256": "f1c9f1edc85d043df005e46cf41ecf10b08ab8719f5e9d8a77a9a84ef94a4288",
+      "pid": 745,
+      "terminatedExactPid": 745,
+      "records": [
+        {
+          "time": "2026-10-03T01:52:31.057588Z",
+          "elapsedMs": 0,
+          "event": "start",
+          "quality": "medium",
+          "limitSeconds": 8,
+          "sustainedQualification": false,
+          "cpuReadback": false,
+          "acquireWaitUs": 3000
+        },
+        {
+          "time": "2026-10-03T01:52:32.234043Z",
+          "elapsedMs": 784,
+          "event": "stats",
+          "windowSeconds": 1.011998,
+          "loopFps": 29.644327360330752,
+          "acquiredFps": 19.76288490688717,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=30 ticks=45 missed=0 dropped=6 entities=8846 interval=26.726/41.589/41.646 simulate=18.414/28.318/28.944 render=5.662/7.553/19.845 behaviours=4.075/6.967/9.312 native=14.313/21.337/24.232 work=24.076/35.871/48.789 build=29.725/29.725/29.725 raster=6.822/6.822/6.822 snapshot=28920 snapshot_peak=28920 mem_native=42498735 mem_resident=277299200 mem_assets=86205 instances=1739 draws=16 culled=4269 shadow=3775/60 rendered=24 acquired=20 repeated=1 present_lag=1/1/1 acquire_wait=3.388/3.403/3.404 extract=2.969/3.346/3.348 prepare=2.203/2.909/14.708 encode=0.031/0.045/0.066 cpu=0.456/2.051/2.678 gpu_complete=20.222/23.689/37.831 gpu_frame=17.908/23.386/34.568 gpu_shadow=0.519/1.407/2.109 gpu_ao=10.857/15.119/23.896 gpu_scene=16.079/19.688/21.162 gpu_post=17.294/22.220/22.799 gpu_n=21 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=22 texture_new=21 texture_empty=1 texture_ready=23 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:33.231764Z",
+          "elapsedMs": 1782,
+          "event": "stats",
+          "windowSeconds": 0.9977,
+          "loopFps": 28.06454846146136,
+          "acquiredFps": 28.06454846146136,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=28 ticks=60 missed=0 dropped=0 entities=8856 interval=35.122/49.194/49.731 simulate=27.840/31.778/31.926 render=6.052/6.521/6.616 behaviours=6.033/7.204/7.257 native=20.709/25.332/25.805 work=33.892/38.299/38.542 build=24.728/35.052/36.282 raster=3.510/3.696/6.278 snapshot=28920 snapshot_peak=28920 mem_native=45891644 mem_resident=288210944 mem_assets=86205 instances=1752 draws=16 culled=4266 shadow=3838/60 rendered=28 acquired=28 repeated=0 present_lag=1/1/1 acquire_wait=3.391/3.404/3.420 extract=3.139/3.264/3.315 prepare=2.404/2.864/2.885 encode=0.029/0.031/0.032 cpu=0.446/0.475/0.484 gpu_complete=17.801/18.582/19.142 gpu_frame=17.143/18.020/18.680 gpu_shadow=0.524/0.553/0.561 gpu_ao=10.827/11.712/11.767 gpu_scene=15.342/16.203/16.254 gpu_post=16.531/17.435/18.090 gpu_n=28 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=28 texture_new=28 texture_empty=0 texture_ready=28 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:34.254299Z",
+          "elapsedMs": 2804,
+          "event": "stats",
+          "windowSeconds": 1.022499,
+          "loopFps": 26.405893795495153,
+          "acquiredFps": 26.405893795495153,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=27 ticks=61 missed=0 dropped=0 entities=8866 interval=37.791/48.830/49.206 simulate=29.375/32.321/32.596 render=6.286/6.850/6.968 behaviours=6.115/7.973/8.748 native=22.189/24.654/24.777 work=35.661/39.171/39.564 build=27.675/37.816/38.165 raster=3.536/3.563/3.576 snapshot=28920 snapshot_peak=28920 mem_native=46080376 mem_resident=280707072 mem_assets=86205 instances=1786 draws=16 culled=4242 shadow=3896/60 rendered=27 acquired=27 repeated=0 present_lag=1/1/1 acquire_wait=3.398/3.403/3.403 extract=3.180/3.449/3.449 prepare=2.506/3.050/3.062 encode=0.030/0.032/0.034 cpu=0.460/0.479/0.492 gpu_complete=17.685/19.135/19.159 gpu_frame=17.117/18.592/18.600 gpu_shadow=0.534/0.586/0.612 gpu_ao=10.833/11.441/11.542 gpu_scene=15.337/16.779/16.834 gpu_post=16.504/17.965/17.991 gpu_n=27 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=27 texture_new=27 texture_empty=0 texture_ready=27 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:35.254622Z",
+          "elapsedMs": 3805,
+          "event": "stats",
+          "windowSeconds": 1.000286,
+          "loopFps": 24.992852044315324,
+          "acquiredFps": 24.992852044315324,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=25 ticks=60 missed=0 dropped=0 entities=8876 interval=39.057/48.104/48.929 simulate=30.036/32.995/33.195 render=6.315/7.013/7.273 behaviours=6.656/7.452/7.696 native=23.482/25.558/26.262 work=36.351/40.008/40.468 build=35.890/38.902/39.478 raster=3.549/3.562/3.566 snapshot=28920 snapshot_peak=28920 mem_native=46175234 mem_resident=281034752 mem_assets=86205 instances=1841 draws=16 culled=4197 shadow=3975/60 rendered=25 acquired=25 repeated=0 present_lag=1/1/1 acquire_wait=3.392/3.404/3.407 extract=3.222/3.459/3.610 prepare=2.578/3.179/3.181 encode=0.030/0.032/0.032 cpu=0.468/0.485/0.486 gpu_complete=17.704/19.184/19.214 gpu_frame=17.124/18.630/18.645 gpu_shadow=0.543/0.581/0.589 gpu_ao=10.842/11.546/11.699 gpu_scene=15.328/16.834/16.874 gpu_post=16.489/17.978/18.029 gpu_n=25 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=25 texture_new=25 texture_empty=0 texture_ready=25 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:36.251489Z",
+          "elapsedMs": 4801,
+          "event": "stats",
+          "windowSeconds": 0.996816,
+          "loopFps": 21.067077574998795,
+          "acquiredFps": 21.067077574998795,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=21 ticks=58 missed=0 dropped=0 entities=8878 interval=42.748/62.642/65.364 simulate=32.111/55.309/67.717 render=6.695/7.354/7.494 behaviours=7.390/13.795/17.041 native=25.302/41.764/50.527 work=38.806/62.663/75.211 build=36.881/39.696/40.600 raster=3.544/3.562/3.563 snapshot=28920 snapshot_peak=28920 mem_native=46196791 mem_resident=282525696 mem_assets=86205 instances=1908 draws=16 culled=4132 shadow=4031/60 rendered=21 acquired=21 repeated=0 present_lag=1/1/1 acquire_wait=3.391/3.403/3.415 extract=3.386/3.648/3.700 prepare=2.692/3.312/3.320 encode=0.031/0.033/0.034 cpu=0.472/0.495/0.495 gpu_complete=17.772/18.742/25.866 gpu_frame=17.201/18.024/18.167 gpu_shadow=0.549/0.579/0.580 gpu_ao=10.878/11.799/11.865 gpu_scene=15.366/16.269/16.340 gpu_post=16.579/17.398/17.509 gpu_n=21 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=21 texture_new=21 texture_empty=0 texture_ready=21 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:37.269024Z",
+          "elapsedMs": 5819,
+          "event": "stats",
+          "windowSeconds": 1.017512,
+          "loopFps": 15.724630274630668,
+          "acquiredFps": 15.724630274630668,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=16 ticks=60 missed=1 dropped=0 entities=8878 interval=61.621/77.080/82.458 simulate=53.119/64.759/65.199 render=6.862/7.313/7.414 behaviours=12.852/15.373/15.394 native=40.231/49.240/49.691 work=59.981/72.072/72.613 build=57.703/71.653/74.504 raster=3.516/3.564/3.662 snapshot=28920 snapshot_peak=28920 mem_native=46194293 mem_resident=282443776 mem_assets=86205 instances=1982 draws=16 culled=4058 shadow=4087/60 rendered=16 acquired=16 repeated=0 present_lag=1/1/1 acquire_wait=3.388/3.402/3.403 extract=3.364/3.723/3.744 prepare=2.921/3.321/3.430 encode=0.032/0.039/0.044 cpu=0.491/0.509/0.520 gpu_complete=18.461/26.675/27.176 gpu_frame=17.806/26.130/26.650 gpu_shadow=0.550/2.317/2.332 gpu_ao=10.869/18.454/18.603 gpu_scene=15.991/22.767/23.330 gpu_post=17.173/23.497/23.984 gpu_n=16 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=16 texture_new=16 texture_empty=0 texture_ready=16 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:38.290483Z",
+          "elapsedMs": 6840,
+          "event": "stats",
+          "windowSeconds": 1.021424,
+          "loopFps": 14.685380410094142,
+          "acquiredFps": 14.685380410094142,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=15 ticks=60 missed=1 dropped=0 entities=8878 interval=66.689/73.369/77.193 simulate=55.356/65.631/65.841 render=7.096/7.860/7.882 behaviours=12.742/16.114/16.272 native=41.970/49.657/50.048 work=62.452/73.491/73.723 build=60.037/70.350/71.637 raster=3.529/3.571/3.641 snapshot=28920 snapshot_peak=28920 mem_native=46198852 mem_resident=282411008 mem_assets=86205 instances=2087 draws=16 culled=3953 shadow=4132/60 rendered=15 acquired=15 repeated=0 present_lag=1/1/1 acquire_wait=3.387/3.402/3.407 extract=3.421/3.799/3.811 prepare=3.254/3.532/3.564 encode=0.034/0.036/0.040 cpu=0.503/0.525/0.525 gpu_complete=18.567/26.936/27.514 gpu_frame=18.003/26.409/26.961 gpu_shadow=0.580/2.362/2.391 gpu_ao=10.996/18.769/18.959 gpu_scene=16.092/23.021/23.598 gpu_post=17.346/23.600/24.205 gpu_n=15 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=15 texture_new=15 texture_empty=0 texture_ready=15 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:39.288567Z",
+          "elapsedMs": 7838,
+          "event": "stats",
+          "windowSeconds": 0.998056,
+          "loopFps": 15.02921679745425,
+          "acquiredFps": 15.02921679745425,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=15 ticks=58 missed=2 dropped=0 entities=8879 interval=66.696/79.042/81.387 simulate=53.234/64.777/66.104 render=7.085/7.452/7.802 behaviours=12.344/16.366/16.394 native=40.650/49.325/50.546 work=60.319/72.229/73.906 build=61.175/72.484/72.817 raster=3.531/3.642/3.654 snapshot=28920 snapshot_peak=28920 mem_native=46229569 mem_resident=282968064 mem_assets=86205 instances=2205 draws=16 culled=3836 shadow=4176/60 rendered=15 acquired=15 repeated=0 present_lag=1/1/1 acquire_wait=3.391/3.403/3.404 extract=3.498/3.738/3.825 prepare=3.334/3.454/3.488 encode=0.033/0.034/0.036 cpu=0.495/0.509/0.515 gpu_complete=18.572/26.773/27.310 gpu_frame=18.010/26.239/26.702 gpu_shadow=0.591/2.380/2.384 gpu_ao=10.998/18.705/18.807 gpu_scene=16.168/22.856/23.292 gpu_post=17.291/23.419/23.844 gpu_n=15 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=15 texture_new=15 texture_empty=0 texture_ready=15 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:52:39.500814Z",
+          "elapsedMs": 8051,
+          "event": "stop",
+          "reason": "deadline"
+        }
+      ]
+    }
+  },
+  "summaries": {
+    "baseline-unlocked": {
+      "gpu_frame": 17.193,
+      "gpu_ao": 10.84
+    },
+    "squared-unlocked": {
+      "gpu_frame": 17.201,
+      "gpu_ao": 10.869
+    }
+  },
+  "hashes": {
+    "target/foundation-baseline/f8/blur-squared/f8-blur-tests.log": "d28b2f0ff3efa411d1c88c7e625009b2f2372c12ec88de9d9351404cbe7511f9",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-baseline-unlocked.log": "5d011ccaf7a121b394f2d56cf7bff024764ecf9e1bb4d441dcd792072e9a3016",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-squared-capture.log": "9f8590c6d3828d75cd6e0aee476388c33996817e755be01ba745cd82c2088a7d",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-math-install.log": "d211ff8d4b99d8e61907db2e1504c1078e183d926bc69dddeebb24409de5d9fe",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-pixels-before.log": "4646f266f19986a83dd6b3d185cd2c7ff78ab165dd517ee673392be1658fc64e",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-math-pixels.log": "3df0d92634b1dc5be48c904538d9cfec6212d8f1bc97bd83b41ade593f0d71b2",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-clippy.log": "ac82fb104890caa4567f518da7e1b57eee5fb44fa5974256cb38de2c9ba6a871",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-rejected.wgsl": "16c8c4d04571e0562af79afe7c657db730ff88b47801f2fab9a88055ba542ef5",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-pixel-comparison.json": "fa1448443a09c76445c38d9381c4aa001682dae2ce63f01a66502bfe11f18941",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-baseline-build.log": "f7be1dff84b565214527913ba3280662e517b669b68bf4bdcaab863af589b2a4",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-math-build.log": "9377cbc3d1b94e359ad6fbbce4ae695384484f3f0d902581ccc51f17fc6f6f8f",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-candidate-build.log": "1c76e50452cda02e83a88143dff483e23c062a6813f74594297a6f17a14acf65",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-baseline-capture.log": "418ec3a5a3be637dd318101c9bcea2f2b20cf6d8a68c109e474012979ceda125",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-squared-unlocked.log": "972624a8505bc168c435276df2baa64b0d6fc152274afc4c308d75b6dcb1610c",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-restore-install.log": "8a9c51f45f70d0896654400fa2858dbb2fe2561987d5f4ef7513b8a23b2a8ba0",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-binary-hashes.json": "4540eea9ad8fb110d16284599f481515e11a125bdbf2c8cb316c0179f91c82f9",
+    "target/foundation-baseline/f8/blur-squared/f8-blur-before.wgsl": "bce3c34ca123eb4f47dd8e2ede982d5fabe97e9c7be7043b9c42d34c7ccd29e7",
+    "target/f8-blur-pixels-before/contact-plain.ppm": "b6277c539ace8484000b88b8de59e57741ae1ef2e4c0832acaed17c8c816bc2b",
+    "target/f8-blur-pixels-before/outline-wide.ppm": "b99eac0ec5179be5a85f9f2b20f58729219125deb10ee2ade15515666f994da4",
+    "target/f8-blur-pixels-before/flat.ppm": "dd5e10dcc50e9882a8a4f66c9bba169d77ae1fad9bc15cfaed6d31f8b199d1cd",
+    "target/f8-blur-pixels-before/culling.ppm": "986259642ba9242628a4edd210b03b184d8c63036cfb0f28647d8c82917f0b13",
+    "target/f8-blur-pixels-before/debug-line.ppm": "a8035317f67e2278b31406b73e6f589758d61a45533d17b46d4ad39230356a5b",
+    "target/f8-blur-pixels-before/msaa1.ppm": "707ca60c1a760bb72c80d51b3dab3a0e9691523de1a29ef395b55fe328ced4f8",
+    "target/f8-blur-pixels-before/grading-lift.ppm": "d61ffd1dd76d85f55f832e7f3a141c0093b6f16f48105c276c17a224c21d7f54",
+    "target/f8-blur-pixels-before/emissive.ppm": "4b1ef44f76430831fb406dba13939902a3f94201f130f0f9bf473abe1b6a8050",
+    "target/f8-blur-pixels-before/volume-wide.ppm": "d458a86546a5131096716da3a3e2363b0b819ae9d39c1b057ef3647d64fed3e7",
+    "target/f8-blur-pixels-before/cascades.ppm": "b0da06c7e1eb7e1b0366175a12d013c716bae914f6b794ca9a4a0e0cab00db56",
+    "target/f8-blur-pixels-before/scale-0.5.ppm": "867330b7a4498fe0fbe90d8799e79b244c04ea79dd0e6522da963c2bafde0b4a",
+    "target/f8-blur-pixels-before/outline-scale-2.ppm": "e4c113f80974a582e6ebe124b9efa0afe01fce1409305a92e5c754d0b19b00bb",
+    "target/f8-blur-pixels-before/layer-camera-mask.ppm": "d946fb97d8f7a47b183e7540d5982ed9b4a85927d4cccac1b9484af9fab85d24",
+    "target/f8-blur-pixels-before/spot.ppm": "e38ec2fa5d6ca9ab98b3ccbdff5d8bf02d437bb59ad6c53f66f97b5448a69ffa",
+    "target/f8-blur-pixels-before/msaa4.ppm": "55d6cd86632fe09b34cee977a83174452ca5a4f206288443495ea27812eca428",
+    "target/f8-blur-pixels-before/overlay-grid.ppm": "ebec95bab0f1ba486518e21556900340ea269cb4e8afd194ebce5de316cdbe41",
+    "target/f8-blur-pixels-before/outline-msaa1.ppm": "15b8c7d23dc9a81f5f5a8e4f69e4d3e817b75409cd1cbf547e0164a0fb3711b4",
+    "target/f8-blur-pixels-before/overlay-thick.ppm": "36dc68062c20d8576e3fd0081b58211dbffc2e77f10b76d08fb382c91c59d555",
+    "target/f8-blur-pixels-before/layer-light-mask.ppm": "8d12355a9f16e8f82be2b070e667150e652087066fd3cbbd4198d1330c4e4e06",
+    "target/f8-blur-pixels-before/bloom-wide.ppm": "39150a0fe9ac9076d23d17b7db146ef201669129be9701b4d54cad431abd92c4",
+    "target/f8-blur-pixels-before/masked.ppm": "15b0ff46e13e08b28dd48c43d6982f26fbf7474b20f29981a120e24ac9157032",
+    "target/f8-blur-pixels-before/scale-0.75.ppm": "1464e62eb5e4a355cd58069ef6c720c777719bbeb989db4e2eeaa0f02abf042e",
+    "target/f8-blur-pixels-before/contact.ppm": "9472fbd485535fe135d77dfe1cf26918755d292066ea2b73eb10baf937e0d2e0",
+    "target/f8-blur-pixels-before/point.ppm": "8dbddaf70b2aba20b15b58626dafd0899aedaa7075b4bec4b7ecd0c53bf50535",
+    "target/f8-blur-pixels-before/volume-off.ppm": "f25bfc4d64d904937bd58a5b827cb6cee99f8119450b20294ca5e33a92c9df4c",
+    "target/f8-blur-pixels-before/extra-world-shadow.ppm": "6ea3b56c9fd3e225050272ef728435f23e7380efaf45f347b521452fb768efda",
+    "target/f8-blur-pixels-before/ibl-red.ppm": "75a22e76af17055bb6396c97698c39a488e371266845a22f948bec28c29946c6",
+    "target/f8-blur-pixels-before/shader-shadow-0.ppm": "7d0c78079f678186166f025f39a7c54a16f35fb3c24d71c1d04ccade7f195e9f",
+    "target/f8-blur-pixels-before/debug-aabb.ppm": "18f622f7d35ae553d46d1947f78cbc26484c80a30d68c67a3ee3d684eb1a5e7e",
+    "target/f8-blur-pixels-before/scale-2.ppm": "c91958072eeb040ed7c6dafb425862c6a777830b33305679d11cd35cdc625c0b",
+    "target/f8-blur-pixels-before/ambient.ppm": "ac314c229830d15e8cf951f7266b80826fe1999a4e237a982f31b0bcaf5c46bf",
+    "target/f8-blur-pixels-before/ortho.ppm": "793387291d3db71b1e4b652359e364f002029220ada56b4bb8e1b58706febded",
+    "target/f8-blur-pixels-before/shader-shadow-1.ppm": "839d236992d0ec2fc10086cc788f5c9ed781b5cfce358ac3eb4646780c36b31d",
+    "target/f8-blur-pixels-before/outline-occluded.ppm": "94ef57834a66976e08514438ee339edc324a971e1e61af1aaae284f598b2d0ab",
+    "target/f8-blur-pixels-before/outline-msaa4.ppm": "d738f7f4800a00b0cb81c371bd4b7bd4ef53f9c561d9f4e00ad0bd0c552cf3a7",
+    "target/f8-blur-pixels-before/shader-flat.ppm": "ff9680c7b6e6db909fa4609c1ddae6fd4464158e70b90f634999eef294512c88",
+    "target/f8-blur-pixels-before/ibl.ppm": "1554a2d544a8f24dea7ed76c5de5d574b90509759d843e6330400f20efef11c2",
+    "target/f8-blur-pixels-before/ao-off.ppm": "f25bfc4d64d904937bd58a5b827cb6cee99f8119450b20294ca5e33a92c9df4c",
+    "target/f8-blur-pixels-before/extra-world-grey.ppm": "a5b2b3b327a902f6325537e33d0d74e5591f59cf59079d2db5a8a08eda36863b",
+    "target/f8-blur-pixels-before/sky.ppm": "2382733ec766f5be6fe04fdff915b7470455acd25c3255c71ca556669be71315",
+    "target/f8-blur-pixels-before/shader-pbr.ppm": "3a021289b32017b0d4ae101a44474869a12b5c771b67823e9abc08c8264fef84",
+    "target/f8-blur-pixels-before/bloom.ppm": "641f7af9de6471dcceb3f55a9a8056de6aa7f34594d255782eee26202b356a0d",
+    "target/f8-blur-pixels-before/opaque.ppm": "e2ae808ac5410a41b830acbb66de7821e465a293b84bc5267e6691ab5f6f6d00",
+    "target/f8-blur-pixels-before/grading-neutral.ppm": "210b2d39eff414607249a2ee2ecd012e887b276d46bad763efbd4009fdc8ad53",
+    "target/f8-blur-pixels-before/casters-with.ppm": "c38e426bffc9b221ef83e348c2833e35738388ee92c144e00e4230a522ed306d",
+    "target/f8-blur-pixels-before/grading-warm.ppm": "686e09a3b2f573c820e7b4c20fe35d39b5e4de1277d698dcdb01bc1bfc5a6374",
+    "target/f8-blur-pixels-before/blend.ppm": "148abbc6b12f55b0084688d175c0f6905e4877daa55e7bf914b96f3f264b0abb",
+    "target/f8-blur-pixels-before/shader-texture.ppm": "4a95bf5a2eedf62ae93352709e9b2957e55c6471800dd9a0bd9e65f56c8421b1",
+    "target/f8-blur-pixels-before/shader-wave.ppm": "92d5f439a1d65f93e994db0b7644af08119c01a817105271e5bbff6d0471c037",
+    "target/f8-blur-pixels-before/overlay-occluded.ppm": "3f9c164e19fc8eacfc250288fcdb51915b6d8652e4a93726cd2d35c0babe0ab0",
+    "target/f8-blur-pixels-before/outline-scale-0.5.ppm": "5f143780cc6525c3556a1b2585088c982de36a376cad3e76261ce8e753da9601",
+    "target/f8-blur-pixels-before/grading-grey.ppm": "c666f2e149ddbf2746e1554639e33c3d5c510e9f913945e4a3e1f90245c78a4f",
+    "target/f8-blur-pixels-before/per-object-lights.ppm": "ec054e975673b95b31698d389d4dc30835d106fca116573441dcdfcc3e81d5af",
+    "target/f8-blur-pixels-before/overlay-triangle.ppm": "2b575e8232a2791ab2f87c5e12f2a0898ca41afa431fcefd0f698804b1e8f57f",
+    "target/f8-blur-pixels-before/maps.ppm": "f5383d04e9ef0a843707e29b97474f08e08be7d1d169404c0acbde33d3f39451",
+    "target/f8-blur-pixels-before/grading-plain.ppm": "3b5b31d7c3e18e1ae5329ca5777f9b74262575081a6fa7fd8e29144e18fae42f",
+    "target/f8-blur-pixels-before/ao.ppm": "54f93d0427fd33bc30987465bcc921c4469851c2743a472a024bb6472c9ef8e2",
+    "target/f8-blur-pixels-before/ibl-green.ppm": "4278498988276d7675aefe9d51fc7d19b0b940d6ba6a5db9d5c56ec5256fa2c9",
+    "target/f8-blur-pixels-before/extra-world.ppm": "53818877f839bff131cd1ba4bca0eddaa98c3b38e1b1c8c852c7458b86e03da5",
+    "target/f8-blur-pixels-before/shader-missing.ppm": "dc28e7342bf103d2f7e8cffaeff0b5961cdaa4d7297c7a0e0846b96954c7d260",
+    "target/f8-blur-pixels-before/outline-blend.ppm": "cac58fea4c8a5d83633c64ad38ff75400dbf4ef8c678a069dec0e176f54dffff",
+    "target/f8-blur-pixels-before/shadow.ppm": "c92d3a64e2a24b52faed7ca59f1e3cdb7001678e883c6334d7f23bb49d72a96f",
+    "target/f8-blur-pixels-before/casters-without.ppm": "b495b8706c46cea7389b892e61632ac3eab15ee40fd08ebc275d2a12e0b59e75",
+    "target/f8-blur-pixels-after/contact-plain.ppm": "b6277c539ace8484000b88b8de59e57741ae1ef2e4c0832acaed17c8c816bc2b",
+    "target/f8-blur-pixels-after/outline-wide.ppm": "b99eac0ec5179be5a85f9f2b20f58729219125deb10ee2ade15515666f994da4",
+    "target/f8-blur-pixels-after/flat.ppm": "dd5e10dcc50e9882a8a4f66c9bba169d77ae1fad9bc15cfaed6d31f8b199d1cd",
+    "target/f8-blur-pixels-after/culling.ppm": "986259642ba9242628a4edd210b03b184d8c63036cfb0f28647d8c82917f0b13",
+    "target/f8-blur-pixels-after/debug-line.ppm": "a8035317f67e2278b31406b73e6f589758d61a45533d17b46d4ad39230356a5b",
+    "target/f8-blur-pixels-after/msaa1.ppm": "707ca60c1a760bb72c80d51b3dab3a0e9691523de1a29ef395b55fe328ced4f8",
+    "target/f8-blur-pixels-after/grading-lift.ppm": "d61ffd1dd76d85f55f832e7f3a141c0093b6f16f48105c276c17a224c21d7f54",
+    "target/f8-blur-pixels-after/emissive.ppm": "4b1ef44f76430831fb406dba13939902a3f94201f130f0f9bf473abe1b6a8050",
+    "target/f8-blur-pixels-after/volume-wide.ppm": "d458a86546a5131096716da3a3e2363b0b819ae9d39c1b057ef3647d64fed3e7",
+    "target/f8-blur-pixels-after/cascades.ppm": "b0da06c7e1eb7e1b0366175a12d013c716bae914f6b794ca9a4a0e0cab00db56",
+    "target/f8-blur-pixels-after/scale-0.5.ppm": "867330b7a4498fe0fbe90d8799e79b244c04ea79dd0e6522da963c2bafde0b4a",
+    "target/f8-blur-pixels-after/outline-scale-2.ppm": "e4c113f80974a582e6ebe124b9efa0afe01fce1409305a92e5c754d0b19b00bb",
+    "target/f8-blur-pixels-after/layer-camera-mask.ppm": "d946fb97d8f7a47b183e7540d5982ed9b4a85927d4cccac1b9484af9fab85d24",
+    "target/f8-blur-pixels-after/spot.ppm": "e38ec2fa5d6ca9ab98b3ccbdff5d8bf02d437bb59ad6c53f66f97b5448a69ffa",
+    "target/f8-blur-pixels-after/msaa4.ppm": "55d6cd86632fe09b34cee977a83174452ca5a4f206288443495ea27812eca428",
+    "target/f8-blur-pixels-after/overlay-grid.ppm": "ebec95bab0f1ba486518e21556900340ea269cb4e8afd194ebce5de316cdbe41",
+    "target/f8-blur-pixels-after/outline-msaa1.ppm": "15b8c7d23dc9a81f5f5a8e4f69e4d3e817b75409cd1cbf547e0164a0fb3711b4",
+    "target/f8-blur-pixels-after/overlay-thick.ppm": "36dc68062c20d8576e3fd0081b58211dbffc2e77f10b76d08fb382c91c59d555",
+    "target/f8-blur-pixels-after/layer-light-mask.ppm": "8d12355a9f16e8f82be2b070e667150e652087066fd3cbbd4198d1330c4e4e06",
+    "target/f8-blur-pixels-after/bloom-wide.ppm": "39150a0fe9ac9076d23d17b7db146ef201669129be9701b4d54cad431abd92c4",
+    "target/f8-blur-pixels-after/masked.ppm": "15b0ff46e13e08b28dd48c43d6982f26fbf7474b20f29981a120e24ac9157032",
+    "target/f8-blur-pixels-after/scale-0.75.ppm": "1464e62eb5e4a355cd58069ef6c720c777719bbeb989db4e2eeaa0f02abf042e",
+    "target/f8-blur-pixels-after/contact.ppm": "9472fbd485535fe135d77dfe1cf26918755d292066ea2b73eb10baf937e0d2e0",
+    "target/f8-blur-pixels-after/point.ppm": "8dbddaf70b2aba20b15b58626dafd0899aedaa7075b4bec4b7ecd0c53bf50535",
+    "target/f8-blur-pixels-after/volume-off.ppm": "f25bfc4d64d904937bd58a5b827cb6cee99f8119450b20294ca5e33a92c9df4c",
+    "target/f8-blur-pixels-after/extra-world-shadow.ppm": "6ea3b56c9fd3e225050272ef728435f23e7380efaf45f347b521452fb768efda",
+    "target/f8-blur-pixels-after/ibl-red.ppm": "75a22e76af17055bb6396c97698c39a488e371266845a22f948bec28c29946c6",
+    "target/f8-blur-pixels-after/shader-shadow-0.ppm": "7d0c78079f678186166f025f39a7c54a16f35fb3c24d71c1d04ccade7f195e9f",
+    "target/f8-blur-pixels-after/debug-aabb.ppm": "18f622f7d35ae553d46d1947f78cbc26484c80a30d68c67a3ee3d684eb1a5e7e",
+    "target/f8-blur-pixels-after/scale-2.ppm": "c91958072eeb040ed7c6dafb425862c6a777830b33305679d11cd35cdc625c0b",
+    "target/f8-blur-pixels-after/ambient.ppm": "ac314c229830d15e8cf951f7266b80826fe1999a4e237a982f31b0bcaf5c46bf",
+    "target/f8-blur-pixels-after/ortho.ppm": "793387291d3db71b1e4b652359e364f002029220ada56b4bb8e1b58706febded",
+    "target/f8-blur-pixels-after/shader-shadow-1.ppm": "839d236992d0ec2fc10086cc788f5c9ed781b5cfce358ac3eb4646780c36b31d",
+    "target/f8-blur-pixels-after/outline-occluded.ppm": "94ef57834a66976e08514438ee339edc324a971e1e61af1aaae284f598b2d0ab",
+    "target/f8-blur-pixels-after/outline-msaa4.ppm": "d738f7f4800a00b0cb81c371bd4b7bd4ef53f9c561d9f4e00ad0bd0c552cf3a7",
+    "target/f8-blur-pixels-after/shader-flat.ppm": "ff9680c7b6e6db909fa4609c1ddae6fd4464158e70b90f634999eef294512c88",
+    "target/f8-blur-pixels-after/ibl.ppm": "1554a2d544a8f24dea7ed76c5de5d574b90509759d843e6330400f20efef11c2",
+    "target/f8-blur-pixels-after/ao-off.ppm": "f25bfc4d64d904937bd58a5b827cb6cee99f8119450b20294ca5e33a92c9df4c",
+    "target/f8-blur-pixels-after/extra-world-grey.ppm": "a5b2b3b327a902f6325537e33d0d74e5591f59cf59079d2db5a8a08eda36863b",
+    "target/f8-blur-pixels-after/sky.ppm": "2382733ec766f5be6fe04fdff915b7470455acd25c3255c71ca556669be71315",
+    "target/f8-blur-pixels-after/shader-pbr.ppm": "3a021289b32017b0d4ae101a44474869a12b5c771b67823e9abc08c8264fef84",
+    "target/f8-blur-pixels-after/bloom.ppm": "641f7af9de6471dcceb3f55a9a8056de6aa7f34594d255782eee26202b356a0d",
+    "target/f8-blur-pixels-after/opaque.ppm": "e2ae808ac5410a41b830acbb66de7821e465a293b84bc5267e6691ab5f6f6d00",
+    "target/f8-blur-pixels-after/grading-neutral.ppm": "210b2d39eff414607249a2ee2ecd012e887b276d46bad763efbd4009fdc8ad53",
+    "target/f8-blur-pixels-after/casters-with.ppm": "c38e426bffc9b221ef83e348c2833e35738388ee92c144e00e4230a522ed306d",
+    "target/f8-blur-pixels-after/grading-warm.ppm": "686e09a3b2f573c820e7b4c20fe35d39b5e4de1277d698dcdb01bc1bfc5a6374",
+    "target/f8-blur-pixels-after/blend.ppm": "148abbc6b12f55b0084688d175c0f6905e4877daa55e7bf914b96f3f264b0abb",
+    "target/f8-blur-pixels-after/shader-texture.ppm": "4a95bf5a2eedf62ae93352709e9b2957e55c6471800dd9a0bd9e65f56c8421b1",
+    "target/f8-blur-pixels-after/shader-wave.ppm": "92d5f439a1d65f93e994db0b7644af08119c01a817105271e5bbff6d0471c037",
+    "target/f8-blur-pixels-after/overlay-occluded.ppm": "3f9c164e19fc8eacfc250288fcdb51915b6d8652e4a93726cd2d35c0babe0ab0",
+    "target/f8-blur-pixels-after/outline-scale-0.5.ppm": "5f143780cc6525c3556a1b2585088c982de36a376cad3e76261ce8e753da9601",
+    "target/f8-blur-pixels-after/grading-grey.ppm": "c666f2e149ddbf2746e1554639e33c3d5c510e9f913945e4a3e1f90245c78a4f",
+    "target/f8-blur-pixels-after/per-object-lights.ppm": "ec054e975673b95b31698d389d4dc30835d106fca116573441dcdfcc3e81d5af",
+    "target/f8-blur-pixels-after/overlay-triangle.ppm": "2b575e8232a2791ab2f87c5e12f2a0898ca41afa431fcefd0f698804b1e8f57f",
+    "target/f8-blur-pixels-after/maps.ppm": "f5383d04e9ef0a843707e29b97474f08e08be7d1d169404c0acbde33d3f39451",
+    "target/f8-blur-pixels-after/grading-plain.ppm": "3b5b31d7c3e18e1ae5329ca5777f9b74262575081a6fa7fd8e29144e18fae42f",
+    "target/f8-blur-pixels-after/ao.ppm": "54f93d0427fd33bc30987465bcc921c4469851c2743a472a024bb6472c9ef8e2",
+    "target/f8-blur-pixels-after/ibl-green.ppm": "4278498988276d7675aefe9d51fc7d19b0b940d6ba6a5db9d5c56ec5256fa2c9",
+    "target/f8-blur-pixels-after/extra-world.ppm": "53818877f839bff131cd1ba4bca0eddaa98c3b38e1b1c8c852c7458b86e03da5",
+    "target/f8-blur-pixels-after/shader-missing.ppm": "dc28e7342bf103d2f7e8cffaeff0b5961cdaa4d7297c7a0e0846b96954c7d260",
+    "target/f8-blur-pixels-after/outline-blend.ppm": "cac58fea4c8a5d83633c64ad38ff75400dbf4ef8c678a069dec0e176f54dffff",
+    "target/f8-blur-pixels-after/shadow.ppm": "c92d3a64e2a24b52faed7ca59f1e3cdb7001678e883c6334d7f23bb49d72a96f",
+    "target/f8-blur-pixels-after/casters-without.ppm": "b495b8706c46cea7389b892e61632ac3eab15ee40fd08ebc275d2a12e0b59e75"
+  },
+  "limitations": [
+    "Eight-second diagnostic only; no sustained or thermal qualification.",
+    "Summary values are medians of window p50s after the first second, not pooled frame medians.",
+    "Whole-frame throughput remains CPU and GPU constrained.",
+    "No shader quality settings, taps, thresholds or resolution were reduced."
+  ],
+  "retainedShaderSha256": "bce3c34ca123eb4f47dd8e2ede982d5fabe97e9c7be7043b9c42d34c7ccd29e7"
+}

@@ -345,3 +345,666 @@ was cancelled; it is not counted as a passing check.
 
 [Raw timings, source/binary hashes and archived sampler](../benchmarks/foundation/results/2026-10-03-f8-physics-inputs.json).
 F8 stays open; device validation, remaining native costs and GPU effects remain.
+
+## Physics synchronization — iPhone follow-up (2026-10-03)
+
+Rebuilt release at `d39ae672`; the native framework hash differs from the prior
+lifecycle capture. The dense-5000 app completed its eight-second deadline and
+exact launch PID 662 was terminated before retrieving logs. New-texture acquisition
+ranged 19.66–29.10/s, versus 17.42–28.55/s in the previous capture. These ranges
+overlap substantially: this short run does not establish a clear phone speedup
+from the Mac-verified optimization. The last four windows were about 20–21/s,
+with the same slowdown as the scene advances. Visible instances grew from 1,733
+to 2,229. All rendering thermal samples were nominal.
+
+GPU frame p50 remained approximately 17–18 ms. Native simulation also remains
+costly; the per-host-frame measurements include changing numbers of fixed ticks.
+No sustained-performance, physical scanout, or heat-resolution claim follows.
+F8 remains open. Next investigation should separate the advancing scene's physics
+cost from fixed-tick catch-up and continue the independent GPU effects work.
+
+[Device records, build log hashes and native binary hash](../benchmarks/foundation/results/2026-10-03-f8-physics-inputs-device.json).
+
+## Fixed-tick timeline and AO sample arithmetic (2026-10-03)
+
+A 600-tick Mac CPU run (after 40 warmup ticks, all 300 scripts, no rendering)
+does not reproduce the phone's later slowdown. After the initial window, native
+60-tick-window medians stay near 8.2–8.5 ms, and physics stays near 5.5 ms. This
+separates advancing simulation cost from host-frame catch-up on this Mac; it does
+not identify the cause on the phone or exclude CPU/GPU power contention there.
+[Raw timeline](../benchmarks/foundation/results/2026-10-03-f8-cpu-timeline.json).
+
+The AO shader now stores the same twelve golden-angle hemisphere points and
+rotates them with one sine/cosine pair per pixel. It previously recalculated each
+sample's trigonometry. Resolution, sample count, blur, effect strength and scene
+workload are unchanged. A numerical regression compares every sample across
+1,024 dither rotations against the original f32 formula within 3e-6 per coordinate.
+The existing renderer suite passed 95 tests (zero failures, five ignored); the new
+regression passed separately, and renderer all-target release Clippy passed.
+
+Bounded iPhone runs compared the previous build, candidate, previous build again,
+and candidate again. Median of post-first-second window p50s (not pooled frames):
+
+| Run | AO stage (ms) | GPU frame (ms) |
+| --- | ---: | ---: |
+| Prior physics-inputs capture | 11.109 | 17.808 |
+| Precomputed kernel | 10.844 | 17.158 |
+| Old-build control repeat | 11.127 | 17.426 |
+| Precomputed-kernel repeat | 10.820 | 17.600 |
+
+The AO stage improves approximately 2–3%; whole-frame timing overlaps and no
+clear overall acquisition gain is established. All new captures completed their
+eight-second deadline with nominal rendering thermal samples; exact launch PIDs
+669, 674 and 676 were terminated before log copying. The last installed build is
+the candidate. No sustained performance, physical-display scanout or resolved heat
+claim follows. F8 remains open. Further GPU work and phone per-tick isolation are
+still required; the CPU timeline alone does not explain its slowdown.
+
+[All device records, timing summaries, source/binary hashes and validation](../benchmarks/foundation/results/2026-10-03-f8-ao-kernel.json).
+
+## Phone CPU and presentation isolation (2026-10-03)
+
+The bounded benchmark now optionally buffers per-host-frame CPU totals, tick count
+and the last native tick's system timings. It writes them at stop. No SDK or engine
+scheduling API changed. Readback was approximately 2–3 µs median per host frame,
+outside the simulation timer. It does not capture every native tick, and frame
+cost divided by ticks still includes frame overhead. An analyzer regression
+prevents zero-tick stale data from being counted as a fresh tick.
+
+At the normal 3,000 µs presentation wait, early windows performed about 1.3 ticks
+per host frame; late windows performed about 3.2. The last native tick's median
+rose from about 7.3–7.9 ms to 8.2–8.4 ms, while physics settled near 5.4–5.5 ms.
+Thus much of the growth in per-frame simulation time is catch-up amplification,
+not a threefold increase in individual tick cost. Earlier ticks in each host
+frame remain unsampled; this does not fully explain the remaining overhead.
+
+A second capture disabled the wait only through a benchmark build option. The
+reported acquisition wait became zero, but late acquisition remained around
+19–20/s and catch-up remained about three ticks per frame. Removing that wait does
+not resolve this slowdown; engine defaults remain unchanged. Both runs reached
+the bounded deadline, with nominal rendering thermal samples. Exact launch PIDs
+680 and 682 were terminated before evidence copying. The currently installed
+benchmark is the zero-wait diagnostic; it is stopped.
+
+Seven benchmark/analyzer tests, Dart analysis and both iOS release builds passed.
+Further simulation and GPU cost reduction is still required. F8 remains open;
+this does not establish sustained throughput, physical scanout or thermal stability.
+
+[Raw samples, per-second summaries and validation](../benchmarks/foundation/results/2026-10-03-f8-phone-cpu-isolation.json).
+
+## Rejected squared-distance blur experiment (2026-10-03)
+
+Tested replacing each blur tap's square root and radial interval comparison with
+squared bounds. Taps, depth tolerance, output resolution and quality were unchanged.
+All 96 renderer tests passed (zero failed, five ignored), renderer Clippy passed,
+and all 63 captured shading images were byte-identical before/after.
+
+The first launches were blocked by the locked phone and are preserved as failures.
+After the user unlocked it, baseline and candidate completed bounded captures;
+exact PIDs 739 and 745 were terminated before log retrieval. Both used medium,
+normal 3,000 µs acquisition wait, and no per-frame CPU readback. All rendering
+thermal samples were nominal. Median of post-first-second window p50s:
+
+| Build | AO stage (ms) | GPU frame (ms) |
+| --- | ---: | ---: |
+| Baseline | 10.840 | 17.193 |
+| Squared blur candidate | 10.869 | 17.201 |
+
+There is no measured benefit. The candidate was reverted; the earlier precomputed
+AO kernel stays. Retain this negative result to avoid repeating an unproductive
+change. F8 remains open. Reducing repeated per-tap depth reconstruction is a
+separate candidate requiring implementation and measurement; it is not delivered
+by this experiment.
+
+[Rejected shader, comparisons, build hashes and device records](../benchmarks/foundation/results/2026-10-03-f8-blur-squared-rejected.json).
+
+## Tiled compute blur experiment (2026-10-03)
+
+Implemented an 8×8 compute blur sharing an 11×11 halo of reconstructed radial
+depths and AO values. It preserves the sixteen taps, full resolution, depth
+threshold and RG output precision. Portable storage requires RGBA8 instead of
+RG8 for the blur target, adding 7,571,520 bytes at 1320×2868. All 96 renderer tests
+passed (zero failed, five ignored), and 63 comparison images were byte-identical.
+The candidate iOS release built. Clippy flagged the temporary one-element pass
+loop; this unretained candidate did not pass that check.
+
+The candidate's bounded phone capture had median-of-window-p50 GPU time 18.461 ms
+and AO time 10.877 ms. A subsequent original-build control was slower still:
+19.078 ms GPU, 11.834 ms AO. Both slowed relative to the earlier 17.2 ms control,
+so this comparison does not establish either a gain or a regression from the
+compute change. Nominal thermal readings do not establish stable clocks. Exact
+launch PIDs 762 and 802 were terminated before log copying. The original build
+was restored by the control capture and is stopped.
+
+The compute candidate was archived and fully reverted; the earlier AO-kernel
+improvement remains. No extra compute path or target-memory cost was retained.
+A benchmark-only frozen-scene option is now available for subsequent GPU
+isolation: 120 fixed settling ticks, then timeScale 0, with unchanged rendering.
+It is clearly labelled, off by default, and has passed Dart analysis; it has not
+yet been measured on the phone. It must never be counted as live-game throughput.
+
+[Candidate patch, correctness checks and both device captures](../benchmarks/foundation/results/2026-10-03-f8-tiled-blur-experiment.json).
+F8 remains open; sustained performance and the cause of phone run-to-run drift
+are unresolved.
+
+## Retained tiled blur after fixed-scene comparison (2026-10-03)
+
+Revisited the archived compute candidate using the fixed-scene diagnostic. Each
+run settles exactly 120 ticks, then captures with timeScale 0; every measured
+window has zero fixed ticks and 1,767 visible instances. Medium settings, native
+resolution, normal 3,000 µs acquisition wait and the same assets are retained.
+The final implementation also removes the obsolete estimate binding of the blur
+output and deletes the fragment-blur entry point. There is one production blur
+path. The 8×8 tile shares an 11×11 halo of radial distances and RG estimates while
+preserving the original sixteen taps, threshold and output precision.
+
+Median of window p50 GPU times after 1.5 seconds, and median texture acquisitions:
+
+| Fixed-scene build | GPU frame (ms) | AO stage (ms) | New textures/s |
+| --- | ---: | ---: | ---: |
+| Baseline | 23.749 | 13.178 | 41.98 |
+| Initial tiled candidate | 22.285 | 11.942 | 43.95 |
+| Baseline repeat | 22.806 | 12.757 | 42.89 |
+| Final tiled implementation | 19.133 | 10.614 | 50.95 |
+| Following baseline repeat | 23.870 | 12.435 | 41.95 |
+
+This supports retaining the GPU optimization. These are renderer-isolation
+results, not live-game FPS; the earlier unretained experiment remains archived.
+The memory tradeoff is two additional bytes per internal pixel for portable
+RGBA8 storage (7,571,520 bytes at 1320×2868), plus 1,936 bytes of shared memory per
+workgroup. GPU allocation accounting includes the larger output. No quality,
+resolution or sample-count reduction was used.
+
+The final live-scene release was also built and captured with frozenScene=false,
+normal acquisition wait and no CPU readback. It completed with roughly 14–28
+acquisitions/s after startup, declining later as before. GPU frame window p50
+remained around 17–18 ms; AO around 10.1 ms in most windows. No overall live-game
+throughput gain is established; simulation and catch-up remain bottlenecks.
+All new captures reached their bounded deadline with nominal thermal samples;
+exact launch PIDs 850, 875, 885, 898, 921 and 923 were terminated before retrieval.
+The normal moving-scene final app is installed and stopped.
+
+Final validation: 111 renderer/Apple tests passed, zero failed, seven ignored;
+all-target release Clippy passed for both crates. All 63 captured shading images
+are byte-identical to the original blur baseline. A permanent GPU/scalar-reference
+regression covers 1×1, 1×17, 7×3, 8×8, 9×17 and 23×19 targets, including partial
+tiles, screen edges, depth discontinuities and output channels. Frozen and live
+iOS release builds passed. F8 remains open: eight-second diagnostics do not prove
+sustained performance, physical scanout or thermal stability.
+
+[Source/binary hashes, all comparisons and validation](../benchmarks/foundation/results/2026-10-03-f8-tiled-blur-retained.json).
+
+### Render membership avoids pose-driven rescans (2026-10-03)
+
+Mac sampling found repeated membership checks during extraction. The render list
+now consumes the existing ECS structural journal: component additions/removals
+and entity lifetime changes. Transform, visibility and other component values
+are still read fresh for every snapshot. No additional cache or API was added.
+
+The existing extraction qualification (10,000 spatial entities, 1,000 render
+records, 60 samples per mode) measured dense-motion median extraction at
+1.370 ms before and 0.134 ms after. A following baseline repeat was 1.363 ms;
+the candidate repeat was 0.129 ms. This is about 90% less extraction time in
+this focused workload, not a whole-frame FPS claim. Static/sparse timings varied;
+no improvement is claimed for those modes. No phone measurement was run for
+this change.
+
+Permanent regressions cover value-history overflow, fresh poses and visibility,
+owned snapshots, component removal/readdition, inactivity, missing transforms,
+destruction and replacement entities. The value-churn regression fails on the
+original implementation. The earlier synchronization test now checks the fresh
+rendered position while expecting zero membership candidates on movement.
+Core release tests: 373 passed, zero failed, one manual qualification ignored;
+the extraction suite including that qualification passed separately (four tests).
+All-target release Clippy passed. F8 remains open.
+
+[Measurements and source hashes](../benchmarks/foundation/results/2026-10-03-f8-render-membership.json).
+
+### Render membership: live iPhone follow-up (2026-10-03)
+
+The updated normal moving-scene iOS release built and completed its eight-second
+diagnostic, with CPU readback disabled and the normal 3000 µs acquisition wait.
+PID 1004 was terminated before retrieval. All sampled thermal states were nominal.
+
+After startup, early window-p50 extraction measured 1.84–2.03 ms versus
+3.18–3.30 ms in the previous live capture. New texture acquisitions were
+28–31/s early and 17–20/s late, versus 26–28/s early and 14–18/s late previously.
+These historical sequential runs support further investigation, not a controlled
+overall speedup estimate. GPU window p50 remained about 16.5–17.3 ms.
+
+The late slowdown persists: simulation window-p50 grows to 42–51 ms, and
+extraction rises again to 3.14–3.27 ms. A possible cause of the latter is
+structural churn combined with journal overflow during multi-tick catch-up;
+this has not yet been measured. Next: instrument membership refresh/reset work
+and correlate it with tick counts before choosing another production change.
+F8 remains open; no sustained 60/120 FPS or thermal qualification is claimed.
+
+[Raw capture, comparison windows and bundled binary hashes](../benchmarks/foundation/results/2026-10-03-f8-render-membership-device.json).
+
+### Structural history survives dense value traffic (2026-10-03)
+
+A controlled reproduction confirmed that one temporary entity created/destroyed
+before dense transform writes forced all 10,000 spatial entities through render
+membership again: the general change journal had lost the structural event.
+The shared ECS change API now retains structural events in a separate bounded
+history, using the same revisions and writer barrier. Membership-only readers
+use this history; component-value readers retain their existing semantics. This
+adds up to 16,384 compact revision/entity entries per world, allocated as needed.
+Structural-history overflow still explicitly requests a safe rebuild.
+
+The extended extraction qualification measures dense movement plus churn at
+1.368 ms before and 0.159 ms after (0.136 ms on repeat), with membership candidates
+falling from 10,000 to one. Permanent coverage checks component changes, entity
+generations, independent consumers, value and structural overflow, bulk writes,
+foreign/initial cursors and outstanding writer guards. ECS/core release suites
+including the manual qualification: 404 passed, zero failed or ignored. Release
+all-target Clippy and the iOS release build passed.
+
+The normal live iPhone capture completed eight seconds with nominal thermal
+samples; exact launch PID 1031 was terminated before retrieval. Late extraction
+window-p50 stayed at 2.04–2.19 ms, versus 3.14–3.27 ms in the preceding capture.
+This supports eliminating the late membership rebuild spike. However simulation
+still reaches 49–54 ms per host frame and acquisition throughput falls into the
+teens. These are sequential bounded runs, not a sustained FPS qualification.
+F8 remains open; the next priority is remaining simulation/per-tick cost.
+
+[Raw device capture, microbenchmark samples and validation](../benchmarks/foundation/results/2026-10-03-f8-structural-history.json).
+
+### Physics hierarchy traversal reuses scratch storage (2026-10-03)
+
+Sampling identified per-root subtree list allocations in physics synchronization.
+The traversal now uses one retained stack and reads child lists by shared borrow.
+It still visits descendants through already-affected children and processes the
+resulting set in deterministic entity order. No simulation settings or workload
+population were reduced.
+
+The final Mac CPU comparison ran sequentially with builds/tests finished, using
+300 Wobble behaviours, 40 warmup ticks and 300 measured ticks per fresh world.
+Median physics time fell from 5.522 to 5.164 ms (6.5%), native tick time from
+8.266 to 7.923 ms (4.1%), and total tick time from 10.408 to 10.043 ms (3.5%).
+Initial runs overlapped builds/tests and are retained as exploratory data only.
+
+A permanent regression changes an ancestor's body while its child is independently
+dirty, verifying that an unchanged grandchild collider follows body attachment
+and removal. Physics/core release suites: 405 passed, zero failed, one manual
+extraction qualification ignored. All-target release Clippy and iOS build passed.
+
+The live iPhone release completed its eight-second deadline; exact PID 1034 was
+terminated before retrieval and all thermal samples were nominal. Post-startup
+acquisitions were about 30–32/s early and 20–22/s late. Late simulation window-p50
+was about 38–40 ms compared with 49–54 ms in the preceding run. These sequential
+captures do not establish a controlled overall FPS gain. GPU frame p50 remained
+about 16.4–17.1 ms, and F8's sustained performance gate remains open.
+
+[CPU samples, raw device capture and validation](../benchmarks/foundation/results/2026-10-03-f8-physics-traversal.json).
+
+### Physics affected-list experiment rejected (2026-10-03)
+
+A fresh Mac CPU sample identified ordered-set maintenance among remaining sync
+costs. Two retained-vector variants were tested against the previous hierarchy
+buffer build with the same full workload, 300 behaviours, 40 warmup ticks and
+300 measured ticks. Neither established a consistent improvement. In the final
+sequence physics medians were 5.283 ms baseline, 5.448 ms candidate, 5.494 ms
+control, and 5.290 ms candidate repeat. The affected-set change was reverted.
+
+The earlier hierarchy-buffer optimization remains. The hierarchy regression now
+also checks subsequent clean synchronization and retirement of a destroyed leaf
+collider. Restored physics tests and all-target release Clippy pass. No new phone
+run was warranted; the previous measured app remains stopped. F8 stays open.
+
+[Rejected experiment and validation](../benchmarks/foundation/results/2026-10-03-f8-physics-candidates-rejected.json).
+
+### Native physics phase timings (2026-10-03)
+
+Optional `Physics::set_profiling` / `step_profile` diagnostics now separate sync,
+commands, characters, solver, writeback and events. The phases do not overlap;
+total includes timing/bookkeeping overhead. Profiling is disabled by default and
+performs no clock reads while disabled. Samples clear on disable and correctly
+zero unexecuted phases on empty-world steps. Stripped runtimes return no sample.
+
+The headless `physics_profile` example loads the cooked scene with its assets,
+warms 40 ticks and measures 300 ticks with profiling disabled and enabled in
+fresh worlds. Final transforms and body/character motion states match exactly.
+The final profiled run's phase medians were sync 2.621 ms, solver 0.796 ms,
+writeback 0.165 ms and events/statistics 0.090 ms; inner physics total 3.676 ms.
+These independently calculated medians need not sum exactly. Core propagation
+before physics and event publication after physics are outside this total.
+
+This is a Mac native-only scene: no Dart callbacks, rendering or catch-up. It
+identifies synchronization as the largest measured native physics phase; it does
+not establish a phone FPS improvement. The next optimization target is gathering
+and applying physics synchronization inputs. No phone run was made this turn.
+
+Physics/core tests: 406 passed, zero failed, one manual qualification ignored.
+Stripped physics: 10 passed. All-target release Clippy and the final benchmark
+check pass. F8 remains open.
+
+[Per-tick samples, equality check and validation](../benchmarks/foundation/results/2026-10-03-f8-physics-phases.json).
+
+### Nested collider checks reuse gathered inputs (2026-10-03)
+
+The nested-collider unchanged check reread WorldTransform, Collider and Layer
+and decomposed scale after sync had already gathered and validated them. It now
+uses the existing SyncEntry. Body-home/type lookup still happens after body
+creation/removal, preserving same-tick hierarchy behavior. No cache was added.
+
+A focused qualification moves one body with 5,000 child colliders, with scene
+propagation outside the timer and no solver. Across 20 warmup/60 measured
+iterations, synchronization medians were 1.462 ms candidate, 1.874 ms baseline,
+and 1.486 ms candidate repeat: approximately 21–22% less time for this path.
+The general native dense-scene runs did not improve: sync medians were
+2.664–2.672 ms candidate versus 2.634–2.635 ms baseline/control. This is a targeted
+nested-collider improvement, not a whole-game or phone FPS claim.
+
+Permanent coverage verifies collider-handle preservation plus updated friction,
+collision membership, scaled bounds and relative pose, followed by collider
+removal. Existing same-tick body creation/removal and descendant tests pass.
+Physics/core release suites: 407 passed, zero failed, two manual qualifications
+ignored; the nested qualification passed separately. All-target release Clippy
+passed. No phone run was made for this change; F8 remains open.
+
+[Focused samples, full-workload comparison and validation](../benchmarks/foundation/results/2026-10-03-f8-nested-inputs.json).
+
+### Common collider sync reuses pose and comparisons (2026-10-03)
+
+The unchanged check now tests the world pose before comparing other components,
+so moving objects avoid comparisons that cannot make them unchanged. Entry
+updates compare collider shape once. Collider placement consumes the already
+validated world pose instead of decomposing the matrix again; joined colliders
+still use their relative transform, and refits compute the world pose lazily.
+
+A focused benchmark moves and rotates 5,000 unparented colliders, warms 20
+iterations and records 60 synchronization samples. It verifies all candidates
+were processed and that a collider reached the final position. Sync medians were
+1.612 ms candidate, 1.809 ms baseline and 1.596 ms candidate repeat, an 11–12%
+reduction. An initial harness draft failed to dirty stateless scene propagation;
+its idle timings were discarded, and motion/candidate assertions were added
+before recording the reported runs.
+
+Full native dense-scene comparisons remain noisy: synchronization medians were
+2.884 ms baseline, 2.579 ms candidate, 2.752 ms control, and 2.716 ms candidate
+repeat. Whole-tick timings did not consistently improve, so no overall FPS gain
+is claimed. The new regression checks stable collider identity and correct pose
+with nonuniform scale and a rotated, nonzero offset. Physics/core suites passed
+408 tests; the final physics suite and focused qualification passed separately.
+All-target release Clippy and the iOS release build passed.
+
+The first phone install attempt lost its connection. Retry installed the app,
+but iOS denied launch because the phone was locked; no PID or new performance
+capture was obtained. Unlock requested; bounded device validation is pending.
+F8 remains open.
+
+[Benchmarks, regression validation and device attempts](../benchmarks/foundation/results/2026-10-03-f8-sync-reuse.json).
+
+### Common sync reuse: unlocked iPhone follow-up (2026-10-03)
+
+After the user unlocked the phone, the normal moving-scene release completed
+its eight-second diagnostic. CPU readback and frozen-scene mode were disabled;
+acquisition wait remained 3000 µs. Exact launch PID 1632 was terminated before
+retrieving the capture. All sampled thermal states were nominal.
+
+After startup, acquisitions were about 31–32/s early, then 23–26/s late. Late
+simulation window-p50 was 29–31 ms; extraction 1.93 ms; GPU frame p50 about
+16.5 ms (17.1–17.2 ms earlier). The prior live capture ended near 20 acquisitions/s
+with roughly 38–40 ms simulation windows. These captures occurred hours apart
+and include intervening retained changes, so they do not establish a controlled
+overall speedup or attribute it to one change. Catch-up and GPU cost remain
+substantial. Eight nominal-thermal seconds do not qualify sustained 60/120 FPS.
+F8 remains open; the updated phone app is installed and stopped.
+
+[Raw capture and historical comparison](../benchmarks/foundation/results/2026-10-03-f8-sync-reuse.json).
+
+### Every-tick phone timing isolates frame remainder (2026-10-03)
+
+The updated frame-level CPU capture (PID 1637) still showed modest last-native-tick
+growth while per-frame work increased with catch-up. To avoid assuming the last
+tick represented all ticks, the SDK now supports opt-in `FrameTimes.collectTickTimes`.
+It reads system timings after callback transactions close and publishes immutable,
+owned samples per frame. Samples clear even on zero-tick frames. Collection is
+disabled by default and does not add gameplay objects or callbacks.
+
+An initial diagnostic behaviour attempted this query inside a gameplay transaction.
+The query was rejected and no tick samples were recorded; the completeness check
+rejected that capture (PID 1670). That probe was removed; transaction rules were
+not relaxed. Final capture PID 1686 contains complete frame-matched tick samples.
+All three exact PIDs were terminated, with eight-second deadline stops. Valid
+captures sampled nominal thermal state; this does not prove sustained stability.
+
+The final capture's late first/last catch-up native steps remain about 7.6–8.0 ms.
+The frame native timer minus the sum of *all* its native step timings grows from
+roughly 40–47 µs per tick early to about 1.99–2.06 ms late. Physics remains roughly
+5.0–5.2 ms per tick. Readback itself is about 1 µs median. The unexplained remainder
+includes SDK/bridge/frame work, not an independently timed engine system. This
+identifies where to instrument next: bridge step, snapshots, diagnostics and event
+draining. It does not yet identify a specific slow call or justify changing tick
+scheduling. No FPS improvement is claimed.
+
+Validation: five SDK timing tests, eight Python workload tests, Dart analysis,
+and diagnostic/normal iOS release builds passed. The normal release disables both
+CPU readback flags. F8 remains open.
+
+[Analysis and raw-capture reference](../benchmarks/foundation/results/2026-10-03-f8-all-ticks.json).
+
+The normal release was reinstalled after the diagnostics and left stopped.
+
+### Sparse resource tracking survives dense pose history (2026-10-03)
+
+Opt-in per-tick SDK timing now separates subscriptions, the native bridge step,
+observation sweep, snapshot copy/index, diagnostics and event draining. Collection
+is latched at frame entry and remains disabled by default. Samples are owned and
+immutable. Stage clocks are included in native timing; system readback is outside
+native/behaviour timing. Means accompany medians so periodic spikes remain visible.
+
+The unchanged-scene capture (PID 1742) isolated the overhead to the bridge step:
+average bridge time outside native `step` grew from 0.84–0.93 ms early to 1.91–1.97 ms
+late. Individual spikes were roughly 5–6 ms. Snapshot/index and event processing
+remained in the tens of microseconds; frame setup contributed only a few microseconds.
+
+A regression reproduced unnecessary resource-owner resets: one spawned owner,
+followed by 20,000 unrelated transform writes, overflowed general change history.
+Asset tracking then rebuilt all live owners despite losing no relevant values.
+ECS history now remembers the last discarded nonstructural write per component
+domain and stores component identity with structural events. On general-history
+overflow it can merge retained structural events with retained selected values.
+Lost selected values, unenumerated selected bulk writes, missing structural history,
+invalid cursors and outstanding writers retain their existing reset/barrier behavior.
+History remains bounded; loss metadata has one entry per written component type.
+
+With this change, capture PID 1752 reduced mean bridge overhead outside native
+`step` to 0.024–0.047 ms across the run, including 0.033–0.036 ms late. Native step
+medians were somewhat higher (late 8.0–8.2 ms versus 7.7–7.8 ms); these sequential
+captures do not isolate CPU-frequency, heat or instrumentation effects. They show
+removal of the bridge spikes, not a controlled overall FPS percentage.
+
+The normal release (PID 1800; both CPU readback flags disabled) completed eight
+seconds at approximately 27–31 new textures/s, including 29–31/s late. All three
+captures reported nominal thermal state and exact launched PIDs were terminated.
+No scene, tick-rate, resolution or graphics-quality reduction was made. GPU cost,
+catch-up and sustained 60/120 FPS remain open. The normal app is installed and stopped.
+
+[Stage analysis, regression evidence and raw captures](../benchmarks/foundation/results/2026-10-03-f8-domain-history.json).
+
+Validation also covers SDK runtime-resource ownership and typed assets. The first
+expanded SDK invocation found an old globally installed CLI; rerunning with the
+workspace `FYNKEL_CLI` passed all 15 tests. The stalled debug Rust build was stopped
+and validation moved to the release profile; no product code or test was disabled.
+
+Final checks: 406 ECS/core release tests passed (one existing manual qualification
+ignored), the native animation/resource-ownership test passed, 15 SDK tests passed,
+nine Python checks passed, Dart analysis passed, and release Clippy passed with
+warnings denied. The callback regression now checks recoverable activity changes
+and separately requires reset for a lost name value. Diagnostic and normal iOS
+builds passed; `git diff --check` passed.
+
+### AO arithmetic experiments rejected (2026-10-03)
+
+Four eight-second frozen-scene captures tested two shader simplifications at the
+same resolution, quality and settled state. Exact PIDs 2550, 2556, 2565 and 2574
+were terminated; all sampled thermal states were nominal. The normal scene is
+still live; freezing was limited to GPU attribution.
+
+Selecting the depth neighbour before world reconstruction reduced the AO-stage
+window-p50 median from 10.808 ms to 10.374 ms (control 10.848 ms), but whole-frame
+GPU time stayed at 19.178 ms and acquisitions at approximately 51/s. Of 63 image
+comparisons, one differed in 41 colour channels, by at most 3/255. The change was
+rejected because it did not improve total GPU frame time.
+
+Projecting the hemisphere basis once per pixel instead of each sample preserved
+all 63 comparison images exactly. It also failed to improve performance: AO
+11.076 ms, whole GPU frame 19.508 ms, approximately 50 acquisitions/s. This change
+was rejected too. Both candidates passed 53 shading tests (two existing ignored
+qualifications); renderer release Clippy passed with warnings denied. The first
+baseline image dump lacked its destination directory; after creating it, the
+baseline suite passed. The original shader is restored.
+
+These are sequential short diagnostics, not sustained qualification. GPU pass
+spans overlap and cannot be summed. A frozen GPU frame near 19 ms still exceeds
+both the 16.67 ms/60 FPS and 8.33 ms/120 FPS budgets before gameplay is considered.
+The next investigation should separate depth prepass/resolve, AO estimation and
+blur on the physical device before choosing a larger renderer change. No quality
+reduction or production performance change is retained from these experiments.
+
+[Measurements, image comparisons and raw captures](../benchmarks/foundation/results/2026-10-03-f8-ao-arithmetic.json).
+
+The restored normal release was rebuilt, reinstalled, and left stopped.
+
+### Live-state confirmation and device GPU stage breakdown (2026-10-03)
+
+The user reported that the prior frozen runs did not move. Those runs intentionally
+paused simulation for GPU isolation; the benchmark also intentionally pauses at
+its eight-second deadline. The app now prominently distinguishes LIVE TEST,
+FROZEN GPU TEST and TEST COMPLETE. Each stats row includes its simulation tick and
+mode. The user confirmed visible movement in the new live run before it ended.
+PID 2666 advanced from tick 56 to 476 across the reported windows and was stopped.
+
+An opt-in GPU file trace now makes the existing stage timestamps retrievable from
+the physical phone. Separate depth-resolve timestamps have a per-frame presence
+flag so skipped passes cannot expose stale values. The live trace's median spans
+were depth 0.575 ms, resolve 0.845 ms, estimate 5.902 ms, blur 4.196 ms and total
+screen-space 10.192 ms. These spans overlap; they are not additive or exclusive
+shader costs. Tracing is diagnostic overhead and is off by default.
+
+A 16x16 blur tile experiment preserved all 63 image comparisons and passed the
+expanded edge/depth-discontinuity regression. Frozen captures PID 2679 (8x8) and
+2683 (16x16) measured blur at 4.135 and 4.087 ms respectively, with whole-frame
+window-p50 medians of 19.137 and 19.090 ms. This is not a meaningful speedup;
+the original 8x8 shader and dispatch were restored. All three completed runs
+sampled nominal thermal state and their exact PIDs were terminated.
+
+The runner now gives each launch a unique ID echoed by the app, and uses a unique
+GPU trace filename. Missing/mismatched IDs and missing/malformed trace samples
+fail qualification, preventing old successful logs from covering a failed launch.
+The final live build installed, but iOS blocked the final nonce verification while
+the phone was locked; no PID was launched in that attempt.
+
+Checks: 97 renderer release tests passed (five existing ignored), 11 Python tests
+passed, release Clippy with warnings denied passed, Flutter analysis and release
+build passed. F8 remains open; no production rendering speedup is claimed.
+
+[Stage results and raw captures](../benchmarks/foundation/results/2026-10-03-f8-gpu-stages.json).
+
+
+After unlock, PID 2757 ran but the strict freshness check rejected its log:
+this Flutter iOS host did not expose the launch ID through Dart's
+`Platform.environment`. The protocol now copies a one-use capture-request JSON
+into the app sandbox before launch; the app reads, deletes and echoes its ID.
+Native GPU tracing continues to use its native environment. No freshness check
+was weakened. The Python capture tests pass, Flutter analysis passes and the
+normal release rebuilt successfully.
+
+The first request-based run (PID 2772) verified its ID but paused after 1.05 seconds
+on `lifecycle-inactive`; it remains marked interrupted. The retry (PID 2788)
+completed its eight-second deadline, matched the fresh ID, advanced from tick 57
+to 477 across reporting windows, and returned 31 GPU samples. All reported thermal
+states were nominal. Median GPU spans: depth 0.563 ms, resolve 0.831 ms, estimate
+5.902 ms, blur 4.180 ms, total screen-space 10.158 ms (overlapping spans). All three
+exact PIDs were terminated. Final verification is complete; the live diagnostic
+build remains installed and stopped. F8 performance qualification remains open.
+
+## Blur bounds and predicated accumulation — 2026-10-03
+
+The retained 8×8 compute blur now clips the 4×4 filter rectangle once per output,
+reuses the shared-memory base and depth threshold, and selects accepted samples
+without a per-tap branch. Resolution, effects, sample count, radial threshold,
+row-major accumulation order and workgroup dimensions are unchanged.
+
+Four alternating frozen-scene captures support retaining this small improvement:
+
+| Run | Exact stopped PID | Blur median span | GPU frame window-p50 median | Fresh acquisitions/s median |
+| --- | ---: | ---: | ---: | ---: |
+| Original | 2904 | 4.167 ms | 19.060 ms | 51.00 |
+| Candidate | 2915 | 3.723 ms | 18.736 ms | 51.99 |
+| Original control | 2918 | 4.080 ms | 19.182 ms | 50.99 |
+| Candidate repeat | 2919 | 3.751 ms | 18.668 ms | 52.00 |
+
+All completed their eight-second deadline and matched their launch IDs. Timed
+windows reported nominal thermal state. The repeat also emitted a zero-frame
+startup window with unknown thermal state and no GPU/acquisition measurements;
+it is preserved in raw evidence and excluded from timing medians. Pass spans
+can overlap; these are not additive exclusive shader costs or sustained results.
+
+All 63 rendered comparison images were byte-identical. The scalar regression now
+covers 12 dimensions under identity, perspective and orthographic reconstruction,
+including one-pixel rows/columns, 2×2/3×3 images, partial workgroups and depth
+breaks. Its original one-byte quantization tolerance is unchanged. All 97 renderer
+release tests passed (five existing ignored); release Clippy passed with warnings
+denied. The expanded scalar test passed again after correcting deprecated camera
+constructors to the same API used by the engine.
+
+The final normal live build (PID 2921) completed at 8009 ms, advanced from tick 54
+to 474 across reporting windows, returned 32 GPU samples and was stopped by its
+exact PID. Thermal readings were nominal. Its blur span median was 3.764 ms;
+fresh acquisitions were about 27.93/s, so this does not establish a live-game FPS
+gain or meet either sustained target. The moving test remains installed and
+stopped. F8 remains open.
+
+[Results and raw captures](../benchmarks/foundation/results/2026-10-03-f8-blur-bounds.json).
+
+## Root world-pose preparation — 2026-10-03
+
+The shared scene conversion used by physics writeback and native placements now
+avoids work that roots do not need: ancestor-cycle tracking does not allocate
+until a parent exists, roots use their requested world position/rotation directly,
+and all-root batches skip the unused prepared-ancestor lookup table. The same
+API still deduplicates with last-request-wins, orders parents before children,
+validates every output and publishes nothing during preparation. Mixed batches
+retain their prepared ancestor transforms. Scale, including valid zero/negative
+local scale, is preserved. Cycle, singular-parent and invalid-pose checks remain.
+
+In the manual Mac release probe (5,000 roots, 40 warmup batches, 300 measured
+batches), original/control medians were 817/844 µs; final/repeat medians were
+373/358 µs. Full dense-scene native-only runs showed much smaller and variable
+changes. The final candidate/control unprofiled step medians were 7.503/7.607 ms;
+profiled writeback medians were 136/178 µs. These do not establish a controlled
+whole-game speedup. Each native run also verifies identical simulation outcomes
+with profiling enabled/disabled; this is not a cross-build state comparison.
+
+The initial phone baseline exposed a runner bug: `devicectl` rejects an empty
+`--environment-variables {}` argument when tracing is disabled. The runner now
+omits that option when there are no variables. The added regression failed before
+the fix, and all 11 Python tests passed afterward. The failed attempt launched no
+PID and remains in the evidence. A normal untraced baseline then completed under
+PID 2978, and the first candidate under PID 2991; exact PIDs were stopped. Their
+fresh-acquisition medians were 28.14/28.15 per second, with nominal thermal readings.
+This earlier candidate omitted root matrix work but still populated its unused
+lookup table. The final root-only lookup removal built and installed, but its
+first phone launch was blocked by Locked without launching a PID.
+
+Final source checks: 433 scene/core/physics release tests passed, four manual
+qualifications ignored; the manual root probe passed separately. Release Clippy
+for all three crates and all targets passed with warnings denied. The new
+regression covers duplicate root requests, invalid final poses, scale preservation
+and side-effect-free failure alongside existing mixed hierarchy/cycle tests.
+
+[Results and raw captures](../benchmarks/foundation/results/2026-10-03-f8-root-poses.json).
+
+After unlock, the final live build completed under PID 3040, matched its launch
+ID and advanced from tick 57 to 476 across reporting windows. It stopped at its
+eight-second deadline; the runner terminated that exact PID. Thermal samples were
+nominal. Median fresh acquisitions were 31.38/s and the median of GPU-frame window
+p50s was 16.361 ms. Simulation/behaviour/native window-p50 medians were
+10.436/2.226/8.024 ms respectively; these are per-frame summaries, not per-tick
+measurements, and their medians cannot be added. The higher acquisition rate in
+this short run is encouraging but does not isolate the effect of the pose change
+from run-to-run variation. The live app remains installed and stopped; F8 stays
+open and sustained 60/120 Hz targets remain unqualified.

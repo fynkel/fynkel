@@ -1,0 +1,4864 @@
+{
+  "schemaVersion": 1,
+  "status": "diagnostic-instrumentation-F8-open",
+  "sustainedQualification": false,
+  "capture": {
+    "scope": "Mac native-only cooked scene; no Dart callbacks, rendering or catch-up",
+    "warmupTicks": 40,
+    "measuredTicks": 300,
+    "phaseOrder": [
+      "sync",
+      "commands",
+      "characters",
+      "solver",
+      "writeback",
+      "events",
+      "total"
+    ],
+    "phasesOverlap": false,
+    "totalIncludesTimerOverhead": true,
+    "profiledAndUnprofiledTransformsAndMotionEqual": true,
+    "runs": [
+      {
+        "profiling": false,
+        "samples": [
+          {
+            "stepUs": 7072.125,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7101.834,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7659.375,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7109.0830000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7152.625,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7191.542,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7150.5,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7278.042,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7791.834,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7228.25,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7235.875,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7318.667,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7355.0830000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7451.041,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7958.750000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7497.584,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7558.458,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7547.75,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7575.875,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7611.416,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8223.0,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7639.958,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8283.167,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8381.0,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8094.875,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8085.375000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8333.375,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7668.5,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7816.333,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8053.625,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7835.415999999999,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7634.125,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8103.0419999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7616.959000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7530.625,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7580.5,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7530.4580000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7564.166,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8075.6669999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7612.459,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7510.625,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7535.2919999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7493.292,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7489.959,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8040.7919999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7526.459,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7662.875,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7631.875,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7503.041,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7841.792,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8355.375,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7481.0830000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7484.958,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7556.542,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7597.75,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7566.5,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7936.291,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7436.625,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7401.417,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7444.208,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7444.625,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7386.292,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8012.9580000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7465.375,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7397.375,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7461.25,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7443.459000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7466.417,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7913.083,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7388.708,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7333.834,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7372.875,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7349.125,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7508.5,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8213.458999999999,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7570.0,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7795.75,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7637.875,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7509.4580000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7596.959000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8016.125000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7468.333,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7503.667,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7736.0830000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7696.834,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7515.25,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7889.290999999999,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7383.2919999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7402.5,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7297.0,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7283.9580000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7367.833,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7840.542,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7373.4580000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7400.209,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7408.084,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7364.416,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7350.875,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7887.875000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7294.833,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7368.7919999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7287.25,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7278.2919999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7405.459,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7888.958,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7247.875,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7359.5,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7276.125,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7292.583,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7299.667,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7854.7919999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7393.625,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7239.2919999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7314.25,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7268.75,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7350.375,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7833.75,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7227.0,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7322.915999999999,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7324.125,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7273.042,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7282.375,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7786.5,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7455.665999999999,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7400.542,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7223.958,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7221.208,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7428.333,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7793.584,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7199.5419999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7207.9580000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7232.292,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7231.583,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7317.9580000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7816.9169999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7315.542,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7214.792,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7298.75,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7228.0,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7259.917,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7854.6669999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7212.167,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7233.084,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7292.875,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7251.0,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7275.958,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7762.375,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7341.417,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7294.625,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7260.792,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7250.375,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7318.584000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7781.792,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7237.583,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7334.0419999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7320.375,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7297.4169999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7323.917,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7833.292,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7383.375,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7315.75,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7436.8330000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7300.625,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7276.625,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7853.250000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7273.2919999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7251.2080000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7310.042,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7215.791,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7300.25,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7818.9169999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7235.5,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7211.5419999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7180.0,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7286.5,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7472.125,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8920.541000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7440.9580000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7224.541,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7248.7080000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7249.083,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7247.5830000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7783.2919999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7304.458,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7199.792,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7248.375,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7241.084,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7292.583,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8279.125,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7573.7080000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7558.6669999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 10696.458,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7626.25,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8551.583,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 8168.999999999999,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7370.667,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7370.625,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7282.625,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7297.959,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7396.0,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7863.999999999999,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7386.7919999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7286.166,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7276.915999999999,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7268.125,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7265.8330000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7294.667,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7882.292,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7267.083,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7261.7080000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7325.958,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7302.915999999999,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7799.5419999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7777.375,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7320.5830000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7345.2919999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7240.334,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7356.0830000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7791.5,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7754.25,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7224.666,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7211.708,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7031.875,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7516.9169999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7866.9169999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7811.666,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7296.125,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7299.125,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7298.167,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7338.75,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7827.916000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7927.375,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7414.417,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7390.334,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7316.3330000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7307.4580000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7825.416,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7847.875000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7370.917,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7428.4169999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7271.333,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7392.125,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7872.4580000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7842.541,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7298.541,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7256.2080000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7301.459,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7414.833,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7866.25,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7817.584000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7254.709,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7326.25,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7494.75,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7326.7080000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7918.333,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7901.415999999999,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7292.125,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7274.2919999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7509.333,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7479.0,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7868.125,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7847.375,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7288.083,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7335.084000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7304.125,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7327.833,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7887.417,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7891.2080000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7282.291,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7302.75,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7276.875,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7414.5,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7837.749999999999,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7829.458,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7301.416,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7254.1669999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7338.0,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7292.0830000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7822.0419999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7850.584000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7321.0419999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7350.166,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7279.0,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7310.4169999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7836.291,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7794.875,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7292.917,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7382.5,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7281.4580000000005,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7325.791,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7795.667,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7858.166,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7272.458,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7314.875,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7412.541,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7398.958,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7870.375000000001,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7814.0,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7242.7919999999995,
+            "physicsUs": null
+          },
+          {
+            "stepUs": 7224.7919999999995,
+            "physicsUs": null
+          }
+        ]
+      },
+      {
+        "profiling": true,
+        "samples": [
+          {
+            "stepUs": 7023.458,
+            "physicsUs": [
+              2603.125,
+              0.0,
+              0.083,
+              555.625,
+              207.25,
+              9.959000000000001,
+              3376.042
+            ]
+          },
+          {
+            "stepUs": 7115.125,
+            "physicsUs": [
+              2636.708,
+              0.125,
+              0.041999999999999996,
+              600.75,
+              194.167,
+              12.666,
+              3444.458
+            ]
+          },
+          {
+            "stepUs": 7612.9580000000005,
+            "physicsUs": [
+              2623.75,
+              0.0,
+              0.041999999999999996,
+              606.958,
+              183.167,
+              12.041,
+              3425.958
+            ]
+          },
+          {
+            "stepUs": 7123.0419999999995,
+            "physicsUs": [
+              2611.042,
+              0.041999999999999996,
+              0.0,
+              633.541,
+              184.5,
+              13.25,
+              3442.375
+            ]
+          },
+          {
+            "stepUs": 7174.75,
+            "physicsUs": [
+              2627.083,
+              0.041999999999999996,
+              0.0,
+              612.9580000000001,
+              184.667,
+              20.292,
+              3445.0420000000004
+            ]
+          },
+          {
+            "stepUs": 7152.167,
+            "physicsUs": [
+              2611.5840000000003,
+              0.0,
+              0.041,
+              669.125,
+              183.83399999999997,
+              23.833000000000002,
+              3488.4170000000004
+            ]
+          },
+          {
+            "stepUs": 7168.083,
+            "physicsUs": [
+              2611.958,
+              0.041999999999999996,
+              0.0,
+              664.292,
+              185.0,
+              22.625,
+              3483.958
+            ]
+          },
+          {
+            "stepUs": 7266.583,
+            "physicsUs": [
+              2627.875,
+              0.166,
+              0.041999999999999996,
+              747.5,
+              188.292,
+              23.708000000000002,
+              3587.583
+            ]
+          },
+          {
+            "stepUs": 7742.583,
+            "physicsUs": [
+              2608.75,
+              0.0,
+              0.041999999999999996,
+              729.542,
+              183.25,
+              25.333,
+              3546.9590000000003
+            ]
+          },
+          {
+            "stepUs": 7185.5419999999995,
+            "physicsUs": [
+              2633.541,
+              0.0,
+              0.041999999999999996,
+              719.667,
+              185.166,
+              25.125,
+              3563.583
+            ]
+          },
+          {
+            "stepUs": 7261.959,
+            "physicsUs": [
+              2608.917,
+              0.041999999999999996,
+              0.0,
+              751.708,
+              186.958,
+              29.25,
+              3576.875
+            ]
+          },
+          {
+            "stepUs": 7331.291,
+            "physicsUs": [
+              2613.083,
+              0.041999999999999996,
+              0.0,
+              820.625,
+              182.917,
+              33.166000000000004,
+              3649.875
+            ]
+          },
+          {
+            "stepUs": 7401.5419999999995,
+            "physicsUs": [
+              2632.792,
+              0.041999999999999996,
+              0.0,
+              850.75,
+              185.875,
+              38.25,
+              3707.75
+            ]
+          },
+          {
+            "stepUs": 7432.3330000000005,
+            "physicsUs": [
+              2617.542,
+              0.166,
+              0.0,
+              894.792,
+              189.5,
+              40.75,
+              3742.75
+            ]
+          },
+          {
+            "stepUs": 8011.792,
+            "physicsUs": [
+              2666.2909999999997,
+              0.0,
+              0.041999999999999996,
+              902.25,
+              188.542,
+              42.166000000000004,
+              3799.291
+            ]
+          },
+          {
+            "stepUs": 7493.583,
+            "physicsUs": [
+              2625.9159999999997,
+              0.041999999999999996,
+              0.0,
+              937.3330000000001,
+              187.25,
+              42.583999999999996,
+              3793.166
+            ]
+          },
+          {
+            "stepUs": 7523.625,
+            "physicsUs": [
+              2620.583,
+              0.041999999999999996,
+              0.0,
+              974.4159999999999,
+              189.417,
+              51.5,
+              3835.958
+            ]
+          },
+          {
+            "stepUs": 7586.667,
+            "physicsUs": [
+              2643.6670000000004,
+              0.041,
+              0.0,
+              1017.5,
+              195.417,
+              51.292,
+              3907.9579999999996
+            ]
+          },
+          {
+            "stepUs": 7630.458,
+            "physicsUs": [
+              2632.75,
+              0.041,
+              0.0,
+              1045.667,
+              192.25,
+              54.416999999999994,
+              3925.125
+            ]
+          },
+          {
+            "stepUs": 7605.458,
+            "physicsUs": [
+              2639.0,
+              0.20800000000000002,
+              0.0,
+              1054.7079999999999,
+              190.875,
+              58.375,
+              3943.208
+            ]
+          },
+          {
+            "stepUs": 8159.208,
+            "physicsUs": [
+              2609.375,
+              0.041,
+              0.0,
+              1101.917,
+              186.083,
+              70.75,
+              3968.208
+            ]
+          },
+          {
+            "stepUs": 7631.291,
+            "physicsUs": [
+              2634.083,
+              0.041999999999999996,
+              0.0,
+              1122.083,
+              183.959,
+              64.958,
+              4005.125
+            ]
+          },
+          {
+            "stepUs": 7733.165999999999,
+            "physicsUs": [
+              2617.458,
+              0.041999999999999996,
+              0.0,
+              1178.833,
+              188.583,
+              72.084,
+              4057.0
+            ]
+          },
+          {
+            "stepUs": 7735.333,
+            "physicsUs": [
+              2620.958,
+              0.0,
+              0.041999999999999996,
+              1188.625,
+              189.042,
+              77.5,
+              4076.1670000000004
+            ]
+          },
+          {
+            "stepUs": 7827.249999999999,
+            "physicsUs": [
+              2605.208,
+              0.0,
+              0.041999999999999996,
+              1212.417,
+              187.291,
+              74.75,
+              4079.75
+            ]
+          },
+          {
+            "stepUs": 7748.541,
+            "physicsUs": [
+              2622.833,
+              0.167,
+              0.0,
+              1195.625,
+              185.541,
+              73.417,
+              4077.583
+            ]
+          },
+          {
+            "stepUs": 8336.875,
+            "physicsUs": [
+              2638.625,
+              0.0,
+              0.041,
+              1193.167,
+              190.917,
+              78.041,
+              4100.791
+            ]
+          },
+          {
+            "stepUs": 7741.042,
+            "physicsUs": [
+              2635.0,
+              0.0,
+              0.041999999999999996,
+              1167.0829999999999,
+              185.917,
+              73.667,
+              4061.7090000000003
+            ]
+          },
+          {
+            "stepUs": 7742.334,
+            "physicsUs": [
+              2628.25,
+              0.0,
+              0.041999999999999996,
+              1168.0,
+              189.625,
+              81.5,
+              4067.4580000000005
+            ]
+          },
+          {
+            "stepUs": 7735.9580000000005,
+            "physicsUs": [
+              2610.708,
+              0.0,
+              0.041999999999999996,
+              1165.9579999999999,
+              189.667,
+              81.875,
+              4048.2499999999995
+            ]
+          },
+          {
+            "stepUs": 7716.708,
+            "physicsUs": [
+              2631.917,
+              0.041,
+              0.0,
+              1144.5,
+              187.125,
+              84.459,
+              4048.042
+            ]
+          },
+          {
+            "stepUs": 7664.208,
+            "physicsUs": [
+              2607.5,
+              0.167,
+              0.041,
+              1093.084,
+              187.125,
+              77.875,
+              3965.833
+            ]
+          },
+          {
+            "stepUs": 8143.0830000000005,
+            "physicsUs": [
+              2623.542,
+              0.0,
+              0.041,
+              1051.9170000000001,
+              190.292,
+              82.0,
+              3947.8330000000005
+            ]
+          },
+          {
+            "stepUs": 7707.4580000000005,
+            "physicsUs": [
+              2625.75,
+              0.041,
+              0.0,
+              1060.084,
+              189.416,
+              85.125,
+              3960.458
+            ]
+          },
+          {
+            "stepUs": 7634.958,
+            "physicsUs": [
+              2643.792,
+              0.041999999999999996,
+              0.0,
+              1020.0000000000001,
+              191.208,
+              85.5,
+              3940.5839999999994
+            ]
+          },
+          {
+            "stepUs": 7662.416,
+            "physicsUs": [
+              2641.0,
+              0.041999999999999996,
+              0.041,
+              1059.084,
+              190.333,
+              84.958,
+              3975.5
+            ]
+          },
+          {
+            "stepUs": 7532.167,
+            "physicsUs": [
+              2626.417,
+              0.041,
+              0.0,
+              980.5,
+              185.45899999999997,
+              82.41600000000001,
+              3874.8329999999996
+            ]
+          },
+          {
+            "stepUs": 7646.625,
+            "physicsUs": [
+              2642.583,
+              0.29200000000000004,
+              0.041,
+              1022.084,
+              190.166,
+              85.417,
+              3940.583
+            ]
+          },
+          {
+            "stepUs": 8082.249999999999,
+            "physicsUs": [
+              2608.833,
+              0.041999999999999996,
+              0.0,
+              982.083,
+              191.208,
+              80.16699999999999,
+              3862.333
+            ]
+          },
+          {
+            "stepUs": 7657.959,
+            "physicsUs": [
+              2639.167,
+              0.041,
+              0.0,
+              1042.042,
+              187.583,
+              84.25,
+              3953.0829999999996
+            ]
+          },
+          {
+            "stepUs": 7570.708,
+            "physicsUs": [
+              2646.2909999999997,
+              0.0,
+              0.041999999999999996,
+              962.6669999999999,
+              190.833,
+              93.875,
+              3893.708
+            ]
+          },
+          {
+            "stepUs": 7498.4580000000005,
+            "physicsUs": [
+              2630.041,
+              0.041999999999999996,
+              0.0,
+              926.875,
+              186.958,
+              86.334,
+              3830.291
+            ]
+          },
+          {
+            "stepUs": 7555.333,
+            "physicsUs": [
+              2620.084,
+              0.041,
+              0.0,
+              945.375,
+              188.917,
+              82.75,
+              3837.209
+            ]
+          },
+          {
+            "stepUs": 7508.083,
+            "physicsUs": [
+              2621.542,
+              0.29200000000000004,
+              0.041,
+              957.292,
+              188.875,
+              80.708,
+              3848.75
+            ]
+          },
+          {
+            "stepUs": 8133.583,
+            "physicsUs": [
+              2620.125,
+              0.041,
+              0.0,
+              962.4590000000001,
+              193.0,
+              85.875,
+              3861.5
+            ]
+          },
+          {
+            "stepUs": 7579.875,
+            "physicsUs": [
+              2640.333,
+              0.0,
+              0.041999999999999996,
+              966.791,
+              187.959,
+              86.541,
+              3881.708
+            ]
+          },
+          {
+            "stepUs": 7526.125,
+            "physicsUs": [
+              2622.8340000000003,
+              0.0,
+              0.041,
+              967.5419999999999,
+              187.833,
+              90.79199999999999,
+              3869.0840000000003
+            ]
+          },
+          {
+            "stepUs": 7633.209,
+            "physicsUs": [
+              2628.9159999999997,
+              0.041999999999999996,
+              0.0,
+              1037.542,
+              187.291,
+              92.709,
+              3946.5409999999997
+            ]
+          },
+          {
+            "stepUs": 7702.291,
+            "physicsUs": [
+              2692.75,
+              0.041,
+              0.0,
+              1029.75,
+              193.042,
+              98.792,
+              4014.4159999999997
+            ]
+          },
+          {
+            "stepUs": 7749.209,
+            "physicsUs": [
+              2650.959,
+              0.125,
+              0.041,
+              1020.7919999999999,
+              190.083,
+              86.25,
+              3948.2500000000005
+            ]
+          },
+          {
+            "stepUs": 8057.9580000000005,
+            "physicsUs": [
+              2615.5,
+              0.0,
+              0.041999999999999996,
+              934.375,
+              189.042,
+              81.625,
+              3820.625
+            ]
+          },
+          {
+            "stepUs": 7533.875,
+            "physicsUs": [
+              2606.583,
+              0.0,
+              0.041999999999999996,
+              951.833,
+              185.375,
+              87.375,
+              3831.25
+            ]
+          },
+          {
+            "stepUs": 8719.042,
+            "physicsUs": [
+              3412.334,
+              0.25,
+              0.0,
+              1305.666,
+              233.542,
+              110.667,
+              5062.5
+            ]
+          },
+          {
+            "stepUs": 7646.5,
+            "physicsUs": [
+              2622.125,
+              0.0,
+              0.041,
+              1006.3750000000001,
+              171.209,
+              95.958,
+              3895.75
+            ]
+          },
+          {
+            "stepUs": 7619.1669999999995,
+            "physicsUs": [
+              2662.458,
+              0.041999999999999996,
+              0.083,
+              982.209,
+              183.416,
+              92.042,
+              3920.292
+            ]
+          },
+          {
+            "stepUs": 7761.2080000000005,
+            "physicsUs": [
+              2642.7920000000004,
+              0.375,
+              0.041,
+              1012.167,
+              182.667,
+              88.083,
+              3926.125
+            ]
+          },
+          {
+            "stepUs": 8184.749999999999,
+            "physicsUs": [
+              2670.334,
+              0.0,
+              0.041,
+              967.792,
+              182.833,
+              92.375,
+              3913.417
+            ]
+          },
+          {
+            "stepUs": 7543.167,
+            "physicsUs": [
+              2627.334,
+              0.041,
+              0.0,
+              945.792,
+              181.708,
+              88.125,
+              3843.042
+            ]
+          },
+          {
+            "stepUs": 7489.5,
+            "physicsUs": [
+              2625.9159999999997,
+              0.041999999999999996,
+              0.041999999999999996,
+              952.958,
+              177.292,
+              84.04100000000001,
+              3840.333
+            ]
+          },
+          {
+            "stepUs": 7507.916,
+            "physicsUs": [
+              2653.958,
+              0.0,
+              0.041999999999999996,
+              960.833,
+              180.0,
+              87.75,
+              3882.583
+            ]
+          },
+          {
+            "stepUs": 7516.958,
+            "physicsUs": [
+              2635.333,
+              0.0,
+              0.041999999999999996,
+              906.166,
+              188.084,
+              90.625,
+              3820.291
+            ]
+          },
+          {
+            "stepUs": 7497.542,
+            "physicsUs": [
+              2653.6659999999997,
+              0.459,
+              0.0,
+              911.875,
+              175.0,
+              85.375,
+              3826.416
+            ]
+          },
+          {
+            "stepUs": 8060.084000000001,
+            "physicsUs": [
+              2639.125,
+              0.041999999999999996,
+              0.041999999999999996,
+              929.125,
+              173.833,
+              91.833,
+              3834.0
+            ]
+          },
+          {
+            "stepUs": 7512.0830000000005,
+            "physicsUs": [
+              2631.875,
+              0.041999999999999996,
+              0.0,
+              969.125,
+              169.333,
+              88.917,
+              3859.292
+            ]
+          },
+          {
+            "stepUs": 7414.75,
+            "physicsUs": [
+              2622.625,
+              0.041999999999999996,
+              0.0,
+              875.0,
+              169.0,
+              83.25,
+              3749.9579999999996
+            ]
+          },
+          {
+            "stepUs": 7425.541,
+            "physicsUs": [
+              2603.625,
+              0.041999999999999996,
+              0.0,
+              894.0,
+              174.375,
+              85.041,
+              3757.125
+            ]
+          },
+          {
+            "stepUs": 7387.875,
+            "physicsUs": [
+              2625.708,
+              0.041999999999999996,
+              0.0,
+              860.292,
+              174.25,
+              84.83300000000001,
+              3745.1670000000004
+            ]
+          },
+          {
+            "stepUs": 7378.0419999999995,
+            "physicsUs": [
+              2601.333,
+              0.334,
+              0.0,
+              858.916,
+              183.667,
+              84.5,
+              3728.792
+            ]
+          },
+          {
+            "stepUs": 7962.250000000001,
+            "physicsUs": [
+              2620.167,
+              0.041999999999999996,
+              0.041,
+              866.25,
+              168.70899999999997,
+              86.541,
+              3741.75
+            ]
+          },
+          {
+            "stepUs": 7454.625,
+            "physicsUs": [
+              2674.375,
+              0.083,
+              0.041999999999999996,
+              870.0,
+              169.958,
+              93.375,
+              3807.833
+            ]
+          },
+          {
+            "stepUs": 7447.917,
+            "physicsUs": [
+              2633.2920000000004,
+              0.041999999999999996,
+              0.0,
+              890.208,
+              171.667,
+              88.583,
+              3783.834
+            ]
+          },
+          {
+            "stepUs": 7469.0,
+            "physicsUs": [
+              2641.416,
+              0.041999999999999996,
+              0.0,
+              909.875,
+              171.208,
+              92.0,
+              3814.5409999999997
+            ]
+          },
+          {
+            "stepUs": 7356.625,
+            "physicsUs": [
+              2601.2090000000003,
+              0.041,
+              0.0,
+              844.792,
+              165.0,
+              85.667,
+              3696.75
+            ]
+          },
+          {
+            "stepUs": 7452.542,
+            "physicsUs": [
+              2627.459,
+              0.41600000000000004,
+              0.0,
+              873.5,
+              168.0,
+              91.875,
+              3761.25
+            ]
+          },
+          {
+            "stepUs": 7985.917,
+            "physicsUs": [
+              2653.417,
+              0.041,
+              0.0,
+              847.5419999999999,
+              168.54199999999997,
+              95.333,
+              3764.917
+            ]
+          },
+          {
+            "stepUs": 7395.459,
+            "physicsUs": [
+              2622.0409999999997,
+              0.08399999999999999,
+              0.041,
+              847.417,
+              178.0,
+              94.042,
+              3741.6659999999997
+            ]
+          },
+          {
+            "stepUs": 7395.709000000001,
+            "physicsUs": [
+              2641.666,
+              0.0,
+              0.041999999999999996,
+              854.667,
+              169.25,
+              91.5,
+              3757.166
+            ]
+          },
+          {
+            "stepUs": 7370.625,
+            "physicsUs": [
+              2605.25,
+              0.08399999999999999,
+              0.0,
+              849.791,
+              168.125,
+              86.792,
+              3710.0420000000004
+            ]
+          },
+          {
+            "stepUs": 7384.5,
+            "physicsUs": [
+              2624.292,
+              0.041999999999999996,
+              0.0,
+              841.083,
+              165.542,
+              89.916,
+              3720.917
+            ]
+          },
+          {
+            "stepUs": 7484.5,
+            "physicsUs": [
+              2605.292,
+              0.20800000000000002,
+              0.0,
+              944.7919999999999,
+              170.208,
+              88.625,
+              3809.125
+            ]
+          },
+          {
+            "stepUs": 7933.291,
+            "physicsUs": [
+              2621.75,
+              0.041,
+              0.0,
+              815.084,
+              164.375,
+              89.291,
+              3690.5409999999997
+            ]
+          },
+          {
+            "stepUs": 7337.459,
+            "physicsUs": [
+              2639.292,
+              0.0,
+              0.041999999999999996,
+              803.833,
+              167.708,
+              89.0,
+              3699.875
+            ]
+          },
+          {
+            "stepUs": 7451.0419999999995,
+            "physicsUs": [
+              2674.167,
+              0.0,
+              0.041999999999999996,
+              857.041,
+              172.792,
+              90.833,
+              3794.875
+            ]
+          },
+          {
+            "stepUs": 7357.5419999999995,
+            "physicsUs": [
+              2623.459,
+              0.041,
+              0.0,
+              827.4590000000001,
+              168.375,
+              87.5,
+              3706.834
+            ]
+          },
+          {
+            "stepUs": 7380.083,
+            "physicsUs": [
+              2608.833,
+              0.041999999999999996,
+              0.0,
+              815.25,
+              169.166,
+              86.875,
+              3680.208
+            ]
+          },
+          {
+            "stepUs": 7374.5,
+            "physicsUs": [
+              2624.125,
+              0.33299999999999996,
+              0.0,
+              834.208,
+              170.5,
+              92.042,
+              3721.208
+            ]
+          },
+          {
+            "stepUs": 7879.958,
+            "physicsUs": [
+              2604.458,
+              0.0,
+              0.041999999999999996,
+              816.125,
+              163.625,
+              87.375,
+              3671.666
+            ]
+          },
+          {
+            "stepUs": 7411.291,
+            "physicsUs": [
+              2585.375,
+              0.041,
+              0.0,
+              892.792,
+              164.0,
+              95.25,
+              3737.458
+            ]
+          },
+          {
+            "stepUs": 7356.6669999999995,
+            "physicsUs": [
+              2623.542,
+              0.041,
+              0.0,
+              826.9590000000001,
+              168.458,
+              89.917,
+              3708.917
+            ]
+          },
+          {
+            "stepUs": 7347.9169999999995,
+            "physicsUs": [
+              2637.2079999999996,
+              0.041999999999999996,
+              0.0,
+              788.958,
+              164.083,
+              90.709,
+              3681.0409999999997
+            ]
+          },
+          {
+            "stepUs": 7255.3330000000005,
+            "physicsUs": [
+              2578.791,
+              0.041999999999999996,
+              0.0,
+              787.417,
+              164.25,
+              87.41600000000001,
+              3617.958
+            ]
+          },
+          {
+            "stepUs": 7390.459,
+            "physicsUs": [
+              2617.25,
+              0.25,
+              0.0,
+              834.5,
+              175.167,
+              91.167,
+              3718.334
+            ]
+          },
+          {
+            "stepUs": 7866.9169999999995,
+            "physicsUs": [
+              2599.166,
+              0.041999999999999996,
+              0.0,
+              836.875,
+              167.292,
+              91.708,
+              3695.125
+            ]
+          },
+          {
+            "stepUs": 7360.9169999999995,
+            "physicsUs": [
+              2636.208,
+              0.0,
+              0.041999999999999996,
+              807.833,
+              165.25,
+              90.79199999999999,
+              3700.125
+            ]
+          },
+          {
+            "stepUs": 7378.541,
+            "physicsUs": [
+              2614.375,
+              0.0,
+              0.041999999999999996,
+              813.75,
+              164.083,
+              92.5,
+              3684.75
+            ]
+          },
+          {
+            "stepUs": 7399.1669999999995,
+            "physicsUs": [
+              2620.125,
+              0.041,
+              0.0,
+              896.5419999999999,
+              165.5,
+              91.875,
+              3774.083
+            ]
+          },
+          {
+            "stepUs": 7344.792,
+            "physicsUs": [
+              2610.75,
+              0.0,
+              0.041999999999999996,
+              795.667,
+              164.16600000000003,
+              89.959,
+              3660.625
+            ]
+          },
+          {
+            "stepUs": 7379.75,
+            "physicsUs": [
+              2603.375,
+              0.167,
+              0.0,
+              818.2909999999999,
+              164.584,
+              102.458,
+              3688.875
+            ]
+          },
+          {
+            "stepUs": 7841.791000000001,
+            "physicsUs": [
+              2607.625,
+              0.0,
+              0.041,
+              779.917,
+              163.667,
+              89.083,
+              3640.333
+            ]
+          },
+          {
+            "stepUs": 7297.291,
+            "physicsUs": [
+              2590.8340000000003,
+              0.041,
+              0.0,
+              810.292,
+              162.833,
+              89.375,
+              3653.375
+            ]
+          },
+          {
+            "stepUs": 7421.375,
+            "physicsUs": [
+              2609.375,
+              0.041,
+              0.0,
+              833.709,
+              165.875,
+              101.041,
+              3710.0409999999997
+            ]
+          },
+          {
+            "stepUs": 7726.292,
+            "physicsUs": [
+              2735.917,
+              0.041,
+              0.0,
+              833.709,
+              194.5,
+              102.25,
+              3866.458
+            ]
+          },
+          {
+            "stepUs": 7395.292,
+            "physicsUs": [
+              2643.459,
+              0.0,
+              0.041,
+              805.9169999999999,
+              168.042,
+              97.625,
+              3715.084
+            ]
+          },
+          {
+            "stepUs": 7660.958,
+            "physicsUs": [
+              2693.292,
+              0.375,
+              0.041999999999999996,
+              965.4159999999999,
+              173.375,
+              108.292,
+              3940.7920000000004
+            ]
+          },
+          {
+            "stepUs": 8449.958,
+            "physicsUs": [
+              2786.625,
+              0.041999999999999996,
+              0.0,
+              920.2919999999999,
+              180.625,
+              113.791,
+              4001.4170000000004
+            ]
+          },
+          {
+            "stepUs": 7816.999999999999,
+            "physicsUs": [
+              2790.583,
+              0.041999999999999996,
+              0.0,
+              886.0409999999999,
+              167.125,
+              107.834,
+              3951.666
+            ]
+          },
+          {
+            "stepUs": 7451.25,
+            "physicsUs": [
+              2673.667,
+              0.041,
+              0.0,
+              817.2919999999999,
+              160.708,
+              96.375,
+              3748.083
+            ]
+          },
+          {
+            "stepUs": 7608.916,
+            "physicsUs": [
+              2681.583,
+              0.0,
+              0.041999999999999996,
+              821.916,
+              165.959,
+              96.666,
+              3766.208
+            ]
+          },
+          {
+            "stepUs": 7359.415999999999,
+            "physicsUs": [
+              2626.875,
+              0.0,
+              0.041,
+              800.75,
+              159.625,
+              87.58399999999999,
+              3674.9159999999997
+            ]
+          },
+          {
+            "stepUs": 7461.4169999999995,
+            "physicsUs": [
+              2646.666,
+              0.375,
+              0.041999999999999996,
+              848.3330000000001,
+              162.709,
+              99.375,
+              3757.5
+            ]
+          },
+          {
+            "stepUs": 7876.75,
+            "physicsUs": [
+              2626.583,
+              0.041999999999999996,
+              0.0,
+              798.375,
+              163.666,
+              89.709,
+              3678.4159999999997
+            ]
+          },
+          {
+            "stepUs": 7470.959,
+            "physicsUs": [
+              2631.375,
+              0.041999999999999996,
+              0.0,
+              892.208,
+              164.334,
+              93.5,
+              3781.459
+            ]
+          },
+          {
+            "stepUs": 7346.625,
+            "physicsUs": [
+              2627.75,
+              0.041999999999999996,
+              0.0,
+              792.583,
+              161.167,
+              94.0,
+              3675.542
+            ]
+          },
+          {
+            "stepUs": 7392.833,
+            "physicsUs": [
+              2606.5,
+              0.0,
+              0.041999999999999996,
+              802.875,
+              162.375,
+              89.25,
+              3661.0840000000003
+            ]
+          },
+          {
+            "stepUs": 7328.083,
+            "physicsUs": [
+              2606.792,
+              0.041,
+              0.0,
+              793.625,
+              160.25,
+              91.542,
+              3652.292
+            ]
+          },
+          {
+            "stepUs": 7371.917,
+            "physicsUs": [
+              2641.9579999999996,
+              0.125,
+              0.041999999999999996,
+              797.1659999999999,
+              164.042,
+              90.208,
+              3693.5409999999997
+            ]
+          },
+          {
+            "stepUs": 7944.667,
+            "physicsUs": [
+              2642.0,
+              0.0,
+              0.041999999999999996,
+              824.125,
+              160.541,
+              94.83399999999999,
+              3721.542
+            ]
+          },
+          {
+            "stepUs": 7325.375,
+            "physicsUs": [
+              2615.5,
+              0.0,
+              0.041999999999999996,
+              777.625,
+              161.541,
+              88.084,
+              3642.7920000000004
+            ]
+          },
+          {
+            "stepUs": 7344.209,
+            "physicsUs": [
+              2602.666,
+              0.041999999999999996,
+              0.0,
+              792.125,
+              166.958,
+              90.209,
+              3652.0
+            ]
+          },
+          {
+            "stepUs": 7387.833,
+            "physicsUs": [
+              2627.125,
+              0.041999999999999996,
+              0.0,
+              853.25,
+              163.791,
+              90.584,
+              3734.833
+            ]
+          },
+          {
+            "stepUs": 7366.625,
+            "physicsUs": [
+              2674.625,
+              0.041999999999999996,
+              0.0,
+              784.792,
+              159.791,
+              93.375,
+              3712.667
+            ]
+          },
+          {
+            "stepUs": 7284.458,
+            "physicsUs": [
+              2604.7079999999996,
+              0.29200000000000004,
+              0.0,
+              771.75,
+              163.042,
+              73.625,
+              3613.458
+            ]
+          },
+          {
+            "stepUs": 7781.334,
+            "physicsUs": [
+              2584.75,
+              0.041999999999999996,
+              0.0,
+              759.083,
+              159.583,
+              85.917,
+              3589.375
+            ]
+          },
+          {
+            "stepUs": 7269.875,
+            "physicsUs": [
+              2576.75,
+              0.0,
+              0.041999999999999996,
+              759.0,
+              161.667,
+              89.375,
+              3586.8340000000003
+            ]
+          },
+          {
+            "stepUs": 7259.0,
+            "physicsUs": [
+              2570.792,
+              0.041999999999999996,
+              0.0,
+              775.875,
+              171.458,
+              89.583,
+              3607.75
+            ]
+          },
+          {
+            "stepUs": 7266.1669999999995,
+            "physicsUs": [
+              2603.916,
+              0.041999999999999996,
+              0.0,
+              782.583,
+              164.625,
+              86.709,
+              3637.875
+            ]
+          },
+          {
+            "stepUs": 7237.417,
+            "physicsUs": [
+              2560.042,
+              0.041,
+              0.0,
+              771.167,
+              160.25,
+              67.875,
+              3559.417
+            ]
+          },
+          {
+            "stepUs": 7377.583,
+            "physicsUs": [
+              2588.083,
+              0.29200000000000004,
+              0.0,
+              874.291,
+              159.167,
+              90.875,
+              3712.708
+            ]
+          },
+          {
+            "stepUs": 7870.375000000001,
+            "physicsUs": [
+              2603.875,
+              0.0,
+              0.041,
+              792.7919999999999,
+              159.83300000000003,
+              91.75,
+              3648.291
+            ]
+          },
+          {
+            "stepUs": 7243.041,
+            "physicsUs": [
+              2573.708,
+              0.041999999999999996,
+              0.0,
+              782.5409999999999,
+              162.167,
+              91.792,
+              3610.25
+            ]
+          },
+          {
+            "stepUs": 7226.625,
+            "physicsUs": [
+              2590.125,
+              0.0,
+              0.041999999999999996,
+              761.416,
+              158.70899999999997,
+              87.75,
+              3598.083
+            ]
+          },
+          {
+            "stepUs": 7314.667,
+            "physicsUs": [
+              2602.667,
+              0.041,
+              0.0,
+              790.0,
+              163.0,
+              95.5,
+              3651.208
+            ]
+          },
+          {
+            "stepUs": 7289.75,
+            "physicsUs": [
+              2579.208,
+              0.041999999999999996,
+              0.0,
+              788.666,
+              158.084,
+              88.5,
+              3614.5
+            ]
+          },
+          {
+            "stepUs": 7310.709000000001,
+            "physicsUs": [
+              2622.167,
+              0.20800000000000002,
+              0.0,
+              795.375,
+              166.792,
+              92.166,
+              3676.708
+            ]
+          },
+          {
+            "stepUs": 7823.666,
+            "physicsUs": [
+              2582.5,
+              0.041999999999999996,
+              0.0,
+              779.625,
+              162.625,
+              91.458,
+              3616.25
+            ]
+          },
+          {
+            "stepUs": 7323.916,
+            "physicsUs": [
+              2586.625,
+              0.041999999999999996,
+              0.0,
+              848.3330000000001,
+              157.25,
+              88.584,
+              3680.875
+            ]
+          },
+          {
+            "stepUs": 7290.666,
+            "physicsUs": [
+              2595.833,
+              0.041999999999999996,
+              0.0,
+              756.9169999999999,
+              163.291,
+              102.834,
+              3618.9579999999996
+            ]
+          },
+          {
+            "stepUs": 7307.333,
+            "physicsUs": [
+              2644.875,
+              0.041999999999999996,
+              0.0,
+              771.125,
+              158.041,
+              93.792,
+              3667.875
+            ]
+          },
+          {
+            "stepUs": 7190.416,
+            "physicsUs": [
+              2595.5829999999996,
+              0.041999999999999996,
+              0.0,
+              766.083,
+              156.45899999999997,
+              71.5,
+              3589.667
+            ]
+          },
+          {
+            "stepUs": 7278.625,
+            "physicsUs": [
+              2596.334,
+              0.125,
+              0.041,
+              779.3340000000001,
+              165.166,
+              89.167,
+              3630.2090000000003
+            ]
+          },
+          {
+            "stepUs": 7813.5419999999995,
+            "physicsUs": [
+              2587.625,
+              0.0,
+              0.041999999999999996,
+              778.208,
+              159.834,
+              91.791,
+              3617.5
+            ]
+          },
+          {
+            "stepUs": 7282.625,
+            "physicsUs": [
+              2589.0420000000004,
+              0.0,
+              0.041,
+              796.417,
+              163.083,
+              94.25,
+              3642.8329999999996
+            ]
+          },
+          {
+            "stepUs": 7276.584,
+            "physicsUs": [
+              2584.2920000000004,
+              0.041999999999999996,
+              0.0,
+              764.0,
+              158.583,
+              91.958,
+              3598.875
+            ]
+          },
+          {
+            "stepUs": 7400.5,
+            "physicsUs": [
+              2596.4579999999996,
+              0.041999999999999996,
+              0.0,
+              877.416,
+              160.042,
+              96.625,
+              3730.583
+            ]
+          },
+          {
+            "stepUs": 7585.25,
+            "physicsUs": [
+              2696.0,
+              0.041999999999999996,
+              0.0,
+              856.375,
+              164.625,
+              104.833,
+              3821.9170000000004
+            ]
+          },
+          {
+            "stepUs": 7902.708,
+            "physicsUs": [
+              2745.375,
+              0.375,
+              0.0,
+              903.7090000000001,
+              177.791,
+              117.042,
+              3944.2920000000004
+            ]
+          },
+          {
+            "stepUs": 7807.125,
+            "physicsUs": [
+              2659.834,
+              0.166,
+              0.0,
+              868.0,
+              155.167,
+              95.625,
+              3778.834
+            ]
+          },
+          {
+            "stepUs": 8973.666,
+            "physicsUs": [
+              3351.375,
+              0.459,
+              0.041,
+              1203.75,
+              210.25,
+              180.584,
+              4946.459
+            ]
+          },
+          {
+            "stepUs": 8388.958999999999,
+            "physicsUs": [
+              2836.7090000000003,
+              0.083,
+              0.125,
+              1049.042,
+              175.75,
+              113.791,
+              4175.5
+            ]
+          },
+          {
+            "stepUs": 7923.166,
+            "physicsUs": [
+              2811.25,
+              0.125,
+              0.0,
+              936.125,
+              170.25,
+              112.041,
+              4029.833
+            ]
+          },
+          {
+            "stepUs": 7857.792,
+            "physicsUs": [
+              2801.792,
+              0.041,
+              0.0,
+              882.834,
+              177.708,
+              113.292,
+              3975.7079999999996
+            ]
+          },
+          {
+            "stepUs": 7750.792,
+            "physicsUs": [
+              2762.583,
+              0.75,
+              0.041999999999999996,
+              933.167,
+              164.041,
+              102.417,
+              3963.0000000000005
+            ]
+          },
+          {
+            "stepUs": 8622.792000000001,
+            "physicsUs": [
+              2722.833,
+              0.125,
+              0.041999999999999996,
+              947.583,
+              185.042,
+              136.583,
+              3992.25
+            ]
+          },
+          {
+            "stepUs": 7921.166,
+            "physicsUs": [
+              2824.709,
+              0.041,
+              0.0,
+              919.5419999999999,
+              173.292,
+              119.291,
+              4036.8749999999995
+            ]
+          },
+          {
+            "stepUs": 7611.458,
+            "physicsUs": [
+              2722.834,
+              0.041,
+              0.0,
+              833.75,
+              157.292,
+              104.917,
+              3818.875
+            ]
+          },
+          {
+            "stepUs": 7345.75,
+            "physicsUs": [
+              2624.25,
+              0.0,
+              0.041999999999999996,
+              790.083,
+              159.0,
+              91.042,
+              3664.417
+            ]
+          },
+          {
+            "stepUs": 7284.0,
+            "physicsUs": [
+              2600.625,
+              0.041,
+              0.0,
+              783.5840000000001,
+              156.458,
+              90.75,
+              3631.5
+            ]
+          },
+          {
+            "stepUs": 7302.0419999999995,
+            "physicsUs": [
+              2599.667,
+              0.25,
+              0.041,
+              780.834,
+              173.541,
+              87.75,
+              3642.125
+            ]
+          },
+          {
+            "stepUs": 7834.374999999999,
+            "physicsUs": [
+              2642.7920000000004,
+              0.0,
+              0.041,
+              789.375,
+              157.959,
+              95.0,
+              3685.167
+            ]
+          },
+          {
+            "stepUs": 7591.8330000000005,
+            "physicsUs": [
+              2708.25,
+              0.0,
+              0.041999999999999996,
+              941.708,
+              170.167,
+              100.292,
+              3920.4590000000003
+            ]
+          },
+          {
+            "stepUs": 7353.666,
+            "physicsUs": [
+              2627.791,
+              0.041999999999999996,
+              0.041999999999999996,
+              812.25,
+              157.166,
+              94.417,
+              3691.708
+            ]
+          },
+          {
+            "stepUs": 7298.458,
+            "physicsUs": [
+              2610.542,
+              0.041,
+              0.0,
+              780.375,
+              158.875,
+              89.33399999999999,
+              3639.208
+            ]
+          },
+          {
+            "stepUs": 7307.791,
+            "physicsUs": [
+              2604.75,
+              0.0,
+              0.041999999999999996,
+              803.083,
+              170.833,
+              88.0,
+              3666.75
+            ]
+          },
+          {
+            "stepUs": 7253.666,
+            "physicsUs": [
+              2604.5,
+              0.20900000000000002,
+              0.041,
+              759.792,
+              158.5,
+              84.5,
+              3607.542
+            ]
+          },
+          {
+            "stepUs": 7822.625,
+            "physicsUs": [
+              2610.417,
+              0.0,
+              0.041,
+              786.542,
+              163.375,
+              92.292,
+              3652.667
+            ]
+          },
+          {
+            "stepUs": 7284.625,
+            "physicsUs": [
+              2627.042,
+              0.041999999999999996,
+              0.041,
+              771.0840000000001,
+              159.916,
+              90.95899999999999,
+              3649.084
+            ]
+          },
+          {
+            "stepUs": 7430.875,
+            "physicsUs": [
+              2722.5,
+              2.9579999999999997,
+              0.041999999999999996,
+              790.625,
+              157.958,
+              95.0,
+              3769.125
+            ]
+          },
+          {
+            "stepUs": 7386.208,
+            "physicsUs": [
+              2620.375,
+              0.041999999999999996,
+              0.041,
+              836.292,
+              157.167,
+              91.666,
+              3705.625
+            ]
+          },
+          {
+            "stepUs": 7303.625,
+            "physicsUs": [
+              2622.5,
+              0.041999999999999996,
+              0.0,
+              780.625,
+              158.25,
+              89.375,
+              3650.792
+            ]
+          },
+          {
+            "stepUs": 7287.166,
+            "physicsUs": [
+              2605.666,
+              0.25,
+              0.041999999999999996,
+              758.833,
+              160.917,
+              86.583,
+              3612.291
+            ]
+          },
+          {
+            "stepUs": 7849.874999999999,
+            "physicsUs": [
+              2599.625,
+              0.041999999999999996,
+              0.0,
+              775.25,
+              159.83300000000003,
+              87.583,
+              3622.375
+            ]
+          },
+          {
+            "stepUs": 7238.375,
+            "physicsUs": [
+              2602.292,
+              0.0,
+              0.041,
+              754.375,
+              157.292,
+              84.875,
+              3598.875
+            ]
+          },
+          {
+            "stepUs": 7265.291,
+            "physicsUs": [
+              2617.167,
+              0.0,
+              0.041,
+              755.8340000000001,
+              163.791,
+              86.084,
+              3622.917
+            ]
+          },
+          {
+            "stepUs": 7258.8330000000005,
+            "physicsUs": [
+              2609.792,
+              0.0,
+              0.041999999999999996,
+              750.583,
+              158.833,
+              86.292,
+              3605.584
+            ]
+          },
+          {
+            "stepUs": 7305.0,
+            "physicsUs": [
+              2618.416,
+              0.041999999999999996,
+              0.0,
+              759.9580000000001,
+              175.334,
+              87.41600000000001,
+              3641.208
+            ]
+          },
+          {
+            "stepUs": 7370.625,
+            "physicsUs": [
+              2596.75,
+              0.166,
+              0.0,
+              851.3340000000001,
+              172.041,
+              88.292,
+              3708.583
+            ]
+          },
+          {
+            "stepUs": 7832.084,
+            "physicsUs": [
+              2633.125,
+              0.041999999999999996,
+              0.0,
+              761.1659999999999,
+              162.917,
+              91.208,
+              3648.4579999999996
+            ]
+          },
+          {
+            "stepUs": 7282.5,
+            "physicsUs": [
+              2598.708,
+              0.0,
+              0.041999999999999996,
+              753.375,
+              159.667,
+              87.25,
+              3599.0420000000004
+            ]
+          },
+          {
+            "stepUs": 7261.25,
+            "physicsUs": [
+              2600.916,
+              0.041999999999999996,
+              0.0,
+              757.625,
+              166.5,
+              85.79199999999999,
+              3610.875
+            ]
+          },
+          {
+            "stepUs": 7287.041,
+            "physicsUs": [
+              2628.0829999999996,
+              0.041999999999999996,
+              0.0,
+              743.875,
+              160.167,
+              96.333,
+              3628.5
+            ]
+          },
+          {
+            "stepUs": 7315.125,
+            "physicsUs": [
+              2595.0840000000003,
+              0.041,
+              0.0,
+              745.0840000000001,
+              159.333,
+              89.292,
+              3588.834
+            ]
+          },
+          {
+            "stepUs": 7358.0,
+            "physicsUs": [
+              2648.334,
+              0.166,
+              0.0,
+              753.2090000000001,
+              167.083,
+              86.5,
+              3655.292
+            ]
+          },
+          {
+            "stepUs": 8040.8330000000005,
+            "physicsUs": [
+              2660.1670000000004,
+              0.041,
+              0.0,
+              825.917,
+              165.95800000000003,
+              117.0,
+              3769.125
+            ]
+          },
+          {
+            "stepUs": 7410.208,
+            "physicsUs": [
+              2615.125,
+              0.0,
+              0.041999999999999996,
+              854.625,
+              159.583,
+              87.833,
+              3717.25
+            ]
+          },
+          {
+            "stepUs": 7259.7080000000005,
+            "physicsUs": [
+              2610.3340000000003,
+              0.041,
+              0.0,
+              749.667,
+              155.667,
+              91.708,
+              3607.417
+            ]
+          },
+          {
+            "stepUs": 7252.8330000000005,
+            "physicsUs": [
+              2592.292,
+              0.041,
+              0.0,
+              752.417,
+              160.333,
+              102.0,
+              3607.125
+            ]
+          },
+          {
+            "stepUs": 7284.2080000000005,
+            "physicsUs": [
+              2610.667,
+              0.041999999999999996,
+              0.0,
+              740.75,
+              159.916,
+              101.25,
+              3612.667
+            ]
+          },
+          {
+            "stepUs": 7296.833,
+            "physicsUs": [
+              2584.917,
+              0.33299999999999996,
+              0.041999999999999996,
+              761.458,
+              165.125,
+              89.584,
+              3601.459
+            ]
+          },
+          {
+            "stepUs": 7750.7080000000005,
+            "physicsUs": [
+              2580.0409999999997,
+              0.0,
+              0.041999999999999996,
+              769.625,
+              158.25,
+              86.917,
+              3594.875
+            ]
+          },
+          {
+            "stepUs": 7270.7919999999995,
+            "physicsUs": [
+              2625.208,
+              0.041999999999999996,
+              0.0,
+              742.792,
+              158.583,
+              90.583,
+              3617.2079999999996
+            ]
+          },
+          {
+            "stepUs": 7243.6669999999995,
+            "physicsUs": [
+              2579.375,
+              0.041999999999999996,
+              0.0,
+              743.25,
+              156.5,
+              85.95800000000001,
+              3565.1670000000004
+            ]
+          },
+          {
+            "stepUs": 7304.75,
+            "physicsUs": [
+              2609.0,
+              0.041999999999999996,
+              0.0,
+              812.0,
+              158.167,
+              84.25,
+              3663.459
+            ]
+          },
+          {
+            "stepUs": 7240.542,
+            "physicsUs": [
+              2585.833,
+              0.041999999999999996,
+              0.0,
+              761.125,
+              157.666,
+              85.125,
+              3589.833
+            ]
+          },
+          {
+            "stepUs": 7322.125,
+            "physicsUs": [
+              2597.542,
+              0.25,
+              0.041999999999999996,
+              774.958,
+              163.333,
+              88.20899999999999,
+              3624.334
+            ]
+          },
+          {
+            "stepUs": 7758.333,
+            "physicsUs": [
+              2603.666,
+              0.0,
+              0.041999999999999996,
+              739.208,
+              163.375,
+              89.625,
+              3595.9579999999996
+            ]
+          },
+          {
+            "stepUs": 7230.5,
+            "physicsUs": [
+              2590.417,
+              0.0,
+              0.041,
+              739.042,
+              158.583,
+              86.125,
+              3574.208
+            ]
+          },
+          {
+            "stepUs": 7252.5,
+            "physicsUs": [
+              2601.792,
+              0.0,
+              0.041999999999999996,
+              761.0,
+              158.166,
+              87.459,
+              3608.459
+            ]
+          },
+          {
+            "stepUs": 7201.041,
+            "physicsUs": [
+              2581.125,
+              0.0,
+              0.041999999999999996,
+              746.625,
+              168.417,
+              86.083,
+              3582.292
+            ]
+          },
+          {
+            "stepUs": 7322.6669999999995,
+            "physicsUs": [
+              2585.417,
+              0.041999999999999996,
+              0.0,
+              741.083,
+              159.792,
+              90.79100000000001,
+              3577.125
+            ]
+          },
+          {
+            "stepUs": 7310.166,
+            "physicsUs": [
+              2591.25,
+              0.334,
+              0.041,
+              812.459,
+              160.791,
+              86.084,
+              3651.0
+            ]
+          },
+          {
+            "stepUs": 7769.125,
+            "physicsUs": [
+              2588.5,
+              0.0,
+              0.041999999999999996,
+              758.4580000000001,
+              159.958,
+              90.917,
+              3597.917
+            ]
+          },
+          {
+            "stepUs": 7258.0830000000005,
+            "physicsUs": [
+              2613.042,
+              0.041999999999999996,
+              0.0,
+              757.416,
+              158.917,
+              89.833,
+              3619.25
+            ]
+          },
+          {
+            "stepUs": 7191.459,
+            "physicsUs": [
+              2592.791,
+              0.041999999999999996,
+              0.0,
+              740.3330000000001,
+              158.209,
+              86.25,
+              3577.666
+            ]
+          },
+          {
+            "stepUs": 7225.875,
+            "physicsUs": [
+              2584.2920000000004,
+              0.041999999999999996,
+              0.0,
+              733.5409999999999,
+              158.834,
+              84.5,
+              3561.2090000000003
+            ]
+          },
+          {
+            "stepUs": 7222.5830000000005,
+            "physicsUs": [
+              2584.959,
+              0.041,
+              0.0,
+              739.292,
+              158.583,
+              87.25,
+              3570.167
+            ]
+          },
+          {
+            "stepUs": 7228.75,
+            "physicsUs": [
+              2593.584,
+              0.041,
+              0.0,
+              746.417,
+              160.333,
+              85.917,
+              3586.334
+            ]
+          },
+          {
+            "stepUs": 7227.208,
+            "physicsUs": [
+              2577.292,
+              0.041,
+              0.0,
+              756.209,
+              159.875,
+              85.125,
+              3578.583
+            ]
+          },
+          {
+            "stepUs": 7845.417,
+            "physicsUs": [
+              2593.584,
+              0.0,
+              0.041,
+              824.917,
+              164.292,
+              89.5,
+              3672.375
+            ]
+          },
+          {
+            "stepUs": 7290.334,
+            "physicsUs": [
+              2611.875,
+              0.0,
+              0.041,
+              770.834,
+              157.666,
+              89.917,
+              3630.375
+            ]
+          },
+          {
+            "stepUs": 7209.625,
+            "physicsUs": [
+              2569.875,
+              0.0,
+              0.041999999999999996,
+              749.5419999999999,
+              178.25,
+              90.583,
+              3588.292
+            ]
+          },
+          {
+            "stepUs": 7215.5830000000005,
+            "physicsUs": [
+              2577.875,
+              0.041999999999999996,
+              0.0,
+              731.5419999999999,
+              158.208,
+              88.5,
+              3556.209
+            ]
+          },
+          {
+            "stepUs": 7257.5,
+            "physicsUs": [
+              2576.9590000000003,
+              0.166,
+              0.0,
+              741.875,
+              160.625,
+              91.667,
+              3571.2920000000004
+            ]
+          },
+          {
+            "stepUs": 7752.959,
+            "physicsUs": [
+              2581.6659999999997,
+              0.041999999999999996,
+              0.0,
+              759.667,
+              159.66600000000003,
+              88.334,
+              3589.375
+            ]
+          },
+          {
+            "stepUs": 7981.874999999999,
+            "physicsUs": [
+              2702.75,
+              0.125,
+              0.041,
+              840.25,
+              182.084,
+              97.166,
+              3822.4159999999997
+            ]
+          },
+          {
+            "stepUs": 7285.583,
+            "physicsUs": [
+              2670.667,
+              0.0,
+              0.041999999999999996,
+              753.416,
+              186.584,
+              89.458,
+              3700.167
+            ]
+          },
+          {
+            "stepUs": 7387.791,
+            "physicsUs": [
+              2644.75,
+              0.0,
+              0.041999999999999996,
+              832.75,
+              158.25,
+              88.291,
+              3724.083
+            ]
+          },
+          {
+            "stepUs": 7287.0,
+            "physicsUs": [
+              2646.666,
+              0.041999999999999996,
+              0.0,
+              748.75,
+              160.667,
+              101.208,
+              3657.333
+            ]
+          },
+          {
+            "stepUs": 7351.291,
+            "physicsUs": [
+              2637.5,
+              0.417,
+              0.083,
+              805.458,
+              165.334,
+              91.91600000000001,
+              3700.708
+            ]
+          },
+          {
+            "stepUs": 7874.667,
+            "physicsUs": [
+              2665.458,
+              0.041999999999999996,
+              0.0,
+              770.542,
+              167.125,
+              90.333,
+              3693.5420000000004
+            ]
+          },
+          {
+            "stepUs": 7816.9169999999995,
+            "physicsUs": [
+              2616.583,
+              0.041999999999999996,
+              0.0,
+              769.458,
+              166.459,
+              90.25,
+              3642.8329999999996
+            ]
+          },
+          {
+            "stepUs": 7270.625,
+            "physicsUs": [
+              2622.125,
+              0.041999999999999996,
+              0.0,
+              733.542,
+              157.291,
+              90.875,
+              3603.917
+            ]
+          },
+          {
+            "stepUs": 7234.834,
+            "physicsUs": [
+              2598.958,
+              0.041999999999999996,
+              0.041,
+              747.084,
+              157.291,
+              90.709,
+              3594.125
+            ]
+          },
+          {
+            "stepUs": 7048.2080000000005,
+            "physicsUs": [
+              2630.916,
+              0.041999999999999996,
+              0.0,
+              757.5830000000001,
+              161.625,
+              91.084,
+              3641.291
+            ]
+          },
+          {
+            "stepUs": 7515.334,
+            "physicsUs": [
+              2617.959,
+              0.291,
+              0.0,
+              868.75,
+              167.584,
+              89.833,
+              3744.459
+            ]
+          },
+          {
+            "stepUs": 7884.916,
+            "physicsUs": [
+              2602.25,
+              0.0,
+              0.041999999999999996,
+              765.875,
+              162.708,
+              91.709,
+              3622.625
+            ]
+          },
+          {
+            "stepUs": 7892.7919999999995,
+            "physicsUs": [
+              2636.708,
+              0.0,
+              0.041999999999999996,
+              747.5,
+              158.958,
+              87.5,
+              3630.75
+            ]
+          },
+          {
+            "stepUs": 7317.2080000000005,
+            "physicsUs": [
+              2609.042,
+              0.041,
+              0.041999999999999996,
+              741.5,
+              165.083,
+              89.83399999999999,
+              3605.5420000000004
+            ]
+          },
+          {
+            "stepUs": 7271.709000000001,
+            "physicsUs": [
+              2599.0420000000004,
+              0.041,
+              0.041999999999999996,
+              732.2919999999999,
+              157.791,
+              88.20899999999999,
+              3577.458
+            ]
+          },
+          {
+            "stepUs": 7315.417,
+            "physicsUs": [
+              2605.416,
+              0.041999999999999996,
+              0.0,
+              749.0,
+              159.75,
+              90.542,
+              3604.75
+            ]
+          },
+          {
+            "stepUs": 7345.334,
+            "physicsUs": [
+              2589.0,
+              0.375,
+              0.0,
+              770.25,
+              166.167,
+              87.666,
+              3613.5
+            ]
+          },
+          {
+            "stepUs": 7904.708999999999,
+            "physicsUs": [
+              2635.4579999999996,
+              0.0,
+              0.041999999999999996,
+              744.208,
+              162.667,
+              89.25,
+              3631.666
+            ]
+          },
+          {
+            "stepUs": 7968.790999999999,
+            "physicsUs": [
+              2609.9159999999997,
+              0.041999999999999996,
+              0.041999999999999996,
+              833.4580000000001,
+              173.542,
+              86.125,
+              3703.1659999999997
+            ]
+          },
+          {
+            "stepUs": 7330.4169999999995,
+            "physicsUs": [
+              2606.625,
+              0.0,
+              0.041999999999999996,
+              755.375,
+              163.583,
+              91.209,
+              3616.8340000000003
+            ]
+          },
+          {
+            "stepUs": 7310.5,
+            "physicsUs": [
+              2596.333,
+              0.041999999999999996,
+              0.0,
+              734.833,
+              159.0,
+              92.209,
+              3582.417
+            ]
+          },
+          {
+            "stepUs": 7306.0,
+            "physicsUs": [
+              2584.167,
+              0.041,
+              0.0,
+              738.0,
+              159.25,
+              88.0,
+              3569.458
+            ]
+          },
+          {
+            "stepUs": 7415.25,
+            "physicsUs": [
+              2621.2090000000003,
+              0.166,
+              0.0,
+              783.625,
+              164.66699999999997,
+              91.25,
+              3660.917
+            ]
+          },
+          {
+            "stepUs": 8935.375,
+            "physicsUs": [
+              3083.375,
+              0.334,
+              0.041,
+              1030.459,
+              188.416,
+              167.959,
+              4470.584
+            ]
+          },
+          {
+            "stepUs": 8550.875,
+            "physicsUs": [
+              2702.834,
+              0.083,
+              0.041999999999999996,
+              811.9159999999999,
+              162.41699999999997,
+              91.667,
+              3768.9590000000003
+            ]
+          },
+          {
+            "stepUs": 7376.75,
+            "physicsUs": [
+              2634.9590000000003,
+              0.0,
+              0.041,
+              787.875,
+              162.334,
+              85.666,
+              3670.917
+            ]
+          },
+          {
+            "stepUs": 7443.792,
+            "physicsUs": [
+              2643.7090000000003,
+              0.041,
+              0.041999999999999996,
+              854.458,
+              161.584,
+              88.583,
+              3748.417
+            ]
+          },
+          {
+            "stepUs": 7307.417,
+            "physicsUs": [
+              2607.125,
+              0.0,
+              0.041999999999999996,
+              759.2919999999999,
+              160.958,
+              76.042,
+              3603.5
+            ]
+          },
+          {
+            "stepUs": 7382.0,
+            "physicsUs": [
+              2669.375,
+              0.334,
+              0.0,
+              766.458,
+              163.458,
+              87.709,
+              3687.375
+            ]
+          },
+          {
+            "stepUs": 7867.542,
+            "physicsUs": [
+              2595.708,
+              0.0,
+              0.041999999999999996,
+              755.875,
+              162.167,
+              92.791,
+              3606.625
+            ]
+          },
+          {
+            "stepUs": 8448.166,
+            "physicsUs": [
+              2745.5,
+              0.08399999999999999,
+              0.041,
+              937.042,
+              189.0,
+              93.75,
+              3965.417
+            ]
+          },
+          {
+            "stepUs": 8392.042000000001,
+            "physicsUs": [
+              2951.875,
+              0.041999999999999996,
+              0.041999999999999996,
+              1005.7499999999999,
+              201.875,
+              126.54100000000001,
+              4286.125
+            ]
+          },
+          {
+            "stepUs": 7832.2919999999995,
+            "physicsUs": [
+              2715.6670000000004,
+              0.083,
+              0.083,
+              869.584,
+              162.916,
+              87.58399999999999,
+              3835.958
+            ]
+          },
+          {
+            "stepUs": 7525.0,
+            "physicsUs": [
+              2653.0,
+              0.041,
+              0.0,
+              798.792,
+              161.625,
+              88.75,
+              3702.2079999999996
+            ]
+          },
+          {
+            "stepUs": 7564.084000000001,
+            "physicsUs": [
+              2637.042,
+              0.375,
+              0.0,
+              875.125,
+              171.333,
+              94.167,
+              3778.042
+            ]
+          },
+          {
+            "stepUs": 8180.375,
+            "physicsUs": [
+              2630.208,
+              0.041999999999999996,
+              0.0,
+              775.9159999999999,
+              168.625,
+              100.334,
+              3675.125
+            ]
+          },
+          {
+            "stepUs": 7907.583,
+            "physicsUs": [
+              2632.084,
+              0.0,
+              0.041,
+              743.209,
+              159.5,
+              98.416,
+              3633.2920000000004
+            ]
+          },
+          {
+            "stepUs": 7387.542,
+            "physicsUs": [
+              2633.042,
+              0.0,
+              0.041999999999999996,
+              765.958,
+              162.333,
+              90.084,
+              3651.4590000000003
+            ]
+          },
+          {
+            "stepUs": 7358.4169999999995,
+            "physicsUs": [
+              2641.4590000000003,
+              0.041,
+              0.0,
+              751.792,
+              163.792,
+              94.208,
+              3651.334
+            ]
+          },
+          {
+            "stepUs": 7290.625,
+            "physicsUs": [
+              2629.583,
+              0.041999999999999996,
+              0.0,
+              730.875,
+              159.625,
+              88.125,
+              3608.25
+            ]
+          },
+          {
+            "stepUs": 7340.083,
+            "physicsUs": [
+              2607.3340000000003,
+              0.375,
+              0.0,
+              769.958,
+              167.208,
+              96.084,
+              3641.0
+            ]
+          },
+          {
+            "stepUs": 7915.8330000000005,
+            "physicsUs": [
+              2621.709,
+              0.0,
+              0.041,
+              764.959,
+              160.916,
+              90.75,
+              3638.417
+            ]
+          },
+          {
+            "stepUs": 7922.999999999999,
+            "physicsUs": [
+              2598.0,
+              0.041999999999999996,
+              0.0,
+              839.125,
+              166.75,
+              88.833,
+              3692.75
+            ]
+          },
+          {
+            "stepUs": 7282.7919999999995,
+            "physicsUs": [
+              2628.833,
+              0.0,
+              0.041999999999999996,
+              722.7909999999999,
+              164.709,
+              87.75,
+              3604.125
+            ]
+          },
+          {
+            "stepUs": 7322.3330000000005,
+            "physicsUs": [
+              2642.4159999999997,
+              0.0,
+              0.041999999999999996,
+              722.708,
+              159.084,
+              88.958,
+              3613.208
+            ]
+          },
+          {
+            "stepUs": 7282.583,
+            "physicsUs": [
+              2583.375,
+              0.041999999999999996,
+              0.0,
+              721.375,
+              164.208,
+              89.625,
+              3558.6670000000004
+            ]
+          },
+          {
+            "stepUs": 7348.917,
+            "physicsUs": [
+              2617.958,
+              0.20900000000000002,
+              0.0,
+              769.0830000000001,
+              164.833,
+              89.292,
+              3641.417
+            ]
+          },
+          {
+            "stepUs": 7898.0419999999995,
+            "physicsUs": [
+              2602.584,
+              0.041,
+              0.0,
+              740.625,
+              159.125,
+              91.459,
+              3593.8340000000003
+            ]
+          },
+          {
+            "stepUs": 7875.625000000001,
+            "physicsUs": [
+              2639.209,
+              0.041,
+              0.041999999999999996,
+              744.5419999999999,
+              163.166,
+              93.542,
+              3640.542
+            ]
+          },
+          {
+            "stepUs": 7397.917,
+            "physicsUs": [
+              2630.333,
+              0.0,
+              0.041999999999999996,
+              774.083,
+              166.542,
+              102.291,
+              3673.333
+            ]
+          },
+          {
+            "stepUs": 7463.833,
+            "physicsUs": [
+              2617.917,
+              0.0,
+              0.041999999999999996,
+              843.3330000000001,
+              166.042,
+              98.5,
+              3725.834
+            ]
+          },
+          {
+            "stepUs": 7300.1669999999995,
+            "physicsUs": [
+              2619.4170000000004,
+              0.041999999999999996,
+              0.0,
+              723.125,
+              165.083,
+              88.667,
+              3596.3340000000003
+            ]
+          },
+          {
+            "stepUs": 7358.291,
+            "physicsUs": [
+              2601.1670000000004,
+              0.167,
+              0.0,
+              752.2909999999999,
+              165.875,
+              92.792,
+              3612.334
+            ]
+          },
+          {
+            "stepUs": 7942.124999999999,
+            "physicsUs": [
+              2636.25,
+              0.041,
+              0.0,
+              755.5840000000001,
+              160.791,
+              88.334,
+              3641.0409999999997
+            ]
+          },
+          {
+            "stepUs": 7828.6669999999995,
+            "physicsUs": [
+              2607.166,
+              0.0,
+              0.041999999999999996,
+              739.958,
+              162.209,
+              95.125,
+              3604.541
+            ]
+          },
+          {
+            "stepUs": 7305.75,
+            "physicsUs": [
+              2597.958,
+              0.0,
+              0.041999999999999996,
+              738.4159999999999,
+              161.917,
+              89.792,
+              3588.125
+            ]
+          },
+          {
+            "stepUs": 7304.2080000000005,
+            "physicsUs": [
+              2617.792,
+              0.0,
+              0.041999999999999996,
+              731.0,
+              161.375,
+              88.125,
+              3598.334
+            ]
+          },
+          {
+            "stepUs": 7307.125,
+            "physicsUs": [
+              2579.5,
+              0.0,
+              0.041,
+              743.667,
+              164.0,
+              90.042,
+              3577.25
+            ]
+          },
+          {
+            "stepUs": 7385.209,
+            "physicsUs": [
+              2596.4590000000003,
+              0.166,
+              0.0,
+              825.917,
+              163.167,
+              89.791,
+              3675.542
+            ]
+          },
+          {
+            "stepUs": 7885.9580000000005,
+            "physicsUs": [
+              2617.083,
+              0.041999999999999996,
+              0.0,
+              746.4159999999999,
+              163.0,
+              94.25,
+              3620.833
+            ]
+          },
+          {
+            "stepUs": 7796.875,
+            "physicsUs": [
+              2603.25,
+              0.041,
+              0.0,
+              731.375,
+              158.875,
+              88.334,
+              3581.875
+            ]
+          },
+          {
+            "stepUs": 7258.25,
+            "physicsUs": [
+              2592.9579999999996,
+              0.0,
+              0.041999999999999996,
+              739.167,
+              160.75,
+              72.625,
+              3565.583
+            ]
+          },
+          {
+            "stepUs": 7287.0,
+            "physicsUs": [
+              2583.8340000000003,
+              0.041,
+              0.0,
+              722.5419999999999,
+              159.0,
+              86.583,
+              3552.042
+            ]
+          },
+          {
+            "stepUs": 7520.041,
+            "physicsUs": [
+              2675.083,
+              0.041999999999999996,
+              0.0,
+              822.0,
+              160.625,
+              100.666,
+              3758.458
+            ]
+          },
+          {
+            "stepUs": 7655.292,
+            "physicsUs": [
+              2713.167,
+              0.29200000000000004,
+              0.0,
+              821.583,
+              174.33300000000003,
+              106.0,
+              3815.375
+            ]
+          },
+          {
+            "stepUs": 8058.0419999999995,
+            "physicsUs": [
+              2659.167,
+              0.0,
+              0.041,
+              777.042,
+              171.583,
+              105.5,
+              3713.375
+            ]
+          },
+          {
+            "stepUs": 8226.667,
+            "physicsUs": [
+              2736.25,
+              0.041,
+              0.0,
+              865.2090000000001,
+              173.0,
+              101.166,
+              3875.7079999999996
+            ]
+          },
+          {
+            "stepUs": 7458.709,
+            "physicsUs": [
+              2665.7909999999997,
+              0.0,
+              0.041999999999999996,
+              781.292,
+              165.416,
+              97.292,
+              3709.833
+            ]
+          },
+          {
+            "stepUs": 7422.75,
+            "physicsUs": [
+              2635.417,
+              0.041,
+              0.0,
+              742.542,
+              161.875,
+              92.625,
+              3632.5
+            ]
+          },
+          {
+            "stepUs": 7418.5,
+            "physicsUs": [
+              2642.583,
+              0.0,
+              0.041999999999999996,
+              758.0,
+              163.833,
+              91.91699999999999,
+              3656.416
+            ]
+          },
+          {
+            "stepUs": 7446.042,
+            "physicsUs": [
+              2634.792,
+              0.41600000000000004,
+              0.041999999999999996,
+              763.625,
+              166.583,
+              91.792,
+              3657.292
+            ]
+          },
+          {
+            "stepUs": 8021.2080000000005,
+            "physicsUs": [
+              2646.3340000000003,
+              0.041,
+              0.041999999999999996,
+              758.625,
+              164.5,
+              96.0,
+              3665.542
+            ]
+          },
+          {
+            "stepUs": 8171.75,
+            "physicsUs": [
+              2740.208,
+              0.0,
+              0.041999999999999996,
+              804.583,
+              166.0,
+              102.667,
+              3813.5
+            ]
+          },
+          {
+            "stepUs": 7721.167,
+            "physicsUs": [
+              2747.958,
+              0.041999999999999996,
+              0.0,
+              822.5,
+              166.583,
+              118.5,
+              3855.625
+            ]
+          },
+          {
+            "stepUs": 7530.125,
+            "physicsUs": [
+              2651.875,
+              0.041999999999999996,
+              0.0,
+              845.8330000000001,
+              160.25,
+              75.708,
+              3733.75
+            ]
+          },
+          {
+            "stepUs": 7314.1669999999995,
+            "physicsUs": [
+              2598.375,
+              0.041999999999999996,
+              0.0,
+              747.542,
+              159.416,
+              92.375,
+              3597.75
+            ]
+          },
+          {
+            "stepUs": 7348.417,
+            "physicsUs": [
+              2616.542,
+              0.166,
+              0.041999999999999996,
+              741.667,
+              164.791,
+              90.0,
+              3613.208
+            ]
+          },
+          {
+            "stepUs": 7873.540999999999,
+            "physicsUs": [
+              2621.125,
+              0.041999999999999996,
+              0.0,
+              740.5,
+              162.042,
+              88.20800000000001,
+              3611.9590000000003
+            ]
+          },
+          {
+            "stepUs": 7846.875,
+            "physicsUs": [
+              2439.5,
+              0.041,
+              0.0,
+              764.0840000000001,
+              160.333,
+              96.667,
+              3460.625
+            ]
+          },
+          {
+            "stepUs": 7423.375,
+            "physicsUs": [
+              2656.083,
+              0.0,
+              0.041999999999999996,
+              753.958,
+              172.625,
+              95.875,
+              3678.625
+            ]
+          },
+          {
+            "stepUs": 7300.542,
+            "physicsUs": [
+              2597.833,
+              0.0,
+              0.041999999999999996,
+              718.708,
+              163.917,
+              91.91600000000001,
+              3572.416
+            ]
+          },
+          {
+            "stepUs": 7343.875,
+            "physicsUs": [
+              2604.125,
+              0.041999999999999996,
+              0.041999999999999996,
+              736.25,
+              161.333,
+              90.417,
+              3592.209
+            ]
+          },
+          {
+            "stepUs": 7434.2080000000005,
+            "physicsUs": [
+              2630.125,
+              0.5,
+              0.041999999999999996,
+              831.2919999999999,
+              165.125,
+              88.291,
+              3715.417
+            ]
+          },
+          {
+            "stepUs": 7909.375,
+            "physicsUs": [
+              2594.917,
+              0.0,
+              0.041999999999999996,
+              758.6659999999999,
+              164.542,
+              90.292,
+              3608.459
+            ]
+          },
+          {
+            "stepUs": 7816.8330000000005,
+            "physicsUs": [
+              2605.375,
+              0.041999999999999996,
+              0.0,
+              752.375,
+              164.458,
+              92.792,
+              3615.0420000000004
+            ]
+          },
+          {
+            "stepUs": 7318.7080000000005,
+            "physicsUs": [
+              2630.25,
+              0.0,
+              0.041,
+              725.542,
+              165.833,
+              89.5,
+              3611.208
+            ]
+          },
+          {
+            "stepUs": 7243.165999999999,
+            "physicsUs": [
+              2579.75,
+              0.041,
+              0.0,
+              728.625,
+              161.292,
+              87.5,
+              3557.208
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "phaseMediansUs": {
+    "sync": 2621.1670000000004,
+    "commands": 0.041999999999999996,
+    "characters": 0.0,
+    "solver": 795.521,
+    "writeback": 164.812,
+    "events": 89.6045,
+    "total": 3675.542
+  },
+  "interpretation": "Synchronization is the largest native physics phase in this native-only workload. Does not include Dart behaviours, graphics, pre-physics core propagation, or subsequent core event publication; not a phone performance qualification. Independently computed medians need not sum to median total.",
+  "validation": {
+    "physicsAndCoreRelease": {
+      "passed": 406,
+      "failed": 0,
+      "ignored": 1
+    },
+    "strippedPhysicsRelease": {
+      "passed": 10,
+      "failed": 0
+    },
+    "allTargetsReleaseClippy": "passed",
+    "finalTransformsAndMotionStatesEqual": true
+  },
+  "sourceSha256": {
+    "crates/fynkel_physics/src/lib.rs": "1f6d6c6e453cbe82fcdb83e29fec73a37785a22fb96f104fa069fad502a9bc1f",
+    "crates/fynkel_physics/src/sim.rs": "d6d5c3fd1ac8bc5648084468eeb651442fc86ab8c28ede491962ef0b14e6f78e",
+    "crates/fynkel_physics/src/stub.rs": "56b765af058a84f94af8d037ea4900792310e5623f5d6589c96e66a1d8813c40",
+    "hosts/headless/examples/physics_profile.rs": "d2f3563c7c5dde464d85b9a2d360ff386ca362cc099000fa6383dff2b6fe3276"
+  },
+  "phone": "No new build or run; previous measured app remains stopped."
+}

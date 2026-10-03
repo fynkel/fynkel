@@ -28,7 +28,13 @@ impl ExtractRenderer {
         let shadow = self.shadow_active;
         let ao = self.ao_active;
         if let Some(timer) = self.gpu_timer.as_mut() {
-            timer.begin_frame(encoder, shadow, ao, present);
+            let depth_resolve = ao
+                && self
+                    .attachments
+                    .ao
+                    .as_ref()
+                    .is_some_and(|a| a.resolved_depth.is_some());
+            timer.begin_frame(encoder, shadow, ao, present, depth_resolve);
         }
         if self.shadow_active {
             self.shadow_pass(encoder);
@@ -276,6 +282,7 @@ impl ExtractRenderer {
         if let Some((view, group)) = &ao.resolved_depth {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("fynkel AO depth resolve"),
+                timestamp_writes: self.screen_space_timestamps(14, 15),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
                     depth_slice: None,
@@ -291,22 +298,12 @@ impl ExtractRenderer {
             pass.set_bind_group(0, group, &[]);
             pass.draw(0..3, 0..1);
         }
-        for (label, target, pipeline, bind_group, timestamps) in [
-            (
-                "fynkel ao",
-                &ao.view,
-                &self.pipelines.ao,
-                &ao.ao_bind_group,
-                self.screen_space_timestamps(11, 12),
-            ),
-            (
-                "fynkel ao blur",
-                &ao.blur_view,
-                &self.pipelines.ao_blur,
-                &ao.blur_bind_group,
-                self.screen_space_timestamps(13, 9),
-            ),
-        ] {
+        {
+            let label = "fynkel ao";
+            let target = &ao.view;
+            let pipeline = &self.pipelines.ao;
+            let bind_group = &ao.ao_bind_group;
+            let timestamps = self.screen_space_timestamps(11, 12);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some(label),
                 timestamp_writes: timestamps,
@@ -327,6 +324,26 @@ impl ExtractRenderer {
             pass.set_bind_group(1, bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
+        let timestamps = self
+            .gpu_timer
+            .as_ref()
+            .map(|timer| wgpu::ComputePassTimestampWrites {
+                query_set: &timer.query_sets[timer.writing],
+                beginning_of_pass_write_index: Some(13),
+                end_of_pass_write_index: Some(9),
+            });
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("fynkel tiled ao blur"),
+            timestamp_writes: timestamps,
+        });
+        pass.set_pipeline(&self.pipelines.ao_blur);
+        pass.set_bind_group(0, &self.ao_frame_bind_group, &[]);
+        pass.set_bind_group(1, &ao.blur_bind_group, &[]);
+        pass.dispatch_workgroups(
+            self.attachments.width.div_ceil(8),
+            self.attachments.height.div_ceil(8),
+            1,
+        );
     }
 
     /// Bloom (R3b): the bright-pass from the HDR frame into level 0, a

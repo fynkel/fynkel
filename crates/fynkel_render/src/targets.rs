@@ -44,17 +44,16 @@ pub(crate) struct Attachments {
 }
 
 /// Ambient occlusion (R2) at the internal size: the SSAO estimate and the
-/// blur that removes its per-pixel rotation, RG8 each. Each pass reads the
-/// target the other writes, so neither is ever bound and attached at once.
+/// blur that removes its per-pixel rotation (RG8 estimate, RGBA8 storage output). Each pass
+/// consumes only its input resources; the compute blur writes its storage output.
 pub(crate) struct AoTargets {
     /// Sample zero copied from MSAA depth; absent for single-sample scenes.
     pub(crate) resolved_depth: Option<(wgpu::TextureView, wgpu::BindGroup)>,
     pub(crate) view: wgpu::TextureView,
     pub(crate) blur_view: wgpu::TextureView,
-    /// Group 1 of the SSAO pass: the scene depth, and `blur_view` (which
-    /// the pass does not read — the layout is shared with the blur).
+    /// Group 1 of the SSAO estimate: only the scene depth.
     pub(crate) ao_bind_group: wgpu::BindGroup,
-    /// Group 1 of the blur: the scene depth and `view`.
+    /// Group 1 of the blur: scene depth, estimate input, and storage output.
     pub(crate) blur_bind_group: wgpu::BindGroup,
 }
 
@@ -168,6 +167,7 @@ pub(crate) fn create_attachments(
         ao: ao_layout,
         bloom: bloom_layout,
         ao_depth_resolve,
+        ao_blur,
     } = layouts;
     let (w, h) = quality.internal_size(width, height);
     let samples = quality.msaa;
@@ -185,7 +185,15 @@ pub(crate) fn create_attachments(
         let ao_usage =
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
         let view = create_attachment(device, "fynkel ao", w, h, 1, AO_FORMAT, ao_usage);
-        let blur_view = create_attachment(device, "fynkel ao blur", w, h, 1, AO_FORMAT, ao_usage);
+        let blur_view = create_attachment(
+            device,
+            "fynkel ao blur",
+            w,
+            h,
+            1,
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+        );
         let resolved_depth = (samples > 1).then(|| {
             let view = create_attachment(
                 device,
@@ -210,20 +218,25 @@ pub(crate) fn create_attachments(
             .as_ref()
             .map_or(&depth_view, |(view, _)| view);
         AoTargets {
-            ao_bind_group: create_ao_bind_group(
-                device,
-                ao_layout,
-                sampled_depth,
-                &blur_view,
-                "fynkel ao bg",
-            ),
-            blur_bind_group: create_ao_bind_group(
-                device,
-                ao_layout,
-                sampled_depth,
-                &view,
-                "fynkel ao blur bg",
-            ),
+            ao_bind_group: create_ao_bind_group(device, ao_layout, sampled_depth, "fynkel ao bg"),
+            blur_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("fynkel tiled ao blur bg"),
+                layout: &ao_blur.get_bind_group_layout(1),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(sampled_depth),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&blur_view),
+                    },
+                ],
+            }),
             resolved_depth,
             view,
             blur_view,
@@ -376,7 +389,7 @@ pub(crate) fn create_attachments(
     });
     // Depth32 × samples, HDR rgba16f × samples when resolved, the HDR
     // resolve, the LDR at render scale (4 bytes a texel), the two AO
-    // targets (two bytes each), optional R32Float depth copy, bloom's chain (rgba16f).
+    // targets (two-byte estimate and four-byte blur output), optional R32Float depth copy, bloom's chain (rgba16f).
     let texels = u64::from(w.max(1)) * u64::from(h.max(1));
     let bytes = texels * 4 * u64::from(samples)
         + if samples > 1 {
@@ -387,7 +400,7 @@ pub(crate) fn create_attachments(
         + texels * 8
         + if ldr_view.is_some() { texels * 4 } else { 0 }
         + if ao.is_some() {
-            texels * (if samples > 1 { 8 } else { 4 })
+            texels * (if samples > 1 { 10 } else { 6 })
         } else {
             0
         }
@@ -531,37 +544,25 @@ pub(crate) fn create_instance_buffer(device: &wgpu::Device, capacity: u32) -> wg
     })
 }
 
-/// Group 1 of the AO passes: single-sample depth (native depth or the
-/// R32Float sample-zero copy), and the other AO target.
+/// Group 1 of the AO estimate: single-sample depth (native depth or the
+/// R32Float sample-zero copy).
 pub(crate) fn create_ao_layout(device: &wgpu::Device, sample_count: u32) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("fynkel ao bgl"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: if sample_count > 1 {
-                        wgpu::TextureSampleType::Float { filterable: false }
-                    } else {
-                        wgpu::TextureSampleType::Depth
-                    },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: if sample_count > 1 {
+                    wgpu::TextureSampleType::Float { filterable: false }
+                } else {
+                    wgpu::TextureSampleType::Depth
                 },
-                count: None,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
             },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            },
-        ],
+            count: None,
+        }],
     })
 }
 
@@ -571,7 +572,7 @@ pub(crate) fn create_ao_frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLa
         label: Some("fynkel ao frame bgl"),
         entries: &[wgpu::BindGroupLayoutEntry {
             binding: 0,
-            visibility: wgpu::ShaderStages::FRAGMENT,
+            visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: false,
@@ -586,22 +587,15 @@ pub(crate) fn create_ao_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     depth: &wgpu::TextureView,
-    other: &wgpu::TextureView,
     label: &str,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some(label),
         layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(depth),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(other),
-            },
-        ],
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::TextureView(depth),
+        }],
     })
 }
 
@@ -689,5 +683,48 @@ pub(crate) fn create_local_light_buffer(device: &wgpu::Device, capacity: usize) 
         size: (capacity.max(1) * std::mem::size_of::<GpuLight>()) as u64,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
+    })
+}
+
+/// RGBA8 is a portable storage output; scene shading consumes its original RG channels.
+pub(crate) fn create_ao_blur_layout(device: &wgpu::Device, samples: u32) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("fynkel tiled ao blur bgl"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: if samples > 1 {
+                        wgpu::TextureSampleType::Float { filterable: false }
+                    } else {
+                        wgpu::TextureSampleType::Depth
+                    },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                },
+                count: None,
+            },
+        ],
     })
 }

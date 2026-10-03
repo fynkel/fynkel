@@ -417,3 +417,17 @@ pub struct PhysicsStats {
     /// Events collected by the last step.
     pub events: u32,
 }
+
+/// Optional timings of the last physics step. Phases do not overlap; `total`
+/// also includes timer/bookkeeping overhead. Excludes the core's preceding
+/// scene propagation and subsequent event publication. Not persisted game state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PhysicsStepProfile {
+    pub sync: std::time::Duration,
+    pub commands: std::time::Duration,
+    pub characters: std::time::Duration,
+    pub solver: std::time::Duration,
+    pub writeback: std::time::Duration,
+    pub events: std::time::Duration,
+    pub total: std::time::Duration,
+}

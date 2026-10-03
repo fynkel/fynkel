@@ -139,6 +139,13 @@ impl Physics {
         false
     }
 
+    /// No physics steps are executed by a stripped runtime.
+    pub fn set_profiling(&mut self, _enabled: bool) {}
+
+    pub fn step_profile(&self) -> Option<crate::PhysicsStepProfile> {
+        None
+    }
+
     pub fn stats(&self) -> PhysicsStats {
         PhysicsStats::default()
     }

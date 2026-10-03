@@ -40,7 +40,7 @@ pub(crate) struct Pipelines {
     pub(crate) mask_skinned_double_sided: wgpu::RenderPipeline,
     /// Screen-space ambient occlusion and its blur.
     pub(crate) ao: wgpu::RenderPipeline,
-    pub(crate) ao_blur: wgpu::RenderPipeline,
+    pub(crate) ao_blur: wgpu::ComputePipeline,
     pub(crate) ao_depth_resolve: wgpu::RenderPipeline,
     /// Bloom (R3b): the bright-pass into the chain's first level, the
     /// downsample between levels, and the upsample blended back over the
@@ -129,6 +129,7 @@ pub(crate) struct AttachmentLayouts<'a> {
     pub(crate) ao: &'a wgpu::BindGroupLayout,
     pub(crate) bloom: &'a wgpu::BindGroupLayout,
     pub(crate) ao_depth_resolve: &'a wgpu::RenderPipeline,
+    pub(crate) ao_blur: &'a wgpu::ComputePipeline,
 }
 
 /// Twenty-seven of the pipeline variants (`docs/renderer.md`) for one sample
@@ -276,6 +277,41 @@ pub(crate) fn create_pipelines(
                 },
             ),
     );
+
+    let blur_shader = module(
+        "fynkel tiled ao blur",
+        &include_str!("shaders/ao_blur.wgsl")
+            .replace(
+                "DEPTH_TEXTURE",
+                if sample_count > 1 {
+                    "texture_2d<f32>"
+                } else {
+                    "texture_depth_2d"
+                },
+            )
+            .replace(
+                "DEPTH_LOAD",
+                if sample_count > 1 {
+                    "textureLoad(depth_tex, c, 0).x"
+                } else {
+                    "textureLoad(depth_tex, c, 0)"
+                },
+            ),
+    );
+    let blur_layout = create_ao_blur_layout(device, sample_count);
+    let blur_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("fynkel tiled ao blur layout"),
+        bind_group_layouts: &[Some(ao_frame_layout), Some(&blur_layout)],
+        ..Default::default()
+    });
+    let ao_blur = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("fynkel tiled ao blur"),
+        layout: Some(&blur_pl),
+        module: &blur_shader,
+        entry_point: Some("cs_main"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
 
     // Group 2 (the joint palettes) is part of every mesh layout so the
     // passes bind it once; the static stages simply never read it.
@@ -706,7 +742,7 @@ pub(crate) fn create_pipelines(
             None,
         ),
         ao: ao_pipeline("fynkel ao pipeline", "fs_main"),
-        ao_blur: ao_pipeline("fynkel ao blur pipeline", "fs_blur"),
+        ao_blur,
         ao_depth_resolve: create_ao_depth_resolve(device),
         bloom_prefilter: bloom_pipeline(
             "fynkel bloom prefilter pipeline",
@@ -761,8 +797,54 @@ fn create_ao_depth_resolve(device: &wgpu::Device) -> wgpu::RenderPipeline {
 }
 
 #[cfg(test)]
-mod depth_resolve_tests {
+mod screen_space_tests {
     use super::*;
+
+    #[test]
+    fn ao_kernel_preserves_reference_hemisphere_across_dither_rotations() {
+        let source = include_str!("shaders/ao.wgsl");
+        let table = source
+            .split("const AO_KERNEL =")
+            .nth(1)
+            .unwrap()
+            .split(");")
+            .next()
+            .unwrap();
+        let points: Vec<Vec<f32>> = table
+            .lines()
+            .filter_map(|line| {
+                let coordinates = line.trim().strip_prefix("vec3<f32>(")?.strip_suffix("),")?;
+                Some(
+                    coordinates
+                        .split(',')
+                        .map(|v| v.trim().parse().unwrap())
+                        .collect(),
+                )
+            })
+            .collect();
+        assert_eq!(points.len(), 12);
+        for (i, k) in points.iter().enumerate() {
+            assert_eq!(k.len(), 3);
+            let a = (i as f32 + 0.5) / 12.0;
+            let radius = 0.2 + 0.8 * a * a;
+            for angle in 0..1024 {
+                let rotation = angle as f32 * std::f32::consts::TAU / 1024.0;
+                let phi = rotation + i as f32 * 2.399_963_1;
+                let reference =
+                    glam::Vec3::new(phi.cos() * a.sqrt(), phi.sin() * a.sqrt(), (1.0 - a).sqrt())
+                        * radius;
+                let actual = glam::Vec3::new(
+                    rotation.cos() * k[0] - rotation.sin() * k[1],
+                    rotation.sin() * k[0] + rotation.cos() * k[1],
+                    k[2],
+                );
+                assert!(
+                    (reference - actual).abs().max_element() < 3e-6,
+                    "sample {i}, rotation {rotation}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn ao_depth_copy_preserves_sample_zero_at_odd_and_single_pixel_sizes() {

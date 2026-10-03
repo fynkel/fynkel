@@ -76,6 +76,53 @@ class ClockProbe extends Behaviour {
 void main() {
   late NativeLibrary lib;
   setUpAll(() => lib = NativeLibrary.open());
+
+  test(
+    'opt-in tick timings cover catch-up after callback transactions close',
+    () {
+      final world = World.create(library: lib);
+      addTearDown(world.dispose);
+      final probe = world
+          .spawn(name: 'timed callbacks')
+          .addBehaviour(DeltaProbe());
+      world.frameTimes.collectTickTimes = true;
+      final start = world.tick;
+      final plan = world.frame((1 / 60) * 3.1,
+          fixedUpdate: (_) => world.frameTimes.collectTickTimes = false);
+      expect(plan.steps, 3);
+      final samples = world.frameTimes.tickTimes;
+      expect(samples.map((s) => s.tick).toList(), [
+        start,
+        start + 1,
+        start + 2,
+      ]);
+      expect(
+        samples.every((s) => s.systems.isNotEmpty && s.readbackUs >= 0),
+        isTrue,
+      );
+      for (final sample in samples) {
+        expect(sample.stagesUs.keys, unorderedEquals([
+          'subscriptions', 'bridgeStep', 'observation', 'snapshotCopy',
+          'snapshotIndex', 'diagnostics', 'eventDrain',
+        ]));
+        expect(sample.stagesUs.values.every((us) => us >= 0), isTrue);
+        expect(() => sample.stagesUs.clear(), throwsUnsupportedError);
+      }
+      expect(probe.seen.where((v) => v.$1 == 'afterPhysics').length, 3);
+      expect(() => samples.clear(), throwsUnsupportedError);
+      expect(() => samples.first.systems.clear(), throwsUnsupportedError);
+      world.frame(0);
+      expect(world.frameTimes.tickTimes, isEmpty);
+      expect(samples.length, 3);
+      world.frameTimes.collectTickTimes = true;
+      world.stepFrame();
+      expect(world.frameTimes.tickTimes.length, 1);
+      world.frameTimes.collectTickTimes = false;
+      world.stepFrame();
+      expect(world.frameTimes.tickTimes, isEmpty);
+    },
+  );
+
   tearDownAll(() => lib.dispose());
 
   World world() =>

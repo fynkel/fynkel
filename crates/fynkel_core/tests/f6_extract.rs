@@ -51,6 +51,96 @@ fn compact_snapshot_tracks_membership_dependencies_and_owns_its_data() {
 }
 
 #[test]
+fn render_membership_ignores_value_churn_but_extracts_fresh_values() {
+    let mut world = World::new(Default::default());
+    let e = fynkel_scene::spawn(world.ecs_mut(), Transform::IDENTITY, None).unwrap();
+    world.ecs_mut().insert(e, MeshRenderer::default()).unwrap();
+    world.refresh_physics();
+    let mut frame = Extract::default();
+    world.extract_into(&mut frame, false);
+    let published = frame.clone();
+
+    // Exceed the ECS journal's retained history with value-only changes.
+    for _ in 0..20000 {
+        world.ecs().get_mut::<Transform>(e).unwrap().position.x += 1.0;
+    }
+    world.ecs().get_mut::<MeshRenderer>(e).unwrap().visible = false;
+    world.refresh_physics();
+    world.extract_into(&mut frame, false);
+    assert_eq!(world.render_membership_candidates(), 0);
+    assert_eq!(frame.records.len(), 1);
+    assert_eq!(frame.records[0].world.w_axis.x, 20000.0);
+    assert!(frame.meshes.is_empty());
+    assert_eq!(published.records[0].world.w_axis.x, 0.0);
+    assert_eq!(published.meshes.len(), 1);
+
+    world.ecs().get_mut::<MeshRenderer>(e).unwrap().visible = true;
+    world.ecs().get_mut::<MeshRenderer>(e).unwrap().cast_shadows = false;
+    world.extract_into(&mut frame, false);
+    assert_eq!(world.render_membership_candidates(), 0);
+    assert_eq!(frame.meshes.len(), 1);
+    assert!(!frame.meshes[0].cast_shadows);
+}
+
+#[test]
+fn render_membership_tracks_structure_after_value_history_overflow() {
+    let mut world = World::new(Default::default());
+    let e = fynkel_scene::spawn(world.ecs_mut(), Transform::IDENTITY, None).unwrap();
+    world.ecs_mut().insert(e, MeshRenderer::default()).unwrap();
+    world.refresh_physics();
+    let mut frame = Extract::default();
+    world.extract_into(&mut frame, false);
+
+    let other = fynkel_scene::spawn(world.ecs_mut(), Transform::IDENTITY, None).unwrap();
+    world
+        .ecs_mut()
+        .insert(other, PointLight::default())
+        .unwrap();
+    world.extract_into(&mut frame, false);
+    world.ecs_mut().remove::<MeshRenderer>(e).unwrap();
+    for _ in 0..20000 {
+        world.ecs().get_mut::<Transform>(e).unwrap().position.x += 1.0;
+    }
+    world.extract_into(&mut frame, false);
+    assert_eq!(world.render_membership_candidates(), 1);
+    assert_eq!(frame.records.len(), 1);
+    assert_eq!(frame.records[0].entity, other);
+    world.ecs_mut().despawn(other).unwrap();
+    world.ecs_mut().insert(e, MeshRenderer::default()).unwrap();
+    world.extract_into(&mut frame, false);
+    assert_eq!(frame.meshes.len(), 1);
+
+    world.ecs_mut().insert(e, fynkel_scene::Inactive).unwrap();
+    world.extract_into(&mut frame, true);
+    assert!(frame.records.is_empty());
+    world.ecs_mut().remove::<fynkel_scene::Inactive>(e).unwrap();
+    world.extract_into(&mut frame, false);
+    assert_eq!(frame.meshes.len(), 1);
+
+    let pose = world
+        .ecs_mut()
+        .remove::<fynkel_scene::WorldTransform>(e)
+        .unwrap();
+    world.extract_into(&mut frame, true);
+    assert!(frame.records.is_empty());
+    world.ecs_mut().insert(e, pose).unwrap();
+    world.extract_into(&mut frame, false);
+    assert_eq!(frame.meshes.len(), 1);
+
+    world.ecs_mut().despawn(e).unwrap();
+    let replacement = fynkel_scene::spawn(world.ecs_mut(), Transform::IDENTITY, None).unwrap();
+    world
+        .ecs_mut()
+        .insert(replacement, PointLight::default())
+        .unwrap();
+    world.extract_into(&mut frame, false);
+    assert_eq!(frame.records.len(), 1);
+    assert_eq!(frame.records[0].entity, replacement);
+    assert!(frame.meshes.is_empty());
+    assert_eq!(frame.point_lights.len(), 1);
+}
+
+#[test]
 #[ignore = "manual foundation extraction qualification"]
 fn extraction_qualification() {
     let mut world = World::new(Default::default());
@@ -71,9 +161,19 @@ fn extraction_qualification() {
     let mut frame = Extract::default();
     world.extract_into(&mut frame, false);
     let mut results = Vec::new();
-    for (name, count) in [("static", 0), ("sparse", 1), ("dense", 10000)] {
+    for (name, count) in [
+        ("static", 0),
+        ("sparse", 1),
+        ("dense", 10000),
+        ("dense_churn", 10000),
+    ] {
         let mut samples = Vec::new();
+        let mut candidates = Vec::new();
         for _ in 0..60 {
+            if name == "dense_churn" {
+                let transient = world.ecs_mut().spawn_empty();
+                world.ecs_mut().despawn(transient).unwrap();
+            }
             for &e in &entities[..count] {
                 world.ecs().get_mut::<Transform>(e).unwrap().position.y += 0.01;
             }
@@ -81,10 +181,11 @@ fn extraction_qualification() {
             let start = std::time::Instant::now();
             world.extract_into(&mut frame, false);
             samples.push(start.elapsed().as_secs_f64() * 1e6);
+            candidates.push(world.render_membership_candidates());
             assert_eq!(frame.records.len(), 1000);
         }
         samples.sort_by(f64::total_cmp);
-        results.push(serde_json::json!({"mode":name,"entities":10000,"render_records":1000,"samples_us":samples}));
+        results.push(serde_json::json!({"mode":name,"entities":10000,"render_records":1000,"samples_us":samples,"membership_candidates":candidates}));
     }
     let value = serde_json::json!({"extract":results});
     if let Ok(path) = std::env::var("FYNKEL_F6_EXTRACT_OUT") {

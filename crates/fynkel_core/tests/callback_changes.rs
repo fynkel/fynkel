@@ -42,10 +42,25 @@ fn callback_changes_ignore_pose_traffic_and_cover_native_activity_and_hierarchy(
     }
     let overflow = world.callback_changes_since(token).unwrap();
     assert!(
-        overflow.reset,
-        "evicted relevant activity must force reconciliation"
+        !overflow.reset,
+        "activity membership survives in structural history"
     );
+    assert!(overflow.entities.contains(&parent));
+    assert!(overflow.entities.contains(&child));
     let token = overflow.cursor.token();
+    // An overwritten name is a value change, not recoverable membership.
+    world
+        .edit_gameplay(|edit| edit.set_name(child, "renamed"))
+        .unwrap();
+    for _ in 0..20_000 {
+        world.ecs().get_mut::<Transform>(child).unwrap().position.x += 1.0;
+    }
+    let lost_name = world.callback_changes_since(token).unwrap();
+    assert!(
+        lost_name.reset,
+        "evicted relevant values still force reconciliation"
+    );
+    let token = lost_name.cursor.token();
     world.edit_gameplay(|edit| edit.destroy(parent)).unwrap();
     let destroyed = world.callback_changes_since(token).unwrap();
     assert!(destroyed.entities.contains(&parent));

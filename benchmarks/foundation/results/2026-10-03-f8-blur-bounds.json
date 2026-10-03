@@ -1,0 +1,216 @@
+{
+  "status": "Retained: clipped blur bounds and predicated accumulation",
+  "sustainedQualification": false,
+  "device": "iPhone 16 Pro Max / A18 Pro",
+  "workload": "dense-5000, medium, 1320x2868, MSAA4; AO/contact shadows/bloom retained",
+  "change": "Clip the 4x4 footprint once per output, reuse its shared-memory base and threshold, replace per-tap divergent acceptance with select. Same 16 samples, row-major accumulation, radial-depth threshold, 8x8 workgroups and 11x11 shared tile.",
+  "sequence": [
+    "baseline",
+    "candidate",
+    "control",
+    "repeat",
+    "live"
+  ],
+  "summaries": {
+    "baseline": {
+      "status": "diagnostic-complete",
+      "pid": 2904,
+      "terminatedExactPid": 2904,
+      "captureIdMatched": true,
+      "stopReason": "deadline",
+      "elapsedMs": 8004,
+      "frozenScene": true,
+      "simulationTicks": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120
+      ],
+      "stageMedianUs": {
+        "depthUs": 548.5,
+        "resolveUs": 812.5,
+        "estimateUs": 6544.0,
+        "blurUs": 4167.0,
+        "totalUs": 10503.0
+      },
+      "gpuSamples": 50,
+      "gpuFrameWindowP50MedianMs": 19.060000000000002,
+      "acquiredFpsMedian": 50.99964352273906,
+      "measurementThermal": [
+        "nominal"
+      ],
+      "allThermal": [
+        "nominal"
+      ],
+      "excludedStartupWindows": 0
+    },
+    "candidate": {
+      "status": "diagnostic-complete",
+      "pid": 2915,
+      "terminatedExactPid": 2915,
+      "captureIdMatched": true,
+      "stopReason": "deadline",
+      "elapsedMs": 8006,
+      "frozenScene": true,
+      "simulationTicks": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120
+      ],
+      "stageMedianUs": {
+        "depthUs": 551,
+        "resolveUs": 822,
+        "estimateUs": 6551,
+        "blurUs": 3723,
+        "totalUs": 10395
+      },
+      "gpuSamples": 51,
+      "gpuFrameWindowP50MedianMs": 18.735999999999997,
+      "acquiredFpsMedian": 51.99233167724148,
+      "measurementThermal": [
+        "nominal"
+      ],
+      "allThermal": [
+        "nominal"
+      ],
+      "excludedStartupWindows": 0
+    },
+    "control": {
+      "status": "diagnostic-complete",
+      "pid": 2918,
+      "terminatedExactPid": 2918,
+      "captureIdMatched": true,
+      "stopReason": "deadline",
+      "elapsedMs": 8004,
+      "frozenScene": true,
+      "simulationTicks": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120
+      ],
+      "stageMedianUs": {
+        "depthUs": 548.5,
+        "resolveUs": 813.5,
+        "estimateUs": 6551.5,
+        "blurUs": 4080.0,
+        "totalUs": 10287.0
+      },
+      "gpuSamples": 50,
+      "gpuFrameWindowP50MedianMs": 19.182000000000002,
+      "acquiredFpsMedian": 50.99061784872178,
+      "measurementThermal": [
+        "nominal"
+      ],
+      "allThermal": [
+        "nominal"
+      ],
+      "excludedStartupWindows": 0
+    },
+    "repeat": {
+      "status": "diagnostic-complete",
+      "pid": 2919,
+      "terminatedExactPid": 2919,
+      "captureIdMatched": true,
+      "stopReason": "deadline",
+      "elapsedMs": 8004,
+      "frozenScene": true,
+      "simulationTicks": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120
+      ],
+      "stageMedianUs": {
+        "depthUs": 553,
+        "resolveUs": 818,
+        "estimateUs": 6574,
+        "blurUs": 3751,
+        "totalUs": 10419
+      },
+      "gpuSamples": 51,
+      "gpuFrameWindowP50MedianMs": 18.668,
+      "acquiredFpsMedian": 51.99641255579911,
+      "measurementThermal": [
+        "nominal"
+      ],
+      "allThermal": [
+        "nominal",
+        "unknown"
+      ],
+      "excludedStartupWindows": 1
+    },
+    "live": {
+      "status": "diagnostic-complete",
+      "pid": 2921,
+      "terminatedExactPid": 2921,
+      "captureIdMatched": true,
+      "stopReason": "deadline",
+      "elapsedMs": 8009,
+      "frozenScene": false,
+      "simulationTicks": [
+        54,
+        114,
+        174,
+        234,
+        294,
+        354,
+        414,
+        474
+      ],
+      "stageMedianUs": {
+        "depthUs": 578.0,
+        "resolveUs": 874.5,
+        "estimateUs": 5947.0,
+        "blurUs": 3764.0,
+        "totalUs": 9778.5
+      },
+      "gpuSamples": 32,
+      "gpuFrameWindowP50MedianMs": 16.8015,
+      "acquiredFpsMedian": 27.92552544849741,
+      "measurementThermal": [
+        "nominal"
+      ],
+      "allThermal": [
+        "nominal"
+      ],
+      "excludedStartupWindows": 0
+    }
+  },
+  "validation": {
+    "rendererReleasePassed": 97,
+    "rendererReleaseIgnored": 5,
+    "imagesCompared": 63,
+    "imagesByteIdentical": 63,
+    "scalarCases": "12 dimensions x identity/perspective/orthographic (36 cases); original 1-byte output tolerance retained",
+    "clippy": "release all targets passed, warnings denied; deprecated test camera constructors corrected to existing engine conventions",
+    "finalLiveBuild": "release built, installed; simulation advanced; exact PID stopped"
+  },
+  "limitations": [
+    "Four frozen eight-second diagnostics establish a small local GPU improvement, not sustained performance.",
+    "Stage spans overlap; do not add them or treat them as exclusive shader execution costs.",
+    "Window-p50 summaries are not pooled per-frame percentiles.",
+    "Repeat contained one zero-frame startup window without GPU/acquisition measurements; excluded from timing medians and preserved in raw evidence. Startup thermal was unknown; timed windows nominal.",
+    "Final live scene still acquired about 28 fresh textures per second; GPU isolation results do not establish gameplay FPS."
+  ],
+  "shaderSha256": "0189395230f36553528f49830c2e2f7fbb12f306ce4ebb3f92ecd2008270e427",
+  "raw": "2026-10-03-f8-blur-bounds-raw.json"
+}

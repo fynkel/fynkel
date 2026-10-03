@@ -7,7 +7,7 @@
 // Green, contact shadows (R3d, §"Contact shadows"): whether a short march
 // toward the sun meets something the shadow map is too coarse to see; the
 // mesh pass darkens the sun's light by it. `fs_main` is the estimate,
-// `fs_blur` removes its per-pixel dither. An effect that is off (its
+// The tiled compute blur removes its per-pixel dither. An effect that is off (its
 // intensity 0 in `frame`) leaves its channel at 1.
 //
 // Group 0 is the frame uniform alone — not the mesh pass's group 0, whose
@@ -16,20 +16,11 @@
 // MSAA sample zero is copied once into R32Float; single-sample scenes
 // read their depth texture directly. Both paths preserve the same depth.
 @group(1) @binding(0) var depth_tex: DEPTH_TEXTURE;
-// The SSAO estimate, read by `fs_blur` (`fs_main` never reads it: the
-// pass writes the other half of the pair).
-@group(1) @binding(1) var ao_source: texture_2d<f32>;
-
 // Samples per pixel of the hemisphere and how far a sample must be in
 // front of the surface to occlude it. The hemisphere's radius and the
 // exponent the result is shaped by are the volumes' (R3a): `frame.ao`.
 const AO_SAMPLES: u32 = 12u;
 const AO_BIAS: f32 = 0.02;
-// Half the blur's square side, and how far apart two taps may be along
-// the view ray (a fraction of their distance) before they are taken to be
-// different surfaces.
-const AO_BLUR: i32 = 2;
-const AO_BLUR_DEPTH: f32 = 0.02;
 // Steps of the contact-shadow march, and the smallest gap (in pixel
 // footprints at the point) a step must be behind the drawn surface
 // before it counts: the depth is a pixel's centre, the step anywhere in
@@ -60,14 +51,31 @@ fn world_at(uv: vec2<f32>, depth: f32) -> vec3<f32> {
     return p.xyz / p.w;
 }
 
-/// One hemisphere sample about +Z: a golden-angle spiral whose points
-/// crowd toward the origin, so near contact is sampled densely.
-fn kernel(i: u32, rotation: f32) -> vec3<f32> {
-    let a = (f32(i) + 0.5) / f32(AO_SAMPLES);
-    let phi = rotation + f32(i) * 2.39996323;
-    let sin_t = sqrt(a);
-    let cos_t = sqrt(1.0 - a);
-    return vec3<f32>(cos(phi) * sin_t, sin(phi) * sin_t, cos_t) * mix(0.2, 1.0, a * a);
+// The same twelve golden-angle hemisphere points, evaluated once rather than
+// rebuilding their fixed angle/radius at every pixel. Only the pixel's dither
+// rotation varies; apply it with one shared sine/cosine pair.
+const AO_KERNEL = array<vec3<f32>, 12>(
+    vec3<f32>(0.0411083348, 0.0000000000, 0.1971486479),
+    vec3<f32>(-0.0553985942, 0.0507496503, 0.1987755487),
+    vec3<f32>(0.0093664029, -0.1067253289, 0.2088456278),
+    vec3<f32>(0.0880815921, 0.1148868395, 0.2256023673),
+    vec3<f32>(-0.1884410610, -0.0333325706, 0.2470529422),
+    vec3<f32>(0.2102425478, -0.1337390990, 0.2708815543),
+    vec3<f32>(-0.0830595911, 0.3089775369, 0.2943083357),
+    vec3<f32>(-0.1867442352, -0.3595646630, 0.3138408733),
+    vec3<f32>(0.4754319985, 0.1736270045, 0.3247871206),
+    vec3<f32>(-0.5768520222, 0.2381161275, 0.3201387634),
+    vec3<f32>(0.3221331968, -0.6883799258, 0.2872621299),
+    vec3<f32>(0.2738572002, 0.8730999171, 0.1907993746),
+);
+
+fn kernel(i: u32, rotation: vec2<f32>) -> vec3<f32> {
+    let k = AO_KERNEL[i];
+    return vec3<f32>(
+        rotation.x * k.x - rotation.y * k.y,
+        rotation.y * k.x + rotation.x * k.y,
+        k.z,
+    );
 }
 
 /// Interleaved gradient noise: the per-pixel rotation the blur averages
@@ -123,7 +131,7 @@ fn fs_main(in: AoOut) -> @location(0) vec4<f32> {
 
     var ao = 1.0;
     if frame.ao.y > 0.0 {
-        ao = ambient_occlusion(p, n, t, b, rotation, size, texel);
+        ao = ambient_occlusion(p, n, t, b, vec2<f32>(cos(rotation), sin(rotation)), size, texel);
     }
     var contact = 1.0;
     if frame.contact.x > 0.0 {
@@ -137,7 +145,7 @@ fn ambient_occlusion(
     n: vec3<f32>,
     t: vec3<f32>,
     b: vec3<f32>,
-    rotation: f32,
+    rotation: vec2<f32>,
     size: vec2<i32>,
     texel: vec2<f32>,
 ) -> f32 {
@@ -227,35 +235,4 @@ fn contact_shadow(
         }
     }
     return 1.0;
-}
-
-@fragment
-fn fs_blur(in: AoOut) -> @location(0) vec4<f32> {
-    let size = vec2<i32>(textureDimensions(depth_tex));
-    let c = vec2<i32>(in.clip.xy);
-    let texel = 1.0 / vec2<f32>(size);
-    let eye = frame.camera_pos.xyz;
-    let d0 = depth_at(c);
-    let r0 = distance(world_at((vec2<f32>(c) + 0.5) * texel, d0), eye);
-    var sum = vec2<f32>(0.0);
-    var weight = 0.0;
-    for (var y = -AO_BLUR; y < AO_BLUR; y++) {
-        for (var x = -AO_BLUR; x < AO_BLUR; x++) {
-            let s = c + vec2<i32>(x, y);
-            if any(s < vec2<i32>(0)) || any(s >= size) {
-                continue;
-            }
-            let d = depth_at(s);
-            let r = distance(world_at((vec2<f32>(s) + 0.5) * texel, d), eye);
-            if abs(r - r0) > AO_BLUR_DEPTH * max(r0, 1.0) {
-                continue;
-            }
-            sum += textureLoad(ao_source, s, 0).rg;
-            weight += 1.0;
-        }
-    }
-    if weight <= 0.0 {
-        return vec4<f32>(textureLoad(ao_source, c, 0).rg, 0.0, 1.0);
-    }
-    return vec4<f32>(sum / weight, 0.0, 1.0);
 }

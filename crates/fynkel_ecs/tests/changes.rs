@@ -304,3 +304,142 @@ fn dense_unrelated_writes_do_not_force_clean_consumers_to_reset() {
             .reset
     );
 }
+
+#[test]
+fn structural_history_survives_value_overflow_and_tracks_exact_generations() {
+    let mut w = World::new();
+    let a = w.spawn(EntityBuilder::new().with(0_i32));
+    let cursor = w.change_cursor();
+    w.insert(a, true).unwrap();
+    for i in 0..20000 {
+        w.insert(a, i).unwrap();
+    }
+    // Bulk value writes also leave membership unchanged.
+    for value in w.query_mut::<&mut i32>() {
+        *value = 1;
+    }
+    let delta = w.changes_since(cursor, &[], true).unwrap();
+    assert!(!delta.reset);
+    assert_eq!(delta.entities, vec![a]);
+    // Independent consumers can replay the same structural event.
+    assert_eq!(
+        w.changes_since(cursor, &[], true).unwrap().entities,
+        vec![a]
+    );
+    let cursor = Some(delta.cursor);
+    w.remove::<bool>(a).unwrap();
+    w.despawn(a).unwrap();
+    let b = w.spawn_empty();
+    assert_eq!(a.slot(), b.slot());
+    let delta = w.changes_since(cursor, &[], true).unwrap();
+    assert!(!delta.reset);
+    assert_eq!(delta.entities, vec![a, b]);
+    assert!(w
+        .changes_since(Some(delta.cursor), &[], true)
+        .unwrap()
+        .entities
+        .is_empty());
+    assert!(
+        w.changes_since(World::new().change_cursor(), &[], true)
+            .unwrap()
+            .reset
+    );
+    assert!(w.changes_since(None, &[], true).unwrap().reset);
+}
+
+#[test]
+fn structural_history_resets_on_its_own_overflow_and_waits_for_writers() {
+    let mut w = World::new();
+    let a = w.spawn(EntityBuilder::new().with(0_i32));
+    let cursor = w.change_cursor();
+    for _ in 0..9000 {
+        w.insert(a, true).unwrap();
+        w.remove::<bool>(a).unwrap();
+    }
+    assert!(w.changes_since(cursor, &[], true).unwrap().reset);
+    let cursor = w.change_cursor();
+    let guard = w.get_mut::<i32>(a).unwrap();
+    assert!(w.changes_since(cursor, &[], true).is_none());
+    drop(guard);
+    let delta = w.changes_since(cursor, &[], true).unwrap();
+    assert!(!delta.reset);
+    assert!(delta.entities.is_empty());
+}
+
+#[test]
+fn sparse_component_membership_survives_unrelated_value_history_overflow() {
+    use std::any::TypeId;
+    let mut w = World::new();
+    let moving = w.spawn(EntityBuilder::new().with(0_i32));
+    let cursor = w.change_cursor();
+    let owner = w.spawn_empty();
+    w.insert(owner, true).unwrap();
+    w.insert(moving, 1_u8).unwrap(); // Unrelated component membership.
+    for i in 0..20000 {
+        w.insert(moving, i).unwrap();
+    }
+    for all_structure in [false, true] {
+        let delta = w
+            .changes_since(cursor, &[TypeId::of::<bool>()], all_structure)
+            .unwrap();
+        assert!(
+            !delta.reset,
+            "unrelated pose traffic lost no selected values"
+        );
+        assert_eq!(
+            delta.entities,
+            if all_structure {
+                vec![moving, owner]
+            } else {
+                vec![owner]
+            }
+        );
+    }
+    w.despawn(owner).unwrap();
+    let replacement = w.spawn_empty();
+    w.insert(replacement, false).unwrap();
+    let delta = w
+        .changes_since(cursor, &[TypeId::of::<bool>()], false)
+        .unwrap();
+    assert!(!delta.reset);
+    assert_eq!(delta.entities, vec![owner, replacement]);
+}
+
+#[test]
+fn overflow_recovery_keeps_retained_values_and_resets_for_lost_selected_values() {
+    use std::any::TypeId;
+    let mut w = World::new();
+    let moving = w.spawn(EntityBuilder::new().with(0_i32).with(false));
+    let cursor = w.change_cursor();
+    let spawned = w.spawn_empty();
+    for i in 0..20000 {
+        w.insert(moving, i).unwrap();
+    }
+    w.insert(moving, true).unwrap();
+    let delta = w
+        .changes_since(cursor, &[TypeId::of::<bool>()], false)
+        .unwrap();
+    assert!(!delta.reset);
+    assert_eq!(delta.entities, vec![moving, spawned]);
+    for i in 0..20000 {
+        w.insert(moving, i).unwrap();
+    }
+    assert!(
+        w.changes_since(cursor, &[TypeId::of::<bool>()], false)
+            .unwrap()
+            .reset
+    );
+    // A lost unenumerated bulk write must also force a rebuild.
+    let cursor = w.change_cursor();
+    for value in w.query_mut::<&mut bool>() {
+        *value = false;
+    }
+    for i in 0..20000 {
+        w.insert(moving, i).unwrap();
+    }
+    assert!(
+        w.changes_since(cursor, &[TypeId::of::<bool>()], false)
+            .unwrap()
+            .reset
+    );
+}

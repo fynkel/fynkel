@@ -13,6 +13,7 @@ pub(crate) struct TimestampSlot {
     pub(crate) shadow: bool,
     pub(crate) ao: bool,
     pub(crate) present: bool,
+    pub(crate) depth_resolve: bool,
 }
 
 /// Pass timestamps (`wgpu::Features::TIMESTAMP_QUERY`, M3-16): a frame's
@@ -29,12 +30,13 @@ pub(crate) struct GpuTimer {
     /// frame's stamps until `draw` resolves it.
     pub(crate) writing: usize,
     /// The previous frame's pass flags, resolved with its set.
-    pub(crate) pending: Option<(bool, bool, bool)>,
+    pub(crate) pending: Option<(bool, bool, bool, bool)>,
     pub(crate) resolve: wgpu::Buffer,
     pub(crate) slots: Vec<TimestampSlot>,
     pub(crate) next: usize,
     pub(crate) untimed: u32,
     trace_screen_space: bool,
+    screen_space_file: Option<std::fs::File>,
     traced_frames: u64,
 }
 
@@ -66,6 +68,7 @@ impl GpuTimer {
                 shadow: false,
                 ao: false,
                 present: false,
+                depth_resolve: false,
             })
             .collect();
         Self {
@@ -77,6 +80,7 @@ impl GpuTimer {
             next: 0,
             untimed: 0,
             trace_screen_space: std::env::var_os("FYNKEL_TRACE_SCREEN_SPACE").is_some(),
+            screen_space_file: screen_space_trace_file(),
             traced_frames: 0,
         }
     }
@@ -111,9 +115,10 @@ impl GpuTimer {
         shadow: bool,
         ao: bool,
         present: bool,
+        depth_resolve: bool,
     ) {
         use std::sync::atomic::Ordering;
-        if let Some((shadow, ao, present)) = self.pending.take() {
+        if let Some((shadow, ao, present, depth_resolve)) = self.pending.take() {
             let previous = 1 - self.writing;
             let i = self.next;
             let slot = &mut self.slots[i];
@@ -136,12 +141,13 @@ impl GpuTimer {
                 slot.shadow = shadow;
                 slot.ao = ao;
                 slot.present = present;
+                slot.depth_resolve = depth_resolve;
                 slot.state.store(1, Ordering::Release);
                 self.next = (i + 1) % TIMESTAMP_SLOTS;
             }
         }
         self.writing = 1 - self.writing;
-        self.pending = Some((shadow, ao, present));
+        self.pending = Some((shadow, ao, present, depth_resolve));
     }
 
     /// Reads back what has arrived and asks for what has been submitted:
@@ -182,16 +188,35 @@ impl GpuTimer {
                     } else {
                         0
                     };
-                    if slot.ao && self.trace_screen_space {
+                    if slot.ao && (self.trace_screen_space || self.screen_space_file.is_some()) {
                         self.traced_frames += 1;
                         if self.traced_frames.is_multiple_of(8) {
-                            eprintln!(
-                                "screen_space_us depth={} estimate={} blur={} total={}",
-                                span(8, 10),
-                                span(11, 12),
-                                span(13, 9),
-                                ao
+                            let sample = self.traced_frames;
+                            let depth = span(8, 10);
+                            let resolve = if slot.depth_resolve { span(14, 15) } else { 0 };
+                            let estimate = span(11, 12);
+                            let blur = span(13, 9);
+                            let line = format!(
+                                "screen_space_us sample={sample} depth={depth} resolve={resolve} estimate={estimate} blur={blur} total={ao}"
                             );
+                            if self.trace_screen_space {
+                                eprintln!(
+                                    "screen_space_us depth={} estimate={} blur={} total={}",
+                                    span(8, 10),
+                                    span(11, 12),
+                                    span(13, 9),
+                                    ao
+                                );
+                            }
+                            if let Some(file) = self.screen_space_file.as_mut() {
+                                use std::io::Write;
+                                // Diagnostic only: cap file I/O to 1024 samples.
+                                // An unbuffered File preserves completed rows on termination.
+                                if self.traced_frames <= 8192 && writeln!(file, "{line}").is_err() {
+                                    self.screen_space_file = None;
+                                    eprintln!("fynkel: screen-space trace write failed; file tracing disabled");
+                                }
+                            }
                         }
                     }
                     let scene = span(2, 3);
@@ -229,5 +254,26 @@ impl GpuTimer {
             }
         }
         latest
+    }
+}
+
+/// Optional diagnostic destination. Relative paths use the process home, which
+/// is the app sandbox on iOS. No files are opened in normal builds/runs.
+fn screen_space_trace_file() -> Option<std::fs::File> {
+    let path = std::path::PathBuf::from(std::env::var_os("FYNKEL_TRACE_SCREEN_SPACE_FILE")?);
+    let path = if path.is_absolute() {
+        path
+    } else {
+        std::path::PathBuf::from(std::env::var_os("HOME")?).join(path)
+    };
+    match std::fs::File::create(&path) {
+        Ok(file) => Some(file),
+        Err(error) => {
+            eprintln!(
+                "fynkel: cannot open screen-space trace {}: {error}",
+                path.display()
+            );
+            None
+        }
     }
 }

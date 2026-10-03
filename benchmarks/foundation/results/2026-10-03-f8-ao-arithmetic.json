@@ -1,0 +1,85 @@
+{
+  "status": "Both experiments rejected; original shader restored",
+  "sustainedQualification": false,
+  "experiments": {
+    "normalSelection": "Select depth neighbours before world reconstruction; AO pass slightly lower, total GPU frame unchanged, small pixel differences.",
+    "projectedBasis": "Project sampling basis once rather than each hemisphere point; all comparison images identical, no performance benefit."
+  },
+  "scope": "Eight-second frozen dense scene, 120 settle ticks, unchanged 1320x2868 and medium quality, 5000 moving-collider scene frozen only for GPU attribution. CPU/tick readback disabled.",
+  "summaries": {
+    "normal-baseline": {
+      "status": "diagnostic-complete",
+      "pid": 2550,
+      "terminatedExactPid": 2550,
+      "thermal": [
+        "nominal"
+      ],
+      "acquisitionMedian": 50.993319875096354,
+      "gpu_aoMedianMs": 10.808,
+      "gpu_frameMedianMs": 19.178
+    },
+    "normal-candidate": {
+      "status": "diagnostic-complete",
+      "pid": 2556,
+      "terminatedExactPid": 2556,
+      "thermal": [
+        "nominal"
+      ],
+      "acquisitionMedian": 51.00056100617107,
+      "gpu_aoMedianMs": 10.374,
+      "gpu_frameMedianMs": 19.178
+    },
+    "normal-control": {
+      "status": "diagnostic-complete",
+      "pid": 2565,
+      "terminatedExactPid": 2565,
+      "thermal": [
+        "nominal"
+      ],
+      "acquisitionMedian": 51.00402931831615,
+      "gpu_aoMedianMs": 10.848,
+      "gpu_frameMedianMs": 19.417
+    },
+    "projected-basis": {
+      "status": "diagnostic-complete",
+      "pid": 2574,
+      "terminatedExactPid": 2574,
+      "thermal": [
+        "nominal"
+      ],
+      "acquisitionMedian": 49.98785295173273,
+      "gpu_aoMedianMs": 11.076,
+      "gpu_frameMedianMs": 19.508
+    }
+  },
+  "pixelComparison": {
+    "normalSelection": {
+      "images": 63,
+      "differences": {
+        "volume-wide.ppm": {
+          "changedChannels": 41,
+          "maximumChannelDifference": 3
+        }
+      }
+    },
+    "projectedBasis": {
+      "images": 63,
+      "differences": {}
+    }
+  },
+  "validation": {
+    "baselineShading": 53,
+    "candidateShadingEach": 53,
+    "ignoredEach": 2,
+    "clippy": "release renderer all targets passed with warnings denied",
+    "note": "Initial baseline image dump failed because output directory was absent; created directory and reran successfully."
+  },
+  "interpretation": "GPU pass spans overlap and must not be summed. Summaries are medians of window p50s after the first second, not pooled frame medians. These sequential diagnostics do not establish sustained throughput. No production optimization retained.",
+  "raw": "2026-10-03-f8-ao-arithmetic-raw.json",
+  "restoredShaderSha256": "843a38bef45f6aa9d1da6a473ae83ee0cb2dca6452049f945cf9ebbc401fa953",
+  "normalApp": {
+    "build": "passed, no diagnostic Dart defines",
+    "install": "passed",
+    "state": "installed and stopped; no post-install launch"
+  }
+}

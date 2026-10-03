@@ -31,8 +31,20 @@ fn sparse_direct_native_writes_refresh_scene_physics_and_membership() {
     #[cfg(feature = "physics")]
     assert_eq!(w.physics().sync_candidates(), 1);
     assert_eq!(scene::world_matrix(w.ecs(), e).unwrap().w_axis.y, 3.);
-    w.extract();
-    assert_eq!(w.render_membership_candidates(), 1);
+    let frame = w.extract();
+    assert_eq!(
+        frame
+            .records
+            .iter()
+            .find(|r| r.entity == e)
+            .unwrap()
+            .world
+            .w_axis
+            .y,
+        3.
+    );
+    // Value changes update the snapshot without rechecking membership.
+    assert_eq!(w.render_membership_candidates(), 0);
     w.ecs_mut().remove::<WorldTransform>(e).unwrap();
     assert_eq!(w.extract().records.len(), 2047);
     assert_eq!(w.render_membership_candidates(), 1);
@@ -272,4 +284,36 @@ fn incremental_scene_matches_reference_through_mixed_edits_and_overflow() {
             );
         }
     }
+}
+
+#[test]
+fn resource_owners_remain_sparse_when_particle_spawn_precedes_dense_pose_writes() {
+    let mut w = World::new(Default::default());
+    let moving = scene::spawn(w.ecs_mut(), Transform::IDENTITY, None).unwrap();
+    let (cursor, _, _) = w.resource_changes(0).unwrap();
+    let particle = scene::spawn(w.ecs_mut(), Transform::IDENTITY, None).unwrap();
+    w.ecs_mut()
+        .insert(particle, MeshRenderer::default())
+        .unwrap();
+    for i in 0..20000 {
+        w.ecs_mut().get_mut::<Transform>(moving).unwrap().position.x = i as f32;
+    }
+    let (next, reset, owners) = w.resource_changes(cursor).unwrap();
+    assert!(
+        !reset,
+        "pose history overflow must not rescan every asset owner"
+    );
+    assert_eq!(owners, vec![particle]);
+    assert!(w.resource_changes(next).unwrap().2.is_empty());
+    w.ecs_mut().despawn(particle).unwrap();
+    for i in 0..20000 {
+        w.ecs_mut().get_mut::<Transform>(moving).unwrap().position.x = i as f32;
+    }
+    let (_, reset, owners) = w.resource_changes(next).unwrap();
+    assert!(!reset);
+    assert_eq!(
+        owners,
+        vec![particle],
+        "destroyed owners must still release assets"
+    );
 }

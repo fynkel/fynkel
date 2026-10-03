@@ -74,7 +74,7 @@ while the grade is neutral.
 | **shadow** | shadow uniforms (sun `view_proj`), casters' base-colour map (mask discard) | `SHADOW_FORMAT` (`Depth32Float`) map, `shadow_resolution`², cleared | shadows on, a casting sun, ≥ 1 caster |
 | **depth prepass** | frame uniforms, the opaque instances, their base-colour map (mask discard) | the scene `Depth32Float` (`msaa` samples), cleared and **stored** | ambient occlusion or contact shadows on, ≥ 1 opaque draw |
 | **ambient occlusion** | the frame uniform alone, the stored depth | `AO_FORMAT` (`Rg8Unorm`: red the occlusion, green the contact shadows) at the internal size | the same |
-| **AO blur** | the frame uniform, the depth, the AO target | a second `Rg8Unorm` — what the opaque pass samples | the same |
+| **AO blur** | the frame uniform, the depth, the AO target | `Rgba8Unorm` storage output (RG consumed by opaque shading) | 8×8 compute tiles |
 | **opaque** | frame uniforms, shadow map, the AO target, material maps | HDR colour (`HDR_FORMAT` `Rgba16Float`, `msaa` samples) + `Depth32Float`, the colour cleared to transparent black and the depth **loaded** from the prepass (cleared when the stage did not run); at MSAA 4 the colour resolves into the single-sample HDR texture and the samples are discarded | always |
 | **transparent** | the same, plus the depth just written (read-only) | the same colour attachment, blended | `blend` instances queued |
 | **bloom** | the resolved HDR texture, the frame uniform | `BLOOM_FORMAT` (`Rgba16Float`) chain at half the internal size, up to `BLOOM_LEVELS` (6) mips: a prefilter into level 0, a downsample into each next level, a blended upsample back into each finer one | bloom on in the quality profile, the resolved intensity > 0 |
@@ -230,7 +230,14 @@ shadow and the scene:
 3. **The blur** averages a 4×4 square of that (both channels), dropping taps more than
    2 % of the view distance away along the ray, which is what turns the
    per-pixel rotation back into a smooth term without smearing across a
-   silhouette.
+   silhouette. An 8×8 compute tile loads an 11×11 input region, including the
+   asymmetric −2 through +1 halo, and shares reconstructed radial distances and
+   AO values in workgroup memory. Partial tiles participate in the load/barrier
+   before out-of-bounds output invocations return. Each output clips its filter
+   rectangle to the screen once and accumulates accepted taps with predicated
+   selection, preserving the original row-major order and depth threshold.
+   The estimate and blur have
+   separate layouts; the estimate does not bind the blur output.
 
 `light.wgsl` multiplies the blurred value into `ao` — the material's own
 occlusion factor — so it scales **only** the ambient and IBL term:
@@ -244,8 +251,12 @@ darkening a sunlit face with a screen-space guess is the classic way to
 make a scene look dirty). Blend instances are skipped: they are not in
 the prepass, so the AO under them belongs to whatever is behind them.
 
-The stage is one `Rg8Unorm` pair at the internal size (4 bytes a pixel on
-top of the attachments; 2 before R3d gave it the green channel) and one query pair in the GPU timer — its begin
+The stage uses an `Rg8Unorm` estimate and an `Rgba8Unorm` compute-storage blur
+output at the internal size (6 bytes per pixel, plus the optional 4-byte MSAA
+depth copy). RGBA8 provides portable storage support; shading consumes RG with
+unchanged 8-bit precision. This costs two additional bytes per pixel compared
+with the former fragment blur (about 7.2 MiB at 1320×2868). The GPU timer
+uses one query pair for the whole stage — its begin
 is the prepass's, its end the blur's, so `FrameStats::gpu_ao_us` and
 `ViewportStatsSnapshot.gpuAo` are the whole stage.
 `FrameStats::ambient_occlusion` says whether the occlusion was drawn;
@@ -982,7 +993,8 @@ assets):
 | `shadow_skinned` | the same | | | | | `vs_skinned` |
 | `depth`, `depth_double_sided` | none (depth only) | msaa | back / none | write, `LessEqual` | — | `vs_main` (R2, § Ambient occlusion) |
 | `depth_skinned`, `depth_skinned_double_sided` | the same two | | | | | `vs_skinned` |
-| `ao`, `ao_blur` | `R8Unorm` | 1 | none | none | — | |
+| `ao` | `Rg8Unorm` | 1 | none | none | — | |
+| `ao_blur` | `Rgba8Unorm` storage | 1 | none | none | — | 8×8 compute |
 | `bloom_prefilter`, `bloom_down` | `Rgba16Float` | 1 | none | none | — | (R3b, § Bloom) |
 | `bloom_up` | the same | 1 | none | none | constant (scatter) | |
 | `post` | host format | 1 | none | none | — | |

@@ -67,23 +67,11 @@ pub(super) struct RenderMembership {
 }
 impl RenderMembership {
     pub(super) fn refresh(&mut self, ecs: &fynkel_ecs::World) {
-        use std::any::TypeId;
+        // Membership depends on component presence, not on their values. Pose,
+        // visibility and light changes are read fresh during extraction; watching
+        // them here needlessly rebuilds membership for moving scenes.
         let changes = ecs
-            .changes_since(
-                self.cursor,
-                &[
-                    TypeId::of::<fynkel_scene::WorldTransform>(),
-                    TypeId::of::<fynkel_scene::Inactive>(),
-                    TypeId::of::<crate::MeshRenderer>(),
-                    TypeId::of::<crate::Camera>(),
-                    TypeId::of::<crate::DirectionalLight>(),
-                    TypeId::of::<crate::PointLight>(),
-                    TypeId::of::<crate::SpotLight>(),
-                    TypeId::of::<crate::Environment>(),
-                    TypeId::of::<crate::Volume>(),
-                ],
-                false,
-            )
+            .changes_since(self.cursor, &[], true)
             .expect("settled render storage");
         let candidates = if changes.reset {
             self.entities.clear();

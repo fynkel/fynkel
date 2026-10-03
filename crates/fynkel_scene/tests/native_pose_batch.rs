@@ -91,3 +91,80 @@ fn unchanged_native_pose_batches_preserve_clean_transform_state() {
     scene::set_world_pose(&world, entity, Vec3::X, Quat::IDENTITY).unwrap();
     assert!(!world.copy::<WorldTransform>(entity).unwrap().dirty);
 }
+
+#[test]
+fn root_pose_batch_preserves_scale_last_request_and_atomic_validation() {
+    let mut world = World::new();
+    let initial = Transform {
+        scale: Vec3::new(-2.0, 3.0, 0.0),
+        ..Transform::IDENTITY
+    };
+    let root = scene::spawn(&mut world, initial, None).unwrap();
+    let other = scene::spawn(&mut world, Transform::IDENTITY, None).unwrap();
+    scene::propagate(&mut world);
+    let rotation = Quat::from_rotation_y(0.7);
+    let poses = scene::prepare_world_poses(
+        &world,
+        &[
+            (root, Vec3::splat(f32::NAN), Quat::IDENTITY),
+            (other, Vec3::Y, Quat::IDENTITY),
+            (root, Vec3::X, rotation),
+        ],
+    )
+    .unwrap();
+    assert_eq!(poses.len(), 2);
+    assert_eq!(
+        poses.iter().find(|(e, _)| *e == root).unwrap().1,
+        Transform {
+            position: Vec3::X,
+            rotation,
+            scale: initial.scale
+        }
+    );
+    for (position, rotation) in [
+        (Vec3::splat(f32::NAN), Quat::IDENTITY),
+        (Vec3::ZERO, Quat::from_xyzw(0.0, 0.0, 0.0, 2.0)),
+    ] {
+        assert!(scene::prepare_world_poses(
+            &world,
+            &[(other, Vec3::Y, Quat::IDENTITY), (root, position, rotation),]
+        )
+        .is_err());
+        assert_eq!(world.copy::<Transform>(root).unwrap(), initial);
+        assert_eq!(world.copy::<Transform>(other).unwrap(), Transform::IDENTITY);
+        assert!(!world.copy::<WorldTransform>(root).unwrap().dirty);
+        assert!(!world.copy::<WorldTransform>(other).unwrap().dirty);
+    }
+}
+
+#[test]
+#[ignore = "manual root world-pose preparation qualification"]
+fn root_pose_preparation_qualification() {
+    let mut world = World::new();
+    let requests: Vec<_> = (0..5000)
+        .map(|i| {
+            let entity = scene::spawn(&mut world, Transform::IDENTITY, None).unwrap();
+            (
+                entity,
+                Vec3::new(i as f32, 2.0, 3.0),
+                Quat::from_rotation_y(0.7),
+            )
+        })
+        .collect();
+    for _ in 0..40 {
+        std::hint::black_box(scene::prepare_world_poses(&world, &requests).unwrap());
+    }
+    let mut samples = Vec::new();
+    for _ in 0..300 {
+        let start = std::time::Instant::now();
+        let result = scene::prepare_world_poses(&world, &requests).unwrap();
+        samples.push(start.elapsed().as_secs_f64() * 1e6);
+        assert_eq!(result.len(), requests.len());
+        std::hint::black_box(result);
+    }
+    samples.sort_by(f64::total_cmp);
+    println!(
+        "5000 root poses: median_us={} p95_us={}",
+        samples[150], samples[285]
+    );
+}

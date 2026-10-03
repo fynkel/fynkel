@@ -198,6 +198,14 @@ struct Change {
     structural: bool,
 }
 
+// Structural consumers must retain their history independently of pose/value
+// traffic. Entries share the authoritative revision sequence and writer barrier.
+struct StructuralChange {
+    revision: u64,
+    entity: Option<Entity>,
+    component: Option<std::any::TypeId>,
+}
+
 #[derive(Default)]
 struct Changes {
     entities: u64,
@@ -207,6 +215,11 @@ struct Changes {
     components: std::collections::HashMap<std::any::TypeId, u64>,
     history: std::collections::VecDeque<Change>,
     history_floor: u64,
+    // Last discarded value write by domain. Structural writes remain in their
+    // own bounded history; unrelated values cannot force sparse readers to reset.
+    lost_values: std::collections::HashMap<Option<std::any::TypeId>, u64>,
+    structural_history: std::collections::VecDeque<StructuralChange>,
+    structural_history_floor: u64,
     entities_at: u64,
     structure_at: u64,
 }
@@ -218,8 +231,23 @@ impl Changes {
         component: Option<std::any::TypeId>,
         structural: bool,
     ) {
+        if structural {
+            if self.structural_history.len() == CHANGE_HISTORY {
+                self.structural_history_floor =
+                    self.structural_history.pop_front().unwrap().revision;
+            }
+            self.structural_history.push_back(StructuralChange {
+                revision: self.values,
+                entity,
+                component,
+            });
+        }
         if self.history.len() == CHANGE_HISTORY {
-            self.history_floor = self.history.pop_front().unwrap().revision;
+            let lost = self.history.pop_front().unwrap();
+            self.history_floor = lost.revision;
+            if !lost.structural {
+                self.lost_values.insert(lost.component, lost.revision);
+            }
         }
         self.history.push_back(Change {
             revision: self.values,
@@ -359,7 +387,12 @@ impl World {
     /// participates. `all_structure` also includes any component add/remove.
     /// Bulk writes invalidate their declared component domains; overflow,
     /// foreign/future cursors and initial reads explicitly request a reset.
-    /// Runtime cost is proportional to retained changes since the cursor.
+    /// With no component domains and `all_structure`, a separately bounded
+    /// structural history prevents value-only traffic from evicting membership
+    /// events. Component readers also recover retained structural events when
+    /// overflow discarded only unrelated value domains. Lost selected values
+    /// or structural history still require a reset.
+    /// Runtime cost is proportional to the retained history traversed.
     pub fn changes_since(
         &self,
         cursor: Option<ChangeCursor>,
@@ -397,9 +430,61 @@ impl World {
         if !relevant {
             return Some(result);
         }
-        if cursor.revision < changes.history_floor {
-            result.reset = true;
+        // A membership-only reader must not reset because unrelated value
+        // writes evicted structural events from the general history.
+        if all_structure && components.is_empty() {
+            if cursor.revision < changes.structural_history_floor {
+                result.reset = true;
+                return Some(result);
+            }
+            let first = changes
+                .structural_history
+                .partition_point(|c| c.revision <= cursor.revision);
+            for change in changes.structural_history.iter().skip(first) {
+                let Some(entity) = change.entity else {
+                    result.reset = true;
+                    result.entities.clear();
+                    return Some(result);
+                };
+                result.entities.push(entity);
+            }
+            result.entities.sort_unstable();
+            result.entities.dedup();
             return Some(result);
+        }
+        if cursor.revision < changes.history_floor {
+            let lost_selected_values = changes
+                .lost_values
+                .get(&None)
+                .is_some_and(|revision| *revision > cursor.revision)
+                || components.iter().any(|ty| {
+                    changes
+                        .lost_values
+                        .get(&Some(*ty))
+                        .is_some_and(|revision| *revision > cursor.revision)
+                });
+            if cursor.revision < changes.structural_history_floor || lost_selected_values {
+                result.reset = true;
+                return Some(result);
+            }
+            // Replay the retained structural stream, then merge the general
+            // stream below (which still owns every selected value write).
+            let first = changes
+                .structural_history
+                .partition_point(|c| c.revision <= cursor.revision);
+            for change in changes.structural_history.iter().skip(first) {
+                if all_structure
+                    || change.component.is_none()
+                    || change.component.is_some_and(|ty| components.contains(&ty))
+                {
+                    let Some(entity) = change.entity else {
+                        result.reset = true;
+                        result.entities.clear();
+                        return Some(result);
+                    };
+                    result.entities.push(entity);
+                }
+            }
         }
         let first = changes
             .history

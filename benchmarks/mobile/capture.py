@@ -7,6 +7,7 @@ import plistlib
 from pathlib import Path
 import subprocess
 import time
+import uuid
 
 
 def launched_pid(doc):
@@ -16,14 +17,16 @@ def launched_pid(doc):
     return pid
 
 
-def capture(device, bundle, app, out):
+def capture(device, bundle, app, out, trace_gpu=False):
     with (app / 'Info.plist').open('rb') as file:
         actual_bundle = plistlib.load(file)['CFBundleIdentifier']
     if actual_bundle != bundle:
         raise ValueError(f'bundle mismatch: app is {actual_bundle}, requested {bundle}')
     out.mkdir(parents=True, exist_ok=False)
-    evidence = {'device': device, 'bundle': bundle, 'app': str(app.resolve()),
-                'status': 'running', 'sustainedQualification': False, 'commands': []}
+    capture_id = uuid.uuid4().hex
+    trace_path = f'Documents/screen-space-{capture_id}.log'
+    evidence = {'captureId': capture_id, 'device': device, 'bundle': bundle, 'app': str(app.resolve()),
+                'status': 'running', 'sustainedQualification': False, 'traceGpu': trace_gpu, 'commands': []}
     evidence['executableSha256'] = hashlib.sha256((app / 'Runner').read_bytes()).hexdigest()
 
     def save():
@@ -40,9 +43,19 @@ def capture(device, bundle, app, out):
     pid = None
     try:
         run(['device', 'install', 'app', '--device', device, app], timeout=120)
+        request = out / 'capture-request.json'
+        request.write_text(json.dumps({'captureId': capture_id}) + '\n')
+        run(['device', 'copy', 'to', '--device', device, '--domain-type', 'appDataContainer',
+             '--domain-identifier', bundle, '--source', request,
+             '--destination', 'Documents/capture-request.json'])
         launch = out / 'launch.json'
+        variables = {}
+        if trace_gpu:
+            variables['FYNKEL_TRACE_SCREEN_SPACE_FILE'] = trace_path
+        # devicectl rejects {}; omit the option when tracing needs no variables.
+        environment = ['--environment-variables', json.dumps(variables)] if variables else []
         run(['device', 'process', 'launch', '--device', device, '--terminate-existing',
-             '--json-output', launch, bundle])
+             '--json-output', launch, *environment, bundle])
         pid = launched_pid(json.loads(launch.read_text()))
         evidence['pid'] = pid
         save()
@@ -56,10 +69,12 @@ def capture(device, bundle, app, out):
              '--destination', out / 'mobile-capture.jsonl'])
         rows = [json.loads(line) for line in (out / 'mobile-capture.jsonl').read_text().splitlines()]
         evidence['records'] = rows
-        if not rows or rows[-1].get('event') != 'stop':
-            raise RuntimeError('missing terminal stop record; capture is incomplete')
-        if not any(row.get('event') == 'stats' for row in rows):
-            raise RuntimeError('capture has no frame measurements')
+        validate_capture_rows(rows, capture_id)
+        if trace_gpu:
+            run(['device', 'copy', 'from', '--device', device, '--domain-type', 'appDataContainer',
+                 '--domain-identifier', bundle, '--source', trace_path,
+                 '--destination', out / 'screen-space.log'])
+            evidence['screenSpaceSamples'] = parse_screen_space((out / 'screen-space.log').read_text())
         reason = rows[-1].get('reason')
         evidence['status'] = 'diagnostic-complete' if reason == 'deadline' else 'interrupted'
     except Exception as error:
@@ -77,11 +92,40 @@ def capture(device, bundle, app, out):
     print(out / 'capture.json')
 
 
+def validate_capture_rows(rows, capture_id):
+    if not rows or rows[0].get('event') != 'start' or rows[0].get('captureId') != capture_id:
+        raise RuntimeError('capture log does not belong to this launch')
+    if rows[-1].get('event') != 'stop':
+        raise RuntimeError('missing terminal stop record; capture is incomplete')
+    if not any(row.get('event') == 'stats' for row in rows):
+        raise RuntimeError('capture has no frame measurements')
+
+
+def parse_screen_space(text):
+    import re
+    pattern = re.compile(r'screen_space_us sample=(\d+) depth=(\d+) resolve=(\d+) estimate=(\d+) blur=(\d+) total=(\d+)')
+    rows = []
+    previous = 0
+    for line in text.splitlines():
+        match = pattern.fullmatch(line)
+        if not match:
+            raise ValueError('malformed screen-space trace row')
+        sample, depth, resolve, estimate, blur, total = map(int, match.groups())
+        if sample <= previous:
+            raise ValueError('screen-space trace samples must increase')
+        previous = sample
+        rows.append(dict(sample=sample, depthUs=depth, resolveUs=resolve, estimateUs=estimate, blurUs=blur, totalUs=total))
+    if not rows:
+        raise ValueError('no screen-space GPU samples')
+    return rows
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--device', required=True)
     parser.add_argument('--bundle', required=True)
     parser.add_argument('--app', required=True, type=Path)
     parser.add_argument('--out', required=True, type=Path)
+    parser.add_argument('--trace-gpu', action='store_true')
     args = parser.parse_args()
-    capture(args.device, args.bundle, args.app, args.out.resolve())
+    capture(args.device, args.bundle, args.app, args.out.resolve(), trace_gpu=args.trace_gpu)

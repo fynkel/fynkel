@@ -208,6 +208,17 @@ fn fill_contact(
     contact.impulse = impulse;
 }
 
+// No clock reads when profiling is disabled.
+fn profile_checkpoint(timer: &mut Option<std::time::Instant>) -> std::time::Duration {
+    let Some(previous) = timer else {
+        return std::time::Duration::ZERO;
+    };
+    let now = std::time::Instant::now();
+    let elapsed = now.duration_since(*previous);
+    *previous = now;
+    elapsed
+}
+
 fn pose_of(m: &Mat4) -> (Vec3, Quat, Vec3) {
     let t = Transform::from_matrix(*m);
     (t.position, t.rotation.normalize(), t.scale)
@@ -254,6 +265,7 @@ pub struct Physics {
     sync_candidates: usize,
     writeback_pending: BTreeSet<Entity>,
     scratch_changed: Vec<SyncEntry>,
+    scratch_subtree: Vec<Entity>,
     scratch_nested: Vec<SyncEntry>,
     scratch_gone: Vec<Entity>,
     /// Entities whose transform the last step wrote (`record` refreshes
@@ -265,6 +277,8 @@ pub struct Physics {
     /// learns of them at the step, or at [`Physics::refresh`] for queries.
     unplaced: Vec<ColliderHandle>,
     stats: PhysicsStats,
+    profile_enabled: bool,
+    step_profile: Option<crate::PhysicsStepProfile>,
 }
 
 impl Default for Physics {
@@ -300,6 +314,7 @@ impl Physics {
             sync_candidates: 0,
             writeback_pending: BTreeSet::new(),
             scratch_changed: Vec::new(),
+            scratch_subtree: Vec::new(),
             scratch_nested: Vec::new(),
             scratch_gone: Vec::new(),
             scratch_written: Vec::new(),
@@ -307,6 +322,8 @@ impl Physics {
             forced: Vec::new(),
             unplaced: Vec::new(),
             stats: PhysicsStats::default(),
+            profile_enabled: false,
+            step_profile: None,
         }
     }
 
@@ -568,22 +585,45 @@ impl Physics {
 
     // ------------------------------------------------------------- the tick
 
+    /// Enables diagnostic timing of future physics steps. Disabled by default;
+    /// disabling clears the last sample. This does not alter simulation settings.
+    pub fn set_profiling(&mut self, enabled: bool) {
+        self.profile_enabled = enabled;
+        self.step_profile = None;
+    }
+
+    /// Last completed profiled step, or None before a sample/when disabled.
+    pub fn step_profile(&self) -> Option<crate::PhysicsStepProfile> {
+        self.step_profile
+    }
+
     /// The physics phase of one fixed tick; `watched` selects the entities
     /// whose `CollisionStay` events are reported.
     pub fn step(&mut self, ecs: &mut Ecs, dt: f32, watched: &BTreeSet<Entity>) {
+        let mut timer = self.profile_enabled.then(std::time::Instant::now);
+        let started = timer;
+        let mut profile = crate::PhysicsStepProfile::default();
+        self.step_profile = None;
         self.events.clear();
         self.sync(ecs);
+        profile.sync = profile_checkpoint(&mut timer);
         // The step's broad-phase update places them.
         self.unplaced.clear();
         self.apply_pending(ecs);
         self.apply_root_motion();
+        profile.commands = profile_checkpoint(&mut timer);
         if self.entries.is_empty() {
             self.pending.clear();
             self.stats = PhysicsStats::default();
+            self.step_profile = started.map(|start| {
+                profile.total = start.elapsed();
+                profile
+            });
             return;
         }
         self.world.integration_parameters.dt = dt;
         self.move_characters(dt, watched);
+        profile.characters = profile_checkpoint(&mut timer);
         let collector = Collector {
             events: Mutex::new(Vec::new()),
         };
@@ -594,7 +634,9 @@ impl Physics {
                 b.reset_torques(false);
             }
         }
+        profile.solver = profile_checkpoint(&mut timer);
         self.write_back(ecs);
+        profile.writeback = profile_checkpoint(&mut timer);
         let raw = collector.events.into_inner().unwrap();
         self.collect_events(raw, watched);
         for h in self.retired.drain(..) {
@@ -608,6 +650,11 @@ impl Physics {
             contact_pairs: self.world.narrow_phase.contact_pairs().count() as u32,
             events: self.events.len() as u32,
         };
+        profile.events = profile_checkpoint(&mut timer);
+        self.step_profile = started.map(|start| {
+            profile.total = start.elapsed();
+            profile
+        });
     }
 
     /// After the post-physics propagate: every entry remembers its world
@@ -682,23 +729,32 @@ impl Physics {
         affected.append(&mut self.invalidated);
         // An ancestor's body/component or hierarchy change can change the home
         // of a nested collider even when its own component did not change.
-        let roots: Vec<_> = affected
-            .iter()
-            .copied()
-            .filter(|&e| {
-                let mut up = scene::parent_of(ecs, e);
-                while let Some(p) = up {
-                    if affected.contains(&p) {
-                        return false;
-                    }
-                    up = scene::parent_of(ecs, p);
+        let mut subtree = std::mem::take(&mut self.scratch_subtree);
+        subtree.clear();
+        subtree.extend(affected.iter().copied().filter(|&e| {
+            let mut up = scene::parent_of(ecs, e);
+            while let Some(p) = up {
+                if affected.contains(&p) {
+                    return false;
                 }
-                true
-            })
-            .collect();
-        for root in roots {
-            affected.extend(scene::subtree(ecs, root));
+                up = scene::parent_of(ecs, p);
+            }
+            true
+        }));
+        // Walk all roots with one retained stack. The affected set is processed
+        // in entity order below, so traversal order does not affect physics.
+        // Visit descendants even when already affected: their own children may
+        // still need a new body home after an ancestor changes.
+        while let Some(entity) = subtree.pop() {
+            if !ecs.contains(entity) {
+                continue;
+            }
+            affected.insert(entity);
+            if let Ok(children) = ecs.get::<scene::Children>(entity) {
+                subtree.extend(children.0.iter().copied());
+            }
         }
+        self.scratch_subtree = subtree;
         self.sync_candidates = affected.len();
         let mut changed = std::mem::take(&mut self.scratch_changed);
         let mut nested = std::mem::take(&mut self.scratch_nested);
@@ -768,7 +824,9 @@ impl Physics {
                 continue;
             }
             let same = self.entries.get(&entity).is_some_and(|entry| {
-                entry.joined.is_none()
+                entry.last_world == wt.matrix
+                    && !entry.stale
+                    && entry.joined.is_none()
                     && entry.rigid.is_some() == rigid.is_some()
                     && entry.shape.is_some() == shape.is_some()
                     && entry.character.is_some() == character.is_some()
@@ -780,8 +838,6 @@ impl Physics {
                         .is_none_or(|(a, b)| a == b)
                     && entry.rigid == rigid.copied()
                     && entry.layer == layer.copied().unwrap_or_default().bit()
-                    && entry.last_world == wt.matrix
-                    && !entry.stale
             });
             if !same {
                 changed.push(SyncEntry {
@@ -806,7 +862,7 @@ impl Physics {
             let join = home_of(ecs, entity)
                 .filter(|b| self.entries.get(b).is_some_and(|e| e.body.is_some()))
                 .map(|b| (b, relative(ecs, entity, b)));
-            if !self.unchanged(ecs, entity, join) {
+            if !self.unchanged(&input, join) {
                 self.update_entry(ecs, input, join);
             }
         }
@@ -819,29 +875,24 @@ impl Physics {
     /// Whether a nested collider's entry still matches its entity: joined
     /// to the same body at the same relative place (so a moving body costs
     /// nothing), or, standing alone, where it was.
-    fn unchanged(&self, ecs: &Ecs, entity: Entity, join: Option<(Entity, Mat4)>) -> bool {
-        let Some(entry) = self.entries.get(&entity) else {
+    fn unchanged(&self, input: &SyncEntry, join: Option<(Entity, Mat4)>) -> bool {
+        let Some(entry) = self.entries.get(&input.entity) else {
             return false;
         };
-        let (Ok(wt), Ok(shape)) = (
-            ecs.get::<WorldTransform>(entity),
-            ecs.get::<Collider>(entity),
-        ) else {
-            return false;
-        };
-        if entry.stale
-            || entry.shape.as_ref() != Some(&*shape)
-            || entry.layer != ecs.copy::<Layer>(entity).unwrap_or_default().bit()
+        if input.shape.is_none()
+            || entry.stale
+            || entry.shape != input.shape
+            || entry.layer != input.layer
         {
             return false;
         }
         match (join, entry.joined) {
-            (None, None) => entry.last_world == wt.matrix,
+            (None, None) => entry.last_world == input.world,
             (Some((body, rel)), Some((was, kind))) => {
                 body == was
                     && rel == entry.rel
                     && Some(kind) == self.body_type_of(body)
-                    && !rescaled(entry.scale, pose_of(&wt.matrix).2)
+                    && !rescaled(entry.scale, input.transform.scale)
             }
             _ => false,
         }
@@ -935,12 +986,13 @@ impl Physics {
             }
             return;
         }
+        let shape_changed = entry.shape != shape;
         let mut refit = entry.stale
-            || entry.shape != shape
+            || shape_changed
             || entry.layer != layer
             || entry.joined != joined
             || rescaled(entry.scale, scale);
-        if entry.shape != shape {
+        if shape_changed {
             // Report a still-broken value again once it changes.
             entry.reported = false;
         }
@@ -988,7 +1040,7 @@ impl Physics {
         if refit {
             self.fit_collider(entity);
         } else if (moved && body.is_none()) || placed {
-            self.place_collider(entity);
+            self.place_collider(entity, pose(position, rotation));
         }
     }
 
@@ -1063,7 +1115,11 @@ impl Physics {
 
     /// Where an entry's collider goes: the body it is attached to and its
     /// pose relative to that body, or, without one, its world pose.
-    fn collider_place(&self, entry: &Entry) -> (Option<RigidBodyHandle>, Pose) {
+    fn collider_place(
+        &self,
+        entry: &Entry,
+        world_pose: impl FnOnce() -> Pose,
+    ) -> (Option<RigidBodyHandle>, Pose) {
         let offset = Pose::from_translation(
             entry.shape.as_ref().map_or(Vec3::ZERO, |s| s.offset) * entry.scale,
         );
@@ -1077,18 +1133,17 @@ impl Physics {
         if entry.body.is_some() {
             return (entry.body, offset);
         }
-        let (t, r, _) = pose_of(&entry.last_world);
-        (None, pose(t, r) * offset)
+        (None, world_pose() * offset)
     }
 
     /// Moves an entry's collider to its place (the entity or its place in
     /// the body moved; nothing else changed).
-    fn place_collider(&mut self, entity: Entity) {
+    fn place_collider(&mut self, entity: Entity, world_pose: Pose) {
         let entry = &self.entries[&entity];
         let Some(h) = entry.collider else {
             return;
         };
-        let (parent, place) = self.collider_place(entry);
+        let (parent, place) = self.collider_place(entry, || world_pose);
         let co = &mut self.world.colliders[h];
         if parent.is_some() {
             co.set_position_wrt_parent(place);
@@ -1114,7 +1169,10 @@ impl Physics {
         };
         let built = self.build_shape(&c, entry.scale, body_type);
         let surface = self.surface(&c);
-        let (parent, place) = self.collider_place(entry);
+        let (parent, place) = self.collider_place(entry, || {
+            let (t, r, _) = pose_of(&entry.last_world);
+            pose(t, r)
+        });
         let body_entity = match entry.joined {
             Some((home, _)) => Some(home),
             None => entry.rigid.is_some().then_some(entity),
@@ -3610,6 +3668,255 @@ mod tests {
         assert!(p.register_material(material_key(3), mat(0.5, 2.0)).is_err());
         assert!(!p.has_material(&material_key(3)));
         assert_eq!(p.material_count(), 1);
+    }
+
+    #[test]
+    fn optional_step_profile_resets_and_covers_only_executed_phases() {
+        let mut ecs = world();
+        let e = spawn(
+            &mut ecs,
+            Vec3::Y,
+            Some(RigidBody::default()),
+            Some(Collider::default()),
+        );
+        scene::propagate(&mut ecs);
+        let mut physics = Physics::new();
+        let watched = BTreeSet::new();
+        physics.step(&mut ecs, 1.0 / 60.0, &watched);
+        assert!(physics.step_profile().is_none());
+        physics.set_profiling(true);
+        assert!(physics.step_profile().is_none());
+        physics.step(&mut ecs, 1.0 / 60.0, &watched);
+        let p = physics.step_profile().unwrap();
+        assert!(p.total >= p.sync + p.commands + p.characters + p.solver + p.writeback + p.events);
+        ecs.despawn(e).unwrap();
+        physics.step(&mut ecs, 1.0 / 60.0, &watched);
+        let empty = physics.step_profile().unwrap();
+        assert_eq!(empty.solver, std::time::Duration::ZERO);
+        assert_eq!(empty.writeback, std::time::Duration::ZERO);
+        assert_eq!(empty.events, std::time::Duration::ZERO);
+        physics.set_profiling(false);
+        assert!(physics.step_profile().is_none());
+        physics.step(&mut ecs, 1.0 / 60.0, &watched);
+        assert!(physics.step_profile().is_none());
+    }
+
+    #[test]
+    fn changed_ancestor_visits_grandchildren_through_an_already_affected_child() {
+        let mut ecs = world();
+        let root = spawn(&mut ecs, Vec3::ZERO, None, None);
+        let middle = spawn(&mut ecs, Vec3::X, None, Some(Collider::default()));
+        let leaf = spawn(&mut ecs, Vec3::Y, None, Some(Collider::default()));
+        scene::set_parent_keep_local(&mut ecs, middle, Some(root)).unwrap();
+        scene::set_parent_keep_local(&mut ecs, leaf, Some(middle)).unwrap();
+        scene::propagate(&mut ecs);
+        let mut physics = Physics::new();
+        physics.sync(&mut ecs);
+        for attached in [true, false, true] {
+            if attached {
+                ecs.insert(
+                    root,
+                    RigidBody {
+                        body_type: BodyType::Static,
+                        ..RigidBody::default()
+                    },
+                )
+                .unwrap();
+            } else {
+                ecs.remove::<RigidBody>(root).unwrap();
+            }
+            // Middle is independently dirty, but leaf has no direct changes.
+            ecs.get_mut::<Collider>(middle).unwrap().friction = if attached { 0.3 } else { 0.7 };
+            physics.sync(&mut ecs);
+            for e in [middle, leaf] {
+                let collider = &physics.world.colliders[physics.entries[&e].collider.unwrap()];
+                assert_eq!(
+                    collider.parent(),
+                    physics.entries.get(&root).and_then(|entry| entry.body)
+                );
+                assert_eq!(collider.parent().is_some(), attached);
+            }
+            assert_eq!(physics.sync_candidates(), 3);
+            physics.sync(&mut ecs);
+            // Removing a body queues its two former colliders for reconciliation.
+            assert_eq!(physics.sync_candidates(), if attached { 0 } else { 2 });
+            physics.sync(&mut ecs);
+            assert_eq!(physics.sync_candidates(), 0);
+        }
+        ecs.despawn(leaf).unwrap();
+        physics.sync(&mut ecs);
+        assert_eq!(physics.sync_candidates(), 1);
+        assert!(!physics.entries.contains_key(&leaf));
+        assert!(physics.entries.contains_key(&middle));
+    }
+
+    #[test]
+    #[ignore = "manual nested-collider synchronization qualification"]
+    fn nested_sync_qualification() {
+        let mut ecs = world();
+        let parent = spawn(
+            &mut ecs,
+            Vec3::ZERO,
+            Some(RigidBody {
+                body_type: BodyType::Static,
+                ..RigidBody::default()
+            }),
+            None,
+        );
+        for i in 0..5000 {
+            let child = spawn(
+                &mut ecs,
+                Vec3::X * (i * 3) as f32,
+                None,
+                Some(Collider::default()),
+            );
+            scene::set_parent_keep_local(&mut ecs, child, Some(parent)).unwrap();
+        }
+        scene::propagate(&mut ecs);
+        let mut physics = Physics::new();
+        physics.sync(&mut ecs);
+        let mut samples = Vec::new();
+        for i in 0..80 {
+            scene::set_local(&ecs, parent, Transform::from_position(Vec3::Y * i as f32)).unwrap();
+            scene::propagate(&mut ecs);
+            let start = std::time::Instant::now();
+            physics.sync(&mut ecs);
+            let micros = start.elapsed().as_secs_f64() * 1e6;
+            if i >= 20 {
+                samples.push(micros);
+            }
+            assert_eq!(physics.world.colliders.len(), 5000);
+        }
+        println!("nested_sync_samples_us={samples:?}");
+    }
+
+    #[test]
+    #[ignore = "manual moving-collider synchronization qualification"]
+    fn moving_collider_sync_qualification() {
+        let mut ecs = world();
+        let entities: Vec<_> = (0..5000)
+            .map(|i| {
+                spawn(
+                    &mut ecs,
+                    Vec3::X * (i * 3) as f32,
+                    None,
+                    Some(Collider::default()),
+                )
+            })
+            .collect();
+        scene::propagate(&mut ecs);
+        let mut physics = Physics::new();
+        physics.sync(&mut ecs);
+        let mut samples = Vec::new();
+        for i in 0..80 {
+            for &entity in &entities {
+                let mut local = ecs.copy::<Transform>(entity).unwrap();
+                local.position.y = i as f32;
+                local.rotation = Quat::from_rotation_y(i as f32 * 0.01);
+                scene::set_local(&ecs, entity, local).unwrap();
+            }
+            scene::propagate(&mut ecs);
+            let start = std::time::Instant::now();
+            physics.sync(&mut ecs);
+            let micros = start.elapsed().as_secs_f64() * 1e6;
+            if i >= 20 {
+                samples.push(micros);
+            }
+            assert_eq!(physics.world.colliders.len(), 5000);
+        }
+        assert_eq!(physics.sync_candidates(), 5000);
+        let collider = &physics.world.colliders[physics.entries[&entities[0]].collider.unwrap()];
+        assert!((collider.position().translation.y - 79.0).abs() < 1e-5);
+        println!("moving_sync_samples_us={samples:?}");
+    }
+
+    #[test]
+    fn collider_motion_reuses_pose_without_losing_scaled_rotated_offset() {
+        let mut ecs = world();
+        let entity = spawn(
+            &mut ecs,
+            Vec3::ZERO,
+            None,
+            Some(Collider {
+                offset: Vec3::new(1.0, 2.0, 3.0),
+                ..Collider::default()
+            }),
+        );
+        let mut physics = Physics::new();
+        scene::set_local(
+            &ecs,
+            entity,
+            Transform {
+                scale: Vec3::new(2.0, 3.0, 4.0),
+                ..Transform::IDENTITY
+            },
+        )
+        .unwrap();
+        scene::propagate(&mut ecs);
+        physics.sync(&mut ecs);
+        let handle = physics.entries[&entity].collider.unwrap();
+        for angle in [0.3, 1.2, -2.0] {
+            let transform = Transform {
+                position: Vec3::new(4.0, -1.0, 2.0),
+                rotation: Quat::from_rotation_y(angle),
+                scale: Vec3::new(2.0, 3.0, 4.0),
+            };
+            scene::set_local(&ecs, entity, transform).unwrap();
+            scene::propagate(&mut ecs);
+            physics.sync(&mut ecs);
+            assert_eq!(physics.entries[&entity].collider, Some(handle));
+            let collider = &physics.world.colliders[handle];
+            let expected = transform
+                .matrix()
+                .transform_point3(Vec3::new(1.0, 2.0, 3.0));
+            assert!((collider.position().translation - expected).length() < 1e-4);
+            assert!(collider.position().rotation.dot(transform.rotation).abs() > 0.99999);
+        }
+    }
+
+    #[test]
+    fn nested_collider_refresh_applies_shape_layer_scale_and_removal() {
+        let mut ecs = world();
+        let parent = spawn(
+            &mut ecs,
+            Vec3::ZERO,
+            Some(RigidBody {
+                body_type: BodyType::Static,
+                ..RigidBody::default()
+            }),
+            None,
+        );
+        let child = spawn(&mut ecs, Vec3::X, None, Some(Collider::default()));
+        scene::set_parent_keep_local(&mut ecs, child, Some(parent)).unwrap();
+        scene::propagate(&mut ecs);
+        let mut physics = Physics::new();
+        physics.sync(&mut ecs);
+        let handle = physics.entries[&child].collider.unwrap();
+        ecs.get_mut::<Collider>(child).unwrap().friction = 0.7;
+        ecs.insert(child, Layer { layer: 3 }).unwrap();
+        scene::set_local(
+            &ecs,
+            child,
+            Transform {
+                position: Vec3::Y,
+                scale: Vec3::splat(2.0),
+                ..Transform::IDENTITY
+            },
+        )
+        .unwrap();
+        scene::propagate(&mut ecs);
+        physics.sync(&mut ecs);
+        assert_eq!(physics.entries[&child].collider, Some(handle));
+        let collider = &physics.world.colliders[handle];
+        assert_eq!(collider.friction(), 0.7);
+        assert_eq!(collider.collision_groups().memberships.bits(), 1 << 3);
+        assert!((collider.position_wrt_parent().unwrap().translation - Vec3::Y).length() < 1e-5);
+        let bounds = collider.shape().compute_local_aabb();
+        assert!((bounds.half_extents() - Vec3::ONE).length() < 1e-5);
+        ecs.remove::<Collider>(child).unwrap();
+        physics.sync(&mut ecs);
+        assert!(!physics.entries.contains_key(&child));
+        assert!(physics.world.colliders.get(handle).is_none());
     }
 
     #[test]

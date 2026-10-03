@@ -1,0 +1,231 @@
+{
+  "schemaVersion": 1,
+  "commit": "d39ae672ef97fb591bb0524c7ca21e96dedc76a2",
+  "status": "diagnostic-complete-not-qualified",
+  "sustainedQualification": false,
+  "phone": {
+    "device": "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+    "bundle": "com.fynkel.qualification.mobileDense5000",
+    "app": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-app-500/build/ios/iphoneos/Runner.app",
+    "status": "diagnostic-complete",
+    "sustainedQualification": false,
+    "commands": [
+      {
+        "argv": [
+          "xcrun",
+          "devicectl",
+          "device",
+          "install",
+          "app",
+          "--device",
+          "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+          "target/f8-mobile-app-500/build/ios/iphoneos/Runner.app"
+        ],
+        "exitCode": 0,
+        "stdout": "03:29:32  Acquired tunnel connection to device.\n03:29:32  Enabling developer disk image services.\n03:29:32  Acquired usage assertion.\nApp installed:\n\u2022 bundleID: com.fynkel.qualification.mobileDense5000\n\u2022 installationURL: file:///private/var/containers/Bundle/Application/CB8F6D18-3FB6-419F-A4DF-25D035A6BACC/Runner.app/\n\u2022 launchServicesIdentifier: unknown\n\u2022 databaseUUID: 3CA3D25C-7ED7-4480-97BA-F3545CDF9E74\n\u2022 databaseSequenceNumber: 7484\n\u2022 options: \n",
+        "stderr": ""
+      },
+      {
+        "argv": [
+          "xcrun",
+          "devicectl",
+          "device",
+          "process",
+          "launch",
+          "--device",
+          "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+          "--terminate-existing",
+          "--json-output",
+          "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-physics-inputs/launch.json",
+          "com.fynkel.qualification.mobileDense5000"
+        ],
+        "exitCode": 0,
+        "stdout": "03:29:34  Acquired tunnel connection to device.\n03:29:34  Enabling developer disk image services.\n03:29:34  Acquired usage assertion.\nLaunched application with com.fynkel.qualification.mobileDense5000 bundle identifier.\n",
+        "stderr": ""
+      },
+      {
+        "argv": [
+          "xcrun",
+          "devicectl",
+          "device",
+          "process",
+          "terminate",
+          "--device",
+          "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+          "--pid",
+          "662"
+        ],
+        "exitCode": 0,
+        "stdout": "03:29:46  Acquired tunnel connection to device.\n03:29:46  Enabling developer disk image services.\n03:29:47  Acquired usage assertion.\nSent signal to terminate process sent to pid 662\n",
+        "stderr": ""
+      },
+      {
+        "argv": [
+          "xcrun",
+          "devicectl",
+          "device",
+          "copy",
+          "from",
+          "--device",
+          "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+          "--domain-type",
+          "appDataContainer",
+          "--domain-identifier",
+          "com.fynkel.qualification.mobileDense5000",
+          "--source",
+          "Documents/mobile-capture.jsonl",
+          "--destination",
+          "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-physics-inputs/mobile-capture.jsonl"
+        ],
+        "exitCode": 0,
+        "stdout": "03:29:47  Acquired tunnel connection to device.\n03:29:47  Enabling developer disk image services.\n03:29:47  Acquired usage assertion.\nFile received from Device\n/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-physics-inputs/mobile-capture.jsonl\n",
+        "stderr": ""
+      }
+    ],
+    "executableSha256": "4eb33cba8db87aead00270f60ec82da8a06e712b1bdef829bfed843d8d2274c1",
+    "pid": 662,
+    "terminatedExactPid": 662,
+    "records": [
+      {
+        "time": "2026-10-03T01:29:34.652122Z",
+        "elapsedMs": 0,
+        "event": "start",
+        "quality": "medium",
+        "limitSeconds": 8,
+        "sustainedQualification": false
+      },
+      {
+        "time": "2026-10-03T01:29:35.844747Z",
+        "elapsedMs": 956,
+        "event": "stats",
+        "windowSeconds": 1.010587,
+        "loopFps": 35.62286077299629,
+        "acquiredFps": 24.7380977590252,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=36 ticks=56 missed=0 dropped=7 entities=8848 interval=28.235/38.600/48.915 simulate=18.758/27.503/35.524 render=5.527/6.676/21.733 behaviours=4.077/6.901/9.707 native=14.703/20.733/28.762 work=24.285/34.179/57.257 build=42.060/42.060/42.060 raster=6.371/6.371/6.371 snapshot=28920 snapshot_peak=28920 mem_native=43616834 mem_resident=281575424 mem_assets=86205 instances=1733 draws=16 culled=4277 shadow=3776/60 rendered=29 acquired=25 repeated=0 present_lag=1/1/1 acquire_wait=3.382/3.405/3.414 extract=2.899/3.269/3.349 prepare=2.180/2.669/14.899 encode=0.028/0.038/0.066 cpu=0.438/1.729/4.457 gpu_complete=19.631/24.273/39.959 gpu_frame=18.186/23.690/32.652 gpu_shadow=0.522/1.387/6.455 gpu_ao=11.014/14.907/16.378 gpu_scene=16.152/20.271/21.108 gpu_post=17.471/22.161/22.536 gpu_n=26 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=26 texture_new=26 texture_empty=0 texture_ready=28 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:29:36.841270Z",
+        "elapsedMs": 1953,
+        "event": "stats",
+        "windowSeconds": 0.996495,
+        "loopFps": 37.13014114471221,
+        "acquiredFps": 29.102002518828492,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=37 ticks=60 missed=0 dropped=5 entities=8858 interval=25.836/34.312/34.339 simulate=19.524/28.073/28.341 render=5.549/5.946/6.108 behaviours=4.071/6.412/6.612 native=15.471/21.546/21.661 work=25.073/34.019/34.449 build=24.609/33.284/34.655 raster=3.499/3.596/5.703 snapshot=28920 snapshot_peak=28920 mem_native=45969010 mem_resident=287145984 mem_assets=86205 instances=1764 draws=16 culled=4256 shadow=3850/60 rendered=32 acquired=29 repeated=0 present_lag=1/1/1 acquire_wait=3.388/3.405/3.433 extract=2.916/2.995/3.069 prepare=2.180/2.663/2.679 encode=0.027/0.030/0.032 cpu=0.424/0.447/0.456 gpu_complete=18.489/20.436/21.274 gpu_frame=17.808/18.744/18.881 gpu_shadow=0.523/0.565/1.358 gpu_ao=10.980/11.746/11.882 gpu_scene=15.462/16.327/17.059 gpu_post=16.666/18.139/18.292 gpu_n=33 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=28 texture_new=28 texture_empty=0 texture_ready=32 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:29:37.846758Z",
+        "elapsedMs": 2958,
+        "event": "stats",
+        "windowSeconds": 1.00544,
+        "loopFps": 37.79439847231063,
+        "acquiredFps": 26.853914704010187,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=38 ticks=60 missed=0 dropped=6 entities=8868 interval=25.429/33.968/41.423 simulate=19.278/27.173/28.536 render=5.547/6.053/6.292 behaviours=4.012/6.412/7.413 native=15.210/20.833/21.168 work=24.825/33.226/34.828 build=25.005/34.009/34.213 raster=3.490/3.546/3.556 snapshot=28920 snapshot_peak=28920 mem_native=46086055 mem_resident=284016640 mem_assets=86205 instances=1796 draws=16 culled=4234 shadow=3911/60 rendered=32 acquired=27 repeated=0 present_lag=1/1/1 acquire_wait=3.383/3.403/3.404 extract=2.898/3.081/3.260 prepare=2.198/2.758/2.793 encode=0.026/0.028/0.029 cpu=0.409/0.426/0.437 gpu_complete=18.577/20.516/21.528 gpu_frame=17.322/18.617/18.820 gpu_shadow=0.528/0.542/1.276 gpu_ao=11.026/11.313/11.668 gpu_scene=15.559/16.378/16.869 gpu_post=16.712/18.006/18.212 gpu_n=31 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=28 texture_new=28 texture_empty=0 texture_ready=32 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:29:38.846551Z",
+        "elapsedMs": 3958,
+        "event": "stats",
+        "windowSeconds": 0.99975,
+        "loopFps": 42.010502625656414,
+        "acquiredFps": 24.006001500375092,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=42 ticks=60 missed=0 dropped=10 entities=8878 interval=24.728/31.851/34.772 simulate=18.388/20.939/22.884 render=5.638/6.223/6.705 behaviours=4.092/5.079/5.134 native=13.476/16.242/17.993 work=24.026/27.162/29.589 build=24.759/32.738/34.468 raster=3.099/3.552/3.553 snapshot=28920 snapshot_peak=28920 mem_native=46167287 mem_resident=283590656 mem_assets=86205 instances=1852 draws=16 culled=4188 shadow=3988/60 rendered=32 acquired=24 repeated=0 present_lag=1/1/1 acquire_wait=3.382/3.399/3.403 extract=2.954/3.176/3.302 prepare=2.286/2.898/3.041 encode=0.027/0.030/0.036 cpu=0.417/0.437/0.448 gpu_complete=18.901/20.586/21.430 gpu_frame=18.048/18.408/19.033 gpu_shadow=0.532/1.113/1.237 gpu_ao=11.007/11.221/11.831 gpu_scene=15.595/16.438/16.585 gpu_post=17.434/17.797/18.430 gpu_n=32 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=24 texture_new=24 texture_empty=0 texture_ready=32 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:29:39.848040Z",
+        "elapsedMs": 4959,
+        "event": "stats",
+        "windowSeconds": 1.001446,
+        "loopFps": 24.963902197422527,
+        "acquiredFps": 20.969677845834923,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=25 ticks=58 missed=0 dropped=2 entities=8879 interval=33.594/66.659/68.311 simulate=28.730/52.951/54.148 render=6.090/6.954/7.120 behaviours=5.905/13.156/13.740 native=21.779/40.075/40.840 work=34.820/59.905/61.268 build=24.302/26.712/28.934 raster=0.127/3.543/3.596 snapshot=28920 snapshot_peak=28920 mem_native=46180743 mem_resident=279773184 mem_assets=86205 instances=1922 draws=16 culled=4119 shadow=4043/60 rendered=23 acquired=21 repeated=0 present_lag=1/1/1 acquire_wait=3.387/3.402/3.402 extract=3.103/3.386/3.439 prepare=2.491/3.145/3.212 encode=0.028/0.037/0.039 cpu=0.427/0.484/0.511 gpu_complete=17.965/20.071/26.907 gpu_frame=17.407/18.782/26.391 gpu_shadow=0.537/1.277/2.254 gpu_ao=11.143/11.382/19.024 gpu_scene=15.618/16.486/23.136 gpu_post=16.780/18.167/23.856 gpu_n=23 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=21 texture_new=21 texture_empty=0 texture_ready=23 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:29:40.865449Z",
+        "elapsedMs": 5977,
+        "event": "stats",
+        "windowSeconds": 1.017384,
+        "loopFps": 19.658260794351,
+        "acquiredFps": 19.658260794351,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=20 ticks=61 missed=0 dropped=0 entities=8878 interval=53.974/61.262/67.668 simulate=41.295/50.174/58.047 render=6.140/6.475/6.835 behaviours=11.041/12.846/14.308 native=32.834/37.324/43.614 work=47.435/56.649/64.882 build=47.805/61.139/64.343 raster=3.522/3.568/3.614 snapshot=28920 snapshot_peak=28920 mem_native=46179056 mem_resident=281149440 mem_assets=86205 instances=1993 draws=16 culled=4047 shadow=4097/60 rendered=20 acquired=20 repeated=0 present_lag=1/1/1 acquire_wait=3.385/3.401/3.406 extract=3.171/3.315/3.418 prepare=2.567/2.627/3.136 encode=0.030/0.031/0.032 cpu=0.445/0.456/0.461 gpu_complete=18.618/18.795/18.865 gpu_frame=18.124/18.257/18.312 gpu_shadow=0.546/0.579/0.581 gpu_ao=11.109/12.056/12.105 gpu_scene=16.270/16.484/16.546 gpu_post=17.494/17.625/17.675 gpu_n=20 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=20 texture_new=20 texture_empty=0 texture_ready=20 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:29:41.876413Z",
+        "elapsedMs": 6988,
+        "event": "stats",
+        "windowSeconds": 1.010933,
+        "loopFps": 19.783704755903702,
+        "acquiredFps": 19.783704755903702,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=20 ticks=61 missed=0 dropped=0 entities=8878 interval=50.789/60.835/61.675 simulate=40.728/50.542/52.249 render=6.163/6.488/6.489 behaviours=9.697/12.819/12.990 native=32.333/38.442/39.328 work=46.891/57.030/58.738 build=46.113/57.004/58.778 raster=3.500/3.559/3.562 snapshot=28920 snapshot_peak=28920 mem_native=46189142 mem_resident=280068096 mem_assets=86205 instances=2111 draws=16 culled=3929 shadow=4143/60 rendered=20 acquired=20 repeated=0 present_lag=1/1/1 acquire_wait=3.392/3.402/3.403 extract=3.182/3.397/3.398 prepare=2.603/2.680/2.704 encode=0.029/0.030/0.030 cpu=0.438/0.448/0.448 gpu_complete=17.956/18.786/18.786 gpu_frame=17.394/18.226/18.227 gpu_shadow=0.558/0.595/0.606 gpu_ao=11.135/11.190/12.023 gpu_scene=15.578/16.436/16.438 gpu_post=16.729/17.562/17.572 gpu_n=20 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=20 texture_new=20 texture_empty=0 texture_ready=20 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:29:42.864293Z",
+        "elapsedMs": 7976,
+        "event": "stats",
+        "windowSeconds": 0.987849,
+        "loopFps": 20.246009258500035,
+        "acquiredFps": 20.246009258500035,
+        "width": 1320,
+        "height": 2868,
+        "thermal": "nominal",
+        "summary": "frames=20 ticks=59 missed=0 dropped=0 entities=8878 interval=57.750/62.597/63.062 simulate=38.435/51.099/51.293 render=6.168/6.469/6.496 behaviours=9.934/12.841/12.865 native=28.438/38.288/38.709 work=44.603/57.568/57.789 build=45.755/56.445/56.528 raster=3.522/3.556/3.559 snapshot=28920 snapshot_peak=28920 mem_native=46219577 mem_resident=281411584 mem_assets=86205 instances=2229 draws=16 culled=3811 shadow=4180/60 rendered=20 acquired=20 repeated=0 present_lag=1/1/1 acquire_wait=3.391/3.402/3.405 extract=3.154/3.317/3.323 prepare=2.560/2.700/2.809 encode=0.028/0.030/0.030 cpu=0.427/0.450/0.458 gpu_complete=18.666/18.767/18.846 gpu_frame=18.107/18.219/18.288 gpu_shadow=0.560/0.606/0.609 gpu_ao=11.174/12.003/12.054 gpu_scene=15.615/16.426/16.480 gpu_post=17.390/17.544/17.612 gpu_n=20 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=20 texture_new=20 texture_empty=0 texture_ready=20 thermal=nominal"
+      },
+      {
+        "time": "2026-10-03T01:29:42.914483Z",
+        "elapsedMs": 8026,
+        "event": "stop",
+        "reason": "deadline"
+      }
+    ]
+  },
+  "acquisitionRange": [
+    19.658260794351,
+    29.102002518828492
+  ],
+  "comparison": "Previous lifecycle capture 17.42\u201328.55 acquisitions/s; current 19.66\u201329.10. Overlapping short-run ranges do not establish a clear device performance gain.",
+  "cpuEvidence": "2026-10-03-f8-physics-inputs.json",
+  "previousPhoneEvidence": "2026-10-03-f8-lifecycle-invalidation.json",
+  "validation": {
+    "iosReleaseBuild": "passed",
+    "capture": "eight-second deadline, exact launch PID 662 terminated before log retrieval",
+    "thermal": "all rendering samples nominal"
+  },
+  "limitations": [
+    "No sustained thermal or performance qualification.",
+    "Texture acquisition is not physical-display scanout.",
+    "Native simulation remains costly and the scene advances through changing visibility and physics states.",
+    "GPU frame p50 approximately 17\u201318 ms remains over the 120 Hz budget."
+  ],
+  "hashes": {
+    "crates/fynkel_physics/src/sim.rs": "cbb69499bdf7026e07a954a63becaf100628e8433c8e594d8fc52b3d1836ede9",
+    "benchmarks/mobile/capture.py": "44f3b47dcf9ab43f7538146d6d3ab78fa3812b75ea32be490047778ca15f22f0",
+    "target/f8-mobile-app-500/lib/main.dart": "f8e37ef85034a2e9aef441d1b00d4c5bc1d92d4d996af1f605978122df17ff72",
+    "target/f8-mobile-app-500/build/ios/iphoneos/Runner.app/Frameworks/objective_c.framework/objective_c": "4d844222e034f48fc855aa87bdd16aedac783ea34c549e677e0227c8a930c94a",
+    "target/f8-mobile-app-500/build/ios/iphoneos/Runner.app/Frameworks/Flutter.framework/Flutter": "4433a5884942a596095425aec78d06064be6ab8c7a5e5684f39c007192d0b7d4",
+    "target/f8-mobile-app-500/build/ios/iphoneos/Runner.app/Frameworks/App.framework/App": "de7197ab2182646d91c87f84dcf87417a8d108162a86dae2eb649f452b1ac031",
+    "target/f8-mobile-app-500/build/ios/iphoneos/Runner.app/Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "804cf615fcfa79cabdd1743d6255fff6cc1d68e5217b96b586389e59b4e23a68",
+    "target/foundation-baseline/f8/physics-inputs-device/capture.json": "d268340f959fb8acdf59367d17d4367ccc4ef6c61a28fb4080f4c135d324e554",
+    "target/foundation-baseline/f8/physics-inputs-device/f8-physics-ios-build.log": "98af871a8c5600ad4341a8b78b2148a527e07d547e4dc5428c1ffd8f74bb0700",
+    "target/foundation-baseline/f8/physics-inputs-device/f8-physics-ios-capture.log": "23e463a7f7580cf6515f02264cac8aa456a49a7efb7b7f83851fd7a1b9f92e6a"
+  }
+}

@@ -122,3 +122,95 @@ falling toward 17 at the end, with nominal thermal samples. This does not establ
 steady or sustained performance. [Evidence and regressions](../benchmarks/foundation/results/2026-10-03-f8-lifecycle-invalidation.json)
 retain the locked-device failure and successful retry. Native simulation and GPU
 cost remain open; F8 is not qualified.
+
+The physics-input reuse change has now also completed a bounded iPhone diagnostic
+at `d39ae672`: about 20–29 new textures/s, overlapping the preceding 17–29 range.
+The Mac CPU gain is measured; a clear phone speedup is not established. GPU frame
+p50 remains about 17–18 ms, and the dense scene slows as it advances. Thermal
+samples were nominal for eight seconds only. [Device evidence](../benchmarks/foundation/results/2026-10-03-f8-physics-inputs-device.json)
+does not close sustained performance or F8.
+
+A subsequent AO arithmetic optimization preserves the twelve-sample pattern and
+reduces the measured AO stage about 2–3% in repeated bounded phone captures.
+Whole-frame GPU timings overlap (approximately 17–18 ms), so no overall FPS gain
+or gate closure is claimed. A 600-tick Mac timeline does not reproduce the phone's
+late slowdown; phone-specific per-tick isolation remains open. See the
+[comparison and regression evidence](../benchmarks/foundation/results/2026-10-03-f8-ao-kernel.json).
+
+Fixed-scene GPU isolation subsequently supports retaining the tiled compute blur:
+the final GPU window-p50 summary is 19.13 ms versus 23.87 ms in the following
+baseline repeat, with identical scene state and 63 byte-identical comparison
+images. The implementation adds about 7.2 MiB at phone resolution, removes the old
+fragment blur and its obsolete binding, and passes 111 renderer/Apple tests plus
+Clippy. [Evidence](../benchmarks/foundation/results/2026-10-03-f8-tiled-blur-retained.json)
+keeps preliminary and final runs separate. The live dense scene still declines
+into the teens; no live-game FPS improvement or sustained qualification is claimed.
+F8 remains open.
+
+Render membership now ignores pose-only changes. The focused Mac extraction
+qualification improves from 1.37 ms to 0.13 ms for 10,000 moving spatial entities.
+A subsequent bounded live iPhone capture shows lower early extraction cost
+(1.84–2.03 ms) but still declines to 17–20 new textures/s late in the run.
+Simulation catch-up and renewed extraction cost remain open; these historical
+comparisons do not establish a sustained FPS improvement.
+[Device evidence](../benchmarks/foundation/results/2026-10-03-f8-render-membership-device.json).
+
+The subsequent structural-history fix prevents dense value writes from evicting
+membership events. It removes the reproduced full-scene rebuild on sparse churn
+and keeps late phone extraction near 2.0–2.2 ms rather than 3.1–3.3 ms.
+ECS/core validation passed 404 tests. Simulation still reaches approximately
+50 ms per host frame, so live throughput and sustained qualification remain open.
+[Reproduction and bounded device evidence](../benchmarks/foundation/results/2026-10-03-f8-structural-history.json).
+
+Physics synchronization now reuses a hierarchy traversal buffer rather than
+allocating subtree lists for each changed root. A controlled Mac CPU pair shows
+6.5% lower physics time and 4.1% lower native tick time; 405 physics/core tests
+pass. The bounded live phone capture still settles near 20 acquisitions/s, so
+this does not close the performance gate.
+[CPU/device evidence](../benchmarks/foundation/results/2026-10-03-f8-physics-traversal.json).
+
+The subsequent common-collider sync changes reduce repeated component comparisons
+and reuse validated pose data. A focused 5,000-moving-collider benchmark improves
+from 1.81 ms to 1.60–1.61 ms. After unlock, the updated live iPhone release completed
+eight seconds at roughly 31–32 acquisitions/s early and 23–26/s late. This is a
+historical comparison, not a controlled overall speedup or sustained qualification.
+Exact PID 1632 was stopped; F8 remains open.
+[Validation and capture](../benchmarks/foundation/results/2026-10-03-f8-sync-reuse.json).
+
+The next dense-scene investigation removed unnecessary asset-owner rebuilds when
+unrelated transform traffic overflows ECS history. Sparse readers can recover
+retained structural events without ignoring lost relevant values. Bounded phone
+captures reduced late mean bridge overhead outside simulation from 1.91–1.97 ms
+per tick to 0.033–0.036 ms. The normal release delivered roughly 27–31 new textures/s
+and was stopped after eight seconds. This fixes a core scaling issue but does not
+qualify sustained 60/120 FPS; F8 remains open.
+[Evidence and limitations](../benchmarks/foundation/results/2026-10-03-f8-domain-history.json).
+
+Two further AO arithmetic experiments were rejected: neither improved whole-frame
+GPU time in bounded frozen-scene device captures. The retained renderer still
+measures approximately 19 ms/GPU frame in that isolated workload. F8 remains open;
+this is neither live-game throughput nor sustained qualification.
+[Rejected experiments](../benchmarks/foundation/results/2026-10-03-f8-ao-arithmetic.json).
+
+The blur now clips its filter bounds once per output and uses predicated tap
+accumulation. In alternating original/candidate eight-second frozen captures,
+blur spans measured 4.08–4.17 ms versus 3.72–3.75 ms, and whole-frame window-p50
+medians measured 19.06–19.18 ms versus 18.67–18.74 ms. All 63 comparison images
+were byte-identical; 97 renderer tests and release Clippy passed, with scalar
+coverage extended to real perspective/orthographic projections and tiny edges.
+The final live run advanced simulation and stopped normally, but acquired only
+about 28 fresh textures/s. This is a small retained GPU improvement, not a
+60/120 Hz qualification. [Evidence](../benchmarks/foundation/results/2026-10-03-f8-blur-bounds.json).
+
+Shared world-pose preparation now avoids ancestor allocation, identity inversion
+and unused ancestor lookup tables for root-only batches. Focused 5,000-root
+preparation medians fell from 817–844 µs to 358–373 µs on the Mac. The same API,
+validation and mixed parent/child ordering remain. 433 scene/core/physics tests
+and release Clippy passed; the no-trace device runner's empty-environment launch
+bug was also fixed with regression coverage. This is a local CPU optimization;
+phone captures of the first candidate remained about 28 fresh acquisitions/s.
+[Results and verification status](../benchmarks/foundation/results/2026-10-03-f8-root-poses.json).
+The final root-only implementation subsequently passed the live phone check:
+fresh launch ID, advancing simulation, nominal thermal samples, eight-second
+deadline and exact PID termination. Its 31.38 fresh acquisitions/s is a short-run
+observation, not an established sustained or causal FPS improvement. F8 stays open.

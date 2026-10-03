@@ -330,10 +330,10 @@ pub fn prepare_world_poses(
         world.get::<Transform>(entity)?;
         world.get::<WorldTransform>(entity)?;
         let mut depth = 0usize;
-        let mut ancestors = BTreeSet::from([entity]);
+        let mut ancestors = BTreeSet::new();
         let mut parent = parent_of(world, entity);
         while let Some(p) = parent {
-            if !ancestors.insert(p) {
+            if p == entity || !ancestors.insert(p) {
                 return Err(SceneError::Cycle {
                     child: entity,
                     parent: p,
@@ -346,40 +346,51 @@ pub fn prepare_world_poses(
         ordered.push((depth, entity));
     }
     ordered.sort_unstable();
+    let has_parented_targets = ordered.last().is_some_and(|(depth, _)| *depth != 0);
     let mut prepared = BTreeMap::<Entity, Transform>::new();
     let mut output = Vec::with_capacity(ordered.len());
-    for (_, entity) in ordered {
+    for (depth, entity) in ordered {
         let (position, rotation) = requested[&entity];
         let current = world.copy::<Transform>(entity)?;
-        let mut parent_matrix = Mat4::IDENTITY;
-        let mut parent_rotation = Quat::IDENTITY;
-        let mut parent = parent_of(world, entity);
-        while let Some(p) = parent {
-            let local = match prepared.get(&p) {
-                Some(local) => *local,
-                None => world.copy::<Transform>(p)?,
-            };
-            if !local.is_valid() {
-                return Err(SceneError::UnsupportedTransform(p));
-            }
-            parent_matrix = local.matrix() * parent_matrix;
-            parent_rotation = local.rotation * parent_rotation;
-            parent = parent_of(world, p);
-        }
-        let inverse =
-            inverse_affine(parent_matrix).ok_or(SceneError::UnsupportedTransform(entity))?;
-        let local = Transform {
-            position: inverse.transform_point3(position),
-            rotation: parent_rotation.inverse() * rotation,
+        // A root's world pose already is its local pose. Keep it inside the
+        // same batch validation/order path, without allocating a visited set
+        // or inverting an identity parent matrix for each root object.
+        let mut local = Transform {
+            position,
+            rotation,
             scale: current.scale,
         };
+        if depth != 0 {
+            let mut parent_matrix = Mat4::IDENTITY;
+            let mut parent_rotation = Quat::IDENTITY;
+            let mut parent = parent_of(world, entity);
+            while let Some(p) = parent {
+                let ancestor = match prepared.get(&p) {
+                    Some(local) => *local,
+                    None => world.copy::<Transform>(p)?,
+                };
+                if !ancestor.is_valid() {
+                    return Err(SceneError::UnsupportedTransform(p));
+                }
+                parent_matrix = ancestor.matrix() * parent_matrix;
+                parent_rotation = ancestor.rotation * parent_rotation;
+                parent = parent_of(world, p);
+            }
+            let inverse =
+                inverse_affine(parent_matrix).ok_or(SceneError::UnsupportedTransform(entity))?;
+            local.position = inverse.transform_point3(position);
+            local.rotation = parent_rotation.inverse() * rotation;
+        }
         if !local.is_finite() {
             return Err(SceneError::NotFinite(entity));
         }
         if !local.is_valid() {
             return Err(SceneError::UnsupportedTransform(entity));
         }
-        prepared.insert(entity, local);
+        // Root-only batches never look up prepared ancestors.
+        if has_parented_targets {
+            prepared.insert(entity, local);
+        }
         output.push((entity, local));
     }
     Ok(output)

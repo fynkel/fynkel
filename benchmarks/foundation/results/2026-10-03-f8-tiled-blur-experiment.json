@@ -1,0 +1,810 @@
+{
+  "schemaVersion": 1,
+  "status": "candidate-not-retained-inconclusive-device-comparison",
+  "sustainedQualification": false,
+  "change": "8x8 compute blur with shared 11x11 radial-distance/AO tile; same 16-tap full-resolution bilateral filter.",
+  "candidatePatch": "--- a/crates/fynkel_render/src/pipelines.rs\n+++ b/crates/fynkel_render/src/pipelines.rs\n@@ -40,7 +40,7 @@\n     pub(crate) mask_skinned_double_sided: wgpu::RenderPipeline,\n     /// Screen-space ambient occlusion and its blur.\n     pub(crate) ao: wgpu::RenderPipeline,\n-    pub(crate) ao_blur: wgpu::RenderPipeline,\n+    pub(crate) ao_blur: wgpu::ComputePipeline,\n     pub(crate) ao_depth_resolve: wgpu::RenderPipeline,\n     /// Bloom (R3b): the bright-pass into the chain's first level, the\n     /// downsample between levels, and the upsample blended back over the\n@@ -129,6 +129,7 @@\n     pub(crate) ao: &'a wgpu::BindGroupLayout,\n     pub(crate) bloom: &'a wgpu::BindGroupLayout,\n     pub(crate) ao_depth_resolve: &'a wgpu::RenderPipeline,\n+    pub(crate) ao_blur: &'a wgpu::ComputePipeline,\n }\n \n /// Twenty-seven of the pipeline variants (`docs/renderer.md`) for one sample\n@@ -276,6 +277,41 @@\n                 },\n             ),\n     );\n+\n+    let blur_shader = module(\n+        \"fynkel tiled ao blur\",\n+        &include_str!(\"shaders/ao_blur.wgsl\")\n+            .replace(\n+                \"DEPTH_TEXTURE\",\n+                if sample_count > 1 {\n+                    \"texture_2d<f32>\"\n+                } else {\n+                    \"texture_depth_2d\"\n+                },\n+            )\n+            .replace(\n+                \"DEPTH_LOAD\",\n+                if sample_count > 1 {\n+                    \"textureLoad(depth_tex, c, 0).x\"\n+                } else {\n+                    \"textureLoad(depth_tex, c, 0)\"\n+                },\n+            ),\n+    );\n+    let blur_layout = create_ao_blur_layout(device, sample_count);\n+    let blur_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {\n+        label: Some(\"fynkel tiled ao blur layout\"),\n+        bind_group_layouts: &[Some(ao_frame_layout), Some(&blur_layout)],\n+        ..Default::default()\n+    });\n+    let ao_blur = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {\n+        label: Some(\"fynkel tiled ao blur\"),\n+        layout: Some(&blur_pl),\n+        module: &blur_shader,\n+        entry_point: Some(\"cs_main\"),\n+        compilation_options: Default::default(),\n+        cache: None,\n+    });\n \n     // Group 2 (the joint palettes) is part of every mesh layout so the\n     // passes bind it once; the static stages simply never read it.\n@@ -706,7 +742,7 @@\n             None,\n         ),\n         ao: ao_pipeline(\"fynkel ao pipeline\", \"fs_main\"),\n-        ao_blur: ao_pipeline(\"fynkel ao blur pipeline\", \"fs_blur\"),\n+        ao_blur,\n         ao_depth_resolve: create_ao_depth_resolve(device),\n         bloom_prefilter: bloom_pipeline(\n             \"fynkel bloom prefilter pipeline\",\n--- a/crates/fynkel_render/src/targets.rs\n+++ b/crates/fynkel_render/src/targets.rs\n@@ -168,6 +168,7 @@\n         ao: ao_layout,\n         bloom: bloom_layout,\n         ao_depth_resolve,\n+        ao_blur,\n     } = layouts;\n     let (w, h) = quality.internal_size(width, height);\n     let samples = quality.msaa;\n@@ -185,7 +186,15 @@\n         let ao_usage =\n             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;\n         let view = create_attachment(device, \"fynkel ao\", w, h, 1, AO_FORMAT, ao_usage);\n-        let blur_view = create_attachment(device, \"fynkel ao blur\", w, h, 1, AO_FORMAT, ao_usage);\n+        let blur_view = create_attachment(\n+            device,\n+            \"fynkel ao blur\",\n+            w,\n+            h,\n+            1,\n+            wgpu::TextureFormat::Rgba8Unorm,\n+            wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,\n+        );\n         let resolved_depth = (samples > 1).then(|| {\n             let view = create_attachment(\n                 device,\n@@ -217,13 +226,24 @@\n                 &blur_view,\n                 \"fynkel ao bg\",\n             ),\n-            blur_bind_group: create_ao_bind_group(\n-                device,\n-                ao_layout,\n-                sampled_depth,\n-                &view,\n-                \"fynkel ao blur bg\",\n-            ),\n+            blur_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {\n+                label: Some(\"fynkel tiled ao blur bg\"),\n+                layout: &ao_blur.get_bind_group_layout(1),\n+                entries: &[\n+                    wgpu::BindGroupEntry {\n+                        binding: 0,\n+                        resource: wgpu::BindingResource::TextureView(sampled_depth),\n+                    },\n+                    wgpu::BindGroupEntry {\n+                        binding: 1,\n+                        resource: wgpu::BindingResource::TextureView(&view),\n+                    },\n+                    wgpu::BindGroupEntry {\n+                        binding: 2,\n+                        resource: wgpu::BindingResource::TextureView(&blur_view),\n+                    },\n+                ],\n+            }),\n             resolved_depth,\n             view,\n             blur_view,\n@@ -387,7 +407,7 @@\n         + texels * 8\n         + if ldr_view.is_some() { texels * 4 } else { 0 }\n         + if ao.is_some() {\n-            texels * (if samples > 1 { 8 } else { 4 })\n+            texels * (if samples > 1 { 10 } else { 6 })\n         } else {\n             0\n         }\n@@ -571,7 +591,7 @@\n         label: Some(\"fynkel ao frame bgl\"),\n         entries: &[wgpu::BindGroupLayoutEntry {\n             binding: 0,\n-            visibility: wgpu::ShaderStages::FRAGMENT,\n+            visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,\n             ty: wgpu::BindingType::Buffer {\n                 ty: wgpu::BufferBindingType::Uniform,\n                 has_dynamic_offset: false,\n@@ -691,3 +711,46 @@\n         mapped_at_creation: false,\n     })\n }\n+\n+/// RGBA8 is a portable storage output; scene shading consumes its original RG channels.\n+pub(crate) fn create_ao_blur_layout(device: &wgpu::Device, samples: u32) -> wgpu::BindGroupLayout {\n+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {\n+        label: Some(\"fynkel tiled ao blur bgl\"),\n+        entries: &[\n+            wgpu::BindGroupLayoutEntry {\n+                binding: 0,\n+                visibility: wgpu::ShaderStages::COMPUTE,\n+                ty: wgpu::BindingType::Texture {\n+                    sample_type: if samples > 1 {\n+                        wgpu::TextureSampleType::Float { filterable: false }\n+                    } else {\n+                        wgpu::TextureSampleType::Depth\n+                    },\n+                    view_dimension: wgpu::TextureViewDimension::D2,\n+                    multisampled: false,\n+                },\n+                count: None,\n+            },\n+            wgpu::BindGroupLayoutEntry {\n+                binding: 1,\n+                visibility: wgpu::ShaderStages::COMPUTE,\n+                ty: wgpu::BindingType::Texture {\n+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },\n+                    view_dimension: wgpu::TextureViewDimension::D2,\n+                    multisampled: false,\n+                },\n+                count: None,\n+            },\n+            wgpu::BindGroupLayoutEntry {\n+                binding: 2,\n+                visibility: wgpu::ShaderStages::COMPUTE,\n+                ty: wgpu::BindingType::StorageTexture {\n+                    access: wgpu::StorageTextureAccess::WriteOnly,\n+                    format: wgpu::TextureFormat::Rgba8Unorm,\n+                    view_dimension: wgpu::TextureViewDimension::D2,\n+                },\n+                count: None,\n+            },\n+        ],\n+    })\n+}\n--- a/crates/fynkel_render/src/passes.rs\n+++ b/crates/fynkel_render/src/passes.rs\n@@ -291,22 +291,13 @@\n             pass.set_bind_group(0, group, &[]);\n             pass.draw(0..3, 0..1);\n         }\n-        for (label, target, pipeline, bind_group, timestamps) in [\n-            (\n-                \"fynkel ao\",\n-                &ao.view,\n-                &self.pipelines.ao,\n-                &ao.ao_bind_group,\n-                self.screen_space_timestamps(11, 12),\n-            ),\n-            (\n-                \"fynkel ao blur\",\n-                &ao.blur_view,\n-                &self.pipelines.ao_blur,\n-                &ao.blur_bind_group,\n-                self.screen_space_timestamps(13, 9),\n-            ),\n-        ] {\n+        for (label, target, pipeline, bind_group, timestamps) in [(\n+            \"fynkel ao\",\n+            &ao.view,\n+            &self.pipelines.ao,\n+            &ao.ao_bind_group,\n+            self.screen_space_timestamps(11, 12),\n+        )] {\n             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {\n                 label: Some(label),\n                 timestamp_writes: timestamps,\n@@ -327,6 +318,26 @@\n             pass.set_bind_group(1, bind_group, &[]);\n             pass.draw(0..3, 0..1);\n         }\n+        let timestamps = self\n+            .gpu_timer\n+            .as_ref()\n+            .map(|timer| wgpu::ComputePassTimestampWrites {\n+                query_set: &timer.query_sets[timer.writing],\n+                beginning_of_pass_write_index: Some(13),\n+                end_of_pass_write_index: Some(9),\n+            });\n+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {\n+            label: Some(\"fynkel tiled ao blur\"),\n+            timestamp_writes: timestamps,\n+        });\n+        pass.set_pipeline(&self.pipelines.ao_blur);\n+        pass.set_bind_group(0, &self.ao_frame_bind_group, &[]);\n+        pass.set_bind_group(1, &ao.blur_bind_group, &[]);\n+        pass.dispatch_workgroups(\n+            self.attachments.width.div_ceil(8),\n+            self.attachments.height.div_ceil(8),\n+            1,\n+        );\n     }\n \n     /// Bloom (R3b): the bright-pass from the HDR frame into level 0, a\n--- a/crates/fynkel_render/src/lib.rs\n+++ b/crates/fynkel_render/src/lib.rs\n@@ -668,6 +668,7 @@\n                 ao: &ao_layout,\n                 bloom: &bloom_layout,\n                 ao_depth_resolve: &pipelines.ao_depth_resolve,\n+                ao_blur: &pipelines.ao_blur,\n             },\n             &present_sampler,\n             &post_buffer,\n@@ -862,6 +863,7 @@\n                 ao: &self.ao_layout,\n                 bloom: &self.bloom_layout,\n                 ao_depth_resolve: &self.pipelines.ao_depth_resolve,\n+                ao_blur: &self.pipelines.ao_blur,\n             },\n             &self.present_sampler,\n             &self.post_buffer,\n--- /dev/null\n+++ b/crates/fynkel_render/src/shaders/ao_blur.wgsl\n@@ -0,0 +1,47 @@\n+// Full-resolution bilateral blur. An 8x8 output tile shares an 11x11 input\n+// tile, including the original asymmetric [-2, 1] halo. Each input depth\n+// is reconstructed once per tile instead of once for each neighbouring tap.\n+@group(1) @binding(0) var depth_tex: DEPTH_TEXTURE;\n+@group(1) @binding(1) var ao_source: texture_2d<f32>;\n+@group(1) @binding(2) var ao_output: texture_storage_2d<rgba8unorm, write>;\n+var<workgroup> samples: array<vec3<f32>, 121>;\n+\n+fn depth_at(c: vec2<i32>) -> f32 { return DEPTH_LOAD; }\n+fn radial_distance(c: vec2<i32>, size: vec2<i32>) -> f32 {\n+    let uv = (vec2<f32>(c) + 0.5) / vec2<f32>(size);\n+    let ndc = vec3<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth_at(c));\n+    let p = frame.inv_view_proj * vec4<f32>(ndc, 1.0);\n+    return distance(p.xyz / p.w, frame.camera_pos.xyz);\n+}\n+\n+@compute @workgroup_size(8, 8)\n+fn cs_main(@builtin(workgroup_id) group: vec3<u32>,\n+           @builtin(local_invocation_id) local: vec3<u32>,\n+           @builtin(local_invocation_index) index: u32) {\n+    let size = vec2<i32>(textureDimensions(depth_tex));\n+    let origin = vec2<i32>(group.xy * 8u) - vec2<i32>(2);\n+    for (var i = index; i < 121u; i += 64u) {\n+        let c = clamp(origin + vec2<i32>(i32(i % 11u), i32(i / 11u)), vec2<i32>(0), size - 1);\n+        samples[i] = vec3<f32>(textureLoad(ao_source, c, 0).rg, radial_distance(c, size));\n+    }\n+    workgroupBarrier();\n+    let c = vec2<i32>(group.xy * 8u + local.xy);\n+    // Every invocation participates in the barrier, including partial edge tiles.\n+    if any(c >= size) { return; }\n+    let center = samples[(local.y + 2u) * 11u + local.x + 2u];\n+    var sum = vec2<f32>(0.0);\n+    var weight = 0.0;\n+    for (var y = -2; y < 2; y++) {\n+        for (var x = -2; x < 2; x++) {\n+            let s = c + vec2<i32>(x, y);\n+            if any(s < vec2<i32>(0)) || any(s >= size) { continue; }\n+            let tap = samples[u32(i32(local.y) + y + 2) * 11u + u32(i32(local.x) + x + 2)];\n+            if abs(tap.z - center.z) > 0.02 * max(center.z, 1.0) { continue; }\n+            sum += tap.xy;\n+            weight += 1.0;\n+        }\n+    }\n+    var value = center.xy;\n+    if weight > 0.0 { value = sum / weight; }\n+    textureStore(ao_output, c, vec4<f32>(value, 0.0, 1.0));\n+}\n",
+  "extraOutputBytesPerPixel": 2,
+  "extraOutputBytesAt1320x2868": 7571520,
+  "validation": {
+    "renderer": "96 passed, zero failed, five ignored",
+    "pixels": "63 images byte-identical",
+    "iosRelease": "passed",
+    "clippy": "candidate failed single_element_loop lint after replacing the blur loop; candidate reverted rather than retained"
+  },
+  "pixelComparison": [
+    {
+      "image": "contact-plain.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "outline-wide.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "flat.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "culling.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "debug-line.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "msaa1.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "grading-lift.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "emissive.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "volume-wide.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "cascades.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "scale-0.5.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "outline-scale-2.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "layer-camera-mask.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "spot.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "msaa4.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "overlay-grid.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "outline-msaa1.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "overlay-thick.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "layer-light-mask.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "bloom-wide.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "masked.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "scale-0.75.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "contact.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "point.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "volume-off.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "extra-world-shadow.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "ibl-red.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shader-shadow-0.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "debug-aabb.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "scale-2.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "ambient.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "ortho.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shader-shadow-1.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "outline-occluded.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "outline-msaa4.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shader-flat.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "ibl.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "ao-off.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "extra-world-grey.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "sky.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shader-pbr.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "bloom.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "opaque.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "grading-neutral.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "casters-with.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "grading-warm.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "blend.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shader-texture.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shader-wave.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "overlay-occluded.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "outline-scale-0.5.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "grading-grey.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "per-object-lights.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "overlay-triangle.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "maps.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "grading-plain.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "ao.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "ibl-green.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "extra-world.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shader-missing.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "outline-blend.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "shadow.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    },
+    {
+      "image": "casters-without.ppm",
+      "changedChannels": 0,
+      "maxChannelDelta": 0,
+      "meanChannelDelta": 0.0
+    }
+  ],
+  "runs": {
+    "tiled-blur": {
+      "device": "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+      "bundle": "com.fynkel.qualification.mobileDense5000",
+      "app": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-app-500/build/ios/iphoneos/Runner.app",
+      "status": "diagnostic-complete",
+      "sustainedQualification": false,
+      "commands": [
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "install",
+            "app",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "target/f8-mobile-app-500/build/ios/iphoneos/Runner.app"
+          ],
+          "exitCode": 0,
+          "stdout": "03:58:41  Acquired tunnel connection to device.\n03:58:41  Enabling developer disk image services.\n03:58:41  Acquired usage assertion.\nApp installed:\n\u2022 bundleID: com.fynkel.qualification.mobileDense5000\n\u2022 installationURL: file:///private/var/containers/Bundle/Application/D221C3B9-CA77-405E-9758-0FF5CBAC5D55/Runner.app/\n\u2022 launchServicesIdentifier: unknown\n\u2022 databaseUUID: 3CA3D25C-7ED7-4480-97BA-F3545CDF9E74\n\u2022 databaseSequenceNumber: 7572\n\u2022 options: \n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "process",
+            "launch",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "--terminate-existing",
+            "--json-output",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-tiled-blur/launch.json",
+            "com.fynkel.qualification.mobileDense5000"
+          ],
+          "exitCode": 0,
+          "stdout": "03:58:42  Acquired tunnel connection to device.\n03:58:42  Enabling developer disk image services.\n03:58:42  Acquired usage assertion.\nLaunched application with com.fynkel.qualification.mobileDense5000 bundle identifier.\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "process",
+            "terminate",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "--pid",
+            "762"
+          ],
+          "exitCode": 0,
+          "stdout": "03:58:55  Acquired tunnel connection to device.\n03:58:55  Enabling developer disk image services.\n03:58:55  Acquired usage assertion.\nSent signal to terminate process sent to pid 762\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "copy",
+            "from",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "--domain-type",
+            "appDataContainer",
+            "--domain-identifier",
+            "com.fynkel.qualification.mobileDense5000",
+            "--source",
+            "Documents/mobile-capture.jsonl",
+            "--destination",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-tiled-blur/mobile-capture.jsonl"
+          ],
+          "exitCode": 0,
+          "stdout": "03:58:55  Acquired tunnel connection to device.\n03:58:55  Enabling developer disk image services.\n03:58:55  Acquired usage assertion.\nFile received from Device\n/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-tiled-blur/mobile-capture.jsonl\n",
+          "stderr": ""
+        }
+      ],
+      "executableSha256": "f2b3b1cc5bba83bc28642e261ced5ea60005592cad36d3e5a8c7a727d99fb441",
+      "pid": 762,
+      "terminatedExactPid": 762,
+      "records": [
+        {
+          "time": "2026-10-03T01:58:42.974096Z",
+          "elapsedMs": 0,
+          "event": "start",
+          "quality": "medium",
+          "limitSeconds": 8,
+          "sustainedQualification": false,
+          "cpuReadback": false,
+          "acquireWaitUs": 3000
+        },
+        {
+          "time": "2026-10-03T01:58:44.217141Z",
+          "elapsedMs": 685,
+          "event": "stats",
+          "windowSeconds": 1.022167,
+          "loopFps": 12.71807835705907,
+          "acquiredFps": 10.761450917511521,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=13 ticks=33 missed=3 dropped=0 entities=8844 interval=45.076/82.024/134.458 simulate=29.304/60.675/111.089 render=6.498/20.733/21.392 behaviours=7.097/17.914/23.702 native=22.344/54.213/86.967 work=35.802/81.408/132.481 build=32.430/32.430/32.430 raster=17.657/17.657/17.657 snapshot=28920 snapshot_peak=28920 mem_native=41236987 mem_resident=266944512 mem_assets=86205 instances=1728 draws=16 culled=4278 shadow=3760/60 rendered=13 acquired=11 repeated=1 present_lag=1/1/1 acquire_wait=3.385/3.399/3.399 extract=3.120/6.221/10.089 prepare=2.853/11.322/14.950 encode=0.037/0.075/0.095 cpu=0.533/2.191/3.189 gpu_complete=17.945/26.557/75.126 gpu_frame=17.479/53.084/53.084 gpu_shadow=0.521/1.153/1.153 gpu_ao=10.247/23.413/23.413 gpu_scene=14.830/23.525/23.525 gpu_post=16.750/24.818/24.818 gpu_n=10 gpu_untimed=0 gpu_timestamps=true mem_gpu=277854984 texture_copies=13 texture_new=12 texture_empty=1 texture_ready=12 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:58:45.217984Z",
+          "elapsedMs": 1686,
+          "event": "stats",
+          "windowSeconds": 1.000833,
+          "loopFps": 25.978360026098258,
+          "acquiredFps": 25.978360026098258,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=26 ticks=60 missed=0 dropped=0 entities=8854 interval=37.456/50.510/50.611 simulate=30.393/43.298/43.897 render=6.392/7.012/7.119 behaviours=6.450/9.796/10.338 native=23.032/33.381/33.639 work=36.785/50.310/51.016 build=35.995/81.092/130.938 raster=3.567/5.255/6.716 snapshot=28920 snapshot_peak=28920 mem_native=45900402 mem_resident=279822336 mem_assets=86205 instances=1749 draws=16 culled=4267 shadow=3822/60 rendered=26 acquired=26 repeated=0 present_lag=1/1/1 acquire_wait=3.386/3.400/3.401 extract=3.277/3.462/3.531 prepare=2.608/3.128/3.137 encode=0.033/0.044/0.046 cpu=0.510/0.689/0.730 gpu_complete=18.985/21.511/22.434 gpu_frame=18.434/20.729/21.830 gpu_shadow=0.535/0.764/0.876 gpu_ao=10.719/11.789/14.549 gpu_scene=15.825/17.635/19.654 gpu_post=17.846/19.954/20.819 gpu_n=26 gpu_untimed=0 gpu_timestamps=true mem_gpu=278575880 texture_copies=26 texture_new=26 texture_empty=0 texture_ready=26 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:58:46.237231Z",
+          "elapsedMs": 2705,
+          "event": "stats",
+          "windowSeconds": 1.019211,
+          "loopFps": 24.528777652517483,
+          "acquiredFps": 24.528777652517483,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=25 ticks=61 missed=0 dropped=0 entities=8864 interval=41.293/49.389/51.212 simulate=32.255/42.089/43.869 render=6.634/7.209/7.557 behaviours=6.884/9.704/10.599 native=24.973/31.344/34.074 work=38.889/49.298/51.426 build=38.034/50.323/50.460 raster=3.518/3.578/3.593 snapshot=28920 snapshot_peak=28920 mem_native=46135576 mem_resident=275283968 mem_assets=86205 instances=1785 draws=16 culled=4241 shadow=3883/60 rendered=25 acquired=25 repeated=0 present_lag=1/1/1 acquire_wait=3.387/3.400/3.402 extract=3.344/3.614/3.703 prepare=2.732/3.337/3.339 encode=0.033/0.042/0.042 cpu=0.494/0.615/0.639 gpu_complete=18.296/19.787/20.172 gpu_frame=17.791/19.252/19.534 gpu_shadow=0.539/0.718/0.787 gpu_ao=10.512/11.224/12.032 gpu_scene=15.480/17.281/17.289 gpu_post=17.204/18.530/18.750 gpu_n=25 gpu_untimed=0 gpu_timestamps=true mem_gpu=278575880 texture_copies=25 texture_new=25 texture_empty=0 texture_ready=25 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:58:47.239919Z",
+          "elapsedMs": 3708,
+          "event": "stats",
+          "windowSeconds": 1.002653,
+          "loopFps": 23.936496474852216,
+          "acquiredFps": 23.936496474852216,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=24 ticks=60 missed=0 dropped=0 entities=8874 interval=43.067/50.311/57.770 simulate=32.722/42.191/42.807 render=6.817/7.630/7.718 behaviours=7.149/9.701/9.880 native=25.407/32.453/33.042 work=39.539/49.821/50.525 build=39.641/49.847/51.047 raster=3.532/3.574/3.595 snapshot=28920 snapshot_peak=28920 mem_native=46233720 mem_resident=274300928 mem_assets=86205 instances=1828 draws=16 culled=4208 shadow=3961/60 rendered=24 acquired=24 repeated=0 present_lag=1/1/1 acquire_wait=3.388/3.401/3.404 extract=3.444/3.684/3.702 prepare=2.788/3.411/3.440 encode=0.033/0.036/0.038 cpu=0.504/0.565/0.591 gpu_complete=18.283/19.773/20.652 gpu_frame=17.624/19.184/20.190 gpu_shadow=0.541/0.587/0.591 gpu_ao=10.575/11.564/12.671 gpu_scene=15.763/17.348/18.429 gpu_post=16.995/18.526/19.578 gpu_n=24 gpu_untimed=0 gpu_timestamps=true mem_gpu=278575880 texture_copies=24 texture_new=24 texture_empty=0 texture_ready=24 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:58:48.265517Z",
+          "elapsedMs": 4734,
+          "event": "stats",
+          "windowSeconds": 1.025561,
+          "loopFps": 17.551369445600994,
+          "acquiredFps": 17.551369445600994,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=18 ticks=58 missed=2 dropped=0 entities=8878 interval=54.136/74.363/74.516 simulate=44.654/59.949/67.909 render=6.999/7.392/8.315 behaviours=9.831/14.772/15.462 native=34.980/46.658/52.167 work=51.653/67.341/76.224 build=40.087/51.915/55.134 raster=3.543/3.589/3.602 snapshot=28920 snapshot_peak=28920 mem_native=46272297 mem_resident=276889600 mem_assets=86205 instances=1897 draws=16 culled=4143 shadow=4022/60 rendered=18 acquired=18 repeated=0 present_lag=1/1/1 acquire_wait=3.391/3.404/3.404 extract=3.445/3.681/3.983 prepare=2.905/3.367/3.748 encode=0.035/0.039/0.045 cpu=0.555/0.644/0.690 gpu_complete=19.620/20.592/21.559 gpu_frame=18.970/19.900/19.964 gpu_shadow=0.548/0.675/0.677 gpu_ao=10.877/11.778/12.026 gpu_scene=16.238/17.689/17.913 gpu_post=18.150/19.116/19.151 gpu_n=18 gpu_untimed=0 gpu_timestamps=true mem_gpu=278575880 texture_copies=18 texture_new=18 texture_empty=0 texture_ready=18 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:58:49.210688Z",
+          "elapsedMs": 5679,
+          "event": "stats",
+          "windowSeconds": 0.945146,
+          "loopFps": 13.754488724493358,
+          "acquiredFps": 13.754488724493358,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=13 ticks=52 missed=4 dropped=0 entities=8879 interval=69.429/82.547/87.202 simulate=58.684/70.894/72.322 render=7.371/8.217/8.256 behaviours=13.416/17.438/18.049 native=44.697/54.048/54.124 work=66.055/79.111/80.578 build=62.943/77.336/78.309 raster=3.560/3.638/3.640 snapshot=28920 snapshot_peak=28920 mem_native=46268084 mem_resident=276430848 mem_assets=86205 instances=1946 draws=16 culled=4095 shadow=4076/60 rendered=13 acquired=13 repeated=0 present_lag=1/1/1 acquire_wait=3.386/3.403/3.406 extract=3.650/3.780/3.968 prepare=3.309/3.719/3.815 encode=0.035/0.045/0.053 cpu=0.526/0.655/0.694 gpu_complete=19.048/27.179/28.393 gpu_frame=18.461/26.609/27.725 gpu_shadow=0.596/2.342/2.349 gpu_ao=11.229/18.635/19.238 gpu_scene=16.539/23.163/23.801 gpu_post=17.812/24.029/25.093 gpu_n=13 gpu_untimed=0 gpu_timestamps=true mem_gpu=278575880 texture_copies=13 texture_new=13 texture_empty=0 texture_ready=13 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:58:50.233780Z",
+          "elapsedMs": 6702,
+          "event": "stats",
+          "windowSeconds": 1.023056,
+          "loopFps": 13.684490389577892,
+          "acquiredFps": 13.684490389577892,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=14 ticks=56 missed=5 dropped=0 entities=8878 interval=72.395/80.207/82.654 simulate=60.420/73.395/74.707 render=7.727/8.658/8.747 behaviours=14.242/17.126/17.399 native=46.756/56.089/57.086 work=68.147/82.053/83.454 build=67.661/80.031/82.494 raster=3.545/3.595/3.637 snapshot=28920 snapshot_peak=28920 mem_native=46272782 mem_resident=276217856 mem_assets=86205 instances=2036 draws=16 culled=4004 shadow=4113/60 rendered=14 acquired=14 repeated=0 present_lag=1/1/1 acquire_wait=3.386/3.388/3.414 extract=3.835/4.107/4.269 prepare=3.532/3.878/3.923 encode=0.037/0.049/0.061 cpu=0.553/0.625/0.695 gpu_complete=19.848/27.581/27.677 gpu_frame=19.194/27.026/27.059 gpu_shadow=0.688/2.335/2.344 gpu_ao=11.278/18.602/18.684 gpu_scene=17.020/23.259/23.426 gpu_post=18.280/24.376/24.421 gpu_n=14 gpu_untimed=0 gpu_timestamps=true mem_gpu=278575880 texture_copies=14 texture_new=14 texture_empty=0 texture_ready=14 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:58:51.228126Z",
+          "elapsedMs": 7696,
+          "event": "stats",
+          "windowSeconds": 0.9943,
+          "loopFps": 14.080257467565122,
+          "acquiredFps": 14.080257467565122,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=14 ticks=55 missed=4 dropped=0 entities=8878 interval=73.828/80.067/82.602 simulate=59.288/69.348/73.519 render=7.353/8.322/8.354 behaviours=14.127/16.966/18.693 native=44.959/52.332/54.666 work=66.641/77.670/81.873 build=67.868/76.061/76.596 raster=3.535/3.638/3.666 snapshot=28920 snapshot_peak=28920 mem_native=46274019 mem_resident=275447808 mem_assets=86205 instances=2147 draws=16 culled=3893 shadow=4153/60 rendered=14 acquired=14 repeated=0 present_lag=1/1/1 acquire_wait=3.386/3.399/3.400 extract=3.655/3.986/4.032 prepare=3.359/3.809/3.822 encode=0.036/0.040/0.043 cpu=0.518/0.564/0.600 gpu_complete=18.755/27.071/27.279 gpu_frame=19.185/26.694/26.712 gpu_shadow=0.563/2.386/2.435 gpu_ao=11.518/18.664/19.067 gpu_scene=17.010/23.255/23.274 gpu_post=18.116/23.826/23.997 gpu_n=14 gpu_untimed=0 gpu_timestamps=true mem_gpu=278575880 texture_copies=14 texture_new=14 texture_empty=0 texture_ready=14 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:58:51.538342Z",
+          "elapsedMs": 8006,
+          "event": "stop",
+          "reason": "deadline"
+        }
+      ]
+    },
+    "tiled-control": {
+      "device": "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+      "bundle": "com.fynkel.qualification.mobileDense5000",
+      "app": "/Users/oumari/Desktop/Code/fynkelengine/target/f8-blur-baseline.app",
+      "status": "diagnostic-complete",
+      "sustainedQualification": false,
+      "commands": [
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "install",
+            "app",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "target/f8-blur-baseline.app"
+          ],
+          "exitCode": 0,
+          "stdout": "03:59:29  Acquired tunnel connection to device.\n03:59:29  Enabling developer disk image services.\n03:59:29  Acquired usage assertion.\nApp installed:\n\u2022 bundleID: com.fynkel.qualification.mobileDense5000\n\u2022 installationURL: file:///private/var/containers/Bundle/Application/5CBE472F-3A6D-4806-87EA-EEA7147EDAB7/f8-blur-baseline.app/\n\u2022 launchServicesIdentifier: unknown\n\u2022 databaseUUID: 3CA3D25C-7ED7-4480-97BA-F3545CDF9E74\n\u2022 databaseSequenceNumber: 7580\n\u2022 options: \n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "process",
+            "launch",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "--terminate-existing",
+            "--json-output",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-tiled-control/launch.json",
+            "com.fynkel.qualification.mobileDense5000"
+          ],
+          "exitCode": 0,
+          "stdout": "03:59:31  Acquired tunnel connection to device.\n03:59:31  Enabling developer disk image services.\n03:59:31  Acquired usage assertion.\nLaunched application with com.fynkel.qualification.mobileDense5000 bundle identifier.\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "process",
+            "terminate",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "--pid",
+            "802"
+          ],
+          "exitCode": 0,
+          "stdout": "03:59:43  Acquired tunnel connection to device.\n03:59:43  Enabling developer disk image services.\n03:59:44  Acquired usage assertion.\nSent signal to terminate process sent to pid 802\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "xcrun",
+            "devicectl",
+            "device",
+            "copy",
+            "from",
+            "--device",
+            "0B7504CE-4917-5F8B-9F4C-B05BC9FF8D2D",
+            "--domain-type",
+            "appDataContainer",
+            "--domain-identifier",
+            "com.fynkel.qualification.mobileDense5000",
+            "--source",
+            "Documents/mobile-capture.jsonl",
+            "--destination",
+            "/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-tiled-control/mobile-capture.jsonl"
+          ],
+          "exitCode": 0,
+          "stdout": "03:59:44  Acquired tunnel connection to device.\n03:59:44  Enabling developer disk image services.\n03:59:44  Acquired usage assertion.\nFile received from Device\n/Users/oumari/Desktop/Code/fynkelengine/target/f8-mobile-capture-5000-tiled-control/mobile-capture.jsonl\n",
+          "stderr": ""
+        }
+      ],
+      "executableSha256": "d59b43fc35baf9428ec3905f382003a8b0d5b73a4ceb06316b6ab682a6c3b5b0",
+      "pid": 802,
+      "terminatedExactPid": 802,
+      "records": [
+        {
+          "time": "2026-10-03T01:59:31.335574Z",
+          "elapsedMs": 0,
+          "event": "start",
+          "quality": "medium",
+          "limitSeconds": 8,
+          "sustainedQualification": false,
+          "cpuReadback": false,
+          "acquireWaitUs": 3000
+        },
+        {
+          "time": "2026-10-03T01:59:32.564889Z",
+          "elapsedMs": 1005,
+          "event": "stats",
+          "windowSeconds": 1.039845,
+          "loopFps": 26.927090095158416,
+          "acquiredFps": 19.233635782256012,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=28 ticks=58 missed=0 dropped=2 entities=8848 interval=36.752/46.489/49.699 simulate=24.587/33.883/37.401 render=6.497/8.866/21.379 behaviours=6.055/9.151/9.523 native=19.447/26.688/28.077 work=31.084/42.749/58.780 build=25.510/25.510/25.510 raster=3.156/3.156/3.156 snapshot=28920 snapshot_peak=28920 mem_native=43896420 mem_resident=281329664 mem_assets=86205 instances=1735 draws=16 culled=4275 shadow=3779/60 rendered=26 acquired=20 repeated=0 present_lag=1/1/1 acquire_wait=3.388/3.403/3.408 extract=3.247/3.618/3.881 prepare=2.539/3.325/15.390 encode=0.034/0.060/0.085 cpu=0.548/2.529/3.508 gpu_complete=19.849/40.699/50.173 gpu_frame=19.150/31.498/46.287 gpu_shadow=0.526/3.572/3.685 gpu_ao=11.566/17.089/31.140 gpu_scene=16.986/26.075/27.742 gpu_post=18.480/27.209/27.638 gpu_n=23 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=21 texture_new=21 texture_empty=0 texture_ready=25 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:59:33.558838Z",
+          "elapsedMs": 1999,
+          "event": "stats",
+          "windowSeconds": 0.993927,
+          "loopFps": 21.128312240234948,
+          "acquiredFps": 21.128312240234948,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=21 ticks=59 missed=0 dropped=0 entities=8858 interval=46.260/58.176/59.438 simulate=35.781/46.361/47.924 render=6.826/7.692/7.923 behaviours=7.309/10.701/12.002 native=28.018/34.485/37.057 work=42.607/54.053/55.847 build=35.717/43.230/55.660 raster=3.557/3.689/5.738 snapshot=28920 snapshot_peak=28920 mem_native=45975901 mem_resident=280870912 mem_assets=86205 instances=1764 draws=16 culled=4256 shadow=3843/60 rendered=21 acquired=21 repeated=0 present_lag=1/1/1 acquire_wait=3.387/3.407/3.407 extract=3.476/3.701/3.733 prepare=2.806/3.358/3.546 encode=0.034/0.041/0.044 cpu=0.521/0.672/0.678 gpu_complete=19.741/21.628/22.705 gpu_frame=19.078/20.989/22.409 gpu_shadow=0.540/0.799/0.926 gpu_ao=11.834/12.667/14.489 gpu_scene=16.957/18.886/20.370 gpu_post=18.346/20.375/21.711 gpu_n=21 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=21 texture_new=21 texture_empty=0 texture_ready=21 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:59:34.539077Z",
+          "elapsedMs": 2979,
+          "event": "stats",
+          "windowSeconds": 0.980221,
+          "loopFps": 18.363205848477026,
+          "acquiredFps": 18.363205848477026,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=18 ticks=58 missed=0 dropped=0 entities=8868 interval=52.105/63.271/74.985 simulate=43.990/50.042/61.011 render=7.389/7.831/8.222 behaviours=10.118/11.052/13.283 native=33.719/39.401/47.503 work=51.379/57.873/69.233 build=42.699/51.571/53.630 raster=3.529/3.588/3.592 snapshot=28920 snapshot_peak=28920 mem_native=46090420 mem_resident=278937600 mem_assets=86205 instances=1795 draws=16 culled=4235 shadow=3914/60 rendered=18 acquired=18 repeated=0 present_lag=1/1/1 acquire_wait=3.390/3.404/3.406 extract=3.665/3.942/4.001 prepare=3.094/3.540/3.679 encode=0.033/0.043/0.045 cpu=0.520/0.671/0.678 gpu_complete=19.355/20.814/27.870 gpu_frame=18.757/19.636/19.700 gpu_shadow=0.539/0.677/0.700 gpu_ao=11.615/12.094/12.123 gpu_scene=16.603/17.768/17.849 gpu_post=17.956/18.876/19.107 gpu_n=18 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=18 texture_new=18 texture_empty=0 texture_ready=18 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:59:35.528159Z",
+          "elapsedMs": 3968,
+          "event": "stats",
+          "windowSeconds": 0.989038,
+          "loopFps": 16.177335956757982,
+          "acquiredFps": 16.177335956757982,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=16 ticks=59 missed=0 dropped=0 entities=8878 interval=62.215/69.128/71.063 simulate=47.874/58.184/61.624 render=7.534/8.332/8.543 behaviours=11.366/12.676/13.352 native=37.379/45.329/48.103 work=55.408/66.516/70.167 build=53.255/63.481/69.274 raster=3.556/3.605/3.612 snapshot=28920 snapshot_peak=28920 mem_native=46175524 mem_resident=279298048 mem_assets=86205 instances=1850 draws=16 culled=4190 shadow=3990/60 rendered=16 acquired=16 repeated=0 present_lag=1/1/1 acquire_wait=3.385/3.402/3.402 extract=3.739/4.055/4.099 prepare=3.439/3.798/3.821 encode=0.036/0.039/0.042 cpu=0.529/0.587/0.618 gpu_complete=19.374/25.911/28.512 gpu_frame=18.879/27.270/27.974 gpu_shadow=0.545/2.268/2.314 gpu_ao=11.751/19.374/19.758 gpu_scene=16.823/23.792/24.154 gpu_post=18.236/24.714/25.318 gpu_n=16 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=16 texture_new=16 texture_empty=0 texture_ready=16 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:59:36.566676Z",
+          "elapsedMs": 5006,
+          "event": "stats",
+          "windowSeconds": 1.038485,
+          "loopFps": 14.444118114368527,
+          "acquiredFps": 14.444118114368527,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=15 ticks=58 missed=4 dropped=0 entities=8878 interval=73.319/78.095/84.756 simulate=59.271/68.853/72.188 render=7.353/8.099/8.653 behaviours=13.526/16.917/18.260 native=45.734/52.665/53.632 work=66.624/76.952/80.841 build=56.072/70.225/75.229 raster=3.542/3.652/3.653 snapshot=28920 snapshot_peak=28920 mem_native=46187603 mem_resident=280264704 mem_assets=86205 instances=1921 draws=16 culled=4119 shadow=4042/60 rendered=15 acquired=15 repeated=0 present_lag=1/1/1 acquire_wait=3.385/3.397/3.400 extract=3.640/3.938/3.980 prepare=3.306/3.550/4.073 encode=0.035/0.040/0.049 cpu=0.562/0.632/0.648 gpu_complete=19.443/39.991/42.319 gpu_frame=18.607/27.571/41.671 gpu_shadow=0.563/2.315/2.334 gpu_ao=11.915/19.553/29.701 gpu_scene=16.612/23.986/37.673 gpu_post=17.975/24.952/38.957 gpu_n=15 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=15 texture_new=15 texture_empty=0 texture_ready=15 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:59:37.549283Z",
+          "elapsedMs": 5989,
+          "event": "stats",
+          "windowSeconds": 0.982576,
+          "loopFps": 13.230528732637476,
+          "acquiredFps": 13.230528732637476,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=13 ticks=52 missed=6 dropped=0 entities=8878 interval=71.057/87.758/88.295 simulate=62.540/74.172/74.478 render=7.905/8.575/9.009 behaviours=14.654/17.200/18.588 native=48.368/56.519/56.931 work=70.445/82.747/83.487 build=70.459/77.137/80.022 raster=3.559/3.643/3.720 snapshot=28920 snapshot_peak=28920 mem_native=46186912 mem_resident=280920064 mem_assets=86205 instances=1982 draws=16 culled=4058 shadow=4089/60 rendered=13 acquired=13 repeated=0 present_lag=1/1/1 acquire_wait=3.386/3.404/3.446 extract=3.824/4.102/4.281 prepare=3.570/3.849/4.171 encode=0.035/0.041/0.046 cpu=0.558/0.618/0.654 gpu_complete=19.672/28.887/41.446 gpu_frame=22.136/39.381/40.822 gpu_shadow=0.785/2.302/2.306 gpu_ao=13.295/27.773/28.829 gpu_scene=19.889/35.442/36.740 gpu_post=21.188/36.831/38.213 gpu_n=13 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=13 texture_new=13 texture_empty=0 texture_ready=13 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:59:38.549949Z",
+          "elapsedMs": 6990,
+          "event": "stats",
+          "windowSeconds": 1.00064,
+          "loopFps": 12.991685321394307,
+          "acquiredFps": 12.991685321394307,
+          "width": 1320,
+          "height": 2868,
+          "thermal": "nominal",
+          "summary": "frames=13 ticks=52 missed=8 dropped=0 entities=8879 interval=78.227/83.311/90.971 simulate=62.515/74.461/75.164 render=8.325/8.704/8.935 behaviours=14.318/18.411/18.595 native=48.213/56.017/56.415 work=70.840/83.165/84.099 build=71.352/81.372/82.434 raster=3.555/3.598/3.664 snapshot=28920 snapshot_peak=28920 mem_native=46189174 mem_resident=280936448 mem_assets=86205 instances=2068 draws=16 culled=3973 shadow=4128/60 rendered=13 acquired=13 repeated=0 present_lag=1/1/1 acquire_wait=3.391/3.398/3.405 extract=3.886/4.244/4.310 prepare=3.645/3.954/4.168 encode=0.037/0.044/0.044 cpu=0.578/0.667/0.830 gpu_complete=26.979/27.899/41.008 gpu_frame=26.156/26.692/26.937 gpu_shadow=2.324/2.407/2.427 gpu_ao=18.149/19.052/19.180 gpu_scene=22.603/23.354/23.435 gpu_post=23.431/24.046/24.130 gpu_n=13 gpu_untimed=0 gpu_timestamps=true mem_gpu=271004360 texture_copies=13 texture_new=13 texture_empty=0 texture_ready=13 thermal=nominal"
+        },
+        {
+          "time": "2026-10-03T01:59:39.571890Z",
+          "elapsedMs": 8012,
+          "event": "stop",
+          "reason": "deadline"
+        }
+      ]
+    }
+  },
+  "summaries": {
+    "tiled-blur": {
+      "gpu_frame": 18.461,
+      "gpu_ao": 10.877
+    },
+    "tiled-control": {
+      "gpu_frame": 19.078,
+      "gpu_ao": 11.834
+    }
+  },
+  "limitations": [
+    "Candidate and following control both slowed relative to earlier captures; no reliable improvement or regression attributed.",
+    "Nominal thermal samples do not prove stable clocks.",
+    "GPU pass spans overlap and cannot be summed.",
+    "No sustained qualification.",
+    "Candidate reverted and baseline app reinstalled by the control run; app stopped."
+  ],
+  "hashes": {
+    "target/foundation-baseline/f8/tiled-blur/f8-tiled-blur-clippy.log": "2d0cd4c42520723e7b9118bbeb5d6ca183d9b203f5ec80888e592e63535e0c09",
+    "target/foundation-baseline/f8/tiled-blur/f8-tiled-blur-pixel-comparison.json": "8e69a52040810b1ee77dd970a47640d83fceb1af8623fb96a3c6870b231efcd0",
+    "target/foundation-baseline/f8/tiled-blur/f8-tiled-blur-build.log": "15c868138b72d449bb4e215b31c2a6c087b790e39e6ac6eb61f78086c52c9fc6",
+    "target/foundation-baseline/f8/tiled-blur/f8-tiled-blur-capture.log": "9ff3bb44ae5e0f6e1d430e83783304b4eac204ab6c72c06883628bfd98ceef66",
+    "target/foundation-baseline/f8/tiled-blur/f8-tiled-blur-tests.log": "4c07a805ba83e25e9fea59eb6c62dc782431a819376e1b993d7d3a71a3c23d95",
+    "target/foundation-baseline/f8/tiled-blur/f8-tiled-control-capture.log": "4c7bedb7af3e1c399893abbfe6414e91303ec1ececead4c7caf3f9f2a2671819",
+    "target/foundation-baseline/f8/tiled-blur/f8-tiled-blur-pixels.log": "1b849e76809319e54483712e984ba70a2b1cf3305a8f5d0fbed07dabc4ed1e05",
+    "target/foundation-baseline/f8/tiled-blur/ao_blur.wgsl": "34367e57cd8ec5750766b27870eeb8dc9349d5fa7eb4cd5e9222f8e3600c1685",
+    "target/foundation-baseline/f8/tiled-blur/targets.rs": "6f64a5f5ed520ecab02404393630bf9b53fef4dddcd04f3a0ff2b03361606e05",
+    "target/foundation-baseline/f8/tiled-blur/lib.rs": "ac86a36f80d95b4377b4569973a59705ca7d70e92db8769d50cc2f39f29e013b",
+    "target/foundation-baseline/f8/tiled-blur/pipelines.rs": "b771d9f2f21a71a4ea8a810fe78b2e633a64c0a98cdd451f7287cec0370aac79",
+    "target/foundation-baseline/f8/tiled-blur/passes.rs": "81a3171f6cc5d01f810ebe99dbb1c9bdfba5ed5cef56f42bd0da1514b62f660a"
+  }
+}

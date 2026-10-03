@@ -421,3 +421,13 @@ hosts). `FynkelFrameStats.summary()` includes `thermal=<state>`. This is device-
 pressure, not a temperature sensor or proof of engine-induced throttling. The
 [mobile benchmark harness](../benchmarks/mobile/README.md) records it and stops
 short diagnostic runs at serious/critical pressure.
+
+`FYNKEL_TRACE_SCREEN_SPACE_FILE=<path>` independently enables a file destination
+for every eighth completed screen-space sample, capped at 1024 rows per renderer.
+Absolute paths are used directly; relative paths resolve against the process home
+(the app data sandbox on iOS). The destination directory must already exist. Each
+renderer truncates its destination when created, so use this with a single renderer
+per capture. Disabled tracing opens no files. A write failure disables file tracing.
+The mobile runner uses `Documents/screen-space-<captureId>.log` and retrieves it after stopping
+the app. File rows also identify the MSAA depth-resolve span; the per-frame presence
+flag prevents stale timestamps from being reported when that pass is skipped.

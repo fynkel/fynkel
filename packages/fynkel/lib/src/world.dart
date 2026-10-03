@@ -894,12 +894,17 @@ class World {
   StepResult step() {
     _rejectDuringEdit('step');
     // Read since the last drain: in this tick's snapshot already.
+    final timing = _tickStages;
     _flushSubscriptions();
+    timing?.mark('subscriptions');
     final r = _native.step();
+    timing?.mark('bridgeStep');
     _checkFatal(r.status, 'step');
     if (_pendingFrameSteps > 0) _pendingFrameSteps--;
     if (++_steps % _observeTicks == 0) _sweepObserved();
+    timing?.mark('observation');
     _snapshot = _native.snapshot;
+    timing?.mark('snapshotCopy');
     // entity → record index. Overwrite in place (no growth in steady state,
     // M1 gate); rebuild only when the subscribed set changed size, which is
     // the only way a stale key can remain.
@@ -916,7 +921,9 @@ class World {
         _snapshotIndex[readEntity(d, i * gen.SnapshotTransformRecord.wireSize)] = i;
       }
     }
+    timing?.mark('snapshotIndex');
     _collectDiagnostics('step');
+    timing?.mark('diagnostics');
     return r;
   }
 
@@ -1116,8 +1123,15 @@ class World {
         if (isDisposed) return;
         final stepped = tick;
         t._native.start();
-        _deferring(step);
+        final timing = t._collectThisFrame ? _TickStages() : null;
+        _tickStages = timing;
+        try {
+          _deferring(step);
+        } finally {
+          _tickStages = null;
+        }
         final events = drainEvents();
+        timing?.mark('eventDrain');
         t._native.stop();
         t._behaviours.start();
         _behaviours.afterPhysics(
@@ -1132,6 +1146,11 @@ class World {
         t._behaviours.stop();
         if (isDisposed) return;
         _carry(events);
+        if (t._collectThisFrame) {
+          final readback = Stopwatch()..start();
+          final systems = systemTimes();
+          t._tickTimes.add(TickTimes(stepped, systems, readback.elapsedMicroseconds, stagesUs: timing!.stages));
+        }
       } finally {
         if (!isDisposed) _checkFatal(_native.cancelGameplayTick(), 'cancelGameplayTick');
       }
@@ -1139,9 +1158,10 @@ class World {
   }
 
   /// Where the last [frame] spent its time (M3-16, blueprint §15.4). One
-  /// object, overwritten every frame — read it after [frame], allocation
-  /// free.
+  /// object, overwritten every frame — read it after [frame]. Detailed tick
+  /// samples allocate only when [FrameTimes.collectTickTimes] is enabled.
   final FrameTimes frameTimes = FrameTimes();
+  _TickStages? _tickStages;
 
   /// The subscription budget (blueprint C5): a ceiling in bytes on a
   /// tick's snapshot. The first tick over it reports
@@ -3637,6 +3657,32 @@ class _WorldTime implements TimeService {
   double get alpha => world.alpha;
 }
 
+/// Owned diagnostic sample of one completed native tick. Read after gameplay
+/// transactions close. System readback is outside native/behaviour timers;
+/// stage clock reads are included in the measured native segment.
+class TickTimes {
+  TickTimes(this.tick, List<SystemTime> systems, this.readbackUs, {Map<String, int> stagesUs = const {}})
+      : systems = List.unmodifiable(systems), stagesUs = Map.unmodifiable(stagesUs);
+  final int tick;
+  final List<SystemTime> systems;
+  final int readbackUs;
+  /// Sequential SDK stages in microseconds. `bridgeStep` includes native system
+  /// execution and bridge publication; it overlaps [systems], not other stages.
+  final Map<String, int> stagesUs;
+}
+
+class _TickStages {
+  final Stopwatch clock = Stopwatch()..start();
+  final Map<String, int> stages = {};
+  int previousUs = 0;
+
+  void mark(String stage) {
+    final now = clock.elapsedMicroseconds;
+    stages[stage] = now - previousUs;
+    previousUs = now;
+  }
+}
+
 /// Where one [World.frame] spent its time (M3-16, blueprint §15.4), in
 /// microseconds: [behavioursUs] is the Dart side — every `fixedUpdate`,
 /// `afterPhysics`, `update`/`lateUpdate` and the host's own callbacks;
@@ -3646,11 +3692,20 @@ class _WorldTime implements TimeService {
 /// presentation-lane flush; [totalUs] the whole call (the rest is the
 /// SDK's own event decoding). [ticks] is the frame's fixed ticks.
 class FrameTimes {
+  /// Opt-in per-tick diagnostics for the next frame. Disabled by default.
+  /// Samples are replaced each frame, including frames that execute no ticks.
+  bool collectTickTimes = false;
+  bool _collectThisFrame = false;
+  final List<TickTimes> _tickTimes = [];
+  List<TickTimes> get tickTimes => List.unmodifiable(_tickTimes);
+
   int behavioursUs = 0, nativeUs = 0, presentationUs = 0, totalUs = 0, ticks = 0;
 
   final Stopwatch _behaviours = Stopwatch(), _native = Stopwatch(), _total = Stopwatch();
 
   void _begin() {
+    _tickTimes.clear();
+    _collectThisFrame = collectTickTimes;
     _behaviours.reset();
     _native.reset();
     _total
