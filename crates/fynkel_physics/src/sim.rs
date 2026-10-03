@@ -731,27 +731,38 @@ impl Physics {
         // of a nested collider even when its own component did not change.
         let mut subtree = std::mem::take(&mut self.scratch_subtree);
         subtree.clear();
-        subtree.extend(affected.iter().copied().filter(|&e| {
-            let mut up = scene::parent_of(ecs, e);
-            while let Some(p) = up {
-                if affected.contains(&p) {
-                    return false;
+        if !affected.is_empty() {
+            let mut hierarchy = ecs.query::<(Option<&Parent>, Option<&scene::Children>)>();
+            let view = hierarchy.view();
+            let parent_of = |entity| {
+                ecs.raw(entity)
+                    .and_then(|raw| view.get(raw))
+                    .and_then(|(parent, _)| parent.map(|p| p.0))
+            };
+            subtree.extend(affected.iter().copied().filter(|&e| {
+                let mut up = parent_of(e);
+                while let Some(p) = up {
+                    if affected.contains(&p) {
+                        return false;
+                    }
+                    up = parent_of(p);
                 }
-                up = scene::parent_of(ecs, p);
-            }
-            true
-        }));
-        // Walk all roots with one retained stack. The affected set is processed
-        // in entity order below, so traversal order does not affect physics.
-        // Visit descendants even when already affected: their own children may
-        // still need a new body home after an ancestor changes.
-        while let Some(entity) = subtree.pop() {
-            if !ecs.contains(entity) {
-                continue;
-            }
-            affected.insert(entity);
-            if let Ok(children) = ecs.get::<scene::Children>(entity) {
-                subtree.extend(children.0.iter().copied());
+                true
+            }));
+            // Roots are already in affected. Add only live descendants, still
+            // visiting children that were already marked: their descendants may
+            // need a new body home too. Final processing remains in entity order.
+            while let Some(entity) = subtree.pop() {
+                let Some((_, Some(children))) = ecs.raw(entity).and_then(|raw| view.get(raw))
+                else {
+                    continue;
+                };
+                for &child in &children.0 {
+                    if ecs.contains(child) {
+                        affected.insert(child);
+                        subtree.push(child);
+                    }
+                }
             }
         }
         self.scratch_subtree = subtree;
@@ -4020,6 +4031,61 @@ mod tests {
             let collider = &physics.world.colliders[physics.entries[&child].collider.unwrap()];
             assert_eq!(collider.parent().is_some(), attached);
             assert!((collider.position().translation - Vec3::new(10.0, 6.0, 0.0)).length() < 1e-4);
+            assert!(physics.take_rejections().is_empty());
+        }
+    }
+
+    #[test]
+    fn changed_ancestors_reach_grandchild_when_middle_is_already_affected() {
+        let mut ecs = world();
+        let root = spawn(&mut ecs, Vec3::X * 10.0, None, None);
+        let middle = scene::spawn(&mut ecs, Transform::from_position(Vec3::Y), Some(root)).unwrap();
+        let leaf = scene::spawn(
+            &mut ecs,
+            Transform::from_position(Vec3::Z * 2.0),
+            Some(middle),
+        )
+        .unwrap();
+        ecs.insert(leaf, Collider::default()).unwrap();
+        scene::propagate(&mut ecs);
+        let mut physics = Physics::new();
+        physics.sync(&mut ecs);
+        for attached in [true, false, true] {
+            if attached {
+                ecs.insert(
+                    root,
+                    RigidBody {
+                        body_type: BodyType::Static,
+                        ..RigidBody::default()
+                    },
+                )
+                .unwrap();
+            } else {
+                ecs.remove::<RigidBody>(root).unwrap();
+            }
+            // Change a non-physics middle node without changing any world poses.
+            // Both root and middle are initial candidates; leaf must still be visited.
+            ecs.insert(
+                middle,
+                Layer {
+                    layer: if attached { 1 } else { 2 },
+                },
+            )
+            .unwrap();
+            physics.sync(&mut ecs);
+            assert_eq!(physics.sync_candidates(), 3);
+            assert_eq!(
+                physics.entries[&leaf].joined.map(|(e, _)| e),
+                attached.then_some(root)
+            );
+            let collider = &physics.world.colliders[physics.entries[&leaf].collider.unwrap()];
+            assert_eq!(collider.parent().is_some(), attached);
+            // Sync sets the parent-relative pose; Rapier updates its cached world
+            // pose during the solver step. Check the effective placement here.
+            let placement = collider.parent().map_or(*collider.position(), |body| {
+                physics.world.bodies[body].position() * collider.position_wrt_parent().unwrap()
+            });
+            assert!((placement.translation - Vec3::new(10.0, 1.0, 2.0)).length() < 1e-5);
             assert!(physics.take_rejections().is_empty());
         }
     }

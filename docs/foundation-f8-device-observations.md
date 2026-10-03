@@ -1048,3 +1048,36 @@ both crates/all targets passed with warnings denied. The release app remains
 installed and stopped. F8 remains open.
 
 [Results and raw captures](../benchmarks/foundation/results/2026-10-03-f8-sync-view.json).
+
+## Physics hierarchy traversal — 2026-10-03
+
+Synchronization now gathers parent/child data through a shared ECS query and
+inserts only live descendants into the affected set; the initial roots are already
+present. It still visits already-affected children, filters stale descendants and
+applies final physics changes in entity order. Empty candidate sets skip the view.
+
+The focused 5,000-moving-collider Mac test measured 1.444 ms before and 1.242 ms
+after. Alternating native-only dense-scene runs measured unprofiled step medians
+at 7.157/7.119 ms for original/control and 6.739/6.736 ms for candidate/repeat.
+Profiled synchronization medians were 1.984/1.955 ms versus 1.536/1.555 ms. This
+supports a roughly 6% CPU step improvement in this Mac workload. Each mode warms
+40 ticks and measures 300; profiling-on/off simulation outcomes remain equal.
+
+411 physics/core release tests passed (three existing manual qualifications
+ignored), and release Clippy for both crates/all targets passed with warnings
+denied. The new hierarchy regression changes a root body and a non-physics middle
+node simultaneously while leaving the leaf transform untouched; the grandchild
+still follows body attachment/removal. The direct-sync test checks effective
+parent-relative placement, because Rapier updates cached world collider poses in
+the solver phase. Existing lifecycle and invalid-transform checks also pass.
+
+Live iPhone captures PID 3058 (original) and PID 3065 (candidate) both completed
+the eight-second deadline with matching IDs, advancing ticks and nominal thermal
+samples; their exact PIDs were stopped. Native CPU window-p50 medians were
+7.325/6.946 ms, simulation 9.692/9.407 ms, GPU frame 16.813/16.548 ms, and fresh
+acquisitions 26.46/30.01 per second. These are short sequential observations and
+medians of per-frame window summaries, not sustained or per-tick measurements.
+Frame delivery still varies substantially. The candidate live app remains
+installed and stopped. F8 stays open.
+
+[Results and raw captures](../benchmarks/foundation/results/2026-10-03-f8-sync-hierarchy.json).

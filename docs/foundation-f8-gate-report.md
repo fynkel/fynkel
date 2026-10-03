@@ -224,3 +224,11 @@ captures completed with nominal thermal samples and exact PID termination;
 fresh acquisitions changed from 31.48/s to 32.06/s. This is a retained CPU
 improvement, not sustained 60/120 Hz qualification. F8 remains open.
 [Evidence](../benchmarks/foundation/results/2026-10-03-f8-sync-view.json).
+
+Shared hierarchy reads and removal of redundant root insertions further reduced
+native dense-scene step medians from 7.12–7.16 ms to about 6.74 ms in alternating
+Mac runs. Final update order and descendant invalidation remain unchanged.
+411 physics/core tests and release Clippy passed, including an already-affected
+middle-node regression. Both bounded phone captures completed and their exact
+PIDs were stopped; fresh-frame delivery still varied around 26–30/s. F8 stays
+open. [Evidence](../benchmarks/foundation/results/2026-10-03-f8-sync-hierarchy.json).
