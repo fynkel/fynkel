@@ -762,93 +762,99 @@ impl Physics {
         changed.clear();
         nested.clear();
         gone.clear();
-        for entity in affected {
-            let rigid_guard = ecs.get::<RigidBody>(entity).ok();
-            let shape_guard = ecs.get::<Collider>(entity).ok();
-            let character_guard = ecs.get::<CharacterController>(entity).ok();
-            let layer_guard = ecs.get::<Layer>(entity).ok();
-            let parent_guard = ecs.get::<Parent>(entity).ok();
-            let (rigid, shape, character, layer, parent) = (
-                rigid_guard.as_deref(),
-                shape_guard.as_deref(),
-                character_guard.as_deref(),
-                layer_guard.as_deref(),
-                parent_guard.as_deref(),
-            );
-            let wt = ecs.get::<WorldTransform>(entity).ok();
-            if wt.is_none()
-                || ecs.has::<scene::Inactive>(entity)
-                || (rigid.is_none() && shape.is_none() && character.is_none())
-            {
-                gone.push(entity);
-                self.unsupported_transforms.remove(&entity);
-                continue;
-            }
-            let wt = wt.unwrap();
-            let was_unsupported = self.unsupported_transforms.contains(&entity);
-            // last_world also contains physics writeback: equality is not
-            // proof that this matrix passed transform validation.
-            let moving =
-                character.is_some() || rigid.is_some_and(|r| r.body_type != BodyType::Static);
-            let transform = Transform::try_from_matrix(wt.matrix);
-            if transform.is_none() || (moving && !supports_motion_parent(ecs, parent.map(|p| p.0)))
-            {
-                self.unsupported_transforms.insert(entity);
-                if !was_unsupported {
-                    self.rejections.push(Rejection {
+        if !affected.is_empty() {
+            // Resolve the candidate identity once and reuse one shared archetype
+            // query for all sync inputs. The borrow ends before ownership changes.
+            let mut inputs = ecs
+                .query::<(
+                    Option<&RigidBody>,
+                    Option<&Collider>,
+                    Option<&CharacterController>,
+                    Option<&Layer>,
+                    Option<&Parent>,
+                    &WorldTransform,
+                )>()
+                .without::<&scene::Inactive>();
+            let view = inputs.view();
+            for entity in affected {
+                let Some((rigid, shape, character, layer, parent, wt)) =
+                    ecs.raw(entity).and_then(|raw| view.get(raw))
+                else {
+                    gone.push(entity);
+                    self.unsupported_transforms.remove(&entity);
+                    continue;
+                };
+                if rigid.is_none() && shape.is_none() && character.is_none() {
+                    gone.push(entity);
+                    self.unsupported_transforms.remove(&entity);
+                    continue;
+                }
+                let was_unsupported = self.unsupported_transforms.contains(&entity);
+                // last_world also contains physics writeback: equality is not
+                // proof that this matrix passed transform validation.
+                let moving =
+                    character.is_some() || rigid.is_some_and(|r| r.body_type != BodyType::Static);
+                let transform = Transform::try_from_matrix(wt.matrix);
+                if transform.is_none()
+                    || (moving && !supports_motion_parent(ecs, parent.map(|p| p.0)))
+                {
+                    self.unsupported_transforms.insert(entity);
+                    if !was_unsupported {
+                        self.rejections.push(Rejection {
                             index: u32::MAX,
                             entity,
                             kind: RejectionKind::UnsupportedTransform,
                             message: "physics requires a non-singular world TRS; moving bodies require positive uniform scale on every ancestor".into(),
                         });
+                    }
+                    // Leaving candidates removes any previously valid body
+                    // and collider, instead of retaining stale geometry.
+                    gone.push(entity);
+                    continue;
                 }
-                // Leaving candidates removes any previously valid body
-                // and collider, instead of retaining stale geometry.
-                gone.push(entity);
-                continue;
-            }
-            self.unsupported_transforms.remove(&entity);
-            // A lone collider under a parent may belong to an
-            // ancestor's body (ADR-0034): decided once the bodies are
-            // synced.
-            if rigid.is_none() && character.is_none() && parent.is_some() {
-                nested.push(SyncEntry {
-                    entity,
-                    world: wt.matrix,
-                    transform: transform.unwrap(),
-                    rigid: rigid.copied(),
-                    shape: shape.cloned(),
-                    character: character.cloned(),
-                    layer: layer.copied().unwrap_or_default().bit(),
+                self.unsupported_transforms.remove(&entity);
+                // A lone collider under a parent may belong to an
+                // ancestor's body (ADR-0034): decided once the bodies are
+                // synced.
+                if rigid.is_none() && character.is_none() && parent.is_some() {
+                    nested.push(SyncEntry {
+                        entity,
+                        world: wt.matrix,
+                        transform: transform.unwrap(),
+                        rigid: rigid.copied(),
+                        shape: shape.cloned(),
+                        character: character.cloned(),
+                        layer: layer.copied().unwrap_or_default().bit(),
+                    });
+                    continue;
+                }
+                let same = self.entries.get(&entity).is_some_and(|entry| {
+                    entry.last_world == wt.matrix
+                        && !entry.stale
+                        && entry.joined.is_none()
+                        && entry.rigid.is_some() == rigid.is_some()
+                        && entry.shape.is_some() == shape.is_some()
+                        && entry.character.is_some() == character.is_some()
+                        && entry.shape.as_ref().zip(shape).is_none_or(|(a, b)| a == b)
+                        && entry
+                            .character
+                            .as_ref()
+                            .zip(character)
+                            .is_none_or(|(a, b)| a == b)
+                        && entry.rigid == rigid.copied()
+                        && entry.layer == layer.copied().unwrap_or_default().bit()
                 });
-                continue;
-            }
-            let same = self.entries.get(&entity).is_some_and(|entry| {
-                entry.last_world == wt.matrix
-                    && !entry.stale
-                    && entry.joined.is_none()
-                    && entry.rigid.is_some() == rigid.is_some()
-                    && entry.shape.is_some() == shape.is_some()
-                    && entry.character.is_some() == character.is_some()
-                    && entry.shape.as_ref().zip(shape).is_none_or(|(a, b)| a == b)
-                    && entry
-                        .character
-                        .as_ref()
-                        .zip(character)
-                        .is_none_or(|(a, b)| a == b)
-                    && entry.rigid == rigid.copied()
-                    && entry.layer == layer.copied().unwrap_or_default().bit()
-            });
-            if !same {
-                changed.push(SyncEntry {
-                    entity,
-                    world: wt.matrix,
-                    transform: transform.unwrap(),
-                    rigid: rigid.copied(),
-                    shape: shape.cloned(),
-                    character: character.cloned(),
-                    layer: layer.copied().unwrap_or_default().bit(),
-                });
+                if !same {
+                    changed.push(SyncEntry {
+                        entity,
+                        world: wt.matrix,
+                        transform: transform.unwrap(),
+                        rigid: rigid.copied(),
+                        shape: shape.cloned(),
+                        character: character.cloned(),
+                        layer: layer.copied().unwrap_or_default().bit(),
+                    });
+                }
             }
         }
         for e in gone.drain(..) {
@@ -3788,6 +3794,50 @@ mod tests {
             assert_eq!(physics.world.colliders.len(), 5000);
         }
         println!("nested_sync_samples_us={samples:?}");
+    }
+
+    #[test]
+    fn sync_inputs_follow_component_membership_activity_and_reused_entities() {
+        let mut ecs = world();
+        let mut physics = Physics::new();
+        let a = spawn(&mut ecs, Vec3::ZERO, None, Some(Collider::default()));
+        let b = spawn(&mut ecs, Vec3::X * 3.0, None, None);
+        scene::propagate(&mut ecs);
+        physics.sync(&mut ecs);
+        assert!(physics.entries.contains_key(&a));
+        assert!(!physics.entries.contains_key(&b));
+
+        ecs.remove::<Collider>(a).unwrap();
+        ecs.insert(b, Collider::default()).unwrap();
+        physics.sync(&mut ecs);
+        assert!(!physics.entries.contains_key(&a));
+        assert!(physics.entries.contains_key(&b));
+        assert_eq!(physics.world.colliders.len(), 1);
+
+        ecs.insert(b, scene::Inactive).unwrap();
+        physics.sync(&mut ecs);
+        assert!(physics.world.colliders.is_empty());
+        ecs.remove::<scene::Inactive>(b).unwrap();
+        let transform = ecs.remove::<WorldTransform>(b).unwrap();
+        physics.sync(&mut ecs);
+        assert!(!physics.entries.contains_key(&b));
+        ecs.insert(b, transform).unwrap();
+        physics.sync(&mut ecs);
+        assert!(physics.entries.contains_key(&b));
+
+        ecs.despawn(b).unwrap();
+        let replacement = spawn(&mut ecs, Vec3::Y * 5.0, None, Some(Collider::default()));
+        assert_ne!(replacement, b);
+        scene::propagate(&mut ecs);
+        physics.sync(&mut ecs);
+        assert!(!physics.entries.contains_key(&b));
+        assert!(physics.entries.contains_key(&replacement));
+        assert_eq!(physics.world.colliders.len(), 1);
+        let collider = &physics.world.colliders[physics.entries[&replacement].collider.unwrap()];
+        assert!((collider.position().translation.y - 5.0).abs() < 1e-5);
+        physics.sync(&mut ecs);
+        assert_eq!(physics.sync_candidates(), 0);
+        assert_eq!(physics.world.colliders.len(), 1);
     }
 
     #[test]

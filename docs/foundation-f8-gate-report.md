@@ -214,3 +214,13 @@ The final root-only implementation subsequently passed the live phone check:
 fresh launch ID, advancing simulation, nominal thermal samples, eight-second
 deadline and exact PID termination. Its 31.38 fresh acquisitions/s is a short-run
 observation, not an established sustained or causal FPS improvement. F8 stays open.
+
+Physics synchronization now gathers candidate components through one shared ECS
+query view, preserving validation, candidate order and lifecycle semantics.
+Alternating Mac dense-scene captures measured native steps at 7.53–7.56 ms before
+and 7.02–7.05 ms after; profiled sync fell from 2.51–2.54 ms to about 1.96 ms.
+410 physics/core tests and release Clippy passed. Live eight-second iPhone
+captures completed with nominal thermal samples and exact PID termination;
+fresh acquisitions changed from 31.48/s to 32.06/s. This is a retained CPU
+improvement, not sustained 60/120 Hz qualification. F8 remains open.
+[Evidence](../benchmarks/foundation/results/2026-10-03-f8-sync-view.json).

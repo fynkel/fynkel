@@ -1008,3 +1008,43 @@ measurements, and their medians cannot be added. The higher acquisition rate in
 this short run is encouraging but does not isolate the effect of the pose change
 from run-to-run variation. The live app remains installed and stopped; F8 stays
 open and sustained 60/120 Hz targets remain unqualified.
+
+## Shared physics synchronization reads — 2026-10-03
+
+Physics synchronization now reads candidate inputs through one shared ECS query
+view, resolving each candidate's identity once. Previously every component read
+repeated identity resolution, component lookup and borrow acquisition. The query
+uses the existing internal ECS API; its scope ends before physics ownership
+components change. Empty candidate sets do not construct a view. Candidate order,
+validation, nested-body resolution and removal handling remain unchanged.
+
+The focused 5,000-moving-collider Mac probe measured sync at 1.571 ms before and
+1.425 ms after. Alternating dense-scene native-only runs give stronger evidence:
+
+| Run | Unprofiled native step median | Profiled sync median |
+| --- | ---: | ---: |
+| Original | 7.559 ms | 2.539 ms |
+| Candidate | 7.046 ms | 1.956 ms |
+| Original control | 7.528 ms | 2.507 ms |
+| Candidate repeat | 7.021 ms | 1.959 ms |
+
+Each mode warms 40 ticks and measures 300. This is about a 7% native-step reduction
+in this Mac workload, not an overall game FPS improvement. Every native run also
+verified equal profiled/unprofiled simulation outcomes. No quality or gameplay
+workload reduction was made.
+
+Live iPhone captures completed under PID 3046 (original) and PID 3049 (candidate),
+with matching launch IDs, ticks 58 through 478 across reporting windows, nominal
+thermal samples, eight-second deadlines and exact PID termination. Median fresh
+acquisitions were 31.48/s and 32.06/s. Native CPU window-p50 medians were 8.124 and
+7.365 ms; simulation medians were 10.500 and 9.737 ms. These are per-frame window
+summaries, not per-tick measurements or pooled frame percentiles. Short sequential
+runs do not establish sustained FPS, and GPU/frame-delivery costs still matter.
+
+410 physics/core release tests passed (three existing manual qualifications
+ignored), including a new mixed-membership regression covering inactive objects,
+missing/restored transforms and destroyed/replaced entities. Release Clippy for
+both crates/all targets passed with warnings denied. The release app remains
+installed and stopped. F8 remains open.
+
+[Results and raw captures](../benchmarks/foundation/results/2026-10-03-f8-sync-view.json).
