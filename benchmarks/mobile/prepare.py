@@ -23,10 +23,15 @@ def add_effect_isolation_profiles(project):
     path = project / 'fynkel.project.json'
     document = json.loads(path.read_text())
     profiles = document['quality']['profiles']
-    for name, ao, contact in [('medium-no-ao', False, True),
-                              ('medium-no-contact', True, False),
-                              ('medium-no-screen-space', False, False)]:
-        profiles[name] = {**profiles['medium'], 'ambientOcclusion': ao, 'contactShadows': contact}
+    for name, changes in [
+            ('medium-no-ao', {'ambientOcclusion': False, 'contactShadows': True}),
+            ('medium-no-contact', {'ambientOcclusion': True, 'contactShadows': False}),
+            ('medium-no-screen-space', {'ambientOcclusion': False, 'contactShadows': False}),
+            ('medium-no-bloom', {'bloom': False}),
+            ('medium-msaa2', {'msaa': 2}),
+            ('medium-msaa1', {'msaa': 1}),
+            ('medium-bare', {'ambientOcclusion': False, 'contactShadows': False, 'bloom': False, 'msaa': 1})]:
+        profiles[name] = {**profiles['medium'], **changes}
     path.write_text(json.dumps(document, indent=2) + '\n')
 
 

@@ -85,7 +85,8 @@ class _CaptureState extends State<_Capture> with WidgetsBindingObserver {
         if (waiting is! bool) throw StateError('Invalid profiler wait option');
         awaitProfiler = waiting;
         final quality = value['quality'] ?? 'medium';
-        if (!['medium', 'medium-no-ao', 'medium-no-contact', 'medium-no-screen-space'].contains(quality)) {
+        if (!['medium', 'medium-no-ao', 'medium-no-contact', 'medium-no-screen-space', 'medium-no-bloom',
+          'medium-msaa2', 'medium-msaa1', 'medium-bare'].contains(quality)) {
           throw StateError('Invalid diagnostic quality');
         }
         _quality = quality as String;

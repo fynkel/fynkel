@@ -176,6 +176,31 @@ ways to 120 are legitimate: render at a fraction of native resolution
 0 dropped here), or make the effects cheaper. The option is explicit and off
 by default; nothing is lowered silently.
 
+### What each effect costs on the iPhone (native 1320×2868, dense-500)
+
+One quality profile at a time, otherwise identical (live scene, pipelined +
+queue 2 + 5 buffers, nominal thermal state, 90 s between captures; the
+profiles are `prepare.py`'s diagnostic copies of `medium`, selected with
+`capture.py --quality`). Loop was 120 throughout.
+
+| profile (what is off) | fresh frames/s | dropped/s | GPU frame p50 |
+| --- | --- | --- | --- |
+| medium (nothing) | 90 | 30 | 9.8 ms |
+| no contact shadows | 90 | 30 | 9.4 ms |
+| no AO | 99 | 20 | 9.1 ms |
+| no bloom | 100 | 19 | 9.1 ms |
+| MSAA 2 instead of 4 | 95 | 24 | 9.1 ms |
+| MSAA off (1) | 100 | 20 | 9.1 ms |
+| **no AO and no contact shadows** | **120** | 0 | 5.4 ms |
+| no AO, no contact shadows, no bloom, MSAA off | 120 | 0 | 4.6 ms |
+
+Turning off AO *or* contact shadows alone saves 0.4–0.7 ms, but turning off
+both saves 4.4 ms. The two share the screen-space pipeline (depth prepass, MSAA
+depth resolve, estimation and the depth-aware blur), and that fixed cost only
+disappears when neither is on. Practical consequences: dropping one of them is
+nearly useless for performance; dropping both is what reaches 120 at native
+resolution on this scene. Bloom and MSAA each cost about 0.7 ms.
+
 Not yet measured on the phone: dense-5000 (its 8+ ms tick frame plus the GPU
 put it near 60 and the phone throttles after ~2 s), and sustained runs longer
 than the 6-second capture.

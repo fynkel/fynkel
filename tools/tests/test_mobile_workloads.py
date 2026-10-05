@@ -24,7 +24,7 @@ cpu = module('mobile_cpu', 'benchmarks/mobile/analyze_cpu.py')
 
 
 class MobileWorkloadTests(unittest.TestCase):
-    def test_effect_profiles_preserve_medium_and_only_change_two_switches(self):
+    def test_effect_profiles_preserve_medium_and_only_change_their_switches(self):
         with tempfile.TemporaryDirectory() as temp:
             project = Path(temp)
             medium = {'msaa': 4, 'shadowResolution': 2048, 'renderScale': 1.0}
@@ -34,9 +34,15 @@ class MobileWorkloadTests(unittest.TestCase):
             quality = json.loads(path.read_text())['quality']
             self.assertEqual(quality['default'], 'medium')
             self.assertEqual(quality['profiles']['medium'], medium)
-            for name, ao, contact in [('medium-no-ao', False, True), ('medium-no-contact', True, False),
-                                       ('medium-no-screen-space', False, False)]:
-                self.assertEqual(quality['profiles'][name], {**medium, 'ambientOcclusion': ao, 'contactShadows': contact})
+            for name, changes in [('medium-no-ao', {'ambientOcclusion': False, 'contactShadows': True}),
+                                  ('medium-no-contact', {'ambientOcclusion': True, 'contactShadows': False}),
+                                  ('medium-no-screen-space', {'ambientOcclusion': False, 'contactShadows': False}),
+                                  ('medium-no-bloom', {'bloom': False}),
+                                  ('medium-msaa2', {'msaa': 2}),
+                                  ('medium-msaa1', {'msaa': 1}),
+                                  ('medium-bare', {'ambientOcclusion': False, 'contactShadows': False,
+                                                   'bloom': False, 'msaa': 1})]:
+                self.assertEqual(quality['profiles'][name], {**medium, **changes})
 
     def test_all_tick_probe_accounts_for_first_and_last_catchup_ticks(self):
         frames = [{'ticks': 0, 'elapsedUs': 0, 'nativeUs': 5},

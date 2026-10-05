@@ -250,7 +250,7 @@ if __name__ == '__main__':
     parser.add_argument('--bundle', required=True)
     parser.add_argument('--app', required=True, type=Path)
     parser.add_argument('--out', required=True, type=Path)
-    parser.add_argument('--quality', choices=['medium', 'medium-no-ao', 'medium-no-contact', 'medium-no-screen-space'], default='medium')
+    parser.add_argument('--quality', choices=['medium', 'medium-no-ao', 'medium-no-contact', 'medium-no-screen-space', 'medium-no-bloom', 'medium-msaa2', 'medium-msaa1', 'medium-bare'], default='medium')
     parser.add_argument('--metal-trace-device', help='Physical-device UDID from xctrace list devices; adds an eight-second attached Metal trace, with profiler overhead')
     parser.add_argument('--trace-physics', action='store_true', help='Bounded per-tick native physics phase trace; adds diagnostic overhead')
     parser.add_argument('--trace-gpu', action='store_true')
