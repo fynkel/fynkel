@@ -47,6 +47,7 @@ class _CaptureState extends State<_Capture> with WidgetsBindingObserver {
   bool _pipelined = false;
   bool _ignoreInactive = false;
   int _frameQueue = 1;
+  int _limitSeconds = 8;
   late final FynkelViewportController _controller;
   bool _controllerCreated = false;
   Game? _game;
@@ -101,6 +102,9 @@ class _CaptureState extends State<_Capture> with WidgetsBindingObserver {
         final queue = value['frameQueue'] ?? 1;
         if (queue is! int || queue < 1 || queue > 3) throw StateError('Invalid frameQueue option');
         _frameQueue = queue;
+        final limit = value['limitSeconds'] ?? 8;
+        if (limit is! int || limit < 1 || limit > 600) throw StateError('Invalid limitSeconds option');
+        _limitSeconds = limit;
         if (timeline is! bool || frozen is! bool || ticks is! bool || ![0, 3000].contains(wait) ||
             ![4, 5, 6, 8].contains(buffers) || ![0.5, 1.0].contains(scale)) {
           throw StateError('Invalid diagnostic options');
@@ -128,7 +132,7 @@ class _CaptureState extends State<_Capture> with WidgetsBindingObserver {
         'awaitProfiler': awaitProfiler,
         'quality': _quality,
         'timeline': _timeline,
-        'limitSeconds': 8,
+        'limitSeconds': _limitSeconds,
         'sustainedQualification': false,
         'cpuReadback': _captureCpu,
         'cpuTickReadback': _captureTicks,
@@ -322,7 +326,7 @@ class _CaptureState extends State<_Capture> with WidgetsBindingObserver {
               } else if (!_clock.isRunning) {
                 _clock.start();
                 // Wall-clock deadline, independent of simulated time/frame rate.
-                _deadline = Timer(const Duration(seconds: 8), () => _stop('deadline'));
+                _deadline = Timer(Duration(seconds: _limitSeconds), () => _stop('deadline'));
               }
               _captureFrame(dt, plan.steps);
             },
