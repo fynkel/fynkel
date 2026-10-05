@@ -91,7 +91,7 @@ impl World {
     fn frame_camera(
         &self,
         alpha: f32,
-        memo: &mut HashMap<Entity, Mat4>,
+        memo: &mut fynkel_contracts::FastMap<Entity, Mat4>,
     ) -> Option<(Entity, Mat4, Camera)> {
         let mut best: Option<(Entity, Camera)> = None;
         for e in self.gameplay.ecs.entities() {
@@ -127,7 +127,7 @@ impl World {
     ) -> ProjectionInfo {
         out.clear();
         let alpha = self.clock.alpha();
-        let mut memo: HashMap<Entity, Mat4> = HashMap::new();
+        let mut memo: fynkel_contracts::FastMap<Entity, Mat4> = Default::default();
         let camera = self.frame_camera(alpha, &mut memo);
         let take = anchors.len().min(MAX_PROJECTION_ANCHORS);
         let dropped = (anchors.len() - take) as u32;

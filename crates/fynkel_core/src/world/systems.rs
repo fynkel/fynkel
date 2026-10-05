@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use fynkel_contracts::{ComponentId, Entity, Tick};
 
-use super::{micros, World};
+use super::{micros, PhysicsSystemProfile, World};
 use crate::command::Lane;
 use crate::schema::SystemKind;
 
@@ -445,18 +445,30 @@ impl System for PhysicsStep {
         !w.edit() && w.modules.physics && w.physics.has_work(&w.gameplay.ecs)
     }
     fn run(w: &mut World, t: &mut TickRun) -> u32 {
+        let started = w.physics_profiling.then(Instant::now);
         t.propagated += w.propagate() as u32;
+        let propagated = started.map(|_| Instant::now());
         w.physics.step(
             &mut w.gameplay.ecs,
             w.config.fixed_dt,
             &w.publication.subscriptions,
         );
+        let simulated = started.map(|_| Instant::now());
         // A body command counted as applied above may fail here.
         let failed = w.physics_rejections();
         t.rejected += failed;
         t.applied = t.applied.saturating_sub(failed);
         w.physics_events(t.tick);
         let ps = w.physics.stats();
+        if let (Some(start), Some(propagated), Some(simulated)) = (started, propagated, simulated) {
+            let finished = Instant::now();
+            w.physics_system_profile = Some(PhysicsSystemProfile {
+                propagation: propagated - start,
+                adapter: simulated - propagated,
+                publication: finished - simulated,
+                total: finished - start,
+            });
+        }
         ps.bodies + ps.colliders + ps.characters
     }
 }

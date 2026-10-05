@@ -17,6 +17,7 @@ pub mod bridge;
 pub mod buffer;
 pub mod gameplay;
 pub mod load;
+mod physics_trace;
 mod resources;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -38,6 +39,7 @@ pub struct FynkelRuntime {
 }
 
 pub struct FynkelWorld {
+    physics_trace: Option<physics_trace::Shared>,
     inner: gameplay::WorldSlot,
     gameplay_allowed: bool,
     gameplay_pending: Vec<fynkel_core::PendingEntity>,
@@ -248,6 +250,7 @@ impl FynkelWorld {
     /// Call before exposing the world through the runtime ABI.
     pub fn with_core(inner: World) -> Self {
         Self {
+            physics_trace: physics_trace::from_env(),
             inner: gameplay::WorldSlot::new(inner),
             gameplay_allowed: true,
             gameplay_pending: Vec::new(),
@@ -784,7 +787,20 @@ pub unsafe extern "C" fn fynkel_world_step(
 ) -> Status {
     guarded(world, |w| {
         w.stats.step_calls += 1;
+        if let Some(trace) = &w.physics_trace {
+            let active = trace.lock().unwrap_or_else(|e| e.into_inner()).active();
+            // Reset the last sample before each step, including skipped stages.
+            w.inner.set_physics_profiling(active);
+        }
         let r = w.inner.step();
+        if let Some(trace) = &w.physics_trace {
+            trace.lock().unwrap_or_else(|e| e.into_inner()).record(
+                w.inner.id().0,
+                r.tick,
+                w.inner.physics().step_profile(),
+                w.inner.physics_system_profile(),
+            );
+        }
         resources::synchronize(w);
         let buf = std::mem::take(&mut w.snapshot_buf);
         w.snapshot_buf = bridge::encode_snapshot(buf, w.inner.snapshot());

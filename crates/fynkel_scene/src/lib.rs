@@ -324,14 +324,32 @@ pub fn prepare_world_poses(
     world: &World,
     poses: &[(Entity, Vec3, Quat)],
 ) -> Result<Vec<(Entity, Transform)>> {
+    if poses.is_empty() {
+        return Ok(Vec::new());
+    }
     let requested: BTreeMap<_, _> = poses.iter().map(|&(e, p, r)| (e, (p, r))).collect();
+    // One immutable view for the whole proposal pass. Optional columns keep
+    // stale handles distinct from live entities missing required components.
+    let mut inputs =
+        world.query::<(Option<&Transform>, Option<&Parent>, Option<&WorldTransform>)>();
+    let view = inputs.view();
+    let read = |entity| -> Result<(Transform, Option<Entity>, bool)> {
+        let raw = world.raw(entity).ok_or(EcsError::StaleEntity(entity))?;
+        let (local, parent, propagated) = view.get(raw).ok_or(EcsError::StaleEntity(entity))?;
+        Ok((
+            *local.ok_or(EcsError::MissingComponent(entity))?,
+            parent.map(|p| p.0),
+            propagated.is_some(),
+        ))
+    };
     let mut ordered = Vec::with_capacity(requested.len());
-    for &entity in requested.keys() {
-        world.get::<Transform>(entity)?;
-        world.get::<WorldTransform>(entity)?;
+    for (&entity, &(position, rotation)) in &requested {
+        let (current, mut parent, has_world) = read(entity)?;
+        if !has_world {
+            return Err(EcsError::MissingComponent(entity).into());
+        }
         let mut depth = 0usize;
         let mut ancestors = BTreeSet::new();
-        let mut parent = parent_of(world, entity);
         while let Some(p) = parent {
             if p == entity || !ancestors.insert(p) {
                 return Err(SceneError::Cycle {
@@ -339,19 +357,17 @@ pub fn prepare_world_poses(
                     parent: p,
                 });
             }
-            world.get::<Transform>(p)?;
+            let (_, next, _) = read(p)?;
             depth += 1;
-            parent = parent_of(world, p);
+            parent = next;
         }
-        ordered.push((depth, entity));
+        ordered.push((depth, entity, current, position, rotation));
     }
-    ordered.sort_unstable();
-    let has_parented_targets = ordered.last().is_some_and(|(depth, _)| *depth != 0);
+    ordered.sort_unstable_by_key(|(depth, entity, ..)| (*depth, *entity));
+    let has_parented_targets = ordered.last().is_some_and(|(depth, ..)| *depth != 0);
     let mut prepared = BTreeMap::<Entity, Transform>::new();
     let mut output = Vec::with_capacity(ordered.len());
-    for (depth, entity) in ordered {
-        let (position, rotation) = requested[&entity];
-        let current = world.copy::<Transform>(entity)?;
+    for (depth, entity, current, position, rotation) in ordered {
         // A root's world pose already is its local pose. Keep it inside the
         // same batch validation/order path, without allocating a visited set
         // or inverting an identity parent matrix for each root object.
@@ -363,18 +379,16 @@ pub fn prepare_world_poses(
         if depth != 0 {
             let mut parent_matrix = Mat4::IDENTITY;
             let mut parent_rotation = Quat::IDENTITY;
-            let mut parent = parent_of(world, entity);
+            let mut parent = read(entity)?.1;
             while let Some(p) = parent {
-                let ancestor = match prepared.get(&p) {
-                    Some(local) => *local,
-                    None => world.copy::<Transform>(p)?,
-                };
+                let (current, next, _) = read(p)?;
+                let ancestor = prepared.get(&p).copied().unwrap_or(current);
                 if !ancestor.is_valid() {
                     return Err(SceneError::UnsupportedTransform(p));
                 }
                 parent_matrix = ancestor.matrix() * parent_matrix;
                 parent_rotation = ancestor.rotation * parent_rotation;
-                parent = parent_of(world, p);
+                parent = next;
             }
             let inverse =
                 inverse_affine(parent_matrix).ok_or(SceneError::UnsupportedTransform(entity))?;
@@ -762,43 +776,51 @@ fn propagate_dirty(world: &mut World, dirty: Vec<(Entity, Option<Entity>)>) -> u
     // The tops: dirty nodes with no dirty ancestor, found before any flag
     // is cleared. The parent of a top is clean, so its matrix is current.
     let mut tops: Vec<(Entity, Mat4)> = Vec::new();
-    'next: for (entity, parent) in dirty {
-        let mut parent_matrix = Mat4::IDENTITY;
-        let mut first = true;
-        let mut up = parent;
-        while let Some(p) = up {
-            // An ancestor that is not spatial cuts the chain: its
-            // descendants are not reached from a root, as before.
-            let Ok(wt) = world.copy::<WorldTransform>(p) else {
-                continue 'next;
-            };
-            if wt.dirty {
-                continue 'next;
+    {
+        let mut ancestors = world.query::<(&WorldTransform, Option<&Parent>)>();
+        let view = ancestors.view();
+        'next: for (entity, parent) in dirty {
+            let mut parent_matrix = Mat4::IDENTITY;
+            let mut first = true;
+            let mut up = parent;
+            while let Some(p) = up {
+                // An ancestor that is not spatial cuts the chain: its
+                // descendants are not reached from a root, as before.
+                let Some((wt, parent)) = world.raw(p).and_then(|raw| view.get(raw)) else {
+                    continue 'next;
+                };
+                if wt.dirty {
+                    continue 'next;
+                }
+                if first {
+                    parent_matrix = wt.matrix;
+                    first = false;
+                }
+                up = parent.map(|parent| parent.0);
             }
-            if first {
-                parent_matrix = wt.matrix;
-                first = false;
-            }
-            up = parent_of(world, p);
+            tops.push((entity, parent_matrix));
         }
-        tops.push((entity, parent_matrix));
     }
     let mut count = 0;
     let mut stack = tops;
+    // Shared pose/hierarchy inputs remain borrowed while individual world
+    // matrices are written through tracked leases. Never invalidate the whole
+    // component column: downstream sparse consumers need exact entity changes.
+    let mut inputs = world.query::<(&Transform, Option<&Children>)>();
+    let view = inputs.view();
     while let Some((entity, parent_matrix)) = stack.pop() {
-        let h = &*world;
-        let Ok(local) = h.get::<Transform>(entity).map(|t| t.matrix()) else {
+        let Some((local, children)) = world.raw(entity).and_then(|raw| view.get(raw)) else {
             continue;
         };
-        let Ok(mut wt) = h.get_mut::<WorldTransform>(entity) else {
+        let Ok(mut wt) = world.get_mut::<WorldTransform>(entity) else {
             continue;
         };
-        let m = parent_matrix * local;
+        let m = parent_matrix * local.matrix();
         wt.matrix = m;
         wt.dirty = false;
         drop(wt);
         count += 1;
-        if let Ok(children) = h.get::<Children>(entity) {
+        if let Some(children) = children {
             for &c in children.0.iter().rev() {
                 if world.contains(c) {
                     stack.push((c, m));

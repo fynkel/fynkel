@@ -63,7 +63,7 @@ pub(super) struct RenderMembership {
     pub(super) entities: std::collections::BTreeSet<Entity>,
     pub(super) examined: usize,
     pub(super) renderable: std::collections::BTreeSet<Entity>,
-    pub(super) memo: std::collections::HashMap<Entity, glam::Mat4>,
+    pub(super) memo: fynkel_contracts::FastMap<Entity, glam::Mat4>,
 }
 impl RenderMembership {
     pub(super) fn refresh(&mut self, ecs: &fynkel_ecs::World) {

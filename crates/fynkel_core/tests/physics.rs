@@ -1332,3 +1332,30 @@ fn a_collision_carries_its_points_impulse_and_relative_velocity() {
     assert_eq!(x.point_count, 0);
     assert_eq!(x.impulse, Vec3::ZERO);
 }
+
+#[test]
+fn physics_system_profile_is_opt_in_and_clears_when_skipped() {
+    let mut w = world();
+    floor(&mut w);
+    w.step();
+    assert!(w.physics_system_profile().is_none());
+    assert!(w.physics().step_profile().is_none());
+    w.set_physics_profiling(true);
+    w.step();
+    let p = w.physics_system_profile().unwrap();
+    assert_eq!(p.total, p.propagation + p.adapter + p.publication);
+    assert!(p.adapter >= w.physics().step_profile().unwrap().total);
+    let mut modules = Modules::default();
+    modules.physics = false;
+    w.set_modules(modules);
+    w.step();
+    assert!(w.physics_system_profile().is_none());
+    assert!(w.physics().step_profile().is_none());
+    w.set_modules(Modules::default());
+    w.step();
+    assert!(w.physics_system_profile().is_some());
+    w.set_physics_profiling(false);
+    w.step();
+    assert!(w.physics_system_profile().is_none());
+    assert!(w.physics().step_profile().is_none());
+}

@@ -168,3 +168,52 @@ fn root_pose_preparation_qualification() {
         samples[150], samples[285]
     );
 }
+
+#[test]
+fn shared_pose_reads_preserve_missing_stale_foreign_and_recycled_handle_errors() {
+    use fynkel_ecs::EcsError;
+    let mut world = World::new();
+    let good = scene::spawn(&mut world, Transform::IDENTITY, None).unwrap();
+    scene::propagate(&mut world);
+    let missing_local = scene::spawn(&mut world, Transform::IDENTITY, None).unwrap();
+    world.remove::<Transform>(missing_local).unwrap();
+    let missing_world = scene::spawn(&mut world, Transform::IDENTITY, None).unwrap();
+    world.remove::<WorldTransform>(missing_world).unwrap();
+    for bad in [missing_local, missing_world] {
+        assert!(matches!(scene::prepare_world_poses(&world,
+            &[(good, Vec3::X, Quat::IDENTITY), (bad, Vec3::Y, Quat::IDENTITY)]),
+            Err(scene::SceneError::Ecs(EcsError::MissingComponent(e))) if e == bad));
+    }
+    let stale = scene::spawn(&mut world, Transform::IDENTITY, None).unwrap();
+    world.despawn(stale).unwrap();
+    let replacement = scene::spawn(&mut world, Transform::IDENTITY, None).unwrap();
+    let mut foreign_world = World::new();
+    let foreign = scene::spawn(&mut foreign_world, Transform::IDENTITY, None).unwrap();
+    for bad in [stale, foreign, fynkel_contracts::Entity::NULL] {
+        assert!(matches!(scene::prepare_world_poses(&world,
+            &[(good, Vec3::X, Quat::IDENTITY), (bad, Vec3::Y, Quat::IDENTITY)]),
+            Err(scene::SceneError::Ecs(EcsError::StaleEntity(e))) if e == bad));
+    }
+    assert_eq!(world.copy::<Transform>(good).unwrap(), Transform::IDENTITY);
+    assert!(!world.copy::<WorldTransform>(good).unwrap().dirty);
+    assert_eq!(
+        world.copy::<Transform>(replacement).unwrap(),
+        Transform::IDENTITY
+    );
+    // Ancestors need local poses, but need not carry a propagated component.
+    let child = scene::spawn(&mut world, Transform::IDENTITY, Some(missing_world)).unwrap();
+    assert!(scene::prepare_world_poses(&world, &[(child, Vec3::Y, Quat::IDENTITY)]).is_ok());
+    world.remove::<Transform>(missing_world).unwrap();
+    assert!(
+        matches!(scene::prepare_world_poses(&world, &[(child, Vec3::Y, Quat::IDENTITY)]),
+        Err(scene::SceneError::Ecs(EcsError::MissingComponent(e))) if e == missing_world)
+    );
+}
+
+#[test]
+fn empty_pose_preparation_does_not_borrow_unrelated_component_columns() {
+    let mut world = World::new();
+    let entity = scene::spawn(&mut world, Transform::IDENTITY, None).unwrap();
+    let _exclusive = world.get_mut::<Transform>(entity).unwrap();
+    assert!(scene::prepare_world_poses(&world, &[]).unwrap().is_empty());
+}

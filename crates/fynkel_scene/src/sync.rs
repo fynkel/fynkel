@@ -49,13 +49,17 @@ impl SceneSync {
         candidates.sort_unstable();
         candidates.dedup();
         self.transform_candidates = candidates.len();
-        let dirty = candidates
-            .into_iter()
-            .filter(|&e| {
-                world.has::<Transform>(e) && world.get::<WorldTransform>(e).is_ok_and(|wt| wt.dirty)
-            })
-            .map(|e| (e, parent_of(world, e)))
-            .collect();
+        let dirty = {
+            let mut inputs = world.query::<(&Transform, &WorldTransform, Option<&Parent>)>();
+            let view = inputs.view();
+            candidates
+                .into_iter()
+                .filter_map(|entity| {
+                    let (_, wt, parent) = world.raw(entity).and_then(|raw| view.get(raw))?;
+                    wt.dirty.then_some((entity, parent.map(|p| p.0)))
+                })
+                .collect()
+        };
         let count = super::propagate_dirty(world, dirty);
         self.transforms = world.change_cursor();
         count

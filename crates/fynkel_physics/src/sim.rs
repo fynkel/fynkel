@@ -605,7 +605,7 @@ impl Physics {
         let mut profile = crate::PhysicsStepProfile::default();
         self.step_profile = None;
         self.events.clear();
-        self.sync(ecs);
+        profile.synchronization = self.sync(ecs);
         profile.sync = profile_checkpoint(&mut timer);
         // The step's broad-phase update places them.
         self.unplaced.clear();
@@ -703,7 +703,9 @@ impl Physics {
         self.sync_candidates
     }
 
-    fn sync(&mut self, ecs: &mut Ecs) {
+    fn sync(&mut self, ecs: &mut Ecs) -> crate::PhysicsSyncProfile {
+        let mut timer = self.profile_enabled.then(std::time::Instant::now);
+        let mut profile = crate::PhysicsSyncProfile::default();
         use std::any::TypeId;
         let changes = ecs
             .changes_since(
@@ -727,6 +729,7 @@ impl Physics {
             changes.entities.into_iter().collect()
         };
         affected.append(&mut self.invalidated);
+        profile.collect = profile_checkpoint(&mut timer);
         // An ancestor's body/component or hierarchy change can change the home
         // of a nested collider even when its own component did not change.
         let mut subtree = std::mem::take(&mut self.scratch_subtree);
@@ -740,7 +743,16 @@ impl Physics {
                     .and_then(|(parent, _)| parent.map(|p| p.0))
             };
             subtree.extend(affected.iter().copied().filter(|&e| {
-                let mut up = parent_of(e);
+                let Some((parent, Some(children))) = ecs.raw(e).and_then(|raw| view.get(raw))
+                else {
+                    return false;
+                };
+                // Leaf candidates still synchronize below; only entities with
+                // descendants need a root walk and a subtree stack entry.
+                if children.0.is_empty() {
+                    return false;
+                }
+                let mut up = parent.map(|p| p.0);
                 while let Some(p) = up {
                     if affected.contains(&p) {
                         return false;
@@ -766,6 +778,7 @@ impl Physics {
             }
         }
         self.scratch_subtree = subtree;
+        profile.hierarchy = profile_checkpoint(&mut timer);
         self.sync_candidates = affected.len();
         let mut changed = std::mem::take(&mut self.scratch_changed);
         let mut nested = std::mem::take(&mut self.scratch_nested);
@@ -868,6 +881,7 @@ impl Physics {
                 }
             }
         }
+        profile.classify = profile_checkpoint(&mut timer);
         for e in gone.drain(..) {
             self.remove_entry(ecs, e);
         }
@@ -887,6 +901,8 @@ impl Physics {
         self.scratch_nested = nested;
         self.scratch_gone = gone;
         self.sync_cursor = ecs.change_cursor();
+        profile.apply = profile_checkpoint(&mut timer);
+        profile
     }
 
     /// Whether a nested collider's entry still matches its entity: joined
@@ -946,7 +962,9 @@ impl Physics {
         } = transform;
         let joined = join.and_then(|(b, _)| Some((b, self.body_type_of(b)?)));
         let rel = join.map_or(Mat4::IDENTITY, |(_, rel)| rel);
-        let recreate = match self.entries.get(&entity) {
+        // Reuse the lookup for in-place updates; rebuilding releases the borrow.
+        let existing = self.entries.get_mut(&entity);
+        let recreate = match existing.as_deref() {
             None => true,
             Some(e) => {
                 e.rigid.is_some() != rigid.is_some()
@@ -983,7 +1001,7 @@ impl Physics {
             );
             return;
         }
-        let entry = self.entries.get_mut(&entity).unwrap();
+        let entry = existing.unwrap();
         let mut moved = entry.last_world != world;
         entry.last_world = world;
         if entry.character.is_some() {
@@ -3705,6 +3723,8 @@ mod tests {
         assert!(physics.step_profile().is_none());
         physics.step(&mut ecs, 1.0 / 60.0, &watched);
         let p = physics.step_profile().unwrap();
+        let s = p.synchronization;
+        assert!(p.sync >= s.collect + s.hierarchy + s.classify + s.apply);
         assert!(p.total >= p.sync + p.commands + p.characters + p.solver + p.writeback + p.events);
         ecs.despawn(e).unwrap();
         physics.step(&mut ecs, 1.0 / 60.0, &watched);
@@ -3805,6 +3825,57 @@ mod tests {
             assert_eq!(physics.world.colliders.len(), 5000);
         }
         println!("nested_sync_samples_us={samples:?}");
+    }
+
+    #[test]
+    fn leaf_candidates_still_move_and_reconcile_after_losing_their_last_child() {
+        let mut ecs = world();
+        let parent = spawn(&mut ecs, Vec3::ZERO, None, Some(Collider::default()));
+        let child = spawn(&mut ecs, Vec3::X, None, Some(Collider::default()));
+        scene::set_parent_keep_local(&mut ecs, child, Some(parent)).unwrap();
+        scene::propagate(&mut ecs);
+        let mut physics = Physics::new();
+        physics.sync(&mut ecs);
+        let parent_handle = physics.entries[&parent].collider.unwrap();
+        let child_handle = physics.entries[&child].collider.unwrap();
+        scene::set_parent_keep_local(&mut ecs, child, None).unwrap();
+        for (entity, position) in [(parent, Vec3::Y * 3.0), (child, Vec3::Y * 7.0)] {
+            scene::set_local(
+                &ecs,
+                entity,
+                Transform {
+                    position,
+                    ..Transform::IDENTITY
+                },
+            )
+            .unwrap();
+        }
+        scene::propagate(&mut ecs);
+        physics.sync(&mut ecs);
+        assert_eq!(physics.entries[&parent].collider, Some(parent_handle));
+        assert_eq!(physics.entries[&child].collider, Some(child_handle));
+        assert!(
+            (physics.world.colliders[parent_handle]
+                .position()
+                .translation
+                .y
+                - 3.0)
+                .abs()
+                < 1e-5
+        );
+        assert!(
+            (physics.world.colliders[child_handle]
+                .position()
+                .translation
+                .y
+                - 7.0)
+                .abs()
+                < 1e-5
+        );
+        ecs.remove::<Collider>(parent).unwrap();
+        ecs.despawn(child).unwrap();
+        physics.sync(&mut ecs);
+        assert!(physics.world.colliders.is_empty());
     }
 
     #[test]

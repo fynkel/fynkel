@@ -81,9 +81,10 @@ pub use world::gameplay::{
 pub use world::{
     projection_matrix, view_matrix, Diagnostic, Extract, ExtractCamera, ExtractDirectionalLight,
     ExtractEnvironment, ExtractMesh, ExtractPointLight, ExtractRecord, ExtractSpotLight,
-    ExtractVolume, Name, PhysicsOwned, ProjectionInfo, SnapshotRecord, StepReport, World,
-    WorldConfig, MAX_PROJECTION_ANCHORS, PROJECTED_DROPPED, PROJECTED_IN_FRONT, PROJECTED_MISSING,
-    PROJECTED_NO_CAMERA, PROJECTED_OCCLUDED, PROJECTED_ON_SCREEN, PROJECTED_VISIBLE,
+    ExtractVolume, Name, PhysicsOwned, PhysicsSystemProfile, ProjectionInfo, SnapshotRecord,
+    StepReport, World, WorldConfig, MAX_PROJECTION_ANCHORS, PROJECTED_DROPPED, PROJECTED_IN_FRONT,
+    PROJECTED_MISSING, PROJECTED_NO_CAMERA, PROJECTED_OCCLUDED, PROJECTED_ON_SCREEN,
+    PROJECTED_VISIBLE,
 };
 
 pub use world::command_resources::{CommandResourceSource, PreparedCommandResources};

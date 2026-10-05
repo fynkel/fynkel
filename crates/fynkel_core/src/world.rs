@@ -124,6 +124,13 @@ impl Name {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct PrevTransform(Transform, Option<Entity>);
 
+type ExtractPoseQuery = (
+    Option<&'static WorldTransform>,
+    Option<&'static Transform>,
+    Option<&'static PrevTransform>,
+    Option<&'static scene::Parent>,
+);
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Diagnostic {
     /// Index in the batch the command came from; `u32::MAX` for diagnostics
@@ -134,6 +141,16 @@ pub struct Diagnostic {
     pub entity: Entity,
     pub component: ComponentId,
     pub message: String,
+}
+
+/// Optional non-overlapping timings inside the core physics system.
+/// Excludes its scheduler eligibility check; `adapter` includes adapter timers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PhysicsSystemProfile {
+    pub propagation: std::time::Duration,
+    pub adapter: std::time::Duration,
+    pub publication: std::time::Duration,
+    pub total: std::time::Duration,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -283,6 +300,8 @@ pub struct World {
     input: Input,
     /// The Rapier adapter (M3-08), stepped at the §5.1 physics slot.
     physics: Physics,
+    physics_profiling: bool,
+    physics_system_profile: Option<PhysicsSystemProfile>,
     /// The optional modules the project uses (ADR-0029 §3): one that is
     /// off runs no systems and its commands are rejected.
     modules: crate::Modules,
@@ -350,6 +369,8 @@ impl World {
             poisoned: false,
             input,
             physics: Physics::new(),
+            physics_profiling: false,
+            physics_system_profile: None,
             modules: crate::Modules::COMPILED,
             prefabs: HashMap::new(),
             anim: AnimationState::default(),
@@ -385,6 +406,17 @@ impl World {
 
     pub fn physics(&self) -> &Physics {
         &self.physics
+    }
+
+    /// Enable diagnostic timings for both the core physics system and adapter.
+    pub fn set_physics_profiling(&mut self, enabled: bool) {
+        self.physics_profiling = enabled;
+        self.physics_system_profile = None;
+        self.physics.set_profiling(enabled);
+    }
+
+    pub fn physics_system_profile(&self) -> Option<PhysicsSystemProfile> {
+        self.physics_system_profile
     }
 
     /// Before a host's queries: the colliders made since the last step
@@ -730,6 +762,10 @@ impl World {
     /// native phases, propagates transforms, publishes S[n+1], the tick's
     /// events and the snapshot.
     pub fn step(&mut self) -> StepReport {
+        self.physics_system_profile = None;
+        if self.physics_profiling {
+            self.physics.set_profiling(true);
+        }
         if self.poisoned {
             return StepReport {
                 status: Status::Poisoned,
@@ -1350,11 +1386,42 @@ impl World {
         } else {
             &membership.renderable
         };
+        // Borrow component columns once, then resolve each entity once. Keep
+        // membership order authoritative for record indices and camera ties.
+        let mut inputs = self.gameplay.ecs.query::<(
+            &WorldTransform,
+            Option<&scene::Inactive>,
+            Option<&Layer>,
+            Option<&MeshRenderer>,
+            Option<&Camera>,
+            Option<&DirectionalLight>,
+            Option<&PointLight>,
+            Option<&SpotLight>,
+            Option<&Volume>,
+            Option<&Environment>,
+        )>();
+        let view = inputs.view();
+        // One column lookup per entity for everything its pose needs, instead
+        // of four separate component fetches.
+        let mut pose_query = self.gameplay.ecs.query::<ExtractPoseQuery>();
+        let poses = pose_query.view();
         for &e in entities {
-            if !self.gameplay.ecs.has::<WorldTransform>(e) {
+            let Some((
+                _,
+                inactive,
+                layer,
+                mesh,
+                camera,
+                directional,
+                point,
+                spot,
+                volume,
+                environment,
+            )) = self.gameplay.ecs.raw(e).and_then(|raw| view.get(raw))
+            else {
                 continue;
-            }
-            if self.gameplay.ecs.has::<scene::Inactive>(e) {
+            };
+            if inactive.is_some() {
                 // Not active in the hierarchy: as absent as a hidden one.
                 continue;
             }
@@ -1363,18 +1430,14 @@ impl World {
                 // draw, light with or look through.
                 continue;
             }
-            let world = self.resolve_extract(e, alpha, &mut memo);
+            let world = self.resolve_extract_view(e, alpha, &mut memo, &poses);
             let record = out.records.len() as u32;
             out.records.push(ExtractRecord {
                 entity: e,
                 world,
-                layer_bit: self
-                    .gameplay
-                    .ecs
-                    .copy::<Layer>(e)
-                    .map_or(1, |l| l.bit().max(1)),
+                layer_bit: layer.map_or(1, |l| l.bit().max(1)),
             });
-            if let Ok(m) = self.gameplay.ecs.get::<MeshRenderer>(e) {
+            if let Some(m) = mesh {
                 if m.visible {
                     // A skinned draw's palette from the joints' own
                     // interpolated matrices (M3-19).
@@ -1384,7 +1447,7 @@ impl World {
                             self.gameplay
                                 .ecs
                                 .has::<WorldTransform>(j)
-                                .then(|| self.resolve_extract(j, alpha, &mut memo))
+                                .then(|| self.resolve_extract_view(j, alpha, &mut memo, &poses))
                         };
                         World::skin_palette(world, &skin, &joints, &mut world_of, &mut out.joints);
                         ExtractSkin {
@@ -1402,7 +1465,7 @@ impl World {
                     });
                 }
             }
-            if let Ok(c) = self.gameplay.ecs.copy::<Camera>(e) {
+            if let Some(&c) = camera {
                 let better = match &out.camera {
                     Some(cur) => c.priority > cur.camera.priority,
                     None => true,
@@ -1415,7 +1478,7 @@ impl World {
                     });
                 }
             }
-            if let Ok(l) = self.gameplay.ecs.copy::<DirectionalLight>(e) {
+            if let Some(&l) = directional {
                 let direction = world.transform_vector3(-Vec3::Z).normalize_or(-Vec3::Z);
                 out.directional_lights.push(ExtractDirectionalLight {
                     record,
@@ -1423,14 +1486,14 @@ impl World {
                     light: l,
                 });
             }
-            if let Ok(l) = self.gameplay.ecs.copy::<PointLight>(e) {
+            if let Some(&l) = point {
                 out.point_lights.push(ExtractPointLight {
                     record,
                     position: world.transform_point3(Vec3::ZERO),
                     light: l,
                 });
             }
-            if let Ok(l) = self.gameplay.ecs.copy::<SpotLight>(e) {
+            if let Some(&l) = spot {
                 out.spot_lights.push(ExtractSpotLight {
                     record,
                     position: world.transform_point3(Vec3::ZERO),
@@ -1438,7 +1501,7 @@ impl World {
                     light: l,
                 });
             }
-            if let Ok(v) = self.gameplay.ecs.get::<Volume>(e) {
+            if let Some(v) = volume {
                 if v.enabled && v.weight > 0.0 {
                     out.volumes.push(ExtractVolume {
                         record,
@@ -1448,7 +1511,7 @@ impl World {
                 }
             }
             if out.environment.is_none() {
-                if let Ok(env) = self.gameplay.ecs.get::<Environment>(e) {
+                if let Some(env) = environment {
                     out.environment = Some(ExtractEnvironment {
                         record,
                         environment: env.clone(),
@@ -1470,7 +1533,51 @@ impl World {
         membership.memo = memo;
     }
 
-    fn resolve_extract(&self, e: Entity, alpha: f32, memo: &mut HashMap<Entity, Mat4>) -> Mat4 {
+    /// [`resolve_extract`](Self::resolve_extract) over a prefetched pose view:
+    /// one lookup per entity. Same result, bit for bit.
+    fn resolve_extract_view(
+        &self,
+        e: Entity,
+        alpha: f32,
+        memo: &mut fynkel_contracts::FastMap<Entity, Mat4>,
+        poses: &fynkel_ecs::internal::hecs::View<'_, ExtractPoseQuery>,
+    ) -> Mat4 {
+        if let Some(r) = memo.get(&e) {
+            return *r;
+        }
+        let Some((world, local, prev, parent)) = self
+            .gameplay
+            .ecs
+            .raw(e)
+            .and_then(|raw| poses.get(raw))
+        else {
+            return self.resolve_extract(e, alpha, memo);
+        };
+        let parent = parent.map(|p| p.0);
+        let parent_res = parent.map(|p| self.resolve_extract_view(p, alpha, memo, poses));
+        let cur = world.map(|w| w.matrix).unwrap_or(Mat4::IDENTITY);
+        let result = match prev {
+            // Reparenting changes coordinate space: snap this entity to
+            // the current hierarchy rather than mixing unrelated locals.
+            Some(prev) if prev.1 != parent => cur,
+            Some(prev) => {
+                let local = local.copied().unwrap_or_default();
+                let pw = parent_res.unwrap_or(Mat4::IDENTITY);
+                // Nothing moved this tick: the pose is the local itself.
+                let at = if prev.0 == local {
+                    local
+                } else {
+                    lerp(prev.0, local, alpha)
+                };
+                pw * at.matrix()
+            }
+            None => cur,
+        };
+        memo.insert(e, result);
+        result
+    }
+
+    fn resolve_extract(&self, e: Entity, alpha: f32, memo: &mut fynkel_contracts::FastMap<Entity, Mat4>) -> Mat4 {
         if let Some(r) = memo.get(&e) {
             return *r;
         }

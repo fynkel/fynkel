@@ -980,10 +980,12 @@ dependencies = [
  "fynkel_core",
  "fynkel_document",
  "fynkel_import",
+ "fynkel_render",
  "fynkel_scene",
  "glam 0.33.7",
  "serde",
  "serde_json",
+ "wgpu",
 ]
 
 [[package]]

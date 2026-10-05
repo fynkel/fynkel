@@ -212,12 +212,12 @@ struct Changes {
     structure: u64,
     values: u64,
     writers: usize,
-    components: std::collections::HashMap<std::any::TypeId, u64>,
+    components: fynkel_contracts::FastMap<std::any::TypeId, u64>,
     history: std::collections::VecDeque<Change>,
     history_floor: u64,
     // Last discarded value write by domain. Structural writes remain in their
     // own bounded history; unrelated values cannot force sparse readers to reset.
-    lost_values: std::collections::HashMap<Option<std::any::TypeId>, u64>,
+    lost_values: fynkel_contracts::FastMap<Option<std::any::TypeId>, u64>,
     structural_history: std::collections::VecDeque<StructuralChange>,
     structural_history_floor: u64,
     entities_at: u64,

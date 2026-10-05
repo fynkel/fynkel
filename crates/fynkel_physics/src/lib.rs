@@ -423,6 +423,8 @@ pub struct PhysicsStats {
 /// scene propagation and subsequent event publication. Not persisted game state.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PhysicsStepProfile {
+    /// Nested phases contained within `sync`; never add these to the outer phases.
+    pub synchronization: PhysicsSyncProfile,
     pub sync: std::time::Duration,
     pub commands: std::time::Duration,
     pub characters: std::time::Duration,
@@ -430,4 +432,13 @@ pub struct PhysicsStepProfile {
     pub writeback: std::time::Duration,
     pub events: std::time::Duration,
     pub total: std::time::Duration,
+}
+
+/// Non-overlapping parts of scene-to-physics synchronization, diagnostic only.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PhysicsSyncProfile {
+    pub collect: std::time::Duration,
+    pub hierarchy: std::time::Duration,
+    pub classify: std::time::Duration,
+    pub apply: std::time::Duration,
 }

@@ -141,6 +141,82 @@ fn render_membership_tracks_structure_after_value_history_overflow() {
 }
 
 #[test]
+fn extraction_preserves_mixed_components_ties_and_archetype_changes() {
+    let mut world = World::new(Default::default());
+    let first = fynkel_scene::spawn(
+        world.ecs_mut(),
+        Transform::from_position(Vec3::new(1.0, 2.0, 3.0)),
+        None,
+    )
+    .unwrap();
+    let second = fynkel_scene::spawn(world.ecs_mut(), Transform::IDENTITY, None).unwrap();
+    world
+        .ecs_mut()
+        .insert(first, MeshRenderer::default())
+        .unwrap();
+    world.ecs_mut().insert(first, Layer { layer: 3 }).unwrap();
+    world.ecs_mut().insert(first, Camera::default()).unwrap();
+    world.ecs_mut().insert(second, Camera::default()).unwrap();
+    world
+        .ecs_mut()
+        .insert(first, DirectionalLight::default())
+        .unwrap();
+    world
+        .ecs_mut()
+        .insert(first, PointLight::default())
+        .unwrap();
+    world.ecs_mut().insert(first, SpotLight::default()).unwrap();
+    world.ecs_mut().insert(first, Volume::default()).unwrap();
+    world
+        .ecs_mut()
+        .insert(first, Environment::default())
+        .unwrap();
+    world
+        .ecs_mut()
+        .insert(second, Environment::default())
+        .unwrap();
+    world.refresh_physics();
+    let mut frame = Extract::default();
+    world.extract_into(&mut frame, false);
+    assert_eq!(
+        frame.records.iter().map(|r| r.entity).collect::<Vec<_>>(),
+        vec![first, second]
+    );
+    assert_eq!(frame.records[0].layer_bit, 8);
+    assert_eq!(frame.records[1].layer_bit, 1);
+    assert_eq!(frame.camera.unwrap().record, 0);
+    assert_eq!(frame.environment.as_ref().unwrap().record, 0);
+    assert_eq!(frame.meshes[0].record, 0);
+    assert_eq!(frame.directional_lights[0].record, 0);
+    assert_eq!(frame.directional_lights[0].direction, -Vec3::Z);
+    assert_eq!(frame.point_lights[0].position, Vec3::new(1.0, 2.0, 3.0));
+    assert_eq!(
+        frame.spot_lights[0].position,
+        frame.point_lights[0].position
+    );
+    assert_eq!(frame.volumes[0].world, frame.records[0].world);
+    let retained = frame.clone();
+
+    // Change archetypes between calls and ensure optional values cannot leak
+    // from a previous entity or extraction, nor reorder equal-priority owners.
+    world.ecs_mut().remove::<Environment>(first).unwrap();
+    world.ecs_mut().remove::<PointLight>(first).unwrap();
+    world.ecs_mut().remove::<Layer>(first).unwrap();
+    world.ecs().get_mut::<Camera>(second).unwrap().priority = 1;
+    world.ecs().get_mut::<Volume>(first).unwrap().enabled = false;
+    world.extract_into(&mut frame, false);
+    assert_eq!(frame.records[0].entity, first);
+    assert_eq!(frame.records[0].layer_bit, 1);
+    assert_eq!(frame.camera.unwrap().record, 1);
+    assert_eq!(frame.environment.as_ref().unwrap().record, 1);
+    assert!(frame.point_lights.is_empty());
+    assert!(frame.volumes.is_empty());
+    assert_eq!(retained.point_lights.len(), 1);
+    assert_eq!(retained.volumes.len(), 1);
+    assert_eq!(retained.environment.unwrap().record, 0);
+}
+
+#[test]
 #[ignore = "manual foundation extraction qualification"]
 fn extraction_qualification() {
     let mut world = World::new(Default::default());
