@@ -1,0 +1,45 @@
+{
+  "retained": false,
+  "sustainedQualification": false,
+  "phoneRun": false,
+  "reason": "Moving unchanged-entry comparisons into application did not produce a consistent total synchronization benefit. Restored previous retained implementation.",
+  "scope": "Mac native-only diagnostic; no Dart or rendering",
+  "runs": [
+    {
+      "name": "control",
+      "classifyMedianUs": 603.583,
+      "applyMedianUs": 410.3125,
+      "syncMedianUs": 1352.0829999999999,
+      "stepMedianUs": 6373.0835
+    },
+    {
+      "name": "candidate",
+      "classifyMedianUs": 509.45849999999996,
+      "applyMedianUs": 547.479,
+      "syncMedianUs": 1411.8125,
+      "stepMedianUs": 6729.437
+    },
+    {
+      "name": "control2",
+      "classifyMedianUs": 618.6665,
+      "applyMedianUs": 409.7085,
+      "syncMedianUs": 1375.2710000000002,
+      "stepMedianUs": 6512.646000000001
+    },
+    {
+      "name": "candidate2",
+      "classifyMedianUs": 501.0625,
+      "applyMedianUs": 519.75,
+      "syncMedianUs": 1355.375,
+      "stepMedianUs": 6434.041499999999
+    }
+  ],
+  "temporaryProbe": {
+    "samples": 300,
+    "matrixMedianUs": 271.53200000000004,
+    "matrixCountMedian": 5532.0,
+    "parentMedianUs": 9.061,
+    "parentCountMedian": 531.0,
+    "limitations": "Includes per-object clock overhead and perturbs classification. Mac-only; not exact phone attribution. Probe removed."
+  }
+}

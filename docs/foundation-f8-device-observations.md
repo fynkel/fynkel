@@ -1081,3 +1081,175 @@ Frame delivery still varies substantially. The candidate live app remains
 installed and stopped. F8 stays open.
 
 [Results and raw captures](../benchmarks/foundation/results/2026-10-03-f8-sync-hierarchy.json).
+
+## Correlated dense-scene diagnosis
+
+The [2026-10-03 frame diagnosis](foundation-f8-performance-diagnosis.md) correlates
+host work, native texture state transitions and Flutter raster timing across nine
+bounded captures. Normal live delivery was 29.4–29.7 new textures/s; half-resolution
+live rendering reached 58.2; frozen half-resolution rendering reached 118.6.
+Eight buffers improved throughput but increased queue latency. This establishes
+separate CPU, pixel-dependent GPU, and buffer coordination constraints. It is a
+prioritized diagnostic result, not a production performance fix or an F8 pass.
+
+2026-10-04: bounded live dense-5000 physics-phase capture completed 479 ticks,
+matched to all SDK tick samples. Synchronization median 1.873 ms; solver 0.996 ms;
+adapter total 3.185 ms. App reached its eight-second deadline and exact PID 4879
+was terminated. Thermal samples were nominal, with no sustained qualification
+claim. [Detailed evidence](foundation-f8-physics-phases.md).
+
+2026-10-04: four bounded synchronization captures completed with 474/480/478/479
+matched ticks. Repeated leaf hierarchy optimization lowers hierarchy medians
+0.287→0.232 and 0.294→0.239 ms. Whole-step medians do not improve. All runs ended
+at the deadline, their exact PIDs were terminated, and thermal samples were
+nominal. [Full comparison](foundation-f8-sync-hierarchy.md).
+
+2026-10-04: four bounded entry-lookup comparisons completed with 480/480/479/480
+matched ticks. Application medians fall 0.688→0.576 and 0.733→0.604 ms; whole-step
+results are mixed. All runs reached the deadline, recorded nominal thermal state
+and had their exact PIDs terminated. The retained candidate is installed and
+stopped. [Detailed comparison](foundation-f8-entry-lookup.md).
+
+2026-10-04: core physics-phase diagnostic captured 480 matched ticks. Median
+propagation 1.135 ms, adapter 2.972 ms, event/rejection handling 0.0011 ms. The app
+reached the eight-second deadline; exact PID 5041 was terminated. Thermal samples
+were nominal. [Evidence and limits](foundation-f8-core-physics-phases.md).
+
+2026-10-04: retained shared propagation reads after two live phase comparisons
+(1.148→0.833 and 1.135→0.864 ms/tick). Separate captures without phase tracing or
+all-tick readback deliver 43.428 vs 43.444 acquired frames/s. All six runs reach the
+deadline and exact PIDs are stopped. First control has one unknown startup/thermal
+window; other thermal samples are nominal. [Evidence](foundation-f8-propagation.md).
+
+2026-10-04: eight bounded redundant-dirty-write captures completed and exact PIDs
+were stopped. Local propagation costs fell, whole-step timing was mixed, and
+untraced acquisition regressed once but tied in reverse order. The candidate was
+removed; the last installed/stopped app is the retained control. [Evidence and
+limits](foundation-f8-dirty-writes.md).
+
+2026-10-04: four bounded frozen-scene blur-tile comparisons completed. Original
+8×8 controls measured 3.726/3.791 ms blur spans and 47.996/48.242 acquisitions/s;
+16×16 and 16×8 measured 4.424/4.475 ms and 44.211/46.338/s. All thermal samples
+were nominal, deadline stops completed and exact PIDs were terminated. Larger
+tiles were removed; the original app is installed and stopped. [Evidence](foundation-f8-blur-tiles.md).
+
+2026-10-04: four bounded frozen AO-neighbour comparisons completed with nominal
+thermal samples and exact PID termination. Candidate acquisitions 47.116/47.966
+versus controls 48.369/49.363 per second; no useful whole-frame GPU reduction.
+Candidate removed; original retained app installed and stopped. [Evidence and
+limits](foundation-f8-ao-neighbour.md).
+
+2026-10-04: one valid Metal baseline and six failed PID-attachment attempts;
+all exact launched PIDs stopped. Gated failures withhold the scene start signal.
+The final medium-quality manual handshake check releases the scene and completes
+the eight-second deadline; it is not a Metal capture. Phone app stopped.
+[Details and remaining profiler limitation](foundation-f8-profiler-gate.md).
+
+2026-10-04: user reconnected USB; three gated exact-PID Metal captures completed
+(AO-only, contact-only, normal medium). All used 1320×2868, recorded nominal
+thermal samples, reached the bounded deadline and stopped their exact PIDs.
+Normal medium was selected last; app stopped. [Comparison and limitations](foundation-f8-metal-effects.md).
+
+2026-10-04: four frozen fixed-blur comparisons completed and exact PIDs stopped.
+Candidate GPU medians 17.658/17.643 ms versus controls 19.143/19.203 ms; no reliable
+acquisition improvement established. Final control reported fair thermal state,
+so testing stopped and cooldown confirmation was requested. Original control app
+is installed/stopped; candidate acceptance awaits live testing. [Evidence](foundation-f8-fixed-blur.md).
+
+2026-10-04: user confirmed cooldown. Four live fixed-blur comparisons completed
+(control/candidate/candidate/control), all deadline-stopped and exact PIDs
+terminated. First three runs nominal, final control fair. GPU spans improved,
+but acquisitions were mixed and the reverse control was warmer. Candidate
+removed; original app installed/stopped and generated release rebuilt. [Decision](foundation-f8-fixed-blur.md).
+
+2026-10-04: one bounded live frame/all-tick capture completed with nominal thermal
+samples and exact-PID termination. 509 host frames and 480 ticks matched; late
+frames increasingly execute two catch-up ticks. Original renderer remains
+installed/stopped. [Attribution and limits](foundation-f8-live-critical-path.md).
+
+## 2026-10-04 — shared extraction query
+
+Retained shared read-query extraction after 376 release core tests, Clippy,
+local qualification and iOS release build. Nominal phone pair: extraction p50
+2.067→1.584 ms; new acquisitions 34.32→39.72/s (instrumented, not display FPS).
+Repeat extraction 1.589 ms, but thermal fair: stopped testing and excluded the
+repeat from controlled throughput acceptance. Cooled reverse-order comparison
+and sustained performance remain open. No quality/workload reduction.
+See [extraction evidence](foundation-f8-extract-views.md). F8 remains open.
+
+## 2026-10-04 — renderer preparation attribution
+
+Added nine disjoint CPU phase timers and checked host-frame correlation. One
+unlocked iPhone diagnostic completed with nominal thermal samples and exact-PID
+termination. Instance construction p50 1.209 ms; visibility 0.632 ms; batching and
+uploads 0.337 ms. Instances plus visibility account for 71.5% of preparation total.
+29 renderer, five Apple and 22 Python tests pass; Clippy and iOS release build pass.
+No FPS improvement or sustained qualification claimed. Next measured experiment:
+direct record-index lookup in instance construction. Extraction reverse-order
+comparison remains pending. See [phase evidence](foundation-f8-prepare-phases.md).
+
+## 2026-10-04 — direct record lookup experiment rejected
+
+Tested a dense array instead of the per-world mesh-record hash map. Instance p50
+improved 1.1935→1.079 ms and 1.200→1.072 ms, but acquisitions fell 39.16→32.87/s
+in the first pair and tied 39.44→39.46/s in the repeat. Final candidate includes
+an unknown thermal window. No repeatable whole-frame gain established; restored
+the original source and app. 29 restored unit tests, 55 shading tests and all 68
+reference images pass/match. Candidate source/test/evidence archived. F8 remains
+open. See [experiment](foundation-f8-dense-lookup.md).
+
+## 2026-10-04 — visibility cost attribution
+
+Added checked nested CPU visibility timing. One eight-second nominal iPhone
+capture: bounds construction 54.9%, index update 40.5%, queries 4.6% of visibility
+time; medians 0.419/0.160/0.035 ms. Index-update p95 0.784 ms; rebuild/refit cause
+not yet isolated. 29 renderer, five Apple and 23 Python checks pass, plus Clippy
+and iOS build. Exact PID stopped. No runtime speedup or sustained qualification
+claimed. Next: bounds construction and hierarchy-update attribution. F8 remains
+open. See [visibility evidence](foundation-f8-visibility-phases.md).
+
+## 2026-10-04 — bounds reduction and hierarchy update classification
+
+Retained bounds reduction: compute fallback spheres only for meshless records;
+main-world identity multiplication removed. 31 renderer + 55 shading + five Apple
++ 24 Python tests pass; 68 images identical, Clippy/iOS build pass. Nominal candidate
+bounds p50 0.344 ms versus controls 0.468/0.497; preparation also lower. Initial
+control has an unknown thermal window; final candidate fair, so stopped and left
+cooled repeat/throughput qualification open. New hierarchy classification identifies
+initial/membership rebuilds (~0.798 ms) versus dense refits (~0.167 ms); no
+cost-triggered rebuilds in first control. Next: membership churn without whole-tree
+rebuilds, preserving correctness. F8 remains open.
+See [bounds evidence](foundation-f8-bounds-work.md).
+
+## 2026-10-05 — visibility membership repair retained
+
+Small membership changes now repair leaves, refresh all current bounds, reuse
+node slots and rebuild traversal metadata without spatial repartitioning. Large
+or cumulative changes, cost growth and excessive depth retain full-build paths.
+34 renderer + 55 shading + five Apple + 24 Python tests pass; 68 images identical;
+Clippy and iOS build pass. Three nominal captures: control 102 rebuilds versus one
+initial build per candidate, with 97/87 repairs. Index p95 0.751→0.229/0.216 ms.
+Acquisitions 42.77 versus 42.22/43.62/s: no overall FPS gain claimed. Exact PIDs
+stopped. F8 and sustained qualification remain open.
+See [membership evidence](foundation-f8-membership-repair.md).
+
+## 2026-10-05 — shared pose reads, mobile comparison pending
+
+Implemented shared ECS reads and carried proposal inputs in world-pose preparation,
+with unchanged atomic publication. 27 scene + 376 core tests, Clippy and iOS build
+pass. Local 5,000-root conversion median 343.334→106.541 µs. Device control native
+median 7.1915 ms / lookAtCamera 0.735 ms; candidate 7.088 / 0.638 ms, but candidate
+thermal fair. Stopped exact PID and requested cooldown; no mobile gain accepted.
+Implementation remains in working tree pending cooled comparison. F8 remains open.
+See [pose-read evidence](foundation-f8-pose-views.md).
+
+## 2026-10-05 — shared pose reads retained after normal-thermal repeats
+
+All-nominal candidate/control/candidate eight-second sequence completed, with
+exact PIDs stopped. LookAtCamera medians 0.6745 / 0.736 / 0.628 ms support an
+8–15% targeted saving. Native ticks 7.385 / 7.202 / 7.020 ms and acquisitions
+37.52 / 39.06 / 39.95 per second do not establish repeatable whole-frame gain.
+Retained on local correctness and targeted CPU evidence; earlier fair candidate
+remains excluded. No quality/workload/rate reductions. F8 and sustained thermal
+60/120 FPS qualification remain open. Physics synchronization and GPU screen-space
+costs remain the larger priorities. See [pose-read evidence](foundation-f8-pose-views.md).

@@ -1,0 +1,1143 @@
+{
+  "scope": "Frozen dense-5000 effect isolation with Metal profiling; no runtime optimization or FPS gain claimed.",
+  "sustainedQualification": false,
+  "executionWindowMs": [
+    3500,
+    7000
+  ],
+  "runs": [
+    {
+      "mode": "ao",
+      "captureId": "5b244a3480c847f8b99482d523d804eb",
+      "pid": 6144,
+      "quality": "medium-no-contact",
+      "frameworkSha256": {
+        "Frameworks/App.framework/App": "99dfc390ccd4b02846997cc1bf68cc3ba310d4fe3ffc10c9d8d6e868c6bdc748",
+        "Frameworks/Flutter.framework/Flutter": "0f8cf4ff38133da89497616cf9d6a827f30ab10a14b060bea6af317e33229fa0",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "a0ed6b0ebf64f98b3d635ea919e03d60e2603a68cd55a83c977530b9908d0fe3",
+        "Frameworks/objective_c.framework/objective_c": "38ea7f271b04c094f997a6452ec5b883d714192930a1724afbb9df2144621972"
+      },
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "thermal": [
+        "nominal"
+      ],
+      "stop": "deadline",
+      "fullTrace": {
+        "captureId": "5b244a3480c847f8b99482d523d804eb",
+        "pid": 6144,
+        "scope": "Profiled top-level active intervals only; excludes nested intervals and other processes. Channel durations overlap; do not add them as frame time. Not an unprofiled FPS or hardware-stall measurement.",
+        "matchedEncoders": 3682,
+        "observedSpanMs": 6418.32,
+        "activeIntervalUnionMs": 2488.366975,
+        "stages": [
+          {
+            "label": "fynkel ao",
+            "channel": "Fragment",
+            "encoders": 131,
+            "medianActiveMs": 3.505333,
+            "totalActiveMs": 516.806919
+          },
+          {
+            "label": "fynkel scene",
+            "channel": "Fragment",
+            "encoders": 94,
+            "medianActiveMs": 4.3069375,
+            "totalActiveMs": 452.79838
+          },
+          {
+            "label": "fynkel tiled ao blur",
+            "channel": "Compute",
+            "encoders": 97,
+            "medianActiveMs": 3.977625,
+            "totalActiveMs": 374.763997
+          },
+          {
+            "label": "Render Command 0",
+            "channel": "Vertex",
+            "encoders": 583,
+            "medianActiveMs": 0.039541,
+            "totalActiveMs": 305.917538
+          },
+          {
+            "label": "fynkel depth prepass",
+            "channel": "Fragment",
+            "encoders": 321,
+            "medianActiveMs": 0.409083,
+            "totalActiveMs": 264.836952
+          },
+          {
+            "label": "fynkel AO depth resolve",
+            "channel": "Fragment",
+            "encoders": 311,
+            "medianActiveMs": 0.381292,
+            "totalActiveMs": 165.079379
+          },
+          {
+            "label": "fynkel bloom prefilter",
+            "channel": "Fragment",
+            "encoders": 90,
+            "medianActiveMs": 1.3864375,
+            "totalActiveMs": 130.794296
+          },
+          {
+            "label": "fynkel shadow",
+            "channel": "Vertex",
+            "encoders": 321,
+            "medianActiveMs": 0.34575,
+            "totalActiveMs": 126.976416
+          },
+          {
+            "label": "fynkel bloom down",
+            "channel": "Fragment",
+            "encoders": 458,
+            "medianActiveMs": 0.012354500000000001,
+            "totalActiveMs": 83.879844
+          },
+          {
+            "label": "Render Command 0",
+            "channel": "Fragment",
+            "encoders": 55,
+            "medianActiveMs": 1.128333,
+            "totalActiveMs": 64.275667
+          },
+          {
+            "label": "fynkel post",
+            "channel": "Fragment",
+            "encoders": 90,
+            "medianActiveMs": 0.689125,
+            "totalActiveMs": 62.317420999999996
+          },
+          {
+            "label": "fynkel shadow",
+            "channel": "Fragment",
+            "encoders": 307,
+            "medianActiveMs": 0.182583,
+            "totalActiveMs": 61.332626
+          },
+          {
+            "label": "Blit Command 0",
+            "channel": "Compute",
+            "encoders": 714,
+            "medianActiveMs": 0.0303125,
+            "totalActiveMs": 50.958
+          },
+          {
+            "label": "fynkel depth prepass",
+            "channel": "Vertex",
+            "encoders": 325,
+            "medianActiveMs": 0.084166,
+            "totalActiveMs": 34.690216
+          },
+          {
+            "label": "fynkel scene",
+            "channel": "Vertex",
+            "encoders": 95,
+            "medianActiveMs": 0.266542,
+            "totalActiveMs": 24.461001
+          },
+          {
+            "label": "fynkel bloom up",
+            "channel": "Fragment",
+            "encoders": 455,
+            "medianActiveMs": 0.01375,
+            "totalActiveMs": 20.01904
+          },
+          {
+            "label": "fynkel bloom up",
+            "channel": "Vertex",
+            "encoders": 454,
+            "medianActiveMs": 0.0120625,
+            "totalActiveMs": 10.525888
+          },
+          {
+            "label": "fynkel bloom down",
+            "channel": "Vertex",
+            "encoders": 460,
+            "medianActiveMs": 0.0113545,
+            "totalActiveMs": 4.58104
+          },
+          {
+            "label": "fynkel AO depth resolve",
+            "channel": "Vertex",
+            "encoders": 311,
+            "medianActiveMs": 0.007667,
+            "totalActiveMs": 2.954002
+          },
+          {
+            "label": "fynkel post",
+            "channel": "Vertex",
+            "encoders": 90,
+            "medianActiveMs": 0.0255415,
+            "totalActiveMs": 1.848541
+          },
+          {
+            "label": "fynkel ao",
+            "channel": "Vertex",
+            "encoders": 131,
+            "medianActiveMs": 0.0075,
+            "totalActiveMs": 1.284708
+          },
+          {
+            "label": "fynkel bloom prefilter",
+            "channel": "Vertex",
+            "encoders": 92,
+            "medianActiveMs": 0.014770499999999999,
+            "totalActiveMs": 1.230374
+          },
+          {
+            "label": "(wgpu internal) clear_texture clear pass",
+            "channel": "Fragment",
+            "encoders": 1,
+            "medianActiveMs": 0.535084,
+            "totalActiveMs": 0.535084
+          },
+          {
+            "label": "BlitPass",
+            "channel": "Compute",
+            "encoders": 1,
+            "medianActiveMs": 0.371584,
+            "totalActiveMs": 0.371584
+          },
+          {
+            "label": "(wgpu internal) clear_texture clear pass",
+            "channel": "Vertex",
+            "encoders": 1,
+            "medianActiveMs": 0.006208,
+            "totalActiveMs": 0.006208
+          }
+        ]
+      },
+      "middleWindow": {
+        "captureId": "5b244a3480c847f8b99482d523d804eb",
+        "pid": 6144,
+        "scope": "Profiled top-level active intervals only; excludes nested intervals and other processes. Channel durations overlap; do not add them as frame time. Not an unprofiled FPS or hardware-stall measurement.",
+        "executionWindowMs": {
+          "start": 3500.0,
+          "end": 7000.0
+        },
+        "excludedEncoderChannels": 2644,
+        "matchedEncoders": 2066,
+        "observedSpanMs": 3497.586583,
+        "activeIntervalUnionMs": 1403.89125,
+        "stages": [
+          {
+            "label": "fynkel ao",
+            "channel": "Fragment",
+            "encoders": 75,
+            "medianActiveMs": 3.531,
+            "totalActiveMs": 301.861002
+          },
+          {
+            "label": "fynkel scene",
+            "channel": "Fragment",
+            "encoders": 54,
+            "medianActiveMs": 4.2970625,
+            "totalActiveMs": 258.236126
+          },
+          {
+            "label": "fynkel tiled ao blur",
+            "channel": "Compute",
+            "encoders": 56,
+            "medianActiveMs": 3.9679165000000003,
+            "totalActiveMs": 212.012623
+          },
+          {
+            "label": "Render Command 0",
+            "channel": "Vertex",
+            "encoders": 326,
+            "medianActiveMs": 0.039896,
+            "totalActiveMs": 166.560583
+          },
+          {
+            "label": "fynkel depth prepass",
+            "channel": "Fragment",
+            "encoders": 176,
+            "medianActiveMs": 0.407375,
+            "totalActiveMs": 142.78737
+          },
+          {
+            "label": "fynkel AO depth resolve",
+            "channel": "Fragment",
+            "encoders": 173,
+            "medianActiveMs": 0.386625,
+            "totalActiveMs": 92.046209
+          },
+          {
+            "label": "fynkel bloom prefilter",
+            "channel": "Fragment",
+            "encoders": 51,
+            "medianActiveMs": 1.3235,
+            "totalActiveMs": 71.50592
+          },
+          {
+            "label": "fynkel shadow",
+            "channel": "Vertex",
+            "encoders": 178,
+            "medianActiveMs": 0.345917,
+            "totalActiveMs": 71.04479
+          },
+          {
+            "label": "fynkel bloom down",
+            "channel": "Fragment",
+            "encoders": 258,
+            "medianActiveMs": 0.012292,
+            "totalActiveMs": 45.448966
+          },
+          {
+            "label": "Render Command 0",
+            "channel": "Fragment",
+            "encoders": 33,
+            "medianActiveMs": 1.170208,
+            "totalActiveMs": 39.97104
+          },
+          {
+            "label": "fynkel post",
+            "channel": "Fragment",
+            "encoders": 50,
+            "medianActiveMs": 0.6837915,
+            "totalActiveMs": 34.668169
+          },
+          {
+            "label": "fynkel shadow",
+            "channel": "Fragment",
+            "encoders": 169,
+            "medianActiveMs": 0.182416,
+            "totalActiveMs": 34.272791
+          },
+          {
+            "label": "Blit Command 0",
+            "channel": "Compute",
+            "encoders": 404,
+            "medianActiveMs": 0.0295835,
+            "totalActiveMs": 31.692372
+          },
+          {
+            "label": "fynkel depth prepass",
+            "channel": "Vertex",
+            "encoders": 181,
+            "medianActiveMs": 0.0845,
+            "totalActiveMs": 20.441672
+          },
+          {
+            "label": "fynkel scene",
+            "channel": "Vertex",
+            "encoders": 53,
+            "medianActiveMs": 0.266167,
+            "totalActiveMs": 13.438751
+          },
+          {
+            "label": "fynkel bloom up",
+            "channel": "Fragment",
+            "encoders": 255,
+            "medianActiveMs": 0.01375,
+            "totalActiveMs": 11.110747
+          },
+          {
+            "label": "fynkel bloom up",
+            "channel": "Vertex",
+            "encoders": 249,
+            "medianActiveMs": 0.012041,
+            "totalActiveMs": 2.558925
+          },
+          {
+            "label": "fynkel bloom down",
+            "channel": "Vertex",
+            "encoders": 255,
+            "medianActiveMs": 0.011167,
+            "totalActiveMs": 2.41262
+          },
+          {
+            "label": "fynkel AO depth resolve",
+            "channel": "Vertex",
+            "encoders": 173,
+            "medianActiveMs": 0.007667,
+            "totalActiveMs": 1.694129
+          },
+          {
+            "label": "fynkel post",
+            "channel": "Vertex",
+            "encoders": 49,
+            "medianActiveMs": 0.025542,
+            "totalActiveMs": 0.967001
+          },
+          {
+            "label": "fynkel ao",
+            "channel": "Vertex",
+            "encoders": 75,
+            "medianActiveMs": 0.007542,
+            "totalActiveMs": 0.769957
+          },
+          {
+            "label": "fynkel bloom prefilter",
+            "channel": "Vertex",
+            "encoders": 51,
+            "medianActiveMs": 0.01375,
+            "totalActiveMs": 0.62621
+          }
+        ]
+      }
+    },
+    {
+      "mode": "contact",
+      "captureId": "a048590b68084c13a819e362ec5bb6e1",
+      "pid": 6150,
+      "quality": "medium-no-ao",
+      "frameworkSha256": {
+        "Frameworks/App.framework/App": "99dfc390ccd4b02846997cc1bf68cc3ba310d4fe3ffc10c9d8d6e868c6bdc748",
+        "Frameworks/Flutter.framework/Flutter": "0f8cf4ff38133da89497616cf9d6a827f30ab10a14b060bea6af317e33229fa0",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "a0ed6b0ebf64f98b3d635ea919e03d60e2603a68cd55a83c977530b9908d0fe3",
+        "Frameworks/objective_c.framework/objective_c": "38ea7f271b04c094f997a6452ec5b883d714192930a1724afbb9df2144621972"
+      },
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "thermal": [
+        "nominal"
+      ],
+      "stop": "deadline",
+      "fullTrace": {
+        "captureId": "a048590b68084c13a819e362ec5bb6e1",
+        "pid": 6150,
+        "scope": "Profiled top-level active intervals only; excludes nested intervals and other processes. Channel durations overlap; do not add them as frame time. Not an unprofiled FPS or hardware-stall measurement.",
+        "matchedEncoders": 5201,
+        "observedSpanMs": 6474.720708,
+        "activeIntervalUnionMs": 3638.650399,
+        "stages": [
+          {
+            "label": "fynkel scene",
+            "channel": "Fragment",
+            "encoders": 185,
+            "medianActiveMs": 4.379042,
+            "totalActiveMs": 823.688327
+          },
+          {
+            "label": "fynkel tiled ao blur",
+            "channel": "Compute",
+            "encoders": 199,
+            "medianActiveMs": 3.986167,
+            "totalActiveMs": 791.047912
+          },
+          {
+            "label": "fynkel ao",
+            "channel": "Fragment",
+            "encoders": 210,
+            "medianActiveMs": 1.9341249999999999,
+            "totalActiveMs": 415.895753
+          },
+          {
+            "label": "fynkel depth prepass",
+            "channel": "Fragment",
+            "encoders": 381,
+            "medianActiveMs": 0.495,
+            "totalActiveMs": 329.904038
+          },
+          {
+            "label": "fynkel bloom prefilter",
+            "channel": "Fragment",
+            "encoders": 185,
+            "medianActiveMs": 1.3085,
+            "totalActiveMs": 227.72812
+          },
+          {
+            "label": "fynkel bloom down",
+            "channel": "Fragment",
+            "encoders": 957,
+            "medianActiveMs": 0.012417,
+            "totalActiveMs": 199.499252
+          },
+          {
+            "label": "fynkel post",
+            "channel": "Fragment",
+            "encoders": 191,
+            "medianActiveMs": 0.7055,
+            "totalActiveMs": 186.284955
+          },
+          {
+            "label": "fynkel AO depth resolve",
+            "channel": "Fragment",
+            "encoders": 374,
+            "medianActiveMs": 0.3530415,
+            "totalActiveMs": 147.55324
+          },
+          {
+            "label": "fynkel shadow",
+            "channel": "Vertex",
+            "encoders": 376,
+            "medianActiveMs": 0.345958,
+            "totalActiveMs": 141.234215
+          },
+          {
+            "label": "fynkel shadow",
+            "channel": "Fragment",
+            "encoders": 365,
+            "medianActiveMs": 0.18325,
+            "totalActiveMs": 135.930378
+          },
+          {
+            "label": "Render Command 0",
+            "channel": "Vertex",
+            "encoders": 582,
+            "medianActiveMs": 0.028917,
+            "totalActiveMs": 106.496296
+          },
+          {
+            "label": "Render Command 0",
+            "channel": "Fragment",
+            "encoders": 56,
+            "medianActiveMs": 1.4413749999999999,
+            "totalActiveMs": 104.755332
+          },
+          {
+            "label": "fynkel depth prepass",
+            "channel": "Vertex",
+            "encoders": 381,
+            "medianActiveMs": 0.082166,
+            "totalActiveMs": 90.898549
+          },
+          {
+            "label": "fynkel bloom up",
+            "channel": "Fragment",
+            "encoders": 958,
+            "medianActiveMs": 0.014,
+            "totalActiveMs": 56.810413
+          },
+          {
+            "label": "fynkel scene",
+            "channel": "Vertex",
+            "encoders": 194,
+            "medianActiveMs": 0.248146,
+            "totalActiveMs": 51.644497
+          },
+          {
+            "label": "Blit Command 0",
+            "channel": "Compute",
+            "encoders": 570,
+            "medianActiveMs": 0.034354,
+            "totalActiveMs": 37.19087
+          },
+          {
+            "label": "fynkel bloom up",
+            "channel": "Vertex",
+            "encoders": 961,
+            "medianActiveMs": 0.012792,
+            "totalActiveMs": 24.415332
+          },
+          {
+            "label": "fynkel bloom down",
+            "channel": "Vertex",
+            "encoders": 965,
+            "medianActiveMs": 0.012041,
+            "totalActiveMs": 10.783263
+          },
+          {
+            "label": "fynkel AO depth resolve",
+            "channel": "Vertex",
+            "encoders": 374,
+            "medianActiveMs": 0.007667,
+            "totalActiveMs": 9.251589
+          },
+          {
+            "label": "fynkel post",
+            "channel": "Vertex",
+            "encoders": 192,
+            "medianActiveMs": 0.025687,
+            "totalActiveMs": 7.211164
+          },
+          {
+            "label": "fynkel bloom prefilter",
+            "channel": "Vertex",
+            "encoders": 193,
+            "medianActiveMs": 0.018583,
+            "totalActiveMs": 3.377287
+          },
+          {
+            "label": "fynkel ao",
+            "channel": "Vertex",
+            "encoders": 210,
+            "medianActiveMs": 0.0075,
+            "totalActiveMs": 2.266558
+          },
+          {
+            "label": "(wgpu internal) clear_texture clear pass",
+            "channel": "Fragment",
+            "encoders": 1,
+            "medianActiveMs": 0.681167,
+            "totalActiveMs": 0.681167
+          },
+          {
+            "label": "BlitPass",
+            "channel": "Compute",
+            "encoders": 1,
+            "medianActiveMs": 0.359125,
+            "totalActiveMs": 0.359125
+          },
+          {
+            "label": "(wgpu internal) clear_texture clear pass",
+            "channel": "Vertex",
+            "encoders": 1,
+            "medianActiveMs": 0.006,
+            "totalActiveMs": 0.006
+          }
+        ]
+      },
+      "middleWindow": {
+        "captureId": "a048590b68084c13a819e362ec5bb6e1",
+        "pid": 6150,
+        "scope": "Profiled top-level active intervals only; excludes nested intervals and other processes. Channel durations overlap; do not add them as frame time. Not an unprofiled FPS or hardware-stall measurement.",
+        "executionWindowMs": {
+          "start": 3500.0,
+          "end": 7000.0
+        },
+        "excludedEncoderChannels": 4096,
+        "matchedEncoders": 2852,
+        "observedSpanMs": 3496.687416,
+        "activeIntervalUnionMs": 1971.803135,
+        "stages": [
+          {
+            "label": "fynkel scene",
+            "channel": "Fragment",
+            "encoders": 99,
+            "medianActiveMs": 4.355625,
+            "totalActiveMs": 436.203788
+          },
+          {
+            "label": "fynkel tiled ao blur",
+            "channel": "Compute",
+            "encoders": 107,
+            "medianActiveMs": 3.991,
+            "totalActiveMs": 425.350288
+          },
+          {
+            "label": "fynkel ao",
+            "channel": "Fragment",
+            "encoders": 112,
+            "medianActiveMs": 1.9344375,
+            "totalActiveMs": 218.838835
+          },
+          {
+            "label": "fynkel depth prepass",
+            "channel": "Fragment",
+            "encoders": 210,
+            "medianActiveMs": 0.788583,
+            "totalActiveMs": 183.409584
+          },
+          {
+            "label": "fynkel bloom prefilter",
+            "channel": "Fragment",
+            "encoders": 101,
+            "medianActiveMs": 1.313875,
+            "totalActiveMs": 125.789
+          },
+          {
+            "label": "fynkel bloom down",
+            "channel": "Fragment",
+            "encoders": 528,
+            "medianActiveMs": 0.012375,
+            "totalActiveMs": 110.900715
+          },
+          {
+            "label": "fynkel post",
+            "channel": "Fragment",
+            "encoders": 105,
+            "medianActiveMs": 0.70025,
+            "totalActiveMs": 104.32575
+          },
+          {
+            "label": "fynkel AO depth resolve",
+            "channel": "Fragment",
+            "encoders": 204,
+            "medianActiveMs": 0.35258350000000005,
+            "totalActiveMs": 77.813827
+          },
+          {
+            "label": "fynkel shadow",
+            "channel": "Fragment",
+            "encoders": 203,
+            "medianActiveMs": 0.18275,
+            "totalActiveMs": 76.599917
+          },
+          {
+            "label": "fynkel shadow",
+            "channel": "Vertex",
+            "encoders": 209,
+            "medianActiveMs": 0.34575,
+            "totalActiveMs": 76.011462
+          },
+          {
+            "label": "Render Command 0",
+            "channel": "Fragment",
+            "encoders": 33,
+            "medianActiveMs": 1.680334,
+            "totalActiveMs": 68.040459
+          },
+          {
+            "label": "fynkel depth prepass",
+            "channel": "Vertex",
+            "encoders": 210,
+            "medianActiveMs": 0.08181250000000001,
+            "totalActiveMs": 50.508623
+          },
+          {
+            "label": "Render Command 0",
+            "channel": "Vertex",
+            "encoders": 320,
+            "medianActiveMs": 0.0288955,
+            "totalActiveMs": 50.448495
+          },
+          {
+            "label": "fynkel bloom up",
+            "channel": "Fragment",
+            "encoders": 528,
+            "medianActiveMs": 0.013979499999999999,
+            "totalActiveMs": 32.52046
+          },
+          {
+            "label": "fynkel scene",
+            "channel": "Vertex",
+            "encoders": 105,
+            "medianActiveMs": 0.247375,
+            "totalActiveMs": 25.989287
+          },
+          {
+            "label": "Blit Command 0",
+            "channel": "Compute",
+            "encoders": 316,
+            "medianActiveMs": 0.0344165,
+            "totalActiveMs": 18.587962
+          },
+          {
+            "label": "fynkel bloom up",
+            "channel": "Vertex",
+            "encoders": 525,
+            "medianActiveMs": 0.012834,
+            "totalActiveMs": 10.418505
+          },
+          {
+            "label": "fynkel AO depth resolve",
+            "channel": "Vertex",
+            "encoders": 204,
+            "medianActiveMs": 0.007666,
+            "totalActiveMs": 6.962213
+          },
+          {
+            "label": "fynkel bloom down",
+            "channel": "Vertex",
+            "encoders": 525,
+            "medianActiveMs": 0.012209,
+            "totalActiveMs": 6.044253
+          },
+          {
+            "label": "fynkel post",
+            "channel": "Vertex",
+            "encoders": 105,
+            "medianActiveMs": 0.026083,
+            "totalActiveMs": 2.432789
+          },
+          {
+            "label": "fynkel bloom prefilter",
+            "channel": "Vertex",
+            "encoders": 105,
+            "medianActiveMs": 0.018625,
+            "totalActiveMs": 1.875247
+          },
+          {
+            "label": "fynkel ao",
+            "channel": "Vertex",
+            "encoders": 112,
+            "medianActiveMs": 0.0075,
+            "totalActiveMs": 1.128253
+          }
+        ]
+      }
+    },
+    {
+      "mode": "both",
+      "captureId": "52cde6de083244a9b25411f3e72c36a4",
+      "pid": 6172,
+      "quality": "medium",
+      "frameworkSha256": {
+        "Frameworks/App.framework/App": "99dfc390ccd4b02846997cc1bf68cc3ba310d4fe3ffc10c9d8d6e868c6bdc748",
+        "Frameworks/Flutter.framework/Flutter": "0f8cf4ff38133da89497616cf9d6a827f30ab10a14b060bea6af317e33229fa0",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "a0ed6b0ebf64f98b3d635ea919e03d60e2603a68cd55a83c977530b9908d0fe3",
+        "Frameworks/objective_c.framework/objective_c": "38ea7f271b04c094f997a6452ec5b883d714192930a1724afbb9df2144621972"
+      },
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "thermal": [
+        "nominal"
+      ],
+      "stop": "deadline",
+      "fullTrace": {
+        "captureId": "52cde6de083244a9b25411f3e72c36a4",
+        "pid": 6172,
+        "scope": "Profiled top-level active intervals only; excludes nested intervals and other processes. Channel durations overlap; do not add them as frame time. Not an unprofiled FPS or hardware-stall measurement.",
+        "executionWindowMs": {
+          "start": null,
+          "end": null
+        },
+        "excludedEncoderChannels": 0,
+        "matchedEncoders": 4088,
+        "observedSpanMs": 6405.565792,
+        "activeIntervalUnionMs": 3113.168513,
+        "stages": [
+          {
+            "label": "fynkel ao",
+            "channel": "Fragment",
+            "encoders": 149,
+            "medianActiveMs": 5.978166,
+            "totalActiveMs": 905.550996
+          },
+          {
+            "label": "fynkel scene",
+            "channel": "Fragment",
+            "encoders": 149,
+            "medianActiveMs": 5.317209,
+            "totalActiveMs": 781.69305
+          },
+          {
+            "label": "fynkel tiled ao blur",
+            "channel": "Compute",
+            "encoders": 145,
+            "medianActiveMs": 3.78375,
+            "totalActiveMs": 534.591501
+          },
+          {
+            "label": "Render Command 0",
+            "channel": "Vertex",
+            "encoders": 619,
+            "medianActiveMs": 0.029417,
+            "totalActiveMs": 232.17589
+          },
+          {
+            "label": "fynkel depth prepass",
+            "channel": "Fragment",
+            "encoders": 162,
+            "medianActiveMs": 1.4217295,
+            "totalActiveMs": 208.4545
+          },
+          {
+            "label": "fynkel bloom prefilter",
+            "channel": "Fragment",
+            "encoders": 149,
+            "medianActiveMs": 1.24725,
+            "totalActiveMs": 145.092165
+          },
+          {
+            "label": "fynkel post",
+            "channel": "Fragment",
+            "encoders": 148,
+            "medianActiveMs": 0.7009375,
+            "totalActiveMs": 112.939035
+          },
+          {
+            "label": "fynkel shadow",
+            "channel": "Vertex",
+            "encoders": 287,
+            "medianActiveMs": 0.346542,
+            "totalActiveMs": 108.253998
+          },
+          {
+            "label": "fynkel bloom down",
+            "channel": "Fragment",
+            "encoders": 740,
+            "medianActiveMs": 0.0124585,
+            "totalActiveMs": 108.233908
+          },
+          {
+            "label": "Render Command 0",
+            "channel": "Fragment",
+            "encoders": 57,
+            "medianActiveMs": 1.576583,
+            "totalActiveMs": 94.18625
+          },
+          {
+            "label": "fynkel AO depth resolve",
+            "channel": "Fragment",
+            "encoders": 161,
+            "medianActiveMs": 0.380333,
+            "totalActiveMs": 68.406823
+          },
+          {
+            "label": "fynkel shadow",
+            "channel": "Fragment",
+            "encoders": 284,
+            "medianActiveMs": 0.18016700000000002,
+            "totalActiveMs": 58.406123
+          },
+          {
+            "label": "Blit Command 0",
+            "channel": "Compute",
+            "encoders": 637,
+            "medianActiveMs": 0.036917,
+            "totalActiveMs": 38.960258
+          },
+          {
+            "label": "fynkel scene",
+            "channel": "Vertex",
+            "encoders": 149,
+            "medianActiveMs": 0.253333,
+            "totalActiveMs": 37.763205
+          },
+          {
+            "label": "fynkel bloom up",
+            "channel": "Fragment",
+            "encoders": 740,
+            "medianActiveMs": 0.013875,
+            "totalActiveMs": 34.471908
+          },
+          {
+            "label": "fynkel depth prepass",
+            "channel": "Vertex",
+            "encoders": 162,
+            "medianActiveMs": 0.080583,
+            "totalActiveMs": 14.871167
+          },
+          {
+            "label": "fynkel bloom up",
+            "channel": "Vertex",
+            "encoders": 736,
+            "medianActiveMs": 0.013145500000000001,
+            "totalActiveMs": 9.413038
+          },
+          {
+            "label": "fynkel bloom down",
+            "channel": "Vertex",
+            "encoders": 740,
+            "medianActiveMs": 0.012125,
+            "totalActiveMs": 8.484881
+          },
+          {
+            "label": "fynkel post",
+            "channel": "Vertex",
+            "encoders": 148,
+            "medianActiveMs": 0.02575,
+            "totalActiveMs": 3.497332
+          },
+          {
+            "label": "fynkel bloom prefilter",
+            "channel": "Vertex",
+            "encoders": 149,
+            "medianActiveMs": 0.018458,
+            "totalActiveMs": 2.635842
+          },
+          {
+            "label": "fynkel AO depth resolve",
+            "channel": "Vertex",
+            "encoders": 161,
+            "medianActiveMs": 0.007583,
+            "totalActiveMs": 1.404212
+          },
+          {
+            "label": "fynkel ao",
+            "channel": "Vertex",
+            "encoders": 149,
+            "medianActiveMs": 0.0075,
+            "totalActiveMs": 1.256921
+          },
+          {
+            "label": "(wgpu internal) clear_texture clear pass",
+            "channel": "Fragment",
+            "encoders": 1,
+            "medianActiveMs": 0.604708,
+            "totalActiveMs": 0.604708
+          },
+          {
+            "label": "BlitPass",
+            "channel": "Compute",
+            "encoders": 1,
+            "medianActiveMs": 0.356417,
+            "totalActiveMs": 0.356417
+          },
+          {
+            "label": "(wgpu internal) clear_texture clear pass",
+            "channel": "Vertex",
+            "encoders": 1,
+            "medianActiveMs": 0.006166,
+            "totalActiveMs": 0.006166
+          }
+        ]
+      },
+      "middleWindow": {
+        "captureId": "52cde6de083244a9b25411f3e72c36a4",
+        "pid": 6172,
+        "scope": "Profiled top-level active intervals only; excludes nested intervals and other processes. Channel durations overlap; do not add them as frame time. Not an unprofiled FPS or hardware-stall measurement.",
+        "executionWindowMs": {
+          "start": 3500.0,
+          "end": 7000.0
+        },
+        "excludedEncoderChannels": 2990,
+        "matchedEncoders": 2296,
+        "observedSpanMs": 3486.921708,
+        "activeIntervalUnionMs": 1742.964625,
+        "stages": [
+          {
+            "label": "fynkel ao",
+            "channel": "Fragment",
+            "encoders": 83,
+            "medianActiveMs": 5.98825,
+            "totalActiveMs": 504.683916
+          },
+          {
+            "label": "fynkel scene",
+            "channel": "Fragment",
+            "encoders": 83,
+            "medianActiveMs": 5.298541,
+            "totalActiveMs": 427.916216
+          },
+          {
+            "label": "fynkel tiled ao blur",
+            "channel": "Compute",
+            "encoders": 83,
+            "medianActiveMs": 3.793166,
+            "totalActiveMs": 305.810125
+          },
+          {
+            "label": "Render Command 0",
+            "channel": "Vertex",
+            "encoders": 340,
+            "medianActiveMs": 0.029625,
+            "totalActiveMs": 126.266173
+          },
+          {
+            "label": "fynkel depth prepass",
+            "channel": "Fragment",
+            "encoders": 92,
+            "medianActiveMs": 1.4265415,
+            "totalActiveMs": 114.868417
+          },
+          {
+            "label": "fynkel bloom prefilter",
+            "channel": "Fragment",
+            "encoders": 83,
+            "medianActiveMs": 1.251583,
+            "totalActiveMs": 80.515331
+          },
+          {
+            "label": "fynkel bloom down",
+            "channel": "Fragment",
+            "encoders": 415,
+            "medianActiveMs": 0.012458,
+            "totalActiveMs": 68.061105
+          },
+          {
+            "label": "Render Command 0",
+            "channel": "Fragment",
+            "encoders": 36,
+            "medianActiveMs": 1.756125,
+            "totalActiveMs": 63.61975
+          },
+          {
+            "label": "fynkel shadow",
+            "channel": "Vertex",
+            "encoders": 160,
+            "medianActiveMs": 0.34658350000000004,
+            "totalActiveMs": 60.729378
+          },
+          {
+            "label": "fynkel post",
+            "channel": "Fragment",
+            "encoders": 83,
+            "medianActiveMs": 0.697125,
+            "totalActiveMs": 60.195116999999996
+          },
+          {
+            "label": "fynkel AO depth resolve",
+            "channel": "Fragment",
+            "encoders": 91,
+            "medianActiveMs": 0.385667,
+            "totalActiveMs": 40.171289
+          },
+          {
+            "label": "fynkel shadow",
+            "channel": "Fragment",
+            "encoders": 157,
+            "medianActiveMs": 0.180458,
+            "totalActiveMs": 33.297125
+          },
+          {
+            "label": "Blit Command 0",
+            "channel": "Compute",
+            "encoders": 353,
+            "medianActiveMs": 0.037667,
+            "totalActiveMs": 22.317964
+          },
+          {
+            "label": "fynkel scene",
+            "channel": "Vertex",
+            "encoders": 84,
+            "medianActiveMs": 0.2534165,
+            "totalActiveMs": 21.345457
+          },
+          {
+            "label": "fynkel bloom up",
+            "channel": "Fragment",
+            "encoders": 415,
+            "medianActiveMs": 0.013833,
+            "totalActiveMs": 19.819864
+          },
+          {
+            "label": "fynkel depth prepass",
+            "channel": "Vertex",
+            "encoders": 92,
+            "medianActiveMs": 0.080479,
+            "totalActiveMs": 8.662
+          },
+          {
+            "label": "fynkel bloom up",
+            "channel": "Vertex",
+            "encoders": 420,
+            "medianActiveMs": 0.0135,
+            "totalActiveMs": 5.449579
+          },
+          {
+            "label": "fynkel bloom down",
+            "channel": "Vertex",
+            "encoders": 420,
+            "medianActiveMs": 0.0123125,
+            "totalActiveMs": 4.771171
+          },
+          {
+            "label": "fynkel post",
+            "channel": "Vertex",
+            "encoders": 84,
+            "medianActiveMs": 0.0259585,
+            "totalActiveMs": 1.991165
+          },
+          {
+            "label": "fynkel bloom prefilter",
+            "channel": "Vertex",
+            "encoders": 84,
+            "medianActiveMs": 0.0189165,
+            "totalActiveMs": 1.508591
+          },
+          {
+            "label": "fynkel AO depth resolve",
+            "channel": "Vertex",
+            "encoders": 92,
+            "medianActiveMs": 0.007625,
+            "totalActiveMs": 0.839294
+          },
+          {
+            "label": "fynkel ao",
+            "channel": "Vertex",
+            "encoders": 84,
+            "medianActiveMs": 0.0074795,
+            "totalActiveMs": 0.747667
+          }
+        ]
+      }
+    }
+  ]
+}

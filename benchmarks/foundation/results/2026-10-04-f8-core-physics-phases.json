@@ -1,0 +1,95 @@
+{
+  "captureId": "7bd900fc8ac24054b9642fd3898359f4",
+  "samples": 480,
+  "diagnosticOverhead": true,
+  "sustainedQualification": false,
+  "phases": {
+    "sync_ns": {
+      "medianUs": 1667.5625,
+      "p95Us": 2009.0
+    },
+    "commands_ns": {
+      "medianUs": 0.167,
+      "p95Us": 0.834
+    },
+    "characters_ns": {
+      "medianUs": 0.042,
+      "p95Us": 0.209
+    },
+    "solver_ns": {
+      "medianUs": 999.562,
+      "p95Us": 1213.166
+    },
+    "writeback_ns": {
+      "medianUs": 157.875,
+      "p95Us": 189.541
+    },
+    "events_ns": {
+      "medianUs": 121.688,
+      "p95Us": 149.875
+    },
+    "total_ns": {
+      "medianUs": 2972.3334999999997,
+      "p95Us": 3421.416
+    },
+    "collect_ns": {
+      "medianUs": 169.2705,
+      "p95Us": 241.833
+    },
+    "hierarchy_ns": {
+      "medianUs": 226.833,
+      "p95Us": 266.125
+    },
+    "classify_ns": {
+      "medianUs": 681.396,
+      "p95Us": 928.541
+    },
+    "apply_ns": {
+      "medianUs": 570.875,
+      "p95Us": 747.459
+    },
+    "propagation_ns": {
+      "medianUs": 1134.938,
+      "p95Us": 1360.5
+    },
+    "core_adapter_ns": {
+      "medianUs": 2972.3955,
+      "p95Us": 3421.5
+    },
+    "publication_ns": {
+      "medianUs": 1.125,
+      "p95Us": 3.291
+    },
+    "core_total_ns": {
+      "medianUs": 4129.6875,
+      "p95Us": 4736.25
+    }
+  },
+  "systems": {
+    "physics": {
+      "medianUs": 4129.5,
+      "p95Us": 4736
+    },
+    "step": {
+      "medianUs": 6835.0,
+      "p95Us": 7803
+    }
+  },
+  "schedulerOutsideCore": {
+    "medianUs": -0.29100000000016735,
+    "p95Us": 0.20799999999962893
+  },
+  "thermal": [
+    "nominal"
+  ],
+  "stop": [
+    {
+      "time": "2026-10-04T14:12:19.253527Z",
+      "elapsedMs": 8022,
+      "event": "stop",
+      "reason": "deadline"
+    }
+  ],
+  "terminatedExactPid": 5041,
+  "interpretation": "Propagation dominates the core physics residual. Core adapter includes the nested physics adapter phases; do not add nested totals. Scheduler residual is subject to whole-microsecond truncation."
+}

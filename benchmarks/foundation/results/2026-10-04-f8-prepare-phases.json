@@ -1,0 +1,155 @@
+{
+  "scope": "One eight-second instrumented dense-5000 live diagnostic, medium, 1320x2868. Acquisition is not physical display presentation.",
+  "runtimeOptimization": false,
+  "sustainedQualification": false,
+  "captureId": "6b955f1e794c4f8bbcba14123a21091f",
+  "frameworkSha256": {
+    "Frameworks/App.framework/App": "99f9051f20573d17d71774837af020cbeecd699c685953eda9b9f5042498bd13",
+    "Frameworks/Flutter.framework/Flutter": "4dd7513d7d2f27ab8b75ef9151311af588441725614eead63465f886fa784189",
+    "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "8e62f0a4f902da05fa8650de653952ddaaded57f4c4c4a7f3405e492a2cadd9f",
+    "Frameworks/objective_c.framework/objective_c": "96c78f4f1c0a540f58735a3597c77db456d2645909daf5a7fb9866af8c5a02bc"
+  },
+  "terminatedExactPid": 6843,
+  "thermal": [
+    "nominal"
+  ],
+  "freshAcquisitionsPerSecond": 42.210148265947346,
+  "prepareCorrelation": {
+    "scope": "Disjoint elapsed CPU phases, nested inside prepare; includes upload calls and waits, not GPU execution. Medians are not additive.",
+    "frames": 347,
+    "outerRemainderUs": {
+      "count": 347,
+      "mean": 1.2939481268011528,
+      "p50": 1,
+      "p95": 2,
+      "p99": 2,
+      "maximum": 13
+    },
+    "outerRemainderTotalMs": 0.449,
+    "phasesUs": {
+      "setup": {
+        "count": 347,
+        "mean": 213.61095100864554,
+        "p50": 181,
+        "p95": 230,
+        "p99": 260,
+        "maximum": 12117
+      },
+      "cameraEnvironment": {
+        "count": 347,
+        "mean": 2.2420749279538903,
+        "p50": 2,
+        "p95": 4,
+        "p99": 6,
+        "maximum": 9
+      },
+      "visibility": {
+        "count": 347,
+        "mean": 739.4755043227666,
+        "p50": 632,
+        "p95": 1262,
+        "p99": 1381,
+        "maximum": 1510
+      },
+      "lightPool": {
+        "count": 347,
+        "mean": 1.5994236311239194,
+        "p50": 2,
+        "p95": 3,
+        "p99": 3,
+        "maximum": 5
+      },
+      "instances": {
+        "count": 347,
+        "mean": 1212.9250720461096,
+        "p50": 1209,
+        "p95": 1494,
+        "p99": 1641,
+        "maximum": 1838
+      },
+      "batchUploadsOutline": {
+        "count": 347,
+        "mean": 340.64841498559076,
+        "p50": 337,
+        "p95": 445,
+        "p99": 495,
+        "maximum": 626
+      },
+      "shadowPostUniforms": {
+        "count": 347,
+        "mean": 16.32564841498559,
+        "p50": 16,
+        "p95": 22,
+        "p99": 25,
+        "maximum": 35
+      },
+      "overlay": {
+        "count": 347,
+        "mean": 0.2017291066282421,
+        "p50": 0,
+        "p95": 1,
+        "p99": 1,
+        "maximum": 1
+      },
+      "readinessAccounting": {
+        "count": 347,
+        "mean": 200.62247838616716,
+        "p50": 198,
+        "p95": 238,
+        "p99": 256,
+        "maximum": 257
+      }
+    },
+    "totalsMs": {
+      "setup": 74.123,
+      "cameraEnvironment": 0.778,
+      "visibility": 256.598,
+      "lightPool": 0.555,
+      "instances": 420.885,
+      "batchUploadsOutline": 118.205,
+      "shadowPostUniforms": 5.665,
+      "overlay": 0.07,
+      "readinessAccounting": 69.616
+    }
+  },
+  "stagesUs": {
+    "extract": {
+      "count": 347,
+      "mean": 1528.8530259365994,
+      "p50": 1517,
+      "p95": 1796,
+      "p99": 1925,
+      "maximum": 2828
+    },
+    "prepare": {
+      "count": 347,
+      "mean": 2728.9452449567725,
+      "p50": 2655,
+      "p95": 3426,
+      "p99": 3750,
+      "maximum": 14675
+    },
+    "encode": {
+      "count": 347,
+      "mean": 34.88472622478386,
+      "p50": 33,
+      "p95": 46,
+      "p99": 71,
+      "maximum": 284
+    }
+  },
+  "instanceAndVisibilityShare": 0.7154414622195188,
+  "checks": {
+    "renderUnitTests": 29,
+    "appleUnitTests": 5,
+    "pythonTests": 22,
+    "clippyWarningsDenied": "pass",
+    "iOSReleaseBuild": "pass",
+    "oldTraceCompatibility": "pass"
+  },
+  "pending": [
+    "Cooled reverse-order extraction throughput comparison",
+    "Instance-construction optimization measured against these phases",
+    "Sustained thermal and 60/120 FPS qualification"
+  ]
+}

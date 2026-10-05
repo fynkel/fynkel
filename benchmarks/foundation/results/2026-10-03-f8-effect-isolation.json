@@ -1,0 +1,2264 @@
+{
+  "status": "Candidate rejected: repeatable frozen GPU improvement did not establish a reliable live-scene improvement. Original shader restored and installed, stopped.",
+  "scope": "Ten bounded eight-second dense-5000 iPhone 16 Pro Max diagnostics; not sustained qualification or physical display FPS. GPU summaries are medians of seven per-window p50s after skipping startup, not pooled frame medians.",
+  "candidateFingerprints": {
+    "shaderSha256": "d08f027fa8f17c763e397948ec4bb0ea3977dd9f0fb7d0ff8d7abad32d5522d7",
+    "nativeSha256": "6314becadb016311164b613982036001825fea277274277a6aba288b79afe9cf"
+  },
+  "retainedShaderSha256": "0189395230f36553528f49830c2e2f7fbb12f306ce4ebb3f92ecd2008270e427",
+  "validation": {
+    "rendererUnitTests": 29,
+    "rendererUnitIgnored": 1,
+    "baselineAndCandidateShadingTestsEach": 53,
+    "shadingIgnoredEach": 2,
+    "identicalImages": 63,
+    "pythonTests": 14,
+    "clippy": "passed",
+    "dartAnalyze": "passed",
+    "iosBuild": "passed",
+    "restoredAppInstall": "passed"
+  },
+  "projectProfiles": {
+    "default": "medium",
+    "profiles": {
+      "low": {
+        "shadows": false,
+        "msaa": 1,
+        "renderScale": 0.75,
+        "anisotropy": 1
+      },
+      "medium": {
+        "shadowResolution": 2048,
+        "msaa": 4
+      },
+      "high": {
+        "shadowResolution": 4096,
+        "msaa": 4,
+        "anisotropy": 16,
+        "renderScale": 1.5
+      },
+      "medium-no-ao": {
+        "shadowResolution": 2048,
+        "msaa": 4,
+        "ambientOcclusion": false,
+        "contactShadows": true
+      },
+      "medium-no-contact": {
+        "shadowResolution": 2048,
+        "msaa": 4,
+        "ambientOcclusion": true,
+        "contactShadows": false
+      },
+      "medium-no-screen-space": {
+        "shadowResolution": 2048,
+        "msaa": 4,
+        "ambientOcclusion": false,
+        "contactShadows": false
+      }
+    }
+  },
+  "runs": {
+    "f8-effects-medium": {
+      "captureId": "e3947bf56ee44c4dae380101028ea7e9",
+      "status": "diagnostic-complete",
+      "options": {
+        "time": "2026-10-03T20:08:38.184057Z",
+        "elapsedMs": 0,
+        "event": "start",
+        "captureId": "e3947bf56ee44c4dae380101028ea7e9",
+        "quality": "medium",
+        "timeline": true,
+        "limitSeconds": 8,
+        "sustainedQualification": false,
+        "cpuReadback": false,
+        "cpuTickReadback": false,
+        "acquireWaitUs": 3000,
+        "bufferCount": 4,
+        "resolutionScale": 1.0,
+        "frozenScene": true,
+        "settleTicks": 120
+      },
+      "terminatedExactPid": 3256,
+      "executableSha256": "5d7031056ba99606230e35483d8b7141472f6426ca7db6e950878e48bebbcce6",
+      "frameworkSha256": null,
+      "thermalStates": [
+        "nominal"
+      ],
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "visibleInstances": [
+        1767
+      ],
+      "statsWindowAcquisitionsPerSecond": 49.84898506092133,
+      "medianOfSteadyWindowP50Ms": {
+        "gpu_frame": 19.386,
+        "gpu_ao": 10.547,
+        "simulate": 0.028,
+        "render": 0.055,
+        "work": 0.082
+      },
+      "screenSpaceMedianUs": null,
+      "analysis": {
+        "scope": "eight-second diagnostic; acquisition is not physical display presentation",
+        "options": {
+          "time": "2026-10-03T20:08:38.184057Z",
+          "elapsedMs": 0,
+          "event": "start",
+          "captureId": "e3947bf56ee44c4dae380101028ea7e9",
+          "quality": "medium",
+          "timeline": true,
+          "limitSeconds": 8,
+          "sustainedQualification": false,
+          "cpuReadback": false,
+          "cpuTickReadback": false,
+          "acquireWaitUs": 3000,
+          "bufferCount": 4,
+          "resolutionScale": 1.0,
+          "frozenScene": true,
+          "settleTicks": 120
+        },
+        "seconds": 8.005544,
+        "hostFrames": 953,
+        "nativeEvents": {
+          "reserve": 403,
+          "submit_begin": 403,
+          "submitted": 403,
+          "stages": 403,
+          "acquire_call": 408,
+          "acquire_begin": 408,
+          "acquire_repeat": 7,
+          "drop": 550,
+          "ready": 402,
+          "acquire_new": 401,
+          "notified": 402
+        },
+        "matchedAttempts": 953,
+        "renderResults": {
+          "0": 101,
+          "1": 101,
+          "2": 101,
+          "3": 100,
+          "-1": 550
+        },
+        "freshAcquisitionsPerSecond": 50.09028743081045,
+        "hostSimulationUs": {
+          "count": 953,
+          "mean": 29.896117523609654,
+          "p50": 28,
+          "p95": 52,
+          "p99": 63,
+          "maximum": 124
+        },
+        "hostRenderUs": {
+          "count": 953,
+          "mean": 2220.458551941238,
+          "p50": 55,
+          "p95": 5384,
+          "p99": 5994,
+          "maximum": 21079
+        },
+        "hostWorkUs": {
+          "count": 953,
+          "mean": 2250.5655823714587,
+          "p50": 102,
+          "p95": 5413,
+          "p99": 6023,
+          "maximum": 21204
+        },
+        "hostStartIntervalUs": {
+          "count": 952,
+          "mean": 8403.887605042017,
+          "p50": 8333.0,
+          "p95": 8405,
+          "p99": 8453,
+          "maximum": 25100
+        },
+        "simulationSteps": {
+          "0": 953
+        },
+        "simulationTotalMs": 28.491,
+        "renderTotalMs": 2116.097,
+        "droppedRenderCpuMs": 28.923,
+        "dropOccupancy": {
+          "0,4,0,0,0": 3,
+          "0,3,0,1,0": 2,
+          "0,2,1,1,0": 1,
+          "0,2,0,1,1": 289,
+          "0,1,1,1,1": 255
+        },
+        "renderRequestToAcquisitionUs": {
+          "count": 403,
+          "mean": 33806.96029776675,
+          "p50": 30546,
+          "p95": 41881,
+          "p99": 42196,
+          "maximum": 102438
+        },
+        "submitToCompletionUs": {
+          "count": 403,
+          "mean": 25436.548387096773,
+          "p50": 23740,
+          "p95": 31336,
+          "p99": 31795,
+          "maximum": 86491
+        },
+        "completionToNotifyReturnUs": {
+          "count": 402,
+          "mean": 69.33830845771145,
+          "p50": 65.0,
+          "p95": 94,
+          "p99": 120,
+          "maximum": 305
+        },
+        "completionToAcquisitionUs": {
+          "count": 402,
+          "mean": 3307.9154228855723,
+          "p50": 2309.0,
+          "p95": 8343,
+          "p99": 8404,
+          "maximum": 8426
+        },
+        "acquisitionIntervalUs": {
+          "count": 400,
+          "mean": 19724.46,
+          "p50": 19781.5,
+          "p95": 27725,
+          "p99": 27976,
+          "maximum": 28387
+        },
+        "acquisitionCallUs": {
+          "count": 408,
+          "mean": 163.1764705882353,
+          "p50": 96.0,
+          "p95": 134,
+          "p99": 3190,
+          "maximum": 3530
+        },
+        "waitingWithCompletedFrameUs": {
+          "count": 400,
+          "mean": 0,
+          "p50": 0.0,
+          "p95": 0,
+          "p99": 0,
+          "maximum": 0
+        },
+        "stagesUs": {
+          "extract": {
+            "count": 403,
+            "mean": 1977.5707196029778,
+            "p50": 1914,
+            "p95": 2218,
+            "p99": 2410,
+            "maximum": 3153
+          },
+          "prepare": {
+            "count": 403,
+            "mean": 2539.047146401985,
+            "p50": 2477,
+            "p95": 2743,
+            "p99": 2956,
+            "maximum": 14966
+          },
+          "encode": {
+            "count": 403,
+            "mean": 26.483870967741936,
+            "p50": 25,
+            "p95": 32,
+            "p99": 39,
+            "maximum": 97
+          }
+        },
+        "flutterFramesCovered": 940,
+        "flutterLastRasterUs": 1791058127371890,
+        "flutterBuildUs": {
+          "count": 940,
+          "mean": 2241.4170212765957,
+          "p50": 112.5,
+          "p95": 5421,
+          "p99": 5912,
+          "maximum": 16892
+        },
+        "flutterRasterUs": {
+          "count": 940,
+          "mean": 891.281914893617,
+          "p50": 178.0,
+          "p95": 5617,
+          "p99": 6218,
+          "maximum": 21376
+        },
+        "flutterRasterQueueUs": {
+          "count": 940,
+          "mean": 20.626595744680852,
+          "p50": 14.0,
+          "p95": 44,
+          "p99": 70,
+          "maximum": 100
+        },
+        "flutterVsyncToBuildUs": {
+          "count": 940,
+          "mean": 49.4031914893617,
+          "p50": 50.0,
+          "p95": 65,
+          "p99": 84,
+          "maximum": 3574
+        }
+      }
+    },
+    "f8-effects-no-ao": {
+      "captureId": "4fa6492e65af49e3b0c7ce36f4914a58",
+      "status": "diagnostic-complete",
+      "options": {
+        "time": "2026-10-03T20:09:21.431158Z",
+        "elapsedMs": 0,
+        "event": "start",
+        "captureId": "4fa6492e65af49e3b0c7ce36f4914a58",
+        "quality": "medium-no-ao",
+        "timeline": true,
+        "limitSeconds": 8,
+        "sustainedQualification": false,
+        "cpuReadback": false,
+        "cpuTickReadback": false,
+        "acquireWaitUs": 3000,
+        "bufferCount": 4,
+        "resolutionScale": 1.0,
+        "frozenScene": true,
+        "settleTicks": 120
+      },
+      "terminatedExactPid": 3257,
+      "executableSha256": "5d7031056ba99606230e35483d8b7141472f6426ca7db6e950878e48bebbcce6",
+      "frameworkSha256": null,
+      "thermalStates": [
+        "nominal"
+      ],
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "visibleInstances": [
+        1767
+      ],
+      "statsWindowAcquisitionsPerSecond": 59.24614159502862,
+      "medianOfSteadyWindowP50Ms": {
+        "gpu_frame": 15.694,
+        "gpu_ao": 7.399,
+        "simulate": 0.028,
+        "render": 4.803,
+        "work": 4.831
+      },
+      "screenSpaceMedianUs": null,
+      "analysis": {
+        "scope": "eight-second diagnostic; acquisition is not physical display presentation",
+        "options": {
+          "time": "2026-10-03T20:09:21.431158Z",
+          "elapsedMs": 0,
+          "event": "start",
+          "captureId": "4fa6492e65af49e3b0c7ce36f4914a58",
+          "quality": "medium-no-ao",
+          "timeline": true,
+          "limitSeconds": 8,
+          "sustainedQualification": false,
+          "cpuReadback": false,
+          "cpuTickReadback": false,
+          "acquireWaitUs": 3000,
+          "bufferCount": 4,
+          "resolutionScale": 1.0,
+          "frozenScene": true,
+          "settleTicks": 120
+        },
+        "seconds": 8.000481,
+        "hostFrames": 959,
+        "nativeEvents": {
+          "reserve": 478,
+          "submit_begin": 478,
+          "submitted": 478,
+          "stages": 478,
+          "acquire_call": 482,
+          "acquire_begin": 482,
+          "acquire_repeat": 6,
+          "drop": 481,
+          "ready": 476,
+          "acquire_new": 476,
+          "notified": 476
+        },
+        "matchedAttempts": 959,
+        "renderResults": {
+          "0": 120,
+          "1": 120,
+          "2": 119,
+          "3": 119,
+          "-1": 481
+        },
+        "freshAcquisitionsPerSecond": 59.49642277758049,
+        "hostSimulationUs": {
+          "count": 959,
+          "mean": 29.229405630865486,
+          "p50": 29,
+          "p95": 35,
+          "p99": 45,
+          "maximum": 202
+        },
+        "hostRenderUs": {
+          "count": 959,
+          "mean": 2600.713242961418,
+          "p50": 911,
+          "p95": 5440,
+          "p99": 5568,
+          "maximum": 20495
+        },
+        "hostWorkUs": {
+          "count": 959,
+          "mean": 2630.113660062565,
+          "p50": 941,
+          "p95": 5468,
+          "p99": 5594,
+          "maximum": 20620
+        },
+        "hostStartIntervalUs": {
+          "count": 958,
+          "mean": 8351.153444676409,
+          "p50": 8334.0,
+          "p95": 8393,
+          "p99": 8409,
+          "maximum": 24886
+        },
+        "simulationSteps": {
+          "0": 959
+        },
+        "simulationTotalMs": 28.031,
+        "renderTotalMs": 2494.084,
+        "droppedRenderCpuMs": 26.713,
+        "dropOccupancy": {
+          "0,4,0,0,0": 2,
+          "0,3,0,1,0": 3,
+          "0,2,1,1,0": 1,
+          "0,2,0,1,1": 238,
+          "0,1,1,1,1": 237
+        },
+        "renderRequestToAcquisitionUs": {
+          "count": 478,
+          "mean": 28180.70711297071,
+          "p50": 30008.0,
+          "p95": 30687,
+          "p99": 30826,
+          "maximum": 80363
+        },
+        "submitToCompletionUs": {
+          "count": 478,
+          "mean": 19848.121338912133,
+          "p50": 21955.0,
+          "p95": 22783,
+          "p99": 23304,
+          "maximum": 68730
+        },
+        "completionToNotifyReturnUs": {
+          "count": 476,
+          "mean": 69.00630252100841,
+          "p50": 62.0,
+          "p95": 90,
+          "p99": 101,
+          "maximum": 240
+        },
+        "completionToAcquisitionUs": {
+          "count": 476,
+          "mean": 3263.2121848739494,
+          "p50": 3223.0,
+          "p95": 4203,
+          "p99": 4597,
+          "maximum": 7693
+        },
+        "acquisitionIntervalUs": {
+          "count": 475,
+          "mean": 16681.10947368421,
+          "p50": 16799,
+          "p95": 19925,
+          "p99": 20038,
+          "maximum": 26103
+        },
+        "acquisitionCallUs": {
+          "count": 482,
+          "mean": 146.46058091286307,
+          "p50": 97.0,
+          "p95": 109,
+          "p99": 3485,
+          "maximum": 3494
+        },
+        "waitingWithCompletedFrameUs": {
+          "count": 475,
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "maximum": 0
+        },
+        "stagesUs": {
+          "extract": {
+            "count": 478,
+            "mean": 2021.192468619247,
+            "p50": 2029.0,
+            "p95": 2216,
+            "p99": 2299,
+            "maximum": 3055
+          },
+          "prepare": {
+            "count": 478,
+            "mean": 2538.9330543933056,
+            "p50": 2492.0,
+            "p95": 2680,
+            "p99": 2725,
+            "maximum": 14845
+          },
+          "encode": {
+            "count": 478,
+            "mean": 26.267782426778243,
+            "p50": 25.0,
+            "p95": 32,
+            "p99": 40,
+            "maximum": 76
+          }
+        },
+        "flutterFramesCovered": 943,
+        "flutterLastRasterUs": 1791058170527251,
+        "flutterBuildUs": {
+          "count": 943,
+          "mean": 2618.1081654294803,
+          "p50": 145,
+          "p95": 5474,
+          "p99": 5605,
+          "maximum": 8052
+        },
+        "flutterRasterUs": {
+          "count": 943,
+          "mean": 656.4379639448568,
+          "p50": 188,
+          "p95": 2299,
+          "p99": 2508,
+          "maximum": 7685
+        },
+        "flutterRasterQueueUs": {
+          "count": 943,
+          "mean": 26.72746553552492,
+          "p50": 14,
+          "p95": 64,
+          "p99": 92,
+          "maximum": 1671
+        },
+        "flutterVsyncToBuildUs": {
+          "count": 943,
+          "mean": 58.732767762460234,
+          "p50": 57,
+          "p95": 65,
+          "p99": 78,
+          "maximum": 4072
+        }
+      }
+    },
+    "f8-effects-no-contact": {
+      "captureId": "4af8a1796d674e52aa3aca87322b6d57",
+      "status": "diagnostic-complete",
+      "options": {
+        "time": "2026-10-03T20:09:55.041209Z",
+        "elapsedMs": 0,
+        "event": "start",
+        "captureId": "4af8a1796d674e52aa3aca87322b6d57",
+        "quality": "medium-no-contact",
+        "timeline": true,
+        "limitSeconds": 8,
+        "sustainedQualification": false,
+        "cpuReadback": false,
+        "cpuTickReadback": false,
+        "acquireWaitUs": 3000,
+        "bufferCount": 4,
+        "resolutionScale": 1.0,
+        "frozenScene": true,
+        "settleTicks": 120
+      },
+      "terminatedExactPid": 3258,
+      "executableSha256": "5d7031056ba99606230e35483d8b7141472f6426ca7db6e950878e48bebbcce6",
+      "frameworkSha256": null,
+      "thermalStates": [
+        "nominal"
+      ],
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "visibleInstances": [
+        1767
+      ],
+      "statsWindowAcquisitionsPerSecond": 55.59088804132564,
+      "medianOfSteadyWindowP50Ms": {
+        "gpu_frame": 17.04,
+        "gpu_ao": 9.003,
+        "simulate": 0.029,
+        "render": 0.063,
+        "work": 0.092
+      },
+      "screenSpaceMedianUs": null,
+      "analysis": {
+        "scope": "eight-second diagnostic; acquisition is not physical display presentation",
+        "options": {
+          "time": "2026-10-03T20:09:55.041209Z",
+          "elapsedMs": 0,
+          "event": "start",
+          "captureId": "4af8a1796d674e52aa3aca87322b6d57",
+          "quality": "medium-no-contact",
+          "timeline": true,
+          "limitSeconds": 8,
+          "sustainedQualification": false,
+          "cpuReadback": false,
+          "cpuTickReadback": false,
+          "acquireWaitUs": 3000,
+          "bufferCount": 4,
+          "resolutionScale": 1.0,
+          "frozenScene": true,
+          "settleTicks": 120
+        },
+        "seconds": 8.005536,
+        "hostFrames": 959,
+        "nativeEvents": {
+          "reserve": 449,
+          "submit_begin": 449,
+          "submitted": 449,
+          "stages": 449,
+          "acquire_call": 451,
+          "acquire_begin": 451,
+          "acquire_repeat": 4,
+          "drop": 510,
+          "ready": 447,
+          "acquire_new": 447,
+          "notified": 447
+        },
+        "matchedAttempts": 959,
+        "renderResults": {
+          "0": 113,
+          "1": 112,
+          "2": 112,
+          "3": 112,
+          "-1": 510
+        },
+        "freshAcquisitionsPerSecond": 55.836361238023294,
+        "hostSimulationUs": {
+          "count": 959,
+          "mean": 31.24191866527633,
+          "p50": 29,
+          "p95": 47,
+          "p99": 55,
+          "maximum": 140
+        },
+        "hostRenderUs": {
+          "count": 959,
+          "mean": 2485.1199165797707,
+          "p50": 61,
+          "p95": 5459,
+          "p99": 5706,
+          "maximum": 20674
+        },
+        "hostWorkUs": {
+          "count": 959,
+          "mean": 2516.6204379562046,
+          "p50": 106,
+          "p95": 5485,
+          "p99": 5734,
+          "maximum": 20817
+        },
+        "hostStartIntervalUs": {
+          "count": 958,
+          "mean": 8351.10751565762,
+          "p50": 8336.0,
+          "p95": 8399,
+          "p99": 8432,
+          "maximum": 24882
+        },
+        "simulationSteps": {
+          "0": 959
+        },
+        "simulationTotalMs": 29.961,
+        "renderTotalMs": 2383.23,
+        "droppedRenderCpuMs": 28.979,
+        "dropOccupancy": {
+          "0,4,0,0,0": 1,
+          "0,3,0,1,0": 2,
+          "0,2,1,1,0": 1,
+          "0,2,0,1,1": 122,
+          "0,1,1,1,1": 384
+        },
+        "renderRequestToAcquisitionUs": {
+          "count": 449,
+          "mean": 28459.22271714922,
+          "p50": 25217,
+          "p95": 33552,
+          "p99": 41891,
+          "maximum": 63497
+        },
+        "submitToCompletionUs": {
+          "count": 449,
+          "mean": 20470.88864142539,
+          "p50": 19649,
+          "p95": 27456,
+          "p99": 28897,
+          "maximum": 56125
+        },
+        "completionToNotifyReturnUs": {
+          "count": 447,
+          "mean": 71.87919463087249,
+          "p50": 68,
+          "p95": 107,
+          "p99": 125,
+          "maximum": 415
+        },
+        "completionToAcquisitionUs": {
+          "count": 447,
+          "mean": 2824.9082774049216,
+          "p50": 1704,
+          "p95": 8376,
+          "p99": 8463,
+          "maximum": 8756
+        },
+        "acquisitionIntervalUs": {
+          "count": 446,
+          "mean": 17807.051569506726,
+          "p50": 16683.0,
+          "p95": 25053,
+          "p99": 25090,
+          "maximum": 27631
+        },
+        "acquisitionCallUs": {
+          "count": 451,
+          "mean": 136.31929046563192,
+          "p50": 100,
+          "p95": 112,
+          "p99": 393,
+          "maximum": 3733
+        },
+        "waitingWithCompletedFrameUs": {
+          "count": 446,
+          "mean": 0,
+          "p50": 0.0,
+          "p95": 0,
+          "p99": 0,
+          "maximum": 0
+        },
+        "stagesUs": {
+          "extract": {
+            "count": 449,
+            "mean": 2032.2850779510022,
+            "p50": 2037,
+            "p95": 2209,
+            "p99": 2253,
+            "maximum": 3143
+          },
+          "prepare": {
+            "count": 449,
+            "mean": 2609.893095768374,
+            "p50": 2605,
+            "p95": 2761,
+            "p99": 2903,
+            "maximum": 14827
+          },
+          "encode": {
+            "count": 449,
+            "mean": 26.380846325167038,
+            "p50": 26,
+            "p95": 32,
+            "p99": 37,
+            "maximum": 73
+          }
+        },
+        "flutterFramesCovered": 945,
+        "flutterLastRasterUs": 1791058204159465,
+        "flutterBuildUs": {
+          "count": 945,
+          "mean": 2506.7925925925924,
+          "p50": 116,
+          "p95": 5487,
+          "p99": 5739,
+          "maximum": 8544
+        },
+        "flutterRasterUs": {
+          "count": 945,
+          "mean": 413.9195767195767,
+          "p50": 175,
+          "p95": 3869,
+          "p99": 4894,
+          "maximum": 6053
+        },
+        "flutterRasterQueueUs": {
+          "count": 945,
+          "mean": 26.15343915343915,
+          "p50": 16,
+          "p95": 64,
+          "p99": 102,
+          "maximum": 1101
+        },
+        "flutterVsyncToBuildUs": {
+          "count": 945,
+          "mean": 47.388359788359786,
+          "p50": 38,
+          "p95": 62,
+          "p99": 81,
+          "maximum": 3885
+        }
+      }
+    },
+    "f8-effects-no-screen-space": {
+      "captureId": "95c2ed7fb5ff4f9ea41e56cecc3cc8de",
+      "status": "diagnostic-complete",
+      "options": {
+        "time": "2026-10-03T20:10:37.414027Z",
+        "elapsedMs": 0,
+        "event": "start",
+        "captureId": "95c2ed7fb5ff4f9ea41e56cecc3cc8de",
+        "quality": "medium-no-screen-space",
+        "timeline": true,
+        "limitSeconds": 8,
+        "sustainedQualification": false,
+        "cpuReadback": false,
+        "cpuTickReadback": false,
+        "acquireWaitUs": 3000,
+        "bufferCount": 4,
+        "resolutionScale": 1.0,
+        "frozenScene": true,
+        "settleTicks": 120
+      },
+      "terminatedExactPid": 3260,
+      "executableSha256": "5d7031056ba99606230e35483d8b7141472f6426ca7db6e950878e48bebbcce6",
+      "frameworkSha256": null,
+      "thermalStates": [
+        "nominal"
+      ],
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "visibleInstances": [
+        1767
+      ],
+      "statsWindowAcquisitionsPerSecond": 111.31728198928855,
+      "medianOfSteadyWindowP50Ms": {
+        "gpu_frame": 6.911,
+        "gpu_ao": 0.0,
+        "simulate": 0.027,
+        "render": 3.888,
+        "work": 3.915
+      },
+      "screenSpaceMedianUs": null,
+      "analysis": {
+        "scope": "eight-second diagnostic; acquisition is not physical display presentation",
+        "options": {
+          "time": "2026-10-03T20:10:37.414027Z",
+          "elapsedMs": 0,
+          "event": "start",
+          "captureId": "95c2ed7fb5ff4f9ea41e56cecc3cc8de",
+          "quality": "medium-no-screen-space",
+          "timeline": true,
+          "limitSeconds": 8,
+          "sustainedQualification": false,
+          "cpuReadback": false,
+          "cpuTickReadback": false,
+          "acquireWaitUs": 3000,
+          "bufferCount": 4,
+          "resolutionScale": 1.0,
+          "frozenScene": true,
+          "settleTicks": 120
+        },
+        "seconds": 8.004497,
+        "hostFrames": 958,
+        "nativeEvents": {
+          "reserve": 896,
+          "submit_begin": 896,
+          "submitted": 896,
+          "stages": 896,
+          "acquire_call": 896,
+          "acquire_begin": 896,
+          "acquire_repeat": 2,
+          "ready": 894,
+          "acquire_new": 894,
+          "notified": 894,
+          "drop": 62
+        },
+        "matchedAttempts": 958,
+        "renderResults": {
+          "0": 224,
+          "1": 224,
+          "2": 224,
+          "3": 224,
+          "-1": 62
+        },
+        "freshAcquisitionsPerSecond": 111.68721782268142,
+        "hostSimulationUs": {
+          "count": 958,
+          "mean": 28.046972860125262,
+          "p50": 27.0,
+          "p95": 33,
+          "p99": 41,
+          "maximum": 140
+        },
+        "hostRenderUs": {
+          "count": 958,
+          "mean": 3702.1837160751566,
+          "p50": 3890.0,
+          "p95": 4168,
+          "p99": 4392,
+          "maximum": 20190
+        },
+        "hostWorkUs": {
+          "count": 958,
+          "mean": 3730.445720250522,
+          "p50": 3918.0,
+          "p95": 4200,
+          "p99": 4425,
+          "maximum": 20333
+        },
+        "hostStartIntervalUs": {
+          "count": 957,
+          "mean": 8359.76698014629,
+          "p50": 8334,
+          "p95": 8349,
+          "p99": 8403,
+          "maximum": 24833
+        },
+        "simulationSteps": {
+          "0": 958
+        },
+        "simulationTotalMs": 26.869,
+        "renderTotalMs": 3546.692,
+        "droppedRenderCpuMs": 2.556,
+        "dropOccupancy": {
+          "0,2,1,1,0": 1,
+          "0,1,1,1,1": 61
+        },
+        "renderRequestToAcquisitionUs": {
+          "count": 896,
+          "mean": 13386.377232142857,
+          "p50": 12368.5,
+          "p95": 20897,
+          "p99": 21133,
+          "maximum": 49237
+        },
+        "submitToCompletionUs": {
+          "count": 896,
+          "mean": 7879.397321428572,
+          "p50": 7504.0,
+          "p95": 10290,
+          "p99": 10991,
+          "maximum": 29109
+        },
+        "completionToNotifyReturnUs": {
+          "count": 894,
+          "mean": 51.38926174496644,
+          "p50": 45.0,
+          "p95": 86,
+          "p99": 99,
+          "maximum": 1335
+        },
+        "completionToAcquisitionUs": {
+          "count": 894,
+          "mean": 1629.7404921700224,
+          "p50": 1115.5,
+          "p95": 6638,
+          "p99": 7844,
+          "maximum": 8730
+        },
+        "acquisitionIntervalUs": {
+          "count": 893,
+          "mean": 8899.237402015677,
+          "p50": 8346,
+          "p95": 12553,
+          "p99": 12719,
+          "maximum": 14583
+        },
+        "acquisitionCallUs": {
+          "count": 896,
+          "mean": 89.02678571428571,
+          "p50": 76.0,
+          "p95": 88,
+          "p99": 147,
+          "maximum": 3590
+        },
+        "waitingWithCompletedFrameUs": {
+          "count": 893,
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "maximum": 0
+        },
+        "stagesUs": {
+          "extract": {
+            "count": 896,
+            "mean": 1519.7611607142858,
+            "p50": 1502.0,
+            "p95": 1628,
+            "p99": 1689,
+            "maximum": 3174
+          },
+          "prepare": {
+            "count": 896,
+            "mean": 1966.7299107142858,
+            "p50": 1930.0,
+            "p95": 2078,
+            "p99": 2169,
+            "maximum": 14889
+          },
+          "encode": {
+            "count": 896,
+            "mean": 19.627232142857142,
+            "p50": 18.0,
+            "p95": 28,
+            "p99": 30,
+            "maximum": 60
+          }
+        },
+        "flutterFramesCovered": 945,
+        "flutterLastRasterUs": 1791058246536112,
+        "flutterBuildUs": {
+          "count": 945,
+          "mean": 3737.126984126984,
+          "p50": 3936,
+          "p95": 4190,
+          "p99": 4400,
+          "maximum": 7392
+        },
+        "flutterRasterUs": {
+          "count": 945,
+          "mean": 205.65079365079364,
+          "p50": 179,
+          "p95": 223,
+          "p99": 364,
+          "maximum": 10945
+        },
+        "flutterRasterQueueUs": {
+          "count": 945,
+          "mean": 34.19153439153439,
+          "p50": 27,
+          "p95": 59,
+          "p99": 75,
+          "maximum": 3012
+        },
+        "flutterVsyncToBuildUs": {
+          "count": 945,
+          "mean": 67.93544973544974,
+          "p50": 64,
+          "p95": 69,
+          "p99": 79,
+          "maximum": 4326
+        }
+      }
+    },
+    "f8-white-tiles-candidate": {
+      "captureId": "9b2930985aac4a13b314bff2b813e46e",
+      "status": "diagnostic-complete",
+      "options": {
+        "time": "2026-10-03T20:15:30.936849Z",
+        "elapsedMs": 0,
+        "event": "start",
+        "captureId": "9b2930985aac4a13b314bff2b813e46e",
+        "quality": "medium",
+        "timeline": true,
+        "limitSeconds": 8,
+        "sustainedQualification": false,
+        "cpuReadback": false,
+        "cpuTickReadback": false,
+        "acquireWaitUs": 3000,
+        "bufferCount": 4,
+        "resolutionScale": 1.0,
+        "frozenScene": true,
+        "settleTicks": 120
+      },
+      "terminatedExactPid": 3268,
+      "executableSha256": "a05089fc66b8fcba82fc99c98319b78fc88722ee9cd12a7d52d89883bc8845b1",
+      "frameworkSha256": null,
+      "thermalStates": [
+        "nominal"
+      ],
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "visibleInstances": [
+        1767
+      ],
+      "statsWindowAcquisitionsPerSecond": 48.47294603699311,
+      "medianOfSteadyWindowP50Ms": {
+        "gpu_frame": 18.15,
+        "gpu_ao": 10.016,
+        "simulate": 0.028,
+        "render": 0.054,
+        "work": 0.083
+      },
+      "screenSpaceMedianUs": {
+        "depthUs": 559.0,
+        "resolveUs": 1670.5,
+        "estimateUs": 7398.5,
+        "blurUs": 2486.5,
+        "totalUs": 9991.0
+      },
+      "analysis": {
+        "scope": "eight-second diagnostic; acquisition is not physical display presentation",
+        "options": {
+          "time": "2026-10-03T20:15:30.936849Z",
+          "elapsedMs": 0,
+          "event": "start",
+          "captureId": "9b2930985aac4a13b314bff2b813e46e",
+          "quality": "medium",
+          "timeline": true,
+          "limitSeconds": 8,
+          "sustainedQualification": false,
+          "cpuReadback": false,
+          "cpuTickReadback": false,
+          "acquireWaitUs": 3000,
+          "bufferCount": 4,
+          "resolutionScale": 1.0,
+          "frozenScene": true,
+          "settleTicks": 120
+        },
+        "seconds": 7.997441,
+        "hostFrames": 956,
+        "nativeEvents": {
+          "reserve": 407,
+          "submit_begin": 407,
+          "submitted": 407,
+          "stages": 407,
+          "acquire_call": 411,
+          "acquire_begin": 411,
+          "acquire_repeat": 6,
+          "drop": 549,
+          "ready": 405,
+          "acquire_new": 405,
+          "notified": 405
+        },
+        "matchedAttempts": 956,
+        "renderResults": {
+          "0": 102,
+          "1": 102,
+          "2": 102,
+          "3": 101,
+          "-1": 549
+        },
+        "freshAcquisitionsPerSecond": 50.64119885348325,
+        "hostSimulationUs": {
+          "count": 956,
+          "mean": 30.847280334728033,
+          "p50": 29.0,
+          "p95": 44,
+          "p99": 71,
+          "maximum": 170
+        },
+        "hostRenderUs": {
+          "count": 956,
+          "mean": 2303.865062761506,
+          "p50": 61.0,
+          "p95": 5974,
+          "p99": 7043,
+          "maximum": 20867
+        },
+        "hostWorkUs": {
+          "count": 956,
+          "mean": 2334.8880753138073,
+          "p50": 93.5,
+          "p95": 6030,
+          "p99": 7075,
+          "maximum": 21006
+        },
+        "hostStartIntervalUs": {
+          "count": 955,
+          "mean": 8374.20104712042,
+          "p50": 8334,
+          "p95": 8401,
+          "p99": 8447,
+          "maximum": 21987
+        },
+        "simulationSteps": {
+          "0": 956
+        },
+        "simulationTotalMs": 29.49,
+        "renderTotalMs": 2202.495,
+        "droppedRenderCpuMs": 30.503,
+        "dropOccupancy": {
+          "0,4,0,0,0": 2,
+          "0,3,0,1,0": 2,
+          "0,2,1,1,0": 1,
+          "0,2,0,1,1": 282,
+          "0,1,1,1,1": 262
+        },
+        "renderRequestToAcquisitionUs": {
+          "count": 407,
+          "mean": 33442.9828009828,
+          "p50": 30633,
+          "p95": 41892,
+          "p99": 42167,
+          "maximum": 91723
+        },
+        "submitToCompletionUs": {
+          "count": 407,
+          "mean": 24149.184275184274,
+          "p50": 22255,
+          "p95": 30448,
+          "p99": 30798,
+          "maximum": 74042
+        },
+        "completionToNotifyReturnUs": {
+          "count": 405,
+          "mean": 75.09135802469136,
+          "p50": 67,
+          "p95": 96,
+          "p99": 155,
+          "maximum": 1720
+        },
+        "completionToAcquisitionUs": {
+          "count": 405,
+          "mean": 4054.9061728395063,
+          "p50": 3535,
+          "p95": 8141,
+          "p99": 8383,
+          "maximum": 10456
+        },
+        "acquisitionIntervalUs": {
+          "count": 404,
+          "mean": 19578.326732673268,
+          "p50": 19637.5,
+          "p95": 26296,
+          "p99": 27113,
+          "maximum": 29141
+        },
+        "acquisitionCallUs": {
+          "count": 411,
+          "mean": 170.50851581508516,
+          "p50": 100,
+          "p95": 139,
+          "p99": 3483,
+          "maximum": 4164
+        },
+        "waitingWithCompletedFrameUs": {
+          "count": 404,
+          "mean": 0,
+          "p50": 0.0,
+          "p95": 0,
+          "p99": 0,
+          "maximum": 0
+        },
+        "stagesUs": {
+          "extract": {
+            "count": 407,
+            "mean": 2068.083538083538,
+            "p50": 2034,
+            "p95": 2489,
+            "p99": 2736,
+            "maximum": 3084
+          },
+          "prepare": {
+            "count": 407,
+            "mean": 2648.3980343980343,
+            "p50": 2524,
+            "p95": 3147,
+            "p99": 3505,
+            "maximum": 14922
+          },
+          "encode": {
+            "count": 407,
+            "mean": 27.14987714987715,
+            "p50": 26,
+            "p95": 34,
+            "p99": 42,
+            "maximum": 93
+          }
+        },
+        "flutterFramesCovered": 942,
+        "flutterLastRasterUs": 1791058540337943,
+        "flutterBuildUs": {
+          "count": 942,
+          "mean": 2322.2908704883225,
+          "p50": 102.0,
+          "p95": 5915,
+          "p99": 7088,
+          "maximum": 12986
+        },
+        "flutterRasterUs": {
+          "count": 942,
+          "mean": 711.7165605095541,
+          "p50": 176.0,
+          "p95": 5370,
+          "p99": 5721,
+          "maximum": 8196
+        },
+        "flutterRasterQueueUs": {
+          "count": 942,
+          "mean": 28.447983014861997,
+          "p50": 16.0,
+          "p95": 63,
+          "p99": 88,
+          "maximum": 4139
+        },
+        "flutterVsyncToBuildUs": {
+          "count": 942,
+          "mean": 52.18895966029724,
+          "p50": 54.0,
+          "p95": 66,
+          "p99": 81,
+          "maximum": 3875
+        }
+      }
+    },
+    "f8-white-tiles-control": {
+      "captureId": "f9c02dfb51294e07b5f90538cbe44d9f",
+      "status": "diagnostic-complete",
+      "options": {
+        "time": "2026-10-03T20:17:30.913614Z",
+        "elapsedMs": 0,
+        "event": "start",
+        "captureId": "f9c02dfb51294e07b5f90538cbe44d9f",
+        "quality": "medium",
+        "timeline": true,
+        "limitSeconds": 8,
+        "sustainedQualification": false,
+        "cpuReadback": false,
+        "cpuTickReadback": false,
+        "acquireWaitUs": 3000,
+        "bufferCount": 4,
+        "resolutionScale": 1.0,
+        "frozenScene": true,
+        "settleTicks": 120
+      },
+      "terminatedExactPid": 3272,
+      "executableSha256": "05b050d01ca42006a347f71178456359562bbe6d85437a8a8d7ff6bc42a8dcb7",
+      "frameworkSha256": {
+        "Frameworks/App.framework/App": "42e67056e11ebf911f43417b01d73346205acf8a7203b63716a7de67f8ea9bce",
+        "Frameworks/Flutter.framework/Flutter": "8ff73da8ab18f0f29deb2b21c271c9abbae1b93de7160cbade8b125a7e1550d0",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "7a98d8f88c2558c42d72d1aa15d6dd714435d3d7b9048a4f903c1f0d246ae7c3",
+        "Frameworks/objective_c.framework/objective_c": "c035a70fee761b850759c23d29804c39a5168a2d49e5d24614fc586a6dc2edc9"
+      },
+      "thermalStates": [
+        "nominal"
+      ],
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "visibleInstances": [
+        1767
+      ],
+      "statsWindowAcquisitionsPerSecond": 50.116029230767694,
+      "medianOfSteadyWindowP50Ms": {
+        "gpu_frame": 19.404,
+        "gpu_ao": 10.541,
+        "simulate": 0.027,
+        "render": 0.051,
+        "work": 0.078
+      },
+      "screenSpaceMedianUs": {
+        "depthUs": 549.0,
+        "resolveUs": 1621.0,
+        "estimateUs": 7355.5,
+        "blurUs": 2996.5,
+        "totalUs": 10532.5
+      },
+      "analysis": {
+        "scope": "eight-second diagnostic; acquisition is not physical display presentation",
+        "options": {
+          "time": "2026-10-03T20:17:30.913614Z",
+          "elapsedMs": 0,
+          "event": "start",
+          "captureId": "f9c02dfb51294e07b5f90538cbe44d9f",
+          "quality": "medium",
+          "timeline": true,
+          "limitSeconds": 8,
+          "sustainedQualification": false,
+          "cpuReadback": false,
+          "cpuTickReadback": false,
+          "acquireWaitUs": 3000,
+          "bufferCount": 4,
+          "resolutionScale": 1.0,
+          "frozenScene": true,
+          "settleTicks": 120
+        },
+        "seconds": 8.00619,
+        "hostFrames": 959,
+        "nativeEvents": {
+          "reserve": 404,
+          "submit_begin": 404,
+          "submitted": 404,
+          "stages": 404,
+          "acquire_call": 406,
+          "acquire_begin": 406,
+          "acquire_repeat": 4,
+          "drop": 555,
+          "ready": 403,
+          "acquire_new": 402,
+          "notified": 403
+        },
+        "matchedAttempts": 959,
+        "renderResults": {
+          "0": 101,
+          "1": 101,
+          "2": 101,
+          "3": 101,
+          "-1": 555
+        },
+        "freshAcquisitionsPerSecond": 50.21114912336579,
+        "hostSimulationUs": {
+          "count": 959,
+          "mean": 31.221063607924922,
+          "p50": 28,
+          "p95": 55,
+          "p99": 70,
+          "maximum": 138
+        },
+        "hostRenderUs": {
+          "count": 959,
+          "mean": 2217.8383733055266,
+          "p50": 61,
+          "p95": 5896,
+          "p99": 6834,
+          "maximum": 20466
+        },
+        "hostWorkUs": {
+          "count": 959,
+          "mean": 2249.2773722627735,
+          "p50": 103,
+          "p95": 5937,
+          "p99": 6865,
+          "maximum": 20606
+        },
+        "hostStartIntervalUs": {
+          "count": 958,
+          "mean": 8351.2369519833,
+          "p50": 8333.0,
+          "p95": 8404,
+          "p99": 8431,
+          "maximum": 24944
+        },
+        "simulationSteps": {
+          "0": 959
+        },
+        "simulationTotalMs": 29.941,
+        "renderTotalMs": 2126.907,
+        "droppedRenderCpuMs": 29.956,
+        "dropOccupancy": {
+          "0,4,0,0,0": 1,
+          "0,3,0,1,0": 2,
+          "0,2,1,1,0": 1,
+          "0,2,0,1,1": 298,
+          "0,1,1,1,1": 253
+        },
+        "renderRequestToAcquisitionUs": {
+          "count": 404,
+          "mean": 33635.36386138614,
+          "p50": 30565.5,
+          "p95": 41851,
+          "p99": 41906,
+          "maximum": 72329
+        },
+        "submitToCompletionUs": {
+          "count": 404,
+          "mean": 25199.63613861386,
+          "p50": 23666.5,
+          "p95": 31431,
+          "p99": 32393,
+          "maximum": 63138
+        },
+        "completionToNotifyReturnUs": {
+          "count": 403,
+          "mean": 71.95037220843672,
+          "p50": 68,
+          "p95": 95,
+          "p99": 125,
+          "maximum": 1038
+        },
+        "completionToAcquisitionUs": {
+          "count": 403,
+          "mean": 3350.483870967742,
+          "p50": 2359,
+          "p95": 7721,
+          "p99": 8361,
+          "maximum": 8486
+        },
+        "acquisitionIntervalUs": {
+          "count": 401,
+          "mean": 19800.952618453866,
+          "p50": 19910,
+          "p95": 27175,
+          "p99": 27846,
+          "maximum": 27938
+        },
+        "acquisitionCallUs": {
+          "count": 406,
+          "mean": 139.81034482758622,
+          "p50": 95.0,
+          "p95": 133,
+          "p99": 973,
+          "maximum": 3505
+        },
+        "waitingWithCompletedFrameUs": {
+          "count": 401,
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "maximum": 0
+        },
+        "stagesUs": {
+          "extract": {
+            "count": 404,
+            "mean": 1998.9381188118812,
+            "p50": 1902.0,
+            "p95": 2477,
+            "p99": 2705,
+            "maximum": 3014
+          },
+          "prepare": {
+            "count": 404,
+            "mean": 2582.7574257425745,
+            "p50": 2468.0,
+            "p95": 3098,
+            "p99": 3469,
+            "maximum": 14775
+          },
+          "encode": {
+            "count": 404,
+            "mean": 26.38118811881188,
+            "p50": 25.0,
+            "p95": 32,
+            "p99": 38,
+            "maximum": 86
+          }
+        },
+        "flutterFramesCovered": 945,
+        "flutterLastRasterUs": 1791058660027077,
+        "flutterBuildUs": {
+          "count": 945,
+          "mean": 2240.467724867725,
+          "p50": 113,
+          "p95": 5932,
+          "p99": 6833,
+          "maximum": 11155
+        },
+        "flutterRasterUs": {
+          "count": 945,
+          "mean": 804.0084656084656,
+          "p50": 176,
+          "p95": 5638,
+          "p99": 5899,
+          "maximum": 7368
+        },
+        "flutterRasterQueueUs": {
+          "count": 945,
+          "mean": 23.006349206349206,
+          "p50": 15,
+          "p95": 40,
+          "p99": 59,
+          "maximum": 2504
+        },
+        "flutterVsyncToBuildUs": {
+          "count": 945,
+          "mean": 56.147089947089945,
+          "p50": 56,
+          "p95": 68,
+          "p99": 86,
+          "maximum": 4143
+        }
+      }
+    },
+    "f8-white-tiles-candidate-repeat": {
+      "captureId": "3658783e7e714dd9a5795ea254e417ca",
+      "status": "diagnostic-complete",
+      "options": {
+        "time": "2026-10-03T20:18:28.928484Z",
+        "elapsedMs": 0,
+        "event": "start",
+        "captureId": "3658783e7e714dd9a5795ea254e417ca",
+        "quality": "medium",
+        "timeline": true,
+        "limitSeconds": 8,
+        "sustainedQualification": false,
+        "cpuReadback": false,
+        "cpuTickReadback": false,
+        "acquireWaitUs": 3000,
+        "bufferCount": 4,
+        "resolutionScale": 1.0,
+        "frozenScene": true,
+        "settleTicks": 120
+      },
+      "terminatedExactPid": 3276,
+      "executableSha256": "a05089fc66b8fcba82fc99c98319b78fc88722ee9cd12a7d52d89883bc8845b1",
+      "frameworkSha256": {
+        "Frameworks/App.framework/App": "9100859a488b627fedcf09af8350b97df8b4e2f0de0e40014a4877fc82386b8e",
+        "Frameworks/Flutter.framework/Flutter": "9408d43dc8d4c71d17f71ba1c3f5b3dbc5c77628df1837d23e2b6cc506def1bd",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "6314becadb016311164b613982036001825fea277274277a6aba288b79afe9cf",
+        "Frameworks/objective_c.framework/objective_c": "ccaf18ff9a7c93b53bd43dc5ce80ef2e2ea284ac23da30f00071287224fbe3a0"
+      },
+      "thermalStates": [
+        "nominal"
+      ],
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "visibleInstances": [
+        1767
+      ],
+      "statsWindowAcquisitionsPerSecond": 49.493831831208034,
+      "medianOfSteadyWindowP50Ms": {
+        "gpu_frame": 18.102,
+        "gpu_ao": 10.0,
+        "simulate": 0.027,
+        "render": 0.055,
+        "work": 0.082
+      },
+      "screenSpaceMedianUs": {
+        "depthUs": 549.0,
+        "resolveUs": 1667.0,
+        "estimateUs": 7375.0,
+        "blurUs": 2487.0,
+        "totalUs": 9986.0
+      },
+      "analysis": {
+        "scope": "eight-second diagnostic; acquisition is not physical display presentation",
+        "options": {
+          "time": "2026-10-03T20:18:28.928484Z",
+          "elapsedMs": 0,
+          "event": "start",
+          "captureId": "3658783e7e714dd9a5795ea254e417ca",
+          "quality": "medium",
+          "timeline": true,
+          "limitSeconds": 8,
+          "sustainedQualification": false,
+          "cpuReadback": false,
+          "cpuTickReadback": false,
+          "acquireWaitUs": 3000,
+          "bufferCount": 4,
+          "resolutionScale": 1.0,
+          "frozenScene": true,
+          "settleTicks": 120
+        },
+        "seconds": 8.000468,
+        "hostFrames": 957,
+        "nativeEvents": {
+          "reserve": 407,
+          "submit_begin": 407,
+          "submitted": 407,
+          "stages": 407,
+          "acquire_call": 408,
+          "acquire_begin": 408,
+          "acquire_repeat": 3,
+          "ready": 406,
+          "notified": 406,
+          "acquire_new": 405,
+          "drop": 550
+        },
+        "matchedAttempts": 957,
+        "renderResults": {
+          "0": 102,
+          "1": 102,
+          "2": 102,
+          "3": 101,
+          "-1": 550
+        },
+        "freshAcquisitionsPerSecond": 50.62203861074127,
+        "hostSimulationUs": {
+          "count": 957,
+          "mean": 29.402298850574713,
+          "p50": 28,
+          "p95": 40,
+          "p99": 65,
+          "maximum": 147
+        },
+        "hostRenderUs": {
+          "count": 957,
+          "mean": 2293.7220480668757,
+          "p50": 61,
+          "p95": 5761,
+          "p99": 7021,
+          "maximum": 20680
+        },
+        "hostWorkUs": {
+          "count": 957,
+          "mean": 2323.3166144200627,
+          "p50": 94,
+          "p95": 5789,
+          "p99": 7054,
+          "maximum": 20829
+        },
+        "hostStartIntervalUs": {
+          "count": 956,
+          "mean": 8368.614016736401,
+          "p50": 8333.0,
+          "p95": 8403,
+          "p99": 8415,
+          "maximum": 24875
+        },
+        "simulationSteps": {
+          "0": 957
+        },
+        "simulationTotalMs": 28.138,
+        "renderTotalMs": 2195.092,
+        "droppedRenderCpuMs": 30.313,
+        "dropOccupancy": {
+          "0,3,0,1,0": 2,
+          "0,2,1,1,0": 1,
+          "0,2,0,1,1": 284,
+          "0,1,1,1,1": 263
+        },
+        "renderRequestToAcquisitionUs": {
+          "count": 407,
+          "mean": 33247.314496314495,
+          "p50": 30619,
+          "p95": 41892,
+          "p99": 41921,
+          "maximum": 58446
+        },
+        "submitToCompletionUs": {
+          "count": 407,
+          "mean": 23897.574938574937,
+          "p50": 22277,
+          "p95": 30260,
+          "p99": 30646,
+          "maximum": 50677
+        },
+        "completionToNotifyReturnUs": {
+          "count": 406,
+          "mean": 79.42364532019704,
+          "p50": 68.0,
+          "p95": 95,
+          "p99": 126,
+          "maximum": 2967
+        },
+        "completionToAcquisitionUs": {
+          "count": 406,
+          "mean": 4130.57881773399,
+          "p50": 3543.0,
+          "p95": 8107,
+          "p99": 8378,
+          "maximum": 9538
+        },
+        "acquisitionIntervalUs": {
+          "count": 404,
+          "mean": 19599.76732673267,
+          "p50": 19635.0,
+          "p95": 26156,
+          "p99": 27195,
+          "maximum": 27546
+        },
+        "acquisitionCallUs": {
+          "count": 408,
+          "mean": 128.25,
+          "p50": 102.0,
+          "p95": 127,
+          "p99": 152,
+          "maximum": 3509
+        },
+        "waitingWithCompletedFrameUs": {
+          "count": 405,
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "maximum": 0
+        },
+        "stagesUs": {
+          "extract": {
+            "count": 407,
+            "mean": 2064.7985257985256,
+            "p50": 2031,
+            "p95": 2467,
+            "p99": 2721,
+            "maximum": 3042
+          },
+          "prepare": {
+            "count": 407,
+            "mean": 2646.275184275184,
+            "p50": 2541,
+            "p95": 3100,
+            "p99": 3499,
+            "maximum": 14922
+          },
+          "encode": {
+            "count": 407,
+            "mean": 26.476658476658475,
+            "p50": 25,
+            "p95": 31,
+            "p99": 41,
+            "maximum": 87
+          }
+        },
+        "flutterFramesCovered": 942,
+        "flutterLastRasterUs": 1791058718199178,
+        "flutterBuildUs": {
+          "count": 942,
+          "mean": 2313.3110403397027,
+          "p50": 102.0,
+          "p95": 5783,
+          "p99": 7066,
+          "maximum": 11544
+        },
+        "flutterRasterUs": {
+          "count": 942,
+          "mean": 719.2696390658174,
+          "p50": 179.0,
+          "p95": 5311,
+          "p99": 5623,
+          "maximum": 7354
+        },
+        "flutterRasterQueueUs": {
+          "count": 942,
+          "mean": 23.75371549893843,
+          "p50": 15.0,
+          "p95": 59,
+          "p99": 86,
+          "maximum": 117
+        },
+        "flutterVsyncToBuildUs": {
+          "count": 942,
+          "mean": 52.13481953290871,
+          "p50": 55.0,
+          "p95": 65,
+          "p99": 81,
+          "maximum": 3842
+        }
+      }
+    },
+    "f8-white-tiles-live-control": {
+      "captureId": "c443e072b5844ebca74f97ef3ec4f9fc",
+      "status": "diagnostic-complete",
+      "options": {
+        "time": "2026-10-03T20:19:02.846500Z",
+        "elapsedMs": 0,
+        "event": "start",
+        "captureId": "c443e072b5844ebca74f97ef3ec4f9fc",
+        "quality": "medium",
+        "timeline": false,
+        "limitSeconds": 8,
+        "sustainedQualification": false,
+        "cpuReadback": false,
+        "cpuTickReadback": false,
+        "acquireWaitUs": 3000,
+        "bufferCount": 4,
+        "resolutionScale": 1.0,
+        "frozenScene": false,
+        "settleTicks": 0
+      },
+      "terminatedExactPid": 3279,
+      "executableSha256": "a05089fc66b8fcba82fc99c98319b78fc88722ee9cd12a7d52d89883bc8845b1",
+      "frameworkSha256": {
+        "Frameworks/App.framework/App": "9100859a488b627fedcf09af8350b97df8b4e2f0de0e40014a4877fc82386b8e",
+        "Frameworks/Flutter.framework/Flutter": "9408d43dc8d4c71d17f71ba1c3f5b3dbc5c77628df1837d23e2b6cc506def1bd",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "6314becadb016311164b613982036001825fea277274277a6aba288b79afe9cf",
+        "Frameworks/objective_c.framework/objective_c": "ccaf18ff9a7c93b53bd43dc5ce80ef2e2ea284ac23da30f00071287224fbe3a0"
+      },
+      "thermalStates": [
+        "nominal"
+      ],
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "visibleInstances": [
+        1733,
+        1764,
+        1797,
+        1856,
+        1924,
+        1997,
+        2112,
+        2231
+      ],
+      "statsWindowAcquisitionsPerSecond": 36.459966956282,
+      "medianOfSteadyWindowP50Ms": {
+        "gpu_frame": 16.911,
+        "gpu_ao": 9.525,
+        "simulate": 10.561,
+        "render": 5.212,
+        "work": 15.818
+      },
+      "screenSpaceMedianUs": null,
+      "analysis": null
+    },
+    "f8-white-tiles-live-baseline": {
+      "captureId": "f924aeb9fd0e4e70bf45244840d58a24",
+      "status": "diagnostic-complete",
+      "options": {
+        "time": "2026-10-03T20:20:14.441171Z",
+        "elapsedMs": 0,
+        "event": "start",
+        "captureId": "f924aeb9fd0e4e70bf45244840d58a24",
+        "quality": "medium",
+        "timeline": false,
+        "limitSeconds": 8,
+        "sustainedQualification": false,
+        "cpuReadback": false,
+        "cpuTickReadback": false,
+        "acquireWaitUs": 3000,
+        "bufferCount": 4,
+        "resolutionScale": 1.0,
+        "frozenScene": false,
+        "settleTicks": 0
+      },
+      "terminatedExactPid": 3287,
+      "executableSha256": "05b050d01ca42006a347f71178456359562bbe6d85437a8a8d7ff6bc42a8dcb7",
+      "frameworkSha256": {
+        "Frameworks/App.framework/App": "42e67056e11ebf911f43417b01d73346205acf8a7203b63716a7de67f8ea9bce",
+        "Frameworks/Flutter.framework/Flutter": "8ff73da8ab18f0f29deb2b21c271c9abbae1b93de7160cbade8b125a7e1550d0",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "7a98d8f88c2558c42d72d1aa15d6dd714435d3d7b9048a4f903c1f0d246ae7c3",
+        "Frameworks/objective_c.framework/objective_c": "c035a70fee761b850759c23d29804c39a5168a2d49e5d24614fc586a6dc2edc9"
+      },
+      "thermalStates": [
+        "nominal"
+      ],
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "visibleInstances": [
+        1733,
+        1764,
+        1796,
+        1855,
+        1925,
+        1997,
+        2113,
+        2233
+      ],
+      "statsWindowAcquisitionsPerSecond": 40.44014858010145,
+      "medianOfSteadyWindowP50Ms": {
+        "gpu_frame": 17.158,
+        "gpu_ao": 9.885,
+        "simulate": 9.564,
+        "render": 4.759,
+        "work": 14.323
+      },
+      "screenSpaceMedianUs": null,
+      "analysis": null
+    },
+    "f8-white-tiles-live-repeat": {
+      "captureId": "ec35644e59b349058a1b73ddbdf1096a",
+      "status": "diagnostic-complete",
+      "options": {
+        "time": "2026-10-03T20:20:47.504898Z",
+        "elapsedMs": 0,
+        "event": "start",
+        "captureId": "ec35644e59b349058a1b73ddbdf1096a",
+        "quality": "medium",
+        "timeline": false,
+        "limitSeconds": 8,
+        "sustainedQualification": false,
+        "cpuReadback": false,
+        "cpuTickReadback": false,
+        "acquireWaitUs": 3000,
+        "bufferCount": 4,
+        "resolutionScale": 1.0,
+        "frozenScene": false,
+        "settleTicks": 0
+      },
+      "terminatedExactPid": 3288,
+      "executableSha256": "a05089fc66b8fcba82fc99c98319b78fc88722ee9cd12a7d52d89883bc8845b1",
+      "frameworkSha256": {
+        "Frameworks/App.framework/App": "9100859a488b627fedcf09af8350b97df8b4e2f0de0e40014a4877fc82386b8e",
+        "Frameworks/Flutter.framework/Flutter": "9408d43dc8d4c71d17f71ba1c3f5b3dbc5c77628df1837d23e2b6cc506def1bd",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "6314becadb016311164b613982036001825fea277274277a6aba288b79afe9cf",
+        "Frameworks/objective_c.framework/objective_c": "ccaf18ff9a7c93b53bd43dc5ce80ef2e2ea284ac23da30f00071287224fbe3a0"
+      },
+      "thermalStates": [
+        "nominal"
+      ],
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "visibleInstances": [
+        1733,
+        1764,
+        1797,
+        1854,
+        1922,
+        1995,
+        2113,
+        2231
+      ],
+      "statsWindowAcquisitionsPerSecond": 40.9657884459241,
+      "medianOfSteadyWindowP50Ms": {
+        "gpu_frame": 17.451,
+        "gpu_ao": 9.383,
+        "simulate": 10.628,
+        "render": 5.279,
+        "work": 15.907
+      },
+      "screenSpaceMedianUs": null,
+      "analysis": null
+    }
+  },
+  "imageSha256": {
+    "ambient.ppm": {
+      "before": "ac314c229830d15e8cf951f7266b80826fe1999a4e237a982f31b0bcaf5c46bf",
+      "candidate": "ac314c229830d15e8cf951f7266b80826fe1999a4e237a982f31b0bcaf5c46bf"
+    },
+    "ao-off.ppm": {
+      "before": "f25bfc4d64d904937bd58a5b827cb6cee99f8119450b20294ca5e33a92c9df4c",
+      "candidate": "f25bfc4d64d904937bd58a5b827cb6cee99f8119450b20294ca5e33a92c9df4c"
+    },
+    "ao.ppm": {
+      "before": "54f93d0427fd33bc30987465bcc921c4469851c2743a472a024bb6472c9ef8e2",
+      "candidate": "54f93d0427fd33bc30987465bcc921c4469851c2743a472a024bb6472c9ef8e2"
+    },
+    "blend.ppm": {
+      "before": "148abbc6b12f55b0084688d175c0f6905e4877daa55e7bf914b96f3f264b0abb",
+      "candidate": "148abbc6b12f55b0084688d175c0f6905e4877daa55e7bf914b96f3f264b0abb"
+    },
+    "bloom-wide.ppm": {
+      "before": "39150a0fe9ac9076d23d17b7db146ef201669129be9701b4d54cad431abd92c4",
+      "candidate": "39150a0fe9ac9076d23d17b7db146ef201669129be9701b4d54cad431abd92c4"
+    },
+    "bloom.ppm": {
+      "before": "641f7af9de6471dcceb3f55a9a8056de6aa7f34594d255782eee26202b356a0d",
+      "candidate": "641f7af9de6471dcceb3f55a9a8056de6aa7f34594d255782eee26202b356a0d"
+    },
+    "cascades.ppm": {
+      "before": "b0da06c7e1eb7e1b0366175a12d013c716bae914f6b794ca9a4a0e0cab00db56",
+      "candidate": "b0da06c7e1eb7e1b0366175a12d013c716bae914f6b794ca9a4a0e0cab00db56"
+    },
+    "casters-with.ppm": {
+      "before": "c38e426bffc9b221ef83e348c2833e35738388ee92c144e00e4230a522ed306d",
+      "candidate": "c38e426bffc9b221ef83e348c2833e35738388ee92c144e00e4230a522ed306d"
+    },
+    "casters-without.ppm": {
+      "before": "b495b8706c46cea7389b892e61632ac3eab15ee40fd08ebc275d2a12e0b59e75",
+      "candidate": "b495b8706c46cea7389b892e61632ac3eab15ee40fd08ebc275d2a12e0b59e75"
+    },
+    "contact-plain.ppm": {
+      "before": "b6277c539ace8484000b88b8de59e57741ae1ef2e4c0832acaed17c8c816bc2b",
+      "candidate": "b6277c539ace8484000b88b8de59e57741ae1ef2e4c0832acaed17c8c816bc2b"
+    },
+    "contact.ppm": {
+      "before": "9472fbd485535fe135d77dfe1cf26918755d292066ea2b73eb10baf937e0d2e0",
+      "candidate": "9472fbd485535fe135d77dfe1cf26918755d292066ea2b73eb10baf937e0d2e0"
+    },
+    "culling.ppm": {
+      "before": "986259642ba9242628a4edd210b03b184d8c63036cfb0f28647d8c82917f0b13",
+      "candidate": "986259642ba9242628a4edd210b03b184d8c63036cfb0f28647d8c82917f0b13"
+    },
+    "debug-aabb.ppm": {
+      "before": "18f622f7d35ae553d46d1947f78cbc26484c80a30d68c67a3ee3d684eb1a5e7e",
+      "candidate": "18f622f7d35ae553d46d1947f78cbc26484c80a30d68c67a3ee3d684eb1a5e7e"
+    },
+    "debug-line.ppm": {
+      "before": "a8035317f67e2278b31406b73e6f589758d61a45533d17b46d4ad39230356a5b",
+      "candidate": "a8035317f67e2278b31406b73e6f589758d61a45533d17b46d4ad39230356a5b"
+    },
+    "emissive.ppm": {
+      "before": "4b1ef44f76430831fb406dba13939902a3f94201f130f0f9bf473abe1b6a8050",
+      "candidate": "4b1ef44f76430831fb406dba13939902a3f94201f130f0f9bf473abe1b6a8050"
+    },
+    "extra-world-grey.ppm": {
+      "before": "a5b2b3b327a902f6325537e33d0d74e5591f59cf59079d2db5a8a08eda36863b",
+      "candidate": "a5b2b3b327a902f6325537e33d0d74e5591f59cf59079d2db5a8a08eda36863b"
+    },
+    "extra-world-shadow.ppm": {
+      "before": "6ea3b56c9fd3e225050272ef728435f23e7380efaf45f347b521452fb768efda",
+      "candidate": "6ea3b56c9fd3e225050272ef728435f23e7380efaf45f347b521452fb768efda"
+    },
+    "extra-world.ppm": {
+      "before": "53818877f839bff131cd1ba4bca0eddaa98c3b38e1b1c8c852c7458b86e03da5",
+      "candidate": "53818877f839bff131cd1ba4bca0eddaa98c3b38e1b1c8c852c7458b86e03da5"
+    },
+    "flat.ppm": {
+      "before": "dd5e10dcc50e9882a8a4f66c9bba169d77ae1fad9bc15cfaed6d31f8b199d1cd",
+      "candidate": "dd5e10dcc50e9882a8a4f66c9bba169d77ae1fad9bc15cfaed6d31f8b199d1cd"
+    },
+    "grading-grey.ppm": {
+      "before": "c666f2e149ddbf2746e1554639e33c3d5c510e9f913945e4a3e1f90245c78a4f",
+      "candidate": "c666f2e149ddbf2746e1554639e33c3d5c510e9f913945e4a3e1f90245c78a4f"
+    },
+    "grading-lift.ppm": {
+      "before": "d61ffd1dd76d85f55f832e7f3a141c0093b6f16f48105c276c17a224c21d7f54",
+      "candidate": "d61ffd1dd76d85f55f832e7f3a141c0093b6f16f48105c276c17a224c21d7f54"
+    },
+    "grading-neutral.ppm": {
+      "before": "210b2d39eff414607249a2ee2ecd012e887b276d46bad763efbd4009fdc8ad53",
+      "candidate": "210b2d39eff414607249a2ee2ecd012e887b276d46bad763efbd4009fdc8ad53"
+    },
+    "grading-plain.ppm": {
+      "before": "3b5b31d7c3e18e1ae5329ca5777f9b74262575081a6fa7fd8e29144e18fae42f",
+      "candidate": "3b5b31d7c3e18e1ae5329ca5777f9b74262575081a6fa7fd8e29144e18fae42f"
+    },
+    "grading-warm.ppm": {
+      "before": "686e09a3b2f573c820e7b4c20fe35d39b5e4de1277d698dcdb01bc1bfc5a6374",
+      "candidate": "686e09a3b2f573c820e7b4c20fe35d39b5e4de1277d698dcdb01bc1bfc5a6374"
+    },
+    "ibl-green.ppm": {
+      "before": "4278498988276d7675aefe9d51fc7d19b0b940d6ba6a5db9d5c56ec5256fa2c9",
+      "candidate": "4278498988276d7675aefe9d51fc7d19b0b940d6ba6a5db9d5c56ec5256fa2c9"
+    },
+    "ibl-red.ppm": {
+      "before": "75a22e76af17055bb6396c97698c39a488e371266845a22f948bec28c29946c6",
+      "candidate": "75a22e76af17055bb6396c97698c39a488e371266845a22f948bec28c29946c6"
+    },
+    "ibl.ppm": {
+      "before": "1554a2d544a8f24dea7ed76c5de5d574b90509759d843e6330400f20efef11c2",
+      "candidate": "1554a2d544a8f24dea7ed76c5de5d574b90509759d843e6330400f20efef11c2"
+    },
+    "layer-camera-mask.ppm": {
+      "before": "d946fb97d8f7a47b183e7540d5982ed9b4a85927d4cccac1b9484af9fab85d24",
+      "candidate": "d946fb97d8f7a47b183e7540d5982ed9b4a85927d4cccac1b9484af9fab85d24"
+    },
+    "layer-light-mask.ppm": {
+      "before": "8d12355a9f16e8f82be2b070e667150e652087066fd3cbbd4198d1330c4e4e06",
+      "candidate": "8d12355a9f16e8f82be2b070e667150e652087066fd3cbbd4198d1330c4e4e06"
+    },
+    "maps.ppm": {
+      "before": "f5383d04e9ef0a843707e29b97474f08e08be7d1d169404c0acbde33d3f39451",
+      "candidate": "f5383d04e9ef0a843707e29b97474f08e08be7d1d169404c0acbde33d3f39451"
+    },
+    "masked.ppm": {
+      "before": "15b0ff46e13e08b28dd48c43d6982f26fbf7474b20f29981a120e24ac9157032",
+      "candidate": "15b0ff46e13e08b28dd48c43d6982f26fbf7474b20f29981a120e24ac9157032"
+    },
+    "msaa1.ppm": {
+      "before": "707ca60c1a760bb72c80d51b3dab3a0e9691523de1a29ef395b55fe328ced4f8",
+      "candidate": "707ca60c1a760bb72c80d51b3dab3a0e9691523de1a29ef395b55fe328ced4f8"
+    },
+    "msaa4.ppm": {
+      "before": "55d6cd86632fe09b34cee977a83174452ca5a4f206288443495ea27812eca428",
+      "candidate": "55d6cd86632fe09b34cee977a83174452ca5a4f206288443495ea27812eca428"
+    },
+    "opaque.ppm": {
+      "before": "e2ae808ac5410a41b830acbb66de7821e465a293b84bc5267e6691ab5f6f6d00",
+      "candidate": "e2ae808ac5410a41b830acbb66de7821e465a293b84bc5267e6691ab5f6f6d00"
+    },
+    "ortho.ppm": {
+      "before": "793387291d3db71b1e4b652359e364f002029220ada56b4bb8e1b58706febded",
+      "candidate": "793387291d3db71b1e4b652359e364f002029220ada56b4bb8e1b58706febded"
+    },
+    "outline-blend.ppm": {
+      "before": "cac58fea4c8a5d83633c64ad38ff75400dbf4ef8c678a069dec0e176f54dffff",
+      "candidate": "cac58fea4c8a5d83633c64ad38ff75400dbf4ef8c678a069dec0e176f54dffff"
+    },
+    "outline-msaa1.ppm": {
+      "before": "15b8c7d23dc9a81f5f5a8e4f69e4d3e817b75409cd1cbf547e0164a0fb3711b4",
+      "candidate": "15b8c7d23dc9a81f5f5a8e4f69e4d3e817b75409cd1cbf547e0164a0fb3711b4"
+    },
+    "outline-msaa4.ppm": {
+      "before": "d738f7f4800a00b0cb81c371bd4b7bd4ef53f9c561d9f4e00ad0bd0c552cf3a7",
+      "candidate": "d738f7f4800a00b0cb81c371bd4b7bd4ef53f9c561d9f4e00ad0bd0c552cf3a7"
+    },
+    "outline-occluded.ppm": {
+      "before": "94ef57834a66976e08514438ee339edc324a971e1e61af1aaae284f598b2d0ab",
+      "candidate": "94ef57834a66976e08514438ee339edc324a971e1e61af1aaae284f598b2d0ab"
+    },
+    "outline-scale-0.5.ppm": {
+      "before": "5f143780cc6525c3556a1b2585088c982de36a376cad3e76261ce8e753da9601",
+      "candidate": "5f143780cc6525c3556a1b2585088c982de36a376cad3e76261ce8e753da9601"
+    },
+    "outline-scale-2.ppm": {
+      "before": "e4c113f80974a582e6ebe124b9efa0afe01fce1409305a92e5c754d0b19b00bb",
+      "candidate": "e4c113f80974a582e6ebe124b9efa0afe01fce1409305a92e5c754d0b19b00bb"
+    },
+    "outline-wide.ppm": {
+      "before": "b99eac0ec5179be5a85f9f2b20f58729219125deb10ee2ade15515666f994da4",
+      "candidate": "b99eac0ec5179be5a85f9f2b20f58729219125deb10ee2ade15515666f994da4"
+    },
+    "overlay-grid.ppm": {
+      "before": "ebec95bab0f1ba486518e21556900340ea269cb4e8afd194ebce5de316cdbe41",
+      "candidate": "ebec95bab0f1ba486518e21556900340ea269cb4e8afd194ebce5de316cdbe41"
+    },
+    "overlay-occluded.ppm": {
+      "before": "3f9c164e19fc8eacfc250288fcdb51915b6d8652e4a93726cd2d35c0babe0ab0",
+      "candidate": "3f9c164e19fc8eacfc250288fcdb51915b6d8652e4a93726cd2d35c0babe0ab0"
+    },
+    "overlay-thick.ppm": {
+      "before": "36dc68062c20d8576e3fd0081b58211dbffc2e77f10b76d08fb382c91c59d555",
+      "candidate": "36dc68062c20d8576e3fd0081b58211dbffc2e77f10b76d08fb382c91c59d555"
+    },
+    "overlay-triangle.ppm": {
+      "before": "2b575e8232a2791ab2f87c5e12f2a0898ca41afa431fcefd0f698804b1e8f57f",
+      "candidate": "2b575e8232a2791ab2f87c5e12f2a0898ca41afa431fcefd0f698804b1e8f57f"
+    },
+    "per-object-lights.ppm": {
+      "before": "ec054e975673b95b31698d389d4dc30835d106fca116573441dcdfcc3e81d5af",
+      "candidate": "ec054e975673b95b31698d389d4dc30835d106fca116573441dcdfcc3e81d5af"
+    },
+    "point.ppm": {
+      "before": "8dbddaf70b2aba20b15b58626dafd0899aedaa7075b4bec4b7ecd0c53bf50535",
+      "candidate": "8dbddaf70b2aba20b15b58626dafd0899aedaa7075b4bec4b7ecd0c53bf50535"
+    },
+    "scale-0.5.ppm": {
+      "before": "867330b7a4498fe0fbe90d8799e79b244c04ea79dd0e6522da963c2bafde0b4a",
+      "candidate": "867330b7a4498fe0fbe90d8799e79b244c04ea79dd0e6522da963c2bafde0b4a"
+    },
+    "scale-0.75.ppm": {
+      "before": "1464e62eb5e4a355cd58069ef6c720c777719bbeb989db4e2eeaa0f02abf042e",
+      "candidate": "1464e62eb5e4a355cd58069ef6c720c777719bbeb989db4e2eeaa0f02abf042e"
+    },
+    "scale-2.ppm": {
+      "before": "c91958072eeb040ed7c6dafb425862c6a777830b33305679d11cd35cdc625c0b",
+      "candidate": "c91958072eeb040ed7c6dafb425862c6a777830b33305679d11cd35cdc625c0b"
+    },
+    "shader-flat.ppm": {
+      "before": "ff9680c7b6e6db909fa4609c1ddae6fd4464158e70b90f634999eef294512c88",
+      "candidate": "ff9680c7b6e6db909fa4609c1ddae6fd4464158e70b90f634999eef294512c88"
+    },
+    "shader-missing.ppm": {
+      "before": "dc28e7342bf103d2f7e8cffaeff0b5961cdaa4d7297c7a0e0846b96954c7d260",
+      "candidate": "dc28e7342bf103d2f7e8cffaeff0b5961cdaa4d7297c7a0e0846b96954c7d260"
+    },
+    "shader-pbr.ppm": {
+      "before": "3a021289b32017b0d4ae101a44474869a12b5c771b67823e9abc08c8264fef84",
+      "candidate": "3a021289b32017b0d4ae101a44474869a12b5c771b67823e9abc08c8264fef84"
+    },
+    "shader-shadow-0.ppm": {
+      "before": "7d0c78079f678186166f025f39a7c54a16f35fb3c24d71c1d04ccade7f195e9f",
+      "candidate": "7d0c78079f678186166f025f39a7c54a16f35fb3c24d71c1d04ccade7f195e9f"
+    },
+    "shader-shadow-1.ppm": {
+      "before": "839d236992d0ec2fc10086cc788f5c9ed781b5cfce358ac3eb4646780c36b31d",
+      "candidate": "839d236992d0ec2fc10086cc788f5c9ed781b5cfce358ac3eb4646780c36b31d"
+    },
+    "shader-texture.ppm": {
+      "before": "4a95bf5a2eedf62ae93352709e9b2957e55c6471800dd9a0bd9e65f56c8421b1",
+      "candidate": "4a95bf5a2eedf62ae93352709e9b2957e55c6471800dd9a0bd9e65f56c8421b1"
+    },
+    "shader-wave.ppm": {
+      "before": "92d5f439a1d65f93e994db0b7644af08119c01a817105271e5bbff6d0471c037",
+      "candidate": "92d5f439a1d65f93e994db0b7644af08119c01a817105271e5bbff6d0471c037"
+    },
+    "shadow.ppm": {
+      "before": "c92d3a64e2a24b52faed7ca59f1e3cdb7001678e883c6334d7f23bb49d72a96f",
+      "candidate": "c92d3a64e2a24b52faed7ca59f1e3cdb7001678e883c6334d7f23bb49d72a96f"
+    },
+    "sky.ppm": {
+      "before": "2382733ec766f5be6fe04fdff915b7470455acd25c3255c71ca556669be71315",
+      "candidate": "2382733ec766f5be6fe04fdff915b7470455acd25c3255c71ca556669be71315"
+    },
+    "spot.ppm": {
+      "before": "e38ec2fa5d6ca9ab98b3ccbdff5d8bf02d437bb59ad6c53f66f97b5448a69ffa",
+      "candidate": "e38ec2fa5d6ca9ab98b3ccbdff5d8bf02d437bb59ad6c53f66f97b5448a69ffa"
+    },
+    "volume-off.ppm": {
+      "before": "f25bfc4d64d904937bd58a5b827cb6cee99f8119450b20294ca5e33a92c9df4c",
+      "candidate": "f25bfc4d64d904937bd58a5b827cb6cee99f8119450b20294ca5e33a92c9df4c"
+    },
+    "volume-wide.ppm": {
+      "before": "d458a86546a5131096716da3a3e2363b0b819ae9d39c1b057ef3647d64fed3e7",
+      "candidate": "d458a86546a5131096716da3a3e2363b0b819ae9d39c1b057ef3647d64fed3e7"
+    }
+  }
+}

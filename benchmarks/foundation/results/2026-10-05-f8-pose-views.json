@@ -1,0 +1,320 @@
+{
+  "implementation": "Shared ECS read view plus carried proposal inputs in prepare_world_poses",
+  "mobileQualification": "retained targeted CPU improvement: all-nominal candidate/control/candidate sequence; lookAtCamera median 674.5/736/628 us; no repeatable whole-frame improvement established",
+  "sustainedQualification": false,
+  "localRoot5000PoseBenchmark": {
+    "baseline": {
+      "medianUs": 343.334,
+      "p95Us": 389.625
+    },
+    "candidate-final": {
+      "medianUs": 106.541,
+      "p95Us": 112.584
+    }
+  },
+  "runs": [
+    {
+      "label": "control-usb",
+      "captureId": "86272ffb9c3e4e669adb589de9a65dc2",
+      "frameworkSha256": {
+        "Frameworks/App.framework/App": "eca91213d71a7e64f21bfc77564e45d79fd7257e1195b2b01ba504028487a7b3",
+        "Frameworks/Flutter.framework/Flutter": "fe1345f2473e5b4f5932733e00e6e42fd8ba6e3fb9c69df79583df6cda174f10",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "0c07bc036e8a78253cfe67b27e992e181bd43834f5d84260226813017c9839d6",
+        "Frameworks/objective_c.framework/objective_c": "b1e884e25203892a84682f80ac9f9d1ae83a2aaece52c4bc9a599210c88fefba"
+      },
+      "thermal": [
+        "nominal",
+        "unknown"
+      ],
+      "terminatedExactPid": 10389,
+      "ticks": 478,
+      "systemMedianUs": {
+        "step": 7191.5,
+        "commands": 0.0,
+        "characters": 0.0,
+        "animation": 677.0,
+        "rotator": 446.0,
+        "oscillate": 552.5,
+        "lifetimeDespawn": 13.0,
+        "emitter": 1.0,
+        "physics": 4234.0,
+        "cameraRigs": 0.0,
+        "follow": 2.0,
+        "lookAtCamera": 735.0,
+        "transforms": 350.0,
+        "audio": 1.0,
+        "publish": 15.0
+      },
+      "freshAcquisitionsPerSecond": 38.2128714188077,
+      "stagesUs": {
+        "extract": {
+          "count": 317,
+          "mean": 1636.5015772870663,
+          "p50": 1624,
+          "p95": 1913,
+          "p99": 2039,
+          "maximum": 2888
+        },
+        "prepare": {
+          "count": 317,
+          "mean": 2766.741324921136,
+          "p50": 2698,
+          "p95": 3318,
+          "p99": 3530,
+          "maximum": 15407
+        },
+        "encode": {
+          "count": 317,
+          "mean": 35.429022082018925,
+          "p50": 34,
+          "p95": 46,
+          "p99": 53,
+          "maximum": 77
+        }
+      }
+    },
+    {
+      "label": "candidate",
+      "captureId": "797bfa8df22941e59ff063416f7caff4",
+      "frameworkSha256": {
+        "Frameworks/App.framework/App": "893c248bf450998018697cde98c1b081a91726588ddcb72bc342b61ac774bb3e",
+        "Frameworks/Flutter.framework/Flutter": "d52d21432a18926d470475a49315106f75debec4b14e4abf707784e437c1efdf",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "aac1c1fe38cefb4327f7da1f961a9b58b704e81a79c288cd2f4e5213153a98cc",
+        "Frameworks/objective_c.framework/objective_c": "faa46322911c6dfea177ffa2dfae04f199ecd62fbbcde045c25f446dc5f4b572"
+      },
+      "thermal": [
+        "fair"
+      ],
+      "terminatedExactPid": 10399,
+      "ticks": 480,
+      "systemMedianUs": {
+        "step": 7088.0,
+        "commands": 0.0,
+        "characters": 0.0,
+        "animation": 685.5,
+        "rotator": 446.0,
+        "oscillate": 556.0,
+        "lifetimeDespawn": 13.0,
+        "emitter": 1.0,
+        "physics": 4188.0,
+        "cameraRigs": 0.0,
+        "follow": 3.0,
+        "lookAtCamera": 638.0,
+        "transforms": 366.0,
+        "audio": 1.0,
+        "publish": 15.0
+      },
+      "freshAcquisitionsPerSecond": 38.802553208001086,
+      "stagesUs": {
+        "extract": {
+          "count": 322,
+          "mean": 1656.6801242236024,
+          "p50": 1654.0,
+          "p95": 1948,
+          "p99": 2031,
+          "maximum": 4179
+        },
+        "prepare": {
+          "count": 322,
+          "mean": 2790.0062111801244,
+          "p50": 2719.0,
+          "p95": 3356,
+          "p99": 3582,
+          "maximum": 14480
+        },
+        "encode": {
+          "count": 322,
+          "mean": 34.84472049689441,
+          "p50": 34.0,
+          "p95": 46,
+          "p99": 59,
+          "maximum": 82
+        }
+      }
+    },
+    {
+      "label": "candidate-cooled",
+      "captureId": "34f2325a59244932a9eb16267e26d532",
+      "frameworkSha256": {
+        "Frameworks/objective_c.framework/objective_c": "faa46322911c6dfea177ffa2dfae04f199ecd62fbbcde045c25f446dc5f4b572",
+        "Frameworks/Flutter.framework/Flutter": "d52d21432a18926d470475a49315106f75debec4b14e4abf707784e437c1efdf",
+        "Frameworks/App.framework/App": "893c248bf450998018697cde98c1b081a91726588ddcb72bc342b61ac774bb3e",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "aac1c1fe38cefb4327f7da1f961a9b58b704e81a79c288cd2f4e5213153a98cc"
+      },
+      "thermal": [
+        "nominal"
+      ],
+      "terminatedExactPid": 10678,
+      "ticks": 478,
+      "systemMedianUs": {
+        "step": 7385.0,
+        "commands": 0.0,
+        "characters": 0.0,
+        "animation": 721.5,
+        "rotator": 471.5,
+        "oscillate": 586.0,
+        "lifetimeDespawn": 13.0,
+        "emitter": 1.0,
+        "physics": 4374.0,
+        "cameraRigs": 0.0,
+        "follow": 3.0,
+        "lookAtCamera": 674.5,
+        "transforms": 380.0,
+        "audio": 1.0,
+        "publish": 16.0
+      },
+      "freshAcquisitionsPerSecond": 37.51709614185899,
+      "stagesUs": {
+        "extract": {
+          "count": 309,
+          "mean": 1764.1650485436894,
+          "p50": 1744,
+          "p95": 2028,
+          "p99": 2125,
+          "maximum": 3465
+        },
+        "prepare": {
+          "count": 309,
+          "mean": 2942.569579288026,
+          "p50": 2901,
+          "p95": 3376,
+          "p99": 3576,
+          "maximum": 16143
+        },
+        "encode": {
+          "count": 309,
+          "mean": 36.12621359223301,
+          "p50": 35,
+          "p95": 45,
+          "p99": 52,
+          "maximum": 77
+        }
+      }
+    },
+    {
+      "label": "control-cooled",
+      "captureId": "63b50adb7c5742d1898aea82f5dc0e9b",
+      "frameworkSha256": {
+        "Frameworks/objective_c.framework/objective_c": "b1e884e25203892a84682f80ac9f9d1ae83a2aaece52c4bc9a599210c88fefba",
+        "Frameworks/Flutter.framework/Flutter": "fe1345f2473e5b4f5932733e00e6e42fd8ba6e3fb9c69df79583df6cda174f10",
+        "Frameworks/App.framework/App": "eca91213d71a7e64f21bfc77564e45d79fd7257e1195b2b01ba504028487a7b3",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "0c07bc036e8a78253cfe67b27e992e181bd43834f5d84260226813017c9839d6"
+      },
+      "thermal": [
+        "nominal"
+      ],
+      "terminatedExactPid": 10681,
+      "ticks": 480,
+      "systemMedianUs": {
+        "step": 7202.0,
+        "commands": 0.0,
+        "characters": 0.0,
+        "animation": 681.5,
+        "rotator": 447.0,
+        "oscillate": 552.0,
+        "lifetimeDespawn": 14.0,
+        "emitter": 1.0,
+        "physics": 4257.0,
+        "cameraRigs": 0.0,
+        "follow": 2.0,
+        "lookAtCamera": 736.0,
+        "transforms": 353.5,
+        "audio": 1.0,
+        "publish": 15.0
+      },
+      "freshAcquisitionsPerSecond": 39.06182940231171,
+      "stagesUs": {
+        "extract": {
+          "count": 321,
+          "mean": 1663.4797507788162,
+          "p50": 1661,
+          "p95": 1946,
+          "p99": 1970,
+          "maximum": 2872
+        },
+        "prepare": {
+          "count": 321,
+          "mean": 2778.3644859813085,
+          "p50": 2729,
+          "p95": 3317,
+          "p99": 3563,
+          "maximum": 15043
+        },
+        "encode": {
+          "count": 321,
+          "mean": 36.283489096573206,
+          "p50": 35,
+          "p95": 47,
+          "p99": 55,
+          "maximum": 95
+        }
+      }
+    },
+    {
+      "label": "candidate-cooled-repeat",
+      "captureId": "12af35b4cfe14baa95366bd3a4adc326",
+      "frameworkSha256": {
+        "Frameworks/objective_c.framework/objective_c": "faa46322911c6dfea177ffa2dfae04f199ecd62fbbcde045c25f446dc5f4b572",
+        "Frameworks/Flutter.framework/Flutter": "d52d21432a18926d470475a49315106f75debec4b14e4abf707784e437c1efdf",
+        "Frameworks/App.framework/App": "893c248bf450998018697cde98c1b081a91726588ddcb72bc342b61ac774bb3e",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "aac1c1fe38cefb4327f7da1f961a9b58b704e81a79c288cd2f4e5213153a98cc"
+      },
+      "thermal": [
+        "nominal"
+      ],
+      "terminatedExactPid": 10682,
+      "ticks": 480,
+      "systemMedianUs": {
+        "step": 7020.0,
+        "commands": 0.0,
+        "characters": 0.0,
+        "animation": 672.0,
+        "rotator": 438.5,
+        "oscillate": 542.0,
+        "lifetimeDespawn": 13.0,
+        "emitter": 1.0,
+        "physics": 4177.0,
+        "cameraRigs": 0.0,
+        "follow": 3.0,
+        "lookAtCamera": 628.0,
+        "transforms": 351.0,
+        "audio": 1.0,
+        "publish": 15.0
+      },
+      "freshAcquisitionsPerSecond": 39.95304707950071,
+      "stagesUs": {
+        "extract": {
+          "count": 331,
+          "mean": 1646.5649546827794,
+          "p50": 1641,
+          "p95": 1947,
+          "p99": 2095,
+          "maximum": 2582
+        },
+        "prepare": {
+          "count": 331,
+          "mean": 2736.761329305136,
+          "p50": 2677,
+          "p95": 3293,
+          "p99": 3535,
+          "maximum": 14483
+        },
+        "encode": {
+          "count": 331,
+          "mean": 33.93655589123867,
+          "p50": 32,
+          "p95": 46,
+          "p99": 55,
+          "maximum": 76
+        }
+      }
+    }
+  ],
+  "checks": {
+    "sceneTestsPassed": 27,
+    "coreTestsPassed": 376,
+    "clippyWarningsDenied": "pass",
+    "iOSReleaseBuild": "pass"
+  },
+  "decision": "Retain shared pose reads; preserve workload, quality and atomic publication. F8 sustained 60/120 FPS and thermal qualification remain open."
+}

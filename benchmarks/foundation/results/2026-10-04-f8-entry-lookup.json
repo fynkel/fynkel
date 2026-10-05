@@ -1,0 +1,283 @@
+{
+  "sustainedQualification": false,
+  "diagnosticOverhead": true,
+  "change": "Reuse the existing mutable entry lookup for in-place physics updates; preserve rebuild and validation behavior.",
+  "runs": [
+    {
+      "label": "control",
+      "captureId": "4606e5e962df407fb7373e10f6e8b60b",
+      "source": "f8-entry-control-phone",
+      "samples": 480,
+      "phases": {
+        "sync_ns": {
+          "medianUs": 1767.687,
+          "p95Us": 2111.125
+        },
+        "commands_ns": {
+          "medianUs": 0.25,
+          "p95Us": 0.875
+        },
+        "characters_ns": {
+          "medianUs": 0.041,
+          "p95Us": 0.125
+        },
+        "solver_ns": {
+          "medianUs": 979.3955000000001,
+          "p95Us": 1223.459
+        },
+        "writeback_ns": {
+          "medianUs": 154.04149999999998,
+          "p95Us": 181.042
+        },
+        "events_ns": {
+          "medianUs": 122.7915,
+          "p95Us": 148.917
+        },
+        "total_ns": {
+          "medianUs": 3036.25,
+          "p95Us": 3518.667
+        },
+        "collect_ns": {
+          "medianUs": 167.8125,
+          "p95Us": 227.042
+        },
+        "hierarchy_ns": {
+          "medianUs": 227.97899999999998,
+          "p95Us": 267.541
+        },
+        "classify_ns": {
+          "medianUs": 669.0,
+          "p95Us": 909.334
+        },
+        "apply_ns": {
+          "medianUs": 687.9375,
+          "p95Us": 852.75
+        }
+      },
+      "systems": {
+        "physics": {
+          "medianUs": 4155.5,
+          "p95Us": 4745
+        },
+        "step": {
+          "medianUs": 6799.5,
+          "p95Us": 7668
+        }
+      },
+      "thermal": [
+        "nominal"
+      ],
+      "stop": [
+        "deadline"
+      ],
+      "terminatedExactPid": 4929
+    },
+    {
+      "label": "candidate",
+      "captureId": "61dd01c1aa854b17ba9337cf31e1c3e4",
+      "source": "f8-entry-candidate-phone",
+      "samples": 480,
+      "phases": {
+        "sync_ns": {
+          "medianUs": 1695.6875,
+          "p95Us": 2018.375
+        },
+        "commands_ns": {
+          "medianUs": 0.208,
+          "p95Us": 0.834
+        },
+        "characters_ns": {
+          "medianUs": 0.042,
+          "p95Us": 0.125
+        },
+        "solver_ns": {
+          "medianUs": 1018.1665,
+          "p95Us": 1237.958
+        },
+        "writeback_ns": {
+          "medianUs": 159.79149999999998,
+          "p95Us": 190.125
+        },
+        "events_ns": {
+          "medianUs": 125.792,
+          "p95Us": 149.917
+        },
+        "total_ns": {
+          "medianUs": 3005.6665000000003,
+          "p95Us": 3470.125
+        },
+        "collect_ns": {
+          "medianUs": 174.042,
+          "p95Us": 242.334
+        },
+        "hierarchy_ns": {
+          "medianUs": 228.20850000000002,
+          "p95Us": 268.333
+        },
+        "classify_ns": {
+          "medianUs": 694.833,
+          "p95Us": 903.125
+        },
+        "apply_ns": {
+          "medianUs": 576.3335,
+          "p95Us": 734.875
+        }
+      },
+      "systems": {
+        "physics": {
+          "medianUs": 4180.5,
+          "p95Us": 4742
+        },
+        "step": {
+          "medianUs": 6892.0,
+          "p95Us": 7812
+        }
+      },
+      "thermal": [
+        "nominal"
+      ],
+      "stop": [
+        "deadline"
+      ],
+      "terminatedExactPid": 4931
+    },
+    {
+      "label": "control2",
+      "captureId": "e4d09f09b8d14053bd8cb1189cc9bfe6",
+      "source": "f8-entry-control2-phone",
+      "samples": 479,
+      "phases": {
+        "sync_ns": {
+          "medianUs": 1869.584,
+          "p95Us": 2226.291
+        },
+        "commands_ns": {
+          "medianUs": 0.208,
+          "p95Us": 0.875
+        },
+        "characters_ns": {
+          "medianUs": 0.041,
+          "p95Us": 0.125
+        },
+        "solver_ns": {
+          "medianUs": 1034.917,
+          "p95Us": 1266.0
+        },
+        "writeback_ns": {
+          "medianUs": 166.333,
+          "p95Us": 199.667
+        },
+        "events_ns": {
+          "medianUs": 126.375,
+          "p95Us": 157.042
+        },
+        "total_ns": {
+          "medianUs": 3197.208,
+          "p95Us": 3745.291
+        },
+        "collect_ns": {
+          "medianUs": 173.334,
+          "p95Us": 224.292
+        },
+        "hierarchy_ns": {
+          "medianUs": 239.5,
+          "p95Us": 299.375
+        },
+        "classify_ns": {
+          "medianUs": 708.0,
+          "p95Us": 920.25
+        },
+        "apply_ns": {
+          "medianUs": 732.667,
+          "p95Us": 888.75
+        }
+      },
+      "systems": {
+        "physics": {
+          "medianUs": 4377,
+          "p95Us": 5098
+        },
+        "step": {
+          "medianUs": 7227,
+          "p95Us": 8406
+        }
+      },
+      "thermal": [
+        "nominal"
+      ],
+      "stop": [
+        "deadline"
+      ],
+      "terminatedExactPid": 4932
+    },
+    {
+      "label": "candidate2",
+      "captureId": "49f02aa8f2254b77a22c218800ab6c07",
+      "source": "f8-entry-candidate2-phone",
+      "samples": 480,
+      "phases": {
+        "sync_ns": {
+          "medianUs": 1738.5415,
+          "p95Us": 2092.0
+        },
+        "commands_ns": {
+          "medianUs": 0.208,
+          "p95Us": 0.792
+        },
+        "characters_ns": {
+          "medianUs": 0.042,
+          "p95Us": 0.166
+        },
+        "solver_ns": {
+          "medianUs": 1045.667,
+          "p95Us": 1273.708
+        },
+        "writeback_ns": {
+          "medianUs": 168.33350000000002,
+          "p95Us": 206.5
+        },
+        "events_ns": {
+          "medianUs": 128.833,
+          "p95Us": 161.791
+        },
+        "total_ns": {
+          "medianUs": 3090.709,
+          "p95Us": 3650.833
+        },
+        "collect_ns": {
+          "medianUs": 171.9375,
+          "p95Us": 227.25
+        },
+        "hierarchy_ns": {
+          "medianUs": 234.875,
+          "p95Us": 313.416
+        },
+        "classify_ns": {
+          "medianUs": 706.292,
+          "p95Us": 884.125
+        },
+        "apply_ns": {
+          "medianUs": 604.313,
+          "p95Us": 755.667
+        }
+      },
+      "systems": {
+        "physics": {
+          "medianUs": 4292.5,
+          "p95Us": 5111
+        },
+        "step": {
+          "medianUs": 7143.5,
+          "p95Us": 8486
+        }
+      },
+      "thermal": [
+        "nominal"
+      ],
+      "stop": [
+        "deadline"
+      ],
+      "terminatedExactPid": 4933
+    }
+  ]
+}

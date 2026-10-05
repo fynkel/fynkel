@@ -1,0 +1,76 @@
+{
+  "captureId": "3a3c3ce652ef4c84aec7b6b4434da785",
+  "status": "diagnostic-complete",
+  "sustainedQualification": false,
+  "diagnosticOverhead": true,
+  "world": 1,
+  "samples": 479,
+  "tickMapping": "Native completed tick = SDK pre-step tick + 1; all 479 rows matched.",
+  "phases": {
+    "sync": {
+      "medianUs": 1872.584,
+      "p95Us": 2212.084,
+      "meanUs": 1939.8218517745304
+    },
+    "commands": {
+      "medianUs": 0.125,
+      "p95Us": 0.833,
+      "meanUs": 0.24871189979123173
+    },
+    "characters": {
+      "medianUs": 0.041,
+      "p95Us": 0.125,
+      "meanUs": 0.042707724425887265
+    },
+    "solver": {
+      "medianUs": 995.5,
+      "p95Us": 1218.25,
+      "meanUs": 996.0119227557411
+    },
+    "writeback": {
+      "medianUs": 157.459,
+      "p95Us": 185.625,
+      "meanUs": 161.76874947807934
+    },
+    "events": {
+      "medianUs": 128.542,
+      "p95Us": 156.125,
+      "meanUs": 116.1736325678497
+    },
+    "total": {
+      "medianUs": 3185.208,
+      "p95Us": 3589.875,
+      "meanUs": 3214.0866263048015
+    }
+  },
+  "systems": {
+    "physics": {
+      "medianUs": 4344,
+      "p95Us": 4867,
+      "meanUs": 4399.292275574113
+    },
+    "step": {
+      "medianUs": 7017,
+      "p95Us": 7967,
+      "meanUs": 7131.58872651357
+    }
+  },
+  "physicsSystemOutsideAdapter": {
+    "medianUs": 1149.417,
+    "p95Us": 1337.125,
+    "meanUs": 1185.2056492693112
+  },
+  "interpretation": "Residual includes scene propagation and core event/rejection work, not exclusively propagation. Timers and file writes add overhead; this is phase attribution, not a throughput comparison.",
+  "thermalStates": [
+    "nominal"
+  ],
+  "stop": [
+    {
+      "time": "2026-10-04T13:46:01.355511Z",
+      "elapsedMs": 8011,
+      "event": "stop",
+      "reason": "deadline"
+    }
+  ],
+  "terminatedExactPid": 4879
+}

@@ -1,0 +1,102 @@
+{
+  "decision": "no CPU implementation retained; relevance filter showed no useful synchronization gain",
+  "sustainedQualification": false,
+  "device": {
+    "captureId": "5b29df77a824451b829eb78b70b500ad",
+    "status": "diagnostic-complete",
+    "terminatedExactPid": 4721,
+    "frameworkSha256": {
+      "Frameworks/App.framework/App": "638b9c0ce9c3e3ca462653db9b9cf218d0bad01d56b6dc02198881ba7efb3cd4",
+      "Frameworks/Flutter.framework/Flutter": "4fb773cd0bdda6ff6b175daced0a7791a19f9e1ae8a8b2e58cbb07cabaff67a8",
+      "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "9d674081aeb3ab4540e283ad48e04c64a2a8d0d03457c17e29953222e555de27",
+      "Frameworks/objective_c.framework/objective_c": "3c75a5451f47dda4d80b8de2883c49ae3b3df3a99a4975d9a1df6c0fa575417a"
+    },
+    "systemMedianUs": {
+      "step": 6839,
+      "commands": 0,
+      "characters": 0,
+      "animation": 591,
+      "rotator": 393,
+      "oscillate": 481,
+      "lifetimeDespawn": 12,
+      "emitter": 1,
+      "physics": 4207,
+      "cameraRigs": 0,
+      "follow": 2,
+      "lookAtCamera": 620,
+      "transforms": 366,
+      "audio": 1,
+      "publish": 12
+    },
+    "ticks": 479
+  },
+  "mac": {
+    "before": {
+      "stateEqualWithProfiling": true,
+      "runs": [
+        {
+          "profiling": false,
+          "medianStepUs": 6556.458500000001
+        },
+        {
+          "profiling": true,
+          "medianStepUs": 6424.8125,
+          "phaseMedianUs": {
+            "sync": 1503.4375,
+            "commands": 0.041,
+            "characters": 0.041,
+            "solver": 764.3335,
+            "writeback": 135.188,
+            "events": 83.9375,
+            "total": 2482.958
+          }
+        }
+      ]
+    },
+    "after": {
+      "stateEqualWithProfiling": true,
+      "runs": [
+        {
+          "profiling": false,
+          "medianStepUs": 6857.771000000001
+        },
+        {
+          "profiling": true,
+          "medianStepUs": 6832.979,
+          "phaseMedianUs": {
+            "sync": 1835.7915,
+            "commands": 0.041999999999999996,
+            "characters": 0.0,
+            "solver": 807.4580000000001,
+            "writeback": 138.9795,
+            "events": 86.5,
+            "total": 2874.4585
+          }
+        }
+      ]
+    },
+    "reordered": {
+      "stateEqualWithProfiling": true,
+      "runs": [
+        {
+          "profiling": false,
+          "medianStepUs": 6468.1665
+        },
+        {
+          "profiling": true,
+          "medianStepUs": 6439.8330000000005,
+          "phaseMedianUs": {
+            "sync": 1516.1455,
+            "commands": 0.041999999999999996,
+            "characters": 0.0,
+            "solver": 763.5415,
+            "writeback": 139.208,
+            "events": 85.5,
+            "total": 2503.9795
+          }
+        }
+      ]
+    }
+  },
+  "cpuProfiler": "Two exact-PID Time Profiler attachments failed: Cannot find process for provided pid. No sampling attribution established. Unverified runner option removed."
+}

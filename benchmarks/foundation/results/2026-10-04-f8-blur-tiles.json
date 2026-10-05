@@ -1,0 +1,206 @@
+{
+  "retained": false,
+  "sustainedQualification": false,
+  "scope": "Frozen dense-5000, medium, GPU tracing; spans may overlap and are not additive. No live-game performance claim.",
+  "runs": [
+    {
+      "label": "8x8 control",
+      "captureId": "38553bb8ab164bd79c49f439ed62151e",
+      "gpuFrameMedianOfWindowP50Ms": 18.847,
+      "gpuFrameMedianOfWindowP50AfterFirstMs": 18.881,
+      "gpuWindowP50Ms": [
+        17.93,
+        18.791,
+        18.813,
+        18.598,
+        18.899,
+        19.599,
+        19.014,
+        18.881
+      ],
+      "blurMedianUs": 3725.5,
+      "screenSpaceSamples": 48,
+      "acquiredFramesPerSecond": 47.99578836957057,
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "thermal": [
+        "nominal"
+      ],
+      "terminatedExactPid": 5148,
+      "stop": [
+        "deadline"
+      ]
+    },
+    {
+      "label": "16x16",
+      "captureId": "9cf9ed056983447583f0d584f5adb345",
+      "gpuFrameMedianOfWindowP50Ms": 18.908,
+      "gpuFrameMedianOfWindowP50AfterFirstMs": 18.883,
+      "gpuWindowP50Ms": [
+        18.962,
+        18.883,
+        18.81,
+        19.104,
+        18.963,
+        18.687,
+        18.877,
+        18.933
+      ],
+      "blurMedianUs": 4424,
+      "screenSpaceSamples": 47,
+      "acquiredFramesPerSecond": 44.21141448800559,
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "thermal": [
+        "nominal"
+      ],
+      "terminatedExactPid": 5170,
+      "stop": [
+        "deadline"
+      ]
+    },
+    {
+      "label": "16x8",
+      "captureId": "c3e71277cc934c0b84121dadf8c42e38",
+      "gpuFrameMedianOfWindowP50Ms": 18.6235,
+      "gpuFrameMedianOfWindowP50AfterFirstMs": 18.63,
+      "gpuWindowP50Ms": [
+        18.617,
+        18.613,
+        18.63,
+        18.599,
+        19.489,
+        18.676,
+        18.614,
+        18.891
+      ],
+      "blurMedianUs": 4475,
+      "screenSpaceSamples": 47,
+      "acquiredFramesPerSecond": 46.338450547130954,
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "thermal": [
+        "nominal"
+      ],
+      "terminatedExactPid": 5172,
+      "stop": [
+        "deadline"
+      ]
+    },
+    {
+      "label": "8x8 repeat",
+      "captureId": "b9429cfb642f4af486fdab20a955dd78",
+      "gpuFrameMedianOfWindowP50Ms": 18.776,
+      "gpuFrameMedianOfWindowP50AfterFirstMs": 18.823,
+      "gpuWindowP50Ms": [
+        17.985,
+        18.719,
+        18.646,
+        18.857,
+        18.823,
+        18.946,
+        18.921,
+        18.729
+      ],
+      "blurMedianUs": 3791.0,
+      "screenSpaceSamples": 48,
+      "acquiredFramesPerSecond": 48.24187124469527,
+      "dimensions": [
+        [
+          1320,
+          2868
+        ]
+      ],
+      "thermal": [
+        "nominal"
+      ],
+      "terminatedExactPid": 5184,
+      "stop": [
+        "deadline"
+      ]
+    }
+  ],
+  "identicalImagesPerCandidate": 68,
+  "baselineImageSha256": {
+    "ambient.ppm": "ac314c229830d15e8cf951f7266b80826fe1999a4e237a982f31b0bcaf5c46bf",
+    "ao-off.ppm": "f25bfc4d64d904937bd58a5b827cb6cee99f8119450b20294ca5e33a92c9df4c",
+    "ao.ppm": "54f93d0427fd33bc30987465bcc921c4469851c2743a472a024bb6472c9ef8e2",
+    "blend.ppm": "148abbc6b12f55b0084688d175c0f6905e4877daa55e7bf914b96f3f264b0abb",
+    "bloom-wide.ppm": "39150a0fe9ac9076d23d17b7db146ef201669129be9701b4d54cad431abd92c4",
+    "bloom.ppm": "641f7af9de6471dcceb3f55a9a8056de6aa7f34594d255782eee26202b356a0d",
+    "cascades.ppm": "b0da06c7e1eb7e1b0366175a12d013c716bae914f6b794ca9a4a0e0cab00db56",
+    "casters-with.ppm": "c38e426bffc9b221ef83e348c2833e35738388ee92c144e00e4230a522ed306d",
+    "casters-without.ppm": "b495b8706c46cea7389b892e61632ac3eab15ee40fd08ebc275d2a12e0b59e75",
+    "contact-Orthographic-msaa-1.ppm": "6c2dcdf1ebcad476b24c17a2340383a79a1cc9de62f068dc8a61127fecbd57aa",
+    "contact-Orthographic-msaa-4.ppm": "5dcfb948fd728f0a3ea1c06f7128586ad2d614db0e25cf28d8ba616fc4f01198",
+    "contact-Perspective-msaa-1.ppm": "f60627ecd2a987871ffae877dc24629e95927a915b02704180ce857674ed5829",
+    "contact-Perspective-msaa-4.ppm": "9472fbd485535fe135d77dfe1cf26918755d292066ea2b73eb10baf937e0d2e0",
+    "contact-plain.ppm": "b6277c539ace8484000b88b8de59e57741ae1ef2e4c0832acaed17c8c816bc2b",
+    "contact.ppm": "9472fbd485535fe135d77dfe1cf26918755d292066ea2b73eb10baf937e0d2e0",
+    "culling.ppm": "986259642ba9242628a4edd210b03b184d8c63036cfb0f28647d8c82917f0b13",
+    "debug-aabb.ppm": "18f622f7d35ae553d46d1947f78cbc26484c80a30d68c67a3ee3d684eb1a5e7e",
+    "debug-line.ppm": "a8035317f67e2278b31406b73e6f589758d61a45533d17b46d4ad39230356a5b",
+    "emissive.ppm": "4b1ef44f76430831fb406dba13939902a3f94201f130f0f9bf473abe1b6a8050",
+    "extra-world-grey.ppm": "a5b2b3b327a902f6325537e33d0d74e5591f59cf59079d2db5a8a08eda36863b",
+    "extra-world-shadow.ppm": "6ea3b56c9fd3e225050272ef728435f23e7380efaf45f347b521452fb768efda",
+    "extra-world.ppm": "53818877f839bff131cd1ba4bca0eddaa98c3b38e1b1c8c852c7458b86e03da5",
+    "flat.ppm": "dd5e10dcc50e9882a8a4f66c9bba169d77ae1fad9bc15cfaed6d31f8b199d1cd",
+    "grading-grey.ppm": "c666f2e149ddbf2746e1554639e33c3d5c510e9f913945e4a3e1f90245c78a4f",
+    "grading-lift.ppm": "d61ffd1dd76d85f55f832e7f3a141c0093b6f16f48105c276c17a224c21d7f54",
+    "grading-neutral.ppm": "210b2d39eff414607249a2ee2ecd012e887b276d46bad763efbd4009fdc8ad53",
+    "grading-plain.ppm": "3b5b31d7c3e18e1ae5329ca5777f9b74262575081a6fa7fd8e29144e18fae42f",
+    "grading-warm.ppm": "686e09a3b2f573c820e7b4c20fe35d39b5e4de1277d698dcdb01bc1bfc5a6374",
+    "grazing-normal-map.ppm": "908db6d1bcb193b83793408ea8210903d2ecf76b4850f8149b495b0e75079e0e",
+    "ibl-green.ppm": "4278498988276d7675aefe9d51fc7d19b0b940d6ba6a5db9d5c56ec5256fa2c9",
+    "ibl-red.ppm": "75a22e76af17055bb6396c97698c39a488e371266845a22f948bec28c29946c6",
+    "ibl.ppm": "1554a2d544a8f24dea7ed76c5de5d574b90509759d843e6330400f20efef11c2",
+    "layer-camera-mask.ppm": "d946fb97d8f7a47b183e7540d5982ed9b4a85927d4cccac1b9484af9fab85d24",
+    "layer-light-mask.ppm": "8d12355a9f16e8f82be2b070e667150e652087066fd3cbbd4198d1330c4e4e06",
+    "maps.ppm": "f5383d04e9ef0a843707e29b97474f08e08be7d1d169404c0acbde33d3f39451",
+    "masked.ppm": "15b0ff46e13e08b28dd48c43d6982f26fbf7474b20f29981a120e24ac9157032",
+    "msaa1.ppm": "707ca60c1a760bb72c80d51b3dab3a0e9691523de1a29ef395b55fe328ced4f8",
+    "msaa4.ppm": "55d6cd86632fe09b34cee977a83174452ca5a4f206288443495ea27812eca428",
+    "opaque.ppm": "e2ae808ac5410a41b830acbb66de7821e465a293b84bc5267e6691ab5f6f6d00",
+    "ortho.ppm": "793387291d3db71b1e4b652359e364f002029220ada56b4bb8e1b58706febded",
+    "outline-blend.ppm": "cac58fea4c8a5d83633c64ad38ff75400dbf4ef8c678a069dec0e176f54dffff",
+    "outline-msaa1.ppm": "15b8c7d23dc9a81f5f5a8e4f69e4d3e817b75409cd1cbf547e0164a0fb3711b4",
+    "outline-msaa4.ppm": "d738f7f4800a00b0cb81c371bd4b7bd4ef53f9c561d9f4e00ad0bd0c552cf3a7",
+    "outline-occluded.ppm": "94ef57834a66976e08514438ee339edc324a971e1e61af1aaae284f598b2d0ab",
+    "outline-scale-0.5.ppm": "5f143780cc6525c3556a1b2585088c982de36a376cad3e76261ce8e753da9601",
+    "outline-scale-2.ppm": "e4c113f80974a582e6ebe124b9efa0afe01fce1409305a92e5c754d0b19b00bb",
+    "outline-wide.ppm": "b99eac0ec5179be5a85f9f2b20f58729219125deb10ee2ade15515666f994da4",
+    "overlay-grid.ppm": "ebec95bab0f1ba486518e21556900340ea269cb4e8afd194ebce5de316cdbe41",
+    "overlay-occluded.ppm": "3f9c164e19fc8eacfc250288fcdb51915b6d8652e4a93726cd2d35c0babe0ab0",
+    "overlay-thick.ppm": "36dc68062c20d8576e3fd0081b58211dbffc2e77f10b76d08fb382c91c59d555",
+    "overlay-triangle.ppm": "2b575e8232a2791ab2f87c5e12f2a0898ca41afa431fcefd0f698804b1e8f57f",
+    "per-object-lights.ppm": "ec054e975673b95b31698d389d4dc30835d106fca116573441dcdfcc3e81d5af",
+    "point.ppm": "8dbddaf70b2aba20b15b58626dafd0899aedaa7075b4bec4b7ecd0c53bf50535",
+    "scale-0.5.ppm": "867330b7a4498fe0fbe90d8799e79b244c04ea79dd0e6522da963c2bafde0b4a",
+    "scale-0.75.ppm": "1464e62eb5e4a355cd58069ef6c720c777719bbeb989db4e2eeaa0f02abf042e",
+    "scale-2.ppm": "c91958072eeb040ed7c6dafb425862c6a777830b33305679d11cd35cdc625c0b",
+    "shader-flat.ppm": "ff9680c7b6e6db909fa4609c1ddae6fd4464158e70b90f634999eef294512c88",
+    "shader-missing.ppm": "dc28e7342bf103d2f7e8cffaeff0b5961cdaa4d7297c7a0e0846b96954c7d260",
+    "shader-pbr.ppm": "3a021289b32017b0d4ae101a44474869a12b5c771b67823e9abc08c8264fef84",
+    "shader-shadow-0.ppm": "7d0c78079f678186166f025f39a7c54a16f35fb3c24d71c1d04ccade7f195e9f",
+    "shader-shadow-1.ppm": "839d236992d0ec2fc10086cc788f5c9ed781b5cfce358ac3eb4646780c36b31d",
+    "shader-texture.ppm": "4a95bf5a2eedf62ae93352709e9b2957e55c6471800dd9a0bd9e65f56c8421b1",
+    "shader-wave.ppm": "92d5f439a1d65f93e994db0b7644af08119c01a817105271e5bbff6d0471c037",
+    "shadow.ppm": "c92d3a64e2a24b52faed7ca59f1e3cdb7001678e883c6334d7f23bb49d72a96f",
+    "sky.ppm": "2382733ec766f5be6fe04fdff915b7470455acd25c3255c71ca556669be71315",
+    "spot.ppm": "e38ec2fa5d6ca9ab98b3ccbdff5d8bf02d437bb59ad6c53f66f97b5448a69ffa",
+    "volume-off.ppm": "f25bfc4d64d904937bd58a5b827cb6cee99f8119450b20294ca5e33a92c9df4c",
+    "volume-wide.ppm": "d458a86546a5131096716da3a3e2363b0b819ae9d39c1b057ef3647d64fed3e7"
+  }
+}

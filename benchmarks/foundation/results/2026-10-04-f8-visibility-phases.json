@@ -1,0 +1,71 @@
+{
+  "runtimeOptimization": false,
+  "sustainedQualification": false,
+  "scope": "One 8-second live dense-5000 diagnostic, medium 1320x2868, frame/CPU instrumentation. Acquisition is not physical display FPS.",
+  "captureId": "b277b411aabd4ab0a29405d91de41706",
+  "frameworkSha256": {
+    "Frameworks/App.framework/App": "2c4962515b5e5aaecd72c67774c52c5584843e569de99f6b3f4506e767a64bb5",
+    "Frameworks/Flutter.framework/Flutter": "e08fbdf66e265db083bfb21947bb72f1c9fd31bdece29bfedb1ae13526272937",
+    "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "8dc1f9b8c15de0a43b6f8970fc2668b5b3dc0556e8cae8d649f110bee24379af",
+    "Frameworks/objective_c.framework/objective_c": "3d90a203af56489cf08f1ae48d702f35098efd72dcdbdf9bf00fb5ac0348a404"
+  },
+  "terminatedExactPid": 7059,
+  "thermal": [
+    "nominal"
+  ],
+  "frames": 330,
+  "visibilityPhasesUs": {
+    "bounds": {
+      "count": 330,
+      "mean": 423.7090909090909,
+      "p50": 419.0,
+      "p95": 502,
+      "p99": 509,
+      "maximum": 547
+    },
+    "indexUpdate": {
+      "count": 330,
+      "mean": 312.1636363636364,
+      "p50": 160.0,
+      "p95": 784,
+      "p99": 838,
+      "maximum": 994
+    },
+    "queries": {
+      "count": 330,
+      "mean": 35.35454545454545,
+      "p50": 35.0,
+      "p95": 43,
+      "p99": 48,
+      "maximum": 54
+    }
+  },
+  "visibilityTotalsMs": {
+    "bounds": 139.824,
+    "indexUpdate": 103.014,
+    "queries": 11.667
+  },
+  "visibilityShares": {
+    "bounds": 0.5493958861319032,
+    "indexUpdate": 0.40476218541875403,
+    "queries": 0.045841928449342845
+  },
+  "visibilityParentUs": {
+    "count": 330,
+    "mean": 771.8121212121212,
+    "p50": 636.0,
+    "p95": 1285,
+    "p99": 1375,
+    "maximum": 1528
+  },
+  "freshAcquisitionsPerSecond": 37.91503241236389,
+  "checks": {
+    "rendererUnitTestsPassed": 29,
+    "appleUnitTestsPassed": 5,
+    "pythonTestsPassed": 23,
+    "clippyWarningsDenied": "pass",
+    "iOSReleaseBuild": "pass",
+    "olderPhaseTraceCompatibility": "pass"
+  },
+  "next": "Measure bounds-construction simplification and attribute spatial-index update spikes before changing rebuild policy."
+}

@@ -1,0 +1,905 @@
+{
+  "baseCommit": "04a14bc58dea9b548803fe3b4a65725a5c2dbbe3",
+  "scope": "Early render admission. Eight-second dense-5000 diagnostics, not sustained display qualification. Normal resolution, medium effects, four buffers and 3000us wait retained.",
+  "sourceSha256": {
+    "platform/apple/src/ring.rs": "86487757ad52bc53ce2af41601c35aa27ce04dac094b1d81e67cf5c06cca2858",
+    "platform/apple/src/lib.rs": "93b10878c151f89909b47610434384fb4a1b03b97577d4babd5fa32e209ccdf7",
+    "benchmarks/mobile/main.dart": "9f1b6e5e5d8b7d435aa565827561073622425ed739da36af6a670123bafded89"
+  },
+  "appNativeSha256": {
+    "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "8a96ed60f07327737bd130afe5379805ea7a149cec9535c54352d61ef2e45883"
+  },
+  "runs": {
+    "f8-diagnosis-live": {
+      "captureId": "98287cb275904a3e815e0a8a82ac52fb",
+      "status": "diagnostic-complete",
+      "terminatedExactPid": 3100,
+      "executableSha256": "ef3857b2264309875f153a55fff8150e638c74753c6d780fc5d92b6bd00f55bf",
+      "thermalStates": [
+        "nominal"
+      ],
+      "statsWindowAcquisitionsPerSecond": 29.286273573425113,
+      "timeline": {
+        "scope": "eight-second diagnostic; acquisition is not physical display presentation",
+        "options": {
+          "time": "2026-10-03T19:19:40.500983Z",
+          "elapsedMs": 0,
+          "event": "start",
+          "captureId": "98287cb275904a3e815e0a8a82ac52fb",
+          "quality": "medium",
+          "timeline": true,
+          "limitSeconds": 8,
+          "sustainedQualification": false,
+          "cpuReadback": false,
+          "cpuTickReadback": false,
+          "acquireWaitUs": 3000,
+          "bufferCount": 4,
+          "resolutionScale": 1.0,
+          "frozenScene": false,
+          "settleTicks": 0
+        },
+        "seconds": 8.024959,
+        "hostFrames": 434,
+        "nativeEvents": {
+          "reserve": 329,
+          "submit_begin": 329,
+          "submitted": 329,
+          "stages": 434,
+          "ready": 328,
+          "notified": 328,
+          "acquire_call": 296,
+          "acquire_begin": 296,
+          "acquire_new": 236,
+          "drop": 105,
+          "acquire_repeat": 60
+        },
+        "matchedAttempts": 434,
+        "renderResults": {
+          "0": 82,
+          "1": 78,
+          "2": 79,
+          "3": 90,
+          "-1": 105
+        },
+        "freshAcquisitionsPerSecond": 29.408249936230202,
+        "hostSimulationUs": {
+          "count": 434,
+          "mean": 10541.850230414746,
+          "p50": 9326.0,
+          "p95": 18848,
+          "p99": 21119,
+          "maximum": 41498
+        },
+        "hostRenderUs": {
+          "count": 434,
+          "mean": 4866.582949308756,
+          "p50": 4706.0,
+          "p95": 5697,
+          "p99": 6314,
+          "maximum": 20799
+        },
+        "hostWorkUs": {
+          "count": 434,
+          "mean": 15409.00460829493,
+          "p50": 14120.5,
+          "p95": 24133,
+          "p99": 27089,
+          "maximum": 51647
+        },
+        "hostStartIntervalUs": {
+          "count": 433,
+          "mean": 18495.75519630485,
+          "p50": 17820,
+          "p95": 26890,
+          "p99": 33408,
+          "maximum": 57050
+        },
+        "simulationSteps": {
+          "0": 1,
+          "2": 43,
+          "3": 2,
+          "1": 388
+        },
+        "simulationTotalMs": 4575.163,
+        "renderTotalMs": 2112.097,
+        "droppedRenderCpuMs": 463.199,
+        "dropOccupancy": {
+          "0,1,1,1,1": 75,
+          "0,0,2,1,1": 30
+        },
+        "submitToCompletionUs": {
+          "count": 329,
+          "mean": 18067.647416413372,
+          "p50": 17672,
+          "p95": 20044,
+          "p99": 21541,
+          "maximum": 71220
+        },
+        "completionToNotifyReturnUs": {
+          "count": 328,
+          "mean": 82.27134146341463,
+          "p50": 72.0,
+          "p95": 144,
+          "p99": 174,
+          "maximum": 249
+        },
+        "completionToAcquisitionUs": {
+          "count": 237,
+          "mean": 7304.814345991561,
+          "p50": 5738,
+          "p95": 19572,
+          "p99": 31890,
+          "maximum": 38598
+        },
+        "acquisitionIntervalUs": {
+          "count": 235,
+          "mean": 33425.04680851064,
+          "p50": 31295,
+          "p95": 51339,
+          "p99": 68889,
+          "maximum": 80153
+        },
+        "acquisitionCallUs": {
+          "count": 296,
+          "mean": 2749.4189189189187,
+          "p50": 3478.5,
+          "p95": 3575,
+          "p99": 3602,
+          "maximum": 5105
+        },
+        "waitingWithCompletedFrameUs": {
+          "count": 236,
+          "mean": 2432.5254237288136,
+          "p50": 3379.0,
+          "p95": 3392,
+          "p99": 3407,
+          "maximum": 3426
+        },
+        "stagesUs": {
+          "extract": {
+            "count": 434,
+            "mean": 1855.4608294930877,
+            "p50": 1819.5,
+            "p95": 2036,
+            "p99": 2092,
+            "maximum": 3782
+          },
+          "prepare": {
+            "count": 434,
+            "mean": 2476.016129032258,
+            "p50": 2326.5,
+            "p95": 3093,
+            "p99": 3378,
+            "maximum": 14919
+          },
+          "encode": {
+            "count": 434,
+            "mean": 30.214285714285715,
+            "p50": 29.0,
+            "p95": 40,
+            "p99": 44,
+            "maximum": 68
+          }
+        },
+        "flutterFramesCovered": 397,
+        "flutterLastRasterUs": 1791055187993002,
+        "flutterBuildUs": {
+          "count": 397,
+          "mean": 15039.596977329975,
+          "p50": 13948,
+          "p95": 23639,
+          "p99": 26303,
+          "maximum": 35277
+        },
+        "flutterRasterUs": {
+          "count": 397,
+          "mean": 2023.3400503778337,
+          "p50": 2658,
+          "p95": 3746,
+          "p99": 3803,
+          "maximum": 8246
+        },
+        "flutterRasterQueueUs": {
+          "count": 397,
+          "mean": 42.7984886649874,
+          "p50": 40,
+          "p95": 74,
+          "p99": 86,
+          "maximum": 101
+        },
+        "flutterVsyncToBuildUs": {
+          "count": 397,
+          "mean": 2486.6649874055415,
+          "p50": 3328,
+          "p95": 5836,
+          "p99": 6270,
+          "maximum": 6486
+        }
+      },
+      "renderRequestToAcquisitionUs": {
+        "count": 238,
+        "mean": 30182.571428571428,
+        "p50": 27424.5,
+        "p95": 44096,
+        "p99": 57444,
+        "maximum": 62318
+      }
+    },
+    "f8-diagnosis-live-repeat": {
+      "captureId": "6f1b31588a2040f8b99e5f324e8b4587",
+      "status": "diagnostic-complete",
+      "terminatedExactPid": 3128,
+      "executableSha256": "ef3857b2264309875f153a55fff8150e638c74753c6d780fc5d92b6bd00f55bf",
+      "thermalStates": [
+        "nominal"
+      ],
+      "statsWindowAcquisitionsPerSecond": 29.641641275113663,
+      "timeline": {
+        "scope": "eight-second diagnostic; acquisition is not physical display presentation",
+        "options": {
+          "time": "2026-10-03T19:30:36.488617Z",
+          "elapsedMs": 0,
+          "event": "start",
+          "captureId": "6f1b31588a2040f8b99e5f324e8b4587",
+          "quality": "medium",
+          "timeline": true,
+          "limitSeconds": 8,
+          "sustainedQualification": false,
+          "cpuReadback": false,
+          "cpuTickReadback": false,
+          "acquireWaitUs": 3000,
+          "bufferCount": 4,
+          "resolutionScale": 1.0,
+          "frozenScene": false,
+          "settleTicks": 0
+        },
+        "seconds": 8.036283,
+        "hostFrames": 391,
+        "nativeEvents": {
+          "reserve": 311,
+          "submit_begin": 311,
+          "submitted": 311,
+          "stages": 391,
+          "ready": 310,
+          "notified": 310,
+          "drop": 80,
+          "acquire_call": 272,
+          "acquire_begin": 272,
+          "acquire_new": 239,
+          "acquire_repeat": 33
+        },
+        "matchedAttempts": 391,
+        "renderResults": {
+          "0": 80,
+          "1": 77,
+          "2": 79,
+          "3": 75,
+          "-1": 80
+        },
+        "freshAcquisitionsPerSecond": 29.740117414979043,
+        "hostSimulationUs": {
+          "count": 391,
+          "mean": 12200.401534526854,
+          "p50": 10014,
+          "p95": 22054,
+          "p99": 23744,
+          "maximum": 24938
+        },
+        "hostRenderUs": {
+          "count": 391,
+          "mean": 5183.355498721227,
+          "p50": 5058,
+          "p95": 6344,
+          "p99": 6938,
+          "maximum": 19811
+        },
+        "hostWorkUs": {
+          "count": 391,
+          "mean": 17384.26854219949,
+          "p50": 15022,
+          "p95": 27790,
+          "p99": 29915,
+          "maximum": 31246
+        },
+        "hostStartIntervalUs": {
+          "count": 390,
+          "mean": 20535.166666666668,
+          "p50": 18986.0,
+          "p95": 33349,
+          "p99": 40940,
+          "maximum": 41679
+        },
+        "simulationSteps": {
+          "0": 1,
+          "2": 90,
+          "1": 300
+        },
+        "simulationTotalMs": 4770.357,
+        "renderTotalMs": 2026.692,
+        "droppedRenderCpuMs": 367.702,
+        "dropOccupancy": {
+          "0,1,3,0,0": 1,
+          "0,0,4,0,0": 4,
+          "0,1,1,1,1": 41,
+          "0,0,2,1,1": 34
+        },
+        "submitToCompletionUs": {
+          "count": 311,
+          "mean": 17850.700964630225,
+          "p50": 17397,
+          "p95": 20562,
+          "p99": 25419,
+          "maximum": 38767
+        },
+        "completionToNotifyReturnUs": {
+          "count": 310,
+          "mean": 90.54516129032258,
+          "p50": 75.0,
+          "p95": 147,
+          "p99": 198,
+          "maximum": 1417
+        },
+        "completionToAcquisitionUs": {
+          "count": 240,
+          "mean": 9511.783333333333,
+          "p50": 6759.5,
+          "p95": 22774,
+          "p99": 27261,
+          "maximum": 60987
+        },
+        "acquisitionIntervalUs": {
+          "count": 238,
+          "mean": 32815.82352941176,
+          "p50": 31214.0,
+          "p95": 52107,
+          "p99": 68580,
+          "maximum": 83410
+        },
+        "acquisitionCallUs": {
+          "count": 272,
+          "mean": 2887.7463235294117,
+          "p50": 3501.0,
+          "p95": 3589,
+          "p99": 3605,
+          "maximum": 3761
+        },
+        "waitingWithCompletedFrameUs": {
+          "count": 239,
+          "mean": 2669.4267782426778,
+          "p50": 3380,
+          "p95": 3394,
+          "p99": 3400,
+          "maximum": 3485
+        },
+        "stagesUs": {
+          "extract": {
+            "count": 391,
+            "mean": 1943.2762148337597,
+            "p50": 1914,
+            "p95": 2223,
+            "p99": 2327,
+            "maximum": 3329
+          },
+          "prepare": {
+            "count": 391,
+            "mean": 2662.2480818414324,
+            "p50": 2547,
+            "p95": 3498,
+            "p99": 3853,
+            "maximum": 14565
+          },
+          "encode": {
+            "count": 391,
+            "mean": 33.22506393861892,
+            "p50": 32,
+            "p95": 45,
+            "p99": 52,
+            "maximum": 58
+          }
+        },
+        "flutterFramesCovered": 355,
+        "flutterLastRasterUs": 1791055843910061,
+        "flutterBuildUs": {
+          "count": 355,
+          "mean": 16857.997183098592,
+          "p50": 14952,
+          "p95": 27304,
+          "p99": 28960,
+          "maximum": 31277
+        },
+        "flutterRasterUs": {
+          "count": 355,
+          "mean": 2230.9718309859154,
+          "p50": 3599,
+          "p95": 3754,
+          "p99": 3787,
+          "maximum": 3932
+        },
+        "flutterRasterQueueUs": {
+          "count": 355,
+          "mean": 37.32676056338028,
+          "p50": 34,
+          "p95": 61,
+          "p99": 84,
+          "maximum": 120
+        },
+        "flutterVsyncToBuildUs": {
+          "count": 355,
+          "mean": 2213.230985915493,
+          "p50": 1282,
+          "p95": 5817,
+          "p99": 6279,
+          "maximum": 6371
+        }
+      },
+      "renderRequestToAcquisitionUs": {
+        "count": 241,
+        "mean": 32544.336099585063,
+        "p50": 28834,
+        "p95": 45711,
+        "p99": 51158,
+        "maximum": 86442
+      }
+    },
+    "f8-diagnosis-untraced-control": {
+      "captureId": "6126a42f25bc4c6fa4e989188e0f08e7",
+      "status": "diagnostic-complete",
+      "terminatedExactPid": 3126,
+      "executableSha256": "ef3857b2264309875f153a55fff8150e638c74753c6d780fc5d92b6bd00f55bf",
+      "thermalStates": [
+        "nominal"
+      ],
+      "statsWindowAcquisitionsPerSecond": 29.238428891766084,
+      "timeline": null
+    },
+    "f8-admission-live": {
+      "captureId": "aa77a6b2334142b599fa7502025aeaa2",
+      "status": "diagnostic-complete",
+      "terminatedExactPid": 3179,
+      "executableSha256": "25f4dfb7701f7d71800963c152c41e7edca3e48c4295785e454cdc75ac05e3fe",
+      "thermalStates": [
+        "nominal"
+      ],
+      "statsWindowAcquisitionsPerSecond": 38.30390316773279,
+      "timeline": {
+        "scope": "eight-second diagnostic; acquisition is not physical display presentation",
+        "options": {
+          "time": "2026-10-03T19:43:03.089070Z",
+          "elapsedMs": 0,
+          "event": "start",
+          "captureId": "aa77a6b2334142b599fa7502025aeaa2",
+          "quality": "medium",
+          "timeline": true,
+          "limitSeconds": 8,
+          "sustainedQualification": false,
+          "cpuReadback": false,
+          "cpuTickReadback": false,
+          "acquireWaitUs": 3000,
+          "bufferCount": 4,
+          "resolutionScale": 1.0,
+          "frozenScene": false,
+          "settleTicks": 0
+        },
+        "seconds": 8.019562,
+        "hostFrames": 510,
+        "nativeEvents": {
+          "reserve": 334,
+          "submit_begin": 334,
+          "submitted": 334,
+          "stages": 334,
+          "ready": 332,
+          "notified": 332,
+          "acquire_call": 318,
+          "acquire_begin": 318,
+          "acquire_new": 309,
+          "drop": 176,
+          "acquire_repeat": 9
+        },
+        "matchedAttempts": 510,
+        "renderResults": {
+          "0": 84,
+          "1": 86,
+          "2": 84,
+          "3": 80,
+          "-1": 176
+        },
+        "freshAcquisitionsPerSecond": 38.53078260383796,
+        "hostSimulationUs": {
+          "count": 510,
+          "mean": 9231.886274509803,
+          "p50": 9445.5,
+          "p95": 17943,
+          "p99": 21239,
+          "maximum": 44115
+        },
+        "hostRenderUs": {
+          "count": 510,
+          "mean": 3358.9607843137255,
+          "p50": 4589.5,
+          "p95": 5784,
+          "p99": 6093,
+          "maximum": 24144
+        },
+        "hostWorkUs": {
+          "count": 510,
+          "mean": 12591.454901960784,
+          "p50": 13829.0,
+          "p95": 22809,
+          "p99": 27614,
+          "maximum": 52638
+        },
+        "hostStartIntervalUs": {
+          "count": 509,
+          "mean": 15724.30648330059,
+          "p50": 16019,
+          "p95": 26689,
+          "p99": 33340,
+          "maximum": 53175
+        },
+        "simulationSteps": {
+          "0": 60,
+          "2": 26,
+          "4": 1,
+          "1": 423
+        },
+        "simulationTotalMs": 4708.262,
+        "renderTotalMs": 1713.07,
+        "droppedRenderCpuMs": 10.624,
+        "dropOccupancy": {
+          "0,1,1,1,1": 153,
+          "0,2,0,1,1": 9,
+          "0,0,2,1,1": 14
+        },
+        "submitToCompletionUs": {
+          "count": 334,
+          "mean": 18656.200598802396,
+          "p50": 18200.0,
+          "p95": 22060,
+          "p99": 24702,
+          "maximum": 59289
+        },
+        "completionToNotifyReturnUs": {
+          "count": 332,
+          "mean": 80.59638554216868,
+          "p50": 62.0,
+          "p95": 138,
+          "p99": 247,
+          "maximum": 3080
+        },
+        "completionToAcquisitionUs": {
+          "count": 309,
+          "mean": 11993.265372168285,
+          "p50": 12914,
+          "p95": 19480,
+          "p99": 21507,
+          "maximum": 31383
+        },
+        "acquisitionIntervalUs": {
+          "count": 308,
+          "mean": 25667.496753246753,
+          "p50": 25023.0,
+          "p95": 41292,
+          "p99": 50778,
+          "maximum": 58127
+        },
+        "acquisitionCallUs": {
+          "count": 318,
+          "mean": 3348.8616352201257,
+          "p50": 3483.0,
+          "p95": 3597,
+          "p99": 3649,
+          "maximum": 5909
+        },
+        "waitingWithCompletedFrameUs": {
+          "count": 309,
+          "mean": 3206.1650485436894,
+          "p50": 3381,
+          "p95": 3395,
+          "p99": 3399,
+          "maximum": 3444
+        },
+        "stagesUs": {
+          "extract": {
+            "count": 334,
+            "mean": 1854.1107784431138,
+            "p50": 1805.0,
+            "p95": 2065,
+            "p99": 2250,
+            "maximum": 3273
+          },
+          "prepare": {
+            "count": 334,
+            "mean": 2553.9041916167666,
+            "p50": 2498.0,
+            "p95": 3156,
+            "p99": 3334,
+            "maximum": 15251
+          },
+          "encode": {
+            "count": 334,
+            "mean": 32.19760479041916,
+            "p50": 30.0,
+            "p95": 44,
+            "p99": 49,
+            "maximum": 150
+          }
+        },
+        "flutterFramesCovered": 473,
+        "flutterLastRasterUs": 1791056590551426,
+        "flutterBuildUs": {
+          "count": 473,
+          "mean": 12157.780126849895,
+          "p50": 13775,
+          "p95": 17501,
+          "p99": 26456,
+          "maximum": 52696
+        },
+        "flutterRasterUs": {
+          "count": 473,
+          "mean": 2281.644820295983,
+          "p50": 3598,
+          "p95": 3763,
+          "p99": 4709,
+          "maximum": 11501
+        },
+        "flutterRasterQueueUs": {
+          "count": 473,
+          "mean": 395.615221987315,
+          "p50": 40,
+          "p95": 3546,
+          "p99": 3621,
+          "maximum": 3666
+        },
+        "flutterVsyncToBuildUs": {
+          "count": 473,
+          "mean": 1339.8139534883721,
+          "p50": 73,
+          "p95": 5383,
+          "p99": 5815,
+          "maximum": 6361
+        }
+      },
+      "renderRequestToAcquisitionUs": {
+        "count": 311,
+        "mean": 35699.41800643087,
+        "p50": 36041,
+        "p95": 43563,
+        "p99": 45451,
+        "maximum": 90598
+      }
+    },
+    "f8-admission-live-repeat": {
+      "captureId": "9ffb9734d46e4fab884f3f47427bcf8a",
+      "status": "diagnostic-complete",
+      "terminatedExactPid": 3181,
+      "executableSha256": "25f4dfb7701f7d71800963c152c41e7edca3e48c4295785e454cdc75ac05e3fe",
+      "thermalStates": [
+        "nominal"
+      ],
+      "statsWindowAcquisitionsPerSecond": 39.102159451110616,
+      "timeline": {
+        "scope": "eight-second diagnostic; acquisition is not physical display presentation",
+        "options": {
+          "time": "2026-10-03T19:44:03.071828Z",
+          "elapsedMs": 0,
+          "event": "start",
+          "captureId": "9ffb9734d46e4fab884f3f47427bcf8a",
+          "quality": "medium",
+          "timeline": true,
+          "limitSeconds": 8,
+          "sustainedQualification": false,
+          "cpuReadback": false,
+          "cpuTickReadback": false,
+          "acquireWaitUs": 3000,
+          "bufferCount": 4,
+          "resolutionScale": 1.0,
+          "frozenScene": false,
+          "settleTicks": 0
+        },
+        "seconds": 8.027475,
+        "hostFrames": 505,
+        "nativeEvents": {
+          "reserve": 340,
+          "submit_begin": 340,
+          "submitted": 340,
+          "stages": 340,
+          "ready": 339,
+          "notified": 339,
+          "drop": 165,
+          "acquire_call": 327,
+          "acquire_begin": 327,
+          "acquire_new": 315,
+          "acquire_repeat": 12
+        },
+        "matchedAttempts": 505,
+        "renderResults": {
+          "0": 85,
+          "1": 85,
+          "2": 86,
+          "3": 84,
+          "-1": 165
+        },
+        "freshAcquisitionsPerSecond": 39.24023432025636,
+        "hostSimulationUs": {
+          "count": 505,
+          "mean": 9399.273267326733,
+          "p50": 9531,
+          "p95": 19258,
+          "p99": 21080,
+          "maximum": 24747
+        },
+        "hostRenderUs": {
+          "count": 505,
+          "mean": 3504.041584158416,
+          "p50": 4617,
+          "p95": 5938,
+          "p99": 6635,
+          "maximum": 19831
+        },
+        "hostWorkUs": {
+          "count": 505,
+          "mean": 12903.80594059406,
+          "p50": 14067,
+          "p95": 24508,
+          "p99": 26825,
+          "maximum": 29632
+        },
+        "hostStartIntervalUs": {
+          "count": 504,
+          "mean": 15890.505952380952,
+          "p50": 16129.5,
+          "p95": 25329,
+          "p99": 33383,
+          "maximum": 35435
+        },
+        "simulationSteps": {
+          "0": 66,
+          "1": 398,
+          "2": 41
+        },
+        "simulationTotalMs": 4746.633,
+        "renderTotalMs": 1769.541,
+        "droppedRenderCpuMs": 11.349,
+        "dropOccupancy": {
+          "0,0,4,0,0": 5,
+          "0,1,1,1,1": 143,
+          "0,2,0,1,1": 9,
+          "0,0,2,1,1": 8
+        },
+        "submitToCompletionUs": {
+          "count": 340,
+          "mean": 18763.529411764706,
+          "p50": 18019.5,
+          "p95": 23279,
+          "p99": 30470,
+          "maximum": 47385
+        },
+        "completionToNotifyReturnUs": {
+          "count": 339,
+          "mean": 70.15044247787611,
+          "p50": 63,
+          "p95": 136,
+          "p99": 197,
+          "maximum": 259
+        },
+        "completionToAcquisitionUs": {
+          "count": 316,
+          "mean": 11410.75,
+          "p50": 11257.0,
+          "p95": 19742,
+          "p99": 22925,
+          "maximum": 55719
+        },
+        "acquisitionIntervalUs": {
+          "count": 314,
+          "mean": 24910.78025477707,
+          "p50": 24641.5,
+          "p95": 38417,
+          "p99": 45028,
+          "maximum": 51241
+        },
+        "acquisitionCallUs": {
+          "count": 327,
+          "mean": 3378.3333333333335,
+          "p50": 3494,
+          "p95": 3599,
+          "p99": 3638,
+          "maximum": 5422
+        },
+        "waitingWithCompletedFrameUs": {
+          "count": 315,
+          "mean": 3239.790476190476,
+          "p50": 3382,
+          "p95": 3398,
+          "p99": 3400,
+          "maximum": 3416
+        },
+        "stagesUs": {
+          "extract": {
+            "count": 340,
+            "mean": 1877.1911764705883,
+            "p50": 1848.0,
+            "p95": 2174,
+            "p99": 2508,
+            "maximum": 3049
+          },
+          "prepare": {
+            "count": 340,
+            "mean": 2608.1617647058824,
+            "p50": 2516.5,
+            "p95": 3290,
+            "p99": 3531,
+            "maximum": 14557
+          },
+          "encode": {
+            "count": 340,
+            "mean": 31.558823529411764,
+            "p50": 30.0,
+            "p95": 44,
+            "p99": 48,
+            "maximum": 71
+          }
+        },
+        "flutterFramesCovered": 465,
+        "flutterLastRasterUs": 1791056650543644,
+        "flutterBuildUs": {
+          "count": 465,
+          "mean": 12427.307526881721,
+          "p50": 14011,
+          "p95": 19071,
+          "p99": 25845,
+          "maximum": 27087
+        },
+        "flutterRasterUs": {
+          "count": 465,
+          "mean": 2487.589247311828,
+          "p50": 3605,
+          "p95": 3776,
+          "p99": 5054,
+          "maximum": 5580
+        },
+        "flutterRasterQueueUs": {
+          "count": 465,
+          "mean": 268.2021505376344,
+          "p50": 38,
+          "p95": 2129,
+          "p99": 3633,
+          "maximum": 3654
+        },
+        "flutterVsyncToBuildUs": {
+          "count": 465,
+          "mean": 1153.8645161290322,
+          "p50": 66,
+          "p95": 5425,
+          "p99": 6009,
+          "maximum": 6382
+        }
+      },
+      "renderRequestToAcquisitionUs": {
+        "count": 317,
+        "mean": 34964.0189274448,
+        "p50": 35059,
+        "p95": 43953,
+        "p99": 51253,
+        "maximum": 81868
+      }
+    },
+    "f8-admission-untraced-control": {
+      "captureId": "5268875b564d4dd0aa4030267dfe53a9",
+      "status": "diagnostic-complete",
+      "terminatedExactPid": 3182,
+      "executableSha256": "25f4dfb7701f7d71800963c152c41e7edca3e48c4295785e454cdc75ac05e3fe",
+      "thermalStates": [
+        "nominal"
+      ],
+      "statsWindowAcquisitionsPerSecond": 36.2979077811114,
+      "timeline": null
+    }
+  },
+  "finalSourceSha256": {
+    "platform/apple/src/ring.rs": "7edfea88b0bc82246a7117e29a4baadb9624e1132a4dfe75e0d7596d5c8616cd",
+    "platform/apple/src/lib.rs": "93b10878c151f89909b47610434384fb4a1b03b97577d4babd5fa32e209ccdf7",
+    "benchmarks/mobile/main.dart": "9f1b6e5e5d8b7d435aa565827561073622425ed739da36af6a670123bafded89"
+  },
+  "postCaptureChange": "Presentation lag counts actual newer submitted slots rather than reservation identifier distance; regression added for cancelled/reserved identifiers. No cancellations occurred in the timing captures."
+}

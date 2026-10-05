@@ -232,3 +232,297 @@ Mac runs. Final update order and descendant invalidation remain unchanged.
 middle-node regression. Both bounded phone captures completed and their exact
 PIDs were stopped; fresh-frame delivery still varied around 26–30/s. F8 stays
 open. [Evidence](../benchmarks/foundation/results/2026-10-03-f8-sync-hierarchy.json).
+
+### Correlated frame diagnosis follow-up
+
+See [the ranked performance diagnosis](foundation-f8-performance-diagnosis.md)
+for nine controlled iPhone captures, raw traces and the next implementation
+acceptance criteria. Both live CPU work and full-resolution GPU work exceed the
+120 Hz budget; texture admission/acquisition compounds the loss. Instrumentation
+and controlled isolation are complete for this batch. Sustained performance and
+physical-display pacing qualification remain open; no production quality or
+buffer-count default was changed.
+
+### Early admission implementation
+
+[Early render admission](foundation-f8-render-admission.md) now skips world
+extraction and GPU preparation when the texture ring is full. Native lifetime,
+error/panic, Async-progress and one-frame-input regressions pass. Two bounded
+phone traces reached 38.5/39.2 fresh acquisitions/s; the untraced control reached
+36.3 versus 29.2 before. Render-request age at acquisition increased, so throughput
+improvement is not a pacing/latency qualification. GPU and scheduling work remain.
+
+### Presentation wait policy
+
+[Ready-image acquisition](foundation-f8-presentation-wait.md) now avoids waiting
+for a newer GPU frame when a completed image is available. Native regressions,
+Clippy, Flutter tests and the release build pass. Median acquisition calls fell
+from about 3.5 ms to 0.1 ms; request-to-acquisition medians improved to 33–34 ms.
+Fresh acquisition throughput varied between 39.2 and 43.0/s in traced runs; the
+untraced control reached 42.1/s. Interval tails remain variable. This is a partial
+latency improvement, not sustained performance or motion-quality qualification.
+
+### Current AO/contact isolation and rejected blur candidate
+
+[Effect isolation](foundation-f8-effect-isolation.md) measured 19.39 ms full-quality
+GPU time versus 6.91 ms with both screen-space effects disabled in the same frozen
+dense scene. The diagnostic profiles retain all unrelated quality settings.
+A white-tile blur shortcut passed pixel comparisons but did not establish a
+reliable live-scene delivery improvement; it was removed and the original app
+restored. Expanded image/reference tests and diagnostic controls remain. No
+production rendering-quality reduction or new performance pass is claimed.
+
+### Rejected half-resolution reconstruction
+
+[Reconstruction experiment](foundation-f8-reconstruction.md) increased frozen GPU
+time from 19.37 to 25.12 ms and shortened contact shadows despite passing the old
+image tests. The candidate was removed; original source and iPhone app are
+restored. A permanent shadow-extent check fails the candidate and passes the
+original. No performance gate or production quality change results from this batch.
+
+### Contact ray projection follow-up — 2026-10-04
+
+The [contact projection experiment](foundation-f8-effect-isolation.md#contact-ray-projection-follow-up--2026-10-04)
+showed no useful performance gain (19.360 vs 19.417 ms GPU; slightly lower
+acquisition throughput). Original shader and phone app are restored. Permanent
+perspective/orthographic and MSAA 1/4 contact-shadow coverage remains: 54 rendering
+checks pass, and all 67 candidate/control images match. F8 remains open.
+
+### Bounded Metal execution diagnosis — 2026-10-04
+
+The [distance-cache and Metal diagnosis](foundation-f8-metal-diagnosis.md) rejects
+an extra 14.44 MiB distance buffer: only a small GPU reduction and worse texture
+delivery were observed. Original rendering is restored. Exact-PID Metal recording
+and interval analysis now provide per-encoder evidence: AO fragment work, main
+scene fragment shading and the compute blur are substantial. The available
+hardware counter does not diagnose memory/occupancy, so that attribution remains
+open. No new rendering speedup or F8 qualification pass is claimed.
+
+### Retained shared-lighting guards — 2026-10-04
+
+[Lighting work guards](foundation-f8-light-guards.md) skip unused environment
+fetches and sun visibility when the shading normal faces away. All 68 compared
+images match; 55 rendering and 29 renderer unit checks pass, with Clippy clean.
+Repeated frozen GPU timings improve from 19.33 to 18.22–18.47 ms; live GPU timings
+improve from 17.14 to 16.54–16.57 ms. Live acquisition throughput does not improve
+consistently. This is a retained GPU-cost reduction with no new buffers or quality
+reduction, not an FPS, smoothness, thermal or F8 qualification pass.
+
+### CPU follow-up — 2026-10-04
+
+A [fresh 479-tick device diagnostic](foundation-f8-cpu-followup.md) measures a
+6.839 ms native step and 4.207 ms physics-system median. The dense fixture includes
+5,000 moving colliders, not stationary scenery. A visual-leaf relevance filter
+showed no useful synchronization gain in the Mac phase diagnostic and was removed.
+CPU Time Profiler attachment failed twice; no internal phone phase attribution is
+claimed. Prior lighting improvements remain; F8 remains open.
+
+### Phone physics phase attribution — 2026-10-04
+
+The [bounded native phase trace](foundation-f8-physics-phases.md) now resolves the
+CPU follow-up's missing internal attribution: 479 matched ticks show 1.873 ms
+synchronization, 0.996 ms solver and 3.185 ms total adapter medians. The complete
+physics-system median is 4.344 ms; its additional propagation/event work needs
+further attribution. No solver or workload change is justified by this capture.
+This diagnostic does not establish an FPS improvement or close F8.
+
+### Synchronization hierarchy reduction — 2026-10-04
+
+[Four live phone captures](foundation-f8-sync-hierarchy.md) isolate collection,
+hierarchy, input validation and application costs. Skipping descendant-walk setup
+for leaves reduces hierarchy median about 19% (roughly 55 µs per tick), with the
+full candidate set and physics semantics preserved. Whole native-step timing does
+not improve; no FPS or sustained qualification pass is claimed. Validation and
+application remain the larger synchronization costs. F8 remains open.
+
+### Physics entry lookup reuse — 2026-10-04
+
+[Repeated live captures](foundation-f8-entry-lookup.md) support retaining reuse
+of the existing entry lookup during physics updates. Application cost drops
+16–18% (112–128 µs per tick), with no new cache or changed validation. Whole-step
+medians are mixed and p95 does not improve; no FPS/latency qualification is
+claimed. Validation/classification, core propagation/events and GPU work remain.
+
+### Validation-path follow-up — 2026-10-04
+
+A [Mac-only validation probe and comparison](foundation-f8-validation-followup.md)
+found no consistent total benefit from moving unchanged-entry checks into update
+application. The candidate and temporary instrumentation were removed; prior
+retained optimizations remain. No phone run or new FPS claim. Next attribution
+target is the core propagation/event residual outside the physics adapter.
+
+### Core physics propagation attribution — 2026-10-04
+
+[480 matched live iPhone ticks](foundation-f8-core-physics-phases.md) identify
+1.135 ms median transform propagation before physics, versus 0.0011 ms core
+event/rejection handling. The instrumented core stage is 4.130 ms median. No
+runtime optimization or FPS improvement is claimed; transform propagation is
+the next measured target. F8 remains open.
+
+### Shared propagation reads — 2026-10-04
+
+[Repeated live iPhone comparisons](foundation-f8-propagation.md) support retaining
+shared query views during transform propagation, with precise per-entity writes.
+Propagation medians fall 24–27% (0.27–0.31 ms/tick); native-step medians and p95
+improve in both phase comparisons. Without extra tracing, acquisition throughput
+is effectively unchanged at 43.43 vs 43.44/s. This is a CPU reduction, not an FPS
+or sustained qualification pass. Sparse notifications and matrix correctness have
+permanent regression coverage; 25 scene and 375 core checks pass. F8 remains open.
+
+### Redundant dirty-write experiment — 2026-10-04
+
+[The candidate was removed](foundation-f8-dirty-writes.md): propagation became
+cheaper, but phone whole-step timings were mixed. Untraced acquisition fell
+40.54→36.65/s in one pair and tied at 44.24/44.28 in reverse order. No consistent
+end-to-end benefit or consistent regression is established. Prior retained
+optimizations remain; expanded setter/raw-write propagation coverage stays.
+F8 remains open; further work should return to rendering costs.
+
+### Bilateral blur tile experiment — 2026-10-04
+
+[16×16 and 16×8 candidates](foundation-f8-blur-tiles.md) preserve all 68 reference
+images but increase measured blur spans and reduce frozen-scene acquisitions
+relative to both 8×8 controls. Both candidates were removed. The original kernel
+and prior improvements remain; three additional scalar-reference boundary sizes
+are retained. No FPS improvement or F8 completion is claimed.
+
+### AO neighbour reconstruction experiment — 2026-10-04
+
+[The select-before-reconstruct candidate](foundation-f8-ao-neighbour.md) was
+removed. Its initial AO-span advantage reversed on repetition, whole-frame GPU
+cost was effectively unchanged, and acquisitions were lower in both pairs.
+One of 68 reference images had small differences. Restoring the original shader
+restores all images exactly; 29 unit and 55 shading checks pass. F8 remains open.
+
+### Metal profiling startup — 2026-10-04
+
+[A new execution baseline](foundation-f8-profiler-gate.md) confirms AO/contact
+fragment 5.858 ms and blur compute 3.749 ms median active intervals (overlapping,
+not additive). Isolated-effect captures remain incomplete because Instruments
+rejects launched PIDs. The new bounded startup gate is covered by 19 Python checks
+and a successful manual phone handshake, but a successful gated Metal recording
+is still pending. No renderer optimization or FPS gain is claimed. F8 stays open.
+
+### Isolated Metal execution recovered — 2026-10-04
+
+[Three gated exact-PID recordings](foundation-f8-metal-effects.md) succeed after
+USB reconnection. Common-window active estimate intervals are 3.531 ms AO-only,
+1.934 ms contact-only and 5.988 ms combined; the shared blur remains about 4 ms.
+The capture gate gains partial-transfer/cancellation regression coverage and the
+analyzer excludes crossing executions from optional time windows. 20 Python
+checks, Dart gate regressions, analysis and iOS build pass. No renderer FPS gain
+or sustained qualification is claimed; F8 remains open.
+
+### Fixed interior blur candidate — pending acceptance, 2026-10-04
+
+[The candidate](foundation-f8-fixed-blur.md) passes 29 unit and 55 shading checks
+with unchanged tolerances; 66/68 images match exactly and two have one-level
+colour differences. Frozen GPU measurements improve, but the repeat control is
+thermally warmer and live delivery is untested. Candidate remains unqualified in
+the working tree pending cooldown confirmation and live comparison. F8 stays open.
+
+### Fixed interior blur live decision — 2026-10-04
+
+[The candidate was removed](foundation-f8-fixed-blur.md) after cooled live testing.
+GPU medians improve about 5%, but acquisitions fall 41.025→36.989/s in the first
+pair and rise 38.319→40.853/s in reverse order with a warmer control. This does not
+establish a consistent end-to-end benefit or regression. Original shader and
+release app restored; 29 unit and 55 shading checks pass, with all 68 reference
+images exact after restoration. Extra boundary tests stay. F8 remains open.
+
+### Live CPU/frame correlation — 2026-10-04
+
+[A matched 509-frame/480-tick trace](foundation-f8-live-critical-path.md) records
+4.92 s simulation and 1.93 s rendering calls over an 8.04 s host window. One-tick
+host frames have 14.24 ms median work; two-tick frames 27.54 ms. Snapshot/bridge
+bookkeeping and dropped-render work are small relative to simulation and render
+preparation. Analyzer identity/catch-up checks pass (21 Python checks total).
+No runtime optimization or FPS gain claimed. Next candidate: shared ECS reads
+during extraction, with full-frame verification. F8 remains open.
+
+## 2026-10-04 — shared extraction query
+
+Retained shared read-query extraction after 376 release core tests, Clippy,
+local qualification and iOS release build. Nominal phone pair: extraction p50
+2.067→1.584 ms; new acquisitions 34.32→39.72/s (instrumented, not display FPS).
+Repeat extraction 1.589 ms, but thermal fair: stopped testing and excluded the
+repeat from controlled throughput acceptance. Cooled reverse-order comparison
+and sustained performance remain open. No quality/workload reduction.
+See [extraction evidence](foundation-f8-extract-views.md). F8 remains open.
+
+## 2026-10-04 — renderer preparation attribution
+
+Added nine disjoint CPU phase timers and checked host-frame correlation. One
+unlocked iPhone diagnostic completed with nominal thermal samples and exact-PID
+termination. Instance construction p50 1.209 ms; visibility 0.632 ms; batching and
+uploads 0.337 ms. Instances plus visibility account for 71.5% of preparation total.
+29 renderer, five Apple and 22 Python tests pass; Clippy and iOS release build pass.
+No FPS improvement or sustained qualification claimed. Next measured experiment:
+direct record-index lookup in instance construction. Extraction reverse-order
+comparison remains pending. See [phase evidence](foundation-f8-prepare-phases.md).
+
+## 2026-10-04 — direct record lookup experiment rejected
+
+Tested a dense array instead of the per-world mesh-record hash map. Instance p50
+improved 1.1935→1.079 ms and 1.200→1.072 ms, but acquisitions fell 39.16→32.87/s
+in the first pair and tied 39.44→39.46/s in the repeat. Final candidate includes
+an unknown thermal window. No repeatable whole-frame gain established; restored
+the original source and app. 29 restored unit tests, 55 shading tests and all 68
+reference images pass/match. Candidate source/test/evidence archived. F8 remains
+open. See [experiment](foundation-f8-dense-lookup.md).
+
+## 2026-10-04 — visibility cost attribution
+
+Added checked nested CPU visibility timing. One eight-second nominal iPhone
+capture: bounds construction 54.9%, index update 40.5%, queries 4.6% of visibility
+time; medians 0.419/0.160/0.035 ms. Index-update p95 0.784 ms; rebuild/refit cause
+not yet isolated. 29 renderer, five Apple and 23 Python checks pass, plus Clippy
+and iOS build. Exact PID stopped. No runtime speedup or sustained qualification
+claimed. Next: bounds construction and hierarchy-update attribution. F8 remains
+open. See [visibility evidence](foundation-f8-visibility-phases.md).
+
+## 2026-10-04 — bounds reduction and hierarchy update classification
+
+Retained bounds reduction: compute fallback spheres only for meshless records;
+main-world identity multiplication removed. 31 renderer + 55 shading + five Apple
++ 24 Python tests pass; 68 images identical, Clippy/iOS build pass. Nominal candidate
+bounds p50 0.344 ms versus controls 0.468/0.497; preparation also lower. Initial
+control has an unknown thermal window; final candidate fair, so stopped and left
+cooled repeat/throughput qualification open. New hierarchy classification identifies
+initial/membership rebuilds (~0.798 ms) versus dense refits (~0.167 ms); no
+cost-triggered rebuilds in first control. Next: membership churn without whole-tree
+rebuilds, preserving correctness. F8 remains open.
+See [bounds evidence](foundation-f8-bounds-work.md).
+
+## 2026-10-05 — visibility membership repair retained
+
+Small membership changes now repair leaves, refresh all current bounds, reuse
+node slots and rebuild traversal metadata without spatial repartitioning. Large
+or cumulative changes, cost growth and excessive depth retain full-build paths.
+34 renderer + 55 shading + five Apple + 24 Python tests pass; 68 images identical;
+Clippy and iOS build pass. Three nominal captures: control 102 rebuilds versus one
+initial build per candidate, with 97/87 repairs. Index p95 0.751→0.229/0.216 ms.
+Acquisitions 42.77 versus 42.22/43.62/s: no overall FPS gain claimed. Exact PIDs
+stopped. F8 and sustained qualification remain open.
+See [membership evidence](foundation-f8-membership-repair.md).
+
+## 2026-10-05 — shared pose reads, mobile comparison pending
+
+Implemented shared ECS reads and carried proposal inputs in world-pose preparation,
+with unchanged atomic publication. 27 scene + 376 core tests, Clippy and iOS build
+pass. Local 5,000-root conversion median 343.334→106.541 µs. Device control native
+median 7.1915 ms / lookAtCamera 0.735 ms; candidate 7.088 / 0.638 ms, but candidate
+thermal fair. Stopped exact PID and requested cooldown; no mobile gain accepted.
+Implementation remains in working tree pending cooled comparison. F8 remains open.
+See [pose-read evidence](foundation-f8-pose-views.md).
+
+## 2026-10-05 — shared pose reads retained after normal-thermal repeats
+
+All-nominal candidate/control/candidate eight-second sequence completed, with
+exact PIDs stopped. LookAtCamera medians 0.6745 / 0.736 / 0.628 ms support an
+8–15% targeted saving. Native ticks 7.385 / 7.202 / 7.020 ms and acquisitions
+37.52 / 39.06 / 39.95 per second do not establish repeatable whole-frame gain.
+Retained on local correctness and targeted CPU evidence; earlier fair candidate
+remains excluded. No quality/workload/rate reductions. F8 and sustained thermal
+60/120 FPS qualification remain open. Physics synchronization and GPU screen-space
+costs remain the larger priorities. See [pose-read evidence](foundation-f8-pose-views.md).

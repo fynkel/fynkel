@@ -1,0 +1,347 @@
+{
+  "retained": true,
+  "sustainedQualification": false,
+  "scope": "Four 8-second dense-5000 medium full-resolution frame/CPU diagnostics. Acquisition is not display FPS.",
+  "decision": "Retain bounds-work reduction and update classification. Rendering unchanged, lower bounds/preparation times in nominal candidate versus both controls. First control has unknown startup thermal sample; final candidate fair excluded from controlled throughput acceptance. Cooled repeat remains outstanding.",
+  "runs": [
+    {
+      "label": "control",
+      "captureId": "ea0c997d35b74df994b1580342a1831c",
+      "frameworkSha256": {
+        "Frameworks/App.framework/App": "c3bb1902b10d9952c0584e715f63710c57fcb332bbf14f4f37fa3af7c22cfc7f",
+        "Frameworks/Flutter.framework/Flutter": "8112995a78b5f703c1a78a15f98d6d95b217a8611176329a269a630da8e567c0",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "089143b496a0d0f59f9cd50eca31b3f275cc81de4a31cf959522326a6f1509f6",
+        "Frameworks/objective_c.framework/objective_c": "476d79979a82c9e90c7745e357bcaa7e10e1a2bd7db8391c211bb5a55238c3fa"
+      },
+      "terminatedExactPid": 7080,
+      "thermal": [
+        "nominal",
+        "unknown"
+      ],
+      "visibilityPhasesUs": {
+        "bounds": {
+          "count": 251,
+          "mean": 475.6772908366534,
+          "p50": 468,
+          "p95": 594,
+          "p99": 601,
+          "maximum": 699
+        },
+        "indexUpdate": {
+          "count": 251,
+          "mean": 358.7171314741036,
+          "p50": 186,
+          "p95": 911,
+          "p99": 983,
+          "maximum": 1005
+        },
+        "queries": {
+          "count": 251,
+          "mean": 41.0796812749004,
+          "p50": 40,
+          "p95": 53,
+          "p99": 55,
+          "maximum": 60
+        }
+      },
+      "visibilityUpdateKinds": {
+        "membershipRebuild": {
+          "durationsUs": {
+            "count": 74,
+            "mean": 803.9459459459459,
+            "p50": 798.0,
+            "p95": 981,
+            "p99": 993,
+            "maximum": 1005
+          },
+          "totalMs": 59.492
+        },
+        "denseRefit": {
+          "durationsUs": {
+            "count": 177,
+            "mean": 172.57627118644066,
+            "p50": 167,
+            "p95": 213,
+            "p99": 227,
+            "maximum": 241
+          },
+          "totalMs": 30.546
+        }
+      },
+      "prepareUs": {
+        "count": 251,
+        "mean": 3212.3147410358565,
+        "p50": 3149,
+        "p95": 4199,
+        "p99": 4457,
+        "maximum": 15581
+      },
+      "freshAcquisitionsPerSecond": 29.542745610533874,
+      "cpuTotalsMs": {
+        "simulationUs": 5607.968,
+        "renderUs": 1566.022,
+        "workUs": 7176.056,
+        "nativeStepUs": 3833.418,
+        "nativeHostUs": 3872.967,
+        "behaviourHostUs": 1705.349,
+        "probeUs": 2.197
+      }
+    },
+    {
+      "label": "candidate",
+      "captureId": "e1152e50f94143949a10456af7573d6e",
+      "frameworkSha256": {
+        "Frameworks/App.framework/App": "9a02c515afa911677d6bfc03cb17b91d37a0842f68e855f71e1fa7dd2dbc8e6c",
+        "Frameworks/Flutter.framework/Flutter": "b399a05986162844d29dee6a95f37fc278015162d8fde4b51245e931435a83c7",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "e322896b54e9b98498537cb816116640852ea7f339d67fd21b24dbabad395ae9",
+        "Frameworks/objective_c.framework/objective_c": "f7f62cb98e267aa53815e24d2ca476047eb9ac0e3b8d476097e73fb0dbc023fe"
+      },
+      "terminatedExactPid": 7095,
+      "thermal": [
+        "nominal"
+      ],
+      "visibilityPhasesUs": {
+        "bounds": {
+          "count": 306,
+          "mean": 356.859477124183,
+          "p50": 344.0,
+          "p95": 443,
+          "p99": 480,
+          "maximum": 599
+        },
+        "indexUpdate": {
+          "count": 306,
+          "mean": 339.718954248366,
+          "p50": 175.0,
+          "p95": 837,
+          "p99": 889,
+          "maximum": 983
+        },
+        "queries": {
+          "count": 306,
+          "mean": 37.59803921568628,
+          "p50": 36.0,
+          "p95": 48,
+          "p99": 51,
+          "maximum": 60
+        }
+      },
+      "visibilityUpdateKinds": {
+        "membershipRebuild": {
+          "durationsUs": {
+            "count": 94,
+            "mean": 741.3085106382979,
+            "p50": 736.5,
+            "p95": 868,
+            "p99": 923,
+            "maximum": 983
+          },
+          "totalMs": 69.683
+        },
+        "denseRefit": {
+          "durationsUs": {
+            "count": 212,
+            "mean": 161.6556603773585,
+            "p50": 156.0,
+            "p95": 198,
+            "p99": 211,
+            "maximum": 261
+          },
+          "totalMs": 34.271
+        }
+      },
+      "prepareUs": {
+        "count": 306,
+        "mean": 2859.797385620915,
+        "p50": 2796.5,
+        "p95": 3628,
+        "p99": 4059,
+        "maximum": 17651
+      },
+      "freshAcquisitionsPerSecond": 33.69260464798216,
+      "cpuTotalsMs": {
+        "simulationUs": 4935.547,
+        "renderUs": 1674.073,
+        "workUs": 6611.696,
+        "nativeStepUs": 3363.984,
+        "nativeHostUs": 3396.321,
+        "behaviourHostUs": 1515.741,
+        "probeUs": 1.957
+      }
+    },
+    {
+      "label": "control-repeat",
+      "captureId": "b19b0f30cce9481992c79e82dddbbe1d",
+      "frameworkSha256": {
+        "Frameworks/App.framework/App": "c3bb1902b10d9952c0584e715f63710c57fcb332bbf14f4f37fa3af7c22cfc7f",
+        "Frameworks/Flutter.framework/Flutter": "8112995a78b5f703c1a78a15f98d6d95b217a8611176329a269a630da8e567c0",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "089143b496a0d0f59f9cd50eca31b3f275cc81de4a31cf959522326a6f1509f6",
+        "Frameworks/objective_c.framework/objective_c": "476d79979a82c9e90c7745e357bcaa7e10e1a2bd7db8391c211bb5a55238c3fa"
+      },
+      "terminatedExactPid": 7097,
+      "thermal": [
+        "nominal"
+      ],
+      "visibilityPhasesUs": {
+        "bounds": {
+          "count": 249,
+          "mean": 498.2931726907631,
+          "p50": 497,
+          "p95": 596,
+          "p99": 635,
+          "maximum": 648
+        },
+        "indexUpdate": {
+          "count": 249,
+          "mean": 381.6265060240964,
+          "p50": 191,
+          "p95": 903,
+          "p99": 969,
+          "maximum": 1660
+        },
+        "queries": {
+          "count": 249,
+          "mean": 41.66265060240964,
+          "p50": 41,
+          "p95": 51,
+          "p99": 61,
+          "maximum": 112
+        }
+      },
+      "visibilityUpdateKinds": {
+        "membershipRebuild": {
+          "durationsUs": {
+            "count": 84,
+            "mean": 786.6666666666666,
+            "p50": 777.0,
+            "p95": 922,
+            "p99": 992,
+            "maximum": 1660
+          },
+          "totalMs": 66.08
+        },
+        "denseRefit": {
+          "durationsUs": {
+            "count": 165,
+            "mean": 175.42424242424244,
+            "p50": 170,
+            "p95": 218,
+            "p99": 291,
+            "maximum": 447
+          },
+          "totalMs": 28.945
+        }
+      },
+      "prepareUs": {
+        "count": 249,
+        "mean": 3365.0642570281125,
+        "p50": 3269,
+        "p95": 4367,
+        "p99": 4733,
+        "maximum": 18088
+      },
+      "freshAcquisitionsPerSecond": 29.167099810563425,
+      "cpuTotalsMs": {
+        "simulationUs": 5492.103,
+        "renderUs": 1614.537,
+        "workUs": 7108.851,
+        "nativeStepUs": 3758.227,
+        "nativeHostUs": 3797.172,
+        "behaviourHostUs": 1661.075,
+        "probeUs": 2.451
+      }
+    },
+    {
+      "label": "candidate-repeat",
+      "captureId": "9d663ae2a21a48cb96f7d50e44bc5d8c",
+      "frameworkSha256": {
+        "Frameworks/App.framework/App": "9a02c515afa911677d6bfc03cb17b91d37a0842f68e855f71e1fa7dd2dbc8e6c",
+        "Frameworks/Flutter.framework/Flutter": "b399a05986162844d29dee6a95f37fc278015162d8fde4b51245e931435a83c7",
+        "Frameworks/fynkel_platform_apple.framework/fynkel_platform_apple": "e322896b54e9b98498537cb816116640852ea7f339d67fd21b24dbabad395ae9",
+        "Frameworks/objective_c.framework/objective_c": "f7f62cb98e267aa53815e24d2ca476047eb9ac0e3b8d476097e73fb0dbc023fe"
+      },
+      "terminatedExactPid": 7103,
+      "thermal": [
+        "fair"
+      ],
+      "visibilityPhasesUs": {
+        "bounds": {
+          "count": 262,
+          "mean": 388.9465648854962,
+          "p50": 384.0,
+          "p95": 484,
+          "p99": 488,
+          "maximum": 547
+        },
+        "indexUpdate": {
+          "count": 262,
+          "mean": 406.53435114503816,
+          "p50": 197.0,
+          "p95": 927,
+          "p99": 998,
+          "maximum": 1009
+        },
+        "queries": {
+          "count": 262,
+          "mean": 41.091603053435115,
+          "p50": 40.0,
+          "p95": 52,
+          "p99": 56,
+          "maximum": 63
+        }
+      },
+      "visibilityUpdateKinds": {
+        "membershipRebuild": {
+          "durationsUs": {
+            "count": 93,
+            "mean": 826.8279569892474,
+            "p50": 828,
+            "p95": 991,
+            "p99": 1000,
+            "maximum": 1009
+          },
+          "totalMs": 76.895
+        },
+        "denseRefit": {
+          "durationsUs": {
+            "count": 169,
+            "mean": 175.24852071005918,
+            "p50": 167,
+            "p95": 226,
+            "p99": 254,
+            "maximum": 306
+          },
+          "totalMs": 29.617
+        }
+      },
+      "prepareUs": {
+        "count": 262,
+        "mean": 3226.5992366412215,
+        "p50": 3072.0,
+        "p95": 4267,
+        "p99": 4973,
+        "maximum": 16429
+      },
+      "freshAcquisitionsPerSecond": 30.069268660714776,
+      "cpuTotalsMs": {
+        "simulationUs": 5479.647,
+        "renderUs": 1606.741,
+        "workUs": 7088.6,
+        "nativeStepUs": 3749.873,
+        "nativeHostUs": 3787.411,
+        "behaviourHostUs": 1661.499,
+        "probeUs": 2.24
+      }
+    }
+  ],
+  "checks": {
+    "rendererUnitTestsPassed": 31,
+    "shadingTestsPassed": 55,
+    "appleUnitTestsPassed": 5,
+    "pythonTestsPassed": 24,
+    "imagesIdentical": 68,
+    "clippyWarningsDenied": "pass",
+    "iOSReleaseBuild": "pass",
+    "legacyTraceCompatibility": "pass"
+  }
+}

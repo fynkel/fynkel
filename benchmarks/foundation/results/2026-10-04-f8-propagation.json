@@ -1,0 +1,229 @@
+{
+  "retained": true,
+  "sustainedQualification": false,
+  "runs": [
+    {
+      "label": "control-phone",
+      "captureId": "b9f1650cdfd046edb008d45316855d22",
+      "tracePhysics": true,
+      "terminatedExactPid": 5050,
+      "thermal": [
+        "nominal",
+        "unknown"
+      ],
+      "missingAcquisitionWindows": 1,
+      "acquiredFramesPerSecond": null,
+      "stop": [
+        "deadline"
+      ],
+      "ticks": 478,
+      "phases": {
+        "propagation_ns": {
+          "medianUs": 1147.9164999999998,
+          "p95Us": 1550.5
+        },
+        "core_total_ns": {
+          "medianUs": 4296.188,
+          "p95Us": 5531.958
+        },
+        "total_ns": {
+          "medianUs": 3120.9165000000003,
+          "p95Us": 3985.667
+        }
+      },
+      "allTickSystems": {
+        "step": {
+          "medianUs": 7072.5,
+          "p95Us": 9106
+        },
+        "physics": {
+          "medianUs": 4295.5,
+          "p95Us": 5532
+        },
+        "transforms": {
+          "medianUs": 395.0,
+          "p95Us": 516
+        }
+      }
+    },
+    {
+      "label": "candidate-phone",
+      "captureId": "826493df214441f8b7676fdcc2dc7b16",
+      "tracePhysics": true,
+      "terminatedExactPid": 5061,
+      "thermal": [
+        "nominal"
+      ],
+      "missingAcquisitionWindows": 0,
+      "acquiredFramesPerSecond": 42.070776028546206,
+      "stop": [
+        "deadline"
+      ],
+      "ticks": 479,
+      "phases": {
+        "propagation_ns": {
+          "medianUs": 833.084,
+          "p95Us": 972.125
+        },
+        "core_total_ns": {
+          "medianUs": 3784.5,
+          "p95Us": 4270.625
+        },
+        "total_ns": {
+          "medianUs": 2943.5,
+          "p95Us": 3361.75
+        }
+      },
+      "allTickSystems": {
+        "step": {
+          "medianUs": 6383,
+          "p95Us": 7236
+        },
+        "physics": {
+          "medianUs": 3784,
+          "p95Us": 4270
+        },
+        "transforms": {
+          "medianUs": 305,
+          "p95Us": 354
+        }
+      }
+    },
+    {
+      "label": "control-ordinary",
+      "captureId": "2ee9ea1fe88444289f9ae4bb3b429571",
+      "tracePhysics": false,
+      "terminatedExactPid": 5062,
+      "thermal": [
+        "nominal"
+      ],
+      "missingAcquisitionWindows": 0,
+      "acquiredFramesPerSecond": 43.42803973815388,
+      "stop": [
+        "deadline"
+      ],
+      "hostNativeWindowMedianMs": [
+        6.156,
+        6.701,
+        6.534,
+        6.723,
+        7.115,
+        7.275,
+        7.717,
+        8.748
+      ],
+      "medianOfHostNativeWindowMediansMs": 6.9190000000000005
+    },
+    {
+      "label": "candidate-ordinary",
+      "captureId": "ad5140ba11e64a008629f46341b94c41",
+      "tracePhysics": false,
+      "terminatedExactPid": 5063,
+      "thermal": [
+        "nominal"
+      ],
+      "missingAcquisitionWindows": 0,
+      "acquiredFramesPerSecond": 43.443843401922585,
+      "stop": [
+        "deadline"
+      ],
+      "hostNativeWindowMedianMs": [
+        5.614,
+        6.109,
+        6.191,
+        6.565,
+        7.011,
+        7.231,
+        7.477,
+        7.773
+      ],
+      "medianOfHostNativeWindowMediansMs": 6.788
+    },
+    {
+      "label": "control2-phone",
+      "captureId": "801186f55cbe446c9552dd157c5472ae",
+      "tracePhysics": true,
+      "terminatedExactPid": 5065,
+      "thermal": [
+        "nominal"
+      ],
+      "missingAcquisitionWindows": 0,
+      "acquiredFramesPerSecond": 45.15105147070196,
+      "stop": [
+        "deadline"
+      ],
+      "ticks": 480,
+      "phases": {
+        "propagation_ns": {
+          "medianUs": 1134.5,
+          "p95Us": 1360.5
+        },
+        "core_total_ns": {
+          "medianUs": 4166.3125,
+          "p95Us": 4806.5
+        },
+        "total_ns": {
+          "medianUs": 3023.3540000000003,
+          "p95Us": 3468.167
+        }
+      },
+      "allTickSystems": {
+        "step": {
+          "medianUs": 6888.5,
+          "p95Us": 7896
+        },
+        "physics": {
+          "medianUs": 4166.0,
+          "p95Us": 4806
+        },
+        "transforms": {
+          "medianUs": 390.0,
+          "p95Us": 454
+        }
+      }
+    },
+    {
+      "label": "candidate2-phone",
+      "captureId": "30dd36633ab644ed9817af72642759f0",
+      "tracePhysics": true,
+      "terminatedExactPid": 5066,
+      "thermal": [
+        "nominal"
+      ],
+      "missingAcquisitionWindows": 0,
+      "acquiredFramesPerSecond": 44.513049680054664,
+      "stop": [
+        "deadline"
+      ],
+      "ticks": 480,
+      "phases": {
+        "propagation_ns": {
+          "medianUs": 863.646,
+          "p95Us": 1031.5
+        },
+        "core_total_ns": {
+          "medianUs": 3870.8334999999997,
+          "p95Us": 4492.083
+        },
+        "total_ns": {
+          "medianUs": 3005.5834999999997,
+          "p95Us": 3522.625
+        }
+      },
+      "allTickSystems": {
+        "step": {
+          "medianUs": 6601.5,
+          "p95Us": 7597
+        },
+        "physics": {
+          "medianUs": 3870.5,
+          "p95Us": 4492
+        },
+        "transforms": {
+          "medianUs": 317.0,
+          "p95Us": 371
+        }
+      }
+    }
+  ]
+}
