@@ -22,3 +22,5 @@ serde_json.workspace = true
 
 [dev-dependencies]
 fynkel_import.workspace = true
+fynkel_render.workspace = true
+wgpu.workspace = true

@@ -34,7 +34,7 @@ fn main() {
         for _ in 0..40 {
             world.step();
         }
-        world.physics_mut().set_profiling(enabled);
+        world.set_physics_profiling(enabled);
         let mut samples = Vec::new();
         for _ in 0..300 {
             let start = Instant::now();
@@ -43,6 +43,13 @@ fn main() {
             let profile = world.physics().step_profile();
             samples.push(serde_json::json!({
                 "stepUs": step_us,
+                "corePhysicsUs": world.physics_system_profile().map(|p| {
+                    [p.propagation, p.adapter, p.publication, p.total].map(|d| d.as_secs_f64() * 1e6)
+                }),
+                "syncUs": profile.map(|p| {
+                    let s = p.synchronization;
+                    [s.collect, s.hierarchy, s.classify, s.apply].map(|d| d.as_secs_f64() * 1e6)
+                }),
                 "physicsUs": profile.map(|p| {
                     [p.sync, p.commands, p.characters, p.solver, p.writeback, p.events, p.total]
                         .map(|d| d.as_secs_f64() * 1e6)
@@ -76,6 +83,10 @@ fn main() {
             "scope": "Mac native-only cooked scene; no Dart callbacks, rendering or catch-up",
             "warmupTicks": 40, "measuredTicks": 300,
             "phaseOrder": ["sync", "commands", "characters", "solver", "writeback", "events", "total"],
+            "corePhysicsPhaseOrder": ["propagation", "adapter", "publication", "total"],
+            "coreAdapterContainsPhysicsPhases": true,
+            "syncPhaseOrder": ["collect", "hierarchy", "classify", "apply"],
+            "syncPhasesContainedInSync": true,
             "phasesOverlap": false, "totalIncludesTimerOverhead": true,
             "profiledAndUnprofiledTransformsAndMotionEqual": true, "runs": runs,
         })

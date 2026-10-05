@@ -39,6 +39,43 @@ struct Project {
     quality: Option<String>,
 }
 
+/// Per-system tick time averaged over a window (`FYNKEL_SYSTEMS=1`): where a
+/// tick's milliseconds go, to pick the next thing to optimise.
+#[derive(Default)]
+struct SystemAcc {
+    ticks: u32,
+    micros: Vec<u64>,
+    entities: Vec<u32>,
+    names: Vec<&'static str>,
+}
+
+impl SystemAcc {
+    fn add(&mut self, times: &[fynkel_core::schema::SystemTimeRecord]) {
+        if self.micros.is_empty() {
+            self.micros = vec![0; times.len()];
+            self.entities = vec![0; times.len()];
+            self.names = times.iter().map(|t| t.system.name()).collect();
+        }
+        for (i, t) in times.iter().enumerate() {
+            self.micros[i] += u64::from(t.micros);
+            self.entities[i] = t.entities;
+        }
+        self.ticks += 1;
+        if self.ticks == 120 {
+            let mut line = String::from("[systems] ms/tick:");
+            for i in 0..self.micros.len() {
+                let ms = self.micros[i] as f64 / 1000.0 / f64::from(self.ticks);
+                if ms >= 0.02 {
+                    line += &format!(" {}={:.2}({})", self.names[i], ms, self.entities[i]);
+                }
+                self.micros[i] = 0;
+            }
+            log::info!("{line}");
+            self.ticks = 0;
+        }
+    }
+}
+
 struct Gpu {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
@@ -92,7 +129,12 @@ impl Gpu {
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .expect("surface not supported by adapter");
         // Fifo = vsync. The baseline is measured at display rate, like Flutter will be.
-        config.present_mode = wgpu::PresentMode::Fifo;
+        // FYNKEL_PRESENT=immediate|mailbox uncaps the loop to find the host's capacity.
+        config.present_mode = match std::env::var("FYNKEL_PRESENT").as_deref() {
+            Ok("immediate") => wgpu::PresentMode::Immediate,
+            Ok("mailbox") => wgpu::PresentMode::Mailbox,
+            _ => wgpu::PresentMode::Fifo,
+        };
         surface.configure(&device, &config);
 
         let mut renderer =
@@ -204,6 +246,7 @@ struct App {
     /// Open the output device (`--audio`, M3-11); the null backend
     /// otherwise, so captures never touch a device.
     audio: bool,
+    system_acc: Option<SystemAcc>,
 }
 
 impl App {
@@ -220,6 +263,7 @@ impl App {
             residency: None,
             run_for: None,
             audio: false,
+            system_acc: std::env::var_os("FYNKEL_SYSTEMS").map(|_| SystemAcc::default()),
         }
     }
 
@@ -311,6 +355,9 @@ impl App {
                 scene.fixed_update(&mut self.world, tick);
             }
             self.world.step();
+            if let Some(acc) = self.system_acc.as_mut() {
+                acc.add(self.world.system_times());
+            }
         }
         let events = self.world.drain_events();
         if let Some(scene) = self.scene.as_mut() {

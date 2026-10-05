@@ -18,6 +18,18 @@ PRESETS = {
 }
 
 
+def add_effect_isolation_profiles(project):
+    """Diagnostic copies of medium; retain every unrelated setting/default."""
+    path = project / 'fynkel.project.json'
+    document = json.loads(path.read_text())
+    profiles = document['quality']['profiles']
+    for name, ao, contact in [('medium-no-ao', False, True),
+                              ('medium-no-contact', True, False),
+                              ('medium-no-screen-space', False, False)]:
+        profiles[name] = {**profiles['medium'], 'ambientOcclusion': ao, 'contactShadows': contact}
+    path.write_text(json.dumps(document, indent=2) + '\n')
+
+
 def prepare(preset, out, cli, app=False):
     out = out.resolve()
     # generate.py --app can remove an existing directory. Never forward one.
@@ -56,8 +68,10 @@ def prepare(preset, out, cli, app=False):
         if app:
             args.append('--app')
         run(args, 'generate')
+        add_effect_isolation_profiles(out)
         if app:
-            shutil.copyfile(ROOT / 'benchmarks/mobile/main.dart', out / 'lib/main.dart')
+            for name in ['main.dart', 'capture_gate.dart']:
+                shutil.copyfile(ROOT / 'benchmarks/mobile' / name, out / 'lib' / name)
             (out / 'tool').mkdir(exist_ok=True)
             shutil.copyfile(ROOT / 'benchmarks/mobile/cpu.dart', out / 'tool/cpu.dart')
             flutter = shutil.which('flutter')

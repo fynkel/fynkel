@@ -212,3 +212,191 @@ The app consumes and deletes that request. This Flutter iOS host did not expose 
 `devicectl` launch variables through `Platform.environment`; native GPU tracing still uses its native environment. A missing or mismatched ID is rejected, so
 a previous successful log cannot qualify a failed new launch. Rebuild older
 diagnostic apps before using this runner. Manual launches have no ID.
+
+### Correlated frame diagnosis
+
+The same release binary supports one-use capture options without rebuilding:
+
+```sh
+python3 benchmarks/mobile/capture.py --device DEVICE_UUID \
+  --bundle YOUR_BUNDLE_ID --app PATH/Runner.app --out target/frame-trace \
+  --trace-frames --trace-gpu
+python3 benchmarks/mobile/analyze_frames.py target/frame-trace
+```
+
+Optional controls are `--freeze-scene`, `--acquire-wait-us 0`, `--buffer-count 8`,
+`--resolution-scale 0.5`, and `--cpu-ticks`. Change one variable at a time except
+for an explicitly identified combined control. These are diagnostic settings;
+production defaults remain four buffers, 3,000 µs wait and full resolution.
+CPU tick readback is incompatible with frozen simulation. The runner transfers a
+unique request, verifies the app's acknowledged options, stops the exact PID,
+and copies the unique native trace. No request means the normal harness defaults
+(or explicitly compiled Dart defines). Keep diagnostic builds free of unrelated
+Dart defines when using the runner's strict option acknowledgment.
+
+`FYNKEL_TRACE_FRAME_FILE` enables a native single-viewport CSV with at most 16,384
+records; relative paths resolve under HOME. Each viewport opens/truncates its
+file, so use only one viewport per trace destination. `onFrameTrace` enables
+bounded harness host timestamps; Flutter timing callbacks supply raster phases.
+The analyzer rejects malformed/truncated traces and unmatched native render
+attempts. It reports occupancy, dropped-attempt CPU work, correlated sequence
+latency, and Flutter timing coverage. The acquisition rate is not a display FPS
+measurement. Wall-clock changes invalidate correlation. Trace writes and CPU
+readback introduce overhead; retain an untraced control.
+
+See the [ranked diagnosis](../../docs/foundation-f8-performance-diagnosis.md).
+To reproduce its analysis, unpack the linked raw archive into a temporary directory
+and pass an extracted `f8-diagnosis-*` directory to `analyze_frames.py`. The
+untraced control intentionally has no frame CSV.
+
+After the early-admission change, native `stages` records occur only for admitted
+frames; dropped attempts do not perform extraction/preparation. Ring `cpu` now
+includes the admitted preparation callback, whereas the earlier metric began
+later. Compare host render intervals for before/after CPU cost. Occupancy's
+`rendering` column includes CPU-reserved slots; use `submitted` events to identify
+actual GPU submissions. See the [admission results](../../docs/foundation-f8-render-admission.md)
+for the measured throughput improvement and remaining frame-age tradeoff.
+
+The presenter now waits only when no new image is ready; it immediately acquires
+the newest completed image otherwise. `--acquire-wait-us 0` still disables the
+remaining bounded wait. Historical captures used the older policy of waiting
+for the newest submission even with a completed image available; compare source
+and native-library fingerprints as well as the numeric wait setting.
+`analyze_frames.py` now reports render-request-to-acquisition distributions in
+addition to completion-to-acquisition time. See the
+[presentation wait results](../../docs/foundation-f8-presentation-wait.md).
+
+### Effect isolation through project profiles
+
+Newly prepared fixtures include `medium-no-ao`, `medium-no-contact`, and
+`medium-no-screen-space`, each copied from medium with only those effect flags
+changed. Select with `capture.py --quality NAME`; combine with `--freeze-scene`
+for an identical settled GPU workload. These are labelled diagnostic controls;
+medium remains the default. The runner verifies profile acknowledgment and
+asset-store validation, and records native framework hashes. Existing generated
+fixtures must add the profiles and recook/rebuild before selecting them.
+
+Use `--trace-frames` for all four profiles. Do not request `--trace-gpu` for
+`medium-no-screen-space`: that trace specifically expects screen-space samples,
+and a correctly disabled pipeline emits none. Whole-frame GPU timing remains
+available in the normal statistics. See the
+[current isolation results](../../docs/foundation-f8-effect-isolation.md).
+
+### Bounded Metal execution traces
+
+For stage-level investigation, add `--metal-trace-device UDID` to `capture.py`.
+Use the physical-device UDID from `xcrun xctrace list devices`; it differs from
+CoreDevice's `--device` identifier. This attaches Metal System Trace to the exact
+launched PID for eight seconds. Recorder failure fails the capture, and cleanup
+stops only that recorder child. Profiling changes timing; do not compare its FPS
+directly with ordinary captures.
+
+Run `python3 benchmarks/mobile/analyze_metal.py CAPTURE_DIRECTORY --export` to
+export the two required tables and summarize the app's top-level active GPU
+intervals by encoder/channel. Nested intervals and other processes are excluded.
+Channel timings overlap and are not additive frame times. Full `.trace` bundles
+stay in the capture directory; relevant exported tables can be archived separately.
+See [the Metal diagnosis](../../docs/foundation-f8-metal-diagnosis.md).
+
+`--trace-physics` records bounded native adapter phase timings to `physics.csv`
+and validates them into `capture.json`. Combine with `--cpu-ticks` to compare
+adapter work with the whole core physics system. Native completed tick IDs are
+SDK pre-step tick IDs plus one. File writes and timers add diagnostic overhead;
+use this for attribution, not baseline FPS qualification. Traces are capped at
+8,192 rows and saturated/incomplete traces are rejected. See the
+[phone phase report](../../docs/foundation-f8-physics-phases.md).
+
+Physics traces also include four nested synchronization phases: `collect_ns`,
+`hierarchy_ns`, `classify_ns` and `apply_ns`. Their sum is bounded by `sync_ns`;
+do not add them to the outer phase total. The parser validates this containment.
+[Repeated iPhone results](../../docs/foundation-f8-sync-hierarchy.md) document the
+first optimization based on this breakdown.
+
+Core physics tracing also records `propagation_ns`, `core_adapter_ns`,
+`publication_ns` and `core_total_ns`. The adapter duration contains the adapter
+phase timings; the three core phases are non-overlapping. Core totals exclude
+the scheduler's eligibility check. Whole-microsecond SDK system timings may be
+up to a fraction of a microsecond below the more precise core total due to
+truncation. [Attribution](../../docs/foundation-f8-core-physics-phases.md).
+
+### Profiler startup gate
+
+Metal captures request `awaitProfiler` from the diagnostic app. The app waits
+before loading the game; the runner waits at most 30 seconds for Instruments'
+recording-ready message, then copies a start signal named with the capture ID.
+The app checks the signal payload, consumes it once, and records `profiler-ready`.
+It times out after 45 seconds if no signal arrives. The eight-second workload
+and exact-PID termination remain bounded independently of profiler startup.
+A missing acknowledgement, recorder failure or empty execution trace is not a
+valid measurement. Rebuild the generated app after updating `main.dart`.
+
+On 2026-10-04, Instruments repeatedly rejected real launched PIDs with
+`Cannot find process for provided pid`, including while the gated app was idle.
+The gate prevents starting a workload on those failures; it does not claim to
+fix Instruments process discovery. A manual matching-signal check can validate
+the app handshake, but must never be reported as a Metal capture.
+
+Follow-up: a USB reconnect restored exact-PID profiling; three gated recordings
+now pass. The app handshake lives in `capture_gate.dart`, copied by `prepare.py`.
+Run its standalone regressions with:
+
+```sh
+dart run benchmarks/mobile/capture_gate_test.dart
+```
+
+The Metal analyzer accepts `--start-ms 3500 --end-ms 7000` to inspect a common
+trace-relative window. It excludes encoder/channel executions crossing either
+boundary instead of clipping their durations. Keep the full-trace summary too;
+a middle window alone does not establish sustained performance. See
+[isolated execution evidence](../../docs/foundation-f8-metal-effects.md).
+
+For a live capture with both `--trace-frames --cpu-ticks`, `analyze_frames.py`
+adds `cpuCorrelation`: exact host-frame and completed-tick matching, grouped by
+step count and capture second. Nested native/system/host totals must not be added.
+Missing or mismatched batches are rejected. This helps distinguish increased
+per-tick cost from several ticks performed in a single host callback.
+
+### CPU preparation phases
+
+Frame traces from the preparation-phase build add `prepare_0`, `prepare_1`, and
+`prepare_2` alongside `stages` within the same synchronous render call. Their
+`a,b,c` columns contain nine disjoint elapsed CPU intervals in microseconds:
+setup/retention/warm-up; camera/environment/light collection; visibility; light
+pool; instance construction; batch layout/uploads/outline; shadow/post/uniforms;
+overlay; readiness/accounting. They include waits and upload calls, not GPU
+execution. The renderer stores these in `FrameStats.prepare_phases_us`; their sum
+is its `prepare_us`. No native or Dart ABI fields were added.
+
+`analyze_frames.py` reports `prepareCorrelation`, requiring complete groups and
+rejecting duplicates, negative durations, totals exceeding the enclosing timer,
+and records outside their host render call. `outerRemainderUs` is the outer host
+preparation timer minus the phase sum: return/cleanup and caller overhead (or
+readiness retries when that API is used), not an isolated subsystem. Older traces
+without phase records return null. Compare totals for shares; phase medians are
+not additive. Trace output remains opt-in and bounded; phase clocks run alongside
+the existing renderer timing even when file tracing is disabled.
+
+Visibility detail adds one `visibility` record per prepared frame: `a,b,c` are
+bounds construction, spatial-index update and combined camera/shadow queries in
+microseconds. These are disjoint CPU intervals nested inside the existing
+visibility phase, not additional frame costs. The query interval includes clearing
+shadow flags when no shadow frustum exists. The analyzer requires this record for
+every phase group once present, validates its sum against the parent, and reports
+`visibilityPhasesUs` / `visibilityTotalsMs`. Older traces report null for these
+fields. A monotonic start and three elapsed boundary reads are added per preparation.
+
+`visibility_update` classifies the work for the same visibility update interval.
+Its `a` value is 0 unchanged, 1 membership/empty-index rebuild, 2 sparse refit,
+3 dense refit, or 4 cost-triggered rebuild (including its preceding refit).
+`b,c` are reserved zero fields. `visibilityUpdateKinds` groups the matching
+update durations by this actual code path; it does not add another duration to
+the frame. Once classification is present, every group requires it. Unknown
+values, nonzero reserved fields and classification without visibility timing
+are rejected. Earlier captures remain readable with null classification.
+
+The membership-repair build extends `visibility_update` with 5 for small
+membership repair and 6 for the depth-guard rebuild. A repair includes refreshing
+all surviving bounds against current dense record indices, editing leaves and
+regenerating traversal metadata. Large or cumulative size changes still report
+membership rebuild; the cost guard still reports cost rebuild. Older codes keep
+their meaning. Empty-to-empty updates now correctly report unchanged.
