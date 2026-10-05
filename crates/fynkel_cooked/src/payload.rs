@@ -12,7 +12,8 @@
 //!       (u16 × 4 joint indices, f32 × 4 weights: 24 bytes)
 //! TEXR  u32 width, u32 height, u32 format, u32 mip levels, every level
 //!       base first, top row first: 4 bytes a texel (RGBA8, formats 1
-//!       and 2) or 8 (RGBA16F, format 3)
+//!       and 2), 8 (RGBA16F, format 3), or ASTC blocks of 16 bytes,
+//!       `ceil(w / bx) · ceil(h / by)` a level (formats 4–9, ADR-0061)
 //! ENVM  u32 specular size, u32 specular mips, u32 irradiance size,
 //!       [f32; 3] mean irradiance, then the prefiltered specular cube
 //!       (per mip, per face +X −X +Y −Y +Z −Z, size² RGBA16F texels) and
@@ -36,14 +37,62 @@ pub const TEXTURE_FORMAT_RGBA8_LINEAR: u32 = 2;
 /// Linear half-float RGBA (E1): an HDR image, 8 bytes a texel.
 pub const TEXTURE_FORMAT_RGBA16F_LINEAR: u32 = 3;
 
+/// ASTC (ADR-0061): blocks of 16 bytes, each covering the named number
+/// of texels; sRGB and linear.
+pub const TEXTURE_FORMAT_ASTC4X4_SRGB: u32 = 4;
+pub const TEXTURE_FORMAT_ASTC4X4_LINEAR: u32 = 5;
+pub const TEXTURE_FORMAT_ASTC6X6_SRGB: u32 = 6;
+pub const TEXTURE_FORMAT_ASTC6X6_LINEAR: u32 = 7;
+pub const TEXTURE_FORMAT_ASTC8X8_SRGB: u32 = 8;
+pub const TEXTURE_FORMAT_ASTC8X8_LINEAR: u32 = 9;
+
 /// Bytes of one texel of `format`, `None` for a format this build does
-/// not know.
+/// not know or a block-compressed one (see [`texture_block`]).
 pub fn texel_bytes(format: u32) -> Option<usize> {
     match format {
         TEXTURE_FORMAT_RGBA8_SRGB | TEXTURE_FORMAT_RGBA8_LINEAR => Some(4),
         TEXTURE_FORMAT_RGBA16F_LINEAR => Some(8),
         _ => None,
     }
+}
+
+/// The storage unit of `format`: `(block width, block height, bytes a
+/// block)`; an uncompressed format is a 1×1 block of one texel. `None`
+/// for a format this build does not know.
+pub fn texture_block(format: u32) -> Option<(u32, u32, usize)> {
+    match format {
+        TEXTURE_FORMAT_ASTC4X4_SRGB | TEXTURE_FORMAT_ASTC4X4_LINEAR => Some((4, 4, 16)),
+        TEXTURE_FORMAT_ASTC6X6_SRGB | TEXTURE_FORMAT_ASTC6X6_LINEAR => Some((6, 6, 16)),
+        TEXTURE_FORMAT_ASTC8X8_SRGB | TEXTURE_FORMAT_ASTC8X8_LINEAR => Some((8, 8, 16)),
+        f => texel_bytes(f).map(|b| (1, 1, b)),
+    }
+}
+
+/// Whether `format` is block-compressed (ASTC).
+pub fn texture_is_compressed(format: u32) -> bool {
+    texture_block(format).is_some_and(|(bx, _, _)| bx > 1)
+}
+
+/// Whether `format` holds sRGB-encoded colour.
+pub fn texture_is_srgb(format: u32) -> bool {
+    matches!(
+        format,
+        TEXTURE_FORMAT_RGBA8_SRGB
+            | TEXTURE_FORMAT_ASTC4X4_SRGB
+            | TEXTURE_FORMAT_ASTC6X6_SRGB
+            | TEXTURE_FORMAT_ASTC8X8_SRGB
+    )
+}
+
+/// The ASTC format for a block size (4, 6 or 8) and colour space.
+pub fn astc_format(block: u32, srgb: bool) -> Option<u32> {
+    let base = match block {
+        4 => TEXTURE_FORMAT_ASTC4X4_SRGB,
+        6 => TEXTURE_FORMAT_ASTC6X6_SRGB,
+        8 => TEXTURE_FORMAT_ASTC8X8_SRGB,
+        _ => return None,
+    };
+    Some(if srgb { base } else { base + 1 })
 }
 
 /// The one vertex layout every mesh is normalized to (72 bytes): position,
@@ -559,9 +608,9 @@ pub fn decode_animation(bytes: &[u8]) -> Option<AnimationPayload> {
 
 /// A `TEXR` payload: top row first, every mip level concatenated from
 /// the base down (M3-08b): level `i` is `max(width >> i, 1)` by
-/// `max(height >> i, 1)` texels of `texel_bytes(format)` each.
-/// `mip_levels` is 1 for a texture cooked without a chain; a full chain
-/// ends at 1×1.
+/// `max(height >> i, 1)` texels, stored as `level_bytes` (texels of
+/// `texel_bytes(format)` each, or ASTC blocks). `mip_levels` is 1 for a
+/// texture cooked without a chain; a full chain ends at 1×1.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TexturePayload {
     pub width: u32,
@@ -579,22 +628,22 @@ impl TexturePayload {
         mip_size(self.width, self.height, level)
     }
 
-    /// Bytes of one texel.
+    /// Bytes of one texel (an uncompressed format; 4 otherwise).
     pub fn texel_bytes(&self) -> usize {
         texel_bytes(self.format).unwrap_or(4)
     }
 
-    /// The texels of level `i` (`None` past `mip_levels`).
+    /// The bytes of level `i` (`None` past `mip_levels`).
     pub fn level(&self, level: u32) -> Option<&[u8]> {
         if level >= self.mip_levels {
             return None;
         }
-        let texel = self.texel_bytes();
+        let block = texture_block(self.format)?;
         let mut at = 0usize;
         for l in 0..level {
-            at += level_bytes(self.width, self.height, texel, l);
+            at += level_bytes(self.width, self.height, block, l);
         }
-        let len = level_bytes(self.width, self.height, texel, level);
+        let len = level_bytes(self.width, self.height, block, level);
         self.texels.get(at..at + len)
     }
 
@@ -614,17 +663,25 @@ pub fn full_mip_count(width: u32, height: u32) -> u32 {
     32 - width.max(height).max(1).leading_zeros()
 }
 
-fn level_bytes(width: u32, height: u32, texel: usize, level: u32) -> usize {
+/// Bytes of level `level` stored in `block` units (`texture_block`):
+/// whole blocks across and down, a partial block padded.
+pub fn level_bytes(width: u32, height: u32, block: (u32, u32, usize), level: u32) -> usize {
     let (w, h) = mip_size(width, height, level);
-    w as usize * h as usize * texel
+    let (bx, by, bytes) = block;
+    w.div_ceil(bx) as usize * h.div_ceil(by) as usize * bytes
 }
 
 /// Bytes of a chain of `mip_levels` levels, or `None` on overflow.
-fn chain_bytes(width: u32, height: u32, texel: usize, mip_levels: u32) -> Option<usize> {
+fn chain_bytes(width: u32, height: u32, block: (u32, u32, usize), mip_levels: u32) -> Option<usize> {
     let mut total = 0usize;
     for l in 0..mip_levels {
         let (w, h) = mip_size(width, height, l);
-        total = total.checked_add((w as usize).checked_mul(h as usize)?.checked_mul(texel)?)?;
+        let (bx, by, bytes) = block;
+        total = total.checked_add(
+            (w.div_ceil(bx) as usize)
+                .checked_mul(h.div_ceil(by) as usize)?
+                .checked_mul(bytes)?,
+        )?;
     }
     Some(total)
 }
@@ -652,11 +709,11 @@ pub fn decode_texture(bytes: &[u8]) -> Option<TexturePayload> {
     }
     let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
     let (width, height, format, mip_levels) = (u32_at(0), u32_at(4), u32_at(8), u32_at(12));
-    let texel = texel_bytes(format)?;
+    let block = texture_block(format)?;
     if width == 0 || height == 0 || mip_levels == 0 || mip_levels > full_mip_count(width, height) {
         return None;
     }
-    if bytes.len() != 16usize.checked_add(chain_bytes(width, height, texel, mip_levels)?)? {
+    if bytes.len() != 16usize.checked_add(chain_bytes(width, height, block, mip_levels)?)? {
         return None;
     }
     Some(TexturePayload {
@@ -1271,6 +1328,29 @@ mod tests {
         let mut bad = anim.clone();
         bad.channels[0].property = 9;
         assert!(decode_animation(&encode_animation(&bad)).is_none());
+    }
+
+    #[test]
+    fn astc_textures_are_whole_blocks_a_level_and_reject_a_short_chain() {
+        // 13×7 at 6×6: 3×2 blocks, then 6×3 → 1×1, 3×1 → 1×1, 1×1 → 1×1.
+        let format = astc_format(6, true).unwrap();
+        assert_eq!(format, TEXTURE_FORMAT_ASTC6X6_SRGB);
+        assert_eq!(astc_format(4, false), Some(TEXTURE_FORMAT_ASTC4X4_LINEAR));
+        assert_eq!(astc_format(5, true), None);
+        assert!(texture_is_compressed(format) && texture_is_srgb(format));
+        assert!(!texture_is_compressed(TEXTURE_FORMAT_RGBA8_SRGB));
+        assert!(!texture_is_srgb(TEXTURE_FORMAT_ASTC8X8_LINEAR));
+        let levels = full_mip_count(13, 7);
+        assert_eq!(levels, 4);
+        let sizes: Vec<_> = (0..levels).map(|l| level_bytes(13, 7, (6, 6, 16), l)).collect();
+        assert_eq!(sizes, [6 * 16, 16, 16, 16]);
+        let texels: Vec<u8> = (0..sizes.iter().sum::<usize>()).map(|i| i as u8).collect();
+        let d = decode_texture(&encode_texture(13, 7, format, levels, &texels)).unwrap();
+        assert_eq!(d.level(0).unwrap(), &texels[..96]);
+        assert_eq!(d.level(3).unwrap(), &texels[128..]);
+        assert!(d.level(4).is_none());
+        assert!(decode_texture(&encode_texture(13, 7, format, levels, &texels[1..])).is_none());
+        assert!(decode_texture(&encode_texture(13, 7, 10, levels, &texels)).is_none());
     }
 
     #[test]
