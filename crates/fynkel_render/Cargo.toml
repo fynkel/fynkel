@@ -13,6 +13,7 @@ fynkel_cooked.workspace = true
 fynkel_core.workspace = true
 fynkel_assets.workspace = true
 wgpu.workspace = true
+astc-decode.workspace = true
 glam.workspace = true
 bytemuck.workspace = true
 

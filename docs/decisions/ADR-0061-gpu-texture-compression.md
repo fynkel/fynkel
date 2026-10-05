@@ -56,7 +56,17 @@ formats, the header otherwise unchanged:
 | 6 / 7 | ASTC 6×6, sRGB / linear |
 | 8 / 9 | ASTC 8×8, sRGB / linear |
 
-A level is `ceil(w / bx) · ceil(h / by)` blocks of 16 bytes. HDR images
+A level is `ceil(w / bx) · ceil(h / by)` blocks of 16 bytes.
+
+*Amended 2026-10-06, while implementing:* WebGPU (and wgpu) requires level 0
+of a compressed texture to be a whole number of blocks across and down.
+Metal does not, but we go through wgpu. So a texture whose size is not a
+multiple of its block is **resampled at cook to the nearest multiple**
+(Catmull-Rom, in linear light for sRGB): 1024² at 6×6 becomes 1026², a
+0.2 % stretch the UVs absorb (they span the texture, not texels). 4×4 and
+8×8 leave every power-of-two texture of 8 px or more as it is. Unity
+scales non-power-of-two textures for compressed formats in the same way.
+`info` records the cooked size next to the source size. HDR images
 stay RGBA16F (ASTC HDR can follow; the sky is one texture). The encoder
 runs at astcenc's `medium` preset in every cook profile, so what you test
 in the editor is byte for byte what ships. The cache version goes 12 → 13;
@@ -82,9 +92,10 @@ does.
 
 The renderer requests `TEXTURE_COMPRESSION_ASTC` when the adapter offers
 it and uploads the blocks as they are (`bytes_per_row` = blocks across ·
-16). On an adapter without ASTC (an Intel Mac) the asset worker decodes the
-payload to RGBA8 with the same astcenc library before upload, and the
-renderer reports it once (`asset_errors`-style notice, not an error). The
+16). On an adapter without ASTC (an Intel Mac) the renderer decodes the
+payload to RGBA8 before upload, with a pure-Rust decoder (`astc-decode`,
+Apache-2.0) so the runtime on a device carries no C++ encoder, and reports
+it once (a notice, not an error). The
 picture is the same; only the memory saving is lost.
 
 GPU accounting (ADR-0056) counts the compressed bytes, so a texture budget
@@ -112,8 +123,9 @@ holds 4–16× more textures.
   high-contrast detail; `high` or `none` per texture is the escape hatch.
   The renders the tests compare (showcase, reference game) change, so their
   references are regenerated once and reviewed by eye.
-- One native dependency is added (`ctt-astcenc`, C++ built by `cc`), to
-  the cook (`fynkel_import`) and to the asset store's fallback decoder.
+- One native dependency is added to the cook only (`ctt-astcenc`, C++
+  built by `cc`, in `fynkel_import`); the renderer adds the pure-Rust
+  `astc-decode` for its fallback.
 
 ## Steps
 

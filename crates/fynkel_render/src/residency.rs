@@ -516,10 +516,30 @@ impl ExtractRenderer {
                         return false;
                     }
                 }
-                let format = match payload.format {
-                    TEXTURE_FORMAT_RGBA8_SRGB => wgpu::TextureFormat::Rgba8UnormSrgb,
-                    TEXTURE_FORMAT_RGBA16F_LINEAR => wgpu::TextureFormat::Rgba16Float,
-                    _ => wgpu::TextureFormat::Rgba8Unorm,
+                let astc = device.features().contains(wgpu::Features::TEXTURE_COMPRESSION_ASTC);
+                let decoded;
+                let (format, bytes) = match gpu_texture_format(payload.format, astc) {
+                    Some(format) => (format, payload.texels.as_slice()),
+                    // ADR-0061: a device without ASTC gets the texture
+                    // decoded, the same picture without the memory saving.
+                    None => {
+                        let Some(rgba) = decode_astc(&payload) else {
+                            self.record_asset_error(r, format!("texture {r}: malformed ASTC payload"));
+                            self.textures.insert(r.clone(), None);
+                            return false;
+                        };
+                        if !self.astc_decode_noted {
+                            self.astc_decode_noted = true;
+                            eprintln!("fynkel renderer: this GPU has no ASTC; compressed textures are decoded at upload");
+                        }
+                        decoded = rgba;
+                        let format = if fynkel_cooked::payload::texture_is_srgb(payload.format) {
+                            wgpu::TextureFormat::Rgba8UnormSrgb
+                        } else {
+                            wgpu::TextureFormat::Rgba8Unorm
+                        };
+                        (format, decoded.as_slice())
+                    }
                 };
                 Some(upload_rgba8(
                     device,
@@ -529,7 +549,7 @@ impl ExtractRenderer {
                         height: payload.height,
                         format,
                         mip_levels: payload.mip_levels,
-                        rgba8: &payload.texels,
+                        rgba8: bytes,
                     },
                     &format!("fynkel texture {r}"),
                 ))

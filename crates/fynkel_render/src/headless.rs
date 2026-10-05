@@ -29,7 +29,9 @@ pub fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
 /// adapter samples them (`FrameStats::gpu_*`, M3-16); nothing the renderer
 /// cannot do without.
 pub fn device_features(adapter: &wgpu::Adapter) -> wgpu::Features {
-    adapter.features() & wgpu::Features::TIMESTAMP_QUERY
+    // ASTC (ADR-0061): cooked textures upload as blocks where the GPU
+    // samples them; elsewhere they are decoded at upload.
+    adapter.features() & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TEXTURE_COMPRESSION_ASTC)
 }
 
 /// Limits to request for [`ExtractRenderer`]: WebGPU defaults, lowered to

@@ -46,8 +46,7 @@ use std::sync::Arc;
 use fynkel_contracts::{AssetRef, Uuid};
 use fynkel_cooked::payload::{
     CustomMaterialPayload, MaterialSlot, SkinWeight, Vertex, ALPHA_BLEND, ALPHA_MASK,
-    FALLBACK_BLACK, FALLBACK_GRAY, FALLBACK_NORMAL, TEXTURE_FORMAT_RGBA16F_LINEAR,
-    TEXTURE_FORMAT_RGBA8_SRGB,
+    FALLBACK_BLACK, FALLBACK_GRAY, FALLBACK_NORMAL,
 };
 use fynkel_core::material::AlphaMode;
 use fynkel_core::volume::{self, PostSettings, VolumeProfile};
@@ -348,6 +347,8 @@ pub struct ExtractRenderer {
     volume_profiles: fynkel_contracts::FastMap<AssetRef, Option<VolumeProfile>>,
     asset_errors: Vec<String>,
     frame_assets_deferred: bool,
+    /// The "no ASTC, decoding" notice was printed (ADR-0061; once).
+    astc_decode_noted: bool,
     visibility_index: spatial::SpatialIndex,
     visibility_bounds: Vec<Sphere>,
     camera_visible: Vec<bool>,
@@ -794,6 +795,7 @@ impl ExtractRenderer {
             volume_profiles: Default::default(),
             asset_errors: Vec::new(),
             frame_assets_deferred: false,
+            astc_decode_noted: false,
             visibility_index: spatial::SpatialIndex::default(),
             visibility_bounds: Vec::new(),
             camera_visible: Vec::new(),
