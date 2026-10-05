@@ -213,7 +213,9 @@ shadow and the scene:
    The copy adds four bytes per internal pixel while this stage is allocated;
    it preserves the existing sampling policy and scene antialiasing. The pass
    writes the red byte of an `Rg8Unorm` pixel (the green is
-   the contact shadows', § Contact shadows). Per pixel: the world
+   the contact shadows') at **half the internal size**: each pixel stands
+   for the depth texel at its top-left, and the blur upsamples it. Per
+   pixel: the world
    point from `inv_view_proj`, the normal from the four neighbouring
    depths (the nearer neighbour on each axis, so a silhouette does not
    bend it) flipped to face the camera, then `AO_SAMPLES` (12) points in
@@ -227,17 +229,20 @@ shadow and the scene:
    hemisphere fades out instead of darkening across a gap. The result is
    `(1 − occlusion)^intensity` (`frame.ao.y`; 0 — the estimate is
    skipped and the red is 1 — unless a volume gives it one: § Volumes).
-3. **The blur** averages a 4×4 square of that (both channels), dropping taps more than
-   2 % of the view distance away along the ray, which is what turns the
-   per-pixel rotation back into a smooth term without smearing across a
-   silhouette. An 8×8 compute tile loads an 11×11 input region, including the
-   asymmetric −2 through +1 halo, and shares reconstructed radial distances and
-   AO values in workgroup memory. Partial tiles participate in the load/barrier
-   before out-of-bounds output invocations return. Each output clips its filter
-   rectangle to the screen once and accumulates accepted taps with predicated
-   selection, preserving the original row-major order and depth threshold.
-   The estimate and blur have
-   separate layouts; the estimate does not bind the blur output.
+3. **The blur** upsamples that half-size estimate to the internal size: each
+   output pixel averages the 2×2 half-size taps around it (both channels),
+   dropping those more than 2 % of the view distance away along the ray —
+   judged by the full-size depth texel each tap stands for — which is what
+   turns the per-pixel rotation back into a smooth term without smearing
+   across a silhouette. A pixel none of whose taps is on its surface takes
+   the one nearest in depth. An 8×8 compute tile loads a 6×6 input region
+   and shares reconstructed radial distances and AO values in workgroup
+   memory. Partial tiles participate in the load/barrier before out-of-bounds
+   output invocations return. Each output clips its window to the target once
+   and accumulates accepted taps with predicated selection. `TAPS` in
+   `ao_blur.wgsl` is the window's width (4 gives a wider, smoother blur at
+   the cost of contact sharpness). The estimate and blur have separate
+   layouts; the estimate does not bind the blur output.
 
 `light.wgsl` multiplies the blurred value into `ao` — the material's own
 occlusion factor — so it scales **only** the ambient and IBL term:
@@ -251,9 +256,9 @@ darkening a sunlit face with a screen-space guess is the classic way to
 make a scene look dirty). Blend instances are skipped: they are not in
 the prepass, so the AO under them belongs to whatever is behind them.
 
-The stage uses an `Rg8Unorm` estimate and an `Rgba8Unorm` compute-storage blur
-output at the internal size (6 bytes per pixel, plus the optional 4-byte MSAA
-depth copy). RGBA8 provides portable storage support; shading consumes RG with
+The stage uses an `Rg8Unorm` estimate at half the internal size and an
+`Rgba8Unorm` compute-storage blur output at the internal size (4.5 bytes per
+pixel, plus the optional 4-byte MSAA depth copy). RGBA8 provides portable storage support; shading consumes RG with
 unchanged 8-bit precision. This costs two additional bytes per pixel compared
 with the former fragment blur (about 7.2 MiB at 1320×2868). The GPU timer
 uses one query pair for the whole stage — its begin
@@ -271,9 +276,12 @@ stress scene, where the whole GPU frame nevertheless fell from 3.56 to
 3.07 ms p95 — the depth prepass hands the scene pass a complete depth
 buffer, and at 5 530 instances early-Z saves more than the three passes
 cost. In a nearly empty frame there is no overdraw to save and the cost
-is just cost: the reference game's GPU frame went 4.01 → 6.11 ms p95. A
-half-resolution AO target is the lever if that ever matters — the
-estimate is low-frequency and blurred anyway.
+is just cost: the reference game's GPU frame went 4.01 → 6.11 ms p95.
+That is why the estimate is made at half resolution (2026-10-05, the 120 fps
+pass): on an M3 Max at the 3456×2234 native size the reference game's AO
+stage fell from 4.85 to 1.8 ms (the estimate 3.5 → 1.2 ms, the blur 1.3 → 0.56 ms) and its offscreen
+throughput rose from 141 to 242 fps; a frame differs from the full-size
+estimate by 0.04/255 on average (`docs/foundation-f8-throughput-observations.md`).
 
 ### Volumes (R3a, `fynkel_core::volume`)
 
@@ -993,8 +1001,8 @@ assets):
 | `shadow_skinned` | the same | | | | | `vs_skinned` |
 | `depth`, `depth_double_sided` | none (depth only) | msaa | back / none | write, `LessEqual` | — | `vs_main` (R2, § Ambient occlusion) |
 | `depth_skinned`, `depth_skinned_double_sided` | the same two | | | | | `vs_skinned` |
-| `ao` | `Rg8Unorm` | 1 | none | none | — | |
-| `ao_blur` | `Rgba8Unorm` storage | 1 | none | none | — | 8×8 compute |
+| `ao` | `Rg8Unorm` | 1 | none | none | — | half the internal size |
+| `ao_blur` | `Rgba8Unorm` storage | 1 | none | none | — | 8×8 compute (reads the half-size estimate) |
 | `bloom_prefilter`, `bloom_down` | `Rgba16Float` | 1 | none | none | — | (R3b, § Bloom) |
 | `bloom_up` | the same | 1 | none | none | constant (scatter) | |
 | `post` | host format | 1 | none | none | — | |

@@ -1,5 +1,6 @@
-//! Compare the tiled GPU kernel with the scalar bilateral filter, including
-//! partial workgroups, screen edges and depth discontinuities.
+//! Compare the tiled GPU kernel with the scalar depth-aware upsampling
+//! filter over a half-resolution estimate, including partial workgroups,
+//! screen edges and depth discontinuities.
 use super::*;
 use bytemuck::Zeroable;
 
@@ -75,24 +76,58 @@ fn tiled_blur_matches_scalar_filter_at_edges_and_depth_breaks() {
                 resource: uniform.as_entire_binding(),
             }],
         });
-        for (width, height) in [
+        for (width, height, pattern) in [
             (1u32, 1u32),
             (1, 17),
             (17, 1),
             (2, 2),
             (3, 3),
+            (3, 4),
+            (4, 3),
+            (4, 4),
+            (5, 5),
             (7, 3),
             (8, 8),
             (9, 17),
+            (15, 17),
+            (16, 1),
             (16, 16),
+            (31, 33),
             (17, 15),
             (23, 19),
             (33, 31),
-        ] {
+        ]
+        .into_iter()
+        .map(|(w, h)| (w, h, 0))
+        .chain([
+            (1, 1, 1),
+            (17, 15, 1),
+            (33, 31, 1),
+            (49, 31, 2),
+            (49, 31, 3),
+        ]) {
             let extent = wgpu::Extent3d {
                 width,
                 height,
                 depth_or_array_layers: 1,
+            };
+            let (half_w, half_h) = (width.div_ceil(2), height.div_ceil(2));
+            let half_extent = wgpu::Extent3d {
+                width: half_w,
+                height: half_h,
+                depth_or_array_layers: 1,
+            };
+            let make_sized = |size, format, usage| {
+                device.create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage,
+                    view_formats: &[],
+                })
             };
             let make = |format, usage| {
                 device.create_texture(&wgpu::TextureDescriptor {
@@ -108,7 +143,7 @@ fn tiled_blur_matches_scalar_filter_at_edges_and_depth_breaks() {
             };
             let input_usage = wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING;
             let depth = make(wgpu::TextureFormat::R32Float, input_usage);
-            let ao = make(wgpu::TextureFormat::Rg8Unorm, input_usage);
+            let ao = make_sized(half_extent, wgpu::TextureFormat::Rg8Unorm, input_usage);
             let output = make(
                 wgpu::TextureFormat::Rgba8Unorm,
                 wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
@@ -116,12 +151,28 @@ fn tiled_blur_matches_scalar_filter_at_edges_and_depth_breaks() {
             let depths: Vec<f32> = (0..width * height)
                 .map(|i| if i % width < width / 2 { 0.2 } else { 0.8 })
                 .collect();
-            let colours: Vec<[u8; 2]> = (0..width * height)
-                .map(|i| [(i * 37 % 256) as u8, (i * 71 % 256) as u8])
+            let colours: Vec<[u8; 2]> = (0..half_w * half_h)
+                .map(|i| match pattern {
+                    0 => [(i * 37 % 256) as u8, (i * 71 % 256) as u8],
+                    1 => [255, 255],
+                    // Isolated AO/contact taps on tile boundaries and at the
+                    // screen edge must prevent adjacent halo tiles skipping.
+                    _ if i == half_w * 4 + 4
+                        || i == half_w * 8 + 12
+                        || i == half_w * half_h - 1 =>
+                    {
+                        if pattern == 2 {
+                            [0, 255]
+                        } else {
+                            [255, 0]
+                        }
+                    }
+                    _ => [255, 255],
+                })
                 .collect();
-            for (texture, bytes, stride) in [
-                (&depth, bytemuck::cast_slice(&depths), width * 4),
-                (&ao, bytemuck::cast_slice(&colours), width * 2),
+            for (texture, bytes, stride, size) in [
+                (&depth, bytemuck::cast_slice(&depths), width * 4, extent),
+                (&ao, bytemuck::cast_slice(&colours), half_w * 2, half_extent),
             ] {
                 queue.write_texture(
                     wgpu::TexelCopyTextureInfo {
@@ -134,9 +185,9 @@ fn tiled_blur_matches_scalar_filter_at_edges_and_depth_breaks() {
                     wgpu::TexelCopyBufferLayout {
                         offset: 0,
                         bytes_per_row: Some(stride),
-                        rows_per_image: Some(height),
+                        rows_per_image: Some(size.height),
                     },
-                    extent,
+                    size,
                 );
             }
             let views = [
@@ -199,32 +250,43 @@ fn tiled_blur_matches_scalar_filter_at_edges_and_depth_breaks() {
                 );
                 inverse.project_point3(point).distance(eye)
             };
+            // What a half-resolution texel stands for: the full-size depth
+            // texel at its top-left.
+            let rep = |hx: u32, hy: u32| radial((hx * 2).min(width - 1), (hy * 2).min(height - 1));
             for y in 0..height {
                 for x in 0..width {
                     let center = radial(x, y);
                     let mut sum = [0.0f32; 2];
                     let mut count = 0.0;
-                    for dy in -2..2 {
-                        for dx in -2..2 {
-                            let (sx, sy) = (x as i32 + dx, y as i32 + dy);
-                            if sx < 0 || sy < 0 || sx >= width as i32 || sy >= height as i32 {
+                    // The two half-resolution texels around each axis.
+                    let (fx, fy) = ((x as i32 - 1) >> 1, (y as i32 - 1) >> 1);
+                    for hy in fy..fy + 2 {
+                        for hx in fx..fx + 2 {
+                            if hx < 0 || hy < 0 || hx >= half_w as i32 || hy >= half_h as i32 {
                                 continue;
                             }
-                            if (radial(sx as u32, sy as u32) - center).abs()
-                                > 0.02 * center.max(1.0)
-                            {
+                            let (hx, hy) = (hx as u32, hy as u32);
+                            if (rep(hx, hy) - center).abs() > 0.02 * center.max(1.0) {
                                 continue;
                             }
-                            let colour = colours[(sy as u32 * width + sx as u32) as usize];
+                            let colour = colours[(hy * half_w + hx) as usize];
                             for c in 0..2 {
                                 sum[c] += f32::from(colour[c]) / 255.0;
                             }
                             count += 1.0;
                         }
                     }
+                    // None on this surface: the kernel takes the nearest in
+                    // depth, which ties make ambiguous; not compared here.
+                    if count == 0.0 {
+                        continue;
+                    }
                     for c in 0..2 {
                         let expected = (sum[c] / count * 255.0).round() as i32;
                         let actual = i32::from(data[(y * 256 + x * 4 + c as u32) as usize]);
+                        if pattern == 1 {
+                            assert_eq!(actual, 255, "white tile must remain exactly white");
+                        }
                         assert!(
                         (actual - expected).abs() <= 1,
                         "{projection} {width}x{height} ({x},{y}) channel {c}: {actual} vs {expected}"

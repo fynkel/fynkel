@@ -98,6 +98,19 @@ pub struct FrameStats {
     /// (upload + cull + the timestamp read-back) and of the last `draw`
     /// (pass recording; the submit is the host's), in microseconds.
     pub prepare_us: u32,
+    /// Disjoint CPU elapsed intervals within `prepare`, in this order:
+    /// asset retention/setup/warm-up; camera/environment/light collection;
+    /// visibility; light pool; instance construction; batch layout/uploads/outline;
+    /// shadow/post/uniforms; overlay; readiness/accounting. Sum is `prepare_us`.
+    /// Includes waits and upload calls, not GPU execution time.
+    pub prepare_phases_us: [u32; 9],
+    /// CPU bounds construction, spatial-index update and camera/shadow queries.
+    /// Disjoint intervals nested within the visibility preparation phase.
+    pub visibility_phases_us: [u32; 3],
+    /// 0 unchanged, 1 membership/empty-index rebuild, 2 sparse refit,
+    /// 3 dense refit, 4 cost-triggered rebuild (includes its preceding refit),
+    /// 5 membership repair, 6 depth-guard rebuild.
+    pub visibility_update_kind: u32,
     pub encode_us: u32,
     /// Meshes, textures and materials a background load made resident
     /// that this frame put on the GPU ahead of their first draw

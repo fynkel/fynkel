@@ -192,7 +192,9 @@ fn light_surface(in: VsOut, front_facing: bool, s: LitSurface) -> vec3<f32> {
     let v = normalize(frame.camera_pos.xyz - in.world_pos);
 
     var radiance = vec3<f32>(0.0);
-    if frame.sun_dir.w > 0.5 {
+    // `shade` contributes zero when the shading normal faces away from the
+    // sun. Reject before sampling cascades/contact visibility in that case.
+    if frame.sun_dir.w > 0.5 && dot(n, frame.sun_dir.xyz) > 0.0 {
         var visibility = 1.0;
         if frame.shadow.x > 0.5 && (bits & 1u) != 0u {
             visibility = sun_visibility(in.world_pos, geometric_n);
@@ -220,14 +222,20 @@ fn light_surface(in: VsOut, front_facing: bool, s: LitSurface) -> vec3<f32> {
     // reflection at `roughness · last mip`, and the BRDF table the scale
     // and bias on F0.
     let ambient_term = (diffuse + f0) * frame.ambient.rgb / PI;
-    let n_env = rotate_sky(n);
-    let r_env = rotate_sky(reflect(-v, n));
-    let irradiance = textureSample(irradiance_cube, cube_sampler, n_env).rgb;
-    let prefiltered = textureSampleLevel(specular_cube, cube_sampler, r_env, roughness * frame.sky.w).rgb;
-    let ndotv = max(dot(n, v), 1e-4);
-    let ab = textureSampleLevel(brdf_lut, cube_sampler, vec2<f32>(ndotv, roughness), 0.0).rg;
-    let ibl_term = (diffuse * irradiance + prefiltered * (f0 * ab.x + ab.y)) * frame.sky.x;
-    radiance += mix(ambient_term, ibl_term, frame.sky.z) * ao;
+    var environment_term = ambient_term;
+    // The frame flag is uniform. A scene without an HDR environment must not
+    // fetch the fallback cubemaps/BRDF LUT only to discard their result.
+    if frame.sky.z > 0.0 {
+        let n_env = rotate_sky(n);
+        let r_env = rotate_sky(reflect(-v, n));
+        let irradiance = textureSample(irradiance_cube, cube_sampler, n_env).rgb;
+        let prefiltered = textureSampleLevel(specular_cube, cube_sampler, r_env, roughness * frame.sky.w).rgb;
+        let ndotv = max(dot(n, v), 1e-4);
+        let ab = textureSampleLevel(brdf_lut, cube_sampler, vec2<f32>(ndotv, roughness), 0.0).rg;
+        let ibl_term = (diffuse * irradiance + prefiltered * (f0 * ab.x + ab.y)) * frame.sky.x;
+        environment_term = mix(ambient_term, ibl_term, frame.sky.z);
+    }
+    radiance += environment_term * ao;
     // Emissive is relative to the exposure's white (L_max).
     let emissive = s.emission;
     radiance += emissive * frame.ambient.w;

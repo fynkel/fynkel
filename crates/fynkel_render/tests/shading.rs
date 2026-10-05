@@ -872,6 +872,40 @@ fn normal_and_roughness_maps_change_the_shading() {
 }
 
 #[test]
+fn grazing_sun_uses_the_normal_map_when_the_mesh_normal_faces_away() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut lab = Lab::new("grazing-normal-map");
+    let mapped = lab.material(json!({"roughness": 1.0, "normal_texture": asset(NORMAL)}));
+    let flat = lab.material(json!({"roughness": 1.0}));
+    let render = |material| {
+        let (assets, mut extract) =
+            lab.extract(Vec3::new(0.0, 0.0, 3.0), &[(Vec3::ZERO, material)], false);
+        extract.environment = Some(environment(Vec3::ONE, 0.0));
+        // Light is behind the front face's geometric normal, but faces half
+        // the normal map's tilted bands. A geometric-normal lighting shortcut
+        // would incorrectly remove their direct light.
+        extract
+            .directional_lights
+            .push(sun(Vec3::new(-1.0, 0.0, 0.1), 10_000.0));
+        render_lab(&device, &queue, &assets, &extract).0
+    };
+    let mapped = render(mapped);
+    let flat = render(flat);
+    let lit_bands = mapped
+        .iter()
+        .zip(&flat)
+        .filter(|(a, b)| luminance(**a) > luminance(**b) + 10.0)
+        .count();
+    assert!(
+        lit_bands > 100,
+        "normal-map bands must receive grazing sunlight: {lit_bands}"
+    );
+    dump(&mapped, "grazing-normal-map");
+}
+
+#[test]
 fn alpha_mask_discards_texels_below_the_cutoff() {
     let Some((device, queue)) = device() else {
         return;
@@ -3125,6 +3159,24 @@ fn contact_shadows_darken_the_sunlit_floor_at_a_base_and_off_is_none() {
         plain[top_px]
     );
 
+    // The shadow must extend across the floor, not merely survive at the
+    // cube's foot. Half-resolution reconstruction can pass the foot sample
+    // while erasing this outer strip on the same continuous ground surface.
+    let extent_ratio = [-0.6, -0.3, 0.0, 0.3, 0.6]
+        .into_iter()
+        .map(|z| {
+            let (x, y) = pixel_of(&r, Vec3::new(1.4, 0.0, z));
+            let i = (y * W + x) as usize;
+            assert!(!is_background(plain[i]) && !is_background(px[i]));
+            lum(&px, i) / lum(&plain, i)
+        })
+        .sum::<f32>()
+        / 5.0;
+    assert!(
+        extent_ratio < 0.65,
+        "the contact shadow retains its floor extent: mean lit ratio {extent_ratio}"
+    );
+
     // Intensity 0 is none, to the bit.
     let zero = render_offscreen(&device, &queue, &mut r, &with(&off));
     assert!(!r.stats().contact_shadows);
@@ -3145,6 +3197,73 @@ fn contact_shadows_darken_the_sunlit_floor_at_a_base_and_off_is_none() {
     assert!(!r.stats().contact_shadows);
     assert_eq!(capped, plain);
     r.set_quality(Quality::default());
+}
+
+#[test]
+fn contact_shadows_preserve_ground_contact_across_camera_and_depth_modes() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let lab = Lab::new("contact-projections");
+    let on = lab.volume(
+        1,
+        json!({"contactShadows": {
+            "intensity": 1.0, "length": 0.8, "thickness": 0.3
+        }}),
+    );
+    let (assets, _) = lab.extract(Vec3::new(0.0, 0.3, 3.0), &[], false);
+    let eye = Vec3::new(4.0, 2.5, 6.0);
+    let view = glam::camera::rh::view::look_at_mat4(eye, Vec3::new(0.5, 0.3, 0.0), Vec3::Y);
+    for projection in [Projection::Perspective, Projection::Orthographic] {
+        for msaa in [1, 4] {
+            let mut r = renderer(&device);
+            r.set_assets(Some(assets.clone()));
+            r.set_quality(Quality {
+                msaa,
+                ..Quality::default()
+            });
+            let camera = Camera {
+                projection,
+                ortho_height: 8.0,
+                ..Camera::default()
+            };
+            let vp = fynkel_core::projection_matrix(&camera, W as f32 / H as f32) * view;
+            let mut e = ao_corner_scene();
+            e.records.push(record(2, view.inverse()));
+            e.records[2].layer_bit = 0;
+            e.camera = Some(ExtractCamera {
+                record: 2,
+                world: view.inverse(),
+                camera,
+            });
+            e.environment = Some(environment(Vec3::ONE, 1_000.0));
+            e.directional_lights
+                .push(sun(Vec3::new(0.6, -1.0, 0.0), 10_000.0));
+            let plain = render_offscreen(&device, &queue, &mut r, &e);
+            e.volumes = vec![global_volume(&on, 0)];
+            let shadowed = render_offscreen(&device, &queue, &mut r, &e);
+            assert!(r.stats().contact_shadows && !r.stats().ambient_occlusion);
+            let at = |world: Vec3| {
+                let ndc = vp.project_point3(world);
+                let x = ((ndc.x * 0.5 + 0.5) * W as f32) as u32;
+                let y = ((0.5 - ndc.y * 0.5) * H as f32) as u32;
+                assert!(x < W && y < H);
+                (y * W + x) as usize
+            };
+            let foot = at(Vec3::new(1.12, 0.0, 0.3));
+            let open = at(Vec3::new(3.0, 0.0, 0.0));
+            assert!(!is_background(plain[foot]) && !is_background(plain[open]));
+            assert!(
+                luminance(shadowed[foot]) < 0.7 * luminance(plain[foot]),
+                "ground contact for {projection:?}, MSAA {msaa}"
+            );
+            assert!(
+                (luminance(shadowed[open]) - luminance(plain[open])).abs() < 2.0,
+                "open floor for {projection:?}, MSAA {msaa}"
+            );
+            dump(&shadowed, &format!("contact-{projection:?}-msaa-{msaa}"));
+        }
+    }
 }
 
 // -------------------------------------------------- shader assets (ADR-0031)

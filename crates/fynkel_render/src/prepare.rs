@@ -2,6 +2,29 @@
 //! lights, uniforms and GPU buffers.
 
 use super::*;
+use std::borrow::Cow;
+use std::cell::Cell;
+
+/// What one `(mesh, material)` pair resolves to, kept for the rest of a
+/// `prepare` so the thousands of instances that share it do not look the
+/// pair up, clone its asset references or hash its batch key again.
+struct ResolvedPair {
+    mesh: AssetRef,
+    material: AssetRef,
+    have_mesh: bool,
+    loaded: LoadedMaterial,
+    bounds: Sphere,
+    /// The mesh carries skin weights.
+    skin: bool,
+    /// The batch key of an unskinned instance.
+    key: BatchKey,
+    /// Where the unskinned / skinned batch sits in `grouped`.
+    slot: [Cell<Option<usize>>; 2],
+}
+
+/// Pairs remembered per `prepare`; a scene with more distinct pairs
+/// resolves the rest as it always did.
+const PAIR_MEMO: usize = 48;
 
 impl ExtractRenderer {
     /// Applies a pending quality change, then uploads the camera, the
@@ -19,6 +42,7 @@ impl ExtractRenderer {
     ) -> u32 {
         self.upload_usage = streaming::UploadUsage::default();
         let prepare_start = std::time::Instant::now();
+        let mut phase_end = [0u32; 9];
         // Consumed by this frame; handed back empty at the end to keep
         // the queue's capacity.
         let mut extras = std::mem::take(&mut self.extra_worlds);
@@ -51,6 +75,8 @@ impl ExtractRenderer {
         // Readiness describes the instances assembled below, not merely the
         // cache by the time a later object has finished preparing.
         self.frame_assets_deferred = false;
+
+        phase_end[0] = prepare_start.elapsed().as_micros().min(u32::MAX as u128) as u32;
 
         // Camera.
         let aspect = self.width as f32 / self.height as f32;
@@ -286,6 +312,8 @@ impl ExtractRenderer {
             .then(|| shadow::fit(sun_dir, &shape.shadow_corners(), self.shadow_map.resolution));
         let camera_frustum = Frustum::from_view_proj(&view_proj);
         let light_frustum = fit.as_ref().map(|f| Frustum::from_view_proj(&f.view_proj));
+        phase_end[1] = prepare_start.elapsed().as_micros().min(u32::MAX as u128) as u32;
+
         self.prepare_visibility(
             extract,
             &extras,
@@ -293,6 +321,8 @@ impl ExtractRenderer {
             light_frustum.as_ref(),
             &mut stats,
         );
+
+        phase_end[2] = prepare_start.elapsed().as_micros().min(u32::MAX as u128) as u32;
 
         // The frame's light pool (E1). A light whose range sphere misses
         // the camera frustum reaches nothing that is shaded, so it never
@@ -330,6 +360,8 @@ impl ExtractRenderer {
         stats.lights = n_lights as u32;
         stats.lights_dropped = (lights.len() - n_lights) as u32;
 
+        phase_end[3] = prepare_start.elapsed().as_micros().min(u32::MAX as u128) as u32;
+
         // Instances: opaque and mask by (mesh, material) in order of
         // first appearance; blend on their own, sorted back-to-front.
         // Each instance is tagged with where it is drawn — see the batch
@@ -337,7 +369,7 @@ impl ExtractRenderer {
         let mut grouped: Vec<(bool, Vec<Grouped>)> = Vec::new();
         let mut blended: Vec<(f32, BatchKey, bool, Instance, [u32; 12])> = Vec::new();
         self.batch_index.clear();
-        let mut mesh_of_record: HashMap<u32, usize> = HashMap::with_capacity(extract.meshes.len());
+        let mut mesh_of_record: fynkel_contracts::FastMap<u32, usize> = fynkel_contracts::FastMap::with_capacity_and_hasher(extract.meshes.len(), Default::default());
         let cube_key = || BatchKey {
             mesh: None,
             material: None,
@@ -350,7 +382,7 @@ impl ExtractRenderer {
         // of each outlined entity — a child 0.5, selected 1, selected
         // winning when an entity is both.
         let outline = self.overlay.take_outline();
-        let mut outline_marks: HashMap<fynkel_contracts::Entity, f32> = HashMap::new();
+        let mut outline_marks: fynkel_contracts::FastMap<fynkel_contracts::Entity, f32> = Default::default();
         if let Some(o) = &outline {
             for e in &o.children {
                 outline_marks.insert(*e, 0.5);
@@ -371,6 +403,8 @@ impl ExtractRenderer {
         );
         let mut joint_base = 0u32;
         let mut visibility_base = 0usize;
+        let mut pair_memo: Vec<ResolvedPair> = Vec::with_capacity(PAIR_MEMO);
+        let mut last_pair = 0usize;
         for (si, (source, transform, gray)) in sources.enumerate() {
             let main = si == 0;
             mesh_of_record.clear();
@@ -407,108 +441,158 @@ impl ExtractRenderer {
                     stats.culled += 1;
                     continue;
                 }
-                let (key, double_sided, mut instance, casts, blend, sphere) = match mesh_of_record
-                    .get(&(ri as u32))
-                {
-                    Some(&mi) => {
-                        let m = &source.meshes[mi];
-                        let have_mesh = self.mesh(device, &m.mesh);
-                        let loaded = self.material(device, queue, &m.material);
-                        let material = &loaded.material;
-                        if have_mesh {
-                            stats.meshes += 1;
-                            let blend = material.alpha_mode == AlphaMode::Blend;
-                            let gpu = self.meshes.get(&m.mesh).and_then(Option::as_ref);
-                            let bounds = gpu.map_or(cube_bounds, |g| g.bounds);
-                            // Skinned when the mesh carries weights and
-                            // the extract a palette for this instance; a
-                            // skinned mesh without a `Skin` draws as
-                            // cooked (its bind pose).
-                            let palette = m
-                                .skin
-                                .filter(|_| gpu.is_some_and(|g| g.skin_buffer.is_some()));
-                            let cached_bound = self.visibility_bounds[visibility_base + ri];
-                            let sphere = if cached_bound.is_finite() {
-                                cached_bound
-                            } else if loaded.deforms {
-                                Sphere::UNBOUNDED
+                let spill;
+                let (key, double_sided, mut instance, casts, blend, sphere, slot_cache) =
+                    match mesh_of_record.get(&(ri as u32)) {
+                        Some(&mi) => {
+                            let m = &source.meshes[mi];
+                            let found = if pair_memo
+                                .get(last_pair)
+                                .is_some_and(|e| e.mesh == m.mesh && e.material == m.material)
+                            {
+                                Some(last_pair)
                             } else {
-                                match palette {
-                                    Some(p) => {
-                                        let start = p.first_joint as usize;
-                                        let end = start.checked_add(p.joint_count as usize);
-                                        let joints =
-                                            end.and_then(|end| source.joints.get(start..end));
-                                        match (gpu.and_then(|g| g.skin_bounds.as_ref()), joints) {
-                                            (Some(bounds), Some(joints)) => {
-                                                stats.bounds_joints += bounds.joint_count();
-                                                bounds.posed(&world, joints)
-                                            }
-                                            _ => Sphere::UNBOUNDED,
-                                        }
+                                pair_memo
+                                    .iter()
+                                    .position(|e| e.mesh == m.mesh && e.material == m.material)
+                            };
+                            let pair = match found {
+                                Some(i) => {
+                                    last_pair = i;
+                                    &pair_memo[i]
+                                }
+                                None => {
+                                    let have_mesh = self.mesh(device, &m.mesh);
+                                    let loaded = self.material(device, queue, &m.material);
+                                    let gpu = self.meshes.get(&m.mesh).and_then(Option::as_ref);
+                                    let resolved = ResolvedPair {
+                                        mesh: m.mesh.clone(),
+                                        material: m.material.clone(),
+                                        have_mesh,
+                                        bounds: gpu.map_or(cube_bounds, |g| g.bounds),
+                                        skin: gpu.is_some_and(|g| g.skin_buffer.is_some()),
+                                        key: BatchKey {
+                                            mesh: Some(m.mesh.clone()),
+                                            material: loaded.key.clone(),
+                                            skinned: false,
+                                        },
+                                        slot: [Cell::new(None), Cell::new(None)],
+                                        loaded,
+                                    };
+                                    if pair_memo.len() < PAIR_MEMO {
+                                        pair_memo.push(resolved);
+                                        last_pair = pair_memo.len() - 1;
+                                        &pair_memo[last_pair]
+                                    } else {
+                                        spill = resolved;
+                                        &spill
                                     }
-                                    None => bounds.transformed(&world),
                                 }
                             };
-                            let mut instance = instance_for(material, world, m.receive_shadows);
-                            if loaded.broken {
-                                instance.tint = MISSING_TINT;
-                                instance.flags[1] = 1.0;
+                            let loaded = &pair.loaded;
+                            let material = &loaded.material;
+                            if pair.have_mesh {
+                                stats.meshes += 1;
+                                let blend = material.alpha_mode == AlphaMode::Blend;
+                                // Skinned when the mesh carries weights and
+                                // the extract a palette for this instance; a
+                                // skinned mesh without a `Skin` draws as
+                                // cooked (its bind pose).
+                                let palette = m.skin.filter(|_| pair.skin);
+                                let cached_bound = self.visibility_bounds[visibility_base + ri];
+                                let sphere = if cached_bound.is_finite() {
+                                    cached_bound
+                                } else if loaded.deforms {
+                                    Sphere::UNBOUNDED
+                                } else {
+                                    match palette {
+                                        Some(p) => {
+                                            let start = p.first_joint as usize;
+                                            let end = start.checked_add(p.joint_count as usize);
+                                            let joints =
+                                                end.and_then(|end| source.joints.get(start..end));
+                                            let skin_bounds = self
+                                                .meshes
+                                                .get(&m.mesh)
+                                                .and_then(Option::as_ref)
+                                                .and_then(|g| g.skin_bounds.as_ref());
+                                            match (skin_bounds, joints) {
+                                                (Some(bounds), Some(joints)) => {
+                                                    stats.bounds_joints += bounds.joint_count();
+                                                    bounds.posed(&world, joints)
+                                                }
+                                                _ => Sphere::UNBOUNDED,
+                                            }
+                                        }
+                                        None => pair.bounds.transformed(&world),
+                                    }
+                                };
+                                let mut instance = instance_for(material, world, m.receive_shadows);
+                                if loaded.broken {
+                                    instance.tint = MISSING_TINT;
+                                    instance.flags[1] = 1.0;
+                                }
+                                if let Some(p) = palette {
+                                    instance.emissive[3] = (joint_base + p.first_joint) as f32;
+                                }
+                                let skinned = palette.is_some();
+                                (
+                                    if skinned {
+                                        Cow::Owned(BatchKey {
+                                            skinned: true,
+                                            ..pair.key.clone()
+                                        })
+                                    } else {
+                                        Cow::Borrowed(&pair.key)
+                                    },
+                                    material.double_sided,
+                                    instance,
+                                    m.cast_shadows && loaded.casts && !blend,
+                                    blend,
+                                    sphere,
+                                    Some(&pair.slot[usize::from(skinned)]),
+                                )
+                            } else {
+                                stats.missing += 1;
+                                (
+                                    Cow::Owned(cube_key()),
+                                    false,
+                                    Instance {
+                                        model: world.to_cols_array_2d(),
+                                        tint: MISSING_TINT,
+                                        emissive: [0.0; 4],
+                                        params: [0.0, 1.0, 1.0, 1.0],
+                                        flags: [NO_CUTOFF, 1.0, 0.0, 0.0],
+                                    },
+                                    m.cast_shadows,
+                                    false,
+                                    cube_bounds.transformed(&world),
+                                    None,
+                                )
                             }
-                            if let Some(p) = palette {
-                                instance.emissive[3] = (joint_base + p.first_joint) as f32;
+                        }
+                        None => {
+                            if !self.placeholders {
+                                continue;
                             }
+                            stats.placeholders += 1;
                             (
-                                BatchKey {
-                                    mesh: Some(m.mesh.clone()),
-                                    material: loaded.key.clone(),
-                                    skinned: palette.is_some(),
-                                },
-                                material.double_sided,
-                                instance,
-                                m.cast_shadows && loaded.casts && !blend,
-                                blend,
-                                sphere,
-                            )
-                        } else {
-                            stats.missing += 1;
-                            (
-                                cube_key(),
+                                Cow::Owned(cube_key()),
                                 false,
                                 Instance {
                                     model: world.to_cols_array_2d(),
-                                    tint: MISSING_TINT,
+                                    tint: tint_for(r.entity.slot()),
                                     emissive: [0.0; 4],
                                     params: [0.0, 1.0, 1.0, 1.0],
-                                    flags: [NO_CUTOFF, 1.0, 0.0, 0.0],
+                                    flags: [NO_CUTOFF, 0.0, 0.0, 1.0],
                                 },
-                                m.cast_shadows,
+                                true,
                                 false,
                                 cube_bounds.transformed(&world),
+                                None,
                             )
                         }
-                    }
-                    None => {
-                        if !self.placeholders {
-                            continue;
-                        }
-                        stats.placeholders += 1;
-                        (
-                            cube_key(),
-                            false,
-                            Instance {
-                                model: world.to_cols_array_2d(),
-                                tint: tint_for(r.entity.slot()),
-                                emissive: [0.0; 4],
-                                params: [0.0, 1.0, 1.0, 1.0],
-                                flags: [NO_CUTOFF, 0.0, 0.0, 1.0],
-                            },
-                            true,
-                            false,
-                            cube_bounds.transformed(&world),
-                        )
-                    }
-                };
+                    };
                 if gray {
                     instance.flags[3] += GRAY_FLAG;
                 }
@@ -561,7 +645,7 @@ impl ExtractRenderer {
                         // Any valid light list: the mask shades nothing.
                         copy.flags[2] = 0.0;
                         self.outline_draws.push(OutlineDraw {
-                            key: key.clone(),
+                            key: key.as_ref().clone(),
                             double_sided,
                             index: self.outline_instances.len() as u32,
                         });
@@ -600,19 +684,28 @@ impl ExtractRenderer {
                     let origin = world.w_axis.truncate();
                     blended.push((
                         origin.distance_squared(camera_pos),
-                        key,
+                        key.into_owned(),
                         double_sided,
                         instance,
                         light_list,
                     ));
                     continue;
                 }
-                let slot = match self.batch_index.get(&key) {
-                    Some(&s) => s,
+                let slot = match slot_cache.and_then(Cell::get) {
+                    Some(s) => s,
                     None => {
-                        grouped.push((double_sided, Vec::new()));
-                        self.batch_index.insert(key, grouped.len() - 1);
-                        grouped.len() - 1
+                        let s = match self.batch_index.get(key.as_ref()) {
+                            Some(&s) => s,
+                            None => {
+                                grouped.push((double_sided, Vec::new()));
+                                self.batch_index.insert(key.into_owned(), grouped.len() - 1);
+                                grouped.len() - 1
+                            }
+                        };
+                        if let Some(cell) = slot_cache {
+                            cell.set(Some(s));
+                        }
+                        s
                     }
                 };
                 grouped[slot].1.push((
@@ -629,6 +722,8 @@ impl ExtractRenderer {
             joint_base += source.joints.len() as u32;
             visibility_base += source.records.len();
         }
+
+        phase_end[4] = prepare_start.elapsed().as_micros().min(u32::MAX as u128) as u32;
 
         // Batch layout: [shadow only][both][scene only], so the shadow
         // draw is the first two and the scene draw the last two — one
@@ -804,6 +899,8 @@ impl ExtractRenderer {
             0
         };
 
+        phase_end[5] = prepare_start.elapsed().as_micros().min(u32::MAX as u128) as u32;
+
         // The sun's shadow: drawn when the profile draws shadows, the sun
         // casts and something is there to cast.
         self.shadow_active = casters_total > 0;
@@ -941,6 +1038,8 @@ impl ExtractRenderer {
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&u));
         self.last_time = Some(extract.time);
 
+        phase_end[6] = prepare_start.elapsed().as_micros().min(u32::MAX as u128) as u32;
+
         // The overlay (ADR-0019): its queue and the debug lines, uploaded
         // and cleared for the next frame.
         self.overlay_pass.prepare(
@@ -962,6 +1061,8 @@ impl ExtractRenderer {
         stats.overlay_triangles = counts.triangles;
         stats.grid = counts.grid;
 
+        phase_end[7] = prepare_start.elapsed().as_micros().min(u32::MAX as u128) as u32;
+
         stats.extra_worlds = extras.len() as u32;
         self.assets_pending = self.frame_assets_deferred || !self.assets_settled(extract, &extras);
         extras.clear();
@@ -973,7 +1074,12 @@ impl ExtractRenderer {
             bounds,
         };
         stats.gpu_bytes = self.gpu_bytes();
-        stats.prepare_us = prepare_start.elapsed().as_micros() as u32;
+        phase_end[8] = prepare_start.elapsed().as_micros().min(u32::MAX as u128) as u32;
+        stats.prepare_us = phase_end[8];
+        stats.prepare_phases_us = phase_end;
+        for i in (1..phase_end.len()).rev() {
+            stats.prepare_phases_us[i] -= phase_end[i - 1];
+        }
         stats.asset_upload_bytes = self.upload_usage.bytes;
         stats.asset_upload_operations = self.upload_usage.operations;
         stats.asset_upload_deferred = self.upload_usage.deferred;

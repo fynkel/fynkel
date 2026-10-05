@@ -184,7 +184,18 @@ pub(crate) fn create_attachments(
     let ao = (quality.ambient_occlusion || quality.contact_shadows).then(|| {
         let ao_usage =
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
-        let view = create_attachment(device, "fynkel ao", w, h, 1, AO_FORMAT, ao_usage);
+        // The estimate is made at half resolution — a quarter of the
+        // shading — and the blur pass upsamples it against the full-size
+        // depth.
+        let view = create_attachment(
+            device,
+            "fynkel ao",
+            w.div_ceil(2),
+            h.div_ceil(2),
+            1,
+            AO_FORMAT,
+            ao_usage,
+        );
         let blur_view = create_attachment(
             device,
             "fynkel ao blur",

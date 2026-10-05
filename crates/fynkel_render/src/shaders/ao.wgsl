@@ -87,7 +87,9 @@ fn dither(p: vec2<f32>) -> f32 {
 @fragment
 fn fs_main(in: AoOut) -> @location(0) vec4<f32> {
     let size = vec2<i32>(textureDimensions(depth_tex));
-    let c = vec2<i32>(in.clip.xy);
+    // The target is half the depth's size: each of its pixels stands for
+    // the depth texel at its top-left, and the blur upsamples against it.
+    let c = min(vec2<i32>(in.clip.xy) * 2, size - 1);
     let depth = depth_at(c);
     // The sky: nothing occludes it, and it must not darken what a blur
     // tap next to it reads.
