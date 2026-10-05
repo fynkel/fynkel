@@ -5,18 +5,21 @@
 //! * every imported texture is created on the **same `MTLDevice`** wgpu
 //!   owns (asserted at import; a mismatch is a hard failure);
 //! * a ring of N IOSurfaces with an explicit per-slot state machine
-//!   `Free → Rendering → Ready → Presented → Retiring → Free`;
+//!   `Free → Reserved → Rendering → Ready → Presented → Retiring → Free`;
 //! * a slot is handed to the presenter only after the GPU work that renders
 //!   into it has **completed** (Metal completion handler, wgpu's
 //!   submitted-work-done callback, or a blocking wait);
 //! * the slot the presenter shows, and the one it showed before that
 //!   (possibly still sampled by an in-flight raster), are never rendered
-//!   into; when the ring is full the frame is **dropped, never overwritten**;
+//!   into; when no slot is Free the oldest GPU-complete frame the presenter
+//!   has not taken is **recycled** for the new one (it would be discarded
+//!   unseen at the next present anyway); with none such the frame is
+//!   **dropped, never overwritten**;
 //! * a resize rebuilds the ring under a generation counter so completions
 //!   of the old ring cannot promote slots of the new one;
 //! * the presenter thread never touches the device; it only calls
 //!   [`IoSurfaceRing::acquire_presented`], which may wait a bounded time for
-//!   the newest in-flight frame (lag 0);
+//!   a completion only when no new image is already Ready;
 //! * no CPU readback on any per-frame path.
 //!
 //! Colour: `BGRA8Unorm`, opaque (alpha 1), no colour-space tagging; DPI is
@@ -70,6 +73,8 @@ impl SyncMode {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum SlotState {
     Free,
+    /// Admitted CPU preparation; no GPU submission yet.
+    Reserved,
     /// Submitted; GPU may still be writing.
     Rendering,
     /// GPU work complete; may be handed to the presenter.
@@ -98,9 +103,53 @@ struct RingShared {
 struct Ring {
     slots: Vec<Slot>,
     next_seq: u64,
+    last_submitted_seq: u64,
     /// Bumped on every resize; completion callbacks from an older generation
     /// must not touch the new slots.
     generation: u64,
+}
+
+// A reservation cannot outlive the ring borrow or overlap mutable resize.
+// Unwinding or a preparation error releases only this unsubmitted slot.
+struct Reservation<'a> {
+    shared: &'a RingShared,
+    index: usize,
+    seq: u64,
+    generation: u64,
+    submitted: bool,
+}
+
+impl Drop for Reservation<'_> {
+    fn drop(&mut self) {
+        if self.submitted {
+            return;
+        }
+        let mut ring = lock(&self.shared.ring);
+        if ring.generation == self.generation {
+            let slot = &mut ring.slots[self.index];
+            if slot.state == SlotState::Reserved && slot.seq == self.seq {
+                slot.state = SlotState::Free;
+            }
+        }
+    }
+}
+
+impl Ring {
+    // Trace occupancy groups admitted CPU work with GPU work in the existing
+    // rendering column. SlotState still distinguishes them for presentation.
+    fn counts(&self) -> [usize; 5] {
+        let mut counts = [0; 5];
+        for slot in &self.slots {
+            counts[match slot.state {
+                SlotState::Free => 0,
+                SlotState::Reserved | SlotState::Rendering => 1,
+                SlotState::Ready => 2,
+                SlotState::Presented => 3,
+                SlotState::Retiring => 4,
+            }] += 1;
+        }
+        counts
+    }
 }
 
 #[derive(Default, Debug)]
@@ -110,6 +159,8 @@ pub struct RingStats {
     pub frames_presented: u64,
     pub presents_without_new_frame: u64,
     pub resizes: u64,
+    /// Admitted CPU callback and submission time (includes preparation when
+    /// supplied by the viewport); rejected attempts have no sample.
     pub cpu_us: Vec<u32>,
     pub gpu_complete_us: Vec<u32>,
     pub resize_us: Vec<u32>,
@@ -161,6 +212,7 @@ impl FrameReadyCallback {
 }
 
 pub struct IoSurfaceRing {
+    trace: Option<Arc<crate::trace::FrameTrace>>,
     gpu: Arc<Gpu>,
     width: u32,
     height: u32,
@@ -169,6 +221,9 @@ pub struct IoSurfaceRing {
     /// How long `acquire_presented` may wait for an in-flight frame to
     /// complete (0 = never wait). Waiting happens on the presenter's thread.
     acquire_wait: Mutex<Duration>,
+    /// How many finished frames the presenter shows in order before it
+    /// skips ahead to the newest (`set_frame_queue`); 1 is the mailbox.
+    frame_queue: AtomicU32,
     stats: Arc<Mutex<RingStats>>,
     frame_ready_cb: Arc<FrameReadyCallback>,
     /// Kept alive for the lifetime of the textures; indexed like `ring.slots`.
@@ -350,6 +405,7 @@ impl IoSurfaceRing {
             let (slots, surfaces) =
                 build_ring(&gpu.device, &gpu.mtl_device, width, height, buffer_count)?;
             Ok(Self {
+                trace: crate::trace::FrameTrace::from_env().map(Arc::new),
                 gpu,
                 width,
                 height,
@@ -358,11 +414,13 @@ impl IoSurfaceRing {
                     ring: Mutex::new(Ring {
                         slots,
                         next_seq: 1,
+                        last_submitted_seq: 0,
                         generation: 0,
                     }),
                     ready: Condvar::new(),
                 }),
                 acquire_wait: Mutex::new(Duration::ZERO),
+                frame_queue: AtomicU32::new(1),
                 stats: Arc::new(Mutex::new(RingStats::default())),
                 frame_ready_cb: Arc::new(FrameReadyCallback {
                     func: Mutex::new(None),
@@ -423,6 +481,7 @@ impl IoSurfaceRing {
             let mut ring = lock(&self.ring.ring);
             ring.slots = slots;
             ring.generation += 1;
+            ring.last_submitted_seq = 0;
         }
         self.surfaces = surfaces;
         self.width = width;
@@ -447,30 +506,111 @@ impl IoSurfaceRing {
         &self,
         record: impl FnOnce(&wgpu::Device, &wgpu::Queue, &wgpu::TextureView) -> wgpu::CommandBuffer,
     ) -> i32 {
+        match self.try_render_with(|device, queue, view| {
+            Ok::<_, std::convert::Infallible>(record(device, queue, view))
+        }) {
+            Ok(slot) => slot,
+            Err(never) => match never {},
+        }
+    }
+
+    /// Admit before invoking expensive extraction/preparation. An error or panic
+    /// before submission releases the reservation. A full ring returns `Ok(-1)`
+    /// without invoking `record`. Presented and Retiring slots are never reserved.
+    pub fn try_render_with<E>(
+        &self,
+        record: impl FnOnce(
+            &wgpu::Device,
+            &wgpu::Queue,
+            &wgpu::TextureView,
+        ) -> Result<wgpu::CommandBuffer, E>,
+    ) -> Result<i32, E> {
+        // Async completion callbacks need polling even when admission fails.
+        // They must not depend on renderer.prepare being called on a full ring.
+        if self.sync_mode == SyncMode::Async {
+            let _ = self.gpu.device.poll(wgpu::PollType::Poll);
+        }
         let t0 = Instant::now();
-        let (index, seq, generation) = {
+        let (index, seq, generation, view) = {
             let mut ring = lock(&self.ring.ring);
-            let Some(i) = ring.slots.iter().position(|s| s.state == SlotState::Free) else {
+            // A completed frame the presenter has not taken is stale the moment
+            // a newer one is wanted (`acquire_presented` recycles it unseen), so
+            // a full ring reuses the oldest such slot instead of dropping the
+            // new frame (mailbox semantics). Presented, Retiring, Rendering and
+            // Reserved slots are never touched.
+            let free = ring
+                .slots
+                .iter()
+                .position(|s| s.state == SlotState::Free)
+                .or_else(|| {
+                    ring.slots
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, s)| s.state == SlotState::Ready)
+                        .min_by_key(|(_, s)| s.seq)
+                        .map(|(i, _)| i)
+                });
+            let Some(i) = free else {
+                if let Some(trace) = &self.trace {
+                    trace.record("drop", ring.generation, 0, -1, ring.counts(), [0; 3]);
+                }
                 lock(&self.stats).frames_dropped_no_free_buffer += 1;
-                return -1;
+                return Ok(-1);
             };
             let seq = ring.next_seq;
             ring.next_seq += 1;
-            ring.slots[i].state = SlotState::Rendering;
+            ring.slots[i].state = SlotState::Reserved;
             ring.slots[i].seq = seq;
-            (i, seq, ring.generation)
+            if let Some(trace) = &self.trace {
+                trace.record(
+                    "reserve",
+                    ring.generation,
+                    seq,
+                    i as i32,
+                    ring.counts(),
+                    [0; 3],
+                );
+            }
+            (i, seq, ring.generation, ring.slots[i].view.clone())
         };
-
-        let commands = {
-            let ring = lock(&self.ring.ring);
-            record(&self.gpu.device, &self.gpu.queue, &ring.slots[index].view)
+        let mut reservation = Reservation {
+            shared: &self.ring,
+            index,
+            seq,
+            generation,
+            submitted: false,
         };
+        // Never hold the ring mutex across CPU preparation: the presenter and
+        // GPU completions must remain able to rotate/promote other slots.
+        let commands = record(&self.gpu.device, &self.gpu.queue, &view)?;
+        {
+            let mut ring = lock(&self.ring.ring);
+            ring.slots[index].state = SlotState::Rendering;
+            ring.last_submitted_seq = ring.last_submitted_seq.max(seq);
+        }
+        // From this point a submission failure must not recycle a texture that
+        // the GPU may have started writing. The viewport panic guard handles it.
+        reservation.submitted = true;
+        if let Some(trace) = &self.trace {
+            trace.record(
+                "submit_begin",
+                generation,
+                seq,
+                index as i32,
+                [0; 5],
+                [0; 3],
+            );
+        }
         self.gpu.queue.submit(Some(commands));
+        if let Some(trace) = &self.trace {
+            trace.record("submitted", generation, seq, index as i32, [0; 5], [0; 3]);
+        }
 
         let shared = self.ring.clone();
         let stats = self.stats.clone();
         let cb = self.frame_ready_cb.clone();
         let submitted = Instant::now();
+        let trace = self.trace.clone();
         let mark_ready = move || {
             {
                 let mut ring = lock(&shared.ring);
@@ -481,12 +621,25 @@ impl IoSurfaceRing {
                         slot.state = SlotState::Ready;
                     }
                 }
+                if let Some(trace) = &trace {
+                    trace.record(
+                        "ready",
+                        generation,
+                        seq,
+                        index as i32,
+                        ring.counts(),
+                        [0; 3],
+                    );
+                }
                 shared.ready.notify_all();
             }
             lock(&stats)
                 .gpu_complete_us
                 .push(submitted.elapsed().as_micros() as u32);
             cb.fire();
+            if let Some(trace) = &trace {
+                trace.record("notified", generation, seq, index as i32, [0; 5], [0; 3]);
+            }
         };
 
         match self.sync_mode {
@@ -525,10 +678,21 @@ impl IoSurfaceRing {
         let mut st = lock(&self.stats);
         st.frames_rendered += 1;
         st.cpu_us.push(t0.elapsed().as_micros() as u32);
-        index as i32
+        Ok(index as i32)
     }
 
-    /// Bounded wait `acquire_presented` may spend on the newest in-flight frame.
+    /// Maximum wait for a completion when no new image is already Ready.
+    /// How many finished frames wait for the presenter's raster before it
+    /// stops showing each one in turn and jumps to the newest. 1 (the
+    /// default) is a mailbox: only the newest is ever shown. With 2 a raster
+    /// that finds two frames done takes the older and leaves the newer for
+    /// the next raster, so a host whose rasters bunch (a long tick frame
+    /// followed by a short one) still shows every frame it makes instead of
+    /// two frames collapsing into one copy.
+    pub fn set_frame_queue(&self, depth: u32) {
+        self.frame_queue.store(depth.max(1), Ordering::Relaxed);
+    }
+
     pub fn set_acquire_wait(&self, wait: Duration) {
         *lock(&self.acquire_wait) = wait;
     }
@@ -538,21 +702,38 @@ impl IoSurfaceRing {
     /// If nothing new is ready, returns the currently presented slot again
     /// (or -1 if nothing has ever been presented). Safe from any thread.
     pub fn acquire_presented(&self) -> i32 {
+        self.acquire_presented_queued().0
+    }
+
+    /// [`Self::acquire_presented`], and whether a finished frame is still
+    /// queued behind the one returned (only a frame queue leaves one).
+    pub fn acquire_presented_queued(&self) -> (i32, bool) {
+        if let Some(trace) = &self.trace {
+            trace.record("acquire_call", 0, 0, -1, [0; 5], [0; 3]);
+        }
         let mut ring = lock(&self.ring.ring);
+        if let Some(trace) = &self.trace {
+            trace.record(
+                "acquire_begin",
+                ring.generation,
+                ring.last_submitted_seq,
+                -1,
+                ring.counts(),
+                [0; 3],
+            );
+        }
         let mut waited = Duration::ZERO;
         let max_wait = *lock(&self.acquire_wait);
-        if max_wait > Duration::ZERO {
-            // If the newest submitted frame is still on the GPU, give it a
-            // bounded chance to finish so this present shows it (lag 0).
+        if max_wait > Duration::ZERO && !ring.slots.iter().any(|s| s.state == SlotState::Ready) {
+            // A completed image is immediately useful. Only wait when none is
+            // ready, and stop on the first completion rather than chasing a
+            // newer submission while holding up the presenter's raster thread.
             let t0 = Instant::now();
             loop {
-                let newest_seq = ring.next_seq - 1;
-                let newest_in_flight = ring
-                    .slots
-                    .iter()
-                    .any(|s| s.state == SlotState::Rendering && s.seq == newest_seq);
+                let ready = ring.slots.iter().any(|s| s.state == SlotState::Ready);
+                let in_flight = ring.slots.iter().any(|s| s.state == SlotState::Rendering);
                 let remaining = max_wait.saturating_sub(t0.elapsed());
-                if !newest_in_flight || remaining.is_zero() {
+                if ready || !in_flight || remaining.is_zero() {
                     break;
                 }
                 ring = self
@@ -564,13 +745,22 @@ impl IoSurfaceRing {
             }
             waited = t0.elapsed();
         }
-        let newest_ready = ring
-            .slots
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.state == SlotState::Ready)
-            .max_by_key(|(_, s)| s.seq)
-            .map(|(i, _)| i);
+        let depth = self.frame_queue.load(Ordering::Relaxed) as usize;
+        let ready = || {
+            ring.slots
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.state == SlotState::Ready)
+        };
+        let waiting = ready().count();
+        // The mailbox shows the newest. A queue shows the oldest while no
+        // more than `depth` wait, so each gets its own raster, and catches up
+        // to the newest when the host outruns the presenter.
+        let (newest_ready, keep_newer) = if depth > 1 && waiting > 1 && waiting <= depth {
+            (ready().min_by_key(|(_, s)| s.seq).map(|(i, _)| i), true)
+        } else {
+            (ready().max_by_key(|(_, s)| s.seq).map(|(i, _)| i), false)
+        };
 
         let mut stats = lock(&self.stats);
         match newest_ready {
@@ -579,25 +769,56 @@ impl IoSurfaceRing {
                     s.state = match s.state {
                         SlotState::Retiring => SlotState::Free,
                         SlotState::Presented => SlotState::Retiring,
-                        // Older ready frames were never shown; recycle them.
-                        SlotState::Ready if i != new => SlotState::Free,
+                        // Older ready frames were never shown; recycle them
+                        // (a queue keeps the newer ones for the next raster).
+                        SlotState::Ready if i != new && !keep_newer => SlotState::Free,
                         other => other,
                     };
                 }
                 ring.slots[new].state = SlotState::Presented;
                 stats.frames_presented += 1;
-                let lag = (ring.next_seq - 1).saturating_sub(ring.slots[new].seq);
+                // Reservation identifiers can have gaps after cancellation.
+                // Count actual newer submissions, not identifier distance.
+                let lag = ring
+                    .slots
+                    .iter()
+                    .filter(|slot| {
+                        slot.state == SlotState::Rendering && slot.seq > ring.slots[new].seq
+                    })
+                    .count();
                 stats.present_lag.push(lag as u32);
                 stats.acquire_wait_us.push(waited.as_micros() as u32);
-                new as i32
+                if let Some(trace) = &self.trace {
+                    trace.record(
+                        "acquire_new",
+                        ring.generation,
+                        ring.slots[new].seq,
+                        new as i32,
+                        ring.counts(),
+                        [waited.as_micros() as u64, lag as u64, 0],
+                    );
+                }
+                (new as i32, keep_newer)
             }
             None => {
+                if let Some(trace) = &self.trace {
+                    trace.record(
+                        "acquire_repeat",
+                        ring.generation,
+                        ring.last_submitted_seq,
+                        -1,
+                        ring.counts(),
+                        [waited.as_micros() as u64, 0, 0],
+                    );
+                }
                 stats.presents_without_new_frame += 1;
-                ring.slots
+                let shown = ring
+                    .slots
                     .iter()
                     .position(|s| s.state == SlotState::Presented)
                     .map(|i| i as i32)
-                    .unwrap_or(-1)
+                    .unwrap_or(-1);
+                (shown, false)
             }
         }
     }
@@ -626,6 +847,16 @@ impl IoSurfaceRing {
         encode_us: u32,
         gpu: Option<(u32, u32, u32, u32, u32)>,
     ) {
+        if let Some(trace) = &self.trace {
+            trace.record(
+                "stages",
+                0,
+                0,
+                -1,
+                [0; 5],
+                [extract_us as u64, prepare_us as u64, encode_us as u64],
+            );
+        }
         let mut st = lock(&self.stats);
         st.extract_us.push(extract_us);
         st.prepare_us.push(prepare_us);
@@ -636,6 +867,35 @@ impl IoSurfaceRing {
             st.gpu_scene_us.push(scene);
             st.gpu_post_us.push(post);
             st.gpu_frame_us.push(frame);
+        }
+    }
+
+    /// Optional phase details for the same synchronous render call as `stages`.
+    pub(crate) fn record_prepare_phases(
+        &self,
+        phases: [u32; 9],
+        visibility: [u32; 3],
+        update_kind: u32,
+    ) {
+        if let Some(trace) = &self.trace {
+            for (event, values) in ["prepare_0", "prepare_1", "prepare_2"]
+                .into_iter()
+                .zip(phases.chunks_exact(3))
+                .chain(std::iter::once(("visibility", visibility.as_slice())))
+                .chain(std::iter::once((
+                    "visibility_update",
+                    [update_kind, 0, 0].as_slice(),
+                )))
+            {
+                trace.record(
+                    event,
+                    0,
+                    0,
+                    -1,
+                    [0; 5],
+                    [values[0] as u64, values[1] as u64, values[2] as u64],
+                );
+            }
         }
     }
 
@@ -813,4 +1073,81 @@ pub(crate) fn pct(v: &mut [u32], q: f64) -> u32 {
     }
     v.sort_unstable();
     v[((v.len() as f64 - 1.0) * q).round() as usize]
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+
+    #[test]
+    fn presentation_lag_excludes_cancelled_and_unsubmitted_reservations() {
+        let ring = IoSurfaceRing::new(32, 32, 3, SyncMode::Blocking).unwrap();
+        ring.set_acquire_wait(Duration::ZERO);
+        {
+            let mut state = lock(&ring.ring.ring);
+            // Sequence 2 was cancelled. Frame 1 completed, 3 is submitted,
+            // and 4 is still being prepared. Only 3 contributes to GPU lag.
+            state.slots[0].state = SlotState::Ready;
+            state.slots[0].seq = 1;
+            state.slots[1].state = SlotState::Rendering;
+            state.slots[1].seq = 3;
+            state.slots[2].state = SlotState::Reserved;
+            state.slots[2].seq = 4;
+            state.last_submitted_seq = 3;
+            state.next_seq = 5;
+        }
+        assert_eq!(ring.acquire_presented(), 0);
+        assert_eq!(ring.take_stats().present_lag, [1]);
+    }
+
+    #[test]
+    fn completed_frame_is_acquired_without_waiting_for_newer_gpu_work() {
+        let ring = IoSurfaceRing::new(32, 32, 3, SyncMode::Blocking).unwrap();
+        ring.set_acquire_wait(Duration::from_secs(5));
+        {
+            let mut state = lock(&ring.ring.ring);
+            state.slots[0].state = SlotState::Ready;
+            state.slots[0].seq = 1;
+            state.slots[1].state = SlotState::Rendering;
+            state.slots[1].seq = 2;
+            state.last_submitted_seq = 2;
+            state.next_seq = 3;
+        }
+        assert_eq!(ring.acquire_presented(), 0);
+        let stats = ring.take_stats();
+        assert_eq!(stats.acquire_wait_us, [0]);
+        assert_eq!(stats.present_lag, [1]);
+        let state = lock(&ring.ring.ring);
+        assert_eq!(state.slots[1].state, SlotState::Rendering);
+    }
+
+    #[test]
+    fn waiting_presenter_wakes_on_first_completed_frame() {
+        let ring = IoSurfaceRing::new(32, 32, 3, SyncMode::Blocking).unwrap();
+        ring.set_acquire_wait(Duration::from_secs(5));
+        {
+            let mut state = lock(&ring.ring.ring);
+            for i in 0..2 {
+                state.slots[i].state = SlotState::Rendering;
+                state.slots[i].seq = i as u64 + 1;
+            }
+            state.last_submitted_seq = 2;
+            state.next_seq = 3;
+        }
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(Duration::from_millis(10));
+                let mut state = lock(&ring.ring.ring);
+                state.slots[0].state = SlotState::Ready;
+                ring.ring.ready.notify_all();
+            });
+            let start = Instant::now();
+            assert_eq!(ring.acquire_presented(), 0);
+            assert!(
+                start.elapsed() < Duration::from_secs(1),
+                "must not exhaust the five-second budget waiting for frame 2"
+            );
+        });
+        assert_eq!(ring.take_stats().present_lag, [1]);
+    }
 }

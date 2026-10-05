@@ -37,6 +37,7 @@ void main() {
     addTearDown(controller.dispose);
     final fixedTicks = <int>[];
     final frames = <FramePlan>[];
+    final traces = <FynkelFrameTrace>[];
     FynkelFrameStats? last;
 
     await tester.pumpWidget(
@@ -50,6 +51,7 @@ void main() {
               controller: controller,
               fixedUpdate: fixedTicks.add,
               onFrame: (dt, plan) => frames.add(plan),
+              onFrameTrace: traces.add,
               onStats: (s) => last = s,
               overlay: const Text('HUD'),
             ),
@@ -71,6 +73,14 @@ void main() {
       await tester.pump(const Duration(microseconds: 16667));
     }
     expect(frames.length, greaterThanOrEqualTo(30));
+    expect(traces.length, frames.length);
+    for (final trace in traces) {
+      expect(trace.startUs, lessThanOrEqualTo(trace.simulationEndUs));
+      expect(trace.simulationEndUs, lessThanOrEqualTo(trace.renderStartUs));
+      expect(trace.renderStartUs, lessThanOrEqualTo(trace.endUs));
+    }
+    expect(traces.last.tick, world.tick);
+    expect(traces.any((trace) => trace.slot != null), isTrue);
     expect(fixedTicks, isNotEmpty);
     expect(fixedTicks.length, world.tick);
 

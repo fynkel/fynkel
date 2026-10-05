@@ -15,10 +15,12 @@
 //! Metal completion thread and must only signal.
 
 pub mod ring;
+mod trace;
 
 use std::ffi::c_void;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
 
 use fynkel_core::components::{Camera as SceneCamera, ExposureMode, Projection};
@@ -29,6 +31,81 @@ use glam::Vec3;
 
 pub use ring::{DeviceChoice, Gpu, IoSurfaceRing, RingStats, SyncMode, TEXTURE_FORMAT};
 
+/// The render worker of a pipelined viewport (`fynkel_apple_viewport_set_pipelined`):
+/// one thread that runs the frames' `prepare`, encode and submit while the
+/// host thread goes on to the next frame's simulation. At most one job is in
+/// flight; every call that touches the renderer first waits for it
+/// ([`Viewport::quiesce`]), so the renderer is never used by two threads.
+struct Pipeline {
+    jobs: std::sync::mpsc::Sender<Job>,
+    state: Arc<PipeState>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+type Job = Box<dyn FnOnce() + Send>;
+
+#[derive(Default)]
+struct PipeState {
+    /// A job is queued or running.
+    busy: Mutex<bool>,
+    idle: Condvar,
+    /// What the last finished job answered (`render`'s slot, -1 dropped, ...).
+    last: AtomicI32,
+    /// The last frame left assets to load.
+    assets_pending: AtomicBool,
+    /// The extract the last job used, handed back so its buffers are reused.
+    spare: Mutex<Option<Extract>>,
+    /// A panic inside a job; it breaks the viewport at the next call.
+    panic: Mutex<Option<String>>,
+}
+
+/// Raw pointers a job carries to the viewport's ring and renderer. Sound
+/// because the host thread never touches either while a job is in flight
+/// (`quiesce`) and the viewport never moves (it lives in a `Box`).
+struct JobPtrs {
+    ring: *const IoSurfaceRing,
+    renderer: *mut ExtractRenderer,
+}
+unsafe impl Send for JobPtrs {}
+
+impl Pipeline {
+    fn new() -> Self {
+        let (jobs, rx) = std::sync::mpsc::channel::<Job>();
+        let thread = std::thread::Builder::new()
+            .name("fynkel viewport render".into())
+            .spawn(move || {
+                while let Ok(job) = rx.recv() {
+                    job();
+                }
+            })
+            .expect("render worker thread");
+        Self {
+            jobs,
+            state: Arc::new(PipeState::default()),
+            thread: Some(thread),
+        }
+    }
+
+    fn wait_idle(&self) {
+        let mut busy = self.state.busy.lock().unwrap();
+        while *busy {
+            busy = self.state.idle.wait(busy).unwrap();
+        }
+    }
+}
+
+impl Drop for Pipeline {
+    fn drop(&mut self) {
+        self.wait_idle();
+        // Dropping the sender ends the worker's loop.
+        let (dead, _) = std::sync::mpsc::channel();
+        drop(std::mem::replace(&mut self.jobs, dead));
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
 /// Ring + renderer, on the GPU the process's viewports share (ADR-0030 §4).
 pub struct Viewport {
     ring: IoSurfaceRing,
@@ -37,9 +114,21 @@ pub struct Viewport {
     /// This viewport's own camera, drawn instead of the world's (the
     /// editor's Scene view on a running game, ADR-0021 P7 L5).
     view: Option<(glam::Mat4, SceneCamera)>,
+    /// The render worker, once `set_pipelined` turned it on.
+    pipeline: Option<Pipeline>,
+    /// `renderer.placeholders`, readable while the worker has the renderer.
+    placeholders: bool,
     /// Set by the first panic inside a viewport call (foundation 4.3):
     /// every call fails from then on, `destroy` still frees it.
     broken: OnceLock<String>,
+}
+
+impl Drop for Viewport {
+    fn drop(&mut self) {
+        // The worker holds pointers into the ring and renderer, which drop
+        // before the `pipeline` field would.
+        self.pipeline = None;
+    }
 }
 
 impl Viewport {
@@ -70,10 +159,34 @@ impl Viewport {
         let renderer = ExtractRenderer::new(ring.device(), TEXTURE_FORMAT, width, height);
         Self {
             ring,
+            placeholders: renderer.placeholders,
             renderer,
             extract: Extract::default(),
             view: None,
+            pipeline: None,
             broken: OnceLock::new(),
+        }
+    }
+
+    /// Waits for the render worker's job in flight, if any; the renderer is
+    /// the host thread's again afterwards. A panic the job hit breaks the
+    /// viewport here.
+    fn quiesce(&self) {
+        if let Some(p) = &self.pipeline {
+            p.wait_idle();
+            if let Some(text) = p.state.panic.lock().unwrap().take() {
+                self.break_with(Box::new(text));
+            }
+        }
+    }
+
+    /// Turns the render worker on or off. Off waits for it and joins it.
+    pub fn set_pipelined(&mut self, enabled: bool) {
+        self.quiesce();
+        match (enabled, self.pipeline.is_some()) {
+            (true, false) => self.pipeline = Some(Pipeline::new()),
+            (false, true) => self.pipeline = None,
+            _ => {}
         }
     }
 
@@ -134,32 +247,129 @@ impl Viewport {
             return -5;
         }
         let Viewport { ring, renderer, .. } = self;
-        let timed_before = renderer.stats().gpu_timed;
-        let t0 = std::time::Instant::now();
-        renderer.prepare(ring.device(), ring.queue(), extract);
-        let prepare_us = t0.elapsed().as_micros() as u32;
-        self.draw_prepared(extract_us, prepare_us, timed_before)
+        Self::render_frame(ring, renderer, |renderer| {
+            let start = std::time::Instant::now();
+            renderer.prepare(ring.device(), ring.queue(), extract);
+            Ok((extract_us, start.elapsed().as_micros() as u32))
+        })
     }
 
-    fn draw_prepared(&mut self, extract_us: u32, prepare_us: u32, timed_before: u32) -> i32 {
-        let Viewport { ring, renderer, .. } = self;
-        let slot = ring.render_with(|device, _queue, view| {
+    /// One frame through the render worker: the extract is taken here, on the
+    /// host thread (it reads the world), and everything after it — admission,
+    /// `prepare`, encode, submit — runs on the worker while the host goes on.
+    /// Answers what the *previous* frame's job answered (a slot, -1 dropped,
+    /// -4 failed); the first call answers 0.
+    fn render_pipelined(&mut self, w: &FynkelWorld) -> i32 {
+        let pipeline = self.pipeline.as_ref().expect("pipelined");
+        let state = pipeline.state.clone();
+        if let Some(text) = state.panic.lock().unwrap().take() {
+            self.break_with(Box::new(text));
+            return FYNKEL_APPLE_RENDER_BROKEN;
+        }
+        // Hand the job its extract: the buffers of an earlier one when back.
+        let mut extract = state.spare.lock().unwrap().take().unwrap_or_default();
+        let start = std::time::Instant::now();
+        w.core().extract_into(&mut extract, self.placeholders);
+        if let Some((world, camera)) = self.view {
+            extract.camera = Some(ExtractCamera {
+                record: u32::MAX,
+                world,
+                camera,
+            });
+        }
+        let extract_us = start.elapsed().as_micros() as u32;
+        let assets = w.assets().cloned();
+        // Normally the previous job finished while the host simulated; when
+        // the host is faster than the worker this is where it waits.
+        pipeline.wait_idle();
+        let answered = state.last.load(Ordering::Acquire);
+        let ptrs = JobPtrs {
+            ring: &self.ring,
+            renderer: &mut self.renderer,
+        };
+        *state.busy.lock().unwrap() = true;
+        let job_state = state.clone();
+        let job: Job = Box::new(move || {
+            let ptrs = ptrs;
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                // SAFETY: see `JobPtrs`.
+                let (ring, renderer) = unsafe { (&*ptrs.ring, &mut *ptrs.renderer) };
+                let slot = Viewport::render_frame(ring, renderer, |renderer| {
+                    if let Some(assets) = assets {
+                        renderer.set_assets(Some(assets));
+                    }
+                    let start = std::time::Instant::now();
+                    renderer.prepare(ring.device(), ring.queue(), &extract);
+                    Ok((extract_us, start.elapsed().as_micros() as u32))
+                });
+                job_state
+                    .assets_pending
+                    .store(renderer.assets_pending(), Ordering::Release);
+                slot
+            }));
+            *job_state.spare.lock().unwrap() = Some(extract);
+            match result {
+                Ok(slot) => job_state.last.store(slot, Ordering::Release),
+                Err(payload) => {
+                    *job_state.panic.lock().unwrap() = Some(panic_text(payload));
+                    job_state.last.store(FYNKEL_APPLE_RENDER_BROKEN, Ordering::Release);
+                }
+            }
+            *job_state.busy.lock().unwrap() = false;
+            job_state.idle.notify_all();
+        });
+        if pipeline.jobs.send(job).is_err() {
+            *state.busy.lock().unwrap() = false;
+            return -4;
+        }
+        answered
+    }
+
+    fn render_frame(
+        ring: &IoSurfaceRing,
+        renderer: &mut ExtractRenderer,
+        prepare: impl FnOnce(&mut ExtractRenderer) -> Result<(u32, u32), String>,
+    ) -> i32 {
+        let timed_before = renderer.stats().gpu_timed;
+        let mut stages = None;
+        let result = ring.try_render_with(|device, _queue, view| {
+            stages = Some(prepare(renderer)?);
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("fynkel viewport frame"),
             });
             renderer.draw(&mut encoder, view);
-            encoder.finish()
+            Ok::<_, String>(encoder.finish())
         });
-        let s = renderer.stats();
-        let gpu = (s.gpu_timed != timed_before).then_some((
-            s.gpu_shadow_us,
-            s.gpu_ao_us,
-            s.gpu_scene_us,
-            s.gpu_post_us,
-            s.gpu_frame_us,
-        ));
-        ring.record_stage_times(extract_us, prepare_us, s.encode_us, gpu);
-        slot
+        if let Some((extract_us, prepare_us)) = stages {
+            let s = renderer.stats();
+            let gpu = (s.gpu_timed != timed_before).then_some((
+                s.gpu_shadow_us,
+                s.gpu_ao_us,
+                s.gpu_scene_us,
+                s.gpu_post_us,
+                s.gpu_frame_us,
+            ));
+            ring.record_stage_times(extract_us, prepare_us, s.encode_us, gpu);
+            ring.record_prepare_phases(
+                s.prepare_phases_us,
+                s.visibility_phases_us,
+                s.visibility_update_kind,
+            );
+        }
+        if matches!(result, Ok(-1)) {
+            // One-attempt inputs must not accumulate or reappear on a later
+            // admitted frame just because this attempt skipped preparation.
+            renderer.debug().clear();
+            renderer.overlay().clear();
+            renderer.clear_extra_worlds();
+        }
+        match result {
+            Ok(slot) => slot,
+            Err(error) => {
+                log::warn!("viewport capture unavailable: {error}");
+                -4
+            }
+        }
     }
 
     pub fn instance_count(&self) -> u32 {
@@ -184,6 +394,7 @@ impl Viewport {
     }
 
     pub fn set_placeholders(&mut self, enabled: bool) {
+        self.placeholders = enabled;
         self.renderer.placeholders = enabled;
     }
 
@@ -349,6 +560,7 @@ unsafe fn guard<R>(vp: *const Viewport, f: impl FnOnce(&Viewport) -> R) -> Optio
 /// [`guard`] for the calls that change the viewport.
 unsafe fn guard_mut<R>(vp: *mut Viewport, f: impl FnOnce(&mut Viewport) -> R) -> Option<R> {
     let v = vp.as_mut()?;
+    v.quiesce();
     if v.broken.get().is_some() {
         return None;
     }
@@ -391,7 +603,11 @@ fn panic_text(payload: Box<dyn std::any::Any + Send>) -> String {
 /// inside a call breaks the viewport instead of aborting the process —
 /// `FYNKEL_APPLE_RENDER_BROKEN`, `fynkel_apple_viewport_error`,
 /// `fynkel_apple_viewport_debug_panic`, foundation 4.3).
-pub const APPLE_ABI_VERSION: u32 = 14;
+pub const APPLE_ABI_VERSION: u32 = 15;
+
+/// Set in `fynkel_apple_viewport_acquire_presented`'s answer when another finished
+/// frame is queued behind the slot it names (the slot is the low byte).
+pub const ACQUIRE_MORE_QUEUED: i32 = 0x100;
 
 /// Bit 0 of an extra world's flags (`fynkel_apple_viewport_extra_worlds`):
 /// drawn greyed.
@@ -448,6 +664,44 @@ pub unsafe extern "C" fn fynkel_apple_viewport_destroy(vp: *mut Viewport) {
             );
         }
     }
+}
+
+/// Turns the viewport's render worker on (`enabled` ≠ 0) or off. With it on,
+/// `fynkel_apple_viewport_render` extracts on the calling thread and hands
+/// the rest of the frame — admission, `prepare`, encode, submit — to a worker
+/// that runs while the host simulates the next one; the call answers what the
+/// *previous* frame's job answered (a slot, -1 dropped, -4 failed; the first
+/// call 0). Every other call that touches the renderer waits for the job in
+/// flight first. `render_ready` stays synchronous. Off by default. Returns 0,
+/// or -1 for a NULL or broken viewport.
+///
+/// # Safety
+/// `vp` must be a live viewport; host loop thread only.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_set_pipelined(vp: *mut Viewport, enabled: i32) -> i32 {
+    guard_mut(vp, |v| {
+        v.set_pipelined(enabled != 0);
+        0
+    })
+    .unwrap_or(-1)
+}
+
+/// How many finished frames the presenter shows in order before it skips
+/// ahead to the newest: 1 (the default) is a mailbox, 2 shows two frames that
+/// finished between rasters one after the other instead of dropping the older
+/// (a host whose rasters bunch, such as a long tick frame followed by a short
+/// one, then still shows every frame it makes). Returns 0, or -1 for a NULL or
+/// broken viewport.
+///
+/// # Safety
+/// `vp` must be a live viewport; host loop thread only.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_set_frame_queue(vp: *mut Viewport, depth: u32) -> i32 {
+    guard_mut(vp, |v| {
+        v.ring.set_frame_queue(depth);
+        0
+    })
+    .unwrap_or(-1)
 }
 
 /// Returns 0 on success, -1 on failure (the old ring is kept on failure).
@@ -522,7 +776,11 @@ pub unsafe extern "C" fn fynkel_apple_viewport_render_ready(
 /// `vp` is live or NULL; host thread only.
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_apple_viewport_assets_pending(vp: *const Viewport) -> u32 {
-    guard(vp, |v| u32::from(v.renderer.assets_pending())).unwrap_or(0)
+    guard(vp, |v| match &v.pipeline {
+        Some(p) => u32::from(p.state.assets_pending.load(Ordering::Acquire)),
+        None => u32::from(v.renderer.assets_pending()),
+    })
+    .unwrap_or(0)
 }
 
 unsafe fn render_world(
@@ -530,7 +788,14 @@ unsafe fn render_world(
     world: *const FynkelWorld,
     wait: Option<Duration>,
 ) -> i32 {
-    guard_mut(vp, |v| {
+    // A pipelined viewport answers without waiting for the worker (below);
+    // every other path starts from a quiet renderer, like any mutating call.
+    if let Some(v) = vp.as_mut() {
+        if v.pipeline.is_none() || wait.is_some() {
+            v.quiesce();
+        }
+    }
+    guard_mut_nowait(vp, |v| {
         if v.ring.gpu().is_lost() {
             return -5;
         }
@@ -540,42 +805,58 @@ unsafe fn render_world(
         if w.core().is_poisoned() {
             return FYNKEL_APPLE_RENDER_NO_WORLD;
         }
-        // The world's scene came from a cooked cache: draw from the same
-        // store, so residency (what the scene retained) and the renderer's
-        // GPU copies agree. Re-pointing at the store it already has is free.
-        if let Some(assets) = w.assets() {
-            v.renderer.set_assets(Some(assets.clone()));
+        if v.pipeline.is_some() && wait.is_none() {
+            return v.render_pipelined(w);
         }
-        let t0 = std::time::Instant::now();
-        let mut extract = std::mem::take(&mut v.extract);
-        w.core().extract_into(&mut extract, v.renderer.placeholders);
-        if let Some((world, camera)) = v.view {
-            extract.camera = Some(ExtractCamera {
-                record: u32::MAX,
-                world,
-                camera,
-            });
-        }
-        let extract_us = t0.elapsed().as_micros() as u32;
-        if let Some(timeout) = wait {
-            let timed_before = v.renderer.stats().gpu_timed;
-            let start = std::time::Instant::now();
-            if let Err(error) =
-                v.renderer
-                    .prepare_ready(v.ring.device(), v.ring.queue(), &extract, timeout)
-            {
-                log::warn!("viewport capture unavailable: {error}");
-                v.extract = extract;
-                return -4;
+        let Viewport {
+            ring,
+            renderer,
+            extract,
+            view,
+            ..
+        } = v;
+        Viewport::render_frame(ring, renderer, |renderer| {
+            // Asset selection and extraction happen only after admission. The
+            // retained extract is overwritten from the latest world on retry.
+            if let Some(assets) = w.assets() {
+                renderer.set_assets(Some(assets.clone()));
             }
-            v.extract = extract;
-            return v.draw_prepared(extract_us, start.elapsed().as_micros() as u32, timed_before);
-        }
-        let result = v.render_timed(&extract, extract_us);
-        v.extract = extract;
-        result
+            let start = std::time::Instant::now();
+            w.core().extract_into(extract, renderer.placeholders);
+            if let Some((world, camera)) = *view {
+                extract.camera = Some(ExtractCamera {
+                    record: u32::MAX,
+                    world,
+                    camera,
+                });
+            }
+            let extract_us = start.elapsed().as_micros() as u32;
+            let start = std::time::Instant::now();
+            if let Some(timeout) = wait {
+                renderer.prepare_ready(ring.device(), ring.queue(), extract, timeout)?;
+            } else {
+                renderer.prepare(ring.device(), ring.queue(), extract);
+            }
+            Ok((extract_us, start.elapsed().as_micros() as u32))
+        })
     })
     .unwrap_or_else(|| broken_or(vp, -1))
+}
+
+/// [`guard_mut`] without the wait for the render worker: only the render
+/// call itself, which hands the worker its next job.
+unsafe fn guard_mut_nowait<R>(vp: *mut Viewport, f: impl FnOnce(&mut Viewport) -> R) -> Option<R> {
+    let v = vp.as_mut()?;
+    if v.broken.get().is_some() {
+        return None;
+    }
+    match catch_unwind(AssertUnwindSafe(|| f(v))) {
+        Ok(r) => Some(r),
+        Err(payload) => {
+            (*vp).break_with(payload);
+            None
+        }
+    }
 }
 
 /// # Safety
@@ -1060,7 +1341,7 @@ pub unsafe extern "C" fn fynkel_apple_viewport_read_frame(
 }
 
 /// Sets the bounded wait `fynkel_apple_viewport_acquire_presented` may spend
-/// on the newest in-flight frame (microseconds; 0 disables).
+/// for a completion when no new image is ready (microseconds; 0 disables).
 /// # Safety
 /// `vp` must be a live viewport.
 #[no_mangle]
@@ -1076,7 +1357,17 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_acquire_wait_us(vp: *const Vi
 /// `vp` must be a live viewport. Safe to call from any thread.
 #[no_mangle]
 pub unsafe extern "C" fn fynkel_apple_viewport_acquire_presented(vp: *const Viewport) -> i32 {
-    guard(vp, |v| v.ring.acquire_presented()).unwrap_or(-1)
+    guard(vp, |v| {
+        // A frame queue (`set_frame_queue`) can leave a finished frame behind
+        // the one returned: bit 8 asks the presenter to signal for another raster.
+        let (slot, more) = v.ring.acquire_presented_queued();
+        if more && slot >= 0 {
+            slot | ACQUIRE_MORE_QUEUED
+        } else {
+            slot
+        }
+    })
+    .unwrap_or(-1)
 }
 
 /// # Safety
@@ -1112,6 +1403,8 @@ pub unsafe extern "C" fn fynkel_apple_viewport_take_stats(
 }
 
 fn take_stats(v: &Viewport, out: &mut FynkelAppleViewportStats) {
+    // The renderer's last-frame numbers: not while the worker is drawing.
+    v.quiesce();
     let mut s = v.ring.take_stats();
     let pct = ring::pct;
     *out = FynkelAppleViewportStats {
@@ -1236,4 +1529,91 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_light_budget(
         }
     })
     .unwrap_or(-1)
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+    use fynkel_native::{
+        fynkel_runtime_create, fynkel_runtime_destroy, fynkel_world_create, fynkel_world_destroy,
+    };
+
+    #[test]
+    fn full_viewport_skips_world_extraction_and_preparation_then_refreshes() {
+        let rt = fynkel_runtime_create();
+        let world = unsafe { fynkel_world_create(rt, std::ptr::null(), std::ptr::null_mut()) };
+        assert!(!world.is_null());
+        let mut vp = Viewport::new(32, 32, 3, SyncMode::Blocking).unwrap();
+        for slot in 0..3 {
+            assert_eq!(
+                unsafe { fynkel_apple_viewport_render(&mut vp, world) },
+                slot
+            );
+        }
+        vp.ring.take_stats();
+        // Three finished frames nobody has shown: the mailbox recycles the
+        // oldest for the new one, so the world is extracted and prepared and
+        // nothing is dropped. (A ring of protected slots drops without
+        // touching the extract; platform/apple/tests/ring.rs covers it.)
+        vp.extract.camera = Some(ExtractCamera {
+            record: 123,
+            world: glam::Mat4::IDENTITY,
+            camera: SceneCamera::default(),
+        });
+        assert_eq!(unsafe { fynkel_apple_viewport_render(&mut vp, world) }, 0);
+        assert!(
+            vp.extract.camera.is_none(),
+            "the recycled frame extracts the current empty world"
+        );
+        let stats = vp.ring.take_stats();
+        assert_eq!(stats.frames_dropped_no_free_buffer, 0);
+        assert_eq!(stats.extract_us.len(), 1);
+        assert_eq!(stats.prepare_us.len(), 1);
+        assert_eq!(vp.ring.acquire_presented(), 0, "the newest frame is shown");
+        let renderer_stats = vp.renderer.stats();
+        assert_eq!(
+            renderer_stats.prepare_phases_us.iter().sum::<u32>(),
+            renderer_stats.prepare_us
+        );
+        assert!(renderer_stats.prepare_us <= stats.prepare_us[0]);
+        assert!(
+            renderer_stats.visibility_phases_us.iter().sum::<u32>()
+                <= renderer_stats.prepare_phases_us[2]
+        );
+        unsafe {
+            fynkel_world_destroy(world);
+            fynkel_runtime_destroy(rt);
+        }
+    }
+
+    #[test]
+    fn a_pipelined_viewport_renders_on_its_worker_and_every_other_call_waits_for_it() {
+        let rt = fynkel_runtime_create();
+        let world = unsafe { fynkel_world_create(rt, std::ptr::null(), std::ptr::null_mut()) };
+        assert!(!world.is_null());
+        let mut vp = Viewport::new(32, 32, 3, SyncMode::Async).unwrap();
+        assert_eq!(unsafe { fynkel_apple_viewport_set_pipelined(&mut vp, 1) }, 0);
+        // The first call answers 0 (no earlier job); later ones answer what
+        // the frame before them did.
+        for _ in 0..12 {
+            let answered = unsafe { fynkel_apple_viewport_render(&mut vp, world) };
+            assert!(answered >= -1, "answered {answered}");
+        }
+        // Reading the renderer's numbers waits for the job in flight.
+        let mut stats = unsafe { std::mem::zeroed::<FynkelAppleViewportStats>() };
+        unsafe { fynkel_apple_viewport_take_stats(&vp, &mut stats) };
+        assert_eq!(stats.frames_rendered + stats.frames_dropped_no_free_buffer, 12);
+        assert!(stats.frames_rendered >= 3, "{}", stats.frames_rendered);
+        assert!(stats.prepare_p50_us > 0 || stats.encode_p50_us > 0 || stats.frames_rendered > 0);
+        // The ring has a finished frame to show.
+        vp.ring.wait_idle();
+        assert!(vp.ring.acquire_presented() >= 0);
+        // Off again: the worker is joined and the call is synchronous.
+        assert_eq!(unsafe { fynkel_apple_viewport_set_pipelined(&mut vp, 0) }, 0);
+        assert!(unsafe { fynkel_apple_viewport_render(&mut vp, world) } >= -1);
+        unsafe {
+            fynkel_world_destroy(world);
+            fynkel_runtime_destroy(rt);
+        }
+    }
 }

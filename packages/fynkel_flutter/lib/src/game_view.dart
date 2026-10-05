@@ -169,6 +169,7 @@ class FynkelFrameStats {
         'texture_new=${p.copyWithNewFrame}',
         'texture_empty=${p.copyNoFrame}',
         'texture_ready=${p.frameReadySignals}',
+        'texture_more=${p.copyQueued}',
         'thermal=${p.thermalState.name}',
       ],
       if (h != null) ...[
@@ -204,6 +205,17 @@ class FynkelFrameStats {
   };
 }
 
+/// Opt-in host frame trace. Times are epoch microseconds for correlation with
+/// native diagnostics; wall-clock changes invalidate cross-process alignment.
+/// A completed host frame is not proof of physical display presentation.
+class FynkelFrameTrace {
+  const FynkelFrameTrace({required this.startUs, required this.simulationEndUs,
+    required this.renderStartUs, required this.endUs, required this.steps,
+    required this.tick, required this.slot});
+  final int startUs, simulationEndUs, renderStartUs, endUs, steps, tick;
+  final int? slot;
+}
+
 class FynkelGameView extends StatefulWidget {
   const FynkelGameView({
     super.key,
@@ -212,6 +224,7 @@ class FynkelGameView extends StatefulWidget {
     this.input,
     this.fixedUpdate,
     this.onFrame,
+    this.onFrameTrace,
     this.onStats,
     this.statsInterval = const Duration(seconds: 1),
     this.overlay,
@@ -246,6 +259,10 @@ class FynkelGameView extends StatefulWidget {
 
   /// Called once per Flutter frame after `World.frame`, before the render.
   final void Function(double dtSeconds, FramePlan plan)? onFrame;
+
+  /// Optional diagnostic callback after simulation and render return. Timestamp
+  /// reads and trace objects are created only while a callback is installed.
+  final void Function(FynkelFrameTrace trace)? onFrameTrace;
 
   /// Per-window loop statistics (HUD, benchmark captures).
   final void Function(FynkelFrameStats stats)? onStats;
@@ -295,7 +312,11 @@ class FynkelGameView extends StatefulWidget {
 
 class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   FynkelViewportController? _owned;
-  FynkelViewportController get controller => widget.controller ?? (_owned ??= FynkelViewportController());
+  // A game's own viewport draws on the render worker and shows every frame
+  // it makes at the display's rate (docs/foundation-f8-throughput-observations.md):
+  // five buffers hold the two queued frames, the one shown and the one retiring.
+  FynkelViewportController get controller =>
+      widget.controller ?? (_owned ??= FynkelViewportController(pipelined: true, frameQueue: 2, bufferCount: 5));
   FynkelInputCapture? _ownedInput;
   FynkelInputCapture get input => widget.input ?? (_ownedInput ??= FynkelInputCapture());
   bool _hasFocus = false;
@@ -619,6 +640,8 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   /// One frame of [dt] seconds: the world's frame, then the render.
   void _frame(double dt, {bool singleStep = false}) {
     if (_panic != null) return; // stopped for good (a Step, a resume)
+    final trace = widget.onFrameTrace;
+    final startUs = trace == null ? 0 : DateTime.now().microsecondsSinceEpoch;
     final world = widget.world;
     _frames++;
 
@@ -636,6 +659,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       return;
     }
     sim.stop();
+    final simulationEndUs = trace == null ? 0 : DateTime.now().microsecondsSinceEpoch;
     _simMs.add(sim.elapsedMicroseconds / 1000);
     final ft = world.frameTimes;
     _behavioursMs.add(ft.behavioursUs / 1000);
@@ -650,7 +674,13 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       world.projection.update();
     }
     widget.onFrame?.call(dt, plan);
-    _render(world);
+    final renderStartUs = trace == null ? 0 : DateTime.now().microsecondsSinceEpoch;
+    final slot = _render(world);
+    if (trace != null) {
+      trace(FynkelFrameTrace(startUs: startUs, simulationEndUs: simulationEndUs,
+        renderStartUs: renderStartUs, endUs: DateTime.now().microsecondsSinceEpoch,
+        steps: plan.steps, tick: world.tick, slot: slot));
+    }
   }
 
   /// The engine panicked (foundation 4.1): the world is poisoned for good,
@@ -672,13 +702,13 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   FynkelPanicError? _panic;
 
   /// The world's picture as it is now, with its gizmo lines.
-  void _render(World world) {
+  int? _render(World world) {
     final c = controller;
     if (c.state == ViewportState.resizing) {
       _skipped++;
-      return;
+      return null;
     }
-    if (c.state != ViewportState.attached) return;
+    if (c.state != ViewportState.attached) return null;
     final gizmos = world.gizmos;
     if (gizmos != null && !gizmos.isEmpty) {
       // One point wide, faded behind geometry: the editor's gizmo lines.
@@ -711,6 +741,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
         ),
       );
     }
+    return slot;
   }
 
   Future<void> _report() async {

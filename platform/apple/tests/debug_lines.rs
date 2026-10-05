@@ -16,8 +16,8 @@ use fynkel_platform_apple::{
 
 #[test]
 fn debug_lines_draw_on_the_next_render_only() {
-    assert_eq!(fynkel_apple_abi_version(), 14);
-    assert_eq!(APPLE_ABI_VERSION, 14);
+    assert_eq!(fynkel_apple_abi_version(), 15);
+    assert_eq!(APPLE_ABI_VERSION, 15);
 
     let mut world = World::new(WorldConfig::default());
     world.begin_frame(1.0 / 60.0);
@@ -423,8 +423,11 @@ fn the_outline_draws_on_the_next_render_only_and_equals_offscreen() {
             -1
         );
     }
-    // The default-style outline queued above is drawn.
-    let _ = vp.render(&extract);
+    // The default-style outline queued above is drawn. The earlier renders
+    // filled the ring: present the latest before requesting another picture.
+    vp.ring().wait_idle();
+    assert!(vp.ring().acquire_presented() >= 0);
+    assert!(vp.render(&extract) >= 0);
     assert_eq!(vp.frame_stats().outlined, 1);
     vp.ring().wait_idle();
 }

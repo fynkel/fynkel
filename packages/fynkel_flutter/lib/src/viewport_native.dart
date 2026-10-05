@@ -13,7 +13,7 @@ import 'package:fynkel/advanced.dart' show EntityRef, FynkelEntity;
 
 import 'percentiles.dart';
 
-const viewportAbiVersion = 14;
+const viewportAbiVersion = 15;
 
 /// `fynkel_apple_viewport_render` result when the world pointer is null or
 /// the world is poisoned.
@@ -215,6 +215,10 @@ external int _resize(Pointer<Void> vp, int width, int height);
 external int _bufferCount(Pointer<Void> vp);
 @Native<Pointer<Void> Function(Pointer<Void>, Uint32)>(symbol: 'fynkel_apple_viewport_iosurface', assetId: _asset)
 external Pointer<Void> _iosurface(Pointer<Void> vp, int index);
+@Native<Int32 Function(Pointer<Void>, Int32)>(symbol: 'fynkel_apple_viewport_set_pipelined', assetId: _asset)
+external int _setPipelined(Pointer<Void> vp, int enabled);
+@Native<Int32 Function(Pointer<Void>, Uint32)>(symbol: 'fynkel_apple_viewport_set_frame_queue', assetId: _asset)
+external int _setFrameQueue(Pointer<Void> vp, int depth);
 @Native<Int32 Function(Pointer<Void>, Pointer<Void>)>(symbol: 'fynkel_apple_viewport_render', assetId: _asset)
 external int _render(Pointer<Void> vp, Pointer<Void> world);
 
@@ -361,6 +365,10 @@ class ViewportNative {
   bool resize(Pointer<Void> vp, int width, int height) => _resize(vp, width, height) == 0;
 
   int bufferCount(Pointer<Void> vp) => _bufferCount(vp);
+
+  /// Runs the frames' prepare/encode/submit on a native render worker (ABI 15).
+  bool setPipelined(Pointer<Void> vp, bool enabled) => _setPipelined(vp, enabled ? 1 : 0) == 0;
+  bool setFrameQueue(Pointer<Void> vp, int depth) => _setFrameQueue(vp, depth) == 0;
 
   List<int> iosurfaceAddresses(Pointer<Void> vp) => List.generate(bufferCount(vp), (i) => _iosurface(vp, i).address);
 
@@ -579,8 +587,8 @@ class ViewportNative {
     }
   }
 
-  /// Bounded wait the presenter (raster thread) may spend on the newest
-  /// in-flight frame so it composites this tick's frame (0 disables).
+  /// Maximum time the presenter (raster thread) waits for a completion when
+  /// no new image is ready. Completed images are acquired immediately (0 disables).
   void setAcquireWaitUs(Pointer<Void> vp, int us) => _setAcquireWait(vp, us);
 
   /// Clears the Rust -> host frame-ready callback (synchronously; waits for

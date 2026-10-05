@@ -1,4 +1,4 @@
-/* Fynkel macOS viewport ABI v14 (platform/apple). Pairs with fynkel.h: the
+/* Fynkel macOS viewport ABI v15 (platform/apple). Pairs with fynkel.h: the
  * same dylib exports both. See platform/apple/README.md for the contract.
  * v3 added the M3-16 instrumentation fields of FynkelAppleViewportStats; v4
  * fynkel_apple_viewport_debug_lines and fynkel_apple_viewport_read_frame (the
@@ -20,7 +20,24 @@
 extern "C" {
 #endif
 
-#define FYNKEL_APPLE_ABI_VERSION 14
+#define FYNKEL_APPLE_ABI_VERSION 15
+
+/* ABI 15: fynkel_apple_viewport_set_pipelined. With it on, _render extracts on
+ * the calling thread and the rest of the frame (admission, prepare, encode,
+ * submit) runs on a render worker while the host simulates the next one; the
+ * call answers what the PREVIOUS frame's job answered (slot, -1 dropped, -4
+ * failed; the first call 0). Calls that touch the renderer wait for the job in
+ * flight. _render_ready stays synchronous. Off by default; 0 or -1. */
+int32_t fynkel_apple_viewport_set_pipelined(FynkelAppleViewport *vp, int32_t enabled);
+
+/* ABI 15: fynkel_apple_viewport_set_frame_queue. How many finished frames the
+ * presenter shows in order before it skips to the newest: 1 (default) is a
+ * mailbox, 2 shows two frames that finished between rasters one after the
+ * other instead of dropping the older. 0 or -1. */
+int32_t fynkel_apple_viewport_set_frame_queue(FynkelAppleViewport *vp, uint32_t depth);
+/* With a frame queue, _acquire_presented sets bit 8 (0x100) of its answer when
+ * another finished frame is queued behind the slot (low byte): signal the
+ * texture again so the next raster takes it. */
 
 typedef struct FynkelAppleViewport FynkelAppleViewport;
 /* ABI 14: default 1024/8, maximum 16384/8. Invalid limits leave settings
@@ -143,6 +160,8 @@ typedef struct {
  * draw. Nothing in the world changes. Host-loop thread. */
 int32_t fynkel_apple_viewport_set_view(FynkelAppleViewport *vp, const float *world,
                                        const FynkelAppleViewCamera *camera);
+/* Maximum wait for GPU completion when no new image is ready, in microseconds.
+ * Ready images are acquired immediately. Zero disables waiting. */
 void fynkel_apple_viewport_set_acquire_wait_us(const FynkelAppleViewport *vp, uint32_t us);
 void fynkel_apple_viewport_set_frame_ready_callback(const FynkelAppleViewport *vp,
                                                     FynkelAppleFrameReadyFn func, void *userdata);

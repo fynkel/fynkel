@@ -39,6 +39,7 @@ final class FynkelViewportTexture: NSObject, FlutterTexture {
   private var frameReadySignals = 0
   private var copyNoFrame = 0
   private var rebinds = 0
+  private var moreQueued = 0
 
   init?(ctx: UnsafeMutableRawPointer, acquire: AcquireFn, iosurfaces: [UnsafeMutableRawPointer]) {
     self.ctx = ctx
@@ -98,17 +99,28 @@ final class FynkelViewportTexture: NSObject, FlutterTexture {
   // MARK: FlutterTexture (called on Flutter's raster thread)
 
   func copyPixelBuffer() -> Unmanaged<CVPixelBuffer>? {
-    lock.lock(); defer { lock.unlock() }
+    lock.lock()
     copyCalls += 1
-    if detached { return nil }
-    let index = acquire(ctx)
+    if detached { lock.unlock(); return nil }
+    let raw = acquire(ctx)
+    // Bit 8: another finished frame is queued behind this one (the viewport's
+    // frame queue); the engine copies once per signal, so ask for another.
+    let more = raw >= 0 && (raw & 0x100) != 0
+    let index = raw >= 0 ? raw & 0xff : raw
     if index < 0 || Int(index) >= pixelBuffers.count {
       copyNoFrame += 1
+      lock.unlock()
       return nil
     }
     if index != lastIndex { copyWithNewFrame += 1 }
     lastIndex = index
-    return Unmanaged.passRetained(pixelBuffers[Int(index)])
+    let buffer = Unmanaged.passRetained(pixelBuffers[Int(index)])
+    let id = textureId
+    let registry = self.registry
+    lock.unlock()
+    if more { moreQueued += 1 }
+    if more { DispatchQueue.global(qos: .userInteractive).async { registry?.textureFrameAvailable(id) } }
+    return buffer
   }
 
   /// Read and reset under the same lock as raster/completion-thread writes.
@@ -120,10 +132,11 @@ final class FynkelViewportTexture: NSObject, FlutterTexture {
       "frameReadySignals": frameReadySignals,
       "copyNoFrame": copyNoFrame,
       "rebinds": rebinds,
+      "copyQueued": moreQueued,
       "thermalState": ProcessInfo.processInfo.thermalState.rawValue,
     ]
     copyCalls = 0; copyWithNewFrame = 0; frameReadySignals = 0
-    copyNoFrame = 0; rebinds = 0
+    copyNoFrame = 0; rebinds = 0; moreQueued = 0
     return result
   }
 

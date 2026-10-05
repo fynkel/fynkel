@@ -103,10 +103,11 @@ class ViewportPlatformStats {
     this.copyWithNewFrame = 0,
     this.copyNoFrame = 0,
     this.frameReadySignals = 0,
+    this.copyQueued = 0,
     this.rebinds = 0,
     this.thermalState = ViewportThermalState.unknown,
   });
-  final int copyCalls, copyWithNewFrame, copyNoFrame, frameReadySignals, rebinds;
+  final int copyCalls, copyWithNewFrame, copyNoFrame, frameReadySignals, copyQueued, rebinds;
 
   /// Current device-wide pressure at sampling time (not reset with counters).
   final ViewportThermalState thermalState;
@@ -120,6 +121,8 @@ class FynkelViewportController extends ChangeNotifier {
     this.bufferCount = 4,
     this.syncMode = ViewportSyncMode.metalCompletion,
     this.acquireWaitUs = 3000,
+    this.pipelined = false,
+    this.frameQueue = 1,
     bool placeholders = true,
     String? assetCache,
     String? quality,
@@ -141,9 +144,21 @@ class FynkelViewportController extends ChangeNotifier {
   final int bufferCount;
   final ViewportSyncMode syncMode;
 
-  /// Bounded wait the presenter (raster thread) may spend on the newest
-  /// in-flight frame so it composites this tick's frame (0 disables).
+  /// Maximum time the presenter (raster thread) waits for a completion when
+  /// no new image is ready. Completed images are acquired immediately (0 disables).
   final int acquireWaitUs;
+
+  /// Draws on a native render worker: [render] extracts on the calling thread
+  /// and answers the *previous* frame's result, while the frame's prepare,
+  /// encode and submit overlap the next frame's simulation. For a game
+  /// loop; an editor that draws overlays between frames keeps it off.
+  final bool pipelined;
+
+  /// Finished frames the compositor shows in order before it skips to the
+  /// newest: 1 is a mailbox (lowest latency), 2 shows two frames that finish
+  /// between rasters one after the other, so a host whose frames bunch (a
+  /// long tick frame, then a short one) still shows every frame it makes.
+  final int frameQueue;
 
   ViewportNative? _native;
   Pointer<Void> _viewport = nullptr;
@@ -326,6 +341,8 @@ class FynkelViewportController extends ChangeNotifier {
       }
       _viewport = vp;
       native.setAcquireWaitUs(vp, acquireWaitUs);
+      if (pipelined) native.setPipelined(vp, true);
+      if (frameQueue > 1) native.setFrameQueue(vp, frameQueue);
       native.setPlaceholders(vp, _placeholders);
       if (!native.setLightBudget(vp, _lightPool, _lightsPerObject)) {
         throw StateError('Native viewport refused the lighting budget.');
@@ -538,6 +555,7 @@ class FynkelViewportController extends ChangeNotifier {
       copyWithNewFrame: m['copyWithNewFrame'] as int? ?? 0,
       copyNoFrame: m['copyNoFrame'] as int? ?? 0,
       frameReadySignals: m['frameReadySignals'] as int? ?? 0,
+      copyQueued: m['copyQueued'] as int? ?? 0,
       rebinds: m['rebinds'] as int? ?? 0,
       thermalState: _thermalState(m['thermalState']),
     );
