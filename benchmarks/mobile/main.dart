@@ -106,7 +106,7 @@ class _CaptureState extends State<_Capture> with WidgetsBindingObserver {
         if (limit is! int || limit < 1 || limit > 600) throw StateError('Invalid limitSeconds option');
         _limitSeconds = limit;
         if (timeline is! bool || frozen is! bool || ticks is! bool || ![0, 3000].contains(wait) ||
-            ![4, 5, 6, 8].contains(buffers) || ![0.5, 1.0].contains(scale)) {
+            ![4, 5, 6, 8].contains(buffers) || ![0.5, 0.75, 1.0].contains(scale)) {
           throw StateError('Invalid diagnostic options');
         }
         _timeline = timeline; _freezeScene = frozen;
@@ -313,11 +313,9 @@ class _CaptureState extends State<_Capture> with WidgetsBindingObserver {
   Widget build(BuildContext context) => Scaffold(
     body: _game == null
         ? Center(child: Text(_status))
-        : MediaQuery(
-            data: MediaQuery.of(context).copyWith(devicePixelRatio:
-              MediaQuery.devicePixelRatioOf(context) * _resolutionScale),
-            child: FynkelGameView(
+        : FynkelGameView(
             key: _view,
+            resolutionScale: _resolutionScale,
             world: _game!.world,
             controller: _controller,
             onFrame: (dt, plan) {
@@ -352,7 +350,6 @@ class _CaptureState extends State<_Capture> with WidgetsBindingObserver {
                 ),
               ),
             ),
-          ),
           ),
   );
 }

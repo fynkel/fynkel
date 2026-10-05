@@ -224,6 +224,9 @@ pub struct IoSurfaceRing {
     /// How many finished frames the presenter shows in order before it
     /// skips ahead to the newest (`set_frame_queue`); 1 is the mailbox.
     frame_queue: AtomicU32,
+    /// Most frames the GPU may hold at once (`set_frame_queue` sets 2);
+    /// a frame admitted past it is dropped before any work is done for it.
+    max_in_flight: AtomicU32,
     stats: Arc<Mutex<RingStats>>,
     frame_ready_cb: Arc<FrameReadyCallback>,
     /// Kept alive for the lifetime of the textures; indexed like `ring.slots`.
@@ -421,6 +424,7 @@ impl IoSurfaceRing {
                 }),
                 acquire_wait: Mutex::new(Duration::ZERO),
                 frame_queue: AtomicU32::new(1),
+                max_in_flight: AtomicU32::new(u32::MAX),
                 stats: Arc::new(Mutex::new(RingStats::default())),
                 frame_ready_cb: Arc::new(FrameReadyCallback {
                     func: Mutex::new(None),
@@ -533,6 +537,18 @@ impl IoSurfaceRing {
         let t0 = Instant::now();
         let (index, seq, generation, view) = {
             let mut ring = lock(&self.ring.ring);
+            let in_flight = ring
+                .slots
+                .iter()
+                .filter(|s| s.state == SlotState::Rendering)
+                .count() as u32;
+            if in_flight >= self.max_in_flight.load(Ordering::Relaxed) {
+                if let Some(trace) = &self.trace {
+                    trace.record("drop", ring.generation, 0, -1, ring.counts(), [0; 3]);
+                }
+                lock(&self.stats).frames_dropped_no_free_buffer += 1;
+                return Ok(-1);
+            }
             // A completed frame the presenter has not taken is stale the moment
             // a newer one is wanted (`acquire_presented` recycles it unseen), so
             // a full ring reuses the oldest such slot instead of dropping the
@@ -689,8 +705,16 @@ impl IoSurfaceRing {
     /// the next raster, so a host whose rasters bunch (a long tick frame
     /// followed by a short one) still shows every frame it makes instead of
     /// two frames collapsing into one copy.
+    ///
+    /// A queue also stops the producer running ahead of the GPU: at most two
+    /// frames are in flight, and a third is dropped before `prepare`. Without
+    /// the limit a GPU-bound host (a phone at native resolution) renders
+    /// frames the ring recycles before the presenter sees them, which wastes
+    /// GPU time and showed 29 frames/s where the GPU could finish 90.
     pub fn set_frame_queue(&self, depth: u32) {
         self.frame_queue.store(depth.max(1), Ordering::Relaxed);
+        self.max_in_flight
+            .store(if depth > 1 { 2 } else { u32::MAX }, Ordering::Relaxed);
     }
 
     pub fn set_acquire_wait(&self, wait: Duration) {

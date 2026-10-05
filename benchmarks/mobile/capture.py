@@ -18,7 +18,7 @@ def launched_pid(doc):
     return pid
 
 
-def capture(device, bundle, app, out, trace_gpu=False, trace_frames=False, freeze_scene=False, acquire_wait_us=3000, buffer_count=4, resolution_scale=1.0, cpu_ticks=False, quality='medium', metal_trace_device=None, trace_physics=False):
+def capture(device, bundle, app, out, trace_gpu=False, trace_frames=False, freeze_scene=False, acquire_wait_us=3000, buffer_count=4, resolution_scale=1.0, cpu_ticks=False, quality='medium', metal_trace_device=None, trace_physics=False, pipelined=False, frame_queue=1):
     with (app / 'Info.plist').open('rb') as file:
         actual_bundle = plistlib.load(file)['CFBundleIdentifier']
     if actual_bundle != bundle:
@@ -52,7 +52,7 @@ def capture(device, bundle, app, out, trace_gpu=False, trace_frames=False, freez
     try:
         run(['device', 'install', 'app', '--device', device, app], timeout=120)
         request = out / 'capture-request.json'
-        request.write_text(json.dumps({'captureId': capture_id, 'awaitProfiler': bool(metal_trace_device), 'timeline': trace_frames, 'freezeScene': freeze_scene, 'acquireWaitUs': acquire_wait_us, 'bufferCount': buffer_count, 'resolutionScale': resolution_scale, 'cpuTicks': cpu_ticks, 'quality': quality}) + '\n')
+        request.write_text(json.dumps({'captureId': capture_id, 'awaitProfiler': bool(metal_trace_device), 'timeline': trace_frames, 'freezeScene': freeze_scene, 'acquireWaitUs': acquire_wait_us, 'bufferCount': buffer_count, 'resolutionScale': resolution_scale, 'cpuTicks': cpu_ticks, 'quality': quality, 'pipelined': pipelined, 'frameQueue': frame_queue}) + '\n')
         run(['device', 'copy', 'to', '--device', device, '--domain-type', 'appDataContainer',
              '--domain-identifier', bundle, '--source', request,
              '--destination', 'Documents/capture-request.json'])
@@ -102,7 +102,8 @@ def capture(device, bundle, app, out, trace_gpu=False, trace_frames=False, freez
         validate_capture_rows(rows, capture_id)
         expected_options = {'awaitProfiler': bool(metal_trace_device), 'timeline': trace_frames, 'frozenScene': freeze_scene,
                             'acquireWaitUs': acquire_wait_us, 'bufferCount': buffer_count,
-                            'resolutionScale': resolution_scale, 'cpuTickReadback': cpu_ticks, 'quality': quality}
+                            'resolutionScale': resolution_scale, 'cpuTickReadback': cpu_ticks, 'quality': quality,
+                            'pipelined': pipelined, 'frameQueue': frame_queue}
         if any(rows[0].get(key) != value for key, value in expected_options.items()):
             raise RuntimeError('app did not acknowledge the requested diagnostic options')
         if any(row.get('quality') != quality or row.get('qualityVerified') is not True
@@ -257,7 +258,9 @@ if __name__ == '__main__':
     parser.add_argument('--trace-frames', action='store_true')
     parser.add_argument('--freeze-scene', action='store_true')
     parser.add_argument('--acquire-wait-us', type=int, choices=[0, 3000], default=3000)
-    parser.add_argument('--buffer-count', type=int, choices=[4, 8], default=4)
-    parser.add_argument('--resolution-scale', type=float, choices=[0.5, 1.0], default=1.0)
+    parser.add_argument('--buffer-count', type=int, choices=[4, 5, 6, 8], default=4)
+    parser.add_argument('--pipelined', action='store_true', help='Render on the native worker (the game view default)')
+    parser.add_argument('--frame-queue', type=int, choices=[1, 2, 3], default=1, help='Frames the compositor shows in order before skipping to the newest; 2 needs --buffer-count 5')
+    parser.add_argument('--resolution-scale', type=float, choices=[0.5, 0.75, 1.0], default=1.0)
     args = parser.parse_args()
-    capture(args.device, args.bundle, args.app, args.out.resolve(), trace_gpu=args.trace_gpu, trace_frames=args.trace_frames, freeze_scene=args.freeze_scene, acquire_wait_us=args.acquire_wait_us, buffer_count=args.buffer_count, resolution_scale=args.resolution_scale, cpu_ticks=args.cpu_ticks, quality=args.quality, metal_trace_device=args.metal_trace_device, trace_physics=args.trace_physics)
+    capture(args.device, args.bundle, args.app, args.out.resolve(), trace_gpu=args.trace_gpu, trace_frames=args.trace_frames, freeze_scene=args.freeze_scene, acquire_wait_us=args.acquire_wait_us, buffer_count=args.buffer_count, resolution_scale=args.resolution_scale, cpu_ticks=args.cpu_ticks, quality=args.quality, metal_trace_device=args.metal_trace_device, trace_physics=args.trace_physics, pipelined=args.pipelined, frame_queue=args.frame_queue)

@@ -235,6 +235,7 @@ class FynkelGameView extends StatefulWidget {
     this.onKeyEvent,
     this.onPointerEvent,
     this.placeholder,
+    this.resolutionScale = 1.0,
     this.profileDartHeap = false,
     this.gizmos,
   });
@@ -305,6 +306,9 @@ class FynkelGameView extends StatefulWidget {
   final FocusOnKeyEventCallback? onKeyEvent;
   final ViewportPointerCallback? onPointerEvent;
   final Widget? placeholder;
+
+  /// Fraction of native resolution to render at (see [FynkelViewport.resolutionScale]).
+  final double resolutionScale;
 
   @override
   State<FynkelGameView> createState() => FynkelGameViewState();
@@ -519,7 +523,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _pixelRatio = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1;
+    _pixelRatio = (MediaQuery.maybeDevicePixelRatioOf(context) ?? 1) * widget.resolutionScale;
     // The editor's Pause and Step: this runs again whenever they change.
     final play = FynkelPlayScope.maybeOf(context);
     if (!identical(play, _play)) {
@@ -798,6 +802,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       onPointerEvent: _onPointer,
       onFocusChange: _onFocusChange,
       placeholder: widget.placeholder,
+      resolutionScale: widget.resolutionScale,
     );
     final hud = widget.overlay;
     final overlay = hud == null ? null : Focus(focusNode: _overlayFocus, onKeyEvent: _onOverlayKey, child: hud);

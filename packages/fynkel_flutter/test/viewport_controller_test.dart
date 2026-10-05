@@ -551,6 +551,37 @@ void main() {
     await controller.detach();
   });
 
+  testWidgets('resolutionScale renders a smaller ring and reports pointers in its pixels', (tester) async {
+    final controller = FynkelViewportController();
+    addTearDown(controller.dispose);
+    Offset? seen;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Center(
+          child: SizedBox(
+            width: 64,
+            height: 48,
+            child: FynkelViewport(
+              controller: controller,
+              resolutionScale: 0.5,
+              onPointerEvent: (e, p) => seen = p,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    final dpr = tester.view.devicePixelRatio;
+    expect(controller.physicalWidth, (64 * dpr * 0.5).round());
+    expect(controller.physicalHeight, (48 * dpr * 0.5).round());
+    final gesture = await tester.startGesture(tester.getTopLeft(find.byType(FynkelViewport)) + const Offset(20, 10));
+    await gesture.up();
+    expect(seen, Offset(20 * dpr * 0.5, 10 * dpr * 0.5));
+    await tester.pumpWidget(const SizedBox());
+    await controller.detach();
+  });
+
   test('percentiles', () {
     expect(MsPercentiles.of([]).count, 0);
     final p = MsPercentiles.of([5, 1, 3, 2, 4]);

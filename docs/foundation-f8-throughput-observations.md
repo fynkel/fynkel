@@ -146,6 +146,40 @@ benchmark (`render_throughput`, pipelined, not tied to a display) at
 3456×2234 runs 183 fps (stress scene), 167 fps (dense-5000, with its 6 ms
 simulation) and 243 fps (reference game).
 
+## iPhone 16 Pro Max (120 Hz ProMotion, 1320×2868), 2026-10-06
+
+dense-500 release build on the device, full effects (AO, contact shadows,
+MSAA 4), nominal thermal state, a cooled phone, six 1-second windows
+(`benchmarks/mobile/capture.py`).
+
+| configuration | loop | fresh frames/s | dropped/s | GPU frame |
+| --- | --- | --- | --- | --- |
+| old: sync, mailbox, 4 buffers, native | 120 | 38–43 | 30 | ~10.7 ms |
+| pipelined + queue 2 + 5 buffers, native, **before** the in-flight cap | 120 | 29–35 | 19–23 | ~11.5 ms |
+| same, **with the in-flight cap**, native | 120 | **89–90** | 30 | 9.6–11 ms |
+| same, `resolutionScale: 0.75` (990×2151) | 120 | **120** | 0 | 5.6–6.9 ms |
+
+What was wrong: at native resolution the GPU needs ~10 ms a frame, so it
+cannot make 120 fps. The render worker kept starting frames anyway; the ring
+filled with finished frames the presenter never saw, and recycled them, so
+the GPU spent its time on pictures nobody displayed (rendered 98, shown 29,
+repeats 65 in a second). `set_frame_queue(depth > 1)` now also allows at most
+two frames in flight and drops a third before any work is done for it, like
+the full-ring drop. The GPU then renders only what can be shown: 90 fresh
+frames/s at native resolution, 3× the previous default and more than the
+synchronous path, with no throttling in these captures.
+
+The honest limit: at native resolution with every effect on, this scene takes
+~10 ms on the phone's GPU, so 120 is out of reach (≈100 is the ceiling). Two
+ways to 120 are legitimate: render at a fraction of native resolution
+(`FynkelGameView(resolutionScale: 0.75)`, the new option, which holds 120 with
+0 dropped here), or make the effects cheaper. The option is explicit and off
+by default; nothing is lowered silently.
+
+Not yet measured on the phone: dense-5000 (its 8+ ms tick frame plus the GPU
+put it near 60 and the phone throttles after ~2 s), and sustained runs longer
+than the 6-second capture.
+
 ## Next
 
 1. dense-5000 tick frame (8.6–9.5 ms): batch the movers' path (system →

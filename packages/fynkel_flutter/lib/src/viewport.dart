@@ -24,7 +24,8 @@ class FynkelViewport extends StatefulWidget {
     this.filterQuality = FilterQuality.none,
     this.placeholder,
     this.resizeDebounce = Duration.zero,
-  });
+    this.resolutionScale = 1.0,
+  }) : assert(resolutionScale > 0 && resolutionScale <= 1);
 
   final FynkelViewportController controller;
   final FocusNode? focusNode;
@@ -54,6 +55,15 @@ class FynkelViewport extends StatefulWidget {
   /// settles, and then resizes once. The first size is never held: there
   /// is nothing on screen to scale yet.
   final Duration resizeDebounce;
+
+  /// The fraction of the device's physical resolution the ring is rendered
+  /// at; Flutter scales the picture to the widget. 1.0 (the default) is
+  /// native. A phone's panel is far denser than its GPU can fill with every
+  /// effect on: on an iPhone 16 Pro Max (1320x2868) a scene with ambient
+  /// occlusion and contact shadows takes ~10 ms a frame at 1.0, which caps
+  /// a 120 Hz display near 90 frames/s, and ~6 ms at 0.75, which holds 120.
+  /// Pointer positions are reported in the (scaled) ring's pixels.
+  final double resolutionScale;
 
   @override
   State<FynkelViewport> createState() => _FynkelViewportState();
@@ -124,7 +134,7 @@ class _FynkelViewportState extends State<FynkelViewport> {
 
   @override
   Widget build(BuildContext context) {
-    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final dpr = MediaQuery.devicePixelRatioOf(context) * widget.resolutionScale;
     return LayoutBuilder(
       builder: (context, constraints) {
         final w = (constraints.maxWidth * dpr).round();

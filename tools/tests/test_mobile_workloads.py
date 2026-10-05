@@ -134,7 +134,8 @@ class MobileWorkloadTests(unittest.TestCase):
                                  'awaitProfiler': request['awaitProfiler'],
                                  'timeline': request['timeline'], 'frozenScene': request['freezeScene'],
                                  'acquireWaitUs': request['acquireWaitUs'], 'bufferCount': request['bufferCount'],
-                                 'resolutionScale': request['resolutionScale'], 'cpuTickReadback': request['cpuTicks'], 'quality': request['quality']}
+                                 'resolutionScale': request['resolutionScale'], 'cpuTickReadback': request['cpuTicks'], 'quality': request['quality'],
+                                 'pipelined': request['pipelined'], 'frameQueue': request['frameQueue']}
                         path.write_text(json.dumps(start) + '\n' +
                                         (json.dumps({'event': 'profiler-ready', 'captureId': request['captureId']}) + '\n' if request['awaitProfiler'] else '') +
                                         json.dumps({'event': 'stats', 'quality': request['quality'], 'qualityVerified': quality_verified}) + '\n' +
