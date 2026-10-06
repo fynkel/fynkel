@@ -55,7 +55,22 @@ import 'game/spinner.dart';
 import 'ui/menus.dart';
 
 /// `FYNKEL_CAPTURE=1` prints the stats line once a second (benchmarks).
-final bool capturing = (Platform.environment['FYNKEL_CAPTURE'] ?? '').isNotEmpty;
+/// On a phone, where there is no environment: `--dart-define=FYNKEL_CAPTURE=true`.
+final bool capturing =
+    (Platform.environment['FYNKEL_CAPTURE'] ?? '').isNotEmpty || const bool.fromEnvironment('FYNKEL_CAPTURE');
+
+/// `--dart-define=FYNKEL_AUTOPLAY=true` skips the title screen (a measured
+/// run on a device).
+const bool autoplay = bool.fromEnvironment('FYNKEL_AUTOPLAY');
+
+/// `--dart-define=FYNKEL_PANELS=false` leaves the two camera panels out
+/// (measuring what they cost).
+const bool panels = bool.fromEnvironment('FYNKEL_PANELS', defaultValue: true);
+
+/// The crowd's size: `FYNKEL_CROWD` in the environment or as a define.
+int get crowdSize =>
+    int.tryParse(Platform.environment['FYNKEL_CROWD'] ?? '') ??
+    const int.fromEnvironment('FYNKEL_CROWD', defaultValue: 300);
 
 void main() => runApp(buildGame(FynkelLaunch.fromEnvironment()));
 
@@ -221,13 +236,16 @@ class _GamePageState extends State<GamePage> {
       _startScene = start ?? _game!.scenes.current;
       // The viewport draws from the world's asset store (the cooked cache
       // the scene came from); scene entities without a mesh stay invisible
-      // (placeholders off) as they will in the shipped game.
-      _viewport = FynkelViewportController(placeholders: false);
-      _showcase = Showcase(_game!.world, crowdSize: int.tryParse(Platform.environment['FYNKEL_CROWD'] ?? '') ?? 300)
+      // (placeholders off) as they will in the shipped game. `.game()`: the
+      // render worker and a frame queue, so a GPU-bound phone drops frames
+      // instead of falling behind.
+      _viewport = FynkelViewportController.game();
+      _showcase = Showcase(_game!.world, crowdSize: crowdSize)
         ..ensure();
       // The profile the user picked last time (empty: the project's default).
       final quality = _game!.settings.current.quality;
       if (qualityProfiles.contains(quality)) _viewport!.quality = quality;
+      if (autoplay) _game!.hud.screen.value = Screen.playing;
     } on FynkelLoadError catch (e) {
       _error = '$e\nrun `fynkel cook` in the project (or `fynkel run`, which cooks first)';
     } catch (e) {
@@ -291,7 +309,7 @@ class _GamePageState extends State<GamePage> {
               // widget per bar (docs/hud.md § Many marks).
               ProjectedMarks(marks: _showcase!.bars),
               // Two more cameras of the same world, shown in panels.
-              if (_showcase!.minimap case final cam?)
+              if (_showcase!.minimap case final cam? when panels)
                 Positioned(
                   right: 16,
                   top: 16,
@@ -299,7 +317,7 @@ class _GamePageState extends State<GamePage> {
                   height: 180,
                   child: _Panel(label: 'Minimap', circle: true, child: CameraView(world: game.world, camera: cam)),
                 ),
-              if (_showcase!.cubeCam case final cam?)
+              if (_showcase!.cubeCam case final cam? when panels)
                 Positioned(
                   right: 16,
                   bottom: 16,
