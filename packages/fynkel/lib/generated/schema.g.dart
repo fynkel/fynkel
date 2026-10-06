@@ -3343,7 +3343,7 @@ class Settings implements WireRecord {
   String toString() => 'Settings(masterVolume: $masterVolume, musicVolume: $musicVolume, sfxVolume: $sfxVolume, muted: $muted, quality: $quality)';
 }
 
-/// One anchor of a projection request (`fynkel_world_project`, M3-13, blueprint §10): a point `offset` from the entity's origin in its local frame, projected into the viewport the request names. `mask` (collider layers) enables the explicit occlusion policy: a raycast from the camera to the point that hits a collider on those layers first marks the anchor `OCCLUDED`; 0 tests nothing.
+/// One anchor of a projection request (`fynkel_world_project`, M3-13, blueprint §10): a point `offset` from the entity's origin in its local frame, or with a null `entity` a point in the world (ADR-0062), projected into the viewport the request names. `mask` (collider layers) enables the explicit occlusion policy: a raycast from the camera to the point that hits a collider on those layers first marks the anchor `OCCLUDED`; 0 tests nothing.
 ///
 /// `fynkel.rec.ProjectionAnchor` (record, id 0, 32 bytes).
 class ProjectionAnchorRecord implements WireRecord {

@@ -101,6 +101,79 @@ class ProjectionView {
   void addListener(void Function() listener) => _listeners.add(listener);
   void removeListener(void Function() listener) => _listeners.remove(listener);
 
+  /// Where the world [point] lands in the viewport, now — a one-off beside
+  /// the per-frame anchors (an effect at a hit point, a marker for one
+  /// frame): one FFI call, nothing registered. [width]/[height] default
+  /// to the view's viewport ([setViewport]); [occlusionMask] as for
+  /// [add]. Null without an enabled camera.
+  ScreenPoint? worldToScreen(Vec3 point, {double? width, double? height, int occlusionMask = 0}) {
+    final (w, h) = _size(width, height);
+    final batch = _single ??= RecordBatch(BufferKind.projectionAnchors, gen.ProjectionAnchorRecord.wireSize, 64);
+    batch.clear();
+    batch.add(
+      _record
+        ..entity = EntityRef.nil
+        ..offset = point
+        ..mask = occlusionMask,
+    );
+    final length = batch.finalize();
+    final (b, camera, _, _) = _world._native.project(batch.backingStore, length, w, h);
+    batch.clear();
+    if (camera.isNull || b.recordCount < 1) return null;
+    final d = b.records;
+    final flags = d.getUint32(28, Endian.little);
+    return ScreenPoint(
+      x: d.getFloat32(16, Endian.little),
+      y: d.getFloat32(20, Endian.little),
+      depth: d.getFloat32(24, Endian.little),
+      inFront: flags & ScreenAnchor._inFront != 0,
+      onScreen: flags & ScreenAnchor._onScreen != 0,
+      occluded: flags & ScreenAnchor._occluded != 0,
+    );
+  }
+
+  RecordBatch? _single;
+
+  /// The ray through the viewport point ([x], [y]) — pixels from the top
+  /// left, the units of [setViewport] — from the frame's camera and pose:
+  /// Unity's `Camera.ScreenPointToRay`. Use it to aim, or hand it to
+  /// `World.raycast` ([pick] does). [width]/[height] default to the view's
+  /// viewport. Null without an enabled camera.
+  ScreenRay? screenRay(double x, double y, {double? width, double? height}) {
+    final (w, h) = _size(width, height);
+    // The native call takes whole pixels for the viewport; scale the point
+    // with it so a fractional logical size keeps its aspect.
+    final sx = width ?? _width, sy = height ?? _height;
+    final (camera, origin, direction) = _world._native.screenRay(w, h, x * w / sx, y * h / sy);
+    if (camera.isNull) return null;
+    return ScreenRay(camera: camera, origin: origin, direction: direction);
+  }
+
+  /// The nearest collider under the viewport point ([x], [y]): [screenRay]
+  /// into `World.raycast` (a tap on an object, the cursor over the ground).
+  /// The options are the raycast's; null without a camera or a hit.
+  PhysicsHit? pick(
+    double x,
+    double y, {
+    double maxDistance = 1000,
+    int mask = 0xffffffff,
+    bool hitSensors = true,
+    double? width,
+    double? height,
+  }) {
+    final ray = screenRay(x, y, width: width, height: height);
+    if (ray == null) return null;
+    return _world.raycast(ray.origin, ray.direction, maxDistance: maxDistance, mask: mask, hitSensors: hitSensors);
+  }
+
+  (int, int) _size(double? width, double? height) {
+    final w = width ?? _width, h = height ?? _height;
+    if (w <= 0 || h <= 0) {
+      throw StateError('no viewport: call setViewport (a ProjectionLayer does) or pass width and height');
+    }
+    return (w.round().clamp(1, 1 << 20), h.round().clamp(1, 1 << 20));
+  }
+
   /// Projects every anchor into the viewport: one FFI call. Call after
   /// `World.frame` (the same interpolation the frame renders with).
   /// Returns the number of anchors projected. With no anchors nothing is
@@ -116,9 +189,13 @@ class ProjectionView {
       if (a._dropped || a._fresh) dropped = true;
       a._dropped = false;
       a._fresh = false;
+      final entity = a._entityOrZero();
+      // A null entity asks for a world point (ADR-0062); a pending or dead
+      // target is answered here instead (missing), in the same row order.
+      a._gone = entity.isNull;
       _batch.add(
         _record
-          ..entity = a._entityOrZero()
+          ..entity = entity
           ..offset = a.offset
           ..mask = a.occlusionMask,
       );
@@ -148,10 +225,15 @@ class ProjectionView {
     for (var i = 0; i < rows; i++) {
       final o = i * gen.ProjectedPointRecord.wireSize;
       final a = _anchors[i];
-      final x = d.getFloat32(o + 16, Endian.little);
-      final y = d.getFloat32(o + 20, Endian.little);
-      final depth = d.getFloat32(o + 24, Endian.little);
-      final flags = d.getUint32(o + 28, Endian.little);
+      final gone = a._gone;
+      final x = gone ? 0.0 : d.getFloat32(o + 16, Endian.little);
+      final y = gone ? 0.0 : d.getFloat32(o + 20, Endian.little);
+      final depth = gone ? 0.0 : d.getFloat32(o + 24, Endian.little);
+      final flags = !gone
+          ? d.getUint32(o + 28, Endian.little)
+          : camera.isNull
+          ? ScreenAnchor._noCamera
+          : ScreenAnchor._missing;
       if (x != a._x || y != a._y || depth != a._depth || flags != a._flags) {
         changed = true;
       }
@@ -190,6 +272,64 @@ class ProjectionView {
   }
 }
 
+/// A world point on screen ([ProjectionView.worldToScreen]).
+class ScreenPoint {
+  const ScreenPoint({
+    required this.x,
+    required this.y,
+    required this.depth,
+    required this.inFront,
+    required this.onScreen,
+    required this.occluded,
+  });
+
+  /// Viewport pixels (origin top-left, y down) — meaningful only while
+  /// [inFront].
+  final double x, y;
+
+  /// Metres in front of the camera along its view axis.
+  final double depth;
+
+  /// In front of the near plane.
+  final bool inFront;
+
+  /// In front and inside the viewport.
+  final bool onScreen;
+
+  /// A collider on the request's `occlusionMask` sits between the camera
+  /// and the point.
+  final bool occluded;
+
+  /// [onScreen] and not [occluded].
+  bool get visible => onScreen && !occluded;
+
+  @override
+  String toString() =>
+      'ScreenPoint(x=${x.toStringAsFixed(1)} y=${y.toStringAsFixed(1)} depth=${depth.toStringAsFixed(2)}'
+      '${onScreen ? '' : inFront ? ' off screen' : ' behind'}${occluded ? ' occluded' : ''})';
+}
+
+/// The ray through a viewport point ([ProjectionView.screenRay]): Unity's
+/// `Camera.ScreenPointToRay`.
+class ScreenRay {
+  const ScreenRay({required this.camera, required this.origin, required this.direction});
+
+  /// The camera the frame is rendered from.
+  final EntityRef camera;
+
+  /// On the camera's near plane, under the point.
+  final Vec3 origin;
+
+  /// Unit length, away from the camera.
+  final Vec3 direction;
+
+  /// The point [distance] metres along the ray.
+  Vec3 at(double distance) => origin + direction * distance;
+
+  @override
+  String toString() => 'ScreenRay($origin → $direction)';
+}
+
 /// One projected point: where an entity's local [offset] lands in the
 /// viewport after the last [ProjectionView.update].
 class ScreenAnchor {
@@ -213,6 +353,9 @@ class ScreenAnchor {
   double _depth = 0;
   int _flags = 0;
   bool _dropped = false;
+
+  /// The last update sent no entity (a pending or dead target).
+  bool _gone = false;
 
   /// Not projected yet: the first [ProjectionView.update] that places it
   /// notifies whatever its result is.

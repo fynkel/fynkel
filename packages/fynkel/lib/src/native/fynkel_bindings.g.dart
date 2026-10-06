@@ -306,6 +306,41 @@ FynkelStatus fynkel_world_project(
   ),
 );
 
+/// The ray through the point (x, y) of a width x height viewport (pixels
+/// from the top left, as fynkel_world_project answers) from the frame's
+/// camera and interpolated pose: Unity's Camera.ScreenPointToRay
+/// (ADR-0062). Without an enabled camera: FYNKEL_STATUS_OK, camera 0.
+/// out must not be NULL.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Uint32,
+    ffi.Uint32,
+    ffi.Float,
+    ffi.Float,
+    ffi.Pointer<FynkelScreenRay>,
+  )
+>(symbol: 'fynkel_world_screen_ray')
+external int _fynkel_world_screen_ray(
+  ffi.Pointer<FynkelWorld> world,
+  int width,
+  int height,
+  double x,
+  double y,
+  ffi.Pointer<FynkelScreenRay> out,
+);
+
+FynkelStatus fynkel_world_screen_ray(
+  ffi.Pointer<FynkelWorld> world,
+  int width,
+  int height,
+  double x,
+  double y,
+  ffi.Pointer<FynkelScreenRay> out,
+) => FynkelStatus.fromValue(
+  _fynkel_world_screen_ray(world, width, height, x, y, out),
+);
+
 /// Immediate one-shot: one 40-byte PlaySound record followed by its string tail.
 /// Not allowed inside a gameplay edit. Does not flush queued simulation effects.
 @ffi.Native<
@@ -1008,7 +1043,8 @@ FynkelStatus fynkel_world_gameplay_state_since(
   _fynkel_world_gameplay_state_since(world, since, out_view),
 );
 
-/// Bounded-journal identity changes. Cursor local to world, zero initializes.
+/// Bounded-journal callback identity/activity changes. Zero initializes.
+/// Cursor is local to world. Activity-only rows include the unchanged name.
 /// Reply: cursor u64, mode u32 (0 unchanged, 1 reset, 2 delta). Modes 1/2:
 /// count u32; rows (entity, alive u32, and length u32 + UTF-8 name if alive).
 /// A reset replaces all cached identities; delta rows upsert or retire them.
@@ -1248,7 +1284,7 @@ enum FynkelComponent {
   /// A sensor collider that names an event for Dart (M3-12).
   FYNKEL_COMPONENT_TRIGGER_ZONE(20),
 
-  /// Animation (M3-19): a clip player over the named nodes below it, and
+  /// Animation (M3-19): a clip player over the bound nodes below it, and
   /// the skin a skinned mesh deforms with.
   FYNKEL_COMPONENT_ANIMATOR(21),
   FYNKEL_COMPONENT_SKIN(22),
@@ -1647,6 +1683,19 @@ final class FynkelProjectionInfo extends ffi.Struct {
   /// anchors beyond the bound
   @ffi.Uint32()
   external int dropped;
+}
+
+final class FynkelScreenRay extends ffi.Struct {
+  /// the entity rendered from; 0 = no camera, no ray
+  external FynkelEntity camera;
+
+  /// on the camera's near plane, under the point
+  @ffi.Array.multi([3])
+  external ffi.Array<ffi.Float> origin;
+
+  /// unit length, away from the camera
+  @ffi.Array.multi([3])
+  external ffi.Array<ffi.Float> direction;
 }
 
 /// Runtime prefab instantiation (M3-08b, blueprint §6 item 12). Spawns,

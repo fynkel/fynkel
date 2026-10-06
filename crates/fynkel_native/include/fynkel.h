@@ -422,6 +422,24 @@ FynkelStatus fynkel_world_project(FynkelWorld* world,
                                   FynkelProjectionInfo* out_info,
                                   FynkelBufferView* out_view);
 
+typedef struct FynkelScreenRay {
+  FynkelEntity camera; /* the entity rendered from; 0 = no camera, no ray */
+  float origin[3];     /* on the camera's near plane, under the point */
+  float direction[3];  /* unit length, away from the camera */
+} FynkelScreenRay;
+
+/* The ray through the point (x, y) of a width x height viewport (pixels
+ * from the top left, as fynkel_world_project answers) from the frame's
+ * camera and interpolated pose: Unity's Camera.ScreenPointToRay
+ * (ADR-0062). Without an enabled camera: FYNKEL_STATUS_OK, camera 0.
+ * out must not be NULL. */
+FynkelStatus fynkel_world_screen_ray(FynkelWorld* world,
+                                     uint32_t width,
+                                     uint32_t height,
+                                     float x,
+                                     float y,
+                                     FynkelScreenRay* out);
+
 /* ---- Audio (M3-11) ------------------------------------------------------ */
 
 /* Immediate one-shot: one 40-byte PlaySound record followed by its string tail.

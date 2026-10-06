@@ -57,6 +57,17 @@ pub struct ProjectionInfo {
     pub dropped: u32,
 }
 
+/// A viewport point as a ray into the world ([`World::screen_ray`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScreenRay {
+    /// The camera the frame is rendered from.
+    pub camera: Entity,
+    /// On the camera's near plane, under the point.
+    pub origin: Vec3,
+    /// Unit length, away from the camera.
+    pub direction: Vec3,
+}
+
 /// The renderer's view matrix of a camera entity's world matrix (rotation
 /// and translation only — a scaled camera does not scale the view).
 pub fn view_matrix(world: &Mat4) -> Mat4 {
@@ -160,15 +171,20 @@ impl World {
                 out.push(rec);
                 continue;
             };
-            if !self.gameplay.ecs.contains(a.entity)
-                || !self.gameplay.ecs.has::<super::WorldTransform>(a.entity)
-            {
-                rec.flags = PROJECTED_MISSING;
-                out.push(rec);
-                continue;
-            }
-            let world = self.resolve_extract(a.entity, alpha, &mut memo);
-            let point = world.transform_point3(a.offset);
+            // No entity: `offset` is a point in the world (ADR-0062).
+            let point = if a.entity == Entity::NULL {
+                a.offset
+            } else {
+                if !self.gameplay.ecs.contains(a.entity)
+                    || !self.gameplay.ecs.has::<super::WorldTransform>(a.entity)
+                {
+                    rec.flags = PROJECTED_MISSING;
+                    out.push(rec);
+                    continue;
+                }
+                let world = self.resolve_extract(a.entity, alpha, &mut memo);
+                world.transform_point3(a.offset)
+            };
             // Depth along the view axis (the camera looks down -Z).
             rec.depth = -view.transform_point3(point).z;
             let clip = view_proj * Vec4::new(point.x, point.y, point.z, 1.0);
@@ -196,7 +212,7 @@ impl World {
                                 direction: to / distance,
                                 max_distance: distance,
                                 mask: a.mask,
-                                exclude: Some(a.entity),
+                                exclude: (a.entity != Entity::NULL).then_some(a.entity),
                                 max_hits: 1,
                                 hit_sensors: false,
                             },
@@ -226,5 +242,30 @@ impl World {
             });
         }
         info
+    }
+
+    /// The ray through the viewport point (`x`, `y`) of a `width` ×
+    /// `height` viewport (pixels from the top left, the units of
+    /// [`World::project`]), from the frame's camera and interpolated pose —
+    /// what Unity's `Camera.ScreenPointToRay` answers. It starts on the near
+    /// plane; for an orthographic camera every ray is parallel. `None`
+    /// without an enabled camera.
+    pub fn screen_ray(&self, width: u32, height: u32, x: f32, y: f32) -> Option<ScreenRay> {
+        let mut memo: fynkel_contracts::FastMap<Entity, Mat4> = Default::default();
+        let (camera, world, c) = self.frame_camera(self.clock.alpha(), &mut memo)?;
+        let w = width.max(1) as f32;
+        let h = height.max(1) as f32;
+        let inverse = (projection_matrix(&c, w / h) * view_matrix(&world)).inverse();
+        let ndc_x = x / w * 2.0 - 1.0;
+        let ndc_y = 1.0 - y / h * 2.0;
+        // Clip depth 0..=1: the near and far planes under the point.
+        let near = inverse.project_point3(Vec3::new(ndc_x, ndc_y, 0.0));
+        let far = inverse.project_point3(Vec3::new(ndc_x, ndc_y, 1.0));
+        let direction = (far - near).try_normalize()?;
+        Some(ScreenRay {
+            camera,
+            origin: near,
+            direction,
+        })
     }
 }

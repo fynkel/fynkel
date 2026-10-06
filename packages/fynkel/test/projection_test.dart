@@ -340,4 +340,62 @@ void main() {
     expect(w.projection.isEmpty, isTrue);
     expect(a.isAttached, isFalse);
   });
+
+  // ADR-0062 step 2: one-off answers beside the per-frame anchors.
+  test('a world point goes to the screen without an anchor', () {
+    final w = loaded();
+    w.projection.setViewport(800, 600);
+    final before = w.stats().ffiCalls;
+    final p = w.projection.worldToScreen(const Vec3(2, 0, 0))!;
+    expect(w.stats().ffiCalls, before + 2, reason: 'one projection call (the stats call is the other)');
+    final (ex, ey) = expected(const Vec3(2, 0, 0), 800, 600);
+    expect(p.x, closeTo(ex, 0.01));
+    expect(p.y, closeTo(ey, 0.01));
+    expect(p.depth, closeTo(6, 1e-4));
+    expect(p.inFront && p.onScreen, isTrue);
+    expect(w.projection.isEmpty, isTrue, reason: 'no anchor was registered');
+    // Another viewport than the view's.
+    final small = w.projection.worldToScreen(const Vec3(2, 0, 0), width: 400, height: 300)!;
+    expect(small.x, closeTo(ex / 2, 0.01));
+    // Behind the camera: not placed.
+    final behind = w.projection.worldToScreen(const Vec3(0, 2, 8))!;
+    expect(behind.inFront, isFalse);
+    expect(behind.onScreen, isFalse);
+  });
+
+  test('a screen point becomes the ray through what it shows, and picks it', () {
+    final w = loaded();
+    w.projection.setViewport(800, 600);
+    // The ray at a projected point passes through the point.
+    const target = Vec3(1.5, 0, 1);
+    final (tx, ty) = expected(target, 800, 600);
+    final ray = w.projection.screenRay(tx, ty)!;
+    expect(ray.camera.isNull, isFalse);
+    expect(ray.direction.length, closeTo(1, 1e-5));
+    expect(ray.origin.z, lessThan(6), reason: 'from the near plane, in front of the camera');
+    final along = (target - ray.origin).dot(ray.direction);
+    expect((ray.at(along) - target).length, lessThan(1e-3));
+
+    // Picking: the ray into the physics scene. The Floor's top is y 0 (a
+    // box collider's size is its half extents).
+    final floor = w.find('Floor')!;
+    final hit = w.projection.pick(tx, ty)!;
+    expect(hit.entity, floor.entity);
+    expect((hit.point - target).length, lessThan(1e-2));
+    expect(w.projection.pick(tx, ty, mask: w.layerMask(['props'])), isNull, reason: 'not on that layer');
+    // The sky above the horizon: nothing to pick.
+    expect(w.projection.pick(400, 1), isNull);
+  });
+
+  test('without a camera there is no ray and no screen point', () {
+    final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8);
+    addTearDown(w.dispose);
+    w.projection.setViewport(800, 600);
+    expect(w.projection.screenRay(400, 300), isNull);
+    expect(w.projection.worldToScreen(Vec3.zero), isNull);
+    // No viewport: a size has to come from somewhere.
+    final bare = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8);
+    addTearDown(bare.dispose);
+    expect(() => bare.projection.screenRay(1, 1), throwsStateError);
+  });
 }

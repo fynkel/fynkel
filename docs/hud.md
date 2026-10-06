@@ -255,6 +255,44 @@ FynkelGameView(
 * `WorldLabel(target, text, style, background, padding, borderRadius, …)`
   — a `ProjectedAnchor` with a small text pill.
 
+### Screen ↔ world, one point at a time (ADR-0062)
+
+Beside the per-frame anchors, three one-off questions, answered from the
+frame's camera and interpolated pose with the renderer's matrices:
+
+```dart
+// In the game's overlay: a tap picks what it shows.
+GestureDetector(
+  behavior: HitTestBehavior.translucent,
+  onTapUp: (d) {
+    final view = gameView.currentState!; // GlobalKey<FynkelGameViewState>
+    final hit = view.pick(d.localPosition, mask: world.layerMask(['props']));
+    if (hit != null) selected.value = hit.entity;
+  },
+)
+```
+
+* `FynkelGameViewState.screenRay(Offset)` — the ray through a position in
+  the view (its logical pixels from the top left, what a gesture's
+  `localPosition` over the view is): Unity's `Camera.ScreenPointToRay`. A
+  `ScreenRay { camera, origin, direction, at(distance) }`, starting on the
+  near plane; parallel rays for an orthographic camera.
+* `FynkelGameViewState.pick(Offset, {maxDistance, mask, hitSensors})` —
+  that ray into `World.raycast`: the nearest collider under the point, or
+  null.
+* `FynkelGameViewState.worldToScreen(Vec3, {occlusionMask})` — where a
+  world point is drawn in the view now: a `ScreenPoint { x, y, depth,
+  inFront, onScreen, occluded, visible }`, `.offset` for Flutter. For a
+  widget that follows something every frame, use a `ProjectedAnchor`.
+
+All three return null without an enabled camera. The same calls exist on
+`World.projection` in `package:fynkel` (`screenRay(x, y)`,
+`pick(x, y)`, `worldToScreen(point)`) for code without a view, such as a
+behaviour or a headless test. They use the view's `setViewport` size, or
+the `width`/`height` passed. Natively these are `World::screen_ray` /
+`fynkel_world_screen_ray`, and a projection anchor with a null entity,
+which is a point in the world.
+
 Tests: `packages/fynkel/test/projection_test.dart` (the view against the
 fixture scene: positions, interpolation, off-screen and behind, the
 occlusion policy, pending and dead objects, the bound and its one
@@ -267,4 +305,6 @@ diffing; `FynkelGameView` updating the view every frame),
 `test/model_binding_test.dart`; the starter's `test/game_test.dart` ('the
 mover writes the HUD model; a label follows the cube'); `crates/fynkel_core/
 tests/projection.rs`, `crates/fynkel_native/tests/abi.rs`
-(`projection_of_world_anchors`).
+(`projection_of_world_anchors`, `screen_point_to_ray`);
+`packages/fynkel_flutter/test/screen_world_test.dart` (a position in the
+view picks the Floor point drawn there).

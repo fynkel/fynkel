@@ -68,9 +68,9 @@ mod state;
 mod synchronization;
 mod systems;
 pub use projection::{
-    projection_matrix, view_matrix, ProjectionInfo, MAX_PROJECTION_ANCHORS, PROJECTED_DROPPED,
-    PROJECTED_IN_FRONT, PROJECTED_MISSING, PROJECTED_NO_CAMERA, PROJECTED_OCCLUDED,
-    PROJECTED_ON_SCREEN, PROJECTED_VISIBLE,
+    projection_matrix, view_matrix, ProjectionInfo, ScreenRay, MAX_PROJECTION_ANCHORS,
+    PROJECTED_DROPPED, PROJECTED_IN_FRONT, PROJECTED_MISSING, PROJECTED_NO_CAMERA,
+    PROJECTED_OCCLUDED, PROJECTED_ON_SCREEN, PROJECTED_VISIBLE,
 };
 use state::{AnimationState, EditState, Scratch};
 

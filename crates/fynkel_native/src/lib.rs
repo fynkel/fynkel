@@ -1040,6 +1040,53 @@ pub unsafe extern "C" fn fynkel_world_project(
     status
 }
 
+/// What `fynkel_world_screen_ray` answers (ADR-0062).
+#[repr(C)]
+#[derive(Default)]
+pub struct FynkelScreenRay {
+    /// The camera entity the frame is rendered from; 0 when the world has
+    /// no enabled camera (then there is no ray).
+    pub camera: Entity,
+    /// On the camera's near plane, under the point.
+    pub origin: [f32; 3],
+    /// Unit length, away from the camera.
+    pub direction: [f32; 3],
+}
+
+/// The ray through the point (`x`, `y`) of a `width` × `height` viewport
+/// (pixels from the top left, as `fynkel_world_project` answers), from the
+/// frame's camera and interpolated pose — Unity's
+/// `Camera.ScreenPointToRay` (ADR-0062). Without an enabled camera the
+/// call succeeds with `camera` 0.
+///
+/// # Safety
+/// `out` must point to a writable `FynkelScreenRay`.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_screen_ray(
+    world: *mut FynkelWorld,
+    width: u32,
+    height: u32,
+    x: f32,
+    y: f32,
+    out: *mut FynkelScreenRay,
+) -> Status {
+    let Some(out) = out.as_mut() else {
+        return Status::InvalidArgument;
+    };
+    *out = FynkelScreenRay::default();
+    guarded(world, |w| {
+        w.stats.query_calls += 1;
+        if let Some(ray) = w.inner.screen_ray(width, height, x, y) {
+            *out = FynkelScreenRay {
+                camera: ray.camera,
+                origin: ray.origin.to_array(),
+                direction: ray.direction.to_array(),
+            };
+        }
+        Status::Ok
+    })
+}
+
 /// Immediate one-shot audio, with a fixed PlaySound record and its string tail.
 /// There is no command envelope, queue, transaction sequence or tick advancement.
 /// # Safety

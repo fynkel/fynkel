@@ -205,7 +205,8 @@ class NativeWorld {
       _query = calloc<FynkelQueryDesc>(),
       _view = calloc<FynkelBufferView>(),
       _stats = calloc<FynkelWorldStats>(),
-      _projection = calloc<FynkelProjectionInfo>();
+      _projection = calloc<FynkelProjectionInfo>(),
+      _screenRay = calloc<FynkelScreenRay>();
 
   Pointer<FynkelWorld> _ptr;
 
@@ -231,6 +232,7 @@ class NativeWorld {
   final Pointer<FynkelBufferView> _view;
   final Pointer<FynkelWorldStats> _stats;
   final Pointer<FynkelProjectionInfo> _projection;
+  final Pointer<FynkelScreenRay> _screenRay;
 
   // Reused native scratch for command bytes (grown on demand) so a submit is
   // one memcpy + one FFI call, no allocation in steady state.
@@ -619,6 +621,21 @@ class NativeWorld {
     _check(s, 'project');
     final info = _projection.ref;
     return (_wrap(_view.ref), _readNativeEntity(info.camera), info.projected, info.dropped);
+  }
+
+  /// The ray through the point ([x], [y]) of a [width] × [height]
+  /// viewport from the frame's camera (ADR-0062): the camera (0 = none,
+  /// then no ray), the origin on the near plane and the unit direction.
+  (EntityRef camera, Vec3 origin, Vec3 direction) screenRay(int width, int height, double x, double y) {
+    ffiCalls++;
+    final s = fynkel_world_screen_ray(_w, width, height, x, y, _screenRay);
+    _check(s, 'screen_ray');
+    final r = _screenRay.ref;
+    return (
+      _readNativeEntity(r.camera),
+      Vec3(r.origin[0], r.origin[1], r.origin[2]),
+      Vec3(r.direction[0], r.direction[1], r.direction[2]),
+    );
   }
 
   void _copyToScratch(Uint8List bytes, int length) {
@@ -1017,6 +1034,7 @@ class NativeWorld {
     calloc.free(_view);
     calloc.free(_stats);
     calloc.free(_projection);
+    calloc.free(_screenRay);
     if (_scratch != nullptr) calloc.free(_scratch);
     _scratch = nullptr;
     _scratchLen = 0;

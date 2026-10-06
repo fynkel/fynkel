@@ -1163,6 +1163,61 @@ fn projection_of_world_anchors() {
     assert_eq!(s, Status::Ok);
 }
 
+#[test]
+fn screen_point_to_ray() {
+    use fynkel_core::components::{Camera, ComponentValue};
+    let h = Host::new();
+    let ray = |x: f32, y: f32| {
+        let mut out = FynkelScreenRay::default();
+        let s = unsafe { fynkel_world_screen_ray(h.w, 800, 600, x, y, &mut out) };
+        (s, out)
+    };
+    let camera = h.spawn_many(&[(
+        "camera",
+        Transform::from_position(Vec3::new(0.0, 0.0, 5.0)),
+        None,
+    )])[0];
+    h.step();
+    // No camera yet: no ray (camera 0, as fynkel_world_project says it).
+    let (s, none) = ray(400.0, 300.0);
+    assert_eq!(s, Status::Ok);
+    assert_eq!(none.camera, Entity::NULL);
+
+    assert_eq!(
+        h.set_component(camera, &ComponentValue::Camera(Camera::default())),
+        Status::Ok
+    );
+    h.step();
+    let (s, centre) = ray(400.0, 300.0);
+    assert_eq!(s, Status::Ok);
+    assert_eq!(centre.camera, camera);
+    let origin = Vec3::from(centre.origin);
+    let direction = Vec3::from(centre.direction);
+    assert!(
+        (origin - Vec3::new(0.0, 0.0, 5.0 - Camera::default().near)).length() < 1e-4,
+        "{origin}"
+    );
+    assert!((direction - Vec3::NEG_Z).length() < 1e-5, "{direction}");
+
+    assert_eq!(
+        unsafe { fynkel_world_screen_ray(h.w, 800, 600, 0.0, 0.0, ptr::null_mut()) },
+        Status::InvalidArgument
+    );
+    assert_eq!(
+        unsafe {
+            fynkel_world_screen_ray(
+                ptr::null_mut(),
+                800,
+                600,
+                0.0,
+                0.0,
+                &mut FynkelScreenRay::default(),
+            )
+        },
+        Status::InvalidArgument
+    );
+}
+
 /// Animation (M3-19): `fynkel.Animator`/`fynkel.Skin` through
 /// SetComponent, `AnimateCommandRecord` payloads for every op, the
 /// `AnimationEnded` event, `QUERY_ANIMATOR` and the rejections.

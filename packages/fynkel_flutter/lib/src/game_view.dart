@@ -371,6 +371,55 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   bool _hostPaused = false;
   FynkelPlayControl? _play;
 
+  // ------------------------------------------------- screen ↔ world (ADR-0062)
+
+  /// The view's size in logical pixels; null before its first layout.
+  Size? get viewSize {
+    final box = context.findRenderObject();
+    return box is RenderBox && box.hasSize ? box.size : null;
+  }
+
+  Size _sizeFor(String what) =>
+      viewSize ?? (throw StateError('$what: the game view has not been laid out yet'));
+
+  /// The ray through [position] — in this view's logical pixels from its
+  /// top left, as a gesture's `localPosition` over the view is — from the
+  /// frame's camera: Unity's `Camera.ScreenPointToRay`. Null without a
+  /// camera.
+  ScreenRay? screenRay(Offset position) {
+    final size = _sizeFor('screenRay');
+    return widget.world.projection.screenRay(position.dx, position.dy, width: size.width, height: size.height);
+  }
+
+  /// The nearest collider under [position] (a tap on an object, the
+  /// cursor over the ground): [screenRay] into `World.raycast`, with its
+  /// options. Null without a camera or a hit.
+  PhysicsHit? pick(Offset position, {double maxDistance = 1000, int mask = 0xffffffff, bool hitSensors = true}) {
+    final size = _sizeFor('pick');
+    return widget.world.projection.pick(
+      position.dx,
+      position.dy,
+      width: size.width,
+      height: size.height,
+      maxDistance: maxDistance,
+      mask: mask,
+      hitSensors: hitSensors,
+    );
+  }
+
+  /// Where the world [point] is drawn in this view, now (`.offset` is the
+  /// position; check `onScreen`). For a widget that follows an object every
+  /// frame use a `ProjectedAnchor` instead. Null without a camera.
+  ScreenPoint? worldToScreen(Vec3 point, {int occlusionMask = 0}) {
+    final size = _sizeFor('worldToScreen');
+    return widget.world.projection.worldToScreen(
+      point,
+      width: size.width,
+      height: size.height,
+      occlusionMask: occlusionMask,
+    );
+  }
+
   /// Pause/resume the loop; the clock is re-primed on resume.
   void setPaused(bool v) {
     _pausedByUser = v;
@@ -837,4 +886,10 @@ class _Stopped extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// A [ScreenPoint] as a Flutter position.
+extension ScreenPointOffset on ScreenPoint {
+  /// [x], [y] as an [Offset] in the viewport's pixels.
+  Offset get offset => Offset(x, y);
 }

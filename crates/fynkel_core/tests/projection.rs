@@ -426,3 +426,112 @@ fn sheared_anchor_projection_uses_the_same_affine_matrix_as_rendering() {
     assert!((out[0].x - expected_x).abs() < 1e-3);
     assert!((out[0].y - expected_y).abs() < 1e-3);
 }
+
+/// ADR-0062 step 2: an anchor without an entity is a point in the world
+/// (`offset` in world space) — a one-off world point to the screen.
+#[test]
+fn an_anchor_without_an_entity_projects_a_world_point() {
+    let mut w = world();
+    camera_world(&mut w, 0);
+    let mut out = Vec::new();
+    w.project(
+        800,
+        600,
+        &[
+            ProjectionAnchorRecord {
+                entity: Entity::NULL,
+                offset: Vec3::new(0.0, 1.0, 0.0),
+                mask: 0,
+            },
+            ProjectionAnchorRecord {
+                entity: Entity::NULL,
+                offset: Vec3::new(0.0, 0.0, 6.0),
+                mask: 0,
+            },
+        ],
+        &mut out,
+    );
+    let up = &out[0];
+    assert_eq!(up.entity, Entity::NULL);
+    assert_eq!(up.flags, PROJECTED_IN_FRONT | PROJECTED_ON_SCREEN, "{up:?}");
+    assert!((up.x - 400.0).abs() < 1e-3, "{up:?}");
+    assert!(
+        (up.y - (300.0 - 300.0 / (5.0 * 30f32.to_radians().tan()))).abs() < 1e-2,
+        "{up:?}"
+    );
+    assert!((up.depth - 5.0).abs() < 1e-5);
+    // Behind the camera: not placed, not missing.
+    assert_eq!(out[1].flags, 0, "{:?}", out[1]);
+}
+
+/// ADR-0062 step 2: a viewport point becomes the ray the frame renders
+/// along (Unity's `Camera.ScreenPointToRay`): from the near plane, through
+/// whatever the point shows.
+#[test]
+fn a_screen_point_becomes_the_ray_through_what_it_shows() {
+    let mut w = world();
+    assert_eq!(
+        w.screen_ray(800, 600, 400.0, 300.0),
+        None,
+        "no camera, no ray"
+    );
+    let cam = camera_world(&mut w, 0);
+    let centre = w.screen_ray(800, 600, 400.0, 300.0).unwrap();
+    assert_eq!(centre.camera, cam);
+    let near = Camera::default().near;
+    assert!(
+        (centre.origin - Vec3::new(0.0, 0.0, 5.0 - near)).length() < 1e-4,
+        "{centre:?}"
+    );
+    assert!(
+        (centre.direction - Vec3::NEG_Z).length() < 1e-5,
+        "{centre:?}"
+    );
+
+    // Round trip: project a world point, cast the ray at its pixel, and
+    // the ray passes through the point.
+    let point = Vec3::new(1.5, -0.75, -2.0);
+    let mut out = Vec::new();
+    w.project(
+        800,
+        600,
+        &[ProjectionAnchorRecord {
+            entity: Entity::NULL,
+            offset: point,
+            mask: 0,
+        }],
+        &mut out,
+    );
+    let ray = w.screen_ray(800, 600, out[0].x, out[0].y).unwrap();
+    assert!((ray.direction.length() - 1.0).abs() < 1e-5);
+    let along = (point - ray.origin).dot(ray.direction);
+    let closest = ray.origin + ray.direction * along;
+    assert!((closest - point).length() < 1e-3, "{ray:?} misses {point}");
+
+    // An orthographic camera casts parallel rays from different origins.
+    w.edit_gameplay(|edit| {
+        edit.set_component(
+            cam,
+            ComponentValue::Camera(Camera {
+                projection: Projection::Orthographic,
+                ortho_height: 4.0,
+                ..Camera::default()
+            }),
+        )
+    })
+    .unwrap();
+    assert_eq!(w.step().status, Status::Ok);
+    let a = w.screen_ray(800, 600, 0.0, 0.0).unwrap();
+    let b = w.screen_ray(800, 600, 800.0, 600.0).unwrap();
+    assert!((a.direction - Vec3::NEG_Z).length() < 1e-5, "{a:?}");
+    assert!((b.direction - Vec3::NEG_Z).length() < 1e-5, "{b:?}");
+    // Top-left of a 4 m high, 4:3 view: (-8/3, 2).
+    assert!(
+        (a.origin.x + 8.0 / 3.0).abs() < 1e-4 && (a.origin.y - 2.0).abs() < 1e-4,
+        "{a:?}"
+    );
+    assert!(
+        (b.origin.x - 8.0 / 3.0).abs() < 1e-4 && (b.origin.y + 2.0).abs() < 1e-4,
+        "{b:?}"
+    );
+}
