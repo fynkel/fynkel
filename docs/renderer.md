@@ -784,7 +784,12 @@ Every material map is sampled with one repeat/trilinear sampler at `uv0`
 the cook wrote** (M3-08b: `TEXR` carries every level down to 1×1, box
 filtered in linear light for sRGB maps; `upload_rgba8` creates the
 texture with `mip_level_count = mip_levels` and writes each level, so a
-distant textured floor stops shimmering):
+distant textured floor stops shimmering). An ASTC texture
+([ADR-0061](decisions/ADR-0061-gpu-texture-compression.md)) is uploaded
+as its blocks where the device has `TEXTURE_COMPRESSION_ASTC` (every
+Apple GPU since the A8, every Apple Silicon Mac; `device_features`
+requests it); elsewhere `decode_astc` (the pure-Rust `astc-decode`)
+turns the chain into RGBA8 first, noted once on stderr:
 
 | Map | Use | Fallback |
 | --- | --- | --- |

@@ -37,6 +37,7 @@ use crate::cache::{
     hash_bytes, Cache, CacheKey, KeyInputs, Manifest, ManifestChunk, ManifestDependency,
     ManifestInput, Stamps, CACHE_VERSION,
 };
+use crate::compress::Compression;
 use crate::intermediate::{AudioData, ColorSpace, Intermediate, MeshData, TextureData};
 use crate::Limits;
 
@@ -1515,9 +1516,19 @@ fn cook_one(
                 for (sub, id) in &intermediate.sub_assets {
                     sub_assets.entry(sub.clone()).or_insert(*id);
                 }
+                let compression = match Compression::from_meta(meta) {
+                    Ok(c) => c,
+                    Err(d) => {
+                        diagnostics.push(d.with_document(
+                            fynkel_document::asset::sidecar_path(&file).display().to_string(),
+                        ));
+                        return None;
+                    }
+                };
                 plan_intermediate(
                     &intermediate,
                     &entry.name,
+                    compression,
                     &opts.limits,
                     &mut chunks,
                     diagnostics,
@@ -1929,6 +1940,7 @@ struct ChunkPlan {
 fn plan_intermediate(
     im: &Intermediate,
     asset_name: &str,
+    compression: Option<Compression>,
     limits: &Limits,
     chunks: &mut Vec<ChunkPlan>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -1984,7 +1996,13 @@ fn plan_intermediate(
     }
     for image in &im.images {
         match crate::image::decode(&image.bytes, &image.name, Some(image.color_space), limits) {
-            Ok(texture) => chunks.push(texture_chunk(&texture, Some(image.sub_id.clone()))),
+            Ok(texture) => match texture_chunk(&texture, Some(image.sub_id.clone()), compression) {
+                Ok(c) => chunks.push(c),
+                Err(e) => diagnostics.push(
+                    Diagnostic::error(Code::IMPORT_INVALID_DATA, format!("{}: {e}", image.sub_id))
+                        .with_document(shown.to_string()),
+                ),
+            },
             Err(d) => diagnostics.push(
                 Diagnostic::warning(
                     d.code,
@@ -2000,7 +2018,13 @@ fn plan_intermediate(
         } else {
             texture.name.clone()
         };
-        let mut c = texture_chunk(texture, texture.sub_id.clone());
+        let mut c = match texture_chunk(texture, texture.sub_id.clone(), compression) {
+            Ok(c) => c,
+            Err(e) => {
+                diagnostics.push(Diagnostic::error(Code::IMPORT_INVALID_DATA, e).with_document(shown.to_string()));
+                continue;
+            }
+        };
         c.name = name.clone();
         chunks.push(c);
         if let Some(hdr) = &texture.hdr {
@@ -2330,21 +2354,57 @@ fn custom_material_chunk(
     }))
 }
 
-fn texture_chunk(t: &TextureData, sub: Option<String>) -> ChunkPlan {
-    ChunkPlan {
+fn texture_chunk(
+    t: &TextureData,
+    sub: Option<String>,
+    compression: Option<Compression>,
+) -> Result<ChunkPlan, String> {
+    let mut info = json!({
+        "width": t.width,
+        "height": t.height,
+        "colorSpace": t.color_space.name(),
+        "sourceHasAlpha": t.source_has_alpha,
+        "hdr": t.is_hdr(),
+        "mipLevels": fynkel_cooked::payload::full_mip_count(t.width, t.height),
+    });
+    let srgb = t.color_space == ColorSpace::Srgb;
+    let resolved = Compression::resolve(compression, srgb);
+    let payload = match resolved.block().filter(|_| !t.is_hdr()) {
+        // ADR-0061: an LDR texture is cooked as ASTC.
+        Some(block) => {
+            let astc = crate::compress::encode(t.width, t.height, &t.rgba8, srgb, block)?;
+            info["compression"] = resolved.name().into();
+            info["block"] = block.into();
+            info["mipLevels"] = astc.mip_levels.into();
+            if (astc.width, astc.height) != (t.width, t.height) {
+                info["width"] = astc.width.into();
+                info["height"] = astc.height.into();
+                info["sourceWidth"] = t.width.into();
+                info["sourceHeight"] = t.height.into();
+            }
+            fynkel_cooked::payload::encode_texture(
+                astc.width,
+                astc.height,
+                astc.format,
+                astc.mip_levels,
+                &astc.blocks,
+            )
+        }
+        None => {
+            if !t.is_hdr() {
+                info["compression"] = "none".into();
+            }
+            encode_texture(t)
+        }
+    };
+    info["bytes"] = (payload.len() - 16).into();
+    Ok(ChunkPlan {
         kind: KIND_TEXTURE,
         name: t.name.clone(),
         sub,
-        info: json!({
-            "width": t.width,
-            "height": t.height,
-            "colorSpace": t.color_space.name(),
-            "sourceHasAlpha": t.source_has_alpha,
-            "hdr": t.is_hdr(),
-            "mipLevels": fynkel_cooked::payload::full_mip_count(t.width, t.height),
-        }),
-        payload: encode_texture(t),
-    }
+        info,
+        payload,
+    })
 }
 
 /// `MESH` (see `fynkel_cooked::payload`), with the skin weights of a
@@ -2468,7 +2528,7 @@ pub fn mip_chain(width: u32, height: u32, base: &[u8], srgb: bool) -> Vec<u8> {
     out
 }
 
-fn srgb_to_linear(v: f32) -> f32 {
+pub(crate) fn srgb_to_linear(v: f32) -> f32 {
     if v <= 0.04045 {
         v / 12.92
     } else {
@@ -2476,7 +2536,7 @@ fn srgb_to_linear(v: f32) -> f32 {
     }
 }
 
-fn linear_to_srgb(v: f32) -> f32 {
+pub(crate) fn linear_to_srgb(v: f32) -> f32 {
     let v = v.clamp(0.0, 1.0);
     if v <= 0.003_130_8 {
         v * 12.92

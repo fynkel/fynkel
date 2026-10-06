@@ -24,6 +24,7 @@
 pub mod audio;
 pub mod builtin;
 pub mod cache;
+pub mod compress;
 pub mod cook;
 pub mod environment;
 pub mod extract;

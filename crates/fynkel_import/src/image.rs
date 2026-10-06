@@ -9,7 +9,9 @@
 //! environment.
 //!
 //! Sidecar settings: `colorSpace` (`srgb` | `linear`, default `srgb`; an
-//! HDR image is linear radiance and refuses `srgb`).
+//! HDR image is linear radiance and refuses `srgb`); `compression`
+//! (`none` | `low` | `normal` | `high`, ADR-0061 — the cook's, checked
+//! here so a bad value points at the sidecar).
 
 use std::io::Cursor;
 use std::path::Path;
@@ -49,6 +51,7 @@ impl Settings {
                 }
             },
         };
+        crate::compress::Compression::from_meta(meta)?;
         Ok(Settings { color_space })
     }
 }

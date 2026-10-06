@@ -19,6 +19,7 @@ gltf.workspace = true
 ufbx.workspace = true
 base64.workspace = true
 image.workspace = true
+ctt-astcenc.workspace = true
 symphonia.workspace = true
 serde.workspace = true
 serde_json.workspace = true

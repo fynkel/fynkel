@@ -1810,6 +1810,21 @@ anything else is `A0103`. Limits: `max_image_bytes` (64 MiB of file),
 `A0101`. A standalone texture has no sub-assets: an `assetRef` to it is
 `{ asset }` alone.
 
+**GPU compression ([ADR-0061](decisions/ADR-0061-gpu-texture-compression.md)).**
+The cook writes an 8-bit texture as **ASTC**, every mip level compressed
+on its own by ARM's astcenc (`medium` preset, every profile). The
+sidecar's `settings.compression` picks the block: `"none"` (RGBA8, as
+before), `"low"` (8×8, 16× smaller), `"normal"` (6×6, 9×), `"high"`
+(4×4, 4×). Absent, an sRGB texture is `normal` and a linear one `high`
+(a data map's block error is lighting error). A model's sidecar setting
+applies to its embedded images. WebGPU needs level 0 to be whole blocks,
+so another size is resampled first (Catmull-Rom, linear light for sRGB)
+to the nearest multiple of the block: 1024² at 6×6 cooks as 1026²; the
+chunk info then has `sourceWidth`/`sourceHeight` next to the cooked
+`width`/`height`, plus `compression`, `block` and the payload's `bytes`.
+A bad value is `A0104` at `/settings/compression`. HDR images stay
+RGBA16F.
+
 **HDR environments (E1, [renderer.md](renderer.md) § Image-based
 lighting).** `.hdr` (Radiance RGBE, flat or run-length scanlines) → one
 `TextureData` whose `hdr` is `width × height × 3` linear `f32` radiance
@@ -2021,13 +2036,13 @@ Chunk kinds and payloads:
 
 | Kind | Payload |
 | --- | --- |
-| `META` | JSON: `{ fynkel: "cooked", version, id, name, path, kind, importer, importerVersion, profile, key, dependencies: [uuid], subAssets: { sub: uuid }, chunks: [{ index, kind, name, sub?, id?, … }] }` — per-chunk extras: `documentKind`; `vertices`, `indices`, `material`; `width`, `height`, `colorSpace`, `sourceHasAlpha`, `hdr`, `mipLevels`; `specularSize`, `specularMips`, `irradianceSize`, `meanIrradiance`; `sampleRate`, `channels`, `frames`, `codec` (+ `streamed: true`, `bytes` for a `STRM`); `entities`; `extension` |
+| `META` | JSON: `{ fynkel: "cooked", version, id, name, path, kind, importer, importerVersion, profile, key, dependencies: [uuid], subAssets: { sub: uuid }, chunks: [{ index, kind, name, sub?, id?, … }] }` — per-chunk extras: `documentKind`; `vertices`, `indices`, `material`; `width`, `height`, `colorSpace`, `sourceHasAlpha`, `hdr`, `mipLevels`, `compression`, `block`, `bytes`, `sourceWidth`, `sourceHeight`; `specularSize`, `specularMips`, `irradianceSize`, `meanIrradiance`; `sampleRate`, `channels`, `frames`, `codec` (+ `streamed: true`, `bytes` for a `STRM`); `entities`; `extension` |
 | `JSON` | A document's canonical text (scene, prefab, material, …) |
 | `MATL` | `u32` payload version (1), `u32` record size (`PbrMaterial::SIZE`, 184), `u32` string-tail length, `u32` reserved, then the `fynkel.PbrMaterial` wire record (ADR-0012 layout: `Vec4` 16 bytes, optional asset refs as a nil id when unbound) and its string tail (the `sub` ids). `fynkel_wire::material::{encode_material, decode_material}`. META extras: `shader`, `alphaMode`, `textures` (the bound slot names). |
 | `SHDR` | A `.shader` file's text as checked (ADR-0031): the header is the interface, parsed again at load by `fynkel_shader::parse`, so the cook, the renderer and `fynkel shader validate` read one definition. META extras: `contract` (`surface@1`), `shaderName`, `lighting`, `alpha`, `shadows`, `blockBytes`, `textures` (the texture properties in order). |
 | `MATC` | A material of a shader asset (ADR-0031): `u32` layout version (1), the shader's id (16 bytes), `u32` alpha mode (0 opaque, 1 mask, 2 blend), `f32` alpha cutoff, `u32` double-sided, `u32` block length and the property block in the shader's layout (a multiple of 16 bytes, every default filled — `fynkel_shader::Layout`), `u32` slot count, then per texture property in the header's order: `u32` flags (1 bound, 2 mipmaps), `u32` colour space (0 sRGB, 1 linear), `u32` fallback (0 white, 1 black, 2 normal, 3 gray), `u32` filter (0 linear, 1 nearest), `u32` wrap (0 repeat, 1 clamp, 2 mirror), `u32` anisotropy, `u32` uv set, and when bound the texture's id (16 bytes) and its `sub` (a `u32` length, the bytes, padded to 4). `fynkel_cooked::payload::{encode_custom_material, decode_custom_material}`. META extras: `shader`, `alphaMode`, `blockBytes`, `textures` (the bound slots). |
 | `MESH` | `u32` vertex count, `u32` index count, `[f32; 3]` bounds min, `[f32; 3]` bounds max, vertices (72 bytes each, the intermediate's layout), `u32` indices |
-| `TEXR` | `u32` width, `u32` height, `u32` format (1 = RGBA8 sRGB, 2 = RGBA8 linear, 3 = RGBA16F linear — an HDR image, E1), `u32` mip levels (the full chain, `full_mip_count(w, h)`), then every level's `w × h` texels (4 bytes each, 8 for format 3) concatenated, level 0 first, top row first (`TexturePayload::level(i)` / `base()` / `texel_bytes()`) |
+| `TEXR` | `u32` width, `u32` height, `u32` format (1 = RGBA8 sRGB, 2 = RGBA8 linear, 3 = RGBA16F linear — an HDR image, E1; 4/5, 6/7, 8/9 = ASTC 4×4, 6×6, 8×8, sRGB/linear — ADR-0061), `u32` mip levels (the full chain, `full_mip_count(w, h)`), then every level concatenated, level 0 first, top row first: `w × h` texels (4 bytes each, 8 for format 3) or, for ASTC, `ceil(w / b) × ceil(h / b)` blocks of 16 bytes (`level_bytes`, `texture_block`; `TexturePayload::level(i)` / `base()`) |
 | `ENVM` | `u32` specular face size, `u32` specular mip levels, `u32` irradiance face size, `[f32; 3]` mean irradiance, then the specular cube — per level, per face (+X −X +Y −Y +Z −Z), `size²` RGBA16F texels — and the irradiance cube (six faces of `size²` RGBA16F texels of E/π). An HDR image's prefiltered environment (E1); `EnvironmentPayload::specular_level(m)`; faces are bounded to `MAX_ENVIRONMENT_FACE` (2048) on decode. META extras: `specularSize`, `specularMips`, `irradianceSize`, `meanIrradiance`. |
 | `CLIP` | `u32` sample rate, `u32` channels, `u64` frames, interleaved `f32` samples |
 | `STRM` | `u32` sample rate, `u32` channels, `u64` frames, `u32` codec length, `u32` data length, the codec name (`pcm`, `vorbis`), the source file's bytes — a streamed sound (the sidecar's `stream: true`), decoded by the runtime as it plays |

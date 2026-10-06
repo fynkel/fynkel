@@ -15,7 +15,7 @@ use fynkel_document::asset::AssetDatabase;
 use fynkel_document::SchemaSet;
 use fynkel_import::cook::{
     decode_clip, decode_environment, decode_mesh, decode_stream, decode_texture,
-    TEXTURE_FORMAT_RGBA16F_LINEAR, TEXTURE_FORMAT_RGBA8_LINEAR, TEXTURE_FORMAT_RGBA8_SRGB,
+    TEXTURE_FORMAT_RGBA16F_LINEAR, TEXTURE_FORMAT_RGBA8_SRGB,
 };
 use fynkel_import::{cook, Cache, CookOptions, CookProgress, CookReport, Status};
 use fynkel_wire::material::decode_material;
@@ -358,6 +358,25 @@ fn a_stamped_source_is_not_reread_until_it_changes() {
 }
 
 #[test]
+fn a_bad_compression_setting_fails_the_texture_and_points_at_its_sidecar() {
+    let p = Project::new("bad-compression");
+    p.write(
+        "textures/swatch.png.meta.json",
+        &format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"{SWATCH}","name":"swatch.png","importer":"fynkel.image","importerVersion":1,"settings":{{"compression":"bogus"}},"subAssets":{{}}}}"#
+        ),
+    );
+    let report = p.cook();
+    let d = report
+        .diagnostics
+        .iter()
+        .find(|d| d.pointer.as_deref() == Some("/settings/compression"))
+        .expect("the setting is reported");
+    assert!(d.document.as_deref().unwrap_or("").ends_with("swatch.png.meta.json"), "{d:?}");
+    assert!(d.message.contains("\"normal\""), "{}", d.message);
+}
+
+#[test]
 fn editing_import_settings_invalidates_the_same_set() {
     let p = Project::new("edit-settings");
     let first = p.cook();
@@ -381,14 +400,15 @@ fn editing_import_settings_invalidates_the_same_set() {
             (MAIN, Status::Cooked),
         ]
     );
-    // The texture chunk now says linear.
+    // The texture chunk now says linear, and the settings no longer say
+    // `compression: none`: a linear map's default is ASTC 4×4 (ADR-0061).
     let swatch = second.get(id(SWATCH)).unwrap();
     let bytes = std::fs::read(swatch.file.as_ref().unwrap()).unwrap();
     let c = Container::parse(&bytes).unwrap();
     let texture = decode_texture(c.read(1, 1 << 20).unwrap()).unwrap();
     assert_eq!(
         texture.format,
-        fynkel_import::cook::TEXTURE_FORMAT_RGBA8_LINEAR
+        fynkel_cooked::payload::TEXTURE_FORMAT_ASTC4X4_LINEAR
     );
 }
 
@@ -708,6 +728,8 @@ fn containers_read_back_with_bounded_decoding() {
     assert_eq!(glass.alpha_mode, AlphaMode::Blend);
     assert!(glass.double_sided);
     assert_eq!(chunks[7]["alphaMode"], "blend");
+    // Embedded images cook as ASTC (ADR-0061): 6×6 for the colour copy,
+    // 4×4 for the linear one, each at whole blocks.
     let image = decode_texture(&f.read(8, 1 << 24).unwrap()).unwrap();
     assert_eq!(
         (image.width, image.height),
@@ -716,22 +738,15 @@ fn containers_read_back_with_bounded_decoding() {
             chunks[8]["height"].as_u64().unwrap() as u32
         )
     );
-    assert_eq!(image.format, TEXTURE_FORMAT_RGBA8_SRGB);
+    assert_eq!(image.format, fynkel_cooked::payload::TEXTURE_FORMAT_ASTC6X6_SRGB);
+    assert_eq!((image.width % 6, image.height % 6), (0, 0));
     assert_eq!(chunks[8]["colorSpace"], "srgb");
+    assert_eq!(chunks[8]["compression"], "normal");
     assert_eq!(chunks[8]["mipLevels"], image.mip_levels);
     let linear = decode_texture(&f.read(9, 1 << 24).unwrap()).unwrap();
-    assert_eq!(linear.format, TEXTURE_FORMAT_RGBA8_LINEAR);
-    assert_eq!(
-        linear.base(),
-        image.base(),
-        "the base level is the source either way"
-    );
-    assert_eq!(linear.mip_levels, image.mip_levels);
-    assert_ne!(
-        linear.level(linear.mip_levels - 1),
-        image.level(image.mip_levels - 1),
-        "the sRGB chain averages in linear light, the linear one as stored"
-    );
+    assert_eq!(linear.format, fynkel_cooked::payload::TEXTURE_FORMAT_ASTC4X4_LINEAR);
+    assert_eq!(chunks[9]["compression"], "high");
+    assert_eq!((linear.width % 4, linear.height % 4), (0, 0));
     assert_eq!(chunks[9]["colorSpace"], "linear");
     let prefab: serde_json::Value = serde_json::from_slice(&f.read(10, 1 << 20).unwrap()).unwrap();
     assert!(prefab["entities"].is_object());

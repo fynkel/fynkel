@@ -47,9 +47,9 @@ const IMPORTERS: &[(&str, u32)] = &[
 ];
 
 /// What `fynkel_import::expected_lock()` produces; mirrored here because
-/// this crate cannot depend on the importers (cache version 12, container 1).
+/// this crate cannot depend on the importers (cache version 13, container 1).
 fn expected_lock() -> Lock {
-    Lock::expected(IMPORTERS, 12, 1)
+    Lock::expected(IMPORTERS, 13, 1)
 }
 
 /// A temporary copy of the fixture project, removed on drop.
