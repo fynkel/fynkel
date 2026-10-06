@@ -91,6 +91,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Inspector fields | public fields; GameObject/component/colour/enum references | 🔧 `46c091a`, `de1de2c`, `962d30a` (ADR-0018 amended: `GameObject?` and script-typed fields — `None (Type)`, drop a Hierarchy row, ⊙, ×, `Missing` — resolved at load whatever the attach order, a prefab instance's to its own copies; Dart enums as a dropdown; colours were already `@Expose(kind: 'color')`; ADR-0036: built-in component fields `NativeComponent<T>?`, and a reference to something destroyed reads null); 🟡 fields still need `@Expose` (no implicit public fields), typed asset fields (`MaterialAsset?`, `AudioClipAsset?`, …, ADR-0036 §3) filter the picker; code-first specs reference each other through `spec.object` (ADR-0036 §4); one object field for every type — a click pings, ⊙ has Scene and Assets tabs, an asset reads `None (Type)` / `Missing (Type)` (ADR-0036 §6); no `List` of references |
 | A failed hot reload | blocks Play, errors in the Console | 🔧 `68f7d45` (each `file:line:column: Error:` is a Console row, ↩ opens the line in the IDE; Play and Build And Run refused until a reload goes through; the notice links the Console); 🟡 the old code keeps running in the game view meanwhile, as Unity keeps the old assemblies |
 | Drag a script onto an object | adds it | 🔧 `888092b` (a behaviour's file in Scripts drags it — of several, the one named after the file; onto a Hierarchy row, the Inspector for the selection, or the object under the pointer in the Scene view; schema defaults, an override on a prefab instance, one undo step, refused where it is already); 🟡 an entity still holds one of each script (FYN-D0204), Unity allows several; a file without a behaviour does not drag rather than saying why |
+| Game UI (Canvas: uGUI / UI Toolkit), `ScreenPointToRay`, `WorldToScreenPoint` | a UI system of its own, edited in the Scene view | 🟡 ADR-0062: the game's UI is Flutter widgets in Dart (`docs/hud.md`); `fynkel create` starts with a title screen, pause menu and settings panel (`d4cc59b6`); `screenRay` / `pick` / `worldToScreen` on the game view (`c48e9b16`); a world-space Canvas over an object is a `WorldLabel` / `ProjectedAnchor`; no visual UI editor (on purpose, below) and no Canvas *in* the scene yet (ADR-0010's `WorldCanvas`) |
 
 ## Tier 3 — the Scene view and prefabs, beyond the basics
 
@@ -115,6 +116,10 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 - A data asset's runtime changes are never saved, in Play too (ADR-0027
   §3): Unity keeps a ScriptableObject's Play-mode changes; here only
   Inspector edits are written, and they reach the running game.
+- No visual UI editor (ADR-0062): a game's UI is written as Flutter
+  widgets, which is what the engine is on Flutter for. Unity needs a UI
+  system of its own; here Flutter is that system, with hot reload and
+  DevTools' widget inspector for layout.
 - `Vec3.forward` is −Z (right-handed, as glTF), not Unity's +Z.
 - Euler angles are degrees (as in Unity) but every other angle is
   radians (`Quat.axisAngle`), per ADR-0013's amendment.

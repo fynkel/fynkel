@@ -149,7 +149,8 @@ Tier-2 reference game and a pilot project; an **Animator state machine**;
 physics joints and several colliders per object; async scene loading
 and objects that survive a load; game UI as plain Flutter written in
 Dart (ADR-0062: no UI designer — templates with a main menu, pause menu
-and settings screen, screen ↔ world helpers, the game-UI guide);
+and settings screen, screen ↔ world helpers, the game-UI guide — all
+three done 2026-10-06: `d4cc59b6`, `c48e9b16`, `docs/hud.md`);
 WorldCanvas, spatial audio, rebinding, runtime inspection.
 
 ## Phase 6 — M6: shipping

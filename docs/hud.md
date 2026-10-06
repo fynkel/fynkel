@@ -1,23 +1,123 @@
-# HUD models and world labels
+# Game UI
 
-The screens of a Fynkel game — main menu, HUD, pause, settings, results —
-are ordinary Flutter widgets drawn over the viewport. Two rules from
-blueprint §10 and ADR-0008 decide how they learn about the game:
+A Fynkel game's UI is Flutter, written in Dart in the game's `lib/`
+(ADR-0062). This covers main menus, HUDs, pause and settings screens,
+results, inventories and dialogs. There is no engine UI format and no
+UI designer: screens are widgets, any Flutter package works, and Flutter's
+own tools (hot reload, the widget inspector in DevTools) do the layout
+work. The engine's part is connecting those widgets to the game:
 
-1. **HUD state comes from Dart-side observable models that behaviours
-   write, never from the engine snapshot.** Nothing walks the snapshot per
-   frame to find out the score; a `Behaviour` writes the score into a model
-   field when it changes and the one widget bound to that field rebuilds.
-   The whole app never rebuilds per frame.
-2. **Projected world labels are the one exception**: a label pinned to a
-   3D object needs its screen position every frame. That comes from a
-   bounded per-frame projection view — one native call for all anchors —
-   and moves widgets with paint transforms, without rebuilding them.
+* **Composition**: where the widgets sit over the 3D view.
+* **Models**: how gameplay state reaches a widget without rebuilding
+  the app every frame.
+* **Screen ↔ world**: labels pinned to objects, taps that pick
+  objects, world points on screen.
+* **Input**: who gets a key, the UI or the game.
+* **Play and hot reload**: the same UI in the editor and in a build.
 
-Implemented by M3-13 (blueprint §19.2d item 13). `package:fynkel` holds the
-models and the projection view (no Flutter import); `package:fynkel_flutter`
-the widgets. The starter project (`fynkel create`) is the worked example:
-`lib/game/hud_model.dart`, `Mover.update`, `lib/main.dart`.
+`fynkel create` starts every project with the screens most games need: a
+title screen, a pause menu and a settings panel (`lib/ui/menus.dart`,
+switched in `lib/main.dart`, tested by `test/menus_test.dart`). Restyle
+them, replace them, or add screens beside them.
+
+## Composition
+
+`lib/fynkel_game.dart`'s `buildGame(FynkelLaunch)` returns the game's whole
+app: its own `MaterialApp` (or `CupertinoApp`, or `WidgetsApp`), theme,
+navigator and routes. The 3D view is one widget in it:
+
+```dart
+FynkelGameView(
+  world: game.world,
+  onFrame: _onFrame,            // after each frame: read the pause action
+  onKeyEvent: _onKey,           // keys the game's input does not take
+  overlay: ModelBinding<HudModel>(
+    model: game.hud,
+    child: Stack(fit: StackFit.expand, children: [
+      ProjectionLayer(world: game.world, children: [/* labels on objects */]),
+      const Hud(),
+      const Screens(),          // title / pause / settings, switched on a model field
+    ]),
+  ),
+)
+```
+
+`overlay` is drawn over the viewport at the view's size, so the overlay's
+coordinates are the view's. Anything else in the app (a route pushed over
+the game, a drawer, a dialog) is ordinary Flutter. A game that wants its
+menus on their own route can push them with the navigator. The starter
+keeps everything in one overlay so the scene stays visible behind the menus.
+
+## Input between the UI and the game
+
+* Keys reach the game's input (`world.input`, the project's actions)
+  unless a widget takes them. A focused HUD button does not take the
+  game's keys; a focused text field does, so typing a name never moves
+  the player (foundation 4.7, `game_view_test.dart`). `onKeyEvent` sees
+  the keys the input does not handle (the starter's Q for quality,
+  Escape on a menu).
+* Pointer events hit the topmost widget. A menu that should block the
+  game behind it fills the view (the starter's `MenuBackdrop`). A tap
+  meant for the world goes through a `GestureDetector` that calls
+  `pick` (below).
+* A menu that stops the game pauses the view
+  (`FynkelGameViewState.setPaused(true)`): the loop and the ticks stop,
+  held input is released, and the last frame stays on screen. The starter
+  shows its title screen over the scene's first frame this way.
+* Phones: `TouchOverlay.fromActions` draws the project's
+  `touch:overlay/*` bindings as a stick and buttons. They are widgets in
+  the same overlay.
+
+## Play in the editor and hot reload
+
+The editor's Play runs the game in the editor's own process (ADR-0021).
+Its Game view mounts `buildGame` with the open project and scene, so the
+menus and HUD in Play are exactly what a build shows. Saving a file in
+`lib/` hot reloads the running game, widgets included. `FynkelLaunch.inEditor`
+(and `FynkelApplication.inEditor`) tells the game where it runs.
+`FynkelApplication.quit()` ends Play in the editor and exits a build, so
+never call `exit()` from a Quit button.
+
+## Testing UI
+
+Screens are widgets, so `testWidgets` tests them without a world or a
+GPU. Use an in-memory `SettingsStore()` for a settings page
+(`test/menus_test.dart` in a new project). A test that needs the game too
+loads it headlessly (`Game.load`, `test/game_test.dart`) and writes the
+model fields a screen binds to.
+
+## Unity → Fynkel
+
+| Unity | Fynkel |
+|---|---|
+| Canvas (Screen Space – Overlay), uGUI, UI Toolkit | Flutter widgets in `FynkelGameView.overlay` or anywhere in the app |
+| `Text`, `Button`, `Slider`, `Toggle`, `InputField`, `ScrollRect`, layout groups | Flutter's `Text`, `FilledButton`, `Slider`, `Switch`, `TextField`, `ListView`, `Row`/`Column` |
+| A script setting `text.text = score` each frame | a behaviour writing `hud.score.value`, a `ModelBuilder` around one `Text` |
+| `Time.timeScale = 0` for a pause menu | `FynkelGameViewState.setPaused(true)` |
+| `Camera.ScreenPointToRay` + `Physics.Raycast` | `FynkelGameViewState.screenRay` / `pick` |
+| `Camera.WorldToScreenPoint` | `FynkelGameViewState.worldToScreen` (one-off), `ProjectedAnchor` (every frame) |
+| A world-space Canvas over a character (name tag, health bar) | `WorldLabel` / `ProjectedAnchor` in a `ProjectionLayer` |
+| A world-space Canvas *in* the scene (a screen on a wall, in perspective) | not yet: ADR-0010's native `WorldCanvas`, planned after ADR-0062 |
+| `EventSystem` / `Selectable` navigation | Flutter's focus and `Shortcuts`/`Actions`; keys bound to a game action reach the game first (above) |
+
+The rest of this page is the reference for models and world labels:
+blueprint §10 and ADR-0008, implemented by M3-13. Two rules decide how
+widgets learn about the game:
+
+1. **UI state comes from Dart-side observable models that behaviours
+   write, never from the engine snapshot.** Nothing walks the snapshot every
+   frame to find out the score. A `Behaviour` writes the score into a
+   model field when it changes, and the one widget bound to that field
+   rebuilds. The whole app never rebuilds every frame.
+2. **Positions on screen are the one exception.** A label pinned to a 3D
+   object needs its screen position every frame. That comes from a
+   bounded per-frame projection view (one native call for all anchors),
+   and the widgets move by paint transforms instead of rebuilding.
+
+`package:fynkel` holds the models and the projection view (no Flutter
+import); `package:fynkel_flutter` holds the widgets. The starter project
+is the worked example: `lib/game/hud_model.dart`, `Mover.update`,
+`lib/main.dart`, `lib/ui/menus.dart`.
 
 ## Observable models (`GameModel`, `ModelValue<T>`)
 
