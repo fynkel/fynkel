@@ -400,16 +400,50 @@ fn editing_import_settings_invalidates_the_same_set() {
             (MAIN, Status::Cooked),
         ]
     );
-    // The texture chunk now says linear, and the settings no longer say
-    // `compression: none`: a linear map's default is ASTC 4×4 (ADR-0061).
+    // The texture chunk now says linear. The settings no longer say
+    // `compression: none`, but a 4×3 swatch is under 32 px, so it stays
+    // RGBA8 (ADR-0061).
     let swatch = second.get(id(SWATCH)).unwrap();
     let bytes = std::fs::read(swatch.file.as_ref().unwrap()).unwrap();
     let c = Container::parse(&bytes).unwrap();
     let texture = decode_texture(c.read(1, 1 << 20).unwrap()).unwrap();
     assert_eq!(
         texture.format,
-        fynkel_cooked::payload::TEXTURE_FORMAT_ASTC4X4_LINEAR
+        fynkel_cooked::payload::TEXTURE_FORMAT_RGBA8_LINEAR
     );
+}
+
+#[test]
+fn textures_default_to_astc_by_colour_space_and_resample_to_whole_blocks() {
+    // ADR-0061: a colour map is ASTC 6×6 and a data map 4×4 by default; a
+    // size that is not whole blocks is resampled to the nearest that is.
+    let p = Project::new("astc-defaults");
+    let ramp = image::RgbaImage::from_fn(100, 64, |x, y| image::Rgba([(x * 2) as u8, (y * 3) as u8, 96, 255]));
+    ramp.save(p.assets().join("textures/swatch.png")).unwrap();
+    let sidecar = |settings: &str| {
+        format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"{SWATCH}","name":"swatch.png","importer":"fynkel.image","importerVersion":1,"settings":{settings},"subAssets":{{}}}}"#
+        )
+    };
+    p.write("textures/swatch.png.meta.json", &sidecar("{}"));
+    let report = p.cook();
+    assert!(!report.has_errors(), "{:?}", report.diagnostics);
+    let read = |p: &Project| {
+        let swatch = p.cook().get(id(SWATCH)).unwrap().clone();
+        let mut f = ChunkFile::open_path(swatch.file.as_ref().unwrap()).unwrap();
+        let meta: serde_json::Value = serde_json::from_slice(&f.meta(1 << 20).unwrap()).unwrap();
+        (decode_texture(&f.read(1, 1 << 24).unwrap()).unwrap(), meta["chunks"][1].clone())
+    };
+    let (t, info) = read(&p);
+    assert_eq!((t.width, t.height, t.format), (102, 66, fynkel_cooked::payload::TEXTURE_FORMAT_ASTC6X6_SRGB));
+    assert_eq!((info["compression"].as_str(), info["block"].as_u64()), (Some("normal"), Some(6)));
+    assert_eq!((info["sourceWidth"].as_u64(), info["sourceHeight"].as_u64()), (Some(100), Some(64)));
+    assert_eq!(info["bytes"].as_u64(), Some(t.texels.len() as u64));
+    p.write("textures/swatch.png.meta.json", &sidecar(r#"{"colorSpace":"linear"}"#));
+    let (t, info) = read(&p);
+    assert_eq!((t.width, t.height, t.format), (100, 64, fynkel_cooked::payload::TEXTURE_FORMAT_ASTC4X4_LINEAR));
+    assert_eq!(info["compression"], "high");
+    assert!(info.get("sourceWidth").is_none(), "100×64 is whole 4×4 blocks: {info}");
 }
 
 #[test]
@@ -728,25 +762,15 @@ fn containers_read_back_with_bounded_decoding() {
     assert_eq!(glass.alpha_mode, AlphaMode::Blend);
     assert!(glass.double_sided);
     assert_eq!(chunks[7]["alphaMode"], "blend");
-    // Embedded images cook as ASTC (ADR-0061): 6×6 for the colour copy,
-    // 4×4 for the linear one, each at whole blocks.
+    // The embedded image, cooked for colour and for data. It is under
+    // 32 px, so both copies stay RGBA8 (ADR-0061).
     let image = decode_texture(&f.read(8, 1 << 24).unwrap()).unwrap();
-    assert_eq!(
-        (image.width, image.height),
-        (
-            chunks[8]["width"].as_u64().unwrap() as u32,
-            chunks[8]["height"].as_u64().unwrap() as u32
-        )
-    );
-    assert_eq!(image.format, fynkel_cooked::payload::TEXTURE_FORMAT_ASTC6X6_SRGB);
-    assert_eq!((image.width % 6, image.height % 6), (0, 0));
+    assert_eq!(image.format, TEXTURE_FORMAT_RGBA8_SRGB);
     assert_eq!(chunks[8]["colorSpace"], "srgb");
-    assert_eq!(chunks[8]["compression"], "normal");
+    assert_eq!(chunks[8]["compression"], "none");
     assert_eq!(chunks[8]["mipLevels"], image.mip_levels);
     let linear = decode_texture(&f.read(9, 1 << 24).unwrap()).unwrap();
-    assert_eq!(linear.format, fynkel_cooked::payload::TEXTURE_FORMAT_ASTC4X4_LINEAR);
-    assert_eq!(chunks[9]["compression"], "high");
-    assert_eq!((linear.width % 4, linear.height % 4), (0, 0));
+    assert_eq!(linear.format, fynkel_cooked::payload::TEXTURE_FORMAT_RGBA8_LINEAR);
     assert_eq!(chunks[9]["colorSpace"], "linear");
     let prefab: serde_json::Value = serde_json::from_slice(&f.read(10, 1 << 20).unwrap()).unwrap();
     assert!(prefab["entities"].is_object());

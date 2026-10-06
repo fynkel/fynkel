@@ -2369,8 +2369,9 @@ fn texture_chunk(
     });
     let srgb = t.color_space == ColorSpace::Srgb;
     let resolved = Compression::resolve(compression, srgb);
-    let payload = match resolved.block().filter(|_| !t.is_hdr()) {
-        // ADR-0061: an LDR texture is cooked as ASTC.
+    let block = crate::compress::block_for(resolved, t.width, t.height);
+    let payload = match block.filter(|_| !t.is_hdr()) {
+        // ADR-0061: an LDR texture is cooked as ASTC (unless it is tiny).
         Some(block) => {
             let astc = crate::compress::encode(t.width, t.height, &t.rgba8, srgb, block)?;
             info["compression"] = resolved.name().into();

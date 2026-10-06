@@ -1823,7 +1823,9 @@ to the nearest multiple of the block: 1024² at 6×6 cooks as 1026²; the
 chunk info then has `sourceWidth`/`sourceHeight` next to the cooked
 `width`/`height`, plus `compression`, `block` and the payload's `bytes`.
 A bad value is `A0104` at `/settings/compression`. HDR images stay
-RGBA16F.
+RGBA16F. A texture whose shorter side is under 32 px stays RGBA8
+whatever its setting (`compression: "none"` in its info): fitting a 2×2
+tile to a 6×6 block moves where it wraps, to save a few bytes.
 
 **HDR environments (E1, [renderer.md](renderer.md) § Image-based
 lighting).** `.hdr` (Radiance RGBE, flat or run-length scanlines) → one

@@ -66,7 +66,14 @@ multiple of its block is **resampled at cook to the nearest multiple**
 0.2 % stretch the UVs absorb (they span the texture, not texels). 4×4 and
 8×8 leave every power-of-two texture of 8 px or more as it is. Unity
 scales non-power-of-two textures for compressed formats in the same way.
-`info` records the cooked size next to the source size. HDR images
+`info` records the cooked size next to the source size.
+
+*Amended 2026-10-06, after the showcase comparison:* a texture whose
+shorter side is **under 32 px stays RGBA8** whatever its setting. The
+showcase robot's material is one 2×2 image; fitted to a 6×6 block it
+wrapped differently and the robot's pattern visibly moved, for a saving
+of bytes. At 32 px and up, the stretch to whole blocks is a few percent
+at most. HDR images
 stay RGBA16F (ASTC HDR can follow; the sky is one texture). The encoder
 runs at astcenc's `medium` preset in every cook profile, so what you test
 in the editor is byte for byte what ships. The cache version goes 12 → 13;

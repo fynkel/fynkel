@@ -61,6 +61,8 @@ void main() {
     expect(compressionBlock({'colorSpace': 'linear'}), 4);
     expect(compressionBlock({'compression': 'none'}), isNull);
     expect(compressionBlock({'compression': 'low', 'colorSpace': 'linear'}), 8);
+    expect(compressionBlock({}, size: const Size(4, 3)), isNull, reason: 'under 32 px stays RGBA8');
+    expect(compressionBlock({}, size: const Size(32, 512)), 6);
     expect(blockMultiple(1024, 6), 1026);
     expect(blockMultiple(1024, 4), 1024);
     expect(blockMultiple(4, 6), 6);

@@ -78,6 +78,20 @@ impl Compression {
     }
 }
 
+/// A texture with a side shorter than this stays RGBA8 whatever its
+/// setting (ADR-0061 amendment): it saves next to nothing, and fitting it to
+/// whole blocks stretches it by a block's worth (a 2×2 tile becomes 6×6),
+/// which moves where it wraps.
+pub const MIN_COMPRESSED_SIDE: u32 = 32;
+
+/// The ASTC block a `width`×`height` texture is cooked with: the
+/// setting's, unless the texture is smaller than [`MIN_COMPRESSED_SIDE`].
+pub fn block_for(compression: Compression, width: u32, height: u32) -> Option<u32> {
+    compression
+        .block()
+        .filter(|_| width.min(height) >= MIN_COMPRESSED_SIDE)
+}
+
 /// The nearest multiple of `block` to `n` (at least one block).
 pub fn block_multiple(n: u32, block: u32) -> u32 {
     let down = n / block * block;
@@ -198,6 +212,11 @@ mod tests {
         assert_eq!(block_multiple(1024, 4), 1024);
         assert_eq!(block_multiple(1370, 6), 1368);
         assert_eq!(block_multiple(3, 8), 8, "at least one block");
+        // A tiny texture (a 2×2 tile, a 4×3 swatch) stays RGBA8.
+        assert_eq!(block_for(Compression::Normal, 2, 2), None);
+        assert_eq!(block_for(Compression::High, 512, 31), None);
+        assert_eq!(block_for(Compression::High, 32, 32), Some(4));
+        assert_eq!(block_for(Compression::None, 1024, 1024), None);
     }
 
     /// Decodes level `level` of `t` back to RGBA8 with astcenc.

@@ -1042,7 +1042,7 @@ class _AssetPageState extends State<AssetPage> {
           'low' => '16x smaller than uncompressed; visible on close detail.',
           'normal' => '9x smaller; the usual choice for colour textures.',
           'high' => '4x smaller; for normal maps and detail that must stay sharp.',
-          _ when embedded => 'Colour textures 6x6, data textures 4x4.',
+          _ when embedded => 'Colour textures 6x6, data textures 4x4; under 32 px, uncompressed.',
           _ => linear ? 'ASTC 4x4: data maps keep their detail.' : 'ASTC 6x6: 9x smaller than uncompressed.',
         },
       ),

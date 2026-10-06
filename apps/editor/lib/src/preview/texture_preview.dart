@@ -36,8 +36,10 @@ int gpuBytes(Size size, {int bytesPerPixel = 4, int? block}) {
 
 /// The ASTC block edge the cook uses for a texture with these import
 /// [settings] (ADR-0061): `compression`, else 6 for sRGB and 4 for linear;
-/// null for `none`.
-int? compressionBlock(Map<String, Object?> settings) {
+/// null for `none`, or when the texture's shorter side ([size]) is under
+/// 32 px (the cook keeps a tiny texture RGBA8).
+int? compressionBlock(Map<String, Object?> settings, {Size? size}) {
+  if (size != null && math.min(size.width, size.height) < 32) return null;
   final linear = settings['colorSpace'] == 'linear';
   return switch (settings['compression']) {
     'none' => null,
@@ -123,7 +125,7 @@ final texturePreview = PreviewProvider(
     final mips = mipCount(size);
     final mip = preview.value('mip', 0).clamp(0, mips - 1);
     int at(double v) => math.max(1, v.toInt() >> mip);
-    final block = compressionBlock(preview.importSettings);
+    final block = compressionBlock(preview.importSettings, size: size);
     final cooked = block == null
         ? size
         : Size(
