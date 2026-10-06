@@ -1284,6 +1284,27 @@ and the reference game have none — `resolve_volumes` returns the
 defaults before it looks at anything), so it is taken together with
 R3b's on a quiet machine.
 
+**The R3a–R3d capture is taken** (2026-10-06,
+`benchmarks/m3/results/2026-10-06-cffbff95`, after ADR-0061, on a quiet
+Mac under `caffeinate -du`, the stress scene carrying the showcase's
+Global Volume since `d24df9f8`). Every rendering check passes: 120 Hz in
+the standalone host, the stress scene's GPU frame 3.66 ms p95 with AO,
+bloom, grading and contact shadows on (3.07 with AO alone on
+2026-09-22), the reference game's 4.07 (6.11), total work 9.13 ms p95
+for the stress scene in Flutter and 3.48 for the reference game, both
+under 12. The light-pool check followed F6.3 (pool 64 → 1 024, so the
+256 lights are all kept and none dropped). Four CPU checks fail, none
+from R3: the stress tick's p50 is 5.38 ms against < 4 (3.03 on
+2026-09-22), the 5 000 movers take 1.45 ms (0.13), the rigs 0.73 ms
+(0.30, now 2 600 joints with the feet), and the light assignment adds
+3.85 ms to prepare (0.51). The first three are the transactional
+gameplay path from F2–F4 (each mover's pose through the journal and
+commit, physics sync over the dirty set). The fourth is F6.3's spatial
+candidate selection over a pool that no longer clips at 64. The tick
+costs are item 1 of `docs/foundation-f8-throughput-observations.md`
+§ Next; the light assignment is new work. The thresholds stay as they
+were.
+
 R3b, bloom (2026-09-23): fmt clean, clippy clean, `cargo test
 --workspace` green over 85 targets (the render crate's 26 pixel tests
 include the new

@@ -79,13 +79,14 @@ REFERENCE_CACHE = REFERENCE / ".fynkel/cache"
 REFERENCE_APP = REFERENCE / "build/macos/Build/Products/Profile/reference_game.app/Contents/MacOS/reference_game"
 LIGHTS = ROOT / "benchmarks/stress/project-lights"
 LIGHTS_CACHE = LIGHTS / ".fynkel/cache"
-LIGHTS_N = 256  # 4× the renderer's frame pool (fynkel_render::LIGHT_POOL)
+LIGHTS_N = 256  # 4× E1's 64-light pool; under F6.3's 1 024 every light in view is kept
 PLAYGROUND = REFERENCE / "assets/scenes/playground.scene.json"
 ROUTE = REFERENCE / "test/collect_all.input.json"
 NUM = m0.NUM
 TOTAL_WORK_P95_MS = 12.0
-# fynkel_render::LIGHT_POOL / MAX_LIGHTS (E1 light culling).
-LIGHT_POOL, MAX_LIGHTS = 64, 8
+# fynkel_render::LIGHT_POOL / MAX_LIGHTS (E1 light culling; the pool
+# 64 → 1 024 in F6.3, so the 256 lights no longer overflow it).
+LIGHT_POOL, MAX_LIGHTS = 1024, 8
 
 
 def build():
@@ -406,7 +407,9 @@ def gate(r):
             (f"{li['authored']} lights over the stress field culled per object "
              f"({li['lights']} of {li['authored']} in the frame's pool, {li['lights_dropped']} dropped; "
              f"≤ {li['lights_max_per_object']} reach an object, {li['lights_overflow']} of {li['instances']} clipped)",
-             li["lights"] == LIGHT_POOL and li["lights_dropped"] > 0 and li["lights_max_per_object"] == MAX_LIGHTS
+             0 < li["lights"] <= min(li["authored"], LIGHT_POOL)
+             and (li["lights_dropped"] > 0) == (li["authored"] > LIGHT_POOL)
+             and li["lights_max_per_object"] == MAX_LIGHTS
              and li["lights_overflow"] > 0),
         ]
         if lit is None or base is None:
