@@ -85,12 +85,13 @@ switching on model fields, the game's own state left in the world:
   — that is diagnostics, not game state.
 * **Pause** — the `pause` action read by the app in `onFrame`
   (`world.input.pressed('pause')`), `setPaused(true)` on the view (the loop
-  stops; input is released), `hud.paused.value = true` shows the overlay
-  (the starter's `PauseBanner`). Resume is the same in reverse.
+  stops; input is released), `hud.screen.value = Screen.paused` shows the
+  menu (the starter's `PauseMenu`, `lib/ui/menus.dart`). Resume is the same
+  in reverse.
 * **Settings** — the `SettingsStore` (`docs/scenes.md`): widgets edit a
   draft, `settings.update(current.copyWith(...))` saves and applies rebinds;
   a `ModelValue<SettingsDocument>` (or the store's own listeners) drives the
-  page.
+  page (the starter's `SettingsPanel`).
 * **Results** — the behaviour that decides the round is over writes the
   totals into the model *then* transitions (`world.scenes.transition(
   'results')`); the results screen binds to the same fields. Nothing reads

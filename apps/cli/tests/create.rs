@@ -55,6 +55,7 @@ fn a_fresh_project_validates_and_runs_headlessly() {
         "lib/fynkel_game.dart",
         "lib/game/game.dart",
         "lib/game/spinner.dart",
+        "lib/ui/menus.dart",
         "lib/generated/behaviours.g.dart",
         "lib/generated/behaviours.g.json",
         "schemas/behaviours/game.Spinner.schema.json",
@@ -69,6 +70,7 @@ fn a_fresh_project_validates_and_runs_headlessly() {
         "assets/audio/land.ogg",
         "assets/audio/land.ogg.meta.json",
         "test/game_test.dart",
+        "test/menus_test.dart",
     ] {
         assert!(
             files.contains(&expected),

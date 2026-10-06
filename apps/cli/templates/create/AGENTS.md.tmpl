@@ -514,16 +514,19 @@ screen shows (`late final score = field(ModelValue(0));`), installed by
 `Game.load` (`world.context.install(HudModel())`, read back with
 `game.hud` / `world.context.service<HudModel>()`). A behaviour writes the
 fields from `update` (`Mover.update`: position, jumps, airborne); the app
-writes app facts (`hud.paused`). A field notifies on `!=` only, so a bound
+writes app facts (`hud.screen`, `hud.settingsOpen`). A field notifies on `!=` only, so a bound
 widget rebuilds when the game changed what it shows and never per frame.
 Bind in Flutter (package:fynkel_flutter): `ModelBinding<HudModel>(model:
 game.hud, child: …)` hands the model down, `ModelBuilder<int>(value:
 hud.score, builder: (_, score, _) => Text('$score'))` rebuilds one
 widget, `hud.score.listenable` is a `ValueListenable` for
 `ValueListenableBuilder`. Menu / HUD / pause / settings / results: a model
-field (`screen`, `paused`) the widget tree switches on — lib/main.dart's
-`PauseBanner` — with the game's own state left in the world (`setPaused`
-on the view stops the loop; `SceneManager.transition` changes scenes).
+field (`screen`, `settingsOpen`) the widget tree switches on — lib/main.dart
+shows lib/ui/menus.dart's `TitleScreen`, `PauseMenu` and `SettingsPanel`
+from it — with the game's own state left in the world (`setPaused` on the
+view stops the loop; `SceneManager.transition` changes scenes). Game UI is
+plain Flutter (ADR-0062): add a screen as an enum value and a widget,
+test it with `testWidgets` (test/menus_test.dart).
 
 Labels in the 3D scene: `ProjectionLayer(world: game.world, children:
 [WorldLabel(target: cube, offset: Vec3(0, 0.9, 0), text: 'Cube'),

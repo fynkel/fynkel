@@ -16,7 +16,12 @@
 // `Input.action2D('move')` and friends). On a phone a `TouchOverlay` puts
 // the same actions on screen. Q cycles the project's quality profiles
 // (fynkel.project.json `quality`); Escape (the `pause` action) pauses.
-// HUD: the mover's readout and the pause banner are bound to the game's
+// Screens (lib/ui/menus.dart; ADR-0062: game UI is plain Flutter): the
+// title screen first, then the game, the pause menu on Escape, and the
+// settings panel over either menu. Which one shows is `HudModel.screen`;
+// the world runs only while it is `Screen.playing` (the title shows over
+// the scene's first frame, so keys on a menu never move the cube).
+// HUD: the mover's readout is bound to the game's
 // `HudModel` fields (`ModelBuilder`; docs/hud.md) — behaviours write them,
 // the bound widgets rebuild on change only; the stats block refreshes once
 // a second from `onStats` (`FynkelFrameStats`: where the frame goes —
@@ -44,6 +49,7 @@ import 'fynkel_game.dart';
 import 'game/game.dart';
 import 'game/hud_model.dart';
 import 'game/spinner.dart';
+import 'ui/menus.dart';
 
 /// `FYNKEL_CAPTURE=1` prints the stats line once a second (benchmarks).
 final bool capturing = (Platform.environment['FYNKEL_CAPTURE'] ?? '').isNotEmpty;
@@ -79,49 +85,80 @@ class GamePage extends StatefulWidget {
 }
 
 class _GamePageState extends State<GamePage> {
-  /// The project's quality profiles, in the order Q cycles them.
-  static const profiles = ['low', 'medium', 'high'];
-
   Game? _game;
   String? _error;
   FynkelViewportController? _viewport;
   FynkelFrameStats? _stats;
   final _input = FynkelInputCapture();
   final _view = GlobalKey<FynkelGameViewState>();
-  bool _paused = false;
 
-  /// Q: the next quality profile (the project default, `medium`, first);
-  /// Escape while paused: resume (the loop does not run while paused, so
-  /// the `pause` action cannot be read then). Every other key goes to the
+  /// The scene Main menu returns to (a fresh copy of it).
+  String? _startScene;
+
+  /// Q (in the game): the next quality profile (the project default,
+  /// `medium`, first). Escape on a menu: close the settings panel, or
+  /// resume from the pause menu (the loop does not run on a menu, so the
+  /// `pause` action cannot be read then). Every other key goes to the
   /// input capture (WASD, Space, …).
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    if (_paused && event.logicalKey == LogicalKeyboardKey.escape) {
-      _setPaused(false);
-      return KeyEventResult.handled;
+    final hud = _game!.hud;
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      if (hud.settingsOpen.value) {
+        hud.settingsOpen.value = false;
+        return KeyEventResult.handled;
+      }
+      if (hud.screen.value == Screen.paused) {
+        _show(Screen.playing);
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
     }
-    if (event.logicalKey != LogicalKeyboardKey.keyQ) return KeyEventResult.ignored;
-    final viewport = _viewport!;
-    final current = profiles.indexOf(viewport.quality ?? 'medium');
-    final next = profiles[(current + 1) % profiles.length];
-    setState(() => viewport.quality = next);
+    if (event.logicalKey != LogicalKeyboardKey.keyQ || hud.screen.value != Screen.playing) {
+      return KeyEventResult.ignored;
+    }
+    final current = qualityProfiles.indexOf(_viewport!.quality ?? 'medium');
+    _setQuality(qualityProfiles[(current + 1) % qualityProfiles.length]);
     // Remembered in the user's settings.json for the next launch.
-    _game!.settings.update(_game!.settings.current.copyWith(quality: next));
+    _game!.settings.update(_game!.settings.current.copyWith(quality: _viewport!.quality));
     return KeyEventResult.handled;
   }
 
-  /// The `pause` action (Escape, the gamepad's menu button), read after
-  /// each frame: the app owns pausing, so it reads the action here rather
-  /// than in a behaviour.
+  void _setQuality(String profile) => setState(() => _viewport!.quality = profile);
+
+  /// Read after each frame. On a menu the world stops here, after the
+  /// frame it drew (the title's first frame shows the scene behind it). In
+  /// the game, the `pause` action (Escape, the gamepad's menu button) opens
+  /// the pause menu: the app owns pausing, so it reads the action here
+  /// rather than in a behaviour.
   void _onFrame(double dt, FramePlan plan) {
-    if (_game!.world.input.pressed('pause')) _setPaused(true);
+    final screen = _game!.hud.screen.value;
+    if (screen != Screen.playing) {
+      _view.currentState?.setPaused(true);
+    } else if (_game!.world.input.pressed('pause')) {
+      _show(Screen.paused);
+    }
   }
 
-  void _setPaused(bool v) {
-    setState(() => _paused = v);
-    _game!.hud.paused.value = v;
-    _view.currentState?.setPaused(v);
+  /// Switch screens; the world runs only while playing.
+  void _show(Screen screen) {
+    final hud = _game!.hud;
+    hud.settingsOpen.value = false;
+    hud.screen.value = screen;
+    _view.currentState?.setPaused(screen != Screen.playing);
   }
+
+  /// Main menu: back to the title, and a fresh start scene for the next
+  /// Play (the transition runs at the first frame the world runs).
+  void _toTitle() {
+    if (_startScene case final scene?) _game!.scenes.transition(scene);
+    _show(Screen.title);
+  }
+
+  /// Quit on desktop; phones close apps themselves. In the editor's Play
+  /// this ends Play.
+  VoidCallback? get _quit =>
+      Platform.isMacOS || Platform.isWindows || Platform.isLinux ? FynkelApplication.quit : null;
 
   @override
   void initState() {
@@ -154,13 +191,14 @@ class _GamePageState extends State<GamePage> {
       // startup scene, loaded at the first frame.
       final start = launch.startScene;
       if (start != null && start != _game!.scenes.current) _game!.scenes.transition(start);
+      _startScene = start ?? _game!.scenes.current;
       // The viewport draws from the world's asset store (the cooked cache
       // the scene came from); scene entities without a mesh stay invisible
       // (placeholders off) as they will in the shipped game.
       _viewport = FynkelViewportController(placeholders: false);
       // The profile the user picked last time (empty: the project's default).
       final quality = _game!.settings.current.quality;
-      if (profiles.contains(quality)) _viewport!.quality = quality;
+      if (qualityProfiles.contains(quality)) _viewport!.quality = quality;
     } on FynkelLoadError catch (e) {
       _error = '$e\nrun `fynkel cook` in the project (or `fynkel run`, which cooks first)';
     } catch (e) {
@@ -238,7 +276,34 @@ class _GamePageState extends State<GamePage> {
                   ),
                 ),
               ),
-              const PauseBanner(),
+              // The screen on top: nothing in the game, a menu otherwise,
+              // the settings panel over either menu.
+              ModelBuilder<Screen>(
+                value: game.hud.screen,
+                builder: (context, screen, _) => ModelBuilder<bool>(
+                  value: game.hud.settingsOpen,
+                  builder: (context, settingsOpen, _) => switch ((screen, settingsOpen)) {
+                    (Screen.playing, _) => const SizedBox.shrink(),
+                    (_, true) => SettingsPanel(
+                        settings: game.settings,
+                        onBack: () => game.hud.settingsOpen.value = false,
+                        onQuality: _setQuality,
+                      ),
+                    (Screen.title, false) => TitleScreen(
+                        title: '{{title}}',
+                        onPlay: () => _show(Screen.playing),
+                        onSettings: () => game.hud.settingsOpen.value = true,
+                        onQuit: _quit,
+                      ),
+                    (Screen.paused, false) => PauseMenu(
+                        onResume: () => _show(Screen.playing),
+                        onSettings: () => game.hud.settingsOpen.value = true,
+                        onMainMenu: _toTitle,
+                        onQuit: _quit,
+                      ),
+                  },
+                ),
+              ),
             ],
           ),
         ),
@@ -345,27 +410,4 @@ class MoverReadout extends StatelessWidget {
   }
 
   static String _xyz(Vec3 v) => '(${v.x.toStringAsFixed(2)}, ${v.y.toStringAsFixed(2)}, ${v.z.toStringAsFixed(2)})';
-}
-
-/// The pause screen: shown while `HudModel.paused` is set (the pattern for
-/// any screen — menu, settings, results — is a model field the widgets
-/// switch on; docs/hud.md).
-class PauseBanner extends StatelessWidget {
-  const PauseBanner({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final hud = ModelBinding.of<HudModel>(context);
-    return ModelBuilder<bool>(
-      value: hud.paused,
-      builder: (context, paused, _) => paused
-          ? ColoredBox(
-              color: Colors.black.withValues(alpha: 0.5),
-              child: Center(
-                child: Text('PAUSED — Esc resumes', style: Theme.of(context).textTheme.headlineMedium),
-              ),
-            )
-          : const SizedBox.shrink(),
-    );
-  }
 }

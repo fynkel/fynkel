@@ -79,6 +79,7 @@ const FILES: &[TemplateFile] = &[
     text!("lib/game/spinner.dart", "lib/game/spinner.dart"),
     text!("lib/game/mover.dart", "lib/game/mover.dart"),
     text!("lib/game/hud_model.dart", "lib/game/hud_model.dart"),
+    text!("lib/ui/menus.dart", "lib/ui/menus.dart"),
     text!(
         "lib/generated/behaviours.g.dart",
         "lib/generated/behaviours.g.dart.tmpl"
@@ -113,6 +114,7 @@ const FILES: &[TemplateFile] = &[
     bin!("assets/audio/jump.ogg", "assets/audio/jump.ogg"),
     bin!("assets/audio/land.ogg", "assets/audio/land.ogg"),
     text!("test/game_test.dart", "test/game_test.dart.tmpl"),
+    text!("test/menus_test.dart", "test/menus_test.dart.tmpl"),
     text!("test/walk.input.json", "test/walk.input.json"),
 ];
 

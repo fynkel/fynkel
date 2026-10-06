@@ -20,6 +20,14 @@ class HudModel extends GameModel {
   /// In the air right now.
   late final airborne = field(ModelValue(false));
 
-  /// Set by the app (the `pause` action, Escape).
-  late final paused = field(ModelValue(false));
+  /// Which screen shows (lib/ui/menus.dart): the title screen first, the
+  /// game, or the pause menu. Set by the app, never by a behaviour.
+  late final screen = field(ModelValue(Screen.title));
+
+  /// The settings panel is open over the current screen.
+  late final settingsOpen = field(ModelValue(false));
 }
+
+/// The screens the app switches between. The world runs only while
+/// [playing].
+enum Screen { title, playing, paused }
