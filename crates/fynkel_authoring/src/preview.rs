@@ -37,11 +37,12 @@
 use std::collections::{HashMap, HashSet};
 
 use fynkel_assets::{Assets, MeshPayload, PreparedGameplayResources, Residency};
-use fynkel_contracts::{AssetRef, Code, Diagnostic, Entity};
+use fynkel_contracts::{AssetRef, Code, Diagnostic, Entity, ObjectRef};
 use fynkel_core::components::{Camera, ComponentValue, MeshRenderer, Projection};
 use fynkel_core::{
-    projection_matrix, view_matrix, ComponentId, EditResult, EntityDescription, GameplayEdit, Name,
-    PendingEntity, SceneDescription, World,
+    projection_matrix, view_matrix, ComponentId, EditResult, EntityDescription,
+    GameplayComponentValue, GameplayEdit, GameplayObjectRef, Name, PendingEntity, SceneDescription,
+    World,
 };
 use fynkel_document::generated::encode_component;
 use fynkel_document::DocumentCodec;
@@ -163,6 +164,25 @@ fn apply_changes(
         .iter()
         .filter_map(|(id, pending)| commit.resolve(*pending).map(|entity| (*id, entity)))
         .collect())
+}
+
+fn native_component(value: GameplayComponentValue) -> ComponentValue {
+    value.into_native(|r| match r {
+        GameplayObjectRef::Stored(o) => o,
+        GameplayObjectRef::Pending(_) => ObjectRef::NONE,
+    })
+}
+
+/// `c` with each object reference reduced to its live handle: the world
+/// may keep the authoring id a load resolved it from, the sync compares
+/// handles only.
+fn live_form(c: ComponentValue) -> ComponentValue {
+    native_component(
+        GameplayComponentValue::from(c).map_object_refs(|r| match r {
+            GameplayObjectRef::Stored(o) => GameplayObjectRef::Stored(ObjectRef::to(o.entity)),
+            other => other,
+        }),
+    )
 }
 
 /// Radius of the pick sphere and the icon cross of an entity that draws
@@ -791,16 +811,36 @@ impl Preview {
                             });
                         }
                     }
-                    let have = ComponentValue::all_of(world, e);
+                    let have: Vec<ComponentValue> = ComponentValue::all_of(world, e)
+                        .into_iter()
+                        .map(live_form)
+                        .collect();
                     for c in &d.components {
                         if matches!(c, ComponentValue::Transform(_)) {
                             continue;
                         }
-                        if !have.iter().any(|h| h == c) {
-                            out.push(PreviewChange::SetComponent {
-                                entity: e,
-                                value: c.clone(),
-                            });
+                        // The document names an object by its authoring id,
+                        // the world holds its live handle: compare (and
+                        // write) the resolved form, or a component with an
+                        // object reference (a Skin's skeleton) differs on
+                        // every sync and the write is refused.
+                        let value = match self.resolve_component(c) {
+                            Ok(value) => value,
+                            Err(missing) => {
+                                // A target about to spawn is resolved next
+                                // round; one absent from the desired scene
+                                // must reject, never keep the old value.
+                                if missing.iter().any(|id| !wanted.contains(id)) {
+                                    out.push(PreviewChange::SetComponent {
+                                        entity: e,
+                                        value: c.clone(),
+                                    });
+                                }
+                                continue;
+                            }
+                        };
+                        if !have.contains(&value) {
+                            out.push(PreviewChange::SetComponent { entity: e, value });
                         }
                     }
                     for h in &have {
@@ -1064,6 +1104,30 @@ impl Preview {
             world.drain_events();
         }
         Ok(count)
+    }
+
+    /// `c` with its object references resolved to live handles through
+    /// the preview's id map; `Err` lists the authoring ids of targets that
+    /// are not live yet.
+    fn resolve_component(&self, c: &ComponentValue) -> Result<ComponentValue, Vec<Uuid>> {
+        let mut missing = Vec::new();
+        let value = GameplayComponentValue::from(c.clone()).map_object_refs(|r| match r {
+            GameplayObjectRef::Stored(o) if o.entity.is_null() && !o.id.is_nil() => {
+                match self.ids.get(&to_uuid(o.id)) {
+                    Some(&target) => GameplayObjectRef::Stored(ObjectRef::to(target)),
+                    None => {
+                        missing.push(to_uuid(o.id));
+                        r
+                    }
+                }
+            }
+            other => other,
+        });
+        if missing.is_empty() {
+            Ok(live_form(native_component(value)))
+        } else {
+            Err(missing)
+        }
     }
 
     fn resolve_registered(
