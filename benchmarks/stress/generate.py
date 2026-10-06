@@ -268,11 +268,53 @@ def spark_prefab():
             "id": str(SPARK_ID), "name": "Spark", "root": k, "entities": {k: v}}
 
 
-def material_doc(name):
+TEXTURE_MAPS = {"color": ("base_color_texture", "srgb"), "normal": ("normal_texture", "linear"),
+                "mr": ("metallic_roughness_texture", "linear")}
+TEXTURE_SIZE = 1024
+
+
+def material_doc(name, textured=False):
     color, metallic, roughness, extra = MATERIALS[name]
-    return {"$schema": "https://fynkel.dev/schemas/material.schema.json", "formatVersion": 2,
-            "id": uid(f"material/{name}"), "name": name.capitalize(), "shader": "fynkel.pbr@1",
-            "base_color": color, "metallic": metallic, "roughness": roughness, **extra}
+    doc = {"$schema": "https://fynkel.dev/schemas/material.schema.json", "formatVersion": 2,
+           "id": uid(f"material/{name}"), "name": name.capitalize(), "shader": "fynkel.pbr@1",
+           "base_color": color, "metallic": metallic, "roughness": roughness, **extra}
+    if textured:
+        for kind, (field, _) in TEXTURE_MAPS.items():
+            doc[field] = {"asset": uid(f"texture/{name}_{kind}")}
+    return doc
+
+
+def write_textures(out, name, compression):
+    """A material's colour, normal and metallic-roughness maps, 1024² each
+    and different per material (seeded by its name): a detailed height
+    field, so the maps are not trivially compressible. `compression` is
+    the sidecar setting (None = the ADR-0061 defaults)."""
+    import numpy as np
+    from PIL import Image
+    rng = np.random.default_rng(int(uuid.UUID(uid(name)).int % (1 << 32)))
+    n = TEXTURE_SIZE
+    y, x = np.mgrid[0:n, 0:n] / n * 2 * np.pi
+    height = sum(np.sin(x * f * rng.integers(1, 4) + rng.uniform(0, 6)) * np.cos(y * f + rng.uniform(0, 6)) / f
+                 for f in (1, 2, 4, 8, 16, 32))
+    height += rng.normal(0, 0.15, (n, n))
+    height = (height - height.min()) / (np.ptp(height) or 1)
+    base = np.array(MATERIALS[name][0][:3])
+    color = np.clip(base[None, None, :] * (0.55 + 0.9 * height[..., None]), 0, 1)
+    gy, gx = np.gradient(height * 24)
+    normal = np.dstack([-gx, -gy, np.ones_like(gx)])
+    normal /= np.linalg.norm(normal, axis=2, keepdims=True)
+    mr = np.dstack([np.zeros_like(height), 0.35 + 0.6 * (1 - height), np.full_like(height, MATERIALS[name][1])])
+    maps = {"color": color, "normal": normal * 0.5 + 0.5, "mr": mr}
+    for kind, (_, space) in TEXTURE_MAPS.items():
+        file = f"{name}_{kind}.png"
+        Image.fromarray((maps[kind] * 255 + 0.5).astype(np.uint8), "RGB").save(out / "assets/textures" / file)
+        settings = {"colorSpace": space} if space == "linear" else {}
+        if compression:
+            settings["compression"] = compression
+        meta = {"$schema": "https://fynkel.dev/schemas/meta.schema.json", "formatVersion": 2,
+                "id": uid(f"texture/{name}_{kind}"), "name": file, "importer": "fynkel.image", "importerVersion": 1,
+                "settings": settings, "subAssets": {}}
+        (out / "assets/textures" / f"{file}.meta.json").write_text(json.dumps(meta, indent=2) + "\n")
 
 
 def project_doc():
@@ -467,6 +509,9 @@ def main():
     ap.add_argument("--app", action="store_true", help="wrap the project in the `fynkel create` starter app so it runs on a device")
     ap.add_argument("--no-movers", action="store_true", help="no catalogue components: the statics stand still (the item 6/8 baseline)")
     ap.add_argument("--no-look", action="store_true", help="no Global Volume: the scene draws no post effects")
+    ap.add_argument("--textures", choices=["off", "none", "default"], default="off",
+                    help="give every material 1024² colour, normal and metallic-roughness maps, cooked uncompressed "
+                         "('none') or with ADR-0061's defaults ('default': ASTC 6x6 colour, 4x4 data)")
     a = ap.parse_args()
     out = a.out
     if a.app:
@@ -479,8 +524,14 @@ def main():
     for f in ("character.glb", "character.glb.meta.json"):
         shutil.copyfile(REFERENCE / "assets/models" / f, out / "assets/models" / f)
     (out / "assets/models/locomotion.blend.json").write_text(json.dumps(locomotion_blend(), indent=2) + "\n")
+    for stale in (out / "assets/textures").glob("*_*.png*"):
+        stale.unlink()
+    textured = a.textures != "off"
     for name in MATERIALS:
-        (out / f"assets/materials/{name}.material.json").write_text(json.dumps(material_doc(name), indent=2) + "\n")
+        (out / f"assets/materials/{name}.material.json").write_text(
+            json.dumps(material_doc(name, textured), indent=2) + "\n")
+        if textured:
+            write_textures(out, name, "none" if a.textures == "none" else None)
     project = project_doc()
     if a.app:
         # The starter's project file keeps its registry (game.Spinner stays
@@ -517,7 +568,8 @@ def main():
     print(f"{out}: {len(scene['entities'])} entities ({a.static} {'static' if a.no_movers else 'native movers'}, "
           f"{a.bodies} bodies, {a.behaviours} behaviours{' (game.Wobble)' if a.app else ''}, {a.rigs} animated rigs"
           f"{f', {a.lights} lamps' if a.lights else ''}), "
-          f"{len(MATERIALS)} materials, {pairs} distinct (mesh, material) pairs")
+          f"{len(MATERIALS)} materials, {pairs} distinct (mesh, material) pairs"
+          f"{f', 3 maps of {TEXTURE_SIZE}² each, compression {a.textures}' if textured else ''}")
 
 
 if __name__ == "__main__":

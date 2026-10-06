@@ -35,14 +35,14 @@ def add_effect_isolation_profiles(project):
     path.write_text(json.dumps(document, indent=2) + '\n')
 
 
-def prepare(preset, out, cli, app=False):
+def prepare(preset, out, cli, app=False, textures='off'):
     out = out.resolve()
     # generate.py --app can remove an existing directory. Never forward one.
     if out.exists():
         raise ValueError(f"output already exists: {out}; choose a fresh directory")
     out.parent.mkdir(parents=True, exist_ok=True)
     report = {"schemaVersion": 1, "workload": preset, "seed": 1,
-              "populations": PRESETS[preset], "app": app,
+              "populations": PRESETS[preset], "app": app, "textures": textures,
               "dartBehavioursExecute": app,
               "status": "preparing", "deviceQualification": "not-run",
               "resolution": [1320, 2868], "quality": "medium", "commands": []}
@@ -72,6 +72,8 @@ def prepare(preset, out, cli, app=False):
             args.extend(['--' + name, str(count)])
         if app:
             args.append('--app')
+        if textures != 'off':
+            args.extend(['--textures', textures])
         run(args, 'generate')
         add_effect_isolation_profiles(out)
         if app:
@@ -111,5 +113,7 @@ if __name__ == '__main__':
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--cli', type=Path, default=ROOT / 'target/release/fynkel')
     parser.add_argument('--app', action='store_true')
+    parser.add_argument('--textures', choices=['off', 'none', 'default'], default='off',
+                        help="1024² maps on every material, uncompressed ('none') or ASTC by default (ADR-0061)")
     args = parser.parse_args()
-    prepare(args.preset, args.out, args.cli.resolve(), args.app)
+    prepare(args.preset, args.out, args.cli.resolve(), args.app, args.textures)

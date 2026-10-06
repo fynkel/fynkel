@@ -366,6 +366,23 @@ class MobileWorkloadTests(unittest.TestCase):
             self.assertEqual(report['deviceQualification'], 'not-run')
             self.assertEqual(report['commands'][0]['stderr'], 'failure')
 
+    def test_textured_workload_reaches_the_generator_and_the_report(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(mobile.subprocess, 'run') as run:
+            run.return_value = mobile.subprocess.CompletedProcess([], 1, '', 'stop after generate')
+            out = Path(temp) / 'scene'
+            with self.assertRaises(RuntimeError):
+                mobile.prepare('dense-500', out, Path('/unused'), textures='none')
+            argv = run.call_args_list[0].args[0]
+            self.assertEqual(argv[argv.index('--textures') + 1], 'none')
+            report = json.loads(out.with_name('scene-preflight.json').read_text())
+            self.assertEqual(report['textures'], 'none')
+
+    def test_textured_materials_name_three_maps_and_untextured_ones_none(self):
+        doc = gen.material_doc('brick', textured=True)
+        self.assertEqual({k for k in doc if k.endswith('_texture')},
+                         {'base_color_texture', 'normal_texture', 'metallic_roughness_texture'})
+        self.assertFalse(any(k.endswith('_texture') for k in gen.material_doc('brick')))
+
 
 if __name__ == '__main__':
     unittest.main()
