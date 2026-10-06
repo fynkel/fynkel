@@ -139,6 +139,22 @@ class FynkelViewportController extends ChangeNotifier {
        // ignore: prefer_initializing_formals
        _camera = camera;
 
+  /// A game's viewport: the render worker ([pipelined]), a two-deep
+  /// [frameQueue] (which also caps the frames in flight, so a GPU-bound
+  /// phone drops frames before preparing them instead of queueing them) and
+  /// five buffers — what `FynkelGameView` makes when it is given none — and
+  /// no placeholder cubes, as the shipped game draws. An editor or tool
+  /// that draws overlays between frames uses the plain constructor.
+  FynkelViewportController.game({bool placeholders = false, String? assetCache, String? quality})
+    : this(
+        pipelined: true,
+        frameQueue: 2,
+        bufferCount: 5,
+        placeholders: placeholders,
+        assetCache: assetCache,
+        quality: quality,
+      );
+
   static const _channel = MethodChannel('fynkel_flutter/viewport');
 
   /// IOSurfaces in the ring (M0: 4 is the measured sweet spot).

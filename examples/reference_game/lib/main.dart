@@ -235,7 +235,7 @@ class _GamePageState extends State<GamePage> {
       // The viewport draws from the world's asset store (the cooked cache
       // the scene came from); scene entities without a mesh stay invisible
       // (placeholders off) as they will in the shipped game.
-      _viewport = FynkelViewportController(placeholders: false);
+      _viewport = FynkelViewportController.game();
       // The profile the user picked last time (empty: the project's default).
       final quality = _game!.settings.current.quality;
       if (qualityProfiles.contains(quality)) _viewport!.quality = quality;

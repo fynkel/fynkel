@@ -65,6 +65,20 @@ void main() {
     }
   }
 
+  test('a game viewport has the game settings', () {
+    // Render worker, a two-deep frame queue (which also caps frames in
+    // flight on a GPU-bound phone) and five buffers; no placeholder cubes.
+    // What FynkelGameView makes for itself, and what a game passes when it
+    // keeps the controller (for its quality profile).
+    final c = FynkelViewportController.game(quality: 'low');
+    addTearDown(c.dispose);
+    expect(c.pipelined, isTrue);
+    expect(c.frameQueue, 2);
+    expect(c.bufferCount, 5);
+    expect(c.placeholders, isFalse);
+    expect(c.quality, 'low');
+  });
+
   test('abi version matches the native library', () {
     expect(viewportAbiVersion, 16);
   });

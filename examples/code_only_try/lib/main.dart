@@ -95,7 +95,7 @@ class _GamePageState extends State<GamePage> {
         if (start == Assets.scenes.level.asset) _game!.state.reset();
         _game!.world.scenes.transition(start);
       }
-      _viewport = FynkelViewportController(placeholders: false);
+      _viewport = FynkelViewportController.game();
     } on FynkelLoadError catch (e) {
       _error = '$e\nrun `fynkel cook` in the project (or `fynkel run`, which cooks first)';
     } catch (e) {

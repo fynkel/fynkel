@@ -154,7 +154,7 @@ class _GamePageState extends State<GamePage> {
       // The viewport draws from the world's asset store (the cooked cache
       // the scene came from); scene entities without a mesh stay invisible
       // (placeholders off) as they will in the shipped game.
-      _viewport = FynkelViewportController(placeholders: false);
+      _viewport = FynkelViewportController.game();
     } on FynkelLoadError catch (e) {
       _error = '$e\nrun `fynkel cook` in the project (or `fynkel run`, which cooks first)';
     } catch (e) {

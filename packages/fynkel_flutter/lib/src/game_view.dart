@@ -321,7 +321,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   // it makes at the display's rate (docs/foundation-f8-throughput-observations.md):
   // five buffers hold the two queued frames, the one shown and the one retiring.
   FynkelViewportController get controller =>
-      widget.controller ?? (_owned ??= FynkelViewportController(pipelined: true, frameQueue: 2, bufferCount: 5));
+      widget.controller ?? (_owned ??= FynkelViewportController.game(placeholders: true));
   FynkelInputCapture? _ownedInput;
   FynkelInputCapture get input => widget.input ?? (_ownedInput ??= FynkelInputCapture());
   bool _hasFocus = false;
