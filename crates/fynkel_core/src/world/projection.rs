@@ -13,8 +13,6 @@
 //! a mask a label is never hidden by geometry (a screen overlay is not
 //! automatically behind the 3D scene).
 
-use std::collections::HashMap;
-
 use fynkel_contracts::{ComponentId, DiagnosticCode, Entity};
 use fynkel_physics::{ColliderShape, Hit, QueryKind, QuerySpec};
 use glam::{Mat4, Vec3, Vec4};

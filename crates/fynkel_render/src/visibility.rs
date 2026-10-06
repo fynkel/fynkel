@@ -119,14 +119,18 @@ mod tests {
             receive_shadows: true,
             skin: None,
         };
-        let mut main = Extract::default();
-        main.records = vec![
-            record(1, Mat4::IDENTITY),
-            record(2, Mat4::from_translation(Vec3::X)),
-        ];
-        main.meshes = vec![mesh(1), mesh(1), mesh(u32::MAX)];
-        let mut extra = Extract::default();
-        extra.records = vec![record(3, Mat4::from_scale(Vec3::splat(2.0)))];
+        let mut main = Extract {
+            records: vec![
+                record(1, Mat4::IDENTITY),
+                record(2, Mat4::from_translation(Vec3::X)),
+            ],
+            meshes: vec![mesh(1), mesh(1), mesh(u32::MAX)],
+            ..Default::default()
+        };
+        let extra = Extract {
+            records: vec![record(3, Mat4::from_scale(Vec3::splat(2.0)))],
+            ..Default::default()
+        };
         let placement = Mat4::from_translation(Vec3::new(3.0, 4.0, 5.0));
         let extras = [ExtraWorld {
             extract: extra,

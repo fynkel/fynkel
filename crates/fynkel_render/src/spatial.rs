@@ -512,7 +512,7 @@ mod tests {
             assert_eq!(order, (0..bounds.len()).collect::<Vec<_>>());
             assert_eq!(index.postorder.len(), bounds.len() * 2 - 1);
             assert!(
-                index.nodes.len() <= (bounds.len() + 1) * 2 - 1,
+                index.nodes.len() < (bounds.len() + 1) * 2,
                 "freed nodes must be reused"
             );
             for &i in &index.postorder {

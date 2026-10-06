@@ -1345,9 +1345,10 @@ fn physics_system_profile_is_opt_in_and_clears_when_skipped() {
     let p = w.physics_system_profile().unwrap();
     assert_eq!(p.total, p.propagation + p.adapter + p.publication);
     assert!(p.adapter >= w.physics().step_profile().unwrap().total);
-    let mut modules = Modules::default();
-    modules.physics = false;
-    w.set_modules(modules);
+    w.set_modules(Modules {
+        physics: false,
+        ..Default::default()
+    });
     w.step();
     assert!(w.physics_system_profile().is_none());
     assert!(w.physics().step_profile().is_none());

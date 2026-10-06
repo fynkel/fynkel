@@ -40,7 +40,7 @@
 //! up front (rebuilt only when a quality switch changes the sample
 //! count); bind groups are cached per material and per texture.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use fynkel_contracts::{AssetRef, Uuid};
