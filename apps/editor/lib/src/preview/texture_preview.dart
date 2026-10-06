@@ -22,15 +22,38 @@ const _channels = ['rgb', 'r', 'g', 'b', 'a'];
 /// The number of mip levels the cook builds for a [size] image.
 int mipCount(Size size) => (math.log(math.max(size.width, size.height)) / math.ln2).floor() + 1;
 
-/// The bytes the whole mip chain takes on the GPU at [bytesPerPixel].
-int gpuBytes(Size size, {int bytesPerPixel = 4}) {
+/// The bytes the whole mip chain takes on the GPU at [bytesPerPixel], or
+/// in ASTC [block]×[block] blocks of 16 bytes (ADR-0061).
+int gpuBytes(Size size, {int bytesPerPixel = 4, int? block}) {
   var w = size.width.toInt(), h = size.height.toInt(), total = 0;
   while (true) {
-    total += w * h * bytesPerPixel;
+    total += block == null ? w * h * bytesPerPixel : (w + block - 1) ~/ block * ((h + block - 1) ~/ block) * 16;
     if (w == 1 && h == 1) return total;
     w = math.max(1, w >> 1);
     h = math.max(1, h >> 1);
   }
+}
+
+/// The ASTC block edge the cook uses for a texture with these import
+/// [settings] (ADR-0061): `compression`, else 6 for sRGB and 4 for linear;
+/// null for `none`.
+int? compressionBlock(Map<String, Object?> settings) {
+  final linear = settings['colorSpace'] == 'linear';
+  return switch (settings['compression']) {
+    'none' => null,
+    'low' => 8,
+    'normal' => 6,
+    'high' => 4,
+    _ => linear ? 4 : 6,
+  };
+}
+
+/// The nearest multiple of [block] to [n], at least one block: the size
+/// the cook resamples a texture to (WebGPU wants whole blocks).
+int blockMultiple(int n, int block) {
+  final down = n ~/ block * block;
+  final up = down + block;
+  return down == 0 || n - down > up - n ? up : down;
 }
 
 bool _isHdr(String file) => file.toLowerCase().endsWith('.hdr');
@@ -100,13 +123,21 @@ final texturePreview = PreviewProvider(
     final mips = mipCount(size);
     final mip = preview.value('mip', 0).clamp(0, mips - 1);
     int at(double v) => math.max(1, v.toInt() >> mip);
+    final block = compressionBlock(preview.importSettings);
+    final cooked = block == null
+        ? size
+        : Size(
+            blockMultiple(size.width.toInt(), block).toDouble(),
+            blockMultiple(size.height.toInt(), block).toDouble(),
+          );
     return [
       '${size.width.toInt()}x${size.height.toInt()}',
       if (mip > 0) '(mip $mip: ${at(size.width)}x${at(size.height)})',
-      'RGBA8',
+      block == null ? 'RGBA8' : 'ASTC ${block}x$block',
       linear ? 'Linear' : 'sRGB',
-      formatBytes(gpuBytes(size)),
-      'mips $mips',
+      formatBytes(gpuBytes(cooked, block: block)),
+      'mips ${mipCount(cooked)}',
+      if (cooked != size) '(cooked ${cooked.width.toInt()}x${cooked.height.toInt()})',
     ].join('  ');
   },
 );

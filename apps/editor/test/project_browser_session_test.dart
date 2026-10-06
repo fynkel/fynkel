@@ -182,7 +182,7 @@ void main() {
       model.undo();
       model.undo();
       meta = jsonDecode(sidecar.readAsStringSync()) as Map;
-      expect(meta['settings'], isEmpty);
+      expect(meta['settings'], {'compression': 'none'}, reason: 'the fixture swatch is kept uncompressed');
       await expectClean();
     },
   );

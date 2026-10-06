@@ -863,6 +863,29 @@ void main() {
       expect(find.textContaining('must be srgb or linear'), findsOneWidget);
     });
 
+    testWidgets('a texture: Compression, as in Unity, applied with a reimport (ADR-0061)', (tester) async {
+      final (project, _, _, _, _) = await pumpAsset(tester, swatch);
+      expect(find.text('Automatic (Normal)'), findsOneWidget, reason: 'an sRGB map defaults to ASTC 6x6');
+      await chooseLinear(tester);
+      expect(find.text('Automatic (High)'), findsOneWidget, reason: 'a linear map defaults to ASTC 4x4');
+      await tester.tap(find.byKey(const Key('asset.settings.compression')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('None (RGBA8)').last);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Uncompressed'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('asset.applySettings')));
+      await tester.pumpAndSettle();
+      expect(project.settings[swatch], {'colorSpace': 'linear', 'compression': 'none'});
+      // Back to Automatic removes the key.
+      await tester.tap(find.byKey(const Key('asset.settings.compression')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Automatic (High)').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('asset.applySettings')));
+      await tester.pumpAndSettle();
+      expect(project.settings[swatch], {'colorSpace': 'linear'});
+    });
+
     testWidgets('a model: materials remapped from the Materials section; Extract Materials is one step', (tester) async {
       final given = fakeProject();
       final at = given.assetEntries.indexWhere((e) => e.id == robot);

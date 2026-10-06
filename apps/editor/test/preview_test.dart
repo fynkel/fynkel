@@ -54,6 +54,16 @@ void main() {
     expect(mipCount(const Size(4, 3)), 3);
     expect(mipCount(const Size(512, 512)), 10);
     expect(gpuBytes(const Size(4, 3)), 48 + 8 + 4);
+    // ADR-0061: ASTC blocks of 16 bytes; 1026² at 6×6 is 171² blocks at level 0.
+    expect(gpuBytes(const Size(6, 6), block: 6), 16 * 3);
+    expect(gpuBytes(const Size(8, 8), block: 4), 16 * (4 + 1 + 1 + 1));
+    expect(compressionBlock({}), 6);
+    expect(compressionBlock({'colorSpace': 'linear'}), 4);
+    expect(compressionBlock({'compression': 'none'}), isNull);
+    expect(compressionBlock({'compression': 'low', 'colorSpace': 'linear'}), 8);
+    expect(blockMultiple(1024, 6), 1026);
+    expect(blockMultiple(1024, 4), 1024);
+    expect(blockMultiple(4, 6), 6);
     expect(channelMatrix('rgb'), isNull);
     expect(channelMatrix('g')!.sublist(0, 5), [0, 1, 0, 0, 0]);
   });

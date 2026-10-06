@@ -755,6 +755,7 @@ class _AssetPageState extends State<AssetPage> {
                 ? 'Data textures: normal maps, roughness, metallic, masks.'
                 : 'Colour textures: base colour, emissive. The default.',
           ),
+          ..._compression(context, draft, enabled, linear: linear),
         ]);
       case 'fynkel.audio':
         controls.addAll([
@@ -830,6 +831,7 @@ class _AssetPageState extends State<AssetPage> {
             context,
             'Textures and buffers next to the file by plain relative paths; off, the file must be self-contained.',
           ),
+          ..._compression(context, draft, enabled, linear: false, embedded: true),
         ]);
       default:
         controls.add(
@@ -1004,6 +1006,47 @@ class _AssetPageState extends State<AssetPage> {
       decoration: BoxDecoration(color: color, borderRadius: t.cornerControl),
       child: SelectableText(lines.join('\n'), style: Theme.of(context).textTheme.bodySmall?.copyWith(color: on)),
     );
+  }
+
+  /// Unity's texture Compression (ADR-0061): ASTC blocks the cook writes.
+  List<Widget> _compression(
+    BuildContext context,
+    Map<String, Object?> draft,
+    bool enabled, {
+    required bool linear,
+    bool embedded = false,
+  }) {
+    final automatic = embedded ? 'Automatic' : 'Automatic (${linear ? 'High' : 'Normal'})';
+    final value = draft['compression'] as String? ?? '';
+    return [
+      FieldRow(
+        label: embedded ? 'Texture compression' : 'Compression',
+        child: _Choice(
+          key: const Key('asset.settings.compression'),
+          value: value,
+          options: {
+            '': automatic,
+            'none': 'None (RGBA8)',
+            'low': 'Low quality (ASTC 8x8)',
+            'normal': 'Normal quality (ASTC 6x6)',
+            'high': 'High quality (ASTC 4x4)',
+          },
+          enabled: enabled,
+          onChanged: (s) => _set('compression', s.isEmpty ? null : s),
+        ),
+      ),
+      _help(
+        context,
+        switch (value) {
+          'none' => 'Uncompressed: exact pixels, 4 bytes each on the GPU.',
+          'low' => '16x smaller than uncompressed; visible on close detail.',
+          'normal' => '9x smaller; the usual choice for colour textures.',
+          'high' => '4x smaller; for normal maps and detail that must stay sharp.',
+          _ when embedded => 'Colour textures 6x6, data textures 4x4.',
+          _ => linear ? 'ASTC 4x4: data maps keep their detail.' : 'ASTC 6x6: 9x smaller than uncompressed.',
+        },
+      ),
+    ];
   }
 
   Widget _parts(BuildContext context, AssetEntry e, AssetDetail d) {
