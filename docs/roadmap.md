@@ -147,10 +147,10 @@ every row is confirmed by a failing test before it is fixed.
 
 Tier-2 reference game and a pilot project; an **Animator state machine**;
 physics joints and several colliders per object; async scene loading
-and objects that survive a load; a **Game UI designer** (a `.ui.json`
-widget tree edited in the Hierarchy and Inspector, bound to `GameModel`,
-live preview, custom widgets through the Phase 3 extensions); WorldCanvas,
-spatial audio, rebinding, runtime inspection.
+and objects that survive a load; game UI as plain Flutter written in
+Dart (ADR-0062: no UI designer — templates with a main menu, pause menu
+and settings screen, screen ↔ world helpers, the game-UI guide);
+WorldCanvas, spatial audio, rebinding, runtime inspection.
 
 ## Phase 6 — M6: shipping
 
@@ -168,5 +168,3 @@ stress target; public readiness (license, ADR-0005, ABI discipline).
 2. Windows, then Android.
 3. Particles/VFX, navmesh/AI, LOD, streaming.
 4. Browser editor — only if the web runtime lands; a product decision.
-5. General Flutter app builder — only if the Game UI designer proves
-   itself.

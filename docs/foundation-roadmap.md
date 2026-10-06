@@ -43,7 +43,7 @@ Budget approximately **12–16 engineering weeks** for initial planning, subject
 | F7 | Editor, code creation, packages, and examples use the same model | F3 through F6 | Done — [F7 gate report](foundation-f7-gate-report.md), ADR-0058 |
 | F8 | Production qualification and foundation release gate | F7 | Active — local checks captured; second-Mac execution unverified and iPhone GPU throughput/heat issue open (F8.3) |
 
-Independent implementation can overlap once its contracts and prerequisites are settled. Keep one integrated vertical slice runnable throughout. Broad rendering features, new platforms, and the Game UI designer wait behind this program; the older roadmap retains that backlog.
+Independent implementation can overlap once its contracts and prerequisites are settled. Keep one integrated vertical slice runnable throughout. Broad rendering features, and new platforms wait behind this program (the Game UI designer was dropped by ADR-0062); the older roadmap retains that backlog.
 
 ## F0 Baseline and architecture prototype
 
