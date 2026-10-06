@@ -20,7 +20,9 @@
 // title screen first, then the game, the pause menu on Escape, and the
 // settings panel over either menu. Which one shows is `HudModel.screen`;
 // the world runs only while it is `Screen.playing` (the title shows over
-// the scene's first frame, so keys on a menu never move the cube).
+// the scene's first frame, so keys on a menu never move the cube). A menu
+// is driven by mouse, keyboard or controller alike: `setMenuOpen` hands it
+// the controller (D-pad or stick to move, A to press, B or Start back).
 // HUD: the mover's readout is bound to the game's
 // `HudModel` fields (`ModelBuilder`; docs/hud.md) — behaviours write them,
 // the bound widgets rebuild on change only; the stats block refreshes once
@@ -95,15 +97,25 @@ class _GamePageState extends State<GamePage> {
   /// The scene Main menu returns to (a fresh copy of it).
   String? _startScene;
 
+  /// Back on a menu: Escape, or a controller's east (B) or menu (Start)
+  /// button — the view hands a menu the controller as these keys
+  /// (`setMenuOpen`).
+  static final _back = {
+    LogicalKeyboardKey.escape,
+    LogicalKeyboardKey.gameButtonB,
+    LogicalKeyboardKey.gameButtonStart,
+  };
+
   /// Q (in the game): the next quality profile (the project default,
-  /// `medium`, first). Escape on a menu: close the settings panel, or
-  /// resume from the pause menu (the loop does not run on a menu, so the
-  /// `pause` action cannot be read then). Every other key goes to the
-  /// input capture (WASD, Space, …).
+  /// `medium`, first). Back on a menu: close the settings panel, or resume
+  /// from the pause menu (the loop does not run on a menu, so the `pause`
+  /// action cannot be read then). Every other key goes to the input
+  /// capture (WASD, Space, …) in the game, and moves through a menu's
+  /// buttons on a menu (the arrows; Enter or Space press).
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final hud = _game!.hud;
-    if (event.logicalKey == LogicalKeyboardKey.escape) {
+    if (_back.contains(event.logicalKey)) {
       if (hud.settingsOpen.value) {
         hud.settingsOpen.value = false;
         return KeyEventResult.handled;
@@ -134,18 +146,25 @@ class _GamePageState extends State<GamePage> {
   void _onFrame(double dt, FramePlan plan) {
     final screen = _game!.hud.screen.value;
     if (screen != Screen.playing) {
-      _view.currentState?.setPaused(true);
+      _view.currentState
+        ?..setPaused(true)
+        ..setMenuOpen(true);
     } else if (_game!.world.input.pressed('pause')) {
       _show(Screen.paused);
     }
   }
 
-  /// Switch screens; the world runs only while playing.
+  /// Switch screens; the world runs only while playing, and a menu has
+  /// the keys and the controller (the D-pad or the stick move between
+  /// buttons, A presses, B goes back).
   void _show(Screen screen) {
     final hud = _game!.hud;
     hud.settingsOpen.value = false;
     hud.screen.value = screen;
-    _view.currentState?.setPaused(screen != Screen.playing);
+    final menu = screen != Screen.playing;
+    _view.currentState
+      ?..setPaused(menu)
+      ..setMenuOpen(menu);
   }
 
   /// Main menu: back to the title, and a fresh start scene for the next

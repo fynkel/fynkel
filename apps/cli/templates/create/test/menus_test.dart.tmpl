@@ -2,6 +2,7 @@
 // Flutter widget: no world, no GPU, a settings store in memory.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/gameplay.dart' show SettingsStore;
 import 'package:{{package}}/ui/menus.dart';
@@ -29,6 +30,28 @@ void main() {
       await tester.tap(find.text(label));
     }
     expect(pressed, ['play', 'settings', 'quit']);
+  });
+
+  testWidgets('the menus work without a mouse: arrows move, Enter presses', (tester) async {
+    // In the game the view turns the controller into these keys while a
+    // menu is open (FynkelGameViewState.setMenuOpen): the D-pad or stick
+    // are the arrows, A presses.
+    final pressed = <String>[];
+    await tester.pumpWidget(
+      _app(
+        TitleScreen(
+          title: 'My Game',
+          onPlay: () => pressed.add('play'),
+          onSettings: () => pressed.add('settings'),
+          onQuit: () => pressed.add('quit'),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(pressed, ['settings'], reason: 'Play has the focus first; one step down is Settings');
   });
 
   testWidgets('the pause menu resumes, opens settings, returns to the title and quits', (tester) async {

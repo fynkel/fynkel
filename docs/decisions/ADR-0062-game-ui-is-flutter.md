@@ -79,3 +79,32 @@ What already exists (2026-10-06):
   (hot reload, the widget inspector in DevTools) covers layout work.
 - Roadmap Phase 5 loses its largest item; `WorldCanvas` and the Tier-2
   reference game move up.
+
+## Amendment 1 (2026-10-06): before `WorldCanvas`, make game UI solid
+
+Accepted by the user 2026-10-06 ("let's do that"), after a review of
+what the Flutter UI can and cannot do yet. Four steps, in order, each
+confirmed by a failing test first:
+
+1. **Menus by controller and keyboard.** While the app says a menu is
+   open (`FynkelGameViewState.setMenuOpen(true)`), the game's input gets
+   nothing: no keys, gamepad, mouse or touch, and one reset as the menu
+   opens. The controller drives Flutter's focus the way Flutter already
+   treats a TV remote. The D-pad and left stick are the arrow keys, and
+   a held direction repeats. South is `gameButtonA` (Flutter's
+   `ActivateIntent`). East, `menu` and `options` are `gameButtonB`,
+   `gameButtonStart` and `gameButtonSelect`, which the app reads as back
+   or close. The keys go through the normal focus chain, so buttons,
+   sliders, segmented buttons and dropdowns work unchanged, and focus
+   highlights show. The flag is the app's to set, not implied by
+   `setPaused`: a menu over a running world (an inventory) is as common
+   as one over a paused world.
+2. **Many labels.** Raise the 64-anchor bound and add a cheap way to draw
+   many small marks at once (health bars, icons) without a widget each;
+   the acceptance is 500 bars at the frame budget.
+3. **3D in the UI.** A documented widget that shows a second camera's
+   view inside a panel (a model preview, a minimap), on the viewport's
+   existing per-view camera.
+4. **Proof.** A UI-heavy demo (a busy HUD, an inventory with a 3D
+   preview, many health bars, menus by controller), measured on the
+   iPhone.

@@ -31,8 +31,21 @@ class FynkelInputCapture {
   /// Events collected since the last [take].
   List<InputEvent> get pending => List.unmodifiable(_events);
 
-  void add(InputEvent e) => _events.add(e);
-  void addAll(Iterable<InputEvent> events) => _events.addAll(events);
+  /// While set, every event goes here instead of the frame: an open menu
+  /// has the controls (`FynkelGameViewState.setMenuOpen`; ADR-0062
+  /// amendment 1). [reset] still reaches the frame.
+  void Function(InputEvent event)? divert;
+
+  void add(InputEvent e) {
+    final d = divert;
+    if (d != null) {
+      d(e);
+    } else {
+      _events.add(e);
+    }
+  }
+
+  void addAll(Iterable<InputEvent> events) => events.forEach(add);
 
   /// Every control up, with edges for the next tick.
   void reset() {
@@ -61,9 +74,9 @@ class FynkelInputCapture {
     if (name == null) return false;
     switch (event) {
       case KeyDownEvent():
-        _events.add(InputEvent.down(InputDevice.keyboard, name));
+        add(InputEvent.down(InputDevice.keyboard, name));
       case KeyUpEvent():
-        _events.add(InputEvent.up(InputDevice.keyboard, name));
+        add(InputEvent.up(InputDevice.keyboard, name));
       case KeyRepeatEvent():
         break;
     }
@@ -85,7 +98,7 @@ class FynkelInputCapture {
       case PointerMoveEvent() || PointerHoverEvent():
         if (event is PointerMoveEvent) _buttonsChanged(event.buttons);
         if (!pointerCaptured && event.delta != Offset.zero) {
-          _events.add(
+          add(
             InputEvent.move(
               InputDevice.mouse,
               'delta',
@@ -97,14 +110,14 @@ class FynkelInputCapture {
       case PointerScrollEvent():
         // Positive away from the user (up), in logical pixels of scroll.
         if (event.scrollDelta.dy != 0) {
-          _events.add(InputEvent.move(InputDevice.mouse, 'wheel', -event.scrollDelta.dy));
+          add(InputEvent.move(InputDevice.mouse, 'wheel', -event.scrollDelta.dy));
         }
       case PointerPanZoomUpdateEvent():
         // A trackpad's two-finger scroll (macOS sends pan/zoom, not
         // scrolls; foundation 4.6): the wheel, as Unity's scroll delta.
         // Fingers moving down is a wheel turned away from the user.
         if (event.panDelta.dy != 0) {
-          _events.add(InputEvent.move(InputDevice.mouse, 'wheel', event.panDelta.dy));
+          add(InputEvent.move(InputDevice.mouse, 'wheel', event.panDelta.dy));
         }
       default:
         break;
@@ -118,8 +131,8 @@ class FynkelInputCapture {
     for (final (bit, name) in _mouseButtons) {
       final wasDown = was & bit != 0;
       final isDown = now & bit != 0;
-      if (isDown && !wasDown) _events.add(InputEvent.down(InputDevice.mouse, name));
-      if (wasDown && !isDown) _events.add(InputEvent.up(InputDevice.mouse, name));
+      if (isDown && !wasDown) add(InputEvent.down(InputDevice.mouse, name));
+      if (wasDown && !isDown) add(InputEvent.up(InputDevice.mouse, name));
     }
   }
 

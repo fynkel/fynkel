@@ -227,9 +227,14 @@ frames imply, deterministic run to run.
   view's `overlay` with focus (a HUD button after a click or Tab) does not
   take the game's keys, as in Unity: the keys it lets through still reach
   the capture and nothing is let go; only a text field there keeps them
-  (foundation 4.7). The overlay needs no `ExcludeFocus` any more; a menu
-  that wants Flutter's own key navigation handles those keys in its own
-  `Focus`/`Shortcuts` first. Focus leaving the view (or reaching a text
+  (foundation 4.7). The overlay needs no `ExcludeFocus` any more. A menu
+  takes every control with `FynkelGameViewState.setMenuOpen(true)`
+  (ADR-0062 amendment 1): the capture's `divert` sends the events to a
+  `MenuNavigator` instead of the frame, so the game gets nothing; the
+  controller becomes Flutter focus keys (D-pad and left stick → arrows,
+  south → `gameButtonA`, east/menu/options → `gameButtonB`/`Start`/
+  `Select`), and keys go up the focus chain to Flutter's own navigation
+  ([hud.md](hud.md) § Input between the UI and the game). Focus leaving the view (or reaching a text
   field), `setPaused(true)`, the app going hidden: the capture
   `reset()`s (everything up with edges on the next tick) and the pointer
   is released. While paused no frame runs, so the loop cannot read a

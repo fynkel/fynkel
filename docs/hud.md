@@ -60,10 +60,32 @@ keeps everything in one overlay so the scene stays visible behind the menus.
   game behind it fills the view (the starter's `MenuBackdrop`). A tap
   meant for the world goes through a `GestureDetector` that calls
   `pick` (below).
-* A menu that stops the game pauses the view
+* **A menu takes the controls** with
+  `FynkelGameViewState.setMenuOpen(true)` (ADR-0062 amendment 1). While
+  it is open, the game's input gets nothing: no keys, gamepad, mouse or
+  touch, and everything it held is released once. The controller drives
+  Flutter's focus the way Flutter treats a TV remote:
+
+  | Controller | Becomes | In the menu |
+  |---|---|---|
+  | D-pad, left stick | arrow keys (held: repeats after 0.4 s, then every 0.1 s) | move between controls; left/right adjust a focused slider |
+  | south (A) | `gameButtonA` | presses the focused control (Flutter's `ActivateIntent`) |
+  | east (B), menu (Start), options | `gameButtonB`, `gameButtonStart`, `gameButtonSelect` | the app's back / close, read in `onKeyEvent` like Escape |
+  | north, west, shoulders | `gameButtonY`, `gameButtonX`, `gameButtonLeft1`/`Right1` | free for the app (tabs, for example) |
+
+  The keys travel the normal focus chain, so every Material and
+  Cupertino control works unchanged, and the focus highlight shows once
+  the controller is used. While open, the menu uses Flutter's directional
+  navigation mode (up/down move, left/right adjust), the 3D view is out
+  of the focus order, and closing the menu gives the view its focus back.
+  The keyboard works the same way: arrows move, Enter or Space press.
+  `setMenuOpen` is separate from pausing; a menu over a running world
+  (an inventory) is fine.
+* A menu that stops the game also pauses the view
   (`FynkelGameViewState.setPaused(true)`): the loop and the ticks stop,
   held input is released, and the last frame stays on screen. The starter
-  shows its title screen over the scene's first frame this way.
+  shows its title screen over the scene's first frame this way, and calls
+  both.
 * Phones: `TouchOverlay.fromActions` draws the project's
   `touch:overlay/*` bindings as a stick and buttons. They are widgets in
   the same overlay.
@@ -98,7 +120,8 @@ model fields a screen binds to.
 | `Camera.WorldToScreenPoint` | `FynkelGameViewState.worldToScreen` (one-off), `ProjectedAnchor` (every frame) |
 | A world-space Canvas over a character (name tag, health bar) | `WorldLabel` / `ProjectedAnchor` in a `ProjectionLayer` |
 | A world-space Canvas *in* the scene (a screen on a wall, in perspective) | not yet: ADR-0010's native `WorldCanvas`, planned after ADR-0062 |
-| `EventSystem` / `Selectable` navigation | Flutter's focus and `Shortcuts`/`Actions`; keys bound to a game action reach the game first (above) |
+| `EventSystem` / `Selectable` navigation, the Input System's UI module | Flutter's focus; `setMenuOpen` turns the controller into focus keys (above) |
+| Switching the player's action map off while a menu is open | `setMenuOpen(true)`: the game's input gets nothing |
 
 The rest of this page is the reference for models and world labels:
 blueprint §10 and ADR-0008, implemented by M3-13. Two rules decide how

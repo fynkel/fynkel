@@ -15,6 +15,7 @@ import 'application.dart';
 import 'error_report.dart';
 import 'heap_probe.dart';
 import 'input_capture.dart';
+import 'menu_navigation.dart';
 import 'percentiles.dart';
 import 'viewport.dart';
 import 'viewport_controller.dart';
@@ -480,12 +481,77 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     final user = widget.onKeyEvent?.call(node, event);
     if (user == KeyEventResult.handled) return user!;
+    // An open menu: the keys go on up the focus chain (the app's arrow and
+    // activate shortcuts), never to the game.
+    if (_menuOpen) return user ?? KeyEventResult.ignored;
     return input.handleKey(event) ? KeyEventResult.handled : (user ?? KeyEventResult.ignored);
   }
 
   void _onPointer(PointerEvent event, Offset physical) {
     widget.onPointerEvent?.call(event, physical);
+    if (_menuOpen) return;
     input.handlePointer(event, MediaQuery.devicePixelRatioOf(context));
+  }
+
+  // ------------------------------------------------ menus (ADR-0062 amendment 1)
+
+  bool _menuOpen = false;
+  final MenuNavigator _navigator = MenuNavigator();
+
+  /// The viewport's focus node (the widget's, or one the view owns): left
+  /// out of focus traversal while a menu is open, so the arrows move
+  /// between the menu's controls and never onto the full-screen view.
+  FocusNode get _viewFocus => widget.focusNode ?? (_ownedViewFocus ??= FocusNode(debugLabel: 'FynkelViewport'));
+  FocusNode? _ownedViewFocus;
+  bool? _viewSkippedTraversal;
+
+  /// Whether a menu has the controls ([setMenuOpen]).
+  bool get menuOpen => _menuOpen;
+
+  /// Says a menu is open (or closed). While open, the game's input gets
+  /// nothing — no keys, gamepad, mouse or touch — and the controller drives
+  /// Flutter's focus: the D-pad and the left stick are the arrow keys (a
+  /// held direction repeats), south presses the focused control
+  /// (`gameButtonA`), east, menu and options arrive as `gameButtonB`,
+  /// `gameButtonStart` and `gameButtonSelect` for the app to treat as back
+  /// (in [FynkelGameView.onKeyEvent] or a `Shortcuts`). Opening and closing
+  /// both release everything the game held. Independent of [setPaused]: a
+  /// menu over a running world is fine.
+  void setMenuOpen(bool open) {
+    if (open == _menuOpen) return;
+    setState(() => _menuOpen = open);
+    _navigator.releaseAll();
+    input.reset();
+    input.divert = open ? _navigated : null;
+    final view = _viewFocus;
+    if (open) {
+      unawaited(capturePointer(false));
+      _viewSkippedTraversal = view.skipTraversal;
+      view.skipTraversal = true;
+    } else {
+      view.skipTraversal = _viewSkippedTraversal ?? false;
+      _viewSkippedTraversal = null;
+      // The keys are the game's again: give the view the focus back from
+      // the menu (whose controls are about to go).
+      final primary = FocusManager.instance.primaryFocus;
+      if (primary == null || primary.ancestors.contains(_overlayFocus) || primary == _overlayFocus) {
+        view.requestFocus();
+      }
+    }
+  }
+
+  void _navigated(InputEvent e) {
+    // A direction while the focus is outside the menu (on the view itself)
+    // first puts it on the menu's first control.
+    final primary = FocusManager.instance.primaryFocus;
+    if (primary == null || !(primary == _overlayFocus || primary.ancestors.contains(_overlayFocus))) {
+      final first = _overlayFocus.traversalDescendants.where((n) => n.canRequestFocus).firstOrNull;
+      if (first != null && e.phase == InputPhase.down) {
+        first.requestFocus();
+        return;
+      }
+    }
+    _navigator.handle(e);
   }
 
   ViewportState? _seenState;
@@ -639,6 +705,8 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       controller.addListener(_onViewportChanged);
     }
     if (oldWidget.input != widget.input) {
+      (oldWidget.input ?? _ownedInput)?.divert = null;
+      if (_menuOpen) input.divert = _navigated;
       FynkelInputChannel.detach(oldWidget.input ?? _ownedInput ?? input);
       if (widget.input != null) _ownedInput = null;
       FynkelInputChannel.attach(input);
@@ -670,6 +738,9 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     _statsTimer?.cancel();
     _installTimings(false);
     unawaited(_heapProbe?.close());
+    _navigator.releaseAll();
+    input.divert = null;
+    _ownedViewFocus?.dispose();
     FynkelInputChannel.detach(input);
     if (_pointerCaptured) unawaited(FynkelInputChannel.capturePointer(false));
     controller.removeListener(_onViewportChanged);
@@ -845,7 +916,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   Widget build(BuildContext context) {
     final viewport = FynkelViewport(
       controller: controller,
-      focusNode: widget.focusNode,
+      focusNode: _viewFocus,
       autofocus: widget.autofocus,
       onKeyEvent: _onKey,
       onPointerEvent: _onPointer,
@@ -854,7 +925,16 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       resolutionScale: widget.resolutionScale,
     );
     final hud = widget.overlay;
-    final overlay = hud == null ? null : Focus(focusNode: _overlayFocus, onKeyEvent: _onOverlayKey, child: hud);
+    // An open menu is navigated as on a TV (Flutter's directional mode):
+    // up/down move between controls, left/right adjust a slider. Always
+    // wrapped, so opening a menu never rebuilds the overlay's state.
+    final media = MediaQuery.of(context);
+    final overlay = hud == null
+        ? null
+        : MediaQuery(
+            data: media.copyWith(navigationMode: _menuOpen ? NavigationMode.directional : media.navigationMode),
+            child: Focus(focusNode: _overlayFocus, onKeyEvent: _onOverlayKey, child: hud),
+          );
     final panic = _panic;
     if (panic != null) {
       return Stack(fit: StackFit.expand, children: [viewport, _Stopped(panic)]);
