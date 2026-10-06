@@ -1,0 +1,72 @@
+// UI Demo: the game behind the app and the tests.
+//
+// One `World` on the native runtime, the project's startup scene loaded
+// into it from the cooked cache (`.fynkel/cache`, written by `fynkel cook`;
+// `fynkel run` and `fynkel test` cook first, a test calls `cookProject`,
+// and on a device lib/main.dart unpacks the copy the app bundles),
+// and every `@FynkelBehaviour` class of this package and of the Fynkel
+// packages it depends on registered (`registerPackages`) so the scene's
+// behaviour components become live Dart objects. The host
+// (lib/main.dart, or a test) owns the loop and calls [frame] once per frame
+// (ADR-0007/0008).
+
+import 'package:fynkel/gameplay.dart';
+import 'package:fynkel/advanced.dart' show NativeLibrary;
+
+import '../generated/packages.g.dart';
+import 'hud_model.dart';
+
+class Game {
+  Game._(this.world, this.report);
+
+  final World world;
+
+  /// What `World.loadProject` found: scene, entities, attached behaviours
+  /// and any load diagnostics (warnings such as an unregistered type).
+  final LoadReport report;
+
+  /// Loads the project at [projectDir] (the directory holding
+  /// `fynkel.project.json`) from its cooked cache ([cacheDir], default
+  /// `<projectDir>/.fynkel/cache`), and the user's `settings.json` at
+  /// [settingsPath] when given (the app passes the platform's
+  /// application-support directory; a test leaves it out for a memory
+  /// store). Throws when the cache is missing or
+  /// stale (`FYN-R0001`/`R0002`: run `fynkel cook`) or the scene does not
+  /// load; warnings stay in [report].diagnostics.
+  static Game load(String projectDir, {String? cacheDir, String? settingsPath, NativeLibrary? library}) {
+    final world = World.create(library: library);
+    registerPackages(world.registry);
+    // The HUD's observable model: behaviours write it, widgets bind to it.
+    world.context.install(HudModel());
+    final warnings = <LoadDiagnostic>[];
+    world.onLoadDiagnostics = warnings.addAll;
+    final report = world.loadProject(projectDir, cacheDir: cacheDir);
+    if (!report.ok) {
+      world.dispose();
+      throw StateError('$projectDir did not load:\n${report.diagnostics.join('\n')}');
+    }
+    // The user's settings (volumes, quality, rebinds) read once here and
+    // written on every `settings.update`/`edit`; the rebinds sit over the
+    // project's actions from now on.
+    if (settingsPath != null) world.useSettings(SettingsStore.open(settingsPath, world: world));
+    return Game._(world, report);
+  }
+
+  /// The user's settings service (`world.context.settings`).
+  SettingsService get settings => world.context.settings;
+
+  /// The HUD's fields (`Mover.update` writes them; lib/main.dart binds them).
+  HudModel get hud => world.context.service<HudModel>();
+
+  /// Scene flow: `scenes.transition(id)` loads at the next frame.
+  SceneManager get scenes => world.scenes;
+
+  /// One host frame of [dtSeconds]: fixed ticks (behaviour `fixedUpdate`,
+  /// native step, `afterPhysics`), then `update`/`lateUpdate`.
+  FramePlan frame(double dtSeconds) => world.frame(dtSeconds);
+
+  void dispose() {
+    hud.dispose();
+    world.dispose();
+  }
+}

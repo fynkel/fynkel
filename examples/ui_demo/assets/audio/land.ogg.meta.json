@@ -1,0 +1,10 @@
+{
+  "$schema": "https://fynkel.dev/schemas/meta.schema.json",
+  "formatVersion": 2,
+  "id": "812582a6-33a6-4209-b913-7fc21e511875",
+  "name": "land.ogg",
+  "importer": "fynkel.audio",
+  "importerVersion": 1,
+  "settings": {},
+  "subAssets": {}
+}

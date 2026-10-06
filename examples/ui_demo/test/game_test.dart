@@ -1,0 +1,223 @@
+// The project loads headlessly and its behaviours run: no window, no GPU.
+// `flutter test` runs this; `fynkel test --headless` runs the same scene on
+// the Rust host without the Dart behaviours (`--input test/walk.input.json`
+// replays the recording there too). The world reads the cooked cache only,
+// so the test cooks the project first (`cookProject` runs the `fynkel` CLI;
+// a warm cache costs milliseconds).
+
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fynkel/gameplay.dart';
+import 'package:fynkel/testing.dart';
+import 'package:ui_demo/game/game.dart';
+import 'package:ui_demo/game/hud_model.dart';
+import 'package:ui_demo/game/mover.dart';
+import 'package:ui_demo/game/spinner.dart';
+
+void main() {
+  final projectDir = Directory.current.path;
+  setUpAll(() => cookProject(projectDir));
+
+  test('the startup scene loads and the cube spins', () {
+    final game = Game.load(projectDir);
+    addTearDown(game.dispose);
+
+    expect(game.report.ok, isTrue);
+    expect(game.report.diagnostics, isEmpty, reason: 'no load warnings expected');
+    expect(game.report.behavioursAttached, 2);
+    final spinner = game.world.behaviours.whereType<Spinner>().single;
+    expect(spinner.speed, 1.5, reason: 'authored in assets/scenes/main.scene.json');
+
+    for (var i = 0; i < 30; i++) {
+      game.frame(1 / 60);
+    }
+    expect(game.world.tick, greaterThan(0));
+    expect(spinner.angle, closeTo(1.5 * game.world.tick / 60, 1e-9));
+  });
+
+  test('a recorded input stream walks the cube', () {
+    final game = Game.load(projectDir);
+    addTearDown(game.dispose);
+    final mover = game.world.behaviours.whereType<Mover>().single;
+    final cube = mover.gameObject;
+    game.frame(1 / 60); // the behaviours are created on the first frame
+    final start = cube.transform.position;
+
+    // test/walk.input.json: W for five frames, D for four (overlapping), a
+    // Space press during a 50 ms frame (three catch-up ticks: one jump),
+    // the left stick held left for two frames, then — once the jump has
+    // landed — the touch overlay's jump button, a reset (focus lost) and
+    // idle frames until that jump lands too.
+    final recording = loadInputRecording('$projectDir/test/walk.input.json');
+    var airborneTicks = 0;
+    final plans = recording.replay(game.world, fixedUpdate: (_) {
+      if (mover.airTime != null) airborneTicks++;
+    });
+    expect(plans, hasLength(recording.frames.length));
+
+    final end = cube.transform.position;
+    const step = 2.0 / 60; // metres per tick at the authored speed
+    expect(end.z, closeTo(start.z - 5 * step, 1e-3), reason: 'W held for five ticks; forward is -z');
+    expect(end.x, closeTo(start.x + (6 - 2) * step, 1e-3),
+        reason: 'D held for six ticks (the 50 ms frame runs three), the stick left for two');
+    expect(mover.jumps, 2, reason: 'one press per press, however many ticks a frame runs');
+    expect(airborneTicks, inInclusiveRange(58, 61), reason: 'two jumps of ${Mover.jumpDuration} s at 60 ticks/s');
+    expect(mover.airTime, isNull);
+    expect(end.y, closeTo(start.y, 1e-6), reason: 'landed');
+    expect(game.world.input.held('move'), isFalse, reason: 'the reset released everything');
+  });
+
+  test('the mover writes the HUD model; a label follows the cube', () {
+    final game = Game.load(projectDir);
+    addTearDown(game.dispose);
+    final hud = game.hud;
+    expect(game.world.context.service<HudModel>(), same(hud));
+    var positionChanges = 0, jumpChanges = 0;
+    hud.position.addListener(() => positionChanges++);
+    hud.jumps.addListener(() => jumpChanges++);
+    game.frame(1 / 60);
+    expect(hud.position.value, game.world.find('Cube')!.transform.position, reason: 'written from update');
+    expect(positionChanges, 1);
+    game.frame(1 / 60);
+    expect(positionChanges, 1, reason: 'nothing moved: no notification');
+    final recording = loadInputRecording('$projectDir/test/walk.input.json');
+    recording.replay(game.world);
+    expect(hud.jumps.value, 2);
+    expect(jumpChanges, 2, reason: 'once per jump, not per frame');
+    expect(hud.airborne.value, isFalse);
+    expect(positionChanges, greaterThan(1));
+
+    // The projection view (docs/hud.md) places a point above the cube for
+    // the scene's camera — what a `WorldLabel` in lib/main.dart sits at.
+    final anchor = game.world.projection.add(game.world.find('Cube')!, offset: const Vec3(0, 0.9, 0));
+    game.world.projection.setViewport(1280, 720);
+    expect(game.world.projection.update(), 1);
+    expect(anchor.visible, isTrue, reason: '$anchor');
+    expect(anchor.x, inInclusiveRange(0, 1280));
+    expect(anchor.y, inInclusiveRange(0, 720));
+    expect(anchor.depth, greaterThan(0));
+  });
+
+  test('native components are typed from Dart: read, change, add, remove', () {
+    final game = Game.load(projectDir);
+    addTearDown(game.dispose);
+    game.frame(1 / 60);
+    final cube = game.world.behaviours.whereType<Mover>().single.gameObject;
+    final sun = game.world.attach(game.world.allEntities().firstWhere((e) => game.world.nameOfEntity(e) == 'Sun'));
+
+    // Read what the scene authored, typed.
+    final mesh = cube.get<MeshRenderer>()!;
+    expect(mesh.visible, isTrue);
+    expect(cube.has<Camera>(), isFalse);
+    expect(sun.get<DirectionalLight>()!.intensity, greaterThan(0));
+
+    // Change a value: a command at the next tick, readable now.
+    cube.set(mesh.copyWith(visible: false));
+    expect(cube.get<MeshRenderer>()!.visible, isFalse);
+    sun.set(sun.get<DirectionalLight>()!.copyWith(intensity: 0));
+    game.frame(1 / 60);
+    expect(game.world.componentsOf(cube.entity).whereType<MeshRenderer>().single.visible, isFalse);
+    expect(game.world.componentsOf(sun.entity).whereType<DirectionalLight>().single.intensity, 0);
+
+    // A second cube spawned from Dart with the same mesh and material, and
+    // a light on it; the sun's light removed.
+    final twin = game.world.spawn(name: 'Twin', transform: cube.localTransform.copyWith(position: const Vec3(2, 0, 0)))
+      ..add(mesh)
+      ..add(const PointLight(color: Vec3(1, 0.6, 0.2), intensity: 400, range: 8, cullingMask: 0xffffffff));
+    sun.remove<DirectionalLight>();
+    game.frame(1 / 60); // spawns
+    game.frame(1 / 60); // applies the twin's components
+    expect(game.world.componentsOf(twin.entity).map((c) => c.runtimeType), [Pose, Name, MeshRenderer, PointLight]);
+    expect(sun.has<DirectionalLight>(), isFalse);
+  });
+
+  test('a jump plays the cube\'s sound and a landing the land clip', () {
+    final game = Game.load(projectDir);
+    addTearDown(game.dispose);
+    final world = game.world;
+    // assets/audio/*.ogg, imported by the cook; no output device in a test
+    // — the null backend mixes nothing but counts every voice like a
+    // device would (docs/audio.md).
+    expect(game.report.audio.sounds, 1, reason: 'jump.ogg, named by the scene; land.ogg loads on its first play');
+    expect(game.report.audio.device, isFalse);
+    final mover = world.behaviours.whereType<Mover>().single;
+    game.frame(1 / 60);
+    final cube = mover.gameObject;
+    expect(cube.get<AudioSource>()!.clip.isNone, isFalse, reason: 'the scene puts the jump clip on the cube');
+    expect(mover.land.isNone, isFalse, reason: 'the land clip is an exposed field, authored in the scene');
+    final heard = cube.addBehaviour(_Heard());
+
+    final before = world.audio.stats;
+    loadInputRecording('$projectDir/test/walk.input.json').replay(world);
+    for (var i = 0; i < 30; i++) {
+      game.frame(1 / 60); // both clips are shorter than 0.2 s
+    }
+    final after = world.audio.stats;
+    expect(after.started - before.started, 4, reason: 'two take-offs, two landings');
+    expect(after.ended - before.ended, 4);
+    expect(after.clips - before.clips, 1, reason: 'land.ogg, registered from the cache by the first play');
+    expect(after.voices, 0, reason: 'nothing playing any more');
+    expect(heard.ended, 2, reason: "the cube's own source raises PlaybackEnded; a one-shot does not");
+    expect(cube.audio.isPlaying, isFalse);
+  });
+
+  test('the crate falls onto the floor and the cube pushes it', () {
+    final game = Game.load(projectDir);
+    addTearDown(game.dispose);
+    final world = game.world;
+    final crate = world.attach(world.allEntities().firstWhere((e) => world.nameOfEntity(e) == 'Crate'));
+    final landings = crate.addBehaviour(_Landings());
+    final cube = world.behaviours.whereType<Mover>().single.gameObject;
+    expect(game.report.layersAndTags.layers, ['default', 'props']);
+
+    for (var i = 0; i < 180; i++) {
+      game.frame(1 / 60);
+    }
+    expect(crate.get<RigidBody>()!.bodyType, BodyType.dynamic);
+    expect(crate.transform.position.y, closeTo(0.5, 0.05), reason: 'resting on the floor');
+    expect(landings.floorHits, greaterThanOrEqualTo(1));
+    expect(landings.lastImpulse.y, greaterThan(0), reason: 'the floor pushed the crate up');
+    final rest = crate.bodyState()!;
+    expect(rest.sleeping, isTrue, reason: '$rest');
+    expect(cube.bodyState(), isNotNull, reason: 'the cube is a kinematic body');
+
+    // A ray from above finds the crate on the `props` layer, then the floor.
+    final from = Vec3(crate.transform.position.x, 5, crate.transform.position.z);
+    final hits = world.raycastAll(from, const Vec3(0, -1, 0));
+    expect(hits.map((h) => world.nameOfEntity(h.entity)), ['Crate', 'Floor']);
+    expect(world.raycast(from, const Vec3(0, -1, 0), mask: world.layerMask(['default']))!.entity, isNot(crate.entity));
+
+    // Teleport the crate in front of the cube and walk into it: the
+    // kinematic cube pushes the dynamic crate along -z.
+    crate.teleport(Vec3(cube.transform.position.x, 0.5, cube.transform.position.z - 1.2));
+    game.frame(1 / 60);
+    final before = crate.transform.position.z;
+    // W held for a second, as a recording: the first frame presses it.
+    InputRecording([
+      for (var i = 0; i < 60; i++)
+        RecordedFrame(1 / 60, i == 0 ? const [InputEvent.down(InputDevice.keyboard, 'W')] : const []),
+    ]).replay(world);
+    expect(crate.transform.position.z, lessThan(before - 0.3), reason: 'pushed');
+  });
+}
+
+/// Counts the sounds its object's source finished.
+class _Heard extends Behaviour {
+  int ended = 0;
+
+  @override
+  void onPlaybackEnded(PlaybackEnded event) => ended++;
+}
+
+/// Counts the crate's landings on the floor.
+class _Landings extends Behaviour {
+  int floorHits = 0;
+  Vec3 lastImpulse = Vec3.zero;
+
+  @override
+  void onCollisionEnter(Contact contact) {
+    if (world.nameOfEntity(contact.other(gameObject.entity)) == 'Floor') floorHits++;
+    lastImpulse = contact.impulseFor(gameObject.entity);
+  }
+}

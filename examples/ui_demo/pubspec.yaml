@@ -1,0 +1,47 @@
+name: ui_demo
+description: "UI Demo — a Fynkel game (created by `fynkel create`)."
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # The Fynkel Dart SDK; its native-assets build hook provides the runtime
+  # (ADR-0015: built from the checkout, or the prebuilt library of the
+  # runtime fynkel.lock.json pins).
+  fynkel:
+    path: ../../packages/fynkel
+  # The Flutter host: the 3D viewport widget and the game loop
+  # (FynkelGameView) over the same runtime.
+  fynkel_flutter:
+    path: ../../packages/fynkel_flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  # `fynkel codegen --project .` runs this through build_runner: every
+  # @FynkelBehaviour class → lib/generated/behaviours.g.dart + schemas/.
+  fynkel_generator:
+    path: ../../packages/fynkel_generator
+  build_runner: ^2.16.0
+
+flutter:
+  uses-material-design: true
+  # The cooked cache `fynkel cook` stages into fynkel_cache/, bundled so the
+  # app runs where it cannot see this directory (an iPhone, a shipped
+  # build); lib/main.dart unpacks it when FYNKEL_PROJECT is not on this
+  # machine.
+  assets:
+    - fynkel_cache/
+
+# The runtime's build hook reads this project: its fynkel.lock.json pins the
+# runtime, and `modules.strip` in fynkel.project.json leaves the modules it
+# turns off out of a runtime built from source (ADR-0029).
+hooks:
+  user_defines:
+    fynkel:
+      project: .

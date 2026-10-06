@@ -1,0 +1,10 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "573f4325-a176-4c4e-adbf-2cd92213895a",
+  "name": "Starter",
+  "shader": "fynkel.pbr@1",
+  "base_color": [0.9, 0.55, 0.2, 1.0],
+  "metallic": 0.0,
+  "roughness": 0.6
+}

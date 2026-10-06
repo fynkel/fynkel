@@ -1,0 +1,14 @@
+{
+  "$schema": "https://fynkel.dev/schemas/meta.schema.json",
+  "formatVersion": 2,
+  "id": "8cb6939a-20e7-4a32-9eba-36c029472615",
+  "name": "cube.glb",
+  "importer": "fynkel.gltf",
+  "importerVersion": 1,
+  "settings": {},
+  "subAssets": {
+    "mesh/Cube": "0f39648f-2142-5edd-a3d6-730d5f6bb869",
+    "material/Starter": "53423a82-0e6d-5bf8-bdc8-41580912f2fb",
+    "prefab": "85485574-2a35-5c32-b3d7-80f49a6a630d"
+  }
+}
