@@ -261,7 +261,9 @@ pub struct ExtractRenderer {
     local_light_buffer: wgpu::Buffer,
     local_light_capacity: usize,
     light_index: spatial::SpatialIndex,
-    light_candidates: Vec<usize>,
+    /// Each record's light list from the frame before, by its place among
+    /// the frame's records (`lights::LightCache`).
+    light_cache: lights::LightCache,
     /// One light list per instance, in the instance buffer's order — the
     /// storage array the mesh stages index with `Instance.flags[2]`.
     light_lists: Vec<[u32; 12]>,
@@ -741,7 +743,7 @@ impl ExtractRenderer {
             local_light_buffer,
             local_light_capacity,
             light_index: Default::default(),
-            light_candidates: Vec::new(),
+            light_cache: Default::default(),
             light_lists: Vec::new(),
             light_list_buffer,
             light_list_capacity,

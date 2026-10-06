@@ -344,7 +344,12 @@ impl ExtractRenderer {
                 radius: l.position[3],
             })
         });
-        lights.sort_by(|a, b| a.0.total_cmp(&b.0));
+        // Only a pool that drops lights needs the nearest first; otherwise
+        // the extract's order stands, so a moving camera does not reorder
+        // the pool and invalidate every kept light list.
+        if lights.len() > self.light_budget.pool {
+            lights.sort_by(|a, b| a.0.total_cmp(&b.0));
+        }
         let n_lights = lights.len().min(self.light_budget.pool);
         packed.resize(n_lights, GpuLight::default());
         masks.resize(n_lights, u32::MAX);
@@ -357,6 +362,11 @@ impl ExtractRenderer {
             radius: l.position[3],
         }));
         self.light_index.update(&bounds);
+        self.light_cache.begin(
+            &packed[..n_lights],
+            &masks[..n_lights],
+            self.light_budget.per_object,
+        );
         stats.lights = n_lights as u32;
         stats.lights_dropped = (lights.len() - n_lights) as u32;
 
@@ -669,21 +679,19 @@ impl ExtractRenderer {
                 // unlit material ignores every light.
                 let mut light_list = [0u32; 12];
                 if in_view && n_lights > 0 && instance.flags[1] < 0.5 {
-                    self.light_index
-                        .overlaps(&sphere, &mut self.light_candidates);
-                    stats.light_candidates += self.light_candidates.len() as u32;
-                    let (list, count, overflow) = assign_lights(
+                    let lit = self.light_cache.lights(
+                        visibility_base + ri,
+                        &sphere,
+                        r.layer_bit,
+                        &mut self.light_index,
                         &packed[..n_lights],
                         &masks[..n_lights],
-                        r.layer_bit,
-                        &sphere,
                         &mut self.light_scratch,
-                        self.light_budget.per_object,
-                        &self.light_candidates,
                     );
-                    light_list = list;
-                    stats.lights_max_per_object = stats.lights_max_per_object.max(count as u32);
-                    stats.lights_overflow += overflow as u32;
+                    stats.light_candidates += lit.candidates;
+                    light_list = lit.list;
+                    stats.lights_max_per_object = stats.lights_max_per_object.max(lit.count);
+                    stats.lights_overflow += lit.overflow as u32;
                 }
                 if blend {
                     let origin = world.w_axis.truncate();

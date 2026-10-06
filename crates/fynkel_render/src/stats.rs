@@ -13,7 +13,8 @@ pub struct FrameStats {
     pub culled: u32,
     /// Sphere hierarchy nodes tested by camera and shadow queries.
     pub visibility_nodes: u32,
-    /// Spatial light candidates examined across shaded objects this frame.
+    /// Spatial light candidates examined across shaded objects this frame
+    /// (a kept lookup counts its candidates again).
     pub light_candidates: u32,
     /// Records the scene camera's `culling_mask` leaves out (ADR-0020):
     /// neither drawn nor casting a shadow.

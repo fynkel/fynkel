@@ -82,6 +82,155 @@ pub(crate) fn assign_lights(
     (list, scratch.len(), overflow)
 }
 
+/// One record's light list and what it was computed from.
+#[derive(Clone, Copy)]
+pub(crate) struct CachedLights {
+    pub list: [u32; 12],
+    pub count: u32,
+    pub overflow: bool,
+    pub candidates: u32,
+}
+
+/// What is kept for one record: the pool's lights that can reach a sphere
+/// a little larger than its bounds (the spatial lookup, the expensive part),
+/// and the list last chosen from them for exact bounds and a layer.
+#[derive(Default)]
+struct Kept {
+    seen: u64,
+    query: Option<Sphere>,
+    candidates: Vec<usize>,
+    chosen: Option<(Sphere, u32, CachedLights)>,
+}
+
+/// Light lists kept across frames. A list is a function of the pool, the
+/// per-object budget, the object's bounds and its layer alone. Kept work is
+/// trusted only from the frame before, and only where no light that changed
+/// since then reaches it, before or after the change; the lookup's
+/// candidates hold while the bounds stay inside the sphere they were found
+/// for, and the choice among them is made again unless the bounds and layer
+/// are exactly the same.
+#[derive(Default)]
+pub(crate) struct LightCache {
+    entries: Vec<Kept>,
+    pool: Vec<GpuLight>,
+    masks: Vec<u32>,
+    limit: usize,
+    frame: u64,
+    /// Where the lights that changed this frame reached, before and after.
+    changed: Vec<Sphere>,
+}
+
+/// Beyond this many changed lights a frame starts over instead.
+const CHANGED_LIGHTS: usize = 32;
+/// How much larger than the bounds the kept lookup is: a quarter of the
+/// radius and a quarter metre, so a turning or slowly moving object keeps it.
+const LOOKUP_SLACK: (f32, f32) = (1.25, 0.25);
+
+fn reach(l: &GpuLight) -> Sphere {
+    Sphere {
+        center: Vec3::new(l.position[0], l.position[1], l.position[2]),
+        radius: l.position[3],
+    }
+}
+
+fn touches(a: &Sphere, b: &Sphere) -> bool {
+    a.center.distance(b.center) <= a.radius + b.radius
+}
+
+impl LightCache {
+    /// Compares this frame's pool and budget with the last frame's.
+    pub fn begin(&mut self, pool: &[GpuLight], masks: &[u32], limit: usize) {
+        self.frame += 1;
+        self.changed.clear();
+        let comparable =
+            limit == self.limit && pool.len() == self.pool.len() && masks == self.masks.as_slice();
+        let mut fresh = !comparable;
+        if comparable {
+            for (old, new) in self.pool.iter().zip(pool) {
+                if bytemuck::bytes_of(old) != bytemuck::bytes_of(new) {
+                    if self.changed.len() >= 2 * CHANGED_LIGHTS {
+                        fresh = true;
+                        break;
+                    }
+                    self.changed.push(reach(old));
+                    self.changed.push(reach(new));
+                }
+            }
+        }
+        if fresh {
+            // Nothing kept from an earlier frame is trusted (`seen`).
+            self.frame += 1;
+            self.changed.clear();
+            self.masks.clear();
+            self.masks.extend_from_slice(masks);
+            self.limit = limit;
+        }
+        self.pool.clear();
+        self.pool.extend_from_slice(pool);
+    }
+
+    /// `slot`'s light list for `sphere` and `layer`: kept, chosen again from
+    /// kept candidates, or looked up in `index` and chosen.
+    #[allow(clippy::too_many_arguments)]
+    pub fn lights(
+        &mut self,
+        slot: usize,
+        sphere: &Sphere,
+        layer: u32,
+        index: &mut spatial::SpatialIndex,
+        pool: &[GpuLight],
+        masks: &[u32],
+        scratch: &mut Vec<(f32, u32)>,
+    ) -> CachedLights {
+        if self.entries.len() <= slot {
+            self.entries.resize_with(slot + 1, Kept::default);
+        }
+        let frame = self.frame;
+        let kept = &mut self.entries[slot];
+        let current = kept.seen + 1 == frame || kept.seen == frame;
+        let holds = kept.query.is_some_and(|q| {
+            current
+                && q.center.distance(sphere.center) + sphere.radius <= q.radius
+                && !self.changed.iter().any(|c| touches(c, &q))
+        });
+        kept.seen = frame;
+        if !holds {
+            let query = Sphere {
+                center: sphere.center,
+                radius: sphere.radius * LOOKUP_SLACK.0 + LOOKUP_SLACK.1,
+            };
+            index.overlaps(&query, &mut kept.candidates);
+            kept.query = Some(query).filter(|q| q.is_finite());
+            return choose(kept, sphere, layer, pool, masks, scratch, self.limit);
+        }
+        match kept.chosen {
+            Some((s, l, chosen)) if s == *sphere && l == layer => chosen,
+            _ => choose(kept, sphere, layer, pool, masks, scratch, self.limit),
+        }
+    }
+}
+
+fn choose(
+    kept: &mut Kept,
+    sphere: &Sphere,
+    layer: u32,
+    pool: &[GpuLight],
+    masks: &[u32],
+    scratch: &mut Vec<(f32, u32)>,
+    limit: usize,
+) -> CachedLights {
+    let (list, count, overflow) =
+        assign_lights(pool, masks, layer, sphere, scratch, limit, &kept.candidates);
+    let chosen = CachedLights {
+        list,
+        count: count as u32,
+        overflow,
+        candidates: kept.candidates.len() as u32,
+    };
+    kept.chosen = Some((*sphere, layer, chosen));
+    chosen
+}
+
 /// The per-instance data for a material at `world`.
 /// Where an extra world's light stands in the frame (`transform`: none for
 /// the main extract's, which is left bit for bit as it is): its position,
@@ -112,6 +261,91 @@ pub(crate) fn place_light(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whatever moves, kept lists are the lists a fresh assignment over
+    /// the whole pool gives.
+    #[test]
+    fn kept_light_lists_match_a_fresh_assignment_frame_after_frame() {
+        let mut cache = LightCache::default();
+        let mut index = spatial::SpatialIndex::default();
+        let mut scratch = Vec::new();
+        let mut fresh_scratch = Vec::new();
+        let mut seed = 7u32;
+        let mut rand = move || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32
+        };
+        let mut pool: Vec<GpuLight> = (0..40)
+            .map(|_| GpuLight {
+                position: [rand() * 40.0, 3.0, rand() * 40.0, 4.0 + rand() * 8.0],
+                color: [rand() * 300.0, rand() * 300.0, rand() * 300.0, 0.0],
+                ..Default::default()
+            })
+            .collect();
+        let masks: Vec<u32> = (0..40)
+            .map(|i| if i % 7 == 0 { 2 } else { u32::MAX })
+            .collect();
+        let mut objects: Vec<(Sphere, u32)> = (0..120)
+            .map(|i| {
+                (
+                    Sphere {
+                        center: Vec3::new(rand() * 40.0, rand() * 2.0, rand() * 40.0),
+                        radius: 0.3 + rand(),
+                    },
+                    if i % 5 == 0 { 2 } else { 1 },
+                )
+            })
+            .collect();
+        let mut hits = 0;
+        for frame in 0..60 {
+            // Objects drift (a few by more than the slack), one light walks,
+            // now and then a layer changes and once the pool shrinks.
+            for (n, (s, layer)) in objects.iter_mut().enumerate() {
+                if n % 3 == frame % 3 {
+                    s.center.x += if n % 11 == 0 { 0.9 } else { 0.01 };
+                }
+                if frame == 30 && n % 13 == 0 {
+                    *layer ^= 3;
+                }
+            }
+            pool[5].position[0] += 0.5;
+            if frame == 45 {
+                pool.truncate(35);
+            }
+            let n = pool.len();
+            let bounds: Vec<Sphere> = pool.iter().map(reach).collect();
+            index.update(&bounds);
+            cache.begin(&pool, &masks[..n], 4);
+            let all: Vec<usize> = (0..n).collect();
+            for (slot, (sphere, layer)) in objects.iter().enumerate() {
+                let kept = cache.lights(
+                    slot,
+                    sphere,
+                    *layer,
+                    &mut index,
+                    &pool,
+                    &masks[..n],
+                    &mut scratch,
+                );
+                let fresh = assign_lights(
+                    &pool,
+                    &masks[..n],
+                    *layer,
+                    sphere,
+                    &mut fresh_scratch,
+                    4,
+                    &all,
+                );
+                assert_eq!(
+                    (kept.list, kept.count as usize, kept.overflow),
+                    fresh,
+                    "frame {frame} slot {slot}"
+                );
+                hits += usize::from(kept.candidates as usize != n);
+            }
+        }
+        assert!(hits > 0);
+    }
     #[test]
     fn budget_selection_is_stable_respects_masks_and_reports_overflow() {
         assert!(LightBudget {
