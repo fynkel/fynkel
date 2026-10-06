@@ -478,6 +478,7 @@ pub fn strip_description(description: &mut SceneDescription) {
 /// volumes are taken out; the stage's own take their place.
 pub fn strip(extract: &mut Extract) {
     extract.camera = None;
+    extract.cameras.clear();
     extract.directional_lights.clear();
     extract.point_lights.clear();
     extract.spot_lights.clear();

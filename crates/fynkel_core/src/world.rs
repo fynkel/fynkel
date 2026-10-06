@@ -270,6 +270,10 @@ pub struct Extract {
     /// Every skinned mesh's palette, back to back (`ExtractMesh::skin`).
     pub joints: Vec<Mat4>,
     pub camera: Option<ExtractCamera>,
+    /// Every active camera, in record order (`camera` is the one the frame
+    /// draws through); a viewport may look through another (a game's
+    /// second camera in a panel, ADR-0062 amendment 1).
+    pub cameras: Vec<ExtractCamera>,
     pub directional_lights: Vec<ExtractDirectionalLight>,
     pub point_lights: Vec<ExtractPointLight>,
     pub spot_lights: Vec<ExtractSpotLight>,
@@ -1380,6 +1384,7 @@ impl World {
         out.spot_lights.clear();
         out.volumes.clear();
         out.camera = None;
+        out.cameras.clear();
         out.environment = None;
         let entities = if placeholders {
             &membership.entities
@@ -1466,6 +1471,11 @@ impl World {
                 }
             }
             if let Some(&c) = camera {
+                out.cameras.push(ExtractCamera {
+                    record,
+                    world,
+                    camera: c,
+                });
                 let better = match &out.camera {
                     Some(cur) => c.priority > cur.camera.priority,
                     None => true,

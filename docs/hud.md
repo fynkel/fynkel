@@ -48,6 +48,64 @@ the game, a drawer, a dialog) is ordinary Flutter. A game that wants its
 menus on their own route can push them with the navigator. The starter
 keeps everything in one overlay so the scene stays visible behind the menus.
 
+## 3D in the UI (`CameraView`)
+
+A `CameraView` is a widget that shows what one of the world's cameras
+sees, drawn every frame at the widget's size. It is Unity's camera with a
+Render Texture shown in a `RawImage`. Use it for a minimap, a model
+preview in an inventory, a rear-view mirror or a security-camera screen:
+
+```dart
+// A minimap: a camera high above the player, looking down.
+final minimap = world.edit(() {
+  final cam = world.spawn(name: 'Minimap camera', parent: player,
+      transform: Pose(position: const Vec3(0, 30, 0),
+                      rotation: Quat.axisAngle(Vec3.right, -math.pi / 2)));
+  cam.set(const Camera(projection: Projection.orthographic, orthoHeight: 40,
+                       priority: -1)); // below the main camera
+  return cam;
+});
+
+// Anywhere in the overlay:
+Positioned(right: 16, top: 16, width: 180, height: 180,
+  child: ClipOval(child: CameraView(world: world, camera: minimap)),
+)
+```
+
+* The camera is an ordinary scene camera, authored in the scene or made
+  in code. The main picture is drawn through the camera with the highest
+  `priority`, so give a panel's camera a **lower** priority than the main
+  one, or it takes over the screen.
+* Its `cullingMask` chooses what it draws. For a model preview, put the
+  model and a light on a layer that only the preview camera draws, such
+  as `preview`. Take that layer out of the main camera's mask and the main
+  lights' masks, and park the model anywhere (`model.layer = 'preview'`).
+  The scene's other lights and the sky still apply unless their masks
+  leave the layer out.
+* The panel uses the camera's pose from the frame, interpolated like the
+  main picture, so a camera that follows something moves as smoothly as
+  the game. It also uses the camera's projection and exposure.
+* While the camera is not there (destroyed, inactive or not created yet),
+  the panel keeps its last picture. It draws only while its route is
+  visible, takes taps (wrap it in a `GestureDetector` to turn a preview)
+  and never takes keyboard focus, so menus around it navigate as before.
+* **Cost**: every `CameraView` is a second full render of the scene each
+  frame, with shadows and effects, at the panel's size. A 180 × 180
+  minimap is cheap; a half-screen preview is not. `resolutionScale`
+  lowers its pixel count. A `controller:` of your own sets its quality
+  profile (`controller.quality = 'low'`) or light budget.
+* Under it, `FynkelViewportController.viewCamera = entity` draws any
+  viewport through one of the world's cameras (viewport ABI 16:
+  `fynkel_apple_viewport_set_view_camera`, which answers
+  `FYNKEL_APPLE_RENDER_NO_CAMERA` (-6) while the camera is missing).
+
+Tests: `packages/fynkel_flutter/test/camera_view_test.dart` (a twin of the
+fixture's main camera draws the main picture; turned, the panel follows
+and the game does not; a destroyed camera keeps the last picture; no
+focus), `platform/apple/tests/view_camera.rs` (by entity, following the
+frame pose, a missing camera, both render paths, exclusive with
+`set_view`).
+
 ## Input between the UI and the game
 
 * Keys reach the game's input (`world.input`, the project's actions)
@@ -120,6 +178,7 @@ model fields a screen binds to.
 | `Camera.WorldToScreenPoint` | `FynkelGameViewState.worldToScreen` (one-off), `ProjectedAnchor` (every frame) |
 | A world-space Canvas over a character (name tag, health bar) | `WorldLabel` / `ProjectedAnchor` in a `ProjectionLayer`; for hundreds of bars, `WorldMarks` + `ProjectedMarks` |
 | A world-space Canvas *in* the scene (a screen on a wall, in perspective) | not yet: ADR-0010's native `WorldCanvas`, planned after ADR-0062 |
+| A Camera with a Render Texture, shown in a `RawImage` (minimap, model preview) | `CameraView(world, camera:)`, the camera at a lower priority |
 | `EventSystem` / `Selectable` navigation, the Input System's UI module | Flutter's focus; `setMenuOpen` turns the controller into focus keys (above) |
 | Switching the player's action map off while a menu is open | `setMenuOpen(true)`: the game's input gets nothing |
 

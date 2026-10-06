@@ -13,7 +13,7 @@ import 'package:fynkel/advanced.dart' show EntityRef, FynkelEntity;
 
 import 'percentiles.dart';
 
-const viewportAbiVersion = 15;
+const viewportAbiVersion = 16;
 
 /// `fynkel_apple_viewport_render` result when the world pointer is null or
 /// the world is poisoned.
@@ -29,6 +29,11 @@ const renderAssetsUnavailable = -4;
 
 /// Device loss requires a new viewport and texture registration.
 const renderDeviceLost = -5;
+
+/// The viewport's view camera (`FynkelViewportController.viewCamera`, ABI
+/// 16) is not an active camera of the world rendered: nothing drawn, the
+/// last frame stays.
+const renderNoCamera = -6;
 
 final class ViewportStats extends Struct {
   @Uint64()
@@ -240,6 +245,11 @@ external void _setCamera(Pointer<Void> vp, Pointer<ViewportCamera> camera);
   assetId: _asset,
 )
 external int _setView(Pointer<Void> vp, Pointer<Float> world, Pointer<ViewCamera> camera);
+@Native<Int32 Function(Pointer<Void>, Uint64, Uint32, Uint32)>(
+  symbol: 'fynkel_apple_viewport_set_view_camera',
+  assetId: _asset,
+)
+external int _setViewCamera(Pointer<Void> vp, int world, int slot, int generation);
 @Native<Void Function(Pointer<Void>, Uint32)>(symbol: 'fynkel_apple_viewport_set_acquire_wait_us', assetId: _asset)
 external void _setAcquireWait(Pointer<Void> vp, int us);
 @Native<Void Function(Pointer<Void>, Pointer<Void>, Pointer<Void>)>(
@@ -401,6 +411,12 @@ class ViewportNative {
     } finally {
       calloc.free(c);
     }
+  }
+
+  /// Looks through the world's camera on [entity] (v16); null clears.
+  void setViewCamera(Pointer<Void> vp, EntityRef? entity) {
+    final e = entity ?? EntityRef.nil;
+    _setViewCamera(vp, e.world, e.slot, e.generation);
   }
 
   /// The viewport's own camera (v7): at [world] (16 floats, column-major)

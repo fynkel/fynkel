@@ -1,6 +1,6 @@
 //! Projected world anchors (blueprint §19.2d item 13, §10): the frame's
 //! camera and poses mapped into a viewport, the visibility flags, the
-//! explicit occlusion policy, the 64-anchor bound.
+//! explicit occlusion policy, the 4096-anchor bound.
 
 use fynkel_core::components::ComponentValue;
 use fynkel_core::schema::{ProjectedPointRecord, ProjectionAnchorRecord};

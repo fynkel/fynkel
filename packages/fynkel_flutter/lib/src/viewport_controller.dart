@@ -25,6 +25,7 @@ export 'viewport_native.dart'
         renderNoWorld,
         renderAssetsUnavailable,
         renderDeviceLost,
+        renderNoCamera,
         viewportAbiVersion;
 
 /// How the renderer learns that a frame's GPU work is complete.
@@ -268,12 +269,28 @@ class FynkelViewportController extends ChangeNotifier {
   ViewportView? get view => _view;
   set view(ViewportView? v) {
     _view = v;
+    _viewCamera = null;
     if (_viewport != nullptr) _applyView();
   }
 
   /// False when the last [view] had values that cannot draw (the previous
   /// one stays).
   bool get viewOk => _viewOk;
+
+  /// One of the rendered world's cameras this viewport looks through,
+  /// instead of the one the frame picks by priority (viewport ABI 16): a
+  /// game's second camera in a panel. Its pose is the frame's interpolated
+  /// one. While it is not an active camera of the world, [render] answers
+  /// [renderNoCamera] and the last picture stays. Setting it clears [view]
+  /// and the other way round; null gives the picture back to the world.
+  EntityRef? get viewCamera => _viewCamera;
+  EntityRef? _viewCamera;
+  set viewCamera(EntityRef? entity) {
+    if (entity == _viewCamera) return;
+    _viewCamera = entity;
+    _view = null;
+    if (_viewport != nullptr) _native!.setViewCamera(_viewport, entity);
+  }
 
   void _applyView() {
     final v = _view;
@@ -358,6 +375,7 @@ class FynkelViewportController extends ChangeNotifier {
         _applyCamera(cam);
       }
       if (_view != null) _applyView();
+      if (_viewCamera != null) native.setViewCamera(vp, _viewCamera);
       final id = await _channel.invokeMethod<int>('registerTexture', {
         'ctx': vp.address,
         'acquireFn': native.acquireFnAddress,

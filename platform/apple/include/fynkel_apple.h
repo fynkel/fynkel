@@ -1,4 +1,4 @@
-/* Fynkel macOS viewport ABI v15 (platform/apple). Pairs with fynkel.h: the
+/* Fynkel macOS viewport ABI v16 (platform/apple). Pairs with fynkel.h: the
  * same dylib exports both. See platform/apple/README.md for the contract.
  * v3 added the M3-16 instrumentation fields of FynkelAppleViewportStats; v4
  * fynkel_apple_viewport_debug_lines and fynkel_apple_viewport_read_frame (the
@@ -9,7 +9,9 @@
  * fynkel_apple_viewport_outline (the selection outline); v9
  * fynkel_apple_viewport_extra_worlds (other worlds drawn into the frame:
  * Prefab Mode in context, multi-scene editing); v10 no call changed: every
- * viewport shares one GPU device (ADR-0030 §4). */
+ * viewport shares one GPU device (ADR-0030 §4); v16
+ * fynkel_apple_viewport_set_view_camera (a viewport looks through one of the
+ * world's cameras, by entity: a game's second camera in a panel). */
 #ifndef FYNKEL_APPLE_H
 #define FYNKEL_APPLE_H
 
@@ -20,7 +22,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_APPLE_ABI_VERSION 15
+#define FYNKEL_APPLE_ABI_VERSION 16
 
 /* ABI 15: fynkel_apple_viewport_set_pipelined. With it on, _render extracts on
  * the calling thread and the rest of the frame (admission, prepare, encode,
@@ -59,6 +61,10 @@ enum FynkelAppleSyncMode {
 #define FYNKEL_APPLE_RENDER_ASSETS_UNAVAILABLE (-4)
 /* Device lost: unregister the texture and recreate the viewport. */
 #define FYNKEL_APPLE_RENDER_DEVICE_LOST (-5)
+/* The viewport's view camera (fynkel_apple_viewport_set_view_camera) is not
+ * an active camera of the world rendered: nothing drawn, the last frame
+ * stays. */
+#define FYNKEL_APPLE_RENDER_NO_CAMERA (-6)
 
 typedef struct FynkelAppleCamera {
   float eye[3];
@@ -160,6 +166,15 @@ typedef struct {
  * draw. Nothing in the world changes. Host-loop thread. */
 int32_t fynkel_apple_viewport_set_view(FynkelAppleViewport *vp, const float *world,
                                        const FynkelAppleViewCamera *camera);
+/* ABI 16: draws every frame of this viewport through the world's camera on
+ * entity (world, slot, generation) — its Camera component and the frame's
+ * interpolated pose — instead of the one the frame picks by priority. A
+ * game's second camera in a panel (a minimap, a model preview). While that
+ * entity is not an active camera, render answers FYNKEL_APPLE_RENDER_NO_CAMERA.
+ * The null entity clears it; it and fynkel_apple_viewport_set_view replace
+ * each other. Returns 0, or -1 for a NULL viewport. Host-loop thread. */
+int32_t fynkel_apple_viewport_set_view_camera(FynkelAppleViewport *vp, uint64_t world,
+                                              uint32_t slot, uint32_t generation);
 /* Maximum wait for GPU completion when no new image is ready, in microseconds.
  * Ready images are acquired immediately. Zero disables waiting. */
 void fynkel_apple_viewport_set_acquire_wait_us(const FynkelAppleViewport *vp, uint32_t us);

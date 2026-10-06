@@ -24,7 +24,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
 
 use fynkel_core::components::{Camera as SceneCamera, ExposureMode, Projection};
-use fynkel_core::{Extract, ExtractCamera};
+use fynkel_core::{Entity, Extract, ExtractCamera};
 use fynkel_native::FynkelWorld;
 use fynkel_render::{Assets, Camera, ExtractRenderer, FrameStats};
 use glam::Vec3;
@@ -114,6 +114,9 @@ pub struct Viewport {
     /// This viewport's own camera, drawn instead of the world's (the
     /// editor's Scene view on a running game, ADR-0021 P7 L5).
     view: Option<(glam::Mat4, SceneCamera)>,
+    /// One of the world's cameras this viewport looks through instead
+    /// (`fynkel_apple_viewport_set_view_camera`); exclusive with `view`.
+    view_camera: Option<Entity>,
     /// The render worker, once `set_pipelined` turned it on.
     pipeline: Option<Pipeline>,
     /// `renderer.placeholders`, readable while the worker has the renderer.
@@ -163,6 +166,7 @@ impl Viewport {
             renderer,
             extract: Extract::default(),
             view: None,
+            view_camera: None,
             pipeline: None,
             broken: OnceLock::new(),
         }
@@ -220,6 +224,48 @@ impl Viewport {
     /// the world's active camera; `None` hands the picture back to it.
     pub fn set_view(&mut self, view: Option<(glam::Mat4, SceneCamera)>) {
         self.view = view;
+        self.view_camera = None;
+    }
+
+    /// Draws every frame through the world's camera on `entity` (its pose
+    /// in the frame's extract) instead of the one the frame picks; `None`
+    /// hands the picture back. Replaces a [`Viewport::set_view`].
+    pub fn set_view_camera(&mut self, entity: Option<Entity>) {
+        self.view_camera = entity;
+        self.view = None;
+    }
+
+    pub fn view_camera(&self) -> Option<Entity> {
+        self.view_camera
+    }
+
+    /// The viewport's own camera into `extract`: a view matrix, or one of
+    /// the extract's cameras by entity. False when that camera is not in
+    /// it (nothing is drawn).
+    fn aim(
+        extract: &mut Extract,
+        view: Option<(glam::Mat4, SceneCamera)>,
+        view_camera: Option<Entity>,
+    ) -> bool {
+        if let Some((world, camera)) = view {
+            extract.camera = Some(ExtractCamera {
+                record: u32::MAX,
+                world,
+                camera,
+            });
+        }
+        if let Some(entity) = view_camera {
+            let found = extract
+                .cameras
+                .iter()
+                .find(|c| extract.records.get(c.record as usize).map(|r| r.entity) == Some(entity))
+                .copied();
+            match found {
+                Some(c) => extract.camera = Some(c),
+                None => return false,
+            }
+        }
+        true
     }
 
     pub fn view(&self) -> Option<(glam::Mat4, SceneCamera)> {
@@ -270,12 +316,9 @@ impl Viewport {
         let mut extract = state.spare.lock().unwrap().take().unwrap_or_default();
         let start = std::time::Instant::now();
         w.core().extract_into(&mut extract, self.placeholders);
-        if let Some((world, camera)) = self.view {
-            extract.camera = Some(ExtractCamera {
-                record: u32::MAX,
-                world,
-                camera,
-            });
+        if !Self::aim(&mut extract, self.view, self.view_camera) {
+            *state.spare.lock().unwrap() = Some(extract);
+            return FYNKEL_APPLE_RENDER_NO_CAMERA;
         }
         let extract_us = start.elapsed().as_micros() as u32;
         let assets = w.assets().cloned();
@@ -542,6 +585,11 @@ pub const FYNKEL_APPLE_RENDER_NO_WORLD: i32 = -2;
 /// new one to try again).
 pub const FYNKEL_APPLE_RENDER_BROKEN: i32 = -3;
 
+/// Returned by `fynkel_apple_viewport_render` when the viewport's view
+/// camera (`fynkel_apple_viewport_set_view_camera`) is not an active camera
+/// of the world rendered: nothing is drawn and the last frame stays.
+pub const FYNKEL_APPLE_RENDER_NO_CAMERA: i32 = -6;
+
 /// Runs a viewport call so a panic never crosses the C boundary (Rust
 /// aborts the process when one does): `None` for a NULL or broken
 /// viewport; a panic breaks the viewport and answers `None`.
@@ -604,8 +652,10 @@ fn panic_text(payload: Box<dyn std::any::Any + Send>) -> String {
 /// shares one GPU device, ADR-0030 §4 — no call changed; 11: a panic
 /// inside a call breaks the viewport instead of aborting the process —
 /// `FYNKEL_APPLE_RENDER_BROKEN`, `fynkel_apple_viewport_error`,
-/// `fynkel_apple_viewport_debug_panic`, foundation 4.3).
-pub const APPLE_ABI_VERSION: u32 = 15;
+/// `fynkel_apple_viewport_debug_panic`, foundation 4.3; …; 16:
+/// `fynkel_apple_viewport_set_view_camera`, a viewport looking through one
+/// of the world's cameras by entity — ADR-0062 amendment 1).
+pub const APPLE_ABI_VERSION: u32 = 16;
 
 /// Set in `fynkel_apple_viewport_acquire_presented`'s answer when another finished
 /// frame is queued behind the slot it names (the slot is the low byte).
@@ -821,24 +871,36 @@ unsafe fn render_world(
             renderer,
             extract,
             view,
+            view_camera,
             ..
         } = v;
+        // Through one of the world's cameras: extracted before admission,
+        // so a panel whose camera is gone takes no slot and keeps its last
+        // picture.
+        let mut extracted = None;
+        if view_camera.is_some() {
+            let start = std::time::Instant::now();
+            w.core().extract_into(extract, renderer.placeholders);
+            if !Viewport::aim(extract, None, *view_camera) {
+                return FYNKEL_APPLE_RENDER_NO_CAMERA;
+            }
+            extracted = Some(start.elapsed().as_micros() as u32);
+        }
         Viewport::render_frame(ring, renderer, |renderer| {
             // Asset selection and extraction happen only after admission. The
             // retained extract is overwritten from the latest world on retry.
             if let Some(assets) = w.assets() {
                 renderer.set_assets(Some(assets.clone()));
             }
-            let start = std::time::Instant::now();
-            w.core().extract_into(extract, renderer.placeholders);
-            if let Some((world, camera)) = *view {
-                extract.camera = Some(ExtractCamera {
-                    record: u32::MAX,
-                    world,
-                    camera,
-                });
-            }
-            let extract_us = start.elapsed().as_micros() as u32;
+            let extract_us = match extracted {
+                Some(us) => us,
+                None => {
+                    let start = std::time::Instant::now();
+                    w.core().extract_into(extract, renderer.placeholders);
+                    Viewport::aim(extract, *view, None);
+                    start.elapsed().as_micros() as u32
+                }
+            };
             let start = std::time::Instant::now();
             if let Some(timeout) = wait {
                 renderer.prepare_ready(ring.device(), ring.queue(), extract, timeout)?;
@@ -881,6 +943,32 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_camera(
             v.set_camera(cam);
         }
     });
+}
+
+/// Draws this viewport through the world's camera on the entity (`world`,
+/// `slot`, `generation`) — its `Camera` and the frame's interpolated pose —
+/// instead of the one the frame picks by priority: a game's second camera
+/// in a panel. While the entity is not an active camera, render answers
+/// [`FYNKEL_APPLE_RENDER_NO_CAMERA`]. The null entity clears it; it and
+/// `fynkel_apple_viewport_set_view` replace each other. Returns 0, or -1 for
+/// a NULL viewport.
+///
+/// # Safety
+/// `vp` must be NULL or a live viewport.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_set_view_camera(
+    vp: *mut Viewport,
+    world: u64,
+    slot: u32,
+    generation: u32,
+) -> i32 {
+    guard_mut(vp, |v| {
+        let e =
+            Entity::from_bits(world as u128 | (slot as u128) << 64 | (generation as u128) << 96);
+        v.set_view_camera((!e.is_null()).then_some(e));
+        0
+    })
+    .unwrap_or(-1)
 }
 
 /// A viewport's own camera (`fynkel_apple_viewport_set_view`): the scene
