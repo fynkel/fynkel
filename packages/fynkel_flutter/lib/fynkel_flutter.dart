@@ -18,6 +18,7 @@ export 'src/heap_probe.dart';
 export 'src/input_capture.dart';
 export 'src/menu_navigation.dart';
 export 'src/model_binding.dart';
+export 'src/projected_marks.dart';
 export 'src/projection_layer.dart';
 export 'src/touch_overlay.dart';
 export 'src/viewport.dart';

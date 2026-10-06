@@ -24,8 +24,10 @@ use crate::schema::{ProjectedPointRecord, ProjectionAnchorRecord};
 
 /// The most anchors one request projects; the rest come back
 /// [`PROJECTED_DROPPED`] with a `TOO_MANY_ANCHORS` diagnostic (blueprint
-/// §10: bound the number of anchored widgets).
-pub const MAX_PROJECTION_ANCHORS: usize = 64;
+/// §10: a request is bounded). 64 until ADR-0062 amendment 1 raised it so
+/// marks over a crowd (health bars, `ProjectedMarks`) fit in one request;
+/// widgets per anchor remain the expensive part, not this.
+pub const MAX_PROJECTION_ANCHORS: usize = 4096;
 
 /// `flags` bits of a `fynkel.rec.ProjectedPoint`.
 /// The point is in front of the near plane; `x`/`y` are meaningful.

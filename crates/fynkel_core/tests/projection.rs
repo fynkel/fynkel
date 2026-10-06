@@ -351,30 +351,34 @@ fn occlusion_is_an_explicit_policy_by_collider_mask() {
     assert!((out[1].x - 400.0).abs() < 1e-3 && (out[1].y - 300.0).abs() < 1e-3);
 }
 
+/// The bound: 4096 anchors a request (ADR-0062 amendment 1 raised it from
+/// 64 so health bars over a crowd fit; blueprint §10's bound stays — a
+/// request is still finite and says when it overflows).
 #[test]
-fn the_view_is_bounded_to_sixty_four_anchors() {
+fn the_view_is_bounded_to_four_thousand_ninety_six_anchors() {
+    const MAX: usize = 4096;
+    assert_eq!(MAX_PROJECTION_ANCHORS, MAX);
     let mut w = world();
     camera_world(&mut w, 0);
     let e = spawn(&mut w, 10, Transform::from_position(Vec3::ZERO), vec![]);
-    let anchors: Vec<ProjectionAnchorRecord> =
-        (0..MAX_PROJECTION_ANCHORS + 2).map(|_| anchor(e)).collect();
+    let anchors: Vec<ProjectionAnchorRecord> = (0..MAX + 2).map(|_| anchor(e)).collect();
     let mut out: Vec<ProjectedPointRecord> = Vec::new();
     let info = w.project(800, 600, &anchors, &mut out);
-    assert_eq!((info.projected, info.dropped), (64, 2));
-    assert_eq!(out.len(), 66, "one record per anchor, in order");
-    assert_eq!(out[63].flags, PROJECTED_VISIBLE);
-    assert_eq!(out[64].flags, PROJECTED_DROPPED);
-    assert_eq!(out[65].flags, PROJECTED_DROPPED);
+    assert_eq!((info.projected, info.dropped), (MAX as u32, 2));
+    assert_eq!(out.len(), MAX + 2, "one record per anchor, in order");
+    assert_eq!(out[MAX - 1].flags, PROJECTED_VISIBLE);
+    assert_eq!(out[MAX].flags, PROJECTED_DROPPED);
+    assert_eq!(out[MAX + 1].flags, PROJECTED_DROPPED);
     let d = w.diagnostics();
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].code, DiagnosticCode::TOO_MANY_ANCHORS);
     assert_eq!(d[0].command_index, u32::MAX);
     assert!(d[0].message.starts_with("FYN-R0012"), "{}", d[0].message);
-    // Exactly 64 is fine and reports nothing; the diagnostics are the
-    // step's, cleared by the next one.
+    // Exactly the bound is fine and reports nothing; the diagnostics are
+    // the step's, cleared by the next one.
     w.step();
-    let info = w.project(800, 600, &anchors[..64], &mut out);
-    assert_eq!((info.projected, info.dropped), (64, 0));
+    let info = w.project(800, 600, &anchors[..MAX], &mut out);
+    assert_eq!((info.projected, info.dropped), (MAX as u32, 0));
     assert!(w.diagnostics().is_empty());
 }
 

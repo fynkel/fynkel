@@ -1133,15 +1133,19 @@ fn projection_of_world_anchors() {
     );
     assert_eq!(points[3].flags, PROJECTED_MISSING);
 
-    // The bound: 64 projected, the rest dropped, the diagnostic is in the
-    // world's list (cleared by the next step like the others).
-    let many: Vec<(Entity, Vec3, u32)> = (0..70).map(|_| (cube, Vec3::ZERO, 0)).collect();
+    // The bound: 4096 projected, the rest dropped, the diagnostic is in
+    // the world's list (cleared by the next step like the others).
+    let max = fynkel_core::MAX_PROJECTION_ANCHORS;
+    let many: Vec<(Entity, Vec3, u32)> = (0..max + 6).map(|_| (cube, Vec3::ZERO, 0)).collect();
     let (s, info, points) = project(&anchors_buffer(&many), 800, 600);
     assert_eq!(s, Status::Ok);
-    assert_eq!((info.projected, info.dropped), (64, 6));
-    assert_eq!(points.len(), 70);
-    assert_eq!(points[63].flags, PROJECTED_IN_FRONT | PROJECTED_ON_SCREEN);
-    assert_eq!(points[64].flags, PROJECTED_DROPPED);
+    assert_eq!((info.projected, info.dropped), (max as u32, 6));
+    assert_eq!(points.len(), max + 6);
+    assert_eq!(
+        points[max - 1].flags,
+        PROJECTED_IN_FRONT | PROJECTED_ON_SCREEN
+    );
+    assert_eq!(points[max].flags, PROJECTED_DROPPED);
     let d = h.diagnostics();
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].code, DiagnosticCode::TOO_MANY_ANCHORS.0);

@@ -92,7 +92,7 @@ fingerprint, `R0003` asset not in the cache, `R0004` its cook failed,
 malformed, `R0008` cooked scene invalid for this build, `R0009` no startup
 scene, `R0010` unload of a scene the world does not hold, `R0011` an
 additive load of a scene loaded already — M3-12, `R0012` a projection
-request with more than 64 anchors, the rest dropped — informational,
+request with more than 4096 anchors (64 before ADR-0062 amendment 1), the rest dropped — informational,
 M3-13, [hud.md](hud.md)), `FYN-U` the user's
 settings document ([scenes.md](scenes.md) § Settings: `U0001` not a
 settings document or another format version, `U0002` a field or rebind

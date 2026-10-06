@@ -428,7 +428,7 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   &view)` — `FynkelProjectionInfo { camera, projected, dropped }` and a
   `QUERY` buffer of `ProjectedPointRecord`s, one per anchor in order,
   from the frame's camera and interpolated poses; at most
-  `FYNKEL_MAX_PROJECTION_ANCHORS` (64) are projected, the rest come back
+  `FYNKEL_MAX_PROJECTION_ANCHORS` (4096; 64 before ADR-0062 amendment 1) are projected, the rest come back
   `FYNKEL_PROJECTED_DROPPED` with a `TOO_MANY_ANCHORS` (15) diagnostic
   (`fynkel_world_diagnostics` is rebuilt so the host sees it before the
   next step); a framing error is `Protocol` with an empty view and the

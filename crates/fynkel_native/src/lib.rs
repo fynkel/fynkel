@@ -964,7 +964,7 @@ pub struct FynkelProjectionInfo {
 /// the frame's camera and interpolated poses — the same matrices the
 /// renderer uses — as a `Query` buffer of `fynkel.rec.ProjectedPoint`
 /// records in request order, valid until the next projection or mutating
-/// call. At most 64 anchors are projected; the rest come back
+/// call. At most 4096 anchors are projected; the rest come back
 /// `PROJECTED_DROPPED` and the world reports `TOO_MANY_ANCHORS`. A framing
 /// error is `Status::Protocol` with an empty view; the world stays usable.
 ///

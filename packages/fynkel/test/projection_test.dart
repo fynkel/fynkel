@@ -243,18 +243,24 @@ void main() {
     expect(bogus.missing, isTrue);
   });
 
-  test('the view is bounded to 64 anchors and says so once', () {
+  test('the view is bounded to 4096 anchors and says so once', () {
+    // ADR-0062 amendment 1 raised the bound from 64: health bars over a
+    // crowd are one request.
+    const max = 4096;
+    expect(ProjectionView.maxAnchors, max);
     final w = loaded();
     w.throwOnDiagnostics = false;
     final diagnostics = <FynkelDiagnostic>[];
     w.onDiagnostics = diagnostics.addAll;
     final crate = w.find('Crate A')!;
-    final anchors = List.generate(65, (_) => w.projection.add(crate));
+    final anchors = List.generate(max + 1, (_) => w.projection.add(crate));
     w.projection.setViewport(800, 600);
-    expect(w.projection.update(), 64);
-    expect(anchors[63].visible, isTrue);
-    expect(anchors[64].dropped, isTrue);
-    expect(anchors[64].visible, isFalse);
+    final calls = w.stats().ffiCalls;
+    expect(w.projection.update(), max);
+    expect(w.stats().ffiCalls, calls + 2, reason: 'one projection call (the stats call is the other)');
+    expect(anchors[max - 1].visible, isTrue);
+    expect(anchors[max].dropped, isTrue);
+    expect(anchors[max].visible, isFalse);
     expect(diagnostics, hasLength(1));
     expect(diagnostics.single.code, DiagnosticCode.tooManyAnchors);
     expect(diagnostics.single.isInformational, isTrue);
@@ -263,9 +269,9 @@ void main() {
     w.projection.update();
     expect(diagnostics, hasLength(1));
     // Back under the bound the episode ends; a new overflow reports again.
-    anchors[64].remove();
-    expect(w.projection.update(), 64);
-    expect(anchors[64].isAttached, isFalse);
+    anchors[max].remove();
+    expect(w.projection.update(), max);
+    expect(anchors[max].isAttached, isFalse);
     w.projection.add(crate);
     w.projection.update();
     expect(diagnostics, hasLength(2));

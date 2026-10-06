@@ -118,7 +118,7 @@ model fields a screen binds to.
 | `Time.timeScale = 0` for a pause menu | `FynkelGameViewState.setPaused(true)` |
 | `Camera.ScreenPointToRay` + `Physics.Raycast` | `FynkelGameViewState.screenRay` / `pick` |
 | `Camera.WorldToScreenPoint` | `FynkelGameViewState.worldToScreen` (one-off), `ProjectedAnchor` (every frame) |
-| A world-space Canvas over a character (name tag, health bar) | `WorldLabel` / `ProjectedAnchor` in a `ProjectionLayer` |
+| A world-space Canvas over a character (name tag, health bar) | `WorldLabel` / `ProjectedAnchor` in a `ProjectionLayer`; for hundreds of bars, `WorldMarks` + `ProjectedMarks` |
 | A world-space Canvas *in* the scene (a screen on a wall, in perspective) | not yet: ADR-0010's native `WorldCanvas`, planned after ADR-0062 |
 | `EventSystem` / `Selectable` navigation, the Input System's UI module | Flutter's focus; `setMenuOpen` turns the controller into focus keys (above) |
 | Switching the player's action map off while a menu is open | `setMenuOpen(true)`: the game's input gets nothing |
@@ -320,19 +320,21 @@ Occlusion is by colliders, not by rendered meshes: a wall without a
 collider does not occlude. That is the trade the policy makes — one ray per
 masked anchor, no depth read-back from the GPU.
 
-### The bound: 64 anchors, `FYN-R0012`
+### The bound: 4096 anchors, `FYN-R0012`
 
-The engine projects at most `MAX_PROJECTION_ANCHORS = 64` anchors per
-request (`ProjectionView.maxAnchors`). Beyond that the first 64 are
+The engine projects at most `MAX_PROJECTION_ANCHORS = 4096` anchors per
+request (`ProjectionView.maxAnchors`). Beyond that the first 4096 are
 projected in registration order, the rest come back `dropped` (never
 placed), and the world reports `DiagnosticCode.tooManyAnchors` (15) with a
 message starting `FYN-R0012` on the presentation lane — the Dart view
 forwards it through `World.onDiagnostics` **once per overflow episode**
 (not per frame; again after the count drops below the bound and overflows
 anew). It is informational (`isInformational`), never thrown by
-`throwOnDiagnostics`. Sixty-four labels on screen at once is already too
-many to read; a game that wants more chooses which (`prune()`, distance,
-gameplay relevance) — the bound is the design, not a limit to raise.
+`throwOnDiagnostics`. The bound was 64 until ADR-0062 amendment 1: a
+crowd's health bars ([many marks](#many-marks-worldmarks-projectedmarks))
+need hundreds. A widget per label stays the costly part, so text labels
+should still be few; a game picks which (`prune()`, distance, gameplay
+relevance).
 
 ### The widgets (`package:fynkel_flutter`)
 
@@ -377,6 +379,49 @@ FynkelGameView(
   own widget over the anchor's `depth`/`x`/`y`).
 * `WorldLabel(target, text, style, background, padding, borderRadius, …)`
   — a `ProjectedAnchor` with a small text pill.
+
+### Many marks (`WorldMarks`, `ProjectedMarks`)
+
+A `ProjectedAnchor` child is a widget, which is right for a name tag, a
+button over a door or a speech bubble, and too much for a health bar over
+each of 500 enemies. For those, `WorldMarks` keeps one anchor per mark, and
+`ProjectedMarks` draws them all in one paint. No widget is created per mark,
+and nothing rebuilds when a value, a colour or a position changes:
+
+```dart
+final bars = WorldMarks(
+  world,
+  style: const MarkStyle.bar(size: Size(40, 6), color: Colors.red, background: Color(0x99000000)),
+  offset: const Vec3(0, 2, 0), // over each object's head
+);
+final bar = bars.add(enemy);   // a WorldMark
+bar.value = health / maxHealth; // 0 to 1: repaints, no rebuild
+bar.color = Colors.orange;      // this mark only
+bar.remove();                   // when the enemy goes
+
+// In the overlay, sized like the view:
+Positioned.fill(child: ProjectedMarks(marks: bars)),
+```
+
+* `MarkStyle.bar(size, color, background, cornerRadius, alignment, nudge,
+  maxDistance)` is a bar filled from the left to the mark's value.
+  `MarkStyle.dot(radius, color, nudge, maxDistance)` is a dot centred on
+  the point, for minimap-style blips or "something is here". With
+  `maxDistance` set, marks farther from the camera than that are skipped.
+* `WorldMarks(world, style, offset, occlusionMask)` has `add(target,
+  {value, color, offset})`, `remove`, `prune()` (marks over destroyed
+  objects), `clear()`, `marks`, `length` and `dispose()`, which removes
+  every anchor. It is a `ChangeNotifier` that fires on the view's updates
+  and on any mark change.
+* `WorldMark` has `value`, `color`, `hidden`, `anchor` (its `ScreenAnchor`),
+  `target` and `remove()`.
+* Marks are not drawn while their object is off screen, behind the camera,
+  occluded (with a mask), destroyed or `hidden`. They take no taps: a tap
+  on a bar reaches the game.
+
+Marks share the 4096-anchor bound with every `ProjectionLayer`. On the
+test host, updating 500 anchors takes about 0.6 ms a frame (JIT). The
+iPhone figure is ADR-0062 amendment 1's step 4.
 
 ### Screen ↔ world, one point at a time (ADR-0062)
 
@@ -425,7 +470,11 @@ diagnostic, no camera, no anchors → no call), `test/model_test.dart`;
 camera pans, with zero rebuilds, and is neither painted nor hit-testable
 once the crate is culled or behind the camera; clamped markers; children
 diffing; `FynkelGameView` updating the view every frame),
-`test/model_binding_test.dart`; the starter's `test/game_test.dart` ('the
+`test/projected_marks_test.dart` (500 bars over a crowd: one painter, two
+rounded rectangles per visible bar at its point, a value change and a
+moving crowd repainted with no rebuild, a destroyed object's bar gone;
+dots with per-mark colours, hidden marks, the distance cut-off and no hit
+testing), `test/model_binding_test.dart`; the starter's `test/game_test.dart` ('the
 mover writes the HUD model; a label follows the cube'); `crates/fynkel_core/
 tests/projection.rs`, `crates/fynkel_native/tests/abi.rs`
 (`projection_of_world_anchors`, `screen_point_to_ray`);

@@ -365,8 +365,9 @@ impl Code {
     pub const RUNTIME_SCENE_NOT_LOADED: Code = Code("FYN-R0010");
     /// An additive load named a scene the world already holds (M3-12).
     pub const RUNTIME_SCENE_ALREADY_LOADED: Code = Code("FYN-R0011");
-    /// A projection request with more than 64 anchors (M3-13, blueprint
-    /// §10): the first 64 project, the rest are dropped. The world reports
+    /// A projection request with more than 4096 anchors (M3-13, blueprint
+    /// §10; 64 until ADR-0062 amendment 1): the first 4096 project, the
+    /// rest are dropped. The world reports
     /// it as `DiagnosticCode::TOO_MANY_ANCHORS`; the SDK reports the same
     /// under this code when it caps what it sends.
     pub const RUNTIME_TOO_MANY_ANCHORS: Code = Code("FYN-R0012");

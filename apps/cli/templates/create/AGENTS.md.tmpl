@@ -540,9 +540,11 @@ dead object is not painted (`clampToEdges: true` keeps an in-front marker
 on the edge). Occlusion is opt-in: `occlusionMask: world.layerMask(['walls'])`
 hides the child when a collider on those layers sits between the camera
 and the point; without a mask a label is never hidden by geometry. At most
-64 anchors project per frame (blueprint §10); beyond that the newest are
-dropped and `FYN-R0012` (`tooManyAnchors`, informational) is reported
-once. In a test: `world.projection.add(object, offset:)`, `setViewport(w,
+4096 anchors project per frame (blueprint §10); beyond that the newest
+are dropped and `FYN-R0012` (`tooManyAnchors`, informational) is reported
+once. For many small marks over objects (a health bar over each enemy) use
+`WorldMarks` + `ProjectedMarks` (one painter, no widget per mark):
+`bars.add(enemy).value = health / maxHealth`. In a test: `world.projection.add(object, offset:)`, `setViewport(w,
 h)`, `update()`, then `anchor.x`/`y`/`visible`/`occluded`/`depth`.
 
 ## Where the frame goes (stats; docs/instrumentation.md in the engine)

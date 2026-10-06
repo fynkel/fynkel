@@ -21,7 +21,7 @@ class ProjectionView {
 
   /// The bound (blueprint §10): the engine projects at most this many
   /// anchors per request.
-  static const int maxAnchors = 64;
+  static const int maxAnchors = 4096;
 
   final World _world;
   final List<ScreenAnchor> _anchors = [];

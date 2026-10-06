@@ -391,7 +391,7 @@ FynkelStatus fynkel_world_physics_query(FynkelWorld* world,
 /* Projected world anchors (M3-13, blueprint §10). At most this many
  * anchors project per request; the rest come back PROJECTED_DROPPED and
  * the world reports TOO_MANY_ANCHORS (15). */
-#define FYNKEL_MAX_PROJECTION_ANCHORS 64u
+#define FYNKEL_MAX_PROJECTION_ANCHORS 4096u
 
 /* ProjectedPointRecord.flags bits. */
 #define FYNKEL_PROJECTED_IN_FRONT 1u   /* in front of the near plane; x/y meaningful */
