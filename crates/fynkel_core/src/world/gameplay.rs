@@ -2041,6 +2041,31 @@ impl World {
         Ok(EditCommit { value, spawned })
     }
 
+    /// A native stage's pose output: what `edit_native_data_at_tick` publishes
+    /// for one `set_transform` per live entity — the same checks, all or
+    /// nothing, settled by the stage's own propagation — without staging a
+    /// journal. At stress scale the journal, not the movers' maths, was the
+    /// cost. `poses` is sorted by handle here; a target named twice keeps its
+    /// last pose.
+    pub(super) fn publish_native_poses(
+        &mut self,
+        poses: &mut [(Entity, Transform)],
+    ) -> EditResult<()> {
+        if self.poisoned {
+            return Err(EditError::Poisoned);
+        }
+        poses.sort_by_key(|p| p.0);
+        scene::set_local_batch(&self.gameplay.ecs, poses).map_err(|error| match error {
+            scene::SceneError::Ecs(EcsError::StaleEntity(e)) => EditError::StaleEntity(e),
+            scene::SceneError::Ecs(EcsError::MissingComponent(e)) => {
+                EditError::MissingTransform(e.into())
+            }
+            scene::SceneError::NotFinite(e) => EditError::InvalidTransform(e.into()),
+            scene::SceneError::UnsupportedTransform(e) => EditError::InvalidTransform(e.into()),
+            other => EditError::InvalidEffect(Entity::NULL.into(), format!("{other:?}")),
+        })
+    }
+
     fn begin_gameplay_journal(&mut self) -> EditResult<GameplayJournal> {
         if self.poisoned {
             return Err(EditError::Poisoned);

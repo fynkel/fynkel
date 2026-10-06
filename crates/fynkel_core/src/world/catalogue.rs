@@ -95,7 +95,7 @@ impl World {
     /// Every `Rotator`: the local rotation turns by `speed · dt` about the
     /// axis (in the entity's or the world's frame); the subtree is marked
     /// for propagation.
-    pub(super) fn run_rotators(&mut self, tick: Tick) -> u32 {
+    pub(super) fn run_rotators(&mut self) -> u32 {
         let dt = self.config.fixed_dt;
         let mut updates = Vec::new();
         for (handle, rot, original, parent) in self
@@ -127,19 +127,20 @@ impl World {
         let count = updates.len() as u32;
         if !updates.is_empty() {
             updates.sort_unstable_by_key(|u| u.0);
-            let result = self.edit_native_data_at_tick(tick, |edit| {
-                for &(entity, rot, pose) in &updates {
-                    rot.validate().map_err(|message| {
-                        super::gameplay::EditError::InvalidComponent {
+            let result = updates
+                .iter()
+                .try_for_each(|&(entity, rot, _)| {
+                    rot.validate()
+                        .map_err(|message| super::gameplay::EditError::InvalidComponent {
                             entity: entity.into(),
                             component: ComponentId::ROTATOR,
                             message,
-                        }
-                    })?;
-                    edit.set_transform(entity, pose)?;
-                }
-                Ok(())
-            });
+                        })
+                })
+                .and_then(|()| {
+                    let mut poses: Vec<_> = updates.iter().map(|&(e, _, pose)| (e, pose)).collect();
+                    self.publish_native_poses(&mut poses)
+                });
             if let Err(error) = result {
                 self.native_pose_rejection(ComponentId::ROTATOR, "rotator", error);
             }
@@ -149,7 +150,7 @@ impl World {
 
     /// Calculates poses and oscillator clocks together; neither publishes when
     /// any member of the native stage fails validation.
-    pub(super) fn run_oscillators(&mut self, tick: Tick) -> u32 {
+    pub(super) fn run_oscillators(&mut self) -> u32 {
         let dt = self.config.fixed_dt;
         let mut updates = Vec::new();
         for (handle, osc, state, original, parent) in self
@@ -189,18 +190,20 @@ impl World {
             return count;
         }
         updates.sort_unstable_by_key(|u| u.0);
-        let result = self.edit_native_data_at_tick(tick, |edit| {
-            for &(entity, osc, pose, _) in &updates {
+        let result = updates
+            .iter()
+            .try_for_each(|&(entity, osc, _, _)| {
                 osc.validate()
                     .map_err(|message| super::gameplay::EditError::InvalidComponent {
                         entity: entity.into(),
                         component: ComponentId::OSCILLATE,
                         message,
-                    })?;
-                edit.set_transform(entity, pose)?;
-            }
-            Ok(())
-        });
+                    })
+            })
+            .and_then(|()| {
+                let mut poses: Vec<_> = updates.iter().map(|&(e, _, pose, _)| (e, pose)).collect();
+                self.publish_native_poses(&mut poses)
+            });
         match result {
             Ok(_) => {
                 self.attach_state::<Oscillate, Oscillation>();
@@ -443,7 +446,7 @@ impl World {
 
     /// Every `Follow` moves towards its target's propagated world
     /// position plus the offset. Returns the count and whether any moved.
-    pub(super) fn run_followers(&mut self, tick: Tick) -> (u32, bool) {
+    pub(super) fn run_followers(&mut self) -> (u32, bool) {
         let dt = self.config.fixed_dt;
         let mut placements = std::mem::take(&mut self.scratch.placements);
         placements.clear();
@@ -498,14 +501,14 @@ impl World {
             self.scratch.placements = placements;
             return (count, false);
         }
-        let moved = self.apply_placements(tick, ComponentId::FOLLOW, &mut placements);
+        let moved = self.apply_placements(ComponentId::FOLLOW, &mut placements);
         self.scratch.placements = placements;
         (count, moved)
     }
 
     /// Every `LookAtCamera` turns its +Z towards the active camera's
     /// propagated position.
-    pub(super) fn run_billboards(&mut self, tick: Tick) -> (u32, bool) {
+    pub(super) fn run_billboards(&mut self) -> (u32, bool) {
         let Some(camera) = self.active_camera_position() else {
             return (0, false);
         };
@@ -535,7 +538,7 @@ impl World {
                 });
             }
         }
-        let moved = self.apply_placements(tick, ComponentId::LOOK_AT_CAMERA, &mut placements);
+        let moved = self.apply_placements(ComponentId::LOOK_AT_CAMERA, &mut placements);
         self.scratch.placements = placements;
         (count, moved)
     }
@@ -563,12 +566,7 @@ impl World {
     }
 
     /// Writes world poses; `true` when at least one entity changed.
-    fn apply_placements(
-        &mut self,
-        tick: Tick,
-        component: ComponentId,
-        placements: &mut [Placement],
-    ) -> bool {
+    fn apply_placements(&mut self, component: ComponentId, placements: &mut [Placement]) -> bool {
         if placements.is_empty() {
             return false;
         }
@@ -590,16 +588,15 @@ impl World {
                 return false;
             }
         };
-        let result = self.edit_native_data_at_tick(tick, |edit| {
-            let mut moved = false;
-            for &(entity, pose) in &poses {
-                moved |= edit.local_transform(entity)? != pose;
-                edit.set_transform(entity, pose)?;
-            }
-            Ok(moved)
+        let mut poses = poses;
+        let moved = poses.iter().any(|&(e, pose)| {
+            self.gameplay
+                .ecs
+                .copy::<Transform>(e)
+                .is_ok_and(|t| t != pose)
         });
-        match result {
-            Ok(commit) => commit.value,
+        match self.publish_native_poses(&mut poses) {
+            Ok(()) => moved,
             Err(error) => {
                 self.native_pose_rejection(component, "placement", error);
                 false

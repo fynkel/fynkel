@@ -443,3 +443,55 @@ fn overflow_recovery_keeps_retained_values_and_resets_for_lost_selected_values()
             .reset
     );
 }
+
+#[test]
+fn a_batch_write_is_one_revision_reports_every_entity_and_fails_closed() {
+    let mut world = World::new();
+    let a = world.spawn(EntityBuilder::new().with(1_i32));
+    let b = world.spawn(EntityBuilder::new().with(2_i32));
+    let flagged = world.spawn(EntityBuilder::new().with(false));
+    // Written but reported unchanged: no record.
+    let flagged_twin = world.spawn(EntityBuilder::new().with(5_i32));
+
+    // A handle without the component, or a stale one, writes nothing.
+    assert!(world
+        .update_each::<&mut i32>(&[a, flagged], |_, v| {
+            *v = 9;
+            true
+        })
+        .is_err());
+    let gone = world.spawn(EntityBuilder::new().with(3_i32));
+    world.despawn(gone).unwrap();
+    let after_spawn = world.change_stamp().unwrap();
+    assert!(world
+        .update_each::<&mut i32>(&[a, gone], |_, v| {
+            *v = 9;
+            true
+        })
+        .is_err());
+    assert_eq!(world.copy::<i32>(a).unwrap(), 1);
+    assert_eq!(world.change_stamp(), Some(after_spawn));
+    let cursor = world.change_cursor();
+
+    let changed = world
+        .update_each::<&mut i32>(&[a, b, flagged_twin], |i, v| {
+            *v += 10 * (i as i32 + 1) * i32::from(i < 2);
+            i < 2
+        })
+        .unwrap();
+    assert_eq!(changed, 2);
+    assert_eq!(
+        (world.copy::<i32>(a).unwrap(), world.copy::<i32>(b).unwrap()),
+        (11, 22)
+    );
+    let changed = world
+        .changes_since(cursor, &[std::any::TypeId::of::<i32>()], false)
+        .unwrap();
+    assert!(!changed.reset);
+    assert!(changed.entities.contains(&a) && changed.entities.contains(&b));
+    assert!(!changed.entities.contains(&flagged) && !changed.entities.contains(&flagged_twin));
+    let unrelated = world
+        .changes_since(cursor, &[std::any::TypeId::of::<bool>()], false)
+        .unwrap();
+    assert!(unrelated.entities.is_empty());
+}

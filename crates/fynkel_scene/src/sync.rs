@@ -36,17 +36,31 @@ impl SceneSync {
         };
         // Local pose/hierarchy writes must invalidate derived matrices even if
         // the native caller did not explicitly set WorldTransform.dirty.
-        for &entity in &candidates {
-            if world.has::<Transform>(entity) {
-                if let Ok(mut wt) = world.get_mut::<WorldTransform>(entity) {
-                    wt.dirty = true;
-                }
-            }
-        }
+        let clean: Vec<Entity> = {
+            let mut spatial = world.query::<(&Transform, &WorldTransform)>();
+            let view = spatial.view();
+            candidates
+                .iter()
+                .copied()
+                .filter(|&e| {
+                    world
+                        .raw(e)
+                        .and_then(|raw| view.get(raw))
+                        .is_some_and(|(_, wt)| !wt.dirty)
+                })
+                .collect()
+        };
+        world
+            .update_each::<&mut WorldTransform>(&clean, |_, wt| {
+                wt.dirty = true;
+                true
+            })
+            .expect("spatial entities checked above");
         if !reset {
             candidates.extend(flags.entities);
         }
-        candidates.sort_unstable();
+        // Two ascending runs: the stable sort merges them.
+        candidates.sort();
         candidates.dedup();
         self.transform_candidates = candidates.len();
         let dirty = {

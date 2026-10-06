@@ -298,6 +298,29 @@ pub fn set_local(world: &World, entity: Entity, transform: Transform) -> Result<
 /// Runtime solvers keep their own state; their ECS pose output uses this shared
 /// boundary. No transform or dirty flag changes when validation fails.
 pub fn set_local_batch(world: &World, poses: &[(Entity, Transform)]) -> Result<()> {
+    // Strictly ascending handles (what the native systems publish) cannot
+    // repeat a target: one batch write, unchanged poses left alone.
+    if poses.windows(2).all(|w| w[0].0 < w[1].0) {
+        for &(entity, transform) in poses {
+            if !transform.is_finite() {
+                return Err(SceneError::NotFinite(entity));
+            }
+            if !transform.is_valid() {
+                return Err(SceneError::UnsupportedTransform(entity));
+            }
+        }
+        let entities: Vec<Entity> = poses.iter().map(|p| p.0).collect();
+        world.update_each::<(&mut Transform, &mut WorldTransform)>(&entities, |i, (t, w)| {
+            let next = poses[i].1;
+            if *t == next {
+                return false;
+            }
+            *t = next;
+            w.dirty = true;
+            true
+        })?;
+        return Ok(());
+    }
     for &(entity, transform) in poses {
         world.get::<Transform>(entity)?;
         world.get::<WorldTransform>(entity)?;
@@ -801,32 +824,37 @@ fn propagate_dirty(world: &mut World, dirty: Vec<(Entity, Option<Entity>)>) -> u
             tops.push((entity, parent_matrix));
         }
     }
-    let mut count = 0;
+    // Every matrix comes from its parent's on the stack, never from storage,
+    // so all are computed first and written as one batch: each written
+    // entity still reported exactly (downstream sparse consumers need that),
+    // without a lock and a revision per node.
     let mut stack = tops;
-    // Shared pose/hierarchy inputs remain borrowed while individual world
-    // matrices are written through tracked leases. Never invalidate the whole
-    // component column: downstream sparse consumers need exact entity changes.
-    let mut inputs = world.query::<(&Transform, Option<&Children>)>();
-    let view = inputs.view();
-    while let Some((entity, parent_matrix)) = stack.pop() {
-        let Some((local, children)) = world.raw(entity).and_then(|raw| view.get(raw)) else {
-            continue;
-        };
-        let Ok(mut wt) = world.get_mut::<WorldTransform>(entity) else {
-            continue;
-        };
-        let m = parent_matrix * local.matrix();
-        wt.matrix = m;
-        wt.dirty = false;
-        drop(wt);
-        count += 1;
-        if let Some(children) = children {
-            for &c in children.0.iter().rev() {
-                if world.contains(c) {
-                    stack.push((c, m));
+    let mut written: Vec<Entity> = Vec::new();
+    let mut matrices: Vec<Mat4> = Vec::new();
+    {
+        let mut inputs = world.query::<(&Transform, &WorldTransform, Option<&Children>)>();
+        let view = inputs.view();
+        while let Some((entity, parent_matrix)) = stack.pop() {
+            let Some((local, _, children)) = world.raw(entity).and_then(|raw| view.get(raw)) else {
+                continue;
+            };
+            let m = parent_matrix * local.matrix();
+            written.push(entity);
+            matrices.push(m);
+            if let Some(children) = children {
+                for &c in children.0.iter().rev() {
+                    if world.contains(c) {
+                        stack.push((c, m));
+                    }
                 }
             }
         }
     }
-    count
+    world
+        .update_each::<&mut WorldTransform>(&written, |i, wt| {
+            wt.matrix = matrices[i];
+            wt.dirty = false;
+            true
+        })
+        .expect("spatial entities checked above")
 }

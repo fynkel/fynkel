@@ -398,8 +398,8 @@ impl System for Rotators {
     fn runs(w: &World) -> bool {
         !w.edit()
     }
-    fn run(w: &mut World, t: &mut TickRun) -> u32 {
-        w.run_rotators(t.tick)
+    fn run(w: &mut World, _: &mut TickRun) -> u32 {
+        w.run_rotators()
     }
 }
 
@@ -409,8 +409,8 @@ impl System for Oscillators {
     fn runs(w: &World) -> bool {
         !w.edit()
     }
-    fn run(w: &mut World, t: &mut TickRun) -> u32 {
-        w.run_oscillators(t.tick)
+    fn run(w: &mut World, _: &mut TickRun) -> u32 {
+        w.run_oscillators()
     }
 }
 
@@ -550,7 +550,7 @@ impl System for Followers {
         !w.edit()
     }
     fn run(w: &mut World, t: &mut TickRun) -> u32 {
-        let (n, moved) = w.run_followers(t.tick);
+        let (n, moved) = w.run_followers();
         t.moved |= moved;
         n
     }
@@ -563,7 +563,7 @@ impl System for Billboards {
         !w.edit()
     }
     fn run(w: &mut World, t: &mut TickRun) -> u32 {
-        let (n, moved) = w.run_billboards(t.tick);
+        let (n, moved) = w.run_billboards();
         t.moved |= moved;
         n
     }

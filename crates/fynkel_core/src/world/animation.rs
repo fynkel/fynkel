@@ -1372,16 +1372,22 @@ impl World {
             let published = if transforms.is_empty() && animator == previous_animator {
                 true
             } else {
-                match self.edit_native_data_at_tick(tick, |edit| {
-                    for &(target, transform) in &transforms {
-                        edit.set_transform(target, transform)?;
-                    }
-                    if animator != previous_animator {
+                // Poses alone (the animator's own state unchanged) need no
+                // journal; with a component change both publish together.
+                let result = if animator == previous_animator {
+                    self.publish_native_poses(&mut transforms)
+                } else {
+                    self.edit_native_data_at_tick(tick, |edit| {
+                        for &(target, transform) in &transforms {
+                            edit.set_transform(target, transform)?;
+                        }
                         edit.set_component(entity, ComponentValue::Animator(animator))?;
-                    }
-                    Ok(())
-                }) {
-                    Ok(_) => true,
+                        Ok(())
+                    })
+                    .map(|_| ())
+                };
+                match result {
+                    Ok(()) => true,
                     Err(error) => {
                         self.reject(
                             u32::MAX,

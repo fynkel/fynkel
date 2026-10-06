@@ -255,7 +255,7 @@ pub struct Physics {
     /// velocity added to the character's `Move` at the step.
     root_motion: Vec<(Entity, Vec3)>,
     rejections: Vec<Rejection>,
-    unsupported_transforms: HashSet<Entity>,
+    unsupported_transforms: fynkel_contracts::FastSet<Entity>,
     events: Vec<PhysicsEvent>,
     /// Touching pairs `(a, b)` with `a < b`: sensor pair or not.
     touching: BTreeMap<(Entity, Entity), bool>,
@@ -287,6 +287,34 @@ impl Default for Physics {
     }
 }
 
+/// The union of two ascending lists, ascending and without repeats.
+fn merge_sorted(a: &[Entity], b: &[Entity]) -> Vec<Entity> {
+    let mut out = Vec::with_capacity(a.len() + b.len());
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() || j < b.len() {
+        let next = match (a.get(i), b.get(j)) {
+            (Some(&x), Some(&y)) if x <= y => {
+                i += 1;
+                j += usize::from(x == y);
+                x
+            }
+            (_, Some(&y)) => {
+                j += 1;
+                y
+            }
+            (Some(&x), None) => {
+                i += 1;
+                x
+            }
+            (None, None) => unreachable!(),
+        };
+        if out.last() != Some(&next) {
+            out.push(next);
+        }
+    }
+    out
+}
+
 impl Physics {
     /// Remove CPU source data after its owning references have been released.
     pub fn retain_resources(&mut self, mut keep: impl FnMut(&AssetRef) -> bool) {
@@ -306,7 +334,7 @@ impl Physics {
             pending: Vec::new(),
             root_motion: Vec::new(),
             rejections: Vec::new(),
-            unsupported_transforms: HashSet::new(),
+            unsupported_transforms: Default::default(),
             events: Vec::new(),
             touching: BTreeMap::new(),
             sync_cursor: None,
@@ -723,12 +751,18 @@ impl Physics {
                 false,
             )
             .expect("settled physics storage");
-        let mut affected: BTreeSet<Entity> = if changes.reset {
+        // A sorted, deduplicated vector: the same order as a set, without
+        // building a tree of every moved entity each tick.
+        let mut affected: Vec<Entity> = if changes.reset {
             ecs.entities().chain(self.entries.keys().copied()).collect()
         } else {
-            changes.entities.into_iter().collect()
+            changes.entities
         };
-        affected.append(&mut self.invalidated);
+        if !self.invalidated.is_empty() || changes.reset {
+            affected.extend(std::mem::take(&mut self.invalidated));
+            affected.sort_unstable();
+            affected.dedup();
+        }
         profile.collect = profile_checkpoint(&mut timer);
         // An ancestor's body/component or hierarchy change can change the home
         // of a nested collider even when its own component did not change.
@@ -754,7 +788,7 @@ impl Physics {
                 }
                 let mut up = parent.map(|p| p.0);
                 while let Some(p) = up {
-                    if affected.contains(&p) {
+                    if affected.binary_search(&p).is_ok() {
                         return false;
                     }
                     up = parent_of(p);
@@ -764,6 +798,7 @@ impl Physics {
             // Roots are already in affected. Add only live descendants, still
             // visiting children that were already marked: their descendants may
             // need a new body home too. Final processing remains in entity order.
+            let mut added = Vec::new();
             while let Some(entity) = subtree.pop() {
                 let Some((_, Some(children))) = ecs.raw(entity).and_then(|raw| view.get(raw))
                 else {
@@ -771,10 +806,14 @@ impl Physics {
                 };
                 for &child in &children.0 {
                     if ecs.contains(child) {
-                        affected.insert(child);
+                        added.push(child);
                         subtree.push(child);
                     }
                 }
+            }
+            if !added.is_empty() {
+                added.sort_unstable();
+                affected = merge_sorted(&affected, &added);
             }
         }
         self.scratch_subtree = subtree;

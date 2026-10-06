@@ -63,6 +63,74 @@ pub mod internal {
             });
             self.inner.query_mut::<Q>()
         }
+        /// Writes the `&mut` components of `Q` on many entities as one write: one
+        /// revision for the batch, recorded per entity `write` reports changed
+        /// (what `get_mut` per entity records, at a shared revision). Every handle
+        /// is resolved and checked against `Q` first; on an error nothing is
+        /// written and no revision is spent. `write` receives each entity's index
+        /// in `entities`; returns how many it changed.
+        pub fn update_each<Q: hecs::Query>(
+            &self,
+            entities: &[super::Entity],
+            mut write: impl FnMut(usize, Q::Item<'_>) -> bool,
+        ) -> super::Result<usize> {
+            use hecs::Fetch;
+            let mut raws = Vec::with_capacity(entities.len());
+            for &entity in entities {
+                let raw = self.require(entity)?;
+                if !self.inner.satisfies::<Q>(raw) {
+                    return Err(super::EcsError::MissingComponent(entity));
+                }
+                raws.push(raw);
+            }
+            if raws.is_empty() {
+                return Ok(0);
+            }
+            {
+                let mut changes = self.changes.lock().unwrap();
+                changes.advance(false, false);
+                changes.writers = changes
+                    .writers
+                    .checked_add(1)
+                    .expect("ECS writers exhausted");
+            }
+            // Released on unwind too, as a `RefMut` would be. Readers see no
+            // settled stamp until the records below are in.
+            struct Writer<'a>(&'a std::sync::Mutex<super::Changes>);
+            impl Drop for Writer<'_> {
+                fn drop(&mut self) {
+                    self.0.lock().unwrap().writers -= 1;
+                }
+            }
+            let writer = Writer(&self.changes);
+            let mut changed = Vec::new();
+            for (i, &raw) in raws.iter().enumerate() {
+                let mut one = self.inner.query_one::<Q>(raw);
+                if write(i, one.get().expect("checked above")) {
+                    changed.push(entities[i]);
+                }
+            }
+            let mut changes = self.changes.lock().unwrap();
+            let revision = changes.values;
+            let mut types = Vec::new();
+            Q::Fetch::for_each_borrow(|ty, unique| {
+                if unique {
+                    types.push(ty);
+                }
+            });
+            if !changed.is_empty() {
+                for &ty in &types {
+                    changes.components.insert(ty, revision);
+                    for &entity in &changed {
+                        changes.record(Some(entity), Some(ty), false);
+                    }
+                }
+            }
+            drop(changes);
+            drop(writer);
+            Ok(changed.len())
+        }
+
         /// Fynkel handle of a raw `hecs` entity (every spawned entity carries one).
         pub fn handle_of(&self, raw: hecs::Entity) -> Option<super::Entity> {
             self.inner.get::<&Handle>(raw).ok().map(|h| h.0)
@@ -502,7 +570,9 @@ impl World {
                 result.entities.push(entity);
             }
         }
-        result.entities.sort_unstable();
+        // Batch writes leave ascending runs in the history; a stable sort
+        // merges natural runs instead of partitioning them again.
+        result.entities.sort();
         result.entities.dedup();
         Some(result)
     }
