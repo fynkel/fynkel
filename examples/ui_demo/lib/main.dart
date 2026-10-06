@@ -67,6 +67,10 @@ const bool autoplay = bool.fromEnvironment('FYNKEL_AUTOPLAY');
 /// (measuring what they cost).
 const bool panels = bool.fromEnvironment('FYNKEL_PANELS', defaultValue: true);
 
+/// `--dart-define=FYNKEL_SCALE=0.75` draws the scene at that fraction of
+/// the screen's resolution (`FynkelGameView.resolutionScale`); 1 is native.
+final double resolutionScale = double.tryParse(const String.fromEnvironment('FYNKEL_SCALE')) ?? 1.0;
+
 /// The crowd's size: `FYNKEL_CROWD` in the environment or as a define.
 int get crowdSize =>
     int.tryParse(Platform.environment['FYNKEL_CROWD'] ?? '') ??
@@ -278,6 +282,7 @@ class _GamePageState extends State<GamePage> {
         // while the app is hidden and closes it when disposed. Without a
         // device (CI, a headless box) the game still runs, silently.
         audio: true,
+        resolutionScale: resolutionScale,
         onKeyEvent: _onKey,
         onFrame: _onFrame,
         // Once a second. `profileDartHeap` adds the Dart heap's allocation
