@@ -1305,6 +1305,14 @@ costs are item 1 of `docs/foundation-f8-throughput-observations.md`
 § Next; the light assignment is new work. The thresholds stay as they
 were.
 
+**All 18 green again the same day** (`benchmarks/m3/results/2026-10-06-fa46f203`,
+thresholds unchanged): native movers publish their poses as one batch
+instead of a journal per entity, and propagation and the physics sync
+write and merge in batches (`6a58294f`); each object's light lookup is
+kept across frames (`fa46f203`). Tick p50 3.83 ms (5.38), movers 0.50 ms
+(1.45), rigs 0.65 ms (0.73), the lights' prepare +0.40 ms (+3.85); the
+checksum is unchanged.
+
 R3b, bloom (2026-09-23): fmt clean, clippy clean, `cargo test
 --workspace` green over 85 targets (the render crate's 26 pixel tests
 include the new

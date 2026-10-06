@@ -231,7 +231,9 @@ stands as written ("to be measured, not assumed"): measured, no change here.
 
 ## Next
 
-1. dense-5000 tick frame (8.6–9.5 ms): batch the movers' path (system →
+1. (Done on the desktop stress scene 2026-10-06, `6a58294f`: movers,
+   propagation and the physics sync batched, tick p50 5.38 → 3.83 ms; the
+   phone's dense-5000 not yet re-measured.) dense-5000 tick frame (8.6–9.5 ms): batch the movers' path (system →
    journal → commit → propagate → physics sync, ≈ 1.3 µs per moving entity),
    trim `Physics::sync` (1.0 ms, a `BTreeSet` of 8.9 k candidates) and
    `propagate` (0.7 ms), and parallelise `extract_into`. Native profile of one
