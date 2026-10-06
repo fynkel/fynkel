@@ -252,6 +252,17 @@ String? _findCargo() {
   return null;
 }
 
+/// `{'SDKROOT': <the macOS SDK>}` from `xcrun`, or null when it has none.
+Future<Map<String, String>?> _macSdk() async {
+  try {
+    final r = await Process.run('/usr/bin/xcrun', ['--sdk', 'macosx', '--show-sdk-path']);
+    final path = '${r.stdout}'.trim();
+    return r.exitCode == 0 && path.isNotEmpty ? {'SDKROOT': path} : null;
+  } on ProcessException {
+    return null;
+  }
+}
+
 Future<Uri> _cargoBuild(
   Uri workspace,
   String crate,
@@ -276,7 +287,14 @@ Future<Uri> _cargoBuild(
     cargo,
     args,
     workingDirectory: workspace.toFilePath(),
-    environment: {'PATH': '${Platform.environment['PATH'] ?? ''}:${File(cargo).parent.path}'},
+    environment: {
+      'PATH': '${Platform.environment['PATH'] ?? ''}:${File(cargo).parent.path}',
+      // Under Xcode `cc` is its toolchain's clang, which adds no SDK by
+      // itself, and the hook's stripped environment has no SDKROOT: the C
+      // in crates like blake3 then cannot find <assert.h>. cc-rs passes the
+      // SDK for iOS targets, not for a macOS host build.
+      if (os == OS.macOS && Platform.environment['SDKROOT'] == null) ...?await _macSdk(),
+    },
   );
   if (result.exitCode != 0) {
     final stderr = '${result.stderr}';
