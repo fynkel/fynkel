@@ -516,7 +516,9 @@ impl ExtractRenderer {
                         return false;
                     }
                 }
-                let astc = device.features().contains(wgpu::Features::TEXTURE_COMPRESSION_ASTC);
+                let astc = device
+                    .features()
+                    .contains(wgpu::Features::TEXTURE_COMPRESSION_ASTC);
                 let decoded;
                 let (format, bytes) = match gpu_texture_format(payload.format, astc) {
                     Some(format) => (format, payload.texels.as_slice()),
@@ -524,7 +526,10 @@ impl ExtractRenderer {
                     // decoded, the same picture without the memory saving.
                     None => {
                         let Some(rgba) = decode_astc(&payload) else {
-                            self.record_asset_error(r, format!("texture {r}: malformed ASTC payload"));
+                            self.record_asset_error(
+                                r,
+                                format!("texture {r}: malformed ASTC payload"),
+                            );
                             self.textures.insert(r.clone(), None);
                             return false;
                         };

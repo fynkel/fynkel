@@ -19,8 +19,8 @@ pub mod uuid;
 
 pub use asset::{AssetId, AssetRef};
 pub use codes::{DiagnosticCode, Status};
-pub use fast_hash::{FastBuildHasher, FastHasher, FastMap, FastSet};
 pub use diagnostic::{has_errors, Code, Diagnostic, Severity};
+pub use fast_hash::{FastBuildHasher, FastHasher, FastMap, FastSet};
 pub use handle::{
     allocate_world_id, attach_identity_authority, identity_authority, AuthorityMismatch, Entity,
     IdentityAuthority, IdentityExhausted, WorldId,

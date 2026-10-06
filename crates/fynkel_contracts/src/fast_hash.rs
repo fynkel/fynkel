@@ -112,6 +112,9 @@ mod tests {
             h.write_u64(i);
             buckets[(h.finish() & 63) as usize] += 1;
         }
-        assert!(buckets.iter().all(|&n| (60..140).contains(&n)), "{buckets:?}");
+        assert!(
+            buckets.iter().all(|&n| (60..140).contains(&n)),
+            "{buckets:?}"
+        );
     }
 }

@@ -672,7 +672,12 @@ pub fn level_bytes(width: u32, height: u32, block: (u32, u32, usize), level: u32
 }
 
 /// Bytes of a chain of `mip_levels` levels, or `None` on overflow.
-fn chain_bytes(width: u32, height: u32, block: (u32, u32, usize), mip_levels: u32) -> Option<usize> {
+fn chain_bytes(
+    width: u32,
+    height: u32,
+    block: (u32, u32, usize),
+    mip_levels: u32,
+) -> Option<usize> {
     let mut total = 0usize;
     for l in 0..mip_levels {
         let (w, h) = mip_size(width, height, l);
@@ -1342,7 +1347,9 @@ mod tests {
         assert!(!texture_is_srgb(TEXTURE_FORMAT_ASTC8X8_LINEAR));
         let levels = full_mip_count(13, 7);
         assert_eq!(levels, 4);
-        let sizes: Vec<_> = (0..levels).map(|l| level_bytes(13, 7, (6, 6, 16), l)).collect();
+        let sizes: Vec<_> = (0..levels)
+            .map(|l| level_bytes(13, 7, (6, 6, 16), l))
+            .collect();
         assert_eq!(sizes, [6 * 16, 16, 16, 16]);
         let texels: Vec<u8> = (0..sizes.iter().sum::<usize>()).map(|i| i as u8).collect();
         let d = decode_texture(&encode_texture(13, 7, format, levels, &texels)).unwrap();

@@ -369,7 +369,11 @@ impl ExtractRenderer {
         let mut grouped: Vec<(bool, Vec<Grouped>)> = Vec::new();
         let mut blended: Vec<(f32, BatchKey, bool, Instance, [u32; 12])> = Vec::new();
         self.batch_index.clear();
-        let mut mesh_of_record: fynkel_contracts::FastMap<u32, usize> = fynkel_contracts::FastMap::with_capacity_and_hasher(extract.meshes.len(), Default::default());
+        let mut mesh_of_record: fynkel_contracts::FastMap<u32, usize> =
+            fynkel_contracts::FastMap::with_capacity_and_hasher(
+                extract.meshes.len(),
+                Default::default(),
+            );
         let cube_key = || BatchKey {
             mesh: None,
             material: None,
@@ -382,7 +386,8 @@ impl ExtractRenderer {
         // of each outlined entity — a child 0.5, selected 1, selected
         // winning when an entity is both.
         let outline = self.overlay.take_outline();
-        let mut outline_marks: fynkel_contracts::FastMap<fynkel_contracts::Entity, f32> = Default::default();
+        let mut outline_marks: fynkel_contracts::FastMap<fynkel_contracts::Entity, f32> =
+            Default::default();
         if let Some(o) = &outline {
             for e in &o.children {
                 outline_marks.insert(*e, 0.5);

@@ -75,14 +75,22 @@ fn main() {
         world.step();
     }
     let (device, queue) = headless_device().expect("no GPU adapter");
-    let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Bgra8Unorm, width, height);
+    let mut renderer =
+        ExtractRenderer::new(&device, wgpu::TextureFormat::Bgra8Unorm, width, height);
     renderer.set_assets(Some(assets.clone()));
     if !renderer.set_quality_profile(quality.as_deref()) {
-        panic!("unknown quality profile; have {:?}", renderer.quality_profiles());
+        panic!(
+            "unknown quality profile; have {:?}",
+            renderer.quality_profiles()
+        );
     }
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("throughput target"),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -94,7 +102,12 @@ fn main() {
     let mut extract = world.extract();
     // Settle assets and pipelines before timing.
     renderer
-        .prepare_ready(&device, &queue, &extract, std::time::Duration::from_secs(30))
+        .prepare_ready(
+            &device,
+            &queue,
+            &extract,
+            std::time::Duration::from_secs(30),
+        )
         .expect("assets");
     for _ in 0..8 {
         let mut e = device.create_command_encoder(&Default::default());
@@ -110,7 +123,8 @@ fn main() {
     let mut submitted = 0u64;
     let (mut sim_us, mut extract_us, mut prepare_us, mut encode_us, mut gpu_us) =
         (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
-    let (mut ao, mut scene_pass, mut post, mut shadow) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut ao, mut scene_pass, mut post, mut shadow) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut last_timed = renderer.stats().gpu_timed;
     let start = Instant::now();
     for frame in 0..frames {
@@ -197,9 +211,20 @@ fn main() {
             .iter()
             .zip(&system_us)
             .filter(|(_, us)| **us / f64::from(system_ticks) >= 20.0)
-            .map(|(t, us)| format!("{}={:.2}({})", t.system.name(), us / f64::from(system_ticks) / 1000.0, t.entities))
+            .map(|(t, us)| {
+                format!(
+                    "{}={:.2}({})",
+                    t.system.name(),
+                    us / f64::from(system_ticks) / 1000.0,
+                    t.entities
+                )
+            })
             .collect();
-        println!("  systems ms/tick: {}  physics sync candidates (last tick): {}", line.join(" "), world.physics().sync_candidates());
+        println!(
+            "  systems ms/tick: {}  physics sync candidates (last tick): {}",
+            line.join(" "),
+            world.physics().sync_candidates()
+        );
     }
     println!(
         "  prepare {:.2}/{:.2}  encode+submit {:.2}/{:.2}  (ms p50/p95)",

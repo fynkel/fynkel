@@ -1519,9 +1519,13 @@ fn cook_one(
                 let compression = match Compression::from_meta(meta) {
                     Ok(c) => c,
                     Err(d) => {
-                        diagnostics.push(d.with_document(
-                            fynkel_document::asset::sidecar_path(&file).display().to_string(),
-                        ));
+                        diagnostics.push(
+                            d.with_document(
+                                fynkel_document::asset::sidecar_path(&file)
+                                    .display()
+                                    .to_string(),
+                            ),
+                        );
                         return None;
                     }
                 };
@@ -2021,7 +2025,10 @@ fn plan_intermediate(
         let mut c = match texture_chunk(texture, texture.sub_id.clone(), compression) {
             Ok(c) => c,
             Err(e) => {
-                diagnostics.push(Diagnostic::error(Code::IMPORT_INVALID_DATA, e).with_document(shown.to_string()));
+                diagnostics.push(
+                    Diagnostic::error(Code::IMPORT_INVALID_DATA, e)
+                        .with_document(shown.to_string()),
+                );
                 continue;
             }
         };

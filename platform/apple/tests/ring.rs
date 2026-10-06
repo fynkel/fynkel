@@ -90,7 +90,10 @@ fn ring_rotates_slot_states_and_never_overwrites() {
         if mode == SyncMode::Blocking {
             assert_eq!(fourth, 1, "oldest unshown frame recycled, never presented");
         } else {
-            assert!(fourth == -1 || fourth == 1, "dropped or recycled, got {fourth}");
+            assert!(
+                fourth == -1 || fourth == 1,
+                "dropped or recycled, got {fourth}"
+            );
         }
         let dropped = fourth == -1;
         settle(&ring, mode);
@@ -313,46 +316,62 @@ fn a_full_ring_of_protected_slots_drops_without_preparation() {
             ring.render_with(|_, _, _| panic!("a protected ring must skip preparation")),
             -1
         );
-        Ok::<_, ()>(
-            ring_empty_commands(&ring),
-        )
+        Ok::<_, ()>(ring_empty_commands(&ring))
     });
     assert_eq!(outer, Ok(1));
 }
 
 fn ring_empty_commands(ring: &IoSurfaceRing) -> wgpu::CommandBuffer {
-    ring.device().create_command_encoder(&Default::default()).finish()
+    ring.device()
+        .create_command_encoder(&Default::default())
+        .finish()
 }
 
 #[test]
 fn a_frame_queue_shows_finished_frames_in_order_and_catches_up_when_it_falls_behind() {
     let world = world_with_cube();
     let ring = IoSurfaceRing::new(64, 64, 5, SyncMode::Blocking).expect("ring");
-    let mut renderer = ExtractRenderer::new(
-        ring.device(),
-        fynkel_platform_apple::TEXTURE_FORMAT,
-        64,
-        64,
-    );
+    let mut renderer =
+        ExtractRenderer::new(ring.device(), fynkel_platform_apple::TEXTURE_FORMAT, 64, 64);
     // A mailbox (the default) shows the newest and recycles the older.
     assert_eq!(render(&ring, &mut renderer, &world), 0);
     assert_eq!(render(&ring, &mut renderer, &world), 1);
     assert_eq!(ring.acquire_presented_queued(), (1, false));
-    assert_eq!(ring.acquire_presented_queued(), (1, false), "nothing newer: the same frame");
+    assert_eq!(
+        ring.acquire_presented_queued(),
+        (1, false),
+        "nothing newer: the same frame"
+    );
 
     // Depth 2: two finished frames are shown one raster each, and the first
     // answer says another is queued behind it.
     ring.set_frame_queue(2);
     assert_eq!(render(&ring, &mut renderer, &world), 0, "the retired slot");
     assert_eq!(render(&ring, &mut renderer, &world), 2);
-    assert_eq!(ring.acquire_presented_queued(), (0, true), "the older first");
-    assert_eq!(ring.acquire_presented_queued(), (2, false), "then the newer");
-    assert_eq!(ring.acquire_presented_queued(), (2, false), "then nothing new");
+    assert_eq!(
+        ring.acquire_presented_queued(),
+        (0, true),
+        "the older first"
+    );
+    assert_eq!(
+        ring.acquire_presented_queued(),
+        (2, false),
+        "then the newer"
+    );
+    assert_eq!(
+        ring.acquire_presented_queued(),
+        (2, false),
+        "then nothing new"
+    );
 
     // Three waiting is more than the queue holds: jump to the newest.
     let a = render(&ring, &mut renderer, &world);
     let b = render(&ring, &mut renderer, &world);
     let c = render(&ring, &mut renderer, &world);
     assert!(a >= 0 && b >= 0 && c >= 0);
-    assert_eq!(ring.acquire_presented_queued(), (c, false), "caught up to the newest");
+    assert_eq!(
+        ring.acquire_presented_queued(),
+        (c, false),
+        "caught up to the newest"
+    );
 }

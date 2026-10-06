@@ -236,7 +236,9 @@ mod tests {
     /// 12×6 at 6×6 with its full chain: 2×1 blocks, then one block a level.
     fn red_chain(format: u32) -> TexturePayload {
         let levels = p::full_mip_count(12, 6);
-        let blocks: usize = (0..levels).map(|l| p::level_bytes(12, 6, (6, 6, 16), l) / 16).sum();
+        let blocks: usize = (0..levels)
+            .map(|l| p::level_bytes(12, 6, (6, 6, 16), l) / 16)
+            .sum();
         let texels = solid_block([0xFFFF, 0, 0, 0xFFFF]).repeat(blocks);
         p::decode_texture(&p::encode_texture(12, 6, format, levels, &texels)).unwrap()
     }
@@ -246,10 +248,19 @@ mod tests {
         let t = red_chain(p::TEXTURE_FORMAT_ASTC6X6_SRGB);
         assert_eq!(gpu_texture_format(t.format, false), None);
         let rgba = decode_astc(&t).unwrap();
-        let texels: usize = (0..t.mip_levels).map(|l| p::level_bytes(12, 6, (1, 1, 4), l)).sum();
+        let texels: usize = (0..t.mip_levels)
+            .map(|l| p::level_bytes(12, 6, (1, 1, 4), l))
+            .sum();
         assert_eq!(rgba.len(), texels);
         assert!(rgba.chunks_exact(4).all(|c| c == [255, 0, 0, 255]));
-        let rgba8 = p::decode_texture(&p::encode_texture(1, 1, p::TEXTURE_FORMAT_RGBA8_SRGB, 1, &[1; 4])).unwrap();
+        let rgba8 = p::decode_texture(&p::encode_texture(
+            1,
+            1,
+            p::TEXTURE_FORMAT_RGBA8_SRGB,
+            1,
+            &[1; 4],
+        ))
+        .unwrap();
         assert_eq!(decode_astc(&rgba8), None);
     }
 
@@ -258,13 +269,25 @@ mod tests {
         let Some((device, queue)) = crate::headless_device() else {
             return;
         };
-        if !device.features().contains(wgpu::Features::TEXTURE_COMPRESSION_ASTC) {
+        if !device
+            .features()
+            .contains(wgpu::Features::TEXTURE_COMPRESSION_ASTC)
+        {
             return;
         }
-        for format in [p::TEXTURE_FORMAT_ASTC6X6_SRGB, p::TEXTURE_FORMAT_ASTC6X6_LINEAR] {
+        for format in [
+            p::TEXTURE_FORMAT_ASTC6X6_SRGB,
+            p::TEXTURE_FORMAT_ASTC6X6_LINEAR,
+        ] {
             let t = red_chain(format);
             let gpu = gpu_texture_format(t.format, true).unwrap();
-            assert!(matches!(gpu, wgpu::TextureFormat::Astc { block: wgpu::AstcBlock::B6x6, .. }));
+            assert!(matches!(
+                gpu,
+                wgpu::TextureFormat::Astc {
+                    block: wgpu::AstcBlock::B6x6,
+                    ..
+                }
+            ));
             let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
             let uploaded = upload_rgba8(
                 &device,

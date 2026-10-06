@@ -48,13 +48,17 @@ impl Compression {
     pub fn from_meta(meta: &Meta) -> Result<Option<Compression>, Diagnostic> {
         match meta.settings.get("compression") {
             None => Ok(None),
-            Some(v) => v.as_str().and_then(Compression::parse).map(Some).ok_or_else(|| {
-                Diagnostic::error(
-                    Code::IMPORT_INVALID_DATA,
-                    "settings.compression must be \"none\", \"low\", \"normal\" or \"high\"",
-                )
-                .with_pointer("/settings/compression")
-            }),
+            Some(v) => v
+                .as_str()
+                .and_then(Compression::parse)
+                .map(Some)
+                .ok_or_else(|| {
+                    Diagnostic::error(
+                        Code::IMPORT_INVALID_DATA,
+                        "settings.compression must be \"none\", \"low\", \"normal\" or \"high\"",
+                    )
+                    .with_pointer("/settings/compression")
+                }),
         }
     }
 
@@ -116,7 +120,13 @@ pub struct AstcTexture {
 /// Compresses `rgba8` (`width`×`height`, top row first) with `block`×`block`
 /// ASTC: resampled to whole blocks if need be, the mip chain built as
 /// `mip_chain` builds it, each level encoded.
-pub fn encode(width: u32, height: u32, rgba8: &[u8], srgb: bool, block: u32) -> Result<AstcTexture, String> {
+pub fn encode(
+    width: u32,
+    height: u32,
+    rgba8: &[u8],
+    srgb: bool,
+    block: u32,
+) -> Result<AstcTexture, String> {
     let format = fynkel_cooked::payload::astc_format(block, srgb).ok_or("no such ASTC block")?;
     let (w, h) = (block_multiple(width, block), block_multiple(height, block));
     let resampled;
@@ -129,8 +139,15 @@ pub fn encode(width: u32, height: u32, rgba8: &[u8], srgb: bool, block: u32) -> 
     let mip_levels = fynkel_cooked::payload::full_mip_count(w, h);
     let chain = mip_chain(w, h, base, srgb);
     let profile = if srgb { Profile::LdrSrgb } else { Profile::Ldr };
-    let config = config_init(profile, block, block, 1, Preset::Medium, Flags::USE_DECODE_UNORM8)
-        .map_err(|e| format!("astcenc: {e:?}"))?;
+    let config = config_init(
+        profile,
+        block,
+        block,
+        1,
+        Preset::Medium,
+        Flags::USE_DECODE_UNORM8,
+    )
+    .map_err(|e| format!("astcenc: {e:?}"))?;
     let mut context = Context::new_parallel(&config).map_err(|e| format!("astcenc: {e:?}"))?;
     let mut blocks = Vec::new();
     let mut at = 0usize;
@@ -153,7 +170,9 @@ pub fn encode(width: u32, height: u32, rgba8: &[u8], srgb: bool, block: u32) -> 
         context
             .compress(&mut image, Swizzle::IDENTITY, &mut blocks[start..])
             .map_err(|e| format!("astcenc: {e:?}"))?;
-        context.compress_reset().map_err(|e| format!("astcenc: {e:?}"))?;
+        context
+            .compress_reset()
+            .map_err(|e| format!("astcenc: {e:?}"))?;
     }
     Ok(AstcTexture {
         width: w,
@@ -189,10 +208,19 @@ fn resample(width: u32, height: u32, rgba8: &[u8], w: u32, h: u32, srgb: bool) -
         .chunks_exact(4)
         .flat_map(|t| {
             let c = |v: f32| {
-                let v = if srgb { linear_to_srgb(v) } else { v.clamp(0.0, 1.0) };
+                let v = if srgb {
+                    linear_to_srgb(v)
+                } else {
+                    v.clamp(0.0, 1.0)
+                };
                 (v * 255.0 + 0.5) as u8
             };
-            [c(t[0]), c(t[1]), c(t[2]), (t[3].clamp(0.0, 1.0) * 255.0 + 0.5) as u8]
+            [
+                c(t[0]),
+                c(t[1]),
+                c(t[2]),
+                (t[3].clamp(0.0, 1.0) * 255.0 + 0.5) as u8,
+            ]
         })
         .collect()
 }
@@ -206,7 +234,10 @@ mod tests {
     fn defaults_follow_the_colour_space_and_blocks_round_to_the_nearest_multiple() {
         assert_eq!(Compression::resolve(None, true), Compression::Normal);
         assert_eq!(Compression::resolve(None, false), Compression::High);
-        assert_eq!(Compression::resolve(Some(Compression::None), true).block(), None);
+        assert_eq!(
+            Compression::resolve(Some(Compression::None), true).block(),
+            None
+        );
         assert_eq!(Compression::parse("bogus"), None);
         assert_eq!(block_multiple(1024, 6), 1026);
         assert_eq!(block_multiple(1024, 4), 1024);
@@ -228,7 +259,15 @@ mod tests {
         }
         let len = p::level_bytes(t.width, t.height, (block, block, 16), level);
         let profile = if srgb { Profile::LdrSrgb } else { Profile::Ldr };
-        let config = config_init(profile, block, block, 1, Preset::Medium, Flags::DECOMPRESS_ONLY).unwrap();
+        let config = config_init(
+            profile,
+            block,
+            block,
+            1,
+            Preset::Medium,
+            Flags::DECOMPRESS_ONLY,
+        )
+        .unwrap();
         let mut context = Context::new(&config).unwrap();
         let mut out = vec![0u8; (w * h * 4) as usize];
         let mut plane = out.as_mut_ptr() as *mut std::ffi::c_void;
@@ -239,7 +278,9 @@ mod tests {
             data_type: bindings::astcenc_type_ASTCENC_TYPE_U8,
             data: &mut plane,
         };
-        context.decompress(&t.blocks[at..at + len], &mut image, Swizzle::IDENTITY).unwrap();
+        context
+            .decompress(&t.blocks[at..at + len], &mut image, Swizzle::IDENTITY)
+            .unwrap();
         out
     }
 
@@ -254,19 +295,38 @@ mod tests {
             })
             .collect();
         let t = encode(w, h, &source, true, 6).unwrap();
-        assert_eq!((t.width, t.height, t.format), (102, 72, p::TEXTURE_FORMAT_ASTC6X6_SRGB));
+        assert_eq!(
+            (t.width, t.height, t.format),
+            (102, 72, p::TEXTURE_FORMAT_ASTC6X6_SRGB)
+        );
         assert_eq!(t.mip_levels, p::full_mip_count(102, 72));
-        let total: usize = (0..t.mip_levels).map(|l| p::level_bytes(102, 72, (6, 6, 16), l)).sum();
+        let total: usize = (0..t.mip_levels)
+            .map(|l| p::level_bytes(102, 72, (6, 6, 16), l))
+            .sum();
         assert_eq!(t.blocks.len(), total, "every level, whole blocks");
         let decoded = decode_level(&t, 6, true, 0);
         let resampled = resample(w, h, &source, 102, 72, true);
-        let worst = decoded.iter().zip(&resampled).map(|(a, b)| a.abs_diff(*b)).max().unwrap();
+        let worst = decoded
+            .iter()
+            .zip(&resampled)
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap();
         assert!(worst <= 12, "worst channel error {worst}");
         // A flat colour survives to the last level.
         let flat = [200u8, 40, 10, 255].repeat(64 * 64);
         let t = encode(64, 64, &flat, false, 4).unwrap();
-        assert_eq!((t.width, t.format), (64, p::TEXTURE_FORMAT_ASTC4X4_LINEAR), "no resample");
+        assert_eq!(
+            (t.width, t.format),
+            (64, p::TEXTURE_FORMAT_ASTC4X4_LINEAR),
+            "no resample"
+        );
         let top = decode_level(&t, 4, false, t.mip_levels - 1);
-        assert!(top.iter().zip([200u8, 40, 10, 255]).all(|(a, b)| a.abs_diff(b) <= 1), "{top:?}");
+        assert!(
+            top.iter()
+                .zip([200u8, 40, 10, 255])
+                .all(|(a, b)| a.abs_diff(b) <= 1),
+            "{top:?}"
+        );
     }
 }

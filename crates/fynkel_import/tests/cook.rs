@@ -372,7 +372,13 @@ fn a_bad_compression_setting_fails_the_texture_and_points_at_its_sidecar() {
         .iter()
         .find(|d| d.pointer.as_deref() == Some("/settings/compression"))
         .expect("the setting is reported");
-    assert!(d.document.as_deref().unwrap_or("").ends_with("swatch.png.meta.json"), "{d:?}");
+    assert!(
+        d.document
+            .as_deref()
+            .unwrap_or("")
+            .ends_with("swatch.png.meta.json"),
+        "{d:?}"
+    );
     assert!(d.message.contains("\"normal\""), "{}", d.message);
 }
 
@@ -418,7 +424,9 @@ fn textures_default_to_astc_by_colour_space_and_resample_to_whole_blocks() {
     // ADR-0061: a colour map is ASTC 6×6 and a data map 4×4 by default; a
     // size that is not whole blocks is resampled to the nearest that is.
     let p = Project::new("astc-defaults");
-    let ramp = image::RgbaImage::from_fn(100, 64, |x, y| image::Rgba([(x * 2) as u8, (y * 3) as u8, 96, 255]));
+    let ramp = image::RgbaImage::from_fn(100, 64, |x, y| {
+        image::Rgba([(x * 2) as u8, (y * 3) as u8, 96, 255])
+    });
     ramp.save(p.assets().join("textures/swatch.png")).unwrap();
     let sidecar = |settings: &str| {
         format!(
@@ -432,18 +440,43 @@ fn textures_default_to_astc_by_colour_space_and_resample_to_whole_blocks() {
         let swatch = p.cook().get(id(SWATCH)).unwrap().clone();
         let mut f = ChunkFile::open_path(swatch.file.as_ref().unwrap()).unwrap();
         let meta: serde_json::Value = serde_json::from_slice(&f.meta(1 << 20).unwrap()).unwrap();
-        (decode_texture(&f.read(1, 1 << 24).unwrap()).unwrap(), meta["chunks"][1].clone())
+        (
+            decode_texture(&f.read(1, 1 << 24).unwrap()).unwrap(),
+            meta["chunks"][1].clone(),
+        )
     };
     let (t, info) = read(&p);
-    assert_eq!((t.width, t.height, t.format), (102, 66, fynkel_cooked::payload::TEXTURE_FORMAT_ASTC6X6_SRGB));
-    assert_eq!((info["compression"].as_str(), info["block"].as_u64()), (Some("normal"), Some(6)));
-    assert_eq!((info["sourceWidth"].as_u64(), info["sourceHeight"].as_u64()), (Some(100), Some(64)));
+    assert_eq!(
+        (t.width, t.height, t.format),
+        (102, 66, fynkel_cooked::payload::TEXTURE_FORMAT_ASTC6X6_SRGB)
+    );
+    assert_eq!(
+        (info["compression"].as_str(), info["block"].as_u64()),
+        (Some("normal"), Some(6))
+    );
+    assert_eq!(
+        (info["sourceWidth"].as_u64(), info["sourceHeight"].as_u64()),
+        (Some(100), Some(64))
+    );
     assert_eq!(info["bytes"].as_u64(), Some(t.texels.len() as u64));
-    p.write("textures/swatch.png.meta.json", &sidecar(r#"{"colorSpace":"linear"}"#));
+    p.write(
+        "textures/swatch.png.meta.json",
+        &sidecar(r#"{"colorSpace":"linear"}"#),
+    );
     let (t, info) = read(&p);
-    assert_eq!((t.width, t.height, t.format), (100, 64, fynkel_cooked::payload::TEXTURE_FORMAT_ASTC4X4_LINEAR));
+    assert_eq!(
+        (t.width, t.height, t.format),
+        (
+            100,
+            64,
+            fynkel_cooked::payload::TEXTURE_FORMAT_ASTC4X4_LINEAR
+        )
+    );
     assert_eq!(info["compression"], "high");
-    assert!(info.get("sourceWidth").is_none(), "100×64 is whole 4×4 blocks: {info}");
+    assert!(
+        info.get("sourceWidth").is_none(),
+        "100×64 is whole 4×4 blocks: {info}"
+    );
 }
 
 #[test]
@@ -770,7 +803,10 @@ fn containers_read_back_with_bounded_decoding() {
     assert_eq!(chunks[8]["compression"], "none");
     assert_eq!(chunks[8]["mipLevels"], image.mip_levels);
     let linear = decode_texture(&f.read(9, 1 << 24).unwrap()).unwrap();
-    assert_eq!(linear.format, fynkel_cooked::payload::TEXTURE_FORMAT_RGBA8_LINEAR);
+    assert_eq!(
+        linear.format,
+        fynkel_cooked::payload::TEXTURE_FORMAT_RGBA8_LINEAR
+    );
     assert_eq!(chunks[9]["colorSpace"], "linear");
     let prefab: serde_json::Value = serde_json::from_slice(&f.read(10, 1 << 20).unwrap()).unwrap();
     assert!(prefab["entities"].is_object());

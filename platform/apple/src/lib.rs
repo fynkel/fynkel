@@ -312,7 +312,9 @@ impl Viewport {
                 Ok(slot) => job_state.last.store(slot, Ordering::Release),
                 Err(payload) => {
                     *job_state.panic.lock().unwrap() = Some(panic_text(payload));
-                    job_state.last.store(FYNKEL_APPLE_RENDER_BROKEN, Ordering::Release);
+                    job_state
+                        .last
+                        .store(FYNKEL_APPLE_RENDER_BROKEN, Ordering::Release);
                 }
             }
             *job_state.busy.lock().unwrap() = false;
@@ -678,7 +680,10 @@ pub unsafe extern "C" fn fynkel_apple_viewport_destroy(vp: *mut Viewport) {
 /// # Safety
 /// `vp` must be a live viewport; host loop thread only.
 #[no_mangle]
-pub unsafe extern "C" fn fynkel_apple_viewport_set_pipelined(vp: *mut Viewport, enabled: i32) -> i32 {
+pub unsafe extern "C" fn fynkel_apple_viewport_set_pipelined(
+    vp: *mut Viewport,
+    enabled: i32,
+) -> i32 {
     guard_mut(vp, |v| {
         v.set_pipelined(enabled != 0);
         0
@@ -696,7 +701,10 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_pipelined(vp: *mut Viewport, 
 /// # Safety
 /// `vp` must be a live viewport; host loop thread only.
 #[no_mangle]
-pub unsafe extern "C" fn fynkel_apple_viewport_set_frame_queue(vp: *mut Viewport, depth: u32) -> i32 {
+pub unsafe extern "C" fn fynkel_apple_viewport_set_frame_queue(
+    vp: *mut Viewport,
+    depth: u32,
+) -> i32 {
     guard_mut(vp, |v| {
         v.ring.set_frame_queue(depth);
         0
@@ -1592,7 +1600,10 @@ mod admission_tests {
         let world = unsafe { fynkel_world_create(rt, std::ptr::null(), std::ptr::null_mut()) };
         assert!(!world.is_null());
         let mut vp = Viewport::new(32, 32, 3, SyncMode::Async).unwrap();
-        assert_eq!(unsafe { fynkel_apple_viewport_set_pipelined(&mut vp, 1) }, 0);
+        assert_eq!(
+            unsafe { fynkel_apple_viewport_set_pipelined(&mut vp, 1) },
+            0
+        );
         // The first call answers 0 (no earlier job); later ones answer what
         // the frame before them did.
         for _ in 0..12 {
@@ -1602,14 +1613,20 @@ mod admission_tests {
         // Reading the renderer's numbers waits for the job in flight.
         let mut stats = unsafe { std::mem::zeroed::<FynkelAppleViewportStats>() };
         unsafe { fynkel_apple_viewport_take_stats(&vp, &mut stats) };
-        assert_eq!(stats.frames_rendered + stats.frames_dropped_no_free_buffer, 12);
+        assert_eq!(
+            stats.frames_rendered + stats.frames_dropped_no_free_buffer,
+            12
+        );
         assert!(stats.frames_rendered >= 3, "{}", stats.frames_rendered);
         assert!(stats.prepare_p50_us > 0 || stats.encode_p50_us > 0 || stats.frames_rendered > 0);
         // The ring has a finished frame to show.
         vp.ring.wait_idle();
         assert!(vp.ring.acquire_presented() >= 0);
         // Off again: the worker is joined and the call is synchronous.
-        assert_eq!(unsafe { fynkel_apple_viewport_set_pipelined(&mut vp, 0) }, 0);
+        assert_eq!(
+            unsafe { fynkel_apple_viewport_set_pipelined(&mut vp, 0) },
+            0
+        );
         assert!(unsafe { fynkel_apple_viewport_render(&mut vp, world) } >= -1);
         unsafe {
             fynkel_world_destroy(world);

@@ -1545,11 +1545,8 @@ impl World {
         if let Some(r) = memo.get(&e) {
             return *r;
         }
-        let Some((world, local, prev, parent)) = self
-            .gameplay
-            .ecs
-            .raw(e)
-            .and_then(|raw| poses.get(raw))
+        let Some((world, local, prev, parent)) =
+            self.gameplay.ecs.raw(e).and_then(|raw| poses.get(raw))
         else {
             return self.resolve_extract(e, alpha, memo);
         };
@@ -1577,7 +1574,12 @@ impl World {
         result
     }
 
-    fn resolve_extract(&self, e: Entity, alpha: f32, memo: &mut fynkel_contracts::FastMap<Entity, Mat4>) -> Mat4 {
+    fn resolve_extract(
+        &self,
+        e: Entity,
+        alpha: f32,
+        memo: &mut fynkel_contracts::FastMap<Entity, Mat4>,
+    ) -> Mat4 {
         if let Some(r) = memo.get(&e) {
             return *r;
         }
