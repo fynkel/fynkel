@@ -126,6 +126,12 @@ holds 4–16× more textures.
 - Texture memory and disk drop 4× (linear maps) to 9× (colour maps). The
   GPU reads fewer bytes per sample; on a bandwidth-bound phone that is
   frame time. How much is to be measured on the iPhone, not assumed.
+  *Measured 2026-10-06* (docs/foundation-f8-throughput-observations.md):
+  on dense-500 with 1024² maps on every material, the cooked textures
+  went from 130 MB to 28 MB and the app from 163 MB to 56 MB, and the
+  frame rate and GPU time did not change (90 fps with every effect, 120
+  without AO and contact shadows, either way): that scene's GPU time is
+  the screen-space passes, not texture reads.
 - Compression is lossy. 6×6 on a colour map is visible only on close,
   high-contrast detail; `high` or `none` per texture is the escape hatch.
   The renders the tests compare (showcase, reference game) change, so their

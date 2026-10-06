@@ -205,6 +205,30 @@ Not yet measured on the phone: dense-5000 (its 8+ ms tick frame plus the GPU
 put it near 60 and the phone throttles after ~2 s), and sustained runs longer
 than the 6-second capture.
 
+### Texture compression on the iPhone (ADR-0061), 2026-10-06
+
+The dense-500 app with `--textures`: every one of its 8 materials has a
+1024² colour, normal and metallic-roughness map (24 textures). Built twice,
+the maps cooked uncompressed (`none`) or with the ADR-0061 defaults (ASTC 6×6
+colour, 4×4 data); same scene, same native resolution, pipelined + queue 2 +
+5 buffers, nominal thermal state, captures alternated with 90 s between.
+
+| | uncompressed | ASTC | |
+| --- | --- | --- | --- |
+| cooked textures (`fynkel_cache`) | 130 MB | 28 MB | 4.6× smaller |
+| app (`Runner.app`) | 163 MB | 56 MB | 2.9× smaller |
+| medium (every effect): fresh frames/s | 89–92 | 89–90 | same |
+| medium: GPU frame p50 | 10.2–11.9 ms | 10.9–12.2 ms | same (noise) |
+| no AO, no contact shadows: fresh frames/s | 120 | 120 | same |
+| no AO, no contact shadows: GPU frame p50 | 6.30–6.54 ms | 6.27–6.54 ms | same |
+
+So on this scene compression buys memory, disk and download size, not frame
+time: the GPU's time is the screen-space passes and the resolve, not texture
+reads (the textured surfaces are small on screen and sample low mips). Where
+compression should show in frame time is a scene whose screen is covered by
+close, high-resolution textures; none of ours is that yet. The ADR's claim
+stands as written ("to be measured, not assumed"): measured, no change here.
+
 ## Next
 
 1. dense-5000 tick frame (8.6–9.5 ms): batch the movers' path (system →
