@@ -1,0 +1,15 @@
+{
+  "$schema": "https://fynkel.dev/schemas/volume.schema.json",
+  "formatVersion": 1,
+  "id": "e5b99afd-ca36-4e88-b1aa-289fa4c15022",
+  "name": "Look",
+  "ambientOcclusion": {
+    "radius": 0.6,
+    "intensity": 1.35
+  },
+  "bloom": {
+    "intensity": 0.6,
+    "threshold": 0.9,
+    "scatter": 0.7
+  }
+}

@@ -1,0 +1,14 @@
+# Unity generated
+Library/
+Temp/
+Logs/
+Build/
+obj/
+UserSettings/
+*.csproj
+*.sln
+.idea/
+.vs/
+# Copied comparison assets (Sponza: CRYENGINE licence, benchmarking only; not committed)
+Assets/Models/
+Assets/Models.meta

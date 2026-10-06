@@ -1,0 +1,25 @@
+{
+  "$schema": "https://fynkel.dev/schemas/meta.schema.json",
+  "formatVersion": 2,
+  "id": "a0334e32-da97-4882-a67b-05cbe1e4a7a3",
+  "name": "character.glb",
+  "importer": "fynkel.gltf",
+  "importerVersion": 1,
+  "settings": {},
+  "subAssets": {
+    "mesh/Body": "69f72b38-8aee-5fe8-b2f6-404244d50b38",
+    "skin/Skeleton": "f829039c-43c1-52f0-930e-23a25a4cb3dc",
+    "anim/idle": "2cb9e579-668c-579d-8610-adf4605c3b21",
+    "anim/walk": "7d66969f-e2ad-5081-bacc-9169673886cd",
+    "anim/run": "7ad1cf88-7280-5a3d-87d0-96f784932ac0",
+    "anim/jump": "b3c3f62d-e703-522a-b9ea-3abb24744f98",
+    "anim/wave": "4283d3fc-125e-5217-b993-6a61aa0a6b4f",
+    "anim/walk_back": "f244814b-8c78-588c-a872-0324a1eaea74",
+    "anim/walk_left": "71a6e0eb-261d-5b0b-8567-f1175a6619c8",
+    "anim/walk_right": "3c8b2fc7-d99d-5fd6-afbd-45fe86079fb9",
+    "anim/run_back": "7323c85b-83cd-585d-b7bb-d6a819ea41f8",
+    "anim/run_left": "8c8ed321-bddf-55a3-b346-3af050a1df04",
+    "anim/run_right": "2e7d4a09-309f-5e70-b2ce-33cd708d9234",
+    "prefab": "809ca702-9dd6-59ea-aea9-a7e08fce67c9"
+  }
+}
