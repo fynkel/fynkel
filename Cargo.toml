@@ -14,7 +14,11 @@ fynkel_world = { path = "crates/fynkel_world" }
 fynkel_render = { path = "crates/fynkel_render" }
 fynkel_present = { path = "crates/fynkel_present" }
 hecs = "0.11.2"
-glam = "0.34.1"
+glam = { version = "0.34.1", features = ["bytemuck"] }
+wgpu = "30.0.1"
+bytemuck = { version = "1.25.2", features = ["derive"] }
+pollster = "1.0.1"
+png = "0.18.1"
 
 # Unsafe code is denied everywhere. `fynkel_ffi` (the C boundary) and the
 # platform modules of `fynkel_present` allow it locally, and nothing else.
