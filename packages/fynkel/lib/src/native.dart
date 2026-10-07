@@ -46,6 +46,7 @@ final class Scratch {
   final light = malloc<FyLight>();
   final meshRenderer = malloc<FyMeshRenderer>();
   final material = malloc<FyMaterial>();
+  final viewStats = malloc<FyViewStats>();
 }
 
 final scratch = Scratch();
