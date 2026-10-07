@@ -1,0 +1,19 @@
+[package]
+name = "fynkel_ffi"
+description = "The C interface Dart calls: extracts the world, runs the render thread."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["rlib", "staticlib", "cdylib"]
+
+[dependencies]
+fynkel_world.workspace = true
+fynkel_render.workspace = true
+fynkel_present.workspace = true

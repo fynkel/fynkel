@@ -1,0 +1,39 @@
+# Runs on every push to main and every pull request.
+#
+# The runner is self-hosted on the developer's Mac (label `fynkel`,
+# ~/actions-runner as a launchd service). It uses the machine's rustup,
+# which installs the toolchain pinned in rust-toolchain.toml. `target/` is
+# kept between runs for speed; everything else is cleaned, so each run
+# starts from the commit alone.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  rust:
+    runs-on: [self-hosted, macOS, fynkel]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+      - name: clean (all but target/)
+        run: git clean -ffdx -e /target/ && git reset --hard HEAD
+      - name: toolchain
+        run: rustup show active-toolchain
+      - name: fmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace
