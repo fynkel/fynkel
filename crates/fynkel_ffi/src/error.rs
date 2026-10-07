@@ -41,6 +41,8 @@ pub enum FyStatus {
     /// An earlier call panicked while changing this world, so it can't be
     /// trusted any more.
     Poisoned = 13,
+    /// Not available on this platform, or not for this kind of view.
+    Unsupported = 14,
 }
 
 /// A failed call: its status and its message.

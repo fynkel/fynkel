@@ -53,6 +53,8 @@ struct Mailbox {
     /// Scene buffers ready for reuse.
     spare: Vec<RenderScene>,
     ops: Vec<MeshOp>,
+    /// A new size for the target, applied before the next scene is drawn.
+    size: Option<(u32, u32)>,
     stop: bool,
     /// Why the worker stopped, if it panicked.
     failure: Option<String>,
@@ -68,11 +70,14 @@ impl Worker {
             let shared = shared.clone();
             move || {
                 let result = panic::catch_unwind(AssertUnwindSafe(|| run(&shared, &gpu, renderer, target)));
-                if let Err(payload) = result {
-                    let mut mailbox = shared.lock();
-                    mailbox.failure = Some(format!("the render worker panicked: {}", panic_message(&*payload)));
-                    mailbox.pending = None;
-                }
+                let failure = match result {
+                    Ok(Ok(())) => return,
+                    Ok(Err(failure)) => failure,
+                    Err(payload) => format!("the render worker panicked: {}", panic_message(&*payload)),
+                };
+                let mut mailbox = shared.lock();
+                mailbox.failure = Some(failure);
+                mailbox.pending = None;
             }
         })?;
         Ok(Self { shared, thread: Some(thread) })
@@ -102,12 +107,22 @@ impl Worker {
         Ok(())
     }
 
+    /// Draws the scenes posted from now on at `width` × `height`. Fails
+    /// only when the worker has stopped.
+    pub(crate) fn resize(&self, width: u32, height: u32) -> Result<(), String> {
+        let mut mailbox = self.shared.lock();
+        if let Some(failure) = &mailbox.failure {
+            return Err(failure.clone());
+        }
+        mailbox.size = Some((width, height));
+        Ok(())
+    }
+
     /// Why the worker stopped, if it did.
     pub(crate) fn failure(&self) -> Option<String> {
         self.shared.lock().failure.clone()
     }
 
-    #[cfg(test)]
     pub(crate) fn stats(&self) -> WorkerStats {
         self.shared.lock().stats
     }
@@ -139,23 +154,27 @@ impl Shared {
     }
 }
 
-fn run<T: Target>(shared: &Shared, gpu: &Gpu, mut renderer: Renderer, mut target: T) {
+/// Draws until stopped. Fails when the target can't take a new size.
+fn run<T: Target>(shared: &Shared, gpu: &Gpu, mut renderer: Renderer, mut target: T) -> Result<(), String> {
     let mut ops = Vec::new();
     loop {
-        let (number, scene) = {
+        let (number, scene, size) = {
             let mut mailbox = shared.lock();
             loop {
                 if mailbox.stop {
-                    return;
+                    return Ok(());
                 }
-                if let Some(posted) = mailbox.pending.take() {
+                if let Some((number, scene)) = mailbox.pending.take() {
                     std::mem::swap(&mut mailbox.ops, &mut ops);
-                    break posted;
+                    break (number, scene, mailbox.size.take());
                 }
                 mailbox = shared.wake.wait(mailbox).unwrap_or_else(PoisonError::into_inner);
             }
         };
 
+        if let Some((width, height)) = size {
+            target.resize(width, height).map_err(|e| format!("couldn't resize the view to {width} × {height}: {e}"))?;
+        }
         for op in ops.drain(..) {
             match op {
                 MeshOp::Upload(key, source) => renderer.upload_mesh(key, &mesh_data(source)),

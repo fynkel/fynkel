@@ -31,4 +31,9 @@ pub trait Target: Send {
     /// `number` is the frame's number from the caller, for targets that
     /// report which frame they show.
     fn finish(&mut self, frame: Self::Frame, encoder: wgpu::CommandEncoder, number: u64);
+
+    /// Draws later frames at `width` × `height` (each at least 1). Frames
+    /// already begun finish at the old size. Fails only when the platform
+    /// can't make textures of that size.
+    fn resize(&mut self, width: u32, height: u32) -> Result<(), String>;
 }

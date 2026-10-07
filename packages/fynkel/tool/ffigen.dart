@@ -13,6 +13,8 @@ import 'package:ffigen/ffigen.dart';
 /// VM can collect garbage and run other isolates while they run.
 const _blocking = {
   'fy_view_new_headless', // creates a GPU device and starts a thread
+  'fy_view_new_apple', // the same
+  'fy_apple_set_frame_ready', // waits for a frame-ready call in progress
   'fy_view_free', // joins the render worker
   'fy_view_read', // waits for the GPU
 };

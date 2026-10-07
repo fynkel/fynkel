@@ -101,6 +101,9 @@ impl Target for Nowhere {
     fn finish(&mut self, _: (), _: wgpu::CommandEncoder, _: u64) {
         unreachable!("never begun")
     }
+    fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+        self.0.resize(width, height)
+    }
 }
 
 #[test]
@@ -135,6 +138,9 @@ impl Target for Boom {
     fn finish(&mut self, _: (), _: wgpu::CommandEncoder, number: u64) {
         panic!("boom in frame {number}");
     }
+    fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+        Err(format!("no room for {width} × {height}"))
+    }
 }
 
 #[test]
@@ -161,4 +167,18 @@ fn dropping_the_worker_stops_it_even_with_a_scene_waiting() {
         worker.post(2, RenderScene::default(), &mut Vec::new()).unwrap();
         drop(worker);
     }
+}
+
+#[test]
+fn a_resize_the_target_refuses_stops_the_worker_with_a_clear_message() {
+    let gpu = gpu();
+    let worker = start(&gpu, Boom(headless(&gpu).0));
+    worker.resize(9, 9).unwrap();
+    worker.post(1, worker.scene(), &mut Vec::new()).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while worker.failure().is_none() && std::time::Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    assert_eq!(worker.failure().as_deref(), Some("couldn't resize the view to 9 × 9: no room for 9 × 9"));
+    assert_eq!(worker.resize(10, 10), Err(worker.failure().unwrap()), "later calls report it");
 }

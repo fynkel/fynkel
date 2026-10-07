@@ -13,5 +13,14 @@ workspace = true
 [dependencies]
 wgpu.workspace = true
 
+# The Apple target: IOSurfaces imported into wgpu as Metal textures.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+wgpu-hal = { version = "30.0.1", features = ["metal"] }
+objc2 = "0.6.5"
+block2 = "0.6.2"
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFBase", "CFDictionary", "CFNumber", "CFString"] }
+objc2-io-surface = { version = "0.3.2", default-features = false, features = ["std", "IOSurfaceRef", "IOSurfaceTypes", "libc", "objc2-core-foundation"] }
+objc2-metal = { version = "0.3.2", default-features = false, features = ["std", "block2", "objc2-io-surface", "MTLAllocation", "MTLCommandBuffer", "MTLCommandQueue", "MTLDevice", "MTLPixelFormat", "MTLResource", "MTLTexture", "MTLTypes"] }
+
 [dev-dependencies]
 pollster.workspace = true

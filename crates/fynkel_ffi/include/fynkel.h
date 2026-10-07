@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 1
+#define FY_ABI_VERSION 2
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -26,6 +26,13 @@
 
 // `fy_mesh_add`'s shape: a 1×1 plane facing +Y.
 #define FY_MESH_PLANE 2
+
+// `fy_apple_acquire`: a surface was written to `out_surface`.
+#define FY_APPLE_SHOWN 1
+
+// `fy_apple_acquire`: another finished frame is waiting; ask Flutter for
+// one more frame.
+#define FY_APPLE_MORE 2
 
 // What a `fy_*` call returns. Anything but `Ok` leaves a message for
 // `fy_last_error`.
@@ -61,6 +68,8 @@ enum FyStatus
   // An earlier call panicked while changing this world, so it can't be
   // trusted any more.
   FY_STATUS_POISONED = 13,
+  // Not available on this platform, or not for this kind of view.
+  FY_STATUS_UNSUPPORTED = 14,
 };
 #ifndef __cplusplus
 #if __STDC_VERSION__ >= 202311L
@@ -135,6 +144,27 @@ typedef struct FyMaterial {
   // 0–1.
   float roughness;
 } FyMaterial;
+
+// What a view did since it was made.
+typedef struct FyViewStats {
+  // Scenes handed to the render worker by `fy_view_frame`.
+  uint64_t posted;
+  // Scenes drawn.
+  uint64_t rendered;
+  // Scenes replaced by a newer one before they were drawn.
+  uint64_t coalesced;
+  // Scenes not drawn because the target had nowhere to draw.
+  uint64_t skipped;
+  // Apple: new frames taken by Flutter (`fy_apple_acquire`). 0 for
+  // other views.
+  uint64_t presented;
+  // Apple: frames finished but never shown, because newer ones were
+  // waiting.
+  uint64_t dropped;
+} FyViewStats;
+
+// Called on a GPU thread each time an Apple view finishes a frame.
+typedef void (*FyFrameReady)(void *userdata);
 
 #ifdef __cplusplus
 extern "C" {
@@ -309,6 +339,19 @@ FyStatus fy_view_new_headless(const struct FyWorld *world,
                               uint32_t height,
                               struct FyView **out);
 
+// A view of `world` that draws into a ring of IOSurfaces for Flutter to
+// show (macOS and iOS; `FY_STATUS_UNSUPPORTED` elsewhere). The Flutter
+// plugin shows them with `fy_apple_acquire` and learns of new frames
+// through `fy_apple_set_frame_ready`. Free it with `fy_view_free`.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FyStatus fy_view_new_apple(const struct FyWorld *world,
+                           uint32_t width,
+                           uint32_t height,
+                           struct FyView **out);
+
 // Stops a view's render worker (after the frame it's drawing) and frees
 // the view. Null is ignored.
 //
@@ -342,6 +385,42 @@ FyStatus fy_view_read(const struct FyView *view,
                       uint8_t *rgba,
                       size_t len,
                       uint64_t *out_number);
+
+// Draws the frames from the next `fy_view_frame` on at `width` × `height`
+// pixels. Frames already on their way finish at the old size and, on
+// Apple, are never shown.
+//
+// # Safety
+//
+// `view` is null or live.
+FyStatus fy_view_resize(const struct FyView *view, uint32_t width, uint32_t height);
+
+// # Safety
+//
+// `view` is null or live; `out` is null or writable.
+FyStatus fy_view_stats(const struct FyView *view, struct FyViewStats *out);
+
+// For Flutter's raster thread: the IOSurface to show now. Returns
+// `FY_APPLE_SHOWN` (plus `FY_APPLE_MORE` when another frame waits) and
+// writes the surface, retained once for the caller, to `out_surface`; or 0
+// with nothing written, when there's no frame yet or `view` isn't an Apple
+// view. Never blocks on the GPU and allocates nothing.
+//
+// # Safety
+//
+// `view` is null or live; `out_surface` is null or writable. The caller
+// releases the surface (`CFRelease`).
+uint32_t fy_apple_acquire(const struct FyView *view, void **out_surface);
+
+// Sets the function an Apple view calls, on a GPU thread, each time a
+// frame finishes (null for none). Waits for a call in progress, so once
+// this returns the old `userdata` is no longer used.
+//
+// # Safety
+//
+// `view` is null or live; `function` must be safe to call with `userdata`
+// from any thread until it is replaced.
+FyStatus fy_apple_set_frame_ready(const struct FyView *view, FyFrameReady function, void *userdata);
 
 #ifdef __cplusplus
 }  // extern "C"
