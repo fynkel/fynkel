@@ -17,3 +17,7 @@ crate-type = ["rlib", "staticlib", "cdylib"]
 fynkel_world.workspace = true
 fynkel_render.workspace = true
 fynkel_present.workspace = true
+
+[dev-dependencies]
+fynkel_golden.workspace = true
+cbindgen.workspace = true
