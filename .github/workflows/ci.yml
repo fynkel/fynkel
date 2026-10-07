@@ -37,6 +37,20 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace
+      # package:fynkel. Its build hook compiles fynkel_ffi; its tests draw
+      # the stage 1 scene from Dart to the same golden image. The bindings
+      # are generated again from the header and must match the committed
+      # ones, so the Dart and C sides can't drift apart.
+      - name: dart (package:fynkel)
+        working-directory: packages/fynkel
+        run: |
+          export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
+          dart pub get
+          dart format -l 120 --output=none --set-exit-if-changed .
+          dart analyze --fatal-infos
+          dart run tool/ffigen.dart
+          git diff --exit-code lib/src/bindings.g.dart
+          dart test
       # The same GPU tests inside the iOS Simulator and the Android
       # emulator: fast testing in simulators is how Flutter developers
       # work, so it must never silently break.
