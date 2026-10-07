@@ -120,9 +120,11 @@ fy_frame():
 - A forward pass with 4× MSAA (cheap on tile GPUs, because the multisample buffer stays in on-chip memory), resolved into the target.
 - Reversed-Z with `Depth32Float`, for better depth precision than standard Z.
 - The material is metallic-roughness PBR: base colour, metallic and roughness. Colours are given in sRGB, as in a colour picker, and converted to linear once.
-- **Units:** unitless and documented. A sun of intensity 1.0 shows a white, rough, sun-facing surface at its albedo. Ambient is a colour times an intensity. Output goes through the Khronos PBR Neutral tonemapper, which keeps albedo colours true, into an sRGB target.
+- **Units:** unitless. Before tonemapping, a sun of intensity 1.0 makes a rough surface that faces it reflect exactly its albedo (Lambert diffuse), plus a small specular term. The same goes for an ambient of 1.0 on its own. The Khronos PBR Neutral tonemapper then subtracts a small offset (0.04 in linear, to cancel the Fresnel reflection every surface has) and rolls highlights off above 0.76. So a lit mid-grey shows a few levels darker than its picked colour, and colours stay true otherwise. A test checks the GPU against a CPU copy of these formulas, to within 1/255.
+- **sRGB views only.** The renderer draws into an sRGB view, so the hardware encodes and the MSAA resolve averages in linear light. Resolving into a plain format averaged encoded values and darkened every edge by up to 47/255 (found by a test). A plain-format texture or surface still works through an sRGB view of itself (`view_formats`).
+- **Instancing.** Per-draw data lives in an instance buffer, and draws are sorted by mesh, so each mesh is one draw call. 1,000 cubes is 1 call. This cut wgpu's own allocations per frame from 1,072 to about 69.
 - Primitives are generated in code: a cube with 24 vertices and flat normals, a UV sphere, and a plane.
-- Not in stage 1: shadows, textures, more than one light, a hierarchy, culling or instancing. One draw per object is fine at this scale.
+- Not in stage 1: shadows, textures, more than one light, a hierarchy, or culling.
 
 ### 3.7 Measuring
 
@@ -144,16 +146,19 @@ fail first.
 - Cargo workspace (the four crates, each still empty), `rustfmt.toml`, clippy with warnings as errors, `deny(unsafe_code)` everywhere except `fynkel_ffi` and the platform modules of `fynkel_present`.
 - CI on the self-hosted runner (label `fynkel`) runs fmt, clippy and tests.
 - *Done when* CI is green on a PR. A deliberately broken format makes it red, and that breakage is then reverted.
+- ✅ Done 2026-10-07 (PR #1).
 
 **Step 1: `fynkel_world`**
 - `ObjectId`, spawn/despawn, the ID→entity map, the four components, `Component::fields()`, and mesh/material resource IDs.
 - *Done when* tests show that IDs are never reused after despawn, a stale ID gives `NoObject`, every component's field defaults match `Default`, and spawning or despawning 100k objects stays within a measured budget (recorded, not guessed).
+- ✅ Done 2026-10-07 (PR #2).
 
 **Step 2: `fynkel_render`, headless**
-- `RenderScene`, primitives, the PBR pipeline, MSAA, reversed-Z, the tonemapper, and the headless target in `fynkel_present`.
+- `RenderScene`, primitives, the PBR pipeline, MSAA, reversed-Z and the tonemapper. Getting a headless GPU (`Gpu::headless`) lives in `fynkel_render`, because every caller needs it. The `Target` for headless frames comes with the ring in `fynkel_present`.
 - Golden test: render the stage 1 scene at 256×256 and compare it with `tests/golden/cube.png`. Each channel may differ by at most 2/255, and at most 0.1 % of pixels may be outside that. References are only regenerated on purpose (`FYNKEL_BLESS=1`), and the image goes in the commit for review.
-- More golden tests: a sphere lit from four sun directions, which checks the lighting maths; and a white plane at intensity 1.0, which checks the unit definition in §3.6.
-- *Done when* the golden tests pass in CI and a test proves a steady-state frame makes zero heap allocations.
+- More golden tests: a sphere lit from four sun directions, which checks the lighting maths, plus a mixed instanced scene. A plane facing the sun and camera checks the unit definition in §3.6 against the CPU formulas.
+- *Done when* the golden tests pass in CI and a test proves a steady-state `prepare` makes zero heap allocations. wgpu allocates inside `encode` and submit, which our code can't avoid, so that number is recorded rather than asserted.
+- ✅ Done 2026-10-07 (see §7).
 
 **Step 3: `fynkel_present`, the ring**
 - The slot state machine and the frame-queue rules from §3.5, with no GPU.
@@ -217,3 +222,22 @@ often, costs about 30 ns with full validation. A frame that moves 10,000
 objects spends 0.3 ms in the world. Walking every drawable object, which
 the renderer's extract will do each frame, is close to free. Nothing here
 needs optimising now.
+
+### Step 2: `fynkel_render` (2026-10-07, M3 Max Mac, release build)
+
+`cargo run --release -p fynkel_render --example bench`: a 1280×720 target
+with 4× MSAA, moving cubes, best of 50 frames.
+
+| Cubes | `prepare` (CPU) | Whole frame (prepare, encode, submit, wait for GPU) |
+|---|---|---|
+| 1 | 0.000 ms | 0.43 ms |
+| 1,000 | 0.010 ms | 0.55 ms |
+| 10,000 | 0.096 ms | 0.99 ms |
+
+Allocations in a steady frame with 1,000 draws: 0 in `prepare` (asserted).
+wgpu makes about 69 in `encode` + submit; that was 1,072 before draws were
+instanced by mesh.
+
+What this means: at 120 fps a frame has 8.3 ms. 10,000 moving cubes take
+under 1 ms on this Mac, including waiting for the GPU. The phone will be
+slower, and steps 5–7 measure it there.
