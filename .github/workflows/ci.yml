@@ -37,3 +37,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace
+      # The same GPU tests inside the iOS Simulator and the Android
+      # emulator: fast testing in simulators is how Flutter developers
+      # work, so it must never silently break.
+      - name: GPU tests in the iOS Simulator and Android emulator
+        run: tools/test-mobile.sh
