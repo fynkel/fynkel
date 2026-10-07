@@ -181,11 +181,11 @@ fail first.
 
 **Step 6: iOS**
 - The same app on the iPhone 16 Pro Max.
-- *Done when* it holds 120 fresh fps at native resolution over 60 s with no throttling, and the same create/destroy and resize checks pass.
+- *Done when* it holds 120 fresh fps at native resolution over 60 s with no throttling, and the same create/destroy and resize checks pass. `examples/hello` must also run in the **iOS Simulator** with `flutter run`, with the cube spinning smoothly, and with hot reload of the Dart game code working. The simulator's frame rate isn't a performance number.
 
 **Step 7: Android**
 - A Kotlin plugin (`SurfaceProducer`), the `ANativeWindow` → wgpu surface, the Android `Target`, and the build hook producing `arm64-v8a` and `x86_64`.
-- *Done when* the cube runs on the emulator (`Medium_Phone_API_36.0`) and on a physical device at its display rate, including app pause/resume (the surface is destroyed and recreated) and rotation. The physical device needs one to be connected.
+- *Done when* the cube runs with `flutter run` on the **emulator** (`Medium_Phone_API_36.0`), with hot reload working, and on a physical device at its display rate, including app pause/resume (the surface is destroyed and recreated) and rotation. The physical device needs one to be connected.
 
 **Step 8: the stage 1 check**
 - Run hello on all three platforms and write a short report with the numbers.
