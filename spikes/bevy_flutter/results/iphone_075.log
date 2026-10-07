@@ -1,0 +1,76 @@
+[spike] created 990x2151 in 65 ms (texture 0)
+[spike] fresh 65.9 fps | bevy frames 103 coalesced 2 presented 66 | update p50 2.42 p95 6.55 ms | gpu p50 3.88 p95 6.35 ms | dart p50 0.013 p95 0.022 ms | 990x2151 | rss 199 MB | thermal 0
+[spike] first frame within 985 ms of create (1 s stats granularity)
+[spike] fresh 105.9 fps | bevy frames 120 coalesced 0 presented 106 | update p50 2.55 p95 2.91 ms | gpu p50 5.25 p95 5.99 ms | dart p50 0.016 p95 0.028 ms | 990x2151 | rss 201 MB | thermal 0
+[spike] fresh 100.0 fps | bevy frames 120 coalesced 0 presented 100 | update p50 2.61 p95 3.47 ms | gpu p50 5.22 p95 5.77 ms | dart p50 0.016 p95 0.031 ms | 990x2151 | rss 198 MB | thermal 0
+[spike] fresh 106.0 fps | bevy frames 120 coalesced 0 presented 106 | update p50 2.61 p95 3.03 ms | gpu p50 5.14 p95 5.87 ms | dart p50 0.016 p95 0.026 ms | 990x2151 | rss 193 MB | thermal 0
+[spike] fresh 105.0 fps | bevy frames 120 coalesced 0 presented 105 | update p50 2.64 p95 2.92 ms | gpu p50 5.16 p95 5.62 ms | dart p50 0.016 p95 0.026 ms | 990x2151 | rss 189 MB | thermal 0
+[spike] fresh 99.0 fps | bevy frames 120 coalesced 0 presented 99 | update p50 2.70 p95 3.10 ms | gpu p50 5.18 p95 5.75 ms | dart p50 0.017 p95 0.034 ms | 990x2151 | rss 189 MB | thermal 0
+[spike] fresh 106.1 fps | bevy frames 120 coalesced 0 presented 106 | update p50 2.64 p95 2.97 ms | gpu p50 5.12 p95 5.73 ms | dart p50 0.017 p95 0.026 ms | 990x2151 | rss 189 MB | thermal 0
+[spike] fresh 102.0 fps | bevy frames 120 coalesced 0 presented 102 | update p50 2.66 p95 2.98 ms | gpu p50 5.08 p95 5.75 ms | dart p50 0.017 p95 0.036 ms | 990x2151 | rss 189 MB | thermal 0
+[spike] fresh 101.0 fps | bevy frames 120 coalesced 0 presented 101 | update p50 2.68 p95 2.88 ms | gpu p50 5.17 p95 5.78 ms | dart p50 0.017 p95 0.027 ms | 990x2151 | rss 190 MB | thermal 0
+[spike] fresh 107.0 fps | bevy frames 120 coalesced 0 presented 107 | update p50 2.67 p95 2.99 ms | gpu p50 5.16 p95 5.58 ms | dart p50 0.017 p95 0.027 ms | 990x2151 | rss 189 MB | thermal 0
+[spike] fresh 106.0 fps | bevy frames 120 coalesced 0 presented 106 | update p50 2.63 p95 2.90 ms | gpu p50 5.07 p95 5.85 ms | dart p50 0.016 p95 0.033 ms | 990x2151 | rss 190 MB | thermal 0
+[spike] fresh 109.0 fps | bevy frames 120 coalesced 0 presented 109 | update p50 2.62 p95 2.84 ms | gpu p50 5.17 p95 5.74 ms | dart p50 0.017 p95 0.025 ms | 990x2151 | rss 189 MB | thermal 0
+[spike] fresh 107.2 fps | bevy frames 120 coalesced 0 presented 107 | update p50 2.67 p95 3.03 ms | gpu p50 5.08 p95 5.67 ms | dart p50 0.017 p95 0.028 ms | 990x2151 | rss 189 MB | thermal 0
+[spike] fresh 105.9 fps | bevy frames 120 coalesced 0 presented 106 | update p50 2.62 p95 2.83 ms | gpu p50 5.16 p95 5.68 ms | dart p50 0.016 p95 0.026 ms | 990x2151 | rss 189 MB | thermal 0
+[spike] fresh 104.1 fps | bevy frames 120 coalesced 0 presented 104 | update p50 2.64 p95 2.90 ms | gpu p50 5.29 p95 5.68 ms | dart p50 0.017 p95 0.025 ms | 990x2151 | rss 189 MB | thermal 0
+[spike] fresh 105.0 fps | bevy frames 120 coalesced 0 presented 105 | update p50 2.58 p95 2.87 ms | gpu p50 5.09 p95 5.67 ms | dart p50 0.016 p95 0.027 ms | 990x2151 | rss 189 MB | thermal 0
+[spike] STEADY 990x2151: fresh fps min 101.0 median 106.0 max 109.0 over 10 s
+[spike] resize -> 594x1291: 1.52 ms
+[spike] fresh 110.0 fps | bevy frames 119 coalesced 0 presented 110 | update p50 2.65 p95 2.98 ms | gpu p50 4.48 p95 5.70 ms | dart p50 0.018 p95 0.028 ms | 594x1291 | rss 190 MB | thermal 0
+[spike] fresh 109.0 fps | bevy frames 120 coalesced 0 presented 109 | update p50 2.74 p95 3.07 ms | gpu p50 4.81 p95 5.67 ms | dart p50 0.019 p95 0.030 ms | 594x1291 | rss 189 MB | thermal 0
+[spike] resize -> 990x2151: 2.13 ms
+[spike] fresh 94.0 fps | bevy frames 119 coalesced 0 presented 94 | update p50 2.70 p95 3.10 ms | gpu p50 5.11 p95 5.83 ms | dart p50 0.017 p95 0.034 ms | 990x2151 | rss 190 MB | thermal 0
+[spike] fresh 105.0 fps | bevy frames 120 coalesced 0 presented 105 | update p50 2.64 p95 2.98 ms | gpu p50 5.13 p95 5.76 ms | dart p50 0.016 p95 0.025 ms | 990x2151 | rss 189 MB | thermal 0
+[spike] resize -> 743x1613: 1.33 ms
+[spike] fresh 111.0 fps | bevy frames 119 coalesced 0 presented 111 | update p50 2.56 p95 3.05 ms | gpu p50 5.03 p95 5.64 ms | dart p50 0.017 p95 0.026 ms | 743x1613 | rss 190 MB | thermal 0
+[spike] fresh 105.0 fps | bevy frames 120 coalesced 0 presented 105 | update p50 2.65 p95 2.96 ms | gpu p50 5.04 p95 5.79 ms | dart p50 0.018 p95 0.028 ms | 743x1613 | rss 189 MB | thermal 0
+[spike] resize -> 495x1076: 1.14 ms
+[spike] fresh 114.0 fps | bevy frames 119 coalesced 0 presented 114 | update p50 2.72 p95 3.04 ms | gpu p50 4.59 p95 5.39 ms | dart p50 0.019 p95 0.024 ms | 495x1076 | rss 190 MB | thermal 0
+[spike] fresh 116.0 fps | bevy frames 120 coalesced 0 presented 116 | update p50 2.76 p95 3.04 ms | gpu p50 4.53 p95 5.46 ms | dart p50 0.019 p95 0.023 ms | 495x1076 | rss 189 MB | thermal 0
+[spike] resize -> 891x1936: 4.00 ms
+[spike] fresh 103.0 fps | bevy frames 119 coalesced 0 presented 103 | update p50 2.62 p95 3.00 ms | gpu p50 4.75 p95 5.71 ms | dart p50 0.018 p95 0.031 ms | 891x1936 | rss 190 MB | thermal 0
+[spike] fresh 94.1 fps | bevy frames 120 coalesced 0 presented 94 | update p50 2.74 p95 3.01 ms | gpu p50 5.12 p95 5.63 ms | dart p50 0.018 p95 0.038 ms | 891x1936 | rss 190 MB | thermal 0
+[spike] resize -> 990x2151: 1.78 ms
+[spike] fresh 104.0 fps | bevy frames 119 coalesced 0 presented 104 | update p50 2.65 p95 2.90 ms | gpu p50 5.12 p95 5.66 ms | dart p50 0.017 p95 0.027 ms | 990x2151 | rss 189 MB | thermal 0
+[spike] fresh 102.1 fps | bevy frames 120 coalesced 0 presented 102 | update p50 2.65 p95 3.03 ms | gpu p50 5.09 p95 5.70 ms | dart p50 0.017 p95 0.030 ms | 990x2151 | rss 190 MB | thermal 0
+[spike] RESIZE 6x: max 4.00 ms, frames resumed after every one
+[spike] created 990x2151 in 48 ms (texture 1)
+[spike] fresh 93.9 fps | bevy frames 108 coalesced 3 presented 93 | update p50 2.64 p95 4.34 ms | gpu p50 4.84 p95 5.76 ms | dart p50 0.016 p95 0.030 ms | 990x2151 | rss 199 MB | thermal 0
+[spike] fresh 107.0 fps | bevy frames 120 coalesced 0 presented 107 | update p50 2.60 p95 3.00 ms | gpu p50 5.06 p95 5.75 ms | dart p50 0.016 p95 0.034 ms | 990x2151 | rss 199 MB | thermal 0
+[spike] created 990x2151 in 45 ms (texture 2)
+[spike] fresh 88.0 fps | bevy frames 99 coalesced 3 presented 88 | update p50 2.57 p95 4.42 ms | gpu p50 4.34 p95 5.71 ms | dart p50 0.016 p95 0.024 ms | 990x2151 | rss 198 MB | thermal 0
+[spike] fresh 110.0 fps | bevy frames 120 coalesced 0 presented 110 | update p50 2.63 p95 3.00 ms | gpu p50 5.10 p95 5.62 ms | dart p50 0.016 p95 0.031 ms | 990x2151 | rss 197 MB | thermal 0
+[spike] created 990x2151 in 47 ms (texture 3)
+[spike] fresh 90.0 fps | bevy frames 103 coalesced 2 presented 90 | update p50 2.60 p95 4.48 ms | gpu p50 4.45 p95 5.68 ms | dart p50 0.016 p95 0.025 ms | 990x2151 | rss 193 MB | thermal 0
+[spike] fresh 105.0 fps | bevy frames 120 coalesced 0 presented 105 | update p50 2.66 p95 2.87 ms | gpu p50 5.16 p95 5.61 ms | dart p50 0.017 p95 0.024 ms | 990x2151 | rss 193 MB | thermal 0
+[spike] created 990x2151 in 46 ms (texture 4)
+[spike] fresh 92.1 fps | bevy frames 105 coalesced 3 presented 92 | update p50 2.63 p95 4.37 ms | gpu p50 4.55 p95 5.75 ms | dart p50 0.016 p95 0.034 ms | 990x2151 | rss 194 MB | thermal 0
+[spike] fresh 100.9 fps | bevy frames 120 coalesced 0 presented 101 | update p50 2.64 p95 3.04 ms | gpu p50 5.05 p95 5.81 ms | dart p50 0.016 p95 0.032 ms | 990x2151 | rss 193 MB | thermal 0
+[spike] created 990x2151 in 47 ms (texture 5)
+[spike] fresh 98.1 fps | bevy frames 108 coalesced 3 presented 98 | update p50 2.56 p95 4.48 ms | gpu p50 4.67 p95 5.76 ms | dart p50 0.015 p95 0.024 ms | 990x2151 | rss 194 MB | thermal 0
+[spike] fresh 104.9 fps | bevy frames 120 coalesced 0 presented 105 | update p50 2.58 p95 2.80 ms | gpu p50 5.16 p95 5.64 ms | dart p50 0.016 p95 0.024 ms | 990x2151 | rss 193 MB | thermal 0
+[spike] created 990x2151 in 47 ms (texture 6)
+[spike] fresh 83.0 fps | bevy frames 99 coalesced 2 presented 83 | update p50 2.57 p95 4.47 ms | gpu p50 4.29 p95 5.67 ms | dart p50 0.016 p95 0.030 ms | 990x2151 | rss 194 MB | thermal 0
+[spike] fresh 109.0 fps | bevy frames 120 coalesced 0 presented 109 | update p50 2.59 p95 3.00 ms | gpu p50 5.05 p95 5.74 ms | dart p50 0.016 p95 0.025 ms | 990x2151 | rss 194 MB | thermal 0
+[spike] created 990x2151 in 47 ms (texture 7)
+[spike] fresh 85.0 fps | bevy frames 100 coalesced 3 presented 85 | update p50 2.65 p95 4.12 ms | gpu p50 4.37 p95 5.89 ms | dart p50 0.016 p95 0.026 ms | 990x2151 | rss 195 MB | thermal 0
+[spike] fresh 103.1 fps | bevy frames 120 coalesced 0 presented 103 | update p50 2.63 p95 2.90 ms | gpu p50 5.22 p95 5.74 ms | dart p50 0.017 p95 0.026 ms | 990x2151 | rss 194 MB | thermal 0
+[spike] created 990x2151 in 47 ms (texture 8)
+[spike] fresh 85.0 fps | bevy frames 103 coalesced 3 presented 85 | update p50 2.61 p95 4.34 ms | gpu p50 4.95 p95 5.75 ms | dart p50 0.016 p95 0.028 ms | 990x2151 | rss 195 MB | thermal 0
+[spike] fresh 111.0 fps | bevy frames 120 coalesced 0 presented 111 | update p50 2.61 p95 2.81 ms | gpu p50 5.12 p95 5.66 ms | dart p50 0.016 p95 0.024 ms | 990x2151 | rss 194 MB | thermal 0
+[spike] created 990x2151 in 47 ms (texture 9)
+[spike] fresh 92.0 fps | bevy frames 107 coalesced 2 presented 92 | update p50 2.52 p95 4.41 ms | gpu p50 4.75 p95 5.68 ms | dart p50 0.015 p95 0.024 ms | 990x2151 | rss 195 MB | thermal 0
+[spike] fresh 105.0 fps | bevy frames 120 coalesced 0 presented 105 | update p50 2.59 p95 2.96 ms | gpu p50 5.10 p95 5.79 ms | dart p50 0.016 p95 0.032 ms | 990x2151 | rss 196 MB | thermal 0
+[spike] created 990x2151 in 48 ms (texture 10)
+[spike] fresh 90.0 fps | bevy frames 108 coalesced 3 presented 90 | update p50 2.64 p95 4.27 ms | gpu p50 4.79 p95 5.74 ms | dart p50 0.016 p95 0.029 ms | 990x2151 | rss 197 MB | thermal 0
+[spike] fresh 111.0 fps | bevy frames 120 coalesced 0 presented 111 | update p50 2.59 p95 2.83 ms | gpu p50 5.09 p95 5.69 ms | dart p50 0.016 p95 0.023 ms | 990x2151 | rss 197 MB | thermal 0
+[spike] RECREATE 10x: create ms [49, 46, 48, 47, 48, 48, 48, 48, 48, 49]; rss MB [197, 192, 192, 193, 193, 194, 194, 194, 194, 196]
+[spike] fresh 105.0 fps | bevy frames 120 coalesced 0 presented 105 | update p50 2.63 p95 2.92 ms | gpu p50 5.07 p95 5.73 ms | dart p50 0.016 p95 0.025 ms | 990x2151 | rss 196 MB | thermal 0
+[spike] fresh 106.0 fps | bevy frames 120 coalesced 0 presented 106 | update p50 2.63 p95 2.96 ms | gpu p50 5.08 p95 5.70 ms | dart p50 0.016 p95 0.024 ms | 990x2151 | rss 197 MB | thermal 0
+[spike] fresh 110.0 fps | bevy frames 120 coalesced 0 presented 110 | update p50 2.61 p95 3.03 ms | gpu p50 5.05 p95 5.63 ms | dart p50 0.016 p95 0.024 ms | 990x2151 | rss 197 MB | thermal 0
+[spike] fresh 107.0 fps | bevy frames 120 coalesced 0 presented 107 | update p50 2.60 p95 2.79 ms | gpu p50 5.13 p95 5.71 ms | dart p50 0.017 p95 0.025 ms | 990x2151 | rss 196 MB | thermal 0
+[spike] fresh 111.1 fps | bevy frames 120 coalesced 0 presented 111 | update p50 2.55 p95 2.79 ms | gpu p50 5.21 p95 5.63 ms | dart p50 0.016 p95 0.024 ms | 990x2151 | rss 196 MB | thermal 0
+[spike] AFTER fresh fps median 107.0
+[spike] DONE

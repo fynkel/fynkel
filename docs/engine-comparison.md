@@ -97,6 +97,53 @@ We answer it with numbers from one phone, not with opinions.
 - **C2 is much faster than C1:** the Flutter bridge is a bottleneck,
   whatever the answer above.
 
-## Results
+## Results (2026-10-07, partial — stopped by the decision below)
 
-(filled in as the runs land)
+iPhone 16 Pro Max, iOS 26.6.1, release builds, one 60 s run each (the
+first 15 s dropped), alternating engines with 90 s cool-downs. GPU time is
+each engine's own timestamps. Fynkel's settings were baked in with
+`--dart-define` (devicectl's launch environment does not reach a Flutter
+app's `Platform.environment` on iOS).
+
+**Cubes** — the Bevy spike's scene (spikes/bevy_flutter): ground, shadowed
+sun, 1 000 cubes moved from Dart every frame, one walking character.
+Bevy runs inside Flutter (C5, the spike); Fynkel in `FynkelGameView` with
+`CMP_SCENE=cubes`, level `plain`.
+
+| | fps | GPU ms | engine CPU ms/frame | Dart ms/frame |
+|---|---|---|---|---|
+| Fynkel, native 1320×2868 | 120 | 5.9 | 0.7 (render thread) | 2.3 |
+| Bevy in Flutter, native | 120 | 5.4 | 2.6 (`app.update`) | 0.02 |
+| Fynkel, 0.75 | 120 | 5.9 | 0.7 | 2.3 |
+| Bevy in Flutter, 0.75 | 120 | 5.2 | 2.6 | 0.02 |
+
+A tie on what the screen shows; GPU time is a fixed per-frame cost in both
+(it hardly moves with resolution or cube count). Fynkel's engine CPU is
+about a quarter of Bevy's. The Dart column is API shape, not engine: Fynkel
+sets each cube through `GameObject.transform` (1 000 calls), the spike
+sends one float buffer.
+
+**Sponza + 20 characters, `plain`, native** (only pair completed):
+
+| | fps | GPU ms | CPU ms/frame |
+|---|---|---|---|
+| Fynkel (C1, in Flutter) | 106 | 9.2 | 2.9 (render thread) |
+| Bevy (C3, standalone) | 60 | 15.1 | 8.6 |
+
+Thermal: Fynkel's run went 0 → 2, Bevy's 0 → 1, so heat worked against
+Fynkel. `full` and the 0.75 runs were not taken (the phone auto-locked).
+
+**Pictures.** Bevy's Sponza is far darker (floor median 7–9 of 255 vs
+Fynkel's 24). Most of that is our Bevy setup, not Bevy: its ambient term at
+roughness 1 is ≈ 0.45 × `brightness` × albedo (`pbr_ambient.wgsl`,
+`EnvBRDFApprox` with `F_AB(1, NdotV).x` ≈ 0.45), so `2000 / π` gives about
+half the intended 2 000 lux. A hand estimate for that light puts the floor
+at ≈ 25–50, so Fynkel is about right. Brightness does not change GPU work;
+the timings stand. The shots also differ in aspect (Bevy 16:9, Fynkel 4:3).
+
+**Verdict.** The premise that rendering is Fynkel's bottleneck and Bevy
+would be faster does not hold on the target phone: equal on the simple
+scene, Fynkel ahead on the heavy one (one pair, Bevy setup not tuned).
+Decision (the user, 2026-10-07): keep Fynkel's own wgpu renderer and hecs
+world, and restart the framework code-first with no editor; the state
+before that restart is tagged `fynkel-1-final`.

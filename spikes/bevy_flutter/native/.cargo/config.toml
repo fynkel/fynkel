@@ -1,0 +1,3 @@
+# Reuse the comparison project's compiled Bevy (same version and features).
+[build]
+target-dir = "../../../benchmarks/compare/bevy/target"

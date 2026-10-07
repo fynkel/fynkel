@@ -1,0 +1,88 @@
+[IMPORTANT:flutter/shell/platform/embedder/embedder_surface_metal_impeller.mm(53)] Using the Impeller rendering backend (MetalSDF).
+flutter: [spike] created 1600x1200 in 5658 ms (texture 35640829344)
+flutter: [spike] fresh 0.0 fps | bevy frames 0 coalesced 34 presented 0 | update p50 0.00 p95 0.00 ms | gpu p50 0.00 p95 0.00 ms | dart p50 0.014 p95 0.019 ms | 1600x1200 | rss 233 MB | thermal 0
+flutter: [spike] fresh 1.0 fps | bevy frames 1 coalesced 119 presented 1 | update p50 1163.86 p95 1163.86 ms | gpu p50 4.12 p95 4.12 ms | dart p50 0.015 p95 0.025 ms | 1600x1200 | rss 255 MB | thermal 0
+flutter: [spike] first frame within 6981 ms of create (1 s stats granularity)
+flutter: [spike] fresh 0.0 fps | bevy frames 0 coalesced 120 presented 0 | update p50 0.00 p95 0.00 ms | gpu p50 0.00 p95 0.00 ms | dart p50 0.014 p95 0.021 ms | 1600x1200 | rss 255 MB | thermal 0
+flutter: [spike] fresh 0.0 fps | bevy frames 0 coalesced 120 presented 0 | update p50 0.00 p95 0.00 ms | gpu p50 0.00 p95 0.00 ms | dart p50 0.015 p95 0.025 ms | 1600x1200 | rss 258 MB | thermal 0
+flutter: [spike] fresh 0.0 fps | bevy frames 0 coalesced 120 presented 0 | update p50 0.00 p95 0.00 ms | gpu p50 0.00 p95 0.00 ms | dart p50 0.014 p95 0.021 ms | 1600x1200 | rss 260 MB | thermal 0
+flutter: [spike] fresh 17.0 fps | bevy frames 19 coalesced 102 presented 17 | update p50 2.99 p95 4.78 ms | gpu p50 2.04 p95 2.29 ms | dart p50 0.015 p95 0.024 ms | 1600x1200 | rss 267 MB | thermal 0
+flutter: [spike] fresh 119.0 fps | bevy frames 120 coalesced 0 presented 119 | update p50 2.59 p95 3.34 ms | gpu p50 2.04 p95 2.63 ms | dart p50 0.021 p95 0.030 ms | 1600x1200 | rss 268 MB | thermal 0
+flutter: [spike] fresh 120.0 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.66 p95 3.27 ms | gpu p50 2.04 p95 2.50 ms | dart p50 0.020 p95 0.030 ms | 1600x1200 | rss 268 MB | thermal 0
+flutter: [spike] fresh 119.0 fps | bevy frames 120 coalesced 0 presented 119 | update p50 2.74 p95 3.19 ms | gpu p50 2.03 p95 2.40 ms | dart p50 0.020 p95 0.034 ms | 1600x1200 | rss 269 MB | thermal 0
+flutter: [spike] fresh 119.0 fps | bevy frames 120 coalesced 0 presented 119 | update p50 2.72 p95 3.14 ms | gpu p50 2.01 p95 2.40 ms | dart p50 0.021 p95 0.035 ms | 1600x1200 | rss 269 MB | thermal 0
+flutter: [spike] fresh 120.1 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.71 p95 3.24 ms | gpu p50 2.01 p95 2.44 ms | dart p50 0.020 p95 0.031 ms | 1600x1200 | rss 269 MB | thermal 0
+flutter: [spike] fresh 119.9 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.69 p95 3.61 ms | gpu p50 1.99 p95 2.54 ms | dart p50 0.019 p95 0.032 ms | 1600x1200 | rss 269 MB | thermal 0
+flutter: [spike] fresh 120.1 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.64 p95 3.27 ms | gpu p50 2.03 p95 2.40 ms | dart p50 0.020 p95 0.033 ms | 1600x1200 | rss 269 MB | thermal 0
+flutter: [spike] fresh 119.9 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.68 p95 3.26 ms | gpu p50 2.02 p95 2.35 ms | dart p50 0.021 p95 0.035 ms | 1600x1200 | rss 269 MB | thermal 0
+flutter: [spike] fresh 119.0 fps | bevy frames 120 coalesced 0 presented 119 | update p50 2.68 p95 3.51 ms | gpu p50 2.02 p95 2.36 ms | dart p50 0.021 p95 0.035 ms | 1600x1200 | rss 269 MB | thermal 0
+flutter: [spike] fresh 119.2 fps | bevy frames 120 coalesced 0 presented 119 | update p50 2.75 p95 3.32 ms | gpu p50 2.02 p95 2.46 ms | dart p50 0.022 p95 0.036 ms | 1600x1200 | rss 269 MB | thermal 0
+flutter: [spike] fresh 118.9 fps | bevy frames 121 coalesced 0 presented 119 | update p50 2.70 p95 3.10 ms | gpu p50 2.01 p95 2.29 ms | dart p50 0.020 p95 0.036 ms | 1600x1200 | rss 269 MB | thermal 0
+flutter: [spike] STEADY 1600x1200: fresh fps min 118.9 median 119.9 max 120.1 over 10 s
+flutter: [spike] resize -> 960x720: 0.40 ms
+flutter: [spike] fresh 117.0 fps | bevy frames 118 coalesced 0 presented 117 | update p50 2.74 p95 3.29 ms | gpu p50 1.49 p95 2.10 ms | dart p50 0.020 p95 0.033 ms | 960x720 | rss 269 MB | thermal 0
+flutter: [spike] fresh 120.1 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.74 p95 3.29 ms | gpu p50 1.43 p95 1.90 ms | dart p50 0.020 p95 0.034 ms | 960x720 | rss 269 MB | thermal 0
+flutter: [spike] resize -> 1600x1200: 0.33 ms
+flutter: [spike] fresh 117.8 fps | bevy frames 119 coalesced 0 presented 118 | update p50 2.71 p95 3.17 ms | gpu p50 1.98 p95 2.36 ms | dart p50 0.019 p95 0.033 ms | 1600x1200 | rss 269 MB | thermal 0
+flutter: [spike] fresh 120.1 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.76 p95 3.44 ms | gpu p50 2.00 p95 2.67 ms | dart p50 0.021 p95 0.033 ms | 1600x1200 | rss 271 MB | thermal 0
+flutter: [spike] resize -> 1200x900: 0.36 ms
+flutter: [spike] fresh 118.0 fps | bevy frames 119 coalesced 0 presented 118 | update p50 2.66 p95 3.12 ms | gpu p50 1.69 p95 2.40 ms | dart p50 0.020 p95 0.033 ms | 1200x900 | rss 270 MB | thermal 0
+flutter: [spike] fresh 120.0 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.65 p95 3.13 ms | gpu p50 1.66 p95 2.00 ms | dart p50 0.020 p95 0.032 ms | 1200x900 | rss 270 MB | thermal 0
+flutter: [spike] resize -> 800x600: 0.36 ms
+flutter: [spike] fresh 118.0 fps | bevy frames 119 coalesced 0 presented 118 | update p50 2.52 p95 3.12 ms | gpu p50 1.42 p95 1.86 ms | dart p50 0.019 p95 0.032 ms | 800x600 | rss 270 MB | thermal 0
+flutter: [spike] fresh 119.0 fps | bevy frames 120 coalesced 0 presented 119 | update p50 2.62 p95 3.23 ms | gpu p50 1.35 p95 1.72 ms | dart p50 0.019 p95 0.033 ms | 800x600 | rss 278 MB | thermal 0
+flutter: [spike] resize -> 1440x1080: 0.37 ms
+flutter: [spike] fresh 117.0 fps | bevy frames 119 coalesced 0 presented 117 | update p50 2.70 p95 3.30 ms | gpu p50 1.78 p95 2.21 ms | dart p50 0.019 p95 0.031 ms | 1440x1080 | rss 278 MB | thermal 0
+flutter: [spike] fresh 120.0 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.69 p95 3.24 ms | gpu p50 1.80 p95 2.57 ms | dart p50 0.021 p95 0.034 ms | 1440x1080 | rss 278 MB | thermal 0
+flutter: [spike] resize -> 1600x1200: 0.45 ms
+flutter: [spike] fresh 118.0 fps | bevy frames 119 coalesced 0 presented 118 | update p50 2.68 p95 3.22 ms | gpu p50 2.01 p95 2.31 ms | dart p50 0.020 p95 0.033 ms | 1600x1200 | rss 278 MB | thermal 0
+flutter: [spike] fresh 120.1 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.70 p95 3.80 ms | gpu p50 2.01 p95 2.33 ms | dart p50 0.021 p95 0.032 ms | 1600x1200 | rss 277 MB | thermal 0
+flutter: [spike] RESIZE 6x: max 0.45 ms, frames resumed after every one
+[2m2026-10-07T00:10:17.650803Z[0m [31mERROR[0m [2mbevy_log[0m[2m:[0m Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+flutter: [spike] created 1600x1200 in 46 ms (texture 35621576240)
+flutter: [spike] fresh 83.0 fps | bevy frames 84 coalesced 18 presented 83 | update p50 2.75 p95 4.29 ms | gpu p50 2.04 p95 2.60 ms | dart p50 0.017 p95 0.029 ms | 1600x1200 | rss 287 MB | thermal 0
+flutter: [spike] fresh 119.9 fps | bevy frames 121 coalesced 0 presented 120 | update p50 2.53 p95 3.29 ms | gpu p50 2.01 p95 2.67 ms | dart p50 0.019 p95 0.031 ms | 1600x1200 | rss 286 MB | thermal 0
+[2m2026-10-07T00:10:19.622622Z[0m [31mERROR[0m [2mbevy_log[0m[2m:[0m Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+flutter: [spike] created 1600x1200 in 46 ms (texture 35621573440)
+flutter: [spike] fresh 86.0 fps | bevy frames 88 coalesced 17 presented 86 | update p50 2.78 p95 4.01 ms | gpu p50 2.00 p95 2.74 ms | dart p50 0.019 p95 0.028 ms | 1600x1200 | rss 287 MB | thermal 0
+flutter: [spike] fresh 120.0 fps | bevy frames 121 coalesced 0 presented 120 | update p50 2.73 p95 3.88 ms | gpu p50 2.00 p95 2.35 ms | dart p50 0.019 p95 0.032 ms | 1600x1200 | rss 288 MB | thermal 0
+[2m2026-10-07T00:10:21.593158Z[0m [31mERROR[0m [2mbevy_log[0m[2m:[0m Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+flutter: [spike] created 1600x1200 in 46 ms (texture 35640829344)
+flutter: [spike] fresh 90.0 fps | bevy frames 92 coalesced 17 presented 90 | update p50 2.71 p95 3.37 ms | gpu p50 2.02 p95 2.62 ms | dart p50 0.019 p95 0.031 ms | 1600x1200 | rss 292 MB | thermal 0
+flutter: [spike] fresh 120.0 fps | bevy frames 121 coalesced 0 presented 120 | update p50 2.77 p95 3.24 ms | gpu p50 2.01 p95 2.48 ms | dart p50 0.020 p95 0.033 ms | 1600x1200 | rss 292 MB | thermal 0
+[2m2026-10-07T00:10:23.563371Z[0m [31mERROR[0m [2mbevy_log[0m[2m:[0m Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+flutter: [spike] created 1600x1200 in 46 ms (texture 35621576240)
+flutter: [spike] fresh 94.1 fps | bevy frames 95 coalesced 17 presented 94 | update p50 2.79 p95 3.56 ms | gpu p50 2.01 p95 2.73 ms | dart p50 0.018 p95 0.026 ms | 1600x1200 | rss 293 MB | thermal 0
+flutter: [spike] fresh 119.8 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.74 p95 3.30 ms | gpu p50 1.98 p95 2.44 ms | dart p50 0.020 p95 0.034 ms | 1600x1200 | rss 293 MB | thermal 0
+[2m2026-10-07T00:10:25.633523Z[0m [31mERROR[0m [2mbevy_log[0m[2m:[0m Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+flutter: [spike] created 1600x1200 in 47 ms (texture 35640820048)
+flutter: [spike] fresh 85.1 fps | bevy frames 86 coalesced 18 presented 85 | update p50 2.77 p95 4.16 ms | gpu p50 1.99 p95 2.70 ms | dart p50 0.019 p95 0.031 ms | 1600x1200 | rss 294 MB | thermal 0
+flutter: [spike] fresh 119.9 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.66 p95 3.83 ms | gpu p50 2.02 p95 2.42 ms | dart p50 0.023 p95 0.032 ms | 1600x1200 | rss 295 MB | thermal 0
+[2m2026-10-07T00:10:27.609766Z[0m [31mERROR[0m [2mbevy_log[0m[2m:[0m Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+flutter: [spike] created 1600x1200 in 46 ms (texture 35621573440)
+flutter: [spike] fresh 88.0 fps | bevy frames 89 coalesced 18 presented 88 | update p50 2.72 p95 3.96 ms | gpu p50 2.05 p95 2.54 ms | dart p50 0.019 p95 0.031 ms | 1600x1200 | rss 297 MB | thermal 0
+flutter: [spike] fresh 120.0 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.62 p95 3.32 ms | gpu p50 2.10 p95 2.46 ms | dart p50 0.020 p95 0.030 ms | 1600x1200 | rss 297 MB | thermal 0
+[2m2026-10-07T00:10:29.578673Z[0m [31mERROR[0m [2mbevy_log[0m[2m:[0m Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+flutter: [spike] created 1600x1200 in 47 ms (texture 35640820048)
+flutter: [spike] fresh 92.0 fps | bevy frames 93 coalesced 17 presented 92 | update p50 2.76 p95 3.64 ms | gpu p50 2.05 p95 2.85 ms | dart p50 0.018 p95 0.032 ms | 1600x1200 | rss 298 MB | thermal 0
+flutter: [spike] fresh 120.0 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.73 p95 3.19 ms | gpu p50 2.00 p95 2.52 ms | dart p50 0.020 p95 0.032 ms | 1600x1200 | rss 298 MB | thermal 0
+[2m2026-10-07T00:10:31.650619Z[0m [31mERROR[0m [2mbevy_log[0m[2m:[0m Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+flutter: [spike] created 1600x1200 in 46 ms (texture 35640820048)
+flutter: [spike] fresh 84.0 fps | bevy frames 85 coalesced 17 presented 84 | update p50 2.81 p95 3.69 ms | gpu p50 2.01 p95 2.30 ms | dart p50 0.017 p95 0.024 ms | 1600x1200 | rss 299 MB | thermal 0
+flutter: [spike] fresh 120.0 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.74 p95 3.16 ms | gpu p50 2.01 p95 2.50 ms | dart p50 0.018 p95 0.030 ms | 1600x1200 | rss 299 MB | thermal 0
+[2m2026-10-07T00:10:33.619623Z[0m [31mERROR[0m [2mbevy_log[0m[2m:[0m Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+flutter: [spike] created 1600x1200 in 46 ms (texture 35621576240)
+flutter: [spike] fresh 88.0 fps | bevy frames 89 coalesced 17 presented 88 | update p50 2.71 p95 3.64 ms | gpu p50 2.01 p95 2.43 ms | dart p50 0.018 p95 0.029 ms | 1600x1200 | rss 299 MB | thermal 0
+flutter: [spike] fresh 120.0 fps | bevy frames 121 coalesced 0 presented 120 | update p50 2.68 p95 3.28 ms | gpu p50 2.03 p95 2.44 ms | dart p50 0.020 p95 0.029 ms | 1600x1200 | rss 298 MB | thermal 0
+[2m2026-10-07T00:10:35.588178Z[0m [31mERROR[0m [2mbevy_log[0m[2m:[0m Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+flutter: [spike] created 1600x1200 in 46 ms (texture 35640829344)
+flutter: [spike] fresh 90.1 fps | bevy frames 92 coalesced 17 presented 90 | update p50 2.66 p95 3.44 ms | gpu p50 2.04 p95 2.60 ms | dart p50 0.018 p95 0.035 ms | 1600x1200 | rss 299 MB | thermal 0
+flutter: [spike] fresh 119.9 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.69 p95 3.31 ms | gpu p50 2.00 p95 2.37 ms | dart p50 0.021 p95 0.032 ms | 1600x1200 | rss 299 MB | thermal 0
+flutter: [spike] RECREATE 10x: create ms [46, 46, 46, 46, 47, 46, 47, 46, 46, 46]; rss MB [286, 287, 293, 294, 294, 297, 297, 298, 298, 299]
+flutter: [spike] fresh 120.0 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.65 p95 3.23 ms | gpu p50 2.02 p95 2.81 ms | dart p50 0.020 p95 0.033 ms | 1600x1200 | rss 298 MB | thermal 0
+flutter: [spike] fresh 120.0 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.73 p95 3.42 ms | gpu p50 2.02 p95 2.41 ms | dart p50 0.019 p95 0.031 ms | 1600x1200 | rss 299 MB | thermal 0
+flutter: [spike] fresh 120.2 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.78 p95 3.59 ms | gpu p50 1.98 p95 2.31 ms | dart p50 0.018 p95 0.031 ms | 1600x1200 | rss 299 MB | thermal 0
+flutter: [spike] fresh 118.9 fps | bevy frames 120 coalesced 0 presented 119 | update p50 2.79 p95 3.15 ms | gpu p50 1.99 p95 2.42 ms | dart p50 0.020 p95 0.033 ms | 1600x1200 | rss 299 MB | thermal 0
+flutter: [spike] fresh 120.0 fps | bevy frames 120 coalesced 0 presented 120 | update p50 2.80 p95 3.32 ms | gpu p50 1.98 p95 2.47 ms | dart p50 0.020 p95 0.031 ms | 1600x1200 | rss 299 MB | thermal 0
+flutter: [spike] AFTER fresh fps median 120.0
+flutter: [spike] DONE
