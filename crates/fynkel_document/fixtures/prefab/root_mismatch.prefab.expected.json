@@ -1,5 +1,0 @@
-[
-  { "code": "FYN-D0400", "pointer": "/root", "line": 6, "column": 3 },
-  { "code": "FYN-D0400", "pointer": "/entities/10000000-0000-4000-8000-0000000000b1/parent", "line": 10, "column": 7 },
-  { "code": "FYN-D0400", "pointer": "/entities/10000000-0000-4000-8000-0000000000b2/parent", "line": 16, "column": 7 }
-]

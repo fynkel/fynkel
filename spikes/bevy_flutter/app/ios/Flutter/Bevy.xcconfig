@@ -1,8 +1,0 @@
-// Links spikes/bevy_flutter/native (staticlib) into Runner; Dart finds the
-// bf_* symbols through DynamicLibrary.process().
-BEVY_LIB = $(SRCROOT)/../../../../benchmarks/compare/bevy/target/aarch64-apple-ios/release/libbevy_flutter_spike.a
-DEAD_CODE_STRIPPING = YES
-OTHER_LDFLAGS = $(inherited) $(BEVY_LIB) -framework Metal -framework QuartzCore -framework IOSurface -framework CoreGraphics -framework UIKit -lobjc -liconv -lc++ -u _bf_create -u _bf_last_error -u _bf_surface_count -u _bf_surface -u _bf_acquire -u _bf_set_frame_ready_callback -u _bf_frame -u _bf_resize -u _bf_stats -u _bf_destroy -u _bf_set_queue
-STRIP_STYLE = non-global
-DEVELOPMENT_TEAM = N2VZ98KJRE
-CODE_SIGN_STYLE = Automatic

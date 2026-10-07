@@ -1,5 +1,0 @@
-[
-  { "code": "FYN-D0305", "pointer": "", "line": 1, "column": 1 },
-  { "code": "FYN-D0302", "pointer": "/parameters/bands", "line": 10, "column": 5 },
-  { "code": "FYN-D0306", "pointer": "/alpha_mode", "line": 12, "column": 3 }
-]

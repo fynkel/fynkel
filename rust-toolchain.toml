@@ -1,9 +1,9 @@
 [toolchain]
 channel = "1.93.0"
 components = ["rustfmt", "clippy"]
-# Flutter builds universal macOS apps and simulator slices; package:fynkel's
-# build hook (ADR-0015) compiles the runtime once per target architecture.
+# Stage 1 platforms: macOS (universal), iOS (device + simulator), Android.
 targets = [
   "aarch64-apple-darwin", "x86_64-apple-darwin",
   "aarch64-apple-ios", "aarch64-apple-ios-sim", "x86_64-apple-ios",
+  "aarch64-linux-android", "x86_64-linux-android",
 ]
