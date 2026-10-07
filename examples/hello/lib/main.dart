@@ -22,6 +22,10 @@ final _printStats = _setting('FYNKEL_STATS', const String.fromEnvironment('FYNKE
 final _lifecycleCheck = _setting('FYNKEL_CHECK', const String.fromEnvironment('FYNKEL_CHECK')) == 'lifecycle';
 final _cycles = int.tryParse(_setting('FYNKEL_CYCLES', const String.fromEnvironment('FYNKEL_CYCLES'))) ?? 10;
 
+/// For comparison: a spinning Flutter box where the engine's view would be,
+/// so the same checks show what Flutter alone does.
+final _baseline = _setting('FYNKEL_BASELINE', const String.fromEnvironment('FYNKEL_BASELINE')) == '1';
+
 void main() => runApp(const HelloApp());
 
 class HelloApp extends StatelessWidget {
@@ -62,10 +66,17 @@ class _HelloPageState extends State<HelloPage> {
     super.initState();
     SchedulerBinding.instance.addTimingsCallback(_onTimings);
     if (_lifecycleCheck) unawaited(_runLifecycleCheck());
+    // The baseline has no view to report, but its stats line changes every
+    // second all the same: laying out new text costs Flutter memory, and
+    // the comparison must not miss that.
+    if (_baseline) _baselineStats = Timer.periodic(const Duration(seconds: 1), (_) => _onSecond('baseline=1'));
   }
+
+  Timer? _baselineStats;
 
   @override
   void dispose() {
+    _baselineStats?.cancel();
     SchedulerBinding.instance.removeTimingsCallback(_onTimings);
     _game.world.dispose();
     super.dispose();
@@ -77,10 +88,11 @@ class _HelloPageState extends State<HelloPage> {
     _slowFrames += timings.where((t) => t.buildDuration > budget || t.rasterDuration > budget).length;
   }
 
-  void _onStats(FynkelViewStats stats) {
-    final seconds = stats.window.inMicroseconds / 1e6;
+  void _onStats(FynkelViewStats stats) => _onSecond('$stats', seconds: stats.window.inMicroseconds / 1e6);
+
+  void _onSecond(String view, {double seconds = 1}) {
     final line =
-        '$stats flutter=${(_flutterFrames / seconds).toStringAsFixed(1)} flutterFrames=$_flutterFrames '
+        '$view flutter=${(_flutterFrames / seconds).toStringAsFixed(1)} flutterFrames=$_flutterFrames '
         'slow=$_slowFrames footprint=${physicalFootprint()} mouse=${RendererBinding.instance.mouseTracker.mouseIsConnected ? 1 : 0}';
     _flutterFrames = 0;
     _slowFrames = 0;
@@ -96,13 +108,13 @@ class _HelloPageState extends State<HelloPage> {
     // footprint as well and prints the lowest reading as a `[memory]` line.
     Future<void> mark(String point) async {
       stdout.writeln('[check] $point');
-      var lowest = physicalFootprint();
+      var lowest = footprint();
       for (var i = 0; i < 5; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 500));
-        final reading = physicalFootprint();
-        if (reading < lowest) lowest = reading;
+        final reading = footprint();
+        if (reading.total < lowest.total) lowest = reading;
       }
-      stdout.writeln('[memory] $point $lowest');
+      stdout.writeln('[memory] $point ${lowest.total} ${lowest.graphics}');
       await Future<void>.delayed(const Duration(milliseconds: 500));
     }
 
@@ -132,7 +144,9 @@ class _HelloPageState extends State<HelloPage> {
             child: FractionallySizedBox(
               widthFactor: _scale,
               heightFactor: _scale,
-              child: FynkelView(world: _game.world, onFrame: _game.onFrame, onStats: _onStats),
+              child: _baseline
+                  ? const _Spinner()
+                  : FynkelView(world: _game.world, onFrame: _game.onFrame, onStats: _onStats),
             ),
           ),
         // Clear of the iPhone's status bar and Dynamic Island, and wrapped
@@ -156,4 +170,29 @@ class _HelloPageState extends State<HelloPage> {
       ],
     );
   }
+}
+
+/// A box turning once every 4 seconds: a new Flutter frame every vsync, as
+/// with the engine's view, but nothing of the engine's.
+class _Spinner extends StatefulWidget {
+  const _Spinner();
+
+  @override
+  State<_Spinner> createState() => _SpinnerState();
+}
+
+class _SpinnerState extends State<_Spinner> with SingleTickerProviderStateMixin {
+  late final _turns = AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat();
+
+  @override
+  void dispose() {
+    _turns.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => RotationTransition(
+    turns: _turns,
+    child: const ColoredBox(color: Colors.teal),
+  );
 }

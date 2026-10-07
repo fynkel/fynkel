@@ -205,7 +205,7 @@ fail first.
 **Step 5: macOS — Apple target, `fynkel_flutter`, `examples/hello`**
 - IOSurface slots imported as wgpu Metal textures, the Swift `FlutterTexture`, the `FynkelView` widget (ticker, resize, dispose, `resolutionScale`), and the hello app.
 - ✅ Done 2026-10-07 (see §7).
-  - **The memory rule, as read from step 5 on** (decided 2026-10-07): points of the same kind (the same view at the same size) must agree within ± 5 MB. Each point is the lowest of five readings while the view is drawing. One difference is allowed and must be named when it shows: Flutter's compositor sometimes keeps two more window-sized IOSurfaces (+14.7 MB at 1600 × 1200), visible in the IOSurface category and sized like the window, not like our surfaces. Flutter owns that pool and it isn't the engine's memory. Any other difference fails the step. Growth over cycles fails it too, so the 40-cycle run stays part of the check.
+  - **The memory rule, as read from step 5 on** (decided 2026-10-07): points of the same kind (the same view at the same size) must agree within ± 5 MB. Each point is the lowest of five readings while the view is drawing. One difference is allowed and must be named when it shows: Flutter's compositor sometimes keeps two more window-sized IOSurfaces (+14.7 MB at 1600 × 1200), visible in the IOSurface category and sized like the window, not like our surfaces. Flutter owns that pool and it isn't the engine's memory. Any other difference fails the step. Growth over cycles fails it too, so the 40-cycle run stays part of the check. *Amended 2026-10-07, at step 6:* Flutter itself grows a little with every cycle in profile builds. A Flutter-only run of the same check (`--baseline`, a spinning box in place of the view) shows it, and so do Instruments' Allocations (§7, step 6). So growth is judged against that baseline. Growth the baseline also has is Flutter's; any growth beyond it must be traced to its owner, and growth of the engine's own (Metal memory, or allocations made by `fynkel_ffi`) fails the step.
   - The Apple target draws into 5 IOSurfaces imported as Metal textures. When a frame's GPU work is done, a Metal completion handler marks it finished in the ring and tells Flutter. Flutter's raster thread calls `fy_apple_acquire`, which never blocks and allocates nothing (tested over 1,000 calls), and gets the surface retained once.
   - A resize makes new surfaces and resets the ring under the same lock, so a frame of the old size is never shown (tested). The Swift side needs no "rebind" call: it keeps a pixel buffer per surface and starts again when an unknown surface comes from a full cache.
   - The plugin's teardown order is: no more frame-ready calls (the engine waits for one in progress), no more acquires, unregister the texture, and only then does Dart free the view. A widget test with a real engine view proves the view is still alive when the plugin is told, also when the widget goes away while its texture is still being registered. Swapping the order fails the test.
@@ -220,13 +220,15 @@ fail first.
 **Step 6: iOS**
 - The same app on the iPhone 16 Pro Max.
 - *Done when* it holds 120 fresh fps at native resolution over 60 s with no throttling, and the same create/destroy and resize checks pass. `examples/hello` must also run in the **iOS Simulator** with `flutter run`, with the cube spinning smoothly, and with hot reload of the Dart game code working. The simulator's frame rate isn't a performance number.
-- In progress (see §7). Done so far:
-  - the iPhone holds 120 fresh fps at native 1320 × 2868 over 60 s;
-  - the simulator runs hello with `flutter run`, and hot reload works both ways.
+- ✅ Done 2026-10-07 (see §7).
+  - The iPhone holds 120 fresh fps at native 1320 × 2868 over 60 s.
+  - The simulator runs hello with `flutter run`, and hot reload works both ways.
+  - Over 40 create/destroy cycles and 40 resizes, Metal memory is flat to 0.1 MB. The rest grows as much as Flutter alone does. Instruments shows that the engine keeps only the current view's allocations.
   - **Hot restart leaked a render worker each time.** A restart makes a new Dart isolate without disposing anything, so the old views kept drawing. Now the plugin is sent `reset` once per isolate, before its first view registers. It releases every view it still holds and frees each one through `fy_view_free`, whose address Dart passes in at registration. A widget test checks that the reset comes first; dropping it fails the test. After 5 restarts, 1 worker runs.
   - **Autorelease pools on engine threads.** Rust threads have no autorelease pool, so what Metal autoreleases on them would only go when the thread ends. The render worker now drains a pool every pass, and view creation and freeing (called from Dart's thread) drain one too (`fynkel_present::autorelease_pool`). On its own, the Apple target leaked 0.8 MB over 400 resizes without the pool and nothing with it.
   - `tool/measure.dart --ios <device>` runs the same checks on an iPhone or a simulator. The settings go in as `--dart-define`s. The app's output is read from the VM service, because iOS output doesn't reach `flutter run`. The app reports its own footprint, read with `task_info`, which matches `footprint` on the Mac exactly. Each lifecycle point also shows the Dart heap.
-- Still to do: the create/destroy and resize checks on the iPhone (the first 40-cycle run grew; see §7).
+  - hello turns off the iPhone's idle timer, as games do. Before that, Auto-Lock locked the phone about 5 minutes into a check nobody touched.
+  - The app also reports Metal's share of its footprint (the kernel's graphics ledger), and the tool fails loudly when the app goes away before the check ends. Before, it ended quietly with exit code 0.
 
 **Step 7: Android**
 - A Kotlin plugin (`SurfaceProducer`), the `ANativeWindow` → wgpu surface, the Android `Target`, and the build hook producing `arm64-v8a` and `x86_64`.
@@ -466,6 +468,53 @@ about 0.2 MB each (141.4 → 150.0 MB). What was found:
   0.06 MB per cycle. So most of the growth comes with drawing frames,
   and the inspection above puts it on Flutter's side of them.
 
-Still open: the iPhone's 40-cycle run with the pools in, now that the
-tool shows the Dart heap at each point. The phone was unreachable when
-this was written.
+**Memory, iPhone, with the pools in** (40 cycles, profile build). Each
+point also shows Metal's share of the footprint (the kernel's graphics
+ledger). On the iPhone the IOSurfaces aren't in it; they are in "the
+rest", which changes by exactly their size when the view shrinks.
+
+| Points (40 cycles) | Total, first → last | Metal | Dart heap |
+|---|---|---|---|
+| Created, full size | 367.8 → 380.5 MB (+12.8) | 167.1 – 167.3 MB | 7.6 – 9.6 MB |
+| Resized back to full size | 380.9 → 393.8 MB (+12.9) | 167.1 MB | flat |
+| Resized to 0.6 | 256.0 → 268.9 MB (+13.0) | 89.6 MB | flat |
+
+The same check with a spinning Flutter box in place of the view
+(`--baseline`), with a stats line changing every second, as with the view:
+
+| Points (40 cycles) | Total, first → last |
+|---|---|
+| Created | 164.6 → 177.5 MB (**+12.8**, the same as with the engine) |
+| Resized back to full size | 177.9 → 187.2 MB (+9.2) |
+| Resized to 0.6 | 177.5 → 187.1 MB (+9.6) |
+
+Creating and destroying views grows exactly as Flutter alone does. Resizes
+leave about 3.5 MB more per 40 (about 90 KB each). Instruments'
+Allocations, attached to hello on the iPhone for 100 s of the resize
+phase (about 20 resizes), shows whose it is:
+
+- **The engine keeps only the current view's allocations.** What
+  `fynkel_ffi` allocated in that window and still held at the end was the
+  last resize's 5 IOSurfaces and their bookkeeping, plus about 1 KB from
+  earlier.
+- **Flutter kept 6.1 MB**, about 0.3 MB per 5-second cycle, which accounts
+  for all of the growth:
+  - Dart heap pages: 2.5 MB
+  - the Dart timeline recorder: 1.5 MB of async-track metadata, plus
+    0.3 MB of events
+  - Skia's text layout for the stats line: about 1.1 MB
+  - Dart's native-call wrappers: 0.4 MB, in 24,873 blocks
+
+  Flutter's texture path also makes Metal textures from each new set of
+  surfaces. That probably explains why resizes leave more than in the
+  baseline, where nothing is resized but a box.
+
+So the engine's memory comes back on the iPhone, and what grows is
+Flutter's. Profile builds record a timeline, so part of this growth may
+not be in a release build; the tool can't measure a release build,
+because it has no VM service.
+
+Two measuring fixes came out of this. Auto-Lock locked the phone about
+5 minutes into a run nobody touched; the app went away and the tool ended
+quietly with exit code 0. hello now keeps the screen on, as games do, and
+the tool fails when the app goes away early.
