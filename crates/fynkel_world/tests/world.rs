@@ -226,3 +226,15 @@ fn materials_are_validated_and_can_change() {
     let ghost = MaterialId::from_raw(77).unwrap();
     assert_eq!(world.set_material(ghost, red), Err(WorldError::NoMaterial(ghost)));
 }
+
+#[test]
+fn meshes_lists_every_mesh_still_there() {
+    let mut world = World::new();
+    let cube = world.add_mesh(MeshSource::Cube);
+    let sphere = world.add_mesh(MeshSource::Sphere);
+    let plane = world.add_mesh(MeshSource::Plane);
+    world.remove_mesh(sphere).unwrap();
+    let mut listed: Vec<_> = world.meshes().collect();
+    listed.sort_by_key(|(id, _)| *id);
+    assert_eq!(listed, [(cube, MeshSource::Cube), (plane, MeshSource::Plane)]);
+}

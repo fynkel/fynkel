@@ -216,6 +216,11 @@ impl World {
         self.meshes.get(&id).copied().ok_or(WorldError::NoMesh(id))
     }
 
+    /// Every mesh, in no particular order.
+    pub fn meshes(&self) -> impl Iterator<Item = (MeshId, MeshSource)> + '_ {
+        self.meshes.iter().map(|(&id, &source)| (id, source))
+    }
+
     /// Removes a mesh. Refused while any object's [`MeshRenderer`] uses it.
     pub fn remove_mesh(&mut self, id: MeshId) -> Result<()> {
         if !self.meshes.contains_key(&id) {
