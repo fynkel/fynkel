@@ -3,13 +3,15 @@
 //! A frame has two halves. [`Renderer::prepare`] is plain CPU work: it
 //! turns the scene into per-draw instance data and the frame uniforms, in
 //! buffers it reuses, so a steady frame allocates nothing.
-//! [`Renderer::encode`] uploads that and records the pass.
+//! [`Renderer::encode`] writes that where the GPU reads it (see
+//! `frame_ring`) and records the pass.
 
 use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3};
 
+use crate::frame_ring::FrameRing;
 use crate::gpu::Gpu;
 use crate::mesh::{MeshData, Vertex};
 use crate::scene::{MeshKey, RenderScene};
@@ -75,9 +77,7 @@ pub struct Renderer {
     gpu: Gpu,
     format: wgpu::TextureFormat,
     pipeline: wgpu::RenderPipeline,
-    frame_buffer: wgpu::Buffer,
-    frame_bind_group: wgpu::BindGroup,
-    instance_buffer: wgpu::Buffer,
+    frame_data: FrameRing,
     meshes: HashMap<MeshKey, GpuMesh>,
     targets: Option<Targets>,
 
@@ -138,18 +138,6 @@ impl Renderer {
                 count: None,
             }],
         });
-        let frame_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("frame uniforms"),
-            size: std::mem::size_of::<FrameUniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let frame_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("frame"),
-            layout: &frame_layout,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: frame_buffer.as_entire_binding() }],
-        });
-
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("forward"),
             bind_group_layouts: &[Some(&frame_layout)],
@@ -212,9 +200,12 @@ impl Renderer {
             gpu: gpu.clone(),
             format,
             pipeline,
-            frame_buffer,
-            frame_bind_group,
-            instance_buffer: Self::create_instance_buffer(device, 64),
+            frame_data: FrameRing::new(
+                device,
+                frame_layout,
+                std::mem::size_of::<FrameUniforms>() as u64,
+                64 * INSTANCE_SIZE,
+            ),
             meshes: HashMap::new(),
             targets: None,
             uniforms: FrameUniforms::zeroed(),
@@ -231,29 +222,13 @@ impl Renderer {
         self.format
     }
 
-    fn create_instance_buffer(device: &wgpu::Device, capacity: u64) -> wgpu::Buffer {
-        device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("instances"),
-            size: capacity * INSTANCE_SIZE,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        })
-    }
-
     /// Uploads `data` under `key`, replacing any mesh already there.
     pub fn upload_mesh(&mut self, key: MeshKey, data: &MeshData) {
-        use wgpu::util::DeviceExt;
         let device = &self.gpu.device;
-        let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mesh vertices"),
-            contents: bytemuck::cast_slice(&data.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mesh indices"),
-            contents: bytemuck::cast_slice(&data.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let vertices =
+            filled_buffer(device, "mesh vertices", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(&data.vertices));
+        let indices =
+            filled_buffer(device, "mesh indices", wgpu::BufferUsages::INDEX, bytemuck::cast_slice(&data.indices));
         self.meshes.insert(key, GpuMesh { vertices, indices, index_count: data.indices.len() as u32 });
     }
 
@@ -321,23 +296,21 @@ impl Renderer {
         stats
     }
 
-    /// The GPU half: uploads what [`Renderer::prepare`] built and records the
-    /// pass into `encoder`, resolving into `target`. The target must be a
-    /// view in this renderer's format, of the size given to `prepare`.
+    /// The GPU half: writes what [`Renderer::prepare`] built where the GPU
+    /// reads it and records the pass into `encoder`, resolving into
+    /// `target`. The target must be a view in this renderer's format, of
+    /// the size given to `prepare`. `encoder` must be submitted before the
+    /// next `encode`.
     pub fn encode(&mut self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
         let (width, height) = self.size;
         if self.targets.as_ref().is_none_or(|t| (t.width, t.height) != (width, height)) {
             self.targets = Some(self.create_targets(width, height));
         }
-        let queue = &self.gpu.queue;
-        queue.write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&self.uniforms));
-        if !self.instances.is_empty() {
-            let needed = self.instances.len() as u64;
-            if self.instance_buffer.size() < needed * INSTANCE_SIZE {
-                self.instance_buffer = Self::create_instance_buffer(&self.gpu.device, needed.next_power_of_two());
-            }
-            queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&self.instances));
-        }
+        let frame = self.frame_data.write(
+            &self.gpu.device,
+            bytemuck::bytes_of(&self.uniforms),
+            bytemuck::cast_slice(&self.instances),
+        );
 
         let targets = self.targets.as_ref().expect("made above");
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -363,8 +336,8 @@ impl Renderer {
             return;
         }
         pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.frame_bind_group, &[]);
-        pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+        pass.set_bind_group(0, frame.bind_group, &[]);
+        pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..));
         for batch in &self.batches {
             let mesh = &self.meshes[&batch.mesh];
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
@@ -401,6 +374,20 @@ impl Renderer {
         self.gpu.queue.submit([encoder.finish()]);
         stats
     }
+}
+
+/// A buffer holding `contents`, written by the CPU where the GPU reads it:
+/// no staging copy, so no blit (see `frame_ring`).
+fn filled_buffer(device: &wgpu::Device, label: &str, usage: wgpu::BufferUsages, contents: &[u8]) -> wgpu::Buffer {
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: (contents.len() as u64).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT).max(wgpu::COPY_BUFFER_ALIGNMENT),
+        usage: usage | wgpu::BufferUsages::MAP_WRITE,
+        mapped_at_creation: true,
+    });
+    buffer.get_mapped_range_mut(..).expect("mapped at creation").slice(..contents.len()).copy_from_slice(contents);
+    buffer.unmap();
+    buffer
 }
 
 /// The inverse-transpose of the upper 3×3: keeps normals perpendicular to

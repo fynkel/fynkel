@@ -48,7 +48,9 @@ impl Gpu {
     pub fn from_adapter(adapter: wgpu::Adapter) -> Result<Self, GpuError> {
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("fynkel"),
-            required_features: wgpu::Features::empty(),
+            // Buffers the CPU writes and the GPU reads in place, with no
+            // staging copy (frame_ring.rs). Every native backend has it.
+            required_features: wgpu::Features::MAPPABLE_PRIMARY_BUFFERS,
             // WebGPU's defaults, lowered wherever this adapter offers less
             // (the iOS simulator sits below a few of them). The renderer
             // stays within the lower set.

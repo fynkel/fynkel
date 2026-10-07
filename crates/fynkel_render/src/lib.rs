@@ -3,6 +3,7 @@
 //! See `docs/stage-1.md` §3.6. Nothing here knows about the world,
 //! platforms, Flutter or Dart.
 
+mod frame_ring;
 mod gpu;
 mod mesh;
 mod renderer;
