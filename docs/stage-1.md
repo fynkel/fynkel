@@ -164,6 +164,15 @@ fail first.
 **Step 3: `fynkel_present`, the ring**
 - The slot state machine and the frame-queue rules from §3.5, with no GPU.
 - *Done when* table tests cover every state change (including illegal ones, which return an error rather than corrupting the state), and a multi-threaded stress test with 3 threads and 1M frames never shows a slot in two states and never loses a slot.
+- ✅ Done 2026-10-07 (see §7). The rules are Fynkel 1's, with these improvements:
+  - Every move goes through one checked table (`SlotState::can_become`).
+  - Tickets are taken by value, so completing a frame twice doesn't compile. A ticket from before a resize returns `Stale`.
+  - The in-flight cap holds across resizes.
+  - `reserve` takes the slot that has been free longest, so every slot takes its turn and the compositor's last slot is reused last.
+  - A frame that finishes after a newer one is on screen is dropped, so frames are never shown out of order.
+  - `acquire` allocates nothing.
+  - Debug builds check every invariant after every operation, including that each frame is accounted for.
+  - Five deliberate bugs (wrong retire order, late frames shown, lowest slot first, stale tickets forgotten, a longer queue) were each caught by the tests.
 
 **Step 4: `fynkel_ffi` + `packages/fynkel`**
 - The extract, the render worker, the C ABI, cbindgen, and the Dart API (`World`, `spawn`, `Object`, components, `Mesh`, `Material`, `Color`, `Vec3`, `Quat`), plus the build hook.
@@ -242,3 +251,21 @@ instanced by mesh.
 What this means: at 120 fps a frame has 8.3 ms. 10,000 moving cubes take
 under 1 ms on this Mac, including waiting for the GPU. The phone will be
 slower, and steps 5–7 measure it there.
+
+### Step 3: the frame ring (2026-10-07, M3 Max Mac, release build)
+
+`cargo run --release -p fynkel_present --example bench`: one frame's trip
+round the ring (reserve, complete, acquire) on one thread, best of 5 runs
+of 1M frames: **24 ns**, about 8 ns per operation, each taking the lock
+once.
+
+The stress test (`tests/stress.rs`) runs three threads at full speed (render
+worker, GPU completion and presenter, with out-of-order completions,
+cancels and a reset every 50,000 frames shown) for 1M frames. It takes
+3.8 s in release and about 12 s in debug, where the invariants are checked
+after every operation. Most of that time is the threads contending for
+the lock on purpose, far more often than the three calls per frame they
+make in real use.
+
+What this means: the ring costs nothing measurable per frame. Its rules,
+not its speed, are what matter, and they are now tested.
