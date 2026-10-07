@@ -753,13 +753,16 @@ pub unsafe extern "C" fn fy_view_new_apple(
     guard(|| {
         #[cfg(target_vendor = "apple")]
         // SAFETY: per this function's contract.
-        return unsafe {
+        // Dart calls in on a thread with no autorelease pool, so what
+        // Metal autoreleases while the device and surfaces are made would
+        // outlive the view: drain it here.
+        return fynkel_present::autorelease_pool(|| unsafe {
             new_view(world, width, height, out, |gpu, width, height| {
                 let (target, presenter) = fynkel_present::Apple::new(&gpu.device, &gpu.queue, width, height)
                     .map_err(|e| Error::new(FyStatus::NoGpu, e.to_string()))?;
                 Ok((target, Output::Apple(presenter)))
             })
-        };
+        });
         #[cfg(not(target_vendor = "apple"))]
         {
             let _ = (world, width, height, out);
@@ -779,8 +782,8 @@ pub unsafe extern "C" fn fy_view_new_apple(
 pub unsafe extern "C" fn fy_view_free(view: *mut FyView) {
     if !view.is_null() {
         // SAFETY: made by Box::into_raw in fy_view_new_headless; the caller
-        // gives it up.
-        drop(unsafe { Box::from_raw(view) });
+        // gives it up. In a pool, like creation, for what Metal autoreleases.
+        fynkel_present::autorelease_pool(|| drop(unsafe { Box::from_raw(view) }));
     }
 }
 

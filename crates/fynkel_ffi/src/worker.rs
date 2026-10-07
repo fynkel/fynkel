@@ -172,31 +172,39 @@ fn run<T: Target>(shared: &Shared, gpu: &Gpu, mut renderer: Renderer, mut target
             }
         };
 
-        if let Some((width, height)) = size {
-            target.resize(width, height).map_err(|e| format!("couldn't resize the view to {width} × {height}: {e}"))?;
-        }
-        for op in ops.drain(..) {
-            match op {
-                MeshOp::Upload(key, source) => renderer.upload_mesh(key, &mesh_data(source)),
-                MeshOp::Remove(key) => {
-                    renderer.remove_mesh(key);
+        // One pool per pass, so what Metal autoreleases on this thread is
+        // freed every frame and every resize, not when the view goes.
+        let drawn = fynkel_present::autorelease_pool(|| -> Result<bool, String> {
+            if let Some((width, height)) = size {
+                target
+                    .resize(width, height)
+                    .map_err(|e| format!("couldn't resize the view to {width} × {height}: {e}"))?;
+            }
+            for op in ops.drain(..) {
+                match op {
+                    MeshOp::Upload(key, source) => renderer.upload_mesh(key, &mesh_data(source)),
+                    MeshOp::Remove(key) => {
+                        renderer.remove_mesh(key);
+                    }
                 }
             }
-        }
 
-        let drawn = match target.begin() {
-            Some(frame) => {
-                let (width, height) = target.size();
-                renderer.prepare(&scene, width, height);
-                let mut encoder = gpu
-                    .device
-                    .create_command_encoder(&fynkel_render::wgpu::CommandEncoderDescriptor { label: Some("frame") });
-                renderer.encode(&mut encoder, target.view(&frame));
-                target.finish(frame, encoder, number);
-                true
-            }
-            None => false,
-        };
+            let drawn = match target.begin() {
+                Some(frame) => {
+                    let (width, height) = target.size();
+                    renderer.prepare(&scene, width, height);
+                    let mut encoder =
+                        gpu.device.create_command_encoder(&fynkel_render::wgpu::CommandEncoderDescriptor {
+                            label: Some("frame"),
+                        });
+                    renderer.encode(&mut encoder, target.view(&frame));
+                    target.finish(frame, encoder, number);
+                    true
+                }
+                None => false,
+            };
+            Ok(drawn)
+        })?;
 
         let mut mailbox = shared.lock();
         mailbox.spare.push(scene);

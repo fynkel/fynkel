@@ -204,7 +204,8 @@ fail first.
 
 **Step 5: macOS — Apple target, `fynkel_flutter`, `examples/hello`**
 - IOSurface slots imported as wgpu Metal textures, the Swift `FlutterTexture`, the `FynkelView` widget (ticker, resize, dispose, `resolutionScale`), and the hello app.
-- ✅ Done 2026-10-07 (see §7), with one reading of the memory rule for you to confirm.
+- ✅ Done 2026-10-07 (see §7).
+  - **The memory rule, as read from step 5 on** (decided 2026-10-07): points of the same kind (the same view at the same size) must agree within ± 5 MB. Each point is the lowest of five readings while the view is drawing. One difference is allowed and must be named when it shows: Flutter's compositor sometimes keeps two more window-sized IOSurfaces (+14.7 MB at 1600 × 1200), visible in the IOSurface category and sized like the window, not like our surfaces. Flutter owns that pool and it isn't the engine's memory. Any other difference fails the step. Growth over cycles fails it too, so the 40-cycle run stays part of the check.
   - The Apple target draws into 5 IOSurfaces imported as Metal textures. When a frame's GPU work is done, a Metal completion handler marks it finished in the ring and tells Flutter. Flutter's raster thread calls `fy_apple_acquire`, which never blocks and allocates nothing (tested over 1,000 calls), and gets the surface retained once.
   - A resize makes new surfaces and resets the ring under the same lock, so a frame of the old size is never shown (tested). The Swift side needs no "rebind" call: it keeps a pixel buffer per surface and starts again when an unknown surface comes from a full cache.
   - The plugin's teardown order is: no more frame-ready calls (the engine waits for one in progress), no more acquires, unregister the texture, and only then does Dart free the view. A widget test with a real engine view proves the view is still alive when the plugin is told, also when the widget goes away while its texture is still being registered. Swapping the order fails the test.
@@ -219,6 +220,13 @@ fail first.
 **Step 6: iOS**
 - The same app on the iPhone 16 Pro Max.
 - *Done when* it holds 120 fresh fps at native resolution over 60 s with no throttling, and the same create/destroy and resize checks pass. `examples/hello` must also run in the **iOS Simulator** with `flutter run`, with the cube spinning smoothly, and with hot reload of the Dart game code working. The simulator's frame rate isn't a performance number.
+- In progress (see §7). Done so far:
+  - the iPhone holds 120 fresh fps at native 1320 × 2868 over 60 s;
+  - the simulator runs hello with `flutter run`, and hot reload works both ways.
+  - **Hot restart leaked a render worker each time.** A restart makes a new Dart isolate without disposing anything, so the old views kept drawing. Now the plugin is sent `reset` once per isolate, before its first view registers. It releases every view it still holds and frees each one through `fy_view_free`, whose address Dart passes in at registration. A widget test checks that the reset comes first; dropping it fails the test. After 5 restarts, 1 worker runs.
+  - **Autorelease pools on engine threads.** Rust threads have no autorelease pool, so what Metal autoreleases on them would only go when the thread ends. The render worker now drains a pool every pass, and view creation and freeing (called from Dart's thread) drain one too (`fynkel_present::autorelease_pool`). On its own, the Apple target leaked 0.8 MB over 400 resizes without the pool and nothing with it.
+  - `tool/measure.dart --ios <device>` runs the same checks on an iPhone or a simulator. The settings go in as `--dart-define`s. The app's output is read from the VM service, because iOS output doesn't reach `flutter run`. The app reports its own footprint, read with `task_info`, which matches `footprint` on the Mac exactly. Each lifecycle point also shows the Dart heap.
+- Still to do: the create/destroy and resize checks on the iPhone (the first 40-cycle run grew; see §7).
 
 **Step 7: Android**
 - A Kotlin plugin (`SurfaceProducer`), the `ANativeWindow` → wgpu surface, the Android `Target`, and the build hook producing `arm64-v8a` and `x86_64`.
@@ -240,7 +248,7 @@ own, under the quality rule in ADR-0001.
 2. ~~Light units~~: unitless, confirmed 2026-10-07.
 3. ~~The API shape~~: the snippet at the top was confirmed 2026-10-07.
 4. ~~Two changes to that snippet~~: `Light.sun()` with `Transform(forward: …)`, and `cube.rotate(…)`. Accepted 2026-10-07.
-5. **Names shared with Flutter.** `Color`, `Material` and `Transform` are also Flutter names, so a file that imports both `package:flutter/material.dart` and `package:fynkel/fynkel.dart` must hide one or use a prefix. Proposed in step 5, waiting for your OK: keep the game in its own files, which import only `package:fynkel`, and keep the Flutter side in files that don't import it (`examples/hello` does this: `lib/game.dart` and `lib/main.dart`). `package:fynkel_flutter` exports only `FynkelView` and `FynkelViewStats`, so it never clashes. A file that really needs both writes `import 'package:fynkel/fynkel.dart' as fy;`. Nothing is renamed.
+5. ~~Names shared with Flutter~~: decided 2026-10-07, nothing is renamed. `Color`, `Material` and `Transform` are also Flutter names, so a file that imports both `package:flutter/material.dart` and `package:fynkel/fynkel.dart` must hide one or use a prefix. The convention: keep the game in its own files, which import only `package:fynkel`, and keep the Flutter side in files that don't import it (`examples/hello` does this: `lib/game.dart` and `lib/main.dart`). `package:fynkel_flutter` exports only `FynkelView` and `FynkelViewStats`, so it never clashes. A file that really needs both writes `import 'package:fynkel/fynkel.dart' as fy;`. Nothing is renamed.
 6. ~~The engine's fixed GPU memory~~: explained, and cut from about 324 MB to 198 MB, on 2026-10-07. The memory isn't the engine's. Apple's Metal driver gives each process pools of its own when it first uses the GPU, and the footprint counts them: 195 MB once it runs a render pass, and another 128 MB once it runs a blit (a GPU copy or fill) or a compute pass. Plain Metal measures the same, with no wgpu involved (a test program: render only 195.5 MB, blit only 128 MB, both 323.5 MB). The driver frees a pool about a second after the GPU stops using it, and frees everything when the GPU goes idle. The engine paid the blit pool all the time because `queue.write_buffer` copies with a blit, and the renderer called it twice a frame. It now writes per-frame data where the GPU reads it (§3.6), and `crates/fynkel_render/tests/gpu_memory.rs` fails if a steady frame blits again. The render pool stays: every app that draws pays it, Flutter included (a Flutter app with a spinner holds 197 MB). Earlier figures were wrong in two ways. The "blank Flutter app, 54 MB" drew nothing, so it held no pools. And "wgpu adds 130 MB" was really our `write_buffer` calls. Still open, and not worth doing now: a new view still blits once (wgpu clears a buffer of its own when a device is made), which costs 128 MB for about a second. One device shared by all views would avoid that, along with the device's start-up time, once a game has more than one view.
 
 ## 7. Measurements
@@ -412,3 +420,52 @@ in, probably because the Mac was in use and the window got covered. (A
 run with the stats printed drew all the way through, every create and
 resize at 120 fps.) So the 8 created points above are the clean ones, and
 the resize points need a run with the window left in front.
+
+### Step 6: iOS (2026-10-07, iPhone 16 Pro Max, 120 Hz; iOS Simulator on the M3 Max)
+
+`tool/measure.dart --ios <device>`: the profile build (AOT) on the
+iPhone, the debug build in the simulator.
+
+| 60 s of the spinning cube, iPhone | Native, 1320 × 2868 pixels |
+|---|---|
+| Fresh frames per second (median, min) | **120**, 118 |
+| Coalesced, skipped, dropped | 0, 0, 0 |
+| Flutter frames over 8.33 ms | 0 |
+| Dart allocation per frame | 12.0 KB (the Mac: 7.1 KB with no mouse over the view) |
+
+The extra Dart allocation on the iPhone isn't looked into yet.
+
+**Memory, iPhone, before the autorelease pools**: 10 cycles stayed within
+± 5 MB, but 40 cycles grew steadily, about 0.3 MB per create or resize:
+
+| Points (40 cycles) | First → last |
+|---|---|
+| Created, full size | 367.7 → 380.4 MB |
+| Resized back to full size | 380.5 → 391.8 MB |
+| Resized to 0.6 | 255.4 → 266.7 MB |
+
+That fails the rule. The simulator was used to find the cause, because
+there the process can be inspected. Its footprint shows the CPU side.
+Creates stayed flat (132 – 138 MB over 30 cycles); resizes grew
+about 0.2 MB each (141.4 → 150.0 MB). What was found:
+- **Not the engine.** The Apple target resized 400 times from Rust, with
+  frames drawn and shown, stays flat once it has an autorelease pool
+  (54.4 MB from start to end). The pool fix above went in anyway, but
+  the simulator's growth didn't change with it.
+- **Not our objects.** Between resize 4 and resize 28, malloc grows by
+  about 2 MB, all of it allocated by Flutter or the Dart VM: Skia
+  (0.8 MB), a Dart VM hash map (0.8 MB), the Dart timeline recorder
+  (0.3 MB in 10,720 blocks) and Skia's text layout for the changing stats
+  line. Our IOSurfaces, pixel buffers and textures appear as exactly one
+  set of 5.
+- **Not the Dart heap.** It stays between 72 and 79 MB with no trend.
+- The rest is mapped memory: Dart's debug JIT code, and one 18.8 MB region
+  that Flutter reserves when its view is created and that fills slowly
+  (+2.8 MB). Both are bounded and neither is ours.
+- With the view hidden during the resize phase, the same loop grows
+  0.06 MB per cycle. So most of the growth comes with drawing frames,
+  and the inspection above puts it on Flutter's side of them.
+
+Still open: the iPhone's 40-cycle run with the pools in, now that the
+tool shows the Dart heap at each point. The phone was unreachable when
+this was written.
