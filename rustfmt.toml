@@ -1,1 +1,3 @@
 max_width = 120
+# Short struct literals and calls stay on one line up to max_width.
+use_small_heuristics = "Max"

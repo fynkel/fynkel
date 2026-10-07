@@ -13,6 +13,8 @@ publish = false
 fynkel_world = { path = "crates/fynkel_world" }
 fynkel_render = { path = "crates/fynkel_render" }
 fynkel_present = { path = "crates/fynkel_present" }
+hecs = "0.11.2"
+glam = "0.34.1"
 
 # Unsafe code is denied everywhere. `fynkel_ffi` (the C boundary) and the
 # platform modules of `fynkel_present` allow it locally, and nothing else.

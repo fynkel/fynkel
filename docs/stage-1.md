@@ -196,3 +196,24 @@ own, under the quality rule in ADR-0001.
 1. **An Android phone.** Step 7 needs one connected over USB or Wi-Fi. Until then, only the emulator can be tested.
 2. ~~Light units~~: unitless, confirmed 2026-10-07.
 3. ~~The API shape~~: the snippet at the top was confirmed 2026-10-07.
+
+## 7. Measurements
+
+### Step 1: `fynkel_world` (2026-10-07, M3 Max Mac, release build)
+
+`cargo run --release -p fynkel_world --example bench`, 100,000 objects,
+best of 5 runs:
+
+| Operation | Total | Per object |
+|---|---|---|
+| spawn + Transform + MeshRenderer | 8.60 ms | 86.0 ns |
+| set Transform (validated) | 3.03 ms | 30.3 ns |
+| get Transform | 1.84 ms | 18.4 ns |
+| for_each2 Transform+MeshRenderer | 0.08 ms | 0.8 ns |
+| despawn | 1.84 ms | 18.4 ns |
+
+What this means: setting a transform, which is the call a game makes most
+often, costs about 30 ns with full validation. A frame that moves 10,000
+objects spends 0.3 ms in the world. Walking every drawable object, which
+the renderer's extract will do each frame, is close to free. Nothing here
+needs optimising now.
