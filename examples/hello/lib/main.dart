@@ -87,11 +87,11 @@ class _HelloPageState extends State<HelloPage> {
 
   Future<void> _runLifecycleCheck() async {
     const settle = Duration(seconds: 2);
-    // Nothing changes for a second after a mark, while the tool reads the
-    // memory.
+    // Nothing changes for three seconds after a mark, while the tool reads
+    // the memory (several times: see tool/measure.dart).
     Future<void> mark(String point) async {
       stdout.writeln('[check] $point');
-      await Future<void>.delayed(const Duration(seconds: 1));
+      await Future<void>.delayed(const Duration(seconds: 3));
     }
 
     await Future<void>.delayed(const Duration(seconds: 5));
