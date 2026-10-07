@@ -113,12 +113,19 @@ pub fn read_back(gpu: &Gpu, texture: &wgpu::Texture) -> Image {
 
 // --- Golden images -----------------------------------------------------------
 
+/// `tests/golden`, or `FYNKEL_GOLDEN_DIR` when the tests run on a device
+/// or emulator, where the source tree isn't.
 fn golden_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden")
+    std::env::var_os("FYNKEL_GOLDEN_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden"))
 }
 
 fn failure_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/golden-failures")
+    match std::env::var_os("FYNKEL_GOLDEN_DIR") {
+        Some(dir) => PathBuf::from(dir).join("failures"),
+        None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/golden-failures"),
+    }
 }
 
 fn write_png(path: &PathBuf, image: &Image) {

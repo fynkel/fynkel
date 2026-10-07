@@ -159,6 +159,7 @@ fail first.
 - More golden tests: a sphere lit from four sun directions, which checks the lighting maths, plus a mixed instanced scene. A plane facing the sun and camera checks the unit definition in §3.6 against the CPU formulas.
 - *Done when* the golden tests pass in CI and a test proves a steady-state `prepare` makes zero heap allocations. wgpu allocates inside `encode` and submit, which our code can't avoid, so that number is recorded rather than asserted.
 - ✅ Done 2026-10-07 (see §7).
+- **Simulators.** The same GPU tests pass inside the iOS Simulator (Metal) and the Android emulator (Vulkan through MoltenVK), reference images included. `tools/test-mobile.sh` runs them, and CI runs it on every change. The Android emulator's Vulkan driver crashes when wgpu names GPU objects, so on Android names aren't passed to the driver (`instance_flags()`).
 
 **Step 3: `fynkel_present`, the ring**
 - The slot state machine and the frame-queue rules from §3.5, with no GPU.

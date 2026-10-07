@@ -33,6 +33,7 @@ impl Gpu {
     pub fn headless() -> Result<Self, GpuError> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
+            flags: instance_flags(),
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -57,4 +58,14 @@ impl Gpu {
         .map_err(GpuError::NoDevice)?;
         Ok(Self { adapter, device, queue })
     }
+}
+
+/// wgpu's defaults for this build, plus one Android fix: the Android
+/// emulator's Vulkan driver (`vulkan.ranchu.so`, over MoltenVK) crashes in
+/// `vkSetDebugUtilsObjectNameEXT` when wgpu names its objects in debug
+/// builds. Not passing names to the driver avoids it, and costs nothing but
+/// names in GPU debuggers. Apple keeps them for Xcode's frame capture.
+pub fn instance_flags() -> wgpu::InstanceFlags {
+    let flags = wgpu::InstanceFlags::from_build_config();
+    if cfg!(target_os = "android") { flags | wgpu::InstanceFlags::DISCARD_HAL_LABELS } else { flags }
 }
