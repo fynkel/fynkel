@@ -134,6 +134,7 @@ fy_frame():
 - **Units:** unitless. Before tonemapping, a sun of intensity 1.0 makes a rough surface that faces it reflect exactly its albedo (Lambert diffuse), plus a small specular term. The same goes for an ambient of 1.0 on its own. The Khronos PBR Neutral tonemapper then subtracts a small offset (0.04 in linear, to cancel the Fresnel reflection every surface has) and rolls highlights off above 0.76. So a lit mid-grey shows a few levels darker than its picked colour, and colours stay true otherwise. A test checks the GPU against a CPU copy of these formulas, to within 1/255.
 - **sRGB views only.** The renderer draws into an sRGB view, so the hardware encodes and the MSAA resolve averages in linear light. Resolving into a plain format averaged encoded values and darkened every edge by up to 47/255 (found by a test). A plain-format texture or surface still works through an sRGB view of itself (`view_formats`).
 - **Instancing.** Per-draw data lives in an instance buffer, and draws are sorted by mesh, so each mesh is one draw call. 1,000 cubes is 1 call. This cut wgpu's own allocations per frame from 1,072 to about 69.
+- **No GPU copies per frame.** The frame uniforms and the instances go into one of three buffers that the CPU writes and the GPU reads in place (`frame_ring.rs`; wgpu's `MAPPABLE_PRIMARY_BUFFERS`, which every native backend has). Meshes are written the same way. `queue.write_buffer` would copy them with a blit, and on Apple GPUs a process that blits every frame keeps 128 MB of driver memory dirty (§6, question 6).
 - Primitives are generated in code: a cube with 24 vertices and flat normals, a UV sphere, and a plane.
 - Not in stage 1: shadows, textures, more than one light, a hierarchy, or culling.
 
@@ -240,7 +241,7 @@ own, under the quality rule in ADR-0001.
 3. ~~The API shape~~: the snippet at the top was confirmed 2026-10-07.
 4. ~~Two changes to that snippet~~: `Light.sun()` with `Transform(forward: …)`, and `cube.rotate(…)`. Accepted 2026-10-07.
 5. **Names shared with Flutter.** `Color`, `Material` and `Transform` are also Flutter names, so a file that imports both `package:flutter/material.dart` and `package:fynkel/fynkel.dart` must hide one or use a prefix. Proposed in step 5, waiting for your OK: keep the game in its own files, which import only `package:fynkel`, and keep the Flutter side in files that don't import it (`examples/hello` does this: `lib/game.dart` and `lib/main.dart`). `package:fynkel_flutter` exports only `FynkelView` and `FynkelViewStats`, so it never clashes. A file that really needs both writes `import 'package:fynkel/fynkel.dart' as fy;`. Nothing is renamed.
-6. **The engine's fixed GPU memory.** Found in step 5: one view costs about 320 MB of GPU memory before it draws anything, whatever its size (a blank Flutter app is 54 MB in total). It is all given back when the view is disposed. Plain Metal in a command-line process costs 195 MB on its first render pass, so most of it is the Metal driver's per-process cost; wgpu adds about 130 MB. Flutter's own renderer doesn't show it. Not a leak, but it matters on the iPhone. To look at in step 6: share Flutter's Metal device and queue, and find what wgpu adds.
+6. ~~The engine's fixed GPU memory~~: explained, and cut from about 324 MB to 198 MB, on 2026-10-07. The memory isn't the engine's. Apple's Metal driver gives each process pools of its own when it first uses the GPU, and the footprint counts them: 195 MB once it runs a render pass, and another 128 MB once it runs a blit (a GPU copy or fill) or a compute pass. Plain Metal measures the same, with no wgpu involved (a test program: render only 195.5 MB, blit only 128 MB, both 323.5 MB). The driver frees a pool about a second after the GPU stops using it, and frees everything when the GPU goes idle. The engine paid the blit pool all the time because `queue.write_buffer` copies with a blit, and the renderer called it twice a frame. It now writes per-frame data where the GPU reads it (§3.6), and `crates/fynkel_render/tests/gpu_memory.rs` fails if a steady frame blits again. The render pool stays: every app that draws pays it, Flutter included (a Flutter app with a spinner holds 197 MB). Earlier figures were wrong in two ways. The "blank Flutter app, 54 MB" drew nothing, so it held no pools. And "wgpu adds 130 MB" was really our `write_buffer` calls. Still open, and not worth doing now: a new view still blits once (wgpu clears a buffer of its own when a device is made), which costs 128 MB for about a second. One device shared by all views would avoid that, along with the device's start-up time, once a game has more than one view.
 
 ## 7. Measurements
 
@@ -351,7 +352,8 @@ about 12 KB per frame. The stats line says whether a mouse was in the
 view (`mouse=1`), so a measurement always says which case it was.
 
 **Memory** is the process's physical footprint (`footprint`), which counts
-GPU memory and IOSurfaces, not just the heap. One run, 10 cycles each:
+GPU memory and IOSurfaces, not just the heap. One run, 10 cycles each,
+before the GPU memory fix (§6, question 6):
 
 | Points | Range |
 |---|---|
@@ -382,4 +384,31 @@ Where the memory goes at 1600 × 1200 (about 564 MB in total, against
 
 What this means: on the Mac, the cube is at the display rate with every
 frame fresh, in a window and full screen, and nothing builds up. The one
-surprise is the fixed GPU memory, which step 6 looks at on the iPhone.
+surprise was the fixed GPU memory, below.
+
+**After the GPU memory fix** (2026-10-07, same Mac and build settings):
+
+| | Before | After |
+|---|---|---|
+| The renderer alone, steady frames (GPU, dirty) | 326 MB | **198 MB** |
+| `examples/hello`, steady, window (GPU, dirty) | 415.7 MB | **271.7 MB** |
+| `examples/hello` after each create/destroy cycle (total) | 553.2 – 579.2 MB | **424.4 – 432.8 MB** |
+| …its GPU part | 397.8 – 414.3 MB | **271.7 MB** every time |
+
+That's 144 MB less in the app. The rest of hello's GPU memory: the
+driver's render pool (about 198 MB, paid by any app that draws), our
+61 MB of MSAA targets, and Flutter's own drawing. Frame rate is unchanged:
+median 120 fresh fps, nothing coalesced or dropped.
+
+Two measurement fixes came with it. Each lifecycle point is now the lowest
+of five readings over two seconds, because a blit by anyone (a new view,
+or Flutter updating text) holds the 128 MB pool for about a second, and a
+single reading caught it at random. A leak is in every reading, so the
+lowest can't hide one. And the tool now marks points where nothing was
+drawn, because a hidden window gets no frames and an idle GPU frees its
+pools: the readings drop to about 140 MB and mean nothing. All four
+lifecycle runs after the fix stopped drawing partway through, 40 to 80 s
+in, probably because the Mac was in use and the window got covered. (A
+run with the stats printed drew all the way through, every create and
+resize at 120 fps.) So the 8 created points above are the clean ones, and
+the resize points need a run with the window left in front.

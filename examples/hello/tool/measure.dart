@@ -13,7 +13,12 @@
 // allocated between any two samples.
 //
 // Memory is the process's physical footprint (`footprint`), which counts
-// the GPU memory and IOSurfaces the process owns, not just its heap.
+// the GPU memory and IOSurfaces the process owns, not just its heap. Each
+// point is the lowest of several readings while the app stands still: the
+// Metal driver keeps a 128 MB pool dirty for about a second after any blit
+// (a GPU copy), and both a new view (wgpu clears a buffer of its own) and
+// Flutter (text updates) blit now and then. Leaked memory is there in every
+// reading, so the lowest one can't hide it.
 
 import 'dart:async';
 import 'dart:convert';
@@ -87,12 +92,18 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
 /// window and 0.6 of it, with the footprint at each point the app reports.
 /// Points of the same kind should match: the same view at the same size.
 Future<void> _lifecycle(int cycles) async {
-  final app = await _App.start({'FYNKEL_CHECK': 'lifecycle', 'FYNKEL_CYCLES': '$cycles'});
+  final app = await _App.start({'FYNKEL_CHECK': 'lifecycle', 'FYNKEL_CYCLES': '$cycles', 'FYNKEL_STATS': '1'});
   try {
     final marks = <String, _Footprint>{};
+    final idle = <String>[];
     await for (final point in app.checks) {
-      final footprint = marks[point] = await _Footprint.of(app.pid);
-      print('${point.padRight(12)} $footprint');
+      final from = app.windows.length;
+      final footprint = marks[point] = await _Footprint.lowest(app.pid);
+      // A hidden window gets no frames, and an idle GPU frees its driver
+      // memory, so such a reading says nothing about the view.
+      final drawing = app.windows.skip(from).any((w) => (w['presented'] as num) > 0);
+      if (!drawing) idle.add(point);
+      print('${point.padRight(12)} $footprint${drawing ? '' : '   NOT DRAWING'}');
       if (point == 'done') break;
     }
     void range(String label, bool Function(String point) which) {
@@ -108,6 +119,10 @@ Future<void> _lifecycle(int cycles) async {
     range('created, full size', (p) => p.startsWith('created'));
     range('resized, back to full size', (p) => p.startsWith('resized') && number(p).isEven);
     range('resized, to 0.6', (p) => p.startsWith('resized') && number(p).isOdd);
+    if (idle.isNotEmpty) {
+      print('\nNothing was drawn at ${idle.join(', ')}: was the window hidden? Those readings are void.');
+      exitCode = 1;
+    }
   } finally {
     await app.stop();
   }
@@ -119,6 +134,18 @@ class _Footprint {
   _Footprint(this.total, this.gpu, this.surfaces);
 
   final int total, gpu, surfaces;
+
+  /// The lowest of five readings over two seconds, after a moment for the
+  /// app to settle (it stands still for three seconds after each mark).
+  static Future<_Footprint> lowest(int pid) async {
+    _Footprint? lowest;
+    for (var i = 0; i < 5; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      final reading = await of(pid);
+      if (lowest == null || reading.total < lowest.total) lowest = reading;
+    }
+    return lowest!;
+  }
 
   static Future<_Footprint> of(int pid) async {
     final result = await Process.run('footprint', ['-p', '$pid', '-f', 'bytes']);
