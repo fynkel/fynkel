@@ -13,6 +13,7 @@ import IOSurface
 typealias FyAcquire = @convention(c) (UnsafeRawPointer?, UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> UInt32
 typealias FyFrameReady = @convention(c) (UnsafeMutableRawPointer?) -> Void
 typealias FySetFrameReady = @convention(c) (UnsafeRawPointer?, FyFrameReady?, UnsafeMutableRawPointer?) -> Int32
+typealias FyViewFree = @convention(c) (UnsafeRawPointer?) -> Void
 
 /// `fy_apple_acquire`'s flags.
 private let shownFlag: UInt32 = 1

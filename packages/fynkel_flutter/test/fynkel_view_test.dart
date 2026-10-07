@@ -8,7 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/src/bindings.g.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
-import 'package:fynkel_flutter/src/fynkel_view.dart' show channel;
+import 'package:fynkel_flutter/src/fynkel_view.dart' show channel, forgetReset;
 
 /// Whether the engine view at [address] is still alive and answering.
 bool alive(int address) {
@@ -25,6 +25,10 @@ void main() {
   // The engine view behind each texture.
   final views = <int, int>{};
   late List<String> calls;
+  // How many calls this test had made at each `reset`.
+  late List<int> resets;
+  // Whether the plugin was ever reset in this isolate.
+  var everReset = false;
   late int nextTexture;
   // When set, `register` answers only once it completes.
   Completer<void>? hold;
@@ -33,21 +37,28 @@ void main() {
     world = World();
     world.spawn(Camera(), Transform(position: Vec3(0, 0, 4)));
     calls = [];
+    resets = [];
     nextTexture = 7;
     hold = null;
     // The Swift plugin, as far as Dart can see it.
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
-      final args = call.arguments as Map;
+      final args = call.arguments as Map? ?? const {};
       switch (call.method) {
         case 'register':
           expect(args['acquire'], isNot(0));
           expect(args['setFrameReady'], isNot(0));
+          expect(args['free'], isNot(0));
+          expect(everReset, isTrue, reason: 'the plugin is reset before the first register');
           final view = args['view'] as int;
           expect(alive(view), isTrue);
           calls.add('register');
           await hold?.future;
           views[nextTexture] = view;
           return nextTexture++;
+        case 'reset':
+          resets.add(calls.length);
+          everReset = true;
+          return null;
         case 'unregister':
           final texture = args['texture'] as int;
           expect(alive(views[texture]!), isTrue, reason: 'the view is freed only after this');
@@ -133,6 +144,22 @@ void main() {
     expect(calls, ['register', 'unregister 7', 'register']);
     expect(tester.widget<Texture>(find.byType(Texture)).textureId, 8);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  // A hot restart starts a new isolate and disposes nothing, so the first
+  // view of each isolate has the plugin free what an earlier one left.
+  testWidgets('the plugin is reset once per isolate, before its first view registers', (tester) async {
+    forgetReset();
+    await tester.pumpWidget(sized(FynkelView(world: world)));
+    await tester.pump(const Duration(milliseconds: 8));
+    await tester.pumpWidget(sized(const SizedBox()));
+    final other = World();
+    addTearDown(other.dispose);
+    await tester.pumpWidget(sized(FynkelView(world: other)));
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(calls, ['register', 'unregister 7', 'register']);
+    expect(resets, [0]);
+    await tester.pumpWidget(sized(const SizedBox()));
   });
 
   testWidgets('an unbounded size is a clear error', (tester) async {

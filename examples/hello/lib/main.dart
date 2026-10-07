@@ -6,18 +6,21 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
+import 'footprint.dart';
 import 'game.dart';
 
-/// Set by tool/measure.dart, never by hand.
-final _env = Platform.environment;
+/// Set by tool/measure.dart, never by hand: as environment variables on
+/// the Mac, and as `--dart-define`s on iOS, where an app gets no
+/// environment.
+String _setting(String name, String defined) => Platform.environment[name] ?? defined;
 
 /// Prints a `[stats]` line every second.
-final _printStats = _env['FYNKEL_STATS'] == '1';
+final _printStats = _setting('FYNKEL_STATS', const String.fromEnvironment('FYNKEL_STATS')) == '1';
 
 /// Runs the create/destroy and resize check, printing a `[check]` line at
 /// each point where memory should be back where it started.
-final _lifecycleCheck = _env['FYNKEL_CHECK'] == 'lifecycle';
-final _cycles = int.tryParse(_env['FYNKEL_CYCLES'] ?? '') ?? 10;
+final _lifecycleCheck = _setting('FYNKEL_CHECK', const String.fromEnvironment('FYNKEL_CHECK')) == 'lifecycle';
+final _cycles = int.tryParse(_setting('FYNKEL_CYCLES', const String.fromEnvironment('FYNKEL_CYCLES'))) ?? 10;
 
 void main() => runApp(const HelloApp());
 
@@ -78,7 +81,7 @@ class _HelloPageState extends State<HelloPage> {
     final seconds = stats.window.inMicroseconds / 1e6;
     final line =
         '$stats flutter=${(_flutterFrames / seconds).toStringAsFixed(1)} flutterFrames=$_flutterFrames '
-        'slow=$_slowFrames mouse=${RendererBinding.instance.mouseTracker.mouseIsConnected ? 1 : 0}';
+        'slow=$_slowFrames footprint=${physicalFootprint()} mouse=${RendererBinding.instance.mouseTracker.mouseIsConnected ? 1 : 0}';
     _flutterFrames = 0;
     _slowFrames = 0;
     _stats.value = line;
@@ -87,11 +90,20 @@ class _HelloPageState extends State<HelloPage> {
 
   Future<void> _runLifecycleCheck() async {
     const settle = Duration(seconds: 2);
-    // Nothing changes for three seconds after a mark, while the tool reads
-    // the memory (several times: see tool/measure.dart).
+    // Nothing changes for three seconds after a mark, while the memory is
+    // read (several times: see tool/measure.dart). On the Mac the tool
+    // reads it from outside; on iOS nothing can, so the app reads its own
+    // footprint as well and prints the lowest reading as a `[memory]` line.
     Future<void> mark(String point) async {
       stdout.writeln('[check] $point');
-      await Future<void>.delayed(const Duration(seconds: 3));
+      var lowest = physicalFootprint();
+      for (var i = 0; i < 5; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        final reading = physicalFootprint();
+        if (reading < lowest) lowest = reading;
+      }
+      stdout.writeln('[memory] $point $lowest');
+      await Future<void>.delayed(const Duration(milliseconds: 500));
     }
 
     await Future<void>.delayed(const Duration(seconds: 5));
@@ -123,15 +135,20 @@ class _HelloPageState extends State<HelloPage> {
               child: FynkelView(world: _game.world, onFrame: _game.onFrame, onStats: _onStats),
             ),
           ),
+        // Clear of the iPhone's status bar and Dynamic Island, and wrapped
+        // to the screen's width.
         Positioned(
           left: 12,
+          right: 12,
           top: 12,
-          child: RepaintBoundary(
-            child: ValueListenableBuilder(
-              valueListenable: _stats,
-              builder: (context, line, _) => Text(
-                line,
-                style: const TextStyle(fontFamily: 'Menlo', fontSize: 11, color: Colors.white70),
+          child: SafeArea(
+            child: RepaintBoundary(
+              child: ValueListenableBuilder(
+                valueListenable: _stats,
+                builder: (context, line, _) => Text(
+                  line,
+                  style: const TextStyle(fontFamily: 'Menlo', fontSize: 11, color: Colors.white70),
+                ),
               ),
             ),
           ),

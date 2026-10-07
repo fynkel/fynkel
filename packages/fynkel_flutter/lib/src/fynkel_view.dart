@@ -11,6 +11,18 @@ import 'package:fynkel/platform.dart';
 @visibleForTesting
 const channel = MethodChannel('fynkel_flutter');
 
+/// Whether this isolate has told the plugin to free the views an earlier
+/// isolate left (a hot restart disposes nothing). It does so before its
+/// first view registers. The plugin handles a channel's calls in the order
+/// they were sent, so a `register` sent after `reset` always comes after
+/// it, even while the first is still waiting for the answer.
+bool _resetSent = false;
+
+/// Forgets that this isolate reset the plugin, so a test can check that it
+/// does.
+@visibleForTesting
+void forgetReset() => _resetSent = false;
+
 /// What a [FynkelView] did in one stats window (about a second).
 @immutable
 class FynkelViewStats {
@@ -160,10 +172,15 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
 
   Future<int?> _register(AppleView view) async {
     try {
+      if (!_resetSent) {
+        _resetSent = true;
+        await channel.invokeMethod<void>('reset');
+      }
       final texture = await channel.invokeMethod<int>('register', {
         'view': view.address,
         'acquire': AppleView.acquireAddress,
         'setFrameReady': AppleView.setFrameReadyAddress,
+        'free': AppleView.freeAddress,
       });
       if (mounted && _view == view) setState(() => _texture = texture);
       return texture;

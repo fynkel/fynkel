@@ -210,6 +210,10 @@ final class AppleView extends WorldView {
       Native.addressOf<NativeFunction<Uint32 Function(Pointer<FyView>, Pointer<Pointer<Void>>)>>(fy_apple_acquire)
           .address;
 
+  /// `fy_view_free`, for the plugin to free the views of an isolate that
+  /// is gone (a hot restart disposes nothing).
+  static int get freeAddress => Native.addressOf<NativeFunction<Void Function(Pointer<FyView>)>>(fy_view_free).address;
+
   /// `fy_apple_set_frame_ready`, for the plugin to learn of new frames.
   static int get setFrameReadyAddress =>
       Native.addressOf<
