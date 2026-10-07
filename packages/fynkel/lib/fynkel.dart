@@ -4,6 +4,6 @@ library;
 
 export 'src/color.dart';
 export 'src/error.dart';
-export 'src/headless_view.dart';
 export 'src/math.dart';
+export 'src/view.dart' show HeadlessView, ViewStats, WorldView;
 export 'src/world.dart';

@@ -203,6 +203,13 @@ fail first.
 
 **Step 5: macOS — Apple target, `fynkel_flutter`, `examples/hello`**
 - IOSurface slots imported as wgpu Metal textures, the Swift `FlutterTexture`, the `FynkelView` widget (ticker, resize, dispose, `resolutionScale`), and the hello app.
+- ✅ Done 2026-10-07 (see §7), with one reading of the memory rule for you to confirm.
+  - The Apple target draws into 5 IOSurfaces imported as Metal textures. When a frame's GPU work is done, a Metal completion handler marks it finished in the ring and tells Flutter. Flutter's raster thread calls `fy_apple_acquire`, which never blocks and allocates nothing (tested over 1,000 calls), and gets the surface retained once.
+  - A resize makes new surfaces and resets the ring under the same lock, so a frame of the old size is never shown (tested). The Swift side needs no "rebind" call: it keeps a pixel buffer per surface and starts again when an unknown surface comes from a full cache.
+  - The plugin's teardown order is: no more frame-ready calls (the engine waits for one in progress), no more acquires, unregister the texture, and only then does Dart free the view. A widget test with a real engine view proves the view is still alive when the plugin is told, also when the widget goes away while its texture is still being registered. Swapping the order fails the test.
+  - The garbage collector never frees an `AppleView`, because Flutter's raster thread may still be using it; only `dispose` does, after the plugin has let go. Headless views still have finalizers.
+  - `HeadlessView` and `AppleView` share `WorldView` (`frame`, `resize`, `stats`, `dispose`). `AppleView` is in `package:fynkel/platform.dart`, not in the game API.
+  - `tool/measure.dart` reads the app's Dart heap from outside the app, through the VM service, so the measurement allocates nothing in the app it measures.
 - *Done when*:
   - the cube spins at 120 fresh fps on the Mac's display (window and full screen), with no dropped frames over 60 s;
   - 10 create/destroy cycles and 10 resizes leave memory flat (± 5 MB);
@@ -232,7 +239,8 @@ own, under the quality rule in ADR-0001.
 2. ~~Light units~~: unitless, confirmed 2026-10-07.
 3. ~~The API shape~~: the snippet at the top was confirmed 2026-10-07.
 4. ~~Two changes to that snippet~~: `Light.sun()` with `Transform(forward: …)`, and `cube.rotate(…)`. Accepted 2026-10-07.
-5. **Names shared with Flutter.** `Color`, `Material` and `Transform` are also Flutter names, so a file that imports both `package:flutter/material.dart` and `package:fynkel/fynkel.dart` must hide one or use a prefix. To decide in step 5, when `examples/hello` first imports both.
+5. **Names shared with Flutter.** `Color`, `Material` and `Transform` are also Flutter names, so a file that imports both `package:flutter/material.dart` and `package:fynkel/fynkel.dart` must hide one or use a prefix. Proposed in step 5, waiting for your OK: keep the game in its own files, which import only `package:fynkel`, and keep the Flutter side in files that don't import it (`examples/hello` does this: `lib/game.dart` and `lib/main.dart`). `package:fynkel_flutter` exports only `FynkelView` and `FynkelViewStats`, so it never clashes. A file that really needs both writes `import 'package:fynkel/fynkel.dart' as fy;`. Nothing is renamed.
+6. **The engine's fixed GPU memory.** Found in step 5: one view costs about 320 MB of GPU memory before it draws anything, whatever its size (a blank Flutter app is 54 MB in total). It is all given back when the view is disposed. Plain Metal in a command-line process costs 195 MB on its first render pass, so most of it is the Metal driver's per-process cost; wgpu adds about 130 MB. Flutter's own renderer doesn't show it. Not a leak, but it matters on the iPhone. To look at in step 6: share Flutter's Metal device and queue, and find what wgpu adds.
 
 ## 7. Measurements
 
@@ -317,3 +325,61 @@ rule, so the calls stay direct and no batched path is designed. A game
 that turns 10,000 objects every frame through `rotate` spends 1.25 ms of
 its 8.3 ms. That's worth remembering, but not worth fixing before a
 real game needs it.
+
+### Step 5: macOS (2026-10-07, M3 Max MacBook Pro, 120 Hz built-in display)
+
+`examples/hello/tool/measure.dart` on the profile build (AOT), with the
+display kept awake (`caffeinate -du`), after 5 s of warm-up.
+
+| 60 s of the spinning cube | Window, 1600 × 1200 pixels | Full screen, 3456 × 2168 |
+|---|---|---|
+| Fresh frames per second (median, min, max) | **120**, 120, 120 | **120**, 120, 120 |
+| Frames drawn / shown | 7,139 / 7,139 | 7,139 / 7,139 |
+| Coalesced, skipped, dropped | 0, 0, 0 | 0, 0, 0 |
+| Flutter frames over 8.33 ms (build or raster) | 0 | 0 |
+| Dart allocation per frame | 13.4 KB | 13.4 KB |
+
+A first window run had 3 dropped frames and 2 slow Flutter frames in its
+first seconds; three more runs had none.
+
+**Dart allocation per frame** is 7.1 KB with no mouse over the view and
+13.4 KB with one. While a mouse pointer is inside a Flutter view, Flutter
+hit-tests its position after every frame to update hover; that's the
+6 KB difference, and it isn't Fynkel's. Both runs above had the pointer
+over the view. Fynkel 1's floor for a blank Flutter app with a ticker was
+about 12 KB per frame. The stats line says whether a mouse was in the
+view (`mouse=1`), so a measurement always says which case it was.
+
+**Memory** is the process's physical footprint (`footprint`), which counts
+GPU memory and IOSurfaces, not just the heap. One run, 10 cycles each:
+
+| Points | Range |
+|---|---|
+| After each of 10 create/destroy cycles (full size) | 553.2 – 579.2 MB |
+| After each resize back to full size | 563.4 – 564.6 MB (1.2 MB) |
+| After each resize to 0.6 | 502.0 – 517.4 MB |
+
+The memory at one size is the same each time, except for one thing that
+isn't ours: Flutter's compositor keeps a pool of window-sized IOSurfaces
+and sometimes holds 2 more (+14.7 MB: two 1600 × 1200 surfaces, and the
+same at 0.6, where ours are smaller). Without it, the GPU memory after
+the create/destroy cycles was 397.8 MB seven times, 399.7 MB twice, and
+414.3 MB once, back to 399.7 MB at the next point. There's also one 7 MB
+step in `MALLOC_LARGE` that happens once in a run (likely the system
+allocator keeping freed large blocks). Over 40 cycles there is no growth:
+cycles 15 to 39 stay within 0.8 MB. Read as "the engine's memory comes back", the rule
+holds. Read as "the process total stays within ± 5 MB", it doesn't,
+because of Flutter's pool. Your call.
+
+Where the memory goes at 1600 × 1200 (about 564 MB in total, against
+54 MB for a blank Flutter app with a ticker):
+- 61 MB: the 4× MSAA colour and depth targets (32 bytes per pixel; this
+  is the part that changes with the size);
+- 37 MB: our 5 IOSurfaces;
+- about 320 MB: fixed GPU memory of the engine's device, whatever the
+  size (§6, question 6);
+- the rest: Flutter, the Dart heap and the engine's CPU side.
+
+What this means: on the Mac, the cube is at the display rate with every
+frame fresh, in a window and full screen, and nothing builds up. The one
+surprise is the fixed GPU memory, which step 6 looks at on the iPhone.

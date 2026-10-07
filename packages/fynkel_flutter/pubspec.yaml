@@ -1,0 +1,32 @@
+name: fynkel_flutter
+description: Shows a Fynkel world in a Flutter app. The FynkelView widget and the platform plugins that put its frames on screen.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.47.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  fynkel:
+    path: ../fynkel
+
+dev_dependencies:
+  # The tests check the engine view directly.
+  ffi: ^2.2.0
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0
+
+flutter:
+  plugin:
+    platforms:
+      # One Swift source for both (darwin/): only the imports differ.
+      ios:
+        pluginClass: FynkelFlutterPlugin
+        sharedDarwinSource: true
+      macos:
+        pluginClass: FynkelFlutterPlugin
+        sharedDarwinSource: true

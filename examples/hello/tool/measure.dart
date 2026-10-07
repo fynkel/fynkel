@@ -1,0 +1,284 @@
+// The step 5 measurements (docs/stage-1.md §4): runs the profile build of
+// hello and reports the fresh frame rate, the Dart allocation per frame,
+// and the memory over create/destroy and resize cycles.
+//
+//   flutter build macos --profile
+//   dart tool/measure.dart rate [--seconds 60] [--fullscreen]
+//   dart tool/measure.dart lifecycle [--cycles 10]
+//
+// The Dart heap is read from out here, through the app's VM service: the
+// app's own isolate does nothing for the measurement, so it can't distort
+// it. Only the VM's GC timeline is recorded while it runs; each collection
+// event carries the heap before and after it, which gives the bytes
+// allocated between any two samples.
+//
+// Memory is the process's physical footprint (`footprint`), which counts
+// the GPU memory and IOSurfaces the process owns, not just its heap.
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+const _app = 'build/macos/Build/Products/Profile/hello.app/Contents/MacOS/hello';
+
+/// Seconds of a run that aren't measured: startup and the first frames.
+const _warmUp = 5;
+
+Future<void> main(List<String> args) async {
+  if (!File(_app).existsSync()) {
+    stderr.writeln('No profile build. Run: flutter build macos --profile');
+    exit(2);
+  }
+  final mode = args.isEmpty ? 'rate' : args.first;
+  final fullscreen = args.contains('--fullscreen');
+  final secondsAt = args.indexOf('--seconds');
+  final seconds = secondsAt < 0 ? 60 : int.parse(args[secondsAt + 1]);
+  switch (mode) {
+    case 'rate':
+      await _rate(seconds, fullscreen: fullscreen);
+    case 'lifecycle':
+      final cyclesAt = args.indexOf('--cycles');
+      await _lifecycle(cyclesAt < 0 ? 10 : int.parse(args[cyclesAt + 1]));
+    default:
+      stderr.writeln('usage: dart tool/measure.dart rate [--seconds N] [--fullscreen] | lifecycle [--cycles N]');
+      exit(2);
+  }
+}
+
+/// [seconds] of the spinning cube: the frame rate the player sees, every
+/// frame that wasn't fresh, and the Dart allocation per frame.
+Future<void> _rate(int seconds, {required bool fullscreen}) async {
+  final app = await _App.start({'FYNKEL_STATS': '1', if (fullscreen) 'FYNKEL_FULLSCREEN': '1'});
+  try {
+    await app.serviceReady;
+    await Future<void>.delayed(const Duration(seconds: _warmUp));
+    final heap = await _Heap.connect(app.service!);
+    final from = app.windows.length;
+    await Future<void>.delayed(Duration(seconds: seconds));
+    final allocated = await heap.allocatedSinceStart();
+    await heap.close();
+    final windows = app.windows.sublist(from);
+    if (windows.isEmpty) throw StateError('the app printed no stats');
+
+    int sum(String key) => windows.fold(0, (total, w) => total + (w[key] as num).toInt());
+    final fresh = windows.map((w) => w['fresh'] as double).toList()..sort();
+    final presented = sum('presented');
+    print('mode            ${fullscreen ? 'full screen' : 'window'}, ${windows.last['size']} pixels');
+    print('windows         ${windows.length} × ~1 s');
+    print(
+      'fresh fps       median ${fresh[fresh.length ~/ 2].toStringAsFixed(1)}, '
+      'min ${fresh.first.toStringAsFixed(1)}, max ${fresh.last.toStringAsFixed(1)}',
+    );
+    print('frames          posted ${sum('posted')}, rendered ${sum('rendered')}, presented $presented');
+    print('not shown       coalesced ${sum('coalesced')}, skipped ${sum('skipped')}, dropped ${sum('dropped')}');
+    print('flutter frames  ${sum('flutterFrames')}, slow ${sum('slow')} (build or raster over 8.33 ms)');
+    print('mouse in view   ${sum('mouse')} of ${windows.length} windows (Flutter hit-tests it after every frame)');
+    print(
+      'dart heap       ${allocated.bytes} B allocated in ${allocated.seconds.toStringAsFixed(1)} s, '
+      '${allocated.collections} collections',
+    );
+    print('per frame       ${(allocated.bytes / presented).toStringAsFixed(0)} B');
+  } finally {
+    await app.stop();
+  }
+}
+
+/// [cycles] create/destroy cycles, then as many resizes between the full
+/// window and 0.6 of it, with the footprint at each point the app reports.
+/// Points of the same kind should match: the same view at the same size.
+Future<void> _lifecycle(int cycles) async {
+  final app = await _App.start({'FYNKEL_CHECK': 'lifecycle', 'FYNKEL_CYCLES': '$cycles'});
+  try {
+    final marks = <String, _Footprint>{};
+    await for (final point in app.checks) {
+      final footprint = marks[point] = await _Footprint.of(app.pid);
+      print('${point.padRight(12)} $footprint');
+      if (point == 'done') break;
+    }
+    void range(String label, bool Function(String point) which) {
+      final totals = [
+        for (final e in marks.entries)
+          if (which(e.key)) e.value.total,
+      ]..sort();
+      print('${label.padRight(28)} ${_mb(totals.first)} to ${_mb(totals.last)} (${_mb(totals.last - totals.first)})');
+    }
+
+    int number(String point) => int.parse(point.split(' ').last);
+    print('');
+    range('created, full size', (p) => p.startsWith('created'));
+    range('resized, back to full size', (p) => p.startsWith('resized') && number(p).isEven);
+    range('resized, to 0.6', (p) => p.startsWith('resized') && number(p).isOdd);
+  } finally {
+    await app.stop();
+  }
+}
+
+/// The process's physical footprint: in total, the GPU memory it owns
+/// (render targets, buffers) and its IOSurfaces (ours and Flutter's).
+class _Footprint {
+  _Footprint(this.total, this.gpu, this.surfaces);
+
+  final int total, gpu, surfaces;
+
+  static Future<_Footprint> of(int pid) async {
+    final result = await Process.run('footprint', ['-p', '$pid', '-f', 'bytes']);
+    final out = '${result.stdout}';
+    int category(String name) => RegExp(
+      '^\\s*(\\d+) B.*\\s$name',
+      multiLine: true,
+    ).allMatches(out).fold(0, (sum, m) => sum + int.parse(m.group(1)!));
+    final total = RegExp(r'Footprint: (\d+) B').firstMatch(out);
+    if (total == null) throw StateError('footprint said: $out${result.stderr}');
+    return _Footprint(int.parse(total.group(1)!), category(r'Owned physical footprint'), category('IOSurface'));
+  }
+
+  @override
+  String toString() => '${_mb(total).padLeft(9)}   GPU ${_mb(gpu)}, IOSurface ${_mb(surfaces)}';
+}
+
+String _mb(int bytes) => '${(bytes / (1 << 20)).toStringAsFixed(1)} MB';
+
+/// The running app, its output read line by line.
+class _App {
+  _App._(this._process) {
+    _process.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen(_line);
+    _process.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(_line);
+  }
+
+  static Future<_App> start(Map<String, String> environment) async =>
+      // Without saved window state: a run after a full-screen one would
+      // otherwise start full screen too.
+      _App._(await Process.start(_app, ['-ApplePersistenceIgnoreState', 'YES'], environment: environment));
+
+  final Process _process;
+  final _serviceReady = Completer<void>();
+  final _checks = StreamController<String>();
+  Uri? service;
+
+  /// Each `[stats]` line, as its key=value pairs.
+  final windows = <Map<String, Object>>[];
+
+  int get pid => _process.pid;
+  Future<void> get serviceReady => _serviceReady.future.timeout(const Duration(seconds: 30));
+  Stream<String> get checks => _checks.stream;
+
+  void _line(String line) {
+    final uri = RegExp(r'VM service is listening on (\S+)').firstMatch(line);
+    if (uri != null && !_serviceReady.isCompleted) {
+      service = Uri.parse(uri.group(1)!);
+      _serviceReady.complete();
+    }
+    if (line.startsWith('[check] ')) _checks.add(line.substring(8));
+    if (line.startsWith('[stats] ')) {
+      final window = <String, Object>{};
+      for (final pair in line.substring(8).split(' ')) {
+        final [key, value] = pair.split('=');
+        window[key] = num.tryParse(value) ?? value;
+      }
+      windows.add(window);
+    }
+  }
+
+  Future<void> stop() async {
+    _process.kill();
+    await _process.exitCode;
+    await _checks.close();
+  }
+}
+
+/// The app's Dart heap, through its VM service.
+class _Heap {
+  _Heap._(this._socket) {
+    _socket.listen(_onMessage);
+  }
+
+  final WebSocket _socket;
+  late final String _isolate;
+  final _pending = <int, Completer<Map<String, Object?>>>{};
+  int _nextId = 0;
+  late int _startMicros, _startUsed;
+  List<Object?> _streams = const [];
+
+  static Future<_Heap> connect(Uri service) async {
+    final ws = service.replace(scheme: 'ws', path: '${service.path}ws');
+    final heap = _Heap._(await WebSocket.connect('$ws'));
+    final isolates = ((await heap._call('getVM'))['isolates'] as List).cast<Map<String, Object?>>();
+    heap._isolate = isolates.firstWhere((i) => i['name'] == 'main', orElse: () => isolates.first)['id'] as String;
+    return heap._start();
+  }
+
+  Future<_Heap> _start() async {
+    _streams = ((await _call('getVMTimelineFlags'))['recordedStreams'] as List?) ?? const [];
+    await _call('setVMTimelineFlags', {
+      'recordedStreams': ['GC'],
+    });
+    _startMicros = await _micros();
+    _startUsed = await _used();
+    return this;
+  }
+
+  /// Bytes allocated since [connect]: the heap's growth between the points
+  /// where it is known (the start, before and after each collection, now).
+  Future<({int bytes, double seconds, int collections})> allocatedSinceStart() async {
+    final now = await _micros();
+    final timeline = await _call('getVMTimeline', {
+      'timeOriginMicros': _startMicros,
+      'timeExtentMicros': now - _startMicros,
+    });
+    final used = await _used();
+    final collections = <({int ts, int before, int after})>[];
+    for (final event in (timeline['traceEvents'] as List).cast<Map<String, Object?>>()) {
+      if (event['cat'] != 'GC' || event['ph'] != 'E') continue;
+      final args = event['args'] as Map<String, Object?>?;
+      int? kb(String key) {
+        final value = args?[key];
+        final n = value is num ? value.toInt() : int.tryParse('$value');
+        return n == null ? null : n * 1024;
+      }
+
+      final beforeNew = kb('Before.New.Used (kB)');
+      if (beforeNew == null) continue;
+      collections.add((
+        ts: (event['ts'] as num).toInt(),
+        before: beforeNew + (kb('Before.Old.Used (kB)') ?? 0),
+        after: (kb('After.New.Used (kB)') ?? 0) + (kb('After.Old.Used (kB)') ?? 0),
+      ));
+    }
+    collections.sort((a, b) => a.ts.compareTo(b.ts));
+    var bytes = 0, known = _startUsed;
+    for (final c in collections) {
+      if (c.before > known) bytes += c.before - known;
+      known = c.after;
+    }
+    if (used > known) bytes += used - known;
+    return (bytes: bytes, seconds: (now - _startMicros) / 1e6, collections: collections.length);
+  }
+
+  Future<void> close() async {
+    await _call('setVMTimelineFlags', {'recordedStreams': _streams});
+    await _socket.close();
+  }
+
+  Future<int> _micros() async => ((await _call('getVMTimelineMicros'))['timestamp'] as num).toInt();
+
+  Future<int> _used() async => ((await _call('getMemoryUsage', {'isolateId': _isolate}))['heapUsage'] as num).toInt();
+
+  Future<Map<String, Object?>> _call(String method, [Map<String, Object?> params = const {}]) {
+    final id = _nextId++;
+    final reply = _pending[id] = Completer();
+    _socket.add(jsonEncode({'jsonrpc': '2.0', 'id': '$id', 'method': method, 'params': params}));
+    return reply.future.timeout(const Duration(seconds: 10)).catchError((Object e) => throw StateError('$method: $e'));
+  }
+
+  void _onMessage(Object? data) {
+    final message = jsonDecode(data as String) as Map<String, Object?>;
+    final reply = _pending.remove(int.tryParse('${message['id']}'));
+    if (reply == null) return;
+    final result = message['result'];
+    if (result is Map<String, Object?>) {
+      reply.complete(result);
+    } else {
+      reply.completeError('${message['error']}');
+    }
+  }
+}

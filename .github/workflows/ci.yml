@@ -51,6 +51,22 @@ jobs:
           dart run tool/ffigen.dart
           git diff --exit-code lib/src/bindings.g.dart
           dart test
+      # package:fynkel_flutter's widget tests (a real engine view behind a
+      # stand-in for the Swift plugin), and a macOS build of examples/hello,
+      # which compiles the plugin's Swift and bundles the engine.
+      - name: flutter (package:fynkel_flutter, examples/hello)
+        run: |
+          export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
+          cd packages/fynkel_flutter
+          flutter pub get
+          dart format -l 120 --output=none --set-exit-if-changed lib test
+          flutter analyze --fatal-infos
+          flutter test
+          cd ../../examples/hello
+          flutter pub get
+          dart format -l 120 --output=none --set-exit-if-changed lib tool
+          flutter analyze --fatal-infos
+          flutter build macos --debug
       # The same GPU tests inside the iOS Simulator and the Android
       # emulator: fast testing in simulators is how Flutter developers
       # work, so it must never silently break.
