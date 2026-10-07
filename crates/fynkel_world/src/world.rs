@@ -145,7 +145,13 @@ impl World {
         let entity = self.entity(id)?;
         validate_all(&component)?;
         self.check_references(&component)?;
-        self.ecs.insert_one(entity, component).expect("the id map only holds live entities");
+        // Replacing is the common case (a transform set every frame), and
+        // writing in place skips hecs's archetype lookup.
+        if let Ok(mut slot) = self.ecs.get::<&mut C>(entity) {
+            *slot = component;
+        } else {
+            self.ecs.insert_one(entity, component).expect("the id map only holds live entities");
+        }
         Ok(())
     }
 
