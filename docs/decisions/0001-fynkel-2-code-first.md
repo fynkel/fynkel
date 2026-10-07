@@ -54,6 +54,28 @@ follows four rules from the start:
 3. Objects have stable IDs, not only memory handles.
 4. Saving is an optional layer on top. The core never needs it.
 
+### Flutter first, with an engine that stands alone
+
+Fynkel is made for Flutter and Dart developers only. Other hosts, such
+as React Native, are out of scope. The Rust engine is still kept
+self-contained, so it can be tested and reasoned about without Flutter:
+
+1. **No Flutter or Dart in the Rust crates.** The C interface (`fy_*`)
+   uses plain C types only.
+2. **Flutter provides the frame clock, and Rust does the work on its own
+   threads.** The engine never owns a main loop or a window. Flutter's
+   ticker calls `fy_frame()` once per display refresh. That call copies
+   the world into a render list and returns, and Rust's render thread
+   draws the frame. One clock keeps frames in step with the display: no
+   wasted frames, no drift and judder. Work that must not wait for frames
+   (rendering now; audio and loading later) runs on Rust's own threads.
+3. **Game logic lives in Dart, above the C interface.** The engine is a
+   library the game calls. It never calls back into Dart to run game
+   code.
+4. **The engine runs without Flutter in tests.** Pure Rust tests render
+   to PNG in CI, so any Flutter dependency leaking into the core breaks a
+   test.
+
 ## Stage 1 scope
 
 Stage 1 is a bare engine that renders something:
