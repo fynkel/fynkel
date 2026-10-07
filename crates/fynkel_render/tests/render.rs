@@ -205,6 +205,64 @@ fn the_target_can_change_size_between_frames() {
     assert!(big.rgba == again.rgba, "the same size renders the same pixels after resizes");
 }
 
+/// Each frame's uniforms and instances go into one of three buffers the
+/// GPU reads in place. Nine frames of three scenes, submitted without
+/// waiting, go round the buffers three times while the GPU still reads
+/// earlier ones, and grow them on the way (the 200-cube scene). Each frame
+/// must show its own scene, exactly as drawn alone.
+#[test]
+fn frames_in_flight_keep_their_own_data() {
+    let gpu = gpu();
+    let one = stage1_scene();
+    let mut many = stage1_scene();
+    many.camera = Some(CameraView::looking_at(Vec3::new(0.0, 12.0, 16.0), Vec3::ZERO));
+    many.draws = (0..200)
+        .map(|i| Draw {
+            mesh: if i % 2 == 0 { CUBE } else { SPHERE },
+            model: Mat4::from_scale_rotation_translation(
+                Vec3::splat(0.5),
+                Quat::from_rotation_y(i as f32),
+                Vec3::new((i % 20) as f32 - 9.5, 0.0, (i / 20) as f32 * 1.2 - 6.0),
+            ),
+            material: PbrMaterial {
+                base_color: linear_rgb(0xFF000000 | (i * 0x0A1B2C)),
+                metallic: 0.0,
+                roughness: 0.5,
+            },
+        })
+        .collect();
+    let mut empty = stage1_scene();
+    empty.draws.clear();
+    empty.camera.as_mut().expect("has a camera").clear_color = [0.0, 0.2, 0.0];
+    let scenes = [&one, &many, &empty];
+
+    let (width, height) = (96, 64);
+    let alone: Vec<Image> =
+        scenes.iter().map(|s| render(&gpu, &mut renderer(&gpu, SRGB), s, width, height).0).collect();
+
+    let mut r = renderer(&gpu, SRGB);
+    let targets: Vec<wgpu::Texture> = (0..9)
+        .map(|_| {
+            gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: SRGB,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            })
+        })
+        .collect();
+    for (frame, target) in targets.iter().enumerate() {
+        r.render(scenes[frame % 3], &target.create_view(&Default::default()), width, height);
+    }
+    for (frame, target) in targets.iter().enumerate() {
+        assert!(read_back(&gpu, target).rgba == alone[frame % 3].rgba, "frame {frame} doesn't show its own scene");
+    }
+}
+
 #[test]
 fn non_uniform_scale_keeps_normals_right() {
     // A cube turned, then squashed to a slab: the squash shears it, so the
