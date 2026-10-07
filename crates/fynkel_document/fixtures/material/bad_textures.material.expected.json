@@ -1,8 +1,0 @@
-[
-  { "code": "FYN-D0100", "pointer": "/albedo_texture", "line": 7, "column": 3 },
-  { "code": "FYN-D0100", "pointer": "/normal_texture", "line": 10, "column": 3 },
-  { "code": "FYN-D0100", "pointer": "/emissive_texture", "line": 15, "column": 3 },
-  { "code": "FYN-D0307", "pointer": "/normal_texture/asset", "line": 10, "column": 3 },
-  { "code": "FYN-D0307", "pointer": "/emissive_texture/asset", "line": 16, "column": 5 },
-  { "code": "FYN-D0307", "pointer": "/textures", "line": 18, "column": 3 }
-]

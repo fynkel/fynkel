@@ -1,7 +1,0 @@
-target/
-build/
-# Symlinks / copies of the comparison assets (Sponza is not committed).
-assets/
-ios/build/
-ios/assets/
-*.png

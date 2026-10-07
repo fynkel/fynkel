@@ -1,9 +1,0 @@
-[package]
-name = "fynkel_contracts"
-description = "Fynkel runtime contracts: handles, ids, status/diagnostic codes, event kinds, protocol versions. No dependencies; everything else builds on this."
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
-
-[dependencies]

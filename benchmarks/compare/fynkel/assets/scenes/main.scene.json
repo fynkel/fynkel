@@ -1,7 +1,0 @@
-{
-  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 7,
-  "id": "f780b63e-322f-4b02-a0d0-437fbe8ae147",
-  "name": "Main",
-  "entities": {}
-}

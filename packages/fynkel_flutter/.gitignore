@@ -1,7 +1,0 @@
-.dart_tool/
-build/
-pubspec.lock
-.flutter-plugins-dependencies
-# SwiftPM / Xcode state under darwin/
-.build/
-.swiftpm/

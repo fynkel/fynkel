@@ -1,4 +1,0 @@
-[
-  {"code": "FYN-D0403", "severity": "warning", "pointer": "/entities/20000000-0000-4000-8000-0000000000a5/prefab/overrides/0", "line": 18, "column": 11},
-  {"code": "FYN-D0403", "severity": "warning", "pointer": "/entities/20000000-0000-4000-8000-0000000000a5/prefab/overrides/2", "line": 32, "column": 11}
-]

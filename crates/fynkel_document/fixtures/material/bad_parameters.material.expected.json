@@ -1,7 +1,0 @@
-[
-  { "code": "FYN-D0100", "pointer": "/base_colour", "line": 7, "column": 3 },
-  { "code": "FYN-D0100", "pointer": "/metallic", "line": 13, "column": 3 },
-  { "code": "FYN-D0100", "pointer": "/emissive_strength", "line": 23, "column": 3 },
-  { "code": "FYN-D0303", "pointer": "/roughness", "line": 17, "column": 3 },
-  { "code": "FYN-D0303", "pointer": "/emissive", "line": 18, "column": 3 }
-]

@@ -1,8 +1,10 @@
 /target
-**/.fynkel/cache/
 **/build/
 .DS_Store
 # Dart
 .dart_tool/
 pubspec.lock
+# Android
+.gradle/
+local.properties
 __pycache__/
