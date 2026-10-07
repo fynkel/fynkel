@@ -100,3 +100,44 @@ fn a_steady_frame_with_1000_moving_cubes_allocates_nothing_on_the_calling_thread
     view.read(*numbers.last().unwrap(), 64, 64);
     assert_eq!(allocations, 0, "allocations in 100 frames of 1,000 transform writes each");
 }
+
+/// Flutter's raster thread calls `fy_apple_acquire` once per frame.
+#[cfg(target_vendor = "apple")]
+#[test]
+fn acquiring_the_surface_to_show_allocates_nothing() {
+    unsafe extern "C" {
+        fn CFRelease(object: *mut std::ffi::c_void);
+    }
+    let world = World::new();
+    stage1(&world);
+    let mut view = std::ptr::null_mut();
+    // SAFETY: a live world and a local out-value.
+    ok(unsafe { fy_view_new_apple(world.0, 32, 32, &mut view) });
+    let mut number = 0;
+    let acquire = || {
+        let mut surface = std::ptr::null_mut();
+        // SAFETY: a live view and a local out-value.
+        let flags = unsafe { fy_apple_acquire(view, &mut surface) };
+        if flags & FY_APPLE_SHOWN != 0 {
+            // SAFETY: retained for us by fy_apple_acquire.
+            unsafe { CFRelease(surface) };
+        }
+        flags
+    };
+    // Warm up: frames finish on a Metal thread, so acquire until one is there.
+    for _ in 0..50 {
+        // SAFETY: a live view and a local out-value.
+        ok(unsafe { fy_view_frame(view, &mut number) });
+        while acquire() == 0 {
+            std::thread::yield_now();
+        }
+    }
+    let allocations = count(|| {
+        for _ in 0..1000 {
+            acquire();
+        }
+    });
+    // SAFETY: a live view, not used again.
+    unsafe { fy_view_free(view) };
+    assert_eq!(allocations, 0, "allocations in 1,000 acquires");
+}

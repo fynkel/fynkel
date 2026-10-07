@@ -259,6 +259,21 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_1() {
-    assert_eq!(fy_abi_version(), 1);
+fn the_abi_version_is_2() {
+    assert_eq!(fy_abi_version(), 2);
+}
+
+#[test]
+fn a_resized_headless_view_reads_back_frames_of_the_new_size() {
+    let world = World::new();
+    stage1(&world);
+    let view = View::headless(&world, 16, 16);
+    view.read(view.frame(), 16, 16);
+    // SAFETY: a live view.
+    ok(unsafe { fy_view_resize(view.0, 24, 8) });
+    let image = view.read(view.frame(), 24, 8);
+    assert_eq!(image.rgba.len(), 24 * 8 * 4);
+    // SAFETY: a live view.
+    assert_eq!(unsafe { fy_view_resize(view.0, 0, 8) }, FyStatus::InvalidValue);
+    assert_eq!(last_error(), "a view can't be 0 × 8");
 }

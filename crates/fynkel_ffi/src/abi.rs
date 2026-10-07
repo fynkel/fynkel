@@ -10,7 +10,7 @@
 //! freed in either order. Passing a handle after freeing it is undefined
 //! behaviour; `package:fynkel` makes that impossible from Dart.
 
-use std::ffi::c_char;
+use std::ffi::{c_char, c_void};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -26,7 +26,7 @@ use crate::extract::{Extract, MeshOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 1;
+pub const FY_ABI_VERSION: u32 = 2;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -256,8 +256,15 @@ pub struct FyView {
     /// The frame clock's side: the extract and the frame numbers.
     clock: Mutex<Clock>,
     worker: Worker,
-    /// Headless views only.
-    frames: Option<HeadlessFrames>,
+    output: Output,
+}
+
+/// Where a view's frames can be had.
+#[derive(Debug)]
+enum Output {
+    Headless(HeadlessFrames),
+    #[cfg(target_vendor = "apple")]
+    Apple(fynkel_present::ApplePresenter),
 }
 
 #[derive(Debug, Default)]
@@ -664,6 +671,45 @@ pub unsafe extern "C" fn fy_material_remove(world: *const FyWorld, id: u64) -> F
 
 // --- Views -------------------------------------------------------------------
 
+/// Starts a view of the world behind `world`: a GPU device, the target
+/// `make` builds on it, a renderer and the render worker.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+unsafe fn new_view<T: fynkel_present::Target + 'static>(
+    world: *const FyWorld,
+    width: u32,
+    height: u32,
+    out: *mut *mut FyView,
+    make: impl FnOnce(&Gpu, u32, u32) -> Result<(T, Output), Error>,
+) -> Result<(), Error> {
+    if out.is_null() {
+        return Err(Error::null("out"));
+    }
+    if world.is_null() {
+        return Err(Error::null("world"));
+    }
+    // SAFETY: not null, and made by fy_world_new (Arc::into_raw); this adds
+    // the view's own reference.
+    let world = unsafe {
+        Arc::increment_strong_count(world);
+        Arc::from_raw(world)
+    };
+    if width == 0 || height == 0 {
+        return Err(Error::new(FyStatus::InvalidValue, format!("a view can't be {width} × {height}")));
+    }
+    let gpu = Gpu::headless().map_err(|e| Error::new(FyStatus::NoGpu, e.to_string()))?;
+    let (target, output) = make(&gpu, width, height)?;
+    let renderer = Renderer::new(&gpu, fynkel_present::Target::format(&target));
+    let worker = Worker::start(gpu, renderer, target)
+        .map_err(|e| Error::new(FyStatus::WorkerFailed, format!("couldn't start the render worker: {e}")))?;
+    let view = FyView { world, clock: Mutex::default(), worker, output };
+    // SAFETY: checked non-null above; the caller promises it's writable.
+    unsafe { out.write(Box::into_raw(Box::new(view))) };
+    Ok(())
+}
+
 /// A view of `world` that draws `width` × `height` frames offscreen and
 /// reads them back (`fy_view_read`). Starts its render worker. Free it with
 /// `fy_view_free`.
@@ -679,30 +725,46 @@ pub unsafe extern "C" fn fy_view_new_headless(
     out: *mut *mut FyView,
 ) -> FyStatus {
     guard(|| {
-        if out.is_null() {
-            return Err(Error::null("out"));
+        // SAFETY: per this function's contract.
+        unsafe {
+            new_view(world, width, height, out, |gpu, width, height| {
+                let (target, frames) = Headless::new(&gpu.device, &gpu.queue, width, height);
+                Ok((target, Output::Headless(frames)))
+            })
         }
-        if world.is_null() {
-            return Err(Error::null("world"));
-        }
-        // SAFETY: not null, and made by fy_world_new (Arc::into_raw); this
-        // adds the view's own reference.
-        let world = unsafe {
-            Arc::increment_strong_count(world);
-            Arc::from_raw(world)
+    })
+}
+
+/// A view of `world` that draws into a ring of IOSurfaces for Flutter to
+/// show (macOS and iOS; `FY_STATUS_UNSUPPORTED` elsewhere). The Flutter
+/// plugin shows them with `fy_apple_acquire` and learns of new frames
+/// through `fy_apple_set_frame_ready`. Free it with `fy_view_free`.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_view_new_apple(
+    world: *const FyWorld,
+    width: u32,
+    height: u32,
+    out: *mut *mut FyView,
+) -> FyStatus {
+    guard(|| {
+        #[cfg(target_vendor = "apple")]
+        // SAFETY: per this function's contract.
+        return unsafe {
+            new_view(world, width, height, out, |gpu, width, height| {
+                let (target, presenter) = fynkel_present::Apple::new(&gpu.device, &gpu.queue, width, height)
+                    .map_err(|e| Error::new(FyStatus::NoGpu, e.to_string()))?;
+                Ok((target, Output::Apple(presenter)))
+            })
         };
-        if width == 0 || height == 0 {
-            return Err(Error::new(FyStatus::InvalidValue, format!("a view can't be {width} × {height}")));
+        #[cfg(not(target_vendor = "apple"))]
+        {
+            let _ = (world, width, height, out);
+            Err(Error::new(FyStatus::Unsupported, "Apple views exist only on macOS and iOS"))
         }
-        let gpu = Gpu::headless().map_err(|e| Error::new(FyStatus::NoGpu, e.to_string()))?;
-        let (target, frames) = Headless::new(&gpu.device, &gpu.queue, width, height);
-        let renderer = Renderer::new(&gpu, fynkel_present::Target::format(&target));
-        let worker = Worker::start(gpu, renderer, target)
-            .map_err(|e| Error::new(FyStatus::WorkerFailed, format!("couldn't start the render worker: {e}")))?;
-        let view = FyView { world, clock: Mutex::default(), worker, frames: Some(frames) };
-        // SAFETY: checked non-null above; the caller promises it's writable.
-        unsafe { out.write(Box::into_raw(Box::new(view))) };
-        Ok(())
     })
 }
 
@@ -777,7 +839,10 @@ pub unsafe extern "C" fn fy_view_read(
         if out_number.is_null() {
             return Err(Error::null("out_number"));
         }
-        let frames = view.frames.as_ref().ok_or_else(|| Error::new(FyStatus::InvalidValue, "not a headless view"))?;
+        #[allow(irrefutable_let_patterns)] // only one kind of view on Android
+        let Output::Headless(frames) = &view.output else {
+            return Err(Error::new(FyStatus::InvalidValue, "not a headless view"));
+        };
         // SAFETY: not null, and the caller promises len writable bytes.
         let rgba = unsafe { std::slice::from_raw_parts_mut(rgba, len) };
         let read = frames.read(number, Duration::from_millis(timeout_ms.into()), rgba).map_err(|e| {
@@ -794,5 +859,146 @@ pub unsafe extern "C" fn fy_view_read(
         // SAFETY: checked non-null above; the caller promises it's writable.
         unsafe { out_number.write(read) };
         Ok(())
+    })
+}
+
+/// Draws the frames from the next `fy_view_frame` on at `width` × `height`
+/// pixels. Frames already on their way finish at the old size and, on
+/// Apple, are never shown.
+///
+/// # Safety
+///
+/// `view` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_view_resize(view: *const FyView, width: u32, height: u32) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let view = unsafe { handle(view, "view") }?;
+        if width == 0 || height == 0 {
+            return Err(Error::new(FyStatus::InvalidValue, format!("a view can't be {width} × {height}")));
+        }
+        view.worker.resize(width, height).map_err(|e| Error::new(FyStatus::WorkerFailed, e))
+    })
+}
+
+/// What a view did since it was made.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FyViewStats {
+    /// Scenes handed to the render worker by `fy_view_frame`.
+    pub posted: u64,
+    /// Scenes drawn.
+    pub rendered: u64,
+    /// Scenes replaced by a newer one before they were drawn.
+    pub coalesced: u64,
+    /// Scenes not drawn because the target had nowhere to draw.
+    pub skipped: u64,
+    /// Apple: new frames taken by Flutter (`fy_apple_acquire`). 0 for
+    /// other views.
+    pub presented: u64,
+    /// Apple: frames finished but never shown, because newer ones were
+    /// waiting.
+    pub dropped: u64,
+}
+
+/// # Safety
+///
+/// `view` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_view_stats(view: *const FyView, out: *mut FyViewStats) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let view = unsafe { handle(view, "view") }?;
+        let w = view.worker.stats();
+        let mut stats = FyViewStats {
+            posted: w.posted,
+            rendered: w.rendered,
+            coalesced: w.coalesced,
+            skipped: w.skipped,
+            ..Default::default()
+        };
+        #[cfg(target_vendor = "apple")]
+        if let Output::Apple(presenter) = &view.output {
+            let ring = presenter.stats();
+            (stats.presented, stats.dropped) = (ring.presented, ring.dropped);
+        }
+        // SAFETY: per this function's contract.
+        unsafe { write(out, stats, "out") }
+    })
+}
+
+/// `fy_apple_acquire`: a surface was written to `out_surface`.
+pub const FY_APPLE_SHOWN: u32 = 1;
+
+/// `fy_apple_acquire`: another finished frame is waiting; ask Flutter for
+/// one more frame.
+pub const FY_APPLE_MORE: u32 = 2;
+
+/// For Flutter's raster thread: the IOSurface to show now. Returns
+/// `FY_APPLE_SHOWN` (plus `FY_APPLE_MORE` when another frame waits) and
+/// writes the surface, retained once for the caller, to `out_surface`; or 0
+/// with nothing written, when there's no frame yet or `view` isn't an Apple
+/// view. Never blocks on the GPU and allocates nothing.
+///
+/// # Safety
+///
+/// `view` is null or live; `out_surface` is null or writable. The caller
+/// releases the surface (`CFRelease`).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_apple_acquire(view: *const FyView, out_surface: *mut *mut c_void) -> u32 {
+    #[cfg(target_vendor = "apple")]
+    {
+        let acquire = || -> u32 {
+            // SAFETY: per this function's contract.
+            let Ok(view) = (unsafe { handle(view, "view") }) else { return 0 };
+            let Output::Apple(presenter) = &view.output else { return 0 };
+            if out_surface.is_null() {
+                return 0;
+            }
+            let Some(shown) = presenter.acquire() else { return 0 };
+            let more = if shown.more { FY_APPLE_MORE } else { 0 };
+            // SAFETY: checked non-null above; the caller promises it's
+            // writable.
+            unsafe { out_surface.write(shown.into_raw()) };
+            FY_APPLE_SHOWN | more
+        };
+        // The raster thread is Flutter's: nothing may unwind into it.
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(acquire)).unwrap_or(0)
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    {
+        let _ = (view, out_surface);
+        0
+    }
+}
+
+/// Called on a GPU thread each time an Apple view finishes a frame.
+pub type FyFrameReady = Option<unsafe extern "C" fn(userdata: *mut c_void)>;
+
+/// Sets the function an Apple view calls, on a GPU thread, each time a
+/// frame finishes (null for none). Waits for a call in progress, so once
+/// this returns the old `userdata` is no longer used.
+///
+/// # Safety
+///
+/// `view` is null or live; `function` must be safe to call with `userdata`
+/// from any thread until it is replaced.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_apple_set_frame_ready(
+    view: *const FyView,
+    function: FyFrameReady,
+    userdata: *mut c_void,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let view = unsafe { handle(view, "view") }?;
+        #[cfg(target_vendor = "apple")]
+        if let Output::Apple(presenter) = &view.output {
+            // SAFETY: promised by this function's caller.
+            unsafe { presenter.set_frame_ready(function, userdata) };
+            return Ok(());
+        }
+        let _ = (view, function, userdata);
+        Err(Error::new(FyStatus::Unsupported, "not an Apple view"))
     })
 }

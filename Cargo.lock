@@ -278,8 +278,14 @@ dependencies = [
 name = "fynkel_present"
 version = "0.1.0"
 dependencies = [
+ "block2",
+ "objc2",
+ "objc2-core-foundation",
+ "objc2-io-surface",
+ "objc2-metal",
  "pollster",
  "wgpu",
+ "wgpu-hal",
 ]
 
 [[package]]
@@ -676,6 +682,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "180788110936d59bab6bd83b6060ffdfffb3b922ba1396b312ae795e1de9d81d"
 dependencies = [
  "bitflags",
+ "libc",
  "objc2",
  "objc2-core-foundation",
 ]
@@ -690,6 +697,7 @@ dependencies = [
  "block2",
  "objc2",
  "objc2-foundation",
+ "objc2-io-surface",
 ]
 
 [[package]]

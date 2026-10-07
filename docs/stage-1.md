@@ -16,8 +16,8 @@ final cube = world.spawn(Transform(), MeshRenderer(Mesh.cube(), Material(color: 
 FynkelView(world: world, onFrame: (dt) => cube.rotate(Vec3.up, dt));
 ```
 
-Step 4 changed two lines of the snippet confirmed on 2026-10-07 (§6,
-question 4):
+Step 4 changed two lines of the snippet confirmed on 2026-10-07; the user
+accepted both the same day:
 - The sun's direction is its transform's, as the engine has it, so
   `Light.sun()` comes with `Transform(forward: …)` instead of taking a
   `direction:`. A `direction` on the light would be a second place for the
@@ -231,7 +231,7 @@ own, under the quality rule in ADR-0001.
 1. **An Android phone.** Step 7 needs one connected over USB or Wi-Fi. Until then, only the emulator can be tested.
 2. ~~Light units~~: unitless, confirmed 2026-10-07.
 3. ~~The API shape~~: the snippet at the top was confirmed 2026-10-07.
-4. **Two changes to that snippet** (step 4, explained under it): `Light.sun()` with `Transform(forward: …)`, and `cube.rotate(…)` for `cube.transform.rotate(…)`. Waiting for the user's OK; the other way is a small change.
+4. ~~Two changes to that snippet~~: `Light.sun()` with `Transform(forward: …)`, and `cube.rotate(…)`. Accepted 2026-10-07.
 5. **Names shared with Flutter.** `Color`, `Material` and `Transform` are also Flutter names, so a file that imports both `package:flutter/material.dart` and `package:fynkel/fynkel.dart` must hide one or use a prefix. To decide in step 5, when `examples/hello` first imports both.
 
 ## 7. Measurements

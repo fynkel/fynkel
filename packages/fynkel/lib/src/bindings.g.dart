@@ -12,6 +12,22 @@ import 'dart:ffi' as ffi;
 @ffi.Native<ffi.Uint32 Function()>(isLeaf: true)
 external int fy_abi_version();
 
+@ffi.Native<ffi.Uint32 Function(ffi.Pointer<FyView>, ffi.Pointer<ffi.Pointer<ffi.Void>>)>(isLeaf: true)
+external int fy_apple_acquire(ffi.Pointer<FyView> view, ffi.Pointer<ffi.Pointer<ffi.Void>> out_surface);
+
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<FyView>,
+    ffi.Pointer<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void> userdata)>>,
+    ffi.Pointer<ffi.Void>,
+  )
+>()
+external int fy_apple_set_frame_ready(
+  ffi.Pointer<FyView> view,
+  ffi.Pointer<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void> userdata)>> function,
+  ffi.Pointer<ffi.Void> userdata,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyCamera>)>(isLeaf: true)
 external int fy_camera_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyCamera> out);
 
@@ -85,6 +101,9 @@ external int fy_view_frame(ffi.Pointer<FyView> view, ffi.Pointer<ffi.Uint64> out
 external void fy_view_free(ffi.Pointer<FyView> view);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Pointer<FyView>>)>()
+external int fy_view_new_apple(ffi.Pointer<FyWorld> world, int width, int height, ffi.Pointer<ffi.Pointer<FyView>> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Pointer<FyView>>)>()
 external int fy_view_new_headless(
   ffi.Pointer<FyWorld> world,
   int width,
@@ -111,13 +130,23 @@ external int fy_view_read(
   ffi.Pointer<ffi.Uint64> out_number,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>, ffi.Uint32, ffi.Uint32)>(isLeaf: true)
+external int fy_view_resize(ffi.Pointer<FyView> view, int width, int height);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>, ffi.Pointer<FyViewStats>)>(isLeaf: true)
+external int fy_view_stats(ffi.Pointer<FyView> view, ffi.Pointer<FyViewStats> out);
+
 @ffi.Native<ffi.Void Function(ffi.Pointer<FyWorld>)>(isLeaf: true)
 external void fy_world_free(ffi.Pointer<FyWorld> world);
 
 @ffi.Native<ffi.Pointer<FyWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FyWorld> fy_world_new();
 
-const int FY_ABI_VERSION = 1;
+const int FY_ABI_VERSION = 2;
+
+const int FY_APPLE_MORE = 2;
+
+const int FY_APPLE_SHOWN = 1;
 
 const int FY_LIGHT_AMBIENT = 1;
 
@@ -242,6 +271,7 @@ sealed class FyStatus {
   static const FY_STATUS_WRONG_SIZE = 11;
   static const FY_STATUS_PANIC = 12;
   static const FY_STATUS_POISONED = 13;
+  static const FY_STATUS_UNSUPPORTED = 14;
 }
 
 final class FyTransform extends ffi.Struct {
@@ -274,5 +304,41 @@ final class FyVec3 extends ffi.Struct {
 }
 
 final class FyView extends ffi.Opaque {}
+
+final class FyViewStats extends ffi.Struct {
+  @ffi.Uint64()
+  external int posted;
+
+  @ffi.Uint64()
+  external int rendered;
+
+  @ffi.Uint64()
+  external int coalesced;
+
+  @ffi.Uint64()
+  external int skipped;
+
+  @ffi.Uint64()
+  external int presented;
+
+  @ffi.Uint64()
+  external int dropped;
+
+  static ffi.Pointer<FyViewStats> $allocate(
+    ffi.Allocator $allocator, {
+    required int posted,
+    required int rendered,
+    required int coalesced,
+    required int skipped,
+    required int presented,
+    required int dropped,
+  }) => $allocator<FyViewStats>()
+    ..ref.posted = posted
+    ..ref.rendered = rendered
+    ..ref.coalesced = coalesced
+    ..ref.skipped = skipped
+    ..ref.presented = presented
+    ..ref.dropped = dropped;
+}
 
 final class FyWorld extends ffi.Opaque {}

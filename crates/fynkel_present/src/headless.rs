@@ -34,6 +34,8 @@ struct Shared {
 struct Latest {
     /// 0 until the first frame.
     number: u64,
+    width: u32,
+    height: u32,
     /// RGBA8, rows unpadded.
     rgba: Vec<u8>,
 }
@@ -42,8 +44,6 @@ struct Latest {
 #[derive(Clone, Debug)]
 pub struct HeadlessFrames {
     shared: Arc<Shared>,
-    width: u32,
-    height: u32,
 }
 
 /// Why [`HeadlessFrames::read`] gave nothing.
@@ -73,6 +73,20 @@ impl Headless {
     /// A `width` × `height` target on `device`, and the reader for it.
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, width: u32, height: u32) -> (Self, HeadlessFrames) {
         let (width, height) = (width.max(1), height.max(1));
+        let (texture, view, readback, padded_row) = buffers(device, width, height);
+        let shared = Arc::new(Shared {
+            latest: Mutex::new(Latest { number: 0, width, height, rgba: vec![0; (width * height * 4) as usize] }),
+            changed: Condvar::new(),
+        });
+        let frames = HeadlessFrames { shared: shared.clone() };
+        let target = Self { device: device.clone(), queue: queue.clone(), texture, view, readback, padded_row, shared };
+        (target, frames)
+    }
+}
+
+/// The texture, its view, the readback buffer and its padded row size.
+fn buffers(device: &wgpu::Device, width: u32, height: u32) -> (wgpu::Texture, wgpu::TextureView, wgpu::Buffer, u32) {
+    {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("headless target"),
             size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
@@ -91,13 +105,7 @@ impl Headless {
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
-        let shared = Arc::new(Shared {
-            latest: Mutex::new(Latest { number: 0, rgba: vec![0; (width * height * 4) as usize] }),
-            changed: Condvar::new(),
-        });
-        let frames = HeadlessFrames { shared: shared.clone(), width, height };
-        let target = Self { device: device.clone(), queue: queue.clone(), texture, view, readback, padded_row, shared };
-        (target, frames)
+        (texture, view, readback, padded_row)
     }
 }
 
@@ -141,6 +149,10 @@ impl Target for Headless {
         {
             let data = slice.get_mapped_range().expect("mapped above");
             let mut latest = self.shared.latest.lock().unwrap_or_else(PoisonError::into_inner);
+            if (latest.width, latest.height) != (width, height) {
+                (latest.width, latest.height) = (width, height);
+                latest.rgba.resize((width * height * 4) as usize, 0);
+            }
             let row = (width * 4) as usize;
             for (y, padded) in data.chunks(self.padded_row as usize).take(height as usize).enumerate() {
                 latest.rgba[y * row..(y + 1) * row].copy_from_slice(&padded[..row]);
@@ -151,21 +163,27 @@ impl Target for Headless {
         self.readback.unmap();
         self.shared.changed.notify_all();
     }
+
+    fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+        let (width, height) = (width.max(1), height.max(1));
+        if (width, height) != self.size() {
+            (self.texture, self.view, self.readback, self.padded_row) = buffers(&self.device, width, height);
+        }
+        Ok(())
+    }
 }
 
 impl HeadlessFrames {
+    /// The size of the latest frame (the size asked for, before the first).
     pub fn size(&self) -> (u32, u32) {
-        (self.width, self.height)
+        let latest = self.shared.latest.lock().unwrap_or_else(PoisonError::into_inner);
+        (latest.width, latest.height)
     }
 
     /// Waits up to `timeout` for frame `wanted` or a later one to finish,
-    /// copies its RGBA pixels into `out` (width × height × 4 bytes, rows
-    /// top to bottom) and returns its number.
+    /// copies its RGBA pixels into `out` (width × height × 4 bytes of that
+    /// frame, rows top to bottom) and returns its number.
     pub fn read(&self, wanted: u64, timeout: Duration, out: &mut [u8]) -> Result<u64, ReadError> {
-        let expected = (self.width * self.height * 4) as usize;
-        if out.len() != expected {
-            return Err(ReadError::WrongSize { expected, got: out.len() });
-        }
         let deadline = Instant::now() + timeout;
         let mut latest = self.shared.latest.lock().unwrap_or_else(PoisonError::into_inner);
         while latest.number < wanted {
@@ -174,6 +192,9 @@ impl HeadlessFrames {
                 return Err(ReadError::Timeout { wanted, latest: latest.number });
             }
             latest = self.shared.changed.wait_timeout(latest, left).unwrap_or_else(PoisonError::into_inner).0;
+        }
+        if out.len() != latest.rgba.len() {
+            return Err(ReadError::WrongSize { expected: latest.rgba.len(), got: out.len() });
         }
         out.copy_from_slice(&latest.rgba);
         Ok(latest.number)

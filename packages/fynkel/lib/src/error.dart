@@ -40,6 +40,9 @@ enum FynkelStatus {
   /// An earlier panic happened while the world was being changed, so it
   /// can't be trusted any more.
   poisoned,
+
+  /// Not available on this platform, or not for this kind of view.
+  unsupported,
 }
 
 /// A call into the engine failed. [message] is the engine's own
