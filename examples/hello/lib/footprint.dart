@@ -19,18 +19,28 @@ const _taskVmInfo = 22;
 /// and seventeen 64-bit fields.
 const _physFootprintAt = 144;
 
+/// Where `ledger_tag_graphics_footprint` sits: the part of the footprint
+/// Metal tagged as its own (buffers, textures, the driver's pools). Checked
+/// on the Mac: a 100 MB Metal buffer shows here, a 100 MB malloc doesn't.
+/// On the iPhone IOSurfaces aren't in it: ours change it by nothing when
+/// the view shrinks, and the rest by their exact size.
+const _graphicsAt = 272;
+
 /// Room for the whole struct, in the 32-bit words `task_info` counts in.
 const _words = 128;
 
 /// The physical footprint in bytes.
-int physicalFootprint() {
+int physicalFootprint() => footprint().total;
+
+/// The physical footprint in bytes, and the GPU's part of it.
+({int total, int graphics}) footprint() {
   final info = calloc<Uint8>(_words * 4);
   final count = calloc<Uint32>()..value = _words;
   try {
     final status = _taskInfo(_machTaskSelf, _taskVmInfo, info, count);
     if (status != 0) throw StateError('task_info failed: $status');
-    if (count.value * 4 < _physFootprintAt + 8) throw StateError('task_info gave no phys_footprint');
-    return (info + _physFootprintAt).cast<Uint64>().value;
+    if (count.value * 4 < _graphicsAt + 8) throw StateError('task_info gave no graphics footprint');
+    return (total: (info + _physFootprintAt).cast<Uint64>().value, graphics: (info + _graphicsAt).cast<Int64>().value);
   } finally {
     calloc.free(info);
     calloc.free(count);

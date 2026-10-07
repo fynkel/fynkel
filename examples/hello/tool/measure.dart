@@ -44,10 +44,15 @@ String? _ios;
 /// `flutter run --debug` instead of `--profile`, for the iOS Simulator.
 var _debug = false;
 
+/// A spinning Flutter box instead of the engine's view: what Flutter alone
+/// does in the same check.
+var _baseline = false;
+
 Future<void> main(List<String> args) async {
   final iosAt = args.indexOf('--ios');
   if (iosAt >= 0) _ios = args[iosAt + 1];
   _debug = args.contains('--debug');
+  _baseline = args.contains('--baseline');
   if (_ios == null && !File(_app).existsSync()) {
     stderr.writeln('No profile build. Run: flutter build macos --profile');
     exit(2);
@@ -64,7 +69,7 @@ Future<void> main(List<String> args) async {
       await _lifecycle(cyclesAt < 0 ? 10 : int.parse(args[cyclesAt + 1]));
     default:
       stderr.writeln(
-        'usage: dart tool/measure.dart rate [--seconds N] [--fullscreen] | lifecycle [--cycles N]  [--ios <device>]',
+        'usage: dart tool/measure.dart rate [--seconds N] [--fullscreen] | lifecycle [--cycles N] [--baseline]  [--ios <device>] [--debug]',
       );
       exit(2);
   }
@@ -126,7 +131,12 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
 /// window and 0.6 of it, with the footprint at each point the app reports.
 /// Points of the same kind should match: the same view at the same size.
 Future<void> _lifecycle(int cycles) async {
-  final app = await _App.start({'FYNKEL_CHECK': 'lifecycle', 'FYNKEL_CYCLES': '$cycles', 'FYNKEL_STATS': '1'});
+  final app = await _App.start({
+    'FYNKEL_CHECK': 'lifecycle',
+    'FYNKEL_CYCLES': '$cycles',
+    'FYNKEL_STATS': '1',
+    if (_baseline) 'FYNKEL_BASELINE': '1',
+  });
   try {
     await app.serviceReady;
     // The Dart heap's share of each point, so a growing total can be told
@@ -138,11 +148,13 @@ Future<void> _lifecycle(int cycles) async {
       final from = app.windows.length;
       final footprint = marks[point] = _ios == null
           ? await _Footprint.lowest(app.pid)
-          : _Footprint.total(await app.memory.firstWhere((m) => m.point == point).then((m) => m.bytes));
+          : await app.memory.firstWhere((m) => m.point == point).then((m) => _Footprint(m.bytes, m.graphics, null));
       final dart = await heap.usage();
       // A hidden window gets no frames, and an idle GPU frees its driver
       // memory, so such a reading says nothing about the view.
-      final drawing = app.windows.skip(from).any((w) => (w['presented'] as num) > 0);
+      // The baseline has no engine view, so no frame counts: its readings
+      // can't be checked this way.
+      final drawing = _baseline || app.windows.skip(from).any((w) => (w['presented'] as num) > 0);
       if (!drawing) idle.add(point);
       print(
         '${point.padRight(12)} $footprint   Dart heap ${_mb(dart.capacity)} (${_mb(dart.used)} used)'
@@ -150,6 +162,7 @@ Future<void> _lifecycle(int cycles) async {
       );
       if (point == 'done') break;
     }
+    if (!marks.containsKey('done')) throw StateError('the app stopped reporting before the check finished');
     await heap.close();
     void range(String label, bool Function(String point) which) {
       final totals = [
@@ -179,9 +192,6 @@ Future<void> _lifecycle(int cycles) async {
 /// (render targets, buffers) and its IOSurfaces (ours and Flutter's).
 class _Footprint {
   _Footprint(this.total, this.gpu, this.surfaces);
-
-  /// The total alone: what the app reports of itself on iOS.
-  _Footprint.total(this.total) : gpu = null, surfaces = null;
 
   final int total;
   final int? gpu, surfaces;
@@ -214,7 +224,12 @@ class _Footprint {
   String toString() {
     final (gpu, surfaces) = (this.gpu, this.surfaces);
     final all = _mb(total).padLeft(9);
-    return gpu == null || surfaces == null ? all : '$all   GPU ${_mb(gpu)}, IOSurface ${_mb(surfaces)}';
+    if (gpu == null) return all;
+    // On iOS the app reports Metal's part itself (the graphics ledger:
+    // buffers, textures, the driver's pools). IOSurfaces aren't in it on
+    // the iPhone; they are in the rest, with the CPU's memory.
+    if (surfaces == null) return '$all   Metal ${_mb(gpu)}, rest ${_mb(total - gpu)}';
+    return '$all   GPU ${_mb(gpu)}, IOSurface ${_mb(surfaces)}';
   }
 }
 
@@ -234,7 +249,9 @@ class _App {
     if (ios == null) {
       // Without saved window state: a run after a full-screen one would
       // otherwise start full screen too.
-      return _App._(await Process.start(_app, ['-ApplePersistenceIgnoreState', 'YES'], environment: settings));
+      final app = _App._(await Process.start(_app, ['-ApplePersistenceIgnoreState', 'YES'], environment: settings));
+      unawaited(app._process.exitCode.then((code) => app._ended('the app ended ($code)')));
+      return app;
     }
     final app = _App._(
       await Process.start('flutter', [
@@ -254,9 +271,26 @@ class _App {
             StateError('flutter run ended ($code) before the app was up:\n${app._log.join('\n')}'),
           );
         }
+        app._ended('flutter run ended ($code)');
       }),
     );
     return app;
+  }
+
+  /// The app went away before [stop]: a check still waiting for a point
+  /// fails, with flutter run's last words. Without this, nothing would be
+  /// left to wait for and the tool would end quietly, with exit code 0.
+  void _ended(String why) {
+    if (_stopping || _checks.isClosed) return;
+    final last = _log.length > 20 ? _log.sublist(_log.length - 20) : _log;
+    final error = StateError('$why before the check finished. flutter run said, last:\n${last.join('\n')}');
+    // Both streams a check may be waiting on.
+    _checks.addError(error);
+    unawaited(_checks.close());
+    if (!_memory.isClosed) {
+      _memory.addError(error);
+      unawaited(_memory.close());
+    }
   }
 
   /// flutter run's output on iOS, for the error when it fails.
@@ -265,7 +299,8 @@ class _App {
   final Process _process;
   final _serviceReady = Completer<void>();
   final _checks = StreamController<String>();
-  final _memory = StreamController<({String point, int bytes})>.broadcast();
+  var _stopping = false;
+  final _memory = StreamController<({String point, int bytes, int graphics})>.broadcast();
   Uri? service;
   WebSocket? _appOutput;
 
@@ -281,7 +316,7 @@ class _App {
   Stream<String> get checks => _checks.stream;
 
   /// The app's own footprint readings (`[memory]` lines).
-  Stream<({String point, int bytes})> get memory => _memory.stream;
+  Stream<({String point, int bytes, int graphics})> get memory => _memory.stream;
 
   void _line(String line) {
     if (_ios != null) {
@@ -312,7 +347,7 @@ class _App {
       final lines = (partial + utf8.decode(base64.decode(event!['bytes'] as String))).split('\n');
       partial = lines.removeLast();
       lines.forEach(_appLine);
-    });
+    }, onDone: () => _ended("the app's output ended"));
     socket.add(
       jsonEncode({
         'jsonrpc': '2.0',
@@ -326,8 +361,10 @@ class _App {
 
   void _appLine(String line) {
     if (line.startsWith('[check] ')) _checks.add(line.substring(8));
-    final memory = RegExp(r'^\[memory\] (.+) (\d+)$').firstMatch(line);
-    if (memory != null) _memory.add((point: memory.group(1)!, bytes: int.parse(memory.group(2)!)));
+    final memory = RegExp(r'^\[memory\] (.+) (\d+) (\d+)$').firstMatch(line);
+    if (memory != null) {
+      _memory.add((point: memory.group(1)!, bytes: int.parse(memory.group(2)!), graphics: int.parse(memory.group(3)!)));
+    }
     if (line.startsWith('[stats] ')) {
       final window = <String, Object>{};
       for (final pair in line.substring(8).split(' ')) {
@@ -339,6 +376,7 @@ class _App {
   }
 
   Future<void> stop() async {
+    _stopping = true;
     await _appOutput?.close();
     if (_ios != null) {
       // Quits the app on the phone too.
