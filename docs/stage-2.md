@@ -1,6 +1,6 @@
 # Stage 2 plan: a small scene you can play with
 
-Status: accepted 2026-10-08, with the three answers in §5. Scope and rules:
+Status: done 2026-10-08 ([report](stage-2-report.md)); accepted the same day, with the three answers in §5. Scope and rules:
 [ADR-0001](decisions/0001-fynkel-2-code-first.md). Stage 1 is done
 ([report](stage-1-report.md)).
 
@@ -221,8 +221,10 @@ grows by about 16 MB over the first 14 cycles and then stays flat; after
 that the app grows as Flutter alone does, which you accepted as a pass. Numbers,
 and the phone numbers steps 1 and 5 owed, in §6.
 
-**Step 7: the stage 2 check.** A short report, as in stage 1. *Done when*
-it's committed and you have played the scene on each device.
+**Step 7: the stage 2 check.** ✅ A short report, as in stage 1. *Done when*
+it's committed and you have played the scene on each device. The
+[report](stage-2-report.md); played on the Mac, the iPhone and the
+Note10+ on 2026-10-08.
 
 ## 5. Decisions (2026-10-08)
 
