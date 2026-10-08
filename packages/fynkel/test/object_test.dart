@@ -203,4 +203,43 @@ void main() {
     world.add(camera);
     expect(camera.camera.fovY, 60);
   });
+
+  test('an inactive object and everything below it are not hit, and each keeps its own flag', () {
+    final behind = world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, -8)),
+        components: [_cube()],
+      ),
+    );
+    final robot = world.add(Robot(transform: Transform(position: Vec3(-1, 0, -3))));
+    final arm = robot.find('arm')!;
+    final ray = Ray(Vec3.zero, Vec3(0, 0, -1));
+    expect(world.raycast(ray)!.object, same(arm));
+
+    robot.active = false;
+    expect(world.raycast(ray)!.object, same(behind));
+    expect((robot.active, robot.activeInHierarchy), (false, false));
+    expect((arm.active, arm.activeInHierarchy), (true, false), reason: 'hidden by its parent, its own flag kept');
+
+    arm.active = false;
+    robot.active = true;
+    expect(world.raycast(ray)!.object, same(behind), reason: 'the arm is still off');
+    arm.active = true;
+    expect(world.raycast(ray)!.object, same(arm));
+  });
+
+  test('an object can be made inactive before it is added, and so can its children', () {
+    final robot = Robot(transform: Transform(position: Vec3(-1, 0, -3)))..active = false;
+    expect(robot.active, isFalse);
+    expect(() => robot.activeInHierarchy, throwsStateErrorSaying('onLoad'));
+    final queued = robot.add(GameObject(name: 'off')..active = false);
+
+    world.add(robot);
+    expect(robot.active, isFalse);
+    expect(queued.active, isFalse);
+    expect(robot.find('arm')!.active, isTrue);
+    expect(world.raycast(Ray(Vec3.zero, Vec3(0, 0, -1))), isNull);
+    robot.active = true;
+    expect(world.raycast(Ray(Vec3.zero, Vec3(0, 0, -1)))!.object.name, 'arm');
+  });
 }

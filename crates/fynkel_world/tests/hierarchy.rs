@@ -1,7 +1,8 @@
 //! The hierarchy's promises (stage 2 plan §3.1): parents and children agree
 //! both ways, a cycle is refused and leaves the world unchanged, despawning
-//! takes the children along, names find descendants, and world transforms
-//! compose parent before child, whichever way they are asked for.
+//! takes the children along, names find descendants, world transforms
+//! compose parent before child, whichever way they are asked for, and an
+//! inactive object hides everything below it (stage 3 plan §3.3).
 
 use fynkel_world::*;
 
@@ -163,6 +164,50 @@ fn a_name_goes_with_its_object() {
     assert_eq!(world.set_name(child, Some("x")), Err(WorldError::NoObject(child)));
 }
 
+// --- The active flag -------------------------------------------------------
+
+#[test]
+fn an_inactive_object_hides_everything_below_it_and_each_keeps_its_own_flag() {
+    let mut world = World::new();
+    let [root, child, grandchild, loose] = std::array::from_fn(|_| world.spawn());
+    world.set_parent(child, Some(root)).unwrap();
+    world.set_parent(grandchild, Some(child)).unwrap();
+    let shown = |w: &World| [root, child, grandchild, loose].map(|id| w.active_in_hierarchy(id).unwrap());
+    assert_eq!(shown(&world), [true; 4], "on by default");
+
+    world.set_active(grandchild, false).unwrap();
+    world.set_active(root, false).unwrap();
+    assert_eq!(shown(&world), [false, false, false, true]);
+    assert_eq!([root, child, grandchild].map(|id| world.active(id).unwrap()), [false, true, false]);
+
+    // On again: the child shows, the grandchild keeps its own flag.
+    world.set_active(root, true).unwrap();
+    assert_eq!(shown(&world), [true, true, false, true]);
+    world.set_active(root, true).unwrap();
+    assert!(world.active(root).unwrap(), "setting it twice is fine");
+
+    // Moved out from under an inactive parent: shown again.
+    world.set_active(child, false).unwrap();
+    world.set_active(grandchild, true).unwrap();
+    assert!(!world.active_in_hierarchy(grandchild).unwrap());
+    world.set_parent(grandchild, None).unwrap();
+    assert!(world.active_in_hierarchy(grandchild).unwrap());
+}
+
+#[test]
+fn the_flag_goes_with_its_object() {
+    let mut world = World::new();
+    let [root, child] = std::array::from_fn(|_| world.spawn());
+    world.set_parent(child, Some(root)).unwrap();
+    world.set_active(child, false).unwrap();
+    world.despawn(root).unwrap();
+    for gone in [root, child] {
+        assert_eq!(world.set_active(gone, true), Err(WorldError::NoObject(gone)));
+        assert_eq!(world.active(gone), Err(WorldError::NoObject(gone)));
+        assert_eq!(world.active_in_hierarchy(gone), Err(WorldError::NoObject(gone)));
+    }
+}
+
 // --- World transforms ------------------------------------------------------
 
 #[test]
@@ -216,8 +261,10 @@ impl Lcg {
     }
 }
 
-/// The matrices the extract uses agree with `world_matrix` after every kind
-/// of change: new parents, detaching, moves, despawns and new objects.
+/// The matrices the extract uses agree with `world_matrix`, and what they
+/// show with `active_in_hierarchy`, after every kind of change: new
+/// parents, detaching, moves, despawns, new objects and turning objects on
+/// and off.
 #[test]
 fn cached_world_matrices_always_match_the_walk_up() {
     let mut world = World::new();
@@ -226,7 +273,7 @@ fn cached_world_matrices_always_match_the_walk_up() {
     let mut live: Vec<ObjectId> = Vec::new();
 
     for step in 0..2_000 {
-        match rng.below(10) {
+        match rng.below(12) {
             0..=2 => {
                 let id = world.spawn();
                 if rng.below(4) != 0 {
@@ -258,6 +305,10 @@ fn cached_world_matrices_always_match_the_walk_up() {
                 world.despawn(id).unwrap();
                 live.retain(|&id| world.contains(id));
             }
+            9 | 10 if !live.is_empty() => {
+                let id = live[rng.below(live.len())];
+                world.set_active(id, rng.below(3) == 0).unwrap();
+            }
             _ => {}
         }
 
@@ -265,7 +316,13 @@ fn cached_world_matrices_always_match_the_walk_up() {
             matrices.update(&world);
             for &id in &live {
                 let local = world.get::<Transform>(id).unwrap_or_default();
-                let cached = matrices.world(id, &local);
+                let shown = world.active_in_hierarchy(id).unwrap();
+                assert_eq!(matrices.shown(&world, id), shown, "step {step}, {id}");
+                let Some(cached) = matrices.world(&world, id, &local) else {
+                    assert!(!shown, "step {step}, {id}: hidden but active");
+                    continue;
+                };
+                assert!(shown, "step {step}, {id}: placed but inactive");
                 let walked = world.world_matrix(id).unwrap();
                 assert!(close(cached, walked), "step {step}, {id}: {cached} vs {walked}");
             }

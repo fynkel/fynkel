@@ -74,7 +74,11 @@ fn main() {
             // its world matrix out.
             let t = Instant::now();
             let mut sum = 0.0;
-            world.for_each::<Transform>(|id, local| sum += matrices.world(id, local).w_axis.y);
+            world.for_each::<Transform>(|id, local| {
+                if let Some(m) = matrices.world(&world, id, local) {
+                    sum += m.w_axis.y;
+                }
+            });
             let read = t.elapsed();
             std::hint::black_box(sum);
             assert!(world.world_matrix(ids[N - 1]).is_ok());

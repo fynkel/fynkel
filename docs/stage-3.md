@@ -85,7 +85,7 @@ settles.
 ```
 crates/
   fynkel_world/     an active flag: an inactive object and everything below it isn't drawn or hit by rays
-  fynkel_ffi/       fy_active_get / fy_active_set
+  fynkel_ffi/       fy_active_get / fy_active_set / fy_active_in_hierarchy_get (ABI 9)
 packages/
   fynkel/           GameObject you can extend: onLoad, onStart, onUpdate, onTap, onDestroy; add and destroy;
                     World.update(dt, input); Input and Tap (plain Dart); Assets (by name, shared, released)
@@ -148,6 +148,11 @@ Only objects whose class overrides `onUpdate` are visited each frame. Dart can't
 - **A load that fails** destroys the object and reports the error through `world.errors` (a stream), and the parent's load goes on without it. A game that would rather stop can rethrow.
 - **Destroyed while loading** (the player leaves before the sword is ready): the object is gone at once, its `onLoad` carries on to its next `await` and then finds the object destroyed (`add` and asset calls on it throw a `StateError` the loop catches and ignores), and whatever it loaded is released. Nothing appears, nothing leaks, and a test checks both.
 - **Loading ahead.** `await assets.preload(['character.glb'])` loads without adding anything, so a later `Character()` appears on its first frame. 
+- *Settled in step 2:*
+  - **Hidden means left out of everything a view uses**: not drawn, and an inactive camera, sun or ambient light doesn't count either, so a level's camera can't take over the view while it loads. Rays pass through, as they hit only what's drawn.
+  - **Each object keeps its own flag** (Unity's `activeSelf`); `activeInHierarchy` says whether it's shown. Turning a parent on again shows exactly the children that were on.
+  - **An object can be made inactive before it's added** (`GameObject()..active = false`), like its other settings; step 4 uses that for loading.
+  - **The flags live beside the hierarchy**, not in a component, and the per-frame pass that computes world matrices works out what's shown in the same walk. A world with every object on pays one `is_empty` a frame for it; turning objects on and off allocates nothing and rebuilds nothing.
 
 ### 3.4 Assets
 
@@ -201,10 +206,14 @@ added and forget what was destroyed, and every stage 2 test passes on
 the new API. Eight new tests (`test/object_test.dart`), nine mutants
 killed; all 62 package tests and the examples' moved over. Numbers in §6.
 
-**Step 2: the active flag.** `fynkel_world`, the C interface and Dart.
+**Step 2: the active flag.** ✅ `fynkel_world`, the C interface and Dart.
 *Done when* an inactive object's subtree is missing from a golden image
 and from rays, and the extract's budget and its zero-allocation test
-still pass.
+still pass. The stage 1 golden, drawn with an inactive rig (camera,
+lights and a cube in front of the camera) added before it, through C and
+through Dart; rays, the extract, the random hierarchy test, and the
+zero-allocation frame hiding and showing 143 objects; 13 mutants killed.
+Numbers in §6.
 
 **Step 3: the loop.** `world.update(dt, input)`, `onStart`, `onUpdate`,
 `onDestroy`, `onTap` with its bubble; `Input` and `Tap` in package:fynkel,
@@ -265,3 +274,19 @@ each. Destroying walks the subtree once to forget the Dart objects below
 (one call into the engine per object). Both happen when a level loads or
 goes, not each frame; a single call that returns a subtree's ids would
 take most of the destroy's cost away if a game ever needs it.
+
+### Step 2: the active flag (Mac, M3 Max, `extract_probe`, release)
+
+Median of 500 steady frames, 10,000 drawn cubes, three runs each:
+
+| | main | with the flag |
+|---|---:|---:|
+| 100 × 100 wide | 0.330 – 0.333 ms | 0.348 – 0.353 ms |
+| 100 chains 100 deep | 0.340 – 0.350 ms | 0.370 – 0.374 ms |
+| no tree (stage 1) | 0.205 – 0.221 ms | 0.222 – 0.233 ms |
+| wide, 10 of the 100 trees hidden | – | 0.338 – 0.341 ms |
+
+About 0.02 ms more for 10,000 objects (a flag per object in the matrices
+pass, and the lookup of where each object stands), well inside the 1 ms
+budget. The iPhone ran stage 2's extract as fast as the Mac; the phones
+are measured again with the loop in step 3.

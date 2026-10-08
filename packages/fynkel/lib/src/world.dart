@@ -118,6 +118,7 @@ final class World implements Finalizable {
       if (parent != null) check(fy_parent_set(pointer, id, parent.id));
       if (described.model == null) object._writeTransform(described.transform);
       if (described.name != null) object._writeName(described.name!);
+      if (!described.active) check(fy_active_set(pointer, id, false));
       for (final component in described.components) {
         object._write(component);
       }
@@ -499,6 +500,31 @@ class GameObject {
     return null;
   }
 
+  /// Whether this object is on. One that is off hides itself and
+  /// everything below it: they aren't drawn, don't light the scene or show
+  /// it, and aren't hit by rays. Its children keep their own [active], so
+  /// turning it on again shows the ones that were on. See
+  /// [activeInHierarchy].
+  bool get active {
+    if (_described case final d?) return d.active;
+    check(fy_active_get(world.pointer, id, scratch.flag));
+    return scratch.flag.value;
+  }
+
+  set active(bool value) {
+    if (_described case final d?) {
+      d.active = value;
+      return;
+    }
+    check(fy_active_set(world.pointer, id, value));
+  }
+
+  /// Whether this object is shown: it and every object above it [active].
+  bool get activeInHierarchy {
+    check(fy_active_in_hierarchy_get(world.pointer, id, scratch.flag));
+    return scratch.flag.value;
+  }
+
   /// The object's name, or null. Names needn't be unique; setting '' is
   /// the same as null.
   String? get name {
@@ -702,6 +728,7 @@ final class _Description {
   _Description(this.name, this.transform, this.components);
 
   String? name;
+  bool active = true;
   Transform transform;
   final List<Component> components;
   final children = <GameObject>[];

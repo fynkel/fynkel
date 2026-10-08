@@ -6,8 +6,8 @@ import 'package:test/test.dart';
 import 'golden.dart';
 
 /// The stage 1 scene, written the way a game writes it.
-({World world, GameObject cube, Material orange}) stage1() {
-  final world = World();
+({World world, GameObject cube, Material orange}) stage1([World? into]) {
+  final world = into ?? World();
   world.add(
     GameObject(
       transform: Transform(position: Vec3(0, 1.5, 4), lookAt: Vec3.zero),
@@ -40,6 +40,36 @@ void main() {
 
     final frame = view.read(view.frame());
     expectGolden('cube', frame.rgba, 256, 256);
+  });
+
+  test('an inactive object and everything below it are missing from the picture', () {
+    // A rig made first, so its camera would win, with a cube right in front
+    // of the stage 1 camera, then the stage 1 scene around it.
+    final world = World();
+    final rig = world.add(GameObject()..active = false);
+    rig
+      ..add(
+        GameObject(
+          transform: Transform(position: Vec3(0, 0, 6)),
+          components: [Camera(fovY: 100, clearColor: Color.rgb(1, 0, 0))],
+        ),
+      )
+      ..add(GameObject(components: [Light.ambient(color: Color.rgb(0, 0, 1), intensity: 5)]))
+      ..add(
+        GameObject(
+          transform: Transform(position: Vec3(0, 1.5, 3)),
+          components: [MeshRenderer(Mesh.cube(), Material())],
+        ),
+      );
+    final scene = stage1(world);
+    final view = HeadlessView(scene.world, width: 256, height: 256);
+    addTearDown(view.dispose);
+    addTearDown(world.dispose);
+
+    expectGolden('cube', view.read(view.frame()).rgba, 256, 256);
+    rig.active = true;
+    final [r, g, b, _] = view.read(view.frame()).rgba.sublist(0, 4);
+    expect((r, g, b), (255, 0, 0), reason: "shown, the rig's camera wins and clears to red");
   });
 
   test('changing a material changes the objects that use it', () {
