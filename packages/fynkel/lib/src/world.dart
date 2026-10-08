@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:isolate';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
@@ -125,6 +126,26 @@ final class World implements Finalizable {
       );
       return GameObject._(this, out.value);
     });
+  }
+
+  /// The closest object along [ray], no further than [maxDistance], or
+  /// null when it hits nothing. It reads the world as it is now, not as the
+  /// last frame showed it, so it finds what the game just moved.
+  ///
+  /// It hits what a view draws: objects with a [Transform] and a
+  /// [MeshRenderer] with both a mesh and a material, from the side they're
+  /// drawn from (both sides for a [Material.doubleSided] one). Cut-outs
+  /// ([Material.alphaCutoff]) are hit as if solid. No physics is involved:
+  /// each object's box is tested, then the triangles of those the ray may
+  /// hit.
+  RayHit? raycast(Ray ray, {double maxDistance = double.infinity}) {
+    final r = scratch.ray.ref;
+    r.origin.write(ray.origin);
+    r.direction.write(ray.direction);
+    check(fy_raycast(pointer, scratch.ray, maxDistance, scratch.rayHit));
+    final hit = scratch.rayHit.ref;
+    if (hit.object == 0) return null;
+    return RayHit._(GameObject._(this, hit.object), hit.point.read(), hit.normal.read(), hit.distance);
   }
 
   int _meshId(Mesh mesh) {
@@ -330,6 +351,28 @@ final class GameObject {
     return Transform._(t.position.read(), t.rotation.read(), t.scale.read());
   }
 
+  /// The ray from this camera through [point] in a view showing it: from
+  /// the point on the near plane, away from the camera. Cast it with
+  /// [World.raycast] to find what's drawn there.
+  ///
+  /// Uses the object's [Camera] and its [worldTransform] (its scale is
+  /// ignored, as the view ignores it). Throws a [FynkelException] with
+  /// [FynkelStatus.noComponent] when it has no camera.
+  Ray rayThrough(ViewPoint point) {
+    if (!(point.width > 0 && point.height > 0)) {
+      throw ArgumentError.value(point, 'point', 'needs a view with an area');
+    }
+    final c = camera;
+    final t = worldTransform;
+    final tanHalf = math.tan(c.fovY * math.pi / 360);
+    // Through the point on the plane 1 in front of the camera, in the
+    // camera's frame: -Z ahead, +Y up, so the view's y is flipped.
+    final x = (2 * point.x / point.width - 1) * tanHalf * point.width / point.height;
+    final y = (1 - 2 * point.y / point.height) * tanHalf;
+    final through = t.rotation.rotate(Vec3(x, y, -1));
+    return Ray(t.position + through * c.near, through);
+  }
+
   /// Adds [component], replacing one of the same kind.
   void add(Component component) => switch (component) {
     Transform c => transform = c,
@@ -431,4 +474,24 @@ final class GameObject {
 
   @override
   String toString() => 'GameObject#$id';
+}
+
+/// Where a ray hit first ([World.raycast]).
+final class RayHit {
+  RayHit._(this.object, this.point, this.normal, this.distance);
+
+  final GameObject object;
+
+  /// In the world.
+  final Vec3 point;
+
+  /// The face's normal in the world, unit length, on the side the ray came
+  /// from.
+  final Vec3 normal;
+
+  /// From the ray's origin to [point].
+  final double distance;
+
+  @override
+  String toString() => 'RayHit($object at $point, normal $normal, distance $distance)';
 }

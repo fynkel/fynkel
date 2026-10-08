@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:fynkel/fynkel.dart' show HeadlessView, ViewStats, WorldView, World;
 import 'package:fynkel/platform.dart';
+
+import 'frame_input.dart';
 
 /// The plugin's channel (darwin/…/FynkelFlutterPlugin.swift and
 /// android/…/FynkelFlutterPlugin.kt).
@@ -67,9 +70,14 @@ class FynkelViewStats {
 }
 
 /// Shows [world] and runs its frame clock: each display frame it calls
-/// [onFrame] with the seconds since the last one, then hands the world to
-/// the engine to draw. It fills the space its parent gives it, which must
-/// be bounded.
+/// [onFrame] with the seconds since the last one and what the player did
+/// ([FrameInput]), then hands the world to the engine to draw. It fills
+/// the space its parent gives it, which must be bounded.
+///
+/// It reads pointers with a `Listener`, which takes part in no gesture
+/// arena, so gesture widgets around it keep working. While it has focus it
+/// takes every key, so keys like the arrows and space reach the game
+/// rather than moving focus or pressing buttons.
 ///
 /// The frames are drawn at the widget's size in physical pixels times
 /// [resolutionScale] and scaled to fit. Below 1 trades sharpness for
@@ -77,20 +85,34 @@ class FynkelViewStats {
 ///
 /// macOS, iOS and Android.
 class FynkelView extends StatefulWidget {
-  const FynkelView({super.key, required this.world, this.onFrame, this.resolutionScale = 1.0, this.onStats})
-    : assert(resolutionScale > 0 && resolutionScale <= 4);
+  const FynkelView({
+    super.key,
+    required this.world,
+    this.onFrame,
+    this.resolutionScale = 1.0,
+    this.onStats,
+    this.focusNode,
+    this.autofocus = true,
+  }) : assert(resolutionScale > 0 && resolutionScale <= 4);
 
   final World world;
 
   /// Called once per display frame, before the world is drawn, with the
-  /// seconds since the previous call (0 the first time). Game code goes
-  /// here.
-  final void Function(double dt)? onFrame;
+  /// seconds since the previous call (0 the first time) and the input since
+  /// then. Game code goes here.
+  final void Function(double dt, FrameInput input)? onFrame;
 
   final double resolutionScale;
 
   /// Called about once a second with what the view did since the last call.
   final void Function(FynkelViewStats stats)? onStats;
+
+  /// The view's focus, for keys. One of its own when null.
+  final FocusNode? focusNode;
+
+  /// Whether the view takes focus when it first appears, so keys work
+  /// before it's tapped.
+  final bool autofocus;
 
   @override
   State<FynkelView> createState() => _FynkelViewState();
@@ -99,6 +121,9 @@ class FynkelView extends StatefulWidget {
 class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMixin {
   late final Ticker _ticker = createTicker(_tick)..start();
   int? _lastMicros;
+  final _input = InputCollector();
+  FocusNode? _ownFocus;
+  FocusNode get _focus => widget.focusNode ?? (_ownFocus ??= FocusNode(debugLabel: 'FynkelView'));
 
   /// The size the next frame is drawn at, from the last layout; 0 while it
   /// is empty.
@@ -131,6 +156,7 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
   @override
   void dispose() {
     _ticker.dispose();
+    _ownFocus?.dispose();
     _release();
     super.dispose();
   }
@@ -139,7 +165,8 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
     final micros = elapsed.inMicroseconds;
     final last = _lastMicros;
     _lastMicros = micros;
-    widget.onFrame?.call(last == null ? 0 : (micros - last) / 1e6);
+    final input = _input.take();
+    widget.onFrame?.call(last == null ? 0 : (micros - last) / 1e6, input);
     // Nothing to draw before there is a size (on Android, before the
     // window has one): no view yet, and no surface.
     if (_width == 0 || _height == 0) return;
@@ -272,7 +299,7 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
     final error = _error;
     if (error != null) return ErrorWidget(error);
     final ratio = MediaQuery.devicePixelRatioOf(context) * widget.resolutionScale;
-    return LayoutBuilder(
+    final view = LayoutBuilder(
       builder: (context, constraints) {
         if (!constraints.hasBoundedWidth || !constraints.hasBoundedHeight) {
           throw FlutterError(
@@ -281,11 +308,41 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
           );
         }
         final size = constraints.biggest;
+        _input
+          ..size = size
+          ..gestureSettings = MediaQuery.maybeGestureSettingsOf(context);
         _width = (size.width * ratio).round().clamp(0, 16384);
         _height = (size.height * ratio).round().clamp(0, 16384);
         final texture = _texture;
         return texture == null ? const SizedBox.expand() : Texture(textureId: texture);
       },
+    );
+    return Focus(
+      focusNode: _focus,
+      autofocus: widget.autofocus,
+      onKeyEvent: (_, event) => _input.key(event),
+      onFocusChange: (focused) {
+        if (!focused) _input.releaseKeys();
+      },
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: (event) {
+          _focus.requestFocus();
+          _input.pointerDown(event);
+        },
+        onPointerMove: _input.pointerMove,
+        onPointerUp: _input.pointerUp,
+        onPointerCancel: _input.pointerCancel,
+        onPointerSignal: (event) {
+          if (event is PointerScrollEvent) {
+            GestureBinding.instance.pointerSignalResolver.register(event, (_) => _input.scrolled(event.scrollDelta));
+          }
+        },
+        // A trackpad's two-finger pan moves the fingers; scrolling goes
+        // the other way, as Flutter's scroll views take it.
+        onPointerPanZoomUpdate: (event) => _input.scrolled(-event.localPanDelta),
+        child: view,
+      ),
     );
   }
 }

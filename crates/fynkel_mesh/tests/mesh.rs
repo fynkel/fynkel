@@ -262,3 +262,10 @@ fn the_plane_faces_up() {
     check_winding(&plane);
     assert!(plane.vertices().iter().all(|v| v.normal == [0.0, 1.0, 0.0]));
 }
+
+#[test]
+fn the_bounds_hold_every_vertex() {
+    let mesh = MeshData::new(parts(&[[1.0, -2.0, 0.5], [-3.0, 4.0, 0.0], [0.0, 0.0, 6.0]], &[0, 1, 2])).unwrap();
+    assert_eq!(mesh.bounds(), (Vec3::new(-3.0, -2.0, 0.0), Vec3::new(1.0, 4.0, 6.0)));
+    assert_eq!(MeshData::cube().bounds(), (Vec3::splat(-0.5), Vec3::splat(0.5)));
+}

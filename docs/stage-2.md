@@ -143,6 +143,15 @@ the renderer takes raw pixel slices, so it depends on neither.
 - `FynkelView` collects the events with a `Listener` and a `Focus`, so it works with mouse, touch, trackpad and keyboard alike. Flutter's own gesture widgets around a view keep working.
 - `camera.rayThrough(point)` turns a point in the view into a world-space ray, using the view's real size. `world.raycast(ray)` returns the closest hit: the object, the point and the distance. It tests bounding boxes first, then triangles, on the CPU against the meshes it already has. A faster structure comes only if a measurement asks for it.
 - Raycasts read the world as it is now, not the last frame drawn, so a tap acts on what the game just set.
+- *Settled in step 5:*
+  - **No physics.** A raycast tests meshes the world already holds, on the CPU. Physics engines cast against colliders (simple stand-in shapes); if physics comes, its raycast sits beside this one.
+  - **What a ray hits is what a view draws**, the way it draws it: objects with a `Transform` and a `MeshRenderer` with both a mesh and a material; only front faces unless the material is double-sided; a mirrored object keeps its fronts, as the mirrored pipelines do. Cut-outs are hit as if solid (the texture isn't read). A hit gives the object, the point, the distance and the face normal, turned towards the ray.
+  - **Box first, in the world.** Each object's mesh box is carried into the world (centre moved, half-size by the matrix's absolute values), which costs far less than inverting the matrix; only objects whose box the ray meets are inverted, and their triangles tested in their own space. That took a cast over 10,000 cubes from 210 to 85 µs on the Mac (§6). `MeshData` keeps its box, worked out when it's made.
+  - **A `Raycaster` per world** keeps the world matrices between casts (the C world holds one), so a cast in a steady world allocates nothing.
+  - **`camera.rayThrough(point)`** starts on the near plane, as nothing nearer is drawn. Its `point` is a `ViewPoint`: a position in logical pixels together with the view's size, which is what makes the aspect right. `FrameInput` gives pointer positions as `ViewPoint`s, so the snippet works as written. A test casts a ray through every pixel of a rendered, non-square frame from a camera on a turned parent and checks each hits the object drawn there.
+  - **`FrameInput`** (package:fynkel_flutter) has `size`, `pointers` (id → `ViewPoint`), `taps` and `tapped` (the last), `drag` and `scroll` (`Offset`s), and `keys`, `pressed`, `released`. A **tap** is Flutter's: down and up within the tap slop (18 logical pixels for touch, 1 for a mouse), mouse primary button only, with no time limit. **`drag`** follows the first pointer still down; the move that takes it past the slop counts in full, so a gesture's drags add up to the whole movement. **`scroll`** is the wheel plus the trackpad's two-finger pan (turned to scroll the way Flutter's scroll views do); the view claims the wheel, so a list around it doesn't scroll too. The trackpad pan isn't claimed (that needs a gesture recognizer, which would compete with gesture widgets around the view). Pinch isn't read yet.
+  - **Keys.** The view takes focus at first (`autofocus`, on by default) and whenever it's pressed, and keeps every key while focused, so arrows and space reach the game instead of moving focus or pressing a button. Repeats aren't presses. Losing focus releases the held keys, since their key-ups won't come.
+  - **hello** keeps a game file that imports only package:fynkel, so its `main.dart` adapts `onFrame(dt, input)` to the game's `onFrame(dt)`.
 
 ### 3.5 Measuring
 
@@ -183,9 +192,14 @@ OrientationTest, CesiumMilkTruck, Fox in its bind pose, and a generated
 and two of them again from Dart. A second spawn of the truck leaves the
 view's mesh and texture bytes unchanged. Numbers in §6.
 
-**Step 5: input and raycasts.** `FrameInput`, `rayThrough`, `raycast`.
+**Step 5: input and raycasts.** ✅ `FrameInput`, `rayThrough`, `raycast`.
 *Done when* widget tests drive taps, drags and keys, and raycasts hit the
-right object in unit tests, including through a hierarchy.
+right object in unit tests, including through a hierarchy. Ten widget
+tests drive taps, drags, several fingers, a mouse, the wheel, a trackpad
+and keys; raycasts are tested in Rust (scale, mirror, double-sided,
+hierarchy, edges), through the C interface (a block of the tower model),
+and in Dart against every pixel of a rendered frame. Numbers in §6; the
+phones' come with the garden in step 6.
 
 **Step 6: `examples/garden` on macOS, then iOS, then Android.** The
 scene from the snippet: a textured ground, a model, tap and drag. *Done
@@ -205,6 +219,24 @@ it's committed and you have played the scene on each device.
    for the stage that needs it.
 
 ## 6. Measurements
+
+### Step 5: raycasts (Mac, M3 Max, release build)
+
+`cargo run --release -p fynkel_world --example raycast`, best of 200 casts
+with one `Raycaster`:
+
+| Scene | Objects | Triangles | Hit | Miss |
+|---|---:|---:|---:|---:|
+| 100 × 100 cubes, no tree | 10,000 | 120,000 | 83 µs | 86 µs |
+| 100 × 100 cubes, 100 chains 100 deep | 10,000 | 120,000 | 194 µs | 199 µs |
+| sphere 32 × 16 | 1 | 960 | 7.0 µs | 0.0 µs |
+| sphere 256 × 128 | 1 | 65,024 | 416 µs | 0.0 µs |
+| tower.glb | 139 | 1,500 | 2.7 µs | 2.5 µs |
+| CesiumMilkTruck.glb | 10 | 3,624 | 12.6 µs | 0.2 µs |
+| Fox.glb | 27 | 576 | 4.5 µs | 0.3 µs |
+
+- Before the world-space box (inverting every object's matrix to test its box in its own space): 210 µs and 435 µs for the two grids. The deep grid's extra time is updating 10,000 world matrices each cast.
+- A big mesh costs about 6 ns a triangle once the ray is in its box. A tap or two a frame is well inside a frame at these sizes; a structure over the triangles (or the objects) waits until a scene needs it, as planned.
 
 ### Step 4: glTF (Mac, M3 Max, release build)
 

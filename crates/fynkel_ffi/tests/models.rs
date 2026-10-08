@@ -337,3 +337,29 @@ fn a_spawn_with_the_wrong_ids_spawns_nothing() {
         assert!(!unsafe { fy_exists(world.0, id) }, "object {id} was left behind");
     }
 }
+
+#[test]
+fn a_ray_at_the_tower_hits_a_named_block_that_is_part_of_it() {
+    let world = World::new();
+    let model = Model::load(sample("tower.glb")).unwrap();
+    let ids = model.add_to(&world);
+    let tower = model.spawn(&world, &ids, Transform::from_position(Vec3::new(0.0, 0.0, -10.0))).unwrap();
+    // Level with the bottom floor, at the block in front (+Z), which floor
+    // 0 doesn't turn.
+    let ray = FyRay { origin: FyVec3 { x: 0.0, y: 0.5, z: 0.0 }, direction: FyVec3 { x: 0.0, y: 0.0, z: -1.0 } };
+    let mut hit = FyRayHit::default();
+    let mut part = false;
+    let mut name = [0u8; 64];
+    let mut len = 0;
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        ok(fy_raycast(world.0, &ray, f32::INFINITY, &mut hit));
+        ok(fy_is_part_of(world.0, hit.object, tower, &mut part));
+        ok(fy_name_get(world.0, hit.object, name.as_mut_ptr(), name.len(), &mut len));
+    }
+    assert!(part);
+    assert_eq!(std::str::from_utf8(&name[..len]).unwrap(), "Block 0.3");
+    // The block is turned to face the centre, so its 0.5 (X) is its depth
+    // here; it stands 2.2 out from the centre at z = -10.
+    assert!((hit.distance - (10.0 - 2.2 - 0.25)).abs() < 1e-4, "{}", hit.distance);
+}

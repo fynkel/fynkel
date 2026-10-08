@@ -261,8 +261,8 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_7() {
-    assert_eq!(fy_abi_version(), 7);
+fn the_abi_version_is_8() {
+    assert_eq!(fy_abi_version(), 8);
 }
 
 #[cfg(not(target_os = "android"))]
@@ -686,4 +686,71 @@ fn a_textured_scene_made_through_the_c_interface_matches_its_golden() {
     let mips: u64 = (0..8).map(|i| (128u64 >> i).pow(2) * 4).sum();
     assert_eq!(stats.texture_bytes, mips, "one 128² texture, sRGB only, with its mipmaps");
     assert!(stats.mesh_bytes > 0);
+}
+
+// --- Raycasts --------------------------------------------------------------
+
+fn cast(world: &World, origin: [f32; 3], direction: [f32; 3], max_distance: f32) -> Result<FyRayHit, FyStatus> {
+    let ray = FyRay {
+        origin: FyVec3 { x: origin[0], y: origin[1], z: origin[2] },
+        direction: FyVec3 { x: direction[0], y: direction[1], z: direction[2] },
+    };
+    let mut hit = FyRayHit { object: 99, ..FyRayHit::default() };
+    // SAFETY: a live world and pointers to locals.
+    let status = unsafe { fy_raycast(world.0, &ray, max_distance, &mut hit) };
+    if status == FyStatus::Ok { Ok(hit) } else { Err(status) }
+}
+
+#[test]
+fn a_raycast_reports_the_object_the_point_the_normal_and_the_distance() {
+    let world = World::new();
+    let cube = stage1(&world);
+    // The stage 1 cube is turned 30° about Y; straight down it shows its top.
+    let hit = cast(&world, [0.1, 3.0, 0.2], [0.0, -2.0, 0.0], f32::INFINITY).unwrap();
+    assert_eq!(hit.object, cube);
+    let close =
+        |v: FyVec3, x: f32, y: f32, z: f32| (v.x - x).abs() < 1e-5 && (v.y - y).abs() < 1e-5 && (v.z - z).abs() < 1e-5;
+    assert!(close(hit.point, 0.1, 0.5, 0.2), "{:?}", hit.point);
+    assert!(close(hit.normal, 0.0, 1.0, 0.0), "{:?}", hit.normal);
+    assert!((hit.distance - 2.5).abs() < 1e-5);
+
+    assert_eq!(cast(&world, [0.1, 3.0, 0.2], [0.0, 1.0, 0.0], f32::INFINITY).unwrap(), FyRayHit::default(), "a miss");
+    assert_eq!(cast(&world, [0.1, 3.0, 0.2], [0.0, -1.0, 0.0], 2.4).unwrap().object, 0, "out of reach");
+    assert_eq!(cast(&world, [0.1, 3.0, 0.2], [0.0, -1.0, 0.0], 2.6).unwrap().object, cube);
+}
+
+#[test]
+fn a_raycast_sees_the_world_as_it_is_now_not_the_last_frame() {
+    let world = World::new();
+    let cube = stage1(&world);
+    let view = View::headless(&world, 32, 32);
+    view.read(view.frame(), 32, 32);
+    let moved = fynkel_world::Transform::from_position(fynkel_world::Vec3::new(10.0, 0.0, 0.0));
+    // SAFETY: a live world and a pointer to a local.
+    ok(unsafe { fy_transform_set(world.0, cube, &transform(moved)) });
+    assert_eq!(cast(&world, [0.0, 3.0, 0.0], [0.0, -1.0, 0.0], f32::INFINITY).unwrap().object, 0);
+    assert_eq!(cast(&world, [10.0, 3.0, 0.0], [0.0, -1.0, 0.0], f32::INFINITY).unwrap().object, cube);
+}
+
+#[test]
+fn a_raycast_refuses_a_ray_it_cant_follow() {
+    let world = World::new();
+    stage1(&world);
+    for (origin, direction, max, what) in [
+        ([0.0; 3], [0.0; 3], 1.0, "a direction that isn't zero"),
+        ([f32::NAN, 0.0, 0.0], [1.0, 0.0, 0.0], 1.0, "a finite origin"),
+        ([0.0; 3], [1.0, 0.0, 0.0], -1.0, "max_distance can't be -1"),
+        ([0.0; 3], [1.0, 0.0, 0.0], f32::NAN, "max_distance can't be NaN"),
+    ] {
+        assert_eq!(cast(&world, origin, direction, max), Err(FyStatus::InvalidValue));
+        assert!(last_error().contains(what), "{}", last_error());
+    }
+    let mut hit = FyRayHit::default();
+    // SAFETY: null pointers are refused before anything is read.
+    unsafe {
+        assert_eq!(fy_raycast(world.0, ptr::null(), 1.0, &mut hit), FyStatus::NullPointer);
+        assert_eq!(fy_raycast(ptr::null(), &FyRay::default(), 1.0, &mut hit), FyStatus::NullPointer);
+        let ray = FyRay { direction: FyVec3 { x: 1.0, y: 0.0, z: 0.0 }, ..FyRay::default() };
+        assert_eq!(fy_raycast(world.0, &ray, 1.0, ptr::null_mut()), FyStatus::NullPointer);
+    }
 }

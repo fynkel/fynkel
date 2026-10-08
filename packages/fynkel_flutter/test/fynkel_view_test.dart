@@ -96,7 +96,7 @@ void main() {
     final dts = <double>[];
     final stats = <FynkelViewStats>[];
     await tester.pumpWidget(
-      sized(FynkelView(world: world, resolutionScale: 0.5, onFrame: dts.add, onStats: stats.add)),
+      sized(FynkelView(world: world, resolutionScale: 0.5, onFrame: (dt, _) => dts.add(dt), onStats: stats.add)),
     );
     await tester.pump(const Duration(milliseconds: 8));
     expect(calls, hasLength(1));
