@@ -265,6 +265,7 @@ dependencies = [
  "fynkel_present",
  "fynkel_render",
  "fynkel_world",
+ "jni-sys 0.3.1",
 ]
 
 [[package]]
@@ -279,6 +280,7 @@ name = "fynkel_present"
 version = "0.1.0"
 dependencies = [
  "block2",
+ "jni-sys 0.3.1",
  "objc2",
  "objc2-core-foundation",
  "objc2-io-surface",

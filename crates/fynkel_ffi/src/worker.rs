@@ -10,11 +10,18 @@
 //! Scene buffers circulate between the poster and the worker, so a steady
 //! stream of frames allocates nothing on either side. There are never more
 //! than three: one being filled, one waiting and one being drawn.
+//!
+//! A render thread outlives its view: when the view is freed, the thread
+//! waits for the next one (one thread at most waits). A GPU driver may keep
+//! state for every thread that calls it and never give it back, even when
+//! the thread ends: the Android emulator's keeps 4 MB (docs/stage-1.md §7).
+//! So a view made after another, as at every hot restart, costs no new
+//! thread and leaves nothing behind.
 
 use std::any::Any;
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
-use std::thread::{self, JoinHandle};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, mpsc};
+use std::thread;
 
 use fynkel_present::Target;
 use fynkel_render::{Gpu, MeshData, RenderScene, Renderer};
@@ -38,13 +45,15 @@ pub(crate) struct WorkerStats {
 #[derive(Debug)]
 pub(crate) struct Worker {
     shared: Arc<Shared>,
-    thread: Option<JoinHandle<()>>,
 }
 
 #[derive(Debug)]
 struct Shared {
     mailbox: Mutex<Mailbox>,
     wake: Condvar,
+    /// Signalled once the worker has stopped and dropped everything it
+    /// owned.
+    finished: Condvar,
 }
 
 #[derive(Debug, Default)]
@@ -56,31 +65,49 @@ struct Mailbox {
     /// A new size for the target, applied before the next scene is drawn.
     size: Option<(u32, u32)>,
     stop: bool,
+    /// The worker stopped and dropped everything it owned.
+    finished: bool,
     /// Why the worker stopped, if it panicked.
     failure: Option<String>,
     stats: WorkerStats,
 }
 
 impl Worker {
-    /// Starts the worker thread, which owns `renderer` and `target` from
-    /// now on.
+    /// Starts the worker on a render thread, which owns `gpu`, `renderer`
+    /// and `target` from now on.
     pub(crate) fn start<T: Target + 'static>(gpu: Gpu, renderer: Renderer, target: T) -> std::io::Result<Self> {
-        let shared = Arc::new(Shared { mailbox: Mutex::default(), wake: Condvar::new() });
-        let thread = thread::Builder::new().name("fynkel render".into()).spawn({
-            let shared = shared.clone();
-            move || {
-                let result = panic::catch_unwind(AssertUnwindSafe(|| run(&shared, &gpu, renderer, target)));
-                let failure = match result {
-                    Ok(Ok(())) => return,
-                    Ok(Err(failure)) => failure,
-                    Err(payload) => format!("the render worker panicked: {}", panic_message(&*payload)),
-                };
-                let mut mailbox = shared.lock();
-                mailbox.failure = Some(failure);
-                mailbox.pending = None;
-            }
-        })?;
-        Ok(Self { shared, thread: Some(thread) })
+        Self::start_on(&RENDER_THREADS, gpu, renderer, target)
+    }
+
+    /// [`Worker::start`], on a thread of `threads`.
+    fn start_on<T: Target + 'static>(
+        threads: &'static RenderThreads,
+        gpu: Gpu,
+        renderer: Renderer,
+        target: T,
+    ) -> std::io::Result<Self> {
+        let shared = Arc::new(Shared { mailbox: Mutex::default(), wake: Condvar::new(), finished: Condvar::new() });
+        let job = Job {
+            work: Box::new({
+                let shared = shared.clone();
+                move || {
+                    // Everything the worker owns is dropped inside, on this
+                    // thread, before it counts as finished.
+                    let result = panic::catch_unwind(AssertUnwindSafe(|| run(&shared, gpu, renderer, target)));
+                    let failure = match result {
+                        Ok(Ok(())) => return,
+                        Ok(Err(failure)) => failure,
+                        Err(payload) => format!("the render worker panicked: {}", panic_message(&*payload)),
+                    };
+                    let mut mailbox = shared.lock();
+                    mailbox.failure = Some(failure);
+                    mailbox.pending = None;
+                }
+            }),
+            shared: shared.clone(),
+        };
+        threads.run(job)?;
+        Ok(Self { shared })
     }
 
     /// A scene buffer to fill: a spare one when there is one.
@@ -135,13 +162,85 @@ impl Worker {
 
 impl Drop for Worker {
     /// Stops the worker after the frame it is drawing, if any, and waits
-    /// for it. A scene still waiting is dropped.
+    /// until it has dropped everything it owned (the GPU device, the
+    /// target). A scene still waiting is dropped.
     fn drop(&mut self) {
-        self.shared.lock().stop = true;
+        let mut mailbox = self.shared.lock();
+        mailbox.stop = true;
         self.shared.wake.notify_one();
-        if let Some(thread) = self.thread.take() {
-            // A panic was already caught and recorded inside the thread.
-            let _ = thread.join();
+        while !mailbox.finished {
+            mailbox = self.shared.finished.wait(mailbox).unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+}
+
+/// The render threads waiting for a view: process-wide.
+static RENDER_THREADS: RenderThreads = RenderThreads::new();
+
+/// Render threads that finished a view and wait for the next one.
+#[derive(Debug)]
+struct RenderThreads {
+    /// How to hand each waiting thread its next job.
+    idle: Mutex<Vec<mpsc::Sender<Job>>>,
+}
+
+/// A worker's whole life, for a render thread to run.
+struct Job {
+    work: Box<dyn FnOnce() + Send>,
+    shared: Arc<Shared>,
+}
+
+impl RenderThreads {
+    /// At most this many threads wait. One covers a view replaced by
+    /// another; each more would keep its driver state for nothing.
+    const MAX_IDLE: usize = 1;
+
+    const fn new() -> Self {
+        Self { idle: Mutex::new(Vec::new()) }
+    }
+
+    fn idle(&self) -> MutexGuard<'_, Vec<mpsc::Sender<Job>>> {
+        self.idle.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Runs `job` on a waiting thread, or on a new one when none waits.
+    fn run(&'static self, job: Job) -> std::io::Result<()> {
+        let mut job = job;
+        while let Some(thread) = self.idle().pop() {
+            // A thread that ended (it can't, but a send can fail) gives the
+            // job back.
+            match thread.send(job) {
+                Ok(()) => return Ok(()),
+                Err(mpsc::SendError(back)) => job = back,
+            }
+        }
+        let (sender, jobs) = mpsc::channel();
+        sender.send(job).expect("the receiver is right here");
+        thread::Builder::new().name("fynkel render".into()).spawn(move || self.serve(&sender, &jobs))?;
+        Ok(())
+    }
+
+    /// A render thread's life: jobs until there is room for no more.
+    fn serve(&self, sender: &mpsc::Sender<Job>, jobs: &mpsc::Receiver<Job>) {
+        while let Ok(Job { work, shared }) = jobs.recv() {
+            // The work catches its own panics; this is only so `finished`
+            // is always set.
+            let _ = panic::catch_unwind(AssertUnwindSafe(work));
+            // Waiting again before the worker counts as finished, so a view
+            // made right after this one always finds this thread.
+            let wait = {
+                let mut idle = self.idle();
+                let room = idle.len() < Self::MAX_IDLE;
+                if room {
+                    idle.push(sender.clone());
+                }
+                room
+            };
+            shared.lock().finished = true;
+            shared.finished.notify_all();
+            if !wait {
+                return;
+            }
         }
     }
 }
@@ -155,7 +254,7 @@ impl Shared {
 }
 
 /// Draws until stopped. Fails when the target can't take a new size.
-fn run<T: Target>(shared: &Shared, gpu: &Gpu, mut renderer: Renderer, mut target: T) -> Result<(), String> {
+fn run<T: Target>(shared: &Shared, gpu: Gpu, mut renderer: Renderer, mut target: T) -> Result<(), String> {
     let mut ops = Vec::new();
     loop {
         let (number, scene, size) = {

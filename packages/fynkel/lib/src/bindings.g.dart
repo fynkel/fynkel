@@ -101,6 +101,14 @@ external int fy_view_frame(ffi.Pointer<FyView> view, ffi.Pointer<ffi.Uint64> out
 external void fy_view_free(ffi.Pointer<FyView> view);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Pointer<FyView>>)>()
+external int fy_view_new_android(
+  ffi.Pointer<FyWorld> world,
+  int width,
+  int height,
+  ffi.Pointer<ffi.Pointer<FyView>> out,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Pointer<FyView>>)>()
 external int fy_view_new_apple(ffi.Pointer<FyWorld> world, int width, int height, ffi.Pointer<ffi.Pointer<FyView>> out);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Pointer<FyView>>)>()
@@ -142,7 +150,7 @@ external void fy_world_free(ffi.Pointer<FyWorld> world);
 @ffi.Native<ffi.Pointer<FyWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FyWorld> fy_world_new();
 
-const int FY_ABI_VERSION = 2;
+const int FY_ABI_VERSION = 3;
 
 const int FY_APPLE_MORE = 2;
 

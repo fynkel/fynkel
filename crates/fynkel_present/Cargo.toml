@@ -22,5 +22,9 @@ objc2-core-foundation = { version = "0.3.2", default-features = false, features 
 objc2-io-surface = { version = "0.3.2", default-features = false, features = ["std", "IOSurfaceRef", "IOSurfaceTypes", "libc", "objc2-core-foundation"] }
 objc2-metal = { version = "0.3.2", default-features = false, features = ["std", "block2", "objc2-io-surface", "MTLAllocation", "MTLCommandBuffer", "MTLCommandQueue", "MTLDevice", "MTLPixelFormat", "MTLResource", "MTLTexture", "MTLTypes"] }
 
+# The Android target: its render thread joins the JVM once (android.rs).
+[target.'cfg(target_os = "android")'.dependencies]
+jni-sys.workspace = true
+
 [dev-dependencies]
 pollster.workspace = true

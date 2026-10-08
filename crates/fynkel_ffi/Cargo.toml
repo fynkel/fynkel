@@ -18,6 +18,10 @@ fynkel_world.workspace = true
 fynkel_render.workspace = true
 fynkel_present.workspace = true
 
+# The Flutter plugin's calls (src/jni.rs): Android surfaces come through JNI.
+[target.'cfg(target_os = "android")'.dependencies]
+jni-sys.workspace = true
+
 [dev-dependencies]
 fynkel_golden.workspace = true
 cbindgen.workspace = true

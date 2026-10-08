@@ -2,8 +2,14 @@
 // `footprint` reports on the Mac, and the one iOS kills an app over. On an
 // iPhone no outside tool can read it, so the lifecycle check asks the
 // kernel itself (`task_info` with `TASK_VM_INFO`).
+//
+// On Android it's the process's PSS, the number Android's own tools lead
+// with, from /proc/self/smaps_rollup; there tool/measure.dart reads
+// `dumpsys meminfo` from outside instead, and this is only for the stats
+// line.
 
 import 'dart:ffi';
+import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
@@ -32,8 +38,10 @@ const _words = 128;
 /// The physical footprint in bytes.
 int physicalFootprint() => footprint().total;
 
-/// The physical footprint in bytes, and the GPU's part of it.
+/// The physical footprint in bytes, and the GPU's part of it. On Android:
+/// the PSS, and 0 for the GPU's part, which only `dumpsys meminfo` knows.
 ({int total, int graphics}) footprint() {
+  if (Platform.isAndroid) return (total: _pss(), graphics: 0);
   final info = calloc<Uint8>(_words * 4);
   final count = calloc<Uint32>()..value = _words;
   try {
@@ -45,4 +53,14 @@ int physicalFootprint() => footprint().total;
     calloc.free(info);
     calloc.free(count);
   }
+}
+
+/// The process's PSS in bytes.
+int _pss() {
+  final kb = RegExp(
+    r'^Pss:\s+(\d+) kB',
+    multiLine: true,
+  ).firstMatch(File('/proc/self/smaps_rollup').readAsStringSync());
+  if (kb == null) throw StateError('no Pss in /proc/self/smaps_rollup');
+  return int.parse(kb.group(1)!) * 1024;
 }

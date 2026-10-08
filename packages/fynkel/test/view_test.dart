@@ -76,4 +76,13 @@ void main() {
       throwsA(isA<FynkelException>().having((e) => e.status, 'status', FynkelStatus.unsupported)),
     );
   }, skip: Platform.isMacOS || Platform.isIOS ? 'not on Apple' : false);
+
+  test('an Android view is refused off Android', () {
+    final world = World();
+    addTearDown(world.dispose);
+    expect(
+      () => AndroidSurfaceView(world, width: 8, height: 8),
+      throwsA(isA<FynkelException>().having((e) => e.status, 'status', FynkelStatus.unsupported)),
+    );
+  }, skip: Platform.isAndroid ? 'not on Android' : false);
 }

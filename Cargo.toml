@@ -20,6 +20,7 @@ wgpu = "30.0.1"
 bytemuck = { version = "1.25.2", features = ["derive"] }
 pollster = "1.0.1"
 png = "0.18.1"
+jni-sys = "0.3.1"
 cbindgen = { version = "0.29.4", default-features = false }
 
 # Unsafe code is denied everywhere. `fynkel_ffi` (the C boundary) and the

@@ -124,6 +124,14 @@ fy_frame():
 - The render worker owns the wgpu device and queue. Only one thread ever touches them.
 - **The Apple ring:** 5 IOSurface slots. States are Free → Rendering → Ready → Presented → Retiring → Free. At most 2 frames are in flight; extra scenes are coalesced, not queued. `acquire` returns the **oldest** Ready slot (at most 2 waiting) and sets bit `0x100` when more are waiting, so the Swift side asks for another frame. These are the exact rules that reached 120 fps on the iPhone, now written as a state machine with its own tests.
 - **Android:** Flutter's `SurfaceProducer` gives us a `Surface`. Rust turns it into an `ANativeWindow` and a wgpu surface, and the render worker presents to it directly. The OS does the queueing, so the ring isn't used. Both platforms implement the same small `Target` trait in `fynkel_present`.
+  - *Settled at step 7, from Flutter 3.47's source.* Behind a `SurfaceProducer` (API 29+) is an `ImageReader`. **Every resize makes a new one, and so a new `Surface`.** So on Android the size and the surface travel together, and both come from the Kotlin plugin: `setSize`, `getSurface`, then the surface goes to Rust (`ANativeWindow_fromSurface`, through a JNI function in the engine library). Dart's `fy_view_resize` isn't used there.
+  - The producer uses the `manual` lifecycle, Flutter's default, so the surface stays while the app is in the background (about 95 MB at 1080 × 2241). *Changed at step 7b.* It used `resetInBackground` first. When the app went to the background, Flutter called `onSurfaceCleanup` (at once, on Android 12 and 16), the plugin took the surface away from the engine, and `onSurfaceAvailable` handed over a new one on resume. On the Galaxy Note10+, every trip then kept **58 MB** for good, 1.8 GB after 30 trips. The cause is in Flutter 3.47. A `resetInBackground` texture clears its cache of the last 6 images when its GL context goes. Impeller's GLES texture keeps an EGLImage for each image in a second map, which is only trimmed by evictions from that cache, and its `Detach` is empty. So those 6 EGLImages, and the 6 full-screen buffers under them, are never released. The engine was ruled out first: 20 full-screen surfaces attached, drawn into and closed without Flutter leave nothing behind (`probe_graphics_memory_over_many_surfaces`). With `manual`, 30 trips stay flat (§7, step 7). The plugin still handles both callbacks, in case a later Flutter takes the surface away by itself.
+  - Taking a surface away waits for a frame in progress, then drops the wgpu surface and releases the window. With no surface, the render worker skips frames (they count as `skipped`). A resize takes the old surface away *before* `setSize`, which may free it at once.
+  - `presented` on Android counts frames given to the surface. Only Flutter knows which ones it showed, so `dropped` stays 0 there.
+  - *Found at step 7b, on a Galaxy Note10+.* A surface can die while the engine still holds it. Once, at the first start after install, Flutter closed the `ImageReader` behind our newest surface without calling the plugin's callback. The OS logged "BufferQueue has been abandoned" and Flutter's raster thread logged "Image is already closed". wgpu then reported the swapchain outdated, and configuring it again was a validation error, which panicked the render worker. Six more tries didn't repeat it, so it's a race on Flutter's side. The engine's part is fixed: `configure` runs in an error scope, and a surface that can't be configured counts as dead. Its frames are skipped, and the next `attach` replaces it. With the `manual` lifecycle (above), only a resize brings one, so the view stays frozen until then. Asking the plugin for a new surface at once (`getForcedNewSurface`) is open. A test makes real surfaces with the NDK's `AImageReader` and closes one under the engine. Without the fix, it fails with the phone's exact panic.
+  - `FynkelView` makes no view while its layout is empty. Before the window has a size, Flutter lays it out at 0 × 0, which used to become a 1 × 1 view with a surface of its own, swapped for the real one a frame later. That was the setting of the race above.
+  - *Found at step 7a.* The `ImageReader` lives in our process, and its frame-available callback runs on the thread that queued the frame, then calls into Java. On a thread the JVM doesn't know, that call attaches the thread for one call, with a new `java.lang.Thread`, every frame (the render thread's name changed about 70 times a second). So the render thread joins the JVM once, as a daemon named `fynkel render`, and leaves it when the view goes.
+- **Render threads outlive views.** When a view is freed, its render thread waits for the next view instead of ending (one waits at most). *Found at step 7a:* the Android emulator's Vulkan driver keeps 4.0 MB for every thread that ever called it, even a bare `vkCreateInstance`, and never frees it when the thread ends. With a new thread per view, every hot restart cost 4 MB. Drivers may keep per-thread state anywhere, so this is how views work on every platform. `fy_view_free` still returns only after everything the view owned is dropped, on its thread.
 - **Headless:** renders into an offscreen texture and reads it back. It is used by the tests and by CI.
 
 ### 3.6 Rendering
@@ -233,6 +241,15 @@ fail first.
 **Step 7: Android**
 - A Kotlin plugin (`SurfaceProducer`), the `ANativeWindow` → wgpu surface, the Android `Target`, and the build hook producing `arm64-v8a` and `x86_64`.
 - *Done when* the cube runs with `flutter run` on the **emulator** (`Medium_Phone_API_36.0`), with hot reload working, and on a physical device at its display rate, including app pause/resume (the surface is destroyed and recreated) and rotation. The physical device needs one to be connected.
+- Split in two (decided 2026-10-07; there is no Android phone yet):
+  - **7a, the emulator:** everything above except the physical device. That means `flutter run`, hot reload and hot restart, pause/resume, rotation, and the create/destroy and resize checks against the Flutter-only baseline. The emulator draws through the Mac's GPU, so, as with the iOS Simulator, its frame rate and GPU memory aren't Android numbers.
+  - **7b, a phone:** the display rate over 60 s, pause/resume and rotation on real hardware, and the memory checks with a real driver. It waits for a phone, and stage 1 isn't done without it.
+- ✅ Done 2026-10-08 (see §7).
+  - On a Galaxy Note10+ (Android 12, Mali-G76, 60 Hz), the cube holds the display rate at native 1080 × 2241 over 60 s: 59.9 fresh fps, and as many Flutter frames as Flutter alone draws (3594 against 3595).
+  - On the phone, 30 create/destroy cycles, 30 resizes, 60 rotations and 30 trips to the background keep the GPU memory flat (to 0.1 MB at each size). The total grows no more than Flutter alone does. The emulator passes the same checks.
+  - `flutter run`, hot reload and hot restart work on the emulator (7a).
+  - Found and fixed on the phone: a surface that died under the engine panicked the render thread; Flutter's `resetInBackground` lifecycle leaked 58 MB per trip to the background (a Flutter bug, avoided with `manual`); hello's own memory reading made one frame a second late; and the tool's Android memory readings fell into the next cycle (§7).
+  - `flutter build apk` needs `--target-platform android-arm64,android-x64`: the engine has no 32-bit build, and the hook says so.
 
 **Step 8: the stage 1 check**
 - Run hello on all three platforms and write a short report with the numbers.
@@ -246,12 +263,14 @@ own, under the quality rule in ADR-0001.
 
 ## 6. Open questions
 
-1. **An Android phone.** Step 7 needs one connected over USB or Wi-Fi. Until then, only the emulator can be tested.
+1. ~~An Android phone~~: a Galaxy Note10+ was connected on 2026-10-07, and step 7b ran on it.
 2. ~~Light units~~: unitless, confirmed 2026-10-07.
 3. ~~The API shape~~: the snippet at the top was confirmed 2026-10-07.
 4. ~~Two changes to that snippet~~: `Light.sun()` with `Transform(forward: …)`, and `cube.rotate(…)`. Accepted 2026-10-07.
 5. ~~Names shared with Flutter~~: decided 2026-10-07, nothing is renamed. `Color`, `Material` and `Transform` are also Flutter names, so a file that imports both `package:flutter/material.dart` and `package:fynkel/fynkel.dart` must hide one or use a prefix. The convention: keep the game in its own files, which import only `package:fynkel`, and keep the Flutter side in files that don't import it (`examples/hello` does this: `lib/game.dart` and `lib/main.dart`). `package:fynkel_flutter` exports only `FynkelView` and `FynkelViewStats`, so it never clashes. A file that really needs both writes `import 'package:fynkel/fynkel.dart' as fy;`. Nothing is renamed.
 6. ~~The engine's fixed GPU memory~~: explained, and cut from about 324 MB to 198 MB, on 2026-10-07. The memory isn't the engine's. Apple's Metal driver gives each process pools of its own when it first uses the GPU, and the footprint counts them: 195 MB once it runs a render pass, and another 128 MB once it runs a blit (a GPU copy or fill) or a compute pass. Plain Metal measures the same, with no wgpu involved (a test program: render only 195.5 MB, blit only 128 MB, both 323.5 MB). The driver frees a pool about a second after the GPU stops using it, and frees everything when the GPU goes idle. The engine paid the blit pool all the time because `queue.write_buffer` copies with a blit, and the renderer called it twice a frame. It now writes per-frame data where the GPU reads it (§3.6), and `crates/fynkel_render/tests/gpu_memory.rs` fails if a steady frame blits again. The render pool stays: every app that draws pays it, Flutter included (a Flutter app with a spinner holds 197 MB). Earlier figures were wrong in two ways. The "blank Flutter app, 54 MB" drew nothing, so it held no pools. And "wgpu adds 130 MB" was really our `write_buffer` calls. Still open, and not worth doing now: a new view still blits once (wgpu clears a buffer of its own when a device is made), which costs 128 MB for about a second. One device shared by all views would avoid that, along with the device's start-up time, once a game has more than one view.
+7. **A dead surface on Android.** When Flutter closes the surface under the engine (seen once, §3.5), the view stays frozen until the next resize. The plugin could ask Flutter for a new surface at once (`getForcedNewSurface`). Not done, because the race couldn't be repeated to test it.
+8. **The Flutter leak with `resetInBackground`** (§3.5) could be reported to Flutter with the analysis. Not filed: it's an outside action, and needs your yes.
 
 ## 7. Measurements
 
@@ -518,3 +537,78 @@ Two measuring fixes came out of this. Auto-Lock locked the phone about
 5 minutes into a run nobody touched; the app went away and the tool ended
 quietly with exit code 0. hello now keeps the screen on, as games do, and
 the tool fails when the app goes away early.
+
+### Step 7: Android (2026-10-08, Galaxy Note10+, 60 Hz; the emulator on the M3 Max)
+
+`tool/measure.dart --android <device>`: the profile build (AOT) on both.
+The phone is a Galaxy Note10+ (SM-N975F, Exynos 9825, Mali-G76,
+Android 12), where Flutter draws with Impeller on OpenGL ES and the engine
+with Vulkan. The emulator is `Medium_Phone_API_36.0`, which draws through
+the Mac's GPU, so its numbers aren't Android numbers.
+
+| 60 s of the spinning cube | Phone, 1080 × 2241 | Flutter alone, phone | Emulator, 1080 × 2400 | Flutter alone, emulator |
+|---|---|---|---|---|
+| Fresh frames per second (median, min) | **59.9**, 58.9 | – | **60.0**, 58.0 | – |
+| Frames drawn / shown | 3,594 / 3,594 | – | 3,601 / 3,601 | – |
+| Coalesced, skipped, dropped | 0, 0, 0 | – | 0, 0, 0 | – |
+| Flutter frames | 3,594 | 3,595 | 3,603 | 3,660 (61 s) |
+| …with a build over 16.7 ms | 0 | 1 | 0 | 0 |
+| …with a raster over 16.7 ms | 28 (247 in another run) | 2 | 911 | 1,247 |
+| Dart allocation per frame | 16.4 – 18.2 KB | 20.6 – 23.4 KB | 18.1 KB | 22.8 KB |
+
+The engine draws as many frames as Flutter alone does. Slow rasters are
+Flutter's raster thread compositing; they cost no frames here, because
+that thread runs a frame behind. On the phone, more of them come with the
+engine's full-screen texture than with a spinning box, and their number
+changes a lot from run to run. On the emulator, Flutter alone has more.
+
+**The first phone runs had 58.9 fps and about 35 slow builds a minute.**
+All the slow builds were the stats window. Once a second, hello read its
+own memory for the stats line, from `/proc/self/smaps_rollup`, inside the
+view's tick. The kernel adds that file up over every mapping, which takes
+up to 20 ms with the GPU mapped, so one frame a second was late. hello
+now reads it on another isolate. Flutter alone read it from a timer
+between frames, so it never showed there.
+
+**Memory, phone** (30 cycles; the total is PSS + swap, Graphics is the
+driver's GPU memory, both from `dumpsys meminfo`):
+
+| Points | Engine, total | Graphics | Flutter alone, total |
+|---|---|---|---|
+| Created, full size | 238.4 → 251.3 MB (+12.9) | 119.2 MB every time | 129.4 → 139.4 MB (+10.1) |
+| Resized back to full size | 252.1 → 256.8 MB (+4.7) | 119.2 MB | +5.1 |
+| Resized to 0.6 | 190.8 → 196.0 MB (+5.2) | 58.6 MB | +5.1 |
+| 60 rotations, landscape / portrait | +11.6 / +12.3 MB | 119.0 – 120.2 MB | +15.2 / +13.5 |
+| 30 trips to the background | 280.4 → 286.5 MB (+6.1, no trend) | 126.6 MB from trip 2 on | +4.1 |
+
+The GPU memory comes back exactly. Creating views grows 2.8 MB more over
+30 cycles than with a spinning box, about 90 KB a cycle; the iPhone left
+the same amount more per resize (step 6). The engine's own test on this
+phone makes and frees 40 views and grows less than 2 MB, so that's
+Flutter's texture path, not the engine's objects. Everything else grows as
+much as Flutter alone, or less.
+
+**Memory, emulator** (30 cycles, PSS + swap; its Graphics row is always 0):
+
+| Points | Engine | Flutter alone |
+|---|---|---|
+| Created, full size | 141.0 → 147.8 MB (+6.8), with a 9 MB dip at cycles 5 – 10 | 120.2 → 125.1 MB (+4.9) |
+| Resized, full size / 0.6 | +2.9 / +3.2 MB | +3.3 / +3.3 |
+| 60 rotations, landscape / portrait | +5.3 / +5.4 MB | +6.7 / +6.8 |
+| 30 trips to the background | +2.9 MB | +6.8 |
+
+Two measuring fixes came out of this:
+- **The Android readings fell into the next cycle.** The tool reads
+  `dumpsys meminfo` five times, which over adb takes 5 to 7 s. The app
+  held still for 3 s after each point, so most readings came after the
+  next cycle had begun, with the view hidden or at 0.6. The lowest of them
+  was taken, and the full-size points read 23 MB of Graphics, the view's
+  absence. Only the last point of each phase was real. Now the app holds
+  still until the tool says it has read (`ext.hello.read`, a VM service
+  extension). The Mac and iOS readings fit in the 3 s and weren't
+  affected.
+- The stats line now splits slow frames into build and raster, with the
+  longest raster, and the budget is the display's own frame time.
+
+A release build (`flutter build apk --target-platform
+android-arm64,android-x64`, 43.8 MB) runs on the phone.

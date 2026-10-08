@@ -1,10 +1,13 @@
-// The step 5 and 6 measurements (docs/stage-1.md §4): runs the profile
+// The step 5, 6 and 7 measurements (docs/stage-1.md §4): runs the profile
 // build of hello and reports the fresh frame rate, the Dart allocation per
 // frame, and the memory over create/destroy and resize cycles.
 //
 //   flutter build macos --profile
 //   dart tool/measure.dart rate [--seconds 60] [--fullscreen]
 //   dart tool/measure.dart lifecycle [--cycles 10]
+//
+// `--baseline` runs either with a spinning Flutter box in place of the
+// engine's view: what Flutter alone does, to judge the engine against.
 //
 // With `--ios <device id>` (from `flutter devices`) it measures on that
 // iPhone instead: it starts hello there with `flutter run --profile`,
@@ -14,6 +17,15 @@
 // there the app reports its own (lib/footprint.dart). Add `--debug` for
 // the iOS Simulator, which has no profile mode: its memory points still
 // mean something, its frame rate and Dart allocation don't.
+//
+// With `--android <device id>` it measures on that Android device or
+// emulator the same way. There memory is read from out here, with
+// `dumpsys meminfo`: PSS plus swapped PSS (the emulator swaps, and a leak
+// must not hide there), and the "Graphics" row, the GPU memory the driver
+// reports. On the emulator that row is always 0: the GPU memory lives in
+// the emulator's process on the Mac. The lifecycle check adds what only
+// Android has: rotations and trips to the background, where Flutter takes
+// the view's surface away.
 //
 // The Dart heap is read from out here, through the app's VM service: the
 // app's own isolate does nothing for the measurement, so it can't distort
@@ -32,14 +44,24 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 const _app = 'build/macos/Build/Products/Profile/hello.app/Contents/MacOS/hello';
 
 /// Seconds of a run that aren't measured: startup and the first frames.
 const _warmUp = 5;
 
-/// The iPhone to measure on, or null for this Mac.
+/// The iPhone to measure on, or null.
 String? _ios;
+
+/// The Android device or emulator to measure on, or null.
+String? _android;
+
+/// The phone to measure on, or null for this Mac.
+String? get _device => _ios ?? _android;
+
+/// hello's Android package.
+const _package = 'dev.fynkel.hello';
 
 /// `flutter run --debug` instead of `--profile`, for the iOS Simulator.
 var _debug = false;
@@ -51,9 +73,11 @@ var _baseline = false;
 Future<void> main(List<String> args) async {
   final iosAt = args.indexOf('--ios');
   if (iosAt >= 0) _ios = args[iosAt + 1];
+  final androidAt = args.indexOf('--android');
+  if (androidAt >= 0) _android = args[androidAt + 1];
   _debug = args.contains('--debug');
   _baseline = args.contains('--baseline');
-  if (_ios == null && !File(_app).existsSync()) {
+  if (_device == null && !File(_app).existsSync()) {
     stderr.writeln('No profile build. Run: flutter build macos --profile');
     exit(2);
   }
@@ -69,18 +93,22 @@ Future<void> main(List<String> args) async {
       await _lifecycle(cyclesAt < 0 ? 10 : int.parse(args[cyclesAt + 1]));
     default:
       stderr.writeln(
-        'usage: dart tool/measure.dart rate [--seconds N] [--fullscreen] | lifecycle [--cycles N] [--baseline]  [--ios <device>] [--debug]',
+        'usage: dart tool/measure.dart rate [--seconds N] [--fullscreen] | lifecycle [--cycles N]  [--baseline] [--ios <device> | --android <device>] [--debug]',
       );
       exit(2);
   }
 }
 
 /// [seconds] of the spinning cube: the frame rate the player sees, every
-/// frame that wasn't fresh, and the Dart allocation per frame.
+/// frame that wasn't fresh, and the Dart allocation per frame. With
+/// `--baseline`, Flutter's frames and allocation alone.
 Future<void> _rate(int seconds, {required bool fullscreen}) async {
-  final app = await _App.start({'FYNKEL_STATS': '1', if (fullscreen) 'FYNKEL_FULLSCREEN': '1'});
+  final app = await _App.launch({
+    'FYNKEL_STATS': '1',
+    if (fullscreen) 'FYNKEL_FULLSCREEN': '1',
+    if (_baseline) 'FYNKEL_BASELINE': '1',
+  });
   try {
-    await app.serviceReady;
     await Future<void>.delayed(const Duration(seconds: _warmUp));
     final heap = await _Heap.connect(app.service!);
     final from = app.windows.length;
@@ -90,30 +118,43 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
     final windows = app.windows.sublist(from);
     if (windows.isEmpty) throw StateError('the app printed no stats');
 
-    int sum(String key) => windows.fold(0, (total, w) => total + (w[key] as num).toInt());
-    final fresh = windows.map((w) => w['fresh'] as double).toList()..sort();
+    int sum(String key) => windows.fold(0, (total, w) => total + ((w[key] ?? 0) as num).toInt());
     final presented = sum('presented');
     print(
       'mode            ${_ios != null
           ? 'iPhone'
+          : _android != null
+          ? 'Android'
           : fullscreen
           ? 'full screen'
-          : 'window'}, ${windows.last['size']} pixels',
+          : 'window'}${_baseline ? ', the baseline (no engine view)' : ', ${windows.last['size']} pixels'}',
     );
     print('windows         ${windows.length} × ~1 s');
+    if (!_baseline) {
+      final fresh = windows.map((w) => w['fresh'] as double).toList()..sort();
+      print(
+        'fresh fps       median ${fresh[fresh.length ~/ 2].toStringAsFixed(1)}, '
+        'min ${fresh.first.toStringAsFixed(1)}, max ${fresh.last.toStringAsFixed(1)}',
+      );
+      print('frames          posted ${sum('posted')}, rendered ${sum('rendered')}, presented $presented');
+      print('not shown       coalesced ${sum('coalesced')}, skipped ${sum('skipped')}, dropped ${sum('dropped')}');
+    }
+    final budget = ((windows.last['budget'] ?? 8333) as num) / 1000;
     print(
-      'fresh fps       median ${fresh[fresh.length ~/ 2].toStringAsFixed(1)}, '
-      'min ${fresh.first.toStringAsFixed(1)}, max ${fresh.last.toStringAsFixed(1)}',
+      'flutter frames  ${sum('flutterFrames')}, slow ${sum('slow')} '
+      '(build or raster over one frame, ${budget.toStringAsFixed(2)} ms): '
+      'build ${sum('slowBuild')}, raster ${sum('slowRaster')}',
     );
-    print('frames          posted ${sum('posted')}, rendered ${sum('rendered')}, presented $presented');
-    print('not shown       coalesced ${sum('coalesced')}, skipped ${sum('skipped')}, dropped ${sum('dropped')}');
-    print('flutter frames  ${sum('flutterFrames')}, slow ${sum('slow')} (build or raster over 8.33 ms)');
+    final longest = windows.fold(0, (most, w) => max(most, ((w['longestRaster'] ?? 0) as num).toInt()));
+    print('longest raster  ${(longest / 1000).toStringAsFixed(2)} ms');
     print('mouse in view   ${sum('mouse')} of ${windows.length} windows (Flutter hit-tests it after every frame)');
     print(
       'dart heap       ${allocated.bytes} B allocated in ${allocated.seconds.toStringAsFixed(1)} s, '
       '${allocated.collections} collections',
     );
-    print('per frame       ${(allocated.bytes / presented).toStringAsFixed(0)} B');
+    // The baseline has no engine frames: per Flutter frame instead.
+    final frames = _baseline ? sum('flutterFrames') : presented;
+    print('per frame       ${(allocated.bytes / frames).toStringAsFixed(0)} B');
     // The app's own footprint, once a second: whether it grows while
     // nothing but frames happens.
     final footprints = [for (final w in windows) (w['footprint'] as num).toInt()];
@@ -131,14 +172,13 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
 /// window and 0.6 of it, with the footprint at each point the app reports.
 /// Points of the same kind should match: the same view at the same size.
 Future<void> _lifecycle(int cycles) async {
-  final app = await _App.start({
+  final app = await _App.launch({
     'FYNKEL_CHECK': 'lifecycle',
     'FYNKEL_CYCLES': '$cycles',
     'FYNKEL_STATS': '1',
     if (_baseline) 'FYNKEL_BASELINE': '1',
   });
   try {
-    await app.serviceReady;
     // The Dart heap's share of each point, so a growing total can be told
     // apart: Dart's or native.
     final heap = await _Heap.open(app.service!);
@@ -146,10 +186,13 @@ Future<void> _lifecycle(int cycles) async {
     final idle = <String>[];
     await for (final point in app.checks) {
       final from = app.windows.length;
-      final footprint = marks[point] = _ios == null
+      final footprint = marks[point] = _android != null
+          ? await _Footprint.lowest()
+          : _ios == null
           ? await _Footprint.lowest(app.pid)
           : await app.memory.firstWhere((m) => m.point == point).then((m) => _Footprint(m.bytes, m.graphics, null));
       final dart = await heap.usage();
+      await heap.read();
       // A hidden window gets no frames, and an idle GPU frees its driver
       // memory, so such a reading says nothing about the view.
       // The baseline has no engine view, so no frame counts: its readings
@@ -163,6 +206,7 @@ Future<void> _lifecycle(int cycles) async {
       if (point == 'done') break;
     }
     if (!marks.containsKey('done')) throw StateError('the app stopped reporting before the check finished');
+    if (_android != null) await _androidCycles(app, cycles, heap, marks, idle);
     await heap.close();
     void range(String label, bool Function(String point) which) {
       final totals = [
@@ -177,6 +221,11 @@ Future<void> _lifecycle(int cycles) async {
     range('created, full size', (p) => p.startsWith('created'));
     range('resized, back to full size', (p) => p.startsWith('resized') && number(p).isEven);
     range('resized, to 0.6', (p) => p.startsWith('resized') && number(p).isOdd);
+    if (_android != null) {
+      range('rotated, to landscape', (p) => p.startsWith('rotated') && number(p).isOdd);
+      range('rotated, back to portrait', (p) => p.startsWith('rotated') && number(p).isEven);
+      range('back from the background', (p) => p.startsWith('resumed'));
+    }
     if (idle.isNotEmpty) {
       print(
         '\nNothing was drawn at ${idle.join(', ')}: was the window hidden or the phone locked? Those readings are void.',
@@ -188,24 +237,102 @@ Future<void> _lifecycle(int cycles) async {
   }
 }
 
+/// Android only: [cycles] rotations to landscape and back, then [cycles]
+/// trips to the background, with the memory after each (from out here:
+/// the app doesn't know these happen). The app stands still meanwhile.
+/// The view keeps its surface in the background (docs/stage-1.md §3.5).
+Future<void> _androidCycles(_App app, int cycles, _Heap heap, Map<String, _Footprint> marks, List<String> idle) async {
+  Future<void> mark(String point) async {
+    final from = app.windows.length;
+    // A moment for the app to settle and for a few stats windows.
+    await Future<void>.delayed(const Duration(seconds: 3));
+    final footprint = marks[point] = await _Footprint.lowest();
+    final dart = await heap.usage();
+    final drawing = _baseline || app.windows.skip(from).any((w) => (w['presented'] as num) > 0);
+    if (!drawing) idle.add(point);
+    print(
+      '${point.padRight(12)} $footprint   Dart heap ${_mb(dart.capacity)} (${_mb(dart.used)} used)'
+      '${drawing ? '' : '   NOT DRAWING'}',
+    );
+  }
+
+  // The device may be someone's phone: its rotation settings go back to
+  // what they were.
+  Future<String> setting(String name) async => (await _adb(['shell', 'settings', 'get', 'system', name])).trim();
+  final autoRotate = await setting('accelerometer_rotation');
+  final rotation = await setting('user_rotation');
+  await _adb(['shell', 'settings', 'put', 'system', 'accelerometer_rotation', '0']);
+  try {
+    for (var i = 1; i <= cycles * 2; i++) {
+      await _adb(['shell', 'settings', 'put', 'system', 'user_rotation', i.isOdd ? '1' : '0']);
+      await mark('rotated $i');
+    }
+  } finally {
+    await _adb(['shell', 'settings', 'put', 'system', 'user_rotation', rotation == 'null' ? '0' : rotation]);
+    await _adb([
+      'shell',
+      'settings',
+      'put',
+      'system',
+      'accelerometer_rotation',
+      autoRotate == 'null' ? '1' : autoRotate,
+    ]);
+  }
+  // Each trip must end with the view drawing again; a point where it
+  // doesn't fails the check (`idle`).
+  for (var i = 1; i <= cycles; i++) {
+    await _adb(['shell', 'input', 'keyevent', 'KEYCODE_HOME']);
+    await Future<void>.delayed(const Duration(seconds: 3));
+    await _adb(['shell', 'am', 'start', '-n', '$_package/.MainActivity']);
+    await mark('resumed $i');
+  }
+}
+
+/// `adb -s <device> args`, failing loudly.
+Future<String> _adb(List<String> args) async {
+  final sdk = Platform.environment['ANDROID_HOME'] ?? '${Platform.environment['HOME']}/Library/Android/sdk';
+  final result = await Process.run('$sdk/platform-tools/adb', ['-s', _android!, ...args]);
+  if (result.exitCode != 0) throw StateError('adb ${args.join(' ')} failed: ${result.stderr}');
+  return '${result.stdout}';
+}
+
 /// The process's physical footprint: in total, the GPU memory it owns
-/// (render targets, buffers) and its IOSurfaces (ours and Flutter's).
+/// (render targets, buffers) and its IOSurfaces (ours and Flutter's). On
+/// Android: PSS with swap, and the Graphics row.
 class _Footprint {
-  _Footprint(this.total, this.gpu, this.surfaces);
+  _Footprint(this.total, this.gpu, this.surfaces, {this.android = false});
 
   final int total;
   final int? gpu, surfaces;
+  final bool android;
 
-  /// The lowest of five readings over two seconds, after a moment for the
-  /// app to settle (it stands still for three seconds after each mark).
-  static Future<_Footprint> lowest(int pid) async {
+  /// The lowest of five readings, 400 ms apart. The app stands still after
+  /// each mark until [_Heap.read] says the readings are done (over adb they
+  /// take 5 to 7 s). On Android without a [pid]: hello's, through `dumpsys`.
+  static Future<_Footprint> lowest([int? pid]) async {
     _Footprint? lowest;
     for (var i = 0; i < 5; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
-      final reading = await of(pid);
+      final reading = pid == null ? await ofAndroid() : await of(pid);
       if (lowest == null || reading.total < lowest.total) lowest = reading;
     }
     return lowest!;
+  }
+
+  static Future<_Footprint> ofAndroid() async {
+    final out = await _adb(['shell', 'dumpsys', 'meminfo', _package]);
+    int kb(String pattern) {
+      final match = RegExp(pattern).firstMatch(out);
+      if (match == null) throw StateError('dumpsys meminfo said: $out');
+      return int.parse(match.group(1)!) * 1024;
+    }
+
+    return _Footprint(
+      kb(r'TOTAL PSS:\s+(\d+)') + kb(r'TOTAL SWAP PSS:\s+(\d+)'),
+      kb(r'Graphics:\s+(\d+)'),
+      null,
+      android: true,
+    );
   }
 
   static Future<_Footprint> of(int pid) async {
@@ -225,6 +352,7 @@ class _Footprint {
     final (gpu, surfaces) = (this.gpu, this.surfaces);
     final all = _mb(total).padLeft(9);
     if (gpu == null) return all;
+    if (android) return '$all   Graphics ${_mb(gpu)}';
     // On iOS the app reports Metal's part itself (the graphics ledger:
     // buffers, textures, the driver's pools). IOSurfaces aren't in it on
     // the iPhone; they are in the rest, with the CPU's memory.
@@ -243,22 +371,47 @@ class _App {
   }
 
   /// hello with [settings]: on this Mac as environment variables, or on
-  /// [_ios] through `flutter run`.
+  /// [_device] through `flutter run`.
+  /// Starts the app and waits for its VM service. On Android, flutter run
+  /// finds the service in the device's log, and a busy log can lose that
+  /// line: the app runs, and flutter run waits for good (seen on a Galaxy
+  /// Note10+). So when the line is late after the install, the app is
+  /// started once more.
+  static Future<_App> launch(Map<String, String> settings) async {
+    for (var attempt = 1; ; attempt++) {
+      final app = await start(settings);
+      try {
+        await app.serviceReady;
+        return app;
+      } on TimeoutException {
+        final last = app._log.length > 20 ? app._log.sublist(app._log.length - 20) : app._log;
+        await app.stop();
+        if (_device == null || attempt == 2) {
+          throw StateError("the app's VM service never came up. flutter run said, last:\n${last.join('\n')}");
+        }
+        stderr.writeln('flutter run never saw the VM service; starting the app once more');
+      }
+    }
+  }
+
   static Future<_App> start(Map<String, String> settings) async {
-    final ios = _ios;
-    if (ios == null) {
+    final device = _device;
+    if (device == null) {
       // Without saved window state: a run after a full-screen one would
       // otherwise start full screen too.
       final app = _App._(await Process.start(_app, ['-ApplePersistenceIgnoreState', 'YES'], environment: settings));
       unawaited(app._process.exitCode.then((code) => app._ended('the app ended ($code)')));
       return app;
     }
+    // A phone's screen may have gone off since the last run; the app keeps
+    // it on once it runs.
+    if (_android != null) await _adb(['shell', 'input', 'keyevent', 'KEYCODE_WAKEUP']);
     final app = _App._(
       await Process.start('flutter', [
         'run',
         if (_debug) '--debug' else '--profile',
         '-d',
-        ios,
+        device,
         for (final MapEntry(:key, :value) in settings.entries) '--dart-define=$key=$value',
       ]),
     );
@@ -293,7 +446,7 @@ class _App {
     }
   }
 
-  /// flutter run's output on iOS, for the error when it fails.
+  /// flutter run's output on a phone, for the error when it fails.
   final _log = <String>[];
 
   final Process _process;
@@ -309,21 +462,34 @@ class _App {
 
   int get pid => _process.pid;
 
-  /// The VM service is up (and on iOS, the app's output is being read).
+  /// The VM service is up (and on a phone, the app's output is being read).
   /// An iOS build and install can take minutes.
-  Future<void> get serviceReady =>
-      _serviceReady.future.timeout(_ios == null ? const Duration(seconds: 30) : const Duration(minutes: 10));
+  /// On Android, two minutes from the install on are plenty.
+  Future<void> get serviceReady {
+    final installed = _installing.future.then(
+      (_) => Future<void>.delayed(const Duration(minutes: 2), () {
+        throw TimeoutException('no VM service two minutes after the install');
+      }),
+    );
+    return Future.any([_serviceReady.future, installed])
+        .timeout(_device == null ? const Duration(seconds: 30) : const Duration(minutes: 10));
+  }
+
+  /// flutter run is installing the app on an Android device.
+  final _installing = Completer<void>();
+
   Stream<String> get checks => _checks.stream;
 
   /// The app's own footprint readings (`[memory]` lines).
   Stream<({String point, int bytes, int graphics})> get memory => _memory.stream;
 
   void _line(String line) {
-    if (_ios != null) {
+    if (_device != null) {
       // flutter run's own output: only the VM service address matters,
       // and the rest is kept for the error if it fails.
       _log.add(line);
       if (line.contains('Ensure the device is unlocked') || line.contains('Waiting for')) stderr.writeln(line);
+      if (_android != null && line.startsWith('Installing ') && !_installing.isCompleted) _installing.complete();
       final uri = RegExp(r'Dart VM Service on .* is available at: (\S+)').firstMatch(line);
       if (uri != null && service == null) unawaited(_readAppOutput(Uri.parse(uri.group(1)!)));
       return;
@@ -336,7 +502,8 @@ class _App {
     _appLine(line);
   }
 
-  /// On iOS: the app's stdout, from the VM service's `Stdout` stream.
+  /// On a phone: the app's stdout, from the VM service's `Stdout` stream
+  /// (on Android dart:io's stdout reaches nothing else).
   Future<void> _readAppOutput(Uri uri) async {
     service = uri;
     final socket = _appOutput = await WebSocket.connect('${uri.replace(scheme: 'ws', path: '${uri.path}ws')}');
@@ -378,7 +545,7 @@ class _App {
   Future<void> stop() async {
     _stopping = true;
     await _appOutput?.close();
-    if (_ios != null) {
+    if (_device != null) {
       // Quits the app on the phone too.
       _process.stdin.writeln('q');
       await _process.exitCode.timeout(const Duration(seconds: 20), onTimeout: () => _process.kill() ? -1 : -1);
@@ -426,6 +593,10 @@ class _Heap {
     final usage = await _call('getMemoryUsage', {'isolateId': _isolate});
     return (capacity: (usage['heapCapacity'] as num).toInt(), used: (usage['heapUsage'] as num).toInt());
   }
+
+  /// Tells the app this point's memory is read, so its check goes on
+  /// (lib/main.dart holds still until then).
+  Future<void> read() => _call('ext.hello.read', {'isolateId': _isolate});
 
   Future<_Heap> _start() async {
     _streams = ((await _call('getVMTimelineFlags'))['recordedStreams'] as List?) ?? const [];

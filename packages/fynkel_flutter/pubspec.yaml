@@ -23,6 +23,9 @@ dev_dependencies:
 flutter:
   plugin:
     platforms:
+      android:
+        package: dev.fynkel.fynkel_flutter
+        pluginClass: FynkelFlutterPlugin
       # One Swift source for both (darwin/): only the imports differ.
       ios:
         pluginClass: FynkelFlutterPlugin

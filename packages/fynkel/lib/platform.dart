@@ -2,4 +2,4 @@
 /// on screen. Games use `FynkelView` instead.
 library;
 
-export 'src/view.dart' show AppleView;
+export 'src/view.dart' show AndroidSurfaceView, AppleView;

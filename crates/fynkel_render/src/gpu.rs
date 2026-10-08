@@ -1,8 +1,11 @@
 //! Getting a GPU device.
 
-/// A wgpu device and its queue. Both are cheap handles to clone.
+/// A wgpu device and its queue, with the instance and adapter they came
+/// from (a target that draws to a window makes its surface with them). All
+/// are cheap handles to clone.
 #[derive(Clone, Debug)]
 pub struct Gpu {
+    pub instance: wgpu::Instance,
     pub adapter: wgpu::Adapter,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -41,11 +44,12 @@ impl Gpu {
             ..Default::default()
         }))
         .map_err(GpuError::NoAdapter)?;
-        Self::from_adapter(adapter)
+        Self::from_adapter(instance, adapter)
     }
 
-    /// A device on `adapter`, asking only for what the renderer needs.
-    pub fn from_adapter(adapter: wgpu::Adapter) -> Result<Self, GpuError> {
+    /// A device on `adapter` (from `instance`), asking only for what the
+    /// renderer needs.
+    pub fn from_adapter(instance: wgpu::Instance, adapter: wgpu::Adapter) -> Result<Self, GpuError> {
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("fynkel"),
             // Buffers the CPU writes and the GPU reads in place, with no
@@ -58,7 +62,7 @@ impl Gpu {
             ..Default::default()
         }))
         .map_err(GpuError::NoDevice)?;
-        Ok(Self { adapter, device, queue })
+        Ok(Self { instance, adapter, device, queue })
     }
 }
 

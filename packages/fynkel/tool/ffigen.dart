@@ -14,6 +14,7 @@ import 'package:ffigen/ffigen.dart';
 const _blocking = {
   'fy_view_new_headless', // creates a GPU device and starts a thread
   'fy_view_new_apple', // the same
+  'fy_view_new_android', // the same
   'fy_apple_set_frame_ready', // waits for a frame-ready call in progress
   'fy_view_free', // joins the render worker
   'fy_view_read', // waits for the GPU
