@@ -254,6 +254,7 @@ fail first.
 **Step 8: the stage 1 check**
 - Run hello on all three platforms and write a short report with the numbers.
 - *Done when* the report is committed and you have seen the cube on each device yourself.
+- The report: [stage-1-report.md](stage-1-report.md) (2026-10-08). All three platforms run at the display rate with the GPU memory coming back. Waiting for you to see the cube on each device.
 
 ## 5. Not in stage 1
 
