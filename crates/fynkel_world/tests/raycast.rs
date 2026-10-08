@@ -189,6 +189,30 @@ fn only_what_a_view_draws_is_hit() {
 }
 
 #[test]
+fn an_inactive_object_and_everything_below_it_are_not_hit() {
+    let mut s = scene();
+    let behind = s.cube_at(Vec3::new(0.0, 0.0, -8.0));
+    let parent = s.cube_at(Vec3::new(0.0, 0.0, -2.0));
+    let child = s.cube_at(Vec3::new(0.0, 0.0, -3.0));
+    s.world.set_parent(child, Some(parent)).unwrap();
+    let mut caster = Raycaster::default();
+    let ray = Ray::new(Vec3::ZERO, Vec3::NEG_Z).unwrap();
+    let hit = |caster: &mut Raycaster, s: &Scene| caster.cast(&s.world, ray, f32::INFINITY).map(|h| h.object);
+
+    assert_eq!(hit(&mut caster, &s), Some(parent));
+    s.world.set_active(parent, false).unwrap();
+    assert_eq!(hit(&mut caster, &s), Some(behind), "the parent and its child are passed through");
+    assert_eq!(s.world.raycast(ray, f32::INFINITY).map(|h| h.object), Some(behind), "a fresh cast agrees");
+    s.world.set_active(parent, true).unwrap();
+    s.world.set_active(child, false).unwrap();
+    s.world.set_parent(child, None).unwrap();
+    s.world.insert(parent, Transform::from_position(Vec3::new(5.0, 0.0, 0.0))).unwrap();
+    assert_eq!(hit(&mut caster, &s), Some(behind), "a loose inactive object isn't hit either");
+    s.world.set_active(child, true).unwrap();
+    assert_eq!(hit(&mut caster, &s), Some(child));
+}
+
+#[test]
 fn a_ray_along_a_face_or_through_an_edge_still_finds_the_cube() {
     let mut s = scene();
     let cube = s.cube_at(Vec3::ZERO);

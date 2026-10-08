@@ -92,7 +92,7 @@ fn a_steady_frame_with_1000_moving_cubes_in_trees_allocates_nothing_on_the_calli
     }
     let view = View::headless(&world, 64, 64);
 
-    let frame = |t: f32| {
+    let frame = |t: f32, hide: bool| {
         for (i, &id) in cubes.iter().enumerate() {
             let position = FyVec3 { x: i as f32 * 0.01 + t, y: 0.0, z: 0.0 };
             let value = FyTransform {
@@ -103,22 +103,31 @@ fn a_steady_frame_with_1000_moving_cubes_in_trees_allocates_nothing_on_the_calli
             // SAFETY: a live world and a pointer to a local.
             ok(unsafe { fy_transform_set(world.0, id, &value) });
         }
+        // Chains and loose cubes hidden and shown again (stage 3 plan
+        // §3.3): the flags are kept in a set that has grown to size.
+        for &id in cubes.iter().step_by(7) {
+            // SAFETY: a live world.
+            ok(unsafe { fy_active_set(world.0, id, !hide) });
+        }
         view.frame()
     };
     // Warm up the way the frame clock runs: without waiting for the GPU,
-    // so all three scene buffers come into use and grow to size.
+    // so all three scene buffers come into use and grow to size, with
+    // everything shown. Then hide and show once, for the flags' set.
     for i in 0..50 {
-        frame(i as f32);
+        frame(i as f32, false);
     }
-    view.read(50, 64, 64);
+    frame(0.0, true);
+    frame(0.0, false);
+    view.read(52, 64, 64);
     let mut numbers = Vec::with_capacity(100);
     let allocations = count(|| {
         for i in 0..100 {
-            numbers.push(frame(i as f32));
+            numbers.push(frame(i as f32, i % 2 == 0));
         }
     });
     view.read(*numbers.last().unwrap(), 64, 64);
-    assert_eq!(allocations, 0, "allocations in 100 frames of 1,000 transform writes each");
+    assert_eq!(allocations, 0, "allocations in 100 frames of 1,000 transform writes and 143 flags each");
 }
 
 /// Flutter's raster thread calls `fy_apple_acquire` once per frame.

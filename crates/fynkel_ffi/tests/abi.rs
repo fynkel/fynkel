@@ -261,8 +261,8 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_8() {
-    assert_eq!(fy_abi_version(), 8);
+fn the_abi_version_is_9() {
+    assert_eq!(fy_abi_version(), 9);
 }
 
 #[cfg(not(target_os = "android"))]
@@ -345,6 +345,82 @@ fn parents_and_children_through_the_c_interface() {
         ok(fy_despawn(world.0, a));
         assert!(!fy_exists(world.0, c), "despawning takes the children along");
         assert!(fy_exists(world.0, root));
+    }
+}
+
+/// An inactive rig spawned before the stage 1 scene, so its camera and
+/// sun would win on their lower ids, and its own cube right in front of
+/// the camera. Returns the rig.
+fn hidden_rig(world: &World) -> u64 {
+    use fynkel_world::{Transform, Vec3};
+    let w = world.0;
+    let [rig, camera, sun, ambient, cube] = std::array::from_fn(|_| world.spawn());
+    // SAFETY: a live world, and pointers to locals.
+    unsafe {
+        for part in [camera, sun, ambient, cube] {
+            ok(fy_parent_set(w, part, rig));
+        }
+        let wide = FyCamera { fov_y: 100.0, near_clip: 0.1, far_clip: 10.0, clear_color: srgb(1.0, 0.0, 0.0) };
+        ok(fy_camera_set(w, camera, &wide));
+        ok(fy_transform_set(w, camera, &transform(Transform::from_position(Vec3::new(0.0, 0.0, 6.0)))));
+        let bright = FyLight { kind: FY_LIGHT_DIRECTIONAL, color: srgb(0.0, 1.0, 0.0), intensity: 5.0 };
+        ok(fy_light_set(w, sun, &bright));
+        ok(fy_transform_set(w, sun, &transform(Transform::default())));
+        let flood = FyLight { kind: FY_LIGHT_AMBIENT, color: srgb(0.0, 0.0, 1.0), intensity: 5.0 };
+        ok(fy_light_set(w, ambient, &flood));
+        let (mesh, mut material) = (add_shape(world, FY_MESH_CUBE), 0);
+        ok(fy_material_add(w, &FyMaterial::default(), &mut material));
+        ok(fy_transform_set(w, cube, &transform(Transform::from_position(Vec3::new(0.0, 1.5, 3.0)))));
+        ok(fy_mesh_renderer_set(w, cube, &FyMeshRenderer { mesh, material }));
+        ok(fy_active_set(w, rig, false));
+    }
+    rig
+}
+
+#[test]
+fn an_inactive_object_and_everything_below_it_are_missing_from_the_golden() {
+    let world = World::new();
+    let rig = hidden_rig(&world);
+    stage1(&world);
+    let view = View::headless(&world, 256, 256);
+    assert_golden("cube", &view.read(view.frame(), 256, 256));
+
+    // Shown, the rig's camera wins and clears to red.
+    // SAFETY: a live world.
+    ok(unsafe { fy_active_set(world.0, rig, true) });
+    let [r, g, b, _] = view.read(view.frame(), 256, 256).pixel(0, 0);
+    assert!(r > 200 && g < 30 && b < 30, "{:?}", [r, g, b]);
+}
+
+#[test]
+fn the_active_flag_through_the_c_interface() {
+    let world = World::new();
+    let [root, child] = std::array::from_fn(|_| world.spawn());
+    let flags = |id| {
+        let (mut own, mut shown) = (false, false);
+        // SAFETY: a live world and pointers to locals.
+        unsafe {
+            ok(fy_active_get(world.0, id, &mut own));
+            ok(fy_active_in_hierarchy_get(world.0, id, &mut shown));
+        }
+        (own, shown)
+    };
+    // SAFETY: a live world and pointers to locals; null is allowed for
+    // every pointer argument.
+    unsafe {
+        ok(fy_parent_set(world.0, child, root));
+        assert_eq!(flags(child), (true, true), "on by default");
+        ok(fy_active_set(world.0, root, false));
+        assert_eq!(flags(root), (false, false));
+        assert_eq!(flags(child), (true, false), "hidden by its parent, its own flag kept");
+
+        assert_eq!(fy_active_get(world.0, root, ptr::null_mut()), FyStatus::NullPointer);
+        assert_eq!(fy_active_in_hierarchy_get(world.0, root, ptr::null_mut()), FyStatus::NullPointer);
+        assert_eq!(fy_active_set(ptr::null(), root, true), FyStatus::NullPointer);
+        ok(fy_despawn(world.0, root));
+        assert_eq!(fy_active_set(world.0, child, true), FyStatus::NoObject);
+        assert_eq!(fy_active_get(world.0, child, &mut false), FyStatus::NoObject);
+        assert_eq!(fy_active_in_hierarchy_get(world.0, child, &mut false), FyStatus::NoObject);
     }
 }
 

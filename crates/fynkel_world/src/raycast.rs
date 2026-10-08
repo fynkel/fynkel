@@ -4,7 +4,8 @@
 //! against its triangles, on the CPU. What a ray can hit is what a view
 //! draws, the way the view draws it:
 //! - An object is hit when it has a `Transform` and a `MeshRenderer` with
-//!   both a mesh and a material, the extract's rule for drawing it.
+//!   both a mesh and a material, and it and its parents are active: the
+//!   extract's rule for drawing it.
 //! - A triangle is hit only from its front, unless the material is
 //!   double-sided, as back faces are culled. A mirrored object (negative
 //!   scale) keeps its fronts where they were, as the renderer's mirrored
@@ -81,7 +82,7 @@ impl Raycaster {
             let (Some(mesh), Some(material)) = (r.mesh, r.material) else { return };
             let Ok(mesh) = world.mesh(mesh) else { return };
             let reach = best.map_or(max_distance, |b| b.distance);
-            let model = self.matrices.world(id, t);
+            let Some(model) = self.matrices.world(world, id, t) else { return };
             // The box around the object's box, in the world: far cheaper
             // than the inverse, which only objects the ray may hit need.
             let (lo, hi) = mesh.bounds();

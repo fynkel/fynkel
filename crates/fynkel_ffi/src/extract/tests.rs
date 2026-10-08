@@ -5,6 +5,12 @@ use super::*;
 /// The stage 1 scene, built the way a game builds it.
 fn stage1_world() -> (World, MeshId) {
     let mut world = World::new();
+    let (_, mesh) = stage1_into(&mut world);
+    (world, mesh)
+}
+
+/// Adds the stage 1 scene to `world`. Returns the cube and its mesh.
+fn stage1_into(world: &mut World) -> (ObjectId, MeshId) {
     let camera = world.spawn();
     world.insert(camera, Camera::default()).unwrap();
     world.insert(camera, Transform::from_position(Vec3::new(0.0, 1.5, 4.0)).looking_at(Vec3::ZERO)).unwrap();
@@ -20,7 +26,7 @@ fn stage1_world() -> (World, MeshId) {
         .insert(cube, Transform { rotation: Quat::from_rotation_y(30f32.to_radians()), ..Transform::default() })
         .unwrap();
     world.insert(cube, MeshRenderer { mesh: Some(mesh), material: Some(material) }).unwrap();
-    (world, mesh)
+    (cube, mesh)
 }
 
 fn extract(world: &World) -> (RenderScene, Vec<ResourceOp>) {
@@ -305,18 +311,70 @@ fn the_camera_and_the_sun_follow_their_parents() {
     assert!(close(scene.sun.unwrap().direction, Vec3::NEG_X), "{}", scene.sun.unwrap().direction);
 }
 
+#[test]
+fn an_inactive_object_and_everything_below_it_are_left_out() {
+    let (world, _) = stage1_world();
+    let (full, _) = extract(&world);
+
+    // A rig with a camera, a sun, an ambient light and a sphere below it,
+    // spawned first, so its camera and sun have the lowest ids.
+    let mut world = World::new();
+    let rig = world.spawn();
+    let parts: [ObjectId; 4] = std::array::from_fn(|_| world.spawn());
+    let (cube, cube_mesh) = stage1_into(&mut world);
+    for part in parts {
+        world.set_parent(part, Some(rig)).unwrap();
+    }
+    let sphere = world.add_mesh(MeshData::sphere(8, 4));
+    let material = world.add_material(Material::default()).unwrap();
+    world.insert(parts[0], Camera { fov_y: 20.0, ..Camera::default() }).unwrap();
+    world.insert(parts[0], Transform::from_position(Vec3::new(9.0, 9.0, 9.0))).unwrap();
+    world.insert(parts[1], Light { intensity: 9.0, ..Light::DEFAULT }).unwrap();
+    world.insert(parts[1], Transform::default().looking_at(Vec3::X)).unwrap();
+    world.insert(parts[2], Light::ambient(Color::WHITE, 9.0)).unwrap();
+    world.insert(parts[3], Transform::default()).unwrap();
+    world.insert(parts[3], MeshRenderer { mesh: Some(sphere), material: Some(material) }).unwrap();
+    world.set_active(rig, false).unwrap();
+
+    let mut extract = Extract::default();
+    let (mut scene, mut ops) = (RenderScene::default(), Vec::new());
+    extract.run(&world, &mut scene, &mut ops);
+    assert_eq!(scene.camera, full.camera, "the rig's camera is left out");
+    assert_eq!(scene.sun, full.sun, "and its sun");
+    assert!(close(scene.ambient, full.ambient), "and its ambient light");
+    assert_eq!(scene.draws.iter().map(|d| d.mesh).collect::<Vec<_>>(), [mesh_key(cube_mesh)], "and its sphere");
+
+    world.set_active(rig, true).unwrap();
+    extract.run(&world, &mut scene, &mut ops);
+    assert!((scene.camera.unwrap().fov_y - 20f32.to_radians()).abs() < 1e-6, "shown, the rig's camera wins");
+    assert_eq!(scene.sun.unwrap().color, Vec3::splat(9.0), "and its sun");
+    assert!(close(scene.ambient, Vec3::splat(9.15)));
+    assert_eq!(scene.draws.len(), 2);
+
+    // One part on its own, and a loose object.
+    world.set_active(parts[3], false).unwrap();
+    world.set_active(cube, false).unwrap();
+    extract.run(&world, &mut scene, &mut ops);
+    assert!(scene.draws.is_empty(), "{:?}", scene.draws);
+    assert!(scene.camera.is_some(), "the rest of the rig is still shown");
+}
+
 /// Probe for the stage 2 budget (§3.1): 10,000 drawn objects extract in
 /// under 1 ms on the iPhone. Run it in release, on the Mac or a phone:
 /// `cargo test --release -p fynkel_ffi --lib -- --ignored --nocapture extract_probe`.
 /// Prints the median and the slowest of 500 steady frames for each shape.
+/// The last shape hides one tree in ten (stage 3 plan §3.3), so the flags
+/// are looked up for every object.
 #[test]
 #[ignore = "a measurement, run by hand"]
 fn extract_probe() {
     const N: usize = 10_000;
-    for (name, parent_of) in [
-        ("100 × 100 wide", (|i: usize| (!i.is_multiple_of(100)).then(|| i - i % 100)) as fn(usize) -> Option<usize>),
-        ("100 chains 100 deep", |i| (!i.is_multiple_of(100)).then(|| i - 1)),
-        ("no tree (stage 1)", |_| None),
+    let wide = (|i: usize| (!i.is_multiple_of(100)).then(|| i - i % 100)) as fn(usize) -> Option<usize>;
+    for (name, parent_of, hidden) in [
+        ("100 × 100 wide", wide, 0),
+        ("100 chains 100 deep", |i| (!i.is_multiple_of(100)).then(|| i - 1), 0),
+        ("no tree (stage 1)", |_| None, 0),
+        ("wide, 1 in 10 hidden", wide, 1000),
     ] {
         let (mut world, _) = stage1_world();
         let mut renderer = None;
@@ -339,13 +397,16 @@ fn extract_probe() {
                 world.set_parent(id, Some(ids[p])).unwrap();
             }
         }
+        for &root in ids.iter().step_by(1000) {
+            world.set_active(root, hidden == 0).unwrap();
+        }
 
         let mut extract = Extract::default();
         let (mut scene, mut ops) = (RenderScene::default(), Vec::new());
         let first = std::time::Instant::now();
         extract.run(&world, &mut scene, &mut ops);
         let first = first.elapsed();
-        assert_eq!(scene.draws.len(), N + 1);
+        assert_eq!(scene.draws.len(), N + 1 - hidden);
         let mut times: Vec<std::time::Duration> = (0..500)
             .map(|_| {
                 ops.clear();

@@ -26,7 +26,7 @@ use crate::extract::{Extract, ResourceOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 8;
+pub const FY_ABI_VERSION: u32 = 9;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -647,6 +647,55 @@ pub unsafe extern "C" fn fy_is_part_of(world: *const FyWorld, id: u64, root: u64
         let part = world.lock()?.is_part_of(object(id)?, object(root)?)?;
         // SAFETY: per this function's contract.
         unsafe { write(out, part, "out") }
+    })
+}
+
+/// Turns the object on (`true`) or off. An object that is off hides itself
+/// and everything below it: they aren't drawn, don't light or show the
+/// scene, and aren't hit by rays. Its children keep their own flags.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_active_set(world: *const FyWorld, id: u64, active: bool) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        Ok(world.lock()?.set_active(object(id)?, active)?)
+    })
+}
+
+/// Writes the object's own flag to `out`, whatever its parents' are.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_active_get(world: *const FyWorld, id: u64, out: *mut bool) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let active = world.lock()?.active(object(id)?)?;
+        // SAFETY: per this function's contract.
+        unsafe { write(out, active, "out") }
+    })
+}
+
+/// Writes to `out` whether the object is shown: it and every parent above
+/// it on.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_active_in_hierarchy_get(world: *const FyWorld, id: u64, out: *mut bool) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let shown = world.lock()?.active_in_hierarchy(object(id)?)?;
+        // SAFETY: per this function's contract.
+        unsafe { write(out, shown, "out") }
     })
 }
 

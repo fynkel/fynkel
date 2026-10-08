@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 8
+#define FY_ABI_VERSION 9
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -344,6 +344,30 @@ FyStatus fy_children_get(const struct FyWorld *world,
 //
 // `world` is null or live; `out` is null or writable.
 FyStatus fy_is_part_of(const struct FyWorld *world, uint64_t id, uint64_t root, bool *out);
+
+// Turns the object on (`true`) or off. An object that is off hides itself
+// and everything below it: they aren't drawn, don't light or show the
+// scene, and aren't hit by rays. Its children keep their own flags.
+//
+// # Safety
+//
+// `world` is null or live.
+FyStatus fy_active_set(const struct FyWorld *world, uint64_t id, bool active);
+
+// Writes the object's own flag to `out`, whatever its parents' are.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FyStatus fy_active_get(const struct FyWorld *world, uint64_t id, bool *out);
+
+// Writes to `out` whether the object is shown: it and every parent above
+// it on.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FyStatus fy_active_in_hierarchy_get(const struct FyWorld *world, uint64_t id, bool *out);
 
 // Names the object with `len` bytes of UTF-8 at `name`, or clears its name
 // when `len` is 0. Names needn't be unique.

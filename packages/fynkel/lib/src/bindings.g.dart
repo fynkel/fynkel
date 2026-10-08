@@ -12,6 +12,15 @@ import 'dart:ffi' as ffi;
 @ffi.Native<ffi.Uint32 Function()>(isLeaf: true)
 external int fy_abi_version();
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Bool>)>(isLeaf: true)
+external int fy_active_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<ffi.Bool> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Bool>)>(isLeaf: true)
+external int fy_active_in_hierarchy_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<ffi.Bool> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Bool)>(isLeaf: true)
+external int fy_active_set(ffi.Pointer<FyWorld> world, int id, bool active);
+
 @ffi.Native<ffi.Uint32 Function(ffi.Pointer<FyView>, ffi.Pointer<ffi.Pointer<ffi.Void>>)>(isLeaf: true)
 external int fy_apple_acquire(ffi.Pointer<FyView> view, ffi.Pointer<ffi.Pointer<ffi.Void>> out_surface);
 
@@ -317,7 +326,7 @@ external ffi.Pointer<FyWorld> fy_world_new();
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
 external int fy_world_transform_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> out);
 
-const int FY_ABI_VERSION = 8;
+const int FY_ABI_VERSION = 9;
 
 const int FY_APPLE_MORE = 2;
 
