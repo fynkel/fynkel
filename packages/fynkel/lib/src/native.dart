@@ -49,6 +49,8 @@ final class Scratch {
   final material = malloc<FyMaterial>();
   final viewStats = malloc<FyViewStats>();
   final count = malloc<Size>();
+  final count2 = malloc<Size>();
+  final mesh = malloc<Pointer<FyMesh>>();
   final flag = malloc<Bool>();
 
   // Room for lists of ids and for strings, grown when a call needs more.

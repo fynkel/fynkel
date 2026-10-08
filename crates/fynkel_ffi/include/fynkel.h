@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 4
+#define FY_ABI_VERSION 5
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -18,13 +18,13 @@
 // `FyLight::kind`.
 #define FY_LIGHT_AMBIENT 1
 
-// `fy_mesh_add`'s shape: a 1×1×1 cube.
+// `fy_mesh_new_shape`'s shape: a 1×1×1 cube.
 #define FY_MESH_CUBE 0
 
-// `fy_mesh_add`'s shape: a sphere of radius 0.5.
+// `fy_mesh_new_shape`'s shape: a sphere of radius 0.5.
 #define FY_MESH_SPHERE 1
 
-// `fy_mesh_add`'s shape: a 1×1 plane facing +Y.
+// `fy_mesh_new_shape`'s shape: a 1×1 plane facing +Y.
 #define FY_MESH_PLANE 2
 
 // `fy_apple_acquire`: a surface was written to `out_surface`.
@@ -78,6 +78,12 @@ typedef enum FyStatus FyStatus;
 typedef int32_t FyStatus;
 #endif // __STDC_VERSION__ >= 202311L
 #endif // __cplusplus
+
+// A mesh on its own, before any world has it. Opaque to C. Made with
+// `fy_mesh_new` or `fy_mesh_new_shape` on any thread, freed with
+// `fy_mesh_free`. Worlds that add it share its data, so freeing it
+// doesn't take it from them.
+typedef struct FyMesh FyMesh;
 
 // A view: a world drawn into a target by its own render worker. Opaque to
 // C.
@@ -136,6 +142,21 @@ typedef struct FyLight {
   struct FyColor color;
   float intensity;
 } FyLight;
+
+// A mesh made from code, for `fy_mesh_new`. Each array holds
+// `vertex_count` items of packed floats: 3 per position and normal, 4 per
+// tangent (xyz, then w = 1 or -1), 2 per UV. Normals, tangents and UVs
+// may be null, and are then computed (see `fy_mesh_new`).
+typedef struct FyMeshData {
+  const float *positions;
+  const float *normals;
+  const float *tangents;
+  const float *uvs;
+  size_t vertex_count;
+  // Three per triangle, counter-clockwise seen from the front.
+  const uint32_t *indices;
+  size_t index_count;
+} FyMeshData;
 
 typedef struct FyMaterial {
   struct FyColor base_color;
@@ -367,13 +388,62 @@ FyStatus fy_light_get(const struct FyWorld *world, uint64_t id, struct FyLight *
 // `world` is null or live.
 FyStatus fy_light_remove(const struct FyWorld *world, uint64_t id);
 
-// Adds a built-in mesh (`FY_MESH_CUBE`, `FY_MESH_SPHERE` or
-// `FY_MESH_PLANE`) and writes its id to `out`.
+// Makes a built-in shape (`FY_MESH_CUBE`, `FY_MESH_SPHERE` or
+// `FY_MESH_PLANE`) and writes it to `out`.
 //
 // # Safety
 //
-// `world` is null or live; `out` is null or writable.
-FyStatus fy_mesh_add(const struct FyWorld *world, uint32_t shape, uint64_t *out);
+// `out` is null or writable.
+FyStatus fy_mesh_new_shape(uint32_t shape, struct FyMesh **out);
+
+// Makes a mesh from arrays and writes it to `out`. Only positions and
+// indices are required:
+// - Missing normals are the average of the faces around each vertex,
+//   weighted by angle, so shared vertices are smooth and sharp corners
+//   need a vertex per face.
+// - Missing tangents are generated with MikkTSpace from the UVs; a vertex
+//   whose faces need different tangents (a mirrored texture's seam) is
+//   split.
+// - Missing UVs are (0, 0).
+//
+// A broken mesh (indices out of range, not a multiple of 3, values that
+// aren't finite, arrays of the wrong length) is refused with
+// `FY_STATUS_INVALID_VALUE` and a message that says which item. The arrays
+// are copied and can be freed after the call.
+//
+// Generating tangents takes about 1 µs per triangle, so a big mesh with UVs
+// is worth making off the UI thread. This touches no world and can run on
+// any thread.
+//
+// # Safety
+//
+// `mesh` is null or readable, and its non-null arrays are valid for the
+// counts it gives; `out` is null or writable.
+FyStatus fy_mesh_new(const struct FyMeshData *mesh, struct FyMesh **out);
+
+// Frees a mesh handle. Worlds that added it keep their share. Null is
+// ignored.
+//
+// # Safety
+//
+// `mesh` is null or live, not used again after this.
+void fy_mesh_free(struct FyMesh *mesh);
+
+// Writes how many vertices and indices the mesh has. There can be more
+// vertices than were given, when generated tangents split some.
+//
+// # Safety
+//
+// `mesh` is null or live; the outs are null or writable.
+FyStatus fy_mesh_counts(const struct FyMesh *mesh, size_t *out_vertices, size_t *out_indices);
+
+// Gives the world a share of `mesh` (nothing is copied) and writes the
+// world's id for it to `out`. Adding the same handle twice gives two ids.
+//
+// # Safety
+//
+// `world` and `mesh` are null or live; `out` is null or writable.
+FyStatus fy_mesh_add(const struct FyWorld *world, const struct FyMesh *mesh, uint64_t *out);
 
 // Removes a mesh. Refused while an object uses it.
 //

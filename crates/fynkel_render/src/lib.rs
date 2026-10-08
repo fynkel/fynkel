@@ -5,13 +5,12 @@
 
 mod frame_ring;
 mod gpu;
-mod mesh;
 mod renderer;
 mod scene;
 
+pub use fynkel_mesh::{MeshData, Vertex};
 pub use glam;
 pub use gpu::{Gpu, GpuError, instance_flags};
-pub use mesh::{MeshData, Vertex};
 pub use renderer::{FrameStats, Renderer};
 pub use scene::{CameraView, Draw, MeshKey, PbrMaterial, RenderScene, Sun};
 pub use wgpu;

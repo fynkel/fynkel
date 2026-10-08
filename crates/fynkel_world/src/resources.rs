@@ -1,19 +1,8 @@
-//! Meshes and materials: shared data that objects point to by id.
+//! Materials: shared data that objects point to by id. Meshes are
+//! `fynkel_mesh::MeshData`, shared the same way.
 
 use crate::Color;
 use crate::describe::{Describe, Field, FieldKind, Value};
-
-/// Where a mesh's geometry comes from. Stage 1 only has built-in shapes,
-/// which the renderer generates. Meshes with your own vertices come later.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum MeshSource {
-    /// A 1×1×1 cube centred on the origin.
-    Cube,
-    /// A sphere of radius 0.5 centred on the origin.
-    Sphere,
-    /// A 1×1 plane in XZ, facing +Y.
-    Plane,
-}
 
 /// A metallic-roughness PBR material.
 #[derive(Clone, Copy, Debug, PartialEq)]

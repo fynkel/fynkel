@@ -13,8 +13,8 @@ use glam::{Mat3, Mat4, Vec3};
 
 use crate::frame_ring::FrameRing;
 use crate::gpu::Gpu;
-use crate::mesh::{MeshData, Vertex};
 use crate::scene::{MeshKey, RenderScene};
+use fynkel_mesh::{MeshData, Vertex};
 
 /// What one frame did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -143,11 +143,13 @@ impl Renderer {
             bind_group_layouts: &[Some(&frame_layout)],
             immediate_size: 0,
         });
-        let vertex_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
+        // Position, normal, tangent and UV, as in `fynkel_mesh::Vertex`.
+        let vertex_attributes =
+            wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32x2];
         let instance_attributes = wgpu::vertex_attr_array![
-            2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4,
-            6 => Float32x3, 7 => Float32x3, 8 => Float32x3,
-            9 => Float32x4, 10 => Float32x4,
+            4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4,
+            8 => Float32x3, 9 => Float32x3, 10 => Float32x3,
+            11 => Float32x4, 12 => Float32x4,
         ];
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("forward"),
@@ -226,10 +228,10 @@ impl Renderer {
     pub fn upload_mesh(&mut self, key: MeshKey, data: &MeshData) {
         let device = &self.gpu.device;
         let vertices =
-            filled_buffer(device, "mesh vertices", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(&data.vertices));
+            filled_buffer(device, "mesh vertices", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(data.vertices()));
         let indices =
-            filled_buffer(device, "mesh indices", wgpu::BufferUsages::INDEX, bytemuck::cast_slice(&data.indices));
-        self.meshes.insert(key, GpuMesh { vertices, indices, index_count: data.indices.len() as u32 });
+            filled_buffer(device, "mesh indices", wgpu::BufferUsages::INDEX, bytemuck::cast_slice(data.indices()));
+        self.meshes.insert(key, GpuMesh { vertices, indices, index_count: data.indices().len() as u32 });
     }
 
     /// Frees the mesh under `key`. Returns whether there was one.

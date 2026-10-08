@@ -17,8 +17,8 @@ use std::time::Duration;
 use fynkel_present::{Headless, HeadlessFrames, ReadError};
 use fynkel_render::{Gpu, Renderer};
 use fynkel_world::{
-    Camera, Color, Component, Light, LightKind, Material, MaterialId, MeshId, MeshRenderer, MeshSource, ObjectId, Quat,
-    Transform, Vec3, World,
+    Camera, Color, Component, Light, LightKind, Material, MaterialId, MeshData, MeshId, MeshParts, MeshRenderer,
+    ObjectId, Quat, Transform, Vec3, World,
 };
 
 use crate::error::{Error, FyStatus, guard, last_error};
@@ -26,7 +26,7 @@ use crate::extract::{Extract, MeshOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 4;
+pub const FY_ABI_VERSION: u32 = 5;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -110,12 +110,29 @@ pub struct FyMaterial {
     pub roughness: f32,
 }
 
-/// `fy_mesh_add`'s shape: a 1×1×1 cube.
+/// `fy_mesh_new_shape`'s shape: a 1×1×1 cube.
 pub const FY_MESH_CUBE: u32 = 0;
-/// `fy_mesh_add`'s shape: a sphere of radius 0.5.
+/// `fy_mesh_new_shape`'s shape: a sphere of radius 0.5.
 pub const FY_MESH_SPHERE: u32 = 1;
-/// `fy_mesh_add`'s shape: a 1×1 plane facing +Y.
+/// `fy_mesh_new_shape`'s shape: a 1×1 plane facing +Y.
 pub const FY_MESH_PLANE: u32 = 2;
+
+/// A mesh made from code, for `fy_mesh_new`. Each array holds
+/// `vertex_count` items of packed floats: 3 per position and normal, 4 per
+/// tangent (xyz, then w = 1 or -1), 2 per UV. Normals, tangents and UVs
+/// may be null, and are then computed (see `fy_mesh_new`).
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct FyMeshData {
+    pub positions: *const f32,
+    pub normals: *const f32,
+    pub tangents: *const f32,
+    pub uvs: *const f32,
+    pub vertex_count: usize,
+    /// Three per triangle, counter-clockwise seen from the front.
+    pub indices: *const u32,
+    pub index_count: usize,
+}
 
 // --- Conversions ---------------------------------------------------------------
 
@@ -793,21 +810,41 @@ pub unsafe extern "C" fn fy_light_remove(world: *const FyWorld, id: u64) -> FySt
 
 // --- Meshes and materials ----------------------------------------------------
 
-/// Adds a built-in mesh (`FY_MESH_CUBE`, `FY_MESH_SPHERE` or
-/// `FY_MESH_PLANE`) and writes its id to `out`.
+/// A mesh on its own, before any world has it. Opaque to C. Made with
+/// `fy_mesh_new` or `fy_mesh_new_shape` on any thread, freed with
+/// `fy_mesh_free`. Worlds that add it share its data, so freeing it
+/// doesn't take it from them.
+#[derive(Debug)]
+pub struct FyMesh(Arc<MeshData>);
+
+/// Writes a new mesh handle to `out`.
 ///
 /// # Safety
 ///
-/// `world` is null or live; `out` is null or writable.
+/// `out` is null or writable.
+unsafe fn new_mesh(data: MeshData, out: *mut *mut FyMesh) -> Result<(), Error> {
+    if out.is_null() {
+        return Err(Error::null("out"));
+    }
+    // SAFETY: not null, and the caller promises it's writable.
+    unsafe { out.write(Box::into_raw(Box::new(FyMesh(Arc::new(data))))) };
+    Ok(())
+}
+
+/// Makes a built-in shape (`FY_MESH_CUBE`, `FY_MESH_SPHERE` or
+/// `FY_MESH_PLANE`) and writes it to `out`.
+///
+/// # Safety
+///
+/// `out` is null or writable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fy_mesh_add(world: *const FyWorld, shape: u32, out: *mut u64) -> FyStatus {
+pub unsafe extern "C" fn fy_mesh_new_shape(shape: u32, out: *mut *mut FyMesh) -> FyStatus {
     guard(|| {
-        // SAFETY: per this function's contract.
-        let world = unsafe { handle(world, "world") }?;
-        let source = match shape {
-            FY_MESH_CUBE => MeshSource::Cube,
-            FY_MESH_SPHERE => MeshSource::Sphere,
-            FY_MESH_PLANE => MeshSource::Plane,
+        let data = match shape {
+            FY_MESH_CUBE => MeshData::cube(),
+            // 48 × 24 matches the golden images.
+            FY_MESH_SPHERE => MeshData::sphere(48, 24),
+            FY_MESH_PLANE => MeshData::plane(),
             other => {
                 return Err(Error::new(
                     FyStatus::InvalidValue,
@@ -815,7 +852,123 @@ pub unsafe extern "C" fn fy_mesh_add(world: *const FyWorld, shape: u32, out: *mu
                 ));
             }
         };
-        let id = world.lock()?.add_mesh(source);
+        // SAFETY: per this function's contract.
+        unsafe { new_mesh(data, out) }
+    })
+}
+
+/// `count` items of `N` values at `p`, or `None` when `p` is null.
+///
+/// # Safety
+///
+/// `p` is null or valid for `count * N` reads.
+unsafe fn items<'a, T, const N: usize>(p: *const T, count: usize, what: &str) -> Result<Option<&'a [[T; N]]>, Error> {
+    if p.is_null() {
+        return Ok(None);
+    }
+    let len = count.checked_mul(N).ok_or_else(|| Error::new(FyStatus::InvalidValue, format!("too many {what}")))?;
+    // SAFETY: not null; the caller promises len readable items, and [T; N]
+    // has T's alignment.
+    let flat = unsafe { std::slice::from_raw_parts(p, len) };
+    Ok(Some(flat.as_chunks::<N>().0))
+}
+
+/// Makes a mesh from arrays and writes it to `out`. Only positions and
+/// indices are required:
+/// - Missing normals are the average of the faces around each vertex,
+///   weighted by angle, so shared vertices are smooth and sharp corners
+///   need a vertex per face.
+/// - Missing tangents are generated with MikkTSpace from the UVs; a vertex
+///   whose faces need different tangents (a mirrored texture's seam) is
+///   split.
+/// - Missing UVs are (0, 0).
+///
+/// A broken mesh (indices out of range, not a multiple of 3, values that
+/// aren't finite, arrays of the wrong length) is refused with
+/// `FY_STATUS_INVALID_VALUE` and a message that says which item. The arrays
+/// are copied and can be freed after the call.
+///
+/// Generating tangents takes about 1 µs per triangle, so a big mesh with UVs
+/// is worth making off the UI thread. This touches no world and can run on
+/// any thread.
+///
+/// # Safety
+///
+/// `mesh` is null or readable, and its non-null arrays are valid for the
+/// counts it gives; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_new(mesh: *const FyMeshData, out: *mut *mut FyMesh) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let m = unsafe { read(mesh, "mesh") }?;
+        let n = m.vertex_count;
+        // SAFETY: per this function's contract, for each array.
+        let parts = unsafe {
+            MeshParts {
+                positions: items::<f32, 3>(m.positions, n, "positions")?.ok_or_else(|| Error::null("positions"))?,
+                normals: items::<f32, 3>(m.normals, n, "normals")?,
+                tangents: items::<f32, 4>(m.tangents, n, "tangents")?,
+                uvs: items::<f32, 2>(m.uvs, n, "uvs")?,
+                indices: items::<u32, 1>(m.indices, m.index_count, "indices")?
+                    .ok_or_else(|| Error::null("indices"))?
+                    .as_flattened(),
+            }
+        };
+        let data = MeshData::new(parts).map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
+        // SAFETY: per this function's contract.
+        unsafe { new_mesh(data, out) }
+    })
+}
+
+/// Frees a mesh handle. Worlds that added it keep their share. Null is
+/// ignored.
+///
+/// # Safety
+///
+/// `mesh` is null or live, not used again after this.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_free(mesh: *mut FyMesh) {
+    if !mesh.is_null() {
+        // SAFETY: made by Box::into_raw in new_mesh; the caller gives it up.
+        drop(unsafe { Box::from_raw(mesh) });
+    }
+}
+
+/// Writes how many vertices and indices the mesh has. There can be more
+/// vertices than were given, when generated tangents split some.
+///
+/// # Safety
+///
+/// `mesh` is null or live; the outs are null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_counts(
+    mesh: *const FyMesh,
+    out_vertices: *mut usize,
+    out_indices: *mut usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let mesh = unsafe { handle(mesh, "mesh") }?;
+        // SAFETY: per this function's contract.
+        unsafe {
+            write(out_vertices, mesh.0.vertices().len(), "out_vertices")?;
+            write(out_indices, mesh.0.indices().len(), "out_indices")
+        }
+    })
+}
+
+/// Gives the world a share of `mesh` (nothing is copied) and writes the
+/// world's id for it to `out`. Adding the same handle twice gives two ids.
+///
+/// # Safety
+///
+/// `world` and `mesh` are null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_add(world: *const FyWorld, mesh: *const FyMesh, out: *mut u64) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let (world, mesh) = unsafe { (handle(world, "world")?, handle(mesh, "mesh")?) };
+        let id = world.lock()?.add_mesh(Arc::clone(&mesh.0));
         // SAFETY: per this function's contract.
         unsafe { write(out, id.raw(), "out") }
     })

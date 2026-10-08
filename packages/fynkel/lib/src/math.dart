@@ -1,5 +1,29 @@
 import 'dart:math' as math;
 
+/// A point or direction in 2D, such as a texture coordinate: (0, 0) is the
+/// image's top-left corner, with y growing downwards.
+final class Vec2 {
+  const Vec2(this.x, this.y);
+
+  final double x;
+  final double y;
+
+  static const zero = Vec2(0, 0);
+
+  Vec2 operator +(Vec2 o) => Vec2(x + o.x, y + o.y);
+  Vec2 operator -(Vec2 o) => Vec2(x - o.x, y - o.y);
+  Vec2 operator *(double s) => Vec2(x * s, y * s);
+
+  @override
+  bool operator ==(Object other) => other is Vec2 && other.x == x && other.y == y;
+
+  @override
+  int get hashCode => Object.hash(x, y);
+
+  @override
+  String toString() => 'Vec2($x, $y)';
+}
+
 /// A point or direction in 3D. Fynkel is right-handed with +Y up, and an
 /// object looks along its -Z ([Vec3.forward]).
 final class Vec3 {

@@ -18,6 +18,7 @@ const _blocking = {
   'fy_apple_set_frame_ready', // waits for a frame-ready call in progress
   'fy_view_free', // joins the render worker
   'fy_view_read', // waits for the GPU
+  'fy_mesh_new', // generating tangents takes about 1 µs per triangle
 };
 
 Future<void> main() async {

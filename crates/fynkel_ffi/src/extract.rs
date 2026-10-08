@@ -17,17 +17,19 @@
 //!   position and rotation from it; a parent's scale doesn't stretch them.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use fynkel_render::glam::{Mat4, Vec3};
 use fynkel_render::{CameraView, Draw, MeshKey, PbrMaterial, RenderScene, Sun};
 use fynkel_world::{
-    Camera, Color, Light, LightKind, MeshId, MeshRenderer, MeshSource, ObjectId, Quat, Transform, World, WorldMatrices,
+    Camera, Color, Light, LightKind, MeshData, MeshId, MeshRenderer, ObjectId, Quat, Transform, World, WorldMatrices,
 };
 
-/// A change to the meshes the renderer holds.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// A change to the meshes the renderer holds. An upload shares the world's
+/// mesh data; nothing is copied until the GPU upload.
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum MeshOp {
-    Upload(MeshKey, MeshSource),
+    Upload(MeshKey, Arc<MeshData>),
     Remove(MeshKey),
 }
 
@@ -57,9 +59,9 @@ impl Extract {
             }
             kept
         });
-        for (id, source) in world.meshes() {
+        for (id, mesh) in world.meshes() {
             if self.uploaded.insert(id) {
-                ops.push(MeshOp::Upload(mesh_key(id), source));
+                ops.push(MeshOp::Upload(mesh_key(id), Arc::clone(mesh)));
             }
         }
 

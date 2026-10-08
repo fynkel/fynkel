@@ -1,5 +1,9 @@
 import 'dart:convert';
 import 'dart:ffi';
+import 'dart:isolate';
+import 'dart:typed_data';
+
+import 'package:ffi/ffi.dart';
 
 import 'bindings.g.dart';
 import 'color.dart';
@@ -80,7 +84,7 @@ final class World implements Finalizable {
   int _meshId(Mesh mesh) {
     final known = _meshIds[mesh];
     if (known != null) return known;
-    check(fy_mesh_add(pointer, mesh._shape, scratch.id));
+    check(fy_mesh_add(pointer, mesh._pointer, scratch.id));
     final id = scratch.id.value;
     _meshIds[mesh] = id;
     _meshes[id] = mesh;
