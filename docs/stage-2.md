@@ -158,6 +158,12 @@ the renderer takes raw pixel slices, so it depends on neither.
 - Load times for each texture and model, on all three devices: time on the helper isolate and time until the first frame shows it.
 - GPU memory per texture and per model, and it must come back: 10 cycles of loading and disposing the scene's model leave memory flat (the stage 1 rule: no more growth than Flutter alone).
 - The garden scene at the display rate over 60 s on all three devices, with the same stats as stage 1.
+- *Settled in step 6:*
+  - **`Material.dispose()`** is new: a model couldn't be unloaded, because the world kept every material ever used, and a texture in use by a world's material can't be disposed. It takes the material out of every world (`fy_material_remove`), refused (`inUse`) while an object uses it; a disposed material can't be used again (`StateError`). To free all a model brought: despawn what it spawned, then dispose its materials, meshes and textures, then the model. The garden does that each cycle.
+  - **`FynkelView.onViewStats`** is new: the engine's counts after each frame the view posts, for measuring. "Until the first frame shows it" is read from them: when the model is spawned, frames up to `posted` don't have it. Once more frames have been drawn since than older ones were left to draw, a newer one was drawn; the next frame Flutter takes is that one or newer. The rule is never early (four tests, five mutants killed); when frames were replaced before being drawn it can be a frame or two late, and on Android, where frames go to the screen as they're drawn, up to one.
+  - **package:fynkel_measure** holds stage 1's measuring, shared instead of copied: the stats line, the memory marks and the baseline inside the app, and the tool (`dart run fynkel_measure:measure`, from the app's directory) outside it. The tool takes the app's name from its `pubspec.yaml`; a lifecycle point's kind is its name without its number, so each app names its own points (hello's are now `created 3`, `resized to 0.6 2`, …). The VM service extension is `ext.fynkel.read`.
+  - **The tool reads the app's reports at the end** (`ext.fynkel.reports`), as an iPhone app's output only reaches the tool once it has connected, after the loads it reports. A third mode, `bench`, runs the app's timings (the garden's are in `lib/bench.dart`) and prints them. On Android the readings now show the Native Heap row too.
+  - **The Kenney files needed fixing**, in `tools/garden_assets.py`, which says why: the character's texture is a separate file and its unlit extension is *required*, and the Nature Kit stores its palette's sRGB values where glTF wants linear ones, and calls every colour metal. Read as written, the props were pale; fixed, they match Kenney's previews. Our reader is right to read them by the spec.
 
 ## 4. Steps
 
@@ -201,10 +207,19 @@ hierarchy, edges), through the C interface (a block of the tower model),
 and in Dart against every pixel of a rendered frame. Numbers in §6; the
 phones' come with the garden in step 6.
 
-**Step 6: `examples/garden` on macOS, then iOS, then Android.** The
+**Step 6: `examples/garden` on macOS, then iOS, then Android.** ✅ The
 scene from the snippet: a textured ground, a model, tap and drag. *Done
 when* it runs at the display rate on all three, loads in a measured and
 written-down time, and passes the memory cycles.
+Kenney's character among twelve of the Nature Kit's props (39 placed),
+tap the character to turn its head, drag to go round, scroll to zoom. It
+runs at 120 fps on the Mac and the iPhone and 60 on the Note10+ with no
+dropped frames; the whole scene loads in 45–73 ms on the Mac (warm),
+23 ms on the iPhone and is on screen 65–153 ms and 148 ms after the load
+starts. The memory cycles pass on the Mac and the iPhone. On the Note10+
+the native heap grows by about 16 MB over the first 14 cycles and then
+stays flat; after that the app grows as Flutter alone does. Numbers,
+and the phone numbers steps 1 and 5 owed, in §6.
 
 **Step 7: the stage 2 check.** A short report, as in stage 1. *Done when*
 it's committed and you have played the scene on each device.
@@ -219,6 +234,86 @@ it's committed and you have played the scene on each device.
    for the stage that needs it.
 
 ## 6. Measurements
+
+### Step 6: the garden (Mac, iPhone, Note10+; profile builds)
+
+`dart run fynkel_measure:measure rate|lifecycle|bench` from
+`examples/garden`. The Mac is the M3 Max in a 1600 × 1200 window, under
+`caffeinate -du`. The iPhone is 1320 × 2868 at 120 Hz, wireless. The
+Note10+ is 1080 × 2241 at 60 Hz.
+
+**Frame rate**, 60 s:
+
+| | Mac | iPhone | Note10+ |
+|---|---:|---:|---:|
+| fresh fps, median (min) | 120.0 (119) | 120.0 (117.7) | 59.9 (57.9) |
+| posted / presented | 7,257 / 7,256 | 7,319 / 7,319 | 3,573 / 3,573 |
+| dropped | 0 | 0 | 0 |
+| slow Flutter frames | 0 | 0 | 275 (271 raster) |
+| longest raster | 3.83 ms | 1.30 ms | 31 ms |
+| Dart allocated per frame | 19.1 KB | 12.7 KB | 19.5 KB |
+
+The Note10+'s slow rasters cost no frames, as in stage 1 (28–247 a
+minute there).
+
+**Loads**: the whole scene (the grass texture, twelve prop models and the
+character, read and loaded at once), then the character alone, reloaded
+in the memory cycles. "On screen" is from the start of the load to the
+first frame on screen that has it (`onViewStats`, §3.5).
+
+| | Mac (warm) | iPhone | Note10+ |
+|---|---:|---:|---:|
+| scene loaded and spawned | 45–73 ms | 22.6 ms | — |
+| scene on screen | 65–153 ms | 148 ms | 0.44–1.3 s |
+| character: load | 1.1–2.5 ms | 5.6–8.7 ms | — |
+| character: on screen | 18–35 ms | 24–33 ms | — |
+
+The first launch on the Mac after a build takes about 1 s (cold
+caches). The scene's on-screen time at startup includes the view's own
+start: it makes its GPU device on the UI isolate in its first tick, which
+takes 4–61 ms on the Mac, 7 ms on the iPhone and 0.84–0.91 s on the
+Note10+, and a load's last steps wait behind it. Making the device off the
+UI isolate is a follow-up.
+
+**Memory cycles**: the character unloaded and loaded again, with the
+footprint after each (Android: PSS with swap). Growth over the cycles,
+against Flutter alone (`--baseline`):
+
+| | cycles | unloaded | loaded | baseline unloaded | baseline loaded |
+|---|---:|---:|---:|---:|---:|
+| Mac | 20 | 3 MB (after +7 MB once, at cycle 2) | 4.3 MB | 5.0 MB | 4.6 MB |
+| iPhone | 10 | 9.4 MB | 4.5 MB | 4.9 MB | 5.0 MB |
+| iPhone | 30 | 20.1 MB | 19.6 MB | 17.5 MB | 17.0 MB |
+| Note10+ | 10 | 16.6 MB | 15.9 MB | 9.0 MB | 8.9 MB |
+| Note10+ | 30 | 30.6 MB | 28.3 MB | 17.3 MB | 16.3 MB |
+
+- GPU memory is flat on all three: each unload frees exactly the 5.33 MB the character's texture took (Metal 170–172 MB after each unload on the iPhone, Graphics 123.3 MB on the Note10+).
+- On the iPhone, 10 cycles were inconclusive (one-off steps); over 30 the garden grows as Flutter alone does, within 3 MB.
+- On the Note10+ the Native Heap row grows from 40.5 to 56.6 MB over the first 14 cycles and then stays within 56.2–58.0 MB to cycle 30. After cycle 14 the app grows 0.44 MB a cycle, against Flutter's own 0.34. So it's bounded: freed memory the allocator or the driver keeps, about 16 MB, not a leak. Each load decodes a 4 MB image on a pool thread.
+- The engine alone on the Mac, without Flutter (1,000 cycles headless): no growth without drawing; 57 KB a cycle with drawing, slowing.
+- A model disposed without its parts keeps its textures and meshes until the garbage collector finalizes them, and the collector doesn't know their size. Telling it (`externalSize` on the finalizers) is a follow-up.
+
+**The phone numbers steps 1 and 5 owed** (`bench`, the app's
+`lib/bench.dart`, on the UI isolate through package:fynkel): `frame()`
+on a headless view with 10,000 objects (the extract and the handover),
+median and slowest of 300; casts are best of 200.
+
+| | Mac | iPhone | Note10+ |
+|---|---:|---:|---:|
+| extract, 100 × 100 wide | 0.30 / 0.72 ms | — | 2.01 / 2.31 ms |
+| extract, 100 chains 100 deep | 0.30 / 0.37 ms | — | 2.56 / 3.27 ms |
+| extract, no tree | 0.16 / 0.20 ms | — | 1.21 / 3.32 ms |
+| raycast, 100 × 100 cubes, hit / miss | 83 / 83 µs | — | 560 / 386 µs |
+| raycast, in chains of 100, hit / miss | 193 / 207 µs | — | 1,668 / 1,669 µs |
+| raycast, the garden's tap | 3 µs | — | 22 µs |
+
+The iPhone's column is still to come: twice, Xcode timed out starting
+the app over the wireless connection after a good build.
+
+The Mac's numbers match the Rust probes' (§6, steps 1 and 5), so the
+Dart layer adds nothing measurable. The Note10+ is 6–8 times slower than
+the Mac: 10,000 objects in trees take 2.5 ms of a 16.7 ms frame, and a tap
+in the garden 22 µs.
 
 ### Step 5: raycasts (Mac, M3 Max, release build)
 

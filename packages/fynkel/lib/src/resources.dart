@@ -365,6 +365,24 @@ final class Material {
   /// global doesn't keep every world it was used in alive.
   final List<WeakReference<World>> _worlds = [];
 
+  bool _disposed = false;
+
+  bool get isDisposed => _disposed;
+
+  /// Takes the material out of every world that has it, so the textures
+  /// it uses can be disposed too. It can't be used in a world after this
+  /// (a [StateError]). Throws a [FynkelException] ([FynkelStatus.inUse])
+  /// while an object's [MeshRenderer] uses it: despawn the object or give
+  /// it another material first. Calling it again does nothing.
+  void dispose() {
+    if (_disposed) return;
+    for (final world in _worlds.map((w) => w.target).nonNulls) {
+      world._releaseMaterial(this);
+    }
+    _worlds.clear();
+    _disposed = true;
+  }
+
   /// The base colour (albedo). Its alpha matters only with [alphaCutoff].
   Color get color => _color;
   set color(Color value) {

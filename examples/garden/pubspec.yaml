@@ -1,0 +1,27 @@
+name: garden
+description: The stage 2 acceptance app, a character in a garden you can turn around and tap.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  fynkel:
+    path: ../../packages/fynkel
+  fynkel_flutter:
+    path: ../../packages/fynkel_flutter
+  fynkel_measure:
+    path: ../../packages/fynkel_measure
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0
+
+flutter:
+  assets:
+    - assets/
+    - assets/props/

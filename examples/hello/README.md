@@ -19,13 +19,15 @@ the new frames you saw, `ticks` the frame clock, then the engine's counts.
 
 ## Measuring
 
-`tool/measure.dart` runs the profile build and prints the numbers recorded
-in docs/stage-1.md §7. Keep the display awake while it runs.
+package:fynkel_measure's tool (`packages/fynkel_measure/bin/measure.dart`)
+runs the profile build and prints the numbers recorded in
+docs/stage-1.md §7. Run it from this directory, and keep the display awake
+while it runs.
 
 ```sh
 flutter build macos --profile
-caffeinate -du dart tool/measure.dart rate --seconds 60 [--fullscreen]
-caffeinate -du dart tool/measure.dart lifecycle [--cycles 10]
+caffeinate -du dart run fynkel_measure:measure rate --seconds 60 [--fullscreen]
+caffeinate -du dart run fynkel_measure:measure lifecycle [--cycles 10]
 ```
 
 On a phone or the emulator, add `--ios <device>` or `--android <device>`;

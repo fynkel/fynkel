@@ -91,6 +91,7 @@ class FynkelView extends StatefulWidget {
     this.onFrame,
     this.resolutionScale = 1.0,
     this.onStats,
+    this.onViewStats,
     this.focusNode,
     this.autofocus = true,
   }) : assert(resolutionScale > 0 && resolutionScale <= 4);
@@ -106,6 +107,13 @@ class FynkelView extends StatefulWidget {
 
   /// Called about once a second with what the view did since the last call.
   final void Function(FynkelViewStats stats)? onStats;
+
+  /// Called after each frame the view hands to the engine with the
+  /// engine's counts since the view was made, for measuring: the frame
+  /// that first draws a new model is the first whose `textureBytes` or
+  /// `meshBytes` hold its data, and it's on screen once `presented` goes
+  /// up after that.
+  final void Function(ViewStats stats)? onViewStats;
 
   /// The view's focus, for keys. One of its own when null.
   final FocusNode? focusNode;
@@ -178,6 +186,7 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
     if (texture == null) return;
     if (_android) _sendSize(view, texture);
     view.frame();
+    widget.onViewStats?.call(view.stats);
 
     _windowTicks++;
     final onStats = widget.onStats;

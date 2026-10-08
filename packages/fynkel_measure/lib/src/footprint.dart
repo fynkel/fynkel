@@ -4,7 +4,7 @@
 // kernel itself (`task_info` with `TASK_VM_INFO`).
 //
 // On Android it's the process's PSS, the number Android's own tools lead
-// with, from /proc/self/smaps_rollup; there tool/measure.dart reads
+// with, from /proc/self/smaps_rollup; there bin/measure.dart reads
 // `dumpsys meminfo` from outside instead, and this is only for the stats
 // line.
 

@@ -123,6 +123,10 @@ final class Model implements Finalizable {
   /// stay usable, and objects already spawned keep drawing; only
   /// [World.spawnModel] can't use it any more. Calling it again does
   /// nothing.
+  ///
+  /// To free everything the model brought, once no object it spawned is
+  /// left, dispose its parts as well: the [materials] first, as they use
+  /// the [textures], then the [meshes] and [textures].
   void dispose() {
     if (_pointer == nullptr) return;
     _finalizer.detach(this);

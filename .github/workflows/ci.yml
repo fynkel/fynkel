@@ -52,9 +52,10 @@ jobs:
           git diff --exit-code lib/src/bindings.g.dart
           dart test
       # package:fynkel_flutter's widget tests (a real engine view behind a
-      # stand-in for the Swift plugin), and a macOS build of examples/hello,
-      # which compiles the plugin's Swift and bundles the engine.
-      - name: flutter (package:fynkel_flutter, examples/hello)
+      # stand-in for the Swift plugin), package:fynkel_measure, the garden's
+      # tests (its real assets, drawn headless), and macOS builds of both
+      # examples, which compile the plugin's Swift and bundle the engine.
+      - name: flutter (package:fynkel_flutter, package:fynkel_measure, examples)
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
           cd packages/fynkel_flutter
@@ -62,10 +63,20 @@ jobs:
           dart format -l 120 --output=none --set-exit-if-changed lib test
           flutter analyze --fatal-infos
           flutter test
+          cd ../fynkel_measure
+          flutter pub get
+          dart format -l 120 --output=none --set-exit-if-changed lib bin
+          flutter analyze --fatal-infos
           cd ../../examples/hello
           flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib tool
+          dart format -l 120 --output=none --set-exit-if-changed lib
           flutter analyze --fatal-infos
+          flutter build macos --debug
+          cd ../garden
+          flutter pub get
+          dart format -l 120 --output=none --set-exit-if-changed lib test
+          flutter analyze --fatal-infos
+          flutter test
           flutter build macos --debug
       # The same GPU tests inside the iOS Simulator and the Android
       # emulator: fast testing in simulators is how Flutter developers

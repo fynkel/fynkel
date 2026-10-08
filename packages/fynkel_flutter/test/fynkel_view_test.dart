@@ -121,6 +121,36 @@ void main() {
     expect(calls, hasLength(1), reason: 'a resize keeps the texture');
   });
 
+  testWidgets("after each frame it posts, onViewStats has the view's counts so far, so a load can be timed", (
+    tester,
+  ) async {
+    final seen = <ViewStats>[];
+    final ticks = <int>[];
+    await tester.pumpWidget(
+      sized(FynkelView(world: world, onFrame: (_, _) => ticks.add(seen.length), onViewStats: seen.add)),
+    );
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    expect(seen, isNotEmpty);
+    expect([for (final s in seen) s.posted], [for (var i = 1; i <= seen.length; i++) i], reason: 'one per frame');
+    expect(ticks.length, greaterThan(seen.length), reason: 'none before the texture is there');
+
+    // A textured cube: the frame that draws it holds the texture's bytes.
+    final before = seen.last.textureBytes;
+    final pixels = Texture2D.rgba(4, 4, Uint8List(64));
+    world.spawn(Transform(), MeshRenderer(Mesh.cube(), Material(baseColorTexture: pixels)));
+    final from = seen.length;
+    for (var i = 0; i < 200 && seen.last.textureBytes == before; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+      // The render worker runs on its own thread, in real time.
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 2)));
+    }
+    // 4 × 4 RGBA and its mipmaps, 2 × 2 and 1 × 1, at 4 bytes a texel.
+    expect(seen.last.textureBytes - before, (16 + 4 + 1) * 4);
+    expect(seen.length, greaterThan(from));
+  });
+
   testWidgets('the plugin lets go of the view before it is freed', (tester) async {
     await tester.pumpWidget(sized(FynkelView(world: world)));
     await tester.pump(const Duration(milliseconds: 8));

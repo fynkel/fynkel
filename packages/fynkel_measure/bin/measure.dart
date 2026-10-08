@@ -1,20 +1,28 @@
-// The step 5, 6 and 7 measurements (docs/stage-1.md §4): runs the profile
-// build of hello and reports the fresh frame rate, the Dart allocation per
-// frame, and the memory over create/destroy and resize cycles.
+// Measures a Fynkel app as the stage reports do (docs/stage-1.md §4,
+// docs/stage-2.md §3.5): runs the profile build of the app in the current
+// directory and reports the fresh frame rate, the Dart allocation per
+// frame, and the memory over the cycles of the app's lifecycle check.
+// The app uses this package's Measurement (lib/src/measurement.dart).
 //
 //   flutter build macos --profile
-//   dart tool/measure.dart rate [--seconds 60] [--fullscreen]
-//   dart tool/measure.dart lifecycle [--cycles 10]
+//   dart run fynkel_measure:measure rate [--seconds 60] [--fullscreen]
+//   dart run fynkel_measure:measure lifecycle [--cycles 10]
+//
+// The lifecycle check's points are the app's: what it does between them
+// is its own (hello hides and shows its view, the garden unloads and
+// loads its model). Points of a kind (the name without its number) should
+// have the same memory. What the app reports (Measurement.report), such
+// as load times, is printed at the end as it is.
 //
 // `--baseline` runs either with a spinning Flutter box in place of the
 // engine's view: what Flutter alone does, to judge the engine against.
 //
 // With `--ios <device id>` (from `flutter devices`) it measures on that
-// iPhone instead: it starts hello there with `flutter run --profile`,
+// iPhone instead: it starts the app there with `flutter run --profile`,
 // passes the settings as `--dart-define`s, and reads the app's output
 // through its VM service, since an iOS app's output doesn't reach
 // `flutter run`. Nothing outside an iPhone can read an app's footprint, so
-// there the app reports its own (lib/footprint.dart). Add `--debug` for
+// there the app reports its own (lib/src/footprint.dart). Add `--debug` for
 // the iOS Simulator, which has no profile mode: its memory points still
 // mean something, its frame rate and Dart allocation don't.
 //
@@ -46,7 +54,20 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-const _app = 'build/macos/Build/Products/Profile/hello.app/Contents/MacOS/hello';
+/// The app's name, from the pubspec.yaml here.
+final String _name = () {
+  final pubspec = File('pubspec.yaml');
+  final name = pubspec.existsSync()
+      ? RegExp(r'^name:\s*(\S+)', multiLine: true).firstMatch(pubspec.readAsStringSync())?.group(1)
+      : null;
+  if (name == null) {
+    stderr.writeln("Run this from the app's directory (no pubspec.yaml with a name here).");
+    exit(2);
+  }
+  return name;
+}();
+
+String get _app => 'build/macos/Build/Products/Profile/$_name.app/Contents/MacOS/$_name';
 
 /// Seconds of a run that aren't measured: startup and the first frames.
 const _warmUp = 5;
@@ -60,8 +81,9 @@ String? _android;
 /// The phone to measure on, or null for this Mac.
 String? get _device => _ios ?? _android;
 
-/// hello's Android package.
-const _package = 'dev.fynkel.hello';
+/// The app's Android package: the examples' bundle ids are all
+/// `dev.fynkel.<name>`.
+String get _package => 'dev.fynkel.$_name';
 
 /// `flutter run --debug` instead of `--profile`, for the iOS Simulator.
 var _debug = false;
@@ -91,15 +113,17 @@ Future<void> main(List<String> args) async {
     case 'lifecycle':
       final cyclesAt = args.indexOf('--cycles');
       await _lifecycle(cyclesAt < 0 ? 10 : int.parse(args[cyclesAt + 1]));
+    case 'bench':
+      await _bench();
     default:
       stderr.writeln(
-        'usage: dart tool/measure.dart rate [--seconds N] [--fullscreen] | lifecycle [--cycles N]  [--baseline] [--ios <device> | --android <device>] [--debug]',
+        'usage: dart run fynkel_measure:measure rate [--seconds N] [--fullscreen] | lifecycle [--cycles N] | bench  [--baseline] [--ios <device> | --android <device>] [--debug]',
       );
       exit(2);
   }
 }
 
-/// [seconds] of the spinning cube: the frame rate the player sees, every
+/// [seconds] of the app running: the frame rate the player sees, every
 /// frame that wasn't fresh, and the Dart allocation per frame. With
 /// `--baseline`, Flutter's frames and allocation alone.
 Future<void> _rate(int seconds, {required bool fullscreen}) async {
@@ -114,6 +138,7 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
     final from = app.windows.length;
     await Future<void>.delayed(Duration(seconds: seconds));
     final allocated = await heap.allocatedSinceStart();
+    await heap.printReports();
     await heap.close();
     final windows = app.windows.sublist(from);
     if (windows.isEmpty) throw StateError('the app printed no stats');
@@ -168,9 +193,25 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
   }
 }
 
-/// [cycles] create/destroy cycles, then as many resizes between the full
-/// window and 0.6 of it, with the footprint at each point the app reports.
-/// Points of the same kind should match: the same view at the same size.
+/// The app's own timings: it runs them, reports each and marks `done`.
+Future<void> _bench() async {
+  final app = await _App.launch({'FYNKEL_CHECK': 'bench'});
+  try {
+    final heap = await _Heap.open(app.service!);
+    await for (final point in app.checks) {
+      await heap.read();
+      if (point == 'done') break;
+    }
+    await heap.printReports();
+    await heap.close();
+  } finally {
+    await app.stop();
+  }
+}
+
+/// The app's lifecycle check, [cycles] times over, with the footprint at
+/// each point the app reports. Points of a kind (`created 3`, `created 4`)
+/// should match: the app is in the same state at each.
 Future<void> _lifecycle(int cycles) async {
   final app = await _App.launch({
     'FYNKEL_CHECK': 'lifecycle',
@@ -200,31 +241,28 @@ Future<void> _lifecycle(int cycles) async {
       final drawing = _baseline || app.windows.skip(from).any((w) => (w['presented'] as num) > 0);
       if (!drawing) idle.add(point);
       print(
-        '${point.padRight(12)} $footprint   Dart heap ${_mb(dart.capacity)} (${_mb(dart.used)} used)'
+        '${point.padRight(24)} $footprint   Dart heap ${_mb(dart.capacity)} (${_mb(dart.used)} used)'
         '${drawing ? '' : '   NOT DRAWING'}',
       );
       if (point == 'done') break;
     }
     if (!marks.containsKey('done')) throw StateError('the app stopped reporting before the check finished');
     if (_android != null) await _androidCycles(app, cycles, heap, marks, idle);
+    await heap.printReports();
     await heap.close();
     void range(String label, bool Function(String point) which) {
       final totals = [
         for (final e in marks.entries)
           if (which(e.key)) e.value.total,
       ]..sort();
-      print('${label.padRight(28)} ${_mb(totals.first)} to ${_mb(totals.last)} (${_mb(totals.last - totals.first)})');
+      print('${label.padRight(24)} ${_mb(totals.first)} to ${_mb(totals.last)} (${_mb(totals.last - totals.first)})');
     }
 
-    int number(String point) => int.parse(point.split(' ').last);
     print('');
-    range('created, full size', (p) => p.startsWith('created'));
-    range('resized, back to full size', (p) => p.startsWith('resized') && number(p).isEven);
-    range('resized, to 0.6', (p) => p.startsWith('resized') && number(p).isOdd);
-    if (_android != null) {
-      range('rotated, to landscape', (p) => p.startsWith('rotated') && number(p).isOdd);
-      range('rotated, back to portrait', (p) => p.startsWith('rotated') && number(p).isEven);
-      range('back from the background', (p) => p.startsWith('resumed'));
+    // Each kind of point that came more than once, in the order they came.
+    final kinds = <String>{for (final point in marks.keys) _kind(point)};
+    for (final kind in kinds) {
+      if (marks.keys.where((p) => _kind(p) == kind).length > 1) range(kind, (p) => _kind(p) == kind);
     }
     if (idle.isNotEmpty) {
       print(
@@ -236,6 +274,9 @@ Future<void> _lifecycle(int cycles) async {
     await app.stop();
   }
 }
+
+/// A point's kind: its name without the number at the end.
+String _kind(String point) => point.replaceFirst(RegExp(r' \d+$'), '');
 
 /// Android only: [cycles] rotations to landscape and back, then [cycles]
 /// trips to the background, with the memory after each (from out here:
@@ -251,7 +292,7 @@ Future<void> _androidCycles(_App app, int cycles, _Heap heap, Map<String, _Footp
     final drawing = _baseline || app.windows.skip(from).any((w) => (w['presented'] as num) > 0);
     if (!drawing) idle.add(point);
     print(
-      '${point.padRight(12)} $footprint   Dart heap ${_mb(dart.capacity)} (${_mb(dart.used)} used)'
+      '${point.padRight(24)} $footprint   Dart heap ${_mb(dart.capacity)} (${_mb(dart.used)} used)'
       '${drawing ? '' : '   NOT DRAWING'}',
     );
   }
@@ -265,7 +306,7 @@ Future<void> _androidCycles(_App app, int cycles, _Heap heap, Map<String, _Footp
   try {
     for (var i = 1; i <= cycles * 2; i++) {
       await _adb(['shell', 'settings', 'put', 'system', 'user_rotation', i.isOdd ? '1' : '0']);
-      await mark('rotated $i');
+      await mark(i.isOdd ? 'rotated to landscape ${(i + 1) ~/ 2}' : 'rotated to portrait ${i ~/ 2}');
     }
   } finally {
     await _adb(['shell', 'settings', 'put', 'system', 'user_rotation', rotation == 'null' ? '0' : rotation]);
@@ -298,17 +339,18 @@ Future<String> _adb(List<String> args) async {
 
 /// The process's physical footprint: in total, the GPU memory it owns
 /// (render targets, buffers) and its IOSurfaces (ours and Flutter's). On
-/// Android: PSS with swap, and the Graphics row.
+/// Android: PSS with swap, and the App Summary's Graphics and Native Heap
+/// rows (malloc's: Rust's, the driver's and Flutter's own C++).
 class _Footprint {
-  _Footprint(this.total, this.gpu, this.surfaces, {this.android = false});
+  _Footprint(this.total, this.gpu, this.surfaces, {this.native});
 
   final int total;
-  final int? gpu, surfaces;
-  final bool android;
+  final int? gpu, surfaces, native;
+  bool get android => native != null;
 
   /// The lowest of five readings, 400 ms apart. The app stands still after
   /// each mark until [_Heap.read] says the readings are done (over adb they
-  /// take 5 to 7 s). On Android without a [pid]: hello's, through `dumpsys`.
+  /// take 5 to 7 s). On Android without a [pid]: the app's, through `dumpsys`.
   static Future<_Footprint> lowest([int? pid]) async {
     _Footprint? lowest;
     for (var i = 0; i < 5; i++) {
@@ -331,7 +373,7 @@ class _Footprint {
       kb(r'TOTAL PSS:\s+(\d+)') + kb(r'TOTAL SWAP PSS:\s+(\d+)'),
       kb(r'Graphics:\s+(\d+)'),
       null,
-      android: true,
+      native: kb(r'Native Heap:\s+(\d+)'),
     );
   }
 
@@ -352,7 +394,7 @@ class _Footprint {
     final (gpu, surfaces) = (this.gpu, this.surfaces);
     final all = _mb(total).padLeft(9);
     if (gpu == null) return all;
-    if (android) return '$all   Graphics ${_mb(gpu)}';
+    if (android) return '$all   Graphics ${_mb(gpu)}   Native ${_mb(native!)}';
     // On iOS the app reports Metal's part itself (the graphics ledger:
     // buffers, textures, the driver's pools). IOSurfaces aren't in it on
     // the iPhone; they are in the rest, with the CPU's memory.
@@ -370,7 +412,7 @@ class _App {
     _process.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(_line);
   }
 
-  /// hello with [settings]: on this Mac as environment variables, or on
+  /// The app with [settings]: on this Mac as environment variables, or on
   /// [_device] through `flutter run`.
   /// Starts the app and waits for its VM service. On Android, flutter run
   /// finds the service in the device's log, and a busy log can lose that
@@ -595,8 +637,17 @@ class _Heap {
   }
 
   /// Tells the app this point's memory is read, so its check goes on
-  /// (lib/main.dart holds still until then).
-  Future<void> read() => _call('ext.hello.read', {'isolateId': _isolate});
+  /// (Measurement.mark holds still until then).
+  Future<void> read() => _call('ext.fynkel.read', {'isolateId': _isolate});
+
+  /// Everything the app reported (Measurement.report), in order.
+  Future<void> printReports() async {
+    final reports = (await _call('ext.fynkel.reports', {'isolateId': _isolate}))['reports'] as List;
+    if (reports.isEmpty) return;
+    print('');
+    reports.forEach(print);
+    print('');
+  }
 
   Future<_Heap> _start() async {
     _streams = ((await _call('getVMTimelineFlags'))['recordedStreams'] as List?) ?? const [];

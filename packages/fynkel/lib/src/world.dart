@@ -34,7 +34,7 @@ final class World implements Finalizable {
 
   // Meshes, materials and textures this world has, both ways. They're
   // added the first time something uses them, and stay until the world is
-  // disposed or [Mesh.dispose] or [Texture2D.dispose] takes them out.
+  // disposed or their `dispose` takes them out.
   final _meshIds = <Mesh, int>{};
   final _meshes = <int, Mesh>{};
   final _materialIds = <Material, int>{};
@@ -197,6 +197,7 @@ final class World implements Finalizable {
   int _materialId(Material material) {
     final known = _materialIds[material];
     if (known != null) return known;
+    if (material.isDisposed) throw StateError('$material was disposed');
     _writeMaterial(material);
     check(fy_material_add(pointer, scratch.material, scratch.id));
     final id = scratch.id.value;
@@ -204,6 +205,16 @@ final class World implements Finalizable {
     _materials[id] = material;
     material._worlds.add(WeakReference(this));
     return id;
+  }
+
+  /// Takes [material] out of this world, for [Material.dispose]. The
+  /// engine refuses while an object uses it.
+  void _releaseMaterial(Material material) {
+    final id = _materialIds[material];
+    if (id == null || isDisposed) return;
+    check(fy_material_remove(_pointer, id));
+    _materialIds.remove(material);
+    _materials.remove(id);
   }
 
   /// Sends [material]'s new values to the engine. False once this world no

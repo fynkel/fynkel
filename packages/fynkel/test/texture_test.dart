@@ -109,6 +109,31 @@ void main() {
     expect(Mesh.cube().dispose, throwsStateError);
   });
 
+  test('a material in use cannot be disposed; once free of objects it can, and so can its textures', () {
+    final world = World();
+    addTearDown(world.dispose);
+    final red = Texture2D.rgba(1, 1, Uint8List.fromList([255, 0, 0, 255]));
+    final material = Material(name: 'paint', baseColorTexture: red);
+    final other = World();
+    addTearDown(other.dispose);
+    final object = world.spawn(MeshRenderer(Mesh.cube(), material));
+    final elsewhere = other.spawn(MeshRenderer(Mesh.cube(), material));
+    expect(material.dispose, throwsFynkel(FynkelStatus.inUse));
+    expect(material.isDisposed, isFalse);
+
+    object.despawn();
+    elsewhere.despawn();
+    expect(red.dispose, throwsFynkel(FynkelStatus.inUse, 'Texture2D(1 × 1) is still used by Material(\'paint\''));
+    material.dispose();
+    material.dispose();
+    expect(material.isDisposed, isTrue);
+    expect(() => world.spawn(MeshRenderer(Mesh.cube(), material)), throwsStateError);
+    expect(() => other.spawn(MeshRenderer(Mesh.cube(), material)), throwsStateError);
+    red.dispose();
+    expect(red.isDisposed, isTrue, reason: 'no world has a material that uses it now');
+    expect(world.spawn(MeshRenderer(Mesh.cube(), Material())).meshRenderer.material, isNotNull);
+  });
+
   test('the new material values reach the picture', () {
     final scene = stage1();
     addTearDown(scene.world.dispose);
