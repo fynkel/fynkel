@@ -1,17 +1,16 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:flutter/widgets.dart' show Offset, Size;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
-import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'package:garden/garden.dart';
 
 const width = 320, height = 200;
 
 /// A frame's input with one tap at ([x], [y]), in view pixels.
-FrameInput tap(double x, double y) => FrameInput(
-  size: Size(width.toDouble(), height.toDouble()),
+Input tap(double x, double y) => Input(
+  width: width.toDouble(),
+  height: height.toDouble(),
   taps: [ViewPoint(x, y, width: width.toDouble(), height: height.toDouble())],
 );
 
@@ -37,7 +36,7 @@ void main() {
     // The character stands in the middle of the view.
     garden.onFrame(0, tap(width / 2, height / 2));
     for (var i = 0; i < 60; i++) {
-      garden.onFrame(1 / 60, FrameInput(size: Size(width.toDouble(), height.toDouble())));
+      garden.onFrame(1 / 60, Input(width: width.toDouble(), height: height.toDouble()));
     }
     final turned = head.transform.rotation;
     // A quarter turn about its own up: the forward goes from -Z to -X.
@@ -84,12 +83,12 @@ void main() {
 
   test('a drag goes around the character, and scrolling zooms', () async {
     final start = garden.camera.transform.position;
-    garden.onFrame(0, FrameInput(size: const Size(320, 200), drag: const Offset(100, 0)));
+    garden.onFrame(0, Input(width: 320, height: 200, drag: Vec2(100, 0)));
     final around = garden.camera.transform.position;
     expect((around - start).length, greaterThan(1));
     expect(around.y, closeTo(start.y, 1e-9), reason: 'sideways, at the same height');
 
-    garden.onFrame(0, FrameInput(size: const Size(320, 200), scroll: const Offset(0, -200)));
+    garden.onFrame(0, Input(width: 320, height: 200, scroll: Vec2(0, -200)));
     final target = Vec3(0, 1.3, 0);
     expect((garden.camera.transform.position - target).length, lessThan((around - target).length));
   });

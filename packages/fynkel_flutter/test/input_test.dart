@@ -8,7 +8,7 @@ import 'package:fynkel_flutter/src/fynkel_view.dart' show channel;
 
 void main() {
   late World world;
-  late List<FrameInput> frames;
+  late List<Input> frames;
 
   setUp(() {
     world = World();
@@ -47,7 +47,7 @@ void main() {
   );
 
   /// One frame; returns its input.
-  Future<FrameInput> frame(WidgetTester tester) async {
+  Future<Input> frame(WidgetTester tester) async {
     await tester.pump(const Duration(milliseconds: 8));
     return frames.last;
   }
@@ -60,13 +60,13 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(app(view(resolutionScale: 0.5)));
     expect((await frame(tester)).tapped, isNull);
-    expect(frames.last.size, const Size(200, 100));
+    expect((frames.last.width, frames.last.height), (200, 100));
 
     await tester.tapAt(corner + const Offset(50, 20));
     final input = await frame(tester);
     expect(input.tapped, at(50, 20));
     expect(input.taps, [at(50, 20)]);
-    expect(input.drag, Offset.zero);
+    expect(input.drag, Vec2.zero);
     expect(input.pointers, isEmpty, reason: 'up again');
     expect((await frame(tester)).tapped, isNull, reason: 'only in the frame it happened');
   });
@@ -76,16 +76,16 @@ void main() {
     final finger = await tester.startGesture(corner + const Offset(20, 50));
     expect((await frame(tester)).pointers.values, [at(20, 50)]);
 
-    final drags = <Offset>[];
+    final drags = <Vec2>[];
     for (var i = 0; i < 10; i++) {
       await finger.moveBy(const Offset(5, -1));
       drags.add((await frame(tester)).drag);
     }
     // Touch slop is 18: the first three moves (15.3 away) are still a
     // possible tap; the fourth (20.4) counts all four.
-    expect(drags.take(3), everyElement(Offset.zero));
-    expect(drags[3], const Offset(20, -4));
-    expect(drags.skip(4), everyElement(const Offset(5, -1)));
+    expect(drags.take(3), everyElement(Vec2.zero));
+    expect(drags[3], Vec2(20, -4));
+    expect(drags.skip(4), everyElement(Vec2(5, -1)));
     expect(frames.last.pointers.values, [at(70, 40)]);
 
     await finger.up();
@@ -106,7 +106,7 @@ void main() {
     await again.moveBy(const Offset(15, 0));
     await again.moveBy(const Offset(15, 0));
     await again.moveBy(const Offset(15, 0));
-    expect((await frame(tester)).drag, const Offset(45, 0));
+    expect((await frame(tester)).drag, Vec2(45, 0));
     await again.up();
   });
 
@@ -116,16 +116,16 @@ void main() {
     final second = await tester.startGesture(corner + const Offset(150, 80), pointer: 2);
     await second.moveBy(const Offset(-40, 0));
     final both = await frame(tester);
-    expect(both.drag, Offset.zero);
+    expect(both.drag, Vec2.zero);
     expect(both.pointers, {1: at(20, 20), 2: at(110, 80)});
 
     await first.moveBy(const Offset(0, 30));
-    expect((await frame(tester)).drag, const Offset(0, 30));
+    expect((await frame(tester)).drag, Vec2(0, 30));
 
     await first.up();
     await frame(tester);
     await second.moveBy(const Offset(-3, 0));
-    expect((await frame(tester)).drag, const Offset(-3, 0), reason: 'the second is first now, and already dragging');
+    expect((await frame(tester)).drag, Vec2(-3, 0), reason: 'the second is first now, and already dragging');
     await second.up();
     expect((await frame(tester)).taps, isEmpty, reason: 'neither was a tap');
   });
@@ -136,7 +136,7 @@ void main() {
     await mouse.addPointer(location: corner + const Offset(10, 10));
     await mouse.moveTo(corner + const Offset(60, 10));
     final hovered = await frame(tester);
-    expect(hovered.drag, Offset.zero, reason: 'moving without a button is no drag');
+    expect(hovered.drag, Vec2.zero, reason: 'moving without a button is no drag');
     expect(hovered.pointers, isEmpty);
 
     await mouse.down(corner + const Offset(60, 10));
@@ -158,7 +158,7 @@ void main() {
     );
     expect((await frame(tester)).pointers, hasLength(1));
     await right.moveBy(const Offset(4, 0));
-    expect((await frame(tester)).drag, const Offset(4, 0), reason: "a mouse's slop is 1 pixel");
+    expect((await frame(tester)).drag, Vec2(4, 0), reason: "a mouse's slop is 1 pixel");
     await right.up();
     expect((await frame(tester)).tapped, isNull);
     await mouse.removePointer();
@@ -183,14 +183,14 @@ void main() {
     final inside = const Offset(400, 300);
     await tester.sendEventToBinding(PointerScrollEvent(position: inside, scrollDelta: const Offset(0, 30)));
     await tester.sendEventToBinding(PointerScrollEvent(position: inside, scrollDelta: const Offset(0, 12)));
-    expect((await frame(tester)).scroll, const Offset(0, 42));
+    expect((await frame(tester)).scroll, Vec2(0, 42));
     expect(list.offset, 0, reason: 'the view claimed the wheel');
-    expect((await frame(tester)).scroll, Offset.zero);
+    expect((await frame(tester)).scroll, Vec2.zero);
 
     final trackpad = await tester.createGesture(kind: PointerDeviceKind.trackpad);
     await trackpad.panZoomStart(inside);
     await trackpad.panZoomUpdate(inside, pan: const Offset(0, -20));
-    expect((await frame(tester)).scroll, const Offset(0, 20), reason: 'fingers up scroll down');
+    expect((await frame(tester)).scroll, Vec2(0, 20), reason: 'fingers up scroll down');
     await trackpad.panZoomEnd();
   });
 
@@ -287,4 +287,45 @@ void main() {
       expect(hit?.object, hits ? cube : null, reason: '$point');
     }
   });
+
+  testWidgets("the view runs the world's loop: a tap reaches the object under it", (tester) async {
+    final box = world.add(_Box());
+    await tester.pumpWidget(app(view()));
+    await frame(tester);
+    expect(box.started, isTrue);
+    expect(box.updates, greaterThan(0));
+
+    await tester.tapAt(corner + const Offset(100, 50));
+    await frame(tester);
+    expect(box.taps, 1);
+    await tester.tapAt(corner + const Offset(150, 50));
+    await frame(tester);
+    expect(box.taps, 1, reason: 'beside it');
+  });
+}
+
+class _Box extends GameObject {
+  _Box() : super(components: [MeshRenderer(Mesh.cube(), Material())]);
+
+  var started = false;
+  var updates = 0;
+  var taps = 0;
+
+  @override
+  void onStart() {
+    super.onStart();
+    started = true;
+  }
+
+  @override
+  void onUpdate(double dt) {
+    super.onUpdate(dt);
+    updates++;
+  }
+
+  @override
+  bool onTap(Tap tap) {
+    taps++;
+    return true;
+  }
 }

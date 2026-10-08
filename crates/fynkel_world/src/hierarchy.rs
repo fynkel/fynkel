@@ -18,7 +18,7 @@
 use glam::Mat4;
 
 use crate::ObjectId;
-use crate::components::Transform;
+use crate::components::{Camera, Transform};
 use crate::id::IdMap;
 use crate::world::{Result, World, WorldError};
 
@@ -170,6 +170,18 @@ impl World {
             at = self.hierarchy.parent(current);
         }
         Ok(true)
+    }
+
+    /// The camera a view draws from: the shown object with the lowest id
+    /// that has both a `Camera` and a `Transform`, or `None`.
+    pub fn active_camera(&self) -> Option<ObjectId> {
+        let mut best: Option<ObjectId> = None;
+        self.for_each2::<Camera, Transform>(|id, _, _| {
+            if best.is_none_or(|b| id < b) && self.active_in_hierarchy(id).unwrap_or(false) {
+                best = Some(id);
+            }
+        });
+        best
     }
 
     pub fn name(&self, id: ObjectId) -> Result<Option<&str>> {

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:fynkel/fynkel.dart' show Input;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'package:fynkel_measure/fynkel_measure.dart';
 
@@ -109,7 +110,7 @@ class _GardenPageState extends State<GardenPage> {
   Duration? _firstTick;
   var _ticks = 0;
 
-  void _onFrame(double dt, FrameInput input) {
+  void _onFrame(double dt, Input input) {
     _ticks++;
     if (_ticks == 1) _firstTick = _startClock.elapsed;
     if (_ticks == 2) {

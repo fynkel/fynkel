@@ -8,6 +8,7 @@ environment:
 
 dependencies:
   ffi: ^2.2.0
+  meta: ^1.16.0
   # hook/build.dart builds the engine (crates/fynkel_ffi) as a code asset.
   hooks: ^2.2.0
   code_assets: ^2.1.0

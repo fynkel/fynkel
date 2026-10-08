@@ -85,7 +85,7 @@ settles.
 ```
 crates/
   fynkel_world/     an active flag: an inactive object and everything below it isn't drawn or hit by rays
-  fynkel_ffi/       fy_active_get / fy_active_set / fy_active_in_hierarchy_get (ABI 9)
+  fynkel_ffi/       fy_active_get / fy_active_set / fy_active_in_hierarchy_get (ABI 9); fy_camera_active (ABI 10)
 packages/
   fynkel/           GameObject you can extend: onLoad, onStart, onUpdate, onTap, onDestroy; add and destroy;
                     World.update(dt, input); Input and Tap (plain Dart); Assets (by name, shared, released)
@@ -138,7 +138,17 @@ Each frame, `world.update(dt, input)` does, in this order:
 
 Everyone reads the same input: `input.drag`, `input.scroll`, `input.keys` and so on, as `FrameInput` does today, through `input` on any object. The order is fixed and documented, and tests check it, so a game can rely on "my parent updated before me".
 
-Only objects whose class overrides `onUpdate` are visited each frame. Dart can't see overrides, so `GameObject`'s own `onUpdate` takes the object off the update list the first time it's called: a class that doesn't override it is visited once, never again, and nothing has to be declared. Model nodes and plain objects get no Dart object at all until asked for, so they cost nothing per frame. The budget: 10,000 updating objects in trees, each moving itself, in under 1 ms on the Note10+.
+~~Only objects whose class overrides `onUpdate` are visited each frame~~ (see step 3 below). Model nodes get no Dart object at all until asked for, so they cost nothing per frame. The budget: 10,000 updating objects in trees, each moving itself, in under 1 ms on the Note10+.
+
+- *Settled in step 3:*
+  - **Every object the game added is visited**, not only those that override `onUpdate`. Taking an object off the list when `GameObject`'s own `onUpdate` runs can't work with `@mustCallSuper`: an override calls `super.onUpdate(dt)`, which would take it off too. Visiting is cheap: 10,000 objects with nothing to do cost 0.02 ms on the Mac and the iPhone, 0.07 ms on the Note10+.
+  - **`@mustCallSuper` works as promised**: a mixin's `onUpdate` without `super.onUpdate(dt)` is an analyzer warning (`must_call_super`). `onTap` isn't marked: it returns whether the tap was taken.
+  - **The order is the order of adding**, which puts parents before children. A new `parent` counts from the next frame: the moved object and everything below it go last. Objects added during a start start the same frame; objects added during an update or shown by one start the next.
+  - **Hidden objects** (inactive, or below one) are skipped by taps, starts and updates, and start when first shown. Dart works this out itself, as only Dart turns objects off; with none off it costs nothing.
+  - **`onDestroy`** comes children first, while each object is still there to read, and before it's gone from the engine. Adding to a dying object throws.
+  - **A tap is taken only by returning true**; an object that destroys itself in `onTap` and returns false passes it on. A tap on nothing, or with no camera, goes nowhere. Its ray starts at the camera's near plane, as `rayThrough` always did.
+  - **Taps are cast from the camera the view draws from**, which only the engine knows (the lowest shown id with a camera and a transform): `fy_camera_active`, a small query added to the C interface (ABI 10).
+  - **`Input` is plain Dart** in package:fynkel: sizes in logical pixels, `drag` and `scroll` as `Vec2`, keys as `Object`s (Flutter's `LogicalKeyboardKey`s when fynkel_flutter fills it). It replaces fynkel_flutter's `FrameInput`, and `FynkelView` now runs `world.update(dt, input)` each frame, after `onFrame`.
 
 ### 3.3 Loading, and when an object appears
 
@@ -221,7 +231,12 @@ filled by fynkel_flutter; `@mustCallSuper` on the lifecycle. *Done when*
 tests fix the order in §3.2 (starts, parents first, added mid-update,
 destroyed mid-update, the bubble, two mixins' updates both running), and
 10,000 updating objects are measured on the Mac, the iPhone and the
-Note10+ against the 1 ms budget.
+Note10+ against the 1 ms budget. Thirteen tests in `test/loop_test.dart`
+and one through `FynkelView`; 16 mutants, 15 killed (the one left only
+frees memory). **The loop itself is in the budget everywhere; 10,000
+objects each moving itself are not, on any device** (§6): the cost is
+the transform's read and write through the C interface, one call each
+per object, as stage 1 measured.
 
 **Step 4: loading and assets.** `onLoad`, inactive until loaded, load
 errors, `Assets` with its source, sharing, ownership and release,
@@ -290,3 +305,21 @@ About 0.02 ms more for 10,000 objects (a flag per object in the matrices
 pass, and the lookup of where each object stands), well inside the 1 ms
 budget. The iPhone ran stage 2's extract as fast as the Mac; the phones
 are measured again with the loop in step 3.
+
+### Step 3: the loop (`measure bench`, profile builds, the UI isolate)
+
+`world.update` with 10,000 objects in 100 trees of 100, median (slowest)
+of 300 steady frames:
+
+| 10,000 objects | Mac (M3 Max) | iPhone 16 Pro Max | Galaxy Note10+ |
+|---|---:|---:|---:|
+| with nothing to do (the loop) | 0.02 (0.04) ms | 0.02 (0.04) ms | 0.07 (0.45) ms |
+| reading their transforms | 0.51 (0.68) ms | 0.52 (0.66) ms | 2.03 (4.75) ms |
+| moving themselves (`rotate`) | 1.47 (1.82) ms | 1.33 (1.78) ms | **6.10** (8.99) ms |
+
+The loop costs next to nothing. Moving 10,000 objects one call at a time
+misses the 1 ms budget everywhere, by six times on the Note10+: each
+`rotate` reads the transform from the engine and writes it back
+(stage 1 measured the same 1.25 ms on the Mac), and the Note10+ is 4 – 5
+times slower per call. The extract and raycast numbers in the same runs
+match stage 2's.

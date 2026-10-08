@@ -340,6 +340,7 @@ fn an_inactive_object_and_everything_below_it_are_left_out() {
     let (mut scene, mut ops) = (RenderScene::default(), Vec::new());
     extract.run(&world, &mut scene, &mut ops);
     assert_eq!(scene.camera, full.camera, "the rig's camera is left out");
+    assert_ne!(world.active_camera(), Some(parts[0]), "and the world agrees");
     assert_eq!(scene.sun, full.sun, "and its sun");
     assert!(close(scene.ambient, full.ambient), "and its ambient light");
     assert_eq!(scene.draws.iter().map(|d| d.mesh).collect::<Vec<_>>(), [mesh_key(cube_mesh)], "and its sphere");
@@ -347,6 +348,7 @@ fn an_inactive_object_and_everything_below_it_are_left_out() {
     world.set_active(rig, true).unwrap();
     extract.run(&world, &mut scene, &mut ops);
     assert!((scene.camera.unwrap().fov_y - 20f32.to_radians()).abs() < 1e-6, "shown, the rig's camera wins");
+    assert_eq!(world.active_camera(), Some(parts[0]));
     assert_eq!(scene.sun.unwrap().color, Vec3::splat(9.0), "and its sun");
     assert!(close(scene.ambient, Vec3::splat(9.15)));
     assert_eq!(scene.draws.len(), 2);
