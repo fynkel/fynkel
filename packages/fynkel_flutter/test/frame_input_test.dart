@@ -12,7 +12,12 @@ void main() {
 
   setUp(() {
     world = World();
-    world.spawn(Camera(), Transform(position: Vec3(0, 0, 4)));
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, 4)),
+        components: [Camera()],
+      ),
+    );
     frames = [];
     var texture = 1;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
@@ -264,9 +269,14 @@ void main() {
   });
 
   testWidgets('a tap aims a ray at what the view shows there', (tester) async {
-    final cube = world.spawn(Transform(), MeshRenderer(Mesh.cube(), Material()));
+    final cube = world.add(GameObject(transform: Transform(), components: [MeshRenderer(Mesh.cube(), Material())]));
     // Where the view's camera (the setUp one) is.
-    final camera = world.spawn(Camera(), Transform(position: Vec3(0, 0, 4)));
+    final camera = world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, 4)),
+        components: [Camera()],
+      ),
+    );
     await tester.pumpWidget(app(view()));
     await frame(tester);
 

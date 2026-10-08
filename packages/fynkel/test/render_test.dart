@@ -8,13 +8,25 @@ import 'golden.dart';
 /// The stage 1 scene, written the way a game writes it.
 ({World world, GameObject cube, Material orange}) stage1() {
   final world = World();
-  world.spawn(Camera(), Transform(position: Vec3(0, 1.5, 4), lookAt: Vec3.zero));
-  world.spawn(Light.sun(), Transform(forward: Vec3(-0.4, -1, -0.3)));
-  world.spawn(Light.ambient(intensity: 0.15));
+  world.add(
+    GameObject(
+      transform: Transform(position: Vec3(0, 1.5, 4), lookAt: Vec3.zero),
+      components: [Camera()],
+    ),
+  );
+  world.add(
+    GameObject(
+      transform: Transform(forward: Vec3(-0.4, -1, -0.3)),
+      components: [Light.sun()],
+    ),
+  );
+  world.add(GameObject(components: [Light.ambient(intensity: 0.15)]));
   final orange = Material(color: Color(0xFFE0613A));
-  final cube = world.spawn(
-    Transform(rotation: Quat.axisAngle(Vec3.up, 30 * math.pi / 180)),
-    MeshRenderer(Mesh.cube(), orange),
+  final cube = world.add(
+    GameObject(
+      transform: Transform(rotation: Quat.axisAngle(Vec3.up, 30 * math.pi / 180)),
+      components: [MeshRenderer(Mesh.cube(), orange)],
+    ),
   );
   return (world: world, cube: cube, orange: orange);
 }
@@ -57,7 +69,7 @@ void main() {
     addTearDown(scene.world.dispose);
 
     final before = view.read(view.frame()).rgba;
-    scene.cube.despawn();
+    scene.cube.destroy();
     final after = view.read(view.frame()).rgba;
     final i = (32 * 64 + 32) * 4;
     expect(before.sublist(i, i + 3), isNot(after.sublist(i, i + 3)));

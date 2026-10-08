@@ -23,17 +23,26 @@ Future<Uint8List> render(String name, Vec3 centre, double radius, Vec3 from) asy
   final world = World();
   addTearDown(world.dispose);
   final model = await Model.load(glb(name));
-  world.spawnModel(model);
+  world.add(model.instantiate());
   const fov = 40.0;
   final distance = radius / math.sin(fov * math.pi / 180 / 2) * 1.05;
   final camera = Transform(position: centre + from.normalized * distance, lookAt: centre);
-  world.spawn(
-    Camera(fovY: fov, near: radius * 0.05, far: radius * 8 + 10, clearColor: Color.rgb(0.16, 0.17, 0.2)),
-    camera,
+  world.add(
+    GameObject(
+      transform: camera,
+      components: [
+        Camera(fovY: fov, near: radius * 0.05, far: radius * 8 + 10, clearColor: Color.rgb(0.16, 0.17, 0.2)),
+      ],
+    ),
   );
   final shoulder = camera.rotation.rotate(Vec3(-0.5, 0.8, 0.6));
-  world.spawn(Light.sun(), Transform(forward: -shoulder));
-  world.spawn(Light.ambient(intensity: 0.25));
+  world.add(
+    GameObject(
+      transform: Transform(forward: -shoulder),
+      components: [Light.sun()],
+    ),
+  );
+  world.add(GameObject(components: [Light.ambient(intensity: 0.25)]));
   final view = HeadlessView(world, width: 256, height: 256);
   addTearDown(view.dispose);
   return view.read(view.frame()).rgba;
@@ -81,7 +90,7 @@ void main() {
     final world = World();
     addTearDown(world.dispose);
     final truck = await Model.load(glb('CesiumMilkTruck.glb'));
-    final root = world.spawnModel(truck, Transform(position: Vec3(2, 0, 0)));
+    final root = world.add(truck.instantiate(transform: Transform(position: Vec3(2, 0, 0))));
     expect(root.name, 'Scene');
     expect(root.transform.position, Vec3(2, 0, 0));
     final body = root.find('Cesium_Milk_Truck')!;
@@ -95,10 +104,15 @@ void main() {
   test('copies of a model share its GPU data and its materials', () async {
     final world = World();
     addTearDown(world.dispose);
-    world.spawn(Camera(), Transform(position: Vec3(0, 2, 12), lookAt: Vec3.zero));
-    world.spawn(Light.ambient());
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 2, 12), lookAt: Vec3.zero),
+        components: [Camera()],
+      ),
+    );
+    world.add(GameObject(components: [Light.ambient()]));
     final truck = await Model.load(glb('CesiumMilkTruck.glb'));
-    final first = world.spawnModel(truck, Transform(position: Vec3(-3, 0, 0)));
+    final first = world.add(truck.instantiate(transform: Transform(position: Vec3(-3, 0, 0))));
     final view = HeadlessView(world, width: 64, height: 64);
     addTearDown(view.dispose);
     view.read(view.frame());
@@ -106,7 +120,7 @@ void main() {
     expect(once.$1, greaterThan(0));
     expect(once.$2, greaterThan(0));
 
-    final second = world.spawnModel(truck, Transform(position: Vec3(3, 0, 0)));
+    final second = world.add(truck.instantiate(transform: Transform(position: Vec3(3, 0, 0))));
     view.read(view.frame());
     expect((view.stats.meshBytes, view.stats.textureBytes), once);
 
@@ -119,7 +133,7 @@ void main() {
 
     // A disposed model can't be spawned again; what was spawned stays.
     truck.dispose();
-    expect(() => world.spawnModel(truck), throwsStateError);
+    expect(() => world.add(truck.instantiate()), throwsStateError);
     expect(first.find('Wheels')!.isAlive, isTrue);
   });
 

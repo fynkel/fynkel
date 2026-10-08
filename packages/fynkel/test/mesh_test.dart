@@ -41,13 +41,15 @@ void main() {
   test('meshes made in Dart render to the same golden image as the Rust test', () async {
     final scene = stage1();
     addTearDown(scene.world.dispose);
-    scene.cube.despawn();
+    scene.cube.destroy();
     // One made here, one on a helper isolate: the same result.
     final meshes = [(pyramid(), -0.8), (await Mesh.inBackground(octahedron), 0.8)];
     for (final (mesh, x) in meshes) {
-      scene.world.spawn(
-        Transform(position: Vec3(x, 0, 0), lookAt: Vec3(x + 1, 0, 1)),
-        MeshRenderer(mesh, scene.orange),
+      scene.world.add(
+        GameObject(
+          transform: Transform(position: Vec3(x, 0, 0), lookAt: Vec3(x + 1, 0, 1)),
+          components: [MeshRenderer(mesh, scene.orange)],
+        ),
       );
     }
     final view = HeadlessView(scene.world, width: 256, height: 160);
@@ -112,8 +114,8 @@ void main() {
     addTearDown(a.dispose);
     addTearDown(b.dispose);
     final material = Material();
-    final inA = a.spawn(MeshRenderer(terrain, material));
-    final inB = b.spawn(MeshRenderer(terrain, material));
+    final inA = a.add(GameObject(components: [MeshRenderer(terrain, material)]));
+    final inB = b.add(GameObject(components: [MeshRenderer(terrain, material)]));
     expect(inA.meshRenderer.mesh, same(terrain));
     expect(inB.meshRenderer.mesh, same(terrain));
   });

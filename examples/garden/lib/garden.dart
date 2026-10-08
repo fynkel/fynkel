@@ -32,9 +32,19 @@ const _props = [
 
 class Garden {
   Garden(this._bytesOf) {
-    camera = world.spawn(Camera(fovY: 50, clearColor: Color.rgb(0.55, 0.75, 0.95)), _cameraTransform());
-    world.spawn(Light.sun(intensity: 2.5), Transform(forward: Vec3(-0.4, -1, -0.3)));
-    world.spawn(Light.ambient(color: Color.rgb(0.75, 0.85, 1), intensity: 0.5));
+    camera = world.add(
+      GameObject(
+        transform: _cameraTransform(),
+        components: [Camera(fovY: 50, clearColor: Color.rgb(0.55, 0.75, 0.95))],
+      ),
+    );
+    world.add(
+      GameObject(
+        transform: Transform(forward: Vec3(-0.4, -1, -0.3)),
+        components: [Light.sun(intensity: 2.5)],
+      ),
+    );
+    world.add(GameObject(components: [Light.ambient(color: Color.rgb(0.75, 0.85, 1), intensity: 0.5)]));
   }
 
   final BytesOf _bytesOf;
@@ -59,11 +69,15 @@ class Garden {
   Future<List<LoadTime>> load() async {
     final ground = _timed('grass.png', (bytes) async {
       final grass = await Texture2D.load(bytes);
-      return () => world.spawn(
-        Transform(scale: Vec3(30, 1, 30)),
-        MeshRenderer(
-          Mesh.plane(),
-          Material(baseColorTexture: grass, uvScale: Vec2(15, 15), roughness: 1, name: 'grass'),
+      return () => world.add(
+        GameObject(
+          transform: Transform(scale: Vec3(30, 1, 30)),
+          components: [
+            MeshRenderer(
+              Mesh.plane(),
+              Material(baseColorTexture: grass, uvScale: Vec2(15, 15), roughness: 1, name: 'grass'),
+            ),
+          ],
         ),
       );
     });
@@ -82,7 +96,7 @@ class Garden {
   Future<LoadTime> loadCharacter() => _timed('character.glb', (bytes) async {
     final model = _characterModel = await Model.load(bytes);
     return () {
-      final c = character = world.spawnModel(model, Transform(rotation: Quat.axisAngle(Vec3.up, 0.4)));
+      final c = character = world.add(model.instantiate(transform: Transform(rotation: Quat.axisAngle(Vec3.up, 0.4))));
       _head = c.find('head');
       _headTarget = _headTurned = 0;
     };
@@ -94,7 +108,7 @@ class Garden {
   void unloadCharacter() {
     final model = _characterModel;
     if (model == null) return;
-    character!.despawn();
+    character!.destroy();
     character = _head = _characterModel = null;
     for (final material in model.materials) {
       material.dispose();
@@ -129,12 +143,13 @@ class Garden {
     for (var i = 0; i < (tree ? 6 : 3); i++) {
       final angle = random.nextDouble() * 2 * math.pi;
       final radius = tree ? 13 + random.nextDouble() * 3 : 2.5 + random.nextDouble() * 3.5;
-      world.spawnModel(
-        model,
-        Transform(
-          position: Vec3(math.cos(angle) * radius, 0, math.sin(angle) * radius),
-          rotation: Quat.axisAngle(Vec3.up, random.nextDouble() * 2 * math.pi),
-          scale: Vec3(3, 3, 3),
+      world.add(
+        model.instantiate(
+          transform: Transform(
+            position: Vec3(math.cos(angle) * radius, 0, math.sin(angle) * radius),
+            rotation: Quat.axisAngle(Vec3.up, random.nextDouble() * 2 * math.pi),
+            scale: Vec3(3, 3, 3),
+          ),
         ),
       );
     }
