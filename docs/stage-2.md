@@ -56,6 +56,7 @@ compression, Windows and Linux. Each comes back later on its own.
 
 ```
 crates/
+  fynkel_mesh/      NEW (step 2): CPU meshes: the 48-byte vertex, built-in shapes, checks, normals, MikkTSpace tangents
   fynkel_world/     parents, children and names, world transforms, recursive despawn; Texture and Model resources
   fynkel_render/    vertex format with UVs and tangents, custom meshes, textures and samplers, textured PBR, alpha mask
   fynkel_load/      NEW: PNG/JPEG decoding + mipmaps, and .glb parsing into plain data. No GPU, no world, no threads of its own.
@@ -67,8 +68,11 @@ examples/
   garden/           the stage 2 acceptance app
 ```
 
-`fynkel_load` turns bytes into plain values (`ImageData`, `ModelData`)
-and is tested without a GPU. Dependencies still only point down;
+`fynkel_mesh` (*added while building step 2*) holds triangle meshes on the
+CPU. The renderer uploads them, the world keeps them (raycasts in step 5
+read the triangles), and `fynkel_load` will produce them, so none of
+those three has to know another. `fynkel_load` turns bytes into plain
+values (`ImageData`, `ModelData`) and is tested without a GPU. Dependencies still only point down;
 `fynkel_load` doesn't know the world or the renderer.
 
 ## 3. Design decisions
@@ -89,6 +93,13 @@ and is tested without a GPU. Dependencies still only point down;
 
 - Vertices gain UVs and tangents (position, normal, tangent with handedness, UV: 48 bytes). Built-in shapes get both. When a glTF mesh has no tangents, they're generated with MikkTSpace, as glTF requires.
 - `Mesh.custom(positions:, normals:, uvs:, indices:)` makes a mesh from code (rule 2: everything a loader can do, code can do too). Normals and tangents are computed when left out.
+- *Settled in step 2:*
+  - **Mesh objects.** A `Mesh` is an engine object of its own, made without a world and shared, not copied, by every world that uses it. `Mesh.raw` takes packed lists (including tangents), like Flutter's `Vertices.raw`. `Mesh.inBackground(() => ...)` builds one on a helper isolate.
+  - **Why the helper isolate.** MikkTSpace takes about 1 µs per triangle, so a big mesh with UVs shouldn't be built on the UI thread. Textures in step 3 follow the same pattern.
+  - **Computed normals.** They're weighted by angle, so they don't depend on how a face was cut into triangles. A shared vertex is smooth; a sharp edge needs a vertex per side.
+  - **Generated tangents.** A vertex whose faces need different tangents (a mirrored texture's seam) is split.
+  - **Tangent sign.** A tangent's `w` makes `cross(normal, tangent) * w` point up the image, as glTF normal maps expect.
+  - **Built-in shapes.** Their tangents are worked out exactly, not generated, and a test checks that they agree with MikkTSpace.
 - `Texture.load(bytes)` decodes PNG or JPEG and builds the mipmaps on a helper isolate (in Rust, through FFI), then hands the pixels to the world. The render worker uploads them; the Dart UI thread never waits for decoding or for the GPU. `Texture.rgba(width, height, pixels)` makes one from code.
 - Colour textures (base colour, emissive) are sRGB; data textures (normal, metallic-roughness, occlusion) are linear. The material slot decides, so the same image can't be read the wrong way.
 - Mipmaps are built on the CPU in linear light, so a texture doesn't darken as it shrinks. A golden test checks a distant checkerboard is mid-grey, not darker.
@@ -126,9 +137,11 @@ recursive despawn, cycles as errors, the Dart API, and the 10,000-object
 benchmark. *Done when* the tests and the budget pass on the Mac. Numbers
 in §6.
 
-**Step 2: vertex format and custom meshes.** UVs and tangents, MikkTSpace,
-`Mesh.custom`. *Done when* the golden images match (the cube is
-re-blessed once, after you look at it) and a custom mesh renders.
+**Step 2: vertex format and custom meshes.** ✅ UVs and tangents,
+MikkTSpace, `Mesh.custom`. *Done when* the golden images match (the cube is
+re-blessed once, after you look at it) and a custom mesh renders. No
+golden needed re-blessing: the shapes' positions and normals didn't
+change. Numbers in §6.
 
 **Step 3: textures.** `fynkel_load` decoding with mipmaps, `Texture`,
 material slots, sRGB vs linear, the sampler, freeing. *Done when* the
@@ -198,4 +211,28 @@ world matrices that rebuilt the order every frame fails that test.
 The phones aren't measured yet: the Note10+ wasn't connected, and a Rust
 test binary can't run on the iPhone. Both are measured in step 6, when
 `examples/garden` shows the frame clock's time on screen.
+
+### Step 2: vertex format and custom meshes (Mac, M3 Max, release build)
+
+Building meshes (`cargo run --release -p fynkel_mesh --example build`,
+best of 5, two runs):
+
+| Mesh | time | vertices |
+|---|---|---|
+| cube | 0.002–0.003 ms | 24 |
+| sphere 48 × 24 | 0.03–0.04 ms | 1,225 |
+| plane | < 0.001 ms | 4 |
+| 256 × 256 grid, positions only | 2.9–3.7 ms | 66,049 |
+| the same, with normals given | 0.46–0.55 ms | 66,049 |
+| the same, with UVs (tangents generated) | 115–120 ms | 66,049 |
+
+- **MikkTSpace dominates.** It costs about 0.9 µs per triangle, which matches the reference implementation; `bevy_mikktspace` is a safe port of it, byte for byte.
+- **Built-in shapes.** With generated tangents the sphere took 3 ms. With its tangents worked out exactly it takes 0.03 ms, so the shapes aren't generated.
+- **Big meshes.** A mesh like the grid belongs in `Mesh.inBackground`; a Dart test builds a 128 × 128 terrain that way.
+
+Every golden image from stage 1 matches unchanged with the 48-byte
+vertices, on the Mac, in the iOS Simulator and in the Android emulator.
+The new golden `custom_meshes` shows a pyramid with flat faces and an
+octahedron with smooth ones, both with computed normals. It's made once
+through the C interface and once from Dart, and the two match.
 

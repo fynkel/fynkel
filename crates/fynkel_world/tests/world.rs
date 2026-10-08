@@ -8,7 +8,7 @@ use fynkel_world::*;
 
 fn world_with_cube() -> (World, MeshId, MaterialId) {
     let mut world = World::new();
-    let mesh = world.add_mesh(MeshSource::Cube);
+    let mesh = world.add_mesh(MeshData::cube());
     let material = world.add_material(Material::default()).unwrap();
     (world, mesh, material)
 }
@@ -177,11 +177,11 @@ fn meshes_cannot_be_removed_while_in_use() {
     world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(material) }).unwrap();
 
     assert_eq!(world.remove_mesh(mesh), Err(WorldError::MeshInUse { mesh, object: id }));
-    assert_eq!(world.mesh(mesh), Ok(MeshSource::Cube));
+    assert_eq!(world.mesh(mesh).map(|m| m.indices().len()), Ok(36));
 
     world.despawn(id).unwrap();
     world.remove_mesh(mesh).unwrap();
-    assert_eq!(world.mesh(mesh), Err(WorldError::NoMesh(mesh)));
+    assert_eq!(world.mesh(mesh).err(), Some(WorldError::NoMesh(mesh)));
     assert_eq!(world.remove_mesh(mesh), Err(WorldError::NoMesh(mesh)));
 }
 
@@ -200,9 +200,9 @@ fn materials_cannot_be_removed_while_in_use() {
 #[test]
 fn resource_ids_are_never_reused() {
     let mut world = World::new();
-    let a = world.add_mesh(MeshSource::Cube);
+    let a = world.add_mesh(MeshData::plane());
     world.remove_mesh(a).unwrap();
-    let b = world.add_mesh(MeshSource::Cube);
+    let b = world.add_mesh(MeshData::plane());
     assert_ne!(a, b);
 
     let m = world.add_material(Material::default()).unwrap();
@@ -230,11 +230,11 @@ fn materials_are_validated_and_can_change() {
 #[test]
 fn meshes_lists_every_mesh_still_there() {
     let mut world = World::new();
-    let cube = world.add_mesh(MeshSource::Cube);
-    let sphere = world.add_mesh(MeshSource::Sphere);
-    let plane = world.add_mesh(MeshSource::Plane);
+    let cube = world.add_mesh(MeshData::cube());
+    let sphere = world.add_mesh(MeshData::sphere(8, 4));
+    let plane = world.add_mesh(MeshData::plane());
     world.remove_mesh(sphere).unwrap();
-    let mut listed: Vec<_> = world.meshes().collect();
-    listed.sort_by_key(|(id, _)| *id);
-    assert_eq!(listed, [(cube, MeshSource::Cube), (plane, MeshSource::Plane)]);
+    let mut listed: Vec<_> = world.meshes().map(|(id, m)| (id, m.indices().len())).collect();
+    listed.sort();
+    assert_eq!(listed, [(cube, 36), (plane, 6)]);
 }

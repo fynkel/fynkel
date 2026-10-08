@@ -24,8 +24,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread;
 
 use fynkel_present::Target;
-use fynkel_render::{Gpu, MeshData, RenderScene, Renderer};
-use fynkel_world::MeshSource;
+use fynkel_render::{Gpu, RenderScene, Renderer};
 
 use crate::extract::MeshOp;
 
@@ -281,7 +280,7 @@ fn run<T: Target>(shared: &Shared, gpu: Gpu, mut renderer: Renderer, mut target:
             }
             for op in ops.drain(..) {
                 match op {
-                    MeshOp::Upload(key, source) => renderer.upload_mesh(key, &mesh_data(source)),
+                    MeshOp::Upload(key, mesh) => renderer.upload_mesh(key, &mesh),
                     MeshOp::Remove(key) => {
                         renderer.remove_mesh(key);
                     }
@@ -312,15 +311,6 @@ fn run<T: Target>(shared: &Shared, gpu: Gpu, mut renderer: Renderer, mut target:
         } else {
             mailbox.stats.skipped += 1;
         }
-    }
-}
-
-/// The built-in shapes. The sphere's 48 × 24 matches the golden images.
-fn mesh_data(source: MeshSource) -> MeshData {
-    match source {
-        MeshSource::Cube => MeshData::cube(),
-        MeshSource::Sphere => MeshData::sphere(48, 24),
-        MeshSource::Plane => MeshData::plane(),
     }
 }
 

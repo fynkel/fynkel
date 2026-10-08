@@ -43,8 +43,7 @@ fn a_sphere_lit_from_the_left_matches_its_golden() {
         let ambient = world.spawn();
         ok(fy_light_set(w, ambient, &FyLight { kind: FY_LIGHT_AMBIENT, color: white, intensity: 0.05 }));
 
-        let (mut mesh, mut material) = (0, 0);
-        ok(fy_mesh_add(w, FY_MESH_SPHERE, &mut mesh));
+        let (mesh, mut material) = (add_shape(&world, FY_MESH_SPHERE), 0);
         // Linear 0.8, as the golden scene has it, written in sRGB.
         let grey = 1.055 * 0.8f32.powf(1.0 / 2.4) - 0.055;
         let matte = FyMaterial { base_color: srgb(grey, grey, grey), metallic: 0.0, roughness: 0.6 };
@@ -135,9 +134,10 @@ fn values_are_validated_with_a_message_that_names_the_field() {
         assert_eq!(fy_light_set(world.0, id, &light), FyStatus::InvalidValue);
         assert_eq!(last_error(), "Light.kind 7 doesn't exist (0 = directional, 1 = ambient)");
 
+        let mut shape = ptr::null_mut();
+        assert_eq!(fy_mesh_new_shape(3, &mut shape), FyStatus::InvalidValue);
+        assert!(shape.is_null(), "nothing written on failure");
         let mut mesh = 0;
-        assert_eq!(fy_mesh_add(world.0, 3, &mut mesh), FyStatus::InvalidValue);
-        assert_eq!(mesh, 0, "nothing written on failure");
 
         let rough = FyMaterial { base_color: srgb(1.0, 1.0, 1.0), metallic: 0.0, roughness: 2.0 };
         assert_eq!(fy_material_add(world.0, &rough, &mut mesh), FyStatus::InvalidValue);
@@ -259,8 +259,8 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_4() {
-    assert_eq!(fy_abi_version(), 4);
+fn the_abi_version_is_5() {
+    assert_eq!(fy_abi_version(), 5);
 }
 
 #[cfg(not(target_os = "android"))]
@@ -410,4 +410,128 @@ fn the_world_transform_composes_the_parents() {
     assert!(position.abs_diff_eq(Vec3::new(-1.0, 0.0, 0.0), 1e-5), "{position}");
     assert!(Quat::from(out.rotation).abs_diff_eq(turn, 1e-5));
     assert!(Vec3::from(out.scale).abs_diff_eq(Vec3::splat(2.0), 1e-5));
+}
+
+/// `mesh` as `fy_mesh_new` takes it, positions and indices only.
+fn custom(positions: &[[f32; 3]], indices: &[u32]) -> FyMeshData {
+    FyMeshData {
+        positions: positions.as_ptr().cast(),
+        normals: ptr::null(),
+        tangents: ptr::null(),
+        uvs: ptr::null(),
+        vertex_count: positions.len(),
+        indices: indices.as_ptr(),
+        index_count: indices.len(),
+    }
+}
+
+/// A mesh handle that frees itself.
+struct Mesh(*mut FyMesh);
+
+impl Mesh {
+    fn new(data: &FyMeshData) -> Result<Self, FyStatus> {
+        let mut mesh = ptr::null_mut();
+        // SAFETY: a pointer to a local, whose arrays outlive the call.
+        match unsafe { fy_mesh_new(data, &mut mesh) } {
+            FyStatus::Ok => Ok(Self(mesh)),
+            status => {
+                assert!(mesh.is_null(), "nothing written on failure");
+                Err(status)
+            }
+        }
+    }
+
+    fn counts(&self) -> (usize, usize) {
+        let (mut vertices, mut indices) = (0, 0);
+        // SAFETY: a live mesh and pointers to locals.
+        ok(unsafe { fy_mesh_counts(self.0, &mut vertices, &mut indices) });
+        (vertices, indices)
+    }
+}
+
+impl Drop for Mesh {
+    fn drop(&mut self) {
+        // SAFETY: made by fy_mesh_new, not used again.
+        unsafe { fy_mesh_free(self.0) };
+    }
+}
+
+/// Two meshes made from code with only positions and indices, so the
+/// engine computes their normals: a pyramid with a vertex per face corner
+/// (flat faces) and an octahedron whose six vertices are shared (smooth).
+/// The handles are freed before drawing; the world keeps its share.
+#[test]
+fn custom_meshes_render_with_computed_normals() {
+    use fynkel_world::{Transform, Vec3};
+    let world = World::new();
+    let cube = stage1(&world);
+    let (w, mut renderer) = (world.0, FyMeshRenderer::default());
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        ok(fy_mesh_renderer_get(w, cube, &mut renderer));
+        ok(fy_despawn(w, cube));
+    }
+
+    let apex = [0.0, 0.6, 0.0];
+    let base = [[-0.5, -0.4, 0.5], [0.5, -0.4, 0.5], [0.5, -0.4, -0.5], [-0.5, -0.4, -0.5]];
+    let mut pyramid: Vec<[f32; 3]> = vec![];
+    for i in 0..4 {
+        pyramid.extend([base[i], base[(i + 1) % 4], apex]);
+    }
+    pyramid.extend([base[0], base[3], base[2], base[0], base[2], base[1]]);
+    let pyramid_indices: Vec<u32> = (0..pyramid.len() as u32).collect();
+
+    let octahedron =
+        [[0.6, 0.0, 0.0], [-0.6, 0.0, 0.0], [0.0, 0.6, 0.0], [0.0, -0.6, 0.0], [0.0, 0.0, 0.6], [0.0, 0.0, -0.6]];
+    let mut octahedron_indices = vec![];
+    for (x, y, z) in [(0, 2, 4), (4, 2, 1), (1, 2, 5), (5, 2, 0), (4, 3, 0), (1, 3, 4), (5, 3, 1), (0, 3, 5)] {
+        octahedron_indices.extend([x, y, z]);
+    }
+
+    for (positions, indices, x) in
+        [(&pyramid[..], &pyramid_indices[..], -0.8), (&octahedron[..], &octahedron_indices[..], 0.8)]
+    {
+        let handle = Mesh::new(&custom(positions, indices)).unwrap();
+        assert_eq!(handle.counts(), (positions.len(), indices.len()));
+        let mut mesh = 0;
+        // SAFETY: a live world and mesh, and pointers to locals.
+        unsafe {
+            ok(fy_mesh_add(w, handle.0, &mut mesh));
+            let id = world.spawn();
+            let placed = Transform::from_position(Vec3::new(x, 0.0, 0.0));
+            ok(fy_transform_set(w, id, &transform(placed.looking_at(Vec3::new(x + 1.0, 0.0, 1.0)))));
+            ok(fy_mesh_renderer_set(w, id, &FyMeshRenderer { mesh, material: renderer.material }));
+        }
+    }
+    let view = View::headless(&world, 256, 160);
+    assert_golden("custom_meshes", &view.read(view.frame(), 256, 160));
+}
+
+#[test]
+fn a_broken_mesh_is_refused_with_a_clear_message() {
+    let triangle = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+    assert_eq!(Mesh::new(&custom(&triangle, &[0, 1, 9])).err(), Some(FyStatus::InvalidValue));
+    assert_eq!(last_error(), "index 2 is 9, but there are only 3 vertices");
+    assert_eq!(Mesh::new(&custom(&triangle, &[0, 1])).err(), Some(FyStatus::InvalidValue));
+    let no_positions = FyMeshData { positions: ptr::null(), ..custom(&triangle, &[0, 1, 2]) };
+    assert_eq!(Mesh::new(&no_positions).err(), Some(FyStatus::NullPointer));
+    assert_eq!(last_error(), "positions is null");
+
+    let world = World::new();
+    let mut id = 0;
+    // SAFETY: a live world; null for the mesh.
+    assert_eq!(unsafe { fy_mesh_add(world.0, ptr::null(), &mut id) }, FyStatus::NullPointer);
+    assert_eq!(last_error(), "mesh is null");
+}
+
+/// A texture mirrored down the middle: the two vertices on the mirror line
+/// need opposite tangents, so they're split, and the counts say so.
+#[test]
+fn generated_tangents_can_add_vertices() {
+    let positions =
+        [[-1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+    let uvs = [[0.0f32, 0.0], [1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 1.0]];
+    let indices = [3, 4, 1, 3, 1, 0, 4, 5, 2, 4, 2, 1];
+    let mesh = Mesh::new(&FyMeshData { uvs: uvs.as_ptr().cast(), ..custom(&positions, &indices) }).unwrap();
+    assert_eq!(mesh.counts(), (8, 12));
 }

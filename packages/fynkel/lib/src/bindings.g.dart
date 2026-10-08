@@ -92,8 +92,24 @@ external int fy_material_remove(ffi.Pointer<FyWorld> world, int id);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyMaterial>)>(isLeaf: true)
 external int fy_material_set(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyMaterial> value);
 
-@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint32, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
-external int fy_mesh_add(ffi.Pointer<FyWorld> world, int shape, ffi.Pointer<ffi.Uint64> out);
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
+external int fy_mesh_add(ffi.Pointer<FyWorld> world, ffi.Pointer<FyMesh> mesh, ffi.Pointer<ffi.Uint64> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Size>, ffi.Pointer<ffi.Size>)>(isLeaf: true)
+external int fy_mesh_counts(
+  ffi.Pointer<FyMesh> mesh,
+  ffi.Pointer<ffi.Size> out_vertices,
+  ffi.Pointer<ffi.Size> out_indices,
+);
+
+@ffi.Native<ffi.Void Function(ffi.Pointer<FyMesh>)>(isLeaf: true)
+external void fy_mesh_free(ffi.Pointer<FyMesh> mesh);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMeshData>, ffi.Pointer<ffi.Pointer<FyMesh>>)>()
+external int fy_mesh_new(ffi.Pointer<FyMeshData> mesh, ffi.Pointer<ffi.Pointer<FyMesh>> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Uint32, ffi.Pointer<ffi.Pointer<FyMesh>>)>(isLeaf: true)
+external int fy_mesh_new_shape(int shape, ffi.Pointer<ffi.Pointer<FyMesh>> out);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
 external int fy_mesh_remove(ffi.Pointer<FyWorld> world, int id);
@@ -198,7 +214,7 @@ external ffi.Pointer<FyWorld> fy_world_new();
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
 external int fy_world_transform_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> out);
 
-const int FY_ABI_VERSION = 4;
+const int FY_ABI_VERSION = 5;
 
 const int FY_APPLE_MORE = 2;
 
@@ -271,6 +287,44 @@ final class FyMaterial extends ffi.Struct {
 
   @ffi.Float()
   external double roughness;
+}
+
+final class FyMesh extends ffi.Opaque {}
+
+final class FyMeshData extends ffi.Struct {
+  external ffi.Pointer<ffi.Float> positions;
+
+  external ffi.Pointer<ffi.Float> normals;
+
+  external ffi.Pointer<ffi.Float> tangents;
+
+  external ffi.Pointer<ffi.Float> uvs;
+
+  @ffi.Size()
+  external int vertex_count;
+
+  external ffi.Pointer<ffi.Uint32> indices;
+
+  @ffi.Size()
+  external int index_count;
+
+  static ffi.Pointer<FyMeshData> $allocate(
+    ffi.Allocator $allocator, {
+    required ffi.Pointer<ffi.Float> positions,
+    required ffi.Pointer<ffi.Float> normals,
+    required ffi.Pointer<ffi.Float> tangents,
+    required ffi.Pointer<ffi.Float> uvs,
+    required int vertex_count,
+    required ffi.Pointer<ffi.Uint32> indices,
+    required int index_count,
+  }) => $allocator<FyMeshData>()
+    ..ref.positions = positions
+    ..ref.normals = normals
+    ..ref.tangents = tangents
+    ..ref.uvs = uvs
+    ..ref.vertex_count = vertex_count
+    ..ref.indices = indices
+    ..ref.index_count = index_count;
 }
 
 final class FyMeshRenderer extends ffi.Struct {

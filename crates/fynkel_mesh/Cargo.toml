@@ -1,0 +1,16 @@
+[package]
+name = "fynkel_mesh"
+description = "Triangle meshes on the CPU: the vertex layout, built-in shapes, checks, normals and MikkTSpace tangents. No GPU, no world."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+glam.workspace = true
+bytemuck.workspace = true
+bevy_mikktspace.workspace = true

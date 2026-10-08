@@ -4,7 +4,11 @@ use crate::components::{Component, MeshRenderer};
 use crate::describe::{Describe, FieldError, Value};
 use crate::hierarchy::Hierarchy;
 use crate::id::{IdCounter, IdMap};
-use crate::resources::{Material, MeshSource};
+use std::sync::Arc;
+
+use fynkel_mesh::MeshData;
+
+use crate::resources::Material;
 use crate::{MaterialId, MeshId, ObjectId};
 
 /// Why a world operation was refused. On error, the world is unchanged.
@@ -73,7 +77,7 @@ pub struct World {
     pub(crate) entities: IdMap<ObjectId, hecs::Entity>,
     pub(crate) hierarchy: Hierarchy,
     object_ids: IdCounter,
-    meshes: IdMap<MeshId, MeshSource>,
+    meshes: IdMap<MeshId, Arc<MeshData>>,
     mesh_ids: IdCounter,
     materials: IdMap<MaterialId, Material>,
     material_ids: IdCounter,
@@ -227,19 +231,21 @@ impl World {
 
     // --- Meshes ------------------------------------------------------------
 
-    pub fn add_mesh(&mut self, source: MeshSource) -> MeshId {
+    /// Adds a mesh. It's shared, not copied: each view's renderer uploads
+    /// it from here, and raycasts read it.
+    pub fn add_mesh(&mut self, mesh: impl Into<Arc<MeshData>>) -> MeshId {
         let id = MeshId::new(self.mesh_ids.next());
-        self.meshes.insert(id, source);
+        self.meshes.insert(id, mesh.into());
         id
     }
 
-    pub fn mesh(&self, id: MeshId) -> Result<MeshSource> {
-        self.meshes.get(&id).copied().ok_or(WorldError::NoMesh(id))
+    pub fn mesh(&self, id: MeshId) -> Result<&Arc<MeshData>> {
+        self.meshes.get(&id).ok_or(WorldError::NoMesh(id))
     }
 
     /// Every mesh, in no particular order.
-    pub fn meshes(&self) -> impl Iterator<Item = (MeshId, MeshSource)> + '_ {
-        self.meshes.iter().map(|(&id, &source)| (id, source))
+    pub fn meshes(&self) -> impl Iterator<Item = (MeshId, &Arc<MeshData>)> + '_ {
+        self.meshes.iter().map(|(&id, mesh)| (id, mesh))
     }
 
     /// Removes a mesh. Refused while any object's [`MeshRenderer`] uses it.

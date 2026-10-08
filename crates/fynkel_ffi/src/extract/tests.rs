@@ -13,7 +13,7 @@ fn stage1_world() -> (World, MeshId) {
     world.insert(sun, Transform::default().looking_at(Vec3::new(-0.4, -1.0, -0.3))).unwrap();
     let ambient = world.spawn();
     world.insert(ambient, Light::ambient(Color::WHITE, 0.15)).unwrap();
-    let mesh = world.add_mesh(MeshSource::Cube);
+    let mesh = world.add_mesh(MeshData::cube());
     let material = world.add_material(Material::color(Color::from_argb32(0xFFE0613A))).unwrap();
     let cube = world.spawn();
     world
@@ -27,6 +27,16 @@ fn extract(world: &World) -> (RenderScene, Vec<MeshOp>) {
     let (mut scene, mut ops) = (RenderScene::default(), Vec::new());
     Extract::default().run(world, &mut scene, &mut ops);
     (scene, ops)
+}
+
+/// The keys of the uploads in `ops`, which must hold only uploads.
+fn uploads(ops: &[MeshOp]) -> Vec<MeshKey> {
+    ops.iter()
+        .map(|op| match op {
+            MeshOp::Upload(key, _) => *key,
+            MeshOp::Remove(key) => panic!("expected only uploads, got a removal of {key:?}"),
+        })
+        .collect()
 }
 
 fn close(a: Vec3, b: Vec3) -> bool {
@@ -57,7 +67,7 @@ fn the_stage_1_scene_is_extracted_resolved_and_linear() {
     assert_eq!(draw.material.base_color, Color::from_argb32(0xFFE0613A).to_linear());
     assert_eq!((draw.material.metallic, draw.material.roughness), (0.0, 0.5));
 
-    assert_eq!(ops, [MeshOp::Upload(mesh_key(mesh), MeshSource::Cube)]);
+    assert_eq!(uploads(&ops), [mesh_key(mesh)]);
 }
 
 #[test]
@@ -110,15 +120,17 @@ fn each_mesh_is_uploaded_once_and_removed_when_the_world_removes_it() {
     let (mut world, cube) = stage1_world();
     let (mut extract, mut scene, mut ops) = (Extract::default(), RenderScene::default(), Vec::new());
     extract.run(&world, &mut scene, &mut ops);
-    assert_eq!(ops, [MeshOp::Upload(mesh_key(cube), MeshSource::Cube)]);
+    assert_eq!(uploads(&ops), [mesh_key(cube)]);
+    let MeshOp::Upload(_, shared) = &ops[0] else { unreachable!() };
+    assert!(Arc::ptr_eq(shared, world.mesh(cube).unwrap()), "the world's data, not a copy");
 
     ops.clear();
     extract.run(&world, &mut scene, &mut ops);
     assert_eq!(ops, [], "nothing changed");
 
-    let sphere = world.add_mesh(MeshSource::Sphere);
+    let sphere = world.add_mesh(MeshData::sphere(8, 4));
     extract.run(&world, &mut scene, &mut ops);
-    assert_eq!(ops, [MeshOp::Upload(mesh_key(sphere), MeshSource::Sphere)]);
+    assert_eq!(uploads(&ops), [mesh_key(sphere)]);
 
     ops.clear();
     world.remove_mesh(sphere).unwrap();
@@ -129,7 +141,7 @@ fn each_mesh_is_uploaded_once_and_removed_when_the_world_removes_it() {
 #[test]
 fn a_new_extract_uploads_every_mesh_the_world_has() {
     let (mut world, _) = stage1_world();
-    world.add_mesh(MeshSource::Plane);
+    world.add_mesh(MeshData::plane());
     assert_eq!(extract(&world).1.len(), 2);
 }
 

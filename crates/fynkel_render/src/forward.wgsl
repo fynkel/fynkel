@@ -23,19 +23,21 @@ struct Frame {
 struct VertexIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    // Locations 2 and 3 are the tangent and UV, unused until textures
+    // (stage 2 step 3).
     // Per draw (instance step):
-    @location(2) model_0: vec4<f32>,
-    @location(3) model_1: vec4<f32>,
-    @location(4) model_2: vec4<f32>,
-    @location(5) model_3: vec4<f32>,
+    @location(4) model_0: vec4<f32>,
+    @location(5) model_1: vec4<f32>,
+    @location(6) model_2: vec4<f32>,
+    @location(7) model_3: vec4<f32>,
     // The inverse-transpose of the model matrix's upper 3×3, so normals
     // stay perpendicular under non-uniform scale.
-    @location(6) normal_0: vec3<f32>,
-    @location(7) normal_1: vec3<f32>,
-    @location(8) normal_2: vec3<f32>,
-    @location(9) base_color: vec4<f32>,
+    @location(8) normal_0: vec3<f32>,
+    @location(9) normal_1: vec3<f32>,
+    @location(10) normal_2: vec3<f32>,
+    @location(11) base_color: vec4<f32>,
     // x: metallic, y: roughness.
-    @location(10) params: vec4<f32>,
+    @location(12) params: vec4<f32>,
 };
 
 struct VertexOut {

@@ -16,7 +16,7 @@ fn main() {
     let mut best = [Duration::MAX; 5];
     for _ in 0..RUNS {
         let mut world = World::new();
-        let mesh = world.add_mesh(MeshSource::Cube);
+        let mesh = world.add_mesh(MeshData::cube());
         let material = world.add_material(Material::default()).unwrap();
         let renderer = MeshRenderer { mesh: Some(mesh), material: Some(material) };
         let mut ids = Vec::with_capacity(N);

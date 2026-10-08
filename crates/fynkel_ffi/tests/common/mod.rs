@@ -55,6 +55,19 @@ pub fn argb(argb: u32) -> FyColor {
     FyColor { r: c(16), g: c(8), b: c(0), a: c(24) }
 }
 
+/// Adds a built-in shape to the world and returns its id, freeing the
+/// handle again as `package:fynkel` would for a mesh it no longer needs.
+pub fn add_shape(world: &World, shape: u32) -> u64 {
+    let (mut mesh, mut id) = (std::ptr::null_mut(), 0);
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        ok(fy_mesh_new_shape(shape, &mut mesh));
+        ok(fy_mesh_add(world.0, mesh, &mut id));
+        fy_mesh_free(mesh);
+    }
+    id
+}
+
 /// The stage 1 scene, made only through `fy_*` calls. Returns the cube.
 pub fn stage1(world: &World) -> u64 {
     let w = world.0;
@@ -76,8 +89,7 @@ pub fn stage1(world: &World) -> u64 {
         let light = FyLight { kind: FY_LIGHT_AMBIENT, color: srgb(1.0, 1.0, 1.0), intensity: 0.15 };
         ok(fy_light_set(w, ambient, &light));
 
-        let (mut mesh, mut material) = (0, 0);
-        ok(fy_mesh_add(w, FY_MESH_CUBE, &mut mesh));
+        let (mesh, mut material) = (add_shape(world, FY_MESH_CUBE), 0);
         let orange = FyMaterial { base_color: argb(0xFFE0613A), metallic: 0.0, roughness: 0.5 };
         ok(fy_material_add(w, &orange, &mut material));
         let cube = world.spawn();
