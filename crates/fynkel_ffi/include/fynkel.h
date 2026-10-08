@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 3
+#define FY_ABI_VERSION 4
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -208,6 +208,90 @@ FyStatus fy_despawn(const struct FyWorld *world, uint64_t id);
 //
 // `world` is null or live.
 bool fy_exists(const struct FyWorld *world, uint64_t id);
+
+// Makes `child` a child of `parent`, or a root when `parent` is 0. Its
+// `Transform` is kept, so it now counts from the new parent. A parent that
+// is `child` or below it is refused with `FY_STATUS_INVALID_VALUE`.
+//
+// # Safety
+//
+// `world` is null or live.
+FyStatus fy_parent_set(const struct FyWorld *world, uint64_t child, uint64_t parent);
+
+// Writes the object's parent to `out`, or 0 for a root.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FyStatus fy_parent_get(const struct FyWorld *world, uint64_t id, uint64_t *out);
+
+// The object's children, in the order they were added. Writes how many
+// there are to `out_count`, and copies them into `buf` only when they all
+// fit in `cap`.
+//
+// # Safety
+//
+// `world` is null or live; `buf` is null or valid for `cap` writes;
+// `out_count` is null or writable.
+FyStatus fy_children_get(const struct FyWorld *world,
+                         uint64_t id,
+                         uint64_t *buf,
+                         size_t cap,
+                         size_t *out_count);
+
+// Writes to `out` whether `id` is `root` or below it.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FyStatus fy_is_part_of(const struct FyWorld *world, uint64_t id, uint64_t root, bool *out);
+
+// Names the object with `len` bytes of UTF-8 at `name`, or clears its name
+// when `len` is 0. Names needn't be unique.
+//
+// # Safety
+//
+// `world` is null or live; `name` is null or valid for `len` reads.
+FyStatus fy_name_set(const struct FyWorld *world, uint64_t id, const uint8_t *name, size_t len);
+
+// The object's name as UTF-8, without a terminating zero. Writes its
+// length in bytes to `out_len` (0 for no name), and copies it into `buf`
+// only when it fits in `cap`.
+//
+// # Safety
+//
+// `world` is null or live; `buf` is null or valid for `cap` writes;
+// `out_len` is null or writable.
+FyStatus fy_name_get(const struct FyWorld *world,
+                     uint64_t id,
+                     uint8_t *buf,
+                     size_t cap,
+                     size_t *out_len);
+
+// Writes to `out` the first object below `root` named `name` (`len` bytes
+// of UTF-8), depth first in child order, or 0 when there's none. `root`
+// itself isn't searched.
+//
+// # Safety
+//
+// `world` is null or live; `name` is null or valid for `len` reads; `out`
+// is null or writable.
+FyStatus fy_find(const struct FyWorld *world,
+                 uint64_t root,
+                 const uint8_t *name,
+                 size_t len,
+                 uint64_t *out);
+
+// The object's transform in the world: its own after its parents'. The
+// position and rotation are exact; the scale is approximate when a parent
+// with an uneven scale has a rotated child, because the result is skewed
+// and no position, rotation and scale can say that. An object without a
+// `Transform` counts as not moved from its parent.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FyStatus fy_world_transform_get(const struct FyWorld *world, uint64_t id, struct FyTransform *out);
 
 // Adds or replaces the object's `Transform`. The rotation must be a unit
 // quaternion and every value finite.

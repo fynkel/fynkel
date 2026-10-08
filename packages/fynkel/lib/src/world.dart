@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ffi';
 
 import 'bindings.g.dart';
@@ -133,9 +134,97 @@ final class GameObject {
   /// world hasn't been disposed).
   bool get isAlive => !world.isDisposed && fy_exists(world._pointer, id);
 
-  /// Removes the object and its components. Using it afterwards throws a
+  /// Removes the object and its components, and its [children] with
+  /// theirs, all the way down. Using any of them afterwards throws a
   /// [FynkelException] with [FynkelStatus.noObject].
   void despawn() => check(fy_despawn(world.pointer, id));
+
+  // --- Hierarchy ---
+
+  /// The object this one hangs from, or null for a root. Its [transform] is
+  /// relative to its parent, so it moves, turns and scales with it.
+  ///
+  /// Setting it keeps [transform] as it is (now counted from the new
+  /// parent) and puts the object last among the parent's [children].
+  /// Setting null makes it a root. A parent that is this object or below it
+  /// throws [FynkelStatus.invalidValue], as does one from another world.
+  GameObject? get parent {
+    check(fy_parent_get(world.pointer, id, scratch.id));
+    final parent = scratch.id.value;
+    return parent == 0 ? null : GameObject._(world, parent);
+  }
+
+  set parent(GameObject? value) {
+    if (value != null && !identical(value.world, world)) {
+      throw FynkelException(
+        FynkelStatus.invalidValue,
+        '$value is in another world, so it can\'t be the parent of $this',
+      );
+    }
+    check(fy_parent_set(world.pointer, id, value?.id ?? 0));
+  }
+
+  /// The objects whose [parent] is this one, in the order they were added.
+  /// A new list each time.
+  List<GameObject> get children {
+    final w = world.pointer;
+    var capacity = scratch.idCapacity;
+    check(fy_children_get(w, id, scratch.ids(), capacity, scratch.count));
+    final count = scratch.count.value;
+    if (count > capacity) {
+      check(fy_children_get(w, id, scratch.ids(count), count, scratch.count));
+    }
+    final ids = scratch.ids();
+    return List.unmodifiable([for (var i = 0; i < count; i++) GameObject._(world, ids[i])]);
+  }
+
+  /// Whether this object is [other] or below it.
+  bool isPartOf(GameObject other) {
+    if (!identical(other.world, world)) return false;
+    check(fy_is_part_of(world.pointer, id, other.id, scratch.flag));
+    return scratch.flag.value;
+  }
+
+  /// The object's name, or null. Names needn't be unique; setting '' is
+  /// the same as null.
+  String? get name {
+    final w = world.pointer;
+    var capacity = scratch.byteCapacity;
+    check(fy_name_get(w, id, scratch.bytes(), capacity, scratch.count));
+    final length = scratch.count.value;
+    if (length == 0) return null;
+    if (length > capacity) {
+      check(fy_name_get(w, id, scratch.bytes(length), length, scratch.count));
+    }
+    return const Utf8Decoder().convert(scratch.bytes().asTypedList(length));
+  }
+
+  set name(String? value) {
+    final length = scratch.utf8(value ?? '');
+    check(fy_name_set(world.pointer, id, scratch.bytes(), length));
+  }
+
+  /// The first object below this one named [name], searching depth first
+  /// in [children] order, or null. This object itself isn't searched.
+  GameObject? find(String name) {
+    final length = scratch.utf8(name);
+    check(fy_find(world.pointer, id, scratch.bytes(), length, scratch.id));
+    final found = scratch.id.value;
+    return found == 0 ? null : GameObject._(world, found);
+  }
+
+  /// Where the object is in the world: its [transform] after its parents'.
+  /// Read only; to move it, set [transform].
+  ///
+  /// The position and rotation are exact. The scale is approximate when a
+  /// parent with an uneven scale has a rotated child: the result is then
+  /// skewed, which no position, rotation and scale can describe (Unity
+  /// calls this the "lossy" scale).
+  Transform get worldTransform {
+    check(fy_world_transform_get(world.pointer, id, scratch.transform));
+    final t = scratch.transform.ref;
+    return Transform._(t.position.read(), t.rotation.read(), t.scale.read());
+  }
 
   /// Adds [component], replacing one of the same kind.
   void add(Component component) => switch (component) {
@@ -174,7 +263,8 @@ final class GameObject {
   /// Turns the object [angle] radians around [axis], in its own frame.
   void rotate(Vec3 axis, double angle) => transform = transform.rotated(axis, angle);
 
-  /// Moves the object by [offset], in world space.
+  /// Moves the object by [offset], in its parent's space (the world's for
+  /// a root).
   void translate(Vec3 offset) => transform = transform.translated(offset);
 
   Camera get camera {

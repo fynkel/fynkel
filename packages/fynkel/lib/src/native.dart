@@ -1,6 +1,7 @@
 // What every call into the engine shares: the ABI check, turning a status
 // into an exception, and scratch memory for passing structs.
 
+import 'dart:convert';
 import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
@@ -47,6 +48,45 @@ final class Scratch {
   final meshRenderer = malloc<FyMeshRenderer>();
   final material = malloc<FyMaterial>();
   final viewStats = malloc<FyViewStats>();
+  final count = malloc<Size>();
+  final flag = malloc<Bool>();
+
+  // Room for lists of ids and for strings, grown when a call needs more.
+  var _ids = malloc<Uint64>(_initial);
+  var _idCapacity = _initial;
+  var _bytes = malloc<Uint8>(_initial * 4);
+  var _byteCapacity = _initial * 4;
+  static const _initial = 16;
+
+  int get idCapacity => _idCapacity;
+  int get byteCapacity => _byteCapacity;
+
+  /// At least [count] ids.
+  Pointer<Uint64> ids([int count = 0]) {
+    if (count > _idCapacity) {
+      malloc.free(_ids);
+      _ids = malloc<Uint64>(count);
+      _idCapacity = count;
+    }
+    return _ids;
+  }
+
+  /// At least [count] bytes.
+  Pointer<Uint8> bytes([int count = 0]) {
+    if (count > _byteCapacity) {
+      malloc.free(_bytes);
+      _bytes = malloc<Uint8>(count);
+      _byteCapacity = count;
+    }
+    return _bytes;
+  }
+
+  /// Copies [s] as UTF-8 into [bytes] and returns its length in bytes.
+  int utf8(String s) {
+    final encoded = const Utf8Encoder().convert(s);
+    bytes(encoded.length).asTypedList(encoded.length).setAll(0, encoded);
+    return encoded.length;
+  }
 }
 
 final scratch = Scratch();

@@ -1,4 +1,4 @@
-//! The stage 1 components (plan §3.2): Transform, MeshRenderer, Camera and
+//! The components (stage 1 plan §3.2): Transform, MeshRenderer, Camera and
 //! Light.
 //!
 //! Conventions: right-handed, +Y up, -Z forward (glTF's), metres, angles in
@@ -14,8 +14,8 @@ pub trait Component: Describe + Default + Copy + Send + Sync + 'static {}
 
 // --- Transform -------------------------------------------------------------
 
-/// Where an object is, how it's turned and how big it is. There's no
-/// parent/child hierarchy in stage 1, so this is the world transform.
+/// Where an object is, how it's turned and how big it is, relative to its
+/// parent (`World::set_parent`), or to the world for an object without one.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Transform {
     pub position: Vec3,

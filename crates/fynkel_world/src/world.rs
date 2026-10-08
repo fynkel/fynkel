@@ -2,6 +2,7 @@
 
 use crate::components::{Component, MeshRenderer};
 use crate::describe::{Describe, FieldError, Value};
+use crate::hierarchy::Hierarchy;
 use crate::id::{IdCounter, IdMap};
 use crate::resources::{Material, MeshSource};
 use crate::{MaterialId, MeshId, ObjectId};
@@ -28,6 +29,11 @@ pub enum WorldError {
     },
     /// A field value failed validation.
     Field(FieldError),
+    /// `parent` is `child` or below it, so it can't be `child`'s parent.
+    Cycle {
+        child: ObjectId,
+        parent: ObjectId,
+    },
 }
 
 impl std::fmt::Display for WorldError {
@@ -40,6 +46,9 @@ impl std::fmt::Display for WorldError {
             WorldError::MeshInUse { mesh, object } => write!(f, "{mesh} is still used by {object}"),
             WorldError::MaterialInUse { material, object } => write!(f, "{material} is still used by {object}"),
             WorldError::Field(e) => e.fmt(f),
+            WorldError::Cycle { child, parent } => {
+                write!(f, "{parent} can't be the parent of {child}: it is {child} or below it")
+            }
         }
     }
 }
@@ -59,9 +68,10 @@ pub type Result<T> = std::result::Result<T, WorldError>;
 /// Objects are addressed only by [`ObjectId`]. The `hecs` entity behind an
 /// id is a private detail, and no public item names a `hecs` type.
 pub struct World {
-    ecs: hecs::World,
+    pub(crate) ecs: hecs::World,
     /// The only place an `ObjectId` and a `hecs::Entity` meet.
-    entities: IdMap<ObjectId, hecs::Entity>,
+    pub(crate) entities: IdMap<ObjectId, hecs::Entity>,
+    pub(crate) hierarchy: Hierarchy,
     object_ids: IdCounter,
     meshes: IdMap<MeshId, MeshSource>,
     mesh_ids: IdCounter,
@@ -90,6 +100,7 @@ impl World {
         Self {
             ecs: hecs::World::new(),
             entities: IdMap::default(),
+            hierarchy: Hierarchy::default(),
             object_ids: IdCounter::new(),
             meshes: IdMap::default(),
             mesh_ids: IdCounter::new(),
@@ -109,11 +120,15 @@ impl World {
         id
     }
 
-    /// Removes an object and all its components. Its id is never handed out
-    /// again.
+    /// Removes an object, its components and its children, theirs too.
+    /// None of their ids is ever handed out again.
     pub fn despawn(&mut self, id: ObjectId) -> Result<()> {
-        let entity = self.entities.remove(&id).ok_or(WorldError::NoObject(id))?;
-        self.ecs.despawn(entity).expect("the id map only holds live entities");
+        self.entity(id)?;
+        let below = self.take_subtree(id);
+        for id in std::iter::once(id).chain(below.into_iter().flatten()) {
+            let entity = self.entities.remove(&id).expect("the hierarchy only holds live objects");
+            self.ecs.despawn(entity).expect("the id map only holds live entities");
+        }
         Ok(())
     }
 
@@ -130,7 +145,7 @@ impl World {
         self.len() == 0
     }
 
-    fn entity(&self, id: ObjectId) -> Result<hecs::Entity> {
+    pub(crate) fn entity(&self, id: ObjectId) -> Result<hecs::Entity> {
         self.entities.get(&id).copied().ok_or(WorldError::NoObject(id))
     }
 

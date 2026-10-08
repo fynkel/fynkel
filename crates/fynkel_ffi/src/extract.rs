@@ -6,18 +6,23 @@
 //! - The camera is the one on the object with the lowest id that has both a
 //!   `Camera` and a `Transform`. Its transform's scale is ignored.
 //! - The sun is the directional light with the lowest id that has a
-//!   `Transform`; it shines along the transform's forward (-Z). A
+//!   `Transform`; it shines along its world forward (-Z). A
 //!   directional light without a transform has no direction and is
 //!   ignored.
 //! - Every ambient light adds to the ambient term.
 //! - An object is drawn when it has a `Transform` and a `MeshRenderer`
 //!   with both a mesh and a material.
+//! - Everything is placed by its world transform: its own after its
+//!   parents' (stage 2 plan §3.1). The camera and the sun take only the
+//!   position and rotation from it; a parent's scale doesn't stretch them.
 
 use std::collections::HashSet;
 
 use fynkel_render::glam::{Mat4, Vec3};
 use fynkel_render::{CameraView, Draw, MeshKey, PbrMaterial, RenderScene, Sun};
-use fynkel_world::{Camera, Color, Light, LightKind, MeshId, MeshRenderer, MeshSource, ObjectId, Transform, World};
+use fynkel_world::{
+    Camera, Color, Light, LightKind, MeshId, MeshRenderer, MeshSource, ObjectId, Quat, Transform, World, WorldMatrices,
+};
 
 /// A change to the meshes the renderer holds.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,6 +36,7 @@ pub(crate) enum MeshOp {
 #[derive(Debug, Default)]
 pub(crate) struct Extract {
     uploaded: HashSet<MeshId>,
+    matrices: WorldMatrices,
 }
 
 pub(crate) fn mesh_key(id: MeshId) -> MeshKey {
@@ -57,25 +63,40 @@ impl Extract {
             }
         }
 
+        self.matrices.update(world);
+        let matrices = &self.matrices;
+        // Where an object is and which way it faces, scale left out.
+        let placed = |id: ObjectId, t: &Transform| -> (Quat, Vec3) {
+            let (_, rotation, position) = matrices.world(id, t).to_scale_rotation_translation();
+            (rotation.normalize(), position)
+        };
+
         let mut camera: Option<(ObjectId, Camera, Transform)> = None;
         world.for_each2::<Camera, Transform>(|id, c, t| {
             if camera.is_none_or(|(best, ..)| id < best) {
                 camera = Some((id, *c, *t));
             }
         });
-        scene.camera = camera.map(|(_, c, t)| CameraView {
-            view: Mat4::from_rotation_translation(t.rotation, t.position).inverse(),
-            position: t.position,
-            fov_y: c.fov_y.to_radians(),
-            near: c.near,
-            far: c.far,
-            clear_color: rgb(c.clear_color),
+        scene.camera = camera.map(|(id, c, t)| {
+            let (rotation, position) = placed(id, &t);
+            CameraView {
+                view: Mat4::from_rotation_translation(rotation, position).inverse(),
+                position,
+                fov_y: c.fov_y.to_radians(),
+                near: c.near,
+                far: c.far,
+                clear_color: rgb(c.clear_color),
+            }
         });
 
         let mut sun: Option<(ObjectId, Sun)> = None;
         world.for_each2::<Light, Transform>(|id, light, t| {
             if light.kind == LightKind::Directional && sun.is_none_or(|(best, _)| id < best) {
-                sun = Some((id, Sun { direction: t.forward(), color: Vec3::from(rgb(light.color)) * light.intensity }));
+                let (rotation, _) = placed(id, t);
+                sun = Some((
+                    id,
+                    Sun { direction: rotation * Vec3::NEG_Z, color: Vec3::from(rgb(light.color)) * light.intensity },
+                ));
             }
         });
         scene.sun = sun.map(|(_, s)| s);
@@ -85,14 +106,14 @@ impl Extract {
             }
         });
 
-        world.for_each2::<MeshRenderer, Transform>(|_, r, t| {
+        world.for_each2::<MeshRenderer, Transform>(|id, r, t| {
             let (Some(mesh), Some(material)) = (r.mesh, r.material) else { return };
             // The world refuses a renderer pointing at a missing material,
             // so this always succeeds.
             let Ok(m) = world.material(material) else { return };
             scene.draws.push(Draw {
                 mesh: mesh_key(mesh),
-                model: t.matrix(),
+                model: matrices.world(id, t),
                 material: PbrMaterial {
                     base_color: m.base_color.to_linear(),
                     metallic: m.metallic,

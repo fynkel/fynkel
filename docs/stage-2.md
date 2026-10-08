@@ -56,7 +56,7 @@ compression, Windows and Linux. Each comes back later on its own.
 
 ```
 crates/
-  fynkel_world/     Parent and Name components, world transforms, recursive despawn; Texture and Model resources
+  fynkel_world/     parents, children and names, world transforms, recursive despawn; Texture and Model resources
   fynkel_render/    vertex format with UVs and tangents, custom meshes, textures and samplers, textured PBR, alpha mask
   fynkel_load/      NEW: PNG/JPEG decoding + mipmaps, and .glb parsing into plain data. No GPU, no world, no threads of its own.
   fynkel_ffi/       loading entry points, resources handed to the render worker, raycasts
@@ -75,13 +75,15 @@ and is tested without a GPU. Dependencies still only point down;
 
 ### 3.1 Hierarchy
 
-- `Parent(ObjectId)` is a component. `Transform` stays the local transform, relative to the parent. An object without one is a root.
+- Each object has at most one parent. `Transform` stays the local transform, relative to the parent. An object without a parent is a root.
+- *Changed while building step 1:* parents and names are kept by the world beside the components, not as `Parent` and `Name` components. A parent component could be overwritten with `insert` without the cycle check or the parent's list of children knowing, and components are plain `Copy` values, which a name (a string) isn't. Through the API nothing differs: `object.parent`, `object.name`.
 - `object.parent = other` (or `null`), `object.children`, `object.worldTransform` (read only). Setting a parent that would make a cycle is an error (`FY_STATUS_INVALID_VALUE`), never a hang.
 - `object.despawn()` despawns its children too. That's what a game almost always wants, and the opposite (orphans left in place) is easy to write by hand.
-- `Name` is a component (optional, not unique). `object.find('Head')` searches its descendants, depth first. glTF nodes keep their names.
+- An object may have a name (not unique; `''` is no name). `object.find('Head')` searches its descendants, depth first. glTF nodes keep their names.
 - `object.isPartOf(other)` is true for `other` itself and everything below it.
 - World transforms are computed during the extract, in one pass over objects sorted parents first. The order is kept between frames and rebuilt only when a parent changes. Stage 1's test that a steady frame allocates nothing on the Rust heap must still pass.
 - The budget, checked by a benchmark on the Mac and measured on both phones: 10,000 objects (one flat level, 100 × 100, and a chain 100 deep) extract in under 1 ms on the iPhone.
+- `object.worldTransform` is read only. Its position and rotation are exact; its scale is approximate when a parent with an uneven scale has a rotated child, since the result is skewed (Unity's "lossy" scale).
 
 ### 3.2 Meshes and textures
 
@@ -119,9 +121,10 @@ and is tested without a GPU. Dependencies still only point down;
 Each step is built, tested, and merged on its own, in this order. Each
 step's tests fail first where that makes sense.
 
-**Step 1: hierarchy.** `Parent`, `Name`, world transforms in the extract,
+**Step 1: hierarchy.** ✅ Parents, names, world transforms in the extract,
 recursive despawn, cycles as errors, the Dart API, and the 10,000-object
-benchmark. *Done when* the tests and the budget pass on the Mac.
+benchmark. *Done when* the tests and the budget pass on the Mac. Numbers
+in §6.
 
 **Step 2: vertex format and custom meshes.** UVs and tangents, MikkTSpace,
 `Mesh.custom`. *Done when* the golden images match (the cube is
@@ -156,3 +159,43 @@ it's committed and you have played the scene on each device.
    the engine and its headless tests load textures without Flutter.
 3. **No transparency in stage 2**, only cut-outs (MASK). Blending waits
    for the stage that needs it.
+
+## 6. Measurements
+
+### Step 1: hierarchy (Mac, M3 Max, release build)
+
+The extract with 10,000 drawn cubes plus the stage 1 scene, steady frames
+(`extract_probe` in `crates/fynkel_ffi/src/extract/tests.rs`, 500 frames,
+three runs):
+
+| Shape | first frame | median | slowest |
+|---|---|---|---|
+| 100 × 100 wide | 0.60–1.08 ms | 0.30–0.32 ms | 0.40–0.65 ms |
+| 100 chains 100 deep | 0.53–0.79 ms | 0.31–0.32 ms | 0.57–0.68 ms |
+| no tree (as in stage 1) | 0.20 ms | 0.18 ms | 0.27–0.59 ms |
+
+So the hierarchy adds about 0.13 ms per frame for 10,000 objects in trees,
+and costs nothing for objects in none. The first frame builds the order
+(parents before children); after that it's rebuilt only when a parent
+changes. The world matrices alone (`cargo run --release -p fynkel_world
+--example hierarchy`, best of 5):
+
+| Shape | linking 10,000 | first update | steady update | reading all |
+|---|---|---|---|---|
+| 100 × 100 wide | 0.43 ms | 0.44 ms | 0.19 ms | 0.07 ms |
+| 100 chains 100 deep | 5.6 ms | 0.39 ms | 0.13 ms | 0.05 ms |
+| no tree | 0 | 0 | 0 | 0.04 ms |
+
+Linking deep chains costs more because each `set_parent` checks for a
+cycle by walking up (O(depth)); 5.6 ms for 10,000 links is a one-off at
+load. Despawning a loose object stays at 23 ns (stage 1: 18 ns): the
+subtree walk allocates only when there are children.
+
+A steady frame still allocates nothing on the calling thread, now with
+the 1,000 cubes in chains of ten (`tests/alloc.rs`). A version of the
+world matrices that rebuilt the order every frame fails that test.
+
+The phones aren't measured yet: the Note10+ wasn't connected, and a Rust
+test binary can't run on the iPhone. Both are measured in step 6, when
+`examples/garden` shows the frame clock's time on screen.
+

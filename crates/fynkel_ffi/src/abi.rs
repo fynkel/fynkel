@@ -26,7 +26,7 @@ use crate::extract::{Extract, MeshOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 3;
+pub const FY_ABI_VERSION: u32 = 4;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -416,6 +416,218 @@ pub unsafe extern "C" fn fy_exists(world: *const FyWorld, id: u64) -> bool {
         Ok(())
     });
     exists
+}
+
+// --- Hierarchy ---------------------------------------------------------------
+
+/// Copies `items` into `buf` when they fit in `cap`, and writes how many
+/// there are to `out_count` either way, so a caller whose buffer was too
+/// small can retry with one big enough. `buf` may be null when `cap` is 0.
+///
+/// # Safety
+///
+/// `buf` is null or valid for `cap` writes of `T`; `out_count` is null or
+/// writable.
+unsafe fn write_all<T>(
+    items: impl ExactSizeIterator<Item = T>,
+    buf: *mut T,
+    cap: usize,
+    out_count: *mut usize,
+) -> Result<(), Error> {
+    let count = items.len();
+    if count <= cap && count > 0 {
+        if buf.is_null() {
+            return Err(Error::null("buf"));
+        }
+        for (i, item) in items.enumerate() {
+            // SAFETY: not null, and i < count <= cap, which the caller
+            // promises are writable.
+            unsafe { buf.add(i).write(item) };
+        }
+    }
+    // SAFETY: per the caller's contract.
+    unsafe { write(out_count, count, "out_count") }
+}
+
+/// A UTF-8 string from `ptr` and `len` bytes. `ptr` may be null when `len`
+/// is 0.
+///
+/// # Safety
+///
+/// `ptr` is null or valid for `len` reads.
+unsafe fn utf8<'a>(ptr: *const u8, len: usize, what: &str) -> Result<&'a str, Error> {
+    if len == 0 {
+        return Ok("");
+    }
+    if ptr.is_null() {
+        return Err(Error::null(what));
+    }
+    // SAFETY: not null, and the caller promises len readable bytes.
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    std::str::from_utf8(bytes).map_err(|e| Error::new(FyStatus::InvalidValue, format!("{what} is not UTF-8: {e}")))
+}
+
+/// Makes `child` a child of `parent`, or a root when `parent` is 0. Its
+/// `Transform` is kept, so it now counts from the new parent. A parent that
+/// is `child` or below it is refused with `FY_STATUS_INVALID_VALUE`.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_parent_set(world: *const FyWorld, child: u64, parent: u64) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let parent = if parent == 0 { None } else { Some(object(parent)?) };
+        Ok(world.lock()?.set_parent(object(child)?, parent)?)
+    })
+}
+
+/// Writes the object's parent to `out`, or 0 for a root.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_parent_get(world: *const FyWorld, id: u64, out: *mut u64) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let parent = world.lock()?.parent(object(id)?)?;
+        // SAFETY: per this function's contract.
+        unsafe { write(out, parent.map_or(0, ObjectId::raw), "out") }
+    })
+}
+
+/// The object's children, in the order they were added. Writes how many
+/// there are to `out_count`, and copies them into `buf` only when they all
+/// fit in `cap`.
+///
+/// # Safety
+///
+/// `world` is null or live; `buf` is null or valid for `cap` writes;
+/// `out_count` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_children_get(
+    world: *const FyWorld,
+    id: u64,
+    buf: *mut u64,
+    cap: usize,
+    out_count: *mut usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let world = world.lock()?;
+        let children = world.children(object(id)?)?.iter().map(|c| c.raw());
+        // SAFETY: per this function's contract.
+        unsafe { write_all(children, buf, cap, out_count) }
+    })
+}
+
+/// Writes to `out` whether `id` is `root` or below it.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_is_part_of(world: *const FyWorld, id: u64, root: u64, out: *mut bool) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let part = world.lock()?.is_part_of(object(id)?, object(root)?)?;
+        // SAFETY: per this function's contract.
+        unsafe { write(out, part, "out") }
+    })
+}
+
+/// Names the object with `len` bytes of UTF-8 at `name`, or clears its name
+/// when `len` is 0. Names needn't be unique.
+///
+/// # Safety
+///
+/// `world` is null or live; `name` is null or valid for `len` reads.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_name_set(world: *const FyWorld, id: u64, name: *const u8, len: usize) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let (world, name) = unsafe { (handle(world, "world")?, utf8(name, len, "name")?) };
+        Ok(world.lock()?.set_name(object(id)?, Some(name))?)
+    })
+}
+
+/// The object's name as UTF-8, without a terminating zero. Writes its
+/// length in bytes to `out_len` (0 for no name), and copies it into `buf`
+/// only when it fits in `cap`.
+///
+/// # Safety
+///
+/// `world` is null or live; `buf` is null or valid for `cap` writes;
+/// `out_len` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_name_get(
+    world: *const FyWorld,
+    id: u64,
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let world = world.lock()?;
+        let name = world.name(object(id)?)?.unwrap_or("");
+        // SAFETY: per this function's contract.
+        unsafe { write_all(name.bytes(), buf, cap, out_len) }
+    })
+}
+
+/// Writes to `out` the first object below `root` named `name` (`len` bytes
+/// of UTF-8), depth first in child order, or 0 when there's none. `root`
+/// itself isn't searched.
+///
+/// # Safety
+///
+/// `world` is null or live; `name` is null or valid for `len` reads; `out`
+/// is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_find(
+    world: *const FyWorld,
+    root: u64,
+    name: *const u8,
+    len: usize,
+    out: *mut u64,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let (world, name) = unsafe { (handle(world, "world")?, utf8(name, len, "name")?) };
+        let found = world.lock()?.find(object(root)?, name)?;
+        // SAFETY: per this function's contract.
+        unsafe { write(out, found.map_or(0, ObjectId::raw), "out") }
+    })
+}
+
+/// The object's transform in the world: its own after its parents'. The
+/// position and rotation are exact; the scale is approximate when a parent
+/// with an uneven scale has a rotated child, because the result is skewed
+/// and no position, rotation and scale can say that. An object without a
+/// `Transform` counts as not moved from its parent.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_world_transform_get(world: *const FyWorld, id: u64, out: *mut FyTransform) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let matrix = world.lock()?.world_matrix(object(id)?)?;
+        let (scale, rotation, position) = matrix.to_scale_rotation_translation();
+        let t = Transform { position, rotation: rotation.normalize(), scale };
+        // SAFETY: per this function's contract.
+        unsafe { write(out, FyTransform::from_component(t), "out") }
+    })
 }
 
 // --- Components --------------------------------------------------------------

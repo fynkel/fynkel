@@ -132,3 +132,122 @@ fn a_new_extract_uploads_every_mesh_the_world_has() {
     world.add_mesh(MeshSource::Plane);
     assert_eq!(extract(&world).1.len(), 2);
 }
+
+// --- Hierarchy (stage 2 plan §3.1) -------------------------------------------
+
+#[test]
+fn a_child_is_drawn_where_its_parent_puts_it_and_follows_it_next_frame() {
+    let (mut world, _) = stage1_world();
+    let mut cube = None;
+    world.for_each::<MeshRenderer>(|id, _| cube = Some(id));
+    let cube = cube.unwrap();
+    let root = world.spawn();
+    world.insert(root, Transform::from_position(Vec3::new(0.0, 2.0, 0.0))).unwrap();
+    world.set_parent(cube, Some(root)).unwrap();
+
+    let mut extract = Extract::default();
+    let (mut scene, mut ops) = (RenderScene::default(), Vec::new());
+    extract.run(&world, &mut scene, &mut ops);
+    let expected = Mat4::from_translation(Vec3::new(0.0, 2.0, 0.0)) * Mat4::from_rotation_y(30f32.to_radians());
+    assert!(scene.draws[0].model.abs_diff_eq(expected, 1e-5), "{}", scene.draws[0].model);
+
+    // Only the parent's transform changes: no change of parent.
+    world.insert(root, Transform::from_position(Vec3::new(5.0, 0.0, 0.0))).unwrap();
+    extract.run(&world, &mut scene, &mut ops);
+    let expected = Mat4::from_translation(Vec3::new(5.0, 0.0, 0.0)) * Mat4::from_rotation_y(30f32.to_radians());
+    assert!(scene.draws[0].model.abs_diff_eq(expected, 1e-5), "{}", scene.draws[0].model);
+}
+
+#[test]
+fn the_camera_and_the_sun_follow_their_parents() {
+    let mut world = World::new();
+    let rig = world.spawn();
+    world
+        .insert(
+            rig,
+            Transform {
+                position: Vec3::new(10.0, 0.0, 0.0),
+                rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+                // Scale on a parent mustn't stretch the view or the light.
+                scale: Vec3::splat(3.0),
+            },
+        )
+        .unwrap();
+    let camera = world.spawn();
+    world.insert(camera, Camera::default()).unwrap();
+    world.insert(camera, Transform::from_position(Vec3::new(0.0, 0.0, 1.0))).unwrap();
+    world.set_parent(camera, Some(rig)).unwrap();
+    let sun = world.spawn();
+    world.insert(sun, Light::DEFAULT).unwrap();
+    world.insert(sun, Transform::default()).unwrap();
+    world.set_parent(sun, Some(rig)).unwrap();
+
+    let (scene, _) = extract(&world);
+    let camera = scene.camera.unwrap();
+    // One unit behind the rig (+Z), times 3, turned a quarter left: +X.
+    assert!(close(camera.position, Vec3::new(13.0, 0.0, 0.0)), "{}", camera.position);
+    let expected = CameraView::looking_at(Vec3::new(13.0, 0.0, 0.0), Vec3::new(12.0, 0.0, 0.0));
+    assert!(camera.view.abs_diff_eq(expected.view, 1e-5), "{}", camera.view);
+    // The rig faces -X, and so does the sun, with unit length.
+    assert!(close(scene.sun.unwrap().direction, Vec3::NEG_X), "{}", scene.sun.unwrap().direction);
+}
+
+/// Probe for the stage 2 budget (§3.1): 10,000 drawn objects extract in
+/// under 1 ms on the iPhone. Run it in release, on the Mac or a phone:
+/// `cargo test --release -p fynkel_ffi --lib -- --ignored --nocapture extract_probe`.
+/// Prints the median and the slowest of 500 steady frames for each shape.
+#[test]
+#[ignore = "a measurement, run by hand"]
+fn extract_probe() {
+    const N: usize = 10_000;
+    for (name, parent_of) in [
+        ("100 × 100 wide", (|i: usize| (!i.is_multiple_of(100)).then(|| i - i % 100)) as fn(usize) -> Option<usize>),
+        ("100 chains 100 deep", |i| (!i.is_multiple_of(100)).then(|| i - 1)),
+        ("no tree (stage 1)", |_| None),
+    ] {
+        let (mut world, _) = stage1_world();
+        let mut renderer = None;
+        world.for_each::<MeshRenderer>(|_, r| renderer = Some(*r));
+        let ids: Vec<ObjectId> = (0..N)
+            .map(|i| {
+                let id = world.spawn();
+                let t = Transform {
+                    position: Vec3::new(0.0, 0.01, 0.1),
+                    rotation: Quat::from_rotation_y(i as f32 * 1e-3),
+                    scale: Vec3::ONE,
+                };
+                world.insert(id, t).unwrap();
+                world.insert(id, renderer.unwrap()).unwrap();
+                id
+            })
+            .collect();
+        for (i, &id) in ids.iter().enumerate() {
+            if let Some(p) = parent_of(i) {
+                world.set_parent(id, Some(ids[p])).unwrap();
+            }
+        }
+
+        let mut extract = Extract::default();
+        let (mut scene, mut ops) = (RenderScene::default(), Vec::new());
+        let first = std::time::Instant::now();
+        extract.run(&world, &mut scene, &mut ops);
+        let first = first.elapsed();
+        assert_eq!(scene.draws.len(), N + 1);
+        let mut times: Vec<std::time::Duration> = (0..500)
+            .map(|_| {
+                ops.clear();
+                let t = std::time::Instant::now();
+                extract.run(&world, &mut scene, &mut ops);
+                t.elapsed()
+            })
+            .collect();
+        times.sort();
+        let ms = |d: std::time::Duration| d.as_secs_f64() * 1e3;
+        println!(
+            "{name:<20} first {:>6.3} ms   median {:>6.3} ms   slowest {:>6.3} ms",
+            ms(first),
+            ms(times[times.len() / 2]),
+            ms(times[times.len() - 1])
+        );
+    }
+}
