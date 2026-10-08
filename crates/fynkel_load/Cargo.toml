@@ -1,6 +1,6 @@
 [package]
 name = "fynkel_load"
-description = "Bytes to plain values: PNG and JPEG images. No GPU, no world, no threads of its own."
+description = "Bytes to plain values: PNG and JPEG images, and .glb models. No GPU, no world, no threads of its own."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,7 +11,11 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+fynkel_mesh.workspace = true
+gltf.workspace = true
 image.workspace = true
 
 [dev-dependencies]
 png.workspace = true
+# Editing a sample's JSON to make broken files.
+serde_json = "1.0.151"

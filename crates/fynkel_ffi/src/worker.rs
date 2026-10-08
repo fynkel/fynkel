@@ -296,6 +296,13 @@ fn run<T: Target>(shared: &Shared, gpu: Gpu, mut renderer: Renderer, mut target:
                     }
                 }
             }
+            // Before the frame is finished: a reader woken by it must see
+            // the memory its uploads took.
+            {
+                let mut mailbox = shared.lock();
+                mailbox.stats.texture_bytes = renderer.texture_bytes();
+                mailbox.stats.mesh_bytes = renderer.mesh_bytes();
+            }
 
             let drawn = match target.begin() {
                 Some(frame) => {
@@ -315,8 +322,6 @@ fn run<T: Target>(shared: &Shared, gpu: Gpu, mut renderer: Renderer, mut target:
         })?;
 
         let mut mailbox = shared.lock();
-        mailbox.stats.texture_bytes = renderer.texture_bytes();
-        mailbox.stats.mesh_bytes = renderer.mesh_bytes();
         mailbox.spare.push(scene);
         if drawn {
             mailbox.stats.rendered += 1;

@@ -261,8 +261,8 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_6() {
-    assert_eq!(fy_abi_version(), 6);
+fn the_abi_version_is_7() {
+    assert_eq!(fy_abi_version(), 7);
 }
 
 #[cfg(not(target_os = "android"))]
@@ -321,7 +321,7 @@ fn parents_and_children_through_the_c_interface() {
         ok(fy_parent_get(world.0, root, &mut parent));
         assert_eq!(parent, 0, "a root's parent is 0");
         assert_eq!(children(&world, root), [a, b, c], "three don't fit the first buffer of two");
-        assert_eq!(children(&world, a), []);
+        assert!(children(&world, a).is_empty());
 
         let mut count = 99;
         ok(fy_children_get(world.0, root, ptr::null_mut(), 0, &mut count));
@@ -658,7 +658,12 @@ fn a_textured_scene_made_through_the_c_interface_matches_its_golden() {
     // SAFETY: a live world and pointers to locals.
     unsafe {
         ok(fy_material_add(w, &FyMaterial { base_color_texture: texture, ..FyMaterial::default() }, &mut card));
-        let tiled = FyMaterial { base_color_texture: texture, uv_scale: 4.0, roughness: 0.9, ..FyMaterial::default() };
+        let tiled = FyMaterial {
+            base_color_texture: texture,
+            uv_scale: FyVec2 { x: 4.0, y: 4.0 },
+            roughness: 0.9,
+            ..FyMaterial::default()
+        };
         ok(fy_material_add(w, &tiled, &mut ground));
         let mut renderer = FyMeshRenderer::default();
         ok(fy_mesh_renderer_get(w, cube, &mut renderer));

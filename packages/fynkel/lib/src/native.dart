@@ -52,6 +52,8 @@ final class Scratch {
   final count2 = malloc<Size>();
   final mesh = malloc<Pointer<FyMesh>>();
   final texture = malloc<Pointer<FyTexture>>();
+  final model = malloc<Pointer<FyModel>>();
+  final modelCounts = malloc<FyModelCounts>();
   final width = malloc<Uint32>();
   final height = malloc<Uint32>();
   final flag = malloc<Bool>();

@@ -26,7 +26,7 @@ void main() {
       scene.orange
         ..color = Color.white
         ..baseColorTexture = grid;
-      final ground = Material(baseColorTexture: grid, uvScale: 4, roughness: 0.9);
+      final ground = Material(baseColorTexture: grid, uvScale: Vec2(4, 4), roughness: 0.9);
       scene.world.spawn(
         Transform(position: Vec3(0, -0.5, 0), scale: Vec3(8, 1, 8)),
         MeshRenderer(Mesh.plane(), ground),
@@ -125,13 +125,60 @@ void main() {
     scene.orange.emissiveIntensity = 0;
     expect(centreRed(), dark);
 
-    expect(() => Material(uvScale: 0), throwsRangeError);
+    expect(() => Material(uvScale: Vec2(1, 2e4)), throwsRangeError);
+    expect(() => Material(uvOffset: Vec2(double.nan, 0)), throwsRangeError);
     expect(() => Material(alphaCutoff: 1.5), throwsRangeError);
     expect(() => scene.orange.emissiveIntensity = -1, throwsRangeError);
     expect(
-      Material(uvScale: 4, alphaCutoff: 0.5).toString(),
-      'Material(color: ${Color.white}, metallic: 0.0, roughness: 0.5, uvScale: 4.0, alphaCutoff: 0.5)',
+      Material(uvScale: Vec2(4, 4), alphaCutoff: 0.5, doubleSided: true).toString(),
+      'Material(color: ${Color.white}, metallic: 0.0, roughness: 0.5, uvScale: Vec2(4.0, 4.0), alphaCutoff: 0.5, '
+      'doubleSided)',
     );
+    expect(Material(name: 'Brick', roughness: 0.8).toString(), "Material('Brick')");
+  });
+
+  test('a UV scale and offset pick part of a texture, and a double-sided plane shows its back', () {
+    final world = World();
+    addTearDown(world.dispose);
+    world.spawn(Camera(clearColor: Color.black), Transform(position: Vec3(0, 0, 3), lookAt: Vec3.zero));
+    // Unlit: only the emission shows, so colours come through as they are.
+    // Red and green halves, 32 texels each, so filtering never mixes them
+    // where the test looks.
+    final pixels = Uint8List(64 * 64 * 4);
+    for (var i = 0; i < 64 * 64; i++) {
+      pixels.setAll(i * 4, i % 64 < 32 ? [255, 0, 0, 255] : [0, 255, 0, 255]);
+    }
+    final halves = Texture2D.rgba(64, 64, pixels);
+    final material = Material(color: Color.black, emissive: Color.white, emissiveTexture: halves);
+    // Mesh.plane() faces +Y: turned to face the camera, or away from it.
+    final facing = Quat.axisAngle(Vec3.right, math.pi / 2);
+    final plane = world.spawn(Transform(rotation: facing, scale: Vec3(2, 2, 2)), MeshRenderer(Mesh.plane(), material));
+    final view = HeadlessView(world, width: 32, height: 32);
+    addTearDown(view.dispose);
+    // Which colour the middle of the view shows.
+    String centre() {
+      final rgba = view.read(view.frame()).rgba;
+      final i = (16 * 32 + 16) * 4;
+      final [r, g, b] = rgba.sublist(i, i + 3);
+      // The tone mapping desaturates bright colours a little.
+      if (r > 200 && g < 50 && b < 50) return 'red';
+      if (g > 200 && r < 50 && b < 50) return 'green';
+      if (r + g + b == 0) return 'black';
+      return '($r, $g, $b)';
+    }
+
+    // The right half (green) stretched over the whole plane.
+    material
+      ..uvScale = Vec2(0.5, 1)
+      ..uvOffset = Vec2(0.5, 0);
+    expect(centre(), 'green');
+    material.uvOffset = Vec2.zero;
+    expect(centre(), 'red');
+
+    plane.transform = Transform(rotation: Quat.axisAngle(Vec3.up, math.pi) * facing, scale: Vec3(2, 2, 2));
+    expect(centre(), 'black', reason: 'single-sided, its back is not drawn');
+    material.doubleSided = true;
+    expect(centre(), 'red', reason: 'double-sided, its back shows');
   });
 
   test('Texture2D.load decodes off the calling isolate, so it never stalls the UI', () async {

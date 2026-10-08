@@ -1,5 +1,5 @@
 //! Turns bytes into plain values the engine can use (`docs/stage-2.md`
-//! §2): PNG and JPEG images now, `.glb` models in step 4.
+//! §2): PNG and JPEG images, and `.glb` models.
 //!
 //! Nothing here touches the GPU or the world, or starts a thread: decoding
 //! runs on the caller's thread, which for a game is a helper isolate.
@@ -7,6 +7,10 @@
 use std::io::Cursor;
 
 use image::{ImageFormat, ImageReader};
+
+mod model;
+
+pub use model::{MaterialData, ModelData, ModelError, NodeData, Part};
 
 /// An image as 8-bit RGBA, straight (not premultiplied) alpha, rows from
 /// the top. Colour channels are as the file stored them: whether they are

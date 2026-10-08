@@ -75,7 +75,7 @@ impl From<WorldError> for Error {
             WorldError::MeshInUse { .. } | WorldError::MaterialInUse { .. } | WorldError::TextureInUse { .. } => {
                 FyStatus::InUse
             }
-            WorldError::Field(_) | WorldError::Cycle { .. } => FyStatus::InvalidValue,
+            WorldError::Field(_) | WorldError::Cycle { .. } | WorldError::ModelIds { .. } => FyStatus::InvalidValue,
         };
         Self::new(status, e.to_string())
     }

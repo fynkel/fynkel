@@ -1,4 +1,4 @@
-use fynkel_world::{ImageData, Material, Quat};
+use fynkel_world::{ImageData, Material, Quat, Vec2};
 
 use super::*;
 
@@ -170,7 +170,7 @@ fn a_material_is_extracted_with_its_textures_and_linear_emission() {
         .add_material(Material {
             emissive: orange,
             emissive_intensity: 2.0,
-            uv_scale: 10.0,
+            uv_scale: Vec2::splat(10.0),
             alpha_cutoff: 0.5,
             base_color_texture: Some(a),
             occlusion_texture: Some(b),
@@ -182,7 +182,7 @@ fn a_material_is_extracted_with_its_textures_and_linear_emission() {
     world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(material) }).unwrap();
 
     let (scene, _) = extract(&world);
-    let m = scene.draws.iter().find(|d| d.material.uv_scale == 10.0).unwrap().material;
+    let m = scene.draws.iter().find(|d| d.material.uv_scale == [10.0; 2]).unwrap().material;
     assert_eq!(m.emissive, (Vec3::from(rgb(orange)) * 2.0).to_array());
     assert_eq!(m.alpha_cutoff, 0.5);
     assert_eq!(

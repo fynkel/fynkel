@@ -40,7 +40,7 @@ struct FrameUniforms {
     ambient: [f32; 4],
 }
 
-/// The per-draw vertex data (instance step), locations 4–13.
+/// The per-draw vertex data (instance step), locations 4–14.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Instance {
@@ -49,8 +49,10 @@ struct Instance {
     base_color: [f32; 4],
     /// Metallic, roughness, alpha cutoff, and -1 when the model mirrors.
     params: [f32; 4],
-    /// Emission, then the UV scale.
+    /// Emission (w unused).
     emissive: [f32; 4],
+    /// UV scale (xy), then offset (zw).
+    uv: [f32; 4],
 }
 
 struct GpuMesh {
@@ -73,12 +75,42 @@ struct Targets {
     depth: wgpu::TextureView,
 }
 
+/// Which faces a pipeline draws, and which way round.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum Faces {
+    /// Fronts only: counter-clockwise on screen.
+    Front,
+    /// Fronts only, for a mirrored object: mirroring turns its triangles
+    /// clockwise on screen, so clockwise is the front.
+    Mirrored,
+    /// Both sides (a double-sided material), the back lit as the front.
+    Both,
+}
+
+impl Faces {
+    const ALL: [Self; 3] = [Self::Front, Self::Mirrored, Self::Both];
+
+    fn of(material: &crate::PbrMaterial, mirrored: bool) -> Self {
+        match (material.double_sided, mirrored) {
+            (true, _) => Self::Both,
+            (false, false) => Self::Front,
+            (false, true) => Self::Mirrored,
+        }
+    }
+}
+
+/// A pipeline's index in `Renderer::pipelines`.
+fn pipeline_index(cutout: bool, faces: Faces) -> usize {
+    usize::from(cutout) * Faces::ALL.len() + faces as usize
+}
+
 /// One instanced draw call, as `prepare` left it for `encode`: `count`
 /// instances of `mesh` starting at instance `first`, with one set of
-/// textures, opaque or cut out.
+/// textures, opaque or cut out, facing one way.
 #[derive(Clone, Copy)]
 struct Batch {
     cutout: bool,
+    faces: Faces,
     textures: MaterialTextures,
     mesh: MeshKey,
     first: u32,
@@ -89,9 +121,9 @@ struct Batch {
 pub struct Renderer {
     gpu: Gpu,
     format: wgpu::TextureFormat,
-    pipeline: wgpu::RenderPipeline,
-    /// The same, for cut-outs.
-    cutout_pipeline: wgpu::RenderPipeline,
+    /// Opaque then cut-out, each for every [`Faces`] (see
+    /// [`pipeline_index`]).
+    pipelines: Vec<wgpu::RenderPipeline>,
     frame_data: FrameRing,
     meshes: HashMap<MeshKey, GpuMesh>,
     textures: Textures,
@@ -167,7 +199,7 @@ impl Renderer {
         let instance_attributes = wgpu::vertex_attr_array![
             4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4,
             8 => Float32x3, 9 => Float32x3, 10 => Float32x3,
-            11 => Float32x4, 12 => Float32x4, 13 => Float32x4,
+            11 => Float32x4, 12 => Float32x4, 13 => Float32x4, 14 => Float32x4,
         ];
         let buffers = [
             Some(wgpu::VertexBufferLayout {
@@ -181,13 +213,20 @@ impl Renderer {
                 attributes: &instance_attributes,
             }),
         ];
-        // Cut-outs get their own pipeline: a shader that can drop pixels
+        // Cut-outs get their own pipelines: a shader that can drop pixels
         // costs tile GPUs their hidden-surface removal, so opaque surfaces
         // don't use it. Its alpha becomes MSAA coverage, and it writes
         // colour only, so the target stays opaque.
-        let pipeline = |label, entry_point, cutout: bool| {
+        let pipeline = |cutout: bool, faces: Faces| {
+            let (front_face, cull_mode) = match faces {
+                Faces::Front => (wgpu::FrontFace::Ccw, Some(wgpu::Face::Back)),
+                Faces::Mirrored => (wgpu::FrontFace::Cw, Some(wgpu::Face::Back)),
+                Faces::Both => (wgpu::FrontFace::Ccw, None),
+            };
+            let constants = [("double_sided", if faces == Faces::Both { 1.0 } else { 0.0 })];
+            let compilation_options = wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() };
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(label),
+                label: Some(if cutout { "forward cut-out" } else { "forward" }),
                 layout: Some(&layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
@@ -197,8 +236,8 @@ impl Renderer {
                 },
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: Some(wgpu::Face::Back),
+                    front_face,
+                    cull_mode,
                     ..Default::default()
                 },
                 // Reversed-Z: near is 1, far is 0, so nearer means greater. Float
@@ -218,8 +257,8 @@ impl Renderer {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
-                    entry_point: Some(entry_point),
-                    compilation_options: Default::default(),
+                    entry_point: Some(if cutout { "fs_cutout" } else { "fs_main" }),
+                    compilation_options,
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
                         blend: None,
@@ -234,8 +273,11 @@ impl Renderer {
         Self {
             gpu: gpu.clone(),
             format,
-            pipeline: pipeline("forward", "fs_main", false),
-            cutout_pipeline: pipeline("forward cut-out", "fs_cutout", true),
+            pipelines: [false, true]
+                .into_iter()
+                .flat_map(|cutout| Faces::ALL.map(|faces| (cutout, faces)))
+                .map(|(cutout, faces)| pipeline(cutout, faces))
+                .collect(),
             frame_data: FrameRing::new(
                 device,
                 frame_layout,
@@ -344,7 +386,8 @@ impl Renderer {
         self.order.extend(0..scene.draws.len() as u32);
         self.order.sort_unstable_by_key(|&i| {
             let draw = &scene.draws[i as usize];
-            (draw.material.alpha_cutoff > 0.0, draw.material.textures, draw.mesh.0)
+            let faces = Faces::of(&draw.material, mirrors(draw.model));
+            (draw.material.alpha_cutoff > 0.0, faces, draw.material.textures, draw.mesh.0)
         });
 
         for &i in &self.order {
@@ -355,25 +398,31 @@ impl Renderer {
             }
             let m = &draw.material;
             let cutout = m.alpha_cutoff > 0.0;
+            let (normal, mirrored) = normal_matrix(draw.model);
+            let faces = Faces::of(m, mirrored);
             let instance = self.instances.len() as u32;
             match self.batches.last_mut() {
-                Some(b) if (b.cutout, b.textures, b.mesh) == (cutout, m.textures, draw.mesh) => b.count += 1,
+                Some(b) if (b.cutout, b.faces, b.textures, b.mesh) == (cutout, faces, m.textures, draw.mesh) => {
+                    b.count += 1
+                }
                 _ => self.batches.push(Batch {
                     cutout,
+                    faces,
                     textures: m.textures,
                     mesh: draw.mesh,
                     first: instance,
                     count: 1,
                 }),
             }
-            let (normal, mirrored) = normal_matrix(draw.model);
             let [er, eg, eb] = m.emissive;
+            let ([su, sv], [ou, ov]) = (m.uv_scale, m.uv_offset);
             self.instances.push(Instance {
                 model: draw.model.to_cols_array_2d(),
                 normal: normal.to_cols_array_2d(),
                 base_color: m.base_color,
                 params: [m.metallic, m.roughness, m.alpha_cutoff, if mirrored { -1.0 } else { 1.0 }],
-                emissive: [er, eg, eb, m.uv_scale],
+                emissive: [er, eg, eb, 0.0],
+                uv: [su, sv, ou, ov],
             });
         }
         stats.draws = self.instances.len() as u32;
@@ -429,8 +478,8 @@ impl Renderer {
         pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..));
         let mut last: Option<&Batch> = None;
         for batch in &self.batches {
-            if last.is_none_or(|l| l.cutout != batch.cutout) {
-                pass.set_pipeline(if batch.cutout { &self.cutout_pipeline } else { &self.pipeline });
+            if last.is_none_or(|l| (l.cutout, l.faces) != (batch.cutout, batch.faces)) {
+                pass.set_pipeline(&self.pipelines[pipeline_index(batch.cutout, batch.faces)]);
             }
             if last.is_none_or(|l| l.textures != batch.textures) {
                 pass.set_bind_group(1, self.textures.bind_group(&batch.textures), &[]);
@@ -496,4 +545,10 @@ fn normal_matrix(model: Mat4) -> (Mat3, bool) {
     let m = Mat3::from_mat4(model);
     let det = m.determinant();
     (if det.abs() < 1e-12 { Mat3::ZERO } else { m.inverse().transpose() }, det < 0.0)
+}
+
+/// Whether `model` mirrors: a negative determinant, which also turns its
+/// triangles' winding around.
+fn mirrors(model: Mat4) -> bool {
+    Mat3::from_mat4(model).determinant() < 0.0
 }

@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 6
+#define FY_ABI_VERSION 7
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -86,6 +86,12 @@ typedef int32_t FyStatus;
 // `fy_mesh_free`. Worlds that add it share its data, so freeing it
 // doesn't take it from them.
 typedef struct FyMesh FyMesh;
+
+// A model read from a `.glb`, before any world has it. Opaque to C. Made
+// with `fy_model_load` on any thread, freed with `fy_model_free`. Its
+// meshes and textures are shared with the handles `fy_model_mesh` and
+// `fy_model_texture` give, and with every world that spawns it.
+typedef struct FyModel FyModel;
 
 // An image on its own, before any world has it. Opaque to C. Made with
 // `fy_texture_decode` or `fy_texture_new_rgba` on any thread, freed with
@@ -166,9 +172,14 @@ typedef struct FyMeshData {
   size_t index_count;
 } FyMeshData;
 
+typedef struct FyVec2 {
+  float x;
+  float y;
+} FyVec2;
+
 // A metallic-roughness material (glTF's). Each texture multiplies its
 // factor; 0 is no texture. `Default` is the engine's default material,
-// not zeros (a UV scale of 0 is refused).
+// not zeros (a UV scale of 0 would show one texel).
 typedef struct FyMaterial {
   // sRGB. Its alpha matters only for cut-outs.
   struct FyColor base_color;
@@ -180,11 +191,15 @@ typedef struct FyMaterial {
   struct FyColor emissive;
   // 0 or more.
   float emissive_intensity;
-  // Multiplies texture coordinates; 1e-4 to 1e4.
-  float uv_scale;
+  // Multiplies texture coordinates, per axis; -1e4 to 1e4.
+  struct FyVec2 uv_scale;
+  // Added to texture coordinates after the scale; -1e4 to 1e4.
+  struct FyVec2 uv_offset;
   // 0 for opaque; otherwise the alpha below which the surface is cut
   // away. 0–1.
   float alpha_cutoff;
+  // Both sides of each triangle are drawn.
+  bool double_sided;
   // Read as sRGB.
   uint64_t base_color_texture;
   // Tangent space, glTF's convention. Linear.
@@ -196,6 +211,15 @@ typedef struct FyMaterial {
   // Read as sRGB.
   uint64_t emissive_texture;
 } FyMaterial;
+
+// How many of each thing a model has, from `fy_model_counts`.
+typedef struct FyModelCounts {
+  size_t meshes;
+  size_t textures;
+  size_t materials;
+  // Lines saying what was skipped (`fy_model_warning`).
+  size_t warnings;
+} FyModelCounts;
 
 // What a view did since it was made.
 typedef struct FyViewStats {
@@ -579,6 +603,111 @@ FyStatus fy_texture_add(const struct FyWorld *world,
 //
 // `world` is null or live.
 FyStatus fy_texture_remove(const struct FyWorld *world, uint64_t id);
+
+// Reads a `.glb` (binary glTF 2.0) of `len` bytes and writes the model to
+// `out`. Its images are decoded and its meshes' tangents generated here,
+// so a big model takes a while: call it off the UI thread.
+//
+// What can't be drawn yet (animations, skins, see-through materials, ...)
+// is skipped with a warning (`fy_model_warning`). A file that can't be
+// read at all, or needs a glTF extension the engine doesn't know, is
+// refused (`FY_STATUS_INVALID_VALUE`) with a message saying why.
+//
+// # Safety
+//
+// `bytes` is valid for `len` bytes (it may be null when `len` is 0);
+// `out` is null or writable.
+FyStatus fy_model_load(const uint8_t *bytes, size_t len, struct FyModel **out);
+
+// Frees a model handle. Mesh and texture handles taken from it, and
+// worlds that spawned it, keep their share. Null is ignored.
+//
+// # Safety
+//
+// `model` is null or live, not used again after this.
+void fy_model_free(struct FyModel *model);
+
+// # Safety
+//
+// `model` is null or live; `out` is null or writable.
+FyStatus fy_model_counts(const struct FyModel *model, struct FyModelCounts *out);
+
+// Writes a new handle to the model's mesh `index` to `out`, sharing its
+// data.
+//
+// # Safety
+//
+// `model` is null or live; `out` is null or writable.
+FyStatus fy_model_mesh(const struct FyModel *model, size_t index, struct FyMesh **out);
+
+// Writes a new handle to the model's image `index` to `out`, sharing its
+// pixels.
+//
+// # Safety
+//
+// `model` is null or live; `out` is null or writable.
+FyStatus fy_model_texture(const struct FyModel *model, size_t index, struct FyTexture **out);
+
+// Writes the model's material `index` to `out`, its colours converted to
+// sRGB. Each texture field is the model's texture index plus 1 (0 for
+// none), not a world's id: the caller maps them to its own.
+//
+// # Safety
+//
+// `model` is null or live; `out` is null or writable.
+FyStatus fy_model_material(const struct FyModel *model, size_t index, struct FyMaterial *out);
+
+// The name the file gives material `index` ("" for none), as UTF-8
+// without a terminating zero: its length goes to `out_len`, and it's
+// copied into `buf` only when it fits in `cap`.
+//
+// # Safety
+//
+// `model` is null or live; `buf` is null or valid for `cap` writes;
+// `out_len` is null or writable.
+FyStatus fy_model_material_name(const struct FyModel *model,
+                                size_t index,
+                                uint8_t *buf,
+                                size_t cap,
+                                size_t *out_len);
+
+// Warning `index`: one line saying what was skipped, as UTF-8 like
+// `fy_model_material_name`.
+//
+// # Safety
+//
+// `model` is null or live; `buf` is null or valid for `cap` writes;
+// `out_len` is null or writable.
+FyStatus fy_model_warning(const struct FyModel *model,
+                          size_t index,
+                          uint8_t *buf,
+                          size_t cap,
+                          size_t *out_len);
+
+// Spawns the model: a root object at `transform`, named after the model's
+// scene, with one object per node below it, named and placed as in the
+// file. A node drawing one primitive gets a mesh renderer; one drawing
+// several gets an unnamed child for each. Writes the root's id to `out`.
+//
+// `meshes` and `materials` are this world's ids for the model's meshes
+// (`fy_mesh_add` of each `fy_model_mesh`) and materials (`fy_material_add`
+// of each `fy_model_material`, its textures mapped), in the model's
+// order. Spawning again with the same ids shares everything. On error
+// nothing is spawned.
+//
+// # Safety
+//
+// `world` and `model` are null or live; `meshes` and `materials` are
+// valid for their counts; `transform` is null or readable; `out` is null
+// or writable.
+FyStatus fy_model_spawn(const struct FyWorld *world,
+                        const struct FyModel *model,
+                        const uint64_t *meshes,
+                        size_t mesh_count,
+                        const uint64_t *materials,
+                        size_t material_count,
+                        const struct FyTransform *transform,
+                        uint64_t *out);
 
 // A view of `world` that draws `width` × `height` frames offscreen and
 // reads them back (`fy_view_read`). Starts its render worker. Free it with

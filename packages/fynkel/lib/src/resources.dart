@@ -313,13 +313,16 @@ final class Texture2D implements Finalizable {
 /// (green), [emissiveTexture] the [emissive] light.
 final class Material {
   Material({
+    this.name,
     this._color = Color.white,
     double metallic = 0,
     double roughness = 0.5,
     this._emissive = Color.black,
     double emissiveIntensity = 1,
-    double uvScale = 1,
+    Vec2 uvScale = Vec2.one,
+    Vec2 uvOffset = Vec2.zero,
     double alphaCutoff = 0,
+    this._doubleSided = false,
     Texture2D? baseColorTexture,
     Texture2D? normalTexture,
     Texture2D? metallicRoughnessTexture,
@@ -328,7 +331,8 @@ final class Material {
   }) : _metallic = _unit(metallic, 'metallic'),
        _roughness = _unit(roughness, 'roughness'),
        _emissiveIntensity = _atLeast0(emissiveIntensity, 'emissiveIntensity'),
-       _uvScale = _scale(uvScale),
+       _uvScale = _uv(uvScale, 'uvScale'),
+       _uvOffset = _uv(uvOffset, 'uvOffset'),
        _alphaCutoff = _unit(alphaCutoff, 'alphaCutoff'),
        _textures = [
          _usable(baseColorTexture),
@@ -338,13 +342,20 @@ final class Material {
          _usable(emissiveTexture),
        ];
 
+  /// What it's called, for messages and finding it again: a loaded
+  /// model's materials have the names the file gives them. Needn't be
+  /// unique.
+  String? name;
+
   Color _color;
   double _metallic;
   double _roughness;
   Color _emissive;
   double _emissiveIntensity;
-  double _uvScale;
+  Vec2 _uvScale;
+  Vec2 _uvOffset;
   double _alphaCutoff;
+  bool _doubleSided;
 
   /// Base colour, normal, metallic-roughness, occlusion, emissive: the
   /// engine's order.
@@ -391,11 +402,21 @@ final class Material {
   }
 
   /// How many times the textures repeat across a mesh whose texture
-  /// coordinates go from 0 to 1, such as `Mesh.plane()`: 10 tiles a ground
-  /// texture ten times each way.
-  double get uvScale => _uvScale;
-  set uvScale(double value) {
-    _uvScale = _scale(value);
+  /// coordinates go from 0 to 1, such as `Mesh.plane()`, each way:
+  /// `Vec2(10, 10)` tiles a ground texture ten times. A negative value
+  /// flips the textures. -1e4 to 1e4.
+  Vec2 get uvScale => _uvScale;
+  set uvScale(Vec2 value) {
+    _uvScale = _uv(value, 'uvScale');
+    _changed();
+  }
+
+  /// Added to texture coordinates after [uvScale], so a part of a texture
+  /// fills the mesh: `uvScale: Vec2(0.5, 0.5), uvOffset: Vec2(0.5, 0)`
+  /// shows its top-right quarter. -1e4 to 1e4.
+  Vec2 get uvOffset => _uvOffset;
+  set uvOffset(Vec2 value) {
+    _uvOffset = _uv(value, 'uvOffset');
     _changed();
   }
 
@@ -406,6 +427,15 @@ final class Material {
   double get alphaCutoff => _alphaCutoff;
   set alphaCutoff(double value) {
     _alphaCutoff = _unit(value, 'alphaCutoff');
+    _changed();
+  }
+
+  /// Draw both sides of each triangle, the back lit like the front: for
+  /// leaves, paper and flags, whose triangles are seen from behind.
+  /// Otherwise a triangle seen from behind isn't drawn.
+  bool get doubleSided => _doubleSided;
+  set doubleSided(bool value) {
+    _doubleSided = value;
     _changed();
   }
 
@@ -455,8 +485,9 @@ final class Material {
     return value;
   }
 
-  static double _scale(double value) {
-    if (!(value >= 1e-4 && value <= 1e4)) throw RangeError.value(value, 'uvScale', 'must be between 1e-4 and 1e4');
+  static Vec2 _uv(Vec2 value, String name) {
+    bool fits(double x) => x >= -1e4 && x <= 1e4;
+    if (!fits(value.x) || !fits(value.y)) throw RangeError('$name must be between -1e4 and 1e4 each way, not $value');
     return value;
   }
 
@@ -471,11 +502,14 @@ final class Material {
       for (final (i, name) in ['baseColor', 'normal', 'metallicRoughness', 'occlusion', 'emissive'].indexed)
         if (_textures[i] != null) '${name}Texture: ${_textures[i]}',
     ];
+    if (name case final name? when name.isNotEmpty) return "Material('$name')";
     final fields = [
       'color: $color, metallic: $metallic, roughness: $roughness',
       if (emissive != Color.black) 'emissive: $emissive × $emissiveIntensity',
-      if (uvScale != 1) 'uvScale: $uvScale',
+      if (uvScale != Vec2.one) 'uvScale: $uvScale',
+      if (uvOffset != Vec2.zero) 'uvOffset: $uvOffset',
       if (alphaCutoff != 0) 'alphaCutoff: $alphaCutoff',
+      if (doubleSided) 'doubleSided',
       ...textures,
     ];
     return 'Material(${fields.join(', ')})';

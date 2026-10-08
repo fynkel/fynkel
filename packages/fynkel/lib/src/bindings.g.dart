@@ -123,6 +123,69 @@ external int fy_mesh_renderer_remove(ffi.Pointer<FyWorld> world, int id);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyMeshRenderer>)>(isLeaf: true)
 external int fy_mesh_renderer_set(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyMeshRenderer> value);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyModel>, ffi.Pointer<FyModelCounts>)>(isLeaf: true)
+external int fy_model_counts(ffi.Pointer<FyModel> model, ffi.Pointer<FyModelCounts> out);
+
+@ffi.Native<ffi.Void Function(ffi.Pointer<FyModel>)>(isLeaf: true)
+external void fy_model_free(ffi.Pointer<FyModel> model);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Pointer<FyModel>>)>()
+external int fy_model_load(ffi.Pointer<ffi.Uint8> bytes, int len, ffi.Pointer<ffi.Pointer<FyModel>> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyModel>, ffi.Size, ffi.Pointer<FyMaterial>)>(isLeaf: true)
+external int fy_model_material(ffi.Pointer<FyModel> model, int index, ffi.Pointer<FyMaterial> out);
+
+@ffi.Native<
+  ffi.Int32 Function(ffi.Pointer<FyModel>, ffi.Size, ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Size>)
+>(isLeaf: true)
+external int fy_model_material_name(
+  ffi.Pointer<FyModel> model,
+  int index,
+  ffi.Pointer<ffi.Uint8> buf,
+  int cap,
+  ffi.Pointer<ffi.Size> out_len,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyModel>, ffi.Size, ffi.Pointer<ffi.Pointer<FyMesh>>)>(isLeaf: true)
+external int fy_model_mesh(ffi.Pointer<FyModel> model, int index, ffi.Pointer<ffi.Pointer<FyMesh>> out);
+
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<FyWorld>,
+    ffi.Pointer<FyModel>,
+    ffi.Pointer<ffi.Uint64>,
+    ffi.Size,
+    ffi.Pointer<ffi.Uint64>,
+    ffi.Size,
+    ffi.Pointer<FyTransform>,
+    ffi.Pointer<ffi.Uint64>,
+  )
+>(isLeaf: true)
+external int fy_model_spawn(
+  ffi.Pointer<FyWorld> world,
+  ffi.Pointer<FyModel> model,
+  ffi.Pointer<ffi.Uint64> meshes,
+  int mesh_count,
+  ffi.Pointer<ffi.Uint64> materials,
+  int material_count,
+  ffi.Pointer<FyTransform> transform,
+  ffi.Pointer<ffi.Uint64> out,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyModel>, ffi.Size, ffi.Pointer<ffi.Pointer<FyTexture>>)>(isLeaf: true)
+external int fy_model_texture(ffi.Pointer<FyModel> model, int index, ffi.Pointer<ffi.Pointer<FyTexture>> out);
+
+@ffi.Native<
+  ffi.Int32 Function(ffi.Pointer<FyModel>, ffi.Size, ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Size>)
+>(isLeaf: true)
+external int fy_model_warning(
+  ffi.Pointer<FyModel> model,
+  int index,
+  ffi.Pointer<ffi.Uint8> buf,
+  int cap,
+  ffi.Pointer<ffi.Size> out_len,
+);
+
 @ffi.Native<
   ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Size>)
 >(isLeaf: true)
@@ -244,7 +307,7 @@ external ffi.Pointer<FyWorld> fy_world_new();
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
 external int fy_world_transform_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> out);
 
-const int FY_ABI_VERSION = 6;
+const int FY_ABI_VERSION = 7;
 
 const int FY_APPLE_MORE = 2;
 
@@ -323,11 +386,15 @@ final class FyMaterial extends ffi.Struct {
   @ffi.Float()
   external double emissive_intensity;
 
-  @ffi.Float()
-  external double uv_scale;
+  external FyVec2 uv_scale;
+
+  external FyVec2 uv_offset;
 
   @ffi.Float()
   external double alpha_cutoff;
+
+  @ffi.Bool()
+  external bool double_sided;
 
   @ffi.Uint64()
   external int base_color_texture;
@@ -396,6 +463,34 @@ final class FyMeshRenderer extends ffi.Struct {
         ..ref.material = material;
 }
 
+final class FyModel extends ffi.Opaque {}
+
+final class FyModelCounts extends ffi.Struct {
+  @ffi.Size()
+  external int meshes;
+
+  @ffi.Size()
+  external int textures;
+
+  @ffi.Size()
+  external int materials;
+
+  @ffi.Size()
+  external int warnings;
+
+  static ffi.Pointer<FyModelCounts> $allocate(
+    ffi.Allocator $allocator, {
+    required int meshes,
+    required int textures,
+    required int materials,
+    required int warnings,
+  }) => $allocator<FyModelCounts>()
+    ..ref.meshes = meshes
+    ..ref.textures = textures
+    ..ref.materials = materials
+    ..ref.warnings = warnings;
+}
+
 final class FyQuat extends ffi.Struct {
   @ffi.Float()
   external double x;
@@ -449,6 +544,19 @@ final class FyTransform extends ffi.Struct {
   external FyQuat rotation;
 
   external FyVec3 scale;
+}
+
+final class FyVec2 extends ffi.Struct {
+  @ffi.Float()
+  external double x;
+
+  @ffi.Float()
+  external double y;
+
+  static ffi.Pointer<FyVec2> $allocate(ffi.Allocator $allocator, {required double x, required double y}) =>
+      $allocator<FyVec2>()
+        ..ref.x = x
+        ..ref.y = y;
 }
 
 final class FyVec3 extends ffi.Struct {

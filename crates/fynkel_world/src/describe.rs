@@ -6,7 +6,7 @@
 //! a type it has never seen. Writes are validated here, once, for every
 //! caller.
 
-use glam::{Quat, Vec3};
+use glam::{Quat, Vec2, Vec3};
 
 use crate::{Color, MaterialId, MeshId, TextureId};
 
@@ -14,6 +14,7 @@ use crate::{Color, MaterialId, MeshId, TextureId};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FieldKind {
     F32,
+    Vec2,
     Vec3,
     /// A rotation. Stored values are unit quaternions.
     Quat,
@@ -30,6 +31,7 @@ pub enum FieldKind {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Value {
     F32(f32),
+    Vec2(Vec2),
     Vec3(Vec3),
     Quat(Quat),
     Color(Color),
@@ -47,6 +49,7 @@ impl Value {
         match (self, kind) {
             (Value::Enum(i), FieldKind::Enum(names)) => (*i as usize) < names.len(),
             (Value::F32(_), FieldKind::F32)
+            | (Value::Vec2(_), FieldKind::Vec2)
             | (Value::Vec3(_), FieldKind::Vec3)
             | (Value::Quat(_), FieldKind::Quat)
             | (Value::Color(_), FieldKind::Color)
@@ -59,7 +62,7 @@ impl Value {
     }
 }
 
-/// An inclusive range for an `F32` field.
+/// An inclusive range for an `F32` field, or for each part of a `Vec2`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Range {
     pub min: f32,
@@ -168,6 +171,7 @@ pub(crate) fn validate(ty: &'static str, field: &Field, value: Value) -> Result<
     }
     let finite = match value {
         Value::F32(v) => v.is_finite(),
+        Value::Vec2(v) => v.is_finite(),
         Value::Vec3(v) => v.is_finite(),
         Value::Quat(q) => q.is_finite(),
         Value::Color(c) => [c.r, c.g, c.b, c.a].iter().all(|x| x.is_finite()),
@@ -176,8 +180,13 @@ pub(crate) fn validate(ty: &'static str, field: &Field, value: Value) -> Result<
     if !finite {
         return Err(FieldError::NotFinite { ty, field: name });
     }
-    if let (Value::F32(v), Some(range)) = (value, field.range)
-        && !(range.min..=range.max).contains(&v)
+    let parts = match value {
+        Value::F32(v) => [v, v],
+        Value::Vec2(v) => v.to_array(),
+        _ => [0.0; 2],
+    };
+    if let Some(range) = field.range
+        && let Some(&v) = parts.iter().find(|v| !(range.min..=range.max).contains(*v))
     {
         return Err(FieldError::OutOfRange { ty, field: name, value: v, range });
     }

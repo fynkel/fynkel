@@ -123,12 +123,17 @@ pub struct PbrMaterial {
     pub roughness: f32,
     /// Linear light the surface gives off, colour × intensity.
     pub emissive: [f32; 3],
-    /// Texture coordinates are multiplied by this: 10 repeats a texture ten
-    /// times across a mesh with 0–1 UVs.
-    pub uv_scale: f32,
+    /// Texture coordinates are multiplied by this, per axis: 10 repeats a
+    /// texture ten times across a mesh with 0–1 UVs.
+    pub uv_scale: [f32; 2],
+    /// Then this is added (glTF's texture transform, without rotation).
+    pub uv_offset: [f32; 2],
     /// 0 for an opaque surface. Otherwise a cut-out (glTF's MASK): the
     /// surface is there only where its alpha reaches this.
     pub alpha_cutoff: f32,
+    /// Draw the back of each triangle too, lit as its front, as for
+    /// leaves or a sheet of paper. Otherwise backs aren't drawn.
+    pub double_sided: bool,
     pub textures: MaterialTextures,
 }
 
@@ -139,8 +144,10 @@ impl PbrMaterial {
         metallic: 0.0,
         roughness: 0.5,
         emissive: [0.0; 3],
-        uv_scale: 1.0,
+        uv_scale: [1.0; 2],
+        uv_offset: [0.0; 2],
         alpha_cutoff: 0.0,
+        double_sided: false,
         textures: MaterialTextures::NONE,
     };
 }
