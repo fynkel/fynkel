@@ -1,6 +1,6 @@
 # Stage 2 plan: a small scene you can play with
 
-Status: proposed 2026-10-08, waiting for your approval. Scope and rules:
+Status: accepted 2026-10-08, with the three answers in §5. Scope and rules:
 [ADR-0001](decisions/0001-fynkel-2-code-first.md). Stage 1 is done
 ([report](stage-1-report.md)).
 
@@ -148,18 +148,11 @@ written-down time, and passes the memory cycles.
 **Step 7: the stage 2 check.** A short report, as in stage 1. *Done when*
 it's committed and you have played the scene on each device.
 
-## 5. Questions for you
+## 5. Decisions (2026-10-08)
 
-1. **The model for the garden scene.** Either a Khronos sample model
-   (made for testing glTF; CC-BY 4.0, so the app shows a credit), or a
-   CC0 model such as Kenney's. I suggest a Kenney character plus a few
-   props: CC0, small, and it looks like a game. The Khronos models are
-   used in the tests either way.
-2. **Image decoding in Rust** (the `image` crate, PNG and JPEG) rather
-   than through Flutter's decoder. Flutter's would mean no new Rust code,
-   but the engine couldn't load a texture without Flutter, and the
-   headless tests couldn't either (ADR-0001, "the engine runs without
-   Flutter in tests"). I suggest Rust.
-3. **No transparency in stage 2**, only cut-outs (MASK). Real blending
-   needs sorting and a second pass. I suggest it waits for the stage that
-   needs it.
+1. **The garden scene uses Kenney's CC0 character and props.** The
+   Khronos sample models are used in the tests.
+2. **Images are decoded in Rust** (the `image` crate, PNG and JPEG), so
+   the engine and its headless tests load textures without Flutter.
+3. **No transparency in stage 2**, only cut-outs (MASK). Blending waits
+   for the stage that needs it.
