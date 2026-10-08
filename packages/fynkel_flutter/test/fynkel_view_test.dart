@@ -35,7 +35,12 @@ void main() {
 
   setUp(() {
     world = World();
-    world.spawn(Camera(), Transform(position: Vec3(0, 0, 4)));
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, 4)),
+        components: [Camera()],
+      ),
+    );
     calls = [];
     resets = [];
     nextTexture = 7;
@@ -139,7 +144,12 @@ void main() {
     // A textured cube: the frame that draws it holds the texture's bytes.
     final before = seen.last.textureBytes;
     final pixels = Texture2D.rgba(4, 4, Uint8List(64));
-    world.spawn(Transform(), MeshRenderer(Mesh.cube(), Material(baseColorTexture: pixels)));
+    world.add(
+      GameObject(
+        transform: Transform(),
+        components: [MeshRenderer(Mesh.cube(), Material(baseColorTexture: pixels))],
+      ),
+    );
     final from = seen.length;
     for (var i = 0; i < 200 && seen.last.textureBytes == before; i++) {
       await tester.pump(const Duration(milliseconds: 8));

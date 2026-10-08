@@ -7,9 +7,19 @@ import 'package:fynkel/fynkel.dart';
 /// The stage 1 program (docs/stage-1.md), as written there.
 class Hello {
   Hello() {
-    world.spawn(Camera(), Transform(position: Vec3(0, 1.5, 4), lookAt: Vec3.zero));
-    world.spawn(Light.sun(), Transform(forward: Vec3(-0.4, -1, -0.3)));
-    cube = world.spawn(Transform(), MeshRenderer(Mesh.cube(), Material(color: Color(0xFFE0613A))));
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 1.5, 4), lookAt: Vec3.zero),
+        components: [Camera()],
+      ),
+    );
+    world.add(
+      GameObject(
+        transform: Transform(forward: Vec3(-0.4, -1, -0.3)),
+        components: [Light.sun()],
+      ),
+    );
+    cube = world.add(GameObject(components: [MeshRenderer(Mesh.cube(), Material(color: Color(0xFFE0613A)))]));
   }
 
   final world = World();

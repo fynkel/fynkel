@@ -61,49 +61,96 @@ final class World implements Finalizable {
     _materialIds.clear();
     _materials.clear();
     _textureIds.clear();
+    _objects.clear();
+    _byClass.clear();
   }
 
-  /// A new object with these components (at most one of each kind). If a
-  /// component is refused, the object is despawned again and the error
-  /// thrown.
-  GameObject spawn([Component? a, Component? b, Component? c, Component? d]) {
-    final components = [a, b, c, d].nonNulls.toList();
-    for (var i = 0; i < components.length; i++) {
-      for (var j = 0; j < i; j++) {
-        if (components[i].runtimeType == components[j].runtimeType) {
-          throw ArgumentError('spawn got two ${components[i].runtimeType}s; an object has at most one');
-        }
-      }
+  /// Makes [root] live in this world, with everything added to it so
+  /// far, and returns it. A world can have any number of roots: a level,
+  /// a player who outlives levels, and so on.
+  ///
+  /// Throws a [StateError] if [root] was already added (to move a live
+  /// object, set its [GameObject.parent]) or destroyed. If the engine
+  /// refuses one of its components, the object isn't added and the error
+  /// is thrown; objects below it that were already live stay so.
+  T add<T extends GameObject>(T root) {
+    root._checkAddable();
+    _attach(root, null);
+    return root;
+  }
+
+  /// Every live object of class [T] (or a subclass) that the game added,
+  /// grouped by class, each class in the order its objects were added.
+  /// The parts a model makes aren't included: find them by name.
+  List<T> all<T extends GameObject>() => [
+    for (final objects in _byClass.values)
+      if (objects.first is T) ...objects.cast<T>(),
+  ];
+
+  /// The first live object of class [T] (or a subclass) that the game
+  /// added, or null.
+  T? first<T extends GameObject>() {
+    for (final objects in _byClass.values) {
+      if (objects.first is T) return objects.first as T;
     }
-    check(fy_spawn(pointer, scratch.id));
-    final object = GameObject._(this, scratch.id.value);
+    return null;
+  }
+
+  // The Dart object for each live engine id that has been asked for, so
+  // the same instance always comes back: the game's own, or a plain one
+  // made the first time a model's part is asked for.
+  final _objects = <int, GameObject>{};
+
+  // The objects the game added, by class, for [all] and [first].
+  final _byClass = <Type, Set<GameObject>>{};
+
+  GameObject _object(int id) => _objects[id] ??= GameObject._live(this, id);
+
+  /// Spawns [object] in the engine under [parent], then what was added to
+  /// it before it was live.
+  void _attach(GameObject object, GameObject? parent) {
+    final described = object._described!;
+    final id = described.model == null ? _spawn() : _spawnModel(described.model!, described.transform);
+    object
+      .._world = this
+      .._id = id;
     try {
-      components.forEach(object.add);
+      if (parent != null) check(fy_parent_set(pointer, id, parent.id));
+      if (described.model == null) object._writeTransform(described.transform);
+      if (described.name != null) object._writeName(described.name!);
+      for (final component in described.components) {
+        object._write(component);
+      }
     } catch (_) {
-      fy_despawn(_pointer, object.id);
+      fy_despawn(_pointer, id);
+      object
+        .._world = null
+        .._id = 0;
       rethrow;
     }
-    return object;
+    object._described = null;
+    _objects[id] = object;
+    (_byClass[object.runtimeType] ??= {}).add(object);
+    for (final child in described.children) {
+      child._queuedIn = null;
+      _attach(child, object);
+    }
   }
 
-  /// Spawns [model]: a root object at [transform], named after the
-  /// model's scene, with an object for each node of the file below it,
-  /// named and placed as there. A node that draws one part gets a
-  /// [MeshRenderer]; one that draws several gets an unnamed child for
-  /// each. Find nodes with [GameObject.find].
-  ///
-  /// Every copy shares the model's meshes, textures and [Model.materials]
-  /// (changing a material changes every copy), so spawning a model again
-  /// uploads nothing new. Throws, spawning nothing, if one of the model's
-  /// meshes or textures was disposed.
-  GameObject spawnModel(Model model, [Transform? transform]) {
+  int _spawn() {
+    check(fy_spawn(pointer, scratch.id));
+    return scratch.id.value;
+  }
+
+  /// A copy of [model]'s objects, with its root at [transform]: each copy
+  /// shares the model's meshes, textures and materials.
+  int _spawnModel(Model model, Transform transform) {
     final meshes = model.meshes.map(_meshId).toList();
     final materials = model.materials.map(_materialId).toList();
-    final at = transform ?? Transform();
     final t = scratch.transform.ref;
-    t.position.write(at.position);
-    t.rotation.write(at.rotation);
-    t.scale.write(at.scale);
+    t.position.write(transform.position);
+    t.rotation.write(transform.rotation);
+    t.scale.write(transform.scale);
     return using((arena) {
       Pointer<Uint64> copy(List<int> ids) {
         final p = arena<Uint64>(ids.isEmpty ? 1 : ids.length);
@@ -124,8 +171,40 @@ final class World implements Finalizable {
           out,
         ),
       );
-      return GameObject._(this, out.value);
+      return out.value;
     });
+  }
+
+  /// Takes [id] and everything below it out of the engine and forgets
+  /// their Dart objects.
+  void _destroy(int id) {
+    final ids = <int>[];
+    void collect(int id) {
+      ids.add(id);
+      for (final child in _childIds(id)) {
+        collect(child);
+      }
+    }
+
+    collect(id);
+    check(fy_despawn(pointer, id));
+    for (final id in ids) {
+      final object = _objects.remove(id);
+      if (object == null) continue;
+      object._destroyed = true;
+      final same = _byClass[object.runtimeType];
+      if (same != null && same.remove(object) && same.isEmpty) _byClass.remove(object.runtimeType);
+    }
+  }
+
+  List<int> _childIds(int id) {
+    final w = pointer;
+    final capacity = scratch.idCapacity;
+    check(fy_children_get(w, id, scratch.ids(), capacity, scratch.count));
+    final count = scratch.count.value;
+    if (count > capacity) check(fy_children_get(w, id, scratch.ids(count), count, scratch.count));
+    final ids = scratch.ids();
+    return [for (var i = 0; i < count; i++) ids[i]];
   }
 
   /// The closest object along [ray], no further than [maxDistance], or
@@ -145,7 +224,7 @@ final class World implements Finalizable {
     check(fy_raycast(pointer, scratch.ray, maxDistance, scratch.rayHit));
     final hit = scratch.rayHit.ref;
     if (hit.object == 0) return null;
-    return RayHit._(GameObject._(this, hit.object), hit.point.read(), hit.normal.read(), hit.distance);
+    return RayHit._(_object(hit.object), hit.point.read(), hit.normal.read(), hit.distance);
   }
 
   int _meshId(Mesh mesh) {
@@ -253,27 +332,128 @@ final class World implements Finalizable {
   }
 }
 
-/// An object in a [World]: an id and whatever components it has. Reading a
-/// component gives a copy; setting it replaces the object's.
+/// An object in a [World]: a [Transform], whatever other components it
+/// has, and the objects added to it.
+///
+/// Make one, then add it: `world.add(GameObject(...))` or
+/// `parent.add(child)`. Until then it only describes itself: its
+/// [transform], [name] and components can be read and set, and objects
+/// can be added to it, but anything that needs the world ([parent],
+/// [children], [find], [worldTransform]...) throws a [StateError].
+///
+/// Extend it to give an object its own fields and code: a class is what
+/// other engines call a prefab, and each instance is one object. The same
+/// instance comes back from [find], [children], [parent] and
+/// [World.raycast], so a hit on a character's arm leads to the
+/// `Character` with its fields.
 ///
 /// (Called `GameObject`, not `Object`, because Dart's `Object` is every
 /// value's type.)
-final class GameObject {
-  GameObject._(this.world, this.id);
+class GameObject {
+  /// A new object, not yet in any world, with [transform] (the identity if
+  /// not given) and [components]: at most one of each kind, and no
+  /// [Transform] among them.
+  GameObject({String? name, Transform? transform, Iterable<Component> components = const []})
+    : _described = _Description(name, transform ?? Transform(), _checked(components));
 
-  final World world;
+  /// The object for an engine id the game didn't make, such as a model's
+  /// part.
+  GameObject._live(World world, int id) : _world = world, _id = id;
 
-  /// The engine's id: never 0, and never reused after a despawn.
-  final int id;
+  static List<Component> _checked(Iterable<Component> components) {
+    final list = components.toList();
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] is Transform) {
+        throw ArgumentError('give the Transform as transform:, not among the components');
+      }
+      for (var j = 0; j < i; j++) {
+        if (list[i].runtimeType == list[j].runtimeType) {
+          throw ArgumentError('got two ${list[i].runtimeType}s; an object has at most one');
+        }
+      }
+    }
+    return list;
+  }
 
-  /// Whether the object still exists (it hasn't been despawned and the
-  /// world hasn't been disposed).
-  bool get isAlive => !world.isDisposed && fy_exists(world._pointer, id);
+  World? _world;
+  int _id = 0;
 
-  /// Removes the object and its components, and its [children] with
-  /// theirs, all the way down. Using any of them afterwards throws a
-  /// [FynkelException] with [FynkelStatus.noObject].
-  void despawn() => check(fy_despawn(world.pointer, id));
+  // What the object is to be, until it's added.
+  _Description? _described;
+
+  // The object this one was added to before either was live.
+  GameObject? _queuedIn;
+
+  bool _destroyed = false;
+
+  /// The world the object was added to. Throws a [StateError] before it's
+  /// added.
+  World get world => _world ?? (throw _notAdded('world'));
+
+  /// The engine's id: never 0, and never reused. Throws a [StateError]
+  /// before the object is added.
+  int get id => _world == null ? throw _notAdded('id') : _id;
+
+  /// Whether the object is live: added to a world, not destroyed, and the
+  /// world not disposed.
+  bool get isAlive => _world != null && !_destroyed && !_world!.isDisposed && fy_exists(_world!._pointer, _id);
+
+  /// Whether [destroy] was called on this object or one above it.
+  bool get isDestroyed => _destroyed;
+
+  StateError _notAdded(String what) => StateError(
+    '$this has no $what yet: it isn\'t added to a world. Add it first (world.add, or add to an object '
+    'that is), and touch the world from its onLoad on.',
+  );
+
+  // --- Adding and destroying ---
+
+  /// Adds [child] below this object and returns it. If this object is
+  /// live, [child] is now live too; if not, it becomes live when this one
+  /// does.
+  ///
+  /// Throws a [StateError] if [child] was already added (to move a live
+  /// object, set its [parent]) or destroyed, or would end up below itself.
+  T add<T extends GameObject>(T child) {
+    child._checkAddable();
+    if (_destroyed) throw StateError('$this was destroyed, so nothing can be added to it');
+    for (GameObject? above = this; above != null; above = above._queuedIn) {
+      if (identical(above, child)) throw StateError('$child can\'t be added below itself');
+    }
+    if (_world != null) {
+      _world!._attach(child, this);
+    } else {
+      child._queuedIn = this;
+      _described!.children.add(child);
+    }
+    return child;
+  }
+
+  void _checkAddable() {
+    if (_destroyed) throw StateError('$this was destroyed; make a new one to add');
+    if (_world != null || _queuedIn != null) {
+      throw StateError('$this was already added; to move it, set its parent');
+    }
+  }
+
+  /// Removes the object and everything below it. Using any of them
+  /// afterwards throws a [FynkelException] with [FynkelStatus.noObject].
+  /// Destroying an object again does nothing.
+  void destroy() {
+    if (_destroyed) return;
+    final world = _world;
+    if (world == null) {
+      _queuedIn?._described?.children.remove(this);
+      _queuedIn = null;
+      _destroyed = true;
+      return;
+    }
+    if (world.isDisposed || !fy_exists(world._pointer, _id)) {
+      _destroyed = true;
+      return;
+    }
+    world._destroy(_id);
+  }
 
   // --- Hierarchy ---
 
@@ -287,11 +467,11 @@ final class GameObject {
   GameObject? get parent {
     check(fy_parent_get(world.pointer, id, scratch.id));
     final parent = scratch.id.value;
-    return parent == 0 ? null : GameObject._(world, parent);
+    return parent == 0 ? null : world._object(parent);
   }
 
   set parent(GameObject? value) {
-    if (value != null && !identical(value.world, world)) {
+    if (value != null && !identical(value._world, world)) {
       throw FynkelException(
         FynkelStatus.invalidValue,
         '$value is in another world, so it can\'t be the parent of $this',
@@ -302,30 +482,29 @@ final class GameObject {
 
   /// The objects whose [parent] is this one, in the order they were added.
   /// A new list each time.
-  List<GameObject> get children {
-    final w = world.pointer;
-    var capacity = scratch.idCapacity;
-    check(fy_children_get(w, id, scratch.ids(), capacity, scratch.count));
-    final count = scratch.count.value;
-    if (count > capacity) {
-      check(fy_children_get(w, id, scratch.ids(count), count, scratch.count));
-    }
-    final ids = scratch.ids();
-    return List.unmodifiable([for (var i = 0; i < count; i++) GameObject._(world, ids[i])]);
-  }
+  List<GameObject> get children => List.unmodifiable(world._childIds(id).map(world._object));
 
   /// Whether this object is [other] or below it.
   bool isPartOf(GameObject other) {
-    if (!identical(other.world, world)) return false;
+    if (other._world == null || !identical(other._world, world)) return false;
     check(fy_is_part_of(world.pointer, id, other.id, scratch.flag));
     return scratch.flag.value;
+  }
+
+  /// The nearest object above this one that is a [T], or null.
+  T? ancestor<T extends GameObject>() {
+    for (var above = parent; above != null; above = above.parent) {
+      if (above is T) return above;
+    }
+    return null;
   }
 
   /// The object's name, or null. Names needn't be unique; setting '' is
   /// the same as null.
   String? get name {
+    if (_described case final d?) return d.name;
     final w = world.pointer;
-    var capacity = scratch.byteCapacity;
+    final capacity = scratch.byteCapacity;
     check(fy_name_get(w, id, scratch.bytes(), capacity, scratch.count));
     final length = scratch.count.value;
     if (length == 0) return null;
@@ -336,7 +515,15 @@ final class GameObject {
   }
 
   set name(String? value) {
-    final length = scratch.utf8(value ?? '');
+    if (_described case final d?) {
+      d.name = value == '' ? null : value;
+      return;
+    }
+    _writeName(value ?? '');
+  }
+
+  void _writeName(String value) {
+    final length = scratch.utf8(value);
     check(fy_name_set(world.pointer, id, scratch.bytes(), length));
   }
 
@@ -346,7 +533,7 @@ final class GameObject {
     final length = scratch.utf8(name);
     check(fy_find(world.pointer, id, scratch.bytes(), length, scratch.id));
     final found = scratch.id.value;
-    return found == 0 ? null : GameObject._(world, found);
+    return found == 0 ? null : world._object(found);
   }
 
   /// Where the object is in the world: its [transform] after its parents'.
@@ -384,16 +571,14 @@ final class GameObject {
     return Ray(t.position + through * c.near, through);
   }
 
-  /// Adds [component], replacing one of the same kind.
-  void add(Component component) => switch (component) {
-    Transform c => transform = c,
-    Camera c => camera = c,
-    Light c => light = c,
-    MeshRenderer c => meshRenderer = c,
-  };
-
   /// Removes the object's component of kind [T]. Throws if it has none.
   void remove<T extends Component>() {
+    if (_described case final d?) {
+      if (T == Transform) throw ArgumentError('an object that isn\'t added yet always has a Transform');
+      if (d.get<T>() == null) throw FynkelException(FynkelStatus.noComponent, '$this has no $T');
+      d.components.removeWhere((c) => c is T);
+      return;
+    }
     final w = world.pointer;
     check(switch (T) {
       const (Transform) => fy_transform_remove(w, id),
@@ -404,13 +589,34 @@ final class GameObject {
     });
   }
 
+  /// The object's component of kind [T] while it's only described. Throws
+  /// as the engine would when it has none.
+  T _describedOr<T extends Component>(_Description d) =>
+      d.get<T>() ?? (throw FynkelException(FynkelStatus.noComponent, '$this has no $T'));
+
+  void _write(Component component) => switch (component) {
+    Transform c => _writeTransform(c),
+    Camera c => _writeCamera(c),
+    Light c => _writeLight(c),
+    MeshRenderer c => _writeMeshRenderer(c),
+  };
+
   Transform get transform {
+    if (_described case final d?) return d.transform;
     check(fy_transform_get(world.pointer, id, scratch.transform));
     final t = scratch.transform.ref;
     return Transform._(t.position.read(), t.rotation.read(), t.scale.read());
   }
 
   set transform(Transform value) {
+    if (_described case final d?) {
+      d.transform = value;
+      return;
+    }
+    _writeTransform(value);
+  }
+
+  void _writeTransform(Transform value) {
     final t = scratch.transform.ref;
     t.position.write(value.position);
     t.rotation.write(value.rotation);
@@ -426,12 +632,15 @@ final class GameObject {
   void translate(Vec3 offset) => transform = transform.translated(offset);
 
   Camera get camera {
+    if (_described case final d?) return _describedOr<Camera>(d);
     check(fy_camera_get(world.pointer, id, scratch.camera));
     final c = scratch.camera.ref;
     return Camera(fovY: c.fov_y, near: c.near_clip, far: c.far_clip, clearColor: c.clear_color.read());
   }
 
-  set camera(Camera value) {
+  set camera(Camera value) => _described == null ? _writeCamera(value) : _described!.set(value);
+
+  void _writeCamera(Camera value) {
     final c = scratch.camera.ref;
     c.fov_y = value.fovY;
     c.near_clip = value.near;
@@ -441,6 +650,7 @@ final class GameObject {
   }
 
   Light get light {
+    if (_described case final d?) return _describedOr<Light>(d);
     check(fy_light_get(world.pointer, id, scratch.light));
     final l = scratch.light.ref;
     return switch (l.kind) {
@@ -450,7 +660,9 @@ final class GameObject {
     };
   }
 
-  set light(Light value) {
+  set light(Light value) => _described == null ? _writeLight(value) : _described!.set(value);
+
+  void _writeLight(Light value) {
     final l = scratch.light.ref;
     l.kind = switch (value.kind) {
       LightKind.sun => FY_LIGHT_DIRECTIONAL,
@@ -462,12 +674,15 @@ final class GameObject {
   }
 
   MeshRenderer get meshRenderer {
+    if (_described case final d?) return _describedOr<MeshRenderer>(d);
     check(fy_mesh_renderer_get(world.pointer, id, scratch.meshRenderer));
     final r = scratch.meshRenderer.ref;
     return MeshRenderer(world._meshes[r.mesh], world._materials[r.material]);
   }
 
-  set meshRenderer(MeshRenderer value) {
+  set meshRenderer(MeshRenderer value) => _described == null ? _writeMeshRenderer(value) : _described!.set(value);
+
+  void _writeMeshRenderer(MeshRenderer value) {
     final w = world;
     final mesh = value.mesh == null ? 0 : w._meshId(value.mesh!);
     final material = value.material == null ? 0 : w._materialId(value.material!);
@@ -478,13 +693,28 @@ final class GameObject {
   }
 
   @override
-  bool operator ==(Object other) => other is GameObject && identical(other.world, world) && other.id == id;
+  String toString() => _world == null ? '$runtimeType (not added)' : '$runtimeType#$_id';
+}
 
-  @override
-  int get hashCode => Object.hash(identityHashCode(world), id);
+/// What an object is to be, until it's added: what its constructor and
+/// setters said.
+final class _Description {
+  _Description(this.name, this.transform, this.components);
 
-  @override
-  String toString() => 'GameObject#$id';
+  String? name;
+  Transform transform;
+  final List<Component> components;
+  final children = <GameObject>[];
+
+  /// For a model's copy ([Model.instantiate]): the engine makes its objects.
+  Model? model;
+
+  T? get<T extends Component>() => transform is T ? transform as T : components.whereType<T>().firstOrNull;
+
+  void set<T extends Component>(T component) {
+    components.removeWhere((c) => c is T);
+    components.add(component);
+  }
 }
 
 /// Where a ray hit first ([World.raycast]).

@@ -117,6 +117,16 @@ it, so a whole game runs in `dart test` without a screen.
   - **A mixin** for what is part of the object: `class Barrel extends GameObject with Health`. Every lifecycle method on `GameObject` is `@mustCallSuper`, so a mixin's `onUpdate` that forgets `super.onUpdate(dt)` (and with it the next mixin's) is an analyzer warning, not a silent bug.
   - **A child object** for what can come and go: `add(Shield())` with no components is logic only. It costs one engine entity and its update, and `destroy()` takes it off again. This is Godot's way.
 
+- *Settled in step 1:*
+  - **Every object has a `Transform`**, the identity unless `transform:` gives one, as in Unity and Godot. It's never among `components` (an `ArgumentError` says to use `transform:`); in the first conversion of the tests that rule caught a camera whose transform had gone into its components.
+  - **`add` adds objects only.** `GameObject.add(Component)` is gone, as Dart has no overloading; components are given to the constructor or set later (`object.camera = ...`), and `remove<T>()` stays.
+  - **Equality is identity.** The world keeps one Dart object per engine id that has been asked for, so `==` by id was no longer needed.
+  - **`destroy()` twice does nothing**, and destroying an object that waits to be added (added to one that isn't live) takes it out, so it never comes.
+  - **A refused component** (a camera with `fovY: 500`) leaves the object not added and still describing itself, to be fixed and added again.
+  - **`all<T>()` lists the game's own objects**, grouped by class, each class in the order its objects were added. A model's parts aren't included; they're found by name.
+  - **`model.instantiate(transform:)`** replaces `spawnModel`: a copy is an object to add, as any other.
+  - **The cost** is on loading, not on frames (§6).
+
 ### 3.2 The loop and its order
 
 Each frame, `world.update(dt, input)` does, in this order:
@@ -181,14 +191,15 @@ Only objects whose class overrides `onUpdate` are visited each frame. Dart can't
 Each step is built, tested, and merged on its own, in this order. Each
 step's tests fail first where that makes sense.
 
-**Step 1: objects you can extend.** `GameObject` non-final, built then
+**Step 1: objects you can extend.** ✅ `GameObject` non-final, built then
 added (`add`, `world.add`), the id-to-object map, `destroy`, the same
 instance from `find`, `children`, `parent` and rays. `world.spawn` and
 `spawnModel` go; hello and the tests move to the new way. `all<T>`,
 `first<T>`, `ancestor<T>`. *Done when* a subclass's fields survive a
 round trip through `find` and a ray, the type lookups find what was
 added and forget what was destroyed, and every stage 2 test passes on
-the new API.
+the new API. Eight new tests (`test/object_test.dart`), nine mutants
+killed; all 62 package tests and the examples' moved over. Numbers in §6.
 
 **Step 2: the active flag.** `fynkel_world`, the C interface and Dart.
 *Done when* an inactive object's subtree is missing from a golden image
@@ -242,4 +253,15 @@ each device.
 
 ## 6. Measurements
 
-To come, step by step.
+### Step 1: objects (Mac, M3 Max, `dart test`, JIT, best of 5)
+
+| 10,000 cubes below one root | before (`spawn`, `parent =`) | after (`add`) |
+|---|---:|---:|
+| adding them | 3.1 ms | 4.0 ms |
+| destroying the root | 0.2 ms | 1.1 ms |
+
+Adding costs a Dart object, its description and its class's set for
+each. Destroying walks the subtree once to forget the Dart objects below
+(one call into the engine per object). Both happen when a level loads or
+goes, not each frame; a single call that returns a subtree's ids would
+take most of the destroy's cost away if a game ever needs it.

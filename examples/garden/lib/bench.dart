@@ -20,12 +20,27 @@ List<String> _extract() {
     ('no tree', (int i) => null),
   ]) {
     final world = World();
-    world.spawn(Camera(), Transform(position: Vec3(0, 1, 4), lookAt: Vec3.zero));
-    world.spawn(Light.sun(), Transform(forward: Vec3(-0.4, -1, -0.3)));
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 1, 4), lookAt: Vec3.zero),
+        components: [Camera()],
+      ),
+    );
+    world.add(
+      GameObject(
+        transform: Transform(forward: Vec3(-0.4, -1, -0.3)),
+        components: [Light.sun()],
+      ),
+    );
     final renderer = MeshRenderer(Mesh.cube(), Material());
     final objects = [
       for (var i = 0; i < 10000; i++)
-        world.spawn(Transform(position: Vec3(0, 0.01, 0.1), rotation: Quat.axisAngle(Vec3.up, i * 1e-3)), renderer),
+        world.add(
+          GameObject(
+            transform: Transform(position: Vec3(0, 0.01, 0.1), rotation: Quat.axisAngle(Vec3.up, i * 1e-3)),
+            components: [renderer],
+          ),
+        ),
     ];
     for (var i = 0; i < objects.length; i++) {
       if (parentOf(i) case final p?) objects[i].parent = objects[p];
@@ -66,7 +81,12 @@ List<String> _raycasts() {
         // Deep, each row is a chain of 100, each cube under the one before.
         final chained = deep && j > 0;
         final local = chained ? position - previous!.$2 : position;
-        final object = world.spawn(Transform(position: local), MeshRenderer(cube, material));
+        final object = world.add(
+          GameObject(
+            transform: Transform(position: local),
+            components: [MeshRenderer(cube, material)],
+          ),
+        );
         if (chained) object.parent = previous!.$1;
         previous = (object, position);
       }

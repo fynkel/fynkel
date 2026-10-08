@@ -12,8 +12,18 @@ void main() {
   test('a raycast finds the closest object, where and how far', () {
     final cube = Mesh.cube();
     final material = Material();
-    final near = world.spawn(Transform(position: Vec3(0, 0, -4)), MeshRenderer(cube, material));
-    world.spawn(Transform(position: Vec3(0, 0, -10)), MeshRenderer(cube, material));
+    final near = world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, -4)),
+        components: [MeshRenderer(cube, material)],
+      ),
+    );
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, -10)),
+        components: [MeshRenderer(cube, material)],
+      ),
+    );
 
     final hit = world.raycast(Ray(Vec3.zero, Vec3(0, 0, -5)))!;
     expect(hit.object, near);
@@ -41,26 +51,28 @@ void main() {
   test('a hit on a model is part of it, and names the node', () async {
     final model = await Model.load(File('../../tests/assets/gltf/tower.glb').readAsBytesSync());
     addTearDown(model.dispose);
-    final tower = world.spawnModel(model, Transform(position: Vec3(0, 0, -10)));
+    final tower = world.add(model.instantiate(transform: Transform(position: Vec3(0, 0, -10))));
     final hit = world.raycast(Ray(Vec3(0, 0.5, 0), Vec3.forward))!;
     expect(hit.object.isPartOf(tower), isTrue);
     expect(hit.object.name, 'Block 0.3');
   });
 
   test('rayThrough needs a camera and a view with an area', () {
-    final empty = world.spawn(Transform());
+    final empty = world.add(GameObject(transform: Transform()));
     expect(
       () => empty.rayThrough(const ViewPoint(1, 1, width: 2, height: 2)),
       throwsA(isA<FynkelException>().having((e) => e.status, 'status', FynkelStatus.noComponent)),
     );
-    final camera = world.spawn(Camera(), Transform());
+    final camera = world.add(GameObject(transform: Transform(), components: [Camera()]));
     expect(() => camera.rayThrough(const ViewPoint(0, 0, width: 0, height: 2)), throwsArgumentError);
   });
 
   test('rayThrough the centre goes straight ahead from the near plane, and a corner at half the field of view', () {
-    final camera = world.spawn(
-      Camera(fovY: 90, near: 0.5),
-      Transform(position: Vec3(1, 2, 3), rotation: Quat.axisAngle(Vec3.up, math.pi / 2)),
+    final camera = world.add(
+      GameObject(
+        transform: Transform(position: Vec3(1, 2, 3), rotation: Quat.axisAngle(Vec3.up, math.pi / 2)),
+        components: [Camera(fovY: 90, near: 0.5)],
+      ),
     );
     final centre = camera.rayThrough(const ViewPoint(100, 50, width: 200, height: 100));
     // Turned a quarter left, the camera looks along -X.
@@ -78,21 +90,36 @@ void main() {
   test('a ray through each pixel hits the object the view drew there', () {
     // Flat colours, one per object, so a pixel says which object it shows.
     Material flat(Color c) => Material(color: Color.rgb(0, 0, 0), emissive: c, roughness: 1, metallic: 0);
-    final red = world.spawn(
-      Transform(position: Vec3(-1.2, 0.5, 0), rotation: Quat.axisAngle(Vec3(1, 1, 0), 0.6)),
-      MeshRenderer(Mesh.cube(), flat(Color.rgb(1, 0, 0))),
+    final red = world.add(
+      GameObject(
+        transform: Transform(position: Vec3(-1.2, 0.5, 0), rotation: Quat.axisAngle(Vec3(1, 1, 0), 0.6)),
+        components: [MeshRenderer(Mesh.cube(), flat(Color.rgb(1, 0, 0)))],
+      ),
     );
-    final green = world.spawn(
-      Transform(position: Vec3(1.1, 0.6, -0.5), scale: Vec3(1.5, 1, 1)),
-      MeshRenderer(Mesh.sphere(), flat(Color.rgb(0, 1, 0))),
+    final green = world.add(
+      GameObject(
+        transform: Transform(position: Vec3(1.1, 0.6, -0.5), scale: Vec3(1.5, 1, 1)),
+        components: [MeshRenderer(Mesh.sphere(), flat(Color.rgb(0, 1, 0)))],
+      ),
     );
-    final blue = world.spawn(Transform(scale: Vec3(6, 1, 3)), MeshRenderer(Mesh.plane(), flat(Color.rgb(0, 0, 1))));
+    final blue = world.add(
+      GameObject(
+        transform: Transform(scale: Vec3(6, 1, 3)),
+        components: [MeshRenderer(Mesh.plane(), flat(Color.rgb(0, 0, 1)))],
+      ),
+    );
     // The camera hangs from a turned, moved rig, so its world transform is
     // what counts.
-    final rig = world.spawn(Transform(position: Vec3(0, 1, 0), rotation: Quat.axisAngle(Vec3.up, 0.3)));
-    final camera = world.spawn(
-      Camera(fovY: 50, clearColor: Color.rgb(0, 0, 0)),
-      Transform(position: Vec3(0.6, 1.5, 5), lookAt: Vec3(0.3, -0.6, 0)),
+    final rig = world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 1, 0), rotation: Quat.axisAngle(Vec3.up, 0.3)),
+      ),
+    );
+    final camera = world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0.6, 1.5, 5), lookAt: Vec3(0.3, -0.6, 0)),
+        components: [Camera(fovY: 50, clearColor: Color.rgb(0, 0, 0))],
+      ),
     );
     camera.parent = rig;
 

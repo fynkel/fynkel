@@ -14,7 +14,7 @@ const frames = 300;
 
 void main() {
   final world = World();
-  final cubes = [for (var i = 0; i < objects; i++) world.spawn(Transform())];
+  final cubes = [for (var i = 0; i < objects; i++) world.add(GameObject(transform: Transform()))];
   final positions = [for (var i = 0; i < objects; i++) Vec3(i % 100 * 1.0, 0, i ~/ 100 * 1.0)];
 
   void measure(String name, void Function(int frame) body) {

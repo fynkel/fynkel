@@ -2,14 +2,14 @@ part of 'world.dart';
 
 /// A 3D model from a `.glb` file (binary glTF 2.0, which Blender and most
 /// tools export): its meshes, textures and materials, and the tree of
-/// nodes that places them. Load it once with [Model.load], then
-/// [World.spawnModel] it as often as you like; every copy shares the same
+/// nodes that places them. Load it once with [Model.load], then add as
+/// many copies as you like ([instantiate]); every copy shares the same
 /// data.
 ///
 /// What the engine can't draw yet (animations, skins, see-through
 /// materials, ...) is skipped, and [warnings] says what. [dispose] frees
 /// the model; otherwise it's freed when it's garbage collected. Its
-/// meshes, textures and materials live on in the worlds that spawned it.
+/// meshes, textures and materials live on in the worlds that have copies.
 final class Model implements Finalizable {
   Model._(this._pointer) {
     _finalizer.attach(this, _pointer.cast(), detach: this);
@@ -119,13 +119,27 @@ final class Model implements Finalizable {
     );
   }
 
-  /// Frees the model's own data. Its [meshes], [textures] and [materials]
-  /// stay usable, and objects already spawned keep drawing; only
-  /// [World.spawnModel] can't use it any more. Calling it again does
-  /// nothing.
+  /// A copy of the model to add to a world: a root object at [transform],
+  /// named after the model's scene, with an object for each node of the
+  /// file below it, named and placed as there. A node that draws one part
+  /// gets a [MeshRenderer]; one that draws several gets an unnamed child
+  /// for each. Find the parts with [GameObject.find] once it's added.
   ///
-  /// To free everything the model brought, once no object it spawned is
-  /// left, dispose its parts as well: the [materials] first, as they use
+  /// Every copy shares the model's meshes, textures and [materials]
+  /// (changing a material changes every copy), so adding another uploads
+  /// nothing new. Adding it throws, adding nothing, if one of the model's
+  /// meshes or textures was disposed, or the model was.
+  GameObject instantiate({Transform? transform}) {
+    _live;
+    return GameObject(transform: transform).._described!.model = this;
+  }
+
+  /// Frees the model's own data. Its [meshes], [textures] and [materials]
+  /// stay usable, and copies already added keep drawing; only
+  /// [instantiate]d copies not yet added can't be added any more. Calling
+  /// it again does nothing.
+  ///
+  /// To free everything the model brought, once no copy of it is left, dispose its parts as well: the [materials] first, as they use
   /// the [textures], then the [meshes] and [textures].
   void dispose() {
     if (_pointer == nullptr) return;

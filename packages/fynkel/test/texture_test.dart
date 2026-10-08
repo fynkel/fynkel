@@ -27,9 +27,11 @@ void main() {
         ..color = Color.white
         ..baseColorTexture = grid;
       final ground = Material(baseColorTexture: grid, uvScale: Vec2(4, 4), roughness: 0.9);
-      scene.world.spawn(
-        Transform(position: Vec3(0, -0.5, 0), scale: Vec3(8, 1, 8)),
-        MeshRenderer(Mesh.plane(), ground),
+      scene.world.add(
+        GameObject(
+          transform: Transform(position: Vec3(0, -0.5, 0), scale: Vec3(8, 1, 8)),
+          components: [MeshRenderer(Mesh.plane(), ground)],
+        ),
       );
       final view = HeadlessView(scene.world, width: 256, height: 160);
       addTearDown(view.dispose);
@@ -96,16 +98,16 @@ void main() {
     final world = World();
     addTearDown(world.dispose);
     final mesh = Mesh.custom(positions: const [Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 1, 0)], indices: const [0, 1, 2]);
-    final object = world.spawn(MeshRenderer(mesh, Material()));
+    final object = world.add(GameObject(components: [MeshRenderer(mesh, Material())]));
     expect(mesh.dispose, throwsFynkel(FynkelStatus.inUse));
     expect(mesh.vertexCount, 3, reason: 'still usable');
 
-    object.despawn();
+    object.destroy();
     mesh.dispose();
     mesh.dispose();
     expect(mesh.isDisposed, isTrue);
     expect(() => mesh.vertexCount, throwsStateError);
-    expect(() => world.spawn(MeshRenderer(mesh, Material())), throwsStateError);
+    expect(() => world.add(GameObject(components: [MeshRenderer(mesh, Material())])), throwsStateError);
     expect(Mesh.cube().dispose, throwsStateError);
   });
 
@@ -116,22 +118,22 @@ void main() {
     final material = Material(name: 'paint', baseColorTexture: red);
     final other = World();
     addTearDown(other.dispose);
-    final object = world.spawn(MeshRenderer(Mesh.cube(), material));
-    final elsewhere = other.spawn(MeshRenderer(Mesh.cube(), material));
+    final object = world.add(GameObject(components: [MeshRenderer(Mesh.cube(), material)]));
+    final elsewhere = other.add(GameObject(components: [MeshRenderer(Mesh.cube(), material)]));
     expect(material.dispose, throwsFynkel(FynkelStatus.inUse));
     expect(material.isDisposed, isFalse);
 
-    object.despawn();
-    elsewhere.despawn();
+    object.destroy();
+    elsewhere.destroy();
     expect(red.dispose, throwsFynkel(FynkelStatus.inUse, 'Texture2D(1 × 1) is still used by Material(\'paint\''));
     material.dispose();
     material.dispose();
     expect(material.isDisposed, isTrue);
-    expect(() => world.spawn(MeshRenderer(Mesh.cube(), material)), throwsStateError);
-    expect(() => other.spawn(MeshRenderer(Mesh.cube(), material)), throwsStateError);
+    expect(() => world.add(GameObject(components: [MeshRenderer(Mesh.cube(), material)])), throwsStateError);
+    expect(() => other.add(GameObject(components: [MeshRenderer(Mesh.cube(), material)])), throwsStateError);
     red.dispose();
     expect(red.isDisposed, isTrue, reason: 'no world has a material that uses it now');
-    expect(world.spawn(MeshRenderer(Mesh.cube(), Material())).meshRenderer.material, isNotNull);
+    expect(world.add(GameObject(components: [MeshRenderer(Mesh.cube(), Material())])).meshRenderer.material, isNotNull);
   });
 
   test('the new material values reach the picture', () {
@@ -165,7 +167,12 @@ void main() {
   test('a UV scale and offset pick part of a texture, and a double-sided plane shows its back', () {
     final world = World();
     addTearDown(world.dispose);
-    world.spawn(Camera(clearColor: Color.black), Transform(position: Vec3(0, 0, 3), lookAt: Vec3.zero));
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, 3), lookAt: Vec3.zero),
+        components: [Camera(clearColor: Color.black)],
+      ),
+    );
     // Unlit: only the emission shows, so colours come through as they are.
     // Red and green halves, 32 texels each, so filtering never mixes them
     // where the test looks.
@@ -177,7 +184,12 @@ void main() {
     final material = Material(color: Color.black, emissive: Color.white, emissiveTexture: halves);
     // Mesh.plane() faces +Y: turned to face the camera, or away from it.
     final facing = Quat.axisAngle(Vec3.right, math.pi / 2);
-    final plane = world.spawn(Transform(rotation: facing, scale: Vec3(2, 2, 2)), MeshRenderer(Mesh.plane(), material));
+    final plane = world.add(
+      GameObject(
+        transform: Transform(rotation: facing, scale: Vec3(2, 2, 2)),
+        components: [MeshRenderer(Mesh.plane(), material)],
+      ),
+    );
     final view = HeadlessView(world, width: 32, height: 32);
     addTearDown(view.dispose);
     // Which colour the middle of the view shows.
