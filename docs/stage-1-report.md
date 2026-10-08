@@ -92,8 +92,11 @@ From [stage-1.md §6](stage-1.md#6-open-questions):
 
 ## Seen on each device
 
-Step 8 is done when you have seen the cube on each device yourself:
+Step 8 is done when you have seen the cube on each device yourself.
+Confirmed on 2026-10-08:
 
-- [ ] Mac
-- [ ] iPhone 16 Pro Max
-- [ ] Galaxy Note10+
+- [x] Mac
+- [x] iPhone 16 Pro Max
+- [x] Galaxy Note10+
+
+**Stage 1 is done.**
