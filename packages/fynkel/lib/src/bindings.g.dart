@@ -206,6 +206,16 @@ external int fy_parent_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<ffi.U
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint64)>(isLeaf: true)
 external int fy_parent_set(ffi.Pointer<FyWorld> world, int child, int parent);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyRay>, ffi.Float, ffi.Pointer<FyRayHit>)>(
+  isLeaf: true,
+)
+external int fy_raycast(
+  ffi.Pointer<FyWorld> world,
+  ffi.Pointer<FyRay> ray,
+  double max_distance,
+  ffi.Pointer<FyRayHit> out,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_spawn(ffi.Pointer<FyWorld> world, ffi.Pointer<ffi.Uint64> out);
 
@@ -307,7 +317,7 @@ external ffi.Pointer<FyWorld> fy_world_new();
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
 external int fy_world_transform_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> out);
 
-const int FY_ABI_VERSION = 7;
+const int FY_ABI_VERSION = 8;
 
 const int FY_APPLE_MORE = 2;
 
@@ -515,6 +525,24 @@ final class FyQuat extends ffi.Struct {
     ..ref.y = y
     ..ref.z = z
     ..ref.w = w;
+}
+
+final class FyRay extends ffi.Struct {
+  external FyVec3 origin;
+
+  external FyVec3 direction;
+}
+
+final class FyRayHit extends ffi.Struct {
+  @ffi.Uint64()
+  external int object;
+
+  external FyVec3 point;
+
+  external FyVec3 normal;
+
+  @ffi.Float()
+  external double distance;
 }
 
 sealed class FyStatus {

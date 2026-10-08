@@ -41,6 +41,8 @@ const _: () = assert!(std::mem::size_of::<Vertex>() == 48);
 pub struct MeshData {
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
+    /// The smallest and largest corner of the box around every vertex.
+    bounds: (Vec3, Vec3),
 }
 
 /// What [`MeshData::new`] takes. Only positions and indices are required.
@@ -170,6 +172,9 @@ impl MeshData {
                 .map(|i| Vertex { position: positions[i], normal: normals[i].into(), tangent: [0.0; 4], uv: uv(i) })
                 .collect(),
             indices: indices.to_vec(),
+            bounds: positions.iter().fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(lo, hi), &p| {
+                (lo.min(Vec3::from(p)), hi.max(Vec3::from(p)))
+            }),
         };
 
         match (tangents, uvs) {
@@ -201,6 +206,12 @@ impl MeshData {
 
     pub fn indices(&self) -> &[u32] {
         &self.indices
+    }
+
+    /// The smallest and largest corner of the axis-aligned box around
+    /// every vertex.
+    pub fn bounds(&self) -> (Vec3, Vec3) {
+        self.bounds
     }
 
     /// MikkTSpace gives each triangle corner a tangent; corners that share

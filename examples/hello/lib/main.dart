@@ -198,7 +198,7 @@ class _HelloPageState extends State<HelloPage> {
               heightFactor: _scale,
               child: _baseline
                   ? const _Spinner()
-                  : FynkelView(world: _game.world, onFrame: _game.onFrame, onStats: _onStats),
+                  : FynkelView(world: _game.world, onFrame: (dt, _) => _game.onFrame(dt), onStats: _onStats),
             ),
           ),
         // Clear of the iPhone's status bar and Dynamic Island, and wrapped

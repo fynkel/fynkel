@@ -176,3 +176,54 @@ final class Quat {
   @override
   String toString() => 'Quat($x, $y, $z, $w)';
 }
+
+/// A half-line in the world: from [origin], along [direction]. Make one
+/// with [GameObject.rayThrough] to find what's under a point in a view, and
+/// cast it with [World.raycast].
+final class Ray {
+  /// [direction] is made unit length; throws for a zero one.
+  factory Ray(Vec3 origin, Vec3 direction) => Ray._(origin, direction.normalized);
+
+  const Ray._(this.origin, this.direction);
+
+  final Vec3 origin;
+
+  /// Unit length.
+  final Vec3 direction;
+
+  /// The point [distance] along the ray.
+  Vec3 at(double distance) => origin + direction * distance;
+
+  @override
+  bool operator ==(Object other) => other is Ray && other.origin == origin && other.direction == direction;
+
+  @override
+  int get hashCode => Object.hash(origin, direction);
+
+  @override
+  String toString() => 'Ray($origin, $direction)';
+}
+
+/// A point in a view, in logical pixels from its top-left corner, with
+/// the view's size: what [GameObject.rayThrough] needs to aim a ray.
+/// package:fynkel_flutter's `FrameInput` gives pointer positions as these.
+final class ViewPoint {
+  const ViewPoint(this.x, this.y, {required this.width, required this.height});
+
+  final double x;
+  final double y;
+
+  /// The view's size, in the same logical pixels.
+  final double width;
+  final double height;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ViewPoint && other.x == x && other.y == y && other.width == width && other.height == height;
+
+  @override
+  int get hashCode => Object.hash(x, y, width, height);
+
+  @override
+  String toString() => 'ViewPoint($x, $y in ${width}x$height)';
+}

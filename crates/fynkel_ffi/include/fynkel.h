@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 7
+#define FY_ABI_VERSION 8
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -125,6 +125,24 @@ typedef struct FyTransform {
   struct FyQuat rotation;
   struct FyVec3 scale;
 } FyTransform;
+
+// A half-line from `origin` along `direction`, which needn't be unit
+// length.
+typedef struct FyRay {
+  struct FyVec3 origin;
+  struct FyVec3 direction;
+} FyRay;
+
+// Where a ray hit first. `object` is 0 when it hit nothing; the rest is
+// then 0 too.
+typedef struct FyRayHit {
+  uint64_t object;
+  struct FyVec3 point;
+  // The face's normal, unit length, on the side the ray came from.
+  struct FyVec3 normal;
+  // From the ray's origin to `point`.
+  float distance;
+} FyRayHit;
 
 typedef struct FyMeshRenderer {
   // 0 for none.
@@ -373,6 +391,25 @@ FyStatus fy_find(const struct FyWorld *world,
 //
 // `world` is null or live; `out` is null or writable.
 FyStatus fy_world_transform_get(const struct FyWorld *world, uint64_t id, struct FyTransform *out);
+
+// Casts `ray` at the world as it is now and writes the closest object it
+// hits no further than `max_distance` (which may be infinite) to `out`.
+// What a ray can hit is what a view draws: objects with a `Transform` and
+// a mesh renderer with both a mesh and a material, from the side they're
+// drawn from (both sides for a double-sided material). Cut-outs are hit as
+// if solid.
+//
+// `FY_STATUS_INVALID_VALUE` for a ray without a direction or with a
+// non-finite origin, and for a negative or NaN `max_distance`.
+//
+// # Safety
+//
+// `world` is null or live; `ray` is null or readable; `out` is null or
+// writable.
+FyStatus fy_raycast(const struct FyWorld *world,
+                    const struct FyRay *ray,
+                    float max_distance,
+                    struct FyRayHit *out);
 
 // Adds or replaces the object's `Transform`. The rotation must be a unit
 // quaternion and every value finite.

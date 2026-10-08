@@ -10,6 +10,7 @@ mod describe;
 mod hierarchy;
 mod id;
 mod model;
+pub mod raycast;
 mod resources;
 mod world;
 
@@ -22,5 +23,6 @@ pub use glam::{Mat4, Quat, Vec2, Vec3};
 pub use hierarchy::WorldMatrices;
 pub use id::{MaterialId, MeshId, ObjectId, TextureId};
 pub use model::ModelIds;
+pub use raycast::{Ray, RayHit, Raycaster};
 pub use resources::Material;
 pub use world::{Result, World, WorldError};

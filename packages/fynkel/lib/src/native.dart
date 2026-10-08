@@ -57,6 +57,8 @@ final class Scratch {
   final width = malloc<Uint32>();
   final height = malloc<Uint32>();
   final flag = malloc<Bool>();
+  final ray = malloc<FyRay>();
+  final rayHit = malloc<FyRayHit>();
 
   // Room for lists of ids and for strings, grown when a call needs more.
   var _ids = malloc<Uint64>(_initial);
