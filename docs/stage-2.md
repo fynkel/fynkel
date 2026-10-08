@@ -216,9 +216,9 @@ tap the character to turn its head, drag to go round, scroll to zoom. It
 runs at 120 fps on the Mac and the iPhone and 60 on the Note10+ with no
 dropped frames; the whole scene loads in 45–73 ms on the Mac (warm),
 23 ms on the iPhone and is on screen 65–153 ms and 148 ms after the load
-starts. The memory cycles pass on the Mac and the iPhone. On the Note10+
-the native heap grows by about 16 MB over the first 14 cycles and then
-stays flat; after that the app grows as Flutter alone does. Numbers,
+starts. The memory cycles pass on all three. On the Note10+ the native heap
+grows by about 16 MB over the first 14 cycles and then stays flat; after
+that the app grows as Flutter alone does, which you accepted as a pass. Numbers,
 and the phone numbers steps 1 and 5 owed, in §6.
 
 **Step 7: the stage 2 check.** A short report, as in stage 1. *Done when*
@@ -300,18 +300,16 @@ median and slowest of 300; casts are best of 200.
 
 | | Mac | iPhone | Note10+ |
 |---|---:|---:|---:|
-| extract, 100 × 100 wide | 0.30 / 0.72 ms | — | 2.01 / 2.31 ms |
-| extract, 100 chains 100 deep | 0.30 / 0.37 ms | — | 2.56 / 3.27 ms |
-| extract, no tree | 0.16 / 0.20 ms | — | 1.21 / 3.32 ms |
-| raycast, 100 × 100 cubes, hit / miss | 83 / 83 µs | — | 560 / 386 µs |
-| raycast, in chains of 100, hit / miss | 193 / 207 µs | — | 1,668 / 1,669 µs |
-| raycast, the garden's tap | 3 µs | — | 22 µs |
-
-The iPhone's column is still to come: twice, Xcode timed out starting
-the app over the wireless connection after a good build.
+| extract, 100 × 100 wide | 0.30 / 0.72 ms | 0.27 / 0.50 ms | 2.01 / 2.31 ms |
+| extract, 100 chains 100 deep | 0.30 / 0.37 ms | 0.30 / 0.37 ms | 2.56 / 3.27 ms |
+| extract, no tree | 0.16 / 0.20 ms | 0.16 / 0.25 ms | 1.21 / 3.32 ms |
+| raycast, 100 × 100 cubes, hit / miss | 83 / 83 µs | 80 / 80 µs | 560 / 386 µs |
+| raycast, in chains of 100, hit / miss | 193 / 207 µs | 191 / 220 µs | 1,668 / 1,669 µs |
+| raycast, the garden's tap | 3 µs | 4 µs | 22 µs |
 
 The Mac's numbers match the Rust probes' (§6, steps 1 and 5), so the
-Dart layer adds nothing measurable. The Note10+ is 6–8 times slower than
+Dart layer adds nothing measurable. The iPhone is as fast as the Mac.
+The Note10+ is 6–8 times slower than
 the Mac: 10,000 objects in trees take 2.5 ms of a 16.7 ms frame, and a tap
 in the garden 22 µs.
 
