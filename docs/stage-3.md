@@ -62,12 +62,12 @@ class Character extends GameObject {
 ```
 
 `OrbitCamera`, `Ground` and `Props` are the garden's own classes, a few
-lines each (§3.7). The engine has no ground, sun or orbit camera: those
+lines each (§3.8). The engine has no ground, sun or orbit camera: those
 are one game's choices. The names follow the decisions in §5.
 
 Not in stage 3: animation, physics, audio, saving, an editor, several
-behaviours on one object (§3.1), prefab variants and overrides, and
-scene files. Each comes back later on its own, on top of what stage 3
+behaviours on one object (§3.1), object input beyond taps (§3.7), prefab
+variants and overrides, and scene files. Each comes back later on its own, on top of what stage 3
 settles.
 
 ## 1. Lessons from Fynkel 1, and what we do differently
@@ -93,6 +93,7 @@ packages/
   fynkel_measure/   measures any app from outside its code (a separate entry point)
 examples/
   garden/           rewritten; hello rewritten
+  coins/            NEW: a second small game, to prove the model past one scene (§4, step 6)
 ```
 
 The update loop lives in Dart, in package:fynkel (ADR-0001: game logic
@@ -108,9 +109,13 @@ it, so a whole game runs in `dart test` without a screen.
 - **Defined and spawned are the class and the instance.** Flutter splits a widget (the description) from its element (what's live) because widgets are rebuilt every frame. Game objects aren't: they live and change in place. A second class per object would double the code, which is what this stage is meant to cut.
 - **One way to make objects.** `GameObject(name:, transform:, components:)` makes a plain one; a subclass passes the same to `super`. `parent.add(child)` and `world.add(root)` make it live and return it. `world.spawn(...)` and `world.spawnModel(...)` go: `assets.model` gives a model instance as a GameObject to add (§3.4).
 - **An object is live once added, and can't be added twice.** Before it's added, its transform, name and components are held in Dart and applied when it is. Its children can be added before or after.
+- **The constructor describes; `onLoad` acts.** A constructor only says what the object is made of (transform, name, components, its own fields). Anything that touches the world (assets, `find`, rays, other objects) is done from `onLoad` on, and doing it earlier throws a `StateError` that says so. One rule, so no developer has to learn which members work before `add`.
 - **The same object comes back.** `find('head')`, `children`, `parent` and a ray's hit return the instance that was added, not a new handle, so a hit on a character's mesh leads to the `Character` with its fields. The world keeps a map from engine ids to Dart objects; objects a model makes get a plain `GameObject` the first time they're asked for.
 - **`destroy()`** removes the object and everything below it, calls their `onDestroy`, and releases what they loaded. It replaces `despawn`.
-- **One class per object, no behaviour components, in this stage.** Unity puts several behaviours on one object (a mover, a health, a sound). That's flexible, but every object then has two levels (the object and its behaviours), and they look each other up by type. With one class per object, the same thing is done with children (a `Health` child object) or plain Dart (fields, mixins). If real games need more, behaviours can be added on top later without changing what's here. *Decision 1 in §5.*
+- **One class per object, no behaviour components, in this stage.** Unity puts several behaviours on one object (a mover, a health, a sound). That's flexible, but every object then has two levels (the object and its behaviours), and they look each other up by type. If real games need more, behaviours can be added on top later without changing what's here. *Decision 1 in §5.*
+- **Reuse is with mixins or children**, the two ways documented and shown in the examples:
+  - **A mixin** for what is part of the object: `class Barrel extends GameObject with Health`. Every lifecycle method on `GameObject` is `@mustCallSuper`, so a mixin's `onUpdate` that forgets `super.onUpdate(dt)` (and with it the next mixin's) is an analyzer warning, not a silent bug.
+  - **A child object** for what can come and go: `add(Shield())` with no components is logic only. It costs one engine entity and its update, and `destroy()` takes it off again. This is Godot's way.
 
 ### 3.2 The loop and its order
 
@@ -131,6 +136,7 @@ Only objects whose class overrides `onUpdate` are visited each frame. Dart can't
 - **An object appears when it and everything added during its load are loaded.** Until then it's inactive: not drawn, not hit, not updated. So the garden appears whole, never piece by piece, and the character never shows without its head. A parent's load waits for its children's.
 - **The active flag is in the engine** (the one Rust change): an inactive object hides its subtree from the extract and from rays. Games use it too: `object.active = false` (Unity's `SetActive`).
 - **A load that fails** destroys the object and reports the error through `world.errors` (a stream), and the parent's load goes on without it. A game that would rather stop can rethrow.
+- **Destroyed while loading** (the player leaves before the sword is ready): the object is gone at once, its `onLoad` carries on to its next `await` and then finds the object destroyed (`add` and asset calls on it throw a `StateError` the loop catches and ignores), and whatever it loaded is released. Nothing appears, nothing leaks, and a test checks both.
 - **Loading ahead.** `await assets.preload(['character.glb'])` loads without adding anything, so a later `Character()` appears on its first frame. 
 
 ### 3.4 Assets
@@ -156,7 +162,15 @@ Only objects whose class overrides `onUpdate` are visited each frame. Dart can't
 - **Any object can add and destroy others at any time**, and they can load what they need themselves: a character adds a `Sword()`, later destroys it and adds an `Axe()`. The sword's model is freed with it unless something else still uses it.
 - **Changing level** is destroying one root and adding another: `garden.destroy(); world.add(Forest())`. To keep the old level on screen until the new one is ready, add the new one first (it stays inactive while it loads) and destroy the old one once it's there: `final forest = world.add(Forest()); await forest.loaded; garden.destroy();`. `loaded` completes when the object appears. Whatever should survive the change (the player, the score) lives in another root and is simply not destroyed (Unity's `DontDestroyOnLoad`, without a special case).
 
-### 3.7 The garden after
+### 3.7 Working with other objects
+
+- **Finding objects by type.** `world.all<Enemy>()` lists every live `Enemy`; `world.first<Player>()` gives one (or `null`); `ancestor<Level>()` gives the nearest `Level` above an object. Names stay for the parts of a model (`find('head')`). The world keeps a list per class added, so these don't walk the tree.
+- **Talking to each other is plain Dart.** An object that has another calls its methods (`player.hurt(10)`), or takes a callback in its constructor. There's no event bus or message system to learn.
+- **Showing game state in Flutter** uses what Flutter already has: a `ValueNotifier` on the object (`final score = ValueNotifier(0)`), shown by a `ValueListenableBuilder` over the view. The HUD needs nothing from Fynkel.
+- **Many of a thing** (bullets, particles, a crowd of hundreds) shouldn't each be a class with its own `onUpdate`. One manager object moves them, as plain objects with only components, in its own `onUpdate`. The examples show it. Systems that run in Rust over thousands of objects can come later, behind the same manager.
+- **Object input beyond taps** comes later: in stage 3, objects get `onTap`, and dragging, hovering and keys are read from the shared `input`. `onDrag` and the like wait for a game that needs them.
+
+### 3.8 The garden after
 
 - `main.dart`: one line. `garden.dart`: `Garden`, `Character`, `OrbitCamera` (a camera that reads `input.drag` and `input.scroll` in `onUpdate`), `Ground` (loads `grass.png`, adds a plane), `Props` (loads one model and adds a few at seeded places).
 - The target: the garden's game code in **60 lines or fewer** (non-blank, non-comment), against 132 in `garden.dart` today plus the app's own part of `main.dart`, and nothing about measuring in either.
@@ -170,9 +184,11 @@ step's tests fail first where that makes sense.
 **Step 1: objects you can extend.** `GameObject` non-final, built then
 added (`add`, `world.add`), the id-to-object map, `destroy`, the same
 instance from `find`, `children`, `parent` and rays. `world.spawn` and
-`spawnModel` go; hello and the tests move to the new way. *Done when* a
-subclass's fields survive a round trip through `find` and a ray, and
-every stage 2 test passes on the new API.
+`spawnModel` go; hello and the tests move to the new way. `all<T>`,
+`first<T>`, `ancestor<T>`. *Done when* a subclass's fields survive a
+round trip through `find` and a ray, the type lookups find what was
+added and forget what was destroyed, and every stage 2 test passes on
+the new API.
 
 **Step 2: the active flag.** `fynkel_world`, the C interface and Dart.
 *Done when* an inactive object's subtree is missing from a golden image
@@ -181,29 +197,38 @@ still pass.
 
 **Step 3: the loop.** `world.update(dt, input)`, `onStart`, `onUpdate`,
 `onDestroy`, `onTap` with its bubble; `Input` and `Tap` in package:fynkel,
-filled by fynkel_flutter. *Done when* tests fix the order in §3.2 (starts,
-parents first, added mid-update, destroyed mid-update, the bubble), and
+filled by fynkel_flutter; `@mustCallSuper` on the lifecycle. *Done when*
+tests fix the order in §3.2 (starts, parents first, added mid-update,
+destroyed mid-update, the bubble, two mixins' updates both running), and
 10,000 updating objects are measured on the Mac, the iPhone and the
 Note10+ against the 1 ms budget.
 
 **Step 4: loading and assets.** `onLoad`, inactive until loaded, load
 errors, `Assets` with its source, sharing, ownership and release,
 `preload`, `own`, `loaded`. *Done when* tests show a parent appears only with its
-children loaded, two objects share one load, and destroying the last
-user frees exactly what was loaded (`ViewStats` back to where it was).
+children loaded, two objects share one load, destroying the last
+user frees exactly what was loaded (`ViewStats` back to where it was),
+and an object destroyed while loading never appears and leaks nothing.
 
 **Step 5: Flutter and measuring.** `FynkelView(root:)`, `FynkelApp`, the
 bundle as the default source, fynkel_measure from outside the app's
 code, the generic lifecycle check. *Done when* a widget test runs a
 small game from its root and hello's measurements match stage 1's.
 
-**Step 6: the garden, rewritten.** *Done when* its game code is 60 lines
-or fewer, it runs at the display rate on all three devices, and
-destroying and re-adding the whole garden passes the memory cycles
-against `--baseline`.
+**Step 6: the garden, rewritten, and a second game.** The garden shows
+loading a level, tapping and a camera. `examples/coins` shows the rest:
+two levels and the change between them, a player who outlives them and
+swaps what it carries, coins found by type, a score shown by a Flutter
+HUD through a `ValueNotifier`, a mixin and a logic-only child, and a
+manager moving a few hundred objects. *Done when* the garden's game code
+is 60 lines or fewer, both games run at the display rate on all three
+devices, destroying and re-adding the whole garden passes the memory
+cycles against `--baseline`, and changing coins' level back and forth
+does too.
 
 **Step 7: the stage 3 check.** A short report, as in stages 1 and 2.
-*Done when* it's committed and you have played the garden on each device.
+*Done when* it's committed and you have played the garden and coins on
+each device.
 
 ## 5. Decisions (2026-10-09)
 
