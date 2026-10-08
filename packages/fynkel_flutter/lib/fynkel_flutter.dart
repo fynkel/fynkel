@@ -3,5 +3,4 @@ library;
 
 import 'package:fynkel/fynkel.dart' show World;
 
-export 'src/frame_input.dart' show FrameInput;
 export 'src/fynkel_view.dart' show FynkelView, FynkelViewStats;

@@ -26,7 +26,7 @@ use crate::extract::{Extract, ResourceOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 9;
+pub const FY_ABI_VERSION: u32 = 10;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -696,6 +696,24 @@ pub unsafe extern "C" fn fy_active_in_hierarchy_get(world: *const FyWorld, id: u
         let shown = world.lock()?.active_in_hierarchy(object(id)?)?;
         // SAFETY: per this function's contract.
         unsafe { write(out, shown, "out") }
+    })
+}
+
+/// Writes to `out` the camera a view of the world draws from: the shown
+/// object with the lowest id that has both a camera and a transform, or 0
+/// when there is none.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_camera_active(world: *const FyWorld, out: *mut u64) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let camera = world.lock()?.active_camera();
+        // SAFETY: per this function's contract.
+        unsafe { write(out, camera.map_or(0, ObjectId::raw), "out") }
     })
 }
 

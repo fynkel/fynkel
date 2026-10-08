@@ -37,6 +37,9 @@ external int fy_apple_set_frame_ready(
   ffi.Pointer<ffi.Void> userdata,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
+external int fy_camera_active(ffi.Pointer<FyWorld> world, ffi.Pointer<ffi.Uint64> out);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyCamera>)>(isLeaf: true)
 external int fy_camera_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyCamera> out);
 
@@ -326,7 +329,7 @@ external ffi.Pointer<FyWorld> fy_world_new();
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
 external int fy_world_transform_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> out);
 
-const int FY_ABI_VERSION = 9;
+const int FY_ABI_VERSION = 10;
 
 const int FY_APPLE_MORE = 2;
 

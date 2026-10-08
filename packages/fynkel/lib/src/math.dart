@@ -15,6 +15,8 @@ final class Vec2 {
   Vec2 operator -(Vec2 o) => Vec2(x - o.x, y - o.y);
   Vec2 operator *(double s) => Vec2(x * s, y * s);
 
+  double get length => math.sqrt(x * x + y * y);
+
   @override
   bool operator ==(Object other) => other is Vec2 && other.x == x && other.y == y;
 

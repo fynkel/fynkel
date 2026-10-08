@@ -1,12 +1,11 @@
 // The game: the stage 2 scene (docs/stage-2.md), a character in a garden
-// you can turn around, tap and zoom. Only package:fynkel and the view's
-// FrameInput; main.dart is the Flutter side, and measures.
+// you can turn around, tap and zoom. Only package:fynkel; main.dart is the
+// Flutter side, and measures.
 
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:fynkel/fynkel.dart';
-import 'package:fynkel_flutter/fynkel_flutter.dart' show FrameInput;
 
 /// The app's own loading: the engine takes bytes and never touches files.
 typedef BytesOf = Future<Uint8List> Function(String asset);
@@ -155,7 +154,7 @@ class Garden {
     }
   }
 
-  void onFrame(double dt, FrameInput input) {
+  void onFrame(double dt, Input input) {
     // A tap on the character turns its head a quarter turn.
     if (input.tapped case final point?) {
       final hit = world.raycast(camera.rayThrough(point));
@@ -170,10 +169,10 @@ class Garden {
     }
 
     // Drag to go around, scroll (or two fingers on a trackpad) to zoom.
-    _yaw -= input.drag.dx * 0.008;
-    _pitch = (_pitch + input.drag.dy * 0.006).clamp(0.05, 1.3);
-    _distance = (_distance * math.exp(input.scroll.dy * 0.002)).clamp(4.0, 12.0);
-    if (input.drag.distance > 0 || input.scroll.distance > 0) camera.transform = _cameraTransform();
+    _yaw -= input.drag.x * 0.008;
+    _pitch = (_pitch + input.drag.y * 0.006).clamp(0.05, 1.3);
+    _distance = (_distance * math.exp(input.scroll.y * 0.002)).clamp(4.0, 12.0);
+    if (input.drag.length > 0 || input.scroll.length > 0) camera.transform = _cameraTransform();
   }
 
   /// From the camera to the character's middle, what a tap there casts.

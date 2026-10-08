@@ -5,10 +5,10 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart' show HeadlessView, ViewStats, WorldView, World;
+import 'package:fynkel/fynkel.dart' show HeadlessView, Input, ViewStats, WorldView, World;
 import 'package:fynkel/platform.dart';
 
-import 'frame_input.dart';
+import 'input_collector.dart';
 
 /// The plugin's channel (darwin/…/FynkelFlutterPlugin.swift and
 /// android/…/FynkelFlutterPlugin.kt).
@@ -71,8 +71,9 @@ class FynkelViewStats {
 
 /// Shows [world] and runs its frame clock: each display frame it calls
 /// [onFrame] with the seconds since the last one and what the player did
-/// ([FrameInput]), then hands the world to the engine to draw. It fills
-/// the space its parent gives it, which must be bounded.
+/// ([Input]), runs the world's loop ([World.update]: taps, starts,
+/// updates), then hands the world to the engine to draw. It fills the
+/// space its parent gives it, which must be bounded.
 ///
 /// It reads pointers with a `Listener`, which takes part in no gesture
 /// arena, so gesture widgets around it keep working. While it has focus it
@@ -98,10 +99,11 @@ class FynkelView extends StatefulWidget {
 
   final World world;
 
-  /// Called once per display frame, before the world is drawn, with the
-  /// seconds since the previous call (0 the first time) and the input since
-  /// then. Game code goes here.
-  final void Function(double dt, FrameInput input)? onFrame;
+  /// Called once per display frame, before the world's [World.update],
+  /// with the seconds since the previous call (0 the first time) and the
+  /// input since then. For code that drives the world from outside; a
+  /// game's own code goes in its objects.
+  final void Function(double dt, Input input)? onFrame;
 
   final double resolutionScale;
 
@@ -174,7 +176,9 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
     final last = _lastMicros;
     _lastMicros = micros;
     final input = _input.take();
-    widget.onFrame?.call(last == null ? 0 : (micros - last) / 1e6, input);
+    final dt = last == null ? 0.0 : (micros - last) / 1e6;
+    widget.onFrame?.call(dt, input);
+    if (!widget.world.isDisposed) widget.world.update(dt, input);
     // Nothing to draw before there is a size (on Android, before the
     // window has one): no view yet, and no surface.
     if (_width == 0 || _height == 0) return;

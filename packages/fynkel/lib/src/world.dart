@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
+import 'package:meta/meta.dart';
 
 import 'bindings.g.dart';
 import 'color.dart';
@@ -13,6 +14,7 @@ import 'math.dart';
 import 'native.dart';
 
 part 'components.dart';
+part 'input.dart';
 part 'model.dart';
 part 'resources.dart';
 
@@ -63,6 +65,150 @@ final class World implements Finalizable {
     _textureIds.clear();
     _objects.clear();
     _byClass.clear();
+    _live.clear();
+    _starting.clear();
+    _moved.clear();
+    _off.clear();
+    _hidden.clear();
+  }
+
+  // --- The loop ---
+
+  // Every object the game added, in the order it became live, so parents
+  // come before their children. Destroyed ones are dropped and moved ones
+  // put last at the start of the next update.
+  final _live = <GameObject>[];
+  var _liveDirty = false;
+  final _moved = <GameObject>[];
+
+  // Live objects that haven't had onStart yet, in the same order.
+  final _starting = <GameObject>[];
+
+  // Objects whose own flag is off, and the ids of everything they hide,
+  // worked out again when [_shape] has changed since [_hiddenAt]. Only
+  // Dart turns objects off, so it knows them all; with none off (the
+  // usual case) nothing is worked out at all.
+  final _off = <GameObject>{};
+  final _hidden = <int>{};
+  var _shape = 0;
+  var _hiddenAt = -1;
+
+  Input _input = Input.none;
+
+  /// What the player did since the last frame, as the last [update] got
+  /// it. Objects read it as [GameObject.input].
+  Input get input => _input;
+
+  /// Runs one frame of the game, in this order:
+  ///
+  /// 1. **Taps.** Each of [input]'s taps is cast into the world from the
+  ///    camera the view draws from. The object hit gets
+  ///    [GameObject.onTap]; if it returns false, its parent does, and so on
+  ///    up to the root, until one returns true.
+  /// 2. **Starts.** Each object added since the last frame gets
+  ///    [GameObject.onStart], once, parents before children. Objects added
+  ///    during a start start too.
+  /// 3. **Updates.** Each started object gets [GameObject.onUpdate],
+  ///    parents before children, in the order they were added. Objects
+  ///    added during an update start next frame; objects destroyed during
+  ///    it get no more calls, even this frame. A new [GameObject.parent]
+  ///    counts from the next frame.
+  ///
+  /// Hidden objects (inactive, or below one that is) are skipped by all
+  /// three and start when they're first shown. A view then draws the world
+  /// as it is.
+  void update(double dt, [Input? input]) {
+    final w = pointer;
+    _input = input ?? Input.none;
+    _tidy();
+
+    for (final at in _input.taps) {
+      _tap(w, at);
+    }
+
+    final waiting = <GameObject>[];
+    for (var i = 0; i < _starting.length; i++) {
+      final object = _starting[i];
+      if (object._destroyed) continue;
+      if (_isHidden(object)) {
+        waiting.add(object);
+        continue;
+      }
+      object._started = true;
+      object.onStart();
+    }
+    _starting
+      ..clear()
+      ..addAll(waiting);
+
+    // Objects added from here on are past the end when they come, or not
+    // started: they wait for the next frame.
+    for (var i = 0; i < _live.length; i++) {
+      final object = _live[i];
+      if (!object._started || object._destroyed || _isHidden(object)) continue;
+      object.onUpdate(dt);
+    }
+  }
+
+  /// Drops destroyed objects from the update order, and puts each moved
+  /// one last with everything below it.
+  void _tidy() {
+    if (_liveDirty) {
+      _live.removeWhere((o) => o._destroyed);
+      _liveDirty = false;
+    }
+    for (final moved in _moved) {
+      if (moved._destroyed) continue;
+      final below = _subtreeIds(moved._id);
+      final tail = [
+        for (final o in _live)
+          if (below.contains(o._id)) o,
+      ];
+      _live
+        ..removeWhere((o) => below.contains(o._id))
+        ..addAll(tail);
+    }
+    _moved.clear();
+  }
+
+  void _tap(Pointer<FyWorld> w, ViewPoint at) {
+    check(fy_camera_active(w, scratch.id));
+    final camera = scratch.id.value;
+    if (camera == 0) return;
+    final hit = raycast(_object(camera).rayThrough(at));
+    if (hit == null) return;
+    final tap = Tap._(at, hit);
+    for (GameObject? object = hit.object; object != null && !object._destroyed;) {
+      final up = object.parent;
+      if (object.onTap(tap)) return;
+      object = up;
+    }
+  }
+
+  bool _isHidden(GameObject object) {
+    if (_off.isEmpty) return false;
+    if (_hiddenAt != _shape) {
+      _hidden.clear();
+      for (final off in _off) {
+        _hidden.addAll(_subtreeIds(off._id));
+      }
+      _hiddenAt = _shape;
+    }
+    return _hidden.contains(object._id);
+  }
+
+  /// [id] and the ids of everything below it.
+  Set<int> _subtreeIds(int id) {
+    final ids = <int>{};
+    void collect(int id) {
+      ids.add(id);
+      for (final child in _childIds(id)) {
+        collect(child);
+      }
+    }
+
+    collect(id);
+    return ids;
   }
 
   /// Makes [root] live in this world, with everything added to it so
@@ -132,6 +278,10 @@ final class World implements Finalizable {
     object._described = null;
     _objects[id] = object;
     (_byClass[object.runtimeType] ??= {}).add(object);
+    _live.add(object);
+    _starting.add(object);
+    if (!described.active) _off.add(object);
+    _shape++;
     for (final child in described.children) {
       child._queuedIn = null;
       _attach(child, object);
@@ -177,24 +327,28 @@ final class World implements Finalizable {
   }
 
   /// Takes [id] and everything below it out of the engine and forgets
-  /// their Dart objects.
+  /// their Dart objects. Each gets [GameObject.onDestroy] first, children
+  /// before parents, while it's still there to read.
   void _destroy(int id) {
-    final ids = <int>[];
-    void collect(int id) {
-      ids.add(id);
-      for (final child in _childIds(id)) {
-        collect(child);
-      }
-    }
-
-    collect(id);
-    check(fy_despawn(pointer, id));
-    for (final id in ids) {
-      final object = _objects.remove(id);
-      if (object == null) continue;
+    final ids = _subtreeIds(id).toList();
+    final objects = [for (final id in ids) ?_objects[id]];
+    for (final object in objects) {
       object._destroyed = true;
-      final same = _byClass[object.runtimeType];
-      if (same != null && same.remove(object) && same.isEmpty) _byClass.remove(object.runtimeType);
+    }
+    try {
+      for (final object in objects.reversed) {
+        object.onDestroy();
+      }
+    } finally {
+      check(fy_despawn(pointer, id));
+      for (final object in objects) {
+        _objects.remove(object._id);
+        _off.remove(object);
+        final same = _byClass[object.runtimeType];
+        if (same != null && same.remove(object) && same.isEmpty) _byClass.remove(object.runtimeType);
+      }
+      _liveDirty = true;
+      _shape++;
     }
   }
 
@@ -386,6 +540,7 @@ class GameObject {
   GameObject? _queuedIn;
 
   bool _destroyed = false;
+  bool _started = false;
 
   /// The world the object was added to. Throws a [StateError] before it's
   /// added.
@@ -406,6 +561,38 @@ class GameObject {
     '$this has no $what yet: it isn\'t added to a world. Add it first (world.add, or add to an object '
     'that is), and touch the world from its onLoad on.',
   );
+
+  // --- The loop ---
+
+  /// What the player did since the last frame: the world's [World.input].
+  Input get input => world.input;
+
+  /// Called once, in the first [World.update] after the object is added
+  /// and shown, before its first [onUpdate]. Its parent's comes first.
+  @mustCallSuper
+  @protected
+  void onStart() {}
+
+  /// Called every [World.update] with the seconds since the last one,
+  /// parents before children, while the object is shown. Override it to
+  /// move, animate or think; a mixin that overrides it calls
+  /// `super.onUpdate(dt)` so the next one runs too.
+  @mustCallSuper
+  @protected
+  void onUpdate(double dt) {}
+
+  /// Called when the object, or one above it, is destroyed: children
+  /// before parents, while the object is still there to read (where it
+  /// was, what it carried). Adding to it then throws.
+  @mustCallSuper
+  @protected
+  void onDestroy() {}
+
+  /// Called when a tap hits this object or something below it that didn't
+  /// take it ([Tap.object] is the one hit). Return true to take the tap;
+  /// false (the default) passes it to the parent.
+  @protected
+  bool onTap(Tap tap) => false;
 
   // --- Adding and destroying ---
 
@@ -479,6 +666,8 @@ class GameObject {
       );
     }
     check(fy_parent_set(world.pointer, id, value?.id ?? 0));
+    world._moved.add(this);
+    world._shape++;
   }
 
   /// The objects whose [parent] is this one, in the order they were added.
@@ -517,6 +706,12 @@ class GameObject {
       return;
     }
     check(fy_active_set(world.pointer, id, value));
+    if (value) {
+      world._off.remove(this);
+    } else {
+      world._off.add(this);
+    }
+    world._shape++;
   }
 
   /// Whether this object is shown: it and every object above it [active].

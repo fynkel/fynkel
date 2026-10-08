@@ -32,6 +32,6 @@ caffeinate -du dart run fynkel_measure:measure bench
 `lifecycle` unloads the character and loads it again, freeing everything
 it brought each time, with the memory after each. `--ios <device>`,
 `--android <device>` and `--baseline` work as for hello. `bench` runs
-`lib/bench.dart`'s timings in the app (the world's extract with 10,000
-objects in trees, raycasts over 10,000 cubes, the garden's tap) and
+`lib/bench.dart`'s timings in the app (`world.update` with 10,000
+objects in trees, the world's extract with 10,000 objects in trees, raycasts over 10,000 cubes, the garden's tap) and
 prints them. The loads' times are printed at the end of each run.

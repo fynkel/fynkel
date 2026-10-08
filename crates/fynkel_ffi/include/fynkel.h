@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 9
+#define FY_ABI_VERSION 10
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -368,6 +368,15 @@ FyStatus fy_active_get(const struct FyWorld *world, uint64_t id, bool *out);
 //
 // `world` is null or live; `out` is null or writable.
 FyStatus fy_active_in_hierarchy_get(const struct FyWorld *world, uint64_t id, bool *out);
+
+// Writes to `out` the camera a view of the world draws from: the shown
+// object with the lowest id that has both a camera and a transform, or 0
+// when there is none.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FyStatus fy_camera_active(const struct FyWorld *world, uint64_t *out);
 
 // Names the object with `len` bytes of UTF-8 at `name`, or clears its name
 // when `len` is 0. Names needn't be unique.

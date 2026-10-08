@@ -261,8 +261,8 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_9() {
-    assert_eq!(fy_abi_version(), 9);
+fn the_abi_version_is_10() {
+    assert_eq!(fy_abi_version(), 10);
 }
 
 #[cfg(not(target_os = "android"))]
@@ -384,12 +384,22 @@ fn an_inactive_object_and_everything_below_it_are_missing_from_the_golden() {
     stage1(&world);
     let view = View::headless(&world, 256, 256);
     assert_golden("cube", &view.read(view.frame(), 256, 256));
+    let (mut camera, rig_camera) = (0, children(&world, rig)[0]);
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        ok(fy_camera_active(world.0, &mut camera));
+        assert_eq!(fy_camera_active(world.0, ptr::null_mut()), FyStatus::NullPointer);
+    }
+    assert!(camera > rig_camera, "the stage 1 camera, the one drawn from, not the hidden rig's");
 
     // Shown, the rig's camera wins and clears to red.
     // SAFETY: a live world.
     ok(unsafe { fy_active_set(world.0, rig, true) });
     let [r, g, b, _] = view.read(view.frame(), 256, 256).pixel(0, 0);
     assert!(r > 200 && g < 30 && b < 30, "{:?}", [r, g, b]);
+    // SAFETY: a live world and a pointer to a local.
+    ok(unsafe { fy_camera_active(world.0, &mut camera) });
+    assert_eq!(camera, rig_camera);
 }
 
 #[test]
