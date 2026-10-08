@@ -1,6 +1,6 @@
 # Stage 3 plan: how a game is written
 
-Status: proposed 2026-10-09, waiting for the answers in §5. Scope and
+Status: accepted 2026-10-09, with the five answers in §5. Scope and
 rules: [ADR-0001](decisions/0001-fynkel-2-code-first.md). Stage 2 is done
 ([report](stage-2-report.md)).
 
@@ -62,9 +62,8 @@ class Character extends GameObject {
 ```
 
 `OrbitCamera`, `Ground` and `Props` are the garden's own classes, a few
-lines each (§3.6). The engine has no ground, sun or orbit camera: those
-are one game's choices. The names above are proposals; §5 asks about the
-ones that matter.
+lines each (§3.7). The engine has no ground, sun or orbit camera: those
+are one game's choices. The names follow the decisions in §5.
 
 Not in stage 3: animation, physics, audio, saving, an editor, several
 behaviours on one object (§3.1), prefab variants and overrides, and
@@ -111,13 +110,13 @@ it, so a whole game runs in `dart test` without a screen.
 - **An object is live once added, and can't be added twice.** Before it's added, its transform, name and components are held in Dart and applied when it is. Its children can be added before or after.
 - **The same object comes back.** `find('head')`, `children`, `parent` and a ray's hit return the instance that was added, not a new handle, so a hit on a character's mesh leads to the `Character` with its fields. The world keeps a map from engine ids to Dart objects; objects a model makes get a plain `GameObject` the first time they're asked for.
 - **`destroy()`** removes the object and everything below it, calls their `onDestroy`, and releases what they loaded. It replaces `despawn`.
-- **One class per object, no behaviour components, in this stage.** Unity puts several behaviours on one object (a mover, a health, a sound). That's flexible, but every object then has two levels (the object and its behaviours), and they look each other up by type. With one class per object, the same thing is done with children (a `Health` child object) or plain Dart (fields, mixins). If real games need more, behaviours can be added on top later without changing what's here. *Question 1 in §5.*
+- **One class per object, no behaviour components, in this stage.** Unity puts several behaviours on one object (a mover, a health, a sound). That's flexible, but every object then has two levels (the object and its behaviours), and they look each other up by type. With one class per object, the same thing is done with children (a `Health` child object) or plain Dart (fields, mixins). If real games need more, behaviours can be added on top later without changing what's here. *Decision 1 in §5.*
 
 ### 3.2 The loop and its order
 
 Each frame, `world.update(dt, input)` does, in this order:
 
-1. **Taps.** Each tap is cast into the world from the active camera. The hit object's `onTap(tap)` is called; if it returns `false`, its parent's is, and so on up to the root, until one returns `true` (a DOM-style bubble). So a tap on the character's arm reaches `Character.onTap` without the game knowing the arm. *Question 4.*
+1. **Taps.** Each tap is cast into the world from the active camera. The hit object's `onTap(tap)` is called; if it returns `false`, its parent's is, and so on up to the root, until one returns `true` (a DOM-style bubble). So a tap on the character's arm reaches `Character.onTap` without the game knowing the arm. *Decision 4.*
 2. **Starts.** Each object that became live since the last frame gets `onStart()`, once, parents before children.
 3. **Updates.** Each live object's `onUpdate(dt)`, parents before children, in the order they were added. Objects added during an update start next frame; objects destroyed during it get no more calls, even this frame.
 4. **The frame.** The view copies the world for the render worker, as now.
@@ -132,7 +131,7 @@ Only objects whose class overrides `onUpdate` are visited each frame. Dart can't
 - **An object appears when it and everything added during its load are loaded.** Until then it's inactive: not drawn, not hit, not updated. So the garden appears whole, never piece by piece, and the character never shows without its head. A parent's load waits for its children's.
 - **The active flag is in the engine** (the one Rust change): an inactive object hides its subtree from the extract and from rays. Games use it too: `object.active = false` (Unity's `SetActive`).
 - **A load that fails** destroys the object and reports the error through `world.errors` (a stream), and the parent's load goes on without it. A game that would rather stop can rethrow.
-- **Loading ahead.** `await assets.preload(['character.glb'])` loads without adding anything, so a later `Character()` appears on its first frame. *Question 3.*
+- **Loading ahead.** `await assets.preload(['character.glb'])` loads without adding anything, so a later `Character()` appears on its first frame. 
 
 ### 3.4 Assets
 
@@ -150,7 +149,14 @@ Only objects whose class overrides `onUpdate` are visited each frame. Dart can't
 - **Measuring leaves the game's code.** `examples/garden/lib/main.dart` is the one line above; `lib/measured.dart` wraps the same root with package:fynkel_measure, and the tool runs that entry point (`-t lib/measured.dart`). The lifecycle check becomes generic: it destroys the root and adds a new one, N times, so it measures loading and freeing the whole scene, not only the character. The on-screen clock and the bench move into fynkel_measure.
 - `FynkelView(world:, onFrame:)` stays for tests and tools that drive a world by hand, documented as the low-level way.
 
-### 3.6 The garden after
+### 3.6 The world, levels, and changing things
+
+- **There are no scenes.** A level is a GameObject like any other (`Garden`), and so is anything inside it.
+- **A world is the place objects live in**, not a level: everything live, the active camera, the shared assets, and the loop. A view shows one world, and `FynkelView(root:)` makes it. A world can hold several roots at once: a level, a player who outlives levels, a music object.
+- **Any object can add and destroy others at any time**, and they can load what they need themselves: a character adds a `Sword()`, later destroys it and adds an `Axe()`. The sword's model is freed with it unless something else still uses it.
+- **Changing level** is destroying one root and adding another: `garden.destroy(); world.add(Forest())`. To keep the old level on screen until the new one is ready, add the new one first (it stays inactive while it loads) and destroy the old one once it's there: `final forest = world.add(Forest()); await forest.loaded; garden.destroy();`. `loaded` completes when the object appears. Whatever should survive the change (the player, the score) lives in another root and is simply not destroyed (Unity's `DontDestroyOnLoad`, without a special case).
+
+### 3.7 The garden after
 
 - `main.dart`: one line. `garden.dart`: `Garden`, `Character`, `OrbitCamera` (a camera that reads `input.drag` and `input.scroll` in `onUpdate`), `Ground` (loads `grass.png`, adds a plane), `Props` (loads one model and adds a few at seeded places).
 - The target: the garden's game code in **60 lines or fewer** (non-blank, non-comment), against 132 in `garden.dart` today plus the app's own part of `main.dart`, and nothing about measuring in either.
@@ -182,7 +188,7 @@ Note10+ against the 1 ms budget.
 
 **Step 4: loading and assets.** `onLoad`, inactive until loaded, load
 errors, `Assets` with its source, sharing, ownership and release,
-`preload`, `own`. *Done when* tests show a parent appears only with its
+`preload`, `own`, `loaded`. *Done when* tests show a parent appears only with its
 children loaded, two objects share one load, and destroying the last
 user frees exactly what was loaded (`ViewStats` back to where it was).
 
@@ -199,20 +205,15 @@ against `--baseline`.
 **Step 7: the stage 3 check.** A short report, as in stages 1 and 2.
 *Done when* it's committed and you have played the garden on each device.
 
-## 5. Questions
+## 5. Decisions (2026-10-09)
 
-1. **One class per object, or Unity-style behaviours?** I recommend one
-   class per object for now (§3.1): less code, one level to think
-   about. Behaviours can be added later on top if games need them.
-2. **Words.** `add` and `destroy` (proposed), or `spawn` and `despawn`
-   (today's)? And `onUpdate`, `onTap` (proposed) or Flutter-like
-   `update`, `tap`?
-3. **Assets by default from Flutter's bundle, under `assets/`?** I
-   recommend yes, with any other source one argument away.
-4. **Taps bubble up to the parents until one handles it?** I recommend
-   yes (§3.2): the character handles taps on any of its parts.
-5. **hello**: rewrite it as the smallest game (recommended), or keep it
-   on the low-level API as the example of driving a world by hand?
+1. **One class per object** for now. Behaviours on top can come later.
+2. **`add` and `destroy`**, **`onUpdate` and `onTap`** (and so `onLoad`,
+   `onStart`, `onDestroy`).
+3. **Assets come from Flutter's bundle, under `assets/`, by default**,
+   with any other source one argument away.
+4. **Taps bubble up** to the parents until one handles them.
+5. **hello is rewritten** as the smallest game.
 
 ## 6. Measurements
 
