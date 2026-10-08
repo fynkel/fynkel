@@ -13,7 +13,7 @@ final world = World();
 final camera = world.spawn(Camera(), Transform(position: Vec3(0, 2, 6), lookAt: Vec3.zero));
 world.spawn(Light.sun(), Transform(forward: Vec3(-0.4, -1, -0.3)));
 
-final grass = await Texture.load(await bytesOf('assets/grass.png'));
+final grass = await Texture2D.load(await bytesOf('assets/grass.png'));
 world.spawn(
   Transform(scale: Vec3(20, 1, 20)),
   MeshRenderer(Mesh.plane(), Material(baseColorTexture: grass, uvScale: 10)),
@@ -59,10 +59,10 @@ crates/
   fynkel_mesh/      NEW (step 2): CPU meshes: the 48-byte vertex, built-in shapes, checks, normals, MikkTSpace tangents
   fynkel_world/     parents, children and names, world transforms, recursive despawn; Texture and Model resources
   fynkel_render/    vertex format with UVs and tangents, custom meshes, textures and samplers, textured PBR, alpha mask
-  fynkel_load/      NEW: PNG/JPEG decoding + mipmaps, and .glb parsing into plain data. No GPU, no world, no threads of its own.
+  fynkel_load/      NEW (step 3): PNG/JPEG decoding into plain data (and .glb parsing in step 4). No GPU, no world, no threads of its own.
   fynkel_ffi/       loading entry points, resources handed to the render worker, raycasts
 packages/
-  fynkel/           Texture, Model, Mesh.custom, parent/children/find, raycast, Ray
+  fynkel/           Texture2D, Model, Mesh.custom, parent/children/find, raycast, Ray
   fynkel_flutter/   FrameInput (pointers, taps, drags, keys) passed to onFrame
 examples/
   garden/           the stage 2 acceptance app
@@ -73,7 +73,9 @@ CPU. The renderer uploads them, the world keeps them (raycasts in step 5
 read the triangles), and `fynkel_load` will produce them, so none of
 those three has to know another. `fynkel_load` turns bytes into plain
 values (`ImageData`, `ModelData`) and is tested without a GPU. Dependencies still only point down;
-`fynkel_load` doesn't know the world or the renderer.
+`fynkel_load` doesn't know the world or the renderer. *Settled in step 3:*
+`fynkel_world` depends on `fynkel_load` (a world keeps `ImageData`), and
+the renderer takes raw pixel slices, so it depends on neither.
 
 ## 3. Design decisions
 
@@ -100,11 +102,21 @@ values (`ImageData`, `ModelData`) and is tested without a GPU. Dependencies stil
   - **Generated tangents.** A vertex whose faces need different tangents (a mirrored texture's seam) is split.
   - **Tangent sign.** A tangent's `w` makes `cross(normal, tangent) * w` point up the image, as glTF normal maps expect.
   - **Built-in shapes.** Their tangents are worked out exactly, not generated, and a test checks that they agree with MikkTSpace.
-- `Texture.load(bytes)` decodes PNG or JPEG and builds the mipmaps on a helper isolate (in Rust, through FFI), then hands the pixels to the world. The render worker uploads them; the Dart UI thread never waits for decoding or for the GPU. `Texture.rgba(width, height, pixels)` makes one from code.
+- `Texture2D.load(bytes)` decodes PNG or JPEG on a helper isolate (in Rust, through FFI), then hands the pixels to the world. The render worker uploads them; the Dart UI thread never waits for decoding or for the GPU. `Texture2D.rgba(width, height, pixels)` makes one from code.
 - Colour textures (base colour, emissive) are sRGB; data textures (normal, metallic-roughness, occlusion) are linear. The material slot decides, so the same image can't be read the wrong way.
-- Mipmaps are built on the CPU in linear light, so a texture doesn't darken as it shrinks. A golden test checks a distant checkerboard is mid-grey, not darker.
+- Mipmaps are built in linear light (*on the GPU, changed in step 3, below*), so a texture doesn't darken as it shrinks. A golden test checks a distant checkerboard is mid-grey, not darker.
 - `Material` gains `baseColorTexture`, `normalTexture`, `metallicRoughnessTexture`, `occlusionTexture`, `emissive`, `emissiveTexture`, `uvScale`, and `alphaCutoff` for cut-out leaves and fences (glTF's MASK). One sampler: repeat, trilinear, anisotropic 8× where supported.
 - Textures and meshes are freed when disposed, or when the world is, and the GPU memory is checked to come back.
+- *Settled in step 3:*
+  - **The Dart class is `Texture2D`**, Unity's name. `Texture` would clash with Flutter's `Texture` widget in every file that imports both.
+  - **Mipmaps are built on the GPU, not the CPU** (changed from the plan). The material slot decides the colour space, so one decoded image may be needed both ways; CPU mips would need a chain per space, built before the first use. Instead each view uploads the base level and draws each smaller level from the one above with a bilinear pass (`mipmap.wgsl`). In an sRGB texture the hardware averages in linear light, so the distant checkerboard stays mid-grey: a version that averages the stored sRGB values measures 118 against 181 and fails the test.
+  - **One GPU texture per (texture, colour space) a material uses.** The world keeps the decoded image, shared through `Arc`; the extract uploads each pair the first frame a material uses it. The view keeps it until the world lets the texture go, so switching a material between two textures doesn't upload again.
+  - **Empty slots** read a 1×1 default: white for colour, occlusion and metallic-roughness, and a flat normal stored as 16-bit float so it's exactly (0, 0, 1). Every stage 1 golden matches unchanged with the textured shader.
+  - **Cut-outs** (`alphaCutoff` > 0) are drawn by their own pipeline with alpha-to-coverage and sharpened alpha (`(a − cutoff) / fwidth(a) + 0.5`), so edges are smooth under MSAA and don't thin out in the distance. Opaque objects keep a pipeline without `discard`, so tile GPUs keep hidden-surface removal for them. Draws are sorted by (cut-out, textures, mesh), and the pass switches the pipeline and the texture bind group only when they change.
+  - **`emissiveIntensity`** (0 to 10⁶) multiplies `emissive`, as a light's intensity does its colour.
+  - **Freeing.** `Texture2D.dispose()` is refused (`inUse`, naming the Dart material) while a material in a world uses it, and `Mesh.dispose()` while an object does; a built-in shape can't be disposed. Each view frees the GPU copy on its next frame. `ViewStats` reports `textureBytes` and `meshBytes`, counted on the render worker.
+  - **`Texture2D.load` copies the bytes into native memory** and sends only the address to the helper isolate. Sending the list itself copies it on the calling isolate, which took 12–41 ms for a 50 MB file; the native copy takes about 5 ms. A test runs a 1 ms timer through a 4096² load and fails if it ever waits 16 ms. Decoding on the calling isolate shows a 98 ms gap, and sending the list a 40–74 ms one.
+  - **Known gap for step 4.** A mirrored object (negative scale on one axis) has its triangles' winding flipped, so back-face culling hides it. Its normals and tangents are already right; step 4 adds the front-face variant, since glTF files mirror with negative scale.
 
 ### 3.3 Models (glTF)
 
@@ -143,10 +155,13 @@ re-blessed once, after you look at it) and a custom mesh renders. No
 golden needed re-blessing: the shapes' positions and normals didn't
 change. Numbers in §6.
 
-**Step 3: textures.** `fynkel_load` decoding with mipmaps, `Texture`,
-material slots, sRGB vs linear, the sampler, freeing. *Done when* the
-golden images pass (including the distant checkerboard) and loading
-never blocks the UI thread (a test checks Flutter frames during a load).
+**Step 3: textures.** ✅ `fynkel_load` decoding, GPU mipmaps,
+`Texture2D`, material slots, sRGB vs linear, the sampler, cut-outs,
+freeing. *Done when* the golden images pass (including the distant
+checkerboard) and loading never blocks the UI thread (a test checks
+Flutter frames during a load). The UI test runs a timer on the calling
+isolate rather than Flutter frames: the same thing measured more finely,
+without a widget test. Numbers in §6.
 
 **Step 4: glTF.** `Model.load`, `spawnModel`, the sample-model goldens,
 warnings for what's skipped. *Done when* every listed sample renders
@@ -236,3 +251,38 @@ The new golden `custom_meshes` shows a pyramid with flat faces and an
 octahedron with smooth ones, both with computed normals. It's made once
 through the C interface and once from Dart, and the two match.
 
+### Step 3: textures (Mac, M3 Max, release build)
+
+Decoding (`cargo run --release -p fynkel_load --example decode`, best of
+5, two runs; photo-like images made by the example):
+
+| Image | file | decode |
+|---|---|---|
+| 512² PNG | 579 KiB | 1.7 ms |
+| 512² JPEG (quality 85) | 54 KiB | 1.1 ms |
+| 1024² PNG | 2.3 MiB | 6.6–6.9 ms |
+| 1024² JPEG | 194 KiB | 4.0–4.1 ms |
+| 2048² PNG | 9.0 MiB | 26.5–26.9 ms |
+| 2048² JPEG | 703 KiB | 14.4–14.5 ms |
+
+So a 2048² texture decoded on the UI thread would drop one or two frames
+at 60 Hz; `Texture2D.load` decodes on a helper isolate. Uploading and
+building the mipmaps happens on the render worker, not the UI thread.
+
+GPU memory (`crates/fynkel_render/tests/texture_memory.rs`, macOS, the
+process's dirty GPU memory from `footprint`): ten 2048² textures with
+their mipmaps report 213.3 MB in `texture_bytes`, and hold 216.4 MB once
+they settle. While they upload it peaks at 555 MB (staging copies and
+the driver's upload pool, so a game shouldn't upload many big textures
+in one frame), and after they're removed 1.3 MB is left. A texture's mipmaps add a third:
+a 256² texture counts 349,524 bytes.
+
+A steady frame with textured materials, in both colour spaces, still
+allocates nothing on the calling thread (`tests/alloc.rs`).
+
+New goldens: `textured_materials` (each slot, cut-outs and tiling),
+`distant_checkerboard` (mips in linear light), and `textured_scene` (the
+test card on the stage 1 cube and a tiled ground, made once through the
+C interface and once from Dart, from PNG and from JPEG). All texture
+tests pass on the Mac, in the iOS Simulator and in the Android emulator;
+`tools/test-mobile.sh` now runs them too.

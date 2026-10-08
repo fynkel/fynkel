@@ -8,7 +8,7 @@
 
 use glam::{Quat, Vec3};
 
-use crate::{Color, MaterialId, MeshId};
+use crate::{Color, MaterialId, MeshId, TextureId};
 
 /// What a field holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,6 +21,7 @@ pub enum FieldKind {
     Bool,
     Mesh,
     Material,
+    Texture,
     /// One of the listed names. The value is its index.
     Enum(&'static [&'static str]),
 }
@@ -35,6 +36,7 @@ pub enum Value {
     Bool(bool),
     Mesh(Option<MeshId>),
     Material(Option<MaterialId>),
+    Texture(Option<TextureId>),
     Enum(u32),
 }
 
@@ -50,7 +52,8 @@ impl Value {
             | (Value::Color(_), FieldKind::Color)
             | (Value::Bool(_), FieldKind::Bool)
             | (Value::Mesh(_), FieldKind::Mesh)
-            | (Value::Material(_), FieldKind::Material) => true,
+            | (Value::Material(_), FieldKind::Material)
+            | (Value::Texture(_), FieldKind::Texture) => true,
             _ => false,
         }
     }

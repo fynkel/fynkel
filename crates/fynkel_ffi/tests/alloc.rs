@@ -1,6 +1,7 @@
 //! The frame clock's side of a frame allocates nothing (stage 1 plan
 //! §3.5): `fy_view_frame` extracts into recycled scene buffers, world
-//! matrices go into a kept buffer (stage 2 plan §3.1), and setting
+//! matrices go into a kept buffer (stage 2 plan §3.1), texture slots are
+//! only looked up once uploaded (§3.2), and setting
 //! components goes straight into the world. Only the calling
 //! thread is counted. The render worker's own allocations (wgpu's) are
 //! measured in fynkel_render's tests.
@@ -63,6 +64,18 @@ fn a_steady_frame_with_1000_moving_cubes_in_trees_allocates_nothing_on_the_calli
     let mut renderer = FyMeshRenderer::default();
     // SAFETY: a live world and a local out-value.
     ok(unsafe { fy_mesh_renderer_get(world.0, cube, &mut renderer) });
+    // Textured, in both colour spaces, so the extract looks at texture
+    // slots every frame too.
+    // SAFETY: a live world, a slice, and pointers to locals.
+    unsafe {
+        let (mut texture, mut id) = (std::ptr::null_mut(), 0);
+        ok(fy_texture_new_rgba(1, 1, [255u8; 4].as_ptr(), 4, &mut texture));
+        ok(fy_texture_add(world.0, texture, &mut id));
+        fy_texture_free(texture);
+        let textured =
+            FyMaterial { base_color_texture: id, normal_texture: id, emissive_texture: id, ..FyMaterial::default() };
+        ok(fy_material_set(world.0, renderer.material, &textured));
+    }
     let cubes: Vec<u64> = (0..1000)
         .map(|_| {
             let id = world.spawn();

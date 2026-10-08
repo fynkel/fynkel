@@ -46,7 +46,8 @@ fn a_sphere_lit_from_the_left_matches_its_golden() {
         let (mesh, mut material) = (add_shape(&world, FY_MESH_SPHERE), 0);
         // Linear 0.8, as the golden scene has it, written in sRGB.
         let grey = 1.055 * 0.8f32.powf(1.0 / 2.4) - 0.055;
-        let matte = FyMaterial { base_color: srgb(grey, grey, grey), metallic: 0.0, roughness: 0.6 };
+        let matte =
+            FyMaterial { base_color: srgb(grey, grey, grey), metallic: 0.0, roughness: 0.6, ..FyMaterial::default() };
         ok(fy_material_add(w, &matte, &mut material));
         let ball = world.spawn();
         ok(fy_transform_set(w, ball, &transform(Transform::default())));
@@ -139,7 +140,8 @@ fn values_are_validated_with_a_message_that_names_the_field() {
         assert!(shape.is_null(), "nothing written on failure");
         let mut mesh = 0;
 
-        let rough = FyMaterial { base_color: srgb(1.0, 1.0, 1.0), metallic: 0.0, roughness: 2.0 };
+        let rough =
+            FyMaterial { base_color: srgb(1.0, 1.0, 1.0), metallic: 0.0, roughness: 2.0, ..FyMaterial::default() };
         assert_eq!(fy_material_add(world.0, &rough, &mut mesh), FyStatus::InvalidValue);
         assert!(last_error().contains("Material.roughness"), "{}", last_error());
 
@@ -171,7 +173,7 @@ fn materials_change_for_everyone_using_them() {
     let cube = stage1(&world);
     let mut renderer = FyMeshRenderer::default();
     let mut material = FyMaterial::default();
-    let blue = FyMaterial { base_color: srgb(0.0, 0.0, 1.0), metallic: 1.0, roughness: 0.25 };
+    let blue = FyMaterial { base_color: srgb(0.0, 0.0, 1.0), metallic: 1.0, roughness: 0.25, ..FyMaterial::default() };
     // SAFETY: a live world and pointers to locals.
     unsafe {
         ok(fy_mesh_renderer_get(world.0, cube, &mut renderer));
@@ -259,8 +261,8 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_5() {
-    assert_eq!(fy_abi_version(), 5);
+fn the_abi_version_is_6() {
+    assert_eq!(fy_abi_version(), 6);
 }
 
 #[cfg(not(target_os = "android"))]
@@ -534,4 +536,149 @@ fn generated_tangents_can_add_vertices() {
     let indices = [3, 4, 1, 3, 1, 0, 4, 5, 2, 4, 2, 1];
     let mesh = Mesh::new(&FyMeshData { uvs: uvs.as_ptr().cast(), ..custom(&positions, &indices) }).unwrap();
     assert_eq!(mesh.counts(), (8, 12));
+}
+
+// --- Textures (stage 2 plan §3.2) ---------------------------------------------
+
+/// A 128 × 128 test card (tools/make_test_images.py), compiled in so the
+/// tests also run on devices.
+const GRID_PNG: &[u8] = include_bytes!("../../../tests/assets/grid.png");
+const GRID_JPG: &[u8] = include_bytes!("../../../tests/assets/grid.jpg");
+
+struct Texture(*mut FyTexture);
+
+impl Texture {
+    fn decode(bytes: &[u8]) -> Result<Self, FyStatus> {
+        let mut texture = ptr::null_mut();
+        // SAFETY: a slice and a pointer to a local.
+        match unsafe { fy_texture_decode(bytes.as_ptr(), bytes.len(), &mut texture) } {
+            FyStatus::Ok => Ok(Self(texture)),
+            status => {
+                assert!(texture.is_null(), "nothing written on failure");
+                Err(status)
+            }
+        }
+    }
+
+    fn rgba(width: u32, height: u32, pixels: &[u8]) -> Result<Self, FyStatus> {
+        let mut texture = ptr::null_mut();
+        // SAFETY: a slice and a pointer to a local.
+        match unsafe { fy_texture_new_rgba(width, height, pixels.as_ptr(), pixels.len(), &mut texture) } {
+            FyStatus::Ok => Ok(Self(texture)),
+            status => Err(status),
+        }
+    }
+
+    fn size(&self) -> (u32, u32) {
+        let (mut width, mut height) = (0, 0);
+        // SAFETY: a live texture and pointers to locals.
+        ok(unsafe { fy_texture_size(self.0, &mut width, &mut height) });
+        (width, height)
+    }
+
+    fn add(&self, world: &World) -> u64 {
+        let mut id = 0;
+        // SAFETY: a live world and texture, and a pointer to a local.
+        ok(unsafe { fy_texture_add(world.0, self.0, &mut id) });
+        id
+    }
+}
+
+impl Drop for Texture {
+    fn drop(&mut self) {
+        // SAFETY: made by fy_texture_decode or fy_texture_new_rgba, not used
+        // again.
+        unsafe { fy_texture_free(self.0) };
+    }
+}
+
+#[test]
+fn png_and_jpeg_files_become_textures() {
+    assert_eq!(Texture::decode(GRID_PNG).unwrap().size(), (128, 128));
+    assert_eq!(Texture::decode(GRID_JPG).unwrap().size(), (128, 128));
+    assert_eq!(Texture::rgba(2, 1, &[0; 8]).unwrap().size(), (2, 1));
+}
+
+#[test]
+fn an_image_that_cant_be_used_is_refused_with_a_clear_message() {
+    assert_eq!(Texture::decode(b"not an image").err(), Some(FyStatus::InvalidValue));
+    assert_eq!(last_error(), "the image isn't a PNG or JPEG");
+    assert_eq!(Texture::decode(&GRID_PNG[..100]).err(), Some(FyStatus::InvalidValue));
+    assert!(last_error().starts_with("the PNG couldn't be decoded"), "{}", last_error());
+    assert_eq!(Texture::decode(&[]).err(), Some(FyStatus::InvalidValue));
+    assert_eq!(last_error(), "the image is empty (0 bytes)");
+    assert_eq!(Texture::rgba(2, 2, &[0; 15]).err(), Some(FyStatus::InvalidValue));
+    assert_eq!(last_error(), "a 2 × 2 image has 16 bytes of RGBA, but there are 15");
+
+    let mut texture = ptr::null_mut();
+    // SAFETY: null bytes with a length, and a pointer to a local.
+    assert_eq!(unsafe { fy_texture_decode(ptr::null(), 4, &mut texture) }, FyStatus::NullPointer);
+    assert_eq!(last_error(), "bytes is null");
+    // SAFETY: a slice, and null for the out.
+    assert_eq!(unsafe { fy_texture_decode(GRID_PNG.as_ptr(), GRID_PNG.len(), ptr::null_mut()) }, FyStatus::NullPointer);
+}
+
+#[test]
+fn a_texture_cant_be_removed_while_a_material_uses_it() {
+    let world = World::new();
+    let id = Texture::decode(GRID_PNG).unwrap().add(&world);
+    let (w, mut material) = (world.0, 0);
+    let ghost = FyMaterial { normal_texture: 99, ..FyMaterial::default() };
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        assert_eq!(fy_material_add(w, &ghost, &mut material), FyStatus::NoTexture);
+        assert_eq!(last_error(), "texture#99 does not exist");
+        ok(fy_material_add(w, &FyMaterial { base_color_texture: id, ..FyMaterial::default() }, &mut material));
+        assert_eq!(fy_texture_remove(w, id), FyStatus::InUse);
+        assert_eq!(last_error(), format!("texture#{id} is still used by material#{material}"));
+        let mut read = FyMaterial::default();
+        ok(fy_material_get(w, material, &mut read));
+        assert_eq!(read.base_color_texture, id);
+
+        ok(fy_material_set(w, material, &FyMaterial::default()));
+        ok(fy_texture_remove(w, id));
+        assert_eq!(fy_texture_remove(w, id), FyStatus::NoTexture);
+        assert_eq!(fy_texture_remove(w, 0), FyStatus::NoTexture);
+        assert_eq!(last_error(), "0 is not a texture id");
+    }
+}
+
+/// The test card on the stage 1 cube and on a ground that repeats it
+/// four times. `packages/fynkel`'s tests draw the same scene from Dart and
+/// compare with the same golden.
+#[test]
+fn a_textured_scene_made_through_the_c_interface_matches_its_golden() {
+    let world = World::new();
+    let cube = stage1(&world);
+    let w = world.0;
+    let grid = Texture::decode(GRID_PNG).unwrap();
+    let texture = grid.add(&world);
+    drop(grid); // the world keeps its share
+    let (mut card, mut ground, plane) = (0, 0, add_shape(&world, FY_MESH_PLANE));
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        ok(fy_material_add(w, &FyMaterial { base_color_texture: texture, ..FyMaterial::default() }, &mut card));
+        let tiled = FyMaterial { base_color_texture: texture, uv_scale: 4.0, roughness: 0.9, ..FyMaterial::default() };
+        ok(fy_material_add(w, &tiled, &mut ground));
+        let mut renderer = FyMeshRenderer::default();
+        ok(fy_mesh_renderer_get(w, cube, &mut renderer));
+        ok(fy_mesh_renderer_set(w, cube, &FyMeshRenderer { material: card, ..renderer }));
+        let floor = world.spawn();
+        let placed = fynkel_world::Transform {
+            position: fynkel_world::Vec3::new(0.0, -0.5, 0.0),
+            scale: fynkel_world::Vec3::new(8.0, 1.0, 8.0),
+            ..Default::default()
+        };
+        ok(fy_transform_set(w, floor, &transform(placed)));
+        ok(fy_mesh_renderer_set(w, floor, &FyMeshRenderer { mesh: plane, material: ground }));
+    }
+    let view = View::headless(&world, 256, 160);
+    assert_golden("textured_scene", &view.read(view.frame(), 256, 160));
+
+    let mut stats = FyViewStats::default();
+    // SAFETY: a live view and a pointer to a local.
+    ok(unsafe { fy_view_stats(view.0, &mut stats) });
+    let mips: u64 = (0..8).map(|i| (128u64 >> i).pow(2) * 4).sum();
+    assert_eq!(stats.texture_bytes, mips, "one 128² texture, sRGB only, with its mipmaps");
+    assert!(stats.mesh_bytes > 0);
 }

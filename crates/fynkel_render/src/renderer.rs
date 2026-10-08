@@ -13,7 +13,8 @@ use glam::{Mat3, Mat4, Vec3};
 
 use crate::frame_ring::FrameRing;
 use crate::gpu::Gpu;
-use crate::scene::{MeshKey, RenderScene};
+use crate::scene::{ColorSpace, MaterialTextures, MeshKey, RenderScene, TextureKey};
+use crate::texture::Textures;
 use fynkel_mesh::{MeshData, Vertex};
 
 /// What one frame did.
@@ -39,20 +40,29 @@ struct FrameUniforms {
     ambient: [f32; 4],
 }
 
-/// The per-draw vertex data (instance step), locations 2–10.
+/// The per-draw vertex data (instance step), locations 4–13.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Instance {
     model: [[f32; 4]; 4],
     normal: [[f32; 3]; 3],
     base_color: [f32; 4],
+    /// Metallic, roughness, alpha cutoff, and -1 when the model mirrors.
     params: [f32; 4],
+    /// Emission, then the UV scale.
+    emissive: [f32; 4],
 }
 
 struct GpuMesh {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     index_count: u32,
+}
+
+impl GpuMesh {
+    fn bytes(&self) -> u64 {
+        self.vertices.size() + self.indices.size()
+    }
 }
 
 /// The multisampled colour and depth targets, remade when the size changes.
@@ -64,9 +74,12 @@ struct Targets {
 }
 
 /// One instanced draw call, as `prepare` left it for `encode`: `count`
-/// instances of `mesh` starting at instance `first`.
+/// instances of `mesh` starting at instance `first`, with one set of
+/// textures, opaque or cut out.
 #[derive(Clone, Copy)]
 struct Batch {
+    cutout: bool,
+    textures: MaterialTextures,
     mesh: MeshKey,
     first: u32,
     count: u32,
@@ -77,8 +90,11 @@ pub struct Renderer {
     gpu: Gpu,
     format: wgpu::TextureFormat,
     pipeline: wgpu::RenderPipeline,
+    /// The same, for cut-outs.
+    cutout_pipeline: wgpu::RenderPipeline,
     frame_data: FrameRing,
     meshes: HashMap<MeshKey, GpuMesh>,
+    textures: Textures,
     targets: Option<Targets>,
 
     // Built by `prepare`, consumed by `encode`. Reused every frame.
@@ -96,6 +112,7 @@ impl std::fmt::Debug for Renderer {
         f.debug_struct("Renderer")
             .field("format", &self.format)
             .field("meshes", &self.meshes.len())
+            .field("texture_bytes", &self.textures.bytes())
             .field("size", &self.size)
             .finish_non_exhaustive()
     }
@@ -138,9 +155,10 @@ impl Renderer {
                 count: None,
             }],
         });
+        let textures = Textures::new(gpu);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("forward"),
-            bind_group_layouts: &[Some(&frame_layout)],
+            bind_group_layouts: &[Some(&frame_layout), Some(&textures.layout)],
             immediate_size: 0,
         });
         // Position, normal, tangent and UV, as in `fynkel_mesh::Vertex`.
@@ -149,59 +167,75 @@ impl Renderer {
         let instance_attributes = wgpu::vertex_attr_array![
             4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4,
             8 => Float32x3, 9 => Float32x3, 10 => Float32x3,
-            11 => Float32x4, 12 => Float32x4,
+            11 => Float32x4, 12 => Float32x4, 13 => Float32x4,
         ];
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("forward"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[
-                    Some(wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<Vertex>() as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &vertex_attributes,
-                    }),
-                    Some(wgpu::VertexBufferLayout {
-                        array_stride: INSTANCE_SIZE,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &instance_attributes,
-                    }),
-                ],
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                ..Default::default()
-            },
-            // Reversed-Z: near is 1, far is 0, so nearer means greater. Float
-            // depth has most precision near 0, which is where reversed-Z puts
-            // the distance, where perspective has least.
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Greater),
-                stencil: Default::default(),
-                bias: Default::default(),
+        let buffers = [
+            Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<Vertex>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &vertex_attributes,
             }),
-            multisample: wgpu::MultisampleState { count: Self::SAMPLES, ..Default::default() },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+            Some(wgpu::VertexBufferLayout {
+                array_stride: INSTANCE_SIZE,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &instance_attributes,
             }),
-            multiview_mask: None,
-            cache: None,
-        });
+        ];
+        // Cut-outs get their own pipeline: a shader that can drop pixels
+        // costs tile GPUs their hidden-surface removal, so opaque surfaces
+        // don't use it. Its alpha becomes MSAA coverage, and it writes
+        // colour only, so the target stays opaque.
+        let pipeline = |label, entry_point, cutout: bool| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &buffers,
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    ..Default::default()
+                },
+                // Reversed-Z: near is 1, far is 0, so nearer means greater. Float
+                // depth has most precision near 0, which is where reversed-Z puts
+                // the distance, where perspective has least.
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Greater),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: Self::SAMPLES,
+                    alpha_to_coverage_enabled: cutout,
+                    ..Default::default()
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some(entry_point),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: None,
+                        write_mask: if cutout { wgpu::ColorWrites::COLOR } else { wgpu::ColorWrites::ALL },
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
 
         Self {
             gpu: gpu.clone(),
             format,
-            pipeline,
+            pipeline: pipeline("forward", "fs_main", false),
+            cutout_pipeline: pipeline("forward cut-out", "fs_cutout", true),
             frame_data: FrameRing::new(
                 device,
                 frame_layout,
@@ -209,6 +243,7 @@ impl Renderer {
                 64 * INSTANCE_SIZE,
             ),
             meshes: HashMap::new(),
+            textures,
             targets: None,
             uniforms: FrameUniforms::zeroed(),
             instances: Vec::new(),
@@ -237,6 +272,39 @@ impl Renderer {
     /// Frees the mesh under `key`. Returns whether there was one.
     pub fn remove_mesh(&mut self, key: MeshKey) -> bool {
         self.meshes.remove(&key).is_some()
+    }
+
+    /// Uploads an image under `key`, to be read in `space`, replacing any
+    /// texture there in that space. RGBA8, rows from the top. The full mip
+    /// chain is drawn on the GPU, averaging in `space`. Draws whose
+    /// material names a slot of that space use it from the next frame.
+    ///
+    /// The image becomes one texture per space it's uploaded in; a draw
+    /// whose texture isn't uploaded in its slot's space uses a texture that
+    /// changes nothing (white, or a flat normal).
+    ///
+    /// # Panics
+    ///
+    /// If `rgba` isn't `width × height × 4` bytes, or a side is 0 or more
+    /// than 8192.
+    pub fn upload_texture(&mut self, key: TextureKey, space: ColorSpace, width: u32, height: u32, rgba: &[u8]) {
+        self.textures.upload(key, space, width, height, rgba);
+    }
+
+    /// Frees the textures under `key`, in both spaces. Returns whether
+    /// there were any.
+    pub fn remove_texture(&mut self, key: TextureKey) -> bool {
+        self.textures.remove(key)
+    }
+
+    /// GPU memory held by textures, in bytes: every mip level, as stored.
+    pub fn texture_bytes(&self) -> u64 {
+        self.textures.bytes()
+    }
+
+    /// GPU memory held by meshes' vertex and index buffers, in bytes.
+    pub fn mesh_bytes(&self) -> u64 {
+        self.meshes.values().map(GpuMesh::bytes).sum()
     }
 
     /// The CPU half of a frame: builds per-draw data and the frame uniforms
@@ -268,12 +336,16 @@ impl Renderer {
             ambient: scene.ambient.extend(0.0).into(),
         };
 
-        // Group draws by mesh, so each mesh is one instanced draw call. The
-        // sort is in place and the order is reused, so this allocates
-        // nothing in a steady frame.
+        // Group draws by pipeline, then textures, then mesh, so each run
+        // of the same three is one instanced draw call and the state
+        // changes least between calls. The sort is in place and the order
+        // is reused, so this allocates nothing in a steady frame.
         self.order.clear();
         self.order.extend(0..scene.draws.len() as u32);
-        self.order.sort_unstable_by_key(|&i| scene.draws[i as usize].mesh.0);
+        self.order.sort_unstable_by_key(|&i| {
+            let draw = &scene.draws[i as usize];
+            (draw.material.alpha_cutoff > 0.0, draw.material.textures, draw.mesh.0)
+        });
 
         for &i in &self.order {
             let draw = &scene.draws[i as usize];
@@ -281,16 +353,27 @@ impl Renderer {
                 stats.missing_meshes += 1;
                 continue;
             }
+            let m = &draw.material;
+            let cutout = m.alpha_cutoff > 0.0;
             let instance = self.instances.len() as u32;
             match self.batches.last_mut() {
-                Some(batch) if batch.mesh == draw.mesh => batch.count += 1,
-                _ => self.batches.push(Batch { mesh: draw.mesh, first: instance, count: 1 }),
+                Some(b) if (b.cutout, b.textures, b.mesh) == (cutout, m.textures, draw.mesh) => b.count += 1,
+                _ => self.batches.push(Batch {
+                    cutout,
+                    textures: m.textures,
+                    mesh: draw.mesh,
+                    first: instance,
+                    count: 1,
+                }),
             }
+            let (normal, mirrored) = normal_matrix(draw.model);
+            let [er, eg, eb] = m.emissive;
             self.instances.push(Instance {
                 model: draw.model.to_cols_array_2d(),
-                normal: normal_matrix(draw.model).to_cols_array_2d(),
-                base_color: draw.material.base_color,
-                params: [draw.material.metallic, draw.material.roughness, 0.0, 0.0],
+                normal: normal.to_cols_array_2d(),
+                base_color: m.base_color,
+                params: [m.metallic, m.roughness, m.alpha_cutoff, if mirrored { -1.0 } else { 1.0 }],
+                emissive: [er, eg, eb, m.uv_scale],
             });
         }
         stats.draws = self.instances.len() as u32;
@@ -307,6 +390,11 @@ impl Renderer {
         let (width, height) = self.size;
         if self.targets.as_ref().is_none_or(|t| (t.width, t.height) != (width, height)) {
             self.targets = Some(self.create_targets(width, height));
+        }
+        // Bind groups for texture sets not seen before. A steady frame only
+        // looks them up.
+        for batch in &self.batches {
+            self.textures.prepare(batch.textures);
         }
         let frame = self.frame_data.write(
             &self.gpu.device,
@@ -337,10 +425,17 @@ impl Renderer {
         if self.batches.is_empty() {
             return;
         }
-        pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, frame.bind_group, &[]);
         pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..));
+        let mut last: Option<&Batch> = None;
         for batch in &self.batches {
+            if last.is_none_or(|l| l.cutout != batch.cutout) {
+                pass.set_pipeline(if batch.cutout { &self.cutout_pipeline } else { &self.pipeline });
+            }
+            if last.is_none_or(|l| l.textures != batch.textures) {
+                pass.set_bind_group(1, self.textures.bind_group(&batch.textures), &[]);
+            }
+            last = Some(batch);
             let mesh = &self.meshes[&batch.mesh];
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -395,9 +490,10 @@ fn filled_buffer(device: &wgpu::Device, label: &str, usage: wgpu::BufferUsages, 
 /// The inverse-transpose of the upper 3×3: keeps normals perpendicular to
 /// their surface under non-uniform scale. Rotation-only matrices give
 /// themselves back. A degenerate (zero-scale) matrix gives zero, so the
-/// object draws unlit instead of NaN.
-fn normal_matrix(model: Mat4) -> Mat3 {
+/// object draws unlit instead of NaN. Also whether the matrix mirrors (a
+/// negative determinant), which flips the bitangent.
+fn normal_matrix(model: Mat4) -> (Mat3, bool) {
     let m = Mat3::from_mat4(model);
     let det = m.determinant();
-    if det.abs() < 1e-12 { Mat3::ZERO } else { m.inverse().transpose() }
+    (if det.abs() < 1e-12 { Mat3::ZERO } else { m.inverse().transpose() }, det < 0.0)
 }

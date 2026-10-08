@@ -1,5 +1,7 @@
-// The stage 1 forward pass: metallic-roughness PBR lit by one sun and an
-// ambient term, tonemapped (Khronos PBR Neutral) in the same pass.
+// The forward pass: metallic-roughness PBR lit by one sun and an ambient
+// term, tonemapped (Khronos PBR Neutral) in the same pass. Materials are
+// glTF's: factors times textures, a tangent-space normal map, occlusion of
+// the ambient light, emission, and cut-outs (MASK).
 //
 // Units (stage 1 plan §3.6): `sun_color` is colour × intensity. The sun's
 // irradiance is π × that, so with Lambert's albedo / π a rough surface
@@ -20,11 +22,27 @@ struct Frame {
 
 @group(0) @binding(0) var<uniform> frame: Frame;
 
+// A material's textures. A slot without a texture holds a 1×1 one that
+// changes nothing: white, or a flat normal. Colour slots (base colour,
+// emissive) are sRGB textures, so sampling decodes them to linear before
+// filtering; the others are linear data.
+@group(1) @binding(0) var base_color_texture: texture_2d<f32>;
+@group(1) @binding(1) var normal_texture: texture_2d<f32>;
+// glTF's packing: roughness in G, metallic in B.
+@group(1) @binding(2) var metallic_roughness_texture: texture_2d<f32>;
+// In R.
+@group(1) @binding(3) var occlusion_texture: texture_2d<f32>;
+@group(1) @binding(4) var emissive_texture: texture_2d<f32>;
+@group(1) @binding(5) var material_sampler: sampler;
+
 struct VertexIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    // Locations 2 and 3 are the tangent and UV, unused until textures
-    // (stage 2 step 3).
+    // Along +u. w is 1 or -1: cross(normal, tangent) * w points up the
+    // image (fynkel_mesh's convention, glTF's).
+    @location(2) tangent: vec4<f32>,
+    // (0, 0) is the image's top-left.
+    @location(3) uv: vec2<f32>,
     // Per draw (instance step):
     @location(4) model_0: vec4<f32>,
     @location(5) model_1: vec4<f32>,
@@ -36,8 +54,11 @@ struct VertexIn {
     @location(9) normal_1: vec3<f32>,
     @location(10) normal_2: vec3<f32>,
     @location(11) base_color: vec4<f32>,
-    // x: metallic, y: roughness.
+    // x: metallic, y: roughness, z: alpha cutoff (0 for opaque), w: 1, or
+    // -1 when the model matrix mirrors (which flips the bitangent).
     @location(12) params: vec4<f32>,
+    // rgb: linear emission, w: UV scale.
+    @location(13) emissive: vec4<f32>,
 };
 
 struct VertexOut {
@@ -46,6 +67,9 @@ struct VertexOut {
     @location(1) normal: vec3<f32>,
     @location(2) @interpolate(flat) base_color: vec4<f32>,
     @location(3) @interpolate(flat) params: vec4<f32>,
+    @location(4) tangent: vec4<f32>,
+    @location(5) uv: vec2<f32>,
+    @location(6) @interpolate(flat) emissive: vec3<f32>,
 };
 
 @vertex
@@ -57,8 +81,14 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.clip = frame.view_proj * world;
     out.world_position = world.xyz;
     out.normal = normal_matrix * in.normal;
+    // A tangent lies along the surface, so it turns with the model matrix
+    // itself (unlike the normal).
+    out.tangent = vec4<f32>(mat3x3<f32>(in.model_0.xyz, in.model_1.xyz, in.model_2.xyz) * in.tangent.xyz,
+        in.tangent.w * in.params.w);
+    out.uv = in.uv * in.emissive.w;
     out.base_color = in.base_color;
     out.params = in.params;
+    out.emissive = in.emissive.rgb;
     return out;
 }
 
@@ -115,21 +145,47 @@ fn tonemap_neutral(color_in: vec3<f32>) -> vec3<f32> {
     return mix(color, vec3<f32>(new_peak), g);
 }
 
-@fragment
-fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let albedo = in.base_color.rgb;
-    let metallic = in.params.x;
+// The surface's normal: the interpolated one, bent by the normal map.
+// The map stores tangent-space x (along +u), y (up the image) and z (out
+// of the surface) as 0–1. Without a usable tangent, the map is ignored.
+fn surface_normal(in: VertexOut, mapped: vec3<f32>) -> vec3<f32> {
+    let n = normalize(in.normal);
+    let t_raw = in.tangent.xyz - n * dot(n, in.tangent.xyz);
+    if dot(t_raw, t_raw) < 1e-12 {
+        return n;
+    }
+    let t = normalize(t_raw);
+    let b = cross(n, t) * in.tangent.w;
+    let m = mapped * 2.0 - 1.0;
+    return normalize(m.x * t + m.y * b + m.z * n);
+}
+
+// Linear radiance and alpha.
+fn shade(in: VertexOut) -> vec4<f32> {
+    // Every texture is sampled first, where control flow is still uniform
+    // (WGSL requires it for implicit mip selection).
+    let base_sample = textureSample(base_color_texture, material_sampler, in.uv);
+    let normal_sample = textureSample(normal_texture, material_sampler, in.uv).xyz;
+    let mr_sample = textureSample(metallic_roughness_texture, material_sampler, in.uv);
+    let occlusion = textureSample(occlusion_texture, material_sampler, in.uv).r;
+    let emissive_sample = textureSample(emissive_texture, material_sampler, in.uv).rgb;
+
+    let base = in.base_color * base_sample;
+    let albedo = base.rgb;
+    let metallic = in.params.x * mr_sample.b;
     // Below ~0.045 the highlight gets thinner than a pixel and aliases.
-    let roughness = clamp(in.params.y, 0.045, 1.0);
+    let roughness = clamp(in.params.y * mr_sample.g, 0.045, 1.0);
     let alpha = roughness * roughness;
 
-    let n = normalize(in.normal);
+    let n = surface_normal(in, normal_sample);
     let v = normalize(frame.camera_position.xyz - in.world_position);
     let n_dot_v = max(dot(n, v), 1e-4);
     let f0 = mix(vec3<f32>(0.04), albedo, metallic);
     let diffuse_color = albedo * (1.0 - metallic);
 
-    var color = frame.ambient.rgb * (diffuse_color + env_brdf(f0, roughness, n_dot_v));
+    // Occlusion darkens only the ambient light: the sun's shadows are
+    // another matter (glTF's rule).
+    var color = frame.ambient.rgb * (diffuse_color + env_brdf(f0, roughness, n_dot_v)) * occlusion;
 
     if frame.to_sun.w > 0.5 {
         let l = frame.to_sun.xyz;
@@ -145,8 +201,28 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
             color += (diffuse + specular) * irradiance;
         }
     }
+    color += in.emissive * emissive_sample;
+    return vec4<f32>(color, base.a);
+}
 
-    // The target is always an sRGB view, so the hardware encodes, and the
-    // MSAA resolve averages in linear light.
-    return vec4<f32>(tonemap_neutral(color), 1.0);
+// Opaque surfaces: alpha is ignored. The target is always an sRGB view,
+// so the hardware encodes, and the MSAA resolve averages in linear light.
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(tonemap_neutral(shade(in).rgb), 1.0);
+}
+
+// Cut-outs (glTF's MASK): the surface is there where alpha reaches the
+// cutoff. Alpha-to-coverage turns the returned alpha into how many of the
+// 4 MSAA samples are covered, so the edge is antialiased. Alpha is first
+// sharpened to go from 0 to 1 across about one pixel at the cutoff, so the
+// edge stays crisp at any distance instead of turning into a dither
+// (Castaño, "Anti-aliased alpha test"). The pipeline writes colour only,
+// so the target stays opaque.
+@fragment
+fn fs_cutout(in: VertexOut) -> @location(0) vec4<f32> {
+    let shaded = shade(in);
+    let cutoff = in.params.z;
+    let sharp = (shaded.a - cutoff) / max(fwidth(shaded.a), 1e-4) + 0.5;
+    return vec4<f32>(tonemap_neutral(shaded.rgb), clamp(sharp, 0.0, 1.0));
 }

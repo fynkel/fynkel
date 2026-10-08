@@ -17,16 +17,16 @@ use std::time::Duration;
 use fynkel_present::{Headless, HeadlessFrames, ReadError};
 use fynkel_render::{Gpu, Renderer};
 use fynkel_world::{
-    Camera, Color, Component, Light, LightKind, Material, MaterialId, MeshData, MeshId, MeshParts, MeshRenderer,
-    ObjectId, Quat, Transform, Vec3, World,
+    Camera, Color, Component, ImageData, ImageError, Light, LightKind, Material, MaterialId, MeshData, MeshId,
+    MeshParts, MeshRenderer, ObjectId, Quat, TextureId, Transform, Vec3, World,
 };
 
 use crate::error::{Error, FyStatus, guard, last_error};
-use crate::extract::{Extract, MeshOp};
+use crate::extract::{Extract, ResourceOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 5;
+pub const FY_ABI_VERSION: u32 = 6;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -100,14 +100,37 @@ pub struct FyLight {
     pub intensity: f32,
 }
 
+/// A metallic-roughness material (glTF's). Each texture multiplies its
+/// factor; 0 is no texture. `Default` is the engine's default material,
+/// not zeros (a UV scale of 0 is refused).
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FyMaterial {
+    /// sRGB. Its alpha matters only for cut-outs.
     pub base_color: FyColor,
     /// 0–1.
     pub metallic: f32,
     /// 0–1.
     pub roughness: f32,
+    /// sRGB; alpha is ignored.
+    pub emissive: FyColor,
+    /// 0 or more.
+    pub emissive_intensity: f32,
+    /// Multiplies texture coordinates; 1e-4 to 1e4.
+    pub uv_scale: f32,
+    /// 0 for opaque; otherwise the alpha below which the surface is cut
+    /// away. 0–1.
+    pub alpha_cutoff: f32,
+    /// Read as sRGB.
+    pub base_color_texture: u64,
+    /// Tangent space, glTF's convention. Linear.
+    pub normal_texture: u64,
+    /// Roughness in G, metallic in B. Linear.
+    pub metallic_roughness_texture: u64,
+    /// In R. Linear.
+    pub occlusion_texture: u64,
+    /// Read as sRGB.
+    pub emissive_texture: u64,
 }
 
 /// `fy_mesh_new_shape`'s shape: a 1×1×1 cube.
@@ -233,15 +256,48 @@ impl CComponent for FyLight {
     }
 }
 
+impl Default for FyMaterial {
+    fn default() -> Self {
+        Material::DEFAULT.into()
+    }
+}
+
 impl From<FyMaterial> for Material {
     fn from(m: FyMaterial) -> Self {
-        Material { base_color: m.base_color.into(), metallic: m.metallic, roughness: m.roughness }
+        Material {
+            base_color: m.base_color.into(),
+            metallic: m.metallic,
+            roughness: m.roughness,
+            emissive: m.emissive.into(),
+            emissive_intensity: m.emissive_intensity,
+            uv_scale: m.uv_scale,
+            alpha_cutoff: m.alpha_cutoff,
+            base_color_texture: TextureId::from_raw(m.base_color_texture),
+            normal_texture: TextureId::from_raw(m.normal_texture),
+            metallic_roughness_texture: TextureId::from_raw(m.metallic_roughness_texture),
+            occlusion_texture: TextureId::from_raw(m.occlusion_texture),
+            emissive_texture: TextureId::from_raw(m.emissive_texture),
+        }
     }
 }
 
 impl From<Material> for FyMaterial {
     fn from(m: Material) -> Self {
-        Self { base_color: m.base_color.into(), metallic: m.metallic, roughness: m.roughness }
+        let raw = |id: Option<TextureId>| id.map_or(0, TextureId::raw);
+        Self {
+            base_color: m.base_color.into(),
+            metallic: m.metallic,
+            roughness: m.roughness,
+            emissive: m.emissive.into(),
+            emissive_intensity: m.emissive_intensity,
+            uv_scale: m.uv_scale,
+            alpha_cutoff: m.alpha_cutoff,
+            base_color_texture: raw(m.base_color_texture),
+            normal_texture: raw(m.normal_texture),
+            metallic_roughness_texture: raw(m.metallic_roughness_texture),
+            occlusion_texture: raw(m.occlusion_texture),
+            emissive_texture: raw(m.emissive_texture),
+        }
     }
 }
 
@@ -301,7 +357,7 @@ impl FyView {
 struct Clock {
     extract: Extract,
     last_number: u64,
-    ops: Vec<MeshOp>,
+    ops: Vec<ResourceOp>,
 }
 
 /// `p` as a reference, or an error when it's null.
@@ -348,6 +404,10 @@ fn mesh(id: u64) -> Result<MeshId, Error> {
 
 fn material(id: u64) -> Result<MaterialId, Error> {
     MaterialId::from_raw(id).ok_or_else(|| Error::new(FyStatus::NoMaterial, "0 is not a material id"))
+}
+
+fn texture(id: u64) -> Result<TextureId, Error> {
+    TextureId::from_raw(id).ok_or_else(|| Error::new(FyStatus::NoTexture, "0 is not a texture id"))
 }
 
 // --- Library -----------------------------------------------------------------
@@ -1047,6 +1107,153 @@ pub unsafe extern "C" fn fy_material_remove(world: *const FyWorld, id: u64) -> F
     })
 }
 
+// --- Textures ----------------------------------------------------------------
+
+/// An image on its own, before any world has it. Opaque to C. Made with
+/// `fy_texture_decode` or `fy_texture_new_rgba` on any thread, freed with
+/// `fy_texture_free`. Worlds that add it share its pixels, so freeing it
+/// doesn't take it from them.
+#[derive(Debug)]
+pub struct FyTexture(Arc<ImageData>);
+
+/// Writes a new texture handle to `out`.
+///
+/// # Safety
+///
+/// `out` is null or writable.
+unsafe fn new_texture(image: Result<ImageData, ImageError>, out: *mut *mut FyTexture) -> Result<(), Error> {
+    if out.is_null() {
+        return Err(Error::null("out"));
+    }
+    let image = image.map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
+    // SAFETY: checked non-null; the caller promises it's writable.
+    unsafe { out.write(Box::into_raw(Box::new(FyTexture(Arc::new(image))))) };
+    Ok(())
+}
+
+/// Decodes a PNG or JPEG of `len` bytes into a texture handle and writes
+/// it to `out`. Any PNG layout becomes 8-bit RGBA. A broken or unsupported
+/// file, or one over 8192 pixels on a side, is refused
+/// (`FY_STATUS_INVALID_VALUE`) with a message saying why.
+///
+/// Decoding a big image takes tens of milliseconds: call it off the UI
+/// thread.
+///
+/// # Safety
+///
+/// `bytes` is valid for `len` bytes (it may be null when `len` is 0);
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_texture_decode(bytes: *const u8, len: usize, out: *mut *mut FyTexture) -> FyStatus {
+    guard(|| {
+        let bytes = if len == 0 {
+            &[][..]
+        } else {
+            // SAFETY: per this function's contract.
+            unsafe { std::slice::from_raw_parts(handle(bytes, "bytes")?, len) }
+        };
+        // SAFETY: per this function's contract.
+        unsafe { new_texture(ImageData::decode(bytes), out) }
+    })
+}
+
+/// Makes a texture handle from `len` bytes of 8-bit RGBA, rows from the
+/// top, and writes it to `out`. `len` must be `width × height × 4`.
+///
+/// # Safety
+///
+/// `pixels` is valid for `len` bytes (it may be null when `len` is 0);
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_texture_new_rgba(
+    width: u32,
+    height: u32,
+    pixels: *const u8,
+    len: usize,
+    out: *mut *mut FyTexture,
+) -> FyStatus {
+    guard(|| {
+        let pixels = if len == 0 {
+            Vec::new()
+        } else {
+            // SAFETY: per this function's contract.
+            unsafe { std::slice::from_raw_parts(handle(pixels, "pixels")?, len) }.to_vec()
+        };
+        // SAFETY: per this function's contract.
+        unsafe { new_texture(ImageData::from_rgba(width, height, pixels), out) }
+    })
+}
+
+/// Frees a texture handle. Worlds that added it keep their share. Null is
+/// ignored.
+///
+/// # Safety
+///
+/// `texture` is null or live, not used again after this.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_texture_free(texture: *mut FyTexture) {
+    if !texture.is_null() {
+        // SAFETY: made by Box::into_raw in new_texture; the caller gives it
+        // up.
+        drop(unsafe { Box::from_raw(texture) });
+    }
+}
+
+/// Writes the texture's width and height in pixels.
+///
+/// # Safety
+///
+/// `texture` is null or live; the outs are null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_texture_size(
+    texture: *const FyTexture,
+    out_width: *mut u32,
+    out_height: *mut u32,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let texture = unsafe { handle(texture, "texture") }?;
+        // SAFETY: per this function's contract.
+        unsafe {
+            write(out_width, texture.0.width(), "out_width")?;
+            write(out_height, texture.0.height(), "out_height")
+        }
+    })
+}
+
+/// Gives the world a share of `texture` (nothing is copied) and writes the
+/// id materials use for it to `out`. Each view uploads it to the GPU the
+/// first frame a material uses it.
+///
+/// # Safety
+///
+/// `world` and `texture` are null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_texture_add(world: *const FyWorld, texture: *const FyTexture, out: *mut u64) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let (world, texture) = unsafe { (handle(world, "world")?, handle(texture, "texture")?) };
+        let id = world.lock()?.add_texture(Arc::clone(&texture.0));
+        // SAFETY: per this function's contract.
+        unsafe { write(out, id.raw(), "out") }
+    })
+}
+
+/// Removes a texture from the world; each view frees its GPU copy on its
+/// next frame. Refused (`FY_STATUS_IN_USE`) while a material uses it.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_texture_remove(world: *const FyWorld, id: u64) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        Ok(world.lock()?.remove_texture(texture(id)?)?)
+    })
+}
+
 // --- Views -------------------------------------------------------------------
 
 /// Starts a view of the world behind `world`: a GPU device, the target
@@ -1316,6 +1523,11 @@ pub struct FyViewStats {
     /// Apple: frames finished but never shown, because newer ones were
     /// waiting. 0 for other views (Android's queue is the OS's).
     pub dropped: u64,
+    /// GPU memory the view's textures hold, in bytes: every mip level, as
+    /// stored. Up to date as of the last frame drawn.
+    pub texture_bytes: u64,
+    /// GPU memory the view's meshes hold, in bytes.
+    pub mesh_bytes: u64,
 }
 
 /// # Safety
@@ -1332,6 +1544,8 @@ pub unsafe extern "C" fn fy_view_stats(view: *const FyView, out: *mut FyViewStat
             rendered: w.rendered,
             coalesced: w.coalesced,
             skipped: w.skipped,
+            texture_bytes: w.texture_bytes,
+            mesh_bytes: w.mesh_bytes,
             ..Default::default()
         };
         #[cfg(target_vendor = "apple")]

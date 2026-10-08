@@ -22,7 +22,7 @@ cd "$(dirname "$0")/.."
 which="${1:-all}"
 crates=(fynkel_present fynkel_render fynkel_ffi)
 # crate:test (fynkel_ffi has an alloc test of its own, for the host).
-tests=(fynkel_present:android fynkel_render:render fynkel_render:alloc fynkel_ffi:android)
+tests=(fynkel_present:android fynkel_render:render fynkel_render:textures fynkel_render:alloc fynkel_ffi:android)
 
 # The test binaries for a target, one "crate:test path" line each, for
 # every test in $tests. Fails, with cargo's errors, when one didn't build:

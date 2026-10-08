@@ -1,4 +1,4 @@
-use fynkel_world::{Material, Quat};
+use fynkel_world::{ImageData, Material, Quat};
 
 use super::*;
 
@@ -23,18 +23,28 @@ fn stage1_world() -> (World, MeshId) {
     (world, mesh)
 }
 
-fn extract(world: &World) -> (RenderScene, Vec<MeshOp>) {
+fn extract(world: &World) -> (RenderScene, Vec<ResourceOp>) {
     let (mut scene, mut ops) = (RenderScene::default(), Vec::new());
     Extract::default().run(world, &mut scene, &mut ops);
     (scene, ops)
 }
 
 /// The keys of the uploads in `ops`, which must hold only uploads.
-fn uploads(ops: &[MeshOp]) -> Vec<MeshKey> {
+fn uploads(ops: &[ResourceOp]) -> Vec<MeshKey> {
     ops.iter()
         .map(|op| match op {
-            MeshOp::Upload(key, _) => *key,
-            MeshOp::Remove(key) => panic!("expected only uploads, got a removal of {key:?}"),
+            ResourceOp::UploadMesh(key, _) => *key,
+            other => panic!("expected only mesh uploads, got {other:?}"),
+        })
+        .collect()
+}
+
+/// The texture uploads in `ops`, which must hold only those.
+fn texture_uploads(ops: &[ResourceOp]) -> Vec<(TextureKey, ColorSpace)> {
+    ops.iter()
+        .map(|op| match op {
+            ResourceOp::UploadTexture(key, space, _) => (*key, *space),
+            other => panic!("expected only texture uploads, got {other:?}"),
         })
         .collect()
 }
@@ -121,7 +131,7 @@ fn each_mesh_is_uploaded_once_and_removed_when_the_world_removes_it() {
     let (mut extract, mut scene, mut ops) = (Extract::default(), RenderScene::default(), Vec::new());
     extract.run(&world, &mut scene, &mut ops);
     assert_eq!(uploads(&ops), [mesh_key(cube)]);
-    let MeshOp::Upload(_, shared) = &ops[0] else { unreachable!() };
+    let ResourceOp::UploadMesh(_, shared) = &ops[0] else { unreachable!() };
     assert!(Arc::ptr_eq(shared, world.mesh(cube).unwrap()), "the world's data, not a copy");
 
     ops.clear();
@@ -135,7 +145,7 @@ fn each_mesh_is_uploaded_once_and_removed_when_the_world_removes_it() {
     ops.clear();
     world.remove_mesh(sphere).unwrap();
     extract.run(&world, &mut scene, &mut ops);
-    assert_eq!(ops, [MeshOp::Remove(mesh_key(sphere))]);
+    assert_eq!(ops, [ResourceOp::RemoveMesh(mesh_key(sphere))]);
 }
 
 #[test]
@@ -143,6 +153,97 @@ fn a_new_extract_uploads_every_mesh_the_world_has() {
     let (mut world, _) = stage1_world();
     world.add_mesh(MeshData::plane());
     assert_eq!(extract(&world).1.len(), 2);
+}
+
+// --- Textures (stage 2 plan §3.2) ---------------------------------------------
+
+fn image() -> ImageData {
+    ImageData::from_rgba(1, 1, vec![255; 4]).unwrap()
+}
+
+#[test]
+fn a_material_is_extracted_with_its_textures_and_linear_emission() {
+    let (mut world, mesh) = stage1_world();
+    let (a, b) = (world.add_texture(image()), world.add_texture(image()));
+    let orange = Color::from_argb32(0xFFE0613A);
+    let material = world
+        .add_material(Material {
+            emissive: orange,
+            emissive_intensity: 2.0,
+            uv_scale: 10.0,
+            alpha_cutoff: 0.5,
+            base_color_texture: Some(a),
+            occlusion_texture: Some(b),
+            ..Material::DEFAULT
+        })
+        .unwrap();
+    let id = world.spawn();
+    world.insert(id, Transform::default()).unwrap();
+    world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(material) }).unwrap();
+
+    let (scene, _) = extract(&world);
+    let m = scene.draws.iter().find(|d| d.material.uv_scale == 10.0).unwrap().material;
+    assert_eq!(m.emissive, (Vec3::from(rgb(orange)) * 2.0).to_array());
+    assert_eq!(m.alpha_cutoff, 0.5);
+    assert_eq!(
+        m.textures,
+        MaterialTextures {
+            base_color: Some(texture_key(a)),
+            occlusion: Some(texture_key(b)),
+            ..MaterialTextures::NONE
+        }
+    );
+}
+
+#[test]
+fn a_texture_is_uploaded_once_per_colour_space_a_material_reads_it_in() {
+    let mut world = World::new();
+    let texture = world.add_texture(image());
+    world.add_texture(image());
+    let (mut extract, mut scene, mut ops) = (Extract::default(), RenderScene::default(), Vec::new());
+    extract.run(&world, &mut scene, &mut ops);
+    assert_eq!(ops, [], "a texture no material uses isn't uploaded");
+
+    let base = world.add_material(Material { base_color_texture: Some(texture), ..Material::DEFAULT }).unwrap();
+    // A second material reading it as colour again costs nothing more.
+    world.add_material(Material { emissive_texture: Some(texture), ..Material::DEFAULT }).unwrap();
+    extract.run(&world, &mut scene, &mut ops);
+    let key = texture_key(texture);
+    assert_eq!(texture_uploads(&ops), [(key, ColorSpace::Srgb)]);
+    let ResourceOp::UploadTexture(_, _, shared) = &ops[0] else { unreachable!() };
+    assert!(Arc::ptr_eq(shared, world.texture(texture).unwrap()), "the world's pixels, not a copy");
+
+    // Read as data too: a second upload, in the other space.
+    ops.clear();
+    world.set_material(base, Material { normal_texture: Some(texture), ..Material::DEFAULT }).unwrap();
+    extract.run(&world, &mut scene, &mut ops);
+    assert_eq!(texture_uploads(&ops), [(key, ColorSpace::Linear)]);
+
+    ops.clear();
+    extract.run(&world, &mut scene, &mut ops);
+    assert_eq!(ops, [], "nothing changed");
+}
+
+#[test]
+fn a_texture_the_world_removes_is_freed_and_comes_back_if_added_again() {
+    let mut world = World::new();
+    let texture = world.add_texture(image());
+    let material = world.add_material(Material { base_color_texture: Some(texture), ..Material::DEFAULT }).unwrap();
+    let (mut extract, mut scene, mut ops) = (Extract::default(), RenderScene::default(), Vec::new());
+    extract.run(&world, &mut scene, &mut ops);
+
+    ops.clear();
+    world.set_material(material, Material::DEFAULT).unwrap();
+    world.remove_texture(texture).unwrap();
+    extract.run(&world, &mut scene, &mut ops);
+    assert_eq!(ops, [ResourceOp::RemoveTexture(texture_key(texture))]);
+
+    // A new texture has a new id, so it can't be mistaken for the old one.
+    ops.clear();
+    let again = world.add_texture(image());
+    world.set_material(material, Material { base_color_texture: Some(again), ..Material::DEFAULT }).unwrap();
+    extract.run(&world, &mut scene, &mut ops);
+    assert_eq!(texture_uploads(&ops), [(texture_key(again), ColorSpace::Srgb)]);
 }
 
 // --- Hierarchy (stage 2 plan §3.1) -------------------------------------------

@@ -47,7 +47,12 @@ fn light_units_match_the_documented_maths() {
     let draw = Draw {
         mesh: PLANE,
         model: facing_camera,
-        material: PbrMaterial { base_color: [albedo.x, albedo.y, albedo.z, 1.0], metallic: 0.0, roughness: 1.0 },
+        material: PbrMaterial {
+            base_color: [albedo.x, albedo.y, albedo.z, 1.0],
+            metallic: 0.0,
+            roughness: 1.0,
+            ..PbrMaterial::DEFAULT
+        },
     };
     let surface = Surface { albedo, metallic: 0.0, roughness: 1.0 };
     let (n, v) = (Vec3::Z, Vec3::Z); // at the centre pixel
@@ -100,7 +105,12 @@ fn a_sphere_is_lit_from_where_the_sun_is() {
             draws: vec![Draw {
                 mesh: SPHERE,
                 model: Mat4::IDENTITY,
-                material: PbrMaterial { base_color: [0.8, 0.8, 0.8, 1.0], metallic: 0.0, roughness: 0.6 },
+                material: PbrMaterial {
+                    base_color: [0.8, 0.8, 0.8, 1.0],
+                    metallic: 0.0,
+                    roughness: 0.6,
+                    ..PbrMaterial::DEFAULT
+                },
             }],
         };
         let (image, _) = render(&gpu, &mut r, &scene, 128, 128);
@@ -152,7 +162,12 @@ fn draws_sharing_a_mesh_are_instanced_together() {
     let mut r = renderer(&gpu, SRGB);
     let mut scene = stage1_scene();
     scene.camera = Some(CameraView::looking_at(Vec3::new(0.0, 4.0, 6.0), Vec3::ZERO));
-    let material = |rgb: u32, metallic| PbrMaterial { base_color: linear_rgb(rgb), metallic, roughness: 0.4 };
+    let material = |rgb: u32, metallic| PbrMaterial {
+        base_color: linear_rgb(rgb),
+        metallic,
+        roughness: 0.4,
+        ..PbrMaterial::DEFAULT
+    };
     let at = |x: f32, z: f32| Mat4::from_translation(Vec3::new(x, 0.0, z));
     // Interleaved meshes and materials: cube, sphere, cube, sphere, cube.
     scene.draws = vec![
@@ -228,6 +243,7 @@ fn frames_in_flight_keep_their_own_data() {
                 base_color: linear_rgb(0xFF000000 | (i * 0x0A1B2C)),
                 metallic: 0.0,
                 roughness: 0.5,
+                ..PbrMaterial::DEFAULT
             },
         })
         .collect();
@@ -281,7 +297,12 @@ fn non_uniform_scale_keeps_normals_right() {
         draws: vec![Draw {
             mesh: CUBE,
             model: Mat4::from_scale(squash) * Mat4::from_quat(turn),
-            material: PbrMaterial { base_color: [0.5, 0.5, 0.5, 1.0], metallic: 0.0, roughness: 1.0 },
+            material: PbrMaterial {
+                base_color: [0.5, 0.5, 0.5, 1.0],
+                metallic: 0.0,
+                roughness: 1.0,
+                ..PbrMaterial::DEFAULT
+            },
         }],
     };
     let got = render(&gpu, &mut r, &scene, 64, 64).0.pixel(32, 32);

@@ -1,0 +1,17 @@
+[package]
+name = "fynkel_load"
+description = "Bytes to plain values: PNG and JPEG images. No GPU, no world, no threads of its own."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+image.workspace = true
+
+[dev-dependencies]
+png.workspace = true
