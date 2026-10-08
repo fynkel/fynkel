@@ -170,8 +170,10 @@ impl Extract {
                     metallic: m.metallic,
                     roughness: m.roughness,
                     emissive: (Vec3::from(rgb(m.emissive)) * m.emissive_intensity).into(),
-                    uv_scale: m.uv_scale,
+                    uv_scale: m.uv_scale.into(),
+                    uv_offset: m.uv_offset.into(),
                     alpha_cutoff: m.alpha_cutoff,
+                    double_sided: m.double_sided,
                     textures: texture_keys(&m),
                 },
             });

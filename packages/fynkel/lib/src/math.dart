@@ -9,6 +9,7 @@ final class Vec2 {
   final double y;
 
   static const zero = Vec2(0, 0);
+  static const one = Vec2(1, 1);
 
   Vec2 operator +(Vec2 o) => Vec2(x + o.x, y + o.y);
   Vec2 operator -(Vec2 o) => Vec2(x - o.x, y - o.y);

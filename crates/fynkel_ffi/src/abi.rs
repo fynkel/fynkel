@@ -18,7 +18,7 @@ use fynkel_present::{Headless, HeadlessFrames, ReadError};
 use fynkel_render::{Gpu, Renderer};
 use fynkel_world::{
     Camera, Color, Component, ImageData, ImageError, Light, LightKind, Material, MaterialId, MeshData, MeshId,
-    MeshParts, MeshRenderer, ObjectId, Quat, TextureId, Transform, Vec3, World,
+    MeshParts, MeshRenderer, ModelData, ObjectId, Quat, TextureId, Transform, Vec2, Vec3, World,
 };
 
 use crate::error::{Error, FyStatus, guard, last_error};
@@ -26,9 +26,16 @@ use crate::extract::{Extract, ResourceOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 6;
+pub const FY_ABI_VERSION: u32 = 7;
 
 // --- Plain types ---------------------------------------------------------------
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FyVec2 {
+    pub x: f32,
+    pub y: f32,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -102,7 +109,7 @@ pub struct FyLight {
 
 /// A metallic-roughness material (glTF's). Each texture multiplies its
 /// factor; 0 is no texture. `Default` is the engine's default material,
-/// not zeros (a UV scale of 0 is refused).
+/// not zeros (a UV scale of 0 would show one texel).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FyMaterial {
@@ -116,11 +123,15 @@ pub struct FyMaterial {
     pub emissive: FyColor,
     /// 0 or more.
     pub emissive_intensity: f32,
-    /// Multiplies texture coordinates; 1e-4 to 1e4.
-    pub uv_scale: f32,
+    /// Multiplies texture coordinates, per axis; -1e4 to 1e4.
+    pub uv_scale: FyVec2,
+    /// Added to texture coordinates after the scale; -1e4 to 1e4.
+    pub uv_offset: FyVec2,
     /// 0 for opaque; otherwise the alpha below which the surface is cut
     /// away. 0–1.
     pub alpha_cutoff: f32,
+    /// Both sides of each triangle are drawn.
+    pub double_sided: bool,
     /// Read as sRGB.
     pub base_color_texture: u64,
     /// Tangent space, glTF's convention. Linear.
@@ -158,6 +169,18 @@ pub struct FyMeshData {
 }
 
 // --- Conversions ---------------------------------------------------------------
+
+impl From<FyVec2> for Vec2 {
+    fn from(v: FyVec2) -> Self {
+        Vec2::new(v.x, v.y)
+    }
+}
+
+impl From<Vec2> for FyVec2 {
+    fn from(v: Vec2) -> Self {
+        Self { x: v.x, y: v.y }
+    }
+}
 
 impl From<FyVec3> for Vec3 {
     fn from(v: FyVec3) -> Self {
@@ -270,8 +293,10 @@ impl From<FyMaterial> for Material {
             roughness: m.roughness,
             emissive: m.emissive.into(),
             emissive_intensity: m.emissive_intensity,
-            uv_scale: m.uv_scale,
+            uv_scale: m.uv_scale.into(),
+            uv_offset: m.uv_offset.into(),
             alpha_cutoff: m.alpha_cutoff,
+            double_sided: m.double_sided,
             base_color_texture: TextureId::from_raw(m.base_color_texture),
             normal_texture: TextureId::from_raw(m.normal_texture),
             metallic_roughness_texture: TextureId::from_raw(m.metallic_roughness_texture),
@@ -290,8 +315,10 @@ impl From<Material> for FyMaterial {
             roughness: m.roughness,
             emissive: m.emissive.into(),
             emissive_intensity: m.emissive_intensity,
-            uv_scale: m.uv_scale,
+            uv_scale: m.uv_scale.into(),
+            uv_offset: m.uv_offset.into(),
             alpha_cutoff: m.alpha_cutoff,
+            double_sided: m.double_sided,
             base_color_texture: raw(m.base_color_texture),
             normal_texture: raw(m.normal_texture),
             metallic_roughness_texture: raw(m.metallic_roughness_texture),
@@ -1251,6 +1278,259 @@ pub unsafe extern "C" fn fy_texture_remove(world: *const FyWorld, id: u64) -> Fy
         // SAFETY: per this function's contract.
         let world = unsafe { handle(world, "world") }?;
         Ok(world.lock()?.remove_texture(texture(id)?)?)
+    })
+}
+
+// --- Models ------------------------------------------------------------------
+
+/// A model read from a `.glb`, before any world has it. Opaque to C. Made
+/// with `fy_model_load` on any thread, freed with `fy_model_free`. Its
+/// meshes and textures are shared with the handles `fy_model_mesh` and
+/// `fy_model_texture` give, and with every world that spawns it.
+#[derive(Debug)]
+pub struct FyModel(Arc<ModelData>);
+
+/// How many of each thing a model has, from `fy_model_counts`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FyModelCounts {
+    pub meshes: usize,
+    pub textures: usize,
+    pub materials: usize,
+    /// Lines saying what was skipped (`fy_model_warning`).
+    pub warnings: usize,
+}
+
+/// Reads a `.glb` (binary glTF 2.0) of `len` bytes and writes the model to
+/// `out`. Its images are decoded and its meshes' tangents generated here,
+/// so a big model takes a while: call it off the UI thread.
+///
+/// What can't be drawn yet (animations, skins, see-through materials, ...)
+/// is skipped with a warning (`fy_model_warning`). A file that can't be
+/// read at all, or needs a glTF extension the engine doesn't know, is
+/// refused (`FY_STATUS_INVALID_VALUE`) with a message saying why.
+///
+/// # Safety
+///
+/// `bytes` is valid for `len` bytes (it may be null when `len` is 0);
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_model_load(bytes: *const u8, len: usize, out: *mut *mut FyModel) -> FyStatus {
+    guard(|| {
+        if out.is_null() {
+            return Err(Error::null("out"));
+        }
+        let bytes = if len == 0 {
+            &[][..]
+        } else {
+            // SAFETY: per this function's contract.
+            unsafe { std::slice::from_raw_parts(handle(bytes, "bytes")?, len) }
+        };
+        let model = ModelData::from_glb(bytes).map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
+        // SAFETY: checked non-null; the caller promises it's writable.
+        unsafe { out.write(Box::into_raw(Box::new(FyModel(Arc::new(model))))) };
+        Ok(())
+    })
+}
+
+/// Frees a model handle. Mesh and texture handles taken from it, and
+/// worlds that spawned it, keep their share. Null is ignored.
+///
+/// # Safety
+///
+/// `model` is null or live, not used again after this.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_model_free(model: *mut FyModel) {
+    if !model.is_null() {
+        // SAFETY: made by Box::into_raw in fy_model_load; the caller gives
+        // it up.
+        drop(unsafe { Box::from_raw(model) });
+    }
+}
+
+/// # Safety
+///
+/// `model` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_model_counts(model: *const FyModel, out: *mut FyModelCounts) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let model = &unsafe { handle(model, "model") }?.0;
+        let counts = FyModelCounts {
+            meshes: model.meshes().len(),
+            textures: model.images().len(),
+            materials: model.materials().len(),
+            warnings: model.warnings().len(),
+        };
+        // SAFETY: per this function's contract.
+        unsafe { write(out, counts, "out") }
+    })
+}
+
+/// `items[index]`, or an error naming what there are fewer of.
+fn nth<'a, T>(items: &'a [T], index: usize, what: &str) -> Result<&'a T, Error> {
+    items.get(index).ok_or_else(|| {
+        Error::new(FyStatus::InvalidValue, format!("the model has {} {what}; there's no {what} {index}", items.len()))
+    })
+}
+
+/// Writes a new handle to the model's mesh `index` to `out`, sharing its
+/// data.
+///
+/// # Safety
+///
+/// `model` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_model_mesh(model: *const FyModel, index: usize, out: *mut *mut FyMesh) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let model = &unsafe { handle(model, "model") }?.0;
+        let mesh = Arc::clone(nth(model.meshes(), index, "meshes")?);
+        // SAFETY: per this function's contract.
+        unsafe { write(out, Box::into_raw(Box::new(FyMesh(mesh))), "out") }
+    })
+}
+
+/// Writes a new handle to the model's image `index` to `out`, sharing its
+/// pixels.
+///
+/// # Safety
+///
+/// `model` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_model_texture(model: *const FyModel, index: usize, out: *mut *mut FyTexture) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let model = &unsafe { handle(model, "model") }?.0;
+        let image = Arc::clone(nth(model.images(), index, "textures")?);
+        // SAFETY: per this function's contract.
+        unsafe { write(out, Box::into_raw(Box::new(FyTexture(image))), "out") }
+    })
+}
+
+/// Writes the model's material `index` to `out`, its colours converted to
+/// sRGB. Each texture field is the model's texture index plus 1 (0 for
+/// none), not a world's id: the caller maps them to its own.
+///
+/// # Safety
+///
+/// `model` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_model_material(model: *const FyModel, index: usize, out: *mut FyMaterial) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let model = &unsafe { handle(model, "model") }?.0;
+        let data = nth(model.materials(), index, "materials")?;
+        let numbers: Vec<TextureId> =
+            (1..=model.images().len() as u64).map(|n| TextureId::from_raw(n).expect("from 1")).collect();
+        let material: FyMaterial = Material::from_model(data, &numbers).into();
+        // SAFETY: per this function's contract.
+        unsafe { write(out, material, "out") }
+    })
+}
+
+/// The name the file gives material `index` ("" for none), as UTF-8
+/// without a terminating zero: its length goes to `out_len`, and it's
+/// copied into `buf` only when it fits in `cap`.
+///
+/// # Safety
+///
+/// `model` is null or live; `buf` is null or valid for `cap` writes;
+/// `out_len` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_model_material_name(
+    model: *const FyModel,
+    index: usize,
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let model = &unsafe { handle(model, "model") }?.0;
+        let name = &nth(model.materials(), index, "materials")?.name;
+        // SAFETY: per this function's contract.
+        unsafe { write_all(name.bytes(), buf, cap, out_len) }
+    })
+}
+
+/// Warning `index`: one line saying what was skipped, as UTF-8 like
+/// `fy_model_material_name`.
+///
+/// # Safety
+///
+/// `model` is null or live; `buf` is null or valid for `cap` writes;
+/// `out_len` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_model_warning(
+    model: *const FyModel,
+    index: usize,
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let model = &unsafe { handle(model, "model") }?.0;
+        let warning = nth(model.warnings(), index, "warnings")?;
+        // SAFETY: per this function's contract.
+        unsafe { write_all(warning.bytes(), buf, cap, out_len) }
+    })
+}
+
+/// `count` ids at `p`, each turned into a typed id by `id`.
+///
+/// # Safety
+///
+/// `p` is null or valid for `count` reads (it may be null when `count` is
+/// 0).
+unsafe fn ids<T>(p: *const u64, count: usize, what: &str, id: fn(u64) -> Result<T, Error>) -> Result<Vec<T>, Error> {
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    // SAFETY: per this function's contract.
+    let raw = unsafe { std::slice::from_raw_parts(handle(p, what)?, count) };
+    raw.iter().map(|&r| id(r)).collect()
+}
+
+/// Spawns the model: a root object at `transform`, named after the model's
+/// scene, with one object per node below it, named and placed as in the
+/// file. A node drawing one primitive gets a mesh renderer; one drawing
+/// several gets an unnamed child for each. Writes the root's id to `out`.
+///
+/// `meshes` and `materials` are this world's ids for the model's meshes
+/// (`fy_mesh_add` of each `fy_model_mesh`) and materials (`fy_material_add`
+/// of each `fy_model_material`, its textures mapped), in the model's
+/// order. Spawning again with the same ids shares everything. On error
+/// nothing is spawned.
+///
+/// # Safety
+///
+/// `world` and `model` are null or live; `meshes` and `materials` are
+/// valid for their counts; `transform` is null or readable; `out` is null
+/// or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_model_spawn(
+    world: *const FyWorld,
+    model: *const FyModel,
+    meshes: *const u64,
+    mesh_count: usize,
+    materials: *const u64,
+    material_count: usize,
+    transform: *const FyTransform,
+    out: *mut u64,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let (world, model, transform) =
+            unsafe { (handle(world, "world")?, &handle(model, "model")?.0, read(transform, "transform")?) };
+        // SAFETY: per this function's contract.
+        let (meshes, materials) = unsafe {
+            (ids(meshes, mesh_count, "meshes", mesh)?, ids(materials, material_count, "materials", material)?)
+        };
+        let root = world.lock()?.spawn_model(model, &meshes, &materials, transform.to_component()?)?;
+        // SAFETY: per this function's contract.
+        unsafe { write(out, root.raw(), "out") }
     })
 }
 

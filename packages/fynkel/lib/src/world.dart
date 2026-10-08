@@ -12,6 +12,7 @@ import 'math.dart';
 import 'native.dart';
 
 part 'components.dart';
+part 'model.dart';
 part 'resources.dart';
 
 /// Everything in a scene: objects, their components, and the meshes and
@@ -82,6 +83,48 @@ final class World implements Finalizable {
       rethrow;
     }
     return object;
+  }
+
+  /// Spawns [model]: a root object at [transform], named after the
+  /// model's scene, with an object for each node of the file below it,
+  /// named and placed as there. A node that draws one part gets a
+  /// [MeshRenderer]; one that draws several gets an unnamed child for
+  /// each. Find nodes with [GameObject.find].
+  ///
+  /// Every copy shares the model's meshes, textures and [Model.materials]
+  /// (changing a material changes every copy), so spawning a model again
+  /// uploads nothing new. Throws, spawning nothing, if one of the model's
+  /// meshes or textures was disposed.
+  GameObject spawnModel(Model model, [Transform? transform]) {
+    final meshes = model.meshes.map(_meshId).toList();
+    final materials = model.materials.map(_materialId).toList();
+    final at = transform ?? Transform();
+    final t = scratch.transform.ref;
+    t.position.write(at.position);
+    t.rotation.write(at.rotation);
+    t.scale.write(at.scale);
+    return using((arena) {
+      Pointer<Uint64> copy(List<int> ids) {
+        final p = arena<Uint64>(ids.isEmpty ? 1 : ids.length);
+        p.asTypedList(ids.length).setAll(0, ids);
+        return p;
+      }
+
+      final out = arena<Uint64>();
+      check(
+        fy_model_spawn(
+          pointer,
+          model._live,
+          copy(meshes),
+          meshes.length,
+          copy(materials),
+          materials.length,
+          scratch.transform,
+          out,
+        ),
+      );
+      return GameObject._(this, out.value);
+    });
   }
 
   int _meshId(Mesh mesh) {
@@ -162,8 +205,14 @@ final class World implements Finalizable {
     m.roughness = material.roughness;
     m.emissive.write(material.emissive);
     m.emissive_intensity = material.emissiveIntensity;
-    m.uv_scale = material.uvScale;
+    m.uv_scale
+      ..x = material.uvScale.x
+      ..y = material.uvScale.y;
+    m.uv_offset
+      ..x = material.uvOffset.x
+      ..y = material.uvOffset.y;
     m.alpha_cutoff = material.alphaCutoff;
+    m.double_sided = material.doubleSided;
     m.base_color_texture = textures[0];
     m.normal_texture = textures[1];
     m.metallic_roughness_texture = textures[2];

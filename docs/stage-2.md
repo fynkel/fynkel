@@ -59,7 +59,7 @@ crates/
   fynkel_mesh/      NEW (step 2): CPU meshes: the 48-byte vertex, built-in shapes, checks, normals, MikkTSpace tangents
   fynkel_world/     parents, children and names, world transforms, recursive despawn; Texture and Model resources
   fynkel_render/    vertex format with UVs and tangents, custom meshes, textures and samplers, textured PBR, alpha mask
-  fynkel_load/      NEW (step 3): PNG/JPEG decoding into plain data (and .glb parsing in step 4). No GPU, no world, no threads of its own.
+  fynkel_load/      NEW (step 3): PNG/JPEG decoding into plain data, and .glb parsing (step 4). No GPU, no world, no threads of its own.
   fynkel_ffi/       loading entry points, resources handed to the render worker, raycasts
 packages/
   fynkel/           Texture2D, Model, Mesh.custom, parent/children/find, raycast, Ray
@@ -116,7 +116,7 @@ the renderer takes raw pixel slices, so it depends on neither.
   - **`emissiveIntensity`** (0 to 10⁶) multiplies `emissive`, as a light's intensity does its colour.
   - **Freeing.** `Texture2D.dispose()` is refused (`inUse`, naming the Dart material) while a material in a world uses it, and `Mesh.dispose()` while an object does; a built-in shape can't be disposed. Each view frees the GPU copy on its next frame. `ViewStats` reports `textureBytes` and `meshBytes`, counted on the render worker.
   - **`Texture2D.load` copies the bytes into native memory** and sends only the address to the helper isolate. Sending the list itself copies it on the calling isolate, which took 12–41 ms for a 50 MB file; the native copy takes about 5 ms. A test runs a 1 ms timer through a 4096² load (170 ms on the Mac, the timer waiting at most 4–6 ms) and fails if it ever waits half the load: decoding on the calling isolate freezes it for all of it. The bound is a share of the load, not a frame's 16 ms, because on the loaded CI machine the timer alone was 27 ms late. Sending the list instead of the address costs too little next to the load for that test to see, so the copy is checked by hand (the numbers above).
-  - **Known gap for step 4.** A mirrored object (negative scale on one axis) has its triangles' winding flipped, so back-face culling hides it. Its normals and tangents are already right; step 4 adds the front-face variant, since glTF files mirror with negative scale.
+  - **Known gap for step 4** (*closed in step 4, §3.3*). A mirrored object (negative scale on one axis) has its triangles' winding flipped, so back-face culling hides it. Its normals and tangents are already right; step 4 adds the front-face variant, since glTF files mirror with negative scale.
 
 ### 3.3 Models (glTF)
 
@@ -124,6 +124,17 @@ the renderer takes raw pixel slices, so it depends on neither.
 - A `Model` is a resource: its meshes, materials and textures are uploaded once. `world.spawnModel(model, transform)` makes one object per glTF node, with `Parent`, `Name`, `Transform` and `MeshRenderer`, and returns the root. Spawning the same model twice shares the meshes and textures.
 - Supported: meshes (triangles; several primitives per mesh), the metallic-roughness material with all five textures, MASK alpha, node transforms and names, `KHR_texture_transform` and `KHR_materials_emissive_strength`. Everything else (skins, animations, morph targets, cameras, lights, BLEND) is skipped with one readable warning per kind, never an error.
 - Tests: Khronos's glTF sample models load and render to golden images (Box, BoxTextured, NormalTangentMirrorTest, AlphaBlendModeTest's MASK part, a model with 100+ nodes), and broken files give readable errors.
+- *Settled in step 4:*
+  - **The parser is the `gltf` crate** (no default features; images go through `fynkel_load`'s own decoding, and nothing is read from files). A file whose `extensionsRequired` lists an extension we don't know is refused before validation, so the message names the extension. It costs 853 KB of release library (6.3 → 7.2 MB on the Mac), mostly its JSON parser; a smaller hand-written one is possible later if size matters.
+  - **A root object is always made**, named after the glTF scene, with the file's top-level nodes below it, so a model with several top-level nodes (AlphaBlendModeTest has 9) is still one object to move or despawn. `spawnModel(model, transform)` places the root.
+  - **A node with several primitives** gets an unnamed child per primitive, each with its own `MeshRenderer`; a node with one gets the renderer itself. So one object still means one mesh and one material.
+  - **Primitives that read the same accessors share a mesh**, whichever nodes and materials use them: the tower's three glTF meshes (the same cube in three materials) are one mesh, and the truck's wheels one.
+  - **Materials.** glTF's linear factors become sRGB `Color`s (`Color::from_linear`); `KHR_materials_emissive_strength` becomes `emissiveIntensity`. Values outside glTF's ranges (nothing in the format enforces them) are clamped, with a warning, rather than refused by the world later. A primitive without a material gets glTF's default (white, metallic 1, roughness 1). Dart materials gain `name`, and a loaded model's are named as in the file.
+  - **UV transform per material**, not per slot: `uvScale` is now a `Vec2` (an API change from step 3's `double`) and `uvOffset` is new. The first textured slot's `KHR_texture_transform` is used for all; a material whose slots differ, or rotate, gets a warning.
+  - **Double-sided materials** (`doubleSided`) are drawn without culling, and a back face's normal is flipped, so the back is lit like the front. **Mirrored objects** (a negative determinant) draw with clockwise front faces. Both are pipeline variants: 2 (opaque, cut-out) × 3 (front, mirrored, both sides), switched only between batches.
+  - **BLEND materials are drawn opaque**, with a warning (decision 3: no transparency in stage 2).
+  - **Warnings** are one line per kind of thing skipped, in the order met, each said once however often it's met: lights, cameras, animations, skins, morph targets, vertex colours, points and lines, extra UV sets, unsupported samplers (clamp, mirror, nearest), normal-map scale and occlusion strength, unusable transforms, BLEND, unlit, unknown extensions. Unusable normals or tangents are recomputed, with a warning.
+  - **Loading** copies the bytes to native memory and reads them on a helper isolate, as `Texture2D.load` does; the main isolate then makes the `Mesh`, `Texture2D` and `Material` objects, which share the model's data. `model.dispose()` frees only the parsed model: what it spawned keeps drawing.
 
 ### 3.4 Input
 
@@ -163,9 +174,14 @@ Flutter frames during a load). The UI test runs a timer on the calling
 isolate rather than Flutter frames: the same thing measured more finely,
 without a widget test. Numbers in §6.
 
-**Step 4: glTF.** `Model.load`, `spawnModel`, the sample-model goldens,
+**Step 4: glTF.** ✅ `Model.load`, `spawnModel`, the sample-model goldens,
 warnings for what's skipped. *Done when* every listed sample renders
-correctly and spawning a model twice shares its GPU data.
+correctly and spawning a model twice shares its GPU data. Eight goldens
+(Box, BoxTextured, NormalTangentMirrorTest, AlphaBlendModeTest,
+OrientationTest, CesiumMilkTruck, Fox in its bind pose, and a generated
+138-node tower with a mirrored shape), rendered through the C interface
+and two of them again from Dart. A second spawn of the truck leaves the
+view's mesh and texture bytes unchanged. Numbers in §6.
 
 **Step 5: input and raycasts.** `FrameInput`, `rayThrough`, `raycast`.
 *Done when* widget tests drive taps, drags and keys, and raycasts hit the
@@ -189,6 +205,36 @@ it's committed and you have played the scene on each device.
    for the stage that needs it.
 
 ## 6. Measurements
+
+### Step 4: glTF (Mac, M3 Max, release build)
+
+Reading a `.glb` (`cargo run --release -p fynkel_load --example
+load_model`, best of 5), which `Model.load` does on its helper isolate:
+
+| Model | file | nodes | meshes | image pixels | read |
+|---|---|---|---|---|---|
+| Box | 1 KiB | 2 | 1 | 0 | 0.0 ms |
+| BoxTextured | 5 KiB | 2 | 1 | 0.1 Mpx | 0.1 ms |
+| Fox | 159 KiB | 26 | 1 | 1.0 Mpx | 5.3 ms |
+| CesiumMilkTruck | 361 KiB | 6 | 4 | 4.2 Mpx | 10.0 ms |
+| NormalTangentMirrorTest | 1.5 MiB | 1 | 1 | 12.6 Mpx | 16.1 ms |
+| AlphaBlendModeTest | 2.8 MiB | 9 | 9 | 13.6 Mpx | 99.4 ms |
+| tower (generated) | 23 KiB | 138 | 1 | 0 | 0.1 ms |
+
+Decoding the images is nearly all of it (AlphaBlendModeTest's are big
+PNGs; NormalTangentMirrorTest's are JPEGs), as step 3's numbers predict.
+
+Spawning (`cargo run --release -p fynkel_world --example spawn_model`,
+best of 20): the tower's 139 objects spawn and despawn in 24 µs, and
+every object's world matrix, as each frame's extract computes them, takes
+1.6 µs for one tower and 15 µs for ten (1,390 objects).
+
+Spawning the truck a second time adds no mesh or texture bytes to the
+view (`ViewStats`), from Rust and from Dart. The model tests pass on the
+Mac, in the iOS Simulator and in the Android emulator. On the emulator
+they found a race from step 3: the render worker published a frame
+before writing its GPU byte counts, so a reader woken by the frame could
+see the counts from before it. The counts are now written first.
 
 ### Step 1: hierarchy (Mac, M3 Max, release build)
 

@@ -217,7 +217,7 @@ fn a_distant_checkerboard_is_mid_grey_not_darker() {
                 material: PbrMaterial {
                     base_color: [0.0, 0.0, 0.0, 1.0],
                     emissive: [1.0; 3],
-                    uv_scale: 400.0,
+                    uv_scale: [400.0; 2],
                     textures: MaterialTextures { emissive: Some(texture), ..MaterialTextures::NONE },
                     ..PbrMaterial::DEFAULT
                 },
@@ -279,7 +279,7 @@ fn uv_scale_repeats_the_texture() {
     let scene = facing_plane(PbrMaterial {
         base_color: [0.0, 0.0, 0.0, 1.0],
         emissive: [1.0; 3],
-        uv_scale: 2.0,
+        uv_scale: [2.0; 2],
         textures: MaterialTextures { emissive: Some(A), ..MaterialTextures::NONE },
         ..PbrMaterial::DEFAULT
     });

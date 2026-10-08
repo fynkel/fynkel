@@ -83,6 +83,19 @@ fn set_refuses_bad_values_and_changes_nothing() {
         Err(FieldError::NotUnit { ty: "Transform", field: "rotation" })
     );
     assert_eq!(t, Transform::default());
+
+    // A Vec2's range holds for each component.
+    let mut material = Material::default();
+    for (value, why) in [
+        (Vec2::new(1.0, 2e4), "y above the range"),
+        (Vec2::new(-2e4, 1.0), "x below the range"),
+        (Vec2::new(f32::NAN, 1.0), "NaN"),
+    ] {
+        assert!(material.set(5, Value::Vec2(value)).is_err(), "uv_scale accepted {why}");
+    }
+    assert_eq!(material, Material::default());
+    material.set(5, Value::Vec2(Vec2::new(-1e4, 1e4))).unwrap();
+    assert_eq!(material.uv_scale, Vec2::new(-1e4, 1e4));
 }
 
 #[test]

@@ -45,6 +45,13 @@ pub enum WorldError {
         child: ObjectId,
         parent: ObjectId,
     },
+    /// A model was spawned with a different number of mesh or material
+    /// ids than it has meshes or materials.
+    ModelIds {
+        what: &'static str,
+        given: usize,
+        needed: usize,
+    },
 }
 
 impl std::fmt::Display for WorldError {
@@ -61,6 +68,9 @@ impl std::fmt::Display for WorldError {
             WorldError::Field(e) => e.fmt(f),
             WorldError::Cycle { child, parent } => {
                 write!(f, "{parent} can't be the parent of {child}: it is {child} or below it")
+            }
+            WorldError::ModelIds { what, given, needed } => {
+                write!(f, "the model has {needed} {what}, but {given} ids were given for them")
             }
         }
     }

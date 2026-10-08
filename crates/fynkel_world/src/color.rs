@@ -38,4 +38,15 @@ impl Color {
         }
         [channel(self.r), channel(self.g), channel(self.b), self.a]
     }
+
+    /// From linear RGB, as glTF files store colours: the inverse of
+    /// [`Color::to_linear`]. Alpha is unchanged.
+    pub fn from_linear([r, g, b, a]: [f32; 4]) -> Self {
+        // In f64 so 1 stays exactly 1 (white stays `Color::WHITE`).
+        fn channel(c: f32) -> f32 {
+            let c = f64::from(c);
+            (if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }) as f32
+        }
+        Self { r: channel(r), g: channel(g), b: channel(b), a }
+    }
 }

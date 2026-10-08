@@ -22,6 +22,11 @@ struct Frame {
 
 @group(0) @binding(0) var<uniform> frame: Frame;
 
+// Set by the pipeline for double-sided materials, whose triangles are
+// drawn from both sides: seen from behind, the normal is turned round so
+// the back is lit as the front.
+override double_sided: bool = false;
+
 // A material's textures. A slot without a texture holds a 1×1 one that
 // changes nothing: white, or a flat normal. Colour slots (base colour,
 // emissive) are sRGB textures, so sampling decodes them to linear before
@@ -57,8 +62,10 @@ struct VertexIn {
     // x: metallic, y: roughness, z: alpha cutoff (0 for opaque), w: 1, or
     // -1 when the model matrix mirrors (which flips the bitangent).
     @location(12) params: vec4<f32>,
-    // rgb: linear emission, w: UV scale.
+    // rgb: linear emission.
     @location(13) emissive: vec4<f32>,
+    // xy: UV scale, zw: UV offset (glTF's texture transform).
+    @location(14) uv_transform: vec4<f32>,
 };
 
 struct VertexOut {
@@ -85,7 +92,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     // itself (unlike the normal).
     out.tangent = vec4<f32>(mat3x3<f32>(in.model_0.xyz, in.model_1.xyz, in.model_2.xyz) * in.tangent.xyz,
         in.tangent.w * in.params.w);
-    out.uv = in.uv * in.emissive.w;
+    out.uv = in.uv * in.uv_transform.xy + in.uv_transform.zw;
     out.base_color = in.base_color;
     out.params = in.params;
     out.emissive = in.emissive.rgb;
@@ -160,8 +167,9 @@ fn surface_normal(in: VertexOut, mapped: vec3<f32>) -> vec3<f32> {
     return normalize(m.x * t + m.y * b + m.z * n);
 }
 
-// Linear radiance and alpha.
-fn shade(in: VertexOut) -> vec4<f32> {
+// Linear radiance and alpha. `front_facing` is the builtin: whether the
+// triangle is counter-clockwise on screen.
+fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
     // Every texture is sampled first, where control flow is still uniform
     // (WGSL requires it for implicit mip selection).
     let base_sample = textureSample(base_color_texture, material_sampler, in.uv);
@@ -177,7 +185,13 @@ fn shade(in: VertexOut) -> vec4<f32> {
     let roughness = clamp(in.params.y * mr_sample.g, 0.045, 1.0);
     let alpha = roughness * roughness;
 
-    let n = surface_normal(in, normal_sample);
+    var n = surface_normal(in, normal_sample);
+    // Mirroring turns triangles clockwise, so for a mirrored object the
+    // front is the clockwise side. Turning the final normal round turns
+    // the whole tangent frame, as the back's normal map needs.
+    if double_sided && front_facing == (in.params.w < 0.0) {
+        n = -n;
+    }
     let v = normalize(frame.camera_position.xyz - in.world_position);
     let n_dot_v = max(dot(n, v), 1e-4);
     let f0 = mix(vec3<f32>(0.04), albedo, metallic);
@@ -208,8 +222,8 @@ fn shade(in: VertexOut) -> vec4<f32> {
 // Opaque surfaces: alpha is ignored. The target is always an sRGB view,
 // so the hardware encodes, and the MSAA resolve averages in linear light.
 @fragment
-fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    return vec4<f32>(tonemap_neutral(shade(in).rgb), 1.0);
+fn fs_main(in: VertexOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
+    return vec4<f32>(tonemap_neutral(shade(in, front_facing).rgb), 1.0);
 }
 
 // Cut-outs (glTF's MASK): the surface is there where alpha reaches the
@@ -220,8 +234,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 // (Castaño, "Anti-aliased alpha test"). The pipeline writes colour only,
 // so the target stays opaque.
 @fragment
-fn fs_cutout(in: VertexOut) -> @location(0) vec4<f32> {
-    let shaded = shade(in);
+fn fs_cutout(in: VertexOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
+    let shaded = shade(in, front_facing);
     let cutoff = in.params.z;
     let sharp = (shaded.a - cutoff) / max(fwidth(shaded.a), 1e-4) + 0.5;
     return vec4<f32>(tonemap_neutral(shaded.rgb), clamp(sharp, 0.0, 1.0));
