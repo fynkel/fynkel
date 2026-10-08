@@ -135,11 +135,15 @@ void main() {
   });
 
   test('Texture2D.load decodes off the calling isolate, so it never stalls the UI', () async {
-    // A 4096² photo-like image: noise, so it doesn't compress away.
+    // A 4096² photo-like image: smooth colour with noise in the low bits,
+    // about 30 MB as PNG.
     final random = math.Random(1);
     final big = img.Image(width: 4096, height: 4096);
     for (final p in big) {
-      p.setRgb(random.nextInt(256), random.nextInt(256), random.nextInt(256));
+      final (u, v) = (p.x / 4096, p.y / 4096);
+      int wave(double f, double phase) =>
+          (127 + 100 * math.sin(f * u + phase) * math.cos(f * v - phase)).round() + random.nextInt(16);
+      p.setRgb(wave(9, 0), wave(13, 1), wave(7, 2));
     }
     final png = img.encodePng(big, level: 1);
 
@@ -166,8 +170,12 @@ void main() {
     ticker.cancel();
     expect((texture.width, texture.height), (4096, 4096));
     // For the test to mean anything the decode must take a while, and the
-    // UI must have kept ticking through it.
+    // UI must have kept ticking through it. Decoding here would freeze it
+    // for about the whole load, so the bound is a share of the load
+    // rather than a frame's 16 ms, which a busy CI machine can miss
+    // while the timer alone is late.
     expect(took, greaterThan(const Duration(milliseconds: 40)), reason: 'too quick to tell');
-    expect(longest, lessThan(const Duration(milliseconds: 16)), reason: 'decoded in $took');
+    expect(longest, lessThan(took * 0.5), reason: 'the UI froze for $longest of a $took load');
+    print('Texture2D.load of ${png.length ~/ 1024} KiB: $took, the UI waited at most $longest');
   });
 }
