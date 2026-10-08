@@ -259,8 +259,8 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_3() {
-    assert_eq!(fy_abi_version(), 3);
+fn the_abi_version_is_4() {
+    assert_eq!(fy_abi_version(), 4);
 }
 
 #[cfg(not(target_os = "android"))]
@@ -286,4 +286,128 @@ fn a_resized_headless_view_reads_back_frames_of_the_new_size() {
     // SAFETY: a live view.
     assert_eq!(unsafe { fy_view_resize(view.0, 0, 8) }, FyStatus::InvalidValue);
     assert_eq!(last_error(), "a view can't be 0 × 8");
+}
+
+/// The children through `fy_children_get`, asking again when the first
+/// buffer is too small, as `package:fynkel` does.
+fn children(world: &World, id: u64) -> Vec<u64> {
+    let mut buf = [0u64; 2];
+    let mut count = 0;
+    // SAFETY: a live world and a buffer of the length passed.
+    ok(unsafe { fy_children_get(world.0, id, buf.as_mut_ptr(), buf.len(), &mut count) });
+    if count <= buf.len() {
+        return buf[..count].to_vec();
+    }
+    let mut all = vec![0; count];
+    // SAFETY: the same, with a bigger buffer.
+    ok(unsafe { fy_children_get(world.0, id, all.as_mut_ptr(), all.len(), &mut count) });
+    all
+}
+
+#[test]
+fn parents_and_children_through_the_c_interface() {
+    let world = World::new();
+    let [root, a, b, c] = std::array::from_fn(|_| world.spawn());
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        for child in [a, b, c] {
+            ok(fy_parent_set(world.0, child, root));
+        }
+        let mut parent = 0;
+        ok(fy_parent_get(world.0, b, &mut parent));
+        assert_eq!(parent, root);
+        ok(fy_parent_get(world.0, root, &mut parent));
+        assert_eq!(parent, 0, "a root's parent is 0");
+        assert_eq!(children(&world, root), [a, b, c], "three don't fit the first buffer of two");
+        assert_eq!(children(&world, a), []);
+
+        let mut count = 99;
+        ok(fy_children_get(world.0, root, ptr::null_mut(), 0, &mut count));
+        assert_eq!(count, 3, "a null buffer of 0 asks only how many");
+
+        ok(fy_parent_set(world.0, c, a));
+        let mut part = false;
+        ok(fy_is_part_of(world.0, c, root, &mut part));
+        assert!(part);
+        ok(fy_is_part_of(world.0, root, c, &mut part));
+        assert!(!part);
+
+        assert_eq!(fy_parent_set(world.0, root, c), FyStatus::InvalidValue);
+        assert_eq!(
+            last_error(),
+            format!("object#{c} can't be the parent of object#{root}: it is object#{root} or below it")
+        );
+        ok(fy_parent_set(world.0, a, 0));
+        assert_eq!(children(&world, root), [b]);
+
+        ok(fy_despawn(world.0, a));
+        assert!(!fy_exists(world.0, c), "despawning takes the children along");
+        assert!(fy_exists(world.0, root));
+    }
+}
+
+/// Reads a name through `fy_name_get`.
+fn name(world: &World, id: u64) -> String {
+    let mut buf = [0u8; 64];
+    let mut len = 0;
+    // SAFETY: a live world and a buffer of the length passed.
+    ok(unsafe { fy_name_get(world.0, id, buf.as_mut_ptr(), buf.len(), &mut len) });
+    String::from_utf8(buf[..len].to_vec()).unwrap()
+}
+
+#[test]
+fn names_and_find_through_the_c_interface() {
+    let world = World::new();
+    let [root, arm, hand] = std::array::from_fn(|_| world.spawn());
+    let set = |id, name: &str| ok(unsafe { fy_name_set(world.0, id, name.as_ptr(), name.len()) });
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        ok(fy_parent_set(world.0, arm, root));
+        ok(fy_parent_set(world.0, hand, arm));
+        set(arm, "Arm");
+        set(hand, "Hand · Größe");
+        assert_eq!(name(&world, hand), "Hand · Größe");
+        assert_eq!(name(&world, root), "");
+
+        let mut len = 0;
+        ok(fy_name_get(world.0, hand, ptr::null_mut(), 0, &mut len));
+        assert_eq!(len, "Hand · Größe".len(), "the length in bytes, without copying");
+
+        let mut found = 0;
+        let wanted = "Hand · Größe";
+        ok(fy_find(world.0, root, wanted.as_ptr(), wanted.len(), &mut found));
+        assert_eq!(found, hand);
+        ok(fy_find(world.0, root, "Leg".as_ptr(), 3, &mut found));
+        assert_eq!(found, 0);
+
+        let broken = [b'A', 0xff];
+        assert_eq!(fy_name_set(world.0, arm, broken.as_ptr(), broken.len()), FyStatus::InvalidValue);
+        assert!(last_error().starts_with("name is not UTF-8"), "{}", last_error());
+        assert_eq!(name(&world, arm), "Arm", "a refused name changes nothing");
+
+        ok(fy_name_set(world.0, arm, ptr::null(), 0));
+        assert_eq!(name(&world, arm), "", "length 0 clears the name");
+    }
+}
+
+#[test]
+fn the_world_transform_composes_the_parents() {
+    use fynkel_world::{Quat, Transform, Vec3};
+    let world = World::new();
+    let [parent, child] = std::array::from_fn(|_| world.spawn());
+    let turn = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+    let mut out = FyTransform::default();
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        let p = Transform { position: Vec3::new(1.0, 0.0, 0.0), rotation: turn, scale: Vec3::splat(2.0) };
+        ok(fy_transform_set(world.0, parent, &transform(p)));
+        ok(fy_transform_set(world.0, child, &transform(Transform::from_position(Vec3::new(0.0, 0.0, -1.0)))));
+        ok(fy_parent_set(world.0, child, parent));
+        ok(fy_world_transform_get(world.0, child, &mut out));
+    }
+    // One unit ahead (-Z), doubled, turned a quarter left: two along -X.
+    let position = Vec3::from(out.position);
+    assert!(position.abs_diff_eq(Vec3::new(-1.0, 0.0, 0.0), 1e-5), "{position}");
+    assert!(Quat::from(out.rotation).abs_diff_eq(turn, 1e-5));
+    assert!(Vec3::from(out.scale).abs_diff_eq(Vec3::splat(2.0), 1e-5));
 }

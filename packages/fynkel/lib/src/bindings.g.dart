@@ -37,11 +37,36 @@ external int fy_camera_remove(ffi.Pointer<FyWorld> world, int id);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyCamera>)>(isLeaf: true)
 external int fy_camera_set(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyCamera> value);
 
+@ffi.Native<
+  ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Uint64>, ffi.Size, ffi.Pointer<ffi.Size>)
+>(isLeaf: true)
+external int fy_children_get(
+  ffi.Pointer<FyWorld> world,
+  int id,
+  ffi.Pointer<ffi.Uint64> buf,
+  int cap,
+  ffi.Pointer<ffi.Size> out_count,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
 external int fy_despawn(ffi.Pointer<FyWorld> world, int id);
 
 @ffi.Native<ffi.Bool Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
 external bool fy_exists(ffi.Pointer<FyWorld> world, int id);
+
+@ffi.Native<
+  ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Uint64>)
+>(isLeaf: true)
+external int fy_find(
+  ffi.Pointer<FyWorld> world,
+  int root,
+  ffi.Pointer<ffi.Uint8> name,
+  int len,
+  ffi.Pointer<ffi.Uint64> out,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint64, ffi.Pointer<ffi.Bool>)>(isLeaf: true)
+external int fy_is_part_of(ffi.Pointer<FyWorld> world, int id, int root, ffi.Pointer<ffi.Bool> out);
 
 @ffi.Native<ffi.Pointer<ffi.Char> Function()>(isLeaf: true)
 external ffi.Pointer<ffi.Char> fy_last_error();
@@ -81,6 +106,26 @@ external int fy_mesh_renderer_remove(ffi.Pointer<FyWorld> world, int id);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyMeshRenderer>)>(isLeaf: true)
 external int fy_mesh_renderer_set(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyMeshRenderer> value);
+
+@ffi.Native<
+  ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Size>)
+>(isLeaf: true)
+external int fy_name_get(
+  ffi.Pointer<FyWorld> world,
+  int id,
+  ffi.Pointer<ffi.Uint8> buf,
+  int cap,
+  ffi.Pointer<ffi.Size> out_len,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Uint8>, ffi.Size)>(isLeaf: true)
+external int fy_name_set(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<ffi.Uint8> name, int len);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
+external int fy_parent_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<ffi.Uint64> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint64)>(isLeaf: true)
+external int fy_parent_set(ffi.Pointer<FyWorld> world, int child, int parent);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_spawn(ffi.Pointer<FyWorld> world, ffi.Pointer<ffi.Uint64> out);
@@ -150,7 +195,10 @@ external void fy_world_free(ffi.Pointer<FyWorld> world);
 @ffi.Native<ffi.Pointer<FyWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FyWorld> fy_world_new();
 
-const int FY_ABI_VERSION = 3;
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
+external int fy_world_transform_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> out);
+
+const int FY_ABI_VERSION = 4;
 
 const int FY_APPLE_MORE = 2;
 

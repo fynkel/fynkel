@@ -7,7 +7,9 @@ sealed class Component {
   const Component();
 }
 
-/// Where an object is, which way it faces, and how big it is.
+/// Where an object is, which way it faces, and how big it is, relative to
+/// its [GameObject.parent] (or the world, for a root). [GameObject.worldTransform]
+/// gives it in the world.
 final class Transform extends Component {
   /// [lookAt] turns the object so it looks at that point from [position];
   /// [forward] turns it to look along that direction. Give at most one of
@@ -38,7 +40,7 @@ final class Transform extends Component {
   Transform rotated(Vec3 axis, double angle) =>
       Transform._(position, (rotation * Quat.axisAngle(axis, angle)).normalized, scale);
 
-  /// Moved by [offset], in world space.
+  /// Moved by [offset], in the parent's space (the world's for a root).
   Transform translated(Vec3 offset) => Transform._(position + offset, rotation, scale);
 
   Transform copyWith({Vec3? position, Quat? rotation, Vec3? scale}) =>

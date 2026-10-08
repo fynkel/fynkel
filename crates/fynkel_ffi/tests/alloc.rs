@@ -1,6 +1,7 @@
 //! The frame clock's side of a frame allocates nothing (stage 1 plan
-//! §3.5): `fy_view_frame` extracts into recycled scene buffers, and
-//! setting components goes straight into the world. Only the calling
+//! §3.5): `fy_view_frame` extracts into recycled scene buffers, world
+//! matrices go into a kept buffer (stage 2 plan §3.1), and setting
+//! components goes straight into the world. Only the calling
 //! thread is counted. The render worker's own allocations (wgpu's) are
 //! measured in fynkel_render's tests.
 //!
@@ -56,7 +57,7 @@ fn count(f: impl FnOnce()) -> u64 {
 }
 
 #[test]
-fn a_steady_frame_with_1000_moving_cubes_allocates_nothing_on_the_calling_thread() {
+fn a_steady_frame_with_1000_moving_cubes_in_trees_allocates_nothing_on_the_calling_thread() {
     let world = World::new();
     let cube = stage1(&world);
     let mut renderer = FyMeshRenderer::default();
@@ -70,6 +71,12 @@ fn a_steady_frame_with_1000_moving_cubes_allocates_nothing_on_the_calling_thread
             id
         })
         .collect();
+    // Chains of ten, so the extract computes world matrices through
+    // parents (stage 2 plan §3.1). The order is built once, in warm-up.
+    for (i, &id) in cubes.iter().enumerate().filter(|(i, _)| !i.is_multiple_of(10)) {
+        // SAFETY: a live world.
+        ok(unsafe { fy_parent_set(world.0, id, cubes[i - 1]) });
+    }
     let view = View::headless(&world, 64, 64);
 
     let frame = |t: f32| {

@@ -70,7 +70,7 @@ impl From<WorldError> for Error {
             WorldError::NoMesh(_) => FyStatus::NoMesh,
             WorldError::NoMaterial(_) => FyStatus::NoMaterial,
             WorldError::MeshInUse { .. } | WorldError::MaterialInUse { .. } => FyStatus::InUse,
-            WorldError::Field(_) => FyStatus::InvalidValue,
+            WorldError::Field(_) | WorldError::Cycle { .. } => FyStatus::InvalidValue,
         };
         Self::new(status, e.to_string())
     }
