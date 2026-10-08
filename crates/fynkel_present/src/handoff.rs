@@ -1,0 +1,147 @@
+//! Something one thread draws with while another may take it away: the
+//! Android surface. The render worker borrows it for one frame at a time;
+//! the platform thread replaces it (a resize makes a new surface) or takes
+//! it away (the app went to the background), and either waits until no
+//! frame is using it, because the window under it may be released as soon
+//! as it returns.
+
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+
+pub(crate) struct Handoff<T> {
+    state: Mutex<State<T>>,
+    /// Signalled when a lease ends.
+    idle: Condvar,
+}
+
+struct State<T> {
+    current: Option<Arc<T>>,
+    /// A [`Lease`] is out.
+    leased: bool,
+}
+
+/// The current value, for one frame. While it lives, [`Handoff::put`] and
+/// [`Handoff::take`] wait.
+pub(crate) struct Lease<T> {
+    handoff: Arc<Handoff<T>>,
+    value: Arc<T>,
+}
+
+impl<T> Handoff<T> {
+    pub(crate) fn new() -> Self {
+        Self { state: Mutex::new(State { current: None, leased: false }), idle: Condvar::new() }
+    }
+
+    fn state(&self) -> MutexGuard<'_, State<T>> {
+        // Nothing panics while holding the lock.
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Waits until no lease is out, then hands the lock back.
+    fn idle(&self) -> MutexGuard<'_, State<T>> {
+        let mut state = self.state();
+        while state.leased {
+            state = self.idle.wait(state).unwrap_or_else(PoisonError::into_inner);
+        }
+        state
+    }
+
+    /// Makes `value` the current one, once no frame uses the old one, and
+    /// returns the old one. Dropping it is then safe.
+    pub(crate) fn put(&self, value: T) -> Option<Arc<T>> {
+        self.idle().current.replace(Arc::new(value))
+    }
+
+    /// Takes the current value away, once no frame uses it.
+    pub(crate) fn take(&self) -> Option<Arc<T>> {
+        self.idle().current.take()
+    }
+
+    /// The current value for one frame, or `None` when there is none.
+    /// Only one lease may be out at a time: the render worker is the only
+    /// borrower.
+    pub(crate) fn lease(self: &Arc<Self>) -> Option<Lease<T>> {
+        let mut state = self.state();
+        debug_assert!(!state.leased, "one lease at a time");
+        let value = state.current.clone()?;
+        state.leased = true;
+        Some(Lease { handoff: self.clone(), value })
+    }
+}
+
+impl<T> std::ops::Deref for Lease<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T> Drop for Lease<T> {
+    fn drop(&mut self) {
+        self.handoff.state().leased = false;
+        self.handoff.idle.notify_all();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn nothing_to_lease_until_a_value_is_put() {
+        let handoff = Arc::new(Handoff::new());
+        assert!(handoff.lease().is_none());
+        assert!(handoff.put(1).is_none());
+        assert_eq!(*handoff.lease().unwrap(), 1);
+        assert_eq!(handoff.take().as_deref(), Some(&1));
+        assert!(handoff.lease().is_none());
+    }
+
+    #[test]
+    fn put_returns_the_old_value() {
+        let handoff = Arc::new(Handoff::new());
+        handoff.put(1);
+        assert_eq!(handoff.put(2).as_deref(), Some(&1));
+        assert_eq!(*handoff.lease().unwrap(), 2);
+    }
+
+    /// The point of it all: taking the surface away waits for the frame
+    /// that is drawing with it.
+    #[test]
+    fn take_and_put_wait_for_the_frame_in_progress() {
+        for replace in [false, true] {
+            let handoff = Arc::new(Handoff::new());
+            handoff.put(1);
+            let (done, finished) = mpsc::channel();
+            thread::scope(|scope| {
+                let lease = handoff.lease().unwrap();
+                scope.spawn(|| {
+                    let old = if replace { handoff.put(2) } else { handoff.take() };
+                    done.send(old.map(|old| *old)).unwrap();
+                });
+                // Still drawing: the other thread must still be waiting.
+                assert!(finished.recv_timeout(Duration::from_millis(200)).is_err(), "didn't wait for the frame");
+                drop(lease);
+                assert_eq!(finished.recv_timeout(Duration::from_secs(5)).unwrap(), Some(1));
+            });
+            assert_eq!(handoff.lease().map(|lease| *lease), replace.then_some(2));
+        }
+    }
+
+    #[test]
+    fn a_taken_value_is_dropped_by_whoever_took_it() {
+        let handoff = Arc::new(Handoff::new());
+        let value = Arc::new(());
+        handoff.put(value.clone());
+        drop(handoff.lease());
+        let taken = handoff.take().unwrap();
+        // The handoff holds no copy any more, and the lease left none.
+        assert_eq!(Arc::strong_count(&taken), 1);
+        drop(taken);
+        assert_eq!(Arc::strong_count(&value), 1);
+    }
+}

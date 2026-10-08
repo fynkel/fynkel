@@ -21,7 +21,13 @@ void main(List<String> args) async {
     final os = code.targetOS;
     final arch = code.targetArchitecture;
     final triple = rustTriple(os, arch, iosSdk: os == OS.iOS ? code.iOS.targetSdk : null);
-    if (triple == null) throw HookError('Fynkel does not build for ${os.name}/${arch.name}.');
+    if (triple == null) {
+      // `flutter build apk` builds 32-bit arm too unless told otherwise.
+      final hint = os == OS.android
+          ? ' On Android it builds arm64-v8a and x86_64: add `--target-platform android-arm64,android-x64`.'
+          : '';
+      throw HookError('Fynkel does not build for ${os.name}/${arch.name}.$hint');
+    }
 
     final workspace = input.packageRoot.resolve('../../');
     if (!File.fromUri(workspace.resolve('crates/$_crate/Cargo.toml')).existsSync()) {
@@ -89,23 +95,29 @@ String? rustTriple(OS os, Architecture arch, {IOSSdk? iosSdk}) {
   };
 }
 
-/// Android needs the NDK's clang as the linker. Step 7 sets this up
-/// properly; until then ANDROID_NDK_HOME (or the newest NDK in the default
-/// SDK) is used when present.
+/// Android needs the NDK's clang as the linker, for API 30 (Android 11),
+/// package:fynkel_flutter's floor. The NDK is ANDROID_NDK_HOME, or the
+/// newest one in the SDK (ANDROID_HOME, or Android Studio's default place).
 Map<String, String>? _androidLinker(OS os, Architecture arch, String triple) {
   if (os != OS.android) return null;
-  final home = Platform.environment['HOME'] ?? '';
-  var ndk = Platform.environment['ANDROID_NDK_HOME'];
+  final env = Platform.environment;
+  var ndk = env['ANDROID_NDK_HOME'];
   if (ndk == null) {
-    final dir = Directory('$home/Library/Android/sdk/ndk');
-    if (!dir.existsSync()) return null;
-    final versions = dir.listSync().map((e) => e.path).toList()..sort();
-    if (versions.isEmpty) return null;
+    final sdk = env['ANDROID_HOME'] ?? env['ANDROID_SDK_ROOT'] ?? '${env['HOME'] ?? ''}/Library/Android/sdk';
+    final dir = Directory('$sdk/ndk');
+    final versions = dir.existsSync() ? (dir.listSync().map((e) => e.path).toList()..sort()) : <String>[];
+    if (versions.isEmpty) {
+      throw HookError(
+        'Android builds need the Android NDK, and there is none in $sdk/ndk. '
+        "Install it with Android Studio's SDK Manager (SDK Tools → NDK), or set ANDROID_NDK_HOME.",
+      );
+    }
     ndk = versions.last;
   }
-  final clang =
-      '$ndk/toolchains/llvm/prebuilt/darwin-x86_64/bin/$triple'
-      '30-clang';
+  // The NDK's prebuilt tools for macOS are universal binaries in
+  // darwin-x86_64, Apple silicon included.
+  final clang = '$ndk/toolchains/llvm/prebuilt/darwin-x86_64/bin/${triple}30-clang';
+  if (!File(clang).existsSync()) throw HookError('the NDK at $ndk has no $clang.');
   return {'CARGO_TARGET_${triple.toUpperCase().replaceAll('-', '_')}_LINKER': clang};
 }
 

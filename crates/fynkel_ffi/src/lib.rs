@@ -9,7 +9,11 @@
 mod abi;
 mod error;
 mod extract;
+#[cfg(target_os = "android")]
+mod jni;
 mod worker;
 
 pub use abi::*;
 pub use error::FyStatus;
+#[cfg(target_os = "android")]
+pub use jni::*;

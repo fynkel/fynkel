@@ -26,7 +26,7 @@ use crate::extract::{Extract, MeshOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 2;
+pub const FY_ABI_VERSION: u32 = 3;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -265,6 +265,19 @@ enum Output {
     Headless(HeadlessFrames),
     #[cfg(target_vendor = "apple")]
     Apple(fynkel_present::ApplePresenter),
+    #[cfg(target_os = "android")]
+    Android(fynkel_present::AndroidPresenter),
+}
+
+impl FyView {
+    /// The platform side of an Android view, for the plugin's JNI calls.
+    #[cfg(target_os = "android")]
+    pub(crate) fn android(&self) -> Option<&fynkel_present::AndroidPresenter> {
+        match &self.output {
+            Output::Android(presenter) => Some(presenter),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -771,6 +784,42 @@ pub unsafe extern "C" fn fy_view_new_apple(
     })
 }
 
+/// A view of `world` that draws into an Android `Surface` for Flutter to
+/// show (Android only; `FY_STATUS_UNSUPPORTED` elsewhere). It draws nothing
+/// until the Flutter plugin gives it a surface, and each new surface brings
+/// its own size: the plugin's JNI calls (`FynkelNative.attach` and
+/// `detach`) do both, and `fy_view_resize` changes nothing. `width` ×
+/// `height` is the size until the first surface. Free it with
+/// `fy_view_free`.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_view_new_android(
+    world: *const FyWorld,
+    width: u32,
+    height: u32,
+    out: *mut *mut FyView,
+) -> FyStatus {
+    guard(|| {
+        #[cfg(target_os = "android")]
+        // SAFETY: per this function's contract.
+        return unsafe {
+            new_view(world, width, height, out, |gpu, width, height| {
+                let (target, presenter) =
+                    fynkel_present::Android::new(&gpu.instance, &gpu.adapter, &gpu.device, &gpu.queue, width, height);
+                Ok((target, Output::Android(presenter)))
+            })
+        };
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (world, width, height, out);
+            Err(Error::new(FyStatus::Unsupported, "Android views exist only on Android"))
+        }
+    })
+}
+
 /// Stops a view's render worker (after the frame it's drawing) and frees
 /// the view. Null is ignored.
 ///
@@ -781,7 +830,7 @@ pub unsafe extern "C" fn fy_view_new_apple(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fy_view_free(view: *mut FyView) {
     if !view.is_null() {
-        // SAFETY: made by Box::into_raw in fy_view_new_headless; the caller
+        // SAFETY: made by Box::into_raw in new_view; the caller
         // gives it up. In a pool, like creation, for what Metal autoreleases.
         fynkel_present::autorelease_pool(|| drop(unsafe { Box::from_raw(view) }));
     }
@@ -842,7 +891,7 @@ pub unsafe extern "C" fn fy_view_read(
         if out_number.is_null() {
             return Err(Error::null("out_number"));
         }
-        #[allow(irrefutable_let_patterns)] // only one kind of view on Android
+        #[allow(irrefutable_let_patterns)] // only headless views on desktop Linux and Windows
         let Output::Headless(frames) = &view.output else {
             return Err(Error::new(FyStatus::InvalidValue, "not a headless view"));
         };
@@ -896,11 +945,11 @@ pub struct FyViewStats {
     pub coalesced: u64,
     /// Scenes not drawn because the target had nowhere to draw.
     pub skipped: u64,
-    /// Apple: new frames taken by Flutter (`fy_apple_acquire`). 0 for
-    /// other views.
+    /// Apple: new frames taken by Flutter (`fy_apple_acquire`). Android:
+    /// frames given to the surface. 0 for headless views.
     pub presented: u64,
     /// Apple: frames finished but never shown, because newer ones were
-    /// waiting.
+    /// waiting. 0 for other views (Android's queue is the OS's).
     pub dropped: u64,
 }
 
@@ -924,6 +973,10 @@ pub unsafe extern "C" fn fy_view_stats(view: *const FyView, out: *mut FyViewStat
         if let Output::Apple(presenter) = &view.output {
             let ring = presenter.stats();
             (stats.presented, stats.dropped) = (ring.presented, ring.dropped);
+        }
+        #[cfg(target_os = "android")]
+        if let Some(presenter) = view.android() {
+            stats.presented = presenter.presented();
         }
         // SAFETY: per this function's contract.
         unsafe { write(out, stats, "out") }

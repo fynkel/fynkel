@@ -182,3 +182,117 @@ fn a_resize_the_target_refuses_stops_the_worker_with_a_clear_message() {
     assert_eq!(worker.failure().as_deref(), Some("couldn't resize the view to 9 × 9: no room for 9 × 9"));
     assert_eq!(worker.resize(10, 10), Err(worker.failure().unwrap()), "later calls report it");
 }
+
+/// A target that notes the thread it draws on, and when it is dropped.
+struct Noting {
+    inner: Headless,
+    thread: Arc<Mutex<Option<thread::ThreadId>>>,
+    dropped: Arc<Mutex<bool>>,
+}
+
+impl Drop for Noting {
+    fn drop(&mut self) {
+        *self.dropped.lock().unwrap() = true;
+    }
+}
+
+impl Target for Noting {
+    type Frame = <Headless as Target>::Frame;
+    fn format(&self) -> wgpu::TextureFormat {
+        self.inner.format()
+    }
+    fn size(&self) -> (u32, u32) {
+        self.inner.size()
+    }
+    fn begin(&mut self) -> Option<Self::Frame> {
+        *self.thread.lock().unwrap() = Some(thread::current().id());
+        self.inner.begin()
+    }
+    fn view<'a>(&'a self, frame: &'a Self::Frame) -> &'a wgpu::TextureView {
+        self.inner.view(frame)
+    }
+    fn finish(&mut self, frame: Self::Frame, encoder: wgpu::CommandEncoder, number: u64) {
+        self.inner.finish(frame, encoder, number);
+    }
+    fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+        self.inner.resize(width, height)
+    }
+}
+
+/// Starts a worker on `threads` with a [`Noting`] target, draws one frame,
+/// and returns it with the thread it drew on and its dropped flag.
+fn noting(gpu: &Gpu, threads: &'static RenderThreads) -> (Worker, thread::ThreadId, Arc<Mutex<bool>>) {
+    let (inner, frames) = headless(gpu);
+    let (thread, dropped) = (Arc::default(), Arc::default());
+    let target = Noting { inner, thread: Arc::clone(&thread), dropped: Arc::clone(&dropped) };
+    let renderer = Renderer::new(gpu, target.format());
+    let worker = Worker::start_on(threads, gpu.clone(), renderer, target).unwrap();
+    worker.post(1, worker.scene(), &mut Vec::new()).unwrap();
+    frames.read(1, Duration::from_secs(10), &mut vec![0; 16 * 16 * 4]).unwrap();
+    let id = thread.lock().unwrap().expect("drew a frame");
+    (worker, id, dropped)
+}
+
+/// Its own threads, apart from the other tests'.
+fn threads() -> &'static RenderThreads {
+    Box::leak(Box::new(RenderThreads::new()))
+}
+
+#[test]
+fn a_view_made_after_another_gets_its_render_thread() {
+    let gpu = gpu();
+    let threads = threads();
+    let (first, thread, _) = noting(&gpu, threads);
+    drop(first);
+    let (second, again, _) = noting(&gpu, threads);
+    assert_eq!(again, thread, "the same thread");
+    assert_ne!(again, thread::current().id());
+    drop(second);
+}
+
+#[test]
+fn only_one_render_thread_waits() {
+    let gpu = gpu();
+    let threads = threads();
+    let (a, thread_a, _) = noting(&gpu, threads);
+    let (b, thread_b, _) = noting(&gpu, threads);
+    assert_ne!(thread_a, thread_b, "two views at once, two threads");
+    drop(a);
+    drop(b);
+    assert_eq!(threads.idle().len(), 1, "b's thread ended");
+    let (c, thread_c, _) = noting(&gpu, threads);
+    assert_eq!(thread_c, thread_a);
+    let (d, thread_d, _) = noting(&gpu, threads);
+    assert!(thread_d != thread_a && thread_d != thread_b, "a new thread when none waits");
+    drop((c, d));
+}
+
+/// fy_view_free relies on it: when it returns, the GPU objects are gone.
+#[test]
+fn a_dropped_worker_has_dropped_everything_it_owned() {
+    let gpu = gpu();
+    let threads = threads();
+    for _ in 0..20 {
+        let (worker, _, dropped) = noting(&gpu, threads);
+        worker.post(2, worker.scene(), &mut Vec::new()).unwrap();
+        drop(worker);
+        assert!(*dropped.lock().unwrap(), "the target went with the worker");
+    }
+}
+
+#[test]
+fn a_thread_whose_worker_panicked_serves_the_next_view() {
+    let gpu = gpu();
+    let threads = threads();
+    let renderer = Renderer::new(&gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+    let boom = Worker::start_on(threads, gpu.clone(), renderer, Boom(headless(&gpu).0)).unwrap();
+    boom.post(1, RenderScene::default(), &mut Vec::new()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while boom.failure().is_none() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    drop(boom);
+    let (next, _, _) = noting(&gpu, threads);
+    assert_eq!(next.stats().rendered, 1);
+}

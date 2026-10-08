@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 2
+#define FY_ABI_VERSION 3
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -155,11 +155,11 @@ typedef struct FyViewStats {
   uint64_t coalesced;
   // Scenes not drawn because the target had nowhere to draw.
   uint64_t skipped;
-  // Apple: new frames taken by Flutter (`fy_apple_acquire`). 0 for
-  // other views.
+  // Apple: new frames taken by Flutter (`fy_apple_acquire`). Android:
+  // frames given to the surface. 0 for headless views.
   uint64_t presented;
   // Apple: frames finished but never shown, because newer ones were
-  // waiting.
+  // waiting. 0 for other views (Android's queue is the OS's).
   uint64_t dropped;
 } FyViewStats;
 
@@ -351,6 +351,22 @@ FyStatus fy_view_new_apple(const struct FyWorld *world,
                            uint32_t width,
                            uint32_t height,
                            struct FyView **out);
+
+// A view of `world` that draws into an Android `Surface` for Flutter to
+// show (Android only; `FY_STATUS_UNSUPPORTED` elsewhere). It draws nothing
+// until the Flutter plugin gives it a surface, and each new surface brings
+// its own size: the plugin's JNI calls (`FynkelNative.attach` and
+// `detach`) do both, and `fy_view_resize` changes nothing. `width` ×
+// `height` is the size until the first surface. Free it with
+// `fy_view_free`.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FyStatus fy_view_new_android(const struct FyWorld *world,
+                             uint32_t width,
+                             uint32_t height,
+                             struct FyView **out);
 
 // Stops a view's render worker (after the frame it's drawing) and frees
 // the view. Null is ignored.

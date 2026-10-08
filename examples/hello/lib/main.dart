@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:developer';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -50,12 +52,15 @@ class _HelloPageState extends State<HelloPage> {
   final _game = Hello();
   final _stats = ValueNotifier('');
 
-  // Flutter's own frames in the current stats window: how many, and how
-  // many had a build or raster phase longer than one 120 Hz frame. The
+  // Flutter's own frames in the current stats window: how many, how many
+  // had a build or raster phase longer than one frame of the display
+  // (8.33 ms at 120 Hz, 16.7 ms at 60 Hz), which of the two it was, and
+  // the longest raster phase (a slow frame's cause is usually there). The
   // line also says whether a mouse is over the view: while one is, Flutter
   // hit-tests its position after every frame, which roughly doubles the
   // Dart allocation per frame (docs/stage-1.md §7).
-  int _flutterFrames = 0, _slowFrames = 0;
+  int _flutterFrames = 0, _slowFrames = 0, _slowBuilds = 0, _slowRasters = 0;
+  Duration _longestRaster = Duration.zero;
 
   // The lifecycle check: whether the view is there, and its size.
   bool _shown = true;
@@ -65,6 +70,7 @@ class _HelloPageState extends State<HelloPage> {
   void initState() {
     super.initState();
     SchedulerBinding.instance.addTimingsCallback(_onTimings);
+    _footprint();
     if (_lifecycleCheck) unawaited(_runLifecycleCheck());
     // The baseline has no view to report, but its stats line changes every
     // second all the same: laying out new text costs Flutter memory, and
@@ -73,6 +79,28 @@ class _HelloPageState extends State<HelloPage> {
   }
 
   Timer? _baselineStats;
+
+  // On Android the footprint is the PSS from /proc/self/smaps_rollup, which
+  // the kernel adds up over every mapping: up to 20 ms with the GPU mapped.
+  // Read on the UI thread, inside the view's tick, it made one frame a
+  // second late (59 fps on a 60 Hz phone). So there it's read on another
+  // isolate, and the stats line shows the latest reading.
+  int? _lastFootprint;
+  bool _readingFootprint = false;
+
+  int _footprint() {
+    if (!Platform.isAndroid) return physicalFootprint();
+    if (!_readingFootprint) {
+      _readingFootprint = true;
+      unawaited(
+        Isolate.run(physicalFootprint).then((bytes) {
+          _lastFootprint = bytes;
+          _readingFootprint = false;
+        }),
+      );
+    }
+    return _lastFootprint ?? 0;
+  }
 
   @override
   void dispose() {
@@ -83,9 +111,21 @@ class _HelloPageState extends State<HelloPage> {
   }
 
   void _onTimings(List<FrameTiming> timings) {
-    const budget = Duration(microseconds: 8333);
+    final budget = _budget;
     _flutterFrames += timings.length;
-    _slowFrames += timings.where((t) => t.buildDuration > budget || t.rasterDuration > budget).length;
+    for (final t in timings) {
+      final build = t.buildDuration > budget, raster = t.rasterDuration > budget;
+      if (build || raster) _slowFrames++;
+      if (build) _slowBuilds++;
+      if (raster) _slowRasters++;
+      if (t.rasterDuration > _longestRaster) _longestRaster = t.rasterDuration;
+    }
+  }
+
+  /// One frame of the display; 120 Hz when Flutter doesn't know its rate.
+  Duration get _budget {
+    final hz = WidgetsBinding.instance.platformDispatcher.views.firstOrNull?.display.refreshRate ?? 0;
+    return Duration(microseconds: (1e6 / (hz > 0 ? hz : 120)).round());
   }
 
   void _onStats(FynkelViewStats stats) => _onSecond('$stats', seconds: stats.window.inMicroseconds / 1e6);
@@ -93,20 +133,32 @@ class _HelloPageState extends State<HelloPage> {
   void _onSecond(String view, {double seconds = 1}) {
     final line =
         '$view flutter=${(_flutterFrames / seconds).toStringAsFixed(1)} flutterFrames=$_flutterFrames '
-        'slow=$_slowFrames footprint=${physicalFootprint()} mouse=${RendererBinding.instance.mouseTracker.mouseIsConnected ? 1 : 0}';
+        'slow=$_slowFrames slowBuild=$_slowBuilds slowRaster=$_slowRasters '
+        'longestRaster=${_longestRaster.inMicroseconds} budget=${_budget.inMicroseconds} footprint=${_footprint()} mouse=${RendererBinding.instance.mouseTracker.mouseIsConnected ? 1 : 0}';
     _flutterFrames = 0;
-    _slowFrames = 0;
+    _slowFrames = _slowBuilds = _slowRasters = 0;
+    _longestRaster = Duration.zero;
     _stats.value = line;
     if (_printStats) stdout.writeln('[stats] $line');
   }
 
   Future<void> _runLifecycleCheck() async {
     const settle = Duration(seconds: 2);
-    // Nothing changes for three seconds after a mark, while the memory is
-    // read (several times: see tool/measure.dart). On the Mac the tool
-    // reads it from outside; on iOS nothing can, so the app reads its own
-    // footprint as well and prints the lowest reading as a `[memory]` line.
+    // Nothing changes after a mark until tool/measure.dart has read the
+    // memory (several times, which over adb takes seconds) and says so
+    // through `ext.hello.read`. A fixed pause was too short on a phone:
+    // the readings fell into the next cycle, with the view hidden. On the
+    // Mac and Android the tool reads the memory from outside; on iOS
+    // nothing can, so the app reads its own footprint as well and prints
+    // the lowest reading as a `[memory]` line.
+    Completer<void>? read;
+    registerExtension('ext.hello.read', (method, parameters) async {
+      read?.complete();
+      read = null;
+      return ServiceExtensionResponse.result('{}');
+    });
     Future<void> mark(String point) async {
+      final done = read = Completer<void>();
       stdout.writeln('[check] $point');
       var lowest = footprint();
       for (var i = 0; i < 5; i++) {
@@ -115,7 +167,7 @@ class _HelloPageState extends State<HelloPage> {
         if (reading.total < lowest.total) lowest = reading;
       }
       stdout.writeln('[memory] $point ${lowest.total} ${lowest.graphics}');
-      await Future<void>.delayed(const Duration(milliseconds: 500));
+      await done.future;
     }
 
     await Future<void>.delayed(const Duration(seconds: 5));

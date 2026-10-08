@@ -259,8 +259,18 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_2() {
-    assert_eq!(fy_abi_version(), 2);
+fn the_abi_version_is_3() {
+    assert_eq!(fy_abi_version(), 3);
+}
+
+#[cfg(not(target_os = "android"))]
+#[test]
+fn an_android_view_is_refused_off_android() {
+    let world = World::new();
+    let mut view = ptr::null_mut();
+    // SAFETY: a live world and a local out-value.
+    assert_eq!(unsafe { fy_view_new_android(world.0, 8, 8, &mut view) }, FyStatus::Unsupported);
+    assert!(view.is_null());
 }
 
 #[test]

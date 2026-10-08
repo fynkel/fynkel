@@ -4,12 +4,23 @@ import 'dart:io';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart' show ViewStats, World;
+import 'package:fynkel/fynkel.dart' show HeadlessView, ViewStats, WorldView, World;
 import 'package:fynkel/platform.dart';
 
-/// The plugin's channel (darwin/…/FynkelFlutterPlugin.swift).
+/// The plugin's channel (darwin/…/FynkelFlutterPlugin.swift and
+/// android/…/FynkelFlutterPlugin.kt).
 @visibleForTesting
 const channel = MethodChannel('fynkel_flutter');
+
+/// Whether views talk to the plugin the Android way: a size with
+/// `register` and a `resize` for each new one, because there the plugin
+/// makes a new surface for every size. Null for this platform's way. A test
+/// sets it to check Android's way on a Mac, where the view is then a
+/// [HeadlessView] standing in for the `AndroidSurfaceView`.
+@visibleForTesting
+bool? debugAndroid;
+
+bool get _android => debugAndroid ?? Platform.isAndroid;
 
 /// Whether this isolate has told the plugin to free the views an earlier
 /// isolate left (a hot restart disposes nothing). It does so before its
@@ -64,7 +75,7 @@ class FynkelViewStats {
 /// [resolutionScale] and scaled to fit. Below 1 trades sharpness for
 /// speed; the view never lowers it by itself.
 ///
-/// macOS and iOS for now; Android comes in stage 1, step 7.
+/// macOS, iOS and Android.
 class FynkelView extends StatefulWidget {
   const FynkelView({super.key, required this.world, this.onFrame, this.resolutionScale = 1.0, this.onStats})
     : assert(resolutionScale > 0 && resolutionScale <= 4);
@@ -89,12 +100,16 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
   late final Ticker _ticker = createTicker(_tick)..start();
   int? _lastMicros;
 
-  /// The size the next frame is drawn at, from the last layout.
+  /// The size the next frame is drawn at, from the last layout; 0 while it
+  /// is empty.
   int _width = 0, _height = 0;
 
-  AppleView? _view;
+  WorldView? _view;
   Future<int?>? _registration;
   int? _texture;
+
+  /// Android: the size the plugin was last given.
+  int _sentWidth = 0, _sentHeight = 0;
   Object? _error;
 
   // The current stats window.
@@ -125,12 +140,16 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
     final last = _lastMicros;
     _lastMicros = micros;
     widget.onFrame?.call(last == null ? 0 : (micros - last) / 1e6);
-    if (_width == 0) return;
+    // Nothing to draw before there is a size (on Android, before the
+    // window has one): no view yet, and no surface.
+    if (_width == 0 || _height == 0) return;
 
     final view = _view ?? _open();
     if (view == null) return;
-    view.resize(_width, _height);
-    if (_texture == null) return;
+    if (!_android) view.resize(_width, _height);
+    final texture = _texture;
+    if (texture == null) return;
+    if (_android) _sendSize(view, texture);
     view.frame();
 
     _windowTicks++;
@@ -154,13 +173,18 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
   }
 
   /// Makes the engine view and starts registering its texture.
-  AppleView? _open() {
-    final AppleView view;
+  WorldView? _open() {
+    final WorldView view;
     try {
-      if (!Platform.isMacOS && !Platform.isIOS) {
-        throw UnsupportedError('FynkelView runs on macOS and iOS for now (Android: stage 1, step 7).');
+      if (_android) {
+        view = Platform.isAndroid
+            ? AndroidSurfaceView(widget.world, width: _width, height: _height)
+            : HeadlessView(widget.world, width: _width, height: _height);
+      } else if (Platform.isMacOS || Platform.isIOS) {
+        view = AppleView(widget.world, width: _width, height: _height);
+      } else {
+        throw UnsupportedError('FynkelView runs on macOS, iOS and Android.');
       }
-      view = AppleView(widget.world, width: _width, height: _height);
     } catch (error, stack) {
       _fail(error, stack);
       return null;
@@ -170,24 +194,48 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
     return view;
   }
 
-  Future<int?> _register(AppleView view) async {
+  Future<int?> _register(WorldView view) async {
     try {
       if (!_resetSent) {
         _resetSent = true;
         await channel.invokeMethod<void>('reset');
       }
-      final texture = await channel.invokeMethod<int>('register', {
-        'view': view.address,
-        'acquire': AppleView.acquireAddress,
-        'setFrameReady': AppleView.setFrameReadyAddress,
-        'free': AppleView.freeAddress,
-      });
+      final Map<String, Object> arguments;
+      if (_android) {
+        _sentWidth = view.width;
+        _sentHeight = view.height;
+        arguments = {'view': view.address, 'width': view.width, 'height': view.height};
+      } else {
+        arguments = {
+          'view': view.address,
+          'acquire': AppleView.acquireAddress,
+          'setFrameReady': AppleView.setFrameReadyAddress,
+          'free': AppleView.freeAddress,
+        };
+      }
+      final texture = await channel.invokeMethod<int>('register', arguments);
       if (mounted && _view == view) setState(() => _texture = texture);
       return texture;
     } catch (error, stack) {
       if (mounted && _view == view) _fail(error, stack);
       return null;
     }
+  }
+
+  /// Android: gives the plugin the new size, which brings a new surface.
+  /// The plugin handles the calls in order, so the last size sent wins.
+  void _sendSize(WorldView view, int texture) {
+    if (_width == _sentWidth && _height == _sentHeight) return;
+    _sentWidth = _width;
+    _sentHeight = _height;
+    unawaited(
+      channel.invokeMethod<void>('resize', {'texture': texture, 'width': _width, 'height': _height}).catchError((
+        Object error,
+        StackTrace stack,
+      ) {
+        if (mounted && _view == view) _fail(error, stack);
+      }),
+    );
   }
 
   void _fail(Object error, StackTrace stack) {
@@ -233,8 +281,8 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
           );
         }
         final size = constraints.biggest;
-        _width = (size.width * ratio).round().clamp(1, 16384);
-        _height = (size.height * ratio).round().clamp(1, 16384);
+        _width = (size.width * ratio).round().clamp(0, 16384);
+        _height = (size.height * ratio).round().clamp(0, 16384);
         final texture = _texture;
         return texture == null ? const SizedBox.expand() : Texture(textureId: texture);
       },

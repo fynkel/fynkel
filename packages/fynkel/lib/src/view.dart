@@ -54,7 +54,8 @@ final class ViewStats {
 
 /// A view of a [World]: a render worker on its own thread and GPU device
 /// that draws the world each time [frame] is called. [HeadlessView] reads
-/// the pixels back; [AppleView] draws for Flutter to show.
+/// the pixels back; [AppleView] and [AndroidSurfaceView] draw for Flutter to
+/// show.
 abstract base class WorldView implements Finalizable {
   WorldView._(this._width, this._height, Pointer<FyView> pointer, {required bool finalize}) : _pointer = pointer {
     if (finalize) _finalizer.attach(this, pointer.cast(), detach: this);
@@ -82,6 +83,10 @@ abstract base class WorldView implements Finalizable {
   int get height => _height;
 
   bool get isDisposed => _pointer == nullptr;
+
+  /// The native view, for the platform plugins' calls. A plugin must stop
+  /// using it before [dispose].
+  int get address => _live.address;
 
   Pointer<FyView> get _live {
     if (_pointer == nullptr) throw StateError('this $runtimeType was disposed');
@@ -186,7 +191,7 @@ final class HeadlessView extends WorldView {
 
 /// A view that draws a [World] into IOSurfaces for Flutter to show on
 /// macOS and iOS. package:fynkel_flutter's `FynkelView` makes one and
-/// hands [address] and the two function addresses to its Swift plugin; a
+/// hands [address] and the function addresses to its Swift plugin; a
 /// game never uses it directly. It must be disposed: an Apple view left
 /// for the garbage collector stays allocated, with its render worker.
 final class AppleView extends WorldView {
@@ -200,10 +205,6 @@ final class AppleView extends WorldView {
         // the garbage collector, only by [dispose] after the plugin let go.
         finalize: false,
       );
-
-  /// The native view, for the plugin's `fy_apple_acquire` calls. The plugin
-  /// must stop using it before [dispose].
-  int get address => _live.address;
 
   /// `fy_apple_acquire`, for Flutter's raster thread.
   static int get acquireAddress =>
@@ -222,4 +223,24 @@ final class AppleView extends WorldView {
             >
           >(fy_apple_set_frame_ready)
           .address;
+}
+
+/// A view that draws a [World] into an Android `Surface` for Flutter to
+/// show. package:fynkel_flutter's `FynkelView` makes one and hands
+/// [address] to its Kotlin plugin, which gives it a surface (and with it
+/// the size) through JNI; [resize] changes nothing here. A game never uses
+/// it directly. It must be disposed: an Android view left for the garbage
+/// collector stays allocated, with its render worker.
+final class AndroidSurfaceView extends WorldView {
+  /// Throws a [FynkelException] with [FynkelStatus.unsupported] off
+  /// Android.
+  AndroidSurfaceView(World world, {required int width, required int height})
+    : super._(
+        width,
+        height,
+        WorldView._create((out) => fy_view_new_android(world.pointer, width, height, out)),
+        // The plugin may be handing it a surface, so it's never freed by
+        // the garbage collector, only by [dispose] after the plugin let go.
+        finalize: false,
+      );
 }
