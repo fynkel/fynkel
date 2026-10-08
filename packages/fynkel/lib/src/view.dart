@@ -16,6 +16,8 @@ final class ViewStats {
     this.skipped = 0,
     this.presented = 0,
     this.dropped = 0,
+    this.textureBytes = 0,
+    this.meshBytes = 0,
   });
 
   /// Scenes handed to the render worker by [WorldView.frame].
@@ -37,7 +39,15 @@ final class ViewStats {
   /// waiting.
   final int dropped;
 
-  /// The counts since [earlier].
+  /// GPU memory the view's textures hold, in bytes: every mipmap level, as
+  /// stored. As of the last frame drawn.
+  final int textureBytes;
+
+  /// GPU memory the view's meshes hold, in bytes. As of the last frame
+  /// drawn.
+  final int meshBytes;
+
+  /// The counts since [earlier]. The memory is the newer one's.
   ViewStats operator -(ViewStats earlier) => ViewStats(
     posted: posted - earlier.posted,
     rendered: rendered - earlier.rendered,
@@ -45,11 +55,14 @@ final class ViewStats {
     skipped: skipped - earlier.skipped,
     presented: presented - earlier.presented,
     dropped: dropped - earlier.dropped,
+    textureBytes: textureBytes,
+    meshBytes: meshBytes,
   );
 
   @override
   String toString() =>
-      'posted=$posted rendered=$rendered coalesced=$coalesced skipped=$skipped presented=$presented dropped=$dropped';
+      'posted=$posted rendered=$rendered coalesced=$coalesced skipped=$skipped presented=$presented dropped=$dropped '
+      'textureBytes=$textureBytes meshBytes=$meshBytes';
 }
 
 /// A view of a [World]: a render worker on its own thread and GPU device
@@ -121,6 +134,8 @@ abstract base class WorldView implements Finalizable {
       skipped: r.skipped,
       presented: r.presented,
       dropped: r.dropped,
+      textureBytes: r.texture_bytes,
+      meshBytes: r.mesh_bytes,
     );
   }
 

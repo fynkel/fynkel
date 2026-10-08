@@ -7,10 +7,11 @@ mod frame_ring;
 mod gpu;
 mod renderer;
 mod scene;
+mod texture;
 
 pub use fynkel_mesh::{MeshData, Vertex};
 pub use glam;
 pub use gpu::{Gpu, GpuError, instance_flags};
 pub use renderer::{FrameStats, Renderer};
-pub use scene::{CameraView, Draw, MeshKey, PbrMaterial, RenderScene, Sun};
+pub use scene::{CameraView, ColorSpace, Draw, MaterialTextures, MeshKey, PbrMaterial, RenderScene, Sun, TextureKey};
 pub use wgpu;

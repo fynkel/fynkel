@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 5
+#define FY_ABI_VERSION 6
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -48,7 +48,8 @@ enum FyStatus
   FY_STATUS_NO_COMPONENT = 2,
   FY_STATUS_NO_MESH = 3,
   FY_STATUS_NO_MATERIAL = 4,
-  // A mesh or material can't be removed while an object uses it.
+  // A mesh or material can't be removed while an object uses it, or a
+  // texture while a material does.
   FY_STATUS_IN_USE = 5,
   // A value was out of range, not finite, or not one of the choices.
   FY_STATUS_INVALID_VALUE = 6,
@@ -70,6 +71,7 @@ enum FyStatus
   FY_STATUS_POISONED = 13,
   // Not available on this platform, or not for this kind of view.
   FY_STATUS_UNSUPPORTED = 14,
+  FY_STATUS_NO_TEXTURE = 15,
 };
 #ifndef __cplusplus
 #if __STDC_VERSION__ >= 202311L
@@ -84,6 +86,12 @@ typedef int32_t FyStatus;
 // `fy_mesh_free`. Worlds that add it share its data, so freeing it
 // doesn't take it from them.
 typedef struct FyMesh FyMesh;
+
+// An image on its own, before any world has it. Opaque to C. Made with
+// `fy_texture_decode` or `fy_texture_new_rgba` on any thread, freed with
+// `fy_texture_free`. Worlds that add it share its pixels, so freeing it
+// doesn't take it from them.
+typedef struct FyTexture FyTexture;
 
 // A view: a world drawn into a target by its own render worker. Opaque to
 // C.
@@ -158,12 +166,35 @@ typedef struct FyMeshData {
   size_t index_count;
 } FyMeshData;
 
+// A metallic-roughness material (glTF's). Each texture multiplies its
+// factor; 0 is no texture. `Default` is the engine's default material,
+// not zeros (a UV scale of 0 is refused).
 typedef struct FyMaterial {
+  // sRGB. Its alpha matters only for cut-outs.
   struct FyColor base_color;
   // 0–1.
   float metallic;
   // 0–1.
   float roughness;
+  // sRGB; alpha is ignored.
+  struct FyColor emissive;
+  // 0 or more.
+  float emissive_intensity;
+  // Multiplies texture coordinates; 1e-4 to 1e4.
+  float uv_scale;
+  // 0 for opaque; otherwise the alpha below which the surface is cut
+  // away. 0–1.
+  float alpha_cutoff;
+  // Read as sRGB.
+  uint64_t base_color_texture;
+  // Tangent space, glTF's convention. Linear.
+  uint64_t normal_texture;
+  // Roughness in G, metallic in B. Linear.
+  uint64_t metallic_roughness_texture;
+  // In R. Linear.
+  uint64_t occlusion_texture;
+  // Read as sRGB.
+  uint64_t emissive_texture;
 } FyMaterial;
 
 // What a view did since it was made.
@@ -182,6 +213,11 @@ typedef struct FyViewStats {
   // Apple: frames finished but never shown, because newer ones were
   // waiting. 0 for other views (Android's queue is the OS's).
   uint64_t dropped;
+  // GPU memory the view's textures hold, in bytes: every mip level, as
+  // stored. Up to date as of the last frame drawn.
+  uint64_t texture_bytes;
+  // GPU memory the view's meshes hold, in bytes.
+  uint64_t mesh_bytes;
 } FyViewStats;
 
 // Called on a GPU thread each time an Apple view finishes a frame.
@@ -480,6 +516,69 @@ FyStatus fy_material_get(const struct FyWorld *world, uint64_t id, struct FyMate
 //
 // `world` is null or live.
 FyStatus fy_material_remove(const struct FyWorld *world, uint64_t id);
+
+// Decodes a PNG or JPEG of `len` bytes into a texture handle and writes
+// it to `out`. Any PNG layout becomes 8-bit RGBA. A broken or unsupported
+// file, or one over 8192 pixels on a side, is refused
+// (`FY_STATUS_INVALID_VALUE`) with a message saying why.
+//
+// Decoding a big image takes tens of milliseconds: call it off the UI
+// thread.
+//
+// # Safety
+//
+// `bytes` is valid for `len` bytes (it may be null when `len` is 0);
+// `out` is null or writable.
+FyStatus fy_texture_decode(const uint8_t *bytes, size_t len, struct FyTexture **out);
+
+// Makes a texture handle from `len` bytes of 8-bit RGBA, rows from the
+// top, and writes it to `out`. `len` must be `width × height × 4`.
+//
+// # Safety
+//
+// `pixels` is valid for `len` bytes (it may be null when `len` is 0);
+// `out` is null or writable.
+FyStatus fy_texture_new_rgba(uint32_t width,
+                             uint32_t height,
+                             const uint8_t *pixels,
+                             size_t len,
+                             struct FyTexture **out);
+
+// Frees a texture handle. Worlds that added it keep their share. Null is
+// ignored.
+//
+// # Safety
+//
+// `texture` is null or live, not used again after this.
+void fy_texture_free(struct FyTexture *texture);
+
+// Writes the texture's width and height in pixels.
+//
+// # Safety
+//
+// `texture` is null or live; the outs are null or writable.
+FyStatus fy_texture_size(const struct FyTexture *texture,
+                         uint32_t *out_width,
+                         uint32_t *out_height);
+
+// Gives the world a share of `texture` (nothing is copied) and writes the
+// id materials use for it to `out`. Each view uploads it to the GPU the
+// first frame a material uses it.
+//
+// # Safety
+//
+// `world` and `texture` are null or live; `out` is null or writable.
+FyStatus fy_texture_add(const struct FyWorld *world,
+                        const struct FyTexture *texture,
+                        uint64_t *out);
+
+// Removes a texture from the world; each view frees its GPU copy on its
+// next frame. Refused (`FY_STATUS_IN_USE`) while a material uses it.
+//
+// # Safety
+//
+// `world` is null or live.
+FyStatus fy_texture_remove(const struct FyWorld *world, uint64_t id);
 
 // A view of `world` that draws `width` × `height` frames offscreen and
 // reads them back (`fy_view_read`). Starts its render worker. Free it with

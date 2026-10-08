@@ -11,7 +11,8 @@ enum FynkelStatus {
   noMesh,
   noMaterial,
 
-  /// A mesh or material can't be removed while an object uses it.
+  /// A mesh or material can't be removed while an object uses it, or a
+  /// texture while a material does.
   inUse,
 
   /// A value was out of range, not finite, or not one of the choices.
@@ -43,6 +44,7 @@ enum FynkelStatus {
 
   /// Not available on this platform, or not for this kind of view.
   unsupported,
+  noTexture,
 }
 
 /// A call into the engine failed. [message] is the engine's own

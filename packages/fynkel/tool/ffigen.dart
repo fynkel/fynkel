@@ -19,6 +19,8 @@ const _blocking = {
   'fy_view_free', // joins the render worker
   'fy_view_read', // waits for the GPU
   'fy_mesh_new', // generating tangents takes about 1 µs per triangle
+  'fy_texture_decode', // decoding a big image takes tens of milliseconds
+  'fy_texture_new_rgba', // copies the pixels
 };
 
 Future<void> main() async {

@@ -1,6 +1,7 @@
 //! Stable ids (stage 1 plan §3.1).
 //!
-//! Every object, mesh and material gets an id from its own counter. Ids
+//! Every object, mesh, material and texture gets an id from its own
+//! counter. Ids
 //! start at 1 and are never reused, so an old id can never point at a new
 //! thing. 0 is "none" at the C boundary, which is why the ids wrap
 //! `NonZeroU64` (`Option<ObjectId>` is also 8 bytes).
@@ -58,6 +59,11 @@ id_type!(
     MaterialId,
     "material"
 );
+id_type!(
+    /// A texture resource: an image that materials use.
+    TextureId,
+    "texture"
+);
 
 /// Hands out ids from 1 upwards and never repeats one.
 #[derive(Debug)]
@@ -89,6 +95,12 @@ impl MeshId {
 }
 
 impl MaterialId {
+    pub(crate) const fn new(n: NonZeroU64) -> Self {
+        Self(n)
+    }
+}
+
+impl TextureId {
     pub(crate) const fn new(n: NonZeroU64) -> Self {
         Self(n)
     }

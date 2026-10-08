@@ -1,4 +1,5 @@
-//! The world: objects, their components, meshes and materials.
+//! The world: objects, their components, and the meshes, materials and
+//! textures they use.
 
 use crate::components::{Component, MeshRenderer};
 use crate::describe::{Describe, FieldError, Value};
@@ -6,10 +7,11 @@ use crate::hierarchy::Hierarchy;
 use crate::id::{IdCounter, IdMap};
 use std::sync::Arc;
 
+use fynkel_load::ImageData;
 use fynkel_mesh::MeshData;
 
 use crate::resources::Material;
-use crate::{MaterialId, MeshId, ObjectId};
+use crate::{MaterialId, MeshId, ObjectId, TextureId};
 
 /// Why a world operation was refused. On error, the world is unchanged.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -22,6 +24,7 @@ pub enum WorldError {
     },
     NoMesh(MeshId),
     NoMaterial(MaterialId),
+    NoTexture(TextureId),
     /// The resource can't be removed while an object still uses it.
     MeshInUse {
         mesh: MeshId,
@@ -30,6 +33,10 @@ pub enum WorldError {
     MaterialInUse {
         material: MaterialId,
         object: ObjectId,
+    },
+    TextureInUse {
+        texture: TextureId,
+        material: MaterialId,
     },
     /// A field value failed validation.
     Field(FieldError),
@@ -47,8 +54,10 @@ impl std::fmt::Display for WorldError {
             WorldError::NoComponent { object, component } => write!(f, "{object} has no {component}"),
             WorldError::NoMesh(id) => write!(f, "{id} does not exist"),
             WorldError::NoMaterial(id) => write!(f, "{id} does not exist"),
+            WorldError::NoTexture(id) => write!(f, "{id} does not exist"),
             WorldError::MeshInUse { mesh, object } => write!(f, "{mesh} is still used by {object}"),
             WorldError::MaterialInUse { material, object } => write!(f, "{material} is still used by {object}"),
+            WorldError::TextureInUse { texture, material } => write!(f, "{texture} is still used by {material}"),
             WorldError::Field(e) => e.fmt(f),
             WorldError::Cycle { child, parent } => {
                 write!(f, "{parent} can't be the parent of {child}: it is {child} or below it")
@@ -67,7 +76,7 @@ impl From<FieldError> for WorldError {
 
 pub type Result<T> = std::result::Result<T, WorldError>;
 
-/// Holds every object, component, mesh and material.
+/// Holds every object, component, mesh, material and texture.
 ///
 /// Objects are addressed only by [`ObjectId`]. The `hecs` entity behind an
 /// id is a private detail, and no public item names a `hecs` type.
@@ -81,6 +90,8 @@ pub struct World {
     mesh_ids: IdCounter,
     materials: IdMap<MaterialId, Material>,
     material_ids: IdCounter,
+    textures: IdMap<TextureId, Arc<ImageData>>,
+    texture_ids: IdCounter,
 }
 
 impl std::fmt::Debug for World {
@@ -89,6 +100,7 @@ impl std::fmt::Debug for World {
             .field("objects", &self.entities.len())
             .field("meshes", &self.meshes.len())
             .field("materials", &self.materials.len())
+            .field("textures", &self.textures.len())
             .finish()
     }
 }
@@ -110,6 +122,8 @@ impl World {
             mesh_ids: IdCounter::new(),
             materials: IdMap::default(),
             material_ids: IdCounter::new(),
+            textures: IdMap::default(),
+            texture_ids: IdCounter::new(),
         }
     }
 
@@ -205,18 +219,20 @@ impl World {
         }
     }
 
-    /// Mesh and material ids in a component must point at live resources.
-    /// Only [`MeshRenderer`] holds such ids in stage 1. Checking every
-    /// field of kind `Mesh` or `Material` keeps this right for future
-    /// components without listing them here.
-    fn check_references<C: Component>(&self, component: &C) -> Result<()> {
-        for index in 0..C::fields().len() {
-            match component.get(index) {
+    /// Mesh, material and texture ids in a component or material must
+    /// point at live resources. Checking every field of those kinds keeps
+    /// this right for future types without listing them here.
+    fn check_references<T: Describe>(&self, value: &T) -> Result<()> {
+        for index in 0..T::fields().len() {
+            match value.get(index) {
                 Some(Value::Mesh(Some(mesh))) if !self.meshes.contains_key(&mesh) => {
                     return Err(WorldError::NoMesh(mesh));
                 }
                 Some(Value::Material(Some(material))) if !self.materials.contains_key(&material) => {
                     return Err(WorldError::NoMaterial(material));
+                }
+                Some(Value::Texture(Some(texture))) if !self.textures.contains_key(&texture) => {
+                    return Err(WorldError::NoTexture(texture));
                 }
                 _ => {}
             }
@@ -262,9 +278,11 @@ impl World {
 
     // --- Materials ---------------------------------------------------------
 
-    /// Adds a material after validating its fields.
+    /// Adds a material after validating its fields. Its textures must
+    /// exist.
     pub fn add_material(&mut self, material: Material) -> Result<MaterialId> {
         validate_all(&material)?;
+        self.check_references(&material)?;
         let id = MaterialId::new(self.material_ids.next());
         self.materials.insert(id, material);
         Ok(id)
@@ -276,9 +294,12 @@ impl World {
 
     /// Replaces a material's values. Every object using it changes with it.
     pub fn set_material(&mut self, id: MaterialId, material: Material) -> Result<()> {
-        let slot = self.materials.get_mut(&id).ok_or(WorldError::NoMaterial(id))?;
+        if !self.materials.contains_key(&id) {
+            return Err(WorldError::NoMaterial(id));
+        }
         validate_all(&material)?;
-        *slot = material;
+        self.check_references(&material)?;
+        self.materials.insert(id, material);
         Ok(())
     }
 
@@ -291,6 +312,42 @@ impl World {
             return Err(WorldError::MaterialInUse { material: id, object });
         }
         self.materials.remove(&id);
+        Ok(())
+    }
+
+    /// Every material, in no particular order.
+    pub fn materials(&self) -> impl Iterator<Item = (MaterialId, &Material)> + '_ {
+        self.materials.iter().map(|(&id, material)| (id, material))
+    }
+
+    // --- Textures ----------------------------------------------------------
+
+    /// Adds an image for materials to use. It's shared, not copied: each
+    /// view's renderer uploads it from here.
+    pub fn add_texture(&mut self, image: impl Into<Arc<ImageData>>) -> TextureId {
+        let id = TextureId::new(self.texture_ids.next());
+        self.textures.insert(id, image.into());
+        id
+    }
+
+    pub fn texture(&self, id: TextureId) -> Result<&Arc<ImageData>> {
+        self.textures.get(&id).ok_or(WorldError::NoTexture(id))
+    }
+
+    /// Every texture, in no particular order.
+    pub fn textures(&self) -> impl Iterator<Item = (TextureId, &Arc<ImageData>)> + '_ {
+        self.textures.iter().map(|(&id, image)| (id, image))
+    }
+
+    /// Removes a texture. Refused while any material uses it.
+    pub fn remove_texture(&mut self, id: TextureId) -> Result<()> {
+        if !self.textures.contains_key(&id) {
+            return Err(WorldError::NoTexture(id));
+        }
+        if let Some((&material, _)) = self.materials.iter().find(|(_, m)| m.textures().contains(&Some(id))) {
+            return Err(WorldError::TextureInUse { texture: id, material });
+        }
+        self.textures.remove(&id);
         Ok(())
     }
 }

@@ -90,7 +90,8 @@ pub fn stage1(world: &World) -> u64 {
         ok(fy_light_set(w, ambient, &light));
 
         let (mesh, mut material) = (add_shape(world, FY_MESH_CUBE), 0);
-        let orange = FyMaterial { base_color: argb(0xFFE0613A), metallic: 0.0, roughness: 0.5 };
+        let orange =
+            FyMaterial { base_color: argb(0xFFE0613A), metallic: 0.0, roughness: 0.5, ..FyMaterial::default() };
         ok(fy_material_add(w, &orange, &mut material));
         let cube = world.spawn();
         let turned = Transform { rotation: Quat::from_rotation_y(30f32.to_radians()), ..Transform::default() };

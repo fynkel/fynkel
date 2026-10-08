@@ -12,5 +12,6 @@ workspace = true
 
 [dependencies]
 fynkel_mesh.workspace = true
+fynkel_load.workspace = true
 hecs.workspace = true
 glam.workspace = true

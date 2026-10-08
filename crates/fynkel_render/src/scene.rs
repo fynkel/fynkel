@@ -3,7 +3,8 @@
 //!
 //! Everything here is linear and already resolved: colours are linear RGB,
 //! light colours are multiplied by their intensity, and matrices are final.
-//! The renderer converts nothing and looks nothing up except mesh keys.
+//! The renderer converts nothing and looks nothing up except mesh and
+//! texture keys.
 
 use glam::{Mat4, Vec3};
 
@@ -11,6 +12,65 @@ use glam::{Mat4, Vec3};
 /// caller chooses the values (the world uses its `MeshId`s).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MeshKey(pub u64);
+
+/// Names an image uploaded with [`crate::Renderer::upload_texture`]. The
+/// caller chooses the values (the world uses its `TextureId`s).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TextureKey(pub u64);
+
+/// How a texture's values are read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ColorSpace {
+    /// Colour, as images store it: sampling decodes to linear first.
+    Srgb,
+    /// Data used as-is: normals, roughness, occlusion.
+    Linear,
+}
+
+impl ColorSpace {
+    pub(crate) fn format(self) -> wgpu::TextureFormat {
+        match self {
+            ColorSpace::Srgb => wgpu::TextureFormat::Rgba8UnormSrgb,
+            ColorSpace::Linear => wgpu::TextureFormat::Rgba8Unorm,
+        }
+    }
+}
+
+/// A material's textures, `None` where it has none. Each slot reads its
+/// texture in a fixed colour space ([`MaterialTextures::slots`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct MaterialTextures {
+    /// Multiplies the base colour (and its alpha).
+    pub base_color: Option<TextureKey>,
+    /// A tangent-space normal map, glTF's convention: +X along +u, +Y up
+    /// the image.
+    pub normal: Option<TextureKey>,
+    /// Roughness in G, metallic in B, multiplying the factors.
+    pub metallic_roughness: Option<TextureKey>,
+    /// Ambient occlusion in R.
+    pub occlusion: Option<TextureKey>,
+    /// Multiplies the emissive colour.
+    pub emissive: Option<TextureKey>,
+}
+
+impl MaterialTextures {
+    pub const NONE: Self =
+        Self { base_color: None, normal: None, metallic_roughness: None, occlusion: None, emissive: None };
+
+    /// The index of the normal slot in [`MaterialTextures::slots`].
+    pub(crate) const NORMAL: usize = 1;
+
+    /// Each slot's texture and how it's read, in binding order.
+    pub fn slots(&self) -> [(Option<TextureKey>, ColorSpace); 5] {
+        [
+            (self.base_color, ColorSpace::Srgb),
+            (self.normal, ColorSpace::Linear),
+            (self.metallic_roughness, ColorSpace::Linear),
+            (self.occlusion, ColorSpace::Linear),
+            (self.emissive, ColorSpace::Srgb),
+        ]
+    }
+}
 
 /// The camera a frame is seen through.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -53,13 +113,42 @@ pub struct Sun {
     pub color: Vec3,
 }
 
-/// A metallic-roughness material, resolved.
+/// A metallic-roughness material, resolved: glTF's, factors times
+/// textures.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PbrMaterial {
     /// Linear RGBA.
     pub base_color: [f32; 4],
     pub metallic: f32,
     pub roughness: f32,
+    /// Linear light the surface gives off, colour × intensity.
+    pub emissive: [f32; 3],
+    /// Texture coordinates are multiplied by this: 10 repeats a texture ten
+    /// times across a mesh with 0–1 UVs.
+    pub uv_scale: f32,
+    /// 0 for an opaque surface. Otherwise a cut-out (glTF's MASK): the
+    /// surface is there only where its alpha reaches this.
+    pub alpha_cutoff: f32,
+    pub textures: MaterialTextures,
+}
+
+impl PbrMaterial {
+    /// White, rough-ish, untextured.
+    pub const DEFAULT: Self = Self {
+        base_color: [1.0; 4],
+        metallic: 0.0,
+        roughness: 0.5,
+        emissive: [0.0; 3],
+        uv_scale: 1.0,
+        alpha_cutoff: 0.0,
+        textures: MaterialTextures::NONE,
+    };
+}
+
+impl Default for PbrMaterial {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 /// One mesh drawn once.

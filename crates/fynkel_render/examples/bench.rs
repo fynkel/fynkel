@@ -15,7 +15,8 @@ fn scene(n: u32, t: f32) -> RenderScene {
     let side = (n as f32).sqrt().ceil() as u32;
     let spacing = 1.5;
     let extent = side as f32 * spacing;
-    let material = PbrMaterial { base_color: [0.8, 0.3, 0.1, 1.0], metallic: 0.0, roughness: 0.5 };
+    let material =
+        PbrMaterial { base_color: [0.8, 0.3, 0.1, 1.0], metallic: 0.0, roughness: 0.5, ..PbrMaterial::DEFAULT };
     RenderScene {
         camera: Some(CameraView::looking_at(Vec3::new(0.0, extent * 0.6, extent * 0.9), Vec3::ZERO)),
         sun: Some(Sun { direction: Vec3::new(-0.4, -1.0, -0.3), color: Vec3::ONE }),

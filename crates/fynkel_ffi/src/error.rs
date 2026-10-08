@@ -21,7 +21,8 @@ pub enum FyStatus {
     NoComponent = 2,
     NoMesh = 3,
     NoMaterial = 4,
-    /// A mesh or material can't be removed while an object uses it.
+    /// A mesh or material can't be removed while an object uses it, or a
+    /// texture while a material does.
     InUse = 5,
     /// A value was out of range, not finite, or not one of the choices.
     InvalidValue = 6,
@@ -43,6 +44,7 @@ pub enum FyStatus {
     Poisoned = 13,
     /// Not available on this platform, or not for this kind of view.
     Unsupported = 14,
+    NoTexture = 15,
 }
 
 /// A failed call: its status and its message.
@@ -69,7 +71,10 @@ impl From<WorldError> for Error {
             WorldError::NoComponent { .. } => FyStatus::NoComponent,
             WorldError::NoMesh(_) => FyStatus::NoMesh,
             WorldError::NoMaterial(_) => FyStatus::NoMaterial,
-            WorldError::MeshInUse { .. } | WorldError::MaterialInUse { .. } => FyStatus::InUse,
+            WorldError::NoTexture(_) => FyStatus::NoTexture,
+            WorldError::MeshInUse { .. } | WorldError::MaterialInUse { .. } | WorldError::TextureInUse { .. } => {
+                FyStatus::InUse
+            }
             WorldError::Field(_) | WorldError::Cycle { .. } => FyStatus::InvalidValue,
         };
         Self::new(status, e.to_string())

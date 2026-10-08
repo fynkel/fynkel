@@ -4,7 +4,7 @@
 //! Posting never waits for the GPU. Scenes go through a mailbox where the
 //! newest wins: a scene posted while another is still waiting replaces it
 //! (it is *coalesced*), so a slow GPU means fewer, fresher frames rather
-//! than a growing queue. Mesh changes are not coalesced; they queue up in
+//! than a growing queue. Mesh and texture changes are not coalesced; they queue up in
 //! order and are applied before the next scene is drawn.
 //!
 //! Scene buffers circulate between the poster and the worker, so a steady
@@ -26,7 +26,7 @@ use std::thread;
 use fynkel_present::Target;
 use fynkel_render::{Gpu, RenderScene, Renderer};
 
-use crate::extract::MeshOp;
+use crate::extract::ResourceOp;
 
 /// Counts since the worker started. Every scene posted is rendered,
 /// coalesced, skipped, or still waiting.
@@ -39,6 +39,10 @@ pub(crate) struct WorkerStats {
     /// The target had nowhere to draw. The next scene posted brings the
     /// picture up to date.
     pub(crate) skipped: u64,
+    /// GPU memory the renderer's textures and meshes hold, as of the last
+    /// scene taken.
+    pub(crate) texture_bytes: u64,
+    pub(crate) mesh_bytes: u64,
 }
 
 #[derive(Debug)]
@@ -60,7 +64,7 @@ struct Mailbox {
     pending: Option<(u64, RenderScene)>,
     /// Scene buffers ready for reuse.
     spare: Vec<RenderScene>,
-    ops: Vec<MeshOp>,
+    ops: Vec<ResourceOp>,
     /// A new size for the target, applied before the next scene is drawn.
     size: Option<(u32, u32)>,
     stop: bool,
@@ -117,7 +121,7 @@ impl Worker {
     /// Hands `scene` (frame `number`) and the mesh changes in `ops` to the
     /// worker. `ops` is left empty. Fails only when the worker has stopped
     /// after a panic.
-    pub(crate) fn post(&self, number: u64, scene: RenderScene, ops: &mut Vec<MeshOp>) -> Result<(), String> {
+    pub(crate) fn post(&self, number: u64, scene: RenderScene, ops: &mut Vec<ResourceOp>) -> Result<(), String> {
         let mut mailbox = self.shared.lock();
         if let Some(failure) = &mailbox.failure {
             return Err(failure.clone());
@@ -280,9 +284,15 @@ fn run<T: Target>(shared: &Shared, gpu: Gpu, mut renderer: Renderer, mut target:
             }
             for op in ops.drain(..) {
                 match op {
-                    MeshOp::Upload(key, mesh) => renderer.upload_mesh(key, &mesh),
-                    MeshOp::Remove(key) => {
+                    ResourceOp::UploadMesh(key, mesh) => renderer.upload_mesh(key, &mesh),
+                    ResourceOp::RemoveMesh(key) => {
                         renderer.remove_mesh(key);
+                    }
+                    ResourceOp::UploadTexture(key, space, image) => {
+                        renderer.upload_texture(key, space, image.width(), image.height(), image.pixels());
+                    }
+                    ResourceOp::RemoveTexture(key) => {
+                        renderer.remove_texture(key);
                     }
                 }
             }
@@ -305,6 +315,8 @@ fn run<T: Target>(shared: &Shared, gpu: Gpu, mut renderer: Renderer, mut target:
         })?;
 
         let mut mailbox = shared.lock();
+        mailbox.stats.texture_bytes = renderer.texture_bytes();
+        mailbox.stats.mesh_bytes = renderer.mesh_bytes();
         mailbox.spare.push(scene);
         if drawn {
             mailbox.stats.rendered += 1;

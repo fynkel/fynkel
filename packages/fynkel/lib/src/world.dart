@@ -30,12 +30,14 @@ final class World implements Finalizable {
 
   Pointer<FyWorld> _pointer = nullptr;
 
-  // Meshes and materials this world has, both ways. Stage 1 never removes
-  // them: they live as long as the world.
+  // Meshes, materials and textures this world has, both ways. They're
+  // added the first time something uses them, and stay until the world is
+  // disposed or [Mesh.dispose] or [Texture2D.dispose] takes them out.
   final _meshIds = <Mesh, int>{};
   final _meshes = <int, Mesh>{};
   final _materialIds = <Material, int>{};
   final _materials = <int, Material>{};
+  final _textureIds = <Texture2D, int>{};
 
   /// The engine's world, for package:fynkel's views.
   Pointer<FyWorld> get pointer {
@@ -56,6 +58,7 @@ final class World implements Finalizable {
     _meshes.clear();
     _materialIds.clear();
     _materials.clear();
+    _textureIds.clear();
   }
 
   /// A new object with these components (at most one of each kind). If a
@@ -84,11 +87,47 @@ final class World implements Finalizable {
   int _meshId(Mesh mesh) {
     final known = _meshIds[mesh];
     if (known != null) return known;
-    check(fy_mesh_add(pointer, mesh._pointer, scratch.id));
+    check(fy_mesh_add(pointer, mesh._live, scratch.id));
     final id = scratch.id.value;
     _meshIds[mesh] = id;
     _meshes[id] = mesh;
+    mesh._worlds.add(WeakReference(this));
     return id;
+  }
+
+  /// Takes [mesh] out of this world, for [Mesh.dispose]. The engine
+  /// refuses while an object uses it.
+  void _releaseMesh(Mesh mesh) {
+    final id = _meshIds[mesh];
+    if (id == null || isDisposed) return;
+    check(fy_mesh_remove(_pointer, id));
+    _meshIds.remove(mesh);
+    _meshes.remove(id);
+  }
+
+  int _textureId(Texture2D texture) {
+    final known = _textureIds[texture];
+    if (known != null) return known;
+    check(fy_texture_add(pointer, texture._live, scratch.id));
+    final id = scratch.id.value;
+    _textureIds[texture] = id;
+    texture._worlds.add(WeakReference(this));
+    return id;
+  }
+
+  /// Takes [texture] out of this world, for [Texture2D.dispose]. Refused
+  /// while one of this world's materials uses it; checked here, so the
+  /// error names the Dart material rather than the engine's id.
+  void _releaseTexture(Texture2D texture) {
+    final id = _textureIds[texture];
+    if (id == null || isDisposed) return;
+    for (final material in _materials.values) {
+      if (material._uses(texture)) {
+        throw FynkelException(FynkelStatus.inUse, '$texture is still used by $material');
+      }
+    }
+    check(fy_texture_remove(_pointer, id));
+    _textureIds.remove(texture);
   }
 
   int _materialId(Material material) {
@@ -114,10 +153,22 @@ final class World implements Finalizable {
   }
 
   void _writeMaterial(Material material) {
+    int texture(Texture2D? t) => t == null ? 0 : _textureId(t);
+    // Textures first: adding one can fail, and then nothing was written.
+    final textures = material._textures.map(texture).toList();
     final m = scratch.material.ref;
     m.base_color.write(material.color);
     m.metallic = material.metallic;
     m.roughness = material.roughness;
+    m.emissive.write(material.emissive);
+    m.emissive_intensity = material.emissiveIntensity;
+    m.uv_scale = material.uvScale;
+    m.alpha_cutoff = material.alphaCutoff;
+    m.base_color_texture = textures[0];
+    m.normal_texture = textures[1];
+    m.metallic_roughness_texture = textures[2];
+    m.occlusion_texture = textures[3];
+    m.emissive_texture = textures[4];
   }
 }
 

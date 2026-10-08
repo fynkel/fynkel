@@ -238,3 +238,41 @@ fn meshes_lists_every_mesh_still_there() {
     listed.sort();
     assert_eq!(listed, [(cube, 36), (plane, 6)]);
 }
+
+// --- Textures ----------------------------------------------------------------
+
+fn image() -> ImageData {
+    ImageData::from_rgba(1, 1, vec![255; 4]).unwrap()
+}
+
+#[test]
+fn textures_are_shared_and_must_exist_for_a_material_to_use_them() {
+    let mut world = World::new();
+    let image = std::sync::Arc::new(image());
+    let texture = world.add_texture(image.clone());
+    assert!(std::sync::Arc::ptr_eq(world.texture(texture).unwrap(), &image), "shared, not copied");
+
+    let ghost = TextureId::from_raw(99).unwrap();
+    let uses_ghost = Material { normal_texture: Some(ghost), ..Material::default() };
+    assert_eq!(world.add_material(uses_ghost), Err(WorldError::NoTexture(ghost)));
+    let material = world.add_material(Material { base_color_texture: Some(texture), ..Material::default() }).unwrap();
+    assert_eq!(world.set_material(material, uses_ghost), Err(WorldError::NoTexture(ghost)));
+    assert_eq!(world.material(material).unwrap().base_color_texture, Some(texture), "a refused write changes nothing");
+}
+
+#[test]
+fn textures_cannot_be_removed_while_a_material_uses_them() {
+    let mut world = World::new();
+    let texture = world.add_texture(image());
+    // Any slot counts.
+    let material = world.add_material(Material { emissive_texture: Some(texture), ..Material::default() }).unwrap();
+    assert_eq!(world.remove_texture(texture), Err(WorldError::TextureInUse { texture, material }));
+    assert_eq!(world.remove_texture(texture).unwrap_err().to_string(), "texture#1 is still used by material#1");
+
+    world.set_material(material, Material::default()).unwrap();
+    world.remove_texture(texture).unwrap();
+    assert_eq!(world.texture(texture), Err(WorldError::NoTexture(texture)));
+    assert_eq!(world.remove_texture(texture), Err(WorldError::NoTexture(texture)));
+    assert_ne!(world.add_texture(image()), texture, "ids are never reused");
+    assert_eq!(world.textures().count(), 1);
+}

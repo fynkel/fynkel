@@ -121,7 +121,12 @@ pub fn stage1_scene() -> RenderScene {
         draws: vec![Draw {
             mesh: CUBE,
             model: Mat4::from_rotation_y(30f32.to_radians()),
-            material: PbrMaterial { base_color: linear_rgb(0xFFE0613A), metallic: 0.0, roughness: 0.5 },
+            material: PbrMaterial {
+                base_color: linear_rgb(0xFFE0613A),
+                metallic: 0.0,
+                roughness: 0.5,
+                ..PbrMaterial::DEFAULT
+            },
         }],
     }
 }

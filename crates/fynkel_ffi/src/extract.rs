@@ -12,6 +12,9 @@
 //! - Every ambient light adds to the ambient term.
 //! - An object is drawn when it has a `Transform` and a `MeshRenderer`
 //!   with both a mesh and a material.
+//! - A texture is uploaded once for each colour space a material reads it
+//!   in, the first frame a material uses it that way, and freed when the
+//!   world removes it.
 //! - Everything is placed by its world transform: its own after its
 //!   parents' (stage 2 plan §3.1). The camera and the sun take only the
 //!   position and rotation from it; a parent's scale doesn't stretch them.
@@ -20,24 +23,33 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use fynkel_render::glam::{Mat4, Vec3};
-use fynkel_render::{CameraView, Draw, MeshKey, PbrMaterial, RenderScene, Sun};
+use fynkel_render::{
+    CameraView, ColorSpace, Draw, MaterialTextures, MeshKey, PbrMaterial, RenderScene, Sun, TextureKey,
+};
 use fynkel_world::{
-    Camera, Color, Light, LightKind, MeshData, MeshId, MeshRenderer, ObjectId, Quat, Transform, World, WorldMatrices,
+    Camera, Color, ImageData, Light, LightKind, Material, MeshData, MeshId, MeshRenderer, ObjectId, Quat, TextureId,
+    Transform, World, WorldMatrices,
 };
 
-/// A change to the meshes the renderer holds. An upload shares the world's
-/// mesh data; nothing is copied until the GPU upload.
+/// A change to the meshes and textures the renderer holds. An upload
+/// shares the world's data; nothing is copied until the GPU upload.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum MeshOp {
-    Upload(MeshKey, Arc<MeshData>),
-    Remove(MeshKey),
+pub(crate) enum ResourceOp {
+    UploadMesh(MeshKey, Arc<MeshData>),
+    RemoveMesh(MeshKey),
+    UploadTexture(TextureKey, ColorSpace, Arc<ImageData>),
+    /// In every colour space. Sent once for each space the texture was
+    /// uploaded in; removing again does nothing.
+    RemoveTexture(TextureKey),
 }
 
-/// One view's extract. It remembers which meshes the view's renderer has,
-/// so each mesh is uploaded once and freed when the world removes it.
+/// One view's extract. It remembers which meshes and textures the view's
+/// renderer has, so each is uploaded once and freed when the world removes
+/// it.
 #[derive(Debug, Default)]
 pub(crate) struct Extract {
     uploaded: HashSet<MeshId>,
+    uploaded_textures: HashSet<(TextureId, ColorSpace)>,
     matrices: WorldMatrices,
 }
 
@@ -45,23 +57,60 @@ pub(crate) fn mesh_key(id: MeshId) -> MeshKey {
     MeshKey(id.raw())
 }
 
+pub(crate) fn texture_key(id: TextureId) -> TextureKey {
+    TextureKey(id.raw())
+}
+
+/// A material's textures as the renderer names them.
+fn texture_keys(m: &Material) -> MaterialTextures {
+    let key = |id: Option<TextureId>| id.map(texture_key);
+    MaterialTextures {
+        base_color: key(m.base_color_texture),
+        normal: key(m.normal_texture),
+        metallic_roughness: key(m.metallic_roughness_texture),
+        occlusion: key(m.occlusion_texture),
+        emissive: key(m.emissive_texture),
+    }
+}
+
 impl Extract {
     /// Fills `scene` from `world` (emptying it first) and adds the mesh
     /// changes since the last run to `ops`. Allocates nothing once `scene`
     /// and `ops` have grown to size and the meshes are unchanged.
-    pub(crate) fn run(&mut self, world: &World, scene: &mut RenderScene, ops: &mut Vec<MeshOp>) {
+    pub(crate) fn run(&mut self, world: &World, scene: &mut RenderScene, ops: &mut Vec<ResourceOp>) {
         scene.clear();
 
         self.uploaded.retain(|&id| {
             let kept = world.mesh(id).is_ok();
             if !kept {
-                ops.push(MeshOp::Remove(mesh_key(id)));
+                ops.push(ResourceOp::RemoveMesh(mesh_key(id)));
             }
             kept
         });
         for (id, mesh) in world.meshes() {
             if self.uploaded.insert(id) {
-                ops.push(MeshOp::Upload(mesh_key(id), Arc::clone(mesh)));
+                ops.push(ResourceOp::UploadMesh(mesh_key(id), Arc::clone(mesh)));
+            }
+        }
+
+        // Removals first, so a key is never freed after its new upload.
+        self.uploaded_textures.retain(|&(id, _)| {
+            let kept = world.texture(id).is_ok();
+            if !kept {
+                ops.push(ResourceOp::RemoveTexture(texture_key(id)));
+            }
+            kept
+        });
+        // Materials are few next to objects, so looking at each one's
+        // slots every frame costs little.
+        for (_, material) in world.materials() {
+            for (key, space) in texture_keys(material).slots() {
+                let Some(key) = key else { continue };
+                let id = TextureId::from_raw(key.0).expect("made from a TextureId");
+                if self.uploaded_textures.insert((id, space)) {
+                    let image = world.texture(id).expect("the world refuses a material with a missing texture");
+                    ops.push(ResourceOp::UploadTexture(key, space, Arc::clone(image)));
+                }
             }
         }
 
@@ -120,6 +169,10 @@ impl Extract {
                     base_color: m.base_color.to_linear(),
                     metallic: m.metallic,
                     roughness: m.roughness,
+                    emissive: (Vec3::from(rgb(m.emissive)) * m.emissive_intensity).into(),
+                    uv_scale: m.uv_scale,
+                    alpha_cutoff: m.alpha_cutoff,
+                    textures: texture_keys(&m),
                 },
             });
         });

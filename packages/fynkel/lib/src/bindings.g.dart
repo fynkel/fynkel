@@ -146,6 +146,36 @@ external int fy_parent_set(ffi.Pointer<FyWorld> world, int child, int parent);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_spawn(ffi.Pointer<FyWorld> world, ffi.Pointer<ffi.Uint64> out);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyTexture>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
+external int fy_texture_add(ffi.Pointer<FyWorld> world, ffi.Pointer<FyTexture> texture, ffi.Pointer<ffi.Uint64> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Pointer<FyTexture>>)>()
+external int fy_texture_decode(ffi.Pointer<ffi.Uint8> bytes, int len, ffi.Pointer<ffi.Pointer<FyTexture>> out);
+
+@ffi.Native<ffi.Void Function(ffi.Pointer<FyTexture>)>(isLeaf: true)
+external void fy_texture_free(ffi.Pointer<FyTexture> texture);
+
+@ffi.Native<
+  ffi.Int32 Function(ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Pointer<FyTexture>>)
+>()
+external int fy_texture_new_rgba(
+  int width,
+  int height,
+  ffi.Pointer<ffi.Uint8> pixels,
+  int len,
+  ffi.Pointer<ffi.Pointer<FyTexture>> out,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
+external int fy_texture_remove(ffi.Pointer<FyWorld> world, int id);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyTexture>, ffi.Pointer<ffi.Uint32>, ffi.Pointer<ffi.Uint32>)>(isLeaf: true)
+external int fy_texture_size(
+  ffi.Pointer<FyTexture> texture,
+  ffi.Pointer<ffi.Uint32> out_width,
+  ffi.Pointer<ffi.Uint32> out_height,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
 external int fy_transform_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> out);
 
@@ -214,7 +244,7 @@ external ffi.Pointer<FyWorld> fy_world_new();
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
 external int fy_world_transform_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> out);
 
-const int FY_ABI_VERSION = 5;
+const int FY_ABI_VERSION = 6;
 
 const int FY_APPLE_MORE = 2;
 
@@ -287,6 +317,32 @@ final class FyMaterial extends ffi.Struct {
 
   @ffi.Float()
   external double roughness;
+
+  external FyColor emissive;
+
+  @ffi.Float()
+  external double emissive_intensity;
+
+  @ffi.Float()
+  external double uv_scale;
+
+  @ffi.Float()
+  external double alpha_cutoff;
+
+  @ffi.Uint64()
+  external int base_color_texture;
+
+  @ffi.Uint64()
+  external int normal_texture;
+
+  @ffi.Uint64()
+  external int metallic_roughness_texture;
+
+  @ffi.Uint64()
+  external int occlusion_texture;
+
+  @ffi.Uint64()
+  external int emissive_texture;
 }
 
 final class FyMesh extends ffi.Opaque {}
@@ -382,7 +438,10 @@ sealed class FyStatus {
   static const FY_STATUS_PANIC = 12;
   static const FY_STATUS_POISONED = 13;
   static const FY_STATUS_UNSUPPORTED = 14;
+  static const FY_STATUS_NO_TEXTURE = 15;
 }
+
+final class FyTexture extends ffi.Opaque {}
 
 final class FyTransform extends ffi.Struct {
   external FyVec3 position;
@@ -434,6 +493,12 @@ final class FyViewStats extends ffi.Struct {
   @ffi.Uint64()
   external int dropped;
 
+  @ffi.Uint64()
+  external int texture_bytes;
+
+  @ffi.Uint64()
+  external int mesh_bytes;
+
   static ffi.Pointer<FyViewStats> $allocate(
     ffi.Allocator $allocator, {
     required int posted,
@@ -442,13 +507,17 @@ final class FyViewStats extends ffi.Struct {
     required int skipped,
     required int presented,
     required int dropped,
+    required int texture_bytes,
+    required int mesh_bytes,
   }) => $allocator<FyViewStats>()
     ..ref.posted = posted
     ..ref.rendered = rendered
     ..ref.coalesced = coalesced
     ..ref.skipped = skipped
     ..ref.presented = presented
-    ..ref.dropped = dropped;
+    ..ref.dropped = dropped
+    ..ref.texture_bytes = texture_bytes
+    ..ref.mesh_bytes = mesh_bytes;
 }
 
 final class FyWorld extends ffi.Opaque {}
