@@ -270,6 +270,16 @@ external int fy_transform_remove(ffi.Pointer<FyWorld> world, int id);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
 external int fy_transform_set(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> value);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<ffi.Uint64>, ffi.Pointer<FyTransform>, ffi.Size)>(
+  isLeaf: true,
+)
+external int fy_transform_set_many(
+  ffi.Pointer<FyWorld> world,
+  ffi.Pointer<ffi.Uint64> ids,
+  ffi.Pointer<FyTransform> values,
+  int count,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_view_frame(ffi.Pointer<FyView> view, ffi.Pointer<ffi.Uint64> out_number);
 
@@ -329,7 +339,7 @@ external ffi.Pointer<FyWorld> fy_world_new();
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
 external int fy_world_transform_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> out);
 
-const int FY_ABI_VERSION = 10;
+const int FY_ABI_VERSION = 11;
 
 const int FY_APPLE_MORE = 2;
 

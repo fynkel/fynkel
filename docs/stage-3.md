@@ -85,7 +85,8 @@ settles.
 ```
 crates/
   fynkel_world/     an active flag: an inactive object and everything below it isn't drawn or hit by rays
-  fynkel_ffi/       fy_active_get / fy_active_set / fy_active_in_hierarchy_get (ABI 9); fy_camera_active (ABI 10)
+  fynkel_ffi/       fy_active_get / fy_active_set / fy_active_in_hierarchy_get (ABI 9); fy_camera_active (ABI 10);
+                    fy_transform_set_many (ABI 11)
 packages/
   fynkel/           GameObject you can extend: onLoad, onStart, onUpdate, onTap, onDestroy; add and destroy;
                     World.update(dt, input); Input and Tap (plain Dart); Assets (by name, shared, released)
@@ -148,6 +149,7 @@ Everyone reads the same input: `input.drag`, `input.scroll`, `input.keys` and so
   - **`onDestroy`** comes children first, while each object is still there to read, and before it's gone from the engine. Adding to a dying object throws.
   - **A tap is taken only by returning true**; an object that destroys itself in `onTap` and returns false passes it on. A tap on nothing, or with no camera, goes nowhere. Its ray starts at the camera's near plane, as `rayThrough` always did.
   - **Taps are cast from the camera the view draws from**, which only the engine knows (the lowest shown id with a camera and a transform): `fy_camera_active`, a small query added to the C interface (ABI 10).
+  - **Transforms are kept in Dart** (step 3b): reading `transform` makes no call; setting it checks the value at once, as the engine would and with its words, and the frame's moves go to the engine in one `fy_transform_set_many` call when something next reads the engine's transforms (a view's frame, a raycast, `worldTransform`, a tap). A transform reads back exactly as it was set; the engine keeps it in 32-bit floats.
   - **`Input` is plain Dart** in package:fynkel: sizes in logical pixels, `drag` and `scroll` as `Vec2`, keys as `Object`s (Flutter's `LogicalKeyboardKey`s when fynkel_flutter fills it). It replaces fynkel_flutter's `FrameInput`, and `FynkelView` now runs `world.update(dt, input)` each frame, after `onFrame`.
 
 ### 3.3 Loading, and when an object appears
@@ -238,6 +240,19 @@ objects each moving itself are not, on any device** (§6): the cost is
 the transform's read and write through the C interface, one call each
 per object, as stage 1 measured.
 
+**Step 3b: transforms kept in Dart.** ✅ Each object's transform is kept
+in Dart, so reading it costs nothing; a set is checked at once and the
+frame's moves go to the engine in one call (`fy_transform_set_many`,
+ABI 11: all checked before any is written, no allocation). *Done when*
+reads make no call, a set throws the engine's own error where it's made,
+the moves reach the engine before a frame, a raycast, a world transform
+or a tap reads it, and the bench is measured again on all three devices.
+Nine tests in `test/transform_test.dart`, one in the C interface's, and
+the zero-allocation frame sends half its cubes this way; 18 mutants, 17
+killed (the one left only frees memory). **Reading is now free everywhere, and moving 10,000 objects
+is in the budget on the Mac and the iPhone; the Note10+ takes 2.8 ms**
+(§6), of which 0.9 ms is the turn's own arithmetic in Dart.
+
 **Step 4: loading and assets.** `onLoad`, inactive until loaded, load
 errors, `Assets` with its source, sharing, ownership and release,
 `preload`, `own`, `loaded`. *Done when* tests show a parent appears only with its
@@ -323,3 +338,31 @@ misses the 1 ms budget everywhere, by six times on the Note10+: each
 (stage 1 measured the same 1.25 ms on the Mac), and the Note10+ is 4 – 5
 times slower per call. The extract and raycast numbers in the same runs
 match stage 2's.
+
+### Step 3b: transforms kept in Dart (`measure bench`, as step 3)
+
+The same 10,000 objects; each time now includes sending the moves to the
+engine, as the next frame would:
+
+| 10,000 objects | Mac (M3 Max) | iPhone 16 Pro Max | Galaxy Note10+ |
+|---|---:|---:|---:|
+| with nothing to do (the loop) | 0.03 (0.42) ms | 0.03 (0.37) ms | 0.07 (1.81) ms |
+| reading their transforms | 0.05 (0.48) ms | 0.05 (0.41) ms | 0.14 (1.68) ms |
+| moving themselves (`rotate`) | 0.80 (1.19) ms | 0.76 (1.04) ms | **2.76** (6.52) ms |
+
+Step 3's 1.47, 1.33 and 6.10 ms for moving, and 0.51, 0.52 and 2.03 ms
+for reading. Where moving's time goes, timed apart in the same runs
+(Mac, iPhone, Note10+):
+
+| per frame, 10,000 objects | Mac | iPhone | Note10+ |
+|---|---:|---:|---:|
+| the turn itself (`Transform.rotated`, plain Dart) | 0.30 ms | 0.27 ms | 0.88 ms |
+| setting it (checked, kept, queued) | 0.20 ms | 0.18 ms | 0.51 ms |
+| the engine's half of the send | 0.15 ms | 0.13 ms | 0.67 ms |
+
+The engine's half was 0.25 ms on the Mac before `insert_all` kept each
+object's entity from its check and wrote through `query_one_mut`. What
+is left on the Note10+ is Dart's arithmetic and the engine's lookups of
+10,000 objects, both slower there per object. (The slowest frames
+include the garbage collector's.)
+

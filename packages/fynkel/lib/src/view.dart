@@ -70,7 +70,8 @@ final class ViewStats {
 /// the pixels back; [AppleView] and [AndroidSurfaceView] draw for Flutter to
 /// show.
 abstract base class WorldView implements Finalizable {
-  WorldView._(this._width, this._height, Pointer<FyView> pointer, {required bool finalize}) : _pointer = pointer {
+  WorldView._(this._world, this._width, this._height, Pointer<FyView> pointer, {required bool finalize})
+    : _pointer = pointer {
     if (finalize) _finalizer.attach(this, pointer.cast(), detach: this);
   }
 
@@ -88,6 +89,7 @@ abstract base class WorldView implements Finalizable {
     }
   }
 
+  final World _world;
   int _width, _height;
   Pointer<FyView> _pointer;
 
@@ -109,7 +111,9 @@ abstract base class WorldView implements Finalizable {
   /// Copies the world and hands it to the render worker, without waiting
   /// for the GPU. Returns the frame's number (1, 2, …).
   int frame() {
-    check(fy_view_frame(_live, scratch.id));
+    final live = _live;
+    _world.sendTransforms();
+    check(fy_view_frame(live, scratch.id));
     return scratch.id.value;
   }
 
@@ -155,6 +159,7 @@ abstract base class WorldView implements Finalizable {
 final class HeadlessView extends WorldView {
   HeadlessView(World world, {required int width, required int height})
     : super._(
+        world,
         width,
         height,
         WorldView._create((out) => fy_view_new_headless(world.pointer, width, height, out)),
@@ -213,6 +218,7 @@ final class AppleView extends WorldView {
   /// Throws a [FynkelException] with [FynkelStatus.unsupported] off Apple.
   AppleView(World world, {required int width, required int height})
     : super._(
+        world,
         width,
         height,
         WorldView._create((out) => fy_view_new_apple(world.pointer, width, height, out)),
@@ -251,6 +257,7 @@ final class AndroidSurfaceView extends WorldView {
   /// Android.
   AndroidSurfaceView(World world, {required int width, required int height})
     : super._(
+        world,
         width,
         height,
         WorldView._create((out) => fy_view_new_android(world.pointer, width, height, out)),

@@ -70,6 +70,7 @@ final class World implements Finalizable {
     _moved.clear();
     _off.clear();
     _hidden.clear();
+    _unsent.clear();
   }
 
   // --- The loop ---
@@ -94,6 +95,44 @@ final class World implements Finalizable {
   var _hiddenAt = -1;
 
   Input _input = Input.none;
+
+  // Objects whose transform the game set since it was last sent, in the
+  // order they were first set. [_sendTransforms] sends them all in one
+  // call before anything reads the engine's transforms: a view's frame, a
+  // raycast, a world transform, a tap.
+  final _unsent = <GameObject>[];
+
+  void _sendTransforms() {
+    if (_unsent.isEmpty) return;
+    final w = pointer;
+    final n = _unsent.length;
+    final ids = scratch.ids(n);
+    final values = scratch.transforms(n);
+    // An FyTransform is ten floats: position, rotation, scale.
+    final idList = ids.asTypedList(n);
+    final floats = values.cast<Float>().asTypedList(n * 10);
+    var count = 0;
+    for (final object in _unsent) {
+      if (!object._unsent) continue;
+      object._unsent = false;
+      final Transform(:position, :rotation, :scale) = object._transform!;
+      idList[count] = object._id;
+      floats
+        ..[count * 10] = position.x
+        ..[count * 10 + 1] = position.y
+        ..[count * 10 + 2] = position.z
+        ..[count * 10 + 3] = rotation.x
+        ..[count * 10 + 4] = rotation.y
+        ..[count * 10 + 5] = rotation.z
+        ..[count * 10 + 6] = rotation.w
+        ..[count * 10 + 7] = scale.x
+        ..[count * 10 + 8] = scale.y
+        ..[count * 10 + 9] = scale.z;
+      count++;
+    }
+    _unsent.clear();
+    check(fy_transform_set_many(w, ids, values, count));
+  }
 
   /// What the player did since the last frame, as the last [update] got
   /// it. Objects read it as [GameObject.input].
@@ -172,6 +211,7 @@ final class World implements Finalizable {
   }
 
   void _tap(Pointer<FyWorld> w, ViewPoint at) {
+    _sendTransforms();
     check(fy_camera_active(w, scratch.id));
     final camera = scratch.id.value;
     if (camera == 0) return;
@@ -256,13 +296,14 @@ final class World implements Finalizable {
   /// it before it was live.
   void _attach(GameObject object, GameObject? parent) {
     final described = object._described!;
+    final transform = described.transform;
+    GameObject._check(transform);
     final id = described.model == null ? _spawn() : _spawnModel(described.model!, described.transform);
     object
       .._world = this
       .._id = id;
     try {
       if (parent != null) check(fy_parent_set(pointer, id, parent.id));
-      if (described.model == null) object._writeTransform(described.transform);
       if (described.name != null) object._writeName(described.name!);
       if (!described.active) check(fy_active_set(pointer, id, false));
       for (final component in described.components) {
@@ -276,6 +317,7 @@ final class World implements Finalizable {
       rethrow;
     }
     object._described = null;
+    if (described.model == null) object._setTransform(transform);
     _objects[id] = object;
     (_byClass[object.runtimeType] ??= {}).add(object);
     _live.add(object);
@@ -342,6 +384,9 @@ final class World implements Finalizable {
     } finally {
       check(fy_despawn(pointer, id));
       for (final object in objects) {
+        object
+          .._transform = null
+          .._unsent = false;
         _objects.remove(object._id);
         _off.remove(object);
         final same = _byClass[object.runtimeType];
@@ -373,6 +418,7 @@ final class World implements Finalizable {
   /// each object's box is tested, then the triangles of those the ray may
   /// hit.
   RayHit? raycast(Ray ray, {double maxDistance = double.infinity}) {
+    _sendTransforms();
     final r = scratch.ray.ref;
     r.origin.write(ray.origin);
     r.direction.write(ray.direction);
@@ -541,6 +587,12 @@ class GameObject {
 
   bool _destroyed = false;
   bool _started = false;
+
+  // The transform as the game last set or read it, so reading it makes no
+  // call, and whether it waits in [World._unsent]. Null until first read
+  // or set, and once the object is gone.
+  Transform? _transform;
+  bool _unsent = false;
 
   /// The world the object was added to. Throws a [StateError] before it's
   /// added.
@@ -765,6 +817,7 @@ class GameObject {
   /// skewed, which no position, rotation and scale can describe (Unity
   /// calls this the "lossy" scale).
   Transform get worldTransform {
+    world._sendTransforms();
     check(fy_world_transform_get(world.pointer, id, scratch.transform));
     final t = scratch.transform.ref;
     return Transform._(t.position.read(), t.rotation.read(), t.scale.read());
@@ -801,6 +854,10 @@ class GameObject {
       return;
     }
     final w = world.pointer;
+    if (T == Transform) {
+      world._sendTransforms();
+      _transform = null;
+    }
     check(switch (T) {
       const (Transform) => fy_transform_remove(w, id),
       const (Camera) => fy_camera_remove(w, id),
@@ -816,17 +873,27 @@ class GameObject {
       d.get<T>() ?? (throw FynkelException(FynkelStatus.noComponent, '$this has no $T'));
 
   void _write(Component component) => switch (component) {
-    Transform c => _writeTransform(c),
+    Transform c => transform = c,
     Camera c => _writeCamera(c),
     Light c => _writeLight(c),
     MeshRenderer c => _writeMeshRenderer(c),
   };
 
+  /// Where the object is, how it's turned and how big it is, relative to
+  /// its [parent]. Reading it makes no call into the engine. Setting it
+  /// checks the value at once, as the engine would, and sends it with the
+  /// frame's other moves in one call when something next reads the
+  /// engine's transforms (a view's frame, [World.raycast],
+  /// [worldTransform]). It reads back exactly as it was set; the engine
+  /// keeps it in 32-bit floats, so what it draws may differ in the last
+  /// digits.
   Transform get transform {
     if (_described case final d?) return d.transform;
-    check(fy_transform_get(world.pointer, id, scratch.transform));
+    final w = world.pointer;
+    if (_transform case final t?) return t;
+    check(fy_transform_get(w, id, scratch.transform));
     final t = scratch.transform.ref;
-    return Transform._(t.position.read(), t.rotation.read(), t.scale.read());
+    return _transform = Transform._(t.position.read(), t.rotation.read(), t.scale.read());
   }
 
   set transform(Transform value) {
@@ -834,16 +901,42 @@ class GameObject {
       d.transform = value;
       return;
     }
-    _writeTransform(value);
+    final w = world.pointer;
+    if (_transform == null && !fy_exists(w, _id)) {
+      throw FynkelException(FynkelStatus.noObject, 'object#$_id does not exist (despawned, or never spawned)');
+    }
+    _check(value);
+    _setTransform(value);
   }
 
-  void _writeTransform(Transform value) {
-    final t = scratch.transform.ref;
-    t.position.write(value.position);
-    t.rotation.write(value.rotation);
-    t.scale.write(value.scale);
-    check(fy_transform_set(world.pointer, id, scratch.transform));
+  void _setTransform(Transform value) {
+    _transform = value;
+    if (_unsent) return;
+    _unsent = true;
+    world._unsent.add(this);
   }
+
+  /// Throws a [FynkelException] with the engine's message when the engine
+  /// would refuse [value]: checked here, so the error comes from the line
+  /// that set it, not from the frame that sends it.
+  static void _check(Transform value) {
+    // In the engine's order: each field's finiteness as 32-bit floats,
+    // and the rotation's length after its finiteness.
+    final Transform(position: p, rotation: r, scale: s) = value;
+    if (!(_fits(p.x) && _fits(p.y) && _fits(p.z))) _refuse('position: NaN or infinity');
+    if (!(_fits(r.x) && _fits(r.y) && _fits(r.z) && _fits(r.w))) _refuse('rotation: NaN or infinity');
+    if ((math.sqrt(r.x * r.x + r.y * r.y + r.z * r.z + r.w * r.w) - 1).abs() > 1e-3) {
+      _refuse('rotation: rotation is not a unit quaternion');
+    }
+    if (!(_fits(s.x) && _fits(s.y) && _fits(s.z))) _refuse('scale: NaN or infinity');
+  }
+
+  static final _f32 = Float32List(1);
+
+  /// Whether [x] is finite as a 32-bit float: the fast test first.
+  static bool _fits(double x) => x.abs() < 3.4e38 || (_f32..[0] = x)[0].isFinite;
+
+  static Never _refuse(String what) => throw FynkelException(FynkelStatus.invalidValue, 'Transform.$what');
 
   /// Turns the object [angle] radians around [axis], in its own frame.
   void rotate(Vec3 axis, double angle) => transform = transform.rotated(axis, angle);
@@ -957,4 +1050,12 @@ final class RayHit {
 
   @override
   String toString() => 'RayHit($object at $point, normal $normal, distance $distance)';
+}
+
+/// For package:fynkel's views: sends the transforms the game set since the
+/// last send, before a frame copies the world. Not exported.
+extension SendTransforms on World {
+  void sendTransforms() {
+    if (!isDisposed) _sendTransforms();
+  }
 }

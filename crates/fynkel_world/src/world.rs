@@ -102,6 +102,9 @@ pub struct World {
     material_ids: IdCounter,
     textures: IdMap<TextureId, Arc<ImageData>>,
     texture_ids: IdCounter,
+    /// [`World::insert_all`]'s entities, kept between calls so a frame's
+    /// batch allocates nothing.
+    batch: Vec<hecs::Entity>,
 }
 
 impl std::fmt::Debug for World {
@@ -134,6 +137,7 @@ impl World {
             material_ids: IdCounter::new(),
             textures: IdMap::default(),
             texture_ids: IdCounter::new(),
+            batch: Vec::new(),
         }
     }
 
@@ -185,17 +189,50 @@ impl World {
     /// struct's public fields are checked too. Mesh and material ids must
     /// exist.
     pub fn insert<C: Component>(&mut self, id: ObjectId, component: C) -> Result<()> {
-        let entity = self.entity(id)?;
-        validate_all(&component)?;
-        self.check_references(&component)?;
+        let entity = self.check(id, &component)?;
+        self.write(entity, component);
+        Ok(())
+    }
+
+    /// [`insert`](Self::insert) for many objects at once: all are checked
+    /// first, so if one is refused none is written. `items` is gone through
+    /// twice, so it's cloned once.
+    pub fn insert_all<C: Component>(&mut self, items: impl Iterator<Item = (ObjectId, C)> + Clone) -> Result<()> {
+        let mut entities = std::mem::take(&mut self.batch);
+        entities.clear();
+        let checked = items.clone().try_for_each(|(id, component)| {
+            entities.push(self.check(id, &component)?);
+            Ok(())
+        });
+        if checked.is_ok() {
+            for ((_, component), &entity) in items.zip(&entities) {
+                self.write(entity, component);
+            }
+        }
+        self.batch = entities;
+        checked
+    }
+
+    /// Writes a checked component.
+    fn write<C: Component>(&mut self, entity: hecs::Entity, component: C) {
         // Replacing is the common case (a transform set every frame), and
-        // writing in place skips hecs's archetype lookup.
-        if let Ok(mut slot) = self.ecs.get::<&mut C>(entity) {
+        // writing in place skips hecs's archetype lookup; `query_one_mut`
+        // also skips its run-time borrow.
+        if let Ok(slot) = self.ecs.query_one_mut::<&mut C>(entity) {
             *slot = component;
         } else {
             self.ecs.insert_one(entity, component).expect("the id map only holds live entities");
         }
-        Ok(())
+    }
+
+    /// Whether [`insert`](Self::insert) would take `component` for the
+    /// object, without changing anything (so many can be checked before
+    /// any is written), and the object's entity if so.
+    fn check<C: Component>(&self, id: ObjectId, component: &C) -> Result<hecs::Entity> {
+        let entity = self.entity(id)?;
+        validate_all(component)?;
+        self.check_references(component)?;
+        Ok(entity)
     }
 
     /// Removes the object's `C` and returns it.

@@ -26,7 +26,7 @@ use crate::extract::{Extract, ResourceOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 10;
+pub const FY_ABI_VERSION: u32 = 11;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -923,6 +923,49 @@ unsafe fn remove<C: CComponent>(world: *const FyWorld, id: u64) -> FyStatus {
 pub unsafe extern "C" fn fy_transform_set(world: *const FyWorld, id: u64, value: *const FyTransform) -> FyStatus {
     // SAFETY: the same contract.
     unsafe { set(world, id, value) }
+}
+
+/// Sets the transforms of `count` objects at once: `ids[i]` gets
+/// `values[i]`. All are checked first, so if one is refused (an object
+/// that doesn't exist, a value that isn't finite, a rotation that isn't a
+/// unit) none is written. One call for a frame's moves instead of one each.
+///
+/// # Safety
+///
+/// `world` is null or live; `ids` and `values` are null or valid for
+/// `count` reads (they may be null when `count` is 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_transform_set_many(
+    world: *const FyWorld,
+    ids: *const u64,
+    values: *const FyTransform,
+    count: usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        if count == 0 {
+            return Ok(());
+        }
+        if ids.is_null() {
+            return Err(Error::null("ids"));
+        }
+        if values.is_null() {
+            return Err(Error::null("values"));
+        }
+        // SAFETY: not null, and valid for count reads per the contract.
+        let (ids, values) =
+            unsafe { (std::slice::from_raw_parts(ids, count), std::slice::from_raw_parts(values, count)) };
+        // 0 isn't an id: refused up front, so the pairs below can't fail.
+        if ids.contains(&0) {
+            return Err(object(0).unwrap_err());
+        }
+        let pairs = ids.iter().zip(values).map(|(&id, value)| {
+            let transform = value.to_component().expect("any FyTransform converts; the world checks the values");
+            (ObjectId::from_raw(id).expect("not 0"), transform)
+        });
+        Ok(world.lock()?.insert_all(pairs)?)
+    })
 }
 
 /// # Safety

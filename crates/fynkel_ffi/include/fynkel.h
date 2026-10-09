@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 10
+#define FY_ABI_VERSION 11
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -453,6 +453,20 @@ FyStatus fy_raycast(const struct FyWorld *world,
 FyStatus fy_transform_set(const struct FyWorld *world,
                           uint64_t id,
                           const struct FyTransform *value);
+
+// Sets the transforms of `count` objects at once: `ids[i]` gets
+// `values[i]`. All are checked first, so if one is refused (an object
+// that doesn't exist, a value that isn't finite, a rotation that isn't a
+// unit) none is written. One call for a frame's moves instead of one each.
+//
+// # Safety
+//
+// `world` is null or live; `ids` and `values` are null or valid for
+// `count` reads (they may be null when `count` is 0).
+FyStatus fy_transform_set_many(const struct FyWorld *world,
+                               const uint64_t *ids,
+                               const struct FyTransform *values,
+                               size_t count);
 
 // # Safety
 //
