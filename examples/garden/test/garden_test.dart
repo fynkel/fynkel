@@ -15,37 +15,45 @@ Input tap(double x, double y) => Input(
 );
 
 void main() {
+  late World world;
   late Garden garden;
-  setUp(() => garden = Garden((asset) async => File('assets/$asset').readAsBytesSync()));
-  tearDown(() => garden.world.dispose());
+  setUp(() {
+    world = World(source: (asset) async => File('assets/$asset').readAsBytesSync());
+    garden = world.add(Garden());
+  });
+  tearDown(() => world.dispose());
+
+  /// What the engine holds for drawing: [ViewStats.textureBytes] and
+  /// [ViewStats.meshBytes] after a frame.
+  (int, int) held(HeadlessView view) {
+    view.read(view.frame());
+    return (view.stats.textureBytes, view.stats.meshBytes);
+  }
 
   test('the garden loads, and a tap on the character turns its head; elsewhere it does nothing', () async {
-    final times = await garden.load();
-    expect(times.map((t) => t.asset), contains('character.glb'));
-    expect(times.last.asset, 'character.glb');
-    final head = garden.character!.find('head')!;
+    await garden.loaded;
+    final character = world.first<Character>()!;
+    final head = character.find('head')!;
     final facing = head.transform.rotation;
-
-    // The bench's cast, from the camera to the character's middle, hits it.
-    expect(garden.world.raycast(garden.centreRay)?.object.isPartOf(garden.character!), isTrue);
+    world.update(0);
 
     // The sky, top left: nothing turns.
-    garden.onFrame(1, tap(5, 5));
+    world.update(1, tap(5, 5));
     expect(head.transform.rotation, facing);
 
     // The character stands in the middle of the view.
-    garden.onFrame(0, tap(width / 2, height / 2));
+    world.update(0, tap(width / 2, height / 2));
     for (var i = 0; i < 60; i++) {
-      garden.onFrame(1 / 60, Input(width: width.toDouble(), height: height.toDouble()));
+      world.update(1 / 60);
     }
-    final turned = head.transform.rotation;
     // A quarter turn about its own up: the forward goes from -Z to -X.
     expect(
-      Transform(rotation: turned).forward.closeTo(Transform(rotation: facing).rotated(Vec3.up, 1.5708).forward, 1e-3),
+      Transform(rotation: head.transform.rotation).forward
+          .closeTo(Transform(rotation: facing).rotated(Vec3.up, 1.5708).forward, 1e-3),
       isTrue,
     );
 
-    final view = HeadlessView(garden.world, width: width, height: height);
+    final view = HeadlessView(world, width: width, height: height);
     addTearDown(view.dispose);
     final frame = view.read(view.frame());
     expect(view.stats.textureBytes, greaterThan(1 << 20), reason: 'the grass and the character texture');
@@ -53,44 +61,41 @@ void main() {
     if (shot != null) File(shot).writeAsBytesSync(_png(frame.rgba, width, height));
   });
 
-  test('unloading the character frees everything it brought, and it loads again', () async {
-    await garden.load();
-    final view = HeadlessView(garden.world, width: width, height: height);
+  test('destroying the garden frees everything it loaded, and a new one loads the same', () async {
+    final view = HeadlessView(world, width: width, height: height);
     addTearDown(view.dispose);
-    view.read(view.frame());
-    final loaded = view.stats;
+    garden.destroy();
+    // The plane and the cube stay: the engine's own meshes.
+    world.add(GameObject(components: [MeshRenderer(Mesh.plane(), Material())]));
+    final empty = held(view);
 
-    garden.unloadCharacter();
-    expect(garden.character, isNull);
-    view.read(view.frame());
-    final unloaded = view.stats;
-    // The 1024² texture with its mipmaps, about 5.3 MB, and the meshes.
-    var texture = 0;
-    for (var side = 1024; side >= 1; side ~/= 2) {
-      texture += side * side * 4;
+    final first = world.add(Garden());
+    await first.loaded;
+    final loaded = held(view);
+    expect(loaded.$1, greaterThan(empty.$1 + (1 << 20)));
+
+    for (var i = 0; i < 3; i++) {
+      world.first<Garden>()!.destroy();
+      expect(world.all<Props>(), isEmpty);
+      expect(held(view), empty, reason: 'every texture and mesh freed');
+      await world.add(Garden()).loaded;
+      expect(held(view), loaded);
     }
-    expect(loaded.textureBytes - unloaded.textureBytes, texture);
-    expect(unloaded.meshBytes, lessThan(loaded.meshBytes));
-
-    // Tapping where it was does nothing now.
-    garden.onFrame(0, tap(width / 2, height / 2));
-
-    await garden.loadCharacter();
-    view.read(view.frame());
-    expect(view.stats.textureBytes, loaded.textureBytes);
-    expect(view.stats.meshBytes, loaded.meshBytes);
   });
 
   test('a drag goes around the character, and scrolling zooms', () async {
-    final start = garden.camera.transform.position;
-    garden.onFrame(0, Input(width: 320, height: 200, drag: Vec2(100, 0)));
-    final around = garden.camera.transform.position;
+    await garden.loaded;
+    final camera = world.first<OrbitCamera>()!;
+    world.update(0);
+    final start = camera.transform.position;
+    world.update(0, Input(width: 320, height: 200, drag: Vec2(100, 0)));
+    final around = camera.transform.position;
     expect((around - start).length, greaterThan(1));
     expect(around.y, closeTo(start.y, 1e-9), reason: 'sideways, at the same height');
 
-    garden.onFrame(0, Input(width: 320, height: 200, scroll: Vec2(0, -200)));
-    final target = Vec3(0, 1.3, 0);
-    expect((garden.camera.transform.position - target).length, lessThan((around - target).length));
+    world.update(0, Input(width: 320, height: 200, scroll: Vec2(0, -200)));
+    const target = OrbitCamera.target;
+    expect((camera.transform.position - target).length, lessThan((around - target).length));
   });
 }
 
