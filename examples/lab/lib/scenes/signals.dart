@@ -169,7 +169,7 @@ class Enemy extends GameObject {
   }
 
   @override
-  bool onTap(Tap tap) {
+  bool onClick(Finger finger) {
     get<Health>()!.hurt(1);
     return true;
   }
@@ -268,7 +268,7 @@ class Plate extends GameObject {
   void press() => pressed.emit(++_presses);
 
   @override
-  bool onTap(Tap tap) {
+  bool onClick(Finger finger) {
     press();
     return true;
   }

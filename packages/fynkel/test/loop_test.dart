@@ -3,6 +3,8 @@
 import 'package:fynkel/fynkel.dart';
 import 'package:test/test.dart';
 
+import 'tapping.dart';
+
 /// Every call any object gets, in order.
 final log = <String>[];
 
@@ -60,11 +62,11 @@ class Tappable extends GameObject {
   Tappable(String name, {this.takes = false, super.transform, super.components}) : super(name: name);
 
   final bool takes;
-  final taps = <Tap>[];
+  final taps = <Finger>[];
 
   @override
-  bool onTap(Tap tap) {
-    taps.add(tap);
+  bool onClick(Finger finger) {
+    taps.add(finger);
     log.add('tap $name');
     return takes;
   }
@@ -75,7 +77,6 @@ MeshRenderer cube() => MeshRenderer(Mesh.cube(), Material());
 /// A camera at the origin looking down -Z, in a 100 × 100 view.
 GameObject camera() => GameObject(components: [Camera()]);
 const centre = ViewPoint(50, 50, width: 100, height: 100);
-Input tapAt(ViewPoint at) => Input(width: 100, height: 100, taps: [at]);
 
 void main() {
   late World world;
@@ -188,17 +189,21 @@ void main() {
     final level = world.add(Tappable('level', takes: true));
     final robot = level.add(Tappable('robot', transform: Transform(position: Vec3(0, 0, -5))));
     final arm = robot.add(Tappable('arm', components: [cube()]));
-    world.update(0.1, tapAt(centre));
+    tap(world, centre);
+    world.update(0.1);
     expect(log, ['tap arm', 'tap robot', 'tap level']);
-    expect(robot.taps.single.object, same(arm), reason: 'it learns which part was hit');
-    expect(robot.taps.single.at, centre);
-    expect(robot.taps.single.point.z, closeTo(-4.5, 1e-5));
-    expect(robot.taps.single.hit.distance, closeTo(4.4, 1e-5), reason: 'from the near plane, 0.1 ahead');
+    expect(robot.taps.single.over!.object, same(arm), reason: 'it learns which part was hit');
+    expect(robot.taps.single.position, centre);
+    expect(robot.taps.single.over!.point.z, closeTo(-4.5, 1e-5));
+    expect(robot.taps.single.over!.distance, closeTo(4.4, 1e-5), reason: 'from the near plane, 0.1 ahead');
 
     log.clear();
-    world.update(0.1, tapAt(const ViewPoint(0, 0, width: 100, height: 100)));
+    tap(world, const ViewPoint(0, 0, width: 100, height: 100));
+    world.update(0.1);
     expect(log, isEmpty, reason: 'a tap on nothing goes nowhere');
-    world.update(0.1, Input(width: 100, height: 100, taps: [centre, centre]));
+    tap(world, centre);
+    tap(world, centre);
+    world.update(0.1);
     expect(log, hasLength(6), reason: 'every tap of the frame');
   });
 
@@ -207,7 +212,8 @@ void main() {
     final level = world.add(Tappable('level'));
     final taker = level.add(Tappable('taker', takes: true, transform: Transform(position: Vec3(0, 0, -5))));
     taker.add(Tappable('arm', components: [cube()]));
-    world.update(0.1, tapAt(centre));
+    tap(world, centre);
+    world.update(0.1);
     expect(log, ['tap arm', 'tap taker']);
 
     log.clear();
@@ -218,7 +224,8 @@ void main() {
         components: [cube()],
       ),
     );
-    world.update(0.1, tapAt(centre));
+    tap(world, centre);
+    world.update(0.1);
     expect(log, ['tap quitter', 'tap level'], reason: 'only taking it stops it');
     expect(quitter.isAlive, isFalse);
   });
@@ -231,7 +238,8 @@ void main() {
         transform: Transform(position: Vec3(0, 0, -5)),
       ),
     );
-    world.update(0.1, tapAt(centre));
+    tap(world, centre);
+    world.update(0.1);
     expect(log, isEmpty, reason: 'no camera, no tap');
     // A hidden camera first, looking away; the one drawn from looks at the box.
     world.add(
@@ -241,7 +249,8 @@ void main() {
       )..active = false,
     );
     world.add(camera());
-    world.update(0.1, tapAt(centre));
+    tap(world, centre);
+    world.update(0.1);
     expect(log, ['tap box']);
   });
 
@@ -256,7 +265,8 @@ void main() {
       ),
     );
     final on = world.add(Logged('on'));
-    world.update(0.1, tapAt(centre));
+    tap(world, centre);
+    world.update(0.1);
     expect(log, ['start on', 'update on']);
 
     log.clear();
@@ -311,12 +321,10 @@ void main() {
 
   test('every object reads the same input', () {
     final reader = world.add(_ReadsInput());
-    final input = Input(width: 10, height: 20, drag: Vec2(3, 4), keys: {'w'});
-    world.update(0.1, input);
-    expect(reader.seen, same(input));
-    expect(reader.input.isDown('w'), isTrue);
+    world.input.keyDown(KeyCode.w);
     world.update(0.1);
-    expect(reader.input, same(Input.none), reason: 'none given, none read');
+    expect(reader.seen, same(world.input));
+    expect(reader.wasDown, isTrue, reason: 'the key went down in the input step, before the updates');
   });
 }
 
@@ -356,8 +364,8 @@ class _DestroysOnTap extends Tappable {
   _DestroysOnTap({super.transform, super.components}) : super('quitter');
 
   @override
-  bool onTap(Tap tap) {
-    super.onTap(tap);
+  bool onClick(Finger finger) {
+    super.onClick(finger);
     destroy();
     return false;
   }
@@ -365,10 +373,12 @@ class _DestroysOnTap extends Tappable {
 
 class _ReadsInput extends GameObject {
   Input? seen;
+  bool? wasDown;
 
   @override
   void onUpdate() {
     super.onUpdate();
     seen = input;
+    wasDown = input.isDown(KeyCode.w);
   }
 }

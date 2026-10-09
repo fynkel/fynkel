@@ -104,7 +104,11 @@ void main() {
     world.update(0);
     // Below the middle of the view: the ground in front of the player.
     final at = ViewPoint(width / 2, height * 0.8, width: width.toDouble(), height: height.toDouble());
-    world.update(0, Input(width: width.toDouble(), height: height.toDouble(), taps: [at]));
+    world.input
+      ..resize(width.toDouble(), height.toDouble())
+      ..fingerDown(1, at.x, at.y)
+      ..fingerUp(1, at.x, at.y);
+    world.update(0);
     for (var i = 0; i < 120; i++) {
       world.update(1 / 60);
     }

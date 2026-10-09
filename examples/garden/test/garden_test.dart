@@ -7,12 +7,17 @@ import 'package:garden/garden.dart';
 
 const width = 320, height = 200;
 
-/// A frame's input with one tap at ([x], [y]), in view pixels.
-Input tap(double x, double y) => Input(
-  width: width.toDouble(),
-  height: height.toDouble(),
-  taps: [ViewPoint(x, y, width: width.toDouble(), height: height.toDouble())],
-);
+var _finger = 0;
+
+/// Gives [world]'s input a tap at ([x], [y]), in view pixels, for its next
+/// frame.
+void tap(World world, double x, double y) {
+  final id = ++_finger;
+  world.input
+    ..resize(width.toDouble(), height.toDouble())
+    ..fingerDown(id, x, y)
+    ..fingerUp(id, x, y);
+}
 
 void main() {
   late World world;
@@ -38,11 +43,13 @@ void main() {
     world.update(0);
 
     // The sky, top left: nothing turns.
-    world.update(1, tap(5, 5));
+    tap(world, 5, 5);
+    world.update(1);
     expect(head.transform.rotation, facing);
 
     // The character stands in the middle of the view.
-    world.update(0, tap(width / 2, height / 2));
+    tap(world, width / 2, height / 2);
+    world.update(0);
     for (var i = 0; i < 60; i++) {
       world.update(1 / 60);
     }
@@ -88,12 +95,19 @@ void main() {
     final camera = world.first<OrbitCamera>()!;
     world.update(0);
     final start = camera.transform.position;
-    world.update(0, Input(width: 320, height: 200, drag: Vec2(100, 0)));
+    world.input
+      ..resize(320, 200)
+      ..fingerDown(99, 100, 100);
+    world.update(0);
+    world.input.fingerMove(99, 200, 100);
+    world.update(0);
+    world.input.fingerUp(99, 200, 100);
     final around = camera.transform.position;
     expect((around - start).length, greaterThan(1));
     expect(around.y, closeTo(start.y, 1e-9), reason: 'sideways, at the same height');
 
-    world.update(0, Input(width: 320, height: 200, scroll: Vec2(0, -200)));
+    world.input.scrollBy(0, -200);
+    world.update(0);
     const target = OrbitCamera.target;
     expect((camera.transform.position - target).length, lessThan((around - target).length));
   });

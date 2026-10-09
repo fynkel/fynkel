@@ -41,8 +41,8 @@ class Garden extends GameObject {
   ];
 }
 
-/// Goes around the character's middle: drag to turn, scroll (or two
-/// fingers on a trackpad) to zoom.
+/// Goes around the character's middle: drag one finger to turn, scroll,
+/// pinch (or two fingers on a trackpad) to zoom.
 class OrbitCamera extends GameObject {
   OrbitCamera()
     : super(
@@ -54,14 +54,26 @@ class OrbitCamera extends GameObject {
   double _yaw = 0.5, _pitch = 0.35, _distance = 9;
 
   @override
-  void onUpdate() {
-    super.onUpdate();
-    if (input.drag.length == 0 && input.scroll.length == 0) return;
-    _yaw -= input.drag.x * 0.008;
-    _pitch = (_pitch + input.drag.y * 0.006).clamp(0.05, 1.3);
-    _distance = (_distance * math.exp(input.scroll.y * 0.002)).clamp(4.0, 12.0);
-    transform = _at(_yaw, _pitch, _distance);
+  void onStart() {
+    super.onStart();
+    on(input.onDrag, (finger) {
+      if (_fingersDown() > 1) return;
+      _yaw -= finger.delta.x * 0.008;
+      _pitch = (_pitch + finger.delta.y * 0.006).clamp(0.05, 1.3);
+      _move();
+    });
+    on(input.onPinch, (pinch) => _zoom(1 / pinch.scale));
+    on(input.onScroll, (scroll) => _zoom(math.exp(scroll.y * 0.002)));
   }
+
+  int _fingersDown() => input.fingers.where((f) => f.isDown).length;
+
+  void _zoom(double by) {
+    _distance = (_distance * by).clamp(4.0, 12.0);
+    _move();
+  }
+
+  void _move() => transform = _at(_yaw, _pitch, _distance);
 
   static Transform _at(double yaw, double pitch, double distance) {
     final flat = math.cos(pitch) * distance;
@@ -122,7 +134,7 @@ class Character extends GameObject {
   }
 
   @override
-  bool onTap(Tap tap) {
+  bool onClick(Finger finger) {
     _target += math.pi / 2;
     return true;
   }

@@ -84,7 +84,7 @@ class Doorbell extends GameObject {
   }
 
   @override
-  bool onTap(Tap tap) {
+  bool onClick(Finger finger) {
     ring();
     return true;
   }

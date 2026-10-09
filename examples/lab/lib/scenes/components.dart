@@ -91,7 +91,7 @@ class ComponentsScene extends LabScene {
 /// Picks its crate when it's tapped.
 class Pick extends Behaviour {
   @override
-  bool onTap(Tap tap) {
+  bool onClick(Finger finger) {
     gameObject.ancestor<ComponentsScene>()?.pick(gameObject);
     return true;
   }
