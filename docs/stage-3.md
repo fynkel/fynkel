@@ -1,6 +1,6 @@
 # Stage 3 plan: how a game is written
 
-Status: accepted 2026-10-09, with the five answers in §5. Scope and
+Status: done 2026-10-09 ([report](stage-3-report.md)); accepted the same day, with the five answers in §5. Scope and
 rules: [ADR-0001](decisions/0001-fynkel-2-code-first.md). Stage 2 is done
 ([report](stage-2-report.md)).
 
@@ -324,9 +324,10 @@ as much (§6, the GPU side's own pools, as in stage 2). Five coins tests,
 the garden's three. Found on the way: each helper isolate leaked its
 scratch, about 1.7 KB of native memory a load (fixed).
 
-**Step 7: the stage 3 check.** A short report, as in stages 1 and 2.
+**Step 7: the stage 3 check.** ✅ A short report, as in stages 1 and 2.
 *Done when* it's committed and you have played the garden and coins on
-each device.
+each device. The [report](stage-3-report.md); played on the Mac, the
+iPhone and the Note10+ on 2026-10-09.
 
 ## 5. Decisions (2026-10-09)
 
