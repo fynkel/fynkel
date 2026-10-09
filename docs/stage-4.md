@@ -193,6 +193,19 @@ A frame, in `world.update`: **input** (events and the object handlers of §3.6) 
   - `time.scale` slows its waits; `unscaled: true` doesn't.
 - **When the code after an `await` runs**: in the frame's routines step (§3.2), in a fixed order, not at some later point of Dart's event loop. Each routine runs in a zone that takes Dart's continuations and runs them at that step. A test fixes that a routine's code never runs after its object is destroyed, even after an outside future it was waiting for completes.
 
+- *Settled in step 3:*
+  - **`start` is on objects and behaviours**, and the `Routine` it returns is itself a future: `final choice = await start(askPlayer);`, `race([wait(3), start(fight)])`. `done` gives the same future; `stop()`, `isRunning` and `isStopped` are on it.
+  - **The waits are top-level functions**, `nextFrame`, `wait`, `until`, `whileTrue`, so a helper function called from a routine can wait too. They throw a `StateError` outside a routine. `race` and `all` work anywhere.
+  - **Every wait ends in a later frame**: one made in frame F (in an update, or in the routines step itself) ends in F + 1 at the earliest, and `wait(s)` counts from there; `wait(0)` is the next frame.
+  - **Code after one of these waits runs in the routines step**, in the order the waits were made, with whatever it schedules (an `await` on a finished future, `await null`) before the next routine goes on. **Code after any other future** (an asset load, a Completer) runs when that future completes, as anywhere in Dart, not deferred to the routines step: a zone can't hold back a continuation without breaking what `.then` returns. Its next wait puts it back in step.
+  - **Nothing of a stopped routine runs again**, even when an outside future it awaited completes later: its zone runs none of its callbacks but those that unwind it. Waiting on one of the world's waits or on another routine, it unwinds through its `finally` blocks at once; waiting on another future, it's dropped without them.
+  - **It stops** when it's stopped, when the routine it was started in is stopped, when its behaviour is removed, or when its object is destroyed (after the object's onDisable, before its onDestroy, so its `finally` can still read it). A routine that ends normally lets those started in it go on, as Unity's do.
+  - **It pauses** while its object is hidden, or its behaviour isn't enabled: its waits don't count down or end, and it goes on where it was. (Unity stops them for good.)
+  - **`RoutineStopped`** is what a stopped routine throws at its wait and fails with when awaited. Catching it doesn't keep the routine going: its next wait throws it at once.
+  - **Errors** a routine doesn't catch go to `world.errors`, unless something awaits it (another routine, `race`, `all`), which gets the error instead.
+  - **`race` stops the losing routines and drops the losing waits** given to it as they are; a derived future such as `wait(3).then(...)` can't be stopped, and just ends into nothing.
+  - **No game-time `x.timeout(seconds)`**: `Future.timeout` is Dart's own, in real time, and a routine is a `Future`. `race([x, wait(seconds)])` does it.
+
 ### 3.5 Signals, references and singletons
 
 - **`Signal<T>`**: `emit(value)`, `listen(handler)` (returns a subscription to cancel), `await signal.next`. Plain Dart, usable anywhere.
@@ -275,7 +288,7 @@ lifecycle as objects, in the order added, `get<T>` finds by subtype,
 `world.all<T>` finds behaviours and forgets destroyed ones, and the step
 3b bench (10,000 objects, now each with one moving behaviour) stays
 within 10 % of stage 3's on all three devices.
-✅ on the Mac and the iPhone; the Note10+ is still to measure. 17 tests in
+✅ on all three devices (the Note10+ measured with step 3, §6). 17 tests in
 `test/component_test.dart`, and every earlier test moved to the new API
 (121 in package:fynkel, 25 in package:fynkel_flutter, the examples' 8);
 17 mutants, all killed. A behaviour moving its object costs what an object
@@ -299,6 +312,10 @@ routines stopping with their object and pausing while it's inactive,
 nested routines, and that no routine code runs after its object is
 destroyed, even when an outside future completes later. 1,000 waiting
 routines cost less than 0.5 ms a frame on the Note10+.
+✅ 21 tests in `test/routine_test.dart` (166 in package:fynkel in all);
+21 mutants, all killed. 1,000 waiting routines cost 0.03 ms a frame on
+the Note10+, and 1,000 going on every frame 0.85 ms (§6). The code after
+an outside future isn't moved into the routines step (§3.4, settled).
 
 **Step 4: signals.** §3.5: `Signal`, `on`, `next`, `world.only`, clear
 errors from destroyed objects. *Done when* a destroyed listener is never
@@ -402,3 +419,36 @@ the frame costs 0.02–0.04 ms per 10,000. At 10,000 objects that's at most
 0.12 ms, under 1 % of a 60 fps frame; a game with hundreds of objects
 won't see it. Kept as it is: skipping objects that don't override
 onLateUpdate would need each class to say so.
+
+On the Note10+ (measured with step 3, which adds nothing to a frame
+without routines; main before step 1 and step 1 measured the same day):
+
+| 10,000 objects, Note10+ | before step 1 | step 1 | steps 2–3 |
+|---|---:|---:|---:|
+| moving themselves | 2.88 ms | 2.92 ms | 2.98 / 3.02 ms |
+| each moved by a behaviour | – | 3.19 ms | 3.75 / 3.50 ms |
+| reading their transforms | 0.18 ms | 0.20 ms | 0.49 / 0.47 ms |
+| with nothing to do | 0.08 ms | 0.09 ms | 0.14 / 0.15 ms |
+
+(Two runs of steps 2–3.) Step 1 holds stage 3's numbers (stage 3 missed
+its 1 ms budget on this phone, at 2.8 ms). Step 2's second walk, for
+onLateUpdate, costs the Note10+ 0.05–0.5 ms per 10,000: more than the
+Mac's and the iPhone's, and more for objects whose update touched
+memory, as its caches are smaller. Without the try/catch the numbers are
+the same (2.98, 3.50, 0.52, 0.14 ms), so it isn't that.
+
+### Step 3: routines (`measure bench`, profile builds, 2026-10-09)
+
+`world.update` with 1,000 routines on one object, median (slowest) of
+300 steady frames:
+
+| 1,000 routines | Mac (M3 Max) | Galaxy Note10+ |
+|---|---:|---:|
+| **waiting** (`await wait(1000)`) | 0.01 (0.01) ms | **0.03** (0.70) ms |
+| each going on every frame (`await nextFrame`) | 0.30 (2.28) ms | 0.85 (9.40) ms |
+| none | 0.00 ms | 0.00 ms |
+
+Waiting is what the plan budgets (0.5 ms on the Note10+): 0.03 ms. A
+routine going on costs about 0.3 µs on the Mac and 0.85 µs on the
+Note10+ each time: a wait made, ended and awaited. The slowest frames
+are the garbage collector's.

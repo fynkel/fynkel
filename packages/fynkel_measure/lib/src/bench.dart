@@ -9,7 +9,7 @@
 import 'package:fynkel/fynkel.dart';
 
 /// Each result as a line, for `Measurement.report`.
-List<String> bench() => [..._updates(), ..._extract(), ..._raycasts()];
+List<String> bench() => [..._updates(), ..._routines(), ..._extract(), ..._raycasts()];
 
 /// Turns itself a little every frame: a transform read and written.
 class _Spinner extends GameObject {
@@ -94,6 +94,56 @@ List<String> _updates() {
     world.dispose();
     times.sort();
     lines.add('update, 10,000 objects $name: median ${_ms(times[times.length ~/ 2])}, slowest ${_ms(times.last)}');
+  }
+  return lines;
+}
+
+/// `world.update` with 1,000 routines on one object (docs/stage-4.md,
+/// step 3: under 0.5 ms on the Note10+), each waiting on a long `wait`
+/// (counted down each frame), each going on every frame (`nextFrame`: a
+/// wait made, ended and awaited per routine per frame), and with none.
+/// Median and slowest of 300 steady frames.
+List<String> _routines() {
+  final lines = <String>[];
+  for (final (name, body) in <(String, Future<void> Function())>[
+    (
+      'waiting',
+      () async {
+        while (true) {
+          await wait(1000);
+        }
+      },
+    ),
+    (
+      'each going on every frame',
+      () async {
+        while (true) {
+          await nextFrame;
+        }
+      },
+    ),
+    ('none', () async {}),
+  ]) {
+    final world = World();
+    final object = world.add(GameObject());
+    for (var i = 0; i < 1000; i++) {
+      object.start(body);
+    }
+    for (var i = 0; i < 20; i++) {
+      world.update(1 / 120);
+    }
+    final times = <int>[];
+    final clock = Stopwatch();
+    for (var i = 0; i < 300; i++) {
+      clock
+        ..reset()
+        ..start();
+      world.update(1 / 120);
+      times.add(clock.elapsedMicroseconds);
+    }
+    world.dispose();
+    times.sort();
+    lines.add('update, 1,000 routines $name: median ${_ms(times[times.length ~/ 2])}, slowest ${_ms(times.last)}');
   }
   return lines;
 }

@@ -254,6 +254,9 @@ abstract class Behaviour extends Component {
   bool _started = false;
   bool _enabledNow = false;
 
+  // The routines it started that are still running.
+  List<Routine<Object?>>? _routines;
+
   /// The world its object is in. Throws a [StateError] before the object
   /// is added.
   World get world => gameObject.world;
@@ -268,6 +271,11 @@ abstract class Behaviour extends Component {
   /// Its object's assets: what it loads is held until the object is
   /// destroyed. See [GameObject.assets].
   Assets get assets => gameObject.assets;
+
+  /// Starts a routine, as [GameObject.start] does; it stops when this
+  /// behaviour is removed or its object destroyed, and is paused while
+  /// the behaviour isn't enabled.
+  Routine<T> start<T>(Future<T> Function() body) => gameObject.world._start(this, gameObject, body);
 
   /// Gives [resource] to its object, to be disposed when the object is
   /// destroyed: see [GameObject.own].

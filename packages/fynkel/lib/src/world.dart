@@ -18,6 +18,7 @@ part 'components.dart';
 part 'input.dart';
 part 'model.dart';
 part 'resources.dart';
+part 'routines.dart';
 part 'time.dart';
 
 /// Everything in a scene: objects, their components, and the meshes and
@@ -78,6 +79,8 @@ final class World implements Finalizable {
     _live.clear();
     _starting.clear();
     _compact.clear();
+    _waits.clear();
+    _microtasks.clear();
     _moved.clear();
     _off.clear();
     _hidden.clear();
@@ -321,6 +324,8 @@ final class World implements Finalizable {
       }
     }
 
+    _runRoutines();
+
     for (var i = 0; i < updated && i < _live.length; i++) {
       final object = _live[i];
       if (!object._started || object._destroyed || _isHidden(object)) continue;
@@ -340,6 +345,96 @@ final class World implements Finalizable {
           }
         }
       }
+    }
+  }
+
+  // --- Routines ---
+
+  // What routines wait for, in the order they were made, and the
+  // microtasks routines scheduled during [_runRoutines].
+  final _waits = <_Wait>[];
+  final _microtasks = <void Function()>[];
+  var _inRoutineStep = false;
+
+  Routine<T> _start<T>(Object owner, GameObject object, Future<T> Function() body) {
+    if (isDisposed || object._destroyed) throw StateError('$owner was destroyed, so it can\'t start a routine');
+    final parent = _currentRoutine;
+    final base = _baseZone;
+    final routine = Routine<T>._(this, owner, object, parent?._running == true ? parent : null);
+    if (routine._parent case final p?) (p._children ??= []).add(routine);
+    switch (owner) {
+      case final GameObject o:
+        (o._routines ??= []).add(routine);
+      case final Behaviour b:
+        (b._routines ??= []).add(routine);
+    }
+    final zone = base.fork(specification: _routineZone, zoneValues: {_routineKey: routine, _baseKey: base});
+    final Future<T> future;
+    try {
+      future = zone.run(body);
+    } catch (error, stack) {
+      routine._fail(error, stack);
+      return routine;
+    }
+    base.run(() => future.then(routine._finish, onError: routine._fail));
+    return routine;
+  }
+
+  /// Ends what routines wait for, in the order the waits were made, each
+  /// running its routine on to its next wait; then what those runs
+  /// scheduled. Waits made during it end in a later frame.
+  void _runRoutines() {
+    if (_waits.isEmpty) return;
+    _inRoutineStep = true;
+    try {
+      final n = _waits.length;
+      final frame = time._frame;
+      for (var i = 0; i < n; i++) {
+        final wait = _waits[i];
+        if (wait.over || wait.made >= frame || wait.routine._paused) continue;
+        final bool ends;
+        try {
+          ends = wait.ends(time);
+        } catch (error, stack) {
+          wait.over = true;
+          wait.completer.completeError(error, stack);
+          _runMicrotasks();
+          continue;
+        }
+        if (!ends) continue;
+        wait.over = true;
+        wait.completer.complete();
+        _runMicrotasks();
+      }
+      _runMicrotasks();
+    } finally {
+      _inRoutineStep = false;
+      _waits.removeWhere((w) => w.over);
+    }
+  }
+
+  void _runMicrotasks() {
+    for (var i = 0; i < _microtasks.length; i++) {
+      _microtasks[i]();
+    }
+    _microtasks.clear();
+  }
+
+  /// Unwinds [routine] from what it waits for.
+  void _failWaits(Routine<Object?> routine) {
+    for (var i = 0; i < _waits.length; i++) {
+      final wait = _waits[i];
+      if (wait.over || !identical(wait.routine, routine)) continue;
+      wait.over = true;
+      wait.completer.completeError(RoutineStopped._(), StackTrace.current);
+    }
+  }
+
+  /// Stops the routines [owner] started, the last started first.
+  void _stopRoutines(List<Routine<Object?>>? routines) {
+    if (routines == null) return;
+    for (final routine in [...routines].reversed) {
+      routine.stop();
     }
   }
 
@@ -769,6 +864,10 @@ final class World implements Finalizable {
             _safely(object, b.onDisable);
           }
         }
+        for (final c in components.reversed) {
+          if (c case final Behaviour b when !b._removed) _stopRoutines(b._routines);
+        }
+        _stopRoutines(object._routines);
         _safely(object, object.onDestroy);
         for (final c in components) {
           if (c case final Behaviour b when !b._removed) _safely(object, b.onDestroy);
@@ -1014,6 +1113,9 @@ class GameObject {
   // Whether it had onEnable and not onDisable since: it's shown.
   bool _enabled = false;
 
+  // The routines it started that are still running.
+  List<Routine<Object?>>? _routines;
+
   // Its components, in the order they were put on; removed ones stay until
   // the world's next update takes them out. For an object the engine made
   // (a model's part), its engine components are read the first time
@@ -1132,6 +1234,25 @@ class GameObject {
   /// The world's clock: `time.delta` is the seconds this frame counts for.
   /// See [Time].
   Time get time => world.time;
+
+  /// Starts a routine: runs [body] now, up to its first wait, and returns
+  /// the [Routine], which can be awaited for what [body] returns, or
+  /// stopped. Its waits ([nextFrame], [wait], [until], [whileTrue],
+  /// [race], [all]) end in the routines step of a later frame, after
+  /// every [onUpdate] (docs/stage-4.md §3.2):
+  ///
+  /// ```dart
+  /// start(() async {
+  ///   while (true) {
+  ///     await wait(2);
+  ///     add(Coin());
+  ///   }
+  /// });
+  /// ```
+  ///
+  /// It stops when this object is destroyed, and is paused while it's
+  /// hidden. Throws a [StateError] before the object is added.
+  Routine<T> start<T>(Future<T> Function() body) => world._start(this, this, body);
 
   /// Called each time the object is shown: when it appears (right after
   /// its load, with everything added during it), and when it, or one
@@ -1485,6 +1606,7 @@ class GameObject {
           b._enabledNow = false;
           world._safely(this, b.onDisable);
         }
+        world._stopRoutines(b._routines);
         world._safely(this, b.onDestroy);
       case Camera():
         check(fy_camera_remove(world.pointer, id));
