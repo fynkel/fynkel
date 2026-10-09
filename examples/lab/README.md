@@ -11,7 +11,8 @@ scene(s) here.
 | Lifecycle  | 2    | Turn objects and behaviours on and off, destroy and rebuild, a buggy cube   |
 | Time       | 2    | The time scale, pausing, maxDelta, and a hitch                              |
 | Routines   | 3    | A spawner, a traffic light with a `finally`, and a race against a timeout   |
-| Signals    | 4    | Enemies' `died`, a scoreboard, `listen` against `on`, a door awaiting `next` |
+| Signals: the basics | 4 | A doorbell with one signal, and lamps that listen with `on` |
+| Signals in a game | 4    | Enemies' `died`, a scoreboard, `listen` against `on`, a door awaiting `next` |
 
 ## Running it
 
