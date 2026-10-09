@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ffi' show AllocatorAlloc, Pointer;
+import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/services.dart';
@@ -17,6 +18,57 @@ bool alive(int address) {
     return fy_view_stats(Pointer.fromAddress(address), stats) == FyStatus.FY_STATUS_OK;
   } finally {
     malloc.free(stats);
+  }
+}
+
+/// The app's bundle, as far as the tests need one: [files] by key, each
+/// read from the middle of a bigger buffer, as a real bundle may.
+class Bundle extends CachingAssetBundle {
+  Bundle(this.files);
+  final Map<String, List<int>> files;
+  final asked = <String>[];
+
+  @override
+  Future<ByteData> load(String key) async {
+    asked.add(key);
+    // Later, as a real bundle answers.
+    await Future<void>.delayed(Duration.zero);
+    final bytes = files[key];
+    if (bytes == null) throw FlutterError('no asset $key');
+    final padded = Uint8List(bytes.length + 8)..setAll(4, bytes);
+    return ByteData.view(padded.buffer, 4, bytes.length);
+  }
+}
+
+/// The smallest game: a camera, a texture from the bundle, and a log of
+/// what it was told.
+class Tiny extends GameObject {
+  final log = <String>[];
+  Texture2D? texture;
+
+  @override
+  Future<void> onLoad() async {
+    log.add('load');
+    add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, 4)),
+        components: [Camera()],
+      ),
+    );
+    texture = await assets.texture('grid.png');
+    await super.onLoad();
+  }
+
+  @override
+  void onStart() {
+    log.add('start');
+    super.onStart();
+  }
+
+  @override
+  void onUpdate(double dt) {
+    if (log.last != 'update') log.add('update');
+    super.onUpdate(dt);
   }
 }
 
@@ -87,6 +139,18 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
     world.dispose();
   });
+
+  // Lets [future] finish: its real work (the image decoded on another
+  // isolate) in real time, and what follows it in the test's own time.
+  Future<void> finish(WidgetTester tester, Future<void> future) async {
+    var done = false;
+    unawaited(future.whenComplete(() => done = true).catchError((_) {}));
+    for (var i = 0; i < 400 && !done; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+      await tester.pump(const Duration(milliseconds: 1));
+    }
+    expect(done, isTrue, reason: 'it finished');
+  }
 
   Widget sized(Widget child, {double width = 100, double height = 50}) => Directionality(
     textDirection: TextDirection.ltr,
@@ -264,6 +328,86 @@ void main() {
       await tester.pump();
       expect(tester.takeException().toString(), contains('no RGBA8 format'));
       expect(find.byType(ErrorWidget), findsOneWidget);
+    });
+  });
+
+  group('from a root', () {
+    final png = File('../../tests/assets/grid.png').readAsBytesSync();
+
+    testWidgets('runs a game: makes its world, loads it from the bundle, starts it, and frees it all with the view', (
+      tester,
+    ) async {
+      final game = Tiny();
+      final bundle = Bundle({'assets/grid.png': png});
+      final key = GlobalKey<FynkelViewState>();
+      await tester.pumpWidget(sized(FynkelView(key: key, root: game, source: bundleSource(bundle))));
+      final own = key.currentState!.world;
+      expect(game.world, same(own));
+      expect(game.log, ['load']);
+
+      await tester.pump(const Duration(milliseconds: 8));
+      expect(game.log, ['load'], reason: 'not started while it loads');
+      await finish(tester, game.loaded);
+      await tester.pump(const Duration(milliseconds: 8));
+      await tester.pump(const Duration(milliseconds: 8));
+      expect(game.log, ['load', 'start', 'update']);
+      expect(bundle.asked, ['assets/grid.png']);
+      expect(game.texture!.width, greaterThan(0));
+      expect(calls, ['register']);
+
+      await tester.pumpWidget(sized(const SizedBox()));
+      await tester.pump();
+      expect(calls, ['register', 'unregister 7']);
+      expect(own.isDisposed, isTrue);
+      expect(game.isAlive, isFalse);
+    });
+
+    testWidgets('a new root on rebuild is ignored; a world in its place starts over', (tester) async {
+      final game = Tiny();
+      final source = bundleSource(Bundle({'assets/grid.png': png}));
+      final key = GlobalKey<FynkelViewState>();
+      await tester.pumpWidget(sized(FynkelView(key: key, root: game, source: source)));
+      final own = key.currentState!.world;
+      await tester.pumpWidget(sized(FynkelView(key: key, root: Tiny(), source: source)));
+      expect(key.currentState!.world, same(own));
+
+      await tester.pumpWidget(sized(FynkelView(key: key, world: world)));
+      expect(key.currentState!.world, same(world));
+      expect(own.isDisposed, isTrue);
+      expect(world.isDisposed, isFalse);
+
+      final next = Tiny();
+      await tester.pumpWidget(sized(FynkelView(key: key, root: next, source: source)));
+      expect(next.world, isNot(same(own)));
+      expect(key.currentState!.world, same(next.world));
+      await tester.pumpWidget(sized(const SizedBox()));
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(world.isDisposed, isFalse, reason: 'a world given by hand is not the view\'s to free');
+    });
+
+    testWidgets("a failed load reaches the world's errors", (tester) async {
+      final game = Tiny();
+      final key = GlobalKey<FynkelViewState>();
+      await tester.pumpWidget(sized(FynkelView(key: key, root: game, source: bundleSource(Bundle({})))));
+      final errors = <ObjectError>[];
+      key.currentState!.world.errors.listen(errors.add);
+      await finish(tester, game.loaded);
+      await tester.pump();
+      expect(errors.single.error.toString(), contains('no asset assets/grid.png'));
+      expect(game.isAlive, isFalse);
+    });
+
+    testWidgets('FynkelApp shows the game in a view of its own', (tester) async {
+      final game = Tiny();
+      await tester.pumpWidget(FynkelApp(game, source: bundleSource(Bundle({'assets/grid.png': png}))));
+      final view = tester.widget<FynkelView>(find.byType(FynkelView));
+      expect(view.root, same(game));
+      expect(game.world, same(tester.state<FynkelViewState>(find.byType(FynkelView)).world));
+      await finish(tester, game.loaded);
+      expect(game.texture, isNotNull, reason: 'from the source given');
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(game.isAlive, isFalse);
     });
   });
 
