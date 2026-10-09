@@ -1,8 +1,6 @@
 // The stage 1 program (docs/stage-1.md), as a game: a camera, a sun and a
 // turning cube. lib/measured.dart runs the same game for the tool.
 
-import 'dart:async';
-
 import 'package:flutter/widgets.dart' show runApp;
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
