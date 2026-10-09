@@ -136,9 +136,8 @@ void main() {
     gone.destroy();
     view.frame();
     expect(engine(keep).$1, Vec3(1, 0, 0));
-    final missing = 'object#${gone.id} does not exist (despawned, or never spawned)';
-    expect(() => gone.transform, throwsFynkel(FynkelStatus.noObject, missing));
-    expect(() => gone.transform = Transform(), throwsFynkel(FynkelStatus.noObject, missing));
+    expect(() => gone.transform, throwsA(isA<StateError>()));
+    expect(() => gone.transform = Transform(), throwsA(isA<StateError>()));
   });
 
   test("a model's root and parts read their transforms from the engine once, then keep them", () async {

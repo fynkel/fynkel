@@ -110,8 +110,16 @@ class _Panel extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.all(12),
               children: [
-                Text(scene.about, style: text.bodySmall),
-                const SizedBox(height: 8),
+                // Folded on a phone, so the controls fit.
+                ExpansionTile(
+                  title: Text('About this scene', style: text.labelLarge),
+                  initiallyExpanded: MediaQuery.sizeOf(context).width >= 700,
+                  dense: true,
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.only(bottom: 8),
+                  expandedAlignment: Alignment.topLeft,
+                  children: [Text(scene.about, style: text.bodySmall)],
+                ),
                 // The controls show the game's state, which changes each
                 // frame: rebuild with the readout.
                 ValueListenableBuilder(

@@ -213,6 +213,12 @@ final class _Wait {
   final completer = Completer<void>.sync();
   bool over = false;
 
+  /// Ends it: the routine goes on.
+  void end() => completer.complete();
+
+  /// Throws [error] into the routine, at its `await`.
+  void fail(Object error, StackTrace stack) => completer.completeError(error, stack);
+
   /// Whether it ends in this frame's routines step.
   bool ends(Time time) {
     if (timed) {

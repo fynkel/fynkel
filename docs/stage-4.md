@@ -214,6 +214,16 @@ A frame, in `world.update`: **input** (events and the object handlers of §3.6) 
 - **Singletons**: `world.first<Score>()`, or `world.only<Score>()` which throws if there isn't exactly one. No `static instance`, so two worlds and tests never share one.
 - **Showing state in Flutter** stays `ValueNotifier` (stage 3).
 
+- *Settled in step 4:*
+  - **`emit` calls every listener at once**, in the order they started listening. One added while it emits hears the next value; one cancelled before its turn doesn't hear this one. Emitting from a handler is fine.
+  - **Errors don't stop the others.** A handler added with `on` that throws goes to `world.errors` with its object, as an update's would. One added with `listen` doesn't stop the rest either; once all have heard, `emit` throws the first such error.
+  - **`on` stops listening with the routines**: when the object is destroyed (after its `onDisable`, before its `onDestroy`), when the behaviour is removed, and when the world is disposed. A hidden object still hears, as in Unity.
+  - **A listener holds its subscriptions weakly**; the signal holds them. So a long-lived listener (the arena's `on(enemy.died, ...)`) doesn't keep the signals of dead enemies, and a destroyed listener is held by nothing. Tests check both with the garbage collector.
+  - **`next` in a routine is one of its waits**: the code after it runs in the routines step, in the frame after it started waiting at the earliest; it holds while the routine is paused; stopping the routine unwinds it through its `finally`; and `race([died.next, wait(5)])` drops it, with its subscription, when the timeout wins. Outside a routine it's a plain future.
+  - **`world.only<T>()`** counts objects and components of `T` and its subclasses, as `all` does.
+  - **A destroyed object** can still be read in its own `onDisable` and `onDestroy`. After that, everything that needs the engine throws a `StateError` saying what: "Enemy#12 was destroyed, so its transform can't be read". A removed component, or one whose object was destroyed, refuses changes the same way, instead of doing nothing.
+  - **Fixed along the way:** a destroyed object stayed in the list of transforms to send until a view drew a frame, so a world without a view kept every destroyed object that had moved. It's now dropped at the next update.
+
 ### 3.6 Input
 
 Its own module (`package:fynkel`'s `input`), which knows nothing about objects: it turns raw events into fingers, gestures, events and polled state. The world then adds what needs the scene (which object is under a finger). It's tested in `dart test` with made-up events and times.
@@ -327,6 +337,13 @@ an outside future isn't moved into the routines step (§3.4, settled).
 errors from destroyed objects. *Done when* a destroyed listener is never
 called and holds nothing (a test with the garbage collector), and
 `await signal.next` works in routines.
+✅ 26 tests in `test/signal_test.dart` (193 in package:fynkel in all); 10
+mutants, all killed (one only after a test for two objects of the same
+class). The lab's Signals scene shows each part by hand: enemies' `died`,
+a scoreboard found with `world.only`, a ghost that listens with `listen`
+and still hears once destroyed next to one using `on`, which doesn't, a
+door whose routine awaits a plate's `next`, and the error from a dead
+enemy.
 
 **Step 5: input.** §3.6, with fynkel_flutter's raw events. *Done when*
 tests drive each event and gesture from made-up events (taps and double
