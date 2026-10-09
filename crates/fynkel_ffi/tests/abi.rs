@@ -261,8 +261,8 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_10() {
-    assert_eq!(fy_abi_version(), 10);
+fn the_abi_version_is_11() {
+    assert_eq!(fy_abi_version(), 11);
 }
 
 #[cfg(not(target_os = "android"))]
@@ -431,6 +431,44 @@ fn the_active_flag_through_the_c_interface() {
         assert_eq!(fy_active_set(world.0, child, true), FyStatus::NoObject);
         assert_eq!(fy_active_get(world.0, child, &mut false), FyStatus::NoObject);
         assert_eq!(fy_active_in_hierarchy_get(world.0, child, &mut false), FyStatus::NoObject);
+    }
+}
+
+#[test]
+fn many_transforms_are_set_in_one_call_or_none_are() {
+    use fynkel_world::{Quat, Transform, Vec3};
+    let world = World::new();
+    let ids: Vec<u64> = (0..3).map(|_| world.spawn()).collect();
+    let at = |x: f32| transform(Transform::from_position(Vec3::new(x, 0.0, 0.0)));
+    let position = |id| {
+        let mut out = FyTransform::default();
+        // SAFETY: a live world and a pointer to a local.
+        ok(unsafe { fy_transform_get(world.0, id, &mut out) });
+        out.position.x
+    };
+    // SAFETY: a live world, and slices of the length passed.
+    unsafe {
+        ok(fy_transform_set_many(world.0, ids.as_ptr(), [at(1.0), at(2.0), at(3.0)].as_ptr(), 3));
+        assert_eq!(ids.iter().map(|&id| position(id)).collect::<Vec<_>>(), [1.0, 2.0, 3.0]);
+
+        let bad_rotation =
+            transform(Transform { rotation: Quat::from_xyzw(0.0, 0.0, 0.0, 2.0), ..Transform::default() });
+        let refused = [
+            ([ids[0], ids[1], ids[2]], [at(9.0), at(9.0), at(f32::NAN)], FyStatus::InvalidValue, "NaN or infinity"),
+            ([ids[0], ids[1], ids[2]], [at(9.0), bad_rotation, at(9.0)], FyStatus::InvalidValue, "unit quaternion"),
+            ([ids[0], 0, ids[2]], [at(9.0), at(9.0), at(9.0)], FyStatus::NoObject, "0 is not an object id"),
+            ([ids[0], ids[1], 999], [at(9.0), at(9.0), at(9.0)], FyStatus::NoObject, "object#999 does not exist"),
+        ];
+        for (which, values, status, message) in refused {
+            assert_eq!(fy_transform_set_many(world.0, which.as_ptr(), values.as_ptr(), 3), status, "{message}");
+            assert!(last_error().contains(message), "{}", last_error());
+            assert_eq!(ids.iter().map(|&id| position(id)).collect::<Vec<_>>(), [1.0, 2.0, 3.0], "none written");
+        }
+
+        ok(fy_transform_set_many(world.0, ptr::null(), ptr::null(), 0));
+        assert_eq!(fy_transform_set_many(world.0, ptr::null(), [at(0.0)].as_ptr(), 1), FyStatus::NullPointer);
+        assert_eq!(fy_transform_set_many(world.0, ids.as_ptr(), ptr::null(), 1), FyStatus::NullPointer);
+        assert_eq!(fy_transform_set_many(ptr::null(), ids.as_ptr(), [at(0.0)].as_ptr(), 1), FyStatus::NullPointer);
     }
 }
 

@@ -67,6 +67,9 @@ final class Scratch {
   var _byteCapacity = _initial * 4;
   static const _initial = 16;
 
+  var _transforms = malloc<FyTransform>(_initial);
+  var _transformCapacity = _initial;
+
   int get idCapacity => _idCapacity;
   int get byteCapacity => _byteCapacity;
 
@@ -78,6 +81,16 @@ final class Scratch {
       _idCapacity = count;
     }
     return _ids;
+  }
+
+  /// At least [count] transforms.
+  Pointer<FyTransform> transforms([int count = 0]) {
+    if (count > _transformCapacity) {
+      malloc.free(_transforms);
+      _transforms = malloc<FyTransform>(count);
+      _transformCapacity = count;
+    }
+    return _transforms;
   }
 
   /// At least [count] bytes.

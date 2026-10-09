@@ -40,8 +40,9 @@ class _Idle extends GameObject {}
 /// `world.update` with 10,000 objects in 100 trees of 100 (the budget in
 /// docs/stage-3.md §3.2: under 1 ms on the Note10+), each moving itself
 /// (`rotate`: a transform read, a turn and a write), each only reading its
-/// transform, and each doing nothing. Median and slowest of 300 steady
-/// frames.
+/// transform, and each doing nothing. Each time includes sending the
+/// moves to the engine, as the next frame would (one root's
+/// `worldTransform` sends them). Median and slowest of 300 steady frames.
 List<String> _updates() {
   final lines = <String>[];
   for (final (name, make) in <(String, GameObject Function())>[
@@ -50,8 +51,9 @@ List<String> _updates() {
     ('with nothing to do', _Idle.new),
   ]) {
     final world = World();
+    final first = world.add(make());
     for (var tree = 0; tree < 100; tree++) {
-      final root = world.add(make());
+      final root = tree == 0 ? first : world.add(make());
       for (var i = 1; i < 100; i++) {
         root.add(make());
       }
@@ -66,6 +68,7 @@ List<String> _updates() {
         ..reset()
         ..start();
       world.update(1 / 120);
+      first.worldTransform;
       times.add(clock.elapsedMicroseconds);
     }
     world.dispose();

@@ -92,7 +92,12 @@ fn a_steady_frame_with_1000_moving_cubes_in_trees_allocates_nothing_on_the_calli
     }
     let view = View::headless(&world, 64, 64);
 
-    let frame = |t: f32, hide: bool| {
+    // Half the cubes are moved one call each, half in one call for all
+    // (`fy_transform_set_many`, as package:fynkel sends a frame's moves),
+    // from a buffer kept between frames.
+    let half = cubes.len() / 2;
+    let mut batch = vec![FyTransform::default(); cubes.len() - half];
+    let mut frame = |t: f32, hide: bool| {
         for (i, &id) in cubes.iter().enumerate() {
             let position = FyVec3 { x: i as f32 * 0.01 + t, y: 0.0, z: 0.0 };
             let value = FyTransform {
@@ -100,9 +105,15 @@ fn a_steady_frame_with_1000_moving_cubes_in_trees_allocates_nothing_on_the_calli
                 rotation: FyQuat { w: 1.0, ..Default::default() },
                 scale: FyVec3 { x: 1.0, y: 1.0, z: 1.0 },
             };
-            // SAFETY: a live world and a pointer to a local.
-            ok(unsafe { fy_transform_set(world.0, id, &value) });
+            if i < half {
+                // SAFETY: a live world and a pointer to a local.
+                ok(unsafe { fy_transform_set(world.0, id, &value) });
+            } else {
+                batch[i - half] = value;
+            }
         }
+        // SAFETY: a live world, and slices of the length passed.
+        ok(unsafe { fy_transform_set_many(world.0, cubes[half..].as_ptr(), batch.as_ptr(), batch.len()) });
         // Chains and loose cubes hidden and shown again (stage 3 plan
         // §3.3): the flags are kept in a set that has grown to size.
         for &id in cubes.iter().step_by(7) {
