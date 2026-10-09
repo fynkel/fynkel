@@ -7,6 +7,7 @@ import 'package:lab/lab.dart';
 import 'package:lab/scenes.dart';
 import 'package:lab/scenes/input.dart';
 import 'package:lab/scenes/motion.dart';
+import 'package:lab/scenes/motion_basics.dart';
 import 'package:lab/scenes/pointers.dart';
 
 void main() {
@@ -109,6 +110,28 @@ void main() {
       world.update(1 / 60);
     }
     expect(puck.transform.position.x, closeTo(from.x + 2, 0.1), reason: '4 a second for half a second');
+  });
+
+  test('Motion: the basics: move goes there, and all in a row comes back down', () async {
+    final world = World();
+    addTearDown(world.dispose);
+    final scene = world.add(MotionBasicsScene());
+    await scene.loaded;
+    void frames(int n) {
+      for (var i = 0; i < n; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    final [move, ..., row] = scene.controls.cast<Button>();
+    move.onPressed();
+    frames(60);
+    expect(scene.cube.position, const Vec3(2, 0.5, 0));
+    row.onPressed();
+    frames(60);
+    expect(scene.cube.position.y, greaterThan(0.5), reason: 'still on its way');
+    frames(60);
+    expect(scene.cube.position, const Vec3(0, 0.5, 0));
   });
 
   test('Motion: the door is awaited, the race is won by the wait, and the patrol comes round again', () async {

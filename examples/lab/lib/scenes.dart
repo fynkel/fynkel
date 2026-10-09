@@ -7,6 +7,7 @@ import 'scenes/eases.dart';
 import 'scenes/input.dart';
 import 'scenes/lifecycle.dart';
 import 'scenes/motion.dart';
+import 'scenes/motion_basics.dart';
 import 'scenes/pointers.dart';
 import 'scenes/routines.dart';
 import 'scenes/signal_basics.dart';
@@ -22,6 +23,7 @@ final List<LabScene Function()> scenes = [
   SignalsScene.new,
   InputScene.new,
   PointersScene.new,
+  MotionBasicsScene.new,
   EasesScene.new,
   MotionScene.new,
 ];
