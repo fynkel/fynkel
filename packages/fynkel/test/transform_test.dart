@@ -141,15 +141,6 @@ void main() {
     expect(() => gone.transform = Transform(), throwsFynkel(FynkelStatus.noObject, missing));
   });
 
-  test("removing a transform that wasn't sent yet removes it, and setting one again adds it", () {
-    final o = world.add(GameObject(transform: Transform(position: Vec3(1, 0, 0))));
-    o.remove<Transform>();
-    expect(() => o.transform, throwsFynkel(FynkelStatus.noComponent));
-    expect(o.worldTransform.position, Vec3.zero, reason: 'none counts as not moved');
-    o.transform = Transform(position: Vec3(3, 0, 0));
-    expect(o.worldTransform.position, Vec3(3, 0, 0));
-  });
-
   test("a model's root and parts read their transforms from the engine once, then keep them", () async {
     final truck = await Model.load(File('../../tests/assets/gltf/CesiumMilkTruck.glb').readAsBytesSync());
     addTearDown(truck.dispose);

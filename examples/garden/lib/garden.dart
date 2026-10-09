@@ -78,7 +78,7 @@ class Ground extends GameObject {
     await super.onLoad();
     final grass = await assets.texture('grass.png');
     final material = own(Material(baseColorTexture: grass, uvScale: Vec2(15, 15), roughness: 1, name: 'grass'));
-    meshRenderer = MeshRenderer(Mesh.plane(), material);
+    addComponent(MeshRenderer(Mesh.plane(), material));
   }
 }
 

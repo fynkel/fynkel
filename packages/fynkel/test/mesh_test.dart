@@ -116,7 +116,7 @@ void main() {
     final material = Material();
     final inA = a.add(GameObject(components: [MeshRenderer(terrain, material)]));
     final inB = b.add(GameObject(components: [MeshRenderer(terrain, material)]));
-    expect(inA.meshRenderer.mesh, same(terrain));
-    expect(inB.meshRenderer.mesh, same(terrain));
+    expect(inA.get<MeshRenderer>()!.mesh, same(terrain));
+    expect(inB.get<MeshRenderer>()!.mesh, same(terrain));
   });
 }

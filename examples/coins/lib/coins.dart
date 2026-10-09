@@ -110,7 +110,7 @@ class Level extends GameObject {
   @override
   void onStart() {
     super.onStart();
-    world.first<FollowCamera>()!.camera = Camera(fovY: 50, clearColor: sky);
+    world.first<FollowCamera>()!.get<Camera>()!.clearColor = sky;
     world.first<Player>()!
       ..transform = Transform()
       ..walkTo(Vec3.zero)

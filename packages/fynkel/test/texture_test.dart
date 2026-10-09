@@ -133,7 +133,10 @@ void main() {
     expect(() => other.add(GameObject(components: [MeshRenderer(Mesh.cube(), material)])), throwsStateError);
     red.dispose();
     expect(red.isDisposed, isTrue, reason: 'no world has a material that uses it now');
-    expect(world.add(GameObject(components: [MeshRenderer(Mesh.cube(), Material())])).meshRenderer.material, isNotNull);
+    expect(
+      world.add(GameObject(components: [MeshRenderer(Mesh.cube(), Material())])).get<MeshRenderer>()!.material,
+      isNotNull,
+    );
   });
 
   test('the new material values reach the picture', () {
