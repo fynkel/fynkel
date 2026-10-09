@@ -1,13 +1,14 @@
-// The phone numbers steps 1 and 5 left for the garden (docs/stage-2.md §6):
-// the world's extract with 10,000 objects in trees, and raycasts over
-// 10,000 cubes. The scenes are the Rust probes' (crates/fynkel_ffi
-// extract_probe, crates/fynkel_world/examples/raycast.rs), measured here
-// through package:fynkel on the UI isolate, as a game would run them. And
-// stage 3's loop (docs/stage-3.md §3.2): 10,000 objects updating.
+// The timings the stages left for the phones, run by MeasuredApp's bench:
+// stage 2's (docs/stage-2.md §6), the world's extract with 10,000 objects
+// in trees and raycasts over 10,000 cubes, and stage 3's loop
+// (docs/stage-3.md §3.2), 10,000 objects updating. The scenes are the
+// Rust probes' (crates/fynkel_ffi extract_probe,
+// crates/fynkel_world/examples/raycast.rs), measured here through
+// package:fynkel on the UI isolate, as a game would run them.
 
 import 'package:fynkel/fynkel.dart';
 
-/// Each result as a line, for Measurement.report.
+/// Each result as a line, for `Measurement.report`.
 List<String> bench() => [..._updates(), ..._extract(), ..._raycasts()];
 
 /// Turns itself a little every frame: a transform read and written.

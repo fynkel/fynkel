@@ -6,9 +6,7 @@ import 'package:fynkel/fynkel.dart' show Input;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'package:fynkel_measure/fynkel_measure.dart';
 
-import 'bench.dart';
 import 'garden.dart';
-import 'on_screen.dart';
 
 void main() => runApp(const GardenApp());
 
@@ -91,7 +89,7 @@ class _GardenPageState extends State<GardenPage> {
     await Measurement.mark('done');
   }
 
-  /// The timings steps 1 and 5 left for the phones (lib/bench.dart), and
+  /// The timings steps 1 and 5 left for the phones (package:fynkel_measure's bench), and
   /// the garden's own tap cast, once the scene has loaded and settled.
   Future<void> _runBench() async {
     await Future<void>.delayed(const Duration(seconds: 8));

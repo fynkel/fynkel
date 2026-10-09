@@ -5,7 +5,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart' show HeadlessView, Input, ViewStats, WorldView, World;
+import 'package:fynkel/fynkel.dart' show AssetSource, GameObject, HeadlessView, Input, ViewStats, WorldView, World;
 import 'package:fynkel/platform.dart';
 
 import 'input_collector.dart';
@@ -69,11 +69,32 @@ class FynkelViewStats {
       'size=${size.width.toInt()}x${size.height.toInt()} $view';
 }
 
-/// Shows [world] and runs its frame clock: each display frame it calls
-/// [onFrame] with the seconds since the last one and what the player did
-/// ([Input]), runs the world's loop ([World.update]: taps, starts,
-/// updates), then hands the world to the engine to draw. It fills the
-/// space its parent gives it, which must be bounded.
+/// The bytes of asset [name] from the app's bundle, under `assets/`:
+/// `character.glb` is `assets/character.glb`, listed in the app's
+/// pubspec.yaml. A [FynkelView] with a [FynkelView.root] uses it unless
+/// given another [FynkelView.source].
+AssetSource bundleSource([AssetBundle? bundle]) => (name) async {
+  final data = await (bundle ?? rootBundle).load('assets/$name');
+  return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+};
+
+/// Shows a game: `FynkelView(root: Garden())` makes a world, adds the
+/// root, runs it, and frees it all when the view goes. Each display frame
+/// it runs the world's loop ([World.update]: taps, starts, updates) with
+/// what the player did ([Input]), then hands the world to the engine to
+/// draw from its active camera. It fills the space its parent gives it,
+/// which must be bounded, so menus and HUDs are Flutter widgets around or
+/// on top of it.
+///
+/// The root is used once, when the view is first built: to change level,
+/// destroy the old root and add another to its world (`root.world`), and
+/// to start over, give the view a new `key`. The world is
+/// [FynkelViewState.world] too, for code outside the game.
+///
+/// `FynkelView(world:)` shows a world made and driven by hand instead,
+/// for tests and tools: [onFrame] is called each frame with the seconds
+/// since the last one and the input, before the world's loop, and the
+/// world is the caller's to dispose.
 ///
 /// It reads pointers with a `Listener`, which takes part in no gesture
 /// arena, so gesture widgets around it keep working. While it has focus it
@@ -88,16 +109,28 @@ class FynkelViewStats {
 class FynkelView extends StatefulWidget {
   const FynkelView({
     super.key,
-    required this.world,
+    this.root,
+    this.source,
+    this.world,
     this.onFrame,
     this.resolutionScale = 1.0,
     this.onStats,
     this.onViewStats,
     this.focusNode,
     this.autofocus = true,
-  }) : assert(resolutionScale > 0 && resolutionScale <= 4);
+  }) : assert(resolutionScale > 0 && resolutionScale <= 4),
+       assert((root == null) != (world == null), 'give FynkelView a root or a world, not both');
 
-  final World world;
+  /// The game: added to the view's own world when the view is first
+  /// built.
+  final GameObject? root;
+
+  /// Where the view's own world loads assets from; the app's bundle
+  /// ([bundleSource]) when null.
+  final AssetSource? source;
+
+  /// A world made by hand, shown in place of a [root]'s own.
+  final World? world;
 
   /// Called once per display frame, before the world's [World.update],
   /// with the seconds since the previous call (0 the first time) and the
@@ -125,10 +158,18 @@ class FynkelView extends StatefulWidget {
   final bool autofocus;
 
   @override
-  State<FynkelView> createState() => _FynkelViewState();
+  State<FynkelView> createState() => FynkelViewState();
 }
 
-class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMixin {
+/// A [FynkelView]'s state: its [world], for code outside the game, such
+/// as a HUD (`GlobalKey<FynkelViewState>().currentState!.world`).
+class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMixin {
+  World? _own;
+
+  /// The world shown: the view's own, which its root was added to, or the
+  /// one it was given.
+  World get world => widget.world ?? _own!;
+
   late final Ticker _ticker = createTicker(_tick)..start();
   int? _lastMicros;
   final _input = InputCollector();
@@ -155,12 +196,25 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
   void initState() {
     super.initState();
     _ticker; // Starts it.
+    _own = _makeOwn();
+  }
+
+  /// A world with the widget's root in it, if it has one.
+  World? _makeOwn() {
+    final root = widget.root;
+    return root == null ? null : (World(source: widget.source ?? bundleSource())..add(root));
   }
 
   @override
-  void didUpdateWidget(FynkelView old) {
-    super.didUpdateWidget(old);
-    if (old.world != widget.world) _release();
+  void didUpdateWidget(FynkelView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A new root alone changes nothing (see FynkelView); a new world, or
+    // from a root to a world or back, starts the view over.
+    if (oldWidget.world != widget.world) {
+      _release();
+      _own?.dispose();
+      _own = _makeOwn();
+    }
   }
 
   @override
@@ -168,6 +222,8 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
     _ticker.dispose();
     _ownFocus?.dispose();
     _release();
+    // A view still drawing keeps what it last had until it's freed.
+    _own?.dispose();
     super.dispose();
   }
 
@@ -178,7 +234,8 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
     final input = _input.take();
     final dt = last == null ? 0.0 : (micros - last) / 1e6;
     widget.onFrame?.call(dt, input);
-    if (!widget.world.isDisposed) widget.world.update(dt, input);
+    final world = this.world;
+    if (!world.isDisposed) world.update(dt, input);
     // Nothing to draw before there is a size (on Android, before the
     // window has one): no view yet, and no surface.
     if (_width == 0 || _height == 0) return;
@@ -218,10 +275,10 @@ class _FynkelViewState extends State<FynkelView> with SingleTickerProviderStateM
     try {
       if (_android) {
         view = Platform.isAndroid
-            ? AndroidSurfaceView(widget.world, width: _width, height: _height)
-            : HeadlessView(widget.world, width: _width, height: _height);
+            ? AndroidSurfaceView(world, width: _width, height: _height)
+            : HeadlessView(world, width: _width, height: _height);
       } else if (Platform.isMacOS || Platform.isIOS) {
-        view = AppleView(widget.world, width: _width, height: _height);
+        view = AppleView(world, width: _width, height: _height);
       } else {
         throw UnsupportedError('FynkelView runs on macOS, iOS and Android.');
       }

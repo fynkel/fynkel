@@ -190,6 +190,12 @@ Everyone reads the same input: `input.drag`, `input.scroll`, `input.keys` and so
 - **The world is reachable** from any object (`world`) and from the view's state, for code outside the game that needs it (a HUD showing the score reads the game's own objects).
 - **Measuring leaves the game's code.** `examples/garden/lib/main.dart` is the one line above; `lib/measured.dart` wraps the same root with package:fynkel_measure, and the tool runs that entry point (`-t lib/measured.dart`). The lifecycle check becomes generic: it destroys the root and adds a new one, N times, so it measures loading and freeing the whole scene, not only the character. The on-screen clock and the bench move into fynkel_measure.
 - `FynkelView(world:, onFrame:)` stays for tests and tools that drive a world by hand, documented as the low-level way.
+- *Settled in step 5:*
+  - **The root is used once**, when the view is first built. A rebuild with a new root changes nothing, since the game changes level inside its world (`root.world`); to start over, the view gets a new `key`. A new world, or a switch between `root:` and `world:`, starts the view over, and the view's own world is disposed with it.
+  - **The world is `FynkelViewState.world`**, the state being public for that (`GlobalKey<FynkelViewState>`).
+  - **`bundleSource([bundle])`** reads `assets/<name>` from the app's bundle (or the one given); it's the default `source`. `FynkelApp(root, source:, title:)` is a `WidgetsApp` around the view, without Material.
+  - **`MeasuredApp(Hello.new)`** takes a function that makes the root, since its checks make new ones. Its lifecycle points are `destroyed` and `added` (the root replaced in the same world), `created` (a new view, world and root) and the two resizes. It reports each load's time to the screen. The game's own timings join the bench through `timings:`.
+  - **The tool builds the Mac's profile build itself**, of `lib/measured.dart` when the app has one (`-t`), so a run is never of stale code. On a phone `flutter run` gets the same `-t`.
 
 ### 3.6 The world, levels, and changing things
 
@@ -280,6 +286,14 @@ instead of 3.7 (§6).
 bundle as the default source, fynkel_measure from outside the app's
 code, the generic lifecycle check. *Done when* a widget test runs a
 small game from its root and hello's measurements match stage 1's.
+✅ `test/fynkel_view_test.dart` runs a small game from its root: it loads
+a texture through `bundleSource`, starts, updates, and is freed with its
+world when the view goes; a failed load reaches `world.errors`; a new
+root is ignored, a world in its place starts over; `FynkelApp` shows the
+game. 9 mutants, 8 killed; the one left removed a line that changed
+nothing, and the code no longer has it. hello is
+`runApp(FynkelApp(Hello()))` plus `lib/measured.dart`; its numbers are in
+§6.
 
 **Step 6: the garden, rewritten, and a second game.** The garden shows
 loading a level, tapping and a camera. `examples/coins` shows the rest:
@@ -386,3 +400,58 @@ is left on the Note10+ is Dart's arithmetic and the engine's lookups of
 10,000 objects, both slower there per object. (The slowest frames
 include the garbage collector's.)
 
+
+### Step 5: hello as a game (`measure`, profile builds, 2026-10-09)
+
+hello is now `runApp(FynkelApp(Hello()))`, measured through
+`lib/measured.dart` (`MeasuredApp(Hello.new)`). 60 s of the turning cube,
+against stage 1's (docs/stage-1.md §7):
+
+| | Mac, window 1600 × 1200 | iPhone 16 Pro Max | Galaxy Note10+ |
+|---|---|---|---|
+| fresh fps (median, min) | **120**, 119 (stage 1: 120, 120) | **120**, 120 (120, 118) | **59.9**, 57.9 (59.9, 58.9) |
+| coalesced, skipped, dropped | 0, 0, 1 (0, 0, 0) | 0, 0, 0 (0, 0, 0) | 0, 0, 0 (0, 0, 0) |
+| slow Flutter frames | 1 raster (0) | 0 (0) | 1 build, 38 raster (0, 28 – 247) |
+| Dart allocation per frame | 14.7 KB, mouse over the view (13.4); 7.8 KB without (7.1) | 13.3 KB (12.0) | 19.0 KB (16.4 – 18.2) |
+
+The frame rate is stage 1's everywhere. Dart allocates about 1 KB a frame
+more than in stage 1, and nearly all of it came before this step: main's
+hello (step 4, the world driven through `onFrame`), measured the same
+day, allocates 7.6 KB a frame on the Mac without the mouse and 13.2 KB on
+the iPhone. Step 5 adds 0.1 – 0.25 KB.
+
+**Memory**, 10 cycles of the new lifecycle check, each against
+`--baseline` (a spinning Flutter box, the same steps):
+
+| | Mac | iPhone | Note10+ |
+|---|---|---|---|
+| engine's GPU memory, at full size | 276.1 MB at every destroy and add; 276.1, then 279.7 MB from create 4 on | Metal 167.2 MB at every point (stage 1: 167.1 – 167.3) | Graphics 122.6 – 123.3 MB at every destroy and add; 119.2 MB at every create (stage 1: 119.2) |
+| destroyed / added, total | 431.3 – 442.2 MB: one 8 MB step at cycle 3, then +1.9 MB over 7 cycles. Baseline: the same step, then +1.9 MB | 368.6 → 373.7 MB (+5.1). Baseline +5.5 | 252.7 → 262.6 MB (+9.9; +8.9 in a second run). Baseline +8.4 |
+| created, total | 442.7 – 447.4 MB (+4.7, the GPU step included). Baseline +2.3 | 374.8 → 378.5 MB (+3.7). Baseline +3.8 | 260.5 → 265.2 MB (+4.7; +6.0). Baseline +3.3 (stage 1: +12.9 over 30, against +10.1) |
+| resized, 0.6 / full | 0.5 / 0.9 MB ranges | +2.9 / +3.2 MB. Baseline +2.2 / +2.8 | +1.9 / +1.8 MB (+1.7 / +1.5). Baseline +1.8 / +1.5 |
+| start to done | – | +12.7 MB. Baseline +12.9 | +15.3 MB from the first destroy. Baseline +10.2 |
+| 10 rotations, landscape / portrait; 10 trips to the background | – | – | +5.2 / +4.3; +5.2 (+3.2 / +3.4; +2.4). Baseline +5.0 / +4.7; +2.7 |
+
+The engine's GPU memory comes back whole every time the root is
+destroyed, and when a view and its world go. On the Mac and the iPhone
+what grows, grows by as much with Flutter alone. On the Note10+ it grows
+about 5 MB more over the run than the baseline's: creating views, as in
+stage 1 (Flutter's texture path), and in both runs about 2 MB of Native
+memory over 10 destroys and adds (some 200 KB a cycle, against noise of
+about 1 MB in the totals). A hello root is four objects and a material;
+step 6 destroys and re-adds the whole garden, which would show a cost per
+object or per asset many times over, so it's looked at there.
+
+The Mac's one-off GPU step after the first new views is there in main's
+hello too (+14.6 MB at its second create), and its
+absolute GPU numbers follow the window's size, which differs from run to
+run, so they can't be compared with stage 1's 271.7 MB.
+
+**Loading**, reported by `MeasuredApp`: a new hello root is loaded within
+a millisecond and on screen 17 – 25 ms later on the Mac and the iPhone
+(two or three frames at 120 Hz) and 35 – 49 ms on the Note10+ (two or
+three at 60 Hz). A new view with its world and root is on screen in
+36 – 45 ms on the Mac, 57 – 69 ms on the iPhone and 353 – 389 ms on the
+Note10+, most of it making the engine's view. The app's very first view
+takes longer: its first tick holds the UI isolate for 3 – 20 ms on the Mac,
+4 ms on the iPhone and 830 ms on the Note10+.

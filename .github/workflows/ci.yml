@@ -65,8 +65,9 @@ jobs:
           flutter test
           cd ../fynkel_measure
           flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib bin
+          dart format -l 120 --output=none --set-exit-if-changed lib bin test
           flutter analyze --fatal-infos
+          flutter test
           cd ../../examples/hello
           flutter pub get
           dart format -l 120 --output=none --set-exit-if-changed lib

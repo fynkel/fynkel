@@ -1,16 +1,18 @@
 // Measures a Fynkel app as the stage reports do (docs/stage-1.md §4,
-// docs/stage-2.md §3.5): runs the profile build of the app in the current
-// directory and reports the fresh frame rate, the Dart allocation per
+// docs/stage-2.md §3.5): builds and runs the profile build of the app in
+// the current directory and reports the fresh frame rate, the Dart allocation per
 // frame, and the memory over the cycles of the app's lifecycle check.
-// The app uses this package's Measurement (lib/src/measurement.dart).
+// The app runs `lib/measured.dart` when it has one: the game wrapped in
+// this package's MeasuredApp (lib/src/measured_app.dart), so the game's
+// own code knows nothing of measuring. Otherwise it runs lib/main.dart,
+// which uses this package's Measurement itself.
 //
-//   flutter build macos --profile
 //   dart run fynkel_measure:measure rate [--seconds 60] [--fullscreen]
 //   dart run fynkel_measure:measure lifecycle [--cycles 10]
+//   dart run fynkel_measure:measure bench
 //
-// The lifecycle check's points are the app's: what it does between them
-// is its own (hello hides and shows its view, the garden unloads and
-// loads its model). Points of a kind (the name without its number) should
+// The lifecycle check's points are the app's: MeasuredApp's destroy and
+// add the root, show a new view, and resize it. Points of a kind (the name without its number) should
 // have the same memory. What the app reports (Measurement.report), such
 // as load times, is printed at the end as it is.
 //
@@ -69,6 +71,10 @@ final String _name = () {
 
 String get _app => 'build/macos/Build/Products/Profile/$_name.app/Contents/MacOS/$_name';
 
+/// The entry point measured: the game wrapped in MeasuredApp, if the app
+/// has one.
+final String _target = File('lib/measured.dart').existsSync() ? 'lib/measured.dart' : 'lib/main.dart';
+
 /// Seconds of a run that aren't measured: startup and the first frames.
 const _warmUp = 5;
 
@@ -99,10 +105,7 @@ Future<void> main(List<String> args) async {
   if (androidAt >= 0) _android = args[androidAt + 1];
   _debug = args.contains('--debug');
   _baseline = args.contains('--baseline');
-  if (_device == null && !File(_app).existsSync()) {
-    stderr.writeln('No profile build. Run: flutter build macos --profile');
-    exit(2);
-  }
+  if (_device == null) await _buildMac();
   final mode = args.isEmpty ? 'rate' : args.first;
   final fullscreen = args.contains('--fullscreen');
   final secondsAt = args.indexOf('--seconds');
@@ -120,6 +123,20 @@ Future<void> main(List<String> args) async {
         'usage: dart run fynkel_measure:measure rate [--seconds N] [--fullscreen] | lifecycle [--cycles N] | bench  [--baseline] [--ios <device> | --android <device>] [--debug]',
       );
       exit(2);
+  }
+}
+
+/// The Mac's profile build of [_target], so the run is of the code as it
+/// is now. A phone's is built by `flutter run`.
+Future<void> _buildMac() async {
+  stderr.writeln('Building $_target for macOS (profile)…');
+  final build = await Process.run('flutter', ['build', 'macos', '--profile', '-t', _target]);
+  if (build.exitCode != 0) {
+    stderr
+      ..write(build.stdout)
+      ..write(build.stderr)
+      ..writeln('The build failed.');
+    exit(2);
   }
 }
 
@@ -454,6 +471,8 @@ class _App {
         if (_debug) '--debug' else '--profile',
         '-d',
         device,
+        '-t',
+        _target,
         for (final MapEntry(:key, :value) in settings.entries) '--dart-define=$key=$value',
       ]),
     );

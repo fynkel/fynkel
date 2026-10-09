@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart' show ViewStats;
-import 'package:garden/on_screen.dart';
+import 'package:fynkel_measure/fynkel_measure.dart';
 
 void main() {
   ViewStats at(int posted, int rendered, {int coalesced = 0, int presented = 0}) =>

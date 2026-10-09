@@ -1,6 +1,6 @@
-/// Shows a Fynkel [World] in a Flutter app: [FynkelView].
+/// Shows a Fynkel game in a Flutter app: [FynkelApp] for a game that is
+/// the whole app, [FynkelView] for one inside a Flutter app.
 library;
 
-import 'package:fynkel/fynkel.dart' show World;
-
-export 'src/fynkel_view.dart' show FynkelView, FynkelViewStats;
+export 'src/fynkel_app.dart' show FynkelApp;
+export 'src/fynkel_view.dart' show FynkelView, FynkelViewState, FynkelViewStats, bundleSource;
