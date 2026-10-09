@@ -11,7 +11,7 @@ import '../lab.dart';
 
 class SignalsScene extends LabScene {
   @override
-  String get title => 'Signals';
+  String get title => 'Signals in a game';
   @override
   String get step => 'step 4';
   @override

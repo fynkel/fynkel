@@ -5,6 +5,7 @@ import 'lab.dart';
 import 'scenes/components.dart';
 import 'scenes/lifecycle.dart';
 import 'scenes/routines.dart';
+import 'scenes/signal_basics.dart';
 import 'scenes/signals.dart';
 import 'scenes/time.dart';
 
@@ -13,5 +14,6 @@ final List<LabScene Function()> scenes = [
   LifecycleScene.new,
   TimeScene.new,
   RoutinesScene.new,
+  SignalBasicsScene.new,
   SignalsScene.new,
 ];
