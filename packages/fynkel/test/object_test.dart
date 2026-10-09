@@ -139,7 +139,7 @@ void main() {
     expect([root, arm].map((o) => (o.isAlive, o.isDestroyed)), everyElement((false, true)));
     expect(keep.isAlive, isTrue);
     expect(keep.children, isEmpty);
-    expect(() => root.find('arm'), throwsFynkel(FynkelStatus.noObject));
+    expect(() => root.find('arm'), throwsA(isA<StateError>()));
     root.destroy(); // again: nothing
 
     final parent = GameObject();

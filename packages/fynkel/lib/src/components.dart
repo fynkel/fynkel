@@ -43,6 +43,18 @@ sealed class Component {
     final o? when o._world != null && !_removed => o,
     _ => null,
   };
+
+  /// Throws a [StateError] once it's removed: a change would do nothing.
+  void _checkChangeable() {
+    if (!_removed) return;
+    final owner = _owner;
+    if (owner == null) return;
+    throw StateError(
+      owner._destroyed
+          ? '$owner was destroyed, so its $runtimeType can\'t be changed'
+          : '$runtimeType was removed from $owner, so it can\'t be changed',
+    );
+  }
 }
 
 /// Where an object is, which way it faces, and how big it is, relative to
@@ -122,6 +134,7 @@ final class Camera extends Component {
   /// Makes a change and writes it to the engine; undoes it if the engine
   /// refuses it.
   void _change(void Function() set) {
+    _checkChangeable();
     final (fovY, near, far, clearColor) = (_fovY, _near, _far, _clearColor);
     set();
     try {
@@ -173,6 +186,7 @@ final class Light extends Component {
   set intensity(double value) => _change(() => _intensity = value);
 
   void _change(void Function() set) {
+    _checkChangeable();
     final (kind, color, intensity) = (_kind, _color, _intensity);
     set();
     try {
@@ -204,6 +218,7 @@ final class MeshRenderer extends Component {
   set material(Material? value) => _change(() => _material = value);
 
   void _change(void Function() set) {
+    _checkChangeable();
     final (mesh, material) = (_mesh, _material);
     set();
     try {
@@ -254,8 +269,10 @@ abstract class Behaviour extends Component {
   bool _started = false;
   bool _enabledNow = false;
 
-  // The routines it started that are still running.
+  // The routines it started that are still running, and the signals it
+  // listens to with [on].
   List<Routine<Object?>>? _routines;
+  _Listening? _listening;
 
   /// The world its object is in. Throws a [StateError] before the object
   /// is added.
@@ -276,6 +293,13 @@ abstract class Behaviour extends Component {
   /// behaviour is removed or its object destroyed, and is paused while
   /// the behaviour isn't enabled.
   Routine<T> start<T>(Future<T> Function() body) => gameObject.world._start(this, gameObject, body);
+
+  /// Listens to [signal], as [GameObject.on] does, until this behaviour
+  /// is removed or its object destroyed.
+  SignalSubscription<T> on<T>(Signal<T> signal, void Function(T value) handler) {
+    if (_removed) throw StateError('$this was removed, so it can\'t listen');
+    return _on(this, signal, handler);
+  }
 
   /// Gives [resource] to its object, to be disposed when the object is
   /// destroyed: see [GameObject.own].

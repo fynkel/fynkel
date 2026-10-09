@@ -7,6 +7,8 @@ import 'package:fynkel/src/bindings.g.dart';
 import 'package:fynkel/src/native.dart';
 import 'package:test/test.dart';
 
+Matcher throwsBadState(String message) => throwsA(isA<StateError>().having((e) => e.message, 'message', message));
+
 Matcher throwsFynkel(FynkelStatus status, [Pattern? message]) => throwsA(
   isA<FynkelException>()
       .having((e) => e.status, 'status', status)
@@ -22,9 +24,19 @@ void main() {
     final cube = world.add(GameObject(transform: Transform()));
     cube.destroy();
     expect(cube.isAlive, isFalse);
-    expect(() => cube.transform, throwsFynkel(FynkelStatus.noObject, 'object#${cube.id} does not exist'));
-    expect(() => cube.transform = Transform(), throwsFynkel(FynkelStatus.noObject));
-    expect(() => cube.find('x'), throwsFynkel(FynkelStatus.noObject, '(despawned, or never spawned)'));
+    expect(cube.isDestroyed, isTrue);
+    expect(
+      () => cube.transform,
+      throwsBadState('GameObject#${cube.id} was destroyed, so its transform can\'t be read'),
+    );
+    expect(
+      () => cube.transform = Transform(),
+      throwsBadState('GameObject#${cube.id} was destroyed, so its transform can\'t be set'),
+    );
+    expect(
+      () => cube.find('x'),
+      throwsBadState('GameObject#${cube.id} was destroyed, so nothing can be found below it'),
+    );
   });
 
   test('components come back as they went in', () {
@@ -188,7 +200,10 @@ void main() {
       root.destroy();
       expect([root, child, grandchild].map((o) => o.isAlive), everyElement(isFalse));
       expect(keep.children, isEmpty);
-      expect(() => grandchild.name, throwsFynkel(FynkelStatus.noObject));
+      expect(
+        () => grandchild.name,
+        throwsBadState('GameObject#${grandchild.id} was destroyed, so its name can\'t be read'),
+      );
     });
 
     test('isPartOf is true for the object itself and everything below it', () {

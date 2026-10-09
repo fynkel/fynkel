@@ -19,6 +19,7 @@ part 'input.dart';
 part 'model.dart';
 part 'resources.dart';
 part 'routines.dart';
+part 'signals.dart';
 part 'time.dart';
 
 /// Everything in a scene: objects, their components, and the meshes and
@@ -66,6 +67,13 @@ final class World implements Finalizable {
       for (final object in _objects.values) ...?object._owned,
       for (final asset in _assets.values) ?asset.value,
     ];
+    // Nothing of a disposed world hears a signal again, or holds one.
+    for (final object in _objects.values) {
+      object._stopListening();
+    }
+    for (final wait in _waits) {
+      wait.over = true;
+    }
     _finalizer.detach(this);
     fy_world_free(_pointer);
     _pointer = nullptr;
@@ -197,6 +205,10 @@ final class World implements Finalizable {
   // call before anything reads the engine's transforms: a view's frame, a
   // raycast, a world transform, a tap.
   final _unsent = <GameObject>[];
+
+  // Whether a destroyed object is in [_unsent], to be dropped at the next
+  // update: with no view drawing, nothing else would let go of it.
+  var _unsentGone = false;
 
   void _sendTransforms() {
     if (_unsent.isEmpty) return;
@@ -397,13 +409,13 @@ final class World implements Finalizable {
           ends = wait.ends(time);
         } catch (error, stack) {
           wait.over = true;
-          wait.completer.completeError(error, stack);
+          wait.fail(error, stack);
           _runMicrotasks();
           continue;
         }
         if (!ends) continue;
         wait.over = true;
-        wait.completer.complete();
+        wait.end();
         _runMicrotasks();
       }
       _runMicrotasks();
@@ -426,7 +438,7 @@ final class World implements Finalizable {
       final wait = _waits[i];
       if (wait.over || !identical(wait.routine, routine)) continue;
       wait.over = true;
-      wait.completer.completeError(RoutineStopped._(), StackTrace.current);
+      wait.fail(RoutineStopped._(), StackTrace.current);
     }
   }
 
@@ -445,6 +457,10 @@ final class World implements Finalizable {
       object._components?.removeWhere((c) => c._removed);
     }
     _compact.clear();
+    if (_unsentGone) {
+      _unsentGone = false;
+      _unsent.removeWhere((o) => o._gone);
+    }
     if (_liveDirty) {
       _live.removeWhere((o) => o._destroyed);
       _liveDirty = false;
@@ -572,6 +588,26 @@ final class World implements Finalizable {
     for (final objects in _byClass.values)
       if (objects.first is T) ...objects.cast<T>(),
   ];
+
+  /// The one live object or component of type [T] that the game added:
+  /// `world.only<Score>()`. Throws a [StateError] if there's none or more
+  /// than one, so a game's singletons need no `static instance`. See
+  /// [all].
+  T only<T extends Object>() {
+    T? found;
+    var count = 0;
+    for (final objects in _byClass.values) {
+      if (objects.first is! T) continue;
+      found ??= objects.first as T;
+      count += objects.length;
+    }
+    if (count == 1) return found!;
+    throw StateError(
+      count == 0
+          ? 'there is no $T in this world; only<$T>() needs exactly one'
+          : 'there are $count of $T in this world; only<$T>() needs exactly one (all<$T>() gives them all)',
+    );
+  }
 
   /// The first live object or component of type [T] that the game added,
   /// or null. See [all].
@@ -865,9 +901,13 @@ final class World implements Finalizable {
           }
         }
         for (final c in components.reversed) {
-          if (c case final Behaviour b when !b._removed) _stopRoutines(b._routines);
+          if (c case final Behaviour b when !b._removed) {
+            _stopRoutines(b._routines);
+            b._listening?.cancelAll();
+          }
         }
         _stopRoutines(object._routines);
+        object._listening?.cancelAll();
         _safely(object, object.onDestroy);
         for (final c in components) {
           if (c case final Behaviour b when !b._removed) _safely(object, b.onDestroy);
@@ -876,7 +916,9 @@ final class World implements Finalizable {
     } finally {
       check(fy_despawn(pointer, id));
       for (final object in objects) {
+        if (object._unsent) _unsentGone = true;
         object
+          .._gone = true
           .._transform = null
           .._unsent = false;
         _objects.remove(object._id);
@@ -1107,14 +1149,19 @@ class GameObject {
   // The object this one was added to before either was live.
   GameObject? _queuedIn;
 
+  // Destroyed: from [destroy] on. Gone: out of the engine, once its
+  // onDestroy calls are done.
   bool _destroyed = false;
+  bool _gone = false;
   bool _started = false;
 
   // Whether it had onEnable and not onDisable since: it's shown.
   bool _enabled = false;
 
-  // The routines it started that are still running.
+  // The routines it started that are still running, and the signals it
+  // listens to with [on].
   List<Routine<Object?>>? _routines;
+  _Listening? _listening;
 
   // Its components, in the order they were put on; removed ones stay until
   // the world's next update takes them out. For an object the engine made
@@ -1162,6 +1209,13 @@ class GameObject {
 
   /// Whether [destroy] was called on this object or one above it.
   bool get isDestroyed => _destroyed;
+
+  /// The engine's world, for what needs this object there; a
+  /// [StateError] saying [what] can't be done once it's destroyed.
+  Pointer<FyWorld> _engine(String what) {
+    if (_gone) throw StateError('$this was destroyed, so $what');
+    return world.pointer;
+  }
 
   StateError _notAdded(String what) => StateError(
     '$this has no $what yet: it isn\'t added to a world. Add it first (world.add, or add to an object '
@@ -1254,6 +1308,25 @@ class GameObject {
   /// hidden. Throws a [StateError] before the object is added.
   Routine<T> start<T>(Future<T> Function() body) => world._start(this, this, body);
 
+  /// Calls [handler] with each value [signal] emits, until this object is
+  /// destroyed (with its routines: after its onDisable, before its
+  /// onDestroy) or the subscription is cancelled. The usual way to listen:
+  /// a destroyed object never hears anything, and nothing holds it. What
+  /// [handler] throws goes to [World.errors]. It hears signals while it's
+  /// hidden too, as in Unity.
+  SignalSubscription<T> on<T>(Signal<T> signal, void Function(T value) handler) {
+    if (_destroyed) throw StateError('$this was destroyed, so it can\'t listen');
+    return _on(this, signal, handler);
+  }
+
+  /// Stops listening with [on], for this object and its behaviours.
+  void _stopListening() {
+    _listening?.cancelAll();
+    for (final c in _components ?? const <Component>[]) {
+      if (c is Behaviour) c._listening?.cancelAll();
+    }
+  }
+
   /// Called each time the object is shown: when it appears (right after
   /// its load, with everything added during it), and when it, or one
   /// above it, is turned on ([active]) or it's moved out from below a
@@ -1332,9 +1405,10 @@ class GameObject {
     }
   }
 
-  /// Removes the object and everything below it. Using any of them
-  /// afterwards throws a [FynkelException] with [FynkelStatus.noObject].
-  /// Destroying an object again does nothing.
+  /// Removes the object and everything below it. Each gets its onDisable
+  /// and onDestroy calls first, while it can still be read; using any of
+  /// them after that throws a [StateError] saying it was destroyed
+  /// ([isDestroyed] tells). Destroying an object again does nothing.
   void destroy() {
     if (_destroyed) return;
     final world = _world;
@@ -1346,6 +1420,7 @@ class GameObject {
     }
     if (world.isDisposed || !fy_exists(world._pointer, _id)) {
       _destroyed = true;
+      _gone = true;
       return;
     }
     world._destroy(_id);
@@ -1355,6 +1430,8 @@ class GameObject {
   /// what they own and the assets they hold go too.
   void _destroyUnadded() {
     _destroyed = true;
+    _gone = true;
+    _stopListening();
     for (final c in _components ?? const <Component>[]) {
       c._removed = true;
     }
@@ -1394,7 +1471,7 @@ class GameObject {
   /// Setting null makes it a root. A parent that is this object or below it
   /// throws [FynkelStatus.invalidValue], as does one from another world.
   GameObject? get parent {
-    check(fy_parent_get(world.pointer, id, scratch.id));
+    check(fy_parent_get(_engine('its parent can\'t be read'), id, scratch.id));
     final parent = scratch.id.value;
     return parent == 0 ? null : world._object(parent);
   }
@@ -1406,7 +1483,7 @@ class GameObject {
         '$value is in another world, so it can\'t be the parent of $this',
       );
     }
-    check(fy_parent_set(world.pointer, id, value?.id ?? 0));
+    check(fy_parent_set(_engine('its parent can\'t be set'), id, value?.id ?? 0));
     world._moved.add(this);
     world._shape++;
     world._refresh(this);
@@ -1414,12 +1491,15 @@ class GameObject {
 
   /// The objects whose [parent] is this one, in the order they were added.
   /// A new list each time.
-  List<GameObject> get children => List.unmodifiable(world._childIds(id).map(world._object));
+  List<GameObject> get children {
+    _engine('its children can\'t be read');
+    return List.unmodifiable(world._childIds(id).map(world._object));
+  }
 
   /// Whether this object is [other] or below it.
   bool isPartOf(GameObject other) {
     if (other._world == null || !identical(other._world, world)) return false;
-    check(fy_is_part_of(world.pointer, id, other.id, scratch.flag));
+    check(fy_is_part_of(_engine('isPartOf can\'t tell'), id, other.id, scratch.flag));
     return scratch.flag.value;
   }
 
@@ -1438,11 +1518,9 @@ class GameObject {
   /// [activeInHierarchy].
   bool get active {
     if (_described case final d?) return d.active;
-    if (_hiddenForLoad) {
-      world.pointer;
-      return _activeSelf;
-    }
-    check(fy_active_get(world.pointer, id, scratch.flag));
+    final w = _engine('active can\'t be read');
+    if (_hiddenForLoad) return _activeSelf;
+    check(fy_active_get(w, id, scratch.flag));
     return scratch.flag.value;
   }
 
@@ -1451,7 +1529,7 @@ class GameObject {
       d.active = value;
       return;
     }
-    final w = world.pointer;
+    final w = _engine('active can\'t be set');
     _activeSelf = value;
     // While it loads it stays hidden; it takes this flag when it appears.
     if (_hiddenForLoad) return;
@@ -1468,7 +1546,7 @@ class GameObject {
   /// Whether this object is shown: it and every object above it [active],
   /// and loaded (see [GameObject.onLoad]).
   bool get activeInHierarchy {
-    check(fy_active_in_hierarchy_get(world.pointer, id, scratch.flag));
+    check(fy_active_in_hierarchy_get(_engine('activeInHierarchy can\'t be read'), id, scratch.flag));
     return scratch.flag.value;
   }
 
@@ -1476,7 +1554,7 @@ class GameObject {
   /// the same as null.
   String? get name {
     if (_described case final d?) return d.name;
-    final w = world.pointer;
+    final w = _engine('its name can\'t be read');
     final capacity = scratch.byteCapacity;
     check(fy_name_get(w, id, scratch.bytes(), capacity, scratch.count));
     final length = scratch.count.value;
@@ -1497,14 +1575,15 @@ class GameObject {
 
   void _writeName(String value) {
     final length = scratch.utf8(value);
-    check(fy_name_set(world.pointer, id, scratch.bytes(), length));
+    check(fy_name_set(_engine('its name can\'t be set'), id, scratch.bytes(), length));
   }
 
   /// The first object below this one named [name], searching depth first
   /// in [children] order, or null. This object itself isn't searched.
   GameObject? find(String name) {
+    final w = _engine('nothing can be found below it');
     final length = scratch.utf8(name);
-    check(fy_find(world.pointer, id, scratch.bytes(), length, scratch.id));
+    check(fy_find(w, id, scratch.bytes(), length, scratch.id));
     final found = scratch.id.value;
     return found == 0 ? null : world._object(found);
   }
@@ -1517,8 +1596,9 @@ class GameObject {
   /// skewed, which no position, rotation and scale can describe (Unity
   /// calls this the "lossy" scale).
   Transform get worldTransform {
+    final w = _engine('its worldTransform can\'t be read');
     world._sendTransforms();
-    check(fy_world_transform_get(world.pointer, id, scratch.transform));
+    check(fy_world_transform_get(w, id, scratch.transform));
     final t = scratch.transform.ref;
     return Transform._(t.position.read(), t.rotation.read(), t.scale.read());
   }
@@ -1598,6 +1678,7 @@ class GameObject {
     if (world == null) {
       component._removed = true;
       _components!.remove(component);
+      if (component is Behaviour) component._listening?.cancelAll();
       return;
     }
     switch (component) {
@@ -1607,6 +1688,7 @@ class GameObject {
           world._safely(this, b.onDisable);
         }
         world._stopRoutines(b._routines);
+        b._listening?.cancelAll();
         world._safely(this, b.onDestroy);
       case Camera():
         check(fy_camera_remove(world.pointer, id));
@@ -1716,7 +1798,7 @@ class GameObject {
   /// digits.
   Transform get transform {
     if (_described case final d?) return d.transform;
-    final w = world.pointer;
+    final w = _engine('its transform can\'t be read');
     if (_transform case final t?) return t;
     check(fy_transform_get(w, id, scratch.transform));
     final t = scratch.transform.ref;
@@ -1728,7 +1810,7 @@ class GameObject {
       d.transform = value;
       return;
     }
-    final w = world.pointer;
+    final w = _engine('its transform can\'t be set');
     if (_transform == null && !fy_exists(w, _id)) {
       throw FynkelException(FynkelStatus.noObject, 'object#$_id does not exist (despawned, or never spawned)');
     }
@@ -1778,7 +1860,7 @@ class GameObject {
     c.near_clip = value.near;
     c.far_clip = value.far;
     c.clear_color.write(value.clearColor);
-    check(fy_camera_set(world.pointer, id, scratch.camera));
+    check(fy_camera_set(_engine('its Camera can\'t be changed'), id, scratch.camera));
   }
 
   void _writeLight(Light value) {
@@ -1789,10 +1871,11 @@ class GameObject {
     };
     l.color.write(value.color);
     l.intensity = value.intensity;
-    check(fy_light_set(world.pointer, id, scratch.light));
+    check(fy_light_set(_engine('its Light can\'t be changed'), id, scratch.light));
   }
 
   void _writeMeshRenderer(MeshRenderer value) {
+    _engine('its MeshRenderer can\'t be changed');
     final w = world;
     final mesh = value.mesh == null ? 0 : w._meshId(value.mesh!);
     final material = value.material == null ? 0 : w._materialId(value.material!);
