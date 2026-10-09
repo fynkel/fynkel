@@ -271,6 +271,16 @@ Built into package:fynkel, its own module: one small core and short helpers on t
 - **Moving things by hand**: `position`, `rotation`, `scale` and `worldPosition` read and set directly on objects and behaviours (still one `Transform` value underneath); `forward`, `right`, `up`; `lookAt(point)`; `transformPoint` and `inverseTransformPoint`. And Unity's Mathf: `moveTowards`, `smoothDamp`, `lerp`, `inverseLerp`, `clamp`, `repeat`, `pingPong`, `randomInSphere`, `randomOnCircle`.
 - **Names that don't clash with Flutter's** (`Tween`, `Curve`, `Animation`), since games import both: `tween()`, `Ease`, and `Motion` for a running tween (§5).
 
+- *Settled in step 6:*
+  - **`seconds:` or `speed:`, named**: every tween and helper takes one of the two (`moveTo(p, seconds: 0.5)`, `moveTo(p, speed: 4)`), rather than seconds in its place, as Dart can't have both. Speed works for numbers, `Vec2`, `Vec3` (units a second) and `Quat` (radians a second).
+  - **Where they run**: in the routines step, before the waits end, in the order they were made; a motion made in a frame moves from the next, as a `wait` counts. So late updates (a camera) see where the tweens put things.
+  - **A motion is a future that never fails**: it completes when it ends, however it ends (done, stopped, with its owner); `isCompleted` and `isStopped` say which. Awaited in a routine it's one of the routine's waits, so the code after it runs in the routines step and stopping the routine unwinds it; `race` stops a motion that loses.
+  - **Helpers read where they start when they begin** (after their delay), so `sequence([moveTo(a), moveTo(b)])` goes to a, then from a to b. A group takes motions made in the same frame, none looping for ever. A group that loops without a yoyo begins its parts again from where they are (a patrol); one with a yoyo plays them back, the last first. A tween that loops starts over from the same value.
+  - **The default ease is `Ease.outQuad`**, DOTween's.
+  - **`position`, `rotation`, `scale` are the local ones**, as `transform`'s; `worldPosition` and `forward`, `right`, `up` are the world's, as in Unity. A game's own field with one of these names clashes (hello's `Sphere` had `var up = true`, now `goingUp`); the helpers never read them, so an override can't change what they move.
+  - **`rotateBy(axis, angle)`** joined the helpers: a spinning coin needs more than half a turn, which `rotateTo` can't say. **`fadeTo` waits**: the engine draws nothing see-through yet. `colorTo` colours the renderer's material, or the one given.
+  - **Mathf**: `lerp`, `inverseLerp`, `clamp01` (Dart's `clamp` does the rest), `moveTowards`, `repeat`, `pingPong`, `randomInSphere`, `randomOnCircle`; `Vec2`/`Vec3.lerp` and `moveTowards`, `Quat.slerp`, `Color.lerp`. `SmoothDamp` and `SmoothDamp3` are small classes holding their velocity, as Dart has no `ref`.
+
 ### 3.8 Cameras
 
 As Cinemachine: the view has one real camera, and **virtual cameras** decide where it is.
@@ -374,6 +384,16 @@ keys and hover wait for the three devices.
 shape, sequences, loops and yoyo, unscaled tweens, stopping with the
 owner, awaiting in routines, and the transform helpers against hand-worked
 values; 1,000 running tweens cost less than 1 ms a frame on the Note10+.
+✅ 6 tests in `test/ease_test.dart`, 42 in `test/motion_test.dart` and 13
+in `test/moving_test.dart` (304 in package:fynkel in all); 20 mutants:
+15 killed at once, 4 more after a test each (a moveBy loop going on from
+where it was, a yoyo group's later parts waiting their turn, a part's
+`onComplete` each time it ends, SmoothDamp never passing its target), one
+equivalent. 1,000 tweens: median 0.25 ms a frame on the Note10+ (§6). The
+lab's two scenes, Motion: eases and Motion: tweens and sequences, were
+tried on the iOS simulator (eases, complete, the patrol, the door awaited
+in a routine, the race, the shake); the crate's click and the three
+devices wait for you.
 
 **Step 7: cameras.** §3.8, and the orthographic camera in the engine.
 *Done when* tests show priorities, blends and cuts, each rig against
@@ -492,3 +512,17 @@ Waiting is what the plan budgets (0.5 ms on the Note10+): 0.03 ms. A
 routine going on costs about 0.3 µs on the Mac and 0.85 µs on the
 Note10+ each time: a wait made, ended and awaited. The slowest frames
 are the garbage collector's.
+
+### Step 6: motion (`measure bench`, profile builds, 2026-10-10)
+
+`world.update` with 1,000 motions, median (slowest) of 300 steady frames:
+
+| 1,000 motions | Mac (M3 Max) | Galaxy Note10+ |
+|---|---:|---:|
+| **moving 1,000 objects** (`moveTo`, yoyo, for ever) | 0.09 (1.17) ms | **0.25** (6.26) ms |
+| of a double (`tween`) | 0.02 (0.41) ms | 0.05 (2.78) ms |
+| none | 0.00 ms | 0.00 ms |
+
+The bar is 1 ms on the Note10+: 0.25 ms, of which most is setting 1,000
+transforms (a double alone is 0.05 ms). The slowest frames are the
+garbage collector's, as with routines.

@@ -18,6 +18,11 @@ final class Color {
   static const white = Color.rgb(1, 1, 1);
   static const black = Color.rgb(0, 0, 0);
 
+  /// The colour [t] of the way from [a] to [b], channel by channel as
+  /// they're picked (sRGB): [a] at 0, [b] at 1.
+  static Color lerp(Color a, Color b, double t) =>
+      Color.rgb(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t);
+
   @override
   bool operator ==(Object other) => other is Color && other.r == r && other.g == g && other.b == b && other.a == a;
 

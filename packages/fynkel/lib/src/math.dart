@@ -14,8 +14,23 @@ final class Vec2 {
   Vec2 operator +(Vec2 o) => Vec2(x + o.x, y + o.y);
   Vec2 operator -(Vec2 o) => Vec2(x - o.x, y - o.y);
   Vec2 operator *(double s) => Vec2(x * s, y * s);
+  Vec2 operator /(double s) => Vec2(x / s, y / s);
+  Vec2 operator -() => Vec2(-x, -y);
 
+  double dot(Vec2 o) => x * o.x + y * o.y;
   double get length => math.sqrt(x * x + y * y);
+
+  /// The point [t] of the way from [a] to [b]: [a] at 0, [b] at 1, and
+  /// beyond them outside 0–1.
+  static Vec2 lerp(Vec2 a, Vec2 b, double t) => Vec2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+
+  /// [current] moved towards [target] by at most [maxDistance], never past
+  /// it: `position = Vec2.moveTowards(position, goal, speed * time.delta)`.
+  static Vec2 moveTowards(Vec2 current, Vec2 target, double maxDistance) {
+    final d = target - current;
+    final l = d.length;
+    return l <= maxDistance || l == 0 ? target : current + d * (maxDistance / l);
+  }
 
   @override
   bool operator ==(Object other) => other is Vec2 && other.x == x && other.y == y;
@@ -53,6 +68,9 @@ final class Vec3 {
   Vec3 operator *(double s) => Vec3(x * s, y * s, z * s);
   Vec3 operator /(double s) => Vec3(x / s, y / s, z / s);
 
+  /// Each component times [o]'s: a scale applied to a point.
+  Vec3 scaledBy(Vec3 o) => Vec3(x * o.x, y * o.y, z * o.z);
+
   double dot(Vec3 o) => x * o.x + y * o.y + z * o.z;
   Vec3 cross(Vec3 o) => Vec3(y * o.z - z * o.y, z * o.x - x * o.z, x * o.y - y * o.x);
   double get length => math.sqrt(dot(this));
@@ -68,6 +86,19 @@ final class Vec3 {
   /// Whether every component is within [tolerance] of [o]'s.
   bool closeTo(Vec3 o, [double tolerance = 1e-6]) =>
       (x - o.x).abs() <= tolerance && (y - o.y).abs() <= tolerance && (z - o.z).abs() <= tolerance;
+
+  /// The point [t] of the way from [a] to [b]: [a] at 0, [b] at 1, and
+  /// beyond them outside 0–1.
+  static Vec3 lerp(Vec3 a, Vec3 b, double t) =>
+      Vec3(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
+
+  /// [current] moved towards [target] by at most [maxDistance], never past
+  /// it: `position = Vec3.moveTowards(position, goal, speed * time.delta)`.
+  static Vec3 moveTowards(Vec3 current, Vec3 target, double maxDistance) {
+    final d = target - current;
+    final l = d.length;
+    return l <= maxDistance || l == 0 ? target : current + d * (maxDistance / l);
+  }
 
   @override
   bool operator ==(Object other) => other is Vec3 && other.x == x && other.y == y && other.z == z;
@@ -150,6 +181,33 @@ final class Quat {
   /// The opposite rotation.
   Quat get inverse => Quat(-x, -y, -z, w);
 
+  double dot(Quat o) => x * o.x + y * o.y + z * o.z + w * o.w;
+
+  /// The angle between this rotation and [o], in radians: 0 to pi.
+  double angleTo(Quat o) => 2 * math.acos(math.min(1, dot(o).abs()));
+
+  /// The rotation [t] of the way from [a] to [b], turning the short way
+  /// round at an even speed (spherical interpolation): [a] at 0, [b] at 1.
+  static Quat slerp(Quat a, Quat b, double t) {
+    var d = a.dot(b);
+    // q and -q are the same rotation: take the one nearer, for the short way.
+    final s = d < 0 ? -1.0 : 1.0;
+    d *= s;
+    double ka, kb;
+    if (d > 0.9995) {
+      // Nearly the same: a straight line, normalized, is as good.
+      ka = 1 - t;
+      kb = t;
+    } else {
+      final theta = math.acos(d);
+      final sin = math.sin(theta);
+      ka = math.sin((1 - t) * theta) / sin;
+      kb = math.sin(t * theta) / sin;
+    }
+    kb *= s;
+    return Quat(a.x * ka + b.x * kb, a.y * ka + b.y * kb, a.z * ka + b.z * kb, a.w * ka + b.w * kb).normalized;
+  }
+
   double get length => math.sqrt(x * x + y * y + z * z + w * w);
 
   /// This rotation with length exactly 1 again. Many multiplied rotations
@@ -228,4 +286,126 @@ final class ViewPoint {
 
   @override
   String toString() => 'ViewPoint($x, $y in ${width}x$height)';
+}
+
+// Unity's Mathf, for moving things by hand.
+
+/// The value [t] of the way from [a] to [b]: [a] at 0, [b] at 1, and
+/// beyond them outside 0–1 (Unity's `LerpUnclamped`; clamp [t] for its
+/// `Lerp`).
+double lerp(double a, double b, double t) => a + (b - a) * t;
+
+/// How far [value] is from [a] to [b]: 0 at [a], 1 at [b], beyond outside
+/// them; 0 when [a] and [b] are the same.
+double inverseLerp(double a, double b, double value) => a == b ? 0 : (value - a) / (b - a);
+
+/// [value] kept within 0 and 1.
+double clamp01(double value) => value < 0 ? 0 : (value > 1 ? 1 : value);
+
+/// [current] moved towards [target] by at most [maxDelta], never past it.
+double moveTowards(double current, double target, double maxDelta) {
+  final d = target - current;
+  return d.abs() <= maxDelta ? target : current + (d < 0 ? -maxDelta : maxDelta);
+}
+
+/// [t] wrapped into 0 up to [length]: 0, 1, 2, 0, 1, 2... for a length of
+/// 3, as a clock's hand goes round. Negative [t] wraps too.
+double repeat(double t, double length) => t - (t / length).floorToDouble() * length;
+
+/// [t] going from 0 up to [length] and back again: 0, 1, 2, 1, 0, 1...
+double pingPong(double t, double length) {
+  final r = repeat(t, length * 2);
+  return length - (r - length).abs();
+}
+
+final _random = math.Random();
+
+/// A point anywhere inside the sphere of radius 1, each as likely.
+Vec3 randomInSphere([math.Random? random]) {
+  final r = random ?? _random;
+  while (true) {
+    final p = Vec3(r.nextDouble() * 2 - 1, r.nextDouble() * 2 - 1, r.nextDouble() * 2 - 1);
+    if (p.dot(p) <= 1) return p;
+  }
+}
+
+/// A point on the circle of radius 1, each direction as likely.
+Vec2 randomOnCircle([math.Random? random]) {
+  final a = (random ?? _random).nextDouble() * 2 * math.pi;
+  return Vec2(math.cos(a), math.sin(a));
+}
+
+/// Follows a moving target smoothly, as a spring that never overshoots
+/// (Unity's `Mathf.SmoothDamp`), keeping its own speed from frame to
+/// frame:
+///
+/// ```dart
+/// final follow = SmoothDamp(smoothTime: 0.3);
+/// // each frame:
+/// height = follow.step(height, target, time.delta);
+/// ```
+final class SmoothDamp {
+  SmoothDamp({required this.smoothTime, this.maxSpeed = double.infinity});
+
+  /// About how long it takes to reach the target, in seconds.
+  double smoothTime;
+
+  /// The fastest it moves, in units a second.
+  double maxSpeed;
+
+  /// How fast it's moving now, in units a second.
+  double velocity = 0;
+
+  /// [current] moved towards [target] over [dt] seconds.
+  double step(double current, double target, double dt) {
+    // Unity's: a critically damped spring, by Game Programming Gems 4.
+    final st = math.max(0.0001, smoothTime);
+    final omega = 2 / st;
+    final x = omega * dt;
+    final exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+    var change = current - target;
+    final goal = target;
+    final maxChange = maxSpeed * st;
+    change = change.clamp(-maxChange, maxChange);
+    final to = current - change;
+    final temp = (velocity + omega * change) * dt;
+    velocity = (velocity - omega * temp) * exp;
+    var out = to + (change + temp) * exp;
+    // Never past the target.
+    if ((goal - current > 0) == (out > goal)) {
+      out = goal;
+      velocity = dt > 0 ? (out - goal) / dt : 0;
+    }
+    return out;
+  }
+}
+
+/// [SmoothDamp] for a point: follows a moving target in 3D.
+final class SmoothDamp3 {
+  SmoothDamp3({required double smoothTime, this._maxSpeed = double.infinity})
+    : _x = SmoothDamp(smoothTime: smoothTime),
+      _y = SmoothDamp(smoothTime: smoothTime),
+      _z = SmoothDamp(smoothTime: smoothTime);
+
+  final SmoothDamp _x, _y, _z;
+  final double _maxSpeed;
+
+  /// About how long it takes to reach the target, in seconds.
+  double get smoothTime => _x.smoothTime;
+  set smoothTime(double value) => _x.smoothTime = _y.smoothTime = _z.smoothTime = value;
+
+  /// How fast it's moving now, in units a second.
+  Vec3 get velocity => Vec3(_x.velocity, _y.velocity, _z.velocity);
+
+  /// [current] moved towards [target] over [dt] seconds, at most
+  /// `maxSpeed` units a second.
+  Vec3 step(Vec3 current, Vec3 target, double dt) {
+    var goal = target;
+    if (_maxSpeed.isFinite) {
+      final reach = _maxSpeed * smoothTime;
+      final d = target - current;
+      if (d.length > reach) goal = current + d * (reach / d.length);
+    }
+    return Vec3(_x.step(current.x, goal.x, dt), _y.step(current.y, goal.y, dt), _z.step(current.z, goal.z, dt));
+  }
 }

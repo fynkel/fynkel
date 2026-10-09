@@ -9,7 +9,7 @@
 import 'package:fynkel/fynkel.dart';
 
 /// Each result as a line, for `Measurement.report`.
-List<String> bench() => [..._updates(), ..._routines(), ..._extract(), ..._raycasts()];
+List<String> bench() => [..._updates(), ..._routines(), ..._motions(), ..._extract(), ..._raycasts()];
 
 /// Turns itself a little every frame: a transform read and written.
 class _Spinner extends GameObject {
@@ -144,6 +144,59 @@ List<String> _routines() {
     world.dispose();
     times.sort();
     lines.add('update, 1,000 routines $name: median ${_ms(times[times.length ~/ 2])}, slowest ${_ms(times.last)}');
+  }
+  return lines;
+}
+
+/// `world.update` with 1,000 running tweens (docs/stage-4.md, step 6:
+/// under 1 ms a frame on the Note10+): 1,000 objects each moved by a
+/// `moveTo` that goes back and forth for ever (a transform written each
+/// frame, and sent, as the next frame would), 1,000 `tween`s of a double
+/// on one object (the motions alone), and none. Median and slowest of 300
+/// steady frames.
+List<String> _motions() {
+  final lines = <String>[];
+  for (final (name, make) in <(String, void Function(World world))>[
+    (
+      'moving 1,000 objects',
+      (world) {
+        for (var i = 0; i < 1000; i++) {
+          final o = world.add(GameObject(transform: Transform(position: Vec3(i * 0.01, 0, 0))));
+          o.moveTo(Vec3(i * 0.01, 1, 0), seconds: 1 + i % 7 * 0.1, ease: Ease.inOutSine, loops: -1, yoyo: true);
+        }
+      },
+    ),
+    (
+      'of a double',
+      (world) {
+        final o = world.add(GameObject());
+        var sum = 0.0;
+        for (var i = 0; i < 1000; i++) {
+          o.tween(0.0, 1.0, seconds: 1 + i % 7 * 0.1, loops: -1, yoyo: true, onUpdate: (v) => sum += v);
+        }
+      },
+    ),
+    ('none', (world) => world.add(GameObject())),
+  ]) {
+    final world = World();
+    make(world);
+    final first = world.add(GameObject());
+    for (var i = 0; i < 20; i++) {
+      world.update(1 / 120);
+    }
+    final times = <int>[];
+    final clock = Stopwatch();
+    for (var i = 0; i < 300; i++) {
+      clock
+        ..reset()
+        ..start();
+      world.update(1 / 120);
+      first.worldTransform;
+      times.add(clock.elapsedMicroseconds);
+    }
+    world.dispose();
+    times.sort();
+    lines.add('update, 1,000 tweens $name: median ${_ms(times[times.length ~/ 2])}, slowest ${_ms(times.last)}');
   }
   return lines;
 }

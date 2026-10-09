@@ -8,22 +8,22 @@ class Sphere extends GameObject {
   }
 
   var t = 0;
-  var up = true;
+  var goingUp = true;
 
   @override
   void onUpdate() {
     super.onUpdate();
     print(transform.position.y);
 
-    if (up) {
+    if (goingUp) {
       translate(Vec3(0, 1, 0) * time.delta);
       if (transform.position.y >= 1) {
-        up = false;
+        goingUp = false;
       }
     } else {
       translate(Vec3(0, -1, 0) * time.delta);
       if (transform.position.y <= -1) {
-        up = true;
+        goingUp = true;
       }
     }
   }
