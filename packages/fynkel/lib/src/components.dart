@@ -248,8 +248,11 @@ final class MeshRenderer extends Component {
 /// is turned off, and [onDisable] and [onDestroy] when it's removed or its
 /// object is destroyed. While [enabled] is false it gets none of them but
 /// [onLoad] and [onDestroy], and it starts when it's next enabled.
-abstract class Behaviour extends Component {
+abstract class Behaviour extends Component with _Moving {
   Behaviour() : super._();
+
+  @override
+  GameObject get _self => gameObject;
 
   /// Whether it gets its object's frames and pointers. A disabled behaviour
   /// waits to start until it's enabled. Setting it calls [onDisable] or

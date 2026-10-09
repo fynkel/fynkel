@@ -15,6 +15,8 @@ scene(s) here.
 | Signals in a game | 4    | Enemies' `died`, a scoreboard, `listen` against `on`, a door awaiting `next` |
 | Input: fingers and keys | 5 | Every gesture logged, a dial to pinch and twist, a puck on WASD and space |
 | Input on objects | 5 | Pads that light, sink, count clicks and bubble; crates you drag |
+| Motion: eases | 6 | Every ease side by side, in, out and in-out; seconds, time scale, complete |
+| Motion: tweens and sequences | 6 | A patrol sequence, a SmoothDamp follower, a punched crate, a door awaited in a routine, a race |
 
 ## Running it
 

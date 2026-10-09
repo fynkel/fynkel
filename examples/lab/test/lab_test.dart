@@ -6,6 +6,7 @@ import 'package:fynkel/fynkel.dart';
 import 'package:lab/lab.dart';
 import 'package:lab/scenes.dart';
 import 'package:lab/scenes/input.dart';
+import 'package:lab/scenes/motion.dart';
 import 'package:lab/scenes/pointers.dart';
 
 void main() {
@@ -108,5 +109,37 @@ void main() {
       world.update(1 / 60);
     }
     expect(puck.transform.position.x, closeTo(from.x + 2, 0.1), reason: '4 a second for half a second');
+  });
+
+  test('Motion: the door is awaited, the race is won by the wait, and the patrol comes round again', () async {
+    final world = World();
+    addTearDown(world.dispose);
+    final scene = world.add(MotionScene());
+    await scene.loaded;
+    void seconds(double s) {
+      for (var i = 0; i < s * 60; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    seconds(0.1);
+    final start = scene.guard.position;
+    // The square's side is 4 at 2 a second, plus a 0.4 s turn: 9.6 s round.
+    seconds(9.6);
+    expect(scene.guard.position.closeTo(start, 0.05), isTrue, reason: '${scene.guard.position}');
+
+    Button control(String label) => scene.controls.whereType<Button>().firstWhere((b) => b.label.startsWith(label));
+    final doorY = scene.door.position.y;
+    control('open the door').onPressed();
+    seconds(1.2);
+    expect(scene.door.position.y, closeTo(doorY + 1.9, 1e-9));
+    seconds(2);
+    expect(scene.door.position.y, closeTo(doorY, 1e-9));
+    control('race').onPressed();
+    seconds(1.2);
+    final lines = scene.log.value.map((l) => l.text);
+    expect(lines, containsAllInOrder(['door: opening…', startsWith('door: open'), 'door: closed']));
+    expect(lines, contains(startsWith('race: the 1 s wait won')));
+    expect(scene.runner.position.x, lessThan(-0.5), reason: 'stopped about a third of the way');
   });
 }

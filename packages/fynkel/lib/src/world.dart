@@ -19,6 +19,7 @@ part 'components.dart';
 part 'input.dart';
 part 'keys.dart';
 part 'model.dart';
+part 'motion.dart';
 part 'pointing.dart';
 part 'resources.dart';
 part 'routines.dart';
@@ -92,6 +93,7 @@ final class World implements Finalizable {
     _compact.clear();
     _waits.clear();
     _microtasks.clear();
+    _motions.clear();
     _moved.clear();
     _off.clear();
     _hidden.clear();
@@ -268,12 +270,15 @@ final class World implements Finalizable {
   ///    added during an update start next frame; objects destroyed during
   ///    it get no more calls, even this frame. A new [GameObject.parent]
   ///    counts from the next frame.
-  /// 4. **Late updates.** Then each object updated this frame, and its
+  /// 4. **Motions and routines.** Each running [Motion] moves on
+  ///    ([GameObject.tween], [GameObject.moveTo]...), in the order they
+  ///    were made, then the routines' waits end ([GameObject.start]).
+  /// 5. **Late updates.** Then each object updated this frame, and its
   ///    behaviours, get [GameObject.onLateUpdate] in the same order: for
   ///    what follows where the others went, such as a camera.
   ///
   /// Hidden objects (inactive, or below one that is) and their behaviours
-  /// are skipped by the last three and start when they're first shown; so are
+  /// are skipped by the last four and start when they're first shown; so are
   /// disabled behaviours ([Behaviour.enabled]) and those still loading. A
   /// view then draws the world as it is. What their code throws goes to
   /// [errors], and the frame goes on.
@@ -339,6 +344,7 @@ final class World implements Finalizable {
       }
     }
 
+    _runMotions();
     _runRoutines();
 
     for (var i = 0; i < updated && i < _live.length; i++) {
@@ -360,6 +366,47 @@ final class World implements Finalizable {
           }
         }
       }
+    }
+  }
+
+  // --- Motions ---
+
+  // The running motions not in a group, in the order they were made.
+  final _motions = <Motion>[];
+
+  /// Moves each running motion on by this frame's time: those made before
+  /// this frame, whose owners aren't paused.
+  void _runMotions() {
+    final motions = _motions;
+    if (motions.isEmpty) return;
+    final frame = time._frame;
+    var ended = false;
+    final n = motions.length;
+    for (var i = 0; i < n; i++) {
+      final m = motions[i];
+      if (!m.isRunning || m._group != null) {
+        ended = true;
+        continue;
+      }
+      if (m._made >= frame || _pausedOwner(m._owner)) continue;
+      try {
+        m._step(m.unscaled ? time._unscaledDelta : time._delta);
+      } catch (error, stack) {
+        _report(_objectOf(m._owner), error, stack);
+        m.stop();
+      }
+      if (!m.isRunning) ended = true;
+    }
+    if (ended) motions.removeWhere(_notRunning);
+  }
+
+  static bool _notRunning(Motion m) => !m.isRunning || m._group != null;
+
+  /// Stops the motions [owner] made, as it goes.
+  void _haltMotions(List<Motion>? motions) {
+    if (motions == null) return;
+    for (final m in [...motions].reversed) {
+      m._halt();
     }
   }
 
@@ -882,10 +929,12 @@ final class World implements Finalizable {
         for (final c in components.reversed) {
           if (c case final Behaviour b when !b._removed) {
             _stopRoutines(b._routines);
+            _haltMotions(b._motions);
             b._listening?.cancelAll();
           }
         }
         _stopRoutines(object._routines);
+        _haltMotions(object._motions);
         object._listening?.cancelAll();
         _safely(object, object.onDestroy);
         for (final c in components) {
@@ -1096,7 +1145,7 @@ final class World implements Finalizable {
 ///
 /// (Called `GameObject`, not `Object`, because Dart's `Object` is every
 /// value's type.)
-class GameObject {
+class GameObject with _Moving {
   /// A new object, not yet in any world, with [transform] (the identity if
   /// not given), [components] (as [addComponent] puts them on) and
   /// [children] (as [add] adds them), so a whole prefab can be one
@@ -1173,6 +1222,9 @@ class GameObject {
   List<Object>? _owned;
   List<_Asset>? _uses;
   Assets? _assets;
+
+  @override
+  GameObject get _self => this;
 
   /// The world the object was added to. Throws a [StateError] before it's
   /// added.
@@ -1716,6 +1768,7 @@ class GameObject {
           world._safely(this, b.onDisable);
         }
         world._stopRoutines(b._routines);
+        world._haltMotions(b._motions);
         b._listening?.cancelAll();
         world._safely(this, b.onDestroy);
       case Camera():

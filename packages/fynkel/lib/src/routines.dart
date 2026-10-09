@@ -339,6 +339,8 @@ Future<List<T>> all<T>(Iterable<Future<T>> futures) {
 void _cancel(Future<Object?> future) {
   if (future is Routine<Object?>) {
     future.stop();
+  } else if (future is Motion) {
+    future.stop();
   } else if (_waitOf[future] case final wait?) {
     wait.over = true;
   }
