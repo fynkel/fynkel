@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:isolate';
@@ -13,6 +14,7 @@ import 'error.dart';
 import 'math.dart';
 import 'native.dart';
 
+part 'assets.dart';
 part 'components.dart';
 part 'input.dart';
 part 'model.dart';
@@ -22,7 +24,9 @@ part 'resources.dart';
 /// materials they use. A world lives in the engine; free it with
 /// [dispose] (or it's freed when it's garbage collected).
 final class World implements Finalizable {
-  World() {
+  /// A new, empty world. [source] gives the bytes of an asset by name,
+  /// for [assets]; package:fynkel_flutter passes the app's bundle.
+  World({this._source}) {
     ensureEngine();
     _pointer = fy_world_new();
     _finalizer.attach(this, _pointer.cast(), detach: this);
@@ -55,6 +59,12 @@ final class World implements Finalizable {
   /// keeps drawing what it last had until the view is disposed too.
   void dispose() {
     if (_pointer == nullptr) return;
+    // What the objects owned and the assets still held: the engine's side
+    // goes with the world, the rest goes after it.
+    final owned = [
+      for (final object in _objects.values) ...?object._owned,
+      for (final asset in _assets.values) ?asset.value,
+    ];
     _finalizer.detach(this);
     fy_world_free(_pointer);
     _pointer = nullptr;
@@ -71,6 +81,64 @@ final class World implements Finalizable {
     _off.clear();
     _hidden.clear();
     _unsent.clear();
+    _assets.clear();
+    _free(owned, null);
+  }
+
+  // --- Errors ---
+
+  final _errors = StreamController<ObjectError>.broadcast();
+
+  /// Errors no caller could catch: an [GameObject.onLoad] that failed
+  /// (the object is destroyed, and its parent's load goes on without it),
+  /// and what couldn't be freed when an object was destroyed. With no
+  /// listener, each is an uncaught error of the zone the object was added
+  /// in, as an unawaited future's would be; listen to handle them, or
+  /// rethrow to stop.
+  Stream<ObjectError> get errors => _errors.stream;
+
+  void _report(GameObject? object, Object error, StackTrace stack) {
+    if (_errors.hasListener) {
+      _errors.add(ObjectError._(object, error, stack));
+    } else {
+      Zone.current.handleUncaughtError(error, stack);
+    }
+  }
+
+  // --- Assets ---
+
+  final AssetSource? _source;
+  final _assets = <String, _Asset>{};
+
+  /// Assets held by the world itself, for as long as it lives: what
+  /// `world.assets.preload` loads stays. Objects use their own
+  /// [GameObject.assets], so what they load goes with them.
+  late final Assets assets = Assets._(this, null);
+
+  /// Disposes [things]: materials first (they use textures), then meshes,
+  /// textures and models. What can't be disposed (still used elsewhere)
+  /// is reported, not thrown, as this runs while objects are destroyed.
+  void _free(Iterable<Object> things, GameObject? object) {
+    for (final kind in [Material, Mesh, Texture2D, Model]) {
+      for (final thing in things) {
+        if (thing.runtimeType != kind) continue;
+        try {
+          switch (thing) {
+            case Model model:
+              _free([...model.materials, ...model.meshes, ...model.textures], object);
+              model.dispose();
+            case Material material:
+              material.dispose();
+            case Mesh mesh:
+              mesh.dispose();
+            case Texture2D texture:
+              texture.dispose();
+          }
+        } catch (error, stack) {
+          if (!isDisposed) _report(object, error, stack);
+        }
+      }
+    }
   }
 
   // --- The loop ---
@@ -261,7 +329,7 @@ final class World implements Finalizable {
   /// is thrown; objects below it that were already live stay so.
   T add<T extends GameObject>(T root) {
     root._checkAddable();
-    _attach(root, null);
+    _add(root, null);
     return root;
   }
 
@@ -292,9 +360,26 @@ final class World implements Finalizable {
 
   GameObject _object(int id) => _objects[id] ??= GameObject._live(this, id);
 
+  /// Spawns [object] under [parent] with everything added to it so far,
+  /// then runs their loads, parents first. Those still loading when that
+  /// returns are hidden until they're done.
+  void _add(GameObject object, GameObject? parent) {
+    final fresh = <GameObject>[];
+    try {
+      _attach(object, parent, fresh);
+    } finally {
+      for (final o in fresh) {
+        _runLoad(o);
+      }
+      for (final o in fresh) {
+        if (o._pending > 0 && !o._destroyed) _hideWhileLoading(o);
+      }
+    }
+  }
+
   /// Spawns [object] in the engine under [parent], then what was added to
-  /// it before it was live.
-  void _attach(GameObject object, GameObject? parent) {
+  /// it before it was live, and lists each in [fresh].
+  void _attach(GameObject object, GameObject? parent, List<GameObject> fresh) {
     final described = object._described!;
     final transform = described.transform;
     GameObject._check(transform);
@@ -316,7 +401,16 @@ final class World implements Finalizable {
         .._id = 0;
       rethrow;
     }
-    object._described = null;
+    object
+      .._described = null
+      .._activeSelf = described.active
+      .._pending = 1;
+    if (described.asset case final asset?) (object._uses ??= []).add(asset);
+    if (parent != null && parent._pending > 0) {
+      object._waiter = parent;
+      parent._pending++;
+    }
+    fresh.add(object);
     if (described.model == null) object._setTransform(transform);
     _objects[id] = object;
     (_byClass[object.runtimeType] ??= {}).add(object);
@@ -326,8 +420,75 @@ final class World implements Finalizable {
     _shape++;
     for (final child in described.children) {
       child._queuedIn = null;
-      _attach(child, object);
+      _attach(child, object, fresh);
     }
+  }
+
+  /// Runs [object]'s [GameObject.onLoad]: done at once when it returns no
+  /// future, else when its future completes.
+  void _runLoad(GameObject object) {
+    if (object._destroyed) return;
+    final FutureOr<void> result;
+    try {
+      result = object.onLoad();
+    } catch (error, stack) {
+      _loadFailed(object, error, stack);
+      return;
+    }
+    if (result is Future<void>) {
+      result.then(
+        (_) => _loadDone(object),
+        onError: (Object error, StackTrace stack) => _loadFailed(object, error, stack),
+      );
+    } else {
+      _loadDone(object);
+    }
+  }
+
+  void _loadDone(GameObject object) {
+    if (object._destroyed) return;
+    object._pending--;
+    _appearIfDone(object);
+  }
+
+  /// Destroys the object whose load failed and reports why. A load that
+  /// fails after its object was destroyed (it found the object gone) is
+  /// what destroying it mid-load means, and is ignored.
+  void _loadFailed(GameObject object, Object error, StackTrace stack) {
+    if (object._destroyed || isDisposed) return;
+    object._failLoaded(error, stack);
+    object.destroy();
+    _report(object, error, stack);
+  }
+
+  /// Shows [object] once its own load and those of everything added
+  /// during it are done, then tells the object waiting for it.
+  void _appearIfDone(GameObject object) {
+    if (object._pending > 0 || object._destroyed) return;
+    object._appeared = true;
+    if (object._hiddenForLoad) {
+      object._hiddenForLoad = false;
+      if (object._activeSelf) {
+        check(fy_active_set(pointer, object._id, true));
+        _off.remove(object);
+        _shape++;
+      }
+    }
+    object._loadedCompleter?.complete();
+    object._loadedCompleter = null;
+    final waiter = object._waiter;
+    object._waiter = null;
+    if (waiter != null) {
+      waiter._pending--;
+      _appearIfDone(waiter);
+    }
+  }
+
+  void _hideWhileLoading(GameObject object) {
+    object._hiddenForLoad = true;
+    check(fy_active_set(pointer, object._id, false));
+    _off.add(object);
+    _shape++;
   }
 
   int _spawn() {
@@ -394,6 +555,34 @@ final class World implements Finalizable {
       }
       _liveDirty = true;
       _shape++;
+      _forget(objects);
+    }
+  }
+
+  /// What destroying [objects] means beyond the engine: loads waiting for
+  /// them go on without them, and what they owned and the assets they
+  /// held are freed, if no one else holds them.
+  void _forget(List<GameObject> objects) {
+    final waiters = <GameObject>[];
+    for (final object in objects) {
+      if (!object._appeared) {
+        object._failLoaded(StateError('$object was destroyed before it appeared'), StackTrace.current);
+      }
+      object._pending = 0;
+      if (object._waiter case final waiter? when !waiter._destroyed) waiters.add(waiter);
+      object._waiter = null;
+    }
+    _free([for (final object in objects) ...?object._owned], objects.firstOrNull);
+    for (final object in objects) {
+      object._owned = null;
+      for (final asset in object._uses ?? const <_Asset>[]) {
+        _release(asset, object);
+      }
+      object._uses = null;
+    }
+    for (final waiter in waiters) {
+      waiter._pending--;
+      _appearIfDone(waiter);
     }
   }
 
@@ -559,7 +748,7 @@ class GameObject {
 
   /// The object for an engine id the game didn't make, such as a model's
   /// part.
-  GameObject._live(World world, int id) : _world = world, _id = id;
+  GameObject._live(World world, int id) : _world = world, _id = id, _appeared = true;
 
   static List<Component> _checked(Iterable<Component> components) {
     final list = components.toList();
@@ -594,6 +783,24 @@ class GameObject {
   Transform? _transform;
   bool _unsent = false;
 
+  // Loading: how many loads this object waits for (its own, and those of
+  // the objects added during it), the object waiting for this one, and
+  // whether it's hidden until they're done. [_activeSelf] is the game's
+  // own flag, which the engine's follows once the object has appeared.
+  int _pending = 0;
+  GameObject? _waiter;
+  bool _appeared = false;
+  bool _hiddenForLoad = false;
+  bool _activeSelf = true;
+  Completer<void>? _loadedCompleter;
+  (Object, StackTrace)? _loadFailure;
+
+  // What the object frees when it's destroyed: what it [own]s, and the
+  // assets it holds a use of.
+  List<Object>? _owned;
+  List<_Asset>? _uses;
+  Assets? _assets;
+
   /// The world the object was added to. Throws a [StateError] before it's
   /// added.
   World get world => _world ?? (throw _notAdded('world'));
@@ -613,6 +820,64 @@ class GameObject {
     '$this has no $what yet: it isn\'t added to a world. Add it first (world.add, or add to an object '
     'that is), and touch the world from its onLoad on.',
   );
+
+  // --- Loading ---
+
+  /// Called once, when the object is added: where it gets its assets
+  /// and adds its children. Until it, and everything added during it,
+  /// are loaded, the object is hidden: not drawn, not hit, not started or
+  /// updated. Then it appears whole, and [loaded] completes.
+  ///
+  /// Return a future (`Future<void> onLoad() async`) to load something;
+  /// an object that loads nothing appears at once, in the same `add`.
+  /// A load that throws destroys the object and goes to [World.errors];
+  /// the parent's load goes on without it. If the object is destroyed
+  /// while it loads, its load finds it gone at its next step (adding to
+  /// it and loading for it throw a [StateError]) and is ignored, and
+  /// what it loaded is freed.
+  @mustCallSuper
+  @protected
+  FutureOr<void> onLoad() {}
+
+  /// Completes when the object has appeared: it and everything added
+  /// during its [onLoad] are loaded. Fails with the load's error if its
+  /// load failed, or with a [StateError] if it was destroyed first.
+  ///
+  /// To keep one level on screen until the next is ready:
+  /// `final forest = world.add(Forest()); await forest.loaded; garden.destroy();`.
+  Future<void> get loaded {
+    if (_appeared) return Future.value();
+    if (_loadFailure case (final error, final stack)) return Future.error(error, stack);
+    return (_loadedCompleter ??= Completer<void>()).future;
+  }
+
+  void _failLoaded(Object error, StackTrace stack) {
+    if (_appeared || _loadFailure != null) return;
+    _loadFailure = (error, stack);
+    _loadedCompleter?.completeError(error, stack);
+    _loadedCompleter = null;
+  }
+
+  /// The world's assets, loaded for this object: each one it asks for is
+  /// held until it's destroyed, and freed then if no one else holds it.
+  Assets get assets => _assets ??= Assets._(_world ?? (throw _notAdded('assets')), this);
+
+  /// Gives [resource] (a [Mesh], [Texture2D], [Material] or [Model] the
+  /// game made itself) to this object, to be disposed when it's
+  /// destroyed, and returns it: `own(Material(baseColorTexture: grass))`.
+  /// Materials are disposed before meshes and textures, as they use them.
+  T own<T extends Object>(T resource) {
+    if (_destroyed) throw StateError('$this was destroyed, so it can\'t own anything');
+    switch (resource) {
+      case Mesh(_shape: true):
+        throw ArgumentError.value(resource, 'resource', 'is built in and is never disposed');
+      case Mesh() || Texture2D() || Material() || Model():
+        (_owned ??= []).add(resource);
+        return resource;
+      default:
+        throw ArgumentError.value(resource, 'resource', 'is not a Mesh, Texture2D, Material or Model');
+    }
+  }
 
   // --- The loop ---
 
@@ -661,7 +926,7 @@ class GameObject {
       if (identical(above, child)) throw StateError('$child can\'t be added below itself');
     }
     if (_world != null) {
-      _world!._attach(child, this);
+      _world!._add(child, this);
     } else {
       child._queuedIn = this;
       _described!.children.add(child);
@@ -685,7 +950,7 @@ class GameObject {
     if (world == null) {
       _queuedIn?._described?.children.remove(this);
       _queuedIn = null;
-      _destroyed = true;
+      _destroyUnadded();
       return;
     }
     if (world.isDisposed || !fy_exists(world._pointer, _id)) {
@@ -693,6 +958,36 @@ class GameObject {
       return;
     }
     world._destroy(_id);
+  }
+
+  /// Destroys an object that was never added, and what was added to it:
+  /// what they own and the assets they hold go too.
+  void _destroyUnadded() {
+    _destroyed = true;
+    _failLoaded(StateError('$this was destroyed before it was added'), StackTrace.current);
+    final described = _described;
+    for (final child in described?.children ?? const <GameObject>[]) {
+      child._destroyUnadded();
+    }
+    if (_owned case final owned?) {
+      for (final thing in owned) {
+        // No world to report to: a resource used elsewhere throws here.
+        switch (thing) {
+          case Material m:
+            m.dispose();
+          case Mesh m:
+            m.dispose();
+          case Texture2D t:
+            t.dispose();
+          case Model m:
+            m.dispose();
+        }
+      }
+    }
+    if (described?.asset case final asset?) {
+      asset.world._release(asset, this);
+      described!.asset = null;
+    }
   }
 
   // --- Hierarchy ---
@@ -748,6 +1043,10 @@ class GameObject {
   /// [activeInHierarchy].
   bool get active {
     if (_described case final d?) return d.active;
+    if (_hiddenForLoad) {
+      world.pointer;
+      return _activeSelf;
+    }
     check(fy_active_get(world.pointer, id, scratch.flag));
     return scratch.flag.value;
   }
@@ -757,7 +1056,11 @@ class GameObject {
       d.active = value;
       return;
     }
-    check(fy_active_set(world.pointer, id, value));
+    final w = world.pointer;
+    _activeSelf = value;
+    // While it loads it stays hidden; it takes this flag when it appears.
+    if (_hiddenForLoad) return;
+    check(fy_active_set(w, id, value));
     if (value) {
       world._off.remove(this);
     } else {
@@ -766,7 +1069,8 @@ class GameObject {
     world._shape++;
   }
 
-  /// Whether this object is shown: it and every object above it [active].
+  /// Whether this object is shown: it and every object above it [active],
+  /// and loaded (see [GameObject.onLoad]).
   bool get activeInHierarchy {
     check(fy_active_in_hierarchy_get(world.pointer, id, scratch.flag));
     return scratch.flag.value;
@@ -1024,6 +1328,10 @@ final class _Description {
   /// For a model's copy ([Model.instantiate]): the engine makes its objects.
   Model? model;
 
+  /// For a model's copy from [Assets.model]: the use it holds of the
+  /// model, until it's destroyed.
+  _Asset? asset;
+
   T? get<T extends Component>() => transform is T ? transform as T : components.whereType<T>().firstOrNull;
 
   void set<T extends Component>(T component) {
@@ -1058,4 +1366,19 @@ extension SendTransforms on World {
   void sendTransforms() {
     if (!isDisposed) _sendTransforms();
   }
+}
+
+/// An error no caller could catch, from an object's load or from freeing
+/// what it held: see [World.errors].
+final class ObjectError {
+  ObjectError._(this.object, this.error, this.stackTrace);
+
+  /// The object whose load failed (now destroyed), or that was being
+  /// destroyed; null for an asset the world freed.
+  final GameObject? object;
+  final Object error;
+  final StackTrace stackTrace;
+
+  @override
+  String toString() => '${object ?? 'World'}: $error';
 }
