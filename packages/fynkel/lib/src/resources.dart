@@ -154,7 +154,7 @@ final class Mesh implements Finalizable {
   /// so a big mesh doesn't hold up the UI thread: generating tangents
   /// takes about a microsecond per triangle.
   static Future<Mesh> inBackground(Mesh Function() build) async {
-    final (address, name) = await Isolate.run(() {
+    final (address, name) = await inHelper(() {
       final mesh = build();
       // This isolate ends next; the mesh now belongs to the caller's.
       _finalizer.detach(mesh);
@@ -230,7 +230,7 @@ final class Texture2D implements Finalizable {
     final copy = malloc<Uint8>(bytes.isEmpty ? 1 : bytes.length);
     copy.asTypedList(bytes.length).setAll(0, bytes);
     try {
-      final (address, width, height) = await Isolate.run(_decodeAt(copy.address, bytes.length));
+      final (address, width, height) = await inHelper(_decodeAt(copy.address, bytes.length));
       return Texture2D._(Pointer<FyTexture>.fromAddress(address), width, height, 'Texture2D($width × $height)');
     } finally {
       malloc.free(copy);

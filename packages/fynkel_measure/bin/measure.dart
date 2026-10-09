@@ -11,9 +11,10 @@
 //   dart run fynkel_measure:measure lifecycle [--cycles 10]
 //   dart run fynkel_measure:measure bench
 //
-// The lifecycle check's points are the app's: MeasuredApp's destroy and
-// add the root, show a new view, and resize it. Points of a kind (the name without its number) should
-// have the same memory. What the app reports (Measurement.report), such
+// The lifecycle check's points are the app's: MeasuredApp's make the
+// game's own change (such as the next level) if it has one, destroy and
+// add the root, show a new view, and resize it. Points of a kind (the name
+// without its number) should have the same memory. What the app reports (Measurement.report), such
 // as load times, is printed at the end as it is.
 //
 // `--baseline` runs either with a spinning Flutter box in place of the
