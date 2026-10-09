@@ -54,8 +54,8 @@ class OrbitCamera extends GameObject {
   double _yaw = 0.5, _pitch = 0.35, _distance = 9;
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
+  void onUpdate() {
+    super.onUpdate();
     if (input.drag.length == 0 && input.scroll.length == 0) return;
     _yaw -= input.drag.x * 0.008;
     _pitch = (_pitch + input.drag.y * 0.006).clamp(0.05, 1.3);
@@ -128,9 +128,9 @@ class Character extends GameObject {
   }
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
-    final step = (_target - _turned).clamp(-6 * dt, 6 * dt);
+  void onUpdate() {
+    super.onUpdate();
+    final step = (_target - _turned).clamp(-6 * time.delta, 6 * time.delta);
     if (step == 0) return;
     _head.rotate(Vec3.up, step);
     _turned += step;

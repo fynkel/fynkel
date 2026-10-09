@@ -16,9 +16,9 @@ class _Spinner extends GameObject {
   _Spinner() : super(transform: Transform(position: Vec3(0, 0.01, 0.1)));
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
-    rotate(Vec3.up, dt);
+  void onUpdate() {
+    super.onUpdate();
+    rotate(Vec3.up, time.delta);
   }
 }
 
@@ -29,8 +29,8 @@ class _Reader extends GameObject {
   var x = 0.0;
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
+  void onUpdate() {
+    super.onUpdate();
     x += transform.position.x;
   }
 }
@@ -50,9 +50,9 @@ class _Spun extends GameObject {
 
 class _Spin extends Behaviour {
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
-    gameObject.rotate(Vec3.up, dt);
+  void onUpdate() {
+    super.onUpdate();
+    gameObject.rotate(Vec3.up, time.delta);
   }
 }
 

@@ -318,8 +318,8 @@ class _Box extends GameObject {
   }
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
+  void onUpdate() {
+    super.onUpdate();
     updates++;
   }
 

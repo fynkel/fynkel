@@ -11,17 +11,17 @@ class Sphere extends GameObject {
   var up = true;
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
+  void onUpdate() {
+    super.onUpdate();
     print(transform.position.y);
 
     if (up) {
-      translate(Vec3(0, 1, 0) * dt);
+      translate(Vec3(0, 1, 0) * time.delta);
       if (transform.position.y >= 1) {
         up = false;
       }
     } else {
-      translate(Vec3(0, -1, 0) * dt);
+      translate(Vec3(0, -1, 0) * time.delta);
       if (transform.position.y <= -1) {
         up = true;
       }

@@ -19,8 +19,8 @@ class Logged extends GameObject {
   }
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
+  void onUpdate() {
+    super.onUpdate();
     log.add('update $name');
     onEachUpdate?.call(this);
   }
@@ -37,8 +37,8 @@ mixin Spins on GameObject {
   var turns = 0;
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
+  void onUpdate() {
+    super.onUpdate();
     turns++;
   }
 }
@@ -47,9 +47,9 @@ mixin Ages on GameObject {
   var age = 0.0;
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
-    age += dt;
+  void onUpdate() {
+    super.onUpdate();
+    age += time.delta;
   }
 }
 
@@ -154,17 +154,25 @@ void main() {
     expect(world.all<GameObject>(), isEmpty);
   });
 
-  test("an object destroyed before its first frame never starts, and an object can't be added to a dying one", () {
-    final gone = world.add(Logged('gone'));
-    gone.destroy();
-    world.update(0.1);
-    expect(log, ['destroy gone']);
+  test(
+    "an object destroyed before its first frame never starts, and an object can't be added to a dying one",
+    () async {
+      final gone = world.add(Logged('gone'));
+      gone.destroy();
+      world.update(0.1);
+      expect(log, ['destroy gone']);
 
-    final dying = world.add(_AddsWhileDying());
-    expect(dying.destroy, throwsStateError);
-    expect(dying.isDestroyed, isTrue);
-    expect(dying.isAlive, isFalse, reason: 'it goes even when its onDestroy throws');
-  });
+      final errors = <ObjectError>[];
+      world.errors.listen(errors.add);
+      final dying = world.add(_AddsWhileDying());
+      dying.destroy();
+      await pumpEventQueue();
+      expect(errors.single.object, dying);
+      expect(errors.single.error, isA<StateError>());
+      expect(dying.isDestroyed, isTrue);
+      expect(dying.isAlive, isFalse, reason: 'it goes even when its onDestroy throws');
+    },
+  );
 
   test("two mixins' updates both run, in order, with the class's own", () {
     final windmill = world.add(Windmill());
@@ -359,8 +367,8 @@ class _ReadsInput extends GameObject {
   Input? seen;
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
+  void onUpdate() {
+    super.onUpdate();
     seen = input;
   }
 }

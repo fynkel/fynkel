@@ -226,20 +226,33 @@ final class MeshRenderer extends Component {
 ///
 /// A behaviour gets the same calls as its object, right after the
 /// object's own, in the order the behaviours were added: [onLoad] when
-/// it's put on a live object (or with its object), then [onStart],
-/// [onUpdate] each frame, [onTap], and [onDestroy] when it's removed or
-/// its object is destroyed. While [enabled] is false it gets none of them
-/// but [onLoad] and [onDestroy], and it starts when it's next enabled.
+/// it's put on a live object (or with its object), [onEnable] when it's
+/// loaded and its object is shown, then [onStart], [onUpdate] and
+/// [onLateUpdate] each frame, [onTap], [onDisable] when it or its object
+/// is turned off, and [onDisable] and [onDestroy] when it's removed or its
+/// object is destroyed. While [enabled] is false it gets none of them but
+/// [onLoad] and [onDestroy], and it starts when it's next enabled.
 abstract class Behaviour extends Component {
   Behaviour() : super._();
 
   /// Whether it gets its object's frames and taps. A disabled behaviour
-  /// waits to start until it's enabled.
-  bool enabled = true;
+  /// waits to start until it's enabled. Setting it calls [onDisable] or
+  /// [onEnable] when that changes whether it's enabled: only while it's
+  /// loaded and its object is shown.
+  bool get enabled => _enabledFlag;
+  set enabled(bool value) {
+    if (value == _enabledFlag) return;
+    _enabledFlag = value;
+    if (_live case final object?) object.world._refreshBehaviour(object, this);
+  }
 
-  // Its load is done, and it has had onStart.
+  bool _enabledFlag = true;
+
+  // Its load is done, it has had onStart, and it had onEnable and not
+  // onDisable since.
   bool _loaded = false;
   bool _started = false;
+  bool _enabledNow = false;
 
   /// The world its object is in. Throws a [StateError] before the object
   /// is added.
@@ -247,6 +260,10 @@ abstract class Behaviour extends Component {
 
   /// What the player did since the last frame: the world's [World.input].
   Input get input => gameObject.input;
+
+  /// The world's clock: `time.delta` is the seconds this frame counts for.
+  /// See [Time].
+  Time get time => gameObject.time;
 
   /// Its object's assets: what it loads is held until the object is
   /// destroyed. See [GameObject.assets].
@@ -266,17 +283,35 @@ abstract class Behaviour extends Component {
   @protected
   FutureOr<void> onLoad() {}
 
+  /// Called each time it becomes enabled: loaded, [enabled], and its
+  /// object shown (right after the object's own [GameObject.onEnable]).
+  @mustCallSuper
+  @protected
+  void onEnable() {}
+
   /// Called once, in the first [World.update] where it's loaded, enabled
   /// and its object is shown, before its first [onUpdate].
   @mustCallSuper
   @protected
   void onStart() {}
 
-  /// Called every [World.update] with the seconds since the last one, right
-  /// after its object's, while it's enabled and its object is shown.
+  /// Called every [World.update], right after its object's, while it's
+  /// enabled and its object is shown. Move by `time.delta`.
   @mustCallSuper
   @protected
-  void onUpdate(double dt) {}
+  void onUpdate() {}
+
+  /// Called every [World.update] after every [onUpdate], right after its
+  /// object's [GameObject.onLateUpdate].
+  @mustCallSuper
+  @protected
+  void onLateUpdate() {}
+
+  /// Called each time it stops being enabled: [enabled] set false, its
+  /// object hidden, or right before [onDestroy].
+  @mustCallSuper
+  @protected
+  void onDisable() {}
 
   /// Called when it's removed, or its object is destroyed (right after the
   /// object's own), while the object is still there to read.

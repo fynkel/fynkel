@@ -169,6 +169,13 @@ A frame, in `world.update`: **input** (events and the object handlers of §3.6) 
 - **`time` belongs to the world** and is on every object and behaviour: `delta`, `unscaledDelta`, `scale` (0 pauses), `sinceStart`, `unscaledSinceStart`, `frame`, `maxDelta` (a long hitch, or a return from the background, counts as at most this, so nothing jumps through walls; Unity's `maximumDeltaTime`).
 - **Not a global `Time` class.** Fynkel can run more than one world at once (two views), and code after an `await` may run while another world's frame is set. `time` on the object is always its own world's. It reads the same as Unity's.
 - **Unscaled things** (a pause menu's animation, a UI tween) say so: `wait(1, unscaled: true)`, `tween(..., unscaled: true)`.
+- *Settled in step 2 (§3.2 and §3.3):*
+  - **onEnable comes as soon as an object appears**, in the same `world.add` when nothing loads, with everything below it, parents first, each object before its behaviours. An object still loading gets it when its whole tree appears, never part of it. onStart still waits for the next frame.
+  - **What changes "shown"** calls onEnable or onDisable at once, in the setter: `active`, `parent` (moving below a hidden object, or out from below it), a behaviour's `enabled`, its load finishing on a shown object, `removeComponent`, and `destroy`. A behaviour still loading isn't enabled by its object being turned on; it's enabled when its load is done.
+  - **Destroying** gives each object, children first, onDisable if it was enabled, then its enabled behaviours' onDisable, then onDestroy, then its behaviours' onDestroy. An object that destroys itself in any call (onEnable, onStart, onUpdate, onLateUpdate, onDisable) gets nothing more, nor do its behaviours and children, and the frame goes on for the others.
+  - **onLateUpdate** goes to the objects updated this frame, after all updates; routines and tweens will come between them in steps 3 and 6.
+  - **`world.update(dt)` still takes the frame's real time** (the view passes it); `dt` must be 0 or more. `time.delta` is it clamped to `maxDelta` (1/3 s by default, as Unity's), times `scale`; a 5 s hitch counts as 1/3 s. `unscaledDelta` is clamped too, not scaled. `frame` counts updates from 0.
+  - **Errors in any lifecycle call or `onTap`** go to `world.errors` with the object (a behaviour's go with its object), and the frame goes on; a throwing `onTap` counts as not taking the tap. Calls each frame are guarded inline, so a frame still makes no closures.
 
 ### 3.4 Routines (coroutines)
 
@@ -280,6 +287,11 @@ the game. *Done when* tests fix the whole order of §3.2 (including turning
 parents and behaviours on and off, and destroying in each step), `time`
 follows `scale` and `maxDelta`, and an exception in one object's update
 reaches `world.errors` while the others update.
+✅ 22 tests in `test/lifecycle_test.dart` (146 in package:fynkel in all,
+25 in package:fynkel_flutter); every `onUpdate(double dt)` in the
+examples, tests and bench now reads `time.delta`. 26 mutants, all killed
+(one more was equivalent, and its code removed). The late-update pass
+costs 0.03–0.12 ms per 10,000 objects (§6).
 
 **Step 3: routines.** §3.4. *Done when* tests show waits in game time
 (scaled and not), `race` and `all`, return values, `finally` on stop,
@@ -371,3 +383,22 @@ measured the same day, the same way:
 A behaviour costs its object 0.04 ms more per 10,000 on the Mac and 0.03
 on the iPhone (5 % and 4 %), the call and the walk over the object's
 components. Objects without components pay nothing measurable.
+
+### Step 2: the lifecycle (`measure bench`, profile builds, 2026-10-09)
+
+The same bench; main (step 1) measured again the same day, the same way:
+
+| 10,000 objects | Mac (M3 Max) | iPhone 16 Pro Max |
+|---|---:|---:|
+| moving themselves, main / step 2 | 0.85 / **0.92** ms | 0.77 / **0.81** ms |
+| each moved by a behaviour, main / step 2 | 0.90 / **1.02** ms | 0.79 / **0.88** ms |
+| with nothing to do, main / step 2 | 0.03 / **0.06** ms | 0.03 / **0.05** ms |
+| step 2 without the try/catch (Mac only) | 0.90 / 0.98 / 0.06 ms | – |
+
+Most of the cost is the second walk, for onLateUpdate: every object
+(and each behaviour) gets the call, as every script with a LateUpdate
+does in Unity. The try/catch that keeps one object's error from stopping
+the frame costs 0.02–0.04 ms per 10,000. At 10,000 objects that's at most
+0.12 ms, under 1 % of a 60 fps frame; a game with hundreds of objects
+won't see it. Kept as it is: skipping objects that don't override
+onLateUpdate would need each class to say so.
