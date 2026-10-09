@@ -37,8 +37,8 @@ class Cube extends GameObject {
   }
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
-    rotate(Vec3.up, dt);
+  void onUpdate() {
+    super.onUpdate();
+    rotate(Vec3.up, time.delta);
   }
 }

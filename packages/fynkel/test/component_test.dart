@@ -21,8 +21,8 @@ class Logged extends GameObject {
   }
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
+  void onUpdate() {
+    super.onUpdate();
     log.add('update $name');
   }
 
@@ -56,8 +56,8 @@ class Logs extends Behaviour {
   }
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
+  void onUpdate() {
+    super.onUpdate();
     log.add('update $label');
   }
 
@@ -103,8 +103,8 @@ class Remover extends Behaviour {
   final Behaviour target;
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
+  void onUpdate() {
+    super.onUpdate();
     if (!target.isRemoved) target.gameObject.removeComponent(target);
   }
 }

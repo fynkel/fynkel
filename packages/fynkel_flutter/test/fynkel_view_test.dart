@@ -66,9 +66,9 @@ class Tiny extends GameObject {
   }
 
   @override
-  void onUpdate(double dt) {
+  void onUpdate() {
     if (log.last != 'update') log.add('update');
-    super.onUpdate(dt);
+    super.onUpdate();
   }
 }
 

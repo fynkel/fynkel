@@ -18,6 +18,7 @@ part 'components.dart';
 part 'input.dart';
 part 'model.dart';
 part 'resources.dart';
+part 'time.dart';
 
 /// Everything in a scene: objects, their components, and the meshes and
 /// materials they use. A world lives in the engine; free it with
@@ -91,10 +92,13 @@ final class World implements Finalizable {
 
   /// Errors no caller could catch: an [GameObject.onLoad] that failed
   /// (the object is destroyed, and its parent's load goes on without it),
-  /// and what couldn't be freed when an object was destroyed. With no
-  /// listener, each is an uncaught error of the zone the object was added
-  /// in, as an unawaited future's would be; listen to handle them, or
-  /// rethrow to stop.
+  /// what couldn't be freed when an object was destroyed, and what an
+  /// object's or behaviour's own code threw from onStart, onUpdate,
+  /// onLateUpdate, onTap, onEnable, onDisable or onDestroy (the frame goes
+  /// on, as in Unity: one object's bug doesn't stop the others). With no
+  /// listener, each is an uncaught error of the current zone (for a load,
+  /// the zone the object was added in), as an unawaited future's would
+  /// be; listen to handle them, or rethrow to stop.
   Stream<ObjectError> get errors => _errors.stream;
 
   void _report(GameObject? object, Object error, StackTrace stack) {
@@ -104,6 +108,22 @@ final class World implements Finalizable {
       Zone.current.handleUncaughtError(error, stack);
     }
   }
+
+  /// Runs one of [object]'s calls (or its behaviour's) that isn't run
+  /// every frame, reporting what it throws.
+  void _safely(GameObject object, void Function() call) {
+    try {
+      call();
+    } catch (error, stack) {
+      _report(object, error, stack);
+    }
+  }
+
+  // --- Time ---
+
+  /// The world's clock: [Time.delta], [Time.scale], [Time.sinceStart] and
+  /// the rest. Objects and behaviours read it as `time`.
+  final Time time = Time._();
 
   // --- Assets ---
 
@@ -211,7 +231,8 @@ final class World implements Finalizable {
   /// it. Objects read it as [GameObject.input].
   Input get input => _input;
 
-  /// Runs one frame of the game, in this order:
+  /// Runs one frame of the game, [dt] seconds after the last one: [time]
+  /// moves on (see [Time.delta]), then, in this order:
   ///
   /// 1. **Taps.** Each of [input]'s taps is cast into the world from the
   ///    camera the view draws from. The object hit gets
@@ -228,13 +249,20 @@ final class World implements Finalizable {
   ///    added during an update start next frame; objects destroyed during
   ///    it get no more calls, even this frame. A new [GameObject.parent]
   ///    counts from the next frame.
+  /// 4. **Late updates.** Then each object updated this frame, and its
+  ///    behaviours, get [GameObject.onLateUpdate] in the same order: for
+  ///    what follows where the others went, such as a camera.
   ///
   /// Hidden objects (inactive, or below one that is) and their behaviours
-  /// are skipped by all three and start when they're first shown; so are
+  /// are skipped by all four and start when they're first shown; so are
   /// disabled behaviours ([Behaviour.enabled]) and those still loading. A
-  /// view then draws the world as it is.
+  /// view then draws the world as it is. What their code throws goes to
+  /// [errors], and the frame goes on.
+  ///
+  /// Throws an [ArgumentError] if [dt] is negative or NaN.
   void update(double dt, [Input? input]) {
     final w = pointer;
+    time._advance(dt);
     _input = input ?? Input.none;
     _tidy();
 
@@ -252,16 +280,16 @@ final class World implements Finalizable {
             continue;
           }
           object._started = true;
-          object.onStart();
+          _safely(object, object.onStart);
         case final Behaviour behaviour:
           final object = behaviour._owner!;
           if (behaviour._removed || object._destroyed) continue;
-          if (!behaviour._loaded || !behaviour.enabled || !object._started || _isHidden(object)) {
+          if (!behaviour._loaded || !behaviour._enabledFlag || !object._started || _isHidden(object)) {
             waiting.add(behaviour);
             continue;
           }
           behaviour._started = true;
-          behaviour.onStart();
+          _safely(object, behaviour.onStart);
       }
     }
     _starting
@@ -269,15 +297,48 @@ final class World implements Finalizable {
       ..addAll(waiting);
 
     // Objects added from here on are past the end when they come, or not
-    // started: they wait for the next frame.
-    for (var i = 0; i < _live.length; i++) {
+    // started: they wait for the next frame. The calls are guarded inline,
+    // not through [_safely], so a frame makes no closures.
+    final updated = _live.length;
+    for (var i = 0; i < updated; i++) {
       final object = _live[i];
       if (!object._started || object._destroyed || _isHidden(object)) continue;
-      object.onUpdate(dt);
+      try {
+        object.onUpdate();
+      } catch (error, stack) {
+        _report(object, error, stack);
+      }
       final components = object._components;
       if (components == null) continue;
       for (var j = 0; j < components.length && !object._destroyed; j++) {
-        if (components[j] case final Behaviour b when b._started && b.enabled && !b._removed) b.onUpdate(dt);
+        if (components[j] case final Behaviour b when b._started && b._enabledFlag && !b._removed) {
+          try {
+            b.onUpdate();
+          } catch (error, stack) {
+            _report(object, error, stack);
+          }
+        }
+      }
+    }
+
+    for (var i = 0; i < updated && i < _live.length; i++) {
+      final object = _live[i];
+      if (!object._started || object._destroyed || _isHidden(object)) continue;
+      try {
+        object.onLateUpdate();
+      } catch (error, stack) {
+        _report(object, error, stack);
+      }
+      final components = object._components;
+      if (components == null) continue;
+      for (var j = 0; j < components.length && !object._destroyed; j++) {
+        if (components[j] case final Behaviour b when b._started && b._enabledFlag && !b._removed) {
+          try {
+            b.onLateUpdate();
+          } catch (error, stack) {
+            _report(object, error, stack);
+          }
+        }
       }
     }
   }
@@ -317,11 +378,19 @@ final class World implements Finalizable {
     final tap = Tap._(at, hit);
     for (GameObject? object = hit.object; object != null && !object._destroyed;) {
       final up = object.parent;
-      if (object.onTap(tap)) return;
+      try {
+        if (object.onTap(tap)) return;
+      } catch (error, stack) {
+        _report(object, error, stack);
+      }
       final components = object._components;
       for (var j = 0; components != null && j < components.length && !object._destroyed; j++) {
-        if (components[j] case final Behaviour b when b._loaded && b.enabled && !b._removed) {
-          if (b.onTap(tap)) return;
+        if (components[j] case final Behaviour b when b._loaded && b._enabledFlag && !b._removed) {
+          try {
+            if (b.onTap(tap)) return;
+          } catch (error, stack) {
+            _report(object, error, stack);
+          }
         }
       }
       object = up;
@@ -340,7 +409,38 @@ final class World implements Finalizable {
     return _hidden.contains(object._id);
   }
 
-  /// [id] and the ids of everything below it.
+  /// Calls onEnable or onDisable on [root], everything below it, and their
+  /// behaviours, wherever being shown changed: parents first, each object
+  /// before its behaviours.
+  void _refresh(GameObject root) {
+    if (root._destroyed || root._world == null) return;
+    for (final id in _subtreeIds(root._id)) {
+      if (_objects[id] case final object?) _refreshObject(object);
+    }
+  }
+
+  void _refreshObject(GameObject object) {
+    final shown = object._appeared && !object._destroyed && !_isHidden(object);
+    if (shown != object._enabled) {
+      object._enabled = shown;
+      _safely(object, shown ? object.onEnable : object.onDisable);
+    }
+    final components = object._components;
+    for (var i = 0; components != null && i < components.length; i++) {
+      if (components[i] case final Behaviour b) _refreshBehaviour(object, b);
+    }
+  }
+
+  /// A behaviour is enabled while its object is, it's [Behaviour.enabled],
+  /// loaded, and still on.
+  void _refreshBehaviour(GameObject object, Behaviour b) {
+    final on = object._enabled && b._enabledFlag && b._loaded && !b._removed;
+    if (on == b._enabledNow) return;
+    b._enabledNow = on;
+    _safely(object, on ? b.onEnable : b.onDisable);
+  }
+
+  /// [id] and the ids of everything below it, parents first.
   Set<int> _subtreeIds(int id) {
     final ids = <int>{};
     void collect(int id) {
@@ -556,9 +656,11 @@ final class World implements Finalizable {
     if (result is Future<void>) {
       result.then((_) {
         component._loaded = true;
+        if (!isDisposed) _refreshBehaviour(object, component);
       }, onError: failed);
     } else {
       component._loaded = true;
+      _refreshBehaviour(object, component);
     }
   }
 
@@ -573,7 +675,8 @@ final class World implements Finalizable {
   }
 
   /// Shows [object] once its own load and those of everything added
-  /// during it are done, then tells the object waiting for it.
+  /// during it are done, then tells the object waiting for it. The
+  /// topmost to appear enables itself and what's below it at once.
   void _appearIfDone(GameObject object) {
     if (object._pending > 0 || object._destroyed) return;
     object._appeared = true;
@@ -592,6 +695,8 @@ final class World implements Finalizable {
     if (waiter != null) {
       waiter._pending--;
       _appearIfDone(waiter);
+    } else {
+      _refresh(object);
     }
   }
 
@@ -641,8 +746,10 @@ final class World implements Finalizable {
   }
 
   /// Takes [id] and everything below it out of the engine and forgets
-  /// their Dart objects. Each gets [GameObject.onDestroy] first, children
-  /// before parents, while it's still there to read.
+  /// their Dart objects. Each, children before parents, while it's still
+  /// there to read, gets [GameObject.onDisable] if it was enabled, then
+  /// its enabled behaviours theirs, then [GameObject.onDestroy], then its
+  /// behaviours theirs.
   void _destroy(int id) {
     final ids = _subtreeIds(id).toList();
     final objects = [for (final id in ids) ?_objects[id]];
@@ -651,9 +758,20 @@ final class World implements Finalizable {
     }
     try {
       for (final object in objects.reversed) {
-        object.onDestroy();
-        for (final c in object._components ?? const <Component>[]) {
-          if (c case final Behaviour b when !b._removed) b.onDestroy();
+        final components = object._components ?? const <Component>[];
+        if (object._enabled) {
+          object._enabled = false;
+          _safely(object, object.onDisable);
+        }
+        for (final c in components) {
+          if (c case final Behaviour b when b._enabledNow) {
+            b._enabledNow = false;
+            _safely(object, b.onDisable);
+          }
+        }
+        _safely(object, object.onDestroy);
+        for (final c in components) {
+          if (c case final Behaviour b when !b._removed) _safely(object, b.onDestroy);
         }
       }
     } finally {
@@ -893,6 +1011,9 @@ class GameObject {
   bool _destroyed = false;
   bool _started = false;
 
+  // Whether it had onEnable and not onDisable since: it's shown.
+  bool _enabled = false;
+
   // Its components, in the order they were put on; removed ones stay until
   // the world's next update takes them out. For an object the engine made
   // (a model's part), its engine components are read the first time
@@ -1008,19 +1129,44 @@ class GameObject {
   /// What the player did since the last frame: the world's [World.input].
   Input get input => world.input;
 
+  /// The world's clock: `time.delta` is the seconds this frame counts for.
+  /// See [Time].
+  Time get time => world.time;
+
+  /// Called each time the object is shown: when it appears (right after
+  /// its load, with everything added during it), and when it, or one
+  /// above it, is turned on ([active]) or it's moved out from below a
+  /// hidden one. Parents come first, each before its behaviours.
+  @mustCallSuper
+  @protected
+  void onEnable() {}
+
   /// Called once, in the first [World.update] after the object is added
   /// and shown, before its first [onUpdate]. Its parent's comes first.
   @mustCallSuper
   @protected
   void onStart() {}
 
-  /// Called every [World.update] with the seconds since the last one,
-  /// parents before children, while the object is shown. Override it to
-  /// move, animate or think; a mixin that overrides it calls
-  /// `super.onUpdate(dt)` so the next one runs too.
+  /// Called every [World.update], parents before children, while the
+  /// object is shown. Override it to move, animate or think, by
+  /// [Time.delta] (`time.delta`); a mixin that overrides it calls
+  /// `super.onUpdate()` so the next one runs too.
   @mustCallSuper
   @protected
-  void onUpdate(double dt) {}
+  void onUpdate() {}
+
+  /// Called every [World.update] after every object's [onUpdate], in the
+  /// same order: for what follows where the others went, such as a camera.
+  @mustCallSuper
+  @protected
+  void onLateUpdate() {}
+
+  /// Called each time a shown object is hidden: it or one above it is
+  /// turned off, it's moved below a hidden one, or it's destroyed (right
+  /// before [onDestroy]). Parents come first, each before its behaviours.
+  @mustCallSuper
+  @protected
+  void onDisable() {}
 
   /// Called when the object, or one above it, is destroyed: children
   /// before parents, while the object is still there to read (where it
@@ -1142,6 +1288,7 @@ class GameObject {
     check(fy_parent_set(world.pointer, id, value?.id ?? 0));
     world._moved.add(this);
     world._shape++;
+    world._refresh(this);
   }
 
   /// The objects whose [parent] is this one, in the order they were added.
@@ -1194,6 +1341,7 @@ class GameObject {
       world._off.add(this);
     }
     world._shape++;
+    world._refresh(this);
   }
 
   /// Whether this object is shown: it and every object above it [active],
@@ -1317,7 +1465,8 @@ class GameObject {
   }
 
   /// Takes [component] off this object. A behaviour gets
-  /// [Behaviour.onDestroy] first and no calls after; an engine component
+  /// [Behaviour.onDisable] if it was enabled, then [Behaviour.onDestroy],
+  /// and no calls after; an engine component
   /// is taken out of the engine. It can't be put on again. Throws an
   /// [ArgumentError] if it isn't on this object.
   void removeComponent(Component component) {
@@ -1332,7 +1481,11 @@ class GameObject {
     }
     switch (component) {
       case Behaviour b:
-        b.onDestroy();
+        if (b._enabledNow) {
+          b._enabledNow = false;
+          world._safely(this, b.onDisable);
+        }
+        world._safely(this, b.onDestroy);
       case Camera():
         check(fy_camera_remove(world.pointer, id));
       case Light():

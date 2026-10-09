@@ -143,9 +143,9 @@ class Prop extends GameObject {
 /// Turns about its up axis.
 mixin Spins on GameObject {
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
-    rotate(Vec3.up, 3 * dt);
+  void onUpdate() {
+    super.onUpdate();
+    rotate(Vec3.up, 3 * time.delta);
   }
 }
 
@@ -155,10 +155,10 @@ mixin Bobs on GameObject {
   double _time = 0;
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
+  void onUpdate() {
+    super.onUpdate();
     final at = transform.position;
-    _time += dt;
+    _time += time.delta;
     transform = transform.copyWith(position: Vec3(at.x, _height + 0.15 * math.sin(3 * _time), at.z));
   }
 }
@@ -194,11 +194,11 @@ class Player extends GameObject {
   }
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
+  void onUpdate() {
+    super.onUpdate();
     final to = _goal - transform.position;
     if (to.length < 0.05) return;
-    final step = math.min(to.length, 5 * dt);
+    final step = math.min(to.length, 5 * time.delta);
     transform = Transform(
       position: transform.position + to.normalized * step,
       rotation: Quat.axisAngle(Vec3.up, math.atan2(to.x, to.z)),
@@ -210,8 +210,8 @@ class Player extends GameObject {
 /// code, kept apart from the walking.
 class Collector extends GameObject {
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
+  void onUpdate() {
+    super.onUpdate();
     final player = parent! as Player, at = player.transform.position;
     var picked = false;
     for (final coin in world.all<Coin>()) {
@@ -233,8 +233,8 @@ class FollowCamera extends GameObject {
   final Player player;
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
+  void onUpdate() {
+    super.onUpdate();
     transform = _behind(player.transform.position);
   }
 
@@ -269,9 +269,9 @@ class Swarm extends GameObject {
   }
 
   @override
-  void onUpdate(double dt) {
-    super.onUpdate(dt);
-    _time += dt;
+  void onUpdate() {
+    super.onUpdate();
+    _time += time.delta;
     for (var i = 0; i < count; i++) {
       final (radius, height, speed, phase) = _orbits[i];
       final angle = phase + speed * _time;
