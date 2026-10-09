@@ -312,6 +312,17 @@ is 60 lines or fewer, both games run at the display rate on all three
 devices, destroying and re-adding the whole garden passes the memory
 cycles against `--baseline`, and changing coins' level back and forth
 does too.
+✅ with two misses. The garden is five classes and `runApp(FynkelApp(Garden()))`,
+measured through `lib/measured.dart`; its game code is 111 lines, not 60
+(accepted, §3.8). coins is `examples/coins` (§3.8). Both games run at
+120 fps on the Mac and the iPhone; on the Note10+ the garden runs at
+59.9 fps and coins at 58.9, 1 fps short, from drawing its 300 motes (§6).
+The engine's GPU memory comes back exactly at every destroy and level
+change on all three. The totals match the baseline's on the Mac and the
+iPhone; on the Note10+ they grow more for the first 15 – 20 cycles, then
+as much (§6, the GPU side's own pools, as in stage 2). Five coins tests,
+the garden's three. Found on the way: each helper isolate leaked its
+scratch, about 1.7 KB of native memory a load (fixed).
 
 **Step 7: the stage 3 check.** A short report, as in stages 1 and 2.
 *Done when* it's committed and you have played the garden and coins on
@@ -462,3 +473,79 @@ three at 60 Hz). A new view with its world and root is on screen in
 Note10+, most of it making the engine's view. The app's very first view
 takes longer: its first tick holds the UI isolate for 3 – 20 ms on the Mac,
 4 ms on the iPhone and 830 ms on the Note10+.
+
+### Step 6: the garden and coins (`measure`, profile builds, 2026-10-09)
+
+60 s of each game standing still, coins with its 300 motes moving:
+
+| | Mac, window 1600 × 1200 | iPhone 16 Pro Max | Galaxy Note10+ |
+|---|---|---|---|
+| garden: fresh fps (median, min) | **120**, 120 | **120**, 120 | **59.9**, 57.9 |
+| garden: coalesced, skipped, dropped | 0, 0, 0 | 0, 0, 0 | 0, 0, 0 |
+| garden: slow Flutter frames | 0 | 0 | 2 build, 208 raster |
+| garden: Dart allocation per frame | 14.5 KB, mouse over the view | 13.3 KB | 19.2 KB |
+| coins: fresh fps (median, min) | **120**, 120 | **120**, 118 | **58.9**, 54.9 |
+| coins: coalesced, skipped, dropped | 0, 0, 0 | 0, 0, 1 | 0, 0, 0 |
+| coins: slow Flutter frames | 0 | 1 build | 6 build, 463 raster |
+| coins: Dart allocation per frame | 47.9 KB, mouse over the view | 44.1 KB | 46.1 KB |
+
+**coins misses the display rate on the Note10+ by 1 fps.** The motes were
+the built-in sphere at first, 2,304 triangles each, and with 690,000
+triangles a frame the Note10+ drew 29 fps; they're cubes now. With the
+swarm moving but hidden (`active = false`) the Note10+ draws 59.9 fps, min
+57.9, and without the swarm 59.9 too, so what's left is drawing the 300
+small objects, not the Dart that moves them. Even without the swarm,
+coins has twice the garden's share of slow raster frames: the Note10+ is at
+its limit at full resolution (1080 × 2241) with either game. Runs of the
+same game differ by about 1 fps there (200 motes measured 57.9 once), and
+the phone was cool (33 °C, thermal status 0).
+
+**coins allocates three times the garden's Dart memory a frame**: the
+swarm makes a new `Transform` for each of its 300 motes every frame,
+about 110 bytes each. A way to move many objects without a new
+`Transform` each is for later; the manager pattern itself costs nothing
+that isn't the moves.
+
+**Memory**, 10 cycles of each lifecycle check, against `--baseline` (a
+spinning Flutter box, the same steps):
+
+| | Mac | iPhone |
+|---|---|---|
+| garden: engine's GPU memory | 283.3 – 284.2 MB at every destroy, 290.9 MB at every add | Metal 167.1 – 169.0 MB at every destroy, 175.9 – 178.0 MB at every add |
+| garden: destroyed / added, total | +1.3 / +1.7 MB from cycle 4 to 10, baseline +1.8 / +1.9; the first 3 cycles rise about 5 MB more than the baseline's own 8 MB step, once | 381.8 – 390.3 / 391.6 – 401.4 MB, up and down by 8 MB, no climb; baseline +4.3 / +5.2 |
+| coins: engine's GPU memory | 281.6 MB at every destroy | Metal 168.6 – 168.7 MB at every destroy |
+| coins: changed (the level back and forth) | +10.4 MB over 10, baseline +8.9, the same step at cycle 3 in both | +4.8 MB, baseline +2.1 |
+| coins: destroyed / added, total | +5.6 / −1.7 MB over 10 (+3.9 from cycle 4), baseline +2.0 / +2.3 (+1.7) | +9.9 / +1.5 MB, baseline +5.8 / +4.8 |
+| created, resized | ranges of 2.5 – 7.6 MB, the baseline's 0.2 – 2.6 | ranges of 2.1 – 6.8 MB, the baseline's 2.3 – 3.2 |
+
+The engine's GPU memory comes back exactly at every destroy, in both games
+and on both devices, and goes back to the same figure at every add. What
+the totals do beyond that is within the noise of a footprint on those
+devices (an iPhone's moves by 5 – 10 MB between readings).
+
+**On the Note10+** the totals grow more than the baseline's at first, and
+then by as much. 30 cycles of each, against the baseline's 30:
+
+| Note10+ | first cycles | cycle 15 or 16 to 30 | baseline, 16 to 30 |
+|---|---|---|---|
+| garden: destroyed | Native 40.4 → 61.3 MB by cycle 15 (+26.6 MB in all over the first 10, baseline +6.9) | +5.1 MB, Native 61.3 → 63.0 | +3.1 MB |
+| coins: changed | +14.5 MB to cycle 16, baseline +5.4 | +5.9 MB | +5.2 MB |
+| coins: destroyed | +8.8 MB to cycle 16, baseline +5.2 | +4.3 MB | +3.1 MB |
+
+Graphics stays at 123.3 MB (127.3 in the garden's run) at every destroy,
+add and change. The early growth is the one stage 2 found
+(docs/stage-2.md §6), now pinned down with a probe (a scratch app
+measuring `mallinfo` and `dumpsys meminfo` around 40 garden cycles in one
+view): the live native allocations grow about 20 MB over the first 25
+cycles and then stay; loading the same gardens in a world with no view
+grows nothing; `mallopt(M_PURGE)` gives about 10 MB of the heap's pages
+back. So it's memory the GPU side holds to draw (the Vulkan driver's or
+wgpu's own pools), bounded, not a leak in Fynkel, and Metal on the Mac
+and the iPhone has nothing like it.
+
+**Loading**: the garden is loaded in 104 ms and on screen at 140 ms on the
+Mac (64 / 110 ms on the iPhone, 884 / 1,247 ms on the Note10+, its first
+view's 840 ms tick included); a new garden in the same view is on screen
+in about 25 ms on the Mac, 37 – 68 ms on the iPhone and 71 – 89 ms on the
+Note10+. Changing coins' level, models loaded and all, is on screen in
+20 – 23 ms on the Mac and 26 – 40 ms on the iPhone.
