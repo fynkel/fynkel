@@ -38,6 +38,24 @@ class _Reader extends GameObject {
 /// Has nothing to do each frame: what the loop costs by itself.
 class _Idle extends GameObject {}
 
+/// A plain object turned by a behaviour: [_Spinner]'s work, done from a
+/// component (docs/stage-4.md, step 1).
+class _Spun extends GameObject {
+  _Spun()
+    : super(
+        transform: Transform(position: Vec3(0, 0.01, 0.1)),
+        components: [_Spin()],
+      );
+}
+
+class _Spin extends Behaviour {
+  @override
+  void onUpdate(double dt) {
+    super.onUpdate(dt);
+    gameObject.rotate(Vec3.up, dt);
+  }
+}
+
 /// `world.update` with 10,000 objects in 100 trees of 100 (the budget in
 /// docs/stage-3.md §3.2: under 1 ms on the Note10+), each moving itself
 /// (`rotate`: a transform read, a turn and a write), each only reading its
@@ -48,6 +66,7 @@ List<String> _updates() {
   final lines = <String>[];
   for (final (name, make) in <(String, GameObject Function())>[
     ('moving themselves', _Spinner.new),
+    ('each moved by a behaviour', _Spun.new),
     ('reading their transforms', _Reader.new),
     ('with nothing to do', _Idle.new),
   ]) {
@@ -102,13 +121,13 @@ List<String> _extract() {
         components: [Light.sun()],
       ),
     );
-    final renderer = MeshRenderer(Mesh.cube(), Material());
+    final cube = Mesh.cube(), material = Material();
     final objects = [
       for (var i = 0; i < 10000; i++)
         world.add(
           GameObject(
             transform: Transform(position: Vec3(0, 0.01, 0.1), rotation: Quat.axisAngle(Vec3.up, i * 1e-3)),
-            components: [renderer],
+            components: [MeshRenderer(cube, material)],
           ),
         ),
     ];

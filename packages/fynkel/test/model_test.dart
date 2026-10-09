@@ -95,10 +95,10 @@ void main() {
     expect(root.transform.position, Vec3(2, 0, 0));
     final body = root.find('Cesium_Milk_Truck')!;
     final parts = body.children.where((c) => c.name == null).toList();
-    expect(parts.map((p) => p.meshRenderer.material), [for (final m in truck.materials.take(3)) same(m)]);
-    final wheel = root.find('Wheels')!.meshRenderer;
+    expect(parts.map((p) => p.get<MeshRenderer>()!.material), [for (final m in truck.materials.take(3)) same(m)]);
+    final wheel = root.find('Wheels')!.get<MeshRenderer>()!;
     expect(wheel.mesh, same(truck.meshes[3]));
-    expect(root.find('Wheels.001')!.meshRenderer.mesh, same(wheel.mesh));
+    expect(root.find('Wheels.001')!.get<MeshRenderer>()!.mesh, same(wheel.mesh));
   });
 
   test('copies of a model share its GPU data and its materials', () async {
@@ -128,7 +128,7 @@ void main() {
     final glass = truck.materials[1];
     for (final copy in [first, second]) {
       final parts = copy.find('Cesium_Milk_Truck')!.children.where((c) => c.name == null);
-      expect(parts.where((p) => identical(p.meshRenderer.material, glass)), hasLength(1));
+      expect(parts.where((p) => identical(p.get<MeshRenderer>()!.material, glass)), hasLength(1));
     }
 
     // A disposed model can't be spawned again; what was spawned stays.

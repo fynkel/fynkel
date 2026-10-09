@@ -25,7 +25,7 @@ What a game looks like at the end:
 class Enemy extends GameObject {
   Enemy(Vec3 at) : super(
     transform: Transform(position: at),
-    behaviours: [Health(30), Chase(speed: 2), Flash()],
+    components: [Health(30), Chase(speed: 2), Flash()],
     children: [Body()],
   );
 }
@@ -88,7 +88,7 @@ What a Unity developer does, and how stage 4 lets them do it in Fynkel:
 
 | In Unity | In Fynkel after stage 4 |
 |---|---|
-| A GameObject has components; MonoBehaviours add behaviour, any number, added and removed at any time. | The same: `addBehaviour(Health(100))`, `get<Health>()`, `remove<Health>()`. A subclass of `GameObject` is still the prefab. |
+| A GameObject has components; MonoBehaviours add behaviour, any number, added and removed at any time. | The same: `addComponent(Health(100))`, `get<Health>()`, `removeComponent(health)`. A subclass of `GameObject` is still the prefab. |
 | `GetComponent<Light>().intensity = 2` changes the light. | The engine's components (Camera, Light, MeshRenderer) are components like any other, reached the same way. They become objects you change in place (§5). |
 | Awake, OnEnable, Start, Update, LateUpdate, OnDisable, OnDestroy. | onLoad (async, where an object gets its assets), onEnable, onStart, onUpdate, onLateUpdate, onDisable, onDestroy. FixedUpdate comes with physics. |
 | `Time.deltaTime`, `Time.timeScale`, `Time.time`, `Time.unscaledDeltaTime`, `Time.frameCount`. | `time.delta`, `time.scale`, `time.sinceStart`, `time.unscaledDelta`, `time.frame`, on every object and behaviour. |
@@ -132,12 +132,23 @@ are all tested in `dart test`, frame by frame, with made-up events.
 ### 3.1 Components and behaviours
 
 - **A `Component` is something on an object.** A `Behaviour` is a component with code: it gets the lifecycle (§3.2) and has `enabled`. The engine's components (Transform, Camera, Light, MeshRenderer) are components too.
-- **Any number of behaviours on an object**, of different types or the same: `addBehaviour(b)` returns `b`; `get<T>()` gives the first of type `T` or null, `getAll<T>()` all of them, `has<T>()`, `remove(b)` or `remove<T>()`. `get<T>()` finds by subtype, so `get<Weapon>()` finds a `Sword`, as `GetComponent` does.
+- **Any number of behaviours on an object**, of different types or the same: `addComponent(b)` returns `b`; `get<T>()` gives the first of type `T` or null, `getAll<T>()` all of them, `has<T>()`, `removeComponent(b)`. `get<T>()` finds by subtype, so `get<Weapon>()` finds a `Sword`, as `GetComponent` does.
 - **From a behaviour, the object is near**: `gameObject`, and the shortcuts Unity has (`transform`, `position`, `get<T>()`, `world`, `time`, `input`, `assets`, `start`, `on`). A behaviour is on one object for its life; it can't move to another.
-- **Building**: `GameObject(name:, transform:, behaviours: [...], children: [...])`, so a prefab can be written as one expression, as a Flutter widget tree is. A subclass passes the same to `super`, or adds them in its constructor or `onLoad`.
+- **Building**: `GameObject(name:, transform:, components: [...], children: [...])`, so a prefab can be written as one expression, as a Flutter widget tree is. A subclass passes the same to `super`, or adds them in its constructor or `onLoad`.
 - **Finding by type includes behaviours**: `world.all<Health>()`, `world.first<Player>()`. Behaviours are kept in the same per-type lists as objects, so it doesn't walk the tree.
 - **Subclassing `GameObject` stays**, for things that are one thing (a `Level`, a `Player`). A behaviour is for what's shared (`Health`, `Spins`). The mixins of stage 3 still work, but behaviours replace them in the examples.
 - **A behaviour added to a live object** runs its `onLoad`; the object doesn't hide again for it (it's already there). One added before its object is added loads with it, as children do.
+- *Settled in step 1:*
+  - **`addComponent` and `removeComponent`, not `addBehaviour`.** Once the engine's components became components like the rest (§5, 2), one name had to cover both: `addComponent(Light.sun())` and `addComponent(Health(100))`. `add` still adds children, `get<T>`, `getAll<T>` and `has<T>` stay, and the constructor takes `components:` and `children:`.
+  - **`Transform` isn't a component.** Every object has one, as in Unity, so it stays the value `transform` reads and sets (stage 3's step 3b), and `remove<Transform>()` is gone.
+  - **The engine's components are changed in place**, and each change goes to the engine at once, checked there: `get<Camera>()!.fovY = 500` throws the engine's error and leaves the old value. The old `camera`, `light` and `meshRenderer` getters and setters are gone, and a missing component is `null`, not an error.
+  - **`get<T>` takes any type**, so interfaces work (`get<Damageable>()`), and so do `world.all<T>` and `world.first<T>`, which now find the components the game put on as well as objects.
+  - **A model's parts** get their engine components read once, the first time they're asked for, so the same instances come back. A behaviour put on one puts that part in the update order.
+  - **Taps reach behaviours** that are loaded and enabled, right after their object's own `onTap` and before the parent's, as objects get taps before their first start.
+  - **A behaviour's load** counts toward its object's while the object is loading, and a failure fails the object's load. Once the object has appeared, a failure removes only the behaviour and goes to `world.errors`.
+  - **A removed component can't be put on again**, and a removed behaviour gets no more calls, even later in the frame it was removed in.
+  - **`getInParent<T>` and `getInChildren<T>`** (Unity's `GetComponentInParent` and `GetComponentInChildren`) look at the object first, then up or down.
+  - `onUpdate` still takes `dt`; step 2 removes it.
 
 ### 3.2 The lifecycle and its order
 
@@ -250,13 +261,18 @@ sense. hello, the garden and coins keep working at every step; they move
 fully to the new API in step 9.
 
 **Step 1: components and behaviours.** §3.1: `Component`, `Behaviour`,
-`addBehaviour`, `get`, `getAll`, `has`, `remove`, `behaviours:` and
+`addComponent`, `get`, `getAll`, `has`, `removeComponent`, `components:` and
 `children:` in the constructor, finding behaviours by type. The engine's
-components as §5 decides. *Done when* tests show behaviours get the same
+components become objects you change in place (§5). *Done when* tests show behaviours get the same
 lifecycle as objects, in the order added, `get<T>` finds by subtype,
 `world.all<T>` finds behaviours and forgets destroyed ones, and the step
 3b bench (10,000 objects, now each with one moving behaviour) stays
 within 10 % of stage 3's on all three devices.
+✅ on the Mac and the iPhone; the Note10+ is still to measure. 17 tests in
+`test/component_test.dart`, and every earlier test moved to the new API
+(121 in package:fynkel, 25 in package:fynkel_flutter, the examples' 8);
+17 mutants, all killed. A behaviour moving its object costs what an object
+moving itself does (§6).
 
 **Step 2: the lifecycle and time.** §3.2, §3.3: onEnable, onDisable,
 onLateUpdate, `onUpdate()` without `dt`, `time`, errors that don't stop
@@ -321,7 +337,7 @@ guide, `docs/writing-a-game.md`, that teaches all of this from hello up.
 
 You took the first answer, the recommended one, in each.
 
-1. **Names**: `addBehaviour` / `get<T>` / `getAll<T>` / `remove`, since `add`
+1. **Names** (changed in step 1 to `addComponent` / `removeComponent`, §3.1): `addBehaviour` / `get<T>` / `getAll<T>` / `remove`, since `add`
    already adds children; or Unity's `addComponent` / `getComponent`.
 2. **The engine's components**: they become objects you change in place
    (`get<Light>()!.intensity = 2`, as in Unity, each change written to the
@@ -339,4 +355,19 @@ You took the first answer, the recommended one, in each.
 
 ## 6. Measurements
 
-(Filled in as each step is measured.)
+### Step 1: behaviours (`measure bench`, profile builds, 2026-10-09)
+
+`world.update` with 10,000 objects in 100 trees of 100, median (slowest)
+of 300 steady frames, each time with the frame's moves sent; main
+measured the same day, the same way:
+
+| 10,000 objects | Mac (M3 Max) | iPhone 16 Pro Max | Galaxy Note10+ |
+|---|---:|---:|---:|
+| moving themselves (`rotate`), main | 0.81 (1.42) ms | 0.76 (2.48) ms | – |
+| moving themselves, step 1 | 0.85 (8.38) ms | 0.77 (2.53) ms | – |
+| **each moved by a behaviour**, step 1 | **0.85** (1.46) ms | **0.79** (1.16) ms | – |
+| with nothing to do, main / step 1 | 0.02 / 0.03 ms | 0.02 / 0.03 ms | – |
+
+A behaviour costs its object 0.04 ms more per 10,000 on the Mac and 0.03
+on the iPhone (5 % and 4 %), the call and the walk over the object's
+components. Objects without components pay nothing measurable.

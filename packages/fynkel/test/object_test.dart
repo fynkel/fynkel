@@ -61,14 +61,14 @@ void main() {
     );
     expect(light.name, 'sun');
     expect(light.transform.position, Vec3(0, 3, 0));
-    expect(light.light.intensity, Light.sun().intensity);
-    expect(() => light.camera, throwsFynkel(FynkelStatus.noComponent, 'Camera'));
+    expect(light.get<Light>()!.intensity, Light.sun().intensity);
+    expect(light.get<Camera>(), isNull);
     light
       ..name = 'moon'
-      ..light = Light.ambient(intensity: 0.2)
-      ..camera = const Camera(fovY: 40);
-    light.remove<Camera>();
-    expect(() => light.camera, throwsFynkel(FynkelStatus.noComponent));
+      ..get<Light>()!.kind = LightKind.ambient
+      ..addComponent(Camera(fovY: 40));
+    light.removeComponent(light.get<Camera>()!);
+    expect(light.get<Camera>(), isNull);
 
     for (final touch in <void Function()>[
       () => light.world,
@@ -87,8 +87,8 @@ void main() {
     expect(light.isAlive, isTrue);
     expect(light.name, 'moon');
     expect(light.transform.position, Vec3(0, 3, 0));
-    expect(light.light.kind, LightKind.ambient);
-    expect(() => light.camera, throwsFynkel(FynkelStatus.noComponent));
+    expect(light.get<Light>()!.kind, LightKind.ambient);
+    expect(light.get<Camera>(), isNull);
   });
 
   test('objects added to one that is not added yet become live with it, in order', () {
@@ -194,14 +194,13 @@ void main() {
 
   test('a refused component leaves the object unadded, to be fixed and added again', () {
     expect(() => GameObject(components: [Light.sun(), Light.ambient()]), throwsArgumentError);
-    expect(() => GameObject(components: [Transform()]), throwsArgumentError);
 
-    final camera = GameObject(components: [const Camera(fovY: 500)]);
+    final camera = GameObject(components: [Camera(fovY: 500)]);
     expect(() => world.add(camera), throwsFynkel(FynkelStatus.invalidValue, 'fov_y'));
     expect(camera.isAlive, isFalse);
-    camera.camera = const Camera(fovY: 60);
+    camera.get<Camera>()!.fovY = 60;
     world.add(camera);
-    expect(camera.camera.fovY, 60);
+    expect(camera.get<Camera>()!.fovY, 60);
   });
 
   test('an inactive object and everything below it are not hit, and each keeps its own flag', () {

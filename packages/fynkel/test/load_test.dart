@@ -86,7 +86,7 @@ class Floor extends GameObject {
     await super.onLoad();
     final grid = await assets.texture('grid.png');
     final material = Material(baseColorTexture: grid);
-    meshRenderer = MeshRenderer(Mesh.plane(), owns ? own(material) : material);
+    addComponent(MeshRenderer(Mesh.plane(), owns ? own(material) : material));
   }
 }
 
@@ -108,11 +108,7 @@ class Source {
 
 /// The first mesh drawn at or below [object].
 Mesh? meshOf(GameObject object) {
-  try {
-    if (object.meshRenderer.mesh case final mesh?) return mesh;
-  } on FynkelException {
-    // No renderer here; look below.
-  }
+  if (object.get<MeshRenderer>()?.mesh case final mesh?) return mesh;
   for (final child in object.children) {
     if (meshOf(child) case final mesh?) return mesh;
   }
@@ -360,7 +356,7 @@ void main() {
     final floor = world.add(Floor());
     await floor.loaded;
     final texture = await world.assets.texture('grid.png');
-    final material = floor.meshRenderer.material!;
+    final material = floor.get<MeshRenderer>()!.material!;
     world.dispose();
     expect([material.isDisposed, texture.isDisposed], [true, true]);
   });

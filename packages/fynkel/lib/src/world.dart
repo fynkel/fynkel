@@ -76,6 +76,7 @@ final class World implements Finalizable {
     _byClass.clear();
     _live.clear();
     _starting.clear();
+    _compact.clear();
     _moved.clear();
     _off.clear();
     _hidden.clear();
@@ -149,8 +150,13 @@ final class World implements Finalizable {
   var _liveDirty = false;
   final _moved = <GameObject>[];
 
-  // Live objects that haven't had onStart yet, in the same order.
-  final _starting = <GameObject>[];
+  // Live objects and behaviours that haven't had onStart yet, in the same
+  // order, each object before its behaviours.
+  final _starting = <Object>[];
+
+  // Objects with removed components still in their lists: taken out at the
+  // start of the next update, so a removal never shifts a list being run.
+  final _compact = <GameObject>[];
 
   // Objects whose own flag is off, and the ids of everything they hide,
   // worked out again when [_shape] has changed since [_hiddenAt]. Only
@@ -209,20 +215,24 @@ final class World implements Finalizable {
   ///
   /// 1. **Taps.** Each of [input]'s taps is cast into the world from the
   ///    camera the view draws from. The object hit gets
-  ///    [GameObject.onTap]; if it returns false, its parent does, and so on
-  ///    up to the root, until one returns true.
+  ///    [GameObject.onTap], then its behaviours get [Behaviour.onTap]; if
+  ///    none returns true, its parent and its behaviours do, and so on up
+  ///    to the root, until one returns true.
   /// 2. **Starts.** Each object added since the last frame gets
-  ///    [GameObject.onStart], once, parents before children. Objects added
-  ///    during a start start too.
+  ///    [GameObject.onStart], once, parents before children, each right
+  ///    before its behaviours' [Behaviour.onStart]. Objects added during a
+  ///    start start too.
   /// 3. **Updates.** Each started object gets [GameObject.onUpdate],
-  ///    parents before children, in the order they were added. Objects
+  ///    then its started behaviours get [Behaviour.onUpdate] in the order
+  ///    they were added, parents before children. Objects and behaviours
   ///    added during an update start next frame; objects destroyed during
   ///    it get no more calls, even this frame. A new [GameObject.parent]
   ///    counts from the next frame.
   ///
-  /// Hidden objects (inactive, or below one that is) are skipped by all
-  /// three and start when they're first shown. A view then draws the world
-  /// as it is.
+  /// Hidden objects (inactive, or below one that is) and their behaviours
+  /// are skipped by all three and start when they're first shown; so are
+  /// disabled behaviours ([Behaviour.enabled]) and those still loading. A
+  /// view then draws the world as it is.
   void update(double dt, [Input? input]) {
     final w = pointer;
     _input = input ?? Input.none;
@@ -232,16 +242,27 @@ final class World implements Finalizable {
       _tap(w, at);
     }
 
-    final waiting = <GameObject>[];
+    final waiting = <Object>[];
     for (var i = 0; i < _starting.length; i++) {
-      final object = _starting[i];
-      if (object._destroyed) continue;
-      if (_isHidden(object)) {
-        waiting.add(object);
-        continue;
+      switch (_starting[i]) {
+        case final GameObject object:
+          if (object._destroyed) continue;
+          if (_isHidden(object)) {
+            waiting.add(object);
+            continue;
+          }
+          object._started = true;
+          object.onStart();
+        case final Behaviour behaviour:
+          final object = behaviour._owner!;
+          if (behaviour._removed || object._destroyed) continue;
+          if (!behaviour._loaded || !behaviour.enabled || !object._started || _isHidden(object)) {
+            waiting.add(behaviour);
+            continue;
+          }
+          behaviour._started = true;
+          behaviour.onStart();
       }
-      object._started = true;
-      object.onStart();
     }
     _starting
       ..clear()
@@ -253,12 +274,21 @@ final class World implements Finalizable {
       final object = _live[i];
       if (!object._started || object._destroyed || _isHidden(object)) continue;
       object.onUpdate(dt);
+      final components = object._components;
+      if (components == null) continue;
+      for (var j = 0; j < components.length && !object._destroyed; j++) {
+        if (components[j] case final Behaviour b when b._started && b.enabled && !b._removed) b.onUpdate(dt);
+      }
     }
   }
 
   /// Drops destroyed objects from the update order, and puts each moved
   /// one last with everything below it.
   void _tidy() {
+    for (final object in _compact) {
+      object._components?.removeWhere((c) => c._removed);
+    }
+    _compact.clear();
     if (_liveDirty) {
       _live.removeWhere((o) => o._destroyed);
       _liveDirty = false;
@@ -288,6 +318,12 @@ final class World implements Finalizable {
     for (GameObject? object = hit.object; object != null && !object._destroyed;) {
       final up = object.parent;
       if (object.onTap(tap)) return;
+      final components = object._components;
+      for (var j = 0; components != null && j < components.length && !object._destroyed; j++) {
+        if (components[j] case final Behaviour b when b._loaded && b.enabled && !b._removed) {
+          if (b.onTap(tap)) return;
+        }
+      }
       object = up;
     }
   }
@@ -332,17 +368,19 @@ final class World implements Finalizable {
     return root;
   }
 
-  /// Every live object of class [T] (or a subclass) that the game added,
-  /// grouped by class, each class in the order its objects were added.
-  /// The parts a model makes aren't included: find them by name.
-  List<T> all<T extends GameObject>() => [
+  /// Every live object and component of type [T] (a class, a subclass,
+  /// or an interface they implement) that the game added, grouped by
+  /// class, each class in the order they were added: `world.all<Enemy>()`,
+  /// `world.all<Health>()`. The parts a model makes, and the components the
+  /// engine gave them, aren't included: find them by name.
+  List<T> all<T extends Object>() => [
     for (final objects in _byClass.values)
       if (objects.first is T) ...objects.cast<T>(),
   ];
 
-  /// The first live object of class [T] (or a subclass) that the game
-  /// added, or null.
-  T? first<T extends GameObject>() {
+  /// The first live object or component of type [T] that the game added,
+  /// or null. See [all].
+  T? first<T extends Object>() {
     for (final objects in _byClass.values) {
       if (objects.first is T) return objects.first as T;
     }
@@ -354,8 +392,25 @@ final class World implements Finalizable {
   // made the first time a model's part is asked for.
   final _objects = <int, GameObject>{};
 
-  // The objects the game added, by class, for [all] and [first].
-  final _byClass = <Type, Set<GameObject>>{};
+  // The objects and components the game added, by class, for [all] and
+  // [first].
+  final _byClass = <Type, Set<Object>>{};
+
+  void _register(Object thing) => (_byClass[thing.runtimeType] ??= {}).add(thing);
+
+  void _unregister(Object thing) {
+    final same = _byClass[thing.runtimeType];
+    if (same != null && same.remove(thing) && same.isEmpty) _byClass.remove(thing.runtimeType);
+  }
+
+  /// Puts an object the game didn't add (a model's part) in the update
+  /// order, once something on it needs updates.
+  void _enterLoop(GameObject object) {
+    if (object._inLoop) return;
+    object._inLoop = true;
+    _live.add(object);
+    _starting.add(object);
+  }
 
   GameObject _object(int id) => _objects[id] ??= GameObject._live(this, id);
 
@@ -390,8 +445,8 @@ final class World implements Finalizable {
       if (parent != null) check(fy_parent_set(pointer, id, parent.id));
       if (described.name != null) object._writeName(described.name!);
       if (!described.active) check(fy_active_set(pointer, id, false));
-      for (final component in described.components) {
-        object._write(component);
+      for (final component in object._components ?? const <Component>[]) {
+        if (!component._removed) object._write(component);
       }
     } catch (_) {
       fy_despawn(_pointer, id);
@@ -403,6 +458,8 @@ final class World implements Finalizable {
     object
       .._described = null
       .._activeSelf = described.active
+      .._probed = described.model == null
+      .._inLoop = true
       .._pending = 1;
     if (described.asset case final asset?) (object._uses ??= []).add(asset);
     if (parent != null && parent._pending > 0) {
@@ -412,9 +469,14 @@ final class World implements Finalizable {
     fresh.add(object);
     if (described.model == null) object._setTransform(transform);
     _objects[id] = object;
-    (_byClass[object.runtimeType] ??= {}).add(object);
+    _register(object);
     _live.add(object);
     _starting.add(object);
+    for (final component in object._components ?? const <Component>[]) {
+      if (component._removed) continue;
+      _register(component);
+      if (component is Behaviour) _starting.add(component);
+    }
     if (!described.active) _off.add(object);
     _shape++;
     for (final child in described.children) {
@@ -423,31 +485,81 @@ final class World implements Finalizable {
     }
   }
 
-  /// Runs [object]'s [GameObject.onLoad]: done at once when it returns no
-  /// future, else when its future completes.
+  /// Runs [object]'s [GameObject.onLoad], then its behaviours'
+  /// [Behaviour.onLoad]s: each done at once when it returns no future,
+  /// else when its future completes. The object waits for all of them.
   void _runLoad(GameObject object) {
+    if (object._destroyed) return;
+    final behaviours = [
+      for (final c in object._components ?? const <Component>[])
+        if (c is Behaviour && !c._removed) c,
+    ];
+    object._pending += behaviours.length;
+    _load(object, null, object.onLoad);
+    for (final b in behaviours) {
+      _load(object, b, b.onLoad);
+    }
+  }
+
+  void _load(GameObject object, Behaviour? behaviour, FutureOr<void> Function() onLoad) {
     if (object._destroyed) return;
     final FutureOr<void> result;
     try {
-      result = object.onLoad();
+      result = onLoad();
     } catch (error, stack) {
       _loadFailed(object, error, stack);
       return;
     }
     if (result is Future<void>) {
       result.then(
-        (_) => _loadDone(object),
+        (_) => _loadDone(object, behaviour),
         onError: (Object error, StackTrace stack) => _loadFailed(object, error, stack),
       );
     } else {
-      _loadDone(object);
+      _loadDone(object, behaviour);
     }
   }
 
-  void _loadDone(GameObject object) {
+  void _loadDone(GameObject object, [Behaviour? behaviour]) {
+    behaviour?._loaded = true;
     if (object._destroyed) return;
     object._pending--;
     _appearIfDone(object);
+  }
+
+  /// Puts [component] on [object], which is live: the engine's are written
+  /// by the caller; a behaviour loads, with the object if it's still
+  /// loading, else by itself (a failed load removes only the behaviour).
+  void _componentAdded(GameObject object, Component component) {
+    _register(component);
+    if (component is! Behaviour) return;
+    _enterLoop(object);
+    _starting.add(component);
+    if (!object._appeared) {
+      object._pending++;
+      _load(object, component, component.onLoad);
+      return;
+    }
+    void failed(Object error, StackTrace stack) {
+      if (component._removed || object._destroyed || isDisposed) return;
+      object.removeComponent(component);
+      _report(object, error, stack);
+    }
+
+    final FutureOr<void> result;
+    try {
+      result = component.onLoad();
+    } catch (error, stack) {
+      failed(error, stack);
+      return;
+    }
+    if (result is Future<void>) {
+      result.then((_) {
+        component._loaded = true;
+      }, onError: failed);
+    } else {
+      component._loaded = true;
+    }
   }
 
   /// Destroys the object whose load failed and reports why. A load that
@@ -540,6 +652,9 @@ final class World implements Finalizable {
     try {
       for (final object in objects.reversed) {
         object.onDestroy();
+        for (final c in object._components ?? const <Component>[]) {
+          if (c case final Behaviour b when !b._removed) b.onDestroy();
+        }
       }
     } finally {
       check(fy_despawn(pointer, id));
@@ -549,8 +664,12 @@ final class World implements Finalizable {
           .._unsent = false;
         _objects.remove(object._id);
         _off.remove(object);
-        final same = _byClass[object.runtimeType];
-        if (same != null && same.remove(object) && same.isEmpty) _byClass.remove(object.runtimeType);
+        _unregister(object);
+        for (final c in object._components ?? const <Component>[]) {
+          if (c._removed) continue;
+          c._removed = true;
+          _unregister(c);
+        }
       }
       _liveDirty = true;
       _shape++;
@@ -721,12 +840,13 @@ final class World implements Finalizable {
   }
 }
 
-/// An object in a [World]: a [Transform], whatever other components it
-/// has, and the objects added to it.
+/// An object in a [World]: a [Transform], its components (the engine's
+/// [Camera], [Light] and [MeshRenderer], and any number of the game's
+/// [Behaviour]s), and the objects added to it.
 ///
 /// Make one, then add it: `world.add(GameObject(...))` or
 /// `parent.add(child)`. Until then it only describes itself: its
-/// [transform], [name] and components can be read and set, and objects
+/// [transform], [name] and components can be read and changed, and objects
 /// can be added to it, but anything that needs the world ([parent],
 /// [children], [find], [worldTransform]...) throws a [StateError].
 ///
@@ -740,29 +860,26 @@ final class World implements Finalizable {
 /// value's type.)
 class GameObject {
   /// A new object, not yet in any world, with [transform] (the identity if
-  /// not given) and [components]: at most one of each kind, and no
-  /// [Transform] among them.
-  GameObject({String? name, Transform? transform, Iterable<Component> components = const []})
-    : _described = _Description(name, transform ?? Transform(), _checked(components));
+  /// not given), [components] (as [addComponent] puts them on) and
+  /// [children] (as [add] adds them), so a whole prefab can be one
+  /// expression:
+  ///
+  /// ```dart
+  /// GameObject(name: 'enemy', components: [Health(30), Chase()], children: [Body()])
+  /// ```
+  GameObject({
+    String? name,
+    Transform? transform,
+    Iterable<Component> components = const [],
+    Iterable<GameObject> children = const [],
+  }) : _described = _Description(name, transform ?? Transform()) {
+    components.forEach(addComponent);
+    children.forEach(add);
+  }
 
   /// The object for an engine id the game didn't make, such as a model's
   /// part.
-  GameObject._live(World world, int id) : _world = world, _id = id, _appeared = true;
-
-  static List<Component> _checked(Iterable<Component> components) {
-    final list = components.toList();
-    for (var i = 0; i < list.length; i++) {
-      if (list[i] is Transform) {
-        throw ArgumentError('give the Transform as transform:, not among the components');
-      }
-      for (var j = 0; j < i; j++) {
-        if (list[i].runtimeType == list[j].runtimeType) {
-          throw ArgumentError('got two ${list[i].runtimeType}s; an object has at most one');
-        }
-      }
-    }
-    return list;
-  }
+  GameObject._live(World world, int id) : _world = world, _id = id, _appeared = true, _probed = false;
 
   World? _world;
   int _id = 0;
@@ -775,6 +892,14 @@ class GameObject {
 
   bool _destroyed = false;
   bool _started = false;
+
+  // Its components, in the order they were put on; removed ones stay until
+  // the world's next update takes them out. For an object the engine made
+  // (a model's part), its engine components are read the first time
+  // they're asked for ([_probed]). [_inLoop]: in the world's update order.
+  List<Component>? _components;
+  bool _probed = true;
+  bool _inLoop = false;
 
   // The transform as the game last set or read it, so reading it makes no
   // call, and whether it waits in [World._unsent]. Null until first read
@@ -963,6 +1088,9 @@ class GameObject {
   /// what they own and the assets they hold go too.
   void _destroyUnadded() {
     _destroyed = true;
+    for (final c in _components ?? const <Component>[]) {
+      c._removed = true;
+    }
     _failLoaded(StateError('$this was destroyed before it was added'), StackTrace.current);
     final described = _described;
     for (final child in described?.children ?? const <GameObject>[]) {
@@ -1137,7 +1265,7 @@ class GameObject {
     if (!(point.width > 0 && point.height > 0)) {
       throw ArgumentError.value(point, 'point', 'needs a view with an area');
     }
-    final c = camera;
+    final c = get<Camera>() ?? (throw FynkelException(FynkelStatus.noComponent, '$this has no Camera'));
     final t = worldTransform;
     final tanHalf = math.tan(c.fovY * math.pi / 360);
     // Through the point on the plane 1 in front of the camera, in the
@@ -1148,38 +1276,159 @@ class GameObject {
     return Ray(t.position + through * c.near, through);
   }
 
-  /// Removes the object's component of kind [T]. Throws if it has none.
-  void remove<T extends Component>() {
-    if (_described case final d?) {
-      if (T == Transform) throw ArgumentError('an object that isn\'t added yet always has a Transform');
-      if (d.get<T>() == null) throw FynkelException(FynkelStatus.noComponent, '$this has no $T');
-      d.components.removeWhere((c) => c is T);
-      return;
+  // --- Components ---
+
+  /// Puts [component] on this object and returns it: a [Behaviour] (any
+  /// number), or one of the engine's (at most one [Camera], [Light] and
+  /// [MeshRenderer] each). On a live object an engine component is written
+  /// at once and a behaviour loads ([Behaviour.onLoad]) and starts the next
+  /// frame.
+  ///
+  /// Throws a [StateError] if [component] is on an object already (each
+  /// belongs to one, for its life) or this object was destroyed, an
+  /// [ArgumentError] for a second engine component of a kind, and the
+  /// engine's error if it refuses the component's values.
+  T addComponent<T extends Component>(T component) {
+    if (component._owner case final owner?) {
+      throw StateError('$component is on $owner already; a component belongs to one object');
     }
-    final w = world.pointer;
-    if (T == Transform) {
-      world._sendTransforms();
-      _transform = null;
+    if (_destroyed) throw StateError('$this was destroyed, so nothing can be put on it');
+    if (component is! Behaviour) {
+      _probe();
+      for (final c in _components ?? const <Component>[]) {
+        if (!c._removed && c.runtimeType == component.runtimeType) {
+          throw ArgumentError('$this has a ${c.runtimeType} already; an object has at most one');
+        }
+      }
     }
-    check(switch (T) {
-      const (Transform) => fy_transform_remove(w, id),
-      const (Camera) => fy_camera_remove(w, id),
-      const (Light) => fy_light_remove(w, id),
-      const (MeshRenderer) => fy_mesh_renderer_remove(w, id),
-      _ => throw ArgumentError('remove needs a component type, such as remove<Camera>(); got $T'),
-    });
+    component._owner = this;
+    (_components ??= []).add(component);
+    if (_world case final world?) {
+      try {
+        _write(component);
+      } catch (_) {
+        _components!.removeLast();
+        component._owner = null;
+        rethrow;
+      }
+      world._componentAdded(this, component);
+    }
+    return component;
   }
 
-  /// The object's component of kind [T] while it's only described. Throws
-  /// as the engine would when it has none.
-  T _describedOr<T extends Component>(_Description d) =>
-      d.get<T>() ?? (throw FynkelException(FynkelStatus.noComponent, '$this has no $T'));
+  /// Takes [component] off this object. A behaviour gets
+  /// [Behaviour.onDestroy] first and no calls after; an engine component
+  /// is taken out of the engine. It can't be put on again. Throws an
+  /// [ArgumentError] if it isn't on this object.
+  void removeComponent(Component component) {
+    if (!identical(component._owner, this) || component._removed) {
+      throw ArgumentError.value(component, 'component', 'is not on $this');
+    }
+    final world = _world;
+    if (world == null) {
+      component._removed = true;
+      _components!.remove(component);
+      return;
+    }
+    switch (component) {
+      case Behaviour b:
+        b.onDestroy();
+      case Camera():
+        check(fy_camera_remove(world.pointer, id));
+      case Light():
+        check(fy_light_remove(world.pointer, id));
+      case MeshRenderer():
+        check(fy_mesh_renderer_remove(world.pointer, id));
+    }
+    component._removed = true;
+    world._unregister(component);
+    world._compact.add(this);
+  }
+
+  /// The first component on this object of type [T] (a class, a subclass,
+  /// or an interface one implements), or null: `get<Health>()`,
+  /// `get<Camera>()`. Unity's `GetComponent`.
+  T? get<T extends Object>() {
+    _probe();
+    for (final c in _components ?? const <Component>[]) {
+      if (c is T && !c._removed) return c as T;
+    }
+    return null;
+  }
+
+  /// Every component on this object of type [T], in the order they were
+  /// put on. A new list each time.
+  List<T> getAll<T extends Object>() {
+    _probe();
+    return [
+      for (final c in _components ?? const <Component>[])
+        if (c is T && !c._removed) c as T,
+    ];
+  }
+
+  /// Whether this object has a component of type [T].
+  bool has<T extends Object>() => get<T>() != null;
+
+  /// The first component of type [T] on this object, or else on the
+  /// nearest object above it that has one, or null.
+  T? getInParent<T extends Object>() {
+    for (GameObject? o = this; o != null; o = o.parent) {
+      if (o.get<T>() case final found?) return found;
+    }
+    return null;
+  }
+
+  /// The first component of type [T] on this object, or else below it,
+  /// depth first in [children] order, or null.
+  T? getInChildren<T extends Object>() {
+    if (get<T>() case final found?) return found;
+    for (final child in children) {
+      if (child.getInChildren<T>() case final found?) return found;
+    }
+    return null;
+  }
+
+  /// Reads the engine components of an object the engine made, the first
+  /// time they're asked for, so the same instances come back after.
+  void _probe() {
+    if (_probed) return;
+    _probed = true;
+    final world = _world;
+    if (world == null || _destroyed || world.isDisposed) return;
+    final w = world._pointer;
+    bool missing<T>() => !(_components ?? const <Component>[]).any((c) => c is T && !c._removed);
+    final found = <Component>[
+      if (missing<Camera>() && fy_camera_get(w, _id, scratch.camera) == FyStatus.FY_STATUS_OK)
+        Camera(
+          fovY: scratch.camera.ref.fov_y,
+          near: scratch.camera.ref.near_clip,
+          far: scratch.camera.ref.far_clip,
+          clearColor: scratch.camera.ref.clear_color.read(),
+        ),
+      if (missing<Light>() && fy_light_get(w, _id, scratch.light) == FyStatus.FY_STATUS_OK) _readLight(),
+      if (missing<MeshRenderer>() && fy_mesh_renderer_get(w, _id, scratch.meshRenderer) == FyStatus.FY_STATUS_OK)
+        MeshRenderer(world._meshes[scratch.meshRenderer.ref.mesh], world._materials[scratch.meshRenderer.ref.material]),
+    ];
+    for (final c in found) {
+      c._owner = this;
+    }
+    if (found.isNotEmpty) _components = [...found, ...?_components];
+  }
+
+  Light _readLight() {
+    final l = scratch.light.ref;
+    return switch (l.kind) {
+      FY_LIGHT_DIRECTIONAL => Light.sun(color: l.color.read(), intensity: l.intensity),
+      FY_LIGHT_AMBIENT => Light.ambient(color: l.color.read(), intensity: l.intensity),
+      final kind => throw StateError('the engine returned light kind $kind, which this package:fynkel predates'),
+    };
+  }
 
   void _write(Component component) => switch (component) {
-    Transform c => transform = c,
     Camera c => _writeCamera(c),
     Light c => _writeLight(c),
     MeshRenderer c => _writeMeshRenderer(c),
+    Behaviour() => null,
   };
 
   /// Where the object is, how it's turned and how big it is, relative to
@@ -1248,15 +1497,6 @@ class GameObject {
   /// a root).
   void translate(Vec3 offset) => transform = transform.translated(offset);
 
-  Camera get camera {
-    if (_described case final d?) return _describedOr<Camera>(d);
-    check(fy_camera_get(world.pointer, id, scratch.camera));
-    final c = scratch.camera.ref;
-    return Camera(fovY: c.fov_y, near: c.near_clip, far: c.far_clip, clearColor: c.clear_color.read());
-  }
-
-  set camera(Camera value) => _described == null ? _writeCamera(value) : _described!.set(value);
-
   void _writeCamera(Camera value) {
     final c = scratch.camera.ref;
     c.fov_y = value.fovY;
@@ -1265,19 +1505,6 @@ class GameObject {
     c.clear_color.write(value.clearColor);
     check(fy_camera_set(world.pointer, id, scratch.camera));
   }
-
-  Light get light {
-    if (_described case final d?) return _describedOr<Light>(d);
-    check(fy_light_get(world.pointer, id, scratch.light));
-    final l = scratch.light.ref;
-    return switch (l.kind) {
-      FY_LIGHT_DIRECTIONAL => Light.sun(color: l.color.read(), intensity: l.intensity),
-      FY_LIGHT_AMBIENT => Light.ambient(color: l.color.read(), intensity: l.intensity),
-      final kind => throw StateError('the engine returned light kind $kind, which this package:fynkel predates'),
-    };
-  }
-
-  set light(Light value) => _described == null ? _writeLight(value) : _described!.set(value);
 
   void _writeLight(Light value) {
     final l = scratch.light.ref;
@@ -1289,15 +1516,6 @@ class GameObject {
     l.intensity = value.intensity;
     check(fy_light_set(world.pointer, id, scratch.light));
   }
-
-  MeshRenderer get meshRenderer {
-    if (_described case final d?) return _describedOr<MeshRenderer>(d);
-    check(fy_mesh_renderer_get(world.pointer, id, scratch.meshRenderer));
-    final r = scratch.meshRenderer.ref;
-    return MeshRenderer(world._meshes[r.mesh], world._materials[r.material]);
-  }
-
-  set meshRenderer(MeshRenderer value) => _described == null ? _writeMeshRenderer(value) : _described!.set(value);
 
   void _writeMeshRenderer(MeshRenderer value) {
     final w = world;
@@ -1316,12 +1534,11 @@ class GameObject {
 /// What an object is to be, until it's added: what its constructor and
 /// setters said.
 final class _Description {
-  _Description(this.name, this.transform, this.components);
+  _Description(this.name, this.transform);
 
   String? name;
   bool active = true;
   Transform transform;
-  final List<Component> components;
   final children = <GameObject>[];
 
   /// For a model's copy ([Model.instantiate]): the engine makes its objects.
@@ -1330,13 +1547,6 @@ final class _Description {
   /// For a model's copy from [Assets.model]: the use it holds of the
   /// model, until it's destroyed.
   _Asset? asset;
-
-  T? get<T extends Component>() => transform is T ? transform as T : components.whereType<T>().firstOrNull;
-
-  void set<T extends Component>(T component) {
-    components.removeWhere((c) => c is T);
-    components.add(component);
-  }
 }
 
 /// Where a ray hit first ([World.raycast]).

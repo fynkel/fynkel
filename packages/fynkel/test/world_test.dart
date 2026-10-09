@@ -33,8 +33,8 @@ void main() {
       rotation: Quat.axisAngle(Vec3.right, 0.5),
       scale: Vec3.one * 2,
     );
-    const camera = Camera(fovY: 45, near: 0.5, far: 50, clearColor: Color.rgb(0.25, 0.5, 0.75));
-    const light = Light.ambient(color: Color.rgb(1, 0.5, 0), intensity: 0.25);
+    final camera = Camera(fovY: 45, near: 0.5, far: 50, clearColor: Color.rgb(0.25, 0.5, 0.75));
+    final light = Light.ambient(color: Color.rgb(1, 0.5, 0), intensity: 0.25);
     final material = Material(color: Color(0xFFE0613A), metallic: 0.25, roughness: 0.75);
     final renderer = MeshRenderer(Mesh.sphere(), material);
     final o = world.add(GameObject(transform: transform, components: [camera, light, renderer]));
@@ -42,26 +42,26 @@ void main() {
     expect(o.transform.position, transform.position);
     expect(o.transform.rotation.closeTo(transform.rotation), isTrue);
     expect(o.transform.scale, Vec3(2, 2, 2));
-    expect(o.camera, camera);
-    expect(o.light, light);
-    expect(o.meshRenderer, renderer, reason: 'the same Mesh and Material objects');
-    expect(o.meshRenderer.material, same(material));
+    expect(o.get<Camera>(), same(camera));
+    expect(o.get<Light>(), same(light));
+    expect(o.get<MeshRenderer>(), same(renderer));
+    expect(o.get<MeshRenderer>()!.material, same(material));
   });
 
-  test('a missing component throws, and remove takes it away', () {
+  test('a missing component is null, and removeComponent takes one away', () {
     final o = world.add(GameObject(transform: Transform(), components: [Light.sun()]));
-    expect(() => o.camera, throwsFynkel(FynkelStatus.noComponent, 'Camera'));
-    o.remove<Light>();
-    expect(() => o.light, throwsFynkel(FynkelStatus.noComponent));
-    expect(() => o.remove<Light>(), throwsFynkel(FynkelStatus.noComponent));
-    expect(() => o.remove<Component>(), throwsArgumentError);
+    expect(o.get<Camera>(), isNull);
+    final light = o.get<Light>()!;
+    o.removeComponent(light);
+    expect(o.get<Light>(), isNull);
+    expect(() => o.removeComponent(light), throwsArgumentError);
   });
 
   test('an object refuses two components of one kind, and a refused component leaves no object behind', () {
     expect(() => GameObject(components: [Light.sun(), Light.ambient()]), throwsArgumentError);
     final before = world.add(GameObject());
     expect(
-      () => world.add(GameObject(transform: Transform(), components: [const Camera(fovY: 500)])),
+      () => world.add(GameObject(transform: Transform(), components: [Camera(fovY: 500)])),
       throwsFynkel(FynkelStatus.invalidValue, 'fov_y'),
     );
     final after = world.add(GameObject());

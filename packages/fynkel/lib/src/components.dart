@@ -1,16 +1,54 @@
 part of 'world.dart';
 
-/// Something an object has: a [Transform], [Camera], [Light] or
-/// [MeshRenderer]. Components are values. Reading one from an object gives
-/// a copy, and changing the object means giving it a new value.
+/// Something on a [GameObject]: a [Camera], [Light] or [MeshRenderer]
+/// (the engine's), or a [Behaviour] (the game's own code). An object has
+/// any number of behaviours and at most one of each of the engine's. A
+/// component belongs to the one object it was given to, for its life: put
+/// it on with `GameObject(components: [...])` or
+/// [GameObject.addComponent], find it with [GameObject.get], and take it
+/// off with [GameObject.removeComponent].
+///
+/// Its [transform] is its object's: every object has one, so it isn't a
+/// component here.
 sealed class Component {
-  const Component();
+  Component._();
+
+  GameObject? _owner;
+  bool _removed = false;
+
+  /// The object it's on. Throws a [StateError] before it's given to one.
+  GameObject get gameObject => _owner ?? (throw StateError('$runtimeType is on no object yet'));
+
+  /// Whether it was taken off its object ([GameObject.removeComponent]) or
+  /// its object was destroyed. It can still be read, but not used.
+  bool get isRemoved => _removed;
+
+  /// Its object's [GameObject.transform].
+  Transform get transform => gameObject.transform;
+  set transform(Transform value) => gameObject.transform = value;
+
+  /// Its object's component of type [T]: see [GameObject.get].
+  T? get<T extends Object>() => gameObject.get<T>();
+
+  /// Its object's components of type [T]: see [GameObject.getAll].
+  List<T> getAll<T extends Object>() => gameObject.getAll<T>();
+
+  /// Whether its object has a component of type [T].
+  bool has<T extends Object>() => gameObject.has<T>();
+
+  /// The live object it's on, for writing a change to the engine; null
+  /// while there's nothing to write to (not added yet, or the part of a
+  /// model being read).
+  GameObject? get _live => switch (_owner) {
+    final o? when o._world != null && !_removed => o,
+    _ => null,
+  };
 }
 
 /// Where an object is, which way it faces, and how big it is, relative to
 /// its [GameObject.parent] (or the world, for a root). [GameObject.worldTransform]
 /// gives it in the world.
-final class Transform extends Component {
+final class Transform {
   /// [lookAt] turns the object so it looks at that point from [position];
   /// [forward] turns it to look along that direction. Give at most one of
   /// [rotation], [lookAt] and [forward].
@@ -58,24 +96,44 @@ final class Transform extends Component {
 }
 
 /// Makes the object a camera. The view is drawn from the camera with the
-/// lowest id that also has a [Transform].
+/// lowest id that also has a [Transform]. Change it in place:
+/// `get<Camera>()!.fovY = 40`.
 final class Camera extends Component {
-  const Camera({this.fovY = 60, this.near = 0.1, this.far = 1000, this.clearColor = const Color.rgb(0.1, 0.1, 0.12)});
+  Camera({this._fovY = 60, this._near = 0.1, this._far = 1000, this._clearColor = const Color.rgb(0.1, 0.1, 0.12)})
+    : super._();
+
+  double _fovY, _near, _far;
+  Color _clearColor;
 
   /// Vertical field of view in degrees, 1–179.
-  final double fovY;
-  final double near;
-  final double far;
+  double get fovY => _fovY;
+  set fovY(double value) => _change(() => _fovY = value);
+
+  double get near => _near;
+  set near(double value) => _change(() => _near = value);
+
+  double get far => _far;
+  set far(double value) => _change(() => _far = value);
 
   /// What the view shows where nothing is drawn.
-  final Color clearColor;
+  Color get clearColor => _clearColor;
+  set clearColor(Color value) => _change(() => _clearColor = value);
 
-  @override
-  bool operator ==(Object other) =>
-      other is Camera && other.fovY == fovY && other.near == near && other.far == far && other.clearColor == clearColor;
-
-  @override
-  int get hashCode => Object.hash(fovY, near, far, clearColor);
+  /// Makes a change and writes it to the engine; undoes it if the engine
+  /// refuses it.
+  void _change(void Function() set) {
+    final (fovY, near, far, clearColor) = (_fovY, _near, _far, _clearColor);
+    set();
+    try {
+      _live?._writeCamera(this);
+    } catch (_) {
+      _fovY = fovY;
+      _near = near;
+      _far = far;
+      _clearColor = clearColor;
+      rethrow;
+    }
+  }
 
   @override
   String toString() => 'Camera(fovY: $fovY, near: $near, far: $far, clearColor: $clearColor)';
@@ -83,8 +141,7 @@ final class Camera extends Component {
 
 enum LightKind {
   /// Light from far away, like the sun, shining along the object's forward
-  /// (its [Transform.forward]; without a transform it doesn't shine). Only
-  /// the one with the lowest id is used.
+  /// (its [Transform.forward]). Only the one with the lowest id is used.
   sun,
 
   /// Light from every direction, adding to every surface. All ambient
@@ -92,43 +149,147 @@ enum LightKind {
   ambient,
 }
 
+/// Lights the scene. Change it in place: `get<Light>()!.intensity = 2`.
 final class Light extends Component {
-  /// Shines along the object's [Transform.forward]: spawn it with
+  /// Shines along the object's [Transform.forward]: give the object
   /// `Transform(forward: direction)`.
-  const Light.sun({this.color = Color.white, this.intensity = 1}) : kind = LightKind.sun;
+  Light.sun({Color color = Color.white, double intensity = 1}) : this._(LightKind.sun, color, intensity);
 
-  const Light.ambient({this.color = Color.white, this.intensity = 1}) : kind = LightKind.ambient;
+  Light.ambient({Color color = Color.white, double intensity = 1}) : this._(LightKind.ambient, color, intensity);
 
-  final LightKind kind;
-  final Color color;
-  final double intensity;
+  Light._(this._kind, this._color, this._intensity) : super._();
 
-  @override
-  bool operator ==(Object other) =>
-      other is Light && other.kind == kind && other.color == color && other.intensity == intensity;
+  LightKind _kind;
+  Color _color;
+  double _intensity;
 
-  @override
-  int get hashCode => Object.hash(kind, color, intensity);
+  LightKind get kind => _kind;
+  set kind(LightKind value) => _change(() => _kind = value);
+
+  Color get color => _color;
+  set color(Color value) => _change(() => _color = value);
+
+  double get intensity => _intensity;
+  set intensity(double value) => _change(() => _intensity = value);
+
+  void _change(void Function() set) {
+    final (kind, color, intensity) = (_kind, _color, _intensity);
+    set();
+    try {
+      _live?._writeLight(this);
+    } catch (_) {
+      _kind = kind;
+      _color = color;
+      _intensity = intensity;
+      rethrow;
+    }
+  }
 
   @override
   String toString() => 'Light.${kind.name}(color: $color, intensity: $intensity)';
 }
 
 /// Draws [mesh] with [material] at the object's [Transform]. Without both,
-/// nothing is drawn.
+/// nothing is drawn. Change it in place: `get<MeshRenderer>()!.material = gold`.
 final class MeshRenderer extends Component {
-  const MeshRenderer([this.mesh, this.material]);
+  MeshRenderer([this._mesh, this._material]) : super._();
 
-  final Mesh? mesh;
-  final Material? material;
+  Mesh? _mesh;
+  Material? _material;
 
-  @override
-  bool operator ==(Object other) =>
-      other is MeshRenderer && identical(other.mesh, mesh) && identical(other.material, material);
+  Mesh? get mesh => _mesh;
+  set mesh(Mesh? value) => _change(() => _mesh = value);
 
-  @override
-  int get hashCode => Object.hash(mesh, material);
+  Material? get material => _material;
+  set material(Material? value) => _change(() => _material = value);
+
+  void _change(void Function() set) {
+    final (mesh, material) = (_mesh, _material);
+    set();
+    try {
+      _live?._writeMeshRenderer(this);
+    } catch (_) {
+      _mesh = mesh;
+      _material = material;
+      rethrow;
+    }
+  }
 
   @override
   String toString() => 'MeshRenderer($mesh, $material)';
+}
+
+/// The game's own code on an object: extend it, and put it on any number
+/// of objects, one instance each (`GameObject(components: [Health(100)])`
+/// or [GameObject.addComponent]). An object has any number of behaviours,
+/// of the same class or not.
+///
+/// A behaviour gets the same calls as its object, right after the
+/// object's own, in the order the behaviours were added: [onLoad] when
+/// it's put on a live object (or with its object), then [onStart],
+/// [onUpdate] each frame, [onTap], and [onDestroy] when it's removed or
+/// its object is destroyed. While [enabled] is false it gets none of them
+/// but [onLoad] and [onDestroy], and it starts when it's next enabled.
+abstract class Behaviour extends Component {
+  Behaviour() : super._();
+
+  /// Whether it gets its object's frames and taps. A disabled behaviour
+  /// waits to start until it's enabled.
+  bool enabled = true;
+
+  // Its load is done, and it has had onStart.
+  bool _loaded = false;
+  bool _started = false;
+
+  /// The world its object is in. Throws a [StateError] before the object
+  /// is added.
+  World get world => gameObject.world;
+
+  /// What the player did since the last frame: the world's [World.input].
+  Input get input => gameObject.input;
+
+  /// Its object's assets: what it loads is held until the object is
+  /// destroyed. See [GameObject.assets].
+  Assets get assets => gameObject.assets;
+
+  /// Gives [resource] to its object, to be disposed when the object is
+  /// destroyed: see [GameObject.own].
+  T own<T extends Object>(T resource) => gameObject.own(resource);
+
+  /// Called once, when it's put on a live object, or when its object is
+  /// added: where it gets its assets. Return a future to load something.
+  /// If its object is still loading, the object appears only when this is
+  /// done too, and a load that throws fails the object's; on an object
+  /// that has appeared, a load that throws removes only the behaviour and
+  /// goes to [World.errors].
+  @mustCallSuper
+  @protected
+  FutureOr<void> onLoad() {}
+
+  /// Called once, in the first [World.update] where it's loaded, enabled
+  /// and its object is shown, before its first [onUpdate].
+  @mustCallSuper
+  @protected
+  void onStart() {}
+
+  /// Called every [World.update] with the seconds since the last one, right
+  /// after its object's, while it's enabled and its object is shown.
+  @mustCallSuper
+  @protected
+  void onUpdate(double dt) {}
+
+  /// Called when it's removed, or its object is destroyed (right after the
+  /// object's own), while the object is still there to read.
+  @mustCallSuper
+  @protected
+  void onDestroy() {}
+
+  /// Called when a tap hits its object, or something below that didn't
+  /// take it, right after the object's own [GameObject.onTap]. Return true
+  /// to take it.
+  @protected
+  bool onTap(Tap tap) => false;
+
+  @override
+  String toString() => _owner == null ? '$runtimeType' : '$runtimeType on $_owner';
 }

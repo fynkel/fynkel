@@ -4,7 +4,7 @@ class Sphere extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    meshRenderer = MeshRenderer(Mesh.sphere(), own(Material(color: Color(0xFF8805))));
+    addComponent(MeshRenderer(Mesh.sphere(), own(Material(color: Color(0xFF8805)))));
   }
 
   var t = 0;
