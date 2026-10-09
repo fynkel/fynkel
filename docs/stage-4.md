@@ -243,11 +243,21 @@ Its own module (`package:fynkel`'s `input`), which knows nothing about objects: 
   - `onKeyDown`, `onKeyUp`, with modifiers.
 - **On objects**, as Unity's `IPointerDownHandler` and the rest: `onPointerDown`, `onPointerUp`, `onPointerEnter`, `onPointerExit`, `onClick` (stage 3's `onTap`), `onLongPress`, `onDragStart`, `onDrag`, `onDragEnd`, on objects and behaviours. They bubble up to the parents until one returns true, as taps do now. An object that takes a drag's start gets the rest of that drag, even when the finger leaves it.
 - **Polling**, as Unity's `Input` class: `input.isDown(x)`, `input.wasPressed(x)`, `input.wasReleased(x)` for keys and mouse buttons; `input.mousePosition`, `input.fingers`, `input.scroll`.
-- **Keys** are Fynkel's own `Key` values (`Key.space`, `Key.a`), filled from Flutter's by fynkel_flutter, so package:fynkel needs no Flutter.
+- **Keys** are Fynkel's own `KeyCode` values (`KeyCode.space`, `KeyCode.a`), filled from Flutter's by fynkel_flutter, so package:fynkel needs no Flutter.
 - **Axes and actions**: `input.axis2('move')` reads WASD and the arrow keys as a `Vec2` by default, and `input.action('jump')` gives a named button bound to keys and mouse buttons, with `isDown`, `wasPressed`, `wasReleased`. Gamepads join later, through the same names.
 - **Settings**: the tap's slop and time, the double tap's interval, the long press's time, the swipe's speed, in `input.settings`, with sensible defaults.
 - **Flutter UI on top**: pointers taken by a widget over the view (a HUD button) never reach the game, which is what a game wants. A widget can let them through, as Flutter already allows.
 - **Allocation**: no allocation in a frame without input, and a fixed small cost per event.
+
+- *Settled in step 5:*
+  - **`KeyCode`, not `Key`**: Flutter's widgets have a `Key`, and a game's file imports both. Keys are where they are, not what they type (Flutter's physical keys), so WASD stays WASD on an AZERTY keyboard, as Unity's `KeyCode` does.
+  - **Events wait for the next frame.** The view feeds them as they come; the world handles them in order at the start of its update, before starts, updates and routines, and each takes that frame's time. So a finger's `age` and the long press count in game time steps, unscaled: a frame counts for at most a third of a second, as everywhere.
+  - **The mouse is one finger** for as long as it's over the view, pressed or not, so it hovers, enters and exits. A touch is a finger from down to up, and enters what it lands on just before its down. Every mouse button taps; `finger.button` says which. A touch holds `MouseButton.left` for polling, so `wasPressed(MouseButton.left)` works on phones too.
+  - **A double tap is two taps**: `onTap` fires with `tapCount` 1, then 2. Waiting to see if a second comes would make every single tap late.
+  - **A swipe is a drag that ends fast**: at least `swipeSpeed` (800 px/s) over the last tenth of a second when the finger lifts. A slow drag that ends still is only a drag. A finger that moved past the slop never long presses.
+  - **On objects:** `onPointerUp` goes only to what took the down, wherever the finger is, as in Unity; `onDrag` and `onDragEnd` go to what took the drag's start. Exits run from the part up, enters from the top down. An object's enabled behaviours come right after it, before its parent.
+  - **Errors** from a `listen` handler or an object's handler go to `world.errors`, and the rest still hear; standalone `Input` (for tests) rethrows.
+  - **No allocation, tested**: `test/alloc_test.dart` runs 50 objects with behaviours, a resting mouse and listeners for 50,000 frames and compares the VM's allocation profile with a run of none. Making it pass also took the allocations out of the world's own idle frame (iterators in the transform tidy-up, the starts list).
 
 ### 3.7 Motion
 
@@ -352,6 +362,13 @@ mouse's buttons and hover, keys, axes and actions, the order against
 the rest of the frame), objects' handlers bubble, a frame without input
 allocates nothing, and you have tried it on the Mac, the iPhone and the
 Note10+ with a small test scene.
+✅ 34 tests in `test/input_test.dart`, 15 in `test/pointer_test.dart` and
+the allocation test (243 in package:fynkel in all), 11 in fynkel_flutter's
+`test/input_test.dart`; 12 mutants, all killed (one only after its test
+held the finger well past the long press time). The lab's two scenes,
+Input: fingers and keys, and Input on objects, were tried on the iOS
+simulator (taps, double taps, long press, drags, swipes, bubbling); pinch,
+keys and hover wait for the three devices.
 
 **Step 6: motion.** §3.7. *Done when* tests show each ease's ends and
 shape, sequences, loops and yoyo, unscaled tweens, stopping with the

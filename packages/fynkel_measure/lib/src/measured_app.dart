@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:fynkel/fynkel.dart' show AssetSource, GameObject, Input;
+import 'package:fynkel/fynkel.dart' show AssetSource, GameObject;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'bench.dart';
@@ -177,7 +177,7 @@ class _MeasuredState extends State<_Measured> {
   Duration? _firstTick;
   var _ticks = 0;
 
-  void _onFrame(double dt, Input input) {
+  void _onFrame(double dt) {
     if (++_ticks > 2) return;
     if (_ticks == 1) _firstTick = _clock.elapsed;
     if (_ticks == 2) {

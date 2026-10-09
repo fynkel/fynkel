@@ -5,10 +5,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'package:fynkel_flutter/src/fynkel_view.dart' show channel;
+import 'package:fynkel_flutter/src/input_feed.dart' show keyCodes;
 
 void main() {
   late World world;
-  late List<Input> frames;
+  late List<String> heard;
 
   setUp(() {
     world = World();
@@ -18,7 +19,7 @@ void main() {
         components: [Camera()],
       ),
     );
-    frames = [];
+    heard = [];
     var texture = 1;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
       channel,
@@ -39,132 +40,112 @@ void main() {
     child: Center(child: SizedBox(width: 200, height: 100, child: child)),
   );
 
-  FynkelView view({bool autofocus = true, double resolutionScale = 1}) => FynkelView(
-    world: world,
-    autofocus: autofocus,
-    resolutionScale: resolutionScale,
-    onFrame: (_, input) => frames.add(input),
-  );
+  FynkelView view({bool autofocus = true, double resolutionScale = 1}) =>
+      FynkelView(world: world, autofocus: autofocus, resolutionScale: resolutionScale);
 
-  /// One frame; returns its input.
-  Future<Input> frame(WidgetTester tester) async {
-    await tester.pump(const Duration(milliseconds: 8));
-    return frames.last;
-  }
+  Input input() => world.input;
+
+  /// One frame, which runs the world's input step.
+  Future<void> frame(WidgetTester tester) => tester.pump(const Duration(milliseconds: 8));
 
   ViewPoint at(double x, double y) => ViewPoint(x, y, width: 200, height: 100);
 
-  testWidgets('a tap shows once, at its place in the view in logical pixels', (tester) async {
+  /// Logs what the input's signals say.
+  void listen() {
+    final input = world.input;
+    input.onFingerDown.listen((f) => heard.add('down ${f.kind.name}'));
+    input.onFingerUp.listen((f) => heard.add('up${f.wasCancelled ? ' cancelled' : ''}'));
+    input.onTap.listen((f) => heard.add('tap ${f.button.name} x${f.tapCount}'));
+    input.onDragStart.listen((f) => heard.add('drag start'));
+    input.onDragEnd.listen((f) => heard.add('drag end ${f.totalDelta}'));
+    input.onHover.listen((f) => heard.add('hover'));
+    input.onPinch.listen((p) => heard.add('pinch ${p.scale}'));
+    input.onTwist.listen((p) => heard.add('twist ${p.twist}'));
+  }
+
+  testWidgets('a tap reaches the input once, at its place in the view in logical pixels', (tester) async {
     // Positions don't depend on the pixels the view draws.
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(app(view(resolutionScale: 0.5)));
-    expect((await frame(tester)).tapped, isNull);
-    expect((frames.last.width, frames.last.height), (200, 100));
-
-    await tester.tapAt(corner + const Offset(50, 20));
-    final input = await frame(tester);
-    expect(input.tapped, at(50, 20));
-    expect(input.taps, [at(50, 20)]);
-    expect(input.drag, Vec2.zero);
-    expect(input.pointers, isEmpty, reason: 'up again');
-    expect((await frame(tester)).tapped, isNull, reason: 'only in the frame it happened');
-  });
-
-  testWidgets('a drag adds up to the whole movement, starting once it is past the tap slop', (tester) async {
-    await tester.pumpWidget(app(view()));
-    final finger = await tester.startGesture(corner + const Offset(20, 50));
-    expect((await frame(tester)).pointers.values, [at(20, 50)]);
-
-    final drags = <Vec2>[];
-    for (var i = 0; i < 10; i++) {
-      await finger.moveBy(const Offset(5, -1));
-      drags.add((await frame(tester)).drag);
-    }
-    // Touch slop is 18: the first three moves (15.3 away) are still a
-    // possible tap; the fourth (20.4) counts all four.
-    expect(drags.take(3), everyElement(Vec2.zero));
-    expect(drags[3], Vec2(20, -4));
-    expect(drags.skip(4), everyElement(Vec2(5, -1)));
-    expect(frames.last.pointers.values, [at(70, 40)]);
-
-    await finger.up();
-    final last = await frame(tester);
-    expect(last.tapped, isNull, reason: 'it moved too far to be a tap');
-    expect(last.pointers, isEmpty);
-  });
-
-  testWidgets('several moves in one frame make one drag, and a tap may move a little', (tester) async {
-    await tester.pumpWidget(app(view()));
-    final finger = await tester.startGesture(corner + const Offset(100, 50));
-    await finger.moveBy(const Offset(10, 0));
-    await finger.moveBy(const Offset(0, 10));
-    await finger.up();
-    expect((await frame(tester)).tapped, at(110, 60), reason: '14 away, within the slop; where it came up');
-
-    final again = await tester.startGesture(corner + const Offset(100, 50));
-    await again.moveBy(const Offset(15, 0));
-    await again.moveBy(const Offset(15, 0));
-    await again.moveBy(const Offset(15, 0));
-    expect((await frame(tester)).drag, Vec2(45, 0));
-    await again.up();
-  });
-
-  testWidgets('only the first finger down drags; the next takes over when it lifts', (tester) async {
-    await tester.pumpWidget(app(view()));
-    final first = await tester.startGesture(corner + const Offset(20, 20), pointer: 1);
-    final second = await tester.startGesture(corner + const Offset(150, 80), pointer: 2);
-    await second.moveBy(const Offset(-40, 0));
-    final both = await frame(tester);
-    expect(both.drag, Vec2.zero);
-    expect(both.pointers, {1: at(20, 20), 2: at(110, 80)});
-
-    await first.moveBy(const Offset(0, 30));
-    expect((await frame(tester)).drag, Vec2(0, 30));
-
-    await first.up();
+    listen();
     await frame(tester);
-    await second.moveBy(const Offset(-3, 0));
-    expect((await frame(tester)).drag, Vec2(-3, 0), reason: 'the second is first now, and already dragging');
-    await second.up();
-    expect((await frame(tester)).taps, isEmpty, reason: 'neither was a tap');
+    expect((input().width, input().height), (200, 100));
+
+    final taps = <Finger>[];
+    input().onTap.listen(taps.add);
+    await tester.tapAt(corner + const Offset(50, 20));
+    expect(taps, isEmpty, reason: 'events wait for the frame');
+    await frame(tester);
+    expect(taps.single.position, at(50, 20));
+    expect(taps.single.kind, FingerKind.touch);
+    expect(heard, ['down touch', 'tap left x1', 'up']);
+    expect(input().fingers, isEmpty);
   });
 
-  testWidgets('a mouse taps with its primary button only, and drags with any', (tester) async {
+  testWidgets('a drag past the slop, across frames; touches are fingers of their own', (tester) async {
     await tester.pumpWidget(app(view()));
+    listen();
+    final first = await tester.startGesture(corner + const Offset(20, 50), pointer: 1);
+    final second = await tester.startGesture(corner + const Offset(150, 80), pointer: 2);
+    await frame(tester);
+    expect(input().fingers.map((f) => f.position), [at(20, 50), at(150, 80)]);
+
+    for (var i = 0; i < 10; i++) {
+      await first.moveBy(const Offset(5, -1));
+      await frame(tester);
+    }
+    expect(input().fingers.first.isDragging, isTrue);
+    await first.up();
+    await second.up();
+    await frame(tester);
+    expect(heard.where((h) => h.startsWith('drag')), ['drag start', 'drag end Vec2(50.0, -10.0)']);
+    expect(heard.where((h) => h.startsWith('tap')), ['tap left x1'], reason: 'the second, which stayed put, tapped');
+  });
+
+  testWidgets('the mouse is one finger, hovering or pressed, with its buttons', (tester) async {
+    await tester.pumpWidget(app(view()));
+    listen();
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: corner + const Offset(10, 10));
     await mouse.moveTo(corner + const Offset(60, 10));
-    final hovered = await frame(tester);
-    expect(hovered.drag, Vec2.zero, reason: 'moving without a button is no drag');
-    expect(hovered.pointers, isEmpty);
+    await frame(tester);
+    final finger = input().fingers.single;
+    expect(finger.kind, FingerKind.mouse);
+    expect(finger.isDown, isFalse);
+    expect(input().mousePosition, at(60, 10));
+    expect(heard, ['hover']);
 
+    heard.clear();
     await mouse.down(corner + const Offset(60, 10));
     await mouse.up();
-    expect((await frame(tester)).tapped, at(60, 10));
-
-    final click = await tester.startGesture(
-      corner + const Offset(60, 10),
-      kind: PointerDeviceKind.mouse,
-      buttons: kSecondaryButton,
-    );
-    await click.up();
-    expect((await frame(tester)).tapped, isNull, reason: 'a right click is no tap');
+    await frame(tester);
+    expect(heard, ['down mouse', 'tap left x1', 'up']);
+    expect(input().fingers.single, same(finger), reason: 'the same finger, still over the view');
 
     final right = await tester.startGesture(
       corner + const Offset(60, 10),
       kind: PointerDeviceKind.mouse,
       buttons: kSecondaryButton,
     );
-    expect((await frame(tester)).pointers, hasLength(1));
+    await frame(tester);
+    expect(input().isDown(MouseButton.right), isTrue);
     await right.moveBy(const Offset(4, 0));
-    expect((await frame(tester)).drag, Vec2(4, 0), reason: "a mouse's slop is 1 pixel");
+    await frame(tester);
+    expect(heard.last, 'drag start', reason: "a mouse's slop is 1 pixel");
     await right.up();
-    expect((await frame(tester)).tapped, isNull);
+    await frame(tester);
+    expect(input().wasReleased(MouseButton.right), isTrue);
+
+    await mouse.moveTo(const Offset(5, 5));
+    await frame(tester);
+    expect(input().fingers, isEmpty, reason: 'it left the view');
     await mouse.removePointer();
   });
 
-  testWidgets('the wheel and the trackpad scroll the game, not the list around it', (tester) async {
+  testWidgets('the wheel and the trackpad scroll the game, not the list around it; a trackpad pinches and twists', (
+    tester,
+  ) async {
     final list = ScrollController();
     addTearDown(list.dispose);
     await tester.pumpWidget(
@@ -180,21 +161,31 @@ void main() {
         ),
       ),
     );
+    listen();
     final inside = const Offset(400, 300);
     await tester.sendEventToBinding(PointerScrollEvent(position: inside, scrollDelta: const Offset(0, 30)));
     await tester.sendEventToBinding(PointerScrollEvent(position: inside, scrollDelta: const Offset(0, 12)));
-    expect((await frame(tester)).scroll, Vec2(0, 42));
+    await frame(tester);
+    expect(input().scroll, Vec2(0, 42));
     expect(list.offset, 0, reason: 'the view claimed the wheel');
-    expect((await frame(tester)).scroll, Vec2.zero);
+    await frame(tester);
+    expect(input().scroll, Vec2.zero);
 
     final trackpad = await tester.createGesture(kind: PointerDeviceKind.trackpad);
     await trackpad.panZoomStart(inside);
     await trackpad.panZoomUpdate(inside, pan: const Offset(0, -20));
-    expect((await frame(tester)).scroll, Vec2(0, 20), reason: 'fingers up scroll down');
+    await frame(tester);
+    expect(input().scroll, Vec2(0, 20), reason: 'fingers up scroll down');
+    await trackpad.panZoomUpdate(inside, pan: const Offset(0, -20), scale: 2);
+    await trackpad.panZoomUpdate(inside, pan: const Offset(0, -20), scale: 3, rotation: 0.5);
+    await frame(tester);
+    expect(heard, ['pinch 3.0', 'twist 0.5'], reason: "one frame's worth");
     await trackpad.panZoomEnd();
   });
 
-  testWidgets('keys are held, pressed and released by frame, and let go when focus goes', (tester) async {
+  testWidgets('keys go by where they are, held, pressed and released by frame, and let go when focus goes', (
+    tester,
+  ) async {
     final other = FocusNode();
     addTearDown(other.dispose);
     // What reaches the widgets around the view: shortcuts, focus moves.
@@ -218,38 +209,46 @@ void main() {
     await frame(tester);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.keyW);
-    var input = await frame(tester);
-    expect(input.keys, {LogicalKeyboardKey.keyW});
-    expect(input.wasPressed(LogicalKeyboardKey.keyW), isTrue);
+    await frame(tester);
+    expect(input().isDown(KeyCode.w), isTrue);
+    expect(input().wasPressed(KeyCode.w), isTrue);
+    expect(input().axis2('move'), Vec2(0, 1));
 
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyW);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
-    input = await frame(tester);
-    expect(input.isDown(LogicalKeyboardKey.keyW), isTrue);
-    expect(input.pressed, {LogicalKeyboardKey.arrowDown}, reason: 'a repeat is no new press');
+    await frame(tester);
+    expect(input().wasPressed(KeyCode.w), isFalse, reason: 'a repeat is no new press');
+    expect(input().wasPressed(KeyCode.arrowDown), isTrue);
     expect(around, isEmpty, reason: 'the view keeps the keys it has focus for');
 
     await tester.sendKeyUpEvent(LogicalKeyboardKey.keyW);
-    input = await frame(tester);
-    expect(input.released, {LogicalKeyboardKey.keyW});
-    expect(input.keys, {LogicalKeyboardKey.arrowDown});
+    await frame(tester);
+    expect(input().wasReleased(KeyCode.w), isTrue);
+    expect(input().isDown(KeyCode.arrowDown), isTrue);
 
     other.requestFocus();
-    input = await frame(tester);
-    expect(input.released, {LogicalKeyboardKey.arrowDown}, reason: 'its key-up will never come here');
-    expect(input.keys, isEmpty);
+    await frame(tester);
+    expect(input().wasReleased(KeyCode.arrowDown), isTrue, reason: 'its key-up will never come here');
+    expect(input().isDown(KeyCode.arrowDown), isFalse);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
+  });
+
+  test('every KeyCode has a Flutter key', () {
+    expect(keyCodes.values.toSet(), KeyCode.values.toSet());
   });
 
   testWidgets('without autofocus, keys reach the view once it is tapped', (tester) async {
     await tester.pumpWidget(app(view(autofocus: false)));
     await tester.sendKeyDownEvent(LogicalKeyboardKey.space);
-    expect((await frame(tester)).keys, isEmpty);
+    await frame(tester);
+    expect(input().isDown(KeyCode.space), isFalse);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
 
     await tester.tapAt(corner + const Offset(5, 5));
     await tester.sendKeyDownEvent(LogicalKeyboardKey.space);
-    expect((await frame(tester)).pressed, {LogicalKeyboardKey.space});
+    await frame(tester);
+    expect(input().wasPressed(KeyCode.space), isTrue);
+    expect(input().action('jump').wasPressed, isTrue);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
   });
 
@@ -259,36 +258,50 @@ void main() {
     await tester.pumpWidget(
       app(GestureDetector(onTap: () => taps++, onPanUpdate: (d) => panned += d.delta, child: view())),
     );
+    listen();
     await tester.tapAt(corner + const Offset(50, 50));
     expect(taps, 1);
-    expect((await frame(tester)).tapped, at(50, 50), reason: 'and the view too');
+    await frame(tester);
+    expect(heard, contains('tap left x1'), reason: 'and the view too');
 
     await tester.dragFrom(corner + const Offset(50, 50), const Offset(60, 0));
     expect(panned.dx, greaterThan(0));
     await frame(tester);
   });
 
-  testWidgets('a tap aims a ray at what the view shows there', (tester) async {
-    final cube = world.add(GameObject(transform: Transform(), components: [MeshRenderer(Mesh.cube(), Material())]));
-    // Where the view's camera (the setUp one) is.
-    final camera = world.add(
-      GameObject(
-        transform: Transform(position: Vec3(0, 0, 4)),
-        components: [Camera()],
+  testWidgets('a widget over the view keeps the pointers it takes', (tester) async {
+    var pressed = 0;
+    await tester.pumpWidget(
+      app(
+        Stack(
+          children: [
+            view(),
+            Positioned(
+              left: 0,
+              top: 0,
+              width: 50,
+              height: 50,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => pressed++,
+                child: const SizedBox.expand(),
+              ),
+            ),
+          ],
+        ),
       ),
     );
-    await tester.pumpWidget(app(view()));
+    listen();
+    await tester.tapAt(corner + const Offset(20, 20));
     await frame(tester);
-
-    for (final (point, hits) in [(const Offset(100, 50), true), (const Offset(150, 50), false)]) {
-      await tester.tapAt(corner + point);
-      final tapped = (await frame(tester)).tapped!;
-      final hit = world.raycast(camera.rayThrough(tapped));
-      expect(hit?.object, hits ? cube : null, reason: '$point');
-    }
+    expect(pressed, 1);
+    expect(heard, isEmpty, reason: 'the button over the view took it');
+    await tester.tapAt(corner + const Offset(120, 60));
+    await frame(tester);
+    expect(heard, contains('tap left x1'));
   });
 
-  testWidgets("the view runs the world's loop: a tap reaches the object under it", (tester) async {
+  testWidgets("the view runs the world's loop: a tap clicks the object under it", (tester) async {
     final box = world.add(_Box());
     await tester.pumpWidget(app(view()));
     await frame(tester);
@@ -297,10 +310,11 @@ void main() {
 
     await tester.tapAt(corner + const Offset(100, 50));
     await frame(tester);
-    expect(box.taps, 1);
+    expect(box.clicks, 1);
+    expect(box.where!.z, closeTo(0.5, 1e-5), reason: 'its front face, toward the camera at z 4');
     await tester.tapAt(corner + const Offset(150, 50));
     await frame(tester);
-    expect(box.taps, 1, reason: 'beside it');
+    expect(box.clicks, 1, reason: 'beside it');
   });
 }
 
@@ -309,7 +323,8 @@ class _Box extends GameObject {
 
   var started = false;
   var updates = 0;
-  var taps = 0;
+  var clicks = 0;
+  Vec3? where;
 
   @override
   void onStart() {
@@ -324,8 +339,9 @@ class _Box extends GameObject {
   }
 
   @override
-  bool onTap(Tap tap) {
-    taps++;
+  bool onClick(Finger finger) {
+    clicks++;
+    where = finger.over!.point;
     return true;
   }
 }

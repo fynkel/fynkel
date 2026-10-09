@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:math' as math;
@@ -16,7 +17,9 @@ import 'native.dart';
 part 'assets.dart';
 part 'components.dart';
 part 'input.dart';
+part 'keys.dart';
 part 'model.dart';
+part 'pointing.dart';
 part 'resources.dart';
 part 'routines.dart';
 part 'signals.dart';
@@ -105,7 +108,7 @@ final class World implements Finalizable {
   /// (the object is destroyed, and its parent's load goes on without it),
   /// what couldn't be freed when an object was destroyed, and what an
   /// object's or behaviour's own code threw from onStart, onUpdate,
-  /// onLateUpdate, onTap, onEnable, onDisable or onDestroy (the frame goes
+  /// onLateUpdate, a pointer handler, onEnable, onDisable or onDestroy (the frame goes
   /// on, as in Unity: one object's bug doesn't stop the others). With no
   /// listener, each is an uncaught error of the current zone (for a load,
   /// the zone the object was added in), as an unawaited future's would
@@ -183,7 +186,7 @@ final class World implements Finalizable {
 
   // Live objects and behaviours that haven't had onStart yet, in the same
   // order, each object before its behaviours.
-  final _starting = <Object>[];
+  var _starting = <Object>[];
 
   // Objects with removed components still in their lists: taken out at the
   // start of the next update, so a removal never shifts a list being run.
@@ -197,8 +200,6 @@ final class World implements Finalizable {
   final _hidden = <int>{};
   var _shape = 0;
   var _hiddenAt = -1;
-
-  Input _input = Input.none;
 
   // Objects whose transform the game set since it was last sent, in the
   // order they were first set. [_sendTransforms] sends them all in one
@@ -242,18 +243,21 @@ final class World implements Finalizable {
     check(fy_transform_set_many(w, ids, values, count));
   }
 
-  /// What the player did since the last frame, as the last [update] got
-  /// it. Objects read it as [GameObject.input].
-  Input get input => _input;
+  /// What the player does: fingers, gestures, keys and named controls.
+  /// The view feeds it; [update] runs its step first. Objects read it as
+  /// [GameObject.input].
+  late final Input input = Input().._targets = _Pointing(this);
+
+  // The objects and behaviours still waiting to start, reused each frame.
+  var _waiting = <Object>[];
 
   /// Runs one frame of the game, [dt] seconds after the last one: [time]
   /// moves on (see [Time.delta]), then, in this order:
   ///
-  /// 1. **Taps.** Each of [input]'s taps is cast into the world from the
-  ///    camera the view draws from. The object hit gets
-  ///    [GameObject.onTap], then its behaviours get [Behaviour.onTap]; if
-  ///    none returns true, its parent and its behaviours do, and so on up
-  ///    to the root, until one returns true.
+  /// 1. **Input.** [input]'s events since the last frame, in order, then
+  ///    its gestures ([Input]): its signals, and the objects' pointer
+  ///    handlers ([GameObject.onPointerDown] and the rest), cast into the
+  ///    world from the camera the view draws from.
   /// 2. **Starts.** Each object added since the last frame gets
   ///    [GameObject.onStart], once, parents before children, each right
   ///    before its behaviours' [Behaviour.onStart]. Objects added during a
@@ -269,23 +273,22 @@ final class World implements Finalizable {
   ///    what follows where the others went, such as a camera.
   ///
   /// Hidden objects (inactive, or below one that is) and their behaviours
-  /// are skipped by all four and start when they're first shown; so are
+  /// are skipped by the last three and start when they're first shown; so are
   /// disabled behaviours ([Behaviour.enabled]) and those still loading. A
   /// view then draws the world as it is. What their code throws goes to
   /// [errors], and the frame goes on.
   ///
   /// Throws an [ArgumentError] if [dt] is negative or NaN.
-  void update(double dt, [Input? input]) {
-    final w = pointer;
+  void update(double dt) {
+    pointer;
     time._advance(dt);
-    _input = input ?? Input.none;
     _tidy();
 
-    for (final at in _input.taps) {
-      _tap(w, at);
-    }
+    input
+      .._now = time._unscaledSinceStart
+      .._step();
 
-    final waiting = <Object>[];
+    final waiting = _waiting;
     for (var i = 0; i < _starting.length; i++) {
       switch (_starting[i]) {
         case final GameObject object:
@@ -307,9 +310,9 @@ final class World implements Finalizable {
           _safely(object, behaviour.onStart);
       }
     }
-    _starting
-      ..clear()
-      ..addAll(waiting);
+    // The two lists swap, so a frame makes none.
+    _waiting = _starting..clear();
+    _starting = waiting;
 
     // Objects added from here on are past the end when they come, or not
     // started: they wait for the next frame. The calls are guarded inline,
@@ -453,10 +456,14 @@ final class World implements Finalizable {
   /// Drops destroyed objects from the update order, and puts each moved
   /// one last with everything below it.
   void _tidy() {
-    for (final object in _compact) {
-      object._components?.removeWhere((c) => c._removed);
+    // Index loops, and only when there's something: a steady frame
+    // allocates nothing, not even an iterator.
+    if (_compact.isNotEmpty) {
+      for (var i = 0; i < _compact.length; i++) {
+        _compact[i]._components?.removeWhere((c) => c._removed);
+      }
+      _compact.clear();
     }
-    _compact.clear();
     if (_unsentGone) {
       _unsentGone = false;
       _unsent.removeWhere((o) => o._gone);
@@ -465,6 +472,7 @@ final class World implements Finalizable {
       _live.removeWhere((o) => o._destroyed);
       _liveDirty = false;
     }
+    if (_moved.isEmpty) return;
     for (final moved in _moved) {
       if (moved._destroyed) continue;
       final below = _subtreeIds(moved._id);
@@ -477,35 +485,6 @@ final class World implements Finalizable {
         ..addAll(tail);
     }
     _moved.clear();
-  }
-
-  void _tap(Pointer<FyWorld> w, ViewPoint at) {
-    _sendTransforms();
-    check(fy_camera_active(w, scratch.id));
-    final camera = scratch.id.value;
-    if (camera == 0) return;
-    final hit = raycast(_object(camera).rayThrough(at));
-    if (hit == null) return;
-    final tap = Tap._(at, hit);
-    for (GameObject? object = hit.object; object != null && !object._destroyed;) {
-      final up = object.parent;
-      try {
-        if (object.onTap(tap)) return;
-      } catch (error, stack) {
-        _report(object, error, stack);
-      }
-      final components = object._components;
-      for (var j = 0; components != null && j < components.length && !object._destroyed; j++) {
-        if (components[j] case final Behaviour b when b._loaded && b._enabledFlag && !b._removed) {
-          try {
-            if (b.onTap(tap)) return;
-          } catch (error, stack) {
-            _report(object, error, stack);
-          }
-        }
-      }
-      object = up;
-    }
   }
 
   bool _isHidden(GameObject object) {
@@ -1369,11 +1348,60 @@ class GameObject {
   @protected
   void onDestroy() {}
 
-  /// Called when a tap hits this object or something below it that didn't
-  /// take it ([Tap.object] is the one hit). Return true to take the tap;
-  /// false (the default) passes it to the parent.
+  // --- Pointers (docs/stage-4.md §3.6) ---
+  //
+  // As Unity's IPointerDownHandler and the rest. What's under a finger is
+  // cast from the camera the view draws from; [Finger.over] is the hit.
+
+  /// A finger went down over this object or something below it that didn't
+  /// take it. Return true to take it: this object then gets its
+  /// [onPointerUp]. False (the default) passes it to its behaviours, then
+  /// to the parent.
   @protected
-  bool onTap(Tap tap) => false;
+  bool onPointerDown(Finger finger) => false;
+
+  /// The finger whose [onPointerDown] this object took went up, wherever
+  /// it is.
+  @protected
+  void onPointerUp(Finger finger) {}
+
+  /// A finger came over this object or something below it: the mouse
+  /// hovering, or a touch. Each object it enters gets it, from the top
+  /// down, as in Unity.
+  @protected
+  void onPointerEnter(Finger finger) {}
+
+  /// A finger is no longer over this object or anything below it (it
+  /// moved off, went up, or left the view).
+  @protected
+  void onPointerExit(Finger finger) {}
+
+  /// A tap ([Input.onTap]) on this object or something below it that
+  /// didn't take it ([Finger.over] is the hit; [Finger.tapCount] is 2 for
+  /// a double tap). Return true to take it; false (the default) passes it
+  /// to its behaviours, then to the parent.
+  @protected
+  bool onClick(Finger finger) => false;
+
+  /// A long press ([Input.onLongPress]) on this object or below; bubbles
+  /// as [onClick] does.
+  @protected
+  bool onLongPress(Finger finger) => false;
+
+  /// A drag started from this object or something below it
+  /// ([Finger.startedOver]). Return true to take it: this object then gets
+  /// the drag's [onDrag] and [onDragEnd], wherever the finger goes. False
+  /// (the default) passes it on, as [onClick] does.
+  @protected
+  bool onDragStart(Finger finger) => false;
+
+  /// The drag this object took moved: [Finger.delta] is the frame's move.
+  @protected
+  void onDrag(Finger finger) {}
+
+  /// The drag this object took ended.
+  @protected
+  void onDragEnd(Finger finger) {}
 
   // --- Adding and destroying ---
 

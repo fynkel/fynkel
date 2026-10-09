@@ -6,6 +6,8 @@ import 'dart:io';
 import 'package:fynkel/fynkel.dart';
 import 'package:test/test.dart';
 
+import 'tapping.dart';
+
 import 'mesh_test.dart' show throwsFynkel;
 
 /// Every call any object or behaviour gets, in order.
@@ -91,7 +93,7 @@ class Clicks extends Behaviour {
   final bool takes;
 
   @override
-  bool onTap(Tap tap) {
+  bool onClick(Finger finger) {
     log.add('tap $label');
     return takes;
   }
@@ -110,7 +112,6 @@ class Remover extends Behaviour {
 }
 
 MeshRenderer cube() => MeshRenderer(Mesh.cube(), Material());
-Input tapAt(ViewPoint at) => Input(width: 100, height: 100, taps: [at]);
 const centre = ViewPoint(50, 50, width: 100, height: 100);
 
 void main() {
@@ -294,12 +295,14 @@ void main() {
         components: [cube(), Clicks('first'), Clicks('second', takes: true), Clicks('third')],
       ),
     );
-    world.update(1 / 60, tapAt(centre));
+    tap(world, centre);
+    world.update(1 / 60);
     expect(log, ['tap first', 'tap second']);
 
     log.clear();
     child.get<Clicks>()!.gameObject.getAll<Clicks>()[1].enabled = false;
-    world.update(1 / 60, tapAt(centre));
+    tap(world, centre);
+    world.update(1 / 60);
     expect(log, ['tap first', 'tap third', 'tap parent']);
   });
 

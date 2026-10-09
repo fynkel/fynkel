@@ -5,6 +5,8 @@ import 'dart:async';
 import 'package:fynkel/fynkel.dart';
 import 'package:test/test.dart';
 
+import 'tapping.dart';
+
 /// Every call any object or behaviour gets, in order.
 final log = <String>[];
 
@@ -175,7 +177,7 @@ class TapThrows extends GameObject {
   TapThrows({super.transform, super.components});
 
   @override
-  bool onTap(Tap tap) => throw StateError('in tap');
+  bool onClick(Finger finger) => throw StateError('in tap');
 }
 
 /// Throws from its onTap, or logs it.
@@ -185,7 +187,7 @@ class TapBehaviour extends Behaviour {
   final bool throws;
 
   @override
-  bool onTap(Tap tap) {
+  bool onClick(Finger finger) {
     if (throws) throw StateError('in $label');
     log.add('tap $label');
     return true;
@@ -397,7 +399,8 @@ void main() {
         components: [MeshRenderer(Mesh.cube(), Material()), TapBehaviour('mine', throws: true)],
       ),
     );
-    world.update(1 / 60, Input(width: 100, height: 100, taps: [const ViewPoint(50, 50, width: 100, height: 100)]));
+    tap(world, const ViewPoint(50, 50, width: 100, height: 100));
+    world.update(1 / 60);
     await pumpEventQueue();
     expect(errors.map((e) => (e.object, (e.error as StateError).message)), [(hit, 'in tap'), (hit, 'in mine')]);
     expect(log, ['tap parent']);

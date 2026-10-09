@@ -13,6 +13,8 @@ scene(s) here.
 | Routines   | 3    | A spawner, a traffic light with a `finally`, and a race against a timeout   |
 | Signals: the basics | 4 | A doorbell with one signal, and lamps that listen with `on` |
 | Signals in a game | 4    | Enemies' `died`, a scoreboard, `listen` against `on`, a door awaiting `next` |
+| Input: fingers and keys | 5 | Every gesture logged, a dial to pinch and twist, a puck on WASD and space |
+| Input on objects | 5 | Pads that light, sink, count clicks and bubble; crates you drag |
 
 ## Running it
 

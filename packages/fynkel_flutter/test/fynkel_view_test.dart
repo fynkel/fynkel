@@ -165,7 +165,7 @@ void main() {
     final dts = <double>[];
     final stats = <FynkelViewStats>[];
     await tester.pumpWidget(
-      sized(FynkelView(world: world, resolutionScale: 0.5, onFrame: (dt, _) => dts.add(dt), onStats: stats.add)),
+      sized(FynkelView(world: world, resolutionScale: 0.5, onFrame: dts.add, onStats: stats.add)),
     );
     await tester.pump(const Duration(milliseconds: 8));
     expect(calls, hasLength(1));
@@ -196,7 +196,7 @@ void main() {
     final seen = <ViewStats>[];
     final ticks = <int>[];
     await tester.pumpWidget(
-      sized(FynkelView(world: world, onFrame: (_, _) => ticks.add(seen.length), onViewStats: seen.add)),
+      sized(FynkelView(world: world, onFrame: (_) => ticks.add(seen.length), onViewStats: seen.add)),
     );
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 8));

@@ -243,14 +243,15 @@ final class MeshRenderer extends Component {
 /// object's own, in the order the behaviours were added: [onLoad] when
 /// it's put on a live object (or with its object), [onEnable] when it's
 /// loaded and its object is shown, then [onStart], [onUpdate] and
-/// [onLateUpdate] each frame, [onTap], [onDisable] when it or its object
+/// [onLateUpdate] each frame, the pointer handlers ([onClick] and the
+/// rest), [onDisable] when it or its object
 /// is turned off, and [onDisable] and [onDestroy] when it's removed or its
 /// object is destroyed. While [enabled] is false it gets none of them but
 /// [onLoad] and [onDestroy], and it starts when it's next enabled.
 abstract class Behaviour extends Component {
   Behaviour() : super._();
 
-  /// Whether it gets its object's frames and taps. A disabled behaviour
+  /// Whether it gets its object's frames and pointers. A disabled behaviour
   /// waits to start until it's enabled. Setting it calls [onDisable] or
   /// [onEnable] when that changes whether it's enabled: only while it's
   /// loaded and its object is shown.
@@ -278,7 +279,7 @@ abstract class Behaviour extends Component {
   /// is added.
   World get world => gameObject.world;
 
-  /// What the player did since the last frame: the world's [World.input].
+  /// What the player does: the world's [World.input].
   Input get input => gameObject.input;
 
   /// The world's clock: `time.delta` is the seconds this frame counts for.
@@ -351,11 +352,45 @@ abstract class Behaviour extends Component {
   @protected
   void onDestroy() {}
 
-  /// Called when a tap hits its object, or something below that didn't
-  /// take it, right after the object's own [GameObject.onTap]. Return true
-  /// to take it.
+  // Pointers: each is its object's (GameObject.onPointerDown and the
+  // rest), right after the object's own; one that takes a down or a drag
+  // gets its up, or the rest of the drag, itself.
+
+  /// See [GameObject.onPointerDown].
   @protected
-  bool onTap(Tap tap) => false;
+  bool onPointerDown(Finger finger) => false;
+
+  /// See [GameObject.onPointerUp].
+  @protected
+  void onPointerUp(Finger finger) {}
+
+  /// See [GameObject.onPointerEnter].
+  @protected
+  void onPointerEnter(Finger finger) {}
+
+  /// See [GameObject.onPointerExit].
+  @protected
+  void onPointerExit(Finger finger) {}
+
+  /// See [GameObject.onClick].
+  @protected
+  bool onClick(Finger finger) => false;
+
+  /// See [GameObject.onLongPress].
+  @protected
+  bool onLongPress(Finger finger) => false;
+
+  /// See [GameObject.onDragStart].
+  @protected
+  bool onDragStart(Finger finger) => false;
+
+  /// See [GameObject.onDrag].
+  @protected
+  void onDrag(Finger finger) {}
+
+  /// See [GameObject.onDragEnd].
+  @protected
+  void onDragEnd(Finger finger) {}
 
   @override
   String toString() => _owner == null ? '$runtimeType' : '$runtimeType on $_owner';

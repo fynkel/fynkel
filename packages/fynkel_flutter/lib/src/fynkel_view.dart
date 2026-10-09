@@ -8,7 +8,7 @@ import 'package:flutter/widgets.dart';
 import 'package:fynkel/fynkel.dart' show AssetSource, GameObject, HeadlessView, Input, ViewStats, WorldView, World;
 import 'package:fynkel/platform.dart';
 
-import 'input_collector.dart';
+import 'input_feed.dart';
 
 /// The plugin's channel (darwin/…/FynkelFlutterPlugin.swift and
 /// android/…/FynkelFlutterPlugin.kt).
@@ -93,13 +93,15 @@ AssetSource bundleSource([AssetBundle? bundle]) => (name) async {
 ///
 /// `FynkelView(world:)` shows a world made and driven by hand instead,
 /// for tests and tools: [onFrame] is called each frame with the seconds
-/// since the last one and the input, before the world's loop, and the
-/// world is the caller's to dispose.
+/// since the last one, before the world's loop, and the world is the
+/// caller's to dispose.
 ///
-/// It reads pointers with a `Listener`, which takes part in no gesture
-/// arena, so gesture widgets around it keep working. While it has focus it
-/// takes every key, so keys like the arrows and space reach the game
-/// rather than moving focus or pressing buttons.
+/// It gives the world's [World.input] Flutter's events as they come. It
+/// reads pointers with a `Listener`, which takes part in no gesture
+/// arena, so gesture widgets around it keep working, and a widget over it
+/// (a HUD's button) keeps the pointers it takes from the game. While it
+/// has focus it takes every key, so keys like the arrows and space reach
+/// the game rather than moving focus or pressing buttons.
 ///
 /// The frames are drawn at the widget's size in physical pixels times
 /// [resolutionScale] and scaled to fit. Below 1 trades sharpness for
@@ -133,10 +135,10 @@ class FynkelView extends StatefulWidget {
   final World? world;
 
   /// Called once per display frame, before the world's [World.update],
-  /// with the seconds since the previous call (0 the first time) and the
-  /// input since then. For code that drives the world from outside; a
-  /// game's own code goes in its objects.
-  final void Function(double dt, Input input)? onFrame;
+  /// with the seconds since the previous call (0 the first time). For
+  /// code that drives the world from outside; a game's own code goes in
+  /// its objects.
+  final void Function(double dt)? onFrame;
 
   final double resolutionScale;
 
@@ -172,7 +174,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
 
   late final Ticker _ticker = createTicker(_tick)..start();
   int? _lastMicros;
-  final _input = InputCollector();
+  late final _input = InputFeed(() => world.input);
   FocusNode? _ownFocus;
   FocusNode get _focus => widget.focusNode ?? (_ownFocus ??= FocusNode(debugLabel: 'FynkelView'));
 
@@ -231,11 +233,10 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     final micros = elapsed.inMicroseconds;
     final last = _lastMicros;
     _lastMicros = micros;
-    final input = _input.take();
     final dt = last == null ? 0.0 : (micros - last) / 1e6;
-    widget.onFrame?.call(dt, input);
+    widget.onFrame?.call(dt);
     final world = this.world;
-    if (!world.isDisposed) world.update(dt, input);
+    if (!world.isDisposed) world.update(dt);
     // Nothing to draw before there is a size (on Android, before the
     // window has one): no view yet, and no surface.
     if (_width == 0 || _height == 0) return;
@@ -378,9 +379,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
           );
         }
         final size = constraints.biggest;
-        _input
-          ..size = size
-          ..gestureSettings = MediaQuery.maybeGestureSettingsOf(context);
+        if (!world.isDisposed) _input.resize(size);
         _width = (size.width * ratio).round().clamp(0, 16384);
         _height = (size.height * ratio).round().clamp(0, 16384);
         final texture = _texture;
@@ -408,10 +407,9 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
             GestureBinding.instance.pointerSignalResolver.register(event, (_) => _input.scrolled(event.scrollDelta));
           }
         },
-        // A trackpad's two-finger pan moves the fingers; scrolling goes
-        // the other way, as Flutter's scroll views take it.
-        onPointerPanZoomUpdate: (event) => _input.scrolled(-event.localPanDelta),
-        child: view,
+        onPointerPanZoomStart: _input.panZoomStart,
+        onPointerPanZoomUpdate: _input.panZoomUpdate,
+        child: MouseRegion(onEnter: _input.hover, onHover: _input.hover, onExit: _input.exit, child: view),
       ),
     );
   }

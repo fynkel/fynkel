@@ -118,8 +118,8 @@ class Level extends GameObject {
   }
 
   @override
-  bool onTap(Tap tap) {
-    world.first<Player>()!.walkTo(tap.hit.point);
+  bool onClick(Finger finger) {
+    world.first<Player>()!.walkTo(finger.over!.point);
     return true;
   }
 }

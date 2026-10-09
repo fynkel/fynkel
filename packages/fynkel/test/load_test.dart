@@ -8,6 +8,8 @@ import 'dart:typed_data';
 import 'package:fynkel/fynkel.dart';
 import 'package:test/test.dart';
 
+import 'tapping.dart';
+
 /// Every load, start and destroy, in order.
 final log = <String>[];
 
@@ -156,7 +158,8 @@ void main() {
     );
     var appeared = false;
     unawaited(parent.loaded.then((_) => appeared = true));
-    world.update(0.1, Input(width: 100, height: 100, taps: [centre]));
+    tap(world, centre);
+    world.update(0.1);
     await pumpEventQueue();
     expect(log, ['load parent', 'load child'], reason: 'neither started');
     expect([parent.activeInHierarchy, child.activeInHierarchy, hit()], [false, false, null]);
