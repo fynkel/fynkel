@@ -113,11 +113,13 @@ final class Routine<T> implements Future<T> {
   /// nothing.
   void stop() {
     if (!_running) return;
+    // Over before its children stop: if it awaits one of them, it unwinds
+    // while they do, and that mustn't end it a second time.
     _stopped = true;
+    _running = false;
     for (final child in [...?_children].reversed) {
       child.stop();
     }
-    _running = false;
     _world._failWaits(this);
     _detach();
     _result.completeError(RoutineStopped._(), StackTrace.current);

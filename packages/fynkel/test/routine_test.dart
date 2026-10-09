@@ -295,6 +295,21 @@ void main() {
     expect(kept.isRunning, isTrue);
   });
 
+  test('stopping a routine that awaits its own routines (in a race) stops them, then it, once', () async {
+    final outer = object.start(() async {
+      try {
+        await race([object.start(() async => wait(5)), object.start(() async => wait(5))]);
+      } finally {
+        log.add('outer finally');
+      }
+    });
+    frames(1);
+    outer.stop();
+    expect(log.where((l) => l.contains('finally')), ['outer finally']);
+    expect(outer.isStopped, isTrue);
+    await expectLater(outer.done, throwsA(isA<RoutineStopped>()));
+  });
+
   test('race gives the first to end and stops the rest; all gives each, in order', () {
     final loser = object.start(() async {
       try {

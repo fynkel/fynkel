@@ -280,6 +280,12 @@ builds on the ones before). Each step's tests fail first where that makes
 sense. hello, the garden and coins keep working at every step; they move
 fully to the new API in step 9.
 
+Each step also adds its scene(s) to `examples/lab`, the feature lab, so
+the feature is tried by hand on a device, not only in tests. Steps 1 to 3
+got theirs after the fact (Components, Lifecycle, Time, Routines). From
+step 4 on, a step's *done when* includes its lab scene, tried on the
+iPhone or the simulator.
+
 **Step 1: components and behaviours.** §3.1: `Component`, `Behaviour`,
 `addComponent`, `get`, `getAll`, `has`, `removeComponent`, `components:` and
 `children:` in the constructor, finding behaviours by type. The engine's
