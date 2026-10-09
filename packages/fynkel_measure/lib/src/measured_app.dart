@@ -13,11 +13,13 @@ import 'on_screen.dart';
 /// that in place of `lib/main.dart`, so the game's own code knows nothing
 /// of measuring.
 ///
-/// It shows the root [make] makes in a [FynkelView], with the stats line
-/// over it, and reports how long the root took to load and to reach the
-/// screen. Its lifecycle check, [MeasureSettings.cycles] times each, with
-/// a mark after each step:
+/// It shows the root [make] makes in a [FynkelView], with the game's
+/// [overlay] and the stats line over it, and reports how long the root
+/// took to load and to reach the screen. Its lifecycle check,
+/// [MeasureSettings.cycles] times each, with a mark after each step:
 ///
+/// 0. if the game has a [change], makes it (`changed`), as the next
+///    level: part of the scene freed and another loaded;
 /// 1. destroys the root (`destroyed`) and adds a new one (`added`): the
 ///    whole scene freed and loaded again, in the same world and view;
 /// 2. takes the view away and shows a new one, with a new world and root
@@ -28,13 +30,20 @@ import 'on_screen.dart';
 /// The bench runs [bench] (this package's timings), then the game's own
 /// [timings], if any.
 class MeasuredApp extends StatelessWidget {
-  const MeasuredApp(this.make, {super.key, this.source, this.timings});
+  const MeasuredApp(this.make, {super.key, this.source, this.overlay, this.change, this.timings});
 
   /// Makes a new root, as `Garden.new` does.
   final GameObject Function() make;
 
   /// Where the game's assets come from: the app's bundle if null.
   final AssetSource? source;
+
+  /// What the game shows over its view, such as a HUD, given its root.
+  final Widget Function(GameObject root)? overlay;
+
+  /// A change the game makes again and again, given its root, such as
+  /// going to the next level: done when what it adds has loaded.
+  final Future<void> Function(GameObject root)? change;
 
   /// The game's own timings for the bench, given its loaded root: each a
   /// line for [Measurement.report].
@@ -93,10 +102,10 @@ class _MeasuredState extends State<_Measured> {
     super.dispose();
   }
 
-  /// Reports how long [_root] took, by [clock], to load and to reach the
-  /// screen.
-  Future<void> _timeLoad(String what, Stopwatch clock) async {
-    await _root.loaded;
+  /// Reports how long [_root] took, by [clock], to load (or [done] to
+  /// complete) and to reach the screen.
+  Future<void> _timeLoad(String what, Stopwatch clock, [Future<void>? done]) async {
+    await (done ?? _root.loaded);
     final loaded = clock.elapsed;
     final shown = await _onScreen.next(clock);
     final line = '$what: loaded ${_ms(loaded)}, on screen ${_ms(shown)}';
@@ -112,6 +121,13 @@ class _MeasuredState extends State<_Measured> {
     // The first frames and uploads are over by then.
     await Future<void>.delayed(const Duration(seconds: 5));
     await Measurement.mark('start');
+    if (widget.app.change case final change?) {
+      for (var i = 1; i <= cycles; i++) {
+        if (!baseline) await _timeLoad('changed', Stopwatch()..start(), change(_root));
+        await Future<void>.delayed(settle);
+        await Measurement.mark('changed $i');
+      }
+    }
     for (var i = 1; i <= cycles; i++) {
       if (!baseline) _root.destroy();
       await Future<void>.delayed(settle);
@@ -195,6 +211,11 @@ class _MeasuredState extends State<_Measured> {
                     ),
             ),
           ),
+        if (_shown && !MeasureSettings.baseline)
+          if (widget.app.overlay case final overlay?)
+            Center(
+              child: FractionallySizedBox(widthFactor: _scale, heightFactor: _scale, child: overlay(_root)),
+            ),
         StatsLine(_measurement),
         Positioned(
           left: 12,

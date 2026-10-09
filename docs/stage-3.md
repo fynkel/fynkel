@@ -217,6 +217,13 @@ Everyone reads the same input: `input.drag`, `input.scroll`, `input.keys` and so
 - `main.dart`: one line. `garden.dart`: `Garden`, `Character`, `OrbitCamera` (a camera that reads `input.drag` and `input.scroll` in `onUpdate`), `Ground` (loads `grass.png`, adds a plane), `Props` (loads one model and adds a few at seeded places).
 - The target: the garden's game code in **60 lines or fewer** (non-blank, non-comment), against 132 in `garden.dart` today plus the app's own part of `main.dart`, and nothing about measuring in either.
 - hello becomes the smallest game: one class, a spinning cube, in about 15 lines.
+- *Settled in step 6:*
+  - **The garden is 111 lines, not 60** (`garden.dart`, non-blank, non-comment; `main.dart` is 4), from 146 and 127 counted the same way. The rest of the 60 would come from packing code in ways the formatter undoes: it puts each item of a broken list on its own line (the twelve prop names are 14 lines) and each closing bracket too. Accepted as it is (your call, 2026-10-09).
+  - **coins is the second game** (`examples/coins`): two levels, a player who outlives them and carries a different model in each, coins found with `world.all<Coin>()`, a score in a `ValueNotifier` shown by a Flutter HUD, two mixins (`Spins`, `Bobs`) on one class, a logic-only child (`Collector`), and a `Swarm` moving 300 plain objects in its own `onUpdate`. 230 lines of game, 22 of HUD, 20 of `main.dart`.
+  - **A model's part takes children** like any object: the player carries its item in `find('arm-right')`, and swapping it destroys the old one.
+  - **coins changes level as §3.6 says**: it adds the next level, waits for `loaded`, then destroys the old one, so there's always a level on screen. Coins still loading aren't picked up: the `Collector` skips those not `activeInHierarchy`.
+  - **`MeasuredApp(overlay:, change:)`**: `overlay` puts the game's HUD over its view (given the root, so each new root gets its own); `change` is a change the game makes again and again (coins' `nextLevel`), done when what it added has loaded. The lifecycle check makes it first, with a `changed` point after each.
+  - **A helper isolate frees its scratch** (`inHelper`): each model, texture or background mesh load made one and left it, about 1.7 KB of native memory a load. What's left, about 3 KB a load on the Mac, is the Dart VM's own cost of an isolate, the same with `Isolate.run(() => 0)`.
 
 ## 4. Steps
 

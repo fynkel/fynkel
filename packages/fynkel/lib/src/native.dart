@@ -3,6 +3,7 @@
 
 import 'dart:convert';
 import 'dart:ffi';
+import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
@@ -39,7 +40,7 @@ void check(int status) {
 /// One of each struct the calls pass, allocated once per isolate and
 /// reused by every call, so a call allocates no native memory. Calls never
 /// call back into Dart, so nothing can use the scratch while a call has it.
-/// It lives as long as the isolate.
+/// It lives as long as the isolate, except a helper's ([inHelper]).
 final class Scratch {
   final id = malloc<Uint64>();
   final transform = malloc<FyTransform>();
@@ -69,6 +70,13 @@ final class Scratch {
 
   var _transforms = malloc<FyTransform>(_initial);
   var _transformCapacity = _initial;
+
+  /// Frees it all. Nothing may use it after.
+  void free() {
+    final all = [id, transform, camera, light, meshRenderer, material, viewStats, count, count2, mesh, texture];
+    all.addAll([model, modelCounts, width, height, flag, ray, rayHit, _ids, _bytes, _transforms]);
+    all.forEach(malloc.free);
+  }
 
   int get idCapacity => _idCapacity;
   int get byteCapacity => _byteCapacity;
@@ -112,6 +120,17 @@ final class Scratch {
 }
 
 final scratch = Scratch();
+
+/// Runs [work] on a helper isolate, as [Isolate.run] does, and frees the
+/// helper's [scratch] before it ends: native memory, which would outlive
+/// it otherwise.
+Future<T> inHelper<T>(T Function() work) => Isolate.run(() {
+  try {
+    return work();
+  } finally {
+    scratch.free();
+  }
+});
 
 extension WriteVec3 on FyVec3 {
   void write(Vec3 v) => this

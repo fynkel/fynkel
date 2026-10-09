@@ -55,7 +55,7 @@ final class Model implements Finalizable {
     final copy = malloc<Uint8>(bytes.isEmpty ? 1 : bytes.length);
     copy.asTypedList(bytes.length).setAll(0, bytes);
     try {
-      final address = await Isolate.run(_loadAt(copy.address, bytes.length));
+      final address = await inHelper(_loadAt(copy.address, bytes.length));
       return Model._(Pointer<FyModel>.fromAddress(address));
     } finally {
       malloc.free(copy);

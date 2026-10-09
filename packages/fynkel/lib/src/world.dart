@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
-import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
