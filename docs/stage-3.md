@@ -173,6 +173,15 @@ Everyone reads the same input: `input.drag`, `input.scroll`, `input.keys` and so
 - **Shared by name.** Ten characters load `character.glb` once and share its meshes, materials and textures. Two calls in the same frame wait for the same load.
 - **Owned by who asked.** Each object that asked holds a reference. When it's destroyed its references go; when an asset's last reference goes, it's freed completely: its objects first, then its materials, meshes and textures, then the model (stage 2's full unload, done by the engine). Memory after destroying the garden must come back to where it was before adding it.
 - **`assets.model(name)` returns a new instance each call**: a GameObject tree to add, sharing the loaded data. The `Model` itself stays inside `Assets`. Code that builds meshes and textures itself (`Mesh.custom`, `Texture2D.rgba`) keeps working, and gives them to an object to own (`own(texture)`), so they're freed with it.
+- *Settled in step 4:*
+  - **`onLoad` returns `FutureOr<void>`**, so an object that loads nothing appears in the same `add`, as before. Only a load that returns a future hides its object until it's done.
+  - **Loads run parents first**, once everything added is spawned. Objects added to an object before it was added, or during its load, are waited for alike; one added after it appeared loads by itself while it stays.
+  - **The game's `active` is kept apart from loading**: set while the object loads, it's what the object takes when it appears. `activeInHierarchy` is false while it loads.
+  - **A failed load with no one listening to `world.errors` is an uncaught error** of the zone the object was added in, as an unawaited future's would be, so a test fails and Flutter's error handler shows it. `loaded` fails with the same error.
+  - **Once an object is destroyed, its load's errors are ignored**, whatever they are: anything the load does to an object that's gone fails because it's gone.
+  - **A model's copy holds the model too**, as well as the object that asked for it, so a copy added somewhere else (as a root) keeps it alive. The copy's hold goes when the copy is destroyed, whether or not it was ever added.
+  - **A load that fails isn't kept**, so asking again tries again. `preload` tells models from textures by their extension. `World(source:)` gives the source, and `world.assets` holds what it loads for the world's life.
+  - **What can't be freed is reported, not thrown**: a texture still used by a material no one owns goes to `world.errors`, and destroying goes on. Materials are freed before meshes and textures. Built-in meshes stay, as they always have. `world.dispose()` frees what objects owned and the assets still held.
 
 ### 3.5 Flutter: one line to start, measuring outside
 
@@ -259,6 +268,13 @@ errors, `Assets` with its source, sharing, ownership and release,
 children loaded, two objects share one load, destroying the last
 user frees exactly what was loaded (`ViewStats` back to where it was),
 and an object destroyed while loading never appears and leaks nothing.
+✅ 20 tests in `test/load_test.dart`: each of those, plus failed loads
+(at once and later, with and without a listener), the order of loads,
+the game's flag while loading, `own`, preloading, assets that can't be
+freed, and freeing on `world.dispose()`. 28 mutants, 27 killed (the one
+left frees a model that arrives after everyone left at once, rather than
+when the garbage collector finds it). Adding 10,000 objects costs 4.1 ms
+instead of 3.7 (§6).
 
 **Step 5: Flutter and measuring.** `FynkelView(root:)`, `FynkelApp`, the
 bundle as the default source, fynkel_measure from outside the app's
@@ -304,6 +320,10 @@ each. Destroying walks the subtree once to forget the Dart objects below
 (one call into the engine per object). Both happen when a level loads or
 goes, not each frame; a single call that returns a subtree's ids would
 take most of the destroy's cost away if a game ever needs it.
+
+Step 4 makes every `add` run the object's load: adding the same 10,000
+cubes takes 4.1 ms instead of 3.7 (best of 5 after 2 warm-ups, the same
+day), and destroying them is unchanged at 1.5 ms.
 
 ### Step 2: the active flag (Mac, M3 Max, `extract_probe`, release)
 
