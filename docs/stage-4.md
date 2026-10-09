@@ -1,6 +1,6 @@
 # Stage 4 plan: a solid base for writing games
 
-Status: proposed 2026-10-09, waiting for your answers in §5. Scope and
+Status: accepted 2026-10-09, with the recommended answer to each question in §5. Scope and
 rules: [ADR-0001](decisions/0001-fynkel-2-code-first.md). Stage 3 is done
 ([report](stage-3-report.md)).
 
@@ -19,7 +19,7 @@ is. Stage 4 ends when a third game, a small arena, is written with all of
 it, the garden and coins are moved to it, and all three run as well as
 before on all three devices.
 
-What a game looks like at the end (the names are §5's to settle):
+What a game looks like at the end:
 
 ```dart
 class Enemy extends GameObject {
@@ -89,7 +89,7 @@ What a Unity developer does, and how stage 4 lets them do it in Fynkel:
 | In Unity | In Fynkel after stage 4 |
 |---|---|
 | A GameObject has components; MonoBehaviours add behaviour, any number, added and removed at any time. | The same: `addBehaviour(Health(100))`, `get<Health>()`, `remove<Health>()`. A subclass of `GameObject` is still the prefab. |
-| `GetComponent<Light>().intensity = 2` changes the light. | The engine's components (Camera, Light, MeshRenderer) are components like any other, reached the same way. §5 decides whether they become objects you change in place. |
+| `GetComponent<Light>().intensity = 2` changes the light. | The engine's components (Camera, Light, MeshRenderer) are components like any other, reached the same way. They become objects you change in place (§5). |
 | Awake, OnEnable, Start, Update, LateUpdate, OnDisable, OnDestroy. | onLoad (async, where an object gets its assets), onEnable, onStart, onUpdate, onLateUpdate, onDisable, onDestroy. FixedUpdate comes with physics. |
 | `Time.deltaTime`, `Time.timeScale`, `Time.time`, `Time.unscaledDeltaTime`, `Time.frameCount`. | `time.delta`, `time.scale`, `time.sinceStart`, `time.unscaledDelta`, `time.frame`, on every object and behaviour. |
 | Coroutines: `yield return new WaitForSeconds(1)`. They can't return a value, catch errors, or clean up. | Routines: plain `async` code. `await wait(1)`, `await until(...)`, `await race([...])`. They return values, `try/finally` cleans up, and they stop with their object. |
@@ -218,7 +218,7 @@ Built into package:fynkel, its own module: one small core and short helpers on t
 - **Every tween is a future and an owned thing**: `await transform.moveTo(...)` in a routine, and it stops with the object or behaviour that made it, as routines do.
 - **Helpers**: `moveTo`, `moveBy`, `rotateTo`, `scaleTo`, `lookAtOver`, `colorTo`, `fadeTo`, `punchScale`, `shake`, on objects and materials.
 - **Moving things by hand**: `position`, `rotation`, `scale` and `worldPosition` read and set directly on objects and behaviours (still one `Transform` value underneath); `forward`, `right`, `up`; `lookAt(point)`; `transformPoint` and `inverseTransformPoint`. And Unity's Mathf: `moveTowards`, `smoothDamp`, `lerp`, `inverseLerp`, `clamp`, `repeat`, `pingPong`, `randomInSphere`, `randomOnCircle`.
-- **Names that don't clash with Flutter's** (`Tween`, `Curve`, `Animation`), since games import both: §5.
+- **Names that don't clash with Flutter's** (`Tween`, `Curve`, `Animation`), since games import both: `tween()`, `Ease`, and `Motion` for a running tween (§5).
 
 ### 3.8 Cameras
 
@@ -317,9 +317,9 @@ in stage 3, and you have played the arena on each.
 guide, `docs/writing-a-game.md`, that teaches all of this from hello up.
 *Done when* both are committed and you have read the guide.
 
-## 5. Decisions to answer
+## 5. Decisions (2026-10-09)
 
-My recommendation is first in each.
+You took the first answer, the recommended one, in each.
 
 1. **Names**: `addBehaviour` / `get<T>` / `getAll<T>` / `remove`, since `add`
    already adds children; or Unity's `addComponent` / `getComponent`.
