@@ -480,7 +480,20 @@ every frame). Dart allocation a frame: hello 6.8 KB, garden 15.5, coins
 (`changed`) steps 8 MB once at cycle 4 and then adds 2.2 MB over 16
 cycles, GPU and Dart heap flat; destroyed / added +3.4 MB over 20, GPU
 flat. Baseline, 10 cycles: changed +0.7, destroyed +2.4, added +2.4 MB.
-To do: the iPhone and the Note10+, and your play on each.
+**iPhone 16 Pro Max** (wireless): all four median 120 fps (min 118 –
+120), no slow Flutter frames; Dart a frame: hello 20.2 KB, garden 14.6,
+coins 44.8, arena 20.1. Arena lifecycle, 10 cycles, against the
+baseline: changed +4.2 MB (+2.6), destroyed +6.3 (+5.9), added +5.2
+(+5.4), created +4.9 (+3.3); Metal flat at 167.3 MB.
+**Note10+** (1080 × 2241, 30 s): arena, hello and the garden 59.9 fps
+(min 56.9 – 58.9); coins 57.9 (min 50.9), and 56.9 over 60 s against
+stage 3's 58.9: its 300 motes, at the phone's limit as in stage 3.
+Arena lifecycle, 15 cycles, against the baseline: changed +7.6 MB
+(+5.9), destroyed +7.8 (+7.6), added +7.4 (+7.8), created +5.3 (+2.6);
+Graphics flat at 143.6 MB; Native rises 35.4 → 42.4 MB over the first
+cycles, then holds (42.4 → 42.2 from destroyed 8 to 15), as in stage 3.
+One run never got its VM service after a 54 s install; run again, it
+passed. To do: your play on each.
 
 **Step 10: the stage 4 check.** A short report, as in stages 1 to 3, and a
 guide, `docs/writing-a-game.md`, that teaches all of this from hello up.
