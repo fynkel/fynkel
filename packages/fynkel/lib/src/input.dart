@@ -572,6 +572,9 @@ final class Input {
   /// frame, and the trackpad's.
   @pragma('vm:never-inline')
   void _pinch() {
+    // Most frames have nothing to pinch: they return before holding a
+    // double, which the JIT may box (it did, once a frame, on CI's runner).
+    if (_padScale == 1 && _padTwist == 0 && !_pinching()) return;
     var n = 0;
     var moved = false;
     double cx = 0, cy = 0, px = 0, py = 0;
@@ -627,6 +630,15 @@ final class Input {
   }
 
   bool _pinches(Finger f) => f._down && f.kind != FingerKind.mouse && f._downFrame < _frame;
+
+  /// Whether two or more fingers [_pinches]: only then can they pinch.
+  bool _pinching() {
+    var n = 0;
+    for (var i = 0; i < _fingers.length; i++) {
+      if (_pinches(_fingers[i]) && ++n >= 2) return true;
+    }
+    return false;
+  }
 
   ViewPoint _point(double x, double y) => ViewPoint(x, y, width: _width, height: _height);
 
