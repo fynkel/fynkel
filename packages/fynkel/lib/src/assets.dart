@@ -38,8 +38,8 @@ final class Assets {
   }
 
   /// The texture in [name] (a `.png` or `.jpg`), shared by everything
-  /// that asks for it. Give it to a material the object [GameObject.own]s,
-  /// so the material goes first and the texture can be freed.
+  /// that asks for it. Freed when the last object holding it is
+  /// destroyed, or, if a material still uses it then, with the material.
   Future<Texture2D> texture(String name) async {
     final asset = _hold(name, _Kind.texture);
     final texture = await asset.ready as Texture2D;

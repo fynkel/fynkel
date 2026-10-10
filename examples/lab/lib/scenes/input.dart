@@ -107,7 +107,7 @@ class Puck extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    addComponent(MeshRenderer(Mesh.sphere(), own(Material(color: const Color(0xFFE0613A)))));
+    addComponent(MeshRenderer(Mesh.sphere(), Material(color: const Color(0xFFE0613A))));
   }
 
   @override

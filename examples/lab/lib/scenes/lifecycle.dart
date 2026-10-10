@@ -195,7 +195,7 @@ class Mover extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    addComponent(MeshRenderer(Mesh.cube(), own(Material(color: const Color(0xFFE0E0E0)))));
+    addComponent(MeshRenderer(Mesh.cube(), Material(color: const Color(0xFFE0E0E0))));
   }
 
   @override
@@ -219,7 +219,7 @@ class Follower extends GameObject {
   void onLoad() {
     super.onLoad();
     final color = late ? const Color(0xFF60D070) : const Color(0xFFE04848);
-    addComponent(MeshRenderer(Mesh.sphere(), own(Material(color: color))));
+    addComponent(MeshRenderer(Mesh.sphere(), Material(color: color)));
   }
 
   void _follow() => transform = Transform(

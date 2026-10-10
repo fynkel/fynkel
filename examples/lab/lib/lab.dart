@@ -57,7 +57,7 @@ abstract class LabScene extends GameObject {
       GameObject(
         name: 'floor',
         transform: Transform(scale: Vec3(20, 1, 20)),
-        components: [MeshRenderer(Mesh.plane(), own(Material(color: const Color(0xFF3A3F4A))))],
+        components: [MeshRenderer(Mesh.plane(), Material(color: const Color(0xFF3A3F4A)))],
       ),
     );
     build();
@@ -76,7 +76,7 @@ abstract class LabScene extends GameObject {
     name: name,
     transform: Transform(position: at, scale: size),
     components: [
-      MeshRenderer(mesh, own(Material(color: color))),
+      MeshRenderer(mesh, Material(color: color)),
       ...components,
     ],
     children: children,

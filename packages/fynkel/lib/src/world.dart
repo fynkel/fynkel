@@ -47,14 +47,21 @@ final class World implements Finalizable {
 
   Pointer<FyWorld> _pointer = nullptr;
 
-  // Meshes, materials and textures this world has, both ways. They're
-  // added the first time something uses them, and stay until the world is
-  // disposed or their `dispose` takes them out.
-  final _meshIds = <Mesh, int>{};
-  final _meshes = <int, Mesh>{};
-  final _materialIds = <Material, int>{};
-  final _materials = <int, Material>{};
-  final _textureIds = <Texture2D, int>{};
+  // Meshes, materials and textures this world has, both ways, weakly.
+  // They're added the first time something uses them, and stay until the
+  // world is disposed, their `dispose` takes them out, or nothing reaches
+  // them any more: then their [_Release] puts them in [_collected].
+  var _meshIds = Expando<int>();
+  final _meshes = <int, WeakReference<Mesh>>{};
+  var _materialIds = Expando<int>();
+  final _materials = <int, WeakReference<Material>>{};
+  var _textureIds = Expando<int>();
+
+  // Garbage-collected resources to take out, at the end of the next update.
+  // One the engine still uses stays here, and is tried again when another
+  // is collected.
+  final _collected = <(_Resource, int)>[];
+  var _collectedNew = false;
 
   /// The engine's world, for package:fynkel's views.
   Pointer<FyWorld> get pointer {
@@ -68,12 +75,9 @@ final class World implements Finalizable {
   /// keeps drawing what it last had until the view is disposed too.
   void dispose() {
     if (_pointer == nullptr) return;
-    // What the objects owned and the assets still held: the engine's side
-    // goes with the world, the rest goes after it.
-    final owned = [
-      for (final object in _objects.values) ...?object._owned,
-      for (final asset in _assets.values) ?asset.value,
-    ];
+    // The assets still held: the engine's side goes with the world, the
+    // rest goes after it.
+    final owned = [for (final asset in _assets.values) ?asset.value];
     // Nothing of a disposed world hears a signal again, or holds one.
     for (final object in _objects.values) {
       object._stopListening();
@@ -85,11 +89,12 @@ final class World implements Finalizable {
     _debug?._release();
     fy_world_free(_pointer);
     _pointer = nullptr;
-    _meshIds.clear();
+    _meshIds = Expando();
     _meshes.clear();
-    _materialIds.clear();
+    _materialIds = Expando();
     _materials.clear();
-    _textureIds.clear();
+    _textureIds = Expando();
+    _collected.clear();
     _objects.clear();
     _byClass.clear();
     _live.clear();
@@ -156,8 +161,9 @@ final class World implements Finalizable {
   late final Assets assets = Assets._(this, null);
 
   /// Disposes [things]: materials first (they use textures), then meshes,
-  /// textures and models. What can't be disposed (still used elsewhere)
-  /// is reported, not thrown, as this runs while objects are destroyed.
+  /// textures and models. What something still uses is left to be freed
+  /// when that's garbage-collected; any other error is reported, not
+  /// thrown, as this runs while objects are destroyed.
   void _free(Iterable<Object> things, GameObject? object) {
     for (final kind in [Material, Mesh, Texture2D, Model]) {
       for (final thing in things) {
@@ -172,9 +178,12 @@ final class World implements Finalizable {
             case Mesh mesh:
               mesh.dispose();
             case Texture2D texture:
+              _unloadMaterialsUsing(texture);
               texture.dispose();
           }
         } catch (error, stack) {
+          // Something still using it is freed with what uses it.
+          if (error is FynkelException && error.status == FynkelStatus.inUse) continue;
           if (!isDisposed) _report(object, error, stack);
         }
       }
@@ -535,6 +544,7 @@ final class World implements Finalizable {
   /// Drops destroyed objects from the update order, and puts each moved
   /// one last with everything below it.
   void _tidy() {
+    if (_collectedNew) _removeCollected();
     // Index loops, and only when there's something: a steady frame
     // allocates nothing, not even an iterator.
     if (_compact.isNotEmpty) {
@@ -749,6 +759,7 @@ final class World implements Finalizable {
       .._described = null
       .._activeSelf = described.active
       .._probed = described.model == null
+      .._model = described.model
       .._inLoop = true
       .._pending = 1;
     if (described.asset case final asset?) (object._uses ??= []).add(asset);
@@ -1010,9 +1021,7 @@ final class World implements Finalizable {
       if (object._waiter case final waiter? when !waiter._destroyed) waiters.add(waiter);
       object._waiter = null;
     }
-    _free([for (final object in objects) ...?object._owned], objects.firstOrNull);
     for (final object in objects) {
-      object._owned = null;
       for (final asset in object._uses ?? const <_Asset>[]) {
         _release(asset, object);
       }
@@ -1062,8 +1071,8 @@ final class World implements Finalizable {
     check(fy_mesh_add(pointer, mesh._live, scratch.id));
     final id = scratch.id.value;
     _meshIds[mesh] = id;
-    _meshes[id] = mesh;
-    mesh._worlds.add(WeakReference(this));
+    _meshes[id] = WeakReference(mesh);
+    mesh._release.add(mesh, this, id);
     return id;
   }
 
@@ -1073,7 +1082,7 @@ final class World implements Finalizable {
     final id = _meshIds[mesh];
     if (id == null || isDisposed) return;
     check(fy_mesh_remove(_pointer, id));
-    _meshIds.remove(mesh);
+    _meshIds[mesh] = null;
     _meshes.remove(id);
   }
 
@@ -1083,7 +1092,7 @@ final class World implements Finalizable {
     check(fy_texture_add(pointer, texture._live, scratch.id));
     final id = scratch.id.value;
     _textureIds[texture] = id;
-    texture._worlds.add(WeakReference(this));
+    texture._release.add(texture, this, id);
     return id;
   }
 
@@ -1093,13 +1102,13 @@ final class World implements Finalizable {
   void _releaseTexture(Texture2D texture) {
     final id = _textureIds[texture];
     if (id == null || isDisposed) return;
-    for (final material in _materials.values) {
+    for (final material in _materials.values.map((m) => m.target).nonNulls) {
       if (material._uses(texture)) {
         throw FynkelException(FynkelStatus.inUse, '$texture is still used by $material');
       }
     }
     check(fy_texture_remove(_pointer, id));
-    _textureIds.remove(texture);
+    _textureIds[texture] = null;
   }
 
   int _materialId(Material material) {
@@ -1110,8 +1119,8 @@ final class World implements Finalizable {
     check(fy_material_add(pointer, scratch.material, scratch.id));
     final id = scratch.id.value;
     _materialIds[material] = id;
-    _materials[id] = material;
-    material._worlds.add(WeakReference(this));
+    _materials[id] = WeakReference(material);
+    material._release.add(material, this, id);
     return id;
   }
 
@@ -1121,8 +1130,51 @@ final class World implements Finalizable {
     final id = _materialIds[material];
     if (id == null || isDisposed) return;
     check(fy_material_remove(_pointer, id));
-    _materialIds.remove(material);
+    _materialIds[material] = null;
     _materials.remove(id);
+  }
+
+  /// Takes out of this world the materials using [texture] that no object
+  /// draws with, so the texture can be freed. Each comes back the next
+  /// time something uses it.
+  void _unloadMaterialsUsing(Texture2D texture) {
+    if (isDisposed) return;
+    for (final MapEntry(key: id, value: ref) in [..._materials.entries]) {
+      final material = ref.target;
+      if (material == null || !material._uses(texture)) continue;
+      if (fy_material_remove(_pointer, id) != FyStatus.FY_STATUS_OK) continue;
+      _materialIds[material] = null;
+      _materials.remove(id);
+      material._release.drop(this);
+    }
+  }
+
+  /// For a [_Release]: [id], a [kind] of resource nothing reaches any more,
+  /// is to be taken out.
+  void _collect(_Resource kind, int id) {
+    if (isDisposed) return;
+    _collected.add((kind, id));
+    _collectedNew = true;
+  }
+
+  /// Takes out what was garbage-collected: materials first, as they use
+  /// textures. What an object still uses (a part of a model copy whose
+  /// model was collected) stays until the world is disposed.
+  void _removeCollected() {
+    _collectedNew = false;
+    _collected.sort((a, b) => a.$1.index - b.$1.index);
+    _collected.removeWhere((gone) {
+      final (kind, id) = gone;
+      final status = switch (kind) {
+        _Resource.material => fy_material_remove(_pointer, id),
+        _Resource.mesh => fy_mesh_remove(_pointer, id),
+        _Resource.texture => fy_texture_remove(_pointer, id),
+      };
+      if (status == FyStatus.FY_STATUS_IN_USE) return false;
+      if (kind == _Resource.material) _materials.remove(id);
+      if (kind == _Resource.mesh) _meshes.remove(id);
+      return true;
+    });
   }
 
   /// Sends [material]'s new values to the engine. False once this world no
@@ -1256,10 +1308,13 @@ class GameObject with _Moving {
   Completer<void>? _loadedCompleter;
   (Object, StackTrace)? _loadFailure;
 
-  // What the object frees when it's destroyed: what it [own]s, and the
-  // assets it holds a use of.
-  List<Object>? _owned;
+  // The assets the object holds a use of, freed when it's destroyed.
   List<_Asset>? _uses;
+
+  // For a model's copy: the model, so the meshes and materials its
+  // objects use aren't collected while it's there. Only held, never read.
+  // ignore: unused_field
+  Model? _model;
   Assets? _assets;
 
   @override
@@ -1332,23 +1387,6 @@ class GameObject with _Moving {
   /// The world's assets, loaded for this object: each one it asks for is
   /// held until it's destroyed, and freed then if no one else holds it.
   Assets get assets => _assets ??= Assets._(_world ?? (throw _notAdded('assets')), this);
-
-  /// Gives [resource] (a [Mesh], [Texture2D], [Material] or [Model] the
-  /// game made itself) to this object, to be disposed when it's
-  /// destroyed, and returns it: `own(Material(baseColorTexture: grass))`.
-  /// Materials are disposed before meshes and textures, as they use them.
-  T own<T extends Object>(T resource) {
-    if (_destroyed) throw StateError('$this was destroyed, so it can\'t own anything');
-    switch (resource) {
-      case Mesh(_shape: true):
-        throw ArgumentError.value(resource, 'resource', 'is built in and is never disposed');
-      case Mesh() || Texture2D() || Material() || Model():
-        (_owned ??= []).add(resource);
-        return resource;
-      default:
-        throw ArgumentError.value(resource, 'resource', 'is not a Mesh, Texture2D, Material or Model');
-    }
-  }
 
   // --- The loop ---
 
@@ -1561,21 +1599,6 @@ class GameObject with _Moving {
     final described = _described;
     for (final child in described?.children ?? const <GameObject>[]) {
       child._destroyUnadded();
-    }
-    if (_owned case final owned?) {
-      for (final thing in owned) {
-        // No world to report to: a resource used elsewhere throws here.
-        switch (thing) {
-          case Material m:
-            m.dispose();
-          case Mesh m:
-            m.dispose();
-          case Texture2D t:
-            t.dispose();
-          case Model m:
-            m.dispose();
-        }
-      }
     }
     if (described?.asset case final asset?) {
       asset.world._release(asset, this);
@@ -1946,7 +1969,10 @@ class GameObject with _Moving {
         ),
       if (missing<Light>() && fy_light_get(w, _id, scratch.light) == FyStatus.FY_STATUS_OK) _readLight(),
       if (missing<MeshRenderer>() && fy_mesh_renderer_get(w, _id, scratch.meshRenderer) == FyStatus.FY_STATUS_OK)
-        MeshRenderer(world._meshes[scratch.meshRenderer.ref.mesh], world._materials[scratch.meshRenderer.ref.material]),
+        MeshRenderer(
+          world._meshes[scratch.meshRenderer.ref.mesh]?.target,
+          world._materials[scratch.meshRenderer.ref.material]?.target,
+        ),
     ];
     for (final c in found) {
       c._owner = this;

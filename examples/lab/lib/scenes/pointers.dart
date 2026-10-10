@@ -75,7 +75,7 @@ class Table extends GameObject {
       GameObject(
         name: 'top',
         transform: Transform(position: Vec3(0, 0.1, 0), scale: Vec3(8, 0.2, 2)),
-        components: [MeshRenderer(Mesh.cube(), own(Material(color: const Color(0xFF5A4A3A))))],
+        components: [MeshRenderer(Mesh.cube(), Material(color: const Color(0xFF5A4A3A)))],
       ),
     );
   }
@@ -110,7 +110,7 @@ class Pad extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    _paint = own(Material(color: color));
+    _paint = Material(color: color);
     addComponent(MeshRenderer(Mesh.cube(), _paint));
     _place();
   }
