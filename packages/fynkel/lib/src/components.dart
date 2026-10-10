@@ -160,8 +160,15 @@ final class Camera extends Component {
   /// refuses it.
   void _change(void Function() set) {
     _checkChangeable();
-    final (fovY, near, far, clearColor, orthographic, size, cullingMask) =
-        (_fovY, _near, _far, _clearColor, _orthographic, _size, _cullingMask);
+    final (fovY, near, far, clearColor, orthographic, size, cullingMask) = (
+      _fovY,
+      _near,
+      _far,
+      _clearColor,
+      _orthographic,
+      _size,
+      _cullingMask,
+    );
     set();
     try {
       _live?._writeCamera(this);
