@@ -124,11 +124,9 @@ class Drop extends GameObject {
   void onStart() {
     super.onStart();
     start(() async {
-      final at = transform.position;
-      Vec3 size(double s) => Vec3(0.5 * s, 0.5 * s, 0.5 * s);
-      await over(time, 0.4, (t) => transform = Transform(position: at, scale: size(t)));
+      await over(time, 0.4, (t) => scale = Vec3.one * (0.5 * t));
       await wait(1.5);
-      await over(time, 0.4, (t) => transform = Transform(position: at, scale: size(1 - t)));
+      await over(time, 0.4, (t) => scale = Vec3.one * (0.5 * (1 - t)));
       destroy();
     });
   }

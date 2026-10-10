@@ -149,15 +149,14 @@ mixin Spins on GameObject {
 
 /// Rises and falls about where it started.
 mixin Bobs on GameObject {
-  late final double _height = transform.position.y;
+  late final double _height = position.y;
   double _time = 0;
 
   @override
   void onUpdate() {
     super.onUpdate();
-    final at = transform.position;
     _time += time.delta;
-    transform = transform.copyWith(position: Vec3(at.x, _height + 0.15 * math.sin(3 * _time), at.z));
+    position = Vec3(position.x, _height + 0.15 * math.sin(3 * _time), position.z);
   }
 }
 
