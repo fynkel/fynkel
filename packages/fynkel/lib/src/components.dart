@@ -289,6 +289,15 @@ final class MeshRenderer extends Component {
 /// or [GameObject.addComponent]). An object has any number of behaviours,
 /// of the same class or not.
 ///
+/// **A behaviour is what an object does; a subclass of [GameObject] is
+/// what it is.** Make a behaviour of code that other kinds of object could
+/// use too (`Health` on the player and the enemies, `Spin` on anything),
+/// or that comes and goes while the game runs. An object's own state and
+/// parts go in its subclass. A subclass reads its behaviours with
+/// [GameObject.get] (`Health get health => get<Health>()!;`); a behaviour
+/// reaches its object as [gameObject], and what's above it with
+/// [ancestor] (`ancestor<Level>()`).
+///
 /// A behaviour gets the same calls as its object, right after the
 /// object's own, in the order the behaviours were added: [onLoad] when
 /// it's put on a live object (or with its object), [onEnable] when it's
