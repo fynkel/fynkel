@@ -77,18 +77,14 @@ class Holder extends GameObject {
   }
 }
 
-/// A plane with a texture from the assets, on a material it owns.
+/// A plane with a texture from the assets.
 class Floor extends GameObject {
-  Floor({this.owns = true});
-
-  final bool owns;
-
   @override
   Future<void> onLoad() async {
     await super.onLoad();
     final grid = await assets.texture('grid.png');
     final material = Material(baseColorTexture: grid);
-    addComponent(MeshRenderer(Mesh.plane(), owns ? own(material) : material));
+    addComponent(MeshRenderer(Mesh.plane(), material));
   }
 }
 
@@ -321,8 +317,7 @@ void main() {
     final before = drawn();
     final a = world.add(Holder('BoxTextured.glb', transform: ahead()));
     final b = world.add(Holder('BoxTextured.glb', transform: ahead()));
-    final floor = world.add(Floor());
-    await Future.wait([a.loaded, b.loaded, floor.loaded]);
+    await Future.wait([a.loaded, b.loaded]);
     final mesh = meshOf(a)!;
     final loaded = drawn();
     expect(loaded.$1, greaterThan(before.$1));
@@ -332,7 +327,6 @@ void main() {
     expect(drawn(), loaded, reason: 'b still holds the model');
     expect(mesh.isDisposed, isFalse);
     b.destroy();
-    floor.destroy();
     expect(drawn(), before);
     expect(mesh.isDisposed, isTrue);
 
@@ -355,13 +349,12 @@ void main() {
     expect(mesh.isDisposed, isTrue);
   });
 
-  test('disposing the world frees what objects own and the assets it holds', () async {
+  test('disposing the world frees the assets it holds', () async {
     final floor = world.add(Floor());
     await floor.loaded;
     final texture = await world.assets.texture('grid.png');
-    final material = floor.get<MeshRenderer>()!.material!;
     world.dispose();
-    expect([material.isDisposed, texture.isDisposed], [true, true]);
+    expect(texture.isDisposed, isTrue);
   });
 
   test('an object destroyed while its asset loads never appears, and the asset is not kept', () async {
@@ -401,38 +394,6 @@ void main() {
     expect(later.activeInHierarchy, isTrue);
     expect(source.reads, hasLength(2));
     expect(() => world.assets.preload(['notes.txt']), throwsArgumentError);
-  });
-
-  test('own frees what the game made with the object, materials first', () {
-    final texture = Texture2D.rgba(1, 1, Uint8List(4));
-    final material = Material(baseColorTexture: texture);
-    final mesh = Mesh.custom(positions: [Vec3.zero, Vec3(1, 0, 0), Vec3(0, 1, 0)], indices: [0, 1, 2]);
-    final object = world.add(GameObject(components: [MeshRenderer(mesh, material)]));
-    expect(object.own(texture), same(texture));
-    object
-      ..own(mesh)
-      ..own(material);
-    object.destroy();
-    expect([texture.isDisposed, material.isDisposed, mesh.isDisposed], [true, true, true]);
-
-    final unadded = GameObject();
-    final kept = unadded.own(Material());
-    unadded.destroy();
-    expect(kept.isDisposed, isTrue, reason: 'an object never added frees what it owns too');
-
-    expect(() => world.add(GameObject()).own(Mesh.cube()), throwsArgumentError);
-    expect(() => world.add(GameObject()).own('text'), throwsArgumentError);
-    expect(() => unadded.own(Material()), throwsStateError);
-  });
-
-  test("an asset that can't be freed is reported, not thrown, when its object is destroyed", () async {
-    final errors = <ObjectError>[];
-    world.errors.listen(errors.add);
-    final floor = world.add(Floor(owns: false));
-    await floor.loaded;
-    floor.destroy();
-    await pumpEventQueue();
-    expect(errors.single.error, isA<FynkelException>().having((e) => e.message, 'message', contains('still used')));
   });
 
   test('asking for assets needs a source, an added object, and one kind per name', () async {

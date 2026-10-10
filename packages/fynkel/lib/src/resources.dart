@@ -6,8 +6,9 @@ part of 'world.dart';
 ///
 /// Each built-in shape is one [Mesh], so `Mesh.cube()` always returns the
 /// same object. [Mesh.custom] and [Mesh.raw] make one from code; for a big
-/// mesh, make it in [Mesh.inBackground]. [dispose] frees a mesh you're done
-/// with; otherwise it's freed when it and every world using it are gone.
+/// mesh, make it in [Mesh.inBackground]. A world keeps a mesh while your
+/// code or an object's [MeshRenderer] can reach it, and lets it go once
+/// it's garbage-collected; [dispose] frees it sooner.
 final class Mesh implements Finalizable {
   Mesh._(this._pointer, this._name, {this._shape = false}) {
     _finalizer.attach(this, _pointer.cast(), detach: this);
@@ -21,9 +22,7 @@ final class Mesh implements Finalizable {
   final String _name;
   final bool _shape;
 
-  /// The worlds that have this mesh. Weak, so a mesh kept in a global
-  /// doesn't keep every world it was used in alive.
-  final List<WeakReference<World>> _worlds = [];
+  final _release = _Release(_Resource.mesh);
 
   Pointer<FyMesh> get _live {
     if (_pointer == nullptr) throw StateError('$this was disposed');
@@ -184,10 +183,10 @@ final class Mesh implements Finalizable {
   void dispose() {
     if (_pointer == nullptr) return;
     if (_shape) throw StateError('$this is built in and can\'t be disposed');
-    for (final world in _worlds.map((w) => w.target).nonNulls) {
+    for (final world in _release.worlds) {
       world._releaseMesh(this);
     }
-    _worlds.clear();
+    _release.forget();
     _finalizer.detach(this);
     fy_mesh_free(_pointer);
     _pointer = nullptr;
@@ -204,8 +203,8 @@ final class Mesh implements Finalizable {
 /// The material slot decides how its values are read: colour slots
 /// ([Material.baseColorTexture], [Material.emissiveTexture]) as sRGB
 /// colour, the others as linear data. Each view uploads it with mipmaps
-/// the first frame a material uses it. [dispose] frees it; otherwise it's
-/// freed when it and every world using it are gone.
+/// the first frame a material uses it. Like a [Mesh], it's freed once
+/// nothing reaches it; [dispose] frees it sooner.
 final class Texture2D implements Finalizable {
   Texture2D._(this._pointer, this.width, this.height, this._name) {
     _finalizer.attach(this, _pointer.cast(), detach: this);
@@ -274,8 +273,7 @@ final class Texture2D implements Finalizable {
   /// In pixels.
   final int width, height;
 
-  /// The worlds that have this texture, weakly (as for [Material]).
-  final List<WeakReference<World>> _worlds = [];
+  final _release = _Release(_Resource.texture);
 
   Pointer<FyTexture> get _live {
     if (_pointer == nullptr) throw StateError('$this was disposed');
@@ -290,10 +288,10 @@ final class Texture2D implements Finalizable {
   /// slot to null first. Calling it again does nothing.
   void dispose() {
     if (_pointer == nullptr) return;
-    for (final world in _worlds.map((w) => w.target).nonNulls) {
+    for (final world in _release.worlds) {
       world._releaseTexture(this);
     }
-    _worlds.clear();
+    _release.forget();
     _finalizer.detach(this);
     fy_texture_free(_pointer);
     _pointer = nullptr;
@@ -306,7 +304,7 @@ final class Texture2D implements Finalizable {
 /// How a surface looks under light: glTF's metallic-roughness model, so a
 /// loaded model's materials are these. A material can be used in any
 /// number of worlds, and changing it changes every object that uses it, in
-/// every world.
+/// every world. Like a [Mesh], a world lets it go once nothing reaches it.
 ///
 /// Each texture multiplies its value: [baseColorTexture] the [color],
 /// [metallicRoughnessTexture] the [metallic] (blue) and [roughness]
@@ -361,9 +359,7 @@ final class Material {
   /// engine's order.
   final List<Texture2D?> _textures;
 
-  /// The worlds that have this material. Weak, so a material kept in a
-  /// global doesn't keep every world it was used in alive.
-  final List<WeakReference<World>> _worlds = [];
+  final _release = _Release(_Resource.material);
 
   bool _disposed = false;
 
@@ -376,10 +372,10 @@ final class Material {
   /// it another material first. Calling it again does nothing.
   void dispose() {
     if (_disposed) return;
-    for (final world in _worlds.map((w) => w.target).nonNulls) {
+    for (final world in _release.worlds) {
       world._releaseMaterial(this);
     }
-    _worlds.clear();
+    _release.forget();
     _disposed = true;
   }
 
@@ -488,7 +484,7 @@ final class Material {
   bool _uses(Texture2D texture) => _textures.any((t) => identical(t, texture));
 
   void _changed() {
-    _worlds.removeWhere((ref) => ref.target?._updateMaterial(this) != true);
+    _release.removeWhere((world) => !world._updateMaterial(this));
   }
 
   // The engine checks again; checking here too reports the mistake where
@@ -531,5 +527,49 @@ final class Material {
       ...textures,
     ];
     return 'Material(${fields.join(', ')})';
+  }
+}
+
+enum _Resource { material, mesh, texture }
+
+/// Which worlds have a mesh, material or texture, and its id in each.
+/// When the resource is garbage-collected, each world that's still there
+/// takes it out. So it mustn't reach the resource, or that would never be
+/// collected; and it holds the worlds weakly, so a resource kept in a
+/// global doesn't keep every world it was used in alive.
+final class _Release {
+  _Release(this.kind);
+
+  final _Resource kind;
+  final _in = <(WeakReference<World>, int)>[];
+
+  static final _finalizer = Finalizer<_Release>((release) {
+    for (final (world, id) in release._in) {
+      world.target?._collect(release.kind, id);
+    }
+  });
+
+  Iterable<World> get worlds => _in.map((entry) => entry.$1.target).nonNulls;
+
+  void add(Object resource, World world, int id) {
+    if (_in.isEmpty) _finalizer.attach(resource, this, detach: this);
+    _in.add((WeakReference(world), id));
+  }
+
+  void removeWhere(bool Function(World world) test) {
+    _in.removeWhere((entry) => switch (entry.$1.target) {
+      null => true,
+      final world => test(world),
+    });
+    if (_in.isEmpty) _finalizer.detach(this);
+  }
+
+  /// [world] took the resource out, and may add it again.
+  void drop(World world) => removeWhere((w) => identical(w, world));
+
+  /// After the resource's `dispose`: no world has it any more.
+  void forget() {
+    _in.clear();
+    _finalizer.detach(this);
   }
 }

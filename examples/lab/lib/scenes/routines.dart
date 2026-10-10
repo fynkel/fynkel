@@ -85,7 +85,7 @@ class Spawner extends GameObject {
       GameObject(
         name: 'pad',
         transform: Transform(position: Vec3(0, 0.05, 0), scale: Vec3(2.4, 0.1, 2.4)),
-        components: [MeshRenderer(Mesh.cube(), own(Material(color: const Color(0xFF8A8F99))))],
+        components: [MeshRenderer(Mesh.cube(), Material(color: const Color(0xFF8A8F99)))],
       ),
     );
   }
@@ -117,7 +117,7 @@ class Drop extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    addComponent(MeshRenderer(Mesh.sphere(), own(Material(color: _colors[id % 3]))));
+    addComponent(MeshRenderer(Mesh.sphere(), Material(color: _colors[id % 3])));
   }
 
   @override
@@ -156,11 +156,11 @@ class TrafficLight extends GameObject {
       GameObject(
         name: 'pole',
         transform: Transform(position: Vec3(0, 1.2, 0), scale: Vec3(0.7, 2.4, 0.5)),
-        components: [MeshRenderer(Mesh.cube(), own(Material(color: const Color(0xFF22252B))))],
+        components: [MeshRenderer(Mesh.cube(), Material(color: const Color(0xFF22252B)))],
       ),
     );
     for (var i = 0; i < 3; i++) {
-      final lamp = own(Material(color: _off));
+      final lamp = Material(color: _off);
       _lamps.add(lamp);
       add(
         GameObject(
@@ -230,7 +230,7 @@ class Race extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    _paint = own(Material(color: Color.white));
+    _paint = Material(color: Color.white);
     _runner = add(
       GameObject(
         name: 'runner',
@@ -242,7 +242,7 @@ class Race extends GameObject {
       GameObject(
         name: 'flag',
         transform: Transform(position: Vec3(0, 0.75, _to - 0.4), scale: Vec3(1.4, 1.5, 0.1)),
-        components: [MeshRenderer(Mesh.cube(), own(Material(color: const Color(0xFFE0E0E0))))],
+        components: [MeshRenderer(Mesh.cube(), Material(color: const Color(0xFFE0E0E0)))],
       ),
     );
   }

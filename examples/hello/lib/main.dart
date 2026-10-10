@@ -33,7 +33,7 @@ class Cube extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    addComponent(MeshRenderer(Mesh.cube(), own(Material(color: Color(0xFFE0613A)))));
+    addComponent(MeshRenderer(Mesh.cube(), Material(color: Color(0xFFE0613A))));
   }
 
   @override

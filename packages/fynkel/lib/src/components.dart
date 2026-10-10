@@ -339,10 +339,6 @@ abstract class Behaviour extends Component with _Moving {
     return _on(this, signal, handler);
   }
 
-  /// Gives [resource] to its object, to be disposed when the object is
-  /// destroyed: see [GameObject.own].
-  T own<T extends Object>(T resource) => gameObject.own(resource);
-
   /// Called once, when it's put on a live object, or when its object is
   /// added: where it gets its assets. Return a future to load something.
   /// If its object is still loading, the object appears only when this is

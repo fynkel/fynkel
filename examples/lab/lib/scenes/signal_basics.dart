@@ -74,7 +74,7 @@ class Doorbell extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    addComponent(MeshRenderer(Mesh.cube(), own(Material(color: const Color(0xFF4CA6E0)))));
+    addComponent(MeshRenderer(Mesh.cube(), Material(color: const Color(0xFF4CA6E0))));
   }
 
   void ring() {
@@ -107,7 +107,7 @@ class Lamp extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    _glass = own(Material(color: _off));
+    _glass = Material(color: _off);
     addComponent(MeshRenderer(Mesh.sphere(), _glass));
 
     // The one line that matters: when the bell rings, run this.

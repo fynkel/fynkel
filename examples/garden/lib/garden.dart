@@ -75,7 +75,7 @@ class Ground extends GameObject {
   Future<void> onLoad() async {
     await super.onLoad();
     final grass = await assets.texture('grass.png');
-    final material = own(Material(baseColorTexture: grass, uvScale: Vec2(15, 15), roughness: 1, name: 'grass'));
+    final material = Material(baseColorTexture: grass, uvScale: Vec2(15, 15), roughness: 1, name: 'grass');
     addComponent(MeshRenderer(Mesh.plane(), material));
   }
 }

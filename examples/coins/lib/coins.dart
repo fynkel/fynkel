@@ -81,7 +81,7 @@ class Level extends GameObject {
       ),
     );
     add(GameObject(components: [Light.ambient(color: sky, intensity: 0.6)]));
-    final groundMaterial = own(Material(color: ground, roughness: 1));
+    final groundMaterial = Material(color: ground, roughness: 1);
     add(
       GameObject(
         transform: Transform(scale: Vec3(40, 1, 40)),
@@ -93,13 +93,11 @@ class Level extends GameObject {
         add(Prop(asset, at: somewhere(10, 16), turn: random.nextDouble() * 2 * math.pi));
       }
     }
-    final gold = own(
-      Material(
-        color: Color.rgb(1, 0.75, 0.2),
-        roughness: 0.3,
-        emissive: Color.rgb(1, 0.6, 0.1),
-        emissiveIntensity: 0.4,
-      ),
+    final gold = Material(
+      color: Color.rgb(1, 0.75, 0.2),
+      roughness: 0.3,
+      emissive: Color.rgb(1, 0.6, 0.1),
+      emissiveIntensity: 0.4,
     );
     for (var i = 0; i < 8; i++) {
       add(Coin(somewhere(2, 8) + Vec3(0, 0.7, 0), gold));
@@ -252,7 +250,7 @@ class Swarm extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    final random = math.Random(count), glow = own(Material(color: color, emissive: color, emissiveIntensity: 3));
+    final random = math.Random(count), glow = Material(color: color, emissive: color, emissiveIntensity: 3);
     for (var i = 0; i < count; i++) {
       final speed = (0.1 + 0.3 * random.nextDouble()) * (i.isEven ? 1 : -1);
       _orbits.add((

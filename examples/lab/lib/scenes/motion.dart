@@ -168,7 +168,7 @@ class Crate extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    addComponent(MeshRenderer(Mesh.cube(), own(Material(color: _color))));
+    addComponent(MeshRenderer(Mesh.cube(), Material(color: _color)));
   }
 
   @override

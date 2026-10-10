@@ -153,7 +153,7 @@ class Enemy extends GameObject {
   void onLoad() {
     super.onLoad();
     name = 'enemy ${++_count}';
-    _paint = own(Material(color: _color));
+    _paint = Material(color: _color);
     addComponent(MeshRenderer(Mesh.cube(), _paint));
     final health = get<Health>()!;
     // Its own signals: they go with it.
@@ -193,7 +193,7 @@ class Scoreboard extends GameObject {
     _bar = add(
       GameObject(
         name: 'bar',
-        components: [MeshRenderer(Mesh.cube(), own(Material(color: const Color(0xFFFFD040))))],
+        components: [MeshRenderer(Mesh.cube(), Material(color: const Color(0xFFFFD040)))],
       ),
     );
     _show();
@@ -228,7 +228,7 @@ class Ghost extends GameObject {
   void onLoad() {
     super.onLoad();
     final color = viaOn ? const Color(0xFF60D070) : const Color(0xFFA060E0);
-    addComponent(MeshRenderer(Mesh.sphere(), own(Material(color: color))));
+    addComponent(MeshRenderer(Mesh.sphere(), Material(color: color)));
     final scene = ancestor<SignalsScene>()!;
     final log = scene.log;
     final label = '$name #$id';
@@ -262,7 +262,7 @@ class Plate extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    addComponent(MeshRenderer(Mesh.cube(), own(Material(color: const Color(0xFF4CA6E0)))));
+    addComponent(MeshRenderer(Mesh.cube(), Material(color: const Color(0xFF4CA6E0))));
   }
 
   void press() => pressed.emit(++_presses);
@@ -291,7 +291,7 @@ class Door extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    _paint = own(Material(color: const Color(0xFF8A8F99)));
+    _paint = Material(color: const Color(0xFF8A8F99));
     _panel = add(GameObject(name: 'panel', components: [MeshRenderer(Mesh.cube(), _paint)]));
     _place(0);
   }
