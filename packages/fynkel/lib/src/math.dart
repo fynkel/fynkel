@@ -238,7 +238,7 @@ final class Quat {
 }
 
 /// A half-line in the world: from [origin], along [direction]. Make one
-/// with [GameObject.rayThrough] to find what's under a point in a view, and
+/// with [GameObject.screenToRay] to find what's under a point in a view, and
 /// cast it with [World.raycast].
 final class Ray {
   /// [direction] is made unit length; throws for a zero one.
@@ -264,8 +264,50 @@ final class Ray {
   String toString() => 'Ray($origin, $direction)';
 }
 
+/// A flat surface without end, as Unity's `Plane`: the points [p] where
+/// `normal.dot(p) == distance`.
+final class Plane {
+  /// The plane through [point] facing [normal] (made unit length).
+  factory Plane(Vec3 normal, Vec3 point) {
+    final n = normal.normalized;
+    return Plane._(n, n.dot(point));
+  }
+
+  const Plane._(this.normal, this.distance);
+
+  /// The ground: y = 0, facing up.
+  static const ground = Plane._(Vec3.up, 0);
+
+  /// Unit length.
+  final Vec3 normal;
+
+  /// From the origin along [normal] to the plane.
+  final double distance;
+
+  /// How far [point] is above the plane (below, negative).
+  double distanceTo(Vec3 point) => normal.dot(point) - distance;
+
+  /// How far along [ray] it meets the plane; null when it runs along the
+  /// plane or away from it.
+  double? raycast(Ray ray) {
+    final towards = normal.dot(ray.direction);
+    if (towards.abs() < 1e-12) return null;
+    final along = -distanceTo(ray.origin) / towards;
+    return along >= 0 ? along : null;
+  }
+
+  @override
+  bool operator ==(Object other) => other is Plane && other.normal == normal && other.distance == distance;
+
+  @override
+  int get hashCode => Object.hash(normal, distance);
+
+  @override
+  String toString() => 'Plane($normal, $distance)';
+}
+
 /// A point in a view, in logical pixels from its top-left corner, with
-/// the view's size: what [GameObject.rayThrough] needs to aim a ray.
+/// the view's size: what [GameObject.screenToRay] needs to aim a ray.
 /// package:fynkel_flutter's `FrameInput` gives pointer positions as these.
 final class ViewPoint {
   const ViewPoint(this.x, this.y, {required this.width, required this.height});

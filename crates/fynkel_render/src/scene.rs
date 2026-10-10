@@ -81,6 +81,9 @@ pub struct CameraView {
     pub position: Vec3,
     /// Vertical field of view in radians.
     pub fov_y: f32,
+    /// Orthographic, with half the view's height in world units; `fov_y`
+    /// is then unused.
+    pub orthographic: Option<f32>,
     pub near: f32,
     pub far: f32,
     /// Linear RGB. Shown as-is behind everything (not tonemapped), so the
@@ -95,6 +98,7 @@ impl CameraView {
             view: glam::camera::rh::view::look_at_mat4(position, target, Vec3::Y),
             position,
             fov_y: 60f32.to_radians(),
+            orthographic: None,
             near: 0.1,
             far: 1000.0,
             clear_color: [0.0; 3],

@@ -26,7 +26,7 @@ use crate::extract::{Extract, ResourceOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 11;
+pub const FY_ABI_VERSION: u32 = 12;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -91,6 +91,10 @@ pub struct FyCamera {
     pub near_clip: f32,
     pub far_clip: f32,
     pub clear_color: FyColor,
+    /// Parallel projection; `fov_y` is then unused.
+    pub orthographic: bool,
+    /// Half the view's height in metres when orthographic.
+    pub size: f32,
 }
 
 /// `FyLight::kind`.
@@ -248,10 +252,24 @@ impl CComponent for FyMeshRenderer {
 impl CComponent for FyCamera {
     type Component = Camera;
     fn to_component(self) -> Result<Camera, Error> {
-        Ok(Camera { fov_y: self.fov_y, near: self.near_clip, far: self.far_clip, clear_color: self.clear_color.into() })
+        Ok(Camera {
+            fov_y: self.fov_y,
+            near: self.near_clip,
+            far: self.far_clip,
+            clear_color: self.clear_color.into(),
+            orthographic: self.orthographic,
+            size: self.size,
+        })
     }
     fn from_component(c: Camera) -> Self {
-        Self { fov_y: c.fov_y, near_clip: c.near, far_clip: c.far, clear_color: c.clear_color.into() }
+        Self {
+            fov_y: c.fov_y,
+            near_clip: c.near,
+            far_clip: c.far,
+            clear_color: c.clear_color.into(),
+            orthographic: c.orthographic,
+            size: c.size,
+        }
     }
 }
 

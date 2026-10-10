@@ -20,7 +20,9 @@ final class _Pointing implements _Targets {
     check(fy_camera_active(w, scratch.id));
     final camera = scratch.id.value;
     if (camera == 0) return null;
-    return world.raycast(world._object(camera).rayThrough(ViewPoint(x, y, width: input._width, height: input._height)));
+    return world.raycast(
+      world._object(camera).screenToRay(ViewPoint(x, y, width: input._width, height: input._height)),
+    );
   }
 
   @override

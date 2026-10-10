@@ -197,7 +197,7 @@ class Draggable extends Behaviour {
   @override
   void onDrag(Finger finger) {
     final scene = ancestor()!;
-    final ray = scene.camera.rayThrough(finger.position);
+    final ray = scene.camera.screenToRay(finger.position);
     // Where the ray meets the plane at the crate's height.
     if (ray.direction.y.abs() < 1e-6) return;
     final t = (_height - ray.origin.y) / ray.direction.y;

@@ -136,6 +136,7 @@ impl Extract {
             view: Mat4::from_rotation_translation(rotation, position).inverse(),
             position,
             fov_y: c.fov_y.to_radians(),
+            orthographic: c.orthographic.then_some(c.size),
             near: c.near,
             far: c.far,
             clear_color: rgb(c.clear_color),

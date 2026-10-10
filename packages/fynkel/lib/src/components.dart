@@ -108,14 +108,21 @@ final class Transform {
 }
 
 /// Makes the object a camera. The view is drawn from the camera with the
-/// lowest id that also has a [Transform]. Change it in place:
-/// `get<Camera>()!.fovY = 40`.
+/// lowest id that also has a [Transform] ([World.camera]). Change it in
+/// place: `get<Camera>()!.fovY = 40`.
 final class Camera extends Component {
-  Camera({this._fovY = 60, this._near = 0.1, this._far = 1000, this._clearColor = const Color.rgb(0.1, 0.1, 0.12)})
-    : super._();
+  Camera({
+    this._fovY = 60,
+    this._near = 0.1,
+    this._far = 1000,
+    this._clearColor = const Color.rgb(0.1, 0.1, 0.12),
+    this._orthographic = false,
+    this._size = 5,
+  }) : super._();
 
-  double _fovY, _near, _far;
+  double _fovY, _near, _far, _size;
   Color _clearColor;
+  bool _orthographic;
 
   /// Vertical field of view in degrees, 1–179.
   double get fovY => _fovY;
@@ -131,11 +138,21 @@ final class Camera extends Component {
   Color get clearColor => _clearColor;
   set clearColor(Color value) => _change(() => _clearColor = value);
 
+  /// Parallel projection: things keep their size however far away they
+  /// are, and [fovY] is unused. For a map, a board game or a side view.
+  bool get orthographic => _orthographic;
+  set orthographic(bool value) => _change(() => _orthographic = value);
+
+  /// Half the view's height, in metres, when [orthographic] (Unity's
+  /// `orthographicSize`): 5 shows 10 m from top to bottom.
+  double get size => _size;
+  set size(double value) => _change(() => _size = value);
+
   /// Makes a change and writes it to the engine; undoes it if the engine
   /// refuses it.
   void _change(void Function() set) {
     _checkChangeable();
-    final (fovY, near, far, clearColor) = (_fovY, _near, _far, _clearColor);
+    final (fovY, near, far, clearColor, orthographic, size) = (_fovY, _near, _far, _clearColor, _orthographic, _size);
     set();
     try {
       _live?._writeCamera(this);
@@ -144,12 +161,16 @@ final class Camera extends Component {
       _near = near;
       _far = far;
       _clearColor = clearColor;
+      _orthographic = orthographic;
+      _size = size;
       rethrow;
     }
   }
 
   @override
-  String toString() => 'Camera(fovY: $fovY, near: $near, far: $far, clearColor: $clearColor)';
+  String toString() =>
+      'Camera(${orthographic ? 'orthographic, size: $size' : 'fovY: $fovY'}, near: $near, far: $far, '
+      'clearColor: $clearColor)';
 }
 
 enum LightKind {

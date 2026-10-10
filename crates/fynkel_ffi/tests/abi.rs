@@ -32,7 +32,18 @@ fn a_sphere_lit_from_the_left_matches_its_golden() {
     unsafe {
         let camera = world.spawn();
         let black = srgb(0.0, 0.0, 0.0);
-        ok(fy_camera_set(w, camera, &FyCamera { fov_y: 40.0, near_clip: 0.1, far_clip: 1000.0, clear_color: black }));
+        ok(fy_camera_set(
+            w,
+            camera,
+            &FyCamera {
+                fov_y: 40.0,
+                near_clip: 0.1,
+                far_clip: 1000.0,
+                clear_color: black,
+                orthographic: false,
+                size: 5.0,
+            },
+        ));
         let looking = Transform::from_position(Vec3::new(0.0, 0.0, 2.2)).looking_at(Vec3::ZERO);
         ok(fy_transform_set(w, camera, &transform(looking)));
 
@@ -123,9 +134,19 @@ fn values_are_validated_with_a_message_that_names_the_field() {
     let id = world.spawn();
     // SAFETY: a live world and pointers to locals.
     unsafe {
-        let camera = FyCamera { fov_y: 0.0, near_clip: 0.1, far_clip: 10.0, clear_color: srgb(0.0, 0.0, 0.0) };
+        let camera = FyCamera {
+            fov_y: 0.0,
+            near_clip: 0.1,
+            far_clip: 10.0,
+            clear_color: srgb(0.0, 0.0, 0.0),
+            orthographic: false,
+            size: 5.0,
+        };
         assert_eq!(fy_camera_set(world.0, id, &camera), FyStatus::InvalidValue);
         assert!(last_error().contains("Camera.fov_y"), "{}", last_error());
+        let flat = FyCamera { orthographic: true, size: 0.0, ..camera };
+        assert_eq!(fy_camera_set(world.0, id, &FyCamera { fov_y: 60.0, ..flat }), FyStatus::InvalidValue);
+        assert!(last_error().contains("Camera.size"), "{}", last_error());
 
         let squashed = FyTransform { rotation: FyQuat { x: 1.0, w: 1.0, ..Default::default() }, ..Default::default() };
         assert_eq!(fy_transform_set(world.0, id, &squashed), FyStatus::InvalidValue);
@@ -192,7 +213,14 @@ fn every_component_reads_back_what_was_written() {
         rotation: FyQuat { x: 0.0, y: 0.6, z: 0.0, w: 0.8 },
         scale: FyVec3 { x: 2.0, y: 2.0, z: 2.0 },
     };
-    let camera = FyCamera { fov_y: 45.0, near_clip: 0.5, far_clip: 50.0, clear_color: srgb(0.2, 0.3, 0.4) };
+    let camera = FyCamera {
+        fov_y: 45.0,
+        near_clip: 0.5,
+        far_clip: 50.0,
+        clear_color: srgb(0.2, 0.3, 0.4),
+        orthographic: true,
+        size: 3.0,
+    };
     let light = FyLight { kind: FY_LIGHT_AMBIENT, color: srgb(0.5, 0.5, 0.5), intensity: 2.0 };
     // SAFETY: a live world and pointers to locals.
     unsafe {
@@ -261,8 +289,8 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_11() {
-    assert_eq!(fy_abi_version(), 11);
+fn the_abi_version_is_12() {
+    assert_eq!(fy_abi_version(), 12);
 }
 
 #[cfg(not(target_os = "android"))]
@@ -360,7 +388,14 @@ fn hidden_rig(world: &World) -> u64 {
         for part in [camera, sun, ambient, cube] {
             ok(fy_parent_set(w, part, rig));
         }
-        let wide = FyCamera { fov_y: 100.0, near_clip: 0.1, far_clip: 10.0, clear_color: srgb(1.0, 0.0, 0.0) };
+        let wide = FyCamera {
+            fov_y: 100.0,
+            near_clip: 0.1,
+            far_clip: 10.0,
+            clear_color: srgb(1.0, 0.0, 0.0),
+            orthographic: false,
+            size: 5.0,
+        };
         ok(fy_camera_set(w, camera, &wide));
         ok(fy_transform_set(w, camera, &transform(Transform::from_position(Vec3::new(0.0, 0.0, 6.0)))));
         let bright = FyLight { kind: FY_LIGHT_DIRECTIONAL, color: srgb(0.0, 1.0, 0.0), intensity: 5.0 };

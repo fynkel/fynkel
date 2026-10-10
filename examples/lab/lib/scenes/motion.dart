@@ -37,7 +37,7 @@ class MotionScene extends LabScene {
     follower = add(
       shape('follower', Mesh.sphere(), const Color(0xFF4CA6E0), at: Vec3(-3, 0.3, -3), size: Vec3(0.5, 0.5, 0.5)),
     );
-    follower.addComponent(Follow(guard));
+    follower.addComponent(Trail(guard));
     crate = add(Crate());
     coin = add(shape('coin', Mesh.sphere(), const Color(0xFFFFC020), at: Vec3(3.6, 1, 0), size: Vec3(0.7, 0.7, 0.12)));
     door = add(shape('door', Mesh.cube(), const Color(0xFF8A6A50), at: Vec3(-3.6, 1, 0), size: Vec3(0.2, 2, 1.4)));
@@ -108,7 +108,7 @@ class MotionScene extends LabScene {
               ? 'stopped'
               : 'completed'}'
           '   guard at ${_vec(guard.position)}, facing ${_vec(guard.forward)}',
-      'follower: ${follower.get<Follow>()!.speed.toStringAsFixed(2)} a second',
+      'follower: ${follower.get<Trail>()!.speed.toStringAsFixed(2)} a second',
       'crate hits: ${crate.hits}   time scale: ${time.scale.toStringAsFixed(2)}',
     ].join('\n');
   }
@@ -124,9 +124,9 @@ class MotionScene extends LabScene {
     Button('shake the camera', () => camera.shake(0.15, seconds: 0.5)),
     Slider(
       'follower lag (smoothTime)',
-      () => follower.get<Follow>()!.damp.smoothTime,
+      () => follower.get<Trail>()!.damp.smoothTime,
       (v) {
-        follower.get<Follow>()!.damp.smoothTime = v;
+        follower.get<Trail>()!.damp.smoothTime = v;
       },
       min: 0.05,
       max: 1.5,
@@ -137,8 +137,8 @@ class MotionScene extends LabScene {
 
 /// Follows [target] by hand, a little behind it, with SmoothDamp3: no
 /// tween, just a step each frame.
-class Follow extends Behaviour {
-  Follow(this.target);
+class Trail extends Behaviour {
+  Trail(this.target);
 
   final GameObject target;
   final damp = SmoothDamp3(smoothTime: 0.5);

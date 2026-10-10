@@ -339,7 +339,7 @@ external ffi.Pointer<FyWorld> fy_world_new();
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
 external int fy_world_transform_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> out);
 
-const int FY_ABI_VERSION = 11;
+const int FY_ABI_VERSION = 12;
 
 const int FY_APPLE_MORE = 2;
 
@@ -366,6 +366,12 @@ final class FyCamera extends ffi.Struct {
   external double far_clip;
 
   external FyColor clear_color;
+
+  @ffi.Bool()
+  external bool orthographic;
+
+  @ffi.Float()
+  external double size;
 }
 
 final class FyColor extends ffi.Struct {

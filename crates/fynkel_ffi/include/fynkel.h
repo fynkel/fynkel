@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 11
+#define FY_ABI_VERSION 12
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -166,6 +166,10 @@ typedef struct FyCamera {
   float near_clip;
   float far_clip;
   struct FyColor clear_color;
+  // Parallel projection; `fov_y` is then unused.
+  bool orthographic;
+  // Half the view's height in metres when orthographic.
+  float size;
 } FyCamera;
 
 typedef struct FyLight {

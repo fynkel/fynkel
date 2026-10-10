@@ -61,7 +61,7 @@ void main() {
     ViewPoint? on;
     for (var y = 0.0; y < 300 && on == null; y += 2) {
       final p = ViewPoint(200, y, width: 400, height: 300);
-      if (world.raycast(camera.rayThrough(p))?.object == crate) on = p;
+      if (world.raycast(camera.screenToRay(p))?.object == crate) on = p;
     }
     world.input.fingerDown(1, on!.x, on.y);
     world.update(1 / 60);
@@ -85,7 +85,7 @@ void main() {
     for (var x = 0.0; x < 400 && padAt == null; x += 2) {
       for (var y = 0.0; y < 300 && padAt == null; y += 4) {
         final q = ViewPoint(x, y, width: p.width, height: p.height);
-        if (world.raycast(camera.rayThrough(q))?.object == pad) padAt = q;
+        if (world.raycast(camera.screenToRay(q))?.object == pad) padAt = q;
       }
     }
     for (var i = 0; i < 2; i++) {
