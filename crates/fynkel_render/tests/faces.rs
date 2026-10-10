@@ -29,6 +29,7 @@ fn scene(draws: Vec<Draw>) -> RenderScene {
         camera: Some(camera),
         sun: Some(Sun { direction: Vec3::new(0.0, -0.5, -1.0), color: Vec3::ONE }),
         ambient: Vec3::splat(0.1),
+        lines: Vec::new(),
         draws,
     }
 }

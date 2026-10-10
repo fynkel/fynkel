@@ -42,6 +42,7 @@ fn a_sphere_lit_from_the_left_matches_its_golden() {
                 clear_color: black,
                 orthographic: false,
                 size: 5.0,
+                culling_mask: u32::MAX,
             },
         ));
         let looking = Transform::from_position(Vec3::new(0.0, 0.0, 2.2)).looking_at(Vec3::ZERO);
@@ -141,6 +142,7 @@ fn values_are_validated_with_a_message_that_names_the_field() {
             clear_color: srgb(0.0, 0.0, 0.0),
             orthographic: false,
             size: 5.0,
+            culling_mask: u32::MAX,
         };
         assert_eq!(fy_camera_set(world.0, id, &camera), FyStatus::InvalidValue);
         assert!(last_error().contains("Camera.fov_y"), "{}", last_error());
@@ -220,6 +222,7 @@ fn every_component_reads_back_what_was_written() {
         clear_color: srgb(0.2, 0.3, 0.4),
         orthographic: true,
         size: 3.0,
+        culling_mask: u32::MAX,
     };
     let light = FyLight { kind: FY_LIGHT_AMBIENT, color: srgb(0.5, 0.5, 0.5), intensity: 2.0 };
     // SAFETY: a live world and pointers to locals.
@@ -289,8 +292,8 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_12() {
-    assert_eq!(fy_abi_version(), 12);
+fn the_abi_version_is_13() {
+    assert_eq!(fy_abi_version(), 13);
 }
 
 #[cfg(not(target_os = "android"))]
@@ -395,6 +398,7 @@ fn hidden_rig(world: &World) -> u64 {
             clear_color: srgb(1.0, 0.0, 0.0),
             orthographic: false,
             size: 5.0,
+            culling_mask: u32::MAX,
         };
         ok(fy_camera_set(w, camera, &wide));
         ok(fy_transform_set(w, camera, &transform(Transform::from_position(Vec3::new(0.0, 0.0, 6.0)))));
@@ -856,7 +860,7 @@ fn cast(world: &World, origin: [f32; 3], direction: [f32; 3], max_distance: f32)
     };
     let mut hit = FyRayHit { object: 99, ..FyRayHit::default() };
     // SAFETY: a live world and pointers to locals.
-    let status = unsafe { fy_raycast(world.0, &ray, max_distance, &mut hit) };
+    let status = unsafe { fy_raycast(world.0, &ray, max_distance, u32::MAX, &mut hit) };
     if status == FyStatus::Ok { Ok(hit) } else { Err(status) }
 }
 
@@ -907,9 +911,140 @@ fn a_raycast_refuses_a_ray_it_cant_follow() {
     let mut hit = FyRayHit::default();
     // SAFETY: null pointers are refused before anything is read.
     unsafe {
-        assert_eq!(fy_raycast(world.0, ptr::null(), 1.0, &mut hit), FyStatus::NullPointer);
-        assert_eq!(fy_raycast(ptr::null(), &FyRay::default(), 1.0, &mut hit), FyStatus::NullPointer);
+        assert_eq!(fy_raycast(world.0, ptr::null(), 1.0, u32::MAX, &mut hit), FyStatus::NullPointer);
+        assert_eq!(fy_raycast(ptr::null(), &FyRay::default(), 1.0, u32::MAX, &mut hit), FyStatus::NullPointer);
         let ray = FyRay { direction: FyVec3 { x: 1.0, y: 0.0, z: 0.0 }, ..FyRay::default() };
-        assert_eq!(fy_raycast(world.0, &ray, 1.0, ptr::null_mut()), FyStatus::NullPointer);
+        assert_eq!(fy_raycast(world.0, &ray, 1.0, u32::MAX, ptr::null_mut()), FyStatus::NullPointer);
+    }
+}
+
+// --- Layers and debug lines ----------------------------------------------------
+
+/// The stage 1 scene with a wall on layer 3 between the camera and the
+/// cube. Returns the camera, the cube and the wall.
+fn stage1_behind_a_wall(world: &World) -> (u64, u64, u64) {
+    use fynkel_world::{Transform, Vec3};
+    let cube = stage1(world);
+    let (wall, mesh, mut material, mut camera) = (world.spawn(), add_shape(world, FY_MESH_CUBE), 0, 0);
+    // SAFETY: a live world, and pointers to locals.
+    unsafe {
+        ok(fy_material_add(
+            world.0,
+            &FyMaterial { base_color: argb(0xFF3A8EE0), ..FyMaterial::default() },
+            &mut material,
+        ));
+        let wide = Transform { scale: Vec3::new(1.5, 1.5, 0.2), ..Transform::from_position(Vec3::new(0.0, 0.5, 2.0)) };
+        ok(fy_transform_set(world.0, wall, &transform(wide)));
+        ok(fy_mesh_renderer_set(world.0, wall, &FyMeshRenderer { mesh, material }));
+        ok(fy_layer_set(world.0, wall, 3));
+        ok(fy_camera_active(world.0, &mut camera));
+    }
+    (camera, cube, wall)
+}
+
+fn set_culling_mask(world: &World, camera: u64, mask: u32) {
+    let mut lens = FyCamera::default();
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        ok(fy_camera_get(world.0, camera, &mut lens));
+        ok(fy_camera_set(world.0, camera, &FyCamera { culling_mask: mask, ..lens }));
+    }
+}
+
+#[test]
+fn a_layer_left_out_of_the_cameras_mask_is_missing_from_the_golden() {
+    let world = World::new();
+    let (camera, ..) = stage1_behind_a_wall(&world);
+    let view = View::headless(&world, 256, 256);
+    let [r, g, b, _] = view.read(view.frame(), 256, 256).pixel(128, 128);
+    assert!(b > r && b > g, "the wall hides the cube: {:?}", [r, g, b]);
+
+    set_culling_mask(&world, camera, !(1 << 3));
+    assert_golden("cube", &view.read(view.frame(), 256, 256));
+    set_culling_mask(&world, camera, 1 << 3);
+    let image = view.read(view.frame(), 256, 256);
+    let [r, g, b, _] = image.pixel(128, 128);
+    assert!(b > r && b > g, "only the wall: {:?}", [r, g, b]);
+    let [r, g, b, _] = image.pixel(0, 0);
+    assert!(r < 40 && g < 40 && b < 40, "and the clear colour: {:?}", [r, g, b]);
+}
+
+#[test]
+fn a_raycast_goes_through_the_layers_left_out_of_its_mask() {
+    let world = World::new();
+    let (_, cube, wall) = stage1_behind_a_wall(&world);
+    let hit = |mask: u32| {
+        let ray = FyRay { origin: FyVec3 { x: 0.1, y: 0.2, z: 5.0 }, direction: FyVec3 { x: 0.0, y: 0.0, z: -1.0 } };
+        let mut hit = FyRayHit::default();
+        // SAFETY: a live world and pointers to locals.
+        ok(unsafe { fy_raycast(world.0, &ray, f32::INFINITY, mask, &mut hit) });
+        hit.object
+    };
+    assert_eq!(hit(u32::MAX), wall);
+    assert_eq!(hit(!(1 << 3)), cube);
+    assert_eq!(hit(1 << 3), wall);
+    assert_eq!(hit(1), cube, "layer 0 only");
+    assert_eq!(hit(0), 0, "no layers: nothing");
+}
+
+#[test]
+fn layers_through_the_c_interface() {
+    let world = World::new();
+    let [parent, child] = std::array::from_fn(|_| world.spawn());
+    let layer = |id| {
+        let mut layer = 99;
+        // SAFETY: a live world and a pointer to a local.
+        ok(unsafe { fy_layer_get(world.0, id, &mut layer) });
+        layer
+    };
+    // SAFETY: a live world and pointers to locals; null is allowed for
+    // every pointer argument.
+    unsafe {
+        ok(fy_parent_set(world.0, child, parent));
+        assert_eq!(layer(parent), 0, "0 by default");
+        ok(fy_layer_set(world.0, parent, 31));
+        assert_eq!((layer(parent), layer(child)), (31, 0), "a child keeps its own");
+
+        assert_eq!(fy_layer_set(world.0, parent, 32), FyStatus::InvalidValue);
+        assert!(last_error().contains("layer 32 doesn't exist: layers are 0 to 31"), "{}", last_error());
+        assert_eq!(layer(parent), 31, "unchanged");
+
+        assert_eq!(fy_layer_get(world.0, parent, ptr::null_mut()), FyStatus::NullPointer);
+        assert_eq!(fy_layer_set(ptr::null(), parent, 1), FyStatus::NullPointer);
+        ok(fy_despawn(world.0, child));
+        assert_eq!(fy_layer_set(world.0, child, 1), FyStatus::NoObject);
+        assert_eq!(fy_layer_get(world.0, child, &mut 0), FyStatus::NoObject);
+    }
+}
+
+fn line(a: [f32; 3], b: [f32; 3], color: FyColor) -> FyDebugLine {
+    let v = |p: [f32; 3]| FyVec3 { x: p[0], y: p[1], z: p[2] };
+    FyDebugLine { a: v(a), b: v(b), color }
+}
+
+#[test]
+fn debug_lines_are_drawn_over_the_scene_until_replaced() {
+    let world = World::new();
+    stage1(&world);
+    let view = View::headless(&world, 256, 256);
+    let (red, green) = (srgb(1.0, 0.0, 0.0), srgb(0.0, 1.0, 0.0));
+    let lines = [
+        line([-2.0, 0.0, 0.0], [2.0, 0.0, 0.0], red),
+        line([0.0, -2.0, -3.0], [0.0, 2.0, -3.0], green),
+        // Left out: a point that isn't finite.
+        line([f32::NAN, 0.0, 0.0], [1.0, 1.0, 1.0], red),
+    ];
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        ok(fy_debug_lines_set(world.0, lines.as_ptr(), lines.len()));
+        // The same lines as fynkel_render's test, over the same scene.
+        assert_golden("lines", &view.read(view.frame(), 256, 256));
+        assert_golden("lines", &view.read(view.frame(), 256, 256));
+
+        ok(fy_debug_lines_set(world.0, ptr::null(), 0));
+        assert_golden("cube", &view.read(view.frame(), 256, 256));
+
+        assert_eq!(fy_debug_lines_set(world.0, ptr::null(), 1), FyStatus::NullPointer);
+        assert_eq!(fy_debug_lines_set(ptr::null(), lines.as_ptr(), 1), FyStatus::NullPointer);
     }
 }

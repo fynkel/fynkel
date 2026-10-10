@@ -21,6 +21,7 @@ fn scene(n: u32, t: f32) -> RenderScene {
         camera: Some(CameraView::looking_at(Vec3::new(0.0, extent * 0.6, extent * 0.9), Vec3::ZERO)),
         sun: Some(Sun { direction: Vec3::new(-0.4, -1.0, -0.3), color: Vec3::ONE }),
         ambient: Vec3::splat(0.15),
+        lines: Vec::new(),
         draws: (0..n)
             .map(|i| Draw {
                 mesh: MeshKey(1),

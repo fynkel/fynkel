@@ -170,6 +170,15 @@ pub struct Draw {
     pub material: PbrMaterial,
 }
 
+/// A debug line, drawn on top of the scene.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Line {
+    pub a: Vec3,
+    pub b: Vec3,
+    /// Linear RGBA; alpha blends it over the scene.
+    pub color: [f32; 4],
+}
+
 /// One frame's worth of things to draw.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RenderScene {
@@ -180,6 +189,8 @@ pub struct RenderScene {
     /// shows a rough surface at its albedo.
     pub ambient: Vec3,
     pub draws: Vec<Draw>,
+    /// Drawn after the draws, over them, one pixel wide.
+    pub lines: Vec<Line>,
 }
 
 impl RenderScene {
@@ -190,5 +201,6 @@ impl RenderScene {
         self.sun = None;
         self.ambient = Vec3::ZERO;
         self.draws.clear();
+        self.lines.clear();
     }
 }

@@ -34,6 +34,11 @@ final class Input {
   /// time and the swipe's speed.
   final InputSettings settings;
 
+  /// The layers a finger can touch ([GameObject.layer]): taps, presses and
+  /// drags go through objects on the others, as do the layers the camera
+  /// doesn't draw ([Camera.cullingMask]). Unity's `eventMask`.
+  LayerMask layers = LayerMask.all;
+
   // The world, through which the input step reaches objects; null for an
   // input of its own.
   _Targets? _targets;

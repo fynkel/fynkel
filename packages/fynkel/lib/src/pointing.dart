@@ -20,8 +20,12 @@ final class _Pointing implements _Targets {
     check(fy_camera_active(w, scratch.id));
     final camera = scratch.id.value;
     if (camera == 0) return null;
+    final object = world._object(camera);
+    // What the camera doesn't draw can't be touched through it.
+    final drawn = object.get<Camera>()?.cullingMask ?? LayerMask.all;
     return world.raycast(
-      world._object(camera).screenToRay(ViewPoint(x, y, width: input._width, height: input._height)),
+      object.screenToRay(ViewPoint(x, y, width: input._width, height: input._height)),
+      layers: drawn & input.layers,
     );
   }
 

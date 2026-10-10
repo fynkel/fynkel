@@ -6,6 +6,7 @@ import 'package:fynkel/fynkel.dart';
 import 'package:lab/lab.dart';
 import 'package:lab/scenes.dart';
 import 'package:lab/scenes/input.dart';
+import 'package:lab/scenes/layers_basics.dart';
 import 'package:lab/scenes/motion.dart';
 import 'package:lab/scenes/motion_basics.dart';
 import 'package:lab/scenes/pointers.dart';
@@ -164,5 +165,31 @@ void main() {
     expect(lines, containsAllInOrder(['door: opening…', startsWith('door: open'), 'door: closed']));
     expect(lines, contains(startsWith('race: the 1 s wait won')));
     expect(scene.runner.position.x, lessThan(-0.5), reason: 'stopped about a third of the way');
+  });
+
+  test('Layers and debug: the basics: the ray hits the blue cube until told to go through layer 1', () async {
+    final world = World();
+    addTearDown(world.dispose);
+    final scene = world.add(LayersBasicsScene());
+    await scene.loaded;
+    world.update(1 / 60);
+    expect(scene.readout.value, contains('the ray hits: blue cube'));
+    Toggle control(String label) => scene.controls.whereType<Toggle>().firstWhere((c) => c.label == label);
+
+    control('ray hits layer 1').onChanged(false);
+    world.update(1 / 60);
+    expect(scene.readout.value, contains('the ray hits: orange cube'));
+
+    control('camera draws layer 1').onChanged(false);
+    expect(world.camera!.get<Camera>()!.cullingMask, LayerMask.except([blueLayer]));
+    expect(scene.blue.layer, blueLayer);
+
+    // A line and a sphere's 96 a frame; the box's 12 stay two seconds.
+    scene.controls.whereType<Button>().single.onPressed();
+    world.update(1 / 60);
+    expect(world.debug.count, 12);
+    control('debug lines').onChanged(false);
+    world.update(1 / 60);
+    expect(world.debug.count, 0);
   });
 }

@@ -1,5 +1,5 @@
-//! Parents, children, names and the active flag (stage 2 plan §3.1, stage
-//! 3 plan §3.3).
+//! Parents, children, names, the active flag (stage 2 plan §3.1, stage 3
+//! plan §3.3) and layers (stage 4 plan §3.9).
 //!
 //! The hierarchy lives beside the components, not in them: setting a parent
 //! must check for cycles and keep both sides in step, which a component
@@ -14,6 +14,10 @@
 //! lit by, not seen through and not hit by rays. Each object keeps its own
 //! flag, so making a parent active again shows exactly the children that
 //! were active before.
+//!
+//! Each object is on one of 32 layers, 0 unless set. A layer is the
+//! object's own: its children keep theirs. Cameras draw and rays hit only
+//! the layers in their masks.
 
 use glam::Mat4;
 
@@ -32,6 +36,9 @@ pub(crate) struct Hierarchy {
     /// Objects whose own flag is off. Few, usually none, so a world with
     /// every object active pays one `is_empty` a frame.
     inactive: IdMap<ObjectId, ()>,
+    /// Objects not on layer 0. Usually few, so a world on layer 0 pays one
+    /// `is_empty` per object asked about.
+    layers: IdMap<ObjectId, u8>,
     /// Bumped on every change of parent, so [`WorldMatrices`] knows when
     /// its order is stale.
     version: u64,
@@ -56,6 +63,10 @@ impl Hierarchy {
     /// Whether `id`'s own flag is off. Skips hashing when nothing is.
     fn is_off(&self, id: ObjectId) -> bool {
         !self.inactive.is_empty() && self.inactive.contains_key(&id)
+    }
+
+    fn layer(&self, id: ObjectId) -> u8 {
+        if self.layers.is_empty() { 0 } else { self.layers.get(&id).copied().unwrap_or(0) }
     }
 
     /// Drops `id`'s node once it has neither a parent nor children.
@@ -172,6 +183,31 @@ impl World {
         Ok(true)
     }
 
+    /// Puts the object on `layer`, 0 to 31. Its children keep theirs.
+    pub fn set_layer(&mut self, id: ObjectId, layer: u32) -> Result<()> {
+        self.entity(id)?;
+        if layer >= 32 {
+            return Err(WorldError::Layer(layer));
+        }
+        if layer == 0 {
+            self.hierarchy.layers.remove(&id);
+        } else {
+            self.hierarchy.layers.insert(id, layer as u8);
+        }
+        Ok(())
+    }
+
+    pub fn layer(&self, id: ObjectId) -> Result<u32> {
+        self.entity(id)?;
+        Ok(self.hierarchy.layer(id).into())
+    }
+
+    /// Whether the object's layer is in `mask` (bit `n` for layer `n`).
+    /// False for an object that doesn't exist.
+    pub fn in_mask(&self, id: ObjectId, mask: u32) -> bool {
+        mask == u32::MAX || (mask >> self.hierarchy.layer(id)) & 1 == 1
+    }
+
     /// The camera a view draws from: the shown object with the lowest id
     /// that has both a `Camera` and a `Transform`, or `None`.
     pub fn active_camera(&self) -> Option<ObjectId> {
@@ -230,6 +266,7 @@ impl World {
         if !tree.nodes.contains_key(&id) {
             tree.names.remove(&id);
             tree.inactive.remove(&id);
+            tree.layers.remove(&id);
             return None;
         }
         let mut subtree = vec![id];
@@ -242,6 +279,7 @@ impl World {
             }
             tree.names.remove(&current);
             tree.inactive.remove(&current);
+            tree.layers.remove(&current);
             next += 1;
         }
         subtree.swap_remove(0);

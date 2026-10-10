@@ -27,6 +27,7 @@ fn facing_plane(material: PbrMaterial) -> RenderScene {
         camera: Some(CameraView::looking_at(Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO)),
         sun: None,
         ambient: Vec3::ZERO,
+        lines: Vec::new(),
         draws: vec![Draw {
             mesh: PLANE,
             model: Mat4::from_rotation_x(90f32.to_radians()) * Mat4::from_scale(Vec3::splat(2.0)),
@@ -211,6 +212,7 @@ fn a_distant_checkerboard_is_mid_grey_not_darker() {
             camera: Some(camera),
             sun: None,
             ambient: Vec3::ZERO,
+            lines: Vec::new(),
             draws: vec![Draw {
                 mesh: PLANE,
                 model: Mat4::from_scale(Vec3::new(400.0, 1.0, 400.0)),
@@ -367,7 +369,7 @@ fn draws_are_batched_by_textures_too() {
         .collect();
     let (_, stats) = render(&gpu, &mut r, &scene, 64, 64);
     // A ×2, B, none, and A cut out.
-    assert_eq!(stats, FrameStats { draws: 5, draw_calls: 4, missing_meshes: 0 });
+    assert_eq!(stats, FrameStats { draws: 5, draw_calls: 4, missing_meshes: 0, lines: 0 });
 }
 
 /// The look, for a person to check: a UV grid on a cube, a bumpy

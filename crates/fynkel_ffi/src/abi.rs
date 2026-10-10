@@ -26,7 +26,7 @@ use crate::extract::{Extract, ResourceOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 12;
+pub const FY_ABI_VERSION: u32 = 13;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -95,6 +95,8 @@ pub struct FyCamera {
     pub orthographic: bool,
     /// Half the view's height in metres when orthographic.
     pub size: f32,
+    /// The layers it draws: bit n for layer n. `0xFFFFFFFF` for all.
+    pub culling_mask: u32,
 }
 
 /// `FyLight::kind`.
@@ -259,6 +261,7 @@ impl CComponent for FyCamera {
             clear_color: self.clear_color.into(),
             orthographic: self.orthographic,
             size: self.size,
+            culling_mask: self.culling_mask,
         })
     }
     fn from_component(c: Camera) -> Self {
@@ -269,6 +272,7 @@ impl CComponent for FyCamera {
             clear_color: c.clear_color.into(),
             orthographic: c.orthographic,
             size: c.size,
+            culling_mask: c.culling_mask,
         }
     }
 }
@@ -700,6 +704,38 @@ pub unsafe extern "C" fn fy_active_get(world: *const FyWorld, id: u64, out: *mut
     })
 }
 
+/// Puts the object on `layer`, 0 to 31 (`FY_STATUS_INVALID_VALUE` past
+/// that). Cameras draw, and rays hit, only the layers in their masks. Each
+/// object has its own: a child doesn't take its parent's.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_layer_set(world: *const FyWorld, id: u64, layer: u32) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        Ok(world.lock()?.set_layer(object(id)?, layer)?)
+    })
+}
+
+/// Writes the object's layer to `out`: 0 unless put on another.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_layer_get(world: *const FyWorld, id: u64, out: *mut u32) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let layer = world.lock()?.layer(object(id)?)?;
+        // SAFETY: per this function's contract.
+        unsafe { write(out, layer, "out") }
+    })
+}
+
 /// Writes to `out` whether the object is shown: it and every parent above
 /// it on.
 ///
@@ -852,7 +888,8 @@ pub struct FyRayHit {
 /// What a ray can hit is what a view draws: objects with a `Transform` and
 /// a mesh renderer with both a mesh and a material, from the side they're
 /// drawn from (both sides for a double-sided material). Cut-outs are hit as
-/// if solid.
+/// if solid. Only objects on a layer in `mask` (bit n for layer n) are hit:
+/// `0xFFFFFFFF` for all.
 ///
 /// `FY_STATUS_INVALID_VALUE` for a ray without a direction or with a
 /// non-finite origin, and for a negative or NaN `max_distance`.
@@ -866,6 +903,7 @@ pub unsafe extern "C" fn fy_raycast(
     world: *const FyWorld,
     ray: *const FyRay,
     max_distance: f32,
+    mask: u32,
     out: *mut FyRayHit,
 ) -> FyStatus {
     guard(|| {
@@ -881,7 +919,7 @@ pub unsafe extern "C" fn fy_raycast(
         // The raycaster holds only matrices it recomputes, so one left
         // behind by a panic is as good as new.
         let mut caster = handle.raycaster.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let hit = caster.cast(&world, ray, max_distance).map_or_else(FyRayHit::default, |h| FyRayHit {
+        let hit = caster.cast(&world, ray, max_distance, mask).map_or_else(FyRayHit::default, |h| FyRayHit {
             object: h.object.raw(),
             point: h.point.into(),
             normal: h.normal.into(),
@@ -889,6 +927,47 @@ pub unsafe extern "C" fn fy_raycast(
         });
         // SAFETY: per this function's contract.
         unsafe { write(out, hit, "out") }
+    })
+}
+
+// --- Debug drawing -------------------------------------------------------------
+
+/// A line from `a` to `b` in world space.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FyDebugLine {
+    pub a: FyVec3,
+    pub b: FyVec3,
+    pub color: FyColor,
+}
+
+/// Replaces the lines views draw on top of the scene with these `count`
+/// lines, until the next call: 0 lines clears them. A line with a point
+/// that isn't finite is left out.
+///
+/// # Safety
+///
+/// `world` is null or live; `lines` is null or valid for `count` reads (it
+/// may be null when `count` is 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_debug_lines_set(
+    world: *const FyWorld,
+    lines: *const FyDebugLine,
+    count: usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let lines: &[FyDebugLine] = if count == 0 {
+            &[]
+        } else {
+            // SAFETY: per this function's contract.
+            unsafe { std::slice::from_raw_parts(handle(lines, "lines")?, count) }
+        };
+        let lines =
+            lines.iter().map(|l| fynkel_world::DebugLine { a: l.a.into(), b: l.b.into(), color: l.color.into() });
+        world.lock()?.set_debug_lines(lines.filter(|l| l.a.is_finite() && l.b.is_finite()));
+        Ok(())
     })
 }
 

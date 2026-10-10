@@ -25,6 +25,8 @@ pub enum FieldKind {
     Texture,
     /// One of the listed names. The value is its index.
     Enum(&'static [&'static str]),
+    /// 32 on-off bits, one per layer: bit `n` is layer `n`.
+    Mask,
 }
 
 /// A field's value, tagged with its kind.
@@ -40,6 +42,7 @@ pub enum Value {
     Material(Option<MaterialId>),
     Texture(Option<TextureId>),
     Enum(u32),
+    Mask(u32),
 }
 
 impl Value {
@@ -56,7 +59,8 @@ impl Value {
             | (Value::Bool(_), FieldKind::Bool)
             | (Value::Mesh(_), FieldKind::Mesh)
             | (Value::Material(_), FieldKind::Material)
-            | (Value::Texture(_), FieldKind::Texture) => true,
+            | (Value::Texture(_), FieldKind::Texture)
+            | (Value::Mask(_), FieldKind::Mask) => true,
             _ => false,
         }
     }

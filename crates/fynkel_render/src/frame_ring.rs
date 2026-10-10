@@ -41,11 +41,13 @@ struct Slot {
 }
 
 /// What a frame binds: the uniforms' bind group, and the buffer holding
-/// the instances from [`Written::instances`] on.
+/// the instances from [`Written::instances`] on and the line vertices from
+/// [`Written::lines`] on.
 pub(crate) struct Written<'a> {
     pub(crate) bind_group: &'a wgpu::BindGroup,
     pub(crate) buffer: &'a wgpu::Buffer,
     pub(crate) instances: u64,
+    pub(crate) lines: u64,
 }
 
 /// The three buffers. The uniforms are bound with `layout`'s binding 0.
@@ -100,11 +102,18 @@ impl FrameRing {
         Slot { buffer, bind_group, state: Arc::new(AtomicU8::new(MAPPED)) }
     }
 
-    /// Writes a frame's `uniforms` and `instances` into the next buffer,
+    /// Writes a frame's `uniforms`, `instances` and `lines` (vertices,
+    /// straight after the instances) into the next buffer,
     /// waiting for the GPU if it still reads all three. The frame that
     /// binds what this returns must be submitted before the next `write`,
     /// which maps its buffer again.
-    pub(crate) fn write(&mut self, device: &wgpu::Device, uniforms: &[u8], instances: &[u8]) -> Written<'_> {
+    pub(crate) fn write(
+        &mut self,
+        device: &wgpu::Device,
+        uniforms: &[u8],
+        instances: &[u8],
+        lines: &[u8],
+    ) -> Written<'_> {
         debug_assert_eq!(uniforms.len() as u64, self.uniforms);
         if let Some(last) = self.last.take() {
             let slot = &self.slots[last];
@@ -120,21 +129,24 @@ impl FrameRing {
         self.wait_until_mapped(device, index);
 
         let at = instances_at(self.uniforms);
-        if self.slots[index].buffer.size() < at + instances.len() as u64 {
+        let lines_at = at + instances.len() as u64;
+        let data = (instances.len() + lines.len()) as u64;
+        if self.slots[index].buffer.size() < at + data {
             // Dropping the old buffer frees it once the GPU is done with it.
-            self.slots[index] = self.create_slot(device, (instances.len() as u64).next_power_of_two());
+            self.slots[index] = self.create_slot(device, data.next_power_of_two());
         }
 
         let slot = &mut self.slots[index];
         {
             let mut view = slot.buffer.get_mapped_range_mut(..).expect("the slot is mapped");
             view.slice(..uniforms.len()).copy_from_slice(uniforms);
-            view.slice(at as usize..at as usize + instances.len()).copy_from_slice(instances);
+            view.slice(at as usize..lines_at as usize).copy_from_slice(instances);
+            view.slice(lines_at as usize..lines_at as usize + lines.len()).copy_from_slice(lines);
         }
         slot.buffer.unmap();
         slot.state.store(IN_FLIGHT, Ordering::Relaxed);
         self.last = Some(index);
-        Written { bind_group: &slot.bind_group, buffer: &slot.buffer, instances: at }
+        Written { bind_group: &slot.bind_group, buffer: &slot.buffer, instances: at, lines: lines_at }
     }
 
     /// Lets wgpu finish the mapping of slot `index`, waiting for the GPU

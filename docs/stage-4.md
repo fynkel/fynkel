@@ -313,6 +313,14 @@ As Cinemachine: the view has one real camera, and **virtual cameras** decide whe
 - **Errors don't stop the game**: an exception from any lifecycle call, routine, handler or tween is reported to `world.errors` with its object, and the rest of the frame goes on. If nothing listens, it's an uncaught error, so tests fail (as load errors already do).
 - **Hot reload**: check what Flutter's hot reload does to a running game (changed methods take effect at once; changed fields don't apply to live objects) and write it down, with a test game.
 
+- *Settled in step 8:*
+  - **A layer is an int, 0 to 31**, on the object (`GameObject.layer`, or `GameObject(layer: 3)`), 0 by default; a child keeps its own, as in Unity. Name layers with constants (`const enemies = 8`); there are no layer names in the engine. Out of range is a `RangeError`.
+  - **`LayerMask`** is a value: `LayerMask.all`, `none`, `of([1, 3])`, `except([2])`, `plus`, `minus`, `|`, `&`, `contains`. No layer is special: Unity's layer 2, "Ignore Raycast", has no counterpart, so a default ray hits every layer.
+  - **The masks**: `Camera.cullingMask` (an engine field, ABI 13) leaves objects undrawn, and lights still light every layer; `world.raycast(ray, layers:)` goes through what's left out; a finger touches only what the camera draws and `world.input.layers` has (Unity's `eventMask`).
+  - **`world.debug`** (`debug` in an object or a behaviour): `line`, `ray` (as long as its direction, as Unity's `DrawRay`), `box` (12 edges, turned by `rotation`), `sphere` (three circles), `path` (`closed:`), each with `color` and `seconds`, and `clear`. A line lasts a frame, or `seconds` of unscaled time, so they pass while paused. `enabled` is off in a release build unless turned on, and turning it off takes the lines away.
+  - **The seventh step of the frame**: the lines go to the engine in one call at the end of `update`; a frame with none after a frame with none makes no call. The engine draws them after the scene, through it (no depth test), one pixel wide, blended by their alpha.
+  - **Errors**: every call that runs game code already reported to `world.errors` (steps 2 to 7); nothing new was needed.
+
 ## 4. Steps
 
 Each step is built, tested, and merged on its own, in this order (each
@@ -426,6 +434,22 @@ pointers.
 *Done when* goldens show a layer hidden from a camera and debug lines
 drawn, rays and input skip masked layers, and a frame with no debug
 drawing costs what it did.
+✅ Rust: layer tests in `fynkel_world`, the extract's culling mask and lines,
+`fy_layer_set`/`get`, `fy_raycast`'s mask and `fy_debug_lines_set` through
+the C interface, and two goldens: `lines.png` (lines over the cube and
+through it) and the cube golden again with a wall on layer 3 left out of
+the camera's mask. Dart: 13 tests in `test/layers_test.dart` and 8 in
+`test/debug_test.dart`, which draw the same goldens and a new
+`debug_shapes.png`, and `test/debug_alloc_test.dart`: drawing a line, a
+box and a sphere from ten objects every frame allocates nothing but their
+`Vec3`s; 10 mutants of the new Dart code: 8 killed at once, 2 more after a
+test each (a line gone the very frame its time is up, a refused culling
+mask undone). A frame without debug drawing does no new work: no call into the
+engine, and in the renderer two empty checks (not measured on the devices).
+Found on the way: on main, a world of plain objects without a mouse over
+the view boxes one double and makes one list a frame in the JIT (the alloc
+test's scene, with a resting mouse, makes none); not looked into. Lab scene:
+Layers and debug: the basics, tried on the iOS 18.4 simulator.
 
 **Step 9: the arena, and the others moved over.** `examples/arena`: a
 small top-down game. You move with WASD or by dragging, aim and dash by

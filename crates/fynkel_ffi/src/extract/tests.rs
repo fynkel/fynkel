@@ -439,3 +439,39 @@ fn an_orthographic_camera_is_extracted_with_its_size() {
     let (scene, _) = extract(&world);
     assert_eq!(scene.camera.unwrap().orthographic, Some(2.5));
 }
+
+#[test]
+fn only_layers_in_the_cameras_culling_mask_are_drawn_and_lights_light_them_all() {
+    let mut world = World::new();
+    let (cube, _) = stage1_into(&mut world);
+    let camera = world.active_camera().unwrap();
+    world.set_layer(cube, 4).unwrap();
+    // A light on layer 4 still lights everything.
+    let ambient = world.spawn();
+    world.insert(ambient, Light::ambient(Color::WHITE, 1.0)).unwrap();
+    world.set_layer(ambient, 4).unwrap();
+
+    let mut extract = Extract::default();
+    let (mut scene, mut ops) = (RenderScene::default(), Vec::new());
+    for (mask, drawn) in [(u32::MAX, 1), (!(1 << 4), 0), (1 << 4, 1), (1, 0), (0, 0)] {
+        let lens = world.get::<Camera>(camera).unwrap();
+        world.insert(camera, Camera { culling_mask: mask, ..lens }).unwrap();
+        extract.run(&world, &mut scene, &mut ops);
+        assert_eq!(scene.draws.len(), drawn, "mask {mask:#x}");
+        assert!(close(scene.ambient, Vec3::splat(1.15)), "mask {mask:#x}");
+        assert!(scene.camera.is_some() && scene.sun.is_some());
+    }
+}
+
+#[test]
+fn the_worlds_debug_lines_are_copied_with_linear_colours() {
+    let (mut world, _) = stage1_world();
+    let (scene, _) = extract(&world);
+    assert!(scene.lines.is_empty());
+    let grey = Color::rgba(0.5, 0.5, 0.5, 0.25);
+    world.set_debug_lines([fynkel_world::DebugLine { a: Vec3::ZERO, b: Vec3::X, color: grey }]);
+    let (scene, _) = extract(&world);
+    assert_eq!(scene.lines, [Line { a: Vec3::ZERO, b: Vec3::X, color: grey.to_linear() }]);
+    assert!(scene.lines[0].color[0] < 0.25, "linear: sRGB 0.5 is about 0.21");
+    assert_eq!(scene.lines[0].color[3], 0.25, "alpha as given");
+}

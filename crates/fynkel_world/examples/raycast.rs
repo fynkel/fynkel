@@ -17,7 +17,7 @@ fn best(world: &World, ray: Ray) -> (Duration, bool) {
     let time = (0..200)
         .map(|_| {
             let t = Instant::now();
-            hit = std::hint::black_box(caster.cast(world, ray, f32::INFINITY)).is_some();
+            hit = std::hint::black_box(caster.cast(world, ray, f32::INFINITY, u32::MAX)).is_some();
             t.elapsed()
         })
         .min()

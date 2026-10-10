@@ -4,7 +4,7 @@
 //! turns the scene into per-draw instance data and the frame uniforms, in
 //! buffers it reuses, so a steady frame allocates nothing.
 //! [`Renderer::encode`] writes that where the GPU reads it (see
-//! `frame_ring`) and records the pass.
+//! `frame_ring`) and records the pass. Debug lines come last, on top.
 
 use std::collections::HashMap;
 
@@ -27,6 +27,8 @@ pub struct FrameStats {
     pub draw_calls: u32,
     /// Draws skipped because their mesh key wasn't uploaded.
     pub missing_meshes: u32,
+    /// Debug lines drawn.
+    pub lines: u32,
 }
 
 /// `Frame` in forward.wgsl.
@@ -53,6 +55,15 @@ struct Instance {
     emissive: [f32; 4],
     /// UV scale (xy), then offset (zw).
     uv: [f32; 4],
+}
+
+/// A debug line's end, as lines.wgsl reads it.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct LineVertex {
+    position: [f32; 3],
+    /// Linear RGBA.
+    color: [f32; 4],
 }
 
 struct GpuMesh {
@@ -124,6 +135,7 @@ pub struct Renderer {
     /// Opaque then cut-out, each for every [`Faces`] (see
     /// [`pipeline_index`]).
     pipelines: Vec<wgpu::RenderPipeline>,
+    lines: wgpu::RenderPipeline,
     frame_data: FrameRing,
     meshes: HashMap<MeshKey, GpuMesh>,
     textures: Textures,
@@ -133,6 +145,7 @@ pub struct Renderer {
     uniforms: FrameUniforms,
     instances: Vec<Instance>,
     batches: Vec<Batch>,
+    line_vertices: Vec<LineVertex>,
     /// Indices into the scene's draws, sorted by mesh.
     order: Vec<u32>,
     clear: wgpu::Color,
@@ -270,8 +283,55 @@ impl Renderer {
             })
         };
 
+        // Lines: over everything (depth always passes, and isn't written),
+        // blended by their alpha.
+        let line_shader = device.create_shader_module(wgpu::include_wgsl!("lines.wgsl"));
+        let line_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("lines"),
+            bind_group_layouts: &[Some(&frame_layout)],
+            immediate_size: 0,
+        });
+        let line_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
+        let lines = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("lines"),
+            layout: Some(&line_layout),
+            vertex: wgpu::VertexState {
+                module: &line_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<LineVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &line_attributes,
+                })],
+            },
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::LineList, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState { count: Self::SAMPLES, ..Default::default() },
+            fragment: Some(wgpu::FragmentState {
+                module: &line_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    // Colour only: the target stays opaque.
+                    write_mask: wgpu::ColorWrites::COLOR,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
         Self {
             gpu: gpu.clone(),
+            lines,
             format,
             pipelines: [false, true]
                 .into_iter()
@@ -290,6 +350,7 @@ impl Renderer {
             uniforms: FrameUniforms::zeroed(),
             instances: Vec::new(),
             batches: Vec::new(),
+            line_vertices: Vec::new(),
             order: Vec::new(),
             clear: wgpu::Color::BLACK,
             size: (0, 0),
@@ -356,6 +417,7 @@ impl Renderer {
         self.size = (width.max(1), height.max(1));
         self.instances.clear();
         self.batches.clear();
+        self.line_vertices.clear();
         let mut stats = FrameStats::default();
 
         let Some(camera) = scene.camera else {
@@ -441,6 +503,12 @@ impl Renderer {
                 uv: [su, sv, ou, ov],
             });
         }
+        for line in &scene.lines {
+            for end in [line.a, line.b] {
+                self.line_vertices.push(LineVertex { position: end.into(), color: line.color });
+            }
+        }
+        stats.lines = scene.lines.len() as u32;
         stats.draws = self.instances.len() as u32;
         stats.draw_calls = self.batches.len() as u32;
         stats
@@ -465,6 +533,7 @@ impl Renderer {
             &self.gpu.device,
             bytemuck::bytes_of(&self.uniforms),
             bytemuck::cast_slice(&self.instances),
+            bytemuck::cast_slice(&self.line_vertices),
         );
 
         let targets = self.targets.as_ref().expect("made above");
@@ -487,11 +556,13 @@ impl Renderer {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        if self.batches.is_empty() {
+        if self.batches.is_empty() && self.line_vertices.is_empty() {
             return;
         }
         pass.set_bind_group(0, frame.bind_group, &[]);
-        pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..));
+        if !self.batches.is_empty() {
+            pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
+        }
         let mut last: Option<&Batch> = None;
         for batch in &self.batches {
             if last.is_none_or(|l| (l.cutout, l.faces) != (batch.cutout, batch.faces)) {
@@ -505,6 +576,11 @@ impl Renderer {
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
+        }
+        if !self.line_vertices.is_empty() {
+            pass.set_pipeline(&self.lines);
+            pass.set_vertex_buffer(0, frame.buffer.slice(frame.lines..));
+            pass.draw(0..self.line_vertices.len() as u32, 0..1);
         }
     }
 

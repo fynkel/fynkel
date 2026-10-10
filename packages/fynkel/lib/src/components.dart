@@ -118,11 +118,13 @@ final class Camera extends Component {
     this._clearColor = const Color.rgb(0.1, 0.1, 0.12),
     this._orthographic = false,
     this._size = 5,
+    this._cullingMask = LayerMask.all,
   }) : super._();
 
   double _fovY, _near, _far, _size;
   Color _clearColor;
   bool _orthographic;
+  LayerMask _cullingMask;
 
   /// Vertical field of view in degrees, 1–179.
   double get fovY => _fovY;
@@ -148,11 +150,18 @@ final class Camera extends Component {
   double get size => _size;
   set size(double value) => _change(() => _size = value);
 
+  /// The layers it draws (Unity's `cullingMask`): objects on the others
+  /// ([GameObject.layer]) aren't drawn, nor tapped through it. Lights light
+  /// every layer.
+  LayerMask get cullingMask => _cullingMask;
+  set cullingMask(LayerMask value) => _change(() => _cullingMask = value);
+
   /// Makes a change and writes it to the engine; undoes it if the engine
   /// refuses it.
   void _change(void Function() set) {
     _checkChangeable();
-    final (fovY, near, far, clearColor, orthographic, size) = (_fovY, _near, _far, _clearColor, _orthographic, _size);
+    final (fovY, near, far, clearColor, orthographic, size, cullingMask) =
+        (_fovY, _near, _far, _clearColor, _orthographic, _size, _cullingMask);
     set();
     try {
       _live?._writeCamera(this);
@@ -163,6 +172,7 @@ final class Camera extends Component {
       _clearColor = clearColor;
       _orthographic = orthographic;
       _size = size;
+      _cullingMask = cullingMask;
       rethrow;
     }
   }
@@ -170,7 +180,7 @@ final class Camera extends Component {
   @override
   String toString() =>
       'Camera(${orthographic ? 'orthographic, size: $size' : 'fovY: $fovY'}, near: $near, far: $far, '
-      'clearColor: $clearColor)';
+      'clearColor: $clearColor${cullingMask == LayerMask.all ? '' : ', cullingMask: $cullingMask'})';
 }
 
 enum LightKind {
@@ -305,6 +315,9 @@ abstract class Behaviour extends Component with _Moving {
 
   /// What the player does: the world's [World.input].
   Input get input => gameObject.input;
+
+  /// The world's [World.debug]: lines drawn over the scene.
+  Debug get debug => gameObject.debug;
 
   /// The world's clock: `time.delta` is the seconds this frame counts for.
   /// See [Time].

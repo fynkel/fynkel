@@ -185,6 +185,7 @@ fn render(name: &str, from: Vec3, zoom: f32) -> fynkel_golden::Image {
                 clear_color: clear,
                 orthographic: false,
                 size: 5.0,
+                culling_mask: u32::MAX,
             },
         ));
         let distance = radius / (FOV.to_radians() / 2.0).sin() * 1.05 / zoom;
@@ -360,7 +361,7 @@ fn a_ray_at_the_tower_hits_a_named_block_that_is_part_of_it() {
     let mut len = 0;
     // SAFETY: a live world and pointers to locals.
     unsafe {
-        ok(fy_raycast(world.0, &ray, f32::INFINITY, &mut hit));
+        ok(fy_raycast(world.0, &ray, f32::INFINITY, u32::MAX, &mut hit));
         ok(fy_is_part_of(world.0, hit.object, tower, &mut part));
         ok(fy_name_get(world.0, hit.object, name.as_mut_ptr(), name.len(), &mut len));
     }
