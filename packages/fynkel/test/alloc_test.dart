@@ -33,6 +33,7 @@ class _System extends WorldSystem {
   _System(super.world);
 
   var steps = 0;
+  var frames = 0;
 
   @override
   void afterFixedUpdate() {
@@ -43,6 +44,7 @@ class _System extends WorldSystem {
   @override
   void afterLateUpdate() {
     super.afterLateUpdate();
+    frames++;
   }
 }
 
@@ -64,5 +66,6 @@ void main() {
 
     expect(await madeEachFrame(world, 50000), isEmpty);
     expect(system.steps, greaterThan(40000), reason: 'the frames ran fixed steps');
+    expect(system.frames, greaterThanOrEqualTo(50000));
   });
 }
