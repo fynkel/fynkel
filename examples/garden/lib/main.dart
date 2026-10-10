@@ -3,4 +3,4 @@ import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'garden.dart';
 
-void main() => runApp(FynkelApp(Garden()));
+void main() => runApp(FynkelApp(Garden.new));

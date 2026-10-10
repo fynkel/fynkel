@@ -19,8 +19,8 @@ The game is `lib/coins.dart`, and each part shows one way of working:
   it finds the coins by type (`world.all<Coin>()`), picks up those near,
   and asks for the next level after the last.
 - The player's `score` is a `ValueNotifier`, which `lib/hud.dart` shows
-  over the view with a `ValueListenableBuilder`. `lib/main.dart` puts the
-  two in a `Stack`.
+  over the view with a `ValueListenableBuilder`. `lib/main.dart` is one
+  line: `FynkelApp(CoinsGame.new, overlay: (context, game) => Hud(...))`.
 - A `Swarm` moves 300 plain objects, motes with only a mesh, in its own
   `onUpdate`.
 

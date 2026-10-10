@@ -6,7 +6,7 @@ import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'package:hello/sphere.dart';
 
-void main() => runApp(FynkelApp(Hello()));
+void main() => runApp(FynkelApp(Hello.new));
 
 class Hello extends GameObject {
   @override
