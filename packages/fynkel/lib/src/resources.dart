@@ -557,10 +557,12 @@ final class _Release {
   }
 
   void removeWhere(bool Function(World world) test) {
-    _in.removeWhere((entry) => switch (entry.$1.target) {
-      null => true,
-      final world => test(world),
-    });
+    _in.removeWhere(
+      (entry) => switch (entry.$1.target) {
+        null => true,
+        final world => test(world),
+      },
+    );
     if (_in.isEmpty) _finalizer.detach(this);
   }
 
