@@ -442,9 +442,16 @@ class ArenaCamera extends GameObject {
     on(input.onScroll, (scroll) => _zoomBy(1 + scroll.y * 0.002));
   }
 
-  void _zoomBy(double factor) {
-    _zoom = (_zoom * factor).clamp(0.5, 1.6);
-    _follow.offset = _offset * _zoom;
+  void _zoomBy(double factor) => _zoom = (_zoom * factor).clamp(0.5, 1.6);
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    // The lens fits the view's height, so a tall view (a phone held
+    // upright) sees less across: go back as far again as it's narrower.
+    final (w, h) = (input.width, input.height);
+    final fit = w > 0 && h > w ? math.min(2.0, 0.75 * h / w) : 1.0;
+    _follow.offset = _offset * (_zoom * fit);
   }
 
   /// Follows [player] from now on.
