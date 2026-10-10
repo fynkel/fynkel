@@ -34,7 +34,7 @@ List<String> timings() {
   // A whole drop, as the scene runs it: 8 s of falling, tumbling and
   // settling, in 400 fixed steps, then the same split by the second.
   tumble.drop();
-  time('step, 1,000 cubes, a whole 8 s drop', 400, () => tumble.physics.step(fixedStep));
+  time('step, 1,000 cubes, a whole 8 s drop', 400, () => tumble.physics.step(stepSeconds));
   tumble.drop();
   final perStep = <int>[];
   final clock = Stopwatch();
@@ -56,7 +56,7 @@ List<String> timings() {
   );
   // Resting: once they've settled.
   for (var i = 0; i < 1000; i++) {
-    tumble.physics.step(fixedStep);
+    tumble.physics.step(stepSeconds);
   }
   time('step and poses, 1,000 cubes resting', 150, () {
     stepAndWrite(tumble.physics, tumble.cubes);

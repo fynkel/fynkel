@@ -28,6 +28,7 @@ part 'pointing.dart';
 part 'resources.dart';
 part 'routines.dart';
 part 'signals.dart';
+part 'systems.dart';
 part 'time.dart';
 part 'world_loop.dart';
 part 'world_objects.dart';
@@ -90,8 +91,18 @@ final class World implements Finalizable {
     for (final object in _objects.values) {
       object._stopListening();
     }
-    for (final wait in _waits) {
+    for (final wait in [..._waits, ..._fixedWaits]) {
       wait.over = true;
+    }
+    final systems = [..._systems];
+    _systems.clear();
+    _systemsByType.clear();
+    for (final system in systems) {
+      try {
+        system.dispose();
+      } catch (error, stack) {
+        _report(null, error, stack);
+      }
     }
     _finalizer.detach(this);
     _debug?._release();
@@ -109,6 +120,7 @@ final class World implements Finalizable {
     _starting.clear();
     _compact.clear();
     _waits.clear();
+    _fixedWaits.clear();
     _microtasks.clear();
     _motions.clear();
     _moved.clear();
@@ -242,26 +254,33 @@ final class World implements Finalizable {
   ///    [GameObject.onStart], once, parents before children, each right
   ///    before its behaviours' [Behaviour.onStart]. Objects added during a
   ///    start start too.
-  /// 3. **Updates.** Each started object gets [GameObject.onUpdate],
+  /// 3. **Fixed steps.** As many as the frame's time holds
+  ///    ([Time.fixedDelta] each, maybe none). In each, the [WorldSystem]s'
+  ///    `beforeFixedUpdate`, then each started object's
+  ///    [GameObject.onFixedUpdate] and its behaviours', in the same order
+  ///    as the updates, then the systems' `afterFixedUpdate` (where physics
+  ///    steps), then the routines waiting for [fixedStep].
+  /// 4. **Updates.** Each started object gets [GameObject.onUpdate],
   ///    then its started behaviours get [Behaviour.onUpdate] in the order
   ///    they were added, parents before children. Objects and behaviours
   ///    added during an update start next frame; objects destroyed during
   ///    it get no more calls, even this frame. A new [GameObject.parent]
   ///    counts from the next frame.
-  /// 4. **Motions and routines.** Each running [Motion] moves on
+  /// 5. **Motions and routines.** Each running [Motion] moves on
   ///    ([GameObject.tween], [GameObject.moveTo]...), in the order they
   ///    were made, then the routines' waits end ([GameObject.start]).
-  /// 5. **Late updates.** Then each object updated this frame, and its
+  /// 6. **Late updates.** Then each object updated this frame, and its
   ///    behaviours, get [GameObject.onLateUpdate] in the same order: for
-  ///    what follows where the others went.
-  /// 6. **Cameras.** The camera rigs move their objects ([Follow] and
+  ///    what follows where the others went. Then the systems'
+  ///    `afterLateUpdate`.
+  /// 7. **Cameras.** The camera rigs move their objects ([Follow] and
   ///    [Orbit], then [LookAt]), then [cameras] puts the view's camera
   ///    where the live [VirtualCamera] is, and shakes it.
-  /// 7. **Debug lines.** What was drawn with [debug] goes to the engine,
+  /// 8. **Debug lines.** What was drawn with [debug] goes to the engine,
   ///    to be drawn over the frame.
   ///
   /// Hidden objects (inactive, or below one that is) and their behaviours
-  /// are skipped by the last five and start when they're first shown; so are
+  /// are skipped by the last six and start when they're first shown; so are
   /// disabled behaviours ([Behaviour.enabled]) and those still loading. A
   /// view then draws the world as it is. What their code throws goes to
   /// [errors], and the frame goes on.
@@ -301,6 +320,9 @@ final class World implements Finalizable {
     // The two lists swap, so a frame makes none.
     _waiting = _starting..clear();
     _starting = waiting;
+
+    _runFixedSteps();
+    if (isDisposed) return;
 
     // Objects added from here on are past the end when they come, or not
     // started: they wait for the next frame. The calls are guarded inline,
@@ -351,6 +373,15 @@ final class World implements Finalizable {
       }
     }
 
+    for (var i = 0; i < _systems.length; i++) {
+      final system = _systems[i];
+      try {
+        system.afterLateUpdate();
+      } catch (error, stack) {
+        _report(null, error, stack);
+      }
+    }
+
     cameras._run();
     _debug?._flush();
   }
@@ -360,11 +391,18 @@ final class World implements Finalizable {
   // The running motions not in a group, in the order they were made.
   final _motions = <Motion>[];
 
+  // --- Systems ---
+
+  // The world's systems, in the order they were made (systems.dart).
+  final _systems = <WorldSystem>[];
+  final _systemsByType = <Type, WorldSystem>{};
+
   // --- Routines ---
 
   // What routines wait for, in the order they were made, and the
   // microtasks routines scheduled during [_runRoutines].
   final _waits = <_Wait>[];
+  final _fixedWaits = <_Wait>[];
   final _microtasks = <void Function()>[];
   var _inRoutineStep = false;
 

@@ -152,7 +152,7 @@ physics is tested in `dart test` step by step, without a screen.
   time (0 runs none); `time.maxDelta` limits how many run after a hitch.
 - **`time.fixedAlpha`**: how far the frame is between the last fixed step
   and the next, for interpolation.
-- **`await fixedStep()`** in a routine, as Unity's `WaitForFixedUpdate`.
+- **`await fixedStep`** in a routine, as Unity's `WaitForFixedUpdate`.
 
 ### 3.3 Colliders and rigidbodies
 
@@ -291,9 +291,22 @@ tumble`), so they stay off.
 **Step 2: the fixed step, and the core's part.** §3.2 and §3.1's
 `extend.dart`. *Done when* tests fix the fixed step's order in the frame,
 the number of steps for any frame time, scale and maxDelta, `time.delta`
-inside it, and `fixedStep()`; a world without systems allocates nothing in
+inside it, and `fixedStep`; a world without systems allocates nothing in
 a frame, and the stage 4 bench stays within its noise; a test system sees
 each point of the frame. Lab: "Fixed step: the basics".
+✅ on all three devices.
+`onFixedUpdate`, `time.fixedDelta`, `fixedAlpha` and `inFixedStep`, `await
+fixedStep`, and `WorldSystem` with `world.system(Make.new)` in
+`package:fynkel/extend.dart` (16 tests in `fixed_step_test.dart`, 10
+mutants all killed; the allocation test now runs fixed steps and a system,
+and still allocates nothing). Inside a step `time.sinceStart` is the
+steps' own time, so it moves by `fixedDelta` too. **Not in this step:**
+the moved-objects list and the batched transform calls of §3.1; nothing
+uses them yet, so they come with the first step that does (3 or 4). A
+fixed step costs every object a call, as `onLateUpdate` does: 0.03–0.11 ms
+per 10,000 objects per step (§6). `tumble` now steps in `onFixedUpdate`.
+Its `fixedStep` constant is now `stepSeconds`, because `fixedStep` is now
+a wait, next to `nextFrame`.
 
 **Step 3: colliders and queries.** §3.3's colliders (box, sphere,
 capsule) on static objects, §3.5's layers in queries, §3.6, and
@@ -386,6 +399,44 @@ Live (`measure rate`, 30 s), the cubes on screen with a sun's shadows:
 | 500 cubes | | | 44.9 fps |
 | 1,000 cubes, physics off | | | 57.9 fps |
 
+How many cubes the Note10+ holds (2026-10-11, live, 30 s each, every cube
+awake): up to 300 it stays near 60, and its few slow frames are the GPU's
+(shadowed cubes), not physics'; from 400 the physics' share shows.
+
+| Cubes | 100 | 200 | 300 | 400 | 500 | 1,000 |
+|---|---:|---:|---:|---:|---:|---:|
+| fps (median) | 59.9 | 58.9 | 57.9 | 50.9 | 44.9 | 30.0 |
+| slowest second | 54.9 | 44.9 | 47.9 | 43.9 | | |
+| slow frames: Dart / GPU | 0 / 48 | 6 / 87 | 4 / 77 | 67 / 50 | | |
+
+Before step 4 we try, on the Note10+, Rapier's `parallel` build (a step's
+work split over cores, as PhysX does in Unity) and the step on a thread of
+its own alongside the frame, and we build the same scene in Unity, on the
+three devices, to compare.
+
 What the package adds to an app: its library is 2.3 MB on an iPhone and
 2.3 MB on 64-bit Android (arm64, stripped), about 1.2 MB of that to
 download (gzip -9); the engine's is 6.0 and 7.2 MB.
+
+### Step 2: the fixed step (2026-10-11)
+
+Stage 4's bench (`measure bench`, profile builds), 10,000 objects in 100
+trees of 100, median of 300 steady frames. Main and step 2 were measured
+the same day, the same way. The new row runs frames of 1/50 s, so every
+frame has exactly one fixed step. The other rows run at 1/120 s, so about
+two frames in five have one.
+
+| 10,000 objects, main / step 2 | Mac (M3 Max) | iPhone 16 Pro Max | Note10+ |
+|---|---:|---:|---:|
+| moving themselves | 0.95 / 0.96 ms | 0.87 / 0.88 ms | 3.05 / 3.12 ms |
+| each moved by a behaviour | 1.05 / 1.09 ms | 0.94 / 0.96 ms | 3.58 / 3.70 ms |
+| reading their transforms | 0.13 / 0.14 ms | 0.11 / 0.12 ms | 0.30 / 0.34 ms |
+| with nothing to do | 0.06 / 0.07 ms | 0.06 / 0.06 ms | 0.20 / 0.22 ms |
+| **with nothing to do, a step every frame** | 0.06 / **0.10** ms | 0.05 / **0.08** ms | 0.19 / **0.30** ms |
+
+A fixed step's walk, where every object and behaviour gets
+`onFixedUpdate`, costs 0.04 ms per 10,000 objects on the Mac, 0.03 on the
+iPhone and 0.11 on the Note10+. That's the same as stage 4's walk for
+`onLateUpdate`. At 50 steps a second, a game with 1,000 objects on the
+Note10+ spends about 0.5 ms a second on it. The other rows are within
+the bench's noise.

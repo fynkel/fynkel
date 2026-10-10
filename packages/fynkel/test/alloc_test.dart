@@ -1,6 +1,8 @@
 // A frame without input allocates nothing (docs/stage-4.md §3.6, step 5),
-// counted by the VM service's allocation profile (see allocations.dart).
+// counted by the VM service's allocation profile (see allocations.dart);
+// with its fixed steps and a world system (docs/stage-5.md, step 2).
 
+import 'package:fynkel/extend.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:test/test.dart';
 
@@ -10,12 +12,39 @@ class _Still extends GameObject {
   _Still() : super(components: [MeshRenderer(Mesh.cube(), Material())]);
 
   @override
+  void onFixedUpdate() {
+    super.onFixedUpdate();
+  }
+
+  @override
   void onUpdate() {
     super.onUpdate();
   }
 }
 
-class _Idle extends Behaviour {}
+class _Idle extends Behaviour {
+  @override
+  void onFixedUpdate() {
+    super.onFixedUpdate();
+  }
+}
+
+class _System extends WorldSystem {
+  _System(super.world);
+
+  var steps = 0;
+
+  @override
+  void afterFixedUpdate() {
+    super.afterFixedUpdate();
+    steps++;
+  }
+
+  @override
+  void afterLateUpdate() {
+    super.afterLateUpdate();
+  }
+}
 
 void main() {
   final madeEachFrame = allocations();
@@ -31,7 +60,9 @@ void main() {
     world.input.hover(-1, 50, 50);
     world.input.onFingerHeld.listen((_) {});
     world.input.onHover.listen((_) {});
+    final system = world.system(_System.new);
 
     expect(await madeEachFrame(world, 50000), isEmpty);
+    expect(system.steps, greaterThan(40000), reason: 'the frames ran fixed steps');
   });
 }

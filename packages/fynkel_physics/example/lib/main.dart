@@ -20,7 +20,7 @@ const cubeCount = int.fromEnvironment('TUMBLE_CUBES', defaultValue: 1000);
 /// `--dart-define=TUMBLE_PHYSICS=0` leaves the cubes where they're dropped:
 /// the same scene without the physics, to tell its cost from drawing's.
 const stepping = bool.fromEnvironment('TUMBLE_PHYSICS', defaultValue: true);
-const fixedStep = 1 / 50;
+const stepSeconds = 1 / 50;
 const size = 0.5;
 
 class Tumble extends GameObject {
@@ -30,7 +30,6 @@ class Tumble extends GameObject {
   final physics = RawPhysics();
   final cubes = <GameObject>[];
   final bodies = <int>[];
-  var _behind = 0.0;
   var _sinceDrop = 0.0;
 
   @override
@@ -100,19 +99,18 @@ class Tumble extends GameObject {
     super.onUpdate();
     _sinceDrop += time.delta;
     if (_sinceDrop > 8) drop();
-    if (!stepping) return;
-    // The fixed step comes into the core in step 2; until then, here.
-    _behind += time.delta;
-    while (_behind >= fixedStep) {
-      _behind -= fixedStep;
-      stepAndWrite(physics, cubes);
-    }
+  }
+
+  @override
+  void onFixedUpdate() {
+    super.onFixedUpdate();
+    if (stepping) stepAndWrite(physics, cubes);
   }
 }
 
 /// One fixed step, and each moved cube's pose written to its object.
 void stepAndWrite(RawPhysics physics, List<GameObject> cubes) {
-  final moved = physics.step(fixedStep);
+  final moved = physics.step(stepSeconds);
   for (var i = 0; i < moved; i++) {
     cubes[physics.movedKey(i)].transform = Transform(
       position: physics.movedPosition(i),
