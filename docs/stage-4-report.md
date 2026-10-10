@@ -40,7 +40,7 @@ builds and runs on the Mac.
 | coins: fresh fps (median) | **120** | **120** | **57.9** (min 50.9) |
 | Dart allocation per frame: hello / garden / coins / arena | 6.8 / 15.5 / 46.7 / 26.6 KB | 20.2 / 14.6 / 44.8 / 20.1 KB | – |
 
-**Two misses, for you to accept or not:**
+**Two misses, both accepted:**
 
 - **coins on the Note10+: 57.9 fps over 30 s, 56.9 over 60 s**, against
   stage 3's 58.9. The plan asked for all four "as well as before". Its
@@ -165,8 +165,10 @@ device. Confirmed on 2026-10-10 ("ok all good"):
 - [x] iPhone 16 Pro Max
 - [x] Galaxy Note10+
 
-Step 10 is done when you have read [the guide](writing-a-game.md):
+Step 10 is done when you have read [the guide](writing-a-game.md).
+Closed on 2026-10-10 ("now stage 4 is closed"), with the two misses
+above accepted:
 
-- [ ] Read
+- [x] Read
 
-**Stage 4 is done** once the guide is read.
+**Stage 4 is done.**
