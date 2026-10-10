@@ -1,6 +1,7 @@
 # Stage 4 plan: a solid base for writing games
 
-Status: accepted 2026-10-09, with the recommended answer to each question in §5. Scope and
+Status: accepted 2026-10-09, with the recommended answer to each question in §5; steps 1–9
+done, step 10 waits for you to read the guide ([report](stage-4-report.md)). Scope and
 rules: [ADR-0001](decisions/0001-fynkel-2-code-first.md). Stage 3 is done
 ([report](stage-3-report.md)).
 
@@ -471,7 +472,7 @@ coins move to behaviours, `time` and rigs; hot reload is checked and
 written down (§3.9). *Done when* all four run at the display rate on all
 three devices, the lifecycle memory checks pass against `--baseline` as
 in stage 3, and you have played the arena on each.
-In progress (2026-10-10). Done so far: `examples/arena` (9 tests, in CI),
+✅ Played on all three devices (2026-10-10, "ok all good"). `examples/arena` (9 tests, in CI),
 coins on `Spin`, `Bob` and `Collector` behaviours, the examples on the
 position setters, `rotate` and `translate` in behaviours, resources freed
 by the GC with `own()` gone (`test/collect_test.dart`, 5 tests, the
@@ -498,11 +499,14 @@ Arena lifecycle, 15 cycles, against the baseline: changed +7.6 MB
 Graphics flat at 143.6 MB; Native rises 35.4 → 42.4 MB over the first
 cycles, then holds (42.4 → 42.2 from destroyed 8 to 15), as in stage 3.
 One run never got its VM service after a 54 s install; run again, it
-passed. To do: your play on each.
+passed.
 
 **Step 10: the stage 4 check.** A short report, as in stages 1 to 3, and a
 guide, `docs/writing-a-game.md`, that teaches all of this from hello up.
 *Done when* both are committed and you have read the guide.
+Written: [the report](stage-4-report.md) and [the guide](writing-a-game.md),
+whose code `tools/check_guide.py` compiles and tests in a throwaway app,
+in CI too. To do: your read.
 
 ## 5. Decisions (2026-10-09)
 

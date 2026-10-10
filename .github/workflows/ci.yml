@@ -92,6 +92,12 @@ jobs:
           flutter analyze --fatal-infos
           flutter test
           flutter build macos --debug
+      # docs/writing-a-game.md's code, in a throwaway app: it must compile,
+      # and its test pass, so the guide never drifts from the API.
+      - name: the guide
+        run: |
+          export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
+          python3 tools/check_guide.py
       # The same GPU tests inside the iOS Simulator and the Android
       # emulator: fast testing in simulators is how Flutter developers
       # work, so it must never silently break.
