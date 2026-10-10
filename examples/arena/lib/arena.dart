@@ -231,7 +231,7 @@ class Player extends GameObject {
   static const speed = 6.0;
   static const blue = Color(0xFF4CA6E0);
 
-  late final Health health = get<Health>()!;
+  Health get health => get<Health>()!;
   Vec3 facing = Vec3.forward;
   bool dashing = false;
 
@@ -323,7 +323,7 @@ class Enemy extends GameObject {
   final double _size;
   bool _ready = false;
 
-  late final Health health = get<Health>()!;
+  Health get health => get<Health>()!;
 
   @override
   void onStart() {

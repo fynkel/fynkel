@@ -664,7 +664,9 @@ class GameObject with _Moving {
     }
     final world = _world;
     if (world == null) {
-      component._removed = true;
+      component
+        .._removed = true
+        .._takenOff = true;
       _components!.remove(component);
       if (component is Behaviour) component._listening?.cancelAll();
       return;
@@ -686,7 +688,9 @@ class GameObject with _Moving {
       case MeshRenderer():
         check(fy_mesh_renderer_remove(world.pointer, id));
     }
-    component._removed = true;
+    component
+      .._removed = true
+      .._takenOff = true;
     world._unregister(component);
     world._compact.add(this);
   }
@@ -694,10 +698,14 @@ class GameObject with _Moving {
   /// The first component on this object of type [T] (a class, a subclass,
   /// or an interface one implements), or null: `get<Health>()`,
   /// `get<Camera>()`. Unity's `GetComponent`.
+  ///
+  /// A destroyed object still has the components it had, to read (an
+  /// enemy's `Health` after it died): they're [Component.isRemoved], so
+  /// they can't be changed. One taken off with [removeComponent] is gone.
   T? get<T extends Object>() {
     _probe();
     for (final c in _components ?? const <Component>[]) {
-      if (c is T && !c._removed) return c as T;
+      if (c is T && !c._takenOff) return c as T;
     }
     return null;
   }
@@ -708,7 +716,7 @@ class GameObject with _Moving {
     _probe();
     return [
       for (final c in _components ?? const <Component>[])
-        if (c is T && !c._removed) c as T,
+        if (c is T && !c._takenOff) c as T,
     ];
   }
 
