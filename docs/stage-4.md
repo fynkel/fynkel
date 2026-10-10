@@ -466,6 +466,21 @@ coins move to behaviours, `time` and rigs; hot reload is checked and
 written down (§3.9). *Done when* all four run at the display rate on all
 three devices, the lifecycle memory checks pass against `--baseline` as
 in stage 3, and you have played the arena on each.
+In progress (2026-10-10). Done so far: `examples/arena` (9 tests, in CI),
+coins on `Spin`, `Bob` and `Collector` behaviours, the examples on the
+position setters, `rotate` and `translate` in behaviours, resources freed
+by the GC with `own()` gone (`test/collect_test.dart`, 5 tests, the
+model keep-alive checked by removing it), hot reload written down (§3.9).
+hello was already on `time`, the garden on its `Orbit` rig, coins on a
+`Follow` and a `LookAt`; the user's Sphere in hello is left as it is.
+**Mac** (profile, 1600×1200 window): all four median 120 fps, no slow
+Flutter frames (hello dips to 52 in one window of 30: its Sphere prints
+every frame). Dart allocation a frame: hello 6.8 KB, garden 15.5, coins
+46.7 (stage 3: 47.9), arena 26.6. Arena lifecycle, 20 cycles: a new round
+(`changed`) steps 8 MB once at cycle 4 and then adds 2.2 MB over 16
+cycles, GPU and Dart heap flat; destroyed / added +3.4 MB over 20, GPU
+flat. Baseline, 10 cycles: changed +0.7, destroyed +2.4, added +2.4 MB.
+To do: the iPhone and the Note10+, and your play on each.
 
 **Step 10: the stage 4 check.** A short report, as in stages 1 to 3, and a
 guide, `docs/writing-a-game.md`, that teaches all of this from hello up.
