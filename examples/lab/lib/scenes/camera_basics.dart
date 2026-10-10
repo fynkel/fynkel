@@ -28,7 +28,7 @@ class CameraBasicsScene extends LabScene {
   VirtualCamera _virtual(String name, Vec3 at, {required int priority}) => add(
     GameObject(
       name: name,
-      transform: Transform(position: at, lookAt: Vec3(0, 0.5, 0)),
+      transform: Transform(position: at, rotation: Quat.lookRotation(Vec3(0, 0.5, 0) - at)),
       components: [VirtualCamera(priority: priority, size: 3)],
     ),
   ).get<VirtualCamera>()!;

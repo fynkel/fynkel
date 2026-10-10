@@ -14,13 +14,13 @@ class Hello extends GameObject {
     super.onLoad();
     add(
       GameObject(
-        transform: Transform(position: Vec3(0, 1.5, 4), lookAt: Vec3.zero),
+        transform: Transform(position: Vec3(0, 1.5, 4), rotation: Quat.lookRotation(Vec3(0, -1.5, -4))),
         components: [Camera()],
       ),
     );
     add(
       GameObject(
-        transform: Transform(forward: Vec3(-0.4, -1, -0.3)),
+        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.3))),
         components: [Light.sun()],
       ),
     );

@@ -26,7 +26,8 @@ Future<Uint8List> render(String name, Vec3 centre, double radius, Vec3 from) asy
   world.add(model.instantiate());
   const fov = 40.0;
   final distance = radius / math.sin(fov * math.pi / 180 / 2) * 1.05;
-  final camera = Transform(position: centre + from.normalized * distance, lookAt: centre);
+  final eye = centre + from.normalized * distance;
+  final camera = Transform(position: eye, rotation: Quat.lookRotation(centre - eye));
   world.add(
     GameObject(
       transform: camera,
@@ -38,7 +39,7 @@ Future<Uint8List> render(String name, Vec3 centre, double radius, Vec3 from) asy
   final shoulder = camera.rotation.rotate(Vec3(-0.5, 0.8, 0.6));
   world.add(
     GameObject(
-      transform: Transform(forward: -shoulder),
+      transform: Transform(rotation: Quat.lookRotation(-shoulder)),
       components: [Light.sun()],
     ),
   );
@@ -106,7 +107,7 @@ void main() {
     addTearDown(world.dispose);
     world.add(
       GameObject(
-        transform: Transform(position: Vec3(0, 2, 12), lookAt: Vec3.zero),
+        transform: Transform(position: Vec3(0, 2, 12), rotation: Quat.lookRotation(Vec3(0, -2, -12))),
         components: [Camera()],
       ),
     );

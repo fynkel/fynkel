@@ -329,6 +329,14 @@ As Cinemachine: the view has one real camera, and **virtual cameras** decide whe
   - **A subclass is what an object is; a behaviour is what it does.** Both stay. A `Player`, an `Enemy` or a `Level` is a subclass of `GameObject`: its state, its parts, a constructor, and typed results from `find`, `children`, `ancestor` and `raycast`. Code another kind of object could use too (`Health`, `Spin`, `Flash`), or that comes and goes while the game runs, is a behaviour. The test: if a subclass's `onUpdate` would make sense on another kind of object, it belongs in a behaviour. Behaviours only (Unity's way) would give up the typed objects; subclasses only (Flame's) would give up adding and removing code at runtime. The rule is in the `GameObject` and `Behaviour` docs; every class in the examples already follows it.
   - **A destroyed object's components are still found**: `get`, `getAll` and `has` give what it had, to read (they can't be changed), so `Health get health => get<Health>()!` works on a dead enemy. One taken off with `removeComponent` is gone. Behaviours (all components) have `ancestor`, `getInParent` and `getInChildren`, as objects do.
   - **Starting over after a hot reload**: `FynkelGame(make: ArenaGame.new, builder: ...)` makes the root and builds what shows it; `restart()` builds it all again around a new root, in a new world, with the code as it is now. F5 restarts in debug builds; `restartOnReload: true` makes every hot reload restart, for phones. `FynkelApp` takes a constructor and an `overlay` (`FynkelApp(ArenaGame.new, overlay: (context, game) => Hud(game))`).
+  - **A `Transform` is a position, a rotation and a scale, nothing else**
+    (after step 10, your call): its `lookAt:` and `forward:` shortcuts are
+    gone. They gave three ways to say a rotation, checked only at run time,
+    and `lookAt:` took a point in the parent's space while
+    `GameObject.lookAt` takes one in the world's. As in Unity, rotations
+    are made on `Quat`: `lookRotation`, `axisAngle`, and the new
+    `Quat.euler(pitch, yaw, roll)` (Unity's order: roll, pitch, then yaw;
+    radians, as everywhere). `Transform` is now `const`.
   - **world.dart is split**: `World` keeps its state and what the game calls; the work behind it is in `world_loop.dart`, `world_objects.dart` and `world_resources.dart` (private extensions), and `GameObject` is in `game_object.dart`.
 
 ## 4. Steps

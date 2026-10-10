@@ -76,7 +76,7 @@ class Level extends GameObject {
 
     add(
       GameObject(
-        transform: Transform(forward: Vec3(-0.4, -1, -0.3)),
+        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.3))),
         components: [Light.sun(color: sun, intensity: 2.5)],
       ),
     );

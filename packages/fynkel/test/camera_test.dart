@@ -63,7 +63,7 @@ void main() {
       final scene = stage1(world);
       scene.cube.destroy();
       final view = world.camera!
-        ..transform = Transform(position: const Vec3(0, 0, 10), lookAt: Vec3.zero)
+        ..transform = Transform(position: const Vec3(0, 0, 10), rotation: Quat.lookRotation(Vec3.forward))
         ..get<Camera>()!.clearColor = Color.black;
       view.get<Camera>()!
         ..orthographic = true
@@ -118,7 +118,10 @@ void main() {
       expectPoint(o.worldToScreen(const Vec3(1, 0, -1)), 150, 50);
 
       // Round trips, turned and orthographic too.
-      o.transform = Transform(position: const Vec3(3, 1, -2), lookAt: const Vec3(0, 0, -9));
+      o.transform = Transform(
+        position: const Vec3(3, 1, -2),
+        rotation: Quat.lookRotation(const Vec3(0, 0, -9) - const Vec3(3, 1, -2)),
+      );
       for (final orthographic in [false, true]) {
         o.get<Camera>()!.orthographic = orthographic;
         for (final p in [
@@ -134,7 +137,7 @@ void main() {
     test('screenToPlane finds the spot on the ground under a point', () {
       final o = world.add(
         GameObject(
-          transform: Transform(position: const Vec3(0, 10, 10), lookAt: Vec3.zero),
+          transform: Transform(position: const Vec3(0, 10, 10), rotation: Quat.lookRotation(Vec3(0, -10, -10))),
           components: [Camera()],
         ),
       );
@@ -143,7 +146,7 @@ void main() {
       // 15° below level, so it meets the ground far off.
       final top = o.screenToPlane(const ViewPoint(50, 0, width: 100, height: 100), Plane.ground)!;
       expect(top.z, closeTo(10 - 10 / math.tan(15 * math.pi / 180), 1e-4));
-      o.transform = Transform(position: const Vec3(0, 10, 0), forward: Vec3.right);
+      o.transform = Transform(position: const Vec3(0, 10, 0), rotation: Quat.lookRotation(Vec3.right));
       expect(o.screenToPlane(const ViewPoint(50, 50, width: 100, height: 100), Plane.ground), isNull, reason: 'level');
       expect(o.screenToPlane(const ViewPoint(50, 0, width: 100, height: 100), Plane.ground), isNull, reason: 'up');
     });
@@ -510,7 +513,7 @@ void main() {
   group('shake', () {
     test('stays within its strength across the view, and ends where it began', () {
       final view = camera();
-      view.transform = Transform(position: const Vec3(1, 2, 3), lookAt: Vec3.zero);
+      view.transform = Transform(position: const Vec3(1, 2, 3), rotation: Quat.lookRotation(Vec3(-1, -2, -3)));
       final start = view.transform;
       world.cameras.shake(0.5, seconds: 1, seed: 1);
       final offsets = <Vec3>[];

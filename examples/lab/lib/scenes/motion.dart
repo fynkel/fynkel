@@ -58,7 +58,7 @@ class MotionScene extends LabScene {
   /// Round the square, turning a quarter at each corner, for ever.
   void _startPatrol() {
     _patrol?.stop();
-    guard.transform = Transform(position: Vec3(-2, 0.4, -2), forward: Vec3.right);
+    guard.transform = Transform(position: Vec3(-2, 0.4, -2), rotation: Quat.lookRotation(Vec3.right));
     const corners = [Vec3(2, 0.4, -2), Vec3(2, 0.4, 2), Vec3(-2, 0.4, 2), Vec3(-2, 0.4, -2)];
     _patrol = guard.sequence([
       for (final corner in corners) ...[

@@ -17,7 +17,7 @@ class Probe extends GameObject {
     super.onLoad();
     add(
       GameObject(
-        transform: Transform(position: Vec3(0, 1, 4), lookAt: Vec3.zero),
+        transform: Transform(position: Vec3(0, 1, 4), rotation: Quat.lookRotation(Vec3(0, -1, -4))),
         components: [Camera()],
       ),
     );

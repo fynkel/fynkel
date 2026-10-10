@@ -117,7 +117,10 @@ void main() {
     );
     final camera = world.add(
       GameObject(
-        transform: Transform(position: Vec3(0.6, 1.5, 5), lookAt: Vec3(0.3, -0.6, 0)),
+        transform: Transform(
+          position: Vec3(0.6, 1.5, 5),
+          rotation: Quat.lookRotation(Vec3(0.3, -0.6, 0) - Vec3(0.6, 1.5, 5)),
+        ),
         components: [Camera(fovY: 50, clearColor: Color.rgb(0, 0, 0))],
       ),
     );

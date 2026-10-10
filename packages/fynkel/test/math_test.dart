@@ -5,7 +5,7 @@ import 'package:test/test.dart';
 
 void main() {
   test('lookRotation matches the engine: the camera at (0, 1.5, 4) looking at the origin', () {
-    final q = Transform(position: Vec3(0, 1.5, 4), lookAt: Vec3.zero).rotation;
+    final q = Quat.lookRotation(Vec3.zero - Vec3(0, 1.5, 4));
     // A pure pitch down by atan(1.5 / 4), the value glam's look_at gives.
     final half = -math.atan2(1.5, 4) / 2;
     expect(q.closeTo(Quat(math.sin(half), 0, 0, math.cos(half))), isTrue, reason: '$q');
@@ -43,9 +43,23 @@ void main() {
     expect(Color(0xFFFFFFFF), Color.white);
   });
 
-  test('Transform takes at most one way to say its rotation', () {
-    expect(() => Transform(rotation: Quat.identity, lookAt: Vec3.zero), throwsArgumentError);
-    expect(Transform(forward: Vec3.back).forward.closeTo(Vec3.back, 1e-12), isTrue);
+  test('euler turns each way as axisAngle does: roll, then pitch, then yaw', () {
+    const turn = math.pi / 2;
+    expect(Quat.euler(0, 0, 0), Quat.identity);
+    expect(Quat.euler(turn, 0, 0).rotate(Vec3.forward).closeTo(Vec3.up, 1e-12), isTrue, reason: 'pitch up');
+    expect(Quat.euler(0, turn, 0).rotate(Vec3.forward).closeTo(Vec3.left, 1e-12), isTrue, reason: 'yaw left');
+    expect(Quat.euler(0, 0, turn).rotate(Vec3.up).closeTo(Vec3.left, 1e-12), isTrue, reason: 'roll');
+    // All three: Unity's order, roll first and yaw last.
+    final q = Quat.euler(0.3, 0.8, 0.5);
+    final expected = Quat.axisAngle(Vec3.up, 0.8) * Quat.axisAngle(Vec3.right, 0.3) * Quat.axisAngle(Vec3.back, 0.5);
+    expect(q.closeTo(expected), isTrue, reason: '$q');
+    expect(Quat.euler(0, 0.8, 0.5).closeTo(Quat.euler(0, 0.8, 0) * Quat.euler(0, 0, 0.5)), isTrue);
+  });
+
+  test('Transform is a position, a rotation and a scale', () {
+    const t = Transform(position: Vec3(1, 2, 3), scale: Vec3(2, 2, 2));
+    expect(t.rotation, Quat.identity);
+    expect(Transform(rotation: Quat.lookRotation(Vec3.back)).forward.closeTo(Vec3.back, 1e-12), isTrue);
     expect(Transform().rotated(Vec3.up, 0).rotation, Quat.identity);
   });
 }
