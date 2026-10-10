@@ -16,6 +16,13 @@ part of 'world.dart';
 /// [World.raycast], so a hit on a character's arm leads to the
 /// `Character` with its fields.
 ///
+/// **A subclass is what an object is; a [Behaviour] is what it does.** A
+/// `Player`, an `Enemy` or a `Level` is a subclass: its state, its parts,
+/// and a constructor that makes one. Code another kind of object could use
+/// as well, such as `Health`, `Spin` or `Flash`, is a behaviour, put on
+/// each object that needs it. If a subclass's [onUpdate] would make sense
+/// on another kind of object, it belongs in a behaviour.
+///
 /// (Called `GameObject`, not `Object`, because Dart's `Object` is every
 /// value's type.)
 class GameObject with _Moving {
