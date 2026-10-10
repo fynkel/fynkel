@@ -1,12 +1,13 @@
 // A probe for hot reload (docs/stage-4.md §3.9), not part of the game:
 // `flutter run -t lib/reload_probe.dart`, then change the v1s, `field`'s
-// 1, or add a field, and press r (hot reload) or R (hot restart).
+// 1, or add a field, and press r (hot reload), R (hot restart) or F5 (a
+// new Probe, in the same app).
 
 import 'package:flutter/widgets.dart' show runApp;
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
-void main() => runApp(FynkelApp(Probe()));
+void main() => runApp(FynkelApp(Probe.new));
 
 class Probe extends GameObject {
   int field = 1;

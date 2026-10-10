@@ -38,7 +38,7 @@ class SceneList extends StatelessWidget {
               title: Text(scene.title),
               subtitle: Text('${scene.step} · ${scene.about}', maxLines: 2, overflow: TextOverflow.ellipsis),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ScenePage(scenes[i]()))),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ScenePage(scenes[i]))),
             ),
         ],
       ),
@@ -46,10 +46,11 @@ class SceneList extends StatelessWidget {
   }
 }
 
-/// One scene: the game, and over it what to do with it and what happened.
+/// One scene: the game, and beside it what to do with it and what
+/// happened. F5 (in a debug build) starts the scene over, its panel too.
 class ScenePage extends StatefulWidget {
-  const ScenePage(this.scene, {super.key});
-  final lab.LabScene scene;
+  const ScenePage(this.make, {super.key});
+  final lab.LabScene Function() make;
 
   @override
   State<ScenePage> createState() => _ScenePageState();
@@ -58,10 +59,10 @@ class ScenePage extends StatefulWidget {
 class _ScenePageState extends State<ScenePage> {
   var _open = true;
 
-  lab.LabScene get scene => widget.scene;
-
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => FynkelGame(make: widget.make, builder: _page);
+
+  Widget _page(BuildContext context, lab.LabScene scene) {
     final wide = MediaQuery.sizeOf(context).width >= 700;
     final panel = _Panel(scene);
     return Scaffold(

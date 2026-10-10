@@ -190,13 +190,13 @@ class Draggable extends Behaviour {
   @override
   bool onDragStart(Finger finger) {
     _height = gameObject.transform.position.y;
-    ancestor()?.log.add('${gameObject.name}: drag taken');
+    ancestor<PointersScene>()?.log.add('${gameObject.name}: drag taken');
     return true;
   }
 
   @override
   void onDrag(Finger finger) {
-    final scene = ancestor()!;
+    final scene = ancestor<PointersScene>()!;
     final ray = scene.camera.screenToRay(finger.position);
     // Where the ray meets the plane at the crate's height.
     if (ray.direction.y.abs() < 1e-6) return;
@@ -207,9 +207,7 @@ class Draggable extends Behaviour {
   }
 
   @override
-  void onDragEnd(Finger finger) => ancestor()?.log.add(
+  void onDragEnd(Finger finger) => ancestor<PointersScene>()?.log.add(
     '${gameObject.name}: dropped, ${finger.over?.object == gameObject ? 'under' : 'not under'} the finger',
   );
-
-  PointersScene? ancestor() => gameObject.ancestor<PointersScene>();
 }

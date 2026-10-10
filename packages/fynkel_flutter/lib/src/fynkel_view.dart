@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,7 @@ import 'package:flutter/widgets.dart';
 import 'package:fynkel/fynkel.dart' show AssetSource, GameObject, HeadlessView, Input, ViewStats, WorldView, World;
 import 'package:fynkel/platform.dart';
 
+import 'fynkel_game.dart';
 import 'input_feed.dart';
 
 /// The plugin's channel (darwin/…/FynkelFlutterPlugin.swift and
@@ -78,7 +80,7 @@ AssetSource bundleSource([AssetBundle? bundle]) => (name) async {
   return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
 };
 
-/// Shows a game: `FynkelView(root: Garden())` makes a world, adds the
+/// Shows a game: `FynkelView(root: garden)` makes a world, adds the
 /// root, runs it, and frees it all when the view goes. Each display frame
 /// it runs the world's loop ([World.update]: taps, starts, updates) with
 /// what the player did ([Input]), then hands the world to the engine to
@@ -87,9 +89,10 @@ AssetSource bundleSource([AssetBundle? bundle]) => (name) async {
 /// on top of it.
 ///
 /// The root is used once, when the view is first built: to change level,
-/// destroy the old root and add another to its world (`root.world`), and
-/// to start over, give the view a new `key`. The world is
-/// [FynkelViewState.world] too, for code outside the game.
+/// destroy the old root and add another to its world (`root.world`); to
+/// start over, make the root in a [FynkelGame] (as [FynkelApp] does) and
+/// restart it. The world is [FynkelViewState.world] too, for code outside
+/// the game.
 ///
 /// `FynkelView(world:)` shows a world made and driven by hand instead,
 /// for tests and tools: [onFrame] is called each frame with the seconds
@@ -389,7 +392,13 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     return Focus(
       focusNode: _focus,
       autofocus: widget.autofocus,
-      onKeyEvent: (_, event) => _input.key(event),
+      onKeyEvent: (_, event) {
+        // A debug build's restart key goes up to the game's FynkelGame.
+        if (kDebugMode && event.logicalKey == LogicalKeyboardKey.f5 && FynkelGame.maybeOf(context) != null) {
+          return KeyEventResult.ignored;
+        }
+        return _input.key(event);
+      },
       onFocusChange: (focused) {
         if (!focused) _input.releaseKeys();
       },
