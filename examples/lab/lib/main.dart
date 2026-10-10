@@ -121,53 +121,57 @@ class _Panel extends StatelessWidget {
                   children: [Text(scene.about, style: text.bodySmall)],
                 ),
                 // The controls show the game's state, which changes each
-                // frame: rebuild with the readout.
+                // frame: rebuild with the readout, and after each control,
+                // as the readout may not change.
                 ValueListenableBuilder(
                   valueListenable: scene.readout,
-                  builder: (context, readout, _) => Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          for (final c in scene.controls)
-                            if (c is lab.Button) OutlinedButton(onPressed: c.onPressed, child: Text(c.label)),
-                        ],
-                      ),
-                      for (final c in scene.controls)
-                        switch (c) {
-                          lab.Toggle() => SwitchListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            title: Text(c.label),
-                            value: c.value(),
-                            onChanged: c.onChanged,
-                          ),
-                          lab.Slider() => Row(
-                            children: [
-                              SizedBox(width: 90, child: Text(c.label, style: text.bodySmall)),
-                              Expanded(
-                                child: Slider(
-                                  value: c.value().clamp(c.min, c.max),
-                                  min: c.min,
-                                  max: c.max,
-                                  onChanged: c.onChanged,
-                                ),
-                              ),
-                              SizedBox(width: 40, child: Text(c.value().toStringAsFixed(2), style: text.bodySmall)),
-                            ],
-                          ),
-                          lab.Button() => const SizedBox.shrink(),
-                        },
-                      if (readout.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          readout,
-                          style: text.bodySmall?.copyWith(fontFamily: 'Menlo', color: Colors.amber[200]),
+                  builder: (context, readout, _) => StatefulBuilder(
+                    builder: (context, setState) => Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            for (final c in scene.controls)
+                              if (c is lab.Button)
+                                OutlinedButton(onPressed: () => setState(c.onPressed), child: Text(c.label)),
+                          ],
                         ),
+                        for (final c in scene.controls)
+                          switch (c) {
+                            lab.Toggle() => SwitchListTile(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(c.label),
+                              value: c.value(),
+                              onChanged: (v) => setState(() => c.onChanged(v)),
+                            ),
+                            lab.Slider() => Row(
+                              children: [
+                                SizedBox(width: 90, child: Text(c.label, style: text.bodySmall)),
+                                Expanded(
+                                  child: Slider(
+                                    value: c.value().clamp(c.min, c.max),
+                                    min: c.min,
+                                    max: c.max,
+                                    onChanged: (v) => setState(() => c.onChanged(v)),
+                                  ),
+                                ),
+                                SizedBox(width: 40, child: Text(c.value().toStringAsFixed(2), style: text.bodySmall)),
+                              ],
+                            ),
+                            lab.Button() => const SizedBox.shrink(),
+                          },
+                        if (readout.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            readout,
+                            style: text.bodySmall?.copyWith(fontFamily: 'Menlo', color: Colors.amber[200]),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ],
