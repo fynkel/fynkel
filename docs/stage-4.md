@@ -1,7 +1,7 @@
 # Stage 4 plan: a solid base for writing games
 
-Status: accepted 2026-10-09, with the recommended answer to each question in §5; steps 1–9
-done, step 10 waits for you to read the guide ([report](stage-4-report.md)). Scope and
+Status: done 2026-10-10 ([report](stage-4-report.md)); accepted 2026-10-09, with the
+recommended answer to each question in §5. Scope and
 rules: [ADR-0001](decisions/0001-fynkel-2-code-first.md). Stage 3 is done
 ([report](stage-3-report.md)).
 
@@ -514,7 +514,7 @@ guide, `docs/writing-a-game.md`, that teaches all of this from hello up.
 *Done when* both are committed and you have read the guide.
 Written: [the report](stage-4-report.md) and [the guide](writing-a-game.md),
 whose code `tools/check_guide.py` compiles and tests in a throwaway app,
-in CI too. To do: your read.
+in CI too. ✅ Closed on 2026-10-10.
 
 ## 5. Decisions (2026-10-09)
 
