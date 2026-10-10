@@ -154,17 +154,12 @@ class Pulse extends LabBehaviour {
   @override
   void onUpdate() {
     super.onUpdate();
-    final s = 1 + 0.25 * math.sin(time.sinceStart * 5);
-    final t = gameObject.transform;
-    gameObject.transform = Transform(position: t.position, rotation: t.rotation, scale: Vec3(s, s, s));
+    scale = Vec3.one * (1 + 0.25 * math.sin(time.sinceStart * 5));
   }
 
   @override
   void onDestroy() {
-    if (!gameObject.isDestroyed) {
-      final t = gameObject.transform;
-      gameObject.transform = Transform(position: t.position, rotation: t.rotation);
-    }
+    if (!gameObject.isDestroyed) scale = Vec3.one;
     super.onDestroy();
   }
 }

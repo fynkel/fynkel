@@ -203,9 +203,7 @@ class Draggable extends Behaviour {
     final t = (_height - ray.origin.y) / ray.direction.y;
     if (t <= 0) return;
     final at = ray.origin + ray.direction * t;
-    gameObject.transform = gameObject.transform.copyWith(
-      position: Vec3(at.x.clamp(-6.0, 6.0), _height, at.z.clamp(-4.0, 5.0)),
-    );
+    position = Vec3(at.x.clamp(-6.0, 6.0), _height, at.z.clamp(-4.0, 5.0));
   }
 
   @override
