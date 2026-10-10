@@ -255,13 +255,22 @@ Each object and behaviour gets these calls, in the order they were added:
 | `onLoad` | Once, before it appears. It may be `async` (to load assets, §12); the object appears when everything in it has loaded. |
 | `onEnable` | Each time it starts being shown: when it appears, and when it or a parent is turned back on. |
 | `onStart` | Once, at the start of its first frame. |
+| `onFixedUpdate` | Every fixed step: 50 times a second, whatever the frame rate. For forces and what physics needs. |
 | `onUpdate` | Every frame. |
 | `onLateUpdate` | Every frame, after every `onUpdate`, the routines and the tweens: for what follows where things ended up. |
 | `onDisable` | Each time it stops being shown, and before `onDestroy`. |
 | `onDestroy` | Once, when it's destroyed. |
 
-A frame goes: input → starts → updates → routines and tweens → late
-updates → cameras → drawing. This order is fixed and tested.
+A frame goes: input → starts → fixed steps → updates → routines and
+tweens → late updates → cameras → drawing. This order is fixed and
+tested.
+
+**Fixed steps** cut the game's time into equal steps of `time.fixedDelta`
+(1/50 s), so what runs in them goes the same at 30 fps and at 120. A
+frame runs as many as its time holds: at 120 fps most frames have none,
+at 30 some have two. Inside a step `time.delta` is `time.fixedDelta`. To
+draw something a step moves without it stepping, draw it between where
+the last two steps left it, `time.fixedAlpha` of the way (0 to 1).
 
 **`time`** is on every object and behaviour:
 
@@ -272,6 +281,8 @@ updates → cameras → drawing. This order is fixed and tested.
   `time.frame`.
 - `time.maxDelta` (1/3 s): a long hitch counts as at most this, so nothing
   jumps through walls.
+- `time.fixedDelta`, `time.fixedAlpha`, `time.inFixedStep`: the fixed
+  steps.
 
 **Errors don't stop the game.** An exception in any of these calls (or a
 routine, a handler, a tween) goes to `world.errors` with its object, and
@@ -411,9 +422,11 @@ class Spawner extends GameObject {
   **stops by itself** when its object is destroyed (or its behaviour
   removed), and **pauses** while its object is hidden or the behaviour
   isn't enabled.
-- **Waits**: `await nextFrame`, `await wait(seconds)` (`unscaled: true` to
-  go on while paused), `await until(() => test)`, `await whileTrue(() =>
-  test)`, a tween, a signal's `next`, or any `Future`.
+- **Waits**: `await nextFrame`, `await fixedStep` (right after the next
+  fixed step's `onFixedUpdate` calls), `await wait(seconds)`
+  (`unscaled: true` to go on while paused), `await until(() => test)`,
+  `await whileTrue(() => test)`, a tween, a signal's `next`, or any
+  `Future`.
 - **`race([...])`** gives the first to end and stops the rest (routines,
   waits and tweens); **`all([...])`**
   waits for every one. `race([x, wait(3)])` is a timeout.
@@ -793,7 +806,9 @@ comes, distance checks (`(a.position - b.position).length < 1`) and
 | `Destroy(go)` | `go.destroy()` |
 | `SetActive(false)`, `enabled = false` | `active = false`, `enabled = false` |
 | `Awake`, `Start`, `Update`, `LateUpdate`, `OnDestroy` | `onLoad`, `onStart`, `onUpdate`, `onLateUpdate`, `onDestroy` |
+| `FixedUpdate`, `Time.fixedDeltaTime` | `onFixedUpdate`, `time.fixedDelta` |
 | `Time.deltaTime`, `Time.timeScale` | `time.delta`, `time.scale` |
+| `yield return new WaitForFixedUpdate()` | `await fixedStep` |
 | `StartCoroutine`, `yield return new WaitForSeconds(1)` | `start(() async {...})`, `await wait(1)` |
 | `FindObjectOfType<T>()`, `FindObjectsOfType<T>()` | `world.first<T>()`, `world.all<T>()` |
 | `transform.Find("name")` | `find('name')` |

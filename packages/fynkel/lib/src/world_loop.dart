@@ -98,16 +98,18 @@ extension _Loop on World {
 
   /// Ends what routines wait for, in the order the waits were made, each
   /// running its routine on to its next wait; then what those runs
-  /// scheduled. Waits made during it end in a later frame.
-  void _runRoutines() {
-    if (_waits.isEmpty) return;
+  /// scheduled. Waits made during it end in a later frame. With [fixed],
+  /// the waits for a fixed step ([fixedStep]), in a later step.
+  void _runRoutines({bool fixed = false}) {
+    final waits = fixed ? _fixedWaits : _waits;
+    if (waits.isEmpty) return;
     _inRoutineStep = true;
     try {
-      final n = _waits.length;
-      final frame = time._frame;
+      final n = waits.length;
+      final now = fixed ? time._fixedSteps : time._frame;
       for (var i = 0; i < n; i++) {
-        final wait = _waits[i];
-        if (wait.over || wait.made >= frame || wait.routine._paused) continue;
+        final wait = waits[i];
+        if (wait.over || wait.made >= now || wait.routine._paused) continue;
         final bool ends;
         try {
           ends = wait.ends(time);
@@ -125,7 +127,7 @@ extension _Loop on World {
       _runMicrotasks();
     } finally {
       _inRoutineStep = false;
-      _waits.removeWhere((w) => w.over);
+      waits.removeWhere((w) => w.over);
     }
   }
 
@@ -138,11 +140,13 @@ extension _Loop on World {
 
   /// Unwinds [routine] from what it waits for.
   void _failWaits(Routine<Object?> routine) {
-    for (var i = 0; i < _waits.length; i++) {
-      final wait = _waits[i];
-      if (wait.over || !identical(wait.routine, routine)) continue;
-      wait.over = true;
-      wait.fail(RoutineStopped._(), StackTrace.current);
+    for (final waits in [_waits, _fixedWaits]) {
+      for (var i = 0; i < waits.length; i++) {
+        final wait = waits[i];
+        if (wait.over || !identical(wait.routine, routine)) continue;
+        wait.over = true;
+        wait.fail(RoutineStopped._(), StackTrace.current);
+      }
     }
   }
 
@@ -151,6 +155,65 @@ extension _Loop on World {
     if (routines == null) return;
     for (final routine in [...routines].reversed) {
       routine.stop();
+    }
+  }
+
+  /// Runs the fixed steps this frame's time holds: in each, the systems'
+  /// [WorldSystem.beforeFixedUpdate], every started, shown object's
+  /// [GameObject.onFixedUpdate] and its behaviours', the systems'
+  /// [WorldSystem.afterFixedUpdate], then the routines waiting for
+  /// [fixedStep]. Objects added during a step start next frame.
+  void _runFixedSteps() {
+    final time = this.time;
+    if (!time._fixedDue) return;
+    final systems = _systems;
+    try {
+      while (time._fixedDue) {
+        time._fixedTime += time._fixedDelta;
+        time._fixedSteps++;
+        time._inFixed = true;
+        for (var i = 0; i < systems.length; i++) {
+          final system = systems[i];
+          try {
+            system.beforeFixedUpdate();
+          } catch (error, stack) {
+            _report(null, error, stack);
+          }
+        }
+        final n = _live.length;
+        for (var i = 0; i < n && i < _live.length; i++) {
+          final object = _live[i];
+          if (!object._started || object._destroyed || _isHidden(object)) continue;
+          try {
+            object.onFixedUpdate();
+          } catch (error, stack) {
+            _report(object, error, stack);
+          }
+          final components = object._components;
+          if (components == null) continue;
+          for (var j = 0; j < components.length && !object._destroyed; j++) {
+            if (components[j] case final Behaviour b when b._started && b._enabledFlag && !b._removed) {
+              try {
+                b.onFixedUpdate();
+              } catch (error, stack) {
+                _report(object, error, stack);
+              }
+            }
+          }
+        }
+        for (var i = 0; i < systems.length; i++) {
+          final system = systems[i];
+          try {
+            system.afterFixedUpdate();
+          } catch (error, stack) {
+            _report(null, error, stack);
+          }
+        }
+        _runRoutines(fixed: true);
+        if (isDisposed) return;
+      }
+    } finally {
+      time._inFixed = false;
     }
   }
 

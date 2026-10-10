@@ -64,11 +64,14 @@ class _Spin extends Behaviour {
 /// `worldTransform` sends them). Median and slowest of 300 steady frames.
 List<String> _updates() {
   final lines = <String>[];
-  for (final (name, make) in <(String, GameObject Function())>[
-    ('moving themselves', _Spinner.new),
-    ('each moved by a behaviour', _Spun.new),
-    ('reading their transforms', _Reader.new),
-    ('with nothing to do', _Idle.new),
+  for (final (name, make, dt) in <(String, GameObject Function(), double)>[
+    ('moving themselves', _Spinner.new, 1 / 120),
+    ('each moved by a behaviour', _Spun.new, 1 / 120),
+    ('reading their transforms', _Reader.new, 1 / 120),
+    ('with nothing to do', _Idle.new, 1 / 120),
+    // A fixed step in every frame (docs/stage-5.md step 2): the walk for
+    // onFixedUpdate, which every object gets.
+    ('with nothing to do, at 50 fps', _Idle.new, 1 / 50),
   ]) {
     final world = World();
     final first = world.add(make());
@@ -79,7 +82,7 @@ List<String> _updates() {
       }
     }
     for (var i = 0; i < 20; i++) {
-      world.update(1 / 120);
+      world.update(dt);
     }
     final times = <int>[];
     final clock = Stopwatch();
@@ -87,7 +90,7 @@ List<String> _updates() {
       clock
         ..reset()
         ..start();
-      world.update(1 / 120);
+      world.update(dt);
       first.worldTransform;
       times.add(clock.elapsedMicroseconds);
     }

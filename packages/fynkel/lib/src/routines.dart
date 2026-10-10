@@ -204,7 +204,7 @@ final class _Wait {
   });
 
   final Routine<Object?> routine;
-  final int made; // the frame it was made in: it ends in a later one
+  final int made; // the frame (or fixed step) it was made in: it ends in a later one
   double seconds; // left to wait, for a timed one
   final bool timed;
   final bool unscaled;
@@ -232,13 +232,13 @@ final class _Wait {
 
 final _waitOf = Expando<_Wait>();
 
-Future<void> _addWait(_Wait Function(Routine<Object?> routine, int frame) make, String what) {
+Future<void> _addWait(_Wait Function(Routine<Object?> routine, int frame) make, String what, {bool fixed = false}) {
   final routine =
       _currentRoutine ?? (throw StateError('$what waits only inside a routine: start(() async { await $what; })'));
   if (routine._stopped) throw RoutineStopped._();
   final world = routine._world;
-  final wait = make(routine, world.time._frame);
-  world._waits.add(wait);
+  final wait = make(routine, fixed ? world.time._fixedSteps : world.time._frame);
+  (fixed ? world._fixedWaits : world._waits).add(wait);
   final future = wait.completer.future;
   _waitOf[future] = wait;
   return future;
@@ -247,6 +247,12 @@ Future<void> _addWait(_Wait Function(Routine<Object?> routine, int frame) make, 
 /// Ends in the routines step of the next frame: Unity's `yield return null`.
 /// Only inside a routine.
 Future<void> get nextFrame => _addWait((r, frame) => _Wait(r, frame), 'nextFrame');
+
+/// Ends right after the next fixed step's [GameObject.onFixedUpdate]
+/// calls, still inside the step: Unity's `yield return new
+/// WaitForFixedUpdate()`. A frame with no step doesn't end it; one with
+/// several ends it in the first. Only inside a routine.
+Future<void> get fixedStep => _addWait((r, step) => _Wait(r, step), 'fixedStep', fixed: true);
 
 /// Ends once [seconds] of game time ([Time.delta], so [Time.scale] slows
 /// it) have passed, counting from the next frame, in that frame's

@@ -387,6 +387,13 @@ abstract class Behaviour extends Component with _Moving {
   @protected
   void onStart() {}
 
+  /// Called every fixed step, right after its object's
+  /// [GameObject.onFixedUpdate], while it's enabled and its object is
+  /// shown: for forces and what must not depend on the frame rate.
+  @mustCallSuper
+  @protected
+  void onFixedUpdate() {}
+
   /// Called every [World.update], right after its object's, while it's
   /// enabled and its object is shown. Move by `time.delta`.
   @mustCallSuper

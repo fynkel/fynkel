@@ -246,6 +246,15 @@ class GameObject with _Moving {
   @protected
   void onStart() {}
 
+  /// Called every fixed step ([Time.fixedDelta], 50 a second by default)
+  /// while the object is shown, parents before children, before the
+  /// frame's [onUpdate]: for what must not depend on the frame rate, such as
+  /// forces on a rigidbody. A frame runs as many steps as its time holds,
+  /// maybe none; inside one, `time.delta` is [Time.fixedDelta].
+  @mustCallSuper
+  @protected
+  void onFixedUpdate() {}
+
   /// Called every [World.update], parents before children, while the
   /// object is shown. Override it to move, animate or think, by
   /// [Time.delta] (`time.delta`); a mixin that overrides it calls

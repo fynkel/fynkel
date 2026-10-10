@@ -1,11 +1,12 @@
-// Every scene of the lab, in the order of docs/stage-4.md's steps. Each
-// step adds its own.
+// Every scene of the lab, in the order of docs/stage-4.md's and
+// docs/stage-5.md's steps. Each step adds its own.
 
 import 'lab.dart';
 import 'scenes/camera_basics.dart';
 import 'scenes/camera_rigs.dart';
 import 'scenes/components.dart';
 import 'scenes/eases.dart';
+import 'scenes/fixed_step_basics.dart';
 import 'scenes/input.dart';
 import 'scenes/layers_basics.dart';
 import 'scenes/lifecycle.dart';
@@ -32,4 +33,5 @@ final List<LabScene Function()> scenes = [
   CameraBasicsScene.new,
   CameraRigsScene.new,
   LayersBasicsScene.new,
+  FixedStepBasicsScene.new,
 ];
