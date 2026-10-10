@@ -381,6 +381,47 @@ void main() {
     expect(root.find('a')!.getInChildren<Camera>(), isNull);
   });
 
+  test("a destroyed object's components can still be found and read, not changed; one taken off is gone", () {
+    final enemy = world.add(GameObject(components: [Health(3), Armour(1), Light.sun()]));
+    final health = enemy.get<Health>()!, light = enemy.get<Light>()!;
+    enemy.removeComponent(enemy.get<Armour>()!);
+    enemy.destroy();
+    expect(enemy.get<Health>(), same(health));
+    expect(enemy.get<Health>()!.hp, 3);
+    expect(enemy.getAll<Damageable>(), [health]);
+    expect(enemy.get<Light>(), same(light));
+    expect(enemy.has<Armour>(), isFalse, reason: 'taken off before');
+    expect(health.isRemoved, isTrue);
+    expect(() => light.intensity = 2, throwsStateError);
+    world.update(1 / 60);
+    expect(enemy.get<Health>(), same(health), reason: 'still there after the next frame tidies');
+    expect(world.all<Health>(), isEmpty, reason: 'the world forgets it');
+  });
+
+  test('a behaviour finds what is above and below its object: ancestor, getInParent, getInChildren', () {
+    final b = Logs('b');
+    final level = world.add(
+      Logged(
+        'level',
+        components: [Health(1)],
+        children: [
+          GameObject(
+            name: 'a',
+            components: [b],
+            children: [
+              GameObject(components: [Health(5)]),
+            ],
+          ),
+        ],
+      ),
+    );
+    expect(b.ancestor<Logged>(), same(level));
+    expect(b.getInParent<Health>()!.hp, 1);
+    expect(b.getInParent<Logs>(), same(b), reason: 'its own object first');
+    expect(b.getInChildren<Health>()!.hp, 5);
+    expect(b.ancestor<GameObject>(), same(level), reason: 'above, never its own object');
+  });
+
   test("a behaviour's shortcuts reach its object, and touching the world before it's added says so", () {
     final health = Health(3);
     final object = GameObject(

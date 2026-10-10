@@ -16,11 +16,17 @@ sealed class Component {
   GameObject? _owner;
   bool _removed = false;
 
+  // Taken off with [GameObject.removeComponent], not gone with its object:
+  // [GameObject.get] no longer finds it.
+  bool _takenOff = false;
+
   /// The object it's on. Throws a [StateError] before it's given to one.
   GameObject get gameObject => _owner ?? (throw StateError('$runtimeType is on no object yet'));
 
   /// Whether it was taken off its object ([GameObject.removeComponent]) or
-  /// its object was destroyed. It can still be read, but not used.
+  /// its object was destroyed. It can still be read, but not used; one
+  /// that went with its object is still found by the object's
+  /// [GameObject.get].
   bool get isRemoved => _removed;
 
   /// Its object's [GameObject.transform].
@@ -35,6 +41,19 @@ sealed class Component {
 
   /// Whether its object has a component of type [T].
   bool has<T extends Object>() => gameObject.has<T>();
+
+  /// The nearest object above its object that is a [T], or null: see
+  /// [GameObject.ancestor]. `ancestor<ArenaGame>()` finds the game a
+  /// behaviour's object is in.
+  T? ancestor<T extends GameObject>() => gameObject.ancestor<T>();
+
+  /// The first component of type [T] on its object or the nearest one
+  /// above: see [GameObject.getInParent].
+  T? getInParent<T extends Object>() => gameObject.getInParent<T>();
+
+  /// The first component of type [T] on its object or below it: see
+  /// [GameObject.getInChildren].
+  T? getInChildren<T extends Object>() => gameObject.getInChildren<T>();
 
   /// The live object it's on, for writing a change to the engine; null
   /// while there's nothing to write to (not added yet, or the part of a
