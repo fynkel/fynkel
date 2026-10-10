@@ -33,8 +33,9 @@ dependencies:
 ```
 
 Then run it as any Flutter app: `flutter run -d macos`, or on a phone
-(`flutter devices` lists them). On Android, Fynkel builds for 64-bit
-devices only: build with `--target-platform android-arm64,android-x64`.
+(`flutter devices` lists them). `flutter build apk`, `ipa` and `macos`
+make the app to ship. On Android, Fynkel runs on 64-bit devices, which is
+nearly all since Android 11; a 32-bit one gets an error saying so.
 
 ## 2. Hello
 
@@ -274,9 +275,12 @@ updates → cameras → drawing. This order is fixed and tested.
 
 **Errors don't stop the game.** An exception in any of these calls (or a
 routine, a handler, a tween) goes to `world.errors` with its object, and
-the rest of the frame goes on. If nothing listens to `world.errors`, it's
-reported as an uncaught error, so you see it in the console and a test
-fails.
+the rest of the frame goes on. In a debug build the view also shows it
+over the game, with the object and the line in your code it came from,
+and prints it to the console, so a broken game is never just a black
+screen; a widget test fails on it. In a release build, or with
+`FynkelView(showErrors: false)`, it's the game's to handle: listen to
+`world.errors`, or it's an uncaught error.
 
 ## 7. Moving things
 

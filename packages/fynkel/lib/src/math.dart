@@ -79,7 +79,7 @@ final class Vec3 {
   /// direction.
   Vec3 get normalized {
     final l = length;
-    if (l < 1e-12 || !l.isFinite) throw ArgumentError.value(this, 'vector', 'has no direction');
+    if (l < 1e-12 || !l.isFinite) throw ArgumentError('$this has no direction');
     return this / l;
   }
 
@@ -142,7 +142,17 @@ final class Quat {
   /// to [forward]) with its +Y as close to [up] as possible. If [forward]
   /// is straight along [up], -Z is used as up instead, so looking straight
   /// down still works.
+  ///
+  /// [forward] is a direction, not a point: to look from `eye` at
+  /// `target`, give `target - eye`.
   factory Quat.lookRotation(Vec3 forward, {Vec3 up = Vec3.up}) {
+    final l = forward.length;
+    if (l < 1e-12 || !l.isFinite) {
+      throw ArgumentError(
+        'Quat.lookRotation($forward): $forward is no direction. It takes the way to face, not a point to '
+        'look at: to look from eye at target, give it target - eye.',
+      );
+    }
     final back = -forward.normalized;
     var side = up.cross(back);
     if (side.length < 1e-6) side = Vec3.forward.cross(back);

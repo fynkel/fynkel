@@ -72,6 +72,32 @@ class Tiny extends GameObject {
   }
 }
 
+/// The slip of the first game written with Fynkel 2: a point where
+/// `Quat.lookRotation` takes a direction.
+class LooksAtAPoint extends GameObject {
+  @override
+  void onLoad() {
+    super.onLoad();
+    add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 1, 4), rotation: Quat.lookRotation(Vec3.zero)),
+        components: [Camera()],
+      ),
+    );
+  }
+}
+
+/// Throws from onUpdate every frame, counting.
+class ThrowsInUpdate extends GameObject {
+  var count = 0;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    throw StateError('throw ${++count}');
+  }
+}
+
 void main() {
   late World world;
   // The engine view behind each texture.
@@ -395,13 +421,59 @@ void main() {
     testWidgets("a failed load reaches the world's errors", (tester) async {
       final game = Tiny();
       final key = GlobalKey<FynkelViewState>();
-      await tester.pumpWidget(sized(FynkelView(key: key, root: game, source: bundleSource(Bundle({})))));
+      await tester.pumpWidget(
+        sized(FynkelView(key: key, root: game, source: bundleSource(Bundle({})), showErrors: false)),
+      );
       final errors = <ObjectError>[];
       key.currentState!.world.errors.listen(errors.add);
       await finish(tester, game.loaded);
       await tester.pump();
       expect(errors.single.error.toString(), contains('no asset assets/grid.png'));
       expect(game.isAlive, isFalse);
+    });
+
+    testWidgets("in a debug build, what the game throws shows over it with the game's line, and goes to Flutter", (
+      tester,
+    ) async {
+      await tester.pumpWidget(sized(FynkelView(root: LooksAtAPoint()), width: 800, height: 600));
+      expect('${tester.takeException()}', contains('give it target - eye'), reason: 'reported to Flutter');
+      await tester.pump();
+      expect(find.textContaining('LooksAtAPoint#'), findsOneWidget, reason: 'not a black screen');
+      expect(find.textContaining('give it target - eye'), findsOneWidget);
+      expect(find.textContaining('fynkel_view_test.dart'), findsOneWidget, reason: "the game's own line");
+      await tester.tap(find.textContaining('Tap to hide'));
+      await tester.pump();
+      expect(find.textContaining('give it target - eye'), findsNothing);
+    });
+
+    testWidgets('errors while it runs show too, the latest first, with how many came before', (tester) async {
+      final game = ThrowsInUpdate();
+      await tester.pumpWidget(sized(FynkelView(world: world), width: 800, height: 600));
+      world.add(game);
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(tester.takeException(), isStateError);
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(tester.takeException(), isStateError);
+      game.destroy();
+      await tester.pump();
+      expect(find.textContaining('ThrowsInUpdate#'), findsOneWidget);
+      expect(find.textContaining('throw 2'), findsOneWidget);
+      expect(find.textContaining('1 more before it'), findsOneWidget);
+    });
+
+    testWidgets('with showErrors off, errors are the game\'s alone: nothing over it, nothing reported', (tester) async {
+      final key = GlobalKey<FynkelViewState>();
+      final errors = <ObjectError>[];
+      await tester.pumpWidget(sized(FynkelView(key: key, world: world, showErrors: false)));
+      world.errors.listen(errors.add);
+      final game = world.add(ThrowsInUpdate());
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.pump();
+      expect(errors, isNotEmpty);
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('ThrowsInUpdate#'), findsNothing);
+      game.destroy();
     });
 
     testWidgets('FynkelApp makes the game, shows it in a view of its own, and puts the overlay over it', (
