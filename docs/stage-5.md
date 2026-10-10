@@ -271,6 +271,21 @@ it adds to each app's size and what a step of 1,000 bodies (falling, then
 resting) costs on the Note10+, poses in and out included. If two native
 libraries turn out costly, this step says so and we decide again before
 step 2.
+Done on the Mac and the Note10+; the iPhone waits for it to be unlocked.
+`crates/fynkel_physics` (9 tests), `crates/fynkel_physics_ffi` (8, its
+header pinned as the engine's is), `packages/fynkel_physics` (6 Dart tests,
+through the build hook) and its example, `tumble`: 1,000 cubes dropped
+again every 8 s. Both hooks now build through `package:fynkel/hooks.dart`.
+Numbers in §6. **Two libraries cost little**: writing 1,000 bodies' poses
+back adds about 0.6 ms a step on the Note10+. **Rapier itself is the cost**
+with 1,000 cubes all touching, and on the Note10+ it doubles inside the live
+app (10 ms a step, against 4.5 ms in the bench with no view drawing): the
+scene holds 120 fps on the Mac, but 30 fps on the Note10+ with 1,000 cubes
+and 44.9 with 500 (57.9 with physics off). Step 4's bar for the Note10+ is
+at risk; before it, we look at running the step on a thread of its own,
+alongside the frame. LTO, Rapier's `simd8` and its `parallel` build gained
+nothing or 20 % at most (`cargo run --release -p fynkel_physics --example
+tumble`), so they stay off.
 
 **Step 2: the fixed step, and the core's part.** §3.2 and §3.1's
 `extend.dart`. *Done when* tests fix the fixed step's order in the frame,
@@ -347,3 +362,29 @@ builds):
 - 1,000 bodies: the step's cost, with poses in and out, written down (step
   1 measures it first).
 - What the package adds to an app's size, written down.
+
+### Step 1: Rapier in a package (2026-10-11)
+
+`tumble`'s timings (`measure bench`, profile builds): a fixed step of 1,000
+cubes 0.5 m across, dropped in columns of 10 and left for 8 s (400 steps);
+"with poses" writes each moved cube's pose to its object and sends them to
+the engine, as a frame does.
+
+| | Mac (M3 Max) | Note10+ |
+|---|---:|---:|
+| step, falling (first 3 s) | 1.32 ms | 4.44 ms |
+| step, a whole drop | | 3.94 ms (slowest 7.82) |
+| step with poses, a whole drop | 1.85 ms (first 3 s) | 4.54 ms (90th 5.33, slowest 14.57) |
+| step with poses, resting (asleep) | 0.00 ms | 0.00 ms |
+
+Live (`measure rate`, 30 s), the cubes on screen with a sun's shadows:
+
+| | Mac | Note10+ |
+|---|---:|---:|
+| 1,000 cubes | 120 fps | 30.0 fps (physics 10 ms a step, measured in the app) |
+| 500 cubes | | 44.9 fps |
+| 1,000 cubes, physics off | | 57.9 fps |
+
+What the package adds to an app: its library is 2.3 MB on an iPhone and
+2.3 MB on 64-bit Android (arm64, stripped), about 1.2 MB of that to
+download (gzip -9); the engine's is 6.0 and 7.2 MB.

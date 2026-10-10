@@ -51,6 +51,24 @@ jobs:
           dart run tool/ffigen.dart
           git diff --exit-code lib/src/bindings.g.dart
           dart test
+      # package:fynkel_physics (docs/stage-5.md): its build hook compiles
+      # fynkel_physics_ffi, its tests drive Rapier from Dart, and its
+      # bindings must match the header as package:fynkel's do. Its example
+      # (tumble) is analyzed and built for macOS, with both libraries.
+      - name: dart (package:fynkel_physics)
+        working-directory: packages/fynkel_physics
+        run: |
+          export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
+          (cd example && flutter pub get)
+          dart pub get
+          dart format -l 120 --output=none --set-exit-if-changed lib test tool hook example/lib
+          dart analyze --fatal-infos
+          dart run tool/ffigen.dart
+          git diff --exit-code lib/src/bindings.g.dart
+          dart test
+          cd example
+          flutter analyze --fatal-infos
+          flutter build macos --debug
       # package:fynkel_flutter's widget tests (a real engine view behind a
       # stand-in for the Swift plugin), package:fynkel_measure, the garden's
       # coins' and the arena's tests (their real assets, drawn headless), and macOS

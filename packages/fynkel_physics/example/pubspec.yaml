@@ -1,0 +1,22 @@
+name: tumble
+description: package:fynkel_physics's example, and stage 5 step 1's measure (docs/stage-5.md). A pile of cubes on Rapier, dropped again and again.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  fynkel:
+    path: ../../fynkel
+  fynkel_flutter:
+    path: ../../fynkel_flutter
+  fynkel_measure:
+    path: ../../fynkel_measure
+  fynkel_physics:
+    path: ..
+
+dev_dependencies:
+  lints: ^6.1.0

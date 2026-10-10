@@ -16,6 +16,8 @@ fynkel_present = { path = "crates/fynkel_present" }
 fynkel_golden = { path = "crates/fynkel_golden" }
 fynkel_mesh = { path = "crates/fynkel_mesh" }
 fynkel_load = { path = "crates/fynkel_load" }
+fynkel_physics = { path = "crates/fynkel_physics" }
+fynkel_physics_ffi = { path = "crates/fynkel_physics_ffi" }
 hecs = "0.11.2"
 glam = { version = "0.34.1", features = ["bytemuck"] }
 wgpu = "30.0.1"
@@ -29,6 +31,8 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 gltf = { version = "1.4.1", default-features = false, features = ["utils", "names", "KHR_texture_transform", "KHR_materials_emissive_strength", "extensions"] }
 jni-sys = "0.3.1"
 bevy_mikktspace = { version = "1.0.0", default-features = false, features = ["std"] }
+# Physics (packages/fynkel_physics): single-threaded, 32-bit floats.
+rapier3d = "0.36.1"
 cbindgen = { version = "0.29.4", default-features = false }
 
 # Unsafe code is denied everywhere. `fynkel_ffi` (the C boundary) and the
