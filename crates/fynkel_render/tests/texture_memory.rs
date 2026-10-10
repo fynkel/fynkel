@@ -58,8 +58,9 @@ fn removed_textures_give_their_gpu_memory_back() {
     let expected = r.texture_bytes() as f64 / (1 << 20) as f64;
     let loading = gpu_dirty_mb();
     // Uploading also uses staging copies and the driver's copy pool, which
-    // go a moment after the copies stop; then what's left is the textures.
-    let loaded = settle(10.0, |mb| mb < before + expected * 1.1);
+    // go a while after the copies stop (up to about 18 s seen here, under
+    // load); then what's left is the textures.
+    let loaded = settle(30.0, |mb| mb < before + expected * 1.1);
 
     for key in 0..10 {
         assert!(r.remove_texture(TextureKey(key)));
