@@ -14,10 +14,10 @@ The game is `lib/coins.dart`, and each part shows one way of working:
 - A `Level` adds its light, ground, props, coins and `Swarm`, and hands
   the player what it carries here (`player.carry`). A tap on anything in
   it bubbles up to the level, which walks the player there.
-- A `Coin` spins and bobs through two mixins, `Spins` and `Bobs`.
-- The player's `Collector` is a child with no components, only code: it
-  finds the coins by type (`world.all<Coin>()`), picks up those near, and
-  asks for the next level after the last.
+- A `Coin` spins and bobs through two behaviours, `Spin` and `Bob`.
+- The player's `Collector` is a behaviour, kept apart from the walking:
+  it finds the coins by type (`world.all<Coin>()`), picks up those near,
+  and asks for the next level after the last.
 - The player's `score` is a `ValueNotifier`, which `lib/hud.dart` shows
   over the view with a `ValueListenableBuilder`. `lib/main.dart` puts the
   two in a `Stack`.

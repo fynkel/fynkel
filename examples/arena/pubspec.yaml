@@ -1,0 +1,23 @@
+name: arena
+description: "The stage 4 game: a top-down arena, waves of enemies to dash through."
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  fynkel:
+    path: ../../packages/fynkel
+  fynkel_flutter:
+    path: ../../packages/fynkel_flutter
+  fynkel_measure:
+    path: ../../packages/fynkel_measure
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0
+

@@ -53,7 +53,7 @@ jobs:
           dart test
       # package:fynkel_flutter's widget tests (a real engine view behind a
       # stand-in for the Swift plugin), package:fynkel_measure, the garden's
-      # and coins' tests (their real assets, drawn headless), and macOS
+      # coins' and the arena's tests (their real assets, drawn headless), and macOS
       # builds of the examples, which compile the plugin's Swift and bundle
       # the engine.
       - name: flutter (package:fynkel_flutter, package:fynkel_measure, examples)
@@ -81,6 +81,12 @@ jobs:
           flutter test
           flutter build macos --debug
           cd ../coins
+          flutter pub get
+          dart format -l 120 --output=none --set-exit-if-changed lib test
+          flutter analyze --fatal-infos
+          flutter test
+          flutter build macos --debug
+          cd ../arena
           flutter pub get
           dart format -l 120 --output=none --set-exit-if-changed lib test
           flutter analyze --fatal-infos

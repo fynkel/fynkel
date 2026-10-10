@@ -580,6 +580,17 @@ void main() {
       expect(thing.rotation.closeTo(Quat.identity), isTrue, reason: 'a whole turn');
     });
 
+    test('a behaviour moves its object by hand as the object does: position, rotate, translate, scale', () {
+      final mover = thing.addComponent(Mover());
+      mover.position = const Vec3(1, 0, 0);
+      mover.translate(const Vec3(0, 2, 0));
+      mover.rotate(Vec3.up, math.pi / 2);
+      mover.scale = Vec3.one * 2;
+      expectVec(thing.position, const Vec3(1, 2, 0));
+      expect(thing.rotation.closeTo(Quat.axisAngle(Vec3.up, math.pi / 2)), isTrue);
+      expectVec(thing.scale, const Vec3(2, 2, 2));
+    });
+
     test('lookAtOver ends looking at the point', () {
       thing.lookAtOver(const Vec3(5, 0, 0), seconds: 0.5);
       frames(2);
