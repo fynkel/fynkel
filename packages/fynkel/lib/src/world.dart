@@ -1139,8 +1139,8 @@ final class World implements Finalizable {
   /// time something uses it.
   void _unloadMaterialsUsing(Texture2D texture) {
     if (isDisposed) return;
-    for (final MapEntry(key: id, value: ref) in [..._materials.entries]) {
-      final material = ref.target;
+    for (final MapEntry(key: id, value: ref) in _materials.entries.toList()) {
+      final Material? material = ref.target;
       if (material == null || !material._uses(texture)) continue;
       if (fy_material_remove(_pointer, id) != FyStatus.FY_STATUS_OK) continue;
       _materialIds[material] = null;
@@ -2054,13 +2054,6 @@ class GameObject with _Moving {
   static bool _fits(double x) => x.abs() < 3.4e38 || (_f32..[0] = x)[0].isFinite;
 
   static Never _refuse(String what) => throw FynkelException(FynkelStatus.invalidValue, 'Transform.$what');
-
-  /// Turns the object [angle] radians around [axis], in its own frame.
-  void rotate(Vec3 axis, double angle) => transform = transform.rotated(axis, angle);
-
-  /// Moves the object by [offset], in its parent's space (the world's for
-  /// a root).
-  void translate(Vec3 offset) => transform = transform.translated(offset);
 
   void _writeCamera(Camera value) {
     final c = scratch.camera.ref;

@@ -138,8 +138,8 @@ class Prop extends GameObject {
   }
 }
 
-/// Turns about its up axis.
-mixin Spins on GameObject {
+/// Turns its object about its up axis.
+class Spin extends Behaviour {
   @override
   void onUpdate() {
     super.onUpdate();
@@ -147,8 +147,8 @@ mixin Spins on GameObject {
   }
 }
 
-/// Rises and falls about where it started.
-mixin Bobs on GameObject {
+/// Makes its object rise and fall about where it started.
+class Bob extends Behaviour {
   late final double _height = position.y;
   double _time = 0;
 
@@ -160,11 +160,11 @@ mixin Bobs on GameObject {
   }
 }
 
-class Coin extends GameObject with Spins, Bobs {
+class Coin extends GameObject {
   Coin(Vec3 at, Material gold)
     : super(
         transform: Transform(position: at, scale: Vec3(0.6, 0.6, 0.15)),
-        components: [MeshRenderer(Mesh.sphere(), gold)],
+        components: [MeshRenderer(Mesh.sphere(), gold), Spin(), Bob()],
       );
 }
 
@@ -179,7 +179,7 @@ class Player extends GameObject {
   Future<void> onLoad() async {
     await super.onLoad();
     _hand = add(await assets.model('character.glb')).find('arm-right')!;
-    add(Collector());
+    addComponent(Collector());
   }
 
   void walkTo(Vec3 point) => _goal = Vec3(point.x, 0, point.z);
@@ -203,23 +203,23 @@ class Player extends GameObject {
   }
 }
 
-/// Picks up the coins near its player. It has no components: it's only
-/// code, kept apart from the walking.
-class Collector extends GameObject {
+/// Picks up the coins near the player. A behaviour of its own, kept
+/// apart from the walking.
+class Collector extends Behaviour {
   @override
   void onUpdate() {
     super.onUpdate();
-    final player = parent! as Player, at = player.transform.position;
+    final player = gameObject as Player;
     var picked = false;
     for (final coin in world.all<Coin>()) {
-      final to = coin.transform.position - at;
+      final to = coin.position - position;
       if (math.sqrt(to.x * to.x + to.z * to.z) < 0.9 && coin.activeInHierarchy) {
         coin.destroy();
         player.score.value++;
         picked = true;
       }
     }
-    if (picked && world.all<Coin>().isEmpty) ancestor<CoinsGame>()!.nextLevel();
+    if (picked && world.all<Coin>().isEmpty) gameObject.ancestor<CoinsGame>()!.nextLevel();
   }
 }
 

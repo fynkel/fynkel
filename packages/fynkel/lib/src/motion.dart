@@ -636,6 +636,13 @@ mixin _Moving {
   Vec3 get scale => _self.transform.scale;
   set scale(Vec3 value) => _self.transform = _self.transform.copyWith(scale: value);
 
+  /// Turns the object [angle] radians around [axis], in its own frame.
+  void rotate(Vec3 axis, double angle) => _self.transform = _self.transform.rotated(axis, angle);
+
+  /// Moves the object by [offset], in its parent's space (the world's for
+  /// a root).
+  void translate(Vec3 offset) => _self.transform = _self.transform.translated(offset);
+
   /// Where the object is in the world. Setting it moves the object there,
   /// whatever its parents are.
   Vec3 get worldPosition => _self.worldTransform.position;
