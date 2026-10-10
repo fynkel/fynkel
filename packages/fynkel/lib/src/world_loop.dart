@@ -162,7 +162,7 @@ extension _Loop on World {
     // allocates nothing, not even an iterator.
     if (_compact.isNotEmpty) {
       for (var i = 0; i < _compact.length; i++) {
-        _compact[i]._components?.removeWhere((c) => c._removed);
+        _compact[i]._components?.removeWhere((c) => c._takenOff);
       }
       _compact.clear();
     }
