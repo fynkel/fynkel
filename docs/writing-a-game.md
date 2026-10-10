@@ -54,13 +54,13 @@ class Hello extends GameObject {
     super.onLoad();
     add(
       GameObject(
-        transform: Transform(position: Vec3(0, 1.5, 4), lookAt: Vec3.zero),
+        transform: Transform(position: Vec3(0, 1.5, 4), rotation: Quat.lookRotation(Vec3(0, -1.5, -4))),
         components: [Camera()],
       ),
     );
     add(
       GameObject(
-        transform: Transform(forward: Vec3(-0.4, -1, -0.3)),
+        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.3))),
         components: [Light.sun()],
       ),
     );
@@ -305,8 +305,12 @@ class Pilot extends GameObject {}
   `worldPosition` and `forward`, `right` and `up` are in the world.
 - `rotate`, `translate`, `lookAt(point)`, `transformPoint` and
   `inverseTransformPoint`.
-- The whole transform is one value: `transform = Transform(position: …,
-  rotation: …)` sets it at once.
+- The whole transform is one value, a position, a rotation and a scale:
+  `transform = Transform(position: …, rotation: …)` sets it at once.
+- **A rotation is a `Quat`**, as in Unity: `Quat.lookRotation(direction)`
+  to face a way, `Quat.euler(pitch, yaw, roll)` by angles (radians), and
+  `Quat.axisAngle(axis, angle)`. A camera at `eye` looking at `target` is
+  `Transform(position: eye, rotation: Quat.lookRotation(target - eye))`.
 - Unity's Mathf: `lerp`, `inverseLerp`, `clamp01`, `moveTowards`,
   `repeat`, `pingPong`, `randomInSphere`, `randomOnCircle`, and
   `Vec3.lerp`, `Vec3.moveTowards`, `Quat.slerp`, `Color.lerp`.

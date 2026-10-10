@@ -47,7 +47,7 @@ void main() {
     for (final (mesh, x) in meshes) {
       scene.world.add(
         GameObject(
-          transform: Transform(position: Vec3(x, 0, 0), lookAt: Vec3(x + 1, 0, 1)),
+          transform: Transform(position: Vec3(x, 0, 0), rotation: Quat.lookRotation(Vec3(1, 0, 1))),
           components: [MeshRenderer(mesh, scene.orange)],
         ),
       );

@@ -80,20 +80,11 @@ sealed class Component {
 /// its [GameObject.parent] (or the world, for a root). [GameObject.worldTransform]
 /// gives it in the world.
 final class Transform {
-  /// [lookAt] turns the object so it looks at that point from [position];
-  /// [forward] turns it to look along that direction. Give at most one of
-  /// [rotation], [lookAt] and [forward].
-  factory Transform({Vec3 position = Vec3.zero, Quat? rotation, Vec3 scale = Vec3.one, Vec3? lookAt, Vec3? forward}) {
-    if ((rotation != null ? 1 : 0) + (lookAt != null ? 1 : 0) + (forward != null ? 1 : 0) > 1) {
-      throw ArgumentError('give at most one of rotation, lookAt and forward');
-    }
-    final r = switch ((lookAt, forward)) {
-      (final Vec3 target, _) => Quat.lookRotation(target - position),
-      (_, final Vec3 direction) => Quat.lookRotation(direction),
-      _ => rotation ?? Quat.identity,
-    };
-    return Transform._(position, r, scale);
-  }
+  /// Its rotation is a [Quat], as Unity's is a Quaternion: to face a way,
+  /// `rotation: Quat.lookRotation(direction)`; by angles,
+  /// `rotation: Quat.euler(pitch, yaw, roll)`. To face a point in the
+  /// world once it's added, [GameObject.lookAt].
+  const Transform({this.position = Vec3.zero, this.rotation = Quat.identity, this.scale = Vec3.one});
 
   const Transform._(this.position, this.rotation, this.scale);
 
@@ -222,7 +213,7 @@ enum LightKind {
 /// Lights the scene. Change it in place: `get<Light>()!.intensity = 2`.
 final class Light extends Component {
   /// Shines along the object's [Transform.forward]: give the object
-  /// `Transform(forward: direction)`.
+  /// `Transform(rotation: Quat.lookRotation(direction))`.
   Light.sun({Color color = Color.white, double intensity = 1}) : this._(LightKind.sun, color, intensity);
 
   Light.ambient({Color color = Color.white, double intensity = 1}) : this._(LightKind.ambient, color, intensity);

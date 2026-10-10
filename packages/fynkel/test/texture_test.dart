@@ -172,7 +172,7 @@ void main() {
     addTearDown(world.dispose);
     world.add(
       GameObject(
-        transform: Transform(position: Vec3(0, 0, 3), lookAt: Vec3.zero),
+        transform: Transform(position: Vec3(0, 0, 3), rotation: Quat.lookRotation(Vec3.forward)),
         components: [Camera(clearColor: Color.black)],
       ),
     );

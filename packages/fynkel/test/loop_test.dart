@@ -244,7 +244,7 @@ void main() {
     // A hidden camera first, looking away; the one drawn from looks at the box.
     world.add(
       GameObject(
-        transform: Transform(forward: Vec3(0, 0, 1)),
+        transform: Transform(rotation: Quat.lookRotation(Vec3(0, 0, 1))),
         components: [Camera()],
       )..active = false,
     );

@@ -14,7 +14,7 @@ class Garden extends GameObject {
     add(OrbitCamera(character));
     add(
       GameObject(
-        transform: Transform(forward: Vec3(-0.4, -1, -0.3)),
+        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.3))),
         components: [Light.sun(intensity: 2.5)],
       ),
     );

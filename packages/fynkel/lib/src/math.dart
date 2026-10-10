@@ -131,6 +131,13 @@ final class Quat {
     return Quat(n.x * s, n.y * s, n.z * s, math.cos(angle / 2));
   }
 
+  /// Turns by angles, in radians, each counter-clockwise around its axis
+  /// as [Quat.axisAngle] does: [roll] around Z first, then [pitch] around
+  /// X (positive looks up), then [yaw] around Y (positive turns left), the
+  /// order of Unity's `Quaternion.Euler`.
+  factory Quat.euler(double pitch, double yaw, double roll) =>
+      (Quat.axisAngle(Vec3.up, yaw) * Quat.axisAngle(Vec3.right, pitch) * Quat.axisAngle(Vec3.back, roll)).normalized;
+
   /// The rotation that makes an object look along [forward] (its -Z turns
   /// to [forward]) with its +Y as close to [up] as possible. If [forward]
   /// is straight along [up], -Z is used as up instead, so looking straight

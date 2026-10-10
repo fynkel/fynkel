@@ -37,7 +37,7 @@ class ArenaGame extends GameObject {
     super.onLoad();
     add(
       GameObject(
-        transform: Transform(forward: Vec3(-0.3, -1, -0.5)),
+        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.3, -1, -0.5))),
         components: [Light.sun(intensity: 2.5)],
       ),
     );

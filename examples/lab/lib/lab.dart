@@ -41,14 +41,14 @@ abstract class LabScene extends GameObject {
     add(
       GameObject(
         name: 'camera',
-        transform: Transform(position: eye, lookAt: target),
+        transform: Transform(position: eye, rotation: Quat.lookRotation(target - eye)),
         components: [Camera(clearColor: const Color(0xFF20242C))],
       ),
     );
     add(
       GameObject(
         name: 'sun',
-        transform: Transform(forward: Vec3(-0.4, -1, -0.5)),
+        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.5))),
         components: [Light.sun(intensity: 2.5)],
       ),
     );
