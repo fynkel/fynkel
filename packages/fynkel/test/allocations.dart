@@ -46,6 +46,13 @@ Future<Map<String, int>> Function(World world, int frames) allocations() {
     for (var i = 0; i < 100000; i++) {
       world.update(_dt);
     }
+    // It compiles on a background thread, which falls behind while the
+    // other test files run on every core: wait for it, then run a little
+    // more so the optimized code is the code that runs.
+    await Future<void>.delayed(const Duration(seconds: 1));
+    for (var i = 0; i < 1000; i++) {
+      world.update(_dt);
+    }
     final none = await made(world, 0);
     final some = await made(world, frames);
     return {
