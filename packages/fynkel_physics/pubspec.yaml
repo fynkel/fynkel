@@ -1,0 +1,20 @@
+name: fynkel_physics
+description: Physics for Fynkel, as Unity has it, on Rapier. Add it to a game that needs it; a game without it ships none of it.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  ffi: ^2.2.0
+  fynkel:
+    path: ../fynkel
+  # hook/build.dart builds crates/fynkel_physics_ffi as a code asset.
+  hooks: ^2.2.0
+  code_assets: ^2.1.0
+
+dev_dependencies:
+  ffigen: ^23.0.0
+  lints: ^6.1.0
+  test: ^1.32.0
