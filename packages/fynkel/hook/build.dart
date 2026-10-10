@@ -22,11 +22,12 @@ void main(List<String> args) async {
     final arch = code.targetArchitecture;
     final triple = rustTriple(os, arch, iosSdk: os == OS.iOS ? code.iOS.targetSdk : null);
     if (triple == null) {
-      // `flutter build apk` builds 32-bit arm too unless told otherwise.
-      final hint = os == OS.android
-          ? ' On Android it builds arm64-v8a and x86_64: add `--target-platform android-arm64,android-x64`.'
-          : '';
-      throw HookError('Fynkel does not build for ${os.name}/${arch.name}.$hint');
+      // `flutter build apk` builds 32-bit Android too (armeabi-v7a, x86):
+      // leave the engine out there, so the build goes on. Fynkel runs on
+      // 64-bit devices only, and on a 32-bit one the game stops at once
+      // with an error that says so (lib/src/native.dart).
+      if (os == OS.android && (arch == Architecture.arm || arch == Architecture.ia32)) return;
+      throw HookError('Fynkel does not build for ${os.name}/${arch.name}.');
     }
 
     final workspace = input.packageRoot.resolve('../../');

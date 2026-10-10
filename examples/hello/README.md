@@ -9,11 +9,12 @@ itself, shown by `runApp(FynkelApp(Hello.new))`.
 flutter run -d macos
 flutter run -d <iphone>        # flutter devices lists them
 flutter run -d emulator-5554   # Android 11 or later, with the NDK installed
-flutter build apk --target-platform android-arm64,android-x64
+flutter build apk
 ```
 
 On Android the engine builds for 64-bit devices only (`arm64-v8a` and
-`x86_64`). `flutter build apk` adds 32-bit arm unless told otherwise.
+`x86_64`). `flutter build apk` builds 32-bit arm too, without the engine:
+on such a device the game stops at once with an error that says so.
 
 ## Measuring
 

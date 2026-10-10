@@ -17,6 +17,10 @@ import 'math.dart';
 void ensureEngine() => _engine;
 
 final bool _engine = () {
+  // The build hook leaves the engine out of 32-bit Android builds.
+  if (Abi.current() == Abi.androidArm || Abi.current() == Abi.androidIA32) {
+    throw UnsupportedError('Fynkel runs on 64-bit devices only, and this one is ${Abi.current()}.');
+  }
   final version = fy_abi_version();
   if (version != FY_ABI_VERSION) {
     throw StateError(

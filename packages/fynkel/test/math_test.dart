@@ -25,7 +25,11 @@ void main() {
     for (final direction in [Vec3.down, Vec3.up]) {
       expect(Quat.lookRotation(direction).rotate(Vec3.forward).closeTo(direction, 1e-9), isTrue);
     }
-    expect(() => Quat.lookRotation(Vec3.zero), throwsArgumentError);
+    expect(
+      () => Quat.lookRotation(Vec3.zero),
+      throwsA(isArgumentError.having((e) => '$e', 'message', contains('give it target - eye'))),
+      reason: 'a point where a direction belongs, the usual slip, says what to give instead',
+    );
   });
 
   test('axisAngle turns counter-clockwise, and a * b turns by b first', () {

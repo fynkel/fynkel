@@ -6,9 +6,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart' show AssetSource, GameObject, HeadlessView, Input, ViewStats, WorldView, World;
+import 'package:fynkel/fynkel.dart'
+    show AssetSource, GameObject, HeadlessView, Input, ObjectError, ViewStats, WorldView, World;
 import 'package:fynkel/platform.dart';
 
+import 'error_panel.dart';
 import 'fynkel_game.dart';
 import 'input_feed.dart';
 
@@ -106,6 +108,10 @@ AssetSource bundleSource([AssetBundle? bundle]) => (name) async {
 /// has focus it takes every key, so keys like the arrows and space reach
 /// the game rather than moving focus or pressing buttons.
 ///
+/// In a debug build ([showErrors]) it shows what the game's code throws
+/// over the game, with the object and the line it came from, as well as
+/// in the console: [World.errors], which it listens to.
+///
 /// The frames are drawn at the widget's size in physical pixels times
 /// [resolutionScale] and scaled to fit. Below 1 trades sharpness for
 /// speed; the view never lowers it by itself.
@@ -123,6 +129,7 @@ class FynkelView extends StatefulWidget {
     this.onViewStats,
     this.focusNode,
     this.autofocus = true,
+    this.showErrors = kDebugMode,
   }) : assert(resolutionScale > 0 && resolutionScale <= 4),
        assert((root == null) != (world == null), 'give FynkelView a root or a world, not both');
 
@@ -162,6 +169,11 @@ class FynkelView extends StatefulWidget {
   /// before it's tapped.
   final bool autofocus;
 
+  /// Whether the errors the game's code throws ([World.errors]) are shown
+  /// over the game and reported to Flutter (the console, and a failing
+  /// widget test), rather than left to the game. On in debug builds.
+  final bool showErrors;
+
   @override
   State<FynkelView> createState() => FynkelViewState();
 }
@@ -193,6 +205,11 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   int _sentWidth = 0, _sentHeight = 0;
   Object? _error;
 
+  // What the game's code threw, shown over it (showErrors).
+  StreamSubscription<ObjectError>? _errorsHeard;
+  final _gameErrors = <ObjectError>[];
+  bool _built = false;
+
   // The current stats window.
   int _windowStartMicros = 0, _windowTicks = 0;
   ViewStats _windowStart = const ViewStats();
@@ -202,12 +219,47 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     super.initState();
     _ticker; // Starts it.
     _own = _makeOwn();
+    if (widget.world case final world?) _listen(world);
   }
 
-  /// A world with the widget's root in it, if it has one.
+  /// A world with the widget's root in it, if it has one. It's heard
+  /// before the root is added, which may throw at once.
   World? _makeOwn() {
     final root = widget.root;
-    return root == null ? null : (World(source: widget.source ?? bundleSource())..add(root));
+    if (root == null) return null;
+    final world = World(source: widget.source ?? bundleSource());
+    _listen(world);
+    return world..add(root);
+  }
+
+  void _listen(World world) {
+    _errorsHeard?.cancel();
+    _errorsHeard = null;
+    _gameErrors.clear();
+    if (widget.showErrors) _errorsHeard = world.errors.listen(_heard);
+  }
+
+  void _heard(ObjectError error) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error.error,
+        stack: error.stackTrace,
+        library: 'fynkel',
+        context: ErrorDescription('in ${error.object ?? 'the world'}'),
+      ),
+    );
+    if (_gameErrors.length == 100) _gameErrors.removeAt(0);
+    _gameErrors.add(error);
+    // Before the first build (a root's onLoad throwing in initState) the
+    // build reads them; during one, the next frame does.
+    if (!mounted || !_built) return;
+    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    } else {
+      setState(() {});
+    }
   }
 
   @override
@@ -219,11 +271,13 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       _release();
       _own?.dispose();
       _own = _makeOwn();
+      if (widget.world case final world?) _listen(world);
     }
   }
 
   @override
   void dispose() {
+    _errorsHeard?.cancel();
     _ticker.dispose();
     _ownFocus?.dispose();
     _release();
@@ -372,6 +426,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   Widget build(BuildContext context) {
     final error = _error;
     if (error != null) return ErrorWidget(error);
+    _built = true;
     final ratio = MediaQuery.devicePixelRatioOf(context) * widget.resolutionScale;
     final view = LayoutBuilder(
       builder: (context, constraints) {
@@ -389,7 +444,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         return texture == null ? const SizedBox.expand() : Texture(textureId: texture);
       },
     );
-    return Focus(
+    final game = Focus(
       focusNode: _focus,
       autofocus: widget.autofocus,
       onKeyEvent: (_, event) {
@@ -420,6 +475,15 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         onPointerPanZoomUpdate: _input.panZoomUpdate,
         child: MouseRegion(onEnter: _input.hover, onHover: _input.hover, onExit: _input.exit, child: view),
       ),
+    );
+    // Passthrough: an unbounded size still reaches the view's own check.
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        game,
+        if (_gameErrors.isNotEmpty)
+          ErrorPanel(errors: List.of(_gameErrors), onDismiss: () => setState(_gameErrors.clear)),
+      ],
     );
   }
 }
