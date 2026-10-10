@@ -6,6 +6,7 @@
 
 mod color;
 mod components;
+mod debug;
 mod describe;
 mod hierarchy;
 mod id;
@@ -16,6 +17,7 @@ mod world;
 
 pub use color::Color;
 pub use components::{Camera, Component, Light, LightKind, MeshRenderer, Transform};
+pub use debug::DebugLine;
 pub use describe::{Describe, Field, FieldError, FieldKind, Range, Value};
 pub use fynkel_load::{ImageData, ImageError, MaterialData, ModelData, ModelError};
 pub use fynkel_mesh::{MeshData, MeshError, MeshParts, Vertex};

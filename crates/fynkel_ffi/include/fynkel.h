@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 12
+#define FY_ABI_VERSION 13
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -144,13 +144,6 @@ typedef struct FyRayHit {
   float distance;
 } FyRayHit;
 
-typedef struct FyMeshRenderer {
-  // 0 for none.
-  uint64_t mesh;
-  // 0 for none.
-  uint64_t material;
-} FyMeshRenderer;
-
 // sRGB, 0–1 per channel.
 typedef struct FyColor {
   float r;
@@ -158,6 +151,20 @@ typedef struct FyColor {
   float b;
   float a;
 } FyColor;
+
+// A line from `a` to `b` in world space.
+typedef struct FyDebugLine {
+  struct FyVec3 a;
+  struct FyVec3 b;
+  struct FyColor color;
+} FyDebugLine;
+
+typedef struct FyMeshRenderer {
+  // 0 for none.
+  uint64_t mesh;
+  // 0 for none.
+  uint64_t material;
+} FyMeshRenderer;
 
 typedef struct FyCamera {
   // Vertical field of view in degrees, 1–179.
@@ -170,6 +177,8 @@ typedef struct FyCamera {
   bool orthographic;
   // Half the view's height in metres when orthographic.
   float size;
+  // The layers it draws: bit n for layer n. `0xFFFFFFFF` for all.
+  uint32_t culling_mask;
 } FyCamera;
 
 typedef struct FyLight {
@@ -365,6 +374,22 @@ FyStatus fy_active_set(const struct FyWorld *world, uint64_t id, bool active);
 // `world` is null or live; `out` is null or writable.
 FyStatus fy_active_get(const struct FyWorld *world, uint64_t id, bool *out);
 
+// Puts the object on `layer`, 0 to 31 (`FY_STATUS_INVALID_VALUE` past
+// that). Cameras draw, and rays hit, only the layers in their masks. Each
+// object has its own: a child doesn't take its parent's.
+//
+// # Safety
+//
+// `world` is null or live.
+FyStatus fy_layer_set(const struct FyWorld *world, uint64_t id, uint32_t layer);
+
+// Writes the object's layer to `out`: 0 unless put on another.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FyStatus fy_layer_get(const struct FyWorld *world, uint64_t id, uint32_t *out);
+
 // Writes to `out` whether the object is shown: it and every parent above
 // it on.
 //
@@ -434,7 +459,8 @@ FyStatus fy_world_transform_get(const struct FyWorld *world, uint64_t id, struct
 // What a ray can hit is what a view draws: objects with a `Transform` and
 // a mesh renderer with both a mesh and a material, from the side they're
 // drawn from (both sides for a double-sided material). Cut-outs are hit as
-// if solid.
+// if solid. Only objects on a layer in `mask` (bit n for layer n) are hit:
+// `0xFFFFFFFF` for all.
 //
 // `FY_STATUS_INVALID_VALUE` for a ray without a direction or with a
 // non-finite origin, and for a negative or NaN `max_distance`.
@@ -446,7 +472,20 @@ FyStatus fy_world_transform_get(const struct FyWorld *world, uint64_t id, struct
 FyStatus fy_raycast(const struct FyWorld *world,
                     const struct FyRay *ray,
                     float max_distance,
+                    uint32_t mask,
                     struct FyRayHit *out);
+
+// Replaces the lines views draw on top of the scene with these `count`
+// lines, until the next call: 0 lines clears them. A line with a point
+// that isn't finite is left out.
+//
+// # Safety
+//
+// `world` is null or live; `lines` is null or valid for `count` reads (it
+// may be null when `count` is 0).
+FyStatus fy_debug_lines_set(const struct FyWorld *world,
+                            const struct FyDebugLine *lines,
+                            size_t count);
 
 // Adds or replaces the object's `Transform`. The rotation must be a unit
 // quaternion and every value finite.

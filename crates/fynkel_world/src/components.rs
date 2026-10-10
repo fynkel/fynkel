@@ -153,6 +153,8 @@ pub struct Camera {
     /// Half the view's height in metres when orthographic, as Unity's
     /// `orthographicSize`.
     pub size: f32,
+    /// The layers it draws: bit `n` for layer `n` (Unity's `cullingMask`).
+    pub culling_mask: u32,
 }
 
 impl Camera {
@@ -163,6 +165,7 @@ impl Camera {
         clear_color: Color::rgb(0.1, 0.1, 0.12),
         orthographic: false,
         size: 5.0,
+        culling_mask: u32::MAX,
     };
 }
 
@@ -184,6 +187,7 @@ impl Describe for Camera {
             Field::new("clear_color", FieldKind::Color, Value::Color(D.clear_color)),
             Field::new("orthographic", FieldKind::Bool, Value::Bool(D.orthographic)),
             Field::new("size", FieldKind::F32, Value::F32(D.size)).range(1e-4, 1e6),
+            Field::new("culling_mask", FieldKind::Mask, Value::Mask(D.culling_mask)),
         ];
         FIELDS
     }
@@ -196,6 +200,7 @@ impl Describe for Camera {
             3 => Value::Color(self.clear_color),
             4 => Value::Bool(self.orthographic),
             5 => Value::F32(self.size),
+            6 => Value::Mask(self.culling_mask),
             _ => return None,
         })
     }
@@ -208,6 +213,7 @@ impl Describe for Camera {
             (3, Value::Color(c)) => self.clear_color = c,
             (4, Value::Bool(v)) => self.orthographic = v,
             (5, Value::F32(v)) => self.size = v,
+            (6, Value::Mask(v)) => self.culling_mask = v,
             _ => unreachable!("validated by Describe::set"),
         }
     }

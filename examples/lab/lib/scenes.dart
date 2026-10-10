@@ -7,6 +7,7 @@ import 'scenes/camera_rigs.dart';
 import 'scenes/components.dart';
 import 'scenes/eases.dart';
 import 'scenes/input.dart';
+import 'scenes/layers_basics.dart';
 import 'scenes/lifecycle.dart';
 import 'scenes/motion.dart';
 import 'scenes/motion_basics.dart';
@@ -30,4 +31,5 @@ final List<LabScene Function()> scenes = [
   MotionScene.new,
   CameraBasicsScene.new,
   CameraRigsScene.new,
+  LayersBasicsScene.new,
 ];

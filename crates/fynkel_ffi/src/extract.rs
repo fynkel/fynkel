@@ -11,7 +11,9 @@
 //!   ignored.
 //! - Every ambient light adds to the ambient term.
 //! - An object is drawn when it has a `Transform` and a `MeshRenderer`
-//!   with both a mesh and a material.
+//!   with both a mesh and a material, and its layer is in the camera's
+//!   culling mask (stage 4 plan §3.9). Lights light every layer.
+//! - The world's debug lines are drawn over the scene as they are.
 //! - A texture is uploaded once for each colour space a material reads it
 //!   in, the first frame a material uses it that way, and freed when the
 //!   world removes it.
@@ -26,7 +28,7 @@ use std::sync::Arc;
 
 use fynkel_render::glam::{Mat4, Vec3};
 use fynkel_render::{
-    CameraView, ColorSpace, Draw, MaterialTextures, MeshKey, PbrMaterial, RenderScene, Sun, TextureKey,
+    CameraView, ColorSpace, Draw, Line, MaterialTextures, MeshKey, PbrMaterial, RenderScene, Sun, TextureKey,
 };
 use fynkel_world::{
     Camera, Color, ImageData, Light, LightKind, Material, MeshData, MeshId, MeshRenderer, ObjectId, Quat, TextureId,
@@ -132,6 +134,8 @@ impl Extract {
                 camera = Some((id, *c, rotation, position));
             }
         });
+        // The layers drawn: all without a camera, which draws nothing anyway.
+        let mask = camera.map_or(u32::MAX, |(_, c, ..)| c.culling_mask);
         scene.camera = camera.map(|(_, c, rotation, position)| CameraView {
             view: Mat4::from_rotation_translation(rotation, position).inverse(),
             position,
@@ -163,6 +167,9 @@ impl Extract {
 
         world.for_each2::<MeshRenderer, Transform>(|id, r, t| {
             let (Some(mesh), Some(material)) = (r.mesh, r.material) else { return };
+            if !world.in_mask(id, mask) {
+                return;
+            }
             let Some(model) = matrices.world(world, id, t) else { return };
             // The world refuses a renderer pointing at a missing material,
             // so this always succeeds.
@@ -183,6 +190,8 @@ impl Extract {
                 },
             });
         });
+
+        scene.lines.extend(world.debug_lines().iter().map(|l| Line { a: l.a, b: l.b, color: l.color.to_linear() }));
     }
 }
 

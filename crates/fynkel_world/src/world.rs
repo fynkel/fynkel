@@ -45,6 +45,8 @@ pub enum WorldError {
         child: ObjectId,
         parent: ObjectId,
     },
+    /// Layers are 0 to 31.
+    Layer(u32),
     /// A model was spawned with a different number of mesh or material
     /// ids than it has meshes or materials.
     ModelIds {
@@ -69,6 +71,7 @@ impl std::fmt::Display for WorldError {
             WorldError::Cycle { child, parent } => {
                 write!(f, "{parent} can't be the parent of {child}: it is {child} or below it")
             }
+            WorldError::Layer(layer) => write!(f, "layer {layer} doesn't exist: layers are 0 to 31"),
             WorldError::ModelIds { what, given, needed } => {
                 write!(f, "the model has {needed} {what}, but {given} ids were given for them")
             }
@@ -105,6 +108,7 @@ pub struct World {
     /// [`World::insert_all`]'s entities, kept between calls so a frame's
     /// batch allocates nothing.
     batch: Vec<hecs::Entity>,
+    pub(crate) debug_lines: Vec<crate::DebugLine>,
 }
 
 impl std::fmt::Debug for World {
@@ -138,6 +142,7 @@ impl World {
             textures: IdMap::default(),
             texture_ids: IdCounter::new(),
             batch: Vec::new(),
+            debug_lines: Vec::new(),
         }
     }
 

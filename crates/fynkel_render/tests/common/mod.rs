@@ -118,6 +118,7 @@ pub fn stage1_scene() -> RenderScene {
         camera: Some(camera),
         sun: Some(Sun { direction: Vec3::new(-0.4, -1.0, -0.3), color: Vec3::ONE }),
         ambient: Vec3::splat(0.15),
+        lines: Vec::new(),
         draws: vec![Draw {
             mesh: CUBE,
             model: Mat4::from_rotation_y(30f32.to_radians()),

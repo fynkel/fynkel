@@ -6,6 +6,7 @@
 //! - An object is hit when it has a `Transform` and a `MeshRenderer` with
 //!   both a mesh and a material, and it and its parents are active: the
 //!   extract's rule for drawing it.
+//! - Only objects on the layers in the cast's mask are hit.
 //! - A triangle is hit only from its front, unless the material is
 //!   double-sided, as back faces are culled. A mirrored object (negative
 //!   scale) keeps its fronts where they were, as the renderer's mirrored
@@ -73,13 +74,16 @@ pub struct Raycaster {
 }
 
 impl Raycaster {
-    /// The closest hit along `ray` no further than `max_distance`, in the
-    /// world as it is now.
-    pub fn cast(&mut self, world: &World, ray: Ray, max_distance: f32) -> Option<RayHit> {
+    /// The closest hit along `ray` no further than `max_distance`, on the
+    /// layers in `mask` (bit `n` for layer `n`), in the world as it is now.
+    pub fn cast(&mut self, world: &World, ray: Ray, max_distance: f32, mask: u32) -> Option<RayHit> {
         self.matrices.update(world);
         let mut best: Option<RayHit> = None;
         world.for_each2::<MeshRenderer, Transform>(|id, r, t| {
             let (Some(mesh), Some(material)) = (r.mesh, r.material) else { return };
+            if !world.in_mask(id, mask) {
+                return;
+            }
             let Ok(mesh) = world.mesh(mesh) else { return };
             let reach = best.map_or(max_distance, |b| b.distance);
             let Some(model) = self.matrices.world(world, id, t) else { return };
@@ -124,10 +128,11 @@ impl Raycaster {
 
 impl World {
     /// The closest drawn object along `ray`, no further than
-    /// `max_distance`. See the [module docs](crate::raycast) for what can
-    /// be hit. A [`Raycaster`] does the same without allocating each time.
-    pub fn raycast(&self, ray: Ray, max_distance: f32) -> Option<RayHit> {
-        Raycaster::default().cast(self, ray, max_distance)
+    /// `max_distance`, on the layers in `mask`. See the [module
+    /// docs](crate::raycast) for what can be hit. A [`Raycaster`] does the
+    /// same without allocating each time.
+    pub fn raycast(&self, ray: Ray, max_distance: f32, mask: u32) -> Option<RayHit> {
+        Raycaster::default().cast(self, ray, max_distance, mask)
     }
 }
 

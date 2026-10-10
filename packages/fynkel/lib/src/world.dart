@@ -17,8 +17,10 @@ import 'native.dart';
 part 'assets.dart';
 part 'cameras.dart';
 part 'components.dart';
+part 'debug.dart';
 part 'input.dart';
 part 'keys.dart';
+part 'layers.dart';
 part 'model.dart';
 part 'motion.dart';
 part 'pointing.dart';
@@ -80,6 +82,7 @@ final class World implements Finalizable {
       wait.over = true;
     }
     _finalizer.detach(this);
+    _debug?._release();
     fy_world_free(_pointer);
     _pointer = nullptr;
     _meshIds.clear();
@@ -256,6 +259,11 @@ final class World implements Finalizable {
   /// (docs/stage-4.md §3.8).
   late final Cameras cameras = Cameras._(this);
 
+  /// Lines drawn over the scene, to see what the code sees
+  /// (docs/stage-4.md §3.9). Objects and behaviours reach it as `debug`.
+  Debug get debug => _debug ??= Debug._(this);
+  Debug? _debug;
+
   /// The object the view draws from: the one with a [Camera] and the
   /// lowest id; null when there's none.
   GameObject? get camera {
@@ -295,6 +303,8 @@ final class World implements Finalizable {
   /// 6. **Cameras.** The camera rigs move their objects ([Follow] and
   ///    [Orbit], then [LookAt]), then [cameras] puts the view's camera
   ///    where the live [VirtualCamera] is, and shakes it.
+  /// 7. **Debug lines.** What was drawn with [debug] goes to the engine,
+  ///    to be drawn over the frame.
   ///
   /// Hidden objects (inactive, or below one that is) and their behaviours
   /// are skipped by the last five and start when they're first shown; so are
@@ -388,6 +398,7 @@ final class World implements Finalizable {
     }
 
     cameras._run();
+    _debug?._flush();
   }
 
   // --- Motions ---
@@ -723,6 +734,7 @@ final class World implements Finalizable {
       if (parent != null) check(fy_parent_set(pointer, id, parent.id));
       if (described.name != null) object._writeName(described.name!);
       if (!described.active) check(fy_active_set(pointer, id, false));
+      if (object._layer != 0) check(fy_layer_set(pointer, id, object._layer));
       for (final component in object._components ?? const <Component>[]) {
         if (!component._removed) object._write(component);
       }
@@ -1029,15 +1041,16 @@ final class World implements Finalizable {
   /// It hits what a view draws: objects with a [Transform] and a
   /// [MeshRenderer] with both a mesh and a material, from the side they're
   /// drawn from (both sides for a [Material.doubleSided] one). Cut-outs
-  /// ([Material.alphaCutoff]) are hit as if solid. No physics is involved:
-  /// each object's box is tested, then the triangles of those the ray may
-  /// hit.
-  RayHit? raycast(Ray ray, {double maxDistance = double.infinity}) {
+  /// ([Material.alphaCutoff]) are hit as if solid, and only objects on
+  /// [layers] are hit ([GameObject.layer]): the ray goes through the rest.
+  /// No physics is involved: each object's box is tested, then the
+  /// triangles of those the ray may hit.
+  RayHit? raycast(Ray ray, {double maxDistance = double.infinity, LayerMask layers = LayerMask.all}) {
     _sendTransforms();
     final r = scratch.ray.ref;
     r.origin.write(ray.origin);
     r.direction.write(ray.direction);
-    check(fy_raycast(pointer, scratch.ray, maxDistance, scratch.rayHit));
+    check(fy_raycast(pointer, scratch.ray, maxDistance, layers.value, scratch.rayHit));
     final hit = scratch.rayHit.ref;
     if (hit.object == 0) return null;
     return RayHit._(_object(hit.object), hit.point.read(), hit.normal.read(), hit.distance);
@@ -1180,7 +1193,9 @@ class GameObject with _Moving {
     Transform? transform,
     Iterable<Component> components = const [],
     Iterable<GameObject> children = const [],
+    int layer = 0,
   }) : _described = _Description(name, transform ?? Transform()) {
+    _layer = _checkLayer(layer);
     components.forEach(addComponent);
     children.forEach(add);
   }
@@ -1191,6 +1206,9 @@ class GameObject with _Moving {
 
   World? _world;
   int _id = 0;
+
+  // Its layer, kept here: only the game sets one, so it's never read back.
+  int _layer = 0;
 
   // What the object is to be, until it's added.
   _Description? _described;
@@ -1336,6 +1354,9 @@ class GameObject with _Moving {
 
   /// What the player did since the last frame: the world's [World.input].
   Input get input => world.input;
+
+  /// The world's [World.debug]: lines drawn over the scene.
+  Debug get debug => world.debug;
 
   /// The world's clock: `time.delta` is the seconds this frame counts for.
   /// See [Time].
@@ -1644,6 +1665,18 @@ class GameObject with _Moving {
     world._refresh(this);
   }
 
+  /// The object's layer, 0 to 31 (Unity's layers): a camera draws only the
+  /// layers in its [Camera.cullingMask], and a ray ([World.raycast]) or a
+  /// finger ([Input.layers]) hits only those in its mask. 0 unless set; a
+  /// child doesn't take its parent's.
+  int get layer => _layer;
+
+  set layer(int value) {
+    _checkLayer(value);
+    if (_described == null) check(fy_layer_set(_engine('its layer can\'t be set'), id, value));
+    _layer = value;
+  }
+
   /// Whether this object is shown: it and every object above it [active],
   /// and loaded (see [GameObject.onLoad]).
   bool get activeInHierarchy {
@@ -1909,6 +1942,7 @@ class GameObject with _Moving {
           clearColor: scratch.camera.ref.clear_color.read(),
           orthographic: scratch.camera.ref.orthographic,
           size: scratch.camera.ref.size,
+          cullingMask: LayerMask._(scratch.camera.ref.culling_mask),
         ),
       if (missing<Light>() && fy_light_get(w, _id, scratch.light) == FyStatus.FY_STATUS_OK) _readLight(),
       if (missing<MeshRenderer>() && fy_mesh_renderer_get(w, _id, scratch.meshRenderer) == FyStatus.FY_STATUS_OK)
@@ -2010,6 +2044,7 @@ class GameObject with _Moving {
     c.clear_color.write(value.clearColor);
     c.orthographic = value.orthographic;
     c.size = value.size;
+    c.culling_mask = value.cullingMask.value;
     check(fy_camera_set(_engine('its Camera can\'t be changed'), id, scratch.camera));
   }
 

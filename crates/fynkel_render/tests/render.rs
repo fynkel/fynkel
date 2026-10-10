@@ -13,7 +13,7 @@ fn the_stage_1_cube_matches_its_golden() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
     let (image, stats) = render(&gpu, &mut r, &stage1_scene(), 256, 256);
-    assert_eq!(stats, FrameStats { draws: 1, draw_calls: 1, missing_meshes: 0 });
+    assert_eq!(stats, FrameStats { draws: 1, draw_calls: 1, missing_meshes: 0, lines: 0 });
     assert_golden("cube", &image);
 }
 
@@ -62,6 +62,7 @@ fn light_units_match_the_documented_maths() {
             camera: Some(camera),
             sun: (sun > 0.0).then_some(Sun { direction: Vec3::NEG_Z, color: Vec3::splat(sun) }),
             ambient: Vec3::splat(ambient),
+            lines: Vec::new(),
             draws: vec![draw],
         };
         let (image, _) = render(&gpu, &mut r, &scene, 64, 64);
@@ -102,6 +103,7 @@ fn a_sphere_is_lit_from_where_the_sun_is() {
             camera: Some(camera),
             sun: Some(Sun { direction, color: Vec3::ONE }),
             ambient: Vec3::splat(0.05),
+            lines: Vec::new(),
             draws: vec![Draw {
                 mesh: SPHERE,
                 model: Mat4::IDENTITY,
@@ -178,7 +180,7 @@ fn draws_sharing_a_mesh_are_instanced_together() {
         Draw { mesh: CUBE, model: at(2.0, 0.0), material: material(0xFFB03AE0, 0.0) },
     ];
     let (image, stats) = render(&gpu, &mut r, &scene, 256, 160);
-    assert_eq!(stats, FrameStats { draws: 5, draw_calls: 2, missing_meshes: 0 });
+    assert_eq!(stats, FrameStats { draws: 5, draw_calls: 2, missing_meshes: 0, lines: 0 });
     assert_golden("instanced", &image);
 }
 
@@ -235,12 +237,12 @@ fn a_missing_mesh_is_skipped_and_counted() {
     ghost.mesh = MeshKey(404);
     scene.draws.push(ghost);
     let (_, stats) = render(&gpu, &mut r, &scene, 32, 32);
-    assert_eq!(stats, FrameStats { draws: 1, draw_calls: 1, missing_meshes: 1 });
+    assert_eq!(stats, FrameStats { draws: 1, draw_calls: 1, missing_meshes: 1, lines: 0 });
 
     assert!(r.remove_mesh(CUBE));
     assert!(!r.remove_mesh(CUBE));
     let (image, stats) = render(&gpu, &mut r, &stage1_scene(), 32, 32);
-    assert_eq!(stats, FrameStats { draws: 0, draw_calls: 0, missing_meshes: 1 });
+    assert_eq!(stats, FrameStats { draws: 0, draw_calls: 0, missing_meshes: 1, lines: 0 });
     let clear = image.pixel(16, 16);
     assert_eq!(clear, image.pixel(0, 0), "with the cube gone, the centre shows the clear colour");
 }
@@ -331,6 +333,7 @@ fn non_uniform_scale_keeps_normals_right() {
         camera: Some(camera),
         sun: Some(Sun { direction: Vec3::NEG_Y, color: Vec3::ONE }),
         ambient: Vec3::ZERO,
+        lines: Vec::new(),
         draws: vec![Draw {
             mesh: CUBE,
             model: Mat4::from_scale(squash) * Mat4::from_quat(turn),
@@ -353,4 +356,44 @@ fn non_uniform_scale_keeps_normals_right() {
     for c in 0..3 {
         assert!(got[c].abs_diff(right[c]) <= 2, "GPU {got:?}, inverse-transpose {right:?}, wrong {wrong:?}");
     }
+}
+
+/// Debug lines (stage 4 plan §3.9) are drawn over the scene, through what's
+/// in front of them, in their own colour: a red line across the cube and a
+/// green one behind it both show on top.
+#[test]
+fn debug_lines_are_drawn_on_top_of_the_scene() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let mut scene = stage1_scene();
+    let red = [1.0, 0.0, 0.0, 1.0];
+    let green = [0.0, 1.0, 0.0, 1.0];
+    scene.lines = vec![
+        Line { a: Vec3::new(-2.0, 0.0, 0.0), b: Vec3::new(2.0, 0.0, 0.0), color: red },
+        // Behind the cube, seen through it.
+        Line { a: Vec3::new(0.0, -2.0, -3.0), b: Vec3::new(0.0, 2.0, -3.0), color: green },
+    ];
+    let (image, stats) = render(&gpu, &mut r, &scene, 256, 256);
+    assert_eq!(stats, FrameStats { draws: 1, draw_calls: 1, missing_meshes: 0, lines: 2 });
+    assert_golden("lines", &image);
+
+    // The lines alone, no draws: still drawn.
+    scene.draws.clear();
+    let (image, stats) = render(&gpu, &mut r, &scene, 256, 256);
+    assert_eq!((stats.draws, stats.lines), (0, 2));
+    // Each falls on the edge between two rows (or columns) of pixels, so it
+    // half covers both.
+    let px = |x: usize, y: usize| &image.rgba[(y * 256 + x) * 4..][..3];
+    for y in [127, 128] {
+        assert!(px(40, y)[0] > 150 && px(40, y)[1] < 60, "red at row {y}: {:?}", px(40, y));
+    }
+    for x in [127, 128] {
+        assert!(px(x, 40)[1] > 150 && px(x, 40)[0] < 60, "green at column {x}: {:?}", px(x, 40));
+    }
+    assert!(px(40, 126)[0] < 60 && px(40, 129)[0] < 60, "a line is no wider");
+
+    // And a frame after them without any is the scene alone again.
+    let (image, stats) = render(&gpu, &mut r, &stage1_scene(), 256, 256);
+    assert_eq!(stats.lines, 0);
+    assert_golden("cube", &image);
 }

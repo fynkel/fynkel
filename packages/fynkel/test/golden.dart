@@ -1,7 +1,7 @@
 // Golden-image comparison, the same rule as crates/fynkel_golden: a channel
 // may differ by at most 2/255, and at most 0.1 % of pixels may be outside
 // that. The references are the repository's tests/golden/*.png, shared
-// with the Rust tests.
+// with the Rust tests. FYNKEL_BLESS=1 writes them instead.
 
 import 'dart:io';
 import 'dart:typed_data';
@@ -13,6 +13,10 @@ final _root = Directory.current.uri.resolve('../../');
 
 void expectGolden(String name, Uint8List rgba, int width, int height) {
   final file = File.fromUri(_root.resolve('tests/golden/$name.png'));
+  if (Platform.environment['FYNKEL_BLESS'] == '1') {
+    _write(file.path, rgba, width, height);
+    return;
+  }
   final golden = img.decodePng(file.readAsBytesSync());
   expect(golden, isNotNull, reason: '${file.path} is not a PNG');
   expect((golden!.width, golden.height), (width, height), reason: '$name: size differs from the golden');

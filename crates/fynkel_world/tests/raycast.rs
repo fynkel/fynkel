@@ -37,7 +37,7 @@ impl Scene {
     }
 
     fn cast(&self, origin: Vec3, direction: Vec3) -> Option<RayHit> {
-        self.world.raycast(Ray::new(origin, direction).unwrap(), f32::INFINITY)
+        self.world.raycast(Ray::new(origin, direction).unwrap(), f32::INFINITY, u32::MAX)
     }
 }
 
@@ -82,8 +82,8 @@ fn a_miss_is_none_and_the_reach_is_kept() {
     assert!(s.cast(Vec3::ZERO, Vec3::Z).is_none(), "behind the ray");
     assert!(s.cast(Vec3::new(0.6, 0.0, 0.0), Vec3::NEG_Z).is_none(), "beside the cube");
     let ray = Ray::new(Vec3::ZERO, Vec3::NEG_Z).unwrap();
-    assert!(s.world.raycast(ray, 3.4).is_none());
-    assert!(s.world.raycast(ray, 3.6).is_some());
+    assert!(s.world.raycast(ray, 3.4, u32::MAX).is_none());
+    assert!(s.world.raycast(ray, 3.6, u32::MAX).is_some());
 }
 
 #[test]
@@ -197,12 +197,12 @@ fn an_inactive_object_and_everything_below_it_are_not_hit() {
     s.world.set_parent(child, Some(parent)).unwrap();
     let mut caster = Raycaster::default();
     let ray = Ray::new(Vec3::ZERO, Vec3::NEG_Z).unwrap();
-    let hit = |caster: &mut Raycaster, s: &Scene| caster.cast(&s.world, ray, f32::INFINITY).map(|h| h.object);
+    let hit = |caster: &mut Raycaster, s: &Scene| caster.cast(&s.world, ray, f32::INFINITY, u32::MAX).map(|h| h.object);
 
     assert_eq!(hit(&mut caster, &s), Some(parent));
     s.world.set_active(parent, false).unwrap();
     assert_eq!(hit(&mut caster, &s), Some(behind), "the parent and its child are passed through");
-    assert_eq!(s.world.raycast(ray, f32::INFINITY).map(|h| h.object), Some(behind), "a fresh cast agrees");
+    assert_eq!(s.world.raycast(ray, f32::INFINITY, u32::MAX).map(|h| h.object), Some(behind), "a fresh cast agrees");
     s.world.set_active(parent, true).unwrap();
     s.world.set_active(child, false).unwrap();
     s.world.set_parent(child, None).unwrap();
@@ -234,14 +234,14 @@ fn a_raycaster_sees_changes_made_since_its_last_cast() {
     s.world.set_parent(cube, Some(parent)).unwrap();
     let mut caster = Raycaster::default();
     let ray = Ray::new(Vec3::ZERO, Vec3::NEG_Z).unwrap();
-    assert_eq!(caster.cast(&s.world, ray, f32::INFINITY).unwrap().distance, 3.5);
+    assert_eq!(caster.cast(&s.world, ray, f32::INFINITY, u32::MAX).unwrap().distance, 3.5);
 
     s.world.insert(parent, Transform::from_position(Vec3::new(0.0, 0.0, -2.0))).unwrap();
-    assert_eq!(caster.cast(&s.world, ray, f32::INFINITY).unwrap().distance, 5.5, "the parent moved");
+    assert_eq!(caster.cast(&s.world, ray, f32::INFINITY, u32::MAX).unwrap().distance, 5.5, "the parent moved");
     s.world.set_parent(cube, None).unwrap();
-    assert_eq!(caster.cast(&s.world, ray, f32::INFINITY).unwrap().distance, 3.5, "unparented");
+    assert_eq!(caster.cast(&s.world, ray, f32::INFINITY, u32::MAX).unwrap().distance, 3.5, "unparented");
     s.world.despawn(cube).unwrap();
-    assert!(caster.cast(&s.world, ray, f32::INFINITY).is_none(), "despawned");
+    assert!(caster.cast(&s.world, ray, f32::INFINITY, u32::MAX).is_none(), "despawned");
 }
 
 fn triangle(s: &mut Scene, positions: &[[f32; 3]; 3]) -> MeshId {
@@ -291,4 +291,19 @@ fn a_turned_object_is_hit_out_to_its_corners() {
     let corner = std::f32::consts::FRAC_1_SQRT_2;
     assert!((hit.point.x - (0.6 - corner)).abs() < 1e-5, "{}", hit.point);
     assert!(s.cast(Vec3::new(-5.0, 0.0, 0.75), Vec3::X).is_none(), "past the corner");
+}
+
+#[test]
+fn only_objects_on_the_masks_layers_are_hit() {
+    let mut s = scene();
+    let near = s.cube_at(Vec3::new(0.0, 0.0, -2.0));
+    let far = s.cube_at(Vec3::new(0.0, 0.0, -6.0));
+    s.world.set_layer(near, 5).unwrap();
+    let ray = Ray::new(Vec3::ZERO, Vec3::NEG_Z).unwrap();
+    let hit = |mask: u32| s.world.raycast(ray, f32::INFINITY, mask).map(|h| h.object);
+    assert_eq!(hit(u32::MAX), Some(near));
+    assert_eq!(hit(!(1 << 5)), Some(far), "layer 5 left out: the ray goes through it");
+    assert_eq!(hit(1 << 5), Some(near));
+    assert_eq!(hit(1), Some(far), "layer 0 only");
+    assert_eq!(hit(0), None, "no layers");
 }

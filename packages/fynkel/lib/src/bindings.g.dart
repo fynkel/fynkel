@@ -60,6 +60,9 @@ external int fy_children_get(
   ffi.Pointer<ffi.Size> out_count,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyDebugLine>, ffi.Size)>(isLeaf: true)
+external int fy_debug_lines_set(ffi.Pointer<FyWorld> world, ffi.Pointer<FyDebugLine> lines, int count);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
 external int fy_despawn(ffi.Pointer<FyWorld> world, int id);
 
@@ -82,6 +85,12 @@ external int fy_is_part_of(ffi.Pointer<FyWorld> world, int id, int root, ffi.Poi
 
 @ffi.Native<ffi.Pointer<ffi.Char> Function()>(isLeaf: true)
 external ffi.Pointer<ffi.Char> fy_last_error();
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Uint32>)>(isLeaf: true)
+external int fy_layer_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<ffi.Uint32> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint32)>(isLeaf: true)
+external int fy_layer_set(ffi.Pointer<FyWorld> world, int id, int layer);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyLight>)>(isLeaf: true)
 external int fy_light_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyLight> out);
@@ -218,13 +227,14 @@ external int fy_parent_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<ffi.U
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint64)>(isLeaf: true)
 external int fy_parent_set(ffi.Pointer<FyWorld> world, int child, int parent);
 
-@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyRay>, ffi.Float, ffi.Pointer<FyRayHit>)>(
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyRay>, ffi.Float, ffi.Uint32, ffi.Pointer<FyRayHit>)>(
   isLeaf: true,
 )
 external int fy_raycast(
   ffi.Pointer<FyWorld> world,
   ffi.Pointer<FyRay> ray,
   double max_distance,
+  int mask,
   ffi.Pointer<FyRayHit> out,
 );
 
@@ -339,7 +349,7 @@ external ffi.Pointer<FyWorld> fy_world_new();
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
 external int fy_world_transform_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> out);
 
-const int FY_ABI_VERSION = 12;
+const int FY_ABI_VERSION = 13;
 
 const int FY_APPLE_MORE = 2;
 
@@ -372,6 +382,9 @@ final class FyCamera extends ffi.Struct {
 
   @ffi.Float()
   external double size;
+
+  @ffi.Uint32()
+  external int culling_mask;
 }
 
 final class FyColor extends ffi.Struct {
@@ -398,6 +411,14 @@ final class FyColor extends ffi.Struct {
     ..ref.g = g
     ..ref.b = b
     ..ref.a = a;
+}
+
+final class FyDebugLine extends ffi.Struct {
+  external FyVec3 a;
+
+  external FyVec3 b;
+
+  external FyColor color;
 }
 
 final class FyLight extends ffi.Struct {
