@@ -27,7 +27,10 @@ The game is `lib/arena.dart`, and each part shows one way of working:
 - The sparks are on the `effects` layer, and `input.layers` leaves it
   out, so a tap goes through them to the floor.
 - `ArenaGame` keeps what the HUD shows in `ValueNotifier`s, and
-  `lib/hud.dart` shows them over the view in plain Flutter.
+  `lib/hud.dart` shows them over the view in plain Flutter: `FynkelApp`'s
+  `overlay` puts it there.
+- In a debug build, F5 starts the game over with the code as it is now:
+  after a hot reload, that's how changed fields and `onLoad` take effect.
 
 ```sh
 flutter run -d macos

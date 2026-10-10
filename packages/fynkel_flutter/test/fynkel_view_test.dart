@@ -152,6 +152,13 @@ void main() {
     expect(done, isTrue, reason: 'it finished');
   }
 
+  /// A hot reload, as far as the widgets see one: each is reassembled,
+  /// then built again.
+  Future<void> reload(WidgetTester tester) async {
+    tester.binding.buildOwner!.reassemble(tester.binding.rootElement!);
+    await tester.pump();
+  }
+
   Widget sized(Widget child, {double width = 100, double height = 50}) => Directionality(
     textDirection: TextDirection.ltr,
     child: Center(
@@ -397,17 +404,93 @@ void main() {
       expect(game.isAlive, isFalse);
     });
 
-    testWidgets('FynkelApp shows the game in a view of its own', (tester) async {
-      final game = Tiny();
-      await tester.pumpWidget(FynkelApp(game, source: bundleSource(Bundle({'assets/grid.png': png}))));
+    testWidgets('FynkelApp makes the game, shows it in a view of its own, and puts the overlay over it', (
+      tester,
+    ) async {
+      final made = <Tiny>[];
+      await tester.pumpWidget(
+        FynkelApp(
+          () => (made..add(Tiny())).last,
+          overlay: (context, game) => Text('${made.indexOf(game)}', textDirection: TextDirection.ltr),
+          source: bundleSource(Bundle({'assets/grid.png': png})),
+        ),
+      );
+      final game = made.single;
       final view = tester.widget<FynkelView>(find.byType(FynkelView));
       expect(view.root, same(game));
+      expect(find.text('0'), findsOneWidget);
       expect(game.world, same(tester.state<FynkelViewState>(find.byType(FynkelView)).world));
       await finish(tester, game.loaded);
       expect(game.texture, isNotNull, reason: 'from the source given');
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(milliseconds: 1));
       expect(game.isAlive, isFalse);
+    });
+
+    testWidgets('F5 starts a FynkelGame over: a new root in a new world, and what was built around it again', (
+      tester,
+    ) async {
+      final made = <Tiny>[];
+      final source = bundleSource(Bundle({'assets/grid.png': png}));
+      await tester.pumpWidget(
+        sized(
+          FynkelGame(
+            make: () => (made..add(Tiny())).last,
+            builder: (context, game) => Stack(
+              children: [
+                FynkelView(root: game, source: source),
+                Text('game ${made.indexOf(game)}'),
+              ],
+            ),
+          ),
+        ),
+      );
+      final first = made.single, world = first.world;
+      await finish(tester, first.loaded);
+      await tester.sendKeyEvent(LogicalKeyboardKey.f5);
+      await tester.pump();
+      expect(made, hasLength(2));
+      final second = made.last;
+      expect(world.isDisposed, isTrue, reason: 'the old view went, and its world with it');
+      expect(first.isAlive, isFalse);
+      expect(second.world, isNot(same(world)));
+      expect(find.text('game 1'), findsOneWidget);
+      expect(second.world.input.isDown(KeyCode.f5), isFalse, reason: 'the restart key is not the game\'s');
+      await finish(tester, second.loaded);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    });
+
+    testWidgets('with restartOnReload a hot reload starts it over; without, it keeps the game', (tester) async {
+      final made = <Tiny>[];
+      final source = bundleSource(Bundle({'assets/grid.png': png}));
+      Widget game({required bool restart}) => sized(
+        FynkelGame(
+          make: () => (made..add(Tiny())).last,
+          restartOnReload: restart,
+          builder: (context, game) => FynkelView(root: game, source: source),
+        ),
+      );
+      await tester.pumpWidget(game(restart: false));
+      await finish(tester, made.single.loaded);
+      await reload(tester);
+      expect(made, hasLength(1));
+      await tester.pumpWidget(game(restart: true));
+      await reload(tester);
+      expect(made, hasLength(2));
+      expect(made.first.isAlive, isFalse);
+      await finish(tester, made.last.loaded);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    });
+
+    testWidgets('a view with no FynkelGame around it gives F5 to the game', (tester) async {
+      await tester.pumpWidget(sized(FynkelView(world: world)));
+      await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.f5);
+      world.update(1 / 60);
+      expect(world.input.isDown(KeyCode.f5), isTrue);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.f5);
     });
   });
 
