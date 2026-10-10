@@ -66,8 +66,9 @@ final class Time {
   /// Unity's. Throws an [ArgumentError] unless it's finite and more than 0.
   double get fixedDelta => _fixedDelta;
   set fixedDelta(double value) {
-    if (!(value > 0 && value.isFinite))
+    if (!(value > 0 && value.isFinite)) {
       throw ArgumentError.value(value, 'fixedDelta', 'must be finite and more than 0');
+    }
     _fixedDelta = value;
   }
 
