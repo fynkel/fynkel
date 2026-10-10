@@ -368,11 +368,27 @@ impl Renderer {
 
         let aspect = self.size.0 as f32 / self.size.1 as f32;
         // Near and far swapped: reversed-Z.
-        let projection = glam::camera::rh::proj::directx::perspective(camera.fov_y, aspect, camera.far, camera.near);
+        let projection = match camera.orthographic {
+            Some(half) => glam::camera::rh::proj::directx::orthographic(
+                -half * aspect,
+                half * aspect,
+                -half,
+                half,
+                camera.far,
+                camera.near,
+            ),
+            None => glam::camera::rh::proj::directx::perspective(camera.fov_y, aspect, camera.far, camera.near),
+        };
+        // Orthographic: every surface is seen from the same direction, so
+        // the shader gets that direction (w = 0) rather than a position.
+        let to_viewer = match camera.orthographic {
+            Some(_) => camera.view.inverse().transform_vector3(Vec3::Z).normalize().extend(0.0),
+            None => camera.position.extend(1.0),
+        };
         let to_sun = scene.sun.map(|s| (-s.direction).normalize_or_zero()).unwrap_or(Vec3::ZERO);
         self.uniforms = FrameUniforms {
             view_proj: (projection * camera.view).to_cols_array_2d(),
-            camera_position: camera.position.extend(1.0).into(),
+            camera_position: to_viewer.into(),
             to_sun: to_sun.extend(if to_sun == Vec3::ZERO { 0.0 } else { 1.0 }).into(),
             sun_color: scene.sun.map_or(Vec3::ZERO, |s| s.color).extend(0.0).into(),
             ambient: scene.ambient.extend(0.0).into(),

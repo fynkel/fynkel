@@ -182,6 +182,43 @@ fn draws_sharing_a_mesh_are_instanced_together() {
     assert_golden("instanced", &image);
 }
 
+/// An orthographic camera draws things the same size however far away:
+/// three cubes 1 m wide, at 10, 15 and 30 m, are each 32 pixels wide, as
+/// the view is 8 m across (half its height is 2 m, and it's twice as wide
+/// as high) over 256 pixels.
+#[test]
+fn an_orthographic_camera_keeps_sizes_at_any_distance() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let mut scene = stage1_scene();
+    let mut camera = CameraView::looking_at(Vec3::new(0.0, 0.0, 10.0), Vec3::ZERO);
+    camera.clear_color = [0.0; 3];
+    camera.orthographic = Some(2.0);
+    scene.camera = Some(camera);
+    let material = scene.draws[0].material;
+    scene.draws = [(-2.5, 0.0), (0.0, -5.0), (2.5, -20.0)]
+        .map(|(x, z)| Draw { mesh: CUBE, model: Mat4::from_translation(Vec3::new(x, 0.0, z)), material })
+        .to_vec();
+    let (image, _) = render(&gpu, &mut r, &scene, 256, 128);
+    // Across the middle row: where each cube starts, and how wide it is.
+    let row = &image.rgba[64 * 256 * 4..65 * 256 * 4];
+    let mut runs = Vec::new();
+    let mut start = None;
+    for (x, p) in row.chunks(4).chain([[0u8; 4].as_slice()]).enumerate() {
+        match (p[..3] != [0, 0, 0], start) {
+            (true, None) => start = Some(x),
+            (false, Some(s)) => {
+                runs.push((s, x - s));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    // Centred at 128 + 32 × x: 48, 128 and 208.
+    assert_eq!(runs, [(32, 32), (112, 32), (192, 32)]);
+    assert_golden("orthographic", &image);
+}
+
 #[test]
 #[should_panic(expected = "the renderer draws into sRGB views")]
 fn a_plain_format_view_is_refused() {

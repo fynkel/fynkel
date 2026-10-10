@@ -2,6 +2,8 @@
 // step adds its own.
 
 import 'lab.dart';
+import 'scenes/camera_basics.dart';
+import 'scenes/camera_rigs.dart';
 import 'scenes/components.dart';
 import 'scenes/eases.dart';
 import 'scenes/input.dart';
@@ -26,4 +28,6 @@ final List<LabScene Function()> scenes = [
   MotionBasicsScene.new,
   EasesScene.new,
   MotionScene.new,
+  CameraBasicsScene.new,
+  CameraRigsScene.new,
 ];

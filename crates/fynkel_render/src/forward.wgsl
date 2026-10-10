@@ -13,6 +13,8 @@
 
 struct Frame {
     view_proj: mat4x4<f32>,
+    // w = 1: the camera's position. w = 0 (orthographic): the unit vector
+    // towards the camera, the same everywhere.
     camera_position: vec4<f32>,
     // xyz: unit vector towards the sun. w: 1 if there is a sun.
     to_sun: vec4<f32>,
@@ -192,7 +194,8 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
     if double_sided && front_facing == (in.params.w < 0.0) {
         n = -n;
     }
-    let v = normalize(frame.camera_position.xyz - in.world_position);
+    // w = 0: an orthographic camera, and xyz is the way to it.
+    let v = select(normalize(frame.camera_position.xyz - in.world_position), frame.camera_position.xyz, frame.camera_position.w == 0.0);
     let n_dot_v = max(dot(n, v), 1e-4);
     let f0 = mix(vec3<f32>(0.04), albedo, metallic);
     let diffuse_color = albedo * (1.0 - metallic);

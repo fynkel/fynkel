@@ -6,7 +6,7 @@ around it, scroll (or two fingers on a trackpad) to zoom, and tap the
 character to turn its head. The models are Kenney's
 ([assets/CREDITS.md](assets/CREDITS.md)).
 
-The game is `lib/garden.dart`: `Garden`, the root, adds an `OrbitCamera`,
+The game is `lib/garden.dart`: `Garden`, the root, adds an `OrbitCamera` (an `Orbit` rig),
 the lights, the `Ground`, the `Props` and the `Character`, and each of
 those loads what it needs from `assets/`. `lib/main.dart` is
 `runApp(FynkelApp(Garden()))`.

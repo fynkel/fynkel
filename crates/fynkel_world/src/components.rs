@@ -135,8 +135,8 @@ impl Component for MeshRenderer {}
 
 // --- Camera ----------------------------------------------------------------
 
-/// A perspective camera looking along its transform's forward (-Z). The
-/// first camera found is the one rendered.
+/// A camera looking along its transform's forward (-Z): perspective, or
+/// orthographic. The first camera found is the one rendered.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Camera {
     /// Vertical field of view in degrees.
@@ -147,10 +147,23 @@ pub struct Camera {
     pub far: f32,
     /// The colour behind everything.
     pub clear_color: Color,
+    /// Parallel projection: things keep their size however far away they
+    /// are, and `fov_y` is unused.
+    pub orthographic: bool,
+    /// Half the view's height in metres when orthographic, as Unity's
+    /// `orthographicSize`.
+    pub size: f32,
 }
 
 impl Camera {
-    pub const DEFAULT: Self = Self { fov_y: 60.0, near: 0.1, far: 1000.0, clear_color: Color::rgb(0.1, 0.1, 0.12) };
+    pub const DEFAULT: Self = Self {
+        fov_y: 60.0,
+        near: 0.1,
+        far: 1000.0,
+        clear_color: Color::rgb(0.1, 0.1, 0.12),
+        orthographic: false,
+        size: 5.0,
+    };
 }
 
 impl Default for Camera {
@@ -169,6 +182,8 @@ impl Describe for Camera {
             Field::new("near", FieldKind::F32, Value::F32(D.near)).range(1e-4, 1e6),
             Field::new("far", FieldKind::F32, Value::F32(D.far)).range(1e-3, 1e9),
             Field::new("clear_color", FieldKind::Color, Value::Color(D.clear_color)),
+            Field::new("orthographic", FieldKind::Bool, Value::Bool(D.orthographic)),
+            Field::new("size", FieldKind::F32, Value::F32(D.size)).range(1e-4, 1e6),
         ];
         FIELDS
     }
@@ -179,6 +194,8 @@ impl Describe for Camera {
             1 => Value::F32(self.near),
             2 => Value::F32(self.far),
             3 => Value::Color(self.clear_color),
+            4 => Value::Bool(self.orthographic),
+            5 => Value::F32(self.size),
             _ => return None,
         })
     }
@@ -189,6 +206,8 @@ impl Describe for Camera {
             (1, Value::F32(v)) => self.near = v,
             (2, Value::F32(v)) => self.far = v,
             (3, Value::Color(c)) => self.clear_color = c,
+            (4, Value::Bool(v)) => self.orthographic = v,
+            (5, Value::F32(v)) => self.size = v,
             _ => unreachable!("validated by Describe::set"),
         }
     }

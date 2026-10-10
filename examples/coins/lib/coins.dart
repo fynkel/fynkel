@@ -226,19 +226,16 @@ class Collector extends GameObject {
   }
 }
 
-/// Behind and above the player, looking at it.
+/// Behind and above the player, looking at it: a [Follow] and a [LookAt].
 class FollowCamera extends GameObject {
-  FollowCamera(this.player) : super(transform: _behind(Vec3.zero), components: [Camera(fovY: 50)]);
-
-  final Player player;
-
-  @override
-  void onUpdate() {
-    super.onUpdate();
-    transform = _behind(player.transform.position);
-  }
-
-  static Transform _behind(Vec3 at) => Transform(position: at + Vec3(0, 7, 9), lookAt: at + Vec3(0, 1, 0));
+  FollowCamera(GameObject player)
+    : super(
+        components: [
+          Camera(fovY: 50),
+          Follow(player, offset: Vec3(0, 7, 9)),
+          LookAt(player, offset: Vec3(0, 1, 0)),
+        ],
+      );
 }
 
 /// A few hundred plain objects, motes drifting over the level, moved by

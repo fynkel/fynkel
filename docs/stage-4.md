@@ -296,6 +296,16 @@ As Cinemachine: the view has one real camera, and **virtual cameras** decide whe
 - **Between screen and world**: `screenToRay(point)`, `screenToPlane(point, plane)`, `worldToScreen(point)`.
 - All of this is Dart over the engine's one camera; only the orthographic projection is new in Rust.
 
+- *Settled in step 7:*
+  - **The world is the brain**: `world.cameras` holds the virtual cameras, the blends and the shakes; there is no brain component to add. `world.camera` is the object the view draws from. With no virtual camera the camera is the game's, left where it is.
+  - **A sixth step of the frame**, after the late updates: the rigs move their objects (`Follow` and `Orbit`, then `LookAt`, so a LookAt aims from where a Follow put it this frame), then the live virtual camera's pose and lens go to the camera, then the shakes. A frame without cameras allocates nothing.
+  - **The live one** is the enabled one with the highest priority; of equals, the one enabled or given its priority last (Cinemachine's). The first one cuts. `setBlend(blend, from:, to:)` picks the most exact pair (both, then to, then from), else `defaultBlend` (1 s, `Ease.inOutQuad`); `Blend.cut`. A blend cut short blends on from where it got to. `unscaled` keeps blends going while paused; `onLiveChanged` is a signal.
+  - **Damping is Cinemachine's**: 99 % of the way in `damping` seconds, whatever the frame rate.
+  - **Shake is `world.cameras.shake(strength, seconds:)`**, not on an object: it shakes the view's camera on top of whatever moves it (a virtual camera, a rig, a tween, the game), across the view, fading as (1 − p)², and ends exactly where the camera would be. `stopShaking`, `isShaking`, `seed`. Step 6's `GameObject.shake` stays, for shaking anything.
+  - **`size` is half the view's height**, Unity's `orthographicSize`; `Camera.orthographic` and `size` are engine fields (ABI 12).
+  - **`rayThrough` is now `screenToRay`**, beside `screenToPlane(point, plane)` and `worldToScreen(point)` (the view's size by default, null behind a perspective camera); `Plane(normal, point)`, `Plane.ground`.
+  - **The lab's own `Follow` became `Trail`**, as package:fynkel now has a `Follow`.
+
 ### 3.9 Layers, debug drawing, errors, hot reload
 
 - **Layers**: each object has one of 32 (`layer`), and rays, input and cameras take a mask. The engine keeps the layer, so rays and drawing skip what they don't want without asking Dart.
@@ -400,6 +410,17 @@ devices wait for you.
 hand-worked values, shake's ends, and screen and world conversions both
 ways (a golden for the orthographic camera), and the garden's and coins'
 cameras are rigs.
+✅ 30 tests in `test/camera_test.dart` (334 in package:fynkel in all), and
+a Rust golden, `tests/golden/orthographic.png`, which the Dart test renders
+too; 12 mutants of the camera code: 9 killed at once, 3 more after a test
+each (a blend to a camera beating one from the last, the shake's fade, a
+virtual camera on the view's camera itself). The garden's camera is an
+`Orbit`, coins' a `Follow` and a `LookAt`. Two lab scenes, Cameras: the
+basics and Cameras: rigs. Found on the way: in Flutter's debug VM a
+`Pointer.asTypedList` view in `_sendTransforms` once had a bad data
+pointer and crashed the process (the lab's tests, the Motion scene then a
+camera scene; never in AOT or plain Dart); it now writes through the
+pointers.
 
 **Step 8: layers and debug drawing.** §3.9, in the engine and in Dart.
 *Done when* goldens show a layer hidden from a camera and debug lines

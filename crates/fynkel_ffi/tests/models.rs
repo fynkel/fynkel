@@ -178,7 +178,14 @@ fn render(name: &str, from: Vec3, zoom: f32) -> fynkel_golden::Image {
         ok(fy_camera_set(
             w,
             camera,
-            &FyCamera { fov_y: FOV, near_clip: radius * 0.05, far_clip: far, clear_color: clear },
+            &FyCamera {
+                fov_y: FOV,
+                near_clip: radius * 0.05,
+                far_clip: far,
+                clear_color: clear,
+                orthographic: false,
+                size: 5.0,
+            },
         ));
         let distance = radius / (FOV.to_radians() / 2.0).sin() * 1.05 / zoom;
         let at = Transform::from_position(centre + from.normalize() * distance).looking_at(centre);

@@ -57,32 +57,32 @@ void main() {
     expect(hit.object.name, 'Block 0.3');
   });
 
-  test('rayThrough needs a camera and a view with an area', () {
+  test('screenToRay needs a camera and a view with an area', () {
     final empty = world.add(GameObject(transform: Transform()));
     expect(
-      () => empty.rayThrough(const ViewPoint(1, 1, width: 2, height: 2)),
+      () => empty.screenToRay(const ViewPoint(1, 1, width: 2, height: 2)),
       throwsA(isA<FynkelException>().having((e) => e.status, 'status', FynkelStatus.noComponent)),
     );
     final camera = world.add(GameObject(transform: Transform(), components: [Camera()]));
-    expect(() => camera.rayThrough(const ViewPoint(0, 0, width: 0, height: 2)), throwsArgumentError);
+    expect(() => camera.screenToRay(const ViewPoint(0, 0, width: 0, height: 2)), throwsArgumentError);
   });
 
-  test('rayThrough the centre goes straight ahead from the near plane, and a corner at half the field of view', () {
+  test('screenToRay the centre goes straight ahead from the near plane, and a corner at half the field of view', () {
     final camera = world.add(
       GameObject(
         transform: Transform(position: Vec3(1, 2, 3), rotation: Quat.axisAngle(Vec3.up, math.pi / 2)),
         components: [Camera(fovY: 90, near: 0.5)],
       ),
     );
-    final centre = camera.rayThrough(const ViewPoint(100, 50, width: 200, height: 100));
+    final centre = camera.screenToRay(const ViewPoint(100, 50, width: 200, height: 100));
     // Turned a quarter left, the camera looks along -X.
     expect(centre.direction.closeTo(Vec3.left, 1e-6), isTrue, reason: '${centre.direction}');
     expect(centre.origin.closeTo(Vec3(0.5, 2, 3), 1e-6), isTrue, reason: '${centre.origin}');
     // The top edge's middle is 45° up; the top-left corner also 2 × 45°
     // wide in the camera's frame (tan 45° × aspect 2), so 63.4° to the side.
-    final top = camera.rayThrough(const ViewPoint(100, 0, width: 200, height: 100));
+    final top = camera.screenToRay(const ViewPoint(100, 0, width: 200, height: 100));
     expect(top.direction.closeTo(Vec3(-1, 1, 0).normalized, 1e-6), isTrue, reason: '${top.direction}');
-    final corner = camera.rayThrough(const ViewPoint(0, 0, width: 200, height: 100));
+    final corner = camera.screenToRay(const ViewPoint(0, 0, width: 200, height: 100));
     // Camera frame (-2, 1, -1): its right is world -Z, so left is +Z.
     expect(corner.direction.closeTo(Vec3(-1, 1, 2).normalized, 1e-6), isTrue, reason: '${corner.direction}');
   });
@@ -153,7 +153,7 @@ void main() {
         }
         if (!inside) continue;
         final hit = world.raycast(
-          camera.rayThrough(ViewPoint(x + 0.5, y + 0.5, width: width.toDouble(), height: height.toDouble())),
+          camera.screenToRay(ViewPoint(x + 0.5, y + 0.5, width: width.toDouble(), height: height.toDouble())),
         );
         final found = hit == null ? 0 : objects.indexOf(hit.object) + 1;
         expect(found, shown, reason: 'pixel ($x, $y)');

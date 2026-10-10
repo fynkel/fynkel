@@ -18,6 +18,8 @@ scene(s) here.
 | Motion: the basics | 6 | One cube: move, spin, grow, colour, and all four in a sequence; tap it to punch |
 | Motion: eases | 6 | Every ease side by side, in, out and in-out; seconds, time scale, complete |
 | Motion: tweens and sequences | 6 | A patrol sequence, a SmoothDamp follower, a punched crate, a door awaited in a routine, a race |
+| Cameras: the basics | 7 | Two virtual cameras on a cube: switch (blend or cut), orthographic, shake |
+| Cameras: rigs | 7 | Chase (Follow + LookAt), orbit and corner cameras on a running ball; tap the floor |
 
 ## Running it
 

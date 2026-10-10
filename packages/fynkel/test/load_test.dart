@@ -133,7 +133,7 @@ void main() {
   tearDown(() => world.dispose());
 
   /// What the camera sees at the centre, or null.
-  GameObject? hit() => world.raycast(camera.rayThrough(centre))?.object;
+  GameObject? hit() => world.raycast(camera.screenToRay(centre))?.object;
   Transform ahead() => Transform(position: Vec3(0, 0, -5));
 
   test('an object that loads nothing appears in the same add', () async {

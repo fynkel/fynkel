@@ -15,6 +15,7 @@ import 'math.dart';
 import 'native.dart';
 
 part 'assets.dart';
+part 'cameras.dart';
 part 'components.dart';
 part 'input.dart';
 part 'keys.dart';
@@ -219,15 +220,16 @@ final class World implements Finalizable {
     final n = _unsent.length;
     final ids = scratch.ids(n);
     final values = scratch.transforms(n);
-    // An FyTransform is ten floats: position, rotation, scale.
-    final idList = ids.asTypedList(n);
-    final floats = values.cast<Float>().asTypedList(n * 10);
+    // An FyTransform is ten floats: position, rotation, scale. Written
+    // through the pointers, not asTypedList views: in Flutter's debug VM a
+    // view made here once had a bad data pointer and crashed the process.
+    final floats = values.cast<Float>();
     var count = 0;
     for (final object in _unsent) {
       if (!object._unsent) continue;
       object._unsent = false;
       final Transform(:position, :rotation, :scale) = object._transform!;
-      idList[count] = object._id;
+      ids[count] = object._id;
       floats
         ..[count * 10] = position.x
         ..[count * 10 + 1] = position.y
@@ -249,6 +251,20 @@ final class World implements Finalizable {
   /// The view feeds it; [update] runs its step first. Objects read it as
   /// [GameObject.input].
   late final Input input = Input().._targets = _Pointing(this);
+
+  /// The virtual cameras, their blends, and shaking the view's camera
+  /// (docs/stage-4.md §3.8).
+  late final Cameras cameras = Cameras._(this);
+
+  /// The object the view draws from: the one with a [Camera] and the
+  /// lowest id; null when there's none.
+  GameObject? get camera {
+    final w = pointer;
+    _sendTransforms();
+    check(fy_camera_active(w, scratch.id));
+    final id = scratch.id.value;
+    return id == 0 ? null : _object(id);
+  }
 
   // The objects and behaviours still waiting to start, reused each frame.
   var _waiting = <Object>[];
@@ -275,10 +291,13 @@ final class World implements Finalizable {
   ///    were made, then the routines' waits end ([GameObject.start]).
   /// 5. **Late updates.** Then each object updated this frame, and its
   ///    behaviours, get [GameObject.onLateUpdate] in the same order: for
-  ///    what follows where the others went, such as a camera.
+  ///    what follows where the others went.
+  /// 6. **Cameras.** The camera rigs move their objects ([Follow] and
+  ///    [Orbit], then [LookAt]), then [cameras] puts the view's camera
+  ///    where the live [VirtualCamera] is, and shakes it.
   ///
   /// Hidden objects (inactive, or below one that is) and their behaviours
-  /// are skipped by the last four and start when they're first shown; so are
+  /// are skipped by the last five and start when they're first shown; so are
   /// disabled behaviours ([Behaviour.enabled]) and those still loading. A
   /// view then draws the world as it is. What their code throws goes to
   /// [errors], and the frame goes on.
@@ -367,6 +386,8 @@ final class World implements Finalizable {
         }
       }
     }
+
+    cameras._run();
   }
 
   // --- Motions ---
@@ -1685,25 +1706,69 @@ class GameObject with _Moving {
 
   /// The ray from this camera through [point] in a view showing it: from
   /// the point on the near plane, away from the camera. Cast it with
-  /// [World.raycast] to find what's drawn there.
+  /// [World.raycast] to find what's drawn there (Unity's
+  /// `ScreenPointToRay`).
   ///
   /// Uses the object's [Camera] and its [worldTransform] (its scale is
   /// ignored, as the view ignores it). Throws a [FynkelException] with
   /// [FynkelStatus.noComponent] when it has no camera.
-  Ray rayThrough(ViewPoint point) {
+  Ray screenToRay(ViewPoint point) {
     if (!(point.width > 0 && point.height > 0)) {
       throw ArgumentError.value(point, 'point', 'needs a view with an area');
     }
-    final c = get<Camera>() ?? (throw FynkelException(FynkelStatus.noComponent, '$this has no Camera'));
+    final c = _lens();
     final t = worldTransform;
+    // Across the view from -1 to 1, up positive, so the view's y flips.
+    final across = 2 * point.x / point.width - 1;
+    final up = 1 - 2 * point.y / point.height;
+    final aspect = point.width / point.height;
+    if (c.orthographic) {
+      // Straight ahead, from the point on the near plane.
+      final from = Vec3(across * c.size * aspect, up * c.size, -c.near);
+      return Ray(t.position + t.rotation.rotate(from), t.rotation.rotate(Vec3.forward));
+    }
     final tanHalf = math.tan(c.fovY * math.pi / 360);
-    // Through the point on the plane 1 in front of the camera, in the
-    // camera's frame: -Z ahead, +Y up, so the view's y is flipped.
-    final x = (2 * point.x / point.width - 1) * tanHalf * point.width / point.height;
-    final y = (1 - 2 * point.y / point.height) * tanHalf;
-    final through = t.rotation.rotate(Vec3(x, y, -1));
+    // Through the point on the plane 1 in front of the camera.
+    final through = t.rotation.rotate(Vec3(across * tanHalf * aspect, up * tanHalf, -1));
     return Ray(t.position + through * c.near, through);
   }
+
+  /// Where the ray through [point] meets [plane]: the spot on the ground
+  /// under a finger, say. Null when the ray runs along the plane or away
+  /// from it.
+  Vec3? screenToPlane(ViewPoint point, Plane plane) {
+    final ray = screenToRay(point);
+    final distance = plane.raycast(ray);
+    return distance == null ? null : ray.at(distance);
+  }
+
+  /// Where [point], in the world, is in a view showing this camera
+  /// (Unity's `WorldToScreenPoint`), in the view's logical pixels from its
+  /// top left: in [width] × [height], by default the size [World.input]
+  /// was last given. Null when it's behind a perspective camera; it can be
+  /// outside the view.
+  ViewPoint? worldToScreen(Vec3 point, {double? width, double? height}) {
+    final w = width ?? world.input.width, h = height ?? world.input.height;
+    if (!(w > 0 && h > 0)) throw ArgumentError('worldToScreen needs a view with an area; got ${w}x$h');
+    final c = _lens();
+    final t = worldTransform;
+    final p = t.rotation.inverse.rotate(point - t.position);
+    final aspect = w / h;
+    double across, up;
+    if (c.orthographic) {
+      across = p.x / (c.size * aspect);
+      up = p.y / c.size;
+    } else {
+      final ahead = -p.z;
+      if (!(ahead > 0)) return null;
+      final tanHalf = math.tan(c.fovY * math.pi / 360);
+      across = p.x / (ahead * tanHalf * aspect);
+      up = p.y / (ahead * tanHalf);
+    }
+    return ViewPoint((across + 1) / 2 * w, (1 - up) / 2 * h, width: w, height: h);
+  }
+
+  Camera _lens() => get<Camera>() ?? (throw FynkelException(FynkelStatus.noComponent, '$this has no Camera'));
 
   // --- Components ---
 
@@ -1842,6 +1907,8 @@ class GameObject with _Moving {
           near: scratch.camera.ref.near_clip,
           far: scratch.camera.ref.far_clip,
           clearColor: scratch.camera.ref.clear_color.read(),
+          orthographic: scratch.camera.ref.orthographic,
+          size: scratch.camera.ref.size,
         ),
       if (missing<Light>() && fy_light_get(w, _id, scratch.light) == FyStatus.FY_STATUS_OK) _readLight(),
       if (missing<MeshRenderer>() && fy_mesh_renderer_get(w, _id, scratch.meshRenderer) == FyStatus.FY_STATUS_OK)
@@ -1941,6 +2008,8 @@ class GameObject with _Moving {
     c.near_clip = value.near;
     c.far_clip = value.far;
     c.clear_color.write(value.clearColor);
+    c.orthographic = value.orthographic;
+    c.size = value.size;
     check(fy_camera_set(_engine('its Camera can\'t be changed'), id, scratch.camera));
   }
 

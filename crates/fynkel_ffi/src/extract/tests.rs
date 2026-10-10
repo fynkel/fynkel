@@ -71,6 +71,7 @@ fn the_stage_1_scene_is_extracted_resolved_and_linear() {
     assert!((camera.fov_y - 60f32.to_radians()).abs() < 1e-6);
     assert_eq!((camera.near, camera.far), (0.1, 1000.0));
     assert_eq!(camera.clear_color, rgb(Camera::default().clear_color));
+    assert_eq!(camera.orthographic, None, "perspective unless asked");
 
     let sun = scene.sun.unwrap();
     assert!(close(sun.direction, Vec3::new(-0.4, -1.0, -0.3).normalize()), "{:?}", sun.direction);
@@ -426,4 +427,15 @@ fn extract_probe() {
             ms(times[times.len() - 1])
         );
     }
+}
+
+#[test]
+fn an_orthographic_camera_is_extracted_with_its_size() {
+    let (mut world, _) = stage1_world();
+    let mut id = None;
+    world.for_each::<Camera>(|i, _| id = Some(i));
+    let camera = Camera { orthographic: true, size: 2.5, ..Camera::default() };
+    world.insert(id.unwrap(), camera).unwrap();
+    let (scene, _) = extract(&world);
+    assert_eq!(scene.camera.unwrap().orthographic, Some(2.5));
 }

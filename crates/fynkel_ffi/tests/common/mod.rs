@@ -74,7 +74,14 @@ pub fn stage1(world: &World) -> u64 {
     // SAFETY: a live world, and pointers to locals.
     unsafe {
         let camera = world.spawn();
-        let fy_camera = FyCamera { fov_y: 60.0, near_clip: 0.1, far_clip: 1000.0, clear_color: srgb(0.1, 0.1, 0.12) };
+        let fy_camera = FyCamera {
+            fov_y: 60.0,
+            near_clip: 0.1,
+            far_clip: 1000.0,
+            clear_color: srgb(0.1, 0.1, 0.12),
+            orthographic: false,
+            size: 5.0,
+        };
         ok(fy_camera_set(w, camera, &fy_camera));
         let looking = Transform::from_position(Vec3::new(0.0, 1.5, 4.0)).looking_at(Vec3::ZERO);
         ok(fy_transform_set(w, camera, &transform(looking)));
