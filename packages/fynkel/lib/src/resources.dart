@@ -175,6 +175,28 @@ final class Mesh implements Finalizable {
     return scratch.count2.value;
   }
 
+  /// The vertices' positions, 3 floats each (x, y, z), in the mesh's own
+  /// space: a new copy each time. Unity's `Mesh.vertices`.
+  Float32List get positions {
+    final count = vertexCount * 3;
+    return using((arena) {
+      final p = arena<Float>(count);
+      check(fy_mesh_read(_live, p, count ~/ 3, nullptr, 0));
+      return Float32List.fromList(p.asTypedList(count));
+    });
+  }
+
+  /// Three indices into [positions] per triangle, counter-clockwise seen
+  /// from its front: a new copy each time. Unity's `Mesh.triangles`.
+  Uint32List get indices {
+    final count = indexCount;
+    return using((arena) {
+      final p = arena<Uint32>(count);
+      check(fy_mesh_read(_live, nullptr, 0, p, count));
+      return Uint32List.fromList(p.asTypedList(count));
+    });
+  }
+
   /// Frees the mesh: every world that has it lets it go, and each view
   /// frees its GPU copy on its next frame. Throws a [FynkelException]
   /// ([FynkelStatus.inUse]) while an object's [MeshRenderer] uses it, and

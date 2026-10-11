@@ -673,6 +673,29 @@ dynamicFriction:, bounciness:, frictionCombine:, bounceCombine:)`, Unity's
 0.6 and 0 by default. A collider with no `Rigidbody` is static; a game
 moves it by moving its object.
 
+**A `MeshCollider`** takes a mesh's own shape: `MeshCollider(mesh:)`, or
+with no mesh its object's `MeshRenderer`'s. Its triangles suit the ground
+and what stands on it (static, or on a kinematic rigidbody); with
+`convex: true` it's the mesh's hull, which a falling body can be (on a
+dynamic rigidbody a mesh is its hull either way). The object's scale
+stretches it on each axis. A model's parts each get one with
+`MeshCollider.addToParts`:
+
+```dart
+// lib/rock.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
+
+/// A rock model that balls roll over, along its real shape.
+class Rock extends GameObject {
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    MeshCollider.addToParts(add(await assets.model('rock.glb')));
+  }
+}
+```
+
 **A `Rigidbody`** makes its object move with physics, as Unity's: give it
 a collider and it falls, tumbles and lands. Colliders on its children
 that have no rigidbody of their own are part of the same body, and the
@@ -1011,7 +1034,8 @@ scene files and an editor. Until collision callbacks come, queries
 | `IPointerClickHandler` | `onClick` |
 | Cinemachine | `VirtualCamera`, `Follow`, `LookAt`, `Orbit`, `world.cameras` |
 | DOTween | `moveTo`, `tween`, `sequence`, `Ease` |
-| `BoxCollider`, `SphereCollider`, `CapsuleCollider` | the same, from `fynkel_physics` |
+| `BoxCollider`, `SphereCollider`, `CapsuleCollider`, `MeshCollider` | the same, from `fynkel_physics` |
+| A non-convex `MeshCollider` on a dynamic `Rigidbody` (refused) | collides as its hull |
 | `Rigidbody`, `ForceMode`, `RigidbodyConstraints`, `PhysicMaterial` | `Rigidbody`, `ForceMode`, `RigidbodyConstraints`, `PhysicsMaterial` |
 | `Rigidbody.velocity` | `linearVelocity` (as Unity 6's) |
 | `Physics.gravity`, `Physics.autoSimulation` | `physics.gravity`, `physics.stepBetweenFrames` |

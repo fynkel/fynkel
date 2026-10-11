@@ -12,6 +12,7 @@ import 'scenes/input.dart';
 import 'scenes/layer_matrix.dart';
 import 'scenes/layers_basics.dart';
 import 'scenes/lifecycle.dart';
+import 'scenes/mesh_colliders_basics.dart';
 import 'scenes/motion.dart';
 import 'scenes/motion_basics.dart';
 import 'scenes/physics_queries_basics.dart';
@@ -46,4 +47,5 @@ final List<LabScene Function()> scenes = [
   RigidbodyWallsScene.new,
   ContactsBasicsScene.new,
   LayerMatrixScene.new,
+  MeshCollidersBasicsScene.new,
 ];

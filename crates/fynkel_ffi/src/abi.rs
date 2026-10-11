@@ -26,7 +26,7 @@ use crate::extract::{Extract, ResourceOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 14;
+pub const FY_ABI_VERSION: u32 = 15;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -1361,6 +1361,53 @@ pub unsafe extern "C" fn fy_mesh_counts(
             write(out_vertices, mesh.0.vertices().len(), "out_vertices")?;
             write(out_indices, mesh.0.indices().len(), "out_indices")
         }
+    })
+}
+
+/// Copies the mesh's vertex positions, three floats each, to `positions`
+/// and its indices to `indices`: `vertex_count` and `index_count` must be
+/// `fy_mesh_counts`' numbers. A null array (with its count 0) is skipped.
+///
+/// # Safety
+///
+/// `mesh` is null or live; `positions` is null or writable for
+/// `vertex_count * 3` floats, `indices` for `index_count` u32s.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_read(
+    mesh: *const FyMesh,
+    positions: *mut f32,
+    vertex_count: usize,
+    indices: *mut u32,
+    index_count: usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let mesh = unsafe { handle(mesh, "mesh") }?;
+        let (vertices, mesh_indices) = (mesh.0.vertices(), mesh.0.indices());
+        if !positions.is_null() {
+            if vertex_count != vertices.len() {
+                return Err(Error::new(
+                    FyStatus::WrongSize,
+                    format!("the mesh has {} vertices, not {vertex_count}", vertices.len()),
+                ));
+            }
+            // SAFETY: not null, and writable for vertex_count * 3 floats per the contract.
+            let out = unsafe { std::slice::from_raw_parts_mut(positions, vertex_count * 3) };
+            for (out, vertex) in out.chunks_exact_mut(3).zip(vertices) {
+                out.copy_from_slice(&vertex.position);
+            }
+        }
+        if !indices.is_null() {
+            if index_count != mesh_indices.len() {
+                return Err(Error::new(
+                    FyStatus::WrongSize,
+                    format!("the mesh has {} indices, not {index_count}", mesh_indices.len()),
+                ));
+            }
+            // SAFETY: not null, and writable for index_count u32s per the contract.
+            unsafe { std::slice::from_raw_parts_mut(indices, index_count) }.copy_from_slice(mesh_indices);
+        }
+        Ok(())
     })
 }
 

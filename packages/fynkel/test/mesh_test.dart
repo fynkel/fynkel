@@ -85,6 +85,23 @@ void main() {
     expect((Mesh.sphere().vertexCount, Mesh.sphere().indexCount), (49 * 25, 48 * 23 * 2 * 3));
   });
 
+  test('a mesh reads back its positions and triangles, built-in shapes too', () {
+    const given = [Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 1, 0), Vec3(0, 0, 1)];
+    const triangles = [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3];
+    final mesh = Mesh.custom(positions: given, indices: triangles);
+    final (positions, indices) = (mesh.positions, mesh.indices);
+    expect(positions.length, mesh.vertexCount * 3);
+    expect(indices.length, triangles.length);
+    for (var i = 0; i < triangles.length; i++) {
+      final at = indices[i] * 3;
+      expect(Vec3(positions[at], positions[at + 1], positions[at + 2]), given[triangles[i]]);
+    }
+    expect(Mesh.cube().indices.length, 36);
+    expect(Mesh.cube().positions.every((p) => p.abs() == 0.5), isTrue);
+    mesh.dispose();
+    expect(() => mesh.positions, throwsStateError);
+  });
+
   test('one mesh in two worlds, and a big one built in the background', () async {
     // A 128 × 128 terrain: about 33,000 vertices with UVs, so tangents are
     // generated, off the test's own isolate.

@@ -42,8 +42,8 @@ final class PhysicsMaterial {
   }
 }
 
-/// A shape physics knows an object by: [BoxCollider], [SphereCollider] or
-/// [CapsuleCollider]. It's in the world while it's enabled and its object
+/// A shape physics knows an object by: [BoxCollider], [SphereCollider],
+/// [CapsuleCollider] or [MeshCollider]. It's in the world while it's enabled and its object
 /// is shown, at its object's world position, rotation and scale, and on
 /// its object's layer.
 sealed class Collider extends Behaviour {
@@ -174,6 +174,13 @@ sealed class Collider extends Behaviour {
 
   void _writeShape(FpColliderSpec spec);
 
+  /// After the native world took what [_writeShape] wrote ([ok]), or
+  /// refused it.
+  void _settle(bool ok) {}
+
+  /// After the native world let it go.
+  void _released() {}
+
   static void _positive(String name, double value) {
     if (!(value > 0) || !value.isFinite) throw ArgumentError.value(value, name, 'must be finite and more than 0');
   }
@@ -296,5 +303,100 @@ final class CapsuleCollider extends Collider {
       ..x = _radius
       ..y = _height
       ..z = 0;
+  }
+}
+
+/// A mesh's shape (Unity's `MeshCollider`): its triangles, or with
+/// [convex] the smallest convex shape around them, its hull. [mesh] is the
+/// one given, or else its object's [MeshRenderer]'s, read when it's
+/// enabled. Its object's scale stretches it on each axis.
+///
+/// Triangles are for what doesn't move, or moves as the game says
+/// (static, or on a kinematic [Rigidbody]): the ground, a ramp, a model's
+/// rocks. Others bump into them; they bump into nothing, as they have no
+/// inside. On a dynamic rigidbody a mesh collides as its hull, even if not
+/// [convex] (Unity refuses it there). A hull is quick for bodies to hit,
+/// and works on anything; a box, sphere or capsule is quicker still.
+///
+/// For each part of a model, use [MeshCollider.addToParts].
+final class MeshCollider extends Collider {
+  MeshCollider({this._mesh, this._convex = false, super.center, super.isTrigger, super.material});
+
+  /// A [MeshCollider] on [root] and on every object below it that has a
+  /// [MeshRenderer] with a mesh: each part of a model, say, once it's
+  /// added to the world. Returns them.
+  static List<MeshCollider> addToParts(
+    GameObject root, {
+    bool convex = false,
+    bool isTrigger = false,
+    PhysicsMaterial material = PhysicsMaterial.standard,
+  }) {
+    final added = <MeshCollider>[];
+    void walk(GameObject object) {
+      if (object.get<MeshRenderer>()?.mesh != null) {
+        added.add(object.addComponent(MeshCollider(convex: convex, isTrigger: isTrigger, material: material)));
+      }
+      object.children.forEach(walk);
+    }
+
+    walk(root);
+    return added;
+  }
+
+  /// The mesh given, or null to use its object's [MeshRenderer]'s.
+  Mesh? get mesh => _mesh;
+  set mesh(Mesh? value) {
+    _mesh = value;
+    _changed();
+  }
+
+  Mesh? _mesh;
+
+  /// Whether it's the mesh's hull rather than its triangles.
+  bool get convex => _convex;
+  set convex(bool value) {
+    _convex = value;
+    _changed();
+  }
+
+  bool _convex;
+
+  // The mesh the native world has, and the one just written for it.
+  Mesh? _held;
+  Mesh? _next;
+
+  /// The mesh it's made of: [mesh], or its object's [MeshRenderer]'s.
+  Mesh get _shapeMesh {
+    if (_mesh case final mesh?) return mesh;
+    if (gameObject.get<MeshRenderer>()?.mesh case final mesh?) return mesh;
+    throw StateError('MeshCollider on $gameObject: no mesh. Give it one, or a MeshRenderer with one');
+  }
+
+  @override
+  void _checkShape() {}
+
+  @override
+  void _writeShape(FpColliderSpec spec) {
+    final mesh = _shapeMesh;
+    spec
+      ..kind = FpColliderKind.FP_COLLIDER_KIND_MESH
+      ..mesh = _physics!._holdMesh(mesh)
+      ..convex = _convex ? 1 : 0;
+    _next = mesh;
+  }
+
+  @override
+  void _settle(bool ok) {
+    final (physics, next) = (_physics!, _next!);
+    _next = null;
+    if (!ok) return physics._releaseMesh(next);
+    if (_held case final held?) physics._releaseMesh(held);
+    _held = next;
+  }
+
+  @override
+  void _released() {
+    if (_held case final held?) _physics?._releaseMesh(held);
+    _held = null;
   }
 }

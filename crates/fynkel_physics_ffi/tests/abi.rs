@@ -327,6 +327,64 @@ fn all_hits_and_overlaps_are_read_in_exactly_as_many_as_were_found() {
     }
 }
 
+/// A square, 2 × 2, facing -Z, as a mesh through C.
+fn square(world: &World) -> u64 {
+    let positions: [f32; 12] = [-1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0, 1.0, 0.0, -1.0, 1.0, 0.0];
+    let indices: [u32; 6] = [0, 2, 1, 0, 3, 2];
+    let mut mesh = 0;
+    // SAFETY: a live world, arrays of the given lengths and a writable out.
+    let status = unsafe { fp_mesh_add(world.0, positions.as_ptr(), 4, indices.as_ptr(), 6, &mut mesh) };
+    assert_eq!(status, FpStatus::Ok, "{}", last_error());
+    mesh
+}
+
+fn mesh_spec(mesh: u64, convex: u32) -> FpColliderSpec {
+    FpColliderSpec { kind: FpColliderKind::Mesh as u32, mesh, convex, ..FpColliderSpec::default() }
+}
+
+#[test]
+fn a_mesh_collider_comes_through_c_and_bad_meshes_are_refused() {
+    let world = World::new();
+    let mesh = square(&world);
+    let id = world.follower(3, mesh_spec(mesh, 0), object(0.0, 0.0, 10.0, 2.0));
+    let hit = world.ray(1.5, ALL);
+    assert_eq!((hit.collider, hit.key, hit.distance), (id, 3, 10.0));
+    assert_eq!(world.ray(2.5, ALL).collider, 0, "past its scaled edge");
+    let positions = [0.0f32; 9];
+    let mut out = 0;
+    // SAFETY: a live world, arrays at least as long as said and a writable out.
+    unsafe {
+        assert_eq!(
+            fp_mesh_add(world.0, positions.as_ptr(), 3, [0u32, 1].as_ptr(), 2, &mut out),
+            FpStatus::InvalidValue
+        );
+        assert_eq!(last_error(), "2 indices: three per triangle");
+        assert_eq!(
+            fp_mesh_add(world.0, positions.as_ptr(), 3, [0u32, 1, 3].as_ptr(), 3, &mut out),
+            FpStatus::InvalidValue
+        );
+        assert_eq!(fp_mesh_add(world.0, ptr::null(), 3, [0u32, 1, 2].as_ptr(), 3, &mut out), FpStatus::NullPointer);
+        let mut other = 0;
+        for bad in [mesh_spec(mesh, 2), mesh_spec(mesh + 100, 0)] {
+            let status = fp_object_collider_add(world.0, 4, bad, object(0.0, 0.0, 0.0, 1.0), 0, &mut other);
+            assert_eq!(status, FpStatus::InvalidValue);
+        }
+        let mut edges = 0;
+        assert_eq!(fp_collider_edges(world.0, id, &mut edges), FpStatus::Ok);
+        assert_eq!(edges, 5, "the square's four sides and its diagonal");
+        let mut points = [FpVec3::default(); 10];
+        assert_eq!(fp_edges_read(world.0, points.as_mut_ptr(), 4), FpStatus::WrongSize);
+        assert_eq!(fp_edges_read(world.0, points.as_mut_ptr(), 5), FpStatus::Ok);
+        // Each end on the square's edge, at z = 10.
+        assert!(points.iter().all(|p| p.z == 10.0 && (p.x.abs() == 2.0 || p.y.abs() == 2.0)));
+        assert_eq!(fp_mesh_remove(world.0, mesh), FpStatus::InvalidValue);
+        assert_eq!(last_error(), format!("mesh {mesh} is used by a collider"));
+        assert_eq!(fp_collider_remove(world.0, id), FpStatus::Ok);
+        assert_eq!(fp_mesh_remove(world.0, mesh), FpStatus::Ok);
+    }
+    assert_eq!(out, 0, "nothing written on failure");
+}
+
 #[test]
 fn a_colliders_own_point_and_ray_come_through() {
     let world = World::new();

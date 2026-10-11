@@ -330,6 +330,19 @@ void main() {
     expect(log, ['load wheel', 'start wheel', 'update wheel']);
   });
 
+  test("a behaviour on a model's part is enabled, and disabled with the model", () async {
+    final truck = await Model.load(File('../../tests/assets/gltf/CesiumMilkTruck.glb').readAsBytesSync());
+    addTearDown(truck.dispose);
+    final model = world.add(truck.instantiate());
+    final part = model.find('Wheels')!;
+    final enables = part.addComponent(Enables());
+    world.update(1 / 60);
+    expect(enables.log, ['enable']);
+    model.active = false;
+    world.update(1 / 60);
+    expect(enables.log, ['enable', 'disable']);
+  });
+
   test('a behaviour put on an object while it loads holds the object back until its own load is done', () async {
     final objectLoad = Completer<void>(), behaviourLoad = Completer<void>();
     final object = world.add(GameObject(components: [Logs('first', load: objectLoad.future)]));
@@ -435,4 +448,20 @@ void main() {
     health.transform = Transform(position: Vec3(4, 5, 6));
     expect(object.transform.position, Vec3(4, 5, 6));
   });
+}
+
+class Enables extends Behaviour {
+  final log = <String>[];
+
+  @override
+  void onEnable() {
+    super.onEnable();
+    log.add('enable');
+  }
+
+  @override
+  void onDisable() {
+    super.onDisable();
+    log.add('disable');
+  }
 }

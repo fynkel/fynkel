@@ -293,7 +293,7 @@ fn a_view_of_zero_size_is_refused() {
 
 #[test]
 fn the_abi_version_is_14() {
-    assert_eq!(fy_abi_version(), 14);
+    assert_eq!(fy_abi_version(), 15);
 }
 
 #[cfg(not(target_os = "android"))]
@@ -647,6 +647,28 @@ impl Drop for Mesh {
     fn drop(&mut self) {
         // SAFETY: made by fy_mesh_new, not used again.
         unsafe { fy_mesh_free(self.0) };
+    }
+}
+
+/// A mesh's positions and indices read back give the triangles it was
+/// made of; wrong counts are refused.
+#[test]
+fn a_mesh_reads_back_its_positions_and_indices() {
+    let positions = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let indices = [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3];
+    let mesh = Mesh::new(&custom(&positions, &indices)).unwrap();
+    let (vertex_count, index_count) = mesh.counts();
+    let (mut read, mut read_indices) = (vec![0.0f32; vertex_count * 3], vec![0u32; index_count]);
+    // SAFETY: a live mesh and buffers of the given sizes.
+    unsafe {
+        ok(fy_mesh_read(mesh.0, read.as_mut_ptr(), vertex_count, read_indices.as_mut_ptr(), index_count));
+        assert_eq!(fy_mesh_read(mesh.0, read.as_mut_ptr(), vertex_count + 1, ptr::null_mut(), 0), FyStatus::WrongSize);
+        assert_eq!(fy_mesh_read(mesh.0, ptr::null_mut(), 0, read_indices.as_mut_ptr(), 1), FyStatus::WrongSize);
+        ok(fy_mesh_read(mesh.0, ptr::null_mut(), 0, ptr::null_mut(), 0));
+    }
+    let at = |i: u32| [read[i as usize * 3], read[i as usize * 3 + 1], read[i as usize * 3 + 2]];
+    for (given, read) in indices.iter().zip(&read_indices) {
+        assert_eq!(positions[*given as usize], at(*read));
     }
 }
 

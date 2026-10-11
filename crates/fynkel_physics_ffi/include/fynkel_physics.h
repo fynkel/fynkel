@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FP_ABI_VERSION 5
+#define FP_ABI_VERSION 6
 
 // What an `fp_*` call returns. Anything but `Ok` leaves a message for
 // `fp_last_error`.
@@ -95,6 +95,10 @@ enum FpColliderKind
   // `size.x`: the radius; `size.y`: the height, end to end; `direction`:
   // 0, 1 or 2 for X, Y or Z.
   FP_COLLIDER_KIND_CAPSULE = 2,
+  // `mesh`: a mesh from `fp_mesh_add`; `convex`: 1 for its convex hull,
+  // 0 for its triangles (as its hull on a dynamic body). `size` is
+  // unused.
+  FP_COLLIDER_KIND_MESH = 3,
 };
 #ifndef __cplusplus
 #if __STDC_VERSION__ >= 202311L
@@ -266,6 +270,9 @@ typedef struct FpColliderSpec {
   // What its touching others is reported for (`fp_contacts_read`): 1
   // triggers, 2 collisions, 3 both, 0 neither.
   uint32_t listens;
+  // For `FP_COLLIDER_KIND_MESH`.
+  uint64_t mesh;
+  uint32_t convex;
 } FpColliderSpec;
 
 // An object's world transform, as the engine's `FyTransform` has it (the
@@ -462,6 +469,29 @@ FpStatus fp_collider_add(struct FpWorld *world,
                          struct FpPose pose,
                          uint64_t *out);
 
+// Adds a mesh for mesh colliders (`FP_COLLIDER_KIND_MESH`): `vertex_count`
+// positions, three floats each, and `index_count` indices into them,
+// three per triangle. They're copied. Writes its id to `out`.
+//
+// # Safety
+//
+// `world` is null or live; `positions` is null or valid for
+// `vertex_count * 3` reads, `indices` for `index_count`; `out` is null or
+// writable.
+FpStatus fp_mesh_add(struct FpWorld *world,
+                     const float *positions,
+                     size_t vertex_count,
+                     const uint32_t *indices,
+                     size_t index_count,
+                     uint64_t *out);
+
+// Removes a mesh no collider is made of.
+//
+// # Safety
+//
+// `world` is null or live.
+FpStatus fp_mesh_remove(struct FpWorld *world, uint64_t mesh);
+
 // Removes a collider.
 //
 // # Safety
@@ -547,6 +577,22 @@ FpStatus fp_collider_shape_get(struct FpWorld *world,
                                uint64_t collider,
                                struct FpShape *out_shape,
                                struct FpPose *out_pose);
+
+// A mesh collider's edges where they are in the world, for drawing it:
+// writes how many to `out_count`; read them with `fp_edges_read`.
+//
+// # Safety
+//
+// `world` is null or live; `out_count` is null or writable.
+FpStatus fp_collider_edges(struct FpWorld *world, uint64_t collider, uint32_t *out_count);
+
+// Writes the edges of the last `fp_collider_edges` to `out`, two points
+// each, which holds `len` edges: exactly as many as it said.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable for `2 * len` points.
+FpStatus fp_edges_read(struct FpWorld *world, struct FpVec3 *out, size_t len);
 
 // Adds a rigidbody at `pose` (its object's world position and rotation),
 // with `key` to know it by in `fp_moved_read`, and writes its id to `out`.

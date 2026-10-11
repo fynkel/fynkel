@@ -132,6 +132,17 @@ external int fy_mesh_new(ffi.Pointer<FyMeshData> mesh, ffi.Pointer<ffi.Pointer<F
 @ffi.Native<ffi.Int32 Function(ffi.Uint32, ffi.Pointer<ffi.Pointer<FyMesh>>)>(isLeaf: true)
 external int fy_mesh_new_shape(int shape, ffi.Pointer<ffi.Pointer<FyMesh>> out);
 
+@ffi.Native<
+  ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Float>, ffi.Size, ffi.Pointer<ffi.Uint32>, ffi.Size)
+>(isLeaf: true)
+external int fy_mesh_read(
+  ffi.Pointer<FyMesh> mesh,
+  ffi.Pointer<ffi.Float> positions,
+  int vertex_count,
+  ffi.Pointer<ffi.Uint32> indices,
+  int index_count,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
 external int fy_mesh_remove(ffi.Pointer<FyWorld> world, int id);
 
@@ -359,7 +370,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 14;
+const int FY_ABI_VERSION = 15;
 
 const int FY_APPLE_MORE = 2;
 

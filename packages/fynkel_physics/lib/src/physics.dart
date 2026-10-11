@@ -9,6 +9,7 @@
 // call that needs the native world while it steps waits for it first
 // ([Physics._native]).
 
+import 'dart:collection';
 import 'dart:ffi';
 import 'dart:math' as math;
 
@@ -147,6 +148,8 @@ final class Physics extends WorldSystem {
   var _pointCapacity = 0;
   late final _collision = Collision._(this);
   final _leaving = <int>[];
+  // The meshes mesh colliders are made of, by the native world's id.
+  final _meshes = HashMap<Mesh, _HeldMesh>.identity();
   var _leavingBefore = 0;
 
   // Scratch for the calls.
@@ -184,6 +187,8 @@ final class Physics extends WorldSystem {
   late final _hitFloats = _hit.cast<Float>();
   late final _hitIds = _hit.cast<Uint64>();
   final _drawn = malloc<FpShape>();
+  Pointer<FpVec3> _edges = nullptr;
+  var _edgeCapacity = 0;
   final _drawnPose = malloc<FpPose>();
   Pointer<FpHit> _hits = nullptr;
   var _hitsCapacity = 0;
@@ -263,9 +268,11 @@ final class Physics extends WorldSystem {
     _disposed = true;
     _stepping = false;
     for (final c in _colliders) {
+      if (c is MeshCollider) c._held = null;
       c._physics = null;
       c._id = 0;
     }
+    _meshes.clear();
     for (final b in _bodies) {
       b._physics = null;
       b._id = 0;
@@ -280,7 +287,7 @@ final class Physics extends WorldSystem {
     for (final p in [_bodySpec, _pose, _push, _state, _vec, _vec2, _setting]) {
       malloc.free(p);
     }
-    for (final p in [_drawn, _drawnPose, _hits, _found, _objectIds, _colliderIds, _transforms]) {
+    for (final p in [_drawn, _drawnPose, _hits, _found, _objectIds, _colliderIds, _transforms, _edges]) {
       if (p != nullptr) malloc.free(p);
     }
     for (final p in [_contactBuffer, _pointBuffer]) {
@@ -332,7 +339,13 @@ final class Physics extends WorldSystem {
     t.position.set(position);
     t.rotation.set(rotation);
     t.scale.set(scale);
-    checkPhysics(fp_object_collider_add(_world, key, _spec.ref, t, body?._id ?? 0, _id));
+    try {
+      checkPhysics(fp_object_collider_add(_world, key, _spec.ref, t, body?._id ?? 0, _id));
+    } catch (_) {
+      collider._settle(false);
+      rethrow;
+    }
+    collider._settle(true);
     collider
       .._id = _id.value
       .._body = body
@@ -356,6 +369,7 @@ final class Physics extends WorldSystem {
     }
     _listChanged = true;
     checkPhysics(fp_collider_remove(_world, id));
+    collider._released();
   }
 
   /// Puts [collider] on [body] (or none) in the native world: out, and in
@@ -372,8 +386,47 @@ final class Physics extends WorldSystem {
   void _respec(Collider collider) {
     if (_disposed || collider._id == 0) return;
     collider._writeSpec(_spec.ref, _listensFor(collider, collider._body));
-    checkPhysics(fp_collider_spec_set(_world, collider._id, _spec.ref));
+    try {
+      checkPhysics(fp_collider_spec_set(_world, collider._id, _spec.ref));
+    } catch (_) {
+      collider._settle(false);
+      rethrow;
+    }
+    collider._settle(true);
   }
+
+  // --- Meshes ----------------------------------------------------------------
+
+  /// The native world's id for [mesh], given it the first time a collider
+  /// is made of it; [_releaseMesh] once for each.
+  int _holdMesh(Mesh mesh) {
+    final held = _meshes[mesh] ??= _addMesh(mesh);
+    held.users++;
+    return held.id;
+  }
+
+  _HeldMesh _addMesh(Mesh mesh) {
+    final (positions, indices) = (mesh.positions, mesh.indices);
+    return using((arena) {
+      final p = arena<Float>(positions.length);
+      p.asTypedList(positions.length).setAll(0, positions);
+      final i = arena<Uint32>(indices.length);
+      i.asTypedList(indices.length).setAll(0, indices);
+      checkPhysics(fp_mesh_add(_world, p, positions.length ~/ 3, i, indices.length, _id));
+      return _HeldMesh(_id.value);
+    });
+  }
+
+  void _releaseMesh(Mesh mesh) {
+    final held = _meshes[mesh]!;
+    if (--held.users > 0 || _disposed) return;
+    _meshes.remove(mesh);
+    checkPhysics(fp_mesh_remove(_world, held.id));
+  }
+
+  /// How many meshes [MeshCollider]s are made of: each is given to physics
+  /// once, however many colliders share it.
+  int get meshCount => _meshes.length;
 
   /// Brings the native world up to what the game did since the last time:
   /// rigidbodies whose objects the game moved are put there (teleported),
@@ -717,8 +770,12 @@ final class Physics extends WorldSystem {
     _follow();
     final debug = world.debug;
     for (final collider in _colliders) {
-      checkPhysics(fp_collider_shape_get(_world, collider._id, _drawn, _drawnPose));
       final color = collider.isTrigger ? _triggerColor : _solidColor;
+      if (collider is MeshCollider) {
+        _drawEdges(debug, collider, color);
+        continue;
+      }
+      checkPhysics(fp_collider_shape_get(_world, collider._id, _drawn, _drawnPose));
       final FpShape(:kind, :a, :b, :c) = _drawn.ref;
       final pose = _drawnPose.ref;
       final center = pose.position.get();
@@ -731,6 +788,22 @@ final class Physics extends WorldSystem {
         default:
           _drawCapsule(debug, center, rotation, a, b, color);
       }
+    }
+  }
+
+  /// A mesh collider's triangles or hull, edge by edge.
+  void _drawEdges(Debug debug, Collider collider, Color color) {
+    checkPhysics(fp_collider_edges(_world, collider._id, _count));
+    final count = _count.value;
+    if (count > _edgeCapacity) {
+      if (_edges != nullptr) malloc.free(_edges);
+      _edgeCapacity = count * 2;
+      _edges = malloc<FpVec3>(_edgeCapacity * 2);
+    }
+    checkPhysics(fp_edges_read(_world, _edges, count));
+    final f = _edges.cast<Float>();
+    for (var i = 0; i < count * 6; i += 6) {
+      debug.line(Vec3(f[i], f[i + 1], f[i + 2]), Vec3(f[i + 3], f[i + 4], f[i + 5]), color: color);
     }
   }
 
@@ -803,4 +876,12 @@ extension on FpQuat {
     ..w = q.w;
 
   Quat get() => Quat(x, y, z, w);
+}
+
+/// A mesh the native world has, and how many colliders are made of it.
+final class _HeldMesh {
+  _HeldMesh(this.id);
+
+  final int id;
+  var users = 0;
 }

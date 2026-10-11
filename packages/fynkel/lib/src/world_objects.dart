@@ -19,7 +19,16 @@ extension _Objects on World {
     _starting.add(object);
   }
 
-  GameObject _object(int id) => _objects[id] ??= GameObject._live(this, id);
+  GameObject _object(int id) => _objects[id] ?? _part(id);
+
+  /// The object for a part the game didn't add (a model's), made the
+  /// first time it's asked for: enabled if its tree is shown, as it would
+  /// have been had it been there all along.
+  GameObject _part(int id) {
+    final object = _objects[id] = GameObject._live(this, id);
+    _refreshObject(object);
+    return object;
+  }
 
   /// Spawns [object] under [parent] with everything added to it so far,
   /// then runs their loads, parents first. Those still loading when that

@@ -96,6 +96,9 @@ external int fp_collider_add(
   ffi.Pointer<ffi.Uint64> out,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Pointer<ffi.Uint32>)>(isLeaf: true)
+external int fp_collider_edges(ffi.Pointer<FpWorld> world, int collider, ffi.Pointer<ffi.Uint32> out_count);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64)>(isLeaf: true)
 external int fp_collider_key_forget(ffi.Pointer<FpWorld> world, int key);
 
@@ -165,6 +168,9 @@ external int fp_contacts_read(
   ffi.Pointer<ffi.Uint32> out_point_count,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpVec3>, ffi.Size)>(isLeaf: true)
+external int fp_edges_read(ffi.Pointer<FpWorld> world, ffi.Pointer<FpVec3> out, int len);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpFound>, ffi.Size)>(isLeaf: true)
 external int fp_found_read(ffi.Pointer<FpWorld> world, ffi.Pointer<FpFound> out, int len);
 
@@ -182,6 +188,28 @@ external int fp_layer_collision_get(ffi.Pointer<FpWorld> world, int a, int b, ff
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint32, ffi.Uint32, ffi.Uint32)>(isLeaf: true)
 external int fp_layer_collision_set(ffi.Pointer<FpWorld> world, int a, int b, int meet);
+
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<FpWorld>,
+    ffi.Pointer<ffi.Float>,
+    ffi.Size,
+    ffi.Pointer<ffi.Uint32>,
+    ffi.Size,
+    ffi.Pointer<ffi.Uint64>,
+  )
+>(isLeaf: true)
+external int fp_mesh_add(
+  ffi.Pointer<FpWorld> world,
+  ffi.Pointer<ffi.Float> positions,
+  int vertex_count,
+  ffi.Pointer<ffi.Uint32> indices,
+  int index_count,
+  ffi.Pointer<ffi.Uint64> out,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64)>(isLeaf: true)
+external int fp_mesh_remove(ffi.Pointer<FpWorld> world, int mesh);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpMoved>, ffi.Size)>(isLeaf: true)
 external int fp_moved_read(ffi.Pointer<FpWorld> world, ffi.Pointer<FpMoved> out, int len);
@@ -297,7 +325,7 @@ external void fp_world_free(ffi.Pointer<FpWorld> world);
 @ffi.Native<ffi.Pointer<FpWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FpWorld> fp_world_new();
 
-const int FP_ABI_VERSION = 5;
+const int FP_ABI_VERSION = 6;
 
 sealed class FpBodyKind {
   static const FP_BODY_KIND_DYNAMIC = 0;
@@ -353,6 +381,7 @@ sealed class FpColliderKind {
   static const FP_COLLIDER_KIND_BOX = 0;
   static const FP_COLLIDER_KIND_SPHERE = 1;
   static const FP_COLLIDER_KIND_CAPSULE = 2;
+  static const FP_COLLIDER_KIND_MESH = 3;
 }
 
 final class FpColliderSpec extends ffi.Struct {
@@ -376,6 +405,12 @@ final class FpColliderSpec extends ffi.Struct {
 
   @ffi.Uint32()
   external int listens;
+
+  @ffi.Uint64()
+  external int mesh;
+
+  @ffi.Uint32()
+  external int convex;
 }
 
 sealed class FpCombine {

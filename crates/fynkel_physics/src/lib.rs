@@ -17,6 +17,7 @@ pub use rapier3d::math::{Pose, Rotation, Vector};
 mod bodies;
 mod colliders;
 mod contacts;
+mod meshes;
 mod queries;
 
 pub use bodies::{BodySpec, Constraints, ForceMode, Push, Settings};
@@ -100,6 +101,8 @@ pub struct Physics {
     settings: Settings,
     // Who touches whom (contacts.rs), the layer matrix and ignored pairs.
     contacts: contacts::Contacts,
+    // The meshes mesh colliders are made of (meshes.rs).
+    meshes: meshes::Meshes,
 }
 
 impl fmt::Debug for Physics {
@@ -131,6 +134,7 @@ impl Physics {
             steps: bodies::StepWork::default(),
             settings,
             contacts: contacts::Contacts::default(),
+            meshes: meshes::Meshes::default(),
         }
     }
 

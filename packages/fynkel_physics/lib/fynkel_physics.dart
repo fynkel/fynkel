@@ -1,7 +1,7 @@
 /// Physics for Fynkel, as Unity has it, on Rapier (docs/stage-5.md).
 ///
-/// Put a [BoxCollider], [SphereCollider] or [CapsuleCollider] on an object
-/// and physics knows it; ask what's where with `physics.raycast` and the
+/// Put a [BoxCollider], [SphereCollider], [CapsuleCollider] or
+/// [MeshCollider] on an object and physics knows it; ask what's where with `physics.raycast` and the
 /// other queries, from any object or behaviour. Add a [Rigidbody] and
 /// physics moves it: gravity, forces, collisions. Mix [Triggers] or
 /// [Collisions] into an object or a behaviour to hear what it touches, and
@@ -21,6 +21,7 @@ export 'src/physics.dart'
         ContactPoint,
         ForceMode,
         GameObjectPhysics,
+        MeshCollider,
         Physics,
         PhysicsHit,
         PhysicsLayers,

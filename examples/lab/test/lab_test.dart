@@ -1,6 +1,9 @@
 // Every scene of the lab runs, and every control works, without an error
 // (but the buggy cube's, which is the point of it).
 
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_physics/fynkel_physics.dart';
@@ -10,17 +13,21 @@ import 'package:lab/scenes/contacts_basics.dart';
 import 'package:lab/scenes/input.dart';
 import 'package:lab/scenes/layer_matrix.dart';
 import 'package:lab/scenes/layers_basics.dart';
+import 'package:lab/scenes/mesh_colliders_basics.dart';
 import 'package:lab/scenes/motion.dart';
 import 'package:lab/scenes/motion_basics.dart';
 import 'package:lab/scenes/physics_queries_basics.dart';
 import 'package:lab/scenes/pointers.dart';
 import 'package:lab/scenes/rigidbody_walls.dart';
 
+/// The lab's assets, from its folder, as the app has them.
+Future<Uint8List> files(String asset) async => File('assets/$asset').readAsBytesSync();
+
 void main() {
   for (final make in scenes) {
     final title = make().title;
     test('$title runs, and every control works', () async {
-      final world = World();
+      final world = World(source: files);
       addTearDown(world.dispose);
       final scene = world.add(make());
       await scene.loaded;
@@ -291,5 +298,28 @@ void main() {
     expect(scene.red.position.y, lessThan(0));
     expect(scene.blue.position.y, lessThan(0));
     expect(scene.readout.value, contains('layer 8 meets layer 0: false'));
+  });
+
+  test('Mesh colliders: the basics: the ball lands on the rock, and rolls off it onto the floor', () async {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(MeshCollidersBasicsScene());
+    expect(scene.rock.convex, isFalse, reason: 'asked before the model is in');
+    await scene.loaded;
+    var highest = 0.0;
+    for (var i = 0; i < 60; i++) {
+      world.update(1 / 60);
+      if (i >= 45) highest = highest > scene.ball.position.y ? highest : scene.ball.position.y;
+    }
+    expect(highest, greaterThan(0.8), reason: 'on the rock\'s slope, not the floor');
+    for (var i = 0; i < 600; i++) {
+      world.update(1 / 60);
+    }
+    expect(scene.ball.position.y, closeTo(0.3, 0.05), reason: 'rolled off onto the floor');
+    final Vec3(:x, :z) = scene.ball.position;
+    expect(x.abs(), lessThan(2), reason: 'still in view');
+    expect(z, inInclusiveRange(3, 6), reason: 'down the slope towards the camera, and stopped');
+    scene.controls.whereType<Toggle>().first.onChanged(true);
+    expect(scene.rock.convex, isTrue);
   });
 }
