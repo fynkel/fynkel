@@ -16,6 +16,7 @@ import 'package:lab/scenes/contacts_basics.dart';
 import 'package:lab/scenes/input.dart';
 import 'package:lab/scenes/joints_basics.dart';
 import 'package:lab/scenes/joints_bridge.dart';
+import 'package:lab/scenes/joints_chain.dart';
 import 'package:lab/scenes/layer_matrix.dart';
 import 'package:lab/scenes/layers_basics.dart';
 import 'package:lab/scenes/mesh_colliders_basics.dart';
@@ -439,5 +440,68 @@ void main() {
     expect(scene.broken, greaterThan(0));
     expect(scene.log.value.map((l) => l.text), contains(startsWith('a joint on plank broke')));
     expect(scene.crates.single.position.y, lessThan(0.5), reason: 'fell through, onto the floor');
+  });
+
+  group('Joints: a chain and a weight', () {
+    late World world;
+    late JointsChainScene scene;
+    void frames(int n) {
+      for (var i = 0; i < n; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    setUp(() {
+      world = World(source: files);
+      addTearDown(world.dispose);
+      scene = world.add(JointsChainScene());
+      world.input.resize(400, 300);
+      frames(300);
+    });
+
+    test('it hangs straight down from the hook, stretched a little by the weight', () {
+      final length = JointsChainScene.count * JointsChainScene.linkLength + JointsChainScene.radius;
+      expect(scene.weight!.position.x.abs(), lessThan(0.01));
+      expect(JointsChainScene.hook.y - scene.weight!.position.y, closeTo(length, 0.1));
+      expect(scene.stretch.total, lessThan(0.1), reason: '5 kg on 0.2 kg links, at 6 iterations');
+    });
+
+    test('a finger drags the weight across, and lets go of it', () {
+      final weight = scene.weight!;
+      // Where the weight is on the view: aim at it until a ray hits it.
+      ViewPoint? on;
+      for (var y = 0.0; y < 300 && on == null; y += 2) {
+        final p = ViewPoint(200, y, width: 400, height: 300);
+        if (world.physics.raycast(scene.camera.screenToRay(p))?.gameObject == weight) on = p;
+      }
+      world.input.fingerDown(1, on!.x, on.y);
+      frames(1);
+      expect(scene.held?.$1.gameObject, weight);
+      for (var i = 1; i <= 30; i++) {
+        world.input.fingerMove(1, on.x + i * 3, on.y);
+        frames(1);
+      }
+      frames(60);
+      expect(weight.position.x, greaterThan(0.5), reason: 'it followed the finger to the right');
+      world.input.fingerUp(1, on.x + 90, on.y);
+      frames(1);
+      expect(scene.held, isNull);
+      expect(weight.get<SpringJoint>(), isNull, reason: 'the spring to the hand is taken off');
+      frames(60);
+      expect(weight.position.x, lessThan(0.5), reason: 'let go, it swings back');
+    });
+
+    test('heavy, the chain stretches between its links; more solver iterations hold it', () {
+      final slider = scene.controls.whereType<Slider>().firstWhere((s) => s.label == 'the weight (kg)');
+      slider.onChanged(50);
+      frames(300);
+      expect(scene.stretch.total, greaterThan(0.2), reason: '250× a link, at 6 iterations');
+      scene.controls.whereType<Slider>().firstWhere((s) => s.label == 'solver iterations').onChanged(30);
+      frames(300);
+      expect(scene.stretch.total, lessThan(0.05));
+      scene.destroy();
+      frames(1);
+      expect(world.physics.defaultSolverIterations, 6, reason: 'put back for the next scene');
+    });
   });
 }
