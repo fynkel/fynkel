@@ -561,7 +561,15 @@ down" did nothing): Rapier holds a motor of no stiffness and no damping
 still, as a rod, so a spring joint was rigid within its distances. A slack
 spring's motor now has no force; tested in Rust and Dart, and the lab's
 crate hangs its weight past its `maxDistance` (1.99 m) and moves when
-pulled.
+pulled. Lab 'Joints: a chain and a weight': twelve 0.2 kg links,
+hinged on X and Z in turn, a weight at the end, dragged by a finger as
+Unity's DragRigidbody does (a raycast, and a SpringJoint to a kinematic
+hand). It shows what a chain of joints does with a heavy end: at Unity's 6
+solver iterations, hanging, the chain stretches 1.2 cm under 0.5 kg, 4.8
+cm under 5 kg, 14 cm under 20 kg and 42 cm under 50 kg (250× a link); at
+30 iterations, 0.8 cm under 50 kg. PhysX does the same, which is why Unity
+advises mass ratios under 10:1; Rapier's multibody joints (exact, no
+stretch) would be the fix if a game needs heavy chains.
 
 **Decisions:** the motor wins over the spring when both are on (Unity
 mixes them); no limit bounciness, `freeSpin`, `useAcceleration` or
