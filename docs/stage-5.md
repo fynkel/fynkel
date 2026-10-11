@@ -611,8 +611,9 @@ drop crates; a break force to break it).
 by swiping, pins to knock down, a gutter (a trigger), the score, a camera
 that follows the ball. coins' pickups become triggers. *Done when* both
 are played on the three devices, and every game runs as well as before.
-✅ in code, tests and the iOS simulator; playing it on the three devices,
-and measuring every game, is next. `examples/bowling`: a lane, ball and
+✅ in code, tests and the iOS simulator, and every game measured on the
+three devices (below), and played on the phones by the user (bowling and
+the lab's physics scenes: "all working very good"). `examples/bowling`: a lane, ball and
 pins of real size and weight (18.29 m to the head pin, a 6.5 kg ball 21.8
 cm across, 1.5 kg pins 38 cm tall). The ball waits on the foul line: a
 drag sideways places it (a raycast onto the lane), a flick up bowls it
@@ -645,6 +646,24 @@ does, a pocket hit
 strikes and racks again, a gutter ball ends in the pit with no pins, a
 frame of two rolls), coins' 5. CI now builds and tests bowling, and the
 lab, which it had left out.
+
+Every game, `measure rate` (profile builds, 60 s; Note10+ 30 s), main at
+d808cf54, against stage 4's report:
+
+| fresh fps, median (min) | Mac (M3 Max, 120 Hz) | iPhone 16 Pro Max (120 Hz) | Note10+ (60 Hz) | stage 4 |
+|---|---|---|---|---|
+| hello | 120 (118.5) | 120 (117) | 59.9 (58.9) | 120 / 120 / 59.9 |
+| garden | 120 (120) | 120 (119) | 59.9 (58.9) | 120 / 120 / 59.9 |
+| coins | 120 (119) | 120 (120) | 57.9 (53.9) | 120 / 120 / 57.9 |
+| arena | 120 (118) | 120 (120) | 59.9 (54.9)¹ | 120 / 120 / 59.9 |
+| bowling | 120 (119) | 120 (117) | 58.9 (55.9) | new |
+
+Dart allocation a frame, Mac / iPhone: hello 7.0 / 20.2 KB, garden 8.3 /
+14.3, coins 38.3 / 43.9, arena 9.5 / 14.9, bowling 8.4 / 15.5 (stage 4's
+coins: 46.7 / 44.8). ¹ The first run gave 58.9; two more gave 59.9 (arena
+has no physics). On the Mac, the first runs of hello, garden and coins
+were covered by other windows part of the time (minimum 0 fps); run again
+in view, above. Every game runs as well as before.
 
 **Step 10: the stage 5 check.** A report, as before, and a physics part in
 [the guide](writing-a-game.md), checked by `tools/check_guide.py`. *Done
