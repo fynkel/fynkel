@@ -570,11 +570,30 @@ cm under 5 kg, 14 cm under 20 kg and 42 cm under 50 kg (250× a link); at
 30 iterations, 0.8 cm under 50 kg. PhysX does the same, which is why Unity
 advises mass ratios under 10:1; Rapier's multibody joints (exact, no
 stretch) would be the fix if a game needs heavy chains.
+Dragged, it jumped about (the user found it): measured, the joints pulled
+apart while the weight was dragged, up to 74 cm in all at 50 steps a
+second (6 cm a joint, snapping back), with hinges or ball joints alike.
+The scene now steps 120 times a second (16 cm at most; 6 cm with 12
+iterations) and puts 50 back when it's left; the drag is Box2D's mouse
+joint (a spring of 5 Hz at 0.7 of critical damping for what it lifts),
+the links are interpolated, and the weight is 1.5 kg: the finger is
+followed within 6 cm going round. Added for it, `CharacterJoint` (Unity's:
+`axis` to twist about, `swingAxis`, `lowTwistLimit`, `highTwistLimit`,
+`swing1Limit`, `swing2Limit` as `SoftJointLimit`s in degrees, Unity's
+−20°/70°/40°/40° by default, 180° frees one): Rapier's spherical joint
+with a limit on each of its three turns; physics ABI 9. Unity's two
+swings make an elliptical cone; Rapier's are two limits, a square one,
+so swung on a slant an arm goes past 40° (54° in the lab). The chain's links
+are on ball joints (its limits at 180°). Tests: 3 in `joints.rs`, 2 in
+`joints_test.dart`; lab: "Joints: a character joint" (an arm on Unity's
+limits, and one at 180°, swung and twisted the same; a slider for the
+limited arm's swing).
 
 **Decisions:** the motor wins over the spring when both are on (Unity
 mixes them); no limit bounciness, `freeSpin`, `useAcceleration` or
-`extendedLimits`, and no `ConfigurableJoint` or `CharacterJoint`, until a
-game asks; an anchor read back through a turned object's scale a hair off
+`extendedLimits`, and no `ConfigurableJoint`, until a game asks (the
+chain asked for `CharacterJoint`); no limits' spring, bounciness or
+contact distance on a `SoftJointLimit` either; an anchor read back through a turned object's scale a hair off
 is the same anchor (the bridge found it). Tests: 12 in `joints.rs` (a fixed
 joint holds and moves two bodies as one; a pendulum's period is
 2π√(L/g); limits, the motor (fast, weak, slow, at a limit), the spring
