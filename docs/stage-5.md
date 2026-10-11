@@ -579,6 +579,34 @@ drop crates; a break force to break it).
 by swiping, pins to knock down, a gutter (a trigger), the score, a camera
 that follows the ball. coins' pickups become triggers. *Done when* both
 are played on the three devices, and every game runs as well as before.
+✅ in code, tests and the iOS simulator; playing it on the three devices,
+and measuring every game, is next. `examples/bowling`: a lane, ball and
+pins of real size and weight (18.29 m to the head pin, a 6.5 kg ball 21.8
+cm across, 1.5 kg pins 38 cm tall). Swipe up to roll (space rolls a
+straight one): the swipe's start is where the ball starts, its speed and
+way the ball's. A `Gutter` and the `Pit` are triggers that tell the game;
+a routine waits for the pit, then for the pins to settle, and counts those
+tipped past 45°. A pin is `Mesh.custom`, a pin's profile turned, with a
+convex `MeshCollider`, so it stands on its foot; bounciness 0.7, as pins
+are lively (at 0.2, 25 test rolls made no strike; at 0.7 the pocket
+strikes, as it should). `lib/score.dart` scores ten frames as bowling does,
+shown by a Flutter score sheet. A camera follows the ball, short of the
+pins. coins: a coin is a trigger and the player a kinematic rigidbody with
+a capsule; `Collector` is `with Triggers`. Its tests now step a frame of
+1/50 s twice for a pickup (a step, then the frame that hears of it).
+
+**Found: Rapier turns a body no more than π/4 a step** (`MAX_ROTATION`,
+for its continuous detection): 39 rad/s at 50 steps a second, below even
+Unity's default `maxAngularVelocity` (50). PhysX has no such cap. A
+bowling ball rolling at 7.5 m/s turns at 69 rad/s, so it skidded and
+slowed to 4 m/s. bowling steps 100 times a second (`time.fixedDelta`),
+which allows 78 rad/s; `maxAngularVelocity`'s doc says so, and a test in
+`bodies.rs` holds both rates to it. Tests: 9 in `bowling_test.dart` (the
+score: 300, 150, 90, 0, strikes, spares and the tenth frame, the marks;
+the game: pins stand still on their own, a swipe rolls, a pocket hit
+strikes and racks again, a gutter ball ends in the pit with no pins, a
+frame of two rolls), coins' 5. CI now builds and tests bowling, and the
+lab, which it had left out.
 
 **Step 10: the stage 5 check.** A report, as before, and a physics part in
 [the guide](writing-a-game.md), checked by `tools/check_guide.py`. *Done

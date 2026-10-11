@@ -113,7 +113,11 @@ final class Rigidbody extends Behaviour {
   set angularDamping(double value) => _set(() => _angularDamping = value);
   double _angularDamping;
 
-  /// The fastest it turns, in radians a second.
+  /// The fastest it turns, in radians a second. Rapier also turns a body
+  /// no more than a quarter turn a step, 39 radians a second at 50 steps a
+  /// second, where Unity doesn't: a small ball rolling fast (a bowling ball
+  /// past 4 m/s) skids and slows. Take more steps ([Time.fixedDelta]) for
+  /// such a game.
   double get maxAngularVelocity => _maxAngularVelocity;
   set maxAngularVelocity(double value) => _set(() => _maxAngularVelocity = value);
   double _maxAngularVelocity;

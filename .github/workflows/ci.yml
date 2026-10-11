@@ -70,10 +70,10 @@ jobs:
           flutter analyze --fatal-infos
           flutter build macos --debug
       # package:fynkel_flutter's widget tests (a real engine view behind a
-      # stand-in for the Swift plugin), package:fynkel_measure, the garden's
-      # coins' and the arena's tests (their real assets, drawn headless), and macOS
-      # builds of the examples, which compile the plugin's Swift and bundle
-      # the engine.
+      # stand-in for the Swift plugin), package:fynkel_measure, the games'
+      # and the lab's tests (their real assets, drawn headless, and real
+      # physics), and macOS builds of the examples, which compile the
+      # plugin's Swift and bundle the engine.
       - name: flutter (package:fynkel_flutter, package:fynkel_measure, examples)
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
@@ -105,6 +105,18 @@ jobs:
           flutter test
           flutter build macos --debug
           cd ../arena
+          flutter pub get
+          dart format -l 120 --output=none --set-exit-if-changed lib test
+          flutter analyze --fatal-infos
+          flutter test
+          flutter build macos --debug
+          cd ../bowling
+          flutter pub get
+          dart format -l 120 --output=none --set-exit-if-changed lib test
+          flutter analyze --fatal-infos
+          flutter test
+          flutter build macos --debug
+          cd ../lab
           flutter pub get
           dart format -l 120 --output=none --set-exit-if-changed lib test
           flutter analyze --fatal-infos

@@ -1,11 +1,12 @@
 // The game: walk where you tap and pick up the coins. The last coin of a
 // level takes you to the next; your score and you go with you. Kenney's
-// models (assets/CREDITS.md).
+// models (assets/CREDITS.md). A coin is a trigger the player walks into.
 
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
 
 class CoinsGame extends GameObject {
   /// Outlives the levels.
@@ -164,7 +165,13 @@ class Coin extends GameObject {
   Coin(Vec3 at, Material gold)
     : super(
         transform: Transform(position: at, scale: Vec3(0.6, 0.6, 0.15)),
-        components: [MeshRenderer(Mesh.sphere(), gold), Spin(), Bob()],
+        components: [
+          MeshRenderer(Mesh.sphere(), gold),
+          // 0.5 m across its middle: the player picks it up 0.9 m away.
+          SphereCollider(radius: 0.85, isTrigger: true),
+          Spin(),
+          Bob(),
+        ],
       );
 }
 
@@ -179,6 +186,9 @@ class Player extends GameObject {
   Future<void> onLoad() async {
     await super.onLoad();
     _hand = add(await assets.model('character.glb')).find('arm-right')!;
+    // Kinematic: it walks where it's told, and meets the coins' triggers.
+    addComponent(CapsuleCollider(radius: 0.4, height: 1.6, center: Vec3(0, 0.8, 0)));
+    addComponent(Rigidbody(isKinematic: true));
     addComponent(Collector());
   }
 
@@ -203,23 +213,16 @@ class Player extends GameObject {
   }
 }
 
-/// Picks up the coins near the player. A behaviour of its own, kept
-/// apart from the walking.
-class Collector extends Behaviour {
+/// Picks up the coins the player walks into. A behaviour of its own,
+/// kept apart from the walking.
+class Collector extends Behaviour with Triggers {
   @override
-  void onUpdate() {
-    super.onUpdate();
-    final player = gameObject as Player;
-    var picked = false;
-    for (final coin in world.all<Coin>()) {
-      final to = coin.position - position;
-      if (math.sqrt(to.x * to.x + to.z * to.z) < 0.9 && coin.activeInHierarchy) {
-        coin.destroy();
-        player.score.value++;
-        picked = true;
-      }
+  void onTriggerEnter(Collider other) {
+    if (other.gameObject case final Coin coin when !coin.isDestroyed) {
+      coin.destroy();
+      (gameObject as Player).score.value++;
+      if (world.all<Coin>().isEmpty) gameObject.ancestor<CoinsGame>()!.nextLevel();
     }
-    if (picked && world.all<Coin>().isEmpty) gameObject.ancestor<CoinsGame>()!.nextLevel();
   }
 }
 
