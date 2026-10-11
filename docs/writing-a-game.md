@@ -627,6 +627,11 @@ class CameraRig extends GameObject {
   `screenToPlane(point, Plane.ground)` and `worldToScreen(point)`, on the
   camera's object (`world.camera`); `world.raycast(ray)` gives what a ray
   hits first.
+- **A camera that follows a physics body** sees each fixed step's jump:
+  a body steps 50 or 100 times a second, the screen draws at 60 or 120,
+  and the camera moves smoothly, so the body seems to jitter. Give the
+  body `interpolation: RigidbodyInterpolation.interpolate` (§14), as in
+  Unity.
 
 **Layers** keep things apart. Each object has a `layer`, 0 to 31; a
 camera's `cullingMask` leaves layers undrawn, `world.raycast(ray,

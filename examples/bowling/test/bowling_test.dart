@@ -1,5 +1,6 @@
-// The score, as bowling counts it, and the game: pins that stand, a swipe
-// that rolls, a pocket hit that strikes, a gutter ball, and a frame.
+// The score, as bowling counts it, and the game: pins that stand, a drag
+// that places the ball and a flick that bowls it, a pocket hit that
+// strikes, a gutter ball, and a frame.
 
 import 'dart:math' as math;
 
@@ -80,7 +81,8 @@ void main() {
     /// Rolls from [x] to [aim] on the head pin's row, and waits until the
     /// pins are counted.
     void roll(double x, double aim, {double speed = 8}) {
-      game.roll(x: x, speed: speed, angle: math.atan2(aim - x, headPin));
+      game.aimX = x;
+      game.roll(speed: speed, angle: math.atan2(aim - x, headPin));
       expect(game.rolling, isTrue);
       var waited = 0.0;
       while (game.rolling) {
@@ -99,20 +101,62 @@ void main() {
       }
     });
 
-    test('a swipe up the view rolls the ball from where it started, as fast as it went', () {
-      world.input.fingerDown(1, 200, 700);
+    /// A finger down at ([x], [y]), moved [steps] frames by ([dx], [dy])
+    /// each, and lifted.
+    void drag(double x, double y, double dx, double dy, {int steps = 6}) {
+      world.input.fingerDown(1, x, y);
       world.update(1 / 60);
-      for (var i = 1; i <= 6; i++) {
-        world.input.fingerMove(1, 200, 700 - i * 40);
+      for (var i = 1; i <= steps; i++) {
+        world.input.fingerMove(1, x + dx * i, y + dy * i);
         world.update(1 / 60);
       }
-      world.input.fingerUp(1, 200, 460);
+      world.input.fingerUp(1, x + dx * steps, y + dy * steps);
       world.update(1 / 60);
+    }
+
+    test('a drag sideways places the waiting ball; a flick up bowls it from there, as fast as the flick', () {
+      expect(game.waiting.active, isTrue);
+      drag(200, 700, 15, 0);
+      expect(game.rolling, isFalse, reason: 'placing bowls nothing');
+      expect(game.aimX, greaterThan(0.05), reason: 'dragged right');
+      final placed = game.aimX;
+      expect(game.waiting.position.x, placed);
+      expect(game.hint.value, isTrue);
+
+      drag(200, 700, 0, -40);
       expect(game.rolling, isTrue);
+      expect(game.waiting.active, isFalse);
+      expect(game.hint.value, isFalse, reason: 'the hint goes with the first ball');
+      expect(game.message.value, endsWith(' m/s'));
       seconds(0.5);
       final ball = game.ball!;
-      expect(ball.position.x.abs(), lessThan(0.05), reason: 'started in the middle, rolled straight');
+      expect((ball.position.x - placed).abs(), lessThan(0.05), reason: 'rolled straight from where it was placed');
       expect(ball.position.z, lessThan(-2), reason: 'down the lane');
+    });
+
+    test('while a finger flicks up, a line shows where the ball would go', () {
+      final aim = game.find('aim')!;
+      expect(aim.active, isFalse);
+      world.input.fingerDown(1, 200, 700);
+      world.update(1 / 60);
+      for (var i = 1; i <= 3; i++) {
+        world.input.fingerMove(1, 200 + i * 10, 700 - i * 40);
+        world.update(1 / 60);
+      }
+      expect(aim.active, isTrue);
+      expect(aim.rotation.rotate(Vec3.forward).x, greaterThan(0), reason: 'leaning right, as the finger');
+      world.input.fingerUp(1, 230, 580);
+      world.update(1 / 60);
+      expect(aim.active, isFalse);
+    });
+
+    test('a slow drag up bowls nothing, and says to flick', () {
+      drag(200, 700, 0, -4, steps: 30);
+      expect(game.rolling, isFalse);
+      expect(game.message.value, 'Flick faster to bowl');
+      expect(game.trail.value, isNotEmpty, reason: 'the trail stays a moment');
+      seconds(0.5);
+      expect(game.trail.value, isEmpty);
     });
 
     test('a pocket hit strikes, and the pins are set up again', () {
@@ -125,7 +169,8 @@ void main() {
 
     test('a gutter ball rolls past the pins to the pit, and knocks none down', () {
       var waited = 0.0;
-      game.roll(x: 0.4, speed: 6, angle: math.atan2(0.4, headPin));
+      game.aimX = 0.4;
+      game.roll(speed: 6, angle: math.atan2(0.4, headPin));
       while (game.rolling) {
         seconds(0.5);
         waited += 0.5;

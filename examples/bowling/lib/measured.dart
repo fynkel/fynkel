@@ -10,7 +10,9 @@ import 'hud.dart';
 void main() => runApp(
   MeasuredApp(
     BowlingGame.new,
-    overlay: (game) => Hud((game as BowlingGame).score, game.message),
-    change: (game) async => (game as BowlingGame).roll(x: 0.05, speed: 7.5, angle: 0),
+    overlay: (game) => Hud(game as BowlingGame),
+    change: (game) async => (game as BowlingGame)
+      ..aimX = 0.05
+      ..roll(speed: 7.5, angle: 0),
   ),
 );
