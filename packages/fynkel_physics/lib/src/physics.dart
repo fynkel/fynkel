@@ -23,6 +23,7 @@ import 'raw.dart';
 part 'characters.dart';
 part 'colliders.dart';
 part 'contacts.dart';
+part 'joints.dart';
 part 'queries.dart';
 part 'rigidbody.dart';
 
@@ -205,12 +206,29 @@ final class Physics extends WorldSystem {
   late final _movedWords = _moved.cast<Uint32>();
   Pointer<FpCharacterHit> _characterHits = nullptr;
   var _characterHitCapacity = 0;
+  // The joints: by key, enabled, and waiting for their rigidbodies; the
+  // ones the last step broke, to tell; and the buffers they're read
+  // through. An FpBrokenJoint is a 64-bit key, then floats 2 the force and
+  // 3 the torque.
+  final _jointsByKey = <Joint?>[];
+  final _freeJointKeys = <int>[];
+  final _joints = <Joint>[];
+  final _waiting = <Joint>[];
+  final _broken = <(Joint, double)>[];
+  final _jointSpec = malloc<FpJointSpec>();
+  final _jointState = malloc<FpJointState>();
+  Pointer<FpBrokenJoint> _brokenBuffer = nullptr;
+  var _brokenCapacity = 0;
 
   /// How many colliders there are, enabled on shown objects.
   int get colliderCount => _colliders.length;
 
   /// How many rigidbodies there are, enabled on shown objects.
   int get rigidbodyCount => _bodies.length;
+
+  /// How many joints there are, enabled on shown objects, joined or
+  /// waiting for their rigidbodies.
+  int get jointCount => _joints.length;
 
   @override
   void beforeFrame() {
@@ -288,6 +306,13 @@ final class Physics extends WorldSystem {
       b._physics = null;
       b._id = 0;
     }
+    for (final j in _joints) {
+      j._physics = null;
+      j._id = 0;
+    }
+    _joints.clear();
+    _waiting.clear();
+    _broken.clear();
     _colliders.clear();
     _bodies.clear();
     _interpolated.clear();
@@ -298,10 +323,12 @@ final class Physics extends WorldSystem {
     for (final p in [_bodySpec, _pose, _push, _state, _vec, _vec2, _setting, _character, _moved]) {
       malloc.free(p);
     }
+    malloc.free(_jointSpec);
+    malloc.free(_jointState);
     for (final p in [_drawn, _drawnPose, _hits, _found, _objectIds, _colliderIds, _transforms, _edges]) {
       if (p != nullptr) malloc.free(p);
     }
-    for (final p in [_contactBuffer, _pointBuffer, _characterHits]) {
+    for (final p in [_contactBuffer, _pointBuffer, _characterHits, _brokenBuffer]) {
       if (p != nullptr) malloc.free(p);
     }
   }
@@ -442,11 +469,17 @@ final class Physics extends WorldSystem {
   /// Brings the native world up to what the game did since the last time:
   /// rigidbodies whose objects the game moved are put there (teleported),
   /// colliders whose objects moved follow them, and each is on its object's
-  /// layer and on the nearest rigidbody. Before each step and each query;
-  /// nothing to do while no transform, parent or layer was set since.
+  /// layer and on the nearest rigidbody; then joints waiting for their
+  /// rigidbodies join them. Before each step and each query; nothing to do
+  /// while no transform, parent or layer was set since, and no joint
+  /// waits.
   void _follow() {
     if (_stepping) _collect();
-    if (!_listChanged && world.transformVersion == _seenVersion) return;
+    if (_listChanged || world.transformVersion != _seenVersion) _followMoved();
+    if (_waiting.isNotEmpty) _joinWaiting();
+  }
+
+  void _followMoved() {
     _listChanged = false;
     final bodies = _bodies;
     for (var i = 0; i < bodies.length; i++) {
@@ -527,6 +560,8 @@ final class Physics extends WorldSystem {
       c._place._walk(c.gameObject);
       if (c._place.body != c._body) _reattach(c, c._place.body);
     }
+    // The joints waiting for it join.
+    if (_waiting.isNotEmpty) _joinWaiting();
   }
 
   void _removeBody(Rigidbody body) {
@@ -547,6 +582,13 @@ final class Physics extends WorldSystem {
       last._index = body._index;
     }
     _interpolated.remove(body);
+    // Its joints go with it, and wait for it to come back.
+    for (final j in _joints) {
+      if (j._id != 0 && (identical(j._body, body) || identical(j._connectedBody, body))) {
+        j._id = 0;
+        _waiting.add(j);
+      }
+    }
     checkPhysics(fp_body_remove(_world, id));
   }
 
@@ -582,6 +624,7 @@ final class Physics extends WorldSystem {
   void _applyMoved(int count) {
     _steps++;
     _contactsDue = true;
+    if (_joints.isNotEmpty) _readBroken();
     final raw = _raw;
     for (var i = 0; i < count; i++) {
       final key = raw.movedKey(i);
@@ -612,6 +655,7 @@ final class Physics extends WorldSystem {
   /// Tells the last step's contacts, if they aren't yet, then frees the
   /// keys of the colliders removed before it.
   void _tellContacts() {
+    if (_broken.isNotEmpty) _tellBroken();
     if (!_contactsDue) return;
     _contactsDue = false;
     if (_listened) _readContacts();
@@ -733,6 +777,115 @@ final class Physics extends WorldSystem {
     final i = index * _contactWords + at;
     final s = flipped ? -1.0 : 1.0;
     return Vec3(f[i] * s, f[i + 1] * s, f[i + 2] * s);
+  }
+
+  // --- Joints ----------------------------------------------------------------
+
+  void _addJoint(Joint joint) {
+    final key = _freeJointKeys.isNotEmpty ? _freeJointKeys.removeLast() : (_jointsByKey..add(null)).length - 1;
+    _jointsByKey[key] = joint;
+    joint._key = key;
+    _joints.add(joint);
+    _waiting.add(joint);
+    _follow();
+  }
+
+  void _removeJoint(Joint joint) {
+    if (_disposed) return;
+    _waiting.remove(joint);
+    _joints.remove(joint);
+    _jointsByKey[joint._key] = null;
+    _freeJointKeys.add(joint._key);
+    if (joint._id == 0) return;
+    final id = joint._id;
+    joint._id = 0;
+    checkPhysics(fp_joint_remove(_world, id));
+  }
+
+  void _respecJoint(Joint joint) {
+    if (_disposed || joint._id == 0) return;
+    joint._writeSpec(_jointSpec.ref, joint._body!);
+    checkPhysics(fp_joint_spec_set(_world, joint._id, _jointSpec));
+  }
+
+  /// Joins [joint]'s bodies again, as they are now.
+  void _rejoin(Joint joint) {
+    if (_disposed) return;
+    if (joint._id != 0) {
+      final id = joint._id;
+      joint._id = 0;
+      checkPhysics(fp_joint_remove(_world, id));
+      _waiting.add(joint);
+    }
+    _follow();
+  }
+
+  /// Joins the waiting joints whose rigidbodies are in the world. One the
+  /// native world refuses doesn't wait any more, and throws.
+  void _joinWaiting() {
+    final waiting = _waiting;
+    for (var i = waiting.length - 1; i >= 0; i--) {
+      final joint = waiting[i];
+      final body = joint.gameObject.get<Rigidbody>();
+      if (body == null || body._id == 0) continue;
+      final connected = joint._connectedBody;
+      if (connected != null && connected._id == 0) continue;
+      waiting.removeAt(i);
+      joint._writeSpec(_jointSpec.ref, body);
+      checkPhysics(fp_joint_add(_world, joint._key, _jointSpec, _id));
+      joint
+        .._id = _id.value
+        .._body = body;
+    }
+  }
+
+  /// Takes the joints the last step broke: they're out of the native
+  /// world, and are told at the next point contacts are.
+  void _readBroken() {
+    checkPhysics(fp_joints_broken(_pointer, _count));
+    final count = _count.value;
+    if (count == 0) return;
+    if (count > _brokenCapacity) {
+      if (_brokenBuffer != nullptr) malloc.free(_brokenBuffer);
+      _brokenCapacity = count * 2;
+      _brokenBuffer = malloc<FpBrokenJoint>(_brokenCapacity);
+    }
+    checkPhysics(fp_joints_broken_read(_pointer, _brokenBuffer, count));
+    final keys = _brokenBuffer.cast<Uint64>();
+    final floats = _brokenBuffer.cast<Float>();
+    for (var i = 0; i < count; i++) {
+      final key = keys[i * 2];
+      final joint = key < _jointsByKey.length ? _jointsByKey[key] : null;
+      if (joint == null || joint._id == 0) continue;
+      joint._id = 0;
+      _broken.add((joint, floats[i * 4 + 2]));
+    }
+  }
+
+  /// Tells each broken joint's object and its behaviours, then takes the
+  /// joint off it, as Unity does.
+  void _tellBroken() {
+    final broken = [..._broken];
+    _broken.clear();
+    for (final (joint, force) in broken) {
+      if (joint.isRemoved) continue;
+      final object = joint.gameObject;
+      _breakTo(object, object, joint, force);
+      for (var i = 0; i < object.componentCount; i++) {
+        final c = object.componentAt(i);
+        if (!c.isRemoved) _breakTo(object, c, joint, force);
+      }
+      if (!joint.isRemoved && !object.isDestroyed) object.removeComponent(joint);
+    }
+  }
+
+  void _breakTo(GameObject object, Object target, Joint joint, double force) {
+    if (target is! JointBreaks) return;
+    try {
+      target.onJointBreak(joint, force);
+    } catch (error, stack) {
+      world.report(object, error, stack);
+    }
   }
 
   /// Puts each interpolated body between where the last two steps left it,

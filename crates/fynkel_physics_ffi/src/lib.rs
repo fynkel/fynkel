@@ -20,13 +20,13 @@ use std::ffi::{CString, c_char};
 use std::panic::{self, AssertUnwindSafe};
 
 use fynkel_physics::{
-    Axis, BodyKind, BodySpec, CharacterHit, CharacterSettings, ColliderShape, ColliderSpec, Combine, Constraints,
-    ContactKind, ForceMode, Hit, Material, Moved, ObjectPose, Physics, PhysicsError, Pose, Push, QueryOptions,
-    QueryShape, Rotation, Settings, Shape, Vector,
+    Axis, BodyKind, BodySpec, BrokenJoint, CharacterHit, CharacterSettings, ColliderShape, ColliderSpec, Combine,
+    Constraints, ContactKind, ForceMode, Hit, JointKind, JointMotor, JointSpec, JointSpring, Material, Moved,
+    ObjectPose, Physics, PhysicsError, Pose, Push, QueryOptions, QueryShape, Rotation, Settings, Shape, Vector,
 };
 
 /// Bumped on any change to the functions or types in this file.
-pub const FP_ABI_VERSION: u32 = 7;
+pub const FP_ABI_VERSION: u32 = 8;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -381,6 +381,75 @@ pub struct FpCharacterHit {
     pub normal: FpVec3,
 }
 
+/// What a joint lets its body do (`FpJointSpec::kind`).
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FpJointKind {
+    /// Nothing: the two move as one.
+    Fixed = 0,
+    /// Turn about its axis.
+    Hinge = 1,
+    /// Anything, pulled back outside its distances.
+    Spring = 2,
+}
+
+/// What a joint is: Unity's joint properties, in its rigidbody's space.
+/// `connected` is a rigidbody's id or 0 for the world; `connected_anchor`
+/// counts when `has_connected_anchor` is 1, else it's where `anchor` is
+/// when the joint is made. Angles are in radians, flags 0 or 1, break
+/// force and torque infinity for never. The limits, motor and spring count
+/// when their `use_` flag is 1; the motor turns a hinge in place of its
+/// spring. A spring joint uses `spring` and `damper` (not `target`), and
+/// doesn't pull between `min_distance` and `max_distance`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FpJointSpec {
+    pub body: u64,
+    pub connected: u64,
+    pub kind: u32,
+    pub anchor: FpVec3,
+    pub has_connected_anchor: u32,
+    pub connected_anchor: FpVec3,
+    pub axis: FpVec3,
+    pub enable_collision: u32,
+    pub break_force: f32,
+    pub break_torque: f32,
+    pub use_limits: u32,
+    pub limit_min: f32,
+    pub limit_max: f32,
+    pub use_motor: u32,
+    pub motor_velocity: f32,
+    pub motor_force: f32,
+    pub use_spring: u32,
+    pub spring: f32,
+    pub damper: f32,
+    pub target: f32,
+    pub min_distance: f32,
+    pub max_distance: f32,
+}
+
+/// How hard a joint held in the last step, in the world (the torque about
+/// its anchor), where it holds on the connected body, and a hinge's angle
+/// (radians) and how fast it turns (radians a second).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FpJointState {
+    pub connected_anchor: FpVec3,
+    pub force: FpVec3,
+    pub torque: FpVec3,
+    pub angle: f32,
+    pub velocity: f32,
+}
+
+/// A joint a step broke: its key, and the force and torque it broke at.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FpBrokenJoint {
+    pub key: u64,
+    pub force: f32,
+    pub torque: f32,
+}
+
 /// A collider an overlap found.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -411,6 +480,8 @@ pub enum FpStatus {
     /// An earlier call panicked while changing this world, so it can't be
     /// trusted any more.
     Poisoned = 7,
+    /// No joint has this id: it was removed, broke, or was never added.
+    NoJoint = 8,
 }
 
 /// A physics world. Made by `fp_world_new`, freed by `fp_world_free`.
@@ -431,6 +502,8 @@ pub struct FpWorld {
     edges: Vec<[Vector; 2]>,
     /// What the last `fp_character_move` hit, until `fp_character_hits_read`.
     character_hits: Vec<CharacterHit>,
+    /// What the last step broke, until `fp_joints_broken_read`.
+    broken: Vec<BrokenJoint>,
     poisoned: bool,
 }
 
@@ -462,6 +535,7 @@ impl From<PhysicsError> for Error {
         let status = match e {
             PhysicsError::NoBody(_) => FpStatus::NoBody,
             PhysicsError::NoCollider(_) => FpStatus::NoCollider,
+            PhysicsError::NoJoint(_) => FpStatus::NoJoint,
             PhysicsError::Value(_) => FpStatus::InvalidValue,
         };
         Self::new(status, e.to_string())
@@ -687,6 +761,36 @@ fn push(p: FpPush) -> Result<Push, Error> {
     })
 }
 
+fn joint_spec(s: FpJointSpec) -> Result<JointSpec, Error> {
+    let kind = match s.kind {
+        0 => JointKind::Fixed,
+        1 => JointKind::Hinge,
+        2 => JointKind::Spring,
+        k => return Err(invalid(format!("{k} is no joint kind"))),
+    };
+    Ok(JointSpec {
+        kind,
+        body: s.body,
+        connected: s.connected,
+        anchor: vector(s.anchor),
+        connected_anchor: flag(s.has_connected_anchor, "has_connected_anchor")?.then(|| vector(s.connected_anchor)),
+        axis: vector(s.axis),
+        enable_collision: flag(s.enable_collision, "enable_collision")?,
+        break_force: s.break_force,
+        break_torque: s.break_torque,
+        limits: flag(s.use_limits, "use_limits")?.then_some([s.limit_min, s.limit_max]),
+        motor: flag(s.use_motor, "use_motor")?
+            .then_some(JointMotor { velocity: s.motor_velocity, force: s.motor_force }),
+        spring: flag(s.use_spring, "use_spring")?.then_some(JointSpring {
+            spring: s.spring,
+            damper: s.damper,
+            target: s.target,
+        }),
+        min_distance: s.min_distance,
+        max_distance: s.max_distance,
+    })
+}
+
 fn query_shape(s: FpQueryShape) -> Result<QueryShape, Error> {
     Ok(match s.kind {
         0 => QueryShape::Sphere { center: vector(s.a), radius: s.radius },
@@ -766,6 +870,7 @@ pub extern "C" fn fp_world_new() -> *mut FpWorld {
         found: Vec::new(),
         edges: Vec::new(),
         character_hits: Vec::new(),
+        broken: Vec::new(),
         poisoned: false,
     }))
 }
@@ -1965,6 +2070,130 @@ pub unsafe extern "C" fn fp_character_hits_read(world: *mut FpWorld, out: *mut F
                     point: fp_vec3(hit.point),
                     normal: fp_vec3(hit.normal),
                 };
+            }
+            Ok(())
+        })
+    }
+}
+
+// --- Joints --------------------------------------------------------------------
+
+/// Joins `spec.body` to `spec.connected` (or the world) as they are now,
+/// with `key` to know the joint by when it breaks, and writes its id to
+/// `out`.
+///
+/// # Safety
+///
+/// `world` is null or live; `spec` is null or readable; `out` is null or
+/// writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_joint_add(
+    world: *mut FpWorld,
+    key: u64,
+    spec: *const FpJointSpec,
+    out: *mut u64,
+) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            if out.is_null() {
+                return Err(Error::null("out"));
+            }
+            let id = w.physics.add_joint(key, joint_spec(read(spec, "spec")?)?)?;
+            write(out, "out", id)
+        })
+    }
+}
+
+/// Changes a joint's limits, motor, spring, break force and torque, and
+/// whether its bodies collide; its bodies, anchors and axis can't change.
+///
+/// # Safety
+///
+/// `world` is null or live; `spec` is null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_joint_spec_set(world: *mut FpWorld, joint: u64, spec: *const FpJointSpec) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe { with_world(world, |w| Ok(w.physics.set_joint_spec(joint, joint_spec(read(spec, "spec")?)?)?)) }
+}
+
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_joint_remove(world: *mut FpWorld, joint: u64) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe { with_world(world, |w| Ok(w.physics.remove_joint(joint)?)) }
+}
+
+/// How hard a joint held in the last step, and where a hinge is.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_joint_state_get(world: *mut FpWorld, joint: u64, out: *mut FpJointState) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            let s = w.physics.joint_state(joint)?;
+            write(
+                out,
+                "out",
+                FpJointState {
+                    connected_anchor: fp_vec3(s.connected_anchor),
+                    force: fp_vec3(s.force),
+                    torque: fp_vec3(s.torque),
+                    angle: s.angle,
+                    velocity: s.velocity,
+                },
+            )
+        })
+    }
+}
+
+/// Writes how many joints the last step broke to `out_count`: read them
+/// with `fp_joints_broken_read`. They're removed.
+///
+/// # Safety
+///
+/// `world` is null or live; `out_count` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_joints_broken(world: *mut FpWorld, out_count: *mut u32) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            w.broken.clear();
+            w.broken.extend_from_slice(w.physics.broken_joints());
+            write(out_count, "out_count", count(w.broken.len())?)
+        })
+    }
+}
+
+/// Writes the joints the last `fp_joints_broken` counted to `out`, which
+/// holds `len`: exactly as many as it said.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable for `len` entries.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_joints_broken_read(world: *mut FpWorld, out: *mut FpBrokenJoint, len: usize) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            if len != w.broken.len() {
+                return Err(Error::new(FpStatus::WrongSize, format!("{} joints broke, not {len}", w.broken.len())));
+            }
+            if len == 0 {
+                return Ok(());
+            }
+            if out.is_null() {
+                return Err(Error::null("out"));
+            }
+            // SAFETY: writable for len entries, as the caller promises.
+            let out = std::slice::from_raw_parts_mut(out, len);
+            for (slot, b) in out.iter_mut().zip(&w.broken) {
+                *slot = FpBrokenJoint { key: b.key, force: b.force, torque: b.torque };
             }
             Ok(())
         })

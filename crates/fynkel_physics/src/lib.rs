@@ -18,6 +18,7 @@ mod bodies;
 mod characters;
 mod colliders;
 mod contacts;
+mod joints;
 mod meshes;
 mod queries;
 
@@ -25,6 +26,7 @@ pub use bodies::{BodySpec, Constraints, ForceMode, Push, Settings};
 pub use characters::{COLLIDED_ABOVE, COLLIDED_BELOW, COLLIDED_SIDES, CharacterHit, CharacterMove, CharacterSettings};
 pub use colliders::{Axis, ColliderShape, ColliderSpec, Combine, Material, ObjectPose};
 pub use contacts::{ContactEvent, ContactKind, ContactPoint, LISTEN_COLLISIONS, LISTEN_TRIGGERS};
+pub use joints::{BrokenJoint, JointKind, JointMotor, JointSpec, JointSpring, JointState};
 pub use queries::{Hit, QueryOptions, QueryShape};
 
 /// What moves a body.
@@ -61,6 +63,7 @@ pub enum Shape {
 pub enum PhysicsError {
     NoBody(u64),
     NoCollider(u64),
+    NoJoint(u64),
     /// A value was not finite, out of range, or a rotation not of unit length.
     Value(String),
 }
@@ -70,6 +73,7 @@ impl fmt::Display for PhysicsError {
         match self {
             Self::NoBody(id) => write!(f, "no body {id} (removed, or never added)"),
             Self::NoCollider(id) => write!(f, "no collider {id} (removed, or never added)"),
+            Self::NoJoint(id) => write!(f, "no joint {id} (removed, broken, or never added)"),
             Self::Value(message) => f.write_str(message),
         }
     }
@@ -107,6 +111,8 @@ pub struct Physics {
     meshes: meshes::Meshes,
     // Scratch for the character controllers' moves (characters.rs).
     character_collisions: Vec<rapier3d::control::CharacterCollision>,
+    // The joints (joints.rs).
+    joints: joints::Joints,
 }
 
 impl fmt::Debug for Physics {
@@ -140,6 +146,7 @@ impl Physics {
             contacts: contacts::Contacts::default(),
             meshes: meshes::Meshes::default(),
             character_collisions: Vec::new(),
+            joints: joints::Joints::default(),
         }
     }
 
@@ -176,6 +183,7 @@ impl Physics {
     /// Removes a body and the colliders on it.
     pub fn remove_body(&mut self, id: u64) -> Result<(), PhysicsError> {
         let handle = self.body_handle(id)?;
+        self.forget_joints_of(handle);
         let w = &mut self.world;
         for collider in w.bodies[handle].colliders() {
             if let Some(slot) = self.followed.get_mut(collider.into_raw_parts().0 as usize) {
@@ -272,10 +280,12 @@ impl Physics {
         check_positive("a step's time", dt)?;
         self.before_step(dt);
         self.contacts_before_step();
+        self.joints_before_step(dt);
         self.world.integration_parameters.dt = dt;
         self.world.step_with_events(&self.contacts.filter(), &());
         self.after_step();
         self.contacts_after_step();
+        self.joints_after_step();
         // The step put every collider's bounds in the tree.
         self.dirty.clear();
         Ok(())

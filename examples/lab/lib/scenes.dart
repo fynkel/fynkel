@@ -11,6 +11,8 @@ import 'scenes/contacts_basics.dart';
 import 'scenes/eases.dart';
 import 'scenes/fixed_step_basics.dart';
 import 'scenes/input.dart';
+import 'scenes/joints_basics.dart';
+import 'scenes/joints_bridge.dart';
 import 'scenes/layer_matrix.dart';
 import 'scenes/layers_basics.dart';
 import 'scenes/lifecycle.dart';
@@ -52,4 +54,6 @@ final List<LabScene Function()> scenes = [
   MeshCollidersBasicsScene.new,
   CharacterBasicsScene.new,
   CharacterCourseScene.new,
+  JointsBasicsScene.new,
+  JointsBridgeScene.new,
 ];

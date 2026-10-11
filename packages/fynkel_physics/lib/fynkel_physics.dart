@@ -6,7 +6,8 @@
 /// physics moves it: gravity, forces, collisions. Mix [Triggers] or
 /// [Collisions] into an object or a behaviour to hear what it touches, and
 /// say which layers meet with `physics.ignoreLayerCollision`. Walk a
-/// player with a [CharacterController].
+/// player with a [CharacterController]. Join rigidbodies with a
+/// [FixedJoint], [HingeJoint] or [SpringJoint].
 library;
 
 export 'src/physics.dart'
@@ -24,8 +25,15 @@ export 'src/physics.dart'
         ControllerColliderHit,
         ControllerHits,
         ContactPoint,
+        FixedJoint,
         ForceMode,
         GameObjectPhysics,
+        HingeJoint,
+        Joint,
+        JointBreaks,
+        JointLimits,
+        JointMotor,
+        JointSpring,
         MeshCollider,
         Physics,
         PhysicsHit,
@@ -38,6 +46,7 @@ export 'src/physics.dart'
         RigidbodyConstraints,
         RigidbodyInterpolation,
         SphereCollider,
+        SpringJoint,
         Triggers,
         WorldPhysics;
 export 'src/raw.dart' show PhysicsException, PhysicsStatus;

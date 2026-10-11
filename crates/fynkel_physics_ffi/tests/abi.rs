@@ -751,3 +751,63 @@ fn the_layer_matrix_and_ignored_pairs_come_through_c() {
         assert!(last_error().contains("listens"), "{}", last_error());
     }
 }
+
+// --- Joints ----------------------------------------------------------------------
+
+#[test]
+fn a_joint_holds_through_c_says_how_hard_and_breaks_and_bad_joints_are_refused() {
+    let world = World::new();
+    // 2 kg hanging from the world, 1 m below where it's held.
+    let body = world.rigidbody(3, body_spec(), at(0.0, 5.0, 0.0));
+    let spec = FpJointSpec {
+        body,
+        kind: FpJointKind::Fixed as u32,
+        anchor: FpVec3 { y: 1.0, ..FpVec3::default() },
+        break_force: f32::INFINITY,
+        break_torque: f32::INFINITY,
+        ..FpJointSpec::default()
+    };
+    let (mut joint, mut count) = (0, 0);
+    let mut state = FpJointState::default();
+    let mut broken = [FpBrokenJoint::default(); 2];
+    // SAFETY: a live world, readable specs, and writable outs.
+    unsafe {
+        assert_eq!(fp_joint_add(world.0, 42, &spec, &mut joint), FpStatus::Ok, "{}", last_error());
+        for _ in 0..10 {
+            world.step();
+            assert_eq!(fp_joints_broken(world.0, &mut count), FpStatus::Ok);
+            assert_eq!(count, 0);
+        }
+        assert_eq!(fp_joint_state_get(world.0, joint, &mut state), FpStatus::Ok);
+        assert!((state.force.y - 19.62).abs() < 0.1, "{state:?}");
+        assert_eq!(state.connected_anchor, FpVec3 { x: 0.0, y: 6.0, z: 0.0 });
+        assert_eq!(world.state(body).pose, at(0.0, 5.0, 0.0));
+        // Weaker than its load, it breaks in the next step.
+        let weak = FpJointSpec { break_force: 10.0, ..spec };
+        assert_eq!(fp_joint_spec_set(world.0, joint, &weak), FpStatus::Ok, "{}", last_error());
+        world.step();
+        assert_eq!(fp_joints_broken(world.0, &mut count), FpStatus::Ok);
+        assert_eq!(count, 1);
+        assert_eq!(fp_joints_broken_read(world.0, broken.as_mut_ptr(), 2), FpStatus::WrongSize);
+        assert_eq!(fp_joints_broken_read(world.0, broken.as_mut_ptr(), 1), FpStatus::Ok);
+        assert_eq!(broken[0].key, 42);
+        assert!((broken[0].force - 19.62).abs() < 0.5, "{:?}", broken[0]);
+        assert_eq!(fp_joint_state_get(world.0, joint, &mut state), FpStatus::NoJoint);
+        assert_eq!(fp_joint_remove(world.0, joint), FpStatus::NoJoint);
+
+        for bad in [
+            FpJointSpec { kind: 3, ..spec },
+            FpJointSpec { use_limits: 2, ..spec },
+            FpJointSpec { break_force: 0.0, ..spec },
+            FpJointSpec { kind: FpJointKind::Hinge as u32, axis: FpVec3::default(), ..spec },
+        ] {
+            assert_eq!(fp_joint_add(world.0, 1, &bad, &mut joint), FpStatus::InvalidValue, "{bad:?}");
+        }
+        assert_eq!(fp_joint_add(world.0, 1, &FpJointSpec { body: 99, ..spec }, &mut joint), FpStatus::NoBody);
+        assert_eq!(fp_joint_add(world.0, 1, ptr::null(), &mut joint), FpStatus::NullPointer);
+        assert_eq!(fp_joint_add(world.0, 1, &spec, ptr::null_mut()), FpStatus::NullPointer);
+        let hinge = FpJointSpec { kind: FpJointKind::Hinge as u32, axis: FpVec3 { x: 1.0, y: 0.0, z: 0.0 }, ..spec };
+        assert_eq!(fp_joint_add(world.0, 1, &hinge, &mut joint), FpStatus::Ok);
+        assert_eq!(fp_joint_remove(world.0, joint), FpStatus::Ok);
+    }
+}

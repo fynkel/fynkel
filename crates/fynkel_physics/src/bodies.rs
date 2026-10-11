@@ -445,7 +445,7 @@ impl Physics {
         }
     }
 
-    fn rigidbody(&self, id: u64) -> Result<RigidBodyHandle, PhysicsError> {
+    pub(crate) fn rigidbody(&self, id: u64) -> Result<RigidBodyHandle, PhysicsError> {
         let handle = body_handle(&self.world.bodies, id)?;
         match self.bodies.get(handle.into_raw_parts().0 as usize) {
             Some(Some(_)) => Ok(handle),

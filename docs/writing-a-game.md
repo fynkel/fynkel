@@ -912,6 +912,50 @@ GameObject player() => GameObject(
 );
 ```
 
+**Joints** hold a rigidbody to another, or to the world: `FixedJoint`
+holds them as one, `HingeJoint` lets them turn about an `axis` (with
+`limits`, a `motor` and a `spring`, in degrees, each on with `useLimits`,
+`useMotor`, `useSpring`), and `SpringJoint` pulls them back together
+when they are further apart than `maxDistance`. A joint is a behaviour on
+the object with the rigidbody; `connectedBody` is the other one (none for
+the world), and `anchor` is where it holds, in the object's own space. It
+holds the bodies as they are when it joins them. With a `breakForce` or
+`breakTorque`, a joint that holds harder than that breaks: `with
+JointBreaks` hears of it in `onJointBreak`, and the joint is taken off.
+
+```dart
+// lib/door.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
+
+/// A door on a hinge at its left edge, that swings shut, and comes off
+/// when kicked too hard.
+class Door extends GameObject with JointBreaks {
+  Door()
+    : super(
+        name: 'door',
+        transform: Transform(position: Vec3(0, 1.1, 0), scale: Vec3(1, 2, 0.1)),
+        components: [
+          MeshRenderer(Mesh.cube(), Material()),
+          BoxCollider(),
+          Rigidbody(mass: 10),
+          HingeJoint(
+            anchor: Vec3(-0.5, 0, 0),
+            axis: Vec3(0, 1, 0),
+            useLimits: true,
+            limits: const JointLimits(min: -90, max: 90),
+            useSpring: true,
+            spring: const JointSpring(spring: 20, damper: 8),
+            breakForce: 2000,
+          ),
+        ],
+      );
+
+  @override
+  void onJointBreak(Joint joint, double breakForce) => print('the door came off');
+}
+```
+
 ## 15. Flutter around the game
 
 The game is a Flutter widget, so menus, HUDs and settings are plain
@@ -1051,8 +1095,8 @@ What keeps a game fast:
 
 ## 19. What isn't there yet
 
-Joints (stage 5 brings them next), audio, animation of models, point and
-spot lights and shadows, saving, gamepads, scene files and an editor.
+Audio, animation of models, point and spot lights and shadows, saving,
+gamepads, scene files and an editor.
 
 ## 20. From Unity
 
@@ -1088,5 +1132,8 @@ spot lights and shadows, saving, gamepads, scene files and an editor.
 | `CharacterController`, `Move`, `SimpleMove`, `CollisionFlags` | the same, as `move`, `simpleMove`, `CollisionFlags.below` |
 | `OnControllerColliderHit(ControllerColliderHit)` | `with ControllerHits`, then `onControllerColliderHit` |
 | Pushing rigidbodies from `OnControllerColliderHit` | done for you, by the controller's `mass` |
+| `FixedJoint`, `HingeJoint`, `SpringJoint`, `JointLimits`, `JointMotor`, `JointSpring` | the same, from `fynkel_physics` |
+| `OnJointBreak(float breakForce)` | `with JointBreaks`, then `onJointBreak(joint, breakForce)` |
+| `HingeJoint` with both a motor and a spring | the motor wins |
 | `Debug.DrawLine` | `debug.line` |
 | Scenes, the Inspector | Classes; Flutter for UI |
