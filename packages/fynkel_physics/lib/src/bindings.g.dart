@@ -26,6 +26,65 @@ external int fp_body_pose_set(ffi.Pointer<FpWorld> world, int body, FpPose pose)
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64)>(isLeaf: true)
 external int fp_body_remove(ffi.Pointer<FpWorld> world, int body);
 
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<FpWorld>,
+    ffi.Pointer<FpQueryShape>,
+    ffi.Pointer<FpSweep>,
+    ffi.Uint32,
+    ffi.Uint32,
+    ffi.Pointer<FpHit>,
+  )
+>(isLeaf: true)
+external int fp_cast(
+  ffi.Pointer<FpWorld> world,
+  ffi.Pointer<FpQueryShape> shape,
+  ffi.Pointer<FpSweep> sweep,
+  int layers,
+  int hit_triggers,
+  ffi.Pointer<FpHit> out,
+);
+
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<FpWorld>,
+    ffi.Pointer<FpQueryShape>,
+    ffi.Pointer<FpSweep>,
+    ffi.Uint32,
+    ffi.Uint32,
+    ffi.Pointer<ffi.Uint32>,
+  )
+>(isLeaf: true)
+external int fp_cast_all(
+  ffi.Pointer<FpWorld> world,
+  ffi.Pointer<FpQueryShape> shape,
+  ffi.Pointer<FpSweep> sweep,
+  int layers,
+  int hit_triggers,
+  ffi.Pointer<ffi.Uint32> out_count,
+);
+
+@ffi.Native<
+  ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpQueryShape>, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Uint32>)
+>(isLeaf: true)
+external int fp_check(
+  ffi.Pointer<FpWorld> world,
+  ffi.Pointer<FpQueryShape> shape,
+  int layers,
+  int hit_triggers,
+  ffi.Pointer<ffi.Uint32> out,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Pointer<FpVec3>, ffi.Pointer<FpVec3>)>(
+  isLeaf: true,
+)
+external int fp_closest_point(
+  ffi.Pointer<FpWorld> world,
+  int collider,
+  ffi.Pointer<FpVec3> point,
+  ffi.Pointer<FpVec3> out,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, FpShape, FpPose, ffi.Pointer<ffi.Uint64>)>(
   isLeaf: true,
 )
@@ -37,17 +96,98 @@ external int fp_collider_add(
   ffi.Pointer<ffi.Uint64> out,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Pointer<FpRay>, ffi.Pointer<FpHit>)>(isLeaf: true)
+external int fp_collider_raycast(
+  ffi.Pointer<FpWorld> world,
+  int collider,
+  ffi.Pointer<FpRay> ray,
+  ffi.Pointer<FpHit> out,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64)>(isLeaf: true)
 external int fp_collider_remove(ffi.Pointer<FpWorld> world, int collider);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Pointer<FpShape>, ffi.Pointer<FpPose>)>(
+  isLeaf: true,
+)
+external int fp_collider_shape_get(
+  ffi.Pointer<FpWorld> world,
+  int collider,
+  ffi.Pointer<FpShape> out_shape,
+  ffi.Pointer<FpPose> out_pose,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, FpColliderSpec)>(isLeaf: true)
+external int fp_collider_spec_set(ffi.Pointer<FpWorld> world, int collider, FpColliderSpec spec);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<ffi.Uint64>, ffi.Pointer<FpTransform>, ffi.Size)>(
+  isLeaf: true,
+)
+external int fp_colliders_follow(
+  ffi.Pointer<FpWorld> world,
+  ffi.Pointer<ffi.Uint64> ids,
+  ffi.Pointer<FpTransform> objects,
+  int count,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpFound>, ffi.Size)>(isLeaf: true)
+external int fp_found_read(ffi.Pointer<FpWorld> world, ffi.Pointer<FpFound> out, int len);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, FpVec3)>(isLeaf: true)
 external int fp_gravity_set(ffi.Pointer<FpWorld> world, FpVec3 gravity);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpHit>, ffi.Size)>(isLeaf: true)
+external int fp_hits_read(ffi.Pointer<FpWorld> world, ffi.Pointer<FpHit> out, int len);
 
 @ffi.Native<ffi.Pointer<ffi.Char> Function()>(isLeaf: true)
 external ffi.Pointer<ffi.Char> fp_last_error();
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpMoved>, ffi.Size)>(isLeaf: true)
 external int fp_moved_read(ffi.Pointer<FpWorld> world, ffi.Pointer<FpMoved> out, int len);
+
+@ffi.Native<
+  ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpQueryShape>, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Uint32>)
+>(isLeaf: true)
+external int fp_overlap(
+  ffi.Pointer<FpWorld> world,
+  ffi.Pointer<FpQueryShape> shape,
+  int layers,
+  int hit_triggers,
+  ffi.Pointer<ffi.Uint32> out_count,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpRay>, ffi.Uint32, ffi.Uint32, ffi.Pointer<FpHit>)>(
+  isLeaf: true,
+)
+external int fp_raycast(
+  ffi.Pointer<FpWorld> world,
+  ffi.Pointer<FpRay> ray,
+  int layers,
+  int hit_triggers,
+  ffi.Pointer<FpHit> out,
+);
+
+@ffi.Native<
+  ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpRay>, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Uint32>)
+>(isLeaf: true)
+external int fp_raycast_all(
+  ffi.Pointer<FpWorld> world,
+  ffi.Pointer<FpRay> ray,
+  int layers,
+  int hit_triggers,
+  ffi.Pointer<ffi.Uint32> out_count,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, FpColliderSpec, FpTransform, ffi.Pointer<ffi.Uint64>)>(
+  isLeaf: true,
+)
+external int fp_static_collider_add(
+  ffi.Pointer<FpWorld> world,
+  int key,
+  FpColliderSpec spec,
+  FpTransform object,
+  ffi.Pointer<ffi.Uint64> out,
+);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Float, ffi.Pointer<ffi.Uint32>)>(isLeaf: true)
 external int fp_step(ffi.Pointer<FpWorld> world, double dt, ffi.Pointer<ffi.Uint32> out_moved);
@@ -58,12 +198,64 @@ external void fp_world_free(ffi.Pointer<FpWorld> world);
 @ffi.Native<ffi.Pointer<FpWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FpWorld> fp_world_new();
 
-const int FP_ABI_VERSION = 1;
+const int FP_ABI_VERSION = 2;
 
 sealed class FpBodyKind {
   static const FP_BODY_KIND_DYNAMIC = 0;
   static const FP_BODY_KIND_KINEMATIC = 1;
   static const FP_BODY_KIND_STATIC = 2;
+}
+
+sealed class FpColliderKind {
+  static const FP_COLLIDER_KIND_BOX = 0;
+  static const FP_COLLIDER_KIND_SPHERE = 1;
+  static const FP_COLLIDER_KIND_CAPSULE = 2;
+}
+
+final class FpColliderSpec extends ffi.Struct {
+  @ffi.Uint32()
+  external int kind;
+
+  external FpVec3 size;
+
+  @ffi.Uint32()
+  external int direction;
+
+  external FpVec3 center;
+
+  @ffi.Uint32()
+  external int is_trigger;
+
+  @ffi.Uint32()
+  external int layer;
+}
+
+final class FpFound extends ffi.Struct {
+  @ffi.Uint64()
+  external int collider;
+
+  @ffi.Uint64()
+  external int key;
+
+  static ffi.Pointer<FpFound> $allocate(ffi.Allocator $allocator, {required int collider, required int key}) =>
+      $allocator<FpFound>()
+        ..ref.collider = collider
+        ..ref.key = key;
+}
+
+final class FpHit extends ffi.Struct {
+  @ffi.Uint64()
+  external int collider;
+
+  @ffi.Uint64()
+  external int key;
+
+  external FpVec3 point;
+
+  external FpVec3 normal;
+
+  @ffi.Float()
+  external double distance;
 }
 
 final class FpMoved extends ffi.Struct {
@@ -103,6 +295,35 @@ final class FpQuat extends ffi.Struct {
     ..ref.y = y
     ..ref.z = z
     ..ref.w = w;
+}
+
+final class FpQueryShape extends ffi.Struct {
+  @ffi.Uint32()
+  external int kind;
+
+  external FpVec3 a;
+
+  external FpVec3 b;
+
+  @ffi.Float()
+  external double radius;
+
+  external FpQuat rotation;
+}
+
+sealed class FpQueryShapeKind {
+  static const FP_QUERY_SHAPE_KIND_SPHERE = 0;
+  static const FP_QUERY_SHAPE_KIND_BOX = 1;
+  static const FP_QUERY_SHAPE_KIND_CAPSULE = 2;
+}
+
+final class FpRay extends ffi.Struct {
+  external FpVec3 origin;
+
+  external FpVec3 direction;
+
+  @ffi.Float()
+  external double max_distance;
 }
 
 final class FpShape extends ffi.Struct {
@@ -146,6 +367,21 @@ sealed class FpStatus {
   static const FP_STATUS_WRONG_SIZE = 5;
   static const FP_STATUS_PANIC = 6;
   static const FP_STATUS_POISONED = 7;
+}
+
+final class FpSweep extends ffi.Struct {
+  external FpVec3 direction;
+
+  @ffi.Float()
+  external double max_distance;
+}
+
+final class FpTransform extends ffi.Struct {
+  external FpVec3 position;
+
+  external FpQuat rotation;
+
+  external FpVec3 scale;
 }
 
 final class FpVec3 extends ffi.Struct {

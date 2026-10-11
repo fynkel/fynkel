@@ -251,3 +251,13 @@ final class RawPhysics implements Finalizable {
       ..w = r.w;
   }
 }
+
+/// For the rest of the package: the native world under a [RawPhysics]. Not
+/// exported.
+extension RawWorld on RawPhysics {
+  Pointer<FpWorld> get pointer => _live;
+}
+
+/// For the rest of the package: throws the [PhysicsException] a status
+/// other than ok means. Not exported.
+void checkPhysics(int status) => _check(status);

@@ -14,6 +14,12 @@ use rapier3d::prelude::*;
 
 pub use rapier3d::math::{Pose, Rotation, Vector};
 
+mod colliders;
+mod queries;
+
+pub use colliders::{Axis, ColliderShape, ColliderSpec, ObjectPose};
+pub use queries::{Hit, QueryOptions, QueryShape};
+
 /// What moves a body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BodyKind {
@@ -74,6 +80,12 @@ pub struct Moved {
 /// A physics world.
 pub struct Physics {
     world: PhysicsWorld,
+    // The colliders that follow an object ([`Self::add_static_collider`]),
+    // by their handle's index: their spec and the object's last pose.
+    followed: Vec<Option<colliders::Followed>>,
+    // Colliders added or moved since the last step, whose bounds the
+    // queries' tree doesn't have yet ([`Self::sync`]).
+    dirty: Vec<ColliderHandle>,
 }
 
 impl fmt::Debug for Physics {
@@ -94,7 +106,7 @@ impl Default for Physics {
 impl Physics {
     /// An empty world with Unity's gravity, (0, -9.81, 0).
     pub fn new() -> Self {
-        Self { world: PhysicsWorld::new() }
+        Self { world: PhysicsWorld::new(), followed: Vec::new(), dirty: Vec::new() }
     }
 
     pub fn gravity(&self) -> Vector {
@@ -176,6 +188,7 @@ impl Physics {
             }
             None => w.colliders.insert(builder),
         };
+        self.dirty.push(handle);
         Ok(collider_id(handle))
     }
 
@@ -183,6 +196,9 @@ impl Physics {
         let handle = self.collider_handle(id)?;
         let w = &mut self.world;
         w.colliders.remove(handle, &mut w.islands, &mut w.bodies, &mut w.soft_bodies, true);
+        if let Some(slot) = self.followed.get_mut(handle.into_raw_parts().0 as usize) {
+            *slot = None;
+        }
         Ok(())
     }
 
@@ -208,6 +224,8 @@ impl Physics {
         check_positive("a step's time", dt)?;
         self.world.integration_parameters.dt = dt;
         self.world.step();
+        // The step put every collider's bounds in the tree.
+        self.dirty.clear();
         Ok(())
     }
 

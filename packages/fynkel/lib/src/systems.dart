@@ -48,4 +48,24 @@ extension WorldSystems on World {
 
   /// The world's system of type [T], or null if it has none yet.
   T? maybeSystem<T extends WorldSystem>() => _systemsByType[T] as T?;
+
+  /// A number that goes up whenever an object's transform, parent or layer
+  /// is set. While it stays the same, no object's world transform or layer
+  /// has changed, so a system that follows objects has nothing to read.
+  int get transformVersion => _transformVersion;
+
+  /// Reads the world transforms of [count] objects, by their [GameObject.id]s
+  /// at [ids], into [out]: ten 32-bit floats each, the position (x, y, z),
+  /// the rotation (x, y, z, w) and the scale (x, y, z), as
+  /// [GameObject.worldTransform] gives them. One call however many there
+  /// are; the moves set since the last send are sent first. Throws a
+  /// [FynkelException] if an id isn't a live object.
+  void readWorldTransforms(Pointer<Uint64> ids, int count, Pointer<Float> out) {
+    if (count == 0) return;
+    _sendTransforms();
+    // The same buffer each time, as a rule: its cast is kept, since making
+    // one each call allocates.
+    if (out.address != _manyOut.address) _manyOut = out.cast();
+    check(fy_world_transform_get_many(pointer, ids, count, _manyOut));
+  }
 }

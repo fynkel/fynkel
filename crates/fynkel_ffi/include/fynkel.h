@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 13
+#define FY_ABI_VERSION 14
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -453,6 +453,20 @@ FyStatus fy_find(const struct FyWorld *world,
 //
 // `world` is null or live; `out` is null or writable.
 FyStatus fy_world_transform_get(const struct FyWorld *world, uint64_t id, struct FyTransform *out);
+
+// The world transforms of `count` objects, `ids[i]`'s into `out[i]`, as
+// `fy_world_transform_get` gives each: what a package that follows many
+// objects (physics' colliders) reads in one call. Fails on the first id
+// that isn't an object, with what came before it written.
+//
+// # Safety
+//
+// `world` is null or live; `ids` is null or valid for `count` reads, and
+// `out` null or valid for `count` writes.
+FyStatus fy_world_transform_get_many(const struct FyWorld *world,
+                                     const uint64_t *ids,
+                                     size_t count,
+                                     struct FyTransform *out);
 
 // Casts `ray` at the world as it is now and writes the closest object it
 // hits no further than `max_distance` (which may be infinite) to `out`.

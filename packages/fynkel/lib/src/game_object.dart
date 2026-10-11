@@ -432,6 +432,7 @@ class GameObject with _Moving {
       );
     }
     check(fy_parent_set(_engine('its parent can\'t be set'), id, value?.id ?? 0));
+    world._transformVersion++;
     world._moved.add(this);
     world._shape++;
     world._refresh(this);
@@ -501,6 +502,7 @@ class GameObject with _Moving {
     _checkLayer(value);
     if (_described == null) check(fy_layer_set(_engine('its layer can\'t be set'), id, value));
     _layer = value;
+    _world?._transformVersion++;
   }
 
   /// Whether this object is shown: it and every object above it [active],
@@ -839,6 +841,7 @@ class GameObject with _Moving {
 
   void _setTransform(Transform value) {
     _transform = value;
+    world._transformVersion++;
     if (_unsent) return;
     _unsent = true;
     world._unsent.add(this);

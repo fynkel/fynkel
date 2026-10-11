@@ -3,7 +3,7 @@
 This guide teaches Fynkel from the smallest game up. Each section adds one
 idea, with code that compiles as it stands (`tools/check_guide.py` checks
 it). If you know Unity, most of it will look familiar: Fynkel works the
-way Unity works, in Dart, and §19 maps one to the other.
+way Unity works, in Dart, and §20 maps one to the other.
 
 The finished examples are in `examples/`: `hello` (one turning cube),
 `garden`, `coins` and `arena` (a small game using everything here).
@@ -652,7 +652,76 @@ class Sparkle extends GameObject {
 `debug.sphere`, `debug.path`, each with a `color`. It's off in release
 builds.
 
-## 14. Flutter around the game
+## 14. Physics: colliders and queries
+
+Physics is a package, `fynkel_physics`, on Rapier. Add it to the
+pubspec, next to `fynkel`, and a game without it ships none of it:
+
+```yaml
+  fynkel_physics:
+    path: <the repository>/packages/fynkel_physics
+```
+
+**Colliders** are behaviours, as Unity's: `BoxCollider(size:)`,
+`SphereCollider(radius:)` and `CapsuleCollider(radius:, height:,
+direction:)`, each with `center` and `isTrigger`. Their sizes are in the
+object's own space, and they follow its world position, rotation and
+scale (a sphere takes the largest axis). Their defaults fit
+`Mesh.cube()` and `Mesh.sphere()`. A collider counts while it's enabled
+and its object shown. Rigidbodies, which move them, come next; for now
+colliders are static, and a game moves them by moving their objects.
+
+**Queries** are on `physics`, which every object and behaviour has:
+`raycast`, `sphereCast`, `boxCast`, `capsuleCast` (and `…All`, nearest
+first), `overlapSphere`, `overlapBox`, `overlapCapsule`, and `checkSphere`,
+`checkBox`, `checkCapsule`. Each takes `layers:` and `triggers:`
+(`QueryTriggers.ignore` goes through triggers), and sees colliders where
+their objects are now, moved this frame or not:
+
+```dart
+// lib/sight.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
+
+const walls = 2;
+
+/// Sees the player when nothing on the walls layer is in between.
+class Sight extends Behaviour {
+  Sight(this.player);
+
+  final GameObject player;
+  var seesPlayer = false;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    final to = player.position - gameObject.position;
+    final hit = physics.raycast(
+      Ray(gameObject.position, to),
+      maxDistance: to.length,
+      layers: LayerMask.of([walls]),
+      triggers: QueryTriggers.ignore,
+    );
+    seesPlayer = hit == null;
+  }
+}
+
+/// A wall: a cube with a box collider, on the walls layer.
+GameObject wall(Vec3 at) => GameObject(
+  layer: walls,
+  transform: Transform(position: at, scale: Vec3(4, 2, 0.2)),
+  components: [MeshRenderer(Mesh.cube(), Material()), BoxCollider()],
+);
+```
+
+A hit is a `PhysicsHit`: `point`, `normal`, `distance`, `collider` and
+`gameObject`. As Unity's, a ray doesn't hit what it starts inside, and a
+query that misses allocates nothing. `collider.raycast(ray)` and
+`collider.closestPoint(point)` ask one collider. `world.raycast` still
+finds what's drawn, with no colliders: use it for taps.
+`physics.drawColliders = true` draws every collider with the debug lines.
+
+## 15. Flutter around the game
 
 The game is a Flutter widget, so menus, HUDs and settings are plain
 Flutter. Keep what the HUD shows in `ValueNotifier`s on the game, and give
@@ -731,7 +800,7 @@ class PlayPage extends StatelessWidget {
 
 Leaving the page destroys the game and frees the engine's memory.
 
-## 15. Hot reload and starting over
+## 16. Hot reload and starting over
 
 - **Hot reload** (`r`) changes methods at once, in objects and behaviours
   alike: the next frame runs the new `onUpdate`.
@@ -744,7 +813,7 @@ Leaving the page destroys the game and frees the engine's memory.
   true)` makes every hot reload start the game over.
 - **Hot restart** (`R`) starts the whole app again.
 
-## 16. Testing a game
+## 17. Testing a game
 
 package:fynkel has no Flutter in it, so a game runs in a plain test, frame
 by frame, with made-up input:
@@ -775,7 +844,7 @@ and the rest, so taps, drags and swipes can be tested too.
 for a picture of the game. `examples/arena/test` tests a whole game this
 way.
 
-## 17. Speed
+## 18. Speed
 
 What keeps a game fast:
 
@@ -789,14 +858,14 @@ What keeps a game fast:
   `lib/measured.dart` for package:fynkel_measure's tool, which gives the
   frame rate and memory: `dart run fynkel_measure:measure rate`.
 
-## 18. What isn't there yet
+## 19. What isn't there yet
 
-Physics and collisions, audio, animation of models, point and spot lights
-and shadows, saving, gamepads, scene files and an editor. Until physics
-comes, distance checks (`(a.position - b.position).length < 1`) and
-`world.raycast` do the work, as the arena's do.
+Rigidbodies, triggers and collisions (stage 5 brings them next), audio,
+animation of models, point and spot lights and shadows, saving, gamepads,
+scene files and an editor. Until collision callbacks come, queries
+(`physics.overlapSphere`) and distance checks do the work.
 
-## 19. From Unity
+## 20. From Unity
 
 | Unity | Fynkel |
 |---|---|
@@ -818,6 +887,8 @@ comes, distance checks (`(a.position - b.position).length < 1`) and
 | `IPointerClickHandler` | `onClick` |
 | Cinemachine | `VirtualCamera`, `Follow`, `LookAt`, `Orbit`, `world.cameras` |
 | DOTween | `moveTo`, `tween`, `sequence`, `Ease` |
-| `Physics.Raycast` | `world.raycast` |
+| `BoxCollider`, `SphereCollider`, `CapsuleCollider` | the same, from `fynkel_physics` |
+| `Physics.Raycast`, `SphereCast`, `OverlapSphere`, … | `physics.raycast`, `sphereCast`, `overlapSphere`, … |
+| `Physics.Raycast` against what's drawn (no colliders) | `world.raycast` |
 | `Debug.DrawLine` | `debug.line` |
 | Scenes, the Inspector | Classes; Flutter for UI |
