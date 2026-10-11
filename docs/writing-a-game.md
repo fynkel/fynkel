@@ -920,8 +920,11 @@ GameObject player() => GameObject(
 **Joints** hold a rigidbody to another, or to the world: `FixedJoint`
 holds them as one, `HingeJoint` lets them turn about an `axis` (with
 `limits`, a `motor` and a `spring`, in degrees, each on with `useLimits`,
-`useMotor`, `useSpring`), and `SpringJoint` pulls them back together
-when they are further apart than `maxDistance`. A joint is a behaviour on
+`useMotor`, `useSpring`), `CharacterJoint` lets them turn every way, as
+a ball in a socket (twisting about its `axis` within `lowTwistLimit` and
+`highTwistLimit`, and swinging within `swing1Limit` and `swing2Limit`,
+each a `SoftJointLimit` in degrees; 180° frees it), and `SpringJoint`
+pulls them back together when they are further apart than `maxDistance`. A joint is a behaviour on
 the object with the rigidbody; `connectedBody` is the other one (none for
 the world), and `anchor` is where it holds, in the object's own space. It
 holds the bodies as they are when it joins them. With a `breakForce` or
@@ -1138,7 +1141,7 @@ gamepads, scene files and an editor.
 | `CharacterController`, `Move`, `SimpleMove`, `CollisionFlags` | the same, as `move`, `simpleMove`, `CollisionFlags.below` |
 | `OnControllerColliderHit(ControllerColliderHit)` | `with ControllerHits`, then `onControllerColliderHit` |
 | Pushing rigidbodies from `OnControllerColliderHit` | done for you, by the controller's `mass` |
-| `FixedJoint`, `HingeJoint`, `SpringJoint`, `JointLimits`, `JointMotor`, `JointSpring` | the same, from `fynkel_physics` |
+| `FixedJoint`, `HingeJoint`, `SpringJoint`, `CharacterJoint`, `JointLimits`, `JointMotor`, `JointSpring`, `SoftJointLimit` | the same, from `fynkel_physics` |
 | `OnJointBreak(float breakForce)` | `with JointBreaks`, then `onJointBreak(joint, breakForce)` |
 | `HingeJoint` with both a motor and a spring | the motor wins |
 | `Debug.DrawLine` | `debug.line` |

@@ -796,8 +796,9 @@ fn a_joint_holds_through_c_says_how_hard_and_breaks_and_bad_joints_are_refused()
         assert_eq!(fp_joint_remove(world.0, joint), FpStatus::NoJoint);
 
         for bad in [
-            FpJointSpec { kind: 3, ..spec },
+            FpJointSpec { kind: 4, ..spec },
             FpJointSpec { use_limits: 2, ..spec },
+            FpJointSpec { use_swing_limits: 2, ..spec },
             FpJointSpec { break_force: 0.0, ..spec },
             FpJointSpec { kind: FpJointKind::Hinge as u32, axis: FpVec3::default(), ..spec },
         ] {

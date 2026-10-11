@@ -14,6 +14,7 @@ import 'scenes/input.dart';
 import 'scenes/joints_basics.dart';
 import 'scenes/joints_bridge.dart';
 import 'scenes/joints_chain.dart';
+import 'scenes/joints_character.dart';
 import 'scenes/layer_matrix.dart';
 import 'scenes/layers_basics.dart';
 import 'scenes/lifecycle.dart';
@@ -58,4 +59,5 @@ final List<LabScene Function()> scenes = [
   JointsBasicsScene.new,
   JointsBridgeScene.new,
   JointsChainScene.new,
+  JointsCharacterScene.new,
 ];

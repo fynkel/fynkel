@@ -372,7 +372,7 @@ external void fp_world_free(ffi.Pointer<FpWorld> world);
 @ffi.Native<ffi.Pointer<FpWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FpWorld> fp_world_new();
 
-const int FP_ABI_VERSION = 8;
+const int FP_ABI_VERSION = 9;
 
 const int FP_COLLIDED_ABOVE = 2;
 
@@ -620,6 +620,7 @@ sealed class FpJointKind {
   static const FP_JOINT_KIND_FIXED = 0;
   static const FP_JOINT_KIND_HINGE = 1;
   static const FP_JOINT_KIND_SPRING = 2;
+  static const FP_JOINT_KIND_CHARACTER = 3;
 }
 
 final class FpJointSpec extends ffi.Struct {
@@ -685,6 +686,17 @@ final class FpJointSpec extends ffi.Struct {
 
   @ffi.Float()
   external double max_distance;
+
+  external FpVec3 swing_axis;
+
+  @ffi.Uint32()
+  external int use_swing_limits;
+
+  @ffi.Float()
+  external double swing1;
+
+  @ffi.Float()
+  external double swing2;
 }
 
 final class FpJointState extends ffi.Struct {

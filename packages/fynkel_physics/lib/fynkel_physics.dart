@@ -7,7 +7,7 @@
 /// [Collisions] into an object or a behaviour to hear what it touches, and
 /// say which layers meet with `physics.ignoreLayerCollision`. Walk a
 /// player with a [CharacterController]. Join rigidbodies with a
-/// [FixedJoint], [HingeJoint] or [SpringJoint].
+/// [FixedJoint], [HingeJoint], [SpringJoint] or [CharacterJoint].
 library;
 
 export 'src/physics.dart'
@@ -17,6 +17,7 @@ export 'src/physics.dart'
         CapsuleCollider,
         CapsuleDirection,
         CharacterController,
+        CharacterJoint,
         Collider,
         Collision,
         CollisionDetectionMode,
@@ -45,6 +46,7 @@ export 'src/physics.dart'
         Rigidbody,
         RigidbodyConstraints,
         RigidbodyInterpolation,
+        SoftJointLimit,
         SphereCollider,
         SpringJoint,
         Triggers,
