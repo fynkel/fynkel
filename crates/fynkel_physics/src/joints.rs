@@ -410,6 +410,7 @@ impl Physics {
                     motor.target_pos = target;
                     motor.stiffness = s.spring;
                     motor.damping = s.damper;
+                    motor.max_force = slack_force(s);
                     (d - target).abs() > AWAKE_DISTANCE
                 }
                 JointKind::Hinge => {
@@ -524,6 +525,13 @@ const AWAKE_ANGLE: f32 = 0.1 * std::f32::consts::PI / 180.0;
 
 const SLACK: JointSpring = JointSpring { spring: 0.0, damper: 0.0, target: 0.0 };
 
+/// The most force a spring's motor may give: none for a spring of no
+/// stiffness and no damping, which Rapier would otherwise hold still, as a
+/// rod.
+fn slack_force(s: JointSpring) -> f32 {
+    if s.spring > 0.0 || s.damper > 0.0 { f32::MAX } else { 0.0 }
+}
+
 fn joint_id(handle: ImpulseJointHandle) -> u64 {
     let (index, generation) = handle.into_raw_parts();
     join(index, generation)
@@ -550,7 +558,7 @@ fn apply(joint: &mut GenericJoint, spec: &JointSpec) {
                 joint.set_motor_model(axis, MotorModel::ForceBased);
             } else if let Some(s) = spec.spring {
                 joint.set_motor(axis, s.target, 0.0, s.spring, s.damper);
-                joint.set_motor_max_force(axis, f32::MAX);
+                joint.set_motor_max_force(axis, slack_force(s));
                 joint.set_motor_model(axis, MotorModel::ForceBased);
             }
         }
@@ -559,7 +567,7 @@ fn apply(joint: &mut GenericJoint, spec: &JointSpec) {
             let s = spec.spring.unwrap_or(SLACK);
             let target = joint.motor(axis).map_or(0.0, |m| m.target_pos);
             joint.set_motor(axis, target, 0.0, s.spring, s.damper);
-            joint.set_motor_max_force(axis, f32::MAX);
+            joint.set_motor_max_force(axis, slack_force(s));
             joint.set_motor_model(axis, MotorModel::ForceBased);
         }
     }

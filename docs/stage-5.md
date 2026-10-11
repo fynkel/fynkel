@@ -556,7 +556,12 @@ force and torque a joint holds with come from the last substep's impulses,
 so they read as Unity's (a fixed 1 kg box: 9.81 N). Rapier lets a body
 sleep while its drive still pulls; a spring short of its target and a
 motor short of its limit keep their bodies awake, so a hinge's spring gets
-within 0.2° of its target.
+within 0.2° of its target. Fixed after the merge, found in the lab ("pull the crate
+down" did nothing): Rapier holds a motor of no stiffness and no damping
+still, as a rod, so a spring joint was rigid within its distances. A slack
+spring's motor now has no force; tested in Rust and Dart, and the lab's
+crate hangs its weight past its `maxDistance` (1.99 m) and moves when
+pulled.
 
 **Decisions:** the motor wins over the spring when both are on (Unity
 mixes them); no limit bounciness, `freeSpin`, `useAcceleration` or

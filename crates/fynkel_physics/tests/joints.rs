@@ -228,9 +228,11 @@ fn a_hinges_spring_turns_it_to_its_target() {
 
 #[test]
 fn a_spring_pulls_its_anchors_together_unless_they_are_within_its_distances() {
-    // Pulled from 1 m, it comes to rest within its distances: at 0 with
-    // none, in the band with one, and pushed out to the min.
-    for (min, max, near, far) in [(0.0, 0.0, 0.0, 0.02), (0.0, 0.5, 0.0, 0.52), (1.5, 3.0, 1.48, 3.0)] {
+    // Pulled from 1 m, it ends within its distances: at 0 with none, in the
+    // band with one. Pushed out past the min, it carries on freely through
+    // the band, and the spring only slows it outside it: it stays about the
+    // band, but needn't stop.
+    for (min, max, near, far) in [(0.0, 0.0, 0.0, 0.02), (0.0, 0.5, 0.0, 0.52), (1.5, 3.0, 1.45, 3.1)] {
         let mut physics = Physics::new();
         physics.set_gravity(Vector::ZERO).unwrap();
         let ball = cube(&mut physics, 1, Vector::new(1.0, 0.0, 0.0));
@@ -245,8 +247,33 @@ fn a_spring_pulls_its_anchors_together_unless_they_are_within_its_distances() {
         run(&mut physics, 10.0);
         let d = position(&mut physics, ball).length();
         assert!(d >= near && d <= far, "{min} to {max}: it rests {d} m away");
-        assert!(physics.body_state(ball).unwrap().1.length() < 0.05, "{min} to {max}: it moves");
+        if min == 0.0 {
+            assert!(physics.body_state(ball).unwrap().1.length() < 0.05, "{min} to {max}: it moves");
+        }
     }
+}
+
+#[test]
+fn a_spring_lets_its_body_fall_freely_within_its_distances() {
+    // Hanging 1 m below its anchor, within 0 to 3 m: it falls as if free,
+    // and the spring catches it only past 3 m. (Rapier holds a motor of no
+    // stiffness and no damping still, as a rod.)
+    let mut physics = Physics::new();
+    let ball = cube(&mut physics, 1, Vector::new(0.0, -1.0, 0.0));
+    let spring = JointSpec {
+        connected_anchor: Some(Vector::ZERO),
+        spring: Some(JointSpring { spring: 40.0, damper: 1.0, target: 0.0 }),
+        min_distance: 0.0,
+        max_distance: 3.0,
+        ..JointSpec::new(JointKind::Spring, ball)
+    };
+    physics.add_joint(1, spring).unwrap();
+    run(&mut physics, 0.4);
+    let fell = -1.0 - position(&mut physics, ball).y;
+    assert!((fell - 0.5 * 9.81 * 0.4 * 0.4).abs() < 0.05, "it fell {fell} m in 0.4 s");
+    run(&mut physics, 10.0);
+    let y = position(&mut physics, ball).y;
+    assert!((y - (-3.0 - 9.81 / 40.0)).abs() < 0.02, "it hangs at {y}, past 3 m by its weight");
 }
 
 #[test]
