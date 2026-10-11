@@ -112,6 +112,8 @@ final class RawPhysics implements Finalizable {
   final _pose = malloc<FpPose>();
   final _shape = malloc<FpShape>();
   final _vec = malloc<FpVec3>();
+  final _ray = malloc<FpRay>();
+  final _hit = malloc<FpHit>();
   Pointer<FpMoved> _moved = nullptr;
   var _movedCapacity = 0;
   var _movedCount = 0;
@@ -127,7 +129,7 @@ final class RawPhysics implements Finalizable {
     _finalizer.detach(this);
     fp_world_free(_world);
     _world = nullptr;
-    for (final p in [_id, _count, _pose, _shape, _vec, _moved]) {
+    for (final p in [_id, _count, _pose, _shape, _vec, _ray, _hit, _moved]) {
       if (p != nullptr) malloc.free(p);
     }
     _moved = nullptr;
@@ -210,6 +212,24 @@ final class RawPhysics implements Finalizable {
   int step(double dt) {
     _check(fp_step(_live, dt, _count));
     return _readMoved();
+  }
+
+  /// How far along [direction] from [origin] a ray first hits a collider,
+  /// within [maxDistance], or null: every layer, triggers too.
+  double? raycast(Vec3 origin, Vec3 direction, double maxDistance) {
+    final ray = _ray.ref;
+    ray.origin
+      ..x = origin.x
+      ..y = origin.y
+      ..z = origin.z;
+    ray.direction
+      ..x = direction.x
+      ..y = direction.y
+      ..z = direction.z;
+    ray.max_distance = maxDistance;
+    _check(fp_raycast(_live, _ray, 0xFFFFFFFF, 1, _hit));
+    final hit = _hit.ref;
+    return hit.collider == 0 ? null : hit.distance;
   }
 
   /// Starts a step of [dt] seconds on a thread of the physics' own, and

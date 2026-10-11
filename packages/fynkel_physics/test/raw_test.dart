@@ -130,4 +130,11 @@ void main() {
     }
     expect(there.endStep, throwsA(isA<PhysicsException>()));
   });
+
+  test('a raw raycast gives how far it went to the first collider, or null', () {
+    final physics = withGround();
+    expect(physics.raycast(const Vec3(0, 10, 0), const Vec3(0, -1, 0), 30), closeTo(10, 1e-4));
+    expect(physics.raycast(const Vec3(0, 10, 0), const Vec3(0, 1, 0), 30), isNull);
+    expect(physics.raycast(const Vec3(0, 10, 0), const Vec3(0, -1, 0), 5), isNull);
+  });
 }
