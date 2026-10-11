@@ -20,12 +20,13 @@ use std::ffi::{CString, c_char};
 use std::panic::{self, AssertUnwindSafe};
 
 use fynkel_physics::{
-    Axis, BodyKind, BodySpec, ColliderShape, ColliderSpec, Combine, Constraints, ContactKind, ForceMode, Hit, Material,
-    Moved, ObjectPose, Physics, PhysicsError, Pose, Push, QueryOptions, QueryShape, Rotation, Settings, Shape, Vector,
+    Axis, BodyKind, BodySpec, CharacterHit, CharacterSettings, ColliderShape, ColliderSpec, Combine, Constraints,
+    ContactKind, ForceMode, Hit, Material, Moved, ObjectPose, Physics, PhysicsError, Pose, Push, QueryOptions,
+    QueryShape, Rotation, Settings, Shape, Vector,
 };
 
 /// Bumped on any change to the functions or types in this file.
-pub const FP_ABI_VERSION: u32 = 6;
+pub const FP_ABI_VERSION: u32 = 7;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -333,6 +334,53 @@ pub struct FpHit {
     pub distance: f32,
 }
 
+/// A character's move hit something on its sides (`FpCharacterMove::flags`).
+pub const FP_COLLIDED_SIDES: u32 = 1;
+/// A character's move hit something above it.
+pub const FP_COLLIDED_ABOVE: u32 = 2;
+/// A character's move hit something below it, or it stands on the ground.
+pub const FP_COLLIDED_BELOW: u32 = 4;
+
+const _: () = assert!(
+    FP_COLLIDED_SIDES == fynkel_physics::COLLIDED_SIDES
+        && FP_COLLIDED_ABOVE == fynkel_physics::COLLIDED_ABOVE
+        && FP_COLLIDED_BELOW == fynkel_physics::COLLIDED_BELOW
+);
+
+/// How a character controller moves (Unity's `CharacterController`):
+/// `slope_limit` in degrees, the rest in metres, and `mass`, how heavy it
+/// is when it pushes dynamic bodies, in kilograms (0 pushes none).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FpCharacter {
+    pub slope_limit: f32,
+    pub step_offset: f32,
+    pub skin_width: f32,
+    pub mass: f32,
+}
+
+/// What `fp_character_move` did: how far the character went, what it hit
+/// (`flags`: `FP_COLLIDED_SIDES`, `_ABOVE` and `_BELOW`), and how many colliders
+/// it hit, to read with `fp_character_hits_read`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FpCharacterMove {
+    pub translation: FpVec3,
+    pub flags: u32,
+    pub hit_count: u32,
+}
+
+/// A collider a character's move hit: where, and its surface's normal
+/// there.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FpCharacterHit {
+    pub collider: u64,
+    pub key: u64,
+    pub point: FpVec3,
+    pub normal: FpVec3,
+}
+
 /// A collider an overlap found.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -381,6 +429,8 @@ pub struct FpWorld {
     found: Vec<(u64, u64)>,
     /// The last `fp_collider_edges`', until `fp_edges_read`.
     edges: Vec<[Vector; 2]>,
+    /// What the last `fp_character_move` hit, until `fp_character_hits_read`.
+    character_hits: Vec<CharacterHit>,
     poisoned: bool,
 }
 
@@ -715,6 +765,7 @@ pub extern "C" fn fp_world_new() -> *mut FpWorld {
         hits: Vec::new(),
         found: Vec::new(),
         edges: Vec::new(),
+        character_hits: Vec::new(),
         poisoned: false,
     }))
 }
@@ -1832,6 +1883,90 @@ pub unsafe extern "C" fn fp_collider_raycast(
             let hit =
                 w.physics.raycast_collider(collider, vector(ray.origin), vector(ray.direction), ray.max_distance)?;
             write(out, "out", fp_hit(hit))
+        })
+    }
+}
+
+// --- Character controllers -----------------------------------------------------
+
+/// Moves character controller `collider` (a followed capsule) by `motion`
+/// over `dt` seconds, as far as what's in its way lets it, pushing the
+/// dynamic bodies it walks into, and writes what it did to `out`. The
+/// collider stays where it is: move its object by `out.translation` and
+/// follow it. Read what it hit with `fp_character_hits_read`.
+///
+/// # Safety
+///
+/// `world` is null or live; `settings` and `motion` are null or readable;
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_character_move(
+    world: *mut FpWorld,
+    collider: u64,
+    settings: *const FpCharacter,
+    motion: *const FpVec3,
+    dt: f32,
+    out: *mut FpCharacterMove,
+) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            if out.is_null() {
+                return Err(Error::null("out"));
+            }
+            let s = read(settings, "settings")?;
+            let settings = CharacterSettings {
+                slope_limit: s.slope_limit,
+                step_offset: s.step_offset,
+                skin_width: s.skin_width,
+                mass: s.mass,
+            };
+            let motion = vector(read(motion, "motion")?);
+            let moved = w.physics.move_character(collider, motion, dt, settings, &mut w.character_hits)?;
+            let hit_count = count(w.character_hits.len())?;
+            write(
+                out,
+                "out",
+                FpCharacterMove { translation: fp_vec3(moved.translation), flags: moved.flags, hit_count },
+            )
+        })
+    }
+}
+
+/// Writes what the last `fp_character_move` hit to `out`, which holds
+/// `len`: exactly as many as it said.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable for `len` entries.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_character_hits_read(world: *mut FpWorld, out: *mut FpCharacterHit, len: usize) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            if len != w.character_hits.len() {
+                return Err(Error::new(
+                    FpStatus::WrongSize,
+                    format!("the last move hit {}, not {len}", w.character_hits.len()),
+                ));
+            }
+            if len == 0 {
+                return Ok(());
+            }
+            if out.is_null() {
+                return Err(Error::null("out"));
+            }
+            // SAFETY: writable for len entries, as the caller promises.
+            let out = std::slice::from_raw_parts_mut(out, len);
+            for (slot, hit) in out.iter_mut().zip(&w.character_hits) {
+                *slot = FpCharacterHit {
+                    collider: hit.collider,
+                    key: hit.key,
+                    point: fp_vec3(hit.point),
+                    normal: fp_vec3(hit.normal),
+                };
+            }
+            Ok(())
         })
     }
 }

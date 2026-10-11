@@ -113,13 +113,15 @@ impl ObjectPose {
     pub const IDENTITY: Self = Self { position: Vector::ZERO, rotation: Rotation::IDENTITY, scale: Vector::ONE };
 }
 
-/// A followed collider's spec, the last pose of its object, and the body
-/// it's on, if any.
+/// A followed collider's spec, the last pose of its object, the body it's
+/// on, if any, and whether it's a character controller's (moved by
+/// [`Physics::move_character`]), which meets triggers as a kinematic body.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Followed {
     pub(crate) spec: ColliderSpec,
     pub(crate) object: ObjectPose,
     pub(crate) body: Option<RigidBodyHandle>,
+    pub(crate) character: bool,
 }
 
 // The smallest a scaled size gets: a collider scaled to 0 stays a point
@@ -274,7 +276,7 @@ impl Physics {
         if self.followed.len() <= index {
             self.followed.resize(index + 1, None);
         }
-        self.followed[index] = Some(Followed { spec, object, body });
+        self.followed[index] = Some(Followed { spec, object, body, character: false });
         self.listening_changed(0, spec.listens);
         self.dirty.push(handle);
         if let Some(body) = body {

@@ -153,6 +153,11 @@ impl Contacts {
         }
     }
 
+    /// Whether the colliders with keys `a` and `b` ignore each other.
+    pub(crate) fn ignores_keys(&self, a: u64, b: u64) -> bool {
+        !self.ignored.is_empty() && self.ignored.contains(&(a.min(b), a.max(b)))
+    }
+
     pub(crate) fn filter(&self) -> IgnoredPairs<'_> {
         IgnoredPairs(&self.ignored)
     }
@@ -439,13 +444,14 @@ fn meeting(
     h2: ColliderHandle,
     trigger: bool,
 ) -> Option<Pair> {
-    let is_followed = |h: ColliderHandle| matches!(followed.get(h.into_raw_parts().0 as usize), Some(Some(_)));
-    if !is_followed(h1) || !is_followed(h2) {
+    let (Some(Some(f1)), Some(Some(f2))) =
+        (followed.get(h1.into_raw_parts().0 as usize), followed.get(h2.into_raw_parts().0 as usize))
+    else {
         return None;
-    }
+    };
     let (b1, b2) = (moving_body(w, h1), moving_body(w, h2));
     let sends = if trigger {
-        b1.is_some() || b2.is_some()
+        b1.is_some() || b2.is_some() || f1.character || f2.character
     } else {
         b1.is_some_and(RigidBody::is_dynamic) || b2.is_some_and(RigidBody::is_dynamic)
     };

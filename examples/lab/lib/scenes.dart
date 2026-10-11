@@ -4,6 +4,8 @@
 import 'lab.dart';
 import 'scenes/camera_basics.dart';
 import 'scenes/camera_rigs.dart';
+import 'scenes/character_basics.dart';
+import 'scenes/character_course.dart';
 import 'scenes/components.dart';
 import 'scenes/contacts_basics.dart';
 import 'scenes/eases.dart';
@@ -48,4 +50,6 @@ final List<LabScene Function()> scenes = [
   ContactsBasicsScene.new,
   LayerMatrixScene.new,
   MeshCollidersBasicsScene.new,
+  CharacterBasicsScene.new,
+  CharacterCourseScene.new,
 ];

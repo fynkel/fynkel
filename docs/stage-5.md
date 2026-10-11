@@ -499,6 +499,38 @@ tree was enabled; it's now enabled when it's made.
 walks up steps below `stepOffset` and not above, stops at `slopeLimit`,
 slides along walls, knows `isGrounded`, and pushes bodies. Lab: "Character
 controller: the basics", a small course.
+✅ `CharacterController(height:, radius:, slopeLimit:, stepOffset:,
+skinWidth:, mass:, center:)`, a `Collider` (a standing capsule) with
+`move(motion)` returning `CollisionFlags` (`.sides`, `.above`, `.below`,
+`flags.has(…)`), `isGrounded`, `velocity`, `collisionFlags`, and Unity's
+`simpleMove(speed)`; `with ControllerHits` gets
+`onControllerColliderHit(ControllerColliderHit)` once per collider each
+move hits, before `move` returns. Physics ABI 7: `fp_character_move`
+runs Rapier's `KinematicCharacterController` against the world as it is
+now (skin = its offset, `stepOffset` = autostep and snap to ground,
+`slopeLimit` = the climb and slide angles; triggers, layers that don't
+meet and ignored pairs left out), then pushes the dynamic bodies it hit
+with Rapier's impulses, as if it weighed `mass`. The controller then moves
+its object, and the capsule follows it as any collider does. Hits are
+read (`fp_character_hits_read`) only when something listens.
+
+**Pushing is built in** (Unity leaves it to `OnControllerColliderHit`):
+`mass` is 70 kg unless set, and 0 pushes nothing, so it stops at bodies.
+**It meets triggers as a kinematic rigidbody does**, as Unity's does, once
+it has moved: a coin is picked up by walking into it. Its capsule stands
+up and turns with its object; Unity's never turns, so keep it turning
+about Y. Tests: 8 in `characters.rs` (steps of 0.2 and 0.28 m climbed,
+0.4 and 0.6 m not, with a 0.3 m `stepOffset`; slopes of 20° and 40°
+climbed, 50° and 70° not; sliding along a wall; grounded, falling, a
+ceiling; pushing a 1 kg crate, and not with no mass; triggers and layers
+it doesn't meet; a static trigger entered; bad moves), the C interface,
+and 10 in `character_controller_test.dart` (the same through the package,
+`simpleMove` off a ledge, the callbacks on the object and its behaviours,
+a hit's point, normal and direction, a coin). Lab: "Character controller:
+the basics" (tap to walk, or keys: a low step, a high one, a crate) and
+"Character controller: a course" (stairs, a 0.5 m step, 25° and 55°
+ramps, a wall, crates and coins, with sliders for the slope limit and
+step offset).
 
 **Step 8: joints.** §3.7. *Done when* each joint holds as Unity's does
 (a hinge's limits and motor, a spring's rest length), and breaks at its

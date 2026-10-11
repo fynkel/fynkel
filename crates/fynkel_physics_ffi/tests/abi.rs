@@ -386,6 +386,39 @@ fn a_mesh_collider_comes_through_c_and_bad_meshes_are_refused() {
 }
 
 #[test]
+fn a_character_moves_through_c_and_bad_moves_are_refused() {
+    let world = World::new();
+    // A ball 1 m round at z = 3, and a character, a ball too, at the origin.
+    let wall = world.follower(2, ball_spec(1.0, 0, 0), object(0.0, 0.0, 3.0, 1.0));
+    let character = world.follower(1, ball_spec(0.5, 0, 0), object(0.0, 0.0, 0.0, 1.0));
+    let settings = FpCharacter { slope_limit: 45.0, step_offset: 0.0, skin_width: 0.05, mass: 0.0 };
+    let mut moved = FpCharacterMove::default();
+    let mut hits = [FpCharacterHit::default(); 2];
+    // SAFETY: a live world, readable settings and motions, and writable outs.
+    unsafe {
+        let status = fp_character_move(world.0, character, &settings, &FORWARD, 1.0 / 60.0, &mut moved);
+        assert_eq!(status, FpStatus::Ok, "{}", last_error());
+        assert_eq!(moved.translation.z, 1.0, "nothing in the way");
+        assert_eq!(moved.hit_count, 0);
+        let far = FpVec3 { z: 5.0, ..FpVec3::default() };
+        assert_eq!(fp_character_move(world.0, character, &settings, &far, 1.0 / 60.0, &mut moved), FpStatus::Ok);
+        // To 3 - 1 - 0.5, less the skin.
+        assert!((moved.translation.z - 1.45).abs() < 0.01, "{moved:?}");
+        assert_eq!((moved.flags, moved.hit_count), (1, 1), "on its side");
+        assert_eq!(fp_character_hits_read(world.0, hits.as_mut_ptr(), 2), FpStatus::WrongSize);
+        assert_eq!(fp_character_hits_read(world.0, hits.as_mut_ptr(), 1), FpStatus::Ok);
+        assert_eq!((hits[0].collider, hits[0].key), (wall, 2));
+        assert!(hits[0].normal.z < -0.99 && (hits[0].point.z - 2.0).abs() < 0.01, "{:?}", hits[0]);
+        let bad = FpCharacter { skin_width: 0.0, ..settings };
+        assert_eq!(fp_character_move(world.0, character, &bad, &far, 1.0 / 60.0, &mut moved), FpStatus::InvalidValue);
+        assert_eq!(fp_character_move(world.0, character, &settings, &far, 0.0, &mut moved), FpStatus::InvalidValue);
+        let status = fp_character_move(world.0, character, ptr::null(), &far, 1.0 / 60.0, &mut moved);
+        assert_eq!(status, FpStatus::NullPointer);
+        assert_eq!(fp_character_move(world.0, 99, &settings, &far, 1.0 / 60.0, &mut moved), FpStatus::NoCollider);
+    }
+}
+
+#[test]
 fn a_colliders_own_point_and_ray_come_through() {
     let world = World::new();
     let id = world.follower(1, ball_spec(1.0, 0, 0), object(0.0, 0.0, 10.0, 1.0));

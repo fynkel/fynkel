@@ -15,12 +15,14 @@ use rapier3d::prelude::*;
 pub use rapier3d::math::{Pose, Rotation, Vector};
 
 mod bodies;
+mod characters;
 mod colliders;
 mod contacts;
 mod meshes;
 mod queries;
 
 pub use bodies::{BodySpec, Constraints, ForceMode, Push, Settings};
+pub use characters::{COLLIDED_ABOVE, COLLIDED_BELOW, COLLIDED_SIDES, CharacterHit, CharacterMove, CharacterSettings};
 pub use colliders::{Axis, ColliderShape, ColliderSpec, Combine, Material, ObjectPose};
 pub use contacts::{ContactEvent, ContactKind, ContactPoint, LISTEN_COLLISIONS, LISTEN_TRIGGERS};
 pub use queries::{Hit, QueryOptions, QueryShape};
@@ -103,6 +105,8 @@ pub struct Physics {
     contacts: contacts::Contacts,
     // The meshes mesh colliders are made of (meshes.rs).
     meshes: meshes::Meshes,
+    // Scratch for the character controllers' moves (characters.rs).
+    character_collisions: Vec<rapier3d::control::CharacterCollision>,
 }
 
 impl fmt::Debug for Physics {
@@ -135,6 +139,7 @@ impl Physics {
             settings,
             contacts: contacts::Contacts::default(),
             meshes: meshes::Meshes::default(),
+            character_collisions: Vec::new(),
         }
     }
 

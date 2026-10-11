@@ -9,6 +9,8 @@ import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_physics/fynkel_physics.dart';
 import 'package:lab/lab.dart';
 import 'package:lab/scenes.dart';
+import 'package:lab/scenes/character_basics.dart';
+import 'package:lab/scenes/character_course.dart';
 import 'package:lab/scenes/contacts_basics.dart';
 import 'package:lab/scenes/input.dart';
 import 'package:lab/scenes/layer_matrix.dart';
@@ -321,5 +323,48 @@ void main() {
     expect(z, inInclusiveRange(3, 6), reason: 'down the slope towards the camera, and stopped');
     scene.controls.whereType<Toggle>().first.onChanged(true);
     expect(scene.rock.convex, isTrue);
+  });
+
+  test('Character controller: the basics: up the low step, not the high one, and the crate is pushed', () async {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(CharacterBasicsScene());
+    void walkTo(Vec3 target) {
+      scene.player.walker.target = target;
+      for (var i = 0; i < 240; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    walkTo(Vec3(-2.5, 0, -1));
+    expect(scene.player.position.y - 1.08, closeTo(0.25, 0.05), reason: 'on the low step');
+    expect(scene.player.controller.isGrounded, isTrue);
+    scene.reset();
+    walkTo(Vec3(2.5, 0, -1));
+    expect(scene.player.position.y - 1.08, closeTo(0, 0.05), reason: 'not on the high step');
+    expect(scene.player.position.z, greaterThan(0), reason: 'stopped at it');
+    scene.reset();
+    walkTo(Vec3(0, 0, -1));
+    expect(scene.crate.position.z, lessThan(1), reason: 'pushed back from z = 1.5');
+  });
+
+  test('Character controller: a course: the stairs and the gentle ramp, not the steep one, and coins', () async {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(CharacterCourseScene());
+    double walkTo(Vec3 target, {double seconds = 4}) {
+      scene.player.walker.target = target;
+      for (var i = 0; i < seconds * 60; i++) {
+        world.update(1 / 60);
+      }
+      return scene.player.position.y - 1.08;
+    }
+
+    expect(walkTo(Vec3(1.2, 0, -3)), greaterThan(1), reason: 'up the 25° ramp');
+    walkTo(Vec3(1.2, 0, 3));
+    expect(walkTo(Vec3(3.4, 0, -3)), lessThan(0.5), reason: 'not up the 55° ramp');
+    walkTo(Vec3(-5, 0, 2));
+    expect(walkTo(Vec3(-5, 0, -4.4), seconds: 5), closeTo(0.8, 0.05), reason: 'up the stairs to the landing');
+    expect(scene.log.value.map((l) => l.text), contains('picked up a coin: 1 of 4'));
   });
 }

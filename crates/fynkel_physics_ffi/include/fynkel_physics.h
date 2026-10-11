@@ -10,7 +10,16 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FP_ABI_VERSION 6
+#define FP_ABI_VERSION 7
+
+// A character's move hit something on its sides (`FpCharacterMove::flags`).
+#define FP_COLLIDED_SIDES 1
+
+// A character's move hit something above it.
+#define FP_COLLIDED_ABOVE 2
+
+// A character's move hit something below it, or it stands on the ground.
+#define FP_COLLIDED_BELOW 4
 
 // What an `fp_*` call returns. Anything but `Ok` leaves a message for
 // `fp_last_error`.
@@ -393,6 +402,34 @@ typedef struct FpFound {
   uint64_t collider;
   uint64_t key;
 } FpFound;
+
+// How a character controller moves (Unity's `CharacterController`):
+// `slope_limit` in degrees, the rest in metres, and `mass`, how heavy it
+// is when it pushes dynamic bodies, in kilograms (0 pushes none).
+typedef struct FpCharacter {
+  float slope_limit;
+  float step_offset;
+  float skin_width;
+  float mass;
+} FpCharacter;
+
+// What `fp_character_move` did: how far the character went, what it hit
+// (`flags`: `FP_COLLIDED_SIDES`, `_ABOVE` and `_BELOW`), and how many colliders
+// it hit, to read with `fp_character_hits_read`.
+typedef struct FpCharacterMove {
+  struct FpVec3 translation;
+  uint32_t flags;
+  uint32_t hit_count;
+} FpCharacterMove;
+
+// A collider a character's move hit: where, and its surface's normal
+// there.
+typedef struct FpCharacterHit {
+  uint64_t collider;
+  uint64_t key;
+  struct FpVec3 point;
+  struct FpVec3 normal;
+} FpCharacterHit;
 
 #ifdef __cplusplus
 extern "C" {
@@ -858,6 +895,31 @@ FpStatus fp_collider_raycast(struct FpWorld *world,
                              uint64_t collider,
                              const struct FpRay *ray,
                              struct FpHit *out);
+
+// Moves character controller `collider` (a followed capsule) by `motion`
+// over `dt` seconds, as far as what's in its way lets it, pushing the
+// dynamic bodies it walks into, and writes what it did to `out`. The
+// collider stays where it is: move its object by `out.translation` and
+// follow it. Read what it hit with `fp_character_hits_read`.
+//
+// # Safety
+//
+// `world` is null or live; `settings` and `motion` are null or readable;
+// `out` is null or writable.
+FpStatus fp_character_move(struct FpWorld *world,
+                           uint64_t collider,
+                           const struct FpCharacter *settings,
+                           const struct FpVec3 *motion,
+                           float dt,
+                           struct FpCharacterMove *out);
+
+// Writes what the last `fp_character_move` hit to `out`, which holds
+// `len`: exactly as many as it said.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable for `len` entries.
+FpStatus fp_character_hits_read(struct FpWorld *world, struct FpCharacterHit *out, size_t len);
 
 #ifdef __cplusplus
 }  // extern "C"
