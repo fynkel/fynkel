@@ -274,12 +274,19 @@ impl Physics {
 
     /// The bodies the last step may have moved, their keys and poses, into
     /// `out` (cleared first): the awake dynamic and kinematic bodies.
-    /// Sleeping and static bodies aren't in it.
+    /// Sleeping and static bodies aren't in it, nor an awake rigidbody the
+    /// step left where it was with no velocity (a kinematic body not moved,
+    /// or one with every axis frozen).
     pub fn moved(&self, out: &mut Vec<Moved>) {
         out.clear();
         let w = &self.world;
         out.extend(w.islands.active_bodies().filter_map(|handle| {
             let body = w.bodies.get(handle)?;
+            if let Some(Some(data)) = self.bodies.get(handle.into_raw_parts().0 as usize)
+                && data.still
+            {
+                return None;
+            }
             // The key went in as a u64, so it comes back whole.
             #[allow(clippy::cast_possible_truncation)]
             let key = body.user_data as u64;

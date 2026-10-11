@@ -12,21 +12,12 @@ import 'contact_scene.dart';
 void main() {
   final madeEachFrame = allocations();
 
-  // Awake bodies make their new transforms each step (step 4); the stays
-  // must add nothing to that.
-  test('frames of stays allocate nothing more than the same frames unheard, stepping between frames', () async {
-    const frames = 20000;
-    final (silent, _) = scene(betweenFrames: true, listen: false);
-    final unheard = await madeEachFrame(silent, frames);
-    final (world, listeners) = scene(betweenFrames: true, listen: true);
-    final heard = await madeEachFrame(world, frames);
-    expect({
-      for (final MapEntry(:key, :value) in heard.entries)
-        if (value - (unheard[key] ?? 0) >= frames) key: value - (unheard[key] ?? 0),
-    }, isEmpty);
+  test('frames of stays allocate nothing, stepping between frames', () async {
+    final (world, listeners) = scene(betweenFrames: true);
+    expect(await madeEachFrame(world, 20000), isEmpty);
     for (final listener in listeners) {
-      // A trigger stay and a collision stay a step, through 120,000 frames
-      // of 1/60 s at 50 steps a second.
+      // A trigger stay and a collision stay a step, through at least
+      // 120,000 frames of 1/60 s at 50 steps a second.
       expect(listener.stays, greaterThan(150000));
     }
   });

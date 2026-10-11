@@ -158,6 +158,10 @@ impl Default for Settings {
 pub(crate) struct BodyData {
     spec: BodySpec,
     mass_dirty: bool,
+    /// Where the last step left it, and whether that step left it where it
+    /// was, with no velocity: then [`Physics::moved`] leaves it out.
+    last: Pose,
+    pub(crate) still: bool,
 }
 
 /// The bodies a step has to do something for: those pushed with forces
@@ -183,7 +187,7 @@ impl Physics {
         if self.bodies.len() <= index {
             self.bodies.resize(index + 1, None);
         }
-        self.bodies[index] = Some(BodyData { spec, mass_dirty: false });
+        self.bodies[index] = Some(BodyData { spec, mass_dirty: false, last: pose, still: false });
         self.apply_spec(handle, spec);
         self.apply_sleep_threshold(handle);
         self.mass_changed(handle);
@@ -422,7 +426,7 @@ impl Physics {
         }
         let w = &mut self.world;
         for handle in w.islands.active_bodies() {
-            let Some(Some(data)) = self.bodies.get(handle.into_raw_parts().0 as usize) else { continue };
+            let Some(Some(data)) = self.bodies.get_mut(handle.into_raw_parts().0 as usize) else { continue };
             let top = data.spec.max_angular_velocity;
             let Some(body) = w.bodies.get_mut(handle) else { continue };
             let spin = body.angvel();
@@ -430,6 +434,11 @@ impl Physics {
             if speed > top {
                 body.set_angvel(spin * (top / speed), false);
             }
+            // Awake, but standing still (a kinematic body not moved, or one
+            // with every axis frozen): nothing to send back.
+            let pose = *body.position();
+            data.still = pose == data.last && body.linvel() == Vector::ZERO && body.angvel() == Vector::ZERO;
+            data.last = pose;
         }
     }
 
@@ -633,6 +642,33 @@ mod tests {
         }
         assert!(position(&mut physics, mover).abs_diff_eq(Vector::X, 1e-5));
         assert!(position(&mut physics, other).x > 1.9, "pushed to {}", position(&mut physics, other));
+    }
+
+    #[test]
+    fn awake_bodies_standing_still_are_not_in_the_moved_list() {
+        let mut physics = Physics::new();
+        physics.set_settings(Settings { sleep_threshold: 0.0, ..Settings::default() }).unwrap();
+        ground(&mut physics);
+        let frozen = body(
+            &mut physics,
+            BodySpec { constraints: Constraints::FREEZE_ALL, ..BodySpec::default() },
+            cube(),
+            Vector::ZERO,
+        );
+        let still = body(&mut physics, BodySpec { kinematic: true, ..floating() }, cube(), Vector::new(3.0, 2.0, 0.0));
+        let falling = body(&mut physics, floating(), cube(), Vector::new(-3.0, 2.0, 0.0));
+        physics
+            .push(falling, Push::Force { force: Vector::new(0.0, -1.0, 0.0), mode: ForceMode::VelocityChange })
+            .unwrap();
+        let mut moved = Vec::new();
+        for _ in 0..5 {
+            physics.step(STEP).unwrap();
+            physics.moved(&mut moved);
+            assert_eq!(moved.len(), 1, "{moved:?}");
+        }
+        for id in [frozen, still] {
+            assert!(!physics.body_state(id).unwrap().4, "awake");
+        }
     }
 
     #[test]
