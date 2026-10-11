@@ -463,7 +463,7 @@ void main() {
       final length = JointsChainScene.count * JointsChainScene.linkLength + JointsChainScene.radius;
       expect(scene.weight!.position.x.abs(), lessThan(0.01));
       expect(JointsChainScene.hook.y - scene.weight!.position.y, closeTo(length, 0.1));
-      expect(scene.stretch.total, lessThan(0.1), reason: '5 kg on 0.2 kg links, at 6 iterations');
+      expect(scene.stretch.total, lessThan(0.1), reason: '1.5 kg on 0.2 kg links, at 6 iterations');
     });
 
     test('a finger drags the weight across, and lets go of it', () {
@@ -489,6 +489,23 @@ void main() {
       expect(weight.get<SpringJoint>(), isNull, reason: 'the spring to the hand is taken off');
       frames(60);
       expect(weight.position.x, lessThan(0.5), reason: 'let go, it swings back');
+    });
+
+    test('the held weight follows the finger closely, going round', () {
+      final weight = scene.weight!;
+      final p = scene.camera.worldToScreen(weight.position)!;
+      world.input.fingerDown(1, p.x, p.y);
+      frames(1);
+      // A circle 40 px across, once round in two seconds, near where it hangs.
+      var worst = 0.0;
+      for (var i = 0; i < 240; i++) {
+        final a = i / 60 * math.pi;
+        world.input.fingerMove(1, p.x + 20 * math.sin(a), p.y - 20 + 20 * math.cos(a));
+        frames(1);
+        final held = weight.transformPoint(scene.held!.$2.anchor);
+        if (i > 30) worst = math.max(worst, (scene.hand.gameObject.position - held).length);
+      }
+      expect(worst, lessThan(0.06), reason: 'within a few centimetres of the finger');
     });
 
     test('heavy, the chain stretches between its links; more solver iterations hold it', () {
