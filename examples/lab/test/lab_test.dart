@@ -17,6 +17,7 @@ import 'package:lab/scenes/input.dart';
 import 'package:lab/scenes/joints_basics.dart';
 import 'package:lab/scenes/joints_bridge.dart';
 import 'package:lab/scenes/joints_chain.dart';
+import 'package:lab/scenes/joints_character.dart';
 import 'package:lab/scenes/layer_matrix.dart';
 import 'package:lab/scenes/layers_basics.dart';
 import 'package:lab/scenes/mesh_colliders_basics.dart';
@@ -512,13 +513,42 @@ void main() {
       final slider = scene.controls.whereType<Slider>().firstWhere((s) => s.label == 'the weight (kg)');
       slider.onChanged(50);
       frames(300);
-      expect(scene.stretch.total, greaterThan(0.2), reason: '250× a link, at 6 iterations');
+      expect(scene.stretch.total, greaterThan(0.05), reason: '250× a link, at 6 iterations');
       scene.controls.whereType<Slider>().firstWhere((s) => s.label == 'solver iterations').onChanged(30);
       frames(300);
-      expect(scene.stretch.total, lessThan(0.05));
+      expect(scene.stretch.total, lessThan(0.02));
       scene.destroy();
       frames(1);
       expect(world.physics.defaultSolverIterations, 6, reason: 'put back for the next scene');
+      expect(world.time.fixedDelta, 1 / 50);
     });
+  });
+
+  test('Joints: a character joint: the limited arm stops at its 40°, the free one swings on', () {
+    (double, double) swing(String button, {double? limit}) {
+      final world = World(source: files);
+      addTearDown(world.dispose);
+      final scene = world.add(JointsCharacterScene());
+      if (limit != null) scene.controls.whereType<Slider>().single.onChanged(limit);
+      for (var i = 0; i < 30; i++) {
+        world.update(1 / 60);
+      }
+      scene.controls.whereType<Button>().firstWhere((b) => b.label == button).onPressed();
+      var (limited, free) = (0.0, 0.0);
+      for (var i = 0; i < 90; i++) {
+        world.update(1 / 60);
+        limited = math.max(limited, JointsCharacterScene.swing(scene.limited));
+        free = math.max(free, JointsCharacterScene.swing(scene.free));
+      }
+      return (limited, free);
+    }
+
+    for (final button in ['swing them sideways', 'swing them forward']) {
+      final (limited, free) = swing(button);
+      expect(limited, inInclusiveRange(35, 45), reason: '$button: stopped at 40°');
+      expect(free, greaterThan(60), reason: '$button: free, it swings on');
+    }
+    final (freed, _) = swing('swing them sideways', limit: 180);
+    expect(freed, greaterThan(60), reason: 'its limits at 180°, it swings as the free one');
   });
 }

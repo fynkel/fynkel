@@ -1,5 +1,6 @@
-// Stage 5 step 8: a chain of light links, hinged each to the next, with a
-// heavy weight at its end. Drag the weight (or any link) around: a raycast
+// Stage 5 step 8: a chain of light links, each on a ball joint (a
+// CharacterJoint with its limits freed) to the next, with a heavy weight at
+// its end. Drag the weight (or any link) around: a raycast
 // finds it, and a SpringJoint ties it to an unseen kinematic hand that
 // follows the finger, as Unity's DragRigidbody does. The heavier the
 // weight is than a link, the more a chain of joints stretches.
@@ -18,10 +19,12 @@ class JointsChainScene extends LabScene {
   String get step => 'stage 5 step 8';
   @override
   String get about =>
-      'Twelve links of 0.2 kg, each on a HingeJoint to the one above, every other one turned a quarter turn so the '
-      'chain swings every way, and a weight at the end. Drag the weight or a link: it hangs on a SpringJoint from '
+      'Twelve links of 0.2 kg, each on a ball joint to the one above (a CharacterJoint with its limits at 180°, '
+      'so it swings and twists every way), and a weight at the end. Drag the weight or a link: it hangs on a '
+      'SpringJoint from '
       'an unseen kinematic hand that follows your finger. Make the weight heavier and watch the chain stretch '
-      'between its links; more solver iterations hold it tighter.';
+      'between its links; more solver iterations hold it tighter. It steps 120 times a second, not 50, so it '
+      'holds together while it is dragged.';
 
   @override
   Vec3 get eye => Vec3(0, 3.2, 8);
@@ -46,6 +49,10 @@ class JointsChainScene extends LabScene {
 
   @override
   void build() {
+    // 120 steps a second, not 50: a chain of joints pulls apart a little at
+    // each joint while it's dragged, and more the longer a step is. At 50
+    // the links part by up to 6 cm each, and snap back; at 120, about 1.
+    time.fixedDelta = 1 / 120;
     add(floorCollider());
     add(shape('hook', Mesh.cube(), const Color(0xFF7A8290), at: hook + Vec3(0, 0.1, 0), size: Vec3(0.6, 0.2, 0.6)));
     hand = add(GameObject(name: 'hand', components: [Rigidbody(isKinematic: true)])).get<Rigidbody>()!;
@@ -72,11 +79,7 @@ class JointsChainScene extends LabScene {
               BoxCollider(),
               // Drawn between physics' steps, so they glide, not jump.
               Rigidbody(mass: linkMass, interpolation: RigidbodyInterpolation.interpolate),
-              HingeJoint(
-                connectedBody: links.isEmpty ? null : links.last.get<Rigidbody>(),
-                anchor: Vec3(0, 0.5, 0),
-                axis: _axis(i),
-              ),
+              _ball(links.isEmpty ? null : links.last.get<Rigidbody>()),
             ],
           ),
         ),
@@ -92,14 +95,23 @@ class JointsChainScene extends LabScene {
         components: [
           SphereCollider(),
           Rigidbody(mass: mass, interpolation: RigidbodyInterpolation.interpolate),
-          HingeJoint(connectedBody: links.last.get<Rigidbody>(), anchor: Vec3(0, 0.5, 0), axis: _axis(count)),
+          _ball(links.last.get<Rigidbody>()),
         ],
       ),
     );
   }
 
-  /// Every other link turns about X, the others about Z: together, every way.
-  static Vec3 _axis(int i) => i.isEven ? Vec3(0, 0, 1) : Vec3(1, 0, 0);
+  /// A ball joint at the top of its object, to [above] (or the world).
+  static CharacterJoint _ball(Rigidbody? above) => CharacterJoint(
+    connectedBody: above,
+    anchor: Vec3(0, 0.5, 0),
+    axis: Vec3(0, 1, 0),
+    swingAxis: Vec3(1, 0, 0),
+    lowTwistLimit: const SoftJointLimit(limit: -180),
+    highTwistLimit: const SoftJointLimit(limit: 180),
+    swing1Limit: const SoftJointLimit(limit: 180),
+    swing2Limit: const SoftJointLimit(limit: 180),
+  );
 
   @override
   void onStart() {
@@ -175,7 +187,7 @@ class JointsChainScene extends LabScene {
       'the weight is ${mass.toStringAsFixed(1)} kg, ${(mass / linkMass).round()}× a link',
       'the chain has stretched ${(s.total * 100).toStringAsFixed(1)} cm, '
           'at most ${(s.most * 100).toStringAsFixed(1)} cm at a joint',
-      '${physics.defaultSolverIterations} solver iterations',
+      '${physics.defaultSolverIterations} solver iterations, ${(1 / time.fixedDelta).round()} steps a second',
       held == null ? 'drag the weight or a link' : 'holding the ${held!.$1.gameObject.name}',
     ].join('\n');
   }
@@ -211,7 +223,9 @@ class JointsChainScene extends LabScene {
 
   @override
   void onDestroy() {
-    // The solver's iterations are the world's: put them back for the next scene.
+    // The step and the solver's iterations are the world's: put them back
+    // for the next scene.
+    time.fixedDelta = 1 / 50;
     physics.defaultSolverIterations = 6;
     super.onDestroy();
   }
