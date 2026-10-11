@@ -198,8 +198,11 @@ impl Physics {
     pub fn set_body_spec(&mut self, id: u64, spec: BodySpec) -> Result<(), PhysicsError> {
         spec.check()?;
         let handle = self.rigidbody(id)?;
-        self.data_mut(handle).spec = spec;
+        let before = std::mem::replace(&mut self.data_mut(handle).spec, spec);
         self.apply_spec(handle, spec);
+        if before.kinematic != spec.kinematic {
+            self.reshape_meshes(handle);
+        }
         self.mass_changed(handle);
         Ok(())
     }

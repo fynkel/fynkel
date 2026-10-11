@@ -466,6 +466,34 @@ The core gained `WorldSystem.componentAdded`, and in `extend.dart`
 meshes for static colliders (as Unity's non-convex ones), from a
 `Mesh` or a model's parts. *Done when* rays and bodies hit a model's
 shape. Lab: a ball run over a model.
+✅ `MeshCollider(mesh:, convex:)`, and `MeshCollider.addToParts` for a
+model. The core gained `Mesh.positions` and `Mesh.indices` (engine ABI
+15, `fy_mesh_read`); physics (ABI 6) takes a mesh once
+(`fp_mesh_add`), works its hull out the first time one is asked for, and
+shares the unscaled shapes; each collider scales its own on each axis.
+Triangles are Rapier's trimesh with `FIX_INTERNAL_EDGES`, so a ball rolls
+over the seams between triangles without a bump. Tests: 8 in
+`meshes.rs` (triangles and hull hit by rays, scale on each axis and
+mirrored, a ball rolling into a trough, a hull landing, the hull on a
+dynamic body until it turns kinematic, flat meshes, bad meshes, edges),
+the C interface for both (`fy_mesh_read`, `fp_mesh_add`/`remove`, edges),
+and `mesh_collider_test.dart`: rays, scale, a ball in a trough, a hull
+landing, the `MeshRenderer`'s mesh, a model's parts (`Box.glb`), each mesh
+given once and let go when unused, drawing. Lab: "Mesh colliders: the
+basics", a ball rolling down a rock (Kenney's Nature Kit, CC0) over its
+triangles or its hull.
+
+**A dynamic body's mesh is its hull**, even when not `convex`: Unity
+refuses it there; triangles have no inside for a body to be pushed out of.
+Turning the rigidbody kinematic gives it its triangles back. **A flat
+mesh can be convex** (a hull with no thickness), as in Unity; one whose
+points are all on a line can't. A collider without a mesh reads its
+`MeshRenderer`'s when it's enabled and when it's changed, not each frame;
+without either it reports a `StateError` to `world.errors` and isn't in
+the world. `drawColliders` draws a mesh collider's edges
+(`fp_collider_edges`). The core fix it needed: a behaviour put on a
+model's part never had `onEnable`, as the part's object was made after its
+tree was enabled; it's now enabled when it's made.
 
 **Step 7: the character controller.** §3.7. *Done when* tests show it
 walks up steps below `stepOffset` and not above, stops at `slopeLimit`,

@@ -4,6 +4,7 @@
 
 use rapier3d::prelude::*;
 
+use crate::meshes::Meshes;
 use crate::{Physics, PhysicsError, Pose, Rotation, Vector, body_handle, check_vector, collider_id};
 
 /// The axis a capsule's length runs along, in its object's space.
@@ -30,6 +31,13 @@ pub enum ColliderShape {
         radius: f32,
         height: f32,
         direction: Axis,
+    },
+    /// Mesh `mesh` ([`Physics::add_mesh`]): its triangles, or its convex
+    /// hull when `convex`. Triangles collide only with what's convex, so
+    /// on a dynamic body they collide as the hull too.
+    Mesh {
+        mesh: u64,
+        convex: bool,
     },
 }
 
@@ -143,38 +151,59 @@ impl ColliderSpec {
                 check_not_negative("a capsule's radius", radius)?;
                 check_not_negative("a capsule's height", height)?;
             }
+            ColliderShape::Mesh { .. } => {}
         }
         Ok(())
     }
 
-    /// The Rapier shape, scaled by `scale` as Unity scales it, and where it
-    /// sits in the world on an object at `object`.
-    pub(crate) fn place(&self, object: ObjectPose) -> (SharedShape, Pose) {
-        let s = object.scale.abs();
-        let (shape, turn) = match self.shape {
+    /// The Rapier shape, scaled as Unity scales it, and where it sits in
+    /// the world on an object at `object`: a mesh's hull if `hull`.
+    pub(crate) fn place(&self, object: ObjectPose, meshes: &Meshes, hull: bool) -> (SharedShape, Pose) {
+        (self.scaled(object.scale.abs(), meshes, hull), self.pose(object))
+    }
+
+    fn scaled(&self, s: Vector, meshes: &Meshes, hull: bool) -> SharedShape {
+        match self.shape {
             ColliderShape::Box { size } => {
                 let half = (size * s / 2.0).max(Vector::splat(SMALLEST));
-                (SharedShape::cuboid(half.x, half.y, half.z), Rotation::IDENTITY)
+                SharedShape::cuboid(half.x, half.y, half.z)
             }
             // A sphere takes the largest of the three scales.
-            ColliderShape::Sphere { radius } => {
-                (SharedShape::ball((radius * s.max_element()).max(SMALLEST)), Rotation::IDENTITY)
-            }
+            ColliderShape::Sphere { radius } => SharedShape::ball((radius * s.max_element()).max(SMALLEST)),
             // A capsule's length takes its axis's scale, its radius the
             // larger of the other two.
             ColliderShape::Capsule { radius, height, direction } => {
-                let (along, across, turn) = match direction {
-                    Axis::X => (s.x, s.y.max(s.z), Rotation::from_rotation_z(-std::f32::consts::FRAC_PI_2)),
-                    Axis::Y => (s.y, s.x.max(s.z), Rotation::IDENTITY),
-                    Axis::Z => (s.z, s.x.max(s.y), Rotation::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                let (along, across) = match direction {
+                    Axis::X => (s.x, s.y.max(s.z)),
+                    Axis::Y => (s.y, s.x.max(s.z)),
+                    Axis::Z => (s.z, s.x.max(s.y)),
                 };
                 let radius = (radius * across).max(SMALLEST);
                 let half_height = (height * along / 2.0 - radius).max(0.0);
-                (SharedShape::capsule_y(half_height, radius), turn)
+                SharedShape::capsule_y(half_height, radius)
             }
+            // A mesh is scaled on each axis, so it squashes and stretches.
+            ColliderShape::Mesh { mesh, convex } => meshes.shape(mesh, convex || hull, s, SMALLEST),
+        }
+    }
+
+    /// Where the shape sits in the world on an object at `object`.
+    pub(crate) fn pose(&self, object: ObjectPose) -> Pose {
+        // Rapier's capsules run along Y.
+        let turn = match self.shape {
+            ColliderShape::Capsule { direction: Axis::X, .. } => {
+                Rotation::from_rotation_z(-std::f32::consts::FRAC_PI_2)
+            }
+            ColliderShape::Capsule { direction: Axis::Z, .. } => Rotation::from_rotation_x(std::f32::consts::FRAC_PI_2),
+            _ => Rotation::IDENTITY,
         };
         let position = object.position + object.rotation * (self.center * object.scale);
-        (shape, Pose::from_parts(position, (object.rotation * turn).normalize()))
+        Pose::from_parts(position, (object.rotation * turn).normalize())
+    }
+
+    /// Whether its shape changes when its body turns dynamic or kinematic.
+    pub(crate) fn hull_on_dynamic(&self) -> bool {
+        matches!(self.shape, ColliderShape::Mesh { convex: false, .. })
     }
 }
 
@@ -220,10 +249,10 @@ impl Physics {
         object: ObjectPose,
         body: Option<u64>,
     ) -> Result<u64, PhysicsError> {
-        spec.check()?;
+        self.check_spec(&spec)?;
         check_object(object)?;
         let body = body.map(|id| body_handle(&self.world.bodies, id)).transpose()?;
-        let (shape, pose) = spec.place(object);
+        let (shape, pose) = spec.place(object, &self.meshes, self.dynamic(body));
         let builder = ColliderBuilder::new(shape)
             .sensor(spec.is_trigger)
             .active_collision_types(collision_types(spec.is_trigger))
@@ -257,7 +286,7 @@ impl Physics {
     /// Changes what a followed collider is: its shape, center, trigger or
     /// layer.
     pub fn set_collider_spec(&mut self, id: u64, spec: ColliderSpec) -> Result<(), PhysicsError> {
-        spec.check()?;
+        self.check_spec(&spec)?;
         let handle = self.followed_handle(id)?;
         let followed = self.followed[handle.into_raw_parts().0 as usize].as_mut().expect("followed");
         let before = followed.spec.listens;
@@ -291,8 +320,7 @@ impl Physics {
             if rescaled {
                 self.replace(handle, spec, object);
             } else {
-                let (_, pose) = spec.place(object);
-                self.put(handle, pose);
+                self.put(handle, spec.pose(object));
             }
         }
         Ok(())
@@ -312,8 +340,67 @@ impl Physics {
         Ok((shape, *collider.position()))
     }
 
+    /// A mesh collider's edges where they are in the world, as pairs of
+    /// points, into `out`: its triangles' or its hull's, each once. For
+    /// drawing it.
+    pub fn collider_edges(&self, id: u64, out: &mut Vec<[Vector; 2]>) -> Result<(), PhysicsError> {
+        out.clear();
+        let handle = self.collider_handle(id)?;
+        let collider = &self.world.colliders[handle];
+        let pose = *collider.position();
+        match collider.shape().as_typed_shape() {
+            TypedShape::TriMesh(mesh) => {
+                let points = mesh.vertices();
+                let mut seen = std::collections::HashSet::new();
+                for t in mesh.indices() {
+                    for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                        if seen.insert((a.min(b), a.max(b))) {
+                            out.push([pose * points[a as usize], pose * points[b as usize]]);
+                        }
+                    }
+                }
+            }
+            TypedShape::ConvexPolyhedron(hull) => {
+                let points = hull.points();
+                for edge in hull.edges() {
+                    let [a, b] = edge.vertices;
+                    out.push([pose * points[a as usize], pose * points[b as usize]]);
+                }
+            }
+            _ => return Err(PhysicsError::Value(format!("collider {id} isn't a mesh"))),
+        }
+        Ok(())
+    }
+
+    fn check_spec(&self, spec: &ColliderSpec) -> Result<(), PhysicsError> {
+        spec.check()?;
+        if let ColliderShape::Mesh { mesh, convex } = spec.shape {
+            self.meshes.check(mesh, convex)?;
+        }
+        Ok(())
+    }
+
+    /// Whether `body` is there and dynamic: its non-convex meshes are hulls.
+    fn dynamic(&self, body: Option<RigidBodyHandle>) -> bool {
+        body.is_some_and(|b| self.world.bodies[b].is_dynamic())
+    }
+
+    /// Gives `body`'s non-convex mesh colliders their hull or their
+    /// triangles again, after it turned dynamic or kinematic.
+    pub(crate) fn reshape_meshes(&mut self, body: RigidBodyHandle) {
+        let colliders: Vec<_> = self.world.bodies[body].colliders().to_vec();
+        for handle in colliders {
+            let Some(Some(followed)) = self.followed.get(handle.into_raw_parts().0 as usize) else { continue };
+            if followed.spec.hull_on_dynamic() {
+                let (spec, object) = (followed.spec, followed.object);
+                self.replace(handle, spec, object);
+            }
+        }
+    }
+
     fn replace(&mut self, handle: ColliderHandle, spec: ColliderSpec, object: ObjectPose) {
-        let (shape, pose) = spec.place(object);
+        let body = collider_body(&self.followed, handle);
+        let (shape, pose) = spec.place(object, &self.meshes, self.dynamic(body));
         let groups = self.contacts.groups(spec.layer);
         let collider = &mut self.world.colliders[handle];
         collider.set_shape(shape);
@@ -326,7 +413,7 @@ impl Physics {
         collider.set_restitution_combine_rule(spec.material.bounce_combine.rule());
         self.put(handle, pose);
         // A new shape or trigger changes how the body's mass is shared out.
-        if let Some(body) = collider_body(&self.followed, handle) {
+        if let Some(body) = body {
             self.mass_changed(body);
         }
     }
@@ -396,6 +483,12 @@ fn collision_types(is_trigger: bool) -> ActiveCollisionTypes {
 mod tests {
     use super::*;
 
+    impl ColliderSpec {
+        fn place_plain(&self, object: ObjectPose) -> (SharedShape, Pose) {
+            self.place(object, &Meshes::default(), false)
+        }
+    }
+
     fn spec(shape: ColliderShape) -> ColliderSpec {
         ColliderSpec {
             shape,
@@ -416,7 +509,7 @@ mod tests {
         let mut s = spec(ColliderShape::Box { size: Vector::new(1.0, 2.0, 3.0) });
         s.center = Vector::new(1.0, 0.0, 0.0);
         let turn = Rotation::from_rotation_y(std::f32::consts::FRAC_PI_2);
-        let (shape, pose) = s.place(on(Vector::new(5.0, 0.0, 0.0), turn, Vector::new(2.0, -1.0, 1.0)));
+        let (shape, pose) = s.place_plain(on(Vector::new(5.0, 0.0, 0.0), turn, Vector::new(2.0, -1.0, 1.0)));
         let half = shape.as_cuboid().expect("a box").half_extents;
         assert!(half.abs_diff_eq(Vector::new(1.0, 1.0, 1.5), 1e-6), "{half}");
         // The center, 1 along X, doubled, then turned a quarter left: 2 along -Z.
@@ -426,7 +519,7 @@ mod tests {
 
     #[test]
     fn a_sphere_takes_the_largest_scale() {
-        let (shape, _) = spec(ColliderShape::Sphere { radius: 0.5 }).place(on(
+        let (shape, _) = spec(ColliderShape::Sphere { radius: 0.5 }).place_plain(on(
             Vector::ZERO,
             Rotation::IDENTITY,
             Vector::new(1.0, -3.0, 2.0),
@@ -441,7 +534,7 @@ mod tests {
             (Axis::Y, Vector::new(3.0, 2.0, 1.0), Vector::Y),
             (Axis::Z, Vector::new(1.0, 3.0, 2.0), Vector::Z),
         ] {
-            let (shape, pose) = spec(ColliderShape::Capsule { radius: 0.5, height: 4.0, direction }).place(on(
+            let (shape, pose) = spec(ColliderShape::Capsule { radius: 0.5, height: 4.0, direction }).place_plain(on(
                 Vector::ZERO,
                 Rotation::IDENTITY,
                 scale,
@@ -457,10 +550,10 @@ mod tests {
 
     #[test]
     fn a_capsule_shorter_than_its_width_is_a_sphere_and_a_flat_box_stays_a_box() {
-        let (shape, _) =
-            spec(ColliderShape::Capsule { radius: 1.0, height: 0.5, direction: Axis::Y }).place(ObjectPose::IDENTITY);
+        let (shape, _) = spec(ColliderShape::Capsule { radius: 1.0, height: 0.5, direction: Axis::Y })
+            .place_plain(ObjectPose::IDENTITY);
         assert_eq!(shape.as_capsule().unwrap().half_height(), 0.0);
-        let (shape, _) = spec(ColliderShape::Box { size: Vector::new(1.0, 1.0, 1.0) }).place(on(
+        let (shape, _) = spec(ColliderShape::Box { size: Vector::new(1.0, 1.0, 1.0) }).place_plain(on(
             Vector::ZERO,
             Rotation::IDENTITY,
             Vector::new(1.0, 0.0, 1.0),

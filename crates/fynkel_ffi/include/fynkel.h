@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 14
+#define FY_ABI_VERSION 15
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -637,6 +637,20 @@ void fy_mesh_free(struct FyMesh *mesh);
 //
 // `mesh` is null or live; the outs are null or writable.
 FyStatus fy_mesh_counts(const struct FyMesh *mesh, size_t *out_vertices, size_t *out_indices);
+
+// Copies the mesh's vertex positions, three floats each, to `positions`
+// and its indices to `indices`: `vertex_count` and `index_count` must be
+// `fy_mesh_counts`' numbers. A null array (with its count 0) is skipped.
+//
+// # Safety
+//
+// `mesh` is null or live; `positions` is null or writable for
+// `vertex_count * 3` floats, `indices` for `index_count` u32s.
+FyStatus fy_mesh_read(const struct FyMesh *mesh,
+                      float *positions,
+                      size_t vertex_count,
+                      uint32_t *indices,
+                      size_t index_count);
 
 // Gives the world a share of `mesh` (nothing is copied) and writes the
 // world's id for it to `out`. Adding the same handle twice gives two ids.

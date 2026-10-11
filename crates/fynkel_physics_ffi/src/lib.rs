@@ -25,7 +25,7 @@ use fynkel_physics::{
 };
 
 /// Bumped on any change to the functions or types in this file.
-pub const FP_ABI_VERSION: u32 = 5;
+pub const FP_ABI_VERSION: u32 = 6;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -116,6 +116,10 @@ pub enum FpColliderKind {
     /// `size.x`: the radius; `size.y`: the height, end to end; `direction`:
     /// 0, 1 or 2 for X, Y or Z.
     Capsule = 2,
+    /// `mesh`: a mesh from `fp_mesh_add`; `convex`: 1 for its convex hull,
+    /// 0 for its triangles (as its hull on a dynamic body). `size` is
+    /// unused.
+    Mesh = 3,
 }
 
 /// A collider that follows an object, in the object's space: Unity's
@@ -135,6 +139,9 @@ pub struct FpColliderSpec {
     /// What its touching others is reported for (`fp_contacts_read`): 1
     /// triggers, 2 collisions, 3 both, 0 neither.
     pub listens: u32,
+    /// For `FP_COLLIDER_KIND_MESH`.
+    pub mesh: u64,
+    pub convex: u32,
 }
 
 /// Where a pair of colliders is in its touching.
@@ -372,6 +379,8 @@ pub struct FpWorld {
     hits: Vec<Hit>,
     /// What the last overlap found, until `fp_found_read`.
     found: Vec<(u64, u64)>,
+    /// The last `fp_collider_edges`', until `fp_edges_read`.
+    edges: Vec<[Vector; 2]>,
     poisoned: bool,
 }
 
@@ -531,6 +540,14 @@ fn spec(s: FpColliderSpec) -> Result<ColliderSpec, Error> {
                 1 => Axis::Y,
                 2 => Axis::Z,
                 d => return Err(invalid(format!("{d} is no direction: 0, 1 or 2 for X, Y or Z"))),
+            },
+        },
+        3 => ColliderShape::Mesh {
+            mesh: s.mesh,
+            convex: match s.convex {
+                0 => false,
+                1 => true,
+                c => return Err(invalid(format!("convex is 0 or 1, not {c}"))),
             },
         },
         kind => return Err(invalid(format!("{kind} is no collider kind"))),
@@ -697,6 +714,7 @@ pub extern "C" fn fp_world_new() -> *mut FpWorld {
         moved: Vec::new(),
         hits: Vec::new(),
         found: Vec::new(),
+        edges: Vec::new(),
         poisoned: false,
     }))
 }
@@ -810,6 +828,67 @@ pub unsafe extern "C" fn fp_collider_add(
             write(out, "out", id)
         })
     }
+}
+
+/// Adds a mesh for mesh colliders (`FP_COLLIDER_KIND_MESH`): `vertex_count`
+/// positions, three floats each, and `index_count` indices into them,
+/// three per triangle. They're copied. Writes its id to `out`.
+///
+/// # Safety
+///
+/// `world` is null or live; `positions` is null or valid for
+/// `vertex_count * 3` reads, `indices` for `index_count`; `out` is null or
+/// writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_mesh_add(
+    world: *mut FpWorld,
+    positions: *const f32,
+    vertex_count: usize,
+    indices: *const u32,
+    index_count: usize,
+    out: *mut u64,
+) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            if positions.is_null() && vertex_count > 0 {
+                return Err(Error::null("positions"));
+            }
+            if indices.is_null() && index_count > 0 {
+                return Err(Error::null("indices"));
+            }
+            if !index_count.is_multiple_of(3) {
+                return Err(invalid(format!("{index_count} indices: three per triangle")));
+            }
+            let points: Vec<Vector> = if vertex_count == 0 {
+                Vec::new()
+            } else {
+                // SAFETY: not null, and valid for vertex_count * 3 reads, as the caller promises.
+                let flat = std::slice::from_raw_parts(positions, vertex_count * 3);
+                flat.chunks_exact(3).map(|p| Vector::new(p[0], p[1], p[2])).collect()
+            };
+            let triangles: Vec<[u32; 3]> = if index_count == 0 {
+                Vec::new()
+            } else {
+                // SAFETY: not null, and valid for index_count reads, as the caller promises.
+                let flat = std::slice::from_raw_parts(indices, index_count);
+                flat.chunks_exact(3).map(|t| [t[0], t[1], t[2]]).collect()
+            };
+            let id = w.physics.add_mesh(&points, &triangles)?;
+            write(out, "out", id)
+        })
+    }
+}
+
+/// Removes a mesh no collider is made of.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_mesh_remove(world: *mut FpWorld, mesh: u64) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe { with_world(world, |w| Ok(w.physics.remove_mesh(mesh)?)) }
 }
 
 /// Removes a collider.
@@ -1101,6 +1180,59 @@ pub unsafe extern "C" fn fp_collider_shape_get(
             };
             write(out_shape, "out_shape", shape)?;
             write(out_pose, "out_pose", fp_pose(pose))
+        })
+    }
+}
+
+/// A mesh collider's edges where they are in the world, for drawing it:
+/// writes how many to `out_count`; read them with `fp_edges_read`.
+///
+/// # Safety
+///
+/// `world` is null or live; `out_count` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_collider_edges(world: *mut FpWorld, collider: u64, out_count: *mut u32) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            if out_count.is_null() {
+                return Err(Error::null("out_count"));
+            }
+            w.physics.collider_edges(collider, &mut w.edges)?;
+            write(out_count, "out_count", count(w.edges.len())?)
+        })
+    }
+}
+
+/// Writes the edges of the last `fp_collider_edges` to `out`, two points
+/// each, which holds `len` edges: exactly as many as it said.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable for `2 * len` points.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_edges_read(world: *mut FpWorld, out: *mut FpVec3, len: usize) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            if len != w.edges.len() {
+                return Err(Error::new(
+                    FpStatus::WrongSize,
+                    format!("the collider has {} edges, not {len}", w.edges.len()),
+                ));
+            }
+            if len == 0 {
+                return Ok(());
+            }
+            if out.is_null() {
+                return Err(Error::null("out"));
+            }
+            // SAFETY: writable for 2 * len points, as the caller promises.
+            let out = std::slice::from_raw_parts_mut(out, 2 * len);
+            for (slot, &point) in out.iter_mut().zip(w.edges.iter().flatten()) {
+                *slot = fp_vec3(point);
+            }
+            Ok(())
         })
     }
 }
