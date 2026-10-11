@@ -13,6 +13,8 @@ import 'package:lab/scenes/character_basics.dart';
 import 'package:lab/scenes/character_course.dart';
 import 'package:lab/scenes/contacts_basics.dart';
 import 'package:lab/scenes/input.dart';
+import 'package:lab/scenes/joints_basics.dart';
+import 'package:lab/scenes/joints_bridge.dart';
 import 'package:lab/scenes/layer_matrix.dart';
 import 'package:lab/scenes/layers_basics.dart';
 import 'package:lab/scenes/mesh_colliders_basics.dart';
@@ -366,5 +368,56 @@ void main() {
     walkTo(Vec3(-5, 0, 2));
     expect(walkTo(Vec3(-5, 0, -4.4), seconds: 5), closeTo(0.8, 0.05), reason: 'up the stairs to the landing');
     expect(scene.log.value.map((l) => l.text), contains('picked up a coin: 1 of 4'));
+  });
+
+  test('Joints: the basics: the door swings shut, the chain hangs joined, and the crate settles', () async {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(JointsBasicsScene());
+    void frames(int n) {
+      for (var i = 0; i < n; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    frames(60);
+    scene.controls.whereType<Button>().first.onPressed();
+    frames(20);
+    expect(scene.hinge.angle.abs(), greaterThan(20), reason: 'pushed open');
+    frames(600);
+    expect(scene.hinge.angle.abs(), lessThan(3), reason: 'its spring swung it shut');
+    expect(scene.door.position.y, closeTo(1.1, 0.05), reason: 'still on its hinge');
+    for (final (i, link) in scene.links.indexed) {
+      expect(link.position.y, closeTo(3.8 - i * 0.4, 0.05), reason: 'link ${i + 1} hangs where it was');
+    }
+    final below = (scene.crate.position - JointsBasicsScene.hook).length;
+    expect(below, lessThanOrEqualTo(1.55), reason: 'held within its 1.5 m maxDistance');
+    expect(scene.crate.position.y, greaterThan(2), reason: 'hanging, not on the floor');
+  });
+
+  test('Joints: a bridge: it holds a crate, and with a low break force, breaks under it', () async {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(JointsBridgeScene());
+    void frames(int n) {
+      for (var i = 0; i < n; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    frames(120);
+    scene.dropCrate(Vec3(0, 4.5, 0));
+    frames(300);
+    final crate = scene.crates.single;
+    expect(crate.position.y, greaterThan(0.8), reason: 'on the bridge, not on the floor');
+    expect(scene.broken, 0);
+    scene.rebuild();
+    scene.setBreakForce(250);
+    frames(120);
+    scene.dropCrate(Vec3(0, 4.5, 0));
+    frames(300);
+    expect(scene.broken, greaterThan(0));
+    expect(scene.log.value.map((l) => l.text), contains(startsWith('a joint on plank broke')));
+    expect(scene.crates.single.position.y, lessThan(0.5), reason: 'fell through, onto the floor');
   });
 }

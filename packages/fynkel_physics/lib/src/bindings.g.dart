@@ -202,6 +202,31 @@ external int fp_gravity_set(ffi.Pointer<FpWorld> world, FpVec3 gravity);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpHit>, ffi.Size)>(isLeaf: true)
 external int fp_hits_read(ffi.Pointer<FpWorld> world, ffi.Pointer<FpHit> out, int len);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Pointer<FpJointSpec>, ffi.Pointer<ffi.Uint64>)>(
+  isLeaf: true,
+)
+external int fp_joint_add(
+  ffi.Pointer<FpWorld> world,
+  int key,
+  ffi.Pointer<FpJointSpec> spec,
+  ffi.Pointer<ffi.Uint64> out,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64)>(isLeaf: true)
+external int fp_joint_remove(ffi.Pointer<FpWorld> world, int joint);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Pointer<FpJointSpec>)>(isLeaf: true)
+external int fp_joint_spec_set(ffi.Pointer<FpWorld> world, int joint, ffi.Pointer<FpJointSpec> spec);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Pointer<FpJointState>)>(isLeaf: true)
+external int fp_joint_state_get(ffi.Pointer<FpWorld> world, int joint, ffi.Pointer<FpJointState> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<ffi.Uint32>)>(isLeaf: true)
+external int fp_joints_broken(ffi.Pointer<FpWorld> world, ffi.Pointer<ffi.Uint32> out_count);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpBrokenJoint>, ffi.Size)>(isLeaf: true)
+external int fp_joints_broken_read(ffi.Pointer<FpWorld> world, ffi.Pointer<FpBrokenJoint> out, int len);
+
 @ffi.Native<ffi.Pointer<ffi.Char> Function()>(isLeaf: true)
 external ffi.Pointer<ffi.Char> fp_last_error();
 
@@ -347,7 +372,7 @@ external void fp_world_free(ffi.Pointer<FpWorld> world);
 @ffi.Native<ffi.Pointer<FpWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FpWorld> fp_world_new();
 
-const int FP_ABI_VERSION = 7;
+const int FP_ABI_VERSION = 8;
 
 const int FP_COLLIDED_ABOVE = 2;
 
@@ -403,6 +428,27 @@ final class FpBodyState extends ffi.Struct {
 
   @ffi.Uint32()
   external int sleeping;
+}
+
+final class FpBrokenJoint extends ffi.Struct {
+  @ffi.Uint64()
+  external int key;
+
+  @ffi.Float()
+  external double force;
+
+  @ffi.Float()
+  external double torque;
+
+  static ffi.Pointer<FpBrokenJoint> $allocate(
+    ffi.Allocator $allocator, {
+    required int key,
+    required double force,
+    required double torque,
+  }) => $allocator<FpBrokenJoint>()
+    ..ref.key = key
+    ..ref.force = force
+    ..ref.torque = torque;
 }
 
 final class FpCharacter extends ffi.Struct {
@@ -568,6 +614,91 @@ final class FpHit extends ffi.Struct {
 
   @ffi.Float()
   external double distance;
+}
+
+sealed class FpJointKind {
+  static const FP_JOINT_KIND_FIXED = 0;
+  static const FP_JOINT_KIND_HINGE = 1;
+  static const FP_JOINT_KIND_SPRING = 2;
+}
+
+final class FpJointSpec extends ffi.Struct {
+  @ffi.Uint64()
+  external int body;
+
+  @ffi.Uint64()
+  external int connected;
+
+  @ffi.Uint32()
+  external int kind;
+
+  external FpVec3 anchor;
+
+  @ffi.Uint32()
+  external int has_connected_anchor;
+
+  external FpVec3 connected_anchor;
+
+  external FpVec3 axis;
+
+  @ffi.Uint32()
+  external int enable_collision;
+
+  @ffi.Float()
+  external double break_force;
+
+  @ffi.Float()
+  external double break_torque;
+
+  @ffi.Uint32()
+  external int use_limits;
+
+  @ffi.Float()
+  external double limit_min;
+
+  @ffi.Float()
+  external double limit_max;
+
+  @ffi.Uint32()
+  external int use_motor;
+
+  @ffi.Float()
+  external double motor_velocity;
+
+  @ffi.Float()
+  external double motor_force;
+
+  @ffi.Uint32()
+  external int use_spring;
+
+  @ffi.Float()
+  external double spring;
+
+  @ffi.Float()
+  external double damper;
+
+  @ffi.Float()
+  external double target;
+
+  @ffi.Float()
+  external double min_distance;
+
+  @ffi.Float()
+  external double max_distance;
+}
+
+final class FpJointState extends ffi.Struct {
+  external FpVec3 connected_anchor;
+
+  external FpVec3 force;
+
+  external FpVec3 torque;
+
+  @ffi.Float()
+  external double angle;
+
+  @ffi.Float()
+  external double velocity;
 }
 
 final class FpMaterial extends ffi.Struct {
@@ -753,6 +884,7 @@ sealed class FpStatus {
   static const FP_STATUS_WRONG_SIZE = 5;
   static const FP_STATUS_PANIC = 6;
   static const FP_STATUS_POISONED = 7;
+  static const FP_STATUS_NO_JOINT = 8;
 }
 
 final class FpSweep extends ffi.Struct {

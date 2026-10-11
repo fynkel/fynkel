@@ -535,6 +535,45 @@ step offset).
 **Step 8: joints.** §3.7. *Done when* each joint holds as Unity's does
 (a hinge's limits and motor, a spring's rest length), and breaks at its
 force. Lab: a door, a chain, a bridge.
+✅ `FixedJoint`, `HingeJoint(axis:, useLimits:, limits:, useMotor:,
+motor:, useSpring:, spring:)` and `SpringJoint(spring:, damper:,
+minDistance:, maxDistance:)`, behaviours that each share `connectedBody`
+(none = the world), `anchor`, `connectedAnchor` (worked out from where the
+bodies are when left out, as Unity's `autoConfigureConnectedAnchor`),
+`enableCollision`, `breakForce`, `breakTorque`, `currentForce`,
+`currentTorque` and `isJoined`; a hinge also says its `angle` and
+`velocity`, in degrees as Unity's. `JointLimits`, `JointMotor` and
+`JointSpring` are Unity's, in degrees. `with JointBreaks` gets
+`onJointBreak(Joint joint, double breakForce)` on the object and its
+behaviours, and then the joint is taken off its object, as Unity does. A
+joint waits until its rigidbody and its connected one are in the world, and
+waits again while either is away. Changing the bodies, anchors or axis joins
+them again as they are now; everything else changes on the joint as it is.
+Physics ABI 8: Rapier's impulse joints (a hinge is a revolute joint about
+the axis, a spring joint a free joint with a motor along the line between
+the anchors, set each step: slack within its distances, as Unity's). The
+force and torque a joint holds with come from the last substep's impulses,
+so they read as Unity's (a fixed 1 kg box: 9.81 N). Rapier lets a body
+sleep while its drive still pulls; a spring short of its target and a
+motor short of its limit keep their bodies awake, so a hinge's spring gets
+within 0.2° of its target.
+
+**Decisions:** the motor wins over the spring when both are on (Unity
+mixes them); no limit bounciness, `freeSpin`, `useAcceleration` or
+`extendedLimits`, and no `ConfigurableJoint` or `CharacterJoint`, until a
+game asks; an anchor read back through a turned object's scale a hair off
+is the same anchor (the bridge found it). Tests: 12 in `joints.rs` (a fixed
+joint holds and moves two bodies as one; a pendulum's period is
+2π√(L/g); limits, the motor (fast, weak, slow, at a limit), the spring
+(to its target, a new target, a weak one); the spring joint's distances
+and m·g/k; breaking by force and by torque; collision only with
+`enableCollision`; the readouts; removing a body), the C interface, and
+14 in `joints_test.dart` (the same through the package, a chain of six, a
+break heard by the object and a behaviour, a joint waiting and joining
+again, a break force changed on a swinging, turned, scaled plank). Lab:
+"Joints: the basics" (a door with a spring that swings it shut, a chain, a
+crate on a spring) and "Joints: a bridge" (twelve hinged planks; tap to
+drop crates; a break force to break it).
 
 **Step 9: the bowling game, and coins.** `examples/bowling`: roll a ball
 by swiping, pins to knock down, a gutter (a trigger), the score, a camera

@@ -36,6 +36,9 @@ enum PhysicsStatus {
   /// An earlier call panicked while changing this world, so it can't be
   /// trusted any more.
   poisoned,
+
+  /// No joint has this id: it was removed, broke, or was never added.
+  noJoint,
 }
 
 /// A call into the physics failed.

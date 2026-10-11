@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FP_ABI_VERSION 7
+#define FP_ABI_VERSION 8
 
 // A character's move hit something on its sides (`FpCharacterMove::flags`).
 #define FP_COLLIDED_SIDES 1
@@ -45,6 +45,8 @@ enum FpStatus
   // An earlier call panicked while changing this world, so it can't be
   // trusted any more.
   FP_STATUS_POISONED = 7,
+  // No joint has this id: it was removed, broke, or was never added.
+  FP_STATUS_NO_JOINT = 8,
 };
 #ifndef __cplusplus
 #if __STDC_VERSION__ >= 202311L
@@ -211,6 +213,27 @@ enum FpPushKind
 typedef enum FpPushKind FpPushKind;
 #else
 typedef uint32_t FpPushKind;
+#endif // __STDC_VERSION__ >= 202311L
+#endif // __cplusplus
+
+// What a joint lets its body do (`FpJointSpec::kind`).
+enum FpJointKind
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+  : uint32_t
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+ {
+  // Nothing: the two move as one.
+  FP_JOINT_KIND_FIXED = 0,
+  // Turn about its axis.
+  FP_JOINT_KIND_HINGE = 1,
+  // Anything, pulled back outside its distances.
+  FP_JOINT_KIND_SPRING = 2,
+};
+#ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum FpJointKind FpJointKind;
+#else
+typedef uint32_t FpJointKind;
 #endif // __STDC_VERSION__ >= 202311L
 #endif // __cplusplus
 
@@ -430,6 +453,57 @@ typedef struct FpCharacterHit {
   struct FpVec3 point;
   struct FpVec3 normal;
 } FpCharacterHit;
+
+// What a joint is: Unity's joint properties, in its rigidbody's space.
+// `connected` is a rigidbody's id or 0 for the world; `connected_anchor`
+// counts when `has_connected_anchor` is 1, else it's where `anchor` is
+// when the joint is made. Angles are in radians, flags 0 or 1, break
+// force and torque infinity for never. The limits, motor and spring count
+// when their `use_` flag is 1; the motor turns a hinge in place of its
+// spring. A spring joint uses `spring` and `damper` (not `target`), and
+// doesn't pull between `min_distance` and `max_distance`.
+typedef struct FpJointSpec {
+  uint64_t body;
+  uint64_t connected;
+  uint32_t kind;
+  struct FpVec3 anchor;
+  uint32_t has_connected_anchor;
+  struct FpVec3 connected_anchor;
+  struct FpVec3 axis;
+  uint32_t enable_collision;
+  float break_force;
+  float break_torque;
+  uint32_t use_limits;
+  float limit_min;
+  float limit_max;
+  uint32_t use_motor;
+  float motor_velocity;
+  float motor_force;
+  uint32_t use_spring;
+  float spring;
+  float damper;
+  float target;
+  float min_distance;
+  float max_distance;
+} FpJointSpec;
+
+// How hard a joint held in the last step, in the world (the torque about
+// its anchor), where it holds on the connected body, and a hinge's angle
+// (radians) and how fast it turns (radians a second).
+typedef struct FpJointState {
+  struct FpVec3 connected_anchor;
+  struct FpVec3 force;
+  struct FpVec3 torque;
+  float angle;
+  float velocity;
+} FpJointState;
+
+// A joint a step broke: its key, and the force and torque it broke at.
+typedef struct FpBrokenJoint {
+  uint64_t key;
+  float force;
+  float torque;
+} FpBrokenJoint;
 
 #ifdef __cplusplus
 extern "C" {
@@ -920,6 +994,55 @@ FpStatus fp_character_move(struct FpWorld *world,
 //
 // `world` is null or live; `out` is null or writable for `len` entries.
 FpStatus fp_character_hits_read(struct FpWorld *world, struct FpCharacterHit *out, size_t len);
+
+// Joins `spec.body` to `spec.connected` (or the world) as they are now,
+// with `key` to know the joint by when it breaks, and writes its id to
+// `out`.
+//
+// # Safety
+//
+// `world` is null or live; `spec` is null or readable; `out` is null or
+// writable.
+FpStatus fp_joint_add(struct FpWorld *world,
+                      uint64_t key,
+                      const struct FpJointSpec *spec,
+                      uint64_t *out);
+
+// Changes a joint's limits, motor, spring, break force and torque, and
+// whether its bodies collide; its bodies, anchors and axis can't change.
+//
+// # Safety
+//
+// `world` is null or live; `spec` is null or readable.
+FpStatus fp_joint_spec_set(struct FpWorld *world, uint64_t joint, const struct FpJointSpec *spec);
+
+// # Safety
+//
+// `world` is null or live.
+FpStatus fp_joint_remove(struct FpWorld *world, uint64_t joint);
+
+// How hard a joint held in the last step, and where a hinge is.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FpStatus fp_joint_state_get(struct FpWorld *world, uint64_t joint, struct FpJointState *out);
+
+// Writes how many joints the last step broke to `out_count`: read them
+// with `fp_joints_broken_read`. They're removed.
+//
+// # Safety
+//
+// `world` is null or live; `out_count` is null or writable.
+FpStatus fp_joints_broken(struct FpWorld *world, uint32_t *out_count);
+
+// Writes the joints the last `fp_joints_broken` counted to `out`, which
+// holds `len`: exactly as many as it said.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable for `len` entries.
+FpStatus fp_joints_broken_read(struct FpWorld *world, struct FpBrokenJoint *out, size_t len);
 
 #ifdef __cplusplus
 }  // extern "C"
