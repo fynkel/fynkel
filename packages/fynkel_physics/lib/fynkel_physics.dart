@@ -5,7 +5,8 @@
 /// other queries, from any object or behaviour. Add a [Rigidbody] and
 /// physics moves it: gravity, forces, collisions. Mix [Triggers] or
 /// [Collisions] into an object or a behaviour to hear what it touches, and
-/// say which layers meet with `physics.ignoreLayerCollision`.
+/// say which layers meet with `physics.ignoreLayerCollision`. Walk a
+/// player with a [CharacterController].
 library;
 
 export 'src/physics.dart'
@@ -14,10 +15,14 @@ export 'src/physics.dart'
         BoxCollider,
         CapsuleCollider,
         CapsuleDirection,
+        CharacterController,
         Collider,
         Collision,
         CollisionDetectionMode,
+        CollisionFlags,
         Collisions,
+        ControllerColliderHit,
+        ControllerHits,
         ContactPoint,
         ForceMode,
         GameObjectPhysics,

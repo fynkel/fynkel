@@ -16,7 +16,8 @@ part of 'physics.dart';
 /// object for the triggers its colliders touch, with the other collider.
 ///
 /// A trigger meets another collider when at least one of the two is on a
-/// rigidbody (kinematic is enough). Enter comes the step they start to
+/// rigidbody (kinematic is enough), or is a [CharacterController] that has
+/// moved. Enter comes the step they start to
 /// overlap, stay every step after while either rigidbody is awake, and exit
 /// the step they stop, or after one is disabled, removed, destroyed,
 /// hidden, moved to a layer that doesn't meet the other's, or switched

@@ -20,6 +20,7 @@ import 'package:fynkel/fynkel.dart';
 import 'bindings.g.dart';
 import 'raw.dart';
 
+part 'characters.dart';
 part 'colliders.dart';
 part 'contacts.dart';
 part 'queries.dart';
@@ -194,6 +195,16 @@ final class Physics extends WorldSystem {
   var _hitsCapacity = 0;
   Pointer<FpFound> _found = nullptr;
   var _foundCapacity = 0;
+  // The character controllers' moves: an FpCharacter is 4 floats, and an
+  // FpCharacterMove floats 0–2 the translation, then words 3 the flags and
+  // 4 how many colliders it hit.
+  final _character = malloc<FpCharacter>();
+  late final _characterFloats = _character.cast<Float>();
+  final _moved = malloc<FpCharacterMove>();
+  late final _movedFloats = _moved.cast<Float>();
+  late final _movedWords = _moved.cast<Uint32>();
+  Pointer<FpCharacterHit> _characterHits = nullptr;
+  var _characterHitCapacity = 0;
 
   /// How many colliders there are, enabled on shown objects.
   int get colliderCount => _colliders.length;
@@ -284,13 +295,13 @@ final class Physics extends WorldSystem {
     for (final p in [_id, _count, _pointCount, _flag, _spec, _transform, _shape, _vectors, _hit]) {
       malloc.free(p);
     }
-    for (final p in [_bodySpec, _pose, _push, _state, _vec, _vec2, _setting]) {
+    for (final p in [_bodySpec, _pose, _push, _state, _vec, _vec2, _setting, _character, _moved]) {
       malloc.free(p);
     }
     for (final p in [_drawn, _drawnPose, _hits, _found, _objectIds, _colliderIds, _transforms, _edges]) {
       if (p != nullptr) malloc.free(p);
     }
-    for (final p in [_contactBuffer, _pointBuffer]) {
+    for (final p in [_contactBuffer, _pointBuffer, _characterHits]) {
       if (p != nullptr) malloc.free(p);
     }
   }

@@ -816,8 +816,8 @@ mixin: `with Triggers` for `onTriggerEnter`, `onTriggerStay` and
 `onTriggerExit(Collider other)`, `with Collisions` for
 `onCollisionEnter`, `onCollisionStay` and `onCollisionExit(Collision
 collision)`. As in Unity, they come to a collider's object and its
-rigidbody's object; a trigger needs a rigidbody (kinematic will do) on
-one side, and a collision a dynamic one. Enter comes the step two
+rigidbody's object; a trigger needs a rigidbody (kinematic will do) or a
+character controller on one side, and a collision a dynamic one. Enter comes the step two
 colliders start to touch, stay every step after while either body is
 awake, and exit the step they part, or after one is disabled, removed,
 destroyed, hidden, put on a layer that doesn't meet, or switched between
@@ -866,6 +866,51 @@ A behaviour gets callbacks while it's disabled too, as in Unity.
 `physics.ignoreCollision(a, b)` does the same for two colliders until one
 leaves the world. Queries don't read the matrix; their `layers:` say what
 they hit.
+
+**A `CharacterController`** walks a player as Unity's does: a capsule
+(`height:`, `radius:`, `center:`) that the game moves with
+`move(motion)`, and that goes as far as the world lets it. It slides
+along walls, walks up steps up to `stepOffset` (0.3 m) and slopes up to
+`slopeLimit` (45°), and stops at anything higher or steeper. Gravity is
+the game's to add, as in Unity, or `simpleMove(speed)` adds it. `move`
+returns `CollisionFlags`: `flags.has(CollisionFlags.below)` (the
+ground), `.sides`, `.above`; `isGrounded` and `velocity` say how the last
+move went. It pushes the rigidbodies it walks into, as if it weighed
+`mass` (70 kg; 0 pushes nothing), and meets triggers as a kinematic
+rigidbody does. `with ControllerHits` hears each collider a move hits, in
+`onControllerColliderHit`:
+
+```dart
+// lib/player.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
+
+/// Walks with W, A, S, D or the arrows, and jumps on space.
+class Walk extends Behaviour with ControllerHits {
+  late final CharacterController controller = gameObject.get<CharacterController>()!;
+  var fall = 0.0;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    final move = input.axis2('move');
+    if (controller.isGrounded) fall = input.action('jump').wasPressed ? 5 : -1;
+    fall -= 9.81 * time.delta;
+    controller.move(Vec3(move.x * 4, fall, -move.y * 4) * time.delta);
+  }
+
+  @override
+  void onControllerColliderHit(ControllerColliderHit hit) {
+    if (hit.gameObject.name == 'lava') gameObject.position = Vec3(0, 1.1, 0);
+  }
+}
+
+GameObject player() => GameObject(
+  name: 'player',
+  transform: Transform(position: Vec3(0, 1.1, 0)),
+  components: [MeshRenderer(Mesh.sphere(), Material()), CharacterController(), Walk()],
+);
+```
 
 ## 15. Flutter around the game
 
@@ -1006,11 +1051,8 @@ What keeps a game fast:
 
 ## 19. What isn't there yet
 
-Trigger and collision callbacks (stage 5 brings them next), joints, the
-character controller, audio,
-animation of models, point and spot lights and shadows, saving, gamepads,
-scene files and an editor. Until collision callbacks come, queries
-(`physics.overlapSphere`) and distance checks do the work.
+Joints (stage 5 brings them next), audio, animation of models, point and
+spot lights and shadows, saving, gamepads, scene files and an editor.
 
 ## 20. From Unity
 
@@ -1043,5 +1085,8 @@ scene files and an editor. Until collision callbacks come, queries
 | `Physics.Raycast` against what's drawn (no colliders) | `world.raycast` |
 | `OnTriggerEnter(Collider)`, `OnCollisionEnter(Collision)` | `with Triggers`, `with Collisions`, then `onTriggerEnter`, `onCollisionEnter` |
 | `Physics.IgnoreLayerCollision`, `Physics.IgnoreCollision` | `physics.ignoreLayerCollision`, `physics.ignoreCollision` |
+| `CharacterController`, `Move`, `SimpleMove`, `CollisionFlags` | the same, as `move`, `simpleMove`, `CollisionFlags.below` |
+| `OnControllerColliderHit(ControllerColliderHit)` | `with ControllerHits`, then `onControllerColliderHit` |
+| Pushing rigidbodies from `OnControllerColliderHit` | done for you, by the controller's `mass` |
 | `Debug.DrawLine` | `debug.line` |
 | Scenes, the Inspector | Classes; Flutter for UI |

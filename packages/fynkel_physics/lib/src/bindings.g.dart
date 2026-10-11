@@ -64,6 +64,28 @@ external int fp_cast_all(
   ffi.Pointer<ffi.Uint32> out_count,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpCharacterHit>, ffi.Size)>(isLeaf: true)
+external int fp_character_hits_read(ffi.Pointer<FpWorld> world, ffi.Pointer<FpCharacterHit> out, int len);
+
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<FpWorld>,
+    ffi.Uint64,
+    ffi.Pointer<FpCharacter>,
+    ffi.Pointer<FpVec3>,
+    ffi.Float,
+    ffi.Pointer<FpCharacterMove>,
+  )
+>(isLeaf: true)
+external int fp_character_move(
+  ffi.Pointer<FpWorld> world,
+  int collider,
+  ffi.Pointer<FpCharacter> settings,
+  ffi.Pointer<FpVec3> motion,
+  double dt,
+  ffi.Pointer<FpCharacterMove> out,
+);
+
 @ffi.Native<
   ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpQueryShape>, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Uint32>)
 >(isLeaf: true)
@@ -325,7 +347,13 @@ external void fp_world_free(ffi.Pointer<FpWorld> world);
 @ffi.Native<ffi.Pointer<FpWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FpWorld> fp_world_new();
 
-const int FP_ABI_VERSION = 6;
+const int FP_ABI_VERSION = 7;
+
+const int FP_COLLIDED_ABOVE = 2;
+
+const int FP_COLLIDED_BELOW = 4;
+
+const int FP_COLLIDED_SIDES = 1;
 
 sealed class FpBodyKind {
   static const FP_BODY_KIND_DYNAMIC = 0;
@@ -375,6 +403,54 @@ final class FpBodyState extends ffi.Struct {
 
   @ffi.Uint32()
   external int sleeping;
+}
+
+final class FpCharacter extends ffi.Struct {
+  @ffi.Float()
+  external double slope_limit;
+
+  @ffi.Float()
+  external double step_offset;
+
+  @ffi.Float()
+  external double skin_width;
+
+  @ffi.Float()
+  external double mass;
+
+  static ffi.Pointer<FpCharacter> $allocate(
+    ffi.Allocator $allocator, {
+    required double slope_limit,
+    required double step_offset,
+    required double skin_width,
+    required double mass,
+  }) => $allocator<FpCharacter>()
+    ..ref.slope_limit = slope_limit
+    ..ref.step_offset = step_offset
+    ..ref.skin_width = skin_width
+    ..ref.mass = mass;
+}
+
+final class FpCharacterHit extends ffi.Struct {
+  @ffi.Uint64()
+  external int collider;
+
+  @ffi.Uint64()
+  external int key;
+
+  external FpVec3 point;
+
+  external FpVec3 normal;
+}
+
+final class FpCharacterMove extends ffi.Struct {
+  external FpVec3 translation;
+
+  @ffi.Uint32()
+  external int flags;
+
+  @ffi.Uint32()
+  external int hit_count;
 }
 
 sealed class FpColliderKind {
