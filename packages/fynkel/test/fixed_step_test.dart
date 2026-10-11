@@ -69,6 +69,25 @@ class Recorder extends WorldSystem {
   var disposed = false;
 
   @override
+  void beforeFrame() {
+    super.beforeFrame();
+    expect(world.time.inFixedStep, isFalse);
+    log.add('system frame');
+  }
+
+  @override
+  void beforeUpdate() {
+    super.beforeUpdate();
+    log.add('system updates');
+  }
+
+  @override
+  void afterFrame() {
+    super.afterFrame();
+    log.add('system end');
+  }
+
+  @override
   void beforeFixedUpdate() {
     super.beforeFixedUpdate();
     expect(world.time.inFixedStep, isTrue);
@@ -191,6 +210,7 @@ void main() {
       world.add(Ticks('a', components: [FixedLogs('a.b')], children: [Ticks('c')]));
       world.update(0.04);
       expect(log, [
+        'system frame',
         'start a',
         'start c',
         'system before',
@@ -203,12 +223,14 @@ void main() {
         'fixed a.b',
         'fixed c',
         'system after',
+        'system updates',
         'update a',
         'update a.b',
         'update c',
         'late a',
         'late c',
         'system late',
+        'system end',
       ]);
     });
 
@@ -217,7 +239,7 @@ void main() {
       world.system(Recorder.new);
       world.add(Ticks('a'));
       world.update(0.01);
-      expect(log, ['start a', 'update a', 'late a', 'system late']);
+      expect(log, ['system frame', 'start a', 'system updates', 'update a', 'late a', 'system late', 'system end']);
     });
 
     test('hidden objects and disabled behaviours get no fixed step; new ones start first', () {
@@ -296,16 +318,12 @@ void main() {
       expect(steps, isEmpty, reason: 'no step this frame');
       world.update(0.03);
       expect(steps, [1, 2], reason: 'a step\'s waits end after it, so each step wakes it once');
-      expect(log.where((l) => l != 'update a' && l != 'late a' && l != 'system late'), [
-        'system before',
-        'fixed a',
-        'system after',
-        'routine',
-        'system before',
-        'fixed a',
-        'system after',
-        'routine',
-      ]);
+      expect(
+        log.where(
+          (l) => l.startsWith('fixed') || l == 'routine' || l.startsWith('system before') || l == 'system after',
+        ),
+        ['system before', 'fixed a', 'system after', 'routine', 'system before', 'fixed a', 'system after', 'routine'],
+      );
       world.update(0.02);
       expect(steps, [1, 2, 3]);
     });

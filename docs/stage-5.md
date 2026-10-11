@@ -362,6 +362,59 @@ when* §3.8's falling, stacking, tunnelling and frozen-axis tests pass,
 interpolated bodies move smoothly on the three devices, and 500 moving
 bodies hold the full frame rate on all three. Labs: "Rigidbodies: the
 basics", a stack, a ball through walls.
+✅ on all three devices for the frame rate: 500 moving rigidbodies, 10
+rays in every update, hold 120 fps on the Mac and the iPhone and 59.9 on
+the Note10+, interpolated or not (§6). How smooth interpolated bodies look
+on each device is yours to judge: the stack lab's "interpolate" toggle
+shows it with and without.
+`Rigidbody` (Unity's properties, the six force calls and `ForceMode`s,
+`movePosition`/`moveRotation`, `sleep`/`wakeUp`, `position`/`rotation`,
+`worldCenterOfMass`), `RigidbodyConstraints`, `RigidbodyInterpolation`,
+`CollisionDetectionMode`, `PhysicsMaterial` on every collider, and
+`physics.gravity`, `defaultSolverIterations`, `sleepThreshold` and
+`stepBetweenFrames`. Tests: 14 in `bodies.rs` (mass shared over a
+compound body's colliders, each force mode, explosions, kinematic moves,
+frozen axes, tunnelling, a stack of ten standing 10 s, the spin cap,
+sleep, bad values), 3 more through the C interface (ABI 4), and
+`rigidbody_test.dart` through Dart: §3.8's fall (within a step of
+√(2h/g)), stack, tunnelling and frozen axes, each inline and between
+frames; the same input gives the same poses, and between frames gives
+inline's a frame later; teleports, compound bodies, parents,
+interpolation, kinematic moves, materials, gravity, sleep, destroying and
+hiding. `sleep_alloc_test.dart`: a frame whose 20 interpolated bodies
+sleep allocates nothing.
+
+**The step between frames**, as decided before this step: the core's
+systems get three more points in the frame, `beforeFrame` (the step
+started after the last frame is collected and its poses written),
+`beforeUpdate` (interpolated bodies are placed, after the fixed steps)
+and `afterFrame` (the step is started on the physics' thread). A fixed
+step marks a step due; with two fixed steps in one frame, the first's
+step runs in the frame before the second's `onFixedUpdate`s (the core's
+`beforeFixedUpdate`), so each fixed step sees the one before it done, as
+in Unity, and only the last runs between frames. One difference from
+Unity remains: between frames, a routine's `await fixedStep` resumes
+before that step's physics has run, not after. Anything that reaches Rapier while a step runs (a query from
+an input handler, a new collider) waits for it first.
+`physics.stepBetweenFrames = false` steps in the fixed step, as Unity.
+
+**Following moved objects only**: each object now has a transform stamp
+(the world's transform version when its transform or parent was last
+set, `GameObjectSystems.transformStamp` in `extend.dart`), and the world
+a hierarchy version. A collider or body keeps its ancestors and the
+largest stamp of its chain; physics follows only those whose chain moved
+since it last looked, and walks the ancestors again only when the
+hierarchy changed. Poses physics writes don't count as moves.
+
+**Rapier's continuous detection differs from PhysX's**: Rapier always
+sweeps a fast dynamic body against static colliders, so a discrete ball
+never passes a static wall, however thin. It does pass a thin wall that
+is itself a body; `CollisionDetectionMode.continuous` (Rapier's CCD on the
+body) stops that, and the walls lab shows both. **Not in this step**:
+`staticFriction` (Rapier has one friction), `bounceThreshold` and
+`defaultContactOffset`; they wait for a game that needs them.
+`collisionDetectionMode` keeps Unity's name, where §3.3 said
+`collisionDetection`.
 
 **Step 5: callbacks and the layer matrix.** §3.4 and §3.5. *Done when*
 every row of Unity's trigger and collision table is a test, exits come in
@@ -574,4 +627,32 @@ come at the start of the next frame, before `onFixedUpdate` and the
 updates. Queries in the updates never wait. Anything between frames that
 needs the world (an input handler's raycast) waits for the step first. A
 game can still choose the plain step on the frame's thread, as Unity's.
+
+### Step 4: rigidbodies (2026-10-11)
+
+`tumble` with `--define TUMBLE_RIGIDBODIES=1` (`lib/rigid.dart`): the
+same scene made as a game would make it, each cube a `BoxCollider` and a
+`Rigidbody`, dropped by setting transforms (a teleport), and 10 rays down
+onto the pile in every update. 500 cubes, `measure rate`, 30 s each,
+profile builds. `measure` now takes `--define KEY=VALUE` for an app's own
+settings.
+
+| fps (median, slowest second) | Mac | iPhone 16 Pro Max | Note10+ |
+|---|---:|---:|---:|
+| **between frames** (the default) | 120 (120) | 120 (120) | **59.9 (53.9)** |
+| between frames, interpolated | 120 (120) | 120 (119) | **59.9 (55.9)** |
+| in the fixed step (`stepBetweenFrames = false`) | 120 (120) | 120 (120) | 44.2 (38.3) |
+| in the fixed step, interpolated | 120 (120) | 120 (119) | 42.2 (35.3) |
+
+- **The bar holds on all three** with the step between frames, as the
+  experiment before this step said it would (59.9 there with the raw
+  world); `Rigidbody` and its colliders, following only moved objects,
+  cost nothing visible on top.
+- In the fixed step the Note10+ drops to 44 (the raw world's 46.9 before
+  this step): the step is in the frame there.
+- Interpolating 500 bodies costs about 2 fps when the frame is already
+  full (in the fixed step on the Note10+), nothing otherwise.
+- The Note10+'s slow frames between frames are raster (157–178 of about
+  1,770), as with every scene there at full resolution; in the fixed step
+  they are build frames (171–212), the step.
 

@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FP_ABI_VERSION 3
+#define FP_ABI_VERSION 4
 
 // What an `fp_*` call returns. Anything but `Ok` leaves a message for
 // `fp_last_error`.
@@ -124,6 +124,65 @@ typedef uint32_t FpQueryShapeKind;
 #endif // __STDC_VERSION__ >= 202311L
 #endif // __cplusplus
 
+enum FpCombine
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+  : uint32_t
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+ {
+  FP_COMBINE_AVERAGE = 0,
+  FP_COMBINE_MINIMUM = 1,
+  FP_COMBINE_MULTIPLY = 2,
+  FP_COMBINE_MAXIMUM = 3,
+};
+#ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum FpCombine FpCombine;
+#else
+typedef uint32_t FpCombine;
+#endif // __STDC_VERSION__ >= 202311L
+#endif // __cplusplus
+
+// Unity's `ForceMode`.
+enum FpForceMode
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+  : uint32_t
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+ {
+  FP_FORCE_MODE_FORCE = 0,
+  FP_FORCE_MODE_ACCELERATION = 1,
+  FP_FORCE_MODE_IMPULSE = 2,
+  FP_FORCE_MODE_VELOCITY_CHANGE = 3,
+};
+#ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum FpForceMode FpForceMode;
+#else
+typedef uint32_t FpForceMode;
+#endif // __STDC_VERSION__ >= 202311L
+#endif // __cplusplus
+
+enum FpPushKind
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+  : uint32_t
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+ {
+  // `vector`: the force.
+  FP_PUSH_KIND_FORCE = 0,
+  // `vector`: the torque.
+  FP_PUSH_KIND_TORQUE = 1,
+  // `vector`: the force; `position`: where it acts, in the world.
+  FP_PUSH_KIND_AT_POSITION = 2,
+  // `force`, `position` (the center), `radius` and `upwards`.
+  FP_PUSH_KIND_EXPLOSION = 3,
+};
+#ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum FpPushKind FpPushKind;
+#else
+typedef uint32_t FpPushKind;
+#endif // __STDC_VERSION__ >= 202311L
+#endif // __cplusplus
+
 // A physics world. Made by `fp_world_new`, freed by `fp_world_free`.
 typedef struct FpWorld FpWorld;
 
@@ -155,11 +214,24 @@ typedef struct FpShape {
   float c;
 } FpShape;
 
-// A body a step moved: its key and its pose.
+// A body a step moved: its key, its pose and its velocities, linear (m/s)
+// and angular (rad/s).
 typedef struct FpMoved {
   uint64_t key;
   struct FpPose pose;
+  struct FpVec3 linear_velocity;
+  struct FpVec3 angular_velocity;
 } FpMoved;
+
+// What a collider's surface is like: Unity's `PhysicsMaterial`. The
+// combines are `FpCombine`s.
+typedef struct FpMaterial {
+  float friction;
+  // 0 to 1.
+  float bounciness;
+  uint32_t friction_combine;
+  uint32_t bounce_combine;
+} FpMaterial;
 
 // A collider that follows an object, in the object's space: Unity's
 // collider properties. `kind` (an `FpColliderKind`) says what `size` is.
@@ -172,6 +244,7 @@ typedef struct FpColliderSpec {
   uint32_t is_trigger;
   // 0 to 31.
   uint32_t layer;
+  struct FpMaterial material;
 } FpColliderSpec;
 
 // An object's world transform, as the engine's `FyTransform` has it (the
@@ -181,6 +254,50 @@ typedef struct FpTransform {
   struct FpQuat rotation;
   struct FpVec3 scale;
 } FpTransform;
+
+// What a rigidbody is: Unity's `Rigidbody` properties. Flags are 0 or 1;
+// `center_of_mass` counts when `has_center_of_mass` is 1; `constraints`
+// has Unity's `RigidbodyConstraints` bits.
+typedef struct FpBodySpec {
+  uint32_t kinematic;
+  float mass;
+  uint32_t use_gravity;
+  float linear_damping;
+  float angular_damping;
+  float max_angular_velocity;
+  uint32_t has_center_of_mass;
+  struct FpVec3 center_of_mass;
+  uint32_t constraints;
+  uint32_t continuous;
+} FpBodySpec;
+
+// A push on a rigidbody: `kind` (an `FpPushKind`) says which fields
+// count; `mode` is an `FpForceMode`.
+typedef struct FpPush {
+  uint32_t kind;
+  uint32_t mode;
+  struct FpVec3 vector;
+  struct FpVec3 position;
+  float force;
+  float radius;
+  float upwards;
+} FpPush;
+
+// Where a rigidbody is and how it moves: its center of mass in the world,
+// and 1 when it sleeps.
+typedef struct FpBodyState {
+  struct FpPose pose;
+  struct FpVec3 linear_velocity;
+  struct FpVec3 angular_velocity;
+  struct FpVec3 center_of_mass;
+  uint32_t sleeping;
+} FpBodyState;
+
+// The world's settings: Unity's solver iterations and sleep threshold.
+typedef struct FpSettings {
+  uint32_t solver_iterations;
+  float sleep_threshold;
+} FpSettings;
 
 // A ray a query casts: from `origin` along `direction`, at most
 // `max_distance`.
@@ -337,16 +454,18 @@ FpStatus fp_step_end(struct FpWorld *world, uint32_t *out_moved);
 // `world` is null or live; `out` is null or writable for `len` entries.
 FpStatus fp_moved_read(struct FpWorld *world, struct FpMoved *out, size_t len);
 
-// Adds a static collider (no body) that follows an object now at
-// `object`, with `key` to know it by in hits, and writes its id to `out`.
+// Adds a collider that follows an object now at `object`, with `key` to
+// know it by in hits, on the rigidbody `body` (0 for none: a static
+// collider), and writes its id to `out`.
 //
 // # Safety
 //
 // `world` is null or live; `out` is null or writable.
-FpStatus fp_static_collider_add(struct FpWorld *world,
+FpStatus fp_object_collider_add(struct FpWorld *world,
                                 uint64_t key,
                                 struct FpColliderSpec spec,
                                 struct FpTransform object,
+                                uint64_t body,
                                 uint64_t *out);
 
 // Changes what a following collider is: its shape, center, trigger or
@@ -381,6 +500,89 @@ FpStatus fp_collider_shape_get(struct FpWorld *world,
                                uint64_t collider,
                                struct FpShape *out_shape,
                                struct FpPose *out_pose);
+
+// Adds a rigidbody at `pose` (its object's world position and rotation),
+// with `key` to know it by in `fp_moved_read`, and writes its id to `out`.
+// Its colliders are added with `fp_object_collider_add`.
+//
+// # Safety
+//
+// `world` is null or live; `spec` and `pose` are null or readable; `out`
+// is null or writable.
+FpStatus fp_rigidbody_add(struct FpWorld *world,
+                          uint64_t key,
+                          const struct FpBodySpec *spec,
+                          const struct FpPose *pose,
+                          uint64_t *out);
+
+// Changes what a rigidbody is.
+//
+// # Safety
+//
+// `world` is null or live; `spec` is null or readable.
+FpStatus fp_rigidbody_spec_set(struct FpWorld *world, uint64_t body, const struct FpBodySpec *spec);
+
+// Writes what a rigidbody is to `out`.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FpStatus fp_rigidbody_spec_get(struct FpWorld *world, uint64_t body, struct FpBodySpec *out);
+
+// Pushes a rigidbody: a force, a torque, a force at a point, or an
+// explosion. Kinematic bodies aren't pushed.
+//
+// # Safety
+//
+// `world` is null or live; `push` is null or readable.
+FpStatus fp_rigidbody_push(struct FpWorld *world, uint64_t body, const struct FpPush *push);
+
+// Writes where a rigidbody is and how it moves to `out`.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FpStatus fp_rigidbody_state_get(struct FpWorld *world, uint64_t body, struct FpBodyState *out);
+
+// Sets a rigidbody's linear (m/s) and angular (rad/s) velocity, and wakes
+// it.
+//
+// # Safety
+//
+// `world` is null or live; `linear` and `angular` are null or readable.
+FpStatus fp_rigidbody_velocities_set(struct FpWorld *world,
+                                     uint64_t body,
+                                     const struct FpVec3 *linear,
+                                     const struct FpVec3 *angular);
+
+// Moves a kinematic rigidbody to `pose` through the next step, pushing
+// what's in the way; puts a dynamic one there at once.
+//
+// # Safety
+//
+// `world` is null or live; `pose` is null or readable.
+FpStatus fp_rigidbody_move(struct FpWorld *world, uint64_t body, const struct FpPose *pose);
+
+// Puts a rigidbody to sleep (1) or wakes it (0).
+//
+// # Safety
+//
+// `world` is null or live.
+FpStatus fp_rigidbody_sleep_set(struct FpWorld *world, uint64_t body, uint32_t asleep);
+
+// Writes the world's settings to `out`.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FpStatus fp_settings_get(struct FpWorld *world, struct FpSettings *out);
+
+// Changes the world's settings.
+//
+// # Safety
+//
+// `world` is null or live; `settings` is null or readable.
+FpStatus fp_settings_set(struct FpWorld *world, const struct FpSettings *settings);
 
 // The first collider a ray hits, into `out` (its `collider` 0 when none).
 //

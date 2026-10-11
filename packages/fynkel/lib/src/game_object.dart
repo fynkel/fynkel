@@ -90,6 +90,10 @@ class GameObject with _Moving {
   Transform? _transform;
   bool _unsent = false;
 
+  // The world's transform version when this object's transform or parent
+  // was last set (systems.dart).
+  int _transformStamp = 0;
+
   // Loading: how many loads this object waits for (its own, and those of
   // the objects added during it), the object waiting for this one, and
   // whether it's hidden until they're done. [_activeSelf] is the game's
@@ -432,7 +436,7 @@ class GameObject with _Moving {
       );
     }
     check(fy_parent_set(_engine('its parent can\'t be set'), id, value?.id ?? 0));
-    world._transformVersion++;
+    _transformStamp = ++world._transformVersion;
     world._moved.add(this);
     world._shape++;
     world._refresh(this);
@@ -841,7 +845,7 @@ class GameObject with _Moving {
 
   void _setTransform(Transform value) {
     _transform = value;
-    world._transformVersion++;
+    _transformStamp = ++world._transformVersion;
     if (_unsent) return;
     _unsent = true;
     world._unsent.add(this);

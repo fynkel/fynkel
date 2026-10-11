@@ -20,12 +20,12 @@ use std::ffi::{CString, c_char};
 use std::panic::{self, AssertUnwindSafe};
 
 use fynkel_physics::{
-    Axis, BodyKind, ColliderShape, ColliderSpec, Hit, Moved, ObjectPose, Physics, PhysicsError, Pose, QueryOptions,
-    QueryShape, Rotation, Shape, Vector,
+    Axis, BodyKind, BodySpec, ColliderShape, ColliderSpec, Combine, Constraints, ForceMode, Hit, Material, Moved,
+    ObjectPose, Physics, PhysicsError, Pose, Push, QueryOptions, QueryShape, Rotation, Settings, Shape, Vector,
 };
 
 /// Bumped on any change to the functions or types in this file.
-pub const FP_ABI_VERSION: u32 = 3;
+pub const FP_ABI_VERSION: u32 = 4;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -55,12 +55,15 @@ pub struct FpPose {
     pub rotation: FpQuat,
 }
 
-/// A body a step moved: its key and its pose.
+/// A body a step moved: its key, its pose and its velocities, linear (m/s)
+/// and angular (rad/s).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FpMoved {
     pub key: u64,
     pub pose: FpPose,
+    pub linear_velocity: FpVec3,
+    pub angular_velocity: FpVec3,
 }
 
 #[repr(u32)]
@@ -128,6 +131,103 @@ pub struct FpColliderSpec {
     pub is_trigger: u32,
     /// 0 to 31.
     pub layer: u32,
+    pub material: FpMaterial,
+}
+
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FpCombine {
+    Average = 0,
+    Minimum = 1,
+    Multiply = 2,
+    Maximum = 3,
+}
+
+/// What a collider's surface is like: Unity's `PhysicsMaterial`. The
+/// combines are `FpCombine`s.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FpMaterial {
+    pub friction: f32,
+    /// 0 to 1.
+    pub bounciness: f32,
+    pub friction_combine: u32,
+    pub bounce_combine: u32,
+}
+
+/// What a rigidbody is: Unity's `Rigidbody` properties. Flags are 0 or 1;
+/// `center_of_mass` counts when `has_center_of_mass` is 1; `constraints`
+/// has Unity's `RigidbodyConstraints` bits.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FpBodySpec {
+    pub kinematic: u32,
+    pub mass: f32,
+    pub use_gravity: u32,
+    pub linear_damping: f32,
+    pub angular_damping: f32,
+    pub max_angular_velocity: f32,
+    pub has_center_of_mass: u32,
+    pub center_of_mass: FpVec3,
+    pub constraints: u32,
+    pub continuous: u32,
+}
+
+/// Unity's `ForceMode`.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FpForceMode {
+    Force = 0,
+    Acceleration = 1,
+    Impulse = 2,
+    VelocityChange = 3,
+}
+
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FpPushKind {
+    /// `vector`: the force.
+    Force = 0,
+    /// `vector`: the torque.
+    Torque = 1,
+    /// `vector`: the force; `position`: where it acts, in the world.
+    AtPosition = 2,
+    /// `force`, `position` (the center), `radius` and `upwards`.
+    Explosion = 3,
+}
+
+/// A push on a rigidbody: `kind` (an `FpPushKind`) says which fields
+/// count; `mode` is an `FpForceMode`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FpPush {
+    pub kind: u32,
+    pub mode: u32,
+    pub vector: FpVec3,
+    pub position: FpVec3,
+    pub force: f32,
+    pub radius: f32,
+    pub upwards: f32,
+}
+
+/// Where a rigidbody is and how it moves: its center of mass in the world,
+/// and 1 when it sleeps.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FpBodyState {
+    pub pose: FpPose,
+    pub linear_velocity: FpVec3,
+    pub angular_velocity: FpVec3,
+    pub center_of_mass: FpVec3,
+    pub sleeping: u32,
+}
+
+/// The world's settings: Unity's solver iterations and sleep threshold.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FpSettings {
+    pub solver_iterations: u32,
+    pub sleep_threshold: f32,
 }
 
 #[repr(u32)]
@@ -398,7 +498,81 @@ fn spec(s: FpColliderSpec) -> Result<ColliderSpec, Error> {
         1 => true,
         t => return Err(invalid(format!("is_trigger is 0 or 1, not {t}"))),
     };
-    Ok(ColliderSpec { shape, center: vector(s.center), is_trigger, layer: s.layer })
+    let m = s.material;
+    let material = Material {
+        friction: m.friction,
+        bounciness: m.bounciness,
+        friction_combine: combine(m.friction_combine)?,
+        bounce_combine: combine(m.bounce_combine)?,
+    };
+    Ok(ColliderSpec { shape, center: vector(s.center), is_trigger, layer: s.layer, material })
+}
+
+fn combine(c: u32) -> Result<Combine, Error> {
+    Ok(match c {
+        0 => Combine::Average,
+        1 => Combine::Minimum,
+        2 => Combine::Multiply,
+        3 => Combine::Maximum,
+        c => return Err(invalid(format!("{c} is no combine"))),
+    })
+}
+
+fn flag(value: u32, what: &str) -> Result<bool, Error> {
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        v => Err(invalid(format!("{what} is 0 or 1, not {v}"))),
+    }
+}
+
+fn body_spec(s: FpBodySpec) -> Result<BodySpec, Error> {
+    if s.constraints & !Constraints::FREEZE_ALL.0 != 0 {
+        return Err(invalid(format!("{} has bits that are no constraint", s.constraints)));
+    }
+    Ok(BodySpec {
+        kinematic: flag(s.kinematic, "kinematic")?,
+        mass: s.mass,
+        use_gravity: flag(s.use_gravity, "use_gravity")?,
+        linear_damping: s.linear_damping,
+        angular_damping: s.angular_damping,
+        max_angular_velocity: s.max_angular_velocity,
+        center_of_mass: flag(s.has_center_of_mass, "has_center_of_mass")?.then(|| vector(s.center_of_mass)),
+        constraints: Constraints(s.constraints),
+        continuous: flag(s.continuous, "continuous")?,
+    })
+}
+
+fn fp_body_spec(s: BodySpec) -> FpBodySpec {
+    FpBodySpec {
+        kinematic: u32::from(s.kinematic),
+        mass: s.mass,
+        use_gravity: u32::from(s.use_gravity),
+        linear_damping: s.linear_damping,
+        angular_damping: s.angular_damping,
+        max_angular_velocity: s.max_angular_velocity,
+        has_center_of_mass: u32::from(s.center_of_mass.is_some()),
+        center_of_mass: fp_vec3(s.center_of_mass.unwrap_or(Vector::ZERO)),
+        constraints: s.constraints.0,
+        continuous: u32::from(s.continuous),
+    }
+}
+
+fn push(p: FpPush) -> Result<Push, Error> {
+    let mode = match p.mode {
+        0 => ForceMode::Force,
+        1 => ForceMode::Acceleration,
+        2 => ForceMode::Impulse,
+        3 => ForceMode::VelocityChange,
+        m => return Err(invalid(format!("{m} is no force mode"))),
+    };
+    Ok(match p.kind {
+        0 => Push::Force { force: vector(p.vector), mode },
+        1 => Push::Torque { torque: vector(p.vector), mode },
+        2 => Push::AtPosition { force: vector(p.vector), position: vector(p.position), mode },
+        3 => Push::Explosion { force: p.force, center: vector(p.position), radius: p.radius, upwards: p.upwards, mode },
+        k => return Err(invalid(format!("{k} is no push kind"))),
+    })
 }
 
 fn query_shape(s: FpQueryShape) -> Result<QueryShape, Error> {
@@ -767,7 +941,12 @@ pub unsafe extern "C" fn fp_moved_read(world: *mut FpWorld, out: *mut FpMoved, l
             // SAFETY: writable for len entries, as the caller promises.
             let out = std::slice::from_raw_parts_mut(out, len);
             for (slot, moved) in out.iter_mut().zip(&w.moved) {
-                *slot = FpMoved { key: moved.key, pose: fp_pose(moved.pose) };
+                *slot = FpMoved {
+                    key: moved.key,
+                    pose: fp_pose(moved.pose),
+                    linear_velocity: fp_vec3(moved.linear_velocity),
+                    angular_velocity: fp_vec3(moved.angular_velocity),
+                };
             }
             Ok(())
         })
@@ -776,18 +955,20 @@ pub unsafe extern "C" fn fp_moved_read(world: *mut FpWorld, out: *mut FpMoved, l
 
 // --- Colliders that follow objects ---------------------------------------------
 
-/// Adds a static collider (no body) that follows an object now at
-/// `object`, with `key` to know it by in hits, and writes its id to `out`.
+/// Adds a collider that follows an object now at `object`, with `key` to
+/// know it by in hits, on the rigidbody `body` (0 for none: a static
+/// collider), and writes its id to `out`.
 ///
 /// # Safety
 ///
 /// `world` is null or live; `out` is null or writable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fp_static_collider_add(
+pub unsafe extern "C" fn fp_object_collider_add(
     world: *mut FpWorld,
     key: u64,
     spec: FpColliderSpec,
     object: FpTransform,
+    body: u64,
     out: *mut u64,
 ) -> FpStatus {
     // SAFETY: as this function's.
@@ -796,7 +977,8 @@ pub unsafe extern "C" fn fp_static_collider_add(
             if out.is_null() {
                 return Err(Error::null("out"));
             }
-            let id = w.physics.add_static_collider(key, self::spec(spec)?, self::object(object))?;
+            let body = (body != 0).then_some(body);
+            let id = w.physics.add_object_collider(key, self::spec(spec)?, self::object(object), body)?;
             write(out, "out", id)
         })
     }
@@ -874,6 +1056,171 @@ pub unsafe extern "C" fn fp_collider_shape_get(
             };
             write(out_shape, "out_shape", shape)?;
             write(out_pose, "out_pose", fp_pose(pose))
+        })
+    }
+}
+
+// --- Rigidbodies ---------------------------------------------------------------
+
+/// Adds a rigidbody at `pose` (its object's world position and rotation),
+/// with `key` to know it by in `fp_moved_read`, and writes its id to `out`.
+/// Its colliders are added with `fp_object_collider_add`.
+///
+/// # Safety
+///
+/// `world` is null or live; `spec` and `pose` are null or readable; `out`
+/// is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_rigidbody_add(
+    world: *mut FpWorld,
+    key: u64,
+    spec: *const FpBodySpec,
+    pose: *const FpPose,
+    out: *mut u64,
+) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            if out.is_null() {
+                return Err(Error::null("out"));
+            }
+            let spec = body_spec(read(spec, "spec")?)?;
+            let id = w.physics.add_rigidbody(key, spec, self::pose(read(pose, "pose")?))?;
+            write(out, "out", id)
+        })
+    }
+}
+
+/// Changes what a rigidbody is.
+///
+/// # Safety
+///
+/// `world` is null or live; `spec` is null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_rigidbody_spec_set(world: *mut FpWorld, body: u64, spec: *const FpBodySpec) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe { with_world(world, |w| Ok(w.physics.set_body_spec(body, body_spec(read(spec, "spec")?)?)?)) }
+}
+
+/// Writes what a rigidbody is to `out`.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_rigidbody_spec_get(world: *mut FpWorld, body: u64, out: *mut FpBodySpec) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe { with_world(world, |w| write(out, "out", fp_body_spec(w.physics.body_spec(body)?))) }
+}
+
+/// Pushes a rigidbody: a force, a torque, a force at a point, or an
+/// explosion. Kinematic bodies aren't pushed.
+///
+/// # Safety
+///
+/// `world` is null or live; `push` is null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_rigidbody_push(world: *mut FpWorld, body: u64, push: *const FpPush) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe { with_world(world, |w| Ok(w.physics.push(body, self::push(read(push, "push")?)?)?)) }
+}
+
+/// Writes where a rigidbody is and how it moves to `out`.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_rigidbody_state_get(world: *mut FpWorld, body: u64, out: *mut FpBodyState) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            let (pose, linear, angular, center, sleeping) = w.physics.body_state(body)?;
+            let state = FpBodyState {
+                pose: fp_pose(pose),
+                linear_velocity: fp_vec3(linear),
+                angular_velocity: fp_vec3(angular),
+                center_of_mass: fp_vec3(center),
+                sleeping: u32::from(sleeping),
+            };
+            write(out, "out", state)
+        })
+    }
+}
+
+/// Sets a rigidbody's linear (m/s) and angular (rad/s) velocity, and wakes
+/// it.
+///
+/// # Safety
+///
+/// `world` is null or live; `linear` and `angular` are null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_rigidbody_velocities_set(
+    world: *mut FpWorld,
+    body: u64,
+    linear: *const FpVec3,
+    angular: *const FpVec3,
+) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            let (linear, angular) = (vector(read(linear, "linear")?), vector(read(angular, "angular")?));
+            Ok(w.physics.set_velocities(body, linear, angular)?)
+        })
+    }
+}
+
+/// Moves a kinematic rigidbody to `pose` through the next step, pushing
+/// what's in the way; puts a dynamic one there at once.
+///
+/// # Safety
+///
+/// `world` is null or live; `pose` is null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_rigidbody_move(world: *mut FpWorld, body: u64, pose: *const FpPose) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe { with_world(world, |w| Ok(w.physics.move_body(body, self::pose(read(pose, "pose")?))?)) }
+}
+
+/// Puts a rigidbody to sleep (1) or wakes it (0).
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_rigidbody_sleep_set(world: *mut FpWorld, body: u64, asleep: u32) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe { with_world(world, |w| Ok(w.physics.set_sleeping(body, flag(asleep, "asleep")?)?)) }
+}
+
+/// Writes the world's settings to `out`.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_settings_get(world: *mut FpWorld, out: *mut FpSettings) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            let Settings { solver_iterations, sleep_threshold } = w.physics.settings();
+            write(out, "out", FpSettings { solver_iterations, sleep_threshold })
+        })
+    }
+}
+
+/// Changes the world's settings.
+///
+/// # Safety
+///
+/// `world` is null or live; `settings` is null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_settings_set(world: *mut FpWorld, settings: *const FpSettings) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            let FpSettings { solver_iterations, sleep_threshold } = read(settings, "settings")?;
+            Ok(w.physics.set_settings(Settings { solver_iterations, sleep_threshold })?)
         })
     }
 }

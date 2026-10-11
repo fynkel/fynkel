@@ -146,6 +146,18 @@ external ffi.Pointer<ffi.Char> fp_last_error();
 external int fp_moved_read(ffi.Pointer<FpWorld> world, ffi.Pointer<FpMoved> out, int len);
 
 @ffi.Native<
+  ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, FpColliderSpec, FpTransform, ffi.Uint64, ffi.Pointer<ffi.Uint64>)
+>(isLeaf: true)
+external int fp_object_collider_add(
+  ffi.Pointer<FpWorld> world,
+  int key,
+  FpColliderSpec spec,
+  FpTransform object,
+  int body,
+  ffi.Pointer<ffi.Uint64> out,
+);
+
+@ffi.Native<
   ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpQueryShape>, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Uint32>)
 >(isLeaf: true)
 external int fp_overlap(
@@ -178,16 +190,56 @@ external int fp_raycast_all(
   ffi.Pointer<ffi.Uint32> out_count,
 );
 
-@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, FpColliderSpec, FpTransform, ffi.Pointer<ffi.Uint64>)>(
-  isLeaf: true,
-)
-external int fp_static_collider_add(
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<FpWorld>,
+    ffi.Uint64,
+    ffi.Pointer<FpBodySpec>,
+    ffi.Pointer<FpPose>,
+    ffi.Pointer<ffi.Uint64>,
+  )
+>(isLeaf: true)
+external int fp_rigidbody_add(
   ffi.Pointer<FpWorld> world,
   int key,
-  FpColliderSpec spec,
-  FpTransform object,
+  ffi.Pointer<FpBodySpec> spec,
+  ffi.Pointer<FpPose> pose,
   ffi.Pointer<ffi.Uint64> out,
 );
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Pointer<FpPose>)>(isLeaf: true)
+external int fp_rigidbody_move(ffi.Pointer<FpWorld> world, int body, ffi.Pointer<FpPose> pose);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Pointer<FpPush>)>(isLeaf: true)
+external int fp_rigidbody_push(ffi.Pointer<FpWorld> world, int body, ffi.Pointer<FpPush> push);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Uint32)>(isLeaf: true)
+external int fp_rigidbody_sleep_set(ffi.Pointer<FpWorld> world, int body, int asleep);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Pointer<FpBodySpec>)>(isLeaf: true)
+external int fp_rigidbody_spec_get(ffi.Pointer<FpWorld> world, int body, ffi.Pointer<FpBodySpec> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Pointer<FpBodySpec>)>(isLeaf: true)
+external int fp_rigidbody_spec_set(ffi.Pointer<FpWorld> world, int body, ffi.Pointer<FpBodySpec> spec);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Pointer<FpBodyState>)>(isLeaf: true)
+external int fp_rigidbody_state_get(ffi.Pointer<FpWorld> world, int body, ffi.Pointer<FpBodyState> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Pointer<FpVec3>, ffi.Pointer<FpVec3>)>(
+  isLeaf: true,
+)
+external int fp_rigidbody_velocities_set(
+  ffi.Pointer<FpWorld> world,
+  int body,
+  ffi.Pointer<FpVec3> linear,
+  ffi.Pointer<FpVec3> angular,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpSettings>)>(isLeaf: true)
+external int fp_settings_get(ffi.Pointer<FpWorld> world, ffi.Pointer<FpSettings> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpSettings>)>(isLeaf: true)
+external int fp_settings_set(ffi.Pointer<FpWorld> world, ffi.Pointer<FpSettings> settings);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Float, ffi.Pointer<ffi.Uint32>)>(isLeaf: true)
 external int fp_step(ffi.Pointer<FpWorld> world, double dt, ffi.Pointer<ffi.Uint32> out_moved);
@@ -204,12 +256,56 @@ external void fp_world_free(ffi.Pointer<FpWorld> world);
 @ffi.Native<ffi.Pointer<FpWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FpWorld> fp_world_new();
 
-const int FP_ABI_VERSION = 3;
+const int FP_ABI_VERSION = 4;
 
 sealed class FpBodyKind {
   static const FP_BODY_KIND_DYNAMIC = 0;
   static const FP_BODY_KIND_KINEMATIC = 1;
   static const FP_BODY_KIND_STATIC = 2;
+}
+
+final class FpBodySpec extends ffi.Struct {
+  @ffi.Uint32()
+  external int kinematic;
+
+  @ffi.Float()
+  external double mass;
+
+  @ffi.Uint32()
+  external int use_gravity;
+
+  @ffi.Float()
+  external double linear_damping;
+
+  @ffi.Float()
+  external double angular_damping;
+
+  @ffi.Float()
+  external double max_angular_velocity;
+
+  @ffi.Uint32()
+  external int has_center_of_mass;
+
+  external FpVec3 center_of_mass;
+
+  @ffi.Uint32()
+  external int constraints;
+
+  @ffi.Uint32()
+  external int continuous;
+}
+
+final class FpBodyState extends ffi.Struct {
+  external FpPose pose;
+
+  external FpVec3 linear_velocity;
+
+  external FpVec3 angular_velocity;
+
+  external FpVec3 center_of_mass;
+
+  @ffi.Uint32()
+  external int sleeping;
 }
 
 sealed class FpColliderKind {
@@ -234,6 +330,22 @@ final class FpColliderSpec extends ffi.Struct {
 
   @ffi.Uint32()
   external int layer;
+
+  external FpMaterial material;
+}
+
+sealed class FpCombine {
+  static const FP_COMBINE_AVERAGE = 0;
+  static const FP_COMBINE_MINIMUM = 1;
+  static const FP_COMBINE_MULTIPLY = 2;
+  static const FP_COMBINE_MAXIMUM = 3;
+}
+
+sealed class FpForceMode {
+  static const FP_FORCE_MODE_FORCE = 0;
+  static const FP_FORCE_MODE_ACCELERATION = 1;
+  static const FP_FORCE_MODE_IMPULSE = 2;
+  static const FP_FORCE_MODE_VELOCITY_CHANGE = 3;
 }
 
 final class FpFound extends ffi.Struct {
@@ -264,17 +376,75 @@ final class FpHit extends ffi.Struct {
   external double distance;
 }
 
+final class FpMaterial extends ffi.Struct {
+  @ffi.Float()
+  external double friction;
+
+  @ffi.Float()
+  external double bounciness;
+
+  @ffi.Uint32()
+  external int friction_combine;
+
+  @ffi.Uint32()
+  external int bounce_combine;
+
+  static ffi.Pointer<FpMaterial> $allocate(
+    ffi.Allocator $allocator, {
+    required double friction,
+    required double bounciness,
+    required int friction_combine,
+    required int bounce_combine,
+  }) => $allocator<FpMaterial>()
+    ..ref.friction = friction
+    ..ref.bounciness = bounciness
+    ..ref.friction_combine = friction_combine
+    ..ref.bounce_combine = bounce_combine;
+}
+
 final class FpMoved extends ffi.Struct {
   @ffi.Uint64()
   external int key;
 
   external FpPose pose;
+
+  external FpVec3 linear_velocity;
+
+  external FpVec3 angular_velocity;
 }
 
 final class FpPose extends ffi.Struct {
   external FpVec3 position;
 
   external FpQuat rotation;
+}
+
+final class FpPush extends ffi.Struct {
+  @ffi.Uint32()
+  external int kind;
+
+  @ffi.Uint32()
+  external int mode;
+
+  external FpVec3 vector;
+
+  external FpVec3 position;
+
+  @ffi.Float()
+  external double force;
+
+  @ffi.Float()
+  external double radius;
+
+  @ffi.Float()
+  external double upwards;
+}
+
+sealed class FpPushKind {
+  static const FP_PUSH_KIND_FORCE = 0;
+  static const FP_PUSH_KIND_TORQUE = 1;
+  static const FP_PUSH_KIND_AT_POSITION = 2;
+  static const FP_PUSH_KIND_EXPLOSION = 3;
 }
 
 final class FpQuat extends ffi.Struct {
@@ -330,6 +500,22 @@ final class FpRay extends ffi.Struct {
 
   @ffi.Float()
   external double max_distance;
+}
+
+final class FpSettings extends ffi.Struct {
+  @ffi.Uint32()
+  external int solver_iterations;
+
+  @ffi.Float()
+  external double sleep_threshold;
+
+  static ffi.Pointer<FpSettings> $allocate(
+    ffi.Allocator $allocator, {
+    required int solver_iterations,
+    required double sleep_threshold,
+  }) => $allocator<FpSettings>()
+    ..ref.solver_iterations = solver_iterations
+    ..ref.sleep_threshold = sleep_threshold;
 }
 
 final class FpShape extends ffi.Struct {

@@ -13,6 +13,12 @@ abstract class WorldSystem {
 
   final World world;
 
+  /// Called at the start of each frame, after the time moves on and
+  /// before the input and the starts: physics collects the step it ran
+  /// between frames here.
+  @mustCallSuper
+  void beforeFrame() {}
+
   /// Called at the start of each fixed step, before any
   /// [GameObject.onFixedUpdate].
   @mustCallSuper
@@ -24,13 +30,31 @@ abstract class WorldSystem {
   @mustCallSuper
   void afterFixedUpdate() {}
 
+  /// Called every frame after the fixed steps, before any
+  /// [GameObject.onUpdate]: physics puts interpolated bodies here.
+  @mustCallSuper
+  void beforeUpdate() {}
+
   /// Called every frame after the late updates, before the cameras move.
   @mustCallSuper
   void afterLateUpdate() {}
 
+  /// Called at the end of each frame, after everything else: physics
+  /// starts the step it runs between frames here.
+  @mustCallSuper
+  void afterFrame() {}
+
   /// Called once when the world is disposed: free what the system holds.
   @mustCallSuper
   void dispose() {}
+}
+
+/// What a system that follows objects reads of each.
+extension GameObjectSystems on GameObject {
+  /// The [World.transformVersion] when this object's transform or parent
+  /// was last set, or 0. While it stays the same, nothing set this object's
+  /// transform; its world transform also changes when an ancestor's does.
+  int get transformStamp => _transformStamp;
 }
 
 /// Finding and making a world's systems.
@@ -53,6 +77,11 @@ extension WorldSystems on World {
   /// is set. While it stays the same, no object's world transform or layer
   /// has changed, so a system that follows objects has nothing to read.
   int get transformVersion => _transformVersion;
+
+  /// A number that goes up whenever an object is added, destroyed, shown,
+  /// hidden or given a new parent: while it stays the same, every object's
+  /// parent is what it was.
+  int get hierarchyVersion => _shape;
 
   /// Reads the world transforms of [count] objects, by their [GameObject.id]s
   /// at [ids], into [out]: ten 32-bit floats each, the position (x, y, z),

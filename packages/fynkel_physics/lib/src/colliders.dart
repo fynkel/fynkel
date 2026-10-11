@@ -2,15 +2,55 @@ part of 'physics.dart';
 
 // Colliders (docs/stage-5.md §3.3), as Unity's: behaviours whose shape is
 // given in their object's space and follows its world position, rotation
-// and scale. Without a rigidbody (step 4) a collider is static; it can
-// still be moved, and queries find it where it was moved.
+// and scale. On a rigidbody's object, or below one, a collider is part of
+// the rigidbody's shape; without one it's static, and can still be moved:
+// queries find it where it was moved.
+
+/// How two colliders' frictions or bouncinesses make the pair's (Unity's
+/// `PhysicsMaterialCombine`). Where the two differ, the later one here
+/// wins.
+enum PhysicsMaterialCombine { average, minimum, multiply, maximum }
+
+/// What a collider's surface is like (Unity's `PhysicsMaterial`): how it
+/// slides and bounces.
+final class PhysicsMaterial {
+  const PhysicsMaterial({
+    this.dynamicFriction = 0.6,
+    this.bounciness = 0,
+    this.frictionCombine = PhysicsMaterialCombine.average,
+    this.bounceCombine = PhysicsMaterialCombine.average,
+  });
+
+  /// Unity's default: friction 0.6, no bounce.
+  static const standard = PhysicsMaterial();
+
+  /// How hard it is to slide on, 0 (ice) and up. Physics has one friction,
+  /// for sliding and for starting to slide.
+  final double dynamicFriction;
+
+  /// How much of its speed a body keeps when it bounces off, 0 to 1.
+  final double bounciness;
+
+  final PhysicsMaterialCombine frictionCombine;
+  final PhysicsMaterialCombine bounceCombine;
+
+  void _check() {
+    if (!(dynamicFriction >= 0) || !dynamicFriction.isFinite) {
+      throw ArgumentError.value(dynamicFriction, 'dynamicFriction', 'must be finite and 0 or more');
+    }
+    if (!(bounciness >= 0 && bounciness <= 1)) throw ArgumentError.value(bounciness, 'bounciness', 'must be 0 to 1');
+  }
+}
 
 /// A shape physics knows an object by: [BoxCollider], [SphereCollider] or
 /// [CapsuleCollider]. It's in the world while it's enabled and its object
 /// is shown, at its object's world position, rotation and scale, and on
 /// its object's layer.
 sealed class Collider extends Behaviour {
-  Collider({this._center = Vec3.zero, this._isTrigger = false});
+  Collider({this._center = Vec3.zero, this._isTrigger = false, PhysicsMaterial material = PhysicsMaterial.standard})
+    : _material = material {
+    material._check();
+  }
 
   /// Its middle, in its object's space (Unity's `center`).
   Vec3 get center => _center;
@@ -32,13 +72,35 @@ sealed class Collider extends Behaviour {
 
   bool _isTrigger;
 
+  /// What its surface is like.
+  PhysicsMaterial get material => _material;
+  set material(PhysicsMaterial value) {
+    value._check();
+    _material = value;
+    _changed();
+  }
+
+  PhysicsMaterial _material;
+
+  /// The rigidbody it's part of: the nearest on its object or above it, or
+  /// null while it's static (or not in the world).
+  Rigidbody? get attachedRigidbody {
+    _physics?._follow();
+    return _body;
+  }
+
   // Its world's physics while it's enabled, its id and key there, where it
-  // is in the physics' list, and the layer it was given.
+  // is in the physics' list, the layer it was given, the rigidbody it's on,
+  // where its object is, and whether it hadn't moved when its rigidbody
+  // last put its object.
   Physics? _physics;
   int _id = 0;
   int _key = 0;
   int _index = 0;
   int _layer = 0;
+  Rigidbody? _body;
+  final _place = _Place();
+  var _clean = false;
 
   /// The point on it nearest [point], in the world: [point] itself when
   /// it's inside. Throws a [StateError] while it isn't in the world.
@@ -96,6 +158,11 @@ sealed class Collider extends Behaviour {
     spec
       ..is_trigger = _isTrigger ? 1 : 0
       ..layer = _layer;
+    spec.material
+      ..friction = _material.dynamicFriction
+      ..bounciness = _material.bounciness
+      ..friction_combine = _material.frictionCombine.index
+      ..bounce_combine = _material.bounceCombine.index;
     _writeShape(spec);
   }
 
@@ -109,7 +176,7 @@ sealed class Collider extends Behaviour {
 /// A box, [size] across on each axis of its object's space (Unity's
 /// `BoxCollider`); 1 × 1 × 1 unless given, the size of `Mesh.cube()`.
 final class BoxCollider extends Collider {
-  BoxCollider({this._size = Vec3.one, super.center, super.isTrigger}) {
+  BoxCollider({this._size = Vec3.one, super.center, super.isTrigger, super.material}) {
     _checkShape();
   }
 
@@ -139,7 +206,7 @@ final class BoxCollider extends Collider {
 /// unless given, the size of `Mesh.sphere()`. Its object's largest scale
 /// scales it: it stays a sphere.
 final class SphereCollider extends Collider {
-  SphereCollider({this._radius = 0.5, super.center, super.isTrigger}) {
+  SphereCollider({this._radius = 0.5, super.center, super.isTrigger, super.material}) {
     _checkShape();
   }
 
@@ -179,6 +246,7 @@ final class CapsuleCollider extends Collider {
     this._direction = CapsuleDirection.y,
     super.center,
     super.isTrigger,
+    super.material,
   }) {
     _checkShape();
   }

@@ -3,6 +3,7 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
 
 /// A scene of the lab: one feature, to try by hand. Subclasses add their
 /// objects in [build] and say what can be done with [controls].
@@ -62,6 +63,13 @@ abstract class LabScene extends GameObject {
     );
     build();
   }
+
+  /// A box collider under the floor, 20 × 20 like it, for physics scenes.
+  GameObject floorCollider() => GameObject(
+    name: 'floor collider',
+    transform: Transform(position: Vec3(0, -0.5, 0)),
+    components: [BoxCollider(size: Vec3(20, 1, 20))],
+  );
 
   /// A new object with a [mesh] in [color]: the scenes' building block.
   GameObject shape(

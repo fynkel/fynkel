@@ -4,7 +4,7 @@
 
 use rapier3d::prelude::*;
 
-use crate::{Physics, PhysicsError, Pose, Rotation, Vector, check_vector, collider_id};
+use crate::{Physics, PhysicsError, Pose, Rotation, Vector, body_handle, check_vector, collider_id};
 
 /// The axis a capsule's length runs along, in its object's space.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +33,50 @@ pub enum ColliderShape {
     },
 }
 
+/// How two colliders' frictions or bouncinesses make the pair's (Unity's
+/// `PhysicsMaterialCombine`). Where two differ, the later one here wins.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Combine {
+    #[default]
+    Average,
+    Minimum,
+    Multiply,
+    Maximum,
+}
+
+impl Combine {
+    fn rule(self) -> CoefficientCombineRule {
+        match self {
+            Self::Average => CoefficientCombineRule::Average,
+            Self::Minimum => CoefficientCombineRule::Min,
+            Self::Multiply => CoefficientCombineRule::Multiply,
+            Self::Maximum => CoefficientCombineRule::Max,
+        }
+    }
+}
+
+/// What a collider's surface is like (Unity's `PhysicsMaterial`; Rapier
+/// has one friction, so it's the dynamic friction).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Material {
+    pub friction: f32,
+    pub bounciness: f32,
+    pub friction_combine: Combine,
+    pub bounce_combine: Combine,
+}
+
+impl Material {
+    /// Unity's default: friction 0.6, no bounce, both averaged.
+    pub const DEFAULT: Self =
+        Self { friction: 0.6, bounciness: 0.0, friction_combine: Combine::Average, bounce_combine: Combine::Average };
+}
+
+impl Default for Material {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
 /// What a collider is, as the game sets it: Unity's collider properties.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ColliderSpec {
@@ -43,6 +87,7 @@ pub struct ColliderSpec {
     pub is_trigger: bool,
     /// Its object's layer, 0 to 31.
     pub layer: u32,
+    pub material: Material,
 }
 
 /// An object's world pose, as the engine gives it: `GameObject.worldTransform`.
@@ -57,11 +102,13 @@ impl ObjectPose {
     pub const IDENTITY: Self = Self { position: Vector::ZERO, rotation: Rotation::IDENTITY, scale: Vector::ONE };
 }
 
-/// A followed collider's spec and the last pose of its object.
+/// A followed collider's spec, the last pose of its object, and the body
+/// it's on, if any.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Followed {
     pub(crate) spec: ColliderSpec,
     pub(crate) object: ObjectPose,
+    pub(crate) body: Option<RigidBodyHandle>,
 }
 
 // The smallest a scaled size gets: a collider scaled to 0 stays a point
@@ -73,6 +120,13 @@ impl ColliderSpec {
         check_vector("a collider's center", self.center)?;
         if self.layer >= 32 {
             return Err(PhysicsError::Value(format!("a layer is 0 to 31, not {}", self.layer)));
+        }
+        check_not_negative("a material's friction", self.material.friction)?;
+        if !(0.0..=1.0).contains(&self.material.bounciness) {
+            return Err(PhysicsError::Value(format!(
+                "a material's bounciness is 0 to 1, not {}",
+                self.material.bounciness
+            )));
         }
         match self.shape {
             ColliderShape::Box { size } => {
@@ -149,21 +203,48 @@ impl Physics {
         spec: ColliderSpec,
         object: ObjectPose,
     ) -> Result<u64, PhysicsError> {
+        self.add_object_collider(key, spec, object, None)
+    }
+
+    /// Adds a collider that follows an object, as [`Self::add_static_collider`]
+    /// does, on `body` when there is one: it then moves with the body, from
+    /// where the object is relative to the body now, and its volume
+    /// shares out the body's mass.
+    pub fn add_object_collider(
+        &mut self,
+        key: u64,
+        spec: ColliderSpec,
+        object: ObjectPose,
+        body: Option<u64>,
+    ) -> Result<u64, PhysicsError> {
         spec.check()?;
         check_object(object)?;
+        let body = body.map(|id| body_handle(&self.world.bodies, id)).transpose()?;
         let (shape, pose) = spec.place(object);
         let builder = ColliderBuilder::new(shape)
-            .position(pose)
             .sensor(spec.is_trigger)
             .collision_groups(groups(spec.layer))
             .user_data(u128::from(key));
-        let handle = self.world.colliders.insert(builder);
+        let builder = with_material(builder, spec.material);
+        let w = &mut self.world;
+        let handle = match body {
+            Some(parent) => {
+                // Its mass comes from the body (bodies.rs), so its own is 0.
+                let relative = w.bodies[parent].position().inverse() * pose;
+                let builder = builder.position(relative).density(0.0);
+                w.colliders.insert_with_parent(builder, parent, &mut w.bodies)
+            }
+            None => w.colliders.insert(builder.position(pose)),
+        };
         let index = handle.into_raw_parts().0 as usize;
         if self.followed.len() <= index {
             self.followed.resize(index + 1, None);
         }
-        self.followed[index] = Some(Followed { spec, object });
+        self.followed[index] = Some(Followed { spec, object, body });
         self.dirty.push(handle);
+        if let Some(body) = body {
+            self.mass_changed(body);
+        }
         Ok(collider_id(handle))
     }
 
@@ -203,8 +284,7 @@ impl Physics {
                 self.replace(handle, spec, object);
             } else {
                 let (_, pose) = spec.place(object);
-                self.world.colliders[handle].set_position(pose);
-                self.dirty.push(handle);
+                self.put(handle, pose);
             }
         }
         Ok(())
@@ -228,9 +308,34 @@ impl Physics {
         let (shape, pose) = spec.place(object);
         let collider = &mut self.world.colliders[handle];
         collider.set_shape(shape);
-        collider.set_position(pose);
         collider.set_sensor(spec.is_trigger);
         collider.set_collision_groups(groups(spec.layer));
+        collider.set_friction(spec.material.friction);
+        collider.set_restitution(spec.material.bounciness);
+        collider.set_friction_combine_rule(spec.material.friction_combine.rule());
+        collider.set_restitution_combine_rule(spec.material.bounce_combine.rule());
+        self.put(handle, pose);
+        // A new shape or trigger changes how the body's mass is shared out.
+        if let Some(body) = collider_body(&self.followed, handle) {
+            self.mass_changed(body);
+        }
+    }
+
+    /// Puts a collider at `pose` in the world: relative to its body, where
+    /// the body is now, when it has one.
+    fn put(&mut self, handle: ColliderHandle, pose: Pose) {
+        let w = &mut self.world;
+        match collider_body(&self.followed, handle) {
+            Some(body) => {
+                let relative = w.bodies[body].position().inverse() * pose;
+                let collider = &mut w.colliders[handle];
+                collider.set_position_wrt_parent(relative);
+                // The step works the world pose out again; until then the
+                // queries need it now.
+                collider.set_position(pose);
+            }
+            None => w.colliders[handle].set_position(pose),
+        }
         self.dirty.push(handle);
     }
 
@@ -258,6 +363,18 @@ impl Physics {
     }
 }
 
+fn collider_body(followed: &[Option<Followed>], handle: ColliderHandle) -> Option<RigidBodyHandle> {
+    followed.get(handle.into_raw_parts().0 as usize)?.as_ref()?.body
+}
+
+fn with_material(builder: ColliderBuilder, material: Material) -> ColliderBuilder {
+    builder
+        .friction(material.friction)
+        .restitution(material.bounciness)
+        .friction_combine_rule(material.friction_combine.rule())
+        .restitution_combine_rule(material.bounce_combine.rule())
+}
+
 /// A collider on `layer`: queries filter by it (collisions still meet
 /// every layer; the layer matrix comes in step 5).
 fn groups(layer: u32) -> InteractionGroups {
@@ -269,7 +386,7 @@ mod tests {
     use super::*;
 
     fn spec(shape: ColliderShape) -> ColliderSpec {
-        ColliderSpec { shape, center: Vector::ZERO, is_trigger: false, layer: 0 }
+        ColliderSpec { shape, center: Vector::ZERO, is_trigger: false, layer: 0, material: Material::DEFAULT }
     }
 
     fn on(position: Vector, rotation: Rotation, scale: Vector) -> ObjectPose {

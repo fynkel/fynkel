@@ -1,0 +1,490 @@
+part of 'physics.dart';
+
+// Rigidbodies (docs/stage-5.md §3.3, step 4), as Unity's: a behaviour that
+// lets physics move its object, with its colliders and those below it (down
+// to the next rigidbody) as its shape, a mass they share by volume, forces
+// in Unity's four modes, and the object's transform put where the step
+// left the body.
+
+/// How a push changes a body's motion (Unity's `ForceMode`).
+enum ForceMode {
+  /// Newtons (newton metres for a torque) over the next step: mass
+  /// matters.
+  force,
+
+  /// Metres (radians) a second squared over the next step: mass doesn't.
+  acceleration,
+
+  /// Newton seconds, at once: mass matters.
+  impulse,
+
+  /// Metres (radians) a second, at once: mass doesn't.
+  velocityChange,
+}
+
+/// How a rigidbody's object is drawn between steps (Unity's
+/// `RigidbodyInterpolation`).
+enum RigidbodyInterpolation {
+  /// Where the last step left it: it moves in steps when frames come
+  /// faster than steps.
+  none,
+
+  /// Between where the last two steps left it: smooth, a step behind.
+  interpolate,
+
+  /// Ahead of where the last step left it, by its velocity: smooth, and
+  /// not behind, but it can go into what it's about to hit.
+  extrapolate,
+}
+
+/// How a rigidbody finds what it hits (Unity's `CollisionDetectionMode`).
+/// Every mode but [discrete] stops a fast body at thin things it would
+/// otherwise pass between two steps.
+enum CollisionDetectionMode { discrete, continuous, continuousDynamic, continuousSpeculative }
+
+/// The axes physics doesn't move or turn a rigidbody on, in the world's
+/// axes (Unity's `RigidbodyConstraints`, with its values). Join them with
+/// `|`: `RigidbodyConstraints.freezePositionY | RigidbodyConstraints.freezeRotation`.
+extension type const RigidbodyConstraints(int value) {
+  static const none = RigidbodyConstraints(0);
+  static const freezePositionX = RigidbodyConstraints(2);
+  static const freezePositionY = RigidbodyConstraints(4);
+  static const freezePositionZ = RigidbodyConstraints(8);
+  static const freezeRotationX = RigidbodyConstraints(16);
+  static const freezeRotationY = RigidbodyConstraints(32);
+  static const freezeRotationZ = RigidbodyConstraints(64);
+  static const freezePosition = RigidbodyConstraints(14);
+  static const freezeRotation = RigidbodyConstraints(112);
+  static const freezeAll = RigidbodyConstraints(126);
+
+  RigidbodyConstraints operator |(RigidbodyConstraints other) => RigidbodyConstraints(value | other.value);
+
+  /// Whether every axis [other] freezes is frozen here.
+  bool has(RigidbodyConstraints other) => value & other.value == other.value;
+}
+
+/// Lets physics move its object (Unity's `Rigidbody`): gravity pulls it,
+/// forces push it, and it collides through its colliders, those on its
+/// object and below it down to the next rigidbody. Each step puts the
+/// object where the body is; set the object's transform (or [position])
+/// and the body is put there at once.
+///
+/// It's in the world while it's enabled and its object is shown.
+final class Rigidbody extends Behaviour {
+  Rigidbody({
+    this._mass = 1,
+    this._useGravity = true,
+    this._isKinematic = false,
+    this._linearDamping = 0,
+    this._angularDamping = 0.05,
+    this._maxAngularVelocity = 50,
+    this._centerOfMass,
+    this._constraints = RigidbodyConstraints.none,
+    this._interpolation = RigidbodyInterpolation.none,
+    this._collisionDetectionMode = CollisionDetectionMode.discrete,
+  }) {
+    _check();
+  }
+
+  /// In kilograms, shared out over its colliders by their volumes.
+  double get mass => _mass;
+  set mass(double value) => _set(() => _mass = value);
+  double _mass;
+
+  /// Whether gravity ([Physics.gravity]) pulls it.
+  bool get useGravity => _useGravity;
+  set useGravity(bool value) => _set(() => _useGravity = value);
+  bool _useGravity;
+
+  /// Whether the game moves it ([movePosition], [moveRotation], or its
+  /// object's transform), not forces and contacts. It still pushes the
+  /// bodies it moves into.
+  bool get isKinematic => _isKinematic;
+  set isKinematic(bool value) => _set(() => _isKinematic = value);
+  bool _isKinematic;
+
+  /// How fast it slows down as it moves, 0 for not at all.
+  double get linearDamping => _linearDamping;
+  set linearDamping(double value) => _set(() => _linearDamping = value);
+  double _linearDamping;
+
+  /// How fast it slows down as it turns.
+  double get angularDamping => _angularDamping;
+  set angularDamping(double value) => _set(() => _angularDamping = value);
+  double _angularDamping;
+
+  /// The fastest it turns, in radians a second.
+  double get maxAngularVelocity => _maxAngularVelocity;
+  set maxAngularVelocity(double value) => _set(() => _maxAngularVelocity = value);
+  double _maxAngularVelocity;
+
+  /// The axes physics doesn't move or turn it on.
+  RigidbodyConstraints get constraints => _constraints;
+  set constraints(RigidbodyConstraints value) => _set(() => _constraints = value);
+  RigidbodyConstraints _constraints;
+
+  /// How its object is drawn between steps.
+  RigidbodyInterpolation get interpolation => _interpolation;
+  set interpolation(RigidbodyInterpolation value) => _set(() => _interpolation = value);
+  RigidbodyInterpolation _interpolation;
+
+  /// How it finds what it hits: anything but discrete for a fast, small
+  /// body that mustn't pass through thin things.
+  CollisionDetectionMode get collisionDetectionMode => _collisionDetectionMode;
+  set collisionDetectionMode(CollisionDetectionMode value) => _set(() => _collisionDetectionMode = value);
+  CollisionDetectionMode _collisionDetectionMode;
+
+  /// Its center of mass in its object's space: where it was set, or where
+  /// its colliders put it. Setting it keeps it there until
+  /// [resetCenterOfMass].
+  Vec3 get centerOfMass {
+    if (_centerOfMass case final set?) return set;
+    final s = _readState('centerOfMass');
+    final p = s.pose.position.get();
+    return s.pose.rotation.get().inverse.rotate(s.center_of_mass.get() - p);
+  }
+
+  set centerOfMass(Vec3 value) => _set(() => _centerOfMass = value);
+  Vec3? _centerOfMass;
+
+  /// Lets its colliders put its center of mass again.
+  void resetCenterOfMass() => _set(() => _centerOfMass = null);
+
+  /// Its center of mass, in the world.
+  Vec3 get worldCenterOfMass => _readState('worldCenterOfMass').center_of_mass.get();
+
+  /// How fast it moves, in metres a second, in the world. Set before it's
+  /// in the world, it starts at it.
+  Vec3 get linearVelocity => _id == 0 ? _startLinear : _readState('linearVelocity').linear_velocity.get();
+  set linearVelocity(Vec3 value) => _setVelocities(value, null);
+
+  /// How fast it turns, in radians a second, about the world's axes. Set
+  /// before it's in the world, it starts at it.
+  Vec3 get angularVelocity => _id == 0 ? _startAngular : _readState('angularVelocity').angular_velocity.get();
+  set angularVelocity(Vec3 value) => _setVelocities(null, value);
+
+  // The velocities it starts at, set before it was in the world.
+  var _startLinear = Vec3.zero;
+  var _startAngular = Vec3.zero;
+
+  void _setVelocities(Vec3? linear, Vec3? angular) {
+    if (_id == 0) {
+      _startLinear = linear ?? _startLinear;
+      _startAngular = angular ?? _startAngular;
+      return;
+    }
+    final state = _readState('velocities');
+    final physics = _physics!;
+    physics._vec.ref.set(linear ?? state.linear_velocity.get());
+    physics._vec2.ref.set(angular ?? state.angular_velocity.get());
+    checkPhysics(fp_rigidbody_velocities_set(physics._world, _id, physics._vec, physics._vec2));
+  }
+
+  /// Where the body is, in the world: where the last step left it, which
+  /// its object shows unless it's interpolated. Setting it puts it there at
+  /// once, and its object. (Not its object's [Transform.position], as
+  /// a behaviour's `position` is elsewhere.)
+  @override
+  Vec3 get position => _readState('position').pose.position.get();
+  @override
+  set position(Vec3 value) => _teleport(value, rotation);
+
+  /// How the body is turned, in the world. Setting it turns it at once.
+  @override
+  Quat get rotation => _readState('rotation').pose.rotation.get();
+  @override
+  set rotation(Quat value) => _teleport(position, value);
+
+  /// Whether it's asleep: still for a while, so the step skips it until
+  /// something touches it or the game pushes it.
+  bool get isSleeping => _readState('isSleeping').sleeping == 1;
+
+  /// Puts it to sleep.
+  void sleep() => checkPhysics(fp_rigidbody_sleep_set(_inWorld('sleep')._world, _id, 1));
+
+  /// Wakes it.
+  void wakeUp() => checkPhysics(fp_rigidbody_sleep_set(_inWorld('wakeUp')._world, _id, 0));
+
+  /// Pushes it with [force] through its center of mass, in the world.
+  void addForce(Vec3 force, {ForceMode mode = ForceMode.force}) =>
+      _pushWith('addForce', FpPushKind.FP_PUSH_KIND_FORCE, force, Vec3.zero, mode);
+
+  /// Pushes it with [force] in its own space.
+  void addRelativeForce(Vec3 force, {ForceMode mode = ForceMode.force}) => addForce(rotation.rotate(force), mode: mode);
+
+  /// Turns it with [torque] about the world's axes.
+  void addTorque(Vec3 torque, {ForceMode mode = ForceMode.force}) =>
+      _pushWith('addTorque', FpPushKind.FP_PUSH_KIND_TORQUE, torque, Vec3.zero, mode);
+
+  /// Turns it with [torque] about its own axes.
+  void addRelativeTorque(Vec3 torque, {ForceMode mode = ForceMode.force}) =>
+      addTorque(rotation.rotate(torque), mode: mode);
+
+  /// Pushes it with [force] at [position], in the world: off its center of
+  /// mass, it turns it too.
+  void addForceAtPosition(Vec3 force, Vec3 position, {ForceMode mode = ForceMode.force}) =>
+      _pushWith('addForceAtPosition', FpPushKind.FP_PUSH_KIND_AT_POSITION, force, position, mode);
+
+  /// Pushes it away from an explosion at [explosionPosition]: [explosionForce]
+  /// strong there, less further out, and nothing past [explosionRadius]
+  /// (everywhere the same with 0). [upwardsModifier] puts the explosion
+  /// that far below its center, so it lifts too.
+  void addExplosionForce(
+    double explosionForce,
+    Vec3 explosionPosition,
+    double explosionRadius, {
+    double upwardsModifier = 0,
+    ForceMode mode = ForceMode.force,
+  }) {
+    final physics = _inWorld('addExplosionForce');
+    physics._push.ref
+      ..force = explosionForce
+      ..radius = explosionRadius
+      ..upwards = upwardsModifier;
+    _pushWith('addExplosionForce', FpPushKind.FP_PUSH_KIND_EXPLOSION, Vec3.zero, explosionPosition, mode);
+  }
+
+  /// Moves a kinematic body to [position] through the next step, pushing
+  /// what it meets on the way; a dynamic one goes there at once.
+  void movePosition(Vec3 position) {
+    final physics = _inWorld('movePosition');
+    final rotation = _movedAt == physics._steps ? _moveRotation : this.rotation;
+    _move(physics, position, rotation);
+  }
+
+  /// Turns a kinematic body to [rotation] through the next step, as
+  /// [movePosition] moves it.
+  void moveRotation(Quat rotation) {
+    final physics = _inWorld('moveRotation');
+    final position = _movedAt == physics._steps ? _movePosition : this.position;
+    _move(physics, position, rotation);
+  }
+
+  // Its world's physics while it's enabled, its id and key there, and where
+  // it is in the physics' list; the colliders on it; where its object is.
+  Physics? _physics;
+  int _id = 0;
+  int _key = 0;
+  int _index = 0;
+  final _colliders = <Collider>[];
+  final _place = _Place();
+
+  // Where the last two steps left it, its velocities after the last, the
+  // step that last moved it, and whether its object shows where it rests.
+  var _p0 = Vec3.zero;
+  var _p1 = Vec3.zero;
+  var _r0 = Quat.identity;
+  var _r1 = Quat.identity;
+  var _v1 = Vec3.zero;
+  var _w1 = Vec3.zero;
+  var _movedAt = -1;
+  var _resting = true;
+
+  // Where movePosition and moveRotation send it, and the step count then.
+  var _movePosition = Vec3.zero;
+  var _moveRotation = Quat.identity;
+
+  @override
+  void onEnable() {
+    super.onEnable();
+    final physics = gameObject.physics;
+    _physics = physics;
+    physics._addBody(this);
+  }
+
+  @override
+  void onDisable() {
+    super.onDisable();
+    _physics?._removeBody(this);
+    _physics = null;
+  }
+
+  void _set(void Function() change) {
+    change();
+    _check();
+    _physics?._respecBody(this);
+  }
+
+  void _check() {
+    if (!(_mass > 0) || !_mass.isFinite) throw ArgumentError.value(_mass, 'mass', 'must be finite and more than 0');
+    for (final (name, value) in [
+      ('linearDamping', _linearDamping),
+      ('angularDamping', _angularDamping),
+      ('maxAngularVelocity', _maxAngularVelocity),
+    ]) {
+      if (!(value >= 0) || !value.isFinite) throw ArgumentError.value(value, name, 'must be finite and 0 or more');
+    }
+    if (_constraints.value & ~RigidbodyConstraints.freezeAll.value != 0) {
+      throw ArgumentError.value(_constraints.value, 'constraints', 'has bits that are no constraint');
+    }
+  }
+
+  void _writeSpec(FpBodySpec spec) {
+    spec
+      ..kinematic = _isKinematic ? 1 : 0
+      ..mass = _mass
+      ..use_gravity = _useGravity ? 1 : 0
+      ..linear_damping = _linearDamping
+      ..angular_damping = _angularDamping
+      ..max_angular_velocity = _maxAngularVelocity
+      ..has_center_of_mass = _centerOfMass == null ? 0 : 1
+      ..constraints = _constraints.value
+      ..continuous = _collisionDetectionMode == CollisionDetectionMode.discrete ? 0 : 1;
+    spec.center_of_mass.set(_centerOfMass ?? Vec3.zero);
+  }
+
+  Physics _inWorld(String what) {
+    if (_physics case final physics? when _id != 0) return physics;
+    throw StateError('Rigidbody.$what: it isn\'t in the world (not enabled, or its object isn\'t shown)');
+  }
+
+  FpBodyState _readState(String what) {
+    final physics = _inWorld(what);
+    checkPhysics(fp_rigidbody_state_get(physics._world, _id, physics._state));
+    return physics._state.ref;
+  }
+
+  void _pushWith(String what, int kind, Vec3 vector, Vec3 position, ForceMode mode) {
+    final physics = _inWorld(what);
+    final push = physics._push.ref
+      ..kind = kind
+      ..mode = mode.index;
+    push.vector.set(vector);
+    push.position.set(position);
+    checkPhysics(fp_rigidbody_push(physics._world, _id, physics._push));
+  }
+
+  void _move(Physics physics, Vec3 position, Quat rotation) {
+    physics._writePose(position, rotation);
+    checkPhysics(fp_rigidbody_move(physics._world, _id, physics._pose));
+    _movePosition = position;
+    _moveRotation = rotation;
+    _movedAt = physics._steps;
+  }
+
+  void _teleport(Vec3 position, Quat rotation) {
+    final physics = _inWorld('position');
+    physics._writePose(position, rotation);
+    checkPhysics(fp_body_pose_set(physics._world, _id, physics._pose.ref));
+    _reset(position, rotation);
+    _place.stamp = _place.chain();
+    _put(position, rotation);
+  }
+
+  /// It's at [position] and [rotation] now, not moving between steps.
+  void _reset(Vec3 position, Quat rotation) {
+    _p0 = _p1 = position;
+    _r0 = _r1 = rotation;
+    _resting = false;
+  }
+
+  /// The step numbered [step] left it at [position] and [rotation], moving
+  /// at [linear] and [angular].
+  void _stepped(Vec3 position, Quat rotation, Vec3 linear, Vec3 angular, int step) {
+    _p0 = _movedAt == step - 1 ? _p1 : position;
+    _r0 = _movedAt == step - 1 ? _r1 : rotation;
+    _p1 = position;
+    _r1 = rotation;
+    _v1 = linear;
+    _w1 = angular;
+    _movedAt = step;
+    _resting = false;
+  }
+
+  /// Puts its object at [position] and [rotation] in the world, unless the
+  /// game moved it since physics last looked: then the next step puts the
+  /// body where the game did.
+  void _put(Vec3 position, Quat rotation) {
+    final place = _place;
+    if (place.chain() != place.stamp) return;
+    final colliders = _colliders;
+    for (var i = 0; i < colliders.length; i++) {
+      final c = colliders[i];
+      c._clean = c._place.chain() == c._place.stamp;
+    }
+    final object = gameObject;
+    final ancestors = place.ancestors;
+    if (ancestors.isEmpty) {
+      object.transform = object.transform.copyWith(position: position, rotation: rotation);
+    } else {
+      final parent = ancestors.first.worldTransform;
+      final back = parent.rotation.inverse;
+      final local = back.rotate(position - parent.position);
+      final scale = parent.scale;
+      object.transform = object.transform.copyWith(
+        position: Vec3(local.x / scale.x, local.y / scale.y, local.z / scale.z),
+        rotation: (back * rotation).normalized,
+      );
+    }
+    place.seen();
+    for (var i = 0; i < colliders.length; i++) {
+      final c = colliders[i];
+      if (c._clean) c._place.seen();
+    }
+  }
+}
+
+/// Where a collider's or rigidbody's object is in the hierarchy: the
+/// objects above it, the nearest rigidbody, and when it last moved, as its
+/// own and its ancestors' [GameObjectSystems.transformStamp]s say.
+final class _Place {
+  late GameObject _object;
+  List<GameObject> ancestors = const [];
+  Rigidbody? body;
+
+  /// The highest stamp of the object and its ancestors when physics last
+  /// looked, and the hierarchy then.
+  int stamp = -1;
+  int _walkedAt = -1;
+
+  /// Finds the objects above [object], and the nearest rigidbody on it or
+  /// above it but [without].
+  void _walk(GameObject object, {Rigidbody? without}) {
+    _object = object;
+    _walkedAt = object.world.hierarchyVersion;
+    final above = <GameObject>[];
+    body = null;
+    for (GameObject? o = object; o != null; o = o.parent) {
+      if (!identical(o, object)) above.add(o);
+      if (body == null) {
+        final found = o.get<Rigidbody>();
+        if (found != null && found._id != 0 && !identical(found, without)) body = found;
+      }
+    }
+    ancestors = above;
+  }
+
+  /// Whether [object] is above this one, as the hierarchy was when it was
+  /// last walked, or is now.
+  bool isBelow(GameObject object) {
+    if (_object.world.hierarchyVersion != _walkedAt) _walk(_object);
+    final above = ancestors;
+    for (var i = 0; i < above.length; i++) {
+      if (identical(above[i], object)) return true;
+    }
+    return false;
+  }
+
+  /// The highest stamp of the object and its ancestors now.
+  int chain() {
+    var s = _object.transformStamp;
+    final above = ancestors;
+    for (var i = 0; i < above.length; i++) {
+      final a = above[i].transformStamp;
+      if (a > s) s = a;
+    }
+    return s;
+  }
+
+  /// Whether the object or one above it moved since [seen], or got a new
+  /// parent: then the ancestors and the rigidbody are found again, if the
+  /// hierarchy changed.
+  bool moved(World world) {
+    if (chain() == stamp) return false;
+    if (world.hierarchyVersion != _walkedAt) _walk(_object);
+    return true;
+  }
+
+  /// Physics has seen where the object is now.
+  void seen() => stamp = chain();
+}

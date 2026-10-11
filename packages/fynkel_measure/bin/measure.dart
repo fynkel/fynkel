@@ -17,6 +17,9 @@
 // without its number) should have the same memory. What the app reports (Measurement.report), such
 // as load times, is printed at the end as it is.
 //
+// `--define KEY=VALUE`, as often as needed, builds the app with that
+// `--dart-define`, for an app's own settings (such as how many cubes).
+//
 // `--baseline` runs either with a spinning Flutter box in place of the
 // engine's view: what Flutter alone does, to judge the engine against.
 //
@@ -99,6 +102,9 @@ var _debug = false;
 /// does in the same check.
 var _baseline = false;
 
+/// The app's own `--dart-define`s, from `--define KEY=VALUE`.
+final _defines = <String>[];
+
 Future<void> main(List<String> args) async {
   final iosAt = args.indexOf('--ios');
   if (iosAt >= 0) _ios = args[iosAt + 1];
@@ -106,6 +112,9 @@ Future<void> main(List<String> args) async {
   if (androidAt >= 0) _android = args[androidAt + 1];
   _debug = args.contains('--debug');
   _baseline = args.contains('--baseline');
+  for (var i = 0; i < args.length - 1; i++) {
+    if (args[i] == '--define') _defines.add('--dart-define=${args[i + 1]}');
+  }
   if (_device == null) await _buildMac();
   final mode = args.isEmpty ? 'rate' : args.first;
   final fullscreen = args.contains('--fullscreen');
@@ -121,7 +130,7 @@ Future<void> main(List<String> args) async {
       await _bench();
     default:
       stderr.writeln(
-        'usage: dart run fynkel_measure:measure rate [--seconds N] [--fullscreen] | lifecycle [--cycles N] | bench  [--baseline] [--ios <device> | --android <device>] [--debug]',
+        'usage: dart run fynkel_measure:measure rate [--seconds N] [--fullscreen] | lifecycle [--cycles N] | bench  [--define KEY=VALUE] [--baseline] [--ios <device> | --android <device>] [--debug]',
       );
       exit(2);
   }
@@ -131,7 +140,7 @@ Future<void> main(List<String> args) async {
 /// is now. A phone's is built by `flutter run`.
 Future<void> _buildMac() async {
   stderr.writeln('Building $_target for macOS (profile)…');
-  final build = await Process.run('flutter', ['build', 'macos', '--profile', '-t', _target]);
+  final build = await Process.run('flutter', ['build', 'macos', '--profile', '-t', _target, ..._defines]);
   if (build.exitCode != 0) {
     stderr
       ..write(build.stdout)
@@ -475,6 +484,7 @@ class _App {
         '-t',
         _target,
         for (final MapEntry(:key, :value) in settings.entries) '--dart-define=$key=$value',
+        ..._defines,
       ]),
     );
     // flutter run ending before the app is up (no such device, a locked

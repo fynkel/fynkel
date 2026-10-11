@@ -12,6 +12,7 @@ import 'package:lab/scenes/motion.dart';
 import 'package:lab/scenes/motion_basics.dart';
 import 'package:lab/scenes/physics_queries_basics.dart';
 import 'package:lab/scenes/pointers.dart';
+import 'package:lab/scenes/rigidbody_walls.dart';
 
 void main() {
   for (final make in scenes) {
@@ -220,5 +221,25 @@ void main() {
     scene.controls.whereType<Button>().single.onPressed();
     expect(along(-2), isNull, reason: 'moved up, out of the ray, before any frame');
     expect(physics.raycast(Ray(Vec3(-2, 2, 4), Vec3(0, 0, -1)))?.gameObject, scene.cube);
+  });
+
+  test('Rigidbodies: a ball through walls: it passes the moving walls, unless continuous', () async {
+    final world = World();
+    addTearDown(world.dispose);
+    final scene = world.add(RigidbodyWallsScene());
+    await scene.loaded;
+    world.update(1 / 60);
+    void fire() {
+      scene.controls.whereType<Button>().single.onPressed();
+      for (var i = 0; i < 60; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    fire();
+    expect(scene.readout.value, contains('it went through every wall'));
+    scene.controls.whereType<Toggle>().single.onChanged(true);
+    fire();
+    expect(scene.readout.value, contains('before wall 1'));
   });
 }

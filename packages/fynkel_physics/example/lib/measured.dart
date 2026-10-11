@@ -8,8 +8,9 @@ import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_measure/fynkel_measure.dart';
 
 import 'main.dart';
+import 'rigid.dart';
 
-void main() => runApp(MeasuredApp(Tumble.new, timings: (_) => timings()));
+void main() => runApp(MeasuredApp(rigidbodies ? RigidTumble.new : Tumble.new, timings: (_) => timings()));
 
 List<String> timings() {
   final lines = <String>[];
