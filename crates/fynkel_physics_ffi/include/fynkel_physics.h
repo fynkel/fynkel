@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FP_ABI_VERSION 2
+#define FP_ABI_VERSION 3
 
 // What an `fp_*` call returns. Anything but `Ok` leaves a message for
 // `fp_last_error`.
@@ -312,6 +312,22 @@ FpStatus fp_collider_remove(struct FpWorld *world, uint64_t collider);
 //
 // `world` is null or live; `out_moved` is null or writable.
 FpStatus fp_step(struct FpWorld *world, float dt, uint32_t *out_moved);
+
+// Starts a step of `dt` seconds on the world's own thread and returns at
+// once; every other call on the world fails until `fp_step_end`.
+//
+// # Safety
+//
+// `world` is null or live.
+FpStatus fp_step_begin(struct FpWorld *world, float dt);
+
+// Waits for the step `fp_step_begin` started, and writes to `out_moved`
+// how many bodies it moved, as `fp_step` does.
+//
+// # Safety
+//
+// `world` is null or live; `out_moved` is null or writable.
+FpStatus fp_step_end(struct FpWorld *world, uint32_t *out_moved);
 
 // Writes the bodies the last `fp_step` moved to `out`, which holds `len`
 // of them: exactly as many as that step said.

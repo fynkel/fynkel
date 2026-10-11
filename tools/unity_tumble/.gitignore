@@ -1,0 +1,11 @@
+# Unity's own: made again on opening.
+/Library/
+/Temp/
+/Logs/
+/UserSettings/
+/obj/
+/Build/
+*.csproj
+*.sln
+/Assets/Resources/
+/Assets/Resources.meta

@@ -25,7 +25,7 @@ use fynkel_physics::{
 };
 
 /// Bumped on any change to the functions or types in this file.
-pub const FP_ABI_VERSION: u32 = 2;
+pub const FP_ABI_VERSION: u32 = 3;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -218,6 +218,11 @@ pub enum FpStatus {
 
 /// A physics world. Made by `fp_world_new`, freed by `fp_world_free`.
 pub struct FpWorld {
+    /// The thread `fp_step_begin` steps on, once there's been one; first,
+    /// so a running step ends before the rest is dropped.
+    worker: Option<Worker>,
+    /// Between `fp_step_begin` and `fp_step_end`: the worker has the world.
+    stepping: bool,
     physics: Physics,
     /// What the last step moved, until `fp_moved_read`.
     moved: Vec<Moved>,
@@ -302,6 +307,9 @@ unsafe fn with_world(world: *mut FpWorld, body: impl FnOnce(&mut FpWorld) -> Res
     let w = unsafe { &mut *world };
     if w.poisoned {
         return guard(|| Err(Error::new(FpStatus::Poisoned, "an earlier call panicked while changing this world")));
+    }
+    if w.stepping {
+        return guard(|| Err(Error::new(FpStatus::InvalidValue, "a step is running: call fp_step_end first")));
     }
     let status = guard(|| body(&mut *w));
     if status == FpStatus::Panic {
@@ -464,6 +472,8 @@ pub extern "C" fn fp_last_error() -> *const c_char {
 #[unsafe(no_mangle)]
 pub extern "C" fn fp_world_new() -> *mut FpWorld {
     Box::into_raw(Box::new(FpWorld {
+        worker: None,
+        stepping: false,
         physics: Physics::new(),
         moved: Vec::new(),
         hits: Vec::new(),
@@ -615,6 +625,120 @@ pub unsafe extern "C" fn fp_step(world: *mut FpWorld, dt: f32, out_moved: *mut u
             write(out_moved, "out_moved", count)
         })
     }
+}
+
+// --- The step on a thread of its own (an experiment, docs/stage-5.md §6) ----
+
+/// What the worker steps: the world's physics and its moved list, which
+/// nothing else touches until the step ends (`FpWorld::stepping`).
+struct Job {
+    physics: *mut Physics,
+    moved: *mut Vec<Moved>,
+    dt: f32,
+}
+
+// SAFETY: the pointers are used by the worker alone while the step runs.
+unsafe impl Send for Job {}
+
+struct Worker {
+    start: Option<std::sync::mpsc::Sender<Job>>,
+    done: std::sync::mpsc::Receiver<Result<(), Error>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Worker {
+    fn new() -> Self {
+        let (start, jobs) = std::sync::mpsc::channel::<Job>();
+        let (finished, done) = std::sync::mpsc::channel();
+        let thread = std::thread::Builder::new()
+            .name("fynkel physics".into())
+            .spawn(move || {
+                for job in jobs {
+                    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                        // SAFETY: see Job.
+                        let (physics, moved) = unsafe { (&mut *job.physics, &mut *job.moved) };
+                        physics.step(job.dt)?;
+                        physics.moved(moved);
+                        Ok(())
+                    }))
+                    .unwrap_or_else(|payload| {
+                        Err(Error::new(FpStatus::Panic, format!("panicked: {}", panic_message(&*payload))))
+                    });
+                    if finished.send(result).is_err() {
+                        return;
+                    }
+                }
+            })
+            .expect("a thread for the physics");
+        Self { start: Some(start), done, thread: Some(thread) }
+    }
+}
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        self.start = None;
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// Starts a step of `dt` seconds on the world's own thread and returns at
+/// once; every other call on the world fails until `fp_step_end`.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_step_begin(world: *mut FpWorld, dt: f32) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            let worker = w.worker.get_or_insert_with(Worker::new);
+            let job = Job { physics: &raw mut w.physics, moved: &raw mut w.moved, dt };
+            worker
+                .start
+                .as_ref()
+                .and_then(|start| start.send(job).ok())
+                .ok_or_else(|| Error::new(FpStatus::Panic, "the physics thread is gone"))?;
+            w.stepping = true;
+            Ok(())
+        })
+    }
+}
+
+/// Waits for the step `fp_step_begin` started, and writes to `out_moved`
+/// how many bodies it moved, as `fp_step` does.
+///
+/// # Safety
+///
+/// `world` is null or live; `out_moved` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_step_end(world: *mut FpWorld, out_moved: *mut u32) -> FpStatus {
+    if world.is_null() {
+        return guard(|| Err(Error::null("world")));
+    }
+    // SAFETY: live, as the caller promises.
+    let w = unsafe { &mut *world };
+    guard(|| {
+        if !w.stepping {
+            return Err(Error::new(FpStatus::InvalidValue, "no step is running"));
+        }
+        let worker = w.worker.as_ref().expect("a step runs on the worker");
+        let result =
+            worker.done.recv().unwrap_or_else(|_| Err(Error::new(FpStatus::Panic, "the physics thread is gone")));
+        w.stepping = false;
+        if let Err(error) = result {
+            if error.status == FpStatus::Panic {
+                w.poisoned = true;
+            }
+            return Err(error);
+        }
+        let count = u32::try_from(w.moved.len())
+            .map_err(|_| Error::new(FpStatus::InvalidValue, "more than 4 billion bodies moved"))?;
+        // SAFETY: null or writable, as the caller promises.
+        unsafe { write(out_moved, "out_moved", count) }
+    })
 }
 
 /// Writes the bodies the last `fp_step` moved to `out`, which holds `len`

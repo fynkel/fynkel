@@ -382,3 +382,44 @@ fn bad_specs_and_queries_are_refused_and_add_nothing() {
     }
     assert_eq!(world.ray(0.0, ALL).collider, 0);
 }
+
+#[test]
+fn a_step_on_the_worlds_own_thread_moves_as_a_step_here_does_and_the_world_waits_for_it() {
+    let make = || {
+        let world = World::new();
+        world.collider(0, cube(5.0), at(0.0, -5.0, 0.0));
+        for i in 0..20 {
+            let body = world.body(FpBodyKind::Dynamic, i, at(0.0, 1.0 + i as f32, 0.0));
+            world.collider(body, cube(0.4), at(0.0, 0.0, 0.0));
+        }
+        world
+    };
+    let here = make();
+    let there = make();
+    for _ in 0..60 {
+        let expected = here.step();
+        // SAFETY: a live world.
+        assert_eq!(unsafe { fp_step_begin(there.0, STEP) }, FpStatus::Ok);
+        let mut count = 0;
+        // Nothing else is asked of the world while it steps.
+        // SAFETY: a live world and a writable out.
+        assert_eq!(unsafe { fp_step(there.0, STEP, &mut count) }, FpStatus::InvalidValue);
+        assert!(last_error().contains("fp_step_end"), "{}", last_error());
+        // SAFETY: a live world and a writable out.
+        assert_eq!(unsafe { fp_step_end(there.0, &mut count) }, FpStatus::Ok, "{}", last_error());
+        let mut moved = vec![FpMoved::default(); count as usize];
+        // SAFETY: room for exactly count.
+        assert_eq!(unsafe { fp_moved_read(there.0, moved.as_mut_ptr(), moved.len()) }, FpStatus::Ok);
+        assert_eq!(moved.len(), expected.len());
+        for (a, b) in moved.iter().zip(&expected) {
+            assert_eq!((a.key, a.pose.position.y.to_bits()), (b.key, b.pose.position.y.to_bits()));
+        }
+    }
+    let mut count = 0;
+    // SAFETY: a live world and a writable out.
+    assert_eq!(unsafe { fp_step_end(there.0, &mut count) }, FpStatus::InvalidValue);
+    assert_eq!(last_error(), "no step is running");
+    // Freed while a step runs: the step ends first.
+    // SAFETY: a live world.
+    assert_eq!(unsafe { fp_step_begin(there.0, STEP) }, FpStatus::Ok);
+}

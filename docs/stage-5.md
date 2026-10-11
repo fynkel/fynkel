@@ -449,10 +449,9 @@ awake): up to 300 it stays near 60, and its few slow frames are the GPU's
 | slowest second | 54.9 | 44.9 | 47.9 | 43.9 | | |
 | slow frames: Dart / GPU | 0 / 48 | 6 / 87 | 4 / 77 | 67 / 50 | | |
 
-Before step 4 we try, on the Note10+, Rapier's `parallel` build (a step's
-work split over cores, as PhysX does in Unity) and the step on a thread of
-its own alongside the frame, and we build the same scene in Unity, on the
-three devices, to compare.
+Before step 4 we tried, on the Note10+, Rapier's `parallel` build and the
+step on a thread of its own, and built the same scene in Unity: "Before
+step 4" below.
 
 What the package adds to an app: its library is 2.3 MB on an iPhone and
 2.3 MB on 64-bit Android (arm64, stripped), about 1.2 MB of that to
@@ -491,3 +490,61 @@ moved before each ray, so every query follows every collider first.
 |---|---:|---:|---:|
 | `physics.raycast` | 0.20 µs | 0.52 µs | 0.89 µs |
 | after a move (following them all, then the ray) | 4.8 µs | 43 µs | 210 µs |
+
+### Before step 4: threads, and Unity (2026-10-11)
+
+`tumble` live (`measure rate`, 30 s, profile builds), 1,000 cubes unless
+said. "Own thread" is `--dart-define=TUMBLE_THREAD=1`: each fixed step
+waits for the step before (`fp_step_end`), writes its poses and starts the
+next on the physics' own thread (`fp_step_begin`), so the step runs while
+the frame goes on and the cubes show a step (20 ms) late. Inline and own
+thread were measured one after the other, twice on the Note10+; the second
+pair is in brackets.
+
+| fps (median, slowest second) | Mac | iPhone 16 Pro Max | Note10+ |
+|---|---:|---:|---:|
+| inline | 120 (6.6) | 119 (109), 600 slow frames | 35.9 (30.0) [36.0 (29.5)] |
+| **own thread** | 120 (119) | **120 (117), 2 slow frames** | **54.9 (42.9)** [55.9 (41.3)] |
+| own thread, waited for in `onLateUpdate` | | | 24.6 (18.7) |
+| Rapier `parallel`, inline | | | 28.5 (21.6) |
+| Rapier `parallel`, own thread | | | 51.9 (38.0) |
+| 500 cubes, inline / own thread | | | 53.9 / **59.9 (53.9)** |
+
+- **The step on its own thread, a step late, is the win**: 1,000 cubes on
+  the Note10+ go from 36 to 55 fps, 500 hold 60, and the iPhone's slow
+  frames go. The step runs in the time the frame doesn't use.
+- **Waiting for it within the frame is worse than inline** (24.6): the
+  frame waits anyway, and the step then runs on whichever core the thread
+  got, often a slow one. The gain needs the step a step late.
+- **Rapier's `parallel` build is slower** on the Note10+ (28.5 against
+  35.9 inline): its threads compete with Flutter's, the engine's and the
+  GPU driver's for the phone's cores. It stays off.
+- Results are the same either way: a step on the thread gives back the
+  same poses, bit for bit, as one on the caller's (tested through the C
+  interface and through Dart).
+
+The same scene in Unity 6 (6000.3.9f1, built-in pipeline, PhysX, the
+quality each platform gets by default: Ultra on the Mac, Medium on the
+phones), `tools/unity_tumble`: 1,000 cubes of 0.5 m, the same drop every
+8 s, 1/50 s steps, a sun with hard shadows, the same camera, as fast as the
+screen goes. It times each `Physics.Simulate` itself.
+
+| 1,000 cubes | Mac | iPhone 16 Pro Max | Note10+ |
+|---|---:|---:|---:|
+| Unity: fps (slowest second) | 120 (108; 113) | 120 (114) | needs Android Build Support |
+| Unity: a step, median (90th) | 0.97 ms (1.10); 1.11 ms (1.28) | 4.50 ms (5.48) | |
+| Fynkel, own thread: fps (slowest second) | 120 (119) | 120 (117) | 55.9 (41.3) |
+| Fynkel: a step over a whole drop, median | 1.17 ms | 0.86 ms | 3.94 ms |
+
+On the Mac and the iPhone both hold the full rate. A step costs about the
+same on the Mac. On the iPhone, PhysX in Unity takes five times Rapier's
+time, but it runs on Unity's job threads and the frame doesn't wait. The
+Note10+ row waits for Unity's Android Build Support (Unity Hub → Installs →
+6000.3.9f1 → Add modules).
+
+**For step 4**: the step runs on the physics' own thread, a step late, as
+`tumble` does here. A frame shows the last finished step. Interpolation
+shows that step, eased from the one before. Anything that needs the world
+mid-step waits for it first: a query, a body's position, a force. This is
+the user's call before step 4 starts (§5).
+
