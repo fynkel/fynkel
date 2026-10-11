@@ -37,8 +37,9 @@ class JointsChainScene extends LabScene {
   (Rigidbody, SpringJoint)? held;
   Plane? _dragPlane;
 
-  /// The weight's mass, in kilograms.
-  var mass = 5.0;
+  /// The weight's mass, in kilograms: 7.5 times a link's, within the 10
+  /// times Unity advises.
+  var mass = 1.5;
 
   static const count = 12, linkLength = 0.3, linkMass = 0.2, radius = 0.25;
   static final hook = Vec3(0, 5, 0);
@@ -69,7 +70,8 @@ class JointsChainScene extends LabScene {
             size: Vec3(0.08, linkLength, 0.08),
             components: [
               BoxCollider(),
-              Rigidbody(mass: linkMass),
+              // Drawn between physics' steps, so they glide, not jump.
+              Rigidbody(mass: linkMass, interpolation: RigidbodyInterpolation.interpolate),
               HingeJoint(
                 connectedBody: links.isEmpty ? null : links.last.get<Rigidbody>(),
                 anchor: Vec3(0, 0.5, 0),
@@ -89,7 +91,7 @@ class JointsChainScene extends LabScene {
         size: Vec3.one * (radius * 2),
         components: [
           SphereCollider(),
-          Rigidbody(mass: mass),
+          Rigidbody(mass: mass, interpolation: RigidbodyInterpolation.interpolate),
           HingeJoint(connectedBody: links.last.get<Rigidbody>(), anchor: Vec3(0, 0.5, 0), axis: _axis(count)),
         ],
       ),
@@ -116,15 +118,17 @@ class JointsChainScene extends LabScene {
     hand.gameObject.position = hit.point;
     // Dragged across the plane facing the camera, through where it was hit.
     _dragPlane = Plane(camera.forward, hit.point);
-    // Stiff enough to lift the weight and the chain, and nearly critically
-    // damped: it follows, not bounces.
-    final lifted = mass + count * linkMass;
+    // A spring that swings what it holds 5 times a second, as Box2D's mouse
+    // joint does: stiff for what it lifts, the weight and the chain, so it
+    // follows within a few centimetres, and damped to 0.7 of critical, so
+    // it doesn't bounce.
+    final lifted = mass + count * linkMass, w = 2 * math.pi * 5;
     final spring = SpringJoint(
       connectedBody: hand,
       anchor: body.gameObject.inverseTransformPoint(hit.point),
       connectedAnchor: Vec3.zero,
-      spring: 120 * lifted,
-      damper: 15 * lifted,
+      spring: lifted * w * w,
+      damper: 2 * 0.7 * lifted * w,
     );
     body.gameObject.addComponent(spring);
     held = (body, spring);
