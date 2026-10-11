@@ -207,8 +207,25 @@ void main() {
     final spring = SpringJoint(connectedAnchor: Vec3.zero, spring: 20, damper: 2, minDistance: 1.5, maxDistance: 3);
     final ball = box(world, const Vec3(1, 0, 0), joints: [spring]);
     frames(world, 10);
-    expect(ball.position.length, inInclusiveRange(1.48, 3));
+    // Pushed out past its min, it carries on freely through the band: the
+    // spring only slows it outside it, so it stays about the band.
+    expect(ball.position.length, inInclusiveRange(1.45, 3.1));
     expect(spring.autoConfigureConnectedAnchor, isFalse);
+  });
+
+  test('past its max distance a spring stretches by its weight, and a push moves it', () {
+    final world = newWorld();
+    final spring = SpringJoint(connectedAnchor: const Vec3(0, 4, 0), spring: 40, damper: 1, maxDistance: 1.5);
+    final crate = box(world, const Vec3(0, 2.5, 0), mass: 2, joints: [spring]);
+    frames(world, 20);
+    expect(crate.position.y, closeTo(4 - 1.5 - 2 * 9.81 / 40, 0.02), reason: 'hangs its weight past 1.5 m');
+    crate.get<Rigidbody>()!.addForce(const Vec3(0, -20, 0), mode: ForceMode.impulse);
+    var lowest = crate.position.y;
+    for (var i = 0; i < 60; i++) {
+      world.update(step);
+      lowest = math.min(lowest, crate.position.y);
+    }
+    expect(lowest, lessThan(crate.position.y - 0.3), reason: 'the push pulled it down');
   });
 
   test('a chain of hinged links hangs from the world and stays joined', () {

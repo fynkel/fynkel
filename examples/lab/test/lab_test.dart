@@ -2,6 +2,7 @@
 // (but the buggy cube's, which is the point of it).
 
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -390,9 +391,28 @@ void main() {
     for (final (i, link) in scene.links.indexed) {
       expect(link.position.y, closeTo(3.8 - i * 0.4, 0.05), reason: 'link ${i + 1} hangs where it was');
     }
-    final below = (scene.crate.position - JointsBasicsScene.hook).length;
-    expect(below, lessThanOrEqualTo(1.55), reason: 'held within its 1.5 m maxDistance');
-    expect(scene.crate.position.y, greaterThan(2), reason: 'hanging, not on the floor');
+    double below() => (scene.crate.position - JointsBasicsScene.hook).length;
+    // 2 kg on a 40 N/m spring past its 1.5 m maxDistance: 1.5 + 2 × 9.81 / 40.
+    expect(below(), closeTo(1.99, 0.05), reason: 'hangs its weight past its maxDistance');
+    expect(scene.crate.position.y, greaterThan(1.5), reason: 'hanging, not on the floor');
+
+    // Pulled down, it goes down, and the spring brings it back.
+    scene.controls.whereType<Button>().firstWhere((b) => b.label == 'pull the crate down').onPressed();
+    var furthest = below();
+    for (var i = 0; i < 30; i++) {
+      frames(1);
+      furthest = math.max(furthest, below());
+    }
+    expect(furthest, greaterThan(2.3), reason: 'the pull stretched the spring');
+    // Its damper is light and it moves freely within 1.5 m: it bobs a while.
+    frames(300);
+    var (low, high) = (below(), below());
+    for (var i = 0; i < 120; i++) {
+      frames(1);
+      (low, high) = (math.min(low, below()), math.max(high, below()));
+    }
+    expect(high, lessThan(furthest), reason: 'the spring caught it, and its bobs are dying down');
+    expect((low + high) / 2, closeTo(1.99, 0.3), reason: 'bobbing about where it hangs');
   });
 
   test('Joints: a bridge: it holds a crate, and with a low break force, breaks under it', () async {
