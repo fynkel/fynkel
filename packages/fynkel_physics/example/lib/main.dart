@@ -4,10 +4,12 @@
 // to their objects. lib/measured.dart runs the same for the tool, with the
 // step's timings.
 //
-//   flutter run --dart-define=TUMBLE_CUBES=500 [--dart-define=TUMBLE_PHYSICS=0] [--dart-define=TUMBLE_THREAD=1]
+//   flutter run --dart-define=TUMBLE_CUBES=500 [--dart-define=TUMBLE_PHYSICS=0]
+//     [--dart-define=TUMBLE_THREAD=1|2] [--dart-define=TUMBLE_RAYS=10]
 
 import 'dart:math' as math;
 
+import 'package:flutter/scheduler.dart' show SchedulerBinding;
 import 'package:flutter/widgets.dart' show runApp;
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
@@ -21,10 +23,19 @@ const cubeCount = int.fromEnvironment('TUMBLE_CUBES', defaultValue: 1000);
 /// the same scene without the physics, to tell its cost from drawing's.
 const stepping = bool.fromEnvironment('TUMBLE_PHYSICS', defaultValue: true);
 
-/// `--dart-define=TUMBLE_THREAD=1` steps on the physics' own thread,
-/// alongside the frame: each fixed step writes the poses of the step before
-/// and starts the next, so the cubes show a step late.
-const threaded = bool.fromEnvironment('TUMBLE_THREAD');
+/// `--dart-define=TUMBLE_THREAD=1` steps on the physics' own thread from
+/// the fixed step: each fixed step writes the poses of the step before and
+/// starts the next, so the step runs alongside the rest of the frame and
+/// the cubes show a step late. A query in between waits for it.
+///
+/// `--dart-define=TUMBLE_THREAD=2` starts the step once the frame is done
+/// (after Flutter's frame), so it runs between frames; the next frame
+/// writes its poses before any update. Queries in updates never wait.
+const threadMode = int.fromEnvironment('TUMBLE_THREAD');
+
+/// `--dart-define=TUMBLE_RAYS=10` casts that many rays down onto the pile
+/// in every update, as a game's ground checks would.
+const rayCount = int.fromEnvironment('TUMBLE_RAYS');
 const stepSeconds = 1 / 50;
 const size = 0.5;
 
@@ -84,8 +95,7 @@ class Tumble extends GameObject {
   /// Puts every cube back in the air: columns of 10 over a square, each
   /// a little turned so the pile tumbles.
   void drop() {
-    if (_running) physics.endStep();
-    _running = false;
+    _collect();
     final side = math.sqrt(count / 10).ceil();
     for (var i = 0; i < count; i++) {
       final column = i ~/ 10;
@@ -104,21 +114,63 @@ class Tumble extends GameObject {
   @override
   void onUpdate() {
     super.onUpdate();
+    // A query needs the step done: with threadMode 2 it is by now.
+    if (rayCount > 0 || threadMode == 2) _collect();
     _sinceDrop += time.delta;
     if (_sinceDrop > 8) drop();
+    for (var i = 0; i < rayCount; i++) {
+      hits += physics.raycast(Vec3(i * 0.7 - rayCount * 0.35, 12, i * 0.3 - 2), const Vec3(0, -1, 0), 30) == null
+          ? 0
+          : 1;
+    }
   }
+
+  /// How many rays hit, so they aren't optimised away.
+  var hits = 0;
 
   @override
   void onFixedUpdate() {
     super.onFixedUpdate();
     if (!stepping) return;
-    if (!threaded) return stepAndWrite(physics, cubes);
-    if (_running) write(physics, cubes, physics.endStep());
-    physics.beginStep(stepSeconds);
-    _running = true;
+    switch (threadMode) {
+      case 0:
+        stepAndWrite(physics, cubes);
+      case 1:
+        _collect();
+        physics.beginStep(stepSeconds);
+        _running = true;
+      default:
+        _collect();
+        _due++;
+        if (_scheduled) return;
+        _scheduled = true;
+        SchedulerBinding.instance.addPostFrameCallback((_) => _startDue());
+    }
   }
 
   var _running = false;
+  var _scheduled = false;
+  var _due = 0;
+
+  /// The running step's poses written, if one runs.
+  void _collect() {
+    if (!_running) return;
+    write(physics, cubes, physics.endStep());
+    _running = false;
+  }
+
+  /// After the frame: the steps it was due, the last on the physics' thread.
+  void _startDue() {
+    _scheduled = false;
+    if (!isAlive) return;
+    for (; _due > 1; _due--) {
+      stepAndWrite(physics, cubes);
+    }
+    if (_due == 0) return;
+    _due = 0;
+    physics.beginStep(stepSeconds);
+    _running = true;
+  }
 }
 
 /// One fixed step, and each moved cube's pose written to its object.

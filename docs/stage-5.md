@@ -542,9 +542,36 @@ time, but it runs on Unity's job threads and the frame doesn't wait. The
 Note10+ row waits for Unity's Android Build Support (Unity Hub → Installs →
 6000.3.9f1 → Add modules).
 
-**For step 4**: the step runs on the physics' own thread, a step late, as
-`tumble` does here. A frame shows the last finished step. Interpolation
-shows that step, eased from the one before. Anything that needs the world
-mid-step waits for it first: a query, a body's position, a force. This is
-the user's call before step 4 starts (§5).
+**But games query every frame.** A ray in `onUpdate` has to wait for a
+step started in the fixed step (`TUMBLE_THREAD=1`). So a second scheme
+(`TUMBLE_THREAD=2`) starts the step once Flutter's frame is done, and the
+next frame writes its poses before any update. The step then runs only
+between frames, and a query in an update never waits. It sees the world
+that is drawn. The cost is that a force shows a frame later.
+
+Note10+, 30 s each, run alternately (inline, end of frame, ...). The phone
+was warmer than for the table above. `TUMBLE_RAYS=10` casts 10 rays down
+onto the pile in every update, as ground checks would:
+
+| fps (median, slowest second) | 1,000 cubes | 500 cubes |
+|---|---:|---:|
+| inline, 10 rays | 31.4 (27.0), 29.5 (26.5) | 46.9 (40.9) |
+| step from the fixed step (1), 10 rays | 21.6 (17.0) | |
+| **step at the end of the frame (2)**, 10 rays | 30.0 (17.1), 35.0 (19.6) | **59.9 (56.9)** |
+| step at the end of the frame (2), no rays | 29.0 (17.4) | |
+
+- **Scheme 1 is out**: with rays in the updates it's the worst of all
+  (21.6), since every frame waits for the step.
+- **Scheme 2 holds 500 cubes at 60 with rays** where inline gives 46.9:
+  the step fits in the time between frames. That is step 4's bar.
+- At 1,000 cubes the frame takes all the time, nothing is left between
+  frames, and scheme 2 is no better than inline. Its slowest seconds are
+  worse, because a frame sometimes waits for a step.
+
+**For step 4**: the step runs on the physics' own thread between frames
+(scheme 2). It starts when the frame is done, and its poses and callbacks
+come at the start of the next frame, before `onFixedUpdate` and the
+updates. Queries in the updates never wait. Anything between frames that
+needs the world (an input handler's raycast) waits for the step first. A
+game can still choose the plain step on the frame's thread, as Unity's.
 
