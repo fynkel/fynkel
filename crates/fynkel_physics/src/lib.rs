@@ -16,10 +16,12 @@ pub use rapier3d::math::{Pose, Rotation, Vector};
 
 mod bodies;
 mod colliders;
+mod contacts;
 mod queries;
 
 pub use bodies::{BodySpec, Constraints, ForceMode, Push, Settings};
 pub use colliders::{Axis, ColliderShape, ColliderSpec, Combine, Material, ObjectPose};
+pub use contacts::{ContactEvent, ContactKind, ContactPoint, LISTEN_COLLISIONS, LISTEN_TRIGGERS};
 pub use queries::{Hit, QueryOptions, QueryShape};
 
 /// What moves a body.
@@ -96,6 +98,8 @@ pub struct Physics {
     bodies: Vec<Option<bodies::BodyData>>,
     steps: bodies::StepWork,
     settings: Settings,
+    // Who touches whom (contacts.rs), the layer matrix and ignored pairs.
+    contacts: contacts::Contacts,
 }
 
 impl fmt::Debug for Physics {
@@ -126,6 +130,7 @@ impl Physics {
             bodies: Vec::new(),
             steps: bodies::StepWork::default(),
             settings,
+            contacts: contacts::Contacts::default(),
         }
     }
 
@@ -225,8 +230,10 @@ impl Physics {
         let w = &mut self.world;
         let body = w.colliders[handle].parent();
         w.colliders.remove(handle, &mut w.islands, &mut w.bodies, &mut w.soft_bodies, true);
-        if let Some(slot) = self.followed.get_mut(handle.into_raw_parts().0 as usize) {
-            *slot = None;
+        if let Some(slot) = self.followed.get_mut(handle.into_raw_parts().0 as usize)
+            && let Some(followed) = slot.take()
+        {
+            self.listening_changed(followed.spec.listens, 0);
         }
         if let Some(body) = body {
             self.mass_changed(body);
@@ -255,9 +262,11 @@ impl Physics {
     pub fn step(&mut self, dt: f32) -> Result<(), PhysicsError> {
         check_positive("a step's time", dt)?;
         self.before_step(dt);
+        self.contacts_before_step();
         self.world.integration_parameters.dt = dt;
-        self.world.step();
+        self.world.step_with_events(&self.contacts.filter(), &());
         self.after_step();
+        self.contacts_after_step();
         // The step put every collider's bounds in the tree.
         self.dirty.clear();
         Ok(())

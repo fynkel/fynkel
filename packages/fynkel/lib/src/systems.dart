@@ -44,6 +44,11 @@ abstract class WorldSystem {
   @mustCallSuper
   void afterFrame() {}
 
+  /// Called when [component] is put on [object] while it's in the world,
+  /// after the engine has it and before a behaviour loads.
+  @mustCallSuper
+  void componentAdded(GameObject object, Component component) {}
+
   /// Called once when the world is disposed: free what the system holds.
   @mustCallSuper
   void dispose() {}
@@ -55,6 +60,15 @@ extension GameObjectSystems on GameObject {
   /// was last set, or 0. While it stays the same, nothing set this object's
   /// transform; its world transform also changes when an ancestor's does.
   int get transformStamp => _transformStamp;
+
+  /// How many components it holds, removed ones among them until the
+  /// world tidies them away: read them with [componentAt], which, unlike
+  /// [GameObject.getAll], makes no list.
+  int get componentCount => _components?.length ?? 0;
+
+  /// Its component at [index], below [componentCount]; it may be
+  /// [Component.isRemoved].
+  Component componentAt(int index) => _components![index];
 }
 
 /// Finding and making a world's systems.
@@ -72,6 +86,11 @@ extension WorldSystems on World {
 
   /// The world's system of type [T], or null if it has none yet.
   T? maybeSystem<T extends WorldSystem>() => _systemsByType[T] as T?;
+
+  /// Sends what a game's code threw from a call a system made (a physics
+  /// callback, say) to [World.errors], for [object] if it's one's: the
+  /// system goes on.
+  void report(GameObject? object, Object error, StackTrace stack) => _report(object, error, stack);
 
   /// A number that goes up whenever an object's transform, parent or layer
   /// is set. While it stays the same, no object's world transform or layer

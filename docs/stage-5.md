@@ -421,6 +421,46 @@ every row of Unity's trigger and collision table is a test, exits come in
 every case §3.4 lists, errors in callbacks reach `world.errors`, and a
 step where no contact starts or ends allocates nothing. Labs: "Triggers
 and collisions: the basics", "The layer matrix".
+✅ `Triggers` and `Collisions` (mixins for an object or a behaviour),
+`Collision` and `ContactPoint`, and on `physics` `ignoreLayerCollision`,
+`getIgnoreLayerCollision`, `ignoreCollision` and `getIgnoreCollision`
+(`PhysicsLayers`). After each step, Rust lists the pairs of listening
+colliders that touch, as Unity's table lets them meet, and merges them
+with the last step's into enters, stays and exits; Dart reads them in one
+call into one buffer and calls each side: the collider's object and its
+rigidbody's object, each with its components. Tests: 10 in
+`contacts.rs` (each row of the table, order, sleep, points, impulse and
+speed, every exit, layers and ignored pairs), 2 more through the C
+interface (ABI 5), and `contacts_test.dart` through Dart, each inline
+and between frames: the 21 pairs of the table (static, dynamic or
+kinematic, each solid or a trigger), enter-stay-exit through a trigger,
+what each side of a collision is told, a rigidbody's object hearing its
+children's colliders, a listener added later, disabled behaviours
+hearing, an error to `world.errors`, the eight exits (moved away,
+collider disabled, removed, object destroyed, hidden, rigidbody removed,
+a layer that doesn't meet, trigger switched off), the layer matrix and
+ignored pairs. `contacts_alloc_test.dart` (and `…_fixed_…`): 20 boxes
+kept awake on a floor in a trigger, a collision stay and a trigger stay
+each step, allocate nothing more than the same scene unheard (awake
+bodies allocate their new transforms, step 4's).
+On all three devices, 500 cubes that all listen run as fast as unheard
+ones (§6).
+
+**Two triggers meet** when one has a rigidbody, as Unity's table has it;
+§3.4 said they don't. **Only listeners pay**: a collider is reported only
+when its object, its rigidbody's object, or one of their components is
+`Triggers` or `Collisions`, so a world with no listener runs no contact
+pass. **Exits on leaving**: a hidden or destroyed object hears nothing of
+its own exit (as in Unity); the other side does, with a `Collider` that
+is `isRemoved`. A removed collider's key stays taken until the step after
+it has been told, so its exit still names it. Enters come before exits
+in a step, so switching a trigger to solid tells `onCollisionEnter`
+before `onTriggerExit`. **Callbacks come** at the start of the next frame
+between frames (before `onFixedUpdate`), and right after the step in the
+fixed step. A behaviour hears while it's disabled, as in Unity's.
+`physics.ignoreCollision` holds until either collider leaves the world.
+The core gained `WorldSystem.componentAdded`, and in `extend.dart`
+`componentCount`/`componentAt` and `world.report`.
 
 **Step 6: mesh colliders.** Convex hulls from any mesh, and triangle
 meshes for static colliders (as Unity's non-convex ones), from a
@@ -655,4 +695,24 @@ settings.
 - The Note10+'s slow frames between frames are raster (157–178 of about
   1,770), as with every scene there at full resolution; in the fixed step
   they are build frames (171–212), the step.
+
+### Step 5: callbacks (2026-10-11)
+
+`tumble` with `--define TUMBLE_RIGIDBODIES=1 --define TUMBLE_LISTEN=1`:
+step 4's scene (500 cubes, 10 rays in every update, the step between
+frames), with each cube given a behaviour `with Collisions`, so every
+contact in the pile (cube on cube, cube on floor) is told to both sides
+each step while the cubes are awake. 30 s each, profile builds.
+
+| fps (median, slowest second) | Mac | iPhone 16 Pro Max | Note10+ |
+|---|---:|---:|---:|
+| nobody listens | 60 (60)* | 120 (116) | 59.9 (50.9) |
+| every cube listens | 60 (60)* | 120 (119) | 59.9 (51.9) |
+
+\* The Mac was on a 60 Hz external display that day; neither run had a
+slow frame.
+
+- **Listening costs nothing visible** on any of the three: the contact
+  pass runs in the step, on the physics' thread, and the callbacks are a
+  loop over one buffer at the start of the frame.
 

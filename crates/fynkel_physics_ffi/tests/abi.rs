@@ -562,3 +562,101 @@ fn bad_rigidbody_values_are_refused() {
         assert_eq!(fp_rigidbody_sleep_set(world.0, plain, 1), FpStatus::InvalidValue);
     }
 }
+
+impl World {
+    fn contacts(&self) -> (Vec<FpContact>, Vec<FpContactPoint>) {
+        let (mut count, mut point_count) = (0, 0);
+        // SAFETY: a live world; null arrays with capacity 0 and writable counts.
+        let status =
+            unsafe { fp_contacts_read(self.0, ptr::null_mut(), 0, ptr::null_mut(), 0, &mut count, &mut point_count) };
+        assert_eq!(status, FpStatus::Ok, "{}", last_error());
+        let mut contacts = vec![FpContact::default(); count as usize];
+        let mut points = vec![FpContactPoint::default(); point_count as usize];
+        // SAFETY: room for exactly the counts.
+        let status = unsafe {
+            fp_contacts_read(
+                self.0,
+                contacts.as_mut_ptr(),
+                contacts.len(),
+                points.as_mut_ptr(),
+                points.len(),
+                &mut count,
+                &mut point_count,
+            )
+        };
+        assert_eq!(status, FpStatus::Ok, "{}", last_error());
+        (contacts, points)
+    }
+}
+
+#[test]
+fn a_listening_ball_reads_its_enter_its_points_and_its_exit_through_c() {
+    let world = World::new();
+    let body = world.rigidbody(1, body_spec(), at(0.0, 0.95, 0.0));
+    let listening = FpColliderSpec { listens: 2, ..ball_spec(0.5, 0, 0) };
+    let mut ball = 0;
+    // SAFETY: a live world and a writable out.
+    let status = unsafe { fp_object_collider_add(world.0, 1, listening, object(0.0, 0.95, 0.0, 1.0), body, &mut ball) };
+    assert_eq!(status, FpStatus::Ok, "{}", last_error());
+    world.follower(2, ball_spec(0.5, 0, 0), object(0.0, 0.0, 0.0, 1.0));
+    world.step();
+    let (contacts, points) = world.contacts();
+    assert_eq!(contacts.len(), 1, "{contacts:?}");
+    let enter = contacts[0];
+    assert_eq!((enter.kind, enter.trigger, enter.a, enter.b), (FpContactKind::Enter as u32, 0, 1, 2));
+    assert_eq!(enter.first_point, 0);
+    assert_eq!(enter.point_count as usize, points.len());
+    assert!(!points.is_empty());
+    // From b (the floor ball) toward a (the falling ball): up.
+    assert!(points[0].normal.y > 0.9, "{:?}", points[0]);
+    // Too small an array writes nothing, but the counts still come.
+    let (mut count, mut point_count) = (0, 0);
+    let mut one = [FpContact::default(); 1];
+    // SAFETY: room for one contact and no points.
+    let status =
+        unsafe { fp_contacts_read(world.0, one.as_mut_ptr(), 1, ptr::null_mut(), 0, &mut count, &mut point_count) };
+    assert_eq!(status, FpStatus::Ok);
+    assert_eq!((count, point_count as usize, one[0].kind, one[0].a), (1, points.len(), 0, 0));
+    // SAFETY: a live world.
+    assert_eq!(unsafe { fp_collider_remove(world.0, ball) }, FpStatus::Ok, "{}", last_error());
+    world.step();
+    let (contacts, points) = world.contacts();
+    assert_eq!(contacts.len(), 1, "{contacts:?}");
+    assert_eq!((contacts[0].kind, contacts[0].a, contacts[0].b), (FpContactKind::Exit as u32, 1, 2));
+    assert!(points.is_empty());
+}
+
+#[test]
+fn the_layer_matrix_and_ignored_pairs_come_through_c() {
+    let world = World::new();
+    let one = world.follower(1, ball_spec(0.5, 0, 0), object(0.0, 0.0, 0.0, 1.0));
+    let two = world.follower(2, ball_spec(0.5, 0, 0), object(3.0, 0.0, 0.0, 1.0));
+    let mut meet = 7;
+    // SAFETY: a live world and writable outs throughout.
+    unsafe {
+        assert_eq!(fp_layer_collision_get(world.0, 3, 5, &mut meet), FpStatus::Ok);
+        assert_eq!(meet, 1);
+        assert_eq!(fp_layer_collision_set(world.0, 5, 3, 0), FpStatus::Ok);
+        assert_eq!(fp_layer_collision_get(world.0, 3, 5, &mut meet), FpStatus::Ok);
+        assert_eq!(meet, 0);
+        assert_eq!(fp_layer_collision_set(world.0, 5, 3, 2), FpStatus::InvalidValue);
+        assert_eq!(fp_layer_collision_get(world.0, 32, 0, &mut meet), FpStatus::InvalidValue);
+        let mut ignore = 7;
+        assert_eq!(fp_collision_ignore_get(world.0, one, two, &mut ignore), FpStatus::Ok);
+        assert_eq!(ignore, 0);
+        assert_eq!(fp_collision_ignore_set(world.0, two, one, 1), FpStatus::Ok);
+        assert_eq!(fp_collision_ignore_get(world.0, one, two, &mut ignore), FpStatus::Ok);
+        assert_eq!(ignore, 1);
+        // Keys are the caller's: forgetting one forgets its pairs.
+        assert_eq!(fp_collider_key_forget(world.0, 1), FpStatus::Ok);
+        assert_eq!(fp_collision_ignore_get(world.0, one, two, &mut ignore), FpStatus::Ok);
+        assert_eq!(ignore, 0);
+        assert_eq!(fp_collision_ignore_set(world.0, one, one, 1), FpStatus::InvalidValue);
+        assert_eq!(fp_collision_ignore_get(world.0, one, two, ptr::null_mut()), FpStatus::NullPointer);
+        let listens = FpColliderSpec { listens: 4, ..ball_spec(0.5, 0, 0) };
+        let mut id = 0;
+        let status = fp_object_collider_add(world.0, 1, listens, object(0.0, 0.0, 0.0, 1.0), 0, &mut id);
+        assert_eq!(status, FpStatus::InvalidValue);
+        assert!(last_error().contains("listens"), "{}", last_error());
+    }
+}

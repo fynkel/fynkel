@@ -139,8 +139,9 @@ final class World implements Finalizable {
   /// (the object is destroyed, and its parent's load goes on without it),
   /// what couldn't be freed when an object was destroyed, and what an
   /// object's or behaviour's own code threw from onStart, onUpdate,
-  /// onLateUpdate, a pointer handler, onEnable, onDisable or onDestroy (the frame goes
-  /// on, as in Unity: one object's bug doesn't stop the others). With no
+  /// onLateUpdate, a pointer handler, onEnable, onDisable, onDestroy or a
+  /// package's callback, such as a physics trigger (the frame goes on, as
+  /// in Unity: one object's bug doesn't stop the others). With no
   /// listener, each is an uncaught error of the current zone (for a load,
   /// the zone the object was added in), as an unawaited future's would
   /// be; listen to handle them, or rethrow to stop.

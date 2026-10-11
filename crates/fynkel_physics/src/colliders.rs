@@ -88,6 +88,9 @@ pub struct ColliderSpec {
     /// Its object's layer, 0 to 31.
     pub layer: u32,
     pub material: Material,
+    /// What its touching others is reported for ([`crate::Physics::contact_events`]):
+    /// [`crate::LISTEN_TRIGGERS`], [`crate::LISTEN_COLLISIONS`], both or 0.
+    pub listens: u32,
 }
 
 /// An object's world pose, as the engine gives it: `GameObject.worldTransform`.
@@ -223,7 +226,9 @@ impl Physics {
         let (shape, pose) = spec.place(object);
         let builder = ColliderBuilder::new(shape)
             .sensor(spec.is_trigger)
-            .collision_groups(groups(spec.layer))
+            .active_collision_types(collision_types(spec.is_trigger))
+            .collision_groups(self.contacts.groups(spec.layer))
+            .active_hooks(self.contacts.hooks(key))
             .user_data(u128::from(key));
         let builder = with_material(builder, spec.material);
         let w = &mut self.world;
@@ -241,6 +246,7 @@ impl Physics {
             self.followed.resize(index + 1, None);
         }
         self.followed[index] = Some(Followed { spec, object, body });
+        self.listening_changed(0, spec.listens);
         self.dirty.push(handle);
         if let Some(body) = body {
             self.mass_changed(body);
@@ -254,8 +260,10 @@ impl Physics {
         spec.check()?;
         let handle = self.followed_handle(id)?;
         let followed = self.followed[handle.into_raw_parts().0 as usize].as_mut().expect("followed");
+        let before = followed.spec.listens;
         followed.spec = spec;
         let object = followed.object;
+        self.listening_changed(before, spec.listens);
         self.replace(handle, spec, object);
         Ok(())
     }
@@ -306,10 +314,12 @@ impl Physics {
 
     fn replace(&mut self, handle: ColliderHandle, spec: ColliderSpec, object: ObjectPose) {
         let (shape, pose) = spec.place(object);
+        let groups = self.contacts.groups(spec.layer);
         let collider = &mut self.world.colliders[handle];
         collider.set_shape(shape);
         collider.set_sensor(spec.is_trigger);
-        collider.set_collision_groups(groups(spec.layer));
+        collider.set_active_collision_types(collision_types(spec.is_trigger));
+        collider.set_collision_groups(groups);
         collider.set_friction(spec.material.friction);
         collider.set_restitution(spec.material.bounciness);
         collider.set_friction_combine_rule(spec.material.friction_combine.rule());
@@ -339,7 +349,7 @@ impl Physics {
         self.dirty.push(handle);
     }
 
-    fn followed_handle(&self, id: u64) -> Result<ColliderHandle, PhysicsError> {
+    pub(crate) fn followed_handle(&self, id: u64) -> Result<ColliderHandle, PhysicsError> {
         let handle = self.collider_handle(id)?;
         match self.followed.get(handle.into_raw_parts().0 as usize) {
             Some(Some(_)) => Ok(handle),
@@ -375,10 +385,11 @@ fn with_material(builder: ColliderBuilder, material: Material) -> ColliderBuilde
         .restitution_combine_rule(material.bounce_combine.rule())
 }
 
-/// A collider on `layer`: queries filter by it (collisions still meet
-/// every layer; the layer matrix comes in step 5).
-fn groups(layer: u32) -> InteractionGroups {
-    InteractionGroups::new(Group::from_bits_retain(1 << layer), Group::ALL, InteractionTestMode::And)
+/// What a collider meets: Rapier's default for a solid one (a dynamic body
+/// on one side); every pair for a trigger, which Unity's table lets meet
+/// kinematic and static colliders (contacts.rs sorts out which report).
+fn collision_types(is_trigger: bool) -> ActiveCollisionTypes {
+    if is_trigger { ActiveCollisionTypes::all() } else { ActiveCollisionTypes::default() }
 }
 
 #[cfg(test)]
@@ -386,7 +397,14 @@ mod tests {
     use super::*;
 
     fn spec(shape: ColliderShape) -> ColliderSpec {
-        ColliderSpec { shape, center: Vector::ZERO, is_trigger: false, layer: 0, material: Material::DEFAULT }
+        ColliderSpec {
+            shape,
+            center: Vector::ZERO,
+            is_trigger: false,
+            layer: 0,
+            material: Material::DEFAULT,
+            listens: 0,
+        }
     }
 
     fn on(position: Vector, rotation: Rotation, scale: Vector) -> ObjectPose {

@@ -62,7 +62,7 @@ sealed class Collider extends Behaviour {
   Vec3 _center;
 
   /// Whether it's a trigger: queries find it unless they're told not to
-  /// ([QueryTriggers]), and (from step 5) it reports what enters it rather
+  /// ([QueryTriggers]), and it reports what enters it ([Triggers]) rather
   /// than stopping it.
   bool get isTrigger => _isTrigger;
   set isTrigger(bool value) {
@@ -99,6 +99,10 @@ sealed class Collider extends Behaviour {
   int _index = 0;
   int _layer = 0;
   Rigidbody? _body;
+  // What it listens for, and the rigidbody it was last on, which hears of
+  // its contacts until its key is free.
+  int _listens = 0;
+  Rigidbody? _contactBody;
   final _place = _Place();
   var _clean = false;
 
@@ -153,11 +157,13 @@ sealed class Collider extends Behaviour {
   /// Throws an [ArgumentError] for a size it can't have.
   void _checkShape();
 
-  void _writeSpec(FpColliderSpec spec) {
+  void _writeSpec(FpColliderSpec spec, int listens) {
+    _listens = listens;
     spec.center.set(_center);
     spec
       ..is_trigger = _isTrigger ? 1 : 0
-      ..layer = _layer;
+      ..layer = _layer
+      ..listens = listens;
     spec.material
       ..friction = _material.dynamicFriction
       ..bounciness = _material.bounciness

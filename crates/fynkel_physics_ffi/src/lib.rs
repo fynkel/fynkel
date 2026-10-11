@@ -20,12 +20,12 @@ use std::ffi::{CString, c_char};
 use std::panic::{self, AssertUnwindSafe};
 
 use fynkel_physics::{
-    Axis, BodyKind, BodySpec, ColliderShape, ColliderSpec, Combine, Constraints, ForceMode, Hit, Material, Moved,
-    ObjectPose, Physics, PhysicsError, Pose, Push, QueryOptions, QueryShape, Rotation, Settings, Shape, Vector,
+    Axis, BodyKind, BodySpec, ColliderShape, ColliderSpec, Combine, Constraints, ContactKind, ForceMode, Hit, Material,
+    Moved, ObjectPose, Physics, PhysicsError, Pose, Push, QueryOptions, QueryShape, Rotation, Settings, Shape, Vector,
 };
 
 /// Bumped on any change to the functions or types in this file.
-pub const FP_ABI_VERSION: u32 = 4;
+pub const FP_ABI_VERSION: u32 = 5;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -132,6 +132,48 @@ pub struct FpColliderSpec {
     /// 0 to 31.
     pub layer: u32,
     pub material: FpMaterial,
+    /// What its touching others is reported for (`fp_contacts_read`): 1
+    /// triggers, 2 collisions, 3 both, 0 neither.
+    pub listens: u32,
+}
+
+/// Where a pair of colliders is in its touching.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FpContactKind {
+    Enter = 0,
+    Stay = 1,
+    Exit = 2,
+}
+
+/// A pair of colliders, `a` and `b` by their keys (`a` < `b`), starting,
+/// going on with or ending their touching (`kind`, an `FpContactKind`),
+/// as a trigger pair (`trigger` 1) or a collision (0). A collision's
+/// impulse (the one the step gave `a`'s body), relative velocity (`b`'s
+/// less `a`'s, before the step) and points are as `a` sees them; an exit
+/// has none.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FpContact {
+    pub kind: u32,
+    pub trigger: u32,
+    pub a: u64,
+    pub b: u64,
+    pub impulse: FpVec3,
+    pub relative_velocity: FpVec3,
+    /// Its points, from `first_point` in what `fp_contacts_read` gives.
+    pub first_point: u32,
+    pub point_count: u32,
+}
+
+/// Where two colliders touch, as `a` sees it: the normal points from `b`
+/// towards `a`; the separation is negative when they're in each other.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FpContactPoint {
+    pub point: FpVec3,
+    pub normal: FpVec3,
+    pub separation: f32,
 }
 
 #[repr(u32)]
@@ -505,7 +547,10 @@ fn spec(s: FpColliderSpec) -> Result<ColliderSpec, Error> {
         friction_combine: combine(m.friction_combine)?,
         bounce_combine: combine(m.bounce_combine)?,
     };
-    Ok(ColliderSpec { shape, center: vector(s.center), is_trigger, layer: s.layer, material })
+    if s.listens > 3 {
+        return Err(invalid(format!("listens is 0 to 3, not {}", s.listens)));
+    }
+    Ok(ColliderSpec { shape, center: vector(s.center), is_trigger, layer: s.layer, material, listens: s.listens })
 }
 
 fn combine(c: u32) -> Result<Combine, Error> {
@@ -1221,6 +1266,153 @@ pub unsafe extern "C" fn fp_settings_set(world: *mut FpWorld, settings: *const F
         with_world(world, |w| {
             let FpSettings { solver_iterations, sleep_threshold } = read(settings, "settings")?;
             Ok(w.physics.set_settings(Settings { solver_iterations, sleep_threshold })?)
+        })
+    }
+}
+
+// --- Contacts, the layer matrix and ignored pairs -------------------------------
+
+/// The last step's contact events (enters, then stays, then exits) and
+/// their points: writes how many there are to `out_count` and
+/// `out_point_count`, and, when they fit in `capacity` and
+/// `point_capacity`, the events to `out` and the points to `out_points`.
+/// When they don't, it writes nothing else: call it again with room.
+///
+/// # Safety
+///
+/// `world` is null or live; `out_count` and `out_point_count` are null or
+/// writable; `out` and `out_points` are null or writable for their
+/// capacities.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_contacts_read(
+    world: *mut FpWorld,
+    out: *mut FpContact,
+    capacity: usize,
+    out_points: *mut FpContactPoint,
+    point_capacity: usize,
+    out_count: *mut u32,
+    out_point_count: *mut u32,
+) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            let events = w.physics.contact_events();
+            let points = w.physics.contact_points();
+            let count = u32::try_from(events.len()).map_err(|_| invalid("too many contacts".into()))?;
+            let point_count = u32::try_from(points.len()).map_err(|_| invalid("too many contact points".into()))?;
+            write(out_count, "out_count", count)?;
+            write(out_point_count, "out_point_count", point_count)?;
+            if events.len() > capacity || points.len() > point_capacity {
+                return Ok(());
+            }
+            if !events.is_empty() {
+                if out.is_null() {
+                    return Err(Error::null("out"));
+                }
+                // SAFETY: writable for `capacity` entries, as the caller promises.
+                let out = std::slice::from_raw_parts_mut(out, events.len());
+                for (slot, e) in out.iter_mut().zip(events) {
+                    *slot = FpContact {
+                        kind: match e.kind {
+                            ContactKind::Enter => FpContactKind::Enter,
+                            ContactKind::Stay => FpContactKind::Stay,
+                            ContactKind::Exit => FpContactKind::Exit,
+                        } as u32,
+                        trigger: u32::from(e.trigger),
+                        a: e.a,
+                        b: e.b,
+                        impulse: fp_vec3(e.impulse),
+                        relative_velocity: fp_vec3(e.relative_velocity),
+                        first_point: e.first_point,
+                        point_count: e.point_count,
+                    };
+                }
+            }
+            if !points.is_empty() {
+                if out_points.is_null() {
+                    return Err(Error::null("out_points"));
+                }
+                // SAFETY: writable for `point_capacity` entries, as the caller promises.
+                let out = std::slice::from_raw_parts_mut(out_points, points.len());
+                for (slot, p) in out.iter_mut().zip(points) {
+                    *slot =
+                        FpContactPoint { point: fp_vec3(p.point), normal: fp_vec3(p.normal), separation: p.separation };
+                }
+            }
+            Ok(())
+        })
+    }
+}
+
+/// Whether colliders on layers `a` and `b` meet, into `out` (1 or 0).
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_layer_collision_get(world: *mut FpWorld, a: u32, b: u32, out: *mut u32) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe { with_world(world, |w| write(out, "out", u32::from(w.physics.layer_collision(a, b)?))) }
+}
+
+/// Makes colliders on layers `a` and `b` meet (`meet` 1) or not (0), from
+/// the next step.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_layer_collision_set(world: *mut FpWorld, a: u32, b: u32, meet: u32) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe { with_world(world, |w| Ok(w.physics.set_layer_collision(a, b, flag(meet, "meet")?)?)) }
+}
+
+/// Whether two following colliders ignore each other, into `out` (1 or 0).
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_collision_ignore_get(
+    world: *mut FpWorld,
+    collider1: u64,
+    collider2: u64,
+    out: *mut u32,
+) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe { with_world(world, |w| write(out, "out", u32::from(w.physics.ignores(collider1, collider2)?))) }
+}
+
+/// Makes two following colliders ignore each other (`ignore` 1) or not
+/// (0), from the next step, until either's key is forgotten.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_collision_ignore_set(
+    world: *mut FpWorld,
+    collider1: u64,
+    collider2: u64,
+    ignore: u32,
+) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe { with_world(world, |w| Ok(w.physics.set_ignores(collider1, collider2, flag(ignore, "ignore")?)?)) }
+}
+
+/// Forgets the pairs the collider with `key` ignores, before the key is
+/// used for another collider.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_collider_key_forget(world: *mut FpWorld, key: u64) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            w.physics.forget_key(key);
+            Ok(())
         })
     }
 }

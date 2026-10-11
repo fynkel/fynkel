@@ -4,7 +4,7 @@
 //
 //   flutter run --dart-define=TUMBLE_RIGIDBODIES=1 --dart-define=TUMBLE_CUBES=500
 //     [--dart-define=TUMBLE_THREAD=0] [--dart-define=TUMBLE_INTERPOLATE=1]
-//     [--dart-define=TUMBLE_RAYS=10]
+//     [--dart-define=TUMBLE_RAYS=10] [--dart-define=TUMBLE_LISTEN=1]
 
 import 'dart:math' as math;
 
@@ -16,6 +16,24 @@ import 'main.dart' show cubeCount, rayCount, size, threadMode;
 /// `--dart-define=TUMBLE_INTERPOLATE=1` draws each cube between its last
 /// two steps.
 const interpolated = bool.fromEnvironment('TUMBLE_INTERPOLATE');
+
+/// `--dart-define=TUMBLE_LISTEN=1` gives each cube a behaviour with
+/// collision callbacks (stage 5 step 5), so every contact it has is told.
+const listening = bool.fromEnvironment('TUMBLE_LISTEN');
+
+/// Counts the collision callbacks its cube gets.
+class Touches extends Behaviour with Collisions {
+  static var told = 0;
+
+  @override
+  void onCollisionEnter(Collision collision) => told++;
+
+  @override
+  void onCollisionStay(Collision collision) => told++;
+
+  @override
+  void onCollisionExit(Collision collision) => told++;
+}
 
 class RigidTumble extends GameObject {
   RigidTumble({this.count = cubeCount});
@@ -63,6 +81,7 @@ class RigidTumble extends GameObject {
               MeshRenderer(Mesh.cube(), material),
               BoxCollider(),
               Rigidbody(interpolation: interpolated ? RigidbodyInterpolation.interpolate : RigidbodyInterpolation.none),
+              if (listening) Touches(),
             ],
           ),
         ),

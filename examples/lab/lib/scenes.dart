@@ -5,9 +5,11 @@ import 'lab.dart';
 import 'scenes/camera_basics.dart';
 import 'scenes/camera_rigs.dart';
 import 'scenes/components.dart';
+import 'scenes/contacts_basics.dart';
 import 'scenes/eases.dart';
 import 'scenes/fixed_step_basics.dart';
 import 'scenes/input.dart';
+import 'scenes/layer_matrix.dart';
 import 'scenes/layers_basics.dart';
 import 'scenes/lifecycle.dart';
 import 'scenes/motion.dart';
@@ -42,4 +44,6 @@ final List<LabScene Function()> scenes = [
   RigidbodyBasicsScene.new,
   RigidbodyStackScene.new,
   RigidbodyWallsScene.new,
+  ContactsBasicsScene.new,
+  LayerMatrixScene.new,
 ];

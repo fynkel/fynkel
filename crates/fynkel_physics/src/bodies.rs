@@ -474,7 +474,14 @@ mod tests {
     const STEP: f32 = 1.0 / 50.0;
 
     fn collider(shape: ColliderShape) -> ColliderSpec {
-        ColliderSpec { shape, center: Vector::ZERO, is_trigger: false, layer: 0, material: Material::DEFAULT }
+        ColliderSpec {
+            shape,
+            center: Vector::ZERO,
+            is_trigger: false,
+            layer: 0,
+            material: Material::DEFAULT,
+            listens: 0,
+        }
     }
 
     fn at(position: Vector) -> ObjectPose {
