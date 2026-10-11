@@ -15,9 +15,13 @@ The game is `lib/coins.dart`, and each part shows one way of working:
   the player what it carries here (`player.carry`). A tap on anything in
   it bubbles up to the level, which walks the player there.
 - A `Coin` spins and bobs through two behaviours, `Spin` and `Bob`.
+- A `Coin` is a trigger (a `SphereCollider` with `isTrigger`), and the
+  player a kinematic `Rigidbody` with a `CapsuleCollider`, from
+  [fynkel_physics](../../packages/fynkel_physics).
 - The player's `Collector` is a behaviour, kept apart from the walking:
-  it finds the coins by type (`world.all<Coin>()`), picks up those near,
-  and asks for the next level after the last.
+  `with Triggers`, it hears each coin the player walks into
+  (`onTriggerEnter`), picks it up, and asks for the next level after the
+  last (`world.all<Coin>()`).
 - The player's `score` is a `ValueNotifier`, which `lib/hud.dart` shows
   over the view with a `ValueListenableBuilder`. `lib/main.dart` is one
   line: `FynkelApp(CoinsGame.new, overlay: (context, game) => Hud(...))`.

@@ -1124,6 +1124,7 @@ gamepads, scene files and an editor.
 | A non-convex `MeshCollider` on a dynamic `Rigidbody` (refused) | collides as its hull |
 | `Rigidbody`, `ForceMode`, `RigidbodyConstraints`, `PhysicMaterial` | `Rigidbody`, `ForceMode`, `RigidbodyConstraints`, `PhysicsMaterial` |
 | `Rigidbody.velocity` | `linearVelocity` (as Unity 6's) |
+| A small ball rolling fast at 50 steps a second | physics turns a body at most a quarter turn a step: take more steps (`time.fixedDelta = 1 / 100`) |
 | `Physics.gravity`, `Physics.autoSimulation` | `physics.gravity`, `physics.stepBetweenFrames` |
 | `Physics.Raycast`, `SphereCast`, `OverlapSphere`, … | `physics.raycast`, `sphereCast`, `overlapSphere`, … |
 | `Physics.Raycast` against what's drawn (no colliders) | `world.raycast` |

@@ -735,6 +735,30 @@ mod tests {
     }
 
     #[test]
+    fn a_ball_rolls_no_faster_than_a_quarter_turn_a_step() {
+        // A bowling ball, 0.109 m and 6.5 kg, set rolling at 7.5 m/s: 69
+        // rad/s. Rapier turns a body no more than π/4 a step, 39 rad/s at
+        // 50 steps a second: it skids, and slows to where it can roll. At
+        // 100 a second it rolls on.
+        for (step, rolls) in [(STEP, false), (1.0 / 100.0, true)] {
+            let mut physics = Physics::new();
+            ground(&mut physics);
+            let (radius, speed) = (0.109, 7.5);
+            let spec = BodySpec { mass: 6.5, angular_damping: 0.0, max_angular_velocity: 100.0, ..BodySpec::default() };
+            let id = body(&mut physics, spec, ColliderShape::Sphere { radius }, Vector::new(0.0, radius, 0.0));
+            physics.set_velocities(id, Vector::Z * -speed, Vector::X * -(speed / radius)).unwrap();
+            physics.step(step).unwrap();
+            let cap = std::f32::consts::FRAC_PI_4 / step;
+            assert!(spin(&mut physics, id).length() <= cap + 1e-3);
+            for _ in 0..(1.0 / step) as usize {
+                physics.step(step).unwrap();
+            }
+            let v = -velocity(&mut physics, id).z;
+            assert_eq!((v - speed).abs() < 0.1, rolls, "{v} m/s at {step} s a step");
+        }
+    }
+
+    #[test]
     fn spin_is_capped_and_gravity_and_damping_can_change() {
         let mut physics = Physics::new();
         let spec = BodySpec { max_angular_velocity: 7.0, ..floating() };

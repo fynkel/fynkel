@@ -22,7 +22,10 @@ void main() {
     for (final coin in coins.where((coin) => !coin.isDestroyed)) {
       final at = coin.transform.position;
       game.player.transform = Transform(position: Vec3(at.x, 0, at.z));
-      world.update(0);
+      // A fixed step, for the coin's trigger to meet the player, and the
+      // frame after, which hears of it.
+      world.update(1 / 50);
+      world.update(1 / 50);
     }
   }
 
