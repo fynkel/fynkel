@@ -212,6 +212,12 @@ final class World implements Finalizable {
   // raycast, a world transform, a tap.
   final _unsent = <GameObject>[];
 
+  // Goes up whenever an object's transform, parent or layer is set: for
+  // systems that follow objects (systems.dart).
+  var _transformVersion = 0;
+  // readWorldTransforms' last buffer, as the engine's type.
+  Pointer<FyTransform> _manyOut = nullptr;
+
   // Whether a destroyed object is in [_unsent], to be dropped at the next
   // update: with no view drawing, nothing else would let go of it.
   var _unsentGone = false;

@@ -12,6 +12,7 @@ import 'scenes/layers_basics.dart';
 import 'scenes/lifecycle.dart';
 import 'scenes/motion.dart';
 import 'scenes/motion_basics.dart';
+import 'scenes/physics_queries_basics.dart';
 import 'scenes/pointers.dart';
 import 'scenes/routines.dart';
 import 'scenes/signal_basics.dart';
@@ -34,4 +35,5 @@ final List<LabScene Function()> scenes = [
   CameraRigsScene.new,
   LayersBasicsScene.new,
   FixedStepBasicsScene.new,
+  PhysicsQueriesBasicsScene.new,
 ];

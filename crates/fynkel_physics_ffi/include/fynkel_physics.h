@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FP_ABI_VERSION 1
+#define FP_ABI_VERSION 2
 
 // What an `fp_*` call returns. Anything but `Ok` leaves a message for
 // `fp_last_error`.
@@ -83,6 +83,47 @@ typedef uint32_t FpShapeKind;
 #endif // __STDC_VERSION__ >= 202311L
 #endif // __cplusplus
 
+enum FpColliderKind
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+  : uint32_t
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+ {
+  // `size`: its size on X, Y and Z.
+  FP_COLLIDER_KIND_BOX = 0,
+  // `size.x`: the radius.
+  FP_COLLIDER_KIND_SPHERE = 1,
+  // `size.x`: the radius; `size.y`: the height, end to end; `direction`:
+  // 0, 1 or 2 for X, Y or Z.
+  FP_COLLIDER_KIND_CAPSULE = 2,
+};
+#ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum FpColliderKind FpColliderKind;
+#else
+typedef uint32_t FpColliderKind;
+#endif // __STDC_VERSION__ >= 202311L
+#endif // __cplusplus
+
+enum FpQueryShapeKind
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+  : uint32_t
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+ {
+  // `a`: the center; `radius`.
+  FP_QUERY_SHAPE_KIND_SPHERE = 0,
+  // `a`: the center; `b`: half its size on each axis; `rotation`.
+  FP_QUERY_SHAPE_KIND_BOX = 1,
+  // `a` and `b`: its half-spheres' centres; `radius`.
+  FP_QUERY_SHAPE_KIND_CAPSULE = 2,
+};
+#ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum FpQueryShapeKind FpQueryShapeKind;
+#else
+typedef uint32_t FpQueryShapeKind;
+#endif // __STDC_VERSION__ >= 202311L
+#endif // __cplusplus
+
 // A physics world. Made by `fp_world_new`, freed by `fp_world_free`.
 typedef struct FpWorld FpWorld;
 
@@ -119,6 +160,68 @@ typedef struct FpMoved {
   uint64_t key;
   struct FpPose pose;
 } FpMoved;
+
+// A collider that follows an object, in the object's space: Unity's
+// collider properties. `kind` (an `FpColliderKind`) says what `size` is.
+typedef struct FpColliderSpec {
+  uint32_t kind;
+  struct FpVec3 size;
+  uint32_t direction;
+  struct FpVec3 center;
+  // 1 for a trigger, 0 for a solid collider.
+  uint32_t is_trigger;
+  // 0 to 31.
+  uint32_t layer;
+} FpColliderSpec;
+
+// An object's world transform, as the engine's `FyTransform` has it (the
+// same layout, so one buffer serves both libraries).
+typedef struct FpTransform {
+  struct FpVec3 position;
+  struct FpQuat rotation;
+  struct FpVec3 scale;
+} FpTransform;
+
+// A ray a query casts: from `origin` along `direction`, at most
+// `max_distance`.
+typedef struct FpRay {
+  struct FpVec3 origin;
+  struct FpVec3 direction;
+  float max_distance;
+} FpRay;
+
+// Where a query hit a collider. `collider` is 0 when it hit nothing.
+typedef struct FpHit {
+  uint64_t collider;
+  uint64_t key;
+  struct FpVec3 point;
+  struct FpVec3 normal;
+  float distance;
+} FpHit;
+
+// A shape a query sweeps or tests, in the world. `kind` (an
+// `FpQueryShapeKind`) says which fields count.
+typedef struct FpQueryShape {
+  uint32_t kind;
+  struct FpVec3 a;
+  struct FpVec3 b;
+  float radius;
+  struct FpQuat rotation;
+} FpQueryShape;
+
+// Where a cast sweeps its shape: along `direction`, at most
+// `max_distance`. The last four floats of an `FpRay`, so one buffer can
+// hold either.
+typedef struct FpSweep {
+  struct FpVec3 direction;
+  float max_distance;
+} FpSweep;
+
+// A collider an overlap found.
+typedef struct FpFound {
+  uint64_t collider;
+  uint64_t key;
+} FpFound;
 
 #ifdef __cplusplus
 extern "C" {
@@ -217,6 +320,170 @@ FpStatus fp_step(struct FpWorld *world, float dt, uint32_t *out_moved);
 //
 // `world` is null or live; `out` is null or writable for `len` entries.
 FpStatus fp_moved_read(struct FpWorld *world, struct FpMoved *out, size_t len);
+
+// Adds a static collider (no body) that follows an object now at
+// `object`, with `key` to know it by in hits, and writes its id to `out`.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FpStatus fp_static_collider_add(struct FpWorld *world,
+                                uint64_t key,
+                                struct FpColliderSpec spec,
+                                struct FpTransform object,
+                                uint64_t *out);
+
+// Changes what a following collider is: its shape, center, trigger or
+// layer.
+//
+// # Safety
+//
+// `world` is null or live.
+FpStatus fp_collider_spec_set(struct FpWorld *world, uint64_t collider, struct FpColliderSpec spec);
+
+// The following colliders `ids[i]`'s objects are now at `objects[i]`; those
+// that moved are put where their objects are. Checks all of them before
+// changing any.
+//
+// # Safety
+//
+// `world` is null or live; `ids` and `objects` are null or valid for
+// `count` reads.
+FpStatus fp_colliders_follow(struct FpWorld *world,
+                             const uint64_t *ids,
+                             const struct FpTransform *objects,
+                             size_t count);
+
+// Writes a collider's shape, as the physics has it (scaled), to `out_shape`
+// (an `FpShape`, as `fp_collider_add` takes it) and where it is to
+// `out_pose`: for drawing it.
+//
+// # Safety
+//
+// `world` is null or live; `out_shape` and `out_pose` are null or writable.
+FpStatus fp_collider_shape_get(struct FpWorld *world,
+                               uint64_t collider,
+                               struct FpShape *out_shape,
+                               struct FpPose *out_pose);
+
+// The first collider a ray hits, into `out` (its `collider` 0 when none).
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable; `ray` is null or
+// readable.
+FpStatus fp_raycast(struct FpWorld *world,
+                    const struct FpRay *ray,
+                    uint32_t layers,
+                    uint32_t hit_triggers,
+                    struct FpHit *out);
+
+// Every collider a ray hits, nearest first: writes how many to `out_count`;
+// read them with `fp_hits_read`.
+//
+// # Safety
+//
+// `world` is null or live; `out_count` is null or writable; `ray` is null
+// or readable.
+FpStatus fp_raycast_all(struct FpWorld *world,
+                        const struct FpRay *ray,
+                        uint32_t layers,
+                        uint32_t hit_triggers,
+                        uint32_t *out_count);
+
+// The first collider `shape` hits, swept as `sweep` says, into `out`
+// (its `collider` 0 when none). Not those it starts overlapping.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable; `shape` and `sweep`
+// are null or readable.
+FpStatus fp_cast(struct FpWorld *world,
+                 const struct FpQueryShape *shape,
+                 const struct FpSweep *sweep,
+                 uint32_t layers,
+                 uint32_t hit_triggers,
+                 struct FpHit *out);
+
+// Every collider `shape` hits, swept, nearest first, those it starts
+// overlapping at distance 0: writes how many to `out_count`; read them with
+// `fp_hits_read`.
+//
+// # Safety
+//
+// `world` is null or live; `out_count` is null or writable; `shape` and
+// `sweep` are null or readable.
+FpStatus fp_cast_all(struct FpWorld *world,
+                     const struct FpQueryShape *shape,
+                     const struct FpSweep *sweep,
+                     uint32_t layers,
+                     uint32_t hit_triggers,
+                     uint32_t *out_count);
+
+// Writes the hits of the last `fp_raycast_all` or `fp_cast_all` to `out`,
+// which holds `len`: exactly as many as it said.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable for `len` entries.
+FpStatus fp_hits_read(struct FpWorld *world, struct FpHit *out, size_t len);
+
+// The colliders `shape` touches or holds: writes how many to `out_count`;
+// read them with `fp_found_read`.
+//
+// # Safety
+//
+// `world` is null or live; `out_count` is null or writable; `shape` is null or
+// readable.
+FpStatus fp_overlap(struct FpWorld *world,
+                    const struct FpQueryShape *shape,
+                    uint32_t layers,
+                    uint32_t hit_triggers,
+                    uint32_t *out_count);
+
+// Writes what the last `fp_overlap` found to `out`, which holds `len`:
+// exactly as many as it said.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable for `len` entries.
+FpStatus fp_found_read(struct FpWorld *world, struct FpFound *out, size_t len);
+
+// Writes 1 to `out` if `shape` touches or holds any collider, else 0.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable; `shape` is null or
+// readable.
+FpStatus fp_check(struct FpWorld *world,
+                  const struct FpQueryShape *shape,
+                  uint32_t layers,
+                  uint32_t hit_triggers,
+                  uint32_t *out);
+
+// Writes the point of `collider` nearest `point` to `out`: `point` itself
+// when it's inside.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable; `point` is null or
+// readable.
+FpStatus fp_closest_point(struct FpWorld *world,
+                          uint64_t collider,
+                          const struct FpVec3 *point,
+                          struct FpVec3 *out);
+
+// Where a ray hits `collider`, into `out` (its `collider` 0 when it
+// doesn't, or starts inside it).
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable; `ray` is null or
+// readable.
+FpStatus fp_collider_raycast(struct FpWorld *world,
+                             uint64_t collider,
+                             const struct FpRay *ray,
+                             struct FpHit *out);
 
 #ifdef __cplusplus
 }  // extern "C"

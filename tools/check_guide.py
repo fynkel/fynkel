@@ -52,6 +52,8 @@ dependencies:
     path: {ROOT / 'packages' / 'fynkel'}
   fynkel_flutter:
     path: {ROOT / 'packages' / 'fynkel_flutter'}
+  fynkel_physics:
+    path: {ROOT / 'packages' / 'fynkel_physics'}
 dev_dependencies:
   flutter_test:
     sdk: flutter

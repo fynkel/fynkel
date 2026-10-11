@@ -3,12 +3,14 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
 import 'package:lab/lab.dart';
 import 'package:lab/scenes.dart';
 import 'package:lab/scenes/input.dart';
 import 'package:lab/scenes/layers_basics.dart';
 import 'package:lab/scenes/motion.dart';
 import 'package:lab/scenes/motion_basics.dart';
+import 'package:lab/scenes/physics_queries_basics.dart';
 import 'package:lab/scenes/pointers.dart';
 
 void main() {
@@ -191,5 +193,32 @@ void main() {
     control('debug lines').onChanged(false);
     world.update(1 / 60);
     expect(world.debug.count, 0);
+  });
+
+  test('Physics queries: the basics: what a ray finds, as the controls change it', () async {
+    final world = World();
+    addTearDown(world.dispose);
+    final scene = world.add(PhysicsQueriesBasicsScene());
+    await scene.loaded;
+    world.update(1 / 60);
+    final physics = world.physics;
+    expect(physics.colliderCount, 3);
+    expect(physics.drawColliders, isTrue);
+    GameObject? along(double x) => physics.raycast(Ray(Vec3(x, 0.5, 4), Vec3(0, 0, -1)))?.gameObject;
+    expect([along(-2), along(0), along(2)], [scene.cube, scene.ball, scene.pill]);
+    Toggle control(String label) => scene.controls.whereType<Toggle>().firstWhere((c) => c.label == label);
+
+    control('cube is a trigger').onChanged(true);
+    expect(along(-2), scene.cube, reason: 'queries hit triggers unless told not to');
+    control('queries hit triggers').onChanged(false);
+    expect(along(-2), isNull);
+    control('ball on layer 1, the ray skips it').onChanged(true);
+    expect(scene.ball.layer, ballLayer);
+    expect(physics.raycast(Ray(Vec3(0, 0.5, 4), Vec3(0, 0, -1)), layers: LayerMask.except([ballLayer])), isNull);
+
+    control('queries hit triggers').onChanged(true);
+    scene.controls.whereType<Button>().single.onPressed();
+    expect(along(-2), isNull, reason: 'moved up, out of the ray, before any frame');
+    expect(physics.raycast(Ray(Vec3(-2, 2, 4), Vec3(0, 0, -1)))?.gameObject, scene.cube);
   });
 }

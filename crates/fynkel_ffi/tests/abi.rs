@@ -292,8 +292,8 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_13() {
-    assert_eq!(fy_abi_version(), 13);
+fn the_abi_version_is_14() {
+    assert_eq!(fy_abi_version(), 14);
 }
 
 #[cfg(not(target_os = "android"))]
@@ -575,6 +575,35 @@ fn the_world_transform_composes_the_parents() {
     assert!(position.abs_diff_eq(Vec3::new(-1.0, 0.0, 0.0), 1e-5), "{position}");
     assert!(Quat::from(out.rotation).abs_diff_eq(turn, 1e-5));
     assert!(Vec3::from(out.scale).abs_diff_eq(Vec3::splat(2.0), 1e-5));
+}
+
+#[test]
+fn many_world_transforms_are_read_in_one_call_as_one_by_one() {
+    use fynkel_world::{Quat, Transform, Vec3};
+    let world = World::new();
+    let [parent, child, other] = std::array::from_fn(|_| world.spawn());
+    let turn = Quat::from_rotation_y(0.7);
+    let mut one = FyTransform::default();
+    let mut many = [FyTransform::default(); 3];
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        let p = Transform { position: Vec3::new(1.0, 2.0, 3.0), rotation: turn, scale: Vec3::new(1.0, 2.0, 3.0) };
+        ok(fy_transform_set(world.0, parent, &transform(p)));
+        ok(fy_transform_set(world.0, child, &transform(Transform::from_position(Vec3::new(0.0, 1.0, -1.0)))));
+        ok(fy_parent_set(world.0, child, parent));
+        ok(fy_world_transform_get_many(world.0, [parent, child, other].as_ptr(), 3, many.as_mut_ptr()));
+        for (i, id) in [parent, child, other].into_iter().enumerate() {
+            ok(fy_world_transform_get(world.0, id, &mut one));
+            assert_eq!(many[i], one, "object {i}");
+        }
+        // Nothing to read: no pointers needed.
+        ok(fy_world_transform_get_many(world.0, ptr::null(), 0, ptr::null_mut()));
+        assert_eq!(fy_world_transform_get_many(world.0, ptr::null(), 1, many.as_mut_ptr()), FyStatus::NullPointer);
+        assert_eq!(
+            fy_world_transform_get_many(world.0, [parent, 0].as_ptr(), 2, many.as_mut_ptr()),
+            FyStatus::NoObject
+        );
+    }
 }
 
 /// `mesh` as `fy_mesh_new` takes it, positions and indices only.

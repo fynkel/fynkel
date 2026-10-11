@@ -13,6 +13,8 @@ dependencies:
     path: ../../packages/fynkel
   fynkel_flutter:
     path: ../../packages/fynkel_flutter
+  fynkel_physics:
+    path: ../../packages/fynkel_physics
 
 dev_dependencies:
   flutter_test:

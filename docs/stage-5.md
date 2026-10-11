@@ -314,6 +314,46 @@ capsule) on static objects, §3.5's layers in queries, §3.6, and
 shape, with masks, triggers and scale, a query that misses allocates
 nothing, and moved colliders are found where they were moved. Lab:
 "Physics queries: the basics".
+✅ on the iOS simulator; queries cost 0.2–0.9 µs on the Mac (§6).
+`BoxCollider`, `SphereCollider` and `CapsuleCollider` (behaviours with
+`center` and `isTrigger`, scaled as Unity's), `physics` on every object,
+behaviour and world, the queries of §3.6 with `layers` and `triggers`
+(`physics.queriesHitTriggers`), `PhysicsHit`, `collider.raycast` and
+`collider.closestPoint`, and `physics.drawColliders`. Tests: 12 in
+`queries.rs` and 6 new unit tests (`cargo test -p fynkel_physics`), 12
+through the C interface, 13 in `queries_test.dart` (every query against
+each shape, masks, triggers, scale, centres, moves, parents, turns,
+enabling and destroying, removal from the middle, shape changes), and
+`alloc_test.dart`: a query that misses allocates nothing. 14 mutants of
+the new code; 13 killed, and the one left only skips drawing work when
+debug lines are off. The engine's ABI is 14
+(`fy_world_transform_get_many`: many objects' world transforms in one
+call), the physics' 2. The core's part is `world.transformVersion` and
+`world.readWorldTransforms` in `extend.dart`.
+
+How colliders follow objects: while no transform, parent or layer was set
+since the last query, a query does nothing first. Otherwise it reads every
+collider's object's world transform in one call and gives them to Rapier
+in another, which moves those that changed. Queries put what was added or
+moved into Rapier's tree at once, without a step, so a collider moved this
+frame is found where it went (a test shows this doesn't change what the
+next step does). **The cost** is about 42 ns per collider on the Mac, on
+any frame where anything moved: 0.04 ms with 1,000 colliders, 0.21 ms with
+5,000. Step 4 makes it the moved objects' only, with the list of moved
+objects §3.1 planned, since bodies move every step.
+
+Unity's rules, kept: a ray doesn't hit a collider it starts inside, a
+single cast doesn't hit one it starts in, and an `All` cast gives those at
+distance 0, with a zero point and the normal against the cast. Unity's
+`Physics.ClosestPoint(point, collider, position, rotation)`, which places
+a collider somewhere else first, is left out: `collider.closestPoint` does
+what games use it for. `MeshCollider` waits for a game that needs one.
+
+**Allocation in the JIT**: a struct's `.ref`, and a double passed to a
+function the JIT doesn't inline, each allocate. So the queries write their
+inputs into one float buffer and read hits from another, by index, and the
+C calls take pointers (`FpRay`, `FpSweep`, `FpQueryShape`) and no floats.
+AOT, on the devices, needs none of this, but the test runs in the JIT.
 
 **Step 4: rigidbodies.** The rest of §3.3: dynamic and kinematic bodies,
 forces, `movePosition`, constraints, interpolation, continuous detection,
@@ -440,3 +480,14 @@ iPhone and 0.11 on the Note10+. That's the same as stage 4's walk for
 `onLateUpdate`. At 50 steps a second, a game with 1,000 objects on the
 Note10+ spends about 0.5 ms a second on it. The other rows are within
 the bench's noise.
+
+### Step 3: colliders and queries (2026-10-11)
+
+The Mac (M3 Max, JIT, warmed): a ray across a grid of static colliders,
+half boxes and half spheres, 20,000 times; then the same with one object
+moved before each ray, so every query follows every collider first.
+
+| Colliders | 100 | 1,000 | 5,000 |
+|---|---:|---:|---:|
+| `physics.raycast` | 0.20 µs | 0.52 µs | 0.89 µs |
+| after a move (following them all, then the ray) | 4.8 µs | 43 µs | 210 µs |

@@ -13,4 +13,4 @@ rename_variants = "ScreamingSnakeCase"
 prefix_with_name = true
 
 [export]
-include = ["FpStatus", "FpBodyKind", "FpShapeKind"]
+include = ["FpStatus", "FpBodyKind", "FpShapeKind", "FpColliderKind", "FpQueryShapeKind"]

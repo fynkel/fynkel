@@ -26,7 +26,7 @@ use crate::extract::{Extract, ResourceOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 13;
+pub const FY_ABI_VERSION: u32 = 14;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -856,6 +856,46 @@ pub unsafe extern "C" fn fy_world_transform_get(world: *const FyWorld, id: u64, 
         let t = Transform { position, rotation: rotation.normalize(), scale };
         // SAFETY: per this function's contract.
         unsafe { write(out, FyTransform::from_component(t), "out") }
+    })
+}
+
+/// The world transforms of `count` objects, `ids[i]`'s into `out[i]`, as
+/// `fy_world_transform_get` gives each: what a package that follows many
+/// objects (physics' colliders) reads in one call. Fails on the first id
+/// that isn't an object, with what came before it written.
+///
+/// # Safety
+///
+/// `world` is null or live; `ids` is null or valid for `count` reads, and
+/// `out` null or valid for `count` writes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_world_transform_get_many(
+    world: *const FyWorld,
+    ids: *const u64,
+    count: usize,
+    out: *mut FyTransform,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        if count == 0 {
+            return Ok(());
+        }
+        if ids.is_null() {
+            return Err(Error::null("ids"));
+        }
+        if out.is_null() {
+            return Err(Error::null("out"));
+        }
+        // SAFETY: not null, and valid for count reads and writes per the contract.
+        let (ids, out) =
+            unsafe { (std::slice::from_raw_parts(ids, count), std::slice::from_raw_parts_mut(out, count)) };
+        let world = world.lock()?;
+        for (&id, out) in ids.iter().zip(out) {
+            let (scale, rotation, position) = world.world_matrix(object(id)?)?.to_scale_rotation_translation();
+            *out = FyTransform::from_component(Transform { position, rotation: rotation.normalize(), scale });
+        }
+        Ok(())
     })
 }
 
