@@ -4,7 +4,7 @@
 // to their objects. lib/measured.dart runs the same for the tool, with the
 // step's timings.
 //
-//   flutter run --dart-define=TUMBLE_CUBES=500 [--dart-define=TUMBLE_PHYSICS=0]
+//   flutter run --dart-define=TUMBLE_CUBES=500 [--dart-define=TUMBLE_PHYSICS=0] [--dart-define=TUMBLE_THREAD=1]
 
 import 'dart:math' as math;
 
@@ -20,6 +20,11 @@ const cubeCount = int.fromEnvironment('TUMBLE_CUBES', defaultValue: 1000);
 /// `--dart-define=TUMBLE_PHYSICS=0` leaves the cubes where they're dropped:
 /// the same scene without the physics, to tell its cost from drawing's.
 const stepping = bool.fromEnvironment('TUMBLE_PHYSICS', defaultValue: true);
+
+/// `--dart-define=TUMBLE_THREAD=1` steps on the physics' own thread,
+/// alongside the frame: each fixed step writes the poses of the step before
+/// and starts the next, so the cubes show a step late.
+const threaded = bool.fromEnvironment('TUMBLE_THREAD');
 const stepSeconds = 1 / 50;
 const size = 0.5;
 
@@ -79,6 +84,8 @@ class Tumble extends GameObject {
   /// Puts every cube back in the air: columns of 10 over a square, each
   /// a little turned so the pile tumbles.
   void drop() {
+    if (_running) physics.endStep();
+    _running = false;
     final side = math.sqrt(count / 10).ceil();
     for (var i = 0; i < count; i++) {
       final column = i ~/ 10;
@@ -104,13 +111,21 @@ class Tumble extends GameObject {
   @override
   void onFixedUpdate() {
     super.onFixedUpdate();
-    if (stepping) stepAndWrite(physics, cubes);
+    if (!stepping) return;
+    if (!threaded) return stepAndWrite(physics, cubes);
+    if (_running) write(physics, cubes, physics.endStep());
+    physics.beginStep(stepSeconds);
+    _running = true;
   }
+
+  var _running = false;
 }
 
 /// One fixed step, and each moved cube's pose written to its object.
-void stepAndWrite(RawPhysics physics, List<GameObject> cubes) {
-  final moved = physics.step(stepSeconds);
+void stepAndWrite(RawPhysics physics, List<GameObject> cubes) => write(physics, cubes, physics.step(stepSeconds));
+
+/// The [moved] cubes' poses written to their objects.
+void write(RawPhysics physics, List<GameObject> cubes, int moved) {
   for (var i = 0; i < moved; i++) {
     cubes[physics.movedKey(i)].transform = Transform(
       position: physics.movedPosition(i),

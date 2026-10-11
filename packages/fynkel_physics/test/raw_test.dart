@@ -108,4 +108,26 @@ void main() {
     expect(() => physics.step(step), throwsStateError);
     physics.dispose();
   });
+
+  test('a step on the physics\' own thread moves as a step here does, and the world waits for it', () {
+    final here = withGround(), there = withGround();
+    for (final physics in [here, there]) {
+      for (var key = 0; key < 5; key++) {
+        physics.addBox(
+          physics.addBody(BodyKind.dynamic, key, position: Vec3(0, 1 + key * 1.1, 0)),
+          const Vec3(0.5, 0.5, 0.5),
+        );
+      }
+    }
+    for (var i = 0; i < 50; i++) {
+      final moved = here.step(step);
+      there.beginStep(step);
+      expect(() => there.step(step), throwsA(isA<PhysicsException>()));
+      expect(there.endStep(), moved);
+      for (var j = 0; j < moved; j++) {
+        expect((there.movedKey(j), there.movedPosition(j)), (here.movedKey(j), here.movedPosition(j)));
+      }
+    }
+    expect(there.endStep, throwsA(isA<PhysicsException>()));
+  });
 }

@@ -208,8 +208,24 @@ final class RawPhysics implements Finalizable {
   /// step moved: their keys and poses are [movedKey], [movedPosition] and
   /// [movedRotation] from 0 to one less, until the next step.
   int step(double dt) {
+    _check(fp_step(_live, dt, _count));
+    return _readMoved();
+  }
+
+  /// Starts a step of [dt] seconds on a thread of the physics' own, and
+  /// returns at once: nothing else may be asked of this world until
+  /// [endStep], which waits for it and returns what [step] does. (An
+  /// experiment, docs/stage-5.md §6.)
+  void beginStep(double dt) => _check(fp_step_begin(_live, dt));
+
+  /// Waits for the step [beginStep] started; returns as [step] does.
+  int endStep() {
+    _check(fp_step_end(_live, _count));
+    return _readMoved();
+  }
+
+  int _readMoved() {
     final world = _live;
-    _check(fp_step(world, dt, _count));
     final count = _count.value;
     if (count > _movedCapacity) {
       if (_moved != nullptr) malloc.free(_moved);

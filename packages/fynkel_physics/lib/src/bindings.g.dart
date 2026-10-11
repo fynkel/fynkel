@@ -192,13 +192,19 @@ external int fp_static_collider_add(
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Float, ffi.Pointer<ffi.Uint32>)>(isLeaf: true)
 external int fp_step(ffi.Pointer<FpWorld> world, double dt, ffi.Pointer<ffi.Uint32> out_moved);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Float)>(isLeaf: true)
+external int fp_step_begin(ffi.Pointer<FpWorld> world, double dt);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<ffi.Uint32>)>(isLeaf: true)
+external int fp_step_end(ffi.Pointer<FpWorld> world, ffi.Pointer<ffi.Uint32> out_moved);
+
 @ffi.Native<ffi.Void Function(ffi.Pointer<FpWorld>)>(isLeaf: true)
 external void fp_world_free(ffi.Pointer<FpWorld> world);
 
 @ffi.Native<ffi.Pointer<FpWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FpWorld> fp_world_new();
 
-const int FP_ABI_VERSION = 2;
+const int FP_ABI_VERSION = 3;
 
 sealed class FpBodyKind {
   static const FP_BODY_KIND_DYNAMIC = 0;
