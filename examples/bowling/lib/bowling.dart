@@ -1,6 +1,7 @@
-// The game: ten-pin bowling on a lane of real size. Swipe up to roll the
-// ball: where the swipe starts is where on the lane it starts, and how
-// fast and which way it goes, the ball. Ten frames, scored as bowling is.
+// The game: ten-pin bowling on a lane of real size. The ball waits on the
+// foul line: drag it sideways to place it, and flick it up the lane to
+// bowl, as hard and as straight as the flick. Ten frames, scored as
+// bowling is.
 
 import 'dart:math' as math;
 
@@ -17,22 +18,46 @@ const lane = 0, balls = 8, pins = 9;
 /// (z = 0) to the head pin, and the pit behind the pins.
 const laneWidth = 1.05, headPin = 18.29, laneEnd = 19.2;
 
+/// Where the ball waits, and starts: just past the foul line.
+const ballStart = -0.3;
+
 class BowlingGame extends GameObject {
   final score = Score();
 
   /// What the HUD says under the score.
-  final message = ValueNotifier('Swipe up to roll');
+  final message = ValueNotifier('');
 
+  /// Whether the HUD shows how to bowl: until the first ball is bowled.
+  final hint = ValueNotifier(true);
+
+  /// Where the finger has been in the gesture under way, in the view's
+  /// logical pixels, for the HUD to draw; empty with no gesture.
+  final trail = ValueNotifier<List<Vec2>>(const []);
+
+  /// The rolling ball, and the one that waits on the foul line to be
+  /// bowled, where it's placed ([aimX]).
   Ball? ball;
+  late final GameObject waiting;
+  double _aimX = 0;
+  late final GameObject _aimLine;
+
   final _pins = <Pin>[];
   var _rolling = false;
   var _ballDone = false;
+  var _gutter = false;
 
-  /// Whether a roll is under way, from the swipe to the pins counted.
+  /// Whether a roll is under way, from the flick to the pins counted.
   bool get rolling => _rolling;
 
   /// The pins standing on the deck.
   Iterable<Pin> get standing => _pins.where((p) => !p.isDestroyed && !p.down);
+
+  /// Where across the lane the waiting ball is.
+  double get aimX => _aimX;
+  set aimX(double x) {
+    _aimX = x.clamp(-laneWidth / 2 + Ball.radius, laneWidth / 2 - Ball.radius);
+    waiting.position = Vec3(_aimX, Ball.radius, ballStart);
+  }
 
   @override
   void onLoad() {
@@ -49,25 +74,17 @@ class BowlingGame extends GameObject {
     add(GameObject(components: [Light.ambient(color: Color.rgb(0.75, 0.8, 1), intensity: 0.7)]));
     add(Alley());
     add(ChaseCamera(this));
+    waiting = add(
+      GameObject(
+        name: 'waiting ball',
+        transform: Transform(position: Vec3(0, Ball.radius, ballStart), scale: Vec3.one * (Ball.radius * 2)),
+        components: [MeshRenderer(Mesh.sphere(), Ball.look)],
+      ),
+    );
+    final glow = Material(color: Color.rgb(1, 0.85, 0.3), emissive: Color.rgb(1, 0.8, 0.2), emissiveIntensity: 2);
+    _aimLine = add(GameObject(name: 'aim', components: [MeshRenderer(Mesh.cube(), glow)]))..active = false;
+    addComponent(Bowler());
     rack();
-  }
-
-  @override
-  void onStart() {
-    super.onStart();
-    on(input.onSwipe, (swipe) {
-      // Up the view, and not too far sideways.
-      if (swipe.direction.y > -0.5) return;
-      final start = physics.raycast(
-        world.camera!.screenToRay(swipe.finger.startPosition),
-        layers: LayerMask.of([lane]),
-      );
-      final speed = (swipe.speed / 250).clamp(3.0, 9.0);
-      roll(x: start?.point.x ?? 0, speed: speed, angle: math.atan2(swipe.direction.x, -swipe.direction.y) * 0.15);
-    });
-    on(input.onKeyDown, (press) {
-      if (press.key == KeyCode.space) roll(x: 0, speed: 7.5, angle: 0);
-    });
   }
 
   /// Sets up all ten pins, where they stand, and takes away the old ones.
@@ -84,10 +101,24 @@ class BowlingGame extends GameObject {
     }
   }
 
-  /// Rolls a ball from [x] on the foul line, at [speed] metres a second,
-  /// [angle] radians to the right of straight down the lane. Then, once it's
-  /// gone and the pins have settled, counts them.
-  void roll({required double x, required double speed, required double angle}) {
+  /// Shows where a ball bowled [angle] radians to the right of straight
+  /// would go, down to the pins; null hides it.
+  void aim(double? angle) {
+    _aimLine.active = angle != null;
+    if (angle == null) return;
+    final length = (headPin + ballStart) / math.cos(angle);
+    final way = Vec3(math.sin(angle), 0, -math.cos(angle));
+    _aimLine.transform = Transform(
+      position: Vec3(_aimX, 0.004, ballStart) + way * (length / 2),
+      rotation: Quat.axisAngle(Vec3.up, -angle),
+      scale: Vec3(0.025, 0.004, length),
+    );
+  }
+
+  /// Bowls the waiting ball at [speed] metres a second, [angle] radians to
+  /// the right of straight down the lane. Then, once it's gone and the pins
+  /// have settled, counts them.
+  void roll({required double speed, required double angle}) {
     if (_rolling) return;
     if (score.isOver) {
       score.clear();
@@ -95,10 +126,13 @@ class BowlingGame extends GameObject {
     }
     _rolling = true;
     _ballDone = false;
-    message.value = '';
-    final at = Vec3(x.clamp(-laneWidth / 2 + Ball.radius, laneWidth / 2 - Ball.radius), Ball.radius, -0.3);
+    _gutter = false;
+    hint.value = false;
+    waiting.active = false;
+    aim(null);
+    message.value = '${speed.toStringAsFixed(1)} m/s';
     final velocity = Vec3(math.sin(angle), 0, -math.cos(angle)) * speed;
-    ball = add(Ball(at, velocity));
+    ball = add(Ball(waiting.position, velocity));
     start(() async {
       final rolled = time.sinceStart;
       await until(() => _ballDone || time.sinceStart - rolled > 8);
@@ -108,10 +142,16 @@ class BowlingGame extends GameObject {
     });
   }
 
-  /// The ball went into the pit, or a gutter.
+  /// The ball went into the pit.
   void ballDone() => _ballDone = true;
 
-  void gutter() => message.value = 'Gutter';
+  /// The ball fell in a gutter: a gutter ball, unless it had hit pins
+  /// first and fell in after them.
+  void gutter() {
+    if (_pins.any((p) => !p.isDestroyed && p.down)) return;
+    _gutter = true;
+    message.value = 'Gutter';
+  }
 
   void _count() {
     final down = _pins.where((p) => !p.isDestroyed && p.down).toList();
@@ -123,19 +163,102 @@ class BowlingGame extends GameObject {
     ball?.destroy();
     ball = null;
     if (score.isOver) {
-      message.value = 'Game over: ${score.total}. Swipe to play again';
+      message.value = 'Game over: ${score.total}. Flick to play again';
     } else {
       message.value = switch (score.lastMark) {
         'X' => 'Strike!',
         '/' => 'Spare!',
-        _ when message.value.isNotEmpty => message.value,
+        _ when _gutter && down.isEmpty => 'Gutter',
         _ => '${down.length} down',
       };
       // A new frame, or all ten down in the tenth: a new rack.
       if (score.frame != frame || standing.isEmpty) rack();
     }
+    waiting.active = true;
     _rolling = false;
   }
+}
+
+/// The bowler's hand: a drag sideways places the waiting ball, a flick up
+/// the view bowls it, as fast as the flick and leaning as it leans. While
+/// the finger is down, its trail and the ball's way show. The arrows and
+/// space do the same on a keyboard.
+class Bowler extends Behaviour {
+  late final BowlingGame game = gameObject as BowlingGame;
+
+  /// What the gesture under way does, once it's clear: places or bowls.
+  bool? _placing;
+
+  /// A drag up let go: bowled if a swipe comes with it, else too slow.
+  var _letGo = false;
+
+  /// From a flick's way on the view to the ball's on the lane: a flick
+  /// leaning 45° bowls about 7° off straight.
+  static double angleOf(Vec2 way) => math.atan2(way.x, -way.y) * 0.15;
+
+  /// From a flick's speed on the view, in pixels a second, to the ball's.
+  static double speedOf(double pixels) => (pixels / 250).clamp(3.0, 9.0);
+
+  @override
+  void onStart() {
+    super.onStart();
+    on(input.onDragStart, (finger) {
+      if (game.rolling) return;
+      final way = finger.totalDelta;
+      _placing = way.x.abs() > way.y.abs();
+      _letGo = false;
+      game.trail.value = [_at(finger.startPosition), _at(finger.position)];
+    });
+    on(input.onDrag, (finger) {
+      if (_placing == null) return;
+      game.trail.value = [...game.trail.value.skip(game.trail.value.length > 24 ? 1 : 0), _at(finger.position)];
+      if (_placing!) {
+        final hit = physics.raycast(world.camera!.screenToRay(finger.position), layers: LayerMask.of([lane]));
+        if (hit != null) game.aimX = hit.point.x;
+      } else {
+        final way = finger.totalDelta;
+        game.aim(way.y < 0 ? angleOf(way) : null);
+      }
+    });
+    on(input.onDragEnd, (finger) {
+      if (_placing == false) _letGo = true;
+      _placing = null;
+      game.aim(null);
+      start(() async {
+        await wait(0.3);
+        if (_placing == null) game.trail.value = const [];
+      });
+    });
+    on(input.onSwipe, (swipe) {
+      if (!_letGo || swipe.direction.y > -0.5) return;
+      _letGo = false;
+      game.roll(speed: speedOf(swipe.speed), angle: angleOf(swipe.direction));
+    });
+    on(input.onKeyDown, (press) {
+      if (game.rolling) return;
+      switch (press.key) {
+        case KeyCode.arrowLeft:
+          game.aimX -= 0.05;
+        case KeyCode.arrowRight:
+          game.aimX += 0.05;
+        case KeyCode.space:
+          game.roll(speed: 7.5, angle: 0);
+        default:
+      }
+    });
+  }
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    // A drag up let go with no swipe: too slow to bowl.
+    if (_letGo) {
+      _letGo = false;
+      game.message.value = 'Flick faster to bowl';
+    }
+  }
+
+  static Vec2 _at(ViewPoint p) => Vec2(p.x, p.y);
 }
 
 /// The lane, its gutters and the pit behind the pins, and the triggers in
@@ -224,12 +347,15 @@ class Ball extends GameObject {
         layer: balls,
         transform: Transform(position: at, scale: const Vec3(radius * 2, radius * 2, radius * 2)),
         components: [
-          MeshRenderer(Mesh.sphere(), Material(color: Color.rgb(0.15, 0.3, 0.9), roughness: 0.15)),
+          MeshRenderer(Mesh.sphere(), look),
           SphereCollider(),
           // A rolling ball turns at speed / radius: 80 rad/s at 9 m/s, past
-          // the 50 a rigidbody may turn by default.
+          // the 50 a rigidbody may turn by default. Interpolated: drawn
+          // where it is between two steps, so it glides, not jitters, on a
+          // screen that draws faster than physics steps or out of step.
           Rigidbody(
             mass: 6.5,
+            interpolation: RigidbodyInterpolation.interpolate,
             angularDamping: 0,
             maxAngularVelocity: 100,
             collisionDetectionMode: CollisionDetectionMode.continuous,
@@ -240,6 +366,7 @@ class Ball extends GameObject {
   }
 
   static const radius = 0.109;
+  static final look = Material(color: Color.rgb(0.15, 0.3, 0.9), roughness: 0.15);
   late final Vec3 _velocity;
 
   @override

@@ -582,9 +582,13 @@ are played on the three devices, and every game runs as well as before.
 ✅ in code, tests and the iOS simulator; playing it on the three devices,
 and measuring every game, is next. `examples/bowling`: a lane, ball and
 pins of real size and weight (18.29 m to the head pin, a 6.5 kg ball 21.8
-cm across, 1.5 kg pins 38 cm tall). Swipe up to roll (space rolls a
-straight one): the swipe's start is where the ball starts, its speed and
-way the ball's. A `Gutter` and the `Pit` are triggers that tell the game;
+cm across, 1.5 kg pins 38 cm tall). The ball waits on the foul line: a
+drag sideways places it (a raycast onto the lane), a flick up bowls it
+(`onSwipe`: its speed and lean, the ball's), with the finger's trail drawn
+by the HUD, a line on the lane while aiming, a hint until the first ball,
+and the speed shown (the arrows and space do it on a keyboard). The ball
+is interpolated: on your first look it jittered, as a camera following a
+body that moves in fixed steps sees each step. A `Gutter` and the `Pit` are triggers that tell the game;
 a routine waits for the pit, then for the pins to settle, and counts those
 tipped past 45°. A pin is `Mesh.custom`, a pin's profile turned, with a
 convex `MeshCollider`, so it stands on its foot; bounciness 0.7, as pins
@@ -601,9 +605,11 @@ Unity's default `maxAngularVelocity` (50). PhysX has no such cap. A
 bowling ball rolling at 7.5 m/s turns at 69 rad/s, so it skidded and
 slowed to 4 m/s. bowling steps 100 times a second (`time.fixedDelta`),
 which allows 78 rad/s; `maxAngularVelocity`'s doc says so, and a test in
-`bodies.rs` holds both rates to it. Tests: 9 in `bowling_test.dart` (the
+`bodies.rs` holds both rates to it. Tests: 11 in `bowling_test.dart` (the
 score: 300, 150, 90, 0, strikes, spares and the tenth frame, the marks;
-the game: pins stand still on their own, a swipe rolls, a pocket hit
+the game: pins stand still on their own, a drag places and a flick bowls
+from there, a slow drag bowls nothing, the aim line leans as the finger
+does, a pocket hit
 strikes and racks again, a gutter ball ends in the pit with no pins, a
 frame of two rolls), coins' 5. CI now builds and tests bowling, and the
 lab, which it had left out.
