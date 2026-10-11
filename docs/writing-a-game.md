@@ -652,7 +652,7 @@ class Sparkle extends GameObject {
 `debug.sphere`, `debug.path`, each with a `color`. It's off in release
 builds.
 
-## 14. Physics: colliders, rigidbodies and queries
+## 14. Physics: colliders, rigidbodies, queries and callbacks
 
 Physics is a package, `fynkel_physics`, on Rapier. Add it to the
 pubspec, next to `fynkel`, and a game without it ships none of it:
@@ -787,6 +787,62 @@ query that misses allocates nothing. `collider.raycast(ray)` and
 `collider.closestPoint(point)` ask one collider. `world.raycast` still
 finds what's drawn, with no colliders: use it for taps.
 `physics.drawColliders = true` draws every collider with the debug lines.
+
+**Callbacks** come to an object or behaviour that asks for them with a
+mixin: `with Triggers` for `onTriggerEnter`, `onTriggerStay` and
+`onTriggerExit(Collider other)`, `with Collisions` for
+`onCollisionEnter`, `onCollisionStay` and `onCollisionExit(Collision
+collision)`. As in Unity, they come to a collider's object and its
+rigidbody's object; a trigger needs a rigidbody (kinematic will do) on
+one side, and a collision a dynamic one. Enter comes the step two
+colliders start to touch, stay every step after while either body is
+awake, and exit the step they part, or after one is disabled, removed,
+destroyed, hidden, put on a layer that doesn't meet, or switched between
+trigger and solid (Unity skips those; here the other side always hears).
+Between frames, they come at the start of the next frame, before
+`onFixedUpdate`. What a callback throws goes to `world.errors`:
+
+```dart
+// lib/pickups.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
+
+/// A coin the player picks up by touching it.
+class Coin extends GameObject with Triggers {
+  Coin(Vec3 at)
+    : super(
+        transform: Transform(position: at),
+        components: [MeshRenderer(Mesh.sphere(), Material()), SphereCollider(isTrigger: true)],
+      );
+
+  @override
+  void onTriggerEnter(Collider other) {
+    if (other.gameObject.name == 'player') destroy();
+  }
+}
+
+/// Plays a thud when its object lands hard.
+class Thud extends Behaviour with Collisions {
+  @override
+  void onCollisionEnter(Collision collision) {
+    if (collision.relativeVelocity.length > 3) print('thud on ${collision.gameObject.name}');
+  }
+}
+```
+
+A `Collision` has the other side's `collider`, `gameObject` and
+`rigidbody`, the `impulse` that pushed this side, the `relativeVelocity`,
+and the points they touch at (`contactCount`, `getContact(i)`,
+`contacts`), each with a `point`, a `normal` out of the other side, and a
+`separation`. It's the same object every time: read it in the callback.
+A behaviour gets callbacks while it's disabled too, as in Unity.
+
+**Layers that don't meet** pass through each other:
+`physics.ignoreLayerCollision(ghosts, 0)` lets everything on the
+`ghosts` layer fall through layer 0, from the next step, and
+`physics.ignoreCollision(a, b)` does the same for two colliders until one
+leaves the world. Queries don't read the matrix; their `layers:` say what
+they hit.
 
 ## 15. Flutter around the game
 
@@ -961,5 +1017,7 @@ scene files and an editor. Until collision callbacks come, queries
 | `Physics.gravity`, `Physics.autoSimulation` | `physics.gravity`, `physics.stepBetweenFrames` |
 | `Physics.Raycast`, `SphereCast`, `OverlapSphere`, … | `physics.raycast`, `sphereCast`, `overlapSphere`, … |
 | `Physics.Raycast` against what's drawn (no colliders) | `world.raycast` |
+| `OnTriggerEnter(Collider)`, `OnCollisionEnter(Collision)` | `with Triggers`, `with Collisions`, then `onTriggerEnter`, `onCollisionEnter` |
+| `Physics.IgnoreLayerCollision`, `Physics.IgnoreCollision` | `physics.ignoreLayerCollision`, `physics.ignoreCollision` |
 | `Debug.DrawLine` | `debug.line` |
 | Scenes, the Inspector | Classes; Flutter for UI |

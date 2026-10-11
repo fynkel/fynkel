@@ -7,7 +7,7 @@ use fynkel_physics::*;
 const NEAR: f32 = 1e-3;
 
 fn spec(shape: ColliderShape) -> ColliderSpec {
-    ColliderSpec { shape, center: Vector::ZERO, is_trigger: false, layer: 0, material: Material::DEFAULT }
+    ColliderSpec { shape, center: Vector::ZERO, is_trigger: false, layer: 0, material: Material::DEFAULT, listens: 0 }
 }
 
 fn at(x: f32, y: f32, z: f32) -> ObjectPose {

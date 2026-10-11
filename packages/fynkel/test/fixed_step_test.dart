@@ -372,7 +372,39 @@ void main() {
       expect(errors.first.object, isNull);
       expect(errors.first.error, isA<StateError>());
     });
+
+    test('hear of components put on live objects, and read them without a list', () async {
+      final world = newWorld();
+      final system = world.system(_Components.new);
+      final early = _Plain();
+      final object = world.add(GameObject(components: [early]));
+      expect(system.added, isEmpty, reason: 'an object\'s own components come with it');
+      final late = object.addComponent(_Plain());
+      expect(system.added, [(object, late)]);
+      expect([for (var i = 0; i < object.componentCount; i++) object.componentAt(i)], [early, late]);
+      object.removeComponent(early);
+      expect(object.componentAt(0).isRemoved, isTrue);
+      final errors = <ObjectError>[];
+      world.errors.listen(errors.add);
+      world.report(object, StateError('a callback broke'), StackTrace.current);
+      await pumpEventQueue();
+      expect(errors.single.object, same(object));
+    });
   });
+}
+
+class _Plain extends Behaviour {}
+
+class _Components extends WorldSystem {
+  _Components(super.world);
+
+  final added = <(GameObject, Component)>[];
+
+  @override
+  void componentAdded(GameObject object, Component component) {
+    super.componentAdded(object, component);
+    added.add((object, component));
+  }
 }
 
 class _DestroysInFixed extends GameObject {

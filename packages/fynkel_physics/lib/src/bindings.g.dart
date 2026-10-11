@@ -96,6 +96,9 @@ external int fp_collider_add(
   ffi.Pointer<ffi.Uint64> out,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64)>(isLeaf: true)
+external int fp_collider_key_forget(ffi.Pointer<FpWorld> world, int key);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Pointer<FpRay>, ffi.Pointer<FpHit>)>(isLeaf: true)
 external int fp_collider_raycast(
   ffi.Pointer<FpWorld> world,
@@ -130,6 +133,38 @@ external int fp_colliders_follow(
   int count,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Uint64, ffi.Pointer<ffi.Uint32>)>(isLeaf: true)
+external int fp_collision_ignore_get(
+  ffi.Pointer<FpWorld> world,
+  int collider1,
+  int collider2,
+  ffi.Pointer<ffi.Uint32> out,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64, ffi.Uint64, ffi.Uint32)>(isLeaf: true)
+external int fp_collision_ignore_set(ffi.Pointer<FpWorld> world, int collider1, int collider2, int ignore);
+
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<FpWorld>,
+    ffi.Pointer<FpContact>,
+    ffi.Size,
+    ffi.Pointer<FpContactPoint>,
+    ffi.Size,
+    ffi.Pointer<ffi.Uint32>,
+    ffi.Pointer<ffi.Uint32>,
+  )
+>(isLeaf: true)
+external int fp_contacts_read(
+  ffi.Pointer<FpWorld> world,
+  ffi.Pointer<FpContact> out,
+  int capacity,
+  ffi.Pointer<FpContactPoint> out_points,
+  int point_capacity,
+  ffi.Pointer<ffi.Uint32> out_count,
+  ffi.Pointer<ffi.Uint32> out_point_count,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpFound>, ffi.Size)>(isLeaf: true)
 external int fp_found_read(ffi.Pointer<FpWorld> world, ffi.Pointer<FpFound> out, int len);
 
@@ -141,6 +176,12 @@ external int fp_hits_read(ffi.Pointer<FpWorld> world, ffi.Pointer<FpHit> out, in
 
 @ffi.Native<ffi.Pointer<ffi.Char> Function()>(isLeaf: true)
 external ffi.Pointer<ffi.Char> fp_last_error();
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Uint32>)>(isLeaf: true)
+external int fp_layer_collision_get(ffi.Pointer<FpWorld> world, int a, int b, ffi.Pointer<ffi.Uint32> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint32, ffi.Uint32, ffi.Uint32)>(isLeaf: true)
+external int fp_layer_collision_set(ffi.Pointer<FpWorld> world, int a, int b, int meet);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpMoved>, ffi.Size)>(isLeaf: true)
 external int fp_moved_read(ffi.Pointer<FpWorld> world, ffi.Pointer<FpMoved> out, int len);
@@ -256,7 +297,7 @@ external void fp_world_free(ffi.Pointer<FpWorld> world);
 @ffi.Native<ffi.Pointer<FpWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FpWorld> fp_world_new();
 
-const int FP_ABI_VERSION = 4;
+const int FP_ABI_VERSION = 5;
 
 sealed class FpBodyKind {
   static const FP_BODY_KIND_DYNAMIC = 0;
@@ -332,6 +373,9 @@ final class FpColliderSpec extends ffi.Struct {
   external int layer;
 
   external FpMaterial material;
+
+  @ffi.Uint32()
+  external int listens;
 }
 
 sealed class FpCombine {
@@ -339,6 +383,45 @@ sealed class FpCombine {
   static const FP_COMBINE_MINIMUM = 1;
   static const FP_COMBINE_MULTIPLY = 2;
   static const FP_COMBINE_MAXIMUM = 3;
+}
+
+final class FpContact extends ffi.Struct {
+  @ffi.Uint32()
+  external int kind;
+
+  @ffi.Uint32()
+  external int trigger;
+
+  @ffi.Uint64()
+  external int a;
+
+  @ffi.Uint64()
+  external int b;
+
+  external FpVec3 impulse;
+
+  external FpVec3 relative_velocity;
+
+  @ffi.Uint32()
+  external int first_point;
+
+  @ffi.Uint32()
+  external int point_count;
+}
+
+sealed class FpContactKind {
+  static const FP_CONTACT_KIND_ENTER = 0;
+  static const FP_CONTACT_KIND_STAY = 1;
+  static const FP_CONTACT_KIND_EXIT = 2;
+}
+
+final class FpContactPoint extends ffi.Struct {
+  external FpVec3 point;
+
+  external FpVec3 normal;
+
+  @ffi.Float()
+  external double separation;
 }
 
 sealed class FpForceMode {

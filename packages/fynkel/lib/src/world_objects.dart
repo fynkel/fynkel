@@ -141,6 +141,14 @@ extension _Objects on World {
   /// loading, else by itself (a failed load removes only the behaviour).
   void _componentAdded(GameObject object, Component component) {
     _register(component);
+    final systems = _systems;
+    for (var i = 0; i < systems.length; i++) {
+      try {
+        systems[i].componentAdded(object, component);
+      } catch (error, stack) {
+        _report(null, error, stack);
+      }
+    }
     if (component is! Behaviour) return;
     _enterLoop(object);
     _starting.add(component);

@@ -20,6 +20,7 @@ import 'bindings.g.dart';
 import 'raw.dart';
 
 part 'colliders.dart';
+part 'contacts.dart';
 part 'queries.dart';
 part 'rigidbody.dart';
 
@@ -129,9 +130,29 @@ final class Physics extends WorldSystem {
   var _due = false;
   var _steps = 0;
 
+  // The contacts: whether a collider ever listened, whether a step's are
+  // still to be told, and the buffers they're read into, with views to
+  // read them by word (a struct's `.ref` allocates in the JIT). The keys
+  // of the colliders removed since, the first [_leavingBefore] of them
+  // before the last step began: those are free once its contacts are told.
+  var _listened = false;
+  var _contactsDue = false;
+  Pointer<FpContact> _contactBuffer = nullptr;
+  Pointer<Uint32> _contactUints = nullptr;
+  Pointer<Uint64> _contactKeys = nullptr;
+  Pointer<Float> _contactFloats = nullptr;
+  var _contactCapacity = 0;
+  Pointer<FpContactPoint> _pointBuffer = nullptr;
+  Pointer<Float> _pointFloats = nullptr;
+  var _pointCapacity = 0;
+  late final _collision = Collision._(this);
+  final _leaving = <int>[];
+  var _leavingBefore = 0;
+
   // Scratch for the calls.
   final _id = malloc<Uint64>();
   final _count = malloc<Uint32>();
+  final _pointCount = malloc<Uint32>();
   final _flag = malloc<Uint32>();
   final _spec = malloc<FpColliderSpec>();
   final _transform = malloc<FpTransform>();
@@ -179,6 +200,7 @@ final class Physics extends WorldSystem {
   void beforeFrame() {
     super.beforeFrame();
     if (_stepping) _collect();
+    _tellContacts();
   }
 
   // A second fixed step in a frame first runs the step the first left due,
@@ -203,7 +225,10 @@ final class Physics extends WorldSystem {
   void _stepNow() {
     _due = false;
     _follow();
+    _tellContacts();
+    _leavingBefore = _leaving.length;
     _applyMoved(_raw.step(world.time.fixedDelta));
+    _tellContacts();
   }
 
   @override
@@ -224,6 +249,8 @@ final class Physics extends WorldSystem {
     if (!_due) return;
     _due = false;
     _follow();
+    _tellContacts();
+    _leavingBefore = _leaving.length;
     // Straight into the native call: a double passed to a Dart function the
     // JIT doesn't inline is allocated.
     checkPhysics(fp_step_begin(_pointer, world.time.fixedDelta));
@@ -247,7 +274,7 @@ final class Physics extends WorldSystem {
     _bodies.clear();
     _interpolated.clear();
     _raw.dispose();
-    for (final p in [_id, _count, _flag, _spec, _transform, _shape, _vectors, _hit]) {
+    for (final p in [_id, _count, _pointCount, _flag, _spec, _transform, _shape, _vectors, _hit]) {
       malloc.free(p);
     }
     for (final p in [_bodySpec, _pose, _push, _state, _vec, _vec2, _setting]) {
@@ -255,6 +282,21 @@ final class Physics extends WorldSystem {
     }
     for (final p in [_drawn, _drawnPose, _hits, _found, _objectIds, _colliderIds, _transforms]) {
       if (p != nullptr) malloc.free(p);
+    }
+    for (final p in [_contactBuffer, _pointBuffer]) {
+      if (p != nullptr) malloc.free(p);
+    }
+  }
+
+  @override
+  void componentAdded(GameObject object, Component component) {
+    super.componentAdded(object, component);
+    if (component is! Triggers && component is! Collisions) return;
+    // The colliders it now listens for: on its object, or on a rigidbody
+    // there.
+    for (final c in _colliders) {
+      if (!identical(c.gameObject, object) && !identical(c._body?.gameObject, object)) continue;
+      if (_listensFor(c, c._body) != c._listens) _respec(c);
     }
   }
 
@@ -284,7 +326,7 @@ final class Physics extends WorldSystem {
   /// where its object is now.
   void _addNative(Collider collider, int key, Rigidbody? body) {
     final object = collider.gameObject;
-    collider._writeSpec(_spec.ref);
+    collider._writeSpec(_spec.ref, _listensFor(collider, body));
     final Transform(:position, :rotation, :scale) = object.worldTransform;
     final t = _transform.ref;
     t.position.set(position);
@@ -293,7 +335,8 @@ final class Physics extends WorldSystem {
     checkPhysics(fp_object_collider_add(_world, key, _spec.ref, t, body?._id ?? 0, _id));
     collider
       .._id = _id.value
-      .._body = body;
+      .._body = body
+      .._contactBody = body;
     body?._colliders.add(collider);
     collider._place.seen();
   }
@@ -304,8 +347,8 @@ final class Physics extends WorldSystem {
     collider._id = 0;
     collider._body?._colliders.remove(collider);
     collider._body = null;
-    _byKey[collider._key] = null;
-    _freeKeys.add(collider._key);
+    // Its key is free once the step that ends its contacts is told.
+    _leaving.add(collider._key);
     final last = _colliders.removeLast();
     if (!identical(last, collider)) {
       _colliders[collider._index] = last;
@@ -328,7 +371,7 @@ final class Physics extends WorldSystem {
 
   void _respec(Collider collider) {
     if (_disposed || collider._id == 0) return;
-    collider._writeSpec(_spec.ref);
+    collider._writeSpec(_spec.ref, _listensFor(collider, collider._body));
     checkPhysics(fp_collider_spec_set(_world, collider._id, _spec.ref));
   }
 
@@ -474,6 +517,7 @@ final class Physics extends WorldSystem {
   /// moved, and puts those not drawn between steps where they are.
   void _applyMoved(int count) {
     _steps++;
+    _contactsDue = true;
     final raw = _raw;
     for (var i = 0; i < count; i++) {
       final key = raw.movedKey(i);
@@ -489,6 +533,142 @@ final class Physics extends WorldSystem {
       );
       if (body._interpolation == RigidbodyInterpolation.none) body._put(body._p1, body._r1);
     }
+  }
+
+  /// What [collider] listens for, on [body]: its object's callbacks and
+  /// the rigidbody's object's. A collider that listens is reported.
+  int _listensFor(Collider collider, Rigidbody? body) {
+    final object = collider.gameObject;
+    var listens = _listensOf(object);
+    if (body != null && !identical(body.gameObject, object)) listens |= _listensOf(body.gameObject);
+    if (listens != 0) _listened = true;
+    return listens;
+  }
+
+  /// Tells the last step's contacts, if they aren't yet, then frees the
+  /// keys of the colliders removed before it.
+  void _tellContacts() {
+    if (!_contactsDue) return;
+    _contactsDue = false;
+    if (_listened) _readContacts();
+    final leaving = _leaving;
+    final before = _leavingBefore;
+    if (before == 0) return;
+    for (var i = 0; i < before; i++) {
+      final key = leaving[i];
+      _byKey[key] = null;
+      _freeKeys.add(key);
+      checkPhysics(fp_collider_key_forget(_pointer, key));
+    }
+    leaving.removeRange(0, before);
+    _leavingBefore = 0;
+  }
+
+  void _readContacts() {
+    checkPhysics(
+      fp_contacts_read(_pointer, _contactBuffer, _contactCapacity, _pointBuffer, _pointCapacity, _count, _pointCount),
+    );
+    final count = _count.value;
+    if (count == 0) return;
+    if (count > _contactCapacity || _pointCount.value > _pointCapacity) {
+      _growContacts(count, _pointCount.value);
+      checkPhysics(
+        fp_contacts_read(_pointer, _contactBuffer, _contactCapacity, _pointBuffer, _pointCapacity, _count, _pointCount),
+      );
+    }
+    final uints = _contactUints;
+    final keys = _contactKeys;
+    final byKey = _byKey;
+    for (var i = 0; i < count; i++) {
+      final a = byKey[keys[i * 7 + 1]];
+      final b = byKey[keys[i * 7 + 2]];
+      if (a == null || b == null) continue;
+      final kind = uints[i * _contactWords];
+      final trigger = uints[i * _contactWords + 1] != 0;
+      _tell(kind, trigger, i, a, b, false);
+      _tell(kind, trigger, i, b, a, true);
+    }
+  }
+
+  void _growContacts(int count, int points) {
+    if (count > _contactCapacity) {
+      if (_contactBuffer != nullptr) malloc.free(_contactBuffer);
+      _contactCapacity = count * 2;
+      _contactBuffer = malloc<FpContact>(_contactCapacity);
+      _contactUints = _contactBuffer.cast();
+      _contactKeys = _contactBuffer.cast();
+      _contactFloats = _contactBuffer.cast();
+    }
+    if (points > _pointCapacity) {
+      if (_pointBuffer != nullptr) malloc.free(_pointBuffer);
+      _pointCapacity = points * 2;
+      _pointBuffer = malloc<FpContactPoint>(_pointCapacity);
+      _pointFloats = _pointBuffer.cast();
+    }
+  }
+
+  /// Tells [own]'s side of contact [index] with [other]: its object, then
+  /// its rigidbody's object, each with its behaviours. [flipped] when
+  /// [own] is the contact's b, whose vectors point the other way.
+  void _tell(int kind, bool trigger, int index, Collider own, Collider other, bool flipped) {
+    if (!trigger) {
+      _collision
+        .._collider = other
+        .._own = own
+        .._index = index
+        .._flipped = flipped;
+    }
+    final object = own.gameObject;
+    _tellObject(object, kind, trigger, other);
+    final body = own._contactBody?.gameObject;
+    if (body != null && !identical(body, object)) _tellObject(body, kind, trigger, other);
+  }
+
+  void _tellObject(GameObject object, int kind, bool trigger, Collider other) {
+    // A hidden object's colliders are gone, and it hears nothing of it.
+    if (object.isDestroyed || (kind == FpContactKind.FP_CONTACT_KIND_EXIT && !object.activeInHierarchy)) return;
+    _call(object, object, kind, trigger, other);
+    for (var i = 0; i < object.componentCount; i++) {
+      final c = object.componentAt(i);
+      if (!c.isRemoved) _call(object, c, kind, trigger, other);
+    }
+  }
+
+  void _call(GameObject object, Object target, int kind, bool trigger, Collider other) {
+    try {
+      if (trigger) {
+        if (target is! Triggers) return;
+        switch (kind) {
+          case FpContactKind.FP_CONTACT_KIND_ENTER:
+            target.onTriggerEnter(other);
+          case FpContactKind.FP_CONTACT_KIND_STAY:
+            target.onTriggerStay(other);
+          default:
+            target.onTriggerExit(other);
+        }
+      } else {
+        if (target is! Collisions) return;
+        switch (kind) {
+          case FpContactKind.FP_CONTACT_KIND_ENTER:
+            target.onCollisionEnter(_collision);
+          case FpContactKind.FP_CONTACT_KIND_STAY:
+            target.onCollisionStay(_collision);
+          default:
+            target.onCollisionExit(_collision);
+        }
+      }
+    } catch (error, stack) {
+      world.report(object, error, stack);
+    }
+  }
+
+  /// The vector at float [at] of contact [index], turned round if
+  /// [flipped].
+  Vec3 _contactVector(int index, int at, bool flipped) {
+    final f = _contactFloats;
+    final i = index * _contactWords + at;
+    final s = flipped ? -1.0 : 1.0;
+    return Vec3(f[i] * s, f[i + 1] * s, f[i + 2] * s);
   }
 
   /// Puts each interpolated body between where the last two steps left it,

@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FP_ABI_VERSION 4
+#define FP_ABI_VERSION 5
 
 // What an `fp_*` call returns. Anything but `Ok` leaves a message for
 // `fp_last_error`.
@@ -142,6 +142,24 @@ typedef uint32_t FpCombine;
 #endif // __STDC_VERSION__ >= 202311L
 #endif // __cplusplus
 
+// Where a pair of colliders is in its touching.
+enum FpContactKind
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+  : uint32_t
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+ {
+  FP_CONTACT_KIND_ENTER = 0,
+  FP_CONTACT_KIND_STAY = 1,
+  FP_CONTACT_KIND_EXIT = 2,
+};
+#ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum FpContactKind FpContactKind;
+#else
+typedef uint32_t FpContactKind;
+#endif // __STDC_VERSION__ >= 202311L
+#endif // __cplusplus
+
 // Unity's `ForceMode`.
 enum FpForceMode
 #if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
@@ -245,6 +263,9 @@ typedef struct FpColliderSpec {
   // 0 to 31.
   uint32_t layer;
   struct FpMaterial material;
+  // What its touching others is reported for (`fp_contacts_read`): 1
+  // triggers, 2 collisions, 3 both, 0 neither.
+  uint32_t listens;
 } FpColliderSpec;
 
 // An object's world transform, as the engine's `FyTransform` has it (the
@@ -298,6 +319,32 @@ typedef struct FpSettings {
   uint32_t solver_iterations;
   float sleep_threshold;
 } FpSettings;
+
+// A pair of colliders, `a` and `b` by their keys (`a` < `b`), starting,
+// going on with or ending their touching (`kind`, an `FpContactKind`),
+// as a trigger pair (`trigger` 1) or a collision (0). A collision's
+// impulse (the one the step gave `a`'s body), relative velocity (`b`'s
+// less `a`'s, before the step) and points are as `a` sees them; an exit
+// has none.
+typedef struct FpContact {
+  uint32_t kind;
+  uint32_t trigger;
+  uint64_t a;
+  uint64_t b;
+  struct FpVec3 impulse;
+  struct FpVec3 relative_velocity;
+  // Its points, from `first_point` in what `fp_contacts_read` gives.
+  uint32_t first_point;
+  uint32_t point_count;
+} FpContact;
+
+// Where two colliders touch, as `a` sees it: the normal points from `b`
+// towards `a`; the separation is negative when they're in each other.
+typedef struct FpContactPoint {
+  struct FpVec3 point;
+  struct FpVec3 normal;
+  float separation;
+} FpContactPoint;
 
 // A ray a query casts: from `origin` along `direction`, at most
 // `max_distance`.
@@ -583,6 +630,69 @@ FpStatus fp_settings_get(struct FpWorld *world, struct FpSettings *out);
 //
 // `world` is null or live; `settings` is null or readable.
 FpStatus fp_settings_set(struct FpWorld *world, const struct FpSettings *settings);
+
+// The last step's contact events (enters, then stays, then exits) and
+// their points: writes how many there are to `out_count` and
+// `out_point_count`, and, when they fit in `capacity` and
+// `point_capacity`, the events to `out` and the points to `out_points`.
+// When they don't, it writes nothing else: call it again with room.
+//
+// # Safety
+//
+// `world` is null or live; `out_count` and `out_point_count` are null or
+// writable; `out` and `out_points` are null or writable for their
+// capacities.
+FpStatus fp_contacts_read(struct FpWorld *world,
+                          struct FpContact *out,
+                          size_t capacity,
+                          struct FpContactPoint *out_points,
+                          size_t point_capacity,
+                          uint32_t *out_count,
+                          uint32_t *out_point_count);
+
+// Whether colliders on layers `a` and `b` meet, into `out` (1 or 0).
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FpStatus fp_layer_collision_get(struct FpWorld *world, uint32_t a, uint32_t b, uint32_t *out);
+
+// Makes colliders on layers `a` and `b` meet (`meet` 1) or not (0), from
+// the next step.
+//
+// # Safety
+//
+// `world` is null or live.
+FpStatus fp_layer_collision_set(struct FpWorld *world, uint32_t a, uint32_t b, uint32_t meet);
+
+// Whether two following colliders ignore each other, into `out` (1 or 0).
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FpStatus fp_collision_ignore_get(struct FpWorld *world,
+                                 uint64_t collider1,
+                                 uint64_t collider2,
+                                 uint32_t *out);
+
+// Makes two following colliders ignore each other (`ignore` 1) or not
+// (0), from the next step, until either's key is forgotten.
+//
+// # Safety
+//
+// `world` is null or live.
+FpStatus fp_collision_ignore_set(struct FpWorld *world,
+                                 uint64_t collider1,
+                                 uint64_t collider2,
+                                 uint32_t ignore);
+
+// Forgets the pairs the collider with `key` ignores, before the key is
+// used for another collider.
+//
+// # Safety
+//
+// `world` is null or live.
+FpStatus fp_collider_key_forget(struct FpWorld *world, uint64_t key);
 
 // The first collider a ray hits, into `out` (its `collider` 0 when none).
 //

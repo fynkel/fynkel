@@ -6,7 +6,9 @@ import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_physics/fynkel_physics.dart';
 import 'package:lab/lab.dart';
 import 'package:lab/scenes.dart';
+import 'package:lab/scenes/contacts_basics.dart';
 import 'package:lab/scenes/input.dart';
+import 'package:lab/scenes/layer_matrix.dart';
 import 'package:lab/scenes/layers_basics.dart';
 import 'package:lab/scenes/motion.dart';
 import 'package:lab/scenes/motion_basics.dart';
@@ -241,5 +243,53 @@ void main() {
     scene.controls.whereType<Toggle>().single.onChanged(true);
     fire();
     expect(scene.readout.value, contains('before wall 1'));
+  });
+
+  test('Triggers and collisions: the basics: the slab hears the ball pass, the ball hears the floor', () async {
+    final world = World();
+    addTearDown(world.dispose);
+    final scene = world.add(ContactsBasicsScene());
+    await scene.loaded;
+    for (var i = 0; i < 120; i++) {
+      world.update(1 / 60);
+    }
+    expect(
+      scene.log.value.map((l) => l.text),
+      containsAllInOrder([
+        'slab: onTriggerEnter(ball)',
+        'slab: onTriggerExit(ball)',
+        startsWith('ball: onCollisionEnter(floor collider)'),
+      ]),
+    );
+    expect(scene.zone.inside, isEmpty);
+    scene.controls.whereType<Toggle>().single.onChanged(false);
+    scene.controls.whereType<Button>().single.onPressed();
+    for (var i = 0; i < 120; i++) {
+      world.update(1 / 60);
+    }
+    expect(scene.ball.position.y, closeTo(2.6, 0.05), reason: 'on the slab, now solid');
+  });
+
+  test('The layer matrix: layer 8 falls through the floor, and so does blue alone', () async {
+    final world = World();
+    addTearDown(world.dispose);
+    final scene = world.add(LayerMatrixScene());
+    await scene.loaded;
+    void frames(int n) {
+      for (var i = 0; i < n; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    Toggle control(String label) => scene.controls.whereType<Toggle>().firstWhere((c) => c.label == label);
+    frames(120);
+    expect(scene.red.position.y, closeTo(0.5, 0.05));
+    control('layer 8 meets the floor').onChanged(false);
+    control('blue meets the floor').onChanged(false);
+    scene.controls.whereType<Button>().single.onPressed();
+    frames(70);
+    expect(scene.red.position.y, lessThan(0));
+    expect(scene.blue.position.y, lessThan(0));
+    expect(scene.readout.value, contains('layer 8 meets layer 0: false'));
   });
 }
