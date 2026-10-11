@@ -269,6 +269,18 @@ final class RawPhysics implements Finalizable {
     return Quat(r.x, r.y, r.z, r.w);
   }
 
+  /// How fast the [i]th body the last step moved goes, in m/s.
+  Vec3 movedLinearVelocity(int i) {
+    final v = _movedAt(i).linear_velocity;
+    return Vec3(v.x, v.y, v.z);
+  }
+
+  /// How fast the [i]th body the last step moved turns, in rad/s.
+  Vec3 movedAngularVelocity(int i) {
+    final v = _movedAt(i).angular_velocity;
+    return Vec3(v.x, v.y, v.z);
+  }
+
   FpMoved _movedAt(int i) {
     RangeError.checkValidIndex(i, null, 'i', _movedCount);
     return (_moved + i).ref;

@@ -652,7 +652,7 @@ class Sparkle extends GameObject {
 `debug.sphere`, `debug.path`, each with a `color`. It's off in release
 builds.
 
-## 14. Physics: colliders and queries
+## 14. Physics: colliders, rigidbodies and queries
 
 Physics is a package, `fynkel_physics`, on Rapier. Add it to the
 pubspec, next to `fynkel`, and a game without it ships none of it:
@@ -668,8 +668,75 @@ direction:)`, each with `center` and `isTrigger`. Their sizes are in the
 object's own space, and they follow its world position, rotation and
 scale (a sphere takes the largest axis). Their defaults fit
 `Mesh.cube()` and `Mesh.sphere()`. A collider counts while it's enabled
-and its object shown. Rigidbodies, which move them, come next; for now
-colliders are static, and a game moves them by moving their objects.
+and its object shown. Each has a `material`: `PhysicsMaterial(
+dynamicFriction:, bounciness:, frictionCombine:, bounceCombine:)`, Unity's
+0.6 and 0 by default. A collider with no `Rigidbody` is static; a game
+moves it by moving its object.
+
+**A `Rigidbody`** makes its object move with physics, as Unity's: give it
+a collider and it falls, tumbles and lands. Colliders on its children
+that have no rigidbody of their own are part of the same body, and the
+body's mass is spread over them. It has Unity's `mass`, `useGravity`,
+`isKinematic`, `linearDamping`, `angularDamping`, `linearVelocity`,
+`angularVelocity`, `centerOfMass`, `maxAngularVelocity`, `constraints`
+(`RigidbodyConstraints.freezeRotation | .freezePositionY`, …),
+`interpolation` and `collisionDetectionMode`. Push it with `addForce`
+(and its `ForceMode`s), `addTorque`, `addRelativeForce`,
+`addForceAtPosition` and `addExplosionForce`, in `onFixedUpdate`:
+
+```dart
+// lib/ball.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
+
+/// Rolls its ball with W, A, S, D or the arrows, and jumps on space.
+class Roll extends Behaviour {
+  late final Rigidbody body = gameObject.get<Rigidbody>()!;
+
+  @override
+  void onFixedUpdate() {
+    super.onFixedUpdate();
+    final move = input.axis2('move');
+    body.addForce(Vec3(move.x, 0, -move.y) * 10);
+  }
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    if (input.action('jump').wasPressed) body.addForce(Vec3(0, 5, 0), mode: ForceMode.impulse);
+  }
+}
+
+GameObject ball() => GameObject(
+  transform: Transform(position: Vec3(0, 3, 0)),
+  components: [
+    MeshRenderer(Mesh.sphere(), Material()),
+    SphereCollider(material: PhysicsMaterial(bounciness: 0.5)),
+    Rigidbody(mass: 2, interpolation: RigidbodyInterpolation.interpolate),
+    Roll(),
+  ],
+);
+```
+
+As in Unity, **setting a body's transform teleports it**; to move it
+through the world use forces, or `movePosition` and `moveRotation` for a
+kinematic body, which pushes what it meets. A body's object can have a
+parent: physics writes its pose back relative to it. With
+`RigidbodyInterpolation.interpolate`, what's drawn is between the body's
+last two steps, so it moves smoothly at 120 fps on 50 steps a second;
+`rigidbody.position` reads where physics has it. A small, fast body can
+pass through a thin one between steps: Rapier sweeps every fast body
+against static colliders, and `CollisionDetectionMode.continuous` sweeps
+it against bodies too. `physics.gravity`, `defaultSolverIterations` and
+`sleepThreshold` are the world's settings.
+
+**The step runs between frames**, on the physics' own thread: it starts
+when a frame is done, and its results are written at the start of the
+next, before `onFixedUpdate` and the updates. Queries in the updates
+never wait for it, and see the world that's drawn. The costs: a force
+shows a frame later, and `await fixedStep` resumes before that step has
+run. `physics.stepBetweenFrames = false` steps
+within the frame instead, as Unity does.
 
 **Queries** are on `physics`, which every object and behaviour has:
 `raycast`, `sphereCast`, `boxCast`, `capsuleCast` (and `…All`, nearest
@@ -860,7 +927,8 @@ What keeps a game fast:
 
 ## 19. What isn't there yet
 
-Rigidbodies, triggers and collisions (stage 5 brings them next), audio,
+Trigger and collision callbacks (stage 5 brings them next), joints, the
+character controller, audio,
 animation of models, point and spot lights and shadows, saving, gamepads,
 scene files and an editor. Until collision callbacks come, queries
 (`physics.overlapSphere`) and distance checks do the work.
@@ -888,6 +956,9 @@ scene files and an editor. Until collision callbacks come, queries
 | Cinemachine | `VirtualCamera`, `Follow`, `LookAt`, `Orbit`, `world.cameras` |
 | DOTween | `moveTo`, `tween`, `sequence`, `Ease` |
 | `BoxCollider`, `SphereCollider`, `CapsuleCollider` | the same, from `fynkel_physics` |
+| `Rigidbody`, `ForceMode`, `RigidbodyConstraints`, `PhysicMaterial` | `Rigidbody`, `ForceMode`, `RigidbodyConstraints`, `PhysicsMaterial` |
+| `Rigidbody.velocity` | `linearVelocity` (as Unity 6's) |
+| `Physics.gravity`, `Physics.autoSimulation` | `physics.gravity`, `physics.stepBetweenFrames` |
 | `Physics.Raycast`, `SphereCast`, `OverlapSphere`, … | `physics.raycast`, `sphereCast`, `overlapSphere`, … |
 | `Physics.Raycast` against what's drawn (no colliders) | `world.raycast` |
 | `Debug.DrawLine` | `debug.line` |

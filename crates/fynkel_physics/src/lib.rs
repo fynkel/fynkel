@@ -14,10 +14,12 @@ use rapier3d::prelude::*;
 
 pub use rapier3d::math::{Pose, Rotation, Vector};
 
+mod bodies;
 mod colliders;
 mod queries;
 
-pub use colliders::{Axis, ColliderShape, ColliderSpec, ObjectPose};
+pub use bodies::{BodySpec, Constraints, ForceMode, Push, Settings};
+pub use colliders::{Axis, ColliderShape, ColliderSpec, Combine, Material, ObjectPose};
 pub use queries::{Hit, QueryOptions, QueryShape};
 
 /// What moves a body.
@@ -70,11 +72,14 @@ impl fmt::Display for PhysicsError {
 
 impl std::error::Error for PhysicsError {}
 
-/// A body's key and where it is, as [`Physics::moved`] gives them.
+/// A body's key, where it is and how it moves, as [`Physics::moved`]
+/// gives them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Moved {
     pub key: u64,
     pub pose: Pose,
+    pub linear_velocity: Vector,
+    pub angular_velocity: Vector,
 }
 
 /// A physics world.
@@ -86,6 +91,11 @@ pub struct Physics {
     // Colliders added or moved since the last step, whose bounds the
     // queries' tree doesn't have yet ([`Self::sync`]).
     dirty: Vec<ColliderHandle>,
+    // What rigidbodies (bodies.rs) have beyond Rapier's, by their handle's
+    // index, and the step's bookkeeping for them.
+    bodies: Vec<Option<bodies::BodyData>>,
+    steps: bodies::StepWork,
+    settings: Settings,
 }
 
 impl fmt::Debug for Physics {
@@ -106,7 +116,17 @@ impl Default for Physics {
 impl Physics {
     /// An empty world with Unity's gravity, (0, -9.81, 0).
     pub fn new() -> Self {
-        Self { world: PhysicsWorld::new(), followed: Vec::new(), dirty: Vec::new() }
+        let mut world = PhysicsWorld::new();
+        let settings = Settings::default();
+        world.integration_parameters.num_solver_iterations = settings.solver_iterations as usize;
+        Self {
+            world,
+            followed: Vec::new(),
+            dirty: Vec::new(),
+            bodies: Vec::new(),
+            steps: bodies::StepWork::default(),
+            settings,
+        }
     }
 
     pub fn gravity(&self) -> Vector {
@@ -143,6 +163,14 @@ impl Physics {
     pub fn remove_body(&mut self, id: u64) -> Result<(), PhysicsError> {
         let handle = self.body_handle(id)?;
         let w = &mut self.world;
+        for collider in w.bodies[handle].colliders() {
+            if let Some(slot) = self.followed.get_mut(collider.into_raw_parts().0 as usize) {
+                *slot = None;
+            }
+        }
+        if let Some(slot) = self.bodies.get_mut(handle.into_raw_parts().0 as usize) {
+            *slot = None;
+        }
         w.bodies.remove(
             handle,
             &mut w.islands,
@@ -195,9 +223,13 @@ impl Physics {
     pub fn remove_collider(&mut self, id: u64) -> Result<(), PhysicsError> {
         let handle = self.collider_handle(id)?;
         let w = &mut self.world;
+        let body = w.colliders[handle].parent();
         w.colliders.remove(handle, &mut w.islands, &mut w.bodies, &mut w.soft_bodies, true);
         if let Some(slot) = self.followed.get_mut(handle.into_raw_parts().0 as usize) {
             *slot = None;
+        }
+        if let Some(body) = body {
+            self.mass_changed(body);
         }
         Ok(())
     }
@@ -222,8 +254,10 @@ impl Physics {
     /// Moves the world on by `dt` seconds.
     pub fn step(&mut self, dt: f32) -> Result<(), PhysicsError> {
         check_positive("a step's time", dt)?;
+        self.before_step(dt);
         self.world.integration_parameters.dt = dt;
         self.world.step();
+        self.after_step();
         // The step put every collider's bounds in the tree.
         self.dirty.clear();
         Ok(())
@@ -240,7 +274,7 @@ impl Physics {
             // The key went in as a u64, so it comes back whole.
             #[allow(clippy::cast_possible_truncation)]
             let key = body.user_data as u64;
-            Some(Moved { key, pose: *body.position() })
+            Some(Moved { key, pose: *body.position(), linear_velocity: body.linvel(), angular_velocity: body.angvel() })
         }));
     }
 

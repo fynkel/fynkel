@@ -250,7 +250,9 @@ final class World implements Finalizable {
   var _waiting = <Object>[];
 
   /// Runs one frame of the game, [dt] seconds after the last one: [time]
-  /// moves on (see [Time.delta]), then, in this order:
+  /// moves on (see [Time.delta]), the [WorldSystem]s' `beforeFrame` run
+  /// (where physics collects the step it ran between frames), then, in
+  /// this order:
   ///
   /// 1. **Input.** [input]'s events since the last frame, in order, then
   ///    its gestures ([Input]): its signals, and the objects' pointer
@@ -265,7 +267,9 @@ final class World implements Finalizable {
   ///    `beforeFixedUpdate`, then each started object's
   ///    [GameObject.onFixedUpdate] and its behaviours', in the same order
   ///    as the updates, then the systems' `afterFixedUpdate` (where physics
-  ///    steps), then the routines waiting for [fixedStep].
+  ///    steps, or leaves the step for between frames), then the routines
+  ///    waiting for [fixedStep]. Then, with steps or none, the systems'
+  ///    `beforeUpdate`.
   /// 4. **Updates.** Each started object gets [GameObject.onUpdate],
   ///    then its started behaviours get [Behaviour.onUpdate] in the order
   ///    they were added, parents before children. Objects and behaviours
@@ -283,7 +287,7 @@ final class World implements Finalizable {
   ///    [Orbit], then [LookAt]), then [cameras] puts the view's camera
   ///    where the live [VirtualCamera] is, and shakes it.
   /// 8. **Debug lines.** What was drawn with [debug] goes to the engine,
-  ///    to be drawn over the frame.
+  ///    to be drawn over the frame. Last, the systems' `afterFrame`.
   ///
   /// Hidden objects (inactive, or below one that is) and their behaviours
   /// are skipped by the last six and start when they're first shown; so are
@@ -296,6 +300,7 @@ final class World implements Finalizable {
     pointer;
     time._advance(dt);
     _tidy();
+    _runSystems(_SystemHook.beforeFrame);
 
     input
       .._now = time._unscaledSinceStart
@@ -329,6 +334,7 @@ final class World implements Finalizable {
 
     _runFixedSteps();
     if (isDisposed) return;
+    _runSystems(_SystemHook.beforeUpdate);
 
     // Objects added from here on are past the end when they come, or not
     // started: they wait for the next frame. The calls are guarded inline,
@@ -379,17 +385,11 @@ final class World implements Finalizable {
       }
     }
 
-    for (var i = 0; i < _systems.length; i++) {
-      final system = _systems[i];
-      try {
-        system.afterLateUpdate();
-      } catch (error, stack) {
-        _report(null, error, stack);
-      }
-    }
+    _runSystems(_SystemHook.afterLateUpdate);
 
     cameras._run();
     _debug?._flush();
+    _runSystems(_SystemHook.afterFrame);
   }
 
   // --- Motions ---

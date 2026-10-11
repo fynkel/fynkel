@@ -14,7 +14,12 @@ void main() {
     await tester.pumpWidget(const LabApp());
     final titles = [for (final make in scenes) make().title];
     for (var round = 0; round < 5; round++) {
+      // Back to the top of the list.
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, 10000));
+      await tester.pumpAndSettle();
       for (final title in titles) {
+        // The list is longer than a phone's screen.
+        await tester.scrollUntilVisible(find.text(title), 200, scrollable: find.byType(Scrollable).first);
         await tester.tap(find.text(title));
         // Real frames, so the view registers and draws.
         for (var i = 0; i < 40; i++) {

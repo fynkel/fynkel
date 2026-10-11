@@ -217,7 +217,7 @@ impl World {
     fn follower(&self, key: u64, spec: FpColliderSpec, at: FpTransform) -> u64 {
         let mut id = 0;
         // SAFETY: a live world and a writable out.
-        let status = unsafe { fp_static_collider_add(self.0, key, spec, at, &mut id) };
+        let status = unsafe { fp_object_collider_add(self.0, key, spec, at, 0, &mut id) };
         assert_eq!(status, FpStatus::Ok, "{}", last_error());
         id
     }
@@ -358,13 +358,13 @@ fn bad_specs_and_queries_are_refused_and_add_nothing() {
             direction: 3,
             ..FpColliderSpec::default()
         };
-        assert_eq!(fp_static_collider_add(world.0, 1, capsule, at, &mut id), FpStatus::InvalidValue);
+        assert_eq!(fp_object_collider_add(world.0, 1, capsule, at, 0, &mut id), FpStatus::InvalidValue);
         assert_eq!(last_error(), "3 is no direction: 0, 1 or 2 for X, Y or Z");
         let kind = FpColliderSpec { kind: 5, ..ball_spec(1.0, 0, 0) };
-        assert_eq!(fp_static_collider_add(world.0, 1, kind, at, &mut id), FpStatus::InvalidValue);
-        assert_eq!(fp_static_collider_add(world.0, 1, ball_spec(1.0, 0, 2), at, &mut id), FpStatus::InvalidValue);
-        assert_eq!(fp_static_collider_add(world.0, 1, ball_spec(1.0, 32, 0), at, &mut id), FpStatus::InvalidValue);
-        assert_eq!(fp_static_collider_add(world.0, 1, ball_spec(-1.0, 0, 0), at, &mut id), FpStatus::InvalidValue);
+        assert_eq!(fp_object_collider_add(world.0, 1, kind, at, 0, &mut id), FpStatus::InvalidValue);
+        assert_eq!(fp_object_collider_add(world.0, 1, ball_spec(1.0, 0, 2), at, 0, &mut id), FpStatus::InvalidValue);
+        assert_eq!(fp_object_collider_add(world.0, 1, ball_spec(1.0, 32, 0), at, 0, &mut id), FpStatus::InvalidValue);
+        assert_eq!(fp_object_collider_add(world.0, 1, ball_spec(-1.0, 0, 0), at, 0, &mut id), FpStatus::InvalidValue);
         assert_eq!(id, 0);
 
         let zero = FpVec3::default();
@@ -422,4 +422,143 @@ fn a_step_on_the_worlds_own_thread_moves_as_a_step_here_does_and_the_world_waits
     // Freed while a step runs: the step ends first.
     // SAFETY: a live world.
     assert_eq!(unsafe { fp_step_begin(there.0, STEP) }, FpStatus::Ok);
+}
+
+// --- Rigidbodies -----------------------------------------------------------------
+
+fn body_spec() -> FpBodySpec {
+    FpBodySpec { mass: 2.0, use_gravity: 1, max_angular_velocity: 50.0, ..FpBodySpec::default() }
+}
+
+impl World {
+    fn rigidbody(&self, key: u64, spec: FpBodySpec, position: FpPose) -> u64 {
+        let mut id = 0;
+        // SAFETY: a live world, readable spec and pose, a writable out.
+        let status = unsafe { fp_rigidbody_add(self.0, key, &spec, &position, &mut id) };
+        assert_eq!(status, FpStatus::Ok, "{}", last_error());
+        id
+    }
+
+    fn state(&self, body: u64) -> FpBodyState {
+        let mut state = FpBodyState::default();
+        // SAFETY: a live world and a writable out.
+        assert_eq!(unsafe { fp_rigidbody_state_get(self.0, body, &mut state) }, FpStatus::Ok, "{}", last_error());
+        state
+    }
+}
+
+#[test]
+fn a_rigidbody_with_its_collider_falls_and_its_moves_come_back_with_their_velocities() {
+    let world = World::new();
+    let body = world.rigidbody(9, body_spec(), at(0.0, 10.0, 0.0));
+    let mut collider = 0;
+    // SAFETY: a live world and a writable out.
+    let status = unsafe {
+        fp_object_collider_add(world.0, 9, ball_spec(0.5, 0, 0), object(0.0, 10.0, 0.0, 1.0), body, &mut collider)
+    };
+    assert_eq!(status, FpStatus::Ok, "{}", last_error());
+    let moved = world.step();
+    assert_eq!(moved.len(), 1);
+    assert_eq!(moved[0].key, 9);
+    assert!((moved[0].linear_velocity.y + 9.81 * STEP).abs() < 1e-4, "{:?}", moved[0]);
+    let state = world.state(body);
+    assert_eq!(state.pose, moved[0].pose);
+    assert_eq!(state.linear_velocity, moved[0].linear_velocity);
+    assert_eq!(state.sleeping, 0);
+    let mut spec = FpBodySpec::default();
+    // SAFETY: a live world and a writable out.
+    assert_eq!(unsafe { fp_rigidbody_spec_get(world.0, body, &mut spec) }, FpStatus::Ok);
+    assert_eq!(spec, body_spec());
+}
+
+#[test]
+fn pushes_velocities_moves_sleep_and_settings_come_through() {
+    let world = World::new();
+    let floating = FpBodySpec { use_gravity: 0, ..body_spec() };
+    let body = world.rigidbody(1, floating, at(0.0, 0.0, 0.0));
+    // SAFETY: a live world and readable or writable pointers throughout.
+    unsafe {
+        let push = FpPush {
+            kind: FpPushKind::Force as u32,
+            mode: FpForceMode::VelocityChange as u32,
+            vector: FpVec3 { x: 3.0, y: 0.0, z: 0.0 },
+            ..FpPush::default()
+        };
+        assert_eq!(fp_rigidbody_push(world.0, body, &push), FpStatus::Ok, "{}", last_error());
+        world.step();
+        assert!((world.state(body).linear_velocity.x - 3.0).abs() < 1e-5);
+
+        let (linear, angular) = (FpVec3 { x: 0.0, y: 1.0, z: 0.0 }, FpVec3 { x: 0.0, y: 0.0, z: 2.0 });
+        assert_eq!(fp_rigidbody_velocities_set(world.0, body, &linear, &angular), FpStatus::Ok);
+        let state = world.state(body);
+        assert_eq!((state.linear_velocity, state.angular_velocity), (linear, angular));
+
+        let kinematic = FpBodySpec { kinematic: 1, ..floating };
+        assert_eq!(fp_rigidbody_spec_set(world.0, body, &kinematic), FpStatus::Ok);
+        assert_eq!(fp_rigidbody_move(world.0, body, &at(5.0, 0.0, 0.0)), FpStatus::Ok);
+        world.step();
+        assert_eq!(world.state(body).pose.position.x, 5.0);
+
+        assert_eq!(fp_rigidbody_sleep_set(world.0, body, 1), FpStatus::Ok);
+        assert_eq!(world.state(body).sleeping, 1);
+        assert_eq!(fp_rigidbody_sleep_set(world.0, body, 0), FpStatus::Ok);
+        assert_eq!(world.state(body).sleeping, 0);
+
+        let mut settings = FpSettings::default();
+        assert_eq!(fp_settings_get(world.0, &mut settings), FpStatus::Ok);
+        assert_eq!(settings, FpSettings { solver_iterations: 6, sleep_threshold: 0.005 });
+        let changed = FpSettings { solver_iterations: 10, sleep_threshold: 0.1 };
+        assert_eq!(fp_settings_set(world.0, &changed), FpStatus::Ok);
+        assert_eq!(fp_settings_get(world.0, &mut settings), FpStatus::Ok);
+        assert_eq!(settings, changed);
+    }
+}
+
+#[test]
+fn bad_rigidbody_values_are_refused() {
+    let world = World::new();
+    let body = world.rigidbody(1, body_spec(), at(0.0, 0.0, 0.0));
+    let mut id = 0;
+    // SAFETY: a live world and readable or writable pointers throughout.
+    unsafe {
+        for (spec, message) in [
+            (FpBodySpec { kinematic: 2, ..body_spec() }, "kinematic is 0 or 1, not 2"),
+            (FpBodySpec { constraints: 1, ..body_spec() }, "1 has bits that are no constraint"),
+            (FpBodySpec { mass: 0.0, ..body_spec() }, "a rigidbody's mass"),
+        ] {
+            assert_eq!(fp_rigidbody_add(world.0, 1, &spec, &at(0.0, 0.0, 0.0), &mut id), FpStatus::InvalidValue);
+            assert!(last_error().contains(message), "{}", last_error());
+        }
+        assert_eq!(fp_rigidbody_add(world.0, 1, ptr::null(), &at(0.0, 0.0, 0.0), &mut id), FpStatus::NullPointer);
+        assert_eq!(id, 0);
+        let push = FpPush { kind: 4, ..FpPush::default() };
+        assert_eq!(fp_rigidbody_push(world.0, body, &push), FpStatus::InvalidValue);
+        assert_eq!(last_error(), "4 is no push kind");
+        let push = FpPush { mode: 4, ..FpPush::default() };
+        assert_eq!(fp_rigidbody_push(world.0, body, &push), FpStatus::InvalidValue);
+        let bouncy = FpColliderSpec {
+            material: FpMaterial { bounciness: 2.0, ..FpMaterial::default() },
+            ..ball_spec(1.0, 0, 0)
+        };
+        assert_eq!(
+            fp_object_collider_add(world.0, 1, bouncy, object(0.0, 0.0, 0.0, 1.0), body, &mut id),
+            FpStatus::InvalidValue
+        );
+        let combine = FpColliderSpec {
+            material: FpMaterial { friction_combine: 4, ..FpMaterial::default() },
+            ..ball_spec(1.0, 0, 0)
+        };
+        assert_eq!(
+            fp_object_collider_add(world.0, 1, combine, object(0.0, 0.0, 0.0, 1.0), body, &mut id),
+            FpStatus::InvalidValue
+        );
+        assert_eq!(last_error(), "4 is no combine");
+        assert_eq!(
+            fp_settings_set(world.0, &FpSettings { solver_iterations: 0, sleep_threshold: 0.0 }),
+            FpStatus::InvalidValue
+        );
+        // A plain body isn't a rigidbody.
+        let plain = world.body(FpBodyKind::Dynamic, 2, at(0.0, 0.0, 0.0));
+        assert_eq!(fp_rigidbody_sleep_set(world.0, plain, 1), FpStatus::InvalidValue);
+    }
 }

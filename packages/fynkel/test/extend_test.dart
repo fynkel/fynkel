@@ -40,6 +40,27 @@ void main() {
     changed('active and name', false);
   });
 
+  test('an object\'s stamp moves with its own transform or parent set, and the hierarchy version with parents', () {
+    final world = World();
+    addTearDown(world.dispose);
+    final a = world.add(GameObject());
+    final b = world.add(GameObject());
+    world.update(1 / 60);
+    final (stampA, stampB) = (a.transformStamp, b.transformStamp);
+    a.position = Vec3(1, 0, 0);
+    expect(a.transformStamp, world.transformVersion);
+    expect(b.transformStamp, stampB, reason: 'not set');
+    expect(a.transformStamp, isNot(stampA));
+    final shape = world.hierarchyVersion;
+    b.layer = 3;
+    a.name = 'a';
+    expect(b.transformStamp, stampB, reason: 'a layer moves nothing');
+    expect(world.hierarchyVersion, shape);
+    b.parent = a;
+    expect(b.transformStamp, world.transformVersion);
+    expect(world.hierarchyVersion, isNot(shape));
+  });
+
   test('many world transforms are read in one call, after the moves are sent', () {
     final world = World();
     addTearDown(world.dispose);

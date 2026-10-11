@@ -1,11 +1,13 @@
-// package:fynkel_physics's example, for now on the raw world of stage 5
-// step 1 (docs/stage-5.md): a pile of cubes that fall, tumble and settle,
+// package:fynkel_physics's example, on the raw world of stage 5 step 1
+// (docs/stage-5.md): a pile of cubes that fall, tumble and settle,
 // dropped again every 8 seconds. Each fixed step's moved cubes are written
 // to their objects. lib/measured.dart runs the same for the tool, with the
 // step's timings.
 //
 //   flutter run --dart-define=TUMBLE_CUBES=500 [--dart-define=TUMBLE_PHYSICS=0]
 //     [--dart-define=TUMBLE_THREAD=1|2] [--dart-define=TUMBLE_RAYS=10]
+//
+// With --dart-define=TUMBLE_RIGIDBODIES=1 it runs lib/rigid.dart's RigidTumble.
 
 import 'dart:math' as math;
 
@@ -15,7 +17,13 @@ import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'package:fynkel_physics/raw.dart';
 
-void main() => runApp(FynkelApp(Tumble.new));
+import 'rigid.dart';
+
+void main() => runApp(FynkelApp(rigidbodies ? RigidTumble.new : Tumble.new));
+
+/// `--dart-define=TUMBLE_RIGIDBODIES=1` makes the cubes Rigidbodies and
+/// BoxColliders (lib/rigid.dart) in place of the raw world's bodies.
+const rigidbodies = bool.fromEnvironment('TUMBLE_RIGIDBODIES');
 
 const cubeCount = int.fromEnvironment('TUMBLE_CUBES', defaultValue: 1000);
 

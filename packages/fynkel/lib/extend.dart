@@ -2,4 +2,4 @@
 /// world's frame (docs/stage-5.md §3.1). Games don't need it.
 library;
 
-export 'src/world.dart' show WorldSystem, WorldSystems;
+export 'src/world.dart' show GameObjectSystems, WorldSystem, WorldSystems;

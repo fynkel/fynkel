@@ -14,6 +14,9 @@ import 'scenes/motion.dart';
 import 'scenes/motion_basics.dart';
 import 'scenes/physics_queries_basics.dart';
 import 'scenes/pointers.dart';
+import 'scenes/rigidbody_basics.dart';
+import 'scenes/rigidbody_stack.dart';
+import 'scenes/rigidbody_walls.dart';
 import 'scenes/routines.dart';
 import 'scenes/signal_basics.dart';
 import 'scenes/signals.dart';
@@ -36,4 +39,7 @@ final List<LabScene Function()> scenes = [
   LayersBasicsScene.new,
   FixedStepBasicsScene.new,
   PhysicsQueriesBasicsScene.new,
+  RigidbodyBasicsScene.new,
+  RigidbodyStackScene.new,
+  RigidbodyWallsScene.new,
 ];

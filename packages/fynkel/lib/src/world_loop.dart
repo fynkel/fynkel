@@ -158,6 +158,29 @@ extension _Loop on World {
     }
   }
 
+  /// Runs one of the systems' hooks on each system, in the order they were
+  /// made; what one throws goes to [errors].
+  void _runSystems(_SystemHook hook) {
+    final systems = _systems;
+    for (var i = 0; i < systems.length; i++) {
+      final system = systems[i];
+      try {
+        switch (hook) {
+          case _SystemHook.beforeFrame:
+            system.beforeFrame();
+          case _SystemHook.beforeUpdate:
+            system.beforeUpdate();
+          case _SystemHook.afterLateUpdate:
+            system.afterLateUpdate();
+          case _SystemHook.afterFrame:
+            system.afterFrame();
+        }
+      } catch (error, stack) {
+        _report(null, error, stack);
+      }
+    }
+  }
+
   /// Runs the fixed steps this frame's time holds: in each, the systems'
   /// [WorldSystem.beforeFixedUpdate], every started, shown object's
   /// [GameObject.onFixedUpdate] and its behaviours', the systems'
@@ -309,3 +332,6 @@ extension _Loop on World {
     return ids;
   }
 }
+
+/// The [WorldSystem] hooks run once a frame.
+enum _SystemHook { beforeFrame, beforeUpdate, afterLateUpdate, afterFrame }
