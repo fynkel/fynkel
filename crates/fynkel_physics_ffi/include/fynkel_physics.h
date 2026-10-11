@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FP_ABI_VERSION 8
+#define FP_ABI_VERSION 9
 
 // A character's move hit something on its sides (`FpCharacterMove::flags`).
 #define FP_COLLIDED_SIDES 1
@@ -228,6 +228,8 @@ enum FpJointKind
   FP_JOINT_KIND_HINGE = 1,
   // Anything, pulled back outside its distances.
   FP_JOINT_KIND_SPRING = 2,
+  // Turn every way about its anchor, within its twist and swing limits.
+  FP_JOINT_KIND_CHARACTER = 3,
 };
 #ifndef __cplusplus
 #if __STDC_VERSION__ >= 202311L
@@ -461,7 +463,9 @@ typedef struct FpCharacterHit {
 // force and torque infinity for never. The limits, motor and spring count
 // when their `use_` flag is 1; the motor turns a hinge in place of its
 // spring. A spring joint uses `spring` and `damper` (not `target`), and
-// doesn't pull between `min_distance` and `max_distance`.
+// doesn't pull between `min_distance` and `max_distance`. A character
+// joint twists about `axis` between the limits, and swings `swing1` each
+// way about `swing_axis` and `swing2` about the third axis; π frees it.
 typedef struct FpJointSpec {
   uint64_t body;
   uint64_t connected;
@@ -485,6 +489,10 @@ typedef struct FpJointSpec {
   float target;
   float min_distance;
   float max_distance;
+  struct FpVec3 swing_axis;
+  uint32_t use_swing_limits;
+  float swing1;
+  float swing2;
 } FpJointSpec;
 
 // How hard a joint held in the last step, in the world (the torque about

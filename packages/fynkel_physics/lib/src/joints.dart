@@ -16,6 +16,14 @@ final class JointLimits {
   final double max;
 }
 
+/// One of a [CharacterJoint]'s limits, in degrees (Unity's
+/// `SoftJointLimit`; its bounciness and contact distance aren't here).
+final class SoftJointLimit {
+  const SoftJointLimit({this.limit = 0});
+
+  final double limit;
+}
+
 /// A hinge's motor (Unity's `JointMotor`): it turns the hinge at
 /// [targetVelocity] degrees a second, with no more than [force] newton
 /// metres.
@@ -38,8 +46,8 @@ final class JointSpring {
 }
 
 /// What joins its object's [Rigidbody] to [connectedBody], or to the world
-/// when that's null (Unity's `Joint`): [FixedJoint], [HingeJoint] and
-/// [SpringJoint]. Its object needs a rigidbody; the joint waits for it,
+/// when that's null (Unity's `Joint`): [FixedJoint], [HingeJoint],
+/// [SpringJoint] and [CharacterJoint]. Its object needs a rigidbody; the joint waits for it,
 /// and for the connected one, to be in the world.
 ///
 /// It holds the two as they are when it joins them: [anchor] on its own
@@ -178,11 +186,15 @@ sealed class Joint extends Behaviour {
       ..use_motor = 0
       ..use_spring = 0
       ..min_distance = 0
-      ..max_distance = 0;
+      ..max_distance = 0
+      ..use_swing_limits = 0
+      ..swing1 = 0
+      ..swing2 = 0;
     spec.anchor.set(_scaled(_anchor, scale));
     final connectedScale = _connectedBody?.gameObject.worldTransform.scale ?? Vec3.one;
     spec.connected_anchor.set(_scaled(_connectedAnchor ?? Vec3.zero, connectedScale));
     spec.axis.set(const Vec3(1, 0, 0));
+    spec.swing_axis.set(const Vec3(0, 1, 0));
   }
 
   static Vec3 _scaled(Vec3 v, Vec3 scale) => Vec3(v.x * scale.x, v.y * scale.y, v.z * scale.z);
@@ -383,6 +395,112 @@ final class SpringJoint extends Joint {
       ..target = 0
       ..min_distance = _minDistance
       ..max_distance = _maxDistance;
+  }
+}
+
+/// Lets its rigidbody turn every way about [anchor], as a ball in a socket
+/// (Unity's `CharacterJoint`): a chain's link, a rope's, a ragdoll's limb.
+/// It twists about [axis] between [lowTwistLimit] and [highTwistLimit],
+/// and swings [swing1Limit] each way about [swingAxis] and [swing2Limit]
+/// each way about the axis square to both. A limit at 180° (-180° for the
+/// low twist) frees it that way: all four there make a free ball joint.
+/// Unity's defaults: twist -20° to 70°, swing 40°.
+final class CharacterJoint extends Joint {
+  CharacterJoint({
+    super.connectedBody,
+    super.anchor,
+    super.connectedAnchor,
+    this._axis = const Vec3(1, 0, 0),
+    this._swingAxis = const Vec3(0, 1, 0),
+    this._lowTwistLimit = const SoftJointLimit(limit: -20),
+    this._highTwistLimit = const SoftJointLimit(limit: 70),
+    this._swing1Limit = const SoftJointLimit(limit: 40),
+    this._swing2Limit = const SoftJointLimit(limit: 40),
+    super.enableCollision,
+    super.breakForce,
+    super.breakTorque,
+  }) {
+    _check();
+  }
+
+  /// The axis it twists about, in its object's space.
+  Vec3 get axis => _axis;
+  set axis(Vec3 value) {
+    _checkAxes(value, _swingAxis);
+    _rejoin(() => _axis = value);
+  }
+
+  Vec3 _axis;
+
+  /// The axis it swings about by [swing1Limit], in its object's space:
+  /// made square to [axis].
+  Vec3 get swingAxis => _swingAxis;
+  set swingAxis(Vec3 value) {
+    _checkAxes(_axis, value);
+    _rejoin(() => _swingAxis = value);
+  }
+
+  Vec3 _swingAxis;
+
+  /// How far it twists each way, from where it was joined: -180° to 180°.
+  SoftJointLimit get lowTwistLimit => _lowTwistLimit;
+  set lowTwistLimit(SoftJointLimit value) => _respec(() => _lowTwistLimit = value);
+  SoftJointLimit _lowTwistLimit;
+
+  SoftJointLimit get highTwistLimit => _highTwistLimit;
+  set highTwistLimit(SoftJointLimit value) => _respec(() => _highTwistLimit = value);
+  SoftJointLimit _highTwistLimit;
+
+  /// How far it swings each way about [swingAxis], and about the third
+  /// axis: 0° to 180°.
+  SoftJointLimit get swing1Limit => _swing1Limit;
+  set swing1Limit(SoftJointLimit value) => _respec(() => _swing1Limit = value);
+  SoftJointLimit _swing1Limit;
+
+  SoftJointLimit get swing2Limit => _swing2Limit;
+  set swing2Limit(SoftJointLimit value) => _respec(() => _swing2Limit = value);
+  SoftJointLimit _swing2Limit;
+
+  @override
+  int get _kind => FpJointKind.FP_JOINT_KIND_CHARACTER;
+
+  static void _checkAxes(Vec3 axis, Vec3 swingAxis) {
+    if (axis.length < 1e-6) throw ArgumentError.value(axis, 'axis', "can't be (0, 0, 0)");
+    if (swingAxis.length < 1e-6 || axis.normalized.cross(swingAxis.normalized).length < 1e-3) {
+      throw ArgumentError.value(swingAxis, 'swingAxis', 'must lie across the axis');
+    }
+  }
+
+  @override
+  void _check() {
+    _checkAxes(_axis, _swingAxis);
+    final (low, high) = (_lowTwistLimit.limit, _highTwistLimit.limit);
+    if (!(low >= -180 && high <= 180 && low <= high)) {
+      throw ArgumentError.value(
+        '$low to $high',
+        'twist limits',
+        'must be -180 to 180 degrees, the low no more than the high',
+      );
+    }
+    for (final (name, swing) in [('swing1Limit', _swing1Limit.limit), ('swing2Limit', _swing2Limit.limit)]) {
+      if (!(swing >= 0 && swing <= 180)) throw ArgumentError.value(swing, name, 'must be 0 to 180 degrees');
+    }
+  }
+
+  @override
+  void _writeSpec(FpJointSpec spec, Rigidbody body) {
+    super._writeSpec(spec, body);
+    const radians = math.pi / 180;
+    final scale = body.gameObject.worldTransform.scale;
+    spec.axis.set(Joint._scaled(_axis, scale).normalized);
+    spec.swing_axis.set(Joint._scaled(_swingAxis, scale).normalized);
+    spec
+      ..use_limits = 1
+      ..limit_min = _lowTwistLimit.limit * radians
+      ..limit_max = _highTwistLimit.limit * radians
+      ..use_swing_limits = 1
+      ..swing1 = _swing1Limit.limit * radians
+      ..swing2 = _swing2Limit.limit * radians;
   }
 }
 

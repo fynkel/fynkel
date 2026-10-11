@@ -1,6 +1,7 @@
 //! Joints (docs/stage-5.md, step 8): each holds as Unity's does (a fixed
 //! joint as one body, a hinge's period, limits, motor and spring, a
-//! spring's rest length), and breaks at its force.
+//! spring's rest length, a character joint's ball and its limits), and
+//! breaks at its force.
 
 use std::f32::consts::PI;
 
@@ -293,6 +294,107 @@ fn a_spring_keeps_its_bodies_as_they_were_and_hangs_its_weight_by_its_stiffness(
     run(&mut physics, 10.0);
     let y = position(&mut physics, hanging).y;
     assert!((y - (3.0 - 9.81 / 100.0)).abs() < 0.01, "it hangs at {y}");
+}
+
+/// A rod 1 m long and 0.1 thick, hanging from (0, 5, 0) on a character
+/// joint twisting about the rod (Y) and swinging about X and Z.
+fn rod(physics: &mut Physics, twist: [f32; 2], swing: [f32; 2]) -> (u64, u64) {
+    let rod = body(physics, 1, 1.0, Vector::new(0.1, 1.0, 0.1), Vector::new(0.0, 4.5, 0.0));
+    let spec = JointSpec {
+        anchor: Vector::new(0.0, 0.5, 0.0),
+        axis: Vector::Y,
+        swing_axis: Vector::X,
+        limits: Some(twist),
+        swing_limits: Some(swing),
+        ..JointSpec::new(JointKind::Character, rod)
+    };
+    let joint = physics.add_joint(7, spec).unwrap();
+    (rod, joint)
+}
+
+/// The rod's tilt from hanging straight down, and its twist about itself.
+fn tilt_and_twist(physics: &mut Physics, rod: u64) -> (f32, f32) {
+    let r = physics.body_pose(rod).unwrap().rotation;
+    let tilt = (r * Vector::Y).dot(Vector::Y).clamp(-1.0, 1.0).acos();
+    // The twist: the turn about the rod's own axis, once its swing is taken out.
+    let swing = Rotation::from_rotation_arc(Vector::Y, r * Vector::Y);
+    let twist = swing.inverse() * r;
+    (tilt, 2.0 * twist.y.atan2(twist.w))
+}
+
+#[test]
+fn a_free_character_joint_swings_every_way_and_twists_about_its_anchor() {
+    let mut physics = Physics::new();
+    let (rod, _) = rod(&mut physics, [-PI, PI], [PI, PI]);
+    // Pushed at its foot, sideways and forwards, and spun about itself.
+    let foot = Vector::new(0.0, 4.0, 0.0);
+    let push = Push::AtPosition { force: Vector::new(1.0, 0.0, 0.8), position: foot, mode: ForceMode::Impulse };
+    physics.push(rod, push).unwrap();
+    physics.push(rod, Push::Torque { torque: Vector::new(0.0, 0.005, 0.0), mode: ForceMode::Impulse }).unwrap();
+    let (mut far_x, mut far_z, mut twisted) = (0f32, 0f32, 0f32);
+    for _ in 0..100 {
+        run(&mut physics, DT);
+        let pose = physics.body_pose(rod).unwrap();
+        let hook = pose * Vector::new(0.0, 0.5, 0.0);
+        assert!((hook - Vector::new(0.0, 5.0, 0.0)).length() < 0.01, "its anchor left the hook: {hook}");
+        let foot = pose * Vector::new(0.0, -0.5, 0.0);
+        (far_x, far_z) = (far_x.max(foot.x.abs()), far_z.max(foot.z.abs()));
+        twisted = twisted.max(tilt_and_twist(&mut physics, rod).1.abs());
+    }
+    assert!(far_x > 0.3 && far_z > 0.2, "it swung {far_x} m across and {far_z} m forwards");
+    assert!(twisted > 0.5, "it twisted {twisted} rad");
+}
+
+#[test]
+fn a_character_joint_stops_at_its_swing_and_twist_limits() {
+    let mut physics = Physics::new();
+    let (rod, joint) = rod(&mut physics, [-20f32.to_radians(), 20f32.to_radians()], [30f32.to_radians(); 2]);
+    let foot = Vector::new(0.0, 4.0, 0.0);
+    // About 4.5 rad/s, enough to swing it 70° unlimited; and 3 rad/s about itself.
+    let push = Push::AtPosition { force: Vector::new(1.5, 0.0, 0.0), position: foot, mode: ForceMode::Impulse };
+    physics.push(rod, push).unwrap();
+    physics.push(rod, Push::Torque { torque: Vector::new(0.0, 0.005, 0.0), mode: ForceMode::Impulse }).unwrap();
+    let (mut tilted, mut twisted) = (0f32, 0f32);
+    for _ in 0..100 {
+        run(&mut physics, DT);
+        let (tilt, twist) = tilt_and_twist(&mut physics, rod);
+        (tilted, twisted) = (tilted.max(tilt), twisted.max(twist.abs()));
+    }
+    assert!(tilted > 25f32.to_radians() && tilted < 33f32.to_radians(), "it swung to {}°", tilted.to_degrees());
+    assert!(twisted > 15f32.to_radians() && twisted < 23f32.to_radians(), "it twisted to {}°", twisted.to_degrees());
+    // Its limits change on the joint as it is: freed, it swings past them.
+    let spec = JointSpec { swing_limits: Some([PI, PI]), ..physics.joint_spec(joint).unwrap() };
+    physics.set_joint_spec(joint, spec).unwrap();
+    physics
+        .push(rod, Push::AtPosition { force: Vector::new(1.5, 0.0, 0.0), position: foot, mode: ForceMode::Impulse })
+        .unwrap();
+    let mut tilted = 0f32;
+    for _ in 0..50 {
+        run(&mut physics, DT);
+        tilted = tilted.max(tilt_and_twist(&mut physics, rod).0);
+    }
+    assert!(tilted > 45f32.to_radians(), "freed, it swung to {}°", tilted.to_degrees());
+}
+
+#[test]
+fn a_character_joints_axes_and_limits_are_checked() {
+    let mut physics = Physics::new();
+    let id = cube(&mut physics, 1, Vector::ZERO);
+    let spec = JointSpec::new(JointKind::Character, id);
+    assert_eq!(spec.limits, Some([(-20f32).to_radians(), 70f32.to_radians()]), "Unity's defaults");
+    assert_eq!(spec.swing_limits, Some([40f32.to_radians(); 2]));
+    for bad in [
+        JointSpec { swing_axis: Vector::X, ..spec },
+        JointSpec { swing_axis: Vector::new(-2.0, 0.0, 0.0), ..spec },
+        JointSpec { swing_axis: Vector::ZERO, ..spec },
+        JointSpec { swing_limits: Some([-0.1, 0.5]), ..spec },
+        JointSpec { swing_limits: Some([0.5, 4.0]), ..spec },
+        JointSpec { limits: Some([-4.0, 0.0]), ..spec },
+    ] {
+        assert!(physics.add_joint(1, bad).is_err(), "{bad:?} was taken");
+    }
+    // A swing axis not square to the axis is made square to it.
+    assert!(physics.add_joint(1, JointSpec { swing_axis: Vector::new(1.0, 1.0, 0.0), ..spec }).is_ok());
 }
 
 #[test]

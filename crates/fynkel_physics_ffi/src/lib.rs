@@ -26,7 +26,7 @@ use fynkel_physics::{
 };
 
 /// Bumped on any change to the functions or types in this file.
-pub const FP_ABI_VERSION: u32 = 8;
+pub const FP_ABI_VERSION: u32 = 9;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -391,6 +391,8 @@ pub enum FpJointKind {
     Hinge = 1,
     /// Anything, pulled back outside its distances.
     Spring = 2,
+    /// Turn every way about its anchor, within its twist and swing limits.
+    Character = 3,
 }
 
 /// What a joint is: Unity's joint properties, in its rigidbody's space.
@@ -400,7 +402,9 @@ pub enum FpJointKind {
 /// force and torque infinity for never. The limits, motor and spring count
 /// when their `use_` flag is 1; the motor turns a hinge in place of its
 /// spring. A spring joint uses `spring` and `damper` (not `target`), and
-/// doesn't pull between `min_distance` and `max_distance`.
+/// doesn't pull between `min_distance` and `max_distance`. A character
+/// joint twists about `axis` between the limits, and swings `swing1` each
+/// way about `swing_axis` and `swing2` about the third axis; π frees it.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FpJointSpec {
@@ -426,6 +430,10 @@ pub struct FpJointSpec {
     pub target: f32,
     pub min_distance: f32,
     pub max_distance: f32,
+    pub swing_axis: FpVec3,
+    pub use_swing_limits: u32,
+    pub swing1: f32,
+    pub swing2: f32,
 }
 
 /// How hard a joint held in the last step, in the world (the torque about
@@ -766,6 +774,7 @@ fn joint_spec(s: FpJointSpec) -> Result<JointSpec, Error> {
         0 => JointKind::Fixed,
         1 => JointKind::Hinge,
         2 => JointKind::Spring,
+        3 => JointKind::Character,
         k => return Err(invalid(format!("{k} is no joint kind"))),
     };
     Ok(JointSpec {
@@ -775,10 +784,12 @@ fn joint_spec(s: FpJointSpec) -> Result<JointSpec, Error> {
         anchor: vector(s.anchor),
         connected_anchor: flag(s.has_connected_anchor, "has_connected_anchor")?.then(|| vector(s.connected_anchor)),
         axis: vector(s.axis),
+        swing_axis: vector(s.swing_axis),
         enable_collision: flag(s.enable_collision, "enable_collision")?,
         break_force: s.break_force,
         break_torque: s.break_torque,
         limits: flag(s.use_limits, "use_limits")?.then_some([s.limit_min, s.limit_max]),
+        swing_limits: flag(s.use_swing_limits, "use_swing_limits")?.then_some([s.swing1, s.swing2]),
         motor: flag(s.use_motor, "use_motor")?
             .then_some(JointMotor { velocity: s.motor_velocity, force: s.motor_force }),
         spring: flag(s.use_spring, "use_spring")?.then_some(JointSpring {

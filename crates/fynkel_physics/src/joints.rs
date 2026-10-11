@@ -1,5 +1,6 @@
 //! Joints, as Unity's (docs/stage-5.md §3.7): a fixed joint, a hinge with
-//! limits, a motor and a spring, and a spring between two anchors, each
+//! limits, a motor and a spring, a spring between two anchors, and a ball
+//! joint that twists and swings within its limits (a character joint), each
 //! between a rigidbody and another or the world, and each breaking when
 //! it holds harder than its break force or torque. On Rapier's impulse
 //! joints.
@@ -24,6 +25,10 @@ pub enum JointKind {
     /// Anything, pulled back while its anchors are further apart than its
     /// max distance or nearer than its min.
     Spring,
+    /// Turn every way about the anchor, as a ball in a socket: twist about
+    /// the axis within its limits, and swing about the swing axis and the
+    /// third one within theirs.
+    Character,
 }
 
 /// A hinge's motor: it turns the hinge at `velocity` (radians a second),
@@ -58,16 +63,26 @@ pub struct JointSpec {
     /// Where it holds on the connected body, in that body's space (in the
     /// world's for the world), or where the anchor is when it's made.
     pub connected_anchor: Option<Vector>,
-    /// A hinge's axis, in its own body's space.
+    /// A hinge's axis, or a character joint's twist axis, in its own body's
+    /// space.
     pub axis: Vector,
+    /// A character joint's swing axis, in its own body's space: made square
+    /// to the axis.
+    pub swing_axis: Vector,
     /// Whether the two bodies collide with each other.
     pub enable_collision: bool,
     /// The force (newtons) and torque (newton metres) it breaks at:
     /// infinity for never.
     pub break_force: f32,
     pub break_torque: f32,
-    /// A hinge's limits, in radians from where it was made: -π to π.
+    /// A hinge's limits, or a character joint's twist limits, in radians
+    /// from where it was made: -π to π. At -π and π a character joint
+    /// twists freely.
     pub limits: Option<[f32; 2]>,
+    /// A character joint's swing limits, in radians each way: about the
+    /// swing axis, and about the third axis (square to both), 0 to π. At π
+    /// it swings freely that way.
+    pub swing_limits: Option<[f32; 2]>,
     /// A hinge's motor. It turns the hinge in place of its spring.
     pub motor: Option<JointMotor>,
     /// A hinge's spring, or a spring joint's.
@@ -81,7 +96,8 @@ pub struct JointSpec {
 impl JointSpec {
     /// Unity's defaults for a joint of `kind` on `body`: joined to the
     /// world at its middle, about its X axis, unbreakable; a spring joint's
-    /// spring 10 and damper 0.2.
+    /// spring 10 and damper 0.2; a character joint's swing axis Y, twist
+    /// -20° to 70° and swing 40° each way.
     pub fn new(kind: JointKind, body: u64) -> Self {
         Self {
             kind,
@@ -90,10 +106,12 @@ impl JointSpec {
             anchor: Vector::ZERO,
             connected_anchor: None,
             axis: Vector::X,
+            swing_axis: Vector::Y,
             enable_collision: false,
             break_force: f32::INFINITY,
             break_torque: f32::INFINITY,
-            limits: None,
+            limits: (kind == JointKind::Character).then_some([(-20f32).to_radians(), 70f32.to_radians()]),
+            swing_limits: (kind == JointKind::Character).then_some([40f32.to_radians(), 40f32.to_radians()]),
             motor: None,
             spring: (kind == JointKind::Spring).then_some(JointSpring { spring: 10.0, damper: 0.2, target: 0.0 }),
             min_distance: 0.0,
@@ -107,8 +125,14 @@ impl JointSpec {
             check_vector("a joint's connected anchor", a)?;
         }
         check_vector("a joint's axis", self.axis)?;
-        if self.kind == JointKind::Hinge && self.axis.length() < 1e-6 {
-            return Err(PhysicsError::Value("a hinge's axis can't be (0, 0, 0)".into()));
+        check_vector("a joint's swing axis", self.swing_axis)?;
+        if matches!(self.kind, JointKind::Hinge | JointKind::Character) && self.axis.length() < 1e-6 {
+            return Err(PhysicsError::Value("a joint's axis can't be (0, 0, 0)".into()));
+        }
+        if self.kind == JointKind::Character
+            && self.axis.normalize().cross(self.swing_axis.normalize_or_zero()).length() < 1e-3
+        {
+            return Err(PhysicsError::Value("a character joint's swing axis must lie across its axis".into()));
         }
         for (what, value) in [("break force", self.break_force), ("break torque", self.break_torque)] {
             if value.is_nan() || value <= 0.0 {
@@ -119,11 +143,20 @@ impl JointSpec {
             let pi = std::f32::consts::PI + 1e-4;
             if !(min >= -pi && max <= pi && min <= max) {
                 return Err(PhysicsError::Value(format!(
-                    "a hinge's limits must be -180° to 180°, the min no more than the max, not {} to {}",
+                    "a joint's limits must be -180° to 180°, the min no more than the max, not {} to {}",
                     min.to_degrees(),
                     max.to_degrees()
                 )));
             }
+        }
+        if let Some([one, two]) = self.swing_limits
+            && !([one, two].iter().all(|&s| (0.0..=std::f32::consts::PI + 1e-4).contains(&s)))
+        {
+            return Err(PhysicsError::Value(format!(
+                "a joint's swing limits must be 0° to 180°, not {} and {}",
+                one.to_degrees(),
+                two.to_degrees()
+            )));
         }
         if let Some(m) = self.motor
             && !(m.velocity.is_finite() && m.force >= 0.0 && m.force.is_finite())
@@ -167,6 +200,7 @@ impl JointSpec {
                 (None, Some(_)) => false,
             }
             && near(self.axis, other.axis)
+            && near(self.swing_axis, other.swing_axis)
     }
 }
 
@@ -249,6 +283,12 @@ impl Physics {
         // as the own one is now, so the joint holds them as they are.
         let turn = match spec.kind {
             JointKind::Hinge => Rotation::from_rotation_arc(Vector::X, spec.axis.normalize()),
+            // X along the twist axis, Y along the swing axis made square to it.
+            JointKind::Character => {
+                let x = spec.axis.normalize();
+                let y = (spec.swing_axis - x * x.dot(spec.swing_axis)).normalize();
+                Rotation::from_mat3(&rapier3d::math::Matrix::from_cols(x, y, x.cross(y))).normalize()
+            }
             _ => Rotation::IDENTITY,
         };
         let frame2 = Pose::from_parts(spec.anchor, turn);
@@ -260,6 +300,7 @@ impl Physics {
             JointKind::Fixed => JointAxesMask::LOCKED_FIXED_AXES,
             JointKind::Hinge => JointAxesMask::LOCKED_REVOLUTE_AXES,
             JointKind::Spring => JointAxesMask::empty(),
+            JointKind::Character => JointAxesMask::LOCKED_SPHERICAL_AXES,
         };
         let mut joint = GenericJointBuilder::new(locked)
             .local_frame1(frame1)
@@ -296,6 +337,7 @@ impl Physics {
             anchor: data.spec.anchor,
             connected_anchor: data.spec.connected_anchor,
             axis: data.spec.axis,
+            swing_axis: data.spec.swing_axis,
             ..spec
         };
         let before = data.spec;
@@ -437,7 +479,7 @@ impl Physics {
                         _ => false,
                     }
                 }
-                JointKind::Fixed => false,
+                JointKind::Fixed | JointKind::Character => false,
             };
             if pulls {
                 wake.extend([joint.body1(), joint.body2()]);
@@ -569,6 +611,20 @@ fn apply(joint: &mut GenericJoint, spec: &JointSpec) {
             joint.set_motor(axis, target, 0.0, s.spring, s.damper);
             joint.set_motor_max_force(axis, slack_force(s));
             joint.set_motor_model(axis, MotorModel::ForceBased);
+        }
+        JointKind::Character => {
+            let free = std::f32::consts::PI - 1e-3;
+            let [min, max] = spec.limits.unwrap_or([-std::f32::consts::PI, std::f32::consts::PI]);
+            let [one, two] = spec.swing_limits.unwrap_or([std::f32::consts::PI; 2]);
+            for (axis, [min, max]) in
+                [(JointAxis::AngX, [min, max]), (JointAxis::AngY, [-one, one]), (JointAxis::AngZ, [-two, two])]
+            {
+                if min <= -free && max >= free {
+                    joint.limit_axes.remove(axis.into());
+                } else {
+                    joint.set_limits(axis, [min, max]);
+                }
+            }
         }
     }
 }

@@ -1,7 +1,8 @@
 // Joints through the package (docs/stage-5.md, step 8): a fixed joint
 // holds, a hinge swings with the formula's period and stops at its limits,
 // turns with its motor and to its spring's target, a spring keeps its rest
-// length, a chain hangs, and each breaks at its force and says so.
+// length, a character joint swings and twists every way within its limits,
+// a chain hangs, and each breaks at its force and says so.
 
 import 'dart:math' as math;
 
@@ -228,6 +229,74 @@ void main() {
     expect(lowest, lessThan(crate.position.y - 0.3), reason: 'the push pulled it down');
   });
 
+  /// A rod 1 m long, hanging from (0, 5, 0) on [joint], twisting about
+  /// itself (Y) and swinging about X and Z.
+  GameObject hangRod(World world, CharacterJoint joint) =>
+      box(world, const Vec3(0, 4.5, 0), size: const Vec3(0.1, 1, 0.1), joints: [joint]);
+
+  /// [hangRod]'s tilt from hanging straight down, in degrees.
+  double tilt(GameObject rod) => math.acos(rod.rotation.rotate(Vec3.up).y.clamp(-1, 1)) * 180 / math.pi;
+
+  test('a character joint with its limits at 180° is a ball: it swings every way about its anchor, and twists', () {
+    final world = newWorld();
+    const free = SoftJointLimit(limit: 180);
+    final joint = CharacterJoint(
+      anchor: const Vec3(0, 0.5, 0),
+      axis: const Vec3(0, 1, 0),
+      swingAxis: const Vec3(1, 0, 0),
+      lowTwistLimit: const SoftJointLimit(limit: -180),
+      highTwistLimit: free,
+      swing1Limit: free,
+      swing2Limit: free,
+    );
+    final rod = hangRod(world, joint);
+    world.update(step);
+    rod.get<Rigidbody>()!
+      ..addForceAtPosition(const Vec3(1, 0, 0.8), const Vec3(0, 4, 0), mode: ForceMode.impulse)
+      ..addTorque(const Vec3(0, 0.005, 0), mode: ForceMode.impulse);
+    var (farX, farZ) = (0.0, 0.0);
+    for (var i = 0; i < 100; i++) {
+      world.update(step);
+      expect(rod.transformPoint(const Vec3(0, 0.5, 0)), near(const Vec3(0, 5, 0), 0.01), reason: 'held at the hook');
+      final foot = rod.transformPoint(const Vec3(0, -0.5, 0));
+      (farX, farZ) = (math.max(farX, foot.x.abs()), math.max(farZ, foot.z.abs()));
+    }
+    expect(farX, greaterThan(0.3), reason: 'swung across');
+    expect(farZ, greaterThan(0.2), reason: 'and forwards');
+    expect(
+      rod.get<Rigidbody>()!.angularVelocity.dot(rod.rotation.rotate(Vec3.up)).abs(),
+      greaterThan(1),
+      reason: 'still twisting about itself',
+    );
+  });
+
+  test("a character joint stops at its limits, Unity's by default, and they change on the joint as it is", () {
+    final world = newWorld();
+    final joint = CharacterJoint(
+      anchor: const Vec3(0, 0.5, 0),
+      axis: const Vec3(0, 1, 0),
+      swingAxis: const Vec3(1, 0, 0),
+    );
+    expect((joint.lowTwistLimit.limit, joint.highTwistLimit.limit, joint.swing1Limit.limit), (-20, 70, 40));
+    final rod = hangRod(world, joint);
+    world.update(step);
+    double swing() {
+      rod.get<Rigidbody>()!.addForceAtPosition(const Vec3(1.5, 0, 0), const Vec3(0, 4, 0), mode: ForceMode.impulse);
+      var most = 0.0;
+      for (var i = 0; i < 60; i++) {
+        world.update(step);
+        most = math.max(most, tilt(rod));
+      }
+      frames(world, 4);
+      return most;
+    }
+
+    expect(swing(), inInclusiveRange(35, 43), reason: 'stopped at 40°');
+    joint.swing2Limit = const SoftJointLimit(limit: 180);
+    expect(swing(), greaterThan(55), reason: 'freed, it swings on');
+    expect(joint.isJoined, isTrue);
+  });
+
   test('a chain of hinged links hangs from the world and stays joined', () {
     final world = newWorld();
     final links = <GameObject>[];
@@ -353,6 +422,11 @@ void main() {
     expect(() => HingeJoint(spring: const JointSpring(damper: -1)), throwsArgumentError);
     expect(() => SpringJoint(spring: -1), throwsArgumentError);
     expect(() => SpringJoint(minDistance: 2, maxDistance: 1), throwsArgumentError);
+    expect(() => CharacterJoint(swingAxis: const Vec3(-3, 0, 0)), throwsArgumentError);
+    expect(() => CharacterJoint(swingAxis: Vec3.zero), throwsArgumentError);
+    expect(() => CharacterJoint(swing1Limit: const SoftJointLimit(limit: 181)), throwsArgumentError);
+    expect(() => CharacterJoint(lowTwistLimit: const SoftJointLimit(limit: 80)), throwsArgumentError);
+    expect(() => CharacterJoint().axis = const Vec3(0, 1, 0), throwsArgumentError, reason: 'along its swing axis');
     final hinge = HingeJoint();
     expect(() => hinge.axis = Vec3.zero, throwsArgumentError);
     expect(() => hinge.limits = const JointLimits(max: 181), throwsArgumentError);
